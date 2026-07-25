@@ -145,30 +145,6 @@ test('status follows reducer-owned composer target and includes the active overl
   );
 });
 
-test('status surfaces timeline history mode ahead of live activity', () => {
-  const model = buildStatusBarModel({
-    activityStatus: '正在回复 · 2s',
-    connectionStatus: '就绪',
-    composerTarget: 'chat',
-    session: createSession({ id: 'chat:pet' }),
-    globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION,
-    timelineScrollOffset: 18,
-  });
-
-  assert.deepEqual(
-    line(model, 'primary').segments.slice(0, 2).map((segment) => [
-      segment.id,
-      segment.value,
-      segment.priority,
-    ]),
-    [
-      ['timeline-scroll', '浏览历史 · 上移 18 行 · PgDn 下翻', 110],
-      ['activity', '正在回复 · 2s', 100],
-    ],
-  );
-  assert.match(textLines(model, 32)[0] ?? '', /^历史 ↑18 · PgDn 下翻/);
-});
-
 test('status notices and connection remain separate on the primary line', () => {
   const model = buildStatusBarModel({
     statusNotice: '出错，已恢复输入',

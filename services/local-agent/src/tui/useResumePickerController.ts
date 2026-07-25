@@ -87,13 +87,13 @@ export function useResumePickerController(options: ResumePickerControllerOptions
     void options.runtimeController.resumeSession(selected.id).then(({ session, snapshot }) => {
       if (resumeRequestIdRef.current !== requestId) return;
       options.resetComposerTarget();
-      options.resetTimelineView();
       options.dispatch({
         type: 'session.snapshot.loaded',
         reason: 'resume',
         snapshot,
         now: Date.now(),
       });
+      options.resetTimelineView();
       options.dispatch({
         type: 'input.set',
         value: '',

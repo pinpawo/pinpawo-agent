@@ -7,11 +7,13 @@ export type TuiInteractionState = {
   globalReviewPolicyPickerOpen?: boolean;
   commandPaletteOpen?: boolean;
   fileMentionOpen?: boolean;
+  transcriptViewerOpen?: boolean;
   externalEditorOpen?: boolean;
 };
 
 export type TuiInteractionOwner =
   | { type: 'externalEditor' }
+  | { type: 'transcriptViewer' }
   | { type: 'unready' }
   | { type: 'resumePicker' }
   | { type: 'approval'; freeTextActive: boolean }
@@ -23,6 +25,7 @@ export type TuiInteractionOwner =
 
 export function resolveTuiInteractionOwner(state: TuiInteractionState): TuiInteractionOwner {
   if (state.externalEditorOpen) return { type: 'externalEditor' };
+  if (state.transcriptViewerOpen) return { type: 'transcriptViewer' };
   if (!state.ready) return { type: 'unready' };
   if (state.resumePickerOpen) return { type: 'resumePicker' };
   if (state.pendingApproval) {

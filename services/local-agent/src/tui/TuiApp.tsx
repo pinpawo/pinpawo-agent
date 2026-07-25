@@ -1,5 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { Box, Text, useApp, useInput, useStdout } from 'ink';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from 'react';
+import { Box, Static, Text, useApp, useInput, useStdout } from 'ink';
 import type { BuiltinGlobalReviewPolicyMode } from '@pinpawo/pet-agent';
 import { getConfig } from '../config';
 import { loadStoredConfig, saveStoredConfig } from '../storage';
@@ -7,7 +14,7 @@ import { AgentTimelineItem } from './components/AgentTimelineItem';
 import { BottomStatusLine } from './components/BottomStatusLine';
 import { Composer } from './components/Composer';
 import { OverlayLayer } from './components/OverlayLayer';
-import { TimelineViewport } from './components/TimelineViewport';
+import { TranscriptViewer } from './components/TranscriptViewer';
 import { WelcomePanel } from './components/WelcomePanel';
 import {
   createInitialTuiInputBufferState,
@@ -52,15 +59,16 @@ import type { TuiState } from './state/tuiState';
 import type { MessageRole } from './types';
 import {
   createTimelineScrollState,
+  maxTimelineScrollOffset,
   scrollTimelineByLines,
   scrollTimelineByPage,
   updateTimelineScrollMetrics,
 } from './timeline/timelineScroll';
+import { advanceInlineTimeline } from './timeline/inlineTimeline';
+import { useTranscriptTerminalMode } from './transcript/transcriptTerminalMode';
 
 const SPINNER_FRAMES = ['-', '\\', '|', '/'];
 const CLEAR_SCREEN = '\x1B[2J\x1B[3J\x1B[H';
-const ENABLE_MOUSE_WHEEL = '\x1B[?1000h\x1B[?1006h';
-const DISABLE_MOUSE_WHEEL = '\x1B[?1006l\x1B[?1000l';
 
 function renderTimelineDisplayEntry(
   entry: LocalAgentTimelineEntry,
@@ -105,7 +113,14 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
   const [approvalIndex, setApprovalIndex] = useState(0);
   const [commandPaletteIndex, setCommandPaletteIndex] = useState(0);
   const [fileMentionIndex, setFileMentionIndex] = useState(0);
-  const [timelineScroll, setTimelineScroll] = useState(createTimelineScrollState);
+  const [transcriptViewerOpen, setTranscriptViewerOpen] = useState(false);
+  const [transcriptScroll, setTranscriptScroll] = useState(createTimelineScrollState);
+  const [transcriptInitialPageUp, setTranscriptInitialPageUp] = useState(false);
+  const inlineTimelineLedgerRef = useRef<{
+    key: string;
+    entries: LocalAgentTimelineEntry[];
+  }>({ key: '', entries: [] });
+  const transcriptTerminalMode = useTranscriptTerminalMode(stdout);
   const [globalReviewPolicyMode, setGlobalReviewPolicyMode] = useState<BuiltinGlobalReviewPolicyMode>(
     () => config.globalReviewPolicyMode,
   );
@@ -124,10 +139,14 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
   const localServerPort = config.localServerPort;
   const workdir = props.workdir ?? config.workdir;
   const resetTimelineView = useCallback(() => {
+    transcriptTerminalMode.leave();
     stdout.write(CLEAR_SCREEN);
-    setTimelineScroll(createTimelineScrollState());
+    setTranscriptViewerOpen(false);
+    setTranscriptScroll(createTimelineScrollState());
+    setTranscriptInitialPageUp(false);
+    inlineTimelineLedgerRef.current = { key: '', entries: [] };
     setTimelineRenderEpoch((current) => current + 1);
-  }, [stdout]);
+  }, [stdout, transcriptTerminalMode]);
   const runtimeController = useMemo(() => new TuiRuntimeController({
     actorId: props.actorId,
     localServerPort,
@@ -166,10 +185,25 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
 
   useEffect(() => {
     if (activeRequestId && activeRequestId !== lastTimelineRequestIdRef.current) {
-      setTimelineScroll(createTimelineScrollState());
+      setTranscriptScroll(createTimelineScrollState());
     }
     lastTimelineRequestIdRef.current = activeRequestId;
   }, [activeRequestId]);
+
+  useEffect(() => {
+    if (
+      transcriptViewerOpen
+      && transcriptInitialPageUp
+      && transcriptScroll.viewportHeight > 0
+    ) {
+      setTranscriptScroll((current) => scrollTimelineByPage(current, 'up'));
+      setTranscriptInitialPageUp(false);
+    }
+  }, [
+    transcriptInitialPageUp,
+    transcriptScroll.viewportHeight,
+    transcriptViewerOpen,
+  ]);
 
   useEffect(() => {
     if (globalReviewPolicyPickerOpen && (busy || pendingApproval)) {
@@ -269,6 +303,7 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     globalReviewPolicyPickerOpen,
     commandPaletteOpen: commandPalette.open,
     fileMentionOpen: fileMention.open,
+    transcriptViewerOpen,
     externalEditorOpen,
   }), [
     busy,
@@ -280,6 +315,7 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     pendingApproval,
     ready,
     resumePickerOpen,
+    transcriptViewerOpen,
   ]);
   const overlayModel = useMemo(() => buildTuiOverlayModel({
     width: screenModel.regions.overlay.width,
@@ -350,6 +386,20 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     setGlobalReviewPolicyPickerOpen(true);
   };
 
+  const openTranscriptViewer = (initialPageUp = false) => {
+    transcriptTerminalMode.enter();
+    setTranscriptScroll(createTimelineScrollState());
+    setTranscriptInitialPageUp(initialPageUp);
+    setTranscriptViewerOpen(true);
+  };
+
+  const closeTranscriptViewer = () => {
+    transcriptTerminalMode.leave();
+    setTranscriptViewerOpen(false);
+    setTranscriptScroll(createTimelineScrollState());
+    setTranscriptInitialPageUp(false);
+  };
+
   const applyGlobalReviewPolicySelection = () => {
     const option = GLOBAL_REVIEW_POLICY_PICKER_OPTIONS[globalReviewPolicyIndex];
     if (!option) return;
@@ -381,6 +431,7 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
       selectChatComposerTarget,
       openResumePicker,
       openGlobalReviewPolicyPicker,
+      openTranscriptViewer,
       openExternalEditor,
       exit,
       appendSystemMessage: (text) => appendMessage('system', text),
@@ -417,14 +468,6 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     stdout.on?.('resize', handleResize);
     return () => {
       stdout.off?.('resize', handleResize);
-    };
-  }, [stdout]);
-
-  useEffect(() => {
-    if (!stdout.isTTY) return;
-    stdout.write(ENABLE_MOUSE_WHEEL);
-    return () => {
-      stdout.write(DISABLE_MOUSE_WHEEL);
     };
   }, [stdout]);
 
@@ -471,8 +514,34 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
         return;
 
       case 'timeline':
-        setTimelineScroll((current) => {
-          const direction = action.action === 'page_up' || action.action === 'scroll_up'
+        if (action.action === 'page_up' || action.action === 'scroll_up') {
+          openTranscriptViewer(true);
+        }
+        return;
+
+      case 'transcript':
+        if (action.action === 'dismiss') {
+          closeTranscriptViewer();
+          return;
+        }
+        if (action.action === 'top') {
+          setTranscriptScroll((current) => ({
+            ...current,
+            offset: maxTimelineScrollOffset(current.contentHeight, current.viewportHeight),
+            followingTail: false,
+          }));
+          return;
+        }
+        if (action.action === 'bottom') {
+          setTranscriptScroll((current) => ({
+            ...current,
+            offset: 0,
+            followingTail: true,
+          }));
+          return;
+        }
+        setTranscriptScroll((current) => {
+          const direction = action.action === 'line_up' || action.action === 'page_up'
             ? 'up'
             : 'down';
           return action.action === 'page_up' || action.action === 'page_down'
@@ -652,7 +721,6 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     session: focusedSession,
     globalReviewPolicyMode,
     overlayOwner: overlayModel.current?.label ?? null,
-    timelineScrollOffset: timelineScroll.offset,
   }), [
     focusedSession,
     globalReviewPolicyMode,
@@ -661,87 +729,117 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     screenModel.regions.statusBar.connectionStatus,
     screenModel.regions.statusBar.statusNotice,
     composerTarget,
-    timelineScroll.offset,
   ]);
-  const emptyTimelineVersion = screenModel.regions.timeline.emptyState
-    ? JSON.stringify(screenModel.regions.timeline.emptyState)
-    : '';
-  const timelineLayoutVersion = useMemo(() => ({
+  const inlineTimelineKey = `${focusedSession?.sessionId ?? defaultSessionId}:${screenModel.regions.timeline.renderKey}`;
+  if (inlineTimelineLedgerRef.current.key !== inlineTimelineKey) {
+    inlineTimelineLedgerRef.current = {
+      key: inlineTimelineKey,
+      entries: [],
+    };
+  }
+  // Ink Static advances by array length, so keep an append-only ledger even
+  // when an authoritative snapshot replaces the projection with a shorter one.
+  const inlineTimeline = transcriptViewerOpen
+    ? {
+        committedEntries: inlineTimelineLedgerRef.current.entries,
+        liveEntries: [],
+      }
+    : advanceInlineTimeline(
+        inlineTimelineLedgerRef.current.entries,
+        screenModel.regions.timeline.entries,
+      );
+  inlineTimelineLedgerRef.current.entries = inlineTimeline.committedEntries;
+  const transcriptLayoutVersion = useMemo(() => ({
     terminalColumns: terminalSize.columns,
     terminalRows: terminalSize.rows,
-    composerRows: textArea.layout.rows.length,
-    overlay: overlayModel.current,
-    emptyTimelineVersion,
   }), [
-    emptyTimelineVersion,
-    overlayModel.current,
     terminalSize.columns,
     terminalSize.rows,
-    textArea.layout.rows.length,
   ]);
-  const handleTimelineMetricsChange = useCallback((metrics: {
+  const handleTranscriptMetricsChange = useCallback((metrics: {
     contentHeight: number;
     viewportHeight: number;
   }) => {
-    setTimelineScroll((current) => updateTimelineScrollMetrics(current, metrics));
+    setTranscriptScroll((current) => updateTimelineScrollMetrics(current, metrics));
   }, []);
-
   return (
-    <Box
-      flexDirection="column"
-      height={Math.max(8, terminalSize.rows)}
-      overflow="hidden"
-      paddingX={1}
-    >
-      <TimelineViewport
-        key={screenModel.regions.timeline.renderKey}
-        contentVersion={screenModel.regions.timeline.entries}
-        layoutVersion={timelineLayoutVersion}
-        scrollOffset={timelineScroll.offset}
-        onMetricsChange={handleTimelineMetricsChange}
+    <>
+      <Static
+        key={inlineTimelineKey}
+        items={inlineTimeline.committedEntries}
       >
-        {screenModel.regions.timeline.emptyState ? (
-          <Box flexShrink={0}>
-            <WelcomePanel model={screenModel.regions.timeline.emptyState} />
-          </Box>
-        ) : null}
-        {screenModel.regions.timeline.entries.map((entry) => (
-          <Box key={entry.id} flexShrink={0}>
+        {(entry) => (
+          <Box key={entry.id} flexDirection="column" paddingX={1}>
             {renderTimelineDisplayEntry(entry, {
               petName: screenModel.petName,
               now,
               width: contentWidth,
             })}
           </Box>
-        ))}
-      </TimelineViewport>
-      <Box flexShrink={0}>
-        <OverlayLayer model={overlayModel} />
-      </Box>
-      <Box
-        borderStyle="round"
-        borderColor={screenModel.regions.composer.borderColor}
-        flexShrink={0}
-        paddingX={1}
-        marginTop={screenModel.regions.composer.marginTop}
-      >
-        {busy ? (
-          <Text dimColor>{TUI_TEXT.inputBusy}</Text>
-        ) : (
-          <>
-            <Text color="cyan">{'> '}</Text>
-            <Composer
-              {...textArea.composerProps}
-            />
-          </>
         )}
-      </Box>
-      <Box flexShrink={0}>
-        <BottomStatusLine
-          model={statusBarModel}
-          width={screenModel.regions.statusBar.width}
+      </Static>
+      {transcriptViewerOpen ? (
+        <TranscriptViewer
+          entries={screenModel.regions.timeline.entries}
+          petName={screenModel.petName}
+          now={now}
+          width={contentWidth}
+          height={terminalSize.rows}
+          scrollOffset={transcriptScroll.offset}
+          contentVersion={screenModel.regions.timeline.entries}
+          layoutVersion={transcriptLayoutVersion}
+          contentHeight={transcriptScroll.contentHeight}
+          viewportHeight={transcriptScroll.viewportHeight}
+          onMetricsChange={handleTranscriptMetricsChange}
         />
-      </Box>
-    </Box>
+      ) : (
+        <Box
+          flexDirection="column"
+          paddingX={1}
+        >
+          {screenModel.regions.timeline.emptyState ? (
+            <Box flexShrink={0}>
+              <WelcomePanel model={screenModel.regions.timeline.emptyState} />
+            </Box>
+          ) : null}
+          {inlineTimeline.liveEntries.map((entry) => (
+            <Box key={entry.id} flexShrink={0}>
+              {renderTimelineDisplayEntry(entry, {
+                petName: screenModel.petName,
+                now,
+                width: contentWidth,
+              })}
+            </Box>
+          ))}
+          <Box flexShrink={0}>
+            <OverlayLayer model={overlayModel} />
+          </Box>
+          <Box
+            borderStyle="round"
+            borderColor={screenModel.regions.composer.borderColor}
+            flexShrink={0}
+            paddingX={1}
+            marginTop={screenModel.regions.composer.marginTop}
+          >
+            {busy ? (
+              <Text dimColor>{TUI_TEXT.inputBusy}</Text>
+            ) : (
+              <>
+                <Text color="cyan">{'> '}</Text>
+                <Composer
+                  {...textArea.composerProps}
+                />
+              </>
+            )}
+          </Box>
+          <Box flexShrink={0}>
+            <BottomStatusLine
+              model={statusBarModel}
+              width={screenModel.regions.statusBar.width}
+            />
+          </Box>
+        </Box>
+      )}
+    </>
   );
 }

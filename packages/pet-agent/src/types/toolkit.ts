@@ -80,10 +80,13 @@ export const TOOLKIT_REVIEW_GUIDANCE_FIELD_MAX_CHARS = 2_000;
 
 export type NamedStructuredTool<TName extends string = string> = StructuredTool & {
   /**
-   * Stable identity for one registry generation. Hosts must not rename an
-   * executable Tool after it has been registered.
+   * Tool names are stable by convention for one registry generation. Hosts
+   * must not rename an executable Tool after it has been registered.
+   *
+   * This remains mutable because StructuredTool declares a writable `name`;
+   * an intersection cannot strengthen that inherited property to readonly.
    */
-  readonly name: TName;
+  name: TName;
 };
 
 export type ToolDefinition<

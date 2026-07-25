@@ -151,8 +151,8 @@ function snapshotReview(
 function snapshotToolDefinition(definition: ToolDefinition): ToolDefinition {
   // Preserve the executable Tool instance by identity: LangChain Tools may own
   // mutable runtime internals and cannot be safely cloned or deep-frozen.
-  // The surrounding binding is snapshotted, and NamedStructuredTool requires
-  // its name to remain stable for the lifetime of this registry generation.
+  // The surrounding binding is snapshotted; by convention, hosts keep the
+  // Tool name stable for the lifetime of this registry generation.
   return Object.freeze({
     tool: definition.tool,
     ...(definition.operation

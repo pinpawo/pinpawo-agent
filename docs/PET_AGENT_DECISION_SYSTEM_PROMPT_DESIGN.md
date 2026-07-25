@@ -8,8 +8,9 @@
 
 ## 1. 设计原则
 
-大段 shared prefix 保留。它让四个 decision 对 orchestrator、task loop、capability、announce
-和 handoff 使用同一套语义。节点私有 prompt 只描述当前判断，不重复 graph 全貌。
+shared prefix 只保留所有 decision 都必须知道的最小共同契约：orchestrator 围绕用户目标运行
+task loop、decision 只输出自己负责的结构化判断、graph 推进状态而 answer 生成用户可见回复。
+节点流程、字段语义和判断依据由各节点 prompt、schema 或 graph 分别拥有。
 
 提示词按三种关系组织：
 
@@ -47,7 +48,7 @@ effective decision prompt
 
 | 类型 | 应包含 | 不应包含 |
 |---|---|---|
-| 静态 | 共同术语、loop 全貌、node mission、稳定判断规则 | 当前用户、当前 task、候选列表、run state 分支 |
+| 静态 | 最小跨节点契约、node mission、稳定判断规则 | graph 全貌、当前用户、当前 task、候选列表、run state 分支 |
 | 条件 | provider output policy 等不改变 graph 语义的协议 | 是否首轮、是否有 plan、下一节点等控制条件 |
 | 注入 | 用户目标、近期对话、task、plan tail、handoff、候选、announce、runtime | 新决策规则、重复输出说明 |
 
@@ -59,16 +60,12 @@ Zod schema 生成的 JSON Schema 加入 system；其他方法依赖 provider 结
 
 ## 3. Shared Contract
 
-共享前缀以 `PET_AGENT_ORCHESTRATOR_DECISION_PROMPT_PREFIX.md` 为 canonical source，并在
-`buildOrchestratorDecisionPromptPrefixLines()` 中生产组装。它只定义：
+共享前缀以 `PET_AGENT_ORCHESTRATOR_DECISION_PROMPT_PREFIX.md` 为 canonical source，并由
+`buildOrchestratorDecisionPromptPrefix()` 组装。它只定义：
 
-- orchestrator 围绕用户目标管理 task loop。
-- capability subagent 执行 task，并以 announce 返回结果。
-- entryDecision 选择 run 的执行形态。
-- capabilityPlanner 组织 capability execution boundaries。
-- capabilityDecision 为 current task 选择执行 capability。
-- outcomeDecision 验收 announce。
-- answer 是唯一用户可见回复节点。
+- orchestrator 围绕用户目标运行 task loop。
+- decision 节点基于当前调用的上下文，输出各自负责的结构化判断。
+- graph 推进执行和状态转换；answer 基于主对话生成用户可见回复。
 
 shared prefix 不包含：
 
@@ -81,25 +78,28 @@ shared prefix 不包含：
 
 ### 4.1 静态契约
 
-目标：在 run 入口一次性选择执行形态。
+目标：在 run 入口一次性判断现在应直接回复、执行一个任务，还是先规划。
 
 决策采用排除式顺序：
 
 ```text
-1. 当前目标是否需要新的 capability execution？
-   - 需要读取、查询、检查、计算或操作才能得到当前结果：继续判断。
-   - 主对话已有结果足以回复：answer。
-2. 执行目标是否已经唯一确定？
-   - 多个候选且没有选择依据：answer，由 answer 询问用户。
-3. 是否必须先 plan？
-   - 一个 current task 可以包含连续的准备、操作、验证、汇总和同类批量处理；
-     内部动作可以使用前面动作的结果。
-   - 一个 task 完成后仍有独立 task，或后续 task 必须等待前一个 task 的结果
-     才能确定：needs_plan。
-   - 其他执行目标：direct_task，并输出完整的可验收 task。
+1. 理解用户此刻要实现的目的。
+   - 歧义会实质改变结果或行动后果：answer，由 answer 询问用户。
+2. 完成这个目的是否需要先得到主对话中还没有的结果？
+   - 实际内容或当前状态：结果必须匹配所问的对象、范围和时间。
+   - 现实变化：需要对应的完成结果。
+   - 主对话中匹配的观察结果或完成结果可以用于回复。
+   - 意图、计划和进行中的过程只说明行动阶段。
+   - 不需要再得到结果：answer。
+3. 需要结果时，现在能否形成一个明确、可独立执行和验收的任务？
+   - 可以：direct_task，task 写完整目标。
+   - 有多个需要独立验收的任务，或后续任务必须等待前一个结果才能明确：
+     needs_plan，交给 capabilityPlanner。
+   - 完成同一任务所需的连续动作不另行拆分。
 ```
 
-这个顺序先确定是否需要执行，再排除尚不能形成 task 的目标，最后判断执行是否需要 plan。
+这个顺序先确定用户目的和澄清边界，再判断是否缺少完成目的所需的结果，最后形成一个任务或进入
+规划。它不依赖读取、查询、计算等操作清单，也不使用“上下文是否足够”作为未定义的判断标准。
 本节点不选择具体 capability，也不生成用户回复。
 
 ### 4.2 注入事实
@@ -132,8 +132,9 @@ shared prefix 不包含：
 }
 ```
 
-`action` 的 schema description 只说明三种结构结果：不需要 execution、需要 execution 且无需
-plan、需要 execution 且必须先 plan。具体判定顺序由 system prompt 定义，不在 schema 中重复。
+`action` 的 schema description 只说明三种结构结果：`answer` 表示主对话已有回复所需结果或需要
+询问用户；`direct_task` 表示需要先取得一个结果；`needs_plan` 表示需要先规划多个或依赖前一结果
+的任务。具体判定顺序由 system prompt 定义，不在 schema 中重复。
 `direct_task` 必须有非空 task；其他 action 的执行字段被忽略。schema 不包含 capability 枚举、
 search keywords 或 plan。
 

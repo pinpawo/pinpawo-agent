@@ -1,8 +1,8 @@
 import type {
   ToolOperationSummary,
-  ToolkitToolReviewBlock,
-  ToolkitToolReviewContext,
-  ToolkitToolReviewPolicy,
+  ToolReviewBlock,
+  ToolReviewContext,
+  ToolReviewPolicy,
 } from '../../../types/toolkit';
 import { isToolActionAuthorized } from './reviewAuthorizations';
 import {
@@ -41,7 +41,7 @@ function truncate(value: string, limit = DEFAULT_DETAILS_LIMIT) {
     : `${value.slice(0, limit)}\n[truncated ${(value.length - limit).toString()} chars]`;
 }
 
-function readOperationSummary(ctx: ToolkitToolReviewContext): ToolOperationSummary | null {
+function readOperationSummary(ctx: ToolReviewContext): ToolOperationSummary | null {
   try {
     return ctx.operation?.summarizeInput?.(ctx.input) ?? null;
   } catch {
@@ -64,7 +64,7 @@ function formatInput(input: unknown) {
   }
 }
 
-function buildReviewBody(ctx: ToolkitToolReviewContext, summary: ToolOperationSummary | null) {
+function buildReviewBody(ctx: ToolReviewContext, summary: ToolOperationSummary | null) {
   const details = formatDetails(summary?.details);
   const lines = [
     summary?.summary ? `Summary: ${summary.summary}` : null,
@@ -83,7 +83,7 @@ function readPatchDetail(summary: ToolOperationSummary | null): string | null {
 }
 
 function buildReviewView(
-  ctx: ToolkitToolReviewContext,
+  ctx: ToolReviewContext,
   summary: ToolOperationSummary | null,
 ): ReviewView {
   const title = buildReviewTitle(ctx);
@@ -104,7 +104,7 @@ function buildReviewView(
   };
 }
 
-function buildReviewTitle(ctx: ToolkitToolReviewContext) {
+function buildReviewTitle(ctx: ToolReviewContext) {
   return ctx.operation?.title ?? ctx.toolName;
 }
 
@@ -195,14 +195,14 @@ function authorizationDescription(matcher: ToolAuthorizationMatcher) {
   return 'Approve this action and authorize exact matching arguments in this thread.';
 }
 
-function blockReview(ctx: ToolkitToolReviewContext): ToolkitToolReviewBlock {
+function blockReview(ctx: ToolReviewContext): ToolReviewBlock {
   return {
     type: 'block',
     reason: `Human review is required before running ${ctx.toolName}, but this runtime does not support HITL.`,
   };
 }
 
-function createPresetPolicy(options: PresetOptions): ToolkitToolReviewPolicy {
+function createPresetPolicy(options: PresetOptions): ToolReviewPolicy {
   const authorization = options.authorization ?? options.defaultAuthorization;
   const unavailable = options.unavailable ?? options.defaultUnavailable;
 
@@ -253,7 +253,7 @@ function createPresetPolicy(options: PresetOptions): ToolkitToolReviewPolicy {
 }
 
 export const ReviewPolicies = {
-  localMutation(options: HitlPresetOptions = {}): ToolkitToolReviewPolicy {
+  localMutation(options: HitlPresetOptions = {}): ToolReviewPolicy {
     return createPresetPolicy({
       ...options,
       requiresHitl: true,
@@ -262,7 +262,7 @@ export const ReviewPolicies = {
     });
   },
 
-  commandExecution(options: HitlPresetOptions = {}): ToolkitToolReviewPolicy {
+  commandExecution(options: HitlPresetOptions = {}): ToolReviewPolicy {
     return createPresetPolicy({
       ...options,
       requiresHitl: true,
@@ -271,7 +271,7 @@ export const ReviewPolicies = {
     });
   },
 
-  externalAccess(options: HitlPresetOptions = {}): ToolkitToolReviewPolicy {
+  externalAccess(options: HitlPresetOptions = {}): ToolReviewPolicy {
     return createPresetPolicy({
       ...options,
       requiresHitl: true,
@@ -280,7 +280,7 @@ export const ReviewPolicies = {
     });
   },
 
-  requireHitl(options: HitlPresetOptions = {}): ToolkitToolReviewPolicy {
+  requireHitl(options: HitlPresetOptions = {}): ToolReviewPolicy {
     return createPresetPolicy({
       ...options,
       requiresHitl: true,
@@ -289,7 +289,7 @@ export const ReviewPolicies = {
     });
   },
 
-  never(): ToolkitToolReviewPolicy {
+  never(): ToolReviewPolicy {
     return createPresetPolicy({
       requiresHitl: false,
       defaultAuthorization: 'none',
@@ -297,7 +297,7 @@ export const ReviewPolicies = {
     });
   },
 
-  custom(policy: ToolkitToolReviewPolicy): ToolkitToolReviewPolicy {
+  custom(policy: ToolReviewPolicy): ToolReviewPolicy {
     return policy;
   },
 };

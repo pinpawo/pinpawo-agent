@@ -1,17 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type {
-  ToolkitToolAuthorizationMatcherContext,
-  ToolkitToolReviewContext,
+  ToolAuthorizationMatcherContext,
+  ToolReviewContext,
 } from '../../../types/toolkit';
 import { authorizeToolAction } from './reviewAuthorizations';
 import { ReviewPolicies } from './reviewPolicies';
 
-function reviewContext(overrides: Partial<ToolkitToolReviewContext> = {}): ToolkitToolReviewContext {
+function reviewContext(overrides: Partial<ToolReviewContext> = {}): ToolReviewContext {
   return {
-    models: {} as never,
-    actor: {} as never,
-    messages: [],
     toolkitName: 'local',
     toolName: 'write_file',
     input: { path: 'notes.md', content: 'hello' },
@@ -31,7 +28,7 @@ function reviewContext(overrides: Partial<ToolkitToolReviewContext> = {}): Toolk
   };
 }
 
-function matcherContext(overrides: Partial<ToolkitToolAuthorizationMatcherContext> = {}): ToolkitToolAuthorizationMatcherContext {
+function matcherContext(overrides: Partial<ToolAuthorizationMatcherContext> = {}): ToolAuthorizationMatcherContext {
   return {
     toolkitName: 'local',
     toolName: 'write_file',

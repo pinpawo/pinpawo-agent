@@ -23,17 +23,20 @@ export type {
 
 export type {
   AgentCapability,
-  CapabilityAvailability,
-  CapabilityAvailabilityConfig,
-  CapabilityContext,
-  CapabilityInstructionContext,
-  CapabilityMiddleware,
-  CapabilityMiddlewareContext,
-  CapabilityRuntime,
+  CapabilityFinalizeContext,
+  CapabilityFinalizeHook,
+  CapabilityFinalizeResult,
+  CapabilityLifecycle,
+  InstructionDocument,
+} from './types/capability';
+export {
+  defineCapability,
+  defineInstructionDocument,
 } from './types/capability';
 
 export type {
   SubagentInputState,
+  SubagentPromptSection,
   SubagentResult,
   SubagentRunInput,
   SubagentRuntimeEvent,
@@ -66,33 +69,26 @@ export {
 } from './guards';
 
 export type {
-  AgentToolset,
   AgentToolkit,
   NamedStructuredTool,
+  ToolAuthorizationMatcherContext,
+  ToolDefinition,
   ToolOperationMetadata,
-  ToolOperationMetadataMap,
-  ToolOperationMetadataMapFor,
   ToolOperationSummary,
-  ToolkitAutoReviewPolicy,
-  ToolkitContext,
-  ToolkitOperationMetadata,
-  ToolkitOperationSummary,
-  ToolkitToolName,
-  ToolkitPolicy,
-  ToolkitResource,
+  ToolReviewBlock,
+  ToolReviewContext,
+  ToolReviewPolicy,
+  ToolReviewResult,
+  ToolkitAvailability,
+  ToolkitAvailabilityCheck,
   ToolkitReviewCapabilities,
-  ToolkitToolAuthorizationMatcherContext,
-  ToolkitToolReviewBlock,
-  ToolkitToolReviewContext,
-  ToolkitToolReviewPolicy,
-  ToolkitToolReviewPolicyMapFor,
-  ToolkitToolReviewResult,
+  ToolkitReviewGuidance,
 } from './types/toolkit';
 export {
   defineToolkit,
-  defineToolset,
-  hasToolOperationMetadata,
-  TOOLKIT_AUTO_REVIEW_FIELD_MAX_CHARS,
+  evaluateToolkitAvailability,
+  filterAvailableToolkits,
+  TOOLKIT_REVIEW_GUIDANCE_FIELD_MAX_CHARS,
   validateToolkitDefinition,
 } from './types/toolkit';
 
@@ -105,14 +101,21 @@ export {
   ORCHESTRATOR_RECURSION_LIMIT,
   streamOrchestratorGraph,
   streamOrchestratorGraphWithTokenUsage,
+  compileAgentRegistry,
+  ExecutorCompilationError,
+  formatExecutorCompilationIssues,
   validateUniqueCapabilityNames,
   validateUniqueToolkitNames,
-  validateUniqueToolNames,
+} from './agent/createAgentRuntime';
+export type {
+  CompiledAgentRegistry,
+  ExecutorCompilationIssue,
 } from './agent/createAgentRuntime';
 export {
-  ARTIFACT_DISCOVERY_LIST_DIR_TOOL_NAME,
+  ARTIFACT_DISCOVERY_LIST_TOOL_NAME,
+  ARTIFACT_DISCOVERY_READ_TOOL_NAME,
   ARTIFACT_DISCOVERY_TOOL_NAMES,
-  ARTIFACT_DISCOVERY_VIEW_FILE_CHUNK_TOOL_NAME,
+  ARTIFACT_DISCOVERY_TOOLKIT_NAME,
 } from './agent/orchestrator/artifacts/discovery';
 export {
   PROVIDER_INPUT_WATERMARK_RATIO,
@@ -268,11 +271,15 @@ export {
   resultStatusSummary,
 } from './utils/operationMetadata';
 export { runAgent } from './agent/runAgent';
-export type { AgentInvokeInput, AgentRunResult } from './agent/runAgent';
+export type {
+  AgentInvokeInput,
+  AgentRunResult,
+} from './agent/runAgent';
 export {
   createSubagent,
   SUBAGENT_GUARD_DECISION_EVENT,
   SUBAGENT_OPERATIONS_EVENT,
+  SUBAGENT_PROMPT_SECTIONS_EVENT,
 } from './subagent/createSubagent';
 export {
   NamespacedProtocolToolEventReader,
@@ -289,6 +296,7 @@ export {
   createLLMWikiCurator,
   createPetAgentRuntime,
   createPlanCapability,
+  createPlanToolkit,
   createSkeletonWikiCurator,
   createStudioOrchestrator,
   createWikiReadToolkit,
@@ -307,7 +315,7 @@ export {
   FileStudioRunQueueStore,
 } from './agent/studio/index';
 export type {
-  CreatePlanCapabilityOptions,
+  CreatePlanToolkitOptions,
   StudioDueRunEvent,
   StudioDueRunRecord,
   StudioDueRunStatus,

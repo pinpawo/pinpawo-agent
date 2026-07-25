@@ -12,7 +12,10 @@ import {
   buildOrchestrationDecisionStructuredOutputOptions,
 } from '../../src/agent/orchestrator/schemas.ts';
 import type { AgentModels } from '../../src/types/agent.ts';
-import type { AgentCapability } from '../../src/types/capability.ts';
+import {
+  defineInstructionDocument,
+  type AgentCapability,
+} from '../../src/types/capability.ts';
 import { scoreCapabilityDecision } from '../decision-contract-scorers.ts';
 import {
   capabilityDecisionBasicsDataset,
@@ -35,7 +38,10 @@ function capabilities(input: CapabilityDecisionBasicsInput): AgentCapability[] {
   return input.availableCapabilities.map((item) => ({
     name: item.name,
     description: `${item.description} Keywords: ${item.keywords.join('|')}`,
-    createRuntime: () => ({ instructions: [], tools: [] }),
+    uses: [],
+    instructions: defineInstructionDocument({
+      content: `Execute the ${item.name} capability.`,
+    }),
   }));
 }
 

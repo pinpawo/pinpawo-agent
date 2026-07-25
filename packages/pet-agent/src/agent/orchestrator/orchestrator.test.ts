@@ -2,27 +2,35 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import { ToolMessage } from '@langchain/core/messages/tool';
-import { tool } from '@langchain/core/tools';
+import { tool, type StructuredTool } from '@langchain/core/tools';
 import { FakeListChatModel } from '@langchain/core/utils/testing';
 import { Command, MemorySaver, messagesStateReducer } from '@langchain/langgraph';
 import { createMiddleware, FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
-import type { AgentCapability } from '../../types/capability';
+import {
+  defineInstructionDocument,
+  type AgentCapability,
+} from '../../types/capability';
 import type { AgentActor, AgentModels } from '../../types/agent';
-import { defineToolset, type AgentToolkit } from '../../types/toolkit';
+import type {
+  AgentToolkit,
+  ToolDefinition,
+  ToolReviewPolicy,
+} from '../../types/toolkit';
 import { createSubagent } from '../../subagent/createSubagent';
 import { runAgent } from '../runAgent';
-import { buildOrchestratorRunInput, createOrchestratorGraph } from '../createAgentRuntime';
+import {
+  buildOrchestratorRunInput,
+  createOrchestratorGraph as createRuntimeOrchestratorGraph,
+} from '../createAgentRuntime';
+import { compileAgentRegistry } from './registry';
 import {
   searchCapabilities,
   splitCapabilitySearchTerms,
 } from './capabilitySearch';
 import {
-  collectCapabilityOperations,
-  collectGeneralOperations,
   collectToolkitOperations,
-  resolveToolkitResources,
-  selectCapabilityTools,
+  resolveToolkitExecution,
 } from './subagentDispatch';
 import { buildReviewSpec } from './review/reviewSpec';
 import { isToolActionAuthorized } from './review/reviewAuthorizations';
@@ -57,12 +65,52 @@ import {
 } from './state';
 import { createCapabilityDecisionRunner } from './runtime/decisions/orchestrationDecision';
 
-function capability(name: string, description: string): AgentCapability {
+function capability(
+  name: string,
+  description: string,
+  uses: readonly string[] = [],
+): AgentCapability {
   return {
     name,
     description,
-    createRuntime: () => ({}),
+    uses,
+    instructions: defineInstructionDocument({
+      content: `Execute the ${name} capability.`,
+    }),
   };
+}
+
+function createOrchestratorGraph(
+  config: Parameters<typeof createRuntimeOrchestratorGraph>[0],
+): ReturnType<typeof createRuntimeOrchestratorGraph> {
+  const graph = createRuntimeOrchestratorGraph(config);
+  const withRegistry = (options: {
+    configurable?: Record<string, unknown>;
+  } = {}) => {
+    const configurable = options.configurable ?? {};
+    return {
+      ...options,
+      configurable: {
+        ...configurable,
+        registry: compileAgentRegistry({
+          toolkits: (configurable.toolkits ?? []) as AgentToolkit[],
+          capabilities: (configurable.capabilities ?? []) as AgentCapability[],
+          generalUses: (configurable.generalUses ?? []) as string[],
+        }),
+      },
+    };
+  };
+  return new Proxy(graph, {
+    get(target, property, receiver) {
+      if (property === 'invoke' || property === 'streamEvents') {
+        return (input: unknown, options: {
+          configurable?: Record<string, unknown>;
+        } = {}) => target[property](input as never, withRegistry(options) as never);
+      }
+      const value = Reflect.get(target, property, receiver);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
 }
 
 function mockTool(name: string) {
@@ -73,10 +121,31 @@ function mockTool(name: string) {
   });
 }
 
-type ToolkitResources = Awaited<ReturnType<typeof resolveToolkitResources>>;
+function toolDefinition(
+  toolItem: StructuredTool,
+  options: Omit<ToolDefinition, 'tool'> = {},
+): ToolDefinition {
+  return {
+    tool: toolItem,
+    ...options,
+  };
+}
+
+function toolDefinitions(...tools: StructuredTool[]): ToolDefinition[] {
+  return tools.map((toolItem) => toolDefinition(toolItem));
+}
+
+function reviewedTool(
+  toolItem: StructuredTool,
+  review: ToolReviewPolicy,
+): ToolDefinition {
+  return toolDefinition(toolItem, { review });
+}
+
+type ResolvedToolkitExecution = Awaited<ReturnType<typeof resolveToolkitExecution>>;
 
 async function runToolkitToolCall(
-  resources: ToolkitResources,
+  resources: ResolvedToolkitExecution,
   toolCall: { id?: string; name: string; args: Record<string, unknown> }
     | Array<{ id?: string; name: string; args: Record<string, unknown> }>,
 ) {
@@ -87,8 +156,8 @@ async function runToolkitToolCall(
     }),
     tools: resources.tools,
     middleware: resources.middleware,
-    instructions: [],
-    operations: collectGeneralOperations(resources.toolkits),
+    promptSections: [],
+    operations: collectToolkitOperations(resources.toolkits),
     messages: [new HumanMessage(`call ${toolCalls.map((call) => call.name).join(', ')}`)],
   });
 }
@@ -364,6 +433,48 @@ test('capability decision searches candidates from the pending task', async () =
   assert.doesNotMatch(routeInput, /匹配：|search_keywords/);
   assert.doesNotMatch(routeInput, /delegate_capability\.explore/);
   assert.equal(decisionCallCount, 3);
+});
+
+test('capability decision excludes a Capability whose required Toolkit is missing', async () => {
+  let routeInput = '';
+  let decisionCallCount = 0;
+  const model = {
+    invoke: async () => new AIMessage(''),
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async (messages: unknown[]) => {
+        decisionCallCount += 1;
+        routeInput = String((messages.at(-1) as { content?: unknown })?.content ?? '');
+        return { lane: 'general' };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const runCapabilityDecision = createCapabilityDecisionRunner({
+    models: { act: model, observe: model },
+    actor: testActor,
+  });
+  const input = buildOrchestratorRunInput([new HumanMessage('use missing service')]);
+  input.runPendingTask = {
+    task: 'use missing service',
+    contextSummary: null,
+    searchKeywords: 'broken',
+  };
+
+  await runCapabilityDecision(input as OrchestratorStateType, {
+    configurable: {
+      actor: testActor,
+      registry: compileAgentRegistry({
+        capabilities: [capability('broken', 'Broken service capability.', ['missing'])],
+        toolkits: [],
+        generalUses: [],
+      }),
+    },
+  });
+
+  assert.equal(decisionCallCount, 0);
+  assert.equal(routeInput, '');
 });
 
 test('task_done reroutes through capabilityPlanner before the next task', async () => {
@@ -715,8 +826,11 @@ test('capability decision rejects missing pending task as an invariant violation
       configurable: {
         thread_id: 'route-missing-task-invariant',
         actor: testActor,
-        capabilities: [],
-        toolkits: [],
+        registry: compileAgentRegistry({
+          capabilities: [],
+          toolkits: [],
+          generalUses: [],
+        }),
       },
     }),
     /capabilityDecision requires runPendingTask/,
@@ -1378,9 +1492,14 @@ test('limit-reached progress announce lets model choose the same capability dele
   const inspectCapability: AgentCapability = {
     name: 'inspect_repo',
     description: 'Inspect repository.',
-    createRuntime: () => {
-      capabilityRunCount += 1;
-      return {};
+    uses: [],
+    instructions: defineInstructionDocument({
+      content: 'Inspect the repository.',
+    }),
+    lifecycle: {
+      finalize: () => {
+        capabilityRunCount += 1;
+      },
     },
   };
   const graph = createOrchestratorGraph({
@@ -1449,73 +1568,41 @@ test('limit-reached progress announce lets model choose the same capability dele
 test('toolkits compose tools and instructions for capability runtimes', async () => {
   const browserOpen = mockTool('browser_open');
   const readFile = mockTool('read_file');
-  const customTool = mockTool('custom_tool');
   const toolkits: AgentToolkit[] = [
     {
       name: 'browser',
       description: 'browser toolkit',
-      tools: [browserOpen],
-      instructions: ['browser rules'],
+      tools: toolDefinitions(browserOpen),
+      instructions: 'browser rules',
     },
     {
       name: 'bash',
       description: 'bash toolkit',
-      tools: [readFile],
-      instructions: ['bash rules'],
+      tools: toolDefinitions(readFile),
+      instructions: 'bash rules',
     },
   ];
 
-  const browserResources = await resolveToolkitResources(toolkits, ['browser'], {
+  const browserExecution = await resolveToolkitExecution(toolkits, ['browser'], {
     models: {} as AgentModels,
     actor: testActor,
     messages: [],
   });
-  const allResources = await resolveToolkitResources(toolkits, undefined, {
+  const allExecution = await resolveToolkitExecution(toolkits, undefined, {
     models: {} as AgentModels,
     actor: testActor,
     messages: [],
   });
 
-  assert.deepEqual(browserResources.tools.map((toolItem) => toolItem.name), ['browser_open']);
-  assert.deepEqual(browserResources.instructions, ['browser rules']);
-  assert.deepEqual(allResources.tools.map((toolItem) => toolItem.name), ['browser_open', 'read_file']);
+  assert.deepEqual(browserExecution.tools.map((toolItem) => toolItem.name), ['browser_open']);
+  assert.equal(browserExecution.toolkits[0]?.instructions, 'browser rules');
+  assert.deepEqual(allExecution.tools.map((toolItem) => toolItem.name), ['browser_open', 'read_file']);
 
-  const selectedTools = selectCapabilityTools({
-    uses: ['browser'],
-    toolsets: [{
-      name: 'private',
-      tools: [customTool],
-    }],
-  }, browserResources.tools);
-
-  assert.deepEqual(selectedTools.map((toolItem) => toolItem.name), [
-    'browser_open',
-    'custom_tool',
-  ]);
-
-  const dedupedTools = selectCapabilityTools({
-    uses: ['browser'],
-    toolsets: [
-      {
-        name: 'private',
-        tools: [customTool],
-      },
-      {
-        name: 'private_duplicate',
-        tools: [customTool],
-      },
-    ],
-  }, browserResources.tools);
-
-  assert.deepEqual(dedupedTools.map((toolItem) => toolItem.name), [
-    'browser_open',
-    'custom_tool',
-  ]);
 });
 
-test('capability runtime receives available toolkit metadata and fixed uses still resolve normally', async () => {
+test('capability receives tools only from Toolkits authorized by fixed uses', async () => {
   let routeCallCount = 0;
-  let runtimeToolkitNames: string[] = [];
+  let capabilityToolNames: string[] = [];
   const routeModel = {
     invoke: async () => new AIMessage('answered'),
     bindTools: () => ({
@@ -1535,18 +1622,20 @@ test('capability runtime receives available toolkit metadata and fixed uses stil
     }),
   } as unknown as AgentModels['act'];
   const subagentModel = new FakeToolCallingModel({ toolCalls: [[]] });
+  const bindTools = subagentModel.bindTools.bind(subagentModel);
+  (subagentModel as unknown as {
+    bindTools: (tools: Array<{ name: string }>) => unknown;
+  }).bindTools = (tools) => {
+    capabilityToolNames = tools.map((toolItem) => toolItem.name);
+    return bindTools(tools as never);
+  };
   const runtimeCapability: AgentCapability = {
     name: 'inspect_repo',
     description: 'Inspect repository with bash tools.',
-    createRuntime: async (ctx) => {
-      runtimeToolkitNames = ctx.availableToolkits?.map((item) => item.name) ?? [];
-      return {
-        uses: ['bash'],
-        instructions: (instructionCtx) => [
-          `available=${instructionCtx.availableToolkits?.map((item) => item.name).join(',') ?? ''}`,
-        ],
-      };
-    },
+    uses: ['bash'],
+    instructions: defineInstructionDocument({
+      content: 'Inspect the repository with the authorized tools.',
+    }),
   };
   const graph = createOrchestratorGraph({
     models: {
@@ -1566,28 +1655,27 @@ test('capability runtime receives available toolkit metadata and fixed uses stil
         {
           name: 'bash',
           description: 'bash toolkit',
-          tools: [mockTool('read_file')],
+          tools: toolDefinitions(mockTool('read_file')),
         },
         {
           name: 'browser',
           description: 'browser toolkit',
-          tools: [mockTool('browser_open')],
+          tools: toolDefinitions(mockTool('browser_open')),
         },
         {
           name: 'artifact',
           description: 'artifact toolkit',
-          exposure: { general: false },
-          tools: [mockTool('artifact_read')],
+          tools: toolDefinitions(mockTool('artifact_read')),
         },
       ],
       forcedCapabilityNames: ['inspect_repo'],
     },
   });
 
-  assert.deepEqual(runtimeToolkitNames, ['bash', 'browser', 'artifact']);
+  assert.deepEqual(capabilityToolNames, ['read_file']);
 });
 
-test('artifact discovery tools reach a selected capability without broadening its toolkit uses', async () => {
+test('artifact discovery tools reach a selected capability only when declared in uses', async () => {
   let decisionCallCount = 0;
   let capabilityToolNames: string[] = [];
   const routeModel = {
@@ -1622,26 +1710,34 @@ test('artifact discovery tools reach a selected capability without broadening it
       capabilities: [{
         name: 'browser_like',
         description: 'browser-only capability',
-        createRuntime: () => ({ uses: ['browser'] }),
+        uses: ['browser', 'artifact_discovery'],
+        instructions: defineInstructionDocument({
+          content: 'Inspect browser state and related artifacts.',
+        }),
       }],
-      toolkits: [{
-        name: 'browser',
-        description: 'browser toolkit',
-        tools: [mockTool('browser_open')],
-      }],
+      toolkits: [
+        {
+          name: 'browser',
+          description: 'browser toolkit',
+          tools: toolDefinitions(mockTool('browser_open')),
+        },
+        {
+          name: 'artifact_discovery',
+          description: 'artifact discovery toolkit',
+          tools: toolDefinitions(
+            mockTool('artifact_list'),
+            mockTool('artifact_read'),
+          ),
+        },
+      ],
       forcedCapabilityNames: ['browser_like'],
-      artifactDiscoveryRoot: '/repo/.pinpawo/capability-artifacts/threads/tool-test',
-      artifactDiscoveryToolset: defineToolset({
-        name: 'artifact_discovery',
-        tools: [mockTool('artifact_list_dir'), mockTool('artifact_view_file_chunk')],
-      }),
     },
   });
 
   assert.deepEqual(capabilityToolNames, [
     'browser_open',
-    'artifact_list_dir',
-    'artifact_view_file_chunk',
+    'artifact_list',
+    'artifact_read',
   ]);
 });
 
@@ -1679,16 +1775,22 @@ test('general lane keeps workspace file tools alongside scoped artifact discover
       thread_id: 'general-artifact-discovery-tools',
       actor: testActor,
       capabilities: [],
-      toolkits: [{
-        name: 'bash',
-        description: 'workspace file tools',
-        tools: [mockTool('list_dir'), mockTool('view_file_chunk')],
-      }],
-      artifactDiscoveryRoot: '/repo/.pinpawo/capability-artifacts/threads/general-tool-test',
-      artifactDiscoveryToolset: defineToolset({
-        name: 'artifact_discovery',
-        tools: [mockTool('artifact_list_dir'), mockTool('artifact_view_file_chunk')],
-      }),
+      generalUses: ['bash', 'artifact_discovery'],
+      toolkits: [
+        {
+          name: 'bash',
+          description: 'workspace file tools',
+          tools: toolDefinitions(mockTool('list_dir'), mockTool('view_file_chunk')),
+        },
+        {
+          name: 'artifact_discovery',
+          description: 'artifact discovery toolkit',
+          tools: toolDefinitions(
+            mockTool('artifact_list'),
+            mockTool('artifact_read'),
+          ),
+        },
+      ],
     },
     callbacks: recorder.callbacks,
   });
@@ -1696,17 +1798,17 @@ test('general lane keeps workspace file tools alongside scoped artifact discover
   assert.deepEqual(generalToolNames, [
     'list_dir',
     'view_file_chunk',
-    'artifact_list_dir',
-    'artifact_view_file_chunk',
+    'artifact_list',
+    'artifact_read',
   ]);
   assert.equal(recorder.subagentInputs.length, 1);
   assert.match(
     recorder.subagentInputs[0].map((message) => String(message.content)).join('\n'),
-    /<artifact_discovery_context[\s\S]*general-tool-test/,
+    /<artifact_discovery_context[\s\S]*current_thread/,
   );
 });
 
-test('toolkit exposure can hide tools from the general lane', async () => {
+test('toolkit registration does not rely on lane authorization flags', async () => {
   let routeCallCount = 0;
   let generalToolNames: string[] = [];
   const routeModel = {
@@ -1744,38 +1846,44 @@ test('toolkit exposure can hide tools from the general lane', async () => {
 
   await graph.invoke(buildOrchestratorRunInput([new HumanMessage('inspect')]), {
     configurable: {
-      thread_id: 'general-toolkit-exposure',
+      thread_id: 'general-toolkit-registration',
       actor: testActor,
       capabilities: [],
+      generalUses: ['visible', 'artifact'],
       toolkits: [
         {
           name: 'visible',
           description: 'visible toolkit',
-          tools: [mockTool('visible_tool')],
+          tools: toolDefinitions(mockTool('visible_tool')),
         },
         {
           name: 'artifact',
           description: 'artifact toolkit',
-          exposure: { general: false },
-          tools: [mockTool('artifact_read')],
+          tools: toolDefinitions(mockTool('artifact_read')),
         },
       ],
     },
   });
 
-  assert.deepEqual(generalToolNames, ['visible_tool']);
+  assert.deepEqual(generalToolNames, ['visible_tool', 'artifact_read']);
 });
 
-test('toolkit and capability toolset operations are collected with their source', () => {
+test('toolkit ToolDefinition operations are collected with their source', () => {
   const toolkits: AgentToolkit[] = [{
     name: 'bash',
     description: 'bash toolkit',
-    operations: {
-      read_file: {
-        title: 'Read File',
+    tools: [
+      {
+        tool: mockTool('read_file'),
+        operation: {
+          title: 'Read File',
+        },
       },
-      shared_tool: {},
-    },
+      {
+        tool: mockTool('shared_tool'),
+        operation: {},
+      },
+    ],
   }];
 
   const toolkitOperations = collectToolkitOperations(toolkits);
@@ -1786,36 +1894,21 @@ test('toolkit and capability toolset operations are collected with their source'
     toolName: 'read_file',
   });
 
-  const capabilityOperations = collectCapabilityOperations(toolkits, {
-    toolsets: [{
-      name: 'private',
-      tools: [],
-      operations: {
-        custom_tool: {},
-        shared_tool: {},
-      },
-    }],
-  });
-
-  assert.deepEqual(capabilityOperations.custom_tool?.source, {
-    provider: 'toolset',
-    name: 'private',
-    toolName: 'custom_tool',
-  });
-  assert.deepEqual(capabilityOperations.shared_tool?.source, {
+  assert.deepEqual(toolkitOperations.shared_tool?.source, {
     provider: 'toolkit',
     name: 'bash',
     toolName: 'shared_tool',
   });
 });
 
-test('general operations are collected from toolkits', () => {
-  const generalOperations = collectGeneralOperations([{
+test('executor operations are collected from toolkits', () => {
+  const generalOperations = collectToolkitOperations([{
     name: 'bash',
     description: 'bash toolkit',
-    operations: {
-      read_file: {},
-    },
+    tools: [{
+      tool: mockTool('read_file'),
+      operation: {},
+    }],
   }]);
 
   assert.deepEqual(generalOperations.read_file?.source, {
@@ -1825,7 +1918,7 @@ test('general operations are collected from toolkits', () => {
   });
 });
 
-test('capability artifact refs recorded by subagent tools are merged into state', async () => {
+test('capability finalize artifact refs are merged into state', async () => {
   let routeCallCount = 0;
   const routeModel = {
     invoke: async () => new AIMessage('answered'),
@@ -1845,17 +1938,31 @@ test('capability artifact refs recorded by subagent tools are merged into state'
       },
     }),
   } as unknown as AgentModels['act'];
+  const persistReportTool = tool(async () => 'persisted', {
+    name: 'persist_report',
+    description: 'persist report',
+    schema: z.object({}),
+  });
   const artifactToolkit: AgentToolkit = {
     name: 'artifact',
     description: 'artifact recorder',
-    tools: (ctx) => [
-      tool(async () => {
+    tools: toolDefinitions(persistReportTool),
+  };
+  const fixtureCapability: AgentCapability = {
+    name: 'explore',
+    description: 'Explore issue context.',
+    uses: ['artifact'],
+    instructions: defineInstructionDocument({
+      content: 'Explore issue context.',
+    }),
+    lifecycle: {
+      finalize: async (_result, ctx) => {
         const ref = {
           id: 'artifact-1',
           threadId: ctx.threadId ?? 'missing-thread',
-          capabilityId: ctx.capabilityId ?? 'missing-capability',
-          delegationId: ctx.delegationId ?? 'missing-delegation',
-          runId: ctx.runId ?? 'missing-turn',
+          capabilityId: ctx.capabilityId,
+          delegationId: ctx.delegationId,
+          runId: ctx.runId,
           kind: 'report' as const,
           mimeType: 'text/markdown',
           uri: `capability-artifact://thread/${encodeURIComponent(ctx.threadId ?? '')}/artifact/1`,
@@ -1867,20 +1974,9 @@ test('capability artifact refs recorded by subagent tools are merged into state'
           metadata: { sourceCount: 2 },
         };
         await ctx.recordCapabilityArtifact?.(ref);
-        return JSON.stringify(ref);
-      }, {
-        name: 'persist_report',
-        description: 'persist report',
-        schema: z.object({}),
-      }),
-    ],
-  };
-  const fixtureCapability: AgentCapability = {
-    name: 'explore',
-    description: 'Explore issue context.',
-    createRuntime: () => ({
-      uses: ['artifact'],
-    }),
+        return { artifactRefs: [ref] };
+      },
+    },
   };
   const graph = createOrchestratorGraph({
     models: {
@@ -1909,7 +2005,7 @@ test('capability artifact refs recorded by subagent tools are merged into state'
   assert.equal(state.sessionCapabilityArtifacts[0]?.capabilityId, 'explore');
 });
 
-test('capability result artifacts are represented only as refs in state', async () => {
+test('capability finalize stores only artifact refs in state', async () => {
   let routeCallCount = 0;
   const routeModel = {
     invoke: async () => new AIMessage('answered'),
@@ -1929,17 +2025,31 @@ test('capability result artifacts are represented only as refs in state', async 
       },
     }),
   } as unknown as AgentModels['act'];
+  const persistResultTool = tool(async () => 'persisted', {
+    name: 'persist_result',
+    description: 'persist result',
+    schema: z.object({}),
+  });
   const artifactToolkit: AgentToolkit = {
     name: 'artifact',
     description: 'artifact recorder',
-    tools: (ctx) => [
-      tool(async () => {
+    tools: toolDefinitions(persistResultTool),
+  };
+  const fixtureCapability: AgentCapability = {
+    name: 'daily_post',
+    description: 'Create post.',
+    uses: ['artifact'],
+    instructions: defineInstructionDocument({
+      content: 'Create a post.',
+    }),
+    lifecycle: {
+      finalize: async (_result, ctx) => {
         const ref = {
           id: 'result-1',
           threadId: ctx.threadId ?? 'missing-thread',
-          capabilityId: ctx.capabilityId ?? 'missing-capability',
-          delegationId: ctx.delegationId ?? 'missing-delegation',
-          runId: ctx.runId ?? 'missing-turn',
+          capabilityId: ctx.capabilityId,
+          delegationId: ctx.delegationId,
+          runId: ctx.runId,
           kind: 'result' as const,
           mimeType: 'application/json',
           uri: `capability-artifact://thread/${encodeURIComponent(ctx.threadId ?? '')}/artifact/result-1`,
@@ -1950,20 +2060,9 @@ test('capability result artifacts are represented only as refs in state', async 
           schema: { name: 'daily_post.result', version: 1 },
         };
         await ctx.recordCapabilityArtifact?.(ref);
-        return JSON.stringify(ref);
-      }, {
-        name: 'persist_result',
-        description: 'persist result',
-        schema: z.object({}),
-      }),
-    ],
-  };
-  const fixtureCapability: AgentCapability = {
-    name: 'daily_post',
-    description: 'Create post.',
-    createRuntime: () => ({
-      uses: ['artifact'],
-    }),
+        return { artifactRefs: [ref] };
+      },
+    },
   };
   const graph = createOrchestratorGraph({
     models: {
@@ -1990,7 +2089,7 @@ test('capability result artifacts are represented only as refs in state', async 
   assert.equal(state.sessionCapabilityArtifacts[0]?.schema?.name, 'daily_post.result');
 });
 
-test('runAgent omits empty toolkit arrays and forwards artifact discovery resources', async () => {
+test('runAgent reuses a host-precompiled artifact discovery registry', async () => {
   const calls: Array<{ configurable?: Record<string, unknown> }> = [];
   const graph = {
     invoke: async (_input: unknown, options?: { configurable?: Record<string, unknown> }) => {
@@ -1999,28 +2098,41 @@ test('runAgent omits empty toolkit arrays and forwards artifact discovery resour
     },
   };
 
-  const artifactDiscoveryToolset = defineToolset({
+  const artifactDiscoveryToolkit: AgentToolkit = {
     name: 'artifact_discovery',
-    tools: [mockTool('artifact_list_dir'), mockTool('artifact_view_file_chunk')],
+    description: 'artifact discovery toolkit',
+    tools: toolDefinitions(
+      mockTool('artifact_list'),
+      mockTool('artifact_read'),
+    ),
+  };
+  const preparedRegistry = compileAgentRegistry({
+    toolkits: [artifactDiscoveryToolkit],
+    capabilities: [],
+    generalUses: ['artifact_discovery'],
   });
   const result = await runAgent(graph as never, {
     messages: [new HumanMessage('hello')],
-    toolkits: [],
-    artifactDiscoveryRoot: '/repo/.pinpawo/capability-artifacts/threads/thread-1',
-    artifactDiscoveryToolset,
+    toolkits: [artifactDiscoveryToolkit],
+    generalUses: ['artifact_discovery'],
+  }, {
+    registry: preparedRegistry,
   });
 
   assert.equal(result.reply, 'done');
   assert.equal(calls.length, 1);
-  assert.equal(calls[0]?.configurable?.toolkits, undefined);
-  assert.equal(
-    calls[0]?.configurable?.artifactDiscoveryRoot,
-    '/repo/.pinpawo/capability-artifacts/threads/thread-1',
-  );
-  assert.equal(calls[0]?.configurable?.artifactDiscoveryToolset, artifactDiscoveryToolset);
+  const registry = calls[0]?.configurable?.registry as {
+    toolkits?: AgentToolkit[];
+    general?: { toolkits?: AgentToolkit[] };
+  };
+  assert.equal(registry, preparedRegistry);
+  assert.deepEqual(registry.toolkits?.map(({ name }) => name), ['artifact_discovery']);
+  assert.deepEqual(registry.general?.toolkits?.map(({ name }) => name), ['artifact_discovery']);
+  assert.equal(calls[0]?.configurable?.artifactDiscoveryRoot, undefined);
+  assert.equal(calls[0]?.configurable?.artifactDiscoveryToolkit, undefined);
 });
 
-test('capability toolset runtimes expose operation metadata', async () => {
+test('capability Toolkit exposes ToolDefinition operation metadata', () => {
   const saveDraftTool = tool(async () => 'ok', {
     name: 'save_draft',
     description: 'save a draft',
@@ -2029,50 +2141,38 @@ test('capability toolset runtimes expose operation metadata', async () => {
       content: z.string(),
     }),
   });
-  const fixtureCapability: AgentCapability = {
+  const draftToolkit: AgentToolkit = {
     name: 'draft_writer',
-    description: 'Test capability with private toolset metadata.',
-    createRuntime: () => ({
-      toolsets: [defineToolset({
-        name: 'draft_writer',
-        description: 'Draft writer private tools.',
-        tools: [saveDraftTool] as const,
-        operations: {
-          save_draft: {
-            title: '保存草稿',
-            summarizeInput: (input) => {
-              const value = input && typeof input === 'object'
-                ? input as { topic?: unknown; content?: unknown }
-                : {};
-              return {
-                target: typeof value.topic === 'string' ? value.topic : undefined,
-                summary: '保存草稿',
-                details: {
-                  contentLength: typeof value.content === 'string' ? value.content.length : undefined,
-                },
-              };
+    description: 'Draft writer tools.',
+    tools: [{
+      tool: saveDraftTool,
+      operation: {
+        title: '保存草稿',
+        summarizeInput: (input) => {
+          const value = input && typeof input === 'object'
+            ? input as { topic?: unknown; content?: unknown }
+            : {};
+          return {
+            target: typeof value.topic === 'string' ? value.topic : undefined,
+            summary: '保存草稿',
+            details: {
+              contentLength: typeof value.content === 'string' ? value.content.length : undefined,
             },
-          },
+          };
         },
-      })],
-    }),
+      },
+    }],
   };
 
-  const runtime = await fixtureCapability.createRuntime({
-    models: {} as AgentModels,
-    actor: testActor,
-    messages: [],
-  });
-  const toolset = runtime.toolsets?.find((item) => item.name === 'draft_writer');
-
-  assert.equal(toolset?.operations?.save_draft?.title, '保存草稿');
-  assert.deepEqual(collectCapabilityOperations([], runtime).save_draft?.source, {
-    provider: 'toolset',
+  const definition = draftToolkit.tools[0];
+  assert.equal(definition?.operation?.title, '保存草稿');
+  assert.deepEqual(collectToolkitOperations([draftToolkit]).save_draft?.source, {
+    provider: 'toolkit',
     name: 'draft_writer',
     toolName: 'save_draft',
   });
 
-  const summary = toolset?.operations?.save_draft?.summarizeInput?.({
+  const summary = definition?.operation?.summarizeInput?.({
     content: '这是一段待发布的正文',
     topic: '早餐',
   });
@@ -2087,6 +2187,7 @@ test('capability toolset runtimes expose operation metadata', async () => {
 test('toolkit review policy runs after model without changing tool identity', async () => {
   let callCount = 0;
   let reviewCount = 0;
+  let reviewContextKeys: string[] = [];
   const order: string[] = [];
   const rawTool = tool(async () => {
     order.push('tool');
@@ -2100,21 +2201,17 @@ test('toolkit review policy runs after model without changing tool identity', as
   const toolkits: AgentToolkit[] = [{
     name: 'guarded',
     description: 'guarded toolkit',
-    tools: [rawTool],
-    policy: {
-      toolReview: {
-        safe_tool: {
-          request: () => {
-            order.push('review');
-            reviewCount += 1;
-            return null;
-          },
-        },
+    tools: [reviewedTool(rawTool, {
+      request: (ctx) => {
+        reviewContextKeys = Object.keys(ctx).sort();
+        order.push('review');
+        reviewCount += 1;
+        return null;
       },
-    },
+    })],
   }];
 
-  const resources = await resolveToolkitResources(toolkits, ['guarded'], {
+  const resources = await resolveToolkitExecution(toolkits, ['guarded'], {
     models: {} as AgentModels,
     actor: testActor,
     messages: [],
@@ -2133,6 +2230,14 @@ test('toolkit review policy runs after model without changing tool identity', as
   assert.equal(reviewCount, 1);
   assert.equal(callCount, 1);
   assert.deepEqual(order, ['review', 'tool']);
+  assert.deepEqual(reviewContextKeys, [
+    'input',
+    'operation',
+    'reviewCapabilities',
+    'toolAuthorizations',
+    'toolName',
+    'toolkitName',
+  ]);
   assert.equal(readToolMessageContent(result.messages, 'call-safe'), 'raw ok');
 });
 
@@ -2169,32 +2274,29 @@ test('toolkit review cancellation stops the current review action', async () => 
   const toolkits: AgentToolkit[] = [{
     name: 'guarded',
     description: 'guarded toolkit',
-    tools: [allowedTool, blockedTool, laterTool],
-    policy: {
-      toolReview: {
-        allowed_tool: {
-          request: () => {
-            allowedReviewCount += 1;
-            return null;
-          },
+    tools: [
+      reviewedTool(allowedTool, {
+        request: () => {
+          allowedReviewCount += 1;
+          return null;
         },
-        blocked_tool: {
+      }),
+      reviewedTool(blockedTool, {
           request: () => ({
             type: 'block',
             reason: 'blocked by policy',
           }),
+      }),
+      reviewedTool(laterTool, {
+        request: () => {
+          laterReviewCount += 1;
+          return null;
         },
-        later_tool: {
-          request: () => {
-            laterReviewCount += 1;
-            return null;
-          },
-        },
-      },
-    },
+      }),
+    ],
   }];
 
-  const resources = await resolveToolkitResources(toolkits, ['guarded'], {
+  const resources = await resolveToolkitExecution(toolkits, ['guarded'], {
     models: {} as AgentModels,
     actor: testActor,
     messages: [],
@@ -2246,20 +2348,15 @@ test('deterministic toolkit policy block terminates without another model call',
   const toolkits: AgentToolkit[] = [{
     name: 'guarded',
     description: 'guarded toolkit',
-    tools: [blockedTool],
-    policy: {
-      toolReview: {
-        blocked_tool: {
-          request: () => ({
-            type: 'block',
-            reason: 'blocked by policy',
-          }),
-        },
-      },
-    },
+    tools: [reviewedTool(blockedTool, {
+      request: () => ({
+        type: 'block',
+        reason: 'blocked by policy',
+      }),
+    })],
   }];
 
-  const resources = await resolveToolkitResources(toolkits, ['guarded'], {
+  const resources = await resolveToolkitExecution(toolkits, ['guarded'], {
     models: {} as AgentModels,
     actor: testActor,
     messages: [],
@@ -2274,8 +2371,8 @@ test('deterministic toolkit policy block terminates without another model call',
     }),
     tools: resources.tools,
     middleware: resources.middleware,
-    instructions: [],
-    operations: collectGeneralOperations(resources.toolkits),
+    promptSections: [],
+    operations: collectToolkitOperations(resources.toolkits),
     messages: [new HumanMessage('try guarded work')],
     runnableConfig: { callbacks: recorder.callbacks },
   });
@@ -2302,20 +2399,15 @@ test('toolkit review materializes distinct fallback ids for missing tool call id
   const toolkits: AgentToolkit[] = [{
     name: 'guarded',
     description: 'guarded toolkit',
-    tools: [blockedTool],
-    policy: {
-      toolReview: {
-        blocked_tool: {
+    tools: [reviewedTool(blockedTool, {
           request: () => ({
             type: 'block',
             reason: 'blocked by policy',
           }),
-        },
-      },
-    },
+    })],
   }];
 
-  const resources = await resolveToolkitResources(toolkits, ['guarded'], {
+  const resources = await resolveToolkitExecution(toolkits, ['guarded'], {
     models: {} as AgentModels,
     actor: testActor,
     messages: [],
@@ -2362,16 +2454,10 @@ test('global review policy full_access bypasses toolkit review prompts', async (
   const toolkits: AgentToolkit[] = [{
     name: 'local',
     description: 'local tools',
-    tools: [rawTool],
-    policy: {
-      toolReview: {
-        write_file: {
-          request: () => {
-            reviewCount += 1;
-            return ReviewPolicies.localMutation().request({
-              models: {} as AgentModels,
-              actor: testActor,
-              messages: [],
+    tools: [reviewedTool(rawTool, {
+      request: () => {
+        reviewCount += 1;
+        return ReviewPolicies.localMutation().request({
               toolkitName: 'local',
               toolName: 'write_file',
               input: { path: 'notes.md', content: 'hello' },
@@ -2379,14 +2465,12 @@ test('global review policy full_access bypasses toolkit review prompts', async (
                 humanReview: true,
                 sessionAuthorization: false,
               },
-            });
-          },
-        },
+        });
       },
-    },
+    })],
   }];
 
-  const resources = await resolveToolkitResources(toolkits, ['local'], {
+  const resources = await resolveToolkitExecution(toolkits, ['local'], {
     models: {} as AgentModels,
     actor: testActor,
     messages: [],
@@ -2424,12 +2508,7 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
   const toolkits: AgentToolkit[] = [{
     name: 'local',
     description: 'local tools',
-    tools: [rawTool],
-    policy: {
-      toolReview: {
-        write_file: ReviewPolicies.localMutation(),
-      },
-    },
+    tools: [reviewedTool(rawTool, ReviewPolicies.localMutation())],
   }];
   const autoModel = {
     withStructuredOutput: () => ({
@@ -2444,7 +2523,7 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
     }),
   } as unknown as AgentModels['act'];
 
-  const resources = await resolveToolkitResources(toolkits, ['local'], {
+  const resources = await resolveToolkitExecution(toolkits, ['local'], {
     models: { act: autoModel },
     actor: testActor,
     messages: [new HumanMessage('subagent context')],
@@ -2509,16 +2588,13 @@ test('global review policy auto_authorization evaluates a tool-call batch once',
   const toolkits: AgentToolkit[] = [{
     name: 'local',
     description: 'local tools',
-    tools: [firstTool, secondTool],
-    policy: {
-      autoReview: {
-        allow: 'Allow narrow writes to user-requested files.',
-        ask: 'Ask before broad or destructive writes.',
-      },
-      toolReview: {
-        first_write: ReviewPolicies.localMutation(),
-        second_write: ReviewPolicies.localMutation(),
-      },
+    tools: [
+      reviewedTool(firstTool, ReviewPolicies.localMutation()),
+      reviewedTool(secondTool, ReviewPolicies.localMutation()),
+    ],
+    reviewGuidance: {
+      allow: 'Allow narrow writes to user-requested files.',
+      ask: 'Ask before broad or destructive writes.',
     },
   }];
   const autoModel = {
@@ -2534,7 +2610,7 @@ test('global review policy auto_authorization evaluates a tool-call batch once',
     }),
   } as unknown as AgentModels['act'];
 
-  const resources = await resolveToolkitResources(toolkits, ['local'], {
+  const resources = await resolveToolkitExecution(toolkits, ['local'], {
     models: { act: autoModel },
     actor: testActor,
     messages: [new HumanMessage('write both files')],
@@ -2610,12 +2686,7 @@ test('global review policy auto_authorization requires human authorization when 
   const toolkits: AgentToolkit[] = [{
     name: 'local',
     description: 'local tools',
-    tools: [rawTool],
-    policy: {
-      toolReview: {
-        write_file: ReviewPolicies.localMutation(),
-      },
-    },
+    tools: [reviewedTool(rawTool, ReviewPolicies.localMutation())],
   }];
   const autoModel = {
     withStructuredOutput: () => ({
@@ -2626,7 +2697,7 @@ test('global review policy auto_authorization requires human authorization when 
     }),
   } as unknown as AgentModels['act'];
 
-  const resources = await resolveToolkitResources(toolkits, ['local'], {
+  const resources = await resolveToolkitExecution(toolkits, ['local'], {
     models: { act: autoModel },
     actor: testActor,
     messages: [new HumanMessage('rewrite the project')],
@@ -2679,15 +2750,10 @@ test('global review policy custom resolver can authorize reviewed tool calls', a
   const toolkits: AgentToolkit[] = [{
     name: 'local',
     description: 'local tools',
-    tools: [rawTool],
-    policy: {
-      toolReview: {
-        write_file: ReviewPolicies.localMutation(),
-      },
-    },
+    tools: [reviewedTool(rawTool, ReviewPolicies.localMutation())],
   }];
 
-  const resources = await resolveToolkitResources(toolkits, ['local'], {
+  const resources = await resolveToolkitExecution(toolkits, ['local'], {
     models: {} as AgentModels,
     actor: testActor,
     messages: [],
@@ -2728,10 +2794,7 @@ test('toolkit review policy records authorization through orchestrator runtime t
   const toolkits: AgentToolkit[] = [{
     name: 'local',
     description: 'local tools',
-    tools: [rawTool],
-    policy: {
-      toolReview: {
-        run_shell: {
+    tools: [reviewedTool(rawTool, {
           request: ({ input, toolAuthorizations }) => {
             const args = input as { command: string };
             if (isToolActionAuthorized({
@@ -2761,9 +2824,7 @@ test('toolkit review policy records authorization through orchestrator runtime t
             type: 'shell_pattern',
             value: (input as { command: string }).command,
           }),
-        },
-      },
-    },
+    })],
   }];
 
   let routeCallCount = 0;
@@ -2811,6 +2872,7 @@ test('toolkit review policy records authorization through orchestrator runtime t
       thread_id: 'canonical-review-runtime-auth',
       actor: testActor,
       capabilities: [],
+      generalUses: ['local'],
       toolkits,
     },
   };
@@ -2891,10 +2953,7 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
   const toolkits: AgentToolkit[] = [{
     name: 'local',
     description: 'local tools',
-    tools: [rawTool],
-    policy: {
-      toolReview: {
-        run_shell: {
+    tools: [reviewedTool(rawTool, {
           request: () => {
             reviewCount += 1;
             return buildReviewSpec({
@@ -2906,9 +2965,7 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
               }],
             });
           },
-        },
-      },
-    },
+    })],
   }];
 
   let routeCallCount = 0;
@@ -2950,6 +3007,7 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
       thread_id: 'plain-review-runtime-state',
       actor: testActor,
       capabilities: [],
+      generalUses: ['local'],
       toolkits,
     },
   };
@@ -3027,10 +3085,7 @@ test('toolkit review rejection resumes the same subagent before parent handoff',
   const toolkits: AgentToolkit[] = [{
     name: 'local',
     description: 'local tools',
-    tools: [rawTool],
-    policy: {
-      toolReview: {
-        run_shell: {
+    tools: [reviewedTool(rawTool, {
           request: () => {
             reviewCount += 1;
             return buildReviewSpec({
@@ -3052,9 +3107,7 @@ test('toolkit review rejection resumes the same subagent before parent handoff',
               ],
             });
           },
-        },
-      },
-    },
+    })],
   }];
 
   let routeCallCount = 0;
@@ -3099,6 +3152,7 @@ test('toolkit review rejection resumes the same subagent before parent handoff',
       thread_id: 'human-reject-resumes-subagent-loop',
       actor: testActor,
       capabilities: [],
+      generalUses: ['local'],
       toolkits,
     },
   };
@@ -3180,10 +3234,7 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
   const toolkits: AgentToolkit[] = [{
     name: 'local',
     description: 'local tools',
-    tools: [rawTool],
-    policy: {
-      toolReview: {
-        run_shell: {
+    tools: [reviewedTool(rawTool, {
           request: () => {
             reviewCount += 1;
             return buildReviewSpec({
@@ -3195,9 +3246,7 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
               }],
             });
           },
-        },
-      },
-    },
+    })],
   }];
 
   let routeCallCount = 0;
@@ -3246,6 +3295,7 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
       thread_id: 'multi-tool-review-runtime-state',
       actor: testActor,
       capabilities: [],
+      generalUses: ['local'],
       toolkits,
     },
   };
@@ -3661,7 +3711,7 @@ test('terminal outcome decision keeps active delegation when handoff cannot be b
       toolkits: [{
         name: 'local',
         description: 'local tools',
-        tools: [rawTool],
+        tools: toolDefinitions(rawTool),
       }],
     },
   }) as {
@@ -3746,10 +3796,11 @@ test('delegation outcome continue decision can re-enter main and finalize handof
       thread_id: 'delegation-continue-copy-preserve-lane',
       actor: testActor,
       capabilities: [],
+      generalUses: ['local'],
       toolkits: [{
         name: 'local',
         description: 'local tools',
-        tools: [mockTool('run_shell')],
+        tools: toolDefinitions(mockTool('run_shell')),
       }],
     },
   }) as OrchestratorStateType;
@@ -3832,10 +3883,11 @@ test('delegation outcome continuation path rechecks run iteration guard before n
       actor: testActor,
       capabilities: [],
       maxRunIterations: 1,
+      generalUses: ['local'],
       toolkits: [{
         name: 'local',
         description: 'local tools',
-        tools: [mockTool('run_shell')],
+        tools: toolDefinitions(mockTool('run_shell')),
       }],
     },
   }) as OrchestratorStateType;
@@ -3917,10 +3969,11 @@ test('delegation_outcome does not append duplicate handoff copies for unchanged 
       actor: testActor,
       capabilities: [],
       maxRunIterations: 10,
+      generalUses: ['local'],
       toolkits: [{
         name: 'local',
         description: 'local tools',
-        tools: [mockTool('run_shell')],
+        tools: toolDefinitions(mockTool('run_shell')),
       }],
     },
   }) as OrchestratorStateType;
@@ -4121,7 +4174,7 @@ test('limit-reached subagent announce reaches the outcome decision input', async
     }),
     tools: [noop],
     middleware: [progressMiddleware],
-    instructions: [],
+    promptSections: [],
     messages: baseInput.messages,
     maxIterations: 1,
   });
@@ -4257,7 +4310,7 @@ test('delegation outcome does not handoff a limit_reached announce', async () =>
       toolkits: [{
         name: 'local',
         description: 'local tools',
-        tools: [mockTool('run_shell')],
+        tools: toolDefinitions(mockTool('run_shell')),
       }],
   } }) as OrchestratorStateType;
 
@@ -4341,7 +4394,7 @@ test('delegation outcome uses a unified run-iteration guard before invoking deci
       toolkits: [{
         name: 'local',
         description: 'local tools',
-        tools: [mockTool('run_shell')],
+        tools: toolDefinitions(mockTool('run_shell')),
       }],
     },
   }) as OrchestratorStateType;
@@ -4661,13 +4714,20 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
     configurable: {
       thread_id: 'briefing-a-plus-b',
       actor: testActor,
-      capabilities: [capability('ops', '仓库运维：issue 操作、文件清理。')],
+      capabilities: [capability(
+        'ops',
+        '仓库运维：issue 操作、文件清理。',
+        ['artifact_discovery'],
+      )],
       forcedCapabilityNames: ['ops'],
-      artifactDiscoveryRoot: '/repo/.pinpawo/capability-artifacts/threads/briefing-a-plus-b',
-      artifactDiscoveryToolset: defineToolset({
+      toolkits: [{
         name: 'artifact_discovery',
-        tools: [mockTool('artifact_list_dir'), mockTool('artifact_view_file_chunk')],
-      }),
+        description: 'artifact discovery toolkit',
+        tools: toolDefinitions(
+          mockTool('artifact_list'),
+          mockTool('artifact_read'),
+        ),
+      }],
     },
     callbacks: recorder.callbacks,
   }) as OrchestratorStateType;
@@ -4701,7 +4761,7 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
   assert.match(String(secondInput.at(-1)?.content), /<delegation_briefing[\s\S]*删除 packages\/goat 目录/);
   const secondInputText = secondInput.map((message) => String(message.content)).join('\n');
   assert.match(secondInputText, /Issue #272 已关闭。/);
-  assert.match(secondInputText, /<artifact_discovery_context[\s\S]*briefing-a-plus-b/);
+  assert.match(secondInputText, /<artifact_discovery_context[\s\S]*current_thread/);
   assert.doesNotMatch(
     state.messages.map((message) => String(message.content)).join('\n'),
     /artifact_discovery_context/,

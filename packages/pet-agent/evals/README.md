@@ -230,7 +230,7 @@ repeat count before comparing providers:
 npm run eval:prompt-v1
 ```
 
-It runs 34 canonical cases across `entry`, `planner`, `capability`, `outcome`,
+It runs 35 canonical cases across `entry`, `planner`, `capability`, `outcome`,
 and `answer`, with three repeats per case. Model and provider configuration still
 come from `LLM_*`, `~/.pinpawo/.env`, or `~/.pinpawo/config.json`; the generated
 report records the resolved values.

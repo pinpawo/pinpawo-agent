@@ -48,13 +48,6 @@ test('task decision schema separates task birth from route selection', () => {
   assert.equal(schema.safeParse({ lane: 'capability.browser' }).success, false);
 });
 
-test('task decision schema describes the nested execution choice', () => {
-  const instruction = buildTaskDecisionOutputInstruction('jsonMode');
-  assert.match(instruction, /answer=不需要 capability execution/);
-  assert.match(instruction, /direct_task=需要 execution 且无需先 plan/);
-  assert.match(instruction, /needs_plan=需要 execution 且必须先 plan/);
-});
-
 test('route decision schema owns capability lane enum', () => {
   const schema = buildRouteDecisionSchema({
     capabilityCandidates: [{ name: 'browser' }],

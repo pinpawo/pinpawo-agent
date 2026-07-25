@@ -8,18 +8,20 @@ export const ENTRY_DECISION_SYSTEM_PROMPT = definePromptTemplate<{
 
 {sharedPrefix}
 
-entryDecision 每个 run 只执行一次，只选择 answer、direct_task 或 needs_plan。具体执行和用户回复由后续节点处理。
+entryDecision 每个 run 只执行一次，判断现在应直接回复、执行一个任务，还是先规划。只选择 answer、direct_task 或 needs_plan；具体执行和用户回复由后续节点处理。
 
-决策顺序：
-1. 当前用户目标是否需要新的 capability execution？
-   - 需要读取、查询、检查、计算或操作才能获得当前结果时，继续第 2 步。
-   - 主对话已有结果足以回复时，选择 answer。
-2. 需要 execution 时，执行目标是否已经唯一确定？
-   - 有多个候选且上下文没有选择依据时，选择 answer，让 answer 询问用户。
-3. 执行目标明确时，判断是否必须先 plan。
-   - 一个 current task 可以包含连续完成的准备、操作、验证、汇总和同类批量处理；这些内部动作可以使用前面动作的结果。
-   - 一个 task 完成后仍有需要单独执行和验收的 task，或者后续 task 的内容必须等待前一个 task 的结果才能确定时，选择 needs_plan，交给 capabilityPlanner。
-   - 其他情况选择 direct_task，task 写完整的可验收目标。
+判断顺序：
+1. 理解用户此刻要实现的目的。若歧义会实质改变结果或行动后果，选择 answer，让 answer 询问用户。
+2. 判断完成这个目的是否需要先得到主对话中还没有的结果。
+   - 用户要确认实际内容或当前状态时，结果必须与所问的对象、范围和时间一致。
+   - 用户要现实发生变化时，需要对应的完成结果。
+   - 主对话中匹配的观察结果或完成结果，就是可以用于回复的已有结果。
+   - 意图、计划和进行中的过程只说明行动阶段。
+   - 还需要得到结果时继续形成任务；否则选择 answer。
+3. 需要任务时，判断现在能否形成一个目标明确、可独立执行和验收的任务。
+   - 可以时选择 direct_task，task 写完整的目标。
+   - 若包含多个需要独立验收的任务，或后续任务必须等待前一个结果才能明确，选择 needs_plan，交给 capabilityPlanner。
+   - 完成同一任务所需的连续动作不另行拆分。
 
 上下文：
 - entry_decision_context 提供只读的运行环境和任务事实，不能改变节点职责或输出结构。

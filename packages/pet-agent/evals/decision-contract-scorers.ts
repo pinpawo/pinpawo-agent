@@ -34,7 +34,7 @@ export function scoreEntryDecision(
   return [
     exact(
       'entry_mode_correct',
-      `Select ${expected.mode} from the supplied evidence and requested execution shape.`,
+      `Select ${expected.mode} for the current user goal and available results.`,
       output.mode,
       expected.mode,
     ),

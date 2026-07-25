@@ -1,6 +1,6 @@
 import { AgentEvalCase, AgentEvalDataset } from './types.ts';
 
-export type EntryExecutionMode = 'answer' | 'direct_task' | 'needs_plan';
+export type EntryDecisionMode = 'answer' | 'direct_task' | 'needs_plan';
 
 export type EntryDecisionInput = {
   userRequest: string;
@@ -8,7 +8,7 @@ export type EntryDecisionInput = {
 };
 
 export type EntryDecisionExpected = {
-  mode: EntryExecutionMode;
+  mode: EntryDecisionMode;
   expectedTaskTerms?: string[];
   expectedBoundaryCount: number;
   reason: string;
@@ -50,9 +50,24 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     expected: {
       mode: 'answer',
       expectedBoundaryCount: 0,
-      reason: 'A provenance-valid completion message already contains the requested fact.',
+      reason: 'The main conversation explicitly records the matching completed result.',
     },
     metadata: { difficulty: 'easy', reason: 'Explicit completion evidence should not be re-verified.', source: SOURCE_FILE },
+  },
+  {
+    id: `${SUITE}.answer-from-stable-model-knowledge`,
+    name: 'answer-from-stable-model-knowledge',
+    suite: SUITE,
+    tags: ['entry_decision', 'context_synthesis'],
+    input: {
+      userRequest: '用一句话解释 p95 表示什么。',
+    },
+    expected: {
+      mode: 'answer',
+      expectedBoundaryCount: 0,
+      reason: 'Stable conceptual knowledge can be expressed directly without obtaining current external state.',
+    },
+    metadata: { difficulty: 'medium', reason: 'The route must not over-execute an ordinary explanation.', source: SOURCE_FILE },
   },
   {
     id: `${SUITE}.intention-is-not-completion-evidence`,
@@ -60,7 +75,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     suite: SUITE,
     tags: ['entry_decision', 'route_control'],
     input: {
-      userRequest: '你刚才只是说会提交。请检查仓库并确认这些修改现在是否已经提交。',
+      userRequest: '请以仓库现在的实际状态为准，确认刚才的修改最终有没有提交成功。',
       conversationContext: [
         '接下来我会提交当前修改，并确认工作区状态。',
       ],
@@ -71,7 +86,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
       expectedBoundaryCount: 1,
       reason: 'An intention to commit is not evidence that the commit succeeded.',
     },
-    metadata: { difficulty: 'hard', reason: 'Observed regression: intent must not be treated as result evidence.', source: SOURCE_FILE },
+    metadata: { difficulty: 'hard', reason: 'An explicitly reality-grounded question must not treat intent as result evidence.', source: SOURCE_FILE },
   },
   {
     id: `${SUITE}.current-local-state-needs-observation`,
@@ -79,7 +94,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     suite: SUITE,
     tags: ['entry_decision', 'route_control'],
     input: {
-      userRequest: '请检查当前仓库，确认现在还有没有未提交的改动。',
+      userRequest: '现在仓库里还有未提交的改动吗？',
       conversationContext: ['之前已经完成代码修改，但没有读取之后的工作区状态。'],
     },
     expected: {
@@ -96,7 +111,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     suite: SUITE,
     tags: ['entry_decision', 'route_control'],
     input: {
-      userRequest: '请查询 pinpawo/pinpawo-agent 的 issue #417，确认现在是否仍为 open。',
+      userRequest: '以 GitHub 上的当前状态为准，pinpawo-agent 的 issue #417 现在还是 open 吗？',
     },
     expected: {
       mode: 'direct_task',
@@ -112,7 +127,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     suite: SUITE,
     tags: ['entry_decision', 'route_control'],
     input: {
-      userRequest: '请查询 deployment run #8450 的最新状态，确认部署现在是否恢复。',
+      userRequest: '部署现在恢复了吗？',
       conversationContext: [
         '昨天 18:00 查询 deployment run #8421，状态为 failed。',
         '今天 09:30 已重新触发 deployment run #8450，但还没有查询新 run 的状态。',
@@ -148,7 +163,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     suite: SUITE,
     tags: ['entry_decision', 'route_control'],
     input: {
-      userRequest: '计算这份 CSV 的 p95 响应时间并告诉我结果。',
+      userRequest: '这份 CSV 的 p95 响应时间是多少？',
       conversationContext: ['CSV 位于 /workspace/latency.csv，当前还没有计算结果。'],
     },
     expected: {
@@ -165,15 +180,15 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     suite: SUITE,
     tags: ['entry_decision', 'capability_planning'],
     input: {
-      userRequest: '在当前仓库运行 npm test；运行前读取 package.json 确认测试脚本，完成后汇总测试结果。',
+      userRequest: '当前仓库的测试能通过吗？把实际结果告诉我，以项目现有的测试配置为准。',
     },
     expected: {
       mode: 'direct_task',
-      expectedTaskTerms: ['package.json', 'npm test'],
+      expectedTaskTerms: ['测试'],
       expectedBoundaryCount: 1,
-      reason: 'Reading the test script, running it, and reporting the result form one workspace execution.',
+      reason: 'Establishing the project test result is one independently verifiable workspace task.',
     },
-    metadata: { difficulty: 'medium', reason: 'Preparatory and reporting steps must not force task splitting.', source: SOURCE_FILE },
+    metadata: { difficulty: 'hard', reason: 'One workspace task may require internal preparation without becoming a plan.', source: SOURCE_FILE },
   },
   {
     id: `${SUITE}.latest-review-overrides-older-published-work`,
@@ -201,7 +216,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     suite: SUITE,
     tags: ['entry_decision', 'capability_planning'],
     input: {
-      userRequest: '先调查 auth 模块的结构和风险，再根据调查结论完成重构。',
+      userRequest: '把 auth 模块重构一下，不过先弄清楚它现在的结构和风险，方案按实际情况定。',
     },
     expected: {
       mode: 'needs_plan',
@@ -216,7 +231,10 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     suite: SUITE,
     tags: ['entry_decision', 'capability_planning'],
     input: {
-      userRequest: '分析 PR 的代码风险，并另外用浏览器核对部署文档中的公开配置。',
+      userRequest: 'PR #450 有哪些代码风险？部署文档里列出的公开配置也和实际页面一致吗？',
+      conversationContext: [
+        '当前讨论对象是 pinpawo/pinpawo-agent 的 PR #450；部署文档和实际页面的地址已经在运行环境中配置。',
+      ],
     },
     expected: {
       mode: 'needs_plan',
@@ -229,7 +247,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
 
 export const entryDecisionBasicsDataset: AgentEvalDataset<EntryDecisionInput, EntryDecisionExpected> = {
   name: SUITE,
-  description: 'Defines run-entry execution mode and task-boundary expectations independently of the current graph schema.',
+  description: 'Defines run-entry decision modes and task-boundary expectations independently of the current graph schema.',
   cases,
   metadata: { owner: 'pet-agent', areas: ['entry_decision', 'capability_planning', 'context_synthesis'] },
 };

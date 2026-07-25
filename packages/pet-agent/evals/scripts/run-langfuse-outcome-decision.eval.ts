@@ -47,12 +47,12 @@ async function runCase(testCase: typeof outcomeDecisionBasicsDataset.cases[numbe
     }),
     currentTaskContext: buildDelegationOutcomeCurrentTaskContext({
       id: delegationId,
-      lane: 'general',
+      lane: 'capability:general',
       task: testCase.input.currentTask,
       contextSummary: null,
     }),
     subagentAnnounceContext: buildSubagentAnnounceContext({
-      lane: 'general',
+      lane: 'capability:general',
       delegationId,
       task: testCase.input.currentTask,
       text: testCase.input.announce,
@@ -60,7 +60,7 @@ async function runCase(testCase: typeof outcomeDecisionBasicsDataset.cases[numbe
     otherTasksContext: buildDelegationOutcomeOtherTasksContext(
       (testCase.input.completedHandoffs ?? []).map((resultPreview, index) => ({
         id: `completed-${index}`,
-        lane: 'general',
+        lane: 'capability:general',
         task: `Completed task ${index + 1}`,
         status: 'completed',
         resultPreview,

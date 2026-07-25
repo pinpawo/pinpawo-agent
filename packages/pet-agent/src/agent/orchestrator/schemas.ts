@@ -13,7 +13,6 @@ export type CustomCapabilitySelection =
   `${typeof CUSTOM_CAPABILITY_SELECTION_PREFIX}${string}`;
 export type CapabilitySelection =
   | typeof CAPABILITY_UNAVAILABLE_SELECTION
-  | 'general'
   | CustomCapabilitySelection;
 
 export type TaskDecision = {
@@ -45,7 +44,6 @@ export type CapabilityDecision = {
 
 export type CapabilityDecisionSchemaParams = {
   capabilityCandidates: ReadonlyArray<{ name: string }>;
-  generalAvailable: boolean;
 };
 
 export function buildCustomCapabilitySelection(
@@ -55,7 +53,7 @@ export function buildCustomCapabilitySelection(
 }
 
 export function parseCapabilitySelection(selection: string): {
-  kind: 'unavailable' | 'general' | 'capability' | 'invalid';
+  kind: 'unavailable' | 'capability' | 'invalid';
   capabilityName: string | null;
 } {
   if (selection === CAPABILITY_UNAVAILABLE_SELECTION) {
@@ -67,9 +65,6 @@ export function parseCapabilitySelection(selection: string): {
       capabilityName:
         selection.slice(CUSTOM_CAPABILITY_SELECTION_PREFIX.length) || null,
     };
-  }
-  if (selection === 'general') {
-    return { kind: 'general', capabilityName: null };
   }
   return { kind: 'invalid', capabilityName: null };
 }
@@ -165,7 +160,6 @@ export function buildCapabilityDecisionSchema(params: CapabilityDecisionSchemaPa
   validateCapabilityCandidateNames(params);
   const selectionValues = [
     CAPABILITY_UNAVAILABLE_SELECTION,
-    ...(params.generalAvailable ? ['general'] : []),
     ...params.capabilityCandidates.map((candidate) =>
       buildCustomCapabilitySelection(candidate.name)),
   ] as const;

@@ -20,8 +20,6 @@ export type AgentInvokeInput = {
   threadId?: string;
   capabilities?: AgentCapability[];
   toolkits?: AgentToolkit[];
-  /** Explicit Toolkit permission boundary for the general executor. */
-  generalUses: readonly string[];
   execution?: AgentExecution;
   signal?: AbortSignal;
   /** Agent working directory passed into system prompt so the agent knows its file scope. */
@@ -53,7 +51,6 @@ export async function runAgent(
   configurable.registry = options.registry ?? compileAgentRegistry({
     toolkits: await filterAvailableToolkits(input.toolkits ?? []),
     capabilities: input.capabilities ?? [],
-    generalUses: input.generalUses,
   });
   if (input.actor) configurable.actor = input.actor;
   if (input.threadId) configurable.thread_id = input.threadId;

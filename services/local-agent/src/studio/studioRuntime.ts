@@ -19,6 +19,7 @@ import { buildLocalAgentModels } from '../agentModels';
 import type { AgentLlmConfig } from '../agentConfig';
 import { buildDecisionStructuredOutput } from '../agentChannel';
 import { createExploreCapability } from '../capabilities/explore';
+import { createGeneralCapability } from '../capabilities/general';
 import { buildLocalAgentRuntimeConfig } from '../runtimeConfig';
 import { loadPetLocalConfigs } from './petConfig';
 import {
@@ -163,16 +164,19 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
       }
       return cap;
     });
+    const generalToolkitNames = ['bash', 'git'].filter((name) =>
+      (input.toolkits ?? []).some((toolkit) => toolkit.name === name));
 
     return createPetAgentRuntime({
       models: petModels,
       actor: buildPetActorFromLocalConfig(petConfig, input.ownerUserId),
       role: petConfig.role ?? null,
       serviceSummary: petConfig.serviceSummary ?? null,
-      capabilities: capsForThisPet,
+      capabilities: [
+        createGeneralCapability(generalToolkitNames),
+        ...capsForThisPet,
+      ],
       toolkits: input.toolkits,
-      generalUses: ['bash', 'git'].filter((name) =>
-        (input.toolkits ?? []).some((toolkit) => toolkit.name === name)),
       contextWindowTokens: input.llmConfig.contextWindowTokens,
       subagentContextWindowTokens: input.llmConfig.subagentContextWindowTokens ?? input.llmConfig.contextWindowTokens,
       decisionStructuredOutput: petDecisionStructuredOutput,

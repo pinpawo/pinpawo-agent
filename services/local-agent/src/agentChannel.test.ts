@@ -74,19 +74,24 @@ test('buildLocalChatAgentInput passes a single toolkit list', () => {
     setup.input.toolkits?.map((item) => item.name),
     ['pet_profile', 'daily_post', 'capability_creator', 'general-toolkit'],
   );
-  assert.deepEqual(setup.input.generalUses, ['pet_profile']);
+  assert.deepEqual(
+    setup.input.capabilities?.find(({ name }) => name === 'general')?.uses,
+    ['pet_profile'],
+  );
   assert.equal('capabilityToolkits' in setup.input, false);
 });
 
-test('buildLocalChatAgentInput honors an explicit general Toolkit authorization', () => {
+test('buildLocalChatAgentInput does not grant a registered Toolkit to the fallback Capability', () => {
   const setup = buildLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
     toolkits: [createGeneralToolkit()],
-    generalUses: ['general-toolkit'],
   });
 
-  assert.deepEqual(setup.input.generalUses, ['general-toolkit']);
+  assert.deepEqual(
+    setup.input.capabilities?.find(({ name }) => name === 'general')?.uses,
+    ['pet_profile'],
+  );
 });
 
 test('buildLocalChatAgentInput dedupes built-in capabilities by name', () => {
@@ -293,8 +298,8 @@ test('buildLocalChatAgentInput registers artifact discovery for an empty thread'
     ['artifact_list', 'artifact_read'],
   );
   assert.deepEqual(
-    setup.input.generalUses,
-    ['pet_profile', 'bash', 'git', 'artifact_discovery'],
+    setup.input.capabilities?.find(({ name }) => name === 'general')?.uses,
+    ['pet_profile', 'bash', 'git'],
   );
   assert.ok(
     setup.input.capabilities

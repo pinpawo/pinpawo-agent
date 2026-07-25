@@ -8,7 +8,7 @@ export type CapabilityDecisionBasicsInput = {
     description: string;
     keywords: string[];
   }>;
-  generalToolsAvailable: string[];
+  generalCapabilityAvailable: boolean;
 };
 
 export type CapabilityDecisionBasicsExpected = {
@@ -40,7 +40,7 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
           keywords: ['浏览器', '网页', '打开'],
         },
       ],
-      generalToolsAvailable: ['read_file', 'search_files', 'shell'],
+      generalCapabilityAvailable: true,
     },
     expected: {
       expectedSelection: 'capability.explore',
@@ -68,7 +68,7 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
           keywords: ['浏览器', '网页', '打开'],
         },
       ],
-      generalToolsAvailable: ['read_file'],
+      generalCapabilityAvailable: true,
     },
     expected: {
       expectedSelection: 'capability.daily_post',
@@ -96,7 +96,7 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
           keywords: ['浏览器', '网页', '打开'],
         },
       ],
-      generalToolsAvailable: ['read_file'],
+      generalCapabilityAvailable: true,
     },
     expected: {
       expectedSelection: 'capability.daily_post',
@@ -119,7 +119,7 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
           keywords: ['宠物', '发帖'],
         },
       ],
-      generalToolsAvailable: ['read_file', 'search_files'],
+      generalCapabilityAvailable: true,
     },
     expected: {
       expectedSelection: 'general',
@@ -147,7 +147,7 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
           keywords: ['代码库', '调查', '探索'],
         },
       ],
-      generalToolsAvailable: ['web_search'],
+      generalCapabilityAvailable: true,
     },
     expected: {
       expectedSelection: 'capability.browser',
@@ -170,7 +170,7 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
           keywords: ['src/index.ts', '代码审查'],
         },
       ],
-      generalToolsAvailable: ['read_file', 'write_file', 'shell'],
+      generalCapabilityAvailable: true,
     },
     expected: {
       expectedSelection: 'general',
@@ -193,7 +193,7 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
           keywords: ['src/index.ts', '代码审查'],
         },
       ],
-      generalToolsAvailable: [],
+      generalCapabilityAvailable: false,
     },
     expected: {
       expectedSelection: 'unavailable',
@@ -216,7 +216,7 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
           keywords: ['浏览器', '网页', '打开', '页面内容'],
         },
       ],
-      generalToolsAvailable: [],
+      generalCapabilityAvailable: false,
     },
     expected: {
       expectedSelection: 'unavailable',

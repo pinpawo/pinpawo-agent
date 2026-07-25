@@ -26,7 +26,7 @@ test('artifact discovery context exposes only a non-authoritative thread scope',
 test('artifact discovery context stays before the latest briefing without displacing system', () => {
   const [briefing] = materializeDelegation({
     mode: 'initial',
-    lane: 'general',
+    lane: 'capability:general',
     runId: 'run-1',
     delegationId: 'delegation-1',
     task: '检查当前任务',

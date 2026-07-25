@@ -39,12 +39,12 @@ const cases: AgentEvalCase<InterruptionRecoveryInput, InterruptionRecoveryExpect
     input: {
       userMessage: '继续，把剩下的也处理完',
       originalUserMessage: '帮我把 data/items.csv 的所有分片处理完，完成后告诉我总数。',
-      interruptedLane: 'general',
+      interruptedLane: 'capability:general',
       interruptedTask: '处理 data/items.csv 的所有分片并汇总结果。',
       interruptionReason: 'limit_reached',
       progressResult: '已处理前 80 条记录，还剩 40 条记录未处理。',
       resumeCompletion: {
-        lane: 'general',
+        lane: 'capability:general',
         task: '处理 data/items.csv 的所有分片并汇总结果。',
         completionReason: 'natural',
         result: '已处理完 data/items.csv 的全部分片，共 120 条记录，没有失败项。',
@@ -109,12 +109,12 @@ const cases: AgentEvalCase<InterruptionRecoveryInput, InterruptionRecoveryExpect
     input: {
       userMessage: '我同意，继续跑测试',
       originalUserMessage: '帮我运行 npm test 并修失败项。',
-      interruptedLane: 'general',
+      interruptedLane: 'capability:general',
       interruptedTask: '运行 npm test 并修失败项。',
       interruptionReason: 'approval_required',
       progressResult: '等待用户确认是否允许执行 npm test。',
       resumeCompletion: {
-        lane: 'general',
+        lane: 'capability:general',
         task: '运行 npm test 并修失败项。',
         completionReason: 'natural',
         result: '已运行 npm test，全部 556 个测试通过，退出码 0。',
@@ -144,12 +144,12 @@ const cases: AgentEvalCase<InterruptionRecoveryInput, InterruptionRecoveryExpect
     input: {
       userMessage: '总结一下最终结果',
       originalUserMessage: '帮我处理 data/items.csv 的所有分片。',
-      interruptedLane: 'general',
+      interruptedLane: 'capability:general',
       interruptedTask: '处理 data/items.csv 的所有分片。',
       interruptionReason: 'limit_reached',
       progressResult: '上一轮曾经触达过 limit_reached。',
       resumeCompletion: {
-        lane: 'general',
+        lane: 'capability:general',
         task: '处理 data/items.csv 的所有分片。',
         completionReason: 'natural',
         result: '后续继续执行已经自然完成：全部分片处理完毕，共 120 条记录。',
@@ -206,14 +206,14 @@ const cases: AgentEvalCase<InterruptionRecoveryInput, InterruptionRecoveryExpect
     input: {
       userMessage: '继续跑完',
       originalUserMessage: '帮我修复 typecheck，然后运行测试。',
-      interruptedLane: 'general',
+      interruptedLane: 'capability:general',
       interruptedTask: '修复 typecheck，然后运行测试。',
       interruptionReason: 'limit_reached',
       progressResult: '已修复前两个 TypeScript error，还剩 local-agent 的一个导入错误。',
     },
     expected: {
       expectedMode: 'general',
-      expectedLane: 'general',
+      expectedLane: 'capability:general',
       expectedTask: '修复 typecheck，然后运行测试。',
       expectedResume: true,
       reason: 'A general lane limit should continue the same unfinished engineering task.',
@@ -259,14 +259,14 @@ const cases: AgentEvalCase<InterruptionRecoveryInput, InterruptionRecoveryExpect
     input: {
       userMessage: '我同意，继续',
       originalUserMessage: '帮我运行 npm test 并修失败项。',
-      interruptedLane: 'general',
+      interruptedLane: 'capability:general',
       interruptedTask: '运行 npm test 并修失败项。',
       interruptionReason: 'approval_required',
       progressResult: '等待用户确认是否允许执行 npm test。',
     },
     expected: {
       expectedMode: 'general',
-      expectedLane: 'general',
+      expectedLane: 'capability:general',
       expectedTask: '运行 npm test 并修失败项。',
       expectedResume: true,
       reason: 'An approval response should resume the paused task with the granted operation.',

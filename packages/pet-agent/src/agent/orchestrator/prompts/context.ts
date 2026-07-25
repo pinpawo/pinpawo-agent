@@ -1,5 +1,4 @@
 import type { BaseMessage } from '@langchain/core/messages';
-import type { StructuredTool } from '@langchain/core/tools';
 import type { CapabilityArtifactRef } from '../../../types/artifact';
 import type {
   CapabilityCandidate,
@@ -55,19 +54,11 @@ export function buildRunDelegationSummaryContext(runDelegationSummaries: RunDele
 }
 
 export function buildCapabilityDecisionAvailableExecutorsContext(params: {
-  generalTools: StructuredTool[];
   capabilityCandidates: CapabilityCandidate[];
 }): string {
   const lines = ['当前可用执行能力：'];
-  if (params.generalTools.length > 0) {
-    lines.push('', 'general（可使用下列通用工具）：');
-    for (const toolItem of params.generalTools) {
-      lines.push(`- ${toolItem.name}: ${clipForPrompt(toolItem.description, 140)}`);
-    }
-  }
 
   if (params.capabilityCandidates.length > 0) {
-    lines.push('', 'custom capabilities：');
     for (const candidate of params.capabilityCandidates) {
       lines.push(
         `- capability.${candidate.name}：${clipForPrompt(candidate.description, 180)}`,
@@ -75,7 +66,7 @@ export function buildCapabilityDecisionAvailableExecutorsContext(params: {
     }
   }
 
-  if (params.generalTools.length === 0 && params.capabilityCandidates.length === 0) {
+  if (params.capabilityCandidates.length === 0) {
     lines.push('- 无');
   }
   return lines.join('\n');

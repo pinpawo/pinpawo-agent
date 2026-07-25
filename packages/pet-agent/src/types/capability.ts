@@ -50,6 +50,12 @@ export type AgentCapability = {
   readonly lifecycle?: CapabilityLifecycle;
 };
 
+/**
+ * Reserved routing fallback. It is an ordinary AgentCapability; the name only
+ * lets the orchestrator select it when no more specific Capability matches.
+ */
+export const GENERAL_CAPABILITY_NAME = 'general';
+
 export function defineInstructionDocument(params: {
   content: string;
 }): InstructionDocument {

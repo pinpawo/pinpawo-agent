@@ -1,5 +1,6 @@
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
+import { GENERAL_CAPABILITY_NAME } from '../../../../types/capability';
 import { Command } from '@langchain/langgraph';
 import { randomUUID } from 'node:crypto';
 import { evaluateGuard } from '../../../../guards';
@@ -131,9 +132,7 @@ export function createCapabilityDecisionRunner(config: OrchestratorConfig) {
       return buildCapabilityDecisionResult({
         state,
         context: readyContext,
-        selection: context.generalAvailable
-          ? 'general'
-          : CAPABILITY_UNAVAILABLE_SELECTION,
+        selection: CAPABILITY_UNAVAILABLE_SELECTION,
       });
     }
 
@@ -216,7 +215,6 @@ async function buildCapabilityDecisionContext(params: {
   } = getInvokeOptions(runnableConfig);
   const actor = resolveActor(config, runnableConfig);
   const registry = getInvokeRegistry(runnableConfig);
-  const generalTools = [...registry.general.tools];
   const capabilityList = registry.capabilities.map(({ capability }) => capability);
   const query = [state.runPendingTask?.task, state.runPendingTask?.contextSummary]
     .map((item) => item?.trim())
@@ -224,14 +222,27 @@ async function buildCapabilityDecisionContext(params: {
     .join(' | ');
   const forcedCapabilityNames = getInvokeOptions(runnableConfig).forcedCapabilityNames ?? [];
   const forcedNames = new Set(forcedCapabilityNames);
-  const decisionCapabilityCandidates = forcedNames.size > 0
+  const retrievedCandidates = forcedNames.size > 0
     ? capabilityList
         .filter((capability) => forcedNames.has(capability.name))
         .map((capability) => ({ name: capability.name, description: capability.description, score: 1, matchedTerms: ['forced'] }))
     : query ? searchCapabilities(query, capabilityList) : [];
-  const generalAvailable = generalTools.length > 0;
+  const generalCapability = forcedNames.size === 0
+    ? capabilityList.find((capability) => capability.name === GENERAL_CAPABILITY_NAME)
+    : null;
+  const decisionCapabilityCandidates = generalCapability
+    && !retrievedCandidates.some((candidate) => candidate.name === generalCapability.name)
+    ? [
+        ...retrievedCandidates,
+        {
+          name: generalCapability.name,
+          description: generalCapability.description,
+          score: 0,
+          matchedTerms: ['planner-default'],
+        },
+      ]
+    : retrievedCandidates;
   const availableExecutorsContext = buildCapabilityDecisionAvailableExecutorsContext({
-    generalTools,
     capabilityCandidates: decisionCapabilityCandidates,
   });
   const systemPrompt = buildCapabilityDecisionSystemPrompt({
@@ -239,7 +250,6 @@ async function buildCapabilityDecisionContext(params: {
     outputInstruction: buildCapabilityDecisionOutputInstruction(
       {
         capabilityCandidates: decisionCapabilityCandidates,
-        generalAvailable,
       },
       config.decisionStructuredOutput?.method,
     ),
@@ -253,8 +263,6 @@ async function buildCapabilityDecisionContext(params: {
   return {
     decisionCapabilityCandidates,
     decisionInputMessage,
-    generalAvailable,
-    generalTools,
     pendingTask: state.runPendingTask,
     systemPrompt,
   };
@@ -481,7 +489,6 @@ async function invokeCapabilityDecision(params: {
       model: config.models.act,
       schema: buildCapabilityDecisionSchema({
         capabilityCandidates: context.decisionCapabilityCandidates,
-        generalAvailable: context.generalAvailable,
       }),
       options: buildOrchestrationDecisionStructuredOutputOptions(
         config.decisionStructuredOutput,
@@ -640,18 +647,12 @@ function buildCapabilityDecisionResult(params: {
     : null;
   const delegationLane: MessageLane | null = activeCapability
     ? `capability:${activeCapability}`
-    : parsedSelection.kind === 'general'
-      ? 'general'
-      : null;
+    : null;
   if (!delegationLane) {
     throw new Error(
       `capabilityDecision returned invalid selection: ${selection}`,
     );
   }
-  if (delegationLane === 'general' && context.generalTools.length === 0) {
-    throw new Error('capabilityDecision selected unavailable general executor');
-  }
-
   const runNextDelegation: RunNextDelegation = {
     id: randomUUID().slice(0, 8),
     lane: delegationLane,
@@ -708,7 +709,7 @@ function buildDelegationOutcomeDecisionResult(params: {
 
   if (decision.outcome === 'continue') {
     return {
-      goto: activeDelegation.lane === 'general' ? 'general' as const : 'capability' as const,
+      goto: 'capability' as const,
       update: buildContinueDelegationResult({
         state,
         activeDelegation,
@@ -847,7 +848,7 @@ function buildAcceptedDelegationResult(params: {
   };
 }
 
-type DelegationOutcomeDestination = 'capability' | 'general' | 'capabilityPlanner' | 'answer';
+type DelegationOutcomeDestination = 'capability' | 'capabilityPlanner' | 'answer';
 
 type DelegationOutcomeTransition = {
   goto: DelegationOutcomeDestination;

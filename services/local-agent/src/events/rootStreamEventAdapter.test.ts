@@ -108,17 +108,17 @@ test('adapter emits one completed subagent message per child lifecycle across mu
     .addEdge('act2', END)
     .compile();
 
-  const general = async (state: typeof MessagesAnnotation.State, config?: RunnableConfig) => {
+  const capability = async (state: typeof MessagesAnnotation.State, config?: RunnableConfig) => {
     const result = await childGraph.invoke({ messages: state.messages }, config);
     // Lane echo: copy the child's messages into parent state.
     return { messages: result.messages.slice(state.messages.length) };
   };
 
   const graph = new StateGraph(MessagesAnnotation)
-    .addNode('general', general)
+    .addNode('capability', capability)
     .addNode('answer', streamingNode(new FakeListChatModel({ responses: ['主回复'], sleep: 0 })))
-    .addEdge(START, 'general')
-    .addEdge('general', 'answer')
+    .addEdge(START, 'capability')
+    .addEdge('capability', 'answer')
     .addEdge('answer', END)
     .compile();
 
@@ -140,7 +140,7 @@ test('adapter emits one completed subagent message per child lifecycle across mu
 test('adapter hides context-summary model output and keeps the final subagent message', async () => {
   const summaryText = 'INTERNAL_SUMMARY_CONTENT';
   const finalText = 'FINAL_SUBAGENT_CONTENT';
-  const general = async (
+  const capability = async (
     state: typeof MessagesAnnotation.State,
     config?: RunnableConfig,
   ) => {
@@ -158,9 +158,9 @@ test('adapter hides context-summary model output and keeps the final subagent me
     return { messages: [finalMessage] };
   };
   const graph = new StateGraph(MessagesAnnotation)
-    .addNode('general', general)
-    .addEdge(START, 'general')
-    .addEdge('general', END)
+    .addNode('capability', capability)
+    .addEdge(START, 'capability')
+    .addEdge('capability', END)
     .compile();
   const messages = [
     new HumanMessage(`old evidence\n${'x'.repeat(800)}`),

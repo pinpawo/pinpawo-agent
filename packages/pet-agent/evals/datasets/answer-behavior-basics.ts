@@ -24,7 +24,7 @@ export type AnswerBehaviorInput = {
     text: string;
   }>;
   acceptedHandoff?: {
-    handoffFrom: 'general' | 'capability:explore';
+    handoffFrom: 'capability:general' | 'capability:explore';
     runId: string;
     task: string;
     outcome: 'goal_done' | 'user_input_required';
@@ -155,7 +155,7 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
           },
         ],
         acceptedHandoff: {
-          handoffFrom: 'general',
+          handoffFrom: 'capability:general',
           runId: 'answer-eval-run',
           task: '汇总本周发布风险',
           outcome: 'goal_done',
@@ -189,7 +189,7 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
           },
         ],
         acceptedHandoff: {
-          handoffFrom: 'general',
+          handoffFrom: 'capability:general',
           runId: 'answer-eval-user-choice-run',
           task: '确认发送渠道并发送已经完成的报告',
           outcome: 'user_input_required',

@@ -27,7 +27,6 @@ import {
 } from './config';
 import { createAnswerNode } from './nodes/answer';
 import { createCapabilityNode } from './nodes/capability';
-import { createGeneralNode } from './nodes/general';
 import {
   createCompactContextNode,
   createPrepareNode,
@@ -67,7 +66,6 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
 
   const answerNode = createAnswerNode(config);
   const capabilityNode = createCapabilityNode({ config, subagentContextWindowTokens });
-  const generalNode = createGeneralNode({ config, subagentContextWindowTokens });
   // Graph-visible anchor shared by resume and post-execution paths. Its
   // conditional edge owns deterministic guard evaluation and telemetry only;
   // it must not grow state updates or user-facing output.
@@ -85,11 +83,10 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     .addNode('capabilityDecision', asDecisionNode(capabilityDecision, buildControlContext))
     .addNode('delegationOutcomeIterationGuard', delegationOutcomeIterationGuard)
     .addNode('delegationOutcomeDecision', delegationOutcomeDecision, {
-      ends: ['capability', 'general', 'capabilityPlanner', 'answer'],
+      ends: ['capability', 'capabilityPlanner', 'answer'],
     })
     .addNode('answer', answerNode)
     .addNode('capability', capabilityNode)
-    .addNode('general', generalNode)
     .addEdge(START, 'prepare')
     .addEdge('prepare', 'compactContext')
     // Run entry uses explicit task lifecycle state. Lane announces remain
@@ -105,11 +102,9 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     .addConditionalEdges('capabilityDecision', afterDecision, {
       answer: 'answer',
       capability: 'capability',
-      general: 'general',
     })
     .addEdge('answer', END)
-    .addEdge('capability', 'delegationOutcomeIterationGuard')
-    .addEdge('general', 'delegationOutcomeIterationGuard');
+    .addEdge('capability', 'delegationOutcomeIterationGuard');
 
   return graph.compile({
     checkpointer: config.checkpoint,

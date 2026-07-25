@@ -8,7 +8,6 @@ export { buildOrchestratorRunInput, buildOrchestratorTurnInput } from './orchest
 export { validateUniqueCapabilityNames, validateUniqueToolkitNames } from './orchestrator/validation';
 export {
   compileAgentRegistry,
-  ExecutorCompilationError,
   formatExecutorCompilationIssues,
 } from './orchestrator/registry';
 export type {

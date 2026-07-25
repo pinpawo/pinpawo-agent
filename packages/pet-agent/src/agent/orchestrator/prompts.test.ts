@@ -50,7 +50,7 @@ test('start-loop router request context includes compaction summaries outside re
 test('decision recent messages label delegation briefings as scheduling context', () => {
   const [briefing] = materializeDelegation({
     mode: 'initial',
-    lane: 'general',
+    lane: 'capability:general',
     runId: 'run-1',
     delegationId: 'delegation-1',
     task: '只完成任务 A',
@@ -136,7 +136,6 @@ test('entry decision keeps runtime state in the input context', () => {
 
 test('capability decision keeps task and candidates in the input context', () => {
   const availableExecutorsContext = buildCapabilityDecisionAvailableExecutorsContext({
-    generalTools: [],
     capabilityCandidates: [{
       name: 'explore',
       description: '代码库理解和调查。',
@@ -213,14 +212,14 @@ test('loop-internal router input stays focused on current run announce context',
 test('delegation outcome input carries current task context separately', () => {
   const currentTaskContext = buildDelegationOutcomeCurrentTaskContext({
     id: 'task-1',
-    lane: 'general',
+    lane: 'capability:general',
     task: '修复 lint',
     contextSummary: '用户要求处理代码质量。',
   });
   const otherTasksContext = buildDelegationOutcomeOtherTasksContext([
     {
       id: 'task-1',
-      lane: 'general',
+      lane: 'capability:general',
       task: '修复 lint',
       status: 'progress',
       resultPreview: null,
@@ -248,7 +247,7 @@ test('completed subagent announce context includes the full current result text'
     'END_OF_FULL_RANKING_MARKER',
   ].join('\n\n');
   const context = buildSubagentAnnounceContext({
-    lane: 'general',
+    lane: 'capability:general',
     delegationId: 'task-1',
     task: '整理排行榜',
     text: longResult,
@@ -261,7 +260,7 @@ test('completed subagent announce context includes the full current result text'
 
 test('subagent announce wraps markdown result as an xml-ish data block', () => {
   const context = buildSubagentAnnounceContext({
-    lane: 'general',
+    lane: 'capability:general',
     delegationId: 'task-1',
     task: '修复 lint',
     text: '# 结果\n\n- 已修复 lint\n- 已验证',
@@ -332,7 +331,7 @@ test('subagent announce context clips artifact summaries', () => {
 test('delegation outcome input does not duplicate the active task in announce context', () => {
   const currentTaskContext = buildDelegationOutcomeCurrentTaskContext({
     id: 'task-1',
-    lane: 'general',
+    lane: 'capability:general',
     task: '修复 lint',
     contextSummary: null,
   });
@@ -340,7 +339,7 @@ test('delegation outcome input does not duplicate the active task in announce co
     userIntentContext: '<user_intent_context><user_request>请处理代码质量</user_request></user_intent_context>',
     currentTaskContext,
     subagentAnnounceContext: buildSubagentAnnounceContext({
-      lane: 'general',
+      lane: 'capability:general',
       delegationId: 'task-1',
       task: '修复 lint',
       text: '已完成验证。',

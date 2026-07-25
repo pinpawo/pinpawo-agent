@@ -7,8 +7,7 @@ import type {
 } from '../../types';
 
 export function decisionModeFromRunNextDelegation(pending: RunNextDelegation | null): DecisionMode {
-  if (!pending) return 'answer';
-  return pending.lane === 'general' ? 'general' : 'capability';
+  return pending ? 'capability' : 'answer';
 }
 
 export function createTaskActiveDelegation(

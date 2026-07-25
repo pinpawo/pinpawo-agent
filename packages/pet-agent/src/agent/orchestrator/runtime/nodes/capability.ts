@@ -73,7 +73,7 @@ export function createCapabilityNode(params: {
     }
     const { capability } = compiledCapability;
     const toolkitList = [...compiledCapability.toolkits];
-    const lane: MessageLane = `capability:${capability.name}`;
+    const lane: MessageLane = runNextDelegation.lane;
     const transcriptRunId = resolveDelegationTranscriptRunId(state, runNextDelegation);
     const scopedMessages = laneMessages(state.messages, lane, transcriptRunId, runNextDelegation.id);
     const threadId = readThreadId(runnableConfig);

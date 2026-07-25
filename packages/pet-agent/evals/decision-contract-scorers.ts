@@ -81,17 +81,10 @@ export function scoreCapabilityPlanning(
     result: string;
     nextTask?: string | null;
     capabilityIntent?: string | null;
-    remainingPlan: Array<{ objective: string; capabilityIntent: string; status: 'concrete' | 'deferred' }>;
+    remainingPlan: Array<{ objective: string; capabilityIntent: string }>;
   },
   expected: CapabilityPlanningExpected,
 ): DecisionContractScore[] {
-  const remainingPlanMatches = output.remainingPlan.length === expected.remainingPlan.length
-    && output.remainingPlan.every((item, index) => {
-      const expectedItem = expected.remainingPlan[index];
-      return Boolean(expectedItem)
-        && item.capabilityIntent === expectedItem.capabilityIntent
-        && item.status === expectedItem.status;
-    });
   return [
     exact(
       'planner_result_correct',
@@ -99,42 +92,24 @@ export function scoreCapabilityPlanning(
       output.result,
       expected.result,
     ),
-    {
-      key: 'remaining_plan_structure_correct',
-      statement: 'Preserve the expected number, order, status, and capability intent of future tasks.',
-      evaluator: 'deterministic',
-      score: remainingPlanMatches ? 1 : 0,
-      comment: JSON.stringify(output.remainingPlan),
-    },
-    ...(expected.result === 'next_task'
-      ? [
-          exact(
-            'capability_intent_correct',
-            `Assign the materialized task the capability intent ${expected.capabilityIntent ?? 'null'}.`,
-            output.capabilityIntent ?? null,
-            expected.capabilityIntent ?? null,
-          ),
-        ]
-      : []),
   ];
 }
 
-function normalizePlan(plan: Array<{ objective: string; capabilityIntent: string; status: 'concrete' | 'deferred' }>) {
+function normalizePlan(plan: Array<{ objective: string; capabilityIntent: string }>) {
   return plan.map((item) => ({
     objective: item.objective.trim().replace(/\s+/g, ' '),
     capabilityIntent: item.capabilityIntent.trim(),
-    status: item.status,
   }));
 }
 
 export function derivePlanningMetrics(
   input: CapabilityPlanningInput,
-  outputPlan: Array<{ objective: string; capabilityIntent: string; status: 'concrete' | 'deferred' }>,
+  outputPlan: Array<{ objective: string; capabilityIntent: string }>,
   materializedTask: { objective: string; capabilityIntent: string } | null = null,
 ): { planEffect: CapabilityPlanningExpected['planEffect']; rubberStamp: boolean } {
   const before = normalizePlan(input.remainingPlan ?? []);
   const after = normalizePlan([
-    ...(materializedTask ? [{ ...materializedTask, status: 'concrete' as const }] : []),
+    ...(materializedTask ? [materializedTask] : []),
     ...outputPlan,
   ]);
   const unchanged = JSON.stringify(before) === JSON.stringify(after);

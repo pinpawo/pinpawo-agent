@@ -92,7 +92,7 @@ function buildScriptedDecisionModel() {
             return {
               result: 'next_task',
               remaining_plan: [
-                { objective: '根据调查结论重构 auth 模块', capability_intent: 'code_modification', status: 'deferred' },
+                { objective: '根据调查结论重构 auth 模块', capability_intent: 'code_modification' },
               ],
               next_task: { objective, capability_intent: 'codebase_exploration' },
             };

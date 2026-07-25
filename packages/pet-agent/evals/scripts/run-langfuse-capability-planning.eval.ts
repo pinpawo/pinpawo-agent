@@ -8,6 +8,7 @@ import {
   buildCapabilityPlanningDecisionSchema,
   buildCapabilityPlanningDecisionOutputInstruction,
 } from '../../src/agent/orchestrator/schemas.ts';
+import { evaluateCapabilityPlanningOutput } from '../capability-planning-evaluation.ts';
 import { derivePlanningMetrics, scoreCapabilityPlanning } from '../decision-contract-scorers.ts';
 import { capabilityPlanningBasicsDataset } from '../datasets/capability-planning-basics.ts';
 import { createDecisionEvalModel } from './decision-eval-model.ts';
@@ -30,7 +31,6 @@ function deterministicModel(testCase: typeof capabilityPlanningBasicsDataset.cas
     : expected.remainingPlan.map((item) => ({
       objective: item.objectiveTerms.join(' '),
       capabilityIntent: item.capabilityIntent,
-      status: item.status,
     }));
   const unchangedNextTask = expected.planEffect === 'unchanged'
     ? testCase.input.remainingPlan?.[0]
@@ -47,7 +47,6 @@ function deterministicModel(testCase: typeof capabilityPlanningBasicsDataset.cas
         remaining_plan: remainingPlan.map((item) => ({
           objective: item.objective,
           capability_intent: item.capabilityIntent,
-          status: item.status,
         })),
         next_task: nextTask ? {
           objective: nextTask.objective,
@@ -73,6 +72,7 @@ async function runCase(testCase: typeof capabilityPlanningBasicsDataset.cases[nu
   const input = buildCapabilityPlanningDecisionInput({
     mode: testCase.input.mode,
     userIntentContext: `<user_intent_context>${testCase.input.userGoal}</user_intent_context>`,
+    completedTasks: testCase.input.completedTasks ?? [],
     remainingPlan: testCase.input.remainingPlan ?? [],
     latestHandoff: testCase.input.latestHandoff ?? null,
     capabilityRegistryContext: testCase.input.capabilityRegistry.join('\n'),
@@ -87,15 +87,30 @@ async function runCase(testCase: typeof capabilityPlanningBasicsDataset.cases[nu
     remainingPlan: parsed.remaining_plan.map((item) => ({
       objective: item.objective,
       capabilityIntent: item.capability_intent,
-      status: item.status,
     })),
     nextTask: parsed.next_task?.objective ?? null,
     capabilityIntent: parsed.next_task?.capability_intent ?? null,
   };
-  const scores = scoreCapabilityPlanning(output, testCase.expected);
+  const evaluation = modelConfig
+    ? await evaluateCapabilityPlanningOutput({
+        input: testCase.input,
+        expected: testCase.expected,
+        output,
+        judge: {
+          model: modelConfig.model,
+          method: modelConfig.method,
+        },
+      })
+    : {
+        scores: scoreCapabilityPlanning(output, testCase.expected),
+        evaluationSummary: null,
+      };
   return {
     output: {
       ...output,
+      ...(evaluation.evaluationSummary
+        ? { evaluationSummary: evaluation.evaluationSummary }
+        : {}),
       ...derivePlanningMetrics(
         testCase.input,
         output.remainingPlan,
@@ -104,7 +119,7 @@ async function runCase(testCase: typeof capabilityPlanningBasicsDataset.cases[nu
           : null,
       ),
     },
-    scores,
+    scores: evaluation.scores,
   };
 }
 

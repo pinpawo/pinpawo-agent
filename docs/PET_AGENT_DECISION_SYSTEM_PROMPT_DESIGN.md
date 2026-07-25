@@ -149,9 +149,9 @@ search keywords 或 plan。
 - task 对应一次隔离的 capability execution，不对应用户文字中的普通步骤。
 - 同一次 capability 调用可以自然完成的相关动作不拆分。
 - `capability_intent` 描述所需能力类型，不绑定 registry 中的具体 capability id。
-- 依赖 explore handoff 的后续 task 在结论产生前保持 `deferred`，不提前编造实施细节。
+- 依赖 explore handoff 的后续 task 在结论产生前只保留目的，不提前编造实施细节。
 - `entry` 模式建立初始 capability boundaries。
-- `boundary` 模式结合最新完整 handoff 修订、取消或具体化尚未开始的 tail。
+- `boundary` 模式结合已完成任务事实、最新完整 handoff 和 tail 修订后续计划。
 - 没有后续自主执行工作时返回 `answer`。
 
 ### 5.2 Plan 生命周期
@@ -163,15 +163,16 @@ next task 之后尚未开始的 future tail，不重复 current task。
 
 1. `next_task` 写入 `runPendingTask`。
 2. `remaining_plan` 直接写入 `runCapabilityPlan`。
-3. task_done 后，boundary planner 接收完整 handoff + tail。
+3. task_done 后，boundary planner 接收只读 completed tasks + 完整 latest handoff + tail。
 
-运行时不改写 objective、不判断 deferred task 是否仍有效，也不根据 plan 内容决定 route/guard。
-plan 内容只有 capabilityPlanner 决定。
+运行时不改写 objective、不判断 future task 是否仍有效，也不根据 plan 内容决定 route/guard。
+已完成任务及其结果由运行时作为事实保存；未来 plan 内容只有 capabilityPlanner 决定。
 
 ### 5.3 注入事实
 
 - `mode`：`entry | boundary`，表示当前 planner 调用分布。
 - `user_intent_context`：用户目标和必要主对话。
+- `completed_tasks`：本 run 已完成的任务目标和结果摘要，只作为已发生事实。
 - `remaining_plan`：只包含尚未开始的 tail，不含刚完成或当前执行 task。
 - `latest_handoff`：最新 completed delegation 的完整 handoff，不使用 ledger preview 替代。
 - `capability_registry`：当前 custom capability 的 name/description，仅用于理解可用能力类型。
@@ -182,7 +183,6 @@ plan 内容只有 capabilityPlanner 决定。
 type PlanTask = {
   objective: string;
   capability_intent: string;
-  status: 'concrete' | 'deferred';
 };
 
 {
@@ -304,8 +304,8 @@ schema 不包含 task、plan、search keywords、lane、capability 或用户回�
 - entryDecision：已有结果 answer、意图与结果区分、当前本地/远程状态读取、陈旧证据刷新、
   歧义目标澄清、计算执行、单 task 多动作、最近上下文指代、explore→implementation plan
   和独立能力边界。
-- capabilityPlanner(entry)：创建 concrete head + deferred tail，不过度拆分。
-- capabilityPlanner(boundary)：结合完整 handoff 具体化、取消或保留 tail。
+- capabilityPlanner(entry)：创建 current task 并保留 future tail，不过度拆分。
+- capabilityPlanner(boundary)：结合 completed tasks、完整 handoff 具体化、取消或保留 tail。
 - capabilityDecision：candidate recall、custom/general selection、未注册 capability fallback。
 - outcomeDecision：continue / task_done / goal_done 边界，不产生 next task。
 - multi-task flow：entry 只调用一次，第 2+ task 经 boundary planner materialize，每个 task 独立经过 capabilityDecision，lane messages 隔离，结论只通过 handoff 传递。

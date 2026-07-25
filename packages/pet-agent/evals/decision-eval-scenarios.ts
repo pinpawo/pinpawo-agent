@@ -33,10 +33,13 @@ import type { AgentModels } from '../src/types/agent.ts';
 import type { AgentCapability } from '../src/types/capability.ts';
 import type { StructuredOutputMethod } from '../src/utils/structuredOutput.ts';
 import {
+  buildCapabilityPlanningGoalContract,
+  evaluateCapabilityPlanningOutput,
+} from './capability-planning-evaluation.ts';
+import {
   adaptTaskDecisionMode,
   derivePlanningMetrics,
   scoreCapabilityDecision,
-  scoreCapabilityPlanning,
   scoreEntryDecision,
   scoreOutcomeDecision,
   type DecisionContractScore,
@@ -190,7 +193,7 @@ function entryScenarios(): DecisionEvalScenario[] {
 
 function plannerScenarios(): DecisionEvalScenario[] {
   return capabilityPlanningBasicsDataset.cases.map((testCase) => {
-    const objective = `Produce ${testCase.expected.result} at this planning boundary. ${testCase.expected.reason}`;
+    const goalContract = buildCapabilityPlanningGoalContract(testCase.expected);
     const render = (method?: StructuredOutputMethod): RenderedDecisionPrompt => ({
       system: buildCapabilityPlanningDecisionSystemPrompt({
         actor,
@@ -202,6 +205,7 @@ function plannerScenarios(): DecisionEvalScenario[] {
           latestUserRequest: testCase.input.userGoal,
           recentMessages: [new HumanMessage(testCase.input.userGoal)],
         }),
+        completedTasks: testCase.input.completedTasks ?? [],
         remainingPlan: testCase.input.remainingPlan ?? [],
         latestHandoff: testCase.input.latestHandoff ?? null,
         capabilityRegistryContext: testCase.input.capabilityRegistry.join('\n'),
@@ -210,7 +214,7 @@ function plannerScenarios(): DecisionEvalScenario[] {
     return {
       target: 'planner',
       contract: 'planner.execution-boundary',
-      objective,
+      objective: goalContract.objective,
       datasetName: capabilityPlanningBasicsDataset.name,
       caseId: testCase.id,
       caseName: testCase.name,
@@ -226,7 +230,6 @@ function plannerScenarios(): DecisionEvalScenario[] {
         const remainingPlan = decision.remaining_plan.map((item) => ({
           objective: item.objective,
           capabilityIntent: item.capability_intent,
-          status: item.status,
         }));
         const nextTask = decision.next_task?.objective ?? null;
         const capabilityIntent = decision.next_task?.capability_intent ?? null;
@@ -241,51 +244,23 @@ function plannerScenarios(): DecisionEvalScenario[] {
           capabilityIntent,
           remainingPlan,
         };
-        const semanticCriteria: PromptGoalAcceptanceCriterion[] = [
-          ...(testCase.expected.result === 'next_task'
-            ? [{
-                id: 'materialized_task_correct',
-                statement: [
-                  'The next task is the one independently executable current task required at this boundary.',
-                  'It preserves the required work and incorporates relevant handoff evidence without absorbing future tasks.',
-                  `Expected anchors: ${(testCase.expected.nextTaskTerms ?? []).join(', ')}.`,
-                ].join(' '),
-              }]
-            : []),
-          ...(testCase.expected.remainingPlan.length > 0
-            ? [{
-                id: 'remaining_plan_objectives_correct',
-                statement: [
-                  'The remaining plan objectives preserve exactly the required future work after the current task.',
-                  `Expected objective anchors: ${testCase.expected.remainingPlan
-                    .map(({ objectiveTerms }) => objectiveTerms.join(', '))
-                    .join(' | ')}.`,
-                ].join(' '),
-              }]
-            : []),
-        ];
-        const semanticEvaluation = semanticCriteria.length > 0
-          ? await evaluatePromptGoal({
-              judge: judge ?? { model, method, config },
-              contract: 'planner.execution-boundary',
-              objective,
-              acceptanceCriteria: semanticCriteria,
-              evidence: testCase.input,
-              candidateOutput: output,
-            })
-          : null;
+        const evaluation = await evaluateCapabilityPlanningOutput({
+          input: testCase.input,
+          expected: testCase.expected,
+          output,
+          judge: judge ?? { model, method, config },
+        });
         return {
           output,
-          scores: [
-            ...scoreCapabilityPlanning(output, testCase.expected),
-            ...(semanticEvaluation?.scores ?? []),
-          ],
+          scores: evaluation.scores,
           verdict: decision.result,
           shape: `tasks=${(nextTask ? 1 : 0) + remainingPlan.length},tail=${remainingPlan.length},rubberStamp=${metrics.rubberStamp.toString()}`,
           diagnostics: {
             planEffect: metrics.planEffect,
             rubberStamp: metrics.rubberStamp,
-            ...(semanticEvaluation ? { evaluationSummary: semanticEvaluation.summary } : {}),
+            ...(evaluation.evaluationSummary
+              ? { evaluationSummary: evaluation.evaluationSummary }
+              : {}),
           },
         };
       },

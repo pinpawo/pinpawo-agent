@@ -289,6 +289,12 @@ function buildCapabilityPlanningContext(params: {
   const latestCompletedDelegation = [...state.runDelegationSummaries]
     .reverse()
     .find((item) => item.status === 'completed');
+  const completedTasks = state.runDelegationSummaries
+    .filter((item) => item.status === 'completed')
+    .map((item) => ({
+      objective: item.task,
+      result: item.resultPreview,
+    }));
   const latestHandoff = latestCompletedDelegation
     ? [...state.messages]
         .reverse()
@@ -306,6 +312,7 @@ function buildCapabilityPlanningContext(params: {
     decisionInputMessage: new HumanMessage(buildCapabilityPlanningDecisionInput({
       mode,
       userIntentContext,
+      completedTasks,
       remainingPlan: state.runCapabilityPlan,
       latestHandoff: latestHandoff ? readMessageText(latestHandoff) : null,
       capabilityRegistryContext: capabilityList.length > 0
@@ -595,7 +602,6 @@ function buildCapabilityPlanningResult(decision: CapabilityPlanningDecision) {
   const remainingPlan = decision.remaining_plan.map((item) => ({
     objective: item.objective.trim(),
     capabilityIntent: item.capability_intent.trim(),
-    status: item.status,
   }));
   if (decision.result === 'answer' || !decision.next_task) {
     return {

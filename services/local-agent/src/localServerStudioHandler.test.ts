@@ -69,8 +69,9 @@ function createDeps(): LocalServerDeps {
     localToolkits: [{
       name: 'local-toolkit',
       description: 'local toolkit',
-      operations: {
-        read_file: {
+      tools: [{
+        tool: { name: 'read_file' } as never,
+        operation: {
           title: '读文件',
           summarizeInput: (input: unknown) => {
             const path = input && typeof input === 'object' && 'path' in input
@@ -79,7 +80,7 @@ function createDeps(): LocalServerDeps {
             return typeof path === 'string' ? { target: path } : null;
           },
         },
-      },
+      }],
     }] as LocalServerDeps['localToolkits'],
     pluginToolkits: [{ name: 'plugin-toolkit' }] as LocalServerDeps['pluginToolkits'],
     localCapabilities: [{ name: 'browser' }] as LocalServerDeps['localCapabilities'],

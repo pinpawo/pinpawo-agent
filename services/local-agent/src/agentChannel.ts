@@ -1,6 +1,5 @@
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
-import { statSync } from 'node:fs';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
   stampMessageCreatedAtUtc,
@@ -9,12 +8,17 @@ import {
   type AgentInvokeInput,
   type AgentToolkit,
   type CapabilityArtifactStore,
+  type CompiledAgentRegistry,
   type OrchestratorConfig,
 } from '@pinpawo/pet-agent';
-import { createCapabilityCreatorCapability } from './capabilities/capabilityCreator';
+import {
+  createCapabilityCreatorCapability,
+  createCapabilityCreatorToolkit,
+} from './capabilities/capabilityCreator';
 import { createExploreCapability } from './capabilities/explore';
 import {
   createDailyPostCapability,
+  createDailyPostToolkit,
   type DailyImagePlan,
   type DailyPostPayload,
   type TrendPromptItem,
@@ -34,16 +38,16 @@ import {
   type LocalAgentInterfaceKind,
 } from './chatInterface';
 import { inferLlmStructuredOutputMethod } from './llmModelPresets';
-import { resolveCapabilityArtifactThreadRoot } from './capabilityArtifactStore';
-import { createArtifactDiscoveryToolset } from './toolkits/local';
+import {
+  prepareAgentRegistry,
+  reportUnavailableCapabilities,
+} from './agentRegistryPreparation';
 
-function isExistingDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
-}
+const DEFAULT_GENERAL_TOOLKIT_NAMES = [
+  'pet_profile',
+  'bash',
+  'git',
+] as const;
 
 function buildActor(context: AgentContext) {
   return {
@@ -164,6 +168,7 @@ export type AgentChannelSetup = {
   graphKey: string;
   graphConfig: OrchestratorConfig;
   input: AgentInvokeInput;
+  registry: CompiledAgentRegistry;
   interfaceContext?: LocalAgentInterfaceContext;
 };
 
@@ -203,6 +208,8 @@ export function buildLocalChatAgentInput(params: {
   userMessage: string;
   llmConfig?: AgentLlmConfig;
   toolkits?: AgentToolkit[];
+  /** Explicit Toolkit authorization for the general executor. */
+  generalUses?: readonly string[];
   threadId?: string;
   interfaceKind?: LocalAgentInterfaceKind | null;
   dryRun?: boolean;
@@ -213,8 +220,6 @@ export function buildLocalChatAgentInput(params: {
   userCapabilities?: LoadedUserCapability[];
   /** Store handed to capabilities so they can deterministically persist result artifacts */
   capabilityArtifactStore?: CapabilityArtifactStore;
-  /** Root directory backing the capability artifact store. */
-  capabilityArtifactRoot?: string;
   /** Effective agent workdir for prompt context and relative tool paths. */
   workdir?: string;
   /** Fixed session/thread start timestamp used as a stable relative-time anchor. */
@@ -225,8 +230,9 @@ export function buildLocalChatAgentInput(params: {
   const llmConfig = params.llmConfig ?? buildLocalLlmConfig();
   const decisionStructuredOutput = buildDecisionStructuredOutput(llmConfig);
   const actor = buildActor(params.context);
+  const models = buildLocalAgentModels(llmConfig);
   const trendItems = toTrendPromptItems(params.context.context.trendItems);
-  const sharedToolkits = [
+  const sharedToolkits: AgentToolkit[] = [
     createPetProfileToolkit({
       actor,
       profileText: params.context.context.petMemoryText,
@@ -242,7 +248,11 @@ export function buildLocalChatAgentInput(params: {
   }
 
   if (isCapabilityEnabled('daily_post')) {
-    appendCapability(capabilities, createDailyPostCapability({
+    appendCapability(capabilities, createDailyPostCapability());
+    sharedToolkits.push(createDailyPostToolkit({
+      actor,
+      models,
+      dryRun: params.dryRun,
       recentDaily: toRecentDaily(params.context.context.recentDaily),
       trendItems,
       savePost: saveDailyPost,
@@ -256,6 +266,7 @@ export function buildLocalChatAgentInput(params: {
 
   if (isCapabilityEnabled('capability_creator')) {
     appendCapability(capabilities, createCapabilityCreatorCapability());
+    sharedToolkits.push(createCapabilityCreatorToolkit());
   }
 
   for (const capability of params.extraCapabilities ?? []) {
@@ -266,13 +277,24 @@ export function buildLocalChatAgentInput(params: {
   for (const { meta, capability } of params.userCapabilities ?? []) {
     if (isCapabilityEnabled(meta.id)) appendCapability(capabilities, capability);
   }
-  const artifactDiscoveryRootCandidate = params.threadId && params.capabilityArtifactRoot
-    ? resolveCapabilityArtifactThreadRoot(params.capabilityArtifactRoot, params.threadId)
-    : undefined;
-  const artifactDiscoveryRoot = artifactDiscoveryRootCandidate
-    && isExistingDirectory(artifactDiscoveryRootCandidate)
-    ? artifactDiscoveryRootCandidate
-    : undefined;
+  const baseToolkits = [
+    ...sharedToolkits,
+    ...(params.toolkits ?? []),
+  ];
+  const registeredToolkitNames = new Set(baseToolkits.map(({ name }) => name));
+  const baseGeneralUses = [
+    ...(params.generalUses
+      ?? DEFAULT_GENERAL_TOOLKIT_NAMES.filter((name) => registeredToolkitNames.has(name))),
+  ];
+  const preparedRegistry = prepareAgentRegistry({
+    toolkits: baseToolkits,
+    capabilities,
+    generalUses: baseGeneralUses,
+    threadId: params.threadId,
+    capabilityArtifactStore: params.capabilityArtifactStore,
+    authorizeArtifactDiscoveryForGeneral: true,
+  });
+  reportUnavailableCapabilities(preparedRegistry.registry);
 
   return {
     graphKey: buildGraphKey([
@@ -286,7 +308,7 @@ export function buildLocalChatAgentInput(params: {
       params.checkpoint ? 'checkpoint' : 'memory',
     ]),
     graphConfig: {
-      models: buildLocalAgentModels(llmConfig),
+      models,
       actor,
       checkpoint: params.checkpoint,
       decisionStructuredOutput,
@@ -294,6 +316,7 @@ export function buildLocalChatAgentInput(params: {
       subagentContextWindowTokens: llmConfig.subagentContextWindowTokens ?? llmConfig.contextWindowTokens,
       capabilityArtifactStore: params.capabilityArtifactStore,
     },
+    registry: preparedRegistry.registry,
     input: {
       messages: [
         ...buildHistoryMessages(params.context.context.recentChatTurns),
@@ -301,15 +324,12 @@ export function buildLocalChatAgentInput(params: {
       ],
       threadId: params.threadId,
       capabilities,
-      toolkits: [...sharedToolkits, ...(params.toolkits ?? [])],
+      toolkits: [...preparedRegistry.toolkits],
+      generalUses: [...preparedRegistry.generalUses],
       execution: {
         dryRun: params.dryRun,
       },
       workdir: params.workdir,
-      artifactDiscoveryRoot,
-      artifactDiscoveryToolset: artifactDiscoveryRoot
-        ? createArtifactDiscoveryToolset(artifactDiscoveryRoot)
-        : undefined,
       runtimeEnvironment: buildRuntimeEnvironmentSummary(params.workdir, {
         sessionStartedAt: params.sessionStartedAt,
         timezone: params.timezone,

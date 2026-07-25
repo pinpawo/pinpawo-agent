@@ -81,7 +81,6 @@ export type LocalAgentAppChatHandlerOptions = {
   getLocalCapabilities: () => AgentCapability[];
   getUserCapabilities: () => LoadedUserCapability[];
   getCapabilityArtifactStore: () => CapabilityArtifactStore;
-  getCapabilityArtifactRoot?: () => string | undefined;
   getWorkdir: () => string;
   getActorName: () => string | null;
   runStudioRequest: RunStudioRequest;
@@ -107,7 +106,6 @@ export class LocalAgentAppChatHandler {
   private readonly getLocalCapabilities: () => AgentCapability[];
   private readonly getUserCapabilities: () => LoadedUserCapability[];
   private readonly getCapabilityArtifactStore: () => CapabilityArtifactStore;
-  private readonly getCapabilityArtifactRoot: () => string | undefined;
   private readonly getWorkdir: () => string;
   private readonly getActorName: () => string | null;
   private readonly runStudioRequest: RunStudioRequest;
@@ -136,7 +134,6 @@ export class LocalAgentAppChatHandler {
     this.getLocalCapabilities = options.getLocalCapabilities;
     this.getUserCapabilities = options.getUserCapabilities;
     this.getCapabilityArtifactStore = options.getCapabilityArtifactStore;
-    this.getCapabilityArtifactRoot = options.getCapabilityArtifactRoot ?? (() => undefined);
     this.getWorkdir = options.getWorkdir;
     this.getActorName = options.getActorName;
     this.runStudioRequest = options.runStudioRequest;
@@ -673,7 +670,6 @@ export class LocalAgentAppChatHandler {
       checkpoint: this.checkpoint,
       userCapabilities: this.getUserCapabilities(),
       capabilityArtifactStore: this.getCapabilityArtifactStore(),
-      capabilityArtifactRoot: this.getCapabilityArtifactRoot(),
       workdir: this.getWorkdir(),
       sessionStartedAt: this.getSessionStartedAt(threadId),
     });

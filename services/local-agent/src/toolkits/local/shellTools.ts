@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
-import type { ToolkitOperationMetadata } from '@pinpawo/pet-agent';
+import type { ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { readRecord, readString } from '../operationMetadata';
 import { getLocalToolsWorkdir, resolveUserPath } from './pathUtils';
 
@@ -213,7 +213,7 @@ export const runShellTool = tool(
   },
 );
 
-export const shellOperationMetadata: Record<string, ToolkitOperationMetadata> = {
+export const shellOperationMetadata: Record<string, ToolOperationMetadata> = {
   get_current_time: {
     title: '查询时间',
     summarizeInput: (input) => {

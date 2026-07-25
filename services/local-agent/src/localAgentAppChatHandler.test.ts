@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { WebSocket } from 'ws';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
+import { compileAgentRegistry } from '@pinpawo/pet-agent';
 import {
   sendLocalAgentEvent,
   sendLocalAgentMessage,
@@ -33,26 +34,34 @@ function createInflightController() {
 }
 
 function createSetup(): AgentChannelSetup {
+  const toolkit = {
+    name: 'local-toolkit',
+    description: 'local toolkit',
+    tools: [{
+      tool: { name: 'read_file' } as never,
+      operation: {
+        title: '读文件',
+        summarizeInput: (input: unknown) => {
+          const path = input && typeof input === 'object' && 'path' in input
+            ? (input as { path?: unknown }).path
+            : null;
+          return typeof path === 'string' ? { target: path } : null;
+        },
+      },
+    }],
+  };
   return {
     graphKey: 'test',
     graphConfig: {} as AgentChannelSetup['graphConfig'],
+    registry: compileAgentRegistry({
+      toolkits: [toolkit],
+      capabilities: [],
+      generalUses: ['local-toolkit'],
+    }),
     input: {
       messages: [],
-      toolkits: [{
-        name: 'local-toolkit',
-        description: 'local toolkit',
-        operations: {
-          read_file: {
-            title: '读文件',
-            summarizeInput: (input: unknown) => {
-              const path = input && typeof input === 'object' && 'path' in input
-                ? (input as { path?: unknown }).path
-                : null;
-              return typeof path === 'string' ? { target: path } : null;
-            },
-          },
-        },
-      }],
+      generalUses: ['local-toolkit'],
+      toolkits: [toolkit],
     } as AgentChannelSetup['input'],
   };
 }

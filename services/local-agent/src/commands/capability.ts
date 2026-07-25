@@ -45,8 +45,8 @@ async function validateCommand(rootDir: string): Promise<void> {
     id: result.meta?.id,
     name: result.meta?.name,
     rootDir: result.rootDir,
-    manifestPath: result.manifestPath,
-    indexPath: result.indexPath,
+    capabilityPath: result.capabilityPath,
+    entryPath: result.entryPath,
     warnings: result.warnings,
   }, null, 2) + '\n');
 }

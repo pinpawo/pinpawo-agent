@@ -1,4 +1,9 @@
-import { ReviewPolicies, type AgentToolkit, type CapabilityAvailability } from '@pinpawo/pet-agent';
+import {
+  defineToolkit,
+  ReviewPolicies,
+  type AgentToolkit,
+  type ToolReviewPolicy,
+} from '@pinpawo/pet-agent';
 import { loadStoredConfig } from '../../storage';
 import { detectBrowserStatus } from './session';
 import { browserTools } from './tools';
@@ -26,14 +31,14 @@ const browserToolkitInstructions = [
   '完成后返回你实际打开、操作或提取到的内容；不要声称完成未通过工具确认的页面操作。',
 ];
 
-function disabledAvailability(): CapabilityAvailability {
+function disabledAvailability() {
   return {
     available: false,
-    reason: 'browser capability disabled by config',
+    reason: 'browser Toolkit disabled by config',
   };
 }
 
-export async function checkBrowserAvailability(): Promise<CapabilityAvailability> {
+export async function checkBrowserAvailability() {
   const storedCaps = loadStoredConfig().capabilities;
   if (storedCaps?.browser === false) {
     return disabledAvailability();
@@ -63,22 +68,28 @@ export async function checkBrowserAvailability(): Promise<CapabilityAvailability
 }
 
 export function createBrowserToolkit(): AgentToolkit {
-  return {
+  const reviews: Record<string, ToolReviewPolicy> = {
+    browser_open: ReviewPolicies.externalAccess({ authorization: 'url_domain' }),
+    browser_open_with_session: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
+    browser_open_with_profile: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
+  };
+  return defineToolkit({
     name: BROWSER_TOOLKIT_NAME,
     description: '浏览器网页访问、登录态复用、JS 渲染页面读取、点击输入等待和页面内容提取。',
-    availability: {
-      check: checkBrowserAvailability,
-      cache: 'startup',
+    availability: async () => {
+      const availability = await checkBrowserAvailability();
+      return availability.available
+        ? { available: true }
+        : {
+            available: false,
+            reason: availability.reason ?? 'browser toolkit unavailable',
+          };
     },
-    tools: browserTools,
-    instructions: browserToolkitInstructions,
-    operations: browserOperationMetadata,
-    policy: {
-      toolReview: {
-        browser_open: ReviewPolicies.externalAccess({ authorization: 'url_domain' }),
-        browser_open_with_session: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
-        browser_open_with_profile: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
-      },
-    },
-  };
+    tools: browserTools.map((toolItem) => ({
+      tool: toolItem,
+      operation: browserOperationMetadata[toolItem.name],
+      review: reviews[toolItem.name],
+    })),
+    instructions: browserToolkitInstructions.join('\n'),
+  });
 }

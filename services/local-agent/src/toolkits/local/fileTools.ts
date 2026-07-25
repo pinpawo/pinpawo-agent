@@ -1,11 +1,7 @@
-import { closeSync, cpSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { closeSync, cpSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, extname, resolve } from 'node:path';
 import { tool } from '@langchain/core/tools';
-import {
-  ARTIFACT_DISCOVERY_LIST_DIR_TOOL_NAME,
-  ARTIFACT_DISCOVERY_VIEW_FILE_CHUNK_TOOL_NAME,
-  type ToolkitOperationMetadata,
-} from '@pinpawo/pet-agent';
+import { type ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import { tryStat } from './fileSystemUtils';
 import {
@@ -306,7 +302,7 @@ export const readFileTool = tool(
         size: stat.size,
         readableAsText: false,
         reason: 'No document reader is registered for this non-text file.',
-        recommendation: 'Install or enable a document/image reader plugin or toolset that can handle this file type.',
+        recommendation: 'Install or enable a document/image reader toolkit that can handle this file type.',
       });
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : err}`;
@@ -802,86 +798,7 @@ export const listDirTool = tool(
   },
 );
 
-function resolveArtifactDiscoveryPath(root: string, inputPath: string) {
-  const rootPath = resolveUserPath(root);
-  const targetPath = resolve(rootPath, inputPath || '.');
-  const relativePath = relative(rootPath, targetPath);
-  if (
-    relativePath === '..'
-    || relativePath.startsWith(`..${sep}`)
-    || isAbsolute(relativePath)
-  ) {
-    throw new Error('path must stay inside the current thread artifact root');
-  }
-  let canonicalRoot: string;
-  try {
-    canonicalRoot = realpathSync(rootPath);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw new Error('current thread has no artifacts');
-    }
-    throw err;
-  }
-  const canonicalTarget = realpathSync(targetPath);
-  const canonicalRelativePath = relative(canonicalRoot, canonicalTarget);
-  if (
-    canonicalRelativePath === '..'
-    || canonicalRelativePath.startsWith(`..${sep}`)
-    || isAbsolute(canonicalRelativePath)
-  ) {
-    throw new Error('path must stay inside the current thread artifact root');
-  }
-  return canonicalTarget;
-}
-
-export function createArtifactDiscoveryFileTools(root: string) {
-  const scopedListDirTool = tool(
-    async ({ path }: { path: string }) => {
-      try {
-        return await listDirTool.invoke({
-          path: resolveArtifactDiscoveryPath(root, path),
-        });
-      } catch (err) {
-        return `Error: ${err instanceof Error ? err.message : err}`;
-      }
-    },
-    {
-      name: ARTIFACT_DISCOVERY_LIST_DIR_TOOL_NAME,
-      description: '仅列出当前 thread artifact 根目录内的目录内容；普通工作区目录请使用 list_dir。',
-      schema: z.object({ path: z.string().describe('artifact 根目录或其内部目录路径') }),
-    },
-  );
-  const scopedViewFileChunkTool = tool(
-    async ({ path, startLine, endLine }: {
-      path: string;
-      startLine?: number;
-      endLine?: number;
-    }) => {
-      try {
-        return await viewFileChunkTool.invoke({
-          path: resolveArtifactDiscoveryPath(root, path),
-          startLine,
-          endLine,
-        });
-      } catch (err) {
-        return `Error: ${err instanceof Error ? err.message : err}`;
-      }
-    },
-    {
-      name: ARTIFACT_DISCOVERY_VIEW_FILE_CHUNK_TOOL_NAME,
-      description: '仅按行读取当前 thread artifact 根目录内的文本文件片段；普通工作区文件请使用 view_file_chunk。',
-      schema: z.object({
-        path: z.string().describe('artifact 根目录内的文件路径'),
-        startLine: z.number().int().positive().optional().describe('起始行号，默认 1'),
-        endLine: z.number().int().positive().optional().describe('结束行号，默认最多返回 200 行'),
-      }),
-    },
-  );
-
-  return [scopedListDirTool, scopedViewFileChunkTool];
-}
-
-export const fileOperationMetadata: Record<string, ToolkitOperationMetadata> = {
+export const fileOperationMetadata: Record<string, ToolOperationMetadata> = {
   read_file: {
     title: '析文档',
     summarizeInput: pathInputSummary,

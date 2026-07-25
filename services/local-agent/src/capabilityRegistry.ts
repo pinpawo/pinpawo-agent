@@ -43,7 +43,7 @@ export const BUILT_IN_CAPABILITY_REGISTRY: CapabilityMeta[] = [
   {
     id: 'capability_creator',
     name: '能力创建',
-    description: '生成和验证用户自定义 capability 插件模板',
+    description: '生成和验证用户自定义 CAPABILITY.md 目录',
     icon: 'wand.and.stars',
     color: 'purple',
     defaultEnabled: true,

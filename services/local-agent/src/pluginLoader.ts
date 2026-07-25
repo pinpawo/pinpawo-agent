@@ -1,7 +1,11 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { type AgentToolkit, validateToolkitDefinition } from '@pinpawo/pet-agent';
+import {
+  filterAvailableToolkits,
+  type AgentToolkit,
+  validateToolkitDefinition,
+} from '@pinpawo/pet-agent';
 import type { DailyPostPayload } from './capabilities/dailyPost';
 
 export type LocalAgentPluginHooks = {
@@ -56,7 +60,10 @@ export async function loadPluginsFromDir(pluginsDir: string): Promise<{ toolkits
 
   toolkits.forEach(validateToolkitDefinition);
 
-  return { toolkits, plugins };
+  return {
+    toolkits: await filterAvailableToolkits(toolkits),
+    plugins,
+  };
 }
 
 export function collectPluginHooks(plugins: LocalAgentPlugin[]) {

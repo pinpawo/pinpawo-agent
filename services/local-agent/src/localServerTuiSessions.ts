@@ -188,7 +188,6 @@ export class LocalServerTuiSessionService {
       checkpoint: this.checkpointer,
       userCapabilities: deps.userCapabilities,
       capabilityArtifactStore: deps.capabilityArtifactStore,
-      capabilityArtifactRoot: getLocalServerRuntimeConfig(deps).capabilityArtifactRoot,
       workdir: deps.workdir,
       sessionStartedAt: session.createdAt,
     });

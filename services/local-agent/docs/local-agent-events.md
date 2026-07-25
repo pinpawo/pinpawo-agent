@@ -128,7 +128,7 @@ type LocalAgentOperationEvent = {
     summary?: string;             // short status, e.g. '已完成'
     details?: Record<string, unknown>; // toolkit-defined structured data
     source?: {
-      provider: 'toolkit' | 'toolset' | 'runtime';
+      provider: 'toolkit' | 'runtime';
       name: string;
       toolName?: string;
       callId?: string;

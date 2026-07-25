@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test, { type TestContext } from 'node:test';
+import type { AgentToolkit } from '@pinpawo/pet-agent';
 import { createBashToolkit } from './toolkits/local';
 import {
   applyPatchTool,
@@ -19,6 +20,10 @@ import {
 } from './toolkits/local/fileTools';
 import { parsePatch, PatchParseError } from './toolkits/local/applyPatch';
 
+function definition(toolkit: AgentToolkit, toolName: string) {
+  return toolkit.tools.find((item) => item.tool.name === toolName);
+}
+
 function createFileFixture(t: TestContext) {
   const root = mkdtempSync(resolve(tmpdir(), 'pinpawo-files-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -30,7 +35,7 @@ function readJsonOutput(output: unknown) {
 }
 
 function reviewPolicyFor(toolName: string) {
-  const policy = createBashToolkit().policy?.toolReview?.[toolName];
+  const policy = definition(createBashToolkit(), toolName)?.review;
   assert.ok(policy);
   return policy;
 }
@@ -44,7 +49,7 @@ function reviewContext(toolName: string, input: unknown) {
     toolkitName: 'bash',
     toolName,
     input,
-    operation: toolkit.operations?.[toolName],
+    operation: definition(toolkit, toolName)?.operation,
     reviewCapabilities: {
       humanReview: true,
       sessionAuthorization: true,
@@ -199,18 +204,18 @@ test('bash toolkit reviews apply_patch with resolved file paths', async (t) => {
 test('bash toolkit reviews local path mutations with presets', () => {
   const toolkit = createBashToolkit();
 
-  assert.equal(Boolean(toolkit.policy?.toolReview?.move_path), true);
-  assert.equal(Boolean(toolkit.policy?.toolReview?.copy_path), true);
-  assert.equal(Boolean(toolkit.policy?.toolReview?.mkdir_path), true);
+  assert.equal(Boolean(definition(toolkit, 'move_path')?.review), true);
+  assert.equal(Boolean(definition(toolkit, 'copy_path')?.review), true);
+  assert.equal(Boolean(definition(toolkit, 'mkdir_path')?.review), true);
 });
 
 test('bash toolkit leaves read-only file tools without review policy', () => {
   const toolkit = createBashToolkit();
 
-  assert.equal(toolkit.policy?.toolReview?.read_file, undefined);
-  assert.equal(toolkit.policy?.toolReview?.view_file_chunk, undefined);
-  assert.equal(Boolean(toolkit.policy?.toolReview?.write_file), true);
-  assert.equal(Boolean(toolkit.policy?.toolReview?.apply_patch), true);
+  assert.equal(definition(toolkit, 'read_file')?.review, undefined);
+  assert.equal(definition(toolkit, 'view_file_chunk')?.review, undefined);
+  assert.equal(Boolean(definition(toolkit, 'write_file')?.review), true);
+  assert.equal(Boolean(definition(toolkit, 'apply_patch')?.review), true);
 });
 
 test('bash toolkit write policy blocks without HITL support', async () => {
@@ -468,8 +473,8 @@ test('parsePatch parses anchors, moves, and end-of-file markers', () => {
 test('createBashToolkit registers review policies for file mutation tools', () => {
   const toolkit = createBashToolkit();
 
-  assert.equal(Boolean(toolkit.policy?.toolReview?.write_file), true);
-  assert.equal(Boolean(toolkit.policy?.toolReview?.apply_patch), true);
+  assert.equal(Boolean(definition(toolkit, 'write_file')?.review), true);
+  assert.equal(Boolean(definition(toolkit, 'apply_patch')?.review), true);
 });
 
 test('read_file analyzes non-text documents instead of reading text chunks', async (t) => {

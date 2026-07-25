@@ -43,16 +43,25 @@ function buildCancelledToolResult(params: {
   toolkitName: string;
   reason: string;
   input: unknown;
+  source: ToolkitReviewCancellationSource;
 }) {
+  const guidance = params.source === 'human_reject'
+    ? 'Follow the user rejection and any updated direction. Do not retry this exact tool call unless the user explicitly asks for it.'
+    : params.source === 'human_respond'
+      ? 'Treat the user response as new task guidance, replan, and continue without retrying this exact tool call.'
+      : params.source === 'review_unavailable'
+        ? 'This action requires human authorization that is unavailable in this runtime. Do not retry it; choose an allowed alternative or explain the constraint.'
+        : 'This action is blocked by policy. Do not retry it; choose an allowed alternative or explain the constraint.';
   return JSON.stringify({
     ok: false,
     cancelled: true,
+    source: params.source,
     toolName: params.toolName,
     toolkitName: params.toolkitName,
     reason: params.reason,
     input: params.input,
     retryable: false,
-    guidance: 'Do not retry this same tool call. Choose a safer alternative or explain why the action cannot be completed.',
+    guidance,
   });
 }
 
@@ -331,9 +340,21 @@ type PreparedToolkitReview = GlobalReviewPolicyBatchItem & {
 type ToolkitReviewPreparation =
   | { type: 'allow' }
   | { type: 'review'; review: PreparedToolkitReview }
-  | { type: 'cancel'; toolCall: ToolCall; content: string };
+  | {
+      type: 'cancel';
+      toolCall: ToolCall;
+      content: string;
+      reason: string;
+      source: ToolkitReviewCancellationSource;
+    };
 
 type ToolkitReviewCancellation = Extract<ToolkitReviewPreparation, { type: 'cancel' }>;
+
+type ToolkitReviewCancellationSource =
+  | 'human_reject'
+  | 'human_respond'
+  | 'policy_block'
+  | 'review_unavailable';
 
 type PreparedToolkitReviews = {
   reviews: PreparedToolkitReview[];
@@ -360,7 +381,8 @@ type MaterializedToolCallMessage = {
 type ToolkitReviewResults = {
   cancelledToolCallIds: Set<string>;
   toolMessages: ToolMessage[];
-  finalMessage: AIMessage | null;
+  terminalMessage: AIMessage | null;
+  resumeModel: boolean;
   newlyApprovedReviewIds: Set<string>;
 };
 
@@ -428,14 +450,18 @@ async function prepareToolkitToolReview(params: {
     return { type: 'allow' };
   }
   if (isToolkitReviewBlock(reviewSpec)) {
+    const source = 'policy_block' as const;
     return {
       type: 'cancel',
       toolCall,
+      reason: reviewSpec.reason,
+      source,
       content: buildCancelledToolResult({
         toolName: binding.toolName,
         toolkitName: binding.toolkit.name,
         reason: reviewSpec.reason,
         input: currentInput,
+        source,
       }),
     };
   }
@@ -513,7 +539,11 @@ function buildCancellationForDecision(
     : decision.type === 'reject'
       ? decision.message ?? 'tool call rejected by user'
       : 'tool call rejected by user';
-  return buildCancelledOutcomeForReview(review, reason);
+  return buildCancelledOutcomeForReview(
+    review,
+    reason,
+    decision.type === 'respond' ? 'human_respond' : 'human_reject',
+  );
 }
 
 function readLatestAIMessage(messages: BaseMessage[]): {
@@ -551,15 +581,19 @@ function materializeAIMessageToolCalls(params: {
 function buildCancelledOutcomeForReview(
   review: PreparedToolkitReview,
   reason: string,
+  source: ToolkitReviewCancellationSource,
 ): Extract<ToolkitReviewPreparation, { type: 'cancel' }> {
   return {
     type: 'cancel',
     toolCall: review.toolCall,
+    reason,
+    source,
     content: buildCancelledToolResult({
       toolName: review.toolName,
       toolkitName: review.toolkitName,
       reason,
       input: review.input,
+      source,
     }),
   };
 }
@@ -730,6 +764,7 @@ async function resolvePreparedToolkitReviews(params: {
       cancellation: buildCancelledOutcomeForReview(
         firstReview,
         buildHumanReviewUnavailableReason(policyResolution),
+        'review_unavailable',
       ),
     };
   }
@@ -758,35 +793,18 @@ function buildCancelledToolCallResults(
   return {
     cancelledToolCallIds,
     toolMessages,
-    finalMessage: buildCancellationFinalMessage({
-      cancellation,
-      toolCallCount: toolCalls.length,
-    }),
+    terminalMessage: cancellation.source === 'policy_block'
+      || cancellation.source === 'review_unavailable'
+      ? new AIMessage({
+          content: cancellation.source === 'policy_block'
+            ? `工具调用 ${cancellation.toolCall.name} 被策略阻止，未执行。原因：${cancellation.reason}`
+            : `工具调用 ${cancellation.toolCall.name} 需要人工确认，但当前运行环境无法收集确认，因此未执行。原因：${cancellation.reason}`,
+        })
+      : null,
+    resumeModel: cancellation.source === 'human_reject'
+      || cancellation.source === 'human_respond',
     newlyApprovedReviewIds: new Set<string>(),
   };
-}
-
-function buildCancellationFinalMessage(params: {
-  cancellation: ToolkitReviewCancellation;
-  toolCallCount: number;
-}) {
-  const rawReason = readCancellationReason(params.cancellation.content);
-  const reason = rawReason === 'tool call rejected by user'
-    ? '用户拒绝了本次工具调用'
-    : rawReason;
-  const toolName = params.cancellation.toolCall.name || 'tool';
-  const content = params.toolCallCount > 1
-    ? `已停止本次工具调用请求；${params.toolCallCount} 个工具调用均未执行。触发项：${toolName}。原因：${reason}`
-    : `已停止执行工具调用：${toolName}。原因：${reason}`;
-  return new AIMessage({ content });
-}
-
-function readCancellationReason(content: string) {
-  const parsed = JSON.parse(content) as { reason?: unknown };
-  if (typeof parsed.reason === 'string' && parsed.reason.trim()) {
-    return parsed.reason.trim();
-  }
-  throw new Error('Toolkit review cancellation is missing its required reason.');
 }
 
 async function reviewToolkitToolCalls(params: {
@@ -816,7 +834,8 @@ async function reviewToolkitToolCalls(params: {
   return {
     cancelledToolCallIds: new Set<string>(),
     toolMessages: [],
-    finalMessage: null,
+    terminalMessage: null,
+    resumeModel: false,
     newlyApprovedReviewIds: resolution.newlyApprovedReviewIds,
   };
 }
@@ -845,11 +864,19 @@ function buildToolkitReviewStateUpdate(params: {
         : {};
   }
 
-  const appendedMessages = reviewResults.finalMessage
-    ? [...reviewResults.toolMessages, reviewResults.finalMessage]
+  // Once every pending tool call has a ToolMessage, LangChain's normal
+  // after-model router considers the turn complete and exits the child agent.
+  // Human reject/respond is task guidance, so explicitly return to the same
+  // child model. Deterministic policy blocks keep their terminal semantics.
+  const cancellationUpdate = reviewResults.resumeModel
+    ? { jumpTo: 'model' as const }
+    : {};
+  const appendedMessages = reviewResults.terminalMessage
+    ? [...reviewResults.toolMessages, reviewResults.terminalMessage]
     : reviewResults.toolMessages;
   return {
     ...approvalUpdate,
+    ...cancellationUpdate,
     messages: replaceMessageInState(
       params.messages,
       params.aiMessageIndex,
@@ -900,6 +927,7 @@ export function createToolkitReviewMiddleware(
           reviewResults,
         });
       },
+      canJumpTo: ['model'],
     },
   });
 }

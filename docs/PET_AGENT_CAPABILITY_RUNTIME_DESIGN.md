@@ -186,6 +186,13 @@ type CapabilityMiddleware = {
 
 - middleware 只用于 subagent 输入/输出调整
 - middleware 不负责 capability activation 或 tool 可见性控制
+- toolkit review 在 subagent middleware 内暂停，也必须在同一 subagent
+  invocation 内恢复。人工 reject/respond 只为 pending tool calls 生成协议完整的
+  `ToolMessage`，不合成 final `AIMessage`、不把 tool cancellation 提升为
+  delegation cancellation；middleware 通过结构化 `jumpTo: model` 回到 child
+  model，subagent 读取用户的新方向后继续自己的 agent loop。确定性的 policy
+  block 或 headless review-unavailable 不属于人工恢复，保持终止语义，避免模型
+  固执重试时空转到迭代上限。
 
 ### 4.4 capability result schema
 

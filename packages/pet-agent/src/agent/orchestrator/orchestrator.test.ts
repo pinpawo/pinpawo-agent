@@ -2023,9 +2023,8 @@ test('toolkit review cancellation stops the current review action', async () => 
   assert.equal(laterReviewCount, 0);
 });
 
-test('toolkit review cancellation ends subagent without retrying tools', async () => {
+test('deterministic toolkit policy block terminates without another model call', async () => {
   let blockedCallCount = 0;
-  let retryCallCount = 0;
   const blockedTool = tool(async () => {
     blockedCallCount += 1;
     return 'blocked should not run';
@@ -2034,18 +2033,10 @@ test('toolkit review cancellation ends subagent without retrying tools', async (
     description: 'blocked tool',
     schema: z.object({}),
   });
-  const retryTool = tool(async () => {
-    retryCallCount += 1;
-    return 'retry should not run';
-  }, {
-    name: 'retry_tool',
-    description: 'retry tool',
-    schema: z.object({}),
-  });
   const toolkits: AgentToolkit[] = [{
     name: 'guarded',
     description: 'guarded toolkit',
-    tools: [blockedTool, retryTool],
+    tools: [blockedTool],
     policy: {
       toolReview: {
         blocked_tool: {
@@ -2063,11 +2054,11 @@ test('toolkit review cancellation ends subagent without retrying tools', async (
     actor: testActor,
     messages: [],
   });
+  const recorder = createSubagentInputRecorder();
   const result = await createSubagent({
     model: new FakeToolCallingModel({
       toolCalls: [
         [{ id: 'call-blocked', name: 'blocked_tool', args: {} }],
-        [{ id: 'call-retry', name: 'retry_tool', args: {} }],
         [],
       ],
     }),
@@ -2076,14 +2067,20 @@ test('toolkit review cancellation ends subagent without retrying tools', async (
     instructions: [],
     operations: collectGeneralOperations(resources.toolkits),
     messages: [new HumanMessage('try guarded work')],
+    runnableConfig: { callbacks: recorder.callbacks },
   });
 
   assert.equal(blockedCallCount, 0);
-  assert.equal(retryCallCount, 0);
-  assert.equal(readToolMessageContent(result.messages, 'call-retry'), undefined);
+  const blockedResult = JSON.parse(String(
+    readToolMessageContent(result.messages, 'call-blocked'),
+  )) as { cancelled?: boolean; reason?: string };
+  assert.equal(blockedResult.cancelled, true);
+  assert.match(blockedResult.reason ?? '', /blocked by policy/);
+  assert.equal(recorder.subagentInputs.length, 1);
   const lastMessage = result.messages.at(-1);
   assert.ok(AIMessage.isInstance(lastMessage));
-  assert.match(String(lastMessage.content), /已停止执行工具调用/);
+  assert.match(String(lastMessage.content), /被策略阻止/);
+  assert.equal(result.completionReason, 'natural');
 });
 
 test('toolkit review materializes distinct fallback ids for missing tool call ids', async () => {
@@ -2130,7 +2127,7 @@ test('toolkit review materializes distinct fallback ids for missing tool call id
   });
   assert.deepEqual(cancelledResults.map((item) => item.cancelled), [true, true]);
   assert.deepEqual(cancelledResults.map((item) => item.retryable), [false, false]);
-  assert.match(cancelledResults[0]?.guidance ?? '', /Do not retry this same tool call/);
+  assert.match(cancelledResults[0]?.guidance ?? '', /blocked by policy/);
 
   const reviewedMessage = result.messages.find((message): message is AIMessage =>
     AIMessage.isInstance(message)
@@ -2442,10 +2439,20 @@ test('global review policy auto_authorization requires human authorization when 
   const parsed = JSON.parse(String(readToolMessageContent(
     result.messages,
     'call-unsafe-write',
-  ))) as { cancelled?: boolean; reason?: string };
+  ))) as {
+    cancelled?: boolean;
+    guidance?: string;
+    reason?: string;
+    source?: string;
+  };
   assert.equal(callCount, 0);
   assert.equal(parsed.cancelled, true);
+  assert.equal(parsed.source, 'review_unavailable');
   assert.match(parsed.reason ?? '', /too broad/);
+  assert.match(parsed.guidance ?? '', /human authorization.*unavailable/);
+  const lastMessage = result.messages.at(-1);
+  assert.ok(AIMessage.isInstance(lastMessage));
+  assert.match(String(lastMessage.content), /当前运行环境无法收集确认/);
 });
 
 test('global review policy custom resolver can authorize reviewed tool calls', async () => {
@@ -2796,7 +2803,7 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
   assert.equal(readLatestAnnounce(finalState.messages, { runId: finalState.runId }), null);
 });
 
-test('toolkit review policy stops after human reject without requesting another tool', async () => {
+test('toolkit review rejection resumes the same subagent before parent handoff', async () => {
   let runCount = 0;
   let reviewCount = 0;
   const rawTool = tool(async ({ command }: { command: string }) => {
@@ -2827,7 +2834,10 @@ test('toolkit review policy stops after human reject without requesting another 
                 {
                   id: 'reject',
                   label: 'Reject',
-                  decision: { type: 'reject' },
+                  decision: {
+                    type: 'reject',
+                    message: '不要发 PR comment，直接给我结果。',
+                  },
                 },
               ],
             });
@@ -2860,11 +2870,6 @@ test('toolkit review policy stops after human reject without requesting another 
         name: 'run_shell',
         args: { command: 'git status' },
       }],
-      [{
-        id: 'call-after-reject',
-        name: 'run_shell',
-        args: { command: 'git status' },
-      }],
       [],
     ],
   });
@@ -2877,9 +2882,11 @@ test('toolkit review policy stops after human reject without requesting another 
     actor: testActor,
     checkpoint: new MemorySaver(),
   });
+  const recorder = createSubagentInputRecorder();
   const config = {
+    callbacks: recorder.callbacks,
     configurable: {
-      thread_id: 'human-reject-stops-review-loop',
+      thread_id: 'human-reject-resumes-subagent-loop',
       actor: testActor,
       capabilities: [],
       toolkits,
@@ -2916,15 +2923,37 @@ test('toolkit review policy stops after human reject without requesting another 
   }
   const finalState = await resumedRun.output as {
     __interrupt__?: unknown;
-    messages: unknown[];
+    messages: BaseMessage[];
+    taskActiveDelegation: TaskActiveDelegation | null;
   };
 
   assert.equal(finalState.__interrupt__, undefined);
   assert.equal(runCount, 0);
-  // Resume replays the same interrupted review policy once; it must not reach
-  // the second model-proposed tool call after the reject.
+  // Resume replays the interrupted review policy once, then returns to the
+  // same child agent loop for its next model call.
   assert.equal(reviewCount, 2);
-  assert.equal(readToolMessageContent(finalState.messages, 'call-after-reject'), undefined);
+  assert.equal(routeCallCount, 2);
+  const resumedSubagentInput = recorder.subagentInputs.at(-1) ?? [];
+  const rejectedToolResult = resumedSubagentInput.find((message) =>
+    message instanceof ToolMessage
+    && message.tool_call_id === 'call-rejected');
+  assert.ok(rejectedToolResult);
+  const rejectedResult = JSON.parse(String(rejectedToolResult.content)) as {
+    guidance?: string;
+    reason?: string;
+    source?: string;
+  };
+  assert.equal(rejectedResult.source, 'human_reject');
+  assert.equal(rejectedResult.reason, '不要发 PR comment，直接给我结果。');
+  assert.match(rejectedResult.guidance ?? '', /updated direction/);
+  assert.equal(
+    resumedSubagentInput.some((message) => message instanceof HumanMessage),
+    true,
+  );
+  const handoffCopy = mainConversationMessages(finalState.messages)
+    .find((message) => Boolean(getMessageHandoffSource(message)));
+  assert.ok(handoffCopy);
+  assert.equal(finalState.taskActiveDelegation, null);
 });
 
 test('toolkit review resumes multiple reviewed tool calls in one model response', async () => {

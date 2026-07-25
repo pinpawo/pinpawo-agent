@@ -8,10 +8,7 @@ export type ToolReviewRejectRuntimeInput = {
     id: string;
     args: { command: string };
   };
-  retryToolCall: {
-    id: string;
-    args: { command: string };
-  };
+  subagentFinalResponse: string;
   rejectOptionId: string;
 };
 
@@ -19,7 +16,7 @@ export type ToolReviewRejectRuntimeExpected = {
   expectedInterrupted: boolean;
   expectedFinalInterrupt: boolean;
   expectedToolRunCount: number;
-  expectedRetryToolResultPresent: boolean;
+  expectedRejectedToolResultSeenBySubagent: boolean;
   expectedHandoffPresent: boolean;
   expectedAuthorizationCount: number;
   expectedFinalAnnounceIncludes: string[];
@@ -43,21 +40,18 @@ const cases: AgentEvalCase<ToolReviewRejectRuntimeInput, ToolReviewRejectRuntime
         id: 'call-rejected',
         args: { command: 'git status' },
       },
-      retryToolCall: {
-        id: 'call-after-reject',
-        args: { command: 'git status' },
-      },
+      subagentFinalResponse: '已按用户决定跳过被拒绝的工具，并完成无需该工具的结果。',
       rejectOptionId: 'reject',
     },
     expected: {
       expectedInterrupted: true,
       expectedFinalInterrupt: false,
       expectedToolRunCount: 0,
-      expectedRetryToolResultPresent: false,
+      expectedRejectedToolResultSeenBySubagent: true,
       expectedHandoffPresent: true,
       expectedAuthorizationCount: 0,
-      expectedFinalAnnounceIncludes: ['已停止', 'run_shell', '用户拒绝'],
-      reason: 'Rejecting a reviewed tool call must stop the current delegation, avoid executing or retrying tools, and hand off the cancellation announce.',
+      expectedFinalAnnounceIncludes: ['按用户决定', '完成无需该工具的结果'],
+      reason: 'Rejecting a reviewed tool call must resume the same subagent with a cancellation ToolMessage, then hand off only the subagent’s real final result.',
     },
     metadata: {
       difficulty: 'hard',
@@ -72,7 +66,7 @@ export const toolReviewRejectRuntimeDataset: AgentEvalDataset<
   ToolReviewRejectRuntimeExpected
 > = {
   name: SUITE,
-  description: 'Runtime eval for reviewed tool-call rejection: reject must stop subagent execution and hand off a cancellation announce.',
+  description: 'Runtime eval for reviewed tool-call rejection: reject must resume the same subagent invocation before normal handoff.',
   cases,
   metadata: {
     owner: 'pet-agent',

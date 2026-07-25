@@ -16,7 +16,7 @@ function allPass(scores: Array<{ score: number }>) {
   return scores.every((score) => score.score === 1);
 }
 
-test('entry scorer gates only the structured execution shape', () => {
+test('entry scorer gates only the structured decision mode', () => {
   const testCase = entryDecisionBasicsDataset.cases.find((item) => item.name === 'multiple-actions-one-capability-call');
   assert.ok(testCase);
   assert.equal(testCase.expected.expectedBoundaryCount, 1);
@@ -32,7 +32,7 @@ test('entryDecision adapter exposes the planning mode', () => {
   assert.equal(adaptTaskDecisionMode('needs_plan'), 'needs_plan');
 });
 
-test('entryDecision dataset covers the evidence sufficiency matrix', () => {
+test('entryDecision dataset covers the result-availability matrix', () => {
   const ids = entryDecisionBasicsDataset.cases.map((testCase) => testCase.id);
   const names = new Set(entryDecisionBasicsDataset.cases.map((testCase) => testCase.name));
   const modes = new Set(entryDecisionBasicsDataset.cases.map((testCase) => testCase.expected.mode));
@@ -40,6 +40,7 @@ test('entryDecision dataset covers the evidence sufficiency matrix', () => {
   assert.equal(new Set(ids).size, ids.length);
   assert.deepEqual([...modes].sort(), ['answer', 'direct_task', 'needs_plan']);
   assert.ok(names.has('answer-from-explicit-completion-evidence'));
+  assert.ok(names.has('answer-from-stable-model-knowledge'));
   assert.ok(names.has('intention-is-not-completion-evidence'));
   assert.ok(names.has('current-local-state-needs-observation'));
   assert.ok(names.has('current-remote-state-needs-lookup'));

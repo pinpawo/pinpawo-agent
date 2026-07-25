@@ -75,11 +75,11 @@ function validateCapabilityCandidateNames(params: OrchestrationDecisionSchemaPar
 
 export function buildTaskDecisionSchema() {
   return z.object({
-    action: z.enum(['answer', 'direct_task', 'needs_plan']).describe(
-      'run 入口执行形态。answer=基于对话中的已有信息回复；direct_task=执行一个当前任务；needs_plan=先规划多个任务。',
+    action: z.enum(['direct_task', 'needs_plan', 'answer']).describe(
+      'run 入口的下一步。answer=主对话已有回复所需结果或需要询问用户；direct_task=需要先取得一个结果；needs_plan=需要先规划多个或依赖前一结果的任务。',
     ),
     task: z.string().nullable().optional().describe(
-      'action=direct_task 时要执行的单步任务；其他 action 为 null 或省略。',
+      'action=direct_task 时要执行的完整任务；其他 action 为 null 或省略。',
     ),
     context_summary: z.string().nullable().optional().describe(
       'action=direct_task 时执行器需要的简短上下文；其他 action 为 null 或省略。',

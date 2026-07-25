@@ -1,8 +1,8 @@
 ---
 title: EntryDecision State Query Routing
 page_type: investigation
-status: draft
-updated: 2026-07-22
+status: contested
+updated: 2026-07-25
 sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/entryDecision.prompt.ts
@@ -10,6 +10,7 @@ sources:
   - https://github.com/pinpawo/pinpawo-agent/issues/416
   - https://github.com/pinpawo/pinpawo-agent/issues/435
 related:
+  - ../concepts/orchestrator-practical-reasoning.md
   - ../concepts/prompt-knowledge-layers.md
   - ../concepts/decision-node-ownership.md
   - ../decisions/delegation-completion-acknowledgement.md
@@ -55,29 +56,35 @@ of reading/searching/running/external access as execution was no longer explicit
 gap from taskDecision to entryDecision, not evidence that answer, handoff, shared
 prefix, or provenance architecture should be redesigned together.
 
-## Implemented contract
+## Candidate contract
 
 The implementation merged in
-[PR #421](https://github.com/pinpawo/pinpawo-agent/pull/421) expresses stable
-action meanings by evidence and execution shape rather than question topic:
+[PR #421](https://github.com/pinpawo/pinpawo-agent/pull/421) established the
+evidence/execution boundary. The current candidate applies it as an
+ordered decision:
 
-- `answer`: canonical main messages, including accepted handoffs, contain
-  sufficient evidence; no new execution result is required. An intention or plan
-  is not completion evidence.
-- `direct_task`: one new execution result is required. Observation, reading,
-  searching, lookup, verification, calculation, command/tool results, and
-  external or current-state checks all count as execution, including read-only
-  work.
-- `needs_plan`: multiple meaningful execution boundaries are required.
+1. Decide whether the current result requires new execution. Reading, lookup,
+   verification, calculation, commands, and current-state checks count as
+   execution. An intention or plan is not an existing result.
+2. If execution is required, decide whether the execution target is uniquely
+   determined. Multiple candidates without a selection basis route to `answer`
+   for clarification.
+3. For a determined target, decide whether plan is required. Preparation,
+   operation, verification, reporting, and related batch work may remain in one
+   current task; independent future tasks and result-dependent task
+   materialization route to `needs_plan`. Other execution routes to
+   `direct_task`.
 
 Freshness is part of evidence sufficiency when the user asks about current state.
 The classification does not depend on the topic, interrogative form, or words
 such as “existing” and “recent.” Git and commit language remains in eval cases,
 not the production prompt.
 
-The structured-output schema description uses the same three meanings. The
-action enum, graph transitions, message lanes, answer ownership, and fixed
-delegation-completion acknowledgement are unchanged.
+The structured-output schema describes only the three result meanings: no
+execution, execution without plan, and execution requiring plan. The decision
+conditions remain in the node prompt rather than being duplicated in the
+schema. The action enum, graph transitions, message lanes, answer ownership, and
+fixed delegation-completion acknowledgement are unchanged.
 
 ## Deterministic verification status
 
@@ -96,7 +103,7 @@ regression case changed from approximately 1,666 to 1,637 tokens for the full
 system, structured context, and conversation input. This small reduction is not
 itself evidence of improvement; route correctness still requires evaluation.
 
-## GLM-5.2 model evidence
+## GLM-5.2 baseline evidence
 
 The canonical V1 profile at
 `d54c6e38e8a26f5a6c0453112b8017ed0467170a` ran every entry case three times
@@ -114,6 +121,35 @@ before/after comparison and additional-model validation remain tracked in
 [issue #435](https://github.com/pinpawo/pinpawo-agent/issues/435). A future
 production change must address this shared evidence boundary and rerun the same
 cases; it must not add commit- or deployment-specific rules.
+
+## GLM-5.2 candidate validation
+
+The exclusion-flow candidate at
+`6e10c8a641489889ab8c414e8e371678b5562a3e` ran all 12 canonical entry cases
+three times with DashScope `glm-5.2`, JSON Mode, provider-default reasoning, and
+the `prompt-goal-v1` evaluator. All `36/36` goals were achieved with no schema,
+invocation, or evaluator errors.
+
+The dataset separates the owned objectives: existing results, intention versus
+completion, local and remote observation, stale evidence, clarification,
+calculation, one current task with internal actions, recent-context resolution,
+result-dependent planning, and independent-task planning. Cases no longer rely
+on a hidden capability assignment or combine context recency with an unrelated
+batch-boundary judgment.
+
+This result is valid for the evaluated inputs but does not establish the
+candidate as a general execution boundary. Several requests now explicitly say
+“query,” “check,” or “run,” and the production prompt names a similar operation
+inventory. The model can therefore pass by aligning verbs rather than by
+generalizing across unseen capabilities. The phrase “existing results are
+sufficient” also leaves the central evidence correspondence judgment
+underspecified.
+
+The investigation is therefore **contested**, not validated. The next candidate
+must derive execution from external evidence and effect requirements, restore
+natural-language paraphrases that do not name an operation, and preserve paired
+cases for completion, intention, freshness, and target identity. See the draft
+[practical-reasoning philosophy](../concepts/orchestrator-practical-reasoning.md).
 
 ## Explicitly unaffected decision
 

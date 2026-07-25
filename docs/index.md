@@ -10,6 +10,7 @@ the original design and reference documents. Maintenance rules live in
 
 - [Documentation wiki](wiki/index.md)
 - [System prompt design knowledge map](wiki/overview.md)
+- [Orchestrator as practical reasoning](wiki/concepts/orchestrator-practical-reasoning.md)
 - [System prompt authoring and evaluation principles](wiki/concepts/system-prompt-authoring-principles.md)
 - [Documentation wiki management plan](wiki/migrations/docs-wiki-management-plan.md)
 

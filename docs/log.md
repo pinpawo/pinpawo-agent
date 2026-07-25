@@ -206,3 +206,41 @@ lint passes, and documentation migrations.
 - Confirmed in a final planner-only rerun that excluding derived plan diagnostics
   from judge input preserved the 15/18 semantic result and the same sole
   capability-grouping failure.
+
+## [2026-07-24] validation | EntryDecision exclusion flow
+
+- Replaced action-by-action routing prose with the ordered questions: new
+  execution, unique execution target, then plan requirement.
+- Kept schema descriptions at result semantics and left decision conditions in
+  the node system prompt.
+- Isolated mixed eval objectives so context recency, single-task actions,
+  clarification, and planning boundaries are scored independently.
+- Validated all 12 entryDecision cases with GLM 5.2 across three repeats
+  (`36/36` goals achieved).
+- Updated the existing prompt contract, ownership, authoring-principles, and
+  state-query investigation pages without introducing a new wiki concept.
+
+## [2026-07-25] maintenance | Prompt test ownership
+
+- Removed deterministic assertions that treated natural-language prompt clauses
+  as proof of routing, planning, verdict, or reply behavior.
+- Kept unit coverage for prompt assembly, structured input shape, and separation
+  of dynamic runtime facts from static system instructions.
+- Assigned semantic prompt verification to the existing goal-based model evals.
+
+## [2026-07-25] synthesis | Orchestrator practical-reasoning philosophy
+
+- Added a draft philosophy that starts from the orchestrator's human problem:
+  purpose, interpretation, situated knowledge, practical judgment,
+  consequential action, distributed responsibility, time, and completion.
+- Kept epistemic, causal, and normative boundaries as a compact technical
+  projection within the philosophy rather than creating a competing ontology
+  from the current capability architecture.
+- Derived task, planning, result, handoff, outcome, and answer responsibilities
+  from practical reasoning and goal acceptance rather than operation
+  inventories.
+- Reclassified the entryDecision follow-up as contested: its `36/36` GLM-5.2
+  result remains valid for the explicit cases but does not establish
+  generalization.
+- Reopened the execution-boundary question for natural-language paired evals and
+  a first-principles prompt revision.

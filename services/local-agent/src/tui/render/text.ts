@@ -61,7 +61,7 @@ export const TUI_TEXT = {
   connectionReconnectRetrying: (seconds: number, attempt: number, maxAttempts: number) =>
     `连接断开，${seconds}s 后重连 ${attempt}/${maxAttempts}`,
   connectionUnavailable: (port: number) =>
-    `无法连接本地服务（port ${port}），请先运行 pinpawo-agent run`,
+    `无法连接本地服务（port ${port}），请先运行 pinpawo run`,
   initializationFailed: (message: string) => `初始化失败：${message}`,
   connectionError: (message: string) => `连接出错：${message}`,
   reconnectFailed: (message: string) => `重连失败：${message}`,

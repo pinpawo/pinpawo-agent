@@ -25,7 +25,7 @@
  * is the canonical HumanReviewInterruptPayload emitted by pet-agent.
  *
  * Run:
- *   npm run eval:hitl -w pinpawo-local-agent
+ *   npm run eval:hitl -w pinpawo
  */
 import { evaluate } from 'langsmith/evaluation';
 import { Client } from 'langsmith';

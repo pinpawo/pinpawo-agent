@@ -543,8 +543,8 @@ LocalAgentRuntimeEvent
 
 验收：
 
-- `npm run typecheck -w pinpawo-local-agent`
-- `npm run test:unit -w pinpawo-local-agent`
+- `npm run typecheck -w pinpawo`
+- `npm run test:unit -w pinpawo`
 - `/studio` / `/chat` / `/new` / `/allow` 行为保持不变。
 - 第一轮 diff 主要是移动代码和 import 调整。
 
@@ -565,8 +565,8 @@ LocalAgentRuntimeEvent
 
 验收：
 
-- `npm run typecheck -w pinpawo-local-agent`
-- `npm run test:unit -w pinpawo-local-agent`
+- `npm run typecheck -w pinpawo`
+- `npm run test:unit -w pinpawo`
 - reducer unit tests 覆盖：message.delta/completed、operation、human_review、interrupt、error、studio_response/error。
 - **专项测试**：`runRoute` 查不到 requestId 的事件被丢弃（迟到 / 陌生 run）；两条不同 requestId 的 `message.delta` 不会串进同一个 `assistantDraft`。
 
@@ -587,8 +587,8 @@ LocalAgentRuntimeEvent
 
 验收：
 
-- `npm run typecheck -w pinpawo-local-agent`
-- `npm run test:unit -w pinpawo-local-agent`
+- `npm run typecheck -w pinpawo`
+- `npm run test:unit -w pinpawo`
 - TUI reconnect / init / history restore 行为与当前版本一致。
 
 ### 阶段 2：Command registry + keymap + composer

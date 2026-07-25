@@ -10,7 +10,7 @@ test('local agent CLI passes tui options to the handler', async () => {
     },
   });
 
-  await program.parseAsync(['node', 'pinpawo-agent', 'tui', '--dry-run', '--workdir', '/tmp/pinpawo-tui-workdir']);
+  await program.parseAsync(['node', 'pinpawo', 'tui', '--dry-run', '--workdir', '/tmp/pinpawo-tui-workdir']);
 
   assert.deepEqual(received, { dryRun: true, workdir: '/tmp/pinpawo-tui-workdir' });
 });
@@ -25,7 +25,7 @@ test('local agent CLI passes init options to the handler', async () => {
 
   await program.parseAsync([
     'node',
-    'pinpawo-agent',
+    'pinpawo',
     'init',
     '--dir',
     '/tmp/pinpawo-test',
@@ -48,7 +48,7 @@ test('local agent CLI runs setup guide handler', async () => {
     },
   });
 
-  await program.parseAsync(['node', 'pinpawo-agent', 'setup', '--workdir', '/tmp/pinpawo-setup-workdir']);
+  await program.parseAsync(['node', 'pinpawo', 'setup', '--workdir', '/tmp/pinpawo-setup-workdir']);
 
   assert.deepEqual(received, {
     workdir: '/tmp/pinpawo-setup-workdir',
@@ -63,7 +63,7 @@ test('local agent CLI applies run workdir option before handler', async () => {
     },
   });
 
-  await program.parseAsync(['node', 'pinpawo-agent', 'run', '--workdir', '/tmp/pinpawo-workdir']);
+  await program.parseAsync(['node', 'pinpawo', 'run', '--workdir', '/tmp/pinpawo-workdir']);
   assert.deepEqual(received, {
     workdir: '/tmp/pinpawo-workdir',
     stdio: false,
@@ -78,7 +78,7 @@ test('local agent CLI enables the single-peer JSONL stdio transport', async () =
     },
   });
 
-  await program.parseAsync(['node', 'pinpawo-agent', 'run', '--stdio']);
+  await program.parseAsync(['node', 'pinpawo', 'run', '--stdio']);
   assert.deepEqual(received, {
     workdir: undefined,
     stdio: true,
@@ -95,7 +95,7 @@ test('local agent CLI passes Chrome extension registration options to the handle
 
   await program.parseAsync([
     'node',
-    'pinpawo-agent',
+    'pinpawo',
     'browser',
     'extension',
     'register',

@@ -74,8 +74,8 @@ These builders are a reusable normalization boundary, not a frozen cross-backend
 
 ```bash
 npm run build
-npm run test:browser-smoke -w pinpawo-local-agent
-npm run test:browser-extension-smoke -w pinpawo-local-agent
+npm run test:browser-smoke -w pinpawo
+npm run test:browser-extension-smoke -w pinpawo
 ```
 
 The first smoke test uses headless Playwright against a local fixture. The extension smoke requires the unpacked extension and registered native host, then verifies parent page → popup → parent fallback, conditional waits and bridge restart recovery in the user's Chrome.
@@ -83,12 +83,12 @@ The first smoke test uses headless Playwright against a local fixture. The exten
 Then:
 
 1. Open `chrome://extensions` and enable Developer mode.
-2. Load `tools/chrome-extension/dist` as an unpacked extension. For an installed npm package, use the bundled `extensionPath` printed by `pinpawo-agent browser extension status`.
+2. Load `tools/chrome-extension/dist` as an unpacked extension. For an installed npm package, use the bundled `extensionPath` printed by `pinpawo browser extension status`.
 3. Copy the extension ID shown by Chrome.
 4. Register the exact allowed extension origin:
 
    ```bash
-   pinpawo-agent browser extension register --extension-id <id>
+   pinpawo browser extension register --extension-id <id>
    ```
 
 5. Restart the agent. `auto` uses the connected extension first; set `PINPAWO_BROWSER_BACKEND=extension` when you want to require it.
@@ -96,10 +96,10 @@ Then:
 Inspect host registration and bridge runtime-file diagnostics with:
 
 ```bash
-pinpawo-agent browser extension status
+pinpawo browser extension status
 ```
 
-The running local-agent HTTP health response exposes separate host, extension, debugger and target fields while extension mode is selected. Remove registration with `pinpawo-agent browser extension unregister`.
+The running local-agent HTTP health response exposes separate host, extension, debugger and target fields while extension mode is selected. Remove registration with `pinpawo browser extension unregister`.
 
 ## Attribution
 

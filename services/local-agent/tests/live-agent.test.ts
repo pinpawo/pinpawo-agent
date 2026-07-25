@@ -61,7 +61,7 @@ function loadLiveLlmConfig(): AgentLlmConfig {
   const apiKey = process.env.LLM_API_KEY || stored.llm_api_key || '';
   if (!apiKey) {
     throw new Error(
-      'Missing LLM_API_KEY. Set it in services/local-agent/.env or run pinpawo-agent login first.',
+      'Missing LLM_API_KEY. Set it in services/local-agent/.env or run pinpawo login first.',
     );
   }
 

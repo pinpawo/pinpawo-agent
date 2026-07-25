@@ -30,7 +30,7 @@ test('buildSetupGuide reports missing required and recommended config', () => {
       ['studio-config', 'warning'],
     ],
   );
-  assert.match(formatSetupGuide(guide), /pinpawo-agent login/);
+  assert.match(formatSetupGuide(guide), /pinpawo login/);
   assert.match(formatSetupGuide(guide), new RegExp(escapeRegExp(runtimeConfig.workdir)));
   const studioCheck = guide.checks.find((check) => check.id === 'studio-config');
   assert.equal(studioCheck?.nextStep, `Create ${runtimeConfig.studioConfigPath}.`);

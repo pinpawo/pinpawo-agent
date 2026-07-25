@@ -22,6 +22,11 @@
 - Keep runtime-independent agent logic in `packages/pet-agent/`.
 - Keep local machine, CLI, browser, and desktop integration in `services/local-agent/` or `tools/agent-macos/`.
 
+## Wiki Ingest
+
+- Do not modify `docs/wiki/` or `docs/log.md` unless the user explicitly asks to ingest.
+- During normal development, update raw documents under `docs/` instead. Keep incomplete designs there until ingest is explicitly requested.
+
 ## Security
 
 - Do not commit `.env`, tokens, JWTs, API keys, local session state, or generated build output.

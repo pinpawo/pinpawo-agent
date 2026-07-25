@@ -1,43 +1,44 @@
-# PinPawo Local Agent
+# PinPawo CLI
 
-Local CLI/TUI agent client for PinPawo.
+CLI, terminal UI, and local agent runtime for PinPawo.
 
 ## Quick Install
 
-Requires Node.js 20.x.
+Requires Node.js 24 or newer. Node 24 LTS and Node 26 are validated for this
+release.
 
 ```bash
-npm install -g pinpawo-local-agent
-pinpawo-agent init
-pinpawo-agent login
-pinpawo-agent setup
-pinpawo-agent capability validate ~/.pinpawo/capabilities/hello-pinpawo
-pinpawo-agent tui
+npm install -g pinpawo
+pinpawo init
+pinpawo login
+pinpawo setup
+pinpawo capability validate ~/.pinpawo/capabilities/hello-pinpawo
+pinpawo tui
 ```
 
 For one-off usage without a global install:
 
 ```bash
-npx pinpawo-local-agent init
-npx pinpawo-local-agent login
-npx pinpawo-local-agent tui
+npx pinpawo init
+npx pinpawo login
+npx pinpawo tui
 ```
 
-`pinpawo-agent init` creates the quick-start scaffold:
+`pinpawo init` creates the quick-start scaffold:
 
 - `~/.pinpawo/.env` with all supported environment keys.
 - `~/.pinpawo/capabilities/` for user capabilities.
 - `~/.pinpawo/capabilities/hello-pinpawo/` as a minimal capability that validates and loads.
 
-Configuration is read from `~/.pinpawo/config.json`, `~/.pinpawo/.env`, and environment variables. Use `pinpawo-agent login` for interactive credential setup, `pinpawo-agent setup` to check missing config and next steps, or edit `~/.pinpawo/.env` directly. Set `PINPAWO_LOCAL_ONLY=1` to start without hosted API, WebSocket relay, or Hasura GraphQL connections even when saved server credentials exist. Browser `auto` mode prefers a connected Chrome extension for compatible default-session operations and otherwise uses Playwright; force either driver with `PINPAWO_BROWSER_BACKEND=extension` or `playwright`.
+Configuration is read from `~/.pinpawo/config.json`, `~/.pinpawo/.env`, and environment variables. Use `pinpawo login` for interactive credential setup, `pinpawo setup` to check missing config and next steps, or edit `~/.pinpawo/.env` directly. Set `PINPAWO_LOCAL_ONLY=1` to start without hosted API, WebSocket relay, or Hasura GraphQL connections even when saved server credentials exist. Browser `auto` mode prefers a connected Chrome extension for compatible default-session operations and otherwise uses Playwright; force either driver with `PINPAWO_BROWSER_BACKEND=extension` or `playwright`.
 
 For a local repository smoke test:
 
 ```bash
 npm install
 npm run build
-node services/local-agent/dist/index.js init --dir /tmp/pinpawo-agent-demo
-node services/local-agent/dist/index.js capability validate /tmp/pinpawo-agent-demo/capabilities/hello-pinpawo
+node services/local-agent/dist/index.js init --dir /tmp/pinpawo-demo
+node services/local-agent/dist/index.js capability validate /tmp/pinpawo-demo/capabilities/hello-pinpawo
 ```
 
 ## External Plugins
@@ -76,25 +77,25 @@ export default {
 ## Commands
 
 ```bash
-pinpawo-agent init
-pinpawo-agent login
-pinpawo-agent setup
-pinpawo-agent actor
-pinpawo-agent run
-pinpawo-agent run --stdio
-pinpawo-agent tui
-pinpawo-agent detect
-pinpawo-agent browser extension status
-pinpawo-agent browser extension register --extension-id <id>
-pinpawo-agent browser extension unregister
-pinpawo-agent capability list
-pinpawo-agent capability validate ./my-capability
-pinpawo-agent capability install ./my-capability
+pinpawo init
+pinpawo login
+pinpawo setup
+pinpawo actor
+pinpawo run
+pinpawo run --stdio
+pinpawo tui
+pinpawo detect
+pinpawo browser extension status
+pinpawo browser extension register --extension-id <id>
+pinpawo browser extension unregister
+pinpawo capability list
+pinpawo capability validate ./my-capability
+pinpawo capability install ./my-capability
 ```
 
 The packaged extension directory is printed by `browser extension status`. Load it through `chrome://extensions` in Developer mode, copy its ID, register that exact ID, and restart the agent. The Chrome extension is a Browser capability driver, with its Native Messaging host kept as a driver-private companion process. Protocol v2 supports open, snapshot, click, type, scroll, wait, extract, screenshot and detach on one approved Chrome tab.
 
-`pinpawo-agent run --stdio` starts one logical local-agent peer over newline-delimited
+`pinpawo run --stdio` starts one logical local-agent peer over newline-delimited
 JSON. It reads one `LocalAgentClientMessage` per stdin line and writes one
 `LocalAgentServerMessage` per stdout line. Stdout is reserved for protocol messages;
 diagnostics go to stderr. Stdin EOF closes the peer and aborts its active work before
@@ -126,6 +127,8 @@ From the repository root:
 npm run typecheck
 npm test
 npm run build
-npm run pack:dry -w pinpawo-local-agent
-npm publish -w pinpawo-local-agent
+npm pack --dry-run -w @pinpawo/pet-agent
+npm run pack:dry -w pinpawo
+npm publish -w @pinpawo/pet-agent --access public
+npm publish -w pinpawo --access public
 ```

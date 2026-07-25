@@ -255,7 +255,7 @@ runtime 不再探测 `~/.pinpawo` 旧路径，也不提供常驻迁移命令。�
 `run` 命令新增：
 
 ```bash
-pinpawo-agent run --workdir /path/to/workspace
+pinpawo run --workdir /path/to/workspace
 ```
 
 `tui` 命令不直接决定 workdir。TUI 连接 local server 后从 `/runtime` 读取当前服务的 effective workdir 并展示。
@@ -369,7 +369,7 @@ App/API 侧也应传递同样的 workdir 概念，但第一阶段只做 local-ag
 
 验收：
 
-- `pinpawo-agent run --workdir /tmp/a` 后 `/runtime.workdir === /tmp/a`。
+- `pinpawo run --workdir /tmp/a` 后 `/runtime.workdir === /tmp/a`。
 - 不影响旧的 `PINPAWO_WORKDIR` 和 config.json#workdir。
 
 ### Phase 2: 普通 pet runtime 跟随 workdir

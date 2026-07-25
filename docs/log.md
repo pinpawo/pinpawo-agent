@@ -259,3 +259,21 @@ lint passes, and documentation migrations.
   fixed task count remains diagnostic.
 - Recorded the accepted GLM-5.2 single-model baseline of three evaluable passes
   for each of six cases (`18/18`) and kept cross-model validation open.
+
+## [2026-07-26] ingest | CapabilityDecision honest executor contract
+
+- Refined the existing `capability.executor-selection` contract without adding
+  a new Wiki concept: general and custom capabilities are peer executor forms,
+  candidate retrieval is not proof of whole-task ability, and `unavailable`
+  explicitly represents the absence of a suitable executor.
+- Recorded schema/runtime ownership: only actual general availability and
+  current custom candidates enter the selection enum; zero custom candidates
+  use a deterministic `general | unavailable` fast path; executor descriptions
+  support selection while runtime instructions and tools own execution.
+- Updated the Prompt Contract Map, decision ownership, authoring/eval evidence,
+  source registry, open questions, and both documentation indexes.
+- Recorded the DashScope GLM-5.2 result of `24/24` scenario goals achieved:
+  `18/18` model invocations plus `6/6` deterministic fast-path runs, with no
+  schema, invocation, or evaluation errors.
+- Kept cross-model validation open and did not add generated eval reports or
+  private configuration to the Wiki.

@@ -1,14 +1,15 @@
 import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { searchCapabilities } from '../../src/agent/orchestrator/capabilitySearch.ts';
 import {
-  buildRouteDecisionInput,
-  buildRouteDecisionSystemPrompt,
-  buildRouteTargetsContext,
+  buildCapabilityDecisionInput,
+  buildCapabilityDecisionSystemPrompt,
+  buildCapabilityDecisionAvailableExecutorsContext,
 } from '../../src/agent/orchestrator/prompts.ts';
 import {
+  CAPABILITY_UNAVAILABLE_SELECTION,
+  buildCapabilityDecisionOutputInstruction,
+  buildCapabilityDecisionSchema,
   buildOrchestrationDecisionStructuredOutputOptions,
-  buildRouteDecisionOutputInstruction,
-  buildRouteDecisionSchema,
 } from '../../src/agent/orchestrator/schemas.ts';
 import type { AgentModels } from '../../src/types/agent.ts';
 import type { AgentCapability } from '../../src/types/capability.ts';
@@ -38,70 +39,80 @@ function capabilities(input: CapabilityDecisionBasicsInput): AgentCapability[] {
   }));
 }
 
-function mockModel(candidateNames: string[]): AgentModels['act'] {
-  const lane = candidateNames[0] ? `capability.${candidateNames[0]}` : 'general';
+function mockModel(selection: string): AgentModels['act'] {
   return {
     invoke: async () => new AIMessage(''),
-    withStructuredOutput: () => ({ invoke: async () => ({ lane }) }),
+    withStructuredOutput: () => ({ invoke: async () => ({ selection }) }),
   } as unknown as AgentModels['act'];
 }
 
-function containsTerms(value: string, terms: string[]) {
-  return terms.every((term) => value.toLowerCase().includes(term.toLowerCase()));
+function capabilitySearchQuery(input: CapabilityDecisionBasicsInput): string {
+  return [input.task, input.contextSummary]
+    .map((item) => item?.trim())
+    .filter((item): item is string => Boolean(item))
+    .join(' | ');
 }
 
 async function runCase(testCase: typeof capabilityDecisionBasicsDataset.cases[number], useLlm: boolean) {
   const input = testCase.input;
   const capabilityList = capabilities(input);
-  const candidates = searchCapabilities(input.baselineSearchQuery, capabilityList);
+  const query = capabilitySearchQuery(input);
+  const candidates = searchCapabilities(query, capabilityList);
+  const generalAvailable = input.generalToolsAvailable.length > 0;
   const methodConfig = useLlm ? createDecisionEvalModel() : null;
-  const model = methodConfig?.model ?? mockModel(candidates.map((candidate) => candidate.name));
+  const model = methodConfig?.model ?? mockModel(testCase.expected.expectedSelection);
   const method = methodConfig?.method;
-  const schemaParams = { capabilityCandidates: candidates.map(({ name }) => ({ name })) };
-  const structured = model.withStructuredOutput(
-    buildRouteDecisionSchema(schemaParams),
-    buildOrchestrationDecisionStructuredOutputOptions({ method }),
-  );
-  const system = buildRouteDecisionSystemPrompt({
+  const schemaParams = {
+    capabilityCandidates: candidates.map(({ name }) => ({ name })),
+    generalAvailable,
+  };
+  const system = buildCapabilityDecisionSystemPrompt({
     actor,
-    outputInstruction: buildRouteDecisionOutputInstruction(schemaParams, method),
+    outputInstruction: buildCapabilityDecisionOutputInstruction(schemaParams, method),
   });
-  const routeInput = buildRouteDecisionInput({
+  const decisionInput = buildCapabilityDecisionInput({
     pendingTask: {
       task: input.task,
       contextSummary: input.contextSummary ?? null,
-      searchKeywords: input.baselineSearchQuery,
     },
-    targetsContext: buildRouteTargetsContext({
-      generalTools: (input.generalToolsAvailable ?? []).map((name) => ({ name, description: `General tool ${name}` })) as never,
+    availableExecutorsContext: buildCapabilityDecisionAvailableExecutorsContext({
+      generalTools: input.generalToolsAvailable.map((name) => ({
+        name,
+        description: `General tool ${name}`,
+      })) as never,
       capabilityCandidates: candidates,
-      capabilitySearchAttempted: true,
-      capabilitySearchQuery: input.baselineSearchQuery,
-      capabilityRegistryAvailable: capabilityList.length > 0,
     }),
   });
-  const decision = await structured.invoke([new SystemMessage(system), new HumanMessage(routeInput)]);
-  const lane = typeof decision === 'object' && decision && 'lane' in decision ? String(decision.lane) : '';
+  let selection = candidates.length === 0
+    ? generalAvailable ? 'general' : CAPABILITY_UNAVAILABLE_SELECTION
+    : '';
+  if (!selection) {
+    const schema = buildCapabilityDecisionSchema(schemaParams);
+    const structured = model.withStructuredOutput(
+      schema,
+      buildOrchestrationDecisionStructuredOutputOptions({ method }),
+    );
+    const decision = await structured.invoke([
+      new SystemMessage(system),
+      new HumanMessage(decisionInput),
+    ]);
+    selection = schema.parse(decision).selection;
+  }
   const candidateNames = candidates.map((candidate) => candidate.name);
   const candidateRecallCorrect = candidateNames.length === testCase.expected.expectedCandidateNames.length
     && candidateNames.every((name) => testCase.expected.expectedCandidateNames.includes(name));
   const scores: LangfuseEvalScore[] = [
-    {
-      key: 'search_query_correct',
-      score: containsTerms(input.baselineSearchQuery, testCase.expected.expectedSearchQueryTerms) ? 1 : 0,
-      comment: input.baselineSearchQuery,
-    },
     {
       key: 'candidate_recall_correct',
       score: candidateRecallCorrect ? 1 : 0,
       comment: `expected=${testCase.expected.expectedCandidateNames.join(',')}; actual=${candidateNames.join(',')}`,
     },
     ...scoreCapabilityDecision(
-      { selectedLane: lane },
+      { selection },
       testCase.expected,
     ),
   ];
-  return { output: { query: input.baselineSearchQuery, candidateNames, lane }, scores };
+  return { output: { query, candidateNames, selection }, scores };
 }
 
 async function main() {

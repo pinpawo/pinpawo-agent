@@ -15,17 +15,18 @@ import type {
 import {
   buildDelegationOutcomeDecisionOutputInstruction,
   buildDelegationOutcomeDecisionSchema,
+  buildCapabilityDecisionOutputInstruction,
+  buildCapabilityDecisionSchema,
   buildCapabilityPlanningDecisionOutputInstruction,
   buildCapabilityPlanningDecisionSchema,
-  buildRouteDecisionOutputInstruction,
-  buildRouteDecisionSchema,
   buildTaskDecisionOutputInstruction,
   buildTaskDecisionSchema,
   buildOrchestrationDecisionStructuredOutputOptions,
-  parseRouteLane,
+  CAPABILITY_UNAVAILABLE_SELECTION,
+  parseCapabilitySelection,
   readDecisionText,
+  type CapabilityDecision,
   type DelegationOutcomeDecision,
-  type RouteDecision,
   type TaskDecision,
   type CapabilityPlanningDecision,
 } from '../../schemas';
@@ -35,13 +36,13 @@ import {
   buildDelegationOutcomeDecisionInput,
   buildDelegationOutcomeDecisionSystemPrompt,
   buildDelegationOutcomeOtherTasksContext,
+  buildCapabilityDecisionInput,
+  buildCapabilityDecisionSystemPrompt,
+  buildCapabilityDecisionAvailableExecutorsContext,
   buildCapabilityPlanningDecisionInput,
   buildCapabilityPlanningDecisionSystemPrompt,
   buildCompactionSummaryXmlContext,
   buildPreparedRequestContext,
-  buildRouteDecisionInput,
-  buildRouteDecisionSystemPrompt,
-  buildRouteTargetsContext,
   buildRunDelegationSummaryContext,
   buildRuntimeContext,
   buildSubagentAnnounceContext,
@@ -132,11 +133,21 @@ export function createCapabilityDecisionRunner(config: OrchestratorConfig) {
       pendingTask: context.pendingTask,
     };
     if (context.decisionCapabilityCandidates.length === 0) {
-      return buildCapabilityDecisionResult({ state, context: readyContext, routeLane: 'general' });
+      return buildCapabilityDecisionResult({
+        state,
+        context: readyContext,
+        selection: context.generalAvailable
+          ? 'general'
+          : CAPABILITY_UNAVAILABLE_SELECTION,
+      });
     }
 
     const decision = await invokeCapabilityDecision({ config, context, runnableConfig });
-    return buildCapabilityDecisionResult({ state, context: readyContext, routeLane: decision.lane });
+    return buildCapabilityDecisionResult({
+      state,
+      context: readyContext,
+      selection: decision.selection,
+    });
   };
 }
 
@@ -241,30 +252,31 @@ async function buildCapabilityDecisionContext(params: {
         .filter((capability) => forcedNames.has(capability.name))
         .map((capability) => ({ name: capability.name, description: capability.description, score: 1, matchedTerms: ['forced'] }))
     : query ? searchCapabilities(query, capabilityList) : [];
-  const targetsContext = buildRouteTargetsContext({
+  const generalAvailable = generalTools.length > 0;
+  const availableExecutorsContext = buildCapabilityDecisionAvailableExecutorsContext({
     generalTools,
     capabilityCandidates: decisionCapabilityCandidates,
-    capabilitySearchAttempted: true,
-    capabilitySearchQuery: query || null,
-    capabilityRegistryAvailable: capabilityList.length > 0,
   });
-  const systemPrompt = buildRouteDecisionSystemPrompt({
+  const systemPrompt = buildCapabilityDecisionSystemPrompt({
     actor,
-    outputInstruction: buildRouteDecisionOutputInstruction(
-      { capabilityCandidates: decisionCapabilityCandidates },
+    outputInstruction: buildCapabilityDecisionOutputInstruction(
+      {
+        capabilityCandidates: decisionCapabilityCandidates,
+        generalAvailable,
+      },
       config.decisionStructuredOutput?.method,
     ),
   });
-  const decisionInputMessage = new HumanMessage(buildRouteDecisionInput({
+  const decisionInputMessage = new HumanMessage(buildCapabilityDecisionInput({
     pendingTask: state.runPendingTask,
-    targetsContext,
+    availableExecutorsContext,
     runtimeContext: buildRuntimeContext(workdir, runtimeEnvironment),
   }));
 
   return {
-    capabilityList,
     decisionCapabilityCandidates,
     decisionInputMessage,
+    generalAvailable,
     generalTools,
     pendingTask: state.runPendingTask,
     systemPrompt,
@@ -489,8 +501,9 @@ async function invokeCapabilityDecision(params: {
   try {
     return await invokeStructuredOutput({
       model: config.models.act,
-      schema: buildRouteDecisionSchema({
+      schema: buildCapabilityDecisionSchema({
         capabilityCandidates: context.decisionCapabilityCandidates,
+        generalAvailable: context.generalAvailable,
       }),
       options: buildOrchestrationDecisionStructuredOutputOptions(
         config.decisionStructuredOutput,
@@ -500,9 +513,9 @@ async function invokeCapabilityDecision(params: {
         context.decisionInputMessage,
       ],
       runnableConfig,
-    }) as RouteDecision;
+    }) as CapabilityDecision;
   } catch (error) {
-    console.warn('[pet-agent] invalid route decision structured output:', {
+    console.warn('[pet-agent] invalid capability decision structured output:', {
       error: error instanceof Error ? error.message : String(error),
     });
     throw error;
@@ -586,7 +599,6 @@ function buildTaskDecisionResult(params: {
   const pendingTask: RunPendingTask = {
     task,
     contextSummary: readDecisionText(decision.context_summary),
-    searchKeywords: null,
   };
   return {
     goto: 'capabilityDecision' as const,
@@ -620,7 +632,6 @@ function buildCapabilityPlanningResult(decision: CapabilityPlanningDecision) {
       runPendingTask: {
         task: decision.next_task.objective.trim(),
         contextSummary: `Capability intent: ${decision.next_task.capability_intent.trim()}`,
-        searchKeywords: null,
       },
       runNextDelegation: null,
     },
@@ -630,30 +641,37 @@ function buildCapabilityPlanningResult(decision: CapabilityPlanningDecision) {
 function buildCapabilityDecisionResult(params: {
   state: OrchestratorStateType;
   context: CapabilityDecisionReadyContext;
-  routeLane: RouteDecision['lane'];
+  selection: CapabilityDecision['selection'];
 }) {
-  const { state, context, routeLane } = params;
+  const { state, context, selection } = params;
   const pendingTask = context.pendingTask;
 
-  const parsedLane = parseRouteLane(routeLane);
-  const activeCapability = parsedLane.kind === 'capability'
-    && parsedLane.capabilityName
-    && context.capabilityList.some((item) => item.name === parsedLane.capabilityName)
-    ? parsedLane.capabilityName
-    : null;
-  const delegationLane: MessageLane | null = activeCapability
-    ? `capability:${activeCapability}`
-    : parsedLane.kind === 'general'
-      ? 'general'
-      : null;
-  if (!delegationLane) {
-    throw new Error(`capabilityDecision selected unavailable capability: ${parsedLane.capabilityName ?? ''}`);
-  }
-  if (delegationLane === 'general' && context.generalTools.length === 0) {
+  const parsedSelection = parseCapabilitySelection(selection);
+  if (parsedSelection.kind === 'unavailable') {
     return {
       runNextDelegation: null,
       runPendingTask: pendingTask,
     };
+  }
+  const activeCapability = parsedSelection.kind === 'capability'
+    && parsedSelection.capabilityName
+    && context.decisionCapabilityCandidates.some(
+      (item) => item.name === parsedSelection.capabilityName,
+    )
+    ? parsedSelection.capabilityName
+    : null;
+  const delegationLane: MessageLane | null = activeCapability
+    ? `capability:${activeCapability}`
+    : parsedSelection.kind === 'general'
+      ? 'general'
+      : null;
+  if (!delegationLane) {
+    throw new Error(
+      `capabilityDecision returned invalid selection: ${selection}`,
+    );
+  }
+  if (delegationLane === 'general' && context.generalTools.length === 0) {
+    throw new Error('capabilityDecision selected unavailable general executor');
   }
 
   const runNextDelegation: RunNextDelegation = {

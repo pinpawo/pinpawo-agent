@@ -5,25 +5,29 @@ import {
   buildDelegationOutcomeDecisionSchema,
   buildCapabilityPlanningDecisionOutputInstruction,
   buildCapabilityPlanningDecisionSchema,
-  buildRouteCapabilityLane,
-  buildRouteDecisionOutputInstruction,
-  buildRouteDecisionSchema,
+  buildCapabilityDecisionOutputInstruction,
+  buildCapabilityDecisionSchema,
+  buildCustomCapabilitySelection,
   buildTaskDecisionOutputInstruction,
   buildTaskDecisionSchema,
-  parseRouteLane,
+  parseCapabilitySelection,
 } from './schemas';
 
-test('route decision schema rejects candidate names containing "."', () => {
+test('capability decision schema rejects candidate names containing "."', () => {
   assert.throws(
-    () => buildRouteDecisionSchema({ capabilityCandidates: [{ name: 'foo.bar' }] }),
+    () => buildCapabilityDecisionSchema({
+      capabilityCandidates: [{ name: 'foo.bar' }],
+      generalAvailable: true,
+    }),
     /capability name must not contain '\.'/,
   );
 });
 
-test('route decision schema rejects duplicate candidate names', () => {
+test('capability decision schema rejects duplicate candidate names', () => {
   assert.throws(
-    () => buildRouteDecisionSchema({
+    () => buildCapabilityDecisionSchema({
       capabilityCandidates: [{ name: 'browser' }, { name: 'browser' }],
+      generalAvailable: true,
     }),
     /duplicate capability name/,
   );
@@ -48,14 +52,33 @@ test('task decision schema separates task birth from route selection', () => {
   assert.equal(schema.safeParse({ lane: 'capability.browser' }).success, false);
 });
 
-test('route decision schema owns capability lane enum', () => {
-  const schema = buildRouteDecisionSchema({
+test('capability decision schema exposes only available executors plus unavailable', () => {
+  const schema = buildCapabilityDecisionSchema({
     capabilityCandidates: [{ name: 'browser' }],
+    generalAvailable: true,
   });
-  assert.equal(schema.safeParse({ lane: 'general' }).success, true);
-  assert.equal(schema.safeParse({ lane: 'capability.browser' }).success, true);
-  assert.equal(schema.safeParse({ lane: 'capability.daily_post' }).success, false);
+  assert.equal(schema.safeParse({ selection: 'general' }).success, true);
+  assert.equal(schema.safeParse({ selection: 'capability.browser' }).success, true);
+  assert.equal(schema.safeParse({ selection: 'unavailable' }).success, true);
+  assert.equal(schema.safeParse({ selection: 'capability.daily_post' }).success, false);
   assert.equal(schema.safeParse({ action: 'delegate_capability.browser' }).success, false);
+});
+
+test('capability decision schema omits unavailable executors', () => {
+  const customOnlySchema = buildCapabilityDecisionSchema({
+    capabilityCandidates: [{ name: 'browser' }],
+    generalAvailable: false,
+  });
+  assert.equal(customOnlySchema.safeParse({ selection: 'general' }).success, false);
+  assert.equal(customOnlySchema.safeParse({ selection: 'capability.browser' }).success, true);
+  assert.equal(customOnlySchema.safeParse({ selection: 'unavailable' }).success, true);
+
+  const unavailableOnlySchema = buildCapabilityDecisionSchema({
+    capabilityCandidates: [],
+    generalAvailable: false,
+  });
+  assert.equal(unavailableOnlySchema.safeParse({ selection: 'unavailable' }).success, true);
+  assert.equal(unavailableOnlySchema.safeParse({ selection: 'general' }).success, false);
 });
 
 test('delegation outcome decision schema is verdict-only', () => {
@@ -174,19 +197,27 @@ test('capability planner schema materializes a next task without capability ids'
   assert.equal('capability_id' in parsed, false);
 });
 
-test('parseRouteLane splits capability lane names', () => {
-  assert.deepEqual(parseRouteLane('capability.browser'), {
+test('parseCapabilitySelection distinguishes executor selections', () => {
+  assert.deepEqual(parseCapabilitySelection('capability.browser'), {
     kind: 'capability',
     capabilityName: 'browser',
   });
-  assert.deepEqual(parseRouteLane('general'), {
+  assert.deepEqual(parseCapabilitySelection('general'), {
     kind: 'general',
+    capabilityName: null,
+  });
+  assert.deepEqual(parseCapabilitySelection('unavailable'), {
+    kind: 'unavailable',
+    capabilityName: null,
+  });
+  assert.deepEqual(parseCapabilitySelection('browser'), {
+    kind: 'invalid',
     capabilityName: null,
   });
 });
 
-test('buildRouteCapabilityLane composes the prefix correctly', () => {
-  assert.equal(buildRouteCapabilityLane('browser'), 'capability.browser');
+test('buildCustomCapabilitySelection composes the prefix correctly', () => {
+  assert.equal(buildCustomCapabilitySelection('browser'), 'capability.browser');
 });
 
 test('decision output instructions add schema shape only for jsonMode', () => {
@@ -203,11 +234,13 @@ test('decision output instructions add schema shape only for jsonMode', () => {
   assert.match(jsonModePlannerInstruction, /result=answer 时为空数组/);
   assert.match(jsonModePlannerInstruction, /"required":\["result","remaining_plan","next_task"\]/);
 
-  const jsonModeRouteInstruction = buildRouteDecisionOutputInstruction({
+  const jsonModeCapabilityInstruction = buildCapabilityDecisionOutputInstruction({
     capabilityCandidates: [{ name: 'browser' }],
+    generalAvailable: true,
   }, 'jsonMode');
-  assert.match(jsonModeRouteInstruction, /"lane"/);
-  assert.match(jsonModeRouteInstruction, /capability\.browser/);
+  assert.match(jsonModeCapabilityInstruction, /"selection"/);
+  assert.match(jsonModeCapabilityInstruction, /capability\.browser/);
+  assert.match(jsonModeCapabilityInstruction, /unavailable/);
 
   const defaultOutcomeInstruction = buildDelegationOutcomeDecisionOutputInstruction();
   assert.doesNotMatch(defaultOutcomeInstruction, /JSON Schema/);

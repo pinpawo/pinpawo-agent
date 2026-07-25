@@ -79,6 +79,22 @@ Closure evidence:
 - keep model-specific protocol adaptations conditional without changing the
   accepted [task-boundary decision](../decisions/capability-planner-task-boundaries.md).
 
+### Does whole-task executor selection generalize across model families?
+
+The fixed GLM-5.2 capabilityDecision profile now passes all eight cases across
+three repeats. It covers dedicated and general executors, ordinary execution
+details, search-matched but incomplete custom candidates, and explicit
+`unavailable`. Two zero-candidate cases validate deterministic runtime behavior
+rather than model judgment.
+
+Closure evidence:
+
+- run the unchanged model-owned cases across supported model families;
+- preserve the distinction between candidate retrieval and whole-task ability;
+- report deterministic fast-path runs separately from LLM invocations;
+- keep `general`, custom capability, and `unavailable` semantics stable across
+  provider-specific structured-output methods.
+
 ## P1 — prompt governance
 
 ### Does the repository need configurable product policy in prompts?

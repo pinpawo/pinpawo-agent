@@ -31,7 +31,7 @@
 - **D3（再次修订 2026-07-12）— 不恢复自然语言 plan_draft；评估 capability-aware plan。** Stage B 当前仍以「用户原始请求 + 当前 task/委托 + 已完成任务结论（handoff copy + `runDelegationSummaries`）」作为 baseline，`task_done` 回 taskDecision。issue #349 的后续方向是独立 capabilityPlanner：plan 描述 capability execution boundaries、依赖和 future task，不是文字步骤清单。新纪律是：plan 只有 capabilityPlanner 一个写方；entryDecision 不写 plan，outcomeDecision 不读 plan；guard/预算只读 task 总数、plan 修订次数等计数，不读 plan 内容做分支。Phase 1 先建立 `planner@entry` / `planner@boundary` eval，Phase 2 才修改生产 graph。
 - **D4 — 图重构为 task → search → route 三段管道。** task 先出生，capability search 用 task 文本（+ 决策顺带输出的 `search_keywords`）做 query，路由决策最后落 lane。`capabilityDiscovery` 节点删除——它唯一的职责（LLM 从原始请求提炼 query）被"task 即 query"取代。
 - **D5（修订 2026-07-09）— delegation outcome 决策验收化**：三态 `continue | task_done | goal_done` + 可选 `gap_note`，**不携带任何 task 文本字段**，也不携带 capability 枚举（枚举只在 routeDecision 小 schema）。它只回答一个问题——"这次 announce 的结果是否符合目标"：`continue` = 当前任务没达标，同 lane 继续（`gap_note` 说缺什么）；`task_done` = 这步达标但总目标未完；`goal_done` = 总目标满足。原三态里的 `next_task`（验收节点顺手写下一个 task）被否决：那让它同时干验收和规划两件事，prompt 会越写越长、稳定性下降。
-- **D6 — routeDecision 只在零候选时走确定性 fallback**（直接 `general`），有候选一律过 LLM。不做"单一高分候选跳过 LLM"：词法打分置信度不足以定阈值。
+- **D6（2026-07-26 修订）— capabilityDecision 只在存在 custom 候选时调用 LLM。** 零候选时，general tools 实际可用则确定性选择 `general`，否则确定性选择 `unavailable`。有候选时由 LLM 比较本次实际可用的执行能力，选择能够完成完整 task 且职责最贴合的一项；搜索命中只表示候选相关，不表示它能完成完整 task。
 - **D7 — 删除 `recoverTaskActiveDelegationFromRunState`。** 它原本只服务 `taskActiveDelegation` 上线前的旧 checkpoint，但本轮把旧 `runDelegations` channel 改名为 `runDelegationSummaries` 后，旧 checkpoint 的 `runDelegations` 会被新图当作未知 channel 忽略；保留该 recovery 只会形成永远返回 null 的死代码。不做 checkpoint 迁移，旧 interrupt resume 重新决策。
 - **D8 — 单步任务约束随图重构落地**（进 taskDecision / outcomeDecision 的 prompt），不作为独立的 prompt-only PR。粒度标准："同一执行器、同一工具域内能连续完成的相邻动作算一步"，并明确禁止过度拆分。
 - **D9 — `canHandoffActiveDelegation` 整字段删除，不改名。** 它是存进 state 的派生值：guard 逻辑是 `(taskActiveDelegation, messages)` 的纯函数（announce completionReason === 'limit_reached' → false），写者到唯一读者只有一跳，且派生输入在这一跳间不可变；decision context 已在为 announce context 计算同一个 completionReason。改法：`buildDecisionContext` 在 delegation_outcome 时就地 `evaluateGuard(delegationOutcomeDecisionGuard, ...)`（guard 定义与决策事件保留，观测面不丢），连带删除 `delegationOutcomeDecisionGuard` 图节点（薄包装）与 `prepareUserIntentDecision` 图节点（全部职责是写 true，而 run reset 已置 true、user_intent 读者硬编码忽略 state——双重死代码）。
@@ -61,7 +61,6 @@
 type RunPendingTask = {
   task: string;
   contextSummary: string | null;
-  searchKeywords: string | null; // 兼容字段；Phase 2 生产路径写 null
 };
 
 type CapabilityPlanTask = {
@@ -107,10 +106,12 @@ capabilityPlanner（LLM，静态 schema；plan 内容唯一写方）
 capabilityDecision（单节点内完成确定性 search + LLM selection）
   query = runPendingTask.task + contextSummary（含 capability intent）
   forcedCapabilityNames 存在时直接形成局部候选；否则 searchCapabilities
-  零候选：确定性选择 general，跳过 LLM
-  有候选：小 schema { lane: 'general' | 'capability.<name>' }
-  → 写 runNextDelegation、清 runPendingTask
-  → afterDecision → capability / general 执行节点
+  零候选：general tools 可用则选择 general，否则选择 unavailable；跳过 LLM
+  有候选：小 schema { selection: 'unavailable' | 'general' | 'capability.<name>' }
+           其中 general 只在 general tools 实际可用时进入枚举
+  ── general / capability → 写 runNextDelegation、清 runPendingTask
+                           → afterDecision → capability / general 执行节点
+  ── unavailable → 保留 runPendingTask、不创建 delegation → answer
 
 执行节点（不变）
   → 消费 runNextDelegation、更新 taskActiveDelegation/runDelegationSummaries
@@ -141,7 +142,7 @@ delegationOutcomeDecision (LLM，静态 schema) —— 验收节点（D5）
 
 - entryDecision：`{ action: 'answer' | 'direct_task' | 'needs_plan', task?, context_summary? }`；不含 capability 枚举或 search keywords。
 - capabilityPlanner：`{ result: 'next_task' | 'answer', remaining_plan, next_task? }`；task 以 `objective + capability_intent` 表达，不绑定 registry capability id。
-- capabilityDecision：`{ lane: 'general' | 'capability.<name>' }`；动态枚举仅来自节点内部当次局部候选，不写入 state。
+- capabilityDecision：`{ selection: 'unavailable' | 'general' | 'capability.<name>' }`；动态枚举只包含节点内部当次局部 custom 候选，`general` 仅在 general tools 实际存在时提供，`unavailable` 显式表示当前提供的能力都不能承担完整 task。
 - outcomeDecision：`{ outcome: 'continue' | 'task_done' | 'goal_done', gap_note? }`；不含 task、plan 或 capability 字段。
 - 旧 `delegate_*` 动作枚举、`search_keywords` 模型输出和 `runCapabilitySearchState` 全部退出当前生产契约。
 - `parseAction` / `buildCapabilityActionName` / `STATIC_ACTION_KINDS` 随之收缩或删除。
@@ -155,7 +156,7 @@ delegationOutcomeDecision (LLM，静态 schema) —— 验收节点（D5）
 3. capabilityDecision 根据 current task 形成局部候选并选择读取/探索 capability；执行后 subagent announce；
 4. outcomeDecision 验收 task 1 为 `task_done` → 完整 handoff 进入主对话，清 active delegation → capabilityPlanner(boundary)；
 5. boundary planner 结合 completed task 事实和完整 issue 结论，把 future tail 具体化为「在本地仓库检索相关实现与 git log，判断需求点是否已覆盖」；
-6. 新 current task 再次独立进入 capabilityDecision；零 custom 候选时确定性 fallback `general`，否则选择匹配 custom capability；
+6. 新 current task 再次独立进入 capabilityDecision；零 custom 候选时根据 general tools 是否可用确定性选择 `general` 或 `unavailable`，否则在实际可用 executor 中选择；
 7. 执行 → announce → outcomeDecision：若结论已满足用户目标，`goal_done` → handoff → answerNode；若当前 task 完成但是否仍有后续不明确，`task_done` → boundary planner 根据完整 handoff 和空 tail 选择 answer 或继续。
 
 当前结构不会把用户文字步骤机械映射成 task，也不会把完整流程塞进一个 delegation；planner 按 capability execution boundary 组织任务，每个 materialized task 都独立经过 capabilityDecision。

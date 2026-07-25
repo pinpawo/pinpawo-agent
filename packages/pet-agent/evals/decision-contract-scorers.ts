@@ -49,15 +49,15 @@ export function adaptTaskDecisionMode(
 }
 
 export function scoreCapabilityDecision(
-  output: { selectedLane: string },
+  output: { selection: string },
   expected: CapabilityDecisionBasicsExpected,
 ): DecisionContractScore[] {
   return [
     exact(
       'capability_selection_correct',
-      `Select ${expected.expectedLane} from the executor choices supplied to the model.`,
-      output.selectedLane,
-      expected.expectedLane,
+      `Select ${expected.expectedSelection} from the executors actually available for this task.`,
+      output.selection,
+      expected.expectedSelection,
     ),
   ];
 }

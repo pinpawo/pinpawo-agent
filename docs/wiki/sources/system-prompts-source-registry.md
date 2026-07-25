@@ -28,7 +28,10 @@ behavioral claims:
 
 CapabilityPlanner claims added on 2026-07-26 describe the implementation merged
 in [PR #461](https://github.com/pinpawo/pinpawo-agent/pull/461) and checked
-against the resulting `main`.
+against the resulting `main`. CapabilityDecision claims updated on 2026-07-26
+describe the current working implementation and its GLM-5.2 `24/24` profile;
+the eventual implementation PR remains part of the source trail rather than
+being named before publication.
 
 - [`prompts/templates/sharedPrefix.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/sharedPrefix.prompt.ts)
 - [`prompts/templates/entryDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/entryDecision.prompt.ts)
@@ -42,6 +45,7 @@ against the resulting `main`.
 - [`messageLanes.ts`](../../../packages/pet-agent/src/agent/orchestrator/messageLanes.ts)
 - [`orchestrator.test.ts`](../../../packages/pet-agent/src/agent/orchestrator/orchestrator.test.ts)
 - [`entry-decision-basics.ts`](../../../packages/pet-agent/evals/datasets/entry-decision-basics.ts)
+- [`capability-decision-basics.ts`](../../../packages/pet-agent/evals/datasets/capability-decision-basics.ts)
 - [`capability-planning-basics.ts`](../../../packages/pet-agent/evals/datasets/capability-planning-basics.ts)
 - [`capability-planning-evaluation.ts`](../../../packages/pet-agent/evals/capability-planning-evaluation.ts)
 - [`capability-planning-evaluation.test.ts`](../../../packages/pet-agent/evals/capability-planning-evaluation.test.ts)
@@ -51,6 +55,7 @@ against the resulting `main`.
 - [`prompt-goal-evaluator.ts`](../../../packages/pet-agent/evals/prompt-goal-evaluator.ts)
 - [`prompt-eval-report.ts`](../../../packages/pet-agent/evals/prompt-eval-report.ts)
 - [`run-decision-stability.eval.ts`](../../../packages/pet-agent/evals/scripts/run-decision-stability.eval.ts)
+- [`run-langfuse-capability-decision.eval.ts`](../../../packages/pet-agent/evals/scripts/run-langfuse-capability-decision.eval.ts)
 
 ## Current and pinned design sources
 

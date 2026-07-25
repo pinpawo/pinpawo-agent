@@ -34,7 +34,6 @@ export type RunNextDelegation = {
 export type RunPendingTask = {
   task: string;
   contextSummary: string | null;
-  searchKeywords: string | null;
 };
 
 export type CapabilityPlanTask = {

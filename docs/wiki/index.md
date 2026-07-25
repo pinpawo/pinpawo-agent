@@ -32,7 +32,8 @@ explicitly migrated.
   — positive-first contracts, narrow negative boundaries, harness ownership,
   objective-derived eval targets, and eval-backed prompt changes.
 - [Decision node ownership](concepts/decision-node-ownership.md) — semantic owner
-  of each orchestrator decision.
+  of each orchestrator decision, including whole-task executor selection and
+  explicit capability unavailability.
 - [CapabilityPlanner task boundaries](decisions/capability-planner-task-boundaries.md)
   — completed facts, mutable future work, result-driven replanning, and the
   current/future task boundary.

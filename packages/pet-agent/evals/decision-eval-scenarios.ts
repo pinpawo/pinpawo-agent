@@ -2,6 +2,9 @@ import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langc
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { searchCapabilities } from '../src/agent/orchestrator/capabilitySearch.ts';
 import {
+  buildCapabilityDecisionInput,
+  buildCapabilityDecisionSystemPrompt,
+  buildCapabilityDecisionAvailableExecutorsContext,
   buildCapabilityPlanningDecisionInput,
   buildCapabilityPlanningDecisionSystemPrompt,
   buildDelegationOutcomeCurrentTaskContext,
@@ -9,9 +12,6 @@ import {
   buildDelegationOutcomeDecisionSystemPrompt,
   buildDelegationOutcomeOtherTasksContext,
   buildPreparedRequestContext,
-  buildRouteDecisionInput,
-  buildRouteDecisionSystemPrompt,
-  buildRouteTargetsContext,
   buildRunDelegationSummaryContext,
   buildRuntimeContext,
   buildSubagentAnnounceContext,
@@ -19,13 +19,14 @@ import {
   buildTaskDecisionSystemPrompt,
 } from '../src/agent/orchestrator/prompts.ts';
 import {
+  CAPABILITY_UNAVAILABLE_SELECTION,
+  buildCapabilityDecisionOutputInstruction,
+  buildCapabilityDecisionSchema,
   buildCapabilityPlanningDecisionOutputInstruction,
   buildCapabilityPlanningDecisionSchema,
   buildDelegationOutcomeDecisionOutputInstruction,
   buildDelegationOutcomeDecisionSchema,
   buildOrchestrationDecisionStructuredOutputOptions,
-  buildRouteDecisionOutputInstruction,
-  buildRouteDecisionSchema,
   buildTaskDecisionOutputInstruction,
   buildTaskDecisionSchema,
 } from '../src/agent/orchestrator/schemas.ts';
@@ -276,61 +277,75 @@ function capabilities(input: CapabilityDecisionBasicsInput): AgentCapability[] {
   }));
 }
 
+function capabilitySearchQuery(input: CapabilityDecisionBasicsInput): string {
+  return [input.task, input.contextSummary]
+    .map((item) => item?.trim())
+    .filter((item): item is string => Boolean(item))
+    .join(' | ');
+}
+
 function capabilityScenarios(): DecisionEvalScenario[] {
   return capabilityDecisionBasicsDataset.cases.map((testCase) => {
     const capabilityList = capabilities(testCase.input);
-    const candidates = searchCapabilities(testCase.input.baselineSearchQuery, capabilityList);
-    const schemaParams = { capabilityCandidates: candidates.map(({ name }) => ({ name })) };
+    const query = capabilitySearchQuery(testCase.input);
+    const candidates = searchCapabilities(query, capabilityList);
+    const generalTools = testCase.input.generalToolsAvailable.map((name) => ({
+      name,
+      description: `General tool ${name}`,
+    })) as never;
+    const generalAvailable = testCase.input.generalToolsAvailable.length > 0;
+    const schemaParams = {
+      capabilityCandidates: candidates.map(({ name }) => ({ name })),
+      generalAvailable,
+    };
     const render = (method?: StructuredOutputMethod): RenderedDecisionPrompt => ({
-      system: buildRouteDecisionSystemPrompt({
+      system: buildCapabilityDecisionSystemPrompt({
         actor,
-        outputInstruction: buildRouteDecisionOutputInstruction(schemaParams, method),
+        outputInstruction: buildCapabilityDecisionOutputInstruction(schemaParams, method),
       }),
-      input: buildRouteDecisionInput({
+      input: buildCapabilityDecisionInput({
         pendingTask: {
           task: testCase.input.task,
           contextSummary: testCase.input.contextSummary ?? null,
-          searchKeywords: testCase.input.baselineSearchQuery,
         },
-        targetsContext: buildRouteTargetsContext({
-          generalTools: (testCase.input.generalToolsAvailable ?? []).map((name) => ({
-            name,
-            description: `General tool ${name}`,
-          })) as never,
+        availableExecutorsContext: buildCapabilityDecisionAvailableExecutorsContext({
+          generalTools,
           capabilityCandidates: candidates,
-          capabilitySearchAttempted: true,
-          capabilitySearchQuery: testCase.input.baselineSearchQuery,
-          capabilityRegistryAvailable: capabilityList.length > 0,
         }),
       }),
     });
     return {
       target: 'capability',
       contract: 'capability.executor-selection',
-      objective: `Select ${testCase.expected.expectedLane} for the immutable current task. ${testCase.expected.reason}`,
+      objective: `Select ${testCase.expected.expectedSelection} for the immutable current task. ${testCase.expected.reason}`,
       datasetName: capabilityDecisionBasicsDataset.name,
       caseId: testCase.id,
       caseName: testCase.name,
-      expectedSummary: testCase.expected.expectedLane,
+      expectedSummary: testCase.expected.expectedSelection,
       render,
       async run(model, method, config) {
-        const schema = buildRouteDecisionSchema(schemaParams);
-        const raw = await model.withStructuredOutput(
-          schema,
-          buildOrchestrationDecisionStructuredOutputOptions({ method }),
-        ).invoke(messages(render(method)), config);
-        const decision = schema.parse(raw);
+        let resolvedSelection: string | null = candidates.length === 0
+          ? generalAvailable ? 'general' : CAPABILITY_UNAVAILABLE_SELECTION
+          : null;
+        if (!resolvedSelection) {
+          const schema = buildCapabilityDecisionSchema(schemaParams);
+          const raw = await model.withStructuredOutput(
+            schema,
+            buildOrchestrationDecisionStructuredOutputOptions({ method }),
+          ).invoke(messages(render(method)), config);
+          resolvedSelection = schema.parse(raw).selection;
+        }
         const candidateNames = candidates.map(({ name }) => name);
-        const output = { lane: decision.lane };
+        const output = { selection: resolvedSelection };
         const candidateRecallCorrect = candidateNames.length === testCase.expected.expectedCandidateNames.length
           && candidateNames.every((name) => testCase.expected.expectedCandidateNames.includes(name));
         return {
           output,
           scores: scoreCapabilityDecision(
-            { selectedLane: decision.lane },
+            { selection: resolvedSelection },
             testCase.expected,
           ),
-          verdict: decision.lane,
+          verdict: resolvedSelection,
           shape: `candidates=${candidateNames.length.toString()}`,
           diagnostics: {
             candidateNames,

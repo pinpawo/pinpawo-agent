@@ -12,7 +12,7 @@ import {
   CAPABILITY_DECISION_SYSTEM_PROMPT,
 } from './templates/capabilityDecision.prompt';
 
-export function buildRouteDecisionSystemPrompt(params: {
+export function buildCapabilityDecisionSystemPrompt(params: {
   actor: AgentActor;
   outputInstruction: string;
 }): string {
@@ -23,9 +23,9 @@ export function buildRouteDecisionSystemPrompt(params: {
   });
 }
 
-export function buildRouteDecisionInput(params: {
+export function buildCapabilityDecisionInput(params: {
   pendingTask: RunPendingTask | null;
-  targetsContext?: string | null;
+  availableExecutorsContext?: string | null;
   runtimeContext?: string | null;
 }): string {
   const task = params.pendingTask;
@@ -37,11 +37,12 @@ export function buildRouteDecisionInput(params: {
     contextSummaryBlock: promptBlock(task?.contextSummary
       ? xmlTextBlock('context_summary', clipForPrompt(task.contextSummary, 420))
       : null, 2),
-    searchKeywordsBlock: promptBlock(task?.searchKeywords
-      ? xmlTextBlock('search_keywords', clipForPrompt(task.searchKeywords, 240))
-      : null, 2),
-    routeTargetsBlock: promptBlock(params.targetsContext
-      ? xmlTextBlock('route_targets', params.targetsContext, ' role="fact" source="capability_search"')
+    availableExecutorsBlock: promptBlock(params.availableExecutorsContext
+      ? xmlTextBlock(
+          'available_executors',
+          params.availableExecutorsContext,
+          ' role="fact" source="runtime"',
+        )
       : null, 2),
   });
 }

@@ -68,6 +68,7 @@ test('delegation outcome decision schema is verdict-only', () => {
   }
   assert.equal(schema.safeParse({ outcome: 'task_done', gap_note: null }).success, true);
   assert.equal(schema.safeParse({ outcome: 'goal_done', gap_note: null }).success, true);
+  assert.equal(schema.safeParse({ outcome: 'await_user', gap_note: '请确认是否继续。' }).success, true);
   assert.equal(schema.safeParse({ outcome: 'next_task' }).success, false);
   assert.equal(schema.safeParse({ action: 'answer' }).success, false);
 
@@ -90,7 +91,7 @@ test('delegation outcome decision schema is verdict-only', () => {
   }
 });
 
-test('delegation outcome schema keeps gap_note on continue and strips it elsewhere', () => {
+test('delegation outcome schema keeps gap_note on non-terminal outcomes and strips it elsewhere', () => {
   const schema = buildDelegationOutcomeDecisionSchema();
 
   const continueWithGap = schema.safeParse({ outcome: 'continue', gap_note: '未验证 issue 状态。' });
@@ -110,6 +111,15 @@ test('delegation outcome schema keeps gap_note on continue and strips it elsewhe
   assert.equal(continueWithBlankGap.success, true);
   if (continueWithBlankGap.success) {
     assert.equal(continueWithBlankGap.data.gap_note, null);
+  }
+
+  const awaitUserWithGap = schema.safeParse({
+    outcome: 'await_user',
+    gap_note: '请确认是否改用只读方案。',
+  });
+  assert.equal(awaitUserWithGap.success, true);
+  if (awaitUserWithGap.success) {
+    assert.equal(awaitUserWithGap.data.gap_note, '请确认是否改用只读方案。');
   }
 
   // Stray gap_note on a terminal outcome is harmless model noise: normalized

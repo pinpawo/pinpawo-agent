@@ -266,6 +266,7 @@ START → prepare → compactContext
   → delegationOutcomeIterationGuard
   → delegationOutcomeDecision
       ├─ continue → capability | general
+      ├─ await_user → answer（保留 active delegation + lane）
       ├─ task_done → capabilityPlanner
       └─ goal_done → answer → END
 ```

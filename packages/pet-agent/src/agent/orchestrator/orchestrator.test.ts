@@ -11,6 +11,10 @@ import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentModels } from '../../types/agent';
 import { defineToolset, type AgentToolkit } from '../../types/toolkit';
 import { createSubagent } from '../../subagent/createSubagent';
+import {
+  isToolReviewCancellationMessage,
+  markToolReviewCancellationMessage,
+} from '../../subagent/completionReason';
 import { runAgent } from '../runAgent';
 import { buildOrchestratorRunInput, createOrchestratorGraph } from '../createAgentRuntime';
 import {
@@ -153,6 +157,10 @@ function taskDoneDecision(gapNote: string | null = '当前任务已完成，但�
 
 function continueDecision(gapNote: string | null = '当前 delegated task 还未达标，继续执行。') {
   return { outcome: 'continue', gap_note: gapNote };
+}
+
+function awaitUserDecision(gapNote: string | null = '需要用户补充信息后继续。') {
+  return { outcome: 'await_user', gap_note: gapNote };
 }
 
 test('capability search ranks matching capability and keeps original query terms', () => {
@@ -2083,6 +2091,8 @@ test('toolkit review cancellation ends subagent without retrying tools', async (
   const lastMessage = result.messages.at(-1);
   assert.ok(AIMessage.isInstance(lastMessage));
   assert.match(String(lastMessage.content), /已停止执行工具调用/);
+  assert.equal(isToolReviewCancellationMessage(lastMessage), true);
+  assert.equal(result.completionReason, 'cancelled');
 });
 
 test('toolkit review materializes distinct fallback ids for missing tool call ids', async () => {
@@ -2795,7 +2805,7 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
   assert.equal(readLatestAnnounce(finalState.messages, { runId: finalState.runId }), null);
 });
 
-test('toolkit review policy stops after human reject without requesting another tool', async () => {
+test('toolkit review cancellation preserves and resumes the same delegation transcript', async () => {
   let runCount = 0;
   let reviewCount = 0;
   const rawTool = tool(async ({ command }: { command: string }) => {
@@ -2826,7 +2836,10 @@ test('toolkit review policy stops after human reject without requesting another 
                 {
                   id: 'reject',
                   label: 'Reject',
-                  decision: { type: 'reject' },
+                  decision: {
+                    type: 'reject',
+                    message: '不要发 PR comment，直接给我结果。',
+                  },
                 },
               ],
             });
@@ -2847,6 +2860,12 @@ test('toolkit review policy stops after human reject without requesting another 
         routeCallCount += 1;
         if (routeCallCount === 1) {
           return nextTaskDecision('run shell');
+        }
+        if (routeCallCount === 2) {
+          return awaitUserDecision('工具调用已取消，保留现有执行上下文。');
+        }
+        if (routeCallCount === 3) {
+          return continueDecision('不要发 PR comment，直接整理已有结果。');
         }
         return goalDoneDecision();
       },
@@ -2876,7 +2895,9 @@ test('toolkit review policy stops after human reject without requesting another 
     actor: testActor,
     checkpoint: new MemorySaver(),
   });
+  const recorder = createSubagentInputRecorder();
   const config = {
+    callbacks: recorder.callbacks,
     configurable: {
       thread_id: 'human-reject-stops-review-loop',
       actor: testActor,
@@ -2915,7 +2936,8 @@ test('toolkit review policy stops after human reject without requesting another 
   }
   const finalState = await resumedRun.output as {
     __interrupt__?: unknown;
-    messages: unknown[];
+    messages: BaseMessage[];
+    taskActiveDelegation: TaskActiveDelegation | null;
   };
 
   assert.equal(finalState.__interrupt__, undefined);
@@ -2924,6 +2946,43 @@ test('toolkit review policy stops after human reject without requesting another 
   // the second model-proposed tool call after the reject.
   assert.equal(reviewCount, 2);
   assert.equal(readToolMessageContent(finalState.messages, 'call-after-reject'), undefined);
+
+  const activeAfterCancellation = finalState.taskActiveDelegation;
+  assert.ok(activeAfterCancellation);
+  assert.equal(activeAfterCancellation.status, 'awaiting_decision');
+  assert.equal(
+    mainConversationMessages(finalState.messages)
+      .some((message) => getMessageHandoffSource(message)?.delegationId === activeAfterCancellation.id),
+    false,
+  );
+  const retainedLane = laneMessages(
+    finalState.messages,
+    activeAfterCancellation.lane,
+    activeAfterCancellation.transcriptRunId,
+    activeAfterCancellation.id,
+  );
+  const cancellationMessage = retainedLane.find(isToolReviewCancellationMessage);
+  assert.ok(cancellationMessage);
+  assert.equal(getPinpetMeta(cancellationMessage).completionReason, 'cancelled');
+
+  // A later user turn resumes the same delegation. Force the fake model past
+  // the deliberately forbidden second tool proposal so this invocation emits a
+  // natural-language deliverable from the retained transcript.
+  subagentModel.index = 2;
+  const continuedState = await graph.invoke(
+    buildOrchestratorRunInput([new HumanMessage('给我报告。')]),
+    config,
+  ) as OrchestratorStateType;
+
+  const resumedSubagentInput = recorder.subagentInputs.at(-1) ?? [];
+  assert.equal(
+    resumedSubagentInput.some((message) =>
+      message instanceof ToolMessage
+      && message.tool_call_id === 'call-rejected'),
+    true,
+  );
+  assert.equal(resumedSubagentInput.some(isToolReviewCancellationMessage), true);
+  assert.equal(continuedState.taskActiveDelegation, null);
 });
 
 test('toolkit review resumes multiple reviewed tool calls in one model response', async () => {
@@ -4028,6 +4087,84 @@ test('delegation outcome does not handoff a limit_reached announce', async () =>
   assert.equal(state.taskActiveDelegation?.status, 'awaiting_decision');
   assert.equal(state.runDelegationSummaries.find((item) => item.id === activeDelegation.id)?.status, 'progress');
   assert.equal(state.messages.filter((message) => getMessageLane(message) === 'general').length > 0, true);
+});
+
+test('delegation outcome cannot clear a cancelled lane even when the model returns goal_done', async () => {
+  let answerSystemContext = '';
+  const routeModel = {
+    invoke: async (messages: BaseMessage[]) => {
+      answerSystemContext = messages.map((message) => String(message.content)).join('\n');
+      return new AIMessage('已停止该工具调用，并保留当前任务上下文。');
+    },
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async () => goalDoneDecision(),
+    }),
+  } as unknown as AgentModels['act'];
+  const graph = createOrchestratorGraph({
+    models: {
+      act: routeModel,
+      observe: routeModel,
+    },
+    actor: testActor,
+  });
+  const baseInput = buildOrchestratorRunInput([new HumanMessage('继续')]);
+  const activeDelegation: TaskActiveDelegation = {
+    id: 'cancelled-active',
+    lane: 'general',
+    task: '审查 PR 并给出报告',
+    contextSummary: null,
+    transcriptRunId: baseInput.runId,
+    status: 'awaiting_decision',
+    resultPreview: '工具调用已取消。',
+  };
+  const cancelledAnnounce = new AIMessage('工具调用已取消；不要发 PR comment，直接给出报告。');
+  cancelledAnnounce.id = 'cancelled-announce';
+  markToolReviewCancellationMessage(cancelledAnnounce);
+  setPinpetMeta(cancelledAnnounce, {
+    lane: 'general',
+    runId: baseInput.runId,
+    delegationId: activeDelegation.id,
+    isAnnounce: true,
+    completionReason: 'cancelled',
+    task: activeDelegation.task,
+  });
+
+  const state = await graph.invoke({
+    ...baseInput,
+    messages: [...baseInput.messages, cancelledAnnounce],
+    taskActiveDelegation: activeDelegation,
+    runDelegationSummaries: [{
+      id: activeDelegation.id,
+      lane: activeDelegation.lane,
+      task: activeDelegation.task,
+      status: 'progress',
+      resultPreview: activeDelegation.resultPreview,
+    }],
+  }, {
+    configurable: {
+      thread_id: 'cancelled-announce-no-handoff',
+      actor: testActor,
+      capabilities: [],
+      toolkits: [],
+    },
+  }) as OrchestratorStateType;
+
+  assert.equal(
+    mainConversationMessages(state.messages)
+      .some((message) => getMessageHandoffSource(message)?.delegationId === activeDelegation.id),
+    false,
+  );
+  assert.equal(state.taskActiveDelegation?.id, activeDelegation.id);
+  assert.equal(
+    laneMessages(state.messages, 'general', baseInput.runId, activeDelegation.id)
+      .some((message) => message.id === cancelledAnnounce.id),
+    true,
+  );
+  assert.match(answerSystemContext, /已有执行上下文仍被保留/);
+  assert.match(answerSystemContext, /不要发 PR comment/);
 });
 
 test('delegation outcome uses a unified run-iteration guard before invoking decision', async () => {

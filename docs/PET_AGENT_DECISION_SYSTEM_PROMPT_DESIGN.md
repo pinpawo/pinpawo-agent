@@ -240,14 +240,16 @@ capability search 和 selection 属于同一个 graph node，但职责仍分两�
 | 当前状态 | outcome |
 |---|---|
 | 当前 task 未达标，同一 capability 可继续且不需要用户输入 | `continue` |
+| 当前 task 未完成，继续前需要用户补充、澄清或确认 | `await_user` |
 | 当前 task 已达标，但不能明确断言用户目标已经完成 | `task_done` |
-| 不应继续自主执行：目标已满足，或需要用户澄清/确认 | `goal_done` |
+| 用户目标已经完成 | `goal_done` |
 
 每个 outcome 的条件、字段和后续责任必须在对应分组内完整表达：
 
 - `continue`：当前 task 未达标；同一 capability 可继续且不需要用户输入；`gap_note` 只写当前 task 缺口。
+- `await_user`：当前 task 未完成且需要用户输入；保留 active delegation 和 lane，`gap_note` 说明需要用户补充或确认的内容。
 - `task_done`：当前 task 已达标，但不能明确断言总目标完成；不生成 task，handoff 后由 capabilityPlanner 处理后续。
-- `goal_done`：目标已经满足，或继续前需要用户输入；停止自主执行并交给 answer。
+- `goal_done`：目标已经满足；完成 handoff 并交给 answer。
 
 所有 outcome 都以完整 announce 验收当前 task，以用户目标和其他结论判断 loop 是否结束。本节点不读取
 plan 内容，也不接收 capability registry。
@@ -264,7 +266,7 @@ plan 内容，也不接收 capability registry。
 
 ```ts
 {
-  outcome: 'continue' | 'task_done' | 'goal_done';
+  outcome: 'continue' | 'await_user' | 'task_done' | 'goal_done';
   gap_note?: string | null;
 }
 ```
@@ -307,7 +309,7 @@ schema 不包含 task、plan、search keywords、lane、capability 或用户回�
 - capabilityPlanner(entry)：创建 concrete head + deferred tail，不过度拆分。
 - capabilityPlanner(boundary)：结合完整 handoff 具体化、取消或保留 tail。
 - capabilityDecision：candidate recall、custom/general selection、未注册 capability fallback。
-- outcomeDecision：continue / task_done / goal_done 边界，不产生 next task。
+- outcomeDecision：continue / await_user / task_done / goal_done 边界，不产生 next task。
 - multi-task flow：entry 只调用一次，第 2+ task 经 boundary planner materialize，每个 task 独立经过 capabilityDecision，lane messages 隔离，结论只通过 handoff 传递。
 
 生产 runner：

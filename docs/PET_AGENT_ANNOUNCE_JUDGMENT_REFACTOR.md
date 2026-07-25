@@ -65,13 +65,14 @@ handoff 动作（在 delegationOutcomeDecision 写回 state 的同一步内做�
 > 这些是与作者对齐后定下的、直接决定实现形状的点。实现时按此执行，不再重新讨论。
 
 **D1 — handoff 的“完成”信号 = outcomeDecision 的 verdict，不读 completionReason。**
-- outcomeDecision 的 `outcome` 就是验收判定：`continue`=当前 task 未完成；
-  `task_done`=当前 task 完成、总目标仍需下一 task；`goal_done`=总目标完成。
+- outcomeDecision 的 `outcome` 就是验收判定：`continue`=当前 task 未完成且可自主继续；
+  `await_user`=当前 task 未完成且需要用户输入；`task_done`=当前 task 完成、总目标仍需下一 task；
+  `goal_done`=总目标完成。
 - 因此 **handoff 触发 = `task_done | goal_done`**。runtime 不拿
   `completionReason==='natural'` 自己推断完成；natural 只表示 subagent 正常停止。
 - 单线 delegation 下只 handoff 当前 `taskActiveDelegation`。`continue` 保留 lane 并继续同一
-  delegation；`runDelegationSummaries` 只是本 run 的 prompt/debug 摘要，不作为 unfinished task
-  的控制流来源。
+  delegation；`await_user` 同样保留 active delegation 和 lane，下一次用户输入后继续验收或续跑。
+  `runDelegationSummaries` 只是本 run 的 prompt/debug 摘要，不作为 unfinished task 的控制流来源。
 - `completionReason` 仅作为线索喂进 decision 输入（见 D4），不参与 runtime 的 handoff 判定。
 
 **D2 — 溯源 metadata：最小且足以确定身份。**
@@ -120,7 +121,7 @@ handoff 复制出的 main 消息，`additional_kwargs.pinpawo` 带：
 | `laneMessagesForStateUpdate` | completed 才删中间 transcript | 由 handoff 动作取代（copy + 清空 lane） |
 | `answerConversationMessages`（#233 新增） | 去 lane 里捞 completed+progress announce | 不再需要；answer 直接读 main queue |
 | `buildSubagentAnnounceContext`（prompts.ts:326） | 给 decision 喂 `状态：completed/progress`（先入为主） | 去掉“状态”，只喂 announce 文本 + completionReason 线索，让 decision 真正判 |
-| `delegationOutcomeDecision` | 读已写死的 tag，做“追认” | 判定 `continue/task_done/goal_done`，完成 verdict 触发 handoff |
+| `delegationOutcomeDecision` | 读已写死的 tag，做“追认” | 判定 `continue/await_user/task_done/goal_done`；完成 verdict 触发 handoff，`await_user` 保留 lane |
 | delegation state | 依赖 announce/runDelegations 的 progress 状态 | 未完成 delegation 由 `taskActiveDelegation` 表示；`runDelegationSummaries` 只保留本 run 摘要 |
 
 ## 6. 当前落地形态
@@ -128,7 +129,7 @@ handoff 复制出的 main 消息，`additional_kwargs.pinpawo` 带：
 1. `createSubagent` 返回显式 `announceMessageId`。
 2. `tagNewLaneMessages` 按 ID 标记 announce，并给新增消息写入 lane/runId/delegationId。
 3. `buildSubagentHandoff` 按当前 active delegation 构造 main copy 与 lane `RemoveMessage`。
-4. outcomeDecision 的 completed verdict 把 handoff update 写入 state；`continue` 只追加 continuation briefing。
+4. outcomeDecision 的 completed verdict 把 handoff update 写入 state；`continue` 只追加 continuation briefing；`await_user` 保留 active delegation 和 lane，等待下一轮用户输入。
 5. answer 统一读取 `mainConversationMessages()`。
 
 ## 7. 验收标准（重构后必须成立）
@@ -139,6 +140,7 @@ handoff 复制出的 main 消息，`additional_kwargs.pinpawo` 带：
   的 lane 消息（原 announce + 中间 transcript）在 state 里**全部消失**。
 - **完成 A 同时委派 B**：A 的 handoff 照常发生（不被 B 的新委派抑制）。
 - **progress 不动 main**：limit_reached / decision 判未完成时，main queue **不变**，subagent lane 原样保留，可续跑。
+- **取消不清 lane**：用户在 tool review 中取消工具调用时，announce 带结构化 `completionReason=cancelled`；`continue` 或 `await_user` 均不产生 handoff，原 transcript 保留供下一轮续跑。
 - **answer 忠实复述**：用户要求“重发之前的结果”时，answer node 从 main queue 就能读到 handoff 副本，不再依赖 `answerConversationMessages`；旧的“压缩后仍可复述”测试仍通过。
 - **decision 不再被先入为主**：decision 输入不含 `状态：completed/progress`，只有 announce 文本 + 停止原因。
 - **无裸 ToolMessage 残留进 answer**：review P2#1 场景不再可复现。

@@ -13,6 +13,7 @@ export {
   type ContextCompactionWatermarkGuardState,
 } from './contextCompactionWatermarkGuard';
 export {
+  ACTIVE_DELEGATION_CANCELLED,
   ACTIVE_DELEGATION_LIMIT_REACHED,
   DELEGATION_HANDOFF_ALLOWED,
   delegationOutcomeDecisionGuard,

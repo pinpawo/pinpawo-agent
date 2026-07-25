@@ -33,6 +33,7 @@ import {
 } from './prompts/templates/contextSummary.prompt';
 import { SUBAGENT_GOVERNING_PROMPT } from './prompts/templates/governing.prompt';
 import { messageHasToolCalls } from '../utils/messages';
+import { isToolReviewCancellationMessage } from './completionReason';
 
 // Fallback model-call budget when the caller does not pass maxIterations. The
 // subagent iteration guard should stop gracefully first; LangGraph recursionLimit
@@ -300,6 +301,9 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     // Summarization may rewrite the list so an index-based slice is unreliable.
     const lastMessage = latestMessages.at(-1);
     const stoppedByGuard = lastMessage ? isSubagentGuardStopMessage(lastMessage) : false;
+    const cancelledByToolReview = lastMessage
+      ? isToolReviewCancellationMessage(lastMessage)
+      : false;
     const announceMessageId = stoppedByGuard
       ? findLatestDeliverableMessageId(latestMessages, inputMessageIds)
       : lastMessage?._getType() === 'ai'
@@ -309,7 +313,11 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     return {
       messages: latestMessages,
       artifacts: inputState.artifacts ?? [],
-      completionReason: stoppedByGuard ? 'limit_reached' : 'natural',
+      completionReason: stoppedByGuard
+        ? 'limit_reached'
+        : cancelledByToolReview
+          ? 'cancelled'
+          : 'natural',
       announceMessageId,
     };
   } catch (err) {

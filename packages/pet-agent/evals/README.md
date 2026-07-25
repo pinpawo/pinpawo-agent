@@ -57,7 +57,7 @@ recreate datasets.
   clarification, and fixed completion-acknowledgement behavior.
 - `agent-entry-decision-basics`: eval contract for `answer | direct_task | needs_plan`.
 - `agent-capability-decision-basics`: end-to-end capability search and selection from a current task.
-- `agent-outcome-decision-basics`: `continue | task_done | goal_done` verdict boundaries.
+- `agent-outcome-decision-basics`: `continue | await_user | task_done | goal_done` verdict boundaries.
 - `agent-capability-planning-basics`: production `planner@entry` and `planner@boundary` contracts.
 - `agent-multi-task-flow-basics`: real graph baseline across meaningful task boundaries.
 - `agent-tool-review-reject-runtime`: runtime regression case for reviewed tool-call rejection stopping subagent execution and handing off the cancellation announce.

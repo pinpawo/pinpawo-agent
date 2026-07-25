@@ -54,6 +54,7 @@ import {
 } from '../../delegations';
 import { materializeDelegation } from '../../delegationBriefing';
 import {
+  ACTIVE_DELEGATION_CANCELLED,
   ACTIVE_DELEGATION_LIMIT_REACHED,
   delegationOutcomeDecisionGuard,
   ORCHESTRATOR_GUARD_POSITION,
@@ -362,7 +363,10 @@ function buildDecisionContext(params: {
   }, { emit: guardDecisionEmitter(runnableConfig), runId: state.runId });
   const canHandoffActiveDelegation = !(
     handoffGuardOutcome?.kind === 'derive'
-    && handoffGuardOutcome.reason === ACTIVE_DELEGATION_LIMIT_REACHED
+    && (
+      handoffGuardOutcome.reason === ACTIVE_DELEGATION_LIMIT_REACHED
+      || handoffGuardOutcome.reason === ACTIVE_DELEGATION_CANCELLED
+    )
   );
   const preDecisionHandoffMessages =
     canHandoffActiveDelegation
@@ -711,6 +715,22 @@ function buildDelegationOutcomeDecisionResult(params: {
         activeDelegation,
         gapNote: readDecisionText(decision.gap_note),
       }),
+    };
+  }
+
+  if (decision.outcome === 'await_user') {
+    return {
+      goto: 'answer',
+      update: {
+        runNextDelegation: null,
+        runPendingTask: null,
+        taskActiveDelegation: {
+          ...activeDelegation,
+          contextSummary: readDecisionText(decision.gap_note)
+            ?? activeDelegation.contextSummary,
+          status: 'awaiting_decision',
+        },
+      },
     };
   }
 

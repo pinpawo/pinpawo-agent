@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { AIMessage, RemoveMessage, ToolMessage, type BaseMessage, type ToolCall } from '@langchain/core/messages';
 import { REMOVE_ALL_MESSAGES, interrupt } from '@langchain/langgraph';
+import { markToolReviewCancellationMessage } from '../../subagent/completionReason';
 import { createMiddleware, type AnyAgentMiddleware } from 'langchain';
 import { z } from 'zod';
 import type {
@@ -778,7 +779,7 @@ function buildCancellationFinalMessage(params: {
   const content = params.toolCallCount > 1
     ? `已停止本次工具调用请求；${params.toolCallCount} 个工具调用均未执行。触发项：${toolName}。原因：${reason}`
     : `已停止执行工具调用：${toolName}。原因：${reason}`;
-  return new AIMessage({ content });
+  return markToolReviewCancellationMessage(new AIMessage({ content }));
 }
 
 function readCancellationReason(content: string) {

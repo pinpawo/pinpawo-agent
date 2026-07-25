@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import type { AgentToolkit } from '@pinpawo/pet-agent';
 import {
   htmlToText,
   httpFetchTool,
@@ -7,6 +8,10 @@ import {
   sanitizeFilename,
 } from './toolkits/local/networkTools';
 import { createBashToolkit } from './toolkits/local';
+
+function definition(toolkit: AgentToolkit, toolName: string) {
+  return toolkit.tools.find((item) => item.tool.name === toolName);
+}
 
 test('network tool helpers sanitize names and infer image extensions', () => {
   assert.equal(sanitizeFilename('a/b:c?.png'), 'a_b_c_.png');
@@ -44,8 +49,8 @@ test('httpFetchTool uses mocked fetch and returns readable text', async (t) => {
 
 test('bash toolkit external access policy reviews configured network calls', async () => {
   const toolkit = createBashToolkit();
-  const httpPolicy = toolkit.policy?.toolReview?.http_fetch;
-  const downloadPolicy = toolkit.policy?.toolReview?.download_file;
+  const httpPolicy = definition(toolkit, 'http_fetch')?.review;
+  const downloadPolicy = definition(toolkit, 'download_file')?.review;
   assert.ok(httpPolicy);
   assert.ok(downloadPolicy);
 
@@ -64,7 +69,7 @@ test('bash toolkit external access policy reviews configured network calls', asy
     ...baseContext,
     toolName: 'http_fetch',
     input: { url: 'https://example.test/page' },
-    operation: toolkit.operations?.http_fetch,
+    operation: definition(toolkit, 'http_fetch')?.operation,
   });
   assert.equal(getReview && 'schemaVersion' in getReview ? getReview.view.title : null, '请求网页');
   assert.deepEqual(
@@ -76,7 +81,7 @@ test('bash toolkit external access policy reviews configured network calls', asy
     ...baseContext,
     toolName: 'http_fetch',
     input: { url: 'https://example.test/page', method: 'POST', body: 'ok' },
-    operation: toolkit.operations?.http_fetch,
+    operation: definition(toolkit, 'http_fetch')?.operation,
   });
   assert.equal(postReview && 'schemaVersion' in postReview ? postReview.view.title : null, '请求网页');
 
@@ -84,7 +89,7 @@ test('bash toolkit external access policy reviews configured network calls', asy
     ...baseContext,
     toolName: 'download_file',
     input: { url: 'https://example.test/file.txt' },
-    operation: toolkit.operations?.download_file,
+    operation: definition(toolkit, 'download_file')?.operation,
   });
   assert.equal(downloadReview && 'schemaVersion' in downloadReview ? downloadReview.view.title : null, '下载文件');
   assert.deepEqual(

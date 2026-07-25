@@ -30,7 +30,7 @@ export type LocalAgentOperationEntry = {
   summary?: string;
   details?: Record<string, unknown>;
   operationSource?: {
-    provider: 'toolkit' | 'toolset' | 'runtime';
+    provider: 'toolkit' | 'runtime';
     name: string;
     toolName?: string;
     callId?: string;

@@ -6,7 +6,7 @@ import {
   type AgentActor,
   type AgentToolkit,
   type NamedStructuredTool,
-  type ToolkitOperationMetadata,
+  type ToolOperationMetadata,
 } from '@pinpawo/pet-agent';
 
 export type PetProfileToolOptions = {
@@ -85,7 +85,7 @@ const petProfileOperationMetadata = {
       };
     },
   },
-} satisfies Record<string, ToolkitOperationMetadata>;
+} satisfies Record<string, ToolOperationMetadata>;
 
 export function createPetProfileTool(options: PetProfileToolOptions): StructuredTool {
   return tool(
@@ -105,7 +105,9 @@ export function createPetProfileToolkit(options: PetProfileToolOptions): AgentTo
   return defineToolkit({
     name: 'pet_profile',
     description: '读取当前宠物的基本信息、自我介绍和补充资料。',
-    tools: [petProfileTool] as const,
-    operations: petProfileOperationMetadata,
+    tools: [{
+      tool: petProfileTool,
+      operation: petProfileOperationMetadata.describe_pet_profile,
+    }] as const,
   });
 }

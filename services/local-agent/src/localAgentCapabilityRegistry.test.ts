@@ -1,17 +1,36 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { StructuredTool } from '@langchain/core/tools';
-import type { AgentCapability, AgentToolkit } from '@pinpawo/pet-agent';
+import { tool, type StructuredTool } from '@langchain/core/tools';
+import {
+  defineInstructionDocument,
+  type AgentCapability,
+  type AgentToolkit,
+} from '@pinpawo/pet-agent';
+import { z } from 'zod';
 import type { LoadedUserCapability } from './capabilityLoader';
 import { LocalAgentCapabilityRegistry } from './localAgentCapabilityRegistry';
 import { createBashToolkit, createGitToolkit } from './toolkits/local';
 import { createBrowserToolkit } from './toolkits/browser';
 
-function capability(name: string): AgentCapability {
+function mockTool(name: string): StructuredTool {
+  return tool(
+    async () => `${name} result`,
+    {
+      name,
+      description: `${name} test tool`,
+      schema: z.object({}),
+    },
+  );
+}
+
+function capability(name: string, uses: readonly string[] = []): AgentCapability {
   return {
     name,
     description: `${name} capability`,
-    createRuntime: () => ({}),
+    uses,
+    instructions: defineInstructionDocument({
+      content: `Execute ${name}.`,
+    }),
   };
 }
 
@@ -31,12 +50,11 @@ function loadedUserCapability(name: string): LoadedUserCapability {
 }
 
 test('LocalAgentCapabilityRegistry loads resources and rescans user capabilities', async () => {
-  const localTool = { name: 'local-tool' } as StructuredTool;
+  const localTool = mockTool('local-tool');
   const userCapabilityBatches = [
     [loadedUserCapability('enabled-user-cap'), loadedUserCapability('disabled-user-cap')],
     [loadedUserCapability('rescanned-user-cap')],
   ];
-  const availabilityForceValues: Array<boolean | undefined> = [];
 
   const registry = new LocalAgentCapabilityRegistry({
     loadLocalTools: async () => [localTool],
@@ -45,30 +63,21 @@ test('LocalAgentCapabilityRegistry loads resources and rescans user capabilities
       {
         name: 'available-toolkit',
         description: 'available toolkit',
-        tools: localTools,
+        tools: localTools.map((tool) => ({ tool })),
       },
       {
         name: 'unavailable-toolkit',
         description: 'unavailable toolkit',
+        tools: [{ tool: localTool }],
       },
     ],
     createLocalCapabilities: () => [
-      capability('available-local-cap'),
+      capability('available-local-cap', ['available-toolkit']),
       capability('unavailable-local-cap'),
+      capability('missing-toolkit-local-cap', ['unavailable-toolkit']),
     ],
     resolveAvailableToolkits: async (toolkits: AgentToolkit[]) =>
       toolkits.filter((toolkit) => toolkit.name !== 'unavailable-toolkit'),
-    resolveAvailableCapabilities: async (capabilities: AgentCapability[]) =>
-      capabilities.filter((item) => item.name !== 'unavailable-local-cap'),
-    resolveCapabilityAvailability: async (capabilityItem, options) => {
-      availabilityForceValues.push(options?.force);
-      return {
-        capability: capabilityItem,
-        availability: {
-          available: capabilityItem.name !== 'disabled-user-cap',
-        },
-      };
-    },
   });
 
   await registry.load();
@@ -81,28 +90,26 @@ test('LocalAgentCapabilityRegistry loads resources and rescans user capabilities
   assert.deepEqual(registry.getLocalToolkits().map((item) => item.name), [
     'available-toolkit',
   ]);
-  assert.deepEqual(registry.getLocalCapabilityDefinitions().map((item) => item.name), [
+  assert.deepEqual(registry.getLocalCapabilities().map((item) => item.name), [
     'available-local-cap',
     'unavailable-local-cap',
+    'missing-toolkit-local-cap',
   ]);
-  assert.deepEqual(registry.getLocalCapabilities().map((item) => item.name), ['available-local-cap']);
-  assert.deepEqual(registry.getUserCapabilityDefinitions().map((item) => item.meta.id), [
+  assert.deepEqual(registry.getUserCapabilities().map((item) => item.meta.id), [
     'enabled-user-cap',
     'disabled-user-cap',
   ]);
-  assert.deepEqual(registry.getUserCapabilities().map((item) => item.meta.id), ['enabled-user-cap']);
 
   const rescanned = await registry.rescanUserCapabilities();
 
-  assert.deepEqual(rescanned.userCapabilityDefinitions.map((item) => item.meta.id), ['rescanned-user-cap']);
-  assert.deepEqual(rescanned.userCapabilities.map((item) => item.meta.id), ['rescanned-user-cap']);
+  assert.deepEqual(rescanned.map((item) => item.meta.id), ['rescanned-user-cap']);
   assert.deepEqual(registry.getUserCapabilities().map((item) => item.meta.id), ['rescanned-user-cap']);
-  assert.deepEqual(availabilityForceValues, [undefined, undefined, true]);
 });
 
 test('LocalAgentCapabilityRegistry default toolkits include git toolkit', async () => {
+  const localTool = mockTool('local-tool');
   const registry = new LocalAgentCapabilityRegistry({
-    loadLocalTools: async () => [],
+    loadLocalTools: async () => [localTool],
     loadUserCapabilities: async () => [],
     createLocalToolkits: (localTools) => [
       createBashToolkit(localTools),
@@ -110,11 +117,6 @@ test('LocalAgentCapabilityRegistry default toolkits include git toolkit', async 
       createBrowserToolkit(),
     ],
     resolveAvailableToolkits: async (toolkits) => toolkits,
-    resolveAvailableCapabilities: async (capabilities) => capabilities,
-    resolveCapabilityAvailability: async (capabilityItem) => ({
-      capability: capabilityItem,
-      availability: { available: true },
-    }),
   });
 
   await registry.load();
@@ -124,7 +126,7 @@ test('LocalAgentCapabilityRegistry default toolkits include git toolkit', async 
     ['bash', 'git', 'browser'],
   );
   assert.ok(
-    registry.getLocalCapabilityDefinitions().some((item) => item.name === 'explore'),
+    registry.getLocalCapabilities().some((item) => item.name === 'explore'),
     'default local capabilities should include explore',
   );
 });

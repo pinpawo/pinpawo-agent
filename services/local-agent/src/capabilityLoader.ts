@@ -1,34 +1,65 @@
 /**
- * Capability plugin loader.
+ * Loads directory-authored capabilities from CAPABILITY.md.
  *
- * Discovers and loads user-defined capabilities from ~/.pinpawo/capabilities/.
- * Each capability lives in its own sub-directory:
- *
- *   ~/.pinpawo/capabilities/
- *     my-capability/
- *       manifest.json   ← UI metadata (id, name, icon, …)
- *       index.js        ← exports createCapability(): AgentCapability
- *
- * Built-in capabilities are wired separately in agentChannel.ts with their
- * runtime dependencies (savePost, markUsed, …); this loader only handles
- * user-defined extension capabilities.
+ * The Markdown frontmatter owns routing metadata and required Toolkit
+ * dependencies. The body is the immutable instruction document. JavaScript is
+ * optional and, when declared through `entry`, may only export
+ * `lifecycle.finalize`.
  */
 
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { resolve } from 'node:path';
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
+import { isAbsolute, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { AgentCapability } from '@pinpawo/pet-agent';
+import {
+  defineCapability,
+  defineInstructionDocument,
+  type AgentCapability,
+  type CapabilityLifecycle,
+} from '@pinpawo/pet-agent';
 import type { CapabilityMeta } from './capabilityRegistry';
 import { loadStoredConfig } from './storage';
 
-/** Default user-global capabilities directory — always scanned. */
 export const DEFAULT_CAPABILITIES_DIR = resolve(homedir(), '.pinpawo', 'capabilities');
+export const CAPABILITY_DOCUMENT_NAME = 'CAPABILITY.md';
+export const CAPABILITY_DOCUMENT_MAX_BYTES = 64 * 1024;
 
-/** Expand ~ in a path string. */
-function expandHome(p: string): string {
-  if (p === '~' || p.startsWith('~/')) return homedir() + p.slice(1);
-  return p;
+type CapabilityFrontmatter = {
+  name: string;
+  description: string;
+  uses: string[];
+  version: 1;
+  icon?: string;
+  color?: string;
+  defaultEnabled?: boolean;
+  entry?: string;
+};
+
+export type LoadedUserCapability = {
+  meta: CapabilityMeta;
+  capability: AgentCapability;
+};
+
+export type CapabilityPluginValidationResult = {
+  ok: boolean;
+  rootDir: string;
+  capabilityPath: string;
+  entryPath: string | null;
+  meta: CapabilityMeta | null;
+  capability: AgentCapability | null;
+  errors: string[];
+  warnings: string[];
+};
+
+function expandHome(path: string): string {
+  if (path === '~' || path.startsWith('~/')) return homedir() + path.slice(1);
+  return path;
 }
 
 function isDirectoryEntry(root: string, entryName: string): boolean {
@@ -39,149 +70,241 @@ function isDirectoryEntry(root: string, entryName: string): boolean {
   }
 }
 
-/**
- * Resolve all directories to scan for capability plugins.
- * Order: default dir first, then extra dirs from config/env.
- * Deduplicates by resolved absolute path.
- */
 export function resolveCapabilityDirs(): string[] {
   const fromEnv = process.env.PINPAWO_CAPABILITY_DIRS?.split(':').filter(Boolean) ?? [];
   const fromStored = loadStoredConfig().capability_dirs ?? [];
-  const extra = [...fromEnv, ...fromStored].map((d) => resolve(expandHome(d)));
-  const all = [DEFAULT_CAPABILITIES_DIR, ...extra];
-  // deduplicate by resolved path
-  return [...new Map(all.map((d) => [d, d])).values()];
+  const all = [
+    DEFAULT_CAPABILITIES_DIR,
+    ...fromEnv.map((dir) => resolve(expandHome(dir))),
+    ...fromStored.map((dir) => resolve(expandHome(dir))),
+  ];
+  return [...new Set(all)];
 }
 
-export type LoadedUserCapability = {
-  meta: CapabilityMeta;
-  capability: AgentCapability;
-};
-
-export type CapabilityPluginValidationResult = {
-  ok: boolean;
-  rootDir: string;
-  manifestPath: string;
-  indexPath: string;
-  meta: CapabilityMeta | null;
-  capability: AgentCapability | null;
-  errors: string[];
-  warnings: string[];
-};
-
-function readStringField(value: Record<string, unknown>, key: keyof CapabilityMeta, source: string): string {
-  const raw = value[key];
-  if (typeof raw !== 'string' || !raw.trim()) {
-    throw new Error(`${source}: "${key}" must be a non-empty string`);
+function parseScalar(raw: string): string | boolean | number {
+  const value = raw.trim();
+  if (value.startsWith('"') && value.endsWith('"')) {
+    try {
+      return JSON.parse(value) as string;
+    } catch {
+      throw new Error(`invalid quoted frontmatter value: ${value}`);
+    }
   }
-  return raw;
+  if (value.startsWith("'") && value.endsWith("'")) {
+    return value.slice(1, -1);
+  }
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  if (/^\d+$/.test(value)) return Number(value);
+  return value;
 }
 
-function readBooleanField(value: Record<string, unknown>, key: keyof CapabilityMeta, source: string): boolean {
-  const raw = value[key];
-  if (typeof raw !== 'boolean') {
-    throw new Error(`${source}: "${key}" must be a boolean`);
+function parseUsesInline(raw: string): string[] {
+  const value = raw.trim();
+  if (value === '[]') return [];
+  if (!value.startsWith('[') || !value.endsWith(']')) {
+    throw new Error('frontmatter "uses" must be a YAML list');
   }
-  return raw;
+  return value
+    .slice(1, -1)
+    .split(',')
+    .map((item) => String(parseScalar(item)).trim())
+    .filter(Boolean);
 }
 
-export function parseCapabilityManifest(raw: unknown, source: string): CapabilityMeta {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error(`${source}: manifest must be a JSON object`);
+export function parseFrontmatterDocument(
+  source: string,
+  path: string,
+): { frontmatter: CapabilityFrontmatter; body: string } {
+  const normalized = source.replace(/\r\n/g, '\n');
+  if (!normalized.startsWith('---\n')) {
+    throw new Error(`${path}: must start with YAML frontmatter`);
   }
-  const value = raw as Record<string, unknown>;
-  const meta: CapabilityMeta = {
-    id: readStringField(value, 'id', source),
-    name: readStringField(value, 'name', source),
-    description: readStringField(value, 'description', source),
-    icon: readStringField(value, 'icon', source),
-    color: readStringField(value, 'color', source),
-    defaultEnabled: readBooleanField(value, 'defaultEnabled', source),
-    builtIn: readBooleanField(value, 'builtIn', source),
+  const end = normalized.indexOf('\n---\n', 4);
+  if (end < 0) {
+    throw new Error(`${path}: frontmatter closing delimiter is missing`);
+  }
+
+  const header = normalized.slice(4, end);
+  const body = normalized.slice(end + 5).trim();
+  const raw: Record<string, unknown> = {};
+  let listKey: string | null = null;
+  for (const [index, line] of header.split('\n').entries()) {
+    if (!line.trim() || line.trimStart().startsWith('#')) continue;
+    const listItem = line.match(/^\s+-\s+(.+)$/);
+    if (listItem) {
+      if (!listKey) {
+        throw new Error(`${path}:${String(index + 2)}: list item has no field`);
+      }
+      const items = raw[listKey];
+      if (!Array.isArray(items)) {
+        throw new Error(`${path}:${String(index + 2)}: invalid list`);
+      }
+      items.push(String(parseScalar(listItem[1])).trim());
+      continue;
+    }
+
+    const field = line.match(/^([A-Za-z][A-Za-z0-9_]*):(?:\s*(.*))?$/);
+    if (!field) {
+      throw new Error(`${path}:${String(index + 2)}: unsupported frontmatter syntax`);
+    }
+    const [, key, value = ''] = field;
+    listKey = null;
+    if (key === 'uses') {
+      raw[key] = value.trim() ? parseUsesInline(value) : [];
+      listKey = value.trim() ? null : key;
+    } else {
+      raw[key] = parseScalar(value);
+    }
+  }
+
+  const supported = new Set([
+    'name',
+    'description',
+    'uses',
+    'version',
+    'icon',
+    'color',
+    'defaultEnabled',
+    'entry',
+  ]);
+  const unknown = Object.keys(raw).filter((key) => !supported.has(key));
+  if (unknown.length > 0) {
+    throw new Error(`${path}: unsupported frontmatter field(s): ${unknown.join(', ')}`);
+  }
+  if (typeof raw.name !== 'string' || !raw.name.trim()) {
+    throw new Error(`${path}: "name" must be a non-empty string`);
+  }
+  if (typeof raw.description !== 'string' || !raw.description.trim()) {
+    throw new Error(`${path}: "description" must be a non-empty string`);
+  }
+  if (
+    !Array.isArray(raw.uses)
+    || raw.uses.some((name) => typeof name !== 'string' || !name.trim())
+  ) {
+    throw new Error(`${path}: "uses" must contain Toolkit names`);
+  }
+  if (new Set(raw.uses).size !== raw.uses.length) {
+    throw new Error(`${path}: "uses" must not contain duplicate Toolkit names`);
+  }
+  if (raw.version !== 1) {
+    throw new Error(`${path}: "version" must be 1`);
+  }
+  if (!body) {
+    throw new Error(`${path}: Markdown body must not be empty`);
+  }
+  if (Buffer.byteLength(body, 'utf8') > CAPABILITY_DOCUMENT_MAX_BYTES) {
+    throw new Error(`${path}: Markdown body exceeds ${String(CAPABILITY_DOCUMENT_MAX_BYTES)} bytes`);
+  }
+
+  for (const field of ['icon', 'color', 'entry'] as const) {
+    if (raw[field] !== undefined && (typeof raw[field] !== 'string' || !raw[field].trim())) {
+      throw new Error(`${path}: "${field}" must be a non-empty string when present`);
+    }
+  }
+  if (raw.defaultEnabled !== undefined && typeof raw.defaultEnabled !== 'boolean') {
+    throw new Error(`${path}: "defaultEnabled" must be a boolean when present`);
+  }
+
+  return {
+    frontmatter: raw as CapabilityFrontmatter,
+    body,
   };
-  if (value.comingSoon !== undefined) {
-    if (typeof value.comingSoon !== 'boolean') {
-      throw new Error(`${source}: "comingSoon" must be a boolean when present`);
-    }
-    meta.comingSoon = value.comingSoon;
-  }
-  if (meta.builtIn !== false) {
-    throw new Error(`${source}: user capability manifest must set "builtIn": false`);
-  }
-  return meta;
 }
 
-function assertPluginCapability(meta: CapabilityMeta, capability: AgentCapability, source: string) {
-  if (!capability || typeof capability !== 'object') {
-    throw new Error(`${source}: createCapability() must return a capability object`);
+function resolveContainedEntry(rootDir: string, entry: string): string {
+  if (isAbsolute(entry)) {
+    throw new Error('frontmatter "entry" must be relative to the Capability directory');
   }
-  if (typeof capability.name !== 'string' || !capability.name.trim()) {
-    throw new Error(`${source}: capability.name must be a non-empty string`);
+  const entryPath = resolve(rootDir, entry);
+  const relativePath = relative(rootDir, entryPath);
+  if (relativePath === '..' || relativePath.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`)) {
+    throw new Error('frontmatter "entry" must stay inside the Capability directory');
   }
-  if (capability.name !== meta.id) {
-    throw new Error(`${source}: manifest.id (${meta.id}) must match capability.name (${capability.name})`);
+  if (!existsSync(entryPath)) {
+    throw new Error(`Capability entry does not exist: ${entryPath}`);
   }
-  if (typeof capability.description !== 'string' || !capability.description.trim()) {
-    throw new Error(`${source}: capability.description must be a non-empty string`);
+  const realRoot = realpathSync(rootDir);
+  const realEntry = realpathSync(entryPath);
+  const realRelative = relative(realRoot, realEntry);
+  if (realRelative === '..' || realRelative.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`)) {
+    throw new Error('frontmatter "entry" must not escape through a symlink');
   }
-  if (typeof capability.createRuntime !== 'function') {
-    throw new Error(`${source}: capability.createRuntime must be a function`);
-  }
-  if (capability.availability) {
-    if (typeof capability.availability.check !== 'function') {
-      throw new Error(`${source}: capability.availability.check must be a function`);
-    }
-    const cache = capability.availability.cache;
-    if (cache !== undefined && cache !== 'startup' && cache !== 'none') {
-      throw new Error(`${source}: capability.availability.cache must be "startup" or "none"`);
-    }
-  }
+  return entryPath;
 }
 
-async function importCapability(indexPath: string): Promise<AgentCapability> {
-  const url = pathToFileURL(indexPath);
-  url.searchParams.set('v', String(statSync(indexPath).mtimeMs));
-  const mod = await import(url.href) as { createCapability?: () => AgentCapability; default?: () => AgentCapability };
-  const factory = mod.createCapability ?? mod.default;
-  if (typeof factory !== 'function') {
-    throw new Error('index.js must export createCapability() or default');
+async function loadFinalizeLifecycle(entryPath: string): Promise<CapabilityLifecycle> {
+  const url = pathToFileURL(entryPath);
+  url.searchParams.set('v', String(statSync(entryPath).mtimeMs));
+  const module = await import(url.href) as Record<string, unknown>;
+  const exportedKeys = Object.keys(module);
+  if (exportedKeys.some((key) => key !== 'lifecycle')) {
+    throw new Error(`${entryPath}: entry may only export lifecycle`);
   }
-  return factory();
+  const lifecycle = module.lifecycle as Record<string, unknown> | undefined;
+  if (!lifecycle || typeof lifecycle !== 'object' || Array.isArray(lifecycle)) {
+    throw new Error(`${entryPath}: entry must export a lifecycle object`);
+  }
+  const lifecycleKeys = Object.keys(lifecycle);
+  if (lifecycleKeys.some((key) => key !== 'finalize')) {
+    throw new Error(`${entryPath}: lifecycle may only contain finalize`);
+  }
+  if (typeof lifecycle.finalize !== 'function') {
+    throw new Error(`${entryPath}: lifecycle.finalize must be a function`);
+  }
+  return { finalize: lifecycle.finalize as CapabilityLifecycle['finalize'] };
 }
 
-export async function validateCapabilityPlugin(rootDir: string): Promise<CapabilityPluginValidationResult> {
+function toMeta(frontmatter: CapabilityFrontmatter): CapabilityMeta {
+  return {
+    id: frontmatter.name,
+    name: frontmatter.name,
+    description: frontmatter.description,
+    icon: frontmatter.icon ?? 'wand.and.stars',
+    color: frontmatter.color ?? 'purple',
+    defaultEnabled: frontmatter.defaultEnabled ?? true,
+    builtIn: false,
+  };
+}
+
+export async function validateCapabilityPlugin(
+  rootDir: string,
+): Promise<CapabilityPluginValidationResult> {
   const dir = resolve(expandHome(rootDir));
-  const manifestPath = resolve(dir, 'manifest.json');
-  const indexPath = resolve(dir, 'index.js');
+  const capabilityPath = resolve(dir, CAPABILITY_DOCUMENT_NAME);
   const result: CapabilityPluginValidationResult = {
     ok: false,
     rootDir: dir,
-    manifestPath,
-    indexPath,
+    capabilityPath,
+    entryPath: null,
     meta: null,
     capability: null,
     errors: [],
     warnings: [],
   };
-
-  if (!existsSync(manifestPath)) result.errors.push('missing manifest.json');
-  if (!existsSync(indexPath)) result.errors.push('missing index.js');
-  if (result.errors.length > 0) return result;
-
-  try {
-    result.meta = parseCapabilityManifest(
-      JSON.parse(readFileSync(manifestPath, 'utf-8')) as unknown,
-      manifestPath,
-    );
-  } catch (error) {
-    result.errors.push(error instanceof Error ? error.message : String(error));
+  if (!existsSync(capabilityPath)) {
+    result.errors.push(`missing ${CAPABILITY_DOCUMENT_NAME}`);
+    return result;
   }
 
-  if (!result.meta) return result;
-
   try {
-    result.capability = await importCapability(indexPath);
-    assertPluginCapability(result.meta, result.capability, indexPath);
+    const source = readFileSync(capabilityPath, 'utf8');
+    const { frontmatter, body } = parseFrontmatterDocument(source, capabilityPath);
+    const lifecycle = frontmatter.entry
+      ? await loadFinalizeLifecycle(
+        result.entryPath = resolveContainedEntry(dir, frontmatter.entry),
+      )
+      : undefined;
+    result.meta = toMeta(frontmatter);
+    result.capability = defineCapability({
+      name: frontmatter.name,
+      description: frontmatter.description,
+      uses: frontmatter.uses,
+      instructions: defineInstructionDocument({
+        content: body,
+      }),
+      ...(lifecycle ? { lifecycle } : {}),
+    });
   } catch (error) {
     result.errors.push(error instanceof Error ? error.message : String(error));
   }
@@ -190,97 +313,90 @@ export async function validateCapabilityPlugin(rootDir: string): Promise<Capabil
   return result;
 }
 
-/**
- * Load a single directory of capability plugins.
- * Returns only valid, successfully-loaded plugins; skips bad ones with a warning.
- */
 async function loadCapabilitiesFromDir(
   dir: string,
   seenIds: Set<string>,
 ): Promise<LoadedUserCapability[]> {
   if (!existsSync(dir)) return [];
-
   const entries = readdirSync(dir, { withFileTypes: true })
-    .filter((d) => d.isDirectory() || (d.isSymbolicLink() && isDirectoryEntry(dir, d.name)));
+    .filter((entry) => entry.isDirectory() || (entry.isSymbolicLink() && isDirectoryEntry(dir, entry.name)));
   const loaded: LoadedUserCapability[] = [];
 
   for (const entry of entries) {
-    const pluginDir = resolve(dir, entry.name);
-    const manifestPath = resolve(pluginDir, 'manifest.json');
-    const indexPath = resolve(pluginDir, 'index.js');
-
-    if (!existsSync(manifestPath) || !existsSync(indexPath)) {
-      console.warn(`[capabilities] skipping "${entry.name}" in ${dir}: missing manifest.json or index.js`);
-      continue;
-    }
-
-    const validation = await validateCapabilityPlugin(pluginDir);
+    const capabilityDir = resolve(dir, entry.name);
+    const validation = await validateCapabilityPlugin(capabilityDir);
     if (!validation.ok || !validation.meta || !validation.capability) {
-      console.warn(`[capabilities] "${entry.name}" invalid:`, validation.errors.join('; '));
+      if (existsSync(validation.capabilityPath)) {
+        console.warn(`[capabilities] "${entry.name}" invalid: ${validation.errors.join('; ')}`);
+      } else {
+        warnLegacyCapabilityDirectory(capabilityDir, entry.name);
+      }
       continue;
     }
-    const { meta, capability } = validation;
-
-    if (seenIds.has(meta.id)) {
-      console.warn(`[capabilities] duplicate capability id "${meta.id}" in ${dir} — skipped`);
+    if (seenIds.has(validation.meta.id)) {
+      console.warn(`[capabilities] duplicate capability id "${validation.meta.id}" in ${dir} — skipped`);
       continue;
     }
-
-    seenIds.add(meta.id);
-    loaded.push({ meta, capability });
-    console.log(`[capabilities] loaded "${meta.name}" (${meta.id}) from ${dir}`);
+    seenIds.add(validation.meta.id);
+    loaded.push({
+      meta: validation.meta,
+      capability: validation.capability,
+    });
   }
-
   return loaded;
 }
 
-/**
- * Scan all configured capability directories and load every valid plugin.
- * Directories: ~/.pinpawo/capabilities/ (default) plus stored and environment-configured paths.
- * Duplicate IDs across directories are skipped (first-seen wins).
- */
-export async function loadUserCapabilities(): Promise<LoadedUserCapability[]> {
-  const dirs = resolveCapabilityDirs();
-  const seenIds = new Set<string>();
-  const all: LoadedUserCapability[] = [];
+const warnedLegacyCapabilityDirs = new Set<string>();
 
-  for (const dir of dirs) {
-    const results = await loadCapabilitiesFromDir(dir, seenIds);
-    all.push(...results);
+function warnLegacyCapabilityDirectory(dir: string, name: string) {
+  if (
+    warnedLegacyCapabilityDirs.has(dir)
+    || (!existsSync(resolve(dir, 'manifest.json')) && !existsSync(resolve(dir, 'index.js')))
+  ) {
+    return;
   }
-
-  return all;
+  warnedLegacyCapabilityDirs.add(dir);
+  console.warn(
+    `[capabilities] "${name}" uses the removed manifest.json/index.js format and was skipped; `
+    + 'migrate it to CAPABILITY.md',
+  );
 }
 
-/**
- * Read all user capability manifests across all configured directories
- * without loading the JS modules.  Used for health reporting / listing.
- */
-export function readUserCapabilityManifests(): CapabilityMeta[] {
-  const dirs = resolveCapabilityDirs();
+export async function loadUserCapabilities(): Promise<LoadedUserCapability[]> {
   const seenIds = new Set<string>();
-  const manifests: CapabilityMeta[] = [];
+  const loaded: LoadedUserCapability[] = [];
+  for (const dir of resolveCapabilityDirs()) {
+    loaded.push(...await loadCapabilitiesFromDir(dir, seenIds));
+  }
+  return loaded;
+}
 
-  for (const dir of dirs) {
+export function readUserCapabilityManifests(): CapabilityMeta[] {
+  const seenIds = new Set<string>();
+  const metas: CapabilityMeta[] = [];
+  for (const dir of resolveCapabilityDirs()) {
     if (!existsSync(dir)) continue;
     const entries = readdirSync(dir, { withFileTypes: true })
-      .filter((d) => d.isDirectory() || (d.isSymbolicLink() && isDirectoryEntry(dir, d.name)));
+      .filter((entry) => entry.isDirectory() || (entry.isSymbolicLink() && isDirectoryEntry(dir, entry.name)));
     for (const entry of entries) {
-      const manifestPath = resolve(dir, entry.name, 'manifest.json');
-      if (!existsSync(manifestPath)) continue;
+      const capabilityDir = resolve(dir, entry.name);
+      const capabilityPath = resolve(capabilityDir, CAPABILITY_DOCUMENT_NAME);
+      if (!existsSync(capabilityPath)) {
+        warnLegacyCapabilityDirectory(capabilityDir, entry.name);
+        continue;
+      }
       try {
-        const meta = parseCapabilityManifest(
-          JSON.parse(readFileSync(manifestPath, 'utf-8')) as unknown,
-          manifestPath,
+        const { frontmatter } = parseFrontmatterDocument(
+          readFileSync(capabilityPath, 'utf8'),
+          capabilityPath,
         );
-        if (seenIds.has(meta.id)) continue;
-        seenIds.add(meta.id);
-        manifests.push(meta);
+        if (seenIds.has(frontmatter.name)) continue;
+        seenIds.add(frontmatter.name);
+        metas.push(toMeta(frontmatter));
       } catch {
-        // ignore malformed manifests
+        // Listing deliberately skips malformed definitions; validation reports details.
       }
     }
   }
-
-  return manifests;
+  return metas;
 }

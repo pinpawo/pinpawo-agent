@@ -147,7 +147,7 @@ test('adapter hides context-summary model output and keeps the final subagent me
     const result = await createSubagent({
       model: new FakeListChatModel({ responses: [summaryText, finalText], sleep: 0 }),
       tools: [],
-      instructions: [],
+      promptSections: [],
       messages: state.messages,
       contextWindowTokens: 1000,
       maxIterations: 4,

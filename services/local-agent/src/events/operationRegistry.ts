@@ -10,7 +10,7 @@ export type OperationMetadata = ToolOperationMetadata;
 
 export type RegisteredOperationMetadata = OperationMetadata & {
   source: {
-    provider: 'toolkit' | 'toolset';
+    provider: 'toolkit';
     name: string;
     toolName: string;
   };
@@ -43,9 +43,13 @@ export function createOperationRegistryFromSources(params: {
   const entries: Record<string, RegisteredOperationMetadata> = {};
 
   for (const toolkit of params.toolkits) {
-    for (const [toolName, metadata] of Object.entries(toolkit.operations ?? {})) {
+    for (const definition of toolkit.tools) {
+      if (!definition.operation) {
+        continue;
+      }
+      const toolName = definition.tool.name;
       entries[toolName] = {
-        ...metadata,
+        ...definition.operation,
         source: {
           provider: 'toolkit',
           name: toolkit.name,
@@ -62,23 +66,20 @@ export const emptyOperationRegistry = createOperationRegistry();
 
 /**
  * Overlay per-delegation operation metadata (a `subagent_operations`
- * announcement, #322 Phase 4) on a base registry. Delegation-scoped toolset
- * operations are not in any statically known toolkit, so the announcement is
- * the only way their display metadata reaches the operation join. Overlay
- * entries win over the base for the tools they name.
+ * announcement, #322 Phase 4) on a base registry. Overlay entries win over the
+ * base for the tools they name.
  */
 export function overlayOperationRegistry(
   base: OperationRegistry,
   entries: Record<string, SubagentToolOperationMetadata>,
 ): OperationRegistry {
   const overlay = new Map(Object.entries(entries).map(([toolName, metadata]) => {
-    const provider = metadata.source?.provider;
     return [
       toolName,
       {
         ...metadata,
         source: {
-          provider: provider === 'toolkit' ? 'toolkit' as const : 'toolset' as const,
+          provider: 'toolkit' as const,
           name: metadata.source?.name ?? 'delegation',
           toolName: metadata.source?.toolName ?? toolName,
         },

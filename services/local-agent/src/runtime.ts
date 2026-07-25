@@ -43,6 +43,7 @@ export class LocalAgentRuntime {
   private actorName: string | null = null;
   private llmConfig: AgentLlmConfig | null = null;
   private hooks: ReturnType<typeof collectPluginHooks> | null = null;
+  private pluginToolkitDefinitions: AgentToolkit[] = [];
   private pluginToolkits: AgentToolkit[] = [];
   private readonly capabilityRegistry: LocalAgentCapabilityRegistry;
   private readonly chatCheckpointer: FileSaver;
@@ -96,12 +97,13 @@ export class LocalAgentRuntime {
       isCurrentSocket: (ws) => this.appWsClient?.isCurrentSocket(ws) ?? false,
       getActorId: () => this.getActorId(),
       getLlmConfig: () => this.llmConfig,
+      getPluginToolkitDefinitions: () => this.pluginToolkitDefinitions,
       getPluginToolkits: () => this.pluginToolkits,
+      getLocalToolkitDefinitions: () => this.capabilityRegistry.getLocalToolkitDefinitions(),
       getLocalToolkits: () => this.capabilityRegistry.getLocalToolkits(),
       getLocalCapabilities: () => this.capabilityRegistry.getLocalCapabilities(),
       getUserCapabilities: () => this.capabilityRegistry.getUserCapabilities(),
       getCapabilityArtifactStore: () => this.capabilityRegistry.getCapabilityArtifactStore(),
-      getCapabilityArtifactRoot: () => this.runtimeConfig.capabilityArtifactRoot,
       getWorkdir: () => this.runtimeConfig.workdir,
       getActorName: () => this.actorName,
       runStudioRequest: async (ws, message) => {
@@ -122,10 +124,9 @@ export class LocalAgentRuntime {
       studioDueRunScheduler: this.studioDueRunScheduler,
       localToolkitDefinitions: this.getLocalToolkitDefinitions(),
       localToolkits: this.getLocalToolkits(),
+      pluginToolkitDefinitions: this.getPluginToolkitDefinitions(),
       pluginToolkits: this.getPluginToolkits(),
-      localCapabilityDefinitions: this.getLocalCapabilityDefinitions(),
       localCapabilities: this.getLocalCapabilities(),
-      userCapabilityDefinitions: this.getUserCapabilityDefinitions(),
       userCapabilities: this.getUserCapabilities(),
       capabilityArtifactStore: this.capabilityRegistry.getCapabilityArtifactStore(),
       rescanUserCapabilities: () => this.rescanUserCapabilities(),
@@ -137,8 +138,9 @@ export class LocalAgentRuntime {
   }
 
   async init() {
-    const { plugins, toolkits } = await loadPlugins();
+    const { plugins, toolkitDefinitions, toolkits } = await loadPlugins();
     this.llmConfig = buildLocalLlmConfig();
+    this.pluginToolkitDefinitions = toolkitDefinitions;
     this.pluginToolkits = toolkits;
     await this.capabilityRegistry.load();
     this.hooks = collectPluginHooks(plugins);
@@ -168,6 +170,10 @@ export class LocalAgentRuntime {
     return this.pluginToolkits;
   }
 
+  getPluginToolkitDefinitions(): AgentToolkit[] {
+    return this.pluginToolkitDefinitions;
+  }
+
   getLocalToolkits(): AgentToolkit[] {
     return this.capabilityRegistry.getLocalToolkits();
   }
@@ -184,22 +190,11 @@ export class LocalAgentRuntime {
     return this.capabilityRegistry.getCapabilityArtifactStore();
   }
 
-  getLocalCapabilityDefinitions(): AgentCapability[] {
-    return this.capabilityRegistry.getLocalCapabilityDefinitions();
-  }
-
   getUserCapabilities(): LoadedUserCapability[] {
     return this.capabilityRegistry.getUserCapabilities();
   }
 
-  getUserCapabilityDefinitions(): LoadedUserCapability[] {
-    return this.capabilityRegistry.getUserCapabilityDefinitions();
-  }
-
-  async rescanUserCapabilities(): Promise<{
-    userCapabilityDefinitions: LoadedUserCapability[];
-    userCapabilities: LoadedUserCapability[];
-  }> {
+  async rescanUserCapabilities(): Promise<LoadedUserCapability[]> {
     return this.capabilityRegistry.rescanUserCapabilities();
   }
 

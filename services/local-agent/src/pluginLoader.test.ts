@@ -6,17 +6,36 @@ import path from 'node:path';
 
 import { loadPluginsFromDir } from './pluginLoader';
 
+const langchainToolsModuleUrl = import.meta.resolve('@langchain/core/tools');
+const zodModuleUrl = import.meta.resolve('zod');
+
+function toolModulePrelude(): string {
+  return `
+import { tool } from ${JSON.stringify(langchainToolsModuleUrl)};
+import { z } from ${JSON.stringify(zodModuleUrl)};
+
+const defineTestTool = (name) => tool(
+  async () => \`\${name} result\`,
+  {
+    name,
+    description: \`\${name} test tool\`,
+    schema: z.object({}),
+  },
+);
+`;
+}
+
 test('loadPluginsFromDir loads plugin toolkits and ignores unsupported tools exports', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-plugins-'));
-  await fs.writeFile(path.join(root, 'valid-plugin.mjs'), `
+  await fs.writeFile(path.join(root, 'valid-plugin.mjs'), `${toolModulePrelude()}
 export const tools = [{ name: 'legacy_tool' }];
 export const toolkits = [{
   name: 'sample_toolkit',
   description: 'Sample toolkit',
-  tools: [{ name: 'sample_tool' }],
-  operations: {
-    sample_tool: { title: 'Sample Tool' },
-  },
+  tools: [{
+    tool: defineTestTool('sample_tool'),
+    operation: { title: 'Sample Tool' },
+  }],
 }];
 export default { name: 'valid-plugin' };
 `, 'utf8');
@@ -24,8 +43,12 @@ export default { name: 'valid-plugin' };
   const result = await loadPluginsFromDir(root);
 
   assert.deepEqual(result.plugins.map((plugin) => plugin.name), ['valid-plugin']);
+  assert.deepEqual(
+    result.toolkitDefinitions.map((toolkit) => toolkit.name),
+    ['sample_toolkit'],
+  );
   assert.deepEqual(result.toolkits.map((toolkit) => toolkit.name), ['sample_toolkit']);
-  assert.equal(result.toolkits[0]?.operations?.sample_tool?.title, 'Sample Tool');
+  assert.equal(result.toolkits[0]?.tools[0]?.operation?.title, 'Sample Tool');
 });
 
 test('loadPluginsFromDir skips tools and toolkits from invalid plugin modules', async () => {
@@ -39,21 +62,42 @@ export default {};
   const result = await loadPluginsFromDir(root);
 
   assert.deepEqual(result.plugins, []);
+  assert.deepEqual(result.toolkitDefinitions, []);
+  assert.deepEqual(result.toolkits, []);
+});
+
+test('loadPluginsFromDir excludes a plugin Toolkit whose availability check fails', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-plugins-offline-'));
+  await fs.writeFile(path.join(root, 'offline-plugin.mjs'), `${toolModulePrelude()}
+export const toolkits = [{
+  name: 'offline_toolkit',
+  description: 'Offline toolkit',
+  tools: [{ tool: defineTestTool('offline_tool') }],
+  availability: () => ({ available: false, reason: 'service offline' }),
+}];
+export default { name: 'offline-plugin' };
+`, 'utf8');
+
+  const result = await loadPluginsFromDir(root);
+
+  assert.deepEqual(result.plugins.map((plugin) => plugin.name), ['offline-plugin']);
+  assert.deepEqual(
+    result.toolkitDefinitions.map((toolkit) => toolkit.name),
+    ['offline_toolkit'],
+  );
   assert.deepEqual(result.toolkits, []);
 });
 
 test('loadPluginsFromDir fails startup for an oversized toolkit auto-review policy', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-plugins-policy-'));
-  await fs.writeFile(path.join(root, 'invalid-policy-plugin.mjs'), `
+  await fs.writeFile(path.join(root, 'invalid-policy-plugin.mjs'), `${toolModulePrelude()}
 export const toolkits = [{
   name: 'invalid_policy_toolkit',
   description: 'Invalid policy toolkit',
-  tools: [],
-  policy: {
-    autoReview: {
-      allow: 'x'.repeat(2001),
-      ask: 'Ask for risky operations.',
-    },
+  tools: [{ tool: defineTestTool('sample_tool') }],
+  reviewGuidance: {
+    allow: 'x'.repeat(2001),
+    ask: 'Ask for risky operations.',
   },
 }];
 export default { name: 'invalid-policy-plugin' };
@@ -61,6 +105,6 @@ export default { name: 'invalid-policy-plugin' };
 
   await assert.rejects(
     () => loadPluginsFromDir(root),
-    /Toolkit\/toolset "invalid_policy_toolkit" auto-review allow exceeds 2000 characters/,
+    /Toolkit "invalid_policy_toolkit" review guidance allow exceeds 2000 characters/,
   );
 });

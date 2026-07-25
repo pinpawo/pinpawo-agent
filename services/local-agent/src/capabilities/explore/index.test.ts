@@ -2,10 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
-import type { CapabilityContext, OrchestrationDecisionStructuredOutputConfig } from '@pinpawo/pet-agent';
+import type {
+  CapabilityArtifactStore,
+  CapabilityFinalizeContext,
+  CapabilityFinalizeResult,
+  OrchestrationDecisionStructuredOutputConfig,
+  SubagentResult,
+} from '@pinpawo/pet-agent';
 import {
   createExploreCapability,
-  exploreResultSchema,
   readExploreResult,
 } from './index';
 
@@ -37,48 +42,54 @@ function fakeSummaryModel(
   } as unknown as BaseChatModel;
 }
 
-async function createRuntime(
+async function createFinalizeHarness(
   model: BaseChatModel,
   opts: {
     structuredOutput?: OrchestrationDecisionStructuredOutputConfig;
-    artifactStore?: CapabilityContext['artifactStore'];
-    messages?: CapabilityContext['messages'];
+    artifactStore?: CapabilityArtifactStore;
+    messages?: CapabilityFinalizeContext['messages'];
   } = {},
 ) {
-  return createExploreCapability({ structuredOutput: opts.structuredOutput }).createRuntime({
-    models: { act: model },
-    actor: {} as never,
-    messages: opts.messages ?? [],
-    availableToolkits: [],
-    artifactStore: opts.artifactStore,
-  });
+  const capability = createExploreCapability({ structuredOutput: opts.structuredOutput });
+  const finalize = capability.lifecycle?.finalize;
+  assert.ok(finalize);
+  return {
+    middleware: {
+      afterRun: async (
+        result: SubagentResult,
+        context: Partial<CapabilityFinalizeContext>,
+      ): Promise<CapabilityFinalizeResult | void> => finalize(result, {
+        models: { act: model },
+        actor: {} as never,
+        messages: opts.messages ?? [],
+        artifactStore: opts.artifactStore,
+        capabilityId: 'explore',
+        delegationId: 'delegation',
+        runId: 'run',
+        ...context,
+      }),
+    },
+  };
 }
 
-test('explore capability uses shared subagent summarization and filters host toolkits', async () => {
-  const capability = createExploreCapability();
-  const runtime = await capability.createRuntime({
-    models: {} as never,
-    actor: {} as never,
-    messages: [],
-    availableToolkits: [
-      { name: 'bash', description: 'local files and shell' },
-      { name: 'git', description: 'git tools' },
-      { name: 'browser', description: 'browser tools' },
-    ],
+test('explore capability declares immutable instructions and host Toolkits statically', () => {
+  assert.deepEqual(
+    createExploreCapability().uses,
+    ['bash', 'git', 'artifact_discovery'],
+  );
+  const capability = createExploreCapability({
+    uses: ['bash', 'git', 'browser'],
   });
 
-  assert.deepEqual(runtime.uses, ['bash', 'git', 'browser']);
-  assert.equal(Array.isArray(runtime.instructions), true);
-  const instructions = Array.isArray(runtime.instructions) ? runtime.instructions.join('\n') : '';
+  assert.deepEqual(capability.uses, ['bash', 'git', 'browser']);
+  const instructions = capability.instructions.content;
   assert.match(instructions, /只读取、检查、搜索、观察和总结上下文/);
-  assert.match(instructions, /gh_pr_view、gh_pr_diff、git_diff、git_show/);
-  assert.match(instructions, /不要使用 browser、http_fetch 或 download_file/);
+  assert.match(instructions, /gh_pr_view[\s\S]*gh_pr_diff[\s\S]*git_diff[\s\S]*git_show/);
+  assert.match(instructions, /不要使用 browser[\s\S]*http_fetch[\s\S]*download_file/);
   assert.match(instructions, /较早执行上下文总结为摘要/);
   assert.match(instructions, /已查看文件列表/);
-  assert.equal('contextManagement' in runtime, false);
-  assert.equal('contextPolicy' in runtime, false);
-  assert.equal(typeof runtime.middleware?.afterRun, 'function');
-  assert.equal(capability.resultSchema, exploreResultSchema);
+  assert.match(capability.instructions.digest, /^[a-f0-9]{64}$/);
+  assert.equal(typeof capability.lifecycle?.finalize, 'function');
 });
 
 test('explore result reads the latest Explore summary marker', () => {
@@ -140,9 +151,9 @@ test('explore final ingest includes LangChain context summaries and persists one
         kind: 'report' as const,
       };
     },
-  } as unknown as NonNullable<CapabilityContext['artifactStore']>;
+  } as unknown as CapabilityArtifactStore;
   const structuredOutput: OrchestrationDecisionStructuredOutputConfig = { method: 'functionCalling' };
-  const runtime = await createRuntime(fakeSummaryModel(summary, ({ messages, options }) => {
+  const harness = await createFinalizeHarness(fakeSummaryModel(summary, ({ messages, options }) => {
     capturedHuman = String(messages.at(-1)?.content ?? '');
     capturedOptions = options;
   }, evidence), { artifactStore: store, structuredOutput });
@@ -162,7 +173,7 @@ test('explore final ingest includes LangChain context summaries and persists one
     announceMessageId: null,
   };
 
-  const returned = await runtime.middleware?.afterRun?.(result, {
+  const returned = await harness.middleware?.afterRun?.(result, {
     recordCapabilityArtifact: (ref) => {
       recorded.push(ref);
     },
@@ -183,15 +194,15 @@ test('explore final ingest includes LangChain context summaries and persists one
   assert.equal(writes[0]?.content, summary);
   assert.deepEqual(writes[0]?.evidence, evidence);
   assert.equal(recorded.length, 1);
-  assert.match(String(returned?.messages.at(-1)?.content ?? ''), /Explore summary:/);
-  assert.match(String(returned?.messages.at(-1)?.content ?? ''), /最终归纳/);
-  assert.ok(returned?.messages.at(-1)?.id);
-  assert.equal(returned?.announceMessageId, returned?.messages.at(-1)?.id);
+  assert.match(String(returned?.messages?.at(-1)?.content ?? ''), /Explore summary:/);
+  assert.match(String(returned?.messages?.at(-1)?.content ?? ''), /最终归纳/);
+  assert.ok(returned?.messages?.at(-1)?.id);
+  assert.equal(returned?.announceMessageId, returned?.messages?.at(-1)?.id);
 });
 
-test('explore afterRun exposes a generated limit summary as the announce', async () => {
-  const runtime = await createRuntime(fakeSummaryModel('进度摘要：已完成依赖检查，源码仍待继续读取。'));
-  const returned = await runtime.middleware?.afterRun?.({
+test('explore finalize exposes a generated limit summary as the announce', async () => {
+  const harness = await createFinalizeHarness(fakeSummaryModel('进度摘要：已完成依赖检查，源码仍待继续读取。'));
+  const returned = await harness.middleware?.afterRun?.({
     messages: [
       new HumanMessage('继续探查 repo'),
       new AIMessage({
@@ -215,16 +226,15 @@ test('explore afterRun exposes a generated limit summary as the announce', async
     runId: 'run-limit',
   });
 
-  const generatedSummary = returned?.messages.at(-1);
-  assert.equal(returned?.completionReason, 'limit_reached');
+  const generatedSummary = returned?.messages?.at(-1);
   assert.match(String(generatedSummary?.content ?? ''), /进度摘要/);
   assert.ok(generatedSummary?.id);
   assert.equal(returned?.announceMessageId, generatedSummary?.id);
 });
 
-test('explore afterRun preserves an existing subagent announce', async () => {
-  const runtime = await createRuntime(fakeSummaryModel('整理后的 Explore summary。'));
-  const returned = await runtime.middleware?.afterRun?.({
+test('explore finalize preserves an existing subagent announce', async () => {
+  const harness = await createFinalizeHarness(fakeSummaryModel('整理后的 Explore summary。'));
+  const returned = await harness.middleware?.afterRun?.({
     messages: [new AIMessage({ id: 'subagent-announce', content: '原始交付。' })],
     artifacts: [],
     completionReason: 'natural',
@@ -237,11 +247,11 @@ test('explore afterRun preserves an existing subagent announce', async () => {
     runId: 'run-natural',
   });
 
-  assert.match(String(returned?.messages.at(-1)?.content ?? ''), /整理后的 Explore summary/);
+  assert.match(String(returned?.messages?.at(-1)?.content ?? ''), /整理后的 Explore summary/);
   assert.equal(returned?.announceMessageId, 'subagent-announce');
 });
 
-test('explore afterRun uses the previous summary when final ingest fails', async () => {
+test('explore finalize uses the previous summary when final ingest fails', async () => {
   const previous = '已有摘要：已检查 src/existing.ts。';
   const model = {
     withStructuredOutput: () => ({
@@ -256,13 +266,13 @@ test('explore afterRun uses the previous summary when final ingest fails', async
       writes.push(String(input.artifact.content ?? ''));
       return { id: 'fallback', uri: 'artifact://fallback', kind: 'report' as const };
     },
-  } as unknown as NonNullable<CapabilityContext['artifactStore']>;
-  const runtime = await createRuntime(model, {
+  } as unknown as CapabilityArtifactStore;
+  const harness = await createFinalizeHarness(model, {
     artifactStore: store,
     messages: [summaryMessage(previous)],
   });
 
-  const returned = await runtime.middleware?.afterRun?.({
+  const returned = await harness.middleware?.afterRun?.({
     messages: [summaryMessage(previous), new AIMessage('new final answer')],
     artifacts: [],
     completionReason: 'natural',
@@ -276,17 +286,17 @@ test('explore afterRun uses the previous summary when final ingest fails', async
   });
 
   assert.deepEqual(writes, [previous]);
-  assert.equal(returned?.messages.length, 2);
+  assert.equal(returned?.messages?.length, 2);
 });
 
-test('explore afterRun appends a refreshed summary after a continuation', async () => {
+test('explore finalize appends a refreshed summary after a continuation', async () => {
   const previous = '旧摘要：已检查 src/old.ts。';
   const refreshed = '新摘要：已检查 src/old.ts 和 src/new.ts。';
-  const runtime = await createRuntime(fakeSummaryModel(refreshed), {
+  const harness = await createFinalizeHarness(fakeSummaryModel(refreshed), {
     messages: [summaryMessage(previous)],
   });
 
-  const returned = await runtime.middleware?.afterRun?.({
+  const returned = await harness.middleware?.afterRun?.({
     messages: [summaryMessage(previous), new AIMessage('new evidence from src/new.ts')],
     artifacts: [],
     completionReason: 'natural',
@@ -299,14 +309,14 @@ test('explore afterRun appends a refreshed summary after a continuation', async 
     runId: 'run-refresh',
   });
 
-  assert.equal(returned?.messages.length, 3);
-  assert.match(String(returned?.messages.at(-1)?.content ?? ''), /新摘要/);
+  assert.equal(returned?.messages?.length, 3);
+  assert.match(String(returned?.messages?.at(-1)?.content ?? ''), /新摘要/);
   assert.deepEqual(readExploreResult(returned?.messages ?? [])?.summary, refreshed);
 });
 
 test('explore final ingest keeps the newest tool results within its evidence budget', async () => {
   let capturedHuman = '';
-  const runtime = await createRuntime(fakeSummaryModel('budgeted summary', ({ messages }) => {
+  const harness = await createFinalizeHarness(fakeSummaryModel('budgeted summary', ({ messages }) => {
     capturedHuman = String(messages.at(-1)?.content ?? '');
   }));
   const toolResults = Array.from({ length: 12 }, (_, index) => new ToolMessage({
@@ -315,7 +325,7 @@ test('explore final ingest keeps the newest tool results within its evidence bud
     content: `result-${index}\n${String(index).repeat(2_000)}`,
   }));
 
-  await runtime.middleware?.afterRun?.({
+  await harness.middleware?.afterRun?.({
     messages: [...toolResults, new AIMessage('final answer')],
     artifacts: [],
     completionReason: 'natural',
@@ -334,15 +344,15 @@ test('explore final ingest keeps the newest tool results within its evidence bud
 
 test('explore artifact persistence failure is non-fatal', async () => {
   const summary = 'final summary';
-  const runtime = await createRuntime(fakeSummaryModel(summary), {
+  const harness = await createFinalizeHarness(fakeSummaryModel(summary), {
     artifactStore: {
       writeArtifact: async () => {
         throw new Error('store unavailable');
       },
-    } as unknown as NonNullable<CapabilityContext['artifactStore']>,
+    } as unknown as CapabilityArtifactStore,
   });
 
-  const returned = await runtime.middleware?.afterRun?.({
+  const returned = await harness.middleware?.afterRun?.({
     messages: [new AIMessage('final evidence')],
     artifacts: [],
     completionReason: 'natural',
@@ -355,5 +365,5 @@ test('explore artifact persistence failure is non-fatal', async () => {
     runId: 'run-error',
   });
 
-  assert.match(String(returned?.messages.at(-1)?.content ?? ''), /final summary/);
+  assert.match(String(returned?.messages?.at(-1)?.content ?? ''), /final summary/);
 });

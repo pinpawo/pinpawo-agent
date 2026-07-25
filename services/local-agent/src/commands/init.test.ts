@@ -15,7 +15,7 @@ test('scaffoldQuickInstall creates env template and a valid example capability',
   assert.equal(result.capabilitiesDir, resolve(targetDir, 'capabilities'));
   assert.deepEqual(
     result.written.map((file) => file.status),
-    ['created', 'created', 'created'],
+    ['created', 'created'],
   );
   assert.match(readFileSync(resolve(targetDir, '.env'), 'utf-8'), /LLM_API_KEY=sk-xxx/);
 
@@ -32,6 +32,6 @@ test('scaffoldQuickInstall skips existing generated files unless forced', () => 
 
   assert.deepEqual(
     result.written.map((file) => file.status),
-    ['skipped', 'skipped', 'skipped'],
+    ['skipped', 'skipped'],
   );
 });

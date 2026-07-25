@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { WebSocket } from 'ws';
+import { tool } from '@langchain/core/tools';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
+import { compileAgentRegistry } from '@pinpawo/pet-agent';
+import { z } from 'zod';
 import {
   sendLocalAgentEvent,
   sendLocalAgentMessage,
@@ -33,26 +36,42 @@ function createInflightController() {
 }
 
 function createSetup(): AgentChannelSetup {
+  const readFileTool = tool(
+    async ({ path }: { path?: string }) => path ?? '',
+    {
+      name: 'read_file',
+      description: 'Read a test file.',
+      schema: z.object({ path: z.string().optional() }),
+    },
+  );
+  const toolkit = {
+    name: 'local-toolkit',
+    description: 'local toolkit',
+    tools: [{
+      tool: readFileTool,
+      operation: {
+        title: '读文件',
+        summarizeInput: (input: unknown) => {
+          const path = input && typeof input === 'object' && 'path' in input
+            ? (input as { path?: unknown }).path
+            : null;
+          return typeof path === 'string' ? { target: path } : null;
+        },
+      },
+    }],
+  };
   return {
     graphKey: 'test',
     graphConfig: {} as AgentChannelSetup['graphConfig'],
+    registry: compileAgentRegistry({
+      toolkits: [toolkit],
+      capabilities: [],
+      generalUses: ['local-toolkit'],
+    }),
     input: {
       messages: [],
-      toolkits: [{
-        name: 'local-toolkit',
-        description: 'local toolkit',
-        operations: {
-          read_file: {
-            title: '读文件',
-            summarizeInput: (input: unknown) => {
-              const path = input && typeof input === 'object' && 'path' in input
-                ? (input as { path?: unknown }).path
-                : null;
-              return typeof path === 'string' ? { target: path } : null;
-            },
-          },
-        },
-      }],
+      generalUses: ['local-toolkit'],
+      toolkits: [toolkit],
     } as AgentChannelSetup['input'],
   };
 }
@@ -87,7 +106,9 @@ function createHandler(overrides: Partial<ConstructorParameters<typeof LocalAgen
       apiKey: 'test-key',
       baseUrl: 'https://example.test/v1',
     } as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getLlmConfig'] extends () => infer T ? T : never),
+    getPluginToolkitDefinitions: () => [{ name: 'plugin-definition' }] as NonNullable<ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getPluginToolkitDefinitions']> extends () => infer T ? T : never,
     getPluginToolkits: () => [{ name: 'plugin-toolkit' }] as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getPluginToolkits'] extends () => infer T ? T : never,
+    getLocalToolkitDefinitions: () => [{ name: 'local-definition' }] as NonNullable<ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getLocalToolkitDefinitions']> extends () => infer T ? T : never,
     getLocalToolkits: () => [{ name: 'local-toolkit' }] as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getLocalToolkits'] extends () => infer T ? T : never,
     getLocalCapabilities: () => [{ name: 'browser' }] as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getLocalCapabilities'] extends () => infer T ? T : never,
     getUserCapabilities: () => [{
@@ -199,6 +220,11 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
     'plugin-toolkit',
     'local-toolkit',
   ]);
+  assert.deepEqual(
+    (buildInputs[0]?.toolkitDefinitions as Array<{ name?: string }>).map((toolkit) => toolkit.name),
+    ['plugin-definition', 'local-definition'],
+  );
+  assert.equal(typeof buildInputs[0]?.reportCapabilityDiagnostics, 'function');
 
   const eventMessages = sent.filter((item): item is {
     type: 'event';

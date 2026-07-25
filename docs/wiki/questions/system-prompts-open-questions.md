@@ -2,9 +2,10 @@
 title: System Prompt Design Open Questions
 page_type: question
 status: draft
-updated: 2026-07-25
+updated: 2026-07-26
 sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
+  - ../../CAPABILITY_PLANNER_TASK_HORIZON_DRAFT.md
   - ../investigations/entry-decision-state-query-routing.md
   - https://github.com/pinpawo/pinpawo-agent/issues/435
 related:
@@ -12,6 +13,7 @@ related:
   - ../concepts/orchestrator-practical-reasoning.md
   - ../concepts/prompt-knowledge-layers.md
   - ../concepts/system-prompt-authoring-principles.md
+  - ../decisions/capability-planner-task-boundaries.md
   - ../migrations/docs-wiki-management-plan.md
 ---
 
@@ -62,6 +64,20 @@ Validation evidence:
 - evals for explicit handoff evidence, stale observations, and unsupported
   inference;
 - route accuracy and unnecessary-execution comparison across supported models.
+
+### Does result-bounded planning generalize across model families?
+
+The fixed GLM-5.2 capabilityPlanner profile now has three evaluable passes for
+each of six entry/boundary cases. This validates the current profile and model,
+not the generality of the decomposition language.
+
+Closure evidence:
+
+- run the unchanged goal contract and case set across supported model families;
+- distinguish subject behavior failures from schema, invocation, and judge
+  failures;
+- keep model-specific protocol adaptations conditional without changing the
+  accepted [task-boundary decision](../decisions/capability-planner-task-boundaries.md).
 
 ## P1 — prompt governance
 

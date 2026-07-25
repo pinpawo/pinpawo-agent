@@ -2,9 +2,10 @@
 title: System Prompt Source Registry
 page_type: source
 status: draft
-updated: 2026-07-22
+updated: 2026-07-26
 sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
+  - ../../CAPABILITY_PLANNER_TASK_HORIZON_DRAFT.md
   - ../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/entryDecision.prompt.ts
   - https://github.com/pinpawo/pinpawo-agent/issues/415
   - https://github.com/pinpawo/pinpawo-agent/issues/416
@@ -13,6 +14,7 @@ sources:
   - https://github.com/pinpawo/pinpawo-agent/issues/435
 related:
   - ../overview.md
+  - ../decisions/capability-planner-task-boundaries.md
   - ../investigations/entry-decision-state-query-routing.md
   - model-prompting-and-harness-references.md
 ---
@@ -23,6 +25,11 @@ related:
 
 These sources describe what currently runs and have the highest authority for
 behavioral claims:
+
+CapabilityPlanner claims added on 2026-07-26 describe the implementation in
+[PR #461](https://github.com/pinpawo/pinpawo-agent/pull/461) until that PR is
+merged. The associated decision page remains `draft`; this registry does not
+silently treat the branch as current `main`.
 
 - [`prompts/templates/sharedPrefix.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/sharedPrefix.prompt.ts)
 - [`prompts/templates/entryDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/entryDecision.prompt.ts)
@@ -36,6 +43,9 @@ behavioral claims:
 - [`messageLanes.ts`](../../../packages/pet-agent/src/agent/orchestrator/messageLanes.ts)
 - [`orchestrator.test.ts`](../../../packages/pet-agent/src/agent/orchestrator/orchestrator.test.ts)
 - [`entry-decision-basics.ts`](../../../packages/pet-agent/evals/datasets/entry-decision-basics.ts)
+- [`capability-planning-basics.ts`](../../../packages/pet-agent/evals/datasets/capability-planning-basics.ts)
+- [`capability-planning-evaluation.ts`](../../../packages/pet-agent/evals/capability-planning-evaluation.ts)
+- [`capability-planning-evaluation.test.ts`](../../../packages/pet-agent/evals/capability-planning-evaluation.test.ts)
 - [`answer-behavior-basics.ts`](../../../packages/pet-agent/evals/datasets/answer-behavior-basics.ts)
 - [`decision-eval-scenarios.ts`](../../../packages/pet-agent/evals/decision-eval-scenarios.ts)
 - [`answer-eval-scenarios.ts`](../../../packages/pet-agent/evals/answer-eval-scenarios.ts)
@@ -46,6 +56,7 @@ behavioral claims:
 ## Current and pinned design sources
 
 - [Decision system prompt design](../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md)
+- [CapabilityPlanner task-horizon design](../../CAPABILITY_PLANNER_TASK_HORIZON_DRAFT.md)
 - [Decision shared prefix](../../PET_AGENT_ORCHESTRATOR_DECISION_PROMPT_PREFIX.md)
 - [Decision node ownership audit](../../PET_AGENT_DECISION_NODE_OWNERSHIP_AUDIT.md)
 - [Delegation state and task routing](../../PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md)
@@ -78,6 +89,7 @@ behavioral claims:
 ## Active validation work
 
 - [Issue #435 — real-model prompt contract validation](https://github.com/pinpawo/pinpawo-agent/issues/435)
+- [PR #461 — capabilityPlanner task-boundary refinement](https://github.com/pinpawo/pinpawo-agent/pull/461)
 
 ## External method and comparison sources
 

@@ -2,10 +2,11 @@
 title: System Prompt Design Knowledge Map
 page_type: overview
 status: draft
-updated: 2026-07-25
+updated: 2026-07-26
 sources:
   - ../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md
+  - ../CAPABILITY_PLANNER_TASK_HORIZON_DRAFT.md
   - ../../packages/pet-agent/src/agent/orchestrator/prompts/templates/sharedPrefix.prompt.ts
   - https://github.com/pinpawo/pinpawo-agent/issues/418
 related:
@@ -14,6 +15,7 @@ related:
   - concepts/system-prompt-authoring-principles.md
   - concepts/decision-node-ownership.md
   - concepts/message-context-and-provenance.md
+  - decisions/capability-planner-task-boundaries.md
   - decisions/delegation-completion-acknowledgement.md
   - investigations/entry-decision-state-query-routing.md
 ---
@@ -57,7 +59,10 @@ Six relationships organize the current knowledge:
    constraints, and when enforcement belongs to the harness.
 4. [Decision node ownership](concepts/decision-node-ownership.md) keeps semantic
    judgments vertical: entry shape, plan boundary, executor choice, and outcome
-   acceptance have different owners.
+   acceptance have different owners. The
+   [CapabilityPlanner task-boundary decision](decisions/capability-planner-task-boundaries.md)
+   defines how completed facts and returned results revise only the unstarted
+   future plan.
 5. [Message context and provenance](concepts/message-context-and-provenance.md)
    determines which messages each actor sees and how briefing, announce, and
    handoff identities are established.
@@ -74,7 +79,7 @@ relations: contract, owner, design source, implementation, and verification.
 |---|---|---|---|---|
 | `decision.structured-judgment` — decision nodes return their owned structured judgment; the graph advances execution and state, and `answer` produces the user-visible reply | [shared decision infrastructure](concepts/prompt-knowledge-layers.md) | [Prompt knowledge layers](concepts/prompt-knowledge-layers.md), [decision prompt design](../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md) | [`sharedPrefix.prompt.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts/templates/sharedPrefix.prompt.ts), [`schemas.ts`](../../packages/pet-agent/src/agent/orchestrator/schemas.ts), [`orchestrationDecision.ts`](../../packages/pet-agent/src/agent/orchestrator/runtime/decisions/orchestrationDecision.ts) | [`prompts.test.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts.test.ts), [`schemas.test.ts`](../../packages/pet-agent/src/agent/orchestrator/schemas.test.ts) |
 | `entry.execution-shape` — choose `answer`, `direct_task`, or `needs_plan` by whether new execution is required, its target is determined, and it requires prior planning | [`entryDecision`](concepts/decision-node-ownership.md#vertical-decisions) | [State-query investigation](investigations/entry-decision-state-query-routing.md), [#416](https://github.com/pinpawo/pinpawo-agent/issues/416) | [`entryDecision.prompt.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts/templates/entryDecision.prompt.ts), [`schemas.ts`](../../packages/pet-agent/src/agent/orchestrator/schemas.ts) | [`entry-decision-basics.ts`](../../packages/pet-agent/evals/datasets/entry-decision-basics.ts), [`orchestrator-route.eval.ts`](../../packages/pet-agent/evals/orchestrator-route.eval.ts) |
-| `planner.execution-boundary` — materialize one independently executable current task and retain only the future tail | [`capabilityPlanner`](concepts/decision-node-ownership.md#vertical-decisions) | [Decision node ownership](concepts/decision-node-ownership.md), [decision prompt design](../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md) | [`capabilityPlanner.prompt.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityPlanner.prompt.ts), [`schemas.ts`](../../packages/pet-agent/src/agent/orchestrator/schemas.ts) | [`capability-planning-basics.ts`](../../packages/pet-agent/evals/datasets/capability-planning-basics.ts) |
+| `planner.execution-boundary` — preserve completed work as fact, use returned results to materialize one executable current task, and maintain only the unstarted future tail | [`capabilityPlanner`](concepts/decision-node-ownership.md#vertical-decisions) | [CapabilityPlanner task boundaries](decisions/capability-planner-task-boundaries.md), [decision prompt design](../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md) | [`capabilityPlanner.prompt.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityPlanner.prompt.ts), [`orchestrationDecision.ts`](../../packages/pet-agent/src/agent/orchestrator/runtime/decisions/orchestrationDecision.ts), [`schemas.ts`](../../packages/pet-agent/src/agent/orchestrator/schemas.ts) | [`capability-planning-basics.ts`](../../packages/pet-agent/evals/datasets/capability-planning-basics.ts), [`capability-planning-evaluation.ts`](../../packages/pet-agent/evals/capability-planning-evaluation.ts), [`capability-planning-evaluation.test.ts`](../../packages/pet-agent/evals/capability-planning-evaluation.test.ts) |
 | `capability.executor-selection` — select one available executor for the immutable current task | [`capabilityDecision`](concepts/decision-node-ownership.md#vertical-decisions) | [Decision node ownership](concepts/decision-node-ownership.md), [decision prompt design](../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md) | [`capabilityDecision.prompt.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityDecision.prompt.ts), [`schemas.ts`](../../packages/pet-agent/src/agent/orchestrator/schemas.ts) | [`capability-decision-basics.ts`](../../packages/pet-agent/evals/datasets/capability-decision-basics.ts) |
 | `outcome.announce-verdict` — validate the current announce as continue, current-task completion, or user-goal completion | [`outcomeDecision`](concepts/decision-node-ownership.md#vertical-decisions) | [Decision node ownership](concepts/decision-node-ownership.md), [message context and provenance](concepts/message-context-and-provenance.md) | [`outcomeDecision.prompt.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts/templates/outcomeDecision.prompt.ts), [`schemas.ts`](../../packages/pet-agent/src/agent/orchestrator/schemas.ts) | [`outcome-decision-basics.ts`](../../packages/pet-agent/evals/datasets/outcome-decision-basics.ts), [`orchestrator-flow.mock-subagent.eval.ts`](../../packages/pet-agent/evals/orchestrator-flow.mock-subagent.eval.ts) |
 | `answer.user-visible-close` — produce the user-visible response and preserve the fixed post-delegation acknowledgement shape | [`answer`](concepts/decision-node-ownership.md#vertical-decisions) | [Delegation completion acknowledgement](decisions/delegation-completion-acknowledgement.md), [message context and provenance](concepts/message-context-and-provenance.md) | [`answer.prompt.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts/templates/answer.prompt.ts), [`answer.ts`](../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/answer.ts) | [`answer-behavior-basics.ts`](../../packages/pet-agent/evals/datasets/answer-behavior-basics.ts), [`answer-eval-scenarios.ts`](../../packages/pet-agent/evals/answer-eval-scenarios.ts), [`orchestrator.test.ts`](../../packages/pet-agent/src/agent/orchestrator/orchestrator.test.ts) |
@@ -119,6 +124,8 @@ The present architecture accumulated through several deliberate steps:
 - #363/#366 separated downward delegation briefing from upward handoff.
 - #370 removed global recent-announce recall and preserved canonical message order.
 - #398/#404 made metadata and message IDs the only protocol identity signals.
+- PR #461 refines planner state as immutable completed facts plus a mutable
+  result-bounded future tail and removes unused future-task status labels.
 
 New work should state which of these accepted decisions it extends, revises, or
 supersedes. An isolated prompt edit is not enough when it changes the meaning of

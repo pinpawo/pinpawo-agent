@@ -1888,7 +1888,7 @@ test('capability finalize stores only artifact refs in state', async () => {
   assert.equal(state.sessionCapabilityArtifacts[0]?.schema?.name, 'daily_post.result');
 });
 
-test('runAgent compiles the registered artifact discovery Toolkit', async () => {
+test('runAgent reuses a host-precompiled artifact discovery registry', async () => {
   const calls: Array<{ configurable?: Record<string, unknown> }> = [];
   const graph = {
     invoke: async (_input: unknown, options?: { configurable?: Record<string, unknown> }) => {
@@ -1905,10 +1905,17 @@ test('runAgent compiles the registered artifact discovery Toolkit', async () => 
       mockTool('artifact_read'),
     ),
   };
+  const preparedRegistry = compileAgentRegistry({
+    toolkits: [artifactDiscoveryToolkit],
+    capabilities: [],
+    generalUses: ['artifact_discovery'],
+  });
   const result = await runAgent(graph as never, {
     messages: [new HumanMessage('hello')],
     toolkits: [artifactDiscoveryToolkit],
     generalUses: ['artifact_discovery'],
+  }, {
+    registry: preparedRegistry,
   });
 
   assert.equal(result.reply, 'done');
@@ -1917,6 +1924,7 @@ test('runAgent compiles the registered artifact discovery Toolkit', async () => 
     toolkits?: AgentToolkit[];
     general?: { toolkits?: AgentToolkit[] };
   };
+  assert.equal(registry, preparedRegistry);
   assert.deepEqual(registry.toolkits?.map(({ name }) => name), ['artifact_discovery']);
   assert.deepEqual(registry.general?.toolkits?.map(({ name }) => name), ['artifact_discovery']);
   assert.equal(calls[0]?.configurable?.artifactDiscoveryRoot, undefined);

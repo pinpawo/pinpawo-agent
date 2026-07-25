@@ -37,7 +37,7 @@ Per-workspace (use `-w <pkg>` or `cd`):
 - `src/agent/orchestrator/` — the orchestrator graph: routing, HITL (human-in-the-loop), flow control. Tests next to source.
 - `src/agent/studio/` — Studio orchestrator (multi-agent composition for the App Studio surface).
 - `src/subagent/` — subagent execution (delegated tool-using sub-runs).
-- `src/capabilities/` + `src/capability-registry.ts` — capability contract (manifest + tools/handlers). Capabilities are the unit of extensibility; orchestrator route is derived from them.
+- `src/capabilities/` + `src/capability-registry.ts` — capability definitions and metadata. Capabilities are the unit of extensibility; orchestrator route is derived from them.
 - `src/tools/` — built-in tool definitions shared with local-agent.
 - See `docs/PET_AGENT_*` for design docs that explain orchestrator routing, capability runtime, studio composition, and the rewrite plan.
 
@@ -48,7 +48,7 @@ Per-workspace (use `-w <pkg>` or `cd`):
 - `src/localServer.ts` + `src/localServer*.ts` + `src/localHttpHandlers.ts` + `src/localServerWsTransport.ts` — local HTTP+WS server on `127.0.0.1:3210`. Handles chat, studio reviews, TUI sessions, operation events. Macos companion and remote app talk to it; e.g. `GET /capabilities/rescan` reloads plugins.
 - `src/localAgentAppWsClient.ts` + `src/localAgentAppChatHandler.ts` — WS client back to the hosted PinPawo app, plus its chat handler.
 - `src/agentChannel.ts` / `src/agentGraphService.ts` / `src/agentStreamEvents.ts` — adapt pet-agent's LangGraph stream into channel events the TUI/server consume.
-- `src/capabilityLoader.ts` + `src/pluginLoader.ts` + `src/localAgentCapabilityRegistry.ts` — load plugins from `~/.pinpawo/capabilities/<id>/` (each has `manifest.json` + `index.js`). `--link` install mode keeps a capability's own `node_modules` in place.
+- `src/capabilityLoader.ts` + `src/pluginLoader.ts` + `src/localAgentCapabilityRegistry.ts` — load `CAPABILITY.md` definitions from `~/.pinpawo/capabilities/<id>/`. `--link` install mode keeps an optional finalize entry and its dependencies in place.
 - `src/localTools*.ts` — local tool implementations (file/git/shell/network/search). Each has a unit test next to it. The shell/file/git tools are where the operation tracker (`toolOperationTracker.ts`, `runtimeOperationRegistry.ts`) sits.
 - `src/config.ts` + `src/agentConfig.ts` + `src/llmConfig.ts` — config resolution. Reads `~/.pinpawo/config.json`, `~/.pinpawo/.env`, or process env. `.env.example` lives under `services/local-agent/`.
 - `src/studio/` — local-side Studio integration (companion to pet-agent's `agent/studio`).
@@ -63,4 +63,4 @@ Per-workspace (use `-w <pkg>` or `cd`):
 
 ## Capability plugins
 
-User capability plugins live in `~/.pinpawo/capabilities/<id>/` and need `manifest.json` + `index.js`. Manage with `pinpawo-agent capability validate|install|list` (`--link` for capabilities with their own deps). A running agent reloads them via `GET http://127.0.0.1:3210/capabilities/rescan`.
+User capabilities live in `~/.pinpawo/capabilities/<id>/` and require `CAPABILITY.md`. Optional code is finalize-only and must be declared with the frontmatter `entry` field. Manage them with `pinpawo-agent capability validate|install|list` (`--link` for capabilities with their own dependencies). A running agent reloads them via `GET http://127.0.0.1:3210/capabilities/rescan`.

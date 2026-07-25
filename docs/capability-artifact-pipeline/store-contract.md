@@ -62,7 +62,7 @@ type CapabilityArtifactStore = {
 当前本地 store 产出：
 
 ```text
-capability-artifact://thread/{encodeURIComponent(threadId)}/delegation/{encodeURIComponent(delegationId)}/artifact/{encodeURIComponent(id)}
+capability-artifact://thread/{encodedThreadId}/delegation/{encodedDelegationId}/artifact/{encodeURIComponent(id)}
 ```
 
 `state` 和 prompt 内只保存 `uri`，不保存绝对路径。
@@ -70,7 +70,10 @@ capability-artifact://thread/{encodeURIComponent(threadId)}/delegation/{encodeUR
 ## 本地实现（FileCapabilityArtifactStore）要点
 
 - 根目录：`{workdir}/.pinpawo/capability-artifacts/`
-- 组织结构：`threads/{encodeURIComponent(threadId)}/{encodeURIComponent(delegationId)}/manifest.json + artifact files`
+- 组织结构：`threads/{encodedThreadId}/{encodedDelegationId}/manifest.json + artifact files`
+- segment 使用 percent encoding，并显式编码 `.`，避免 `.` / `..` 被路径
+  resolver 当成目录语义；所有最终路径还必须通过 storage root containment
+  校验。
 - `writeArtifacts` 会做分组加锁，保证同 delegation 的并发安全。
 - 同一输入条件下（能力、delegation、`content/externalUri`）是幂等写入。
 - `getDownloadUri`

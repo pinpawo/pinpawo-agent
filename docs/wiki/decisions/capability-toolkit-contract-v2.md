@@ -82,11 +82,25 @@ not prevent healthy Capability executors or thread state reads from working.
 Invalid general-executor authorization and invalid registered Toolkit definitions
 remain fail-fast host configuration errors.
 
+The host assembles run-scoped Toolkits and compiles the registry once for an
+agent run setup. Routing, execution, thread-state reads, and diagnostics consume
+that same compiled value. Host availability projections use the same preparation
+and compiler for their explicitly declared scope instead of reimplementing
+dependency checks. Core registry compilation remains pure: the host reports
+`unavailableCapabilities` once per stable diagnostics fingerprint instead of
+logging during compilation.
+
 Run-scoped Toolkit registration is independent from whether that Toolkit
 currently has data. In particular, Artifact Discovery is registered from an
 artifact store plus thread scope. An empty thread is an empty discovery result,
 not Toolkit unavailability. Capabilities that need it declare the required
 `artifact_discovery` dependency statically.
+
+A host projection without complete run scope reports `requires_scope`; it must
+not guess that the Capability is available or reinterpret a missing run-scoped
+Toolkit as an optional dependency. With complete scope, the projection is
+derived directly from `CompiledAgentRegistry`, including duplicate-tool and
+unknown-Toolkit issues.
 
 Toolkit registration and tool authorization remain separate. The V2 Toolkit
 contract therefore removes Toolkit `exposure`; only Capability `uses` and the

@@ -9,7 +9,6 @@ import {
   type OrchestratorGraph,
   type OrchestratorStateType,
   type ReviewSpec,
-  compileAgentRegistry,
 } from '@pinpawo/pet-agent';
 import type { BaseMessage } from '@langchain/core/messages';
 import { Command, type GraphRunStream } from '@langchain/langgraph';
@@ -23,11 +22,7 @@ const HEADLESS_REVIEW_CAPABILITIES = {
 
 function buildConfigurable(setup: AgentChannelSetup) {
   const configurable: Record<string, unknown> = {};
-  configurable.registry = compileAgentRegistry({
-    toolkits: setup.input.toolkits ?? [],
-    capabilities: setup.input.capabilities ?? [],
-    generalUses: setup.input.generalUses,
-  });
+  configurable.registry = setup.registry;
   configurable.actor = setup.input.actor;
   if (setup.input.threadId) configurable.thread_id = setup.input.threadId;
   if (setup.input.execution) configurable.execution = setup.input.execution;
@@ -141,7 +136,9 @@ export class LocalAgentGraphService {
   }
 
   async run(setup: AgentChannelSetup): Promise<AgentRunResult> {
-    return runAgent(this.getGraph(setup), setup.input);
+    return runAgent(this.getGraph(setup), setup.input, {
+      registry: setup.registry,
+    });
   }
 
   /**

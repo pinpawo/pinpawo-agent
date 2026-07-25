@@ -494,7 +494,29 @@ type CompiledCapability = {
 };
 ```
 
-运行阶段只能执行 `CompiledCapability`，不得再次改变 Toolkit 集合。
+Host 完成 run-scoped Toolkit 装配后只编译一次 registry，并把同一个
+`CompiledAgentRegistry` 放入 run setup。stream、invoke、getState、routing
+和 executor 都消费该对象，不得各自重新编译或再次改变 Toolkit 集合。
+
+`compileAgentRegistry()` 保持纯函数。`unavailableCapabilities` 是结构化
+diagnostics；由 host 按稳定 diagnostics 指纹去重告警，而不是由 core
+compiler 决定日志策略。
+
+对外的 Capability 状态投影也必须来自同一编译结果：
+
+```ts
+type CapabilityRoutability =
+  | { status: 'available' }
+  | { status: 'unavailable'; issues: ExecutorCompilationIssue[] }
+  | {
+      status: 'requires_scope';
+      required: ('threadId' | 'capabilityArtifactStore')[];
+    };
+```
+
+缺少 run scope 时不能用第二套 Toolkit name 比较算法猜测可用性。
+scope 完整后，`unknown_toolkit`、`duplicate_tool` 等状态直接投影
+registry diagnostics。
 
 ## 9. 窄化 Capability 代码入口
 
@@ -615,6 +637,11 @@ thread 是否已经写入 artifact、File store 的物理 thread 目录是否已
 Capability 由 registry 标记 unavailable。运行时不得静默增加或移除
 Capability 的 Toolkit 权限，也不引入 optional dependency。
 
+当 host 只是在展示 Capability inventory、尚未提供完整 run scope 时，
+应投影为 `requires_scope`。这只是说明当前还不能完成 registry generation，
+不把 `artifact_discovery` 降级为 optional，也不把 Capability 谎报为
+available。
+
 ### 10.5 Explore
 
 当前 Explore 根据 available Toolkit 动态过滤依赖。V2 必须拆成确定场景，
@@ -704,6 +731,10 @@ explore_github  uses [git, github]
 - [x] 注册 Toolkit 不会自动扩大 general executor 工具面。
 - [x] run-scoped Toolkit 可以被当前 run 的 Capability 解析。
 - [x] 同一 executor 内同名 tool 在运行前 fail-fast。
+- [x] 一个 run setup 只编译一次 registry，routing、执行和状态读取复用。
+- [x] `unavailableCapabilities` 由 host 去重报告，不在 core compiler 打日志。
+- [x] host 可用性投影复用 registry diagnostics；缺 scope 时明确返回
+  `requires_scope`。
 
 ### Prompt
 

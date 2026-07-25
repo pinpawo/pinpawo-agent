@@ -3,6 +3,7 @@ import type { AgentCapability } from '../types/capability';
 import type { AgentActor, AgentExecution } from '../types/agent';
 import type { AgentToolkit } from '../types/toolkit';
 import { compileAgentRegistry } from './orchestrator/registry';
+import type { CompiledAgentRegistry } from './orchestrator/registry';
 import type { GlobalReviewPolicy } from './orchestrator/review/globalReviewPolicy';
 import {
   buildOrchestratorRunInput,
@@ -32,6 +33,11 @@ export type AgentRunResult = {
   messages: BaseMessage[];
 };
 
+export type AgentRunOptions = {
+  /** Host-precompiled registry. Reused as-is when the host owns run preparation. */
+  registry?: CompiledAgentRegistry;
+};
+
 function readReply(messages: BaseMessage[]): string {
   const last = messages.at(-1);
   return typeof last?.content === 'string' ? last.content.trim() : '';
@@ -40,9 +46,10 @@ function readReply(messages: BaseMessage[]): string {
 export async function runAgent(
   graph: OrchestratorGraph,
   input: AgentInvokeInput,
+  options: AgentRunOptions = {},
 ): Promise<AgentRunResult> {
   const configurable: Record<string, unknown> = {};
-  configurable.registry = compileAgentRegistry({
+  configurable.registry = options.registry ?? compileAgentRegistry({
     toolkits: input.toolkits ?? [],
     capabilities: input.capabilities ?? [],
     generalUses: input.generalUses,

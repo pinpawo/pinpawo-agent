@@ -6,10 +6,11 @@ import { resolve } from 'node:path';
 
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { AIMessage } from '@langchain/core/messages';
+import { tool } from '@langchain/core/tools';
+import { z } from 'zod';
 import { buildDecisionStructuredOutput, buildLocalChatAgentInput } from './agentChannel';
 import type { AgentContext } from './contextLoader';
 import {
-  compileAgentRegistry,
   defineInstructionDocument,
   type AgentCapability,
   type AgentToolkit,
@@ -38,6 +39,20 @@ function createContext(): AgentContext {
   };
 }
 
+function createGeneralToolkit(): AgentToolkit {
+  return {
+    name: 'general-toolkit',
+    description: 'general toolkit',
+    tools: [{
+      tool: tool(async () => 'ok', {
+        name: 'general_tool',
+        description: 'general tool',
+        schema: z.object({}),
+      }),
+    }],
+  };
+}
+
 test('buildLocalChatAgentInput omits empty toolkit configurable arrays', () => {
   const setup = buildLocalChatAgentInput({
     context: createContext(),
@@ -48,7 +63,7 @@ test('buildLocalChatAgentInput omits empty toolkit configurable arrays', () => {
 });
 
 test('buildLocalChatAgentInput passes a single toolkit list', () => {
-  const generalToolkit = { name: 'general-toolkit' } as AgentToolkit;
+  const generalToolkit = createGeneralToolkit();
   const setup = buildLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
@@ -67,7 +82,7 @@ test('buildLocalChatAgentInput honors an explicit general Toolkit authorization'
   const setup = buildLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
-    toolkits: [{ name: 'general-toolkit' } as AgentToolkit],
+    toolkits: [createGeneralToolkit()],
     generalUses: ['general-toolkit'],
   });
 
@@ -287,13 +302,8 @@ test('buildLocalChatAgentInput registers artifact discovery for an empty thread'
       ?.find(({ name }) => name === 'explore')
       ?.uses.includes('artifact_discovery'),
   );
-  const registry = compileAgentRegistry({
-    toolkits: setup.input.toolkits ?? [],
-    capabilities: setup.input.capabilities ?? [],
-    generalUses: setup.input.generalUses,
-  });
   assert.ok(
-    registry.capabilities.some(({ capability }) => capability.name === 'explore'),
+    setup.registry.capabilities.some(({ capability }) => capability.name === 'explore'),
     'an empty thread must not make Explore unavailable',
   );
 

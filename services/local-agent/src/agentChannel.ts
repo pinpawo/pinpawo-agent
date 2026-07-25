@@ -1,7 +1,6 @@
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import {
-  ARTIFACT_DISCOVERY_TOOLKIT_NAME,
   GLOBAL_REVIEW_POLICY_MODE,
   stampMessageCreatedAtUtc,
   type AgentCapability,
@@ -9,6 +8,7 @@ import {
   type AgentInvokeInput,
   type AgentToolkit,
   type CapabilityArtifactStore,
+  type CompiledAgentRegistry,
   type OrchestratorConfig,
 } from '@pinpawo/pet-agent';
 import {
@@ -38,7 +38,10 @@ import {
   type LocalAgentInterfaceKind,
 } from './chatInterface';
 import { inferLlmStructuredOutputMethod } from './llmModelPresets';
-import { createArtifactDiscoveryToolkit } from './toolkits/local';
+import {
+  prepareAgentRegistry,
+  reportUnavailableCapabilities,
+} from './agentRegistryPreparation';
 
 const DEFAULT_GENERAL_TOOLKIT_NAMES = [
   'pet_profile',
@@ -165,6 +168,7 @@ export type AgentChannelSetup = {
   graphKey: string;
   graphConfig: OrchestratorConfig;
   input: AgentInvokeInput;
+  registry: CompiledAgentRegistry;
   interfaceContext?: LocalAgentInterfaceContext;
 };
 
@@ -273,25 +277,24 @@ export function buildLocalChatAgentInput(params: {
   for (const { meta, capability } of params.userCapabilities ?? []) {
     if (isCapabilityEnabled(meta.id)) appendCapability(capabilities, capability);
   }
-  const artifactDiscoveryToolkit = params.threadId && params.capabilityArtifactStore
-    ? createArtifactDiscoveryToolkit({
-        store: params.capabilityArtifactStore,
-        threadId: params.threadId,
-      })
-    : undefined;
-  const toolkits = [
+  const baseToolkits = [
     ...sharedToolkits,
     ...(params.toolkits ?? []),
-    ...(artifactDiscoveryToolkit ? [artifactDiscoveryToolkit] : []),
   ];
-  const registeredToolkitNames = new Set(toolkits.map(({ name }) => name));
-  const generalUses = [
+  const registeredToolkitNames = new Set(baseToolkits.map(({ name }) => name));
+  const baseGeneralUses = [
     ...(params.generalUses
       ?? DEFAULT_GENERAL_TOOLKIT_NAMES.filter((name) => registeredToolkitNames.has(name))),
   ];
-  if (artifactDiscoveryToolkit && !generalUses.includes(ARTIFACT_DISCOVERY_TOOLKIT_NAME)) {
-    generalUses.push(ARTIFACT_DISCOVERY_TOOLKIT_NAME);
-  }
+  const preparedRegistry = prepareAgentRegistry({
+    toolkits: baseToolkits,
+    capabilities,
+    generalUses: baseGeneralUses,
+    threadId: params.threadId,
+    capabilityArtifactStore: params.capabilityArtifactStore,
+    authorizeArtifactDiscoveryForGeneral: true,
+  });
+  reportUnavailableCapabilities(preparedRegistry.registry);
 
   return {
     graphKey: buildGraphKey([
@@ -313,6 +316,7 @@ export function buildLocalChatAgentInput(params: {
       subagentContextWindowTokens: llmConfig.subagentContextWindowTokens ?? llmConfig.contextWindowTokens,
       capabilityArtifactStore: params.capabilityArtifactStore,
     },
+    registry: preparedRegistry.registry,
     input: {
       messages: [
         ...buildHistoryMessages(params.context.context.recentChatTurns),
@@ -320,8 +324,8 @@ export function buildLocalChatAgentInput(params: {
       ],
       threadId: params.threadId,
       capabilities,
-      toolkits,
-      generalUses,
+      toolkits: [...preparedRegistry.toolkits],
+      generalUses: [...preparedRegistry.generalUses],
       execution: {
         dryRun: params.dryRun,
       },

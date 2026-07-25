@@ -4,6 +4,12 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import {
+  defineInstructionDocument,
+  type AgentCapability,
+  type AgentToolkit,
+  type CapabilityArtifactStore,
+} from '@pinpawo/pet-agent';
 import { handleLocalHttpRequest } from './localHttpHandlers';
 import {
   createLocalServerRuntimeDepsStore,
@@ -256,7 +262,15 @@ test('capability rescan replaces frozen runtime capability snapshots', async () 
       defaultEnabled: true,
       builtIn: false,
     },
-    capability: { name: 'custom-test' },
+    capability: {
+      name: 'custom-test',
+      description: 'custom test capability',
+      uses: [],
+      instructions: defineInstructionDocument({
+        content: '# Custom Test',
+        source: { kind: 'inline', id: 'test:rescan-custom-test' },
+      }),
+    },
   } as LoadedUserCapability;
   const runtimeDeps = createLocalServerRuntimeDepsStore({
     actorId: 'pet-a',
@@ -300,6 +314,109 @@ test('capability rescan replaces frozen runtime capability snapshots', async () 
   assert.deepEqual(before.userCapabilities, []);
   assert.equal(after.userCapabilities?.[0], definition);
   assert.equal(Object.isFrozen(after.userCapabilities), true);
+});
+
+test('/capabilities projects run-scoped routability from the compiled registry', () => {
+  const explore: AgentCapability = {
+    name: 'explore',
+    description: 'explore capability',
+    uses: ['artifact_discovery'],
+    instructions: defineInstructionDocument({
+      content: '# Explore',
+      source: { kind: 'inline', id: 'test:http-explore' },
+    }),
+  };
+  const deps = {
+    actorId: 'pet-a',
+    llmConfig: { model: 'test-model' },
+    workdir: '/tmp/pinpawo-capability-routability',
+    localCapabilityDefinitions: [explore],
+    capabilityArtifactStore: {} as CapabilityArtifactStore,
+  } as LocalServerDeps;
+  const options = {
+    authToken: 'secret',
+    loadSnapshot: async () => ({}),
+    listSessions: async () => [],
+    resumeSession: async () => {
+      throw new Error('not called');
+    },
+  };
+
+  const unscopedRes = makeRes();
+  handleLocalHttpRequest(
+    makeReq('/capabilities', 'Bearer secret'),
+    unscopedRes,
+    deps,
+    options,
+  );
+  const unscopedExplore = JSON.parse(unscopedRes.body).builtIns
+    .find((item: { id: string }) => item.id === 'explore');
+  assert.deepEqual(unscopedExplore.routability, {
+    status: 'requires_scope',
+    required: ['threadId'],
+  });
+
+  const scopedRes = makeRes();
+  handleLocalHttpRequest(
+    makeReq('/capabilities?threadId=thread-1', 'Bearer secret'),
+    scopedRes,
+    deps,
+    options,
+  );
+  const scopedExplore = JSON.parse(scopedRes.body).builtIns
+    .find((item: { id: string }) => item.id === 'explore');
+  assert.deepEqual(scopedExplore.routability, {
+    status: 'available',
+  });
+});
+
+test('/capabilities exposes registry compilation issues instead of recomputing missing Toolkits', () => {
+  const duplicateToolkits = ['first', 'second'].map((name) => ({
+    name,
+    description: `${name} Toolkit`,
+    tools: [{ tool: { name: 'duplicate_tool' } }],
+  })) as unknown as AgentToolkit[];
+  const explore: AgentCapability = {
+    name: 'explore',
+    description: 'explore capability',
+    uses: ['first', 'second'],
+    instructions: defineInstructionDocument({
+      content: '# Explore',
+      source: { kind: 'inline', id: 'test:http-duplicate-tool' },
+    }),
+  };
+  const res = makeRes();
+
+  handleLocalHttpRequest(
+    makeReq('/capabilities', 'Bearer secret'),
+    res,
+    {
+      actorId: 'pet-a',
+      llmConfig: { model: 'test-model' },
+      workdir: '/tmp/pinpawo-capability-duplicate-tool',
+      localCapabilityDefinitions: [explore],
+      localToolkits: duplicateToolkits,
+    } as LocalServerDeps,
+    {
+      authToken: 'secret',
+      loadSnapshot: async () => ({}),
+      listSessions: async () => [],
+      resumeSession: async () => {
+        throw new Error('not called');
+      },
+    },
+  );
+
+  const payload = JSON.parse(res.body);
+  const routability = payload.builtIns
+    .find((item: { id: string }) => item.id === 'explore')
+    .routability;
+  assert.equal(routability.status, 'unavailable');
+  assert.deepEqual(routability.issues, [{
+    code: 'duplicate_tool',
+    toolName: 'duplicate_tool',
+    toolkitNames: ['first', 'second'],
+  }]);
 });
 
 test('Toolkit refresh updates frozen runtime lists with copy-on-write', async () => {

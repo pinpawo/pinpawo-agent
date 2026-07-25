@@ -274,7 +274,11 @@ export {
   resultStatusSummary,
 } from './utils/operationMetadata';
 export { runAgent } from './agent/runAgent';
-export type { AgentInvokeInput, AgentRunResult } from './agent/runAgent';
+export type {
+  AgentInvokeInput,
+  AgentRunOptions,
+  AgentRunResult,
+} from './agent/runAgent';
 export {
   createSubagent,
   SUBAGENT_GUARD_DECISION_EVENT,

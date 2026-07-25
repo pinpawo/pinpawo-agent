@@ -136,7 +136,7 @@ await sink.recordCapabilityArtifact?.(ref);
 ## 7. 本地实现（FileCapabilityArtifactStore）
 
 - 根路径：`{workdir}/.pinpawo/capability-artifacts`。
-- 目录结构：`threads/<encoded-thread-id>/<encoded-delegation-id>/`，内含 `manifest.json` 与内容文件；路径 segment 使用 `encodeURIComponent`，没有额外的 `delegation/` 目录层。
+- 目录结构：`threads/<encoded-thread-id>/<encoded-delegation-id>/`，内含 `manifest.json` 与内容文件；路径 segment 使用 percent encoding，并额外编码 `.`，最终路径必须通过 storage root containment 校验，没有额外的 `delegation/` 目录层。
 - URI 形态：`capability-artifact://thread/{threadId}/delegation/{delegationId}/artifact/{id}`（仅用于检索和鉴权映射，不要求客户端直接拼文件路径）。
 
 当前行为：

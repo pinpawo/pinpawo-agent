@@ -226,6 +226,19 @@ lint passes, and documentation migrations.
 - Included run-scoped Artifact Discovery, Studio Plan, and Wiki Read Toolkits in
   the same dependency-resolution path.
 
+## [2026-07-25] implementation | Registry diagnostics and run-scope projection
+
+- Compiled the local chat registry once after run-scoped Toolkit assembly and
+  reused it for invoke, stream, state reads, routing, and execution.
+- Kept registry compilation pure while making the local host report each stable
+  `unavailableCapabilities` diagnostics fingerprint once.
+- Replaced the local HTTP missing-Toolkit reimplementation with a projection of
+  the compiled registry, including `duplicate_tool` issues.
+- Added explicit `requires_scope` projection for Capability inventory requests
+  that do not yet have thread or artifact-store scope.
+- Hardened artifact path segments so `.` and `..` remain encoded data and added
+  storage-root containment checks.
+
 ## [2026-07-24] decision | Capability code entry is finalize-only
 
 - Kept an optional Capability `entry` / `index.js`, restricted to a narrow

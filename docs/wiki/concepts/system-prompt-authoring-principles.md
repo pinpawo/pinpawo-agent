@@ -2,10 +2,11 @@
 title: System Prompt Authoring Principles
 page_type: concept
 status: draft
-updated: 2026-07-25
+updated: 2026-07-26
 sources:
   - ../sources/model-prompting-and-harness-references.md
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
+  - ../../CAPABILITY_PLANNER_TASK_HORIZON_DRAFT.md
   - https://github.com/pinpawo/pinpawo-agent/issues/417
   - https://github.com/pinpawo/pinpawo-agent/issues/435
 related:
@@ -13,6 +14,7 @@ related:
   - orchestrator-practical-reasoning.md
   - prompt-knowledge-layers.md
   - decision-node-ownership.md
+  - ../decisions/capability-planner-task-boundaries.md
   - ../questions/system-prompts-open-questions.md
 ---
 
@@ -262,7 +264,7 @@ The remaining metrics either classify a failed objective or describe the run:
 | Prompt contract | Case objective | Goal-gating evidence | Error classification | Non-gating run diagnostics |
 |---|---|---|---|---|
 | `entry.execution-shape` | Select `answer`, `direct_task`, or `needs_plan` by whether new execution is required, its target is determined, and prior planning is required | Chosen action matches the evidence and execution requirement; a direct task preserves the complete current-task objective | unsupported answer, unnecessary execution, ambiguous-target execution, wrong task grouping | schema/invocation status, variants, tokens, latency, cost |
-| `planner.execution-boundary` | Materialize the next independently executable task and preserve only the valid future tail | Current task, cancellation, grouping, deferral, and tail relationships satisfy the supplied goal and handoff | wrong grouping, obsolete work retained, valid work dropped, premature concretization | schema/invocation status, plan shape, variants, tokens, latency, cost |
+| `planner.execution-boundary` | Use completed facts and returned results to materialize the next independently executable task and preserve only the valid unstarted tail | Current task, capability intents, justified boundaries, cancellation, grouping, ordering, and future-goal preservation satisfy the supplied goal and handoff | wrong grouping, completed work replanned, obsolete work retained, valid work dropped, future purpose lost | schema/invocation status, plan shape and task count, plan effect, rubber-stamp behavior, variants, tokens, latency, cost |
 | `capability.executor-selection` | Select the best currently available executor for the immutable task | Selected lane fits the task and belongs to the supplied candidate set or valid general fallback | missed custom match, wrong custom match, incorrect general fallback, unavailable lane | schema/invocation status, candidate set, variants, tokens, latency, cost |
 | `outcome.announce-verdict` | Judge the current announce against the current task and overall user goal | Verdict reflects current-task sufficiency, remaining work, and required user input without sibling-result substitution | premature completion, missed completion, sibling contamination, missed user-input stop | schema/invocation status, gap-note shape, variants, tokens, latency, cost |
 | `answer.user-visible-close` | Fulfil the current reply objective: direct response, handoff synthesis, requested replay, focused user question, or completion acknowledgement | Case-specific criteria establish correctness, evidence fidelity, and the accepted close behavior | missing requested content, unsupported claim, false status, wrong reply mode, unrequested result replay | invocation status, length, overlap, variants, tokens, latency, cost |
@@ -298,7 +300,7 @@ the prompts.
 |---|---|---|
 | [`sharedPrefix.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/sharedPrefix.prompt.ts) | The common decision-node contract now contains only invocation-context use, the structured-judgment role, and graph/answer ownership | Keep node flow, field semantics, completion criteria, and runtime transitions with their narrower prompt, schema, or graph owner |
 | [`entryDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/entryDecision.prompt.ts) | The prompt applies the ordered new-execution, unique-target, and plan-requirement judgment | Preserve the validated GLM-5.2 profile and extend it across models before changing the production boundary |
-| [`capabilityPlanner.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityPlanner.prompt.ts) | The prompt owns mode-specific planning, task grouping, and deferred-work judgment; the schema owns output relationships | Validate grouping, cancellation, and future-tail preservation across models |
+| [`capabilityPlanner.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityPlanner.prompt.ts) | The prompt owns mode-specific planning over immutable completed facts and a mutable future tail; temporal position replaces `concrete`/`deferred` status | Preserve the accepted 18/18 GLM-5.2 profile and extend the unchanged goal contract across models |
 | [`capabilityDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityDecision.prompt.ts) | The prompt selects the best executor for the current task; schema and runtime own available-lane enforcement | Validate custom/general selection and missing-parameter behavior across models |
 | [`outcomeDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/outcomeDecision.prompt.ts) | The prompt identifies verdict evidence; the schema owns verdict meanings and `gap_note`; runtime owns transitions | Validate task acceptance, sibling-result isolation, and stopping behavior across models |
 | [`answer.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/answer.prompt.ts) | The prompt defines the user-visible reply boundary and evidence source; runtime supplies the current user goal and reply objective, including the fixed completion acknowledgement | Validate answer quality, replay fidelity, and repetition without changing the accepted close structure |
@@ -331,29 +333,33 @@ The stable capability-selection contract, owner, implementation, and verificatio
 links did not change, so the Prompt Contract Map does not gain a wording-only
 revision.
 
-## CapabilityPlanner pilot evidence
+## CapabilityPlanner task-boundary evidence
 
-The second merged #417 change applied the same review lens to
-`capabilityPlanner` only:
+The current planner refinement applies the same authoring principles to the
+planning problem itself rather than adding rules for individual examples:
 
-- the production prompt keeps the entry/boundary planning judgment, task
-  grouping, and the condition for keeping work `deferred`;
-- the model-visible schema defines `result`, the relationship among
-  `next_task` and `remaining_plan`, and a required-but-nullable `next_task`;
-- runtime schema validation owns cross-field validity and exact duplicate
-  rejection;
-- runtime code materializes the current task, while `capabilityDecision` chooses
-  its executor;
-- a dedicated eval case checks that related actions completed by one capability
-  remain one execution task.
+- the production prompt describes a task as continuous work by one kind of
+  ability until it returns a useful result;
+- `completed_tasks` and the full latest handoff enter as facts, while
+  `remaining_plan` enters as mutable unstarted state;
+- `next_task` and `remaining_plan` express current versus future work, so the
+  unused `concrete | deferred` status is removed from prompt, schema, runtime,
+  and eval contracts;
+- runtime code preserves completed facts and maps structured output but does
+  not maintain plan semantics on the model's behalf;
+- `capability_intent` describes an ability type; concrete executor selection
+  remains with `capabilityDecision`.
 
-For one canonical planning case, prompt preview changed from approximately 1,424
-to 1,135 tokens. This is a size measurement, not a claim of behavioral
-improvement. Real-model comparison remains required before this page can become
-`validated`.
+The semantic eval accepts multiple decompositions when task boundaries remain
+justified and the whole user goal is preserved. Exact task count, plan effect,
+and rubber-stamp behavior remain diagnostics. Deterministic checks own the
+top-level result and schema; a shared goal evaluator owns current-task
+correctness, capability intents, task boundaries, and future-goal preservation.
 
-The stable planner contract and its ownership links did not change, so the
-Prompt Contract Map does not gain a wording-only revision.
+The fixed six-case GLM-5.2 profile achieved three evaluable passes per case,
+`18/18` in total. This establishes the current single-model baseline, not
+cross-model validation. The complete decision and evidence boundary are recorded
+in [CapabilityPlanner task boundaries](../decisions/capability-planner-task-boundaries.md).
 
 ## OutcomeDecision pilot evidence
 

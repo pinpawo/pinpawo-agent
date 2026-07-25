@@ -8,6 +8,7 @@ export type ToolReviewRejectRuntimeInput = {
     id: string;
     args: { command: string };
   };
+  subagentFinalResponse: string;
   rejectOptionId: string;
 };
 
@@ -39,6 +40,7 @@ const cases: AgentEvalCase<ToolReviewRejectRuntimeInput, ToolReviewRejectRuntime
         id: 'call-rejected',
         args: { command: 'git status' },
       },
+      subagentFinalResponse: '已按用户决定跳过被拒绝的工具，并完成无需该工具的结果。',
       rejectOptionId: 'reject',
     },
     expected: {
@@ -48,7 +50,7 @@ const cases: AgentEvalCase<ToolReviewRejectRuntimeInput, ToolReviewRejectRuntime
       expectedRejectedToolResultSeenBySubagent: true,
       expectedHandoffPresent: true,
       expectedAuthorizationCount: 0,
-      expectedFinalAnnounceIncludes: ['tool call rejected by user'],
+      expectedFinalAnnounceIncludes: ['按用户决定', '完成无需该工具的结果'],
       reason: 'Rejecting a reviewed tool call must resume the same subagent with a cancellation ToolMessage, then hand off only the subagent’s real final result.',
     },
     metadata: {

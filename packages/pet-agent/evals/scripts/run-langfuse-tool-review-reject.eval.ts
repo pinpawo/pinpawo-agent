@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
+import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { tool } from '@langchain/core/tools';
 import { Command, MemorySaver } from '@langchain/langgraph';
-import { FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
 import type { AgentActor, AgentModels } from '../../src/types/agent';
 import { createOrchestratorGraph, buildOrchestratorRunInput } from '../../src/agent/createAgentRuntime';
@@ -95,7 +95,7 @@ function compactError(error: unknown): string {
 function createRouteModel(task: string): AgentModels['act'] {
   let decisionCount = 0;
   return {
-    invoke: async () => new AIMessage('已停止本次工具调用。'),
+    invoke: async () => new AIMessage('任务已完成。'),
     bindTools: () => ({
       invoke: async () => new AIMessage(''),
     }),
@@ -113,6 +113,46 @@ function createRouteModel(task: string): AgentModels['act'] {
       },
     }),
   } as unknown as AgentModels['act'];
+}
+
+class ToolReviewRejectSubagentModel extends BaseChatModel {
+  private invocationCount = 0;
+
+  constructor(
+    private readonly reviewedTool: string,
+    private readonly firstToolCall: ToolReviewRejectRuntimeInput['firstToolCall'],
+    private readonly finalResponse: string,
+  ) {
+    super({});
+  }
+
+  _llmType() {
+    return 'tool-review-reject-eval';
+  }
+
+  bindTools() {
+    return this;
+  }
+
+  async _generate() {
+    this.invocationCount += 1;
+    const message = this.invocationCount === 1
+      ? new AIMessage({
+          content: '',
+          tool_calls: [{
+            id: this.firstToolCall.id,
+            name: this.reviewedTool,
+            args: this.firstToolCall.args,
+          }],
+        })
+      : new AIMessage(this.finalResponse);
+    return {
+      generations: [{
+        text: typeof message.content === 'string' ? message.content : '',
+        message,
+      }],
+    };
+  }
 }
 
 function createSubagentInputRecorder() {
@@ -187,16 +227,11 @@ async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> 
   })];
 
   const routeModel = createRouteModel(input.delegatedTask);
-  const subagentModel = new FakeToolCallingModel({
-    toolCalls: [
-      [{
-        id: input.firstToolCall.id,
-        name: input.reviewedTool,
-        args: input.firstToolCall.args,
-      }],
-      [],
-    ],
-  });
+  const subagentModel = new ToolReviewRejectSubagentModel(
+    input.reviewedTool,
+    input.firstToolCall,
+    input.subagentFinalResponse,
+  );
   const graph = createOrchestratorGraph({
     models: {
       act: routeModel,
@@ -302,7 +337,7 @@ function finalAnnounceScore(
     key: 'final_announce_correct',
     score: missing.length === 0 ? 1 : 0,
     comment: missing.length === 0
-      ? 'Cancellation announce contains all expected terms.'
+      ? 'Subagent final announce contains all expected result terms.'
       : `Missing terms in final handoff announce: ${missing.join(', ')}`,
   };
 }

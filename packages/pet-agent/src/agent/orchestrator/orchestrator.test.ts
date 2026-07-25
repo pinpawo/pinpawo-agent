@@ -2023,7 +2023,7 @@ test('toolkit review cancellation stops the current review action', async () => 
   assert.equal(laterReviewCount, 0);
 });
 
-test('toolkit review cancellation continues inside the same subagent invocation', async () => {
+test('deterministic toolkit policy block terminates without another model call', async () => {
   let blockedCallCount = 0;
   const blockedTool = tool(async () => {
     blockedCallCount += 1;
@@ -2076,15 +2076,10 @@ test('toolkit review cancellation continues inside the same subagent invocation'
   )) as { cancelled?: boolean; reason?: string };
   assert.equal(blockedResult.cancelled, true);
   assert.match(blockedResult.reason ?? '', /blocked by policy/);
-  assert.equal(recorder.subagentInputs.length, 2);
-  assert.equal(
-    recorder.subagentInputs.at(-1)?.some((message) =>
-      message instanceof ToolMessage
-      && message.tool_call_id === 'call-blocked'),
-    true,
-  );
+  assert.equal(recorder.subagentInputs.length, 1);
   const lastMessage = result.messages.at(-1);
   assert.ok(AIMessage.isInstance(lastMessage));
+  assert.match(String(lastMessage.content), /被策略阻止/);
   assert.equal(result.completionReason, 'natural');
 });
 
@@ -2132,7 +2127,7 @@ test('toolkit review materializes distinct fallback ids for missing tool call id
   });
   assert.deepEqual(cancelledResults.map((item) => item.cancelled), [true, true]);
   assert.deepEqual(cancelledResults.map((item) => item.retryable), [false, false]);
-  assert.match(cancelledResults[0]?.guidance ?? '', /Do not retry this same tool call/);
+  assert.match(cancelledResults[0]?.guidance ?? '', /blocked by policy/);
 
   const reviewedMessage = result.messages.find((message): message is AIMessage =>
     AIMessage.isInstance(message)
@@ -2444,10 +2439,20 @@ test('global review policy auto_authorization requires human authorization when 
   const parsed = JSON.parse(String(readToolMessageContent(
     result.messages,
     'call-unsafe-write',
-  ))) as { cancelled?: boolean; reason?: string };
+  ))) as {
+    cancelled?: boolean;
+    guidance?: string;
+    reason?: string;
+    source?: string;
+  };
   assert.equal(callCount, 0);
   assert.equal(parsed.cancelled, true);
+  assert.equal(parsed.source, 'review_unavailable');
   assert.match(parsed.reason ?? '', /too broad/);
+  assert.match(parsed.guidance ?? '', /human authorization.*unavailable/);
+  const lastMessage = result.messages.at(-1);
+  assert.ok(AIMessage.isInstance(lastMessage));
+  assert.match(String(lastMessage.content), /当前运行环境无法收集确认/);
 });
 
 test('global review policy custom resolver can authorize reviewed tool calls', async () => {
@@ -2933,7 +2938,14 @@ test('toolkit review rejection resumes the same subagent before parent handoff',
     message instanceof ToolMessage
     && message.tool_call_id === 'call-rejected');
   assert.ok(rejectedToolResult);
-  assert.match(String(rejectedToolResult.content), /不要发 PR comment，直接给我结果/);
+  const rejectedResult = JSON.parse(String(rejectedToolResult.content)) as {
+    guidance?: string;
+    reason?: string;
+    source?: string;
+  };
+  assert.equal(rejectedResult.source, 'human_reject');
+  assert.equal(rejectedResult.reason, '不要发 PR comment，直接给我结果。');
+  assert.match(rejectedResult.guidance ?? '', /updated direction/);
   assert.equal(
     resumedSubagentInput.some((message) => message instanceof HumanMessage),
     true,

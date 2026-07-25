@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { capabilityPlanningBasicsDataset } from './datasets/capability-planning-basics.ts';
 import { getDecisionEvalScenarios } from './decision-eval-scenarios.ts';
 import { summarizeDecisionStability } from './decision-stability.ts';
 import { measureDecisionPrompt } from './prompt-preview.ts';
@@ -148,14 +149,19 @@ test('decision eval keeps runtime and shape evidence outside goal criteria', asy
   assert.equal(capabilityResult.diagnostics?.candidateRecallCorrect, true);
 
   const planner = getDecisionEvalScenarios('planner').find(
-    ({ caseName }) => caseName === 'boundary-keeps-valid-concrete-task',
+    ({ caseName }) => caseName === 'boundary-keeps-valid-next-task',
   );
   assert.ok(planner);
+  const plannerCase = capabilityPlanningBasicsDataset.cases.find(
+    ({ name }) => name === 'boundary-keeps-valid-next-task',
+  );
+  const materialized = plannerCase?.input.remainingPlan?.[0];
+  assert.ok(materialized);
   const plannerResult = await planner.run(structuredModel({
     result: 'next_task',
     next_task: {
-      objective: '把完成的报告发送给项目负责人',
-      capability_intent: 'message_delivery',
+      objective: materialized.objective,
+      capability_intent: materialized.capabilityIntent,
     },
     remaining_plan: [],
   }), undefined, undefined, goalJudge());

@@ -41,7 +41,6 @@ export type CapabilityPlanTask = {
   /** Planned capability boundary that has not started yet. */
   objective: string;
   capabilityIntent: string;
-  status: 'concrete' | 'deferred';
 };
 
 export type TaskActiveDelegation = {

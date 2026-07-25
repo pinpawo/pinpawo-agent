@@ -24,13 +24,18 @@ export function buildCapabilityPlanningDecisionSystemPrompt(params: {
 export function buildCapabilityPlanningDecisionInput(params: {
   mode: 'entry' | 'boundary';
   userIntentContext: string;
-  remainingPlan: Array<{ objective: string; capabilityIntent: string; status: 'concrete' | 'deferred' }>;
+  completedTasks: Array<{ objective: string; result: string | null }>;
+  remainingPlan: Array<{ objective: string; capabilityIntent: string }>;
   latestHandoff: string | null;
   capabilityRegistryContext: string;
 }): string {
   return CAPABILITY_PLANNER_INPUT_PROMPT.render({
     mode: params.mode,
     userIntentContextBlock: promptBlock(params.userIntentContext, 2),
+    completedTasksBlock: promptBlock(
+      xmlTextBlock('completed_tasks', JSON.stringify(params.completedTasks), ' role="fact"'),
+      2,
+    ),
     remainingPlanBlock: promptBlock(
       xmlTextBlock('remaining_plan', JSON.stringify(params.remainingPlan), ' role="state"'),
       2,

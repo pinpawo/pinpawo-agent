@@ -176,12 +176,21 @@ test('capability planner keeps planning state in the input context', () => {
   const input = buildCapabilityPlanningDecisionInput({
     mode: 'boundary',
     userIntentContext: '<user_intent_context>重构 auth</user_intent_context>',
-    remainingPlan: [{ objective: '根据调查重构 auth', capabilityIntent: 'code_modification', status: 'deferred' }],
+    completedTasks: [{
+      objective: '调查 auth',
+      result: '发现 token validation 循环依赖。',
+    }, {
+      objective: '确认公开接口约束',
+      result: '现有公开接口必须保持兼容。',
+    }],
+    remainingPlan: [{ objective: '根据调查重构 auth', capabilityIntent: 'code_modification' }],
     latestHandoff: '发现 token validation 循环依赖。',
     capabilityRegistryContext: 'explore: codebase exploration',
   });
   assert.match(prompt, /PLANNER_OUTPUT_INSTRUCTION/);
   assert.match(input, /<mode>boundary<\/mode>/);
+  assert.match(input, /<completed_tasks[^]*?调查 auth[^]*?token validation[^]*?<\/completed_tasks>/);
+  assert.match(input, /<completed_tasks[^]*?确认公开接口约束[^]*?保持兼容[^]*?<\/completed_tasks>/);
   assert.match(input, /token validation/);
   assert.match(input, /code_modification/);
   assert.match(input, /explore: codebase exploration/);

@@ -1,5 +1,5 @@
 import { type BaseMessage } from '@langchain/core/messages';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type {
   SubagentInputState,
   SubagentResult,
@@ -58,10 +58,11 @@ export const SUBAGENT_GUARD_DECISION_EVENT = 'subagent_guard_decision';
  * Runtime-event name announcing the per-delegation tool-operation display
  * metadata (`SubagentRunInput.operations`). Root `tools` protocol events only
  * carry `tool_call_id`/`tool_name`; a consumer that joins display metadata
- * from a registry merges this map in so delegation-scoped toolset operations
+ * from a registry merges this map in so delegation-scoped toolkit operations
  * (which are not in any statically known toolkit) still resolve.
  */
 export const SUBAGENT_OPERATIONS_EVENT = 'subagent_operations';
+export const SUBAGENT_PROMPT_SECTIONS_EVENT = 'subagent_prompt_sections';
 
 function readResultMessages(result: unknown): BaseMessage[] | null {
   if (
@@ -233,7 +234,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
   // messages from summaries and model responses returned by the child graph.
   ensureSubagentMessageIds(input.messages);
   const inputState: SubagentInputState = {
-    instructions: input.instructions,
+    promptSections: input.promptSections,
     operations: input.operations,
     messages: input.messages,
     maxIterations: input.maxIterations,
@@ -241,11 +242,37 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     artifacts: input.artifacts,
   };
   const inputMessageIds = new Set(inputState.messages.map((message) => message.id as string));
-  const systemPrompt = [
-    SUBAGENT_GOVERNING_PROMPT,
-    inputState.contextWindowTokens ? SUBAGENT_CONTEXT_SUMMARY_GOVERNING_PROMPT : null,
-    ...inputState.instructions,
-  ].filter((item): item is string => Boolean(item)).join('\n\n');
+  const systemPromptSections = [
+    {
+      id: 'framework:governing',
+      owner: 'framework',
+      content: SUBAGENT_GOVERNING_PROMPT,
+    },
+    ...(inputState.contextWindowTokens
+      ? [{
+          id: 'framework:context-summary',
+          owner: 'framework',
+          content: SUBAGENT_CONTEXT_SUMMARY_GOVERNING_PROMPT,
+        }]
+      : []),
+    ...inputState.promptSections,
+  ];
+  const sectionIds = new Set<string>();
+  for (const section of systemPromptSections) {
+    if (!section.id.trim()) {
+      throw new Error('Subagent prompt section id must be non-empty');
+    }
+    if (!section.content.trim()) {
+      throw new Error(`Subagent prompt section "${section.id}" content must be non-empty`);
+    }
+    if (sectionIds.has(section.id)) {
+      throw new Error(`Duplicate subagent prompt section id: ${section.id}`);
+    }
+    sectionIds.add(section.id);
+  }
+  const systemPrompt = systemPromptSections
+    .map((section) => section.content)
+    .join('\n\n');
   // Decision records must never fail the run.
   const emitGuardDecision: GuardDecisionEmitter = (record) => {
     writeSubagentRuntimeEvent(SUBAGENT_GUARD_DECISION_EVENT, record);
@@ -268,6 +295,13 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     ...(middleware.length > 0 ? { middleware } : {}),
   });
 
+  writeSubagentRuntimeEvent(SUBAGENT_PROMPT_SECTIONS_EVENT, {
+    sections: systemPromptSections.map((section) => ({
+      id: section.id,
+      owner: section.owner ?? null,
+      digest: createHash('sha256').update(section.content, 'utf8').digest('hex'),
+    })),
+  });
   if (inputState.operations && Object.keys(inputState.operations).length > 0) {
     writeSubagentRuntimeEvent(SUBAGENT_OPERATIONS_EVENT, { operations: inputState.operations });
   }

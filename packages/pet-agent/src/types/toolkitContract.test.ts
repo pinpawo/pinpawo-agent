@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import type { NamedStructuredTool, ToolkitToolReviewPolicy } from './toolkit';
+import type { NamedStructuredTool, ToolReviewPolicy } from './toolkit';
 import {
   defineToolkit,
-  defineToolset,
-  hasToolOperationMetadata,
-  TOOLKIT_AUTO_REVIEW_FIELD_MAX_CHARS,
+  evaluateToolkitAvailability,
+  filterAvailableToolkits,
+  TOOLKIT_REVIEW_GUIDANCE_FIELD_MAX_CHARS,
   validateToolkitDefinition,
 } from './toolkit';
 
@@ -15,114 +15,142 @@ const betaTool = { name: 'beta_tool' } as NamedStructuredTool<'beta_tool'>;
 
 const reviewPolicy = {
   request: () => null,
-} satisfies ToolkitToolReviewPolicy;
+} satisfies ToolReviewPolicy;
 
 test('defineToolkit rejects duplicate tool names at runtime', () => {
   assert.throws(
     () => defineToolkit({
       name: 'duplicate_tools',
       description: 'Duplicate tool names should fail fast.',
-      tools: [alphaTool, alphaTool] as const,
+      tools: [{ tool: alphaTool }, { tool: alphaTool }] as const,
     }),
     /duplicate tool "alpha_tool"/,
   );
 });
 
-test('defineToolkit rejects operation metadata for unknown tools at runtime', () => {
+test('defineToolkit requires a non-empty ToolDefinition list', () => {
   assert.throws(
     () => defineToolkit({
-      name: 'unknown_operation',
-      description: 'Operation metadata must be owned by a toolkit tool.',
-      tools: [alphaTool] as const,
-      operations: {
-        alpha_tool: {},
-        beta_tool: {},
-      } as never,
+      name: 'empty_tools',
+      description: 'Toolkits must own at least one tool.',
+      tools: [],
     }),
-    /operation metadata references unknown tool "beta_tool"/,
+    /must define at least one tool/,
   );
 });
 
-test('defineToolset rejects review policy for unknown tools at runtime', () => {
-  assert.throws(
-    () => defineToolset({
-      name: 'unknown_review',
-      description: 'Review policy must be owned by a toolset tool.',
-      tools: [alphaTool] as const,
-      policy: {
-        toolReview: {
-          beta_tool: reviewPolicy,
-        },
-      } as never,
-    }),
-    /review policy references unknown tool "beta_tool"/,
-  );
-});
-
-test('toolkit registration rejects oversized auto-review fields', () => {
-  const oversized = 'x'.repeat(TOOLKIT_AUTO_REVIEW_FIELD_MAX_CHARS + 1);
+test('toolkit registration rejects oversized review guidance', () => {
+  const oversized = 'x'.repeat(TOOLKIT_REVIEW_GUIDANCE_FIELD_MAX_CHARS + 1);
 
   assert.throws(
     () => defineToolkit({
-      name: 'oversized_auto_review',
-      description: 'Invalid auto-review policy.',
-      tools: [alphaTool] as const,
-      policy: {
-        autoReview: {
-          allow: oversized,
-          ask: 'Ask for risky operations.',
-        },
+      name: 'oversized_review_guidance',
+      description: 'Invalid review guidance.',
+      tools: [{ tool: alphaTool }],
+      reviewGuidance: {
+        allow: oversized,
+        ask: 'Ask for risky operations.',
       },
     }),
-    /auto-review allow exceeds 2000 characters/,
+    /review guidance allow exceeds 2000 characters/,
   );
 
   assert.throws(
     () => validateToolkitDefinition({
       name: 'runtime_registered_toolkit',
       description: 'Plugin-style toolkit definition.',
-      policy: {
-        autoReview: {
-          allow: 'Allow routine operations.',
-          ask: oversized,
-        },
+      tools: [{ tool: alphaTool }],
+      reviewGuidance: {
+        allow: 'Allow routine operations.',
+        ask: oversized,
       },
     }),
-    /auto-review ask exceeds 2000 characters/,
+    /review guidance ask exceeds 2000 characters/,
   );
 });
 
-test('defineToolkit preserves valid tool metadata and review policy', () => {
+test('toolkit registration rejects malformed static contract fields', () => {
+  assert.throws(
+    () => validateToolkitDefinition({
+      name: 'dynamic_instructions',
+      description: 'Toolkit instructions must already be resolved.',
+      tools: [{ tool: alphaTool }],
+      instructions: ['not', 'a', 'document'],
+    } as never),
+    /instructions must be a string/,
+  );
+
+  assert.throws(
+    () => validateToolkitDefinition({
+      name: 'invalid_review',
+      description: 'Review policies must be bound to one ToolDefinition.',
+      tools: [{ tool: alphaTool, review: {} }],
+    } as never),
+    /review must define request\(\)/,
+  );
+});
+
+test('defineToolkit keeps implementation, operation, and review in one ToolDefinition', () => {
   const toolkit = defineToolkit({
     name: 'valid_toolkit',
     description: 'Valid toolkit contract.',
-    tools: [alphaTool, betaTool] as const,
-    operations: {
-      alpha_tool: { title: 'Alpha' },
-    },
-    policy: {
-      autoReview: {
-        allow: 'Allow alpha operations when explicitly requested.',
-        ask: 'Ask before beta operations that delete data.',
+    tools: [
+      {
+        tool: alphaTool,
+        operation: { title: 'Alpha' },
       },
-      toolReview: {
-        beta_tool: reviewPolicy,
+      {
+        tool: betaTool,
+        review: reviewPolicy,
       },
+    ] as const,
+    reviewGuidance: {
+      allow: 'Allow alpha operations when explicitly requested.',
+      ask: 'Ask before beta operations that delete data.',
     },
   });
 
-  assert.ok(Array.isArray(toolkit.tools));
-  assert.deepEqual(toolkit.tools.map((tool) => tool.name), ['alpha_tool', 'beta_tool']);
-  assert.equal(toolkit.operations?.alpha_tool?.title, 'Alpha');
-  assert.equal(toolkit.policy?.toolReview?.beta_tool, reviewPolicy);
-  assert.deepEqual(toolkit.policy?.autoReview, {
+  assert.deepEqual(
+    toolkit.tools.map((definition) => definition.tool.name),
+    ['alpha_tool', 'beta_tool'],
+  );
+  assert.equal(toolkit.tools[0].operation?.title, 'Alpha');
+  assert.equal(toolkit.tools[1].review, reviewPolicy);
+  assert.deepEqual(toolkit.reviewGuidance, {
     allow: 'Allow alpha operations when explicitly requested.',
     ask: 'Ask before beta operations that delete data.',
   });
 });
 
-test('hasToolOperationMetadata treats empty operation maps as absent', () => {
-  assert.equal(hasToolOperationMetadata(undefined), false);
-  assert.equal(hasToolOperationMetadata({}), false);
-  assert.equal(hasToolOperationMetadata({ alpha_tool: {} }), true);
+test('filterAvailableToolkits excludes unavailable and failed checks for one generation', async () => {
+  const available = defineToolkit({
+    name: 'available',
+    description: 'Available Toolkit.',
+    tools: [{ tool: alphaTool }],
+    availability: async () => ({ available: true }),
+  });
+  const unavailable = defineToolkit({
+    name: 'unavailable',
+    description: 'Unavailable Toolkit.',
+    tools: [{ tool: betaTool }],
+    availability: () => ({ available: false, reason: 'offline' }),
+  });
+  const failed = defineToolkit({
+    name: 'failed',
+    description: 'Failed availability check.',
+    tools: [{ tool: betaTool }],
+    availability: () => {
+      throw new Error('check failed');
+    },
+  });
+
+  assert.deepEqual(
+    (await filterAvailableToolkits([available, unavailable, failed]))
+      .map(({ name }) => name),
+    ['available'],
+  );
+  assert.deepEqual(await evaluateToolkitAvailability(failed), {
+    available: false,
+    reason: 'check failed',
+  });
 });

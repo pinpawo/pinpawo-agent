@@ -1,7 +1,12 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import type { AgentCapability } from '../types/capability';
 import type { AgentActor, AgentExecution } from '../types/agent';
-import type { AgentToolkit, AgentToolset } from '../types/toolkit';
+import {
+  filterAvailableToolkits,
+  type AgentToolkit,
+} from '../types/toolkit';
+import { compileAgentRegistry } from './orchestrator/registry';
+import type { CompiledAgentRegistry } from './orchestrator/registry';
 import type { GlobalReviewPolicy } from './orchestrator/review/globalReviewPolicy';
 import {
   buildOrchestratorRunInput,
@@ -15,14 +20,12 @@ export type AgentInvokeInput = {
   threadId?: string;
   capabilities?: AgentCapability[];
   toolkits?: AgentToolkit[];
+  /** Explicit Toolkit permission boundary for the general executor. */
+  generalUses: readonly string[];
   execution?: AgentExecution;
   signal?: AbortSignal;
   /** Agent working directory passed into system prompt so the agent knows its file scope. */
   workdir?: string;
-  /** Host-resolved current-thread capability artifact directory. */
-  artifactDiscoveryRoot?: string;
-  /** Host-owned read-only tools used to inspect artifactDiscoveryRoot. */
-  artifactDiscoveryToolset?: AgentToolset;
   /** Runtime environment summary injected into system prompts. Must not contain secrets. */
   runtimeEnvironment?: string;
   globalReviewPolicy?: GlobalReviewPolicy;
@@ -41,18 +44,21 @@ function readReply(messages: BaseMessage[]): string {
 export async function runAgent(
   graph: OrchestratorGraph,
   input: AgentInvokeInput,
+  options: {
+    /** Host-precompiled registry. Reused as-is when the host owns run preparation. */
+    registry?: CompiledAgentRegistry;
+  } = {},
 ): Promise<AgentRunResult> {
   const configurable: Record<string, unknown> = {};
+  configurable.registry = options.registry ?? compileAgentRegistry({
+    toolkits: await filterAvailableToolkits(input.toolkits ?? []),
+    capabilities: input.capabilities ?? [],
+    generalUses: input.generalUses,
+  });
   if (input.actor) configurable.actor = input.actor;
   if (input.threadId) configurable.thread_id = input.threadId;
-  if (input.capabilities) configurable.capabilities = input.capabilities;
-  if (input.toolkits && input.toolkits.length > 0) configurable.toolkits = input.toolkits;
   if (input.execution) configurable.execution = input.execution;
   if (input.workdir) configurable.workdir = input.workdir;
-  if (input.artifactDiscoveryRoot) configurable.artifactDiscoveryRoot = input.artifactDiscoveryRoot;
-  if (input.artifactDiscoveryToolset) {
-    configurable.artifactDiscoveryToolset = input.artifactDiscoveryToolset;
-  }
   if (input.runtimeEnvironment) configurable.runtimeEnvironment = input.runtimeEnvironment;
   if (input.globalReviewPolicy) configurable.globalReviewPolicy = input.globalReviewPolicy;
 

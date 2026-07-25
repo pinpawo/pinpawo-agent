@@ -1,6 +1,4 @@
-import type { BaseMessage } from '@langchain/core/messages';
 import type { StructuredTool } from '@langchain/core/tools';
-import type { ZodType } from 'zod';
 import type {
   PendingReviewAction,
   ReviewEffect,
@@ -8,100 +6,10 @@ import type {
   ToolAuthorizationMatcher,
 } from '../agent/orchestrator/review/reviewSpec';
 import type { ToolAuthorizationRecord } from '../agent/orchestrator/review/reviewAuthorizations';
-import type { GlobalReviewPolicy } from '../agent/orchestrator/review/globalReviewPolicy';
-import type { AgentActor, AgentExecution, AgentModels } from './agent';
-import type { CapabilityAvailabilityConfig } from './capability';
-import type { CapabilityArtifactRef } from './artifact';
-import type { SubagentRuntimeEvent } from './subagent';
-
-export type ToolkitContext = {
-  models: AgentModels;
-  actor: AgentActor;
-  messages: BaseMessage[];
-  /** Reviewer-only runtime facts; tools must not treat these as authorization. */
-  reviewContext?: {
-    task?: string | null;
-    workdir?: string | null;
-  };
-  threadId?: string | null;
-  capabilityId?: string | null;
-  resultSchema?: ZodType;
-  delegationId?: string | null;
-  runId?: string | null;
-  execution?: AgentExecution;
-  reviewCapabilities?: ToolkitReviewCapabilities;
-  globalReviewPolicy?: GlobalReviewPolicy;
-  toolAuthorizations?: ToolAuthorizationRecord[];
-  recordToolAuthorization?: (authorization: ToolAuthorizationRecord) => void | Promise<void>;
-  recordCapabilityArtifact?: (ref: CapabilityArtifactRef) => void | Promise<void>;
-  emitRuntimeEvent?: (event: SubagentRuntimeEvent) => void | Promise<void>;
-};
 
 export type ToolkitReviewCapabilities = {
   humanReview: boolean;
   sessionAuthorization: boolean;
-};
-
-export type ToolkitResource<T> = T | ((ctx: ToolkitContext) => T | Promise<T>);
-
-export type ToolkitToolReviewContext = ToolkitContext & {
-  toolkitName: string;
-  toolName: string;
-  input: unknown;
-  operation?: ToolOperationMetadata;
-};
-
-export type ToolkitToolAuthorizationMatcherContext = {
-  toolkitName: string;
-  toolName: string;
-  input: unknown;
-  operation?: ToolOperationMetadata;
-  pendingAction: PendingReviewAction;
-  effect: Extract<ReviewEffect, { type: 'graph.authorize_tool_action' }>;
-};
-
-export type ToolkitToolReviewBlock = {
-  type: 'block';
-  reason: string;
-};
-
-export type ToolkitToolReviewResult = ReviewSpec | ToolkitToolReviewBlock | null;
-
-export type ToolkitToolReviewPolicy = {
-  /**
-   * Produce the review requirement for a single tool call.
-   *
-   * MUST be idempotent and side-effect free: the review middleware re-derives
-   * the pending reviews from state on every afterModel pass, so `request` is
-   * re-invoked for the same tool call when a review action is resumed. Do not
-   * increment counters, emit events, or call external services here — build and
-   * return the ReviewSpec/block purely from `ctx`.
-   */
-  request: (
-    ctx: ToolkitToolReviewContext
-  ) => ToolkitToolReviewResult | Promise<ToolkitToolReviewResult>;
-  buildAuthorizationMatcher?: (
-    ctx: ToolkitToolAuthorizationMatcherContext
-  ) => ToolAuthorizationMatcher | null | Promise<ToolAuthorizationMatcher | null>;
-};
-
-export type ToolkitAutoReviewPolicy = {
-  /**
-   * Toolkit-owned auto-review boundaries.
-   *
-   * `allow` describes calls eligible for automatic authorization; `ask`
-   * describes calls that should be sent to human review. The global policy
-   * validates the whole batch and takes precedence on conflicts.
-   */
-  allow: string;
-  ask: string;
-};
-
-export const TOOLKIT_AUTO_REVIEW_FIELD_MAX_CHARS = 2_000;
-
-export type ToolkitPolicy = {
-  toolReview?: Record<string, ToolkitToolReviewPolicy>;
-  autoReview?: ToolkitAutoReviewPolicy;
 };
 
 export type ToolOperationSummary = {
@@ -118,151 +26,220 @@ export type ToolOperationMetadata = {
   summarizeError?: (error: unknown) => ToolOperationSummary | null;
 };
 
-export type ToolOperationMetadataMap = Record<string, ToolOperationMetadata>;
+export type ToolReviewContext = {
+  toolkitName: string;
+  toolName: string;
+  input: unknown;
+  operation?: ToolOperationMetadata;
+  reviewCapabilities?: ToolkitReviewCapabilities;
+  toolAuthorizations?: ToolAuthorizationRecord[];
+};
 
-export function hasToolOperationMetadata(
-  operations: ToolOperationMetadataMap | undefined,
-): operations is ToolOperationMetadataMap {
-  return Boolean(operations && Object.keys(operations).length > 0);
-}
+export type ToolAuthorizationMatcherContext = {
+  toolkitName: string;
+  toolName: string;
+  input: unknown;
+  operation?: ToolOperationMetadata;
+  pendingAction: PendingReviewAction;
+  effect: Extract<ReviewEffect, { type: 'graph.authorize_tool_action' }>;
+};
 
-export type ToolkitOperationSummary = ToolOperationSummary;
-export type ToolkitOperationMetadata = ToolOperationMetadata;
+export type ToolReviewBlock = {
+  type: 'block';
+  reason: string;
+};
+
+export type ToolReviewResult = ReviewSpec | ToolReviewBlock | null;
+
+export type ToolReviewPolicy = {
+  /**
+   * Produce the review requirement for one tool call.
+   *
+   * The policy must be idempotent and side-effect free. Review middleware can
+   * invoke it again when a suspended review resumes.
+   */
+  request: (
+    ctx: ToolReviewContext,
+  ) => ToolReviewResult | Promise<ToolReviewResult>;
+  buildAuthorizationMatcher?: (
+    ctx: ToolAuthorizationMatcherContext,
+  ) => ToolAuthorizationMatcher | null | Promise<ToolAuthorizationMatcher | null>;
+};
+
+export type ToolkitReviewGuidance = {
+  /**
+   * Toolkit-owned guidance for a global review classifier.
+   *
+   * Deterministic per-tool requirements belong in `ToolDefinition.review`.
+   */
+  allow: string;
+  ask: string;
+};
+
+export const TOOLKIT_REVIEW_GUIDANCE_FIELD_MAX_CHARS = 2_000;
 
 export type NamedStructuredTool<TName extends string = string> = StructuredTool & {
   name: TName;
 };
 
-export type ToolkitToolName<TTools extends readonly NamedStructuredTool[]> =
-  TTools[number]['name'];
-
-export type ToolOperationMetadataMapFor<TTools extends readonly NamedStructuredTool[]> =
-  Partial<Record<ToolkitToolName<TTools>, ToolOperationMetadata>>;
-
-export type ToolkitToolReviewPolicyMapFor<TTools extends readonly NamedStructuredTool[]> =
-  Partial<Record<ToolkitToolName<TTools>, ToolkitToolReviewPolicy>>;
-
-type NoExtraToolkitToolKeys<TMap, TTools extends readonly NamedStructuredTool[]> =
-  TMap & Record<Exclude<keyof TMap, ToolkitToolName<TTools>>, never>;
-
-export type AgentToolkit = {
-  name: string;
-  description: string;
-  exposure?: {
-    general?: boolean;
-    capability?: boolean;
-  };
-  availability?: CapabilityAvailabilityConfig;
-  tools?: ToolkitResource<StructuredTool[]>;
-  instructions?: ToolkitResource<string[]>;
-  operations?: ToolOperationMetadataMap;
-  policy?: ToolkitPolicy;
+export type ToolDefinition<
+  TTool extends NamedStructuredTool = NamedStructuredTool,
+> = {
+  readonly tool: TTool;
+  readonly operation?: ToolOperationMetadata;
+  readonly review?: ToolReviewPolicy;
 };
 
-export type AgentToolset = {
-  name?: string;
-  description?: string;
-  tools: StructuredTool[];
-  operations?: ToolOperationMetadataMap;
-  policy?: ToolkitPolicy;
-};
+export type ToolkitAvailability =
+  | { available: true }
+  | { available: false; reason: string };
 
-type StaticToolsetDefinition<
-  TTools extends readonly NamedStructuredTool[],
-  TOperations extends Partial<Record<string, ToolOperationMetadata>>,
-  TToolReview extends Partial<Record<string, ToolkitToolReviewPolicy>>,
-> = Omit<AgentToolset, 'tools' | 'operations' | 'policy'> & {
-  tools: TTools;
-  operations?: NoExtraToolkitToolKeys<TOperations, TTools>;
-  policy?: Omit<ToolkitPolicy, 'toolReview'> & {
-    toolReview?: NoExtraToolkitToolKeys<TToolReview, TTools>;
-  };
-};
+export type ToolkitAvailabilityCheck = () =>
+  | ToolkitAvailability
+  | Promise<ToolkitAvailability>;
 
-function assertStaticToolsetDefinition(
-  definition: StaticToolsetDefinition<
-    readonly NamedStructuredTool[],
-    Partial<Record<string, ToolOperationMetadata>>,
-    Partial<Record<string, ToolkitToolReviewPolicy>>
-  >,
-) {
-  const ownerName = definition.name ?? 'anonymous';
-  assertToolkitAutoReviewPolicy(ownerName, definition.policy?.autoReview);
-  const toolNames = new Set<string>();
-
-  for (const tool of definition.tools) {
-    if (toolNames.has(tool.name)) {
-      throw new Error(`Toolkit/toolset "${ownerName}" defines duplicate tool "${tool.name}"`);
-    }
-    toolNames.add(tool.name);
+export async function evaluateToolkitAvailability(
+  toolkit: AgentToolkit,
+): Promise<ToolkitAvailability> {
+  if (!toolkit.availability) {
+    return { available: true };
   }
-
-  for (const operationKey of Object.keys(definition.operations ?? {})) {
-    if (!toolNames.has(operationKey)) {
-      throw new Error(`Toolkit/toolset "${ownerName}" operation metadata references unknown tool "${operationKey}"`);
+  try {
+    const availability = await toolkit.availability();
+    if (availability?.available === true) {
+      return { available: true };
     }
-  }
-
-  for (const reviewKey of Object.keys(definition.policy?.toolReview ?? {})) {
-    if (!toolNames.has(reviewKey)) {
-      throw new Error(`Toolkit/toolset "${ownerName}" review policy references unknown tool "${reviewKey}"`);
+    if (
+      availability?.available === false
+      && typeof availability.reason === 'string'
+      && availability.reason.trim()
+    ) {
+      return {
+        available: false,
+        reason: availability.reason,
+      };
     }
+    return {
+      available: false,
+      reason: `Toolkit "${toolkit.name}" availability returned an invalid result`,
+    };
+  } catch (error) {
+    return {
+      available: false,
+      reason: error instanceof Error ? error.message : 'availability check failed',
+    };
   }
 }
 
-function assertToolkitAutoReviewPolicy(
+/**
+ * Resolve one complete Toolkit inventory for the registry generation being
+ * assembled. This function deliberately has no cross-generation cache.
+ */
+export async function filterAvailableToolkits(
+  toolkits: readonly AgentToolkit[],
+): Promise<AgentToolkit[]> {
+  const records = await Promise.all(
+    toolkits.map(async (toolkit) => ({
+      toolkit,
+      availability: await evaluateToolkitAvailability(toolkit),
+    })),
+  );
+  return records
+    .filter(({ availability }) => availability.available)
+    .map(({ toolkit }) => toolkit);
+}
+
+export type AgentToolkit = {
+  readonly name: string;
+  readonly description: string;
+  readonly tools: readonly ToolDefinition[];
+  readonly instructions?: string;
+  readonly availability?: ToolkitAvailabilityCheck;
+  readonly reviewGuidance?: ToolkitReviewGuidance;
+};
+
+function assertToolkitReviewGuidance(
   ownerName: string,
-  policy: ToolkitAutoReviewPolicy | undefined,
+  guidance: ToolkitReviewGuidance | undefined,
 ) {
-  if (!policy) return;
+  if (!guidance) return;
+  if (typeof guidance !== 'object' || Array.isArray(guidance)) {
+    throw new Error(`Toolkit "${ownerName}" review guidance must be an object`);
+  }
 
   for (const field of ['allow', 'ask'] as const) {
-    const value = policy[field];
+    const value = guidance[field];
     if (typeof value !== 'string') {
-      throw new Error(`Toolkit/toolset "${ownerName}" auto-review ${field} must be a string`);
+      throw new Error(`Toolkit "${ownerName}" review guidance ${field} must be a string`);
     }
-    if (value.length > TOOLKIT_AUTO_REVIEW_FIELD_MAX_CHARS) {
+    if (value.length > TOOLKIT_REVIEW_GUIDANCE_FIELD_MAX_CHARS) {
       throw new Error(
-        `Toolkit/toolset "${ownerName}" auto-review ${field} exceeds ${TOOLKIT_AUTO_REVIEW_FIELD_MAX_CHARS.toString()} characters`,
+        `Toolkit "${ownerName}" review guidance ${field} exceeds ${TOOLKIT_REVIEW_GUIDANCE_FIELD_MAX_CHARS.toString()} characters`,
       );
     }
   }
 }
 
 export function validateToolkitDefinition(toolkit: AgentToolkit) {
-  assertToolkitAutoReviewPolicy(toolkit.name, toolkit.policy?.autoReview);
-}
+  if (!toolkit || typeof toolkit !== 'object' || Array.isArray(toolkit)) {
+    throw new Error('Toolkit definition must be an object');
+  }
+  if (typeof toolkit.name !== 'string' || !toolkit.name.trim()) {
+    throw new Error('Toolkit name must not be empty');
+  }
+  if (typeof toolkit.description !== 'string' || !toolkit.description.trim()) {
+    throw new Error(`Toolkit "${toolkit.name}" description must not be empty`);
+  }
+  if (!Array.isArray(toolkit.tools) || toolkit.tools.length === 0) {
+    throw new Error(`Toolkit "${toolkit.name}" must define at least one tool`);
+  }
+  if (toolkit.instructions !== undefined && typeof toolkit.instructions !== 'string') {
+    throw new Error(`Toolkit "${toolkit.name}" instructions must be a string`);
+  }
+  if (toolkit.availability !== undefined && typeof toolkit.availability !== 'function') {
+    throw new Error(`Toolkit "${toolkit.name}" availability must be a function`);
+  }
 
-export function defineToolset<
-  const TTools extends readonly NamedStructuredTool[],
-  const TOperations extends Partial<Record<string, ToolOperationMetadata>> = ToolOperationMetadataMapFor<TTools>,
-  const TToolReview extends Partial<Record<string, ToolkitToolReviewPolicy>> = ToolkitToolReviewPolicyMapFor<TTools>,
->(definition: StaticToolsetDefinition<TTools, TOperations, TToolReview>): AgentToolset {
-  assertStaticToolsetDefinition(definition);
-  return {
-    ...definition,
-    tools: [...definition.tools],
-    operations: definition.operations as ToolOperationMetadataMap | undefined,
-    policy: definition.policy as ToolkitPolicy | undefined,
-  };
+  assertToolkitReviewGuidance(toolkit.name, toolkit.reviewGuidance);
+
+  const toolNames = new Set<string>();
+  for (const definition of toolkit.tools) {
+    const toolName = definition?.tool?.name;
+    if (typeof toolName !== 'string' || !toolName.trim()) {
+      throw new Error(`Toolkit "${toolkit.name}" contains a tool without a name`);
+    }
+    if (toolNames.has(toolName)) {
+      throw new Error(`Toolkit "${toolkit.name}" defines duplicate tool "${toolName}"`);
+    }
+    if (
+      definition.operation !== undefined
+      && (typeof definition.operation !== 'object' || Array.isArray(definition.operation))
+    ) {
+      throw new Error(
+        `Toolkit "${toolkit.name}" tool "${toolName}" operation must be an object`,
+      );
+    }
+    if (
+      definition.review !== undefined
+      && (
+        typeof definition.review !== 'object'
+        || Array.isArray(definition.review)
+        || typeof definition.review.request !== 'function'
+      )
+    ) {
+      throw new Error(
+        `Toolkit "${toolkit.name}" tool "${toolName}" review must define request()`,
+      );
+    }
+    toolNames.add(toolName);
+  }
 }
 
 export function defineToolkit<
-  const TTools extends readonly NamedStructuredTool[],
-  const TOperations extends Partial<Record<string, ToolOperationMetadata>> = ToolOperationMetadataMapFor<TTools>,
-  const TToolReview extends Partial<Record<string, ToolkitToolReviewPolicy>> = ToolkitToolReviewPolicyMapFor<TTools>,
->(definition: Omit<AgentToolkit, 'tools' | 'operations' | 'policy'> & {
-  tools: TTools;
-  operations?: NoExtraToolkitToolKeys<TOperations, TTools>;
-  policy?: Omit<ToolkitPolicy, 'toolReview'> & {
-    toolReview?: NoExtraToolkitToolKeys<TToolReview, TTools>;
-  };
-}): AgentToolkit {
-  const toolset = defineToolset(definition);
-  return {
-    ...definition,
-    tools: toolset.tools,
-    operations: toolset.operations,
-    policy: toolset.policy,
-  };
+  const TTools extends readonly ToolDefinition[],
+>(
+  definition: Omit<AgentToolkit, 'tools'> & { tools: TTools },
+): Omit<AgentToolkit, 'tools'> & { tools: TTools } {
+  validateToolkitDefinition(definition);
+  return definition;
 }

@@ -8,7 +8,7 @@ import {
   defineToolkit,
   type AgentToolkit,
   type NamedStructuredTool,
-  type ToolkitOperationMetadata,
+  type ToolOperationMetadata,
 } from '../../types/toolkit';
 
 const execFileAsync = promisify(execFile);
@@ -127,7 +127,7 @@ const wikiReadOperationMetadata = {
       };
     },
   },
-} satisfies Record<string, ToolkitOperationMetadata>;
+} satisfies Record<string, ToolOperationMetadata>;
 
 async function readDirRecursive(absolutePath: string, root: string, depth: number, maxDepth = 8): Promise<string[]> {
   const lines: string[] = [];
@@ -311,8 +311,10 @@ export function createWikiReadToolkit(wikiRoot: string): AgentToolkit {
   return defineToolkit({
     name: 'wiki_read',
     description: '只读知识库查询能力，提供目录浏览、文件读取、检索和查找。',
-    tools: wikiReadTools,
-    operations: wikiReadOperationMetadata,
+    tools: wikiReadTools.map((toolItem) => ({
+      tool: toolItem,
+      operation: wikiReadOperationMetadata[toolItem.name],
+    })),
   });
 }
 

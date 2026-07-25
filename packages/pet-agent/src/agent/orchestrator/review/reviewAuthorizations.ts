@@ -1,4 +1,4 @@
-import type { AgentToolkit, ToolkitToolReviewPolicy } from '../../../types/toolkit';
+import type { AgentToolkit, ToolReviewPolicy } from '../../../types/toolkit';
 import type {
   PendingReviewAction,
   ReviewEffect,
@@ -230,15 +230,17 @@ export function mergeToolAuthorizations(
 function findReviewPolicy(toolkits: AgentToolkit[], toolName: string): {
   toolkit: AgentToolkit;
   toolkitName: string;
-  policy: ToolkitToolReviewPolicy;
+  policy: ToolReviewPolicy;
+  operation: AgentToolkit['tools'][number]['operation'];
 } | null {
   for (const toolkit of toolkits) {
-    const policy = toolkit.policy?.toolReview?.[toolName];
-    if (policy) {
+    const definition = toolkit.tools.find((item) => item.tool.name === toolName);
+    if (definition?.review) {
       return {
         toolkit,
         toolkitName: toolkit.name,
-        policy,
+        policy: definition.review,
+        operation: definition.operation,
       };
     }
   }
@@ -289,7 +291,7 @@ async function buildMatcherFromTemplate(params: {
     toolkitName: policyRef.toolkitName,
     toolName: params.pendingAction.toolName,
     input: params.pendingAction.args,
-    operation: policyRef.toolkit.operations?.[params.pendingAction.toolName],
+    operation: policyRef.operation,
     pendingAction: params.pendingAction,
     effect: params.effect,
   });

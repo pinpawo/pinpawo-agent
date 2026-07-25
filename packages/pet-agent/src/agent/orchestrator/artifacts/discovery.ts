@@ -1,33 +1,25 @@
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import { getPinpetMeta, setPinpetMeta } from '../messageLanes';
-import { indentXmlBlock, xmlTextBlock } from '../prompts/shared';
 
 export const ARTIFACT_DISCOVERY_CONTEXT_SOURCE = 'artifact_discovery_context';
-export const ARTIFACT_DISCOVERY_LIST_DIR_TOOL_NAME = 'artifact_list_dir';
-export const ARTIFACT_DISCOVERY_VIEW_FILE_CHUNK_TOOL_NAME = 'artifact_view_file_chunk';
+export const ARTIFACT_DISCOVERY_TOOLKIT_NAME = 'artifact_discovery';
+export const ARTIFACT_DISCOVERY_LIST_TOOL_NAME = 'artifact_list';
+export const ARTIFACT_DISCOVERY_READ_TOOL_NAME = 'artifact_read';
 export const ARTIFACT_DISCOVERY_TOOL_NAMES = [
-  ARTIFACT_DISCOVERY_LIST_DIR_TOOL_NAME,
-  ARTIFACT_DISCOVERY_VIEW_FILE_CHUNK_TOOL_NAME,
+  ARTIFACT_DISCOVERY_LIST_TOOL_NAME,
+  ARTIFACT_DISCOVERY_READ_TOOL_NAME,
 ] as const;
 
-export function hasArtifactDiscoveryTools(
-  selectedTools: ReadonlyArray<{ name: string }>,
-  discoveryTools: ReadonlyArray<{ name: string }>,
+export function hasArtifactDiscoveryToolkit(
+  toolkits: ReadonlyArray<{ name: string }>,
 ): boolean {
-  const selectedToolInstances = new Set(selectedTools);
-  return ARTIFACT_DISCOVERY_TOOL_NAMES.every((name) => {
-    const discoveryTool = discoveryTools.find((toolItem) => toolItem.name === name);
-    return discoveryTool ? selectedToolInstances.has(discoveryTool) : false;
-  });
+  return toolkits.some(({ name }) => name === ARTIFACT_DISCOVERY_TOOLKIT_NAME);
 }
 
-export function buildArtifactDiscoveryContextMessage(root: string): AIMessage | null {
-  const artifactRoot = root.trim();
-  if (!artifactRoot) return null;
-
+export function buildArtifactDiscoveryContextMessage(): AIMessage {
   const message = new AIMessage([
     '<artifact_discovery_context role="fact" source="runtime" trust="non_authoritative">',
-    indentXmlBlock(xmlTextBlock('current_thread_root', artifactRoot), 2),
+    '  <scope>current_thread</scope>',
     '</artifact_discovery_context>',
   ].join('\n'));
   setPinpetMeta(message, {
@@ -39,12 +31,10 @@ export function buildArtifactDiscoveryContextMessage(root: string): AIMessage | 
 
 export function withArtifactDiscoveryContext(
   messages: BaseMessage[],
-  artifactDiscoveryRoot?: string | null,
+  enabled: boolean,
 ): BaseMessage[] {
-  const contextMessage = artifactDiscoveryRoot
-    ? buildArtifactDiscoveryContextMessage(artifactDiscoveryRoot)
-    : null;
-  if (!contextMessage) return messages;
+  if (!enabled) return messages;
+  const contextMessage = buildArtifactDiscoveryContextMessage();
 
   // Keep provider-safe message ordering: a compaction SystemMessage must remain
   // first, while the latest delegation briefing remains the final task boundary.

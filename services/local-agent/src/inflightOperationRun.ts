@@ -13,7 +13,6 @@ export type InflightOperationRun = {
   controller: AbortController;
   operationTracker: ToolOperationTracker;
   interruptedSent?: boolean;
-  interruptTimer?: ReturnType<typeof setTimeout>;
 };
 
 export type TerminalOperationPhase = Extract<
@@ -46,13 +45,6 @@ export function overlayInflightDelegationOperations(
   operations: Record<string, SubagentToolOperationMetadata>,
 ) {
   run.operationTracker.overlayOperations(operations);
-}
-
-export function clearInflightOperationTimer(run: InflightOperationRun) {
-  if (run.interruptTimer) {
-    clearTimeout(run.interruptTimer);
-    run.interruptTimer = undefined;
-  }
 }
 
 export function acceptInflightToolEvent(

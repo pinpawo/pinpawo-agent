@@ -103,9 +103,7 @@ export class LocalServerStudioHandler<Peer extends object> {
     console.log(`[local-server] studio_request requestId=${requestId} userRequest="${userRequest.slice(0, 80)}"`);
 
     // 取消已有 inflight(避免跟 chat 重叠)
-    const inflight = this.inflightRequests.start(peer, requestId, {
-      interruptPrevious: false,
-    });
+    const inflight = this.inflightRequests.start(peer, requestId);
     const { controller } = inflight;
 
     // 重置 review slot(防止上一 turn 残留)

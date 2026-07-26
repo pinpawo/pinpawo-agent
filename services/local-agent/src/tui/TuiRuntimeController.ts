@@ -23,6 +23,7 @@ const LOCAL_SERVER_CONNECT_RETRIES = 5;
 const LOCAL_SERVER_CONNECT_RETRY_DELAY_MS = 2000;
 const LOCAL_SERVER_RECONNECT_RETRIES = 5;
 const LOCAL_SERVER_RECONNECT_DELAY_MS = 2000;
+const INTERRUPT_PENDING_NOTICE_DELAY_MS = 10_000;
 const REVIEW_SNAPSHOT_REFRESH_ERROR_CODES = new Set([
   'review_closed',
   'review_stale',
@@ -70,10 +71,25 @@ function getSnapshotRefreshReason(
   return null;
 }
 
+function concludesInterruptWait(message: LocalAgentServerMessage) {
+  if (
+    message.type === 'interrupted'
+    || message.type === 'studio_response'
+    || message.type === 'studio_error'
+  ) {
+    return true;
+  }
+  return message.type === 'event' && (
+    message.event.type === 'human_review.requested'
+    || message.event.type === 'message.completed'
+    || message.event.type === 'error'
+  );
+}
+
 export class TuiRuntimeController {
   private disposed = false;
-  private interruptTimeout: ReturnType<typeof setTimeout> | null = null;
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+  private interruptPendingNoticeTimeout: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
   private readonly localServerClient: TuiLocalServerClient;
   private readonly connection: LocalAgentConnection;
@@ -106,8 +122,8 @@ export class TuiRuntimeController {
 
   dispose() {
     this.disposed = true;
-    this.clearInterruptTimeout();
     this.clearReconnectTimeout();
+    this.clearInterruptPendingNoticeTimeout();
     this.connection.disconnect();
   }
 
@@ -268,8 +284,6 @@ export class TuiRuntimeController {
     if (!this.connection.isConnected() || !activeRun) {
       return false;
     }
-    this.clearInterruptTimeout();
-
     const resolutionSent = selectFocusedReviewResolutionSent(state);
     const waitingReviewAction = activeRun.state === 'waiting_review' && !resolutionSent
       ? activeRun.reviewAction
@@ -298,30 +312,12 @@ export class TuiRuntimeController {
         return false;
       }
     }
-    const interruptRequestId = activeRun.requestId;
-    this.interruptTimeout = setTimeout(() => {
-      const state = this.options.getState();
-      const currentRun = selectFocusedActiveRun(state);
-      if (!selectFocusedBusy(state) || currentRun?.requestId !== interruptRequestId) {
-        return;
-      }
-      this.options.dispatch({
-        type: 'run.finish',
-        requestId: interruptRequestId,
-        statusNotice: TUI_TEXT.interruptRequestedStatus,
-        messages: [createTuiMessage({
-          id: `message:${interruptRequestId}:interrupt-local-release`,
-          role: 'system',
-          text: TUI_TEXT.interruptRequestedLocalRelease,
-          requestId: interruptRequestId,
-        })],
-      });
-    }, 1800);
+    this.scheduleInterruptPendingNotice(activeRun.requestId);
     return true;
   }
 
   startNewSession() {
-    this.clearInterruptTimeout();
+    this.clearInterruptPendingNoticeTimeout();
     this.options.dispatch({
       type: 'input.set',
       value: '',
@@ -558,14 +554,14 @@ export class TuiRuntimeController {
   }
 
   private handleServerMessage(msg: LocalAgentServerMessage) {
+    if (concludesInterruptWait(msg)) {
+      this.clearInterruptPendingNoticeTimeout();
+    }
     const now = Date.now();
     const result = buildTuiActionsFromServerMessage(msg, {
       now,
       createMessage: (input) => createTuiMessage(input, now),
     });
-    if (result.clearInterrupt) {
-      this.clearInterruptTimeout();
-    }
     for (const action of result.actions) {
       this.options.dispatch(action);
     }
@@ -582,17 +578,28 @@ export class TuiRuntimeController {
     return selectFocusedBusy(this.options.getState());
   }
 
-  private clearInterruptTimeout() {
-    if (this.interruptTimeout) {
-      clearTimeout(this.interruptTimeout);
-      this.interruptTimeout = null;
-    }
-  }
-
   private clearReconnectTimeout() {
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;
+    }
+  }
+
+  private scheduleInterruptPendingNotice(requestId: string) {
+    this.clearInterruptPendingNoticeTimeout();
+    this.interruptPendingNoticeTimeout = setTimeout(() => {
+      this.interruptPendingNoticeTimeout = null;
+      if (this.disposed) return;
+      const activeRun = selectFocusedActiveRun(this.options.getState());
+      if (activeRun?.requestId !== requestId) return;
+      this.appendSystemMessage(TUI_TEXT.interruptStillPending);
+    }, INTERRUPT_PENDING_NOTICE_DELAY_MS);
+  }
+
+  private clearInterruptPendingNoticeTimeout() {
+    if (this.interruptPendingNoticeTimeout) {
+      clearTimeout(this.interruptPendingNoticeTimeout);
+      this.interruptPendingNoticeTimeout = null;
     }
   }
 

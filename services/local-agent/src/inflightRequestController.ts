@@ -1,7 +1,6 @@
 import type { LocalAgentControlServerMessage } from './localAgentProtocol';
 import type { AgentOperationEvent } from '@pinpawo/agent-session';
 import {
-  clearInflightOperationTimer,
   createInflightOperationRun,
   finishInflightOperations,
   type InflightOperationRun,
@@ -14,17 +13,11 @@ type InflightInterruptMessage = Extract<
 >;
 
 type InflightRequestControllerOptions<TKey> = {
-  forceInterruptMs: number;
   emitOperation: (key: TKey, event: AgentOperationEvent) => void;
   sendControl: (key: TKey, message: InflightInterruptMessage) => void;
-  log?: (message: string) => void;
-  logPrefix?: string;
 };
 
 type StartInflightRequestOptions = {
-  interruptPrevious?: boolean;
-  notifyPrevious?: boolean;
-  previousPhase?: TerminalOperationPhase;
   observeOperation?: (event: AgentOperationEvent) => void;
 };
 
@@ -33,31 +26,25 @@ type InterruptInflightRequestOptions = {
 };
 
 export class InflightRequestController<TKey> {
-  private readonly requests = new Map<TKey, InflightOperationRun>();
-  private readonly forceInterruptMs: number;
+  private readonly requests = new Map<TKey, Set<InflightOperationRun>>();
   private readonly emitOperation: (key: TKey, event: AgentOperationEvent) => void;
   private readonly sendControl: (key: TKey, message: InflightInterruptMessage) => void;
-  private readonly log: (message: string) => void;
-  private readonly logPrefix: string;
   private readonly operationObservers = new WeakMap<
     InflightOperationRun,
     (event: AgentOperationEvent) => void
   >();
 
   constructor(options: InflightRequestControllerOptions<TKey>) {
-    this.forceInterruptMs = options.forceInterruptMs;
     this.emitOperation = options.emitOperation;
     this.sendControl = options.sendControl;
-    this.log = options.log ?? console.warn;
-    this.logPrefix = options.logPrefix ?? 'local-agent';
   }
 
   get(key: TKey) {
-    return this.requests.get(key) ?? null;
+    return [...(this.requests.get(key) ?? [])].at(-1) ?? null;
   }
 
   hasActiveRequest() {
-    return this.requests.size > 0;
+    return [...this.requests.values()].some((runs) => runs.size > 0);
   }
 
   start(
@@ -65,57 +52,33 @@ export class InflightRequestController<TKey> {
     requestId: string,
     options: StartInflightRequestOptions = {},
   ) {
-    const previous = this.get(key);
-    if (previous && options.interruptPrevious) {
-      if (options.notifyPrevious) {
-        this.sendInterrupted(key, previous);
-      } else {
-        this.finish(key, previous, options.previousPhase ?? 'interrupted');
-      }
-      previous.controller.abort();
-      this.clear(key, previous);
-    }
-
     const run = createInflightOperationRun(requestId);
     if (options.observeOperation) {
       this.operationObservers.set(run, options.observeOperation);
     }
-    this.requests.set(key, run);
+    const runs = this.requests.get(key) ?? new Set<InflightOperationRun>();
+    runs.add(run);
+    this.requests.set(key, runs);
     return run;
   }
 
-  isCurrent(key: TKey, run: InflightOperationRun) {
-    return this.requests.get(key) === run;
-  }
-
-  isCurrentActive(key: TKey, run: InflightOperationRun) {
-    return this.isCurrent(key, run) && !run.controller.signal.aborted;
-  }
-
-  clearTimer(run: InflightOperationRun) {
-    clearInflightOperationTimer(run);
-  }
-
-  clear(key: TKey, run: InflightOperationRun | null = this.get(key)) {
+  clear(key: TKey, run: InflightOperationRun | null) {
     if (!run) {
       return;
     }
-    this.clearTimer(run);
     this.operationObservers.delete(run);
-    if (this.requests.get(key) === run) {
+    const runs = this.requests.get(key);
+    runs?.delete(run);
+    if (runs?.size === 0) {
       this.requests.delete(key);
     }
   }
 
-  abortAndClear(key: TKey, run: InflightOperationRun | null = this.get(key)) {
-    if (!run) {
-      return;
-    }
-    this.clearTimer(run);
-    run.controller.abort();
-    this.operationObservers.delete(run);
-    if (this.requests.get(key) === run) {
-      this.requests.delete(key);
+  abortAll(key: TKey) {
+    // Abort is only a signal. Each invocation owner clears its request after
+    // the underlying graph output settles.
+    for (const run of this.requests.get(key) ?? []) {
+      run.controller.abort();
     }
   }
 
@@ -145,11 +108,11 @@ export class InflightRequestController<TKey> {
   }
 
   interrupt(key: TKey, options: InterruptInflightRequestOptions = {}) {
-    const run = this.get(key);
+    const run = options.requestId
+      ? [...(this.requests.get(key) ?? [])]
+        .find((candidate) => candidate.requestId === options.requestId) ?? null
+      : this.get(key);
     if (!run) {
-      return null;
-    }
-    if (options.requestId && run.requestId !== options.requestId) {
       return null;
     }
 
@@ -159,16 +122,6 @@ export class InflightRequestController<TKey> {
       message: 'interrupting',
     });
     run.controller.abort();
-    if (!run.interruptTimer) {
-      run.interruptTimer = setTimeout(() => {
-        if (!this.isCurrent(key, run) || !run.controller.signal.aborted) {
-          return;
-        }
-        this.sendInterrupted(key, run);
-        this.clear(key, run);
-        this.log(`[${this.logPrefix}] force interrupted requestId=${run.requestId}`);
-      }, this.forceInterruptMs);
-    }
     return run;
   }
 }

@@ -23,8 +23,6 @@ import {
   type LocalServerDeps,
 } from './localServerTypes';
 
-const INTERRUPT_FORCE_REPLY_MS = 1800;
-
 export type LocalServerHandlers = {
   peerHandlers: LocalServerPeerHandlers;
   handleHttpRequest: (
@@ -76,11 +74,9 @@ export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHan
       filterWorkdir: effectiveRuntimeConfig.workdir,
     });
   const inflightRequests = new InflightRequestController<LocalServerPeer>({
-    forceInterruptMs: INTERRUPT_FORCE_REPLY_MS,
     // Local TUI / companion / spawned stdio peer: trusted local transports.
     emitOperation: (peer, event) => sendLocalServerPeerEvent(peer, event),
     sendControl: (peer, message) => peer.send(message),
-    logPrefix: 'local-server',
   });
   const chatHandler = new LocalServerChatHandler({
     graphService: chatGraphService,
@@ -127,6 +123,10 @@ export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHan
     while (sessionSwitch) {
       await sessionSwitch;
     }
+    // Disconnect aborts active runs but deliberately leaves ownership with
+    // their invocation owners until graph output settles. Keep that brief
+    // settlement window in this actor-wide admission check so a session switch
+    // cannot race the old thread's final checkpoint write.
     if (activeChatOperations > 0 || inflightRequests.hasActiveRequest()) {
       throw Object.assign(
         new Error('cannot resume a session while a run is active'),
@@ -291,7 +291,7 @@ export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHan
     ),
     onClose: (client) => {
       sessionCommands.clear(client);
-      inflightRequests.abortAndClear(client);
+      inflightRequests.abortAll(client);
       studioHandler.rejectDisconnected(client);
     },
   };

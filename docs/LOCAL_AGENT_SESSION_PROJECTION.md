@@ -181,6 +181,39 @@ transport control state and is never
 projected into `AgentSession` or a snapshot. Long-running agent execution
 does not block later client commands from entering the sequencer.
 
+## Invocation ownership and interruption
+
+One graph invocation is the lifetime of one `graph.streamEvents()` call,
+including settlement of its `GraphRunStream.output`. The server coordinates
+invocations by graph thread:
+
+- registering a replacement immediately aborts the preceding invocation;
+- the replacement does not load context, project its user message, or call the
+  graph until the predecessor has actually settled;
+- a request superseded while queued never enters the graph;
+- different threads remain independent and may execute concurrently, even when
+  they share one WebSocket or stdio transport.
+
+`ThreadInvocationCoordinator` owns this ordering rule.
+`InflightRequestController` owns request-scoped abort controllers, operation
+terminalization, and exact `requestId` interrupt routing for a transport. It
+may therefore track multiple requests on one connection, but it does not decide
+when another graph invocation may begin.
+
+Abort is a signal, not a terminal fact. Neither server nor TUI releases a run
+after an elapsed timeout. The invocation owner emits `interrupted` and clears
+the inflight request only when execution returns or throws; disconnect only
+signals all affected requests. After ten seconds, the TUI may append a local
+"still stopping" notice while keeping input locked; that notice is presentation
+only and does not terminalize or release the run. Once a replacement owns the
+thread, callbacks from the predecessor cannot project or forward late runtime
+events.
+
+This lifecycle is intentionally separate from checkpoint semantics. LangGraph
+continues to own checkpoint persistence and interrupted continuation state;
+the local coordinator neither inspects checkpoint generations nor uses a
+checkpoint as a lock.
+
 ## Hosted chat adapter
 
 The hosted chat adapter folds accepted user input, runtime events, server

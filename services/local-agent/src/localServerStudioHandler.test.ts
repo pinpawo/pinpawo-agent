@@ -38,10 +38,8 @@ function deferred<T>() {
 
 function createInflightController() {
   return new InflightRequestController<LocalServerPeer>({
-    forceInterruptMs: 1,
     emitOperation: (peer, event) => sendLocalServerPeerEvent(peer, event),
     sendControl: (peer, message) => peer.send(message),
-    log: () => undefined,
   });
 }
 

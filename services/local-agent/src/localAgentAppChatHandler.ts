@@ -51,6 +51,7 @@ import {
   type AgentSessionInput,
 } from '@pinpawo/agent-session';
 import { createAgentSessionSnapshot } from '@pinpawo/agent-session';
+import { ThreadInvocationCoordinator } from './threadInvocationCoordinator';
 
 type InflightRequest = InflightOperationRun;
 type LoadContext = (actorId: string) => Promise<AgentContext>;
@@ -123,6 +124,7 @@ export class LocalAgentAppChatHandler {
   private readonly maxSessionProjections: number;
   private readonly reviewResolutions = new ReviewResolutionLifecycle<ReviewActionRoute>();
   private readonly reportCapabilityDiagnostics = createCapabilityDiagnosticReporter();
+  private readonly threadInvocations = new ThreadInvocationCoordinator();
   private readonly sessionStartedAtByThreadId = new Map<string, string>();
   private readonly sessionsByThreadId = new Map<string, AgentSession>();
   private sessionResetPromise: Promise<void> = Promise.resolve();
@@ -226,15 +228,7 @@ export class LocalAgentAppChatHandler {
 
   handleClose(ws: WebSocket) {
     this.rejectStudioPendingReview(ws);
-    const inflight = this.inflightRequests.get(ws);
-    if (inflight) {
-      this.inflightRequests.finish(ws, inflight, 'interrupted');
-      this.reduceSessionForRequest(inflight.requestId, {
-        type: 'run.finished',
-        requestId: inflight.requestId,
-      });
-    }
-    this.inflightRequests.abortAndClear(ws);
+    this.inflightRequests.abortAll(ws);
   }
 
   async handleStudioRequest(ws: WebSocket, msg: StudioRequestMessage) {
@@ -311,26 +305,20 @@ export class LocalAgentAppChatHandler {
         + (source.decisionCount ? ` decisions=${source.decisionCount}` : ''),
       );
     }
-    recordAgentRunActivity('thinking', requestId);
-
+    const threadId = this.getChatThreadId(userId);
     const inflight = this.inflightRequests.start(ws, requestId, {
-      interruptPrevious: true,
-      notifyPrevious: false,
       observeOperation: (event) => {
         this.projectRemoteEvent(userId, event);
       },
     });
-    if (request.kind === 'user_message') {
-      this.reduceRemoteSession(userId, {
-        type: 'user.accepted',
-        requestId,
-        kind: 'chat',
-        text: message,
-        message: { id: `message:${requestId}:user` },
-      });
-    }
     const { controller } = inflight;
-    const isCurrent = () => this.inflightRequests.isCurrentActive(ws, inflight);
+    const invocation = this.threadInvocations.enqueue({
+      threadId,
+      requestId,
+      signal: controller.signal,
+      abort: () => controller.abort(),
+    });
+    const isCurrent = invocation.isCurrent;
     const finishInterrupted = () => {
       if (!controller.signal.aborted) {
         return;
@@ -341,6 +329,17 @@ export class LocalAgentAppChatHandler {
     };
 
     try {
+      await invocation.waitForTurn();
+      recordAgentRunActivity('thinking', requestId);
+      if (request.kind === 'user_message') {
+        this.reduceRemoteSession(userId, {
+          type: 'user.accepted',
+          requestId,
+          kind: 'chat',
+          text: message,
+          message: { id: `message:${requestId}:user` },
+        });
+      }
       const ctx = await this.loadContext(this.getActorId());
       if (!isCurrent()) {
         finishInterrupted();
@@ -361,12 +360,15 @@ export class LocalAgentAppChatHandler {
         isCurrent,
         finishInterrupted,
         emitEvent: (event) => {
+          if (!isCurrent()) return;
           this.emitRemoteEvent(ws, userId, event);
         },
         emitToolEvent: (event) => {
+          if (!isCurrent()) return;
           this.sendStreamToolOperationEvent(ws, inflight, event, userId);
         },
         acceptDelegationOperations: (operations) => {
+          if (!isCurrent()) return;
           overlayInflightDelegationOperations(inflight, operations);
         },
         ...(source.type !== 'chat_request'
@@ -394,6 +396,7 @@ export class LocalAgentAppChatHandler {
         return 'waiting_human';
       }
       if (result.status === 'interrupted') {
+        finishInterrupted();
         return 'interrupted';
       }
       this.inflightRequests.finish(ws, inflight, 'completed');
@@ -403,7 +406,7 @@ export class LocalAgentAppChatHandler {
       console.log(`[local-agent] message.completed sent requestId=${requestId} reply="${result.reply.slice(0, 100)}"`);
       return 'completed';
     } catch (err) {
-      const isStillCurrent = this.inflightRequests.isCurrent(ws, inflight);
+      const isStillCurrent = isCurrent();
       const aborted = controller.signal.aborted
         || (err instanceof Error && err.name === 'AbortError');
       if (aborted) {
@@ -426,6 +429,8 @@ export class LocalAgentAppChatHandler {
         });
       }
       return 'failed';
+    } finally {
+      invocation.settle();
     }
   }
 

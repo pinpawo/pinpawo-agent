@@ -16,6 +16,7 @@ import {
 } from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
 import type {
+  LocalAgentGraphEventStream,
   LocalAgentGraphPendingHumanReview,
   LocalAgentGraphService,
   LocalAgentGraphThreadState,
@@ -95,6 +96,17 @@ function originalReviewWasCheckpointed(
     return !isSamePendingReview(initial.pendingHumanReview, current.pendingHumanReview);
   }
   return current.pendingHumanReview !== null || !current.hasPendingContinuation;
+}
+
+async function waitForGraphRunSettlement(run: LocalAgentGraphEventStream | null) {
+  const output = (run as { output?: PromiseLike<unknown> } | null)?.output;
+  if (!output) return;
+  try {
+    await output;
+  } catch {
+    // Event iteration remains the canonical error path. Waiting here only
+    // ensures an early return does not outlive the underlying graph run.
+  }
 }
 
 function emitHumanReviewRequested(params: {
@@ -323,15 +335,17 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
       // failed read must not cancel an otherwise valid review resolution.
     }
   };
+  let run: LocalAgentGraphEventStream | null = null;
+  let finishInterruptedAfterSettlement = false;
   try {
-    const run = await graphService.streamEvents(setup, graphInput);
+    run = await graphService.streamEvents(setup, graphInput);
     const toolReader = new NamespacedProtocolToolEventReader();
     for await (const chatEvent of adaptRootStream(run as AsyncIterable<RootProtocolEvent>)) {
       if (chatEvent.type === 'values' || chatEvent.type === 'interrupt') {
         await readResumeCheckpointAtBoundary();
       }
       if (!isCurrent()) {
-        finishInterrupted();
+        finishInterruptedAfterSettlement = true;
         return { status: 'interrupted' };
       }
 
@@ -419,7 +433,7 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
       throw error;
     }
     if (!isCurrent()) {
-      finishInterrupted();
+      finishInterruptedAfterSettlement = true;
       return { status: 'interrupted' };
     }
     const reply = streamedReply.trim() || RECURSION_LIMIT_NOTICE;
@@ -429,6 +443,11 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
     emitEvent({ type: 'message.completed', requestId, role: 'assistant', text: reply });
     clearAgentRunActivity(requestId);
     return { status: 'completed', reply };
+  } finally {
+    await waitForGraphRunSettlement(run);
+    if (finishInterruptedAfterSettlement) {
+      finishInterrupted();
+    }
   }
 
   if (!isCurrent()) {

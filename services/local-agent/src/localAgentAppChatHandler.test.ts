@@ -31,10 +31,8 @@ function createFakeWebSocket(sent: unknown[]) {
 
 function createInflightController() {
   return new InflightRequestController<WebSocket>({
-    forceInterruptMs: 1,
     emitOperation: (ws, event) => sendLocalAgentEvent(ws, event),
     sendControl: (ws, message) => sendLocalAgentMessage(ws, message),
-    log: () => undefined,
   });
 }
 
@@ -419,10 +417,20 @@ test('LocalAgentAppChatHandler settles the previous run before projecting replac
   const firstStarted = new Promise<void>((resolve) => {
     notifyFirstStarted = resolve;
   });
+  let notifyFirstAborted!: () => void;
+  const firstAborted = new Promise<void>((resolve) => {
+    notifyFirstAborted = resolve;
+  });
+  let releaseFirst!: () => void;
+  const firstReleased = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+  let replacementStarted = false;
   const { handler, ws, sent } = createHandler({
     now: () => 1000,
     runChat: async (options) => {
       if (options.request.requestId !== 'req-old') {
+        replacementStarted = true;
         return { status: 'completed', reply: 'replacement completed' };
       }
       options.emitToolEvent({
@@ -442,6 +450,8 @@ test('LocalAgentAppChatHandler settles the previous run before projecting replac
         role: 'assistant',
         text: 'late stale output',
       });
+      notifyFirstAborted();
+      await firstReleased;
       return { status: 'interrupted', reply: '' };
     },
   });
@@ -453,13 +463,19 @@ test('LocalAgentAppChatHandler settles the previous run before projecting replac
     userId: 'user-1',
   });
   await firstStarted;
-  await handler.handleChatRequest(ws, {
+  const replacementRun = handler.handleChatRequest(ws, {
     type: 'chat_request',
     requestId: 'req-new',
     message: 'new request',
     userId: 'user-1',
   });
+  await firstAborted;
+  assert.equal(replacementStarted, false);
+
+  releaseFirst();
   await oldRun;
+  await replacementRun;
+  assert.equal(replacementStarted, true);
 
   const projection = handler.readSessionProjection('user-1');
   assert.ok(projection);

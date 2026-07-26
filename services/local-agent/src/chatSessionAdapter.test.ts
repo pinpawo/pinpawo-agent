@@ -33,6 +33,118 @@ function messageLifecycle(text: string, namespace: string[] = [], id = 'msg-1') 
   ];
 }
 
+test('runChatSession does not settle before the underlying graph run output', async () => {
+  let resolveOutput!: () => void;
+  const output = new Promise<void>((resolve) => {
+    resolveOutput = resolve;
+  });
+  let notifyStreamEnded!: () => void;
+  const streamEnded = new Promise<void>((resolve) => {
+    notifyStreamEnded = resolve;
+  });
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: { messages: [] },
+  } as unknown as AgentChannelSetup;
+  const stream = Object.assign((async function* () {
+    yield protocolEvent('values', { messages: [new AIMessage('done')] });
+    notifyStreamEnded();
+  })(), { output });
+  const graphService = {
+    async readThreadState() {
+      return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
+    },
+    streamEvents() {
+      return stream;
+    },
+  };
+
+  let settled = false;
+  const run = runChatSession({
+    request: { kind: 'user_message', requestId: 'req-1', message: 'hello' },
+    setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => true,
+    finishInterrupted: () => {
+      throw new Error('should not interrupt');
+    },
+    emitEvent: () => undefined,
+    emitToolEvent: () => undefined,
+  }).then((result) => {
+    settled = true;
+    return result;
+  });
+
+  await streamEnded;
+  await Promise.resolve();
+  assert.equal(settled, false);
+
+  resolveOutput();
+  assert.deepEqual(await run, { status: 'completed', reply: 'done' });
+});
+
+test('runChatSession defers interrupted terminalization until graph output settles', async () => {
+  let resolveOutput!: () => void;
+  const output = new Promise<void>((resolve) => {
+    resolveOutput = resolve;
+  });
+  let notifyIteratorClosed!: () => void;
+  const iteratorClosed = new Promise<void>((resolve) => {
+    notifyIteratorClosed = resolve;
+  });
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: { messages: [] },
+  } as unknown as AgentChannelSetup;
+  const stream = Object.assign((async function* () {
+    try {
+      yield protocolEvent('values', { messages: [new AIMessage('late')] });
+    } finally {
+      notifyIteratorClosed();
+    }
+  })(), { output });
+  const graphService = {
+    async readThreadState() {
+      return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
+    },
+    streamEvents() {
+      return stream;
+    },
+  };
+  let currentChecks = 0;
+  let interruptedCalls = 0;
+  let settled = false;
+
+  const run = runChatSession({
+    request: { kind: 'user_message', requestId: 'req-1', message: 'hello' },
+    setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => {
+      currentChecks += 1;
+      return currentChecks === 1;
+    },
+    finishInterrupted: () => {
+      interruptedCalls += 1;
+    },
+    emitEvent: () => undefined,
+    emitToolEvent: () => undefined,
+  }).then((result) => {
+    settled = true;
+    return result;
+  });
+
+  await iteratorClosed;
+  await Promise.resolve();
+  assert.equal(interruptedCalls, 0);
+  assert.equal(settled, false);
+
+  resolveOutput();
+  assert.deepEqual(await run, { status: 'interrupted' });
+  assert.equal(interruptedCalls, 1);
+});
+
 test('runChatSession sources tool operations from the root protocol stream, not the callback', async () => {
   const emittedTools: StreamToolsPayload[] = [];
   const emittedEvents: unknown[] = [];

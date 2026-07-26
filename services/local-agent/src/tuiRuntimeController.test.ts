@@ -394,25 +394,68 @@ test('TuiRuntimeController projects chat and studio runs only after transport ac
   );
 });
 
-test('TuiRuntimeController releases input locally after interrupt timeout', () => {
-  mock.timers.enable({ apis: ['setTimeout'], now: 0 });
+test('TuiRuntimeController reports a delayed interrupt without releasing the run', () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  const { controller, actions, sent } = createController(busyRunState());
   try {
-    const { controller, actions } = createController(busyRunState());
+    assert.equal(controller.requestInterrupt(), true);
+    assert.deepEqual(sent, [{
+      type: 'run.interrupt',
+      requestId: 'req-1',
+    }]);
 
-    const submitted = controller.requestInterrupt();
-    mock.timers.tick(1800);
+    mock.timers.tick(9_999);
+    assert.equal(
+      actions.some((action) =>
+        action.type === 'message.appended'
+        && action.message.text === '仍在停止，agent 尚未确认；输入会保持锁定。'),
+      false,
+    );
 
-    assert.equal(submitted, true);
-    const finish = actions.find((action) => action.type === 'run.finish');
-    assert.equal(finish?.type, 'run.finish');
-    if (finish?.type !== 'run.finish') return;
-    assert.equal(finish.requestId, 'req-1');
-    assert.equal(finish.statusNotice, '已请求打断');
-    assert.deepEqual(
-      finish.messages?.map((message) => [message.role, message.text]),
-      [['system', '打断请求已发送，本地先释放输入；迟到的旧响应会被忽略。']],
+    mock.timers.tick(1);
+    assert.equal(
+      actions.filter((action) =>
+        action.type === 'message.appended'
+        && action.message.text === '仍在停止，agent 尚未确认；输入会保持锁定。').length,
+      1,
+    );
+    assert.equal(actions.some((action) => action.type === 'run.finish'), false);
+    assert.equal(controller.sendChatRequest('start too early'), false);
+  } finally {
+    controller.dispose();
+    mock.timers.reset();
+  }
+});
+
+test('TuiRuntimeController cancels the delayed interrupt notice on an authoritative response', () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  const harness = createController(busyRunState());
+  try {
+    assert.equal(harness.controller.requestInterrupt(), true);
+    harness.connectionHandlers.onMessage({
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        type: 'human_review.requested',
+        requestId: 'req-1',
+        review: {
+          id: 'review-2',
+          schemaVersion: 1,
+          view: { kind: 'plain', body: 'A new review' },
+          options: [],
+        },
+      },
+    });
+
+    mock.timers.tick(10_000);
+    assert.equal(
+      harness.actions.some((action) =>
+        action.type === 'message.appended'
+        && action.message.text === '仍在停止，agent 尚未确认；输入会保持锁定。'),
+      false,
     );
   } finally {
+    harness.controller.dispose();
     mock.timers.reset();
   }
 });

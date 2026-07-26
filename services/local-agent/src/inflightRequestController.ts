@@ -75,6 +75,8 @@ export class InflightRequestController<TKey> {
   }
 
   abortAll(key: TKey) {
+    // Abort is only a signal. Each invocation owner clears its request after
+    // the underlying graph output settles.
     for (const run of this.requests.get(key) ?? []) {
       run.controller.abort();
     }

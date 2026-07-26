@@ -394,16 +394,70 @@ test('TuiRuntimeController projects chat and studio runs only after transport ac
   );
 });
 
-test('TuiRuntimeController keeps input gated until the server confirms interruption', () => {
+test('TuiRuntimeController reports a delayed interrupt without releasing the run', () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
   const { controller, actions, sent } = createController(busyRunState());
+  try {
+    assert.equal(controller.requestInterrupt(), true);
+    assert.deepEqual(sent, [{
+      type: 'run.interrupt',
+      requestId: 'req-1',
+    }]);
 
-  assert.equal(controller.requestInterrupt(), true);
-  assert.deepEqual(sent, [{
-    type: 'run.interrupt',
-    requestId: 'req-1',
-  }]);
-  assert.equal(actions.some((action) => action.type === 'run.finish'), false);
-  assert.equal(controller.sendChatRequest('start too early'), false);
+    mock.timers.tick(9_999);
+    assert.equal(
+      actions.some((action) =>
+        action.type === 'message.appended'
+        && action.message.text === '仍在停止，agent 尚未确认；输入会保持锁定。'),
+      false,
+    );
+
+    mock.timers.tick(1);
+    assert.equal(
+      actions.filter((action) =>
+        action.type === 'message.appended'
+        && action.message.text === '仍在停止，agent 尚未确认；输入会保持锁定。').length,
+      1,
+    );
+    assert.equal(actions.some((action) => action.type === 'run.finish'), false);
+    assert.equal(controller.sendChatRequest('start too early'), false);
+  } finally {
+    controller.dispose();
+    mock.timers.reset();
+  }
+});
+
+test('TuiRuntimeController cancels the delayed interrupt notice on an authoritative response', () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  const harness = createController(busyRunState());
+  try {
+    assert.equal(harness.controller.requestInterrupt(), true);
+    harness.connectionHandlers.onMessage({
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        type: 'human_review.requested',
+        requestId: 'req-1',
+        review: {
+          id: 'review-2',
+          schemaVersion: 1,
+          view: { kind: 'plain', body: 'A new review' },
+          options: [],
+        },
+      },
+    });
+
+    mock.timers.tick(10_000);
+    assert.equal(
+      harness.actions.some((action) =>
+        action.type === 'message.appended'
+        && action.message.text === '仍在停止，agent 尚未确认；输入会保持锁定。'),
+      false,
+    );
+  } finally {
+    harness.controller.dispose();
+    mock.timers.reset();
+  }
 });
 
 test('TuiRuntimeController resets the timeline viewport for new sessions', () => {

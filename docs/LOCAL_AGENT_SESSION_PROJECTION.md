@@ -203,8 +203,11 @@ when another graph invocation may begin.
 Abort is a signal, not a terminal fact. Neither server nor TUI releases a run
 after an elapsed timeout. The invocation owner emits `interrupted` and clears
 the inflight request only when execution returns or throws; disconnect only
-signals all affected requests. Once a replacement owns the thread, callbacks
-from the predecessor cannot project or forward late runtime events.
+signals all affected requests. After ten seconds, the TUI may append a local
+"still stopping" notice while keeping input locked; that notice is presentation
+only and does not terminalize or release the run. Once a replacement owns the
+thread, callbacks from the predecessor cannot project or forward late runtime
+events.
 
 This lifecycle is intentionally separate from checkpoint semantics. LangGraph
 continues to own checkpoint persistence and interrupted continuation state;

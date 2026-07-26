@@ -46,6 +46,7 @@ export const TUI_TEXT = {
     `已进入 Studio 模式 (conversation=${conversationId.slice(0, 8)})。后续输入都属于此会话，输入 /chat 或 /studio 退出。`,
   disconnectedCannotSend: '未连接，无法发送',
   busyCannotSend: '当前任务仍在进行中，按 Ctrl+C 或 Esc 打断',
+  interruptStillPending: '仍在停止，agent 尚未确认；输入会保持锁定。',
   studioUserMessage: (userRequest: string) => `[studio] ${userRequest}`,
   reviewDisconnectedCannotSubmit: '未连接，无法提交确认。',
   interruptedStatus: '已打断',

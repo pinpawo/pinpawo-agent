@@ -123,6 +123,10 @@ export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHan
     while (sessionSwitch) {
       await sessionSwitch;
     }
+    // Disconnect aborts active runs but deliberately leaves ownership with
+    // their invocation owners until graph output settles. Keep that brief
+    // settlement window in this actor-wide admission check so a session switch
+    // cannot race the old thread's final checkpoint write.
     if (activeChatOperations > 0 || inflightRequests.hasActiveRequest()) {
       throw Object.assign(
         new Error('cannot resume a session while a run is active'),

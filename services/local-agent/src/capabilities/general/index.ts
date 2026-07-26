@@ -18,7 +18,7 @@ function resolveGeneralCapabilityDocumentUrl(): URL {
   throw new Error('Built-in general Capability document is missing');
 }
 
-function loadGeneralCapability(): AgentCapability {
+function readGeneralCapability(): AgentCapability {
   const documentUrl = resolveGeneralCapabilityDocumentUrl();
   const { frontmatter, body } = parseFrontmatterDocument(
     readFileSync(documentUrl, 'utf8'),
@@ -39,4 +39,26 @@ function loadGeneralCapability(): AgentCapability {
   });
 }
 
-export const generalCapability = loadGeneralCapability();
+let cachedGeneralCapability: AgentCapability | null | undefined;
+
+/**
+ * The bundled General Capability is loaded through the same Markdown contract
+ * as user Capabilities. Keep its immutable result cached, but defer I/O and
+ * parsing until the host assembles a runtime so importing local-agent cannot be
+ * taken down by one malformed Capability document.
+ */
+export function loadGeneralCapability(): AgentCapability | null {
+  if (cachedGeneralCapability !== undefined) {
+    return cachedGeneralCapability;
+  }
+  try {
+    cachedGeneralCapability = readGeneralCapability();
+  } catch (error) {
+    cachedGeneralCapability = null;
+    console.warn(
+      '[capabilities] built-in "general" unavailable:',
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+  return cachedGeneralCapability;
+}

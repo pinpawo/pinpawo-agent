@@ -91,6 +91,12 @@ effective workdir 下新增工作区级目录：
 将其映射为同名的无扩展名 content-addressed 目录。runtime 只读取当前 manifest、
 object、ref 和 writes 布局，不扫描或迁移旧 monolith/shard 文件。
 
+Capability V2 的 delegation lane 与旧 checkpoint 契约不兼容，因此现有
+`checkpoints.json`、`checkpoints-tui.json`、`tui-sessions.json` 及对应的
+content-addressed 目录不会自动迁移。旧状态保留在磁盘上且不再加载；启动时检测到
+这些路径会输出一次提示。Capability artifact 继续使用原有的 thread-scoped
+存储根，不受 checkpoint 命名空间切换影响。
+
 Workdir State Root 存放工作区级配置和产物：
 
 - Studio 拓扑配置。

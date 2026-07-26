@@ -1,5 +1,6 @@
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { basename, isAbsolute, resolve } from 'node:path';
 import { loadStoredConfig, type StoredConfig } from './storage';
 
@@ -29,6 +30,14 @@ export type LocalAgentRuntimeConfig = Readonly<{
  * the new graph. Capability artifacts keep their existing thread-scoped root.
  */
 export const LOCAL_AGENT_CHECKPOINT_CONTRACT = 'capability-v2';
+
+const LEGACY_LOCAL_STATE_NAMES = [
+  'checkpoints.json',
+  'checkpoints',
+  'checkpoints-tui.json',
+  'checkpoints-tui',
+  'tui-sessions.json',
+] as const;
 
 function freezeRuntimeConfig(input: LocalAgentRuntimeConfig): LocalAgentRuntimeConfig {
   return Object.freeze({
@@ -79,6 +88,19 @@ export function buildLocalAgentRuntimeConfig(workdir = resolveDefaultWorkdir()):
     ),
     capabilityArtifactRoot: resolve(stateRoot, 'capability-artifacts'),
   });
+}
+
+/**
+ * Capability V2 intentionally does not reinterpret pre-V2 checkpoint state.
+ * Report preserved legacy paths so the namespace change is visible without
+ * deleting data that a user may still want to archive or inspect.
+ */
+export function findLegacyLocalAgentState(
+  runtimeConfig: Pick<LocalAgentRuntimeConfig, 'stateRoot'>,
+): string[] {
+  return LEGACY_LOCAL_STATE_NAMES
+    .map((name) => resolve(runtimeConfig.stateRoot, name))
+    .filter((path) => existsSync(path));
 }
 
 export type WorkspaceRuntimeConfigOptions = {

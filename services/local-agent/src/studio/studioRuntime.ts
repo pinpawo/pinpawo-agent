@@ -2,6 +2,7 @@ import path from 'node:path';
 import {
   createLLMWikiCurator,
   FileStudioRunQueueStore,
+  GENERAL_CAPABILITY_NAME,
   createPetAgentRuntime,
   createStudioOrchestrator,
   defaultPromptProvider,
@@ -19,7 +20,7 @@ import { buildLocalAgentModels } from '../agentModels';
 import type { AgentLlmConfig } from '../agentConfig';
 import { buildDecisionStructuredOutput } from '../agentChannel';
 import { createExploreCapability } from '../capabilities/explore';
-import { generalCapability } from '../capabilities/general';
+import { loadGeneralCapability } from '../capabilities/general';
 import { buildLocalAgentRuntimeConfig } from '../runtimeConfig';
 import { loadPetLocalConfigs } from './petConfig';
 import {
@@ -138,6 +139,7 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
   // 不支持 json_schema response_format 时 orchestrator decision 调用 400。
   const globalDecisionStructuredOutput = buildDecisionStructuredOutput(input.llmConfig);
   const capabilitiesByName = new Map(input.capabilities.map((c) => [c.name, c]));
+  const generalCapability = loadGeneralCapability();
 
   const petAgents: PetAgentRuntime[] = resolved.agents.map((petConfig) => {
     // 每个 pet 按需挑 model:pet 自己声明了就 build pet-级 models + 重算 decisionStructuredOutput
@@ -170,8 +172,8 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
       role: petConfig.role ?? null,
       serviceSummary: petConfig.serviceSummary ?? null,
       capabilities: [
-        generalCapability,
-        ...capsForThisPet.filter(({ name }) => name !== generalCapability.name),
+        ...(generalCapability ? [generalCapability] : []),
+        ...capsForThisPet.filter(({ name }) => name !== GENERAL_CAPABILITY_NAME),
       ],
       toolkits: input.toolkits,
       contextWindowTokens: input.llmConfig.contextWindowTokens,

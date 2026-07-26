@@ -109,6 +109,16 @@ capability subagent
 
 Toolkit 注册不等于授权。只有 Capability 的 `uses` 才建立工具权限边界；
 缺少任一 required Toolkit 时，该 Capability 在本次 registry generation 中不可用。
+因此 local-agent chat 的内部组装契约要求同时提供稳定 `threadId` 和
+`CapabilityArtifactStore`；host 不能通过省略 thread scope 静默移除 General
+或其他声明了 `artifact_discovery` 的 Capability。
+
+Capability Planner 与 Capability Decision 使用编译后的 Capability 描述。该描述
+由 Capability 自身的 `description` 和实际解析到的 Toolkit name/description 组成，
+因此 Toolkit scope 会参与检索和 planner 上下文，而不是只作为执行期权限信息。
+单个编译描述最多保留 2,000 个字符；Capability Planner 的 registry context 总预算
+为 6,000 个字符。新增大量 Capability 或过长 Toolkit 描述时，应通过
+capability-decision eval 检查候选召回与选择结果。
 
 ## 5. Toolkit Policy 与 HITL
 

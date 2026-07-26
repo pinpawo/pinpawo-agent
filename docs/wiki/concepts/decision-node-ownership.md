@@ -7,12 +7,14 @@ sources:
   - ../../PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md
   - ../../PET_AGENT_DECISION_NODE_OWNERSHIP_AUDIT.md
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
+  - ../../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md
 related:
   - orchestrator-practical-reasoning.md
   - prompt-knowledge-layers.md
   - system-prompt-authoring-principles.md
   - message-context-and-provenance.md
   - ../decisions/capability-planner-task-boundaries.md
+  - ../decisions/delegation-completion-acknowledgement.md
   - ../investigations/entry-decision-state-query-routing.md
 ---
 
@@ -27,11 +29,28 @@ Each decision node owns one semantic question:
 | `entryDecision` | Whether the run can answer now, needs one execution boundary, or needs planning | Capability selection, plan creation, tool execution, user reply |
 | `capabilityPlanner` | Capability execution boundaries and materialization of the next task | Concrete capability ID, announce acceptance, user reply |
 | `capabilityDecision` | Which currently available executor can complete and best fits the already-defined task, or that none can | Task rewriting, replanning, completion judgment, user reply |
-| `outcomeDecision` | Whether the current announce is sufficient for the current task and whether autonomous work continues | Next-task generation, capability selection, user reply |
-| `answer` | The fixed user-visible close for a terminal run state | Tool execution and graph-state decisions |
+| `outcomeDecision` | Whether the current announce means continue, current-task completion, user-goal completion, or that further progress requires user input | Next-task generation, capability selection, user reply |
+| `answer` | The user-visible close selected from the explicit terminal state, including fixed completion acknowledgement and return-control replies | Tool execution and graph-state decisions |
 
 The graph and schema enforce the transitions around those decisions. The model
 should not receive state conditions merely to reproduce a deterministic route.
+
+## Outcome and terminal-close boundary
+
+`outcomeDecision` owns the semantic judgment, but it does not write a reply or
+invent the next task. Its model-visible schema distinguishes:
+
+- `continue`: the same executor can close the current task gap;
+- `task_done`: the current task is accepted and planning owns what follows;
+- `goal_done`: the user goal is established as complete;
+- `user_input_required`: the user goal is incomplete and further progress
+  requires user input.
+
+The graph carries accepted non-continue meaning through typed run state and owns
+the deterministic routes. Handoff provenance remains evidence identity, not a
+completion signal. `answer` communicates the supplied state without re-judging
+the announce: only `goal_done` receives the fixed completion acknowledgement,
+while `user_input_required` states progress and asks for the missing input.
 
 ## Capability execution boundary
 

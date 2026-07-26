@@ -277,3 +277,20 @@ lint passes, and documentation migrations.
   schema, invocation, or evaluation errors.
 - Kept cross-model validation open and did not add generated eval reports or
   private configuration to the Wiki.
+
+## [2026-07-26] ingest | Orchestrator terminal outcome semantics
+
+- Ingested the validated terminal-semantics design and PR #467 implementation
+  into existing outcome, provenance, ownership, and answer-close concepts
+  without adding a competing Wiki concept.
+- Distinguished accepted handoff provenance from terminal meaning:
+  `goal_done` is strict user-goal completion, while `user_input_required`
+  returns control without claiming task or goal completion.
+- Updated the practical-reasoning projection, Prompt Contract Map, graph view,
+  completion-acknowledgement decision, decision ownership, message provenance,
+  authoring evidence, source registry, and both documentation indexes.
+- Recorded the paired GLM-5.2 result: all 32 evaluable outcome/answer runs
+  passed; the single provider timeout passed on an isolated rerun. Genuine
+  completion and required-user-input answer cases both achieved `3/3`.
+- Preserved the fixed completion acknowledgement, kept static production prompt
+  templates unchanged, and left cross-model validation open.

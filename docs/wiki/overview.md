@@ -7,6 +7,7 @@ sources:
   - ../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md
   - ../CAPABILITY_PLANNER_TASK_HORIZON_DRAFT.md
+  - ../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md
   - ../../packages/pet-agent/src/agent/orchestrator/prompts/templates/sharedPrefix.prompt.ts
   - https://github.com/pinpawo/pinpawo-agent/issues/418
 related:
@@ -40,6 +41,7 @@ flowchart LR
   O -->|continue| X
   O -->|task_done| P
   O -->|goal_done| A
+  O -->|user_input_required| A
   X -->|announce| O
   O -->|accepted handoff| M["main conversation"]
   M --> A
@@ -67,8 +69,9 @@ Six relationships organize the current knowledge:
 5. [Message context and provenance](concepts/message-context-and-provenance.md)
    determines which messages each actor sees and how briefing, announce, and
    handoff identities are established.
-6. [The answer close](decisions/delegation-completion-acknowledgement.md) provides
-   a fixed post-delegation message shape rather than repeating the deliverable.
+6. [The answer close](decisions/delegation-completion-acknowledgement.md) keeps
+   the fixed acknowledgement for genuine goal completion and returns control
+   truthfully when an accepted result still requires user input.
 
 ## Prompt Contract Map
 
@@ -82,8 +85,8 @@ relations: contract, owner, design source, implementation, and verification.
 | `entry.execution-shape` — choose `answer`, `direct_task`, or `needs_plan` by whether new execution is required, its target is determined, and it requires prior planning | [`entryDecision`](concepts/decision-node-ownership.md#vertical-decisions) | [State-query investigation](investigations/entry-decision-state-query-routing.md), [#416](https://github.com/pinpawo/pinpawo-agent/issues/416) | [`entryDecision.prompt.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts/templates/entryDecision.prompt.ts), [`schemas.ts`](../../packages/pet-agent/src/agent/orchestrator/schemas.ts) | [`entry-decision-basics.ts`](../../packages/pet-agent/evals/datasets/entry-decision-basics.ts), [`orchestrator-route.eval.ts`](../../packages/pet-agent/evals/orchestrator-route.eval.ts) |
 | `planner.execution-boundary` — preserve completed work as fact, use returned results to materialize one executable current task, and maintain only the unstarted future tail | [`capabilityPlanner`](concepts/decision-node-ownership.md#vertical-decisions) | [CapabilityPlanner task boundaries](decisions/capability-planner-task-boundaries.md), [decision prompt design](../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md) | [`capabilityPlanner.prompt.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityPlanner.prompt.ts), [`orchestrationDecision.ts`](../../packages/pet-agent/src/agent/orchestrator/runtime/decisions/orchestrationDecision.ts), [`schemas.ts`](../../packages/pet-agent/src/agent/orchestrator/schemas.ts) | [`capability-planning-basics.ts`](../../packages/pet-agent/evals/datasets/capability-planning-basics.ts), [`capability-planning-evaluation.ts`](../../packages/pet-agent/evals/capability-planning-evaluation.ts), [`capability-planning-evaluation.test.ts`](../../packages/pet-agent/evals/capability-planning-evaluation.test.ts) |
 | `capability.executor-selection` — select the available executor that can complete the immutable current task and best fits it, or explicitly return `unavailable` when none can | [`capabilityDecision`](concepts/decision-node-ownership.md#vertical-decisions) | [Decision node ownership](concepts/decision-node-ownership.md#capability-selection-boundary), [decision prompt design](../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md) | [`capabilityDecision.prompt.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityDecision.prompt.ts), [`schemas.ts`](../../packages/pet-agent/src/agent/orchestrator/schemas.ts), [`orchestrationDecision.ts`](../../packages/pet-agent/src/agent/orchestrator/runtime/decisions/orchestrationDecision.ts) | [`capability-decision-basics.ts`](../../packages/pet-agent/evals/datasets/capability-decision-basics.ts), [`decision-eval-scenarios.ts`](../../packages/pet-agent/evals/decision-eval-scenarios.ts), [`orchestrator.test.ts`](../../packages/pet-agent/src/agent/orchestrator/orchestrator.test.ts) |
-| `outcome.announce-verdict` — validate the current announce as continue, current-task completion, or user-goal completion | [`outcomeDecision`](concepts/decision-node-ownership.md#vertical-decisions) | [Decision node ownership](concepts/decision-node-ownership.md), [message context and provenance](concepts/message-context-and-provenance.md) | [`outcomeDecision.prompt.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts/templates/outcomeDecision.prompt.ts), [`schemas.ts`](../../packages/pet-agent/src/agent/orchestrator/schemas.ts) | [`outcome-decision-basics.ts`](../../packages/pet-agent/evals/datasets/outcome-decision-basics.ts), [`orchestrator-flow.mock-subagent.eval.ts`](../../packages/pet-agent/evals/orchestrator-flow.mock-subagent.eval.ts) |
-| `answer.user-visible-close` — produce the user-visible response and preserve the fixed post-delegation acknowledgement shape | [`answer`](concepts/decision-node-ownership.md#vertical-decisions) | [Delegation completion acknowledgement](decisions/delegation-completion-acknowledgement.md), [message context and provenance](concepts/message-context-and-provenance.md) | [`answer.prompt.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts/templates/answer.prompt.ts), [`answer.ts`](../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/answer.ts) | [`answer-behavior-basics.ts`](../../packages/pet-agent/evals/datasets/answer-behavior-basics.ts), [`answer-eval-scenarios.ts`](../../packages/pet-agent/evals/answer-eval-scenarios.ts), [`orchestrator.test.ts`](../../packages/pet-agent/src/agent/orchestrator/orchestrator.test.ts) |
+| `outcome.announce-verdict` — validate the current announce as continued work, current-task completion, user-goal completion, or a user-input boundary | [`outcomeDecision`](concepts/decision-node-ownership.md#vertical-decisions) | [Decision node ownership](concepts/decision-node-ownership.md), [terminal semantics](../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md), [message context and provenance](concepts/message-context-and-provenance.md) | [`outcomeDecision.prompt.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts/templates/outcomeDecision.prompt.ts), [`schemas.ts`](../../packages/pet-agent/src/agent/orchestrator/schemas.ts), [`orchestrationDecision.ts`](../../packages/pet-agent/src/agent/orchestrator/runtime/decisions/orchestrationDecision.ts) | [`outcome-decision-basics.ts`](../../packages/pet-agent/evals/datasets/outcome-decision-basics.ts), [`decision-eval-scenarios.ts`](../../packages/pet-agent/evals/decision-eval-scenarios.ts), [`orchestrator.test.ts`](../../packages/pet-agent/src/agent/orchestrator/orchestrator.test.ts) |
+| `answer.user-visible-close` — fulfil the current reply objective, using a fixed acknowledgement only for genuine goal completion and returning control without a false completion claim when user input is required | [`answer`](concepts/decision-node-ownership.md#vertical-decisions) | [Delegation completion acknowledgement](decisions/delegation-completion-acknowledgement.md), [terminal semantics](../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md), [message context and provenance](concepts/message-context-and-provenance.md) | [`answer.prompt.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts/templates/answer.prompt.ts), [`answer.ts`](../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/answer.ts), [`state.ts`](../../packages/pet-agent/src/agent/orchestrator/state.ts) | [`answer-behavior-basics.ts`](../../packages/pet-agent/evals/datasets/answer-behavior-basics.ts), [`answer-eval-scenarios.ts`](../../packages/pet-agent/evals/answer-eval-scenarios.ts), [`orchestrator.test.ts`](../../packages/pet-agent/src/agent/orchestrator/orchestrator.test.ts) |
 
 Maintenance stays deliberately small:
 
@@ -127,6 +130,9 @@ The present architecture accumulated through several deliberate steps:
 - #398/#404 made metadata and message IDs the only protocol identity signals.
 - PR #461 refines planner state as immutable completed facts plus a mutable
   result-bounded future tail and removes unused future-task status labels.
+- PR #467 separates genuine goal completion from the user-input boundary and
+  makes typed outcome state, rather than handoff provenance, select the answer
+  close.
 
 New work should state which of these accepted decisions it extends, revises, or
 supersedes. An isolated prompt edit is not enough when it changes the meaning of

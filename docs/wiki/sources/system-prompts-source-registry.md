@@ -6,6 +6,7 @@ updated: 2026-07-26
 sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../../CAPABILITY_PLANNER_TASK_HORIZON_DRAFT.md
+  - ../../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md
   - ../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/entryDecision.prompt.ts
   - https://github.com/pinpawo/pinpawo-agent/issues/415
   - https://github.com/pinpawo/pinpawo-agent/issues/416
@@ -15,6 +16,7 @@ sources:
 related:
   - ../overview.md
   - ../decisions/capability-planner-task-boundaries.md
+  - ../decisions/delegation-completion-acknowledgement.md
   - ../investigations/entry-decision-state-query-routing.md
   - model-prompting-and-harness-references.md
 ---
@@ -31,7 +33,10 @@ in [PR #461](https://github.com/pinpawo/pinpawo-agent/pull/461) and checked
 against the resulting `main`. CapabilityDecision claims updated on 2026-07-26
 describe the current working implementation and its GLM-5.2 `24/24` profile;
 the eventual implementation PR remains part of the source trail rather than
-being named before publication.
+being named before publication. Terminal-semantics claims describe the
+implementation and paired GLM-5.2 validation published for review in
+[PR #467](https://github.com/pinpawo/pinpawo-agent/pull/467); until merge, that
+PR and its branch are the current implementation source for those claims.
 
 - [`prompts/templates/sharedPrefix.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/sharedPrefix.prompt.ts)
 - [`prompts/templates/entryDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/entryDecision.prompt.ts)
@@ -40,6 +45,7 @@ being named before publication.
 - [`prompts/templates/outcomeDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/outcomeDecision.prompt.ts)
 - [`prompts/templates/answer.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/answer.prompt.ts)
 - [`schemas.ts`](../../../packages/pet-agent/src/agent/orchestrator/schemas.ts)
+- [`state.ts`](../../../packages/pet-agent/src/agent/orchestrator/state.ts)
 - [`runtime/decisions/orchestrationDecision.ts`](../../../packages/pet-agent/src/agent/orchestrator/runtime/decisions/orchestrationDecision.ts)
 - [`runtime/nodes/answer.ts`](../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/answer.ts)
 - [`messageLanes.ts`](../../../packages/pet-agent/src/agent/orchestrator/messageLanes.ts)
@@ -50,6 +56,7 @@ being named before publication.
 - [`capability-planning-evaluation.ts`](../../../packages/pet-agent/evals/capability-planning-evaluation.ts)
 - [`capability-planning-evaluation.test.ts`](../../../packages/pet-agent/evals/capability-planning-evaluation.test.ts)
 - [`answer-behavior-basics.ts`](../../../packages/pet-agent/evals/datasets/answer-behavior-basics.ts)
+- [`outcome-decision-basics.ts`](../../../packages/pet-agent/evals/datasets/outcome-decision-basics.ts)
 - [`decision-eval-scenarios.ts`](../../../packages/pet-agent/evals/decision-eval-scenarios.ts)
 - [`answer-eval-scenarios.ts`](../../../packages/pet-agent/evals/answer-eval-scenarios.ts)
 - [`prompt-goal-evaluator.ts`](../../../packages/pet-agent/evals/prompt-goal-evaluator.ts)
@@ -61,6 +68,7 @@ being named before publication.
 
 - [Decision system prompt design](../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md)
 - [CapabilityPlanner task-horizon design](../../CAPABILITY_PLANNER_TASK_HORIZON_DRAFT.md)
+- [Orchestrator terminal-semantics validation](../../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md)
 - [Decision shared prefix](../../PET_AGENT_ORCHESTRATOR_DECISION_PROMPT_PREFIX.md)
 - [Decision node ownership audit](../../PET_AGENT_DECISION_NODE_OWNERSHIP_AUDIT.md)
 - [Delegation state and task routing](../../PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md)
@@ -94,6 +102,7 @@ being named before publication.
 
 - [Issue #435 — real-model prompt contract validation](https://github.com/pinpawo/pinpawo-agent/issues/435)
 - [PR #461 — capabilityPlanner task-boundary refinement](https://github.com/pinpawo/pinpawo-agent/pull/461)
+- [PR #467 — orchestrator terminal outcome semantics](https://github.com/pinpawo/pinpawo-agent/pull/467)
 
 ## External method and comparison sources
 

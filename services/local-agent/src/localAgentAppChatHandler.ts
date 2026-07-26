@@ -13,7 +13,7 @@ import type { AgentLlmConfig } from './agentConfig';
 import type { LoadedUserCapability } from './capabilityLoader';
 import { buildAppChatThreadId } from './chatInterface';
 import {
-  sanitizeLocalAgentRemoteEvent,
+  redactRemoteCompletedMessagePaths,
   sendLocalAgentEvent,
   type ChatRequestMessage,
   type HumanReviewResponseMessage,
@@ -312,7 +312,7 @@ export class LocalAgentAppChatHandler {
       interruptPrevious: true,
       notifyPrevious: false,
       observeOperation: (event) => {
-        this.projectRemoteEvent(userId, sanitizeLocalAgentRemoteEvent(event));
+        this.projectRemoteEvent(userId, event);
       },
     });
     if (request.kind === 'user_message') {
@@ -609,23 +609,12 @@ export class LocalAgentAppChatHandler {
   }
 
   private emitRemoteEvent(ws: WebSocket, userId: string, event: AgentRuntimeEvent) {
-    // Path-like text cannot be redacted safely one token chunk at a time.
-    // Until the remote transport owns a stateful stream sanitizer, publish
-    // only the complete assistant message. Trusted local transports keep
-    // their existing message.delta stream.
-    if (event.type === 'message.delta') {
-      return true;
-    }
-    const safeEvent = sanitizeLocalAgentRemoteEvent(event);
-    if (!this.projectRemoteEvent(userId, safeEvent)) {
+    const remoteEvent = redactRemoteCompletedMessagePaths(event);
+    if (!this.projectRemoteEvent(userId, remoteEvent)) {
       return false;
     }
-    this.recordReviewActionRoute(safeEvent, userId);
-    // safeEvent already passed through the remote disclosure adapter above.
-    return sendLocalAgentEvent(ws, safeEvent, {
-      audience: 'remote',
-      alreadySanitized: true,
-    });
+    this.recordReviewActionRoute(remoteEvent, userId);
+    return sendLocalAgentEvent(ws, remoteEvent);
   }
 
   private projectRemoteEvent(userId: string, event: AgentRuntimeEvent) {

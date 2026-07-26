@@ -217,10 +217,19 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
     Boolean(item && typeof item === 'object' && (item as { type?: unknown }).type === 'event'),
   );
   assert.deepEqual(eventMessages.map((item) => item.event?.type), [
+    'message.delta',
+    'message.delta',
     'operation',
     'operation',
     'message.completed',
   ]);
+  assert.deepEqual(
+    eventMessages
+      .map((item) => item.event)
+      .filter((event) => event.type === 'message.delta')
+      .map((event) => event.text),
+    ['Saved to /Users/al', 'ice/project/secret.ts'],
+  );
   const completedMessage = eventMessages.find(
     (item) => item.event.type === 'message.completed',
   )?.event;
@@ -229,10 +238,6 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
       ? completedMessage.text
       : null,
     'Saved to [local-path]',
-  );
-  assert.equal(
-    sent.some((item) => JSON.stringify(item).includes('ice/project/secret.ts')),
-    false,
   );
   const operationEvents = eventMessages
     .map((item) => item.event)
@@ -246,14 +251,16 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
     [['local-toolkit.read_file', 'README.md'], ['local-toolkit.read_file', 'README.md']],
   );
 
-  assert.equal(operationEvents.some((event) => 'raw' in event), false);
+  assert.equal(operationEvents.every((event) => 'raw' in event), true);
 
   const hostedSession = handler.readSessionProjection('user-1');
   assert.ok(hostedSession);
   assert.equal(hostedSession.activeRun, null);
   assert.equal(
-    hostedSession.timeline.some((entry) => entry.type === 'operation' && entry.raw !== undefined),
-    false,
+    hostedSession.timeline
+      .filter((entry) => entry.type === 'operation')
+      .every((entry) => entry.raw !== undefined),
+    true,
   );
 
   let tuiState = createInitialTuiState(createSession({ id: hostedSession.sessionId }));
@@ -276,7 +283,10 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
       now: 1000,
     });
   }
-  assert.deepEqual(tuiState.sessions[hostedSession.sessionId]?.timeline, hostedSession.timeline);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(tuiState.sessions[hostedSession.sessionId]?.timeline)),
+    JSON.parse(JSON.stringify(hostedSession.timeline)),
+  );
   assert.deepEqual(tuiState.sessions[hostedSession.sessionId]?.activeRun, hostedSession.activeRun);
 });
 
@@ -363,7 +373,10 @@ test('LocalAgentAppChatHandler settles projected operations when a run is interr
     type: 'run.finish',
     requestId: 'req-interrupt',
   });
-  assert.deepEqual(tuiState.sessions[projection.sessionId]?.timeline, projection.timeline);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(tuiState.sessions[projection.sessionId]?.timeline)),
+    JSON.parse(JSON.stringify(projection.timeline)),
+  );
   assert.deepEqual(tuiState.sessions[projection.sessionId]?.activeRun, projection.activeRun);
 });
 

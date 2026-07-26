@@ -2,8 +2,8 @@
 
 This document describes how tool-call activity inside `pet-agent` becomes
 `operation` events that reach a TUI, the macOS companion, or the hosted
-PinPawo app — and where the `operation.raw` payload (raw tool input/output)
-is allowed to cross the wire.
+PinPawo app, and the small transport-specific transformation applied to
+completed main-agent messages.
 
 ## Big picture
 
@@ -33,7 +33,7 @@ flowchart LR
   LG --> NORM --> TRK --> REG
   REG --> APPOUT
   REG --> LOCOUT
-  APPOUT -- "raw stripped" --> APPUI
+  APPOUT -- "native events; completed text redacted" --> APPUI
   LOCOUT -- "raw preserved" --> TUI
   LOCOUT -- "raw preserved" --> MAC
 ```
@@ -45,10 +45,11 @@ Two physical egress points exist:
 | App WS relay | `runtime.ts` (`inflightRequests`), `localAgentAppChatHandler.ts` | `remote` (default) |
 | Local HTTP/WS server | `localServer.ts`, `localServerChatHandler.ts`, `localServerStudioHandler.ts` | `trusted-local` |
 
-Both call the same `sendLocalAgentEvent(ws, event, options?)`. The `audience`
-selects the complete disclosure policy: remote delivery strips raw and local
-path details and suppresses unsafe token deltas; trusted-local delivery
-preserves native events.
+Both call the same `sendLocalAgentEvent(ws, event, options?)`. Remote delivery
+only redacts obvious local path fragments in main-agent
+`message.completed.text`. Deltas, operation payloads, snapshots, and other
+messages retain their native shape. Trusted-local delivery preserves every
+event unchanged.
 
 ## Why two modes
 
@@ -60,16 +61,16 @@ same data — see `packages/pet-agent/src/types/toolkit.ts`.
 These two channels serve different needs:
 
 - `summary/target/details` — small, schema-stable, safe to render anywhere.
-  This is the only thing toolkit authors guarantee.
+  This is the stable display projection toolkit authors guarantee.
 - `raw` — the full tool input/output. Useful for UIs that want to do things
   the toolkit author didn't pre-imagine: diff renderers, "expand JSON",
-  re-running the call locally, debugging. But it can be large and may contain
+  re-running the call locally, debugging. It can be large and may contain
   sensitive content from the user's environment.
 
-The hosted app talks to the local agent over a public relay, so we keep `raw`
-off that wire. Local clients run on the same machine as the agent and already
-have full filesystem/shell access — there's nothing to "leak" to them, and
-they're the surface that most needs raw data for advanced rendering.
+Both transports currently retain `raw`. The hosted app may use it for transient
+tool rendering and debugging; it is not treated as a durable sanitized API
+projection. If a future public API needs a stricter disclosure contract, that
+policy belongs at that API boundary.
 
 ## Per-event lifecycle
 
@@ -93,7 +94,7 @@ sequenceDiagram
     Send->>Local: { phase, operation, raw:{input} }
   and
     Norm->>Send: emit on app socket (audience=remote)
-    Send->>App: { phase, operation }  (no raw)
+    Send->>App: { phase, operation, raw }
   end
 
   Graph->>Norm: on_tool_end { output }
@@ -136,7 +137,6 @@ type AgentOperationEvent = {
       callId?: string;
     };
   };
-  // Only present on trusted-local transports.
   raw?: {
     input?: unknown;
     output?: unknown;
@@ -147,9 +147,8 @@ type AgentOperationEvent = {
 
 `AgentOperationEvent` is the canonical operation event type. The trusted-local
 vs remote split is enforced at the **transport** layer through `audience`, not
-through separate internal and external event types. `alreadySanitized` is only
-an internal optimization for a remote event that was sanitized before being
-projected; it never changes delta suppression.
+through separate internal and external event types. The current remote rule is
+intentionally narrow: only main-agent `message.completed.text` is redacted.
 
 `buildLocalAgentEventEnvelope` only frames a native event. It does not accept
 an audience or apply disclosure policy. Remote egress must use
@@ -164,5 +163,5 @@ If you build a new egress (e.g. a different IPC, a webhook), select its
 - Trusted, same-machine, bandwidth-rich → `trusted-local`.
 - Remote, multi-tenant, or low-bandwidth → `remote`.
 
-If in doubt, use the default `remote` policy and add an explicit local opt-in
-later.
+If in doubt, use the default `remote` policy. This preserves protocol behavior
+while applying the completed-message text transformation.

@@ -67,11 +67,11 @@ package does not maintain a second `Wire` object graph or a general-purpose JSON
 serializer.
 
 Disclosure policy belongs to the endpoint that knows its trust boundary. The
-current local-agent remote adapter uses native JSON serialization with a small
-wrapper that removes trusted operation `raw`, local runtime fields, and obvious
-local path fragments. Trusted local transports retain the canonical data. A
-future public API may use the same snapshot contract while applying a stricter
-API-specific disclosure policy.
+current local-agent remote adapter preserves native events and snapshots,
+including deltas and operation `raw`, and only redacts obvious local path
+fragments in main-agent `message.completed.text`. Trusted local transports
+retain the canonical data unchanged. A future public API may use the same
+snapshot contract while applying a stricter API-specific disclosure policy.
 
 Runtime/checkpoint-to-snapshot materialization remains a local-agent adapter.
 WebSocket, stdio, HTTP, future API routes, authentication, persistence and
@@ -192,11 +192,11 @@ sessions above its retention limit while always retaining active runs; the
 existing event and control wire protocol remains compatible and does not add
 session patches or revision numbers.
 
-Before an operation event or snapshot reaches the current remote transport, the
-local-agent adapter removes `raw`, local runtime paths, and obvious local path
-fragments. This is an endpoint disclosure rule, not part of the shared
-projection contract. Hosted clients derive operation UI from the remaining safe
-title, summary, source, target, and details fields.
+Before a completed main-agent message reaches the current remote transport, the
+local-agent adapter redacts obvious local path fragments in its `text`. This
+narrow endpoint rule is not part of the shared projection contract. Other
+events and snapshots retain their canonical payload, including operation
+`raw`, title, summary, source, target, and details fields.
 
 Pending chat reviews are durable in LangGraph checkpoints. If an in-memory review route is lost after a restart or websocket route change, the hosted adapter scans the actor's app-chat threads and reconstructs the route from checkpoint state. New clients identify the continuation with `actionId` (the checkpoint interrupt ID), which is also the concurrency and duplicate-protection key. A failed or interrupted resume releases its action claim and forces the next attempt to re-read the checkpoint. Legacy responses without `actionId` may recover by `reviewId` only when exactly one pending review matches and every candidate thread was readable; ambiguity or an incomplete scan fails closed. Decisions remain ordered as supplied by the review batch.
 

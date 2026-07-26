@@ -70,9 +70,9 @@ export type AgentOperationEvent = {
     };
   };
   /**
-   * Raw tool-call input/output/error. Only forwarded over trusted local
-   * transports (e.g. 127.0.0.1 TUI/companion socket). Stripped before sending
-   * to remote app channels — remote UI must rely on operation.summary/details.
+   * Raw tool-call input/output/error. Transports currently preserve this
+   * transient payload; consumers should prefer operation.summary/details for
+   * stable display behavior.
    */
   raw?: AgentOperationRaw;
 };

@@ -6,7 +6,6 @@ import {
   type AgentClientMessage,
   type AgentRuntimeEvent,
   type AgentRuntimeEventEnvelope,
-  type AgentRuntimeView,
   type AgentServerMessage,
 } from '@pinpawo/agent-session';
 
@@ -50,48 +49,15 @@ const AGENT_SERVER_MESSAGE_TYPES = {
   'session.error': true,
 } as const satisfies Record<AgentServerMessage['type'], true>;
 
-const REMOTE_RUNTIME_FIELD_POLICY = {
-  model: 'keep',
-  cwd: 'omit',
-  workspaceId: 'keep',
-  workspaceName: 'keep',
-  workspaceRoot: 'omit',
-  stateRoot: 'omit',
-  studioConfigPath: 'omit',
-  studioDueRunsPath: 'omit',
-  petsDir: 'omit',
-  studioWikiBaseDir: 'omit',
-  contextWindow: 'keep',
-} as const satisfies Record<keyof AgentRuntimeView, 'keep' | 'omit'>;
-
-const REMOTE_OMITTED_KEYS = new Set<string>([
-  'raw',
-  'workdir',
-  ...Object.entries(REMOTE_RUNTIME_FIELD_POLICY)
-    .filter(([, policy]) => policy === 'omit')
-    .map(([field]) => field),
-]);
-
 export type LocalAgentTransportAudience = 'trusted-local' | 'remote';
 
 export type SendLocalAgentMessageOptions = {
   audience?: LocalAgentTransportAudience;
 };
 
-export type SendLocalAgentEventOptions =
-  | {
-      audience?: 'remote';
-      /**
-       * The event already passed through sanitizeLocalAgentRemoteEvent.
-       * This skips duplicate transformation, but remote delta suppression
-       * still applies.
-       */
-      alreadySanitized?: boolean;
-    }
-  | {
-      audience: 'trusted-local';
-      alreadySanitized?: never;
-    };
+export type SendLocalAgentEventOptions = {
+  audience?: LocalAgentTransportAudience;
+};
 
 export function readLocalAgentClientMessageEnvelope(raw: unknown) {
   return readAgentClientMessageEnvelope(normalizeProtocolInput(raw));
@@ -111,8 +77,14 @@ export function buildLocalAgentEventEnvelope(
   return buildAgentEventEnvelope(event);
 }
 
-export function sanitizeLocalAgentRemoteEvent(event: AgentRuntimeEvent) {
-  return toRemoteProtocolValue(event);
+export function redactRemoteCompletedMessagePaths(event: AgentRuntimeEvent) {
+  if (event.type !== 'message.completed') {
+    return event;
+  }
+  return {
+    ...event,
+    text: redactLocalPathFragments(event.text),
+  };
 }
 
 export function sendLocalAgentMessage(
@@ -125,15 +97,11 @@ export function sendLocalAgentMessage(
   }
   const isRemoteServerMessage = isAgentServerMessage(message)
     && (options.audience ?? 'remote') === 'remote';
-  if (
-    isRemoteServerMessage
-    && message.type === 'event'
-    && message.event.type === 'message.delta'
-  ) {
-    return true;
-  }
-  const protocolMessage = isRemoteServerMessage
-    ? toRemoteProtocolValue(message)
+  const protocolMessage = isRemoteServerMessage && message.type === 'event'
+    ? {
+        ...message,
+        event: redactRemoteCompletedMessagePaths(message.event),
+      }
     : message;
   ws.send(JSON.stringify(protocolMessage));
   return true;
@@ -147,29 +115,16 @@ export function sendLocalAgentEvent(
   if (ws.readyState !== WS_OPEN) {
     return false;
   }
-  if (options.audience !== 'trusted-local' && event.type === 'message.delta') {
-    return true;
-  }
-  const envelope = buildLocalAgentEventEnvelope(event);
-  const protocolEnvelope = options.audience === 'trusted-local'
-    || options.alreadySanitized
-    ? envelope
-    : toRemoteProtocolValue(envelope);
+  const protocolEvent = options.audience === 'trusted-local'
+    ? event
+    : redactRemoteCompletedMessagePaths(event);
+  const protocolEnvelope = buildLocalAgentEventEnvelope(protocolEvent);
   ws.send(JSON.stringify(protocolEnvelope));
   return true;
 }
 
 function normalizeProtocolInput(raw: unknown) {
   return raw instanceof Buffer ? raw.toString() : raw;
-}
-
-function toRemoteProtocolValue<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value, (key, item) => {
-    if (REMOTE_OMITTED_KEYS.has(key)) return undefined;
-    return typeof item === 'string'
-      ? redactLocalPathFragments(item)
-      : item;
-  })) as T;
 }
 
 function redactLocalPathFragments(value: string) {

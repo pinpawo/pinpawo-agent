@@ -12,8 +12,9 @@
     "dev:split": "bun run src/splitFooterSpike.ts",
     "smoke": "bun run src/spike.ts --smoke",
     "smoke:split": "bun run src/splitFooterSpike.ts --smoke",
+    "test:native": "bun test $(find src -name '*.bun.test.ts' | sort)",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx/esm --test $(find src -name '*.test.ts' | sort)"
+    "test": "node --import tsx/esm --test $(find src -name '*.test.ts' ! -name '*.bun.test.ts' | sort)"
   },
   "dependencies": {
     "@opentui/core": "0.4.5",

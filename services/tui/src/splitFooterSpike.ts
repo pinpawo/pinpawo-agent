@@ -8,13 +8,16 @@ import {
   type ScrollbackRenderContext,
   type ScrollbackSurface,
 } from '@opentui/core';
+import { calculateComposerLayout } from './spike/composerLayout';
 import { formatInputProbe } from './spike/inputProbe';
 import {
   createSpikeSession,
   formatSpikeTimelineEntry,
 } from './spike/sessionHarness';
+import { installSingleGraphemeBackspaceWorkaround } from './spike/textareaWorkarounds';
 
 const smoke = process.argv.includes('--smoke');
+const initialComposerLayout = calculateComposerLayout('', 1);
 const renderer = await createCliRenderer({
   exitOnCtrlC: true,
   targetFps: 60,
@@ -23,7 +26,7 @@ const renderer = await createCliRenderer({
   useMouse: false,
   enableMouseMovement: false,
   screenMode: 'split-footer',
-  footerHeight: 8,
+  footerHeight: initialComposerLayout.footerHeight,
   externalOutputMode: 'capture-stdout',
   consoleMode: 'disabled',
 });
@@ -35,7 +38,7 @@ const root = new BoxRenderable(renderer, {
 });
 const header = new TextRenderable(renderer, {
   id: 'header',
-  content: 'PinPawo TUI v2 · split-footer / terminal scrollback probe',
+  content: 'PinPawo TUI v2 · split-footer',
   fg: '#f0a6ca',
   height: 1,
 });
@@ -47,7 +50,7 @@ const live = new TextRenderable(renderer, {
 const composerFrame = new BoxRenderable(renderer, {
   id: 'composer-frame',
   width: '100%',
-  height: 5,
+  height: initialComposerLayout.frameHeight,
   border: true,
   padding: 1,
 });
@@ -57,11 +60,12 @@ const status = new TextRenderable(renderer, {
   fg: '#8a8a8a',
   height: 1,
 });
+let pendingPastePreview: string | null = null;
 const composer = new TextareaRenderable(renderer, {
   id: 'composer',
   width: '100%',
   height: '100%',
-  placeholder: 'Footer composer: multiline, paste, IME, file drag-in…',
+  placeholder: 'Message · multiline / paste / IME / file paths',
   keyBindings: [{
     name: 'return',
     ctrl: true,
@@ -74,9 +78,23 @@ const composer = new TextareaRenderable(renderer, {
     status.content = 'submitted to terminal scrollback only';
   },
   onContentChange: () => {
-    status.content = `composer: ${[...composer.plainText].length} code points`;
+    status.content = pendingPastePreview
+      ?? `composer: ${[...composer.plainText].length} code points`;
+    pendingPastePreview = null;
+    syncComposerLayout();
+  },
+  onPaste: (event: PasteEvent) => {
+    pendingPastePreview = formatInputProbe(
+      'paste',
+      new TextDecoder().decode(event.bytes),
+    );
+    status.content = pendingPastePreview;
+    queueMicrotask(() => {
+      pendingPastePreview = null;
+    });
   },
 });
+installSingleGraphemeBackspaceWorkaround(composer);
 
 root.add(header);
 root.add(live);
@@ -88,6 +106,7 @@ composer.focus();
 
 let scrollbackSequence = 0;
 let burstSequence = 0;
+let composerFrameHeight = initialComposerLayout.frameHeight;
 let activeDeltaTimer: ReturnType<typeof setInterval> | null = null;
 let activeDeltaSurface: ScrollbackSurface | null = null;
 for (const entry of createSpikeSession(smoke ? 2 : 40).timeline) {
@@ -104,14 +123,8 @@ renderer.keyInput.on('keypress', (key: KeyEvent) => {
     appendScrollbackBurst();
   }
 });
-renderer.keyInput.on('paste', (event: PasteEvent) => {
-  status.content = formatInputProbe(
-    'paste',
-    new TextDecoder().decode(event.bytes),
-  );
-});
-renderer.on('resize', (width, height) => {
-  status.content = `resize: ${width}×${height}`;
+renderer.on('resize', () => {
+  syncComposerLayout();
 });
 renderer.on('selection', (selection) => {
   status.content = `selection: ${[...selection.getSelectedText()].length} code points`;
@@ -139,6 +152,17 @@ function writeScrollbackLine(content: string) {
       height: 1,
     };
   });
+}
+
+function syncComposerLayout() {
+  const layout = calculateComposerLayout(
+    composer.plainText,
+    composer.virtualLineCount,
+  );
+  if (layout.frameHeight === composerFrameHeight) return;
+  composerFrameHeight = layout.frameHeight;
+  composerFrame.height = layout.frameHeight;
+  renderer.footerHeight = layout.footerHeight;
 }
 
 function runLiveDeltaBurst() {

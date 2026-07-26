@@ -5,7 +5,14 @@ import { formatInputProbe } from './inputProbe';
 test('input probe exposes terminal control sequences without executing them', () => {
   assert.equal(
     formatInputProbe('key', '\u001b[200~/Users/mac/My File.txt\n'),
-    'key: \\x1b[200~/Users/mac/My File.txt\\n',
+    'key: \\x1b[200~/Users/mac/My␠File.txt\\n',
+  );
+});
+
+test('input probe makes shell path separators visible', () => {
+  assert.equal(
+    formatInputProbe('paste', '/tmp/first\\ file.txt /tmp/second.txt'),
+    'paste: /tmp/first\\␠file.txt␠/tmp/second.txt',
   );
 });
 

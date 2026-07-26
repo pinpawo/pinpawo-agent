@@ -18,6 +18,7 @@ function escapeCodePoint(value: string) {
   if (value === '\n') return '\\n';
   if (value === '\r') return '\\r';
   if (value === '\t') return '\\t';
+  if (value === ' ') return '␠';
   if (codePoint === 0x1b) return '\\x1b';
   if (codePoint < 0x20 || codePoint === 0x7f) {
     return `\\x${codePoint.toString(16).padStart(2, '0')}`;

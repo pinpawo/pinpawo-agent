@@ -35,6 +35,9 @@ OpenTUI-supported native-scrollback design.
 The split-footer probe disables OpenTUI mouse tracking so the terminal retains
 touchpad scrolling and native text selection. Mouse editing inside the composer
 is intentionally outside this comparison; keyboard editing remains available.
+The composer grows from one to eight content rows for explicit newlines and
+soft wrapping. A narrow compatibility workaround preserves the preceding
+newline when backspacing the last grapheme on an OpenTUI 0.4.5 textarea line.
 Its delta probe uses OpenTUI's `ScrollbackSurface`: token updates render into an
 off-screen buffer, while only complete rows are committed to terminal
 scrollback. The footer therefore does not repaint for every token.
@@ -59,7 +62,15 @@ Useful controls:
 
 Drag one or more files into the terminal while the textarea is focused. The
 probe shows whether the terminal delivered the input as bracketed paste or key
-input and displays a bounded escaped preview. It does not read or upload files.
+input and displays a bounded escaped preview. Spaces appear as `␠`, making the
+separator between shell-escaped paths visible. The probe does not parse, read,
+or upload files.
+
+Run the native textarea regression with Bun:
+
+```sh
+npm run test:native -w @pinpawo/tui
+```
 
 Manual results belong in
 [`docs/TUI_V2_OPENTUI_CAPABILITY_MATRIX.md`](../../docs/TUI_V2_OPENTUI_CAPABILITY_MATRIX.md).

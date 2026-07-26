@@ -33,8 +33,11 @@ The probe covers:
 | operation raw payload | shared projection retains transient raw data | automated test |
 | high-frequency delta projection | one streaming entry is updated in place | automated test |
 | raw input preview | controls are escaped and output is bounded | automated test |
+| composer layout | logical and soft-wrapped lines grow from 1–8 rows | automated test |
+| native textarea regression | multiline paste and single-grapheme backspace preserve line boundaries | Bun native test |
 | TypeScript | `npm run typecheck -w @pinpawo/tui` | passed |
-| unit tests | `npm run test -w @pinpawo/tui` | passed, 6 tests |
+| unit tests | `npm run test -w @pinpawo/tui` | passed, 9 tests |
+| native tests | `npm run test:native -w @pinpawo/tui` | passed, 1 test |
 | alternate-screen PTY startup | `npm run smoke -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | split-footer PTY startup | `npm run smoke:split -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | standalone executable | `npm run build:spike -w @pinpawo/tui` | passed for darwin-arm64; compiled PTY smoke passed |
@@ -44,23 +47,23 @@ The probe covers:
 Use the same checklist in each terminal. Do not mark a capability supported
 from an automated PTY run alone.
 
-| Capability | macOS Terminal | iTerm2 | Integrated terminal |
-| --- | --- | --- | --- |
-| touchpad scroll while timeline focused | pending | pending | pending |
-| browse position survives incoming rows | pending | pending | pending |
-| scrolling back to bottom resumes sticky follow | pending | pending | pending |
-| terminal/app text selection and copy | pending | pending | pending |
-| multiline edit and soft wrap | pending | pending | pending |
-| Shift selection and deletion | pending | pending | pending |
-| undo/redo | pending | pending | pending |
-| bracketed multiline paste is not submitted | pending | pending | pending |
-| CJK and emoji cursor alignment | pending | pending | pending |
-| Chinese IME composition | pending | pending | pending |
-| absolute path drag-in sequence | pending | pending | pending |
-| quoted/escaped multi-path drag-in sequence | pending | pending | pending |
-| resize during editing and browsing | pending | pending | pending |
-| 250-row append burst | pending | pending | pending |
-| 400-update delta burst | pending | pending | pending |
+| Capability | macOS Terminal | iTerm2 | Ghostty | Integrated terminal |
+| --- | --- | --- | --- | --- |
+| touchpad scroll while timeline focused | pending | pending | passed | pending |
+| browse position survives incoming rows | pending | pending | passed | pending |
+| scrolling back to bottom resumes sticky follow | pending | pending | pending | pending |
+| terminal/app text selection and copy | pending | pending | passed | pending |
+| multiline edit and soft wrap | pending | pending | fix pending retest | pending |
+| Shift selection and deletion | pending | pending | pending | pending |
+| undo/redo | pending | pending | pending | pending |
+| bracketed multiline paste is not submitted | pending | pending | fix pending retest | pending |
+| CJK and emoji cursor alignment | pending | pending | pending | pending |
+| Chinese IME composition | pending | pending | pending | pending |
+| absolute path drag-in sequence | pending | pending | passed | pending |
+| quoted/escaped multi-path drag-in sequence | pending | pending | delivered; parsing pending | pending |
+| resize during editing and browsing | pending | pending | fix pending retest | pending |
+| 250-row append burst | pending | pending | passed | pending |
+| 400-update delta burst | pending | pending | passed | pending |
 
 ## Manual observations
 
@@ -77,6 +80,22 @@ from an automated PTY run alone.
 These are preliminary results from one integrated terminal, not a cross-terminal
 compatibility claim. The current leading direction is split-footer with
 terminal-owned wheel/selection input and stable-row scrollback commits.
+
+### Ghostty
+
+| Probe | Observation | Result |
+| --- | --- | --- |
+| terminal-owned scrolling and selection | touchpad scrolling, the terminal scrollbar, and text selection work in split-footer mode | passed |
+| multiline composer in the initial split-footer build | frame chrome left only one content row, so pasted lines and newlines were hidden | failed; fixed with 1–8 row auto-growth |
+| single-grapheme line backspace | OpenTUI 0.4.5 removed both the grapheme and its preceding newline | failed upstream; narrow workaround and Bun native regression added |
+| `Cmd+A` | selects the composer contents | passed |
+| single-file drag-in | Ghostty delivers the path to the composer | passed |
+| multi-file drag-in | Ghostty delivers shell-style path text, but the original preview did not distinguish escaped spaces from path separators | partial; spaces now render as `␠`, structured attachment parsing remains Phase 2 |
+| resize | committed scrollback and footer layout became visually inconsistent | partial; footer height now resyncs, committed terminal scrollback cannot be reflowed by the app |
+
+The composer and resize fixes above still need confirmation in a fresh Ghostty
+run. Existing committed scrollback is terminal-owned by design, so the spike
+does not destructively replay it after resize.
 
 ## Procedure
 

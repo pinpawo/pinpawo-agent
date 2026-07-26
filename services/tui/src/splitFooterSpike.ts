@@ -6,6 +6,7 @@ import {
   type KeyEvent,
   type PasteEvent,
   type ScrollbackRenderContext,
+  type ScrollbackSurface,
 } from '@opentui/core';
 import { formatInputProbe } from './spike/inputProbe';
 import {
@@ -52,7 +53,7 @@ const composerFrame = new BoxRenderable(renderer, {
 });
 const status = new TextRenderable(renderer, {
   id: 'status',
-  content: 'Ctrl+D live delta · Ctrl+T scrollback rows · Ctrl+C exit',
+  content: 'Ctrl+D surface delta · Ctrl+T scrollback rows · Ctrl+C exit',
   fg: '#8a8a8a',
   height: 1,
 });
@@ -87,6 +88,8 @@ composer.focus();
 
 let scrollbackSequence = 0;
 let burstSequence = 0;
+let activeDeltaTimer: ReturnType<typeof setInterval> | null = null;
+let activeDeltaSurface: ScrollbackSurface | null = null;
 for (const entry of createSpikeSession(smoke ? 2 : 40).timeline) {
   writeScrollbackLine(formatSpikeTimelineEntry(entry));
 }
@@ -113,6 +116,7 @@ renderer.on('resize', (width, height) => {
 renderer.on('selection', (selection) => {
   status.content = `selection: ${[...selection.getSelectedText()].length} code points`;
 });
+renderer.on('destroy', stopActiveDeltaBurst);
 
 if (smoke) {
   renderer.once('frame', () => {
@@ -138,19 +142,63 @@ function writeScrollbackLine(content: string) {
 }
 
 function runLiveDeltaBurst() {
+  if (activeDeltaTimer) {
+    status.content = 'surface delta is already running';
+    return;
+  }
+
   burstSequence += 1;
   const currentBurst = burstSequence;
+  const surface = renderer.createScrollbackSurface({ startOnNewLine: true });
+  const streamedText = new TextRenderable(surface.renderContext, {
+    id: `delta-surface-${currentBurst}`,
+    width: '100%',
+    height: 'auto',
+    content: 'assistant  ',
+  });
+  surface.root.add(streamedText);
+  activeDeltaSurface = surface;
+
   let tick = 0;
-  const timer = setInterval(() => {
+  let committedRows = 0;
+  let content = 'assistant  ';
+  live.content = `live       surface delta ${currentBurst}: streaming`;
+  status.content = 'scroll history now; only stable rows will be committed';
+
+  activeDeltaTimer = setInterval(() => {
     tick += 1;
-    live.content = `live       delta burst ${currentBurst}: ${'▮'.repeat(tick % 40)}`;
+    content += '▮';
+    streamedText.content = content;
+    surface.render();
+
+    const stableRows = tick >= 400
+      ? surface.height
+      : Math.max(0, surface.height - 1);
+    if (stableRows > committedRows) {
+      surface.commitRows(committedRows, stableRows);
+      committedRows = stableRows;
+    }
+
     if (tick >= 400) {
-      clearInterval(timer);
-      writeScrollbackLine(`assistant  delta burst ${currentBurst}: completed (400 updates)`);
+      clearInterval(activeDeltaTimer!);
+      activeDeltaTimer = null;
+      surface.destroy();
+      activeDeltaSurface = null;
       live.content = 'live       idle';
-      status.content = 'live delta committed to terminal scrollback';
+      status.content = `surface delta ${currentBurst} completed (400 updates)`;
     }
   }, 8);
+}
+
+function stopActiveDeltaBurst() {
+  if (activeDeltaTimer) {
+    clearInterval(activeDeltaTimer);
+    activeDeltaTimer = null;
+  }
+  if (activeDeltaSurface && !activeDeltaSurface.isDestroyed) {
+    activeDeltaSurface.destroy();
+  }
+  activeDeltaSurface = null;
 }
 
 function appendScrollbackBurst() {

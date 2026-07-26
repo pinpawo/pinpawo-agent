@@ -35,6 +35,9 @@ OpenTUI-supported native-scrollback design.
 The split-footer probe disables OpenTUI mouse tracking so the terminal retains
 touchpad scrolling and native text selection. Mouse editing inside the composer
 is intentionally outside this comparison; keyboard editing remains available.
+Its delta probe uses OpenTUI's `ScrollbackSurface`: token updates render into an
+off-screen buffer, while only complete rows are committed to terminal
+scrollback. The footer therefore does not repaint for every token.
 
 Build the alternate-screen probe as a standalone executable with:
 
@@ -49,7 +52,7 @@ Useful controls:
 
 - `F2`: focus the timeline for keyboard and touchpad scrolling
 - `F3`: focus the textarea
-- `Ctrl+D`: run a high-frequency streaming-delta burst
+- `Ctrl+D`: run a high-frequency streaming-delta burst (stable-row commits in split-footer)
 - `Ctrl+T`: append a burst of timeline rows
 - `Ctrl+Enter`: submit the textarea without changing the production agent
 - `Ctrl+C`: exit

@@ -25,6 +25,7 @@ import {
   CAPABILITY_UNAVAILABLE_SELECTION,
   parseCapabilitySelection,
   readDecisionText,
+  type AcceptedDelegationOutcome,
   type CapabilityDecision,
   type DelegationOutcomeDecision,
   type TaskDecision,
@@ -712,6 +713,7 @@ function buildCapabilityDecisionResult(params: {
     runPendingTask: null,
     taskActiveDelegation: nextTaskActiveDelegation,
     runDelegationSummaries,
+    runLatestDelegationOutcome: null,
   };
 }
 
@@ -748,8 +750,12 @@ function buildDelegationOutcomeDecisionResult(params: {
     };
   }
 
-  const completedTaskUpdate = buildCompletedTaskResult({ state, context });
-  if (!completedTaskUpdate) {
+  const acceptedDelegationUpdate = buildAcceptedDelegationResult({
+    state,
+    context,
+    outcome: decision.outcome,
+  });
+  if (!acceptedDelegationUpdate) {
     return {
       goto: 'answer',
       update: {
@@ -760,8 +766,8 @@ function buildDelegationOutcomeDecisionResult(params: {
   }
 
   return {
-    goto: decision.outcome === 'goal_done' ? 'answer' : 'capabilityPlanner',
-    update: completedTaskUpdate,
+    goto: decision.outcome === 'task_done' ? 'capabilityPlanner' : 'answer',
+    update: acceptedDelegationUpdate,
   };
 }
 
@@ -805,24 +811,26 @@ function buildContinueDelegationResult(params: {
     runPendingTask: null,
     taskActiveDelegation: nextTaskActiveDelegation,
     runDelegationSummaries,
+    runLatestDelegationOutcome: null,
   };
 }
 
-function buildCompletedTaskResult(params: {
+function buildAcceptedDelegationResult(params: {
   state: OrchestratorStateType;
   context: OrchestrationDecisionContext;
+  outcome: AcceptedDelegationOutcome;
 }) {
-  const { state, context } = params;
+  const { state, context, outcome } = params;
   const {
     activeDelegation,
     canHandoffActiveDelegation,
     preDecisionHandoffMessages,
   } = context;
   if (!activeDelegation) {
-    throw new Error('completed outcome requires taskActiveDelegation');
+    throw new Error('accepted outcome requires taskActiveDelegation');
   }
   if (!canHandoffActiveDelegation) {
-    throw new Error('completed outcome requires a handoff-ready active delegation');
+    throw new Error('accepted outcome requires a handoff-ready active delegation');
   }
 
   const handoffMessages: BaseMessage[] = [];
@@ -844,7 +852,12 @@ function buildCompletedTaskResult(params: {
 
   const runDelegationSummaries = state.runDelegationSummaries.map((delegation) =>
     delegation.id === activeDelegation.id
-      ? { ...delegation, status: 'completed' as const }
+      ? {
+          ...delegation,
+          status: outcome === 'user_input_required'
+            ? 'progress' as const
+            : 'completed' as const,
+        }
       : delegation);
 
   return {
@@ -853,6 +866,7 @@ function buildCompletedTaskResult(params: {
     runPendingTask: null,
     taskActiveDelegation: null,
     runDelegationSummaries,
+    runLatestDelegationOutcome: outcome,
   };
 }
 

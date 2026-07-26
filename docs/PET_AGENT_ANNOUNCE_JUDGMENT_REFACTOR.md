@@ -41,7 +41,7 @@ main agent 的 messages 和 subagent 的 messages **本质是两条独立的 que
 ```
 subagent → delegationOutcomeDecision → main
                      ↑
-   只有 decision 判定 "subagent 完成了" 这一刻，才执行 handoff。
+   decision 接受 announce 作为当前结果时，执行 handoff。
 
 handoff 动作（在 delegationOutcomeDecision 写回 state 的同一步内做，不加新节点）：
   ① 把 announce 内容【复制】成一条新的 main queue 消息
@@ -52,22 +52,25 @@ handoff 动作（在 delegationOutcomeDecision 写回 state 的同一步内做�
   ② 该 subagent lane 的消息【全部清空】（原 announce + 全部中间 transcript 一起焚毁）
 ```
 
-**对比历史实现**：过去是“subagent 自标 completed → 修剪函数顺便删一删，留下带 lane 的原 announce”。当前是“decision 判定完成 → copy 一份干净副本进 main → 整条 lane 用完即焚”。
+**对比历史实现**：过去是“subagent 自标 completed → 修剪函数顺便删一删，留下带 lane 的原 announce”。当前是“decision 接受结果 → copy 一份干净副本进 main → 整条 lane 用完即焚”。
 
 ### progress（未完成）：流程完全不变
 
-- decision 觉得没成 → **不 handoff**，按现在的流程继续走（续跑/ask）。
+- `continue` → **不 handoff**，继续同一 delegation。
 - main queue 此刻拿不到任何东西，subagent lane 原样保留（供续跑切回去）。
 - **不需要把进度/中间过程交给 main**。从 main 视图看，事实就是“委派了任务、还没结果”，这个 context 真实自洽；基于“还没结果”回答用户可接受。
+- `user_input_required` 与 `continue` 不同：当前结果需要先交给 main，再由 answer 基于显式
+  outcome 说明已有进展和缺少的用户输入；handoff 本身仍不表示 task 或目标已经完成。
 
 ## 3a. 已定决策（实现前已拍板，消除歧义）
 
 > 这些是与作者对齐后定下的、直接决定实现形状的点。实现时按此执行，不再重新讨论。
 
-**D1 — handoff 的“完成”信号 = outcomeDecision 的 verdict，不读 completionReason。**
+**D1 — handoff 的接受信号 = outcomeDecision 的 verdict，不读 completionReason。**
 - outcomeDecision 的 `outcome` 就是验收判定：`continue`=当前 task 未完成；
-  `task_done`=当前 task 完成、总目标仍需下一 task；`goal_done`=总目标完成。
-- 因此 **handoff 触发 = `task_done | goal_done`**。runtime 不拿
+  `task_done`=当前 task 完成、总目标仍需下一 task；`goal_done`=总目标完成；
+  `user_input_required`=目标尚未完成，继续需要用户输入。
+- 因此 **handoff 触发 = `task_done | goal_done | user_input_required`**。runtime 不拿
   `completionReason==='natural'` 自己推断完成；natural 只表示 subagent 正常停止。
 - 单线 delegation 下只 handoff 当前 `taskActiveDelegation`。`continue` 保留 lane 并继续同一
   delegation；`runDelegationSummaries` 只是本 run 的 prompt/debug 摘要，不作为 unfinished task
@@ -97,8 +100,10 @@ handoff 复制出的 main 消息，`additional_kwargs.pinpawo` 带：
   main compaction summary；pre-lane briefing 仅按 `source: delegation_briefing` provenance 排除，
   已验收 handoff provenance 优先保留。answer 不解析 briefing 正文，也不对模型输出做 briefing
   文本匹配、重试或替换。
+- handoff provenance 只标识结果来源。graph 另行传递已接受的 outcome：只有 `goal_done`
+  触发固定完成说明；`user_input_required` 触发面向用户的进展说明和信息请求。
 
-**D6 — 未完成流程不交付。** outcomeDecision 返回 `continue` 或 subagent
+**D6 — 继续执行时不交付。** outcomeDecision 返回 `continue` 或 subagent
 `limit_reached` 尚不可 handoff 时，不向 main 写入交付，原 lane 保留用于续跑。
 
 ## 4. 这个模型收敛掉的纠结点
@@ -120,7 +125,7 @@ handoff 复制出的 main 消息，`additional_kwargs.pinpawo` 带：
 | `laneMessagesForStateUpdate` | completed 才删中间 transcript | 由 handoff 动作取代（copy + 清空 lane） |
 | `answerConversationMessages`（#233 新增） | 去 lane 里捞 completed+progress announce | 不再需要；answer 直接读 main queue |
 | `buildSubagentAnnounceContext`（prompts.ts:326） | 给 decision 喂 `状态：completed/progress`（先入为主） | 去掉“状态”，只喂 announce 文本 + completionReason 线索，让 decision 真正判 |
-| `delegationOutcomeDecision` | 读已写死的 tag，做“追认” | 判定 `continue/task_done/goal_done`，完成 verdict 触发 handoff |
+| `delegationOutcomeDecision` | 读已写死的 tag，做“追认” | 判定 `continue/task_done/goal_done/user_input_required`，接受结果的 verdict 触发 handoff |
 | delegation state | 依赖 announce/runDelegations 的 progress 状态 | 未完成 delegation 由 `taskActiveDelegation` 表示；`runDelegationSummaries` 只保留本 run 摘要 |
 
 ## 6. 当前落地形态
@@ -128,17 +133,21 @@ handoff 复制出的 main 消息，`additional_kwargs.pinpawo` 带：
 1. `createSubagent` 返回显式 `announceMessageId`。
 2. `tagNewLaneMessages` 按 ID 标记 announce，并给新增消息写入 lane/runId/delegationId。
 3. `buildSubagentHandoff` 按当前 active delegation 构造 main copy 与 lane `RemoveMessage`。
-4. outcomeDecision 的 completed verdict 把 handoff update 写入 state；`continue` 只追加 continuation briefing。
+4. outcomeDecision 的 accepted verdict 把 handoff update 和显式 outcome 写入 state；`continue` 只追加 continuation briefing。
 5. answer 统一读取 `mainConversationMessages()`。
 
 ## 7. 验收标准（重构后必须成立）
 
-- **验收完成即交付**：subagent 产生 announce 且 outcomeDecision 判定 `task_done/goal_done`
+- **接受结果即交付**：subagent 产生 announce 且 outcomeDecision 判定
+  `task_done/goal_done/user_input_required`
   后，main queue **恰好多出一条** announce 副本，内容 = 原 announce 文本，带
   `handoffFrom`/`delegationId`/`runId`/`task`/`announceMessageId` metadata；该 delegationId
   的 lane 消息（原 announce + 中间 transcript）在 state 里**全部消失**。
 - **完成 A 同时委派 B**：A 的 handoff 照常发生（不被 B 的新委派抑制）。
-- **progress 不动 main**：limit_reached / decision 判未完成时，main queue **不变**，subagent lane 原样保留，可续跑。
+- **continue 不动 main**：limit_reached / decision 判定同一 delegation 可继续时，main queue
+  **不变**，subagent lane 原样保留，可续跑。
+- **需要用户输入不冒充完成**：`user_input_required` 接受并交付当前结果，但 delegation 摘要保持
+  progress；answer 说明目标尚未完成并请求所需信息，不使用固定完成说明。
 - **answer 忠实复述**：用户要求“重发之前的结果”时，answer node 从 main queue 就能读到 handoff 副本，不再依赖 `answerConversationMessages`；旧的“压缩后仍可复述”测试仍通过。
 - **decision 不再被先入为主**：decision 输入不含 `状态：completed/progress`，只有 announce 文本 + 停止原因。
 - **无裸 ToolMessage 残留进 answer**：review P2#1 场景不再可复现。

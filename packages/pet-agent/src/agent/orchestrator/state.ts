@@ -15,6 +15,7 @@ import {
   mergeToolAuthorizations,
   type ToolAuthorizationRecord,
 } from './review/reviewAuthorizations';
+import type { AcceptedDelegationOutcome } from './schemas';
 
 const orchestratorStateChannels = {
   messages: Annotation<BaseMessage[]>({
@@ -49,6 +50,10 @@ const orchestratorStateChannels = {
     reducer: (_prev, next) => next,
     default: () => 0,
   }),
+  runLatestDelegationOutcome: Annotation<AcceptedDelegationOutcome | null>({
+    reducer: (_prev, next) => next,
+    default: () => null,
+  }),
   runId: Annotation<string>({
     reducer: (_prev, next) => next,
     default: () => '',
@@ -72,6 +77,7 @@ export type OrchestratorRunState = Pick<
   | 'runCapabilityPlan'
   | 'runDelegationSummaries'
   | 'runIterationCount'
+  | 'runLatestDelegationOutcome'
   | 'runId'
 >;
 
@@ -82,6 +88,7 @@ export function buildRunStateReset(): OrchestratorRunState {
     runCapabilityPlan: [],
     runDelegationSummaries: [],
     runIterationCount: 0,
+    runLatestDelegationOutcome: null,
     runId: randomUUID().slice(0, 8),
   };
 }

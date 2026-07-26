@@ -24,7 +24,7 @@ test('buildTuiActionsFromServerMessage ignores pong messages', () => {
       now: 1000,
       createMessage: messages(),
     }),
-    { actions: [], clearInterrupt: false },
+    { actions: [] },
   );
 });
 
@@ -39,7 +39,7 @@ test('buildTuiActionsFromServerMessage keeps session command responses out of re
       now: 1000,
       createMessage: messages(),
     }),
-    { actions: [], clearInterrupt: false },
+    { actions: [] },
   );
 });
 
@@ -61,7 +61,6 @@ test('buildTuiActionsFromServerMessage maps local-agent events to event.received
       createMessage: messages(),
     }),
     {
-      clearInterrupt: true,
       actions: [{
         type: 'event.received',
         event: message.event,
@@ -145,7 +144,6 @@ test('buildTuiActionsFromServerMessage omits messages for silent studio progress
       createMessage: messages(),
     }),
     {
-      clearInterrupt: false,
       actions: [{
         type: 'event.received',
         event,
@@ -155,7 +153,7 @@ test('buildTuiActionsFromServerMessage omits messages for silent studio progress
   );
 });
 
-test('buildTuiActionsFromServerMessage keeps streaming event interrupts intact', () => {
+test('buildTuiActionsFromServerMessage maps streaming events', () => {
   const result = buildTuiActionsFromServerMessage({
     type: 'event',
     requestId: 'req-1',
@@ -170,7 +168,6 @@ test('buildTuiActionsFromServerMessage keeps streaming event interrupts intact',
     createMessage: messages(),
   });
 
-  assert.equal(result.clearInterrupt, false);
   assert.equal(result.actions[0]?.type, 'event.received');
 });
 
@@ -185,7 +182,6 @@ test('buildTuiActionsFromServerMessage maps control messages to TUI actions', ()
       createMessage: messages(),
     }),
     {
-      clearInterrupt: false,
       actions: [{
         type: 'run.interrupting',
         requestId: 'req-1',
@@ -203,7 +199,6 @@ test('buildTuiActionsFromServerMessage maps control messages to TUI actions', ()
       createMessage: messages(),
     }),
     {
-      clearInterrupt: true,
       actions: [{
         type: 'run.finish',
         requestId: 'req-1',
@@ -233,7 +228,6 @@ test('buildTuiActionsFromServerMessage maps studio control messages', () => {
       createMessage: messages(),
     }),
     {
-      clearInterrupt: true,
       actions: [{
         type: 'run.finish',
         requestId: 'studio-1',
@@ -264,7 +258,6 @@ test('buildTuiActionsFromServerMessage maps studio control messages', () => {
       createMessage: messages(),
     }),
     {
-      clearInterrupt: true,
       actions: [{
         type: 'run.finish',
         requestId: 'studio-2',

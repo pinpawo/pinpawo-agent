@@ -24,12 +24,98 @@ test('isToolProtocolHistoryError recognizes LangGraph tool history protocol fail
   assert.equal(isToolProtocolHistoryError(new Error('ordinary model error')), false);
 });
 
+test('replacement request waits for the previous thread invocation to settle', async () => {
+  const sent: unknown[] = [];
+  const controls: unknown[] = [];
+  const peer = createFakePeer(sent);
+  let notifyFirstStarted!: () => void;
+  const firstStarted = new Promise<void>((resolve) => {
+    notifyFirstStarted = resolve;
+  });
+  let notifyFirstAborted!: () => void;
+  const firstAborted = new Promise<void>((resolve) => {
+    notifyFirstAborted = resolve;
+  });
+  let releaseFirst!: () => void;
+  const firstReleased = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+  let replacementStarted = false;
+  const handler = new LocalServerChatHandler({
+    graphService: {} as never,
+    tuiSessions: {
+      getChatThreadId: () => 'thread-x',
+      buildChatSetup: () => ({
+        graphKey: 'test',
+        graphConfig: {},
+        input: { messages: [] },
+      }),
+      refreshActiveSessionSummary: async () => undefined,
+    } as never,
+    inflightRequests: new InflightRequestController({
+      emitOperation: () => undefined,
+      sendControl: (_peer, message) => {
+        controls.push(message);
+      },
+    }),
+    loadContext: async () => ({} as never),
+    runChat: async (options) => {
+      if (options.request.requestId !== 'req-old') {
+        replacementStarted = true;
+        return { status: 'completed', reply: 'replacement completed' };
+      }
+      notifyFirstStarted();
+      const signal = options.setup.input.signal;
+      assert.ok(signal);
+      await new Promise<void>((resolve) => {
+        signal.addEventListener('abort', () => resolve(), { once: true });
+      });
+      options.emitEvent({
+        type: 'message.delta',
+        requestId: 'req-old',
+        role: 'assistant',
+        text: 'late stale output',
+      });
+      notifyFirstAborted();
+      await firstReleased;
+      return { status: 'interrupted', reply: '' };
+    },
+  });
+  const deps = { actorId: 'pet-1' } as never;
+
+  const oldRun = handler.handleChatRequest(peer, {
+    type: 'chat_request',
+    requestId: 'req-old',
+    message: 'old request',
+  }, deps);
+  await firstStarted;
+  const replacementRun = handler.handleChatRequest(peer, {
+    type: 'chat_request',
+    requestId: 'req-new',
+    message: 'new request',
+  }, deps);
+  await firstAborted;
+  assert.equal(replacementStarted, false);
+  assert.equal(
+    sent.some((item) => JSON.stringify(item).includes('late stale output')),
+    false,
+  );
+
+  releaseFirst();
+  await Promise.all([oldRun, replacementRun]);
+  assert.equal(replacementStarted, true);
+  assert.deepEqual(controls, [{
+    type: 'interrupted',
+    requestId: 'req-old',
+    message: 'interrupted',
+  }]);
+});
+
 test('run interrupt waits until the review resolution is checkpointed', async () => {
   const controls: unknown[] = [];
   let runCount = 0;
   const fakePeer = createFakePeer();
   const inflightRequests = new InflightRequestController<LocalServerPeer>({
-    forceInterruptMs: 1000,
     emitOperation: () => undefined,
     sendControl: (_peer, message) => {
       controls.push(message);
@@ -114,7 +200,6 @@ test('handleHumanReviewResponse rejects stale canonical reviewId before forwardi
     graphService: {} as never,
     tuiSessions,
     inflightRequests: new InflightRequestController({
-      forceInterruptMs: 1000,
       emitOperation: () => {},
       sendControl: () => {},
     }),
@@ -173,7 +258,6 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
     graphService: {} as never,
     tuiSessions,
     inflightRequests: new InflightRequestController({
-      forceInterruptMs: 1000,
       emitOperation: () => {},
       sendControl: () => {},
     }),
@@ -266,7 +350,6 @@ test('handleHumanReviewResponse keeps single-review review as batch resume shape
       readActivePendingReview: async () => null,
     } as never,
     inflightRequests: new InflightRequestController({
-      forceInterruptMs: 1000,
       emitOperation: () => {},
       sendControl: () => {},
     }),
@@ -341,7 +424,6 @@ test('handleHumanReviewResponse recovers missing route from active checkpoint re
       }),
     } as never,
     inflightRequests: new InflightRequestController({
-      forceInterruptMs: 1000,
       emitOperation: () => {},
       sendControl: () => {},
     }),
@@ -404,7 +486,6 @@ test('handleHumanReviewResponse releases a recovered review when its peer discon
       }),
     } as never,
     inflightRequests: new InflightRequestController({
-      forceInterruptMs: 1000,
       emitOperation: () => {},
       sendControl: () => {},
     }),
@@ -446,7 +527,6 @@ test('buildReviewActionSnapshot exposes routeable review action request ids', ()
       }),
     } as never,
     inflightRequests: new InflightRequestController({
-      forceInterruptMs: 1000,
       emitOperation: () => {},
       sendControl: () => {},
     }),
@@ -530,7 +610,6 @@ test('handleReviewCancel resumes pending review with canonical reject option', a
       }),
     } as never,
     inflightRequests: new InflightRequestController({
-      forceInterruptMs: 1000,
       emitOperation: () => {},
       sendControl: () => {},
     }),
@@ -637,7 +716,6 @@ test('handleReviewCancel recovers missing route from active checkpoint review', 
       }),
     } as never,
     inflightRequests: new InflightRequestController({
-      forceInterruptMs: 1000,
       emitOperation: () => {},
       sendControl: () => {},
     }),
@@ -696,7 +774,6 @@ test('handleReviewCancel restores pending review when no reject option exists', 
       getChatThreadId: () => 'thread-x',
     } as never,
     inflightRequests: new InflightRequestController({
-      forceInterruptMs: 1000,
       emitOperation: () => {},
       sendControl: () => {},
     }),
@@ -768,7 +845,6 @@ test('handleHumanReviewResponse forwards canonical selected option without resol
     graphService: {} as never,
     tuiSessions,
     inflightRequests: new InflightRequestController({
-      forceInterruptMs: 1000,
       emitOperation: () => {},
       sendControl: () => {},
     }),
@@ -848,7 +924,6 @@ test('handleHumanReviewResponse rejects canonical review response from a differe
     graphService: {} as never,
     tuiSessions,
     inflightRequests: new InflightRequestController({
-      forceInterruptMs: 1000,
       emitOperation: () => {},
       sendControl: () => {},
     }),
@@ -908,7 +983,6 @@ test('handleHumanReviewResponse forwards effect-bearing options without local au
       getChatThreadId: () => 'thread-x',
     } as never,
     inflightRequests: new InflightRequestController({
-      forceInterruptMs: 1000,
       emitOperation: () => {},
       sendControl: () => {},
     }),
@@ -1029,7 +1103,6 @@ test('handleHumanReviewResponse does not validate authorization effect context i
       getChatThreadId: () => 'thread-x',
     } as never,
     inflightRequests: new InflightRequestController({
-      forceInterruptMs: 1000,
       emitOperation: () => {},
       sendControl: () => {},
     }),

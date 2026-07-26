@@ -38,7 +38,6 @@ import type { LocalServerDeps } from './localServerTypes';
 
 const WS_RECONNECT_DELAY_MS = 10000;
 const WS_PING_INTERVAL_MS = 30000;
-const INTERRUPT_FORCE_REPLY_MS = 1800;
 
 export class LocalAgentRuntime {
   private readonly runtimeConfig: LocalAgentRuntimeConfig;
@@ -55,12 +54,10 @@ export class LocalAgentRuntime {
   private readonly studioDueRunScheduler: LocalStudioDueRunScheduler;
   private readonly graphService = new LocalAgentGraphService();
   private readonly inflightRequests = new InflightRequestController<WebSocket>({
-    forceInterruptMs: INTERRUPT_FORCE_REPLY_MS,
     // Hosted app WS relay: do NOT include raw — keeps payloads small and
     // avoids leaking raw tool input/output through the remote channel.
     emitOperation: (ws, event) => sendLocalAgentEvent(ws, event),
     sendControl: (ws, message) => sendLocalAgentMessage(ws, message),
-    logPrefix: 'local-agent',
   });
   private readonly studioReviewRouter = new LocalServerStudioReviewRouter<WebSocket>();
   private readonly studioHandler: LocalServerStudioHandler<WebSocket>;
@@ -284,11 +281,7 @@ export class LocalAgentRuntime {
     const client = this.appWsClient;
     const ws = client?.getCurrentSocket() ?? null;
     if (ws) {
-      const inflight = this.inflightRequests.get(ws);
-      if (inflight && ws.readyState === WebSocket.OPEN) {
-        this.inflightRequests.finish(ws, inflight, 'interrupted');
-      }
-      this.inflightRequests.abortAndClear(ws, inflight);
+      this.inflightRequests.abortAll(ws);
       this.studioHandler.rejectDisconnected(ws);
     }
     client?.disconnect();

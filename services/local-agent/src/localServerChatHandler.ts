@@ -39,6 +39,7 @@ import {
 } from '@pinpawo/agent-session';
 import { ReviewResolutionLifecycle } from './reviewResolutionLifecycle';
 import { sendLocalServerPeerEvent, type LocalServerPeer } from './localServerPeer';
+import { ThreadInvocationCoordinator } from './threadInvocationCoordinator';
 
 type InflightRequest = InflightOperationRun;
 
@@ -79,6 +80,7 @@ export class LocalServerChatHandler {
   private readonly loadContext: typeof loadAgentContext;
   private readonly runChat: RunChatSession;
   private readonly reviewResolutions = new ReviewResolutionLifecycle<ReviewActionRoute>();
+  private readonly threadInvocations = new ThreadInvocationCoordinator();
 
   constructor(options: {
     graphService: LocalAgentGraphService;
@@ -261,18 +263,16 @@ export class LocalServerChatHandler {
         + (source.decisionCount ? ` decisions=${source.decisionCount}` : ''),
       );
     }
-    recordAgentRunActivity('thinking', requestId);
-
-    const previousInflight = this.inflightRequests.get(peer);
-    const inflight = this.inflightRequests.start(peer, requestId, {
-      interruptPrevious: true,
-      notifyPrevious: true,
-    });
-    if (previousInflight) {
-      console.warn(`[local-server] abort previous inflight requestId=${previousInflight.requestId} before starting requestId=${requestId}`);
-    }
+    const threadId = this.tuiSessions.getChatThreadId(deps.actorId);
+    const inflight = this.inflightRequests.start(peer, requestId);
     const { controller } = inflight;
-    const isCurrent = () => this.inflightRequests.isCurrentActive(peer, inflight);
+    const invocation = this.threadInvocations.enqueue({
+      threadId,
+      requestId,
+      signal: controller.signal,
+      abort: () => controller.abort(),
+    });
+    const isCurrent = invocation.isCurrent;
     const finishInterrupted = () => {
       if (!controller.signal.aborted) {
         return;
@@ -282,13 +282,15 @@ export class LocalServerChatHandler {
     };
 
     try {
+      await invocation.waitForTurn();
+      recordAgentRunActivity('thinking', requestId);
       const ctx = await this.loadContext(deps.actorId);
       if (!isCurrent()) {
         finishInterrupted();
         return 'interrupted';
       }
 
-      const setup = this.tuiSessions.buildChatSetup(deps, ctx);
+      const setup = this.tuiSessions.buildChatSetup(deps, ctx, threadId);
       configureInflightOperationRegistry(
         inflight,
         createOperationRegistryForAgentSetup(setup),
@@ -301,13 +303,16 @@ export class LocalServerChatHandler {
         isCurrent,
         finishInterrupted,
         emitEvent: (event) => {
+          if (!isCurrent()) return;
           this.recordReviewActionRoute(event, deps);
           sendLocalServerPeerEvent(peer, event);
         },
         emitToolEvent: (event) => {
+          if (!isCurrent()) return;
           this.sendStreamToolOperationEvent(peer, inflight, event);
         },
         acceptDelegationOperations: (operations) => {
+          if (!isCurrent()) return;
           overlayInflightDelegationOperations(inflight, operations);
         },
         ...(source.type !== 'chat_request'
@@ -329,6 +334,7 @@ export class LocalServerChatHandler {
         return 'waiting_human';
       }
       if (result.status === 'interrupted') {
+        finishInterrupted();
         return 'interrupted';
       }
       this.inflightRequests.finish(peer, inflight, 'completed');
@@ -338,7 +344,7 @@ export class LocalServerChatHandler {
       console.log(`[local-server] message.completed sent requestId=${requestId} reply="${result.reply.slice(0, 100)}"`);
       return 'completed';
     } catch (err) {
-      const isStillCurrent = this.inflightRequests.isCurrent(peer, inflight);
+      const isStillCurrent = isCurrent();
       const aborted = controller.signal.aborted
         || (err instanceof Error && err.name === 'AbortError');
       if (aborted) {
@@ -377,6 +383,8 @@ export class LocalServerChatHandler {
         });
       }
       return 'failed';
+    } finally {
+      invocation.settle();
     }
   }
 

@@ -48,8 +48,6 @@ export const TUI_TEXT = {
   busyCannotSend: '当前任务仍在进行中，按 Ctrl+C 或 Esc 打断',
   studioUserMessage: (userRequest: string) => `[studio] ${userRequest}`,
   reviewDisconnectedCannotSubmit: '未连接，无法提交确认。',
-  interruptRequestedStatus: '已请求打断',
-  interruptRequestedLocalRelease: '打断请求已发送，本地先释放输入；迟到的旧响应会被忽略。',
   interruptedStatus: '已打断',
   newSessionCreated: '已创建新会话',
   connectionConnecting: '连接本地服务',

@@ -394,27 +394,16 @@ test('TuiRuntimeController projects chat and studio runs only after transport ac
   );
 });
 
-test('TuiRuntimeController releases input locally after interrupt timeout', () => {
-  mock.timers.enable({ apis: ['setTimeout'], now: 0 });
-  try {
-    const { controller, actions } = createController(busyRunState());
+test('TuiRuntimeController keeps input gated until the server confirms interruption', () => {
+  const { controller, actions, sent } = createController(busyRunState());
 
-    const submitted = controller.requestInterrupt();
-    mock.timers.tick(1800);
-
-    assert.equal(submitted, true);
-    const finish = actions.find((action) => action.type === 'run.finish');
-    assert.equal(finish?.type, 'run.finish');
-    if (finish?.type !== 'run.finish') return;
-    assert.equal(finish.requestId, 'req-1');
-    assert.equal(finish.statusNotice, '已请求打断');
-    assert.deepEqual(
-      finish.messages?.map((message) => [message.role, message.text]),
-      [['system', '打断请求已发送，本地先释放输入；迟到的旧响应会被忽略。']],
-    );
-  } finally {
-    mock.timers.reset();
-  }
+  assert.equal(controller.requestInterrupt(), true);
+  assert.deepEqual(sent, [{
+    type: 'run.interrupt',
+    requestId: 'req-1',
+  }]);
+  assert.equal(actions.some((action) => action.type === 'run.finish'), false);
+  assert.equal(controller.sendChatRequest('start too early'), false);
 });
 
 test('TuiRuntimeController resets the timeline viewport for new sessions', () => {

@@ -72,7 +72,6 @@ function getSnapshotRefreshReason(
 
 export class TuiRuntimeController {
   private disposed = false;
-  private interruptTimeout: ReturnType<typeof setTimeout> | null = null;
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
   private readonly localServerClient: TuiLocalServerClient;
@@ -106,7 +105,6 @@ export class TuiRuntimeController {
 
   dispose() {
     this.disposed = true;
-    this.clearInterruptTimeout();
     this.clearReconnectTimeout();
     this.connection.disconnect();
   }
@@ -268,8 +266,6 @@ export class TuiRuntimeController {
     if (!this.connection.isConnected() || !activeRun) {
       return false;
     }
-    this.clearInterruptTimeout();
-
     const resolutionSent = selectFocusedReviewResolutionSent(state);
     const waitingReviewAction = activeRun.state === 'waiting_review' && !resolutionSent
       ? activeRun.reviewAction
@@ -298,30 +294,10 @@ export class TuiRuntimeController {
         return false;
       }
     }
-    const interruptRequestId = activeRun.requestId;
-    this.interruptTimeout = setTimeout(() => {
-      const state = this.options.getState();
-      const currentRun = selectFocusedActiveRun(state);
-      if (!selectFocusedBusy(state) || currentRun?.requestId !== interruptRequestId) {
-        return;
-      }
-      this.options.dispatch({
-        type: 'run.finish',
-        requestId: interruptRequestId,
-        statusNotice: TUI_TEXT.interruptRequestedStatus,
-        messages: [createTuiMessage({
-          id: `message:${interruptRequestId}:interrupt-local-release`,
-          role: 'system',
-          text: TUI_TEXT.interruptRequestedLocalRelease,
-          requestId: interruptRequestId,
-        })],
-      });
-    }, 1800);
     return true;
   }
 
   startNewSession() {
-    this.clearInterruptTimeout();
     this.options.dispatch({
       type: 'input.set',
       value: '',
@@ -563,9 +539,6 @@ export class TuiRuntimeController {
       now,
       createMessage: (input) => createTuiMessage(input, now),
     });
-    if (result.clearInterrupt) {
-      this.clearInterruptTimeout();
-    }
     for (const action of result.actions) {
       this.options.dispatch(action);
     }
@@ -580,13 +553,6 @@ export class TuiRuntimeController {
 
   private isCurrentBusy() {
     return selectFocusedBusy(this.options.getState());
-  }
-
-  private clearInterruptTimeout() {
-    if (this.interruptTimeout) {
-      clearTimeout(this.interruptTimeout);
-      this.interruptTimeout = null;
-    }
   }
 
   private clearReconnectTimeout() {

@@ -120,6 +120,13 @@ Session commands from one peer execute in wire arrival order. Chat and review-ru
 admission waits for preceding session commands, while interrupts remain immediate.
 `session.resume` fails with `session.error` if that peer already owns an active run.
 
+Chat execution is serialized by graph thread, not by connection. A replacement
+request signals the preceding invocation to abort, then waits for that invocation's
+`streamEvents` run to settle before starting another run on the same thread.
+Different threads may continue concurrently on one transport. The client remains
+busy until the server reports the actual terminal state; there is no local or
+server-side timeout that pretends an invocation has stopped.
+
 These messages only transport the existing session summary and point-in-time
 `AgentSessionSnapshot`. They do not introduce another timeline, recovery model,
 or source of authority; LangGraph checkpoints remain authoritative.

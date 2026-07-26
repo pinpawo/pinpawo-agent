@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { AgentOperationEvent } from '@pinpawo/agent-session';
 import {
-  clearInflightOperationTimer,
   configureInflightOperationRegistry,
   createInflightOperationRun,
   emitInflightToolEvent,
@@ -45,13 +44,4 @@ test('inflight operation run closes active operations with terminal phase', () =
   assert.equal(emitted[0]?.phase, 'started');
   assert.equal(emitted[1]?.phase, 'interrupted');
   assert.equal(emitted[1]?.operation.id, 'tool-1');
-});
-
-test('clearInflightOperationTimer clears pending interrupt timer reference', () => {
-  const run = createInflightOperationRun('req-1');
-  run.interruptTimer = setTimeout(() => undefined, 1000);
-
-  clearInflightOperationTimer(run);
-
-  assert.equal(run.interruptTimer, undefined);
 });

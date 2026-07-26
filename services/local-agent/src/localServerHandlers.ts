@@ -23,8 +23,6 @@ import {
   type LocalServerDeps,
 } from './localServerTypes';
 
-const INTERRUPT_FORCE_REPLY_MS = 1800;
-
 export type LocalServerHandlers = {
   peerHandlers: LocalServerPeerHandlers;
   handleHttpRequest: (
@@ -76,11 +74,9 @@ export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHan
       filterWorkdir: effectiveRuntimeConfig.workdir,
     });
   const inflightRequests = new InflightRequestController<LocalServerPeer>({
-    forceInterruptMs: INTERRUPT_FORCE_REPLY_MS,
     // Local TUI / companion / spawned stdio peer: trusted local transports.
     emitOperation: (peer, event) => sendLocalServerPeerEvent(peer, event),
     sendControl: (peer, message) => peer.send(message),
-    logPrefix: 'local-server',
   });
   const chatHandler = new LocalServerChatHandler({
     graphService: chatGraphService,
@@ -291,7 +287,7 @@ export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHan
     ),
     onClose: (client) => {
       sessionCommands.clear(client);
-      inflightRequests.abortAndClear(client);
+      inflightRequests.abortAll(client);
       studioHandler.rejectDisconnected(client);
     },
   };

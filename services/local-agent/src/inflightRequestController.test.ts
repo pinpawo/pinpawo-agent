@@ -1,32 +1,25 @@
 import assert from 'node:assert/strict';
-import { setTimeout as sleep } from 'node:timers/promises';
 import test from 'node:test';
 import { emitInflightToolEvent } from './inflightOperationRun';
 import { InflightRequestController } from './inflightRequestController';
 import type { LocalAgentControlServerMessage } from './localAgentProtocol';
 import type { AgentOperationEvent } from '@pinpawo/agent-session';
 
-function createTestController(options: { forceInterruptMs?: number } = {}) {
+function createTestController() {
   const controls: LocalAgentControlServerMessage[] = [];
   const operations: AgentOperationEvent[] = [];
-  const logs: string[] = [];
   const controller = new InflightRequestController<string>({
-    forceInterruptMs: options.forceInterruptMs ?? 10,
     emitOperation: (_key, event) => {
       operations.push(event);
     },
     sendControl: (_key, message) => {
       controls.push(message);
     },
-    log: (message) => {
-      logs.push(message);
-    },
-    logPrefix: 'test-agent',
   });
-  return { controller, controls, operations, logs };
+  return { controller, controls, operations };
 }
 
-test('InflightRequestController replaces previous request without notifying when requested', () => {
+test('InflightRequestController tracks concurrent requests for the same transport', () => {
   const { controller, controls, operations } = createTestController();
   const observedOperations: AgentOperationEvent[] = [];
   const first = controller.start('client', 'req-1', {
@@ -38,67 +31,69 @@ test('InflightRequestController replaces previous request without notifying when
     input: { path: 'README.md' },
   }, (event) => operations.push(event));
 
-  const second = controller.start('client', 'req-2', {
-    interruptPrevious: true,
-    notifyPrevious: false,
-  });
+  const second = controller.start('client', 'req-2');
 
-  assert.equal(first.controller.signal.aborted, true);
+  assert.equal(first.controller.signal.aborted, false);
   assert.equal(controller.get('client'), second);
   assert.deepEqual(controls, []);
-  assert.deepEqual(operations.map((event) => event.phase), ['started', 'interrupted']);
-  assert.deepEqual(observedOperations.map((event) => event.phase), ['interrupted']);
-});
+  assert.deepEqual(operations.map((event) => event.phase), ['started']);
+  assert.equal(observedOperations.length, 0);
 
-test('InflightRequestController replaces previous request with interrupted control message', () => {
-  const { controller, controls, operations } = createTestController();
-  const first = controller.start('client', 'req-1');
-  emitInflightToolEvent(first, {
-    event: 'on_tool_start',
-    name: 'run_shell',
-    input: { command: 'npm test' },
-  }, (event) => operations.push(event));
-
-  controller.start('client', 'req-2', {
-    interruptPrevious: true,
-    notifyPrevious: true,
-  });
-
+  controller.sendInterrupted('client', first);
   assert.deepEqual(controls, [{
     type: 'interrupted',
     requestId: 'req-1',
     message: 'interrupted',
   }]);
   assert.deepEqual(operations.map((event) => event.phase), ['started', 'interrupted']);
+  assert.deepEqual(observedOperations.map((event) => event.phase), ['interrupted']);
+  controller.clear('client', first);
+  assert.equal(controller.get('client'), second);
 });
 
-test('InflightRequestController forces interrupted cleanup after interrupt timeout', async () => {
-  const { controller, controls, logs } = createTestController({ forceInterruptMs: 1 });
+test('InflightRequestController does not report terminal interruption before the owner settles', () => {
+  const { controller, controls } = createTestController();
   const run = controller.start('client', 'req-1');
 
   const interrupted = controller.interrupt('client', { requestId: 'req-1' });
-  await sleep(5);
 
   assert.equal(interrupted, run);
   assert.equal(run.controller.signal.aborted, true);
+  assert.equal(controller.get('client'), run);
+  assert.deepEqual(controls, [{
+    type: 'interrupting',
+    requestId: 'req-1',
+    message: 'interrupting',
+  }]);
+
+  controller.sendInterrupted('client', run);
+  controller.clear('client', run);
   assert.equal(controller.get('client'), null);
-  assert.deepEqual(controls, [
-    { type: 'interrupting', requestId: 'req-1', message: 'interrupting' },
-    { type: 'interrupted', requestId: 'req-1', message: 'interrupted' },
-  ]);
-  assert.deepEqual(logs, ['[test-agent] force interrupted requestId=req-1']);
+  assert.equal(controls.at(-1)?.type, 'interrupted');
 });
 
-test('InflightRequestController abortAndClear drops active request without terminal notification', () => {
+test('InflightRequestController abortAll signals every request without clearing ownership', () => {
   const { controller, controls, operations } = createTestController();
-  const run = controller.start('client', 'req-1');
+  const first = controller.start('client', 'req-1');
+  const second = controller.start('client', 'req-2');
 
-  controller.abortAndClear('client', run);
+  controller.abortAll('client');
 
-  assert.equal(run.controller.signal.aborted, true);
-  assert.equal(controller.get('client'), null);
+  assert.equal(first.controller.signal.aborted, true);
+  assert.equal(second.controller.signal.aborted, true);
+  assert.equal(controller.get('client'), second);
   assert.deepEqual(controls, []);
   assert.deepEqual(operations, []);
+});
+
+test('InflightRequestController routes interrupts by requestId', () => {
+  const { controller } = createTestController();
+  const first = controller.start('client', 'req-1');
+  const second = controller.start('client', 'req-2');
+
+  assert.equal(controller.interrupt('client', { requestId: 'req-1' }), first);
+  assert.equal(first.controller.signal.aborted, true);
+  assert.equal(second.controller.signal.aborted, false);
 });
 
 test('InflightRequestController reports active requests across keys', () => {

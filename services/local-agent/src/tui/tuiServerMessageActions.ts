@@ -10,7 +10,6 @@ import type { TuiAction } from './state/tuiState';
 
 export type TuiServerMessageActionResult = {
   actions: TuiAction[];
-  clearInterrupt: boolean;
 };
 
 export type TuiServerMessageActionOptions = {
@@ -25,7 +24,7 @@ export function buildTuiActionsFromServerMessage(
   options: TuiServerMessageActionOptions,
 ): TuiServerMessageActionResult {
   if (message.type === 'pong') {
-    return { actions: [], clearInterrupt: false };
+    return { actions: [] };
   }
 
   if (
@@ -36,13 +35,12 @@ export function buildTuiActionsFromServerMessage(
   ) {
     // Request/response clients own correlation; session results are not live
     // run events and must never enter the timeline reducer.
-    return { actions: [], clearInterrupt: false };
+    return { actions: [] };
   }
 
   if (message.type === 'event') {
     const normalizedMessage = runtimeEventMessage(message.event, options.createMessage);
     return {
-      clearInterrupt: shouldClearInterruptForEvent(message.event.type),
       actions: [{
         type: 'event.received',
         event: message.event,
@@ -54,7 +52,6 @@ export function buildTuiActionsFromServerMessage(
 
   if (message.type === 'interrupting') {
     return {
-      clearInterrupt: false,
       actions: [{
         type: 'run.interrupting',
         requestId: message.requestId,
@@ -64,7 +61,6 @@ export function buildTuiActionsFromServerMessage(
 
   if (message.type === 'interrupted') {
     return {
-      clearInterrupt: true,
       actions: [{
         type: 'run.finish',
         requestId: message.requestId,
@@ -93,7 +89,6 @@ export function buildTuiActionsFromServerMessage(
       }));
     }
     return {
-      clearInterrupt: true,
       actions: [{
         type: 'run.finish',
         requestId: message.requestId,
@@ -103,7 +98,6 @@ export function buildTuiActionsFromServerMessage(
   }
 
   return {
-    clearInterrupt: true,
     actions: [{
       type: 'run.finish',
       requestId: message.requestId,
@@ -151,10 +145,4 @@ function runtimeEventMessage(
     default:
       return undefined;
   }
-}
-
-function shouldClearInterruptForEvent(type: string) {
-  return type === 'human_review.requested'
-    || type === 'message.completed'
-    || type === 'error';
 }

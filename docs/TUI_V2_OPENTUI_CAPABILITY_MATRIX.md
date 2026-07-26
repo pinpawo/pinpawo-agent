@@ -62,6 +62,22 @@ from an automated PTY run alone.
 | 250-row append burst | pending | pending | pending |
 | 400-update delta burst | pending | pending | pending |
 
+## Manual observations
+
+### Codex integrated terminal
+
+| Probe | Observation | Result |
+| --- | --- | --- |
+| alternate-screen `ScrollBoxRenderable` | scrolling became unstable and the internal scrollbar disappeared after burst updates | failed |
+| split-footer with OpenTUI mouse tracking | wheel input was consumed by the footer instead of reaching terminal scrollback | failed |
+| split-footer with terminal-owned mouse input | touchpad scrolling and native scrollback worked after OpenTUI mouse tracking was disabled | passed |
+| per-token live-footer repaint | continuous footer output prevented browsing terminal history during the delta burst | failed |
+| `ScrollbackSurface` stable-row commits | history remained scrollable during 400 off-screen delta updates | passed |
+
+These are preliminary results from one integrated terminal, not a cross-terminal
+compatibility claim. The current leading direction is split-footer with
+terminal-owned wheel/selection input and stable-row scrollback commits.
+
 ## Procedure
 
 1. Run `npm run dev -w @pinpawo/tui`.

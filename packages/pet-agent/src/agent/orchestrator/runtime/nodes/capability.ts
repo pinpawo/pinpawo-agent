@@ -39,6 +39,16 @@ import {
   withArtifactDiscoveryContext,
 } from '../../artifacts/discovery';
 
+function buildCapabilityActorContext(actor: ReturnType<typeof resolveActor>): string {
+  return [
+    '[角色]',
+    `角色：「${actor.name}」`,
+    actor.species ? `物种：${actor.species}` : null,
+    actor.stage ? `阶段：${actor.stage}` : null,
+    actor.personality ? `性格：${actor.personality}` : null,
+  ].filter((line): line is string => Boolean(line)).join('\n');
+}
+
 export function createCapabilityNode(params: {
   config: OrchestratorConfig;
   subagentContextWindowTokens: number | undefined;
@@ -123,6 +133,11 @@ export function createCapabilityNode(params: {
           id: 'delegation-context',
           owner: 'framework',
           content: executionInstruction,
+        },
+        {
+          id: 'actor-context',
+          owner: 'framework',
+          content: buildCapabilityActorContext(actor),
         },
         ...usedResolvedToolkitExecution.toolkits
           .filter((toolkit) => Boolean(toolkit.instructions?.trim()))

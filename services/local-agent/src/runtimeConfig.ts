@@ -23,6 +23,13 @@ export type LocalAgentRuntimeConfig = Readonly<{
   capabilityArtifactRoot: string;
 }>;
 
+/**
+ * The Capability V2 graph changed serialized lane semantics. Local state uses
+ * a new durable namespace instead of interpreting pre-V2 checkpoints through
+ * the new graph. Capability artifacts keep their existing thread-scoped root.
+ */
+export const LOCAL_AGENT_CHECKPOINT_CONTRACT = 'capability-v2';
+
 function freezeRuntimeConfig(input: LocalAgentRuntimeConfig): LocalAgentRuntimeConfig {
   return Object.freeze({
     ...input,
@@ -58,9 +65,18 @@ export function buildLocalAgentRuntimeConfig(workdir = resolveDefaultWorkdir()):
     studioDueRunsPath: resolve(stateRoot, 'studio-due-runs.json'),
     petsDir: resolve(stateRoot, 'pets'),
     studioWikiBaseDir: resolve(stateRoot, 'studio-wiki'),
-    checkpointPath: resolve(stateRoot, 'checkpoints.json'),
-    tuiCheckpointPath: resolve(stateRoot, 'checkpoints-tui.json'),
-    tuiSessionPath: resolve(stateRoot, 'tui-sessions.json'),
+    checkpointPath: resolve(
+      stateRoot,
+      `checkpoints-${LOCAL_AGENT_CHECKPOINT_CONTRACT}.json`,
+    ),
+    tuiCheckpointPath: resolve(
+      stateRoot,
+      `checkpoints-tui-${LOCAL_AGENT_CHECKPOINT_CONTRACT}.json`,
+    ),
+    tuiSessionPath: resolve(
+      stateRoot,
+      `tui-sessions-${LOCAL_AGENT_CHECKPOINT_CONTRACT}.json`,
+    ),
     capabilityArtifactRoot: resolve(stateRoot, 'capability-artifacts'),
   });
 }

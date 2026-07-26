@@ -73,10 +73,11 @@ import {
   readLatestHumanRequest,
   setPinpetMeta,
 } from '../../messageLanes';
-import { readMessageText } from '../../utils';
+import { clipForPrompt, readMessageText } from '../../utils';
 import { searchCapabilities } from '../../capabilitySearch';
 import { invokeStructuredOutput } from '../../../../utils/structuredOutput';
 import {
+  buildCompiledCapabilitySearchDocuments,
   mainMessagesWithoutCompaction,
 } from './capabilityCandidates';
 import {
@@ -215,7 +216,7 @@ async function buildCapabilityDecisionContext(params: {
   } = getInvokeOptions(runnableConfig);
   const actor = resolveActor(config, runnableConfig);
   const registry = getInvokeRegistry(runnableConfig);
-  const capabilityList = registry.capabilities.map(({ capability }) => capability);
+  const capabilityList = buildCompiledCapabilitySearchDocuments(registry.capabilities);
   const query = [state.runPendingTask?.task, state.runPendingTask?.contextSummary]
     .map((item) => item?.trim())
     .filter((item): item is string => Boolean(item))
@@ -281,9 +282,9 @@ function buildCapabilityPlanningContext(params: {
     recentMessages: mainMessagesWithoutCompaction(state.messages),
     contextSummaries: readContextCompactionSummaries(state.messages),
   });
-  const capabilityList = getInvokeRegistry(runnableConfig)
-    .capabilities
-    .map(({ capability }) => capability);
+  const capabilityList = buildCompiledCapabilitySearchDocuments(
+    getInvokeRegistry(runnableConfig).capabilities,
+  );
   const latestCompletedDelegation = [...state.runDelegationSummaries]
     .reverse()
     .find((item) => item.status === 'completed');
@@ -314,8 +315,11 @@ function buildCapabilityPlanningContext(params: {
       remainingPlan: state.runCapabilityPlan,
       latestHandoff: latestHandoff ? readMessageText(latestHandoff) : null,
       capabilityRegistryContext: capabilityList.length > 0
-        ? capabilityList.map((item) => `${item.name}: ${item.description}`).join('\n')
-        : 'No custom capabilities registered; general capability remains available.',
+        ? clipForPrompt(
+            capabilityList.map((item) => `${item.name}: ${item.description}`).join('\n'),
+            6_000,
+          )
+        : 'No capabilities are currently available.',
     })),
     systemPrompt: buildCapabilityPlanningDecisionSystemPrompt({
       actor,

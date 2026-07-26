@@ -1,4 +1,5 @@
 import { defineConfig } from 'tsup';
+import { copyFile, mkdir } from 'node:fs/promises';
 
 // Packages with CJS internals that require Node.js built-ins at runtime —
 // keep them external so node_modules (rsync'd into the .app bundle) resolves them.
@@ -28,6 +29,14 @@ export default defineConfig({
   outDir: 'dist',
   clean: true,
   splitting: false,
+  onSuccess: async () => {
+    const targetDir = 'dist/capabilities/general';
+    await mkdir(targetDir, { recursive: true });
+    await copyFile(
+      'src/capabilities/general/CAPABILITY.md',
+      `${targetDir}/CAPABILITY.md`,
+    );
+  },
   // Manually inject createRequire so the bundled CJS __require shim can
   // resolve Node.js built-ins (events, stream, punycode, …) at runtime.
   banner: {

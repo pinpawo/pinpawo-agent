@@ -82,9 +82,9 @@ effective workdir 下新增工作区级目录：
 ├── studio-curator.md
 ├── studio-wiki/
 ├── capability-artifacts/
-├── checkpoints/
-├── checkpoints-tui/
-└── tui-sessions.json
+├── checkpoints-capability-v2/
+├── checkpoints-tui-capability-v2/
+└── tui-sessions-capability-v2.json
 ```
 
 `checkpointPath` / `tuiCheckpointPath` 仍使用 `.json` anchor 命名；`FileSaver`
@@ -132,9 +132,9 @@ type LocalAgentRuntimeConfig = {
   studioConfigPath: string;   // <stateRoot>/studio.json
   petsDir: string;            // <stateRoot>/pets
   studioWikiBaseDir: string;  // <stateRoot>/studio-wiki
-  checkpointPath: string;     // <stateRoot>/checkpoints.json
-  tuiCheckpointPath: string;  // <stateRoot>/checkpoints-tui.json
-  tuiSessionPath: string;     // <stateRoot>/tui-sessions.json
+  checkpointPath: string;     // <stateRoot>/checkpoints-capability-v2.json
+  tuiCheckpointPath: string;  // <stateRoot>/checkpoints-tui-capability-v2.json
+  tuiSessionPath: string;     // <stateRoot>/tui-sessions-capability-v2.json
   capabilityArtifactRoot: string; // <stateRoot>/capability-artifacts
 };
 ```
@@ -382,7 +382,9 @@ App/API 侧也应传递同样的 workdir 概念，但第一阶段只做 local-ag
 - `buildRuntimeEnvironmentSummary` 接收 workdir 参数。
 - local file/search/git/shell/browser path resolver 改成 toolkit factory 或 runtime-aware resolver。
 - capability artifact root 改为 `<workdir>/.pinpawo/capability-artifacts`。
-- chat checkpoint 从 `~/.pinpawo/checkpoints.json` 迁到 `<workdir>/.pinpawo/checkpoints.json`。
+- chat checkpoint 位于
+  `<workdir>/.pinpawo/checkpoints-capability-v2.json`；Capability V2 不读取旧
+  `general` lane checkpoint。
 
 验收：
 

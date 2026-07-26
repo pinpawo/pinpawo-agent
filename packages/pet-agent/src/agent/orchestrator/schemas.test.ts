@@ -7,7 +7,7 @@ import {
   buildCapabilityPlanningDecisionSchema,
   buildCapabilityDecisionOutputInstruction,
   buildCapabilityDecisionSchema,
-  buildCustomCapabilitySelection,
+  buildCapabilitySelection,
   buildTaskDecisionOutputInstruction,
   buildTaskDecisionSchema,
   parseCapabilitySelection,
@@ -225,8 +225,8 @@ test('parseCapabilitySelection distinguishes executor selections', () => {
   });
 });
 
-test('buildCustomCapabilitySelection composes the prefix correctly', () => {
-  assert.equal(buildCustomCapabilitySelection('browser'), 'capability.browser');
+test('buildCapabilitySelection composes the prefix correctly', () => {
+  assert.equal(buildCapabilitySelection('browser'), 'capability.browser');
 });
 
 test('decision output instructions add schema shape only for jsonMode', () => {

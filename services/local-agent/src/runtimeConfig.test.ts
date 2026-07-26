@@ -29,9 +29,9 @@ test('buildLocalAgentRuntimeConfig scopes runtime state under workdir .pinpawo',
     studioDueRunsPath: '/tmp/pinpawo-workdir/.pinpawo/studio-due-runs.json',
     petsDir: '/tmp/pinpawo-workdir/.pinpawo/pets',
     studioWikiBaseDir: '/tmp/pinpawo-workdir/.pinpawo/studio-wiki',
-    checkpointPath: '/tmp/pinpawo-workdir/.pinpawo/checkpoints.json',
-    tuiCheckpointPath: '/tmp/pinpawo-workdir/.pinpawo/checkpoints-tui.json',
-    tuiSessionPath: '/tmp/pinpawo-workdir/.pinpawo/tui-sessions.json',
+    checkpointPath: '/tmp/pinpawo-workdir/.pinpawo/checkpoints-capability-v2.json',
+    tuiCheckpointPath: '/tmp/pinpawo-workdir/.pinpawo/checkpoints-tui-capability-v2.json',
+    tuiSessionPath: '/tmp/pinpawo-workdir/.pinpawo/tui-sessions-capability-v2.json',
     capabilityArtifactRoot: '/tmp/pinpawo-workdir/.pinpawo/capability-artifacts',
   });
   assert.equal(Object.isFrozen(runtimeConfig), true);

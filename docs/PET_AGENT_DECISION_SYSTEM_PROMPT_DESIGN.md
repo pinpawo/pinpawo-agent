@@ -175,7 +175,9 @@ next task 之后尚未开始的 future tail，不重复 current task。
 - `completed_tasks`：本 run 已完成的任务目标和结果摘要，只作为已发生事实。
 - `remaining_plan`：只包含尚未开始的 tail，不含刚完成或当前执行 task。
 - `latest_handoff`：最新 completed delegation 的完整 handoff，不使用 ledger preview 替代。
-- `capability_registry`：当前 custom capability 的 name/description，仅用于理解可用能力类型。
+- `capability_registry`：当前已编译 Capability 的 name、description 和实际
+  Toolkit scope，仅用于理解可用能力类型；空 registry 明确陈述没有可用
+  Capability，不隐式假设 General 存在。
 
 ### 5.4 Schema
 

@@ -76,12 +76,12 @@ test('buildLocalChatAgentInput passes a single toolkit list', () => {
   );
   assert.deepEqual(
     setup.input.capabilities?.find(({ name }) => name === 'general')?.uses,
-    ['pet_profile'],
+    ['pet_profile', 'bash', 'git', 'artifact_discovery'],
   );
   assert.equal('capabilityToolkits' in setup.input, false);
 });
 
-test('buildLocalChatAgentInput does not grant a registered Toolkit to the general Capability', () => {
+test('buildLocalChatAgentInput keeps the General Capability permission boundary static', () => {
   const setup = buildLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
@@ -90,7 +90,13 @@ test('buildLocalChatAgentInput does not grant a registered Toolkit to the genera
 
   assert.deepEqual(
     setup.input.capabilities?.find(({ name }) => name === 'general')?.uses,
-    ['pet_profile'],
+    ['pet_profile', 'bash', 'git', 'artifact_discovery'],
+  );
+  assert.equal(
+    setup.input.capabilities
+      ?.find(({ name }) => name === 'general')
+      ?.uses.includes('general-toolkit'),
+    false,
   );
 });
 
@@ -114,6 +120,24 @@ test('buildLocalChatAgentInput dedupes built-in capabilities by name', () => {
   assert.equal(
     capabilities.filter((item) => item.name === 'explore').length,
     1,
+  );
+});
+
+test('buildLocalChatAgentInput rejects a host Capability using the reserved general name', () => {
+  assert.throws(
+    () => buildLocalChatAgentInput({
+      context: createContext(),
+      userMessage: 'hello',
+      extraCapabilities: [{
+        name: 'general',
+        description: 'Attempt to replace the host General Capability.',
+        uses: [],
+        instructions: defineInstructionDocument({
+          content: '# Replacement General',
+        }),
+      }],
+    }),
+    /name "general" is reserved by the local-agent host/,
   );
 });
 
@@ -299,7 +323,14 @@ test('buildLocalChatAgentInput registers artifact discovery for an empty thread'
   );
   assert.deepEqual(
     setup.input.capabilities?.find(({ name }) => name === 'general')?.uses,
-    ['pet_profile', 'bash', 'git'],
+    ['pet_profile', 'bash', 'git', 'artifact_discovery'],
+  );
+  assert.deepEqual(
+    setup.registry.capabilities
+      .find(({ capability }) => capability.name === 'general')
+      ?.toolNames
+      .filter((name) => name === 'artifact_list' || name === 'artifact_read'),
+    ['artifact_list', 'artifact_read'],
   );
   assert.ok(
     setup.input.capabilities

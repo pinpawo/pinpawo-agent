@@ -1,90 +1,155 @@
-# 能力与工具契约 API
+# Capability 与 Toolkit 契约 API
 
-## 1. 能力定义
+> 状态：Capability / Toolkit V2
+> 更新：2026-07-27
+
+## 1. Capability
+
+Capability 是 orchestrator 唯一可以委派的业务执行单元：
 
 ```ts
 type AgentCapability = {
-  name: string;
-  description: string;
-  availability?: {
-    check: () => CapabilityAvailability | Promise<CapabilityAvailability>;
-    cache?: 'startup' | 'none';
+  readonly name: string;
+  readonly description: string;
+  readonly uses: readonly string[];
+  readonly instructions: InstructionDocument;
+  readonly lifecycle?: {
+    finalize?: CapabilityFinalizeHook;
   };
-  createRuntime: (ctx: CapabilityContext) => CapabilityRuntime | Promise<CapabilityRuntime>;
-  resultSchema?: ZodType;
 };
 ```
 
-## 2. Capability 上下文与运行时
+- `uses` 是 required Toolkit 依赖，也是完整工具权限边界。
+- `instructions` 是一个不可变 Markdown 文档，不是字符串数组。
+- `lifecycle.finalize` 只负责确定性整理已有执行结果；模型调用和外部操作必须来自 Toolkit。
+- 缺少任一 required Toolkit 时，该 Capability 在本次 registry generation 中不可用。
+
+代码定义示例：
 
 ```ts
-type CapabilityContext = {
-  models: AgentModels;
-  actor: AgentActor;
-  messages: BaseMessage[];
-  execution?: AgentExecution;
-  availableToolkits?: ReadonlyArray<{ name: string; description: string }>;
-  /** Host-provided artifact persistence port, optional for deterministic writes. */
-  artifactStore?: CapabilityArtifactStore;
-};
-
-type CapabilityRuntime = {
-  uses?: string[];
-  toolsets?: AgentToolset[];
-  instructions?: string[] | ((ctx: CapabilityInstructionContext) => string[] | Promise<string[]>);
-  middleware?: {
-    beforeRun?: (input: SubagentRunInput) => SubagentRunInput | Promise<SubagentRunInput>;
-    afterRun?: (
-      result: SubagentResult,
-      ctx: CapabilityMiddlewareContext,
-    ) => SubagentResult | Promise<SubagentResult>;
-  };
-};
+const inspect = defineCapability({
+  name: 'inspect',
+  description: '检查代码库并整理证据。',
+  uses: ['bash', 'git'],
+  instructions: defineInstructionDocument({
+    content: '# Inspect\n\n只读取并总结与当前任务相关的内容。',
+  }),
+});
 ```
 
-### 规则
+目录定义示例：
 
-1. `uses` 声明能力依赖 toolkit 名称，运行时自动注入对应工具集。
-2. `toolsets` 为能力私有工具，建议通过 `defineToolset` 静态定义，避免重复工具名。
-3. `middleware.afterRun` 常用于在代码侧持久化 capability 产物（例如把结构化结果写入 artifact store），并把 ref 回传给 orchestrator。
-4. `afterRun` 新增用户可交付消息时，必须同时返回该消息的 `announceMessageId`；lane tagging 不从正文或消息位置推断身份。
-5. `SubagentRunInput` 是一次 subagent run 的完整输入；`SubagentInputState` 才是进入 subagent graph 的 state 形状。
+```text
+inspect/
+├── CAPABILITY.md
+└── index.js        # 可选；只能导出 lifecycle.finalize
+```
 
-`artifactStore` 为可选依赖，能力需要容错处理未注入的场景（例如测试）。
+```md
+---
+name: inspect
+description: 检查代码库并整理证据。
+uses:
+  - bash
+  - git
+version: 1
+---
 
-## 3. Toolkit 定义
+# Inspect
+
+只读取并总结与当前任务相关的内容。
+```
+
+## 2. Toolkit
+
+Toolkit 是一组编码实现的工具和工具级运行策略，不是委派目标：
 
 ```ts
 type AgentToolkit = {
-  name: string;
-  description: string;
-  availability?: CapabilityAvailabilityConfig;
-  tools?: ToolkitResource<StructuredTool[]>;
-  instructions?: ToolkitResource<string[]>;
-  operations?: ToolOperationMetadataMap;
-  policy?: ToolkitPolicy;
+  readonly name: string;
+  readonly description: string;
+  readonly tools: readonly ToolDefinition[];
+  readonly instructions?: string;
+  readonly availability?: ToolkitAvailabilityCheck;
+  readonly reviewGuidance?: ToolkitReviewGuidance;
+};
+
+type ToolDefinition = {
+  readonly tool: NamedStructuredTool;
+  readonly operation?: ToolOperationMetadata;
+  readonly review?: ToolReviewPolicy;
 };
 ```
 
-建议优先使用：
+示例：
 
-1. `defineToolkit(...)`：定义静态工具 + metadata + policy
-2. `defineToolset(...)`：定义只含 tools 的结构化工具集合
+```ts
+const bash = defineToolkit({
+  name: 'bash',
+  description: '本地文件、搜索和受控 shell 工具。',
+  tools: [{
+    tool: runShellTool,
+    operation: { title: '执行命令' },
+    review: shellReviewPolicy,
+  }],
+  instructions: '优先使用语义具体的文件工具；shell 只作为兜底。',
+});
+```
 
-### Toolkit 与审批
+`availability` 每次组装 registry generation 时重新检查，不做跨 generation 缓存。Toolkit 被过滤后，依赖它的 Capability 会通过 registry diagnostics 报告不可用。
 
-1. `policy.toolReview` 用于工具风险控制。
-2. `ToolAuthorizationMatcher` 可在策略中返回鉴权规则。
-3. `toolAuthorizations` 会通过 `SubagentContext` 流向工具执行层（见 review 相关类型）。
+## 3. 编译与执行
 
-## 4. 常见组合方式
+Host 先组装完整定义，再编译 registry：
 
-1. **Pet runtime 构建时注入**：通过 `PetAgentRuntimeConfig.toolkits`
-2. **单次调用扩展**：通过 `PetAgentRuntimeInvokeInput.toolkits`
-3. **单次能力注入（planner）**：通过 `PetAgentRuntimeInvokeInput.extraCapabilities`
+```ts
+const registry = compileAgentRegistry({
+  capabilities,
+  toolkits,
+});
+```
 
-## 5. 相关导出
+编译过程：
 
-1. `CapabilityArtifactStore`、`CapabilityArtifactRef`、`CapabilityArtifactWriteInput`：见 `packages/pet-agent/src/types/artifact.ts`
-2. `CapabilityContext`、`CapabilityRuntime` 与 `CapabilityMiddleware`：见 `packages/pet-agent/src/types/capability.ts`
-3. toolkit 与 policy：见 `packages/pet-agent/src/types/toolkit.ts`
+```text
+capability.uses
+  -> resolve required Toolkits
+  -> reject unknown/duplicate Toolkit dependencies and duplicate tool names
+  -> snapshot Capability + Toolkit bindings
+  -> expose one CompiledCapability
+```
+
+执行过程统一为：
+
+```text
+capability:<name> lane
+  -> framework delegation + actor context
+  -> declared Toolkit instructions
+  -> Capability Markdown instructions
+  -> tools from declared Toolkits only
+```
+
+General 也使用这条路径。它只是 planner 的默认候选，不拥有独立 executor、lane、tools 或依赖契约。
+
+## 4. Artifact
+
+`CapabilityArtifactStore` 是 host 提供的持久化 port：
+
+- Capability 可以在 `lifecycle.finalize` 中写入结果 artifact。
+- `artifact_discovery` Toolkit 按当前 thread 提供只读 `artifact_list` / `artifact_read`。
+- 空 thread 返回空结果，不代表 Toolkit 不可用。
+- 需要读取历史 artifact 的 Capability 必须在自己的 `uses` 中静态声明 `artifact_discovery`。
+
+## 5. 不存在的兼容概念
+
+V2 不包含：
+
+- `CapabilityRuntime`
+- `CapabilityContext.availableToolkits`
+- inline `tools` / `toolsets`
+- `defineToolset`
+- `createRuntime`
+- `generalUses`
+- General 专属 executor 或授权开关
+
+旧 manifest/runtime 插件格式没有兼容层；目录 Capability 使用 `CAPABILITY.md`。

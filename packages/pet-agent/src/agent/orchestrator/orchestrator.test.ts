@@ -743,6 +743,51 @@ test('missing executable capability routes through the answer node', async () =>
   assert.equal(state.runPendingTask, null);
 });
 
+test('capability planner reports an empty compiled registry without inventing General', async () => {
+  let structuredCallCount = 0;
+  let plannerInput = '';
+  const model = {
+    invoke: async () => new AIMessage('当前没有可用 Capability。'),
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async (messages: unknown[]) => {
+        structuredCallCount += 1;
+        if (structuredCallCount === 1) {
+          return { action: 'needs_plan' };
+        }
+        plannerInput = String(
+          (messages.at(-1) as { content?: unknown })?.content ?? '',
+        );
+        return { result: 'answer', remaining_plan: [], next_task: null };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const graph = createOrchestratorGraph({
+    models: {
+      act: model,
+      observe: model,
+      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
+    },
+    actor: testActor,
+  });
+
+  await graph.invoke(buildOrchestratorRunInput([
+    new HumanMessage('完成一个需要执行能力的任务'),
+  ]), {
+    configurable: {
+      thread_id: 'empty-capability-registry-planner-facts',
+      actor: testActor,
+      capabilities: [],
+      toolkits: [],
+    },
+  });
+
+  assert.match(plannerInput, /No capabilities are currently available\./);
+  assert.doesNotMatch(plannerInput, /general capability remains available/i);
+});
+
 test('capability decision can reject a retrieved candidate when no executor covers the task', async () => {
   let structuredCallCount = 0;
   let capabilityDecisionInput = '';
@@ -835,7 +880,53 @@ test('instructions-only general Capability remains an executable planner candida
 
   assert.equal(result.runNextDelegation?.lane, 'capability:general');
   assert.match(decisionInput, /capability\.general/);
+  assert.match(decisionInput, /Toolkit scope：无（仅 instructions）/);
   assert.doesNotMatch(decisionInput, /\ngeneral（|general tools/);
+});
+
+test('capability decision receives the compiled Toolkit scope as runtime fact', async () => {
+  let decisionInput = '';
+  const model = {
+    withStructuredOutput: () => ({
+      invoke: async (messages: unknown[]) => {
+        decisionInput = String(
+          (messages.at(-1) as { content?: unknown })?.content ?? '',
+        );
+        return routeCapabilityDecision('general');
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const runCapabilityDecision = createCapabilityDecisionRunner({
+    models: { act: model, observe: model },
+    actor: testActor,
+  });
+  const input = buildOrchestratorRunInput([new HumanMessage('read the prior report')]);
+
+  await runCapabilityDecision({
+    ...input,
+    runPendingTask: {
+      task: 'Read the prior report from this thread.',
+      contextSummary: null,
+    },
+  } as OrchestratorStateType, {
+    configurable: {
+      registry: compileAgentRegistry({
+        capabilities: [
+          capability('general', 'Handle general tasks.', ['artifact_discovery']),
+        ],
+        toolkits: [{
+          name: 'artifact_discovery',
+          description: 'Read Capability artifacts from the current thread.',
+          tools: toolDefinitions(mockTool('artifact_read')),
+        }],
+      }),
+    },
+  });
+
+  assert.match(
+    decisionInput,
+    /artifact_discovery（Read Capability artifacts from the current thread\.）/,
+  );
 });
 
 test('capability decision rejects missing pending task as an invariant violation', async () => {
@@ -1841,6 +1932,10 @@ test('general Capability composes its declared Toolkits', async () => {
   assert.match(
     recorder.subagentInputs[0].map((message) => String(message.content)).join('\n'),
     /<artifact_discovery_context[\s\S]*current_thread/,
+  );
+  assert.match(
+    JSON.stringify(recorder.subagentInputs[0].map((message) => message.content)),
+    /角色：「小白」[\s\S]*物种：cat[\s\S]*性格：友好/,
   );
 });
 

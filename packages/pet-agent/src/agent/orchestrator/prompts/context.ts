@@ -61,7 +61,7 @@ export function buildCapabilityDecisionAvailableExecutorsContext(params: {
   if (params.capabilityCandidates.length > 0) {
     for (const candidate of params.capabilityCandidates) {
       lines.push(
-        `- capability.${candidate.name}：${clipForPrompt(candidate.description, 180)}`,
+        `- capability.${candidate.name}：${clipForPrompt(candidate.description, 520)}`,
       );
     }
   }

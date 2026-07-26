@@ -2,6 +2,7 @@ import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messa
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
+  GENERAL_CAPABILITY_NAME,
   stampMessageCreatedAtUtc,
   type AgentCapability,
   type AgentActor,
@@ -16,7 +17,7 @@ import {
   createCapabilityCreatorToolkit,
 } from './capabilities/capabilityCreator';
 import { createExploreCapability } from './capabilities/explore';
-import { createGeneralCapability } from './capabilities/general';
+import { generalCapability } from './capabilities/general';
 import {
   createDailyPostCapability,
   createDailyPostToolkit,
@@ -43,12 +44,6 @@ import {
   prepareAgentRegistry,
   type CapabilityDiagnosticReporter,
 } from './agentRegistryPreparation';
-
-const DEFAULT_GENERAL_TOOLKIT_NAMES = [
-  'pet_profile',
-  'bash',
-  'git',
-] as const;
 
 function buildActor(context: AgentContext) {
   return {
@@ -244,6 +239,8 @@ export function buildLocalChatAgentInput(params: {
 
   const capabilities: AgentCapability[] = [];
 
+  appendCapability(capabilities, generalCapability);
+
   if (isCapabilityEnabled('explore')) {
     appendCapability(capabilities, createExploreCapability({
       structuredOutput: decisionStructuredOutput,
@@ -273,24 +270,28 @@ export function buildLocalChatAgentInput(params: {
   }
 
   for (const capability of params.extraCapabilities ?? []) {
+    if (capability.name === GENERAL_CAPABILITY_NAME) {
+      throw new Error(
+        `Capability name "${GENERAL_CAPABILITY_NAME}" is reserved by the local-agent host`,
+      );
+    }
     appendCapability(capabilities, capability);
   }
 
   // Append user-defined capabilities (enabled state checked against their manifest id)
   for (const { meta, capability } of params.userCapabilities ?? []) {
-    if (isCapabilityEnabled(meta.id)) appendCapability(capabilities, capability);
+    if (!isCapabilityEnabled(meta.id)) continue;
+    if (capability.name === GENERAL_CAPABILITY_NAME) {
+      throw new Error(
+        `Capability name "${GENERAL_CAPABILITY_NAME}" is reserved by the local-agent host`,
+      );
+    }
+    appendCapability(capabilities, capability);
   }
   const baseToolkits = [
     ...sharedToolkits,
     ...(params.toolkits ?? []),
   ];
-  const registeredToolkitNames = new Set(baseToolkits.map(({ name }) => name));
-  appendCapability(
-    capabilities,
-    createGeneralCapability(
-      DEFAULT_GENERAL_TOOLKIT_NAMES.filter((name) => registeredToolkitNames.has(name)),
-    ),
-  );
   const preparedRegistry = prepareAgentRegistry({
     toolkits: baseToolkits,
     capabilities,

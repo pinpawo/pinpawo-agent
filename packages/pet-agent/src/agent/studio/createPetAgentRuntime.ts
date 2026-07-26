@@ -32,7 +32,10 @@ import type {
   PetAgentRuntimeInvokeInput,
   PetAgentRuntimeInvokeResult,
 } from './types';
-import { createWikiReadCapability } from './wikiReadCapability';
+import {
+  createWikiReadCapability,
+  WIKI_READ_CAPABILITY_NAME,
+} from './wikiReadCapability';
 import { createWikiReadToolkit } from './wikiReadToolkit';
 
 export type PetAgentRuntimeConfig = {
@@ -172,7 +175,8 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
     ];
     const capabilities = input.wikiRoot
       && !configuredCapabilities.some((capability) =>
-        capability.uses.includes('wiki_read'))
+        capability.name === WIKI_READ_CAPABILITY_NAME
+          || capability.uses.includes('wiki_read'))
       ? [...configuredCapabilities, createWikiReadCapability()]
       : configuredCapabilities;
     const registry = compileAgentRegistry({

@@ -406,3 +406,47 @@ test('pet runtime passes wiki read tools and operation metadata when wikiRoot is
     '搜索知识库内容',
   );
 });
+
+test('pet runtime does not replace an explicitly configured wiki Capability', async () => {
+  const { graph, calls } = makeStubGraph([
+    { messages: [new AIMessage('done')] },
+  ]);
+  const runtime = createPetAgentRuntime({
+    models: fakeModels(),
+    actor: fakeActor(),
+    capabilities: [{
+      name: 'wiki',
+      description: 'Use an externally managed knowledge source.',
+      uses: [],
+      instructions: defineInstructionDocument({
+        content: '# External Wiki',
+      }),
+    }],
+    graph,
+  });
+
+  const result = await runtime.invoke({
+    brief: 'read wiki',
+    wikiRoot: '/tmp/pinpawo-test-wiki',
+  });
+
+  assert.equal(result.reply, 'done');
+  const configurable = (calls[0]?.options as {
+    configurable?: {
+      registry?: {
+        capabilities?: Array<{
+          capability?: { name?: string; description?: string };
+          toolkits?: Array<{ name?: string }>;
+        }>;
+      };
+    };
+  } | undefined)?.configurable;
+  const wikiCapabilities = configurable?.registry?.capabilities
+    ?.filter(({ capability }) => capability?.name === 'wiki');
+  assert.equal(wikiCapabilities?.length, 1);
+  assert.equal(
+    wikiCapabilities?.[0]?.capability?.description,
+    'Use an externally managed knowledge source.',
+  );
+  assert.deepEqual(wikiCapabilities?.[0]?.toolkits, []);
+});

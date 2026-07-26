@@ -38,7 +38,7 @@ test('decision eval scenarios cover every canonical prompt distribution', () => 
     planner: getDecisionEvalScenarios('planner').length,
     capability: getDecisionEvalScenarios('capability').length,
     outcome: getDecisionEvalScenarios('outcome').length,
-  }, { entry: 13, planner: 7, capability: 8, outcome: 6 });
+  }, { entry: 14, planner: 7, capability: 8, outcome: 6 });
 });
 
 test('decision eval scenarios render complete production messages', () => {

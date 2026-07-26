@@ -39,6 +39,7 @@ the original design and reference documents. Maintenance rules live in
 - [Decision system prompt design](PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md)
 - [CapabilityPlanner task-horizon design](CAPABILITY_PLANNER_TASK_HORIZON_DRAFT.md)
 - [Orchestrator terminal-semantics validation](ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md)
+- [Orchestrator lifecycle composition eval](ORCHESTRATOR_LIFECYCLE_COMPOSITION_EVAL.md)
 - [Decision shared prompt prefix](PET_AGENT_ORCHESTRATOR_DECISION_PROMPT_PREFIX.md)
 - [Historical orchestrator route design](PET_AGENT_ORCHESTRATOR_ROUTE_DESIGN.md)
 - [Announce judgment and explicit handoff](PET_AGENT_ANNOUNCE_JUDGMENT_REFACTOR.md)

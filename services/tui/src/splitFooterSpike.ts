@@ -1,5 +1,6 @@
 import {
   BoxRenderable,
+  RGBA,
   TextareaRenderable,
   TextRenderable,
   createCliRenderer,
@@ -34,6 +35,7 @@ const root = new BoxRenderable(renderer, {
   width: '100%',
   height: '100%',
   flexDirection: 'column',
+  backgroundColor: RGBA.defaultBackground(),
 });
 const header = new TextRenderable(renderer, {
   id: 'header',

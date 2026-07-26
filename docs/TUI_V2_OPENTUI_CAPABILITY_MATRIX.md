@@ -33,7 +33,7 @@ The probe covers:
 | operation raw payload | shared projection retains transient raw data | automated test |
 | high-frequency delta projection | one streaming entry is updated in place | automated test |
 | raw input preview | controls are escaped and output is bounded | automated test |
-| fixed-footer composer layout | composer grows from 1–3 rows without changing terminal footer height | automated test |
+| fixed-footer composer layout | composer grows from 3–5 visible rows without changing terminal footer height | automated test |
 | native textarea regression | multiline paste and single-grapheme backspace preserve line boundaries | Bun native test |
 | TypeScript | `npm run typecheck -w @pinpawo/tui` | passed |
 | unit tests | `npm run test -w @pinpawo/tui` | passed, 9 tests |
@@ -86,7 +86,7 @@ terminal-owned wheel/selection input and stable-row scrollback commits.
 | Probe | Observation | Result |
 | --- | --- | --- |
 | terminal-owned scrolling and selection | touchpad scrolling, the terminal scrollbar, and text selection work in split-footer mode | passed |
-| multiline composer in the initial split-footer build | frame chrome left only one content row, so pasted lines and newlines were hidden | failed; fixed with 1–3 row growth inside a stable footer |
+| multiline composer in the initial split-footer build | frame chrome left only one content row, so pasted lines and newlines were hidden | failed; fixed with 3–5 visible row growth inside a stable footer |
 | single-grapheme line backspace | OpenTUI 0.4.5 removed both the grapheme and its preceding newline | failed upstream; narrow workaround and Bun native regression added |
 | `Cmd+A` | selects the composer contents | passed |
 | single-file drag-in | Ghostty delivers the path to the composer | passed |

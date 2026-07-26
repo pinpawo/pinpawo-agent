@@ -1,6 +1,6 @@
-const MIN_CONTENT_ROWS = 1;
-const MAX_CONTENT_ROWS = 3;
-const FRAME_VERTICAL_CHROME_ROWS = 4;
+const MIN_VISIBLE_CONTENT_ROWS = 3;
+const MAX_VISIBLE_CONTENT_ROWS = 5;
+const FRAME_BORDER_ROWS = 2;
 const FIXED_FOOTER_ROWS = 8;
 const STATUS_ROWS = 1;
 
@@ -9,16 +9,16 @@ export function calculateComposerLayout(
   virtualLineCount: number,
 ) {
   const logicalLineCount = text.split('\n').length;
-  const contentRows = clamp(
-    Math.max(logicalLineCount, virtualLineCount),
-    MIN_CONTENT_ROWS,
-    MAX_CONTENT_ROWS,
+  const visibleContentRows = clamp(
+    Math.max(logicalLineCount, virtualLineCount) + 2,
+    MIN_VISIBLE_CONTENT_ROWS,
+    MAX_VISIBLE_CONTENT_ROWS,
   );
-  const frameHeight = contentRows + FRAME_VERTICAL_CHROME_ROWS;
+  const frameHeight = visibleContentRows + FRAME_BORDER_ROWS;
   const auxiliaryRows = FIXED_FOOTER_ROWS - STATUS_ROWS - frameHeight;
 
   return {
-    contentRows,
+    visibleContentRows,
     frameHeight,
     headerHeight: auxiliaryRows >= 2 ? 1 : 0,
     liveHeight: auxiliaryRows >= 1 ? 1 : 0,

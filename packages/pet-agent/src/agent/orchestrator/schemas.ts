@@ -137,8 +137,8 @@ export function buildCapabilityPlanningDecisionSchema() {
 
 export function buildDelegationOutcomeDecisionSchema() {
   return z.object({
-    outcome: z.enum(['continue', 'task_done', 'goal_done', 'user_input_required']).describe(
-      'continue=当前 task 未达标且同一 capability 可以继续；task_done=当前 task 达标但不能明确断言用户目标已经完成；goal_done=用户目标已经完成；user_input_required=用户目标尚未完成，继续前需要用户补充、澄清或确认。',
+    outcome: z.enum(['goal_done', 'user_input_required', 'task_done', 'continue']).describe(
+      'goal_done=用户目标已经完成；user_input_required=用户目标尚未完成，下一次进展必须先等待用户补充、澄清或确认；task_done=当前 task 已达标且之后仍可自主规划；continue=当前 task 未达标且同一 capability 可以继续。',
     ),
     gap_note: z.string().trim().nullable().optional().describe(
       'outcome=continue 时为当前 task 的具体缺口；没有可补充的具体缺口时可为 null 或省略。其他 outcome 可为 null 或省略。',

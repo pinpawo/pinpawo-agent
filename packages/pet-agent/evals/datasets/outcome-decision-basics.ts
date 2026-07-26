@@ -91,6 +91,22 @@ const cases: AgentEvalCase<OutcomeDecisionInput, OutcomeDecisionExpected>[] = [
     },
     metadata: { difficulty: 'medium', reason: 'User-input stopping boundary.', source: SOURCE_FILE },
   },
+  {
+    id: `${SUITE}.completed-task-still-requires-user-input`,
+    name: 'completed-task-still-requires-user-input',
+    suite: SUITE,
+    tags: ['outcome_decision', 'context_synthesis'],
+    input: {
+      userGoal: '先检查项目中已有的 staging 公开配置，再确认实际部署状态；如果实际状态检查还缺必要信息，告诉我需要什么。',
+      currentTask: '检查项目中已有的 staging 公开配置。',
+      announce: '已完成公开配置检查；要继续确认实际部署状态，需要用户提供 staging 地址和只读访问凭证。',
+    },
+    expected: {
+      outcome: 'user_input_required',
+      reason: 'Required user input takes precedence over task_done when the local task is complete but the user goal cannot continue autonomously.',
+    },
+    metadata: { difficulty: 'hard', reason: 'Overlapping local-completion and user-input conditions.', source: SOURCE_FILE },
+  },
 ];
 
 export const outcomeDecisionBasicsDataset: AgentEvalDataset<OutcomeDecisionInput, OutcomeDecisionExpected> = {

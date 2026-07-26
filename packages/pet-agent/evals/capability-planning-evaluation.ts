@@ -46,23 +46,25 @@ export function buildCapabilityPlanningGoalContract(
           }, {
             id: 'task_boundaries_justified',
             statement: [
-              'Each task boundary is justified by a returned result that later work depends on, a different independently executing ability, or a separately useful acceptance result.',
+              'Each task corresponds to a distinct result or change required by the user goal.',
+              'A later task is justified when it depends on a prior returned result or requires a different independently executing ability.',
               'Stages one ability can perform continuously toward the same result should remain together.',
-              'More than one decomposition may be valid when these conditions are satisfied.',
             ].join(' '),
+          }, {
+            id: 'remaining_plan_objectives_correct',
+            statement: expected.remainingPlan.length > 0
+              ? [
+                  'The remaining plan collectively preserves all future work needed to realize the user goal, in execution order.',
+                  'An intermediate objective is valid when it requires its own execution boundary and the plan still preserves the ultimate outcome it supports.',
+                  `Expected objective anchors: ${expected.remainingPlan
+                    .map(({ objectiveTerms }) => objectiveTerms.join(', '))
+                    .join(' | ')}.`,
+                ].join(' ')
+              : 'The remaining plan is empty because the current task covers all work required for the user goal at this boundary.',
           }]
         : []),
       ...(expected.remainingPlan.length > 0
         ? [{
-            id: 'remaining_plan_objectives_correct',
-            statement: [
-              'The remaining plan collectively preserves all future work needed to realize the user goal, in execution order.',
-              'An intermediate objective is valid when it requires its own execution boundary and the plan still preserves the ultimate outcome it supports.',
-              `Expected objective anchors: ${expected.remainingPlan
-                .map(({ objectiveTerms }) => objectiveTerms.join(', '))
-                .join(' | ')}.`,
-            ].join(' '),
-          }, {
             id: 'remaining_capability_intents_correct',
             statement: [
               'Each future capability intent semantically describes the ability needed for its objective.',

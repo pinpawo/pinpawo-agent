@@ -92,7 +92,9 @@ export function buildAnswerInvocationMessages(params: {
     ? buildDelegationCompletionAnswerContext(params.acceptedHandoff.source, hasUserGoal)
     : params.acceptedHandoff?.outcome === 'user_input_required'
       ? buildUserInputRequiredAnswerContext(hasUserGoal)
-      : hasUserGoal ? buildAnswerReplyContext() : null;
+      : params.acceptedHandoff?.outcome === 'task_done'
+        ? buildTaskResultAnswerContext(hasUserGoal)
+        : hasUserGoal ? buildAnswerReplyContext() : null;
   const systemContext = [
     buildAnswerSystemPrompt({
       actor: params.actor,
@@ -115,6 +117,21 @@ function buildAnswerReplyContext() {
     '',
     '本次回复目标：',
     '根据主对话已有信息完成该用户目标。',
+  ].join('\n');
+}
+
+function buildTaskResultAnswerContext(hasUserGoal: boolean) {
+  return [
+    ...(hasUserGoal ? [
+      '本次用户目标：',
+      '主对话中最近一条用户消息所表达的目标。',
+      '',
+    ] : []),
+    '当前状态：',
+    '上一条消息是本轮执行得到的结果。',
+    '',
+    '本次回复目标：',
+    '向用户呈现上一条结果中的具体发现，并结合本次用户目标说明结论。',
   ].join('\n');
 }
 

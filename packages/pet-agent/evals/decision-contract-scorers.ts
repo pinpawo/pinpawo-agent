@@ -92,6 +92,14 @@ export function scoreCapabilityPlanning(
       output.result,
       expected.result,
     ),
+    ...(expected.exactRemainingPlanLength === undefined
+      ? []
+      : [exact(
+          'remaining_plan_length_correct',
+          `Return exactly ${expected.exactRemainingPlanLength.toString()} future tasks for this case-specific task-boundary contract.`,
+          output.remainingPlan.length,
+          expected.exactRemainingPlanLength,
+        )]),
   ];
 }
 

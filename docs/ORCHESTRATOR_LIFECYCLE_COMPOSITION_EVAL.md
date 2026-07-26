@@ -1,7 +1,7 @@
 # Orchestrator Lifecycle Composition Eval
 
-Status: implementation draft; keep outside the wiki until the profile is
-validated and explicitly ingested.
+Status: candidate validation; keep outside the wiki until the profile is
+accepted and explicitly ingested.
 
 ## Purpose
 
@@ -61,6 +61,40 @@ The production graph uses the configured model for `entryDecision`,
 Executor outputs are scripted facts. The same configured model performs the
 existing `prompt-goal-v1` evaluation after the graph finishes.
 
+## Failure ownership and candidate repair
+
+The first complete GLM-5.2 run exposed composition failures that isolated node
+profiles had not represented:
+
+- `answer` could ignore a completed task result after the boundary planner
+  selected `answer`;
+- `capabilityPlanner` could split one investigation result into repeated tasks
+  or turn an available code-change capability into an unrequested repair goal;
+- an underspecified user-input lifecycle case allowed a valid immediate
+  clarification path while its criteria required a prior public check;
+- `task_done` and `user_input_required` overlapped when the current task was
+  complete but the next progress still required user-owned information.
+
+The candidate changes stay with the narrow owners:
+
+- the user-input case now explicitly requests the public check before the
+  protected deployment-state check;
+- answer receives a typed-state-derived objective to deliver the latest task
+  result, without treating `task_done` as proof that the user goal is complete;
+- planner treats the user request as the source of ends and the capability
+  registry as available means, and keeps evidence gathering, analysis, and
+  verification for one investigation result inside one task boundary;
+- outcome makes terminal user input and autonomously plannable task completion
+  mutually exclusive, including their overlap example;
+- the planner goal evaluator always scores the future tail and can apply an
+  explicit case-level task-count invariant when the task-boundary objective
+  requires it.
+
+Before the clean candidate baseline, the complete planner/outcome profile
+achieved `39/39`, and the two lifecycle cases that originally exposed the
+failures achieved `6/6`. These results locate the repair; the clean full
+lifecycle profile remains the release gate.
+
 ## Evidence and reports
 
 Run:
@@ -93,10 +127,11 @@ Generated reports remain local evidence and are not committed.
 
 ## Change gate
 
-This stage does not modify production prompts. First establish the lifecycle
-baseline on GLM-5.2. If a case fails reproducibly, use its full trajectory to
-locate the owning contract. Only then should a minimal production contract
-change be proposed and compared against the unchanged lifecycle profile.
+First establish the lifecycle baseline on GLM-5.2. If a case fails
+reproducibly, use its full trajectory to locate the owning contract. Change
+production behavior only when the failure is not a provider error or an
+ambiguous evaluation case, and compare the minimal owner-level repair against
+the unchanged lifecycle profile.
 
 After the single-model profile is stable, it can become an input to the
 multi-model contract validation tracked separately. Cross-model comparison

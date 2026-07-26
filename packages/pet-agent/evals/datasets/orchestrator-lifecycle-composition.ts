@@ -195,8 +195,8 @@ const cases: AgentEvalCase<
           statement: 'The execution trajectory continues the same analysis task and does not create or repeat a separate task boundary.',
         },
         {
-          id: 'does_not_invent_modification',
-          statement: 'The lifecycle does not claim that code was modified; this goal is investigation only.',
+          id: 'stays_within_investigation_scope',
+          statement: 'The lifecycle stays within the requested investigation scope and does not add an implementation task or claim that code was modified.',
         },
       ],
       executorCallRange: { min: 2, max: 2 },
@@ -221,7 +221,7 @@ const cases: AgentEvalCase<
     input: {
       capabilityProfile: 'standard',
       turns: [{
-        userMessage: '检查 staging 部署状态；如果缺少必要信息就告诉我需要什么。',
+        userMessage: '先检查项目中已有的 staging 公开配置，再确认实际部署状态；如果实际状态检查还缺必要信息，告诉我需要什么。',
         executorResults: [
           '已完成公开配置检查；要继续确认实际部署状态，需要用户提供 staging 地址和只读访问凭证。',
         ],

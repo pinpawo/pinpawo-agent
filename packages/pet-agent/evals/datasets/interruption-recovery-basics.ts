@@ -17,7 +17,7 @@ type InterruptionRecoveryInput = {
 };
 
 type InterruptionRecoveryExpected = {
-  expectedMode: 'answer' | 'general' | 'capability' | 'ask_permission';
+  expectedMode: 'answer' | 'capability' | 'ask_permission';
   expectedLane?: string | null;
   expectedTask?: string | null;
   expectedResume: boolean;
@@ -212,11 +212,11 @@ const cases: AgentEvalCase<InterruptionRecoveryInput, InterruptionRecoveryExpect
       progressResult: '已修复前两个 TypeScript error，还剩 local-agent 的一个导入错误。',
     },
     expected: {
-      expectedMode: 'general',
+      expectedMode: 'capability',
       expectedLane: 'capability:general',
       expectedTask: '修复 typecheck，然后运行测试。',
       expectedResume: true,
-      reason: 'A general lane limit should continue the same unfinished engineering task.',
+      reason: 'A capability:general limit should continue the same unfinished engineering task.',
     },
     metadata: {
       difficulty: 'medium',
@@ -265,7 +265,7 @@ const cases: AgentEvalCase<InterruptionRecoveryInput, InterruptionRecoveryExpect
       progressResult: '等待用户确认是否允许执行 npm test。',
     },
     expected: {
-      expectedMode: 'general',
+      expectedMode: 'capability',
       expectedLane: 'capability:general',
       expectedTask: '运行 npm test 并修失败项。',
       expectedResume: true,

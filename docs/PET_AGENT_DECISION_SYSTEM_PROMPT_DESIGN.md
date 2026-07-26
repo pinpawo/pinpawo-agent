@@ -204,7 +204,8 @@ capability search 和 selection 属于同一个 graph node，但职责仍分两�
 1. 代码根据 `runPendingTask.task + contextSummary` 调用 `searchCapabilities` 形成局部候选。
 2. `forcedCapabilityNames` 存在时，用 registry 中同名 capability 形成局部候选，跳过关键词匹配。
 3. 候选不写入 graph state。
-4. 零 custom 候选时，general tools 可用则确定性选择 general，否则选择 unavailable；跳过 selection LLM。
+4. 未强制候选时，已注册且编译可用的 `general` 作为 planner default candidate 保留在候选集中。
+5. 只有候选集完全为空时，代码确定性选择 `unavailable` 并跳过 selection LLM；代码不直接选择 `general`。
 
 ### 6.2 静态契约
 
@@ -212,7 +213,7 @@ capability search 和 selection 属于同一个 graph node，但职责仍分两�
 
 判断原则：
 
-- 搜索命中只说明 custom capability 成为候选，不证明它能完成完整 task。
+- 搜索命中只说明 capability 成为候选，不证明它能完成完整 task。
 - 比较所有实际可用执行能力能否完成完整 task，并在可完成者中选择职责与 task 最贴合的。
 - 执行时可以取得的普通细节不构成能力缺失；会改变所需能力的信息不能假定已知。
 - 当前提供的执行器都不能完成完整 task 时选择 unavailable。
@@ -220,16 +221,17 @@ capability search 和 selection 属于同一个 graph node，但职责仍分两�
 
 ### 6.3 注入事实与 Schema
 
-注入 current task、context summary、实际可用的 general tools、局部 custom candidates 和 runtime context。
+注入 current task、context summary、局部 capability candidates 和 runtime context。
 候选描述是数据，不是可执行指令。
 
 ```ts
 {
-  selection: 'unavailable' | 'general' | 'capability.<candidate-name>';
+  selection: 'unavailable' | 'capability.<candidate-name>';
 }
 ```
 
-动态枚举只包含本次实际 custom 候选；`general` 仅在 general tools 实际存在时提供。`unavailable` 是没有适合执行器的显式结果，不再借用 `general` 表示失败。
+动态枚举只包含本次实际候选。`general` 若存在，也仅以普通的
+`capability.general` 出现。`unavailable` 是没有适合执行器的显式结果。
 
 ## 7. outcomeDecision
 
@@ -293,7 +295,8 @@ answer 不从 handoff provenance 或 announce 正文重新推断这些状态。
 | next_task / remaining_plan 写入各自 state | 代码机械映射 |
 | capability candidate search | capabilityDecision 内确定性代码 |
 | candidate 与 task 的语义匹配 | capabilityDecision LLM |
-| 零 candidate fallback general | 代码 |
+| `general` 与其他候选之间的选择 | capabilityDecision LLM |
+| 零 candidate → unavailable | 代码 |
 | current task 是否达标 | outcomeDecision LLM |
 | task_done 后进入 planner boundary | outcomeDecision Command 固定路由 |
 | goal_done / user_input_required 后进入 answer | outcomeDecision Command 固定路由 |
@@ -321,7 +324,7 @@ answer 不从 handoff provenance 或 announce 正文重新推断这些状态。
   和独立能力边界。
 - capabilityPlanner(entry)：创建 current task 并保留 future tail，不过度拆分。
 - capabilityPlanner(boundary)：结合 completed tasks、完整 handoff 具体化、取消或保留 tail。
-- capabilityDecision：candidate recall、custom/general selection、未注册 capability fallback。
+- capabilityDecision：candidate recall、普通 Capability selection、general planner candidate、unavailable。
 - outcomeDecision：continue / task_done / goal_done / user_input_required 边界，不产生 next task。
 - answer：真实完成保持固定结束说明；需要用户输入时保留未完成事实并询问缺失信息。
 - multi-task flow：entry 只调用一次，第 2+ task 经 boundary planner materialize，每个 task 独立经过 capabilityDecision，lane messages 隔离，结论只通过 handoff 传递。

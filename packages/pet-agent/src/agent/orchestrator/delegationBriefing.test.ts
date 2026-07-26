@@ -109,7 +109,7 @@ test('briefing metadata is routing truth and never reads as announce or handoff'
   assert.equal(getPinpetMeta(briefing).synthetic, true);
   assert.equal(getMessageTurnId(briefing), 'run-9');
   assert.equal(getMessageDelegationId(briefing), 'task-9');
-  assert.equal(getMessageLane(briefing), 'general');
+  assert.equal(getMessageLane(briefing), 'capability:general');
   assert.equal(getMessageIsAnnounce(briefing), false);
   assert.equal(getMessageHandoffSource(briefing), null);
 });

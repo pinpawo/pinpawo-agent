@@ -103,7 +103,7 @@ test('registry isolates a Capability whose Toolkits expose duplicate tools', () 
   }]);
 });
 
-test('registry isolates a general fallback Capability with duplicate tools', () => {
+test('registry isolates a general Capability with duplicate tools', () => {
   const first = defineToolkit({
     name: 'first',
     description: 'First toolkit.',

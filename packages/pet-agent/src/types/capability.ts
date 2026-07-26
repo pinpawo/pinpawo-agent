@@ -51,8 +51,9 @@ export type AgentCapability = {
 };
 
 /**
- * Reserved routing fallback. It is an ordinary AgentCapability; the name only
- * lets the orchestrator select it when no more specific Capability matches.
+ * Well-known name for the host's general-purpose Capability. It uses the same
+ * contract, planner selection, lane, and executor path as every Capability.
+ * The planner candidate policy keeps it visible as the default executor.
  */
 export const GENERAL_CAPABILITY_NAME = 'general';
 

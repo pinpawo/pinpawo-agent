@@ -442,7 +442,7 @@ test('capability decision excludes a Capability whose required Toolkit is missin
       invoke: async (messages: unknown[]) => {
         decisionCallCount += 1;
         routeInput = String((messages.at(-1) as { content?: unknown })?.content ?? '');
-        return { lane: 'capability:general' };
+        return routeCapabilityDecision('general');
       },
     }),
   } as unknown as AgentModels['act'];
@@ -454,7 +454,6 @@ test('capability decision excludes a Capability whose required Toolkit is missin
   input.runPendingTask = {
     task: 'use missing service',
     contextSummary: null,
-    searchKeywords: 'broken',
   };
 
   await runCapabilityDecision(input as OrchestratorStateType, {
@@ -801,9 +800,15 @@ test('capability decision can reject a retrieved candidate when no executor cove
 });
 
 test('instructions-only general Capability remains an executable planner candidate', async () => {
+  let decisionInput = '';
   const model = {
     withStructuredOutput: () => ({
-      invoke: async () => routeCapabilityDecision('general'),
+      invoke: async (messages: unknown[]) => {
+        decisionInput = String(
+          (messages.at(-1) as { content?: unknown })?.content ?? '',
+        );
+        return routeCapabilityDecision('general');
+      },
     }),
   } as unknown as AgentModels['act'];
   const runCapabilityDecision = createCapabilityDecisionRunner({
@@ -829,6 +834,8 @@ test('instructions-only general Capability remains an executable planner candida
   });
 
   assert.equal(result.runNextDelegation?.lane, 'capability:general');
+  assert.match(decisionInput, /capability\.general/);
+  assert.doesNotMatch(decisionInput, /\ngeneral（|general tools/);
 });
 
 test('capability decision rejects missing pending task as an invariant violation', async () => {
@@ -847,7 +854,7 @@ test('capability decision rejects missing pending task as an invariant violation
         task: '旧任务',
         contextSummary: null,
       },
-    } as OrchestratorStateType, {
+    } as unknown as OrchestratorStateType, {
       configurable: {
         thread_id: 'route-missing-task-invariant',
         actor: testActor,
@@ -1765,7 +1772,7 @@ test('artifact discovery tools reach a selected capability only when declared in
   ]);
 });
 
-test('general fallback Capability composes its declared Toolkits', async () => {
+test('general Capability composes its declared Toolkits', async () => {
   let routeCallCount = 0;
   let generalToolNames: string[] = [];
   const routeModel = {
@@ -1774,9 +1781,13 @@ test('general fallback Capability composes its declared Toolkits', async () => {
     withStructuredOutput: () => ({
       invoke: async () => {
         routeCallCount += 1;
-        return routeCallCount === 1
-          ? nextTaskDecision('inspect workspace and prior artifacts')
-          : goalDoneDecision();
+        if (routeCallCount === 1) {
+          return nextTaskDecision('inspect workspace and prior artifacts');
+        }
+        if (routeCallCount === 2) {
+          return routeCapabilityDecision('general');
+        }
+        return goalDoneDecision();
       },
     }),
   } as unknown as AgentModels['act'];
@@ -1799,7 +1810,7 @@ test('general fallback Capability composes its declared Toolkits', async () => {
       thread_id: 'general-artifact-discovery-tools',
       actor: testActor,
       capabilities: [
-        capability('general', 'General fallback capability.', ['bash', 'artifact_discovery']),
+        capability('general', 'General-purpose capability.', ['bash', 'artifact_discovery']),
       ],
       toolkits: [
         {
@@ -1844,11 +1855,13 @@ test('toolkit registration does not rely on lane authorization flags', async () 
     withStructuredOutput: () => ({
       invoke: async () => {
         routeCallCount += 1;
-        return routeCallCount === 1
-          ? nextTaskDecision('inspect with tools')
-          : {
-              ...goalDoneDecision(),
-            };
+        if (routeCallCount === 1) {
+          return nextTaskDecision('inspect with tools');
+        }
+        if (routeCallCount === 2) {
+          return routeCapabilityDecision('general');
+        }
+        return goalDoneDecision();
       },
     }),
   } as unknown as AgentModels['act'];
@@ -1874,7 +1887,7 @@ test('toolkit registration does not rely on lane authorization flags', async () 
       thread_id: 'general-toolkit-registration',
       actor: testActor,
       capabilities: [
-        capability('general', 'General fallback capability.', ['visible', 'artifact']),
+        capability('general', 'General-purpose capability.', ['visible', 'artifact']),
       ],
       toolkits: [
         {
@@ -2137,7 +2150,7 @@ test('runAgent reuses a host-precompiled artifact discovery registry', async () 
     capabilities: [
       capability(
         'general',
-        'General fallback capability.',
+        'General-purpose capability.',
         ['artifact_discovery'],
       ),
     ],
@@ -2148,7 +2161,7 @@ test('runAgent reuses a host-precompiled artifact discovery registry', async () 
     capabilities: [
       capability(
         'general',
-        'General fallback capability.',
+        'General-purpose capability.',
         ['artifact_discovery'],
       ),
     ],
@@ -2882,9 +2895,13 @@ test('toolkit review policy records authorization through orchestrator runtime t
     withStructuredOutput: () => ({
       invoke: async () => {
         routeCallCount += 1;
-        return routeCallCount === 1
-          ? nextTaskDecision('run shell')
-          : goalDoneDecision();
+        if (routeCallCount === 1) {
+          return nextTaskDecision('run shell');
+        }
+        if (routeCallCount === 2) {
+          return routeCapabilityDecision('general');
+        }
+        return goalDoneDecision();
       },
     }),
   } as unknown as AgentModels['act'];
@@ -2916,7 +2933,7 @@ test('toolkit review policy records authorization through orchestrator runtime t
     configurable: {
       thread_id: 'canonical-review-runtime-auth',
       actor: testActor,
-      capabilities: [capability('general', 'General fallback capability.', ['local'])],
+      capabilities: [capability('general', 'General-purpose capability.', ['local'])],
       toolkits,
     },
   };
@@ -3021,9 +3038,13 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
     withStructuredOutput: () => ({
       invoke: async () => {
         routeCallCount += 1;
-        return routeCallCount === 1
-          ? nextTaskDecision('run shell')
-          : goalDoneDecision();
+        if (routeCallCount === 1) {
+          return nextTaskDecision('run shell');
+        }
+        if (routeCallCount === 2) {
+          return routeCapabilityDecision('general');
+        }
+        return goalDoneDecision();
       },
     }),
   } as unknown as AgentModels['act'];
@@ -3050,7 +3071,7 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
     configurable: {
       thread_id: 'plain-review-runtime-state',
       actor: testActor,
-      capabilities: [capability('general', 'General fallback capability.', ['local'])],
+      capabilities: [capability('general', 'General-purpose capability.', ['local'])],
       toolkits,
     },
   };
@@ -3106,7 +3127,7 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
     meta: getPinpetMeta(message),
   }))));
   const handoffSource = getMessageHandoffSource(handoffCopy);
-  assert.equal(handoffSource?.handoffFrom, 'general');
+  assert.equal(handoffSource?.handoffFrom, 'capability:general');
   assert.ok(handoffSource?.delegationId);
   assert.equal(handoffSource?.task, 'run shell');
   assert.ok(handoffSource?.announceMessageId);
@@ -3165,6 +3186,9 @@ test('toolkit review rejection resumes the same subagent before parent handoff',
         if (routeCallCount === 1) {
           return nextTaskDecision('run shell');
         }
+        if (routeCallCount === 2) {
+          return routeCapabilityDecision('general');
+        }
         return goalDoneDecision();
       },
     }),
@@ -3194,7 +3218,7 @@ test('toolkit review rejection resumes the same subagent before parent handoff',
     configurable: {
       thread_id: 'human-reject-resumes-subagent-loop',
       actor: testActor,
-      capabilities: [capability('general', 'General fallback capability.', ['local'])],
+      capabilities: [capability('general', 'General-purpose capability.', ['local'])],
       toolkits,
     },
   };
@@ -3238,7 +3262,7 @@ test('toolkit review rejection resumes the same subagent before parent handoff',
   // Resume replays the interrupted review policy once, then returns to the
   // same child agent loop for its next model call.
   assert.equal(reviewCount, 2);
-  assert.equal(routeCallCount, 2);
+  assert.equal(routeCallCount, 3);
   const resumedSubagentInput = recorder.subagentInputs.at(-1) ?? [];
   const rejectedToolResult = resumedSubagentInput.find((message) =>
     message instanceof ToolMessage
@@ -3300,9 +3324,13 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
     withStructuredOutput: () => ({
       invoke: async () => {
         routeCallCount += 1;
-        return routeCallCount === 1
-          ? nextTaskDecision('run shell twice')
-          : goalDoneDecision();
+        if (routeCallCount === 1) {
+          return nextTaskDecision('run shell twice');
+        }
+        if (routeCallCount === 2) {
+          return routeCapabilityDecision('general');
+        }
+        return goalDoneDecision();
       },
     }),
   } as unknown as AgentModels['act'];
@@ -3336,7 +3364,7 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
     configurable: {
       thread_id: 'multi-tool-review-runtime-state',
       actor: testActor,
-      capabilities: [capability('general', 'General fallback capability.', ['local'])],
+      capabilities: [capability('general', 'General-purpose capability.', ['local'])],
       toolkits,
     },
   };
@@ -3447,7 +3475,7 @@ test('handoff idempotency is scoped by delegation lane and run id', () => {
     findLatestHandoffCopyForDelegation(
       [oldCopy, currentCopy],
       'same-delegation',
-      'general',
+      'capability:general',
       'run-current',
       getMessageHandoffSource,
     ),
@@ -3457,7 +3485,7 @@ test('handoff idempotency is scoped by delegation lane and run id', () => {
     findLatestHandoffCopyForDelegation(
       [oldCopy, currentCopy],
       'same-delegation',
-      'general',
+      'capability:general',
       'run-missing',
       getMessageHandoffSource,
     ),
@@ -3836,7 +3864,7 @@ test('delegation outcome continue decision can re-enter main and finalize handof
     configurable: {
       thread_id: 'delegation-continue-copy-preserve-lane',
       actor: testActor,
-      capabilities: [capability('general', 'General fallback capability.', ['local'])],
+      capabilities: [capability('general', 'General-purpose capability.', ['local'])],
       toolkits: [{
         name: 'local',
         description: 'local tools',
@@ -3849,11 +3877,11 @@ test('delegation outcome continue decision can re-enter main and finalize handof
     .map((message) => getMessageHandoffSource(message))
     .find((source) => source?.delegationId === activeDelegation.id);
   assert.ok(handoffSource);
-  assert.equal(handoffSource.handoffFrom, 'general');
+  assert.equal(handoffSource.handoffFrom, 'capability:general');
   assert.equal(handoffSource.runId, input.runId);
   assert.equal(handoffSource.task, '批量梳理仓库问题');
   // Final handoff on answer should clear lane transcript for finished continuation.
-  assert.equal(laneMessages(state.messages, 'general', input.runId, activeDelegation.id)
+  assert.equal(laneMessages(state.messages, 'capability:general', input.runId, activeDelegation.id)
     .filter((message) => getMessageIsAnnounce(message)).length === 0, true);
 });
 
@@ -3921,7 +3949,7 @@ test('delegation outcome continuation path rechecks run iteration guard before n
     configurable: {
       thread_id: 'delegation-outcome-to-iteration-guard',
       actor: testActor,
-      capabilities: [capability('general', 'General fallback capability.', ['local'])],
+      capabilities: [capability('general', 'General-purpose capability.', ['local'])],
       maxRunIterations: 1,
       toolkits: [{
         name: 'local',
@@ -4006,7 +4034,7 @@ test('delegation_outcome does not append duplicate handoff copies for unchanged 
     configurable: {
       thread_id: 'delegation-outcome-no-duplicate-handoff',
       actor: testActor,
-      capabilities: [capability('general', 'General fallback capability.', ['local'])],
+      capabilities: [capability('general', 'General-purpose capability.', ['local'])],
       maxRunIterations: 10,
       toolkits: [{
         name: 'local',
@@ -4031,7 +4059,7 @@ test('lane tagging hides subagent messages from route and records completed anno
     new AIMessage({ id: 'task-1-announce', content: '已查到热门动态。' }),
   ];
 
-  const tagged = tagNewLaneMessages(messages, [messages[0]], 'general', 'turn-1', 'natural', {
+  const tagged = tagNewLaneMessages(messages, [messages[0]], 'capability:general', 'turn-1', 'natural', {
     delegationId: 'task-1',
     task: '查小红书动态',
     announceMessageId: 'task-1-announce',
@@ -4042,7 +4070,7 @@ test('lane tagging hides subagent messages from route and records completed anno
   assert.equal(getMessageIsAnnounce(messages[1]), true);
   assert.equal(getMessageDelegationId(messages[1]), 'task-1');
   assert.deepEqual(mainConversationMessages(messages).map((message) => message.content), ['帮我查一下小红书动态']);
-  assert.deepEqual(laneMessages(messages, 'general', 'turn-1', 'task-1').map((message) => message.content), [
+  assert.deepEqual(laneMessages(messages, 'capability:general', 'turn-1', 'task-1').map((message) => message.content), [
     '帮我查一下小红书动态',
     '已查到热门动态。',
   ]);
@@ -4062,7 +4090,7 @@ test('lane tagging treats briefing-like subagent output as a deliverable, not in
   const tagged = tagNewLaneMessages(
     [human, output],
     [human],
-    'general',
+    'capability:general',
     'turn-briefing-output',
     'natural',
     {
@@ -4118,7 +4146,7 @@ test('lane tagging reconciles a summarized subagent transcript by message identi
   const initialUpdate = tagNewLaneMessages(
     initialOutput,
     [human],
-    'general',
+    'capability:general',
     'turn-1',
     'limit_reached',
     { delegationId: 'task-summary', task: '检查项目' },
@@ -4126,7 +4154,7 @@ test('lane tagging reconciles a summarized subagent transcript by message identi
   const stateBeforeSummary = messagesStateReducer([human], initialUpdate);
   const continuationInput = laneMessages(
     stateBeforeSummary,
-    'general',
+    'capability:general',
     'turn-1',
     'task-summary',
   );
@@ -4140,7 +4168,7 @@ test('lane tagging reconciles a summarized subagent transcript by message identi
   const summarizedUpdate = tagNewLaneMessages(
     [contextSummary, finalAnswer],
     continuationInput,
-    'general',
+    'capability:general',
     'turn-1',
     'natural',
     {
@@ -4154,11 +4182,11 @@ test('lane tagging reconciles a summarized subagent transcript by message identi
   assert.equal(stateAfterSummary.some((message) => message.id === 'main-human'), true);
   assert.equal(stateAfterSummary.some((message) => message.id === 'old-call'), false);
   assert.equal(stateAfterSummary.some((message) => message.id === 'old-result'), false);
-  assert.equal(getMessageLane(contextSummary), 'general');
+  assert.equal(getMessageLane(contextSummary), 'capability:general');
   assert.equal(getMessageDelegationId(contextSummary), 'task-summary');
   assert.equal(getMessageIsAnnounce(finalAnswer), true);
   assert.deepEqual(
-    laneMessages(stateAfterSummary, 'general', 'turn-1', 'task-summary').map((message) => message.id),
+    laneMessages(stateAfterSummary, 'capability:general', 'turn-1', 'task-summary').map((message) => message.id),
     ['main-human', 'context-summary', 'final-answer'],
   );
 });
@@ -4171,7 +4199,7 @@ test('lane tagging marks the deliverable as the announce regardless of stop reas
 
   // limit_reached is just a stop reason now; the deliverable is still marked as
   // the announce (no completed/progress verdict at tag time).
-  tagNewLaneMessages(messages, [messages[0]], 'general', 'turn-1', 'limit_reached', {
+  tagNewLaneMessages(messages, [messages[0]], 'capability:general', 'turn-1', 'limit_reached', {
     delegationId: 'task-2',
     task: '读取文件并运行 lint',
     announceMessageId: 'task-2-progress',
@@ -4223,7 +4251,7 @@ test('limit-reached subagent announce reaches the outcome decision input', async
   const tagged = tagNewLaneMessages(
     result.messages,
     baseInput.messages,
-    'general',
+    'capability:general',
     baseInput.runId,
     result.completionReason,
     {
@@ -4358,7 +4386,9 @@ test('delegation outcome does not handoff a limit_reached announce', async () =>
   assert.equal(state.taskActiveDelegation?.id, activeDelegation.id);
   assert.equal(state.taskActiveDelegation?.status, 'awaiting_decision');
   assert.equal(state.runDelegationSummaries.find((item) => item.id === activeDelegation.id)?.status, 'progress');
-  assert.equal(state.messages.filter((message) => getMessageLane(message) === 'general').length > 0, true);
+  assert.equal(state.messages.filter(
+    (message) => getMessageLane(message) === 'capability:general',
+  ).length > 0, true);
 });
 
 test('delegation outcome uses a unified run-iteration guard before invoking decision', async () => {
@@ -4461,7 +4491,13 @@ test('handoff copies the announce into main and wipes the lane transcript', () =
   });
   const outputMessages = [human, toolCall, toolResult, note, announce];
 
-  const tagged = tagNewLaneMessages(outputMessages, [human], 'general', 'turn-1', 'natural', {
+  const tagged = tagNewLaneMessages(
+    outputMessages,
+    [human],
+    'capability:general',
+    'turn-1',
+    'natural',
+    {
     delegationId: 'task-complete',
     task: '检查项目并汇报',
     announceMessageId: 'task-complete-announce',
@@ -4493,7 +4529,9 @@ test('handoff copies the announce into main and wipes the lane transcript', () =
     announceMessageId: 'task-complete-announce',
   });
   // No lane-tagged messages for this delegation remain.
-  assert.equal(stateMessages.filter((m) => getMessageLane(m) === 'general').length, 0);
+  assert.equal(stateMessages.filter(
+    (message) => getMessageLane(message) === 'capability:general',
+  ).length, 0);
 });
 
 test('handoff after a resumed delegation wipes the whole delegation lane including old progress', () => {
@@ -4509,13 +4547,22 @@ test('handoff after a resumed delegation wipes the whole delegation lane includi
   const oldProgress = new AIMessage({ id: 'task-resume-progress', content: '已处理第一个分片，尚未完成。' });
   const previousRun = [human, oldToolCall, oldToolResult, oldProgress];
   // First (interrupted) run keeps its whole lane in place — no handoff yet.
-  const previousUpdate = tagNewLaneMessages(previousRun, [human], 'general', 'turn-1', 'limit_reached', {
+  const previousUpdate = tagNewLaneMessages(
+    previousRun,
+    [human],
+    'capability:general',
+    'turn-1',
+    'limit_reached',
+    {
     delegationId: 'task-resume',
     task: '处理所有分片',
     announceMessageId: 'task-resume-progress',
   });
   const stateWithProgress = messagesStateReducer([human], previousUpdate);
-  assert.equal(laneMessages(stateWithProgress, 'general', 'turn-1', 'task-resume').length, 4);
+  assert.equal(
+    laneMessages(stateWithProgress, 'capability:general', 'turn-1', 'task-resume').length,
+    4,
+  );
 
   // Continuation (same delegationId) completes naturally.
   const finalNote = new AIMessage('继续处理剩余分片。');
@@ -4523,7 +4570,12 @@ test('handoff after a resumed delegation wipes the whole delegation lane includi
     id: 'task-resume-complete',
     content: '全部分片已处理完成，共 120 条。',
   });
-  const continuationInput = laneMessages(stateWithProgress, 'general', 'turn-1', 'task-resume');
+  const continuationInput = laneMessages(
+    stateWithProgress,
+    'capability:general',
+    'turn-1',
+    'task-resume',
+  );
   const continuationOutput = [
     ...continuationInput,
     finalNote,
@@ -4532,7 +4584,7 @@ test('handoff after a resumed delegation wipes the whole delegation lane includi
   const taggedContinuation = tagNewLaneMessages(
     continuationOutput,
     continuationInput,
-    'general',
+    'capability:general',
     'turn-1',
     'natural',
     {
@@ -4554,7 +4606,9 @@ test('handoff after a resumed delegation wipes the whole delegation lane includi
 
   // The entire delegation lane (old progress + continuation transcript) is gone;
   // only the user message and the main-queue copy of the final announce remain.
-  assert.equal(finalState.filter((m) => getMessageLane(m) === 'general').length, 0);
+  assert.equal(finalState.filter(
+    (message) => getMessageLane(message) === 'capability:general',
+  ).length, 0);
   assert.deepEqual(mainConversationMessages(finalState).map((m) => m.content), [
     '处理所有分片',
     '全部分片已处理完成，共 120 条。',
@@ -4577,7 +4631,13 @@ test('lane messages drop unanswered tool calls from interrupted subagent history
   });
   const messages = [human, completeToolCall, toolResult, unansweredToolCall];
 
-  const tagged = tagNewLaneMessages(messages, [human], 'general', 'turn-1', 'limit_reached', {
+  const tagged = tagNewLaneMessages(
+    messages,
+    [human],
+    'capability:general',
+    'turn-1',
+    'limit_reached',
+    {
     delegationId: 'task-3',
     task: '归档 Downloads',
   });
@@ -4600,7 +4660,12 @@ test('lane messages sanitize checkpoint history with dangling tool calls', () =>
   });
   setPinpetMeta(danglingToolCall, { lane: 'capability:general', runId: 'turn-1', delegationId: 'task-legacy' });
 
-  assert.deepEqual(laneMessages([human, danglingToolCall], 'general', 'turn-1', 'task-legacy').map((message) => message.content), [
+  assert.deepEqual(laneMessages(
+    [human, danglingToolCall],
+    'capability:general',
+    'turn-1',
+    'task-legacy',
+  ).map((message) => message.content), [
     '继续归档',
   ]);
 });
@@ -4618,19 +4683,19 @@ test('lane messages scope to delegation: new task starts clean, reused id carrie
   const task1Answer = new AIMessage({ id: 'task-1-answer', content: '目录已整理完成。' });
   const messages = [human, task1ToolCall, task1ToolResult, task1Answer];
 
-  tagNewLaneMessages(messages, [human], 'general', 'turn-1', 'natural', {
+  tagNewLaneMessages(messages, [human], 'capability:general', 'turn-1', 'natural', {
     delegationId: 'task-1',
     task: '整理仓库',
     announceMessageId: 'task-1-answer',
   });
 
   // 同 turn 同 lane 的新 task：看不到上一个 task 的 transcript，只剩主对话。
-  assert.deepEqual(laneMessages(messages, 'general', 'turn-1', 'task-2').map((message) => message.content), [
+  assert.deepEqual(laneMessages(messages, 'capability:general', 'turn-1', 'task-2').map((message) => message.content), [
     '帮我整理仓库',
   ]);
 
   // 同一 delegation 续跑（复用 delegationId）：全量带回自己的 transcript。
-  assert.deepEqual(laneMessages(messages, 'general', 'turn-1', 'task-1').map((message) => message.content), [
+  assert.deepEqual(laneMessages(messages, 'capability:general', 'turn-1', 'task-1').map((message) => message.content), [
     '帮我整理仓库',
     '先看一下目录。',
     '{"entries":["a.ts"]}',
@@ -4644,7 +4709,7 @@ test('lane messages reject lane history without a delegationId', () => {
   setPinpetMeta(invalidLaneMessage, { lane: 'capability:general', runId: 'turn-1' });
 
   assert.throws(
-    () => laneMessages([human, invalidLaneMessage], 'general', 'turn-1', 'task-1'),
+    () => laneMessages([human, invalidLaneMessage], 'capability:general', 'turn-1', 'task-1'),
     /missing delegationId/,
   );
 });

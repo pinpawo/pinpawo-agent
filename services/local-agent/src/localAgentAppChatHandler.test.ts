@@ -70,7 +70,7 @@ function createSetup(): AgentChannelSetup {
       toolkits: [toolkit],
       capabilities: [{
         name: 'general',
-        description: 'General fallback capability.',
+        description: 'General-purpose capability.',
         uses: ['local-toolkit'],
         instructions: defineInstructionDocument({
           content: '# General',

@@ -7,13 +7,13 @@ type CapabilitySearchInput = {
     description: string;
     keywords: string[];
   }>;
-  generalToolsAvailable?: string[];
+  includeGeneralCapability?: boolean;
   priorCandidates?: string[];
   completedResults?: string[];
 };
 
 type CapabilitySearchExpected = {
-  expectedMode: 'answer' | 'general' | 'capability';
+  expectedMode: 'answer' | 'capability';
   expectedCapability?: string | null;
   expectedCandidateNames?: string[];
   expectedSearchQueryTerms?: string[];
@@ -64,7 +64,7 @@ const cases: AgentEvalCase<CapabilitySearchInput, CapabilitySearchExpected>[] = 
     tags: ['capability_search', 'route_control'],
     input: {
       userMessage: '帮我看一下 src/features/pets/index.ts 的内容',
-      generalToolsAvailable: ['read_file', 'search_files'],
+      includeGeneralCapability: true,
       availableCapabilities: [
         {
           name: 'daily_post',
@@ -74,13 +74,13 @@ const cases: AgentEvalCase<CapabilitySearchInput, CapabilitySearchExpected>[] = 
       ],
     },
     expected: {
-      expectedMode: 'general',
-      expectedCapability: null,
-      reason: 'File inspection is covered by general tools and should not search for a business capability.',
+      expectedMode: 'capability',
+      expectedCapability: 'general',
+      reason: 'The general Capability is the appropriate executor when no domain Capability fits.',
     },
     metadata: {
       difficulty: 'easy',
-      reason: 'General tool routing should take precedence over unrelated capabilities.',
+      reason: 'General Capability selection should take precedence over unrelated capabilities.',
       source: SOURCE_FILE,
     },
   },

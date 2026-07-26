@@ -1,7 +1,7 @@
 # Pet Agent Toolkit Composition Design
 
-> 状态：Draft v1
-> 日期：2026-05-14
+> 状态：Implemented v2
+> 更新：2026-07-26
 
 ## 1. 背景
 
@@ -24,12 +24,12 @@ tool
   最小可调用动作，例如 browser_open、read_file、run_shell。
 
 toolkit
-  一组相关 tools + instructions + availability。
+  一组相关 ToolDefinition + instructions + availability。
   例如 browser toolkit、bash toolkit、memory toolkit、web_search toolkit。
 
 capability
   面向业务目标的可委派能力。
-  通过 uses 组合 toolkit，再叠加自己的业务 tools、instructions、resultSchema。
+  通过静态 uses 组合 toolkit，并提供自己的 Markdown instructions 与 lifecycle。
 
 orchestrator
   唯一编排者，决定委派哪个 capability，以及多个 capability 的先后顺序。
@@ -56,9 +56,8 @@ orchestrator
 所以使用组合语义：
 
 ```ts
-createRuntime: () => ({
+defineCapability({
   uses: ['browser', 'bash'],
-  tools: businessTools,
   instructions: businessInstructions,
 })
 ```
@@ -67,34 +66,37 @@ createRuntime: () => ({
 
 ## 4. 运行时装配
 
-orchestrator 创建 subagent 前完成 toolkit 解析：
+orchestrator 创建 subagent 前，从已编译 registry 完成 toolkit 解析：
 
 ```txt
-capability.createRuntime()
-  -> runtime.uses
+capability.uses
   -> resolve toolkits
-  -> tools = declared toolkit tools + capability.tools
+  -> tools = declared toolkit tools
   -> instructions = handoff + toolkit.instructions + capability.instructions
   -> createSubagent(...)
 ```
 
-general lane 使用所有已注册 toolkit：
+General 不使用独立 lane 或隐式工具面。它是一个名为 `general` 的普通
+Capability，显式声明自己的 Toolkit 依赖：
 
 ```txt
-general subagent
-  tools = global tools + all toolkit tools
-  instructions = handoff + all toolkit instructions + general instructions
+general Capability
+  selection = capability.general
+  lane = capability:general
+  tools = tools from general.uses
+  instructions = handoff + declared toolkit instructions + general instructions
 ```
 
-capability lane 只使用自己声明的 toolkit：
+所有 Capability 都只使用自己声明的 Toolkit：
 
 ```txt
 capability subagent
-  tools = declared toolkit tools + capability tools
+  tools = declared toolkit tools
   instructions = handoff + declared toolkit instructions + capability instructions
 ```
 
-general lane 默认接收 host 注册的所有 toolkit。capability lane 只有显式声明 `uses` 时才接收对应 toolkit，避免业务能力隐式继承过宽的工具面。
+Toolkit 注册不等于授权。只有 Capability 的 `uses` 才建立工具权限边界；
+缺少任一 required Toolkit 时，该 Capability 在本次 registry generation 中不可用。
 
 ## 5. Toolkit Policy 与 HITL
 
@@ -240,12 +242,12 @@ const capabilityCreator = {
 当前实现已支持：
 
 - `AgentToolkit` 类型。
-- `CapabilityRuntime.uses`。
+- `AgentCapability.uses`。
 - invoke/configurable 中传入 `toolkits`。
-- browser toolkit + browser capability 薄包装。
+- browser toolkit 与使用它的 capability。
 - bash toolkit，封装 local-agent 的本地文件和 shell 工具。
-- general lane 装配所有已注册 toolkit tools。
-- capability lane 按 `uses` 装配 toolkit tools。
+- General 作为普通 Capability，按自己的 `uses` 装配 toolkit tools。
+- 所有 delegation 统一使用 `capability:<name>` lane 和 capability executor node。
 - toolkit policy wrapper 可对单个工具调用执行 allow/deny/HITL review。
 
 后续可以继续演进：

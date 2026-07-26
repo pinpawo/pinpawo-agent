@@ -81,7 +81,7 @@ test('buildLocalChatAgentInput passes a single toolkit list', () => {
   assert.equal('capabilityToolkits' in setup.input, false);
 });
 
-test('buildLocalChatAgentInput does not grant a registered Toolkit to the fallback Capability', () => {
+test('buildLocalChatAgentInput does not grant a registered Toolkit to the general Capability', () => {
   const setup = buildLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',

@@ -44,7 +44,7 @@ function capabilities(input: CapabilityDecisionBasicsInput): AgentCapability[] {
         content: `Execute the ${item.name} capability.`,
       }),
     })),
-    ...(input.generalCapabilityAvailable ? [{
+    ...(input.includeGeneralCapability ? [{
       name: 'general',
       description: 'Handle general tasks that do not require a more specific Capability.',
       uses: [],

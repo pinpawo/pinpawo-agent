@@ -9,7 +9,7 @@ type DelegationControlInput = {
 };
 
 type DelegationControlExpected = {
-  expectedMode: 'answer' | 'general' | 'capability';
+  expectedMode: 'answer' | 'capability';
   expectedNextTask?: string | null;
   expectedShouldRepeatCompletedWork: boolean;
   reason: string;
@@ -32,7 +32,7 @@ const cases: AgentEvalCase<DelegationControlInput, DelegationControlExpected>[] 
       ],
     },
     expected: {
-      expectedMode: 'general',
+      expectedMode: 'capability',
       expectedNextTask: '运行 npm test',
       expectedShouldRepeatCompletedWork: false,
       reason: 'The first explicit task is complete, but the second explicit task remains.',
@@ -79,7 +79,7 @@ const cases: AgentEvalCase<DelegationControlInput, DelegationControlExpected>[] 
       progressResults: ['已将 src/ 目录下 23 个文件中的 var 声明改为 const。'],
     },
     expected: {
-      expectedMode: 'general',
+      expectedMode: 'capability',
       expectedNextTask: '运行 lint 检查',
       expectedShouldRepeatCompletedWork: false,
       reason: 'The edit phase is done but lint has not run yet.',

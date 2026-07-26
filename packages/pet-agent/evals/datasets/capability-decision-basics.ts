@@ -8,7 +8,7 @@ export type CapabilityDecisionBasicsInput = {
     description: string;
     keywords: string[];
   }>;
-  generalCapabilityAvailable: boolean;
+  includeGeneralCapability: boolean;
 };
 
 export type CapabilityDecisionBasicsExpected = {
@@ -40,7 +40,7 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
           keywords: ['浏览器', '网页', '打开'],
         },
       ],
-      generalCapabilityAvailable: true,
+      includeGeneralCapability: true,
     },
     expected: {
       expectedSelection: 'capability.explore',
@@ -68,7 +68,7 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
           keywords: ['浏览器', '网页', '打开'],
         },
       ],
-      generalCapabilityAvailable: true,
+      includeGeneralCapability: true,
     },
     expected: {
       expectedSelection: 'capability.daily_post',
@@ -96,7 +96,7 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
           keywords: ['浏览器', '网页', '打开'],
         },
       ],
-      generalCapabilityAvailable: true,
+      includeGeneralCapability: true,
     },
     expected: {
       expectedSelection: 'capability.daily_post',
@@ -119,14 +119,14 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
           keywords: ['宠物', '发帖'],
         },
       ],
-      generalCapabilityAvailable: true,
+      includeGeneralCapability: true,
     },
     expected: {
-      expectedSelection: 'general',
+      expectedSelection: 'capability.general',
       expectedCandidateNames: [],
       reason: 'An empty custom search can be handled by available general tools.',
     },
-    metadata: { difficulty: 'easy', reason: 'Deterministic general fallback.', source: SOURCE_FILE },
+    metadata: { difficulty: 'easy', reason: 'Planner selects the general Capability candidate.', source: SOURCE_FILE },
   },
   {
     id: `${SUITE}.browser-task-routes-to-browser`,
@@ -147,7 +147,7 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
           keywords: ['代码库', '调查', '探索'],
         },
       ],
-      generalCapabilityAvailable: true,
+      includeGeneralCapability: true,
     },
     expected: {
       expectedSelection: 'capability.browser',
@@ -170,10 +170,10 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
           keywords: ['src/index.ts', '代码审查'],
         },
       ],
-      generalCapabilityAvailable: true,
+      includeGeneralCapability: true,
     },
     expected: {
-      expectedSelection: 'general',
+      expectedSelection: 'capability.general',
       expectedCandidateNames: ['code_review'],
       reason: 'Candidate retrieval is not proof that the candidate can execute the complete task.',
     },
@@ -193,7 +193,7 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
           keywords: ['src/index.ts', '代码审查'],
         },
       ],
-      generalCapabilityAvailable: false,
+      includeGeneralCapability: false,
     },
     expected: {
       expectedSelection: 'unavailable',
@@ -216,7 +216,7 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
           keywords: ['浏览器', '网页', '打开', '页面内容'],
         },
       ],
-      generalCapabilityAvailable: false,
+      includeGeneralCapability: false,
     },
     expected: {
       expectedSelection: 'unavailable',

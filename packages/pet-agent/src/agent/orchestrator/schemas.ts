@@ -6,15 +6,14 @@ import type {
   OrchestrationDecisionStructuredOutputOptions,
 } from './types';
 
-const CUSTOM_CAPABILITY_SELECTION_PREFIX = 'capability.' as const;
+const CAPABILITY_SELECTION_PREFIX = 'capability.' as const;
 export const CAPABILITY_UNAVAILABLE_SELECTION = 'unavailable' as const;
 
-export type CustomCapabilitySelection =
-  `${typeof CUSTOM_CAPABILITY_SELECTION_PREFIX}${string}`;
+export type CapabilitySelectionValue =
+  `${typeof CAPABILITY_SELECTION_PREFIX}${string}`;
 export type CapabilitySelection =
   | typeof CAPABILITY_UNAVAILABLE_SELECTION
-  | 'general'
-  | CustomCapabilitySelection;
+  | CapabilitySelectionValue;
 
 export type TaskDecision = {
   action: 'answer' | 'direct_task' | 'needs_plan';
@@ -45,31 +44,27 @@ export type CapabilityDecision = {
 
 export type CapabilityDecisionSchemaParams = {
   capabilityCandidates: ReadonlyArray<{ name: string }>;
-  generalAvailable: boolean;
 };
 
-export function buildCustomCapabilitySelection(
+export function buildCapabilitySelection(
   capabilityName: string,
-): CustomCapabilitySelection {
-  return `${CUSTOM_CAPABILITY_SELECTION_PREFIX}${capabilityName}` as CustomCapabilitySelection;
+): CapabilitySelectionValue {
+  return `${CAPABILITY_SELECTION_PREFIX}${capabilityName}` as CapabilitySelectionValue;
 }
 
 export function parseCapabilitySelection(selection: string): {
-  kind: 'unavailable' | 'general' | 'capability' | 'invalid';
+  kind: 'unavailable' | 'capability' | 'invalid';
   capabilityName: string | null;
 } {
   if (selection === CAPABILITY_UNAVAILABLE_SELECTION) {
     return { kind: 'unavailable', capabilityName: null };
   }
-  if (selection.startsWith(CUSTOM_CAPABILITY_SELECTION_PREFIX)) {
+  if (selection.startsWith(CAPABILITY_SELECTION_PREFIX)) {
     return {
       kind: 'capability',
       capabilityName:
-        selection.slice(CUSTOM_CAPABILITY_SELECTION_PREFIX.length) || null,
+        selection.slice(CAPABILITY_SELECTION_PREFIX.length) || null,
     };
-  }
-  if (selection === 'general') {
-    return { kind: 'general', capabilityName: null };
   }
   return { kind: 'invalid', capabilityName: null };
 }
@@ -165,9 +160,8 @@ export function buildCapabilityDecisionSchema(params: CapabilityDecisionSchemaPa
   validateCapabilityCandidateNames(params);
   const selectionValues = [
     CAPABILITY_UNAVAILABLE_SELECTION,
-    ...(params.generalAvailable ? ['general'] : []),
     ...params.capabilityCandidates.map((candidate) =>
-      buildCustomCapabilitySelection(candidate.name)),
+      buildCapabilitySelection(candidate.name)),
   ] as const;
 
   return z.object({

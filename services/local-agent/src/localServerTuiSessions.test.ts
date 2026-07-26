@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
-import { stampMessageCreatedAtUtc } from '@pinpawo/pet-agent';
+import {
+  stampMessageCreatedAtUtc,
+  type CapabilityArtifactStore,
+} from '@pinpawo/pet-agent';
 import test from 'node:test';
 import { createEmptyTuiSessionState } from './tuiSessionRegistry';
 import {
@@ -11,6 +14,18 @@ import {
   type TuiSessionCheckpointer,
 } from './localServerTuiSessions';
 import { createLocalServerRuntimeDepsStore } from './localServerTypes';
+
+const testArtifactStore: CapabilityArtifactStore = {
+  writeArtifact: async () => {
+    throw new Error('not implemented in this test');
+  },
+  readArtifact: async () => {
+    throw new Error('not implemented in this test');
+  },
+  listArtifacts: async () => [],
+  deleteThreadArtifacts: async () => undefined,
+  getDownloadUri: async (uri) => uri,
+};
 
 test('readTuiCheckpointMessages keeps visible user/assistant messages only', () => {
   const userMessage = stampMessageCreatedAtUtc(
@@ -124,6 +139,7 @@ test('LocalServerTuiSessionService injects active session createdAt into runtime
       model: 'test-model',
     },
     workdir: '/tmp/pinpawo-tui-workdir',
+    capabilityArtifactStore: testArtifactStore,
   } as never, {
     pet: {
       id: 'pet-a',
@@ -149,6 +165,43 @@ test('LocalServerTuiSessionService injects active session createdAt into runtime
   assert.doesNotMatch(setup.input.runtimeEnvironment ?? '', /进程 cwd/);
 });
 
+test('LocalServerTuiSessionService rejects chat setup without a thread-scoped artifact store', () => {
+  const service = new LocalServerTuiSessionService({
+    state: createEmptyTuiSessionState(),
+    saveState: () => {},
+  });
+
+  assert.throws(
+    () => service.buildChatSetup({
+      actorId: 'pet-a',
+      llmConfig: {
+        apiKey: 'test',
+        baseUrl: 'http://localhost',
+        model: 'test-model',
+      },
+      workdir: '/tmp/pinpawo-missing-artifact-store',
+    }, {
+      pet: {
+        id: 'pet-a',
+        name: 'Paw',
+        personality: null,
+        species: null,
+        stage: null,
+        growth_value: null,
+        stage_asset_id: null,
+      },
+      context: {
+        petMemoryText: '',
+        recentChatTurns: [],
+        recentDaily: [],
+        trendItems: [],
+        today: '2026-06-11',
+      },
+    }),
+    /requires a capability artifact store/,
+  );
+});
+
 test('runtime config updates reach the next chat setup through the normalized deps store', () => {
   const service = new LocalServerTuiSessionService({
     state: createEmptyTuiSessionState(),
@@ -163,6 +216,7 @@ test('runtime config updates reach the next chat setup through the normalized de
       globalReviewPolicyMode: 'require_authorization',
     },
     workdir: '/tmp/pinpawo-policy-update',
+    capabilityArtifactStore: testArtifactStore,
   });
   const context = {
     pet: {
@@ -252,6 +306,7 @@ test('LocalServerTuiSessionService reads one checkpoint point for messages and p
       baseUrl: 'http://localhost',
       model: 'test-model',
     },
+    capabilityArtifactStore: testArtifactStore,
   } as never);
 
   assert.deepEqual(checkpoint.pendingReview, {

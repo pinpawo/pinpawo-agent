@@ -4,7 +4,7 @@ import {
   readNumber,
   readRecord,
   readString,
-  type ToolkitOperationSummary,
+  type ToolOperationSummary,
 } from '@pinpawo/pet-agent';
 /**
  * Local-agent toolkit metadata helpers.
@@ -22,13 +22,13 @@ export {
   readString,
 };
 
-export function pathInputSummary(input: unknown): ToolkitOperationSummary | null {
+export function pathInputSummary(input: unknown): ToolOperationSummary | null {
   const record = readRecord(input);
   const target = readString(record, 'path');
   return target ? { target } : null;
 }
 
-export function sourceDestinationInputSummary(input: unknown): ToolkitOperationSummary | null {
+export function sourceDestinationInputSummary(input: unknown): ToolOperationSummary | null {
   const record = readRecord(input);
   const source = readString(record, 'source');
   const destination = readString(record, 'destination');
@@ -37,7 +37,7 @@ export function sourceDestinationInputSummary(input: unknown): ToolkitOperationS
     : null;
 }
 
-export function okOutputPathSummary(output: unknown, pathField = 'path'): ToolkitOperationSummary | null {
+export function okOutputPathSummary(output: unknown, pathField = 'path'): ToolOperationSummary | null {
   const record = readJsonRecord(output);
   const target = readString(record, pathField);
   return target ? { target } : null;

@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, extname, resolve } from 'node:path';
 import { tool } from '@langchain/core/tools';
-import type { ToolkitOperationMetadata } from '@pinpawo/pet-agent';
+import type { ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import {
   okOutputPathSummary,
@@ -203,7 +203,7 @@ export const downloadFileTool = tool(
   },
 );
 
-export const networkOperationMetadata: Record<string, ToolkitOperationMetadata> = {
+export const networkOperationMetadata: Record<string, ToolOperationMetadata> = {
   http_fetch: {
     title: '请求网页',
     summarizeInput: (input) => {

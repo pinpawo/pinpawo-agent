@@ -4,12 +4,69 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { defaultCapabilityArtifactRoot, FileCapabilityArtifactStore } from './capabilityArtifactStore';
+import {
+  defaultCapabilityArtifactRoot,
+  FileCapabilityArtifactStore,
+  resolveCapabilityArtifactThreadRoot,
+} from './capabilityArtifactStore';
 
 test('defaultCapabilityArtifactRoot is scoped under the agent workdir', () => {
   assert.equal(
     defaultCapabilityArtifactRoot('/tmp/pinpawo-workdir'),
     '/tmp/pinpawo-workdir/.pinpawo/capability-artifacts',
+  );
+});
+
+test('artifact store encodes dot path segments instead of resolving them', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-artifacts-dot-segments-'));
+  const store = new FileCapabilityArtifactStore(root);
+  const ref = await store.writeArtifact({
+    threadId: '..',
+    capabilityId: 'explore',
+    delegationId: '.',
+    runId: 'run-1',
+    artifact: {
+      kind: 'report',
+      mimeType: 'text/plain',
+      content: 'contained',
+    },
+  });
+
+  assert.match(ref.uri, /thread\/%2E%2E\/delegation\/%2E\//);
+  assert.equal(
+    resolveCapabilityArtifactThreadRoot(root, '..'),
+    join(root, 'threads', '%2E%2E'),
+  );
+  assert.equal(
+    (await store.readArtifact({ uri: ref.uri, threadId: '..' })).content,
+    'contained',
+  );
+  assert.equal(
+    (await store.listArtifacts({ threadId: '..' })).length,
+    1,
+  );
+});
+
+test('deleting a dot-named thread cannot escape the artifact thread root', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-artifacts-dot-delete-'));
+  const store = new FileCapabilityArtifactStore(root);
+  await store.writeArtifact({
+    threadId: 'safe-thread',
+    capabilityId: 'explore',
+    delegationId: 'delegation-1',
+    runId: 'run-1',
+    artifact: {
+      kind: 'report',
+      mimeType: 'text/plain',
+      content: 'safe',
+    },
+  });
+
+  await store.deleteThreadArtifacts('..');
+
+  assert.equal(
+    (await store.listArtifacts({ threadId: 'safe-thread' })).length,
+    1,
   );
 });
 

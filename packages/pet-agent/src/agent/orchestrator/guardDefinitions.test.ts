@@ -48,7 +48,7 @@ function usageMessage(content: string, inputTokens: number) {
 
 const activeDelegation: TaskActiveDelegation = {
   id: 'd1',
-  lane: 'general',
+  lane: 'capability:general',
   task: '做点事',
   contextSummary: null,
   transcriptRunId: 'run-1',
@@ -79,7 +79,7 @@ test('context compaction watermark guard uses main conversation provider usage o
     tool_call_id: 'call-noise',
   });
   setPinpetMeta(noisyToolResult, {
-    lane: 'general',
+    lane: 'capability:general',
     runId: 'run-1',
     delegationId: 'delegation-noise',
   });
@@ -134,7 +134,7 @@ test('context compaction watermark guard maintains when main provider usage cros
 test('delegation outcome guard derives handoff refusal for a limit_reached active delegation', async () => {
   const announce = new AIMessage('limit reached');
   setPinpetMeta(announce, {
-    lane: 'general',
+    lane: 'capability:general',
     isAnnounce: true,
     completionReason: 'limit_reached',
     runId: 'run-1',

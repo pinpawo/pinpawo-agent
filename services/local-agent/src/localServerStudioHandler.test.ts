@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { tool } from '@langchain/core/tools';
+import { z } from 'zod';
 import { InflightRequestController } from './inflightRequestController';
 import {
   LocalServerStudioHandler,
@@ -44,6 +46,14 @@ function createInflightController() {
 }
 
 function createDeps(): LocalServerDeps {
+  const readFileTool = tool(
+    async ({ path }: { path?: string }) => path ?? '',
+    {
+      name: 'read_file',
+      description: 'Read a test file.',
+      schema: z.object({ path: z.string().optional() }),
+    },
+  );
   return {
     actorId: 'pet-a',
     actorName: 'Pet A',
@@ -69,8 +79,9 @@ function createDeps(): LocalServerDeps {
     localToolkits: [{
       name: 'local-toolkit',
       description: 'local toolkit',
-      operations: {
-        read_file: {
+      tools: [{
+        tool: readFileTool,
+        operation: {
           title: '读文件',
           summarizeInput: (input: unknown) => {
             const path = input && typeof input === 'object' && 'path' in input
@@ -79,7 +90,7 @@ function createDeps(): LocalServerDeps {
             return typeof path === 'string' ? { target: path } : null;
           },
         },
-      },
+      }],
     }] as LocalServerDeps['localToolkits'],
     pluginToolkits: [{ name: 'plugin-toolkit' }] as LocalServerDeps['pluginToolkits'],
     localCapabilities: [{ name: 'browser' }] as LocalServerDeps['localCapabilities'],

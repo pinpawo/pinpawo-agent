@@ -115,7 +115,7 @@ test('decision eval scenarios invoke, parse, normalize, and score each target', 
     {
       target: 'capability' as const,
       name: 'file-read-falls-back-to-general',
-      output: { selection: 'general' },
+      output: { selection: 'capability.general' },
     },
     {
       target: 'outcome' as const,

@@ -73,7 +73,7 @@ export type RootStreamChatEvent =
  * (announces, copied child messages); the live subagent feed comes from the
  * depth >= 2 child scopes, so lane echoes are dropped — as legacy does.
  */
-const DELEGATION_LANE_NODE_NAMES = new Set(['capability', 'general']);
+const DELEGATION_LANE_NODE_NAMES = new Set(['capability']);
 const INTERNAL_SUBAGENT_MESSAGE_NODE_NAMES = new Set([
   'SummarizationMiddleware.before_model',
 ]);

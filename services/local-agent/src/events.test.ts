@@ -4,12 +4,17 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import { ToolMessage } from '@langchain/core/messages';
+import type { AgentToolkit } from '@pinpawo/pet-agent';
 import { buildToolOperationEvent } from './agentStreamEvents';
 import { normalizeToolStreamEvent } from './events/agentStreamNormalizer';
 import { createOperationRegistry } from './events/operationRegistry';
 import { createBrowserToolkit } from './toolkits/browser';
 import { createBashToolkit, createGitToolkit, localToolOperationRegistry } from './toolkits/local';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
+
+function definition(toolkit: AgentToolkit, toolName: string) {
+  return toolkit.tools.find((item) => item.tool.name === toolName);
+}
 
 test('normalizes LangGraph tool stream events with toolkit operation metadata', () => {
   const event = normalizeToolStreamEvent(
@@ -81,7 +86,7 @@ test('normalizes tool stream events with event-provided operation metadata first
           summary: 'custom summary',
         }),
         source: {
-          provider: 'toolset',
+          provider: 'toolkit',
           name: 'private_shell',
           toolName: 'run_shell',
         },
@@ -169,63 +174,60 @@ test('buildToolOperationEvent uses git toolkit metadata', () => {
 test('createBashToolkit exposes operation metadata with the toolkit definition', () => {
   const toolkit = createBashToolkit();
 
-  assert.equal(toolkit.operations?.read_file?.title, '析文档');
-  assert.equal(toolkit.operations?.grep_search?.title, '搜内容');
-  assert.equal(toolkit.operations?.run_shell?.title, '执行命令');
-  assert.equal(toolkit.operations?.git_status, undefined);
+  assert.equal(definition(toolkit, 'read_file')?.operation?.title, '析文档');
+  assert.equal(definition(toolkit, 'grep_search')?.operation?.title, '搜内容');
+  assert.equal(definition(toolkit, 'run_shell')?.operation?.title, '执行命令');
+  assert.equal(definition(toolkit, 'git_status'), undefined);
 });
 
 test('createGitToolkit exposes git operation metadata with the toolkit definition', () => {
   const toolkit = createGitToolkit();
 
-  assert.equal(toolkit.operations?.git_status?.title, '查看 git 状态');
-  assert.equal(toolkit.operations?.git_commit?.title, '创建 git commit');
-  assert.equal(Boolean(toolkit.policy?.toolReview?.git_add), true);
-  assert.equal(Boolean(toolkit.policy?.toolReview?.git_commit), true);
-  assert.match(toolkit.policy?.autoReview?.allow ?? '', /normal non-force push/);
-  assert.match(toolkit.policy?.autoReview?.ask ?? '', /force pushes/);
+  assert.equal(definition(toolkit, 'git_status')?.operation?.title, '查看 git 状态');
+  assert.equal(definition(toolkit, 'git_commit')?.operation?.title, '创建 git commit');
+  assert.equal(Boolean(definition(toolkit, 'git_add')?.review), true);
+  assert.equal(Boolean(definition(toolkit, 'git_commit')?.review), true);
+  assert.match(toolkit.reviewGuidance?.allow ?? '', /normal non-force push/);
+  assert.match(toolkit.reviewGuidance?.ask ?? '', /force pushes/);
 });
 
 test('createBashToolkit exposes shell auto-review risk context', () => {
   const toolkit = createBashToolkit();
 
-  assert.match(toolkit.policy?.autoReview?.allow ?? '', /build, test, typecheck, lint, format/);
-  assert.match(toolkit.policy?.autoReview?.allow ?? '', /deletion of explicitly named non-sensitive/);
-  assert.match(toolkit.policy?.autoReview?.ask ?? '', /deletes recursively/);
-  assert.match(toolkit.policy?.autoReview?.ask ?? '', /deletes user data or sensitive files/);
-  assert.match(toolkit.policy?.autoReview?.ask ?? '', /elevates privileges/);
-  assert.match(toolkit.policy?.autoReview?.ask ?? '', /publishes or deploys artifacts/);
+  assert.match(toolkit.reviewGuidance?.allow ?? '', /build, test, typecheck, lint, format/);
+  assert.match(toolkit.reviewGuidance?.allow ?? '', /deletion of explicitly named non-sensitive/);
+  assert.match(toolkit.reviewGuidance?.ask ?? '', /deletes recursively/);
+  assert.match(toolkit.reviewGuidance?.ask ?? '', /deletes user data or sensitive files/);
+  assert.match(toolkit.reviewGuidance?.ask ?? '', /elevates privileges/);
+  assert.match(toolkit.reviewGuidance?.ask ?? '', /publishes or deploys artifacts/);
 });
 
 test('createBrowserToolkit exposes browser operation metadata', () => {
   const toolkit = createBrowserToolkit();
 
-  assert.equal(toolkit.operations?.browser_open?.title, '打开网页');
-  assert.equal(toolkit.operations?.browser_click?.title, '点击页面');
-  assert.equal(toolkit.operations?.browser_type?.title, '输入文本');
-  assert.equal(Boolean(toolkit.policy?.toolReview?.browser_open), true);
-  assert.equal(Boolean(toolkit.policy?.toolReview?.browser_open_with_session), true);
-  assert.equal(Boolean(toolkit.policy?.toolReview?.browser_open_with_profile), true);
-  assert.equal(toolkit.policy?.toolReview?.browser_click, undefined);
-  assert.equal(toolkit.policy?.toolReview?.browser_type, undefined);
-  assert.equal(toolkit.policy?.toolReview?.browser_snapshot, undefined);
-  assert.equal(toolkit.policy?.toolReview?.browser_extract, undefined);
-  assert.equal(toolkit.policy?.toolReview?.browser_wait, undefined);
+  assert.equal(definition(toolkit, 'browser_open')?.operation?.title, '打开网页');
+  assert.equal(definition(toolkit, 'browser_click')?.operation?.title, '点击页面');
+  assert.equal(definition(toolkit, 'browser_type')?.operation?.title, '输入文本');
+  assert.equal(Boolean(definition(toolkit, 'browser_open')?.review), true);
+  assert.equal(Boolean(definition(toolkit, 'browser_open_with_session')?.review), true);
+  assert.equal(Boolean(definition(toolkit, 'browser_open_with_profile')?.review), true);
+  assert.equal(definition(toolkit, 'browser_click')?.review, undefined);
+  assert.equal(definition(toolkit, 'browser_type')?.review, undefined);
+  assert.equal(definition(toolkit, 'browser_snapshot')?.review, undefined);
+  assert.equal(definition(toolkit, 'browser_extract')?.review, undefined);
+  assert.equal(definition(toolkit, 'browser_wait')?.review, undefined);
 });
 
 test('browser open review policy offers session authorization', async () => {
   const toolkit = createBrowserToolkit();
-  const policy = toolkit.policy?.toolReview?.browser_open;
+  const policy = definition(toolkit, 'browser_open')?.review;
   assert.ok(policy);
 
   const review = await policy.request({
-    models: {} as never,
-    actor: {} as never,
-    messages: [],
     toolkitName: 'browser',
     toolName: 'browser_open',
     input: { url: 'https://example.test', headless: true },
-    operation: toolkit.operations?.browser_open,
+    operation: definition(toolkit, 'browser_open')?.operation,
     reviewCapabilities: {
       humanReview: true,
       sessionAuthorization: true,
@@ -242,7 +244,7 @@ test('browser open review policy offers session authorization', async () => {
       toolkitName: 'browser',
       toolName: 'browser_open',
       input: { url: 'https://Example.test/path', headless: true },
-      operation: toolkit.operations?.browser_open,
+      operation: definition(toolkit, 'browser_open')?.operation,
       pendingAction: {
         actionId: 'call-1',
         toolName: 'browser_open',
@@ -529,11 +531,13 @@ test('createOperationRegistryForAgentSetup reads operation metadata from setup t
     input: {
       toolkits: [{
         name: 'test-toolkit',
-        operations: {
-          custom_tool: {
+        description: 'Test toolkit.',
+        tools: [{
+          tool: { name: 'custom_tool' } as never,
+          operation: {
             title: 'Custom Run',
           },
-        },
+        }],
       }],
     },
   } as never);
@@ -564,8 +568,9 @@ test('createOperationRegistryForAgentSetup reads host tool metadata from setup t
       toolkits: [{
         name: 'fake_pet_profile',
         description: 'Fake toolkit for registry coverage.',
-        operations: {
-          describe_pet_profile: {
+        tools: [{
+          tool: { name: 'describe_pet_profile' } as never,
+          operation: {
             title: '读取宠物资料',
             summarizeInput: (input: unknown) => {
               const focus = input && typeof input === 'object' && 'focus' in input
@@ -576,7 +581,7 @@ test('createOperationRegistryForAgentSetup reads host tool metadata from setup t
                 : null;
             },
           },
-        },
+        }],
       }],
     },
   } as never);

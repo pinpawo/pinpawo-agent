@@ -4,6 +4,14 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { tool } from '@langchain/core/tools';
+import {
+  defineInstructionDocument,
+  type AgentCapability,
+  type AgentToolkit,
+  type CapabilityArtifactStore,
+} from '@pinpawo/pet-agent';
+import { z } from 'zod';
 import { handleLocalHttpRequest } from './localHttpHandlers';
 import {
   createLocalServerRuntimeDepsStore,
@@ -11,6 +19,8 @@ import {
 } from './localServerTypes';
 import type { LoadedUserCapability } from './capabilityLoader';
 import { clearAgentRunActivity, recordOperationActivity } from './operationActivityState';
+import { checkBrowserAvailability } from './toolkits/browser';
+import { resolveToolkitAvailability } from './toolkits/toolkitAvailability';
 
 function makeReq(url: string, authorization?: string): IncomingMessage {
   return {
@@ -245,6 +255,44 @@ test('handleLocalHttpRequest exposes active operation health fields', async () =
   clearAgentRunActivity('req-1');
 });
 
+test('handleLocalHttpRequest preserves browser availability diagnostics', async () => {
+  const availability = await checkBrowserAvailability();
+  const res = makeRes();
+
+  handleLocalHttpRequest(
+    makeReq('/health', 'Bearer secret'),
+    res,
+    {
+      actorId: 'pet-a',
+      llmConfig: { model: 'test-model' },
+      workdir: '/tmp/pinpawo-browser-health',
+    } as LocalServerDeps,
+    {
+      authToken: 'secret',
+      loadSnapshot: async () => ({}),
+      listSessions: async () => [],
+      resumeSession: async () => {
+        throw new Error('not called');
+      },
+    },
+  );
+
+  const payload = JSON.parse(res.body);
+  const mode = availability.metadata?.mode;
+  assert.equal(
+    payload.browser_mode,
+    typeof mode === 'string'
+      ? mode
+      : availability.available
+        ? 'available'
+        : 'none',
+  );
+  assert.equal(
+    payload.browser_detail,
+    availability.detail ?? availability.reason,
+  );
+});
+
 test('capability rescan replaces frozen runtime capability snapshots', async () => {
   const definition = {
     meta: {
@@ -256,7 +304,14 @@ test('capability rescan replaces frozen runtime capability snapshots', async () 
       defaultEnabled: true,
       builtIn: false,
     },
-    capability: { name: 'custom-test' },
+    capability: {
+      name: 'custom-test',
+      description: 'custom test capability',
+      uses: [],
+      instructions: defineInstructionDocument({
+        content: '# Custom Test',
+      }),
+    },
   } as LoadedUserCapability;
   const runtimeDeps = createLocalServerRuntimeDepsStore({
     actorId: 'pet-a',
@@ -266,12 +321,8 @@ test('capability rescan replaces frozen runtime capability snapshots', async () 
       model: 'test-model',
     },
     workdir: '/tmp/pinpawo-capability-rescan',
-    userCapabilityDefinitions: [],
     userCapabilities: [],
-    rescanUserCapabilities: async () => ({
-      userCapabilityDefinitions: [definition],
-      userCapabilities: [definition],
-    }),
+    rescanUserCapabilities: async () => [definition],
   });
   const before = runtimeDeps.get();
   const res = makeRes();
@@ -302,8 +353,196 @@ test('capability rescan replaces frozen runtime capability snapshots', async () 
   assert.equal(Object.isFrozen(after.userCapabilities), true);
 });
 
-test('capability refresh updates frozen runtime lists with copy-on-write', async () => {
-  const capability = { name: 'dynamic-test' } as NonNullable<LocalServerDeps['localCapabilities']>[number];
+test('/capabilities projects run-scoped routability from the compiled registry', () => {
+  const explore: AgentCapability = {
+    name: 'explore',
+    description: 'explore capability',
+    uses: ['artifact_discovery'],
+    instructions: defineInstructionDocument({
+      content: '# Explore',
+    }),
+  };
+  const deps = {
+    actorId: 'pet-a',
+    llmConfig: { model: 'test-model' },
+    workdir: '/tmp/pinpawo-capability-routability',
+    localCapabilities: [explore],
+    capabilityArtifactStore: {} as CapabilityArtifactStore,
+  } as LocalServerDeps;
+  const options = {
+    authToken: 'secret',
+    loadSnapshot: async () => ({}),
+    listSessions: async () => [],
+    resumeSession: async () => {
+      throw new Error('not called');
+    },
+  };
+
+  const unscopedRes = makeRes();
+  handleLocalHttpRequest(
+    makeReq('/capabilities', 'Bearer secret'),
+    unscopedRes,
+    deps,
+    options,
+  );
+  const unscopedExplore = JSON.parse(unscopedRes.body).builtIns
+    .find((item: { id: string }) => item.id === 'explore');
+  assert.deepEqual(unscopedExplore.routability, {
+    status: 'requires_scope',
+    required: ['threadId'],
+  });
+
+  const missingAllScopeRes = makeRes();
+  handleLocalHttpRequest(
+    makeReq('/capabilities', 'Bearer secret'),
+    missingAllScopeRes,
+    {
+      ...deps,
+      capabilityArtifactStore: undefined,
+    },
+    options,
+  );
+  const missingAllScopeExplore = JSON.parse(missingAllScopeRes.body).builtIns
+    .find((item: { id: string }) => item.id === 'explore');
+  assert.deepEqual(missingAllScopeExplore.routability, {
+    status: 'requires_scope',
+    required: ['threadId', 'capabilityArtifactStore'],
+  });
+
+  const scopedRes = makeRes();
+  handleLocalHttpRequest(
+    makeReq('/capabilities?threadId=thread-1', 'Bearer secret'),
+    scopedRes,
+    deps,
+    options,
+  );
+  const scopedExplore = JSON.parse(scopedRes.body).builtIns
+    .find((item: { id: string }) => item.id === 'explore');
+  assert.deepEqual(scopedExplore.routability, {
+    status: 'available',
+  });
+});
+
+test('/capabilities exposes registry compilation issues instead of recomputing missing Toolkits', () => {
+  const duplicateToolkits = ['first', 'second'].map((name) => ({
+    name,
+    description: `${name} Toolkit`,
+    tools: [{
+      tool: tool(
+        async () => 'duplicate result',
+        {
+          name: 'duplicate_tool',
+          description: 'Duplicate test tool.',
+          schema: z.object({}),
+        },
+      ),
+    }],
+  })) as unknown as AgentToolkit[];
+  const explore: AgentCapability = {
+    name: 'explore',
+    description: 'explore capability',
+    uses: ['first', 'second'],
+    instructions: defineInstructionDocument({
+      content: '# Explore',
+    }),
+  };
+  const res = makeRes();
+
+  handleLocalHttpRequest(
+    makeReq('/capabilities', 'Bearer secret'),
+    res,
+    {
+      actorId: 'pet-a',
+      llmConfig: { model: 'test-model' },
+      workdir: '/tmp/pinpawo-capability-duplicate-tool',
+      localCapabilities: [explore],
+      localToolkits: duplicateToolkits,
+    } as LocalServerDeps,
+    {
+      authToken: 'secret',
+      loadSnapshot: async () => ({}),
+      listSessions: async () => [],
+      resumeSession: async () => {
+        throw new Error('not called');
+      },
+    },
+  );
+
+  const payload = JSON.parse(res.body);
+  const routability = payload.builtIns
+    .find((item: { id: string }) => item.id === 'explore')
+    .routability;
+  assert.equal(routability.status, 'unavailable');
+  assert.deepEqual(routability.issues, [{
+    code: 'duplicate_tool',
+    toolName: 'duplicate_tool',
+    toolkitNames: ['first', 'second'],
+  }]);
+});
+
+test('/capabilities attaches the cached reason for a known unavailable Toolkit', async () => {
+  const offlineToolkit: AgentToolkit = {
+    name: 'offline-test',
+    description: 'Unavailable test Toolkit',
+    tools: [],
+    availability: () => ({
+      available: false,
+      reason: 'test dependency is offline',
+    }),
+  };
+  await resolveToolkitAvailability(offlineToolkit);
+  const res = makeRes();
+
+  handleLocalHttpRequest(
+    makeReq('/capabilities', 'Bearer secret'),
+    res,
+    {
+      actorId: 'pet-a',
+      llmConfig: {
+        apiKey: 'test',
+        baseUrl: 'http://localhost',
+        model: 'test-model',
+      },
+      workdir: '/tmp/pinpawo-capability-unavailable-toolkit',
+      localCapabilities: [{
+        name: 'explore',
+        description: 'explore capability',
+        uses: [offlineToolkit.name],
+        instructions: defineInstructionDocument({
+          content: '# Explore',
+        }),
+      }],
+      localToolkitDefinitions: [offlineToolkit],
+      localToolkits: [],
+    } as LocalServerDeps,
+    {
+      authToken: 'secret',
+      loadSnapshot: async () => ({}),
+      listSessions: async () => [],
+      resumeSession: async () => {
+        throw new Error('not called');
+      },
+    },
+  );
+
+  const routability = JSON.parse(res.body).builtIns
+    .find((item: { id: string }) => item.id === 'explore')
+    .routability;
+  assert.deepEqual(routability, {
+    status: 'unavailable',
+    issues: [{
+      code: 'unavailable_toolkit',
+      toolkitName: 'offline-test',
+      reason: 'test dependency is offline',
+    }],
+  });
+});
+
+test('Toolkit refresh updates frozen runtime lists with copy-on-write', async () => {
+  const toolkit = {
+    name: 'dynamic-test',
+    availability: () => ({ available: true as const }),
+  } as NonNullable<LocalServerDeps['localToolkits']>[number];
   const runtimeDeps = createLocalServerRuntimeDepsStore({
     actorId: 'pet-a',
     llmConfig: {
@@ -312,14 +551,14 @@ test('capability refresh updates frozen runtime lists with copy-on-write', async
       model: 'test-model',
     },
     workdir: '/tmp/pinpawo-capability-refresh',
-    localCapabilityDefinitions: [capability],
-    localCapabilities: [],
+    localToolkitDefinitions: [toolkit],
+    localToolkits: [],
   });
   const before = runtimeDeps.get();
   const res = makeRes();
 
   handleLocalHttpRequest(
-    makeReq('/health?refresh_capability=dynamic-test', 'Bearer secret'),
+    makeReq('/health?refresh_toolkit=dynamic-test', 'Bearer secret'),
     res,
     before,
     {
@@ -336,9 +575,52 @@ test('capability refresh updates frozen runtime lists with copy-on-write', async
   await new Promise((resolve) => setTimeout(resolve, 0));
   const after = runtimeDeps.get();
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(before.localCapabilities, []);
-  assert.equal(after.localCapabilities?.[0], capability);
-  assert.equal(Object.isFrozen(after.localCapabilities), true);
+  assert.deepEqual(before.localToolkits, []);
+  assert.equal(after.localToolkits?.[0], toolkit);
+  assert.equal(Object.isFrozen(after.localToolkits), true);
+});
+
+test('Toolkit refresh can restore an unavailable plugin Toolkit', async () => {
+  const toolkit = {
+    name: 'dynamic-plugin-test',
+    availability: () => ({ available: true as const }),
+  } as NonNullable<LocalServerDeps['pluginToolkitDefinitions']>[number];
+  const runtimeDeps = createLocalServerRuntimeDepsStore({
+    actorId: 'pet-a',
+    llmConfig: {
+      apiKey: 'test',
+      baseUrl: 'http://localhost',
+      model: 'test-model',
+    },
+    workdir: '/tmp/pinpawo-plugin-toolkit-refresh',
+    pluginToolkitDefinitions: [toolkit],
+    pluginToolkits: [],
+  });
+  const before = runtimeDeps.get();
+  const res = makeRes();
+
+  handleLocalHttpRequest(
+    makeReq('/health?refresh_toolkit=dynamic-plugin-test', 'Bearer secret'),
+    res,
+    before,
+    {
+      authToken: 'secret',
+      loadSnapshot: async () => ({}),
+      listSessions: async () => [],
+      resumeSession: async () => {
+        throw new Error('not called');
+      },
+      updateCapabilities: (patch) => runtimeDeps.updateCapabilities(patch),
+    },
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const after = runtimeDeps.get();
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(before.pluginToolkits, []);
+  assert.equal(Object.isFrozen(before.pluginToolkitDefinitions), true);
+  assert.equal(after.pluginToolkits?.[0], toolkit);
+  assert.equal(Object.isFrozen(after.pluginToolkits), true);
 });
 
 test('handleLocalHttpRequest exposes canonical workdir Studio paths on runtime endpoint', async () => {

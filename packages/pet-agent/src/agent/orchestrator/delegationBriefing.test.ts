@@ -43,7 +43,7 @@ test('initial delegation materializes a concise main plan and scoped XML briefin
 test('initial delegation omits empty essential context', () => {
   const [briefing] = materializeDelegation({
     mode: 'initial',
-    lane: 'general',
+    lane: 'capability:general',
     runId: 'run-1',
     delegationId: 'task-a',
     task: '检查仓库状态。',
@@ -85,7 +85,7 @@ test('continuation delegation carries task and optional gap note without a new m
 test('delegation XML safely preserves a CDATA terminator in task text', () => {
   const [briefing] = materializeDelegation({
     mode: 'initial',
-    lane: 'general',
+    lane: 'capability:general',
     runId: 'run-1',
     delegationId: 'task-a',
     task: '检查 ]]> 边界。',
@@ -98,7 +98,7 @@ test('delegation XML safely preserves a CDATA terminator in task text', () => {
 test('briefing metadata is routing truth and never reads as announce or handoff', () => {
   const [briefing] = materializeDelegation({
     mode: 'initial',
-    lane: 'general',
+    lane: 'capability:general',
     runId: 'run-9',
     delegationId: 'task-9',
     task: '任务。',
@@ -109,7 +109,7 @@ test('briefing metadata is routing truth and never reads as announce or handoff'
   assert.equal(getPinpetMeta(briefing).synthetic, true);
   assert.equal(getMessageTurnId(briefing), 'run-9');
   assert.equal(getMessageDelegationId(briefing), 'task-9');
-  assert.equal(getMessageLane(briefing), 'general');
+  assert.equal(getMessageLane(briefing), 'capability:general');
   assert.equal(getMessageIsAnnounce(briefing), false);
   assert.equal(getMessageHandoffSource(briefing), null);
 });

@@ -91,18 +91,19 @@ decision.
 
 ## Capability selection boundary
 
-`general` and custom capabilities are peer executor forms. Their registration
-source and breadth differ, but `general` is not the failure state of custom
-selection. The decision compares the actual descriptions of all choices exposed
-for the invocation and selects an executor only when it can complete the whole
-immutable task.
+Every executor is an ordinary Capability. The host may register the well-known
+`general` Capability, but it has no separate selection value, lane, registry
+slot, or execution node. It is selected as `capability.general`, runs in
+`capability:general`, and uses the same compiled Capability executor as its
+peers.
 
-Capability search narrows the custom candidate set; a search hit is evidence of
-relevance, not proof of executability. The runtime therefore exposes only the
-current custom candidates, exposes `general` only when general tools actually
-exist, and always permits the explicit `unavailable` result. If no custom
-candidate exists, code skips the model and deterministically selects `general`
-or `unavailable` from actual general-tool availability.
+Capability search narrows the candidate set; a search hit is evidence of
+relevance, not proof of executability. When registered and compiled, `general`
+is retained as the planner's default candidate so the decision model—not a code
+fallback—chooses between it and more specific candidates. The schema contains
+only `capability.<candidate-name>` values plus the explicit `unavailable`
+result. With no candidate at all, code can return `unavailable` without invoking
+the model.
 
 `unavailable` creates no delegation and sends the run to `answer` with the
 unexecuted task still visible as terminal context. It does not authorize

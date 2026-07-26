@@ -1,4 +1,4 @@
-import type { ToolkitOperationMetadata, ToolkitOperationSummary } from '@pinpawo/pet-agent';
+import type { ToolOperationMetadata, ToolOperationSummary } from '@pinpawo/pet-agent';
 import {
   readBoolean,
   readJsonRecord,
@@ -12,20 +12,20 @@ function compactText(value: string, max = 80) {
   return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized;
 }
 
-function rawStringOutputSummary(output: unknown): ToolkitOperationSummary | null {
+function rawStringOutputSummary(output: unknown): ToolOperationSummary | null {
   if (typeof output !== 'string') return null;
   const summary = compactText(output);
   return summary ? { summary } : null;
 }
 
-function browserErrorSummary(error: unknown): ToolkitOperationSummary | null {
+function browserErrorSummary(error: unknown): ToolOperationSummary | null {
   if (error === undefined || error === null) return null;
   if (error instanceof Error) return { summary: compactText(error.message) || 'browser error' };
   if (typeof error === 'string') return { summary: compactText(error) || 'browser error' };
   return { summary: compactText(String(error)) || 'browser error' };
 }
 
-function browserSnapshotSummary(output: unknown): ToolkitOperationSummary | null {
+function browserSnapshotSummary(output: unknown): ToolOperationSummary | null {
   const record = readJsonRecord(output);
   if (!record) return rawStringOutputSummary(output);
   const title = readString(record, 'title');
@@ -56,7 +56,7 @@ function browserSnapshotSummary(output: unknown): ToolkitOperationSummary | null
   };
 }
 
-function browserExtractInputSummary(input: unknown): ToolkitOperationSummary | null {
+function browserExtractInputSummary(input: unknown): ToolOperationSummary | null {
   const record = readJsonRecord(input);
   const selector = readString(record, 'selector');
   const offset = readNumber(record, 'offset');
@@ -72,7 +72,7 @@ function browserExtractInputSummary(input: unknown): ToolkitOperationSummary | n
   };
 }
 
-function browserExtractOutputSummary(output: unknown): ToolkitOperationSummary | null {
+function browserExtractOutputSummary(output: unknown): ToolOperationSummary | null {
   const record = readJsonRecord(output);
   if (!record) return rawStringOutputSummary(output);
 
@@ -100,7 +100,7 @@ function browserExtractOutputSummary(output: unknown): ToolkitOperationSummary |
   };
 }
 
-function browserOpenInputSummary(input: unknown): ToolkitOperationSummary | null {
+function browserOpenInputSummary(input: unknown): ToolOperationSummary | null {
   const record = readJsonRecord(input);
   const url = readString(record, 'url');
   const headless = readBoolean(record, 'headless');
@@ -115,7 +115,7 @@ function browserOpenInputSummary(input: unknown): ToolkitOperationSummary | null
     : null;
 }
 
-function browserOpenWithSessionInputSummary(input: unknown): ToolkitOperationSummary | null {
+function browserOpenWithSessionInputSummary(input: unknown): ToolOperationSummary | null {
   const record = readJsonRecord(input);
   const url = readString(record, 'url');
   const session = readString(record, 'session');
@@ -132,7 +132,7 @@ function browserOpenWithSessionInputSummary(input: unknown): ToolkitOperationSum
     : null;
 }
 
-function browserOpenWithProfileInputSummary(input: unknown): ToolkitOperationSummary | null {
+function browserOpenWithProfileInputSummary(input: unknown): ToolOperationSummary | null {
   const record = readJsonRecord(input);
   const url = readString(record, 'url');
   const headless = readBoolean(record, 'headless');
@@ -148,7 +148,7 @@ function browserOpenWithProfileInputSummary(input: unknown): ToolkitOperationSum
     : null;
 }
 
-function selectorInputSummary(action: string, input: unknown): ToolkitOperationSummary | null {
+function selectorInputSummary(action: string, input: unknown): ToolOperationSummary | null {
   const record = readJsonRecord(input);
   const selector = readString(record, 'selector');
   const ref = readString(record, 'ref');
@@ -165,7 +165,7 @@ function selectorInputSummary(action: string, input: unknown): ToolkitOperationS
     : null;
 }
 
-function typeInputSummary(input: unknown): ToolkitOperationSummary | null {
+function typeInputSummary(input: unknown): ToolOperationSummary | null {
   const record = readJsonRecord(input);
   const selector = readString(record, 'selector');
   const ref = readString(record, 'ref');
@@ -186,7 +186,7 @@ function typeInputSummary(input: unknown): ToolkitOperationSummary | null {
     : null;
 }
 
-function waitInputSummary(input: unknown): ToolkitOperationSummary | null {
+function waitInputSummary(input: unknown): ToolOperationSummary | null {
   const record = readJsonRecord(input);
   const selector = readString(record, 'selector');
   const ref = readString(record, 'ref');
@@ -203,7 +203,7 @@ function waitInputSummary(input: unknown): ToolkitOperationSummary | null {
   };
 }
 
-function scrollInputSummary(input: unknown): ToolkitOperationSummary | null {
+function scrollInputSummary(input: unknown): ToolOperationSummary | null {
   const record = readJsonRecord(input);
   const selector = readString(record, 'selector');
   const ref = readString(record, 'ref');
@@ -217,7 +217,7 @@ function scrollInputSummary(input: unknown): ToolkitOperationSummary | null {
   };
 }
 
-function browserSessionInputSummary(input: unknown): ToolkitOperationSummary | null {
+function browserSessionInputSummary(input: unknown): ToolOperationSummary | null {
   const record = readJsonRecord(input);
   const action = readString(record, 'action');
   return action
@@ -230,7 +230,7 @@ function browserSessionInputSummary(input: unknown): ToolkitOperationSummary | n
     : null;
 }
 
-export const browserOperationMetadata: Record<string, ToolkitOperationMetadata> = {
+export const browserOperationMetadata: Record<string, ToolOperationMetadata> = {
   browser_open: {
     title: '打开网页',
     summarizeInput: browserOpenInputSummary,

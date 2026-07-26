@@ -1,45 +1,64 @@
-# 能力插件协议
+# Capability 目录协议
 
-## 1. 插件结构
+> 状态：Capability / Toolkit V2
+> 更新：2026-07-27
+
+## 1. 目录结构
 
 ```text
-<plugin-dir>/
-├─ manifest.json
-└─ index.js
+<capability-dir>/
+├── CAPABILITY.md
+└── index.js        # 可选
 ```
 
-### `manifest.json` 字段
+`CAPABILITY.md` 同时拥有路由 metadata、required Toolkit 依赖和 Markdown instructions：
 
-1. `id: string`（必填）→ 与 `capability.name` 必须一致
-2. `name: string`（必填）
-3. `description: string`（必填）
-4. `icon: string`（必填）
-5. `color: string`（必填）
-6. `defaultEnabled: boolean`（必填）
-7. `builtIn: boolean`（用户插件必须是 `false`）
-8. `comingSoon?: boolean`（可选）
+```md
+---
+name: inspect
+description: 检查代码库并整理证据。
+uses:
+  - bash
+  - git
+version: 1
+icon: magnifyingglass
+color: blue
+defaultEnabled: true
+entry: ./index.js
+---
 
-## 2. `index.js` 约束
+# Inspect
 
-1. 必须导出 `createCapability()` 或 `default()`（返回 `AgentCapability`）。
-2. `AgentCapability.name` 与 `manifest.id` 一致。
-3. `createRuntime` 必须是函数。
-4. 若包含 `availability`，只允许 `cache: 'startup' | 'none'`。
+只读取并总结与当前任务相关的内容。
+```
 
-## 3. 加载与安装入口
+## 2. Frontmatter
 
-1. 默认目录：`~/.pinpawo/capabilities/`
-2. 额外目录：
-   - 环境变量 `PINPAWO_CAPABILITY_DIRS`
-   - 本地配置 `capability_dirs`
-3. 安装命令：
-   - `pinpawo capability install <directory>`
-   - `--link` 为软链接安装；否则拷贝（可重命名同名目录）
-4. 验证命令：
-   - `pinpawo capability validate <directory>`
+- `name`：必填；稳定的 Capability route id。
+- `description`：必填；planner 用于候选检索和选择。
+- `uses`：必填；完整 required Toolkit 列表，可以为空。
+- `version`：必填；当前只能为 `1`。
+- `icon`、`color`、`defaultEnabled`：可选展示字段。
+- `entry`：可选，必须是目录内相对路径。
 
-## 4. 扩展行为
+未知字段、重复 `uses`、越界或 symlink 逃逸的 entry、空或超大 Markdown body 都会被拒绝。
 
-1. 插件缺失文件时直接被跳过或报错（install/validate 行为不同）。
-2. 同 ID 插件按扫描顺序 first-win。
-3. 重复 ID 在扫描阶段会跳过后者。
+`general` 是 local-agent host 的保留名，用户 Capability 不能注册该名称。
+
+## 3. 可选代码入口
+
+Capability 不需要代码入口。声明 `entry` 时，该模块只能导出：
+
+```js
+export const lifecycle = {
+  async finalize(result, context) {
+    // 只做确定性结果整理或 artifact 持久化。
+  },
+};
+```
+
+不允许从 entry 导出 runtime、tools、模型调用或任意扩展对象。需要编码实现的动作必须进入 Toolkit，再由 `CAPABILITY.md` 的 `uses` 引用。
+
+## 4. 迁移
+
+旧 `manifest.json/index.js` Capability 格式已删除，不提供兼容层。Loader 会跳过旧目录并输出迁移警告。

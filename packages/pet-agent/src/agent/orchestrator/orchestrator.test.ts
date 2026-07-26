@@ -2,27 +2,35 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import { ToolMessage } from '@langchain/core/messages/tool';
-import { tool } from '@langchain/core/tools';
+import { tool, type StructuredTool } from '@langchain/core/tools';
 import { FakeListChatModel } from '@langchain/core/utils/testing';
 import { Command, MemorySaver, messagesStateReducer } from '@langchain/langgraph';
 import { createMiddleware, FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
-import type { AgentCapability } from '../../types/capability';
+import {
+  defineInstructionDocument,
+  type AgentCapability,
+} from '../../types/capability';
 import type { AgentActor, AgentModels } from '../../types/agent';
-import { defineToolset, type AgentToolkit } from '../../types/toolkit';
+import type {
+  AgentToolkit,
+  ToolDefinition,
+  ToolReviewPolicy,
+} from '../../types/toolkit';
 import { createSubagent } from '../../subagent/createSubagent';
 import { runAgent } from '../runAgent';
-import { buildOrchestratorRunInput, createOrchestratorGraph } from '../createAgentRuntime';
+import {
+  buildOrchestratorRunInput,
+  createOrchestratorGraph as createRuntimeOrchestratorGraph,
+} from '../createAgentRuntime';
+import { compileAgentRegistry } from './registry';
 import {
   searchCapabilities,
   splitCapabilitySearchTerms,
 } from './capabilitySearch';
 import {
-  collectCapabilityOperations,
-  collectGeneralOperations,
   collectToolkitOperations,
-  resolveToolkitResources,
-  selectCapabilityTools,
+  resolveToolkitExecution,
 } from './subagentDispatch';
 import { buildReviewSpec } from './review/reviewSpec';
 import { isToolActionAuthorized } from './review/reviewAuthorizations';
@@ -57,12 +65,51 @@ import {
 } from './state';
 import { createCapabilityDecisionRunner } from './runtime/decisions/orchestrationDecision';
 
-function capability(name: string, description: string): AgentCapability {
+function capability(
+  name: string,
+  description: string,
+  uses: readonly string[] = [],
+): AgentCapability {
   return {
     name,
     description,
-    createRuntime: () => ({}),
+    uses,
+    instructions: defineInstructionDocument({
+      content: `Execute the ${name} capability.`,
+    }),
   };
+}
+
+function createOrchestratorGraph(
+  config: Parameters<typeof createRuntimeOrchestratorGraph>[0],
+): ReturnType<typeof createRuntimeOrchestratorGraph> {
+  const graph = createRuntimeOrchestratorGraph(config);
+  const withRegistry = (options: {
+    configurable?: Record<string, unknown>;
+  } = {}) => {
+    const configurable = options.configurable ?? {};
+    return {
+      ...options,
+      configurable: {
+        ...configurable,
+        registry: compileAgentRegistry({
+          toolkits: (configurable.toolkits ?? []) as AgentToolkit[],
+          capabilities: (configurable.capabilities ?? []) as AgentCapability[],
+        }),
+      },
+    };
+  };
+  return new Proxy(graph, {
+    get(target, property, receiver) {
+      if (property === 'invoke' || property === 'streamEvents') {
+        return (input: unknown, options: {
+          configurable?: Record<string, unknown>;
+        } = {}) => target[property](input as never, withRegistry(options) as never);
+      }
+      const value = Reflect.get(target, property, receiver);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
 }
 
 function mockTool(name: string) {
@@ -73,10 +120,31 @@ function mockTool(name: string) {
   });
 }
 
-type ToolkitResources = Awaited<ReturnType<typeof resolveToolkitResources>>;
+function toolDefinition(
+  toolItem: StructuredTool,
+  options: Omit<ToolDefinition, 'tool'> = {},
+): ToolDefinition {
+  return {
+    tool: toolItem,
+    ...options,
+  };
+}
+
+function toolDefinitions(...tools: StructuredTool[]): ToolDefinition[] {
+  return tools.map((toolItem) => toolDefinition(toolItem));
+}
+
+function reviewedTool(
+  toolItem: StructuredTool,
+  review: ToolReviewPolicy,
+): ToolDefinition {
+  return toolDefinition(toolItem, { review });
+}
+
+type ResolvedToolkitExecution = Awaited<ReturnType<typeof resolveToolkitExecution>>;
 
 async function runToolkitToolCall(
-  resources: ToolkitResources,
+  resources: ResolvedToolkitExecution,
   toolCall: { id?: string; name: string; args: Record<string, unknown> }
     | Array<{ id?: string; name: string; args: Record<string, unknown> }>,
 ) {
@@ -87,8 +155,8 @@ async function runToolkitToolCall(
     }),
     tools: resources.tools,
     middleware: resources.middleware,
-    instructions: [],
-    operations: collectGeneralOperations(resources.toolkits),
+    promptSections: [],
+    operations: collectToolkitOperations(resources.toolkits),
     messages: [new HumanMessage(`call ${toolCalls.map((call) => call.name).join(', ')}`)],
   });
 }
@@ -136,10 +204,6 @@ function nextTaskDecision(
 
 function routeCapabilityDecision(capabilityName: string) {
   return { selection: `capability.${capabilityName}` };
-}
-
-function routeGeneralDecision() {
-  return { selection: 'general' };
 }
 
 function goalDoneDecision() {
@@ -235,7 +299,7 @@ test('task decision reads full canonical main messages and excludes lane announc
   });
   const previousAnnounce = new AIMessage('这是未 handoff 的 lane announce，不应进入 entryDecision。');
   setPinpetMeta(previousAnnounce, {
-    lane: 'general',
+    lane: 'capability:general',
     runId: 'prev-turn',
     isAnnounce: true,
     delegationId: 'task-prev',
@@ -247,7 +311,7 @@ test('task decision reads full canonical main messages and excludes lane announc
   const internalBriefing = new AIMessage('这条消息的正文不参与分类。');
   setPinpetMeta(internalBriefing, {
     source: 'delegation_briefing',
-    lane: 'general',
+    lane: 'capability:general',
     runId: 'prev-turn',
     delegationId: 'task-briefing',
   });
@@ -364,6 +428,46 @@ test('capability decision searches candidates from the pending task', async () =
   assert.doesNotMatch(routeInput, /匹配：|search_keywords/);
   assert.doesNotMatch(routeInput, /delegate_capability\.explore/);
   assert.equal(decisionCallCount, 3);
+});
+
+test('capability decision excludes a Capability whose required Toolkit is missing', async () => {
+  let routeInput = '';
+  let decisionCallCount = 0;
+  const model = {
+    invoke: async () => new AIMessage(''),
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async (messages: unknown[]) => {
+        decisionCallCount += 1;
+        routeInput = String((messages.at(-1) as { content?: unknown })?.content ?? '');
+        return routeCapabilityDecision('general');
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const runCapabilityDecision = createCapabilityDecisionRunner({
+    models: { act: model, observe: model },
+    actor: testActor,
+  });
+  const input = buildOrchestratorRunInput([new HumanMessage('use missing service')]);
+  input.runPendingTask = {
+    task: 'use missing service',
+    contextSummary: null,
+  };
+
+  await runCapabilityDecision(input as OrchestratorStateType, {
+    configurable: {
+      actor: testActor,
+      registry: compileAgentRegistry({
+        capabilities: [capability('broken', 'Broken service capability.', ['missing'])],
+        toolkits: [],
+      }),
+    },
+  });
+
+  assert.equal(decisionCallCount, 0);
+  assert.equal(routeInput, '');
 });
 
 test('task_done reroutes through capabilityPlanner before the next task', async () => {
@@ -639,6 +743,51 @@ test('missing executable capability routes through the answer node', async () =>
   assert.equal(state.runPendingTask, null);
 });
 
+test('capability planner reports an empty compiled registry without inventing General', async () => {
+  let structuredCallCount = 0;
+  let plannerInput = '';
+  const model = {
+    invoke: async () => new AIMessage('当前没有可用 Capability。'),
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async (messages: unknown[]) => {
+        structuredCallCount += 1;
+        if (structuredCallCount === 1) {
+          return { action: 'needs_plan' };
+        }
+        plannerInput = String(
+          (messages.at(-1) as { content?: unknown })?.content ?? '',
+        );
+        return { result: 'answer', remaining_plan: [], next_task: null };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const graph = createOrchestratorGraph({
+    models: {
+      act: model,
+      observe: model,
+      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
+    },
+    actor: testActor,
+  });
+
+  await graph.invoke(buildOrchestratorRunInput([
+    new HumanMessage('完成一个需要执行能力的任务'),
+  ]), {
+    configurable: {
+      thread_id: 'empty-capability-registry-planner-facts',
+      actor: testActor,
+      capabilities: [],
+      toolkits: [],
+    },
+  });
+
+  assert.match(plannerInput, /No capabilities are currently available\./);
+  assert.doesNotMatch(plannerInput, /general capability remains available/i);
+});
+
 test('capability decision can reject a retrieved candidate when no executor covers the task', async () => {
   let structuredCallCount = 0;
   let capabilityDecisionInput = '';
@@ -695,6 +844,91 @@ test('capability decision can reject a retrieved candidate when no executor cove
   assert.equal(state.runDelegationSummaries.length, 0);
 });
 
+test('instructions-only general Capability remains an executable planner candidate', async () => {
+  let decisionInput = '';
+  const model = {
+    withStructuredOutput: () => ({
+      invoke: async (messages: unknown[]) => {
+        decisionInput = String(
+          (messages.at(-1) as { content?: unknown })?.content ?? '',
+        );
+        return routeCapabilityDecision('general');
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const runCapabilityDecision = createCapabilityDecisionRunner({
+    models: { act: model, observe: model },
+    actor: testActor,
+  });
+  const input = buildOrchestratorRunInput([new HumanMessage('summarize this')]);
+  const result = await runCapabilityDecision({
+    ...input,
+    runPendingTask: {
+      task: 'Summarize the supplied text.',
+      contextSummary: null,
+    },
+  } as OrchestratorStateType, {
+    configurable: {
+      registry: compileAgentRegistry({
+        toolkits: [],
+        capabilities: [
+          capability('general', 'Handle general tasks.'),
+        ],
+      }),
+    },
+  });
+
+  assert.equal(result.runNextDelegation?.lane, 'capability:general');
+  assert.match(decisionInput, /capability\.general/);
+  assert.match(decisionInput, /Toolkit scope：无（仅 instructions）/);
+  assert.doesNotMatch(decisionInput, /\ngeneral（|general tools/);
+});
+
+test('capability decision receives the compiled Toolkit scope as runtime fact', async () => {
+  let decisionInput = '';
+  const model = {
+    withStructuredOutput: () => ({
+      invoke: async (messages: unknown[]) => {
+        decisionInput = String(
+          (messages.at(-1) as { content?: unknown })?.content ?? '',
+        );
+        return routeCapabilityDecision('general');
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const runCapabilityDecision = createCapabilityDecisionRunner({
+    models: { act: model, observe: model },
+    actor: testActor,
+  });
+  const input = buildOrchestratorRunInput([new HumanMessage('read the prior report')]);
+
+  await runCapabilityDecision({
+    ...input,
+    runPendingTask: {
+      task: 'Read the prior report from this thread.',
+      contextSummary: null,
+    },
+  } as OrchestratorStateType, {
+    configurable: {
+      registry: compileAgentRegistry({
+        capabilities: [
+          capability('general', 'Handle general tasks.', ['artifact_discovery']),
+        ],
+        toolkits: [{
+          name: 'artifact_discovery',
+          description: 'Read Capability artifacts from the current thread.',
+          tools: toolDefinitions(mockTool('artifact_read')),
+        }],
+      }),
+    },
+  });
+
+  assert.match(
+    decisionInput,
+    /artifact_discovery（Read Capability artifacts from the current thread\.）/,
+  );
+});
+
 test('capability decision rejects missing pending task as an invariant violation', async () => {
   const model = new FakeListChatModel({ responses: ['unused'] }) as unknown as AgentModels['act'];
   const runCapabilityDecision = createCapabilityDecisionRunner({
@@ -707,16 +941,18 @@ test('capability decision rejects missing pending task as an invariant violation
       ...input,
       runNextDelegation: {
         id: 'stale',
-        lane: 'general',
+        lane: 'capability:general',
         task: '旧任务',
         contextSummary: null,
       },
-    } as OrchestratorStateType, {
+    } as unknown as OrchestratorStateType, {
       configurable: {
         thread_id: 'route-missing-task-invariant',
         actor: testActor,
-        capabilities: [],
-        toolkits: [],
+        registry: compileAgentRegistry({
+          capabilities: [],
+          toolkits: [],
+        }),
       },
     }),
     /capabilityDecision requires runPendingTask/,
@@ -903,7 +1139,7 @@ test('a completed subagent announce reaches the decision, while answer node only
     taskActiveDelegation: null as TaskActiveDelegation | null,
   };
   setPinpetMeta(currentAnnounce, {
-    lane: 'general',
+    lane: 'capability:general',
     runId: input.runId,
     isAnnounce: true,
     completionReason: 'natural',
@@ -912,14 +1148,14 @@ test('a completed subagent announce reaches the decision, while answer node only
   });
   input.runDelegationSummaries = [{
     id: 'task-1',
-    lane: 'general',
+    lane: 'capability:general',
     task: '读取文件并运行 lint',
     status: 'progress',
     resultPreview: currentAnnounceText,
   }];
   input.taskActiveDelegation = {
     id: 'task-1',
-    lane: 'general',
+    lane: 'capability:general',
     task: '读取文件并运行 lint',
     contextSummary: null,
     transcriptRunId: input.runId,
@@ -1024,7 +1260,7 @@ test('delegation outcome answer asks LLM for a short delegation completion reply
   const announceText = 'Vibe Coding 模型排行榜：1. Claude Sonnet 4；2. GPT-5；3. Gemini 2.5 Pro。';
   const announceMessage = new AIMessage(announceText);
   setPinpetMeta(announceMessage, {
-    lane: 'general',
+    lane: 'capability:general',
     runId: input.runId,
     isAnnounce: true,
     delegationId: 'task-1',
@@ -1033,14 +1269,14 @@ test('delegation outcome answer asks LLM for a short delegation completion reply
   input.messages.push(announceMessage);
   input.runDelegationSummaries = [{
     id: 'task-1',
-    lane: 'general',
+    lane: 'capability:general',
     task: '搜索并整理 vibecoding 模型排行榜。',
     status: 'completed',
     resultPreview: announceText,
   }];
   input.taskActiveDelegation = {
     id: 'task-1',
-    lane: 'general',
+    lane: 'capability:general',
     task: '搜索并整理 vibecoding 模型排行榜。',
     contextSummary: null,
     transcriptRunId: input.runId,
@@ -1095,7 +1331,7 @@ test('user_input_required returns control without claiming delegation completion
   const announceText = '报告已经完成，但用户尚未选择邮件或项目群，当前无法继续发送。';
   const announceMessage = new AIMessage(announceText);
   setPinpetMeta(announceMessage, {
-    lane: 'general',
+    lane: 'capability:general',
     runId: input.runId,
     isAnnounce: true,
     completionReason: 'natural',
@@ -1105,14 +1341,14 @@ test('user_input_required returns control without claiming delegation completion
   input.messages.push(announceMessage);
   input.runDelegationSummaries = [{
     id: 'task-user-choice',
-    lane: 'general',
+    lane: 'capability:general',
     task,
     status: 'progress',
     resultPreview: announceText,
   }];
   input.taskActiveDelegation = {
     id: 'task-user-choice',
-    lane: 'general',
+    lane: 'capability:general',
     task,
     contextSummary: null,
     transcriptRunId: input.runId,
@@ -1176,7 +1412,7 @@ test('task_done followed by planner answer does not imply user-goal completion',
   const announceText = '调查完成：认证入口集中在 auth/index.ts，主要风险是循环依赖。';
   const announceMessage = new AIMessage(announceText);
   setPinpetMeta(announceMessage, {
-    lane: 'general',
+    lane: 'capability:general',
     runId: input.runId,
     isAnnounce: true,
     completionReason: 'natural',
@@ -1186,14 +1422,14 @@ test('task_done followed by planner answer does not imply user-goal completion',
   input.messages.push(announceMessage);
   input.runDelegationSummaries = [{
     id: 'task-auth-investigation',
-    lane: 'general',
+    lane: 'capability:general',
     task,
     status: 'progress',
     resultPreview: announceText,
   }];
   input.taskActiveDelegation = {
     id: 'task-auth-investigation',
-    lane: 'general',
+    lane: 'capability:general',
     task,
     contextSummary: null,
     transcriptRunId: input.runId,
@@ -1273,7 +1509,7 @@ test('answer filters internal briefings by lane without parsing message text', a
   const internalBriefing = new AIMessage('正文完全普通，但 metadata 表明它属于 delegation lane。');
   setPinpetMeta(internalBriefing, {
     source: 'delegation_briefing',
-    lane: 'general',
+    lane: 'capability:general',
     runId: 'answer-run',
     delegationId: 'answer-task',
   });
@@ -1378,9 +1614,14 @@ test('limit-reached progress announce lets model choose the same capability dele
   const inspectCapability: AgentCapability = {
     name: 'inspect_repo',
     description: 'Inspect repository.',
-    createRuntime: () => {
-      capabilityRunCount += 1;
-      return {};
+    uses: [],
+    instructions: defineInstructionDocument({
+      content: 'Inspect the repository.',
+    }),
+    lifecycle: {
+      finalize: () => {
+        capabilityRunCount += 1;
+      },
     },
   };
   const graph = createOrchestratorGraph({
@@ -1449,73 +1690,41 @@ test('limit-reached progress announce lets model choose the same capability dele
 test('toolkits compose tools and instructions for capability runtimes', async () => {
   const browserOpen = mockTool('browser_open');
   const readFile = mockTool('read_file');
-  const customTool = mockTool('custom_tool');
   const toolkits: AgentToolkit[] = [
     {
       name: 'browser',
       description: 'browser toolkit',
-      tools: [browserOpen],
-      instructions: ['browser rules'],
+      tools: toolDefinitions(browserOpen),
+      instructions: 'browser rules',
     },
     {
       name: 'bash',
       description: 'bash toolkit',
-      tools: [readFile],
-      instructions: ['bash rules'],
+      tools: toolDefinitions(readFile),
+      instructions: 'bash rules',
     },
   ];
 
-  const browserResources = await resolveToolkitResources(toolkits, ['browser'], {
+  const browserExecution = await resolveToolkitExecution(toolkits, ['browser'], {
     models: {} as AgentModels,
     actor: testActor,
     messages: [],
   });
-  const allResources = await resolveToolkitResources(toolkits, undefined, {
+  const allExecution = await resolveToolkitExecution(toolkits, undefined, {
     models: {} as AgentModels,
     actor: testActor,
     messages: [],
   });
 
-  assert.deepEqual(browserResources.tools.map((toolItem) => toolItem.name), ['browser_open']);
-  assert.deepEqual(browserResources.instructions, ['browser rules']);
-  assert.deepEqual(allResources.tools.map((toolItem) => toolItem.name), ['browser_open', 'read_file']);
+  assert.deepEqual(browserExecution.tools.map((toolItem) => toolItem.name), ['browser_open']);
+  assert.equal(browserExecution.toolkits[0]?.instructions, 'browser rules');
+  assert.deepEqual(allExecution.tools.map((toolItem) => toolItem.name), ['browser_open', 'read_file']);
 
-  const selectedTools = selectCapabilityTools({
-    uses: ['browser'],
-    toolsets: [{
-      name: 'private',
-      tools: [customTool],
-    }],
-  }, browserResources.tools);
-
-  assert.deepEqual(selectedTools.map((toolItem) => toolItem.name), [
-    'browser_open',
-    'custom_tool',
-  ]);
-
-  const dedupedTools = selectCapabilityTools({
-    uses: ['browser'],
-    toolsets: [
-      {
-        name: 'private',
-        tools: [customTool],
-      },
-      {
-        name: 'private_duplicate',
-        tools: [customTool],
-      },
-    ],
-  }, browserResources.tools);
-
-  assert.deepEqual(dedupedTools.map((toolItem) => toolItem.name), [
-    'browser_open',
-    'custom_tool',
-  ]);
 });
 
-test('capability runtime receives available toolkit metadata and fixed uses still resolve normally', async () => {
+test('capability receives tools only from Toolkits authorized by fixed uses', async () => {
   let routeCallCount = 0;
-  let runtimeToolkitNames: string[] = [];
+  let capabilityToolNames: string[] = [];
   const routeModel = {
     invoke: async () => new AIMessage('answered'),
     bindTools: () => ({
@@ -1535,18 +1744,20 @@ test('capability runtime receives available toolkit metadata and fixed uses stil
     }),
   } as unknown as AgentModels['act'];
   const subagentModel = new FakeToolCallingModel({ toolCalls: [[]] });
+  const bindTools = subagentModel.bindTools.bind(subagentModel);
+  (subagentModel as unknown as {
+    bindTools: (tools: Array<{ name: string }>) => unknown;
+  }).bindTools = (tools) => {
+    capabilityToolNames = tools.map((toolItem) => toolItem.name);
+    return bindTools(tools as never);
+  };
   const runtimeCapability: AgentCapability = {
     name: 'inspect_repo',
     description: 'Inspect repository with bash tools.',
-    createRuntime: async (ctx) => {
-      runtimeToolkitNames = ctx.availableToolkits?.map((item) => item.name) ?? [];
-      return {
-        uses: ['bash'],
-        instructions: (instructionCtx) => [
-          `available=${instructionCtx.availableToolkits?.map((item) => item.name).join(',') ?? ''}`,
-        ],
-      };
-    },
+    uses: ['bash'],
+    instructions: defineInstructionDocument({
+      content: 'Inspect the repository with the authorized tools.',
+    }),
   };
   const graph = createOrchestratorGraph({
     models: {
@@ -1566,28 +1777,27 @@ test('capability runtime receives available toolkit metadata and fixed uses stil
         {
           name: 'bash',
           description: 'bash toolkit',
-          tools: [mockTool('read_file')],
+          tools: toolDefinitions(mockTool('read_file')),
         },
         {
           name: 'browser',
           description: 'browser toolkit',
-          tools: [mockTool('browser_open')],
+          tools: toolDefinitions(mockTool('browser_open')),
         },
         {
           name: 'artifact',
           description: 'artifact toolkit',
-          exposure: { general: false },
-          tools: [mockTool('artifact_read')],
+          tools: toolDefinitions(mockTool('artifact_read')),
         },
       ],
       forcedCapabilityNames: ['inspect_repo'],
     },
   });
 
-  assert.deepEqual(runtimeToolkitNames, ['bash', 'browser', 'artifact']);
+  assert.deepEqual(capabilityToolNames, ['read_file']);
 });
 
-test('artifact discovery tools reach a selected capability without broadening its toolkit uses', async () => {
+test('artifact discovery tools reach a selected capability only when declared in uses', async () => {
   let decisionCallCount = 0;
   let capabilityToolNames: string[] = [];
   const routeModel = {
@@ -1622,30 +1832,38 @@ test('artifact discovery tools reach a selected capability without broadening it
       capabilities: [{
         name: 'browser_like',
         description: 'browser-only capability',
-        createRuntime: () => ({ uses: ['browser'] }),
+        uses: ['browser', 'artifact_discovery'],
+        instructions: defineInstructionDocument({
+          content: 'Inspect browser state and related artifacts.',
+        }),
       }],
-      toolkits: [{
-        name: 'browser',
-        description: 'browser toolkit',
-        tools: [mockTool('browser_open')],
-      }],
+      toolkits: [
+        {
+          name: 'browser',
+          description: 'browser toolkit',
+          tools: toolDefinitions(mockTool('browser_open')),
+        },
+        {
+          name: 'artifact_discovery',
+          description: 'artifact discovery toolkit',
+          tools: toolDefinitions(
+            mockTool('artifact_list'),
+            mockTool('artifact_read'),
+          ),
+        },
+      ],
       forcedCapabilityNames: ['browser_like'],
-      artifactDiscoveryRoot: '/repo/.pinpawo/capability-artifacts/threads/tool-test',
-      artifactDiscoveryToolset: defineToolset({
-        name: 'artifact_discovery',
-        tools: [mockTool('artifact_list_dir'), mockTool('artifact_view_file_chunk')],
-      }),
     },
   });
 
   assert.deepEqual(capabilityToolNames, [
     'browser_open',
-    'artifact_list_dir',
-    'artifact_view_file_chunk',
+    'artifact_list',
+    'artifact_read',
   ]);
 });
 
-test('general lane keeps workspace file tools alongside scoped artifact discovery tools', async () => {
+test('general Capability composes its declared Toolkits', async () => {
   let routeCallCount = 0;
   let generalToolNames: string[] = [];
   const routeModel = {
@@ -1654,9 +1872,13 @@ test('general lane keeps workspace file tools alongside scoped artifact discover
     withStructuredOutput: () => ({
       invoke: async () => {
         routeCallCount += 1;
-        return routeCallCount === 1
-          ? nextTaskDecision('inspect workspace and prior artifacts')
-          : goalDoneDecision();
+        if (routeCallCount === 1) {
+          return nextTaskDecision('inspect workspace and prior artifacts');
+        }
+        if (routeCallCount === 2) {
+          return routeCapabilityDecision('general');
+        }
+        return goalDoneDecision();
       },
     }),
   } as unknown as AgentModels['act'];
@@ -1678,17 +1900,24 @@ test('general lane keeps workspace file tools alongside scoped artifact discover
     configurable: {
       thread_id: 'general-artifact-discovery-tools',
       actor: testActor,
-      capabilities: [],
-      toolkits: [{
-        name: 'bash',
-        description: 'workspace file tools',
-        tools: [mockTool('list_dir'), mockTool('view_file_chunk')],
-      }],
-      artifactDiscoveryRoot: '/repo/.pinpawo/capability-artifacts/threads/general-tool-test',
-      artifactDiscoveryToolset: defineToolset({
-        name: 'artifact_discovery',
-        tools: [mockTool('artifact_list_dir'), mockTool('artifact_view_file_chunk')],
-      }),
+      capabilities: [
+        capability('general', 'General-purpose capability.', ['bash', 'artifact_discovery']),
+      ],
+      toolkits: [
+        {
+          name: 'bash',
+          description: 'workspace file tools',
+          tools: toolDefinitions(mockTool('list_dir'), mockTool('view_file_chunk')),
+        },
+        {
+          name: 'artifact_discovery',
+          description: 'artifact discovery toolkit',
+          tools: toolDefinitions(
+            mockTool('artifact_list'),
+            mockTool('artifact_read'),
+          ),
+        },
+      ],
     },
     callbacks: recorder.callbacks,
   });
@@ -1696,17 +1925,21 @@ test('general lane keeps workspace file tools alongside scoped artifact discover
   assert.deepEqual(generalToolNames, [
     'list_dir',
     'view_file_chunk',
-    'artifact_list_dir',
-    'artifact_view_file_chunk',
+    'artifact_list',
+    'artifact_read',
   ]);
   assert.equal(recorder.subagentInputs.length, 1);
   assert.match(
     recorder.subagentInputs[0].map((message) => String(message.content)).join('\n'),
-    /<artifact_discovery_context[\s\S]*general-tool-test/,
+    /<artifact_discovery_context[\s\S]*current_thread/,
+  );
+  assert.match(
+    JSON.stringify(recorder.subagentInputs[0].map((message) => message.content)),
+    /角色：「小白」[\s\S]*物种：cat[\s\S]*性格：友好/,
   );
 });
 
-test('toolkit exposure can hide tools from the general lane', async () => {
+test('toolkit registration does not rely on lane authorization flags', async () => {
   let routeCallCount = 0;
   let generalToolNames: string[] = [];
   const routeModel = {
@@ -1717,11 +1950,13 @@ test('toolkit exposure can hide tools from the general lane', async () => {
     withStructuredOutput: () => ({
       invoke: async () => {
         routeCallCount += 1;
-        return routeCallCount === 1
-          ? nextTaskDecision('inspect with tools')
-          : {
-              ...goalDoneDecision(),
-            };
+        if (routeCallCount === 1) {
+          return nextTaskDecision('inspect with tools');
+        }
+        if (routeCallCount === 2) {
+          return routeCapabilityDecision('general');
+        }
+        return goalDoneDecision();
       },
     }),
   } as unknown as AgentModels['act'];
@@ -1744,38 +1979,45 @@ test('toolkit exposure can hide tools from the general lane', async () => {
 
   await graph.invoke(buildOrchestratorRunInput([new HumanMessage('inspect')]), {
     configurable: {
-      thread_id: 'general-toolkit-exposure',
+      thread_id: 'general-toolkit-registration',
       actor: testActor,
-      capabilities: [],
+      capabilities: [
+        capability('general', 'General-purpose capability.', ['visible', 'artifact']),
+      ],
       toolkits: [
         {
           name: 'visible',
           description: 'visible toolkit',
-          tools: [mockTool('visible_tool')],
+          tools: toolDefinitions(mockTool('visible_tool')),
         },
         {
           name: 'artifact',
           description: 'artifact toolkit',
-          exposure: { general: false },
-          tools: [mockTool('artifact_read')],
+          tools: toolDefinitions(mockTool('artifact_read')),
         },
       ],
     },
   });
 
-  assert.deepEqual(generalToolNames, ['visible_tool']);
+  assert.deepEqual(generalToolNames, ['visible_tool', 'artifact_read']);
 });
 
-test('toolkit and capability toolset operations are collected with their source', () => {
+test('toolkit ToolDefinition operations are collected with their source', () => {
   const toolkits: AgentToolkit[] = [{
     name: 'bash',
     description: 'bash toolkit',
-    operations: {
-      read_file: {
-        title: 'Read File',
+    tools: [
+      {
+        tool: mockTool('read_file'),
+        operation: {
+          title: 'Read File',
+        },
       },
-      shared_tool: {},
-    },
+      {
+        tool: mockTool('shared_tool'),
+        operation: {},
+      },
+    ],
   }];
 
   const toolkitOperations = collectToolkitOperations(toolkits);
@@ -1786,36 +2028,21 @@ test('toolkit and capability toolset operations are collected with their source'
     toolName: 'read_file',
   });
 
-  const capabilityOperations = collectCapabilityOperations(toolkits, {
-    toolsets: [{
-      name: 'private',
-      tools: [],
-      operations: {
-        custom_tool: {},
-        shared_tool: {},
-      },
-    }],
-  });
-
-  assert.deepEqual(capabilityOperations.custom_tool?.source, {
-    provider: 'toolset',
-    name: 'private',
-    toolName: 'custom_tool',
-  });
-  assert.deepEqual(capabilityOperations.shared_tool?.source, {
+  assert.deepEqual(toolkitOperations.shared_tool?.source, {
     provider: 'toolkit',
     name: 'bash',
     toolName: 'shared_tool',
   });
 });
 
-test('general operations are collected from toolkits', () => {
-  const generalOperations = collectGeneralOperations([{
+test('executor operations are collected from toolkits', () => {
+  const generalOperations = collectToolkitOperations([{
     name: 'bash',
     description: 'bash toolkit',
-    operations: {
-      read_file: {},
-    },
+    tools: [{
+      tool: mockTool('read_file'),
+      operation: {},
+    }],
   }]);
 
   assert.deepEqual(generalOperations.read_file?.source, {
@@ -1825,7 +2052,7 @@ test('general operations are collected from toolkits', () => {
   });
 });
 
-test('capability artifact refs recorded by subagent tools are merged into state', async () => {
+test('capability finalize artifact refs are merged into state', async () => {
   let routeCallCount = 0;
   const routeModel = {
     invoke: async () => new AIMessage('answered'),
@@ -1845,17 +2072,31 @@ test('capability artifact refs recorded by subagent tools are merged into state'
       },
     }),
   } as unknown as AgentModels['act'];
+  const persistReportTool = tool(async () => 'persisted', {
+    name: 'persist_report',
+    description: 'persist report',
+    schema: z.object({}),
+  });
   const artifactToolkit: AgentToolkit = {
     name: 'artifact',
     description: 'artifact recorder',
-    tools: (ctx) => [
-      tool(async () => {
+    tools: toolDefinitions(persistReportTool),
+  };
+  const fixtureCapability: AgentCapability = {
+    name: 'explore',
+    description: 'Explore issue context.',
+    uses: ['artifact'],
+    instructions: defineInstructionDocument({
+      content: 'Explore issue context.',
+    }),
+    lifecycle: {
+      finalize: async (_result, ctx) => {
         const ref = {
           id: 'artifact-1',
           threadId: ctx.threadId ?? 'missing-thread',
-          capabilityId: ctx.capabilityId ?? 'missing-capability',
-          delegationId: ctx.delegationId ?? 'missing-delegation',
-          runId: ctx.runId ?? 'missing-turn',
+          capabilityId: ctx.capabilityId,
+          delegationId: ctx.delegationId,
+          runId: ctx.runId,
           kind: 'report' as const,
           mimeType: 'text/markdown',
           uri: `capability-artifact://thread/${encodeURIComponent(ctx.threadId ?? '')}/artifact/1`,
@@ -1867,20 +2108,9 @@ test('capability artifact refs recorded by subagent tools are merged into state'
           metadata: { sourceCount: 2 },
         };
         await ctx.recordCapabilityArtifact?.(ref);
-        return JSON.stringify(ref);
-      }, {
-        name: 'persist_report',
-        description: 'persist report',
-        schema: z.object({}),
-      }),
-    ],
-  };
-  const fixtureCapability: AgentCapability = {
-    name: 'explore',
-    description: 'Explore issue context.',
-    createRuntime: () => ({
-      uses: ['artifact'],
-    }),
+        return { artifactRefs: [ref] };
+      },
+    },
   };
   const graph = createOrchestratorGraph({
     models: {
@@ -1909,7 +2139,7 @@ test('capability artifact refs recorded by subagent tools are merged into state'
   assert.equal(state.sessionCapabilityArtifacts[0]?.capabilityId, 'explore');
 });
 
-test('capability result artifacts are represented only as refs in state', async () => {
+test('capability finalize stores only artifact refs in state', async () => {
   let routeCallCount = 0;
   const routeModel = {
     invoke: async () => new AIMessage('answered'),
@@ -1929,17 +2159,31 @@ test('capability result artifacts are represented only as refs in state', async 
       },
     }),
   } as unknown as AgentModels['act'];
+  const persistResultTool = tool(async () => 'persisted', {
+    name: 'persist_result',
+    description: 'persist result',
+    schema: z.object({}),
+  });
   const artifactToolkit: AgentToolkit = {
     name: 'artifact',
     description: 'artifact recorder',
-    tools: (ctx) => [
-      tool(async () => {
+    tools: toolDefinitions(persistResultTool),
+  };
+  const fixtureCapability: AgentCapability = {
+    name: 'daily_post',
+    description: 'Create post.',
+    uses: ['artifact'],
+    instructions: defineInstructionDocument({
+      content: 'Create a post.',
+    }),
+    lifecycle: {
+      finalize: async (_result, ctx) => {
         const ref = {
           id: 'result-1',
           threadId: ctx.threadId ?? 'missing-thread',
-          capabilityId: ctx.capabilityId ?? 'missing-capability',
-          delegationId: ctx.delegationId ?? 'missing-delegation',
-          runId: ctx.runId ?? 'missing-turn',
+          capabilityId: ctx.capabilityId,
+          delegationId: ctx.delegationId,
+          runId: ctx.runId,
           kind: 'result' as const,
           mimeType: 'application/json',
           uri: `capability-artifact://thread/${encodeURIComponent(ctx.threadId ?? '')}/artifact/result-1`,
@@ -1950,20 +2194,9 @@ test('capability result artifacts are represented only as refs in state', async 
           schema: { name: 'daily_post.result', version: 1 },
         };
         await ctx.recordCapabilityArtifact?.(ref);
-        return JSON.stringify(ref);
-      }, {
-        name: 'persist_result',
-        description: 'persist result',
-        schema: z.object({}),
-      }),
-    ],
-  };
-  const fixtureCapability: AgentCapability = {
-    name: 'daily_post',
-    description: 'Create post.',
-    createRuntime: () => ({
-      uses: ['artifact'],
-    }),
+        return { artifactRefs: [ref] };
+      },
+    },
   };
   const graph = createOrchestratorGraph({
     models: {
@@ -1990,7 +2223,7 @@ test('capability result artifacts are represented only as refs in state', async 
   assert.equal(state.sessionCapabilityArtifacts[0]?.schema?.name, 'daily_post.result');
 });
 
-test('runAgent omits empty toolkit arrays and forwards artifact discovery resources', async () => {
+test('runAgent reuses a host-precompiled artifact discovery registry', async () => {
   const calls: Array<{ configurable?: Record<string, unknown> }> = [];
   const graph = {
     invoke: async (_input: unknown, options?: { configurable?: Record<string, unknown> }) => {
@@ -1999,28 +2232,60 @@ test('runAgent omits empty toolkit arrays and forwards artifact discovery resour
     },
   };
 
-  const artifactDiscoveryToolset = defineToolset({
+  const artifactDiscoveryToolkit: AgentToolkit = {
     name: 'artifact_discovery',
-    tools: [mockTool('artifact_list_dir'), mockTool('artifact_view_file_chunk')],
+    description: 'artifact discovery toolkit',
+    tools: toolDefinitions(
+      mockTool('artifact_list'),
+      mockTool('artifact_read'),
+    ),
+  };
+  const preparedRegistry = compileAgentRegistry({
+    toolkits: [artifactDiscoveryToolkit],
+    capabilities: [
+      capability(
+        'general',
+        'General-purpose capability.',
+        ['artifact_discovery'],
+      ),
+    ],
   });
   const result = await runAgent(graph as never, {
     messages: [new HumanMessage('hello')],
-    toolkits: [],
-    artifactDiscoveryRoot: '/repo/.pinpawo/capability-artifacts/threads/thread-1',
-    artifactDiscoveryToolset,
+    toolkits: [artifactDiscoveryToolkit],
+    capabilities: [
+      capability(
+        'general',
+        'General-purpose capability.',
+        ['artifact_discovery'],
+      ),
+    ],
+  }, {
+    registry: preparedRegistry,
   });
 
   assert.equal(result.reply, 'done');
   assert.equal(calls.length, 1);
-  assert.equal(calls[0]?.configurable?.toolkits, undefined);
-  assert.equal(
-    calls[0]?.configurable?.artifactDiscoveryRoot,
-    '/repo/.pinpawo/capability-artifacts/threads/thread-1',
+  const registry = calls[0]?.configurable?.registry as {
+    toolkits?: AgentToolkit[];
+    capabilities?: Array<{
+      capability: AgentCapability;
+      toolkits: AgentToolkit[];
+    }>;
+  };
+  assert.equal(registry, preparedRegistry);
+  assert.deepEqual(registry.toolkits?.map(({ name }) => name), ['artifact_discovery']);
+  assert.deepEqual(
+    registry.capabilities?.find(
+      ({ capability: item }) => item.name === 'general',
+    )?.toolkits.map(({ name }) => name),
+    ['artifact_discovery'],
   );
-  assert.equal(calls[0]?.configurable?.artifactDiscoveryToolset, artifactDiscoveryToolset);
+  assert.equal(calls[0]?.configurable?.artifactDiscoveryRoot, undefined);
+  assert.equal(calls[0]?.configurable?.artifactDiscoveryToolkit, undefined);
 });
 
-test('capability toolset runtimes expose operation metadata', async () => {
+test('capability Toolkit exposes ToolDefinition operation metadata', () => {
   const saveDraftTool = tool(async () => 'ok', {
     name: 'save_draft',
     description: 'save a draft',
@@ -2029,50 +2294,38 @@ test('capability toolset runtimes expose operation metadata', async () => {
       content: z.string(),
     }),
   });
-  const fixtureCapability: AgentCapability = {
+  const draftToolkit: AgentToolkit = {
     name: 'draft_writer',
-    description: 'Test capability with private toolset metadata.',
-    createRuntime: () => ({
-      toolsets: [defineToolset({
-        name: 'draft_writer',
-        description: 'Draft writer private tools.',
-        tools: [saveDraftTool] as const,
-        operations: {
-          save_draft: {
-            title: '保存草稿',
-            summarizeInput: (input) => {
-              const value = input && typeof input === 'object'
-                ? input as { topic?: unknown; content?: unknown }
-                : {};
-              return {
-                target: typeof value.topic === 'string' ? value.topic : undefined,
-                summary: '保存草稿',
-                details: {
-                  contentLength: typeof value.content === 'string' ? value.content.length : undefined,
-                },
-              };
+    description: 'Draft writer tools.',
+    tools: [{
+      tool: saveDraftTool,
+      operation: {
+        title: '保存草稿',
+        summarizeInput: (input) => {
+          const value = input && typeof input === 'object'
+            ? input as { topic?: unknown; content?: unknown }
+            : {};
+          return {
+            target: typeof value.topic === 'string' ? value.topic : undefined,
+            summary: '保存草稿',
+            details: {
+              contentLength: typeof value.content === 'string' ? value.content.length : undefined,
             },
-          },
+          };
         },
-      })],
-    }),
+      },
+    }],
   };
 
-  const runtime = await fixtureCapability.createRuntime({
-    models: {} as AgentModels,
-    actor: testActor,
-    messages: [],
-  });
-  const toolset = runtime.toolsets?.find((item) => item.name === 'draft_writer');
-
-  assert.equal(toolset?.operations?.save_draft?.title, '保存草稿');
-  assert.deepEqual(collectCapabilityOperations([], runtime).save_draft?.source, {
-    provider: 'toolset',
+  const definition = draftToolkit.tools[0];
+  assert.equal(definition?.operation?.title, '保存草稿');
+  assert.deepEqual(collectToolkitOperations([draftToolkit]).save_draft?.source, {
+    provider: 'toolkit',
     name: 'draft_writer',
     toolName: 'save_draft',
   });
 
-  const summary = toolset?.operations?.save_draft?.summarizeInput?.({
+  const summary = definition?.operation?.summarizeInput?.({
     content: '这是一段待发布的正文',
     topic: '早餐',
   });
@@ -2087,6 +2340,7 @@ test('capability toolset runtimes expose operation metadata', async () => {
 test('toolkit review policy runs after model without changing tool identity', async () => {
   let callCount = 0;
   let reviewCount = 0;
+  let reviewContextKeys: string[] = [];
   const order: string[] = [];
   const rawTool = tool(async () => {
     order.push('tool');
@@ -2100,21 +2354,17 @@ test('toolkit review policy runs after model without changing tool identity', as
   const toolkits: AgentToolkit[] = [{
     name: 'guarded',
     description: 'guarded toolkit',
-    tools: [rawTool],
-    policy: {
-      toolReview: {
-        safe_tool: {
-          request: () => {
-            order.push('review');
-            reviewCount += 1;
-            return null;
-          },
-        },
+    tools: [reviewedTool(rawTool, {
+      request: (ctx) => {
+        reviewContextKeys = Object.keys(ctx).sort();
+        order.push('review');
+        reviewCount += 1;
+        return null;
       },
-    },
+    })],
   }];
 
-  const resources = await resolveToolkitResources(toolkits, ['guarded'], {
+  const resources = await resolveToolkitExecution(toolkits, ['guarded'], {
     models: {} as AgentModels,
     actor: testActor,
     messages: [],
@@ -2133,6 +2383,14 @@ test('toolkit review policy runs after model without changing tool identity', as
   assert.equal(reviewCount, 1);
   assert.equal(callCount, 1);
   assert.deepEqual(order, ['review', 'tool']);
+  assert.deepEqual(reviewContextKeys, [
+    'input',
+    'operation',
+    'reviewCapabilities',
+    'toolAuthorizations',
+    'toolName',
+    'toolkitName',
+  ]);
   assert.equal(readToolMessageContent(result.messages, 'call-safe'), 'raw ok');
 });
 
@@ -2169,32 +2427,29 @@ test('toolkit review cancellation stops the current review action', async () => 
   const toolkits: AgentToolkit[] = [{
     name: 'guarded',
     description: 'guarded toolkit',
-    tools: [allowedTool, blockedTool, laterTool],
-    policy: {
-      toolReview: {
-        allowed_tool: {
-          request: () => {
-            allowedReviewCount += 1;
-            return null;
-          },
+    tools: [
+      reviewedTool(allowedTool, {
+        request: () => {
+          allowedReviewCount += 1;
+          return null;
         },
-        blocked_tool: {
+      }),
+      reviewedTool(blockedTool, {
           request: () => ({
             type: 'block',
             reason: 'blocked by policy',
           }),
+      }),
+      reviewedTool(laterTool, {
+        request: () => {
+          laterReviewCount += 1;
+          return null;
         },
-        later_tool: {
-          request: () => {
-            laterReviewCount += 1;
-            return null;
-          },
-        },
-      },
-    },
+      }),
+    ],
   }];
 
-  const resources = await resolveToolkitResources(toolkits, ['guarded'], {
+  const resources = await resolveToolkitExecution(toolkits, ['guarded'], {
     models: {} as AgentModels,
     actor: testActor,
     messages: [],
@@ -2246,20 +2501,15 @@ test('deterministic toolkit policy block terminates without another model call',
   const toolkits: AgentToolkit[] = [{
     name: 'guarded',
     description: 'guarded toolkit',
-    tools: [blockedTool],
-    policy: {
-      toolReview: {
-        blocked_tool: {
-          request: () => ({
-            type: 'block',
-            reason: 'blocked by policy',
-          }),
-        },
-      },
-    },
+    tools: [reviewedTool(blockedTool, {
+      request: () => ({
+        type: 'block',
+        reason: 'blocked by policy',
+      }),
+    })],
   }];
 
-  const resources = await resolveToolkitResources(toolkits, ['guarded'], {
+  const resources = await resolveToolkitExecution(toolkits, ['guarded'], {
     models: {} as AgentModels,
     actor: testActor,
     messages: [],
@@ -2274,8 +2524,8 @@ test('deterministic toolkit policy block terminates without another model call',
     }),
     tools: resources.tools,
     middleware: resources.middleware,
-    instructions: [],
-    operations: collectGeneralOperations(resources.toolkits),
+    promptSections: [],
+    operations: collectToolkitOperations(resources.toolkits),
     messages: [new HumanMessage('try guarded work')],
     runnableConfig: { callbacks: recorder.callbacks },
   });
@@ -2302,20 +2552,15 @@ test('toolkit review materializes distinct fallback ids for missing tool call id
   const toolkits: AgentToolkit[] = [{
     name: 'guarded',
     description: 'guarded toolkit',
-    tools: [blockedTool],
-    policy: {
-      toolReview: {
-        blocked_tool: {
+    tools: [reviewedTool(blockedTool, {
           request: () => ({
             type: 'block',
             reason: 'blocked by policy',
           }),
-        },
-      },
-    },
+    })],
   }];
 
-  const resources = await resolveToolkitResources(toolkits, ['guarded'], {
+  const resources = await resolveToolkitExecution(toolkits, ['guarded'], {
     models: {} as AgentModels,
     actor: testActor,
     messages: [],
@@ -2362,16 +2607,10 @@ test('global review policy full_access bypasses toolkit review prompts', async (
   const toolkits: AgentToolkit[] = [{
     name: 'local',
     description: 'local tools',
-    tools: [rawTool],
-    policy: {
-      toolReview: {
-        write_file: {
-          request: () => {
-            reviewCount += 1;
-            return ReviewPolicies.localMutation().request({
-              models: {} as AgentModels,
-              actor: testActor,
-              messages: [],
+    tools: [reviewedTool(rawTool, {
+      request: () => {
+        reviewCount += 1;
+        return ReviewPolicies.localMutation().request({
               toolkitName: 'local',
               toolName: 'write_file',
               input: { path: 'notes.md', content: 'hello' },
@@ -2379,14 +2618,12 @@ test('global review policy full_access bypasses toolkit review prompts', async (
                 humanReview: true,
                 sessionAuthorization: false,
               },
-            });
-          },
-        },
+        });
       },
-    },
+    })],
   }];
 
-  const resources = await resolveToolkitResources(toolkits, ['local'], {
+  const resources = await resolveToolkitExecution(toolkits, ['local'], {
     models: {} as AgentModels,
     actor: testActor,
     messages: [],
@@ -2424,12 +2661,7 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
   const toolkits: AgentToolkit[] = [{
     name: 'local',
     description: 'local tools',
-    tools: [rawTool],
-    policy: {
-      toolReview: {
-        write_file: ReviewPolicies.localMutation(),
-      },
-    },
+    tools: [reviewedTool(rawTool, ReviewPolicies.localMutation())],
   }];
   const autoModel = {
     withStructuredOutput: () => ({
@@ -2444,7 +2676,7 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
     }),
   } as unknown as AgentModels['act'];
 
-  const resources = await resolveToolkitResources(toolkits, ['local'], {
+  const resources = await resolveToolkitExecution(toolkits, ['local'], {
     models: { act: autoModel },
     actor: testActor,
     messages: [new HumanMessage('subagent context')],
@@ -2509,16 +2741,13 @@ test('global review policy auto_authorization evaluates a tool-call batch once',
   const toolkits: AgentToolkit[] = [{
     name: 'local',
     description: 'local tools',
-    tools: [firstTool, secondTool],
-    policy: {
-      autoReview: {
-        allow: 'Allow narrow writes to user-requested files.',
-        ask: 'Ask before broad or destructive writes.',
-      },
-      toolReview: {
-        first_write: ReviewPolicies.localMutation(),
-        second_write: ReviewPolicies.localMutation(),
-      },
+    tools: [
+      reviewedTool(firstTool, ReviewPolicies.localMutation()),
+      reviewedTool(secondTool, ReviewPolicies.localMutation()),
+    ],
+    reviewGuidance: {
+      allow: 'Allow narrow writes to user-requested files.',
+      ask: 'Ask before broad or destructive writes.',
     },
   }];
   const autoModel = {
@@ -2534,7 +2763,7 @@ test('global review policy auto_authorization evaluates a tool-call batch once',
     }),
   } as unknown as AgentModels['act'];
 
-  const resources = await resolveToolkitResources(toolkits, ['local'], {
+  const resources = await resolveToolkitExecution(toolkits, ['local'], {
     models: { act: autoModel },
     actor: testActor,
     messages: [new HumanMessage('write both files')],
@@ -2610,12 +2839,7 @@ test('global review policy auto_authorization requires human authorization when 
   const toolkits: AgentToolkit[] = [{
     name: 'local',
     description: 'local tools',
-    tools: [rawTool],
-    policy: {
-      toolReview: {
-        write_file: ReviewPolicies.localMutation(),
-      },
-    },
+    tools: [reviewedTool(rawTool, ReviewPolicies.localMutation())],
   }];
   const autoModel = {
     withStructuredOutput: () => ({
@@ -2626,7 +2850,7 @@ test('global review policy auto_authorization requires human authorization when 
     }),
   } as unknown as AgentModels['act'];
 
-  const resources = await resolveToolkitResources(toolkits, ['local'], {
+  const resources = await resolveToolkitExecution(toolkits, ['local'], {
     models: { act: autoModel },
     actor: testActor,
     messages: [new HumanMessage('rewrite the project')],
@@ -2679,15 +2903,10 @@ test('global review policy custom resolver can authorize reviewed tool calls', a
   const toolkits: AgentToolkit[] = [{
     name: 'local',
     description: 'local tools',
-    tools: [rawTool],
-    policy: {
-      toolReview: {
-        write_file: ReviewPolicies.localMutation(),
-      },
-    },
+    tools: [reviewedTool(rawTool, ReviewPolicies.localMutation())],
   }];
 
-  const resources = await resolveToolkitResources(toolkits, ['local'], {
+  const resources = await resolveToolkitExecution(toolkits, ['local'], {
     models: {} as AgentModels,
     actor: testActor,
     messages: [],
@@ -2728,10 +2947,7 @@ test('toolkit review policy records authorization through orchestrator runtime t
   const toolkits: AgentToolkit[] = [{
     name: 'local',
     description: 'local tools',
-    tools: [rawTool],
-    policy: {
-      toolReview: {
-        run_shell: {
+    tools: [reviewedTool(rawTool, {
           request: ({ input, toolAuthorizations }) => {
             const args = input as { command: string };
             if (isToolActionAuthorized({
@@ -2761,9 +2977,7 @@ test('toolkit review policy records authorization through orchestrator runtime t
             type: 'shell_pattern',
             value: (input as { command: string }).command,
           }),
-        },
-      },
-    },
+    })],
   }];
 
   let routeCallCount = 0;
@@ -2776,9 +2990,13 @@ test('toolkit review policy records authorization through orchestrator runtime t
     withStructuredOutput: () => ({
       invoke: async () => {
         routeCallCount += 1;
-        return routeCallCount === 1
-          ? nextTaskDecision('run shell')
-          : goalDoneDecision();
+        if (routeCallCount === 1) {
+          return nextTaskDecision('run shell');
+        }
+        if (routeCallCount === 2) {
+          return routeCapabilityDecision('general');
+        }
+        return goalDoneDecision();
       },
     }),
   } as unknown as AgentModels['act'];
@@ -2810,7 +3028,7 @@ test('toolkit review policy records authorization through orchestrator runtime t
     configurable: {
       thread_id: 'canonical-review-runtime-auth',
       actor: testActor,
-      capabilities: [],
+      capabilities: [capability('general', 'General-purpose capability.', ['local'])],
       toolkits,
     },
   };
@@ -2891,10 +3109,7 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
   const toolkits: AgentToolkit[] = [{
     name: 'local',
     description: 'local tools',
-    tools: [rawTool],
-    policy: {
-      toolReview: {
-        run_shell: {
+    tools: [reviewedTool(rawTool, {
           request: () => {
             reviewCount += 1;
             return buildReviewSpec({
@@ -2906,9 +3121,7 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
               }],
             });
           },
-        },
-      },
-    },
+    })],
   }];
 
   let routeCallCount = 0;
@@ -2920,9 +3133,13 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
     withStructuredOutput: () => ({
       invoke: async () => {
         routeCallCount += 1;
-        return routeCallCount === 1
-          ? nextTaskDecision('run shell')
-          : goalDoneDecision();
+        if (routeCallCount === 1) {
+          return nextTaskDecision('run shell');
+        }
+        if (routeCallCount === 2) {
+          return routeCapabilityDecision('general');
+        }
+        return goalDoneDecision();
       },
     }),
   } as unknown as AgentModels['act'];
@@ -2949,7 +3166,7 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
     configurable: {
       thread_id: 'plain-review-runtime-state',
       actor: testActor,
-      capabilities: [],
+      capabilities: [capability('general', 'General-purpose capability.', ['local'])],
       toolkits,
     },
   };
@@ -3005,7 +3222,7 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
     meta: getPinpetMeta(message),
   }))));
   const handoffSource = getMessageHandoffSource(handoffCopy);
-  assert.equal(handoffSource?.handoffFrom, 'general');
+  assert.equal(handoffSource?.handoffFrom, 'capability:general');
   assert.ok(handoffSource?.delegationId);
   assert.equal(handoffSource?.task, 'run shell');
   assert.ok(handoffSource?.announceMessageId);
@@ -3027,10 +3244,7 @@ test('toolkit review rejection resumes the same subagent before parent handoff',
   const toolkits: AgentToolkit[] = [{
     name: 'local',
     description: 'local tools',
-    tools: [rawTool],
-    policy: {
-      toolReview: {
-        run_shell: {
+    tools: [reviewedTool(rawTool, {
           request: () => {
             reviewCount += 1;
             return buildReviewSpec({
@@ -3052,9 +3266,7 @@ test('toolkit review rejection resumes the same subagent before parent handoff',
               ],
             });
           },
-        },
-      },
-    },
+    })],
   }];
 
   let routeCallCount = 0;
@@ -3068,6 +3280,9 @@ test('toolkit review rejection resumes the same subagent before parent handoff',
         routeCallCount += 1;
         if (routeCallCount === 1) {
           return nextTaskDecision('run shell');
+        }
+        if (routeCallCount === 2) {
+          return routeCapabilityDecision('general');
         }
         return goalDoneDecision();
       },
@@ -3098,7 +3313,7 @@ test('toolkit review rejection resumes the same subagent before parent handoff',
     configurable: {
       thread_id: 'human-reject-resumes-subagent-loop',
       actor: testActor,
-      capabilities: [],
+      capabilities: [capability('general', 'General-purpose capability.', ['local'])],
       toolkits,
     },
   };
@@ -3142,7 +3357,7 @@ test('toolkit review rejection resumes the same subagent before parent handoff',
   // Resume replays the interrupted review policy once, then returns to the
   // same child agent loop for its next model call.
   assert.equal(reviewCount, 2);
-  assert.equal(routeCallCount, 2);
+  assert.equal(routeCallCount, 3);
   const resumedSubagentInput = recorder.subagentInputs.at(-1) ?? [];
   const rejectedToolResult = resumedSubagentInput.find((message) =>
     message instanceof ToolMessage
@@ -3180,10 +3395,7 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
   const toolkits: AgentToolkit[] = [{
     name: 'local',
     description: 'local tools',
-    tools: [rawTool],
-    policy: {
-      toolReview: {
-        run_shell: {
+    tools: [reviewedTool(rawTool, {
           request: () => {
             reviewCount += 1;
             return buildReviewSpec({
@@ -3195,9 +3407,7 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
               }],
             });
           },
-        },
-      },
-    },
+    })],
   }];
 
   let routeCallCount = 0;
@@ -3209,9 +3419,13 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
     withStructuredOutput: () => ({
       invoke: async () => {
         routeCallCount += 1;
-        return routeCallCount === 1
-          ? nextTaskDecision('run shell twice')
-          : goalDoneDecision();
+        if (routeCallCount === 1) {
+          return nextTaskDecision('run shell twice');
+        }
+        if (routeCallCount === 2) {
+          return routeCapabilityDecision('general');
+        }
+        return goalDoneDecision();
       },
     }),
   } as unknown as AgentModels['act'];
@@ -3245,7 +3459,7 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
     configurable: {
       thread_id: 'multi-tool-review-runtime-state',
       actor: testActor,
-      capabilities: [],
+      capabilities: [capability('general', 'General-purpose capability.', ['local'])],
       toolkits,
     },
   };
@@ -3337,7 +3551,7 @@ test('buildSubagentHandoff copies the announce into main and wipes the whole del
 test('handoff idempotency is scoped by delegation lane and run id', () => {
   const oldCopy = new AIMessage('old run result');
   setPinpetMeta(oldCopy, {
-    handoffFrom: 'general',
+    handoffFrom: 'capability:general',
     delegationId: 'same-delegation',
     runId: 'run-old',
     task: 'same task',
@@ -3345,7 +3559,7 @@ test('handoff idempotency is scoped by delegation lane and run id', () => {
   });
   const currentCopy = new AIMessage('current run result');
   setPinpetMeta(currentCopy, {
-    handoffFrom: 'general',
+    handoffFrom: 'capability:general',
     delegationId: 'same-delegation',
     runId: 'run-current',
     task: 'same task',
@@ -3356,7 +3570,7 @@ test('handoff idempotency is scoped by delegation lane and run id', () => {
     findLatestHandoffCopyForDelegation(
       [oldCopy, currentCopy],
       'same-delegation',
-      'general',
+      'capability:general',
       'run-current',
       getMessageHandoffSource,
     ),
@@ -3366,7 +3580,7 @@ test('handoff idempotency is scoped by delegation lane and run id', () => {
     findLatestHandoffCopyForDelegation(
       [oldCopy, currentCopy],
       'same-delegation',
-      'general',
+      'capability:general',
       'run-missing',
       getMessageHandoffSource,
     ),
@@ -3435,11 +3649,11 @@ test('buildSubagentHandoff keeps lane messages when clearLane is disabled', () =
   const humanAsk = new HumanMessage('继续处理一些文件');
   const intermediate = new AIMessage('准备处理中...');
   intermediate.id = 'm-mid';
-  setPinpetMeta(intermediate, { lane: 'general', runId: 'run-5', delegationId: 'd-keep' });
+  setPinpetMeta(intermediate, { lane: 'capability:general', runId: 'run-5', delegationId: 'd-keep' });
   const announce = new AIMessage('已完成部分，继续留痕。');
   announce.id = 'm-announce-keep';
   setPinpetMeta(announce, {
-    lane: 'general',
+    lane: 'capability:general',
     runId: 'run-5',
     delegationId: 'd-keep',
     isAnnounce: true,
@@ -3448,7 +3662,7 @@ test('buildSubagentHandoff keeps lane messages when clearLane is disabled', () =
 
   const update = buildSubagentHandoff({
     messages: [humanAsk, intermediate, announce],
-    lane: 'general',
+    lane: 'capability:general',
     runId: 'run-5',
     delegationId: 'd-keep',
     clearLane: false,
@@ -3461,7 +3675,7 @@ test('buildSubagentHandoff keeps lane messages when clearLane is disabled', () =
   assert.match(String(copy.content), /已完成部分，继续留痕。/);
   const source = getMessageHandoffSource(copy);
   assert.deepEqual(source, {
-    handoffFrom: 'general',
+    handoffFrom: 'capability:general',
     delegationId: 'd-keep',
     runId: 'run-5',
     task: '增量处理',
@@ -3568,10 +3782,10 @@ test('buildSubagentHandoff clips and bounds handoff artifact footer refs', () =>
 test('buildSubagentHandoff returns null when the delegation has no announce text', () => {
   const intermediate = new AIMessage('只有中间步骤，没有结论');
   intermediate.id = 'm1';
-  setPinpetMeta(intermediate, { lane: 'general', runId: 't1', delegationId: 'd1' });
+  setPinpetMeta(intermediate, { lane: 'capability:general', runId: 't1', delegationId: 'd1' });
   const update = buildSubagentHandoff({
     messages: [new HumanMessage('做点事'), intermediate],
-    lane: 'general',
+    lane: 'capability:general',
     runId: 't1',
     delegationId: 'd1',
   });
@@ -3581,7 +3795,7 @@ test('buildSubagentHandoff returns null when the delegation has no announce text
 test('buildSubagentHandoff rejects an announce without a message id', () => {
   const announce = new AIMessage('完成结果');
   setPinpetMeta(announce, {
-    lane: 'general',
+    lane: 'capability:general',
     runId: 't1',
     delegationId: 'd1',
     isAnnounce: true,
@@ -3589,7 +3803,7 @@ test('buildSubagentHandoff rejects an announce without a message id', () => {
 
   assert.throws(() => buildSubagentHandoff({
     messages: [announce],
-    lane: 'general',
+    lane: 'capability:general',
     runId: 't1',
     delegationId: 'd1',
   }), /missing the required message id/);
@@ -3661,7 +3875,7 @@ test('terminal outcome decision keeps active delegation when handoff cannot be b
       toolkits: [{
         name: 'local',
         description: 'local tools',
-        tools: [rawTool],
+        tools: toolDefinitions(rawTool),
       }],
     },
   }) as {
@@ -3708,7 +3922,7 @@ test('delegation outcome continue decision can re-enter main and finalize handof
   });
   const activeDelegation: TaskActiveDelegation = {
     id: 'active-continue',
-    lane: 'general',
+    lane: 'capability:general',
     task: '批量梳理仓库问题',
     contextSummary: '已完成部分。',
     transcriptRunId: 'run-continue',
@@ -3732,7 +3946,7 @@ test('delegation outcome continue decision can re-enter main and finalize handof
   const previousAnnounce = new AIMessage(announceText);
   previousAnnounce.id = 'm-prev-announce';
   setPinpetMeta(previousAnnounce, {
-    lane: 'general',
+    lane: 'capability:general',
     runId: input.runId,
     delegationId: activeDelegation.id,
     isAnnounce: true,
@@ -3745,11 +3959,11 @@ test('delegation outcome continue decision can re-enter main and finalize handof
     configurable: {
       thread_id: 'delegation-continue-copy-preserve-lane',
       actor: testActor,
-      capabilities: [],
+      capabilities: [capability('general', 'General-purpose capability.', ['local'])],
       toolkits: [{
         name: 'local',
         description: 'local tools',
-        tools: [mockTool('run_shell')],
+        tools: toolDefinitions(mockTool('run_shell')),
       }],
     },
   }) as OrchestratorStateType;
@@ -3758,11 +3972,11 @@ test('delegation outcome continue decision can re-enter main and finalize handof
     .map((message) => getMessageHandoffSource(message))
     .find((source) => source?.delegationId === activeDelegation.id);
   assert.ok(handoffSource);
-  assert.equal(handoffSource.handoffFrom, 'general');
+  assert.equal(handoffSource.handoffFrom, 'capability:general');
   assert.equal(handoffSource.runId, input.runId);
   assert.equal(handoffSource.task, '批量梳理仓库问题');
   // Final handoff on answer should clear lane transcript for finished continuation.
-  assert.equal(laneMessages(state.messages, 'general', input.runId, activeDelegation.id)
+  assert.equal(laneMessages(state.messages, 'capability:general', input.runId, activeDelegation.id)
     .filter((message) => getMessageIsAnnounce(message)).length === 0, true);
 });
 
@@ -3793,7 +4007,7 @@ test('delegation outcome continuation path rechecks run iteration guard before n
 
   const activeDelegation: TaskActiveDelegation = {
     id: 'active-limit-inline',
-    lane: 'general',
+    lane: 'capability:general',
     task: '执行长流程任务',
     contextSummary: '持续进行。',
     transcriptRunId: 'run-continue-limit',
@@ -3817,7 +4031,7 @@ test('delegation outcome continuation path rechecks run iteration guard before n
   const announce = new AIMessage('进度已完成前段。');
   announce.id = 'm-limit-announce';
   setPinpetMeta(announce, {
-    lane: 'general',
+    lane: 'capability:general',
     runId: input.runId,
     delegationId: activeDelegation.id,
     isAnnounce: true,
@@ -3830,12 +4044,12 @@ test('delegation outcome continuation path rechecks run iteration guard before n
     configurable: {
       thread_id: 'delegation-outcome-to-iteration-guard',
       actor: testActor,
-      capabilities: [],
+      capabilities: [capability('general', 'General-purpose capability.', ['local'])],
       maxRunIterations: 1,
       toolkits: [{
         name: 'local',
         description: 'local tools',
-        tools: [mockTool('run_shell')],
+        tools: toolDefinitions(mockTool('run_shell')),
       }],
     },
   }) as OrchestratorStateType;
@@ -3879,7 +4093,7 @@ test('delegation_outcome does not append duplicate handoff copies for unchanged 
 
   const activeDelegation: TaskActiveDelegation = {
     id: 'active-dup-copy',
-    lane: 'general',
+    lane: 'capability:general',
     task: '处理大型清单',
     contextSummary: '尚未完成。',
     transcriptRunId: 'run-dup-copy',
@@ -3902,7 +4116,7 @@ test('delegation_outcome does not append duplicate handoff copies for unchanged 
   const initialAnnounce = new AIMessage('进度更新：已完成一部分，继续保留。');
   initialAnnounce.id = 'm-dup-copy';
   setPinpetMeta(initialAnnounce, {
-    lane: 'general',
+    lane: 'capability:general',
     runId: input.runId,
     delegationId: activeDelegation.id,
     isAnnounce: true,
@@ -3915,12 +4129,12 @@ test('delegation_outcome does not append duplicate handoff copies for unchanged 
     configurable: {
       thread_id: 'delegation-outcome-no-duplicate-handoff',
       actor: testActor,
-      capabilities: [],
+      capabilities: [capability('general', 'General-purpose capability.', ['local'])],
       maxRunIterations: 10,
       toolkits: [{
         name: 'local',
         description: 'local tools',
-        tools: [mockTool('run_shell')],
+        tools: toolDefinitions(mockTool('run_shell')),
       }],
     },
   }) as OrchestratorStateType;
@@ -3940,7 +4154,7 @@ test('lane tagging hides subagent messages from route and records completed anno
     new AIMessage({ id: 'task-1-announce', content: '已查到热门动态。' }),
   ];
 
-  const tagged = tagNewLaneMessages(messages, [messages[0]], 'general', 'turn-1', 'natural', {
+  const tagged = tagNewLaneMessages(messages, [messages[0]], 'capability:general', 'turn-1', 'natural', {
     delegationId: 'task-1',
     task: '查小红书动态',
     announceMessageId: 'task-1-announce',
@@ -3951,12 +4165,12 @@ test('lane tagging hides subagent messages from route and records completed anno
   assert.equal(getMessageIsAnnounce(messages[1]), true);
   assert.equal(getMessageDelegationId(messages[1]), 'task-1');
   assert.deepEqual(mainConversationMessages(messages).map((message) => message.content), ['帮我查一下小红书动态']);
-  assert.deepEqual(laneMessages(messages, 'general', 'turn-1', 'task-1').map((message) => message.content), [
+  assert.deepEqual(laneMessages(messages, 'capability:general', 'turn-1', 'task-1').map((message) => message.content), [
     '帮我查一下小红书动态',
     '已查到热门动态。',
   ]);
   assert.deepEqual(readLatestAnnounce(messages, { delegationId: 'task-1' }), {
-    lane: 'general',
+    lane: 'capability:general',
     delegationId: 'task-1',
     task: '查小红书动态',
     text: '已查到热门动态。',
@@ -3971,7 +4185,7 @@ test('lane tagging treats briefing-like subagent output as a deliverable, not in
   const tagged = tagNewLaneMessages(
     [human, output],
     [human],
-    'general',
+    'capability:general',
     'turn-briefing-output',
     'natural',
     {
@@ -3997,7 +4211,7 @@ test('main conversation preserves accepted handoffs that begin with briefing for
   for (const [index, handoff] of handoffs.entries()) {
     setPinpetMeta(handoff, {
       source: 'delegation_briefing',
-      handoffFrom: 'general',
+      handoffFrom: 'capability:general',
       delegationId: 'task-accepted-briefing',
       runId: 'turn-accepted-briefing',
       task: '返回简报格式示例',
@@ -4027,7 +4241,7 @@ test('lane tagging reconciles a summarized subagent transcript by message identi
   const initialUpdate = tagNewLaneMessages(
     initialOutput,
     [human],
-    'general',
+    'capability:general',
     'turn-1',
     'limit_reached',
     { delegationId: 'task-summary', task: '检查项目' },
@@ -4035,7 +4249,7 @@ test('lane tagging reconciles a summarized subagent transcript by message identi
   const stateBeforeSummary = messagesStateReducer([human], initialUpdate);
   const continuationInput = laneMessages(
     stateBeforeSummary,
-    'general',
+    'capability:general',
     'turn-1',
     'task-summary',
   );
@@ -4049,7 +4263,7 @@ test('lane tagging reconciles a summarized subagent transcript by message identi
   const summarizedUpdate = tagNewLaneMessages(
     [contextSummary, finalAnswer],
     continuationInput,
-    'general',
+    'capability:general',
     'turn-1',
     'natural',
     {
@@ -4063,11 +4277,11 @@ test('lane tagging reconciles a summarized subagent transcript by message identi
   assert.equal(stateAfterSummary.some((message) => message.id === 'main-human'), true);
   assert.equal(stateAfterSummary.some((message) => message.id === 'old-call'), false);
   assert.equal(stateAfterSummary.some((message) => message.id === 'old-result'), false);
-  assert.equal(getMessageLane(contextSummary), 'general');
+  assert.equal(getMessageLane(contextSummary), 'capability:general');
   assert.equal(getMessageDelegationId(contextSummary), 'task-summary');
   assert.equal(getMessageIsAnnounce(finalAnswer), true);
   assert.deepEqual(
-    laneMessages(stateAfterSummary, 'general', 'turn-1', 'task-summary').map((message) => message.id),
+    laneMessages(stateAfterSummary, 'capability:general', 'turn-1', 'task-summary').map((message) => message.id),
     ['main-human', 'context-summary', 'final-answer'],
   );
 });
@@ -4080,7 +4294,7 @@ test('lane tagging marks the deliverable as the announce regardless of stop reas
 
   // limit_reached is just a stop reason now; the deliverable is still marked as
   // the announce (no completed/progress verdict at tag time).
-  tagNewLaneMessages(messages, [messages[0]], 'general', 'turn-1', 'limit_reached', {
+  tagNewLaneMessages(messages, [messages[0]], 'capability:general', 'turn-1', 'limit_reached', {
     delegationId: 'task-2',
     task: '读取文件并运行 lint',
     announceMessageId: 'task-2-progress',
@@ -4088,7 +4302,7 @@ test('lane tagging marks the deliverable as the announce regardless of stop reas
 
   assert.equal(getMessageIsAnnounce(messages[1]), true);
   assert.deepEqual(readLatestAnnounce(messages, { delegationId: 'task-2' }), {
-    lane: 'general',
+    lane: 'capability:general',
     delegationId: 'task-2',
     task: '读取文件并运行 lint',
     text: '文件读取完成，lint 还没跑。',
@@ -4121,7 +4335,7 @@ test('limit-reached subagent announce reaches the outcome decision input', async
     }),
     tools: [noop],
     middleware: [progressMiddleware],
-    instructions: [],
+    promptSections: [],
     messages: baseInput.messages,
     maxIterations: 1,
   });
@@ -4132,7 +4346,7 @@ test('limit-reached subagent announce reaches the outcome decision input', async
   const tagged = tagNewLaneMessages(
     result.messages,
     baseInput.messages,
-    'general',
+    'capability:general',
     baseInput.runId,
     result.completionReason,
     {
@@ -4166,7 +4380,7 @@ test('limit-reached subagent announce reaches the outcome decision input', async
   });
   const activeDelegation: TaskActiveDelegation = {
     id: delegationId,
-    lane: 'general',
+    lane: 'capability:general',
     task: '继续探查 repo',
     contextSummary: null,
     transcriptRunId: baseInput.runId,
@@ -4180,7 +4394,7 @@ test('limit-reached subagent announce reaches the outcome decision input', async
     taskActiveDelegation: activeDelegation,
     runDelegationSummaries: [{
       id: delegationId,
-      lane: 'general',
+      lane: 'capability:general',
       task: activeDelegation.task,
       status: 'progress',
       resultPreview: activeDelegation.resultPreview,
@@ -4219,7 +4433,7 @@ test('delegation outcome does not handoff a limit_reached announce', async () =>
 
   const activeDelegation: TaskActiveDelegation = {
     id: 'limit-active',
-    lane: 'general',
+    lane: 'capability:general',
     task: '继续探查 repo',
     contextSummary: null,
     transcriptRunId: baseInput.runId,
@@ -4239,7 +4453,7 @@ test('delegation outcome does not handoff a limit_reached announce', async () =>
   };
   const partialAnnounce = new AIMessage('已跑到一半，继续需要更多时间。');
   setPinpetMeta(partialAnnounce, {
-    lane: 'general',
+    lane: 'capability:general',
     runId: input.runId,
     delegationId: activeDelegation.id,
     isAnnounce: true,
@@ -4257,7 +4471,7 @@ test('delegation outcome does not handoff a limit_reached announce', async () =>
       toolkits: [{
         name: 'local',
         description: 'local tools',
-        tools: [mockTool('run_shell')],
+        tools: toolDefinitions(mockTool('run_shell')),
       }],
   } }) as OrchestratorStateType;
 
@@ -4267,7 +4481,9 @@ test('delegation outcome does not handoff a limit_reached announce', async () =>
   assert.equal(state.taskActiveDelegation?.id, activeDelegation.id);
   assert.equal(state.taskActiveDelegation?.status, 'awaiting_decision');
   assert.equal(state.runDelegationSummaries.find((item) => item.id === activeDelegation.id)?.status, 'progress');
-  assert.equal(state.messages.filter((message) => getMessageLane(message) === 'general').length > 0, true);
+  assert.equal(state.messages.filter(
+    (message) => getMessageLane(message) === 'capability:general',
+  ).length > 0, true);
 });
 
 test('delegation outcome uses a unified run-iteration guard before invoking decision', async () => {
@@ -4306,7 +4522,7 @@ test('delegation outcome uses a unified run-iteration guard before invoking deci
   input.runIterationCount = 2;
   const activeDelegation: TaskActiveDelegation = {
     id: 'limit-iter',
-    lane: 'general',
+    lane: 'capability:general',
     task: '持续执行大规模迁移',
     contextSummary: '最近卡住',
     transcriptRunId: baseInput.runId,
@@ -4315,7 +4531,7 @@ test('delegation outcome uses a unified run-iteration guard before invoking deci
   };
   const partialAnnounce = new AIMessage('继续迁移，已完成 50%。');
   setPinpetMeta(partialAnnounce, {
-    lane: 'general',
+    lane: 'capability:general',
     runId: input.runId,
     delegationId: activeDelegation.id,
     isAnnounce: true,
@@ -4341,7 +4557,7 @@ test('delegation outcome uses a unified run-iteration guard before invoking deci
       toolkits: [{
         name: 'local',
         description: 'local tools',
-        tools: [mockTool('run_shell')],
+        tools: toolDefinitions(mockTool('run_shell')),
       }],
     },
   }) as OrchestratorStateType;
@@ -4370,7 +4586,13 @@ test('handoff copies the announce into main and wipes the lane transcript', () =
   });
   const outputMessages = [human, toolCall, toolResult, note, announce];
 
-  const tagged = tagNewLaneMessages(outputMessages, [human], 'general', 'turn-1', 'natural', {
+  const tagged = tagNewLaneMessages(
+    outputMessages,
+    [human],
+    'capability:general',
+    'turn-1',
+    'natural',
+    {
     delegationId: 'task-complete',
     task: '检查项目并汇报',
     announceMessageId: 'task-complete-announce',
@@ -4379,7 +4601,7 @@ test('handoff copies the announce into main and wipes the lane transcript', () =
 
   const handoff = buildSubagentHandoff({
     messages: stateWithLane,
-    lane: 'general',
+    lane: 'capability:general',
     runId: 'turn-1',
     delegationId: 'task-complete',
   });
@@ -4395,14 +4617,16 @@ test('handoff copies the announce into main and wipes the lane transcript', () =
   // The copy is a first-class main message (no lane) with handoff provenance.
   assert.equal(getMessageLane(stateMessages[1]), null);
   assert.deepEqual(getMessageHandoffSource(stateMessages[1]), {
-    handoffFrom: 'general',
+    handoffFrom: 'capability:general',
     delegationId: 'task-complete',
     runId: 'turn-1',
     task: '检查项目并汇报',
     announceMessageId: 'task-complete-announce',
   });
   // No lane-tagged messages for this delegation remain.
-  assert.equal(stateMessages.filter((m) => getMessageLane(m) === 'general').length, 0);
+  assert.equal(stateMessages.filter(
+    (message) => getMessageLane(message) === 'capability:general',
+  ).length, 0);
 });
 
 test('handoff after a resumed delegation wipes the whole delegation lane including old progress', () => {
@@ -4418,13 +4642,22 @@ test('handoff after a resumed delegation wipes the whole delegation lane includi
   const oldProgress = new AIMessage({ id: 'task-resume-progress', content: '已处理第一个分片，尚未完成。' });
   const previousRun = [human, oldToolCall, oldToolResult, oldProgress];
   // First (interrupted) run keeps its whole lane in place — no handoff yet.
-  const previousUpdate = tagNewLaneMessages(previousRun, [human], 'general', 'turn-1', 'limit_reached', {
+  const previousUpdate = tagNewLaneMessages(
+    previousRun,
+    [human],
+    'capability:general',
+    'turn-1',
+    'limit_reached',
+    {
     delegationId: 'task-resume',
     task: '处理所有分片',
     announceMessageId: 'task-resume-progress',
   });
   const stateWithProgress = messagesStateReducer([human], previousUpdate);
-  assert.equal(laneMessages(stateWithProgress, 'general', 'turn-1', 'task-resume').length, 4);
+  assert.equal(
+    laneMessages(stateWithProgress, 'capability:general', 'turn-1', 'task-resume').length,
+    4,
+  );
 
   // Continuation (same delegationId) completes naturally.
   const finalNote = new AIMessage('继续处理剩余分片。');
@@ -4432,7 +4665,12 @@ test('handoff after a resumed delegation wipes the whole delegation lane includi
     id: 'task-resume-complete',
     content: '全部分片已处理完成，共 120 条。',
   });
-  const continuationInput = laneMessages(stateWithProgress, 'general', 'turn-1', 'task-resume');
+  const continuationInput = laneMessages(
+    stateWithProgress,
+    'capability:general',
+    'turn-1',
+    'task-resume',
+  );
   const continuationOutput = [
     ...continuationInput,
     finalNote,
@@ -4441,7 +4679,7 @@ test('handoff after a resumed delegation wipes the whole delegation lane includi
   const taggedContinuation = tagNewLaneMessages(
     continuationOutput,
     continuationInput,
-    'general',
+    'capability:general',
     'turn-1',
     'natural',
     {
@@ -4454,7 +4692,7 @@ test('handoff after a resumed delegation wipes the whole delegation lane includi
 
   const handoff = buildSubagentHandoff({
     messages: stateBeforeHandoff,
-    lane: 'general',
+    lane: 'capability:general',
     runId: 'turn-1',
     delegationId: 'task-resume',
   });
@@ -4463,7 +4701,9 @@ test('handoff after a resumed delegation wipes the whole delegation lane includi
 
   // The entire delegation lane (old progress + continuation transcript) is gone;
   // only the user message and the main-queue copy of the final announce remain.
-  assert.equal(finalState.filter((m) => getMessageLane(m) === 'general').length, 0);
+  assert.equal(finalState.filter(
+    (message) => getMessageLane(message) === 'capability:general',
+  ).length, 0);
   assert.deepEqual(mainConversationMessages(finalState).map((m) => m.content), [
     '处理所有分片',
     '全部分片已处理完成，共 120 条。',
@@ -4486,7 +4726,13 @@ test('lane messages drop unanswered tool calls from interrupted subagent history
   });
   const messages = [human, completeToolCall, toolResult, unansweredToolCall];
 
-  const tagged = tagNewLaneMessages(messages, [human], 'general', 'turn-1', 'limit_reached', {
+  const tagged = tagNewLaneMessages(
+    messages,
+    [human],
+    'capability:general',
+    'turn-1',
+    'limit_reached',
+    {
     delegationId: 'task-3',
     task: '归档 Downloads',
   });
@@ -4507,9 +4753,14 @@ test('lane messages sanitize checkpoint history with dangling tool calls', () =>
     content: '准备移动。',
     tool_calls: [{ id: 'call-legacy', name: 'move_path', args: { source: 'a', destination: 'b' } }],
   });
-  setPinpetMeta(danglingToolCall, { lane: 'general', runId: 'turn-1', delegationId: 'task-legacy' });
+  setPinpetMeta(danglingToolCall, { lane: 'capability:general', runId: 'turn-1', delegationId: 'task-legacy' });
 
-  assert.deepEqual(laneMessages([human, danglingToolCall], 'general', 'turn-1', 'task-legacy').map((message) => message.content), [
+  assert.deepEqual(laneMessages(
+    [human, danglingToolCall],
+    'capability:general',
+    'turn-1',
+    'task-legacy',
+  ).map((message) => message.content), [
     '继续归档',
   ]);
 });
@@ -4527,19 +4778,19 @@ test('lane messages scope to delegation: new task starts clean, reused id carrie
   const task1Answer = new AIMessage({ id: 'task-1-answer', content: '目录已整理完成。' });
   const messages = [human, task1ToolCall, task1ToolResult, task1Answer];
 
-  tagNewLaneMessages(messages, [human], 'general', 'turn-1', 'natural', {
+  tagNewLaneMessages(messages, [human], 'capability:general', 'turn-1', 'natural', {
     delegationId: 'task-1',
     task: '整理仓库',
     announceMessageId: 'task-1-answer',
   });
 
   // 同 turn 同 lane 的新 task：看不到上一个 task 的 transcript，只剩主对话。
-  assert.deepEqual(laneMessages(messages, 'general', 'turn-1', 'task-2').map((message) => message.content), [
+  assert.deepEqual(laneMessages(messages, 'capability:general', 'turn-1', 'task-2').map((message) => message.content), [
     '帮我整理仓库',
   ]);
 
   // 同一 delegation 续跑（复用 delegationId）：全量带回自己的 transcript。
-  assert.deepEqual(laneMessages(messages, 'general', 'turn-1', 'task-1').map((message) => message.content), [
+  assert.deepEqual(laneMessages(messages, 'capability:general', 'turn-1', 'task-1').map((message) => message.content), [
     '帮我整理仓库',
     '先看一下目录。',
     '{"entries":["a.ts"]}',
@@ -4550,10 +4801,10 @@ test('lane messages scope to delegation: new task starts clean, reused id carrie
 test('lane messages reject lane history without a delegationId', () => {
   const human = new HumanMessage('继续');
   const invalidLaneMessage = new AIMessage('缺少 delegationId 的 lane 消息。');
-  setPinpetMeta(invalidLaneMessage, { lane: 'general', runId: 'turn-1' });
+  setPinpetMeta(invalidLaneMessage, { lane: 'capability:general', runId: 'turn-1' });
 
   assert.throws(
-    () => laneMessages([human, invalidLaneMessage], 'general', 'turn-1', 'task-1'),
+    () => laneMessages([human, invalidLaneMessage], 'capability:general', 'turn-1', 'task-1'),
     /missing delegationId/,
   );
 });
@@ -4562,7 +4813,7 @@ test('delegation helpers keep new same-lane tasks separate and resume by explici
   const delegations: RunDelegationSummary[] = [
     {
       id: 'task-1',
-      lane: 'general',
+      lane: 'capability:general',
       task: '读取文件',
       status: 'progress',
       resultPreview: '已读取部分文件',
@@ -4571,7 +4822,7 @@ test('delegation helpers keep new same-lane tasks separate and resume by explici
 
   const appended = appendRunDelegationSummary(delegations, {
     id: 'task-2',
-    lane: 'general',
+    lane: 'capability:general',
     task: '运行 lint',
     contextSummary: '这是同一 lane 的新任务。',
   });
@@ -4584,7 +4835,7 @@ test('delegation helpers keep new same-lane tasks separate and resume by explici
 
   const resumed = resumeRunDelegationSummary(appended, {
     id: 'task-1',
-    lane: 'general',
+    lane: 'capability:general',
     task: '读取文件',
     contextSummary: '继续原任务。',
   });
@@ -4661,13 +4912,20 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
     configurable: {
       thread_id: 'briefing-a-plus-b',
       actor: testActor,
-      capabilities: [capability('ops', '仓库运维：issue 操作、文件清理。')],
+      capabilities: [capability(
+        'ops',
+        '仓库运维：issue 操作、文件清理。',
+        ['artifact_discovery'],
+      )],
       forcedCapabilityNames: ['ops'],
-      artifactDiscoveryRoot: '/repo/.pinpawo/capability-artifacts/threads/briefing-a-plus-b',
-      artifactDiscoveryToolset: defineToolset({
+      toolkits: [{
         name: 'artifact_discovery',
-        tools: [mockTool('artifact_list_dir'), mockTool('artifact_view_file_chunk')],
-      }),
+        description: 'artifact discovery toolkit',
+        tools: toolDefinitions(
+          mockTool('artifact_list'),
+          mockTool('artifact_read'),
+        ),
+      }],
     },
     callbacks: recorder.callbacks,
   }) as OrchestratorStateType;
@@ -4701,7 +4959,7 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
   assert.match(String(secondInput.at(-1)?.content), /<delegation_briefing[\s\S]*删除 packages\/goat 目录/);
   const secondInputText = secondInput.map((message) => String(message.content)).join('\n');
   assert.match(secondInputText, /Issue #272 已关闭。/);
-  assert.match(secondInputText, /<artifact_discovery_context[\s\S]*briefing-a-plus-b/);
+  assert.match(secondInputText, /<artifact_discovery_context[\s\S]*current_thread/);
   assert.doesNotMatch(
     state.messages.map((message) => String(message.content)).join('\n'),
     /artifact_discovery_context/,

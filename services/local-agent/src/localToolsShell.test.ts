@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import type { AgentToolkit } from '@pinpawo/pet-agent';
 import {
   buildCurrentTimeSnapshot,
   getCurrentTimeTool,
@@ -14,6 +15,10 @@ import {
   truncateShellOutput,
 } from './toolkits/local/shellTools';
 import { createBashToolkit } from './toolkits/local';
+
+function definition(toolkit: AgentToolkit, toolName: string) {
+  return toolkit.tools.find((item) => item.tool.name === toolName);
+}
 
 test('get_current_time returns current time details for a requested timezone', async () => {
   assert.deepEqual(
@@ -48,11 +53,11 @@ test('bash toolkit exposes get_current_time without command review', () => {
 
   assert.equal(Array.isArray(toolkit.tools), true);
   assert.equal(
-    Array.isArray(toolkit.tools) && toolkit.tools.some((item) => item.name === 'get_current_time'),
+    Array.isArray(toolkit.tools) && toolkit.tools.some((item) => item.tool.name === 'get_current_time'),
     true,
   );
-  assert.ok(toolkit.operations?.get_current_time);
-  assert.equal(toolkit.policy?.toolReview?.get_current_time, undefined);
+  assert.ok(definition(toolkit, 'get_current_time')?.operation);
+  assert.equal(definition(toolkit, 'get_current_time')?.review, undefined);
 });
 
 test('shell policy blocks output redirection write commands', () => {
@@ -77,17 +82,14 @@ test('shell policy marks risky commands for review', () => {
 
 test('shell review policy reviews configured command execution', async () => {
   const toolkit = createBashToolkit();
-  const policy = toolkit.policy?.toolReview?.run_shell;
+  const policy = definition(toolkit, 'run_shell')?.review;
   assert.ok(policy);
 
   const review = await policy.request({
-    models: {} as never,
-    actor: {} as never,
-    messages: [],
     toolkitName: 'bash',
     toolName: 'run_shell',
     input: { command: 'pwd' },
-    operation: toolkit.operations?.run_shell,
+    operation: definition(toolkit, 'run_shell')?.operation,
     reviewCapabilities: {
       humanReview: true,
       sessionAuthorization: true,

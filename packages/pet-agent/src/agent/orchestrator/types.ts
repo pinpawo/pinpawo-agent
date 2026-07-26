@@ -6,12 +6,13 @@ import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent';
 import type { CapabilityArtifactRef, CapabilityArtifactStore } from '../../types/artifact';
 import type { SubagentCompletionReason } from '../../types/subagent';
-import type { AgentToolkit, AgentToolset, ToolkitReviewCapabilities } from '../../types/toolkit';
+import type { AgentToolkit, ToolkitReviewCapabilities } from '../../types/toolkit';
+import type { CompiledAgentRegistry } from './registry';
 import type { GlobalReviewPolicy } from './review/globalReviewPolicy';
 import type { StructuredOutputAutoRepairConfig, StructuredOutputMethod } from '../../utils/structuredOutput';
 import type { DelegationOutcomeDecision } from './schemas';
 
-export type MessageLane = 'general' | `capability:${string}`;
+export type MessageLane = `capability:${string}`;
 export type PinpetMessageLane = MessageLane | 'orchestrator';
 export type DelegationStatus = 'pending' | 'progress' | 'completed';
 export type { SubagentCompletionReason };
@@ -70,7 +71,7 @@ export type SubagentAnnounce = {
   >[];
 };
 
-export type DecisionMode = 'answer' | 'general' | 'capability';
+export type DecisionMode = 'answer' | 'capability';
 
 export type ToolBindableChatModel = AgentModels['act'] & {
   bindTools?: (tools: StructuredTool[], options?: Record<string, unknown>) => {
@@ -100,26 +101,18 @@ export type OrchestratorConfig = {
   subagentContextWindowTokens?: number;
   /**
    * Artifact store (a port; the host supplies the concrete adapter). Injected
-   * into each capability's `CapabilityContext` so capabilities can persist
-   * artifacts without the host threading the store through every capability
-   * factory. Optional — surfaces without a store (e.g. tests, studio) skip writes.
+   * into the selected capability's narrow `CapabilityFinalizeContext`.
+   * Optional — surfaces without a store (e.g. tests, studio) skip writes.
    */
   capabilityArtifactStore?: CapabilityArtifactStore;
 };
 
 export type OrchestratorInvokeOptions = {
   actor?: AgentActor;
-  capabilities?: AgentCapability[];
-  toolkits?: AgentToolkit[];
+  /** Host-compiled executable registry. Required by routing and executor nodes. */
+  registry?: CompiledAgentRegistry;
   execution?: AgentExecution;
   workdir?: string;
-  /**
-   * Host-resolved, current-thread artifact directory. This is exposed to the
-   * selected subagent as an optional discovery shortcut, never to entryDecision.
-   */
-  artifactDiscoveryRoot?: string;
-  /** Host-owned read-only tools used to inspect artifactDiscoveryRoot. */
-  artifactDiscoveryToolset?: AgentToolset;
   runtimeEnvironment?: string;
   reviewCapabilities?: ToolkitReviewCapabilities;
   globalReviewPolicy?: GlobalReviewPolicy;

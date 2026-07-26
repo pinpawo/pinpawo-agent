@@ -659,7 +659,6 @@ function isOperationPhase(value: string | null): value is AgentOperationPhase {
 }
 
 function normalizeOperationSourceProvider(value: string | null): 'toolkit' | 'runtime' | null {
-  if (value === 'runtime') return value;
-  if (value === 'toolkit' || value === 'toolset' || value === 'capability') return 'toolkit';
+  if (value === 'toolkit' || value === 'runtime') return value;
   return null;
 }

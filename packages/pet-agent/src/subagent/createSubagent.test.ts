@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
@@ -17,6 +18,7 @@ import {
   createSubagent,
   SUBAGENT_GUARD_DECISION_EVENT,
   SUBAGENT_OPERATIONS_EVENT,
+  SUBAGENT_PROMPT_SECTIONS_EVENT,
 } from './createSubagent';
 import { NamespacedProtocolToolEventReader } from './protocolToolEvents';
 import type { SubagentToolLifecycleEvent } from '../types/subagent';
@@ -65,6 +67,21 @@ class FailingSummaryModel extends BaseChatModel {
   }
 }
 
+test('createSubagent rejects duplicate prompt section ids before invoking the model', async () => {
+  await assert.rejects(
+    createSubagent({
+      model: new FakeListChatModel({ responses: ['unused'], sleep: 0 }),
+      tools: [],
+      promptSections: [
+        { id: 'capability:test', content: 'First document.' },
+        { id: 'capability:test', content: 'Duplicate document.' },
+      ],
+      messages: [new HumanMessage('test')],
+    }),
+    /Duplicate subagent prompt section id: capability:test/,
+  );
+});
+
 /**
  * The production shape (#322 Phase 4): a parent graph node runs createSubagent
  * with the parent config passed through, and every run signal — tool
@@ -95,7 +112,11 @@ test('createSubagent surfaces tool lifecycle, guard decisions and operations on 
         ],
       }),
       tools: [readFile],
-      instructions: [],
+      promptSections: [{
+        id: 'capability:read',
+        owner: 'read',
+        content: 'Read the requested file.',
+      }],
       operations: {
         read_file: {
           title: 'Read File',
@@ -168,6 +189,31 @@ test('createSubagent surfaces tool lifecycle, guard decisions and operations on 
     operations?: Record<string, { title?: string }>;
   })?.operations;
   assert.equal(announced?.read_file?.title, 'Read File');
+
+  const promptEvents = runtimeEvents.filter(
+    (data) => data?.name === SUBAGENT_PROMPT_SECTIONS_EVENT,
+  );
+  assert.equal(promptEvents.length, 1);
+  assert.deepEqual(
+    (promptEvents[0]?.data as {
+      sections?: Array<{ id: string; owner: string | null; digest: string }>;
+    }).sections?.map(({ id, owner, digest }) => ({
+      id,
+      owner,
+      digestLength: digest.length,
+    })),
+    [
+      { id: 'framework:governing', owner: 'framework', digestLength: 64 },
+      { id: 'capability:read', owner: 'read', digestLength: 64 },
+    ],
+  );
+  const capabilitySection = (promptEvents[0]?.data as {
+    sections?: Array<{ id: string; digest: string }>;
+  }).sections?.find(({ id }) => id === 'capability:read');
+  assert.equal(
+    capabilitySection?.digest,
+    createHash('sha256').update('Read the requested file.', 'utf8').digest('hex'),
+  );
 });
 
 test('createSubagent summarizes persisted history from contextWindowTokens', async () => {
@@ -181,7 +227,7 @@ test('createSubagent summarizes persisted history from contextWindowTokens', asy
       sleep: 0,
     }),
     tools: [],
-    instructions: [],
+    promptSections: [],
     contextWindowTokens: 1000,
     messages: [
       new HumanMessage(oldContext),
@@ -211,7 +257,7 @@ test('createSubagent throws instead of committing an error summary', async () =>
     createSubagent({
       model,
       tools: [],
-      instructions: [],
+      promptSections: [],
       contextWindowTokens: 1000,
       messages: [
         new HumanMessage(`old evidence\n${'x'.repeat(800)}`),
@@ -234,7 +280,7 @@ test('createSubagent throws when history cannot be trimmed into a summary', asyn
     createSubagent({
       model: new FakeListChatModel({ responses: ['must not continue'], sleep: 0 }),
       tools: [],
-      instructions: [],
+      promptSections: [],
       contextWindowTokens: 1000,
       messages: [
         new HumanMessage(`single oversized context\n${'x'.repeat(4_000)}`),
@@ -252,7 +298,7 @@ test('createSubagent throws on an empty context summary', async () => {
     createSubagent({
       model: new FakeListChatModel({ responses: ['', 'must not continue'], sleep: 0 }),
       tools: [],
-      instructions: [],
+      promptSections: [],
       contextWindowTokens: 1000,
       messages: [
         new HumanMessage(`old evidence\n${'x'.repeat(800)}`),
@@ -281,7 +327,7 @@ test('createSubagent leaves single-result sizing to the toolkit below the waterm
       ],
     }),
     tools: [readFile],
-    instructions: [],
+      promptSections: [],
     messages: [new HumanMessage('read the file')],
     maxIterations: 4,
   });
@@ -295,7 +341,7 @@ test('createSubagent does not summarize history below the derived token trigger'
   const result = await createSubagent({
     model: new FakeListChatModel({ responses: ['done'], sleep: 0 }),
     tools: [],
-    instructions: [],
+    promptSections: [],
     messages: [new HumanMessage('small delegated task context')],
     contextWindowTokens: 1000,
     maxIterations: 4,
@@ -322,7 +368,7 @@ test('createSubagent ignores a stop marker that arrives in the input history', a
   const result = await createSubagent({
     model: new FakeListChatModel({ responses: ['fresh answer'], sleep: 0 }),
     tools: [],
-    instructions: [],
+    promptSections: [],
     messages: [new HumanMessage('do the task'), staleStopNotice, new HumanMessage('继续')],
     maxIterations: 4,
   });
@@ -360,7 +406,7 @@ test('createSubagent default iteration budget is a soft model-call guard', async
     model: model as unknown as BaseChatModel,
     tools: [noop],
     middleware: [progressMiddleware],
-    instructions: [],
+    promptSections: [],
     messages: [new HumanMessage('go')],
     // no maxIterations -> default budget
   });
@@ -383,7 +429,7 @@ test('createSubagent reports no announce when a limited run has no AI text deliv
   const result = await createSubagent({
     model: new NeverConvergingModel({}) as unknown as BaseChatModel,
     tools: [noop],
-    instructions: [],
+    promptSections: [],
     messages: [
       new HumanMessage('go'),
       new AIMessage('上一轮的交付不能充当本轮 announce。'),

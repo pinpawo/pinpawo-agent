@@ -7,7 +7,7 @@ import { ToolMessage } from '@langchain/core/messages';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
 import {
   type NamedStructuredTool,
-  type ToolOperationMetadataMapFor,
+  type ToolOperationMetadata,
 } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import { readBoolean, readRecord, readString } from '../operationMetadata';
@@ -103,6 +103,10 @@ export async function runGit(
     const result = await execFileAsync('git', args, {
       cwd: repo,
       encoding: 'utf-8',
+      env: {
+        ...process.env,
+        LC_ALL: 'C',
+      },
       timeout: timeoutMs,
       maxBuffer: 1024 * 256,
     });
@@ -995,4 +999,4 @@ export const gitOperationMetadata = {
       };
     },
   },
-} satisfies ToolOperationMetadataMapFor<typeof gitTools>;
+} satisfies Record<(typeof gitTools)[number]['name'], ToolOperationMetadata>;

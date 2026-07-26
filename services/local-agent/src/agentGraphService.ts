@@ -22,18 +22,11 @@ const HEADLESS_REVIEW_CAPABILITIES = {
 
 function buildConfigurable(setup: AgentChannelSetup) {
   const configurable: Record<string, unknown> = {};
+  configurable.registry = setup.registry;
   configurable.actor = setup.input.actor;
   if (setup.input.threadId) configurable.thread_id = setup.input.threadId;
-  if (setup.input.capabilities) configurable.capabilities = setup.input.capabilities;
-  if (setup.input.toolkits && setup.input.toolkits.length > 0) configurable.toolkits = setup.input.toolkits;
   if (setup.input.execution) configurable.execution = setup.input.execution;
   if (setup.input.workdir) configurable.workdir = setup.input.workdir;
-  if (setup.input.artifactDiscoveryRoot) {
-    configurable.artifactDiscoveryRoot = setup.input.artifactDiscoveryRoot;
-  }
-  if (setup.input.artifactDiscoveryToolset) {
-    configurable.artifactDiscoveryToolset = setup.input.artifactDiscoveryToolset;
-  }
   if (setup.input.runtimeEnvironment) configurable.runtimeEnvironment = setup.input.runtimeEnvironment;
   if (setup.input.globalReviewPolicy) configurable.globalReviewPolicy = setup.input.globalReviewPolicy;
   if (setup.interfaceContext?.kind) {
@@ -143,7 +136,9 @@ export class LocalAgentGraphService {
   }
 
   async run(setup: AgentChannelSetup): Promise<AgentRunResult> {
-    return runAgent(this.getGraph(setup), setup.input);
+    return runAgent(this.getGraph(setup), setup.input, {
+      registry: setup.registry,
+    });
   }
 
   /**

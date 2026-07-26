@@ -12,7 +12,15 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { basename, dirname, join, resolve } from 'node:path';
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { pathToFileURL } from 'node:url';
 import type {
@@ -44,11 +52,28 @@ type ArtifactManifest = {
 };
 
 function encodePathSegment(value: string) {
-  return encodeURIComponent(value || '__empty__');
+  return encodeURIComponent(value || '__empty__').replaceAll('.', '%2E');
+}
+
+function resolveContainedPath(rootDir: string, ...segments: string[]) {
+  const root = resolve(rootDir);
+  const candidate = resolve(root, ...segments);
+  const relativePath = relative(root, candidate);
+  if (
+    relativePath === '..'
+    || relativePath.startsWith(`..${sep}`)
+    || isAbsolute(relativePath)
+  ) {
+    throw new Error('capability artifact path escapes its storage scope');
+  }
+  return candidate;
 }
 
 export function resolveCapabilityArtifactThreadRoot(rootDir: string, threadId: string) {
-  return join(rootDir, 'threads', encodePathSegment(threadId));
+  return resolveContainedPath(
+    resolve(rootDir, 'threads'),
+    encodePathSegment(threadId),
+  );
 }
 
 function atomicWriteFile(path: string, data: string | Uint8Array) {
@@ -161,7 +186,10 @@ export class FileCapabilityArtifactStore implements CapabilityArtifactStore {
   }
 
   private delegationDir(threadId: string, delegationId: string) {
-    return join(this.threadDir(threadId), encodePathSegment(delegationId));
+    return resolveContainedPath(
+      this.threadDir(threadId),
+      encodePathSegment(delegationId),
+    );
   }
 
   private manifestPath(threadId: string, delegationId: string) {
@@ -232,8 +260,8 @@ export class FileCapabilityArtifactStore implements CapabilityArtifactStore {
       sourceKey,
     }));
     const relativePath = hasBytes ? `${id}${extensionForMimeType(input.artifact.mimeType)}` : undefined;
-    const uri = `capability-artifact://thread/${encodeURIComponent(input.threadId)}`
-      + `/delegation/${encodeURIComponent(input.delegationId)}`
+    const uri = `capability-artifact://thread/${encodePathSegment(input.threadId)}`
+      + `/delegation/${encodePathSegment(input.delegationId)}`
       + `/artifact/${encodeURIComponent(id)}`;
     return {
       bytes,
@@ -295,7 +323,10 @@ export class FileCapabilityArtifactStore implements CapabilityArtifactStore {
         for (const item of group) {
           const built = this.buildStoredArtifact(item.input, now);
           if (built.bytes !== undefined && built.ref.relativePath) {
-            atomicWriteFile(join(dir, built.ref.relativePath), built.bytes);
+            atomicWriteFile(
+              resolveContainedPath(dir, built.ref.relativePath),
+              built.bytes,
+            );
           }
           nextArtifacts.set(built.ref.id, built.ref);
           const { relativePath: _relativePath, ...publicRef } = built.ref;
@@ -344,7 +375,10 @@ export class FileCapabilityArtifactStore implements CapabilityArtifactStore {
     if (!relativePath) {
       return { ref, content: null };
     }
-    const path = join(this.delegationDir(parsed.threadId, parsed.delegationId), relativePath);
+    const path = resolveContainedPath(
+      this.delegationDir(parsed.threadId, parsed.delegationId),
+      relativePath,
+    );
     if (!isTextReadableMimeType(ref.mimeType)) {
       return { ref, content: null };
     }
@@ -370,7 +404,7 @@ export class FileCapabilityArtifactStore implements CapabilityArtifactStore {
     if (!stored.relativePath) {
       throw new Error('capability artifact has no downloadable content');
     }
-    return pathToFileURL(join(
+    return pathToFileURL(resolveContainedPath(
       this.delegationDir(parsed.threadId, parsed.delegationId),
       stored.relativePath,
     )).toString();

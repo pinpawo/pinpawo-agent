@@ -251,12 +251,7 @@ function parseOperationSource(
 ): AgentOperationEntry['operationSource'] | null {
   if (
     !isRecord(value)
-    || (
-      value.provider !== 'toolkit'
-      && value.provider !== 'toolset'
-      && value.provider !== 'capability'
-      && value.provider !== 'runtime'
-    )
+    || (value.provider !== 'toolkit' && value.provider !== 'runtime')
     || typeof value.name !== 'string'
     || (value.toolName !== undefined && typeof value.toolName !== 'string')
     || (value.callId !== undefined && typeof value.callId !== 'string')

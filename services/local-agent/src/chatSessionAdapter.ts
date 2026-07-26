@@ -58,7 +58,7 @@ export type ChatSessionAdapterOptions = {
   /**
    * Receives a delegation's `subagent_operations` announcement so the
    * caller's operation registry can join display metadata for
-   * delegation-scoped toolset tools (#322 Phase 4).
+   * delegation-scoped toolkit tools (#322 Phase 4).
    */
   acceptDelegationOperations?: (operations: Record<string, SubagentToolOperationMetadata>) => void;
 };

@@ -1,12 +1,15 @@
 # Pet Agent Capability Runtime Design
 
-> 状态：Current v4
+> 状态：Historical；当前契约见 `PET_AGENT_API_CAPABILITY_TOOLKIT.md` 与
+> `PET_AGENT_TOOLKIT_COMPOSITION_DESIGN.md`
 > 日期：2026-03-30
 > 2026-06-19 对齐：结构化 capability result 已迁移为
 > `CapabilityArtifactRef` / `kind: "result"` artifact；subagent completed
 > announce 是返回给父 agent 的自然语言 handoff 结果，不是短 preview。
 > 2026-07-19 对齐：delegation briefing 进入私有 lane；announce 通过显式
 > `announceMessageId` 交付；answer/main 只按 lane 与 provenance 划分消息。
+> 本文保留旧 runtime 演进背景，其中 `createRuntime`、inline tools、
+> custom/general 双执行器等内容不代表 Capability / Toolkit V2。
 
 ## 1. 文档目标
 

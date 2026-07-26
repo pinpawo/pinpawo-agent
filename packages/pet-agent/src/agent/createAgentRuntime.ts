@@ -5,7 +5,15 @@ export type {
 } from './orchestrator/types';
 export type { OrchestratorStateType } from './orchestrator/state';
 export { buildOrchestratorRunInput, buildOrchestratorTurnInput } from './orchestrator/state';
-export { validateUniqueCapabilityNames, validateUniqueToolkitNames, validateUniqueToolNames } from './orchestrator/validation';
+export { validateUniqueCapabilityNames, validateUniqueToolkitNames } from './orchestrator/validation';
+export {
+  compileAgentRegistry,
+  formatExecutorCompilationIssues,
+} from './orchestrator/registry';
+export type {
+  CompiledAgentRegistry,
+  ExecutorCompilationIssue,
+} from './orchestrator/registry';
 export { ORCHESTRATOR_RECURSION_LIMIT } from './orchestrator/controlPrimitives';
 export {
   DEFAULT_ORCHESTRATOR_MAX_ITERATIONS,

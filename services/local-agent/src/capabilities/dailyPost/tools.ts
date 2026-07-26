@@ -2,7 +2,7 @@ import { tool } from '@langchain/core/tools';
 import type { StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 import {
-  defineToolset,
+  defineToolkit,
   readBoolean,
   readRecord,
   readString,
@@ -10,9 +10,9 @@ import {
   resultStatusSummary,
   type AgentActor,
   type AgentModels,
-  type AgentToolset,
+  type AgentToolkit,
   type NamedStructuredTool,
-  type ToolkitOperationMetadata,
+  type ToolOperationMetadata,
 } from '@pinpawo/pet-agent';
 import type { DailyPostPayload, RecentDailyPost, TrendPromptItem } from './types';
 import { isSemanticDuplicate, isUuid } from './utils';
@@ -157,7 +157,7 @@ const dailyPostOperationMetadata = {
     summarizeOutput: (output) => resultStatusSummary(output, dailyPostResultLabels),
     summarizeError: () => ({ summary: '跳过动态失败' }),
   },
-} satisfies Record<'finalize_post' | 'skip_post', ToolkitOperationMetadata>;
+} satisfies Record<'finalize_post' | 'skip_post', ToolOperationMetadata>;
 
 export function createFinalizePostTool(options: DailyPostToolOptions): StructuredTool {
   let duplicateRetries = 0;
@@ -300,15 +300,17 @@ export function buildDailyPostTools(options: DailyPostToolOptions): StructuredTo
   ];
 }
 
-export function createDailyPostToolset(options: DailyPostToolOptions): AgentToolset {
+export function createDailyPostToolkit(options: DailyPostToolOptions): AgentToolkit {
   const tools = buildDailyPostTools(options) as [
     NamedStructuredTool<'finalize_post'>,
     NamedStructuredTool<'skip_post'>,
   ];
-  return defineToolset({
+  return defineToolkit({
     name: 'daily_post',
-    description: '生成、保存或跳过 daily post 的 capability-private toolset。',
-    tools,
-    operations: dailyPostOperationMetadata,
+    description: '生成、保存或跳过 daily post。',
+    tools: tools.map((toolItem) => ({
+      tool: toolItem,
+      operation: dailyPostOperationMetadata[toolItem.name],
+    })),
   });
 }

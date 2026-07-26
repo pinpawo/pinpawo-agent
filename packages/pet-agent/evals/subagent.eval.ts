@@ -250,11 +250,15 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
   const result = await createSubagent({
     model: buildModel(),
     tools: runtime.tools,
-    instructions: [
-      '你可以使用工具完成任务。',
-      '用户明确要求调用工具时，必须实际调用对应工具，不要假装已经执行。',
-      '多步骤任务必须等所有步骤完成并核验后再返回。',
-    ],
+    promptSections: [{
+      id: 'eval-task-policy',
+      owner: 'eval',
+      content: [
+        '你可以使用工具完成任务。',
+        '用户明确要求调用工具时，必须实际调用对应工具，不要假装已经执行。',
+        '多步骤任务必须等所有步骤完成并核验后再返回。',
+      ].join('\n'),
+    }],
     messages: [new HumanMessage(String(inputs.task ?? ''))],
     maxIterations: 8,
   });

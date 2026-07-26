@@ -1,7 +1,7 @@
 # Pet Agent Toolkit Composition Design
 
-> 状态：Draft v1
-> 日期：2026-05-14
+> 状态：Implemented v2
+> 更新：2026-07-26
 
 ## 1. 背景
 
@@ -24,12 +24,12 @@ tool
   最小可调用动作，例如 browser_open、read_file、run_shell。
 
 toolkit
-  一组相关 tools + instructions + availability。
+  一组相关 ToolDefinition + instructions + availability。
   例如 browser toolkit、bash toolkit、memory toolkit、web_search toolkit。
 
 capability
   面向业务目标的可委派能力。
-  通过 uses 组合 toolkit，再叠加自己的业务 tools、instructions、resultSchema。
+  通过静态 uses 组合 toolkit，并提供自己的 Markdown instructions 与 lifecycle。
 
 orchestrator
   唯一编排者，决定委派哪个 capability，以及多个 capability 的先后顺序。
@@ -56,9 +56,8 @@ orchestrator
 所以使用组合语义：
 
 ```ts
-createRuntime: () => ({
+defineCapability({
   uses: ['browser', 'bash'],
-  tools: businessTools,
   instructions: businessInstructions,
 })
 ```
@@ -67,34 +66,59 @@ createRuntime: () => ({
 
 ## 4. 运行时装配
 
-orchestrator 创建 subagent 前完成 toolkit 解析：
+orchestrator 创建 subagent 前，从已编译 registry 完成 toolkit 解析：
 
 ```txt
-capability.createRuntime()
-  -> runtime.uses
+capability.uses
   -> resolve toolkits
-  -> tools = declared toolkit tools + capability.tools
+  -> tools = declared toolkit tools
   -> instructions = handoff + toolkit.instructions + capability.instructions
   -> createSubagent(...)
 ```
 
-general lane 使用所有已注册 toolkit：
+General 不使用独立 lane 或隐式工具面。它是一个名为 `general` 的普通
+Capability，显式声明自己的 Toolkit 依赖：
 
 ```txt
-general subagent
-  tools = global tools + all toolkit tools
-  instructions = handoff + all toolkit instructions + general instructions
+services/local-agent/src/capabilities/general/
+├── CAPABILITY.md
+└── index.ts
 ```
 
-capability lane 只使用自己声明的 toolkit：
+该目录和其他内建 Capability 通过同一注册入口进入 runtime。`CAPABILITY.md`
+静态声明完整 `uses`；registry 不追加、过滤或改写 General 的依赖。
+General 唯一的选择策略差异是：Capability Planner 在没有强制候选时把已成功
+编译的 `general` 作为 planner-default 候选。之后仍然统一使用：
+
+```txt
+selection = capability.general
+lane = capability:general
+tools = tools from general.uses
+instructions = framework + declared Toolkit instructions + general instructions
+```
+
+`general` 是 local-agent host 的保留名，用户 Capability 不能覆盖它。
+
+所有 Capability 都只使用自己声明的 Toolkit：
 
 ```txt
 capability subagent
-  tools = declared toolkit tools + capability tools
+  tools = declared toolkit tools
   instructions = handoff + declared toolkit instructions + capability instructions
 ```
 
-general lane 默认接收 host 注册的所有 toolkit。capability lane 只有显式声明 `uses` 时才接收对应 toolkit，避免业务能力隐式继承过宽的工具面。
+Toolkit 注册不等于授权。只有 Capability 的 `uses` 才建立工具权限边界；
+缺少任一 required Toolkit 时，该 Capability 在本次 registry generation 中不可用。
+因此 local-agent chat 的内部组装契约要求同时提供稳定 `threadId` 和
+`CapabilityArtifactStore`；host 不能通过省略 thread scope 静默移除 General
+或其他声明了 `artifact_discovery` 的 Capability。
+
+Capability Planner 与 Capability Decision 使用编译后的 Capability 描述。该描述
+由 Capability 自身的 `description` 和实际解析到的 Toolkit name/description 组成，
+因此 Toolkit scope 会参与检索和 planner 上下文，而不是只作为执行期权限信息。
+单个编译描述最多保留 2,000 个字符；Capability Planner 的 registry context 总预算
+为 6,000 个字符。新增大量 Capability 或过长 Toolkit 描述时，应通过
+capability-decision eval 检查候选召回与选择结果。
 
 ## 5. Toolkit Policy 与 HITL
 
@@ -107,21 +131,20 @@ toolkit 可以为工具声明 human review policy。policy 不改变模型看到
 这层 policy 只回答一个问题：这次 tool call 是否需要 human review。它不负责决定“工具是否存在”，也不把“不允许”建模为 public state。工具面由 toolkit 装配决定；参数非法、硬性禁止的调用由 raw tool 自己返回错误。
 
 ```ts
-const bashToolkit = {
+const bashToolkit = defineToolkit({
   name: 'bash',
-  tools: [runShellTool],
-  policy: {
-    toolReview: {
-      run_shell: {
-        request: ({ input }) => {
-          if (!needsReview(input)) return null;
-          return reviewSpec;
-        },
-        applyEdit: ({ editedAction }) => editedAction.args,
+  description: '本地文件、搜索和受控 shell 工具。',
+  tools: [{
+    tool: runShellTool,
+    operation: { title: '执行命令' },
+    review: {
+      request: ({ input }) => {
+        if (!needsReview(input)) return null;
+        return reviewSpec;
       },
     },
-  },
-};
+  }],
+});
 ```
 
 wrapper 的职责：
@@ -159,24 +182,28 @@ ambiguous -> optional model classifier -> review or no review
 browser 拆成两部分：
 
 ```ts
-const browserToolkit = {
+const browserToolkit = defineToolkit({
   name: 'browser',
   description: '浏览器网页访问、登录态复用、JS 渲染页面读取、点击输入等待和页面内容提取。',
-  tools: [browser_open, browser_click, browser_extract],
+  tools: [
+    { tool: browser_open },
+    { tool: browser_click },
+    { tool: browser_extract },
+  ],
   instructions: [
     '优先使用 browser_open 打开目标页面。',
     '需要登录、验证码或手动操作时保持可见浏览器窗口。',
-  ],
-};
+  ].join('\n'),
+});
 
-const browserCapability = {
+const browserCapability = defineCapability({
   name: 'browser',
   description: '使用本机浏览器打开网页、交互并提取内容。',
-  createRuntime: () => ({
-    uses: ['browser'],
-    instructions: ['你是浏览器任务执行器。'],
+  uses: ['browser'],
+  instructions: defineInstructionDocument({
+    content: '# Browser\n\n你是浏览器任务执行器。',
   }),
-};
+});
 ```
 
 当用户直接要求浏览器操作时，orchestrator 委派 `browserCapability`。
@@ -184,10 +211,14 @@ const browserCapability = {
 当其他业务 capability 需要浏览器时，它声明：
 
 ```ts
-createRuntime: () => ({
+defineCapability({
+  name: 'trend_research',
+  description: '读取网页内容并整理趋势摘要。',
   uses: ['browser'],
-  instructions: ['读取网页内容后，整理成趋势摘要。'],
-})
+  instructions: defineInstructionDocument({
+    content: '# Trend research\n\n读取网页内容后，整理成趋势摘要。',
+  }),
+});
 ```
 
 它不会调用 `browserCapability`，只复用 `browserToolkit`。
@@ -197,34 +228,35 @@ createRuntime: () => ({
 bash 也作为 toolkit，而不是一个必须独立委派的 capability：
 
 ```ts
-const bashToolkit = {
+const bashToolkit = defineToolkit({
   name: 'bash',
   description: '本地文件读写、目录操作、代码搜索、补丁应用和受控 shell 命令执行。',
-  tools: [read_file, view_file_chunk, grep_search, apply_patch, run_shell],
+  tools: [
+    { tool: read_file },
+    { tool: view_file_chunk },
+    { tool: grep_search },
+    { tool: apply_patch },
+    { tool: run_shell, review: shellReviewPolicy },
+  ],
   instructions: [
     '优先使用语义具体的文件工具。',
     'run_shell 只作为兜底工具。',
     '高风险 shell 命令必须走 toolkit policy 的人类审批流程。',
-  ],
-  policy: {
-    toolReview: {
-      run_shell: shellReviewPolicy,
-    },
-  },
-};
+  ].join('\n'),
+});
 ```
 
 能力示例：
 
 ```ts
-const capabilityCreator = {
+const capabilityCreator = defineCapability({
   name: 'capability_creator',
-  createRuntime: () => ({
-    uses: ['bash'],
-    tools: [scaffold_capability_plugin, validate_capability_plugin],
-    instructions: capabilityCreatorInstructions,
+  description: '生成、修改并验证用户自定义 CAPABILITY.md 目录。',
+  uses: ['bash', 'capability_creator'],
+  instructions: defineInstructionDocument({
+    content: capabilityCreatorInstructions,
   }),
-};
+});
 ```
 
 ## 8. 边界约束
@@ -240,13 +272,18 @@ const capabilityCreator = {
 当前实现已支持：
 
 - `AgentToolkit` 类型。
-- `CapabilityRuntime.uses`。
+- `AgentCapability.uses`。
 - invoke/configurable 中传入 `toolkits`。
-- browser toolkit + browser capability 薄包装。
+- browser toolkit 与使用它的 capability。
 - bash toolkit，封装 local-agent 的本地文件和 shell 工具。
-- general lane 装配所有已注册 toolkit tools。
-- capability lane 按 `uses` 装配 toolkit tools。
+- General 作为普通 Capability，按自己的 `uses` 装配 toolkit tools。
+- 所有 delegation 统一使用 `capability:<name>` lane 和 capability executor node。
 - toolkit policy wrapper 可对单个工具调用执行 allow/deny/HITL review。
+
+Capability V2 把所有 delegation lane 收敛为 `capability:<name>`。local-agent
+不解释旧 `general` lane checkpoint，而是使用新的
+`checkpoints-capability-v2` / `checkpoints-tui-capability-v2` durable state
+namespace；artifact storage 仍按原 thread scope 保持连续。
 
 后续可以继续演进：
 

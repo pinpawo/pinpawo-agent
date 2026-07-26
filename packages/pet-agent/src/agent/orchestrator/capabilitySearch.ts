@@ -3,6 +3,11 @@ import type { ToolCall } from '@langchain/core/messages/tool';
 import type { AgentCapability } from '../../types/capability';
 import type { CapabilityCandidate } from './types';
 
+export type CapabilitySearchDocument = Pick<
+  AgentCapability,
+  'name' | 'description'
+>;
+
 export function readModelToolCalls(response: AIMessage): ToolCall[] {
   const normalizedToolCalls = response.tool_calls;
   if (Array.isArray(normalizedToolCalls)) {
@@ -41,7 +46,7 @@ export function splitCapabilitySearchTerms(query: string): string[] {
   return [...normalized.values()];
 }
 
-function scoreCapabilityMatch(capability: AgentCapability, term: string): number {
+function scoreCapabilityMatch(capability: CapabilitySearchDocument, term: string): number {
   const normalizedTerm = normalizeSearchText(term);
   if (!normalizedTerm) return 0;
 
@@ -65,7 +70,10 @@ function scoreCapabilityMatch(capability: AgentCapability, term: string): number
   return 0;
 }
 
-export function searchCapabilities(query: string, capabilities: AgentCapability[]): CapabilityCandidate[] {
+export function searchCapabilities(
+  query: string,
+  capabilities: readonly CapabilitySearchDocument[],
+): CapabilityCandidate[] {
   const terms = splitCapabilitySearchTerms(query);
   if (terms.length === 0) return [];
 

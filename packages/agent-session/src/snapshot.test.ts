@@ -68,7 +68,7 @@ test('snapshot parser accepts JSON session data and rejects invalid boundaries',
   }), null);
 });
 
-test('snapshot parser normalizes legacy operation owners to toolkit', () => {
+test('snapshot parser rejects removed operation owner providers', () => {
   const snapshot = createAgentSessionSnapshot({
     ...createSession(),
     timeline: [{
@@ -98,14 +98,7 @@ test('snapshot parser normalizes legacy operation owners to toolkit', () => {
     raw.session.timeline[0].operationSource.provider = 'toolset';
   }
 
-  const parsed = parseAgentSessionSnapshot(raw);
-
-  assert.equal(
-    parsed?.session.timeline[0]?.type === 'operation'
-      ? parsed.session.timeline[0].operationSource?.provider
-      : null,
-    'toolkit',
-  );
+  assert.equal(parseAgentSessionSnapshot(raw), null);
 });
 
 test('incremental projection and parsed snapshot converge', () => {
@@ -161,7 +154,7 @@ test('protocol uses the same snapshot and runtime event contracts', () => {
   });
 });
 
-test('protocol parser normalizes legacy toolset events to toolkit', () => {
+test('protocol parser does not project removed toolset providers', () => {
   const parsed = parseAgentServerMessage({
     type: 'event',
     requestId: 'req-1',
@@ -184,7 +177,7 @@ test('protocol parser normalizes legacy toolset events to toolkit', () => {
     parsed?.type === 'event'
       && parsed.event.type === 'operation'
       ? parsed.event.operation.source?.provider
-      : null,
-    'toolkit',
+      : undefined,
+    undefined,
   );
 });

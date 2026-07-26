@@ -373,7 +373,7 @@ export function readLatestHumanRequest(messages: BaseMessage[]): string | null {
 }
 
 function isDelegationLane(messageLane: PinpetMessageLane | null): messageLane is MessageLane {
-  return messageLane === 'general' || Boolean(messageLane?.startsWith('capability:'));
+  return Boolean(messageLane?.startsWith('capability:'));
 }
 
 function readTaggedAnnounce(message: BaseMessage): SubagentAnnounce | null {

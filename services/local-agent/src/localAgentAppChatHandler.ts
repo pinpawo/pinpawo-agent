@@ -7,6 +7,7 @@ import type {
   ReviewSpec,
 } from '@pinpawo/pet-agent';
 import { buildLocalChatAgentInput, type AgentChannelSetup } from './agentChannel';
+import { createCapabilityDiagnosticReporter } from './agentRegistryPreparation';
 import { loadAgentContext, type AgentContext } from './contextLoader';
 import { buildLocalLlmConfig } from './llmConfig';
 import type { AgentLlmConfig } from './agentConfig';
@@ -76,12 +77,13 @@ export type LocalAgentAppChatHandlerOptions = {
   isCurrentSocket: (ws: WebSocket) => boolean;
   getActorId: () => string;
   getLlmConfig: () => AgentLlmConfig | null;
+  getPluginToolkitDefinitions?: () => AgentToolkit[];
   getPluginToolkits: () => AgentToolkit[];
+  getLocalToolkitDefinitions?: () => AgentToolkit[];
   getLocalToolkits: () => AgentToolkit[];
   getLocalCapabilities: () => AgentCapability[];
   getUserCapabilities: () => LoadedUserCapability[];
   getCapabilityArtifactStore: () => CapabilityArtifactStore;
-  getCapabilityArtifactRoot?: () => string | undefined;
   getWorkdir: () => string;
   getActorName: () => string | null;
   runStudioRequest: RunStudioRequest;
@@ -102,12 +104,13 @@ export class LocalAgentAppChatHandler {
   private readonly isCurrentSocket: (ws: WebSocket) => boolean;
   private readonly getActorId: () => string;
   private readonly getLlmConfig: () => AgentLlmConfig | null;
+  private readonly getPluginToolkitDefinitions: () => AgentToolkit[];
   private readonly getPluginToolkits: () => AgentToolkit[];
+  private readonly getLocalToolkitDefinitions: () => AgentToolkit[];
   private readonly getLocalToolkits: () => AgentToolkit[];
   private readonly getLocalCapabilities: () => AgentCapability[];
   private readonly getUserCapabilities: () => LoadedUserCapability[];
   private readonly getCapabilityArtifactStore: () => CapabilityArtifactStore;
-  private readonly getCapabilityArtifactRoot: () => string | undefined;
   private readonly getWorkdir: () => string;
   private readonly getActorName: () => string | null;
   private readonly runStudioRequest: RunStudioRequest;
@@ -119,6 +122,7 @@ export class LocalAgentAppChatHandler {
   private readonly now: () => number;
   private readonly maxSessionProjections: number;
   private readonly reviewResolutions = new ReviewResolutionLifecycle<ReviewActionRoute>();
+  private readonly reportCapabilityDiagnostics = createCapabilityDiagnosticReporter();
   private readonly sessionStartedAtByThreadId = new Map<string, string>();
   private readonly sessionsByThreadId = new Map<string, AgentSession>();
   private sessionResetPromise: Promise<void> = Promise.resolve();
@@ -131,12 +135,13 @@ export class LocalAgentAppChatHandler {
     this.isCurrentSocket = options.isCurrentSocket;
     this.getActorId = options.getActorId;
     this.getLlmConfig = options.getLlmConfig;
+    this.getPluginToolkitDefinitions = options.getPluginToolkitDefinitions ?? (() => []);
     this.getPluginToolkits = options.getPluginToolkits;
+    this.getLocalToolkitDefinitions = options.getLocalToolkitDefinitions ?? (() => []);
     this.getLocalToolkits = options.getLocalToolkits;
     this.getLocalCapabilities = options.getLocalCapabilities;
     this.getUserCapabilities = options.getUserCapabilities;
     this.getCapabilityArtifactStore = options.getCapabilityArtifactStore;
-    this.getCapabilityArtifactRoot = options.getCapabilityArtifactRoot ?? (() => undefined);
     this.getWorkdir = options.getWorkdir;
     this.getActorName = options.getActorName;
     this.runStudioRequest = options.runStudioRequest;
@@ -663,6 +668,11 @@ export class LocalAgentAppChatHandler {
       userMessage,
       llmConfig: this.getLlmConfig() ?? buildLocalLlmConfig(),
       toolkits: [...this.getPluginToolkits(), ...this.getLocalToolkits()],
+      toolkitDefinitions: [
+        ...this.getPluginToolkitDefinitions(),
+        ...this.getLocalToolkitDefinitions(),
+      ],
+      reportCapabilityDiagnostics: this.reportCapabilityDiagnostics,
       extraCapabilities: this.getLocalCapabilities(),
       threadId,
       interfaceKind: 'app-chat',
@@ -670,7 +680,6 @@ export class LocalAgentAppChatHandler {
       checkpoint: this.checkpoint,
       userCapabilities: this.getUserCapabilities(),
       capabilityArtifactStore: this.getCapabilityArtifactStore(),
-      capabilityArtifactRoot: this.getCapabilityArtifactRoot(),
       workdir: this.getWorkdir(),
       sessionStartedAt: this.getSessionStartedAt(threadId),
     });

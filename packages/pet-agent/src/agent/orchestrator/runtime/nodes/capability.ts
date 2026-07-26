@@ -11,23 +11,20 @@ import {
 } from '../../messageLanes';
 import {
   buildSubagentExecutionInstruction,
-  collectCapabilityOperations,
-  resolveInstructions,
-  resolveToolkitResources,
-  selectCapabilityTools,
+  collectToolkitOperations,
+  resolveToolkitExecution,
 } from '../../subagentDispatch';
 import type {
   MessageLane,
   OrchestratorConfig,
 } from '../../types';
 import { emitRuntimeEventToStreamWriter } from '../../../../utils/streamWriterEvents';
-import { validateUniqueToolkitNames, validateUniqueToolNames } from '../../validation';
 import { createToolAuthorizationRecorder } from '../authorization';
 import {
   CAPABILITY_SUBAGENT_MAX_ITERATIONS,
 } from '../constants';
 import {
-  capabilityLaneToolkits,
+  getInvokeRegistry,
   getInvokeOptions,
   readThreadId,
   resolveActor,
@@ -38,9 +35,19 @@ import {
   resolveDelegationTranscriptRunId,
 } from '../decisions/delegationLifecycle';
 import {
-  hasArtifactDiscoveryTools,
+  hasArtifactDiscoveryToolkit,
   withArtifactDiscoveryContext,
 } from '../../artifacts/discovery';
+
+function buildCapabilityActorContext(actor: ReturnType<typeof resolveActor>): string {
+  return [
+    '[角色]',
+    `角色：「${actor.name}」`,
+    actor.species ? `物种：${actor.species}` : null,
+    actor.stage ? `阶段：${actor.stage}` : null,
+    actor.personality ? `性格：${actor.personality}` : null,
+  ].filter((line): line is string => Boolean(line)).join('\n');
+}
 
 export function createCapabilityNode(params: {
   config: OrchestratorConfig;
@@ -51,19 +58,14 @@ export function createCapabilityNode(params: {
   // Node: capability — reads capabilities, tools, execution from configurable
   return async function capabilityNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
     const {
-      capabilities,
-      toolkits,
       execution,
       workdir,
       runtimeEnvironment,
-      artifactDiscoveryRoot,
-      artifactDiscoveryToolset,
       reviewCapabilities,
       globalReviewPolicy,
     } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
-    const toolkitList = capabilityLaneToolkits(toolkits ?? []);
-    validateUniqueToolkitNames(toolkitList);
+    const registry = getInvokeRegistry(runnableConfig);
     const runNextDelegation = state.runNextDelegation;
     if (!runNextDelegation) {
       throw new Error('Capability node cannot run without a pending capability delegation.');
@@ -72,28 +74,19 @@ export function createCapabilityNode(params: {
     if (!capabilityName) {
       throw new Error('Capability node received a non-capability delegation lane.');
     }
-    const capability = capabilities?.find((c) => c.name === capabilityName);
-    if (!capability) {
-      throw new Error(`Capability node cannot resolve capability "${capabilityName}".`);
+    const compiledCapability = registry.capabilities
+      .find(({ capability }) => capability.name === capabilityName);
+    if (!compiledCapability) {
+      throw new Error(
+        `Capability node cannot resolve an available capability "${capabilityName}".`,
+      );
     }
-    const lane: MessageLane = `capability:${capability.name}`;
+    const { capability } = compiledCapability;
+    const toolkitList = [...compiledCapability.toolkits];
+    const lane: MessageLane = runNextDelegation.lane;
     const transcriptRunId = resolveDelegationTranscriptRunId(state, runNextDelegation);
     const scopedMessages = laneMessages(state.messages, lane, transcriptRunId, runNextDelegation.id);
     const threadId = readThreadId(runnableConfig);
-
-    const availableToolkits = toolkitList.map(({ name, description }) => ({
-      name,
-      description,
-    }));
-
-    const runtime = await capability.createRuntime({
-      models: config.models,
-      actor,
-      messages: scopedMessages,
-      execution,
-      availableToolkits,
-      artifactStore: config.capabilityArtifactStore,
-    });
 
     const authorizationRecorder = createToolAuthorizationRecorder(state.sessionToolAuthorizations);
     const artifactRefs: CapabilityArtifactRef[] = [];
@@ -105,43 +98,23 @@ export function createCapabilityNode(params: {
         task: runNextDelegation.task,
         workdir: workdir ?? null,
       },
-      threadId,
-      capabilityId: capability.name,
-      resultSchema: capability.resultSchema,
-      delegationId: runNextDelegation.id,
-      runId: transcriptRunId,
-      execution,
       reviewCapabilities,
       globalReviewPolicy,
       toolAuthorizations: authorizationRecorder.active,
       recordToolAuthorization: authorizationRecorder.recordToolAuthorization,
-      recordCapabilityArtifact: (ref: CapabilityArtifactRef) => {
-        artifactRefs.push(ref);
-      },
       // Runtime events (authorization notices) surface as `custom` protocol
       // events on the root stream (#322); review emits from afterModel
       // middleware, where the writer is reachable at call time.
       emitRuntimeEvent: emitRuntimeEventToStreamWriter,
     };
-    const usedToolkitResources = await resolveToolkitResources(toolkitList, runtime.uses ?? [], toolkitContext);
-    const runtimeInstructions = await resolveInstructions(runtime, {
-      models: config.models,
-      actor,
-      messages: scopedMessages,
-      availableToolkits,
-    }, execution);
-    const middleware = runtime.middleware;
-    const effectiveRuntime = artifactDiscoveryRoot && artifactDiscoveryToolset
-      ? {
-          ...runtime,
-          toolsets: [...(runtime.toolsets ?? []), artifactDiscoveryToolset],
-        }
-      : runtime;
-    const selectedTools = selectCapabilityTools(effectiveRuntime, usedToolkitResources.tools);
-    const canExploreArtifacts = Boolean(
-      artifactDiscoveryRoot
-      && artifactDiscoveryToolset
-      && hasArtifactDiscoveryTools(selectedTools, artifactDiscoveryToolset.tools),
+    const usedResolvedToolkitExecution = await resolveToolkitExecution(
+      toolkitList,
+      undefined,
+      toolkitContext,
+    );
+    const selectedTools = usedResolvedToolkitExecution.tools;
+    const canExploreArtifacts = hasArtifactDiscoveryToolkit(
+      usedResolvedToolkitExecution.toolkits,
     );
     const executionInstruction = buildSubagentExecutionInstruction({
       lane,
@@ -150,32 +123,60 @@ export function createCapabilityNode(params: {
 
     const subagentMessages = withArtifactDiscoveryContext(
       scopedMessages,
-      canExploreArtifacts ? artifactDiscoveryRoot : null,
+      canExploreArtifacts,
     );
-    let subagentInput: SubagentRunInput = {
+    const subagentInput: SubagentRunInput = {
       model: config.models.subagent ?? config.models.act,
       tools: selectedTools,
-      instructions: [executionInstruction, ...usedToolkitResources.instructions, ...(runtimeEnvironment ? [runtimeEnvironment] : []), ...runtimeInstructions],
-      operations: collectCapabilityOperations(usedToolkitResources.toolkits, effectiveRuntime),
+      promptSections: [
+        {
+          id: 'delegation-context',
+          owner: 'framework',
+          content: executionInstruction,
+        },
+        {
+          id: 'actor-context',
+          owner: 'framework',
+          content: buildCapabilityActorContext(actor),
+        },
+        ...usedResolvedToolkitExecution.toolkits
+          .filter((toolkit) => Boolean(toolkit.instructions?.trim()))
+          .map((toolkit) => ({
+            id: `toolkit:${toolkit.name}`,
+            owner: toolkit.name,
+            content: toolkit.instructions as string,
+          })),
+        {
+          id: `capability:${capability.name}`,
+          owner: capability.name,
+          content: capability.instructions.content,
+        },
+        ...(runtimeEnvironment
+          ? [{
+              id: 'runtime-environment',
+              owner: 'host',
+              content: runtimeEnvironment,
+            }]
+          : []),
+      ],
+      operations: collectToolkitOperations(usedResolvedToolkitExecution.toolkits),
       messages: subagentMessages,
       maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
       contextWindowTokens: subagentContextWindowTokens,
-      middleware: usedToolkitResources.middleware,
+      middleware: usedResolvedToolkitExecution.middleware,
       runnableConfig,
       signal: runnableConfig?.signal,
       artifacts: artifactRefs,
     };
-    validateUniqueToolNames(subagentInput.tools);
-
-    if (middleware?.beforeRun) {
-      subagentInput = await middleware.beforeRun(subagentInput);
-      validateUniqueToolNames(subagentInput.tools);
-    }
-
     let result = await createSubagent(subagentInput);
 
-    if (middleware?.afterRun) {
-      result = await middleware.afterRun(result, {
+    if (capability.lifecycle?.finalize) {
+      const finalized = await capability.lifecycle.finalize(result, {
+        models: config.models,
+        actor,
+        messages: scopedMessages,
+        execution,
+        artifactStore: config.capabilityArtifactStore,
         recordCapabilityArtifact: (ref: CapabilityArtifactRef) => {
           artifactRefs.push(ref);
         },
@@ -184,6 +185,18 @@ export function createCapabilityNode(params: {
         delegationId: runNextDelegation.id,
         runId: transcriptRunId,
       });
+      const artifactsById = new Map(
+        [...result.artifacts, ...artifactRefs, ...(finalized?.artifactRefs ?? [])]
+          .map((ref) => [ref.id, ref]),
+      );
+      result = {
+        ...result,
+        ...(finalized?.messages ? { messages: finalized.messages } : {}),
+        ...(finalized?.announceMessageId !== undefined
+          ? { announceMessageId: finalized.announceMessageId }
+          : {}),
+        artifacts: [...artifactsById.values()],
+      };
     }
 
     const laneOutputMessages = tagNewLaneMessages(

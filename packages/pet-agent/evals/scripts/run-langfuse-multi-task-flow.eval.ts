@@ -7,7 +7,10 @@ import {
   createOrchestratorGraph,
 } from '../../src/agent/createAgentRuntime.ts';
 import { getMessageLane } from '../../src/agent/orchestrator/messageLanes.ts';
-import type { AgentCapability } from '../../src/types/capability.ts';
+import {
+  defineInstructionDocument,
+  type AgentCapability,
+} from '../../src/types/capability.ts';
 import { defineToolkit } from '../../src/types/toolkit.ts';
 import type { AgentModels } from '../../src/types/agent.ts';
 import { multiTaskFlowBasicsDataset } from '../datasets/multi-task-flow-basics.ts';
@@ -27,23 +30,31 @@ const actor = {
 const generalToolkit = defineToolkit({
   name: 'multi_task_eval_general',
   description: 'General capability marker for deterministic multi-task flow evaluation.',
-  tools: [tool(async () => 'ok', {
-    name: 'eval_noop',
-    description: 'No-op tool used only to make the general capability available.',
-    schema: z.object({}),
-  })],
+  tools: [{
+    tool: tool(async () => 'ok', {
+      name: 'eval_noop',
+      description: 'No-op tool used only to make the general capability available.',
+      schema: z.object({}),
+    }),
+  }],
 });
 
 const capabilities: AgentCapability[] = [
   {
     name: 'explore',
     description: '代码库调查、结构分析、依赖和风险探索。Keywords: 代码库|auth|调查|结构',
-    createRuntime: () => ({ instructions: ['Investigate the requested codebase task.'] }),
+    uses: ['multi_task_eval_general'],
+    instructions: defineInstructionDocument({
+      content: 'Investigate the requested codebase task.',
+    }),
   },
   {
     name: 'code_modify',
     description: '代码修改与重构。Keywords: 代码修改|auth|重构|token validation',
-    createRuntime: () => ({ instructions: ['Implement the requested code changes.'] }),
+    uses: ['multi_task_eval_general'],
+    instructions: defineInstructionDocument({
+      content: 'Implement the requested code changes.',
+    }),
   },
 ];
 

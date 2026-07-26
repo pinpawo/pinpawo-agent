@@ -31,7 +31,10 @@ import {
   buildTaskDecisionSchema,
 } from '../src/agent/orchestrator/schemas.ts';
 import type { AgentModels } from '../src/types/agent.ts';
-import type { AgentCapability } from '../src/types/capability.ts';
+import {
+  defineInstructionDocument,
+  type AgentCapability,
+} from '../src/types/capability.ts';
 import type { StructuredOutputMethod } from '../src/utils/structuredOutput.ts';
 import {
   buildCapabilityPlanningGoalContract,
@@ -270,11 +273,24 @@ function plannerScenarios(): DecisionEvalScenario[] {
 }
 
 function capabilities(input: CapabilityDecisionBasicsInput): AgentCapability[] {
-  return input.availableCapabilities.map((item) => ({
-    name: item.name,
-    description: `${item.description} Keywords: ${item.keywords.join('|')}`,
-    createRuntime: () => ({ instructions: [], tools: [] }),
-  }));
+  return [
+    ...input.availableCapabilities.map((item) => ({
+      name: item.name,
+      description: `${item.description} Keywords: ${item.keywords.join('|')}`,
+      uses: [],
+      instructions: defineInstructionDocument({
+        content: `Execute the ${item.name} capability.`,
+      }),
+    })),
+    ...(input.includeGeneralCapability ? [{
+      name: 'general',
+      description: 'Handle general tasks that do not require a more specific Capability.',
+      uses: [],
+      instructions: defineInstructionDocument({
+        content: 'Execute the general capability.',
+      }),
+    }] : []),
+  ];
 }
 
 function capabilitySearchQuery(input: CapabilityDecisionBasicsInput): string {
@@ -289,14 +305,21 @@ function capabilityScenarios(): DecisionEvalScenario[] {
     const capabilityList = capabilities(testCase.input);
     const query = capabilitySearchQuery(testCase.input);
     const candidates = searchCapabilities(query, capabilityList);
-    const generalTools = testCase.input.generalToolsAvailable.map((name) => ({
-      name,
-      description: `General tool ${name}`,
-    })) as never;
-    const generalAvailable = testCase.input.generalToolsAvailable.length > 0;
+    const generalCapability = capabilityList.find(({ name }) => name === 'general');
+    const decisionCandidates = generalCapability
+      && !candidates.some(({ name }) => name === generalCapability.name)
+      ? [
+          ...candidates,
+          {
+            name: generalCapability.name,
+            description: generalCapability.description,
+            score: 0,
+            matchedTerms: ['planner-default'],
+          },
+        ]
+      : candidates;
     const schemaParams = {
-      capabilityCandidates: candidates.map(({ name }) => ({ name })),
-      generalAvailable,
+      capabilityCandidates: decisionCandidates.map(({ name }) => ({ name })),
     };
     const render = (method?: StructuredOutputMethod): RenderedDecisionPrompt => ({
       system: buildCapabilityDecisionSystemPrompt({
@@ -309,8 +332,7 @@ function capabilityScenarios(): DecisionEvalScenario[] {
           contextSummary: testCase.input.contextSummary ?? null,
         },
         availableExecutorsContext: buildCapabilityDecisionAvailableExecutorsContext({
-          generalTools,
-          capabilityCandidates: candidates,
+          capabilityCandidates: decisionCandidates,
         }),
       }),
     });
@@ -324,8 +346,8 @@ function capabilityScenarios(): DecisionEvalScenario[] {
       expectedSummary: testCase.expected.expectedSelection,
       render,
       async run(model, method, config) {
-        let resolvedSelection: string | null = candidates.length === 0
-          ? generalAvailable ? 'general' : CAPABILITY_UNAVAILABLE_SELECTION
+        let resolvedSelection: string | null = decisionCandidates.length === 0
+          ? CAPABILITY_UNAVAILABLE_SELECTION
           : null;
         if (!resolvedSelection) {
           const schema = buildCapabilityDecisionSchema(schemaParams);
@@ -373,12 +395,12 @@ function outcomeScenarios(): DecisionEvalScenario[] {
         }),
         currentTaskContext: buildDelegationOutcomeCurrentTaskContext({
           id: delegationId,
-          lane: 'general',
+          lane: 'capability:general',
           task: testCase.input.currentTask,
           contextSummary: null,
         }),
         subagentAnnounceContext: buildSubagentAnnounceContext({
-          lane: 'general',
+          lane: 'capability:general',
           delegationId,
           task: testCase.input.currentTask,
           text: testCase.input.announce,
@@ -386,7 +408,7 @@ function outcomeScenarios(): DecisionEvalScenario[] {
         otherTasksContext: buildDelegationOutcomeOtherTasksContext(
           (testCase.input.completedHandoffs ?? []).map((resultPreview, index) => ({
             id: `completed-${index.toString()}`,
-            lane: 'general',
+            lane: 'capability:general',
             task: `Completed task ${(index + 1).toString()}`,
             status: 'completed',
             resultPreview,

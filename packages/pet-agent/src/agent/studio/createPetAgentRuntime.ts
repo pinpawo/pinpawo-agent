@@ -4,9 +4,12 @@ import { Command } from '@langchain/langgraph';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import type { AgentCapability, CapabilityAvailability } from '../../types/capability';
+import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent';
-import type { AgentToolkit } from '../../types/toolkit';
+import {
+  filterAvailableToolkits,
+  type AgentToolkit,
+} from '../../types/toolkit';
 import type {
   PetAgentCapabilitySummary,
   PetAgentStartupMode,
@@ -15,6 +18,8 @@ import type {
 import {
   buildOrchestratorRunInput,
   createOrchestratorGraph,
+  compileAgentRegistry,
+  formatExecutorCompilationIssues,
   type OrchestratorConfig,
   type OrchestratorGraph,
 } from '../createAgentRuntime';
@@ -27,6 +32,10 @@ import type {
   PetAgentRuntimeInvokeInput,
   PetAgentRuntimeInvokeResult,
 } from './types';
+import {
+  createWikiReadCapability,
+  WIKI_READ_CAPABILITY_NAME,
+} from './wikiReadCapability';
 import { createWikiReadToolkit } from './wikiReadToolkit';
 
 export type PetAgentRuntimeConfig = {
@@ -37,7 +46,6 @@ export type PetAgentRuntimeConfig = {
   startupMode?: PetAgentStartupMode;
   status?: PetAgentStatus;
   capabilities?: AgentCapability[];
-  capabilityAvailability?: Record<string, CapabilityAvailability>;
   toolkits?: AgentToolkit[];
   execution?: AgentExecution;
   workdir?: string;
@@ -55,13 +63,29 @@ export type PetAgentRuntimeConfig = {
 };
 
 function buildCapabilitySummaries(config: PetAgentRuntimeConfig): PetAgentCapabilitySummary[] {
+  // descriptor() is synchronous and therefore reports static dependency
+  // resolution against the configured Toolkit inventory. Runtime availability
+  // is evaluated for each async invoke generation below.
+  const registry = compileAgentRegistry({
+    toolkits: config.toolkits ?? [],
+    capabilities: config.capabilities ?? [],
+  });
+  const availableNames = new Set(
+    registry.capabilities.map(({ capability }) => capability.name),
+  );
+  const unavailableByName = new Map(
+    registry.unavailableCapabilities.map(({ capability, issues }) => [
+      capability.name,
+      formatExecutorCompilationIssues(issues),
+    ]),
+  );
   return (config.capabilities ?? []).map((capability) => {
-    const availability = config.capabilityAvailability?.[capability.name];
+    const available = availableNames.has(capability.name);
     return {
       name: capability.name,
       description: capability.description,
-      available: availability?.available ?? true,
-      reason: availability?.reason ?? null,
+      available,
+      reason: available ? null : unavailableByName.get(capability.name) ?? null,
     };
   });
 }
@@ -139,16 +163,30 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
     }
 
     const messages = await buildInvokeMessages(input.brief, input.wikiRoot);
-    const toolkits = [
+    const toolkitDefinitions = [
       ...(config.toolkits ?? []),
       ...(input.toolkits ?? []),
       ...(input.wikiRoot ? [createWikiReadToolkit(input.wikiRoot)] : []),
     ];
+    const toolkits = await filterAvailableToolkits(toolkitDefinitions);
+    const configuredCapabilities = [
+      ...(config.capabilities ?? []),
+      ...(input.extraCapabilities ?? []),
+    ];
+    const capabilities = input.wikiRoot
+      && !configuredCapabilities.some((capability) =>
+        capability.name === WIKI_READ_CAPABILITY_NAME
+          || capability.uses.includes('wiki_read'))
+      ? [...configuredCapabilities, createWikiReadCapability()]
+      : configuredCapabilities;
+    const registry = compileAgentRegistry({
+      toolkits,
+      capabilities,
+    });
     const configurable: Record<string, unknown> = {
       actor: config.actor,
       thread_id: input.threadId,
-      capabilities: [...(config.capabilities ?? []), ...(input.extraCapabilities ?? [])],
-      toolkits,
+      registry,
       execution: input.execution ?? config.execution,
       workdir: input.workdir ?? config.workdir,
       runtimeEnvironment: input.runtimeEnvironment,

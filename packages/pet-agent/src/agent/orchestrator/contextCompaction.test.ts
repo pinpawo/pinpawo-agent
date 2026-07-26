@@ -78,7 +78,7 @@ test('orchestrator context compaction excludes delegation briefings from summary
   let summaryInput = '';
   const [briefing] = materializeDelegation({
     mode: 'initial',
-    lane: 'general',
+    lane: 'capability:general',
     runId: 'run-1',
     delegationId: 'delegation-1',
     task: '不要把这段调度文本写入摘要',
@@ -176,7 +176,7 @@ test('orchestrator context compaction uses handoff copies and excludes every lan
 
   const subagentDetail = new AIMessage(`subagent verbose detail ${'z'.repeat(3200)}`);
   setPinpetMeta(subagentDetail, {
-    lane: 'general',
+    lane: 'capability:general',
     runId: 'turn-1',
     delegationId: 'task-1',
     task: '整理素材',
@@ -185,7 +185,7 @@ test('orchestrator context compaction uses handoff copies and excludes every lan
 
   const announce = new AIMessage('素材已经整理完成，输出了 result.md。');
   setPinpetMeta(announce, {
-    lane: 'general',
+    lane: 'capability:general',
     runId: 'turn-1',
     isAnnounce: true,
     delegationId: 'task-1',

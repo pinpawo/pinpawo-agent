@@ -2,6 +2,9 @@
 
 > 状态：Draft v2
 > 日期：2026-03-30
+> Capability / Toolkit 对齐：本文保留 package rewrite 的原始需求背景；
+> 当前扩展契约以
+> [Capability / Toolkit V2 契约](./PET_AGENT_API_CAPABILITY_TOOLKIT.md)为准。
 
 ## 1. 文档目标
 
@@ -54,7 +57,8 @@
 
 第一版内置：`daily_post`、`trend_observe`。
 
-capability 的定义、运行模型和设计约束见 [PET_AGENT_CAPABILITY_RUNTIME_DESIGN.md](./PET_AGENT_CAPABILITY_RUNTIME_DESIGN.md)。
+Capability 的当前定义、运行模型和设计约束见
+[Capability / Toolkit V2 契约](./PET_AGENT_API_CAPABILITY_TOOLKIT.md)。
 
 ### 3.3 subagent
 
@@ -293,7 +297,9 @@ actor 绑定规则：
 
 ### 6.4 capability
 
-capability 相关类型（`AgentCapability`、`CapabilityContext`、`CapabilityRuntime`）的完整定义见 [PET_AGENT_CAPABILITY_RUNTIME_DESIGN.md §4](./PET_AGENT_CAPABILITY_RUNTIME_DESIGN.md#4-capability-接口)。
+Capability 只声明 `name / description / uses / instructions / lifecycle?`。
+完整类型、Toolkit 权限边界和 registry 编译语义见
+[Capability / Toolkit V2 契约](./PET_AGENT_API_CAPABILITY_TOOLKIT.md#2-capability)。
 
 ### 6.5 capability results
 
@@ -301,15 +307,16 @@ capability results 不经过 `runAgent` 返回值。
 
 当前模型中：
 
-- capability 通过 `resultSchema` 声明 `kind: "result"` artifact 的结构化 payload
-- capability 在执行完成或 in-loop ingest 时写入 artifact，并把
+- Capability 可以在确定性的 `lifecycle.finalize` 中写入 artifact，并把
   `CapabilityArtifactRef` 交回 orchestrator
 - orchestrator 在 capability 执行完成后，把 refs 合入最终 graph state 的
-  `capabilityArtifacts`
+  `sessionCapabilityArtifacts`
 - chat 场景通常只消费 `runAgent(...)` 的 `reply / messages`
 - task / scheduler 场景如果需要结构化结果，应通过 graph service 读取最终 invoke state，而不是自己创建 graph
 
-详见 [PET_AGENT_CAPABILITY_RUNTIME_DESIGN.md §8](./PET_AGENT_CAPABILITY_RUNTIME_DESIGN.md#8-capability-result)。
+详见
+[Capability Artifact Pipeline](./capability-artifact-pipeline/index.md)与
+[Capability / Toolkit V2 契约](./PET_AGENT_API_CAPABILITY_TOOLKIT.md#7-artifact)。
 
 ### 6.6 execution
 
@@ -351,7 +358,9 @@ type AgentExecution = {
 | `daily_post` | `finalize_post`, `skip_post` | `daily_post.result` |
 | `trend_observe` | `observe_trends` | `trend_observe.result` |
 
-各 capability 的具体结构、共通规则和设计约束见 [PET_AGENT_CAPABILITY_RUNTIME_DESIGN.md](./PET_AGENT_CAPABILITY_RUNTIME_DESIGN.md)。
+各 Capability 的共通结构和设计约束见
+[Capability / Toolkit V2 契约](./PET_AGENT_API_CAPABILITY_TOOLKIT.md)；具体工具
+由其 `uses` 引用的 Toolkit 提供。
 
 ## 8. 运行流程
 

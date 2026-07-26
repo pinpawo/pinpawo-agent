@@ -1,57 +1,106 @@
-# 架构概览：新流程
+# 架构概览：Capability V2 Artifact 流程
 
-当前实现把 `capability` 的可持久化产出定义为 **artifact ref + store 内容** 两层。
+> 状态：Current
+> 更新：2026-07-27
+
+当前实现把 Capability 的可持久化产出分成 **artifact ref** 与 **store
+content** 两层。Capability / Toolkit 的公共边界见
+[Capability / Toolkit V2 契约](../PET_AGENT_API_CAPABILITY_TOOLKIT.md)。
 
 ## 一句话流程
 
 ```text
-subagent / capability 运行
-  ├─ capabilityRuntime 持有 `artifactStore`（持久化写入接口）
-  ├─ capability 在 afterRun 侧产出 ArtifactRef
-  ├─ 通过 `recordCapabilityArtifact` 落到 `SubagentResult.artifacts`
-  ├─ `capabilityNode` 合并到 `state.sessionCapabilityArtifacts`
-  ├─ 委派结束时，`buildSubagentHandoff` 将当前 announce 复制到主队列
-  └─ 主队列 announce copy 在正文末尾追加该委派的 `artifact refs` 预览
-
-entryDecision 和 capabilityPlanner 不接收 session-wide artifact inventory。当前 task 的
-outcomeDecision 可以使用该 active delegation 的 bounded refs，任务级归属信息通过：
-
-- `currentTaskContext`
-- `subagent_announce`（含当前任务 `artifact refs`）
-
-这样主编排可以不依赖系统提示里持久枚举全部 artifact 全量语义。
-
-能力需要完整内容时：`state` 不持有内容，只能通过 `CapabilityArtifactStore.readArtifact` 按 uri 回读。
+Capability subagent 运行
+  -> SubagentResult
+  -> Capability.lifecycle.finalize(result, context)
+       ├─ CapabilityArtifactStore.writeArtifact(...)
+       ├─ context.recordCapabilityArtifact(ref)
+       └─ 或返回 artifactRefs
+  -> capability node 合并 SubagentResult.artifacts
+  -> state.sessionCapabilityArtifacts
+  -> accepted announce handoff 附带当前 delegation 的 bounded refs
 ```
+
+Artifact payload 不进入 LangGraph state。需要完整内容时，消费者通过
+`CapabilityArtifactStore.readArtifact(uri)` 回读。
 
 ## 组件职责
 
-- **pet-agent 编排层（packages/pet-agent）**
-  - 不关心产物内部字节。
-  - 注入 `artifactStore`，并在执行时提供 `recordCapabilityArtifact`。
-  - 维护 `sessionCapabilityArtifacts`（跨 turn 不清空）。
-  - 只在 active delegation 的 outcomeDecision 注入当前任务的 bounded refs；不把 session inventory 注入 entryDecision。
+### pet-agent core
 
-- **能力侧（packages/local-agent/src/capabilities/*）**
-  - 在 `afterRun` 等确定性收尾边界写入 artifact。
-  - 负责构造 `kind/mimeType/title/preview` 等元信息。
-  - 通过 `CapabilityMiddlewareContext.recordCapabilityArtifact` 回传 ref。
+- `CapabilityArtifactStore` 只定义持久化 port，不依赖具体文件系统 adapter。
+- capability node 在执行后调用可选的 `lifecycle.finalize`。
+- finalize context 提供稳定的 `threadId / capabilityId / delegationId / runId`、
+  artifact store 和 ref recorder。
+- `sessionCapabilityArtifacts` 只保存 refs，并跨 turn 保留。
+- 当前 task 的 outcome context 可以读取当前 delegation 的 bounded refs；
+  entryDecision 不接收 session-wide artifact inventory。
 
-- **store 实现（services/local-agent/src/capabilityArtifactStore.ts）**
-  - 实现 `CapabilityArtifactStore`。
-  - 落盘内容并返回稳定 `CapabilityArtifactRef`。
-  - 解析 `capability-artifact://` URI 与 `readArtifact/getDownloadUri`。
+### Capability
 
-## 关键状态与链路
+- Capability instructions 负责业务目标和交付要求。
+- 需要确定性持久化时，Capability 的可选代码入口只导出
+  `lifecycle.finalize`。
+- finalize 基于已经产生的 `SubagentResult` 整理 announce 或写入 artifact；
+  它不是第二个 agent loop，也不拥有额外工具权限。
+- 需要执行外部动作的代码必须作为 Toolkit tool 暴露，并由 Capability 的
+  `uses` 授权。
 
-1. `capability.createRuntime()` 时注入 `CapabilityContext.artifactStore`。
-2. `createSubagent()` 根据 `contextWindowTokens` 独立管理模型上下文，不负责 artifact 写入。
-3. `capability.middleware.afterRun` 收到最终 `SubagentResult` 和稳定寻址 id。
-4. capability 通过 closure 中的 store 写入内容，并调用 `recordCapabilityArtifact` 回传 ref。
-5. `capabilityNode` 将 refs 放入 `SubagentResult.artifacts`，再合并到 `sessionCapabilityArtifacts`。
+### Host store
 
-## 与旧路径的关系
+`services/local-agent/src/capabilityArtifactStore.ts` 实现本地持久化：
 
-- 不再依赖模型内的 `additional_kwargs` 来传递 artifact 注册信息。
-- `ToolMessage.artifact` 不是全局可复用协议；不会替代 store 引用。
-- `main agent` 也不会在 prompt 中看到完整 artifact 内容，只看摘要级元信息。
+- 写入内容并返回稳定 `CapabilityArtifactRef`；
+- 按 thread scope 解析 `capability-artifact://` URI；
+- 提供 list/read/download 等 host 能力；
+- 不把绝对文件系统路径暴露给模型。
+
+## 历史 Artifact 发现
+
+历史 artifact 读取不是 Capability 的隐式能力。local-agent 按当前 thread 创建
+`artifact_discovery` Toolkit：
+
+```text
+artifact_discovery
+  ├─ artifact_list -> store.listArtifacts(threadId)
+  └─ artifact_read -> store.readArtifact(threadId, uri)
+```
+
+需要历史产物的 Capability 必须静态声明：
+
+```yaml
+uses:
+  - artifact_discovery
+```
+
+编译成功后，framework 只注入一个非权威的
+`<artifact_discovery_context>` 提示，告诉 subagent 可以按需使用上述工具。
+它不会把 artifact inventory 或内容直接塞进 system prompt。
+
+空 thread 的 list 结果为空；这不是 Toolkit 不可用。local chat host 要求非空
+`threadId` 和 `CapabilityArtifactStore`，避免 scope 缺失导致依赖该 Toolkit 的
+Capability 静默消失。
+
+## 状态与消息边界
+
+- `SubagentResult.artifacts`：本次 subagent 运行返回的 refs。
+- `sessionCapabilityArtifacts`：orchestrator session 中跨 turn 的 ref 索引。
+- announce：给 orchestrator 和用户读取的自然语言交付。
+- handoff：验收后的 announce 主队列副本，可附带当前 delegation 的 bounded
+  artifact refs。
+- store content：长报告、结构化数据、图片、视频或其他不应进入 message/state
+  的 payload。
+
+Artifact 不替代 announce，announce 也不替代 durable content。前者提供稳定寻址，
+后者提供当前任务可以判断和交接的自然语言结果。
+
+## 不再存在的 V1 路径
+
+- `capability.createRuntime()`
+- `CapabilityContext.availableToolkits`
+- `capability.middleware.afterRun`
+- `resultSchema`
+- 模型通过 marker 或 `additional_kwargs` 注册 artifact
+- orchestrator 默认读取 artifact 全文
+
+历史设计文档可以保留这些名称解释演进，但它们不是当前 API。

@@ -43,7 +43,6 @@ type PetAgentRuntimeConfig = {
   startupMode?: 'standby' | 'lazy' | 'disabled';
   status?: PetAgentStatus;
   capabilities?: AgentCapability[];
-  capabilityAvailability?: Record<string, CapabilityAvailability>;
   toolkits?: AgentToolkit[];
   execution?: AgentExecution;
   workdir?: string;
@@ -61,8 +60,10 @@ type PetAgentRuntimeConfig = {
 1. 入参 `brief` 为必填自然语言任务文本。
 2. `wikiRoot` 可选；存在时会读取 `{wikiRoot}/index.md`，注入 `SystemMessage`。
 3. `extraCapabilities` 仅在本次调用生效，与 runtime 级能力合并。
-4. `forcedCapabilityNames` 触发本次调用的 routeDecision 强制 capability 候选。
+4. `forcedCapabilityNames` 把本次调用的 Capability Decision 候选限制为指定名称。
 5. `invoke()` 是最终结果接口，不接收工具事件 callback；需要实时工具/运行时事件的宿主应消费 root `streamEvents(v3)` 并通过 adapter 投影。
+6. Toolkit availability 在每次 invoke 的 registry generation 中解析；Capability
+   是否可用由编译后的 registry 及其 diagnostics 决定。
 
 ## 4. 返回值与行为
 
@@ -96,3 +97,5 @@ const result = await runtime.invoke({
 1. 运行时边界与 root stream 事件： [PET_AGENT_STUDIO_INTERFACES](PET_AGENT_STUDIO_INTERFACES.md)
 2. HITL 细节： [工具事件与 HITL](PET_AGENT_API_EVENTS_HITL.md)
 3. Studio 编排层调用方式： [Studio Orchestrator API](PET_AGENT_API_STUDIO_ORCHESTRATOR.md)
+4. Capability / Toolkit 组装：
+   [Capability / Toolkit V2 契约](PET_AGENT_API_CAPABILITY_TOOLKIT.md)

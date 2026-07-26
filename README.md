@@ -386,7 +386,7 @@ Start with these documents:
 - [Pet Agent Studio Orchestrator Design](docs/PET_AGENT_STUDIO_ORCHESTRATOR_DESIGN.md)
 - [Capability Artifact Store Design](docs/PET_AGENT_CAPABILITY_ARTIFACT_STORE_DESIGN.md)
 - [Capability Artifact Pipeline (API 风格)](docs/capability-artifact-pipeline/index.md)
-- [Capability Runtime Design](docs/PET_AGENT_CAPABILITY_RUNTIME_DESIGN.md)
+- [Capability / Toolkit V2 Contract](docs/PET_AGENT_API_CAPABILITY_TOOLKIT.md)
 - [Toolkit Composition Design](docs/PET_AGENT_TOOLKIT_COMPOSITION_DESIGN.md)
 - [Context Governance Refactor](docs/CONTEXT_GOVERNANCE_REFACTOR.md)
 - [Explore Knowledge Ingest Design](docs/EXPLORE_KNOWLEDGE_INGEST_DESIGN.md)

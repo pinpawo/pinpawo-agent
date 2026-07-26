@@ -3,6 +3,10 @@
 > 状态：Draft v2
 > 日期：2026-05-29
 > 更新：local-agent runtime/TUI/app-facing WS 出口已经切到 `LocalAgentRuntimeEvent` / `operation` first；本仓库不再派发旧运行态兼容消息。剩余跨仓库迁移见 issue #19（本仓库侧的 adapter 已移除，#19 仅表示 pinpawo-app / API 仓库侧协议迁移）。
+> 2026-07-27 Capability / Toolkit 对齐：本文中
+> `createRuntime / AgentToolset / defineToolset / CapabilityRuntime.toolsets`
+> 属于历史方案，不是当前扩展入口。当前定义见
+> [Capability / Toolkit V2 契约](./PET_AGENT_API_CAPABILITY_TOOLKIT.md)。
 
 ## 1. 文档目标
 
@@ -124,26 +128,27 @@ const bashToolkit = {
 命名约定约束：
 - 真实工具来源（local toolkit、capability、host tool）各自维护自己的 operation metadata。
 - `@pinpawo/pet-agent` 侧 `operationMetadata.ts` 只共享 reader/summarizer 的基础能力，不定义 local-agent 专属 UI 标识。
-- `LocalAgentOperationEvent.operation.kind` 由运行时统一派生：`<toolkitName>.<toolName>` 或 `<toolsetName>.<toolName>`；没有 metadata 时使用 `runtime.<toolName>`。
+- `LocalAgentOperationEvent.operation.kind` 由运行时统一派生：
+  `<toolkitName>.<toolName>`；没有 metadata 时使用 `runtime.<toolName>`。
 
-对于用户 capability：
+对于用户 Capability，工具先定义为 Toolkit：
 
 ```ts
-const capability = {
+const calendarToolkit = defineToolkit({
   name: 'calendar',
-  createRuntime: () => ({
-    tools: [createCalendarEventTool],
-    operations: {
-      create_calendar_event: {
-        title: '创建日程',
-        summarizeInput: (input) => ({ summary: input.title }),
-      },
+  description: '创建和读取日程。',
+  tools: [{
+    tool: createCalendarEventTool,
+    operation: {
+      title: '创建日程',
+      summarizeInput: (input) => ({ summary: input.title }),
     },
-  }),
-};
+  }],
+});
 ```
 
-对于已经有 toolkit 归属的 shared/global tools：
+Capability 的 `CAPABILITY.md` 再通过 `uses: [calendar]` 建立权限。对于已经有
+Toolkit 归属的 shared tools：
 
 ```ts
 const input = {
@@ -151,13 +156,13 @@ const input = {
 };
 ```
 
-host tools 必须通过 toolkit/toolset 暴露，工具本体、展示 metadata 与 review policy 不再通过 invoke-level direct-tool fallback 分散传入。
+host tools 必须通过 Toolkit 暴露，工具本体、展示 metadata 与 review policy
+不再通过 invoke-level direct-tool fallback 分散传入。
 
 pet-agent 在创建 subagent 时负责收集这些 metadata，并随工具事件透传：
 
 ```txt
-AgentToolkit.operations
-CapabilityRuntime.toolsets[].operations
+AgentToolkit.tools[].operation
   -> root protocol tools/custom events -> operation metadata
 ```
 
@@ -419,10 +424,10 @@ type ToolOperationSummary = {
 
 当前实现边界：
 
-- public contract 使用中性的 `ToolOperationMetadata` / `ToolOperationMetadataMap`；`ToolkitOperationMetadata` 只保留为兼容别名。
-- 新的静态 toolkit/toolset 定义优先使用 `defineToolkit()` / `defineToolset()`，由 TypeScript 约束 `operations` / `policy.toolReview` 的 key 必须来自对应 tools。
-- `AgentToolkit.operations` 描述 toolkit tools 的展示语义。
-- `CapabilityRuntime.toolsets[].operations` 描述 capability-private tools 的展示语义。
+- public contract 使用 `ToolOperationMetadata`，并通过
+  `ToolDefinition.operation` 绑定到具体 tool。
+- 静态 Toolkit 使用 `defineToolkit()`；Capability 不再拥有 private tools。
+- `AgentToolkit.tools[].operation` 描述 Toolkit tools 的展示语义。
 - `operations` 不再声明 `kind`；local-agent 事件里的 `operation.kind` 由 owner 和 tool name 派生。
 - pet-agent 的 subagent 工具事件会携带 `operation` metadata。
 - local-agent 的 `ToolOperationTracker` 使用 run-local registry 兜底，不再依赖全局固定 local tool registry。
@@ -538,7 +543,14 @@ type OperationRegistry = {
 
 ### 阶段 5：拆分 tools/policy/capability registry
 
-状态：已完成。local 内置 tools/toolkits 已迁移到 `toolkits/local/`，其中 file/path、shell、network、search、git tools 与对应 operation metadata/review policy 同目录维护；browser toolkit 已迁移到 `toolkits/browser/`，browser capability 只保留 capability routing；pet profile toolkit 已归属 local-agent；operation metadata helper 已提升到 `toolkits/operationMetadata.ts`，供 local/browser tool metadata 共享，`plugins/` 目录不再承载内置 toolkit helper。`defineToolkit()` / `defineToolset()` 已提供 tool name 与 operation metadata/review policy key 的类型约束和运行时兜底校验。内置 local operation metadata 已挂到 toolkit/tool 模块，browser toolkit 已挂载 browser operation metadata，pet-agent 已支持 toolkit/capability/host tool operation metadata 随 root stream protocol events / runtime metadata announcements 透传；external plugin loader 已支持 plugin 导出 `toolkits`，并忽略 plugin 顶层 raw `tools`；Studio local 内置 tools 已停止走 direct tools 注入，改由 local toolkits 暴露；`daily_post`、`capability_creator` 与 Studio planner `submit_plan` 已通过 capability-private toolset 暴露 metadata，Studio worker wiki read tools 已通过 `wiki_read` toolkit 暴露 metadata，`describe_pet_profile` 已通过 local-agent-owned `pet_profile` toolkit 暴露 metadata；草稿 memory/web_search toolkit 不再作为 pet-agent core 的已落地架构；invoke-level direct tools / tool operations fallback 已删除。local-agent 使用 run-local registry 兜底，旧的集中 local tool operation registry 文件已删除。runtime 中的 local toolkit/capability/user capability loading 与 rescan state 已收敛为 `LocalAgentCapabilityRegistry`。工具事件展示 metadata 变量命名已收敛到 operation metadata 语义，避免被误读为业务 operation。
+状态：已完成，并由 Capability / Toolkit V2 进一步收口。local 内置 tools
+按 Toolkit 归属到 `toolkits/local/`、`toolkits/browser/` 等目录；
+`ToolDefinition` 同时绑定 tool、operation metadata 和 review policy。
+Capability 只通过静态 `uses` 获取工具，不再存在 capability-private toolset 或
+direct tools 注入。用户 Capability 使用 `CAPABILITY.md`，编码动作由已注册
+Toolkit 提供。runtime 的 local Toolkit/Capability loading 与 rescan state 收敛到
+`LocalAgentCapabilityRegistry`，实际可路由性以 compiled registry 及其
+diagnostics 为准。
 
 目标：让 local tools 和 capability 管理可维护。
 

@@ -1,11 +1,35 @@
-# Capability 与 Toolkit 契约 API
+# Capability / Toolkit V2 契约
 
-> 状态：Capability / Toolkit V2
+> 状态：Current
 > 更新：2026-07-27
 
-## 1. Capability
+本文是 `packages/pet-agent` 对 Capability / Toolkit V2 的公共契约说明。
+设计理由与组合边界见
+[Toolkit Composition Design](./PET_AGENT_TOOLKIT_COMPOSITION_DESIGN.md)，
+目录插件格式见
+[Capability 目录协议](./PET_AGENT_API_PLUGIN_PROTOCOL.md)。
 
-Capability 是 orchestrator 唯一可以委派的业务执行单元：
+## 1. 核心模型
+
+```text
+ToolDefinition
+  └─ 组成 AgentToolkit（编码实现、不可委派）
+       └─ 被 AgentCapability.uses 静态引用
+            └─ 编译为 CompiledCapability
+                 └─ 由 Capability Planner 选择并在独立 subagent 中执行
+```
+
+只有两个扩展概念：
+
+- **Capability**：面向业务目标的可委派执行单元。
+- **Toolkit**：编码实现的工具、工具说明和工具级策略集合。
+
+Capability 不继承或调用另一个 Capability。多个场景需要复用工具能力时，
+通过 `uses` 组合 Toolkit；多个 Capability 的先后关系由 orchestrator 编排。
+
+## 2. Capability
+
+### 2.1 契约
 
 ```ts
 type AgentCapability = {
@@ -17,14 +41,28 @@ type AgentCapability = {
     finalize?: CapabilityFinalizeHook;
   };
 };
+
+type InstructionDocument = {
+  readonly content: string;
+  readonly digest: string;
+};
 ```
 
-- `uses` 是 required Toolkit 依赖，也是完整工具权限边界。
-- `instructions` 是一个不可变 Markdown 文档，不是字符串数组。
-- `lifecycle.finalize` 只负责确定性整理已有执行结果；模型调用和外部操作必须来自 Toolkit。
-- 缺少任一 required Toolkit 时，该 Capability 在本次 registry generation 中不可用。
+字段语义：
 
-代码定义示例：
+- `name`：稳定 route id；使用小写字母、数字、`_` 或 `-`。
+- `description`：供检索和 Capability Planner 选择执行器。
+- `uses`：required Toolkit 列表，也是该 Capability 的完整工具权限边界。
+- `instructions`：一个非空 Markdown 文档；digest 由
+  `defineInstructionDocument()` 生成并校验。
+- `lifecycle.finalize`：可选的确定性收尾 hook，用于整理已有执行结果、
+  调整 announce 或持久化 artifact。
+
+`uses` 可以是空数组，此时 Capability 是 instructions-only，但仍然通过同一
+subagent 执行路径运行。V2 没有 optional Toolkit 依赖：声明在 `uses` 中就表示
+缺少它时该 Capability 不可用。
+
+### 2.2 代码定义
 
 ```ts
 const inspect = defineCapability({
@@ -37,7 +75,11 @@ const inspect = defineCapability({
 });
 ```
 
-目录定义示例：
+代码形式适合内建 Capability、需要注入确定性 `finalize` 的 Capability，以及
+由 host 在启动时组装的定义。Capability 本身不能声明 tools；需要编码实现的动作
+必须进入 Toolkit。
+
+### 2.3 目录定义
 
 ```text
 inspect/
@@ -60,9 +102,13 @@ version: 1
 只读取并总结与当前任务相关的内容。
 ```
 
-## 2. Toolkit
+`CAPABILITY.md` 同时承载路由 metadata、Toolkit 权限声明和 Markdown
+instructions。纯 Markdown 与带 `finalize` 的目录 Capability 使用同一个
+`AgentCapability` 契约；它们不是两类 runtime。
 
-Toolkit 是一组编码实现的工具和工具级运行策略，不是委派目标：
+## 3. Toolkit
+
+### 3.1 契约
 
 ```ts
 type AgentToolkit = {
@@ -81,7 +127,18 @@ type ToolDefinition = {
 };
 ```
 
-示例：
+字段语义：
+
+- `name` / `description`：Toolkit 的稳定身份和能力范围。
+- `tools`：至少一个可执行的 LangChain Structured Tool。
+- `instructions`：工具族的使用规则，会进入使用该 Toolkit 的 subagent
+  system prompt。
+- `availability`：host 组装本次 registry generation 前执行的可用性检查。
+- `reviewGuidance`：Toolkit 提供给全局 review 判断的允许/询问边界。
+- `ToolDefinition.operation`：工具调用的展示和摘要 metadata。
+- `ToolDefinition.review`：单个工具的确定性 review policy。
+
+Toolkit 必须由代码定义；它不是 Markdown skill，也不是 orchestrator 的委派目标。
 
 ```ts
 const bash = defineToolkit({
@@ -96,60 +153,164 @@ const bash = defineToolkit({
 });
 ```
 
-`availability` 每次组装 registry generation 时重新检查，不做跨 generation 缓存。Toolkit 被过滤后，依赖它的 Capability 会通过 registry diagnostics 报告不可用。
+LangChain Tool 可能包含可变运行时内部状态。registry 会冻结
+`ToolDefinition` 绑定和 metadata，但保留原始 Tool 实例身份；host 必须约定在
+一个 registry generation 内不修改已注册 Tool 的 `name`。
 
-## 3. 编译与执行
+### 3.2 可用性
 
-Host 先组装完整定义，再编译 registry：
+`compileAgentRegistry()` 只负责编译传入的有效 Toolkit inventory，不执行
+`availability`。调用入口或 host 必须先解析可用性：
+
+```text
+Toolkit definitions
+  -> evaluate/filter availability for this generation
+  -> compileAgentRegistry(effective Toolkits, Capabilities)
+```
+
+`runAgent()` 和 pet runtime 会为各自的异步 registry generation 调用
+`filterAvailableToolkits()`；local-agent 可以对同一个 Toolkit 实例缓存检查结果，
+并通过显式 refresh 重新检查。无论 host 采用哪种刷新策略，编译器看到的都必须是
+本次 generation 的完整有效 Toolkit 集合。
+
+如果某个环境可以用另一种实现提供**相同语义**的 Toolkit，fallback 可以封装在
+Toolkit factory 内。不能为了让 Capability 看起来可用而注册一个不满足同名
+Toolkit 契约的空壳实现。
+
+## 4. Registry 编译
+
+Host 先组装完整定义，再编译：
 
 ```ts
 const registry = compileAgentRegistry({
   capabilities,
-  toolkits,
+  toolkits: availableToolkits,
 });
 ```
 
-编译过程：
+编译流程：
 
 ```text
 capability.uses
-  -> resolve required Toolkits
-  -> reject unknown/duplicate Toolkit dependencies and duplicate tool names
-  -> snapshot Capability + Toolkit bindings
-  -> expose one CompiledCapability
+  -> 按声明顺序解析 required Toolkits
+  -> 合并 ToolDefinitions
+  -> 检查重复依赖、未知 Toolkit 和同一执行器内的重复 tool name
+  -> snapshot Capability 与 Toolkit bindings
+  -> 生成一个 CompiledCapability
 ```
 
-执行过程统一为：
+约束与失败语义：
+
+- 重复 Capability 名或 Toolkit 名是 registry 级配置错误，编译直接失败。
+- 单个 Capability 的依赖或 tool 冲突只会把该 Capability 放入
+  `unavailableCapabilities`，不会拖垮其他 Capability。
+- `unavailableCapabilities` 是 host 必须消费的诊断，不应静默丢弃。
+- 两个 Toolkit 可以包含同名 tool，只要没有任何一个 Capability 同时 `uses`
+  它们；冲突按实际执行器组合检查。
+
+`CompiledCapability` 固化了本 generation 使用的 Capability、Toolkits、tools 和
+`toolNames`。执行与诊断应读取该编译结果，不再重新解释原始定义。
+
+## 5. 选择与执行
+
+Capability Planner 看到的是已经成功编译的 Capability。用于检索和 planner
+上下文的描述由以下内容组成：
 
 ```text
-capability:<name> lane
-  -> framework delegation + actor context
-  -> declared Toolkit instructions
-  -> Capability Markdown instructions
-  -> tools from declared Toolkits only
+Capability description + resolved Toolkit names/descriptions
 ```
 
-General 也使用这条路径。它只是 planner 的默认候选，不拥有独立 executor、lane、tools 或依赖契约。
+因此 Toolkit scope 同时影响权限和执行器检索。当前每个编译描述最多 2,000
+字符，planner registry context 总预算为 6,000 字符；扩大 Capability 数量或
+Toolkit 描述时应验证 capability-decision 的召回和选择质量。
 
-## 4. Artifact
+选择成功后统一进入：
+
+```text
+selection = capability.<name>
+lane = capability:<name>
+executor = compiled Capability
+```
+
+subagent system prompt section 的稳定顺序是：
+
+1. framework delegation contract；
+2. actor context；
+3. `uses` 所解析 Toolkit 的 instructions；
+4. Capability Markdown instructions；
+5. host runtime environment（存在时）。
+
+当前任务本身通过 lane 中的 delegation briefing message 传入，不重复写进稳定
+system prompt。subagent 只获得编译到该 Capability 的 tools。
+
+## 6. General 是普通 Capability
+
+`general` 是 well-known name，不是第三个框架概念：
+
+- 使用普通 `AgentCapability` 契约；
+- 通过普通注册入口进入 registry；
+- 静态声明自己的 `uses`；
+- 被选择为 `capability.general`；
+- 运行在 `capability:general` lane；
+- 使用统一 Capability executor。
+
+它唯一的策略差异属于 Capability Planner：当 host 注册的 `general` 已成功编译、
+且没有 forced candidate 时，它作为 `planner-default` 候选保留。最终仍由
+Capability Decision 模型在当前候选中选择；代码没有 general fallback executor。
+
+local-agent 的内建 General 位于：
+
+```text
+services/local-agent/src/capabilities/general/
+├── CAPABILITY.md
+└── index.ts
+```
+
+`general` 是 local-agent host 的保留名，用户 Capability 不能覆盖。
+
+## 7. Artifact
 
 `CapabilityArtifactStore` 是 host 提供的持久化 port：
 
-- Capability 可以在 `lifecycle.finalize` 中写入结果 artifact。
-- `artifact_discovery` Toolkit 按当前 thread 提供只读 `artifact_list` / `artifact_read`。
-- 空 thread 返回空结果，不代表 Toolkit 不可用。
-- 需要读取历史 artifact 的 Capability 必须在自己的 `uses` 中静态声明 `artifact_discovery`。
+- `lifecycle.finalize` 可以通过 context 中的 store 写入执行结果，并返回或记录
+  `CapabilityArtifactRef`。
+- orchestrator state 只保存 refs，不保存大 payload。
+- `artifact_discovery` Toolkit 按当前 thread 提供只读
+  `artifact_list` / `artifact_read`。
+- 空 thread 返回空列表，不代表 Toolkit 不可用。
+- 需要读取历史 artifact 的 Capability 必须在自己的 `uses` 中静态声明
+  `artifact_discovery`。
 
-## 5. 不存在的兼容概念
+本地 chat host 要求稳定的 `threadId` 和 `CapabilityArtifactStore`，以免通过
+缺失 scope 静默移除 General、Explore 等依赖 artifact discovery 的 Capability。
 
-V2 不包含：
+## 8. Host 组装顺序
+
+一个完整 host 应按以下顺序工作：
+
+1. 构造所有 Toolkit definitions。
+2. 解析 Toolkit availability，得到本 generation 的有效 inventory。
+3. 加入所有内建、用户和调用级 Capability definitions。
+4. 添加需要 host scope 的 Toolkit，例如 thread-scoped
+   `artifact_discovery`。
+5. 调用 `compileAgentRegistry()`。
+6. 报告 `unavailableCapabilities`。
+7. 把同一个 `CompiledAgentRegistry` 交给 planner 与 executor。
+
+不要让 UI、HTTP handler 或另一个 registry getter 自己重新计算 Capability
+可用性；可用性必须来自同一次编译结果。
+
+## 9. V2 不包含的概念
 
 - `CapabilityRuntime`
 - `CapabilityContext.availableToolkits`
-- inline `tools` / `toolsets`
-- `defineToolset`
+- Capability inline `tools` / `toolsets`
+- `AgentToolset` / `defineToolset`
 - `createRuntime`
+- `resultSchema`
 - `generalUses`
-- General 专属 executor 或授权开关
+- General 专属 executor、lane、registry slot 或授权开关
+- 旧 `manifest.json/index.js` Capability runtime 插件格式
 
-旧 manifest/runtime 插件格式没有兼容层；目录 Capability 使用 `CAPABILITY.md`。
+这些名称只应出现在明确标记为 historical 的材料或迁移说明中，不应作为当前
+扩展入口。

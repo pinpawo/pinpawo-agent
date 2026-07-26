@@ -2,11 +2,12 @@
 title: Documentation Wiki Index
 page_type: overview
 status: draft
-updated: 2026-07-26
+updated: 2026-07-27
 sources:
   - ../AGENTS.md
 related:
   - overview.md
+  - capability-toolkit-architecture.md
   - concepts/orchestrator-practical-reasoning.md
   - decisions/capability-planner-task-boundaries.md
   - decisions/delegation-completion-acknowledgement.md
@@ -19,6 +20,17 @@ This is the synthesized knowledge layer for the repository documentation. Start
 with an overview, then follow concept, decision, investigation, and source links.
 Existing files outside `docs/wiki/` remain source material until they are
 explicitly migrated.
+
+## Capability / Toolkit
+
+- [Capability / Toolkit V2 architecture](capability-toolkit-architecture.md) —
+  validated system synthesis covering authoring, Toolkit composition, registry
+  compilation, General as an ordinary Capability, execution, artifacts, and
+  host responsibilities.
+- [Decision node ownership](concepts/decision-node-ownership.md) — the
+  Capability Decision boundary and planner-default General selection policy.
+- [Message context and provenance](concepts/message-context-and-provenance.md) —
+  private Capability lanes, announce, and accepted handoff.
 
 ## System prompt design
 

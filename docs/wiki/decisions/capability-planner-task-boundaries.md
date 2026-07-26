@@ -2,7 +2,7 @@
 title: CapabilityPlanner Maintains Result-Bounded Future Work
 page_type: decision
 status: validated
-updated: 2026-07-26
+updated: 2026-07-27
 sources:
   - ../../CAPABILITY_PLANNER_TASK_HORIZON_DRAFT.md
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
@@ -15,6 +15,7 @@ sources:
   - https://github.com/pinpawo/pinpawo-agent/pull/461
 related:
   - ../overview.md
+  - ../capability-toolkit-architecture.md
   - ../concepts/decision-node-ownership.md
   - ../concepts/system-prompt-authoring-principles.md
   - ../questions/system-prompts-open-questions.md

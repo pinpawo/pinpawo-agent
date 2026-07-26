@@ -2,11 +2,13 @@
 title: System Prompt Source Registry
 page_type: source
 status: draft
-updated: 2026-07-26
+updated: 2026-07-27
 sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../../CAPABILITY_PLANNER_TASK_HORIZON_DRAFT.md
   - ../../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md
+  - ../../PET_AGENT_API_CAPABILITY_TOOLKIT.md
+  - ../../PET_AGENT_TOOLKIT_COMPOSITION_DESIGN.md
   - ../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/entryDecision.prompt.ts
   - https://github.com/pinpawo/pinpawo-agent/issues/415
   - https://github.com/pinpawo/pinpawo-agent/issues/416
@@ -15,6 +17,7 @@ sources:
   - https://github.com/pinpawo/pinpawo-agent/issues/435
 related:
   - ../overview.md
+  - ../capability-toolkit-architecture.md
   - ../decisions/capability-planner-task-boundaries.md
   - ../decisions/delegation-completion-acknowledgement.md
   - ../investigations/entry-decision-state-query-routing.md
@@ -73,7 +76,8 @@ PR and its branch are the current implementation source for those claims.
 - [Decision node ownership audit](../../PET_AGENT_DECISION_NODE_OWNERSHIP_AUDIT.md)
 - [Delegation state and task routing](../../PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md)
 - [Announce judgment and handoff](../../PET_AGENT_ANNOUNCE_JUDGMENT_REFACTOR.md)
-- [Capability runtime](../../PET_AGENT_CAPABILITY_RUNTIME_DESIGN.md)
+- [Capability / Toolkit V2 contract](../../PET_AGENT_API_CAPABILITY_TOOLKIT.md)
+- [Capability / Toolkit composition](../../PET_AGENT_TOOLKIT_COMPOSITION_DESIGN.md)
 - [Artifact prompt integration](../../capability-artifact-pipeline/prompt-integration.md)
 - [Context governance](../../CONTEXT_GOVERNANCE_REFACTOR.md)
 

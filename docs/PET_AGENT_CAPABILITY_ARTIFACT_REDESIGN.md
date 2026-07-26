@@ -1,7 +1,13 @@
 # Capability Artifact Redesign
 
 > Date: 2026-06-17
-> Status: Implemented (PR #140, on top of PR #134)
+> Status: Historical (implemented by PR #140, superseded at the Capability
+> lifecycle boundary by Capability / Toolkit V2)
+>
+> Current flow: [Capability Artifact Pipeline](./capability-artifact-pipeline/architecture.md).
+> The deterministic-write decision remains valid, but V2 replaces
+> `CapabilityContext` / `middleware.afterRun` / `resultSchema` with the static
+> Capability contract and optional `lifecycle.finalize`.
 
 ## Decision
 

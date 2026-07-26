@@ -2,15 +2,17 @@
 title: System Prompt Design Knowledge Map
 page_type: overview
 status: draft
-updated: 2026-07-26
+updated: 2026-07-27
 sources:
   - ../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md
   - ../CAPABILITY_PLANNER_TASK_HORIZON_DRAFT.md
   - ../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md
+  - ../PET_AGENT_API_CAPABILITY_TOOLKIT.md
   - ../../packages/pet-agent/src/agent/orchestrator/prompts/templates/sharedPrefix.prompt.ts
   - https://github.com/pinpawo/pinpawo-agent/issues/418
 related:
+  - capability-toolkit-architecture.md
   - concepts/orchestrator-practical-reasoning.md
   - concepts/prompt-knowledge-layers.md
   - concepts/system-prompt-authoring-principles.md
@@ -72,6 +74,10 @@ Six relationships organize the current knowledge:
 6. [The answer close](decisions/delegation-completion-acknowledgement.md) keeps
    the fixed acknowledgement for genuine goal completion and returns control
    truthfully when an accepted result still requires user input.
+7. [Capability / Toolkit V2](capability-toolkit-architecture.md) defines the
+   executor inventory below Capability Decision: Capability owns delegatable
+   business intent, Toolkit owns coded actions, and `uses` is the compiled
+   permission boundary. General is one ordinary planner-default Capability.
 
 ## Prompt Contract Map
 

@@ -211,7 +211,7 @@ Unchanged from the previous design, restated in the new vocabulary:
   `summarizationMiddleware` owns its token trigger and persistent state update.
 - LangGraph `recursionLimit` is not a guard. It stays as a deliberately high
   hard breaker after `stop` guards have had their chance.
-- Node precondition assertions are not guards. A capability/general node that
+- Node precondition assertions are not guards. A capability node that
   runs without a matching pending delegation throws; there is no workflow
   decision to record.
 - Repeated-input detection stays out of the guard layer.

@@ -9,6 +9,7 @@ the original design and reference documents. Maintenance rules live in
 ## Synthesized wiki
 
 - [Documentation wiki](wiki/index.md)
+- [Capability / Toolkit V2 architecture](wiki/capability-toolkit-architecture.md)
 - [System prompt design knowledge map](wiki/overview.md)
 - [Orchestrator as practical reasoning](wiki/concepts/orchestrator-practical-reasoning.md)
 - [System prompt authoring and evaluation principles](wiki/concepts/system-prompt-authoring-principles.md)
@@ -56,12 +57,13 @@ the original design and reference documents. Maintenance rules live in
 
 ## Capabilities, toolkits, and artifacts
 
-- [Capability runtime design](PET_AGENT_CAPABILITY_RUNTIME_DESIGN.md)
 - [Toolkit composition design](PET_AGENT_TOOLKIT_COMPOSITION_DESIGN.md)
 - [Daily post capability](PET_AGENT_DAILY_POST_CAPABILITY.md)
 - [Explore knowledge ingest](EXPLORE_KNOWLEDGE_INGEST_DESIGN.md)
-- [Capability artifact design](PET_AGENT_CAPABILITY_ARTIFACT_DESIGN.md)
-- [Capability artifact redesign](PET_AGENT_CAPABILITY_ARTIFACT_REDESIGN.md)
+- [Capability artifact design](PET_AGENT_CAPABILITY_ARTIFACT_DESIGN.md) —
+  historical draft
+- [Capability artifact redesign](PET_AGENT_CAPABILITY_ARTIFACT_REDESIGN.md) —
+  historical pre-V2 decision
 - [Capability artifact store](PET_AGENT_CAPABILITY_ARTIFACT_STORE_DESIGN.md)
 - [Capability artifact pipeline](capability-artifact-pipeline/index.md)
   - [Architecture](capability-artifact-pipeline/architecture.md)

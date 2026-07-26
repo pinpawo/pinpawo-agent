@@ -2,11 +2,12 @@
 
 > 状态：Draft v1
 > 日期：2026-06-16
-> 关联：`PET_AGENT_CAPABILITY_RUNTIME_DESIGN.md`、`CONTEXT_GOVERNANCE_REFACTOR.md`、`EXPLORE_KNOWLEDGE_INGEST_DESIGN.md`
-> 后续对齐：当前实现以
-> `PET_AGENT_CAPABILITY_ARTIFACT_REDESIGN.md` 为准。本文保留为设计背景；
-> 其中“模型调用 artifact toolkit 写入”和“orchestrator 读取 artifact 全文”
-> 的早期方案已被 deterministic capability write + bounded ref preview 取代。
+> 关联：`PET_AGENT_API_CAPABILITY_TOOLKIT.md`、`CONTEXT_GOVERNANCE_REFACTOR.md`、`EXPLORE_KNOWLEDGE_INGEST_DESIGN.md`
+> 状态补充：Historical draft。当前实现以
+> `capability-artifact-pipeline/architecture.md` 和
+> `PET_AGENT_API_CAPABILITY_TOOLKIT.md` 为准。本文保留为设计背景；
+> 其中 `resultSchema`、Capability write tool、旧 discovery tool 名称和
+> orchestrator 读取 artifact 全文均不是 V2 接口。
 > 2026-07-19：entryDecision 不再接收 artifact inventory；selected subagent 只在需要时
 > 通过当前 thread 的 scoped `artifact_list_dir` / `artifact_view_file_chunk` 自主发现。下文 Phase/State 示例是历史草案，
 > 不作为当前接口定义。

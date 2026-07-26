@@ -39,7 +39,7 @@ across.
 ## Spike setup
 
 A parent `StateGraph` whose node **dynamically** creates a `createAgent()`
-child (mirroring capability/general lanes) and — the crucial change — awaits
+child (mirroring capability lanes) and — the crucial change — awaits
 `child.invoke(input, config)` with the parent config passed through untouched,
 instead of stripping it and consuming a child stream. The root is consumed via
 `graph.streamEvents(input, { version: 'v3' })`.

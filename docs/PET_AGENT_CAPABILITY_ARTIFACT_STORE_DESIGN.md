@@ -103,12 +103,16 @@ type CapabilityArtifactStore = {
 
 ## 6. 典型写入链路（代码路径）
 
-1. capability 运行时拿到 `CapabilityContext.artifactStore`（注入自 orchestrator 配置）。  
-2. 产物成型后调用 `store.writeArtifact(...)` 写入；返回 `CapabilityArtifactRef`。  
-3. 同时把 ref 回传给子图层：
-   - 通过 `CapabilityArtifactSink.recordCapabilityArtifact(ref)`（通常在 `afterRun` 执行）。  
-4. 该 ref 进入 `SubagentResult.artifacts`，再进入 `state.sessionCapabilityArtifacts`。  
-5. 后续 capability/pet 可在 prompt context 中看到短引用（`buildCapabilityArtifactContext`），需要细节再按 ref 到 store 读本体。
+1. Capability 的 `lifecycle.finalize` 从 context 获得
+   `CapabilityArtifactStore`（注入自 orchestrator 配置）。
+2. 产物成型后调用 `store.writeArtifact(...)` 写入并得到
+   `CapabilityArtifactRef`。
+3. 通过 `context.recordCapabilityArtifact(ref)` 或 finalize 返回的
+   `artifactRefs` 回传。
+4. ref 进入 `SubagentResult.artifacts`，再合入
+   `state.sessionCapabilityArtifacts`。
+5. accepted handoff 只携带当前 delegation 的 bounded refs；后续 Capability
+   需要完整内容时，通过声明的 `artifact_discovery` Toolkit 按当前 thread 读取。
 
 ### 示例（概念）
 

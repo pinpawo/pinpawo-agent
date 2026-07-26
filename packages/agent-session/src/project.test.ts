@@ -1,15 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { LocalAgentSession } from './localAgentSession';
 import {
   applySessionSnapshot,
   reduceSession,
-  type LocalAgentSessionInput,
-} from './localAgentSessionReducer';
-import { createInitialTuiState, createSession } from './tui/state/tuiState';
-import { tuiStateReducer } from './tui/state/tuiStateReducer';
+  type AgentSession,
+  type AgentSessionInput,
+} from './index';
 
-function createDomainSession(): LocalAgentSession {
+function createDomainSession(): AgentSession {
   return {
     sessionId: 'chat:pet',
     kind: 'chat',
@@ -20,8 +18,8 @@ function createDomainSession(): LocalAgentSession {
 }
 
 function replay(
-  initial: LocalAgentSession,
-  inputs: Array<{ input: LocalAgentSessionInput; observedAt: number }>,
+  initial: AgentSession,
+  inputs: Array<{ input: AgentSessionInput; observedAt: number }>,
 ) {
   return inputs.reduce(
     (session, item) => reduceSession(session, item.input, { observedAt: item.observedAt }),
@@ -30,7 +28,7 @@ function replay(
 }
 
 test('reduceSession deterministically replays canonical run inputs', () => {
-  const inputs: Array<{ input: LocalAgentSessionInput; observedAt: number }> = [
+  const inputs: Array<{ input: AgentSessionInput; observedAt: number }> = [
     {
       input: {
         type: 'user.accepted',
@@ -380,74 +378,4 @@ test('applySessionSnapshot rematerializes timeline state from a checkpoint point
   });
   assert.equal(resumed.tokenUsage, undefined);
   assert.deepEqual(resumed.sessionTokenUsage, withUsage.sessionTokenUsage);
-});
-
-test('TUI actions preserve the shared session reducer projection', () => {
-  const tuiInitial = createInitialTuiState(createSession({ id: 'chat:pet' }));
-  let tuiState = tuiStateReducer(tuiInitial, {
-    type: 'run.start',
-    requestId: 'req-1',
-    kind: 'chat',
-    message: {
-      id: 'message:user-1',
-      role: 'user',
-      text: 'hello',
-      requestId: 'req-1',
-      createdAt: new Date(1_000).toISOString(),
-    },
-    now: 1_000,
-  });
-  let shared = reduceSession(tuiInitial.sessions['chat:pet'], {
-    type: 'user.accepted',
-    requestId: 'req-1',
-    kind: 'chat',
-    text: 'hello',
-    message: { id: 'message:user-1', createdAt: new Date(1_000).toISOString() },
-  }, { observedAt: 1_000 });
-
-  const delta = {
-    type: 'message.delta' as const,
-    requestId: 'req-1',
-    role: 'assistant' as const,
-    text: 'hi',
-  };
-  tuiState = tuiStateReducer(tuiState, {
-    type: 'event.received',
-    event: delta,
-    now: 1_100,
-  });
-  shared = reduceSession(shared, {
-    type: 'runtime.event',
-    event: delta,
-    message: {
-      role: 'assistant',
-      requestId: 'req-1',
-      text: 'hi',
-      createdAt: new Date(1_100).toISOString(),
-    },
-  }, { observedAt: 1_100 });
-
-  const completed = {
-    type: 'message.completed' as const,
-    requestId: 'req-1',
-    role: 'assistant' as const,
-    text: 'hi there',
-  };
-  tuiState = tuiStateReducer(tuiState, {
-    type: 'event.received',
-    event: completed,
-    now: 1_200,
-  });
-  shared = reduceSession(shared, {
-    type: 'runtime.event',
-    event: completed,
-    message: {
-      role: 'assistant',
-      requestId: 'req-1',
-      text: 'hi there',
-      createdAt: new Date(1_200).toISOString(),
-    },
-  }, { observedAt: 1_200 });
-
-  assert.deepEqual(tuiState.sessions['chat:pet'], shared);
 });

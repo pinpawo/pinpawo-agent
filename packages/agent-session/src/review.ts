@@ -1,14 +1,8 @@
-import type { ReviewResponse, ReviewSpec } from '@pinpawo/pet-agent';
+import type { ReviewSpec } from '@pinpawo/pet-agent';
 
 export type ReviewAction = {
   actionId: string;
   reviews: ReviewSpec[];
-};
-
-export type ReviewDraft = {
-  actionId: string;
-  decisions: ReviewResponse[];
-  resolutionSent?: true;
 };
 
 export function reviewActionId(params: {
@@ -28,12 +22,4 @@ export function reviewActionReviews(
   reviews?: ReviewSpec[],
 ) {
   return reviews?.length ? reviews : [review];
-}
-
-export function currentReview(
-  action: ReviewAction,
-  draft: ReviewDraft,
-) {
-  if (action.actionId !== draft.actionId) return undefined;
-  return action.reviews[draft.decisions.length];
 }

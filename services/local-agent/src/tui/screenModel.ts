@@ -15,7 +15,7 @@ import type {
   SessionModel,
   TuiState,
 } from './state/tuiState';
-import type { LocalAgentTimelineEntry } from '../localAgentSession';
+import type { AgentTimelineEntry } from '@pinpawo/agent-session';
 import type { ActiveOperation } from './types';
 import { buildWelcomePanelModel, type WelcomePanelModel } from './welcomePanelModel';
 
@@ -30,7 +30,7 @@ export type TuiScreenModel = {
   activeOperations: ActiveOperation[];
   regions: {
     timeline: {
-      entries: LocalAgentTimelineEntry[];
+      entries: AgentTimelineEntry[];
       renderKey: string;
       width: number;
       emptyState: WelcomePanelModel | null;

@@ -10,7 +10,7 @@ import type { AgentChannelSetup } from './agentChannel';
 import type { AgentContext } from './contextLoader';
 import { InflightRequestController } from './inflightRequestController';
 import { LocalAgentAppChatHandler } from './localAgentAppChatHandler';
-import type { LocalAgentRuntimeEvent } from './events/localAgentRuntimeEvent';
+import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 import { createInitialTuiState, createSession } from './tui/state/tuiState';
 import { tuiStateReducer } from './tui/state/tuiStateReducer';
 
@@ -161,7 +161,13 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
         type: 'message.delta',
         requestId: 'req-1',
         role: 'assistant',
-        text: 'hello',
+        text: 'Saved to /Users/al',
+      });
+      options.emitEvent({
+        type: 'message.delta',
+        requestId: 'req-1',
+        role: 'assistant',
+        text: 'ice/project/secret.ts',
       });
       options.emitToolEvent({
         event: 'on_tool_start',
@@ -177,9 +183,12 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
         type: 'message.completed',
         requestId: 'req-1',
         role: 'assistant',
-        text: 'done reply',
+        text: 'Saved to /Users/alice/project/secret.ts',
       });
-      return { status: 'completed', reply: 'done reply' };
+      return {
+        status: 'completed',
+        reply: 'Saved to /Users/alice/project/secret.ts',
+      };
     },
   });
 
@@ -203,19 +212,36 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
   const eventMessages = sent.filter((item): item is {
     type: 'event';
     requestId: string;
-    event: LocalAgentRuntimeEvent;
+    event: AgentRuntimeEvent;
   } =>
     Boolean(item && typeof item === 'object' && (item as { type?: unknown }).type === 'event'),
   );
   assert.deepEqual(eventMessages.map((item) => item.event?.type), [
     'message.delta',
+    'message.delta',
     'operation',
     'operation',
     'message.completed',
   ]);
+  assert.deepEqual(
+    eventMessages
+      .map((item) => item.event)
+      .filter((event) => event.type === 'message.delta')
+      .map((event) => event.text),
+    ['Saved to /Users/al', 'ice/project/secret.ts'],
+  );
+  const completedMessage = eventMessages.find(
+    (item) => item.event.type === 'message.completed',
+  )?.event;
+  assert.equal(
+    completedMessage?.type === 'message.completed'
+      ? completedMessage.text
+      : null,
+    'Saved to [local-path]',
+  );
   const operationEvents = eventMessages
     .map((item) => item.event)
-    .filter((event): event is Extract<LocalAgentRuntimeEvent, { type: 'operation' }> =>
+    .filter((event): event is Extract<AgentRuntimeEvent, { type: 'operation' }> =>
       event.type === 'operation');
   assert.deepEqual(operationEvents.map((event) => event.phase), ['started', 'completed']);
   assert.deepEqual(
@@ -225,14 +251,16 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
     [['local-toolkit.read_file', 'README.md'], ['local-toolkit.read_file', 'README.md']],
   );
 
-  assert.equal(operationEvents.some((event) => 'raw' in event), false);
+  assert.equal(operationEvents.every((event) => 'raw' in event), true);
 
   const hostedSession = handler.readSessionProjection('user-1');
   assert.ok(hostedSession);
   assert.equal(hostedSession.activeRun, null);
   assert.equal(
-    hostedSession.timeline.some((entry) => entry.type === 'operation' && entry.raw !== undefined),
-    false,
+    hostedSession.timeline
+      .filter((entry) => entry.type === 'operation')
+      .every((entry) => entry.raw !== undefined),
+    true,
   );
 
   let tuiState = createInitialTuiState(createSession({ id: hostedSession.sessionId }));
@@ -255,7 +283,10 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
       now: 1000,
     });
   }
-  assert.deepEqual(tuiState.sessions[hostedSession.sessionId]?.timeline, hostedSession.timeline);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(tuiState.sessions[hostedSession.sessionId]?.timeline)),
+    JSON.parse(JSON.stringify(hostedSession.timeline)),
+  );
   assert.deepEqual(tuiState.sessions[hostedSession.sessionId]?.activeRun, hostedSession.activeRun);
 });
 
@@ -304,10 +335,10 @@ test('LocalAgentAppChatHandler settles projected operations when a run is interr
   assert.equal(operation?.type, 'operation');
   assert.equal(operation?.phase, 'interrupted');
   const operationEvents = sent
-    .filter((item): item is { type: 'event'; event: LocalAgentRuntimeEvent } =>
+    .filter((item): item is { type: 'event'; event: AgentRuntimeEvent } =>
       Boolean(item && typeof item === 'object' && (item as { type?: unknown }).type === 'event'))
     .map((item) => item.event)
-    .filter((event): event is Extract<LocalAgentRuntimeEvent, { type: 'operation' }> =>
+    .filter((event): event is Extract<AgentRuntimeEvent, { type: 'operation' }> =>
       event.type === 'operation');
   assert.deepEqual(operationEvents.map((event) => event.phase), ['started', 'interrupted']);
 
@@ -342,7 +373,10 @@ test('LocalAgentAppChatHandler settles projected operations when a run is interr
     type: 'run.finish',
     requestId: 'req-interrupt',
   });
-  assert.deepEqual(tuiState.sessions[projection.sessionId]?.timeline, projection.timeline);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(tuiState.sessions[projection.sessionId]?.timeline)),
+    JSON.parse(JSON.stringify(projection.timeline)),
+  );
   assert.deepEqual(tuiState.sessions[projection.sessionId]?.activeRun, projection.activeRun);
 });
 

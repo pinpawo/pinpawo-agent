@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseLocalAgentSessionSnapshot } from './localAgentSessionParser';
+import { parseAgentSessionSnapshot } from './parser';
 
-test('parseLocalAgentSessionSnapshot retains explicit session token usage', () => {
-  const snapshot = parseLocalAgentSessionSnapshot({
+test('parseAgentSessionSnapshot retains explicit session token usage', () => {
+  const snapshot = parseAgentSessionSnapshot({
     version: 3,
     session: {
       sessionId: 'chat:pet',
@@ -27,8 +27,8 @@ test('parseLocalAgentSessionSnapshot retains explicit session token usage', () =
   });
 });
 
-test('parseLocalAgentSessionSnapshot rejects a run-scoped session aggregate', () => {
-  const snapshot = parseLocalAgentSessionSnapshot({
+test('parseAgentSessionSnapshot rejects a run-scoped session aggregate', () => {
+  const snapshot = parseAgentSessionSnapshot({
     version: 3,
     session: {
       sessionId: 'chat:pet',

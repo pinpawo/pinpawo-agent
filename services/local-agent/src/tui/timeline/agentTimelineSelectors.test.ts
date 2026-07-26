@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { LocalAgentOperationEvent } from '../../events/localAgentRuntimeEvent';
+import type { AgentOperationEvent } from '@pinpawo/agent-session';
 import {
-  localAgentOperationEntryId,
-  localAgentOperationEntryFromEvent,
-  localAgentOperationKey,
-} from '../../localAgentTimeline';
+  agentOperationEntryId,
+  agentOperationEntryFromEvent,
+  agentOperationKey,
+} from '@pinpawo/agent-session';
 import {
   findTimelineOperationEntry,
   selectActiveOperationsFromTimeline,
@@ -24,10 +24,10 @@ test('operation timeline entries keep stable ids across lifecycle phases', () =>
     summary: '页面：Example Domain',
   });
 
-  const startedEntry = localAgentOperationEntryFromEvent(started, 1000);
-  const completedEntry = localAgentOperationEntryFromEvent(completed, 2500, startedEntry);
+  const startedEntry = agentOperationEntryFromEvent(started, 1000);
+  const completedEntry = agentOperationEntryFromEvent(completed, 2500, startedEntry);
 
-  assert.equal(localAgentOperationEntryId(started), 'req-1:operation:call-browser');
+  assert.equal(agentOperationEntryId(started), 'req-1:operation:call-browser');
   assert.equal(startedEntry.id, 'req-1:operation:call-browser');
   assert.equal(completedEntry.id, startedEntry.id);
   assert.equal(completedEntry.startedAt, 1000);
@@ -54,8 +54,8 @@ test('operation timeline terminal events preserve previous display fields when p
     source: null,
   });
 
-  const startedEntry = localAgentOperationEntryFromEvent(started, 1000);
-  const completedEntry = localAgentOperationEntryFromEvent(completed, 2500, startedEntry);
+  const startedEntry = agentOperationEntryFromEvent(started, 1000);
+  const completedEntry = agentOperationEntryFromEvent(completed, 2500, startedEntry);
 
   assert.equal(completedEntry.id, startedEntry.id);
   assert.equal(completedEntry.phase, 'completed');
@@ -85,8 +85,8 @@ test('operation timeline terminal events merge completed details with previous d
     },
   });
 
-  const startedEntry = localAgentOperationEntryFromEvent(started, 1000);
-  const completedEntry = localAgentOperationEntryFromEvent(completed, 2500, startedEntry);
+  const startedEntry = agentOperationEntryFromEvent(started, 1000);
+  const completedEntry = agentOperationEntryFromEvent(completed, 2500, startedEntry);
 
   assert.deepEqual(completedEntry.details, {
     before: 'old',
@@ -114,8 +114,8 @@ test('operation timeline terminal events keep raw input for payload renderers', 
     },
   });
 
-  const startedEntry = localAgentOperationEntryFromEvent(started, 1000);
-  const completedEntry = localAgentOperationEntryFromEvent(completed, 2500, startedEntry);
+  const startedEntry = agentOperationEntryFromEvent(started, 1000);
+  const completedEntry = agentOperationEntryFromEvent(completed, 2500, startedEntry);
 
   assert.deepEqual(completedEntry.raw, {
     input: { patch: '*** Begin Patch\n*** Update File: README.md\n-old\n+new\n*** End Patch' },
@@ -132,8 +132,8 @@ test('shared operation projection derives stable keys from operation event field
     summary: undefined,
   });
 
-  assert.equal(localAgentOperationKey(event), 'source-call');
-  const entry = localAgentOperationEntryFromEvent(event, 1000);
+  assert.equal(agentOperationKey(event), 'source-call');
+  const entry = agentOperationEntryFromEvent(event, 1000);
   assert.deepEqual({
     operationKey: entry.operationKey,
     kind: entry.kind,
@@ -161,19 +161,19 @@ test('shared operation projection derives stable keys from operation event field
 });
 
 test('timeline selectors derive active operations from running operation entries', () => {
-  const running = localAgentOperationEntryFromEvent(operationEvent({
+  const running = agentOperationEntryFromEvent(operationEvent({
     phase: 'started',
     target: '.login-btn',
     summary: '点击 .login-btn',
   }), 1000);
-  const otherRun = localAgentOperationEntryFromEvent(operationEvent({
+  const otherRun = agentOperationEntryFromEvent(operationEvent({
     requestId: 'req-2',
     id: 'call-other',
     phase: 'updated',
     target: 'README.md',
     summary: 'read',
   }), 1200);
-  const completed = localAgentOperationEntryFromEvent(operationEvent({
+  const completed = agentOperationEntryFromEvent(operationEvent({
     id: 'call-done',
     phase: 'completed',
     target: 'https://example.com',
@@ -199,7 +199,7 @@ test('timeline selectors derive active operations from running operation entries
 });
 
 test('timeline active operation detail keeps payload fields out of status summaries', () => {
-  const running = localAgentOperationEntryFromEvent(operationEvent({
+  const running = agentOperationEntryFromEvent(operationEvent({
     phase: 'started',
     target: 'README.md',
     summary: 'update',
@@ -221,14 +221,14 @@ function operationEvent(params: {
   requestId?: string;
   id?: string | null;
   callId?: string;
-  phase: LocalAgentOperationEvent['phase'];
+  phase: AgentOperationEvent['phase'];
   title?: string | null;
   target?: string;
   summary?: string;
   details?: Record<string, unknown> | null;
-  source?: LocalAgentOperationEvent['operation']['source'] | null;
-  raw?: LocalAgentOperationEvent['raw'];
-}): LocalAgentOperationEvent {
+  source?: AgentOperationEvent['operation']['source'] | null;
+  raw?: AgentOperationEvent['raw'];
+}): AgentOperationEvent {
   const eventId = params.id === null ? undefined : params.id ?? 'call-browser';
   const callId = params.callId ?? eventId ?? 'call-browser';
   const source = params.source === null

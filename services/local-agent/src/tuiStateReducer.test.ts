@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { LocalAgentOperationEvent } from './events/localAgentRuntimeEvent';
+import type { AgentOperationEvent } from '@pinpawo/agent-session';
 import type {
-  LocalAgentMessageEntry,
-  LocalAgentRunView,
-  LocalAgentSessionSnapshot,
-} from './localAgentSession';
+  AgentMessageEntry,
+  AgentRunView,
+  AgentSessionSnapshot,
+} from '@pinpawo/agent-session';
 import { createInitialTuiState, createSession, type TuiState } from './tui/state/tuiState';
 import {
   selectFocusedActiveOperations,
@@ -31,23 +31,23 @@ function activeRun(state: TuiState, requestId: string) {
   return Object.values(state.sessions).find((session) => session.activeRun?.requestId === requestId)?.activeRun;
 }
 
-function activeRunActivity(run: LocalAgentRunView | null | undefined) {
+function activeRunActivity(run: AgentRunView | null | undefined) {
   return run?.state === 'running' ? run.activity : undefined;
 }
 
-function activeReviewAction(run: LocalAgentRunView | null | undefined) {
+function activeReviewAction(run: AgentRunView | null | undefined) {
   return run?.state === 'waiting_review' ? run.reviewAction : null;
 }
 
 function sessionSnapshot(input: {
   sessionId: string;
   kind: 'chat' | 'studio';
-  timeline: LocalAgentSessionSnapshot['session']['timeline'];
-  activeRun?: LocalAgentRunView | null;
-  runtime?: LocalAgentSessionSnapshot['session']['runtime'];
-  tokenUsage?: LocalAgentSessionSnapshot['session']['tokenUsage'];
-  sessionTokenUsage?: LocalAgentSessionSnapshot['session']['sessionTokenUsage'];
-}): LocalAgentSessionSnapshot {
+  timeline: AgentSessionSnapshot['session']['timeline'];
+  activeRun?: AgentRunView | null;
+  runtime?: AgentSessionSnapshot['session']['runtime'];
+  tokenUsage?: AgentSessionSnapshot['session']['tokenUsage'];
+  sessionTokenUsage?: AgentSessionSnapshot['session']['sessionTokenUsage'];
+}): AgentSessionSnapshot {
   return {
     version: 3,
     session: {
@@ -95,7 +95,7 @@ function transcriptTimeline(state: TuiState, sessionId = 'chat:pet') {
 }
 
 function timelineMessagesByRole(state: TuiState, role: 'system' | 'subagent', sessionId = 'chat:pet') {
-  return state.sessions[sessionId]?.timeline.filter((entry): entry is LocalAgentMessageEntry =>
+  return state.sessions[sessionId]?.timeline.filter((entry): entry is AgentMessageEntry =>
     entry.type === 'message' && entry.role === role) ?? [];
 }
 
@@ -1412,7 +1412,7 @@ test('tuiStateReducer keeps two requestIds from mixing assistant timeline entrie
 
 test('tuiStateReducer tracks operation lifecycle in timeline without terminal message rows', () => {
   let state = startRun(initialState(), 'req-1');
-  const started: LocalAgentOperationEvent = {
+  const started: AgentOperationEvent = {
     type: 'operation',
     requestId: 'req-1',
     phase: 'started',

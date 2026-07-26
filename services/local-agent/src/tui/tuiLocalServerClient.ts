@@ -2,11 +2,11 @@ import {
   buildLocalServerAuthHeaders,
   readLocalServerAuthToken,
 } from '../localServerAuth';
-import type { LocalAgentSessionSnapshot } from '../localAgentSession';
+import type { AgentSessionSnapshot } from '@pinpawo/agent-session';
 import {
-  parseLocalAgentSessionSnapshot,
-  parseLocalAgentSessionSummary,
-} from '../localAgentSessionParser';
+  parseAgentSessionSnapshot,
+  parseAgentSessionSummary,
+} from '@pinpawo/agent-session';
 import type { ResumeSessionSummary } from './types';
 
 const DEFAULT_HEALTH_TIMEOUT_MS = 1500;
@@ -43,11 +43,11 @@ export class TuiLocalServerClient {
     }
   }
 
-  async readSessionSnapshot(): Promise<LocalAgentSessionSnapshot> {
+  async readSessionSnapshot(): Promise<AgentSessionSnapshot> {
     const res = await this.fetchAuth(this.url('/snapshot'));
     if (!res.ok) throw new LocalServerHttpError(res.status);
     const serverSnapshot = await res.json() as unknown;
-    const snapshot = parseLocalAgentSessionSnapshot(serverSnapshot);
+    const snapshot = parseAgentSessionSnapshot(serverSnapshot);
     if (!snapshot) throw new Error('invalid local server snapshot payload');
     return snapshot;
   }
@@ -60,7 +60,7 @@ export class TuiLocalServerClient {
     const payload = await res.json() as { sessions?: unknown };
     return Array.isArray(payload.sessions)
       ? payload.sessions.flatMap((item) => {
-          const session = parseLocalAgentSessionSummary(item);
+          const session = parseAgentSessionSummary(item);
           return session ? [session] : [];
         })
       : [];
@@ -68,7 +68,7 @@ export class TuiLocalServerClient {
 
   async resumeSession(sessionId: string): Promise<{
     session: ResumeSessionSummary;
-    snapshot: LocalAgentSessionSnapshot;
+    snapshot: AgentSessionSnapshot;
   }> {
     const res = await this.fetchAuth(
       this.url(`/sessions/resume?sessionId=${encodeURIComponent(sessionId)}`),
@@ -80,11 +80,11 @@ export class TuiLocalServerClient {
       session?: unknown;
       snapshot?: unknown;
     };
-    const session = parseLocalAgentSessionSummary(payload.session);
+    const session = parseAgentSessionSummary(payload.session);
     if (!session) {
       throw new Error('invalid resume session payload');
     }
-    const snapshot = parseLocalAgentSessionSnapshot(payload.snapshot);
+    const snapshot = parseAgentSessionSnapshot(payload.snapshot);
     if (
       !snapshot
       || snapshot.session.sessionId !== session.id

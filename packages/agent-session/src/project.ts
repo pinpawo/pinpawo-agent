@@ -1,23 +1,23 @@
 import type { TokenUsageSnapshot } from '@pinpawo/pet-agent';
-import type { LocalAgentRuntimeEvent } from './events/localAgentRuntimeEvent';
+import type { AgentRuntimeEvent } from './events';
 import type {
-  LocalAgentMessageEntry,
-  LocalAgentOperationEntry,
-  LocalAgentRunView,
-  LocalAgentSession,
-  LocalAgentSessionMessageInput,
-  LocalAgentSessionSnapshot,
-  LocalAgentTimelineEntry,
-} from './localAgentSession';
-import { localAgentOperationEntryFromEvent, localAgentOperationEntryId } from './localAgentTimeline';
-import { reviewActionId, reviewActionReviews } from './reviewAction';
+  AgentMessageEntry,
+  AgentOperationEntry,
+  AgentRunView,
+  AgentSession,
+  AgentSessionMessageInput,
+  AgentTimelineEntry,
+} from './domain';
+import type { AgentSessionSnapshot } from './snapshot';
+import { agentOperationEntryFromEvent, agentOperationEntryId } from './timeline';
+import { reviewActionId, reviewActionReviews } from './review';
 
-export type LocalAgentSessionInput =
+export type AgentSessionInput =
   | {
       type: 'session.configured';
-      kind?: LocalAgentSession['kind'];
-      actor?: NonNullable<LocalAgentSession['actor']>;
-      runtime?: NonNullable<LocalAgentSession['runtime']>;
+      kind?: AgentSession['kind'];
+      actor?: NonNullable<AgentSession['actor']>;
+      runtime?: NonNullable<AgentSession['runtime']>;
     }
   | {
       type: 'session.cleared';
@@ -25,18 +25,18 @@ export type LocalAgentSessionInput =
   | {
       type: 'user.accepted';
       requestId: string;
-      kind: LocalAgentSession['kind'];
+      kind: AgentSession['kind'];
       text: string;
-      message?: Omit<LocalAgentSessionMessageInput, 'role' | 'text' | 'requestId'>;
+      message?: Omit<AgentSessionMessageInput, 'role' | 'text' | 'requestId'>;
     }
   | {
       type: 'message.appended';
-      message: LocalAgentSessionMessageInput;
+      message: AgentSessionMessageInput;
     }
   | {
       type: 'runtime.event';
-      event: LocalAgentRuntimeEvent;
-      message?: LocalAgentSessionMessageInput;
+      event: AgentRuntimeEvent;
+      message?: AgentSessionMessageInput;
     }
   | {
       type: 'run.interrupting';
@@ -45,25 +45,25 @@ export type LocalAgentSessionInput =
   | {
       type: 'run.finished';
       requestId: string;
-      messages?: LocalAgentSessionMessageInput[];
+      messages?: AgentSessionMessageInput[];
       tokenUsage?: TokenUsageSnapshot | null;
     };
 
-export type LocalAgentSessionReductionContext = {
+export type AgentSessionReductionContext = {
   observedAt: number;
 };
 
-export type LocalAgentSessionSnapshotApplyOptions = {
+export type AgentSessionSnapshotApplyOptions = {
   observedAt?: number;
   preserveOmittedTokenUsage?: boolean;
   preserveOmittedSessionTokenUsage?: boolean;
 };
 
 export function reduceSession(
-  session: LocalAgentSession,
-  input: LocalAgentSessionInput,
-  context: LocalAgentSessionReductionContext,
-): LocalAgentSession {
+  session: AgentSession,
+  input: AgentSessionInput,
+  context: AgentSessionReductionContext,
+): AgentSession {
   switch (input.type) {
     case 'session.configured':
       return {
@@ -105,10 +105,10 @@ export function reduceSession(
 }
 
 export function applySessionSnapshot(
-  session: LocalAgentSession,
-  snapshot: LocalAgentSessionSnapshot,
-  options: LocalAgentSessionSnapshotApplyOptions = {},
-): LocalAgentSession {
+  session: AgentSession,
+  snapshot: AgentSessionSnapshot,
+  options: AgentSessionSnapshotApplyOptions = {},
+): AgentSession {
   const incoming = snapshot.session;
   const context = options.observedAt === undefined
     ? undefined
@@ -145,9 +145,9 @@ export function applySessionSnapshot(
 }
 
 function acceptUserInput(
-  session: LocalAgentSession,
-  input: Extract<LocalAgentSessionInput, { type: 'user.accepted' }>,
-  context: LocalAgentSessionReductionContext,
+  session: AgentSession,
+  input: Extract<AgentSessionInput, { type: 'user.accepted' }>,
+  context: AgentSessionReductionContext,
 ) {
   const withoutUsage = omitRunTokenUsage(session);
   const message = input.message ?? {};
@@ -170,11 +170,11 @@ function acceptUserInput(
 }
 
 function reduceRuntimeEvent(
-  session: LocalAgentSession,
-  event: LocalAgentRuntimeEvent,
-  message: LocalAgentSessionMessageInput | undefined,
-  context: LocalAgentSessionReductionContext,
-): LocalAgentSession {
+  session: AgentSession,
+  event: AgentRuntimeEvent,
+  message: AgentSessionMessageInput | undefined,
+  context: AgentSessionReductionContext,
+): AgentSession {
   switch (event.type) {
     case 'message.delta':
       return appendAssistantDelta(session, event.requestId, event.text, message, context);
@@ -201,11 +201,11 @@ function reduceRuntimeEvent(
 }
 
 function appendRuntimeSystemMessage(
-  session: LocalAgentSession,
+  session: AgentSession,
   requestId: string,
   text: string,
-  message: LocalAgentSessionMessageInput | undefined,
-  context: LocalAgentSessionReductionContext,
+  message: AgentSessionMessageInput | undefined,
+  context: AgentSessionReductionContext,
 ) {
   if (!ownsRun(session, requestId) || !text.trim()) return session;
   return appendMessage(session, {
@@ -217,18 +217,18 @@ function appendRuntimeSystemMessage(
 }
 
 function appendAssistantDelta(
-  session: LocalAgentSession,
+  session: AgentSession,
   requestId: string,
   token: string,
-  message: LocalAgentSessionMessageInput | undefined,
-  context: LocalAgentSessionReductionContext,
+  message: AgentSessionMessageInput | undefined,
+  context: AgentSessionReductionContext,
 ) {
   if (!token || !ownsRun(session, requestId)) return session;
   const streamingIndex = findStreamingAssistantIndex(session.timeline, requestId);
   const createdAt = message?.createdAt ?? observedAtIso(context.observedAt);
   const nextTimeline = [...session.timeline];
   if (streamingIndex >= 0) {
-    const current = nextTimeline[streamingIndex] as LocalAgentMessageEntry;
+    const current = nextTimeline[streamingIndex] as AgentMessageEntry;
     nextTimeline[streamingIndex] = {
       ...current,
       text: current.text + token,
@@ -254,12 +254,12 @@ function appendAssistantDelta(
 }
 
 function completeAssistantMessage(
-  session: LocalAgentSession,
+  session: AgentSession,
   requestId: string,
   completedText: string,
   usage: TokenUsageSnapshot | undefined,
-  message: LocalAgentSessionMessageInput | undefined,
-  context: LocalAgentSessionReductionContext,
+  message: AgentSessionMessageInput | undefined,
+  context: AgentSessionReductionContext,
 ) {
   const ownsActiveRun = ownsRun(session, requestId);
   const recoveredFromTimeline = !ownsActiveRun && hasTimelineRequest(session, requestId);
@@ -275,18 +275,18 @@ function completeAssistantMessage(
 }
 
 function applyOperationEvent(
-  session: LocalAgentSession,
-  event: Extract<LocalAgentRuntimeEvent, { type: 'operation' }>,
-  context: LocalAgentSessionReductionContext,
+  session: AgentSession,
+  event: Extract<AgentRuntimeEvent, { type: 'operation' }>,
+  context: AgentSessionReductionContext,
 ) {
   if (!ownsRun(session, event.requestId)) return session;
   const settledSession = event.phase === 'started'
     ? settleStreamingAssistant(session, event.requestId)
     : session;
-  const entryId = localAgentOperationEntryId(event);
-  const previous = settledSession.timeline.find((entry): entry is LocalAgentOperationEntry =>
+  const entryId = agentOperationEntryId(event);
+  const previous = settledSession.timeline.find((entry): entry is AgentOperationEntry =>
     entry.type === 'operation' && entry.id === entryId);
-  const operation = localAgentOperationEntryFromEvent(event, context.observedAt, previous);
+  const operation = agentOperationEntryFromEvent(event, context.observedAt, previous);
   const withOperation = {
     ...settledSession,
     timeline: upsertTimelineEntry(settledSession.timeline, operation),
@@ -316,17 +316,17 @@ function applyOperationEvent(
 }
 
 function appendSubagentMessage(
-  session: LocalAgentSession,
-  event: Extract<LocalAgentRuntimeEvent, { type: 'subagent.message.completed' }>,
-  context: LocalAgentSessionReductionContext,
+  session: AgentSession,
+  event: Extract<AgentRuntimeEvent, { type: 'subagent.message.completed' }>,
+  context: AgentSessionReductionContext,
 ) {
   if (!event.text.trim() || !ownsRun(session, event.requestId)) return session;
   const namespace = event.namespace.filter(Boolean).join('|');
   const sourceId = event.messageId.trim();
   const id = `${event.requestId}:subagent:${namespace ? `${namespace}:` : ''}${sourceId}`;
-  const previous = session.timeline.find((candidate): candidate is LocalAgentMessageEntry =>
+  const previous = session.timeline.find((candidate): candidate is AgentMessageEntry =>
     candidate.type === 'message' && candidate.id === id);
-  const entry: LocalAgentMessageEntry = {
+  const entry: AgentMessageEntry = {
     id,
     type: 'message',
     role: 'subagent',
@@ -350,9 +350,9 @@ function appendSubagentMessage(
 }
 
 function applyReviewRequest(
-  session: LocalAgentSession,
-  event: Extract<LocalAgentRuntimeEvent, { type: 'human_review.requested' }>,
-  context: LocalAgentSessionReductionContext,
+  session: AgentSession,
+  event: Extract<AgentRuntimeEvent, { type: 'human_review.requested' }>,
+  context: AgentSessionReductionContext,
 ) {
   const reviews = reviewActionReviews(event.review, event.reviews);
   const actionId = reviewActionId({
@@ -373,7 +373,7 @@ function applyReviewRequest(
   }));
 }
 
-function runViewBase(run: LocalAgentRunView) {
+function runViewBase(run: AgentRunView) {
   return {
     requestId: run.requestId,
     ...(run.startedAt !== undefined ? { startedAt: run.startedAt } : {}),
@@ -382,14 +382,14 @@ function runViewBase(run: LocalAgentRunView) {
 }
 
 function finishOwnedRun(
-  session: LocalAgentSession,
+  session: AgentSession,
   requestId: string,
-  messages: LocalAgentSessionMessageInput[],
+  messages: AgentSessionMessageInput[],
   tokenUsage: TokenUsageSnapshot | null | undefined,
-  context: LocalAgentSessionReductionContext,
+  context: AgentSessionReductionContext,
 ) {
   if (!ownsRun(session, requestId)) return session;
-  let nextSession: LocalAgentSession = {
+  let nextSession: AgentSession = {
     ...session,
     timeline: finalizeSubagentMessages(session.timeline, requestId),
     activeRun: null,
@@ -406,12 +406,12 @@ function finishOwnedRun(
 }
 
 function appendMessage(
-  session: LocalAgentSession,
-  message: LocalAgentSessionMessageInput,
-  context: LocalAgentSessionReductionContext,
+  session: AgentSession,
+  message: AgentSessionMessageInput,
+  context: AgentSessionReductionContext,
 ) {
   if (!message.text) return session;
-  const entry: LocalAgentMessageEntry = {
+  const entry: AgentMessageEntry = {
     id: message.id ?? defaultMessageId(session, message),
     type: 'message',
     role: message.role,
@@ -424,16 +424,16 @@ function appendMessage(
 }
 
 function finalizeAssistantMessage(
-  session: LocalAgentSession,
+  session: AgentSession,
   requestId: string,
   text: string,
-  message: LocalAgentSessionMessageInput | undefined,
-  context: LocalAgentSessionReductionContext,
+  message: AgentSessionMessageInput | undefined,
+  context: AgentSessionReductionContext,
 ) {
   const streamingIndex = findStreamingAssistantIndex(session.timeline, requestId);
   const nextTimeline = [...session.timeline];
   if (streamingIndex >= 0) {
-    const current = nextTimeline[streamingIndex] as LocalAgentMessageEntry;
+    const current = nextTimeline[streamingIndex] as AgentMessageEntry;
     const updatedAt = message?.createdAt ?? observedAtIso(context.observedAt);
     nextTimeline[streamingIndex] = {
       ...current,
@@ -455,22 +455,22 @@ function finalizeAssistantMessage(
   return { ...session, timeline: nextTimeline };
 }
 
-function settleStreamingAssistant(session: LocalAgentSession, requestId: string) {
+function settleStreamingAssistant(session: AgentSession, requestId: string) {
   const index = findStreamingAssistantIndex(session.timeline, requestId);
   if (index < 0) return session;
   const timeline = [...session.timeline];
-  timeline[index] = { ...timeline[index] as LocalAgentMessageEntry, status: 'completed' };
+  timeline[index] = { ...timeline[index] as AgentMessageEntry, status: 'completed' };
   return { ...session, timeline };
 }
 
-function finalizeSubagentMessages(timeline: LocalAgentTimelineEntry[], requestId: string) {
+function finalizeSubagentMessages(timeline: AgentTimelineEntry[], requestId: string) {
   return timeline.map((entry) =>
     entry.type === 'message' && entry.role === 'subagent' && entry.requestId === requestId
       ? { ...entry, status: 'completed' as const }
       : entry);
 }
 
-function applyTokenUsage(session: LocalAgentSession, usage: TokenUsageSnapshot) {
+function applyTokenUsage(session: AgentSession, usage: TokenUsageSnapshot) {
   const contextWindow = usage.scope !== 'run'
     && usage.contextWindow === undefined
     && session.runtime?.contextWindow !== undefined
@@ -493,10 +493,10 @@ function applyTokenUsage(session: LocalAgentSession, usage: TokenUsageSnapshot) 
 }
 
 function accumulateSessionTokenUsage(
-  current: LocalAgentSession['sessionTokenUsage'],
+  current: AgentSession['sessionTokenUsage'],
   usage: TokenUsageSnapshot,
   runtimeContextWindow: number | undefined,
-): NonNullable<LocalAgentSession['sessionTokenUsage']> {
+): NonNullable<AgentSession['sessionTokenUsage']> {
   if (usage.scope === 'session') {
     return { ...usage, scope: 'session' };
   }
@@ -514,13 +514,13 @@ function accumulateSessionTokenUsage(
   };
 }
 
-function omitRunTokenUsage(session: LocalAgentSession): LocalAgentSession {
+function omitRunTokenUsage(session: AgentSession): AgentSession {
   const { tokenUsage: _tokenUsage, ...withoutUsage } = session;
   void _tokenUsage;
   return withoutUsage;
 }
 
-function omitAllTokenUsage(session: LocalAgentSession): LocalAgentSession {
+function omitAllTokenUsage(session: AgentSession): AgentSession {
   const {
     tokenUsage: _tokenUsage,
     sessionTokenUsage: _sessionTokenUsage,
@@ -532,31 +532,31 @@ function omitAllTokenUsage(session: LocalAgentSession): LocalAgentSession {
 }
 
 function updateOwnedRun(
-  session: LocalAgentSession,
+  session: AgentSession,
   requestId: string,
-  update: (run: LocalAgentRunView) => LocalAgentRunView,
+  update: (run: AgentRunView) => AgentRunView,
 ) {
   if (!ownsRun(session, requestId) || !session.activeRun) return session;
   const nextRun = update(session.activeRun);
   return nextRun === session.activeRun ? session : { ...session, activeRun: nextRun };
 }
 
-function ownsRun(session: LocalAgentSession, requestId: string) {
+function ownsRun(session: AgentSession, requestId: string) {
   return session.activeRun?.requestId === requestId;
 }
 
-function hasTimelineRequest(session: LocalAgentSession, requestId: string) {
+function hasTimelineRequest(session: AgentSession, requestId: string) {
   return session.timeline.some((entry) => entry.requestId === requestId);
 }
 
-function hasLocalInterruptReleaseNotice(session: LocalAgentSession, requestId: string) {
+function hasLocalInterruptReleaseNotice(session: AgentSession, requestId: string) {
   return session.timeline.some((entry) =>
     entry.type === 'message'
       && entry.role === 'system'
       && entry.id === `message:${requestId}:interrupt-local-release`);
 }
 
-function findStreamingAssistantIndex(timeline: LocalAgentTimelineEntry[], requestId: string) {
+function findStreamingAssistantIndex(timeline: AgentTimelineEntry[], requestId: string) {
   for (let index = timeline.length - 1; index >= 0; index -= 1) {
     const entry = timeline[index];
     if (entry.type === 'message' && entry.requestId === requestId && entry.role === 'assistant') {
@@ -566,7 +566,7 @@ function findStreamingAssistantIndex(timeline: LocalAgentTimelineEntry[], reques
   return -1;
 }
 
-function findLatestAssistantText(session: LocalAgentSession, requestId: string) {
+function findLatestAssistantText(session: AgentSession, requestId: string) {
   for (let index = session.timeline.length - 1; index >= 0; index -= 1) {
     const entry = session.timeline[index];
     if (entry.type === 'message' && entry.requestId === requestId && entry.role === 'assistant') {
@@ -577,29 +577,29 @@ function findLatestAssistantText(session: LocalAgentSession, requestId: string) 
 }
 
 function countMessages(
-  timeline: LocalAgentTimelineEntry[],
+  timeline: AgentTimelineEntry[],
   requestId: string | undefined,
-  role: LocalAgentMessageEntry['role'],
+  role: AgentMessageEntry['role'],
 ) {
   return timeline.filter((entry) =>
     entry.type === 'message' && entry.requestId === requestId && entry.role === role).length;
 }
 
-function defaultMessageId(session: LocalAgentSession, message: LocalAgentSessionMessageInput) {
+function defaultMessageId(session: AgentSession, message: AgentSessionMessageInput) {
   const owner = message.requestId ?? session.sessionId;
   return `${owner}:message:${message.role}:${countMessages(session.timeline, message.requestId, message.role)}`;
 }
 
 function upsertTimelineEntry(
-  timeline: LocalAgentTimelineEntry[],
-  entry: LocalAgentTimelineEntry,
+  timeline: AgentTimelineEntry[],
+  entry: AgentTimelineEntry,
 ) {
   const index = timeline.findIndex((item) => item.id === entry.id);
   if (index < 0) return [...timeline, entry];
   return [...timeline.slice(0, index), entry, ...timeline.slice(index + 1)];
 }
 
-function cloneTimelineEntry(entry: LocalAgentTimelineEntry): LocalAgentTimelineEntry {
+function cloneTimelineEntry(entry: AgentTimelineEntry): AgentTimelineEntry {
   if (entry.type === 'message') return { ...entry };
   return {
     ...entry,
@@ -612,10 +612,10 @@ function cloneTimelineEntry(entry: LocalAgentTimelineEntry): LocalAgentTimelineE
 const MAX_RECONCILED_RUN_AGE_MS = 24 * 60 * 60 * 1000;
 
 function normalizeSnapshotRun(
-  incoming: LocalAgentRunView,
-  existing: LocalAgentRunView | null,
-  context: LocalAgentSessionReductionContext | undefined,
-): LocalAgentRunView {
+  incoming: AgentRunView,
+  existing: AgentRunView | null,
+  context: AgentSessionReductionContext | undefined,
+): AgentRunView {
   const observedAt = context?.observedAt;
   const startedAt = normalizeSnapshotTimestamp(incoming.startedAt, observedAt)
     ?? (existing?.requestId === incoming.requestId
@@ -640,13 +640,13 @@ function normalizeSnapshotTimestamp(value: number | undefined, observedAt: numbe
   return timestamp;
 }
 
-function observedAtUpdate(context: LocalAgentSessionReductionContext) {
+function observedAtUpdate(context: AgentSessionReductionContext) {
   return context.observedAt > 0 ? { updatedAt: context.observedAt } : {};
 }
 
 function createdAtField(
   createdAt: string | undefined,
-  context: LocalAgentSessionReductionContext,
+  context: AgentSessionReductionContext,
 ) {
   const value = createdAt ?? observedAtIso(context.observedAt);
   return value ? { createdAt: value } : {};

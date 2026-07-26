@@ -1,5 +1,5 @@
 import type { LocalAgentControlServerMessage } from './localAgentProtocol';
-import type { LocalAgentOperationEvent } from './events/localAgentRuntimeEvent';
+import type { AgentOperationEvent } from '@pinpawo/agent-session';
 import {
   clearInflightOperationTimer,
   createInflightOperationRun,
@@ -15,7 +15,7 @@ type InflightInterruptMessage = Extract<
 
 type InflightRequestControllerOptions<TKey> = {
   forceInterruptMs: number;
-  emitOperation: (key: TKey, event: LocalAgentOperationEvent) => void;
+  emitOperation: (key: TKey, event: AgentOperationEvent) => void;
   sendControl: (key: TKey, message: InflightInterruptMessage) => void;
   log?: (message: string) => void;
   logPrefix?: string;
@@ -25,7 +25,7 @@ type StartInflightRequestOptions = {
   interruptPrevious?: boolean;
   notifyPrevious?: boolean;
   previousPhase?: TerminalOperationPhase;
-  observeOperation?: (event: LocalAgentOperationEvent) => void;
+  observeOperation?: (event: AgentOperationEvent) => void;
 };
 
 type InterruptInflightRequestOptions = {
@@ -35,13 +35,13 @@ type InterruptInflightRequestOptions = {
 export class InflightRequestController<TKey> {
   private readonly requests = new Map<TKey, InflightOperationRun>();
   private readonly forceInterruptMs: number;
-  private readonly emitOperation: (key: TKey, event: LocalAgentOperationEvent) => void;
+  private readonly emitOperation: (key: TKey, event: AgentOperationEvent) => void;
   private readonly sendControl: (key: TKey, message: InflightInterruptMessage) => void;
   private readonly log: (message: string) => void;
   private readonly logPrefix: string;
   private readonly operationObservers = new WeakMap<
     InflightOperationRun,
-    (event: LocalAgentOperationEvent) => void
+    (event: AgentOperationEvent) => void
   >();
 
   constructor(options: InflightRequestControllerOptions<TKey>) {

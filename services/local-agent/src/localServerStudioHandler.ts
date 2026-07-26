@@ -18,7 +18,7 @@ import {
   type StudioRunServiceResult,
 } from './studioRunService';
 import type { StudioTurnEvent } from '@pinpawo/pet-agent';
-import type { LocalAgentRuntimeEvent } from './events/localAgentRuntimeEvent';
+import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 
 type InflightRequest = InflightOperationRun;
 type StudioHandleResult = StudioRunServiceResult | LocalStudioDueRunCompletion;
@@ -36,7 +36,7 @@ type StudioHandleCompletion = {
 
 export type LocalServerStudioOutbound<Peer extends object> = {
   sendMessage: (peer: Peer, message: LocalAgentServerMessage) => boolean;
-  sendEvent: (peer: Peer, event: LocalAgentRuntimeEvent) => boolean;
+  sendEvent: (peer: Peer, event: AgentRuntimeEvent) => boolean;
 };
 
 export class LocalServerStudioHandler<Peer extends object> {

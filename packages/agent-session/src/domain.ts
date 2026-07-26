@@ -1,13 +1,13 @@
 import type { TokenUsageSnapshot } from '@pinpawo/pet-agent';
 import type {
-  LocalAgentOperationPhase,
-  LocalAgentOperationRaw,
-} from './events/localAgentRuntimeEvent';
-import type { ReviewAction } from './reviewAction';
+  AgentOperationPhase,
+  AgentOperationRaw,
+} from './events';
+import type { ReviewAction } from './review';
 
-export const LOCAL_AGENT_SESSION_SNAPSHOT_VERSION = 3 as const;
+export const AGENT_SESSION_SNAPSHOT_VERSION = 3 as const;
 
-export type LocalAgentMessageEntry = {
+export type AgentMessageEntry = {
   id: string;
   type: 'message';
   role: 'user' | 'assistant' | 'system' | 'subagent';
@@ -18,19 +18,19 @@ export type LocalAgentMessageEntry = {
   updatedAt?: string;
 };
 
-export type LocalAgentOperationEntry = {
+export type AgentOperationEntry = {
   id: string;
   type: 'operation';
   requestId: string;
   operationKey: string;
   kind: string;
   title: string;
-  phase: LocalAgentOperationPhase;
+  phase: AgentOperationPhase;
   target?: string;
   summary?: string;
   details?: Record<string, unknown>;
   operationSource?: {
-    provider: 'toolkit' | 'toolset' | 'runtime';
+    provider: 'toolkit' | 'runtime';
     name: string;
     toolName?: string;
     callId?: string;
@@ -39,55 +39,55 @@ export type LocalAgentOperationEntry = {
   updatedAt?: number;
   completedAt?: number;
   /** Trusted local clients may retain raw payloads; remote transports must strip them. */
-  raw?: LocalAgentOperationRaw;
+  raw?: AgentOperationRaw;
 };
 
-export type LocalAgentTimelineEntry =
-  | LocalAgentMessageEntry
-  | LocalAgentOperationEntry;
+export type AgentTimelineEntry =
+  | AgentMessageEntry
+  | AgentOperationEntry;
 
-export type LocalAgentSessionMessageInput = {
+export type AgentSessionMessageInput = {
   id?: string;
-  role: LocalAgentMessageEntry['role'];
+  role: AgentMessageEntry['role'];
   text: string;
   requestId?: string;
   createdAt?: string;
 };
 
-export type LocalAgentReviewAction = ReviewAction & {
+export type AgentReviewAction = ReviewAction & {
   petId?: string;
 };
 
-export type LocalAgentRunActivity =
+export type AgentRunActivity =
   | 'thinking'
   | 'using_tool'
   | 'streaming';
 
-type LocalAgentRunViewBase = {
+type AgentRunViewBase = {
   requestId: string;
   startedAt?: number;
   updatedAt?: number;
 };
 
-export type LocalAgentRunView =
-  | LocalAgentRunViewBase & {
+export type AgentRunView =
+  | AgentRunViewBase & {
       state: 'running';
-      activity: LocalAgentRunActivity;
+      activity: AgentRunActivity;
     }
-  | LocalAgentRunViewBase & {
+  | AgentRunViewBase & {
       state: 'waiting_review';
-      reviewAction: LocalAgentReviewAction;
+      reviewAction: AgentReviewAction;
     }
-  | LocalAgentRunViewBase & {
+  | AgentRunViewBase & {
       state: 'interrupting';
     };
 
-export type LocalAgentActorView = {
+export type AgentActorView = {
   label: string;
   summary: string;
 };
 
-export type LocalAgentRuntimeView = {
+export type AgentRuntimeView = {
   model?: string;
   cwd?: string;
   workspaceId?: string;
@@ -101,27 +101,22 @@ export type LocalAgentRuntimeView = {
   contextWindow?: number;
 };
 
-export type LocalAgentSession = {
+export type AgentSession = {
   sessionId: string;
   kind: 'chat' | 'studio';
-  actor?: LocalAgentActorView;
-  timeline: LocalAgentTimelineEntry[];
-  activeRun: LocalAgentRunView | null;
-  runtime?: LocalAgentRuntimeView;
+  actor?: AgentActorView;
+  timeline: AgentTimelineEntry[];
+  activeRun: AgentRunView | null;
+  runtime?: AgentRuntimeView;
   /** Latest completed run usage, when the provider reports it. */
   tokenUsage?: TokenUsageSnapshot;
   /** Process-observed cumulative usage for this session. */
   sessionTokenUsage?: TokenUsageSnapshot & { scope: 'session' };
 };
 
-export type LocalAgentSessionSnapshot = {
-  version: typeof LOCAL_AGENT_SESSION_SNAPSHOT_VERSION;
-  session: LocalAgentSession;
-};
-
-export type LocalAgentSessionSummary = {
+export type AgentSessionSummary = {
   id: string;
-  kind: LocalAgentSession['kind'];
+  kind: AgentSession['kind'];
   title: string;
   messageCount: number;
   createdAt: string;

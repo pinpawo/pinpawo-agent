@@ -1,10 +1,10 @@
 import React from 'react';
 import { AgentMessageItem } from './AgentMessageItem';
 import { AgentOperationItem } from './AgentOperationItem';
-import type { LocalAgentTimelineEntry } from '../../localAgentSession';
+import type { AgentTimelineEntry } from '@pinpawo/agent-session';
 
 export function AgentTimelineItem(props: {
-  entry: LocalAgentTimelineEntry;
+  entry: AgentTimelineEntry;
   petName: string;
   now: number;
   width: number;

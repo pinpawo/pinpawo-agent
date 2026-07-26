@@ -1,15 +1,15 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import Markdown from '@inkkit/ink-markdown';
-import type { LocalAgentMessageEntry } from '../../localAgentSession';
+import type { AgentMessageEntry } from '@pinpawo/agent-session';
 import { normalizeAssistantMessageMarkdown } from '../render/messageText';
 import { formatMessageTimestamp } from '../render/terminalText';
 
 type MessageBlockEntry = Pick<
-  LocalAgentMessageEntry,
+  AgentMessageEntry,
   'text' | 'createdAt' | 'updatedAt'
 > & {
-  role: Exclude<LocalAgentMessageEntry['role'], 'subagent'>;
+  role: Exclude<AgentMessageEntry['role'], 'subagent'>;
 };
 
 export function MessageBlock(props: {

@@ -20,7 +20,7 @@ import type {
   LocalAgentGraphService,
   LocalAgentGraphThreadState,
 } from './agentGraphService';
-import type { LocalAgentRuntimeEvent } from './events/localAgentRuntimeEvent';
+import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 import {
   readFinalMessageText,
   type StreamToolsPayload,
@@ -51,7 +51,7 @@ export type ChatSessionAdapterOptions = {
   graphService: LocalAgentGraphService;
   isCurrent: () => boolean;
   finishInterrupted: () => void;
-  emitEvent: (event: LocalAgentRuntimeEvent) => void;
+  emitEvent: (event: AgentRuntimeEvent) => void;
   emitToolEvent: (payload: StreamToolsPayload) => void;
   /** Called once checkpoint state no longer contains the original review. */
   onResumeCheckpointed?: (result: { canInterrupt: boolean }) => void;
@@ -101,7 +101,7 @@ function emitHumanReviewRequested(params: {
   interruptId?: string;
   reviews: ReviewSpec[];
   requestId: string;
-  emitEvent: (event: LocalAgentRuntimeEvent) => void;
+  emitEvent: (event: AgentRuntimeEvent) => void;
 }) {
   const review = params.reviews[0];
   if (!review) {

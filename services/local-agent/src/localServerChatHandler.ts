@@ -25,7 +25,7 @@ import {
 } from './localServerTuiSessions';
 import type { LocalServerDeps } from './localServerTypes';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
-import type { LocalAgentRuntimeEvent } from './events/localAgentRuntimeEvent';
+import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 import {
   resolveHumanReviewAction,
   type HumanReviewActionRoute,
@@ -36,7 +36,7 @@ import {
   reviewActionId,
   reviewActionReviews,
   type ReviewAction,
-} from './reviewAction';
+} from '@pinpawo/agent-session';
 import { ReviewResolutionLifecycle } from './reviewResolutionLifecycle';
 import { sendLocalServerPeerEvent, type LocalServerPeer } from './localServerPeer';
 
@@ -53,14 +53,14 @@ type ReviewActionRoute = HumanReviewActionRoute & {
   requestId: string;
   rejectOptionId?: string;
   sessionId?: string;
-  actor?: Extract<LocalAgentRuntimeEvent, { type: 'human_review.requested' }>['actor'];
+  actor?: Extract<AgentRuntimeEvent, { type: 'human_review.requested' }>['actor'];
 };
 
 export type ReviewActionSnapshot = {
   requestId: string;
   sessionId?: string;
   reviewAction: ReviewAction;
-  actor?: Extract<LocalAgentRuntimeEvent, { type: 'human_review.requested' }>['actor'];
+  actor?: Extract<AgentRuntimeEvent, { type: 'human_review.requested' }>['actor'];
 };
 
 export function isToolProtocolHistoryError(value: unknown): boolean {
@@ -120,7 +120,7 @@ export class LocalServerChatHandler {
   }
 
   private recordReviewActionRoute(
-    event: LocalAgentRuntimeEvent,
+    event: AgentRuntimeEvent,
     deps: LocalServerDeps,
   ) {
     if (event.type !== 'human_review.requested' || !event.review?.id) {
@@ -484,7 +484,7 @@ export class LocalServerChatHandler {
       run: inflight,
       payload,
       // Trusted local peer: include raw input/output so the UI can render diffs etc.
-      emit: (event) => sendLocalServerPeerEvent(peer, event, { includeRaw: true }),
+      emit: (event) => sendLocalServerPeerEvent(peer, event),
     });
   }
 }

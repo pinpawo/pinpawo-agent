@@ -1,9 +1,9 @@
 import type { ActiveOperation } from '../types';
-import { isRunningOperationPhase } from '../../localAgentTimeline';
+import { isRunningOperationPhase } from '@pinpawo/agent-session';
 import type {
-  LocalAgentOperationEntry,
-  LocalAgentTimelineEntry,
-} from '../../localAgentSession';
+  AgentOperationEntry,
+  AgentTimelineEntry,
+} from '@pinpawo/agent-session';
 
 const OPERATION_PAYLOAD_DETAIL_KEYS = new Set([
   'after',
@@ -14,22 +14,22 @@ const OPERATION_PAYLOAD_DETAIL_KEYS = new Set([
 ]);
 
 export function selectOperationTimelineEntries(
-  entries: LocalAgentTimelineEntry[],
-): LocalAgentOperationEntry[] {
-  return entries.filter((entry): entry is LocalAgentOperationEntry => entry.type === 'operation');
+  entries: AgentTimelineEntry[],
+): AgentOperationEntry[] {
+  return entries.filter((entry): entry is AgentOperationEntry => entry.type === 'operation');
 }
 
 export function selectRunningOperationEntries(
-  entries: LocalAgentTimelineEntry[],
+  entries: AgentTimelineEntry[],
   requestId?: string,
-): LocalAgentOperationEntry[] {
+): AgentOperationEntry[] {
   return selectOperationTimelineEntries(entries).filter((entry) =>
     isRunningOperationPhase(entry.phase)
       && (requestId === undefined || entry.requestId === requestId));
 }
 
 export function selectActiveOperationsFromTimeline(
-  entries: LocalAgentTimelineEntry[],
+  entries: AgentTimelineEntry[],
   requestId?: string,
 ): ActiveOperation[] {
   return selectRunningOperationEntries(entries, requestId).map((entry) => ({
@@ -41,14 +41,14 @@ export function selectActiveOperationsFromTimeline(
 }
 
 export function findTimelineOperationEntry(
-  entries: LocalAgentTimelineEntry[],
+  entries: AgentTimelineEntry[],
   operationId: string,
-): LocalAgentOperationEntry | null {
+): AgentOperationEntry | null {
   return selectOperationTimelineEntries(entries).find((entry) =>
     entry.id === operationId || entry.operationKey === operationId) ?? null;
 }
 
-function formatOperationTimelineDetail(entry: LocalAgentOperationEntry) {
+function formatOperationTimelineDetail(entry: AgentOperationEntry) {
   const details = formatDetails(entry.details);
   return [entry.target, entry.summary, details]
     .filter((item): item is string => Boolean(item))

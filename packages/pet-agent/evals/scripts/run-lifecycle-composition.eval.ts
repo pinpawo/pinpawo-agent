@@ -30,7 +30,10 @@ import {
 import type { OrchestratorStateType } from '../../src/agent/orchestrator/state.ts';
 import { readMessageText } from '../../src/agent/orchestrator/utils.ts';
 import type { AgentModels } from '../../src/types/agent.ts';
-import type { AgentCapability } from '../../src/types/capability.ts';
+import {
+  defineInstructionDocument,
+  type AgentCapability,
+} from '../../src/types/capability.ts';
 import { defineToolkit } from '../../src/types/toolkit.ts';
 import type { ProviderTokenUsage } from '../../src/agent/tokenUsage.ts';
 import type { StructuredOutputMethod } from '../../src/utils/structuredOutput.ts';
@@ -175,11 +178,13 @@ type LifecycleCompositionReport = {
 const generalToolkit = defineToolkit({
   name: 'lifecycle_composition_general',
   description: 'General execution capability available to the lifecycle composition eval.',
-  tools: [tool(async () => 'ok', {
-    name: 'lifecycle_eval_noop',
-    description: 'A generic execution marker. It does not provide domain-specific workspace expertise.',
-    schema: z.object({}),
-  })],
+  tools: [{
+    tool: tool(async () => 'ok', {
+      name: 'lifecycle_eval_noop',
+      description: 'A generic execution marker. It does not provide domain-specific workspace expertise.',
+      schema: z.object({}),
+    }),
+  }],
 });
 
 const standardCapabilities: AgentCapability[] = [
@@ -189,8 +194,9 @@ const standardCapabilities: AgentCapability[] = [
       'Inspect and analyze repositories, workspace files, configuration, dependencies, risks, and deployment state.',
       'Keywords: 检查|调查|读取|项目|工作区|配置|发布|部署|staging|auth|结构|风险|状态',
     ].join(' '),
-    createRuntime: () => ({
-      instructions: ['Inspect the requested workspace state and report grounded findings.'],
+    uses: [generalToolkit.name],
+    instructions: defineInstructionDocument({
+      content: 'Inspect the requested workspace state and report grounded findings.',
     }),
   },
   {
@@ -199,8 +205,9 @@ const standardCapabilities: AgentCapability[] = [
       'Modify or refactor code and verify the change with relevant tests.',
       'Keywords: 修改|重构|修复|测试|验证|auth|支付|舍入|代码',
     ].join(' '),
-    createRuntime: () => ({
-      instructions: ['Implement the requested code change and verify it before reporting completion.'],
+    uses: [generalToolkit.name],
+    instructions: defineInstructionDocument({
+      content: 'Implement the requested code change and verify it before reporting completion.',
     }),
   },
 ];

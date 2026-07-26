@@ -336,6 +336,7 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
     }
   };
   let run: LocalAgentGraphEventStream | null = null;
+  let finishInterruptedAfterSettlement = false;
   try {
     run = await graphService.streamEvents(setup, graphInput);
     const toolReader = new NamespacedProtocolToolEventReader();
@@ -344,7 +345,7 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
         await readResumeCheckpointAtBoundary();
       }
       if (!isCurrent()) {
-        finishInterrupted();
+        finishInterruptedAfterSettlement = true;
         return { status: 'interrupted' };
       }
 
@@ -432,7 +433,7 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
       throw error;
     }
     if (!isCurrent()) {
-      finishInterrupted();
+      finishInterruptedAfterSettlement = true;
       return { status: 'interrupted' };
     }
     const reply = streamedReply.trim() || RECURSION_LIMIT_NOTICE;
@@ -444,6 +445,9 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
     return { status: 'completed', reply };
   } finally {
     await waitForGraphRunSettlement(run);
+    if (finishInterruptedAfterSettlement) {
+      finishInterrupted();
+    }
   }
 
   if (!isCurrent()) {

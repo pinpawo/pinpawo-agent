@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type {
-  LocalAgentOperationEvent,
-} from './events/localAgentRuntimeEvent';
+  AgentOperationEvent,
+} from '@pinpawo/agent-session';
 import {
   configureInflightOperationRegistry,
   createInflightOperationRun,
@@ -16,7 +16,7 @@ import { localToolOperationRegistry } from './toolkits/local';
 test('emitLocalServerToolOperationEvent emits one operation for a normal tool event', () => {
   const run = createInflightOperationRun('req-1');
   configureInflightOperationRegistry(run, localToolOperationRegistry);
-  const emitted: LocalAgentOperationEvent[] = [];
+  const emitted: AgentOperationEvent[] = [];
 
   const event = emitLocalServerToolOperationEvent({
     run,
@@ -37,7 +37,7 @@ test('emitLocalServerToolOperationEvent emits one operation for a normal tool ev
 
 test('emitLocalServerToolOperationEvent maps human review tool errors to interrupted operations', () => {
   const run = createInflightOperationRun('req-1');
-  const emitted: LocalAgentOperationEvent[] = [];
+  const emitted: AgentOperationEvent[] = [];
 
   emitLocalServerToolOperationEvent({
     run,

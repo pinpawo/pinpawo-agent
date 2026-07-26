@@ -1,30 +1,30 @@
 import type {
-  LocalAgentOperationEvent,
-  LocalAgentOperationPhase,
-  LocalAgentOperationRaw,
-} from './events/localAgentRuntimeEvent';
-import type { LocalAgentOperationEntry } from './localAgentSession';
+  AgentOperationEvent,
+  AgentOperationPhase,
+  AgentOperationRaw,
+} from './events';
+import type { AgentOperationEntry } from './domain';
 
-export function localAgentOperationKey(event: LocalAgentOperationEvent) {
+export function agentOperationKey(event: AgentOperationEvent) {
   return event.operation.id
     ?? event.operation.source?.callId
     ?? event.operation.source?.name
     ?? event.operation.kind;
 }
 
-export function localAgentOperationEntryId(event: LocalAgentOperationEvent) {
-  return `${event.requestId}:operation:${localAgentOperationKey(event)}`;
+export function agentOperationEntryId(event: AgentOperationEvent) {
+  return `${event.requestId}:operation:${agentOperationKey(event)}`;
 }
 
-export function localAgentOperationEntryFromEvent(
-  event: LocalAgentOperationEvent,
+export function agentOperationEntryFromEvent(
+  event: AgentOperationEvent,
   observedAt: number,
-  previous?: LocalAgentOperationEntry,
-): LocalAgentOperationEntry {
-  const operationKey = localAgentOperationKey(event);
+  previous?: AgentOperationEntry,
+): AgentOperationEntry {
+  const operationKey = agentOperationKey(event);
   const operation = event.operation;
   return {
-    id: previous?.id ?? localAgentOperationEntryId(event),
+    id: previous?.id ?? agentOperationEntryId(event),
     type: 'operation',
     requestId: event.requestId,
     operationKey,
@@ -64,8 +64,8 @@ function operationDetailsField(
 }
 
 function mergeOperationRaw(
-  previous: LocalAgentOperationRaw | undefined,
-  next: LocalAgentOperationRaw | undefined,
+  previous: AgentOperationRaw | undefined,
+  next: AgentOperationRaw | undefined,
 ) {
   if (!previous) return next;
   if (!next) return previous;
@@ -77,18 +77,18 @@ function mergeOperationRaw(
   };
 }
 
-function rawField(raw: LocalAgentOperationRaw | undefined) {
+function rawField(raw: AgentOperationRaw | undefined) {
   return raw ? { raw } : {};
 }
 
 export function isTerminalOperationPhase(
-  phase: LocalAgentOperationPhase,
-): phase is Extract<LocalAgentOperationPhase, 'completed' | 'failed' | 'interrupted'> {
+  phase: AgentOperationPhase,
+): phase is Extract<AgentOperationPhase, 'completed' | 'failed' | 'interrupted'> {
   return phase === 'completed' || phase === 'failed' || phase === 'interrupted';
 }
 
 export function isRunningOperationPhase(
-  phase: LocalAgentOperationPhase,
-): phase is Extract<LocalAgentOperationPhase, 'started' | 'updated'> {
+  phase: AgentOperationPhase,
+): phase is Extract<AgentOperationPhase, 'started' | 'updated'> {
   return phase === 'started' || phase === 'updated';
 }

@@ -4,12 +4,12 @@ import {
   type ReviewResponse,
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
-import type { LocalAgentRuntimeEvent } from './events/localAgentRuntimeEvent';
+import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 import type {
   HumanReviewResponseMessage,
   ReviewCancelMessage,
 } from './localAgentProtocol';
-import type { ReviewAction } from './reviewAction';
+import type { ReviewAction } from '@pinpawo/agent-session';
 import {
   ReviewResolutionLifecycle,
   type ReviewResolutionRoute,
@@ -188,7 +188,7 @@ type HumanReviewResolutionOptions<TRoute extends ResolvableHumanReviewRoute> = {
   message: HumanReviewResolutionMessage;
   recover: () => Promise<TRoute | null>;
   emitClosed: () => void;
-  emitEvent: (event: LocalAgentRuntimeEvent) => void;
+  emitEvent: (event: AgentRuntimeEvent) => void;
   acceptRoute?: (
     route: TRoute,
     message: HumanReviewResolutionMessage,

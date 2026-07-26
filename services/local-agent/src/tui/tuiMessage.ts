@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import type { LocalAgentSessionMessageInput } from '../localAgentSession';
+import type { AgentSessionMessageInput } from '@pinpawo/agent-session';
 
 export function createTuiMessage<
-  T extends Omit<LocalAgentSessionMessageInput, 'createdAt'>,
+  T extends Omit<AgentSessionMessageInput, 'createdAt'>,
 >(
   input: T,
   now = Date.now(),

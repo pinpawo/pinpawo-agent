@@ -39,7 +39,7 @@ import {
   type ToolAuthorizationRecord,
 } from '@pinpawo/pet-agent';
 import { runChatSession } from '../src/chatSessionAdapter';
-import type { LocalAgentRuntimeEvent } from '../src/events/localAgentRuntimeEvent';
+import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 
 const DATASET_NAME = 'local-agent-hitl-resume';
 
@@ -331,7 +331,7 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
   // Turn 2 (resume): readThreadState() now reports the interrupt; the resume
   // Command flows back into stream which emits the final AI message.
 
-  const firstTurnEvents: LocalAgentRuntimeEvent[] = [];
+  const firstTurnEvents: AgentRuntimeEvent[] = [];
   const firstTurn = await runChatSession({
     request: { kind: 'user_message', requestId: FAKE_REQUEST_ID, message: inputs.user_message },
     setup: buildFakeSetup(),
@@ -345,7 +345,7 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
   if (firstTurn.status !== 'waiting_human' || !inputs.resume) {
     const reviewEvent = firstTurnEvents.find(
       (event) => event.type === 'human_review.requested',
-    ) as Extract<LocalAgentRuntimeEvent, { type: 'human_review.requested' }> | undefined;
+    ) as Extract<AgentRuntimeEvent, { type: 'human_review.requested' }> | undefined;
     return {
       first_turn_status: firstTurn.status,
       authorization_option_present: Boolean(
@@ -363,7 +363,7 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
 
   const reviewEvent = firstTurnEvents.find(
     (event) => event.type === 'human_review.requested',
-  ) as Extract<LocalAgentRuntimeEvent, { type: 'human_review.requested' }> | undefined;
+  ) as Extract<AgentRuntimeEvent, { type: 'human_review.requested' }> | undefined;
   const selectedOption = reviewEvent?.review?.options.find((option) =>
     option.id === inputs.resume?.selectedOptionId,
   );
@@ -388,7 +388,7 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
     authorizedPattern = matcher?.type === 'shell_pattern' ? matcher.value : null;
   }
 
-  const secondTurnEvents: LocalAgentRuntimeEvent[] = [];
+  const secondTurnEvents: AgentRuntimeEvent[] = [];
   const secondTurn = await runChatSession({
     request: {
       kind: 'resume',
@@ -405,7 +405,7 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
 
   const finalReplyEvent = secondTurnEvents.find(
     (event) => event.type === 'message.completed',
-  ) as Extract<LocalAgentRuntimeEvent, { type: 'message.completed' }> | undefined;
+  ) as Extract<AgentRuntimeEvent, { type: 'message.completed' }> | undefined;
 
   return {
     first_turn_status: firstTurn.status,

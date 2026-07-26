@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { formatSubagentMessage } from '../render/eventText';
 import { formatMessageTimestamp, wrapLine } from '../render/terminalText';
-import type { LocalAgentMessageEntry } from '../../localAgentSession';
+import type { AgentMessageEntry } from '@pinpawo/agent-session';
 
 function wrapText(text: string, width: number) {
   return text
@@ -12,7 +12,7 @@ function wrapText(text: string, width: number) {
 }
 
 export function SubagentMessageItem(props: {
-  entry: LocalAgentMessageEntry;
+  entry: AgentMessageEntry;
   width: number;
 }) {
   const text = formatSubagentMessage(props.entry.text);

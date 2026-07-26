@@ -1,14 +1,14 @@
 import type {
-  LocalAgentSystemNoticeEvent,
-  LocalAgentStudioProgressEvent,
-} from '../../events/localAgentRuntimeEvent';
+  AgentSystemNoticeEvent,
+  AgentStudioProgressEvent,
+} from '@pinpawo/agent-session';
 import { TUI_TEXT } from './text';
 import { elapsedMsSince, formatElapsed } from './terminalText';
 import type { ActiveOperation, PendingUiState } from '../types';
 
 const SUBAGENT_TEXT_LINE_CHARS = 64;
 
-export function formatSystemNoticeEvent(event: LocalAgentSystemNoticeEvent): string | null {
+export function formatSystemNoticeEvent(event: AgentSystemNoticeEvent): string | null {
   const notice = event.message.trim();
   return notice || null;
 }
@@ -18,7 +18,7 @@ export function formatSubagentMessage(text: string): string | null {
   return content || null;
 }
 
-export function formatStudioProgressEvent(event: LocalAgentStudioProgressEvent): string | null {
+export function formatStudioProgressEvent(event: AgentStudioProgressEvent): string | null {
   const payload = event.event;
   const type = typeof payload.type === 'string' ? payload.type : null;
   if (!type) return null;

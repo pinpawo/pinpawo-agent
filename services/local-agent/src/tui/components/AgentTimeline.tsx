@@ -2,10 +2,10 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { AgentTimelineItem } from './AgentTimelineItem';
 import { TUI_TEXT } from '../render/text';
-import type { LocalAgentTimelineEntry } from '../../localAgentSession';
+import type { AgentTimelineEntry } from '@pinpawo/agent-session';
 
 export function AgentTimeline(props: {
-  entries: LocalAgentTimelineEntry[];
+  entries: AgentTimelineEntry[];
   petName: string;
   width: number;
   now: number;

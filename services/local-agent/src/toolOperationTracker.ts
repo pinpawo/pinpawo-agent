@@ -4,9 +4,9 @@ import {
   type StreamToolsPayload,
 } from './agentStreamEvents';
 import type {
-  LocalAgentOperationEvent,
-  LocalAgentOperationPhase,
-} from './events/localAgentRuntimeEvent';
+  AgentOperationEvent,
+  AgentOperationPhase,
+} from '@pinpawo/agent-session';
 import {
   emptyOperationRegistry,
   overlayOperationRegistry,
@@ -16,10 +16,10 @@ import {
 type ActiveTrackedOperation = {
   id: string;
   name: string;
-  event: LocalAgentOperationEvent;
+  event: AgentOperationEvent;
 };
 
-type TerminalPhase = Extract<LocalAgentOperationPhase, 'completed' | 'failed' | 'interrupted'>;
+type TerminalPhase = Extract<AgentOperationPhase, 'completed' | 'failed' | 'interrupted'>;
 
 export class ToolOperationTracker {
   private sequence = 0;
@@ -46,7 +46,7 @@ export class ToolOperationTracker {
     this.operationRegistry = overlayOperationRegistry(this.operationRegistry, entries);
   }
 
-  accept(payload: StreamToolsPayload): LocalAgentOperationEvent {
+  accept(payload: StreamToolsPayload): AgentOperationEvent {
     const id = this.resolveOperationId(payload);
     const built = buildToolOperationEvent(this.requestId, {
       ...payload,
@@ -57,7 +57,7 @@ export class ToolOperationTracker {
     return event;
   }
 
-  finishActive(phase: TerminalPhase, error?: unknown): LocalAgentOperationEvent[] {
+  finishActive(phase: TerminalPhase, error?: unknown): AgentOperationEvent[] {
     const active = [...this.activeById.values()];
     this.activeById.clear();
     this.activeIdsByName.clear();
@@ -81,9 +81,9 @@ export class ToolOperationTracker {
    * event so the completed line keeps showing which file/url was touched.
    */
   private inheritStartedSummary(
-    event: LocalAgentOperationEvent,
+    event: AgentOperationEvent,
     id: string,
-  ): LocalAgentOperationEvent {
+  ): AgentOperationEvent {
     if (event.phase === 'started') return event;
     const previous = this.activeById.get(id)?.event.operation;
     if (!previous) return event;
@@ -112,7 +112,7 @@ export class ToolOperationTracker {
     return `tool-${this.sequence}`;
   }
 
-  private track(event: LocalAgentOperationEvent, name: string, id: string) {
+  private track(event: AgentOperationEvent, name: string, id: string) {
     if (event.phase === 'started') {
       this.activeById.set(id, { id, name, event });
       const ids = this.activeIdsByName.get(name) ?? [];

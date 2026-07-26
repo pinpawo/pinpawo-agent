@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { LocalAgentOperationEvent } from './events/localAgentRuntimeEvent';
+import type { AgentOperationEvent } from '@pinpawo/agent-session';
 import {
   clearInflightOperationTimer,
   configureInflightOperationRegistry,
@@ -13,7 +13,7 @@ import { localToolOperationRegistry } from './toolkits/local';
 test('inflight operation run emits tool stream events as operations', () => {
   const run = createInflightOperationRun('req-1');
   configureInflightOperationRegistry(run, localToolOperationRegistry);
-  const emitted: LocalAgentOperationEvent[] = [];
+  const emitted: AgentOperationEvent[] = [];
 
   const event = emitInflightToolEvent(run, {
     event: 'on_tool_start',
@@ -31,7 +31,7 @@ test('inflight operation run emits tool stream events as operations', () => {
 
 test('inflight operation run closes active operations with terminal phase', () => {
   const run = createInflightOperationRun('req-1');
-  const emitted: LocalAgentOperationEvent[] = [];
+  const emitted: AgentOperationEvent[] = [];
 
   emitInflightToolEvent(run, {
     event: 'on_tool_start',

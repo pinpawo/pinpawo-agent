@@ -1,10 +1,10 @@
 import React from 'react';
 import { MessageBlock } from './MessageBlock';
-import type { LocalAgentMessageEntry } from '../../localAgentSession';
+import type { AgentMessageEntry } from '@pinpawo/agent-session';
 import { SubagentMessageItem } from './SubagentMessageItem';
 
 export function AgentMessageItem(props: {
-  entry: LocalAgentMessageEntry;
+  entry: AgentMessageEntry;
   petName: string;
   width: number;
 }) {

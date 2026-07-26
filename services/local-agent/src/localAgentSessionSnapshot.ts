@@ -1,11 +1,11 @@
 import type {
-  LocalAgentRunView,
-  LocalAgentRuntimeView,
-  LocalAgentSession,
-  LocalAgentSessionSnapshot,
-  LocalAgentTimelineEntry,
-} from './localAgentSession';
-import { LOCAL_AGENT_SESSION_SNAPSHOT_VERSION } from './localAgentSession';
+  AgentRunView,
+  AgentRuntimeView,
+  AgentSession,
+  AgentSessionSnapshot,
+  AgentTimelineEntry,
+} from '@pinpawo/agent-session';
+import { createAgentSessionSnapshot } from '@pinpawo/agent-session';
 import type { ReviewActionSnapshot } from './localServerChatHandler';
 import type { LocalServerDeps } from './localServerTypes';
 import type { TuiCheckpointMessage } from './localServerTuiSessions';
@@ -13,12 +13,12 @@ import { buildLocalRuntimeProjection } from './localConfigProjection';
 
 export function buildLocalAgentSessionSnapshot(params: {
   sessionId: string;
-  kind: LocalAgentSession['kind'];
+  kind: AgentSession['kind'];
   messages: TuiCheckpointMessage[];
   deps: LocalServerDeps;
-  sessionTokenUsage?: LocalAgentSession['sessionTokenUsage'] | null;
+  sessionTokenUsage?: AgentSession['sessionTokenUsage'] | null;
   pendingReview?: ReviewActionSnapshot | null;
-}): LocalAgentSessionSnapshot {
+}): AgentSessionSnapshot {
   const timeline = timelineFromCheckpointMessages(params.messages);
   const pendingReview = params.pendingReview ?? null;
   const runtime = buildLocalAgentRuntimeView(params.deps);
@@ -30,26 +30,23 @@ export function buildLocalAgentSessionSnapshot(params: {
           : {}),
       }
     : null;
-  return {
-    version: LOCAL_AGENT_SESSION_SNAPSHOT_VERSION,
-    session: {
-      sessionId: params.sessionId,
-      kind: params.kind,
-      timeline,
-      activeRun: pendingReview
-        ? runFromPendingReview({
-          pendingReview,
-        })
-        : null,
-      runtime,
-      ...(sessionTokenUsage ? { sessionTokenUsage } : {}),
-    },
-  };
+  return createAgentSessionSnapshot({
+    sessionId: params.sessionId,
+    kind: params.kind,
+    timeline,
+    activeRun: pendingReview
+      ? runFromPendingReview({
+        pendingReview,
+      })
+      : null,
+    runtime,
+    ...(sessionTokenUsage ? { sessionTokenUsage } : {}),
+  });
 }
 
 export function buildLocalAgentRuntimeView(
   deps: LocalServerDeps,
-): LocalAgentRuntimeView {
+): AgentRuntimeView {
   const runtime = buildLocalRuntimeProjection(deps);
   return {
     model: runtime.model,
@@ -66,7 +63,7 @@ export function buildLocalAgentRuntimeView(
   };
 }
 
-function timelineFromCheckpointMessages(messages: TuiCheckpointMessage[]): LocalAgentTimelineEntry[] {
+function timelineFromCheckpointMessages(messages: TuiCheckpointMessage[]): AgentTimelineEntry[] {
   return messages.flatMap((message, index) => {
     if (message.role !== 'user' && message.role !== 'assistant') {
       return [];
@@ -82,13 +79,13 @@ function timelineFromCheckpointMessages(messages: TuiCheckpointMessage[]): Local
       text,
       status: 'completed',
       ...(message.createdAt ? { createdAt: message.createdAt } : {}),
-    } satisfies LocalAgentTimelineEntry];
+    } satisfies AgentTimelineEntry];
   });
 }
 
 function runFromPendingReview(params: {
   pendingReview: ReviewActionSnapshot;
-}): LocalAgentRunView {
+}): AgentRunView {
   const petId = params.pendingReview.actor?.petId;
   return {
     requestId: params.pendingReview.requestId,

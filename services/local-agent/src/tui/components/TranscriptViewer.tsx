@@ -1,12 +1,12 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { LocalAgentTimelineEntry } from '../../localAgentSession';
+import type { AgentTimelineEntry } from '@pinpawo/agent-session';
 import { maxTimelineScrollOffset } from '../timeline/timelineScroll';
 import { AgentTimelineItem } from './AgentTimelineItem';
 import { TimelineViewport } from './TimelineViewport';
 
 export function TranscriptViewer(props: {
-  entries: LocalAgentTimelineEntry[];
+  entries: AgentTimelineEntry[];
   petName: string;
   now: number;
   width: number;

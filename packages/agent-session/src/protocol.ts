@@ -1,0 +1,664 @@
+import {
+  type BuiltinGlobalReviewPolicyMode,
+  type ReviewResponse,
+  type ReviewSpec,
+} from '@pinpawo/pet-agent';
+import type {
+  AgentErrorCode,
+  AgentOperationRaw,
+  AgentOperationPhase,
+  AgentRuntimeEvent,
+} from './events';
+import type {
+  AgentSessionSummary,
+} from './domain';
+import type {
+  AgentSessionSnapshot,
+  JsonObject,
+} from './snapshot';
+import { isJsonValue } from './snapshot';
+import {
+  parseAgentSessionSnapshot,
+  parseAgentSessionSummary,
+} from './parser';
+import {
+  isAgentReviewSpecValue,
+  isBuiltinGlobalReviewPolicyMode,
+  parseAgentTokenUsageSnapshot,
+} from './validation';
+
+export type ChatRequestMessage = {
+  type: 'chat_request';
+  requestId: string;
+  message: string;
+  petId?: string;
+  userId?: string;
+};
+
+export type RunInterruptMessage = {
+  type: 'run.interrupt';
+  requestId: string;
+};
+
+export type ReviewCancelMessage = {
+  type: 'review.cancel';
+  requestId: string;
+  actionId: string;
+};
+
+export type NewSessionMessage = {
+  type: 'new_session';
+  petId?: string;
+  userId?: string;
+};
+
+export type RuntimeConfigUpdateMessage = {
+  type: 'runtime_config.update';
+  globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
+};
+
+export type StudioRequestMessage = {
+  type: 'studio_request';
+  requestId: string;
+  userRequest: string;
+  /** 可选:显式覆盖 runId，供外部调度器维持同一次 Studio 运行的幂等主键 */
+  runId?: string;
+  /** 可选:overrides 默认的 conversation 命名,影响 wiki 子目录 */
+  conversationId?: string;
+};
+
+export type HumanReviewResponseMessage = {
+  type: 'human_review_response';
+  requestId: string;
+  actionId?: string;
+  reviewId: string;
+  selectedOptionId: string;
+  input?: Record<string, unknown>;
+  decisions?: ReviewResponse[];
+};
+
+export type SessionSnapshotGetMessage = {
+  type: 'session.snapshot.get';
+  requestId: string;
+};
+
+export type SessionListMessage = {
+  type: 'session.list';
+  requestId: string;
+};
+
+export type SessionResumeMessage = {
+  type: 'session.resume';
+  requestId: string;
+  sessionId: string;
+};
+
+export type AgentClientMessage =
+  | ChatRequestMessage
+  | RunInterruptMessage
+  | ReviewCancelMessage
+  | NewSessionMessage
+  | RuntimeConfigUpdateMessage
+  | StudioRequestMessage
+  | HumanReviewResponseMessage
+  | SessionSnapshotGetMessage
+  | SessionListMessage
+  | SessionResumeMessage
+  | { type: 'ping' };
+
+export type AgentRuntimeEventEnvelope = {
+  type: 'event';
+  requestId: string;
+  event: AgentRuntimeEvent;
+};
+
+export type AgentControlServerMessage =
+  | { type: 'pong' }
+  | { type: 'interrupting'; requestId: string; message?: string }
+  | { type: 'interrupted'; requestId: string; message?: string }
+  | {
+      type: 'studio_response';
+      requestId: string;
+      outcome: 'done' | 'stopped';
+      reply: string;
+      finalPetRunId?: string;
+      reason?: string;
+      workdir?: string;
+      runId?: string;
+      conversationId?: string;
+      idempotencyKey?: string;
+    }
+  | { type: 'studio_error'; requestId: string; message: string };
+
+export type AgentSessionServerMessage =
+  | {
+      type: 'session.snapshot.result';
+      requestId: string;
+      snapshot: AgentSessionSnapshot;
+    }
+  | {
+      type: 'session.list.result';
+      requestId: string;
+      sessions: AgentSessionSummary[];
+    }
+  | {
+      type: 'session.resume.result';
+      requestId: string;
+      session: AgentSessionSummary;
+      snapshot: AgentSessionSnapshot;
+    }
+  | {
+      type: 'session.error';
+      requestId: string;
+      operation: 'snapshot' | 'list' | 'resume';
+      message: string;
+    };
+
+export type AgentServerMessage =
+  | AgentRuntimeEventEnvelope
+  | AgentControlServerMessage
+  | AgentSessionServerMessage;
+
+export type AgentClientMessageEnvelope = {
+  type?: string;
+  requestId?: string;
+};
+
+function readJsonRecord(raw: unknown): Record<string, unknown> | null {
+  try {
+    const parsed = typeof raw === 'string'
+      ? JSON.parse(raw) as unknown
+      : raw;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function readString(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return typeof value === 'string' ? value : null;
+}
+
+function readOptionalString(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function readOptionalStringArray(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  if (value === undefined) return undefined;
+  return Array.isArray(value) && value.every((item) => typeof item === 'string')
+    ? value as string[]
+    : null;
+}
+
+function readRecord(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function hasOnlyKeys(record: Record<string, unknown>, allowedKeys: readonly string[]) {
+  const allowed = new Set(allowedKeys);
+  return Object.keys(record).every((key) => allowed.has(key));
+}
+
+function readReviewSpec(record: Record<string, unknown>, key: string): ReviewSpec | null {
+  const review = readRecord(record, key);
+  return isAgentReviewSpecValue(review) ? review : null;
+}
+
+function readReviewSpecs(record: Record<string, unknown>, key: string): ReviewSpec[] | null {
+  const value = record[key];
+  if (value === undefined) return null;
+  if (!Array.isArray(value)) return null;
+  const reviews = value.filter(isAgentReviewSpecValue);
+  return reviews.length === value.length && reviews.length > 0 ? reviews : null;
+}
+
+function readReviewResponse(value: unknown): ReviewResponse | null {
+  const record = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+  if (!record || !hasOnlyKeys(record, ['reviewId', 'selectedOptionId', 'input'])) return null;
+  const reviewId = readString(record, 'reviewId');
+  const selectedOptionId = readString(record, 'selectedOptionId');
+  const input = readRecord(record, 'input');
+  if (record.input !== undefined && !input) return null;
+  return reviewId && selectedOptionId
+    ? {
+        reviewId,
+        selectedOptionId,
+        ...(input ? { input } : {}),
+      }
+    : null;
+}
+
+function readReviewResponses(record: Record<string, unknown>, key: string): ReviewResponse[] | null {
+  const value = record[key];
+  if (value === undefined) return null;
+  if (!Array.isArray(value)) return null;
+  const responses = value.map(readReviewResponse);
+  if (responses.some((response) => !response) || responses.length === 0) return null;
+  return responses as ReviewResponse[];
+}
+
+function readBuiltinGlobalReviewPolicyMode(
+  record: Record<string, unknown>,
+  key: string,
+): BuiltinGlobalReviewPolicyMode | null {
+  const value = readString(record, key);
+  return isBuiltinGlobalReviewPolicyMode(value) ? value : null;
+}
+
+export function readAgentClientMessageEnvelope(raw: unknown): AgentClientMessageEnvelope | null {
+  const record = readJsonRecord(raw);
+  if (!record) {
+    return null;
+  }
+  return {
+    type: readOptionalString(record, 'type'),
+    requestId: readOptionalString(record, 'requestId'),
+  };
+}
+
+function readRawOperationPayload(
+  record: Record<string, unknown>,
+): AgentOperationRaw | null {
+  const raw = readRecord(record, 'raw');
+  if (!raw) return null;
+  const result: AgentOperationRaw = {};
+  if ('input' in raw) {
+    if (!isJsonValue(raw.input)) return null;
+    result.input = raw.input;
+  }
+  if ('output' in raw) {
+    if (!isJsonValue(raw.output)) return null;
+    result.output = raw.output;
+  }
+  if ('error' in raw) {
+    if (!isJsonValue(raw.error)) return null;
+    result.error = raw.error;
+  }
+  return Object.keys(result).length > 0 ? result : null;
+}
+
+function readAgentEvent(record: Record<string, unknown>): AgentRuntimeEvent | null {
+  const type = readString(record, 'type');
+  const requestId = readString(record, 'requestId');
+  if (!type || !requestId) return null;
+
+  if (type === 'message.delta') {
+    const role = readString(record, 'role');
+    const text = readString(record, 'text');
+    return role === 'assistant' && text != null
+      ? { type, requestId, role, text }
+      : null;
+  }
+  if (type === 'subagent.message.completed') {
+    const text = readString(record, 'text');
+    const namespace = readOptionalStringArray(record, 'namespace');
+    const messageId = readString(record, 'messageId');
+    if (text == null || !messageId || !namespace) return null;
+    return {
+      type,
+      requestId,
+      messageId,
+      namespace,
+      text,
+    };
+  }
+  if (type === 'message.completed') {
+    const role = readString(record, 'role');
+    const text = readString(record, 'text');
+    if (role !== 'assistant' || text == null) return null;
+    const usage = parseAgentTokenUsageSnapshot(record.usage);
+    return {
+      type,
+      requestId,
+      ...(usage ? { usage } : {}),
+      role,
+      text,
+    };
+  }
+  if (type === 'operation') {
+    const phase = readString(record, 'phase');
+    const operation = readRecord(record, 'operation');
+    const kind = operation ? readString(operation, 'kind') : null;
+    if (!isOperationPhase(phase) || !operation || !kind) return null;
+    const source = readRecord(operation, 'source');
+    const sourceProvider = source ? readString(source, 'provider') : null;
+    const sourceName = source ? readString(source, 'name') : null;
+    const normalizedProvider = normalizeOperationSourceProvider(sourceProvider);
+    const sourceToolName = source ? readOptionalString(source, 'toolName') : undefined;
+    const sourceCallId = source ? readOptionalString(source, 'callId') : undefined;
+    const raw = readRawOperationPayload(record);
+    const details = readJsonObject(operation, 'details');
+    if (operation.details !== undefined && !details) return null;
+    return {
+      type,
+      requestId,
+      phase,
+      operation: {
+        ...(readOptionalString(operation, 'id') !== undefined
+          ? { id: readOptionalString(operation, 'id') }
+          : {}),
+        kind,
+        ...(readOptionalString(operation, 'title') !== undefined
+          ? { title: readOptionalString(operation, 'title') }
+          : {}),
+        ...(readOptionalString(operation, 'target') !== undefined
+          ? { target: readOptionalString(operation, 'target') }
+          : {}),
+        ...(readOptionalString(operation, 'summary') !== undefined
+          ? { summary: readOptionalString(operation, 'summary') }
+          : {}),
+        ...(details ? { details } : {}),
+        ...(normalizedProvider && sourceName
+          ? {
+              source: {
+                provider: normalizedProvider,
+                name: sourceName,
+                ...(sourceToolName ? { toolName: sourceToolName } : {}),
+                ...(sourceCallId ? { callId: sourceCallId } : {}),
+              },
+            }
+          : {}),
+      },
+      ...(raw ? { raw } : {}),
+    };
+  }
+  if (type === 'human_review.requested') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'interruptId', 'review', 'reviews', 'actor'])) return null;
+    const review = readReviewSpec(record, 'review');
+    const reviews = readReviewSpecs(record, 'reviews');
+    const actor = readRecord(record, 'actor');
+    if (!review) return null;
+    if (actor && !hasOnlyKeys(actor, ['petId'])) return null;
+    return {
+      type,
+      requestId,
+      ...(readOptionalString(record, 'interruptId') ? { interruptId: readOptionalString(record, 'interruptId') } : {}),
+      review,
+      ...(reviews ? { reviews } : {}),
+      ...(actor
+        ? {
+            actor: {
+              ...(readOptionalString(actor, 'petId') !== undefined
+                ? { petId: readOptionalString(actor, 'petId') }
+                : {}),
+            },
+          }
+        : {}),
+    };
+  }
+  if (type === 'studio.progress') {
+    const event = readJsonObject(record, 'event');
+    return event ? { type, requestId, event } : null;
+  }
+  if (type === 'system.notice' || type === 'error') {
+    const message = readString(record, 'message');
+    const code = type === 'error' ? readAgentErrorCode(record) : null;
+    return message == null
+      ? null
+      : {
+          type,
+          requestId,
+          message,
+          ...(code ? { code } : {}),
+        };
+  }
+  return null;
+}
+
+function readJsonObject(
+  record: Record<string, unknown>,
+  key: string,
+): JsonObject | null {
+  const value = readRecord(record, key);
+  return value && isJsonValue(value) ? value : null;
+}
+
+function readAgentErrorCode(record: Record<string, unknown>): AgentErrorCode | null {
+  const code = readOptionalString(record, 'code');
+  if (
+    code === 'review_closed'
+    || code === 'review_stale'
+    || code === 'review_wrong_session'
+  ) {
+    return code;
+  }
+  return null;
+}
+
+export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null {
+  const record = readJsonRecord(raw);
+  if (!record) return null;
+  const type = readString(record, 'type');
+  if (type === 'ping') return { type: 'ping' };
+  if (type === 'session.snapshot.get' || type === 'session.list') {
+    if (!hasOnlyKeys(record, ['type', 'requestId'])) return null;
+    const requestId = readString(record, 'requestId');
+    return requestId ? { type, requestId } : null;
+  }
+  if (type === 'session.resume') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'sessionId'])) return null;
+    const requestId = readString(record, 'requestId');
+    const sessionId = readString(record, 'sessionId');
+    return requestId && sessionId ? { type, requestId, sessionId } : null;
+  }
+  if (type === 'chat_request') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'message', 'petId', 'userId'])) return null;
+    const requestId = readString(record, 'requestId');
+    const message = readString(record, 'message');
+    if (!requestId || message == null) return null;
+    return {
+      type,
+      requestId,
+      message,
+      ...(readOptionalString(record, 'petId') !== undefined
+        ? { petId: readOptionalString(record, 'petId') }
+        : {}),
+      ...(readOptionalString(record, 'userId') !== undefined
+        ? { userId: readOptionalString(record, 'userId') }
+        : {}),
+    };
+  }
+  if (type === 'human_review_response') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'actionId', 'reviewId', 'selectedOptionId', 'input', 'decisions'])) return null;
+    const requestId = readString(record, 'requestId');
+    const actionId = readOptionalString(record, 'actionId');
+    const reviewId = readOptionalString(record, 'reviewId');
+    const selectedOptionId = readOptionalString(record, 'selectedOptionId');
+    const input = readRecord(record, 'input');
+    const decisions = readReviewResponses(record, 'decisions');
+    if (record.input !== undefined && !input) return null;
+    if (record.decisions !== undefined && !decisions) return null;
+    if (record.actionId !== undefined && !actionId) return null;
+    if (!requestId || !reviewId || !selectedOptionId) return null;
+    return {
+      type,
+      requestId,
+      ...(actionId ? { actionId } : {}),
+      reviewId,
+      selectedOptionId,
+      ...(input ? { input } : {}),
+      ...(decisions ? { decisions } : {}),
+    };
+  }
+  if (type === 'run.interrupt') {
+    if (!hasOnlyKeys(record, ['type', 'requestId'])) return null;
+    const requestId = readString(record, 'requestId');
+    return requestId ? { type, requestId } : null;
+  }
+  if (type === 'review.cancel') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'actionId'])) return null;
+    const requestId = readString(record, 'requestId');
+    const actionId = readString(record, 'actionId');
+    return requestId && actionId ? { type, requestId, actionId } : null;
+  }
+  if (type === 'new_session') {
+    return {
+      type,
+      ...(readOptionalString(record, 'petId') !== undefined
+        ? { petId: readOptionalString(record, 'petId') }
+        : {}),
+      ...(readOptionalString(record, 'userId') !== undefined
+        ? { userId: readOptionalString(record, 'userId') }
+        : {}),
+    };
+  }
+  if (type === 'runtime_config.update') {
+    if (!hasOnlyKeys(record, ['type', 'globalReviewPolicyMode'])) return null;
+    const globalReviewPolicyMode = readBuiltinGlobalReviewPolicyMode(record, 'globalReviewPolicyMode');
+    return globalReviewPolicyMode ? { type, globalReviewPolicyMode } : null;
+  }
+  if (type === 'studio_request') {
+    const requestId = readString(record, 'requestId');
+    const userRequest = readString(record, 'userRequest');
+    if (!requestId || userRequest == null) return null;
+    if ('runId' in record && typeof record.runId !== 'string') return null;
+    if ('conversationId' in record && typeof record.conversationId !== 'string') return null;
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'runId', 'userRequest', 'conversationId'])) {
+      return null;
+    }
+    return {
+      type,
+      requestId,
+      userRequest,
+      ...(readOptionalString(record, 'conversationId') !== undefined
+        ? { conversationId: readOptionalString(record, 'conversationId') }
+        : {}),
+      ...(readOptionalString(record, 'runId') !== undefined
+        ? { runId: readOptionalString(record, 'runId') }
+        : {}),
+    };
+  }
+  return null;
+}
+
+function parseAgentServerRecord(record: Record<string, unknown>): AgentServerMessage | null {
+  const type = readString(record, 'type');
+  if (type === 'pong') return { type };
+  const requestId = readString(record, 'requestId');
+  if (!requestId) return null;
+  if (type === 'session.snapshot.result') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'snapshot'])) return null;
+    const snapshot = parseAgentSessionSnapshot(record.snapshot);
+    return snapshot ? { type, requestId, snapshot } : null;
+  }
+  if (type === 'session.list.result') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'sessions'])) return null;
+    if (!Array.isArray(record.sessions)) return null;
+    const sessions = record.sessions.flatMap((value) => {
+      const session = parseAgentSessionSummary(value);
+      return session ? [session] : [];
+    });
+    return sessions.length === record.sessions.length
+      ? { type, requestId, sessions }
+      : null;
+  }
+  if (type === 'session.resume.result') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'session', 'snapshot'])) return null;
+    const session = parseAgentSessionSummary(record.session);
+    const snapshot = parseAgentSessionSnapshot(record.snapshot);
+    if (
+      !session
+      || !snapshot
+      || snapshot.session.sessionId !== session.id
+      || snapshot.session.kind !== session.kind
+    ) {
+      return null;
+    }
+    return { type, requestId, session, snapshot };
+  }
+  if (type === 'session.error') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'operation', 'message'])) return null;
+    const operation = readString(record, 'operation');
+    const message = readString(record, 'message');
+    if (
+      (operation !== 'snapshot' && operation !== 'list' && operation !== 'resume')
+      || message === null
+    ) {
+      return null;
+    }
+    return { type, requestId, operation, message };
+  }
+  if (type === 'event') {
+    const eventRecord = readRecord(record, 'event');
+    const event = eventRecord ? readAgentEvent(eventRecord) : null;
+    return event && event.requestId === requestId ? { type, requestId, event } : null;
+  }
+  if (type === 'interrupting' || type === 'interrupted' || type === 'studio_error') {
+    const message = readOptionalString(record, 'message')
+      ?? (type === 'studio_error' ? '' : undefined);
+    return {
+      type,
+      requestId,
+      ...(message !== undefined ? { message } : {}),
+    } as AgentServerMessage;
+  }
+  if (type === 'studio_response') {
+    const outcome = readString(record, 'outcome');
+    const reply = readString(record, 'reply');
+    if ((outcome !== 'done' && outcome !== 'stopped') || reply == null) return null;
+    return {
+      type,
+      requestId,
+      outcome,
+      reply,
+      ...(readOptionalString(record, 'finalPetRunId') !== undefined
+        ? { finalPetRunId: readOptionalString(record, 'finalPetRunId') }
+        : {}),
+      ...(readOptionalString(record, 'reason') !== undefined
+        ? { reason: readOptionalString(record, 'reason') }
+        : {}),
+      ...(readOptionalString(record, 'workdir') !== undefined
+        ? { workdir: readOptionalString(record, 'workdir') }
+        : {}),
+      ...(readOptionalString(record, 'runId') !== undefined
+        ? { runId: readOptionalString(record, 'runId') }
+        : {}),
+      ...(readOptionalString(record, 'conversationId') !== undefined
+        ? { conversationId: readOptionalString(record, 'conversationId') }
+        : {}),
+      ...(readOptionalString(record, 'idempotencyKey') !== undefined
+        ? { idempotencyKey: readOptionalString(record, 'idempotencyKey') }
+        : {}),
+    };
+  }
+  return null;
+}
+
+export function parseAgentServerMessage(raw: unknown): AgentServerMessage | null {
+  const record = readJsonRecord(raw);
+  if (!record) return null;
+  return parseAgentServerRecord(record);
+}
+
+export function buildAgentEventEnvelope(
+  event: AgentRuntimeEvent,
+): AgentRuntimeEventEnvelope {
+  return {
+    type: 'event',
+    requestId: event.requestId,
+    event,
+  };
+}
+
+function isOperationPhase(value: string | null): value is AgentOperationPhase {
+  return value === 'started'
+    || value === 'updated'
+    || value === 'completed'
+    || value === 'failed'
+    || value === 'interrupted';
+}
+
+function normalizeOperationSourceProvider(value: string | null): 'toolkit' | 'runtime' | null {
+  if (value === 'toolkit' || value === 'runtime') return value;
+  return null;
+}

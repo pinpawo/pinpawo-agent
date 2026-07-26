@@ -1,9 +1,9 @@
 import type {
-  LocalAgentMessageEntry,
-  LocalAgentSessionSummary,
-} from '../localAgentSession';
+  AgentMessageEntry,
+  AgentSessionSummary,
+} from '@pinpawo/agent-session';
 
-export type MessageRole = Exclude<LocalAgentMessageEntry['role'], 'subagent'>;
+export type MessageRole = Exclude<AgentMessageEntry['role'], 'subagent'>;
 
 export type PendingUiState = {
   startedAt: number;
@@ -18,4 +18,4 @@ export type ActiveOperation = {
   startedAt: number;
 };
 
-export type ResumeSessionSummary = LocalAgentSessionSummary;
+export type ResumeSessionSummary = AgentSessionSummary;

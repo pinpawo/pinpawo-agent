@@ -7,7 +7,7 @@ import {
   resolveHumanReviewAction,
   validateHumanReviewDecisions,
 } from './humanReviewActionRouting';
-import type { LocalAgentRuntimeEvent } from './events/localAgentRuntimeEvent';
+import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 import { ReviewResolutionLifecycle } from './reviewResolutionLifecycle';
 
 function reviewSpec(id: string): ReviewSpec {
@@ -141,7 +141,7 @@ test('human review action resolution owns validation, resume, and consumption', 
   const lifecycle = new ReviewResolutionLifecycle<typeof route>();
   lifecycle.register(route);
   const runs: unknown[] = [];
-  const events: LocalAgentRuntimeEvent[] = [];
+  const events: AgentRuntimeEvent[] = [];
   let closed = 0;
   const message = {
     type: 'human_review_response' as const,
@@ -195,7 +195,7 @@ test('human review response validation runs before the route boundary guard', as
   };
   const lifecycle = new ReviewResolutionLifecycle<typeof route>();
   lifecycle.register(route);
-  const events: LocalAgentRuntimeEvent[] = [];
+  const events: AgentRuntimeEvent[] = [];
   let guardCalls = 0;
 
   await resolveHumanReviewAction({
@@ -223,7 +223,7 @@ test('human review response validation runs before the route boundary guard', as
 
   assert.equal(guardCalls, 0);
   assert.equal(
-    (events[0] as Extract<LocalAgentRuntimeEvent, { type: 'error' }> | undefined)?.code,
+    (events[0] as Extract<AgentRuntimeEvent, { type: 'error' }> | undefined)?.code,
     'review_stale',
   );
 });

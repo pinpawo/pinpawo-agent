@@ -45,7 +45,7 @@ import { createInitialTuiState, createSession } from './state/tuiState';
 import {
   tuiStateReducer,
 } from './state/tuiStateReducer';
-import type { LocalAgentTimelineEntry } from '../localAgentSession';
+import type { AgentTimelineEntry } from '@pinpawo/agent-session';
 import { TuiRuntimeController } from './TuiRuntimeController';
 import { TuiLocalWebSocketClient } from './tuiLocalWebSocketClient';
 import { createTuiMessage } from './tuiMessage';
@@ -71,7 +71,7 @@ const SPINNER_FRAMES = ['-', '\\', '|', '/'];
 const CLEAR_SCREEN = '\x1B[2J\x1B[3J\x1B[H';
 
 function renderTimelineDisplayEntry(
-  entry: LocalAgentTimelineEntry,
+  entry: AgentTimelineEntry,
   props: {
     petName: string;
     now: number;
@@ -118,7 +118,7 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
   const [transcriptInitialPageUp, setTranscriptInitialPageUp] = useState(false);
   const inlineTimelineLedgerRef = useRef<{
     key: string;
-    entries: LocalAgentTimelineEntry[];
+    entries: AgentTimelineEntry[];
   }>({ key: '', entries: [] });
   const transcriptTerminalMode = useTranscriptTerminalMode(stdout);
   const [globalReviewPolicyMode, setGlobalReviewPolicyMode] = useState<BuiltinGlobalReviewPolicyMode>(

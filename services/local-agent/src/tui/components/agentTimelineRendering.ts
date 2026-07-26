@@ -1,7 +1,7 @@
 import stringWidth from 'string-width';
 import { TUI_TEXT } from '../render/text';
 import { formatElapsed, truncateLine } from '../render/terminalText';
-import type { LocalAgentOperationEntry } from '../../localAgentSession';
+import type { AgentOperationEntry } from '@pinpawo/agent-session';
 import { buildApplyPatchDisplayLines } from './applyPatchDisplay';
 
 export type TimelineTextLine = {
@@ -12,7 +12,7 @@ export type TimelineTextLine = {
    * When set, the line is the operation's header and should render a leading
    * status dot in this phase's color (gray=running, green=done, red=failed).
    */
-  statusDot?: LocalAgentOperationEntry['phase'];
+  statusDot?: AgentOperationEntry['phase'];
 };
 
 type TimelineTextLineDraft = Omit<TimelineTextLine, 'id'>;
@@ -38,7 +38,7 @@ const OPERATION_PAYLOAD_DETAIL_KEYS = new Set([
 ]);
 
 export function buildAgentOperationDisplayLines(
-  entry: LocalAgentOperationEntry,
+  entry: AgentOperationEntry,
   now: number,
   width: number,
 ): TimelineTextLine[] {
@@ -65,7 +65,7 @@ export function buildAgentOperationDisplayLines(
   return lines;
 }
 
-function buildAgentOperationText(entry: LocalAgentOperationEntry, now: number, width: number) {
+function buildAgentOperationText(entry: AgentOperationEntry, now: number, width: number) {
   const status = buildOperationStatus(entry, now);
   const suffix = `（${status}）`;
   const body = buildOperationBody(entry);
@@ -77,7 +77,7 @@ function buildAgentOperationText(entry: LocalAgentOperationEntry, now: number, w
   return `${truncateLine(body, width - suffixWidth)}${suffix}`;
 }
 
-function buildOperationStatus(entry: LocalAgentOperationEntry, now: number) {
+function buildOperationStatus(entry: AgentOperationEntry, now: number) {
   switch (entry.phase) {
     case 'started':
       return TUI_TEXT.operationStarted;
@@ -94,14 +94,14 @@ function buildOperationStatus(entry: LocalAgentOperationEntry, now: number) {
   }
 }
 
-function buildOperationBody(entry: LocalAgentOperationEntry) {
+function buildOperationBody(entry: AgentOperationEntry) {
   const label = operationToolLabel(entry);
   const argument = operationArgument(entry);
   return argument ? `${label}(${argument})` : label;
 }
 
 /** The tool name shown as the header label, e.g. `apply_patch` or `打开网页`. */
-function operationToolLabel(entry: LocalAgentOperationEntry) {
+function operationToolLabel(entry: AgentOperationEntry) {
   return entry.operationSource?.toolName?.trim()
     || entry.operationSource?.name?.trim()
     || entry.title?.trim()
@@ -109,7 +109,7 @@ function operationToolLabel(entry: LocalAgentOperationEntry) {
 }
 
 /** The parenthesized argument summary, e.g. the target path or a one-line summary. */
-function operationArgument(entry: LocalAgentOperationEntry) {
+function operationArgument(entry: AgentOperationEntry) {
   const label = operationToolLabel(entry);
   const detailText = formatDetails(entry.details);
   return joinUniqueParts([
@@ -130,7 +130,7 @@ function formatDetails(details: Record<string, unknown> | undefined) {
     .join(' · ');
 }
 
-function buildOperationPayloadLines(entry: LocalAgentOperationEntry, width: number): TimelineTextLineDraft[] {
+function buildOperationPayloadLines(entry: AgentOperationEntry, width: number): TimelineTextLineDraft[] {
   if (!isApplyPatchOperation(entry)) return [];
   const patch = readApplyPatchPayload(entry);
   return patch ? buildPatchDiffLines(patch, entry.target, width) : [];
@@ -141,7 +141,7 @@ function buildOperationPayloadLines(entry: LocalAgentOperationEntry, width: numb
  * collapsing long output to a "+N lines" footer. apply_patch keeps its diff
  * rendering instead of dumping raw output.
  */
-function buildOperationOutputLines(entry: LocalAgentOperationEntry, width: number): TimelineTextLineDraft[] {
+function buildOperationOutputLines(entry: AgentOperationEntry, width: number): TimelineTextLineDraft[] {
   if (isApplyPatchOperation(entry)) return [];
   const isError = entry.phase === 'failed';
   const raw = isError ? (entry.raw?.error ?? entry.raw?.output) : entry.raw?.output;
@@ -198,13 +198,13 @@ function buildPatchDiffLines(
   return buildApplyPatchDisplayLines({ patch, target, width });
 }
 
-function isApplyPatchOperation(entry: LocalAgentOperationEntry) {
+function isApplyPatchOperation(entry: AgentOperationEntry) {
   return entry.operationSource?.toolName === 'apply_patch'
     || entry.kind.endsWith('.apply_patch')
     || entry.kind === 'apply_patch';
 }
 
-function readApplyPatchPayload(entry: LocalAgentOperationEntry) {
+function readApplyPatchPayload(entry: AgentOperationEntry) {
   return readPatchFromRawInput(entry.raw?.input)
     ?? (entry.details ? readDetailString(entry.details, 'patch') : undefined);
 }

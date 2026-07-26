@@ -1,5 +1,5 @@
-import type { LocalAgentRuntimeEvent } from '../events/localAgentRuntimeEvent';
-import type { LocalAgentSessionMessageInput } from '../localAgentSession';
+import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
+import type { AgentSessionMessageInput } from '@pinpawo/agent-session';
 import type { LocalAgentServerMessage } from '../localAgentProtocol';
 import {
   formatStudioProgressEvent,
@@ -16,8 +16,8 @@ export type TuiServerMessageActionResult = {
 export type TuiServerMessageActionOptions = {
   now: number;
   createMessage: (
-    input: Omit<LocalAgentSessionMessageInput, 'createdAt'>,
-  ) => LocalAgentSessionMessageInput;
+    input: Omit<AgentSessionMessageInput, 'createdAt'>,
+  ) => AgentSessionMessageInput;
 };
 
 export function buildTuiActionsFromServerMessage(
@@ -118,7 +118,7 @@ export function buildTuiActionsFromServerMessage(
 }
 
 function runtimeEventMessage(
-  event: LocalAgentRuntimeEvent,
+  event: AgentRuntimeEvent,
   createMessage: TuiServerMessageActionOptions['createMessage'],
 ) {
   switch (event.type) {

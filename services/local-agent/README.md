@@ -121,7 +121,7 @@ admission waits for preceding session commands, while interrupts remain immediat
 `session.resume` fails with `session.error` if that peer already owns an active run.
 
 These messages only transport the existing session summary and point-in-time
-`LocalAgentSessionSnapshot`. They do not introduce another timeline, recovery model,
+`AgentSessionSnapshot`. They do not introduce another timeline, recovery model,
 or source of authority; LangGraph checkpoints remain authoritative.
 
 ## Publishing

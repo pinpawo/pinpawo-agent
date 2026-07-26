@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  LOCAL_AGENT_SESSION_SNAPSHOT_VERSION,
-  type LocalAgentSessionSnapshot,
-} from './localAgentSession';
+  AGENT_SESSION_SNAPSHOT_VERSION,
+  type AgentSessionSnapshot,
+} from './index';
 
-test('LocalAgentSession snapshot owns one active run and one ordered timeline', () => {
-  const snapshot: LocalAgentSessionSnapshot = {
-    version: LOCAL_AGENT_SESSION_SNAPSHOT_VERSION,
+test('AgentSession snapshot owns one active run and one ordered timeline', () => {
+  const snapshot: AgentSessionSnapshot = {
+    version: AGENT_SESSION_SNAPSHOT_VERSION,
     session: {
       sessionId: 'chat:pet',
       kind: 'chat',

@@ -4,8 +4,8 @@ import { LocalAgentGraphService } from './agentGraphService';
 import { InflightRequestController } from './inflightRequestController';
 import { buildLocalAgentSessionSnapshot } from './localAgentSessionSnapshot';
 import type {
-  LocalAgentSessionSummary,
-} from './localAgentSession';
+  AgentSessionSummary,
+} from '@pinpawo/agent-session';
 import type {
   LocalAgentSessionServerMessage,
 } from './localAgentProtocol';
@@ -36,11 +36,11 @@ export type LocalServerHandlers = {
 };
 
 type SessionSummarySource = Pick<
-  LocalAgentSessionSummary,
+  AgentSessionSummary,
   'id' | 'title' | 'messageCount' | 'createdAt' | 'updatedAt' | 'active'
 >;
 
-function projectChatSessionSummary(session: SessionSummarySource): LocalAgentSessionSummary {
+function projectChatSessionSummary(session: SessionSummarySource): AgentSessionSummary {
   return {
     id: session.id,
     kind: 'chat',
@@ -78,7 +78,7 @@ export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHan
   const inflightRequests = new InflightRequestController<LocalServerPeer>({
     forceInterruptMs: INTERRUPT_FORCE_REPLY_MS,
     // Local TUI / companion / spawned stdio peer: trusted local transports.
-    emitOperation: (peer, event) => sendLocalServerPeerEvent(peer, event, { includeRaw: true }),
+    emitOperation: (peer, event) => sendLocalServerPeerEvent(peer, event),
     sendControl: (peer, message) => peer.send(message),
     logPrefix: 'local-server',
   });

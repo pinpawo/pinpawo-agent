@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   defineCapability,
+  defineCapabilityDocumentSource,
   defineInstructionDocument,
 } from './capability';
 
@@ -78,4 +79,46 @@ test('defineCapability rejects an InstructionDocument whose content drifted from
     }),
     /instruction digest does not match content/,
   );
+});
+
+test('defineCapabilityDocumentSource requires an absolute source path', () => {
+  assert.throws(
+    () => defineCapabilityDocumentSource({
+      filePath: 'relative/CAPABILITY.md',
+      content: '# Capability',
+    }),
+    /source path must be absolute/,
+  );
+});
+
+test('defineCapability accepts immutable CAPABILITY.md provenance', () => {
+  const source = [
+    '---',
+    'name: example',
+    'description: Example Capability.',
+    'uses: []',
+    'version: 1',
+    '---',
+    '',
+    '# Capability',
+    '',
+  ].join('\n');
+  const document = defineCapabilityDocumentSource({
+    filePath: '/tmp/example/CAPABILITY.md',
+    content: source,
+  });
+  const capability = defineCapability({
+    name: 'example',
+    description: 'Example Capability.',
+    uses: [],
+    instructions: defineInstructionDocument({
+      content: '# Capability',
+    }),
+    document,
+  });
+
+  assert.equal(capability.document, document);
+  assert.equal(capability.document?.content, source);
+  assert.match(capability.document?.digest ?? '', /^[a-f0-9]{64}$/);
+  assert.ok(Object.isFrozen(document));
 });

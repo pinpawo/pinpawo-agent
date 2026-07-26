@@ -1,8 +1,19 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import { createHash } from 'node:crypto';
+import { isAbsolute } from 'node:path';
+import { assertCapabilityDocumentMatches } from './capabilityDocument';
 import type { AgentActor, AgentExecution, AgentModels } from './agent';
 import type { SubagentResult } from './subagent';
 import type { CapabilityArtifactRef, CapabilityArtifactStore } from './artifact';
+
+export type CapabilityDocumentSource = {
+  readonly kind: 'file';
+  readonly filePath: string;
+  /** Complete authored CAPABILITY.md source captured for this generation. */
+  readonly content: string;
+  /** SHA-256 of the complete authored CAPABILITY.md source. */
+  readonly digest: string;
+};
 
 export type InstructionDocument = {
   readonly content: string;
@@ -47,6 +58,13 @@ export type AgentCapability = {
    */
   readonly uses: readonly string[];
   readonly instructions: InstructionDocument;
+  /**
+   * Optional authored CAPABILITY.md provenance.
+   *
+   * Inline definitions omit this field and are rendered into a normalized
+   * document when a Capability Document Workspace is materialized.
+   */
+  readonly document?: CapabilityDocumentSource;
   readonly lifecycle?: CapabilityLifecycle;
 };
 
@@ -67,6 +85,21 @@ export function defineInstructionDocument(params: {
   return Object.freeze({
     content,
     digest: createHash('sha256').update(content, 'utf8').digest('hex'),
+  });
+}
+
+export function defineCapabilityDocumentSource(params: {
+  filePath: string;
+  content: string;
+}): CapabilityDocumentSource {
+  if (!isAbsolute(params.filePath)) {
+    throw new Error('Capability document source path must be absolute');
+  }
+  return Object.freeze({
+    kind: 'file',
+    filePath: params.filePath,
+    content: params.content,
+    digest: createHash('sha256').update(params.content, 'utf8').digest('hex'),
   });
 }
 
@@ -108,6 +141,36 @@ export function defineCapability(capability: AgentCapability): AgentCapability {
     .digest('hex');
   if (capability.instructions.digest !== expectedDigest) {
     throw new Error(`Capability "${capability.name}" instruction digest does not match content`);
+  }
+  if (capability.document !== undefined) {
+    if (
+      !capability.document
+      || typeof capability.document !== 'object'
+      || capability.document.kind !== 'file'
+      || typeof capability.document.filePath !== 'string'
+      || !isAbsolute(capability.document.filePath)
+      || typeof capability.document.content !== 'string'
+      || !capability.document.content
+      || typeof capability.document.digest !== 'string'
+      || !/^[a-f0-9]{64}$/.test(capability.document.digest)
+    ) {
+      throw new Error(
+        `Capability "${capability.name}" document must be an absolute file source with a SHA-256 digest`,
+      );
+    }
+    const documentDigest = createHash('sha256')
+      .update(capability.document.content, 'utf8')
+      .digest('hex');
+    if (documentDigest !== capability.document.digest) {
+      throw new Error(
+        `Capability "${capability.name}" document digest does not match its captured source`,
+      );
+    }
+    assertCapabilityDocumentMatches(
+      capability,
+      capability.document.content,
+      capability.document.filePath,
+    );
   }
   if (capability.lifecycle?.finalize && typeof capability.lifecycle.finalize !== 'function') {
     throw new Error(`Capability "${capability.name}" lifecycle.finalize must be a function`);

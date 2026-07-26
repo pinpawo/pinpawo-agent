@@ -36,7 +36,7 @@ test('loadUserCapabilities loads a code-free CAPABILITY.md', async () => {
   const previousDirs = process.env.PINPAWO_CAPABILITY_DIRS;
   process.env.PINPAWO_CAPABILITY_DIRS = root;
   try {
-    await mkCapability(root, 'unit_test_capability');
+    const capabilityDir = await mkCapability(root, 'unit_test_capability');
 
     const { loadUserCapabilities, readUserCapabilityManifests } = await import('./capabilityLoader');
     const loaded = await loadUserCapabilities();
@@ -46,6 +46,11 @@ test('loadUserCapabilities loads a code-free CAPABILITY.md', async () => {
     assert.ok(item);
     assert.match(item.capability.instructions.content, /Execute the requested task/);
     assert.match(item.capability.instructions.digest, /^[a-f0-9]{64}$/);
+    assert.equal(
+      item.capability.document?.filePath,
+      path.join(capabilityDir, 'CAPABILITY.md'),
+    );
+    assert.match(item.capability.document?.digest ?? '', /^[a-f0-9]{64}$/);
     assert.equal(item.capability.lifecycle, undefined);
     assert.ok(manifests.some((meta) => meta.id === 'unit_test_capability'));
   } finally {

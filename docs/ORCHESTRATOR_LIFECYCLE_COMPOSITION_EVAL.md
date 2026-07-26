@@ -37,11 +37,12 @@ Mechanical invariants remain separate:
 - terminal run state is clean;
 - no private lane message remains in the main state;
 - at least one user-visible assistant message exists;
-- the controlled executor is called exactly as many times as the case permits.
+- every executor call has controlled evidence assigned to its current user turn;
+  a call without evidence stops the run and preserves the attempted task.
 
-Decision kinds, routes, task text, delegation summaries, latencies, token usage,
-and output variants are diagnostics. They explain a failure but do not replace
-the goal verdict.
+Executor-call counts, decision kinds, routes, task text, delegation summaries,
+latencies, token usage, and output variants are diagnostics. They explain a
+failure but do not replace the goal verdict.
 
 ## Initial single-model profile
 

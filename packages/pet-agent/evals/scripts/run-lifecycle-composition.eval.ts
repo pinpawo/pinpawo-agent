@@ -119,6 +119,11 @@ type LifecycleRunResult = {
   diagnostics: {
     decisionCounts: Record<DecisionKind | 'answer', number>;
     executorCallCount: number;
+    expectedExecutorCallRange: {
+      min: number;
+      max: number;
+    };
+    executorCallCountWithinExpectedRange: boolean;
     assistantMessageCount: number;
     evaluationSummary?: string;
   };
@@ -492,8 +497,6 @@ async function runCase(params: {
     const invariants = evaluateLifecycleCompositionInvariants({
       finalState,
       assistantMessageCount,
-      executorCallCount: executor.calls.length,
-      expectedExecutorCallCount: testCase.expected.executorCallCount,
     });
     const evaluation = await evaluatePromptGoal({
       judge: {
@@ -527,6 +530,10 @@ async function runCase(params: {
       diagnostics: {
         decisionCounts: countDecisions(turns),
         executorCallCount: executor.calls.length,
+        expectedExecutorCallRange: testCase.expected.executorCallRange,
+        executorCallCountWithinExpectedRange:
+          executor.calls.length >= testCase.expected.executorCallRange.min
+          && executor.calls.length <= testCase.expected.executorCallRange.max,
         assistantMessageCount,
         evaluationSummary: evaluation.summary,
       },
@@ -583,6 +590,10 @@ async function runCase(params: {
       diagnostics: {
         decisionCounts: countDecisions(turns),
         executorCallCount: executor.calls.length,
+        expectedExecutorCallRange: testCase.expected.executorCallRange,
+        executorCallCountWithinExpectedRange:
+          executor.calls.length >= testCase.expected.executorCallRange.min
+          && executor.calls.length <= testCase.expected.executorCallRange.max,
         assistantMessageCount: turns.reduce(
           (sum, turn) => sum + turn.assistantMessages.length,
           0,

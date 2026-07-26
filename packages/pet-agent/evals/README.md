@@ -181,8 +181,9 @@ workspace task.
    The fixed V1 single-model profile contains seven cases and defaults to three
    repeats. It evaluates the complete user-visible lifecycle with
    `prompt-goal-v1`; terminal-state cleanup, lane isolation, assistant output,
-   and executor-call count are separate mechanical invariants. Decision paths
-   and delegation summaries remain diagnostics.
+   and controlled-evidence availability are separate mechanical invariants.
+   Executor-call counts, decision paths, and delegation summaries remain
+   diagnostics.
 
    ```sh
    LIFECYCLE_EVAL_CASES=dynamic-multi-task \

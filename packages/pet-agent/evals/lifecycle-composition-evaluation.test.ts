@@ -16,10 +16,15 @@ test('lifecycle composition cases have stable identities and consume every contr
       (sum, turn) => sum + turn.executorResults.length,
       0,
     );
+    assert.ok(testCase.expected.executorCallRange.min >= 0);
+    assert.ok(
+      testCase.expected.executorCallRange.max
+      >= testCase.expected.executorCallRange.min,
+    );
     assert.equal(
-      testCase.expected.executorCallCount,
+      testCase.expected.executorCallRange.max,
       executorResultCount,
-      `${testCase.id} must account for every controlled executor result`,
+      `${testCase.id} must supply every potentially consumed controlled executor result`,
     );
     const criterionIds = testCase.expected.acceptanceCriteria.map(({ id }) => id);
     assert.ok(criterionIds.length > 0);
@@ -39,8 +44,6 @@ test('lifecycle composition pass requires semantic goals and mechanical invarian
       runLatestDelegationOutcome: null,
     },
     assistantMessageCount: 1,
-    executorCallCount: 1,
-    expectedExecutorCallCount: 1,
   });
   assert.equal(invariants.every(({ passed }) => passed), true);
   assert.equal(lifecycleCompositionGoalAchieved([{

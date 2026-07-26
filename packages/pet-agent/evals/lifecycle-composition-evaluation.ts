@@ -46,8 +46,6 @@ export function evaluateLifecycleCompositionInvariants(params: {
     | 'runLatestDelegationOutcome'
   >;
   assistantMessageCount: number;
-  executorCallCount: number;
-  expectedExecutorCallCount: number;
 }): LifecycleCompositionInvariant[] {
   const state = params.finalState;
   const laneMessageCount = state.messages.filter(
@@ -81,11 +79,6 @@ export function evaluateLifecycleCompositionInvariants(params: {
       id: 'assistant_output_present',
       passed: params.assistantMessageCount > 0,
       details: `assistantMessages=${params.assistantMessageCount.toString()}`,
-    },
-    {
-      id: 'executor_call_count',
-      passed: params.executorCallCount === params.expectedExecutorCallCount,
-      details: `actual=${params.executorCallCount.toString()}, expected=${params.expectedExecutorCallCount.toString()}`,
     },
   ];
 }

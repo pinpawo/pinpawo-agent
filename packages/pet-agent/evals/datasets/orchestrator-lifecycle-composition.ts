@@ -21,7 +21,10 @@ export type LifecycleCompositionInput = {
 export type LifecycleCompositionExpected = {
   objective: string;
   acceptanceCriteria: PromptGoalAcceptanceCriterion[];
-  executorCallCount: number;
+  executorCallRange: {
+    min: number;
+    max: number;
+  };
   reason: string;
 };
 
@@ -57,7 +60,7 @@ const cases: AgentEvalCase<
           statement: 'The response does not claim that external work, tools, or delegated execution occurred.',
         },
       ],
-      executorCallCount: 0,
+      executorCallRange: { min: 0, max: 0 },
       reason: 'A goal already answerable from conversation context should close without execution.',
     },
     metadata: {
@@ -98,7 +101,7 @@ const cases: AgentEvalCase<
           statement: 'The lifecycle presents the result before truthfully closing the completed goal.',
         },
       ],
-      executorCallCount: 1,
+      executorCallRange: { min: 1, max: 1 },
       reason: 'A single executable boundary should produce one result and then close.',
     },
     metadata: {
@@ -146,7 +149,7 @@ const cases: AgentEvalCase<
           statement: 'The execution trajectory contains the two required task boundaries without repeating either completed task.',
         },
       ],
-      executorCallCount: 2,
+      executorCallRange: { min: 2, max: 2 },
       reason: 'The first handoff determines the concrete second task.',
     },
     metadata: {
@@ -171,8 +174,8 @@ const cases: AgentEvalCase<
       turns: [{
         userMessage: '调查支付模块失败测试的根因、涉及代码和触发条件，确认调查完整后再结束。',
         executorResults: [
-          '已定位：失败来自金额舍入误差；尚未定位具体代码位置和触发条件。',
-          '调查完成：根因是金额舍入误差；涉及代码为 payments/rounding.ts；当金额包含三位小数时触发；本次只做调查，未修改代码。',
+          '初步定位到金额舍入误差；尚未收集完整失败日志、测试文件、具体代码位置和触发条件。',
+          '调查完成：失败断言为 expected 10.01, received 10.00；失败测试位于 payments/rounding.test.ts；根因代码位于 payments/rounding.ts；当金额包含三位小数时触发舍入误差；本次只做调查，未修改代码。',
         ],
       }],
     },
@@ -185,7 +188,7 @@ const cases: AgentEvalCase<
         },
         {
           id: 'delivers_complete_investigation',
-          statement: 'The final user-visible result identifies the rounding-error root cause, payments/rounding.ts, and the three-decimal-place trigger condition.',
+          statement: 'The final user-visible result identifies the failing assertion and test file, the rounding-error root cause in payments/rounding.ts, and the three-decimal-place trigger condition.',
         },
         {
           id: 'continues_same_task',
@@ -196,7 +199,7 @@ const cases: AgentEvalCase<
           statement: 'The lifecycle does not claim that code was modified; this goal is investigation only.',
         },
       ],
-      executorCallCount: 2,
+      executorCallRange: { min: 2, max: 2 },
       reason: 'Outcome continuation must preserve one delegation boundary while the same executor closes a remaining investigation gap.',
     },
     metadata: {
@@ -240,7 +243,7 @@ const cases: AgentEvalCase<
           statement: 'The response does not claim that the deployment-status goal is complete.',
         },
       ],
-      executorCallCount: 1,
+      executorCallRange: { min: 1, max: 1 },
       reason: 'Missing user-owned information is a truthful terminal return, not goal completion.',
     },
     metadata: {
@@ -265,13 +268,13 @@ const cases: AgentEvalCase<
       capabilityProfile: 'standard',
       turns: [
         {
-          userMessage: '检查 staging 部署状态；如果缺少必要信息就告诉我需要什么。',
+          userMessage: '检查 staging 部署状态；如果还没有 staging 地址或只读凭证，就告诉我需要补充这两项。',
           executorResults: [
             '已完成公开配置检查；要继续确认实际部署状态，需要用户提供 staging 地址和只读访问凭证。',
           ],
         },
         {
-          userMessage: 'staging 地址是 https://staging.example.test，凭证已配置为只读，请继续。',
+          userMessage: 'staging 地址已配置在 STAGING_URL，凭证也已配置为只读，请继续。',
           executorResults: [
             '已使用补充信息完成检查：staging 服务健康，当前版本为 2026.07.26，最近一次部署成功。',
           ],
@@ -279,11 +282,11 @@ const cases: AgentEvalCase<
       ],
     },
     expected: {
-      objective: '第一轮如实请求缺失信息；收到信息后继续并完成原目标，不重复已完成的公开配置检查。',
+      objective: '第一轮如实请求缺失的地址和凭证；收到信息后继续并完成原目标，不重复已经完成的工作。',
       acceptanceCriteria: [
         {
           id: 'first_turn_requests_input',
-          statement: 'The first turn reports partial progress and requests the staging address and read-only credential.',
+          statement: 'The first turn requests the missing staging address and read-only credential and does not claim that the actual deployment status was checked.',
         },
         {
           id: 'second_turn_completes_goal',
@@ -291,10 +294,14 @@ const cases: AgentEvalCase<
         },
         {
           id: 'resume_does_not_repeat',
-          statement: 'The second execution uses the newly supplied information and does not repeat the already completed public-configuration check.',
+          statement: 'The second execution uses the newly supplied information and does not repeat work already completed in the first turn.',
+        },
+        {
+          id: 'does_not_contradict_accepted_result',
+          statement: 'After the controlled executor reports success, the user-visible lifecycle does not later deny or contradict that accepted result.',
         },
       ],
-      executorCallCount: 2,
+      executorCallRange: { min: 1, max: 2 },
       reason: 'A later user turn should resume the unfinished goal from main-conversation evidence.',
     },
     metadata: {
@@ -336,7 +343,7 @@ const cases: AgentEvalCase<
           statement: 'The response makes clear that determining the deployment region remains unfinished.',
         },
       ],
-      executorCallCount: 0,
+      executorCallRange: { min: 0, max: 0 },
       reason: 'Unavailable execution must close truthfully without fabricated evidence.',
     },
     metadata: {

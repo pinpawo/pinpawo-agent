@@ -44,6 +44,18 @@ test('planner goal contract keeps semantic plan checks outside the deterministic
   );
 });
 
+test('planner goal contract evaluates an expected empty future plan', () => {
+  const testCase = capabilityPlanningBasicsDataset.cases.find(
+    ({ name }) => name === 'entry-keeps-investigation-scope',
+  );
+  assert.ok(testCase);
+  const criterion = buildCapabilityPlanningGoalContract(testCase.expected)
+    .acceptanceCriteria
+    .find(({ id }) => id === 'remaining_plan_objectives_correct');
+  assert.ok(criterion);
+  assert.match(criterion.statement, /remaining plan is empty/i);
+});
+
 test('planner goal evaluation rejects a semantically wrong plan with the correct result', async () => {
   const testCase = capabilityPlanningBasicsDataset.cases.find(
     ({ name }) => name === 'entry-explore-then-implementation',

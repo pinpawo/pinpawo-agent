@@ -14,6 +14,7 @@ export type CapabilityPlanningExpected = {
   nextTaskTerms?: string[];
   capabilityIntent?: string;
   remainingPlan: Array<{ objectiveTerms: string[]; capabilityIntent: string }>;
+  exactRemainingPlanLength?: number;
   planEffect: 'created' | 'revised' | 'cancelled' | 'unchanged' | 'empty';
   rubberStamp: boolean;
   reason: string;
@@ -48,6 +49,31 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
       reason: 'Entry planning creates exploration first and preserves implementation as future work.',
     },
     metadata: { difficulty: 'hard', reason: 'planner@entry dynamic plan.', source: SOURCE_FILE },
+  },
+  {
+    id: `${SUITE}.entry-keeps-investigation-scope`,
+    name: 'entry-keeps-investigation-scope',
+    suite: SUITE,
+    tags: ['capability_planning', 'entry_decision'],
+    input: {
+      mode: 'entry',
+      userGoal: '调查支付模块失败测试的根因、涉及代码和触发条件，确认调查完整后再结束。',
+      capabilityRegistry: [
+        'workspace_analysis: inspect tests, source code, and failure conditions',
+        'code_change: modify code and verify tests',
+      ],
+    },
+    expected: {
+      result: 'next_task',
+      nextTaskTerms: ['支付', '失败测试', '根因', '代码', '触发条件', '完整'],
+      capabilityIntent: '代码库调查',
+      remainingPlan: [],
+      exactRemainingPlanLength: 0,
+      planEffect: 'created',
+      rubberStamp: false,
+      reason: 'One investigation result stays within the requested scope and does not create an unrequested implementation task.',
+    },
+    metadata: { difficulty: 'hard', reason: 'Goal scope and same-capability task grouping.', source: SOURCE_FILE },
   },
   {
     id: `${SUITE}.boundary-materializes-from-explore-handoff`,

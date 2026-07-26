@@ -107,3 +107,23 @@ test('planner deterministic scorer does not treat capability intent as executor 
     ['planner_result_correct'],
   );
 });
+
+test('planner deterministic scorer can enforce a case-specific future task count', () => {
+  const testCase = capabilityPlanningBasicsDataset.cases.find(
+    (item) => item.name === 'entry-keeps-investigation-scope',
+  );
+  assert.ok(testCase);
+  const scores = scoreCapabilityPlanning({
+    result: 'next_task',
+    nextTask: '调查失败测试并形成完整结论',
+    capabilityIntent: 'workspace_analysis',
+    remainingPlan: [{
+      objective: '修复代码',
+      capabilityIntent: 'code_change',
+    }],
+  }, testCase.expected);
+  assert.equal(
+    scores.find(({ key }) => key === 'remaining_plan_length_correct')?.score,
+    0,
+  );
+});

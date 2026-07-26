@@ -1448,6 +1448,7 @@ test('task_done followed by planner answer does not imply user-goal completion',
 
   assert.equal(structuredCallCount, 2);
   assert.match(answerInput, /调查完成：认证入口集中在 auth\/index\.ts/);
+  assert.match(answerInput, /上一条消息是本轮执行得到的结果/);
   assert.doesNotMatch(answerInput, /本次用户目标（已完成）/);
   assert.doesNotMatch(answerInput, /"调查 auth 模块结构、依赖和风险"已完成/);
   assert.equal(result.runDelegationSummaries[0]?.status, 'completed');

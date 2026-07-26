@@ -61,6 +61,8 @@ recreate datasets.
   verdict boundaries.
 - `agent-capability-planning-basics`: production `planner@entry` and `planner@boundary` contracts.
 - `agent-multi-task-flow-basics`: real graph baseline across meaningful task boundaries.
+- `agent-orchestrator-lifecycle-composition`: production graph and production
+  prompt composition with a real decision model and controlled executor evidence.
 - `agent-tool-review-reject-runtime`: runtime regression case for reviewed tool-call rejection resuming inside the same subagent before normal handoff.
 
 The `agent-*` datasets are seed coverage for future runners. They are meant to
@@ -166,6 +168,33 @@ The canonical two-task baseline is `explore auth -> implement from handoff`.
 The package test-script lookup plus test run is intentionally an entryDecision
 single-task case because preparation, execution, and reporting belong to one
 workspace task.
+
+6. Lifecycle composition executes the production graph with the configured real
+   model for entry, planner, capability, outcome, and answer. Executor results
+   are controlled so the final goal verdict measures orchestrator composition
+   without tool or environment variance:
+
+   ```sh
+   npm run eval:lifecycle-composition
+   ```
+
+   The fixed V1 single-model profile contains seven cases and defaults to three
+   repeats. It evaluates the complete user-visible lifecycle with
+   `prompt-goal-v1`; terminal-state cleanup, lane isolation, assistant output,
+   and controlled-evidence availability are separate mechanical invariants.
+   Executor-call counts, decision paths, and delegation summaries remain
+   diagnostics.
+
+   ```sh
+   LIFECYCLE_EVAL_CASES=dynamic-multi-task \
+   LIFECYCLE_EVAL_REPEATS=1 \
+     npm run eval:lifecycle-composition
+   ```
+
+   Reports are written under `.eval-results/` with the tested revision, model
+   configuration, every decision output, controlled executor call, user-visible
+   turn, semantic score, invariant, and token-usage split. This profile should be
+   stabilized on one model before cross-model validation.
 
 ## Decision Prompt Preview
 

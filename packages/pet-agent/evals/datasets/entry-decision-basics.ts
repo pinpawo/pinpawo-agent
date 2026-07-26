@@ -142,6 +142,25 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     metadata: { difficulty: 'hard', reason: 'Freshness is part of evidence sufficiency.', source: SOURCE_FILE },
   },
   {
+    id: `${SUITE}.new-input-unblocks-original-goal`,
+    name: 'new-input-unblocks-original-goal',
+    suite: SUITE,
+    tags: ['entry_decision', 'interruption_recovery', 'route_control'],
+    input: {
+      userRequest: '地址和只读凭证已经补充好了，请继续。',
+      conversationContext: [
+        '检查环境的公开配置已经完成；要确认实际部署状态，还需要用户补充环境地址和只读凭证。',
+      ],
+    },
+    expected: {
+      mode: 'direct_task',
+      expectedTaskTerms: ['部署状态'],
+      expectedBoundaryCount: 1,
+      reason: 'Newly supplied information removes the blocker but is not the result of the original deployment check.',
+    },
+    metadata: { difficulty: 'hard', reason: 'A resumed run must continue the original goal after user-owned input arrives.', source: SOURCE_FILE },
+  },
+  {
     id: `${SUITE}.clarification-before-execution`,
     name: 'clarification-before-execution',
     suite: SUITE,

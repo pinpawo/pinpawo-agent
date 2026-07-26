@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { homedir } from 'node:os';
-import { resolve } from 'node:path';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import test from 'node:test';
 import {
   attachWorkspaceConfig,
@@ -8,6 +9,7 @@ import {
   buildWorkspaceRuntimeConfig,
   deriveWorkspaceId,
   deriveWorkspaceName,
+  findLegacyLocalAgentState,
   resolveDefaultWorkdir,
   resolveUserDir,
 } from './runtimeConfig';
@@ -29,9 +31,9 @@ test('buildLocalAgentRuntimeConfig scopes runtime state under workdir .pinpawo',
     studioDueRunsPath: '/tmp/pinpawo-workdir/.pinpawo/studio-due-runs.json',
     petsDir: '/tmp/pinpawo-workdir/.pinpawo/pets',
     studioWikiBaseDir: '/tmp/pinpawo-workdir/.pinpawo/studio-wiki',
-    checkpointPath: '/tmp/pinpawo-workdir/.pinpawo/checkpoints.json',
-    tuiCheckpointPath: '/tmp/pinpawo-workdir/.pinpawo/checkpoints-tui.json',
-    tuiSessionPath: '/tmp/pinpawo-workdir/.pinpawo/tui-sessions.json',
+    checkpointPath: '/tmp/pinpawo-workdir/.pinpawo/checkpoints-capability-v2.json',
+    tuiCheckpointPath: '/tmp/pinpawo-workdir/.pinpawo/checkpoints-tui-capability-v2.json',
+    tuiSessionPath: '/tmp/pinpawo-workdir/.pinpawo/tui-sessions-capability-v2.json',
     capabilityArtifactRoot: '/tmp/pinpawo-workdir/.pinpawo/capability-artifacts',
   });
   assert.equal(Object.isFrozen(runtimeConfig), true);
@@ -79,4 +81,17 @@ test('attachWorkspaceConfig honors explicit workspace id and derives readable na
     name: deriveWorkspaceName('/tmp/pinpawo-readable-workspace'),
     rootPath: '/tmp/pinpawo-readable-workspace',
   });
+});
+
+test('findLegacyLocalAgentState reports preserved pre-V2 checkpoint and session paths', (t) => {
+  const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-legacy-state-'));
+  t.after(() => rmSync(workdir, { recursive: true, force: true }));
+  const runtimeConfig = buildLocalAgentRuntimeConfig(workdir);
+  mkdirSync(join(runtimeConfig.stateRoot, 'checkpoints'), { recursive: true });
+  writeFileSync(join(runtimeConfig.stateRoot, 'tui-sessions.json'), '{}');
+
+  assert.deepEqual(findLegacyLocalAgentState(runtimeConfig), [
+    join(runtimeConfig.stateRoot, 'checkpoints'),
+    join(runtimeConfig.stateRoot, 'tui-sessions.json'),
+  ]);
 });

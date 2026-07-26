@@ -12,7 +12,7 @@ import type { GlobalReviewPolicy } from './review/globalReviewPolicy';
 import type { StructuredOutputAutoRepairConfig, StructuredOutputMethod } from '../../utils/structuredOutput';
 import type { DelegationOutcomeDecision } from './schemas';
 
-export type MessageLane = 'general' | `capability:${string}`;
+export type MessageLane = `capability:${string}`;
 export type PinpetMessageLane = MessageLane | 'orchestrator';
 export type DelegationStatus = 'pending' | 'progress' | 'completed';
 export type { SubagentCompletionReason };
@@ -71,7 +71,7 @@ export type SubagentAnnounce = {
   >[];
 };
 
-export type DecisionMode = 'answer' | 'general' | 'capability';
+export type DecisionMode = 'answer' | 'capability';
 
 export type ToolBindableChatModel = AgentModels['act'] & {
   bindTools?: (tools: StructuredTool[], options?: Record<string, unknown>) => {

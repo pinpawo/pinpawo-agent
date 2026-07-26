@@ -14,7 +14,7 @@ type OrchestratorFlowMockSubagentInput = {
 
 type OrchestratorFlowMockSubagentExpected = {
   expected_route: 'answer' | 'delegate';
-  expected_mode: 'answer' | 'general' | 'capability';
+  expected_mode: 'answer' | 'capability';
   expected_phase: 'initial_request' | 'after_subagent';
   expected_latest_announce_kind?: 'progress' | 'completed' | null;
   expected_latest_announce_lane?: string | null;

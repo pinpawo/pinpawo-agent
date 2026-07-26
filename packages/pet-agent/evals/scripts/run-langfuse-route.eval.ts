@@ -182,7 +182,7 @@ function chooseRouteLane(text: string): string {
   if (/capability\.daily_post/.test(text) && /宠物发帖|小红书日常|日常草稿|daily post/i.test(text)) {
     return 'capability.daily_post';
   }
-  return 'general';
+  return 'capability.general';
 }
 
 function taskDecisionFromText(text: string) {

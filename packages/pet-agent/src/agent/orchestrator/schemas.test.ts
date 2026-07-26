@@ -7,7 +7,7 @@ import {
   buildCapabilityPlanningDecisionSchema,
   buildCapabilityDecisionOutputInstruction,
   buildCapabilityDecisionSchema,
-  buildCustomCapabilitySelection,
+  buildCapabilitySelection,
   buildTaskDecisionOutputInstruction,
   buildTaskDecisionSchema,
   parseCapabilitySelection,
@@ -17,7 +17,6 @@ test('capability decision schema rejects candidate names containing "."', () => 
   assert.throws(
     () => buildCapabilityDecisionSchema({
       capabilityCandidates: [{ name: 'foo.bar' }],
-      generalAvailable: true,
     }),
     /capability name must not contain '\.'/,
   );
@@ -27,7 +26,6 @@ test('capability decision schema rejects duplicate candidate names', () => {
   assert.throws(
     () => buildCapabilityDecisionSchema({
       capabilityCandidates: [{ name: 'browser' }, { name: 'browser' }],
-      generalAvailable: true,
     }),
     /duplicate capability name/,
   );
@@ -54,28 +52,25 @@ test('task decision schema separates task birth from route selection', () => {
 
 test('capability decision schema exposes only available executors plus unavailable', () => {
   const schema = buildCapabilityDecisionSchema({
-    capabilityCandidates: [{ name: 'browser' }],
-    generalAvailable: true,
+    capabilityCandidates: [{ name: 'browser' }, { name: 'general' }],
   });
-  assert.equal(schema.safeParse({ selection: 'general' }).success, true);
+  assert.equal(schema.safeParse({ selection: 'capability.general' }).success, true);
   assert.equal(schema.safeParse({ selection: 'capability.browser' }).success, true);
   assert.equal(schema.safeParse({ selection: 'unavailable' }).success, true);
   assert.equal(schema.safeParse({ selection: 'capability.daily_post' }).success, false);
   assert.equal(schema.safeParse({ action: 'delegate_capability.browser' }).success, false);
 });
 
-test('capability decision schema omits unavailable executors', () => {
+test('capability decision schema omits capabilities outside the candidate set', () => {
   const customOnlySchema = buildCapabilityDecisionSchema({
     capabilityCandidates: [{ name: 'browser' }],
-    generalAvailable: false,
   });
-  assert.equal(customOnlySchema.safeParse({ selection: 'general' }).success, false);
+  assert.equal(customOnlySchema.safeParse({ selection: 'capability.general' }).success, false);
   assert.equal(customOnlySchema.safeParse({ selection: 'capability.browser' }).success, true);
   assert.equal(customOnlySchema.safeParse({ selection: 'unavailable' }).success, true);
 
   const unavailableOnlySchema = buildCapabilityDecisionSchema({
     capabilityCandidates: [],
-    generalAvailable: false,
   });
   assert.equal(unavailableOnlySchema.safeParse({ selection: 'unavailable' }).success, true);
   assert.equal(unavailableOnlySchema.safeParse({ selection: 'general' }).success, false);
@@ -213,8 +208,12 @@ test('parseCapabilitySelection distinguishes executor selections', () => {
     capabilityName: 'browser',
   });
   assert.deepEqual(parseCapabilitySelection('general'), {
-    kind: 'general',
+    kind: 'invalid',
     capabilityName: null,
+  });
+  assert.deepEqual(parseCapabilitySelection('capability.general'), {
+    kind: 'capability',
+    capabilityName: 'general',
   });
   assert.deepEqual(parseCapabilitySelection('unavailable'), {
     kind: 'unavailable',
@@ -226,8 +225,8 @@ test('parseCapabilitySelection distinguishes executor selections', () => {
   });
 });
 
-test('buildCustomCapabilitySelection composes the prefix correctly', () => {
-  assert.equal(buildCustomCapabilitySelection('browser'), 'capability.browser');
+test('buildCapabilitySelection composes the prefix correctly', () => {
+  assert.equal(buildCapabilitySelection('browser'), 'capability.browser');
 });
 
 test('decision output instructions add schema shape only for jsonMode', () => {
@@ -245,8 +244,7 @@ test('decision output instructions add schema shape only for jsonMode', () => {
   assert.match(jsonModePlannerInstruction, /"required":\["result","remaining_plan","next_task"\]/);
 
   const jsonModeCapabilityInstruction = buildCapabilityDecisionOutputInstruction({
-    capabilityCandidates: [{ name: 'browser' }],
-    generalAvailable: true,
+    capabilityCandidates: [{ name: 'browser' }, { name: 'general' }],
   }, 'jsonMode');
   assert.match(jsonModeCapabilityInstruction, /"selection"/);
   assert.match(jsonModeCapabilityInstruction, /capability\.browser/);

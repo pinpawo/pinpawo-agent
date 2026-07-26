@@ -25,7 +25,11 @@ import { InflightRequestController } from './inflightRequestController';
 import { LocalAgentAppWsClient } from './localAgentAppWsClient';
 import { LocalAgentAppChatHandler } from './localAgentAppChatHandler';
 import { LocalAgentCapabilityRegistry } from './localAgentCapabilityRegistry';
-import { buildLocalAgentRuntimeConfig, type LocalAgentRuntimeConfig } from './runtimeConfig';
+import {
+  buildLocalAgentRuntimeConfig,
+  findLegacyLocalAgentState,
+  type LocalAgentRuntimeConfig,
+} from './runtimeConfig';
 import { setLocalToolsWorkdir } from './toolkits/local/pathUtils';
 import { LocalServerStudioHandler } from './localServerStudioHandler';
 import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
@@ -62,6 +66,7 @@ export class LocalAgentRuntime {
   private readonly studioHandler: LocalServerStudioHandler<WebSocket>;
   private appWsClient: LocalAgentAppWsClient | null = null;
   private readonly appChatHandler: LocalAgentAppChatHandler;
+  private legacyStateNoticeReported = false;
 
   constructor(runtimeConfig: LocalAgentRuntimeConfig = buildLocalAgentRuntimeConfig()) {
     this.runtimeConfig = runtimeConfig;
@@ -138,6 +143,16 @@ export class LocalAgentRuntime {
   }
 
   async init() {
+    if (!this.legacyStateNoticeReported) {
+      this.legacyStateNoticeReported = true;
+      const legacyStatePaths = findLegacyLocalAgentState(this.runtimeConfig);
+      if (legacyStatePaths.length > 0) {
+        console.warn(
+          '[local-agent] Capability V2 uses a new conversation checkpoint namespace. '
+          + `Legacy state is preserved but not loaded: ${legacyStatePaths.join(', ')}`,
+        );
+      }
+    }
     const { plugins, toolkitDefinitions, toolkits } = await loadPlugins();
     this.llmConfig = buildLocalLlmConfig();
     this.pluginToolkitDefinitions = toolkitDefinitions;

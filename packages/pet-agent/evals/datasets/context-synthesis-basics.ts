@@ -8,7 +8,7 @@ type ContextSynthesisInput = {
 };
 
 type ContextSynthesisExpected = {
-  expectedMode: 'answer' | 'general' | 'capability';
+  expectedMode: 'answer' | 'capability';
   expectedAnswerShouldInclude: string[];
   expectedMissingInfo?: string[];
   expectedNeedsMoreWork: boolean;
@@ -80,7 +80,7 @@ const cases: AgentEvalCase<ContextSynthesisInput, ContextSynthesisExpected>[] = 
       ],
     },
     expected: {
-      expectedMode: 'general',
+      expectedMode: 'capability',
       expectedAnswerShouldInclude: [],
       expectedMissingInfo: ['npm test result'],
       expectedNeedsMoreWork: true,
@@ -104,7 +104,7 @@ const cases: AgentEvalCase<ContextSynthesisInput, ContextSynthesisExpected>[] = 
       progressResults: ['已修改 23 个文件中的 var 声明，但还没有运行校验。'],
     },
     expected: {
-      expectedMode: 'general',
+      expectedMode: 'capability',
       expectedAnswerShouldInclude: [],
       expectedMissingInfo: ['validation result'],
       expectedNeedsMoreWork: true,

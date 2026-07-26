@@ -90,15 +90,16 @@ Workspace-owned config and runtime state stays under the workspace root:
 ├── studio-run-queue.json
 ├── studio-due-runs.json
 ├── capability-artifacts/
-├── checkpoints/
-├── checkpoints-tui/
-└── tui-sessions.json
+├── checkpoints-capability-v2/
+├── checkpoints-tui-capability-v2/
+└── tui-sessions-capability-v2.json
 ```
 
 The runtime config keeps `.json` checkpoint anchor names, while `FileSaver`
 maps them to extensionless content-addressed directories. The runtime reads only
 the current manifest/object/ref/writes layout and does not scan legacy monolith
-or shard checkpoint files.
+or shard checkpoint files. The `capability-v2` suffix is the explicit
+checkpoint contract boundary for the unified `capability:<name>` lane model.
 
 `workspace.json` is optional at first. When present, it can hold display metadata and project background that should be injected into future chat/studio context.
 

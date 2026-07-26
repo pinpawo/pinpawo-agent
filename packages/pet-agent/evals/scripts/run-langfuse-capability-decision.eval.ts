@@ -35,14 +35,24 @@ const actor = {
 };
 
 function capabilities(input: CapabilityDecisionBasicsInput): AgentCapability[] {
-  return input.availableCapabilities.map((item) => ({
-    name: item.name,
-    description: `${item.description} Keywords: ${item.keywords.join('|')}`,
-    uses: [],
-    instructions: defineInstructionDocument({
-      content: `Execute the ${item.name} capability.`,
-    }),
-  }));
+  return [
+    ...input.availableCapabilities.map((item) => ({
+      name: item.name,
+      description: `${item.description} Keywords: ${item.keywords.join('|')}`,
+      uses: [],
+      instructions: defineInstructionDocument({
+        content: `Execute the ${item.name} capability.`,
+      }),
+    })),
+    ...(input.includeGeneralCapability ? [{
+      name: 'general',
+      description: 'Handle general tasks that do not require a more specific Capability.',
+      uses: [],
+      instructions: defineInstructionDocument({
+        content: 'Execute the general capability.',
+      }),
+    }] : []),
+  ];
 }
 
 function mockModel(selection: string): AgentModels['act'] {
@@ -64,13 +74,24 @@ async function runCase(testCase: typeof capabilityDecisionBasicsDataset.cases[nu
   const capabilityList = capabilities(input);
   const query = capabilitySearchQuery(input);
   const candidates = searchCapabilities(query, capabilityList);
-  const generalAvailable = input.generalToolsAvailable.length > 0;
+  const generalCapability = capabilityList.find(({ name }) => name === 'general');
+  const decisionCandidates = generalCapability
+    && !candidates.some(({ name }) => name === generalCapability.name)
+    ? [
+        ...candidates,
+        {
+          name: generalCapability.name,
+          description: generalCapability.description,
+          score: 0,
+          matchedTerms: ['planner-default'],
+        },
+      ]
+    : candidates;
   const methodConfig = useLlm ? createDecisionEvalModel() : null;
   const model = methodConfig?.model ?? mockModel(testCase.expected.expectedSelection);
   const method = methodConfig?.method;
   const schemaParams = {
-    capabilityCandidates: candidates.map(({ name }) => ({ name })),
-    generalAvailable,
+    capabilityCandidates: decisionCandidates.map(({ name }) => ({ name })),
   };
   const system = buildCapabilityDecisionSystemPrompt({
     actor,
@@ -82,15 +103,11 @@ async function runCase(testCase: typeof capabilityDecisionBasicsDataset.cases[nu
       contextSummary: input.contextSummary ?? null,
     },
     availableExecutorsContext: buildCapabilityDecisionAvailableExecutorsContext({
-      generalTools: input.generalToolsAvailable.map((name) => ({
-        name,
-        description: `General tool ${name}`,
-      })) as never,
-      capabilityCandidates: candidates,
+      capabilityCandidates: decisionCandidates,
     }),
   });
-  let selection = candidates.length === 0
-    ? generalAvailable ? 'general' : CAPABILITY_UNAVAILABLE_SELECTION
+  let selection = decisionCandidates.length === 0
+    ? CAPABILITY_UNAVAILABLE_SELECTION
     : '';
   if (!selection) {
     const schema = buildCapabilityDecisionSchema(schemaParams);

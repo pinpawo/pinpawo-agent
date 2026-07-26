@@ -32,6 +32,10 @@ import type {
   PetAgentRuntimeInvokeInput,
   PetAgentRuntimeInvokeResult,
 } from './types';
+import {
+  createWikiReadCapability,
+  WIKI_READ_CAPABILITY_NAME,
+} from './wikiReadCapability';
 import { createWikiReadToolkit } from './wikiReadToolkit';
 
 export type PetAgentRuntimeConfig = {
@@ -43,8 +47,6 @@ export type PetAgentRuntimeConfig = {
   status?: PetAgentStatus;
   capabilities?: AgentCapability[];
   toolkits?: AgentToolkit[];
-  /** Explicit Toolkit permission boundary for the general executor. */
-  generalUses: readonly string[];
   execution?: AgentExecution;
   workdir?: string;
   /**
@@ -67,7 +69,6 @@ function buildCapabilitySummaries(config: PetAgentRuntimeConfig): PetAgentCapabi
   const registry = compileAgentRegistry({
     toolkits: config.toolkits ?? [],
     capabilities: config.capabilities ?? [],
-    generalUses: [],
   });
   const availableNames = new Set(
     registry.capabilities.map(({ capability }) => capability.name),
@@ -168,14 +169,19 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
       ...(input.wikiRoot ? [createWikiReadToolkit(input.wikiRoot)] : []),
     ];
     const toolkits = await filterAvailableToolkits(toolkitDefinitions);
-    const capabilities = [...(config.capabilities ?? []), ...(input.extraCapabilities ?? [])];
+    const configuredCapabilities = [
+      ...(config.capabilities ?? []),
+      ...(input.extraCapabilities ?? []),
+    ];
+    const capabilities = input.wikiRoot
+      && !configuredCapabilities.some((capability) =>
+        capability.name === WIKI_READ_CAPABILITY_NAME
+          || capability.uses.includes('wiki_read'))
+      ? [...configuredCapabilities, createWikiReadCapability()]
+      : configuredCapabilities;
     const registry = compileAgentRegistry({
       toolkits,
       capabilities,
-      generalUses: [
-        ...config.generalUses,
-        ...(input.wikiRoot && !config.generalUses.includes('wiki_read') ? ['wiki_read'] : []),
-      ],
     });
     const configurable: Record<string, unknown> = {
       actor: config.actor,

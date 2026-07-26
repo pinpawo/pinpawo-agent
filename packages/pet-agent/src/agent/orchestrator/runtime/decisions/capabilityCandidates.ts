@@ -1,39 +1,36 @@
 import type { BaseMessage } from '@langchain/core/messages';
-import type { AgentCapability } from '../../../../types/capability';
+import type { CapabilitySearchDocument } from '../../capabilitySearch';
 import { isContextCompactionMessage } from '../../contextCompaction';
 import { mainConversationMessages } from '../../messageLanes';
-import type {
-  CapabilityCandidate,
-  MessageLane,
-} from '../../types';
-
-function readCapabilityNameFromLane(lane: MessageLane): string | null {
-  return lane.startsWith('capability:') ? lane.slice('capability:'.length) : null;
-}
+import type { CompiledAgentRegistry } from '../../registry';
+import { clipForPrompt } from '../../utils';
 
 export function mainMessagesWithoutCompaction(messages: BaseMessage[]): BaseMessage[] {
   return mainConversationMessages(messages).filter((message) => !isContextCompactionMessage(message));
 }
 
-export function buildCapabilityCandidatesFromLanes(
-  capabilityList: AgentCapability[],
-  lanes: Array<MessageLane | null | undefined>,
-): CapabilityCandidate[] {
-  const candidates: CapabilityCandidate[] = [];
-  const seen = new Set<string>();
-  for (const lane of lanes) {
-    if (!lane) continue;
-    const capabilityName = readCapabilityNameFromLane(lane);
-    if (!capabilityName || seen.has(capabilityName)) continue;
-    const capability = capabilityList.find((item) => item.name === capabilityName);
-    if (!capability) continue;
-    seen.add(capabilityName);
-    candidates.push({
-      name: capability.name,
-      description: capability.description,
-      score: Number.POSITIVE_INFINITY,
-      matchedTerms: ['in_progress'],
-    });
-  }
-  return candidates;
+type CompiledCapability = CompiledAgentRegistry['capabilities'][number];
+
+export function buildCompiledCapabilityDescription(
+  compiled: CompiledCapability,
+): string {
+  const toolkitScope = compiled.toolkits.length > 0
+    ? compiled.toolkits
+        .map((toolkit) =>
+          `${toolkit.name}（${clipForPrompt(toolkit.description, 240)}）`)
+        .join('；')
+    : '无（仅 instructions）';
+  return clipForPrompt(
+    `${compiled.capability.description} Toolkit scope：${toolkitScope}`,
+    2_000,
+  );
+}
+
+export function buildCompiledCapabilitySearchDocuments(
+  compiledCapabilities: readonly CompiledCapability[],
+): CapabilitySearchDocument[] {
+  return compiledCapabilities.map((compiled) => ({
+    name: compiled.capability.name,
+    description: buildCompiledCapabilityDescription(compiled),
+  }));
 }

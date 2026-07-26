@@ -7,10 +7,7 @@ import {
   type AgentCapability,
 } from '../../types/capability';
 import { defineToolkit } from '../../types/toolkit';
-import {
-  compileAgentRegistry,
-  ExecutorCompilationError,
-} from './registry';
+import { compileAgentRegistry } from './registry';
 
 function mockTool(name: string) {
   return tool(async () => 'ok', {
@@ -31,7 +28,7 @@ function capability(name: string, uses: readonly string[]): AgentCapability {
   };
 }
 
-test('registry compiles general and Capability Toolkit dependencies in declared order', () => {
+test('registry compiles Capability Toolkit dependencies in declared order', () => {
   const bash = defineToolkit({
     name: 'bash',
     description: 'Bash tools.',
@@ -45,17 +42,22 @@ test('registry compiles general and Capability Toolkit dependencies in declared 
 
   const registry = compileAgentRegistry({
     toolkits: [bash, git],
-    capabilities: [capability('inspect', ['git', 'bash'])],
-    generalUses: ['bash'],
+    capabilities: [
+      capability('general', ['bash']),
+      capability('inspect', ['git', 'bash']),
+    ],
   });
 
-  assert.deepEqual(registry.general.toolNames, ['read_file']);
   assert.deepEqual(
-    registry.capabilities[0]?.toolkits.map((toolkit) => toolkit.name),
+    registry.capabilities[0]?.toolNames,
+    ['read_file'],
+  );
+  assert.deepEqual(
+    registry.capabilities[1]?.toolkits.map((toolkit) => toolkit.name),
     ['git', 'bash'],
   );
   assert.deepEqual(
-    registry.capabilities[0]?.toolNames,
+    registry.capabilities[1]?.toolNames,
     ['git_status', 'read_file'],
   );
 });
@@ -64,7 +66,6 @@ test('registry excludes a Capability with an unknown required Toolkit before rou
   const registry = compileAgentRegistry({
     toolkits: [],
     capabilities: [capability('web_research', ['browser'])],
-    generalUses: [],
   });
 
   assert.deepEqual(registry.capabilities, []);
@@ -73,21 +74,6 @@ test('registry excludes a Capability with an unknown required Toolkit before rou
     code: 'unknown_toolkit',
     toolkitName: 'browser',
   }]);
-});
-
-test('registry rejects invalid explicit general authorization', () => {
-  assert.throws(
-    () => compileAgentRegistry({
-      toolkits: [],
-      capabilities: [],
-      generalUses: ['missing'],
-    }),
-    (error: unknown) => {
-      assert.ok(error instanceof ExecutorCompilationError);
-      assert.match(error.message, /General executor.*unknown Toolkit "missing"/);
-      return true;
-    },
-  );
 });
 
 test('registry isolates a Capability whose Toolkits expose duplicate tools', () => {
@@ -107,7 +93,6 @@ test('registry isolates a Capability whose Toolkits expose duplicate tools', () 
       capability('conflicted', ['first', 'second']),
       capability('healthy', ['first']),
     ],
-    generalUses: ['first'],
   });
 
   assert.deepEqual(registry.capabilities.map(({ capability: item }) => item.name), ['healthy']);
@@ -118,7 +103,7 @@ test('registry isolates a Capability whose Toolkits expose duplicate tools', () 
   }]);
 });
 
-test('registry still fails fast when the general executor has duplicate tools', () => {
+test('registry isolates a general Capability with duplicate tools', () => {
   const first = defineToolkit({
     name: 'first',
     description: 'First toolkit.',
@@ -130,13 +115,21 @@ test('registry still fails fast when the general executor has duplicate tools', 
     tools: [{ tool: mockTool('shared_tool') }],
   });
 
-  assert.throws(
-    () => compileAgentRegistry({
-      toolkits: [first, second],
-      capabilities: [],
-      generalUses: ['first', 'second'],
-    }),
-    ExecutorCompilationError,
+  const registry = compileAgentRegistry({
+    toolkits: [first, second],
+    capabilities: [
+      capability('general', ['first', 'second']),
+      capability('healthy', ['first']),
+    ],
+  });
+
+  assert.deepEqual(
+    registry.capabilities.map(({ capability: item }) => item.name),
+    ['healthy'],
+  );
+  assert.equal(
+    registry.unavailableCapabilities[0]?.capability.name,
+    'general',
   );
 });
 
@@ -150,8 +143,7 @@ test('compiled registry snapshots Toolkit definitions for one generation', () =>
   };
   const registry = compileAgentRegistry({
     toolkits: [toolkit],
-    capabilities: [capability('inspect', ['mutable'])],
-    generalUses: [],
+    capabilities: [capability('general', ['mutable'])],
   });
 
   toolkit.tools = [{ tool: replacement }];

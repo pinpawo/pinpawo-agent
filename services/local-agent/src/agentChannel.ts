@@ -2,6 +2,7 @@ import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messa
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
+  GENERAL_CAPABILITY_NAME,
   stampMessageCreatedAtUtc,
   type AgentCapability,
   type AgentActor,
@@ -16,6 +17,7 @@ import {
   createCapabilityCreatorToolkit,
 } from './capabilities/capabilityCreator';
 import { createExploreCapability } from './capabilities/explore';
+import { loadGeneralCapability } from './capabilities/general';
 import {
   createDailyPostCapability,
   createDailyPostToolkit,
@@ -42,12 +44,6 @@ import {
   prepareAgentRegistry,
   type CapabilityDiagnosticReporter,
 } from './agentRegistryPreparation';
-
-const DEFAULT_GENERAL_TOOLKIT_NAMES = [
-  'pet_profile',
-  'bash',
-  'git',
-] as const;
 
 function buildActor(context: AgentContext) {
   return {
@@ -212,9 +208,8 @@ export function buildLocalChatAgentInput(params: {
   toolkitDefinitions?: readonly AgentToolkit[];
   /** Host-owned diagnostic reporter whose dedupe state follows the host lifecycle. */
   reportCapabilityDiagnostics?: CapabilityDiagnosticReporter;
-  /** Explicit Toolkit authorization for the general executor. */
-  generalUses?: readonly string[];
-  threadId?: string;
+  /** Stable thread scope required by artifact discovery and checkpoint routing. */
+  threadId: string;
   interfaceKind?: LocalAgentInterfaceKind | null;
   dryRun?: boolean;
   checkpoint?: BaseCheckpointSaver;
@@ -223,7 +218,7 @@ export function buildLocalChatAgentInput(params: {
   /** User-defined capability plugins loaded by capabilityLoader */
   userCapabilities?: LoadedUserCapability[];
   /** Store handed to capabilities so they can deterministically persist result artifacts */
-  capabilityArtifactStore?: CapabilityArtifactStore;
+  capabilityArtifactStore: CapabilityArtifactStore;
   /** Effective agent workdir for prompt context and relative tool paths. */
   workdir?: string;
   /** Fixed session/thread start timestamp used as a stable relative-time anchor. */
@@ -231,6 +226,12 @@ export function buildLocalChatAgentInput(params: {
   /** IANA timezone name for interpreting relative dates in this session. */
   timezone?: string;
 }): AgentChannelSetup {
+  if (!params.threadId.trim()) {
+    throw new Error('Local chat requires a non-empty threadId');
+  }
+  if (!params.capabilityArtifactStore) {
+    throw new Error('Local chat requires a capability artifact store');
+  }
   const llmConfig = params.llmConfig ?? buildLocalLlmConfig();
   const decisionStructuredOutput = buildDecisionStructuredOutput(llmConfig);
   const actor = buildActor(params.context);
@@ -244,6 +245,11 @@ export function buildLocalChatAgentInput(params: {
   ];
 
   const capabilities: AgentCapability[] = [];
+
+  const generalCapability = loadGeneralCapability();
+  if (generalCapability) {
+    appendCapability(capabilities, generalCapability);
+  }
 
   if (isCapabilityEnabled('explore')) {
     appendCapability(capabilities, createExploreCapability({
@@ -274,29 +280,33 @@ export function buildLocalChatAgentInput(params: {
   }
 
   for (const capability of params.extraCapabilities ?? []) {
+    if (capability.name === GENERAL_CAPABILITY_NAME) {
+      throw new Error(
+        `Capability name "${GENERAL_CAPABILITY_NAME}" is reserved by the local-agent host`,
+      );
+    }
     appendCapability(capabilities, capability);
   }
 
   // Append user-defined capabilities (enabled state checked against their manifest id)
   for (const { meta, capability } of params.userCapabilities ?? []) {
-    if (isCapabilityEnabled(meta.id)) appendCapability(capabilities, capability);
+    if (!isCapabilityEnabled(meta.id)) continue;
+    if (capability.name === GENERAL_CAPABILITY_NAME) {
+      throw new Error(
+        `Capability name "${GENERAL_CAPABILITY_NAME}" is reserved by the local-agent host`,
+      );
+    }
+    appendCapability(capabilities, capability);
   }
   const baseToolkits = [
     ...sharedToolkits,
     ...(params.toolkits ?? []),
   ];
-  const registeredToolkitNames = new Set(baseToolkits.map(({ name }) => name));
-  const baseGeneralUses = [
-    ...(params.generalUses
-      ?? DEFAULT_GENERAL_TOOLKIT_NAMES.filter((name) => registeredToolkitNames.has(name))),
-  ];
   const preparedRegistry = prepareAgentRegistry({
     toolkits: baseToolkits,
     capabilities,
-    generalUses: baseGeneralUses,
     threadId: params.threadId,
     capabilityArtifactStore: params.capabilityArtifactStore,
-    authorizeArtifactDiscoveryForGeneral: true,
   });
   params.reportCapabilityDiagnostics?.(
     preparedRegistry.registry,
@@ -332,7 +342,6 @@ export function buildLocalChatAgentInput(params: {
       threadId: params.threadId,
       capabilities,
       toolkits: [...preparedRegistry.toolkits],
-      generalUses: [...preparedRegistry.generalUses],
       execution: {
         dryRun: params.dryRun,
       },

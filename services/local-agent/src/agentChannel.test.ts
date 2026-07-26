@@ -14,6 +14,7 @@ import {
   defineInstructionDocument,
   type AgentCapability,
   type AgentToolkit,
+  type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 import { FileCapabilityArtifactStore } from './capabilityArtifactStore';
 import { createBashToolkit, createGitToolkit } from './toolkits/local';
@@ -53,8 +54,33 @@ function createGeneralToolkit(): AgentToolkit {
   };
 }
 
+const testArtifactStore: CapabilityArtifactStore = {
+  writeArtifact: async () => {
+    throw new Error('test artifact writes require an explicit store');
+  },
+  readArtifact: async () => {
+    throw new Error('test artifact reads require an explicit store');
+  },
+  listArtifacts: async () => [],
+  deleteThreadArtifacts: async () => undefined,
+  getDownloadUri: async (uri) => uri,
+};
+
+type LocalChatAgentInputParams = Parameters<typeof buildLocalChatAgentInput>[0];
+
+function buildTestLocalChatAgentInput(
+  params: Omit<LocalChatAgentInputParams, 'threadId' | 'capabilityArtifactStore'>
+    & Partial<Pick<LocalChatAgentInputParams, 'threadId' | 'capabilityArtifactStore'>>,
+) {
+  return buildLocalChatAgentInput({
+    threadId: 'agent-channel-test-thread',
+    capabilityArtifactStore: testArtifactStore,
+    ...params,
+  });
+}
+
 test('buildLocalChatAgentInput omits empty toolkit configurable arrays', () => {
-  const setup = buildLocalChatAgentInput({
+  const setup = buildTestLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
   });
@@ -62,9 +88,20 @@ test('buildLocalChatAgentInput omits empty toolkit configurable arrays', () => {
   assert.ok(setup.input.toolkits);
 });
 
+test('buildLocalChatAgentInput rejects an empty artifact discovery scope', () => {
+  assert.throws(
+    () => buildTestLocalChatAgentInput({
+      context: createContext(),
+      userMessage: 'hello',
+      threadId: '  ',
+    }),
+    /requires a non-empty threadId/,
+  );
+});
+
 test('buildLocalChatAgentInput passes a single toolkit list', () => {
   const generalToolkit = createGeneralToolkit();
-  const setup = buildLocalChatAgentInput({
+  const setup = buildTestLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
     toolkits: [generalToolkit],
@@ -72,21 +109,38 @@ test('buildLocalChatAgentInput passes a single toolkit list', () => {
 
   assert.deepEqual(
     setup.input.toolkits?.map((item) => item.name),
-    ['pet_profile', 'daily_post', 'capability_creator', 'general-toolkit'],
+    [
+      'pet_profile',
+      'daily_post',
+      'capability_creator',
+      'general-toolkit',
+      'artifact_discovery',
+    ],
   );
-  assert.deepEqual(setup.input.generalUses, ['pet_profile']);
+  assert.deepEqual(
+    setup.input.capabilities?.find(({ name }) => name === 'general')?.uses,
+    ['pet_profile', 'bash', 'git', 'artifact_discovery'],
+  );
   assert.equal('capabilityToolkits' in setup.input, false);
 });
 
-test('buildLocalChatAgentInput honors an explicit general Toolkit authorization', () => {
-  const setup = buildLocalChatAgentInput({
+test('buildLocalChatAgentInput keeps the General Capability permission boundary static', () => {
+  const setup = buildTestLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
     toolkits: [createGeneralToolkit()],
-    generalUses: ['general-toolkit'],
   });
 
-  assert.deepEqual(setup.input.generalUses, ['general-toolkit']);
+  assert.deepEqual(
+    setup.input.capabilities?.find(({ name }) => name === 'general')?.uses,
+    ['pet_profile', 'bash', 'git', 'artifact_discovery'],
+  );
+  assert.equal(
+    setup.input.capabilities
+      ?.find(({ name }) => name === 'general')
+      ?.uses.includes('general-toolkit'),
+    false,
+  );
 });
 
 test('buildLocalChatAgentInput dedupes built-in capabilities by name', () => {
@@ -99,7 +153,7 @@ test('buildLocalChatAgentInput dedupes built-in capabilities by name', () => {
     }),
   };
 
-  const setup = buildLocalChatAgentInput({
+  const setup = buildTestLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
     extraCapabilities: [extraExplore],
@@ -109,6 +163,24 @@ test('buildLocalChatAgentInput dedupes built-in capabilities by name', () => {
   assert.equal(
     capabilities.filter((item) => item.name === 'explore').length,
     1,
+  );
+});
+
+test('buildLocalChatAgentInput rejects a host Capability using the reserved general name', () => {
+  assert.throws(
+    () => buildTestLocalChatAgentInput({
+      context: createContext(),
+      userMessage: 'hello',
+      extraCapabilities: [{
+        name: 'general',
+        description: 'Attempt to replace the host General Capability.',
+        uses: [],
+        instructions: defineInstructionDocument({
+          content: '# Replacement General',
+        }),
+      }],
+    }),
+    /name "general" is reserved by the local-agent host/,
   );
 });
 
@@ -240,7 +312,7 @@ test('buildDecisionStructuredOutput selects structured output strategy by provid
 });
 
 test('buildLocalChatAgentInput passes global review policy mode to graph input', () => {
-  const setup = buildLocalChatAgentInput({
+  const setup = buildTestLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
     llmConfig: {
@@ -263,7 +335,7 @@ test('buildLocalChatAgentInput passes global review policy mode to graph input',
 });
 
 test('buildLocalChatAgentInput uses caller-provided workdir', () => {
-  const setup = buildLocalChatAgentInput({
+  const setup = buildTestLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
     workdir: '/tmp/pinpawo-chat-workdir',
@@ -278,7 +350,7 @@ test('buildLocalChatAgentInput registers artifact discovery for an empty thread'
   const artifactRoot = mkdtempSync(resolve(tmpdir(), 'pinpawo-agent-channel-artifacts-'));
   t.after(() => rmSync(artifactRoot, { recursive: true, force: true }));
   const store = new FileCapabilityArtifactStore(artifactRoot);
-  const setup = buildLocalChatAgentInput({
+  const setup = buildTestLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
     threadId: 'thread/with space',
@@ -293,8 +365,15 @@ test('buildLocalChatAgentInput registers artifact discovery for an empty thread'
     ['artifact_list', 'artifact_read'],
   );
   assert.deepEqual(
-    setup.input.generalUses,
+    setup.input.capabilities?.find(({ name }) => name === 'general')?.uses,
     ['pet_profile', 'bash', 'git', 'artifact_discovery'],
+  );
+  assert.deepEqual(
+    setup.registry.capabilities
+      .find(({ capability }) => capability.name === 'general')
+      ?.toolNames
+      .filter((name) => name === 'artifact_list' || name === 'artifact_read'),
+    ['artifact_list', 'artifact_read'],
   );
   assert.ok(
     setup.input.capabilities
@@ -315,7 +394,7 @@ test('artifact discovery sees artifacts written after Toolkit registration', asy
   const artifactRoot = mkdtempSync(resolve(tmpdir(), 'pinpawo-agent-channel-empty-artifacts-'));
   t.after(() => rmSync(artifactRoot, { recursive: true, force: true }));
   const store = new FileCapabilityArtifactStore(artifactRoot);
-  const setup = buildLocalChatAgentInput({
+  const setup = buildTestLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
     threadId: 'new-thread',
@@ -355,7 +434,7 @@ test('artifact discovery rejects an artifact URI from another thread', async (t)
       content: '# Other thread',
     },
   });
-  const setup = buildLocalChatAgentInput({
+  const setup = buildTestLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
     threadId: 'thread-1',
@@ -381,8 +460,8 @@ test('buildLocalChatAgentInput uses caller-provided stable session time', () => 
     sessionStartedAt: '2026-06-23T10:30:00+08:00',
     timezone: 'Asia/Shanghai',
   };
-  const first = buildLocalChatAgentInput(params);
-  const second = buildLocalChatAgentInput(params);
+  const first = buildTestLocalChatAgentInput(params);
+  const second = buildTestLocalChatAgentInput(params);
 
   assert.equal(first.input.runtimeEnvironment, second.input.runtimeEnvironment);
   assert.match(first.input.runtimeEnvironment ?? '', /会话开始时间：2026-06-23T10:30:00\+08:00/);
@@ -390,7 +469,7 @@ test('buildLocalChatAgentInput uses caller-provided stable session time', () => 
 });
 
 test('buildLocalChatAgentInput passes model structured output strategy to explore', async () => {
-  const setup = buildLocalChatAgentInput({
+  const setup = buildTestLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
     llmConfig: {

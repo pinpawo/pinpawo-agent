@@ -38,7 +38,7 @@ export type Example = {
   };
   outputs: {
     expected_route: 'answer' | 'delegate';
-    expected_mode?: 'answer' | 'general' | 'capability';
+    expected_mode?: 'answer' | 'capability';
     expected_phase?: 'initial_request' | 'after_subagent';
     expected_capability_state?: 'unavailable' | 'search_available' | 'candidates_available' | 'search_exhausted';
     expected_active_capability?: string | null;
@@ -181,7 +181,7 @@ export const examples: Example[] = [
     inputs: { user_message: '帮我看一下 src/index.ts 的内容' },
     outputs: {
       expected_route: 'delegate',
-      expected_mode: 'general',
+      expected_mode: 'capability',
       expected_phase: 'initial_request',
       reason: 'Requires file read tool — must delegate to general subagent.',
     },
@@ -191,7 +191,7 @@ export const examples: Example[] = [
     inputs: { user_message: '帮我把 utils.ts 里的 formatDate 函数改成使用 dayjs' },
     outputs: {
       expected_route: 'delegate',
-      expected_mode: 'general',
+      expected_mode: 'capability',
       expected_phase: 'initial_request',
       reason: 'Requires reading and editing code — must delegate.',
     },
@@ -201,7 +201,7 @@ export const examples: Example[] = [
     inputs: { user_message: '帮我搜索一下 LangGraph 的最新文档' },
     outputs: {
       expected_route: 'delegate',
-      expected_mode: 'general',
+      expected_mode: 'capability',
       expected_phase: 'initial_request',
       reason: 'Requires web search tool — must delegate.',
     },
@@ -227,7 +227,7 @@ export const examples: Example[] = [
     inputs: { user_message: '运行一下 npm test 看看测试结果' },
     outputs: {
       expected_route: 'delegate',
-      expected_mode: 'general',
+      expected_mode: 'capability',
       expected_phase: 'initial_request',
       reason: 'Requires shell execution — must delegate.',
     },
@@ -237,7 +237,7 @@ export const examples: Example[] = [
     inputs: { user_message: '帮我重构 auth 模块，先看看现在的代码结构' },
     outputs: {
       expected_route: 'delegate',
-      expected_mode: 'general',
+      expected_mode: 'capability',
       expected_phase: 'initial_request',
       reason: 'Multi-step task, first step needs file exploration — delegate.',
     },
@@ -280,7 +280,7 @@ export const examples: Example[] = [
     },
     outputs: {
       expected_route: 'delegate',
-      expected_mode: 'general',
+      expected_mode: 'capability',
       expected_phase: 'after_subagent',
       reason: 'User explicitly asked for both: change vars AND run lint. Lint not done yet.',
     },
@@ -298,7 +298,7 @@ export const examples: Example[] = [
     },
     outputs: {
       expected_route: 'delegate',
-      expected_mode: 'general',
+      expected_mode: 'capability',
       expected_phase: 'after_subagent',
       reason: 'The first explicit task is completed, but the second explicit task (npm test) still needs execution.',
     },
@@ -399,12 +399,12 @@ export const examples: Example[] = [
     },
     outputs: {
       expected_route: 'delegate',
-      expected_mode: 'general',
+      expected_mode: 'capability',
       expected_phase: 'initial_request',
       expected_capability_state: 'search_available',
       expected_active_capability: null,
       expected_capability_candidates_empty: true,
-      reason: 'Capability search should run, find no matching business capability, and Stage A falls back to the general lane.',
+      reason: 'Capability search should find no matching business capability, then select the general Capability candidate.',
     },
   },
   {
@@ -415,7 +415,7 @@ export const examples: Example[] = [
     },
     outputs: {
       expected_route: 'delegate',
-      expected_mode: 'general',
+      expected_mode: 'capability',
       expected_phase: 'initial_request',
       expected_capability_state: 'search_available',
       reason: 'File inspection is covered by general tools and should not trigger capability search.',

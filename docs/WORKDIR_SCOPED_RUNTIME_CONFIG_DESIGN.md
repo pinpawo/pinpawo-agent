@@ -82,14 +82,20 @@ effective workdir 下新增工作区级目录：
 ├── studio-curator.md
 ├── studio-wiki/
 ├── capability-artifacts/
-├── checkpoints/
-├── checkpoints-tui/
-└── tui-sessions.json
+├── checkpoints-capability-v2/
+├── checkpoints-tui-capability-v2/
+└── tui-sessions-capability-v2.json
 ```
 
 `checkpointPath` / `tuiCheckpointPath` 仍使用 `.json` anchor 命名；`FileSaver`
 将其映射为同名的无扩展名 content-addressed 目录。runtime 只读取当前 manifest、
 object、ref 和 writes 布局，不扫描或迁移旧 monolith/shard 文件。
+
+Capability V2 的 delegation lane 与旧 checkpoint 契约不兼容，因此现有
+`checkpoints.json`、`checkpoints-tui.json`、`tui-sessions.json` 及对应的
+content-addressed 目录不会自动迁移。旧状态保留在磁盘上且不再加载；启动时检测到
+这些路径会输出一次提示。Capability artifact 继续使用原有的 thread-scoped
+存储根，不受 checkpoint 命名空间切换影响。
 
 Workdir State Root 存放工作区级配置和产物：
 
@@ -132,9 +138,9 @@ type LocalAgentRuntimeConfig = {
   studioConfigPath: string;   // <stateRoot>/studio.json
   petsDir: string;            // <stateRoot>/pets
   studioWikiBaseDir: string;  // <stateRoot>/studio-wiki
-  checkpointPath: string;     // <stateRoot>/checkpoints.json
-  tuiCheckpointPath: string;  // <stateRoot>/checkpoints-tui.json
-  tuiSessionPath: string;     // <stateRoot>/tui-sessions.json
+  checkpointPath: string;     // <stateRoot>/checkpoints-capability-v2.json
+  tuiCheckpointPath: string;  // <stateRoot>/checkpoints-tui-capability-v2.json
+  tuiSessionPath: string;     // <stateRoot>/tui-sessions-capability-v2.json
   capabilityArtifactRoot: string; // <stateRoot>/capability-artifacts
 };
 ```
@@ -382,7 +388,9 @@ App/API 侧也应传递同样的 workdir 概念，但第一阶段只做 local-ag
 - `buildRuntimeEnvironmentSummary` 接收 workdir 参数。
 - local file/search/git/shell/browser path resolver 改成 toolkit factory 或 runtime-aware resolver。
 - capability artifact root 改为 `<workdir>/.pinpawo/capability-artifacts`。
-- chat checkpoint 从 `~/.pinpawo/checkpoints.json` 迁到 `<workdir>/.pinpawo/checkpoints.json`。
+- chat checkpoint 位于
+  `<workdir>/.pinpawo/checkpoints-capability-v2.json`；Capability V2 不读取旧
+  `general` lane checkpoint。
 
 验收：
 

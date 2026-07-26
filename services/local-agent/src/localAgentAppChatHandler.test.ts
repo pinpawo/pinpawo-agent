@@ -3,7 +3,10 @@ import test from 'node:test';
 import { WebSocket } from 'ws';
 import { tool } from '@langchain/core/tools';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
-import { compileAgentRegistry } from '@pinpawo/pet-agent';
+import {
+  compileAgentRegistry,
+  defineInstructionDocument,
+} from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import {
   sendLocalAgentEvent,
@@ -65,12 +68,17 @@ function createSetup(): AgentChannelSetup {
     graphConfig: {} as AgentChannelSetup['graphConfig'],
     registry: compileAgentRegistry({
       toolkits: [toolkit],
-      capabilities: [],
-      generalUses: ['local-toolkit'],
+      capabilities: [{
+        name: 'general',
+        description: 'General-purpose capability.',
+        uses: ['local-toolkit'],
+        instructions: defineInstructionDocument({
+          content: '# General',
+        }),
+      }],
     }),
     input: {
       messages: [],
-      generalUses: ['local-toolkit'],
       toolkits: [toolkit],
     } as AgentChannelSetup['input'],
   };

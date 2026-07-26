@@ -175,6 +175,11 @@ export class LocalServerTuiSessionService {
     ctx: Awaited<ReturnType<typeof loadAgentContext>>,
     threadId = this.getChatThreadId(deps.actorId),
   ) {
+    if (!deps.capabilityArtifactStore) {
+      throw new Error(
+        'TUI chat requires a capability artifact store bound to the current runtime',
+      );
+    }
     const session = Object.values(this.state.sessions)
       .find((candidate) => candidate.threadId === threadId)
       ?? this.getActiveSession(deps.actorId);

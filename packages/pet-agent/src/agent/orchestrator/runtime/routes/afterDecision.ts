@@ -3,7 +3,5 @@ import { decisionModeFromRunNextDelegation } from '../decisions/delegationLifecy
 
 export function afterDecision(state: OrchestratorStateType) {
   const decisionMode = decisionModeFromRunNextDelegation(state.runNextDelegation);
-  if (decisionMode === 'capability') return 'capability';
-  if (decisionMode === 'general') return 'general';
-  return 'answer';
+  return decisionMode;
 }

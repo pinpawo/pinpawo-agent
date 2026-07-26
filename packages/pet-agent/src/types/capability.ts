@@ -50,6 +50,13 @@ export type AgentCapability = {
   readonly lifecycle?: CapabilityLifecycle;
 };
 
+/**
+ * Well-known name for the host's general-purpose Capability. It uses the same
+ * contract, planner selection, lane, and executor path as every Capability.
+ * The planner candidate policy keeps it visible as the default executor.
+ */
+export const GENERAL_CAPABILITY_NAME = 'general';
+
 export function defineInstructionDocument(params: {
   content: string;
 }): InstructionDocument {

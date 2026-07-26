@@ -26,14 +26,11 @@ export type ExecutorCompilationIssue =
       toolkitNames: readonly [string, string];
     };
 
-type CompiledExecutor = {
+type CompiledCapability = {
+  capability: AgentCapability;
   toolkits: readonly AgentToolkit[];
   tools: readonly StructuredTool[];
   toolNames: readonly string[];
-};
-
-type CompiledCapability = CompiledExecutor & {
-  capability: AgentCapability;
 };
 
 type UnavailableCapability = {
@@ -43,20 +40,9 @@ type UnavailableCapability = {
 
 export type CompiledAgentRegistry = {
   toolkits: readonly AgentToolkit[];
-  general: CompiledExecutor;
   capabilities: readonly CompiledCapability[];
   unavailableCapabilities: readonly UnavailableCapability[];
 };
-
-export class ExecutorCompilationError extends Error {
-  readonly issues: readonly ExecutorCompilationIssue[];
-
-  constructor(owner: string, issues: readonly ExecutorCompilationIssue[]) {
-    super(`${owner} Toolkit dependencies are invalid: ${formatExecutorCompilationIssues(issues)}`);
-    this.name = 'ExecutorCompilationError';
-    this.issues = issues;
-  }
-}
 
 function formatExecutorCompilationIssue(issue: ExecutorCompilationIssue) {
   if (issue.code === 'duplicate_toolkit_dependency') {
@@ -77,7 +63,10 @@ export function formatExecutorCompilationIssues(
 function compileExecutor(
   toolkitNames: readonly string[],
   toolkitsByName: ReadonlyMap<string, AgentToolkit>,
-): { executor: CompiledExecutor | null; issues: ExecutorCompilationIssue[] } {
+): {
+  executor: Omit<CompiledCapability, 'capability'> | null;
+  issues: ExecutorCompilationIssue[];
+} {
   const issues: ExecutorCompilationIssue[] = [];
   const selectedToolkits: AgentToolkit[] = [];
   const seenToolkitNames = new Set<string>();
@@ -188,7 +177,6 @@ function snapshotCapability(capability: AgentCapability): AgentCapability {
 export function compileAgentRegistry(params: {
   toolkits: readonly AgentToolkit[];
   capabilities: readonly AgentCapability[];
-  generalUses: readonly string[];
 }): CompiledAgentRegistry {
   const toolkitDefinitions = [...params.toolkits];
   const rawCapabilityDefinitions = [...params.capabilities];
@@ -198,10 +186,6 @@ export function compileAgentRegistry(params: {
   const toolkits = toolkitDefinitions.map(snapshotToolkit);
   const capabilityDefinitions = rawCapabilityDefinitions.map(snapshotCapability);
   const toolkitsByName = new Map(toolkits.map((toolkit) => [toolkit.name, toolkit]));
-  const generalResult = compileExecutor(params.generalUses, toolkitsByName);
-  if (!generalResult.executor) {
-    throw new ExecutorCompilationError('General executor', generalResult.issues);
-  }
 
   const capabilities: CompiledCapability[] = [];
   const unavailableCapabilities: UnavailableCapability[] = [];
@@ -222,7 +206,6 @@ export function compileAgentRegistry(params: {
 
   return Object.freeze({
     toolkits: Object.freeze(toolkits),
-    general: Object.freeze(generalResult.executor),
     capabilities: Object.freeze(capabilities),
     unavailableCapabilities: Object.freeze(unavailableCapabilities),
   });

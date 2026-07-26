@@ -32,6 +32,7 @@ export type {
 export {
   defineCapability,
   defineInstructionDocument,
+  GENERAL_CAPABILITY_NAME,
 } from './types/capability';
 
 export type {
@@ -102,7 +103,6 @@ export {
   streamOrchestratorGraph,
   streamOrchestratorGraphWithTokenUsage,
   compileAgentRegistry,
-  ExecutorCompilationError,
   formatExecutorCompilationIssues,
   validateUniqueCapabilityNames,
   validateUniqueToolkitNames,

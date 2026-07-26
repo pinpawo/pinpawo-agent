@@ -370,7 +370,6 @@ function buildCapabilitiesPayload(
       ...(deps.localToolkits ?? []),
     ],
     capabilities,
-    generalUses: [],
     threadId,
     capabilityArtifactStore: deps.capabilityArtifactStore,
   });

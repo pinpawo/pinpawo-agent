@@ -18,8 +18,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isMessageLane(value: unknown): value is MessageLane {
-  return value === 'general'
-    || (typeof value === 'string' && value.startsWith('capability:'));
+  return typeof value === 'string' && value.startsWith('capability:');
 }
 
 function isDelegationStatus(value: unknown): value is RunDelegationSummary['status'] {
@@ -58,9 +57,8 @@ export function readPendingDelegation(result: EvalOrchestratorStateSnapshot): Ru
   return isRunNextDelegation(result.runNextDelegation) ? result.runNextDelegation : null;
 }
 
-export function routeModeFromResult(result: EvalOrchestratorStateSnapshot): 'answer' | 'general' | 'capability' {
+export function routeModeFromResult(result: EvalOrchestratorStateSnapshot): 'answer' | 'capability' {
   const lane = readPendingDelegation(result)?.lane;
-  if (lane === 'general') return 'general';
   if (typeof lane === 'string' && lane.startsWith('capability:')) return 'capability';
   return 'answer';
 }

@@ -515,10 +515,10 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
       workdir: config.workdir,
       extraCapabilities: [planCapability],
       toolkits: [planToolkit],
-      // 强制 planCapability 成为 routeDecision 候选,绕过 keyword 搜索 ——
+      // 强制 planCapability 成为 capabilityDecision 候选,绕过 keyword 搜索 ——
       // 用户请求文本(例如"做一支秋日食材短视频")无法匹到 studio_plan 描述,
-      // 不强制注入就会被错误地 delegate 到 general lane,planner 永远不会
-      // 调 enqueue_tasks。
+      // 不强制注入时,General 作为 planner default candidate 会被选择,
+      // Studio planner 因而不会调用 enqueue_tasks。
       forcedCapabilityNames: [planCapability.name],
     });
 

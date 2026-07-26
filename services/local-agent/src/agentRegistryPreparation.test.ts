@@ -28,7 +28,6 @@ test('prepareAgentRegistry keeps missing run-scoped Toolkits as compiler diagnos
   const prepared = prepareAgentRegistry({
     toolkits: [],
     capabilities: [artifactCapability('scope_required_test')],
-    generalUses: [],
   });
 
   assert.equal(prepared.registry.capabilities.length, 0);
@@ -42,17 +41,14 @@ test('prepareAgentRegistry compiles artifact discovery once run scope is complet
   const prepared = prepareAgentRegistry({
     toolkits: [],
     capabilities: [artifactCapability('scope_ready_test')],
-    generalUses: [],
     threadId: 'thread-1',
     capabilityArtifactStore: {} as CapabilityArtifactStore,
-    authorizeArtifactDiscoveryForGeneral: true,
   });
 
   assert.deepEqual(
     prepared.toolkits.map(({ name }) => name),
     [ARTIFACT_DISCOVERY_TOOLKIT_NAME],
   );
-  assert.deepEqual(prepared.generalUses, [ARTIFACT_DISCOVERY_TOOLKIT_NAME]);
   assert.equal(
     prepared.registry.capabilities[0]?.capability.name,
     'scope_ready_test',
@@ -63,12 +59,10 @@ test('capability diagnostics report state transitions without module-global supp
   const unavailable = prepareAgentRegistry({
     toolkits: [],
     capabilities: [artifactCapability('warning_state_test')],
-    generalUses: [],
   });
   const available = prepareAgentRegistry({
     toolkits: [],
     capabilities: [artifactCapability('warning_state_test')],
-    generalUses: [],
     threadId: 'thread-warning-state',
     capabilityArtifactStore: {} as CapabilityArtifactStore,
   });
@@ -102,7 +96,6 @@ test('capability diagnostics preserve a known unavailable Toolkit reason', async
       ...artifactCapability('offline_capability'),
       uses: [toolkit.name],
     }],
-    generalUses: [],
   });
   const warnings: string[] = [];
   createCapabilityDiagnosticReporter((message) => warnings.push(message))(

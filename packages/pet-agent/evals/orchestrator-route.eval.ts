@@ -318,7 +318,7 @@ export async function target(
   if (completedResults.length > 0) {
     turnInput.runDelegationSummaries = completedResults.map((text, index) => ({
       id: `eval-${index + 1}`,
-      lane: 'general',
+      lane: 'capability:general',
       task: completedTasks[index] ?? userMessage,
       status: 'completed',
       resultPreview: text,
@@ -328,7 +328,7 @@ export async function target(
         content: text,
         additional_kwargs: {
           pinpawo: {
-            lane: 'general',
+            lane: 'capability:general',
             runId: turnInput.runId,
             isAnnounce: true,
             delegationId: `eval-${index + 1}`,
@@ -343,7 +343,7 @@ export async function target(
     const offset = turnInput.runDelegationSummaries.length;
     const progressSummaries = progressResults.map((text, index) => ({
       id: `eval-${offset + index + 1}`,
-      lane: 'general',
+      lane: 'capability:general',
       task: userMessage,
       status: 'progress',
       resultPreview: text,
@@ -366,7 +366,7 @@ export async function target(
         content: text,
         additional_kwargs: {
           pinpawo: {
-            lane: 'general',
+            lane: 'capability:general',
             runId: turnInput.runId,
             isAnnounce: true,
             delegationId: `eval-${offset + index + 1}`,
@@ -383,7 +383,7 @@ export async function target(
 
   // Evaluate through task/search + route decision, but stop before executing subagents.
   const result = await compiled.invoke(turnInput, {
-    interruptBefore: ['capability', 'general'],
+    interruptBefore: ['capability'],
     configurable: {
       thread_id: threadId,
       actor: testActor,

@@ -86,7 +86,6 @@ test('descriptor derives Capability status from registry compilation', () => {
         content: '# Inspect',
       }),
     }],
-    generalUses: [],
     graph: makeStubGraph([]).graph,
   });
 
@@ -123,7 +122,6 @@ test('invoke evaluates Toolkit availability before compiling its registry genera
         return { available: false, reason: 'offline' };
       },
     }],
-    generalUses: [],
     graph,
   });
 
@@ -165,7 +163,6 @@ test('humanReviewer: single interrupt → approve → reply', async () => {
   const runtime = createPetAgentRuntime({
     models: fakeModels(),
     actor: fakeActor(),
-    generalUses: [],
     graph,
     humanReviewer: async (req) => {
       requests.push(req);
@@ -194,7 +191,6 @@ test('humanReviewer: multi-round interrupt loops until resolved', async () => {
   const runtime = createPetAgentRuntime({
     models: fakeModels(),
     actor: fakeActor(),
-    generalUses: [],
     graph,
     humanReviewer: async (req) => {
       requests.push(req);
@@ -220,7 +216,6 @@ test('humanReviewer: canonical review interrupt → approve → reply', async ()
   const runtime = createPetAgentRuntime({
     models: fakeModels(),
     actor: fakeActor(),
-    generalUses: [],
     graph,
     humanReviewer: async (req) => {
       requests.push(req);
@@ -247,7 +242,6 @@ test('humanReviewer: missing reviewer + interrupt → invoke throws', async () =
   const runtime = createPetAgentRuntime({
     models: fakeModels(),
     actor: fakeActor(),
-    generalUses: [],
     graph,
   });
 
@@ -266,7 +260,6 @@ test('humanReviewer: resume call passes canonical response Command', async () =>
   const runtime = createPetAgentRuntime({
     models: fakeModels(),
     actor: fakeActor(),
-    generalUses: [],
     graph,
     humanReviewer: async () => ({
       reviewId: 'review-direct',
@@ -297,7 +290,6 @@ test('humanReviewer: unknown interrupt is not treated as HITL', async () => {
   const runtime = createPetAgentRuntime({
     models: fakeModels(),
     actor: fakeActor(),
-    generalUses: [],
     graph,
     humanReviewer: async (req) => {
       reviewerCalled = true;
@@ -322,7 +314,6 @@ test('humanReviewer: malformed review interrupt is not treated as HITL', async (
   const runtime = createPetAgentRuntime({
     models: fakeModels(),
     actor: fakeActor(),
-    generalUses: [],
     graph,
     humanReviewer: async (req) => {
       reviewerCalled = true;
@@ -348,7 +339,6 @@ test('pet runtime passes wiki read tools and operation metadata when wikiRoot is
   const runtime = createPetAgentRuntime({
     models: fakeModels(),
     actor: fakeActor(),
-    generalUses: [],
     graph,
     toolkits: [{
       name: 'plugin_toolkit',
@@ -385,7 +375,10 @@ test('pet runtime passes wiki read tools and operation metadata when wikiRoot is
           name?: string;
           tools?: Array<{ tool?: { name?: string }; operation?: { title?: string } }>;
         }>;
-        general?: { toolkits?: Array<{ name?: string }> };
+        capabilities?: Array<{
+          capability?: { name?: string };
+          toolkits?: Array<{ name?: string }>;
+        }>;
       };
     };
   } | undefined)?.configurable;
@@ -399,7 +392,9 @@ test('pet runtime passes wiki read tools and operation metadata when wikiRoot is
   assert.equal(invokeToolkit.tools?.[0]?.operation?.title, 'Invoke Tool');
   assert.ok(wikiToolkit, 'wikiRoot should install wiki_read as a toolkit');
   assert.deepEqual(
-    configurable.registry?.general?.toolkits?.map((toolkit) => toolkit.name),
+    configurable.registry?.capabilities
+      ?.find(({ capability }) => capability?.name === 'wiki')
+      ?.toolkits?.map((toolkit) => toolkit.name),
     ['wiki_read'],
   );
   assert.equal(
@@ -410,4 +405,48 @@ test('pet runtime passes wiki read tools and operation metadata when wikiRoot is
     wikiToolkit.tools?.find((item) => item.tool?.name === 'wiki_read_grep')?.operation?.title,
     '搜索知识库内容',
   );
+});
+
+test('pet runtime does not replace an explicitly configured wiki Capability', async () => {
+  const { graph, calls } = makeStubGraph([
+    { messages: [new AIMessage('done')] },
+  ]);
+  const runtime = createPetAgentRuntime({
+    models: fakeModels(),
+    actor: fakeActor(),
+    capabilities: [{
+      name: 'wiki',
+      description: 'Use an externally managed knowledge source.',
+      uses: [],
+      instructions: defineInstructionDocument({
+        content: '# External Wiki',
+      }),
+    }],
+    graph,
+  });
+
+  const result = await runtime.invoke({
+    brief: 'read wiki',
+    wikiRoot: '/tmp/pinpawo-test-wiki',
+  });
+
+  assert.equal(result.reply, 'done');
+  const configurable = (calls[0]?.options as {
+    configurable?: {
+      registry?: {
+        capabilities?: Array<{
+          capability?: { name?: string; description?: string };
+          toolkits?: Array<{ name?: string }>;
+        }>;
+      };
+    };
+  } | undefined)?.configurable;
+  const wikiCapabilities = configurable?.registry?.capabilities
+    ?.filter(({ capability }) => capability?.name === 'wiki');
+  assert.equal(wikiCapabilities?.length, 1);
+  assert.equal(
+    wikiCapabilities?.[0]?.capability?.description,
+    'Use an externally managed knowledge source.',
+  );
+  assert.deepEqual(wikiCapabilities?.[0]?.toolkits, []);
 });

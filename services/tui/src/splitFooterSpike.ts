@@ -8,7 +8,6 @@ import {
   type ScrollbackRenderContext,
   type ScrollbackSurface,
 } from '@opentui/core';
-import { calculateComposerLayout } from './spike/composerLayout';
 import { formatInputProbe } from './spike/inputProbe';
 import {
   createSpikeSession,
@@ -17,7 +16,6 @@ import {
 import { installSingleGraphemeBackspaceWorkaround } from './spike/textareaWorkarounds';
 
 const smoke = process.argv.includes('--smoke');
-const initialComposerLayout = calculateComposerLayout('', 1);
 const renderer = await createCliRenderer({
   exitOnCtrlC: true,
   targetFps: 60,
@@ -26,7 +24,7 @@ const renderer = await createCliRenderer({
   useMouse: false,
   enableMouseMovement: false,
   screenMode: 'split-footer',
-  footerHeight: initialComposerLayout.footerHeight,
+  footerHeight: 8,
   externalOutputMode: 'capture-stdout',
   consoleMode: 'disabled',
 });
@@ -50,9 +48,10 @@ const live = new TextRenderable(renderer, {
 const composerFrame = new BoxRenderable(renderer, {
   id: 'composer-frame',
   width: '100%',
-  height: initialComposerLayout.frameHeight,
+  height: 5,
   border: true,
-  padding: 1,
+  paddingLeft: 1,
+  paddingRight: 1,
 });
 const status = new TextRenderable(renderer, {
   id: 'status',
@@ -81,7 +80,6 @@ const composer = new TextareaRenderable(renderer, {
     status.content = pendingPastePreview
       ?? `composer: ${[...composer.plainText].length} code points`;
     pendingPastePreview = null;
-    syncComposerLayout();
   },
   onPaste: (event: PasteEvent) => {
     pendingPastePreview = formatInputProbe(
@@ -89,9 +87,6 @@ const composer = new TextareaRenderable(renderer, {
       new TextDecoder().decode(event.bytes),
     );
     status.content = pendingPastePreview;
-    queueMicrotask(() => {
-      pendingPastePreview = null;
-    });
   },
 });
 installSingleGraphemeBackspaceWorkaround(composer);
@@ -106,7 +101,6 @@ composer.focus();
 
 let scrollbackSequence = 0;
 let burstSequence = 0;
-let composerFrameHeight = initialComposerLayout.frameHeight;
 let activeDeltaTimer: ReturnType<typeof setInterval> | null = null;
 let activeDeltaSurface: ScrollbackSurface | null = null;
 for (const entry of createSpikeSession(smoke ? 2 : 40).timeline) {
@@ -122,9 +116,6 @@ renderer.keyInput.on('keypress', (key: KeyEvent) => {
   if (key.ctrl && key.name === 't') {
     appendScrollbackBurst();
   }
-});
-renderer.on('resize', () => {
-  syncComposerLayout();
 });
 renderer.on('selection', (selection) => {
   status.content = `selection: ${[...selection.getSelectedText()].length} code points`;
@@ -152,17 +143,6 @@ function writeScrollbackLine(content: string) {
       height: 1,
     };
   });
-}
-
-function syncComposerLayout() {
-  const layout = calculateComposerLayout(
-    composer.plainText,
-    composer.virtualLineCount,
-  );
-  if (layout.frameHeight === composerFrameHeight) return;
-  composerFrameHeight = layout.frameHeight;
-  composerFrame.height = layout.frameHeight;
-  renderer.footerHeight = layout.footerHeight;
 }
 
 function runLiveDeltaBurst() {

@@ -33,10 +33,9 @@ The probe covers:
 | operation raw payload | shared projection retains transient raw data | automated test |
 | high-frequency delta projection | one streaming entry is updated in place | automated test |
 | raw input preview | controls are escaped and output is bounded | automated test |
-| composer layout | logical and soft-wrapped lines grow from 1–8 rows | automated test |
 | native textarea regression | multiline paste and single-grapheme backspace preserve line boundaries | Bun native test |
 | TypeScript | `npm run typecheck -w @pinpawo/tui` | passed |
-| unit tests | `npm run test -w @pinpawo/tui` | passed, 9 tests |
+| unit tests | `npm run test -w @pinpawo/tui` | passed, 7 tests |
 | native tests | `npm run test:native -w @pinpawo/tui` | passed, 1 test |
 | alternate-screen PTY startup | `npm run smoke -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | split-footer PTY startup | `npm run smoke:split -w @pinpawo/tui` | passed in an automated 80×24 PTY |
@@ -86,14 +85,15 @@ terminal-owned wheel/selection input and stable-row scrollback commits.
 | Probe | Observation | Result |
 | --- | --- | --- |
 | terminal-owned scrolling and selection | touchpad scrolling, the terminal scrollbar, and text selection work in split-footer mode | passed |
-| multiline composer in the initial split-footer build | frame chrome left only one content row, so pasted lines and newlines were hidden | failed; fixed with 1–8 row auto-growth |
+| multiline composer in the initial split-footer build | frame chrome left only one content row, so pasted lines and newlines were hidden | failed; fixed with a three-row composer |
 | single-grapheme line backspace | OpenTUI 0.4.5 removed both the grapheme and its preceding newline | failed upstream; narrow workaround and Bun native regression added |
 | `Cmd+A` | selects the composer contents | passed |
 | single-file drag-in | Ghostty delivers the path to the composer | passed |
 | multi-file drag-in | Ghostty delivers shell-style path text, but the original preview did not distinguish escaped spaces from path separators | partial; spaces now render as `␠`, structured attachment parsing remains Phase 2 |
-| resize | committed scrollback and footer layout became visually inconsistent | partial; footer height now resyncs, committed terminal scrollback cannot be reflowed by the app |
+| resize | committed scrollback and footer layout became visually inconsistent | partial; fixed footer avoids app-driven height transitions, but committed terminal scrollback remains terminal-owned |
+| dynamic composer height | changing `renderer.footerHeight` left old footer frames in Ghostty scrollback | failed; replaced with a fixed eight-row footer and internal textarea scrolling |
 
-The composer and resize fixes above still need confirmation in a fresh Ghostty
+The fixed-footer behavior above still needs confirmation in a fresh Ghostty
 run. Existing committed scrollback is terminal-owned by design, so the spike
 does not destructively replay it after resize.
 

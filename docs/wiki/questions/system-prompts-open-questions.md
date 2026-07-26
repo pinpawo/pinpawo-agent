@@ -2,14 +2,16 @@
 title: System Prompt Design Open Questions
 page_type: question
 status: draft
-updated: 2026-07-26
+updated: 2026-07-27
 sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../../CAPABILITY_PLANNER_TASK_HORIZON_DRAFT.md
+  - ../../PET_AGENT_API_CAPABILITY_TOOLKIT.md
   - ../investigations/entry-decision-state-query-routing.md
   - https://github.com/pinpawo/pinpawo-agent/issues/435
 related:
   - ../overview.md
+  - ../capability-toolkit-architecture.md
   - ../concepts/orchestrator-practical-reasoning.md
   - ../concepts/prompt-knowledge-layers.md
   - ../concepts/system-prompt-authoring-principles.md
@@ -81,19 +83,20 @@ Closure evidence:
 
 ### Does whole-task executor selection generalize across model families?
 
-The fixed GLM-5.2 capabilityDecision profile now passes all eight cases across
-three repeats. It covers dedicated and general executors, ordinary execution
-details, search-matched but incomplete custom candidates, and explicit
-`unavailable`. Two zero-candidate cases validate deterministic runtime behavior
-rather than model judgment.
+The fixed GLM-5.2 capabilityDecision profile passes all eight cases across three
+repeats. It covers specific Capabilities, the planner-default General
+Capability, ordinary execution details, search-matched but incomplete
+candidates, and explicit `unavailable`. Two zero-candidate cases validate
+deterministic runtime behavior rather than model judgment.
 
 Closure evidence:
 
 - run the unchanged model-owned cases across supported model families;
 - preserve the distinction between candidate retrieval and whole-task ability;
 - report deterministic fast-path runs separately from LLM invocations;
-- keep `general`, custom capability, and `unavailable` semantics stable across
-  provider-specific structured-output methods.
+- keep ordinary `capability.general`, other Capability candidates, and
+  `unavailable` semantics stable across provider-specific structured-output
+  methods.
 
 ## P1 — prompt governance
 

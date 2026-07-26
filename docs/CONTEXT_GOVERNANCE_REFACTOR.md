@@ -54,7 +54,7 @@
 - runtime 不根据 `<delegation_briefing>`、`【委派简报】` 等文本形状识别、过滤或修复消息；
   pre-lane briefing 仅按 `source: delegation_briefing` provenance 排除，缺少当前 message ID /
   provenance 的旧 checkpoint 不在此协议中兼容。
-- **超出 announce 的收割走 `resultSchema` / result artifact，不要回头保留笔记**：announce 是给人/下游 LLM 读的自然语言结论，`kind: "result"` artifact（schema 校验后以 `CapabilityArtifactRef` 进 state）是给程序读的结构化收割通道——两者都在折叠前定型。将来 memory 层若要收割探索发现，正确做法是给该能力定义 `resultSchema`（与 #75 "ExploreResult schema 延后到需要时再做"对齐），而不是改折叠逻辑。折叠清掉的只是产生 announce / result 的过程性废料。
+- **超出 announce 的收割走 durable artifact，不要回头保留笔记**：announce 是给人/下游 LLM 读的自然语言结论，`CapabilityArtifactRef` + store content 是给程序和后续 Capability 按需读取的持久通道——两者都在折叠前定型。需要收割探索发现时，应在确定性的 `lifecycle.finalize` 边界写入 artifact，而不是改折叠逻辑。折叠清掉的只是产生 announce / artifact 的过程性废料。
 - **当前 announce candidate 是完整交付结果，不是 preview**：outcomeDecision 必须能读取刚返回 announce 的完整文本来判断 `continue/task_done/goal_done`。`resultPreview`、最近任务列表、compaction summary 和 artifact preview 可以有界裁剪，但它们不能替代当前 announce 的文本。
 - **artifact 不替代 announce，而是承载 announce 放不下或不该放的本体**：长结构化 JSON、长报告、图片/视频/PDF/文件包、跨 turn 复用资料，应在折叠前写成 `CapabilityArtifactRef`。此时 announce 仍要说明用户可读结论、关键发现、以及相关 artifact ref/title/preview；父 agent 默认只读 bounded artifact preview，不读 artifact 全文。
 - 回收时机选 outcomeDecision 验收 handoff，而不是 subagent 自行停止时或 run 结束时。
@@ -102,7 +102,7 @@
 4. 摘要保留当前任务、已完成工作、关键发现、决策、失败、待办及精确来源；近期消息保持原样。
 5. 摘要模型异常或无法生成有效摘要时直接抛错，不提交包含 `RemoveMessage` 的 state update；不得用错误占位文本替换旧历史。
 
-trigger/keep 比例属于 runtime 内部保守常量，不进入 `CapabilityRuntime`。这样 system prompt、tool schema
+trigger/keep 比例属于 runtime 内部保守常量，不进入 Capability 公共契约。这样 system prompt、tool schema
 和下一次模型输出始终有预留空间，同时公共配置只有一个窗口字段。
 
 ### 4.3 已删除的旧协议

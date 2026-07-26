@@ -156,4 +156,7 @@ capability subagent 负责真正执行能力逻辑。
 ## 9. 与 capability 文档的关系
 
 - orchestrator route 的职责，以本文件为准
-- capability 的定义和 subagent 运行模型，以 [PET_AGENT_CAPABILITY_RUNTIME_DESIGN.md](./PET_AGENT_CAPABILITY_RUNTIME_DESIGN.md) 为准
+- 当前 Capability / Toolkit 定义以
+  [Capability / Toolkit V2 契约](./PET_AGENT_API_CAPABILITY_TOOLKIT.md)为准；
+  组合理由见
+  [Capability / Toolkit 组合设计](./PET_AGENT_TOOLKIT_COMPOSITION_DESIGN.md)

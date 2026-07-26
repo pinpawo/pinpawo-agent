@@ -2,13 +2,15 @@
 title: Orchestrator Decision Node Ownership
 page_type: concept
 status: validated
-updated: 2026-07-26
+updated: 2026-07-27
 sources:
   - ../../PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md
   - ../../PET_AGENT_DECISION_NODE_OWNERSHIP_AUDIT.md
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md
+  - ../../PET_AGENT_API_CAPABILITY_TOOLKIT.md
 related:
+  - ../capability-toolkit-architecture.md
   - orchestrator-practical-reasoning.md
   - prompt-knowledge-layers.md
   - system-prompt-authoring-principles.md

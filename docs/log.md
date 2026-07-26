@@ -294,3 +294,22 @@ lint passes, and documentation migrations.
   completion and required-user-input answer cases both achieved `3/3`.
 - Preserved the fixed completion acknowledgement, kept static production prompt
   templates unchanged, and left cross-model validation open.
+
+## [2026-07-27] ingest | Capability / Toolkit V2 architecture
+
+- Registered the merged Capability / Toolkit V2 implementation from issue #447
+  and PR #470 as the current architecture source.
+- Added a validated system page covering the two extension concepts, static
+  Toolkit composition, registry-generation availability, isolated compilation
+  diagnostics, unified Capability execution, ordinary General, artifacts, and
+  host responsibilities.
+- Rewrote the public Capability / Toolkit contract and aligned the composition,
+  local-host, pet-runtime, artifact-pipeline, prompt, and Wiki references with
+  current code.
+- Deleted the superseded `PET_AGENT_CAPABILITY_RUNTIME_DESIGN.md`; preserved its
+  still-valid isolation and orchestration rationale in the synthesized system
+  page instead of retaining obsolete `createRuntime / toolset / general
+  executor` guidance.
+- Updated both documentation indexes and the existing decision, provenance,
+  practical-reasoning, authoring, source-registry, and open-question
+  relationships.

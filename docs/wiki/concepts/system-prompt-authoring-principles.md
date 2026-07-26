@@ -2,16 +2,18 @@
 title: System Prompt Authoring Principles
 page_type: concept
 status: draft
-updated: 2026-07-26
+updated: 2026-07-27
 sources:
   - ../sources/model-prompting-and-harness-references.md
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../../CAPABILITY_PLANNER_TASK_HORIZON_DRAFT.md
   - ../../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md
+  - ../../PET_AGENT_API_CAPABILITY_TOOLKIT.md
   - https://github.com/pinpawo/pinpawo-agent/issues/417
   - https://github.com/pinpawo/pinpawo-agent/issues/435
 related:
   - ../overview.md
+  - ../capability-toolkit-architecture.md
   - orchestrator-practical-reasoning.md
   - prompt-knowledge-layers.md
   - decision-node-ownership.md
@@ -303,7 +305,7 @@ the prompts.
 | [`sharedPrefix.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/sharedPrefix.prompt.ts) | The common decision-node contract now contains only invocation-context use, the structured-judgment role, and graph/answer ownership | Keep node flow, field semantics, completion criteria, and runtime transitions with their narrower prompt, schema, or graph owner |
 | [`entryDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/entryDecision.prompt.ts) | The prompt applies the ordered new-execution, unique-target, and plan-requirement judgment | Preserve the validated GLM-5.2 profile and extend it across models before changing the production boundary |
 | [`capabilityPlanner.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityPlanner.prompt.ts) | The prompt owns mode-specific planning over immutable completed facts and a mutable future tail; temporal position replaces `concrete`/`deferred` status | Preserve the accepted 18/18 GLM-5.2 profile and extend the unchanged goal contract across models |
-| [`capabilityDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityDecision.prompt.ts) | The prompt selects the best executor for the current task; schema and runtime own available-lane enforcement | Validate custom/general selection and missing-parameter behavior across models |
+| [`capabilityDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityDecision.prompt.ts) | The prompt selects the best compiled Capability for the current task; schema and runtime own candidate enforcement | Validate specific Capability, planner-default General, explicit unavailability, and missing-parameter behavior across models |
 | [`outcomeDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/outcomeDecision.prompt.ts) | The prompt identifies verdict evidence; the schema owns verdict meanings and `gap_note`; runtime owns transitions | Validate task acceptance, sibling-result isolation, and stopping behavior across models |
 | [`answer.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/answer.prompt.ts) | The prompt defines the user-visible reply boundary and evidence source; runtime supplies the current user goal and typed-state-derived reply objective, including genuine completion and required-user-input closes | Validate answer quality, replay fidelity, truthful terminal status, and repetition without changing the accepted close structure |
 
@@ -311,16 +313,19 @@ Future changes still evaluate each node independently. A shorter prompt is not a
 standing objective, and one node's measured regression is not authority to
 rewrite unrelated node semantics.
 
-## CapabilityDecision pilot evidence
+## CapabilityDecision evidence and V2 alignment
 
 The first merged #417 change applied the review lens to `capabilityDecision`
-only:
+only. Its original custom/general schema is historical; Capability / Toolkit V2
+later unified every executor as an ordinary Capability:
 
-- the production prompt states one task: choose the lane that best matches the
+- the production prompt states one task: choose the executor that best matches the
   already-defined current task;
-- the model-visible rules retain custom capability preference, the `general`
-  fallback, and the semantic treatment of missing execution parameters;
-- the lane schema owns single-choice output and the current candidate enum;
+- the runtime candidate set contains successfully compiled Capabilities;
+- a compiled `general` remains visible as `planner-default`, but is selected as
+  `capability.general`, not through a special fallback value;
+- the schema owns single-choice output over current `capability.<name>`
+  candidates plus explicit `unavailable`;
 - runtime validation owns rejection of unavailable capabilities and preserves
   the current task when materializing the delegation;
 - a dedicated eval case covers a matching capability whose execution parameters
@@ -331,9 +336,11 @@ approximately 1,328 to 1,283 tokens. This is a size measurement, not a claim of
 behavioral improvement. Real-model comparison remains required before this page
 can become `validated`.
 
-The stable capability-selection contract, owner, implementation, and verification
-links did not change, so the Prompt Contract Map does not gain a wording-only
-revision.
+The stable whole-task selection objective did not change. V2 changed the
+candidate representation and execution contract, so the current architecture is
+recorded in
+[Capability / Toolkit V2](../capability-toolkit-architecture.md) while the Prompt
+Contract Map keeps one executor-selection row.
 
 ## CapabilityPlanner task-boundary evidence
 

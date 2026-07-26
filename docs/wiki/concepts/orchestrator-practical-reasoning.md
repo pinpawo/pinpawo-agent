@@ -2,16 +2,18 @@
 title: Orchestrator As Practical Reasoning
 page_type: concept
 status: draft
-updated: 2026-07-26
+updated: 2026-07-27
 sources:
   - ../../PET_AGENT_REWRITE_DESIGN.md
-  - ../../PET_AGENT_CAPABILITY_RUNTIME_DESIGN.md
+  - ../../PET_AGENT_API_CAPABILITY_TOOLKIT.md
+  - ../../PET_AGENT_TOOLKIT_COMPOSITION_DESIGN.md
   - ../../PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md
   - ../../PET_AGENT_ANNOUNCE_JUDGMENT_REFACTOR.md
   - ../../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md
   - ../../CONTEXT_GOVERNANCE_REFACTOR.md
   - ../../HUMAN_REVIEW_APPROVAL_REFACTOR.md
 related:
+  - ../capability-toolkit-architecture.md
   - decision-node-ownership.md
   - message-context-and-provenance.md
   - prompt-knowledge-layers.md

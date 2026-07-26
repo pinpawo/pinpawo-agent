@@ -1,7 +1,11 @@
-# Pet Agent Toolkit Composition Design
+# Capability / Toolkit 组合设计
 
-> 状态：Implemented v2
-> 更新：2026-07-26
+> 状态：Implemented V2
+> 更新：2026-07-27
+
+本文解释为什么 Capability 通过 Toolkit 组合，而不是互相继承或调用。公共类型、
+编译规则和 host 组装顺序以
+[Capability / Toolkit V2 契约](./PET_AGENT_API_CAPABILITY_TOOLKIT.md)为准。
 
 ## 1. 背景
 
@@ -44,11 +48,12 @@ orchestrator
 
 ## 3. 为什么不是 capability extends capability
 
-`extends` 容易让人以为继承整个 capability，包括 description、availability、instructions、tools、middleware、resultSchema 和执行语义。
+`extends` 容易让人以为继承整个 Capability，包括 description、instructions、
+Toolkit 权限、lifecycle、artifact 语义和执行方式。
 
 这会产生几个问题：
 
-- resultSchema 难合并：A extends B 时，B 的结构化结果是否属于 A 的结果。
+- 结果语义难合并：A extends B 时，B 的 artifact 和 announce 是否属于 A 的交付。
 - prompt 隐式耦合：修改 B 的 instructions 可能影响所有继承者。
 - 权限边界变模糊：继承的是工具权限还是完整执行权。
 - 容易演化成 subagent 嵌套调用，破坏 orchestrator 的唯一编排职责。
@@ -64,6 +69,22 @@ defineCapability({
 
 `uses` 表示 capability 需要哪些 toolkit，而不是继承其他 capability。
 
+### 场景扩展的含义
+
+“扩展一套属于自己的 Capability，并组合不同场景”在 V2 中拆成两个明确动作：
+
+- 业务场景变化：新增或改写 Capability 的 description / Markdown instructions。
+- 可执行能力变化：在 `uses` 中组合已有 Toolkit，或编码实现一个新的 Toolkit。
+
+多个 Capability 可以声明相同 Toolkit。共享 Markdown 片段可以在构建时用普通
+代码或文档模板复用，但 runtime 不提供 `Capability extends Capability`；
+否则 instructions、路由语义和工具权限会重新耦合在一起。
+
+`uses` 只有 required 语义，没有 `optionalUses`。如果一个降级实现仍满足同一个
+Toolkit 的语义契约，可以由 Toolkit factory 在内部选择实现；如果降级后的能力
+已经不能完成原任务，就应让 Capability 明确不可用，而不是给模型暴露一个名义上
+存在、实际能力不同的 Toolkit。
+
 ## 4. 运行时装配
 
 orchestrator 创建 subagent 前，从已编译 registry 完成 toolkit 解析：
@@ -72,9 +93,13 @@ orchestrator 创建 subagent 前，从已编译 registry 完成 toolkit 解析�
 capability.uses
   -> resolve toolkits
   -> tools = declared toolkit tools
-  -> instructions = handoff + toolkit.instructions + capability.instructions
+  -> instructions = framework + actor + toolkit.instructions
+                    + capability.instructions + host runtime environment
   -> createSubagent(...)
 ```
+
+当前任务通过 delegation briefing message 进入私有 lane，不重复进入稳定 system
+prompt。Toolkit instructions 按 `uses` 的解析顺序装配。
 
 General 不使用独立 lane 或隐式工具面。它是一个名为 `general` 的普通
 Capability，显式声明自己的 Toolkit 依赖：
@@ -109,6 +134,9 @@ capability subagent
 
 Toolkit 注册不等于授权。只有 Capability 的 `uses` 才建立工具权限边界；
 缺少任一 required Toolkit 时，该 Capability 在本次 registry generation 中不可用。
+Toolkit `availability` 在编译前由调用入口或 host 解析；
+`compileAgentRegistry()` 本身只编译传入的有效 inventory。单个 Capability 的依赖
+解析失败进入 `unavailableCapabilities`，host 必须报告这份诊断。
 因此 local-agent chat 的内部组装契约要求同时提供稳定 `threadId` 和
 `CapabilityArtifactStore`；host 不能通过省略 thread scope 静默移除 General
 或其他声明了 `artifact_discovery` 的 Capability。
@@ -261,7 +289,7 @@ const capabilityCreator = defineCapability({
 
 ## 8. 边界约束
 
-- toolkit 不应该包含业务 resultSchema。
+- Toolkit 不应该包含业务 artifact/result lifecycle。
 - toolkit instructions 只描述工具族的正确使用方式，不描述具体业务目标。
 - capability instructions 描述业务目标、结果格式和任务约束。
 - orchestrator 仍然是唯一可以决定“下一步委派谁”的组件。
@@ -279,6 +307,9 @@ const capabilityCreator = defineCapability({
 - General 作为普通 Capability，按自己的 `uses` 装配 toolkit tools。
 - 所有 delegation 统一使用 `capability:<name>` lane 和 capability executor node。
 - toolkit policy wrapper 可对单个工具调用执行 allow/deny/HITL review。
+- 单个 Capability 编译失败的隔离诊断，以及 registry 级重复名称的 fail-fast。
+- Capability 目录的 `CAPABILITY.md` authoring，以及可选的 finalize-only
+  lifecycle entry。
 
 Capability V2 把所有 delegation lane 收敛为 `capability:<name>`。local-agent
 不解释旧 `general` lane checkpoint，而是使用新的
@@ -289,3 +320,5 @@ namespace；artifact storage 仍按原 thread scope 保持连续。
 
 - 按权限拆分 `bash.readonly`、`bash.write`、`bash.shell`。
 - 在 UI/日志中展示 subagent 使用了哪些 toolkit。
+- 为更多 host surface 统一暴露同一份 compiled registry diagnostics，避免各自
+  重算可用性。

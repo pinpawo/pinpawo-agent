@@ -2,12 +2,13 @@
 title: Orchestrator As Practical Reasoning
 page_type: concept
 status: draft
-updated: 2026-07-25
+updated: 2026-07-26
 sources:
   - ../../PET_AGENT_REWRITE_DESIGN.md
   - ../../PET_AGENT_CAPABILITY_RUNTIME_DESIGN.md
   - ../../PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md
   - ../../PET_AGENT_ANNOUNCE_JUDGMENT_REFACTOR.md
+  - ../../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md
   - ../../CONTEXT_GOVERNANCE_REFACTOR.md
   - ../../HUMAN_REVIEW_APPROVAL_REFACTOR.md
 related:
@@ -15,6 +16,7 @@ related:
   - message-context-and-provenance.md
   - prompt-knowledge-layers.md
   - system-prompt-authoring-principles.md
+  - ../decisions/delegation-completion-acknowledgement.md
   - ../investigations/entry-decision-state-query-routing.md
 ---
 
@@ -286,6 +288,22 @@ This reading reveals possible design tensions rather than hiding them:
 
 These are questions for later contract and runtime review, not immediate schema
 changes.
+
+## Validated projection: terminal outcomes
+
+PR #467 validates one technical projection of this philosophy without turning
+the projection into a new ontology:
+
+- accepted handoff makes a local result available to common ground but does not
+  establish task or goal completion;
+- `task_done`, `goal_done`, and `user_input_required` keep local completion,
+  purpose completion, and return of control distinct;
+- answer restores common ground from explicit terminal meaning rather than
+  treating execution stop or message provenance as proof of success.
+
+The paired lifecycle eval demonstrates this boundary for the current GLM-5.2
+profile. It does not resolve the broader open questions about interpreted
+purpose, consequence-relative uncertainty, or authority.
 
 ## Consequences for prompt design
 

@@ -54,10 +54,11 @@ recreate datasets.
 - `agent-permission-control-basics`: HITL, auto-authorization, scoped authorization, and permission-memory cases.
 - `agent-context-synthesis-basics`: answer-from-context and missing-information cases.
 - `agent-answer-behavior-basics`: direct reply, handoff synthesis, historical replay,
-  clarification, and fixed completion-acknowledgement behavior.
+  clarification, fixed completion acknowledgement, and required-user-input return control.
 - `agent-entry-decision-basics`: eval contract for `answer | direct_task | needs_plan`.
 - `agent-capability-decision-basics`: end-to-end capability search and selection from a current task.
-- `agent-outcome-decision-basics`: `continue | task_done | goal_done` verdict boundaries.
+- `agent-outcome-decision-basics`: `continue | task_done | goal_done | user_input_required`
+  verdict boundaries.
 - `agent-capability-planning-basics`: production `planner@entry` and `planner@boundary` contracts.
 - `agent-multi-task-flow-basics`: real graph baseline across meaningful task boundaries.
 - `agent-tool-review-reject-runtime`: runtime regression case for reviewed tool-call rejection resuming inside the same subagent before normal handoff.

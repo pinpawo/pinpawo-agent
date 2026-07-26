@@ -241,13 +241,15 @@ capability search 和 selection 属于同一个 graph node，但职责仍分两�
 |---|---|
 | 当前 task 未达标，同一 capability 可继续且不需要用户输入 | `continue` |
 | 当前 task 已达标，但不能明确断言用户目标已经完成 | `task_done` |
-| 不应继续自主执行：目标已满足，或需要用户澄清/确认 | `goal_done` |
+| 用户目标已经完成 | `goal_done` |
+| 用户目标尚未完成，继续需要用户补充、澄清或确认 | `user_input_required` |
 
 每个 outcome 的条件、字段和后续责任必须在对应分组内完整表达：
 
 - `continue`：当前 task 未达标；同一 capability 可继续且不需要用户输入；`gap_note` 只写当前 task 缺口。
 - `task_done`：当前 task 已达标，但不能明确断言总目标完成；不生成 task，handoff 后由 capabilityPlanner 处理后续。
-- `goal_done`：目标已经满足，或继续前需要用户输入；停止自主执行并交给 answer。
+- `goal_done`：用户目标已经完成；停止自主执行并交给 answer。
+- `user_input_required`：用户目标尚未完成，继续需要用户补充、澄清或确认；停止自主执行并交给 answer。
 
 所有 outcome 都以完整 announce 验收当前 task，以用户目标和其他结论判断 loop 是否结束。本节点不读取
 plan 内容，也不接收 capability registry。
@@ -264,12 +266,23 @@ plan 内容，也不接收 capability registry。
 
 ```ts
 {
-  outcome: 'continue' | 'task_done' | 'goal_done';
+  outcome: 'continue' | 'task_done' | 'goal_done' | 'user_input_required';
   gap_note?: string | null;
 }
 ```
 
 schema 不包含 task、plan、search keywords、lane、capability 或用户回复字段。
+
+### 7.4 终态传递
+
+handoff 表示当前结果已经进入主对话，不表示 task 或用户目标必然完成。graph 将已接受的
+non-continue outcome 作为本 run 的显式状态传给下游：
+
+- `task_done` 进入 capabilityPlanner boundary；
+- `goal_done` 进入 answer，并使用固定完成说明；
+- `user_input_required` 进入 answer，说明已有结果和尚未完成的部分，并询问继续所需信息。
+
+answer 不从 handoff provenance 或 announce 正文重新推断这些状态。
 
 ## 8. LLM 与代码所有权
 
@@ -283,6 +296,8 @@ schema 不包含 task、plan、search keywords、lane、capability 或用户回�
 | 零 candidate fallback general | 代码 |
 | current task 是否达标 | outcomeDecision LLM |
 | task_done 后进入 planner boundary | outcomeDecision Command 固定路由 |
+| goal_done / user_input_required 后进入 answer | outcomeDecision Command 固定路由 |
+| answer 使用完成说明或请求用户输入 | graph 传递的显式 outcome + answer LLM |
 | plan 是否存在、内容为何 | 不参与 route/guard |
 | iteration limit、handoff availability | guard / code |
 | 用户可见回复 | answer LLM |
@@ -307,7 +322,8 @@ schema 不包含 task、plan、search keywords、lane、capability 或用户回�
 - capabilityPlanner(entry)：创建 current task 并保留 future tail，不过度拆分。
 - capabilityPlanner(boundary)：结合 completed tasks、完整 handoff 具体化、取消或保留 tail。
 - capabilityDecision：candidate recall、custom/general selection、未注册 capability fallback。
-- outcomeDecision：continue / task_done / goal_done 边界，不产生 next task。
+- outcomeDecision：continue / task_done / goal_done / user_input_required 边界，不产生 next task。
+- answer：真实完成保持固定结束说明；需要用户输入时保留未完成事实并询问缺失信息。
 - multi-task flow：entry 只调用一次，第 2+ task 经 boundary planner materialize，每个 task 独立经过 capabilityDecision，lane messages 隔离，结论只通过 handoff 传递。
 
 生产 runner：

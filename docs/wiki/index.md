@@ -9,6 +9,7 @@ related:
   - overview.md
   - concepts/orchestrator-practical-reasoning.md
   - decisions/capability-planner-task-boundaries.md
+  - decisions/delegation-completion-acknowledgement.md
   - migrations/docs-wiki-management-plan.md
 ---
 
@@ -40,7 +41,8 @@ explicitly migrated.
 - [Message context and provenance](concepts/message-context-and-provenance.md) —
   canonical main messages, private lanes, announce, handoff, and trusted identity.
 - [Delegation completion acknowledgement](decisions/delegation-completion-acknowledgement.md)
-  — why the fixed completion close exists and what must remain stable.
+  — why the fixed completion close exists, why handoff alone cannot trigger it,
+  and how answer returns control when user input is required.
 - [State-query routing investigation](investigations/entry-decision-state-query-routing.md)
   — current regression analysis around `answer` versus new execution.
 - [System prompt source registry](sources/system-prompts-source-registry.md) — source

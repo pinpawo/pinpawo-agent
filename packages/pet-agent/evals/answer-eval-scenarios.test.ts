@@ -49,6 +49,21 @@ test('answer eval renders the production prompt and fixed completion context', (
   assert.match(resultText, /RESULT_BODY_START/);
 });
 
+test('answer eval covers a handed-off result that still requires a user choice', () => {
+  const scenario = getAnswerEvalScenarios().find(
+    ({ caseName }) => caseName === 'handoff-requires-user-choice',
+  );
+  assert.ok(scenario);
+  const messages = scenario.render();
+  assert.deepEqual(messages.map((message) => message._getType()), ['system', 'human', 'ai']);
+  assert.equal(scenario.expectedSummary, 'return_control');
+  const systemText = String(messages[0].content);
+  assert.match(systemText, /用户目标（尚未完成）/);
+  assert.doesNotMatch(systemText, /"确认发送渠道并发送已经完成的报告"已完成/);
+  assert.match(String(messages[1].content), /邮件或项目群/);
+  assert.match(String(messages[2].content), /还没有发送/);
+});
+
 test('answer eval renders the current user goal for an ordinary reply', () => {
   const scenario = getAnswerEvalScenarios().find(({ caseName }) => caseName === 'direct-answer');
   assert.ok(scenario);

@@ -8,7 +8,7 @@ export type OutcomeDecisionInput = {
 };
 
 export type OutcomeDecisionExpected = {
-  outcome: 'continue' | 'task_done' | 'goal_done';
+  outcome: 'continue' | 'task_done' | 'goal_done' | 'user_input_required';
   reason: string;
 };
 
@@ -86,7 +86,7 @@ const cases: AgentEvalCase<OutcomeDecisionInput, OutcomeDecisionExpected>[] = [
       announce: '报告已经完成，但用户尚未选择邮件或项目群，当前无法继续发送。',
     },
     expected: {
-      outcome: 'goal_done',
+      outcome: 'user_input_required',
       reason: 'The run must return to the user because autonomous execution cannot continue without their choice.',
     },
     metadata: { difficulty: 'medium', reason: 'User-input stopping boundary.', source: SOURCE_FILE },

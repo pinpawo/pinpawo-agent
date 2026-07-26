@@ -23,10 +23,11 @@ export type AnswerBehaviorInput = {
     role: 'user' | 'assistant';
     text: string;
   }>;
-  completionContext?: {
+  acceptedHandoff?: {
     handoffFrom: 'general' | 'capability:explore';
     runId: string;
     task: string;
+    outcome: 'goal_done' | 'user_input_required';
   };
 };
 
@@ -153,10 +154,11 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
             ].join('\n'),
           },
         ],
-        completionContext: {
+        acceptedHandoff: {
           handoffFrom: 'general',
           runId: 'answer-eval-run',
           task: '汇总本周发布风险',
+          outcome: 'goal_done',
         },
       },
       expected: {
@@ -172,6 +174,45 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
         diagnostics: { referenceMaxCharacters: 180, comparePriorAssistantText: true },
       },
       metadata: { difficulty: 'hard', reason: 'Close the lifecycle without replaying the delivered body.', source: SOURCE_FILE },
+    },
+    {
+      id: `${ANSWER_BEHAVIOR_BASICS_DATASET}.handoff-requires-user-choice`,
+      name: 'handoff-requires-user-choice',
+      suite: ANSWER_BEHAVIOR_BASICS_DATASET,
+      tags: ['context_synthesis', 'delegation_control'],
+      input: {
+        messages: [
+          { role: 'user', text: '根据我的选择，把已经完成的报告发送到邮件或项目群。' },
+          {
+            role: 'assistant',
+            text: '报告已经完成，但你尚未选择邮件或项目群，当前还没有发送。',
+          },
+        ],
+        acceptedHandoff: {
+          handoffFrom: 'general',
+          runId: 'answer-eval-user-choice-run',
+          task: '确认发送渠道并发送已经完成的报告',
+          outcome: 'user_input_required',
+        },
+      },
+      expected: {
+        contract: 'answer.user-visible-close',
+        objective: '保留报告已经完成但尚未发送的事实，将控制权交还用户并询问发送渠道。',
+        acceptanceCriteria: [
+          { id: 'completed_result_preserved', statement: '说明报告本身已经完成或准备好。' },
+          { id: 'unfinished_effect_preserved', statement: '明确说明报告尚未发送，发送任务仍未完成。' },
+          { id: 'asks_for_user_choice', statement: '询问用户选择邮件或项目群作为发送渠道。' },
+          { id: 'no_false_completion_claim', statement: '没有声称发送任务或整个用户目标已经完成。' },
+          { id: 'user_facing_language', statement: '回复面向用户，不暴露 orchestrator、handoff、delegation 等内部执行语言。' },
+        ],
+        expectedBehavior: 'return_control',
+        diagnostics: { referenceMaxCharacters: 220, comparePriorAssistantText: true },
+      },
+      metadata: {
+        difficulty: 'hard',
+        reason: 'Cross-node boundary: an accepted handoff that requires user input is not goal completion.',
+        source: SOURCE_FILE,
+      },
     },
   ],
 };

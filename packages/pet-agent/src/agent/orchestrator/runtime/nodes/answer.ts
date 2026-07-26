@@ -9,6 +9,7 @@ import {
   type HandoffSource,
 } from '../../messageLanes';
 import { buildAnswerSystemPrompt } from '../../prompts';
+import type { AcceptedDelegationOutcome } from '../../schemas';
 import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
 import { readMessageText } from '../../utils';
@@ -34,6 +35,18 @@ export function createAnswerNode(config: OrchestratorConfig) {
     // messages only. After compaction, a summary may be the sole surviving
     // record of older accepted results.
     const history = mainConversationMessages(state.messages);
+    const latestMainMessage = history.at(-1);
+    const handoffSource = latestMainMessage
+      ? getMessageHandoffSource(latestMainMessage)
+      : null;
+    const acceptedOutcome = state.runLatestDelegationOutcome;
+    const acceptedHandoff = handoffSource
+      && acceptedOutcome
+      ? {
+          source: handoffSource,
+          outcome: acceptedOutcome,
+        }
+      : null;
     const terminalContext = buildTerminalAnswerContext(
       state,
       maxRunIterations
@@ -45,6 +58,7 @@ export function createAnswerNode(config: OrchestratorConfig) {
       history,
       workdir,
       runtimeEnvironment,
+      acceptedHandoff,
       terminalContext,
     });
     const response = await config.models.act.invoke(answerMessages, runnableConfig);
@@ -67,17 +81,18 @@ export function buildAnswerInvocationMessages(params: {
   history: BaseMessage[];
   workdir?: string;
   runtimeEnvironment?: string;
-  completionSource?: HandoffSource | null;
+  acceptedHandoff?: {
+    source: HandoffSource;
+    outcome: AcceptedDelegationOutcome;
+  } | null;
   terminalContext?: string | null;
 }): BaseMessage[] {
-  const latestMainMessage = params.history.at(-1);
-  const completionSource = params.completionSource === undefined
-    ? latestMainMessage ? getMessageHandoffSource(latestMainMessage) : null
-    : params.completionSource;
   const hasUserGoal = Boolean(readLatestHumanRequest(params.history));
-  const replyContext = completionSource
-    ? buildDelegationCompletionAnswerContext(completionSource, hasUserGoal)
-    : hasUserGoal ? buildAnswerReplyContext() : null;
+  const replyContext = params.acceptedHandoff?.outcome === 'goal_done'
+    ? buildDelegationCompletionAnswerContext(params.acceptedHandoff.source, hasUserGoal)
+    : params.acceptedHandoff?.outcome === 'user_input_required'
+      ? buildUserInputRequiredAnswerContext(hasUserGoal)
+      : hasUserGoal ? buildAnswerReplyContext() : null;
   const systemContext = [
     buildAnswerSystemPrompt({
       actor: params.actor,
@@ -109,7 +124,23 @@ function buildAnswerCleanup() {
     runPendingTask: null,
     runCapabilityPlan: [],
     runIterationCount: 0,
+    runLatestDelegationOutcome: null,
   };
+}
+
+function buildUserInputRequiredAnswerContext(hasUserGoal: boolean) {
+  return [
+    ...(hasUserGoal ? [
+      '本次用户目标（尚未完成）：',
+      '主对话中最近一条用户消息所表达的目标。',
+      '',
+    ] : []),
+    '当前状态：',
+    '上一条消息呈现了目前已经取得的结果；继续完成目标需要用户补充、澄清或确认。',
+    '',
+    '本次回复目标：',
+    '根据上一条结果说明已经取得的进展和尚未完成的部分，并询问继续所需的信息。',
+  ].join('\n');
 }
 
 function buildTerminalAnswerContext(state: OrchestratorStateType, runIterationLimit: number) {

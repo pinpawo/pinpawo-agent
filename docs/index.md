@@ -14,6 +14,7 @@ the original design and reference documents. Maintenance rules live in
 - [System prompt authoring and evaluation principles](wiki/concepts/system-prompt-authoring-principles.md)
 - [Orchestrator decision node ownership](wiki/concepts/decision-node-ownership.md)
 - [CapabilityPlanner task boundaries](wiki/decisions/capability-planner-task-boundaries.md)
+- [Delegation completion acknowledgement and terminal close](wiki/decisions/delegation-completion-acknowledgement.md)
 - [Documentation wiki management plan](wiki/migrations/docs-wiki-management-plan.md)
 
 ## Pet Agent API
@@ -36,6 +37,7 @@ the original design and reference documents. Maintenance rules live in
 - [Decision node ownership audit](PET_AGENT_DECISION_NODE_OWNERSHIP_AUDIT.md)
 - [Decision system prompt design](PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md)
 - [CapabilityPlanner task-horizon design](CAPABILITY_PLANNER_TASK_HORIZON_DRAFT.md)
+- [Orchestrator terminal-semantics validation](ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md)
 - [Decision shared prompt prefix](PET_AGENT_ORCHESTRATOR_DECISION_PROMPT_PREFIX.md)
 - [Historical orchestrator route design](PET_AGENT_ORCHESTRATOR_ROUTE_DESIGN.md)
 - [Announce judgment and explicit handoff](PET_AGENT_ANNOUNCE_JUDGMENT_REFACTOR.md)

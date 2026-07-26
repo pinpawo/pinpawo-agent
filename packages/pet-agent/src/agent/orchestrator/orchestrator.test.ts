@@ -146,6 +146,10 @@ function goalDoneDecision() {
   return { outcome: 'goal_done', gap_note: null };
 }
 
+function userInputRequiredDecision() {
+  return { outcome: 'user_input_required', gap_note: null };
+}
+
 function taskDoneDecision(gapNote: string | null = '当前任务已完成，但用户目标仍有后续步骤。') {
   return { outcome: 'task_done', gap_note: gapNote };
 }
@@ -1059,6 +1063,158 @@ test('delegation outcome answer asks LLM for a short delegation completion reply
   assert.match(answerInput, /上一条消息已经完整呈现工作结果/);
   assert.match(answerInput, /"搜索并整理 vibecoding 模型排行榜。"已完成。如需继续，请告诉我/);
   assert.doesNotMatch(answerInput, /orchestrator|handoff|delegation|subagent/);
+});
+
+test('user_input_required returns control without claiming delegation completion', async () => {
+  let answerInput = '';
+  const routeModel = {
+    invoke: async (messages: unknown[]) => {
+      answerInput = (messages as Array<{ content?: unknown }>)
+        .map((message) => String(message?.content ?? ''))
+        .join('\n');
+      return new AIMessage('报告已经准备好，但还没有发送。请选择发送到邮件还是项目群。');
+    },
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async () => userInputRequiredDecision(),
+    }),
+  } as unknown as AgentModels['act'];
+  const graph = createOrchestratorGraph({
+    models: { act: routeModel },
+    actor: testActor,
+  });
+  const input = {
+    ...buildOrchestratorRunInput([
+      new HumanMessage('根据我的选择，把已经完成的报告发送到邮件或项目群。'),
+    ]),
+    taskActiveDelegation: null as TaskActiveDelegation | null,
+  };
+  const task = '确认发送渠道并发送已经完成的报告';
+  const announceText = '报告已经完成，但用户尚未选择邮件或项目群，当前无法继续发送。';
+  const announceMessage = new AIMessage(announceText);
+  setPinpetMeta(announceMessage, {
+    lane: 'general',
+    runId: input.runId,
+    isAnnounce: true,
+    completionReason: 'natural',
+    delegationId: 'task-user-choice',
+    task,
+  });
+  input.messages.push(announceMessage);
+  input.runDelegationSummaries = [{
+    id: 'task-user-choice',
+    lane: 'general',
+    task,
+    status: 'progress',
+    resultPreview: announceText,
+  }];
+  input.taskActiveDelegation = {
+    id: 'task-user-choice',
+    lane: 'general',
+    task,
+    contextSummary: null,
+    transcriptRunId: input.runId,
+    status: 'awaiting_decision',
+    resultPreview: announceText,
+  };
+
+  const result = await graph.invoke(input, {
+    configurable: {
+      thread_id: 'delegation-outcome-user-input-required',
+      actor: testActor,
+      capabilities: [],
+      toolkits: [],
+    },
+  }) as OrchestratorStateType;
+
+  assert.equal(
+    result.messages.at(-1)?.content,
+    '报告已经准备好，但还没有发送。请选择发送到邮件还是项目群。',
+  );
+  assert.match(answerInput, /用户目标（尚未完成）/);
+  assert.match(answerInput, /报告已经完成，但用户尚未选择邮件或项目群/);
+  assert.doesNotMatch(answerInput, /"确认发送渠道并发送已经完成的报告"已完成/);
+  assert.equal(result.runDelegationSummaries[0]?.status, 'progress');
+  assert.equal(result.taskActiveDelegation, null);
+});
+
+test('task_done followed by planner answer does not imply user-goal completion', async () => {
+  let structuredCallCount = 0;
+  let answerInput = '';
+  const routeModel = {
+    invoke: async (messages: unknown[]) => {
+      answerInput = (messages as Array<{ content?: unknown }>)
+        .map((message) => String(message?.content ?? ''))
+        .join('\n');
+      return new AIMessage('调查结果已经整理完成；当前没有继续执行的任务。');
+    },
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        structuredCallCount += 1;
+        return structuredCallCount === 1
+          ? taskDoneDecision()
+          : { result: 'answer', remaining_plan: [], next_task: null };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const graph = createOrchestratorGraph({
+    models: { act: routeModel },
+    actor: testActor,
+  });
+  const input = {
+    ...buildOrchestratorRunInput([
+      new HumanMessage('调查 auth 模块，并根据调查结果决定是否重构。'),
+    ]),
+    taskActiveDelegation: null as TaskActiveDelegation | null,
+  };
+  const task = '调查 auth 模块结构、依赖和风险';
+  const announceText = '调查完成：认证入口集中在 auth/index.ts，主要风险是循环依赖。';
+  const announceMessage = new AIMessage(announceText);
+  setPinpetMeta(announceMessage, {
+    lane: 'general',
+    runId: input.runId,
+    isAnnounce: true,
+    completionReason: 'natural',
+    delegationId: 'task-auth-investigation',
+    task,
+  });
+  input.messages.push(announceMessage);
+  input.runDelegationSummaries = [{
+    id: 'task-auth-investigation',
+    lane: 'general',
+    task,
+    status: 'progress',
+    resultPreview: announceText,
+  }];
+  input.taskActiveDelegation = {
+    id: 'task-auth-investigation',
+    lane: 'general',
+    task,
+    contextSummary: null,
+    transcriptRunId: input.runId,
+    status: 'awaiting_decision',
+    resultPreview: announceText,
+  };
+
+  const result = await graph.invoke(input, {
+    configurable: {
+      thread_id: 'task-done-planner-answer-not-goal-done',
+      actor: testActor,
+      capabilities: [],
+      toolkits: [],
+    },
+  }) as OrchestratorStateType;
+
+  assert.equal(structuredCallCount, 2);
+  assert.match(answerInput, /调查完成：认证入口集中在 auth\/index\.ts/);
+  assert.doesNotMatch(answerInput, /本次用户目标（已完成）/);
+  assert.doesNotMatch(answerInput, /"调查 auth 模块结构、依赖和风险"已完成/);
+  assert.equal(result.runDelegationSummaries[0]?.status, 'completed');
 });
 
 test('answer decision emits no reply itself and routes to the dedicated answer node', async () => {

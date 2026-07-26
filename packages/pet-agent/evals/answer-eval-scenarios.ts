@@ -74,7 +74,7 @@ async function evaluateGoal(
     acceptanceCriteria: testCase.expected.acceptanceCriteria,
     evidence: {
       conversation: testCase.input.messages,
-      runtimeContext: testCase.input.completionContext ?? null,
+      runtimeContext: testCase.input.acceptedHandoff ?? null,
     },
     candidateOutput: { text: candidateAnswer },
   });
@@ -104,11 +104,14 @@ function render(testCase: AnswerBehaviorCase): BaseMessage[] {
     history: testCase.input.messages.map((message) => message.role === 'user'
       ? new HumanMessage(message.text)
       : new AIMessage(message.text)),
-    completionSource: testCase.input.completionContext
+    acceptedHandoff: testCase.input.acceptedHandoff
       ? {
-          ...testCase.input.completionContext,
-          delegationId: 'answer-eval-delegation',
-          announceMessageId: 'answer-eval-announce',
+          outcome: testCase.input.acceptedHandoff.outcome,
+          source: {
+            ...testCase.input.acceptedHandoff,
+            delegationId: 'answer-eval-delegation',
+            announceMessageId: 'answer-eval-announce',
+          },
         }
       : null,
   });

@@ -91,6 +91,7 @@ test('delegation outcome decision schema is verdict-only', () => {
   }
   assert.equal(schema.safeParse({ outcome: 'task_done', gap_note: null }).success, true);
   assert.equal(schema.safeParse({ outcome: 'goal_done', gap_note: null }).success, true);
+  assert.equal(schema.safeParse({ outcome: 'user_input_required', gap_note: null }).success, true);
   assert.equal(schema.safeParse({ outcome: 'next_task' }).success, false);
   assert.equal(schema.safeParse({ action: 'answer' }).success, false);
 
@@ -147,6 +148,15 @@ test('delegation outcome schema keeps gap_note on continue and strips it elsewhe
   assert.equal(goalDoneWithGap.success, true);
   if (goalDoneWithGap.success) {
     assert.equal(goalDoneWithGap.data.gap_note, null);
+  }
+
+  const userInputRequiredWithGap = schema.safeParse({
+    outcome: 'user_input_required',
+    gap_note: '多余的缺口说明',
+  });
+  assert.equal(userInputRequiredWithGap.success, true);
+  if (userInputRequiredWithGap.success) {
+    assert.equal(userInputRequiredWithGap.data.gap_note, null);
   }
 });
 

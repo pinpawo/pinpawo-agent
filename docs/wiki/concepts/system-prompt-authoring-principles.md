@@ -7,6 +7,7 @@ sources:
   - ../sources/model-prompting-and-harness-references.md
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../../CAPABILITY_PLANNER_TASK_HORIZON_DRAFT.md
+  - ../../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md
   - https://github.com/pinpawo/pinpawo-agent/issues/417
   - https://github.com/pinpawo/pinpawo-agent/issues/435
 related:
@@ -15,6 +16,7 @@ related:
   - prompt-knowledge-layers.md
   - decision-node-ownership.md
   - ../decisions/capability-planner-task-boundaries.md
+  - ../decisions/delegation-completion-acknowledgement.md
   - ../questions/system-prompts-open-questions.md
 ---
 
@@ -267,7 +269,7 @@ The remaining metrics either classify a failed objective or describe the run:
 | `planner.execution-boundary` | Use completed facts and returned results to materialize the next independently executable task and preserve only the valid unstarted tail | Current task, capability intents, justified boundaries, cancellation, grouping, ordering, and future-goal preservation satisfy the supplied goal and handoff | wrong grouping, completed work replanned, obsolete work retained, valid work dropped, future purpose lost | schema/invocation status, plan shape and task count, plan effect, rubber-stamp behavior, variants, tokens, latency, cost |
 | `capability.executor-selection` | Select an available executor that can complete the immutable task and best fits it, or return `unavailable` | Selection matches actual executor availability and whole-task ability; a retrieved custom candidate is not accepted solely because it matched search | missed capable executor, selected incomplete executor, false `unavailable`, invented executor | schema/invocation status, candidate set, deterministic fast path, variants, tokens, latency, cost |
 | `outcome.announce-verdict` | Judge the current announce against the current task and overall user goal | Verdict reflects current-task sufficiency, remaining work, and required user input without sibling-result substitution | premature completion, missed completion, sibling contamination, missed user-input stop | schema/invocation status, gap-note shape, variants, tokens, latency, cost |
-| `answer.user-visible-close` | Fulfil the current reply objective: direct response, handoff synthesis, requested replay, focused user question, or completion acknowledgement | Case-specific criteria establish correctness, evidence fidelity, and the accepted close behavior | missing requested content, unsupported claim, false status, wrong reply mode, unrequested result replay | invocation status, length, overlap, variants, tokens, latency, cost |
+| `answer.user-visible-close` | Fulfil the current reply objective: direct response, handoff synthesis, requested replay, focused user question, completion acknowledgement, or required-user-input return | Case-specific criteria establish correctness, evidence fidelity, truthful terminal status, and the accepted close behavior | missing requested content, unsupported claim, false status, wrong reply mode, unrequested result replay | invocation status, length, overlap, variants, tokens, latency, cost |
 
 Metrics are aggregated only after case-level goal judgments. A combined pass rate
 must not be manufactured by treating diagnostic thresholds as interchangeable
@@ -303,7 +305,7 @@ the prompts.
 | [`capabilityPlanner.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityPlanner.prompt.ts) | The prompt owns mode-specific planning over immutable completed facts and a mutable future tail; temporal position replaces `concrete`/`deferred` status | Preserve the accepted 18/18 GLM-5.2 profile and extend the unchanged goal contract across models |
 | [`capabilityDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityDecision.prompt.ts) | The prompt selects the best executor for the current task; schema and runtime own available-lane enforcement | Validate custom/general selection and missing-parameter behavior across models |
 | [`outcomeDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/outcomeDecision.prompt.ts) | The prompt identifies verdict evidence; the schema owns verdict meanings and `gap_note`; runtime owns transitions | Validate task acceptance, sibling-result isolation, and stopping behavior across models |
-| [`answer.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/answer.prompt.ts) | The prompt defines the user-visible reply boundary and evidence source; runtime supplies the current user goal and reply objective, including the fixed completion acknowledgement | Validate answer quality, replay fidelity, and repetition without changing the accepted close structure |
+| [`answer.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/answer.prompt.ts) | The prompt defines the user-visible reply boundary and evidence source; runtime supplies the current user goal and typed-state-derived reply objective, including genuine completion and required-user-input closes | Validate answer quality, replay fidelity, truthful terminal status, and repetition without changing the accepted close structure |
 
 Future changes still evaluate each node independently. A shorter prompt is not a
 standing objective, and one node's measured regression is not authority to
@@ -364,48 +366,50 @@ in [CapabilityPlanner task boundaries](../decisions/capability-planner-task-boun
 ## OutcomeDecision pilot evidence
 
 The third merged #417 change applied the same ownership split to
-`outcomeDecision`:
+`outcomeDecision`; PR #467 later refined the verdict meaning without expanding
+the static prompt:
 
 - the production prompt defines which context provides the current-task and
   user-goal evidence;
-- the model-visible schema defines the three verdicts and accepts compatible
-  optional or nullable `gap_note` input;
+- the model-visible schema defines `continue`, `task_done`, `goal_done`, and
+  `user_input_required`, and accepts compatible optional or nullable `gap_note`
+  input;
 - schema normalization produces a stable nullable `gap_note` and removes
   terminal-outcome gap noise, while runtime graph code owns continuation,
-  planner handoff, and answer routing;
+  planner handoff, typed terminal-state transfer, and answer routing;
 - eval cases cover a completed sibling task that cannot replace the current
   announce and a run that requires user input before it can continue.
 
-For one canonical outcome case, prompt preview changed from approximately 1,718
-to 1,169 tokens. This is a size measurement, not a claim of behavioral
-improvement. Real-model comparison remains required before this page can become
-`validated`.
+For one canonical outcome case, the earlier static-prompt preview changed from
+approximately 1,718 to 1,169 tokens. This is a historical size measurement, not
+a claim of behavioral improvement.
 
-The stable verdict contract and ownership links did not change, so the Prompt
-Contract Map does not gain a wording-only revision.
+The later terminal refinement changed the stable verdict contract rather than
+only its wording, so the Prompt Contract Map now records the user-input
+boundary.
 
 ## Answer pilot evidence
 
 The fourth merged #417 change applied positive-first wording to the user-visible
-answer boundary:
+answer boundary. The current ownership split is:
 
-- the static prompt defines four reply modes: direct answer, handoff synthesis,
-  faithful historical replay, and a focused user question;
-- the provenance-triggered delegation completion acknowledgement remains a
-  distinct final main message;
-- its dynamic context now states the acknowledgement's bounded content and the
-  handoff's ownership of the task-result body;
+- the static prompt defines the user-visible final-reply responsibility and
+  canonical evidence source;
+- runtime-derived context supplies the current reply objective;
+- explicit accepted outcome state, paired with handoff provenance, keeps the
+  completion acknowledgement distinct for `goal_done` and selects a
+  return-control close for `user_input_required`;
 - terminal contexts positively require an accurate incomplete-status report;
 - runtime tests continue to cover full main-history access, compacted historical
-  replay, provenance-selected completion mode, and unchanged final model output.
+  replay, typed terminal-mode selection, and unchanged final model output.
 
 For the rendered static answer prompt, preview changed from approximately 303 to
 187 tokens. This is a size measurement, not a claim of behavioral improvement.
 Real-model comparison remains required before this page can become `validated`.
 
-The accepted completion lifecycle and the stable answer contract did not change,
-so neither the completion decision page nor the Prompt Contract Map requires a
-semantic revision.
+PR #467 changes the terminal-state selection contract while preserving the fixed
+completion lifecycle, so both the completion decision page and Prompt Contract
+Map now record the distinction.
 
 ## Answer reply-objective follow-up
 
@@ -420,8 +424,8 @@ knowledge:
 - the static prompt states the user-visible responsibility and canonical
   conversation evidence;
 - runtime context identifies the current user goal, state, and reply objective;
-- provenance still selects completion mode, but internal flow vocabulary and
-  identifiers stay in code;
+- typed outcome state selects terminal meaning, while provenance identifies the
+  accepted result source; internal flow vocabulary and identifiers stay in code;
 - terminal states use the same current-state and reply-objective structure.
 
 This is an application of the existing static-contract, injected-fact, and
@@ -434,6 +438,31 @@ from 12/15 to 15/15 goals achieved. Completion acknowledgement changed from 0/3
 to 3/3, while the other four answer behaviors remained 3/3. The completion
 outputs were identical across the three candidate runs. This is evidence for
 the current provider and model, not cross-model validation.
+
+## Outcome-to-answer terminal semantics evidence
+
+The later paired lifecycle eval exposed a cross-node ownership failure that
+per-node success had hidden. `goal_done` represented both genuine user-goal
+completion and a run that required a user choice; accepted handoff provenance
+then selected the fixed completion acknowledgement for both.
+
+The repair changed the narrowest owners:
+
+- outcome schema gained `user_input_required`, while `goal_done` became strict
+  user-goal completion;
+- graph state carries the accepted non-continue outcome and owns deterministic
+  routing;
+- handoff remains accepted evidence provenance rather than completion proof;
+- answer runtime derives either the fixed completion objective or the
+  return-control objective from typed state;
+- the static outcome and answer prompt templates remain unchanged.
+
+This follows the harness-first review order: the failure was an ambiguous schema
+and graph composition, not missing warning prose. The paired GLM-5.2 answer case
+for required user input improved from `0/3` to `3/3`, while genuine completion
+remained `3/3`. The combined outcome and answer profile passed all 32 evaluable
+runs; the single provider timeout passed on an isolated rerun. This is the
+current single-model baseline, not cross-model validation.
 
 ## Shared-prefix pilot evidence
 

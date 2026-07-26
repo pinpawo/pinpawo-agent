@@ -32,6 +32,10 @@ the live response, composer, and status in the OpenTUI footer. The two probes
 exist so Phase 1 can compare internal viewport behavior with the closest
 OpenTUI-supported native-scrollback design.
 
+The split-footer probe disables OpenTUI mouse tracking so the terminal retains
+touchpad scrolling and native text selection. Mouse editing inside the composer
+is intentionally outside this comparison; keyboard editing remains available.
+
 Build the alternate-screen probe as a standalone executable with:
 
 ```sh

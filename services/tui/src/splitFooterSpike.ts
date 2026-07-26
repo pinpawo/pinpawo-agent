@@ -17,6 +17,10 @@ const smoke = process.argv.includes('--smoke');
 const renderer = await createCliRenderer({
   exitOnCtrlC: true,
   targetFps: 60,
+  // Native scrollback only works when the terminal owns wheel and selection
+  // input. OpenTUI mouse tracking would consume those events in the footer.
+  useMouse: false,
+  enableMouseMovement: false,
   screenMode: 'split-footer',
   footerHeight: 8,
   externalOutputMode: 'capture-stdout',

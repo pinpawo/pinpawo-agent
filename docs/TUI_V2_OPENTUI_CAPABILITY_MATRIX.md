@@ -15,6 +15,7 @@ The probe covers:
 
 - OpenTUI `ScrollBoxRenderable` sticky-bottom and browse behavior;
 - split-footer settled output in terminal scrollback with a live footer;
+- terminal-owned wheel and selection input in split-footer mode;
 - terminal selection while mouse input is enabled;
 - `TextareaRenderable` multiline editing, selection, paste, and undo/redo;
 - Unicode, CJK, and emoji cursor/render behavior;

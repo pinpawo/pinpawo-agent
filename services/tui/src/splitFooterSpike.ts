@@ -8,6 +8,7 @@ import {
   type ScrollbackRenderContext,
   type ScrollbackSurface,
 } from '@opentui/core';
+import { calculateComposerLayout } from './spike/composerLayout';
 import { formatInputProbe } from './spike/inputProbe';
 import {
   createSpikeSession,
@@ -80,6 +81,7 @@ const composer = new TextareaRenderable(renderer, {
     status.content = pendingPastePreview
       ?? `composer: ${[...composer.plainText].length} code points`;
     pendingPastePreview = null;
+    syncComposerLayout();
   },
   onPaste: (event: PasteEvent) => {
     pendingPastePreview = formatInputProbe(
@@ -117,6 +119,7 @@ renderer.keyInput.on('keypress', (key: KeyEvent) => {
     appendScrollbackBurst();
   }
 });
+renderer.on('resize', syncComposerLayout);
 renderer.on('selection', (selection) => {
   status.content = `selection: ${[...selection.getSelectedText()].length} code points`;
 });
@@ -143,6 +146,16 @@ function writeScrollbackLine(content: string) {
       height: 1,
     };
   });
+}
+
+function syncComposerLayout() {
+  const layout = calculateComposerLayout(
+    composer.plainText,
+    composer.virtualLineCount,
+  );
+  composerFrame.height = layout.frameHeight;
+  header.height = layout.headerHeight;
+  live.height = layout.liveHeight;
 }
 
 function runLiveDeltaBurst() {

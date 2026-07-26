@@ -36,10 +36,10 @@ The split-footer probe disables OpenTUI mouse tracking so the terminal retains
 touchpad scrolling and native text selection. Mouse editing inside the composer
 is intentionally outside this comparison; keyboard editing remains available.
 The footer stays at a fixed eight rows so repainting never performs a terminal
-scrollback transition. Its composer exposes three content rows and scrolls
-internally for longer input. A narrow compatibility workaround preserves the
-preceding newline when backspacing the last grapheme on an OpenTUI 0.4.5
-textarea line.
+scrollback transition. Its composer grows from one to three content rows by
+reclaiming the title and idle-live rows, then scrolls internally for longer
+input. A narrow compatibility workaround preserves the preceding newline when
+backspacing the last grapheme on an OpenTUI 0.4.5 textarea line.
 Its delta probe uses OpenTUI's `ScrollbackSurface`: token updates render into an
 off-screen buffer, while only complete rows are committed to terminal
 scrollback. The footer therefore does not repaint for every token.

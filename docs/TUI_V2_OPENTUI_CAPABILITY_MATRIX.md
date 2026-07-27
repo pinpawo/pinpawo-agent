@@ -174,16 +174,20 @@ Known limits and follow-up work:
 ## Procedure
 
 1. Run `npm run dev:split -w @pinpawo/tui` for the Phase 1 interaction probe.
-2. Press `F2`, browse upward with the touchpad, then press `Ctrl+T`.
-3. Confirm the viewport remains anchored while 250 rows are added.
-4. Return to the bottom and press `Ctrl+D`; confirm sticky follow resumes.
+2. Browse upward through the initial 40 rows with the touchpad, then press
+   `Ctrl+T` to commit 250 more rows.
+3. Confirm the viewport remains anchored while those rows are added.
+4. Return to the bottom, press `Ctrl+T` again, and confirm terminal-native
+   sticky follow resumes. Press `Ctrl+D` to run the 400-update stable-row delta
+   probe, then browse history while it streams.
 5. Select timeline text and copy it using the terminal's normal workflow.
-6. Press `F3` and test multiline input, soft wrap, selection, deletion,
-   undo/redo, CJK, emoji, and IME. In the production composer, verify Cmd+A,
-   Option+arrows, Home/End, Cmd+Z/Shift+Cmd+Z, and Cmd+C/Cmd+X; confirm a
-   clipboard failure leaves a cut selection unchanged. Submit two prompts,
-   start a third draft, and verify Up/Down at the first/last visual row recalls
-   both prompts and restores the untouched draft.
+6. The split-footer composer is focused by default. Test multiline input, soft
+   wrap, selection, deletion, undo/redo, CJK, emoji, and IME. In the production
+   composer, verify Cmd+A, Option+arrows, Home/End,
+   Cmd+Z/Shift+Cmd+Z, and Cmd+C/Cmd+X; confirm a clipboard failure leaves a cut
+   selection unchanged. Submit two prompts, start a third draft, and verify
+   Up/Down at the first/last visual row recalls both prompts and restores the
+   untouched draft.
 7. Paste multiple lines and confirm no accidental submit occurs.
 8. Run `npm run dev -w @pinpawo/tui`, then drag a path with spaces, a Unicode
    path, and multiple files into the production composer. Confirm each path

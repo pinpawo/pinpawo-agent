@@ -110,6 +110,7 @@ export {
   validateUniqueToolkitNames,
 } from './agent/createAgentRuntime';
 export type {
+  ActiveDelegationTransition,
   CompiledAgentRegistry,
   ExecutorCompilationIssue,
 } from './agent/createAgentRuntime';

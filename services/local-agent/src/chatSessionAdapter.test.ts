@@ -813,6 +813,83 @@ test('runChatSession does not confirm a review resolution when graph execution f
   assert.equal(confirmations, 0);
 });
 
+test('runChatSession preserves review cancellation when the active checkpoint read fails', async () => {
+  const review = {
+    id: 'review-original',
+    schemaVersion: 1,
+    view: { kind: 'plain' as const, body: 'Approve?' },
+    options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' as const } }],
+  };
+  const finalMessages = [new AIMessage('must not be reported as completed')];
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: { messages: [] },
+  } as unknown as AgentChannelSetup;
+  let reads = 0;
+  let current = true;
+  let finishInterruptedCount = 0;
+  const emittedEvents: AgentRuntimeEvent[] = [];
+  const graphService = {
+    async readThreadState() {
+      reads += 1;
+      if (reads === 1) {
+        return {
+          messages: [],
+          pendingHumanReview: { interruptId: 'interrupt-original', review },
+          hasPendingContinuation: true,
+        };
+      }
+      if (reads === 2) {
+        throw new Error('transient checkpoint read failure');
+      }
+      return {
+        messages: finalMessages,
+        pendingHumanReview: null,
+        hasPendingContinuation: false,
+      };
+    },
+    buildResumeCommand(value: unknown) {
+      return value;
+    },
+    streamEvents() {
+      return (async function* () {
+        yield protocolEvent('values', { messages: finalMessages });
+      })();
+    },
+  };
+
+  const result = await runChatSession({
+    request: {
+      kind: 'resume',
+      requestId: 'req-1',
+      resume: { action: 'interrupt_run' },
+    },
+    setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => current,
+    finishInterrupted: () => {
+      finishInterruptedCount += 1;
+    },
+    emitEvent: (event) => {
+      emittedEvents.push(event);
+    },
+    emitToolEvent: () => {},
+    interruptOnSettledResumeCheckpoint: true,
+    onResumeCheckpointed: ({ canInterrupt }) => {
+      assert.equal(canInterrupt, true);
+      current = false;
+    },
+  });
+
+  assert.deepEqual(result, { status: 'interrupted' });
+  assert.equal(finishInterruptedCount, 1);
+  assert.equal(
+    emittedEvents.some((event) => event.type === 'message.completed'),
+    false,
+  );
+});
+
 test('runChatSession allows a user message after an aborted non-review run leaves pending continuation', async () => {
   const finalMessages = [new AIMessage('continued after abort')];
   const emittedEvents: AgentRuntimeEvent[] = [];

@@ -196,7 +196,10 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
     const previousStatus = status;
     status = 'active';
     try {
-      let graphInput: Parameters<OrchestratorGraph['invoke']>[0] = buildOrchestratorRunInput(messages);
+      let graphInput: Parameters<OrchestratorGraph['invoke']>[0] = buildOrchestratorRunInput(
+        messages,
+        { activeDelegationTransition: input.activeDelegationTransition },
+      );
       while (true) {
         const result = await graph.invoke(graphInput, { signal: input.signal, configurable });
         const pending = readPendingInterrupt(result);

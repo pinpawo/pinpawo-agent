@@ -10,6 +10,7 @@ import { buildRunStateReset } from '../../state';
 import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
 import { guardDecisionEmitter } from '../guards/decisionEvents';
+import { applyActiveDelegationTransition } from '../activeDelegationTransition';
 
 export function createPrepareNode() {
   return async function prepare(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
@@ -21,7 +22,7 @@ export function createPrepareNode() {
     if (outcome.kind === 'derive') {
       return buildRunStateReset();
     }
-    return {};
+    return applyActiveDelegationTransition(state);
   };
 }
 

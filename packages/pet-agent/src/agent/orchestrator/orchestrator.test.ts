@@ -64,6 +64,9 @@ import {
   type OrchestratorStateType,
 } from './state';
 import { createCapabilityDecisionRunner } from './runtime/decisions/orchestrationDecision';
+import { applyActiveDelegationTransition } from './runtime/activeDelegationTransition';
+import { afterContextPrep } from './runtime/routes/afterContextPrep';
+import { readSubagentGuardStopReason } from '../../subagent/guardStop';
 
 function capability(
   name: string,
@@ -1135,7 +1138,7 @@ test('a completed subagent announce reaches the decision, while answer node only
     ...buildOrchestratorRunInput([
       new HumanMessage('读取文件并运行 lint'),
       currentAnnounce,
-    ]),
+    ], { activeDelegationTransition: 'resume_active' }),
     taskActiveDelegation: null as TaskActiveDelegation | null,
   };
   setPinpetMeta(currentAnnounce, {
@@ -1254,7 +1257,7 @@ test('delegation outcome answer asks LLM for a short delegation completion reply
   const input = {
     ...buildOrchestratorRunInput([
       new HumanMessage('帮我列一个目前 vibecoding 的模型排行榜。'),
-    ]),
+    ], { activeDelegationTransition: 'resume_active' }),
     taskActiveDelegation: null as TaskActiveDelegation | null,
   };
   const announceText = 'Vibe Coding 模型排行榜：1. Claude Sonnet 4；2. GPT-5；3. Gemini 2.5 Pro。';
@@ -1324,7 +1327,7 @@ test('user_input_required returns control without claiming delegation completion
   const input = {
     ...buildOrchestratorRunInput([
       new HumanMessage('根据我的选择，把已经完成的报告发送到邮件或项目群。'),
-    ]),
+    ], { activeDelegationTransition: 'resume_active' }),
     taskActiveDelegation: null as TaskActiveDelegation | null,
   };
   const task = '确认发送渠道并发送已经完成的报告';
@@ -1405,7 +1408,7 @@ test('task_done followed by planner answer does not imply user-goal completion',
   const input = {
     ...buildOrchestratorRunInput([
       new HumanMessage('调查 auth 模块，并根据调查结果决定是否重构。'),
-    ]),
+    ], { activeDelegationTransition: 'resume_active' }),
     taskActiveDelegation: null as TaskActiveDelegation | null,
   };
   const task = '调查 auth 模块结构、依赖和风险';
@@ -1639,7 +1642,7 @@ test('limit-reached progress announce lets model choose the same capability dele
       new HumanMessage('先调查仓库，再修复注册链路。'),
       new AIMessage('先从仓库调查开始。'),
       new HumanMessage('继续'),
-    ]),
+    ], { activeDelegationTransition: 'resume_active' }),
     taskActiveDelegation: null as TaskActiveDelegation | null,
   };
   const progressAnnounce = new AIMessage('(no matches)');
@@ -3382,6 +3385,184 @@ test('toolkit review rejection resumes the same subagent before parent handoff',
   assert.equal(finalState.taskActiveDelegation, null);
 });
 
+test('toolkit review run interruption retains the delegation without another model call or handoff', async () => {
+  let runCount = 0;
+  let reviewCount = 0;
+  const rawTool = tool(async ({ command }: { command: string }) => {
+    runCount += 1;
+    return `ran ${command}`;
+  }, {
+    name: 'run_shell',
+    description: 'run shell',
+    schema: z.object({ command: z.string() }),
+  });
+  const toolkits: AgentToolkit[] = [{
+    name: 'local',
+    description: 'local tools',
+    tools: [reviewedTool(rawTool, {
+      request: () => {
+        reviewCount += 1;
+        return buildReviewSpec({
+          view: { kind: 'plain', body: 'Approve shell?' },
+          options: [{
+            id: 'approve',
+            label: 'Approve',
+            decision: { type: 'approve' },
+          }],
+        });
+      },
+    })],
+  }];
+
+  let routeCallCount = 0;
+  const routeModel = {
+    invoke: async () => new AIMessage('answered'),
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        routeCallCount += 1;
+        if (routeCallCount === 1) {
+          return nextTaskDecision('run shell');
+        }
+        if (routeCallCount === 2) {
+          return routeCapabilityDecision('general');
+        }
+        return goalDoneDecision();
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const subagentModel = new FakeToolCallingModel({
+    toolCalls: [
+      [{
+        id: 'call-interrupted',
+        name: 'run_shell',
+        args: { command: 'git status' },
+      }],
+      [],
+    ],
+  });
+  const graph = createOrchestratorGraph({
+    models: {
+      act: routeModel,
+      observe: routeModel,
+      subagent: subagentModel,
+    },
+    actor: testActor,
+    checkpoint: new MemorySaver(),
+  });
+  const recorder = createSubagentInputRecorder();
+  let finalizeCallCount = 0;
+  const reviewedCapability = {
+    ...capability('general', 'General-purpose capability.', ['local']),
+    lifecycle: {
+      finalize: () => {
+        finalizeCallCount += 1;
+      },
+    },
+  };
+  const config = {
+    callbacks: recorder.callbacks,
+    configurable: {
+      thread_id: 'human-review-interrupt-retains-delegation',
+      actor: testActor,
+      capabilities: [reviewedCapability],
+      toolkits,
+    },
+  };
+
+  const interrupted = await graph.invoke(
+    buildOrchestratorRunInput([new HumanMessage('run git status')]),
+    config,
+  ) as {
+    __interrupt__?: Array<{ id?: string; value?: unknown }>;
+  };
+  const interruptId = interrupted.__interrupt__?.[0]?.id;
+  assert.ok(interruptId);
+
+  const resumedRun = await graph.streamEvents(new Command({
+    resume: {
+      [interruptId]: { action: 'interrupt_run' },
+    },
+  }), { version: 'v3', ...config });
+  for await (const _event of resumedRun) {
+    // Drain the root stream so the retained delegation checkpoint is materialized.
+  }
+  const finalState = await resumedRun.output as {
+    __interrupt__?: unknown;
+    messages: BaseMessage[];
+    runNextDelegation: unknown;
+    taskActiveDelegation: TaskActiveDelegation | null;
+  };
+
+  assert.equal(finalState.__interrupt__, undefined);
+  assert.equal(runCount, 0);
+  assert.equal(reviewCount, 2);
+  assert.equal(routeCallCount, 2);
+  assert.equal(recorder.subagentInputs.length, 1);
+  assert.equal(finalizeCallCount, 0);
+  assert.equal(finalState.runNextDelegation, null);
+  assert.equal(finalState.taskActiveDelegation?.status, 'pending');
+  assert.equal(
+    mainConversationMessages(finalState.messages)
+      .some((message) => Boolean(getMessageHandoffSource(message))),
+    false,
+  );
+
+  const activeDelegation = finalState.taskActiveDelegation;
+  assert.ok(activeDelegation);
+  const retainedLane = laneMessages(
+    finalState.messages,
+    activeDelegation.lane,
+    activeDelegation.transcriptRunId,
+    activeDelegation.id,
+  );
+  const cancelledToolResult = retainedLane.find((message) =>
+    message instanceof ToolMessage
+    && message.tool_call_id === 'call-interrupted');
+  assert.ok(cancelledToolResult);
+  assert.equal(
+    (JSON.parse(String(cancelledToolResult.content)) as { source?: string }).source,
+    'human_interrupt',
+  );
+  assert.equal(
+    retainedLane.some((message) =>
+      readSubagentGuardStopReason(message) === 'human_review_run_interrupted'),
+    true,
+  );
+
+  const retainedDelegationId = activeDelegation.id;
+  const continuedState = await graph.invoke(
+    buildOrchestratorRunInput(
+      [new HumanMessage('continue the suspended delegation')],
+      { activeDelegationTransition: 'resume_active' },
+    ),
+    config,
+  ) as {
+    messages: BaseMessage[];
+    taskActiveDelegation: TaskActiveDelegation | null;
+  };
+
+  assert.equal(routeCallCount, 3);
+  assert.equal(recorder.subagentInputs.length, 2);
+  assert.equal(finalizeCallCount, 1);
+  const continuedSubagentInput = recorder.subagentInputs.at(-1) ?? [];
+  assert.equal(
+    continuedSubagentInput.some((message) => {
+      if (!(message instanceof ToolMessage)) return false;
+      const content = JSON.parse(String(message.content)) as { source?: string };
+      return content.source === 'human_interrupt';
+    }),
+    true,
+  );
+  const resumedHandoff = mainConversationMessages(continuedState.messages)
+    .map((message) => getMessageHandoffSource(message))
+    .find((source) => source?.delegationId === retainedDelegationId);
+  assert.ok(resumedHandoff);
+  assert.equal(continuedState.taskActiveDelegation, null);
+});
+
 test('toolkit review resumes multiple reviewed tool calls in one model response', async () => {
   let runCount = 0;
   let reviewCount = 0;
@@ -3857,7 +4038,7 @@ test('terminal outcome decision keeps active delegation when handoff cannot be b
       new HumanMessage('继续'),
       // No announce message for active-1: buildSubagentHandoff must return null.
       new AIMessage('只有中间步骤，没有可交接结果。'),
-    ]),
+    ], { activeDelegationTransition: 'resume_active' }),
     taskActiveDelegation: activeDelegation,
   };
   input.runDelegationSummaries = [{
@@ -3930,7 +4111,10 @@ test('delegation outcome continue decision can re-enter main and finalize handof
     status: 'awaiting_decision',
     resultPreview: '已完成第一批抓取，剩余待查。',
   };
-  const inputBase = buildOrchestratorRunInput([new HumanMessage('继续处理仓库')]);
+  const inputBase = buildOrchestratorRunInput(
+    [new HumanMessage('继续处理仓库')],
+    { activeDelegationTransition: 'resume_active' },
+  );
   activeDelegation.transcriptRunId = inputBase.runId;
   const input = {
     ...inputBase,
@@ -4015,7 +4199,10 @@ test('delegation outcome continuation path rechecks run iteration guard before n
     status: 'awaiting_decision',
     resultPreview: '进度已完成前段。',
   };
-  const inputBase = buildOrchestratorRunInput([new HumanMessage('继续执行任务')]);
+  const inputBase = buildOrchestratorRunInput(
+    [new HumanMessage('继续执行任务')],
+    { activeDelegationTransition: 'resume_active' },
+  );
   activeDelegation.transcriptRunId = inputBase.runId;
   const input = {
     ...inputBase,
@@ -4101,7 +4288,10 @@ test('delegation_outcome does not append duplicate handoff copies for unchanged 
     status: 'awaiting_decision',
     resultPreview: '进度更新：已完成一部分，继续保留。',
   };
-  const inputBase = buildOrchestratorRunInput([new HumanMessage('继续清单处理')]);
+  const inputBase = buildOrchestratorRunInput(
+    [new HumanMessage('继续清单处理')],
+    { activeDelegationTransition: 'resume_active' },
+  );
   activeDelegation.transcriptRunId = inputBase.runId;
   const input = {
     ...inputBase,
@@ -4311,7 +4501,10 @@ test('lane tagging marks the deliverable as the announce regardless of stop reas
 });
 
 test('limit-reached subagent announce reaches the outcome decision input', async () => {
-  const baseInput = buildOrchestratorRunInput([new HumanMessage('继续探查 repo')]);
+  const baseInput = buildOrchestratorRunInput(
+    [new HumanMessage('继续探查 repo')],
+    { activeDelegationTransition: 'resume_active' },
+  );
   const progress = new AIMessage({
     id: 'limit-chain-progress',
     content: '已完成依赖检查，剩余源码还需要继续探查。',
@@ -4430,7 +4623,10 @@ test('delegation outcome does not handoff a limit_reached announce', async () =>
     },
     actor: testActor,
   });
-  const baseInput = buildOrchestratorRunInput([new HumanMessage('继续')]);
+  const baseInput = buildOrchestratorRunInput(
+    [new HumanMessage('继续')],
+    { activeDelegationTransition: 'resume_active' },
+  );
 
   const activeDelegation: TaskActiveDelegation = {
     id: 'limit-active',
@@ -4514,7 +4710,10 @@ test('delegation outcome uses a unified run-iteration guard before invoking deci
     actor: testActor,
     maxRunIterations: 2,
   });
-  const baseInput = buildOrchestratorRunInput([new HumanMessage('继续')]);
+  const baseInput = buildOrchestratorRunInput(
+    [new HumanMessage('继续')],
+    { activeDelegationTransition: 'resume_active' },
+  );
   const input = {
     ...baseInput,
     taskActiveDelegation: null as TaskActiveDelegation | null,
@@ -4869,6 +5068,303 @@ function createSubagentInputRecorder() {
     }],
   };
 }
+
+function interruptedLaneMessages(params: {
+  delegationId: string;
+  runId: string;
+  lane?: `capability:${string}`;
+}) {
+  const lane = params.lane ?? 'capability:general';
+  const toolCall = new AIMessage({
+    id: `${params.delegationId}-tool-call`,
+    content: '旧任务正在执行工具。',
+    tool_calls: [{
+      id: `${params.delegationId}-call`,
+      name: 'old_tool',
+      args: {},
+    }],
+  });
+  const toolResult = new ToolMessage({
+    id: `${params.delegationId}-tool-result`,
+    content: 'OLD_DELEGATION_TOOL_RESULT',
+    tool_call_id: `${params.delegationId}-call`,
+  });
+  for (const message of [toolCall, toolResult]) {
+    setPinpetMeta(message, {
+      lane,
+      runId: params.runId,
+      delegationId: params.delegationId,
+    });
+  }
+  return [toolCall, toolResult];
+}
+
+test('fresh-turn active delegation transitions are explicit for pending and awaiting states', () => {
+  for (const status of ['pending', 'awaiting_decision'] as const) {
+    const activeDelegation: TaskActiveDelegation = {
+      id: `old-${status}`,
+      lane: 'capability:general',
+      task: `旧的 ${status} 任务`,
+      contextSummary: '旧任务上下文。',
+      transcriptRunId: `old-run-${status}`,
+      status,
+      resultPreview: status === 'awaiting_decision' ? '旧进度。' : null,
+    };
+    const oldLaneMessages = interruptedLaneMessages({
+      delegationId: activeDelegation.id,
+      runId: activeDelegation.transcriptRunId,
+    });
+    const supersedeState = {
+      ...buildOrchestratorRunInput([new HumanMessage('开始全新的请求')]),
+      messages: oldLaneMessages,
+      taskActiveDelegation: activeDelegation,
+    } as OrchestratorStateType;
+    const supersedeUpdate = applyActiveDelegationTransition(supersedeState);
+
+    assert.equal(supersedeUpdate.taskActiveDelegation, null);
+    assert.equal(supersedeUpdate.messages, undefined);
+    assert.deepEqual(supersedeState.messages, oldLaneMessages);
+
+    const resumeState = {
+      ...supersedeState,
+      ...buildOrchestratorRunInput(
+        [new HumanMessage('按我刚补充的方向继续')],
+        { activeDelegationTransition: 'resume_active' },
+      ),
+      messages: [...oldLaneMessages, new HumanMessage('按我刚补充的方向继续')],
+      taskActiveDelegation: activeDelegation,
+    } as OrchestratorStateType;
+    const resumeUpdate = applyActiveDelegationTransition(resumeState);
+    const resumedState = {
+      ...resumeState,
+      ...resumeUpdate,
+      messages: messagesStateReducer(
+        resumeState.messages,
+        resumeUpdate.messages ?? [],
+      ),
+    } as OrchestratorStateType;
+
+    assert.equal(resumedState.taskActiveDelegation?.id, activeDelegation.id);
+    assert.equal(
+      resumedState.taskActiveDelegation?.transcriptRunId,
+      activeDelegation.transcriptRunId,
+    );
+    assert.equal(
+      laneMessages(
+        resumedState.messages,
+        activeDelegation.lane,
+        activeDelegation.transcriptRunId,
+        activeDelegation.id,
+      ).some((message) => message instanceof ToolMessage),
+      true,
+    );
+    if (status === 'pending') {
+      assert.equal(resumedState.runNextDelegation?.id, activeDelegation.id);
+      assert.equal(afterContextPrep(resumedState), 'capability');
+      const continuationBriefing = resumedState.messages
+        .filter(isDelegationBriefingMessage)
+        .at(-1);
+      assert.match(String(continuationBriefing?.content ?? ''), /mode="continue"/);
+      assert.match(String(continuationBriefing?.content ?? ''), /按我刚补充的方向继续/);
+    } else {
+      assert.equal(resumedState.runNextDelegation, null);
+      assert.equal(afterContextPrep(resumedState), 'delegationOutcomeIterationGuard');
+      assert.equal(resumedState.runDelegationSummaries[0]?.status, 'progress');
+    }
+  }
+});
+
+test('fresh delegated request supersedes checkpointed work without deleting its lane', async () => {
+  const oldDelegation: TaskActiveDelegation = {
+    id: 'old-awaiting-delegation',
+    lane: 'capability:general',
+    task: '旧任务：检查历史 review 状态',
+    contextSummary: '这段上下文不得进入新任务。',
+    transcriptRunId: 'old-awaiting-run',
+    status: 'awaiting_decision',
+    resultPreview: '旧任务执行了一部分。',
+  };
+  const oldMessages = interruptedLaneMessages({
+    delegationId: oldDelegation.id,
+    runId: oldDelegation.transcriptRunId,
+  });
+  let structuredCallCount = 0;
+  let executedDelegation: { delegationId: string; runId: string } | null = null;
+  const actModel = {
+    invoke: async () => new AIMessage('新请求已经完成。'),
+    bindTools: () => ({ invoke: async () => new AIMessage('') }),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        structuredCallCount += 1;
+        if (structuredCallCount === 1) {
+          return nextTaskDecision('执行全新的请求。');
+        }
+        if (structuredCallCount === 2) {
+          return routeCapabilityDecision('general');
+        }
+        return goalDoneDecision();
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const freshCapability: AgentCapability = {
+    ...capability('general', 'General-purpose capability.'),
+    lifecycle: {
+      finalize: (_result, context) => {
+        executedDelegation = {
+          delegationId: context.delegationId,
+          runId: context.runId,
+        };
+      },
+    },
+  };
+  const recorder = createSubagentInputRecorder();
+  const graph = createOrchestratorGraph({
+    models: {
+      act: actModel,
+      observe: actModel,
+      subagent: new FakeListChatModel({
+        responses: ['全新请求的执行结果。'],
+        sleep: 0,
+      }),
+    },
+    actor: testActor,
+    checkpoint: new MemorySaver(),
+  });
+  const config = {
+    configurable: {
+      thread_id: 'fresh-turn-supersedes-checkpointed-awaiting',
+      actor: testActor,
+      capabilities: [freshCapability],
+      toolkits: [],
+    },
+    callbacks: recorder.callbacks,
+  };
+  await graph.updateState(config, {
+    messages: oldMessages,
+    taskActiveDelegation: oldDelegation,
+    runId: oldDelegation.transcriptRunId,
+  });
+
+  const state = await graph.invoke(
+    buildOrchestratorRunInput([new HumanMessage('这是全新的请求')]),
+    config,
+  ) as OrchestratorStateType;
+
+  assert.equal(structuredCallCount, 3);
+  const observedFreshDelegation = executedDelegation as {
+    delegationId: string;
+    runId: string;
+  } | null;
+  assert.ok(observedFreshDelegation);
+  assert.notEqual(observedFreshDelegation.delegationId, oldDelegation.id);
+  assert.notEqual(observedFreshDelegation.runId, oldDelegation.transcriptRunId);
+  assert.equal(
+    recorder.subagentInputs.flat().some((message) =>
+      message instanceof ToolMessage
+      && message.content === 'OLD_DELEGATION_TOOL_RESULT'),
+    false,
+  );
+  assert.equal(
+    laneMessages(
+      state.messages,
+      oldDelegation.lane,
+      oldDelegation.transcriptRunId,
+      oldDelegation.id,
+    ).some((message) => message instanceof ToolMessage),
+    true,
+  );
+});
+
+test('explicit resume reuses checkpointed delegation identity and ToolMessages', async () => {
+  const activeDelegation: TaskActiveDelegation = {
+    id: 'resume-pending-delegation',
+    lane: 'capability:general',
+    task: '继续原来的仓库检查',
+    contextSummary: '已经完成第一步。',
+    transcriptRunId: 'resume-pending-run',
+    status: 'pending',
+    resultPreview: null,
+  };
+  const oldMessages = interruptedLaneMessages({
+    delegationId: activeDelegation.id,
+    runId: activeDelegation.transcriptRunId,
+  });
+  let structuredCallCount = 0;
+  let executedDelegation: { delegationId: string; runId: string } | null = null;
+  const actModel = {
+    invoke: async () => new AIMessage('原任务继续完成。'),
+    bindTools: () => ({ invoke: async () => new AIMessage('') }),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        structuredCallCount += 1;
+        return goalDoneDecision();
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const resumedCapability: AgentCapability = {
+    ...capability('general', 'General-purpose capability.'),
+    lifecycle: {
+      finalize: (_result, context) => {
+        executedDelegation = {
+          delegationId: context.delegationId,
+          runId: context.runId,
+        };
+      },
+    },
+  };
+  const recorder = createSubagentInputRecorder();
+  const graph = createOrchestratorGraph({
+    models: {
+      act: actModel,
+      observe: actModel,
+      subagent: new FakeListChatModel({
+        responses: ['继续执行后的交付结果。'],
+        sleep: 0,
+      }),
+    },
+    actor: testActor,
+    checkpoint: new MemorySaver(),
+  });
+  const config = {
+    configurable: {
+      thread_id: 'explicit-resume-checkpointed-pending',
+      actor: testActor,
+      capabilities: [resumedCapability],
+      toolkits: [],
+    },
+    callbacks: recorder.callbacks,
+  };
+  await graph.updateState(config, {
+    messages: oldMessages,
+    taskActiveDelegation: activeDelegation,
+    runId: activeDelegation.transcriptRunId,
+  });
+
+  await graph.invoke(
+    buildOrchestratorRunInput(
+      [new HumanMessage('继续，并优先检查最新修改')],
+      { activeDelegationTransition: 'resume_active' },
+    ),
+    config,
+  );
+
+  assert.equal(structuredCallCount, 1);
+  assert.deepEqual(executedDelegation, {
+    delegationId: activeDelegation.id,
+    runId: activeDelegation.transcriptRunId,
+  });
+  const resumedInput = recorder.subagentInputs.at(-1) ?? [];
+  assert.equal(
+    resumedInput.some((message) =>
+      message instanceof ToolMessage
+      && message.content === 'OLD_DELEGATION_TOOL_RESULT'),
+    true,
+  );
+  assert.match(
+    resumedInput.map((message) => String(message.content)).join('\n'),
+    /继续，并优先检查最新修改/,
+  );
+});
 
 test('delegation briefing is lane-scoped while concise plans remain in main', async () => {
   let structuredCallCount = 0;

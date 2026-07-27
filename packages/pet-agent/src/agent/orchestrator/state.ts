@@ -8,6 +8,7 @@ import type {
   RunDelegationSummary,
   CapabilityPlanTask,
   TaskActiveDelegation,
+  ActiveDelegationTransition,
 } from './types';
 import type { CapabilityArtifactRef } from '../../types/artifact';
 import { mergeCapabilityArtifactRefs } from './capabilityArtifacts';
@@ -54,6 +55,10 @@ const orchestratorStateChannels = {
     reducer: (_prev, next) => next,
     default: () => null,
   }),
+  runActiveDelegationTransition: Annotation<ActiveDelegationTransition>({
+    reducer: (_prev, next) => next,
+    default: () => 'supersede_active',
+  }),
   runId: Annotation<string>({
     reducer: (_prev, next) => next,
     default: () => '',
@@ -78,10 +83,17 @@ export type OrchestratorRunState = Pick<
   | 'runDelegationSummaries'
   | 'runIterationCount'
   | 'runLatestDelegationOutcome'
+  | 'runActiveDelegationTransition'
   | 'runId'
 >;
 
-export function buildRunStateReset(): OrchestratorRunState {
+export type BuildOrchestratorRunOptions = {
+  activeDelegationTransition?: ActiveDelegationTransition;
+};
+
+export function buildRunStateReset(
+  options: BuildOrchestratorRunOptions = {},
+): OrchestratorRunState {
   return {
     runNextDelegation: null,
     runPendingTask: null,
@@ -89,14 +101,19 @@ export function buildRunStateReset(): OrchestratorRunState {
     runDelegationSummaries: [],
     runIterationCount: 0,
     runLatestDelegationOutcome: null,
+    runActiveDelegationTransition:
+      options.activeDelegationTransition ?? 'supersede_active',
     runId: randomUUID().slice(0, 8),
   };
 }
 
-export function buildOrchestratorRunInput(messages: BaseMessage[]) {
+export function buildOrchestratorRunInput(
+  messages: BaseMessage[],
+  options: BuildOrchestratorRunOptions = {},
+) {
   return {
     messages,
-    ...buildRunStateReset(),
+    ...buildRunStateReset(options),
   };
 }
 

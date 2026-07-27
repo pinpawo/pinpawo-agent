@@ -43,7 +43,12 @@ export type ChatSessionResult =
   | { status: 'interrupted' };
 
 export type ChatSessionRequest =
-  | { kind: 'user_message'; requestId: string; message: string }
+  | {
+      kind: 'user_message';
+      requestId: string;
+      message: string;
+      activeDelegationTransition?: AgentChannelSetup['input']['activeDelegationTransition'];
+    }
   | { kind: 'resume'; requestId: string; resume: unknown };
 
 export type ChatSessionAdapterOptions = {
@@ -54,6 +59,12 @@ export type ChatSessionAdapterOptions = {
   finishInterrupted: () => void;
   emitEvent: (event: AgentRuntimeEvent) => void;
   emitToolEvent: (payload: StreamToolsPayload) => void;
+  /**
+   * A review.cancel run stops itself at a safe graph checkpoint. If the active
+   * boundary read is transiently unavailable, allow the final settled
+   * checkpoint to release the queued interrupt instead of reporting completed.
+   */
+  interruptOnSettledResumeCheckpoint?: boolean;
   /** Called once checkpoint state no longer contains the original review. */
   onResumeCheckpointed?: (result: { canInterrupt: boolean }) => void;
   /**
@@ -303,6 +314,7 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
     ? graphService.buildResumeCommand(request.resume)
     : undefined;
   if (!isResumeRequest) {
+    setup.input.activeDelegationTransition = request.activeDelegationTransition;
     setup.input.messages = [
       ...setup.input.messages.slice(0, -1),
       stampMessageCreatedAtUtc(new HumanMessage(message)),
@@ -456,7 +468,10 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
   }
 
   const finalThreadState = await graphService.readThreadState(setup);
-  confirmResumeCheckpoint(finalThreadState, false);
+  confirmResumeCheckpoint(
+    finalThreadState,
+    options.interruptOnSettledResumeCheckpoint === true,
+  );
   if (!isCurrent()) {
     finishInterrupted();
     return { status: 'interrupted' };

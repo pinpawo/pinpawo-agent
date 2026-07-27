@@ -227,6 +227,9 @@ export class LocalServerChatHandler {
       kind: 'user_message',
       requestId: msg.requestId,
       message: msg.message,
+      ...(msg.activeDelegationTransition
+        ? { activeDelegationTransition: msg.activeDelegationTransition }
+        : {}),
     }, deps, { type: 'chat_request' });
   }
 
@@ -259,8 +262,7 @@ export class LocalServerChatHandler {
     } else {
       console.log(
         `[local-server] review.cancel resume human_review requestId=${requestId} `
-        + `reviewId=${source.reviewId} option=${source.selectedOptionId}`
-        + (source.decisionCount ? ` decisions=${source.decisionCount}` : ''),
+        + `reviewId=${source.reviewId} action=interrupt_run`,
       );
     }
     const threadId = this.tuiSessions.getChatThreadId(deps.actorId);
@@ -315,6 +317,9 @@ export class LocalServerChatHandler {
           if (!isCurrent()) return;
           overlayInflightDelegationOperations(inflight, operations);
         },
+        ...(source.type === 'review.cancel'
+          ? { interruptOnSettledResumeCheckpoint: true }
+          : {}),
         ...(source.type !== 'chat_request'
           ? {
             onResumeCheckpointed: ({ canInterrupt }: { canInterrupt: boolean }) => {
@@ -426,7 +431,6 @@ export class LocalServerChatHandler {
       },
       acceptRoute: (route) => this.acceptReviewRoute(peer, route, msg, deps),
       isConnected: peer.isConnected,
-      restorePending: (route) => this.restorePendingReview(peer, msg.requestId, route),
       run: (route, resume, source) => this.runChatRequest(peer, {
         kind: 'resume',
         requestId: msg.requestId,
@@ -458,29 +462,6 @@ export class LocalServerChatHandler {
       return false;
     }
     return true;
-  }
-
-  private restorePendingReview(
-    peer: LocalServerPeer,
-    requestId: string,
-    route: ReviewActionRoute,
-  ) {
-    console.warn(
-      `[local-server] review.cancel rejected: review action=${route.actionId} has no reject option`,
-    );
-    sendLocalServerPeerEvent(peer, {
-      type: 'system.notice',
-      requestId,
-      message: '当前 review 没有可用的拒绝选项，无法自动取消。',
-    });
-    sendLocalServerPeerEvent(peer, {
-      type: 'human_review.requested',
-      requestId,
-      ...(route.interruptId ? { interruptId: route.interruptId } : {}),
-      review: route.reviews[0]!,
-      reviews: route.reviews,
-      ...(route.actor ? { actor: route.actor } : {}),
-    });
   }
 
   private sendStreamToolOperationEvent(

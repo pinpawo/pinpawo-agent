@@ -17,9 +17,11 @@ import {
   type ToolAuthorizationRecord,
 } from './review/reviewAuthorizations';
 import {
+  isHumanReviewRunControlResume,
   resolveHumanReviewBatchResume,
   ReviewResponseResolutionError,
 } from './review/reviewResponseResolver';
+import { buildSubagentReviewInterruptStopNotice } from '../../subagent/guardStop';
 import {
   appendReviewViewMessage,
   reviewViewToText,
@@ -67,6 +69,8 @@ function buildCancelledToolResult(params: {
     ? 'Follow the user rejection and any updated direction. Do not retry this exact tool call unless the user explicitly asks for it.'
     : params.source === 'human_respond'
       ? 'Treat the user response as new task guidance, replan, and continue without retrying this exact tool call.'
+      : params.source === 'human_interrupt'
+        ? 'The run was interrupted while awaiting review. Do not retry or continue in this invocation.'
       : params.source === 'review_unavailable'
         ? 'This action requires human authorization that is unavailable in this runtime. Do not retry it; choose an allowed alternative or explain the constraint.'
         : 'This action is blocked by policy. Do not retry it; choose an allowed alternative or explain the constraint.';
@@ -371,6 +375,7 @@ type ToolkitReviewCancellation = Extract<ToolkitReviewPreparation, { type: 'canc
 type ToolkitReviewCancellationSource =
   | 'human_reject'
   | 'human_respond'
+  | 'human_interrupt'
   | 'policy_block'
   | 'review_unavailable';
 
@@ -401,6 +406,7 @@ type ToolkitReviewResults = {
   toolMessages: ToolMessage[];
   terminalMessage: AIMessage | null;
   resumeModel: boolean;
+  stopRun: boolean;
   newlyApprovedReviewIds: Set<string>;
 };
 
@@ -508,19 +514,29 @@ async function prepareToolkitToolReview(params: {
   };
 }
 
+type ReviewActionResumeResolution =
+  | { type: 'interrupt_run' }
+  | { type: 'decisions'; resolutions: ReviewResponseResolution[] };
+
 async function resolveReviewActionResume(params: {
   reviews: PreparedToolkitReview[];
   resume: unknown;
-}): Promise<ReviewResponseResolution[]> {
-  return resolveHumanReviewBatchResume(
-    params.reviews.map((review) => ({
-      reviewSpec: review.reviewPayload.review,
-      ...(review.reviewPayload.pendingAction
-        ? { pendingAction: review.reviewPayload.pendingAction }
-        : {}),
-    })),
-    params.resume,
-  );
+}): Promise<ReviewActionResumeResolution> {
+  if (isHumanReviewRunControlResume(params.resume)) {
+    return { type: 'interrupt_run' };
+  }
+  return {
+    type: 'decisions',
+    resolutions: resolveHumanReviewBatchResume(
+      params.reviews.map((review) => ({
+        reviewSpec: review.reviewPayload.review,
+        ...(review.reviewPayload.pendingAction
+          ? { pendingAction: review.reviewPayload.pendingAction }
+          : {}),
+      })),
+      params.resume,
+    ),
+  };
 }
 
 async function authorizeApprovedReviewAction(params: {
@@ -693,10 +709,28 @@ async function resolveHumanToolkitReviews(params: {
   let resume = interrupt(reviewPayload);
   while (true) {
     try {
-      const resolutions = await resolveReviewActionResume({
+      const resumeResolution = await resolveReviewActionResume({
         reviews: params.reviews,
         resume,
       });
+      if (resumeResolution.type === 'interrupt_run') {
+        const firstReview = params.reviews[0];
+        if (!firstReview) {
+          throw new ReviewResponseResolutionError(
+            'invalid_response',
+            'Cannot interrupt an empty human review action.',
+          );
+        }
+        return {
+          type: 'cancel',
+          cancellation: buildCancelledOutcomeForReview(
+            firstReview,
+            'run interrupted while waiting for human review',
+            'human_interrupt',
+          ),
+        };
+      }
+      const { resolutions } = resumeResolution;
       const firstCancellation = resolutions.find((resolution) =>
         resolution.decision.type !== 'approve');
       if (firstCancellation) {
@@ -818,9 +852,12 @@ function buildCancelledToolCallResults(
             ? `工具调用 ${cancellation.toolCall.name} 被策略阻止，未执行。原因：${cancellation.reason}`
             : `工具调用 ${cancellation.toolCall.name} 需要人工确认，但当前运行环境无法收集确认，因此未执行。原因：${cancellation.reason}`,
         })
-      : null,
+      : cancellation.source === 'human_interrupt'
+        ? buildSubagentReviewInterruptStopNotice()
+        : null,
     resumeModel: cancellation.source === 'human_reject'
       || cancellation.source === 'human_respond',
+    stopRun: cancellation.source === 'human_interrupt',
     newlyApprovedReviewIds: new Set<string>(),
   };
 }
@@ -854,6 +891,7 @@ async function reviewToolkitToolCalls(params: {
     toolMessages: [],
     terminalMessage: null,
     resumeModel: false,
+    stopRun: false,
     newlyApprovedReviewIds: resolution.newlyApprovedReviewIds,
   };
 }
@@ -886,9 +924,11 @@ function buildToolkitReviewStateUpdate(params: {
   // after-model router considers the turn complete and exits the child agent.
   // Human reject/respond is task guidance, so explicitly return to the same
   // child model. Deterministic policy blocks keep their terminal semantics.
-  const cancellationUpdate = reviewResults.resumeModel
-    ? { jumpTo: 'model' as const }
-    : {};
+  const cancellationUpdate = reviewResults.stopRun
+    ? { jumpTo: 'end' as const }
+    : reviewResults.resumeModel
+      ? { jumpTo: 'model' as const }
+      : {};
   const appendedMessages = reviewResults.terminalMessage
     ? [...reviewResults.toolMessages, reviewResults.terminalMessage]
     : reviewResults.toolMessages;
@@ -945,7 +985,7 @@ export function createToolkitReviewMiddleware(
           reviewResults,
         });
       },
-      canJumpTo: ['model'],
+      canJumpTo: ['model', 'end'],
     },
   });
 }

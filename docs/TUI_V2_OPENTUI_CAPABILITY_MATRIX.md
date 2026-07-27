@@ -51,6 +51,7 @@ The probe covers:
 | two-line status | run/connection/notice and session in/out/context/workspace facts remain separate with narrow-width degradation | automated test |
 | borderless welcome | terminal-raster paw, v2 package version, runtime facts, and shortcuts commit once before timeline history | automated + Bun native test |
 | Phase 5 CLI entry | `pinpawo tui --v2` selects a bundled/workspace OpenTUI executable or workspace source while `--legacy` remains an explicit rollback | automated test + compiled PTY |
+| npm distribution payload | one Bun-targeted JS bundle and versioned manifest ship in `pinpawo`; npm selects Bun/OpenTUI platform packages | automated manifest tests + installed-tarball PTY |
 | raw input preview | controls are escaped and output is bounded | automated test |
 | fixed-footer composer layout | composer grows from 3–5 visible rows without changing terminal footer height | automated test |
 | native textarea regression | multiline paste and single-grapheme backspace preserve line boundaries | Bun native test |
@@ -61,9 +62,10 @@ The probe covers:
 | split-footer PTY startup | `npm run smoke:split -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | standalone executable | `npm run build -w @pinpawo/tui` | passed for darwin-arm64; normal and approval compiled PTY smokes passed |
 | root typecheck | `npm run typecheck` | passed |
-| root tests | `npm test` | passed, including local-agent 765/765 and Chrome extension 22/22 |
+| root tests | `npm test` | passed, including local-agent 768/768 and Chrome extension 22/22 |
 | root build | `npm run build` | passed |
-| CLI package dry-run | `npm run pack:dry -w pinpawo` | passed; launcher is bundled, while platform-specific v2 executables remain a later distribution slice |
+| CLI package dry-run | `npm run pack:dry -w pinpawo` | passed; `dist/tui/main.js` and its manifest are included |
+| installed tarball v2 startup | install the generated `pinpawo` tarball in an empty project and run `pinpawo tui --v2` | passed on darwin-arm64 with package-local Bun/OpenTUI runtime |
 
 ## Manual terminal matrix
 

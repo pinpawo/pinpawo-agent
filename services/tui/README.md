@@ -49,16 +49,20 @@ repository root in another terminal:
 npm run tui:v2 -w pinpawo
 ```
 
-An installed package prefers its bundled executable. In a source checkout the
-launcher uses the workspace Bun dependency and current TUI source, then falls
-back to `services/tui/dist/pinpawo-tui` or global `bun`. `PINPAWO_TUI_V2_BIN`
-can select an explicit build. Direct development remains available with
-`npm run dev -w @pinpawo/tui`.
+An installed package runs the Bun-targeted bundle carried at
+`pinpawo/dist/tui/main.js` with the platform Bun and OpenTUI packages selected
+by npm. A source checkout instead prefers its workspace Bun dependency and
+current TUI source, then falls back to a compiled workspace binary, the packaged
+bundle, or global `bun`. `PINPAWO_TUI_V2_BIN` can select an explicit standalone
+build and `PINPAWO_BUN_BIN` can select a Bun runtime. Direct development remains
+available with `npm run dev -w @pinpawo/tui`.
 
-The current public `pinpawo` npm tarball does not yet carry platform-specific
-OpenTUI executables. Until the distribution slice lands, `--v2` is supported
-from this source workspace, a distributor-provided bundle, or an explicit
-`PINPAWO_TUI_V2_BIN`; installed users retain `--legacy`.
+`@pinpawo/tui` remains a private implementation package. The public `pinpawo`
+tarball carries one runtime-neutral Bun bundle and a versioned manifest rather
+than publishing a TUI API package or six PinPawo platform binary packages.
+`bun`, `@opentui/core`, and `web-tree-sitter` are optional runtime dependencies,
+so legacy CLI installation and `pinpawo tui --legacy` remain available if a
+platform cannot install the v2 runtime.
 
 The client reads `LOCAL_SERVER_PORT` (default `3210`) and the bearer token
 written by the host to `~/.pinpawo/local-server-token`. It will synchronize the
@@ -176,6 +180,16 @@ npm run build:spike -w @pinpawo/tui
 
 Platform-specific executables are written to `services/tui/dist/`, which is
 ignored by Git.
+
+Build the npm distribution payload used by the local-agent package with:
+
+```sh
+npm run build:distribution -w @pinpawo/tui
+```
+
+This writes `main.js` and a checked `manifest.json` to
+`services/local-agent/dist/tui/`. The normal `pinpawo` build runs this step
+after the local-agent bundle is created.
 
 Probe controls:
 

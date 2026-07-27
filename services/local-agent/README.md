@@ -96,12 +96,13 @@ pinpawo capability install ./my-capability
 ```
 
 `pinpawo tui` remains the legacy Ink client during OpenTUI dogfood.
-`pinpawo tui --v2` launches the OpenTUI client. Installed packages prefer a
-bundled native executable; source checkouts use their workspace Bun dependency
-and current TUI source, with a compiled workspace binary or global Bun as
-fallbacks. `PINPAWO_TUI_V2_BIN` selects an explicit build. `pinpawo tui
---legacy` is the rollback path and will remain available when v2 becomes the
-default.
+`pinpawo tui --v2` launches the OpenTUI client. Installed packages use the
+Bun-targeted bundle in `dist/tui` together with npm-selected Bun and OpenTUI
+platform packages. Source checkouts prefer their workspace Bun dependency and
+current TUI source, with a compiled workspace binary, packaged bundle, or global
+Bun as fallbacks. `PINPAWO_TUI_V2_BIN` selects an explicit standalone build and
+`PINPAWO_BUN_BIN` selects a Bun runtime. `pinpawo tui --legacy` is the rollback
+path and will remain available when v2 becomes the default.
 
 The TUI client connects to the separately running local host, so start
 `pinpawo run` first. `--workdir` selects the child client's working directory;

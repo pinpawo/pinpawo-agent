@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "bun build --compile src/main.ts --outfile dist/pinpawo-tui",
+    "build:distribution": "bun run scripts/buildDistribution.ts",
     "build:spike": "bun build --compile src/spike.ts --outfile dist/pinpawo-tui-spike",
     "dev": "bun run src/main.ts",
     "dev:command": "bun run src/main.ts --demo-command",

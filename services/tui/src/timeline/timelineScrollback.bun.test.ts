@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {
+  BoxRenderable,
+  CliRenderEvents,
+  TextRenderable,
+} from '@opentui/core';
 import { createTestRenderer } from '@opentui/core/testing';
 import type {
   AgentSession,
@@ -57,10 +62,16 @@ test('welcome is committed once before the first timeline rows', async () => {
   try {
     timeline.renderWelcome(['paw', 'PinPawo TUI v2']);
     timeline.renderWelcome(['must not repeat']);
-    timeline.render(session([userMessage('hello')]));
     assert.equal(
       setup.externalOutput.takeText(),
-      ['paw', 'PinPawo TUI v2', formatTimelineEntry(userMessage('hello'))].join('\n'),
+      ['paw', 'PinPawo TUI v2'].join('\n'),
+    );
+    setup.cellOutput.clear();
+
+    timeline.render(session([userMessage('hello')]));
+    assert.equal(
+      setup.cellOutput.takeText(),
+      formatTimelineEntry(userMessage('hello')),
     );
   } finally {
     timeline.destroy();
@@ -68,13 +79,54 @@ test('welcome is committed once before the first timeline rows', async () => {
   }
 });
 
-test('a running operation prevents later rows from committing out of order', async () => {
+test('an empty subagent entry is ignored without blocking later timeline rows', async () => {
+  const setup = await createTimelineRenderer(80);
+  const timeline = new TimelineScrollback(setup.renderer);
+  try {
+    const emptySubagent: AgentTimelineEntry = {
+      id: 'subagent-empty',
+      type: 'message',
+      role: 'subagent',
+      text: ' \n ',
+      status: 'completed',
+    };
+    timeline.render(session([emptySubagent]));
+    assert.deepEqual(setup.externalOutput.take(), []);
+    setup.cellOutput.clear();
+
+    const next = userMessage('continue', 'user-after-empty');
+    timeline.render(session([emptySubagent, next]));
+    assert.equal(
+      setup.cellOutput.takeText(),
+      formatTimelineEntry(next),
+    );
+  } finally {
+    timeline.destroy();
+    setup.renderer.destroy();
+  }
+});
+
+test('a running operation gets a live surface without committing later rows out of order', async () => {
   const setup = await createTimelineRenderer(80);
   const timeline = new TimelineScrollback(setup.renderer);
   try {
     const user = userMessage('inspect');
     timeline.render(session([user], 'request-1'));
     setup.externalOutput.clear();
+    setup.cellOutput.clear();
+    let surfaceCount = 0;
+    const liveSurfaces: ReturnType<
+      typeof setup.renderer.createScrollbackSurface
+    >[] = [];
+    const createScrollbackSurface = setup.renderer.createScrollbackSurface.bind(
+      setup.renderer,
+    );
+    setup.renderer.createScrollbackSurface = (options) => {
+      surfaceCount += 1;
+      const surface = createScrollbackSurface(options);
+      liveSurfaces.push(surface);
+      return surface;
+    };
 
     const operation: AgentTimelineEntry = {
       id: 'operation-1',
@@ -94,7 +146,22 @@ test('a running operation prevents later rows from committing out of order', asy
       requestId: 'request-1',
     };
     timeline.render(session([user, operation, subagent], 'request-1'));
+    assert.equal(surfaceCount, 1);
     assert.deepEqual(setup.externalOutput.take(), []);
+    const liveRoot = liveSurfaces[0]?.root.getRenderable(
+      'timeline-live-operation-1',
+    );
+    assert.ok(liveRoot instanceof BoxRenderable);
+    assert.equal(
+      liveRoot.getChildren().map((child) => {
+        assert.ok(child instanceof TextRenderable);
+        return child.plainText;
+      }).join('\n'),
+      [
+        formatTimelineEntry(operation),
+        formatTimelineEntry(subagent),
+      ].join('\n'),
+    );
 
     const completedOperation = {
       ...operation,
@@ -102,7 +169,7 @@ test('a running operation prevents later rows from committing out of order', asy
     };
     timeline.render(session([user, completedOperation, subagent]));
     assert.equal(
-      setup.externalOutput.takeText(),
+      setup.cellOutput.takeText(),
       [
         formatTimelineEntry(completedOperation),
         formatTimelineEntry(subagent),
@@ -128,9 +195,9 @@ test('long sessions use bounded native scrollback commits', async () => {
     assert.deepEqual(
       commits.map((commit) => commit.height),
       [
-        MAX_SETTLED_ENTRIES_PER_COMMIT,
-        MAX_SETTLED_ENTRIES_PER_COMMIT,
-        1,
+        MAX_SETTLED_ENTRIES_PER_COMMIT * 2,
+        MAX_SETTLED_ENTRIES_PER_COMMIT * 2,
+        2,
       ],
     );
   } finally {
@@ -146,11 +213,12 @@ test('a new submitted turn advances native scrollback after prior history', asyn
     const first = userMessage('first', 'user-1');
     timeline.render(session([first]));
     setup.externalOutput.clear();
+    setup.cellOutput.clear();
 
     const second = userMessage('second', 'user-2');
     timeline.render(session([first, second], 'request-2'));
     assert.equal(
-      setup.externalOutput.takeText(),
+      setup.cellOutput.takeText(),
       formatTimelineEntry(second),
     );
   } finally {
@@ -166,15 +234,16 @@ test('an authoritative session boundary allows identical text in the new session
     const repeated = userMessage('same text', 'old-user');
     timeline.render(session([repeated], undefined, 'session-old'));
     setup.externalOutput.clear();
+    setup.cellOutput.clear();
 
     timeline.render(session([], undefined, 'session-new'));
-    assert.match(setup.externalOutput.takeText(), /session session-new/);
+    assert.match(setup.cellOutput.takeText(), /session session-new/);
 
     timeline.render(session([
       userMessage('same text', 'new-user'),
     ], undefined, 'session-new'));
     assert.equal(
-      setup.externalOutput.takeText(),
+      setup.cellOutput.takeText(),
       formatTimelineEntry(repeated),
     );
   } finally {
@@ -184,13 +253,39 @@ test('an authoritative session boundary allows identical text in the new session
 });
 
 async function createTimelineRenderer(width: number) {
-  return createTestRenderer({
+  const setup = await createTestRenderer({
     width,
     height: 24,
     screenMode: 'split-footer',
     footerHeight: 9,
     externalOutputMode: 'capture-stdout',
   });
+  const commits: string[][] = [];
+  const decoder = new TextDecoder();
+  setup.renderer.on(CliRenderEvents.EXTERNAL_OUTPUT, (event) => {
+    // OpenTUI 0.4.5's stock recorder slices a UTF-8 byte stream by terminal
+    // cell width, which shifts rows after CJK characters. Ask the native
+    // buffer to emit explicit row breaks for Unicode-sensitive assertions.
+    commits.push(
+      decoder.decode(event.snapshot.getRealCharBytes(true))
+        .split('\n')
+        .slice(0, event.snapshot.height)
+        .map((line) => line.trimEnd()),
+    );
+  });
+  return {
+    ...setup,
+    cellOutput: {
+      takeText() {
+        const text = commits.flat().join('\n');
+        commits.length = 0;
+        return text;
+      },
+      clear() {
+        commits.length = 0;
+      },
+    },
+  };
 }
 
 function session(

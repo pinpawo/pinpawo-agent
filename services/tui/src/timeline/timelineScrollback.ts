@@ -1,6 +1,9 @@
 import {
+  BoxRenderable,
+  TextAttributes,
   TextRenderable,
   type CliRenderer,
+  type RenderContext,
   type ScrollbackSurface,
 } from '@opentui/core';
 import type {
@@ -9,13 +12,16 @@ import type {
 } from '@pinpawo/agent-session';
 import {
   countSettledTimelinePrefix,
-  formatTimelineEntry,
+  buildTimelineDisplayLines,
+  isSettledTimelineEntry,
+  type TimelineDisplayLine,
 } from './timelineModel';
 
-type ActiveStreamingSurface = {
+type ActiveTimelineSurface = {
   surface: ScrollbackSurface;
-  text: TextRenderable;
+  root: BoxRenderable;
   entryKey: string;
+  mode: 'streaming-message' | 'ordered-tail';
   committedRows: number;
 };
 
@@ -34,22 +40,30 @@ export class TimelineScrollback {
     prefixLength: 0,
     tailEntry: null,
   };
-  private activeStreamingSurface: ActiveStreamingSurface | null = null;
+  private activeTimelineSurface: ActiveTimelineSurface | null = null;
 
   constructor(private readonly renderer: CliRenderer) {}
 
   renderWelcome(lines: readonly string[]) {
     if (this.welcomeRendered || lines.length === 0) return;
     this.renderer.writeToScrollback((context) => {
-      const text = new TextRenderable(context.renderContext, {
+      const root = new BoxRenderable(context.renderContext, {
         id: 'pinpawo-welcome',
         width: context.width,
         height: lines.length,
-        content: lines.join('\n'),
-        fg: '#69c0c8',
+        flexDirection: 'column',
+      });
+      lines.forEach((line, index) => {
+        root.add(new TextRenderable(context.renderContext, {
+          id: `pinpawo-welcome:${index}`,
+          width: '100%',
+          height: 1,
+          content: line || ' ',
+          fg: '#69c0c8',
+        }));
       });
       return {
-        root: text,
+        root,
         width: context.width,
         height: lines.length,
       };
@@ -60,7 +74,7 @@ export class TimelineScrollback {
   render(session: AgentSession) {
     if (session.sessionId !== this.sessionId) {
       const previousSessionId = this.sessionId;
-      this.destroyStreamingSurface();
+      this.destroyTimelineSurface();
       this.sessionId = session.sessionId;
       this.committedFingerprints = [];
       this.reconciliationCache = {
@@ -85,19 +99,36 @@ export class TimelineScrollback {
     );
 
     const firstEntry = session.timeline[firstUncommitted];
-    if (this.activeStreamingSurface) {
-      if (
-        firstEntry?.type === 'message'
-        && streamingEntryKey(firstEntry) === this.activeStreamingSurface.entryKey
-      ) {
-        if (firstEntry.status === 'completed') {
-          this.renderStreamingEntry(firstEntry, true);
-          this.committedFingerprints.push(timelineFingerprint(firstEntry));
-          this.destroyStreamingSurface();
-          firstUncommitted += 1;
+    if (this.activeTimelineSurface) {
+      const active = this.activeTimelineSurface;
+      if (active.mode === 'streaming-message') {
+        if (
+          firstEntry?.type === 'message'
+          && liveEntryKey(firstEntry) === active.entryKey
+        ) {
+          if (isSettledTimelineEntry(firstEntry)) {
+            this.renderLiveEntries(
+              [firstEntry],
+              true,
+              active.mode,
+              session.actor?.label,
+            );
+            this.committedFingerprints.push(timelineFingerprint(firstEntry));
+            this.destroyTimelineSurface();
+            firstUncommitted += 1;
+          }
+        } else {
+          this.destroyTimelineSurface();
         }
-      } else {
-        this.destroyStreamingSurface();
+      } else if (
+        !firstEntry
+        || liveEntryKey(firstEntry) !== active.entryKey
+        || isSettledTimelineEntry(firstEntry)
+      ) {
+        // Ordered tails never commit partial rows. Once their first operation
+        // settles, replace the transient surface with the canonical settled
+        // prefix below.
+        this.destroyTimelineSurface();
       }
     }
 
@@ -105,7 +136,10 @@ export class TimelineScrollback {
       firstUncommitted,
       settledEnd,
     )) {
-      this.commitSettledEntries(session.timeline.slice(start, end));
+      this.commitSettledEntries(
+        session.timeline.slice(start, end),
+        session.actor?.label,
+      );
     }
     this.reconciliationCache = timelineReconciliationCache(
       session.timeline,
@@ -113,43 +147,65 @@ export class TimelineScrollback {
     );
 
     const pendingEntry = session.timeline[settledEnd];
-    if (pendingEntry?.type === 'message' && pendingEntry.status === 'streaming') {
-      this.renderStreamingEntry(pendingEntry, false);
-    } else if (this.activeStreamingSurface) {
-      this.destroyStreamingSurface();
+    if (pendingEntry && !isSettledTimelineEntry(pendingEntry)) {
+      const mode = pendingEntry.type === 'message'
+        ? 'streaming-message'
+        : 'ordered-tail';
+      const liveEntries = mode === 'streaming-message'
+        ? [pendingEntry]
+        : session.timeline.slice(settledEnd);
+      this.renderLiveEntries(
+        liveEntries,
+        false,
+        mode,
+        session.actor?.label,
+      );
+    } else if (this.activeTimelineSurface) {
+      this.destroyTimelineSurface();
     }
   }
 
   destroy() {
-    this.destroyStreamingSurface();
+    this.destroyTimelineSurface();
   }
 
-  private destroyStreamingSurface() {
+  private destroyTimelineSurface() {
     if (
-      this.activeStreamingSurface
-      && !this.activeStreamingSurface.surface.isDestroyed
+      this.activeTimelineSurface
+      && !this.activeTimelineSurface.surface.isDestroyed
     ) {
-      this.activeStreamingSurface.surface.destroy();
+      this.activeTimelineSurface.surface.destroy();
     }
-    this.activeStreamingSurface = null;
+    this.activeTimelineSurface = null;
   }
 
-  private commitSettledEntries(entries: readonly AgentTimelineEntry[]) {
+  private commitSettledEntries(
+    entries: readonly AgentTimelineEntry[],
+    actorLabel?: string,
+  ) {
     if (entries.length === 0) return;
     const surface = this.renderer.createScrollbackSurface({ startOnNewLine: true });
-    const text = new TextRenderable(surface.renderContext, {
+    const root = createTimelineRoot(surface.renderContext, {
       id: 'timeline-settled',
-      width: '100%',
-      height: 'auto',
-      content: joinEntries(entries),
+      entries,
+      width: this.renderer.width,
+      actorLabel,
     });
     try {
-      surface.root.add(text);
+      surface.root.add(root);
+      if (root.getChildrenCount() === 0) {
+        this.committedFingerprints.push(...entries.map(timelineFingerprint));
+        return;
+      }
       surface.render();
 
-      const settledRows = text.height;
-      if (typeof settledRows !== 'number' || settledRows < 1) {
+      const settledRows = root.height;
+      if (typeof settledRows !== 'number' || settledRows < 0) {
         throw new Error('OpenTUI did not measure settled timeline rows');
+      }
+      if (settledRows === 0) {
+        this.committedFingerprints.push(...entries.map(timelineFingerprint));
+        return;
       }
       surface.commitRows(0, settledRows);
       this.committedFingerprints.push(...entries.map(timelineFingerprint));
@@ -158,59 +214,83 @@ export class TimelineScrollback {
     }
   }
 
-  private renderStreamingEntry(
-    entry: Extract<AgentTimelineEntry, { type: 'message' }>,
+  private renderLiveEntries(
+    entries: readonly AgentTimelineEntry[],
     completed: boolean,
+    mode: ActiveTimelineSurface['mode'],
+    actorLabel?: string,
   ) {
-    const entryKey = streamingEntryKey(entry);
-    let active = this.activeStreamingSurface;
-    if (!active || active.entryKey !== entryKey || active.surface.isDestroyed) {
-      this.destroyStreamingSurface();
+    const entry = entries[0];
+    if (!entry) return;
+    const entryKey = liveEntryKey(entry);
+    let active = this.activeTimelineSurface;
+    if (
+      !active
+      || active.entryKey !== entryKey
+      || active.mode !== mode
+      || active.surface.isDestroyed
+    ) {
+      this.destroyTimelineSurface();
       const surface = this.renderer.createScrollbackSurface({ startOnNewLine: true });
-      const text = new TextRenderable(surface.renderContext, {
-        id: `timeline-streaming-${entry.id}`,
-        width: '100%',
-        height: 'auto',
-        content: '',
+      const root = createTimelineRoot(surface.renderContext, {
+        id: `timeline-live-${entry.id}`,
+        entries: [],
+        width: this.renderer.width,
+        actorLabel,
       });
-      surface.root.add(text);
+      surface.root.add(root);
       active = {
         surface,
-        text,
+        root,
         entryKey,
+        mode,
         committedRows: 0,
       };
-      this.activeStreamingSurface = active;
+      this.activeTimelineSurface = active;
     }
 
     try {
-      active.text.content = formatTimelineEntry(entry);
+      populateTimelineRoot(
+        active.surface.renderContext,
+        active.root,
+        entries,
+        this.renderer.width,
+        actorLabel,
+      );
       active.surface.render();
       const stableRows = completed
         ? active.surface.height
-        : Math.max(0, active.surface.height - 1);
+        : stableRowsForLiveMode(mode, active.surface.height);
       if (stableRows > active.committedRows) {
         active.surface.commitRows(active.committedRows, stableRows);
         active.committedRows = stableRows;
       }
     } catch (error) {
-      this.destroyStreamingSurface();
+      this.destroyTimelineSurface();
       throw error;
     }
   }
 
   private writeSessionSeparator(sessionId: string) {
     this.renderer.writeToScrollback((context) => {
-      const content = `\n── session ${sessionId} ──`;
-      const text = new TextRenderable(context.renderContext, {
+      const lines = [' ', `── session ${sessionId} ──`];
+      const root = new BoxRenderable(context.renderContext, {
         id: `session-${sessionId}`,
         width: context.width,
         height: 2,
-        content,
-        fg: '#8a8a8a',
+        flexDirection: 'column',
+      });
+      lines.forEach((line, index) => {
+        root.add(new TextRenderable(context.renderContext, {
+          id: `session-${sessionId}:${index}`,
+          width: '100%',
+          height: 1,
+          content: line,
+          fg: '#8a8a8a',
+        }));
       });
       return {
-        root: text,
+        root,
         width: context.width,
         height: 2,
       };
@@ -308,18 +388,121 @@ function timelineReconciliationCache(
   };
 }
 
-function streamingEntryKey(
-  entry: Extract<AgentTimelineEntry, { type: 'message' }>,
-) {
-  return JSON.stringify([
-    entry.id,
-    entry.role,
-    entry.requestId ?? null,
-  ]);
+function liveEntryKey(entry: AgentTimelineEntry) {
+  return entry.type === 'message'
+    ? JSON.stringify([
+        entry.type,
+        entry.id,
+        entry.role,
+        entry.requestId ?? null,
+      ])
+    : JSON.stringify([
+        entry.type,
+        entry.id,
+        entry.requestId,
+        entry.operationKey,
+      ]);
 }
 
-function joinEntries(entries: readonly AgentTimelineEntry[]) {
-  return entries.map(formatTimelineEntry).join('\n');
+function stableRowsForLiveMode(
+  mode: ActiveTimelineSurface['mode'],
+  height: number,
+) {
+  if (mode === 'ordered-tail') {
+    // Operation headers and output can both change until the terminal phase.
+    // Later canonical entries may already exist behind the operation, so keep
+    // the complete ordered tail transient and commit it only after the
+    // operation settles.
+    return 0;
+  }
+  return Math.max(0, height - 1);
+}
+
+function createTimelineRoot(
+  context: RenderContext,
+  options: {
+    id: string;
+    entries: readonly AgentTimelineEntry[];
+    width: number;
+    actorLabel?: string;
+  },
+) {
+  const root = new BoxRenderable(context, {
+    id: options.id,
+    width: '100%',
+    height: 'auto',
+    flexDirection: 'column',
+  });
+  populateTimelineRoot(
+    context,
+    root,
+    options.entries,
+    options.width,
+    options.actorLabel,
+  );
+  return root;
+}
+
+function populateTimelineRoot(
+  context: RenderContext,
+  root: BoxRenderable,
+  entries: readonly AgentTimelineEntry[],
+  width: number,
+  actorLabel?: string,
+) {
+  for (const child of root.getChildren()) {
+    root.remove(child);
+    child.destroyRecursively();
+  }
+
+  const now = Date.now();
+  entries.flatMap((entry) => buildTimelineDisplayLines(entry, {
+    actorLabel,
+    now,
+    width,
+  })).forEach((line, index) => {
+    root.add(new TextRenderable(context, {
+      id: `${root.id}:line:${index}`,
+      width: '100%',
+      height: 'auto',
+      content: line.text || ' ',
+      ...lineStyle(line),
+    }));
+  });
+}
+
+function lineStyle(line: TimelineDisplayLine): {
+  attributes?: number;
+  fg?: string;
+} {
+  switch (line.tone) {
+    case 'user-label':
+    case 'assistant-label':
+      return {
+        attributes: TextAttributes.BOLD,
+        fg: '#5fd75f',
+      };
+    case 'user':
+    case 'added':
+    case 'operation-completed':
+      return { fg: '#5fd75f' };
+    case 'system':
+    case 'subagent':
+    case 'operation-interrupted':
+      return {
+        attributes: TextAttributes.DIM,
+        fg: '#d7af5f',
+      };
+    case 'removed':
+    case 'operation-failed':
+      return { fg: '#ff5f5f' };
+    case 'muted':
+    case 'operation-started':
+    case 'operation-updated':
+      return { attributes: TextAttributes.DIM };
+    case 'assistant':
+      return {};
+  }
 }
 
 function normalizeText(value: string) {

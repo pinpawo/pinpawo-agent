@@ -1,0 +1,94 @@
+# TUI v2 feature parity
+
+Issue: #454
+Legacy baseline: `services/local-agent/src/tui`
+OpenTUI implementation: `services/tui/src`
+
+## Purpose
+
+TUI v2 is still a migration target, not a default-entry candidate. This
+document tracks user-visible parity with the legacy Ink TUI and orders the
+remaining work by chat impact.
+
+Status meanings:
+
+- **aligned**: implemented in v2 with automated evidence;
+- **partial**: the main path exists, but presentation, edge cases, or real-host
+  dogfood are still incomplete;
+- **missing**: no equivalent production behavior yet;
+- **deferred**: deliberately outside the current chat-parity milestone.
+
+## Current parity
+
+| Area | Capability | Status | Remaining work |
+| --- | --- | --- | --- |
+| host | authenticated local WebSocket, snapshot bootstrap, reconnect | aligned | real-host disconnect/reconnect dogfood |
+| chat | submit a message through the shared protocol | aligned | sustained real-host dogfood |
+| chat | canonical message/operation/subagent ordering | aligned | richer rendering below |
+| timeline | streaming assistant response on a live surface | aligned | rich Markdown rendering |
+| timeline | running/updated tool operation appears before completion | aligned | current branch adds an atomic live operation surface |
+| timeline | operation target, summary, bounded output/error, and patch detail | aligned | real-host tool and patch dogfood |
+| timeline | assistant Markdown, lists, links, tables, and code blocks | partial | legacy normalization and terminal-safe tables are reused; rich list/link/code styling still needs a scrollback-safe renderer |
+| timeline | distinct subagent identity and progress presentation | aligned | v2 reuses the legacy paragraph/sentence grouping behind a distinct role surface |
+| timeline | timestamps and actor label | aligned | canonical timestamps and the session actor label feed the shared display model |
+| timeline | long-session bounded commits and session boundaries | aligned | continue performance dogfood with real sessions |
+| scrolling | terminal-owned touchpad scroll, selection, and copy | aligned in Ghostty | Terminal.app, iTerm2, and integrated-terminal matrix |
+| scrolling | browse position survives append and delta bursts | aligned in Ghostty | cross-terminal matrix |
+| composer | multiline edit, soft wrap, paste, selection, undo/redo | aligned | remaining IME and terminal-specific key dogfood |
+| composer | prompt history with draft restoration | aligned | manual cross-terminal verification |
+| composer | slash commands and command/help palette | aligned | production workflow dogfood |
+| composer | workspace `@path` completion | aligned | production workflow dogfood |
+| attachments | quoted, escaped, `file://`, and multiple local paths | partial | complete production multi-path drag-in retest |
+| attachments | removable structured attachment chips and submit | aligned | confirm real host/tool behavior for files and directories |
+| review | approval, rejection, text response, batching, cancellation | aligned | real guarded-tool dogfood |
+| session | new session and resume picker | aligned | real checkpoint/session-list dogfood |
+| runtime | interrupt, error notice, review policy | aligned | disconnect and host failure dogfood |
+| status | two-line run/model/workspace/token/context status | aligned | narrow-terminal dogfood |
+| transcript | pager handoff and Markdown export | aligned | production pager/editor combinations |
+| editor | `$VISUAL`/`$EDITOR` handoff and draft restore | aligned | production editor combinations |
+| Studio | Studio-specific workflow expansion | deferred | tracked after chat parity |
+| release | package/runtime distribution | partial | platform install matrix; no default switch during parity work |
+
+## Work order
+
+### P0 — make the real chat loop complete
+
+1. Finish timeline fidelity:
+   - keep running operations visible and in canonical order;
+   - render operation output, errors, and `apply_patch` diffs;
+   - render assistant Markdown and code without changing canonical text;
+   - distinguish subagent progress from main-assistant messages.
+2. Exercise a real local-agent run containing:
+   user message → streaming assistant/tool activity → subagent output →
+   completed assistant message.
+3. Exercise approval, interruption, reconnect, new, and resume against the real
+   host rather than demo-only connections.
+4. Verify structured attachments reach the real host unchanged and remain
+   local until submission.
+
+### P1 — daily-use interaction parity
+
+1. Complete prompt-history, command, file-mention, clipboard, external-editor,
+   and transcript dogfood.
+2. Finish multi-file drag-in and attachment removal tests in real terminals.
+3. Validate narrow layouts, resize, long sessions, and failure recovery.
+
+### P2 — release readiness
+
+1. Complete the manual matrix in macOS Terminal, iTerm2, Ghostty, and one
+   integrated terminal.
+2. Complete supported-platform install and executable smokes.
+3. Compare the final v2 checklist against the legacy TUI.
+4. Only after parity and dogfood are complete, open a separate decision for the
+   default entry and legacy fallback period.
+
+## Current milestone exit criteria
+
+The feature-parity milestone is complete only when:
+
+- the real chat loop presents messages, operations, and subagents in canonical
+  order with useful live and completed detail;
+- core composer, attachment, review, session, interrupt, reconnect, and error
+  workflows pass against a real local-agent host;
+- known terminal-specific gaps have an explicit fallback;
+- the legacy TUI remains available throughout the migration.

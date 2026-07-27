@@ -3,6 +3,25 @@ import type {
   AgentSession,
   AgentTimelineEntry,
 } from '@pinpawo/agent-session';
+import { buildMessageDisplayLines } from './messageDisplay';
+import { buildOperationDisplayLines } from './operationDisplay';
+
+const OPERATION_LINE_PREFIX_WIDTH = 4;
+
+export type TimelineDisplayLine = {
+  text: string;
+  tone:
+    | 'added'
+    | 'assistant'
+    | 'assistant-label'
+    | 'muted'
+    | 'removed'
+    | 'subagent'
+    | 'system'
+    | 'user'
+    | 'user-label'
+    | `operation-${AgentOperationEntry['phase']}`;
+};
 
 export function isSettledTimelineEntry(entry: AgentTimelineEntry) {
   if (entry.type === 'message') {
@@ -24,14 +43,57 @@ export function countSettledTimelinePrefix(
   return index;
 }
 
-export function formatTimelineEntry(entry: AgentTimelineEntry) {
+export function formatTimelineEntry(
+  entry: AgentTimelineEntry,
+  options: {
+    actorLabel?: string;
+    now?: number;
+    width?: number;
+  } = {},
+) {
+  return buildTimelineDisplayLines(entry, options)
+    .map((line) => line.text)
+    .join('\n');
+}
+
+export function buildTimelineDisplayLines(
+  entry: AgentTimelineEntry,
+  options: {
+    actorLabel?: string;
+    now?: number;
+    width?: number;
+  } = {},
+): TimelineDisplayLine[] {
   if (entry.type === 'operation') {
-    const target = entry.target ? ` ${entry.target}` : '';
-    const summary = entry.summary ? ` — ${entry.summary}` : '';
-    return `  ${operationMark(entry.phase)} ${entry.title}${target}${summary}`;
+    const now = options.now
+      ?? entry.completedAt
+      ?? entry.updatedAt
+      ?? entry.startedAt
+      ?? 0;
+    const width = options.width ?? Number.POSITIVE_INFINITY;
+    return buildOperationDisplayLines(
+      entry,
+      now,
+      width,
+      Math.max(1, width - OPERATION_LINE_PREFIX_WIDTH),
+    ).map((line, index) => (
+      index === 0
+        ? {
+            text: `  ${operationMark(entry.phase)} ${line.text}`,
+            tone: `operation-${entry.phase}` as const,
+          }
+        : {
+            text: line.text,
+            tone: line.tone === 'added' || line.tone === 'removed'
+              ? line.tone
+              : 'muted',
+          }
+    ));
   }
-  const label = `${entry.role}`.padEnd(10);
-  return indentContinuationLines(`${label} ${entry.text}`, label.length + 1);
+  return buildMessageDisplayLines(
+    entry,
+    options.actorLabel,
+  );
 }
 
 export function formatLiveSession(
@@ -81,11 +143,6 @@ export function operationMark(phase: AgentOperationEntry['phase']) {
     case 'interrupted':
       return '■';
   }
-}
-
-function indentContinuationLines(text: string, spaces: number) {
-  const indentation = ' '.repeat(spaces);
-  return text.replace(/\n/g, `\n${indentation}`);
 }
 
 function singleLine(text: string) {

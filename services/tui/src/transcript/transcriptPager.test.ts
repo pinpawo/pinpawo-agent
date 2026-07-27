@@ -51,8 +51,8 @@ test('transcript pager text includes the complete ordered canonical timeline', (
     status: 'completed',
   }]));
 
-  assert.ok(content.indexOf('user       hello') < content.indexOf('Read'));
-  assert.ok(content.indexOf('Read') < content.indexOf('subagent   done'));
+  assert.ok(content.indexOf('你') < content.indexOf('Read'));
+  assert.ok(content.indexOf('Read') < content.indexOf('subagent\n  done'));
   assert.doesNotMatch(content, /\u001b/);
   assert.match(content, /done�\[31m/);
 });
@@ -87,7 +87,7 @@ test('transcript pager receives a temporary snapshot and cleans it up', async ()
     spawnPager,
   });
 
-  assert.match(pagedContent, /assistant  answer/);
+  assert.match(pagedContent, /assistant\n\| answer/);
   await assert.rejects(
     () => readFile(pagedFile, 'utf8'),
     /ENOENT/,

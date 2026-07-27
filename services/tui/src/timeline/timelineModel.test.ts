@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import stringWidth from 'string-width';
 import type { AgentTimelineEntry } from '@pinpawo/agent-session';
 import {
   countSettledTimelinePrefix,
@@ -50,10 +51,97 @@ test('timeline model commits only the settled ordered prefix', () => {
 });
 
 test('timeline formatting keeps multiline messages and operation state readable', () => {
-  assert.equal(formatTimelineEntry(user), 'user       hello\n           world');
+  assert.equal(formatTimelineEntry(user), '你\n> hello\n  world');
   assert.equal(
     formatTimelineEntry({ ...operation, phase: 'completed', summary: 'ok' }),
-    '  ● Read file — ok',
+    '  ● Read file(ok)（完成）',
+  );
+});
+
+test('timeline formatting includes bounded tool output and errors', () => {
+  assert.equal(
+    formatTimelineEntry({
+      ...operation,
+      phase: 'completed',
+      raw: {
+        output: ['line 1', 'line 2'].join('\n'),
+      },
+    }),
+    [
+      '  ● Read file（完成）',
+      '  ⎿ line 1',
+      '    line 2',
+    ].join('\n'),
+  );
+  assert.equal(
+    formatTimelineEntry({
+      ...operation,
+      phase: 'failed',
+      raw: {
+        output: 'ignored output',
+        error: 'permission\tdenied\x1B',
+      },
+    }),
+    [
+      '  × Read file（失败）',
+      '  ⎿ permission  denied�',
+    ].join('\n'),
+  );
+  assert.match(
+    formatTimelineEntry({
+      ...operation,
+      phase: 'completed',
+      raw: {
+        output: Array.from({ length: 10 }, (_, index) => `line ${index}`).join('\n'),
+      },
+    }),
+    /… \+4 lines$/,
+  );
+});
+
+test('operation lines reserve space for the timeline status prefix', () => {
+  const lines = formatTimelineEntry({
+    ...operation,
+    phase: 'completed',
+    target: '很长的目标路径/with-a-long-file-name.txt',
+    raw: {
+      output: '很长的工具输出内容',
+    },
+  }, {
+    width: 20,
+  }).split('\n');
+  assert.ok(lines.every((line) => stringWidth(line) <= 20));
+  assert.match(lines[0] ?? '', /（完成）$/);
+});
+
+test('timeline formatting exposes apply_patch details without wrapper markers', () => {
+  assert.equal(
+    formatTimelineEntry({
+      ...operation,
+      kind: 'apply_patch',
+      title: 'apply_patch',
+      phase: 'completed',
+      raw: {
+        input: {
+          patch: [
+            '*** Begin Patch',
+            '*** Update File: src/example.ts',
+            '@@',
+            '-old',
+            '+new',
+            '*** End Patch',
+          ].join('\n'),
+        },
+      },
+    }),
+    [
+      '  ● apply_patch（完成）',
+      '  patch',
+      '  *** Update File: src/example.ts',
+      '  @@',
+      '  -old',
+      '  +new',
+    ].join('\n'),
   );
 });
 
@@ -167,12 +255,14 @@ test('a pending operation keeps later settled entries in the live ordered tail',
     1,
   );
   assert.deepEqual(
-    [user, operation, subagent, assistant].map(formatTimelineEntry),
+    [user, operation, subagent, assistant].map((entry) => (
+      formatTimelineEntry(entry)
+    )),
     [
-      'user       hello\n           world',
-      '  ◌ Read file',
-      'subagent   progress',
-      'assistant  done',
+      '你\n> hello\n  world',
+      '  ◌ Read file（开始）',
+      'subagent\n  progress',
+      'assistant\n| done',
     ],
   );
 });

@@ -235,7 +235,7 @@ OpenTUI-supported native-scrollback design.
 The split-footer probe disables OpenTUI mouse tracking so the terminal retains
 touchpad scrolling and native text selection. Mouse editing inside the composer
 is intentionally outside this comparison; keyboard editing remains available.
-The footer stays at a fixed eight rows so repainting never performs a terminal
+The footer stays at a fixed nine rows so repainting never performs a terminal
 scrollback transition. Its composer grows from three to five visible rows by
 reclaiming the title and idle-live rows, then scrolls internally for longer
 input. A narrow compatibility workaround preserves the preceding newline when

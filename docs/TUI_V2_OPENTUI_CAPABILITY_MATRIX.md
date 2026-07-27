@@ -78,7 +78,7 @@ The probe covers:
 | transcript pager PTY flow | `npm run smoke:transcript -w @pinpawo/tui` plus interactive `less` | passed; full ordered timeline is readable, `q` exits, split footer resumes, and terminal state is restored |
 | standalone executable | `npm run build -w @pinpawo/tui` | passed for darwin-arm64; normal and approval compiled PTY smokes passed |
 | root typecheck | `npm run typecheck` | passed |
-| root tests | `npm test` | passed, including local-agent 772/772 and Chrome extension 22/22 |
+| root tests | `npm test` | passed, including local-agent 773/773 and Chrome extension 22/22 |
 | root build | `npm run build` | passed |
 | CLI package dry-run | `npm run pack:dry -w pinpawo` | passed; `dist/tui/main.js` and its manifest are included |
 | installed tarball v2 startup | install the generated `pinpawo` tarball in an empty project and run `pinpawo tui --v2` | passed on darwin-arm64 with package-local Bun/OpenTUI runtime |

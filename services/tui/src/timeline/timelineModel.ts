@@ -34,9 +34,15 @@ export function formatTimelineEntry(entry: AgentTimelineEntry) {
   return indentContinuationLines(`${label} ${entry.text}`, label.length + 1);
 }
 
-export function formatLiveSession(session: AgentSession) {
+export function formatLiveSession(
+  session: AgentSession,
+  maxCodePoints = 80,
+) {
   const pending = findLastPendingEntry(session.timeline);
   if (pending) {
+    if (pending.type === 'message') {
+      return formatLiveMessageTail(pending, maxCodePoints);
+    }
     return singleLine(formatTimelineEntry(pending));
   }
   const run = session.activeRun;
@@ -46,6 +52,21 @@ export function formatLiveSession(session: AgentSession) {
   if (run.activity === 'using_tool') return 'using tool';
   if (run.activity === 'streaming') return 'streaming response';
   return 'thinking';
+}
+
+function formatLiveMessageTail(
+  message: Extract<AgentTimelineEntry, { type: 'message' }>,
+  maxCodePoints: number,
+) {
+  const label = `${message.role}  `;
+  const text = singleLine(message.text);
+  const budget = Math.max(1, Math.floor(maxCodePoints) - [...label].length);
+  const characters = [...text];
+  if (characters.length <= budget) {
+    return `${label}${text}`;
+  }
+  const tailLength = Math.max(0, budget - 1);
+  return `${label}…${tailLength ? characters.slice(-tailLength).join('') : ''}`;
 }
 
 export function operationMark(phase: AgentOperationEntry['phase']) {

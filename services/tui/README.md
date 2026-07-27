@@ -13,7 +13,11 @@ progress:
 - it loads one canonical Session snapshot, consumes live runtime events, and
   submits chat messages through the shared protocol;
 - it renders settled timeline entries into terminal-native scrollback and keeps
-  streaming state in an OpenTUI scrollback surface.
+  streaming state in an OpenTUI scrollback surface;
+- it commits completed visual rows during streaming without pulling terminal
+  wheel/selection ownership into the app;
+- it recognizes pasted or dragged local paths as removable attachments without
+  reading or uploading file contents.
 
 ## Run the vertical slice
 
@@ -35,7 +39,21 @@ written by the host to `~/.pinpawo/local-server-token`. It will synchronize the
 active Session before enabling submission and will reconnect with bounded
 backoff if the host disappears.
 
-`Ctrl+Enter` submits the composer. `Ctrl+C` exits the client.
+Production client controls:
+
+- `Ctrl+Enter` submits the composer;
+- dragging or pasting one or more absolute local paths creates attachment chips;
+- Backspace removes the last attachment while the composer text is empty;
+- ordinary prose containing a path remains text, and unavailable path-only
+  pastes are inserted as text with a notice;
+- `Ctrl+C` exits the client.
+
+The timeline keeps message, operation, and subagent ordering from the shared
+Session projection. During a streaming message, only complete terminal rows are
+committed to native scrollback; the mutable last row remains live. Historical
+alignment uses an object-identity fast path for deltas and falls back to
+fingerprint reconciliation after a snapshot or reconnect. Large settled
+prefixes are committed in bounded batches.
 
 ## Phase 1 probes
 

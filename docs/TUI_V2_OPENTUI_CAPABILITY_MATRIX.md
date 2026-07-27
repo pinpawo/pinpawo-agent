@@ -36,13 +36,13 @@ The probe covers:
 | fixed-footer composer layout | composer grows from 3–5 visible rows without changing terminal footer height | automated test |
 | native textarea regression | multiline paste and single-grapheme backspace preserve line boundaries | Bun native test |
 | TypeScript | `npm run typecheck -w @pinpawo/tui` | passed |
-| unit tests | `npm run test -w @pinpawo/tui` | passed, 9 tests |
-| native tests | `npm run test:native -w @pinpawo/tui` | passed, 1 test |
+| unit tests | `npm run test -w @pinpawo/tui` | passed, 34 tests |
+| native tests | `npm run test:native -w @pinpawo/tui` | passed, including textarea, WebSocket, and 4 real ScrollbackSurface tests |
 | alternate-screen PTY startup | `npm run smoke -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | split-footer PTY startup | `npm run smoke:split -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | standalone executable | `npm run build:spike -w @pinpawo/tui` | passed for darwin-arm64; compiled PTY smoke passed |
 | root typecheck | `npm run typecheck` | passed |
-| root tests | `npm test` | passed, including local-agent 717/717 and Chrome extension 22/22 |
+| root tests | `npm test` | passed, including local-agent 754/754 and Chrome extension 22/22 |
 | root build | `npm run build` | passed |
 
 ## Manual terminal matrix
@@ -63,7 +63,7 @@ from an automated PTY run alone.
 | CJK and emoji cursor alignment | pending | pending | pending | pending |
 | Chinese IME composition | pending | pending | pending | pending |
 | absolute path drag-in sequence | pending | pending | passed | pending |
-| quoted/escaped multi-path drag-in sequence | pending | pending | delivered; parsing pending | pending |
+| quoted/escaped multi-path drag-in sequence | pending | pending | delivered; parser automated, production UI retest pending | pending |
 | resize during editing and browsing | pending | pending | passed with terminal-owned history limitation | pending |
 | 250-row append burst | pending | pending | passed | pending |
 | 400-update delta burst | pending | pending | passed | pending |
@@ -93,7 +93,7 @@ terminal-owned wheel/selection input and stable-row scrollback commits.
 | single-grapheme line backspace | OpenTUI 0.4.5 removed both the grapheme and its preceding newline | failed upstream; narrow workaround and Bun native regression added |
 | `Cmd+A` | selects the composer contents | passed |
 | single-file drag-in | Ghostty delivers the path to the composer | passed |
-| multi-file drag-in | Ghostty delivers shell-style path text, but the original preview did not distinguish escaped spaces from path separators | partial; spaces now render as `␠`, structured attachment parsing remains Phase 2 |
+| multi-file drag-in | Ghostty delivers shell-style path text; the production client now parses quoted, escaped, `file://`, and multiple absolute paths into removable chips | automated parser complete; production Ghostty retest pending |
 | resize | committed scrollback and footer layout became visually inconsistent | partial; fixed footer avoids app-driven height transitions, but committed terminal scrollback remains terminal-owned |
 | dynamic composer height | changing `renderer.footerHeight` left old footer frames in Ghostty scrollback | failed; composer now reclaims title/live rows inside a fixed eight-row footer |
 
@@ -125,14 +125,14 @@ Known limits and follow-up work:
 
 - composer mouse editing is not enabled because terminal mouse tracking would
   take ownership away from native scrolling and selection;
-- paths delivered by drag-in remain raw composer text in this spike; structured
-  path parsing and removable attachment UI belong to Phase 2;
+- the production Phase 2 client now has structured path parsing and removable
+  attachment UI; cross-terminal drag-in retesting remains a release gate;
 - IME, key mapping, and repaint behavior still require dogfood in macOS
   Terminal and iTerm2 before the new TUI becomes the default.
 
 ## Procedure
 
-1. Run `npm run dev -w @pinpawo/tui`.
+1. Run `npm run dev:split -w @pinpawo/tui` for the Phase 1 interaction probe.
 2. Press `F2`, browse upward with the touchpad, then press `Ctrl+T`.
 3. Confirm the viewport remains anchored while 250 rows are added.
 4. Return to the bottom and press `Ctrl+D`; confirm sticky follow resumes.
@@ -140,9 +140,10 @@ Known limits and follow-up work:
 6. Press `F3` and test multiline input, soft wrap, selection, deletion,
    undo/redo, CJK, emoji, and IME.
 7. Paste multiple lines and confirm no accidental submit occurs.
-8. Drag a path with spaces, a Unicode path, and multiple files into the
-   textarea. Record whether the status line reports `key:` or `paste:` and copy
-   the escaped preview into this document.
+8. Run `npm run dev -w @pinpawo/tui`, then drag a path with spaces, a Unicode
+   path, and multiple files into the production composer. Confirm each path
+   becomes a distinct chip and Backspace removes the last chip when the text is
+   empty.
 9. Resize the terminal while editing and while browsing history.
 10. Repeat the selection, scroll, resize, paste, IME, and burst checks with
     `npm run dev:split -w @pinpawo/tui`. Compare native terminal scrollback

@@ -1,5 +1,4 @@
 import {
-  BoxRenderable,
   TextRenderable,
   type CliRenderer,
   type ScrollbackSurface,
@@ -13,109 +12,171 @@ import {
   formatTimelineEntry,
 } from './timelineModel';
 
-type ActiveSurface = {
+type ActiveStreamingSurface = {
   surface: ScrollbackSurface;
-  stable: TextRenderable;
-  pending: TextRenderable;
+  text: TextRenderable;
+  entryKey: string;
+  committedRows: number;
 };
+
+export type TimelineReconciliationCache = {
+  prefixLength: number;
+  tailEntry: AgentTimelineEntry | null;
+};
+
+export const MAX_SETTLED_ENTRIES_PER_COMMIT = 200;
 
 export class TimelineScrollback {
   private sessionId: string | null = null;
   private committedFingerprints: string[] = [];
-  private activeSurface: ActiveSurface | null = null;
+  private reconciliationCache: TimelineReconciliationCache = {
+    prefixLength: 0,
+    tailEntry: null,
+  };
+  private activeStreamingSurface: ActiveStreamingSurface | null = null;
 
   constructor(private readonly renderer: CliRenderer) {}
 
   render(session: AgentSession) {
     if (session.sessionId !== this.sessionId) {
       const previousSessionId = this.sessionId;
-      this.destroySurface();
+      this.destroyStreamingSurface();
       this.sessionId = session.sessionId;
       this.committedFingerprints = [];
+      this.reconciliationCache = {
+        prefixLength: 0,
+        tailEntry: null,
+      };
       if (previousSessionId && previousSessionId !== 'pending') {
         this.writeSessionSeparator(session.sessionId);
       }
     }
 
-    const firstUncommitted = findFirstUncommittedEntry(
+    const reconciliation = reconcileTimelinePrefix(
       session.timeline,
       this.committedFingerprints,
+      this.reconciliationCache,
     );
+    let firstUncommitted = reconciliation.firstUncommitted;
+    this.reconciliationCache = reconciliation.cache;
     const settledEnd = countSettledTimelinePrefix(
       session.timeline,
       firstUncommitted,
     );
-    const settled = session.timeline.slice(firstUncommitted, settledEnd);
-    const pending = session.timeline.slice(settledEnd);
 
-    if (settled.length === 0 && pending.length === 0) {
-      this.destroySurface();
-      return;
+    const firstEntry = session.timeline[firstUncommitted];
+    if (this.activeStreamingSurface) {
+      if (
+        firstEntry?.type === 'message'
+        && streamingEntryKey(firstEntry) === this.activeStreamingSurface.entryKey
+      ) {
+        if (firstEntry.status === 'completed') {
+          this.renderStreamingEntry(firstEntry, true);
+          this.committedFingerprints.push(timelineFingerprint(firstEntry));
+          this.destroyStreamingSurface();
+          firstUncommitted += 1;
+        }
+      } else {
+        this.destroyStreamingSurface();
+      }
     }
 
-    const active = this.ensureSurface();
-    active.stable.content = joinEntries(settled);
-    active.stable.height = settled.length ? 'auto' : 0;
-    active.pending.content = joinEntries(pending);
-    active.pending.height = pending.length ? 'auto' : 0;
-    active.surface.render();
-
-    if (settled.length === 0) {
-      return;
+    for (const [start, end] of planSettledTimelineCommits(
+      firstUncommitted,
+      settledEnd,
+    )) {
+      this.commitSettledEntries(session.timeline.slice(start, end));
     }
+    this.reconciliationCache = timelineReconciliationCache(
+      session.timeline,
+      settledEnd,
+    );
 
-    const settledRows = active.stable.height;
-    if (typeof settledRows !== 'number' || settledRows < 1) {
-      throw new Error('OpenTUI did not measure settled timeline rows');
-    }
-    active.surface.commitRows(0, settledRows);
-    this.committedFingerprints.push(...settled.map(timelineFingerprint));
-    this.destroySurface();
-
-    if (pending.length > 0) {
-      this.render(session);
+    const pendingEntry = session.timeline[settledEnd];
+    if (pendingEntry?.type === 'message' && pendingEntry.status === 'streaming') {
+      this.renderStreamingEntry(pendingEntry, false);
+    } else if (this.activeStreamingSurface) {
+      this.destroyStreamingSurface();
     }
   }
 
   destroy() {
-    this.destroySurface();
+    this.destroyStreamingSurface();
   }
 
-  private ensureSurface() {
-    if (this.activeSurface && !this.activeSurface.surface.isDestroyed) {
-      return this.activeSurface;
+  private destroyStreamingSurface() {
+    if (
+      this.activeStreamingSurface
+      && !this.activeStreamingSurface.surface.isDestroyed
+    ) {
+      this.activeStreamingSurface.surface.destroy();
     }
+    this.activeStreamingSurface = null;
+  }
+
+  private commitSettledEntries(entries: readonly AgentTimelineEntry[]) {
+    if (entries.length === 0) return;
     const surface = this.renderer.createScrollbackSurface({ startOnNewLine: true });
-    const column = new BoxRenderable(surface.renderContext, {
-      id: 'timeline-surface',
-      width: '100%',
-      height: 'auto',
-      flexDirection: 'column',
-    });
-    const stable = new TextRenderable(surface.renderContext, {
+    const text = new TextRenderable(surface.renderContext, {
       id: 'timeline-settled',
       width: '100%',
-      height: 0,
-      content: '',
+      height: 'auto',
+      content: joinEntries(entries),
     });
-    const pending = new TextRenderable(surface.renderContext, {
-      id: 'timeline-pending',
-      width: '100%',
-      height: 0,
-      content: '',
-    });
-    column.add(stable);
-    column.add(pending);
-    surface.root.add(column);
-    this.activeSurface = { surface, stable, pending };
-    return this.activeSurface;
+    try {
+      surface.root.add(text);
+      surface.render();
+
+      const settledRows = text.height;
+      if (typeof settledRows !== 'number' || settledRows < 1) {
+        throw new Error('OpenTUI did not measure settled timeline rows');
+      }
+      surface.commitRows(0, settledRows);
+      this.committedFingerprints.push(...entries.map(timelineFingerprint));
+    } finally {
+      surface.destroy();
+    }
   }
 
-  private destroySurface() {
-    if (this.activeSurface && !this.activeSurface.surface.isDestroyed) {
-      this.activeSurface.surface.destroy();
+  private renderStreamingEntry(
+    entry: Extract<AgentTimelineEntry, { type: 'message' }>,
+    completed: boolean,
+  ) {
+    const entryKey = streamingEntryKey(entry);
+    let active = this.activeStreamingSurface;
+    if (!active || active.entryKey !== entryKey || active.surface.isDestroyed) {
+      this.destroyStreamingSurface();
+      const surface = this.renderer.createScrollbackSurface({ startOnNewLine: true });
+      const text = new TextRenderable(surface.renderContext, {
+        id: `timeline-streaming-${entry.id}`,
+        width: '100%',
+        height: 'auto',
+        content: '',
+      });
+      surface.root.add(text);
+      active = {
+        surface,
+        text,
+        entryKey,
+        committedRows: 0,
+      };
+      this.activeStreamingSurface = active;
     }
-    this.activeSurface = null;
+
+    try {
+      active.text.content = formatTimelineEntry(entry);
+      active.surface.render();
+      const stableRows = completed
+        ? active.surface.height
+        : Math.max(0, active.surface.height - 1);
+      if (stableRows > active.committedRows) {
+        active.surface.commitRows(active.committedRows, stableRows);
+        active.committedRows = stableRows;
+      }
+    } catch (error) {
+      this.destroyStreamingSurface();
+      throw error;
+    }
   }
 
   private writeSessionSeparator(sessionId: string) {
@@ -153,12 +214,56 @@ export function findFirstUncommittedEntry(
   return timeline.length;
 }
 
+export function reconcileTimelinePrefix(
+  timeline: readonly AgentTimelineEntry[],
+  committedFingerprints: readonly string[],
+  cache: TimelineReconciliationCache,
+) {
+  if (
+    cache.prefixLength > 0
+    && cache.prefixLength <= timeline.length
+    && timeline[cache.prefixLength - 1] === cache.tailEntry
+  ) {
+    return {
+      firstUncommitted: cache.prefixLength,
+      cache,
+      strategy: 'identity' as const,
+    };
+  }
+
+  const firstUncommitted = findFirstUncommittedEntry(
+    timeline,
+    committedFingerprints,
+  );
+  return {
+    firstUncommitted,
+    cache: timelineReconciliationCache(timeline, firstUncommitted),
+    strategy: 'fingerprint' as const,
+  };
+}
+
+export function planSettledTimelineCommits(
+  start: number,
+  end: number,
+  maxEntries = MAX_SETTLED_ENTRIES_PER_COMMIT,
+) {
+  if (!Number.isInteger(maxEntries) || maxEntries < 1) {
+    throw new Error('maxEntries must be a positive integer');
+  }
+  const ranges: Array<readonly [number, number]> = [];
+  for (let cursor = start; cursor < end; cursor += maxEntries) {
+    ranges.push([cursor, Math.min(cursor + maxEntries, end)]);
+  }
+  return ranges;
+}
+
 export function timelineFingerprint(entry: AgentTimelineEntry) {
   if (entry.type === 'message') {
     return JSON.stringify([
       'message',
       entry.role,
       normalizeText(entry.text),
+      entry.status,
     ]);
   }
   return JSON.stringify([
@@ -168,6 +273,28 @@ export function timelineFingerprint(entry: AgentTimelineEntry) {
     normalizeText(entry.target ?? ''),
     normalizeText(entry.summary ?? ''),
     entry.phase,
+  ]);
+}
+
+function timelineReconciliationCache(
+  timeline: readonly AgentTimelineEntry[],
+  prefixLength: number,
+): TimelineReconciliationCache {
+  return {
+    prefixLength,
+    tailEntry: prefixLength > 0
+      ? timeline[prefixLength - 1] ?? null
+      : null,
+  };
+}
+
+function streamingEntryKey(
+  entry: Extract<AgentTimelineEntry, { type: 'message' }>,
+) {
+  return JSON.stringify([
+    entry.id,
+    entry.role,
+    entry.requestId ?? null,
   ]);
 }
 

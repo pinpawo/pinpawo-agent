@@ -321,6 +321,87 @@ test('completion snapshot refresh cannot erase a newer optimistic run', () => {
   controller.stop();
 });
 
+test('production controller keeps high-frequency deltas interleaved with operations and subagents', () => {
+  const requestIds = ['startup', 'chat', 'completion'];
+  let connection!: FakeConnection;
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => requestIds.shift() ?? 'unexpected',
+    now: () => 1_000,
+  });
+  controller.start();
+  connection.open();
+  connection.receive(snapshotResult('startup', 'chat:one'));
+  assert.equal(controller.submitChat('inspect').ok, true);
+
+  connection.receive(eventMessage({
+    type: 'operation',
+    requestId: 'chat',
+    phase: 'started',
+    operation: {
+      id: 'operation-1',
+      kind: 'test',
+      title: 'Read file',
+    },
+  }));
+  connection.receive(eventMessage({
+    type: 'subagent.message.completed',
+    requestId: 'chat',
+    messageId: 'subagent-1',
+    namespace: ['explore'],
+    text: 'found evidence',
+  }));
+  connection.receive(eventMessage({
+    type: 'operation',
+    requestId: 'chat',
+    phase: 'completed',
+    operation: {
+      id: 'operation-1',
+      kind: 'test',
+      title: 'Read file',
+      summary: 'done',
+    },
+  }));
+
+  for (let index = 0; index < 1_000; index += 1) {
+    connection.receive(eventMessage({
+      type: 'message.delta',
+      requestId: 'chat',
+      role: 'assistant',
+      text: String(index % 10),
+    }));
+  }
+  connection.receive(eventMessage({
+    type: 'message.completed',
+    requestId: 'chat',
+    role: 'assistant',
+    text: 'final answer',
+  }));
+
+  const timeline = controller.getState().session.timeline;
+  assert.deepEqual(timeline.map((entry) => (
+    entry.type === 'operation'
+      ? `operation:${entry.phase}`
+      : `message:${entry.role}:${entry.status}`
+  )), [
+    'message:user:completed',
+    'operation:completed',
+    'message:subagent:completed',
+    'message:assistant:completed',
+  ]);
+  const completed = timeline.at(-1);
+  assert.equal(
+    completed?.type === 'message'
+      ? completed.text
+      : null,
+    'final answer',
+  );
+  controller.stop();
+});
+
 function eventMessage(
   event: Extract<AgentServerMessage, { type: 'event' }>['event'],
 ): AgentServerMessage {

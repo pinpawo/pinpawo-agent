@@ -149,7 +149,7 @@ composer.focus();
 
 const unsubscribe = controller.subscribe((state) => {
   refreshHeader();
-  live.content = `live · ${formatLiveSession(state.session)}`;
+  refreshLive();
   timeline.render(state.session);
   refreshStatus();
 });
@@ -172,7 +172,10 @@ renderer.keyInput.on('keypress', (key) => {
     refreshStatus();
   }
 });
-renderer.on('resize', syncComposerLayout);
+renderer.on('resize', () => {
+  syncComposerLayout();
+  refreshLive();
+});
 renderer.on('destroy', () => {
   unsubscribe();
   controller.stop();
@@ -203,6 +206,13 @@ function refreshHeader() {
   header.content = attachments.length
     ? formatAttachmentStrip(attachments)
     : formatHeader(controller.getState());
+}
+
+function refreshLive() {
+  live.content = `live · ${formatLiveSession(
+    controller.getState().session,
+    Math.max(16, Math.floor((renderer.width - 7) / 2)),
+  )}`;
 }
 
 function refreshStatus() {

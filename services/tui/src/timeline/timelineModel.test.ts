@@ -3,11 +3,14 @@ import test from 'node:test';
 import type { AgentTimelineEntry } from '@pinpawo/agent-session';
 import {
   countSettledTimelinePrefix,
+  formatLiveSession,
   formatTimelineEntry,
   isSettledTimelineEntry,
 } from './timelineModel';
 import {
   findFirstUncommittedEntry,
+  planSettledTimelineCommits,
+  reconcileTimelinePrefix,
   timelineFingerprint,
 } from './timelineScrollback';
 
@@ -54,6 +57,23 @@ test('timeline formatting keeps multiline messages and operation state readable'
   );
 });
 
+test('live timeline shows the newest streaming tail within its footer budget', () => {
+  assert.equal(formatLiveSession({
+    sessionId: 'session',
+    kind: 'chat',
+    timeline: [{
+      ...assistant,
+      text: 'abcdefghijklmnopqrstuvwxyz',
+      status: 'streaming',
+    }],
+    activeRun: {
+      requestId: 'request',
+      state: 'running',
+      activity: 'streaming',
+    },
+  }, 20), 'assistant  …stuvwxyz');
+});
+
 test('scrollback reconciliation tolerates snapshot IDs and omitted live operations', () => {
   const committed = [
     timelineFingerprint(user),
@@ -80,5 +100,79 @@ test('scrollback reconciliation tolerates snapshot IDs and omitted live operatio
   assert.equal(
     findFirstUncommittedEntry([...checkpointTimeline, nextUser], committed),
     2,
+  );
+});
+
+test('delta reconciliation reuses the committed prefix by object identity', () => {
+  const streaming: AgentTimelineEntry = {
+    id: 'assistant-streaming',
+    type: 'message',
+    role: 'assistant',
+    text: 'one',
+    status: 'streaming',
+  };
+  const committed = [timelineFingerprint(user)];
+  const cache = {
+    prefixLength: 1,
+    tailEntry: user,
+  };
+
+  const delta = reconcileTimelinePrefix(
+    [user, { ...streaming, text: 'one two' }],
+    committed,
+    cache,
+  );
+  assert.equal(delta.firstUncommitted, 1);
+  assert.equal(delta.strategy, 'identity');
+
+  const snapshot = reconcileTimelinePrefix(
+    [{ ...user, id: 'snapshot-user' }, assistant],
+    committed,
+    cache,
+  );
+  assert.equal(snapshot.firstUncommitted, 1);
+  assert.equal(snapshot.strategy, 'fingerprint');
+});
+
+test('streaming text cannot be mistaken for an already committed message', () => {
+  assert.notEqual(
+    timelineFingerprint({ ...assistant, status: 'streaming' }),
+    timelineFingerprint(assistant),
+  );
+});
+
+test('large settled prefixes are planned as bounded scrollback commits', () => {
+  assert.deepEqual(planSettledTimelineCommits(0, 501), [
+    [0, 200],
+    [200, 400],
+    [400, 501],
+  ]);
+  assert.deepEqual(planSettledTimelineCommits(3, 3), []);
+  assert.throws(
+    () => planSettledTimelineCommits(0, 1, 0),
+    /positive integer/,
+  );
+});
+
+test('a pending operation keeps later settled entries in the live ordered tail', () => {
+  const subagent: AgentTimelineEntry = {
+    id: 'subagent',
+    type: 'message',
+    role: 'subagent',
+    text: 'progress',
+    status: 'completed',
+  };
+  assert.equal(
+    countSettledTimelinePrefix([user, operation, subagent, assistant]),
+    1,
+  );
+  assert.deepEqual(
+    [user, operation, subagent, assistant].map(formatTimelineEntry),
+    [
+      'user       hello\n           world',
+      '  ◌ Read file',
+      'subagent   progress',
+      'assistant  done',
+    ],
   );
 });

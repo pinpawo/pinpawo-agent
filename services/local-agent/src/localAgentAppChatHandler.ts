@@ -251,6 +251,14 @@ export class LocalAgentAppChatHandler {
       });
       return;
     }
+    if (msg.attachments?.length) {
+      sendLocalAgentEvent(ws, {
+        type: 'error',
+        requestId,
+        message: 'local path attachments are only supported by the local TUI',
+      });
+      return;
+    }
 
     await this.sessionResetPromise;
     if (!this.canUseSocket(ws)) return;

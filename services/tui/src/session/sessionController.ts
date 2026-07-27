@@ -2,12 +2,14 @@ import {
   applySessionSnapshot,
   reduceSession,
   type AgentServerMessage,
+  type AgentLocalAttachment,
   type AgentSession,
 } from '@pinpawo/agent-session';
 import type {
   AgentHostConnection,
   AgentHostConnectionFactory,
 } from '../client/localHostConnection';
+import { formatAttachmentDisplayText } from '../attachments/attachmentModel';
 
 export type TuiConnectionStatus =
   | 'idle'
@@ -107,8 +109,11 @@ export class TuiSessionController {
     this.setConnection('idle');
   }
 
-  submitChat(message: string): SubmitChatResult {
-    if (!message.trim()) {
+  submitChat(
+    message: string,
+    attachments: readonly AgentLocalAttachment[] = [],
+  ): SubmitChatResult {
+    if (!message.trim() && attachments.length === 0) {
       return { ok: false, reason: 'empty' };
     }
     if (this.state.connection !== 'ready' || !this.connection.isConnected()) {
@@ -123,6 +128,7 @@ export class TuiSessionController {
       type: 'chat_request',
       requestId,
       message,
+      ...(attachments.length ? { attachments: [...attachments] } : {}),
     })) {
       return { ok: false, reason: 'send-failed' };
     }
@@ -130,7 +136,7 @@ export class TuiSessionController {
       type: 'user.accepted',
       requestId,
       kind: 'chat',
-      text: message,
+      text: formatAttachmentDisplayText(message, attachments),
     }, { observedAt: this.now() }));
     return { ok: true, requestId };
   }

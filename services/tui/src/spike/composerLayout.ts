@@ -7,21 +7,30 @@ const STATUS_ROWS = 1;
 export function calculateComposerLayout(
   text: string,
   virtualLineCount: number,
+  options: { persistentHeader?: boolean } = {},
 ) {
   const logicalLineCount = text.split('\n').length;
+  const maxVisibleContentRows = options.persistentHeader
+    ? MAX_VISIBLE_CONTENT_ROWS - 1
+    : MAX_VISIBLE_CONTENT_ROWS;
   const visibleContentRows = clamp(
     Math.max(logicalLineCount, virtualLineCount) + 2,
     MIN_VISIBLE_CONTENT_ROWS,
-    MAX_VISIBLE_CONTENT_ROWS,
+    maxVisibleContentRows,
   );
   const frameHeight = visibleContentRows + FRAME_BORDER_ROWS;
   const auxiliaryRows = FIXED_FOOTER_ROWS - STATUS_ROWS - frameHeight;
+  const headerHeight = options.persistentHeader
+    ? 1
+    : auxiliaryRows >= 2
+      ? 1
+      : 0;
 
   return {
     visibleContentRows,
     frameHeight,
-    headerHeight: auxiliaryRows >= 2 ? 1 : 0,
-    liveHeight: auxiliaryRows >= 1 ? 1 : 0,
+    headerHeight,
+    liveHeight: auxiliaryRows - headerHeight >= 1 ? 1 : 0,
   };
 }
 

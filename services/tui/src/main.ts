@@ -4,10 +4,18 @@ import {
   TextareaRenderable,
   TextRenderable,
   createCliRenderer,
+  type PasteEvent,
 } from '@opentui/core';
 import {
   createAgentSessionSnapshot,
+  type AgentLocalAttachment,
 } from '@pinpawo/agent-session';
+import {
+  formatAttachmentStrip,
+  mergeAttachments,
+  removeLastAttachment,
+} from './attachments/attachmentModel';
+import { ingestLocalPathPaste } from './attachments/localPathIngestion';
 import {
   createLocalHostConnectionFactory,
   readLocalServerPort,
@@ -69,6 +77,8 @@ const status = new TextRenderable(renderer, {
 });
 
 let localNotice: string | null = null;
+let pendingComposerNotice: string | null = null;
+let attachments: AgentLocalAttachment[] = [];
 const controller = new TuiSessionController({
   connectionFactory: smoke
     ? createSmokeConnectionFactory()
@@ -86,19 +96,45 @@ const composer = new TextareaRenderable(renderer, {
     action: 'submit',
   }],
   onSubmit: () => {
-    const result = controller.submitChat(composer.plainText);
+    const result = controller.submitChat(composer.plainText, attachments);
     if (result.ok) {
+      attachments = [];
       composer.clear();
       localNotice = null;
+      refreshHeader();
+      syncComposerLayout();
     } else {
       localNotice = submitFailureText(result.reason);
       refreshStatus();
     }
   },
   onContentChange: () => {
-    localNotice = null;
+    localNotice = pendingComposerNotice;
+    pendingComposerNotice = null;
     syncComposerLayout();
     refreshStatus();
+  },
+  onPaste: (event: PasteEvent) => {
+    const input = new TextDecoder().decode(event.bytes);
+    const result = ingestLocalPathPaste(input, {
+      existingPaths: new Set(attachments.map((attachment) => attachment.path)),
+    });
+    if (result.kind === 'attachments') {
+      event.preventDefault();
+      const previousCount = attachments.length;
+      attachments = mergeAttachments(attachments, result.attachments);
+      const addedCount = attachments.length - previousCount;
+      localNotice = attachmentIngestionNotice(
+        addedCount,
+        result.duplicateCount,
+        result.attachments.length - addedCount,
+      );
+      refreshHeader();
+      syncComposerLayout();
+      refreshStatus();
+    } else if (result.pathLike) {
+      pendingComposerNotice = `${result.issue}; inserted as text`;
+    }
   },
 });
 installSingleGraphemeBackspaceWorkaround(composer);
@@ -112,10 +148,29 @@ renderer.root.add(root);
 composer.focus();
 
 const unsubscribe = controller.subscribe((state) => {
-  header.content = formatHeader(state);
+  refreshHeader();
   live.content = `live · ${formatLiveSession(state.session)}`;
   timeline.render(state.session);
   refreshStatus();
+});
+renderer.keyInput.on('keypress', (key) => {
+  if (
+    key.name === 'backspace'
+    && !key.ctrl
+    && !key.meta
+    && !key.option
+    && composer.plainText.length === 0
+    && attachments.length > 0
+  ) {
+    key.preventDefault();
+    attachments = removeLastAttachment(attachments);
+    localNotice = attachments.length
+      ? `${attachments.length} attachment${attachments.length === 1 ? '' : 's'} remaining`
+      : 'attachment removed';
+    refreshHeader();
+    syncComposerLayout();
+    refreshStatus();
+  }
 });
 renderer.on('resize', syncComposerLayout);
 renderer.on('destroy', () => {
@@ -137,14 +192,39 @@ function syncComposerLayout() {
   const layout = calculateComposerLayout(
     composer.plainText,
     composer.virtualLineCount,
+    { persistentHeader: attachments.length > 0 },
   );
   composerFrame.height = layout.frameHeight;
   header.height = layout.headerHeight;
   live.height = layout.liveHeight;
 }
 
+function refreshHeader() {
+  header.content = attachments.length
+    ? formatAttachmentStrip(attachments)
+    : formatHeader(controller.getState());
+}
+
 function refreshStatus() {
   status.content = localNotice ?? formatStatusLine(controller.getState());
+}
+
+function attachmentIngestionNotice(
+  added: number,
+  duplicates: number,
+  overLimit: number,
+) {
+  if (added === 0 && overLimit > 0) {
+    return 'attachment limit reached';
+  }
+  if (added === 0 && duplicates > 0) {
+    return 'attachment already added';
+  }
+  return [
+    `attached ${added} local path${added === 1 ? '' : 's'}`,
+    ...(duplicates > 0 ? [`skipped ${duplicates} duplicate${duplicates === 1 ? '' : 's'}`] : []),
+    ...(overLimit > 0 ? [`skipped ${overLimit} over limit`] : []),
+  ].join(' · ');
 }
 
 function submitFailureText(reason: 'not-ready' | 'busy' | 'empty' | 'send-failed') {

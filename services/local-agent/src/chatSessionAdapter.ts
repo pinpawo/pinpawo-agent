@@ -1,5 +1,4 @@
 import type { BaseMessage } from '@langchain/core/messages';
-import { HumanMessage } from '@langchain/core/messages';
 import {
   createTokenUsageSnapshot,
   GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
@@ -9,7 +8,6 @@ import {
   NamespacedProtocolToolEventReader,
   readLatestProviderInputTokens,
   readMessagesTokenUsage,
-  stampMessageCreatedAtUtc,
   SUBAGENT_OPERATIONS_EVENT,
   type ReviewSpec,
   type SubagentToolOperationMetadata,
@@ -21,7 +19,10 @@ import type {
   LocalAgentGraphService,
   LocalAgentGraphThreadState,
 } from './agentGraphService';
-import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
+import type {
+  AgentLocalAttachment,
+  AgentRuntimeEvent,
+} from '@pinpawo/agent-session';
 import {
   readFinalMessageText,
   type StreamToolsPayload,
@@ -31,6 +32,7 @@ import {
   type RootProtocolEvent,
 } from './events/rootStreamEventAdapter';
 import { clearAgentRunActivity, recordAgentRunActivity } from './operationActivityState';
+import { createLocalChatHumanMessage } from './localChatAttachments';
 
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 32000;
 const STALE_RESUME_MESSAGE = '这个 review 已关闭或不存在，请等待当前确认面板刷新后再应答。';
@@ -43,7 +45,12 @@ export type ChatSessionResult =
   | { status: 'interrupted' };
 
 export type ChatSessionRequest =
-  | { kind: 'user_message'; requestId: string; message: string }
+  | {
+      kind: 'user_message';
+      requestId: string;
+      message: string;
+      attachments?: AgentLocalAttachment[];
+    }
   | { kind: 'resume'; requestId: string; resume: unknown };
 
 export type ChatSessionAdapterOptions = {
@@ -266,6 +273,9 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
   const { requestId } = request;
   const isResumeRequest = request.kind === 'resume';
   const message = request.kind === 'user_message' ? request.message : '';
+  const attachments = request.kind === 'user_message'
+    ? request.attachments ?? []
+    : [];
 
   const initialThreadState = await graphService.readThreadState(setup);
   if (!isCurrent()) {
@@ -274,7 +284,7 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
   }
 
   if (initialThreadState.pendingHumanReview && !isResumeRequest) {
-    if (message.trim()) {
+    if (message.trim() || attachments.length > 0) {
       emitEvent({
         type: 'system.notice',
         requestId,
@@ -305,7 +315,7 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
   if (!isResumeRequest) {
     setup.input.messages = [
       ...setup.input.messages.slice(0, -1),
-      stampMessageCreatedAtUtc(new HumanMessage(message)),
+      createLocalChatHumanMessage(message, attachments),
     ];
   }
 

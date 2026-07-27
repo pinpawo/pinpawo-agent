@@ -31,3 +31,20 @@ test('composer caps soft-wrapped content without resizing the terminal footer', 
     liveHeight: 0,
   });
 });
+
+test('composer reserves a persistent attachment header inside the fixed footer', () => {
+  assert.deepEqual(calculateComposerLayout('one', 1, { persistentHeader: true }), {
+    visibleContentRows: 3,
+    frameHeight: 5,
+    headerHeight: 1,
+    liveHeight: 1,
+  });
+  assert.deepEqual(calculateComposerLayout('one\ntwo\nthree', 1, {
+    persistentHeader: true,
+  }), {
+    visibleContentRows: 4,
+    frameHeight: 6,
+    headerHeight: 1,
+    liveHeight: 0,
+  });
+});

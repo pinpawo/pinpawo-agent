@@ -24,6 +24,58 @@ test('isToolProtocolHistoryError recognizes LangGraph tool history protocol fail
   assert.equal(isToolProtocolHistoryError(new Error('ordinary model error')), false);
 });
 
+test('local server forwards structured local attachments to the chat session', async () => {
+  const peer = createFakePeer();
+  let receivedRequest: unknown;
+  const handler = new LocalServerChatHandler({
+    graphService: {} as never,
+    tuiSessions: {
+      getChatThreadId: () => 'thread-x',
+      buildChatSetup: () => ({
+        graphKey: 'test',
+        graphConfig: {},
+        input: { messages: [] },
+      }),
+      refreshActiveSessionSummary: async () => undefined,
+    } as never,
+    inflightRequests: new InflightRequestController({
+      emitOperation: () => undefined,
+      sendControl: () => undefined,
+    }),
+    loadContext: async () => ({} as never),
+    runChat: async (options) => {
+      receivedRequest = options.request;
+      return { status: 'completed', reply: 'done' };
+    },
+  });
+
+  await handler.handleChatRequest(peer, {
+    type: 'chat_request',
+    requestId: 'request-1',
+    message: 'inspect this',
+    attachments: [{
+      id: 'attachment-1',
+      source: 'local-path',
+      kind: 'directory',
+      path: '/tmp/project',
+      name: 'project',
+    }],
+  }, { actorId: 'pet-1' } as never);
+
+  assert.deepEqual(receivedRequest, {
+    kind: 'user_message',
+    requestId: 'request-1',
+    message: 'inspect this',
+    attachments: [{
+      id: 'attachment-1',
+      source: 'local-path',
+      kind: 'directory',
+      path: '/tmp/project',
+      name: 'project',
+    }],
+  });
+});
+
 test('replacement request waits for the previous thread invocation to settle', async () => {
   const sent: unknown[] = [];
   const controls: unknown[] = [];

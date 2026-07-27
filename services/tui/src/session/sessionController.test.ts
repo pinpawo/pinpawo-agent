@@ -169,6 +169,51 @@ test('TuiSessionController synchronizes one session and projects a chat run', ()
   controller.stop();
 });
 
+test('TuiSessionController submits local attachments and keeps paths out of optimistic text', () => {
+  const requestIds = ['snapshot-1', 'chat-1'];
+  let connection!: FakeConnection;
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => requestIds.shift() ?? 'unexpected',
+  });
+  controller.start();
+  connection.open();
+  connection.receive(snapshotResult('snapshot-1', 'chat:one'));
+
+  assert.equal(controller.submitChat('', [{
+    id: 'attachment-1',
+    source: 'local-path',
+    kind: 'file',
+    path: '/Users/example/private/spec.md',
+    name: 'spec.md',
+  }]).ok, true);
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'chat_request',
+    requestId: 'chat-1',
+    message: '',
+    attachments: [{
+      id: 'attachment-1',
+      source: 'local-path',
+      kind: 'file',
+      path: '/Users/example/private/spec.md',
+      name: 'spec.md',
+    }],
+  });
+  const optimistic = controller.getState().session.timeline[0];
+  assert.equal(
+    optimistic?.type === 'message' ? optimistic.text : null,
+    'Attachments:\n- file: spec.md',
+  );
+  assert.doesNotMatch(
+    optimistic?.type === 'message' ? optimistic.text : '',
+    /Users\/example/,
+  );
+  controller.stop();
+});
+
 test('TuiSessionController reconnects and rehydrates before becoming ready', () => {
   const timers: Array<{ callback: () => void; handle: ReturnType<typeof setTimeout> }> = [];
   let connection!: FakeConnection;

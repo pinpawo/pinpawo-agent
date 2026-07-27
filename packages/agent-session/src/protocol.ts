@@ -26,11 +26,16 @@ import {
   isBuiltinGlobalReviewPolicyMode,
   parseAgentTokenUsageSnapshot,
 } from './validation';
+import {
+  AGENT_LOCAL_ATTACHMENT_LIMIT,
+  type AgentLocalAttachment,
+} from './localAttachments';
 
 export type ChatRequestMessage = {
   type: 'chat_request';
   requestId: string;
   message: string;
+  attachments?: AgentLocalAttachment[];
   petId?: string;
   userId?: string;
 };
@@ -200,6 +205,74 @@ function readRecord(record: Record<string, unknown>, key: string) {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
+}
+
+function readLocalAttachments(
+  record: Record<string, unknown>,
+  key: string,
+): AgentLocalAttachment[] | null | undefined {
+  const value = record[key];
+  if (value === undefined) return undefined;
+  if (
+    !Array.isArray(value)
+    || value.length === 0
+    || value.length > AGENT_LOCAL_ATTACHMENT_LIMIT
+  ) {
+    return null;
+  }
+  const attachments: AgentLocalAttachment[] = [];
+  const ids = new Set<string>();
+  const paths = new Set<string>();
+  for (const candidate of value) {
+    const attachment = readLocalAttachment(candidate);
+    if (
+      !attachment
+      || ids.has(attachment.id)
+      || paths.has(attachment.path)
+    ) {
+      return null;
+    }
+    ids.add(attachment.id);
+    paths.add(attachment.path);
+    attachments.push(attachment);
+  }
+  return attachments;
+}
+
+function readLocalAttachment(value: unknown): AgentLocalAttachment | null {
+  const record = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+  if (!record || !hasOnlyKeys(record, ['id', 'source', 'kind', 'path', 'name'])) {
+    return null;
+  }
+  const id = readString(record, 'id');
+  const source = readString(record, 'source');
+  const kind = readString(record, 'kind');
+  const path = readString(record, 'path');
+  const name = readString(record, 'name');
+  if (
+    !id
+    || id.length > 200
+    || source !== 'local-path'
+    || (kind !== 'file' && kind !== 'directory')
+    || !path
+    || path.length > 4_096
+    || path.includes('\0')
+    || !isAbsoluteLocalPath(path)
+    || !name
+    || name.length > 255
+    || name.includes('\0')
+  ) {
+    return null;
+  }
+  return { id, source, kind, path, name };
+}
+
+function isAbsoluteLocalPath(path: string) {
+  return path.startsWith('/')
+    || path.startsWith('\\\\')
+    || /^[A-Za-z]:[\\/]/.test(path);
 }
 
 function hasOnlyKeys(record: Record<string, unknown>, allowedKeys: readonly string[]) {
@@ -452,14 +525,17 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
     return requestId && sessionId ? { type, requestId, sessionId } : null;
   }
   if (type === 'chat_request') {
-    if (!hasOnlyKeys(record, ['type', 'requestId', 'message', 'petId', 'userId'])) return null;
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'message', 'attachments', 'petId', 'userId'])) return null;
     const requestId = readString(record, 'requestId');
     const message = readString(record, 'message');
+    const attachments = readLocalAttachments(record, 'attachments');
     if (!requestId || message == null) return null;
+    if (attachments === null) return null;
     return {
       type,
       requestId,
       message,
+      ...(attachments ? { attachments } : {}),
       ...(readOptionalString(record, 'petId') !== undefined
         ? { petId: readOptionalString(record, 'petId') }
         : {}),

@@ -46,6 +46,7 @@ The probe covers:
 | policy overlay ownership | arrows/Enter/Esc remain isolated from the composer and the overlay stays bounded across resize | automated + Bun native test |
 | slash command parsing | exact implemented commands resolve while absolute paths and slash-prefixed prose remain chat input | automated test |
 | command palette ownership | cursor-at-end slash tokens own navigation/submit while ordinary edit keys remain composer-owned | automated test |
+| command palette cursor ownership | palette filtering retains composer keyboard input without leaving the terminal cursor visible; closing the overlay restores it | automated test |
 | help paging and resize | command help pages within the fixed footer and remains bounded at narrow widths | automated + Bun native test |
 | Studio mode | `/studio [task]` and `/chat` keep composer mode local while projecting user/progress/reply/error rows through the shared ordered Session timeline | automated test + OpenTUI PTY |
 | external editor lifecycle | `/edit [text]` suspends OpenTUI, gives the TTY to `$VISUAL`/`$EDITOR`, resumes on success or failure, and restores the multiline draft without submitting | automated test + OpenTUI PTY |
@@ -67,7 +68,7 @@ The probe covers:
 | fixed-footer composer layout | composer grows from 3–5 visible rows without changing terminal footer height | automated test |
 | native textarea regression | multiline paste and single-grapheme backspace preserve line boundaries | Bun native test |
 | TypeScript | `npm run typecheck -w @pinpawo/tui` | passed |
-| unit tests | `npm run test -w @pinpawo/tui` | passed, 104 tests |
+| unit tests | `npm run test -w @pinpawo/tui` | passed, 105 tests |
 | native tests | `npm run test:native -w @pinpawo/tui` | passed, 17 tests including file-mention resize/wide-character cursor mapping, policy/command/help/notice, approval/resume resize, textarea editing/history shortcuts, WebSocket, and 6 real ScrollbackSurface tests |
 | alternate-screen PTY startup | `npm run smoke -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | split-footer PTY startup | `npm run smoke:split -w @pinpawo/tui` | passed in an automated 80×24 PTY |
@@ -97,6 +98,7 @@ from an automated PTY run alone.
 | composer internal selection copy/cut | pending | pending | pending | pending |
 | composer prompt history and draft restore | pending | pending | pending | pending |
 | chat `@path` completion and Esc dismissal | pending | pending | pending | pending |
+| command palette hides composer cursor and restores it on close | pending | pending | fixed; retest pending | pending |
 | multiline edit and soft wrap | pending | pending | passed | pending |
 | Shift selection and deletion | pending | pending | pending | pending |
 | undo/redo | pending | pending | pending | pending |

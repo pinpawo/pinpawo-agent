@@ -25,6 +25,7 @@ import {
   resolveClipboardAction,
   type SelectableEditor,
 } from './input/composerClipboard';
+import { syncComposerCursorForCommandOverlay } from './input/composerCursor';
 import {
   createComposerHistoryState,
   navigateComposerHistory,
@@ -668,6 +669,7 @@ function syncComposerInputOverlays() {
 }
 
 function refreshCommandOverlay() {
+  syncComposerCursorForCommandOverlay(composer, commandOverlay);
   commandOverlayView.render(commandOverlay, renderer.width);
 }
 

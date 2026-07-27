@@ -202,6 +202,7 @@ test('review cancellation automatically interrupts at the first resolved checkpo
     inflightRequests,
     loadContext: async () => ({} as never),
     runChat: async (options) => {
+      assert.equal(options.interruptOnSettledResumeCheckpoint, true);
       assert.deepEqual(options.request, {
         kind: 'resume',
         requestId: 'req-1',

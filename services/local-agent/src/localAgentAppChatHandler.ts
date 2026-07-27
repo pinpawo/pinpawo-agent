@@ -353,6 +353,9 @@ export class LocalAgentAppChatHandler {
           if (!isCurrent()) return;
           overlayInflightDelegationOperations(inflight, operations);
         },
+        ...(source.type === 'review.cancel'
+          ? { interruptOnSettledResumeCheckpoint: true }
+          : {}),
         ...(source.type !== 'chat_request'
           ? {
             onResumeCheckpointed: ({ canInterrupt }: { canInterrupt: boolean }) => {

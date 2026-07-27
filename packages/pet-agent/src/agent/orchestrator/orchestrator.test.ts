@@ -3453,12 +3453,21 @@ test('toolkit review run interruption retains the delegation without another mod
     checkpoint: new MemorySaver(),
   });
   const recorder = createSubagentInputRecorder();
+  let finalizeCallCount = 0;
+  const reviewedCapability = {
+    ...capability('general', 'General-purpose capability.', ['local']),
+    lifecycle: {
+      finalize: () => {
+        finalizeCallCount += 1;
+      },
+    },
+  };
   const config = {
     callbacks: recorder.callbacks,
     configurable: {
       thread_id: 'human-review-interrupt-retains-delegation',
       actor: testActor,
-      capabilities: [capability('general', 'General-purpose capability.', ['local'])],
+      capabilities: [reviewedCapability],
       toolkits,
     },
   };
@@ -3492,6 +3501,7 @@ test('toolkit review run interruption retains the delegation without another mod
   assert.equal(reviewCount, 2);
   assert.equal(routeCallCount, 2);
   assert.equal(recorder.subagentInputs.length, 1);
+  assert.equal(finalizeCallCount, 0);
   assert.equal(finalState.runNextDelegation, null);
   assert.equal(finalState.taskActiveDelegation?.status, 'pending');
   assert.equal(
@@ -3536,6 +3546,7 @@ test('toolkit review run interruption retains the delegation without another mod
 
   assert.equal(routeCallCount, 3);
   assert.equal(recorder.subagentInputs.length, 2);
+  assert.equal(finalizeCallCount, 1);
   const continuedSubagentInput = recorder.subagentInputs.at(-1) ?? [];
   assert.equal(
     continuedSubagentInput.some((message) => {

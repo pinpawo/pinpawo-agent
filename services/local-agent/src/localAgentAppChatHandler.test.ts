@@ -1090,6 +1090,7 @@ test('LocalAgentAppChatHandler interrupts pending human review without selecting
         });
         return { status: 'waiting_human' };
       }
+      assert.equal(options.interruptOnSettledResumeCheckpoint, true);
       return { status: 'completed', reply: 'interrupted' };
     },
   });

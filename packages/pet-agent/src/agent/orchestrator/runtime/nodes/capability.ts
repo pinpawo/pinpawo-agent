@@ -170,7 +170,10 @@ export function createCapabilityNode(params: {
     };
     let result = await createSubagent(subagentInput);
 
-    if (capability.lifecycle?.finalize) {
+    if (
+      result.completionReason !== 'interrupted'
+      && capability.lifecycle?.finalize
+    ) {
       const finalized = await capability.lifecycle.finalize(result, {
         models: config.models,
         actor,

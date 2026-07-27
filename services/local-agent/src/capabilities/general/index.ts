@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   defineCapability,
+  defineCapabilityDocumentSource,
   defineInstructionDocument,
   GENERAL_CAPABILITY_NAME,
   type AgentCapability,
@@ -20,9 +21,11 @@ function resolveGeneralCapabilityDocumentUrl(): URL {
 
 function readGeneralCapability(): AgentCapability {
   const documentUrl = resolveGeneralCapabilityDocumentUrl();
+  const documentPath = fileURLToPath(documentUrl);
+  const source = readFileSync(documentUrl, 'utf8');
   const { frontmatter, body } = parseFrontmatterDocument(
-    readFileSync(documentUrl, 'utf8'),
-    fileURLToPath(documentUrl),
+    source,
+    documentPath,
   );
   if (frontmatter.name !== GENERAL_CAPABILITY_NAME) {
     throw new Error(
@@ -35,6 +38,10 @@ function readGeneralCapability(): AgentCapability {
     uses: frontmatter.uses,
     instructions: defineInstructionDocument({
       content: body,
+    }),
+    document: defineCapabilityDocumentSource({
+      filePath: documentPath,
+      content: source,
     }),
   });
 }

@@ -168,6 +168,9 @@ function snapshotCapability(capability: AgentCapability): AgentCapability {
     ...capability,
     uses: Object.freeze([...capability.uses]),
     instructions: Object.freeze({ ...capability.instructions }),
+    ...(capability.document
+      ? { document: Object.freeze({ ...capability.document }) }
+      : {}),
     ...(capability.lifecycle
       ? { lifecycle: Object.freeze({ ...capability.lifecycle }) }
       : {}),

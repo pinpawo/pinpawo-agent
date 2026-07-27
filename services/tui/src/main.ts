@@ -22,6 +22,19 @@ import {
   type AgentHostConnectionFactory as TuiAgentHostConnectionFactory,
 } from './client/localHostConnection';
 import { TuiSessionController } from './session/sessionController';
+import {
+  applySessionPickerAction,
+  beginSessionPickerLoad,
+  beginSessionResume,
+  closeSessionPicker,
+  createSessionPickerState,
+  failSessionPicker,
+  loadSessionPickerSessions,
+  resolveSessionPickerKey,
+  selectedSession,
+  type SessionPickerAction,
+} from './overlays/sessionPickerModel';
+import { SessionPickerView } from './overlays/sessionPickerView';
 import { calculateComposerLayout } from './spike/composerLayout';
 import { installSingleGraphemeBackspaceWorkaround } from './spike/textareaWorkarounds';
 import {
@@ -75,10 +88,14 @@ const status = new TextRenderable(renderer, {
   fg: '#8a8a8a',
   height: 1,
 });
+const sessionPickerView = new SessionPickerView(renderer);
 
 let localNotice: string | null = null;
 let pendingComposerNotice: string | null = null;
 let attachments: AgentLocalAttachment[] = [];
+let sessionPicker = createSessionPickerState();
+let sessionPickerGeneration = 0;
+let sessionListRequest: ReturnType<TuiSessionController['listSessions']> | null = null;
 const controller = new TuiSessionController({
   connectionFactory: smoke
     ? createSmokeConnectionFactory()
@@ -96,6 +113,12 @@ const composer = new TextareaRenderable(renderer, {
     action: 'submit',
   }],
   onSubmit: () => {
+    if (composer.plainText.trim() === '/resume' && attachments.length === 0) {
+      composer.clear();
+      localNotice = null;
+      openSessionPicker();
+      return;
+    }
     const result = controller.submitChat(composer.plainText, attachments);
     if (result.ok) {
       attachments = [];
@@ -144,6 +167,7 @@ root.add(live);
 composerFrame.add(composer);
 root.add(composerFrame);
 root.add(status);
+root.add(sessionPickerView.frame);
 renderer.root.add(root);
 composer.focus();
 
@@ -154,6 +178,19 @@ const unsubscribe = controller.subscribe((state) => {
   refreshStatus();
 });
 renderer.keyInput.on('keypress', (key) => {
+  const pickerAction = resolveSessionPickerKey(sessionPicker, key);
+  if (sessionPicker.phase !== 'closed' && !(key.ctrl && key.name === 'c')) {
+    key.preventDefault();
+    key.stopPropagation();
+    handleSessionPickerAction(pickerAction);
+    return;
+  }
+  if (pickerAction === 'open') {
+    key.preventDefault();
+    key.stopPropagation();
+    openSessionPicker();
+    return;
+  }
   if (
     key.name === 'backspace'
     && !key.ctrl
@@ -172,11 +209,19 @@ renderer.keyInput.on('keypress', (key) => {
     refreshStatus();
   }
 });
+renderer.keyInput.on('paste', (event) => {
+  if (sessionPicker.phase === 'closed') return;
+  event.preventDefault();
+  event.stopPropagation();
+});
 renderer.on('resize', () => {
   syncComposerLayout();
   refreshLive();
+  refreshSessionPicker();
 });
 renderer.on('destroy', () => {
+  sessionPickerGeneration += 1;
+  sessionPicker = closeSessionPicker(sessionPicker);
   unsubscribe();
   controller.stop();
   timeline.destroy();
@@ -217,6 +262,116 @@ function refreshLive() {
 
 function refreshStatus() {
   status.content = localNotice ?? formatStatusLine(controller.getState());
+}
+
+function openSessionPicker() {
+  if (sessionPicker.phase !== 'closed') return;
+  const generation = sessionPickerGeneration + 1;
+  sessionPickerGeneration = generation;
+  sessionPicker = beginSessionPickerLoad(sessionPicker);
+  composer.blur();
+  refreshSessionPicker();
+
+  const request = sessionListRequest ?? controller.listSessions();
+  if (!sessionListRequest) {
+    sessionListRequest = request;
+    void request.then(
+      () => {
+        if (sessionListRequest === request) sessionListRequest = null;
+      },
+      () => {
+        if (sessionListRequest === request) sessionListRequest = null;
+      },
+    );
+  }
+  void request.then((sessions) => {
+    if (
+      sessionPickerGeneration !== generation
+      || sessionPicker.phase !== 'loading'
+    ) {
+      return;
+    }
+    sessionPicker = loadSessionPickerSessions(sessions);
+    refreshSessionPicker();
+  }).catch((error: unknown) => {
+    if (
+      sessionPickerGeneration !== generation
+      || sessionPicker.phase !== 'loading'
+    ) {
+      return;
+    }
+    sessionPicker = failSessionPicker(sessionPicker, errorMessage(error));
+    refreshSessionPicker();
+  });
+}
+
+function handleSessionPickerAction(action: SessionPickerAction) {
+  if (action === 'close') {
+    closeSessionPickerUi();
+    return;
+  }
+  if (action === 'select') {
+    resumeSelectedSession();
+    return;
+  }
+  const next = applySessionPickerAction(sessionPicker, action);
+  if (next !== sessionPicker) {
+    sessionPicker = next;
+    refreshSessionPicker();
+  }
+}
+
+function resumeSelectedSession() {
+  const selected = selectedSession(sessionPicker);
+  if (sessionPicker.phase !== 'ready') return;
+  if (!selected) {
+    sessionPicker = failSessionPicker(sessionPicker, 'no session is selected');
+    refreshSessionPicker();
+    return;
+  }
+  const generation = sessionPickerGeneration + 1;
+  sessionPickerGeneration = generation;
+  sessionPicker = beginSessionResume(sessionPicker);
+  refreshSessionPicker();
+  void controller.resumeSession(selected.id).then(({ session }) => {
+    if (
+      sessionPickerGeneration !== generation
+      || sessionPicker.phase !== 'resuming'
+    ) {
+      return;
+    }
+    attachments = [];
+    composer.clear();
+    localNotice = `resumed: ${session.title}`;
+    closeSessionPickerUi();
+    refreshHeader();
+    syncComposerLayout();
+    refreshStatus();
+  }).catch((error: unknown) => {
+    if (
+      sessionPickerGeneration !== generation
+      || sessionPicker.phase !== 'resuming'
+    ) {
+      return;
+    }
+    sessionPicker = failSessionPicker(sessionPicker, errorMessage(error));
+    refreshSessionPicker();
+  });
+}
+
+function closeSessionPickerUi() {
+  sessionPickerGeneration += 1;
+  sessionPicker = closeSessionPicker(sessionPicker);
+  refreshSessionPicker();
+  composer.focus();
+}
+
+function refreshSessionPicker() {
+  sessionPickerView.render(sessionPicker, renderer.width);
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function attachmentIngestionNotice(
@@ -275,7 +430,7 @@ function createSmokeConnectionFactory(): TuiAgentHostConnectionFactory {
                 id: 'smoke-user',
                 type: 'message',
                 role: 'user',
-                text: 'Smoke test the Phase 2 vertical slice.',
+                text: 'Smoke test the Phase 4 vertical slice.',
                 status: 'completed',
               }, {
                 id: 'smoke-operation',

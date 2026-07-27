@@ -32,12 +32,16 @@ The probe covers:
 | canonical timeline order | message/operation/message order is retained | automated test |
 | operation raw payload | shared projection retains transient raw data | automated test |
 | high-frequency delta projection | one streaming entry is updated in place | automated test |
+| shared session list/resume | host results are correlated, timeout/error paths reject, and resume applies one canonical snapshot | automated test |
+| resume race isolation | late completion snapshots from the previous session cannot replace the resumed session | automated test |
+| resume overlay input ownership | navigation is isolated from the composer and locks during resume | automated test |
+| resume overlay resize | 8-row split footer remains bounded at wide and narrow terminal widths | Bun native test |
 | raw input preview | controls are escaped and output is bounded | automated test |
 | fixed-footer composer layout | composer grows from 3–5 visible rows without changing terminal footer height | automated test |
 | native textarea regression | multiline paste and single-grapheme backspace preserve line boundaries | Bun native test |
 | TypeScript | `npm run typecheck -w @pinpawo/tui` | passed |
-| unit tests | `npm run test -w @pinpawo/tui` | passed, 34 tests |
-| native tests | `npm run test:native -w @pinpawo/tui` | passed, including textarea, WebSocket, and 4 real ScrollbackSurface tests |
+| unit tests | `npm run test -w @pinpawo/tui` | passed, 42 tests |
+| native tests | `npm run test:native -w @pinpawo/tui` | passed, 7 tests including resume overlay resize, textarea, WebSocket, and 4 real ScrollbackSurface tests |
 | alternate-screen PTY startup | `npm run smoke -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | split-footer PTY startup | `npm run smoke:split -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | standalone executable | `npm run build:spike -w @pinpawo/tui` | passed for darwin-arm64; compiled PTY smoke passed |
@@ -144,8 +148,12 @@ Known limits and follow-up work:
    path, and multiple files into the production composer. Confirm each path
    becomes a distinct chip and Backspace removes the last chip when the text is
    empty.
-9. Resize the terminal while editing and while browsing history.
-10. Repeat the selection, scroll, resize, paste, IME, and burst checks with
+9. Press `Ctrl+R`, browse sessions with arrows and PageUp/PageDown, then press
+   Esc and confirm the composer draft is unchanged. Open it again, resume an
+   inactive session, and confirm its timeline replaces the current one.
+10. Resize the terminal while editing, browsing history, and while the resume
+    overlay is open.
+11. Repeat the selection, scroll, resize, paste, IME, and burst checks with
     `npm run dev:split -w @pinpawo/tui`. Compare native terminal scrollback
     against the alternate-screen internal viewport.
 

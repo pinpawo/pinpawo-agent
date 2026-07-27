@@ -4,6 +4,8 @@ import {
   type AgentServerMessage,
   type AgentLocalAttachment,
   type AgentSession,
+  type AgentSessionSnapshot,
+  type AgentSessionSummary,
 } from '@pinpawo/agent-session';
 import type {
   AgentHostConnection,
@@ -33,29 +35,55 @@ type SnapshotReason = 'startup' | 'reconnect' | 'completion';
 
 type TimerHandle = ReturnType<typeof setTimeout>;
 
+export type ResumeSessionResult = {
+  session: AgentSessionSummary;
+  snapshot: AgentSessionSnapshot;
+};
+
 export type TuiSessionControllerOptions = {
   connectionFactory: AgentHostConnectionFactory;
   now?: () => number;
   requestIdFactory?: () => string;
   reconnectDelaysMs?: readonly number[];
   snapshotTimeoutMs?: number;
+  sessionCommandTimeoutMs?: number;
   setTimer?: (callback: () => void, delayMs: number) => TimerHandle;
   clearTimer?: (timer: TimerHandle) => void;
 };
 
 const DEFAULT_RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000] as const;
 const DEFAULT_SNAPSHOT_TIMEOUT_MS = 5_000;
+const DEFAULT_SESSION_COMMAND_TIMEOUT_MS = 5_000;
+
+type PendingSessionCommand =
+  | {
+      operation: 'list';
+      requestId: string;
+      timer: TimerHandle | null;
+      resolve: (sessions: AgentSessionSummary[]) => void;
+      reject: (error: Error) => void;
+    }
+  | {
+      operation: 'resume';
+      requestId: string;
+      sessionId: string;
+      timer: TimerHandle | null;
+      resolve: (result: ResumeSessionResult) => void;
+      reject: (error: Error) => void;
+    };
 
 export class TuiSessionController {
   private readonly now: () => number;
   private readonly requestIdFactory: () => string;
   private readonly reconnectDelaysMs: readonly number[];
   private readonly snapshotTimeoutMs: number;
+  private readonly sessionCommandTimeoutMs: number;
   private readonly setTimer: (callback: () => void, delayMs: number) => TimerHandle;
   private readonly clearTimer: (timer: TimerHandle) => void;
   private readonly connection: AgentHostConnection;
   private readonly listeners = new Set<(state: TuiSessionState) => void>();
   private readonly snapshotRequests = new Map<string, SnapshotReason>();
+  private readonly sessionCommands = new Map<string, PendingSessionCommand>();
   private state: TuiSessionState = {
     connection: 'idle',
     session: createPendingSession(),
@@ -70,6 +98,8 @@ export class TuiSessionController {
     this.requestIdFactory = options.requestIdFactory ?? (() => crypto.randomUUID());
     this.reconnectDelaysMs = options.reconnectDelaysMs ?? DEFAULT_RECONNECT_DELAYS_MS;
     this.snapshotTimeoutMs = options.snapshotTimeoutMs ?? DEFAULT_SNAPSHOT_TIMEOUT_MS;
+    this.sessionCommandTimeoutMs = options.sessionCommandTimeoutMs
+      ?? DEFAULT_SESSION_COMMAND_TIMEOUT_MS;
     this.setTimer = options.setTimer ?? setTimeout;
     this.clearTimer = options.clearTimer ?? clearTimeout;
     this.connection = options.connectionFactory({
@@ -105,6 +135,7 @@ export class TuiSessionController {
     this.clearReconnectTimer();
     this.clearSnapshotTimer();
     this.snapshotRequests.clear();
+    this.rejectSessionCommands('session command cancelled');
     this.connection.disconnect();
     this.setConnection('idle');
   }
@@ -141,6 +172,59 @@ export class TuiSessionController {
     return { ok: true, requestId };
   }
 
+  listSessions(): Promise<AgentSessionSummary[]> {
+    const unavailable = this.sessionCommandUnavailable();
+    if (unavailable) return Promise.reject(new Error(unavailable));
+
+    const requestId = this.requestIdFactory();
+    return new Promise((resolve, reject) => {
+      const pending: PendingSessionCommand = {
+        operation: 'list',
+        requestId,
+        timer: null,
+        resolve,
+        reject,
+      };
+      this.sessionCommands.set(requestId, pending);
+      pending.timer = this.scheduleSessionCommandTimeout(pending);
+      if (!this.connection.send({ type: 'session.list', requestId })) {
+        this.clearSessionCommand(pending);
+        reject(new Error('session list request could not be sent'));
+      }
+    });
+  }
+
+  resumeSession(sessionId: string): Promise<ResumeSessionResult> {
+    const normalizedSessionId = sessionId.trim();
+    if (!normalizedSessionId) {
+      return Promise.reject(new Error('session id is required'));
+    }
+    const unavailable = this.sessionCommandUnavailable();
+    if (unavailable) return Promise.reject(new Error(unavailable));
+
+    const requestId = this.requestIdFactory();
+    return new Promise((resolve, reject) => {
+      const pending: PendingSessionCommand = {
+        operation: 'resume',
+        requestId,
+        sessionId: normalizedSessionId,
+        timer: null,
+        resolve,
+        reject,
+      };
+      this.sessionCommands.set(requestId, pending);
+      pending.timer = this.scheduleSessionCommandTimeout(pending);
+      if (!this.connection.send({
+        type: 'session.resume',
+        requestId,
+        sessionId: normalizedSessionId,
+      })) {
+        this.clearSessionCommand(pending);
+        reject(new Error('session resume request could not be sent'));
+      }
+    });
+  }
+
   private handleOpen() {
     if (!this.started) {
       this.connection.disconnect();
@@ -155,6 +239,42 @@ export class TuiSessionController {
   }
 
   private handleMessage(message: AgentServerMessage) {
+    if (message.type === 'session.list.result') {
+      const pending = this.sessionCommands.get(message.requestId);
+      if (pending?.operation !== 'list') return;
+      this.clearSessionCommand(pending);
+      pending.resolve(message.sessions);
+      return;
+    }
+
+    if (message.type === 'session.resume.result') {
+      const pending = this.sessionCommands.get(message.requestId);
+      if (pending?.operation !== 'resume') return;
+      if (
+        pending.sessionId !== message.session.id
+        || pending.sessionId !== message.snapshot.session.sessionId
+      ) {
+        this.clearSessionCommand(pending);
+        pending.reject(new Error(
+          'session resume response did not match the requested session',
+        ));
+        return;
+      }
+      this.clearSessionCommand(pending);
+      this.clearSnapshotTimer();
+      this.snapshotRequests.clear();
+      this.updateSession(applySessionSnapshot(
+        this.state.session,
+        message.snapshot,
+        { observedAt: this.now() },
+      ));
+      pending.resolve({
+        session: message.session,
+        snapshot: message.snapshot,
+      });
+      return;
+    }
+
     if (message.type === 'session.snapshot.result') {
       const reason = this.snapshotRequests.get(message.requestId);
       if (!reason) return;
@@ -178,6 +298,12 @@ export class TuiSessionController {
     }
 
     if (message.type === 'session.error') {
+      const command = this.sessionCommands.get(message.requestId);
+      if (command?.operation === message.operation) {
+        this.clearSessionCommand(command);
+        command.reject(new Error(message.message));
+        return;
+      }
       const reason = this.snapshotRequests.get(message.requestId);
       if (reason) {
         this.snapshotRequests.delete(message.requestId);
@@ -227,6 +353,7 @@ export class TuiSessionController {
     if (!this.started) return;
     this.clearSnapshotTimer();
     this.snapshotRequests.clear();
+    this.rejectSessionCommands('local-agent disconnected');
     this.scheduleReconnect();
   }
 
@@ -282,6 +409,43 @@ export class TuiSessionController {
         this.connection.connect();
       }
     }, delay);
+  }
+
+  private sessionCommandUnavailable() {
+    if (this.state.connection !== 'ready' || !this.connection.isConnected()) {
+      return 'local-agent is not connected';
+    }
+    if (this.state.session.activeRun) {
+      return 'wait for the current response to finish';
+    }
+    if (this.sessionCommands.size > 0) {
+      return 'another session command is already in progress';
+    }
+    return null;
+  }
+
+  private scheduleSessionCommandTimeout(command: PendingSessionCommand) {
+    return this.setTimer(() => {
+      if (this.sessionCommands.get(command.requestId) !== command) return;
+      this.sessionCommands.delete(command.requestId);
+      command.timer = null;
+      command.reject(new Error(`session ${command.operation} request timed out`));
+    }, this.sessionCommandTimeoutMs);
+  }
+
+  private clearSessionCommand(command: PendingSessionCommand) {
+    if (command.timer) {
+      this.clearTimer(command.timer);
+      command.timer = null;
+    }
+    this.sessionCommands.delete(command.requestId);
+  }
+
+  private rejectSessionCommands(message: string) {
+    for (const command of [...this.sessionCommands.values()]) {
+      this.clearSessionCommand(command);
+      command.reject(new Error(message));
+    }
   }
 
   private updateSession(session: AgentSession) {

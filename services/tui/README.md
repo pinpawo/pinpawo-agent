@@ -2,7 +2,7 @@
 
 OpenTUI-based TUI v2 client.
 
-The package now contains the Phase 2 vertical slice from issue #454. It is
+The package now contains the Phase 2–4 vertical slice from issue #454. It is
 deliberately isolated from the production CLI while the migration is in
 progress:
 
@@ -18,6 +18,9 @@ progress:
   wheel/selection ownership into the app;
 - it recognizes pasted or dragged local paths as removable attachments without
   reading or uploading file contents.
+- it lists and resumes host sessions through the shared protocol in an
+  OpenTUI-owned footer overlay, while keeping picker state outside the canonical
+  Session projection.
 
 ## Run the vertical slice
 
@@ -44,6 +47,9 @@ Production client controls:
 - `Ctrl+Enter` submits the composer;
 - dragging or pasting one or more absolute local paths creates attachment chips;
 - Backspace removes the last attachment while the composer text is empty;
+- `Ctrl+R` or an exact `/resume` command opens the session picker;
+- `↑`/`↓`, `PageUp`/`PageDown`, and Enter navigate and resume a session; Esc
+  closes the picker without changing the composer draft;
 - ordinary prose containing a path remains text, and unavailable path-only
   pastes are inserted as text with a notice;
 - `Ctrl+C` exits the client.
@@ -54,6 +60,11 @@ committed to native scrollback; the mutable last row remains live. Historical
 alignment uses an object-identity fast path for deltas and falls back to
 fingerprint reconciliation after a snapshot or reconnect. Large settled
 prefixes are committed in bounded batches.
+
+The resume overlay defaults to the newest inactive session so Enter does not
+accidentally reload the current one. A successful switch clears the old draft
+and attachments only after the host returns the selected canonical snapshot.
+Late completion snapshots from the previous session are ignored.
 
 ## Phase 1 probes
 

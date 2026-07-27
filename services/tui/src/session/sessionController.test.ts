@@ -402,6 +402,201 @@ test('production controller keeps high-frequency deltas interleaved with operati
   controller.stop();
 });
 
+test('TuiSessionController lists resumable sessions and applies the selected snapshot', async () => {
+  const requestIds = ['startup', 'list', 'resume'];
+  let connection!: FakeConnection;
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => requestIds.shift() ?? 'unexpected',
+    now: () => 2_000,
+  });
+  controller.start();
+  connection.open();
+  connection.receive(snapshotResult('startup', 'chat:one'));
+
+  const listPromise = controller.listSessions();
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'session.list',
+    requestId: 'list',
+  });
+  const listedSession = sessionSummary('chat:two', false);
+  connection.receive({
+    type: 'session.list.result',
+    requestId: 'list',
+    sessions: [listedSession],
+  });
+  assert.deepEqual(await listPromise, [listedSession]);
+
+  const resumePromise = controller.resumeSession('chat:two');
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'session.resume',
+    requestId: 'resume',
+    sessionId: 'chat:two',
+  });
+  const snapshot = createAgentSessionSnapshot({
+    sessionId: 'chat:two',
+    kind: 'chat',
+    timeline: [{
+      id: 'resumed-message',
+      type: 'message',
+      role: 'assistant',
+      text: 'restored',
+      status: 'completed',
+    }],
+    activeRun: null,
+  });
+  connection.receive({
+    type: 'session.resume.result',
+    requestId: 'resume',
+    session: listedSession,
+    snapshot,
+  });
+
+  assert.deepEqual(await resumePromise, {
+    session: listedSession,
+    snapshot,
+  });
+  assert.equal(controller.getState().session.sessionId, 'chat:two');
+  assert.equal(controller.getState().session.timeline[0]?.id, 'resumed-message');
+  controller.stop();
+});
+
+test('resuming clears an older completion snapshot request', async () => {
+  const requestIds = ['startup', 'chat', 'completion', 'resume'];
+  let connection!: FakeConnection;
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => requestIds.shift() ?? 'unexpected',
+  });
+  controller.start();
+  connection.open();
+  connection.receive(snapshotResult('startup', 'chat:one'));
+  assert.equal(controller.submitChat('finish this').ok, true);
+  connection.receive(eventMessage({
+    type: 'message.completed',
+    requestId: 'chat',
+    role: 'assistant',
+    text: 'done',
+  }));
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'session.snapshot.get',
+    requestId: 'completion',
+  });
+
+  const resumePromise = controller.resumeSession('chat:two');
+  const resumedSummary = sessionSummary('chat:two', false);
+  connection.receive({
+    type: 'session.resume.result',
+    requestId: 'resume',
+    session: resumedSummary,
+    snapshot: createAgentSessionSnapshot({
+      sessionId: 'chat:two',
+      kind: 'chat',
+      timeline: [],
+      activeRun: null,
+    }),
+  });
+  await resumePromise;
+
+  connection.receive(snapshotResult('completion', 'chat:one'));
+  assert.equal(controller.getState().session.sessionId, 'chat:two');
+  controller.stop();
+});
+
+test('resume rejects a response whose snapshot belongs to another session', async () => {
+  const requestIds = ['startup', 'resume'];
+  let connection!: FakeConnection;
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => requestIds.shift() ?? 'unexpected',
+  });
+  controller.start();
+  connection.open();
+  connection.receive(snapshotResult('startup', 'chat:one'));
+
+  const resumePromise = controller.resumeSession('chat:two');
+  connection.receive({
+    type: 'session.resume.result',
+    requestId: 'resume',
+    session: sessionSummary('chat:two', false),
+    snapshot: createAgentSessionSnapshot({
+      sessionId: 'chat:wrong',
+      kind: 'chat',
+      timeline: [],
+      activeRun: null,
+    }),
+  });
+  await assert.rejects(resumePromise, /did not match/);
+  assert.equal(controller.getState().session.sessionId, 'chat:one');
+  controller.stop();
+});
+
+test('session commands reject protocol errors, busy runs, and timeouts', async () => {
+  const timers: Array<{ callback: () => void; handle: ReturnType<typeof setTimeout> }> = [];
+  const requestIds = ['startup', 'list-error', 'chat', 'list-timeout'];
+  let connection!: FakeConnection;
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => requestIds.shift() ?? 'unexpected',
+    sessionCommandTimeoutMs: 25,
+    setTimer: (callback) => {
+      const handle = {} as ReturnType<typeof setTimeout>;
+      timers.push({ callback, handle });
+      return handle;
+    },
+    clearTimer: (handle) => {
+      const index = timers.findIndex((timer) => timer.handle === handle);
+      if (index >= 0) timers.splice(index, 1);
+    },
+  });
+  controller.start();
+  connection.open();
+  connection.receive(snapshotResult('startup', 'chat:one'));
+
+  const failedList = controller.listSessions();
+  connection.receive({
+    type: 'session.error',
+    requestId: 'list-error',
+    operation: 'list',
+    message: 'list unavailable',
+  });
+  await assert.rejects(failedList, /list unavailable/);
+
+  assert.equal(controller.submitChat('busy').ok, true);
+  await assert.rejects(
+    controller.listSessions(),
+    /wait for the current response to finish/,
+  );
+  connection.receive(eventMessage({
+    type: 'message.completed',
+    requestId: 'chat',
+    role: 'assistant',
+    text: 'done',
+  }));
+  const completionRequest = connection.sent.at(-1);
+  if (completionRequest?.type === 'session.snapshot.get') {
+    connection.receive(snapshotResult(completionRequest.requestId, 'chat:one'));
+  }
+
+  const timedOutList = controller.listSessions();
+  assert.equal(timers.length, 1);
+  timers[0]?.callback();
+  await assert.rejects(timedOutList, /session list request timed out/);
+  controller.stop();
+});
+
 function eventMessage(
   event: Extract<AgentServerMessage, { type: 'event' }>['event'],
 ): AgentServerMessage {
@@ -409,6 +604,21 @@ function eventMessage(
     type: 'event',
     requestId: event.requestId,
     event,
+  };
+}
+
+function sessionSummary(
+  id: string,
+  active: boolean,
+) {
+  return {
+    id,
+    kind: 'chat' as const,
+    title: `Session ${id}`,
+    messageCount: 2,
+    createdAt: '2026-07-27T01:00:00.000Z',
+    updatedAt: '2026-07-27T02:00:00.000Z',
+    active,
   };
 }
 

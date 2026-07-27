@@ -20,6 +20,11 @@ import {
 import { parseTuiCommand } from './commands/commandRegistry';
 import { createDemoConnectionFactory } from './demo/demoConnection';
 import { editTextWithExternalEditor } from './editor/externalEditor';
+import {
+  applyClipboardAction,
+  resolveClipboardAction,
+  type SelectableEditor,
+} from './input/composerClipboard';
 import { resolveGlobalInterruptAction } from './input/globalInterrupt';
 import { shouldOpenTranscriptPager } from './input/transcriptShortcut';
 import { TuiSessionController } from './session/sessionController';
@@ -331,11 +336,32 @@ const unsubscribe = controller.subscribe((state) => {
 });
 renderer.keyInput.on('keypress', (key) => {
   const approval = approvalController.getState();
-  if (key.ctrl && key.name === 'c') {
+  if (key.ctrl && !key.shift && key.name === 'c') {
     key.preventDefault();
     key.stopPropagation();
     handleGlobalInterrupt(approval.phase);
     return;
+  }
+  const clipboardAction = resolveClipboardAction(key);
+  const clipboardEditor = activeClipboardEditor(approval);
+  if (clipboardAction && clipboardEditor) {
+    const result = applyClipboardAction({
+      action: clipboardAction,
+      editor: clipboardEditor,
+      copy: (text) => renderer.copyToClipboardOSC52(text),
+    });
+    if (result.handled) {
+      key.preventDefault();
+      key.stopPropagation();
+      localNotice = result.copied
+        ? clipboardAction === 'cut' && result.cut
+          ? 'cut selection to clipboard'
+          : 'copied selection to clipboard'
+        : 'terminal clipboard is unavailable';
+      syncComposerLayout();
+      refreshStatus();
+      return;
+    }
   }
   const approvalAction = resolveApprovalKey(approval, key);
   if (approval.phase !== 'closed') {
@@ -1257,6 +1283,25 @@ function reconcileTimelineAfterHandoff() {
   } catch (error) {
     localNotice = `timeline refresh failed: ${errorMessage(error)}`;
   }
+}
+
+function activeClipboardEditor(
+  approval: ReturnType<ApprovalController['getState']>,
+): SelectableEditor | null {
+  if (approvalAcceptsTextInput(approval)) {
+    return approvalView.input;
+  }
+  if (
+    approval.phase === 'closed'
+    && noticeOverlay.phase === 'closed'
+    && policyPicker.phase === 'closed'
+    && sessionPicker.phase === 'closed'
+    && commandOverlay.phase !== 'help'
+    && !terminalHandoffOpen
+  ) {
+    return composer;
+  }
+  return null;
 }
 
 function clearComposerPreservingNotice() {

@@ -80,6 +80,11 @@ backoff if the host disappears.
 Production client controls:
 
 - `Ctrl+Enter` submits the composer;
+- `Cmd+A`, `Cmd+Z`/`Shift+Cmd+Z`, Option+arrows, Home/End, and Shift-modified
+  movement use the native multiline editor selection and history behavior;
+- `Cmd+C`/`Cmd+X` copy or cut an internal selection through OSC 52;
+  `Ctrl+Shift+C`/`Ctrl+Shift+X` are available when the terminal forwards them,
+  and a failed clipboard write never deletes the selection;
 - dragging or pasting one or more absolute local paths creates attachment chips;
 - Backspace removes the last attachment while the composer text is empty;
 - PageUp from an empty, attachment-free composer or `/transcript` opens the

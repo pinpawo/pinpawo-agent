@@ -104,6 +104,10 @@ test('command help pages and remains terminal-width safe', () => {
     buildCommandOverlayViewModel(last, 80).content,
     /Recall prompts/,
   );
+  assert.match(
+    buildCommandOverlayViewModel(last, 80).content,
+    /@path — Complete workspace files in chat/,
+  );
   assert.equal(resolveCommandOverlayKey(state, key('q')), 'close');
   for (const line of second.content.split('\n')) {
     assert.ok(stringWidth(line) <= 28, line);

@@ -32,6 +32,18 @@ import {
   resetComposerHistoryNavigation,
   resolveComposerHistoryDirection,
 } from './input/composerHistory';
+import {
+  placeComposerCursorAtTextOffset,
+  readComposerTextInput,
+} from './input/composerTextPosition';
+import {
+  completeFileMention,
+  createFileMentionState,
+  moveFileMentionSelection,
+  resolveFileMentionKey,
+  syncFileMention,
+  type FileMentionAction,
+} from './input/fileMention';
 import { resolveGlobalInterruptAction } from './input/globalInterrupt';
 import { shouldOpenTranscriptPager } from './input/transcriptShortcut';
 import { TuiSessionController } from './session/sessionController';
@@ -53,6 +65,7 @@ import {
   type CommandOverlayAction,
 } from './overlays/commandOverlayModel';
 import { CommandOverlayView } from './overlays/commandOverlayView';
+import { FileMentionView } from './overlays/fileMentionView';
 import {
   closeNoticeOverlay,
   createNoticeOverlayState,
@@ -162,6 +175,7 @@ const status = new TextRenderable(renderer, {
 const sessionPickerView = new SessionPickerView(renderer);
 const policyPickerView = new PolicyPickerView(renderer);
 const commandOverlayView = new CommandOverlayView(renderer);
+const fileMentionView = new FileMentionView(renderer);
 const noticeOverlayView = new NoticeOverlayView(renderer);
 
 let localNotice: string | null = null;
@@ -169,6 +183,11 @@ let pendingComposerNotice: string | null = null;
 let composerNoticeSticky = false;
 let attachments: AgentLocalAttachment[] = [];
 let commandOverlay = createCommandOverlayState();
+let fileMention = createFileMentionState();
+let dismissedFileMention: {
+  text: string;
+  cursorOffset: number;
+} | null = null;
 let noticeOverlay = createNoticeOverlayState();
 let sessionPicker = createSessionPickerState();
 let policyPicker = createPolicyPickerState();
@@ -222,11 +241,11 @@ const composer = new TextareaRenderable(renderer, {
       localNotice = pendingComposerNotice;
     }
     pendingComposerNotice = null;
-    syncCommandOverlayFromComposer();
+    syncComposerInputOverlays();
     syncComposerLayout();
     refreshStatus();
   },
-  onCursorChange: () => syncCommandOverlayFromComposer(),
+  onCursorChange: () => syncComposerInputOverlays(),
   onPaste: (event: PasteEvent) => {
     const input = new TextDecoder().decode(event.bytes);
     const result = ingestLocalPathPaste(input, {
@@ -243,7 +262,7 @@ const composer = new TextareaRenderable(renderer, {
         result.attachments.length - addedCount,
       );
       refreshHeader();
-      syncCommandOverlayFromComposer();
+      syncComposerInputOverlays();
       syncComposerLayout();
       refreshStatus();
     } else if (result.pathLike) {
@@ -260,6 +279,7 @@ composerFrame.add(composer);
 root.add(composerFrame);
 root.add(status);
 root.add(commandOverlayView.frame);
+root.add(fileMentionView.frame);
 root.add(sessionPickerView.frame);
 root.add(policyPickerView.frame);
 root.add(noticeOverlayView.frame);
@@ -270,7 +290,7 @@ if (smokeCommand || demoCommand) {
   composer.gotoBufferEnd();
 }
 composer.focus();
-syncCommandOverlayFromComposer();
+syncComposerInputOverlays();
 
 const unsubscribe = controller.subscribe((state) => {
   if (state.session.sessionId !== focusedSessionId) {
@@ -406,7 +426,7 @@ renderer.keyInput.on('keypress', (key) => {
     handlePolicyPickerAction(policyAction);
     return;
   }
-  syncCommandOverlayFromComposer();
+  syncComposerInputOverlays();
   const commandAction = resolveCommandOverlayKey(commandOverlay, key);
   if (
     commandOverlay.phase === 'help'
@@ -433,6 +453,13 @@ renderer.keyInput.on('keypress', (key) => {
     key.preventDefault();
     key.stopPropagation();
     handleCommandOverlayAction(commandAction);
+    return;
+  }
+  const fileMentionAction = resolveFileMentionKey(fileMention, key);
+  if (fileMention.phase === 'open' && fileMentionAction) {
+    key.preventDefault();
+    key.stopPropagation();
+    handleFileMentionAction(fileMentionAction);
     return;
   }
   const historyDirection = resolveComposerHistoryDirection(
@@ -480,7 +507,7 @@ renderer.keyInput.on('keypress', (key) => {
       ? `${attachments.length} attachment${attachments.length === 1 ? '' : 's'} remaining`
       : 'attachment removed';
     refreshHeader();
-    syncCommandOverlayFromComposer();
+    syncComposerInputOverlays();
     syncComposerLayout();
     refreshStatus();
   }
@@ -522,6 +549,7 @@ renderer.on('resize', () => {
   refreshPolicyPicker();
   refreshApproval();
   refreshCommandOverlay();
+  refreshFileMention();
   refreshNoticeOverlay();
 });
 renderer.on('destroy', () => {
@@ -530,6 +558,7 @@ renderer.on('destroy', () => {
   sessionPicker = closeSessionPicker(sessionPicker);
   policyPicker = closePolicyPicker(policyPicker);
   commandOverlay = closeCommandOverlay();
+  fileMention = createFileMentionState();
   noticeOverlay = closeNoticeOverlay();
   approvalController.destroy();
   unsubscribe();
@@ -599,7 +628,7 @@ function refreshStatus() {
   ).join('\n');
 }
 
-function syncCommandOverlayFromComposer() {
+function syncComposerInputOverlays() {
   commandOverlay = syncCommandPalette(commandOverlay, {
     text: composer.plainText,
     cursorOffset: composer.cursorOffset,
@@ -611,10 +640,76 @@ function syncCommandOverlayFromComposer() {
       && approvalController.getState().phase === 'closed',
   });
   refreshCommandOverlay();
+
+  const currentInput = readComposerTextInput(composer);
+  if (
+    dismissedFileMention
+    && (
+      dismissedFileMention.text !== currentInput.text
+      || dismissedFileMention.cursorOffset !== currentInput.cursorOffset
+    )
+  ) {
+    dismissedFileMention = null;
+  }
+  fileMention = syncFileMention(
+    fileMention,
+    currentInput,
+    controller.getState().session.runtime?.cwd ?? process.cwd(),
+    composerMode === 'chat'
+      && commandOverlay.phase === 'closed'
+      && !dismissedFileMention
+      && !terminalHandoffOpen
+      && sessionPicker.phase === 'closed'
+      && policyPicker.phase === 'closed'
+      && noticeOverlay.phase === 'closed'
+      && approvalController.getState().phase === 'closed',
+  );
+  refreshFileMention();
 }
 
 function refreshCommandOverlay() {
   commandOverlayView.render(commandOverlay, renderer.width);
+}
+
+function refreshFileMention() {
+  fileMentionView.render(fileMention, renderer.width);
+}
+
+function closeFileMentionOverlay() {
+  fileMention = createFileMentionState();
+  refreshFileMention();
+}
+
+function handleFileMentionAction(action: FileMentionAction) {
+  if (!action) return;
+  if (action === 'previous' || action === 'next') {
+    fileMention = moveFileMentionSelection(
+      fileMention,
+      action === 'previous' ? -1 : 1,
+    );
+    refreshFileMention();
+    return;
+  }
+  if (action === 'dismiss') {
+    dismissedFileMention = readComposerTextInput(composer);
+    fileMention = createFileMentionState();
+    refreshFileMention();
+    return;
+  }
+  const completion = completeFileMention(
+    readComposerTextInput(composer),
+    fileMention,
+  );
+  if (!completion) return;
+  dismissedFileMention = null;
+  composer.replaceText(completion.text);
+  placeComposerCursorAtTextOffset(
+    composer,
+    completion.text,
+    completion.cursorOffset,
+  );
+  syncComposerInputOverlays();
+  syncComposerLayout();
 }
 
 function syncNoticeFromSession() {
@@ -624,6 +719,7 @@ function syncNoticeFromSession() {
     controller.getState(),
   );
   if (noticeOverlay.phase !== 'closed') {
+    closeFileMentionOverlay();
     if (commandOverlay.phase !== 'closed') {
       commandOverlay = closeCommandOverlay();
       refreshCommandOverlay();
@@ -648,7 +744,7 @@ function syncNoticeFromSession() {
       localNotice = null;
     }
     composer.focus();
-    syncCommandOverlayFromComposer();
+    syncComposerInputOverlays();
   }
   refreshNoticeOverlay();
 }
@@ -662,12 +758,13 @@ function closeNoticeOverlayUi() {
     && policyPicker.phase === 'closed'
   ) {
     composer.focus();
-    syncCommandOverlayFromComposer();
+    syncComposerInputOverlays();
   }
 }
 
 function showErrorNotice(message: string) {
   noticeOverlay = openErrorNotice(message);
+  closeFileMentionOverlay();
   composer.blur();
   refreshNoticeOverlay();
 }
@@ -716,6 +813,7 @@ function syncApprovalFromSession() {
   );
   const approval = approvalController.getState();
   if (approval.phase !== 'closed') {
+    closeFileMentionOverlay();
     if (commandOverlay.phase !== 'closed') {
       commandOverlay = closeCommandOverlay();
       refreshCommandOverlay();
@@ -739,7 +837,7 @@ function syncApprovalFromSession() {
     && noticeOverlay.phase === 'closed'
   ) {
     composer.focus();
-    syncCommandOverlayFromComposer();
+    syncComposerInputOverlays();
   }
   refreshApproval();
 }
@@ -760,6 +858,7 @@ function refreshApproval() {
 function openSessionPicker() {
   if (terminalHandoffOpen || sessionPicker.phase !== 'closed') return;
   commandOverlay = closeCommandOverlay();
+  closeFileMentionOverlay();
   refreshCommandOverlay();
   const generation = sessionPickerGeneration + 1;
   sessionPickerGeneration = generation;
@@ -860,7 +959,7 @@ function closeSessionPickerUi() {
   refreshSessionPicker();
   if (!terminalHandoffOpen && noticeOverlay.phase === 'closed') {
     composer.focus();
-    syncCommandOverlayFromComposer();
+    syncComposerInputOverlays();
   }
 }
 
@@ -885,6 +984,7 @@ function openPolicyPickerUi() {
     return;
   }
   commandOverlay = closeCommandOverlay();
+  closeFileMentionOverlay();
   sessionPickerGeneration += 1;
   sessionPicker = closeSessionPicker(sessionPicker);
   policyPickerGeneration += 1;
@@ -936,7 +1036,7 @@ function saveSelectedPolicy() {
     refreshStatus();
     if (!terminalHandoffOpen) {
       composer.focus();
-      syncCommandOverlayFromComposer();
+      syncComposerInputOverlays();
     }
   }).catch((error: unknown) => {
     if (
@@ -961,7 +1061,7 @@ function closePolicyPickerUi() {
     && approvalController.getState().phase === 'closed'
   ) {
     composer.focus();
-    syncCommandOverlayFromComposer();
+    syncComposerInputOverlays();
   }
 }
 
@@ -1009,6 +1109,7 @@ function handleCommandOverlayAction(action: CommandOverlayAction) {
 function openCommandHelpUi() {
   if (terminalHandoffOpen) return;
   commandOverlay = openCommandHelp();
+  closeFileMentionOverlay();
   composer.blur();
   refreshCommandOverlay();
 }
@@ -1137,7 +1238,7 @@ function enterStudioMode(clearComposer = true) {
   studioConversationId ??= crypto.randomUUID();
   localNotice = 'studio mode · /chat to return';
   syncComposerModeUi();
-  syncCommandOverlayFromComposer();
+  syncComposerInputOverlays();
   syncComposerLayout();
   refreshStatus();
 }
@@ -1148,7 +1249,7 @@ function enterChatMode(clearComposer = true) {
   studioConversationId = null;
   localNotice = 'chat mode';
   syncComposerModeUi();
-  syncCommandOverlayFromComposer();
+  syncComposerInputOverlays();
   syncComposerLayout();
   refreshStatus();
 }
@@ -1249,7 +1350,7 @@ function openExternalEditor(initialText: string) {
       && approvalController.getState().phase === 'closed'
     ) {
       composer.focus();
-      syncCommandOverlayFromComposer();
+      syncComposerInputOverlays();
     }
     if (smokeEdit) {
       setTimeout(() => renderer.destroy(), 50);
@@ -1298,7 +1399,7 @@ function openTranscriptPager() {
       && approvalController.getState().phase === 'closed'
     ) {
       composer.focus();
-      syncCommandOverlayFromComposer();
+      syncComposerInputOverlays();
     }
     if (smokeTranscript) {
       setTimeout(() => renderer.destroy(), 50);
@@ -1344,7 +1445,7 @@ function applyComposerHistoryNavigation(
   composerHistory = result.history;
   composer.setText(result.value);
   composer.gotoBufferEnd();
-  syncCommandOverlayFromComposer();
+  syncComposerInputOverlays();
   syncComposerLayout();
 }
 

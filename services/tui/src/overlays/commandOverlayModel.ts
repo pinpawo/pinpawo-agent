@@ -233,6 +233,7 @@ function helpLines() {
     )),
     '  Ctrl+R — Resume a session',
     '  Ctrl+Enter — Send the composer',
+    '  @path — Complete workspace files in chat',
     '  ↑/↓ at composer edge — Recall prompts / restore draft',
     '  Shift+Enter — Insert a newline in review responses',
     '  PgUp/PgDn — Browse timeline or active overlay',

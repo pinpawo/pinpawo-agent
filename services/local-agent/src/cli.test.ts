@@ -15,6 +15,79 @@ test('local agent CLI passes tui options to the handler', async () => {
   assert.deepEqual(received, { dryRun: true, workdir: '/tmp/pinpawo-tui-workdir' });
 });
 
+test('local agent CLI launches OpenTUI v2 without invoking the legacy handler', async () => {
+  let legacyCalls = 0;
+  let received: { workdir?: string } | null = null;
+  const program = createLocalAgentCli({
+    runTui: () => {
+      legacyCalls += 1;
+    },
+    runTuiV2: (options) => {
+      received = options;
+    },
+  });
+
+  await program.parseAsync([
+    'node',
+    'pinpawo',
+    'tui',
+    '--v2',
+    '--workdir',
+    '/tmp/pinpawo-tui-v2-workdir',
+  ]);
+
+  assert.equal(legacyCalls, 0);
+  assert.deepEqual(received, {
+    workdir: '/tmp/pinpawo-tui-v2-workdir',
+  });
+});
+
+test('local agent CLI keeps an explicit legacy fallback during v2 dogfood', async () => {
+  let legacyCalls = 0;
+  let v2Calls = 0;
+  const program = createLocalAgentCli({
+    runTui: () => {
+      legacyCalls += 1;
+    },
+    runTuiV2: () => {
+      v2Calls += 1;
+    },
+  });
+
+  await program.parseAsync(['node', 'pinpawo', 'tui', '--legacy']);
+
+  assert.equal(legacyCalls, 1);
+  assert.equal(v2Calls, 0);
+});
+
+test('local agent CLI rejects conflicting or legacy-only TUI flags', async () => {
+  const handlers = {
+    runTui: () => undefined,
+    runTuiV2: () => undefined,
+  };
+
+  await assert.rejects(
+    createLocalAgentCli(handlers).parseAsync([
+      'node',
+      'pinpawo',
+      'tui',
+      '--v2',
+      '--legacy',
+    ]),
+    /Choose either --v2 or --legacy/,
+  );
+  await assert.rejects(
+    createLocalAgentCli(handlers).parseAsync([
+      'node',
+      'pinpawo',
+      'tui',
+      '--v2',
+      '--dry-run',
+    ]),
+    /--dry-run is only supported by the legacy Ink TUI/,
+  );
+});
+
 test('local agent CLI passes init options to the handler', async () => {
   let received: unknown = null;
   const program = createLocalAgentCli({

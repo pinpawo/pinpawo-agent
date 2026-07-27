@@ -2,13 +2,13 @@
 
 OpenTUI-based TUI v2 client.
 
-The package now contains the Phase 2–4 vertical slice from issue #454. It is
-deliberately isolated from the production CLI while the migration is in
-progress:
+The package now contains the Phase 2–4 vertical slice and the first Phase 5
+dogfood entrypoint from issue #454:
 
 - it imports the canonical projection from `@pinpawo/agent-session`;
 - it does not import `services/local-agent/src/*`;
-- it does not replace or delegate the existing `pinpawo-agent tui` command;
+- it is available through `pinpawo tui --v2`, while the default `pinpawo tui`
+  and explicit `--legacy` rollback still use Ink;
 - it connects to the authenticated loopback local-agent WebSocket;
 - it loads one canonical Session snapshot, consumes live runtime events, and
   submits chat messages through the shared protocol;
@@ -35,18 +35,30 @@ progress:
 
 ## Run the vertical slice
 
-Install Bun and dependencies. Start the Node host in one terminal:
+Install dependencies. Start the Node host in one terminal:
 
 ```sh
 npm install
 npm run start -w pinpawo -- run
 ```
 
-Then start the OpenTUI client from the repository root in another terminal:
+Then start the OpenTUI client through the Phase 5 migration entrypoint from the
+repository root in another terminal:
 
 ```sh
-npm run dev -w @pinpawo/tui
+npm run tui:v2 -w pinpawo
 ```
+
+An installed package prefers its bundled executable. In a source checkout the
+launcher uses the workspace Bun dependency and current TUI source, then falls
+back to `services/tui/dist/pinpawo-tui` or global `bun`. `PINPAWO_TUI_V2_BIN`
+can select an explicit build. Direct development remains available with
+`npm run dev -w @pinpawo/tui`.
+
+The current public `pinpawo` npm tarball does not yet carry platform-specific
+OpenTUI executables. Until the distribution slice lands, `--v2` is supported
+from this source workspace, a distributor-provided bundle, or an explicit
+`PINPAWO_TUI_V2_BIN`; installed users retain `--legacy`.
 
 The client reads `LOCAL_SERVER_PORT` (default `3210`) and the bearer token
 written by the host to `~/.pinpawo/local-server-token`. It will synchronize the

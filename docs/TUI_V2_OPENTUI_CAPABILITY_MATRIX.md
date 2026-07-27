@@ -50,6 +50,7 @@ The probe covers:
 | error notice ownership | connection/local errors remain width-safe and dismissible without editing the composer | automated + Bun native test |
 | two-line status | run/connection/notice and session in/out/context/workspace facts remain separate with narrow-width degradation | automated test |
 | borderless welcome | terminal-raster paw, v2 package version, runtime facts, and shortcuts commit once before timeline history | automated + Bun native test |
+| Phase 5 CLI entry | `pinpawo tui --v2` selects a bundled/workspace OpenTUI executable or workspace source while `--legacy` remains an explicit rollback | automated test + compiled PTY |
 | raw input preview | controls are escaped and output is bounded | automated test |
 | fixed-footer composer layout | composer grows from 3–5 visible rows without changing terminal footer height | automated test |
 | native textarea regression | multiline paste and single-grapheme backspace preserve line boundaries | Bun native test |
@@ -60,8 +61,9 @@ The probe covers:
 | split-footer PTY startup | `npm run smoke:split -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | standalone executable | `npm run build -w @pinpawo/tui` | passed for darwin-arm64; normal and approval compiled PTY smokes passed |
 | root typecheck | `npm run typecheck` | passed |
-| root tests | `npm test` | passed, including local-agent 755/755 and Chrome extension 22/22 |
+| root tests | `npm test` | passed, including local-agent 765/765 and Chrome extension 22/22 |
 | root build | `npm run build` | passed |
+| CLI package dry-run | `npm run pack:dry -w pinpawo` | passed; launcher is bundled, while platform-specific v2 executables remain a later distribution slice |
 
 ## Manual terminal matrix
 
@@ -113,7 +115,7 @@ terminal-owned wheel/selection input and stable-row scrollback commits.
 | single-file drag-in | Ghostty delivers the path to the composer | passed |
 | multi-file drag-in | Ghostty delivers shell-style path text; the production client now parses quoted, escaped, `file://`, and multiple absolute paths into removable chips | automated parser complete; production Ghostty retest pending |
 | resize | committed scrollback and footer layout became visually inconsistent | partial; fixed footer avoids app-driven height transitions, but committed terminal scrollback remains terminal-owned |
-| dynamic composer height | changing `renderer.footerHeight` left old footer frames in Ghostty scrollback | failed; composer now reclaims title/live rows inside a fixed eight-row footer |
+| dynamic composer height | changing `renderer.footerHeight` left old footer frames in Ghostty scrollback | failed; composer now reclaims title/live rows inside a fixed nine-row footer |
 
 The final Ghostty retest confirmed multiline growth, multiline paste, resize,
 and the fixed-footer repaint behavior. Existing committed scrollback remains
@@ -128,7 +130,7 @@ The production direction is the split-footer model:
   `ScrollbackSurface`;
 - OpenTUI mouse tracking stays disabled so touchpad scrolling, selection, and
   copy remain terminal-owned;
-- live state and the composer occupy a fixed eight-row footer;
+- live state and the composer occupy a fixed nine-row footer;
 - the composer exposes three to five visible rows without resizing that footer
   and scrolls internally beyond five rows;
 - streaming rows update in place and are committed only when stable, so
@@ -181,6 +183,9 @@ Known limits and follow-up work:
 15. Repeat the selection, scroll, resize, paste, IME, and burst checks with
     `npm run dev:split -w @pinpawo/tui`. Compare native terminal scrollback
     against the alternate-screen internal viewport.
+16. From the repository root run `npm run tui:v2 -w pinpawo` and confirm the
+    compiled/workspace launcher opens the same v2 client. Run
+    `npm run tui:legacy -w pinpawo` and confirm the Ink rollback still starts.
 
 ## Decision gate
 

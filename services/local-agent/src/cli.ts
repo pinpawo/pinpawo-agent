@@ -10,6 +10,7 @@ type LocalAgentCliHandlers = {
   runActorSelect?: () => Promise<void> | void;
   runAgent?: (opts: { workdir?: string; stdio: boolean }) => Promise<void> | void;
   runTui?: (opts: { dryRun: boolean; workdir?: string }) => Promise<void> | void;
+  runTuiV2?: (opts: { workdir?: string }) => Promise<void> | void;
   runDetect?: () => Promise<void> | void;
   runInit?: (opts: InitCommandOptions) => Promise<void> | void;
   runSetup?: (opts: { workdir?: string }) => Promise<void> | void;
@@ -104,12 +105,34 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
     .command('tui')
     .description('Start the interactive terminal UI')
     .option('--dry-run', 'run without writing generated post changes')
+    .option('--v2', 'use the OpenTUI v2 client')
+    .option('--legacy', 'force the legacy Ink client')
     .option('--workdir <directory>', 'agent working directory for runtime state and relative tool paths')
-    .action(async (options: { dryRun?: boolean; workdir?: string }) => {
+    .action(async (options: {
+      dryRun?: boolean;
+      legacy?: boolean;
+      v2?: boolean;
+      workdir?: string;
+    }) => {
+      if (options.v2 && options.legacy) {
+        throw new Error('Choose either --v2 or --legacy, not both.');
+      }
+      const workdir = options.workdir?.trim()
+        ? resolveWorkdirOption(options.workdir)
+        : undefined;
+      if (options.v2) {
+        if (options.dryRun) {
+          throw new Error('--dry-run is only supported by the legacy Ink TUI.');
+        }
+        const runTuiV2 = handlers.runTuiV2
+          ?? (await import('./commands/tuiV2Launcher')).runTuiV2;
+        await runTuiV2({ workdir });
+        return;
+      }
       const runTui = handlers.runTui ?? (await import('./commands/tui')).runTui;
       await runTui({
         dryRun: options.dryRun ?? false,
-        workdir: options.workdir?.trim() ? resolveWorkdirOption(options.workdir) : undefined,
+        workdir,
       });
     });
 

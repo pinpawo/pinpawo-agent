@@ -84,6 +84,8 @@ pinpawo actor
 pinpawo run
 pinpawo run --stdio
 pinpawo tui
+pinpawo tui --v2
+pinpawo tui --legacy
 pinpawo detect
 pinpawo browser extension status
 pinpawo browser extension register --extension-id <id>
@@ -92,6 +94,18 @@ pinpawo capability list
 pinpawo capability validate ./my-capability
 pinpawo capability install ./my-capability
 ```
+
+`pinpawo tui` remains the legacy Ink client during OpenTUI dogfood.
+`pinpawo tui --v2` launches the OpenTUI client. Installed packages prefer a
+bundled native executable; source checkouts use their workspace Bun dependency
+and current TUI source, with a compiled workspace binary or global Bun as
+fallbacks. `PINPAWO_TUI_V2_BIN` selects an explicit build. `pinpawo tui
+--legacy` is the rollback path and will remain available when v2 becomes the
+default.
+
+The TUI client connects to the separately running local host, so start
+`pinpawo run` first. `--workdir` selects the child client's working directory;
+the host's canonical snapshot remains authoritative for the runtime workspace.
 
 The packaged extension directory is printed by `browser extension status`. Load it through `chrome://extensions` in Developer mode, copy its ID, register that exact ID, and restart the agent. The Chrome extension is a Browser capability driver, with its Native Messaging host kept as a driver-private companion process. Protocol v2 supports open, snapshot, click, type, scroll, wait, extract, screenshot and detach on one approved Chrome tab.
 

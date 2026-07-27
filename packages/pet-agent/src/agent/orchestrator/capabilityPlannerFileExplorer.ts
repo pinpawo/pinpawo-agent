@@ -46,11 +46,13 @@ export type CapabilityPlannerFileExplorer = {
    */
   readonly tools: readonly StructuredTool[];
   readonly getObservationBudget: () => CapabilityPlannerObservationBudgetSnapshot;
+  readonly hasReachedObservationLimit: () => boolean;
 };
 
 class ObservationBudget {
   readonly maxDocumentBytes: number;
   #consumedDocumentBytes = 0;
+  #limitReached = false;
 
   constructor(maxDocumentBytes: number) {
     if (!Number.isSafeInteger(maxDocumentBytes) || maxDocumentBytes <= 0) {
@@ -84,6 +86,14 @@ class ObservationBudget {
       );
     }
     this.#consumedDocumentBytes += bytes;
+  }
+
+  markLimitReached() {
+    this.#limitReached = true;
+  }
+
+  hasReachedLimit() {
+    return this.#limitReached;
   }
 }
 
@@ -131,6 +141,9 @@ function formatError(
   error: unknown,
 ) {
   const stable = stablePlannerFileToolError(error);
+  if (stable.code === 'planning_limit_reached') {
+    budget.markLimitReached();
+  }
   return JSON.stringify({
     ok: false,
     tool: toolName,
@@ -538,5 +551,6 @@ export function createCapabilityPlannerFileExplorer(params: {
   return Object.freeze({
     tools: Object.freeze([globSearch, grepSearch, viewFileChunk]),
     getObservationBudget: () => budget.snapshot(),
+    hasReachedObservationLimit: () => budget.hasReachedLimit(),
   });
 }

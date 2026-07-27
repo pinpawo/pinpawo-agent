@@ -36,15 +36,21 @@ The probe covers:
 | resume race isolation | late completion snapshots from the previous session cannot replace the resumed session | automated test |
 | resume overlay input ownership | navigation is isolated from the composer and locks during resume | automated test |
 | resume overlay resize | 8-row split footer remains bounded at wide and narrow terminal widths | Bun native test |
+| canonical approval restore | snapshot/runtime waiting-review state opens the same approval model | automated test |
+| batched review decisions | approved decisions advance locally and the terminal response carries the complete canonical decision list | automated test |
+| review response validation | stale action, stale batch, missing input, disconnect, and send failure cannot submit an invalid response | automated test |
+| approval input ownership | option navigation yields to a dedicated multiline textarea after free text starts | automated test |
+| approval details paging | long plain/markdown/diff review content remains pageable inside the fixed footer | automated test |
+| approval overlay resize | CJK body/options and multiline input remain bounded in the 8-row split footer | Bun native test |
 | raw input preview | controls are escaped and output is bounded | automated test |
 | fixed-footer composer layout | composer grows from 3–5 visible rows without changing terminal footer height | automated test |
 | native textarea regression | multiline paste and single-grapheme backspace preserve line boundaries | Bun native test |
 | TypeScript | `npm run typecheck -w @pinpawo/tui` | passed |
-| unit tests | `npm run test -w @pinpawo/tui` | passed, 42 tests |
-| native tests | `npm run test:native -w @pinpawo/tui` | passed, 7 tests including resume overlay resize, textarea, WebSocket, and 4 real ScrollbackSurface tests |
+| unit tests | `npm run test -w @pinpawo/tui` | passed, 54 tests |
+| native tests | `npm run test:native -w @pinpawo/tui` | passed, 8 tests including approval/resume resize, textarea, WebSocket, and 4 real ScrollbackSurface tests |
 | alternate-screen PTY startup | `npm run smoke -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | split-footer PTY startup | `npm run smoke:split -w @pinpawo/tui` | passed in an automated 80×24 PTY |
-| standalone executable | `npm run build:spike -w @pinpawo/tui` | passed for darwin-arm64; compiled PTY smoke passed |
+| standalone executable | `npm run build -w @pinpawo/tui` | passed for darwin-arm64; normal and approval compiled PTY smokes passed |
 | root typecheck | `npm run typecheck` | passed |
 | root tests | `npm test` | passed, including local-agent 754/754 and Chrome extension 22/22 |
 | root build | `npm run build` | passed |
@@ -153,7 +159,11 @@ Known limits and follow-up work:
    inactive session, and confirm its timeline replaces the current one.
 10. Resize the terminal while editing, browsing history, and while the resume
     overlay is open.
-11. Repeat the selection, scroll, resize, paste, IME, and burst checks with
+11. Run `npm run dev:review -w @pinpawo/tui`. Page through details, select the
+    text-response option, paste multiple lines, submit, and confirm focus returns
+    to the composer. Restart it, press Esc, and confirm cancellation also
+    restores the composer.
+12. Repeat the selection, scroll, resize, paste, IME, and burst checks with
     `npm run dev:split -w @pinpawo/tui`. Compare native terminal scrollback
     against the alternate-screen internal viewport.
 

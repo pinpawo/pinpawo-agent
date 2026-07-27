@@ -3,9 +3,11 @@ import {
   reduceSession,
   type AgentServerMessage,
   type AgentLocalAttachment,
+  type AgentReviewAction,
   type AgentSession,
   type AgentSessionSnapshot,
   type AgentSessionSummary,
+  type ReviewResponse,
 } from '@pinpawo/agent-session';
 import type {
   AgentHostConnection,
@@ -39,6 +41,30 @@ export type ResumeSessionResult = {
   session: AgentSessionSummary;
   snapshot: AgentSessionSnapshot;
 };
+
+export type SubmitReviewResponseResult =
+  | {
+      ok: true;
+      status: 'advanced' | 'sent';
+      decision: ReviewResponse;
+      decisions: ReviewResponse[];
+    }
+  | {
+      ok: false;
+      reason:
+        | 'not-ready'
+        | 'closed'
+        | 'stale'
+        | 'input-required'
+        | 'send-failed';
+    };
+
+export type CancelReviewResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: 'not-ready' | 'closed' | 'stale' | 'send-failed';
+    };
 
 export type TuiSessionControllerOptions = {
   connectionFactory: AgentHostConnectionFactory;
@@ -223,6 +249,103 @@ export class TuiSessionController {
         reject(new Error('session resume request could not be sent'));
       }
     });
+  }
+
+  submitReviewResponse(params: {
+    requestId: string;
+    actionId: string;
+    decisions: readonly ReviewResponse[];
+    optionId: string;
+    inputText?: string;
+  }): SubmitReviewResponseResult {
+    if (!this.reviewTransportReady()) {
+      return { ok: false, reason: 'not-ready' };
+    }
+    const run = this.state.session.activeRun;
+    if (!run || run.state !== 'waiting_review') {
+      return { ok: false, reason: 'closed' };
+    }
+    if (
+      run.requestId !== params.requestId
+      || run.reviewAction.actionId !== params.actionId
+    ) {
+      return { ok: false, reason: 'stale' };
+    }
+    if (!reviewDecisionsMatch(run.reviewAction, params.decisions)) {
+      return { ok: false, reason: 'stale' };
+    }
+
+    const review = run.reviewAction.reviews[params.decisions.length];
+    const option = review?.options.find((candidate) => candidate.id === params.optionId);
+    if (!review || !option) {
+      return { ok: false, reason: 'stale' };
+    }
+    const inputText = params.inputText?.trim() ?? '';
+    if (option.input?.kind === 'text' && !inputText) {
+      return { ok: false, reason: 'input-required' };
+    }
+    const input = option.input?.kind === 'text'
+      ? { [option.input.key]: inputText }
+      : undefined;
+    const decision: ReviewResponse = {
+      reviewId: review.id,
+      selectedOptionId: option.id,
+      ...(input ? { input } : {}),
+    };
+    const decisions = [...params.decisions, decision];
+    const shouldSend = option.decision.type !== 'approve'
+      || decisions.length >= run.reviewAction.reviews.length;
+    if (!shouldSend) {
+      return {
+        ok: true,
+        status: 'advanced',
+        decision,
+        decisions,
+      };
+    }
+    if (!this.connection.send({
+      type: 'human_review_response',
+      requestId: run.requestId,
+      actionId: run.reviewAction.actionId,
+      reviewId: review.id,
+      selectedOptionId: option.id,
+      ...(input ? { input } : {}),
+      decisions,
+    })) {
+      return { ok: false, reason: 'send-failed' };
+    }
+    return {
+      ok: true,
+      status: 'sent',
+      decision,
+      decisions,
+    };
+  }
+
+  cancelReview(params: {
+    requestId: string;
+    actionId: string;
+  }): CancelReviewResult {
+    if (!this.reviewTransportReady()) {
+      return { ok: false, reason: 'not-ready' };
+    }
+    const run = this.state.session.activeRun;
+    if (!run || run.state !== 'waiting_review') {
+      return { ok: false, reason: 'closed' };
+    }
+    if (
+      run.requestId !== params.requestId
+      || run.reviewAction.actionId !== params.actionId
+    ) {
+      return { ok: false, reason: 'stale' };
+    }
+    return this.connection.send({
+      type: 'review.cancel',
+      requestId: run.requestId,
+      actionId: run.reviewAction.actionId,
+    })
+      ? { ok: true }
+      : { ok: false, reason: 'send-failed' };
   }
 
   private handleOpen() {
@@ -424,6 +547,10 @@ export class TuiSessionController {
     return null;
   }
 
+  private reviewTransportReady() {
+    return this.state.connection === 'ready' && this.connection.isConnected();
+  }
+
   private scheduleSessionCommandTimeout(command: PendingSessionCommand) {
     return this.setTimer(() => {
       if (this.sessionCommands.get(command.requestId) !== command) return;
@@ -518,4 +645,19 @@ function mergeCompletionSnapshotMetadata(
       ? { sessionTokenUsage: snapshot.sessionTokenUsage }
       : {}),
   };
+}
+
+function reviewDecisionsMatch(
+  action: AgentReviewAction,
+  decisions: readonly ReviewResponse[],
+) {
+  if (decisions.length >= action.reviews.length) return false;
+  return decisions.every((decision, index) => {
+    const review = action.reviews[index];
+    const option = review?.options.find((candidate) => (
+      candidate.id === decision.selectedOptionId
+    ));
+    return review?.id === decision.reviewId
+      && option?.decision.type === 'approve';
+  });
 }

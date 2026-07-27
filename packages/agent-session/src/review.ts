@@ -1,5 +1,13 @@
 import type { ReviewSpec } from '@pinpawo/pet-agent';
 
+export type {
+  ReviewOption,
+  ReviewOptionInput,
+  ReviewResponse,
+  ReviewSpec,
+  ReviewView,
+} from '@pinpawo/pet-agent';
+
 export type ReviewAction = {
   actionId: string;
   reviews: ReviewSpec[];

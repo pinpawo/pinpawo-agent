@@ -21,6 +21,9 @@ progress:
 - it lists and resumes host sessions through the shared protocol in an
   OpenTUI-owned footer overlay, while keeping picker state outside the canonical
   Session projection.
+- it restores canonical pending reviews from snapshots and provides an
+  OpenTUI-owned approval overlay for single or batched approve, reject, respond,
+  and cancel flows.
 
 ## Run the vertical slice
 
@@ -50,6 +53,10 @@ Production client controls:
 - `Ctrl+R` or an exact `/resume` command opens the session picker;
 - `↑`/`↓`, `PageUp`/`PageDown`, and Enter navigate and resume a session; Esc
   closes the picker without changing the composer draft;
+- while an approval is open, `↑`/`↓` selects a decision, PageUp/PageDown pages
+  the review details, Enter submits, and Esc cancels the pending review;
+- a text-response option owns a separate multiline textarea; Shift+Enter inserts
+  a newline while Enter submits, and the normal composer draft remains intact;
 - ordinary prose containing a path remains text, and unavailable path-only
   pastes are inserted as text with a notice;
 - `Ctrl+C` exits the client.
@@ -65,6 +72,21 @@ The resume overlay defaults to the newest inactive session so Enter does not
 accidentally reload the current one. A successful switch clears the old draft
 and attachments only after the host returns the selected canonical snapshot.
 Late completion snapshots from the previous session are ignored.
+
+Approval selection, paging, batch decisions, and text drafts are local overlay
+state rather than Session projection fields. The controller validates each
+response against the currently focused canonical review action before sending
+`human_review_response` or `review.cancel`. A disconnect or missing canonical
+state transition releases the submitting lock so the user can retry.
+
+Run the deterministic interactive approval demo without starting the Node host:
+
+```sh
+npm run dev:review -w @pinpawo/tui
+```
+
+The demo accepts real keyboard navigation, multiline paste/input, submit, and
+cancel, then restores focus to the composer.
 
 ## Phase 1 probes
 

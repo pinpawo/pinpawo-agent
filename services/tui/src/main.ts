@@ -23,6 +23,12 @@ import {
 } from './client/localHostConnection';
 import { TuiSessionController } from './session/sessionController';
 import {
+  approvalAcceptsTextInput,
+  resolveApprovalKey,
+} from './overlays/approvalModel';
+import { ApprovalController } from './overlays/approvalController';
+import { ApprovalView } from './overlays/approvalView';
+import {
   applySessionPickerAction,
   beginSessionPickerLoad,
   beginSessionResume,
@@ -44,7 +50,9 @@ import {
 import { formatLiveSession } from './timeline/timelineModel';
 import { TimelineScrollback } from './timeline/timelineScrollback';
 
-const smoke = process.argv.includes('--smoke');
+const smokeReview = process.argv.includes('--smoke-review');
+const demoReview = process.argv.includes('--demo-review');
+const smoke = process.argv.includes('--smoke') || smokeReview;
 const port = readLocalServerPort();
 const renderer = await createCliRenderer({
   exitOnCtrlC: true,
@@ -97,11 +105,19 @@ let sessionPicker = createSessionPickerState();
 let sessionPickerGeneration = 0;
 let sessionListRequest: ReturnType<TuiSessionController['listSessions']> | null = null;
 const controller = new TuiSessionController({
-  connectionFactory: smoke
-    ? createSmokeConnectionFactory()
+  connectionFactory: smoke || demoReview
+    ? createSmokeConnectionFactory({ review: smokeReview || demoReview })
     : createLocalHostConnectionFactory({ port }),
 });
 const timeline = new TimelineScrollback(renderer);
+const approvalController = new ApprovalController({
+  sessionController: controller,
+  getWidth: () => renderer.width,
+  onChange: () => refreshApproval(),
+});
+const approvalView = new ApprovalView(renderer, {
+  onDraftChange: (draft) => approvalController.setDraft(draft),
+});
 const composer = new TextareaRenderable(renderer, {
   id: 'composer',
   width: '100%',
@@ -161,6 +177,7 @@ const composer = new TextareaRenderable(renderer, {
   },
 });
 installSingleGraphemeBackspaceWorkaround(composer);
+installSingleGraphemeBackspaceWorkaround(approvalView.input);
 
 root.add(header);
 root.add(live);
@@ -168,16 +185,32 @@ composerFrame.add(composer);
 root.add(composerFrame);
 root.add(status);
 root.add(sessionPickerView.frame);
+root.add(approvalView.frame);
 renderer.root.add(root);
 composer.focus();
 
 const unsubscribe = controller.subscribe((state) => {
+  syncApprovalFromSession();
   refreshHeader();
   refreshLive();
   timeline.render(state.session);
   refreshStatus();
 });
 renderer.keyInput.on('keypress', (key) => {
+  const approval = approvalController.getState();
+  const approvalAction = resolveApprovalKey(approval, key);
+  if (approval.phase !== 'closed' && !(key.ctrl && key.name === 'c')) {
+    if (approvalAction) {
+      key.preventDefault();
+      key.stopPropagation();
+      approvalController.handle(approvalAction);
+      return;
+    }
+    if (approvalAcceptsTextInput(approval)) return;
+    key.preventDefault();
+    key.stopPropagation();
+    return;
+  }
   const pickerAction = resolveSessionPickerKey(sessionPicker, key);
   if (sessionPicker.phase !== 'closed' && !(key.ctrl && key.name === 'c')) {
     key.preventDefault();
@@ -210,6 +243,13 @@ renderer.keyInput.on('keypress', (key) => {
   }
 });
 renderer.keyInput.on('paste', (event) => {
+  const approval = approvalController.getState();
+  if (approval.phase !== 'closed') {
+    if (approvalAcceptsTextInput(approval)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
   if (sessionPicker.phase === 'closed') return;
   event.preventDefault();
   event.stopPropagation();
@@ -218,10 +258,12 @@ renderer.on('resize', () => {
   syncComposerLayout();
   refreshLive();
   refreshSessionPicker();
+  refreshApproval();
 });
 renderer.on('destroy', () => {
   sessionPickerGeneration += 1;
   sessionPicker = closeSessionPicker(sessionPicker);
+  approvalController.destroy();
   unsubscribe();
   controller.stop();
   timeline.destroy();
@@ -262,6 +304,42 @@ function refreshLive() {
 
 function refreshStatus() {
   status.content = localNotice ?? formatStatusLine(controller.getState());
+}
+
+function syncApprovalFromSession() {
+  const previous = approvalController.getState();
+  approvalController.sync(
+    controller.getState().session.activeRun,
+    controller.getState().connection,
+  );
+  const approval = approvalController.getState();
+  if (approval.phase !== 'closed') {
+    if (sessionPicker.phase !== 'closed') {
+      sessionPickerGeneration += 1;
+      sessionPicker = closeSessionPicker(sessionPicker);
+      refreshSessionPicker();
+    }
+    composer.blur();
+  } else if (
+    previous.phase !== 'closed'
+    && sessionPicker.phase === 'closed'
+  ) {
+    composer.focus();
+  }
+  refreshApproval();
+}
+
+function refreshApproval() {
+  const approval = approvalController.getState();
+  approvalView.render(approval, renderer.width);
+  if (approval.phase === 'closed') return;
+  composer.blur();
+  if (
+    approvalAcceptsTextInput(approval)
+    && !approvalView.input.focused
+  ) {
+    approvalView.focusInput();
+  }
 }
 
 function openSessionPicker() {
@@ -405,9 +483,12 @@ function submitFailureText(reason: 'not-ready' | 'busy' | 'empty' | 'send-failed
   }
 }
 
-function createSmokeConnectionFactory(): TuiAgentHostConnectionFactory {
+function createSmokeConnectionFactory(
+  options: { review?: boolean } = {},
+): TuiAgentHostConnectionFactory {
   return (handlers) => {
     let connected = false;
+    let reviewResolved = false;
     return {
       connect: () => {
         connected = true;
@@ -447,10 +528,87 @@ function createSmokeConnectionFactory(): TuiAgentHostConnectionFactory {
                 role: 'assistant',
                 text: 'Connection, projection, and timeline are aligned.',
                 status: 'completed',
-              }],
-              activeRun: null,
+              }, ...(reviewResolved
+                ? [{
+                    id: 'smoke-review-result',
+                    type: 'message' as const,
+                    role: 'assistant' as const,
+                    requestId: 'smoke-run',
+                    text: 'The review demo completed.',
+                    status: 'completed' as const,
+                  }]
+                : [])],
+              activeRun: options.review && !reviewResolved
+                ? {
+                    requestId: 'smoke-run',
+                    state: 'waiting_review',
+                    reviewAction: {
+                      actionId: 'smoke-review-action',
+                      petId: 'paws',
+                      reviews: [{
+                        id: 'smoke-review',
+                        schemaVersion: 1,
+                        view: {
+                          kind: 'plain',
+                          title: 'Allow local operation?',
+                          body: 'Review details remain pageable inside the fixed footer.',
+                        },
+                        options: [{
+                          id: 'approve',
+                          label: 'Approve',
+                          variant: 'primary',
+                          decision: { type: 'approve' },
+                        }, {
+                          id: 'respond',
+                          label: 'Respond',
+                          input: {
+                            kind: 'text',
+                            key: 'message',
+                            multiline: true,
+                          },
+                          decision: {
+                            type: 'respond',
+                            messageInputKey: 'message',
+                          },
+                        }, {
+                          id: 'reject',
+                          label: 'Reject',
+                          variant: 'danger',
+                          decision: { type: 'reject' },
+                        }],
+                      }],
+                    },
+                  }
+                : null,
             }),
           });
+        }
+        if (
+          options.review
+          && (
+            message.type === 'human_review_response'
+            || message.type === 'review.cancel'
+          )
+        ) {
+          reviewResolved = true;
+          if (message.type === 'review.cancel') {
+            handlers.onMessage({
+              type: 'interrupted',
+              requestId: 'smoke-run',
+              message: 'Review demo cancelled.',
+            });
+          } else {
+            handlers.onMessage({
+              type: 'event',
+              requestId: 'smoke-run',
+              event: {
+                type: 'message.completed',
+                requestId: 'smoke-run',
+                role: 'assistant',
+                text: 'The review demo completed.',
+              },
+            });
+          }
         }
         return true;
       },

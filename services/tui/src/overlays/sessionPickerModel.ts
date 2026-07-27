@@ -1,5 +1,6 @@
 import type { AgentSessionSummary } from '@pinpawo/agent-session';
 import stringWidth from 'string-width';
+import { truncateTerminalLine } from '../text/terminalText';
 
 export type SessionPickerPhase =
   | 'closed'
@@ -159,7 +160,10 @@ export function formatSessionPicker(
   const innerWidth = Math.max(1, width - 4);
   if (state.phase === 'loading') return 'Loading sessions…';
   if (state.phase === 'error') {
-    return truncateLine(`Could not load sessions: ${state.message ?? 'unknown error'}`, innerWidth);
+    return truncateTerminalLine(
+      `Could not load sessions: ${state.message ?? 'unknown error'}`,
+      innerWidth,
+    );
   }
   if (state.sessions.length === 0) return 'No sessions to resume.';
 
@@ -170,7 +174,7 @@ export function formatSessionPicker(
   );
   const visible = state.sessions.slice(windowStart, windowStart + maxRows);
   if (state.phase === 'resuming') {
-    return truncateLine(
+    return truncateTerminalLine(
       `Resuming ${normalizeTitle(selectedSession(state)?.title ?? '')}…`,
       innerWidth,
     );
@@ -189,14 +193,14 @@ export function formatSessionPicker(
       0,
       innerWidth - stringWidth(prefix) - minimumTitleWidth - 3,
     );
-    const visibleMeta = truncateLine(meta, metaBudget);
+    const visibleMeta = truncateTerminalLine(meta, metaBudget);
     const suffix = visibleMeta ? ` · ${visibleMeta}` : '';
     const titleBudget = Math.max(
       1,
       innerWidth - stringWidth(prefix) - stringWidth(suffix),
     );
-    return `${prefix}${truncateLine(normalizeTitle(session.title), titleBudget)}${suffix}`;
-  }).map((line) => truncateLine(line, innerWidth)).join('\n');
+    return `${prefix}${truncateTerminalLine(normalizeTitle(session.title), titleBudget)}${suffix}`;
+  }).map((line) => truncateTerminalLine(line, innerWidth)).join('\n');
 }
 
 function visibleWindowStart(
@@ -229,19 +233,4 @@ function formatSessionTime(value: string) {
     minute: '2-digit',
     hour12: false,
   });
-}
-
-function truncateLine(value: string, width: number) {
-  if (width <= 0) return '';
-  if (stringWidth(value) <= width) return value;
-  if (width === 1) return '…';
-  let result = '';
-  let resultWidth = 0;
-  for (const character of value) {
-    const characterWidth = stringWidth(character);
-    if (resultWidth + characterWidth > width - 1) break;
-    result += character;
-    resultWidth += characterWidth;
-  }
-  return `${result.trimEnd()}…`;
 }

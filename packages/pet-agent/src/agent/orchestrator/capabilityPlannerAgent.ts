@@ -536,7 +536,9 @@ async function invokePlannerLoop(params: {
       }
       const aiResponse = response as AIMessage;
       messages.push(aiResponse);
-      const toolCalls = readMessageToolCalls(aiResponse);
+      const toolCalls = readMessageToolCalls(aiResponse, {
+        fallbackIdPrefix: `capability_planner:${String(iteration)}`,
+      });
       if (toolCalls.length === 0) {
         throw new CapabilityPlannerAgentError(
           'submission_required',
@@ -573,6 +575,10 @@ async function invokePlannerLoop(params: {
             output = stableToolInvocationError(toolCall.name, error);
           }
         }
+        // A tool or an async tracing callback may outlive the deadline even
+        // when it ignores the provided signal. Never accept a submission that
+        // completed after the Planner timeout or parent cancellation.
+        timeout.signal.throwIfAborted();
         recordObservedDocumentPaths(
           toolCall.name,
           output,

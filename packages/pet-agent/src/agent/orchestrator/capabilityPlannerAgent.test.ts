@@ -15,6 +15,7 @@ import {
   type BaseMessage,
 } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import type { RunnableConfig } from '@langchain/core/runnables';
 import type { StructuredTool } from '@langchain/core/tools';
 import {
   CAPABILITY_PLANNER_GLOB_SEARCH_TOOL_NAME,
@@ -30,7 +31,7 @@ import {
 import type { CapabilityPlannerInput } from './capabilityPlannerRunner';
 
 type ScriptedToolCall = {
-  id: string;
+  id?: string;
   name: string;
   args: Record<string, unknown>;
 };
@@ -74,6 +75,33 @@ class ScriptedPlannerModel extends BaseChatModel {
       })),
     });
     return { generations: [{ message, text: String(message.content) }] };
+  }
+}
+
+class DelayedSubmitToolPlannerModel extends ScriptedPlannerModel {
+  override bindTools(tools: StructuredTool[]) {
+    super.bindTools(tools);
+    const submitTool = tools.find(
+      ({ name }) => name === CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
+    );
+    if (!submitTool) {
+      throw new Error('submit tool is missing');
+    }
+    const originalInvoke = submitTool.invoke.bind(submitTool) as unknown as (
+      input: unknown,
+      runnableConfig?: RunnableConfig,
+    ) => Promise<unknown>;
+    Object.defineProperty(submitTool, 'invoke', {
+      configurable: true,
+      value: async (input: unknown, runnableConfig?: RunnableConfig) => {
+        const output = await originalInvoke(input, runnableConfig);
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 30);
+        });
+        return output;
+      },
+    });
+    return this;
   }
 }
 
@@ -258,6 +286,40 @@ test('Planner Agent explores CAPABILITY.md files and submits current selection w
     'capability_name' in result.remaining_plan[0],
     false,
   );
+});
+
+test('Planner Agent materializes deterministic IDs for provider ToolCalls without ids', async (t) => {
+  const workspace = await createWorkspace(t, {
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary tasks.',
+      instructions: 'Complete the requested work.',
+    }),
+  });
+  const model = new ScriptedPlannerModel([
+    {
+      toolCalls: [{
+        name: CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
+        args: { path: 'general/CAPABILITY.md', startLine: 1, endLine: 20 },
+      }],
+    },
+    {
+      toolCalls: [{
+        name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
+        args: submitArgs(workspace, 'general'),
+      }],
+    },
+  ]);
+
+  const result = await createCapabilityPlannerAgent({ model }).invoke(
+    plannerInput(workspace),
+  );
+
+  assert.equal(result.result, 'next_task');
+  assert.equal(result.next_task.capability_name, 'general');
+  assert.ok(model.invocations[1]?.some((message) =>
+    message instanceof ToolMessage
+    && message.tool_call_id === 'capability_planner:1:0'));
 });
 
 test('direct mode rejects task mutation and lets the model correct the submission', async (t) => {
@@ -582,6 +644,32 @@ test('Planner Agent enforces a total timeout', async (t) => {
   await assert.rejects(
     createCapabilityPlannerAgent({
       model: new SlowPlannerModel({}),
+      timeoutMs: 10,
+    }).invoke(plannerInput(workspace)),
+    (error: unknown) =>
+      error instanceof CapabilityPlannerAgentError
+      && error.code === 'planning_timeout',
+  );
+});
+
+test('Planner Agent rejects a valid submission whose tool invocation completes after timeout', async (t) => {
+  const workspace = await createWorkspace(t, {});
+  const model = new DelayedSubmitToolPlannerModel([{
+    toolCalls: [{
+      id: 'late-submit',
+      name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
+      args: {
+        registry_digest: workspace.registryDigest,
+        result: 'unavailable',
+        task: 'Perform an unsupported operation.',
+        reason: 'The workspace is empty.',
+      },
+    }],
+  }]);
+
+  await assert.rejects(
+    createCapabilityPlannerAgent({
+      model,
       timeoutMs: 10,
     }).invoke(plannerInput(workspace)),
     (error: unknown) =>

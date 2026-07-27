@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { BoxRenderable, RGBA } from '@opentui/core';
+import {
+  BoxRenderable,
+  RGBA,
+  TextareaRenderable,
+  TextRenderable,
+} from '@opentui/core';
 import { createTestRenderer } from '@opentui/core/testing';
+import { syncComposerCursorForCommandOverlay } from '../input/composerCursor';
+import { calculateComposerLayout } from '../spike/composerLayout';
 import {
   createCommandOverlayState,
   openCommandHelp,
@@ -9,7 +16,7 @@ import {
 } from './commandOverlayModel';
 import { CommandOverlayView } from './commandOverlayView';
 
-test('command palette and help stay inside the fixed footer across resize', async (context) => {
+test('command palette stays above the composer while help owns the footer', async (context) => {
   const setup = await createTestRenderer({
     width: 60,
     height: 24,
@@ -20,30 +27,78 @@ test('command palette and help stay inside the fixed footer across resize', asyn
   const root = new BoxRenderable(setup.renderer, {
     width: '100%',
     height: '100%',
+    flexDirection: 'column',
     backgroundColor: RGBA.defaultBackground(),
   });
+  const header = new TextRenderable(setup.renderer, {
+    content: 'PinPawo TUI v2',
+    height: 1,
+  });
+  const live = new TextRenderable(setup.renderer, {
+    content: 'live · idle',
+    height: 1,
+  });
+  const composerFrame = new BoxRenderable(setup.renderer, {
+    width: '100%',
+    height: 5,
+    border: true,
+    paddingLeft: 1,
+    paddingRight: 1,
+  });
+  const composer = new TextareaRenderable(setup.renderer, {
+    width: '100%',
+    height: '100%',
+  });
+  const status = new TextRenderable(setup.renderer, {
+    content: 'connected\nin/out: 0/0',
+    height: 2,
+  });
   const view = new CommandOverlayView(setup.renderer);
+  composerFrame.add(composer);
+  root.add(header);
+  root.add(live);
+  root.add(composerFrame);
+  root.add(status);
   root.add(view.frame);
   setup.renderer.root.add(root);
+  composer.setText('/');
+  composer.gotoBufferEnd();
+  composer.focus();
 
   const palette = syncCommandPalette(createCommandOverlayState(), {
-    text: '/re',
-    cursorOffset: 3,
+    text: '/',
+    cursorOffset: 1,
     enabled: true,
   });
+  const paletteLayout = calculateComposerLayout('/', 1, {
+    commandPalette: true,
+  });
+  header.height = paletteLayout.headerHeight;
+  live.height = paletteLayout.liveHeight;
+  composerFrame.border = ['top'];
+  composerFrame.height = paletteLayout.frameHeight;
+  status.height = paletteLayout.statusHeight;
+  syncComposerCursorForCommandOverlay(composer, palette);
   view.render(palette, 60);
   await setup.flush();
   const initial = setup.captureCharFrame();
-  assert.match(initial, /Commands · \/re/);
-  assert.match(initial, /resume/);
-  assert.equal(frameRows(initial).length, 9);
+  const initialRows = frameRows(initial);
+  assert.match(initialRows[0] ?? '', /help/);
+  assert.match(initialRows[4] ?? '', /policy/);
+  assert.ok(initialRows.slice(0, 5).every((line) => line.includes('/')));
+  assert.match(initialRows.slice(5).join('\n'), /\//);
+  assert.equal(composer.showCursor, true);
+  assert.equal(initialRows.length, 9);
 
   setup.resize(32, 18);
-  view.render(openCommandHelp(), 32);
+  const help = openCommandHelp();
+  syncComposerCursorForCommandOverlay(composer, help);
+  view.render(help, 32);
   await setup.flush();
   const resized = setup.captureCharFrame();
   assert.match(resized, /Help/);
   assert.match(resized, /\/help/);
+  assert.equal(composer.showCursor, false);
   assert.equal(frameRows(resized).length, 9);
   assert.ok(frameRows(resized).every((line) => line.length <= 32), resized);
 });

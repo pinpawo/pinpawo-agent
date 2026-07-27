@@ -34,13 +34,20 @@ export type CommandOverlayKey = {
   shift: boolean;
 };
 
-export type CommandOverlayViewModel = {
-  title: string;
-  bottomTitle: string;
-  content: string;
-};
+export type CommandOverlayViewModel =
+  | {
+      kind: 'palette';
+      content: string;
+    }
+  | {
+      kind: 'help';
+      title: string;
+      bottomTitle: string;
+      content: string;
+    };
 
-const OVERLAY_CONTENT_ROWS = 6;
+const HELP_CONTENT_ROWS = 6;
+export const COMMAND_PALETTE_ROWS = 5;
 
 export function createCommandOverlayState(): CommandOverlayState {
   return { phase: 'closed' };
@@ -98,12 +105,12 @@ export function pageCommandHelp(
   direction: -1 | 1,
 ): CommandOverlayState {
   if (state.phase !== 'help') return state;
-  const maximum = Math.max(0, helpLines().length - OVERLAY_CONTENT_ROWS);
+  const maximum = Math.max(0, helpLines().length - HELP_CONTENT_ROWS);
   return {
     ...state,
     offset: Math.max(
       0,
-      Math.min(maximum, state.offset + direction * OVERLAY_CONTENT_ROWS),
+      Math.min(maximum, state.offset + direction * HELP_CONTENT_ROWS),
     ),
   };
 }
@@ -145,15 +152,11 @@ export function buildCommandOverlayViewModel(
   state: Exclude<CommandOverlayState, { phase: 'closed' }>,
   width: number,
 ): CommandOverlayViewModel {
-  const innerWidth = Math.max(1, width - 4);
   if (state.phase === 'palette') {
+    const innerWidth = Math.max(1, width - 2);
     const visible = visiblePaletteItems(state);
     return {
-      title: ` ${truncateTerminalLine(
-        state.query ? `Commands · /${state.query}` : 'Commands',
-        innerWidth,
-      )} `,
-      bottomTitle: ' Type to filter · ↑↓ · Tab complete · Enter · Esc ',
+      kind: 'palette',
       content: visible.length
         ? visible.map(({ command, selected }) => formatCommandLine(
             command,
@@ -164,17 +167,19 @@ export function buildCommandOverlayViewModel(
     };
   }
 
+  const innerWidth = Math.max(1, width - 4);
   const lines = helpLines();
-  const maximum = Math.max(0, lines.length - OVERLAY_CONTENT_ROWS);
+  const maximum = Math.max(0, lines.length - HELP_CONTENT_ROWS);
   const offset = Math.min(state.offset, maximum);
-  const progress = lines.length > OVERLAY_CONTENT_ROWS
-    ? ` · ${offset + 1}-${Math.min(offset + OVERLAY_CONTENT_ROWS, lines.length)}/${lines.length}`
+  const progress = lines.length > HELP_CONTENT_ROWS
+    ? ` · ${offset + 1}-${Math.min(offset + HELP_CONTENT_ROWS, lines.length)}/${lines.length}`
     : '';
   return {
+    kind: 'help',
     title: ` ${truncateTerminalLine(`Help${progress}`, innerWidth)} `,
     bottomTitle: ' ↑↓ PgUp/PgDn · Esc/q close ',
     content: lines
-      .slice(offset, offset + OVERLAY_CONTENT_ROWS)
+      .slice(offset, offset + HELP_CONTENT_ROWS)
       .map((line) => truncateTerminalLine(line, innerWidth))
       .join('\n'),
   };
@@ -207,11 +212,11 @@ function visiblePaletteItems(
   state: Extract<CommandOverlayState, { phase: 'palette' }>,
 ) {
   const start = Math.min(
-    Math.max(0, state.selectedIndex - OVERLAY_CONTENT_ROWS + 1),
-    Math.max(0, state.items.length - OVERLAY_CONTENT_ROWS),
+    Math.max(0, state.selectedIndex - COMMAND_PALETTE_ROWS + 1),
+    Math.max(0, state.items.length - COMMAND_PALETTE_ROWS),
   );
   return state.items
-    .slice(start, start + OVERLAY_CONTENT_ROWS)
+    .slice(start, start + COMMAND_PALETTE_ROWS)
     .map((command, index) => ({
       command,
       selected: start + index === state.selectedIndex,

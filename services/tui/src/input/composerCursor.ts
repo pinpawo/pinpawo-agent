@@ -5,5 +5,5 @@ export function syncComposerCursorForCommandOverlay(
   composer: Pick<TextareaRenderable, 'showCursor'>,
   commandOverlay: CommandOverlayState,
 ) {
-  composer.showCursor = commandOverlay.phase === 'closed';
+  composer.showCursor = commandOverlay.phase !== 'help';
 }

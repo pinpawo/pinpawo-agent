@@ -587,11 +587,18 @@ function syncComposerLayout() {
   const layout = calculateComposerLayout(
     composer.plainText,
     composer.virtualLineCount,
-    { persistentHeader: attachments.length > 0 },
+    {
+      commandPalette: commandOverlay.phase === 'palette',
+      persistentHeader: attachments.length > 0,
+    },
   );
+  composerFrame.border = commandOverlay.phase === 'palette'
+    ? ['top']
+    : true;
   composerFrame.height = layout.frameHeight;
   header.height = layout.headerHeight;
   live.height = layout.liveHeight;
+  status.height = layout.statusHeight;
 }
 
 function refreshHeader() {
@@ -671,6 +678,7 @@ function syncComposerInputOverlays() {
 function refreshCommandOverlay() {
   syncComposerCursorForCommandOverlay(composer, commandOverlay);
   commandOverlayView.render(commandOverlay, renderer.width);
+  syncComposerLayout();
 }
 
 function refreshFileMention() {

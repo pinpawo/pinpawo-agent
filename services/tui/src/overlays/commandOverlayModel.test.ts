@@ -83,6 +83,14 @@ test('command palette navigation clamps and yields ordinary editing keys', () =>
   assert.equal(resolveCommandOverlayKey(state, key('return')), 'submit');
   assert.equal(resolveCommandOverlayKey(state, key('x')), null);
 
+  state = moveCommandSelection(state, 1);
+  const palette = state.phase === 'palette'
+    ? buildCommandOverlayViewModel(state, 80)
+    : null;
+  assert.equal(palette?.kind, 'palette');
+  assert.equal(palette?.content.split('\n').length, 5);
+  assert.match(palette?.content ?? '', /› \/studio/);
+
   state = syncCommandPalette(state, {
     text: '/help ',
     cursorOffset: 6,

@@ -7,7 +7,7 @@ import {
 } from '../overlays/commandOverlayModel';
 import { syncComposerCursorForCommandOverlay } from './composerCursor';
 
-test('composer cursor is hidden while a command overlay is open', () => {
+test('composer cursor stays visible for filtering and hides only behind help', () => {
   const composer = { showCursor: true };
 
   const palette = syncCommandPalette(createCommandOverlayState(), {
@@ -16,7 +16,7 @@ test('composer cursor is hidden while a command overlay is open', () => {
     enabled: true,
   });
   syncComposerCursorForCommandOverlay(composer, palette);
-  assert.equal(composer.showCursor, false);
+  assert.equal(composer.showCursor, true);
 
   syncComposerCursorForCommandOverlay(composer, openCommandHelp());
   assert.equal(composer.showCursor, false);

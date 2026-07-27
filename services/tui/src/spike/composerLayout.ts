@@ -3,12 +3,25 @@ const MAX_VISIBLE_CONTENT_ROWS = 5;
 const FRAME_BORDER_ROWS = 2;
 const FIXED_FOOTER_ROWS = 9;
 const STATUS_ROWS = 2;
+const COMMAND_PALETTE_ROWS = 5;
 
 export function calculateComposerLayout(
   text: string,
   virtualLineCount: number,
-  options: { persistentHeader?: boolean } = {},
+  options: {
+    commandPalette?: boolean;
+    persistentHeader?: boolean;
+  } = {},
 ) {
+  if (options.commandPalette) {
+    return {
+      visibleContentRows: 1,
+      frameHeight: 2,
+      headerHeight: COMMAND_PALETTE_ROWS,
+      liveHeight: 0,
+      statusHeight: STATUS_ROWS,
+    };
+  }
   const logicalLineCount = text.split('\n').length;
   const maxVisibleContentRows = options.persistentHeader
     ? MAX_VISIBLE_CONTENT_ROWS - 1
@@ -31,6 +44,7 @@ export function calculateComposerLayout(
     frameHeight,
     headerHeight,
     liveHeight: auxiliaryRows - headerHeight >= 1 ? 1 : 0,
+    statusHeight: STATUS_ROWS,
   };
 }
 

@@ -27,8 +27,9 @@ dogfood entrypoint from issue #454:
 - it restores canonical pending reviews from snapshots and provides an
   OpenTUI-owned approval overlay for single or batched approve, reject, respond,
   and cancel flows.
-- it provides a cursor-aware slash command palette and pageable help overlay
-  for the commands currently implemented by the v2 client.
+- it provides a compact cursor-aware slash command palette above the visible
+  composer, plus a separate pageable help overlay for the commands currently
+  implemented by the v2 client.
 - it commits a borderless, terminal-rasterized paw welcome with the v2 package
   version before the first timeline rows.
 - it keeps run/connection state and session token/context facts in a compact
@@ -103,8 +104,9 @@ Production client controls:
   the review details, Enter submits, and Esc cancels the pending review;
 - a text-response option owns a separate multiline textarea; Shift+Enter inserts
   a newline while Enter submits, and the normal composer draft remains intact;
-- typing `/` at the end of an attachment-free composer opens the command
-  palette; `↑`/`↓` selects, Tab completes, Enter executes, and Esc clears it;
+- typing `/` at the end of an attachment-free composer opens a five-row command
+  palette above the compact still-visible search composer; `↑`/`↓` selects, Tab
+  completes, Enter executes, and Esc clears it;
 - `/help` opens pageable command and shortcut help, `/new` starts a clean chat
   projection, `/policy` chooses the host review policy, `/resume` opens the
   session picker, `/transcript` (or `/history`) opens the timeline pager,

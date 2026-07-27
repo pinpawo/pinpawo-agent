@@ -48,6 +48,8 @@ The probe covers:
 | command palette ownership | cursor-at-end slash tokens own navigation/submit while ordinary edit keys remain composer-owned | automated test |
 | help paging and resize | command help pages within the fixed footer and remains bounded at narrow widths | automated + Bun native test |
 | Studio mode | `/studio [task]` and `/chat` keep composer mode local while projecting user/progress/reply/error rows through the shared ordered Session timeline | automated test + OpenTUI PTY |
+| external editor lifecycle | `/edit [text]` suspends OpenTUI, gives the TTY to `$VISUAL`/`$EDITOR`, resumes on success or failure, and restores the multiline draft without submitting | automated test + OpenTUI PTY |
+| transcript export | `/export [path]` writes completed canonical user/assistant messages locally without a new host protocol or local-agent implementation import | automated test |
 | new-session race isolation | `/new` waits for an authoritative new-session ID, discards late completion snapshots, and preserves identical messages across the native scrollback boundary | automated + Bun native test |
 | interrupt ownership | Esc/first Ctrl+C sends one canonical interrupt and the notice owns input until the run settles; second Ctrl+C exits | automated test |
 | error notice ownership | connection/local errors remain width-safe and dismissible without editing the composer | automated + Bun native test |
@@ -59,15 +61,16 @@ The probe covers:
 | fixed-footer composer layout | composer grows from 3–5 visible rows without changing terminal footer height | automated test |
 | native textarea regression | multiline paste and single-grapheme backspace preserve line boundaries | Bun native test |
 | TypeScript | `npm run typecheck -w @pinpawo/tui` | passed |
-| unit tests | `npm run test -w @pinpawo/tui` | passed, 78 tests |
+| unit tests | `npm run test -w @pinpawo/tui` | passed, 85 tests |
 | native tests | `npm run test:native -w @pinpawo/tui` | passed, 13 tests including policy/command/help/notice, approval/resume resize, textarea, WebSocket, and 6 real ScrollbackSurface tests |
 | alternate-screen PTY startup | `npm run smoke -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | split-footer PTY startup | `npm run smoke:split -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | Studio PTY flow | `npm run smoke:studio -w @pinpawo/tui` | passed; user/progress/final rows committed in order and terminal state restored |
 | review policy PTY flow | `npm run smoke:policy -w @pinpawo/tui` | passed; host acknowledgement updates the compact policy status and terminal state is restored |
+| external editor PTY flow | `npm run smoke:edit -w @pinpawo/tui` | passed; renderer suspend/resume restores the split footer and edited multiline draft |
 | standalone executable | `npm run build -w @pinpawo/tui` | passed for darwin-arm64; normal and approval compiled PTY smokes passed |
 | root typecheck | `npm run typecheck` | passed |
-| root tests | `npm test` | passed, including local-agent 768/768 and Chrome extension 22/22 |
+| root tests | `npm test` | passed, including local-agent 770/770 and Chrome extension 22/22 |
 | root build | `npm run build` | passed |
 | CLI package dry-run | `npm run pack:dry -w pinpawo` | passed; `dist/tui/main.js` and its manifest are included |
 | installed tarball v2 startup | install the generated `pinpawo` tarball in an empty project and run `pinpawo tui --v2` | passed on darwin-arm64 with package-local Bun/OpenTUI runtime |
@@ -182,7 +185,10 @@ Known limits and follow-up work:
     restores the composer.
 12. Run `npm run dev:command -w @pinpawo/tui`. Filter the palette, navigate and
     complete commands, open `/help`, page it, close with Esc/q, then run `/new`
-    and `/resume`. Confirm every overlay restores the composer focus.
+    and `/resume`. Run `/edit draft`, save a multiline change in the external
+    editor, and confirm it returns to the composer without submitting. Run
+    `/export transcripts` and inspect the generated Markdown. Confirm every
+    overlay and external editor handoff restores the composer focus.
 13. Start a long response, press Esc or Ctrl+C, and confirm the interrupt notice
     owns the footer until the host settles. Confirm a second Ctrl+C exits.
 14. Resize through 80, 40, and 24 columns; confirm both status rows stay bounded

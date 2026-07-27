@@ -34,6 +34,10 @@ dogfood entrypoint from issue #454:
   overlay instead of leaving them as easy-to-miss composer text.
 - it reads the host's global review policy from authoritative runtime metadata
   and changes it through a correlated, host-persisted `/policy` flow.
+- it can suspend OpenTUI, hand the terminal to `$VISUAL` or `$EDITOR`, and load
+  the edited multiline draft back into the composer.
+- it exports completed canonical user/assistant messages as a local Markdown
+  transcript without adding a host protocol or depending on local-agent code.
 
 ## Run the vertical slice
 
@@ -87,7 +91,8 @@ Production client controls:
   palette; `↑`/`↓` selects, Tab completes, Enter executes, and Esc clears it;
 - `/help` opens pageable command and shortcut help, `/new` starts a clean chat
   projection, `/policy` chooses the host review policy, `/resume` opens the
-  session picker, and `/quit` exits;
+  session picker, `/edit [text]` opens `$VISUAL` or `$EDITOR`, `/export [path]`
+  writes a Markdown transcript, and `/quit` exits;
 - `/studio [task]` enters Studio mode and optionally starts a task; subsequent
   prose keeps the same Studio conversation until `/chat` returns to chat mode;
 - ordinary prose containing a path remains text, and unavailable path-only
@@ -128,6 +133,23 @@ deterministic policy flow without a host with:
 ```sh
 npm run smoke:policy -w @pinpawo/tui
 ```
+
+`/edit [text]` writes a temporary Markdown draft, suspends the OpenTUI renderer,
+and starts `$VISUAL` (preferred) or `$EDITOR` with inherited terminal I/O. When
+the editor exits successfully, the renderer resumes and the edited text returns
+to the composer without submitting it. The temporary file is then removed. Run
+the deterministic suspend/resume PTY flow with:
+
+```sh
+npm run smoke:edit -w @pinpawo/tui
+```
+
+`/export [path]` formats the current canonical Session directly in the TUI
+client. It includes only completed user and assistant messages, so live deltas,
+operations, and system rows are not duplicated into the transcript. A path
+with an extension is treated as the destination file; a path without one is
+treated as a directory. Without an argument, the file is written under the
+session runtime working directory.
 
 Run the deterministic interactive approval demo without starting the Node host:
 

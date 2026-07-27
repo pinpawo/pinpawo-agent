@@ -19,6 +19,10 @@ import {
 } from './client/localHostConnection';
 import { parseTuiCommand } from './commands/commandRegistry';
 import { createDemoConnectionFactory } from './demo/demoConnection';
+import {
+  editTextWithExternalEditor,
+  withRendererSuspended,
+} from './editor/externalEditor';
 import { resolveGlobalInterruptAction } from './input/globalInterrupt';
 import { TuiSessionController } from './session/sessionController';
 import {
@@ -82,6 +86,7 @@ import {
 import { formatLiveSession } from './timeline/timelineModel';
 import { TimelineScrollback } from './timeline/timelineScrollback';
 import { truncateTerminalLine } from './text/terminalText';
+import { exportSessionTranscript } from './transcript/transcriptExport';
 import { buildWelcomeLines } from './welcome/welcomeModel';
 
 const smokeReview = process.argv.includes('--smoke-review');
@@ -90,11 +95,13 @@ const smokeCommand = process.argv.includes('--smoke-command');
 const demoCommand = process.argv.includes('--demo-command');
 const smokeStudio = process.argv.includes('--smoke-studio');
 const smokePolicy = process.argv.includes('--smoke-policy');
+const smokeEdit = process.argv.includes('--smoke-edit');
 const smoke = process.argv.includes('--smoke')
   || smokeReview
   || smokeCommand
   || smokeStudio
-  || smokePolicy;
+  || smokePolicy
+  || smokeEdit;
 const port = readLocalServerPort();
 const renderer = await createCliRenderer({
   exitOnCtrlC: false,
@@ -161,6 +168,8 @@ let studioSmokeStarted = false;
 let studioSmokeFinished = false;
 let policySmokeStarted = false;
 let policySmokeFinished = false;
+let editSmokeStarted = false;
+let externalEditorOpen = false;
 const controller = new TuiSessionController({
   connectionFactory: smoke || demoReview || demoCommand || smokeStudio
     ? createDemoConnectionFactory({ review: smokeReview || demoReview })
@@ -299,6 +308,13 @@ const unsubscribe = controller.subscribe((state) => {
   ) {
     policySmokeFinished = true;
     setTimeout(() => renderer.destroy(), 50);
+  } else if (
+    smokeEdit
+    && !editSmokeStarted
+    && state.connection === 'ready'
+  ) {
+    editSmokeStarted = true;
+    queueMicrotask(() => submitComposerInput('/edit smoke draft'));
   }
 });
 renderer.keyInput.on('keypress', (key) => {
@@ -452,7 +468,7 @@ syncComposerLayout();
 syncComposerModeUi();
 controller.start();
 
-if (smoke && !smokeStudio && !smokePolicy) {
+if (smoke && !smokeStudio && !smokePolicy && !smokeEdit) {
   renderer.once('frame', () => {
     setTimeout(() => renderer.destroy(), 50);
   });
@@ -509,6 +525,7 @@ function syncCommandOverlayFromComposer() {
     text: composer.plainText,
     cursorOffset: composer.cursorOffset,
     enabled: attachments.length === 0
+      && !externalEditorOpen
       && sessionPicker.phase === 'closed'
       && policyPicker.phase === 'closed'
       && noticeOverlay.phase === 'closed'
@@ -545,6 +562,7 @@ function syncNoticeFromSession() {
     composer.blur();
   } else if (
     previous.phase === 'interrupting'
+    && !externalEditorOpen
     && approvalController.getState().phase === 'closed'
   ) {
     if (localNotice?.startsWith('interrupt requested')) {
@@ -560,7 +578,8 @@ function closeNoticeOverlayUi() {
   noticeOverlay = closeNoticeOverlay();
   refreshNoticeOverlay();
   if (
-    approvalController.getState().phase === 'closed'
+    !externalEditorOpen
+    && approvalController.getState().phase === 'closed'
     && policyPicker.phase === 'closed'
   ) {
     composer.focus();
@@ -635,6 +654,7 @@ function syncApprovalFromSession() {
     composer.blur();
   } else if (
     previous.phase !== 'closed'
+    && !externalEditorOpen
     && sessionPicker.phase === 'closed'
     && policyPicker.phase === 'closed'
     && noticeOverlay.phase === 'closed'
@@ -659,7 +679,7 @@ function refreshApproval() {
 }
 
 function openSessionPicker() {
-  if (sessionPicker.phase !== 'closed') return;
+  if (externalEditorOpen || sessionPicker.phase !== 'closed') return;
   commandOverlay = closeCommandOverlay();
   refreshCommandOverlay();
   const generation = sessionPickerGeneration + 1;
@@ -759,7 +779,7 @@ function closeSessionPickerUi() {
   sessionPickerGeneration += 1;
   sessionPicker = closeSessionPicker(sessionPicker);
   refreshSessionPicker();
-  if (noticeOverlay.phase === 'closed') {
+  if (!externalEditorOpen && noticeOverlay.phase === 'closed') {
     composer.focus();
     syncCommandOverlayFromComposer();
   }
@@ -770,7 +790,7 @@ function refreshSessionPicker() {
 }
 
 function openPolicyPickerUi() {
-  if (policyPicker.phase !== 'closed') return;
+  if (externalEditorOpen || policyPicker.phase !== 'closed') return;
   const state = controller.getState();
   const currentMode = state.session.runtime?.globalReviewPolicyMode;
   if (state.connection !== 'ready') {
@@ -835,8 +855,10 @@ function saveSelectedPolicy() {
     localNotice = `review policy: ${option.label}`;
     refreshPolicyPicker();
     refreshStatus();
-    composer.focus();
-    syncCommandOverlayFromComposer();
+    if (!externalEditorOpen) {
+      composer.focus();
+      syncCommandOverlayFromComposer();
+    }
   }).catch((error: unknown) => {
     if (
       policyPickerGeneration !== generation
@@ -854,7 +876,8 @@ function closePolicyPickerUi() {
   policyPicker = closePolicyPicker(policyPicker);
   refreshPolicyPicker();
   if (
-    sessionPicker.phase === 'closed'
+    !externalEditorOpen
+    && sessionPicker.phase === 'closed'
     && noticeOverlay.phase === 'closed'
     && approvalController.getState().phase === 'closed'
   ) {
@@ -905,6 +928,7 @@ function handleCommandOverlayAction(action: CommandOverlayAction) {
 }
 
 function openCommandHelpUi() {
+  if (externalEditorOpen) return;
   commandOverlay = openCommandHelp();
   composer.blur();
   refreshCommandOverlay();
@@ -914,7 +938,8 @@ function closeCommandOverlayUi() {
   commandOverlay = closeCommandOverlay();
   refreshCommandOverlay();
   if (
-    sessionPicker.phase === 'closed'
+    !externalEditorOpen
+    && sessionPicker.phase === 'closed'
     && policyPicker.phase === 'closed'
     && noticeOverlay.phase === 'closed'
     && approvalController.getState().phase === 'closed'
@@ -955,6 +980,14 @@ function submitComposerInput(input = composer.plainText) {
       composer.clear();
       localNotice = null;
       openPolicyPickerUi();
+      return;
+    }
+    if (parsed.name === 'export') {
+      exportCurrentTranscript(parsed.args || undefined);
+      return;
+    }
+    if (parsed.name === 'edit') {
+      openExternalEditor(parsed.args);
       return;
     }
     if (parsed.name === 'chat') {
@@ -1051,6 +1084,89 @@ function submitStudioInput(input: string) {
     localNotice = submitFailureText(result.reason);
     refreshStatus();
   }
+}
+
+function exportCurrentTranscript(requestedPath?: string) {
+  const session = controller.getState().session;
+  clearComposerPreservingNotice();
+  if (session.sessionId === 'pending') {
+    localNotice = 'no session is available to export';
+    refreshStatus();
+    return;
+  }
+  localNotice = 'exporting transcript…';
+  refreshStatus();
+  void exportSessionTranscript({
+    session,
+    requestedPath,
+  }).then(({ filePath }) => {
+    localNotice = `exported: ${filePath}`;
+    refreshStatus();
+  }).catch((error: unknown) => {
+    showErrorNotice(`transcript export failed: ${errorMessage(error)}`);
+  });
+}
+
+function openExternalEditor(initialText: string) {
+  if (externalEditorOpen) return;
+  if (controller.getState().session.activeRun) {
+    clearComposerPreservingNotice();
+    localNotice = 'wait for the current response before opening an editor';
+    refreshStatus();
+    return;
+  }
+
+  clearComposerPreservingNotice();
+  commandOverlay = closeCommandOverlay();
+  refreshCommandOverlay();
+  externalEditorOpen = true;
+  composer.blur();
+  localNotice = 'external editor active';
+  refreshStatus();
+
+  const operation = smokeEdit
+    ? async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return `${initialText}\nedited in external editor\n`;
+      }
+    : () => editTextWithExternalEditor({
+        initialText,
+        cwd: controller.getState().session.runtime?.cwd ?? process.cwd(),
+      });
+
+  void withRendererSuspended(renderer, operation).then((text) => {
+    const value = text
+      .replace(/\r\n/g, '\n')
+      .replace(/\n$/, '');
+    if (value) {
+      composer.replaceText(value);
+      composer.gotoBufferEnd();
+      localNotice = 'external editor draft loaded';
+    } else {
+      composer.clear();
+      localNotice = 'external editor returned an empty draft';
+    }
+  }).catch((error: unknown) => {
+    localNotice = `external editor failed: ${errorMessage(error)}`;
+  }).finally(() => {
+    externalEditorOpen = false;
+    syncComposerLayout();
+    refreshHeader();
+    refreshLive();
+    refreshStatus();
+    if (
+      sessionPicker.phase === 'closed'
+      && policyPicker.phase === 'closed'
+      && noticeOverlay.phase === 'closed'
+      && approvalController.getState().phase === 'closed'
+    ) {
+      composer.focus();
+      syncCommandOverlayFromComposer();
+    }
+    if (smokeEdit) {
+      setTimeout(() => renderer.destroy(), 50);
+    }
+  });
 }
 
 function clearComposerPreservingNotice() {

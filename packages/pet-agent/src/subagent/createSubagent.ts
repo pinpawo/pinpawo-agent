@@ -22,7 +22,7 @@ import {
 } from './guardDefinitions';
 import {
   buildSubagentIterationLimitStopNotice,
-  isSubagentGuardStopMessage,
+  readSubagentGuardStopReason,
 } from './guardStop';
 import { Command, END } from '@langchain/langgraph';
 import { emitRuntimeEventToStreamWriter } from '../utils/streamWriterEvents';
@@ -105,7 +105,7 @@ function findLatestDeliverableMessageId(
     const message = messages[index];
     if (message.id && inputMessageIds.has(message.id)) continue;
     if (message._getType() !== 'ai') continue;
-    if (isSubagentGuardStopMessage(message)) continue;
+    if (readSubagentGuardStopReason(message)) continue;
     if (messageHasToolCalls(message)) continue;
     if (!readMessageText(message).trim()) continue;
     return message.id ?? null;
@@ -333,8 +333,8 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     // marker buried in the input history must not be misread as our stop, and
     // Summarization may rewrite the list so an index-based slice is unreliable.
     const lastMessage = latestMessages.at(-1);
-    const stoppedByGuard = lastMessage ? isSubagentGuardStopMessage(lastMessage) : false;
-    const announceMessageId = stoppedByGuard
+    const stopReason = lastMessage ? readSubagentGuardStopReason(lastMessage) : null;
+    const announceMessageId = stopReason
       ? findLatestDeliverableMessageId(latestMessages, inputMessageIds)
       : lastMessage?._getType() === 'ai'
         && !messageHasToolCalls(lastMessage)
@@ -343,8 +343,14 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     return {
       messages: latestMessages,
       artifacts: inputState.artifacts ?? [],
-      completionReason: stoppedByGuard ? 'limit_reached' : 'natural',
-      announceMessageId,
+      completionReason: stopReason === 'human_review_run_interrupted'
+        ? 'interrupted'
+        : stopReason === 'subagent_iteration_limit_reached'
+          ? 'limit_reached'
+          : 'natural',
+      announceMessageId: stopReason === 'human_review_run_interrupted'
+        ? null
+        : announceMessageId,
     };
   } catch (err) {
     // The agent's hard recursion breaker (recursionLimit) fired. The iteration

@@ -217,7 +217,6 @@ export class LocalAgentAppChatHandler {
       emitClosed: () => this.sendClosedReviewError(ws, msg.requestId),
       emitEvent: (event) => sendLocalAgentEvent(ws, event),
       isConnected: () => this.canUseSocket(ws),
-      restorePending: (route) => this.restorePendingReview(ws, msg.requestId, route),
       run: (route, resume, source) => this.runChatRequest(ws, {
         kind: 'resume',
         requestId: msg.requestId,
@@ -265,25 +264,6 @@ export class LocalAgentAppChatHandler {
     }, userId, { type: 'chat_request' });
   }
 
-  private restorePendingReview(
-    ws: WebSocket,
-    requestId: string,
-    route: ReviewActionRoute,
-  ) {
-    sendLocalAgentEvent(ws, {
-      type: 'system.notice',
-      requestId,
-      message: '当前 review 没有可用的拒绝选项，无法自动取消。',
-    });
-    sendLocalAgentEvent(ws, {
-      type: 'human_review.requested',
-      requestId,
-      ...(route.interruptId ? { interruptId: route.interruptId } : {}),
-      review: route.reviews[0]!,
-      reviews: route.reviews,
-    });
-  }
-
   private async runChatRequest(
     ws: WebSocket,
     request: AppChatRunRequest,
@@ -304,8 +284,7 @@ export class LocalAgentAppChatHandler {
     } else {
       console.log(
         `[local-agent] review.cancel resume human_review requestId=${requestId} `
-        + `reviewId=${source.reviewId} option=${source.selectedOptionId}`
-        + (source.decisionCount ? ` decisions=${source.decisionCount}` : ''),
+        + `reviewId=${source.reviewId} action=interrupt_run`,
       );
     }
     const threadId = this.getChatThreadId(userId);
@@ -374,6 +353,9 @@ export class LocalAgentAppChatHandler {
           if (!isCurrent()) return;
           overlayInflightDelegationOperations(inflight, operations);
         },
+        ...(source.type === 'review.cancel'
+          ? { interruptOnSettledResumeCheckpoint: true }
+          : {}),
         ...(source.type !== 'chat_request'
           ? {
             onResumeCheckpointed: ({ canInterrupt }: { canInterrupt: boolean }) => {

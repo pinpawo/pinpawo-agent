@@ -32,6 +32,7 @@ import {
   createPrepareNode,
 } from './nodes/prepare';
 import { afterContextPrep } from './routes/afterContextPrep';
+import { afterCapability } from './routes/afterCapability';
 import { afterDecision } from './routes/afterDecision';
 import { createAfterDelegationOutcomeIterationGuard } from './routes/afterDelegationOutcomeIterationGuard';
 
@@ -105,7 +106,10 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       capability: 'capability',
     })
     .addEdge('answer', END)
-    .addEdge('capability', 'delegationOutcomeIterationGuard');
+    .addConditionalEdges('capability', afterCapability, {
+      end: END,
+      delegationOutcomeIterationGuard: 'delegationOutcomeIterationGuard',
+    });
 
   return graph.compile({
     checkpointer: config.checkpoint,

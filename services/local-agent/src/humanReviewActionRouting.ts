@@ -157,6 +157,21 @@ export function buildHumanReviewRejectResume(
   }]);
 }
 
+export function buildHumanReviewCancelResume(
+  route: HumanReviewActionRoute,
+) {
+  const control = {
+    action: 'interrupt_run',
+  } as const;
+  return route.interruptId
+    ? { [route.interruptId]: control }
+    : control;
+}
+
+export type HumanReviewResume =
+  | ReturnType<typeof buildHumanReviewResume>
+  | ReturnType<typeof buildHumanReviewCancelResume>;
+
 export type HumanReviewResolutionOutcome =
   | 'completed'
   | 'waiting_human'
@@ -173,15 +188,12 @@ export type HumanReviewResolutionSource =
   | {
       type: 'review.cancel';
       reviewId: string;
-      selectedOptionId: string;
-      decisionCount: 1;
+      decisionCount: 0;
     };
 
 type HumanReviewResolutionMessage = HumanReviewResponseMessage | ReviewCancelMessage;
 
-type ResolvableHumanReviewRoute = HumanReviewActionRoute & ReviewResolutionRoute & {
-  rejectOptionId?: string;
-};
+type ResolvableHumanReviewRoute = HumanReviewActionRoute & ReviewResolutionRoute;
 
 type HumanReviewResolutionOptions<TRoute extends ResolvableHumanReviewRoute> = {
   lifecycle: ReviewResolutionLifecycle<TRoute>;
@@ -194,10 +206,9 @@ type HumanReviewResolutionOptions<TRoute extends ResolvableHumanReviewRoute> = {
     message: HumanReviewResolutionMessage,
   ) => boolean | Promise<boolean>;
   isConnected: () => boolean;
-  restorePending: (route: TRoute) => void;
   run: (
     route: TRoute,
-    resume: ReturnType<typeof buildHumanReviewResume>,
+    resume: HumanReviewResume,
     source: HumanReviewResolutionSource,
   ) => Promise<HumanReviewResolutionOutcome>;
 };
@@ -234,7 +245,7 @@ export async function resolveHumanReviewAction<
       });
       return;
     }
-    let resume: ReturnType<typeof buildHumanReviewResume>;
+    let resume: HumanReviewResume;
     let source: HumanReviewResolutionSource;
     if (message.type === 'human_review_response') {
       let decisions: ReviewResponse[];
@@ -268,26 +279,29 @@ export async function resolveHumanReviewAction<
       if (options.acceptRoute && !(await options.acceptRoute(route, message))) {
         return;
       }
-      if (!route.rejectOptionId) {
-        options.restorePending(route);
-        return;
-      }
       const firstReview = route.reviews[0];
       if (!firstReview) {
         options.emitClosed();
         return;
       }
-      resume = buildHumanReviewRejectResume(route, route.rejectOptionId);
+      resume = buildHumanReviewCancelResume(route);
       source = {
         type: 'review.cancel',
         reviewId: firstReview.id,
-        selectedOptionId: route.rejectOptionId,
-        decisionCount: 1,
+        decisionCount: 0,
       };
     }
 
     if (!options.isConnected()) {
       return;
+    }
+    if (
+      message.type === 'review.cancel'
+      && !lifecycle.queueInterrupt(message.requestId)
+    ) {
+      throw new Error(
+        `Review cancellation could not queue interruption for request "${message.requestId}".`,
+      );
     }
 
     let outcome: HumanReviewResolutionOutcome = 'failed';

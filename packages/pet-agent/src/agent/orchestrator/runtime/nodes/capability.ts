@@ -170,7 +170,10 @@ export function createCapabilityNode(params: {
     };
     let result = await createSubagent(subagentInput);
 
-    if (capability.lifecycle?.finalize) {
+    if (
+      result.completionReason !== 'interrupted'
+      && capability.lifecycle?.finalize
+    ) {
       const finalized = await capability.lifecycle.finalize(result, {
         models: config.models,
         actor,
@@ -212,6 +215,11 @@ export function createCapabilityNode(params: {
       },
     );
     const delegationAnnounce = readLatestAnnounce(laneOutputMessages, { delegationId: runNextDelegation.id });
+    const interrupted = result.completionReason === 'interrupted';
+    const currentResultPreview = state.taskActiveDelegation?.resultPreview ?? null;
+    const resultPreview = interrupted
+      ? currentResultPreview
+      : delegationAnnounce?.text ?? null;
     // The subagent node only records that the delegation ran (status 'progress');
     // whether it is complete is the orchestrator's call at delegationOutcomeDecision,
     // which upgrades the status to 'completed' when it hands off. The raw lane
@@ -221,7 +229,7 @@ export function createCapabilityNode(params: {
       runNextDelegation.id,
       {
         status: 'progress',
-        resultPreview: delegationAnnounce?.text ?? null,
+        resultPreview,
       },
     );
 
@@ -232,8 +240,8 @@ export function createCapabilityNode(params: {
       runNextDelegation: null,
       taskActiveDelegation: {
         ...(state.taskActiveDelegation ?? createTaskActiveDelegation(runNextDelegation, transcriptRunId)),
-        status: 'awaiting_decision' as const,
-        resultPreview: delegationAnnounce?.text ?? null,
+        status: interrupted ? 'pending' as const : 'awaiting_decision' as const,
+        resultPreview,
       },
       runIterationCount: state.runIterationCount + 1,
       sessionToolAuthorizations: authorizationRecorder.recorded,

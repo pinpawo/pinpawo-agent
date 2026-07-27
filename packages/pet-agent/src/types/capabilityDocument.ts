@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
+import { parseDocument, visit } from 'yaml';
 import type { AgentCapability } from './capability';
 
 export const CAPABILITY_DOCUMENT_FILE_NAME = 'CAPABILITY.md';
+export const CAPABILITY_DOCUMENT_FRONTMATTER_MAX_BYTES = 16 * 1024;
 export const CAPABILITY_DOCUMENT_MAX_BYTES = 64 * 1024;
 
 export type CapabilityDocumentFrontmatter = {
@@ -15,35 +17,66 @@ export type CapabilityDocumentFrontmatter = {
   entry?: string;
 };
 
-function parseScalar(raw: string): string | boolean | number {
-  const value = raw.trim();
-  if (value.startsWith('"') && value.endsWith('"')) {
-    try {
-      return JSON.parse(value) as string;
-    } catch {
-      throw new Error(`invalid quoted frontmatter value: ${value}`);
-    }
+function parseFrontmatterYaml(
+  header: string,
+  path: string,
+): Record<string, unknown> {
+  const document = parseDocument(header, {
+    version: '1.2',
+    schema: 'core',
+    strict: true,
+    stringKeys: true,
+    uniqueKeys: true,
+    merge: false,
+    resolveKnownTags: false,
+    logLevel: 'error',
+  });
+  const issue = document.errors[0] ?? document.warnings[0];
+  if (issue) {
+    const detail = issue.code === 'DUPLICATE_KEY'
+      ? 'duplicate frontmatter field'
+      : `invalid YAML frontmatter: ${issue.message}`;
+    throw new Error(`${path}: ${detail}`);
   }
-  if (value.startsWith("'") && value.endsWith("'")) {
-    return value.slice(1, -1);
-  }
-  if (value === 'true') return true;
-  if (value === 'false') return false;
-  if (/^\d+$/.test(value)) return Number(value);
-  return value;
-}
 
-function parseUsesInline(raw: string): string[] {
-  const value = raw.trim();
-  if (value === '[]') return [];
-  if (!value.startsWith('[') || !value.endsWith(']')) {
-    throw new Error('frontmatter "uses" must be a YAML list');
+  let unsupportedFeature: string | null = null;
+  visit(document, {
+    Alias: () => {
+      unsupportedFeature = 'aliases';
+      return visit.BREAK;
+    },
+    Node: (_key, node) => {
+      if (node.anchor) {
+        unsupportedFeature = 'anchors';
+        return visit.BREAK;
+      }
+      if (node.tag) {
+        unsupportedFeature = 'explicit tags';
+        return visit.BREAK;
+      }
+    },
+  });
+  if (unsupportedFeature) {
+    throw new Error(
+      `${path}: YAML ${unsupportedFeature} are not supported in Capability frontmatter`,
+    );
   }
-  return value
-    .slice(1, -1)
-    .split(',')
-    .map((item) => String(parseScalar(item)).trim())
-    .filter(Boolean);
+
+  let parsed: unknown;
+  try {
+    parsed = document.toJS({
+      mapAsMap: true,
+      maxAliasCount: 0,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${path}: invalid YAML frontmatter: ${message}`);
+  }
+  if (!(parsed instanceof Map)) {
+    throw new Error(`${path}: YAML frontmatter must be a mapping`);
+  }
+
+  return Object.fromEntries(parsed) as Record<string, unknown>;
 }
 
 export function parseCapabilityDocument(
@@ -60,37 +93,16 @@ export function parseCapabilityDocument(
   }
 
   const header = normalized.slice(4, end);
-  const body = normalized.slice(end + 5).trim();
-  const raw: Record<string, unknown> = {};
-  let listKey: string | null = null;
-  for (const [index, line] of header.split('\n').entries()) {
-    if (!line.trim() || line.trimStart().startsWith('#')) continue;
-    const listItem = line.match(/^\s+-\s+(.+)$/);
-    if (listItem) {
-      if (!listKey) {
-        throw new Error(`${path}:${String(index + 2)}: list item has no field`);
-      }
-      const items = raw[listKey];
-      if (!Array.isArray(items)) {
-        throw new Error(`${path}:${String(index + 2)}: invalid list`);
-      }
-      items.push(String(parseScalar(listItem[1])).trim());
-      continue;
-    }
-
-    const field = line.match(/^([A-Za-z][A-Za-z0-9_]*):(?:\s*(.*))?$/);
-    if (!field) {
-      throw new Error(`${path}:${String(index + 2)}: unsupported frontmatter syntax`);
-    }
-    const [, key, value = ''] = field;
-    listKey = null;
-    if (key === 'uses') {
-      raw[key] = value.trim() ? parseUsesInline(value) : [];
-      listKey = value.trim() ? null : key;
-    } else {
-      raw[key] = parseScalar(value);
-    }
+  if (
+    Buffer.byteLength(header, 'utf8')
+    > CAPABILITY_DOCUMENT_FRONTMATTER_MAX_BYTES
+  ) {
+    throw new Error(
+      `${path}: YAML frontmatter exceeds ${String(CAPABILITY_DOCUMENT_FRONTMATTER_MAX_BYTES)} bytes`,
+    );
   }
+  const body = normalized.slice(end + 5).trim();
+  const raw = parseFrontmatterYaml(header, path);
 
   const supported = new Set([
     'name',

@@ -125,6 +125,7 @@ export type {
 export {
   assertCapabilityDocumentMatches,
   CAPABILITY_DOCUMENT_FILE_NAME,
+  CAPABILITY_DOCUMENT_FRONTMATTER_MAX_BYTES,
   CAPABILITY_DOCUMENT_MAX_BYTES,
   parseCapabilityDocument,
 } from './types/capabilityDocument';

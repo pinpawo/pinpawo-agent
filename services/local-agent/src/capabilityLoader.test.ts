@@ -161,8 +161,8 @@ still body
 name: block_capability
 description: Block uses
 uses:
-\t- bash
-\t- git
+  - bash
+  - git
 version: 1
 ---
 

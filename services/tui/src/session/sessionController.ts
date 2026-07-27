@@ -33,6 +33,18 @@ export type SubmitChatResult =
   | { ok: true; requestId: string }
   | { ok: false; reason: 'not-ready' | 'busy' | 'empty' | 'send-failed' };
 
+export type InterruptRunResult =
+  | { ok: true; requestId: string }
+  | {
+      ok: false;
+      reason:
+        | 'not-ready'
+        | 'idle'
+        | 'review-active'
+        | 'already-interrupting'
+        | 'send-failed';
+    };
+
 type SnapshotReason = 'startup' | 'reconnect' | 'completion';
 
 type TimerHandle = ReturnType<typeof setTimeout>;
@@ -205,6 +217,37 @@ export class TuiSessionController {
       text: formatAttachmentDisplayText(message, attachments),
     }, { observedAt: this.now() }));
     return { ok: true, requestId };
+  }
+
+  interruptRun(): InterruptRunResult {
+    if (this.state.connection !== 'ready' || !this.connection.isConnected()) {
+      return { ok: false, reason: 'not-ready' };
+    }
+    const run = this.state.session.activeRun;
+    if (!run) {
+      return { ok: false, reason: 'idle' };
+    }
+    if (run.state === 'waiting_review') {
+      return { ok: false, reason: 'review-active' };
+    }
+    if (run.state === 'interrupting') {
+      return { ok: false, reason: 'already-interrupting' };
+    }
+    if (!this.connection.send({
+      type: 'run.interrupt',
+      requestId: run.requestId,
+    })) {
+      return { ok: false, reason: 'send-failed' };
+    }
+    this.updateSession(reduceSession(
+      this.state.session,
+      {
+        type: 'run.interrupting',
+        requestId: run.requestId,
+      },
+      { observedAt: this.now() },
+    ));
+    return { ok: true, requestId: run.requestId };
   }
 
   startNewSession(): Promise<StartNewSessionResult> {
@@ -459,12 +502,18 @@ export class TuiSessionController {
         preserveOmittedTokenUsage: reason !== 'startup',
         preserveOmittedSessionTokenUsage: reason !== 'startup',
       });
-      this.updateSession(reason === 'completion'
+      const session = reason === 'completion'
         ? mergeCompletionSnapshotMetadata(this.state.session, applied)
-        : applied);
+        : applied;
       if (reason === 'startup' || reason === 'reconnect') {
         this.reconnectAttempt = 0;
-        this.setConnection('ready');
+        this.state = {
+          connection: 'ready',
+          session,
+        };
+        this.notify();
+      } else {
+        this.updateSession(session);
       }
       return;
     }

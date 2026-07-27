@@ -4,6 +4,7 @@ import type { TuiSessionState } from '../session/sessionController';
 import {
   formatHeader,
   formatStatusLine,
+  formatStatusLines,
 } from './statusModel';
 
 test('status model renders connection, model, token usage, context, and compact cwd', () => {
@@ -30,9 +31,29 @@ test('status model renders connection, model, token usage, context, and compact 
     },
   };
 
-  assert.equal(formatHeader(state), 'PinPawo TUI v2 · connected · gpt-test');
+  assert.equal(
+    formatHeader(state),
+    'PinPawo TUI v2 · v0.1.0 · connected · gpt-test',
+  );
   assert.equal(
     formatStatusLine(state),
     'in/out: 20,000/3,000 · context: 98,000 left · …/me/project',
   );
+  assert.equal(
+    formatStatusLine(state, 40),
+    'in/out: 20,000/3,000 · ctx: 77% left',
+  );
+  assert.equal(
+    formatStatusLine(state, 24),
+    'in/out: 20,000/3,000',
+  );
+  assert.equal(formatHeader(state, 28), 'PinPawo TUI v2 · v0.1.0');
+  assert.deepEqual(formatStatusLines(state, 80), [
+    'connected · idle · gpt-test',
+    'in/out: 20,000/3,000 · context: 98,000 left · …/me/project',
+  ]);
+  assert.deepEqual(formatStatusLines(state, 32, 'interrupt requested'), [
+    'interrupt requested',
+    'in/out: 20,000/3,000',
+  ]);
 });

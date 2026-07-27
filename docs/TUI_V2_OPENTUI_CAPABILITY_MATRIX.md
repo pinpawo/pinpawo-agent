@@ -35,23 +35,27 @@ The probe covers:
 | shared session list/resume | host results are correlated, timeout/error paths reject, and resume applies one canonical snapshot | automated test |
 | resume race isolation | late completion snapshots from the previous session cannot replace the resumed session | automated test |
 | resume overlay input ownership | navigation is isolated from the composer and locks during resume | automated test |
-| resume overlay resize | 8-row split footer remains bounded at wide and narrow terminal widths | Bun native test |
+| resume overlay resize | 9-row split footer remains bounded at wide and narrow terminal widths | Bun native test |
 | canonical approval restore | snapshot/runtime waiting-review state opens the same approval model | automated test |
 | batched review decisions | approved decisions advance locally and the terminal response carries the complete canonical decision list | automated test |
 | review response validation | stale action, stale batch, missing input, disconnect, and send failure cannot submit an invalid response | automated test |
 | approval input ownership | option navigation yields to a dedicated multiline textarea after free text starts | automated test |
 | approval details paging | long plain/markdown/diff review content remains pageable inside the fixed footer | automated test |
-| approval overlay resize | CJK body/options and multiline input remain bounded in the 8-row split footer | Bun native test |
+| approval overlay resize | CJK body/options and multiline input remain bounded in the 9-row split footer | Bun native test |
 | slash command parsing | exact implemented commands resolve while absolute paths and slash-prefixed prose remain chat input | automated test |
 | command palette ownership | cursor-at-end slash tokens own navigation/submit while ordinary edit keys remain composer-owned | automated test |
 | help paging and resize | command help pages within the fixed footer and remains bounded at narrow widths | automated + Bun native test |
 | new-session race isolation | `/new` waits for an authoritative new-session ID, discards late completion snapshots, and preserves identical messages across the native scrollback boundary | automated + Bun native test |
+| interrupt ownership | Esc/first Ctrl+C sends one canonical interrupt and the notice owns input until the run settles; second Ctrl+C exits | automated test |
+| error notice ownership | connection/local errors remain width-safe and dismissible without editing the composer | automated + Bun native test |
+| two-line status | run/connection/notice and session in/out/context/workspace facts remain separate with narrow-width degradation | automated test |
+| borderless welcome | terminal-raster paw, v2 package version, runtime facts, and shortcuts commit once before timeline history | automated + Bun native test |
 | raw input preview | controls are escaped and output is bounded | automated test |
 | fixed-footer composer layout | composer grows from 3–5 visible rows without changing terminal footer height | automated test |
 | native textarea regression | multiline paste and single-grapheme backspace preserve line boundaries | Bun native test |
 | TypeScript | `npm run typecheck -w @pinpawo/tui` | passed |
-| unit tests | `npm run test -w @pinpawo/tui` | passed, 62 tests |
-| native tests | `npm run test:native -w @pinpawo/tui` | passed, 10 tests including command/help, approval/resume resize, textarea, WebSocket, and 5 real ScrollbackSurface tests |
+| unit tests | `npm run test -w @pinpawo/tui` | passed, 72 tests |
+| native tests | `npm run test:native -w @pinpawo/tui` | passed, 12 tests including command/help/notice, approval/resume resize, textarea, WebSocket, and 6 real ScrollbackSurface tests |
 | alternate-screen PTY startup | `npm run smoke -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | split-footer PTY startup | `npm run smoke:split -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | standalone executable | `npm run build -w @pinpawo/tui` | passed for darwin-arm64; normal and approval compiled PTY smokes passed |
@@ -170,7 +174,11 @@ Known limits and follow-up work:
 12. Run `npm run dev:command -w @pinpawo/tui`. Filter the palette, navigate and
     complete commands, open `/help`, page it, close with Esc/q, then run `/new`
     and `/resume`. Confirm every overlay restores the composer focus.
-13. Repeat the selection, scroll, resize, paste, IME, and burst checks with
+13. Start a long response, press Esc or Ctrl+C, and confirm the interrupt notice
+    owns the footer until the host settles. Confirm a second Ctrl+C exits.
+14. Resize through 80, 40, and 24 columns; confirm both status rows stay bounded
+    and the welcome precedes the first timeline entry.
+15. Repeat the selection, scroll, resize, paste, IME, and burst checks with
     `npm run dev:split -w @pinpawo/tui`. Compare native terminal scrollback
     against the alternate-screen internal viewport.
 

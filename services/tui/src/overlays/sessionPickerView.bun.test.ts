@@ -14,7 +14,7 @@ test('session picker stays inside the split footer across selection and resize',
     width: 60,
     height: 24,
     screenMode: 'split-footer',
-    footerHeight: 8,
+    footerHeight: 9,
   });
   context.after(() => setup.renderer.destroy());
   const root = new BoxRenderable(setup.renderer, {
@@ -33,7 +33,7 @@ test('session picker stays inside the split footer across selection and resize',
   assert.match(initial, /Resume session/);
   assert.match(initial, /中文会话 2/);
   assert.match(initial, /PgUp\/PgDn/);
-  assert.equal(frameRows(initial).length, 8);
+  assert.equal(frameRows(initial).length, 9);
 
   state = moveSessionPickerSelection(state, 6);
   setup.resize(34, 18);
@@ -41,7 +41,7 @@ test('session picker stays inside the split footer across selection and resize',
   await setup.flush();
   const resized = setup.captureCharFrame();
   assert.match(resized, /中文会话 8/);
-  assert.equal(frameRows(resized).length, 8);
+  assert.equal(frameRows(resized).length, 9);
   assert.ok(
     frameRows(resized).every((line) => line.length <= 34),
     resized,

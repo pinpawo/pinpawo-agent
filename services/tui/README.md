@@ -26,6 +26,12 @@ progress:
   and cancel flows.
 - it provides a cursor-aware slash command palette and pageable help overlay
   for the commands currently implemented by the v2 client.
+- it commits a borderless, terminal-rasterized paw welcome with the v2 package
+  version before the first timeline rows.
+- it keeps run/connection state and session token/context facts in a compact
+  two-line status area, with width-priority degradation.
+- it gives interrupting and connection/local errors an input-owning notice
+  overlay instead of leaving them as easy-to-miss composer text.
 
 ## Run the vertical slice
 
@@ -65,7 +71,9 @@ Production client controls:
   projection, `/resume` opens the session picker, and `/quit` exits;
 - ordinary prose containing a path remains text, and unavailable path-only
   pastes are inserted as text with a notice;
-- `Ctrl+C` exits the client.
+- Esc or the first `Ctrl+C` interrupts an active response; a second `Ctrl+C`
+  while interruption is settling exits immediately;
+- Enter or Esc dismisses an error notice; `Ctrl+C` exits while idle.
 
 The timeline keeps message, operation, and subagent ordering from the shared
 Session projection. During a streaming message, only complete terminal rows are
@@ -73,6 +81,11 @@ committed to native scrollback; the mutable last row remains live. Historical
 alignment uses an object-identity fast path for deltas and falls back to
 fingerprint reconciliation after a snapshot or reconnect. Large settled
 prefixes are committed in bounded batches.
+
+The fixed footer reserves two status rows. The first keeps connection, current
+run activity, and notices visible; the second keeps cumulative
+`in/out`, context remaining, and the compact workspace path visible. At narrow
+widths the path is dropped first, then context falls back to a percentage.
 
 The resume overlay defaults to the newest inactive session so Enter does not
 accidentally reload the current one. A successful switch clears the old draft

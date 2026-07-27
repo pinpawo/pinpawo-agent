@@ -51,6 +51,23 @@ test('streaming timeline commits stable rows incrementally and finalizes once', 
   }
 });
 
+test('welcome is committed once before the first timeline rows', async () => {
+  const setup = await createTimelineRenderer(80);
+  const timeline = new TimelineScrollback(setup.renderer);
+  try {
+    timeline.renderWelcome(['paw', 'PinPawo TUI v2']);
+    timeline.renderWelcome(['must not repeat']);
+    timeline.render(session([userMessage('hello')]));
+    assert.equal(
+      setup.externalOutput.takeText(),
+      ['paw', 'PinPawo TUI v2', formatTimelineEntry(userMessage('hello'))].join('\n'),
+    );
+  } finally {
+    timeline.destroy();
+    setup.renderer.destroy();
+  }
+});
+
 test('a running operation prevents later rows from committing out of order', async () => {
   const setup = await createTimelineRenderer(80);
   const timeline = new TimelineScrollback(setup.renderer);
@@ -171,7 +188,7 @@ async function createTimelineRenderer(width: number) {
     width,
     height: 24,
     screenMode: 'split-footer',
-    footerHeight: 8,
+    footerHeight: 9,
     externalOutputMode: 'capture-stdout',
   });
 }

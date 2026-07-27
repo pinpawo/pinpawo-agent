@@ -16,7 +16,7 @@ test('approval view remains bounded and accepts multiline input after resize', a
     width: 60,
     height: 24,
     screenMode: 'split-footer',
-    footerHeight: 8,
+    footerHeight: 9,
   });
   context.after(() => setup.renderer.destroy());
   const root = new BoxRenderable(setup.renderer, {
@@ -40,7 +40,7 @@ test('approval view remains bounded and accepts multiline input after resize', a
   assert.match(initial, /Approval 1\/1/);
   assert.match(initial, /是否允许执行/);
   assert.match(initial, /批准/);
-  assert.equal(frameRows(initial).length, 8);
+  assert.equal(frameRows(initial).length, 9);
 
   state = moveApprovalSelection(state, 1);
   view.render(state, 60);
@@ -54,7 +54,7 @@ test('approval view remains bounded and accepts multiline input after resize', a
   assert.equal(view.input.plainText, '第一行\nsecond line');
   const resized = setup.captureCharFrame();
   assert.match(resized, /回复/);
-  assert.equal(frameRows(resized).length, 8);
+  assert.equal(frameRows(resized).length, 9);
   assert.ok(frameRows(resized).every((line) => line.length <= 34), resized);
 });
 

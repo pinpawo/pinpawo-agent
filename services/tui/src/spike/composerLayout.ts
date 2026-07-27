@@ -1,8 +1,8 @@
 const MIN_VISIBLE_CONTENT_ROWS = 3;
 const MAX_VISIBLE_CONTENT_ROWS = 5;
 const FRAME_BORDER_ROWS = 2;
-const FIXED_FOOTER_ROWS = 8;
-const STATUS_ROWS = 1;
+const FIXED_FOOTER_ROWS = 9;
+const STATUS_ROWS = 2;
 
 export function calculateComposerLayout(
   text: string,

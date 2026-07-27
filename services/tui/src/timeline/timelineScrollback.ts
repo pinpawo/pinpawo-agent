@@ -27,6 +27,7 @@ export type TimelineReconciliationCache = {
 export const MAX_SETTLED_ENTRIES_PER_COMMIT = 200;
 
 export class TimelineScrollback {
+  private welcomeRendered = false;
   private sessionId: string | null = null;
   private committedFingerprints: string[] = [];
   private reconciliationCache: TimelineReconciliationCache = {
@@ -36,6 +37,25 @@ export class TimelineScrollback {
   private activeStreamingSurface: ActiveStreamingSurface | null = null;
 
   constructor(private readonly renderer: CliRenderer) {}
+
+  renderWelcome(lines: readonly string[]) {
+    if (this.welcomeRendered || lines.length === 0) return;
+    this.renderer.writeToScrollback((context) => {
+      const text = new TextRenderable(context.renderContext, {
+        id: 'pinpawo-welcome',
+        width: context.width,
+        height: lines.length,
+        content: lines.join('\n'),
+        fg: '#69c0c8',
+      });
+      return {
+        root: text,
+        width: context.width,
+        height: lines.length,
+      };
+    });
+    this.welcomeRendered = true;
+  }
 
   render(session: AgentSession) {
     if (session.sessionId !== this.sessionId) {

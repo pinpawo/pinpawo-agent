@@ -214,6 +214,49 @@ test('TuiSessionController submits local attachments and keeps paths out of opti
   controller.stop();
 });
 
+test('interrupting a running session is optimistic and idempotent', () => {
+  const requestIds = ['startup', 'chat'];
+  let connection!: FakeConnection;
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => requestIds.shift() ?? 'unexpected',
+  });
+  controller.start();
+  connection.open();
+  connection.receive(snapshotResult('startup', 'chat:one'));
+  assert.equal(controller.submitChat('long task').ok, true);
+
+  assert.deepEqual(controller.interruptRun(), {
+    ok: true,
+    requestId: 'chat',
+  });
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'run.interrupt',
+    requestId: 'chat',
+  });
+  assert.equal(controller.getState().session.activeRun?.state, 'interrupting');
+  assert.deepEqual(controller.interruptRun(), {
+    ok: false,
+    reason: 'already-interrupting',
+  });
+
+  connection.receive({
+    type: 'interrupted',
+    requestId: 'chat',
+    message: 'stopped by user',
+  });
+  assert.equal(controller.getState().session.activeRun, null);
+  const terminal = controller.getState().session.timeline.at(-1);
+  assert.equal(
+    terminal?.type === 'message' ? terminal.text : null,
+    'stopped by user',
+  );
+  controller.stop();
+});
+
 test('starting a new session applies the authoritative snapshot and ignores an older completion snapshot', async () => {
   const requestIds = ['startup', 'completion', 'new-session'];
   let connection!: FakeConnection;

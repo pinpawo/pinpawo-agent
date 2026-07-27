@@ -19,6 +19,7 @@ import {
 } from './client/localHostConnection';
 import { parseTuiCommand } from './commands/commandRegistry';
 import { createDemoConnectionFactory } from './demo/demoConnection';
+import { resolveGlobalInterruptAction } from './input/globalInterrupt';
 import { TuiSessionController } from './session/sessionController';
 import {
   approvalAcceptsTextInput,
@@ -39,6 +40,14 @@ import {
 } from './overlays/commandOverlayModel';
 import { CommandOverlayView } from './overlays/commandOverlayView';
 import {
+  closeNoticeOverlay,
+  createNoticeOverlayState,
+  openErrorNotice,
+  resolveNoticeOverlayKey,
+  syncNoticeOverlay,
+} from './overlays/noticeOverlayModel';
+import { NoticeOverlayView } from './overlays/noticeOverlayView';
+import {
   applySessionPickerAction,
   beginSessionPickerLoad,
   beginSessionResume,
@@ -54,11 +63,14 @@ import { SessionPickerView } from './overlays/sessionPickerView';
 import { calculateComposerLayout } from './spike/composerLayout';
 import { installSingleGraphemeBackspaceWorkaround } from './spike/textareaWorkarounds';
 import {
+  formatConnection,
   formatHeader,
-  formatStatusLine,
+  formatStatusLines,
 } from './status/statusModel';
 import { formatLiveSession } from './timeline/timelineModel';
 import { TimelineScrollback } from './timeline/timelineScrollback';
+import { truncateTerminalLine } from './text/terminalText';
+import { buildWelcomeLines } from './welcome/welcomeModel';
 
 const smokeReview = process.argv.includes('--smoke-review');
 const demoReview = process.argv.includes('--demo-review');
@@ -67,12 +79,12 @@ const demoCommand = process.argv.includes('--demo-command');
 const smoke = process.argv.includes('--smoke') || smokeReview || smokeCommand;
 const port = readLocalServerPort();
 const renderer = await createCliRenderer({
-  exitOnCtrlC: true,
+  exitOnCtrlC: false,
   targetFps: 60,
   useMouse: false,
   enableMouseMovement: false,
   screenMode: 'split-footer',
-  footerHeight: 8,
+  footerHeight: 9,
   externalOutputMode: 'capture-stdout',
   consoleMode: 'disabled',
 });
@@ -106,16 +118,18 @@ const status = new TextRenderable(renderer, {
   id: 'status',
   content: `local-agent :${port}`,
   fg: '#8a8a8a',
-  height: 1,
+  height: 2,
 });
 const sessionPickerView = new SessionPickerView(renderer);
 const commandOverlayView = new CommandOverlayView(renderer);
+const noticeOverlayView = new NoticeOverlayView(renderer);
 
 let localNotice: string | null = null;
 let pendingComposerNotice: string | null = null;
 let composerNoticeSticky = false;
 let attachments: AgentLocalAttachment[] = [];
 let commandOverlay = createCommandOverlayState();
+let noticeOverlay = createNoticeOverlayState();
 let sessionPicker = createSessionPickerState();
 let sessionPickerGeneration = 0;
 let sessionListRequest: ReturnType<TuiSessionController['listSessions']> | null = null;
@@ -188,6 +202,7 @@ root.add(composerFrame);
 root.add(status);
 root.add(commandOverlayView.frame);
 root.add(sessionPickerView.frame);
+root.add(noticeOverlayView.frame);
 root.add(approvalView.frame);
 renderer.root.add(root);
 if (smokeCommand || demoCommand) {
@@ -199,15 +214,29 @@ syncCommandOverlayFromComposer();
 
 const unsubscribe = controller.subscribe((state) => {
   syncApprovalFromSession();
+  syncNoticeFromSession();
   refreshHeader();
   refreshLive();
+  if (state.session.sessionId !== 'pending') {
+    timeline.renderWelcome(buildWelcomeLines({
+      session: state.session,
+      width: renderer.width,
+      connection: formatConnection(state.connection),
+    }));
+  }
   timeline.render(state.session);
   refreshStatus();
 });
 renderer.keyInput.on('keypress', (key) => {
   const approval = approvalController.getState();
+  if (key.ctrl && key.name === 'c') {
+    key.preventDefault();
+    key.stopPropagation();
+    handleGlobalInterrupt(approval.phase);
+    return;
+  }
   const approvalAction = resolveApprovalKey(approval, key);
-  if (approval.phase !== 'closed' && !(key.ctrl && key.name === 'c')) {
+  if (approval.phase !== 'closed') {
     if (approvalAction) {
       key.preventDefault();
       key.stopPropagation();
@@ -219,11 +248,19 @@ renderer.keyInput.on('keypress', (key) => {
     key.stopPropagation();
     return;
   }
+  const noticeAction = resolveNoticeOverlayKey(noticeOverlay, key);
+  if (noticeOverlay.phase !== 'closed') {
+    key.preventDefault();
+    key.stopPropagation();
+    if (noticeAction === 'close') {
+      closeNoticeOverlayUi();
+    }
+    return;
+  }
   syncCommandOverlayFromComposer();
   const commandAction = resolveCommandOverlayKey(commandOverlay, key);
   if (
     commandOverlay.phase === 'help'
-    && !(key.ctrl && key.name === 'c')
   ) {
     key.preventDefault();
     key.stopPropagation();
@@ -231,7 +268,7 @@ renderer.keyInput.on('keypress', (key) => {
     return;
   }
   const pickerAction = resolveSessionPickerKey(sessionPicker, key);
-  if (sessionPicker.phase !== 'closed' && !(key.ctrl && key.name === 'c')) {
+  if (sessionPicker.phase !== 'closed') {
     key.preventDefault();
     key.stopPropagation();
     handleSessionPickerAction(pickerAction);
@@ -247,6 +284,15 @@ renderer.keyInput.on('keypress', (key) => {
     key.preventDefault();
     key.stopPropagation();
     handleCommandOverlayAction(commandAction);
+    return;
+  }
+  if (
+    key.name === 'escape'
+    && controller.getState().session.activeRun
+  ) {
+    key.preventDefault();
+    key.stopPropagation();
+    requestRunInterrupt();
     return;
   }
   releaseStickyComposerNotice();
@@ -277,6 +323,11 @@ renderer.keyInput.on('paste', (event) => {
     event.stopPropagation();
     return;
   }
+  if (noticeOverlay.phase !== 'closed') {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
   if (commandOverlay.phase === 'help') {
     event.preventDefault();
     event.stopPropagation();
@@ -295,11 +346,13 @@ renderer.on('resize', () => {
   refreshSessionPicker();
   refreshApproval();
   refreshCommandOverlay();
+  refreshNoticeOverlay();
 });
 renderer.on('destroy', () => {
   sessionPickerGeneration += 1;
   sessionPicker = closeSessionPicker(sessionPicker);
   commandOverlay = closeCommandOverlay();
+  noticeOverlay = closeNoticeOverlay();
   approvalController.destroy();
   unsubscribe();
   controller.stop();
@@ -327,20 +380,27 @@ function syncComposerLayout() {
 }
 
 function refreshHeader() {
-  header.content = attachments.length
+  header.content = truncateTerminalLine(attachments.length
     ? formatAttachmentStrip(attachments)
-    : formatHeader(controller.getState());
+    : formatHeader(controller.getState(), renderer.width), renderer.width);
 }
 
 function refreshLive() {
-  live.content = `live · ${formatLiveSession(
-    controller.getState().session,
-    Math.max(16, Math.floor((renderer.width - 7) / 2)),
-  )}`;
+  live.content = truncateTerminalLine(
+    `live · ${formatLiveSession(
+      controller.getState().session,
+      Math.max(1, renderer.width - 7),
+    )}`,
+    renderer.width,
+  );
 }
 
 function refreshStatus() {
-  status.content = localNotice ?? formatStatusLine(controller.getState());
+  status.content = formatStatusLines(
+    controller.getState(),
+    renderer.width,
+    localNotice,
+  ).join('\n');
 }
 
 function syncCommandOverlayFromComposer() {
@@ -349,6 +409,7 @@ function syncCommandOverlayFromComposer() {
     cursorOffset: composer.cursorOffset,
     enabled: attachments.length === 0
       && sessionPicker.phase === 'closed'
+      && noticeOverlay.phase === 'closed'
       && approvalController.getState().phase === 'closed',
   });
   refreshCommandOverlay();
@@ -356,6 +417,87 @@ function syncCommandOverlayFromComposer() {
 
 function refreshCommandOverlay() {
   commandOverlayView.render(commandOverlay, renderer.width);
+}
+
+function syncNoticeFromSession() {
+  const previous = noticeOverlay;
+  noticeOverlay = syncNoticeOverlay(
+    noticeOverlay,
+    controller.getState(),
+  );
+  if (noticeOverlay.phase !== 'closed') {
+    if (commandOverlay.phase !== 'closed') {
+      commandOverlay = closeCommandOverlay();
+      refreshCommandOverlay();
+    }
+    if (sessionPicker.phase !== 'closed') {
+      sessionPickerGeneration += 1;
+      sessionPicker = closeSessionPicker(sessionPicker);
+      refreshSessionPicker();
+    }
+    composer.blur();
+  } else if (
+    previous.phase === 'interrupting'
+    && approvalController.getState().phase === 'closed'
+  ) {
+    if (localNotice?.startsWith('interrupt requested')) {
+      localNotice = null;
+    }
+    composer.focus();
+    syncCommandOverlayFromComposer();
+  }
+  refreshNoticeOverlay();
+}
+
+function closeNoticeOverlayUi() {
+  noticeOverlay = closeNoticeOverlay();
+  refreshNoticeOverlay();
+  if (approvalController.getState().phase === 'closed') {
+    composer.focus();
+    syncCommandOverlayFromComposer();
+  }
+}
+
+function showErrorNotice(message: string) {
+  noticeOverlay = openErrorNotice(message);
+  composer.blur();
+  refreshNoticeOverlay();
+}
+
+function refreshNoticeOverlay() {
+  noticeOverlayView.render(noticeOverlay, renderer.width);
+}
+
+function handleGlobalInterrupt(
+  approvalPhase: ReturnType<ApprovalController['getState']>['phase'],
+) {
+  const action = resolveGlobalInterruptAction({
+    approvalPhase,
+    activeRun: controller.getState().session.activeRun,
+  });
+  if (action === 'cancel-review') {
+    approvalController.handle('cancel');
+    return;
+  }
+  if (action === 'interrupt-run') {
+    requestRunInterrupt();
+    return;
+  }
+  renderer.destroy();
+}
+
+function requestRunInterrupt() {
+  const result = controller.interruptRun();
+  if (result.ok) {
+    localNotice = 'interrupt requested · Ctrl+C again to exit';
+  } else if (result.reason === 'already-interrupting') {
+    renderer.destroy();
+    return;
+  } else {
+    showErrorNotice(interruptFailureText(result.reason));
+  }
+  refreshLive();
+  refreshStatus();
 }
 
 function syncApprovalFromSession() {
@@ -379,6 +521,7 @@ function syncApprovalFromSession() {
   } else if (
     previous.phase !== 'closed'
     && sessionPicker.phase === 'closed'
+    && noticeOverlay.phase === 'closed'
   ) {
     composer.focus();
     syncCommandOverlayFromComposer();
@@ -500,8 +643,10 @@ function closeSessionPickerUi() {
   sessionPickerGeneration += 1;
   sessionPicker = closeSessionPicker(sessionPicker);
   refreshSessionPicker();
-  composer.focus();
-  syncCommandOverlayFromComposer();
+  if (noticeOverlay.phase === 'closed') {
+    composer.focus();
+    syncCommandOverlayFromComposer();
+  }
 }
 
 function refreshSessionPicker() {
@@ -556,6 +701,7 @@ function closeCommandOverlayUi() {
   refreshCommandOverlay();
   if (
     sessionPicker.phase === 'closed'
+    && noticeOverlay.phase === 'closed'
     && approvalController.getState().phase === 'closed'
   ) {
     composer.focus();
@@ -600,8 +746,7 @@ function submitComposerInput(input = composer.plainText) {
       syncComposerLayout();
       refreshStatus();
     }).catch((error) => {
-      localNotice = errorMessage(error);
-      refreshStatus();
+      showErrorNotice(errorMessage(error));
     });
     return;
   }
@@ -663,5 +808,20 @@ function submitFailureText(reason: 'not-ready' | 'busy' | 'empty' | 'send-failed
       return 'message is empty';
     case 'send-failed':
       return 'message could not be sent';
+  }
+}
+
+function interruptFailureText(
+  reason: 'not-ready' | 'idle' | 'review-active' | 'send-failed',
+) {
+  switch (reason) {
+    case 'not-ready':
+      return 'local-agent is not connected';
+    case 'idle':
+      return 'no active response to interrupt';
+    case 'review-active':
+      return 'close the active review before interrupting';
+    case 'send-failed':
+      return 'interrupt request could not be sent';
   }
 }

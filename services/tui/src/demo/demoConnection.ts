@@ -1,6 +1,12 @@
 import { createAgentSessionSnapshot } from '@pinpawo/agent-session';
 import type { AgentHostConnectionFactory } from '../client/localHostConnection';
 
+const DEMO_RUNTIME = {
+  model: 'gpt-demo',
+  cwd: '/Users/pinpawo/demo',
+  contextWindow: 128_000,
+} as const;
+
 export function createDemoConnectionFactory(
   options: { review?: boolean } = {},
 ): AgentHostConnectionFactory {
@@ -99,6 +105,7 @@ export function createDemoConnectionFactory(
                     },
                   }
                 : null,
+              runtime: DEMO_RUNTIME,
             }),
           });
         }
@@ -145,6 +152,7 @@ export function createDemoConnectionFactory(
               kind: 'chat',
               timeline: [],
               activeRun: null,
+              runtime: DEMO_RUNTIME,
             }),
           });
         }
@@ -174,6 +182,7 @@ export function createDemoConnectionFactory(
                 status: 'completed',
               }],
               activeRun: null,
+              runtime: DEMO_RUNTIME,
             }),
           });
         }

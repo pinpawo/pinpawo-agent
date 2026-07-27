@@ -74,7 +74,6 @@ export const TUI_TEXT = {
   externalEditorLoaded: '已从外部编辑器载入草稿。',
   externalEditorEmpty: '外部编辑器未留下内容。',
   externalEditorFailed: (message: string) => `外部编辑器失败：${message}`,
-  continueRequiresGuidance: '请提供继续当前委派的指导：/continue <指导>',
   resumeLoading: '正在加载可恢复会话…',
   resumeEmpty: '暂无可恢复会话。',
   resumeFailed: (message: string) => `加载可恢复会话失败：${message}`,

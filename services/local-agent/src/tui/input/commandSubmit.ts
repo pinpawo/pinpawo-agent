@@ -86,24 +86,6 @@ export function submitCurrentInputFromController(options: TuiCommandSubmitInput)
       return;
     }
 
-    if (parsed.name === 'continue') {
-      if (!parsed.args) {
-        options.appendSystemMessage(TUI_TEXT.continueRequiresGuidance);
-        options.clearInputValue();
-        return;
-      }
-      options.selectChatComposerTarget();
-      options.dispatch({
-        type: 'session.configured',
-        kind: 'chat',
-      });
-      options.runtimeController.sendChatRequest(
-        parsed.args,
-        'resume_active',
-      );
-      return;
-    }
-
     if (parsed.name === 'policy') {
       options.openGlobalReviewPolicyPicker();
       options.clearInputValue();

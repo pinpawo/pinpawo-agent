@@ -98,7 +98,7 @@ from an automated PTY run alone.
 | composer internal selection copy/cut | pending | pending | pending | pending |
 | composer prompt history and draft restore | pending | pending | pending | pending |
 | chat `@path` completion and Esc dismissal | pending | pending | pending | pending |
-| command palette stays above the visible search composer | pending | pending | implemented; layout retest pending | pending |
+| command palette stays above the visible search composer | pending | pending | passed | pending |
 | multiline edit and soft wrap | pending | pending | passed | pending |
 | Shift selection and deletion | pending | pending | pending | pending |
 | undo/redo | pending | pending | pending | pending |
@@ -139,11 +139,14 @@ terminal-owned wheel/selection input and stable-row scrollback commits.
 | multi-file drag-in | Ghostty delivers shell-style path text; the production client now parses quoted, escaped, `file://`, and multiple absolute paths into removable chips | automated parser complete; production Ghostty retest pending |
 | resize | committed scrollback and footer layout became visually inconsistent | partial; fixed footer avoids app-driven height transitions, but committed terminal scrollback remains terminal-owned |
 | dynamic composer height | changing `renderer.footerHeight` left old footer frames in Ghostty scrollback | failed; composer now reclaims title/live rows inside a fixed nine-row footer |
+| palette-to-composer footer repaint | transparent footer cells retained stale palette/status text after the composer expanded | passed after painting the complete fixed footer with the terminal default background |
 
 The final Ghostty retest confirmed multiline growth, multiline paste, resize,
-and the fixed-footer repaint behavior. Existing committed scrollback remains
-terminal-owned by design, so the spike does not destructively replay it after
-resize.
+touchpad scroll anchoring during a 250-row append, browsing during the
+400-update delta burst, the palette-above-composer layout, and a clean
+palette-to-composer footer transition with one two-line status. Existing
+committed scrollback remains terminal-owned by design, so the spike does not
+destructively replay it after resize.
 
 ## Phase 1 decision
 

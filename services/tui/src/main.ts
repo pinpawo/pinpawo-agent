@@ -152,11 +152,13 @@ const header = new TextRenderable(renderer, {
   id: 'header',
   content: 'PinPawo TUI v2 · connecting',
   fg: '#f0a6ca',
+  bg: RGBA.defaultBackground(),
   height: 1,
 });
 const live = new TextRenderable(renderer, {
   id: 'live',
   content: 'live · idle',
+  bg: RGBA.defaultBackground(),
   height: 1,
 });
 const composerFrame = new BoxRenderable(renderer, {
@@ -166,11 +168,13 @@ const composerFrame = new BoxRenderable(renderer, {
   border: true,
   paddingLeft: 1,
   paddingRight: 1,
+  backgroundColor: RGBA.defaultBackground(),
 });
 const status = new TextRenderable(renderer, {
   id: 'status',
   content: `local-agent :${port}`,
   fg: '#8a8a8a',
+  bg: RGBA.defaultBackground(),
   height: 2,
 });
 const sessionPickerView = new SessionPickerView(renderer);
@@ -224,6 +228,8 @@ const composer = new TextareaRenderable(renderer, {
   id: 'composer',
   width: '100%',
   height: '100%',
+  backgroundColor: RGBA.defaultBackground(),
+  focusedBackgroundColor: RGBA.defaultBackground(),
   placeholder: 'Message · Ctrl+Enter to send',
   keyBindings: [{
     name: 'return',
@@ -571,7 +577,16 @@ syncComposerLayout();
 syncComposerModeUi();
 controller.start();
 
-if (
+if (smokeCommand) {
+  renderer.once('frame', () => {
+    composer.setText('Smoke footer repaint.');
+    composer.gotoBufferEnd();
+    submitComposerInput();
+    renderer.once('frame', () => {
+      setTimeout(() => renderer.destroy(), 50);
+    });
+  });
+} else if (
   smoke
   && !smokeStudio
   && !smokePolicy

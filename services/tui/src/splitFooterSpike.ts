@@ -26,7 +26,7 @@ const renderer = await createCliRenderer({
   useMouse: false,
   enableMouseMovement: false,
   screenMode: 'split-footer',
-  footerHeight: 8,
+  footerHeight: 9,
   externalOutputMode: 'capture-stdout',
   consoleMode: 'disabled',
 });
@@ -41,11 +41,13 @@ const header = new TextRenderable(renderer, {
   id: 'header',
   content: 'PinPawo TUI v2 · split-footer',
   fg: '#f0a6ca',
+  bg: RGBA.defaultBackground(),
   height: 1,
 });
 const live = new TextRenderable(renderer, {
   id: 'live',
   content: 'live       idle',
+  bg: RGBA.defaultBackground(),
   height: 1,
 });
 const composerFrame = new BoxRenderable(renderer, {
@@ -55,18 +57,22 @@ const composerFrame = new BoxRenderable(renderer, {
   border: true,
   paddingLeft: 1,
   paddingRight: 1,
+  backgroundColor: RGBA.defaultBackground(),
 });
 const status = new TextRenderable(renderer, {
   id: 'status',
-  content: 'Ctrl+D surface delta · Ctrl+T scrollback rows · Ctrl+C exit',
+  content: '',
   fg: '#8a8a8a',
-  height: 1,
+  bg: RGBA.defaultBackground(),
+  height: 2,
 });
 let pendingPastePreview: string | null = null;
 const composer = new TextareaRenderable(renderer, {
   id: 'composer',
   width: '100%',
   height: '100%',
+  backgroundColor: RGBA.defaultBackground(),
+  focusedBackgroundColor: RGBA.defaultBackground(),
   placeholder: 'Message · multiline / paste / IME / file paths',
   keyBindings: [{
     name: 'return',
@@ -77,11 +83,13 @@ const composer = new TextareaRenderable(renderer, {
     if (!composer.plainText.trim()) return;
     writeScrollbackLine(`user       ${composer.plainText}`);
     composer.clear();
-    status.content = 'submitted to terminal scrollback only';
+    setStatus('submitted to terminal scrollback only');
   },
   onContentChange: () => {
-    status.content = pendingPastePreview
-      ?? `composer: ${[...composer.plainText].length} code points`;
+    setStatus(
+      pendingPastePreview
+        ?? `composer: ${[...composer.plainText].length} code points`,
+    );
     pendingPastePreview = null;
     syncComposerLayout();
   },
@@ -90,7 +98,7 @@ const composer = new TextareaRenderable(renderer, {
       'paste',
       new TextDecoder().decode(event.bytes),
     );
-    status.content = pendingPastePreview;
+    setStatus(pendingPastePreview);
   },
 });
 installSingleGraphemeBackspaceWorkaround(composer);
@@ -112,18 +120,18 @@ for (const entry of createSpikeSession(smoke ? 2 : 40).timeline) {
 }
 
 renderer.keyInput.on('keypress', (key: KeyEvent) => {
-  status.content = formatInputProbe('key', key.raw);
-  if (key.ctrl && key.name === 'd') {
+  setStatus(formatInputProbe('key', key.raw));
+  if ((key.ctrl && key.name === 'd') || key.raw === '\x04') {
     runLiveDeltaBurst();
     return;
   }
-  if (key.ctrl && key.name === 't') {
+  if ((key.ctrl && key.name === 't') || key.raw === '\x14') {
     appendScrollbackBurst();
   }
 });
 renderer.on('resize', syncComposerLayout);
 renderer.on('selection', (selection) => {
-  status.content = `selection: ${[...selection.getSelectedText()].length} code points`;
+  setStatus(`selection: ${[...selection.getSelectedText()].length} code points`);
 });
 renderer.on('destroy', stopActiveDeltaBurst);
 
@@ -158,11 +166,12 @@ function syncComposerLayout() {
   composerFrame.height = layout.frameHeight;
   header.height = layout.headerHeight;
   live.height = layout.liveHeight;
+  status.height = layout.statusHeight;
 }
 
 function runLiveDeltaBurst() {
   if (activeDeltaTimer) {
-    status.content = 'surface delta is already running';
+    setStatus('surface delta is already running');
     return;
   }
 
@@ -182,7 +191,7 @@ function runLiveDeltaBurst() {
   let committedRows = 0;
   let content = 'assistant  ';
   live.content = `live       surface delta ${currentBurst}: streaming`;
-  status.content = 'scroll history now; only stable rows will be committed';
+  setStatus('scroll history now; only stable rows will be committed');
 
   activeDeltaTimer = setInterval(() => {
     tick += 1;
@@ -204,7 +213,7 @@ function runLiveDeltaBurst() {
       surface.destroy();
       activeDeltaSurface = null;
       live.content = 'live       idle';
-      status.content = `surface delta ${currentBurst} completed (400 updates)`;
+      setStatus(`surface delta ${currentBurst} completed (400 updates)`);
     }
   }, 8);
 }
@@ -224,5 +233,14 @@ function appendScrollbackBurst() {
   for (let index = 0; index < 250; index += 1) {
     writeScrollbackLine(`system     scrollback row ${index + 1}/250 · 宽字符 🙂`);
   }
-  status.content = 'committed 250 rows to terminal scrollback';
+  setStatus('committed 250 rows to terminal scrollback');
 }
+
+function setStatus(message: string) {
+  status.content = [
+    message,
+    'Ctrl+D surface delta · Ctrl+T scrollback rows · Ctrl+C exit',
+  ].join('\n');
+}
+
+setStatus('ready');

@@ -10,6 +10,7 @@ import { createTestRenderer } from '@opentui/core/testing';
 import { syncComposerCursorForCommandOverlay } from '../input/composerCursor';
 import { calculateComposerLayout } from '../spike/composerLayout';
 import {
+  closeCommandOverlay,
   createCommandOverlayState,
   openCommandHelp,
   syncCommandPalette,
@@ -32,10 +33,12 @@ test('command palette stays above the composer while help owns the footer', asyn
   });
   const header = new TextRenderable(setup.renderer, {
     content: 'PinPawo TUI v2',
+    bg: RGBA.defaultBackground(),
     height: 1,
   });
   const live = new TextRenderable(setup.renderer, {
     content: 'live · idle',
+    bg: RGBA.defaultBackground(),
     height: 1,
   });
   const composerFrame = new BoxRenderable(setup.renderer, {
@@ -44,13 +47,17 @@ test('command palette stays above the composer while help owns the footer', asyn
     border: true,
     paddingLeft: 1,
     paddingRight: 1,
+    backgroundColor: RGBA.defaultBackground(),
   });
   const composer = new TextareaRenderable(setup.renderer, {
     width: '100%',
     height: '100%',
+    backgroundColor: RGBA.defaultBackground(),
+    focusedBackgroundColor: RGBA.defaultBackground(),
   });
   const status = new TextRenderable(setup.renderer, {
     content: 'connected\nin/out: 0/0',
+    bg: RGBA.defaultBackground(),
     height: 2,
   });
   const view = new CommandOverlayView(setup.renderer);
@@ -89,6 +96,30 @@ test('command palette stays above the composer while help owns the footer', asyn
   assert.match(initialRows.slice(5).join('\n'), /\//);
   assert.equal(composer.showCursor, true);
   assert.equal(initialRows.length, 9);
+
+  status.content = 'connected · normal\nin/out: 20/10';
+  composer.setText('');
+  const normal = closeCommandOverlay();
+  const normalLayout = calculateComposerLayout('', 1);
+  header.height = normalLayout.headerHeight;
+  live.height = normalLayout.liveHeight;
+  composerFrame.border = true;
+  composerFrame.height = normalLayout.frameHeight;
+  status.height = normalLayout.statusHeight;
+  syncComposerCursorForCommandOverlay(composer, normal);
+  view.render(normal, 60);
+  await setup.flush();
+  const normalRows = frameRows(setup.captureCharFrame());
+  assert.equal(normalRows.length, 9);
+  assert.equal(
+    normalRows.filter((row) => row.includes('connected · normal')).length,
+    1,
+  );
+  assert.equal(
+    normalRows.filter((row) => row.includes('in/out: 20/10')).length,
+    1,
+  );
+  assert.doesNotMatch(normalRows.join('\n'), /in\/out: 0\/0/);
 
   setup.resize(32, 18);
   const help = openCommandHelp();

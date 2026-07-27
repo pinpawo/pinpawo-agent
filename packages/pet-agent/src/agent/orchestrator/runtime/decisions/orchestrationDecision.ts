@@ -722,6 +722,16 @@ function buildDelegationOutcomeDecisionResult(params: {
     };
   }
 
+  if (decision.outcome === 'user_input_required') {
+    return {
+      goto: 'answer' as const,
+      update: buildUserInputRequiredDelegationResult({
+        state,
+        activeDelegation,
+      }),
+    };
+  }
+
   if (!context.canHandoffActiveDelegation) {
     return {
       goto: 'answer' as const,
@@ -750,6 +760,28 @@ function buildDelegationOutcomeDecisionResult(params: {
   return {
     goto: decision.outcome === 'task_done' ? 'capabilityPlanner' : 'answer',
     update: acceptedDelegationUpdate,
+  };
+}
+
+function buildUserInputRequiredDelegationResult(params: {
+  state: OrchestratorStateType;
+  activeDelegation: TaskActiveDelegation;
+}) {
+  const { state, activeDelegation } = params;
+  const runDelegationSummaries = state.runDelegationSummaries.map((delegation) =>
+    delegation.id === activeDelegation.id
+      ? {
+          ...delegation,
+          status: 'progress' as const,
+        }
+      : delegation);
+
+  return {
+    runNextDelegation: null,
+    runPendingTask: null,
+    taskActiveDelegation: activeDelegation,
+    runDelegationSummaries,
+    runLatestDelegationOutcome: 'user_input_required' as const,
   };
 }
 
@@ -797,10 +829,12 @@ function buildContinueDelegationResult(params: {
   };
 }
 
+type CompletedDelegationOutcome = Exclude<AcceptedDelegationOutcome, 'user_input_required'>;
+
 function buildAcceptedDelegationResult(params: {
   state: OrchestratorStateType;
   context: OrchestrationDecisionContext;
-  outcome: AcceptedDelegationOutcome;
+  outcome: CompletedDelegationOutcome;
 }) {
   const { state, context, outcome } = params;
   const {
@@ -836,9 +870,7 @@ function buildAcceptedDelegationResult(params: {
     delegation.id === activeDelegation.id
       ? {
           ...delegation,
-          status: outcome === 'user_input_required'
-            ? 'progress' as const
-            : 'completed' as const,
+          status: 'completed' as const,
         }
       : delegation);
 

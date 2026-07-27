@@ -1,4 +1,5 @@
 export type {
+  ActiveDelegationTransition,
   OrchestratorConfig,
   OrchestratorInvokeOptions,
   OrchestrationDecisionStructuredOutputConfig,

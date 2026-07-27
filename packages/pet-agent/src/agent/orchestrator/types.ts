@@ -17,6 +17,8 @@ export type PinpetMessageLane = MessageLane | 'orchestrator';
 export type DelegationStatus = 'pending' | 'progress' | 'completed';
 export type { SubagentCompletionReason };
 
+export type ActiveDelegationTransition = 'supersede_active' | 'resume_active';
+
 export type RunDelegationSummary = {
   id: string;
   lane: MessageLane;

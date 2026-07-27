@@ -94,6 +94,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     .addConditionalEdges('compactContext', afterContextPrep, {
       delegationOutcomeIterationGuard: 'delegationOutcomeIterationGuard',
       entryDecision: 'entryDecision',
+      capability: 'capability',
     })
     .addConditionalEdges('delegationOutcomeIterationGuard', afterDelegationOutcomeIterationGuard, {
       answer: 'answer',

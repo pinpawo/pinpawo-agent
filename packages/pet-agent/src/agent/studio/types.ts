@@ -11,6 +11,7 @@ import type {
   HumanReviewInterruptPayload,
   ReviewResponse,
 } from '../orchestrator/review/reviewSpec';
+import type { ActiveDelegationTransition } from '../orchestrator/types';
 
 export type HumanReviewerRequest = HumanReviewInterruptPayload;
 
@@ -74,6 +75,7 @@ export type PetAgentRuntimeInvokeInput = {
    * **不传时,通用 pet agent 在 capabilityDecision 内按 current task 搜索。**
    */
   forcedCapabilityNames?: string[];
+  activeDelegationTransition?: ActiveDelegationTransition;
 };
 
 /**

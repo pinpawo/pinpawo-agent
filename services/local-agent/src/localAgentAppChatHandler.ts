@@ -259,6 +259,9 @@ export class LocalAgentAppChatHandler {
       kind: 'user_message',
       requestId,
       message,
+      ...(msg.activeDelegationTransition
+        ? { activeDelegationTransition: msg.activeDelegationTransition }
+        : {}),
     }, userId, { type: 'chat_request' });
   }
 

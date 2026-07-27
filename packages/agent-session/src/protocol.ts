@@ -2,6 +2,7 @@ import {
   type BuiltinGlobalReviewPolicyMode,
   type ReviewResponse,
   type ReviewSpec,
+  type ActiveDelegationTransition,
 } from '@pinpawo/pet-agent';
 import type {
   AgentErrorCode,
@@ -33,6 +34,7 @@ export type ChatRequestMessage = {
   message: string;
   petId?: string;
   userId?: string;
+  activeDelegationTransition?: ActiveDelegationTransition;
 };
 
 export type RunInterruptMessage = {
@@ -185,6 +187,16 @@ function readString(record: Record<string, unknown>, key: string) {
 function readOptionalString(record: Record<string, unknown>, key: string) {
   const value = record[key];
   return typeof value === 'string' ? value : undefined;
+}
+
+function readActiveDelegationTransition(
+  record: Record<string, unknown>,
+): ActiveDelegationTransition | null | undefined {
+  const value = record.activeDelegationTransition;
+  if (value === undefined) return undefined;
+  return value === 'supersede_active' || value === 'resume_active'
+    ? value
+    : null;
 }
 
 function readOptionalStringArray(record: Record<string, unknown>, key: string) {
@@ -452,10 +464,18 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
     return requestId && sessionId ? { type, requestId, sessionId } : null;
   }
   if (type === 'chat_request') {
-    if (!hasOnlyKeys(record, ['type', 'requestId', 'message', 'petId', 'userId'])) return null;
+    if (!hasOnlyKeys(record, [
+      'type',
+      'requestId',
+      'message',
+      'petId',
+      'userId',
+      'activeDelegationTransition',
+    ])) return null;
     const requestId = readString(record, 'requestId');
     const message = readString(record, 'message');
-    if (!requestId || message == null) return null;
+    const activeDelegationTransition = readActiveDelegationTransition(record);
+    if (!requestId || message == null || activeDelegationTransition === null) return null;
     return {
       type,
       requestId,
@@ -465,6 +485,9 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
         : {}),
       ...(readOptionalString(record, 'userId') !== undefined
         ? { userId: readOptionalString(record, 'userId') }
+        : {}),
+      ...(activeDelegationTransition
+        ? { activeDelegationTransition }
         : {}),
     };
   }

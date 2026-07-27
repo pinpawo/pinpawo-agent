@@ -154,7 +154,9 @@ export class LocalAgentGraphService {
   ): Promise<LocalAgentGraphEventStream> {
     const graph = this.getGraph(setup);
     return await graph.streamEvents(
-      (inputOverride ?? buildOrchestratorTurnInput(setup.input.messages)) as Parameters<OrchestratorGraph['streamEvents']>[0],
+      (inputOverride ?? buildOrchestratorTurnInput(setup.input.messages, {
+        activeDelegationTransition: setup.input.activeDelegationTransition,
+      })) as Parameters<OrchestratorGraph['streamEvents']>[0],
       {
         version: 'v3',
         signal: setup.input.signal,
@@ -167,7 +169,9 @@ export class LocalAgentGraphService {
   async invokeState(setup: AgentChannelSetup, inputOverride?: unknown): Promise<OrchestratorStateType> {
     const graph = this.getGraph(setup);
     return await graph.invoke(
-      inputOverride ?? buildOrchestratorTurnInput(setup.input.messages),
+      inputOverride ?? buildOrchestratorTurnInput(setup.input.messages, {
+        activeDelegationTransition: setup.input.activeDelegationTransition,
+      }),
       {
         signal: setup.input.signal,
         configurable: buildConfigurable(setup),

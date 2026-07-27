@@ -43,7 +43,12 @@ export type ChatSessionResult =
   | { status: 'interrupted' };
 
 export type ChatSessionRequest =
-  | { kind: 'user_message'; requestId: string; message: string }
+  | {
+      kind: 'user_message';
+      requestId: string;
+      message: string;
+      activeDelegationTransition?: AgentChannelSetup['input']['activeDelegationTransition'];
+    }
   | { kind: 'resume'; requestId: string; resume: unknown };
 
 export type ChatSessionAdapterOptions = {
@@ -303,6 +308,7 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
     ? graphService.buildResumeCommand(request.resume)
     : undefined;
   if (!isResumeRequest) {
+    setup.input.activeDelegationTransition = request.activeDelegationTransition;
     setup.input.messages = [
       ...setup.input.messages.slice(0, -1),
       stampMessageCreatedAtUtc(new HumanMessage(message)),

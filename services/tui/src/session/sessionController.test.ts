@@ -214,6 +214,100 @@ test('TuiSessionController submits local attachments and keeps paths out of opti
   controller.stop();
 });
 
+test('TuiSessionController projects Studio progress and terminal responses', () => {
+  const requestIds = ['snapshot-1', 'studio-1', 'studio-2'];
+  let connection!: FakeConnection;
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => requestIds.shift() ?? 'unexpected',
+    now: () => 1_000,
+  });
+  controller.start();
+  connection.open();
+  connection.receive(snapshotResult('snapshot-1', 'chat:one'));
+
+  assert.deepEqual(
+    controller.submitStudio('  ship the release  ', 'studio:release'),
+    { ok: true, requestId: 'studio-1' },
+  );
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'studio_request',
+    requestId: 'studio-1',
+    userRequest: 'ship the release',
+    conversationId: 'studio:release',
+  });
+  assert.equal(controller.getState().session.kind, 'studio');
+  const userEntry = controller.getState().session.timeline[0];
+  assert.equal(
+    userEntry?.type === 'message' ? userEntry.text : null,
+    '[studio] ship the release',
+  );
+
+  connection.receive(eventMessage({
+    type: 'studio.progress',
+    requestId: 'studio-1',
+    event: {
+      type: 'tasks_queued',
+      taskCount: 3,
+    },
+  }));
+  const progressEntry = controller.getState().session.timeline.at(-1);
+  assert.equal(
+    progressEntry?.type === 'message' ? progressEntry.text : null,
+    '[studio] queued 3 tasks',
+  );
+
+  connection.receive({
+    type: 'studio_response',
+    requestId: 'studio-1',
+    outcome: 'stopped',
+    reply: 'Prepared two tasks.',
+    reason: 'waiting for input',
+  });
+  assert.equal(controller.getState().session.activeRun, null);
+  assert.deepEqual(
+    controller.getState().session.timeline
+      .filter((entry) => entry.type === 'message')
+      .map((entry) => entry.text),
+    [
+      '[studio] ship the release',
+      '[studio] queued 3 tasks',
+      'Prepared two tasks.',
+      '[studio] stopped: waiting for input',
+    ],
+  );
+  connection.receive(eventMessage({
+    type: 'studio.progress',
+    requestId: 'studio-1',
+    event: {
+      type: 'task_finished',
+      petRunId: 'late-run',
+      status: 'done',
+    },
+  }));
+  assert.equal(controller.getState().session.timeline.length, 4);
+
+  assert.equal(
+    controller.submitStudio('retry', 'studio:release').ok,
+    true,
+  );
+  connection.receive({
+    type: 'studio_error',
+    requestId: 'studio-2',
+    message: 'Studio is not configured',
+  });
+  assert.equal(controller.getState().session.activeRun, null);
+  const errorEntry = controller.getState().session.timeline.at(-1);
+  assert.equal(
+    errorEntry?.type === 'message' ? errorEntry.text : null,
+    '[studio error] Studio is not configured',
+  );
+  controller.stop();
+});
+
 test('interrupting a running session is optimistic and idempotent', () => {
   const requestIds = ['startup', 'chat'];
   let connection!: FakeConnection;

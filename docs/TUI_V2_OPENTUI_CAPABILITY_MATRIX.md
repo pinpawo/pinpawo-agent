@@ -45,6 +45,7 @@ The probe covers:
 | slash command parsing | exact implemented commands resolve while absolute paths and slash-prefixed prose remain chat input | automated test |
 | command palette ownership | cursor-at-end slash tokens own navigation/submit while ordinary edit keys remain composer-owned | automated test |
 | help paging and resize | command help pages within the fixed footer and remains bounded at narrow widths | automated + Bun native test |
+| Studio mode | `/studio [task]` and `/chat` keep composer mode local while projecting user/progress/reply/error rows through the shared ordered Session timeline | automated test + OpenTUI PTY |
 | new-session race isolation | `/new` waits for an authoritative new-session ID, discards late completion snapshots, and preserves identical messages across the native scrollback boundary | automated + Bun native test |
 | interrupt ownership | Esc/first Ctrl+C sends one canonical interrupt and the notice owns input until the run settles; second Ctrl+C exits | automated test |
 | error notice ownership | connection/local errors remain width-safe and dismissible without editing the composer | automated + Bun native test |
@@ -56,10 +57,11 @@ The probe covers:
 | fixed-footer composer layout | composer grows from 3–5 visible rows without changing terminal footer height | automated test |
 | native textarea regression | multiline paste and single-grapheme backspace preserve line boundaries | Bun native test |
 | TypeScript | `npm run typecheck -w @pinpawo/tui` | passed |
-| unit tests | `npm run test -w @pinpawo/tui` | passed, 72 tests |
+| unit tests | `npm run test -w @pinpawo/tui` | passed, 74 tests |
 | native tests | `npm run test:native -w @pinpawo/tui` | passed, 12 tests including command/help/notice, approval/resume resize, textarea, WebSocket, and 6 real ScrollbackSurface tests |
 | alternate-screen PTY startup | `npm run smoke -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | split-footer PTY startup | `npm run smoke:split -w @pinpawo/tui` | passed in an automated 80×24 PTY |
+| Studio PTY flow | `npm run smoke:studio -w @pinpawo/tui` | passed; user/progress/final rows committed in order and terminal state restored |
 | standalone executable | `npm run build -w @pinpawo/tui` | passed for darwin-arm64; normal and approval compiled PTY smokes passed |
 | root typecheck | `npm run typecheck` | passed |
 | root tests | `npm test` | passed, including local-agent 768/768 and Chrome extension 22/22 |

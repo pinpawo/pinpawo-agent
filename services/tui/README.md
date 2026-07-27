@@ -85,6 +85,8 @@ Production client controls:
   palette; `↑`/`↓` selects, Tab completes, Enter executes, and Esc clears it;
 - `/help` opens pageable command and shortcut help, `/new` starts a clean chat
   projection, `/resume` opens the session picker, and `/quit` exits;
+- `/studio [task]` enters Studio mode and optionally starts a task; subsequent
+  prose keeps the same Studio conversation until `/chat` returns to chat mode;
 - ordinary prose containing a path remains text, and unavailable path-only
   pastes are inserted as text with a notice;
 - Esc or the first `Ctrl+C` interrupts an active response; a second `Ctrl+C`
@@ -134,6 +136,16 @@ and prose that do not have the exact command shape remain ordinary chat input.
 `/new` waits for the host's authoritative new-session ID and empty snapshot
 before switching the projection. Outstanding completion snapshots from the
 previous session are then discarded.
+
+Studio mode reuses the shared `studio_request`, progress event, review,
+interrupt, response, and error protocol. Composer mode and conversation ID stay
+view-local; accepted Studio runs, progress, terminal replies, and errors are
+projected into the canonical ordered timeline. Run the deterministic Studio PTY
+smoke without a host with:
+
+```sh
+npm run smoke:studio -w @pinpawo/tui
+```
 
 ## Phase 1 probes
 

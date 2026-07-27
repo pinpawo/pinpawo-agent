@@ -116,7 +116,10 @@ export function selectedCommand(state: CommandOverlayState) {
 
 export function commandCompletion(state: CommandOverlayState) {
   const command = selectedCommand(state);
-  return command ? `/${command.name}` : null;
+  if (!command) return null;
+  return command.usage.includes('[')
+    ? `/${command.name} `
+    : `/${command.name}`;
 }
 
 export function resolveCommandOverlayKey(

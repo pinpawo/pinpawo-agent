@@ -12,11 +12,13 @@ const COUNT_FORMATTER = new Intl.NumberFormat('en-US');
 export function formatHeader(
   state: TuiSessionState,
   width = Number.POSITIVE_INFINITY,
+  composerMode: AgentSession['kind'] = state.session.kind,
 ) {
   const model = state.session.runtime?.model?.trim();
   return fitStatusSegments([
     `PinPawo TUI v2 · v${TUI_VERSION}`,
     formatConnection(state.connection),
+    ...(composerMode === 'studio' ? ['studio'] : []),
     ...(model ? [model] : []),
   ], width);
 }

@@ -213,6 +213,31 @@ export function createDemoConnectionFactory(
             });
           }
         }
+        if (message.type === 'studio_request') {
+          queueMicrotask(() => {
+            if (!connected) return;
+            handlers.onMessage({
+              type: 'event',
+              requestId: message.requestId,
+              event: {
+                type: 'studio.progress',
+                requestId: message.requestId,
+                event: {
+                  type: 'tasks_queued',
+                  taskCount: 2,
+                },
+              },
+            });
+            handlers.onMessage({
+              type: 'studio_response',
+              requestId: message.requestId,
+              outcome: 'done',
+              reply: 'Studio demo completed.',
+              conversationId: message.conversationId,
+              runId: message.requestId,
+            });
+          });
+        }
         return true;
       },
     };

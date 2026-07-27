@@ -1,6 +1,8 @@
 export type TuiCommandName =
   | 'help'
   | 'new'
+  | 'studio'
+  | 'chat'
   | 'resume'
   | 'quit';
 
@@ -19,6 +21,7 @@ export type ParsedTuiCommand =
       command: TuiCommandDefinition;
       name: TuiCommandName;
       raw: string;
+      args: string;
     }
   | {
       type: 'unknown';
@@ -35,6 +38,14 @@ const COMMANDS: readonly TuiCommandDefinition[] = [{
   name: 'new',
   usage: '/new',
   description: 'Start a new chat session',
+}, {
+  name: 'studio',
+  usage: '/studio [task]',
+  description: 'Enter Studio mode or run a Studio task',
+}, {
+  name: 'chat',
+  usage: '/chat',
+  description: 'Return to chat mode',
 }, {
   name: 'resume',
   usage: '/resume',
@@ -54,7 +65,7 @@ for (const command of COMMANDS) {
   }
 }
 
-const COMMAND_LIKE_RE = /^\/([A-Za-z][A-Za-z0-9_-]*)$/;
+const COMMAND_LIKE_RE = /^\/([A-Za-z][A-Za-z0-9_-]*)(?:\s+(.*))?$/;
 
 export function listTuiCommands() {
   return [...COMMANDS];
@@ -75,20 +86,23 @@ export function parseTuiCommand(input: string): ParsedTuiCommand {
     return { type: 'text', text: input };
   }
   const name = match[1].toLowerCase();
+  const args = (match[2] ?? '').trim();
   const command = COMMAND_BY_NAME.get(name);
   return command
-    ? commandResult(command, raw)
+    ? commandResult(command, raw, args)
     : { type: 'unknown', raw, name };
 }
 
 function commandResult(
   command: TuiCommandDefinition,
   raw: string,
+  args = '',
 ): ParsedTuiCommand {
   return {
     type: 'command',
     command,
     name: command.name,
     raw,
+    args,
   };
 }

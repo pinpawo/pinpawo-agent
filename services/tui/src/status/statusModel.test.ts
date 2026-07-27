@@ -36,6 +36,10 @@ test('status model renders connection, model, token usage, context, and compact 
     'PinPawo TUI v2 · v0.1.0 · connected · gpt-test',
   );
   assert.equal(
+    formatHeader(state, Number.POSITIVE_INFINITY, 'studio'),
+    'PinPawo TUI v2 · v0.1.0 · connected · studio · gpt-test',
+  );
+  assert.equal(
     formatStatusLine(state),
     'in/out: 20,000/3,000 · context: 98,000 left · …/me/project',
   );

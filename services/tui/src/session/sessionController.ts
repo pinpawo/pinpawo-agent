@@ -14,6 +14,12 @@ import type {
   AgentHostConnectionFactory,
 } from '../client/localHostConnection';
 import { formatAttachmentDisplayText } from '../attachments/attachmentModel';
+import {
+  studioCompletionMessages,
+  studioErrorMessage,
+  studioProgressMessage,
+  studioUserMessage,
+} from './studioProjection';
 
 export type TuiConnectionStatus =
   | 'idle'
@@ -215,6 +221,39 @@ export class TuiSessionController {
       requestId,
       kind: 'chat',
       text: formatAttachmentDisplayText(message, attachments),
+    }, { observedAt: this.now() }));
+    return { ok: true, requestId };
+  }
+
+  submitStudio(
+    userRequest: string,
+    conversationId: string,
+  ): SubmitChatResult {
+    const request = userRequest.trim();
+    if (!request) {
+      return { ok: false, reason: 'empty' };
+    }
+    if (this.state.connection !== 'ready' || !this.connection.isConnected()) {
+      return { ok: false, reason: 'not-ready' };
+    }
+    if (this.state.session.activeRun || this.sessionCommands.size > 0) {
+      return { ok: false, reason: 'busy' };
+    }
+
+    const requestId = this.requestIdFactory();
+    if (!this.connection.send({
+      type: 'studio_request',
+      requestId,
+      userRequest: request,
+      conversationId,
+    })) {
+      return { ok: false, reason: 'send-failed' };
+    }
+    this.updateSession(reduceSession(this.state.session, {
+      type: 'user.accepted',
+      requestId,
+      kind: 'studio',
+      text: studioUserMessage(request),
     }, { observedAt: this.now() }));
     return { ok: true, requestId };
   }
@@ -539,13 +578,41 @@ export class TuiSessionController {
     }
 
     if (message.type === 'event') {
+      const projectedMessage = (
+        message.event.type === 'studio.progress'
+        && this.state.session.activeRun?.requestId === message.event.requestId
+      )
+        ? studioProgressMessage(message.event)
+        : null;
       this.updateSession(reduceSession(this.state.session, {
         type: 'runtime.event',
         event: message.event,
+        ...(projectedMessage ? { message: projectedMessage } : {}),
       }, { observedAt: this.now() }));
       if (message.event.type === 'message.completed') {
         this.requestSnapshot('completion');
       }
+      return;
+    }
+
+    if (message.type === 'studio_response') {
+      this.updateSession(reduceSession(this.state.session, {
+        type: 'run.finished',
+        requestId: message.requestId,
+        messages: studioCompletionMessages(message),
+      }, { observedAt: this.now() }));
+      return;
+    }
+
+    if (message.type === 'studio_error') {
+      this.updateSession(reduceSession(this.state.session, {
+        type: 'run.finished',
+        requestId: message.requestId,
+        messages: [studioErrorMessage(
+          message.requestId,
+          message.message,
+        )],
+      }, { observedAt: this.now() }));
       return;
     }
 

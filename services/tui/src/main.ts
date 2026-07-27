@@ -76,7 +76,11 @@ const smokeReview = process.argv.includes('--smoke-review');
 const demoReview = process.argv.includes('--demo-review');
 const smokeCommand = process.argv.includes('--smoke-command');
 const demoCommand = process.argv.includes('--demo-command');
-const smoke = process.argv.includes('--smoke') || smokeReview || smokeCommand;
+const smokeStudio = process.argv.includes('--smoke-studio');
+const smoke = process.argv.includes('--smoke')
+  || smokeReview
+  || smokeCommand
+  || smokeStudio;
 const port = readLocalServerPort();
 const renderer = await createCliRenderer({
   exitOnCtrlC: false,
@@ -133,8 +137,13 @@ let noticeOverlay = createNoticeOverlayState();
 let sessionPicker = createSessionPickerState();
 let sessionPickerGeneration = 0;
 let sessionListRequest: ReturnType<TuiSessionController['listSessions']> | null = null;
+let composerMode: 'chat' | 'studio' = 'chat';
+let studioConversationId: string | null = null;
+let focusedSessionId = 'pending';
+let studioSmokeStarted = false;
+let studioSmokeFinished = false;
 const controller = new TuiSessionController({
-  connectionFactory: smoke || demoReview || demoCommand
+  connectionFactory: smoke || demoReview || demoCommand || smokeStudio
     ? createDemoConnectionFactory({ review: smokeReview || demoReview })
     : createLocalHostConnectionFactory({ port }),
 });
@@ -213,6 +222,12 @@ composer.focus();
 syncCommandOverlayFromComposer();
 
 const unsubscribe = controller.subscribe((state) => {
+  if (state.session.sessionId !== focusedSessionId) {
+    focusedSessionId = state.session.sessionId;
+    composerMode = state.session.kind;
+    studioConversationId = null;
+    syncComposerModeUi();
+  }
   syncApprovalFromSession();
   syncNoticeFromSession();
   refreshHeader();
@@ -226,6 +241,26 @@ const unsubscribe = controller.subscribe((state) => {
   }
   timeline.render(state.session);
   refreshStatus();
+  if (
+    smokeStudio
+    && !studioSmokeStarted
+    && state.connection === 'ready'
+  ) {
+    studioSmokeStarted = true;
+    queueMicrotask(() => submitComposerInput('/studio verify Studio mode'));
+  } else if (
+    smokeStudio
+    && studioSmokeStarted
+    && !studioSmokeFinished
+    && !state.session.activeRun
+    && state.session.timeline.some((entry) => (
+      entry.type === 'message'
+      && entry.text === 'Studio demo completed.'
+    ))
+  ) {
+    studioSmokeFinished = true;
+    setTimeout(() => renderer.destroy(), 50);
+  }
 });
 renderer.keyInput.on('keypress', (key) => {
   const approval = approvalController.getState();
@@ -360,9 +395,10 @@ renderer.on('destroy', () => {
 });
 
 syncComposerLayout();
+syncComposerModeUi();
 controller.start();
 
-if (smoke) {
+if (smoke && !smokeStudio) {
   renderer.once('frame', () => {
     setTimeout(() => renderer.destroy(), 50);
   });
@@ -382,7 +418,18 @@ function syncComposerLayout() {
 function refreshHeader() {
   header.content = truncateTerminalLine(attachments.length
     ? formatAttachmentStrip(attachments)
-    : formatHeader(controller.getState(), renderer.width), renderer.width);
+    : formatHeader(
+        controller.getState(),
+        renderer.width,
+        composerMode,
+      ), renderer.width);
+}
+
+function syncComposerModeUi() {
+  composer.placeholder = composerMode === 'studio'
+    ? 'Studio task · Ctrl+Enter to run · /chat to exit'
+    : 'Message · Ctrl+Enter to send';
+  refreshHeader();
 }
 
 function refreshLive() {
@@ -736,18 +783,44 @@ function submitComposerInput(input = composer.plainText) {
       openSessionPicker();
       return;
     }
-    clearComposerPreservingNotice();
-    localNotice = 'creating new session…';
-    refreshStatus();
-    void controller.startNewSession().then(() => {
-      attachments = [];
-      localNotice = 'new chat session';
-      refreshHeader();
-      syncComposerLayout();
+    if (parsed.name === 'chat') {
+      enterChatMode();
+      return;
+    }
+    if (parsed.name === 'studio') {
+      if (!parsed.args) {
+        if (composerMode === 'studio') {
+          enterChatMode();
+        } else {
+          enterStudioMode();
+        }
+        return;
+      }
+      enterStudioMode(false);
+      submitStudioInput(parsed.args);
+      return;
+    }
+    if (parsed.name === 'new') {
+      clearComposerPreservingNotice();
+      localNotice = 'creating new session…';
       refreshStatus();
-    }).catch((error) => {
-      showErrorNotice(errorMessage(error));
-    });
+      void controller.startNewSession().then(() => {
+        attachments = [];
+        enterChatMode(false);
+        localNotice = 'new chat session';
+        refreshHeader();
+        syncComposerLayout();
+        refreshStatus();
+      }).catch((error) => {
+        showErrorNotice(errorMessage(error));
+      });
+      return;
+    }
+    return;
+  }
+
+  if (composerMode === 'studio') {
+    submitStudioInput(parsed.text);
     return;
   }
 
@@ -758,6 +831,48 @@ function submitComposerInput(input = composer.plainText) {
     localNotice = null;
     refreshHeader();
     syncComposerLayout();
+  } else {
+    localNotice = submitFailureText(result.reason);
+    refreshStatus();
+  }
+}
+
+function enterStudioMode(clearComposer = true) {
+  if (clearComposer) composer.clear();
+  composerMode = 'studio';
+  studioConversationId ??= crypto.randomUUID();
+  localNotice = 'studio mode · /chat to return';
+  syncComposerModeUi();
+  syncCommandOverlayFromComposer();
+  syncComposerLayout();
+  refreshStatus();
+}
+
+function enterChatMode(clearComposer = true) {
+  if (clearComposer) composer.clear();
+  composerMode = 'chat';
+  studioConversationId = null;
+  localNotice = 'chat mode';
+  syncComposerModeUi();
+  syncCommandOverlayFromComposer();
+  syncComposerLayout();
+  refreshStatus();
+}
+
+function submitStudioInput(input: string) {
+  if (attachments.length > 0) {
+    localNotice = 'Studio attachments are not supported yet · remove them or use /chat';
+    refreshStatus();
+    return;
+  }
+  const conversationId = studioConversationId ?? crypto.randomUUID();
+  studioConversationId = conversationId;
+  const result = controller.submitStudio(input, conversationId);
+  if (result.ok) {
+    composer.clear();
+    localNotice = null;
+    syncComposerLayout();
+    refreshHeader();
   } else {
     localNotice = submitFailureText(result.reason);
     refreshStatus();

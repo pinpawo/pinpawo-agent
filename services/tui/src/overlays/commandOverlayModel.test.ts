@@ -35,6 +35,13 @@ test('command palette follows a slash token at the composer cursor', () => {
   assert.equal(commandCompletion(state), '/resume');
 
   state = syncCommandPalette(state, {
+    text: '/stu',
+    cursorOffset: 4,
+    enabled: true,
+  });
+  assert.equal(commandCompletion(state), '/studio ');
+
+  state = syncCommandPalette(state, {
     text: '/re',
     cursorOffset: 3,
     enabled: false,

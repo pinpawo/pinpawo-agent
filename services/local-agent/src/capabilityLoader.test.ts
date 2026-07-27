@@ -11,15 +11,20 @@ import {
 async function mkCapability(
   root: string,
   id: string,
-  options: { entry?: string; body?: string } = {},
+  options: {
+    entry?: string;
+    body?: string;
+    description?: string;
+    usesIndent?: string;
+  } = {},
 ) {
   const dir = path.join(root, id);
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(path.join(dir, 'CAPABILITY.md'), `---
 name: ${id}
-description: Description for ${id}
+description: ${options.description ?? `Description for ${id}`}
 uses:
-  - bash
+${options.usesIndent ?? '  '}- bash
 version: 1
 icon: wand.and.stars
 color: purple
@@ -53,6 +58,41 @@ test('loadUserCapabilities loads a code-free CAPABILITY.md', async () => {
     assert.match(item.capability.document?.digest ?? '', /^[a-f0-9]{64}$/);
     assert.equal(item.capability.lifecycle, undefined);
     assert.ok(manifests.some((meta) => meta.id === 'unit_test_capability'));
+  } finally {
+    if (previousDirs === undefined) {
+      delete process.env.PINPAWO_CAPABILITY_DIRS;
+    } else {
+      process.env.PINPAWO_CAPABILITY_DIRS = previousDirs;
+    }
+  }
+});
+
+test('loadUserCapabilities preserves legacy v1 description and list syntax', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-caps-v1-yaml-'));
+  const previousDirs = process.env.PINPAWO_CAPABILITY_DIRS;
+  process.env.PINPAWO_CAPABILITY_DIRS = root;
+  try {
+    await mkCapability(root, 'legacy_yaml_capability', {
+      description: 'Handles API: requests for budget #1',
+      usesIndent: '\t',
+    });
+
+    const { loadUserCapabilities, readUserCapabilityManifests } = await import('./capabilityLoader');
+    const loaded = await loadUserCapabilities();
+    const manifests = readUserCapabilityManifests();
+    const item = loaded.find(
+      ({ meta }) => meta.id === 'legacy_yaml_capability',
+    );
+
+    assert.equal(
+      item?.meta.description,
+      'Handles API: requests for budget #1',
+    );
+    assert.deepEqual(item?.capability.uses, ['bash']);
+    assert.equal(
+      manifests.find(({ id }) => id === 'legacy_yaml_capability')?.description,
+      'Handles API: requests for budget #1',
+    );
   } finally {
     if (previousDirs === undefined) {
       delete process.env.PINPAWO_CAPABILITY_DIRS;

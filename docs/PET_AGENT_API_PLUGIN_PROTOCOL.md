@@ -16,7 +16,7 @@
 ```md
 ---
 name: inspect
-description: 检查代码库并整理证据。
+description: "检查代码库并整理证据。"
 uses:
   - bash
   - git
@@ -40,6 +40,12 @@ entry: ./index.js
 - `version`：必填；当前只能为 `1`。
 - `icon`、`color`、`defaultEnabled`：可选展示字段。
 - `entry`：可选，必须是目录内相对路径。
+
+`description` 应使用 YAML 双引号字符串；内容包含 `:`、`#`、引号或前后空白时，
+需要按 YAML 字符串规则正确引用和转义。解析器继续接受早期 v1 loader 读取过的
+未引用 description，但新文档不应依赖该兼容语法。
+
+`uses` 的 block list 使用空格缩进，不使用 Tab；Tab 兼容仅用于读取已有 v1 文档。
 
 未知字段、重复 `uses`、越界或 symlink 逃逸的 entry、空或超大 Markdown body 都会被拒绝。
 

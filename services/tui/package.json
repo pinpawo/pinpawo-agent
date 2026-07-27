@@ -7,10 +7,13 @@
     "bun": ">=1.3.0"
   },
   "scripts": {
+    "build": "bun build --compile src/main.ts --outfile dist/pinpawo-tui",
     "build:spike": "bun build --compile src/spike.ts --outfile dist/pinpawo-tui-spike",
-    "dev": "bun run src/spike.ts",
+    "dev": "bun run src/main.ts",
+    "dev:spike": "bun run src/spike.ts",
     "dev:split": "bun run src/splitFooterSpike.ts",
-    "smoke": "bun run src/spike.ts --smoke",
+    "smoke": "bun run src/main.ts --smoke",
+    "smoke:spike": "bun run src/spike.ts --smoke",
     "smoke:split": "bun run src/splitFooterSpike.ts --smoke",
     "test:native": "bun test $(find src -name '*.bun.test.ts' | sort)",
     "typecheck": "tsc --noEmit",

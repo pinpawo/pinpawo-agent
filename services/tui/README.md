@@ -2,26 +2,50 @@
 
 OpenTUI-based TUI v2 client.
 
-The current package is the Phase 1 technical spike from issue #454. It is
-deliberately isolated from the production CLI:
+The package now contains the Phase 2 vertical slice from issue #454. It is
+deliberately isolated from the production CLI while the migration is in
+progress:
 
 - it imports the canonical projection from `@pinpawo/agent-session`;
 - it does not import `services/local-agent/src/*`;
 - it does not replace or delegate the existing `pinpawo-agent tui` command;
-- it exercises OpenTUI scrolling, textarea editing, paste/raw input, selection,
-  resize, and high-frequency timeline updates.
+- it connects to the authenticated loopback local-agent WebSocket;
+- it loads one canonical Session snapshot, consumes live runtime events, and
+  submits chat messages through the shared protocol;
+- it renders settled timeline entries into terminal-native scrollback and keeps
+  streaming state in an OpenTUI scrollback surface.
 
-## Run the spike
+## Run the vertical slice
 
-Install Bun, then from the repository root:
+Install Bun and dependencies. Start the Node host in one terminal:
 
 ```sh
 npm install
+npm run start -w pinpawo -- run
+```
+
+Then start the OpenTUI client from the repository root in another terminal:
+
+```sh
 npm run dev -w @pinpawo/tui
 ```
 
-The default probe uses an alternate-screen `ScrollBoxRenderable`. Run the
-split-footer comparison with:
+The client reads `LOCAL_SERVER_PORT` (default `3210`) and the bearer token
+written by the host to `~/.pinpawo/local-server-token`. It will synchronize the
+active Session before enabling submission and will reconnect with bounded
+backoff if the host disappears.
+
+`Ctrl+Enter` submits the composer. `Ctrl+C` exits the client.
+
+## Phase 1 probes
+
+The original alternate-screen probe remains available with:
+
+```sh
+npm run dev:spike -w @pinpawo/tui
+```
+
+Run the split-footer capability probe with:
 
 ```sh
 npm run dev:split -w @pinpawo/tui
@@ -44,16 +68,22 @@ Its delta probe uses OpenTUI's `ScrollbackSurface`: token updates render into an
 off-screen buffer, while only complete rows are committed to terminal
 scrollback. The footer therefore does not repaint for every token.
 
-Build the alternate-screen probe as a standalone executable with:
+Build the Phase 2 client as a standalone executable with:
+
+```sh
+npm run build -w @pinpawo/tui
+```
+
+Build the alternate-screen probe with:
 
 ```sh
 npm run build:spike -w @pinpawo/tui
 ```
 
-The platform-specific executable is written to `services/tui/dist/`, which is
+Platform-specific executables are written to `services/tui/dist/`, which is
 ignored by Git.
 
-Useful controls:
+Probe controls:
 
 - `F2`: focus the timeline for keyboard and touchpad scrolling
 - `F3`: focus the textarea

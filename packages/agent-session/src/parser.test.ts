@@ -46,3 +46,36 @@ test('parseAgentSessionSnapshot rejects a run-scoped session aggregate', () => {
 
   assert.equal(snapshot?.session.sessionTokenUsage, undefined);
 });
+
+test('parseAgentSessionSnapshot retains and validates global review policy runtime state', () => {
+  const base = {
+    version: 3,
+    session: {
+      sessionId: 'chat:pet',
+      kind: 'chat',
+      timeline: [],
+      activeRun: null,
+    },
+  } as const;
+  assert.equal(
+    parseAgentSessionSnapshot({
+      ...base,
+      session: {
+        ...base.session,
+        runtime: {
+          globalReviewPolicyMode: 'auto_authorization',
+        },
+      },
+    })?.session.runtime?.globalReviewPolicyMode,
+    'auto_authorization',
+  );
+  assert.equal(parseAgentSessionSnapshot({
+    ...base,
+    session: {
+      ...base.session,
+      runtime: {
+        globalReviewPolicyMode: 'custom',
+      },
+    },
+  }), null);
+});

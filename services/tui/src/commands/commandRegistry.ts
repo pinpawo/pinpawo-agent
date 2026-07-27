@@ -3,6 +3,7 @@ export type TuiCommandName =
   | 'new'
   | 'studio'
   | 'chat'
+  | 'policy'
   | 'resume'
   | 'quit';
 
@@ -46,6 +47,10 @@ const COMMANDS: readonly TuiCommandDefinition[] = [{
   name: 'chat',
   usage: '/chat',
   description: 'Return to chat mode',
+}, {
+  name: 'policy',
+  usage: '/policy',
+  description: 'Choose the global review policy',
 }, {
   name: 'resume',
   usage: '/resume',

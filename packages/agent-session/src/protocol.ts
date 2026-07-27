@@ -59,6 +59,8 @@ export type NewSessionMessage = {
 
 export type RuntimeConfigUpdateMessage = {
   type: 'runtime_config.update';
+  /** Optional for compatibility with pre-acknowledgement local clients. */
+  requestId?: string;
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
 };
 
@@ -125,6 +127,16 @@ export type AgentRuntimeEventEnvelope = {
 
 export type AgentControlServerMessage =
   | { type: 'pong' }
+  | {
+      type: 'runtime_config.result';
+      requestId: string;
+      globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
+    }
+  | {
+      type: 'runtime_config.error';
+      requestId: string;
+      message: string;
+    }
   | { type: 'interrupting'; requestId: string; message?: string }
   | { type: 'interrupted'; requestId: string; message?: string }
   | {
@@ -605,9 +617,17 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
     };
   }
   if (type === 'runtime_config.update') {
-    if (!hasOnlyKeys(record, ['type', 'globalReviewPolicyMode'])) return null;
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'globalReviewPolicyMode'])) return null;
+    const requestId = readOptionalString(record, 'requestId');
+    if ('requestId' in record && !requestId) return null;
     const globalReviewPolicyMode = readBuiltinGlobalReviewPolicyMode(record, 'globalReviewPolicyMode');
-    return globalReviewPolicyMode ? { type, globalReviewPolicyMode } : null;
+    return globalReviewPolicyMode
+      ? {
+          type,
+          ...(requestId ? { requestId } : {}),
+          globalReviewPolicyMode,
+        }
+      : null;
   }
   if (type === 'studio_request') {
     const requestId = readString(record, 'requestId');
@@ -684,6 +704,21 @@ function parseAgentServerRecord(record: Record<string, unknown>): AgentServerMes
       return null;
     }
     return { type, requestId, operation, message };
+  }
+  if (type === 'runtime_config.result') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'globalReviewPolicyMode'])) return null;
+    const globalReviewPolicyMode = readBuiltinGlobalReviewPolicyMode(
+      record,
+      'globalReviewPolicyMode',
+    );
+    return globalReviewPolicyMode
+      ? { type, requestId, globalReviewPolicyMode }
+      : null;
+  }
+  if (type === 'runtime_config.error') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'message'])) return null;
+    const message = readString(record, 'message');
+    return message !== null ? { type, requestId, message } : null;
   }
   if (type === 'event') {
     const eventRecord = readRecord(record, 'event');

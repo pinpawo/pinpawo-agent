@@ -18,6 +18,7 @@ import { LocalServerStudioHandler } from './localServerStudioHandler';
 import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
 import { LocalServerTuiSessionService } from './localServerTuiSessions';
 import { LocalStudioDueRunScheduler } from './localStudioDueRunScheduler';
+import { persistGlobalReviewPolicyMode } from './globalReviewPolicyConfig';
 import {
   createLocalServerRuntimeDepsStore,
   type LocalServerDeps,
@@ -31,6 +32,10 @@ export type LocalServerHandlers = {
     authToken: string,
   ) => boolean;
   close: () => void;
+};
+
+export type LocalServerHandlerOptions = {
+  persistGlobalReviewPolicyMode?: typeof persistGlobalReviewPolicyMode;
 };
 
 type SessionSummarySource = Pick<
@@ -55,7 +60,10 @@ function projectChatSessionSummary(session: SessionSummarySource): AgentSessionS
  * the outer boundary. HTTP endpoints and stdio session commands call the same
  * checkpoint-backed operations below.
  */
-export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHandlers {
+export function createLocalServerHandlers(
+  deps: LocalServerDeps,
+  options: LocalServerHandlerOptions = {},
+): LocalServerHandlers {
   const runtimeDeps = createLocalServerRuntimeDepsStore(deps);
   const initialDeps = runtimeDeps.get();
   const effectiveRuntimeConfig = initialDeps.runtimeConfig;
@@ -281,12 +289,38 @@ export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHan
       tuiSessions.createNewSession(actorId);
       console.log(`[local-server] new session created for pet ${actorId}`);
     },
-    onRuntimeConfigUpdate: (_client, message) => {
-      runtimeDeps.updateLlmConfig({
-        globalReviewPolicyMode: message.globalReviewPolicyMode,
-      });
-      console.log(`[local-server] global review policy set to ${message.globalReviewPolicyMode}`);
-    },
+    onRuntimeConfigUpdate: (client, message) => sessionCommands.enqueue(
+      client,
+      async () => {
+        try {
+          (options.persistGlobalReviewPolicyMode ?? persistGlobalReviewPolicyMode)(
+            message.globalReviewPolicyMode,
+          );
+          runtimeDeps.updateLlmConfig({
+            globalReviewPolicyMode: message.globalReviewPolicyMode,
+          });
+          if (message.requestId) {
+            client.send({
+              type: 'runtime_config.result',
+              requestId: message.requestId,
+              globalReviewPolicyMode: message.globalReviewPolicyMode,
+            });
+          }
+          console.log(
+            `[local-server] global review policy set to ${message.globalReviewPolicyMode}`,
+          );
+        } catch (error) {
+          if (!message.requestId) throw error;
+          client.send({
+            type: 'runtime_config.error',
+            requestId: message.requestId,
+            message: error instanceof Error
+              ? error.message
+              : 'global review policy could not be saved',
+          });
+        }
+      },
+    ),
     onSessionSnapshotGet: (client, message) => sessionCommands.enqueue(
       client,
       () => respondToSessionRequest(

@@ -8,7 +8,7 @@ import {
 test('command registry exposes only implemented OpenTUI commands', () => {
   assert.deepEqual(
     listTuiCommands().map((command) => command.name),
-    ['help', 'new', 'studio', 'chat', 'resume', 'quit'],
+    ['help', 'new', 'studio', 'chat', 'policy', 'resume', 'quit'],
   );
 });
 
@@ -16,7 +16,7 @@ test('command parser resolves commands and aliases', () => {
   assert.equal(parseTuiCommand('/').type, 'command');
   assert.deepEqual(parseTuiCommand('/exit'), {
     type: 'command',
-    command: listTuiCommands()[5],
+    command: listTuiCommands()[6],
     name: 'quit',
     raw: '/exit',
     args: '',

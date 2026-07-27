@@ -99,6 +99,11 @@ test('local server dispatcher routes typed client messages and pong', async () =
     globalReviewPolicyMode: 'auto_authorization',
   }), handlers);
   dispatchLocalServerMessage(peer, JSON.stringify({
+    type: 'runtime_config.update',
+    requestId: 'policy-1',
+    globalReviewPolicyMode: 'full_access',
+  }), handlers);
+  dispatchLocalServerMessage(peer, JSON.stringify({
     type: 'session.snapshot.get',
     requestId: 'snapshot-1',
   }), handlers);
@@ -125,6 +130,11 @@ test('local server dispatcher routes typed client messages and pong', async () =
     type: 'session.resume',
     requestId: 'resume-invalid',
   }), handlers);
+  dispatchLocalServerMessage(peer, JSON.stringify({
+    type: 'runtime_config.update',
+    requestId: 'policy-invalid',
+    globalReviewPolicyMode: 'custom',
+  }), handlers);
   dispatchLocalServerMessage(peer, '{bad json', handlers);
 
   await assertEventually(() => {
@@ -145,6 +155,11 @@ test('local server dispatcher routes typed client messages and pong', async () =
         operation: 'resume',
         message: '客户端 session 消息协议不兼容或格式无效，请升级客户端后重试。',
       },
+      {
+        type: 'runtime_config.error',
+        requestId: 'policy-invalid',
+        message: '客户端 runtime config 消息协议不兼容或格式无效，请升级客户端后重试。',
+      },
     ]);
     assert.deepEqual(seen, [
       'chat:chat-1:hi',
@@ -154,6 +169,7 @@ test('local server dispatcher routes typed client messages and pong', async () =
       'review-cancel:review-1:action-1',
       'new:user-1',
       'policy:auto_authorization',
+      'policy:full_access',
       'snapshot:snapshot-1',
       'sessions:sessions-1',
       'session-new:new-1',
@@ -162,6 +178,7 @@ test('local server dispatcher routes typed client messages and pong', async () =
     assert.deepEqual(warnings, [
       '[local-server] ignored malformed client message type=chat_request requestId=chat-old',
       '[local-server] ignored malformed client message type=session.resume requestId=resume-invalid',
+      '[local-server] ignored malformed client message type=runtime_config.update requestId=policy-invalid',
       '[local-server] ignored malformed client message type=unknown requestId=unknown',
     ]);
   });

@@ -14,7 +14,10 @@ import type {
   JsonObject,
 } from './snapshot';
 import { isJsonValue } from './snapshot';
-import { isAgentTokenUsageSnapshot } from './validation';
+import {
+  isAgentTokenUsageSnapshot,
+  isBuiltinGlobalReviewPolicyMode,
+} from './validation';
 
 export function parseAgentSessionSnapshot(
   value: unknown,
@@ -126,8 +129,17 @@ function parseAgentRuntime(value: unknown): AgentRuntimeView | null {
   ) {
     return null;
   }
+  if (
+    value.globalReviewPolicyMode !== undefined
+    && !isBuiltinGlobalReviewPolicyMode(value.globalReviewPolicyMode)
+  ) {
+    return null;
+  }
   return {
     ...(typeof value.model === 'string' ? { model: value.model } : {}),
+    ...(isBuiltinGlobalReviewPolicyMode(value.globalReviewPolicyMode)
+      ? { globalReviewPolicyMode: value.globalReviewPolicyMode }
+      : {}),
     ...(typeof value.cwd === 'string' ? { cwd: value.cwd } : {}),
     ...(typeof value.workspaceId === 'string' ? { workspaceId: value.workspaceId } : {}),
     ...(typeof value.workspaceName === 'string' ? { workspaceName: value.workspaceName } : {}),

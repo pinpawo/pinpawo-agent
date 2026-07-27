@@ -42,6 +42,8 @@ The probe covers:
 | approval input ownership | option navigation yields to a dedicated multiline textarea after free text starts | automated test |
 | approval details paging | long plain/markdown/diff review content remains pageable inside the fixed footer | automated test |
 | approval overlay resize | CJK body/options and multiline input remain bounded in the 9-row split footer | Bun native test |
+| global review policy | snapshot metadata restores the host policy; `/policy` persists a correlated update before changing visible state | automated test + OpenTUI PTY |
+| policy overlay ownership | arrows/Enter/Esc remain isolated from the composer and the overlay stays bounded across resize | automated + Bun native test |
 | slash command parsing | exact implemented commands resolve while absolute paths and slash-prefixed prose remain chat input | automated test |
 | command palette ownership | cursor-at-end slash tokens own navigation/submit while ordinary edit keys remain composer-owned | automated test |
 | help paging and resize | command help pages within the fixed footer and remains bounded at narrow widths | automated + Bun native test |
@@ -57,11 +59,12 @@ The probe covers:
 | fixed-footer composer layout | composer grows from 3–5 visible rows without changing terminal footer height | automated test |
 | native textarea regression | multiline paste and single-grapheme backspace preserve line boundaries | Bun native test |
 | TypeScript | `npm run typecheck -w @pinpawo/tui` | passed |
-| unit tests | `npm run test -w @pinpawo/tui` | passed, 74 tests |
-| native tests | `npm run test:native -w @pinpawo/tui` | passed, 12 tests including command/help/notice, approval/resume resize, textarea, WebSocket, and 6 real ScrollbackSurface tests |
+| unit tests | `npm run test -w @pinpawo/tui` | passed, 78 tests |
+| native tests | `npm run test:native -w @pinpawo/tui` | passed, 13 tests including policy/command/help/notice, approval/resume resize, textarea, WebSocket, and 6 real ScrollbackSurface tests |
 | alternate-screen PTY startup | `npm run smoke -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | split-footer PTY startup | `npm run smoke:split -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | Studio PTY flow | `npm run smoke:studio -w @pinpawo/tui` | passed; user/progress/final rows committed in order and terminal state restored |
+| review policy PTY flow | `npm run smoke:policy -w @pinpawo/tui` | passed; host acknowledgement updates the compact policy status and terminal state is restored |
 | standalone executable | `npm run build -w @pinpawo/tui` | passed for darwin-arm64; normal and approval compiled PTY smokes passed |
 | root typecheck | `npm run typecheck` | passed |
 | root tests | `npm test` | passed, including local-agent 768/768 and Chrome extension 22/22 |

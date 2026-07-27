@@ -1,7 +1,12 @@
+import {
+  GLOBAL_REVIEW_POLICY_MODE,
+  type BuiltinGlobalReviewPolicyMode,
+} from '@pinpawo/pet-agent';
 import type { LocalServerDeps } from './localServerTypes';
 
 export type LocalRuntimeProjection = {
   model: string;
+  globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
   contextWindow?: number;
   workdir: string;
   workspaceId?: string;
@@ -19,6 +24,8 @@ export function buildLocalRuntimeProjection(deps: LocalServerDeps): LocalRuntime
 
   return {
     model: deps.llmConfig.model,
+    globalReviewPolicyMode: deps.llmConfig.globalReviewPolicyMode
+      ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
     ...(deps.llmConfig.contextWindowTokens !== undefined
       ? { contextWindow: deps.llmConfig.contextWindowTokens }
       : {}),

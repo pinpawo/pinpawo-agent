@@ -1,4 +1,7 @@
-import type { TokenUsageSnapshot } from '@pinpawo/pet-agent';
+import type {
+  BuiltinGlobalReviewPolicyMode,
+  TokenUsageSnapshot,
+} from '@pinpawo/pet-agent';
 import type {
   AgentOperationPhase,
   AgentOperationRaw,
@@ -89,6 +92,7 @@ export type AgentActorView = {
 
 export type AgentRuntimeView = {
   model?: string;
+  globalReviewPolicyMode?: BuiltinGlobalReviewPolicyMode;
   cwd?: string;
   workspaceId?: string;
   workspaceName?: string;

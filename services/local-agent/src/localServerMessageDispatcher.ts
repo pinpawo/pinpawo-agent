@@ -83,6 +83,14 @@ function sendMalformedClientMessageError(peer: LocalServerPeer, data: Buffer | s
     });
     return;
   }
+  if (envelope.type === 'runtime_config.update') {
+    peer.send({
+      type: 'runtime_config.error',
+      requestId: envelope.requestId,
+      message: '客户端 runtime config 消息协议不兼容或格式无效，请升级客户端后重试。',
+    });
+    return;
+  }
   sendLocalServerPeerEvent(peer, {
     type: 'error',
     requestId: envelope.requestId,

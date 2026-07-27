@@ -1,4 +1,7 @@
-import { createAgentSessionSnapshot } from '@pinpawo/agent-session';
+import {
+  createAgentSessionSnapshot,
+  type BuiltinGlobalReviewPolicyMode,
+} from '@pinpawo/agent-session';
 import type { AgentHostConnectionFactory } from '../client/localHostConnection';
 
 const DEMO_RUNTIME = {
@@ -14,6 +17,7 @@ export function createDemoConnectionFactory(
     let connected = false;
     let reviewResolved = false;
     let newSessionIndex = 0;
+    let globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode = 'require_authorization';
     return {
       connect: () => {
         connected = true;
@@ -105,7 +109,10 @@ export function createDemoConnectionFactory(
                     },
                   }
                 : null,
-              runtime: DEMO_RUNTIME,
+              runtime: {
+                ...DEMO_RUNTIME,
+                globalReviewPolicyMode,
+              },
             }),
           });
         }
@@ -152,7 +159,10 @@ export function createDemoConnectionFactory(
               kind: 'chat',
               timeline: [],
               activeRun: null,
-              runtime: DEMO_RUNTIME,
+              runtime: {
+                ...DEMO_RUNTIME,
+                globalReviewPolicyMode,
+              },
             }),
           });
         }
@@ -182,7 +192,10 @@ export function createDemoConnectionFactory(
                 status: 'completed',
               }],
               activeRun: null,
-              runtime: DEMO_RUNTIME,
+              runtime: {
+                ...DEMO_RUNTIME,
+                globalReviewPolicyMode,
+              },
             }),
           });
         }
@@ -235,6 +248,17 @@ export function createDemoConnectionFactory(
               reply: 'Studio demo completed.',
               conversationId: message.conversationId,
               runId: message.requestId,
+            });
+          });
+        }
+        if (message.type === 'runtime_config.update' && message.requestId) {
+          globalReviewPolicyMode = message.globalReviewPolicyMode;
+          queueMicrotask(() => {
+            if (!connected) return;
+            handlers.onMessage({
+              type: 'runtime_config.result',
+              requestId: message.requestId!,
+              globalReviewPolicyMode,
             });
           });
         }

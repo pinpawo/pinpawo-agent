@@ -40,6 +40,8 @@ const WS_OPEN = 1;
 const AGENT_SERVER_MESSAGE_TYPES = {
   pong: true,
   event: true,
+  'runtime_config.result': true,
+  'runtime_config.error': true,
   interrupting: true,
   interrupted: true,
   studio_response: true,

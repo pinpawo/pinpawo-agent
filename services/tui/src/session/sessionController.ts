@@ -7,6 +7,7 @@ import {
   type AgentSession,
   type AgentSessionSnapshot,
   type AgentSessionSummary,
+  type BuiltinGlobalReviewPolicyMode,
   type ReviewResponse,
 } from '@pinpawo/agent-session';
 import type {
@@ -86,6 +87,10 @@ export type CancelReviewResult =
       reason: 'not-ready' | 'closed' | 'stale' | 'send-failed';
     };
 
+export type UpdateGlobalReviewPolicyResult = {
+  globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
+};
+
 export type TuiSessionControllerOptions = {
   connectionFactory: AgentHostConnectionFactory;
   now?: () => number;
@@ -125,6 +130,14 @@ type PendingSessionCommand =
       reject: (error: Error) => void;
     };
 
+type PendingRuntimeConfigUpdate = {
+  requestId: string;
+  globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
+  timer: TimerHandle | null;
+  resolve: (result: UpdateGlobalReviewPolicyResult) => void;
+  reject: (error: Error) => void;
+};
+
 export class TuiSessionController {
   private readonly now: () => number;
   private readonly requestIdFactory: () => string;
@@ -137,6 +150,7 @@ export class TuiSessionController {
   private readonly listeners = new Set<(state: TuiSessionState) => void>();
   private readonly snapshotRequests = new Map<string, SnapshotReason>();
   private readonly sessionCommands = new Map<string, PendingSessionCommand>();
+  private runtimeConfigUpdate: PendingRuntimeConfigUpdate | null = null;
   private state: TuiSessionState = {
     connection: 'idle',
     session: createPendingSession(),
@@ -189,6 +203,7 @@ export class TuiSessionController {
     this.clearSnapshotTimer();
     this.snapshotRequests.clear();
     this.rejectSessionCommands('session command cancelled');
+    this.rejectRuntimeConfigUpdate('runtime config update cancelled');
     this.connection.disconnect();
     this.setConnection('idle');
   }
@@ -203,7 +218,11 @@ export class TuiSessionController {
     if (this.state.connection !== 'ready' || !this.connection.isConnected()) {
       return { ok: false, reason: 'not-ready' };
     }
-    if (this.state.session.activeRun || this.sessionCommands.size > 0) {
+    if (
+      this.state.session.activeRun
+      || this.sessionCommands.size > 0
+      || this.runtimeConfigUpdate
+    ) {
       return { ok: false, reason: 'busy' };
     }
 
@@ -236,7 +255,11 @@ export class TuiSessionController {
     if (this.state.connection !== 'ready' || !this.connection.isConnected()) {
       return { ok: false, reason: 'not-ready' };
     }
-    if (this.state.session.activeRun || this.sessionCommands.size > 0) {
+    if (
+      this.state.session.activeRun
+      || this.sessionCommands.size > 0
+      || this.runtimeConfigUpdate
+    ) {
       return { ok: false, reason: 'busy' };
     }
 
@@ -364,6 +387,39 @@ export class TuiSessionController {
     });
   }
 
+  updateGlobalReviewPolicy(
+    globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode,
+  ): Promise<UpdateGlobalReviewPolicyResult> {
+    const unavailable = this.runtimeConfigUpdateUnavailable();
+    if (unavailable) return Promise.reject(new Error(unavailable));
+
+    const requestId = this.requestIdFactory();
+    return new Promise((resolve, reject) => {
+      const pending: PendingRuntimeConfigUpdate = {
+        requestId,
+        globalReviewPolicyMode,
+        timer: null,
+        resolve,
+        reject,
+      };
+      this.runtimeConfigUpdate = pending;
+      pending.timer = this.setTimer(() => {
+        if (this.runtimeConfigUpdate !== pending) return;
+        this.runtimeConfigUpdate = null;
+        pending.timer = null;
+        pending.reject(new Error('runtime config update timed out'));
+      }, this.sessionCommandTimeoutMs);
+      if (!this.connection.send({
+        type: 'runtime_config.update',
+        requestId,
+        globalReviewPolicyMode,
+      })) {
+        this.clearRuntimeConfigUpdate(pending);
+        reject(new Error('runtime config update could not be sent'));
+      }
+    });
+  }
+
   submitReviewResponse(params: {
     requestId: string;
     actionId: string;
@@ -475,6 +531,34 @@ export class TuiSessionController {
   }
 
   private handleMessage(message: AgentServerMessage) {
+    if (
+      message.type === 'runtime_config.result'
+      || message.type === 'runtime_config.error'
+    ) {
+      const pending = this.runtimeConfigUpdate;
+      if (!pending || pending.requestId !== message.requestId) return;
+      this.clearRuntimeConfigUpdate(pending);
+      if (message.type === 'runtime_config.error') {
+        pending.reject(new Error(message.message));
+        return;
+      }
+      if (message.globalReviewPolicyMode !== pending.globalReviewPolicyMode) {
+        pending.reject(new Error('runtime config response did not match the requested policy'));
+        return;
+      }
+      this.updateSession({
+        ...this.state.session,
+        runtime: {
+          ...this.state.session.runtime,
+          globalReviewPolicyMode: message.globalReviewPolicyMode,
+        },
+      });
+      pending.resolve({
+        globalReviewPolicyMode: message.globalReviewPolicyMode,
+      });
+      return;
+    }
+
     if (message.type === 'session.list.result') {
       const pending = this.sessionCommands.get(message.requestId);
       if (pending?.operation !== 'list') return;
@@ -642,6 +726,7 @@ export class TuiSessionController {
     this.clearSnapshotTimer();
     this.snapshotRequests.clear();
     this.rejectSessionCommands('local-agent disconnected');
+    this.rejectRuntimeConfigUpdate('local-agent disconnected');
     this.scheduleReconnect();
   }
 
@@ -709,6 +794,25 @@ export class TuiSessionController {
     if (this.sessionCommands.size > 0) {
       return 'another session command is already in progress';
     }
+    if (this.runtimeConfigUpdate) {
+      return 'runtime config is being updated';
+    }
+    return null;
+  }
+
+  private runtimeConfigUpdateUnavailable() {
+    if (this.state.connection !== 'ready' || !this.connection.isConnected()) {
+      return 'local-agent is not connected';
+    }
+    if (this.state.session.activeRun) {
+      return 'wait for the current response to finish';
+    }
+    if (this.sessionCommands.size > 0) {
+      return 'a session command is in progress';
+    }
+    if (this.runtimeConfigUpdate) {
+      return 'runtime config is already being updated';
+    }
     return null;
   }
 
@@ -738,6 +842,23 @@ export class TuiSessionController {
       this.clearSessionCommand(command);
       command.reject(new Error(message));
     }
+  }
+
+  private clearRuntimeConfigUpdate(update: PendingRuntimeConfigUpdate) {
+    if (update.timer) {
+      this.clearTimer(update.timer);
+      update.timer = null;
+    }
+    if (this.runtimeConfigUpdate === update) {
+      this.runtimeConfigUpdate = null;
+    }
+  }
+
+  private rejectRuntimeConfigUpdate(message: string) {
+    const update = this.runtimeConfigUpdate;
+    if (!update) return;
+    this.clearRuntimeConfigUpdate(update);
+    update.reject(new Error(message));
   }
 
   private updateSession(session: AgentSession) {

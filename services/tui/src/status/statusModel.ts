@@ -4,6 +4,7 @@ import type {
   TuiConnectionStatus,
   TuiSessionState,
 } from '../session/sessionController';
+import { formatPolicyMode } from '../overlays/policyPickerModel';
 import { truncateTerminalLine } from '../text/terminalText';
 import { TUI_VERSION } from '../version';
 
@@ -67,6 +68,9 @@ export function formatStatusLines(
     || [
       formatConnection(state.connection),
       formatRunStatus(state.session),
+      ...(state.session.runtime?.globalReviewPolicyMode
+        ? [`policy: ${formatPolicyMode(state.session.runtime.globalReviewPolicyMode)}`]
+        : []),
       ...(state.session.runtime?.model?.trim()
         ? [state.session.runtime.model.trim()]
         : []),

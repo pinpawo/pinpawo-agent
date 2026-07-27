@@ -214,6 +214,74 @@ test('TuiSessionController submits local attachments and keeps paths out of opti
   controller.stop();
 });
 
+test('TuiSessionController updates review policy only after a correlated host acknowledgement', async () => {
+  const requestIds = ['snapshot-1', 'policy-1', 'policy-2'];
+  let connection!: FakeConnection;
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => requestIds.shift() ?? 'unexpected',
+  });
+  controller.start();
+  connection.open();
+  connection.receive({
+    type: 'session.snapshot.result',
+    requestId: 'snapshot-1',
+    snapshot: createAgentSessionSnapshot({
+      sessionId: 'chat:one',
+      kind: 'chat',
+      timeline: [],
+      activeRun: null,
+      runtime: {
+        globalReviewPolicyMode: 'require_authorization',
+      },
+    }),
+  });
+
+  const update = controller.updateGlobalReviewPolicy('auto_authorization');
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'runtime_config.update',
+    requestId: 'policy-1',
+    globalReviewPolicyMode: 'auto_authorization',
+  });
+  assert.equal(
+    controller.getState().session.runtime?.globalReviewPolicyMode,
+    'require_authorization',
+  );
+  assert.deepEqual(controller.submitChat('must wait'), {
+    ok: false,
+    reason: 'busy',
+  });
+
+  connection.receive({
+    type: 'runtime_config.result',
+    requestId: 'policy-1',
+    globalReviewPolicyMode: 'auto_authorization',
+  });
+  assert.deepEqual(await update, {
+    globalReviewPolicyMode: 'auto_authorization',
+  });
+  assert.equal(
+    controller.getState().session.runtime?.globalReviewPolicyMode,
+    'auto_authorization',
+  );
+
+  const failed = controller.updateGlobalReviewPolicy('full_access');
+  connection.receive({
+    type: 'runtime_config.error',
+    requestId: 'policy-2',
+    message: 'config is read-only',
+  });
+  await assert.rejects(failed, /config is read-only/);
+  assert.equal(
+    controller.getState().session.runtime?.globalReviewPolicyMode,
+    'auto_authorization',
+  );
+  controller.stop();
+});
+
 test('TuiSessionController projects Studio progress and terminal responses', () => {
   const requestIds = ['snapshot-1', 'studio-1', 'studio-2'];
   let connection!: FakeConnection;

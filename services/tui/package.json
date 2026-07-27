@@ -18,6 +18,7 @@
     "smoke": "bun run src/main.ts --smoke",
     "smoke:command": "bun run src/main.ts --smoke-command",
     "smoke:review": "bun run src/main.ts --smoke-review",
+    "smoke:policy": "bun run src/main.ts --smoke-policy",
     "smoke:studio": "bun run src/main.ts --smoke-studio",
     "smoke:spike": "bun run src/spike.ts --smoke",
     "smoke:split": "bun run src/splitFooterSpike.ts --smoke",

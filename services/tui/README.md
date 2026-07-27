@@ -32,6 +32,8 @@ dogfood entrypoint from issue #454:
   two-line status area, with width-priority degradation.
 - it gives interrupting and connection/local errors an input-owning notice
   overlay instead of leaving them as easy-to-miss composer text.
+- it reads the host's global review policy from authoritative runtime metadata
+  and changes it through a correlated, host-persisted `/policy` flow.
 
 ## Run the vertical slice
 
@@ -84,7 +86,8 @@ Production client controls:
 - typing `/` at the end of an attachment-free composer opens the command
   palette; `↑`/`↓` selects, Tab completes, Enter executes, and Esc clears it;
 - `/help` opens pageable command and shortcut help, `/new` starts a clean chat
-  projection, `/resume` opens the session picker, and `/quit` exits;
+  projection, `/policy` chooses the host review policy, `/resume` opens the
+  session picker, and `/quit` exits;
 - `/studio [task]` enters Studio mode and optionally starts a task; subsequent
   prose keeps the same Studio conversation until `/chat` returns to chat mode;
 - ordinary prose containing a path remains text, and unavailable path-only
@@ -115,6 +118,16 @@ state rather than Session projection fields. The controller validates each
 response against the currently focused canonical review action before sending
 `human_review_response` or `review.cancel`. A disconnect or missing canonical
 state transition releases the submitting lock so the user can retry.
+
+The policy picker also remains view-local, but its current value does not. The
+host exposes the process-wide policy in snapshot runtime metadata, persists
+changes, and acknowledges each v2 update before the TUI changes its status.
+Legacy clients may still send the older uncorrelated update. Run the
+deterministic policy flow without a host with:
+
+```sh
+npm run smoke:policy -w @pinpawo/tui
+```
 
 Run the deterministic interactive approval demo without starting the Node host:
 

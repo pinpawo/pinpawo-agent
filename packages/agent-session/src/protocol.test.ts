@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   AGENT_LOCAL_ATTACHMENT_LIMIT,
   parseAgentClientMessage,
+  parseAgentServerMessage,
 } from './index';
 
 test('chat request parser accepts bounded local path attachments', () => {
@@ -64,4 +65,51 @@ test('chat request parser rejects relative, duplicate, and excessive attachments
       }),
     ),
   }), null);
+});
+
+test('runtime config protocol supports legacy updates and correlated acknowledgements', () => {
+  assert.deepEqual(parseAgentClientMessage({
+    type: 'runtime_config.update',
+    globalReviewPolicyMode: 'require_authorization',
+  }), {
+    type: 'runtime_config.update',
+    globalReviewPolicyMode: 'require_authorization',
+  });
+  assert.deepEqual(parseAgentClientMessage({
+    type: 'runtime_config.update',
+    requestId: 'policy-1',
+    globalReviewPolicyMode: 'auto_authorization',
+  }), {
+    type: 'runtime_config.update',
+    requestId: 'policy-1',
+    globalReviewPolicyMode: 'auto_authorization',
+  });
+  assert.equal(parseAgentClientMessage({
+    type: 'runtime_config.update',
+    requestId: 42,
+    globalReviewPolicyMode: 'auto_authorization',
+  }), null);
+  assert.equal(parseAgentClientMessage({
+    type: 'runtime_config.update',
+    requestId: '',
+    globalReviewPolicyMode: 'auto_authorization',
+  }), null);
+  assert.deepEqual(parseAgentServerMessage({
+    type: 'runtime_config.result',
+    requestId: 'policy-1',
+    globalReviewPolicyMode: 'auto_authorization',
+  }), {
+    type: 'runtime_config.result',
+    requestId: 'policy-1',
+    globalReviewPolicyMode: 'auto_authorization',
+  });
+  assert.deepEqual(parseAgentServerMessage({
+    type: 'runtime_config.error',
+    requestId: 'policy-2',
+    message: 'config is read-only',
+  }), {
+    type: 'runtime_config.error',
+    requestId: 'policy-2',
+    message: 'config is read-only',
+  });
 });

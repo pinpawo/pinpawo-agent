@@ -48,6 +48,18 @@ import {
 } from './overlays/noticeOverlayModel';
 import { NoticeOverlayView } from './overlays/noticeOverlayView';
 import {
+  beginPolicySave,
+  closePolicyPicker,
+  createPolicyPickerState,
+  failPolicySave,
+  movePolicySelection,
+  openPolicyPicker,
+  resolvePolicyPickerKey,
+  selectedPolicy,
+  type PolicyPickerAction,
+} from './overlays/policyPickerModel';
+import { PolicyPickerView } from './overlays/policyPickerView';
+import {
   applySessionPickerAction,
   beginSessionPickerLoad,
   beginSessionResume,
@@ -77,10 +89,12 @@ const demoReview = process.argv.includes('--demo-review');
 const smokeCommand = process.argv.includes('--smoke-command');
 const demoCommand = process.argv.includes('--demo-command');
 const smokeStudio = process.argv.includes('--smoke-studio');
+const smokePolicy = process.argv.includes('--smoke-policy');
 const smoke = process.argv.includes('--smoke')
   || smokeReview
   || smokeCommand
-  || smokeStudio;
+  || smokeStudio
+  || smokePolicy;
 const port = readLocalServerPort();
 const renderer = await createCliRenderer({
   exitOnCtrlC: false,
@@ -125,6 +139,7 @@ const status = new TextRenderable(renderer, {
   height: 2,
 });
 const sessionPickerView = new SessionPickerView(renderer);
+const policyPickerView = new PolicyPickerView(renderer);
 const commandOverlayView = new CommandOverlayView(renderer);
 const noticeOverlayView = new NoticeOverlayView(renderer);
 
@@ -135,13 +150,17 @@ let attachments: AgentLocalAttachment[] = [];
 let commandOverlay = createCommandOverlayState();
 let noticeOverlay = createNoticeOverlayState();
 let sessionPicker = createSessionPickerState();
+let policyPicker = createPolicyPickerState();
 let sessionPickerGeneration = 0;
+let policyPickerGeneration = 0;
 let sessionListRequest: ReturnType<TuiSessionController['listSessions']> | null = null;
 let composerMode: 'chat' | 'studio' = 'chat';
 let studioConversationId: string | null = null;
 let focusedSessionId = 'pending';
 let studioSmokeStarted = false;
 let studioSmokeFinished = false;
+let policySmokeStarted = false;
+let policySmokeFinished = false;
 const controller = new TuiSessionController({
   connectionFactory: smoke || demoReview || demoCommand || smokeStudio
     ? createDemoConnectionFactory({ review: smokeReview || demoReview })
@@ -211,6 +230,7 @@ root.add(composerFrame);
 root.add(status);
 root.add(commandOverlayView.frame);
 root.add(sessionPickerView.frame);
+root.add(policyPickerView.frame);
 root.add(noticeOverlayView.frame);
 root.add(approvalView.frame);
 renderer.root.add(root);
@@ -260,6 +280,25 @@ const unsubscribe = controller.subscribe((state) => {
   ) {
     studioSmokeFinished = true;
     setTimeout(() => renderer.destroy(), 50);
+  } else if (
+    smokePolicy
+    && !policySmokeStarted
+    && state.connection === 'ready'
+  ) {
+    policySmokeStarted = true;
+    queueMicrotask(() => {
+      submitComposerInput('/policy');
+      handlePolicyPickerAction('move-down');
+      handlePolicyPickerAction('select');
+    });
+  } else if (
+    smokePolicy
+    && policySmokeStarted
+    && !policySmokeFinished
+    && state.session.runtime?.globalReviewPolicyMode === 'auto_authorization'
+  ) {
+    policySmokeFinished = true;
+    setTimeout(() => renderer.destroy(), 50);
   }
 });
 renderer.keyInput.on('keypress', (key) => {
@@ -290,6 +329,13 @@ renderer.keyInput.on('keypress', (key) => {
     if (noticeAction === 'close') {
       closeNoticeOverlayUi();
     }
+    return;
+  }
+  const policyAction = resolvePolicyPickerKey(policyPicker, key);
+  if (policyPicker.phase !== 'closed') {
+    key.preventDefault();
+    key.stopPropagation();
+    handlePolicyPickerAction(policyAction);
     return;
   }
   syncCommandOverlayFromComposer();
@@ -363,6 +409,11 @@ renderer.keyInput.on('paste', (event) => {
     event.stopPropagation();
     return;
   }
+  if (policyPicker.phase !== 'closed') {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
   if (commandOverlay.phase === 'help') {
     event.preventDefault();
     event.stopPropagation();
@@ -379,13 +430,16 @@ renderer.on('resize', () => {
   syncComposerLayout();
   refreshLive();
   refreshSessionPicker();
+  refreshPolicyPicker();
   refreshApproval();
   refreshCommandOverlay();
   refreshNoticeOverlay();
 });
 renderer.on('destroy', () => {
   sessionPickerGeneration += 1;
+  policyPickerGeneration += 1;
   sessionPicker = closeSessionPicker(sessionPicker);
+  policyPicker = closePolicyPicker(policyPicker);
   commandOverlay = closeCommandOverlay();
   noticeOverlay = closeNoticeOverlay();
   approvalController.destroy();
@@ -398,7 +452,7 @@ syncComposerLayout();
 syncComposerModeUi();
 controller.start();
 
-if (smoke && !smokeStudio) {
+if (smoke && !smokeStudio && !smokePolicy) {
   renderer.once('frame', () => {
     setTimeout(() => renderer.destroy(), 50);
   });
@@ -456,6 +510,7 @@ function syncCommandOverlayFromComposer() {
     cursorOffset: composer.cursorOffset,
     enabled: attachments.length === 0
       && sessionPicker.phase === 'closed'
+      && policyPicker.phase === 'closed'
       && noticeOverlay.phase === 'closed'
       && approvalController.getState().phase === 'closed',
   });
@@ -482,6 +537,11 @@ function syncNoticeFromSession() {
       sessionPicker = closeSessionPicker(sessionPicker);
       refreshSessionPicker();
     }
+    if (policyPicker.phase !== 'closed') {
+      policyPickerGeneration += 1;
+      policyPicker = closePolicyPicker(policyPicker);
+      refreshPolicyPicker();
+    }
     composer.blur();
   } else if (
     previous.phase === 'interrupting'
@@ -499,7 +559,10 @@ function syncNoticeFromSession() {
 function closeNoticeOverlayUi() {
   noticeOverlay = closeNoticeOverlay();
   refreshNoticeOverlay();
-  if (approvalController.getState().phase === 'closed') {
+  if (
+    approvalController.getState().phase === 'closed'
+    && policyPicker.phase === 'closed'
+  ) {
     composer.focus();
     syncCommandOverlayFromComposer();
   }
@@ -564,10 +627,16 @@ function syncApprovalFromSession() {
       sessionPicker = closeSessionPicker(sessionPicker);
       refreshSessionPicker();
     }
+    if (policyPicker.phase !== 'closed') {
+      policyPickerGeneration += 1;
+      policyPicker = closePolicyPicker(policyPicker);
+      refreshPolicyPicker();
+    }
     composer.blur();
   } else if (
     previous.phase !== 'closed'
     && sessionPicker.phase === 'closed'
+    && policyPicker.phase === 'closed'
     && noticeOverlay.phase === 'closed'
   ) {
     composer.focus();
@@ -700,6 +769,104 @@ function refreshSessionPicker() {
   sessionPickerView.render(sessionPicker, renderer.width);
 }
 
+function openPolicyPickerUi() {
+  if (policyPicker.phase !== 'closed') return;
+  const state = controller.getState();
+  const currentMode = state.session.runtime?.globalReviewPolicyMode;
+  if (state.connection !== 'ready') {
+    showErrorNotice('local-agent is not connected');
+    return;
+  }
+  if (state.session.activeRun) {
+    showErrorNotice('wait for the current response to finish');
+    return;
+  }
+  if (!currentMode) {
+    showErrorNotice('local-agent does not expose review policy state; upgrade the host');
+    return;
+  }
+  commandOverlay = closeCommandOverlay();
+  sessionPickerGeneration += 1;
+  sessionPicker = closeSessionPicker(sessionPicker);
+  policyPickerGeneration += 1;
+  policyPicker = openPolicyPicker(policyPicker, currentMode);
+  composer.blur();
+  refreshCommandOverlay();
+  refreshSessionPicker();
+  refreshPolicyPicker();
+}
+
+function handlePolicyPickerAction(action: PolicyPickerAction) {
+  if (action === 'close') {
+    closePolicyPickerUi();
+    return;
+  }
+  if (action === 'move-up' || action === 'move-down') {
+    policyPicker = movePolicySelection(
+      policyPicker,
+      action === 'move-up' ? -1 : 1,
+    );
+    refreshPolicyPicker();
+    return;
+  }
+  if (action === 'select') {
+    saveSelectedPolicy();
+  }
+}
+
+function saveSelectedPolicy() {
+  const option = selectedPolicy(policyPicker);
+  if (!option || policyPicker.phase === 'saving') return;
+  const generation = policyPickerGeneration + 1;
+  policyPickerGeneration = generation;
+  policyPicker = beginPolicySave(policyPicker);
+  refreshPolicyPicker();
+  void controller.updateGlobalReviewPolicy(option.mode).then((result) => {
+    if (
+      policyPickerGeneration !== generation
+      || policyPicker.phase !== 'saving'
+    ) {
+      return;
+    }
+    policyPicker = closePolicyPicker({
+      ...policyPicker,
+      currentMode: result.globalReviewPolicyMode,
+    });
+    localNotice = `review policy: ${option.label}`;
+    refreshPolicyPicker();
+    refreshStatus();
+    composer.focus();
+    syncCommandOverlayFromComposer();
+  }).catch((error: unknown) => {
+    if (
+      policyPickerGeneration !== generation
+      || policyPicker.phase !== 'saving'
+    ) {
+      return;
+    }
+    policyPicker = failPolicySave(policyPicker, errorMessage(error));
+    refreshPolicyPicker();
+  });
+}
+
+function closePolicyPickerUi() {
+  policyPickerGeneration += 1;
+  policyPicker = closePolicyPicker(policyPicker);
+  refreshPolicyPicker();
+  if (
+    sessionPicker.phase === 'closed'
+    && noticeOverlay.phase === 'closed'
+    && approvalController.getState().phase === 'closed'
+  ) {
+    composer.focus();
+    syncCommandOverlayFromComposer();
+  }
+}
+
+function refreshPolicyPicker() {
+  policyPickerView.render(policyPicker, renderer.width);
+}
+
 function handleCommandOverlayAction(action: CommandOverlayAction) {
   if (!action) return;
   if (action === 'previous' || action === 'next') {
@@ -748,6 +915,7 @@ function closeCommandOverlayUi() {
   refreshCommandOverlay();
   if (
     sessionPicker.phase === 'closed'
+    && policyPicker.phase === 'closed'
     && noticeOverlay.phase === 'closed'
     && approvalController.getState().phase === 'closed'
   ) {
@@ -781,6 +949,12 @@ function submitComposerInput(input = composer.plainText) {
       composer.clear();
       localNotice = null;
       openSessionPicker();
+      return;
+    }
+    if (parsed.name === 'policy') {
+      composer.clear();
+      localNotice = null;
+      openPolicyPickerUi();
       return;
     }
     if (parsed.name === 'chat') {

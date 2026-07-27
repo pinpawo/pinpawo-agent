@@ -90,7 +90,7 @@ inspect/
 ```md
 ---
 name: inspect
-description: 检查代码库并整理证据。
+description: "检查代码库并整理证据。"
 uses:
   - bash
   - git
@@ -105,6 +105,12 @@ version: 1
 `CAPABILITY.md` 同时承载路由 metadata、Toolkit 权限声明和 Markdown
 instructions。纯 Markdown 与带 `finalize` 的目录 Capability 使用同一个
 `AgentCapability` 契约；它们不是两类 runtime。
+
+`description` 应使用 YAML 双引号字符串；内容包含 `:`、`#`、引号或前后空白时，
+需要按 YAML 字符串规则正确引用和转义。解析器继续接受早期 v1 loader 生成或
+读取过的未引用 description，但新文档不应依赖该兼容语法。
+
+`uses` 的 block list 使用空格缩进，不使用 Tab；Tab 兼容仅用于读取已有 v1 文档。
 
 ## 3. Toolkit
 

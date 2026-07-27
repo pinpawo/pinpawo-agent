@@ -23,6 +23,7 @@ export type {
 
 export type {
   AgentCapability,
+  CapabilityDocumentSource,
   CapabilityFinalizeContext,
   CapabilityFinalizeHook,
   CapabilityFinalizeResult,
@@ -31,6 +32,7 @@ export type {
 } from './types/capability';
 export {
   defineCapability,
+  defineCapabilityDocumentSource,
   defineInstructionDocument,
   GENERAL_CAPABILITY_NAME,
 } from './types/capability';
@@ -111,6 +113,25 @@ export type {
   CompiledAgentRegistry,
   ExecutorCompilationIssue,
 } from './agent/createAgentRuntime';
+export {
+  CAPABILITY_DOCUMENT_WORKSPACE_SCHEMA_VERSION,
+  materializeCapabilityDocumentWorkspace,
+  renderCapabilityDocument,
+} from './agent/orchestrator/capabilityDocumentWorkspace';
+export type {
+  CapabilityDocumentWorkspace,
+  CapabilityDocumentWorkspaceEntry,
+} from './agent/orchestrator/capabilityDocumentWorkspace';
+export {
+  assertCapabilityDocumentMatches,
+  CAPABILITY_DOCUMENT_FILE_NAME,
+  CAPABILITY_DOCUMENT_FRONTMATTER_MAX_BYTES,
+  CAPABILITY_DOCUMENT_MAX_BYTES,
+  parseCapabilityDocument,
+} from './types/capabilityDocument';
+export type {
+  CapabilityDocumentFrontmatter,
+} from './types/capabilityDocument';
 export {
   ARTIFACT_DISCOVERY_LIST_TOOL_NAME,
   ARTIFACT_DISCOVERY_READ_TOOL_NAME,

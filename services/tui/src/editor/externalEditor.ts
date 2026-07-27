@@ -2,11 +2,12 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import {
+  parseTerminalCommand,
+  type TerminalCommand,
+} from '../terminal/commandLine';
 
-export type ExternalEditorCommand = {
-  command: string;
-  args: string[];
-};
+export type ExternalEditorCommand = TerminalCommand;
 
 export type ExternalEditorSpawn = (
   command: string,
@@ -26,19 +27,11 @@ export type ExternalEditorOptions = {
   tmpRoot?: string;
 };
 
-export type SuspendableRenderer = {
-  suspend: () => void;
-  resume: () => void;
-};
-
 export function resolveExternalEditorCommand(
   env: NodeJS.ProcessEnv = process.env,
 ): ExternalEditorCommand | null {
   const raw = env.VISUAL?.trim() || env.EDITOR?.trim() || '';
-  if (!raw) return null;
-  const parts = splitEditorCommand(raw);
-  const command = parts[0];
-  return command ? { command, args: parts.slice(1) } : null;
+  return raw ? parseTerminalCommand(raw) : null;
 }
 
 export async function editTextWithExternalEditor(
@@ -71,18 +64,6 @@ export async function editTextWithExternalEditor(
   }
 }
 
-export async function withRendererSuspended<T>(
-  renderer: SuspendableRenderer,
-  operation: () => Promise<T>,
-): Promise<T> {
-  renderer.suspend();
-  try {
-    return await operation();
-  } finally {
-    renderer.resume();
-  }
-}
-
 function runExternalEditor(options: {
   editor: ExternalEditorCommand;
   filePath: string;
@@ -112,43 +93,4 @@ function runExternalEditor(options: {
         : `editor exited with code ${code ?? 'unknown'}`));
     });
   });
-}
-
-function splitEditorCommand(raw: string) {
-  const parts: string[] = [];
-  let current = '';
-  let quote: '"' | "'" | null = null;
-  let escaping = false;
-
-  for (const char of raw) {
-    if (escaping) {
-      current += char;
-      escaping = false;
-      continue;
-    }
-    if (char === '\\' && quote !== "'") {
-      escaping = true;
-      continue;
-    }
-    if ((char === '"' || char === "'") && quote === null) {
-      quote = char;
-      continue;
-    }
-    if (char === quote) {
-      quote = null;
-      continue;
-    }
-    if (/\s/.test(char) && quote === null) {
-      if (current) {
-        parts.push(current);
-        current = '';
-      }
-      continue;
-    }
-    current += char;
-  }
-
-  if (escaping) current += '\\';
-  if (current) parts.push(current);
-  return parts;
 }

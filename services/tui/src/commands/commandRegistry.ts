@@ -4,6 +4,7 @@ export type TuiCommandName =
   | 'studio'
   | 'chat'
   | 'policy'
+  | 'transcript'
   | 'export'
   | 'edit'
   | 'resume'
@@ -53,6 +54,11 @@ const COMMANDS: readonly TuiCommandDefinition[] = [{
   name: 'policy',
   usage: '/policy',
   description: 'Choose the global review policy',
+}, {
+  name: 'transcript',
+  aliases: ['history'],
+  usage: '/transcript',
+  description: 'Browse the canonical timeline in a terminal pager',
 }, {
   name: 'export',
   usage: '/export [path]',

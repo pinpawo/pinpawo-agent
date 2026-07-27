@@ -38,6 +38,8 @@ dogfood entrypoint from issue #454:
   the edited multiline draft back into the composer.
 - it exports completed canonical user/assistant messages as a local Markdown
   transcript without adding a host protocol or depending on local-agent code.
+- it opens the complete ordered canonical timeline in `$PAGER` (or `less`) by
+  temporarily handing over the TTY, instead of maintaining a second viewport.
 
 ## Run the vertical slice
 
@@ -80,6 +82,8 @@ Production client controls:
 - `Ctrl+Enter` submits the composer;
 - dragging or pasting one or more absolute local paths creates attachment chips;
 - Backspace removes the last attachment while the composer text is empty;
+- PageUp from an empty, attachment-free composer or `/transcript` opens the
+  complete timeline in `$PAGER`; `q` returns to the composer;
 - `Ctrl+R` or an exact `/resume` command opens the session picker;
 - `↑`/`↓`, `PageUp`/`PageDown`, and Enter navigate and resume a session; Esc
   closes the picker without changing the composer draft;
@@ -91,8 +95,9 @@ Production client controls:
   palette; `↑`/`↓` selects, Tab completes, Enter executes, and Esc clears it;
 - `/help` opens pageable command and shortcut help, `/new` starts a clean chat
   projection, `/policy` chooses the host review policy, `/resume` opens the
-  session picker, `/edit [text]` opens `$VISUAL` or `$EDITOR`, `/export [path]`
-  writes a Markdown transcript, and `/quit` exits;
+  session picker, `/transcript` (or `/history`) opens the timeline pager,
+  `/edit [text]` opens `$VISUAL` or `$EDITOR`, `/export [path]` writes a
+  Markdown transcript, and `/quit` exits;
 - `/studio [task]` enters Studio mode and optionally starts a task; subsequent
   prose keeps the same Studio conversation until `/chat` returns to chat mode;
 - ordinary prose containing a path remains text, and unavailable path-only
@@ -150,6 +155,18 @@ operations, and system rows are not duplicated into the transcript. A path
 with an extension is treated as the destination file; a path without one is
 treated as a directory. Without an argument, the file is written under the
 session runtime working directory.
+
+`/transcript` is intentionally different from `/export`: it snapshots every
+ordered canonical timeline entry, including operations, system rows, and
+subagent messages, into a temporary plain-text file and opens `$PAGER`
+(defaulting to `less`). OpenTUI is suspended while the pager owns the terminal,
+then resumed and reconciled with any Session events received in the background.
+The pager snapshot itself stays stable; after `q`, buffered timeline updates and
+the correct overlay focus are rendered. Run the deterministic handoff with:
+
+```sh
+npm run smoke:transcript -w @pinpawo/tui
+```
 
 Run the deterministic interactive approval demo without starting the Node host:
 

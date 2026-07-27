@@ -49,6 +49,7 @@ The probe covers:
 | help paging and resize | command help pages within the fixed footer and remains bounded at narrow widths | automated + Bun native test |
 | Studio mode | `/studio [task]` and `/chat` keep composer mode local while projecting user/progress/reply/error rows through the shared ordered Session timeline | automated test + OpenTUI PTY |
 | external editor lifecycle | `/edit [text]` suspends OpenTUI, gives the TTY to `$VISUAL`/`$EDITOR`, resumes on success or failure, and restores the multiline draft without submitting | automated test + OpenTUI PTY |
+| keyboard transcript browsing | PageUp from an empty composer or `/transcript` hands the full ordered canonical timeline to `$PAGER`, buffers projection rendering while suspended, and reconciles after return | automated test + interactive pager PTY |
 | transcript export | `/export [path]` writes completed canonical user/assistant messages locally without a new host protocol or local-agent implementation import | automated test |
 | new-session race isolation | `/new` waits for an authoritative new-session ID, discards late completion snapshots, and preserves identical messages across the native scrollback boundary | automated + Bun native test |
 | interrupt ownership | Esc/first Ctrl+C sends one canonical interrupt and the notice owns input until the run settles; second Ctrl+C exits | automated test |
@@ -61,13 +62,14 @@ The probe covers:
 | fixed-footer composer layout | composer grows from 3–5 visible rows without changing terminal footer height | automated test |
 | native textarea regression | multiline paste and single-grapheme backspace preserve line boundaries | Bun native test |
 | TypeScript | `npm run typecheck -w @pinpawo/tui` | passed |
-| unit tests | `npm run test -w @pinpawo/tui` | passed, 85 tests |
+| unit tests | `npm run test -w @pinpawo/tui` | passed, 90 tests |
 | native tests | `npm run test:native -w @pinpawo/tui` | passed, 13 tests including policy/command/help/notice, approval/resume resize, textarea, WebSocket, and 6 real ScrollbackSurface tests |
 | alternate-screen PTY startup | `npm run smoke -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | split-footer PTY startup | `npm run smoke:split -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | Studio PTY flow | `npm run smoke:studio -w @pinpawo/tui` | passed; user/progress/final rows committed in order and terminal state restored |
 | review policy PTY flow | `npm run smoke:policy -w @pinpawo/tui` | passed; host acknowledgement updates the compact policy status and terminal state is restored |
 | external editor PTY flow | `npm run smoke:edit -w @pinpawo/tui` | passed; renderer suspend/resume restores the split footer and edited multiline draft |
+| transcript pager PTY flow | `npm run smoke:transcript -w @pinpawo/tui` plus interactive `less` | passed; full ordered timeline is readable, `q` exits, split footer resumes, and terminal state is restored |
 | standalone executable | `npm run build -w @pinpawo/tui` | passed for darwin-arm64; normal and approval compiled PTY smokes passed |
 | root typecheck | `npm run typecheck` | passed |
 | root tests | `npm test` | passed, including local-agent 770/770 and Chrome extension 22/22 |
@@ -83,6 +85,7 @@ from an automated PTY run alone.
 | Capability | macOS Terminal | iTerm2 | Ghostty | Integrated terminal |
 | --- | --- | --- | --- | --- |
 | touchpad scroll while timeline focused | pending | pending | passed | pending |
+| PageUp `/transcript` pager and `q` return | pending | pending | pending | passed with interactive `less` PTY |
 | browse position survives incoming rows | pending | pending | passed | pending |
 | scrolling back to bottom resumes sticky follow | pending | pending | pending | pending |
 | terminal/app text selection and copy | pending | pending | passed | pending |
@@ -186,9 +189,10 @@ Known limits and follow-up work:
 12. Run `npm run dev:command -w @pinpawo/tui`. Filter the palette, navigate and
     complete commands, open `/help`, page it, close with Esc/q, then run `/new`
     and `/resume`. Run `/edit draft`, save a multiline change in the external
-    editor, and confirm it returns to the composer without submitting. Run
-    `/export transcripts` and inspect the generated Markdown. Confirm every
-    overlay and external editor handoff restores the composer focus.
+    editor, and confirm it returns to the composer without submitting. Press
+    PageUp from an empty composer, navigate the transcript pager, and press `q`;
+    then run `/export transcripts` and inspect the generated Markdown. Confirm
+    every overlay and terminal handoff restores the composer focus.
 13. Start a long response, press Esc or Ctrl+C, and confirm the interrupt notice
     owns the footer until the host settles. Confirm a second Ctrl+C exits.
 14. Resize through 80, 40, and 24 columns; confirm both status rows stay bounded

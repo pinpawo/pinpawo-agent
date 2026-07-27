@@ -7,7 +7,6 @@ import test from 'node:test';
 import {
   editTextWithExternalEditor,
   resolveExternalEditorCommand,
-  withRendererSuspended,
   type ExternalEditorSpawn,
 } from './externalEditor';
 
@@ -58,30 +57,4 @@ test('external editor requires an explicit editor command', async () => {
     }),
     /missing VISUAL or EDITOR/,
   );
-});
-
-test('renderer resumes after editor success and failure', async () => {
-  const lifecycle: string[] = [];
-  const renderer = {
-    suspend: () => lifecycle.push('suspend'),
-    resume: () => lifecycle.push('resume'),
-  };
-  assert.equal(await withRendererSuspended(
-    renderer,
-    async () => {
-      lifecycle.push('edit');
-      return 'done';
-    },
-  ), 'done');
-  assert.deepEqual(lifecycle, ['suspend', 'edit', 'resume']);
-
-  lifecycle.length = 0;
-  await assert.rejects(
-    () => withRendererSuspended(renderer, async () => {
-      lifecycle.push('edit');
-      throw new Error('editor failed');
-    }),
-    /editor failed/,
-  );
-  assert.deepEqual(lifecycle, ['suspend', 'edit', 'resume']);
 });

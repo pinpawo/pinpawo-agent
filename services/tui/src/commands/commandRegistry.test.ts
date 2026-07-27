@@ -14,6 +14,7 @@ test('command registry exposes only implemented OpenTUI commands', () => {
       'studio',
       'chat',
       'policy',
+      'transcript',
       'export',
       'edit',
       'resume',
@@ -26,7 +27,7 @@ test('command parser resolves commands and aliases', () => {
   assert.equal(parseTuiCommand('/').type, 'command');
   assert.deepEqual(parseTuiCommand('/exit'), {
     type: 'command',
-    command: listTuiCommands()[8],
+    command: listTuiCommands()[9],
     name: 'quit',
     raw: '/exit',
     args: '',
@@ -41,17 +42,24 @@ test('command parser resolves commands and aliases', () => {
   });
   assert.deepEqual(parseTuiCommand('/export transcripts/today.md'), {
     type: 'command',
-    command: listTuiCommands()[5],
+    command: listTuiCommands()[6],
     name: 'export',
     raw: '/export transcripts/today.md',
     args: 'transcripts/today.md',
   });
   assert.deepEqual(parseTuiCommand('/edit   draft text'), {
     type: 'command',
-    command: listTuiCommands()[6],
+    command: listTuiCommands()[7],
     name: 'edit',
     raw: '/edit   draft text',
     args: 'draft text',
+  });
+  assert.deepEqual(parseTuiCommand('/history'), {
+    type: 'command',
+    command: listTuiCommands()[5],
+    name: 'transcript',
+    raw: '/history',
+    args: '',
   });
 });
 

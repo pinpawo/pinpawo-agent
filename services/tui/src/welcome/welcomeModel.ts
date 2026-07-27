@@ -34,8 +34,16 @@ export function buildWelcomeLines(input: {
   const cwd = input.session.runtime?.cwd?.trim() || 'workspace loading';
   const version = input.version ?? TUI_VERSION;
   const shortcuts = width >= 54
-    ? ['/ commands · /resume sessions · Ctrl+Enter send', 'Esc interrupt · Ctrl+C exit']
-    : ['/ commands · /resume sessions', 'Ctrl+Enter send · Esc interrupt', 'Ctrl+C exit'];
+    ? [
+        '/ commands · PgUp history · Ctrl+Enter send',
+        'Ctrl+R sessions · Esc interrupt · Ctrl+C exit',
+      ]
+    : [
+        '/ commands · PgUp history',
+        'Ctrl+R sessions',
+        'Ctrl+Enter send · Esc interrupt',
+        'Ctrl+C exit',
+      ];
   return [
     ...PAW_LINES,
     `PinPawo TUI v2 · v${version} · ${actor}`,

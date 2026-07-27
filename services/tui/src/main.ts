@@ -19,11 +19,9 @@ import {
 } from './client/localHostConnection';
 import { parseTuiCommand } from './commands/commandRegistry';
 import { createDemoConnectionFactory } from './demo/demoConnection';
-import {
-  editTextWithExternalEditor,
-  withRendererSuspended,
-} from './editor/externalEditor';
+import { editTextWithExternalEditor } from './editor/externalEditor';
 import { resolveGlobalInterruptAction } from './input/globalInterrupt';
+import { shouldOpenTranscriptPager } from './input/transcriptShortcut';
 import { TuiSessionController } from './session/sessionController';
 import {
   approvalAcceptsTextInput,
@@ -86,7 +84,9 @@ import {
 import { formatLiveSession } from './timeline/timelineModel';
 import { TimelineScrollback } from './timeline/timelineScrollback';
 import { truncateTerminalLine } from './text/terminalText';
+import { withRendererSuspended } from './terminal/rendererLifecycle';
 import { exportSessionTranscript } from './transcript/transcriptExport';
+import { pageSessionTranscript } from './transcript/transcriptPager';
 import { buildWelcomeLines } from './welcome/welcomeModel';
 
 const smokeReview = process.argv.includes('--smoke-review');
@@ -96,12 +96,14 @@ const demoCommand = process.argv.includes('--demo-command');
 const smokeStudio = process.argv.includes('--smoke-studio');
 const smokePolicy = process.argv.includes('--smoke-policy');
 const smokeEdit = process.argv.includes('--smoke-edit');
+const smokeTranscript = process.argv.includes('--smoke-transcript');
 const smoke = process.argv.includes('--smoke')
   || smokeReview
   || smokeCommand
   || smokeStudio
   || smokePolicy
-  || smokeEdit;
+  || smokeEdit
+  || smokeTranscript;
 const port = readLocalServerPort();
 const renderer = await createCliRenderer({
   exitOnCtrlC: false,
@@ -169,7 +171,8 @@ let studioSmokeFinished = false;
 let policySmokeStarted = false;
 let policySmokeFinished = false;
 let editSmokeStarted = false;
-let externalEditorOpen = false;
+let transcriptSmokeStarted = false;
+let terminalHandoffOpen = false;
 const controller = new TuiSessionController({
   connectionFactory: smoke || demoReview || demoCommand || smokeStudio
     ? createDemoConnectionFactory({ review: smokeReview || demoReview })
@@ -268,7 +271,9 @@ const unsubscribe = controller.subscribe((state) => {
       connection: formatConnection(state.connection),
     }));
   }
-  timeline.render(state.session);
+  if (!terminalHandoffOpen) {
+    timeline.render(state.session);
+  }
   refreshStatus();
   if (
     smokeStudio
@@ -315,6 +320,13 @@ const unsubscribe = controller.subscribe((state) => {
   ) {
     editSmokeStarted = true;
     queueMicrotask(() => submitComposerInput('/edit smoke draft'));
+  } else if (
+    smokeTranscript
+    && !transcriptSmokeStarted
+    && state.connection === 'ready'
+  ) {
+    transcriptSmokeStarted = true;
+    queueMicrotask(() => submitComposerInput('/transcript'));
   }
 });
 renderer.keyInput.on('keypress', (key) => {
@@ -381,6 +393,16 @@ renderer.keyInput.on('keypress', (key) => {
     key.preventDefault();
     key.stopPropagation();
     handleCommandOverlayAction(commandAction);
+    return;
+  }
+  if (shouldOpenTranscriptPager({
+    key,
+    composerText: composer.plainText,
+    attachmentCount: attachments.length,
+  })) {
+    key.preventDefault();
+    key.stopPropagation();
+    openTranscriptPager();
     return;
   }
   if (
@@ -468,7 +490,13 @@ syncComposerLayout();
 syncComposerModeUi();
 controller.start();
 
-if (smoke && !smokeStudio && !smokePolicy && !smokeEdit) {
+if (
+  smoke
+  && !smokeStudio
+  && !smokePolicy
+  && !smokeEdit
+  && !smokeTranscript
+) {
   renderer.once('frame', () => {
     setTimeout(() => renderer.destroy(), 50);
   });
@@ -525,7 +553,7 @@ function syncCommandOverlayFromComposer() {
     text: composer.plainText,
     cursorOffset: composer.cursorOffset,
     enabled: attachments.length === 0
-      && !externalEditorOpen
+      && !terminalHandoffOpen
       && sessionPicker.phase === 'closed'
       && policyPicker.phase === 'closed'
       && noticeOverlay.phase === 'closed'
@@ -562,7 +590,7 @@ function syncNoticeFromSession() {
     composer.blur();
   } else if (
     previous.phase === 'interrupting'
-    && !externalEditorOpen
+    && !terminalHandoffOpen
     && approvalController.getState().phase === 'closed'
   ) {
     if (localNotice?.startsWith('interrupt requested')) {
@@ -578,7 +606,7 @@ function closeNoticeOverlayUi() {
   noticeOverlay = closeNoticeOverlay();
   refreshNoticeOverlay();
   if (
-    !externalEditorOpen
+    !terminalHandoffOpen
     && approvalController.getState().phase === 'closed'
     && policyPicker.phase === 'closed'
   ) {
@@ -654,7 +682,7 @@ function syncApprovalFromSession() {
     composer.blur();
   } else if (
     previous.phase !== 'closed'
-    && !externalEditorOpen
+    && !terminalHandoffOpen
     && sessionPicker.phase === 'closed'
     && policyPicker.phase === 'closed'
     && noticeOverlay.phase === 'closed'
@@ -679,7 +707,7 @@ function refreshApproval() {
 }
 
 function openSessionPicker() {
-  if (externalEditorOpen || sessionPicker.phase !== 'closed') return;
+  if (terminalHandoffOpen || sessionPicker.phase !== 'closed') return;
   commandOverlay = closeCommandOverlay();
   refreshCommandOverlay();
   const generation = sessionPickerGeneration + 1;
@@ -779,7 +807,7 @@ function closeSessionPickerUi() {
   sessionPickerGeneration += 1;
   sessionPicker = closeSessionPicker(sessionPicker);
   refreshSessionPicker();
-  if (!externalEditorOpen && noticeOverlay.phase === 'closed') {
+  if (!terminalHandoffOpen && noticeOverlay.phase === 'closed') {
     composer.focus();
     syncCommandOverlayFromComposer();
   }
@@ -790,7 +818,7 @@ function refreshSessionPicker() {
 }
 
 function openPolicyPickerUi() {
-  if (externalEditorOpen || policyPicker.phase !== 'closed') return;
+  if (terminalHandoffOpen || policyPicker.phase !== 'closed') return;
   const state = controller.getState();
   const currentMode = state.session.runtime?.globalReviewPolicyMode;
   if (state.connection !== 'ready') {
@@ -855,7 +883,7 @@ function saveSelectedPolicy() {
     localNotice = `review policy: ${option.label}`;
     refreshPolicyPicker();
     refreshStatus();
-    if (!externalEditorOpen) {
+    if (!terminalHandoffOpen) {
       composer.focus();
       syncCommandOverlayFromComposer();
     }
@@ -876,7 +904,7 @@ function closePolicyPickerUi() {
   policyPicker = closePolicyPicker(policyPicker);
   refreshPolicyPicker();
   if (
-    !externalEditorOpen
+    !terminalHandoffOpen
     && sessionPicker.phase === 'closed'
     && noticeOverlay.phase === 'closed'
     && approvalController.getState().phase === 'closed'
@@ -928,7 +956,7 @@ function handleCommandOverlayAction(action: CommandOverlayAction) {
 }
 
 function openCommandHelpUi() {
-  if (externalEditorOpen) return;
+  if (terminalHandoffOpen) return;
   commandOverlay = openCommandHelp();
   composer.blur();
   refreshCommandOverlay();
@@ -938,7 +966,7 @@ function closeCommandOverlayUi() {
   commandOverlay = closeCommandOverlay();
   refreshCommandOverlay();
   if (
-    !externalEditorOpen
+    !terminalHandoffOpen
     && sessionPicker.phase === 'closed'
     && policyPicker.phase === 'closed'
     && noticeOverlay.phase === 'closed'
@@ -980,6 +1008,10 @@ function submitComposerInput(input = composer.plainText) {
       composer.clear();
       localNotice = null;
       openPolicyPickerUi();
+      return;
+    }
+    if (parsed.name === 'transcript') {
+      openTranscriptPager();
       return;
     }
     if (parsed.name === 'export') {
@@ -1108,7 +1140,7 @@ function exportCurrentTranscript(requestedPath?: string) {
 }
 
 function openExternalEditor(initialText: string) {
-  if (externalEditorOpen) return;
+  if (terminalHandoffOpen) return;
   if (controller.getState().session.activeRun) {
     clearComposerPreservingNotice();
     localNotice = 'wait for the current response before opening an editor';
@@ -1119,7 +1151,7 @@ function openExternalEditor(initialText: string) {
   clearComposerPreservingNotice();
   commandOverlay = closeCommandOverlay();
   refreshCommandOverlay();
-  externalEditorOpen = true;
+  terminalHandoffOpen = true;
   composer.blur();
   localNotice = 'external editor active';
   refreshStatus();
@@ -1149,7 +1181,8 @@ function openExternalEditor(initialText: string) {
   }).catch((error: unknown) => {
     localNotice = `external editor failed: ${errorMessage(error)}`;
   }).finally(() => {
-    externalEditorOpen = false;
+    terminalHandoffOpen = false;
+    reconcileTimelineAfterHandoff();
     syncComposerLayout();
     refreshHeader();
     refreshLive();
@@ -1167,6 +1200,63 @@ function openExternalEditor(initialText: string) {
       setTimeout(() => renderer.destroy(), 50);
     }
   });
+}
+
+function openTranscriptPager() {
+  if (terminalHandoffOpen) return;
+  const session = controller.getState().session;
+  clearComposerPreservingNotice();
+  if (session.sessionId === 'pending') {
+    localNotice = 'no session is available to browse';
+    refreshStatus();
+    return;
+  }
+  commandOverlay = closeCommandOverlay();
+  refreshCommandOverlay();
+  terminalHandoffOpen = true;
+  composer.blur();
+  localNotice = 'transcript pager active';
+  refreshStatus();
+
+  const operation = () => pageSessionTranscript({
+    session,
+    cwd: process.cwd(),
+    ...(smokeTranscript
+      ? { env: { ...process.env, PAGER: 'cat' } }
+      : {}),
+  });
+  void withRendererSuspended(renderer, operation).then(() => {
+    localNotice = 'transcript closed';
+  }).catch((error: unknown) => {
+    localNotice = `transcript pager failed: ${errorMessage(error)}`;
+  }).finally(() => {
+    terminalHandoffOpen = false;
+    reconcileTimelineAfterHandoff();
+    syncComposerLayout();
+    refreshHeader();
+    refreshLive();
+    refreshStatus();
+    if (
+      sessionPicker.phase === 'closed'
+      && policyPicker.phase === 'closed'
+      && noticeOverlay.phase === 'closed'
+      && approvalController.getState().phase === 'closed'
+    ) {
+      composer.focus();
+      syncCommandOverlayFromComposer();
+    }
+    if (smokeTranscript) {
+      setTimeout(() => renderer.destroy(), 50);
+    }
+  });
+}
+
+function reconcileTimelineAfterHandoff() {
+  try {
+    timeline.render(controller.getState().session);
+  } catch (error) {
+    localNotice = `timeline refresh failed: ${errorMessage(error)}`;
+  }
 }
 
 function clearComposerPreservingNotice() {

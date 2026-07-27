@@ -82,6 +82,8 @@ Production client controls:
 - `Ctrl+Enter` submits the composer;
 - `Cmd+A`, `Cmd+Z`/`Shift+Cmd+Z`, Option+arrows, Home/End, and Shift-modified
   movement use the native multiline editor selection and history behavior;
+- plain `↑` on the first visual row recalls sent chat prompts; plain `↓` on
+  the last visual row moves forward and restores the in-progress draft;
 - `Cmd+C`/`Cmd+X` copy or cut an internal selection through OSC 52;
   `Ctrl+Shift+C`/`Ctrl+Shift+X` are available when the terminal forwards them,
   and a failed clipboard write never deletes the selection;

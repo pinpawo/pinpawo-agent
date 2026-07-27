@@ -2,6 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { TextareaRenderable } from '@opentui/core';
 import { createTestRenderer } from '@opentui/core/testing';
+import {
+  createComposerHistoryState,
+  navigateComposerHistory,
+  recordComposerHistoryEntry,
+  resolveComposerHistoryDirection,
+} from '../input/composerHistory';
 import { installSingleGraphemeBackspaceWorkaround } from './textareaWorkarounds';
 
 test('textarea preserves pasted lines and deletes across line boundaries', async (context) => {
@@ -141,4 +147,53 @@ test('textarea supports macOS selection, word movement, and undo/redo', async (c
   await setup.mockInput.typeText('replacement');
   await setup.flush();
   assert.equal(textarea.plainText, 'replacement');
+});
+
+test('textarea exposes soft-wrap boundaries for composer history routing', async (context) => {
+  const setup = await createTestRenderer({
+    width: 20,
+    height: 8,
+    kittyKeyboard: true,
+  });
+  context.after(() => setup.renderer.destroy());
+
+  const textarea = new TextareaRenderable(setup.renderer, {
+    id: 'textarea-history',
+    width: 8,
+    height: 2,
+    wrapMode: 'word',
+  });
+  setup.renderer.root.add(textarea);
+  textarea.focus();
+  textarea.setText('one two three four five '.repeat(8));
+  textarea.gotoBufferHome();
+  await setup.flush();
+  assert.ok(textarea.editorView.getTotalVirtualLineCount() > 2);
+
+  const history = recordComposerHistoryEntry(
+    createComposerHistoryState(),
+    'previous prompt',
+  );
+  assert.equal(resolveComposerHistoryDirection(
+    { name: 'up' },
+    textarea,
+    history,
+  ), 'previous');
+
+  const navigating = navigateComposerHistory(history, 'draft', 'previous');
+  textarea.gotoBufferEnd();
+  await setup.flush();
+  assert.equal(resolveComposerHistoryDirection(
+    { name: 'down' },
+    textarea,
+    navigating.history,
+  ), 'next');
+
+  textarea.moveCursorUp();
+  await setup.flush();
+  assert.equal(resolveComposerHistoryDirection(
+    { name: 'down' },
+    textarea,
+    navigating.history,
+  ), null);
 });

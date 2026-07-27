@@ -94,6 +94,16 @@ test('command help pages and remains terminal-width safe', () => {
   if (state.phase !== 'help') return;
   const second = buildCommandOverlayViewModel(state, 32);
   assert.notEqual(second.content, first.content);
+  let last = openCommandHelp();
+  for (let index = 0; index < 4; index += 1) {
+    last = pageCommandHelp(last, 1);
+  }
+  assert.equal(last.phase, 'help');
+  if (last.phase !== 'help') return;
+  assert.match(
+    buildCommandOverlayViewModel(last, 80).content,
+    /Recall prompts/,
+  );
   assert.equal(resolveCommandOverlayKey(state, key('q')), 'close');
   for (const line of second.content.split('\n')) {
     assert.ok(stringWidth(line) <= 28, line);

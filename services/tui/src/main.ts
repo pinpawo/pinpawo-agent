@@ -25,6 +25,13 @@ import {
   resolveClipboardAction,
   type SelectableEditor,
 } from './input/composerClipboard';
+import {
+  createComposerHistoryState,
+  navigateComposerHistory,
+  recordComposerHistoryEntry,
+  resetComposerHistoryNavigation,
+  resolveComposerHistoryDirection,
+} from './input/composerHistory';
 import { resolveGlobalInterruptAction } from './input/globalInterrupt';
 import { shouldOpenTranscriptPager } from './input/transcriptShortcut';
 import { TuiSessionController } from './session/sessionController';
@@ -178,6 +185,7 @@ let policySmokeFinished = false;
 let editSmokeStarted = false;
 let transcriptSmokeStarted = false;
 let terminalHandoffOpen = false;
+let composerHistory = createComposerHistoryState();
 const controller = new TuiSessionController({
   connectionFactory: smoke || demoReview || demoCommand || smokeStudio
     ? createDemoConnectionFactory({ review: smokeReview || demoReview })
@@ -204,6 +212,12 @@ const composer = new TextareaRenderable(renderer, {
   }],
   onSubmit: () => submitComposerInput(),
   onContentChange: () => {
+    const selectedHistoryText = composerHistory.selectedIndex === null
+      ? undefined
+      : composerHistory.entries[composerHistory.selectedIndex];
+    if (selectedHistoryText !== composer.plainText) {
+      composerHistory = resetComposerHistoryNavigation(composerHistory);
+    }
     if (!composerNoticeSticky) {
       localNotice = pendingComposerNotice;
     }
@@ -419,6 +433,17 @@ renderer.keyInput.on('keypress', (key) => {
     key.preventDefault();
     key.stopPropagation();
     handleCommandOverlayAction(commandAction);
+    return;
+  }
+  const historyDirection = resolveComposerHistoryDirection(
+    key,
+    composer,
+    composerHistory,
+  );
+  if (historyDirection) {
+    key.preventDefault();
+    key.stopPropagation();
+    applyComposerHistoryNavigation(historyDirection);
     return;
   }
   if (shouldOpenTranscriptPager({
@@ -1091,6 +1116,10 @@ function submitComposerInput(input = composer.plainText) {
 
   const result = controller.submitChat(parsed.text, attachments);
   if (result.ok) {
+    composerHistory = recordComposerHistoryEntry(
+      composerHistory,
+      parsed.text,
+    );
     attachments = [];
     composer.clear();
     localNotice = null;
@@ -1302,6 +1331,21 @@ function activeClipboardEditor(
     return composer;
   }
   return null;
+}
+
+function applyComposerHistoryNavigation(
+  direction: 'previous' | 'next',
+) {
+  const result = navigateComposerHistory(
+    composerHistory,
+    composer.plainText,
+    direction,
+  );
+  composerHistory = result.history;
+  composer.setText(result.value);
+  composer.gotoBufferEnd();
+  syncCommandOverlayFromComposer();
+  syncComposerLayout();
 }
 
 function clearComposerPreservingNotice() {

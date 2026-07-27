@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   readFileSync,
@@ -31,6 +32,7 @@ export type ResolveTuiV2LaunchPlanOptions = {
   arch?: string;
   pathExists?: (path: string) => boolean;
   readTextFile?: (path: string) => string;
+  readBinaryFile?: (path: string) => Uint8Array;
 };
 
 export type RunTuiV2Options = {
@@ -82,6 +84,8 @@ export function resolveTuiV2LaunchPlan(
   const pathExists = options.pathExists ?? existsSync;
   const readTextFile = options.readTextFile
     ?? ((path: string) => readFileSync(path, 'utf8'));
+  const readBinaryFile = options.readBinaryFile
+    ?? ((path: string) => readFileSync(path));
   const override = env.PINPAWO_TUI_V2_BIN?.trim();
   if (override) {
     return {
@@ -119,19 +123,22 @@ export function resolveTuiV2LaunchPlan(
   const tuiRoot = join(workspaceRoot, 'services', 'tui');
   const workspaceSource = join(tuiRoot, 'src', 'main.ts');
   const configuredBun = env.PINPAWO_BUN_BIN?.trim();
-  const workspaceBun = platform === 'win32'
-    ? join(workspaceRoot, 'node_modules', '.bin', 'bun.cmd')
-    : join(workspaceRoot, 'node_modules', '.bin', 'bun');
+  const workspaceBun = bunExecutableCandidates(
+    join(workspaceRoot, 'node_modules'),
+    platform,
+  ).find(pathExists);
+  const resolvedWorkspaceBun = configuredBun || workspaceBun;
   if (
     isWorkspaceCheckout
     && pathExists(workspaceSource)
-    && (configuredBun || pathExists(workspaceBun))
+    && resolvedWorkspaceBun
   ) {
-    return {
-      source: 'workspace-source',
-      command: configuredBun || workspaceBun,
-      args: ['run', workspaceSource],
-    };
+    return createBunLaunchPlan(
+      'workspace-source',
+      resolvedWorkspaceBun,
+      workspaceSource,
+      platform,
+    );
   }
 
   const workspaceBinaryCandidates = [
@@ -166,28 +173,41 @@ export function resolveTuiV2LaunchPlan(
         `OpenTUI v2 distribution entry is missing: ${entryPath}`,
       );
     }
-    const bunExecutableName = platform === 'win32' ? 'bun.cmd' : 'bun';
+    if (!verifyTuiV2DistributionEntry(
+      manifest,
+      readBinaryFile(entryPath),
+    )) {
+      throw new Error(
+        `OpenTUI v2 distribution entry failed integrity verification: ${entryPath}`,
+      );
+    }
     const packageParent = resolve(options.localAgentRoot, '..');
     const bunCandidates = [
-      join(options.localAgentRoot, 'node_modules', '.bin', bunExecutableName),
-      join(packageParent, '.bin', bunExecutableName),
-      workspaceBun,
+      ...bunExecutableCandidates(
+        join(options.localAgentRoot, 'node_modules'),
+        platform,
+      ),
+      ...bunExecutableCandidates(packageParent, platform),
+      ...bunExecutableCandidates(
+        join(workspaceRoot, 'node_modules'),
+        platform,
+      ),
     ];
-    return {
-      source: 'packaged-bundle',
-      command: configuredBun
-        || bunCandidates.find(pathExists)
-        || 'bun',
-      args: ['run', entryPath],
-    };
+    return createBunLaunchPlan(
+      'packaged-bundle',
+      configuredBun || bunCandidates.find(pathExists) || 'bun',
+      entryPath,
+      platform,
+    );
   }
 
   if (isWorkspaceCheckout && pathExists(workspaceSource)) {
-    return {
-      source: 'workspace-source',
-      command: 'bun',
-      args: ['run', workspaceSource],
-    };
+    return createBunLaunchPlan(
+      'workspace-source',
+      'bun',
+      workspaceSource,
+      platform,
+    );
   }
 
   throw new Error([
@@ -198,6 +218,39 @@ export function resolveTuiV2LaunchPlan(
 
 function isExactVersion(value: unknown): value is string {
   return typeof value === 'string' && /^\d+\.\d+\.\d+$/.test(value);
+}
+
+export function verifyTuiV2DistributionEntry(
+  manifest: TuiV2DistributionManifest,
+  entry: Uint8Array,
+) {
+  return entry.byteLength === manifest.bytes
+    && createHash('sha256').update(entry).digest('hex') === manifest.sha256;
+}
+
+function bunExecutableCandidates(
+  nodeModulesRoot: string,
+  platform: NodeJS.Platform,
+) {
+  if (platform === 'win32') {
+    return [
+      join(nodeModulesRoot, 'bun', 'bin', 'bun.exe'),
+    ];
+  }
+  return [join(nodeModulesRoot, '.bin', 'bun')];
+}
+
+function createBunLaunchPlan(
+  source: Extract<TuiV2LaunchSource, 'workspace-source' | 'packaged-bundle'>,
+  command: string,
+  entryPath: string,
+  platform: NodeJS.Platform,
+): TuiV2LaunchPlan {
+  return {
+    source,
+    command,
+    args: ['run', entryPath],
+  };
 }
 
 function hasTuiWorkspace(

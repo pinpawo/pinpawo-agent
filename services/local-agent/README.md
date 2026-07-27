@@ -159,3 +159,10 @@ npm run pack:dry -w pinpawo
 npm publish -w @pinpawo/pet-agent --access public
 npm publish -w pinpawo --access public
 ```
+
+The packaged OpenTUI launcher verifies `dist/tui/main.js` against the byte
+count and SHA-256 recorded in its versioned manifest before starting Bun.
+Launcher tests cover the package-local Bun runtime on darwin, Linux, and
+Windows for x64 and arm64. Windows starts the direct `bun.exe` instead of an
+npm command shim. Executable smoke tests still need to run on each target OS
+before changing the default TUI.

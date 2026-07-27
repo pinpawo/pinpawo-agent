@@ -38,7 +38,7 @@ export type AgentOperationEntry = {
   startedAt?: number;
   updatedAt?: number;
   completedAt?: number;
-  /** Trusted local clients may retain raw payloads; remote transports must strip them. */
+  /** Transient tool payload retained by the canonical projection when supplied. */
   raw?: AgentOperationRaw;
 };
 

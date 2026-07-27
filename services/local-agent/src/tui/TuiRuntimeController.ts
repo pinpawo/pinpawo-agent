@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import type { BuiltinGlobalReviewPolicyMode, ReviewOption, ReviewResponse } from '@pinpawo/pet-agent';
+import type {
+  ActiveDelegationTransition,
+  BuiltinGlobalReviewPolicyMode,
+  ReviewOption,
+  ReviewResponse,
+} from '@pinpawo/pet-agent';
 import { loadAgentContext } from '../contextLoader';
 import type { LocalAgentServerMessage } from '../localAgentProtocol';
 import { getConfig, setConfig } from '../config';
@@ -135,7 +140,10 @@ export class TuiRuntimeController {
     return this.isCurrentBusy();
   }
 
-  sendChatRequest(message: string) {
+  sendChatRequest(
+    message: string,
+    activeDelegationTransition?: ActiveDelegationTransition,
+  ) {
     if (!this.connection.isConnected()) {
       this.appendSystemMessage(TUI_TEXT.disconnectedCannotSend);
       return false;
@@ -151,6 +159,7 @@ export class TuiRuntimeController {
       type: 'chat_request',
       requestId,
       message,
+      ...(activeDelegationTransition ? { activeDelegationTransition } : {}),
     })) {
       this.appendSystemMessage(TUI_TEXT.disconnectedCannotSend);
       return false;

@@ -394,6 +394,20 @@ test('TuiRuntimeController projects chat and studio runs only after transport ac
   );
 });
 
+test('TuiRuntimeController forwards an explicit active-delegation transition', () => {
+  const { controller, sent } = createController(idleState());
+
+  assert.equal(
+    controller.sendChatRequest('apply the new constraints', 'resume_active'),
+    true,
+  );
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0]?.type, 'chat_request');
+  if (sent[0]?.type !== 'chat_request') assert.fail('expected chat request');
+  assert.equal(sent[0].message, 'apply the new constraints');
+  assert.equal(sent[0].activeDelegationTransition, 'resume_active');
+});
+
 test('TuiRuntimeController reports a delayed interrupt without releasing the run', () => {
   mock.timers.enable({ apis: ['setTimeout'] });
   const { controller, actions, sent } = createController(busyRunState());

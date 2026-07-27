@@ -76,6 +76,14 @@ test('parseTuiCommand parses text, aliases, args, and unknown commands', () => {
   assert.equal(editCommand.type === 'command' ? editCommand.name : null, 'edit');
   assert.equal(editCommand.type === 'command' ? editCommand.args : null, 'draft text');
 
+  const continueCommand = parseTuiCommand('/continue use the new constraints');
+  assert.equal(continueCommand.type, 'command');
+  assert.equal(continueCommand.type === 'command' ? continueCommand.name : null, 'continue');
+  assert.equal(
+    continueCommand.type === 'command' ? continueCommand.args : null,
+    'use the new constraints',
+  );
+
   assert.deepEqual(parseTuiCommand('/studiox'), {
     type: 'unknown',
     raw: '/studiox',
@@ -117,7 +125,7 @@ test('parseTuiCommand treats slash-prefixed non-command shapes as plain text', (
 test('formatTuiCommandHelp is generated from visible command metadata', () => {
   assert.equal(
     formatTuiCommandHelp(),
-    '/new 新会话 · /studio [任务] 进入 Studio 模式 · /chat 退出 Studio · /policy 选择授权策略 · /help · /transcript 浏览历史 · /export [path] 导出 transcript(默认当前目录) · /edit [文本] 外部编辑 · /resume 恢复会话 · /quit',
+    '/new 新会话 · /studio [任务] 进入 Studio 模式 · /chat 退出 Studio · /policy 选择授权策略 · /help · /transcript 浏览历史 · /export [path] 导出 transcript(默认当前目录) · /edit [文本] 外部编辑 · /continue [指导] 继续当前委派 · /resume 恢复会话 · /quit',
   );
 });
 

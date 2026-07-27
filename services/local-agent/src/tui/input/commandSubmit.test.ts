@@ -54,8 +54,8 @@ function createSubmitHarness(overrides: {
           sent.push(`studio:${conversationId ?? 'none'}`);
           return true;
         },
-        sendChatRequest: () => {
-          sent.push('chat');
+        sendChatRequest: (message, activeDelegationTransition) => {
+          sent.push(`chat:${activeDelegationTransition ?? 'default'}:${message}`);
           return true;
         },
         startNewSession: () => {
@@ -110,6 +110,34 @@ test('submitCurrentInputFromController selects the chat composer target for /cha
   assert.equal(harness.studioConversationId, null);
   assert.deepEqual(harness.actions.map((action) => action.type), ['session.configured']);
   assert.deepEqual(harness.sent, ['clear']);
+});
+
+test('submitCurrentInputFromController sends /continue as an explicit active-delegation resume', () => {
+  const harness = createSubmitHarness({
+    inputValue: '/continue apply the new constraints',
+    composerTarget: 'studio',
+    studioConversationId: 'conversation-1',
+  });
+
+  harness.submit();
+
+  assert.equal(harness.composerTarget, 'chat');
+  assert.equal(harness.studioConversationId, null);
+  assert.deepEqual(harness.actions.map((action) => action.type), ['session.configured']);
+  assert.deepEqual(harness.sent, [
+    'chat:resume_active:apply the new constraints',
+  ]);
+});
+
+test('submitCurrentInputFromController requires guidance for /continue', () => {
+  const harness = createSubmitHarness({ inputValue: '/continue' });
+
+  harness.submit();
+
+  assert.deepEqual(harness.sent, ['clear']);
+  assert.deepEqual(harness.messages, [
+    '请提供继续当前委派的指导：/continue <指导>',
+  ]);
 });
 
 test('submitCurrentInputFromController resets the composer target before /resume and /new', () => {

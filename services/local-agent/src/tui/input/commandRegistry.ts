@@ -8,6 +8,7 @@ export type TuiCommandName =
   | 'transcript'
   | 'export'
   | 'edit'
+  | 'continue'
   | 'resume';
 
 export type TuiCommandDefinition = {
@@ -91,6 +92,12 @@ const COMMANDS: TuiCommandDefinition[] = [
     usage: '/edit [文本]',
     description: '使用 $VISUAL 或 $EDITOR 编辑草稿，保存后回填输入框',
     helpText: '/edit [文本] 外部编辑',
+  },
+  {
+    name: 'continue',
+    usage: '/continue [指导]',
+    description: '带新指导继续当前活跃委派',
+    helpText: '/continue [指导] 继续当前委派',
   },
   {
     name: 'resume',

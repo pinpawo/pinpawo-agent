@@ -14,7 +14,7 @@ test('buildCommandPaletteModel opens for slash command prefixes', () => {
   assert.equal(model.query, '');
   assert.deepEqual(
     model.items.map((command) => command.name),
-    ['new', 'studio', 'chat', 'policy', 'help', 'transcript', 'export', 'edit', 'resume', 'quit'],
+    ['new', 'studio', 'chat', 'policy', 'help', 'transcript', 'export', 'edit', 'continue', 'resume', 'quit'],
   );
 });
 
@@ -57,6 +57,12 @@ test('command palette selection clamps and completes selected commands', () => {
   assert.deepEqual(completeCommandPaletteInput(edit), {
     text: '/edit ',
     cursorOffset: '/edit '.length,
+  });
+
+  const continueCommand = buildCommandPaletteModel({ text: '/con', cursorOffset: 4 });
+  assert.deepEqual(completeCommandPaletteInput(continueCommand), {
+    text: '/continue ',
+    cursorOffset: '/continue '.length,
   });
 });
 

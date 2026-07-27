@@ -66,6 +66,7 @@ import {
 import { createCapabilityDecisionRunner } from './runtime/decisions/orchestrationDecision';
 import { applyActiveDelegationTransition } from './runtime/activeDelegationTransition';
 import { afterContextPrep } from './runtime/routes/afterContextPrep';
+import { readSubagentGuardStopReason } from '../../subagent/guardStop';
 
 function capability(
   name: string,
@@ -3382,6 +3383,173 @@ test('toolkit review rejection resumes the same subagent before parent handoff',
     .find((message) => Boolean(getMessageHandoffSource(message)));
   assert.ok(handoffCopy);
   assert.equal(finalState.taskActiveDelegation, null);
+});
+
+test('toolkit review run interruption retains the delegation without another model call or handoff', async () => {
+  let runCount = 0;
+  let reviewCount = 0;
+  const rawTool = tool(async ({ command }: { command: string }) => {
+    runCount += 1;
+    return `ran ${command}`;
+  }, {
+    name: 'run_shell',
+    description: 'run shell',
+    schema: z.object({ command: z.string() }),
+  });
+  const toolkits: AgentToolkit[] = [{
+    name: 'local',
+    description: 'local tools',
+    tools: [reviewedTool(rawTool, {
+      request: () => {
+        reviewCount += 1;
+        return buildReviewSpec({
+          view: { kind: 'plain', body: 'Approve shell?' },
+          options: [{
+            id: 'approve',
+            label: 'Approve',
+            decision: { type: 'approve' },
+          }],
+        });
+      },
+    })],
+  }];
+
+  let routeCallCount = 0;
+  const routeModel = {
+    invoke: async () => new AIMessage('answered'),
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        routeCallCount += 1;
+        if (routeCallCount === 1) {
+          return nextTaskDecision('run shell');
+        }
+        if (routeCallCount === 2) {
+          return routeCapabilityDecision('general');
+        }
+        return goalDoneDecision();
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const subagentModel = new FakeToolCallingModel({
+    toolCalls: [
+      [{
+        id: 'call-interrupted',
+        name: 'run_shell',
+        args: { command: 'git status' },
+      }],
+      [],
+    ],
+  });
+  const graph = createOrchestratorGraph({
+    models: {
+      act: routeModel,
+      observe: routeModel,
+      subagent: subagentModel,
+    },
+    actor: testActor,
+    checkpoint: new MemorySaver(),
+  });
+  const recorder = createSubagentInputRecorder();
+  const config = {
+    callbacks: recorder.callbacks,
+    configurable: {
+      thread_id: 'human-review-interrupt-retains-delegation',
+      actor: testActor,
+      capabilities: [capability('general', 'General-purpose capability.', ['local'])],
+      toolkits,
+    },
+  };
+
+  const interrupted = await graph.invoke(
+    buildOrchestratorRunInput([new HumanMessage('run git status')]),
+    config,
+  ) as {
+    __interrupt__?: Array<{ id?: string; value?: unknown }>;
+  };
+  const interruptId = interrupted.__interrupt__?.[0]?.id;
+  assert.ok(interruptId);
+
+  const resumedRun = await graph.streamEvents(new Command({
+    resume: {
+      [interruptId]: { action: 'interrupt_run' },
+    },
+  }), { version: 'v3', ...config });
+  for await (const _event of resumedRun) {
+    // Drain the root stream so the retained delegation checkpoint is materialized.
+  }
+  const finalState = await resumedRun.output as {
+    __interrupt__?: unknown;
+    messages: BaseMessage[];
+    runNextDelegation: unknown;
+    taskActiveDelegation: TaskActiveDelegation | null;
+  };
+
+  assert.equal(finalState.__interrupt__, undefined);
+  assert.equal(runCount, 0);
+  assert.equal(reviewCount, 2);
+  assert.equal(routeCallCount, 2);
+  assert.equal(recorder.subagentInputs.length, 1);
+  assert.equal(finalState.runNextDelegation, null);
+  assert.equal(finalState.taskActiveDelegation?.status, 'pending');
+  assert.equal(
+    mainConversationMessages(finalState.messages)
+      .some((message) => Boolean(getMessageHandoffSource(message))),
+    false,
+  );
+
+  const activeDelegation = finalState.taskActiveDelegation;
+  assert.ok(activeDelegation);
+  const retainedLane = laneMessages(
+    finalState.messages,
+    activeDelegation.lane,
+    activeDelegation.transcriptRunId,
+    activeDelegation.id,
+  );
+  const cancelledToolResult = retainedLane.find((message) =>
+    message instanceof ToolMessage
+    && message.tool_call_id === 'call-interrupted');
+  assert.ok(cancelledToolResult);
+  assert.equal(
+    (JSON.parse(String(cancelledToolResult.content)) as { source?: string }).source,
+    'human_interrupt',
+  );
+  assert.equal(
+    retainedLane.some((message) =>
+      readSubagentGuardStopReason(message) === 'human_review_run_interrupted'),
+    true,
+  );
+
+  const retainedDelegationId = activeDelegation.id;
+  const continuedState = await graph.invoke(
+    buildOrchestratorRunInput(
+      [new HumanMessage('continue the suspended delegation')],
+      { activeDelegationTransition: 'resume_active' },
+    ),
+    config,
+  ) as {
+    messages: BaseMessage[];
+    taskActiveDelegation: TaskActiveDelegation | null;
+  };
+
+  assert.equal(routeCallCount, 3);
+  assert.equal(recorder.subagentInputs.length, 2);
+  const continuedSubagentInput = recorder.subagentInputs.at(-1) ?? [];
+  assert.equal(
+    continuedSubagentInput.some((message) => {
+      if (!(message instanceof ToolMessage)) return false;
+      const content = JSON.parse(String(message.content)) as { source?: string };
+      return content.source === 'human_interrupt';
+    }),
+    true,
+  );
+  const resumedHandoff = mainConversationMessages(continuedState.messages)
+    .map((message) => getMessageHandoffSource(message))
+    .find((source) => source?.delegationId === retainedDelegationId);
+  assert.ok(resumedHandoff);
+  assert.equal(continuedState.taskActiveDelegation, null);
 });
 
 test('toolkit review resumes multiple reviewed tool calls in one model response', async () => {

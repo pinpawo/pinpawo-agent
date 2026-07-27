@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { ReviewSpec } from '@pinpawo/pet-agent';
 import {
+  buildHumanReviewCancelResume,
   buildHumanReviewRejectResume,
   buildHumanReviewResume,
   resolveHumanReviewAction,
@@ -161,7 +162,6 @@ test('human review action resolution owns validation, resume, and consumption', 
       events.push(event);
     },
     isConnected: () => true,
-    restorePending: () => undefined,
     run: async (_route, resume, source) => {
       runs.push({ resume, source });
       return 'completed';
@@ -217,7 +217,6 @@ test('human review response validation runs before the route boundary guard', as
       return false;
     },
     isConnected: () => true,
-    restorePending: () => undefined,
     run: async () => 'completed',
   });
 
@@ -228,14 +227,14 @@ test('human review response validation runs before the route boundary guard', as
   );
 });
 
-test('human review cancellation restores a route without a reject option', async () => {
+test('human review cancellation interrupts an approve-only review without fabricating a decision', async () => {
   const route = {
     ...reviewRoute(['review-1'], 'interrupt-1'),
     requestId: 'req-1',
   };
   const lifecycle = new ReviewResolutionLifecycle<typeof route>();
   lifecycle.register(route);
-  let restored = 0;
+  const runs: unknown[] = [];
 
   await resolveHumanReviewAction({
     lifecycle,
@@ -248,12 +247,25 @@ test('human review cancellation restores a route without a reject option', async
     emitClosed: () => undefined,
     emitEvent: () => undefined,
     isConnected: () => true,
-    restorePending: () => {
-      restored += 1;
+    run: async (_route, resume, source) => {
+      runs.push({ resume, source });
+      assert.equal(lifecycle.checkpoint('req-1'), true);
+      return 'interrupted';
     },
-    run: async () => 'completed',
   });
 
-  assert.equal(restored, 1);
-  assert.deepEqual(lifecycle.routes(), [route]);
+  assert.deepEqual(buildHumanReviewCancelResume(route), {
+    'interrupt-1': { action: 'interrupt_run' },
+  });
+  assert.deepEqual(runs, [{
+    resume: {
+      'interrupt-1': { action: 'interrupt_run' },
+    },
+    source: {
+      type: 'review.cancel',
+      reviewId: 'review-1',
+      decisionCount: 0,
+    },
+  }]);
+  assert.deepEqual(lifecycle.routes(), []);
 });

@@ -71,22 +71,32 @@ type SubmitToolState = {
 };
 
 const planTaskSchema = z.object({
-  objective: z.string().trim().min(1).max(MAX_TASK_TEXT_CHARS),
-  capability_intent: z.string().trim().min(1).max(MAX_TASK_TEXT_CHARS),
+  objective: z.string().trim().min(1).max(MAX_TASK_TEXT_CHARS)
+    .describe('The useful, independently executable result this future task must produce.'),
+  capability_intent: z.string().trim().min(1).max(MAX_TASK_TEXT_CHARS)
+    .describe('The kind of execution ability the future task will need, without naming a concrete Capability.'),
 }).strict();
 
 const nextTaskSchema = planTaskSchema.extend({
-  capability_name: z.string().trim().min(1).max(128),
-  context_summary: z.string().trim().max(MAX_TASK_TEXT_CHARS).nullable(),
+  capability_name: z.string().trim().min(1).max(128)
+    .describe('The frontmatter name from an observed CAPABILITY.md that can complete the whole current task.'),
+  context_summary: z.string().trim().max(MAX_TASK_TEXT_CHARS).nullable()
+    .describe('Execution context needed by the selected Capability, or null when no additional context is needed.'),
 }).strict();
 
 const submitCapabilityPlanSchema = z.object({
-  registry_digest: z.string().trim().min(1),
-  result: z.enum(['next_task', 'answer', 'unavailable']),
-  next_task: nextTaskSchema.nullable().optional(),
-  remaining_plan: z.array(planTaskSchema).max(MAX_PLAN_TASKS).optional(),
-  task: z.string().trim().min(1).max(MAX_TASK_TEXT_CHARS).nullable().optional(),
-  reason: z.string().trim().min(1).max(MAX_REASON_CHARS).nullable().optional(),
+  registry_digest: z.string().trim().min(1)
+    .describe('The exact registry_digest from the immutable workspace input.'),
+  result: z.enum(['next_task', 'answer', 'unavailable'])
+    .describe('next_task delegates current work; answer ends autonomous work; unavailable reports that no registered Capability can complete the current task.'),
+  next_task: nextTaskSchema.nullable().optional()
+    .describe('The current executable task. Required only for result=next_task.'),
+  remaining_plan: z.array(planTaskSchema).max(MAX_PLAN_TASKS).optional()
+    .describe('Ordered, unstarted future work. It is empty for answer and unavailable.'),
+  task: z.string().trim().min(1).max(MAX_TASK_TEXT_CHARS).nullable().optional()
+    .describe('The current task that cannot be executed. Required only for result=unavailable.'),
+  reason: z.string().trim().min(1).max(MAX_REASON_CHARS).nullable().optional()
+    .describe('Why no Capability in the current registry can complete the unavailable task.'),
 }).strict().superRefine((submission, ctx) => {
   if (submission.result === 'next_task') {
     if (!submission.next_task) {
@@ -335,7 +345,7 @@ function createSubmitCapabilityPlanTool(params: {
     },
     {
       name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
-      description: 'Submit the terminal Capability planning result for the current immutable workspace. Invalid submissions return a structured error so they can be corrected.',
+      description: 'Submit the sole terminal Capability planning result for the current immutable workspace. Invalid submissions return a structured error so they can be corrected.',
       schema: submitCapabilityPlanSchema,
     },
   );

@@ -265,6 +265,13 @@ test('parseLocalAgentClientMessage accepts explicit session request messages', (
   );
   assert.deepEqual(
     parseLocalAgentClientMessage(JSON.stringify({
+      type: 'session.new',
+      requestId: 'new-1',
+    })),
+    { type: 'session.new', requestId: 'new-1' },
+  );
+  assert.deepEqual(
+    parseLocalAgentClientMessage(JSON.stringify({
       type: 'session.resume',
       requestId: 'resume-1',
       sessionId: 'chat:one',
@@ -331,6 +338,15 @@ test('parseLocalAgentServerMessage accepts session results and validates resumed
   );
   assert.deepEqual(
     parseLocalAgentServerMessage(JSON.stringify({
+      type: 'session.new.result',
+      requestId: 'new-1',
+      session,
+      snapshot,
+    })),
+    { type: 'session.new.result', requestId: 'new-1', session, snapshot },
+  );
+  assert.deepEqual(
+    parseLocalAgentServerMessage(JSON.stringify({
       type: 'session.resume.result',
       requestId: 'resume-1',
       session,
@@ -346,6 +362,20 @@ test('parseLocalAgentServerMessage accepts session results and validates resumed
       snapshot,
     })),
     null,
+  );
+  assert.deepEqual(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'session.error',
+      requestId: 'new-1',
+      operation: 'new',
+      message: 'run is active',
+    })),
+    {
+      type: 'session.error',
+      requestId: 'new-1',
+      operation: 'new',
+      message: 'run is active',
+    },
   );
   assert.deepEqual(
     parseLocalAgentServerMessage(JSON.stringify({

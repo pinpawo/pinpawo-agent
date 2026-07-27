@@ -119,6 +119,45 @@ export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHan
     return sessions.map(projectChatSessionSummary);
   };
 
+  const createSession = async () => {
+    while (sessionSwitch) {
+      await sessionSwitch;
+    }
+    if (activeChatOperations > 0 || inflightRequests.hasActiveRequest()) {
+      throw Object.assign(
+        new Error('cannot create a session while a run is active'),
+        { code: 'session_new_conflict' },
+      );
+    }
+
+    let releaseSessionSwitch!: () => void;
+    const currentSwitch = new Promise<void>((resolve) => {
+      releaseSessionSwitch = resolve;
+    });
+    sessionSwitch = currentSwitch;
+    try {
+      const requestDeps = runtimeDeps.get();
+      const session = tuiSessions.createNewSession(requestDeps.actorId);
+      return {
+        session: projectChatSessionSummary({
+          ...session,
+          active: true,
+        }),
+        snapshot: buildLocalAgentSessionSnapshot({
+          sessionId: session.id,
+          kind: 'chat',
+          messages: [],
+          deps: requestDeps,
+          sessionTokenUsage: null,
+          pendingReview: null,
+        }),
+      };
+    } finally {
+      sessionSwitch = null;
+      releaseSessionSwitch();
+    }
+  };
+
   const resumeSession = async (sessionId: string) => {
     while (sessionSwitch) {
       await sessionSwitch;
@@ -166,7 +205,7 @@ export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHan
   const respondToSessionRequest = async (
     peer: LocalServerPeer,
     requestId: string,
-    operation: 'snapshot' | 'list' | 'resume',
+    operation: 'snapshot' | 'list' | 'new' | 'resume',
     load: () => Promise<LocalAgentSessionServerMessage>,
   ) => {
     try {
@@ -271,6 +310,19 @@ export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHan
           type: 'session.list.result',
           requestId: message.requestId,
           sessions: await listSessions(),
+        }),
+      ),
+    ),
+    onSessionNew: (client, message) => sessionCommands.enqueue(
+      client,
+      () => respondToSessionRequest(
+        client,
+        message.requestId,
+        'new',
+        async () => ({
+          type: 'session.new.result',
+          requestId: message.requestId,
+          ...await createSession(),
         }),
       ),
     ),

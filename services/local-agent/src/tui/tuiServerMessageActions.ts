@@ -30,6 +30,7 @@ export function buildTuiActionsFromServerMessage(
   if (
     message.type === 'session.snapshot.result'
     || message.type === 'session.list.result'
+    || message.type === 'session.new.result'
     || message.type === 'session.resume.result'
     || message.type === 'session.error'
   ) {

@@ -17,6 +17,7 @@ export type {
   RunInterruptMessage,
   RuntimeConfigUpdateMessage,
   SessionListMessage,
+  SessionNewMessage,
   SessionResumeMessage,
   SessionSnapshotGetMessage,
   StudioRequestMessage,
@@ -45,6 +46,7 @@ const AGENT_SERVER_MESSAGE_TYPES = {
   studio_error: true,
   'session.snapshot.result': true,
   'session.list.result': true,
+  'session.new.result': true,
   'session.resume.result': true,
   'session.error': true,
 } as const satisfies Record<AgentServerMessage['type'], true>;

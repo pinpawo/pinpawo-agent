@@ -22,6 +22,7 @@ function createHandlers(
     onRuntimeConfigUpdate: () => undefined,
     onSessionSnapshotGet: () => undefined,
     onSessionList: () => undefined,
+    onSessionNew: () => undefined,
     onSessionResume: () => undefined,
     onClose: () => undefined,
     ...overrides,
@@ -160,6 +161,30 @@ test('stdio carries correlated session results without routing them as live even
         }],
       });
     },
+    onSessionNew: (peer, message) => {
+      peer.send({
+        type: 'session.new.result',
+        requestId: message.requestId,
+        session: {
+          id: 'chat:new',
+          kind: 'chat',
+          title: 'New session',
+          messageCount: 0,
+          createdAt: '2026-07-01T00:02:00.000Z',
+          updatedAt: '2026-07-01T00:02:00.000Z',
+          active: true,
+        },
+        snapshot: {
+          version: 3,
+          session: {
+            sessionId: 'chat:new',
+            kind: 'chat',
+            timeline: [],
+            activeRun: null,
+          },
+        },
+      });
+    },
     onSessionResume: (peer, message) => {
       peer.send({
         type: 'session.error',
@@ -175,6 +200,7 @@ test('stdio carries correlated session results without routing them as live even
   });
 
   input.write(`${JSON.stringify({ type: 'session.list', requestId: 'sessions-1' })}\n`);
+  input.write(`${JSON.stringify({ type: 'session.new', requestId: 'new-1' })}\n`);
   input.write(`${JSON.stringify({
     type: 'session.resume',
     requestId: 'resume-1',
@@ -182,7 +208,7 @@ test('stdio carries correlated session results without routing them as live even
   })}\n`);
 
   await assertEventually(() => {
-    assert.equal(parseJsonLines(readOutput()).length, 2);
+    assert.equal(parseJsonLines(readOutput()).length, 3);
   });
   input.end();
   await transport.closed;
@@ -200,6 +226,28 @@ test('stdio carries correlated session results without routing them as live even
         updatedAt: '2026-07-01T00:01:00.000Z',
         active: true,
       }],
+    },
+    {
+      type: 'session.new.result',
+      requestId: 'new-1',
+      session: {
+        id: 'chat:new',
+        kind: 'chat',
+        title: 'New session',
+        messageCount: 0,
+        createdAt: '2026-07-01T00:02:00.000Z',
+        updatedAt: '2026-07-01T00:02:00.000Z',
+        active: true,
+      },
+      snapshot: {
+        version: 3,
+        session: {
+          sessionId: 'chat:new',
+          kind: 'chat',
+          timeline: [],
+          activeRun: null,
+        },
+      },
     },
     {
       type: 'session.error',

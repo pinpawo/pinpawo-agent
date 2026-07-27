@@ -6,10 +6,7 @@ import {
   createCliRenderer,
   type PasteEvent,
 } from '@opentui/core';
-import {
-  createAgentSessionSnapshot,
-  type AgentLocalAttachment,
-} from '@pinpawo/agent-session';
+import type { AgentLocalAttachment } from '@pinpawo/agent-session';
 import {
   formatAttachmentStrip,
   mergeAttachments,
@@ -19,8 +16,9 @@ import { ingestLocalPathPaste } from './attachments/localPathIngestion';
 import {
   createLocalHostConnectionFactory,
   readLocalServerPort,
-  type AgentHostConnectionFactory as TuiAgentHostConnectionFactory,
 } from './client/localHostConnection';
+import { parseTuiCommand } from './commands/commandRegistry';
+import { createDemoConnectionFactory } from './demo/demoConnection';
 import { TuiSessionController } from './session/sessionController';
 import {
   approvalAcceptsTextInput,
@@ -28,6 +26,18 @@ import {
 } from './overlays/approvalModel';
 import { ApprovalController } from './overlays/approvalController';
 import { ApprovalView } from './overlays/approvalView';
+import {
+  closeCommandOverlay,
+  commandCompletion,
+  createCommandOverlayState,
+  moveCommandSelection,
+  openCommandHelp,
+  pageCommandHelp,
+  resolveCommandOverlayKey,
+  syncCommandPalette,
+  type CommandOverlayAction,
+} from './overlays/commandOverlayModel';
+import { CommandOverlayView } from './overlays/commandOverlayView';
 import {
   applySessionPickerAction,
   beginSessionPickerLoad,
@@ -52,7 +62,9 @@ import { TimelineScrollback } from './timeline/timelineScrollback';
 
 const smokeReview = process.argv.includes('--smoke-review');
 const demoReview = process.argv.includes('--demo-review');
-const smoke = process.argv.includes('--smoke') || smokeReview;
+const smokeCommand = process.argv.includes('--smoke-command');
+const demoCommand = process.argv.includes('--demo-command');
+const smoke = process.argv.includes('--smoke') || smokeReview || smokeCommand;
 const port = readLocalServerPort();
 const renderer = await createCliRenderer({
   exitOnCtrlC: true,
@@ -97,16 +109,19 @@ const status = new TextRenderable(renderer, {
   height: 1,
 });
 const sessionPickerView = new SessionPickerView(renderer);
+const commandOverlayView = new CommandOverlayView(renderer);
 
 let localNotice: string | null = null;
 let pendingComposerNotice: string | null = null;
+let composerNoticeSticky = false;
 let attachments: AgentLocalAttachment[] = [];
+let commandOverlay = createCommandOverlayState();
 let sessionPicker = createSessionPickerState();
 let sessionPickerGeneration = 0;
 let sessionListRequest: ReturnType<TuiSessionController['listSessions']> | null = null;
 const controller = new TuiSessionController({
-  connectionFactory: smoke || demoReview
-    ? createSmokeConnectionFactory({ review: smokeReview || demoReview })
+  connectionFactory: smoke || demoReview || demoCommand
+    ? createDemoConnectionFactory({ review: smokeReview || demoReview })
     : createLocalHostConnectionFactory({ port }),
 });
 const timeline = new TimelineScrollback(renderer);
@@ -128,31 +143,17 @@ const composer = new TextareaRenderable(renderer, {
     ctrl: true,
     action: 'submit',
   }],
-  onSubmit: () => {
-    if (composer.plainText.trim() === '/resume' && attachments.length === 0) {
-      composer.clear();
-      localNotice = null;
-      openSessionPicker();
-      return;
-    }
-    const result = controller.submitChat(composer.plainText, attachments);
-    if (result.ok) {
-      attachments = [];
-      composer.clear();
-      localNotice = null;
-      refreshHeader();
-      syncComposerLayout();
-    } else {
-      localNotice = submitFailureText(result.reason);
-      refreshStatus();
-    }
-  },
+  onSubmit: () => submitComposerInput(),
   onContentChange: () => {
-    localNotice = pendingComposerNotice;
+    if (!composerNoticeSticky) {
+      localNotice = pendingComposerNotice;
+    }
     pendingComposerNotice = null;
+    syncCommandOverlayFromComposer();
     syncComposerLayout();
     refreshStatus();
   },
+  onCursorChange: () => syncCommandOverlayFromComposer(),
   onPaste: (event: PasteEvent) => {
     const input = new TextDecoder().decode(event.bytes);
     const result = ingestLocalPathPaste(input, {
@@ -169,6 +170,7 @@ const composer = new TextareaRenderable(renderer, {
         result.attachments.length - addedCount,
       );
       refreshHeader();
+      syncCommandOverlayFromComposer();
       syncComposerLayout();
       refreshStatus();
     } else if (result.pathLike) {
@@ -184,10 +186,16 @@ root.add(live);
 composerFrame.add(composer);
 root.add(composerFrame);
 root.add(status);
+root.add(commandOverlayView.frame);
 root.add(sessionPickerView.frame);
 root.add(approvalView.frame);
 renderer.root.add(root);
+if (smokeCommand || demoCommand) {
+  composer.setText('/');
+  composer.gotoBufferEnd();
+}
 composer.focus();
+syncCommandOverlayFromComposer();
 
 const unsubscribe = controller.subscribe((state) => {
   syncApprovalFromSession();
@@ -211,6 +219,17 @@ renderer.keyInput.on('keypress', (key) => {
     key.stopPropagation();
     return;
   }
+  syncCommandOverlayFromComposer();
+  const commandAction = resolveCommandOverlayKey(commandOverlay, key);
+  if (
+    commandOverlay.phase === 'help'
+    && !(key.ctrl && key.name === 'c')
+  ) {
+    key.preventDefault();
+    key.stopPropagation();
+    handleCommandOverlayAction(commandAction);
+    return;
+  }
   const pickerAction = resolveSessionPickerKey(sessionPicker, key);
   if (sessionPicker.phase !== 'closed' && !(key.ctrl && key.name === 'c')) {
     key.preventDefault();
@@ -224,6 +243,13 @@ renderer.keyInput.on('keypress', (key) => {
     openSessionPicker();
     return;
   }
+  if (commandOverlay.phase === 'palette' && commandAction) {
+    key.preventDefault();
+    key.stopPropagation();
+    handleCommandOverlayAction(commandAction);
+    return;
+  }
+  releaseStickyComposerNotice();
   if (
     key.name === 'backspace'
     && !key.ctrl
@@ -238,6 +264,7 @@ renderer.keyInput.on('keypress', (key) => {
       ? `${attachments.length} attachment${attachments.length === 1 ? '' : 's'} remaining`
       : 'attachment removed';
     refreshHeader();
+    syncCommandOverlayFromComposer();
     syncComposerLayout();
     refreshStatus();
   }
@@ -250,7 +277,15 @@ renderer.keyInput.on('paste', (event) => {
     event.stopPropagation();
     return;
   }
-  if (sessionPicker.phase === 'closed') return;
+  if (commandOverlay.phase === 'help') {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
+  if (sessionPicker.phase === 'closed') {
+    releaseStickyComposerNotice();
+    return;
+  }
   event.preventDefault();
   event.stopPropagation();
 });
@@ -259,10 +294,12 @@ renderer.on('resize', () => {
   refreshLive();
   refreshSessionPicker();
   refreshApproval();
+  refreshCommandOverlay();
 });
 renderer.on('destroy', () => {
   sessionPickerGeneration += 1;
   sessionPicker = closeSessionPicker(sessionPicker);
+  commandOverlay = closeCommandOverlay();
   approvalController.destroy();
   unsubscribe();
   controller.stop();
@@ -306,6 +343,21 @@ function refreshStatus() {
   status.content = localNotice ?? formatStatusLine(controller.getState());
 }
 
+function syncCommandOverlayFromComposer() {
+  commandOverlay = syncCommandPalette(commandOverlay, {
+    text: composer.plainText,
+    cursorOffset: composer.cursorOffset,
+    enabled: attachments.length === 0
+      && sessionPicker.phase === 'closed'
+      && approvalController.getState().phase === 'closed',
+  });
+  refreshCommandOverlay();
+}
+
+function refreshCommandOverlay() {
+  commandOverlayView.render(commandOverlay, renderer.width);
+}
+
 function syncApprovalFromSession() {
   const previous = approvalController.getState();
   approvalController.sync(
@@ -314,6 +366,10 @@ function syncApprovalFromSession() {
   );
   const approval = approvalController.getState();
   if (approval.phase !== 'closed') {
+    if (commandOverlay.phase !== 'closed') {
+      commandOverlay = closeCommandOverlay();
+      refreshCommandOverlay();
+    }
     if (sessionPicker.phase !== 'closed') {
       sessionPickerGeneration += 1;
       sessionPicker = closeSessionPicker(sessionPicker);
@@ -325,6 +381,7 @@ function syncApprovalFromSession() {
     && sessionPicker.phase === 'closed'
   ) {
     composer.focus();
+    syncCommandOverlayFromComposer();
   }
   refreshApproval();
 }
@@ -344,6 +401,8 @@ function refreshApproval() {
 
 function openSessionPicker() {
   if (sessionPicker.phase !== 'closed') return;
+  commandOverlay = closeCommandOverlay();
+  refreshCommandOverlay();
   const generation = sessionPickerGeneration + 1;
   sessionPickerGeneration = generation;
   sessionPicker = beginSessionPickerLoad(sessionPicker);
@@ -419,7 +478,7 @@ function resumeSelectedSession() {
       return;
     }
     attachments = [];
-    composer.clear();
+    clearComposerPreservingNotice();
     localNotice = `resumed: ${session.title}`;
     closeSessionPickerUi();
     refreshHeader();
@@ -442,10 +501,134 @@ function closeSessionPickerUi() {
   sessionPicker = closeSessionPicker(sessionPicker);
   refreshSessionPicker();
   composer.focus();
+  syncCommandOverlayFromComposer();
 }
 
 function refreshSessionPicker() {
   sessionPickerView.render(sessionPicker, renderer.width);
+}
+
+function handleCommandOverlayAction(action: CommandOverlayAction) {
+  if (!action) return;
+  if (action === 'previous' || action === 'next') {
+    commandOverlay = moveCommandSelection(
+      commandOverlay,
+      action === 'previous' ? -1 : 1,
+    );
+    refreshCommandOverlay();
+    return;
+  }
+  if (action === 'page-up' || action === 'page-down') {
+    commandOverlay = pageCommandHelp(
+      commandOverlay,
+      action === 'page-up' ? -1 : 1,
+    );
+    refreshCommandOverlay();
+    return;
+  }
+  if (action === 'complete') {
+    const completion = commandCompletion(commandOverlay);
+    if (completion) {
+      composer.replaceText(completion);
+      composer.gotoBufferEnd();
+    }
+    return;
+  }
+  if (action === 'submit') {
+    const submission = commandCompletion(commandOverlay) ?? composer.plainText;
+    submitComposerInput(submission);
+    return;
+  }
+  if (commandOverlay.phase === 'palette') {
+    composer.clear();
+  }
+  closeCommandOverlayUi();
+}
+
+function openCommandHelpUi() {
+  commandOverlay = openCommandHelp();
+  composer.blur();
+  refreshCommandOverlay();
+}
+
+function closeCommandOverlayUi() {
+  commandOverlay = closeCommandOverlay();
+  refreshCommandOverlay();
+  if (
+    sessionPicker.phase === 'closed'
+    && approvalController.getState().phase === 'closed'
+  ) {
+    composer.focus();
+  }
+}
+
+function submitComposerInput(input = composer.plainText) {
+  const parsed = attachments.length === 0
+    ? parseTuiCommand(input)
+    : { type: 'text' as const, text: input };
+  if (parsed.type === 'empty') return;
+  if (parsed.type === 'unknown') {
+    clearComposerPreservingNotice();
+    localNotice = `unknown command: ${parsed.raw} · use /help`;
+    refreshStatus();
+    return;
+  }
+  if (parsed.type === 'command') {
+    if (parsed.name === 'quit') {
+      renderer.destroy();
+      return;
+    }
+    if (parsed.name === 'help') {
+      composer.clear();
+      localNotice = null;
+      openCommandHelpUi();
+      return;
+    }
+    if (parsed.name === 'resume') {
+      composer.clear();
+      localNotice = null;
+      openSessionPicker();
+      return;
+    }
+    clearComposerPreservingNotice();
+    localNotice = 'creating new session…';
+    refreshStatus();
+    void controller.startNewSession().then(() => {
+      attachments = [];
+      localNotice = 'new chat session';
+      refreshHeader();
+      syncComposerLayout();
+      refreshStatus();
+    }).catch((error) => {
+      localNotice = errorMessage(error);
+      refreshStatus();
+    });
+    return;
+  }
+
+  const result = controller.submitChat(parsed.text, attachments);
+  if (result.ok) {
+    attachments = [];
+    composer.clear();
+    localNotice = null;
+    refreshHeader();
+    syncComposerLayout();
+  } else {
+    localNotice = submitFailureText(result.reason);
+    refreshStatus();
+  }
+}
+
+function clearComposerPreservingNotice() {
+  composerNoticeSticky = true;
+  composer.clear();
+}
+
+function releaseStickyComposerNotice() {
+  if (!composerNoticeSticky) return;
+  composerNoticeSticky = false;
+  localNotice = null;
+  refreshStatus();
 }
 
 function errorMessage(error: unknown) {
@@ -481,137 +664,4 @@ function submitFailureText(reason: 'not-ready' | 'busy' | 'empty' | 'send-failed
     case 'send-failed':
       return 'message could not be sent';
   }
-}
-
-function createSmokeConnectionFactory(
-  options: { review?: boolean } = {},
-): TuiAgentHostConnectionFactory {
-  return (handlers) => {
-    let connected = false;
-    let reviewResolved = false;
-    return {
-      connect: () => {
-        connected = true;
-        handlers.onOpen();
-      },
-      disconnect: () => {
-        connected = false;
-      },
-      isConnected: () => connected,
-      send: (message) => {
-        if (!connected) return false;
-        if (message.type === 'session.snapshot.get') {
-          handlers.onMessage({
-            type: 'session.snapshot.result',
-            requestId: message.requestId,
-            snapshot: createAgentSessionSnapshot({
-              sessionId: 'smoke',
-              kind: 'chat',
-              timeline: [{
-                id: 'smoke-user',
-                type: 'message',
-                role: 'user',
-                text: 'Smoke test the Phase 4 vertical slice.',
-                status: 'completed',
-              }, {
-                id: 'smoke-operation',
-                type: 'operation',
-                requestId: 'smoke-run',
-                operationKey: 'smoke-operation',
-                kind: 'smoke',
-                title: 'Render timeline surface',
-                phase: 'completed',
-                summary: 'ok',
-              }, {
-                id: 'smoke-assistant',
-                type: 'message',
-                role: 'assistant',
-                text: 'Connection, projection, and timeline are aligned.',
-                status: 'completed',
-              }, ...(reviewResolved
-                ? [{
-                    id: 'smoke-review-result',
-                    type: 'message' as const,
-                    role: 'assistant' as const,
-                    requestId: 'smoke-run',
-                    text: 'The review demo completed.',
-                    status: 'completed' as const,
-                  }]
-                : [])],
-              activeRun: options.review && !reviewResolved
-                ? {
-                    requestId: 'smoke-run',
-                    state: 'waiting_review',
-                    reviewAction: {
-                      actionId: 'smoke-review-action',
-                      petId: 'paws',
-                      reviews: [{
-                        id: 'smoke-review',
-                        schemaVersion: 1,
-                        view: {
-                          kind: 'plain',
-                          title: 'Allow local operation?',
-                          body: 'Review details remain pageable inside the fixed footer.',
-                        },
-                        options: [{
-                          id: 'approve',
-                          label: 'Approve',
-                          variant: 'primary',
-                          decision: { type: 'approve' },
-                        }, {
-                          id: 'respond',
-                          label: 'Respond',
-                          input: {
-                            kind: 'text',
-                            key: 'message',
-                            multiline: true,
-                          },
-                          decision: {
-                            type: 'respond',
-                            messageInputKey: 'message',
-                          },
-                        }, {
-                          id: 'reject',
-                          label: 'Reject',
-                          variant: 'danger',
-                          decision: { type: 'reject' },
-                        }],
-                      }],
-                    },
-                  }
-                : null,
-            }),
-          });
-        }
-        if (
-          options.review
-          && (
-            message.type === 'human_review_response'
-            || message.type === 'review.cancel'
-          )
-        ) {
-          reviewResolved = true;
-          if (message.type === 'review.cancel') {
-            handlers.onMessage({
-              type: 'interrupted',
-              requestId: 'smoke-run',
-              message: 'Review demo cancelled.',
-            });
-          } else {
-            handlers.onMessage({
-              type: 'event',
-              requestId: 'smoke-run',
-              event: {
-                type: 'message.completed',
-                requestId: 'smoke-run',
-                role: 'assistant',
-                text: 'The review demo completed.',
-              },
-            });
-          }
-        }
-        return true;
-      },
-    };
-  };
 }

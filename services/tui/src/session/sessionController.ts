@@ -42,6 +42,8 @@ export type ResumeSessionResult = {
   snapshot: AgentSessionSnapshot;
 };
 
+export type StartNewSessionResult = ResumeSessionResult;
+
 export type SubmitReviewResponseResult =
   | {
       ok: true;
@@ -87,6 +89,13 @@ type PendingSessionCommand =
       requestId: string;
       timer: TimerHandle | null;
       resolve: (sessions: AgentSessionSummary[]) => void;
+      reject: (error: Error) => void;
+    }
+  | {
+      operation: 'new';
+      requestId: string;
+      timer: TimerHandle | null;
+      resolve: (result: StartNewSessionResult) => void;
       reject: (error: Error) => void;
     }
   | {
@@ -176,7 +185,7 @@ export class TuiSessionController {
     if (this.state.connection !== 'ready' || !this.connection.isConnected()) {
       return { ok: false, reason: 'not-ready' };
     }
-    if (this.state.session.activeRun) {
+    if (this.state.session.activeRun || this.sessionCommands.size > 0) {
       return { ok: false, reason: 'busy' };
     }
 
@@ -196,6 +205,28 @@ export class TuiSessionController {
       text: formatAttachmentDisplayText(message, attachments),
     }, { observedAt: this.now() }));
     return { ok: true, requestId };
+  }
+
+  startNewSession(): Promise<StartNewSessionResult> {
+    const unavailable = this.sessionCommandUnavailable();
+    if (unavailable) return Promise.reject(new Error(unavailable));
+
+    const requestId = this.requestIdFactory();
+    return new Promise((resolve, reject) => {
+      const pending: PendingSessionCommand = {
+        operation: 'new',
+        requestId,
+        timer: null,
+        resolve,
+        reject,
+      };
+      this.sessionCommands.set(requestId, pending);
+      pending.timer = this.scheduleSessionCommandTimeout(pending);
+      if (!this.connection.send({ type: 'session.new', requestId })) {
+        this.clearSessionCommand(pending);
+        reject(new Error('session new request could not be sent'));
+      }
+    });
   }
 
   listSessions(): Promise<AgentSessionSummary[]> {
@@ -367,6 +398,24 @@ export class TuiSessionController {
       if (pending?.operation !== 'list') return;
       this.clearSessionCommand(pending);
       pending.resolve(message.sessions);
+      return;
+    }
+
+    if (message.type === 'session.new.result') {
+      const pending = this.sessionCommands.get(message.requestId);
+      if (pending?.operation !== 'new') return;
+      this.clearSessionCommand(pending);
+      this.clearSnapshotTimer();
+      this.snapshotRequests.clear();
+      this.updateSession(applySessionSnapshot(
+        this.state.session,
+        message.snapshot,
+        { observedAt: this.now() },
+      ));
+      pending.resolve({
+        session: message.session,
+        snapshot: message.snapshot,
+      });
       return;
     }
 

@@ -142,6 +142,30 @@ test('a new submitted turn advances native scrollback after prior history', asyn
   }
 });
 
+test('an authoritative session boundary allows identical text in the new session', async () => {
+  const setup = await createTimelineRenderer(80);
+  const timeline = new TimelineScrollback(setup.renderer);
+  try {
+    const repeated = userMessage('same text', 'old-user');
+    timeline.render(session([repeated], undefined, 'session-old'));
+    setup.externalOutput.clear();
+
+    timeline.render(session([], undefined, 'session-new'));
+    assert.match(setup.externalOutput.takeText(), /session session-new/);
+
+    timeline.render(session([
+      userMessage('same text', 'new-user'),
+    ], undefined, 'session-new'));
+    assert.equal(
+      setup.externalOutput.takeText(),
+      formatTimelineEntry(repeated),
+    );
+  } finally {
+    timeline.destroy();
+    setup.renderer.destroy();
+  }
+});
+
 async function createTimelineRenderer(width: number) {
   return createTestRenderer({
     width,
@@ -155,9 +179,10 @@ async function createTimelineRenderer(width: number) {
 function session(
   timeline: AgentTimelineEntry[],
   activeRequestId?: string,
+  sessionId = 'session-1',
 ): AgentSession {
   return {
-    sessionId: 'session-1',
+    sessionId,
     kind: 'chat',
     timeline,
     activeRun: activeRequestId

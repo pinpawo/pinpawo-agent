@@ -92,6 +92,11 @@ export type SessionListMessage = {
   requestId: string;
 };
 
+export type SessionNewMessage = {
+  type: 'session.new';
+  requestId: string;
+};
+
 export type SessionResumeMessage = {
   type: 'session.resume';
   requestId: string;
@@ -108,6 +113,7 @@ export type AgentClientMessage =
   | HumanReviewResponseMessage
   | SessionSnapshotGetMessage
   | SessionListMessage
+  | SessionNewMessage
   | SessionResumeMessage
   | { type: 'ping' };
 
@@ -147,6 +153,12 @@ export type AgentSessionServerMessage =
       sessions: AgentSessionSummary[];
     }
   | {
+      type: 'session.new.result';
+      requestId: string;
+      session: AgentSessionSummary;
+      snapshot: AgentSessionSnapshot;
+    }
+  | {
       type: 'session.resume.result';
       requestId: string;
       session: AgentSessionSummary;
@@ -155,7 +167,7 @@ export type AgentSessionServerMessage =
   | {
       type: 'session.error';
       requestId: string;
-      operation: 'snapshot' | 'list' | 'resume';
+      operation: 'snapshot' | 'list' | 'new' | 'resume';
       message: string;
     };
 
@@ -513,7 +525,11 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
   if (!record) return null;
   const type = readString(record, 'type');
   if (type === 'ping') return { type: 'ping' };
-  if (type === 'session.snapshot.get' || type === 'session.list') {
+  if (
+    type === 'session.snapshot.get'
+    || type === 'session.list'
+    || type === 'session.new'
+  ) {
     if (!hasOnlyKeys(record, ['type', 'requestId'])) return null;
     const requestId = readString(record, 'requestId');
     return requestId ? { type, requestId } : null;
@@ -638,7 +654,7 @@ function parseAgentServerRecord(record: Record<string, unknown>): AgentServerMes
       ? { type, requestId, sessions }
       : null;
   }
-  if (type === 'session.resume.result') {
+  if (type === 'session.new.result' || type === 'session.resume.result') {
     if (!hasOnlyKeys(record, ['type', 'requestId', 'session', 'snapshot'])) return null;
     const session = parseAgentSessionSummary(record.session);
     const snapshot = parseAgentSessionSnapshot(record.snapshot);
@@ -657,7 +673,12 @@ function parseAgentServerRecord(record: Record<string, unknown>): AgentServerMes
     const operation = readString(record, 'operation');
     const message = readString(record, 'message');
     if (
-      (operation !== 'snapshot' && operation !== 'list' && operation !== 'resume')
+      (
+        operation !== 'snapshot'
+        && operation !== 'list'
+        && operation !== 'new'
+        && operation !== 'resume'
+      )
       || message === null
     ) {
       return null;

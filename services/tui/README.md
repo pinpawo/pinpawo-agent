@@ -24,6 +24,8 @@ progress:
 - it restores canonical pending reviews from snapshots and provides an
   OpenTUI-owned approval overlay for single or batched approve, reject, respond,
   and cancel flows.
+- it provides a cursor-aware slash command palette and pageable help overlay
+  for the commands currently implemented by the v2 client.
 
 ## Run the vertical slice
 
@@ -57,6 +59,10 @@ Production client controls:
   the review details, Enter submits, and Esc cancels the pending review;
 - a text-response option owns a separate multiline textarea; Shift+Enter inserts
   a newline while Enter submits, and the normal composer draft remains intact;
+- typing `/` at the end of an attachment-free composer opens the command
+  palette; `↑`/`↓` selects, Tab completes, Enter executes, and Esc clears it;
+- `/help` opens pageable command and shortcut help, `/new` starts a clean chat
+  projection, `/resume` opens the session picker, and `/quit` exits;
 - ordinary prose containing a path remains text, and unavailable path-only
   pastes are inserted as text with a notice;
 - `Ctrl+C` exits the client.
@@ -87,6 +93,18 @@ npm run dev:review -w @pinpawo/tui
 
 The demo accepts real keyboard navigation, multiline paste/input, submit, and
 cancel, then restores focus to the composer.
+
+Run the deterministic command/help demo with the palette already open:
+
+```sh
+npm run dev:command -w @pinpawo/tui
+```
+
+Only commands implemented by the v2 client are advertised. Slash-prefixed paths
+and prose that do not have the exact command shape remain ordinary chat input.
+`/new` waits for the host's authoritative new-session ID and empty snapshot
+before switching the projection. Outstanding completion snapshots from the
+previous session are then discarded.
 
 ## Phase 1 probes
 

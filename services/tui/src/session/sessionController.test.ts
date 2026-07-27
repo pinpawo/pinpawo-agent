@@ -214,6 +214,129 @@ test('TuiSessionController submits local attachments and keeps paths out of opti
   controller.stop();
 });
 
+test('starting a new session applies the authoritative snapshot and ignores an older completion snapshot', async () => {
+  const requestIds = ['startup', 'completion', 'new-session'];
+  let connection!: FakeConnection;
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => requestIds.shift() ?? 'unexpected',
+    now: () => 1_000,
+  });
+  controller.start();
+  connection.open();
+  connection.receive({
+    type: 'session.snapshot.result',
+    requestId: 'startup',
+    snapshot: createAgentSessionSnapshot({
+      sessionId: 'chat:old',
+      kind: 'chat',
+      timeline: [{
+        id: 'old-message',
+        type: 'message',
+        role: 'assistant',
+        text: 'old response',
+        status: 'completed',
+      }],
+      activeRun: null,
+      sessionTokenUsage: {
+        inputTokens: 10,
+        outputTokens: 5,
+        totalTokens: 15,
+        scope: 'session',
+      },
+    }),
+  });
+  connection.receive(eventMessage({
+    type: 'message.completed',
+    requestId: 'old-run',
+    role: 'assistant',
+    text: 'late completion',
+  }));
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'session.snapshot.get',
+    requestId: 'completion',
+  });
+
+  const started = controller.startNewSession();
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'session.new',
+    requestId: 'new-session',
+  });
+  assert.equal(controller.getState().session.sessionId, 'chat:old');
+  assert.notEqual(controller.getState().session.timeline.length, 0);
+
+  const newSnapshot = createAgentSessionSnapshot({
+    sessionId: 'chat:new',
+    kind: 'chat',
+    timeline: [],
+    activeRun: null,
+  });
+  connection.receive({
+    type: 'session.new.result',
+    requestId: 'new-session',
+    session: {
+      id: 'chat:new',
+      kind: 'chat',
+      title: 'New session',
+      messageCount: 0,
+      createdAt: '2026-07-27T01:00:00.000Z',
+      updatedAt: '2026-07-27T01:00:00.000Z',
+      active: true,
+    },
+    snapshot: newSnapshot,
+  });
+  assert.equal((await started).snapshot.session.sessionId, 'chat:new');
+  assert.equal(controller.getState().session.sessionId, 'chat:new');
+  assert.equal(controller.getState().session.timeline.length, 0);
+  assert.equal(controller.getState().session.sessionTokenUsage, undefined);
+
+  connection.receive({
+    type: 'session.snapshot.result',
+    requestId: 'completion',
+    snapshot: createAgentSessionSnapshot({
+      sessionId: 'chat:old',
+      kind: 'chat',
+      timeline: [{
+        id: 'late-old-message',
+        type: 'message',
+        role: 'assistant',
+        text: 'must not return',
+        status: 'completed',
+      }],
+      activeRun: null,
+    }),
+  });
+  assert.equal(controller.getState().session.timeline.length, 0);
+  controller.stop();
+});
+
+test('starting a new session rejects unavailable and busy states', async () => {
+  let connection!: FakeConnection;
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => 'request',
+  });
+  await assert.rejects(
+    controller.startNewSession(),
+    /local-agent is not connected/,
+  );
+  controller.start();
+  connection.open();
+  connection.receive(snapshotResult('request', 'chat:one'));
+  assert.equal(controller.submitChat('busy').ok, true);
+  await assert.rejects(
+    controller.startNewSession(),
+    /wait for the current response to finish/,
+  );
+  controller.stop();
+});
+
 test('TuiSessionController reconnects and rehydrates before becoming ready', () => {
   const timers: Array<{ callback: () => void; handle: ReturnType<typeof setTimeout> }> = [];
   let connection!: FakeConnection;

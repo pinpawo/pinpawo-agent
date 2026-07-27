@@ -164,6 +164,7 @@ function createHandlers(): LocalServerPeerHandlers {
     onRuntimeConfigUpdate: () => undefined,
     onSessionSnapshotGet: () => undefined,
     onSessionList: () => undefined,
+    onSessionNew: () => undefined,
     onSessionResume: () => undefined,
     onClose: () => undefined,
     log: () => undefined,

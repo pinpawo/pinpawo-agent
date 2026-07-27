@@ -8,6 +8,7 @@ import {
   type RunInterruptMessage,
   type RuntimeConfigUpdateMessage,
   type SessionListMessage,
+  type SessionNewMessage,
   type SessionResumeMessage,
   type SessionSnapshotGetMessage,
   type StudioRequestMessage,
@@ -37,6 +38,7 @@ export type LocalServerPeerHandlers = {
     message: SessionSnapshotGetMessage,
   ) => MaybePromise<void>;
   onSessionList: (peer: LocalServerPeer, message: SessionListMessage) => MaybePromise<void>;
+  onSessionNew: (peer: LocalServerPeer, message: SessionNewMessage) => MaybePromise<void>;
   onSessionResume: (peer: LocalServerPeer, message: SessionResumeMessage) => MaybePromise<void>;
   onClose: (peer: LocalServerPeer) => MaybePromise<void>;
   log?: (message: string) => void;
@@ -67,8 +69,10 @@ function sendMalformedClientMessageError(peer: LocalServerPeer, data: Buffer | s
     ? 'snapshot'
     : envelope.type === 'session.list'
       ? 'list'
-      : envelope.type === 'session.resume'
-        ? 'resume'
+      : envelope.type === 'session.new'
+        ? 'new'
+        : envelope.type === 'session.resume'
+          ? 'resume'
         : null;
   if (sessionOperation) {
     peer.send({
@@ -165,6 +169,12 @@ export function dispatchLocalServerMessage(
       return runLocalServerPeerHandler(
         'handleSessionList',
         () => handlers.onSessionList(peer, msg),
+        logError,
+      );
+    } else if (msg.type === 'session.new') {
+      return runLocalServerPeerHandler(
+        'handleSessionNew',
+        () => handlers.onSessionNew(peer, msg),
         logError,
       );
     } else if (msg.type === 'session.resume') {

@@ -42,17 +42,21 @@ The probe covers:
 | approval input ownership | option navigation yields to a dedicated multiline textarea after free text starts | automated test |
 | approval details paging | long plain/markdown/diff review content remains pageable inside the fixed footer | automated test |
 | approval overlay resize | CJK body/options and multiline input remain bounded in the 8-row split footer | Bun native test |
+| slash command parsing | exact implemented commands resolve while absolute paths and slash-prefixed prose remain chat input | automated test |
+| command palette ownership | cursor-at-end slash tokens own navigation/submit while ordinary edit keys remain composer-owned | automated test |
+| help paging and resize | command help pages within the fixed footer and remains bounded at narrow widths | automated + Bun native test |
+| new-session race isolation | `/new` waits for an authoritative new-session ID, discards late completion snapshots, and preserves identical messages across the native scrollback boundary | automated + Bun native test |
 | raw input preview | controls are escaped and output is bounded | automated test |
 | fixed-footer composer layout | composer grows from 3–5 visible rows without changing terminal footer height | automated test |
 | native textarea regression | multiline paste and single-grapheme backspace preserve line boundaries | Bun native test |
 | TypeScript | `npm run typecheck -w @pinpawo/tui` | passed |
-| unit tests | `npm run test -w @pinpawo/tui` | passed, 54 tests |
-| native tests | `npm run test:native -w @pinpawo/tui` | passed, 8 tests including approval/resume resize, textarea, WebSocket, and 4 real ScrollbackSurface tests |
+| unit tests | `npm run test -w @pinpawo/tui` | passed, 62 tests |
+| native tests | `npm run test:native -w @pinpawo/tui` | passed, 10 tests including command/help, approval/resume resize, textarea, WebSocket, and 5 real ScrollbackSurface tests |
 | alternate-screen PTY startup | `npm run smoke -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | split-footer PTY startup | `npm run smoke:split -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | standalone executable | `npm run build -w @pinpawo/tui` | passed for darwin-arm64; normal and approval compiled PTY smokes passed |
 | root typecheck | `npm run typecheck` | passed |
-| root tests | `npm test` | passed, including local-agent 754/754 and Chrome extension 22/22 |
+| root tests | `npm test` | passed, including local-agent 755/755 and Chrome extension 22/22 |
 | root build | `npm run build` | passed |
 
 ## Manual terminal matrix
@@ -163,7 +167,10 @@ Known limits and follow-up work:
     text-response option, paste multiple lines, submit, and confirm focus returns
     to the composer. Restart it, press Esc, and confirm cancellation also
     restores the composer.
-12. Repeat the selection, scroll, resize, paste, IME, and burst checks with
+12. Run `npm run dev:command -w @pinpawo/tui`. Filter the palette, navigate and
+    complete commands, open `/help`, page it, close with Esc/q, then run `/new`
+    and `/resume`. Confirm every overlay restores the composer focus.
+13. Repeat the selection, scroll, resize, paste, IME, and burst checks with
     `npm run dev:split -w @pinpawo/tui`. Compare native terminal scrollback
     against the alternate-screen internal viewport.
 

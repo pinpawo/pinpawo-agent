@@ -53,6 +53,7 @@ The probe covers:
 | transcript export | `/export [path]` writes completed canonical user/assistant messages locally without a new host protocol or local-agent implementation import | automated test |
 | composer keyboard editing | Cmd+A, Cmd+Z/Shift+Cmd+Z, Option+arrows, Shift selection, Home/End, and Ctrl+A/E preserve multiline, CJK, and emoji offsets under Kitty keyboard input | Bun native test |
 | composer prompt history | plain Up/Down routes to a bounded 100-entry history only at the first/last total visual row, preserves exact multiline prompts, and restores the in-progress draft | automated + Bun native soft-wrap test |
+| workspace file mention | standalone chat `@path` tokens open bounded workspace candidates; directory/file completion is cursor-aware, wide-character safe, and rejects `..` or symlink escape | automated + Bun native resize/cursor test |
 | internal selection clipboard | Cmd+C/Cmd+X and Ctrl+Shift fallbacks use OSC 52; cut deletes only after a successful clipboard write | automated test; manual terminal verification pending |
 | new-session race isolation | `/new` waits for an authoritative new-session ID, discards late completion snapshots, and preserves identical messages across the native scrollback boundary | automated + Bun native test |
 | interrupt ownership | Esc/first Ctrl+C sends one canonical interrupt and the notice owns input until the run settles; second Ctrl+C exits | automated test |
@@ -66,8 +67,8 @@ The probe covers:
 | fixed-footer composer layout | composer grows from 3–5 visible rows without changing terminal footer height | automated test |
 | native textarea regression | multiline paste and single-grapheme backspace preserve line boundaries | Bun native test |
 | TypeScript | `npm run typecheck -w @pinpawo/tui` | passed |
-| unit tests | `npm run test -w @pinpawo/tui` | passed, 98 tests |
-| native tests | `npm run test:native -w @pinpawo/tui` | passed, 15 tests including policy/command/help/notice, approval/resume resize, textarea editing/history shortcuts, WebSocket, and 6 real ScrollbackSurface tests |
+| unit tests | `npm run test -w @pinpawo/tui` | passed, 104 tests |
+| native tests | `npm run test:native -w @pinpawo/tui` | passed, 17 tests including file-mention resize/wide-character cursor mapping, policy/command/help/notice, approval/resume resize, textarea editing/history shortcuts, WebSocket, and 6 real ScrollbackSurface tests |
 | alternate-screen PTY startup | `npm run smoke -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | split-footer PTY startup | `npm run smoke:split -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | Studio PTY flow | `npm run smoke:studio -w @pinpawo/tui` | passed; user/progress/final rows committed in order and terminal state restored |
@@ -95,6 +96,7 @@ from an automated PTY run alone.
 | terminal/app text selection and copy | pending | pending | passed | pending |
 | composer internal selection copy/cut | pending | pending | pending | pending |
 | composer prompt history and draft restore | pending | pending | pending | pending |
+| chat `@path` completion and Esc dismissal | pending | pending | pending | pending |
 | multiline edit and soft wrap | pending | pending | passed | pending |
 | Shift selection and deletion | pending | pending | pending | pending |
 | undo/redo | pending | pending | pending | pending |
@@ -186,7 +188,8 @@ Known limits and follow-up work:
 8. Run `npm run dev -w @pinpawo/tui`, then drag a path with spaces, a Unicode
    path, and multiple files into the production composer. Confirm each path
    becomes a distinct chip and Backspace removes the last chip when the text is
-   empty.
+   empty. Type `中文 @serv`, use Tab/Enter to descend or complete a candidate,
+   and confirm Esc closes the candidate view without clearing the composer.
 9. Press `Ctrl+R`, browse sessions with arrows and PageUp/PageDown, then press
    Esc and confirm the composer draft is unchanged. Open it again, resume an
    inactive session, and confirm its timeline replaces the current one.

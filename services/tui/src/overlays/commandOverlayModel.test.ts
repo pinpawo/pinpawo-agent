@@ -30,9 +30,16 @@ test('command palette follows a slash token at the composer cursor', () => {
     state.phase === 'palette'
       ? state.items.map((command) => command.name)
       : [],
-    ['resume'],
+    ['resume', 'policy'],
   );
   assert.equal(commandCompletion(state), '/resume');
+
+  state = syncCommandPalette(state, {
+    text: '/review',
+    cursorOffset: 7,
+    enabled: true,
+  });
+  assert.equal(commandCompletion(state), '/policy');
 
   state = syncCommandPalette(state, {
     text: '/stu',

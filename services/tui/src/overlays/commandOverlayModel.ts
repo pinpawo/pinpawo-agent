@@ -189,13 +189,18 @@ function commandPaletteQuery(text: string, cursorOffset: number) {
 }
 
 function matchingCommands(query: string) {
-  return listTuiCommands().filter((command) => (
-    !query
-    || command.name.startsWith(query)
-    || command.aliases?.some((alias) => (
+  const commands = listTuiCommands();
+  if (!query) return commands;
+  const nameMatches = commands.filter((command) => (
+    command.name.startsWith(query)
+  ));
+  const aliasMatches = commands.filter((command) => (
+    !command.name.startsWith(query)
+    && command.aliases?.some((alias) => (
       alias.replace(/^\//, '').startsWith(query)
     ))
   ));
+  return [...nameMatches, ...aliasMatches];
 }
 
 function visiblePaletteItems(

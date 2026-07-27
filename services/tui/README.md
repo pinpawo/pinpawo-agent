@@ -18,6 +18,9 @@ dogfood entrypoint from issue #454:
   wheel/selection ownership into the app;
 - it recognizes pasted or dragged local paths as removable attachments without
   reading or uploading file contents.
+- it completes chat-only `@path` workspace file references in a fixed-footer
+  candidate view without allowing `..` or symlink traversal outside the
+  session workspace.
 - it lists and resumes host sessions through the shared protocol in an
   OpenTUI-owned footer overlay, while keeping picker state outside the canonical
   Session projection.
@@ -89,6 +92,8 @@ Production client controls:
   and a failed clipboard write never deletes the selection;
 - dragging or pasting one or more absolute local paths creates attachment chips;
 - Backspace removes the last attachment while the composer text is empty;
+- typing a standalone `@path` token in chat opens workspace candidates;
+  `↑`/`↓` selects, Tab/Enter inserts, and Esc closes only the candidate view;
 - PageUp from an empty, attachment-free composer or `/transcript` opens the
   complete timeline in `$PAGER`; `q` returns to the composer;
 - `Ctrl+R` or an exact `/resume` command opens the session picker;
@@ -104,7 +109,7 @@ Production client controls:
   projection, `/policy` chooses the host review policy, `/resume` opens the
   session picker, `/transcript` (or `/history`) opens the timeline pager,
   `/edit [text]` opens `$VISUAL` or `$EDITOR`, `/export [path]` writes a
-  Markdown transcript, and `/quit` exits;
+  Markdown transcript, `/review-policy` aliases `/policy`, and `/quit` exits;
 - `/studio [task]` enters Studio mode and optionally starts a task; subsequent
   prose keeps the same Studio conversation until `/chat` returns to chat mode;
 - ordinary prose containing a path remains text, and unavailable path-only

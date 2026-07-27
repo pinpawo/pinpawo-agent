@@ -52,6 +52,7 @@ const COMMANDS: readonly TuiCommandDefinition[] = [{
   description: 'Return to chat mode',
 }, {
   name: 'policy',
+  aliases: ['review-policy'],
   usage: '/policy',
   description: 'Choose the global review policy',
 }, {

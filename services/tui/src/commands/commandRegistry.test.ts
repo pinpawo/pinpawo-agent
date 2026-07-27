@@ -61,6 +61,13 @@ test('command parser resolves commands and aliases', () => {
     raw: '/history',
     args: '',
   });
+  assert.deepEqual(parseTuiCommand('/review-policy'), {
+    type: 'command',
+    command: listTuiCommands()[4],
+    name: 'policy',
+    raw: '/review-policy',
+    args: '',
+  });
 });
 
 test('command parser keeps paths and slash-prefixed prose as chat text', () => {

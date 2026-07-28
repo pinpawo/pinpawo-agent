@@ -59,6 +59,22 @@ const cases: AgentEvalCase<OutcomeDecisionInput, OutcomeDecisionExpected>[] = [
     metadata: { difficulty: 'easy', reason: 'Goal-complete short circuit.', source: SOURCE_FILE },
   },
   {
+    id: `${SUITE}.conditional-followup-is-unnecessary`,
+    name: 'conditional-followup-is-unnecessary',
+    suite: SUITE,
+    tags: ['outcome_decision', 'capability_planning'],
+    input: {
+      userGoal: '确认配置是否正确，必要时修复。',
+      currentTask: '检查项目配置是否与文档一致。',
+      announce: '配置与文档完全一致，验证通过，不需要修改。',
+    },
+    expected: {
+      outcome: 'goal_done',
+      reason: 'The conditional repair is unnecessary, so the user goal is complete and must not reach the Planner as task_done.',
+    },
+    metadata: { difficulty: 'medium', reason: 'Goal completion cancels an unnecessary conditional follow-up before planning.', source: SOURCE_FILE },
+  },
+  {
     id: `${SUITE}.other-results-do-not-complete-current-task`,
     name: 'other-results-do-not-complete-current-task',
     suite: SUITE,

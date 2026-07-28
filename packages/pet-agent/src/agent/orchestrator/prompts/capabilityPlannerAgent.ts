@@ -34,12 +34,6 @@ export function buildCapabilityPlannerAgentInput(input: CapabilityPlannerInput) 
       default_document_glob: '**/CAPABILITY.md',
     }),
     userIntentContext: escapeXml(input.userIntentContext),
-    pendingTaskContext: input.mode === 'direct'
-      ? escapedJson({
-          objective: input.pendingTask.task,
-          context_summary: input.pendingTask.contextSummary,
-        })
-      : 'null',
     completedTasksContext: escapedJson(input.completedTasks),
     remainingPlanContext: escapedJson(input.remainingPlan),
     latestHandoffContext: input.latestHandoff

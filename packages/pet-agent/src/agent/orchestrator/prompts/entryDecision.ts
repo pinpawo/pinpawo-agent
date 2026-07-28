@@ -10,7 +10,7 @@ import {
   ENTRY_DECISION_SYSTEM_PROMPT,
 } from './templates/entryDecision.prompt';
 
-export function buildTaskDecisionSystemPrompt(params: {
+export function buildEntryDecisionSystemPrompt(params: {
   actor: AgentActor;
   outputInstruction: string;
 }): string {
@@ -21,7 +21,7 @@ export function buildTaskDecisionSystemPrompt(params: {
   });
 }
 
-export function buildTaskDecisionInput(params: {
+export function buildEntryDecisionInput(params: {
   runDelegationContext?: string | null;
   runtimeContext?: string | null;
 }): string {

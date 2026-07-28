@@ -16,6 +16,7 @@ export type CapabilityPlanningEvalOutput = {
   result: string;
   nextTask: string | null;
   capabilityIntent: string | null;
+  capabilityName?: string | null;
   remainingPlan: Array<{ objective: string; capabilityIntent: string }>;
 };
 
@@ -43,7 +44,12 @@ export function buildCapabilityPlanningGoalContract(
               'It must not select a concrete executor.',
               `Reference ability: ${expected.capabilityIntent ?? 'none'}.`,
             ].join(' '),
-          }, {
+          }, ...(expected.capabilityName
+            ? [{
+                id: 'current_capability_selection_correct',
+                statement: `The selected concrete Capability must be ${expected.capabilityName}.`,
+              }]
+            : []), {
             id: 'task_boundaries_justified',
             statement: [
               'Each task corresponds to a distinct result or change required by the user goal.',

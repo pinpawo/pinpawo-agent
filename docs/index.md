@@ -33,11 +33,7 @@ the original design and reference documents. Maintenance rules live in
 ## Orchestrator, decisions, and state
 
 - [Pet Agent rewrite requirements](PET_AGENT_REWRITE_DESIGN.md)
-- [Delegation state and task routing](PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md)
-- [State lifecycle refactor](PET_AGENT_STATE_LIFECYCLE_REFACTOR.md)
-- [Decision node ownership audit](PET_AGENT_DECISION_NODE_OWNERSHIP_AUDIT.md)
 - [Decision system prompt design](PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md)
-- [CapabilityPlanner task-horizon design](CAPABILITY_PLANNER_TASK_HORIZON_DRAFT.md)
 - [Orchestrator terminal-semantics validation](ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md)
 - [Orchestrator lifecycle composition eval](ORCHESTRATOR_LIFECYCLE_COMPOSITION_EVAL.md)
 - [Decision shared prompt prefix](PET_AGENT_ORCHESTRATOR_DECISION_PROMPT_PREFIX.md)
@@ -70,7 +66,6 @@ the original design and reference documents. Maintenance rules live in
   - [Architecture](capability-artifact-pipeline/architecture.md)
   - [Store contract](capability-artifact-pipeline/store-contract.md)
   - [Explore ingest](capability-artifact-pipeline/explore-ingest.md)
-  - [Prompt integration](capability-artifact-pipeline/prompt-integration.md)
   - [Compatibility notes](capability-artifact-pipeline/compatibility-notes.md)
 
 ## Studio

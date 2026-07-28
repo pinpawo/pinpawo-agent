@@ -322,7 +322,7 @@ test('Planner Agent materializes deterministic IDs for provider ToolCalls withou
     && message.tool_call_id === 'capability_planner:1:0'));
 });
 
-test('direct mode rejects task mutation and lets the model correct the submission', async (t) => {
+test('entry mode forms one executable task after Capability exploration', async (t) => {
   const workspace = await createWorkspace(t, {
     explore: capabilityDocument({
       name: 'explore',
@@ -330,10 +330,6 @@ test('direct mode rejects task mutation and lets the model correct the submissio
       instructions: 'Inspect files and report evidence.',
     }),
   });
-  const pendingTask = {
-    task: 'Inspect issue #473.',
-    contextSummary: 'Focus on Planner Agent constraints.',
-  };
   const model = new ScriptedPlannerModel([
     {
       toolCalls: [{
@@ -344,33 +340,16 @@ test('direct mode rejects task mutation and lets the model correct the submissio
     },
     {
       toolCalls: [{
-        id: 'invalid-submit',
+        id: 'submit',
         name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
         args: {
           registry_digest: workspace.registryDigest,
           result: 'next_task',
           next_task: {
-            objective: 'Rewrite issue #473.',
+            objective: 'Inspect issue #473 and report the Planner Agent constraints.',
             capability_intent: 'Repository exploration',
             capability_name: 'explore',
-            context_summary: pendingTask.contextSummary,
-          },
-          remaining_plan: [],
-        },
-      }],
-    },
-    {
-      toolCalls: [{
-        id: 'valid-submit',
-        name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
-        args: {
-          registry_digest: workspace.registryDigest,
-          result: 'next_task',
-          next_task: {
-            objective: pendingTask.task,
-            capability_intent: 'Repository exploration',
-            capability_name: 'explore',
-            context_summary: pendingTask.contextSummary,
+            context_summary: 'Use the issue and repository as evidence.',
           },
           remaining_plan: [],
         },
@@ -380,21 +359,15 @@ test('direct mode rejects task mutation and lets the model correct the submissio
 
   const result = await createCapabilityPlannerAgent({
     model,
-    maxIterations: 5,
-  }).invoke(plannerInput(workspace, {
-    mode: 'direct',
-    pendingTask,
-  }));
+    maxIterations: 4,
+  }).invoke(plannerInput(workspace));
 
   assert.equal(result.result, 'next_task');
-  assert.equal(result.next_task.objective, pendingTask.task);
-  assert.equal(result.next_task.context_summary, pendingTask.contextSummary);
-  const correctionInput = model.invocations[2] ?? [];
-  const mutationError = correctionInput.find((message) =>
-    message instanceof ToolMessage
-    && typeof message.content === 'string'
-    && message.content.includes('direct_task_mutation'));
-  assert.ok(mutationError);
+  assert.equal(
+    result.next_task.objective,
+    'Inspect issue #473 and report the Planner Agent constraints.',
+  );
+  assert.equal(result.remaining_plan.length, 0);
 });
 
 test('an unknown or unobserved Capability returns tool feedback and can be repaired in-loop', async (t) => {
@@ -479,7 +452,7 @@ test('an empty workspace can produce a truthful unavailable result', async (t) =
   });
 });
 
-test('a non-empty workspace cannot be declared unavailable before document exploration', async (t) => {
+test('a registered general Capability is the mandatory fallback for unmatched work', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -510,9 +483,26 @@ test('a non-empty workspace cannot be declared unavailable before document explo
     },
     {
       toolCalls: [{
-        id: 'verified-unavailable',
+        id: 'still-unavailable',
         name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
         args: unavailable,
+      }],
+    },
+    {
+      toolCalls: [{
+        id: 'general-fallback',
+        name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
+        args: {
+          registry_digest: workspace.registryDigest,
+          result: 'next_task',
+          next_task: {
+            objective: unavailable.task,
+            capability_intent: 'General execution fallback',
+            capability_name: 'general',
+            context_summary: unavailable.reason,
+          },
+          remaining_plan: [],
+        },
       }],
     },
   ]);
@@ -521,14 +511,19 @@ test('a non-empty workspace cannot be declared unavailable before document explo
     plannerInput(workspace),
   );
 
-  assert.equal(result.result, 'unavailable');
+  assert.equal(result.result, 'next_task');
+  assert.equal(result.next_task.capability_name, 'general');
   assert.ok(model.invocations[1]?.some((message) =>
     message instanceof ToolMessage
     && typeof message.content === 'string'
-    && message.content.includes('capability_not_observed')));
+    && message.content.includes('general_fallback_required')));
+  assert.ok(model.invocations[3]?.some((message) =>
+    message instanceof ToolMessage
+    && typeof message.content === 'string'
+    && message.content.includes('general_fallback_required')));
 });
 
-test('boundary mode can finish with answer after accepted handoff facts satisfy the goal', async (t) => {
+test('boundary mode rejects answer and materializes remaining work with general', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -536,36 +531,69 @@ test('boundary mode can finish with answer after accepted handoff facts satisfy 
       instructions: 'Complete the requested work.',
     }),
   });
-  const model = new ScriptedPlannerModel([{
-    toolCalls: [{
-      id: 'answer',
-      name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
-      args: {
-        registry_digest: workspace.registryDigest,
-        result: 'answer',
-        next_task: null,
-        remaining_plan: [],
-      },
-    }],
-  }]);
+  const model = new ScriptedPlannerModel([
+    {
+      toolCalls: [{
+        id: 'answer',
+        name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
+        args: {
+          registry_digest: workspace.registryDigest,
+          result: 'answer',
+          next_task: null,
+          remaining_plan: [],
+        },
+      }],
+    },
+    {
+      toolCalls: [{
+        id: 'view-general',
+        name: CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
+        args: { path: 'general/CAPABILITY.md', startLine: 1, endLine: 20 },
+      }],
+    },
+    {
+      toolCalls: [{
+        id: 'submit-general',
+        name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
+        args: {
+          registry_digest: workspace.registryDigest,
+          result: 'next_task',
+          next_task: {
+            objective: 'Prepare the review from the completed research.',
+            capability_intent: 'Review synthesis',
+            capability_name: 'general',
+            context_summary: 'Use the accepted research handoff as evidence.',
+          },
+          remaining_plan: [],
+        },
+      }],
+    },
+  ]);
 
-  const result = await createCapabilityPlannerAgent({ model }).invoke(
+  const result = await createCapabilityPlannerAgent({
+    model,
+    maxIterations: 5,
+  }).invoke(
     plannerInput(workspace, {
       mode: 'boundary',
       completedTasks: [{
         objective: 'Research the repository.',
-        result: 'The requested evidence and conclusion were delivered.',
+        result: 'The requested evidence was delivered; review synthesis remains.',
       }],
-      latestHandoff: 'Research complete.',
-      remainingPlan: [],
+      latestHandoff: 'Research complete; prepare the review.',
+      remainingPlan: [{
+        objective: 'Prepare the review from the findings.',
+        capabilityIntent: 'Review synthesis',
+      }],
     }),
   );
 
-  assert.deepEqual(result, {
-    result: 'answer',
-    next_task: null,
-    remaining_plan: [],
-  });
+  assert.equal(result.result, 'next_task');
+  assert.equal(result.next_task.capability_name, 'general');
+  assert.ok(model.invocations[1]?.some((message) =>
+    message instanceof ToolMessage
+    && typeof message.content === 'string'
+    && message.content.includes('invalid_arguments')));
 });
 
 test('document observation exhaustion is reported as planning_limit_reached, not unavailable', async (t) => {

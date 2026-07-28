@@ -6,6 +6,7 @@ import {
 import {
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -44,6 +45,15 @@ import {
   PERSISTENT_HOST_MENTION_REPLY,
   PERSISTENT_HOST_REPLY,
   PERSISTENT_HOST_REMOVED_ATTACHMENT_NAME,
+  PERSISTENT_HOST_REVIEW_APPROVED_REPLY,
+  PERSISTENT_HOST_REVIEW_INPUT,
+  PERSISTENT_HOST_REVIEW_REJECTED_REPLY,
+  PERSISTENT_HOST_REVIEW_SPEC,
+  PERSISTENT_HOST_TIMELINE_INPUT,
+  PERSISTENT_HOST_TIMELINE_REPLY,
+  PERSISTENT_HOST_TIMELINE_SUBAGENT,
+  PERSISTENT_HOST_TIMELINE_TOOL_OUTPUT,
+  PERSISTENT_HOST_TIMELINE_TOOL_UPDATE,
 } from './support/persistentHostGraphService';
 
 const AUTH_TOKEN = 'tui-v2-production-pty-token';
@@ -68,6 +78,7 @@ test('production v2 process exercises composer workflows through a real PTY', {
   skip: process.platform !== 'darwin'
     ? 'macOS expect PTY smoke'
     : false,
+  timeout: 20_000,
 }, async () => {
   const root = mkdtempSync(join(tmpdir(), 'pinpawo-tui-v2-pty-'));
   const workdir = join(root, 'workspace');
@@ -80,6 +91,9 @@ test('production v2 process exercises composer workflows through a real PTY', {
   const removedAttachmentPath = join(workdir, removedAttachmentName);
   const mentionPath = join(workdir, PERSISTENT_HOST_MENTION_NAME);
   const editorScriptPath = join(root, 'visual-fixture.mjs');
+  const pagerScriptPath = join(root, 'pager-fixture.mjs');
+  const pagerSentinelPath = join(root, 'pager-validated.txt');
+  const transcriptExportPath = join(workdir, 'exported-transcript.md');
   mkdirSync(workdir, { recursive: true });
   mkdirSync(join(home, '.pinpawo'), { recursive: true });
   writeFileSync(firstAttachmentPath, 'first attachment');
@@ -98,6 +112,52 @@ test('production v2 process exercises composer workflows through a real PTY', {
     `  filePath, ${JSON.stringify(`${PERSISTENT_HOST_EDITOR_INPUT}\n`)}, 'utf8',`,
     ');',
   ].join('\n'));
+  const orderedChatValues = [
+    PERSISTENT_HOST_ATTACHMENT_INPUT,
+    firstAttachmentName,
+    secondAttachmentName,
+    PERSISTENT_HOST_ATTACHMENT_REPLY,
+    PERSISTENT_HOST_INPUT,
+    PERSISTENT_HOST_REPLY,
+    PERSISTENT_HOST_INPUT,
+    PERSISTENT_HOST_REPLY,
+    PERSISTENT_HOST_MENTION_INPUT,
+    PERSISTENT_HOST_MENTION_REPLY,
+    PERSISTENT_HOST_EDITOR_INPUT,
+    PERSISTENT_HOST_EDITOR_REPLY,
+  ];
+  const orderedExportValues = [
+    ...orderedChatValues,
+    PERSISTENT_HOST_TIMELINE_INPUT,
+    PERSISTENT_HOST_TIMELINE_REPLY,
+    PERSISTENT_HOST_REVIEW_INPUT,
+    PERSISTENT_HOST_REVIEW_APPROVED_REPLY,
+  ];
+  const orderedPagerValues = [
+    ...orderedChatValues.flatMap((value) => value.split('\n')),
+    PERSISTENT_HOST_TIMELINE_INPUT,
+    'read_fixture',
+    PERSISTENT_HOST_TIMELINE_TOOL_OUTPUT,
+    PERSISTENT_HOST_TIMELINE_SUBAGENT,
+    ...PERSISTENT_HOST_TIMELINE_REPLY.split('\n').filter(Boolean),
+    PERSISTENT_HOST_REVIEW_INPUT,
+    PERSISTENT_HOST_REVIEW_APPROVED_REPLY,
+  ];
+  const privateTranscriptValues = [
+    firstAttachmentPath,
+    secondAttachmentPath,
+    removedAttachmentName,
+    removedAttachmentPath,
+    '<local_attachments>',
+  ];
+  writeFileSync(
+    pagerScriptPath,
+    createPagerFixtureSource({
+      orderedValues: orderedPagerValues,
+      forbiddenValues: privateTranscriptValues,
+      sentinelPath: pagerSentinelPath,
+    }),
+  );
   writeFileSync(
     join(home, '.pinpawo', 'local-server-token'),
     `${AUTH_TOKEN}\n`,
@@ -198,6 +258,55 @@ test('production v2 process exercises composer workflows through a real PTY', {
       '  timeout { exit 136 }',
       '  eof { exit 137 }',
       '}',
+      `send -- [binary format H* ${utf8Hex(PERSISTENT_HOST_TIMELINE_INPUT)}]`,
+      'send -- "\\033\\[13;5u"',
+      'expect {',
+      '  -exact "is aligned." {}',
+      '  timeout { exit 138 }',
+      '  eof { exit 139 }',
+      '}',
+      `send -- [binary format H* ${utf8Hex(PERSISTENT_HOST_REVIEW_INPUT)}]`,
+      'send -- "\\033\\[13;5u"',
+      'expect {',
+      `  -exact ${JSON.stringify(PERSISTENT_HOST_REVIEW_SPEC.view.body)} {}`,
+      '  timeout { exit 140 }',
+      '  eof { exit 141 }',
+      '}',
+      `send -- [binary format H* ${utf8Hex('approval-input-must-not-leak')}]`,
+      'after 100',
+      'send -- "\\033\\[13u"',
+      'expect {',
+      `  -exact ${JSON.stringify(PERSISTENT_HOST_REVIEW_APPROVED_REPLY)} {}`,
+      '  timeout { exit 142 }',
+      '  eof { exit 143 }',
+      '}',
+      `send -- [binary format H* ${utf8Hex('/tra')}]`,
+      'after 100',
+      'send -- "\\t"',
+      'after 100',
+      'send -- "\\033\\[13;5u"',
+      'expect {',
+      '  -exact "transcript closed" {}',
+      '  timeout { exit 144 }',
+      '  eof { exit 145 }',
+      '}',
+      `send -- [binary format H* ${utf8Hex('/exp')}]`,
+      'after 100',
+      'send -- "\\t"',
+      'after 100',
+      `send -- [binary format H* ${utf8Hex(transcriptExportPath)}]`,
+      'send -- "\\033\\[13;5u"',
+      `set export_path ${JSON.stringify(transcriptExportPath)}`,
+      'set export_ready 0',
+      'for {set attempt 0} {$attempt < 200} {incr attempt} {',
+      '  if {[file exists $export_path]} {',
+      '    set export_ready 1',
+      '    break',
+      '  }',
+      '  after 25',
+      '}',
+      'if {!$export_ready} { exit 146 }',
+      'after 100',
       `send -- [binary format H* ${utf8Hex('/he')}]`,
       'after 100',
       'send -- "\\t"',
@@ -205,8 +314,8 @@ test('production v2 process exercises composer workflows through a real PTY', {
       'send -- "\\033\\[13;5u"',
       'expect {',
       '  -exact "PgUp/PgDn" {}',
-      '  timeout { exit 138 }',
-      '  eof { exit 139 }',
+      '  timeout { exit 147 }',
+      '  eof { exit 148 }',
       '}',
       'send -- "\\033"',
       'after 100',
@@ -217,7 +326,7 @@ test('production v2 process exercises composer workflows through a real PTY', {
       'send -- "\\033\\[13;5u"',
       'expect {',
       '  eof {}',
-      '  timeout { exit 140 }',
+      '  timeout { exit 149 }',
       '}',
       'set result [wait]',
       'exit [lindex $result 3]',
@@ -238,6 +347,10 @@ test('production v2 process exercises composer workflows through a real PTY', {
           VISUAL: [
             JSON.stringify(process.execPath),
             JSON.stringify(editorScriptPath),
+          ].join(' '),
+          PAGER: [
+            JSON.stringify(process.execPath),
+            JSON.stringify(pagerScriptPath),
           ].join(' '),
         },
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -261,12 +374,16 @@ test('production v2 process exercises composer workflows through a real PTY', {
       undefined,
       `could not start TUI PTY: ${result.error?.message}`,
     );
+    const output = decodeExpectBinaryOutput(stdout.join(''));
     assert.equal(
       result.code,
       0,
-      `TUI PTY failed: signal=${result.signal}\n${stderr.join('')}`,
+      [
+        `TUI PTY failed: signal=${result.signal}`,
+        stderr.join(''),
+        output.slice(-4_000),
+      ].join('\n'),
     );
-    const output = decodeExpectBinaryOutput(stdout.join(''));
     assert.match(output, /PinPawo TUI v2/);
     assert.match(output, /connected/);
     assert.match(output, /process-restart-model/);
@@ -285,8 +402,29 @@ test('production v2 process exercises composer workflows through a real PTY', {
     assert.ok(output.includes(PERSISTENT_HOST_MENTION_REPLY));
     assert.ok(output.includes('external editor draft loaded'));
     assert.ok(output.includes(PERSISTENT_HOST_EDITOR_REPLY));
+    assert.ok(output.includes(PERSISTENT_HOST_TIMELINE_INPUT));
+    assert.ok(output.includes(PERSISTENT_HOST_TIMELINE_TOOL_OUTPUT));
+    assert.ok(output.includes(PERSISTENT_HOST_TIMELINE_SUBAGENT));
+    assert.ok(output.includes('Ordered result'));
+    assert.ok(output.includes(PERSISTENT_HOST_REVIEW_APPROVED_REPLY));
+    assert.ok(!output.includes(PERSISTENT_HOST_REVIEW_REJECTED_REPLY));
+    assert.ok(!output.includes('approval-input-must-not-leak'));
+    assert.ok(output.includes('transcript closed'));
     assert.ok(output.includes('PgUp/PgDn'));
     const searchableOutput = compactTerminalObservation(output);
+    assert.ok(searchableOutput.includes(
+      compactTerminalObservation(PERSISTENT_HOST_REVIEW_SPEC.view.title),
+    ));
+    assert.ok(searchableOutput.includes(
+      compactTerminalObservation(PERSISTENT_HOST_TIMELINE_TOOL_UPDATE),
+    ));
+    assertLastOrderedSubstrings(searchableOutput, [
+      compactTerminalObservation('read_fixture'),
+      compactTerminalObservation(PERSISTENT_HOST_TIMELINE_TOOL_OUTPUT),
+      compactTerminalObservation(PERSISTENT_HOST_TIMELINE_SUBAGENT),
+      compactTerminalObservation('Ordered result'),
+      compactTerminalObservation('The production timeline is aligned.'),
+    ], 'production terminal timeline');
     assert.ok(
       !searchableOutput.includes(compactTerminalObservation(firstAttachmentPath)),
     );
@@ -296,6 +434,24 @@ test('production v2 process exercises composer workflows through a real PTY', {
     assert.ok(
       !searchableOutput.includes(compactTerminalObservation(removedAttachmentPath)),
     );
+    assert.equal(
+      readFileSync(pagerSentinelPath, 'utf8'),
+      'validated',
+      'production TUI did not hand the ordered snapshot to the PAGER child',
+    );
+    const exportedTranscript = readFileSync(transcriptExportPath, 'utf8');
+    assert.match(exportedTranscript, /^# PinPawo TUI Transcript/m);
+    assertOrderedSubstrings(
+      exportedTranscript,
+      orderedExportValues,
+      'exported transcript',
+    );
+    for (const privateValue of privateTranscriptValues) {
+      assert.ok(
+        !exportedTranscript.includes(privateValue),
+        `exported transcript leaked ${JSON.stringify(privateValue)}`,
+      );
+    }
 
     const hostPort = host.port;
     await stopHostProcess(host);
@@ -333,6 +489,10 @@ test('production v2 process exercises composer workflows through a real PTY', {
         `assistant:${PERSISTENT_HOST_MENTION_REPLY}`,
         `user:${PERSISTENT_HOST_EDITOR_INPUT}`,
         `assistant:${PERSISTENT_HOST_EDITOR_REPLY}`,
+        `user:${PERSISTENT_HOST_TIMELINE_INPUT}`,
+        `assistant:${PERSISTENT_HOST_TIMELINE_REPLY}`,
+        `user:${PERSISTENT_HOST_REVIEW_INPUT}`,
+        `assistant:${PERSISTENT_HOST_REVIEW_APPROVED_REPLY}`,
       ],
     );
     const checkpointText = controller.getState().session.timeline.flatMap(
@@ -346,7 +506,12 @@ test('production v2 process exercises composer workflows through a real PTY', {
     assert.ok(!checkpointText.includes(secondAttachmentPath));
     assert.ok(!checkpointText.includes(removedAttachmentName));
     assert.ok(!checkpointText.includes(removedAttachmentPath));
-    assert.equal(controller.getState().session.sessionTokenUsage?.totalTokens, 35);
+    assert.equal(controller.getState().session.sessionTokenUsage?.totalTokens, 49);
+    assert.equal(controller.getState().session.activeRun, null);
+    assert.ok(controller.getState().session.timeline.every((entry) => (
+      entry.type !== 'operation'
+      && (entry.type !== 'message' || entry.role !== 'subagent')
+    )));
   } finally {
     controller?.stop();
     if (tui && tuiExit) {
@@ -370,6 +535,67 @@ function decodeExpectBinaryOutput(value: string) {
 
 function compactTerminalObservation(value: string) {
   return stripAnsiSequences(value).replace(/\s+/g, '');
+}
+
+function createPagerFixtureSource(params: {
+  orderedValues: readonly string[];
+  forbiddenValues: readonly string[];
+  sentinelPath: string;
+}) {
+  return [
+    "import { readFileSync, writeFileSync } from 'node:fs';",
+    'const filePath = process.argv.at(-1);',
+    "if (!filePath) throw new Error('missing pager file path');",
+    "const content = readFileSync(filePath, 'utf8');",
+    `const orderedValues = ${JSON.stringify(params.orderedValues)};`,
+    `const forbiddenValues = ${JSON.stringify(params.forbiddenValues)};`,
+    'let cursor = 0;',
+    'for (const value of orderedValues) {',
+    '  const index = content.indexOf(value, cursor);',
+    '  if (index < 0) {',
+    "    throw new Error('missing ordered transcript value: ' + JSON.stringify(value));",
+    '  }',
+    '  cursor = index + value.length;',
+    '}',
+    'for (const value of forbiddenValues) {',
+    '  if (content.includes(value)) {',
+    "    throw new Error('private transcript value leaked: ' + JSON.stringify(value));",
+    '  }',
+    '}',
+    `writeFileSync(${JSON.stringify(params.sentinelPath)}, 'validated', 'utf8');`,
+  ].join('\n');
+}
+
+function assertOrderedSubstrings(
+  content: string,
+  values: readonly string[],
+  label: string,
+) {
+  let cursor = 0;
+  for (const value of values) {
+    const index = content.indexOf(value, cursor);
+    assert.ok(
+      index >= 0,
+      `${label} omitted or reordered ${JSON.stringify(value)}`,
+    );
+    cursor = index + value.length;
+  }
+}
+
+function assertLastOrderedSubstrings(
+  content: string,
+  values: readonly string[],
+  label: string,
+) {
+  let cursor = -1;
+  for (const value of values) {
+    const index = content.lastIndexOf(value);
+    assert.ok(
+      index > cursor,
+      `${label} did not settle ${JSON.stringify(value)} after offset ${cursor}`,
+    );
+    cursor = index;
+  }
 }
 
 async function waitFor(

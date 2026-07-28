@@ -24,12 +24,12 @@ Status meanings:
 | --- | --- | --- | --- |
 | host | authenticated local WebSocket, snapshot bootstrap, reconnect | aligned | the no-smoke v2 production process reaches an authenticated host through a macOS PTY, exits through the user `/quit` path, and independent host processes restore a non-empty FileSaver checkpoint and continue the same session; full `pinpawo run` browser-runtime dogfood remains |
 | chat | submit a message through the shared protocol | aligned | a real PTY drives composer text and Kitty `Ctrl+Enter` through the no-smoke production entry, then rehydrates that turn after host restart; sustained live-LLM dogfood remains |
-| chat | canonical message/operation/subagent ordering | aligned | richer rendering below |
-| timeline | streaming assistant response on a live surface | aligned | real-host Markdown delta dogfood |
-| timeline | running/updated tool operation appears before completion | aligned | current branch adds an atomic live operation surface |
+| chat | canonical message/operation/subagent ordering | aligned | a no-smoke production PTY now settles operation output, distinct subagent progress, and the final assistant message in canonical terminal order; sustained real-agent dogfood remains |
+| timeline | streaming assistant response on a live surface | aligned | a no-smoke production PTY observes multiple Markdown deltas before the final rich-text commit; live-LLM Markdown dogfood remains |
+| timeline | running/updated tool operation appears before completion | aligned | the production PTY observes the running operation, an output-delta update, and its completed output before later canonical rows settle |
 | timeline | operation target, summary, bounded output/error, and patch detail | aligned | real-host tool and patch dogfood |
-| timeline | assistant Markdown, lists, links, tables, and code blocks | aligned | cross-terminal and real-host Markdown dogfood |
-| timeline | distinct subagent identity and progress presentation | aligned | v2 reuses the legacy paragraph/sentence grouping behind a distinct role surface |
+| timeline | assistant Markdown, lists, links, tables, and code blocks | aligned | production PTY coverage now includes streaming emphasis plus a final heading/rich-text commit; cross-terminal and broader real-host Markdown dogfood remains |
+| timeline | distinct subagent identity and progress presentation | aligned | v2 reuses the legacy paragraph/sentence grouping behind a distinct role surface, now verified between a production operation and main-assistant reply in a real PTY |
 | timeline | timestamps and actor label | aligned | canonical timestamps and the session actor label feed the shared display model |
 | timeline | long-session bounded commits and session boundaries | aligned | continue performance dogfood with real sessions |
 | scrolling | terminal-owned touchpad scroll, selection, and copy | aligned in Ghostty | Terminal.app, iTerm2, and integrated-terminal matrix |
@@ -40,11 +40,11 @@ Status meanings:
 | composer | workspace `@path` completion | aligned | a no-smoke macOS PTY opens the production overlay, completes a Unicode filename containing a space, submits the exact text to the host, and restores it from checkpoint; the cross-terminal matrix remains |
 | attachments | quoted, escaped, `file://`, and multiple local paths | aligned | production OpenTUI paste handling now separates multiple paths into attachments while preserving ordinary multiline paste; a real macOS PTY covers quoted paths with spaces, Unicode filenames, and last-item removal, while the cross-terminal drag-in matrix remains |
 | attachments | removable structured attachment chips and submit | aligned | production host integration proves selected full paths reach model context without eager content reads while terminal/checkpoint text remains filename-only; the PTY graph also proves a removed path does not reach model input or recovery, while live tool dogfood remains |
-| review | approval, rejection, text response, batching, cancellation | aligned | production handler-chain approval and cancel-to-reject resume are covered; live guarded-tool dogfood remains |
+| review | approval, rejection, text response, batching, cancellation | aligned | production handler-chain approval and cancel-to-reject resume are covered; a no-smoke PTY now drives a real checkpointed LangGraph interrupt through the approval overlay, proves non-input keys do not leak into the composer, approves, resumes, and restores the completed turn after host restart; live guarded-tool dogfood remains |
 | session | new session and resume picker | aligned | production handler-chain new/list/resume, native scrollback boundaries, and non-empty checkpoint recovery across host processes are covered; live checkpoint dogfood remains |
 | runtime | interrupt, error notice, review policy | aligned | production interruption, graph-failure recovery, immediate stop wake-up, and process-level host restart are covered; full CLI/browser-runtime dogfood remains |
 | status | two-line run/model/workspace/token/context status | aligned | narrow-terminal dogfood |
-| transcript | pager handoff and Markdown export | aligned | production pager/editor combinations |
+| transcript | pager handoff and Markdown export | aligned | a no-smoke macOS PTY completes `/transcript` through the palette, hands all seven ordered turns plus operation/subagent rows to a real `$PAGER` child without local-path leakage, resumes the composer, and writes the seven canonical user/assistant turns through `/export`; actual pager and cross-terminal combinations remain |
 | editor | `$VISUAL`/`$EDITOR` handoff and draft restore | aligned | a no-smoke macOS PTY invokes a real `$VISUAL` child with inherited TTY, validates its initial file, restores a Unicode multiline draft after renderer resume, submits it to the production host, and recovers it from checkpoint; actual editor combinations remain |
 | Studio | Studio-specific workflow expansion | deferred | tracked after chat parity |
 | release | package/runtime distribution | partial | platform install matrix; no default switch during parity work |
@@ -60,12 +60,16 @@ Status meanings:
    - confirm subagent progress remains distinct from main-assistant messages.
 2. Exercise a real local-agent run containing:
    user message → streaming assistant/tool activity → subagent output →
-   completed assistant message.
+   completed assistant message. The deterministic production host and no-smoke
+   `main.ts` PTY now cover this exact ordering, including a tool-output update
+   and multi-delta Markdown; sustained live-model/tool dogfood remains.
 3. Dogfood approval against a live guarded tool. Deterministic production-host
    coverage now includes approval, cancel-to-reject resume, interruption
    (including partial-stream settlement), reconnect across independent host
    processes with non-empty FileSaver history, new, list, resume, and native
-   scrollback session boundaries.
+   scrollback session boundaries. The no-smoke production PTY also drives a
+   real checkpointed LangGraph review through overlay ownership, keyed resume,
+   completion, and restart recovery; only actual guarded-tool dogfood remains.
 4. Dogfood structured attachments with real local tools. The deterministic
    production-host integration already proves full paths reach model context,
    contents are not eagerly read, and terminal/checkpoint text remains
@@ -76,7 +80,7 @@ Status meanings:
 ### P1 — daily-use interaction parity
 
 1. Complete cross-terminal prompt-history/file-mention plus command, clipboard,
-   actual-editor combinations, and transcript dogfood.
+   actual-editor, and pager combinations.
 2. Complete the cross-terminal multi-file drag-in and attachment-removal matrix.
 3. Validate narrow layouts, resize, long sessions, and failure recovery.
 

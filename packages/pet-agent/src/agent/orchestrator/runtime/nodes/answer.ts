@@ -1,6 +1,10 @@
 import { AIMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import {
+  buildHandoffArtifactRefs,
+  formatHandoffArtifactRefsForMessage,
+} from '../../artifacts/handoff';
+import {
   getMessageHandoffSource,
   mainConversationMessages,
   readLatestAnnounce,
@@ -31,8 +35,8 @@ export function createAnswerNode(config: OrchestratorConfig) {
     const actor = resolveActor(config, runnableConfig);
     // The full main conversation queue. Completed subagent results live here as
     // handoff copies (first-class, lane-free). A user-input-required result is
-    // different: its lane remains resumable, so its announce is appended only to
-    // this model invocation and never copied into main state.
+    // different: its lane remains resumable, so its announce and artifact refs
+    // are appended only to this model invocation and never copied into main state.
     const history = mainConversationMessages(state.messages);
     const latestMainMessage = history.at(-1);
     const handoffSource = latestMainMessage
@@ -47,16 +51,31 @@ export function createAnswerNode(config: OrchestratorConfig) {
           outcome: acceptedOutcome,
         }
       : null;
-    const userInputRequiredAnnounce = acceptedOutcome === 'user_input_required'
-      && state.taskActiveDelegation
+    const userInputRequiredDelegation = acceptedOutcome === 'user_input_required'
+      ? state.taskActiveDelegation
+      : null;
+    const userInputRequiredAnnounce = userInputRequiredDelegation
       ? readLatestAnnounce(state.messages, {
-          runId: state.taskActiveDelegation.transcriptRunId,
-          delegationId: state.taskActiveDelegation.id,
+          runId: userInputRequiredDelegation.transcriptRunId,
+          delegationId: userInputRequiredDelegation.id,
         })
       : null;
+    const userInputRequiredArtifactContext = userInputRequiredDelegation
+      ? formatHandoffArtifactRefsForMessage(buildHandoffArtifactRefs(
+          state.sessionCapabilityArtifacts,
+          {
+            runId: userInputRequiredDelegation.transcriptRunId,
+            delegationId: userInputRequiredDelegation.id,
+          },
+        ))
+      : '';
     const awaitingUserInput = acceptedOutcome === 'user_input_required';
-    const answerHistory = userInputRequiredAnnounce?.text
-      ? [...history, new AIMessage(userInputRequiredAnnounce.text)]
+    const userInputRequiredContext = [
+      userInputRequiredAnnounce?.text ?? '',
+      userInputRequiredArtifactContext,
+    ].join('').trim();
+    const answerHistory = userInputRequiredContext
+      ? [...history, new AIMessage(userInputRequiredContext)]
       : history;
     const terminalContext = awaitingUserInput
       ? null

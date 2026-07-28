@@ -14,6 +14,7 @@ import type { SubagentRuntimeEvent } from '../../types/subagent';
 import {
   applyReviewEffects,
   buildToolAuthorizationRecord,
+  readToolAuthorizationMatcher,
   ReviewEffectApplicationError,
   type ToolAuthorizationRecord,
 } from './review/reviewAuthorizations';
@@ -31,6 +32,7 @@ import type {
   PendingReviewAction,
   ReviewResponseResolution,
   ReviewSpec,
+  ToolAuthorizationMatcher,
   HumanReviewBatchInterruptPayload,
   HumanReviewInterruptPayload,
 } from './review/reviewSpec';
@@ -108,6 +110,14 @@ function reviewCapabilitiesForGlobalPolicy(ctx: ToolkitReviewRuntimeContext) {
 
 function runtimeCanCollectHumanReview(ctx: ToolkitReviewRuntimeContext) {
   return ctx.reviewCapabilities?.humanReview !== false;
+}
+
+function toolAuthorizationsForGlobalPolicy(ctx: ToolkitReviewRuntimeContext) {
+  if (ctx.globalReviewPolicy?.mode === GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION) {
+    return ctx.toolAuthorizations;
+  }
+  return ctx.toolAuthorizations?.filter((authorization) =>
+    authorization.source !== 'auto_review');
 }
 
 function buildHumanReviewUnavailableReason(resolution: GlobalReviewPolicyResolution | null) {
@@ -351,7 +361,7 @@ async function recordToolAuthorizations(
  * for exact matching arguments in the same checkpointed session, but never
  * widen it to a shell wildcard, URL domain, or toolkit-defined broad matcher.
  */
-function buildAutoReviewSessionAuthorizations(params: {
+async function buildAutoReviewSessionAuthorizations(params: {
   ctx: ToolkitReviewRuntimeContext;
   reviews: PreparedToolkitReview[];
 }) {
@@ -363,19 +373,46 @@ function buildAutoReviewSessionAuthorizations(params: {
     return [];
   }
 
-  return params.reviews.flatMap((review) => {
+  const authorizations: ToolAuthorizationRecord[] = [];
+  for (const review of params.reviews) {
     const pendingAction = review.reviewPayload.pendingAction;
-    if (!pendingAction) {
-      return [];
+    const buildAuthorizationMatcher = review.reviewPolicy.buildAuthorizationMatcher;
+    if (!pendingAction || !buildAuthorizationMatcher) {
+      continue;
     }
-    return [buildToolAuthorizationRecord({
+    let declaredMatcher: ToolAuthorizationMatcher | null;
+    try {
+      declaredMatcher = await buildAuthorizationMatcher({
+        toolkitName: review.toolkitName,
+        toolName: review.toolName,
+        input: pendingAction.args,
+        operation: review.operation,
+        pendingAction,
+        effect: {
+          type: 'graph.authorize_tool_action',
+          scope: 'thread',
+          actionRef: { type: 'pending_action' },
+          matcher: { type: 'policy_hook' },
+        },
+      });
+    } catch {
+      // Session reuse is optional; a broken matcher hook must not overturn the
+      // auto-review decision for the current concrete action.
+      continue;
+    }
+    if (!readToolAuthorizationMatcher(declaredMatcher)) {
+      continue;
+    }
+    authorizations.push(buildToolAuthorizationRecord({
       toolName: review.toolName,
       matcher: {
         type: 'exact_args',
         value: { ...pendingAction.args },
       },
-    })];
-  });
+      source: 'auto_review',
+    }));
+  }
+  return authorizations;
 }
 
 export type ToolkitReviewBinding = {
@@ -393,6 +430,7 @@ type ToolkitReviewState = z.infer<typeof ToolkitReviewStateSchema>;
 
 type PreparedToolkitReview = GlobalReviewPolicyBatchItem & {
   toolCall: ToolCall;
+  reviewPolicy: ToolReviewPolicy;
   reviewPayload: HumanReviewInterruptPayload;
 };
 
@@ -504,7 +542,7 @@ async function prepareToolkitToolReview(params: {
     input: currentInput,
     operation: binding.operation,
     reviewCapabilities: reviewCapabilitiesForGlobalPolicy(ctx),
-    toolAuthorizations: ctx.toolAuthorizations,
+    toolAuthorizations: toolAuthorizationsForGlobalPolicy(ctx),
   });
 
   if (!reviewSpec) {
@@ -544,6 +582,7 @@ async function prepareToolkitToolReview(params: {
       toolName: binding.toolName,
       input: currentInput,
       operation: binding.operation,
+      reviewPolicy: binding.reviewPolicy,
       autoReviewContext: binding.toolkit.reviewGuidance,
       review: reviewPayload.review,
       reviewPayload,
@@ -834,7 +873,7 @@ async function resolvePreparedToolkitReviews(params: {
   });
 
   if (policyResolution.type === GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE) {
-    const sessionAuthorizations = buildAutoReviewSessionAuthorizations({
+    const sessionAuthorizations = await buildAutoReviewSessionAuthorizations({
       ctx: params.ctx,
       reviews: params.prepared.reviews,
     });

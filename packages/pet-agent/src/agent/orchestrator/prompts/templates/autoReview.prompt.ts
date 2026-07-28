@@ -1,6 +1,9 @@
 import { definePromptTemplate } from '../template';
 
-export const AUTO_REVIEW_SYSTEM_PROMPT = definePromptTemplate<{ toolkitPolicyBlock: string }>(
+export const AUTO_REVIEW_SYSTEM_PROMPT = definePromptTemplate<{
+  toolkitPolicyBlock: string;
+  outputInstruction: string;
+}>(
   `You are the security reviewer for a local AI agent.
 
 Mission:
@@ -22,8 +25,8 @@ Automatic-authorization boundary:
 - Human authorization is required for destructive or broad changes, writes outside the workdir, credentials or secret exposure, permission or repository-administration changes, software installation, spending money, force pushes or history rewrites, deployments or releases, or shell commands with unclear effects.
 - Evaluate the complete batch. One unsafe or unclear action makes the batch require authorization.
 {toolkitPolicyBlock}
-`,
-  ['toolkitPolicyBlock'],
+{outputInstruction}`,
+  ['toolkitPolicyBlock', 'outputInstruction'],
 );
 
 export const AUTO_REVIEW_INPUT_PROMPT = definePromptTemplate<{

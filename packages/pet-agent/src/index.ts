@@ -218,6 +218,7 @@ export type {
   ApplyReviewEffectsOptions,
   ReviewEffectApplicationErrorCode,
   ToolAuthorizationRecord,
+  ToolAuthorizationSource,
 } from './agent/orchestrator/review/reviewAuthorizations';
 export {
   buildStandardReviewOptions,

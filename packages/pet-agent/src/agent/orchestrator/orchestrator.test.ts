@@ -2786,6 +2786,7 @@ test('global review policy reuses an exact auto authorization in the same sessio
     [
       {
         toolName: 'run_shell',
+        source: 'auto_review',
         matcher: {
           type: 'exact_args',
           value: { command: 'git status --short' },
@@ -2793,6 +2794,7 @@ test('global review policy reuses an exact auto authorization in the same sessio
       },
       {
         toolName: 'run_shell',
+        source: 'auto_review',
         matcher: {
           type: 'exact_args',
           value: { command: 'git diff --stat' },
@@ -2807,6 +2809,85 @@ test('global review policy reuses an exact auto authorization in the same sessio
       'global_review_policy_auto_authorized',
     ],
   );
+
+  const downgradedResources = await resolveToolkitExecution(toolkits, ['bash'], {
+    models: { act: autoModel },
+    actor: testActor,
+    messages: [],
+    reviewCapabilities: {
+      humanReview: false,
+      sessionAuthorization: true,
+    },
+    globalReviewPolicy: { mode: 'require_authorization' },
+    toolAuthorizations: sessionAuthorizations,
+  });
+  const afterDowngrade = await runToolkitToolCall(downgradedResources, {
+    id: 'call-status-after-downgrade',
+    name: 'run_shell',
+    args: { command: 'git status --short' },
+  });
+  const downgradeResult = JSON.parse(String(readToolMessageContent(
+    afterDowngrade.messages,
+    'call-status-after-downgrade',
+  ))) as { cancelled?: boolean; source?: string };
+  assert.equal(downgradeResult.cancelled, true);
+  assert.equal(downgradeResult.source, 'policy_block');
+  assert.equal(callCount, 3);
+  assert.equal(autoReviewCount, 2);
+});
+
+test('global review policy does not record auto grants for policies without session authorization', async () => {
+  let autoReviewCount = 0;
+  const sessionAuthorizations: ToolAuthorizationRecord[] = [];
+  const rawTool = tool(async ({ command }: { command: string }) => `ran ${command}`, {
+    name: 'run_shell',
+    description: 'run shell',
+    schema: z.object({ command: z.string() }),
+  });
+  const toolkits: AgentToolkit[] = [{
+    name: 'bash',
+    description: 'bash tools',
+    tools: [reviewedTool(rawTool, ReviewPolicies.commandExecution())],
+  }];
+  const autoModel = {
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        autoReviewCount += 1;
+        return {
+          decision: 'authorize',
+          reason: 'The command is safe but the tool policy does not support session authorization.',
+        };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const resources = await resolveToolkitExecution(toolkits, ['bash'], {
+    models: { act: autoModel },
+    actor: testActor,
+    messages: [],
+    reviewCapabilities: {
+      humanReview: true,
+      sessionAuthorization: true,
+    },
+    globalReviewPolicy: { mode: 'auto_authorization' },
+    toolAuthorizations: sessionAuthorizations,
+    recordToolAuthorization: (authorization) => {
+      sessionAuthorizations.push(authorization);
+    },
+  });
+
+  await runToolkitToolCall(resources, {
+    id: 'call-status-no-grant-1',
+    name: 'run_shell',
+    args: { command: 'git status --short' },
+  });
+  await runToolkitToolCall(resources, {
+    id: 'call-status-no-grant-2',
+    name: 'run_shell',
+    args: { command: 'git status --short' },
+  });
+
+  assert.equal(autoReviewCount, 2);
+  assert.deepEqual(sessionAuthorizations, []);
 });
 
 test('global review policy auto_authorization evaluates a tool-call batch once', async () => {
@@ -2902,14 +2983,14 @@ test('global review policy auto_authorization evaluates a tool-call batch once',
   assert.match(reviewPrompt, /b\.txt/);
   assert.match(systemPrompt, /Toolkit local:/);
   assert.equal(
-    systemPrompt.match(/Allow narrow writes to user-requested files\./g)?.length,
+    systemPrompt.match(/Automatic-authorization eligibility: narrow writes to user-requested files\./g)?.length,
     1,
   );
   assert.equal(
-    systemPrompt.match(/Ask before broad or destructive writes\./g)?.length,
+    systemPrompt.match(/Human-authorization conditions: before broad or destructive writes\./g)?.length,
     1,
   );
-  assert.doesNotMatch(reviewPrompt, /Toolkit local:|Allow narrow writes/);
+  assert.doesNotMatch(reviewPrompt, /Toolkit local:|narrow writes to user-requested files/);
   const authorizationEvent = runtimeEvents[0] as {
     name?: unknown;
     data?: { batchSize?: unknown; toolCalls?: unknown[] };
@@ -3167,6 +3248,7 @@ test('toolkit review policy records authorization through orchestrator runtime t
   assert.deepEqual(finalState.sessionToolAuthorizations.map(({ createdAt: _createdAt, ...item }) => item), [{
     toolName: 'run_shell',
     matcher: { type: 'shell_pattern', value: 'git status' },
+    source: 'human',
   }]);
   const authorizationEvents = runtimeEvents.filter((event) =>
     event
@@ -3183,6 +3265,7 @@ test('toolkit review policy records authorization through orchestrator runtime t
   assert.deepEqual(eventAuthorizations.map(({ createdAt: _createdAt, ...item }) => item), [{
     toolName: 'run_shell',
     matcher: { type: 'shell_pattern', value: 'git status' },
+    source: 'human',
   }]);
   assert.equal(reviewCount, 2);
   assert.equal(runCount, 1);

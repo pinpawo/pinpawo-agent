@@ -154,18 +154,19 @@ async function resolveAutoAuthorization(
   }
 
   try {
+    const structuredOutput = options.policy?.mode === GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION
+      ? options.policy.structuredOutput
+      : undefined;
     const decision = await invokeStructuredOutput({
       model,
       schema: AUTO_REVIEW_DECISION_SCHEMA,
       options: {
         name: 'global_review_policy_auto_decision',
         autoRepair: true,
-        ...(options.policy?.mode === GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION
-          ? options.policy.structuredOutput
-          : undefined),
+        ...structuredOutput,
       },
       messages: [
-        new SystemMessage(buildAutoReviewSystemPrompt(options.reviews)),
+        new SystemMessage(buildAutoReviewSystemPrompt(options.reviews, structuredOutput?.method)),
         new HumanMessage(prompt.text),
       ],
     });

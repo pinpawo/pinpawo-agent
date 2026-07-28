@@ -312,11 +312,36 @@ test('auto review puts registered toolkit policy in the trusted system prompt', 
   const humanPrompt = String(humanMessage?.content);
   assert.match(systemPrompt, /Registered toolkit auto-review policies:/);
   assert.match(systemPrompt, /Toolkit git:/);
-  assert.match(systemPrompt, /Eligible for automatic authorization: Allow normal non-force pushes/);
-  assert.match(systemPrompt, /Requires human authorization: Ask before force pushes/);
-  assert.doesNotMatch(systemPrompt, /- Allow:|- Ask:/);
+  assert.match(systemPrompt, /Automatic-authorization eligibility: normal non-force pushes/);
+  assert.match(systemPrompt, /Human-authorization conditions: before force pushes/);
+  assert.doesNotMatch(systemPrompt, /- Allow:|- Ask:|conditions: Ask\b/);
   assert.doesNotMatch(humanPrompt, /Registered toolkit auto-review policies|normal non-force pushes/);
   assert.doesNotMatch(humanPrompt, /Conversation context/);
+});
+
+test('auto review gives jsonMode providers the canonical output protocol', async () => {
+  let capturedMessages: unknown;
+  await resolveGlobalReviewBatchPolicy({
+    policy: {
+      mode: 'auto_authorization',
+      structuredOutput: { method: 'jsonMode' },
+    },
+    models: {
+      act: autoModel(async (messages) => {
+        capturedMessages = messages;
+        return safeDecision;
+      }),
+    },
+    actor: testActor,
+    messages: [],
+    reviews: [review()],
+  });
+
+  const systemPrompt = String((capturedMessages as Array<{ content?: unknown }>)[0]?.content);
+  assert.match(systemPrompt, /Output protocol:/);
+  assert.match(systemPrompt, /"decision": exactly "authorize" or "require_authorization"/);
+  assert.match(systemPrompt, /"reason": a concise explanation/);
+  assert.doesNotMatch(systemPrompt, /"ask"/);
 });
 
 test('auto review has no toolkit policy block when none is registered', async () => {
@@ -372,6 +397,6 @@ test('auto review deduplicates toolkit policy across a batch', async () => {
 
   const systemPrompt = String((capturedMessages as Array<{ content?: unknown }>)[0]?.content);
   assert.equal(systemPrompt.match(/Toolkit git:/g)?.length, 1);
-  assert.equal(systemPrompt.match(/Allow routine repository collaboration/g)?.length, 1);
-  assert.equal(systemPrompt.match(/Ask before history-rewriting repository operations/g)?.length, 1);
+  assert.equal(systemPrompt.match(/Automatic-authorization eligibility: routine repository collaboration/g)?.length, 1);
+  assert.equal(systemPrompt.match(/Human-authorization conditions: before history-rewriting repository operations/g)?.length, 1);
 });

@@ -31,8 +31,9 @@ export type TranscriptPagerOptions = {
 export function resolveTranscriptPagerCommand(
   env: NodeJS.ProcessEnv = process.env,
   fallbackCommand = process.platform === 'win32' ? 'more' : 'less',
+  platform: NodeJS.Platform = process.platform,
 ): TerminalCommand {
-  return parseTerminalCommand(env.PAGER ?? '')
+  return parseTerminalCommand(env.PAGER ?? '', platform)
     ?? { command: fallbackCommand, args: [] };
 }
 

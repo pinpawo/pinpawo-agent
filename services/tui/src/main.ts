@@ -237,12 +237,19 @@ const composer = new TextareaRenderable(renderer, {
   height: '100%',
   backgroundColor: RGBA.defaultBackground(),
   focusedBackgroundColor: RGBA.defaultBackground(),
-  placeholder: 'Message · Ctrl+Enter to send',
-  keyBindings: [{
-    name: 'return',
-    ctrl: true,
-    action: 'submit',
-  }],
+  placeholder: 'Message · Ctrl+Enter or Ctrl+O to send',
+  keyBindings: [
+    {
+      name: 'return',
+      ctrl: true,
+      action: 'submit',
+    },
+    {
+      name: 'o',
+      ctrl: true,
+      action: 'submit',
+    },
+  ],
   onSubmit: () => submitComposerInput(),
   onContentChange: () => {
     const selectedHistoryText = composerHistory.selectedIndex === null
@@ -645,8 +652,8 @@ function refreshHeader() {
 
 function syncComposerModeUi() {
   composer.placeholder = composerMode === 'studio'
-    ? 'Studio task · Ctrl+Enter to run · /chat to exit'
-    : 'Message · Ctrl+Enter to send';
+    ? 'Studio task · Ctrl+Enter/Ctrl+O run · /chat to exit'
+    : 'Message · Ctrl+Enter or Ctrl+O to send';
   refreshHeader();
 }
 

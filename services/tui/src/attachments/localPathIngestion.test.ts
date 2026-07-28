@@ -27,6 +27,41 @@ test('path parser accepts quoted, escaped, file URL, and multiple absolute paths
   );
 });
 
+test('path parser preserves Windows drive, UNC, and file URL paths', () => {
+  assert.deepEqual(
+    parseLocalPathCandidates(
+      '"C:\\Users\\Alice\\My File.txt" \'D:\\资料\\第二.txt\'',
+      'win32',
+    ),
+    [
+      'C:\\Users\\Alice\\My File.txt',
+      'D:\\资料\\第二.txt',
+    ],
+  );
+  assert.deepEqual(
+    parseLocalPathCandidates('\\\\server\\share\\folder\\file.txt', 'win32'),
+    ['\\\\server\\share\\folder\\file.txt'],
+  );
+  assert.deepEqual(
+    parseLocalPathCandidates(
+      'file:///C:/Users/Alice/My%20File.txt',
+      'win32',
+    ),
+    ['C:\\Users\\Alice\\My File.txt'],
+  );
+  assert.deepEqual(
+    parseLocalPathCandidates(
+      'file://server/share/Folder/My%20File.txt',
+      'win32',
+    ),
+    ['\\\\server\\share\\Folder\\My File.txt'],
+  );
+  assert.equal(
+    parseLocalPathCandidates('"C:\\Users\\Alice\\My File.txt', 'win32'),
+    null,
+  );
+});
+
 test('path ingestion validates readable files and directories without reading content', async () => {
   const root = await mkdtemp(join(tmpdir(), 'pinpawo-attachments-'));
   const file = join(root, 'hello.txt');

@@ -90,6 +90,30 @@ test('transcript export path handles default, file, directory, and home paths', 
   }), path.join(os.homedir(), 'out.md'));
 });
 
+test('transcript export path uses Windows drive and home semantics', () => {
+  const expectedName =
+    'pinpawo-transcript-chat-pet-a-2026-06-01T01-02-03-000Z.md';
+  const common = {
+    cwd: 'C:\\workspace',
+    sessionId: 'chat:pet/a',
+    now: FIXED_NOW,
+    platform: 'win32' as const,
+    homeDir: 'C:\\Users\\Alice',
+  };
+  assert.equal(resolveTranscriptExportPath({
+    ...common,
+    requestedPath: '~\\out.md',
+  }), 'C:\\Users\\Alice\\out.md');
+  assert.equal(resolveTranscriptExportPath({
+    ...common,
+    requestedPath: 'transcripts',
+  }), `C:\\workspace\\transcripts\\${expectedName}`);
+  assert.equal(resolveTranscriptExportPath({
+    ...common,
+    requestedPath: 'D:\\exports\\session.md',
+  }), 'D:\\exports\\session.md');
+});
+
 test('transcript export creates parents and defaults to canonical runtime cwd', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'pinpawo-v2-export-'));
   const session = createSession([{

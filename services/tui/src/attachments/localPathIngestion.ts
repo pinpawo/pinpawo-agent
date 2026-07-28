@@ -5,12 +5,12 @@ import {
 } from 'node:fs';
 import {
   basename,
-  isAbsolute,
-  normalize,
+  posix,
   win32,
 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentLocalAttachment } from '@pinpawo/agent-session';
+import { splitWindowsCommandLine } from '../terminal/commandLine';
 
 export type LocalPathPasteResult =
   | {
@@ -85,12 +85,19 @@ export function ingestLocalPathPaste(
   return { kind: 'attachments', attachments, duplicateCount };
 }
 
-export function parseLocalPathCandidates(input: string): string[] | null {
+export function parseLocalPathCandidates(
+  input: string,
+  platform: NodeJS.Platform = process.platform,
+): string[] | null {
   const trimmed = input.trim();
   if (!trimmed || trimmed.includes('\0')) return null;
 
-  const words = tokenizeShellWords(trimmed);
-  const parsedWords = words?.map(normalizeLocalPathToken) ?? null;
+  const words = platform === 'win32' || looksLikeWindowsPathInput(trimmed)
+    ? splitWindowsCommandLine(trimmed)
+    : tokenizeShellWords(trimmed);
+  const parsedWords = words?.map((word) => (
+    normalizeLocalPathToken(word, platform)
+  )) ?? null;
   if (
     parsedWords
     && parsedWords.length > 0
@@ -100,23 +107,60 @@ export function parseLocalPathCandidates(input: string): string[] | null {
     return dedupePaths(parsedWords);
   }
 
-  const wholePath = normalizeLocalPathToken(trimmed);
+  const wholePath = normalizeLocalPathToken(trimmed, platform);
   return wholePath ? [wholePath] : null;
 }
 
-function normalizeLocalPathToken(token: string): string | null {
+function normalizeLocalPathToken(
+  token: string,
+  platform: NodeJS.Platform,
+): string | null {
   let path = token;
   if (path.startsWith('file://')) {
     try {
-      path = fileURLToPath(path);
+      path = localPathFromFileUrl(path, platform);
     } catch {
       return null;
     }
   }
-  if (!isAbsolute(path) && !win32.isAbsolute(path) && !path.startsWith('\\\\')) {
-    return null;
+  if (platform === 'win32' || isExplicitWindowsAbsolutePath(path)) {
+    return win32.isAbsolute(path) ? win32.normalize(path) : null;
   }
-  return normalize(path);
+  return posix.isAbsolute(path) ? posix.normalize(path) : null;
+}
+
+function localPathFromFileUrl(
+  value: string,
+  platform: NodeJS.Platform,
+) {
+  if (platform === 'win32') {
+    const url = new URL(value);
+    if (
+      url.protocol === 'file:'
+      && url.hostname
+      && url.hostname.toLowerCase() !== 'localhost'
+    ) {
+      if (/%(?:2f|5c)/i.test(url.pathname)) {
+        throw new Error('encoded file URL separators are not supported');
+      }
+      const sharePath = decodeURIComponent(url.pathname).replaceAll('/', '\\');
+      return win32.normalize(`\\\\${url.hostname}${sharePath}`);
+    }
+  }
+  const path = fileURLToPath(value, { windows: platform === 'win32' });
+  if (platform === 'win32' && /^\/[A-Za-z]:\//.test(path)) {
+    return win32.normalize(path.slice(1));
+  }
+  return path;
+}
+
+function looksLikeWindowsPathInput(input: string) {
+  return /(?:^|\s|["'])[A-Za-z]:[\\/]/.test(input)
+    || /(?:^|\s|["'])\\\\/.test(input);
+}
+
+function isExplicitWindowsAbsolutePath(path: string) {
+  return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\');
 }
 
 function tokenizeShellWords(input: string): string[] | null {

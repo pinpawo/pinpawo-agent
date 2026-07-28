@@ -24,6 +24,12 @@ test('external editor command prefers VISUAL and parses arguments', () => {
     command: 'my editor',
     args: ['--flag'],
   });
+  assert.deepEqual(resolveExternalEditorCommand({
+    VISUAL: '"C:\\Program Files\\Editor\\editor.exe" --wait',
+  }, 'win32'), {
+    command: 'C:\\Program Files\\Editor\\editor.exe',
+    args: ['--wait'],
+  });
   assert.equal(resolveExternalEditorCommand({}), null);
 });
 

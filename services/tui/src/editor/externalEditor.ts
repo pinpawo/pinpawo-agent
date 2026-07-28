@@ -29,9 +29,10 @@ export type ExternalEditorOptions = {
 
 export function resolveExternalEditorCommand(
   env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
 ): ExternalEditorCommand | null {
   const raw = env.VISUAL?.trim() || env.EDITOR?.trim() || '';
-  return raw ? parseTerminalCommand(raw) : null;
+  return raw ? parseTerminalCommand(raw, platform) : null;
 }
 
 export async function editTextWithExternalEditor(

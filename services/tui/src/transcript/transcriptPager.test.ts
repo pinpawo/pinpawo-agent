@@ -24,6 +24,12 @@ test('transcript pager resolves PAGER arguments and a platform fallback', () => 
     command: 'test-pager',
     args: [],
   });
+  assert.deepEqual(resolveTranscriptPagerCommand({
+    PAGER: '"C:\\Program Files\\Pager\\pager.exe" --plain',
+  }, 'more', 'win32'), {
+    command: 'C:\\Program Files\\Pager\\pager.exe',
+    args: ['--plain'],
+  });
 });
 
 test('transcript pager text includes the complete ordered canonical timeline', () => {

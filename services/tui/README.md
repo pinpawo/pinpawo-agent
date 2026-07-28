@@ -76,6 +76,10 @@ than publishing a TUI API package or six PinPawo platform binary packages.
 so legacy CLI installation and `pinpawo tui --legacy` remain available if a
 platform cannot install the v2 runtime.
 
+Windows drive and UNC attachment paths, plus quoted `VISUAL`/`EDITOR`/`PAGER`
+commands under `Program Files`, use Windows tokenization so separator
+backslashes are not interpreted as POSIX shell escapes.
+
 The client reads `LOCAL_SERVER_PORT` (default `3210`) and the bearer token
 written by the host to `~/.pinpawo/local-server-token`. It will synchronize the
 active Session before enabling submission and will reconnect with bounded
@@ -83,7 +87,9 @@ backoff if the host disappears.
 
 Production client controls:
 
-- `Ctrl+Enter` submits the composer;
+- `Ctrl+Enter` submits the composer; terminals without distinguishable modified
+  Enter input can use the raw `Ctrl+O` fallback without changing multiline
+  Enter behavior;
 - `Cmd+A`, `Cmd+Z`/`Shift+Cmd+Z`, Option+arrows, Home/End, and Shift-modified
   movement use the native multiline editor selection and history behavior;
 - plain `↑` on the first visual row recalls sent chat prompts; plain `↓` on
@@ -92,6 +98,8 @@ Production client controls:
   `Ctrl+Shift+C`/`Ctrl+Shift+X` are available when the terminal forwards them,
   and a failed clipboard write never deletes the selection;
 - dragging or pasting one or more absolute local paths creates attachment chips;
+  POSIX shell escaping and Windows drive/UNC separators are parsed independently
+  so Windows backslashes are not consumed as shell escapes;
 - Backspace removes the last attachment while the composer text is empty;
 - typing a standalone `@path` token in chat opens workspace candidates;
   `↑`/`↓` selects, Tab/Enter inserts, and Esc closes only the candidate view;
@@ -168,7 +176,8 @@ client. It includes only completed user and assistant messages, so live deltas,
 operations, and system rows are not duplicated into the transcript. A path
 with an extension is treated as the destination file; a path without one is
 treated as a directory. Without an argument, the file is written under the
-session runtime working directory.
+session runtime working directory. Windows drive paths and `~\` home paths use
+win32 resolution rather than POSIX path rules.
 
 `/transcript` is intentionally different from `/export`: it snapshots every
 ordered canonical timeline entry, including operations, system rows, and

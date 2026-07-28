@@ -13,3 +13,24 @@ test('terminal command parser preserves quoted arguments and escapes', () => {
   });
   assert.equal(parseTerminalCommand('   '), null);
 });
+
+test('terminal command parser preserves Windows executable separators', () => {
+  assert.deepEqual(parseTerminalCommand(
+    '"C:\\Program Files\\Microsoft VS Code\\Code.exe" --wait',
+    'win32',
+  ), {
+    command: 'C:\\Program Files\\Microsoft VS Code\\Code.exe',
+    args: ['--wait'],
+  });
+  assert.deepEqual(parseTerminalCommand(
+    '"C:\\Tools\\pager.exe" "--style=plain text"',
+    'win32',
+  ), {
+    command: 'C:\\Tools\\pager.exe',
+    args: ['--style=plain text'],
+  });
+  assert.equal(parseTerminalCommand(
+    '"C:\\Program Files\\Editor\\editor.exe',
+    'win32',
+  ), null);
+});

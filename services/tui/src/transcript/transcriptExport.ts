@@ -39,19 +39,28 @@ export function resolveTranscriptExportPath(params: {
   cwd: string;
   sessionId: string;
   now: Date;
+  platform?: NodeJS.Platform;
+  homeDir?: string;
 }) {
   const requested = params.requestedPath?.trim();
   const fileName = defaultTranscriptFileName(params.sessionId, params.now);
+  const platform = params.platform ?? process.platform;
+  const pathApi = platform === 'win32' ? path.win32 : path.posix;
   if (!requested) {
-    return path.join(params.cwd, fileName);
+    return pathApi.join(params.cwd, fileName);
   }
-  const expanded = expandHomePath(requested);
-  const resolved = path.isAbsolute(expanded)
+  const expanded = expandHomePath(
+    requested,
+    platform,
+    params.homeDir ?? os.homedir(),
+    pathApi,
+  );
+  const resolved = pathApi.isAbsolute(expanded)
     ? expanded
-    : path.resolve(params.cwd, expanded);
-  return path.extname(resolved)
+    : pathApi.resolve(params.cwd, expanded);
+  return pathApi.extname(resolved)
     ? resolved
-    : path.join(resolved, fileName);
+    : pathApi.join(resolved, fileName);
 }
 
 export function formatTranscriptMarkdown(
@@ -102,9 +111,19 @@ function formatRole(entry: TranscriptEntry) {
   return entry.role === 'assistant' ? 'Assistant' : 'User';
 }
 
-function expandHomePath(value: string) {
-  if (value === '~') return os.homedir();
-  if (value.startsWith('~/')) return path.join(os.homedir(), value.slice(2));
+function expandHomePath(
+  value: string,
+  platform: NodeJS.Platform,
+  homeDir: string,
+  pathApi: typeof path.posix,
+) {
+  if (value === '~') return homeDir;
+  if (
+    value.startsWith('~/')
+    || (platform === 'win32' && value.startsWith('~\\'))
+  ) {
+    return pathApi.join(homeDir, value.slice(2));
+  }
   return value;
 }
 

@@ -597,7 +597,7 @@ test('production v2 executes reviewed and attachment toolkit calls through a rea
       '  eof { exit 161 }',
       '}',
       `send -- [binary format H* ${utf8Hex(GUARDED_HOST_INPUT)}]`,
-      'send -- "\\033\\[13;5u"',
+      'send -- "\\017"',
       'expect {',
       `  -exact ${JSON.stringify(GUARDED_HOST_REVIEW_TITLE)} {}`,
       '  timeout { exit 162 }',

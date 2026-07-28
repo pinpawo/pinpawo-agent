@@ -16,6 +16,24 @@ import type { AgentLocalAttachment } from '@pinpawo/agent-session';
 import {
   handleAttachmentPasteEvent,
 } from './attachmentPaste';
+import { parseLocalPathCandidates } from './localPathIngestion';
+
+test('Bun path parser preserves Windows drive and UNC file URLs', () => {
+  assert.deepEqual(
+    parseLocalPathCandidates(
+      'file:///C:/Users/Alice/My%20File.txt',
+      'win32',
+    ),
+    ['C:\\Users\\Alice\\My File.txt'],
+  );
+  assert.deepEqual(
+    parseLocalPathCandidates(
+      'file://server/share/Folder/My%20File.txt',
+      'win32',
+    ),
+    ['\\\\server\\share\\Folder\\My File.txt'],
+  );
+});
 
 test('production attachment paste keeps paths out of the OpenTUI textarea', async (context) => {
   const root = await mkdtemp(join(tmpdir(), 'pinpawo-native-attachments-'));

@@ -1,5 +1,6 @@
 import {
   listTuiCommands,
+  type TuiCommandAvailability,
   type TuiCommandDefinition,
 } from './commandRegistry';
 
@@ -32,11 +33,13 @@ const CLOSED_COMMAND_PALETTE: CommandPaletteModel = {
 export function buildCommandPaletteModel(
   input: CommandPaletteInput,
   selectedIndex = 0,
+  availability: TuiCommandAvailability = {},
 ): CommandPaletteModel {
   const query = resolveCommandPaletteQuery(input);
   if (query === null) return CLOSED_COMMAND_PALETTE;
 
-  const items = listTuiCommands().filter((command) => commandMatchesQuery(command, query));
+  const items = listTuiCommands(availability)
+    .filter((command) => commandMatchesQuery(command, query));
   return {
     open: true,
     query,
@@ -99,5 +102,5 @@ function clampSelectedIndex(index: number, itemCount: number) {
 }
 
 function commandExpectsArgs(command: TuiCommandDefinition) {
-  return /\[[^\]]+\]/.test(command.usage);
+  return /(?:\[[^\]]+\]|<[^>]+>)/.test(command.usage);
 }

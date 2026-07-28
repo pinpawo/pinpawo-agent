@@ -74,7 +74,7 @@ async function evaluateGoal(
     acceptanceCriteria: testCase.expected.acceptanceCriteria,
     evidence: {
       conversation: testCase.input.messages,
-      runtimeContext: testCase.input.acceptedHandoff ?? null,
+      runtimeContext: testCase.input.delegationOutcome ?? null,
     },
     candidateOutput: { text: candidateAnswer },
   });
@@ -97,6 +97,7 @@ function collectDiagnostics(
 }
 
 function render(testCase: AnswerBehaviorCase): BaseMessage[] {
+  const delegationOutcome = testCase.input.delegationOutcome;
   return buildAnswerInvocationMessages({
     actor,
     workdir: '/workspace',
@@ -104,16 +105,17 @@ function render(testCase: AnswerBehaviorCase): BaseMessage[] {
     history: testCase.input.messages.map((message) => message.role === 'user'
       ? new HumanMessage(message.text)
       : new AIMessage(message.text)),
-    acceptedHandoff: testCase.input.acceptedHandoff
+    acceptedHandoff: delegationOutcome?.outcome === 'goal_done'
       ? {
-          outcome: testCase.input.acceptedHandoff.outcome,
+          outcome: delegationOutcome.outcome,
           source: {
-            ...testCase.input.acceptedHandoff,
+            ...delegationOutcome,
             delegationId: 'answer-eval-delegation',
             announceMessageId: 'answer-eval-announce',
           },
         }
       : null,
+    awaitingUserInput: delegationOutcome?.outcome === 'user_input_required',
   });
 }
 

@@ -23,7 +23,7 @@ export type AnswerBehaviorInput = {
     role: 'user' | 'assistant';
     text: string;
   }>;
-  acceptedHandoff?: {
+  delegationOutcome?: {
     handoffFrom: 'capability:general' | 'capability:explore';
     runId: string;
     task: string;
@@ -154,7 +154,7 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
             ].join('\n'),
           },
         ],
-        acceptedHandoff: {
+        delegationOutcome: {
           handoffFrom: 'capability:general',
           runId: 'answer-eval-run',
           task: '汇总本周发布风险',
@@ -188,7 +188,7 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
             text: '报告已经完成，但你尚未选择邮件或项目群，当前还没有发送。',
           },
         ],
-        acceptedHandoff: {
+        delegationOutcome: {
           handoffFrom: 'capability:general',
           runId: 'answer-eval-user-choice-run',
           task: '确认发送渠道并发送已经完成的报告',
@@ -210,7 +210,7 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
       },
       metadata: {
         difficulty: 'hard',
-        reason: 'Cross-node boundary: an accepted handoff that requires user input is not goal completion.',
+        reason: 'Cross-node boundary: user input retains a resumable delegation instead of completing handoff.',
         source: SOURCE_FILE,
       },
     },

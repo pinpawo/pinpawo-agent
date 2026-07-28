@@ -1,8 +1,13 @@
 import { AIMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import {
+  buildHandoffArtifactRefs,
+  formatHandoffArtifactRefsForMessage,
+} from '../../artifacts/handoff';
+import {
   getMessageHandoffSource,
   mainConversationMessages,
+  readLatestAnnounce,
   readLatestAnnounceCompletionReason,
   readLatestHumanRequest,
   stampMessageCreatedAtUtc,
@@ -28,12 +33,10 @@ export function createAnswerNode(config: OrchestratorConfig) {
   return async function answerNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
     const { workdir, runtimeEnvironment, maxRunIterations } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
-    // The full main conversation queue. Subagent results already live here as
-    // handoff copies (first-class, lane-free), so the answer node just reads main
-    // — no need to dig announces out of lanes. Context-compaction summaries are
-    // kept; mainConversationMessages drops lane-tagged and internal briefing
-    // messages only. After compaction, a summary may be the sole surviving
-    // record of older accepted results.
+    // The full main conversation queue. Completed subagent results live here as
+    // handoff copies (first-class, lane-free). A user-input-required result is
+    // different: its lane remains resumable, so its announce and artifact refs
+    // are appended only to this model invocation and never copied into main state.
     const history = mainConversationMessages(state.messages);
     const latestMainMessage = history.at(-1);
     const handoffSource = latestMainMessage
@@ -42,23 +45,53 @@ export function createAnswerNode(config: OrchestratorConfig) {
     const acceptedOutcome = state.runLatestDelegationOutcome;
     const acceptedHandoff = handoffSource
       && acceptedOutcome
+      && acceptedOutcome !== 'user_input_required'
       ? {
           source: handoffSource,
           outcome: acceptedOutcome,
         }
       : null;
-    const terminalContext = buildTerminalAnswerContext(
-      state,
-      maxRunIterations
-        ?? readRunIterationLimit(config.maxRunIterations)
-        ?? DEFAULT_ORCHESTRATOR_MAX_ITERATIONS,
-    );
+    const userInputRequiredDelegation = acceptedOutcome === 'user_input_required'
+      ? state.taskActiveDelegation
+      : null;
+    const userInputRequiredAnnounce = userInputRequiredDelegation
+      ? readLatestAnnounce(state.messages, {
+          runId: userInputRequiredDelegation.transcriptRunId,
+          delegationId: userInputRequiredDelegation.id,
+        })
+      : null;
+    const userInputRequiredArtifactContext = userInputRequiredDelegation
+      ? formatHandoffArtifactRefsForMessage(buildHandoffArtifactRefs(
+          state.sessionCapabilityArtifacts,
+          {
+            runId: userInputRequiredDelegation.transcriptRunId,
+            delegationId: userInputRequiredDelegation.id,
+          },
+        ))
+      : '';
+    const awaitingUserInput = acceptedOutcome === 'user_input_required';
+    const userInputRequiredContext = [
+      userInputRequiredAnnounce?.text ?? '',
+      userInputRequiredArtifactContext,
+    ].join('').trim();
+    const answerHistory = userInputRequiredContext
+      ? [...history, new AIMessage(userInputRequiredContext)]
+      : history;
+    const terminalContext = awaitingUserInput
+      ? null
+      : buildTerminalAnswerContext(
+          state,
+          maxRunIterations
+            ?? readRunIterationLimit(config.maxRunIterations)
+            ?? DEFAULT_ORCHESTRATOR_MAX_ITERATIONS,
+        );
     const answerMessages = buildAnswerInvocationMessages({
       actor,
-      history,
+      history: answerHistory,
       workdir,
       runtimeEnvironment,
       acceptedHandoff,
+      awaitingUserInput,
       terminalContext,
     });
     const response = await config.models.act.invoke(answerMessages, runnableConfig);
@@ -83,15 +116,16 @@ export function buildAnswerInvocationMessages(params: {
   runtimeEnvironment?: string;
   acceptedHandoff?: {
     source: HandoffSource;
-    outcome: AcceptedDelegationOutcome;
+    outcome: Exclude<AcceptedDelegationOutcome, 'user_input_required'>;
   } | null;
+  awaitingUserInput?: boolean;
   terminalContext?: string | null;
 }): BaseMessage[] {
   const hasUserGoal = Boolean(readLatestHumanRequest(params.history));
-  const replyContext = params.acceptedHandoff?.outcome === 'goal_done'
-    ? buildDelegationCompletionAnswerContext(params.acceptedHandoff.source, hasUserGoal)
-    : params.acceptedHandoff?.outcome === 'user_input_required'
-      ? buildUserInputRequiredAnswerContext(hasUserGoal)
+  const replyContext = params.awaitingUserInput
+    ? buildUserInputRequiredAnswerContext(hasUserGoal)
+    : params.acceptedHandoff?.outcome === 'goal_done'
+      ? buildDelegationCompletionAnswerContext(params.acceptedHandoff.source, hasUserGoal)
       : params.acceptedHandoff?.outcome === 'task_done'
         ? buildTaskResultAnswerContext(hasUserGoal)
         : hasUserGoal ? buildAnswerReplyContext() : null;

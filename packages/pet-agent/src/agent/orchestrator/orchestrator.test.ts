@@ -1329,7 +1329,7 @@ test('user_input_required returns control without claiming delegation completion
       new HumanMessage('根据我的选择，把已经完成的报告发送到邮件或项目群。'),
     ], { activeDelegationTransition: 'resume_active' }),
     taskActiveDelegation: null as TaskActiveDelegation | null,
-  };
+  } as OrchestratorStateType;
   const task = '确认发送渠道并发送已经完成的报告';
   const announceText = '报告已经完成，但用户尚未选择邮件或项目群，当前无法继续发送。';
   const announceMessage = new AIMessage(announceText);
@@ -1341,7 +1341,13 @@ test('user_input_required returns control without claiming delegation completion
     delegationId: 'task-user-choice',
     task,
   });
-  input.messages.push(announceMessage);
+  input.messages.push(
+    ...interruptedLaneMessages({
+      delegationId: 'task-user-choice',
+      runId: input.runId,
+    }),
+    announceMessage,
+  );
   input.runDelegationSummaries = [{
     id: 'task-user-choice',
     lane: 'capability:general',
@@ -1358,6 +1364,20 @@ test('user_input_required returns control without claiming delegation completion
     status: 'awaiting_decision',
     resultPreview: announceText,
   };
+  input.sessionCapabilityArtifacts = [{
+    id: 'artifact-awaiting-user-choice',
+    threadId: 'delegation-outcome-user-input-required',
+    capabilityId: 'general',
+    delegationId: 'task-user-choice',
+    runId: input.runId,
+    kind: 'report',
+    mimeType: 'text/markdown',
+    uri: 'capability-artifact://thread/user-choice/report',
+    title: '待发送报告',
+    preview: '报告已生成，等待选择发送渠道。',
+    sizeBytes: 42,
+    createdAt: '2026-07-28T00:00:00.000Z',
+  }];
 
   const result = await graph.invoke(input, {
     configurable: {
@@ -1374,9 +1394,118 @@ test('user_input_required returns control without claiming delegation completion
   );
   assert.match(answerInput, /用户目标（尚未完成）/);
   assert.match(answerInput, /报告已经完成，但用户尚未选择邮件或项目群/);
+  assert.match(answerInput, /<artifacts>/);
+  assert.match(answerInput, /capability-artifact:\/\/thread\/user-choice\/report/);
   assert.doesNotMatch(answerInput, /"确认发送渠道并发送已经完成的报告"已完成/);
   assert.equal(result.runDelegationSummaries[0]?.status, 'progress');
-  assert.equal(result.taskActiveDelegation, null);
+  assert.equal(result.taskActiveDelegation?.id, 'task-user-choice');
+  assert.equal(result.taskActiveDelegation?.status, 'awaiting_decision');
+  assert.equal(
+    laneMessages(
+      result.messages,
+      'capability:general',
+      input.runId,
+      'task-user-choice',
+    ).some((message) => message instanceof ToolMessage),
+    true,
+  );
+  assert.equal(
+    result.messages.some((message) =>
+      getMessageHandoffSource(message)?.delegationId === 'task-user-choice'),
+    false,
+  );
+  assert.equal(
+    mainConversationMessages(result.messages).some((message) =>
+      String(message.content).includes('capability-artifact://thread/user-choice/report')),
+    false,
+  );
+});
+
+test('capability errors retain the active delegation and lane without a handoff', async () => {
+  const activeDelegation: TaskActiveDelegation = {
+    id: 'task-capability-error',
+    lane: 'capability:general',
+    task: '继续处理会失败的 delegated task',
+    contextSummary: null,
+    transcriptRunId: 'run-capability-error',
+    status: 'pending',
+    resultPreview: null,
+  };
+  const messages = interruptedLaneMessages({
+    delegationId: activeDelegation.id,
+    runId: activeDelegation.transcriptRunId,
+  });
+  const failingCapability: AgentCapability = {
+    ...capability('general', 'General-purpose capability.'),
+    lifecycle: {
+      finalize: () => {
+        throw new Error('capability finalize failed');
+      },
+    },
+  };
+  const graph = createOrchestratorGraph({
+    models: {
+      act: new FakeListChatModel({ responses: ['unused'], sleep: 0 }),
+      subagent: new FakeListChatModel({
+        responses: ['执行产生了结果，但 finalize 随后失败。'],
+        sleep: 0,
+      }),
+    },
+    actor: testActor,
+    checkpoint: new MemorySaver(),
+  });
+  const config = {
+    configurable: {
+      thread_id: 'delegation-capability-error',
+      actor: testActor,
+      capabilities: [failingCapability],
+      toolkits: [],
+    },
+  };
+  await graph.updateState(config, {
+    messages,
+    runId: activeDelegation.transcriptRunId,
+    taskActiveDelegation: activeDelegation,
+    runDelegationSummaries: [{
+      id: activeDelegation.id,
+      lane: activeDelegation.lane,
+      task: activeDelegation.task,
+      status: 'progress',
+      resultPreview: null,
+    }],
+  });
+
+  await assert.rejects(
+    graph.invoke(
+      buildOrchestratorRunInput(
+        [new HumanMessage('继续执行')],
+        { activeDelegationTransition: 'resume_active' },
+      ),
+      config,
+    ),
+    /capability finalize failed/,
+  );
+
+  const checkpoint = await graph.getState(config);
+  const checkpointState = checkpoint.values as OrchestratorStateType;
+  assert.equal(checkpointState.taskActiveDelegation?.id, activeDelegation.id);
+  assert.equal(
+    checkpointState.taskActiveDelegation?.transcriptRunId,
+    activeDelegation.transcriptRunId,
+  );
+  assert.equal(
+    laneMessages(
+      checkpointState.messages,
+      activeDelegation.lane,
+      activeDelegation.transcriptRunId,
+      activeDelegation.id,
+    ).some((message) => message instanceof ToolMessage),
+    true,
+  );
+  assert.equal(
+    checkpointState.messages.some((message) => getMessageHandoffSource(message)),
+    false,
+  );
 });
 
 test('task_done followed by planner answer does not imply user-goal completion', async () => {
@@ -5282,13 +5411,23 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
     task: '继续原来的仓库检查',
     contextSummary: '已经完成第一步。',
     transcriptRunId: 'resume-pending-run',
-    status: 'pending',
-    resultPreview: null,
+    status: 'awaiting_decision',
+    resultPreview: '第一步完成后，需要用户确认检查方向。',
   };
   const oldMessages = interruptedLaneMessages({
     delegationId: activeDelegation.id,
     runId: activeDelegation.transcriptRunId,
   });
+  const priorAnnounce = new AIMessage(activeDelegation.resultPreview ?? '');
+  setPinpetMeta(priorAnnounce, {
+    lane: activeDelegation.lane,
+    runId: activeDelegation.transcriptRunId,
+    isAnnounce: true,
+    completionReason: 'natural',
+    delegationId: activeDelegation.id,
+    task: activeDelegation.task,
+  });
+  oldMessages.push(priorAnnounce);
   let structuredCallCount = 0;
   let executedDelegation: { delegationId: string; runId: string } | null = null;
   const actModel = {
@@ -5297,7 +5436,9 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
     withStructuredOutput: () => ({
       invoke: async () => {
         structuredCallCount += 1;
-        return goalDoneDecision();
+        return structuredCallCount === 1
+          ? continueDecision('用户已确认优先检查最新修改。')
+          : goalDoneDecision();
       },
     }),
   } as unknown as AgentModels['act'];
@@ -5348,7 +5489,7 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
     config,
   );
 
-  assert.equal(structuredCallCount, 1);
+  assert.equal(structuredCallCount, 2);
   assert.deepEqual(executedDelegation, {
     delegationId: activeDelegation.id,
     runId: activeDelegation.transcriptRunId,

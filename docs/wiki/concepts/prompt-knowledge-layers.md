@@ -1,11 +1,12 @@
 ---
 title: Prompt Knowledge Layers
 page_type: concept
-status: draft
-updated: 2026-07-25
+status: validated
+updated: 2026-07-29
 sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
-  - ../../PET_AGENT_DECISION_NODE_OWNERSHIP_AUDIT.md
+  - ../../../packages/pet-agent/src/agent/orchestrator/capabilityPlannerAgent.ts
+  - https://github.com/pinpawo/pinpawo-agent/pull/492
 related:
   - orchestrator-practical-reasoning.md
   - decision-node-ownership.md
@@ -23,13 +24,14 @@ model input; the fourth belongs to the runtime.
 
 | Layer | Purpose | Examples |
 |---|---|---|
-| Static contract | Stable meaning of a node and its output | entry chooses execution shape; outcome validates an announce |
+| Static contract | Stable meaning of a node and its output | entry chooses result availability; Planner forms a task and selects its Capability; outcome validates an announce |
 | Conditional protocol | Protocol selected by provider or product configuration without changing graph semantics | JSON mode schema rendering |
-| Injected facts | Values that vary per call | user request, task, plan tail, candidates, announce, workdir |
-| Deterministic enforcement | State and safety rules that code can derive | guards, availability, schema validation, routing, cleanup |
+| Injected facts | Values that vary per call | user request, workspace digest, completed tasks, future tail, announce, workdir |
+| Deterministic enforcement | State and safety rules that code can derive | guards, workspace containment, availability, schema validation, routing, cleanup |
 
-This model was established by [the decision prompt design](../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md)
-and [the ownership audit](../../PET_AGENT_DECISION_NODE_OWNERSHIP_AUDIT.md).
+This model is defined by
+[the decision prompt design](../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md)
+and instantiated by the current Planner harness.
 
 ## Why the distinction matters
 

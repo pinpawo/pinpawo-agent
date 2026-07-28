@@ -1,18 +1,23 @@
 ---
-title: CapabilityPlanner Maintains Result-Bounded Future Work
+title: Capability Planner Owns Task Boundaries And Capability Selection
 page_type: decision
 status: validated
-updated: 2026-07-27
+updated: 2026-07-29
 sources:
-  - ../../CAPABILITY_PLANNER_TASK_HORIZON_DRAFT.md
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
-  - ../../PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md
-  - ../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityPlanner.prompt.ts
-  - ../../../packages/pet-agent/src/agent/orchestrator/runtime/decisions/orchestrationDecision.ts
-  - ../../../packages/pet-agent/src/agent/orchestrator/schemas.ts
+  - ../../../packages/pet-agent/src/agent/orchestrator/capabilityPlannerAgent.ts
+  - ../../../packages/pet-agent/src/agent/orchestrator/capabilityPlannerRunner.ts
+  - ../../../packages/pet-agent/src/agent/orchestrator/capabilityPlannerFileExplorer.ts
+  - ../../../packages/pet-agent/src/agent/orchestrator/capabilityDocumentWorkspace.ts
+  - ../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/capabilityPlanner.ts
   - ../../../packages/pet-agent/evals/datasets/capability-planning-basics.ts
   - ../../../packages/pet-agent/evals/capability-planning-evaluation.ts
-  - https://github.com/pinpawo/pinpawo-agent/pull/461
+  - https://github.com/pinpawo/pinpawo-agent/issues/473
+  - https://github.com/pinpawo/pinpawo-agent/issues/490
+  - https://github.com/pinpawo/pinpawo-agent/pull/474
+  - https://github.com/pinpawo/pinpawo-agent/pull/480
+  - https://github.com/pinpawo/pinpawo-agent/pull/483
+  - https://github.com/pinpawo/pinpawo-agent/pull/492
 related:
   - ../overview.md
   - ../capability-toolkit-architecture.md
@@ -21,125 +26,197 @@ related:
   - ../questions/system-prompts-open-questions.md
 ---
 
-# CapabilityPlanner Maintains Result-Bounded Future Work
-
-## Status and scope
-
-This decision has passed the fixed GLM-5.2 planner profile. Its implementation
-was merged in [PR #461](https://github.com/pinpawo/pinpawo-agent/pull/461) and
-checked against the resulting `main`.
-
-The decision refines the existing `planner.execution-boundary` contract. It does
-not add another orchestrator decision, move executor selection into the planner,
-or make a fixed task decomposition part of the product contract.
+# Capability Planner Owns Task Boundaries And Capability Selection
 
 ## Decision
 
-`capabilityPlanner` maintains the semantic state of the plan across execution
-results.
+Every run that needs a new result enters one Capability Planner Agent. The
+Planner:
 
-- Completed task objectives and result summaries are immutable execution facts.
-- `latest_handoff` is the complete newest result available at the current
-  boundary.
-- `remaining_plan` is the unstarted future tail. The planner may concretize,
-  revise, preserve, reorder, or cancel it when facts change.
-- `next_task` is the first task that the available results make executable now.
-- The ordered position of `next_task` and `remaining_plan` expresses time;
-  future-task labels such as `concrete` and `deferred` are not separate state.
+1. explores the immutable Capability Document Workspace;
+2. forms the current independently executable task;
+3. selects the concrete Capability that owns it;
+4. maintains the ordered, unstarted future plan.
 
-The runtime preserves facts and maps the structured result into graph state. It
-does not reconstruct, advance, or freeze the plan in code.
+All execution-requiring entry paths use this same deliberation. Task formation
+and concrete actor choice are not split across separate stages.
+
+## Why task formation and selection are one judgment
+
+A task boundary is meaningful only relative to an actor that can carry the work
+continuously to a useful result. Separating the two judgments created a lossy
+handoff:
+
+```text
+user purpose
+  -> abstract task + capability intent
+  -> intermediate code-ranked candidate list
+  -> second executor choice
+```
+
+The final executor could be chosen from an incomplete candidate set, while the
+task-forming model could not inspect the complete instructions and Toolkit scope
+of the actors it was planning around.
+
+The accepted flow keeps the deliberation intact:
+
+```text
+user purpose + completed facts + future tail
+  -> model explores CAPABILITY.md files
+  -> current task + concrete Capability + revised future tail
+```
+
+The registry still remains deterministic. It materializes the map; it does not
+decide which path through that map fits the purpose.
+
+## Capability Document Workspace
+
+For one compiled registry generation, the runtime publishes a content-addressed
+directory containing one `CAPABILITY.md` per allowed compiled Capability and
+exposes it to the Planner only through read tools. Typed workspace metadata
+carries the registry digest, allowed names, document paths, digests, and
+provenance.
+
+The Planner receives:
+
+- the workspace root contract and registry digest;
+- `glob_search` for bounded discovery;
+- `grep_search` for literal text exploration;
+- `view_file_chunk` for bounded document reading.
+
+These tools are private Planner infrastructure. They are not Toolkits, are not
+available to Capability subagents, and do not become a third extension concept.
+
+Filesystem containment, symlink rejection, digest verification, observation
+budgets, iteration limits, and timeouts are code-owned invariants. The model owns
+what to explore and how the observed documents change the plan.
 
 ## Task boundary
 
-A task continues while one kind of ability can work continuously toward one
-useful returned result. Stages that the ability arranges internally remain
-inside that task.
+A task continues while one Capability can work continuously toward one useful,
+independently accepted result. Internal preparation, action, verification, and
+reporting remain one task when the same Capability can naturally own them.
 
-A new task boundary is justified when:
+A new boundary is justified when:
 
-- later work cannot be decided until the current task returns its result;
-- a different kind of ability must execute independently; or
-- a separately useful acceptance result warrants returning control to the
-  planner.
+- later work cannot be decided until the current result returns;
+- a different Capability must execute independently; or
+- the user goal contains a separately useful deliverable or acceptance point.
 
-The number of verbs, implementation phases, or anticipated intermediate
-artifacts does not determine task count. More than one decomposition may be
-valid when each boundary is justified and the complete user goal remains
-preserved.
+Verb count, implementation phases, or anticipated intermediate artifacts do not
+determine task count.
 
-## Entry and boundary planning
+## Entry and boundary modes
 
-At `entry`, the planner starts from the complete user goal. It materializes the
-first executable task and preserves later required purposes without inventing
-details that depend on results that do not yet exist.
+At `entry`, the Planner starts from the complete user purpose and canonical
+conversation. It forms the first executable task and preserves only necessary
+future purposes.
 
-At `boundary`, the planner receives four distinct roles:
+At `boundary`, the Planner receives:
 
 | Input | Role |
 |---|---|
-| Complete user goal and canonical conversation | Purpose and interpretation |
-| `completed_tasks` | Read-only facts about work that has already happened |
-| `latest_handoff` | The newest full result that may change future work |
-| `remaining_plan` | Mutable, unstarted work after the completed boundary |
+| User intent context | Purpose and interpretation |
+| `completed_tasks` | Immutable facts about accepted work |
+| `latest_handoff` | The newest complete result |
+| `remaining_plan` | Mutable, unstarted future work |
+| Capability Document Workspace | Current executable actor map |
 
-It uses those inputs to materialize the next task, revise the tail, cancel work
-made obsolete by the result, or select `answer` when no autonomous work remains.
-Already completed work remains visible as fact but cannot return to the future
-plan.
+It may concretize, revise, reorder, or remove the future tail as returned facts
+change what remains useful. Completed work cannot re-enter the future plan.
 
-## Ownership and enforcement
+There is no `direct` mode and no externally staged immutable pending task.
 
-The planner owns:
+## Submission contract
 
-- the current task objective;
-- future task objectives, boundaries, and order;
-- plan revision after completed results;
-- `capability_intent` as a semantic description of the ability a task needs.
+The Planner submits one of two results:
 
-[`capabilityDecision`](../concepts/decision-node-ownership.md#vertical-decisions)
-owns selection of a concrete executor. The capability registry informs the
-planner about available ability types but does not turn `capability_intent` into
-a registry identifier.
+```ts
+type CapabilityPlannerResult =
+  | {
+      result: 'next_task';
+      next_task: {
+        objective: string;
+        capability_intent: string;
+        capability_name: string;
+        context_summary: string | null;
+      };
+      remaining_plan: Array<{
+        objective: string;
+        capability_intent: string;
+      }>;
+    }
+  | {
+      result: 'unavailable';
+      task: string;
+      reason: string;
+    };
+```
 
-The model-visible schema owns the relationship among `result`, `next_task`, and
-`remaining_plan`. Runtime validation enforces the nullable/empty combinations
-and exact duplicate rejection. The graph mechanically maps `next_task` to the
-pending task and `remaining_plan` to the future tail.
+`capability_name` is concrete only for the current task. Future work retains a
+semantic `capability_intent` because its details may depend on results that do
+not yet exist.
+
+The Planner has no `answer` result. Entering it means the run still needs a new
+result. If a completed Capability also completes the user goal,
+`outcomeDecision` must return `goal_done` before another Planner call.
+
+## General fallback
+
+`general` is an ordinary Capability and an explicit Planner policy when it is
+present in the current Workspace:
+
+- if a specialized Capability completely fits the current task, select it;
+- otherwise, if `general` exists, read its document and select
+  `capability_name: "general"`;
+- submit `unavailable` only when no executable Capability, including `general`,
+  can proceed.
+
+The submission tool returns correctable feedback when a model reports
+`unavailable` while `general` is present. The graph node independently
+rejects the same contract violation from an injected Planner runner.
+
+This is not a code-selected fallback: the Planner still owns the task,
+Capability selection, and evidence trail.
+
+## Runtime mapping
+
+For `next_task`, runtime code:
+
+1. verifies that the selected name belongs to the immutable workspace;
+2. rejects duplicate current/future objectives;
+3. materializes one `RunNextDelegation`;
+4. replaces the future tail with `remaining_plan`;
+5. routes to the unified Capability executor.
+
+For truthful `unavailable`, runtime preserves the unexecuted task and reason as
+answer context and creates no delegation.
 
 ## Evaluation contract
 
-Evaluation follows the existing objective-derived pattern:
+Planner evaluation owns:
 
-- deterministic checks own the exact top-level `result` and schema validity;
-- the goal evaluator judges the materialized task, current capability intent,
-  justification of boundaries, preservation and order of future objectives,
-  and semantic compatibility of future capability intents;
-- executor identity is evaluated only by the capability-selection contract;
-- task count, plan effect, rubber-stamp behavior, latency, tokens, and variants
-  remain diagnostics unless a case objective explicitly requires them.
+- appropriate document exploration;
+- current task correctness;
+- concrete current Capability selection;
+- preservation of user purpose;
+- justified task boundaries;
+- correct use of completed facts and latest handoff;
+- semantic validity of the future tail;
+- mandatory General fallback.
 
-The planner stability profile contains six entry/boundary cases covering
-creation, handoff-driven materialization, cancellation, preservation,
-current/future separation, and result-dependent follow-up. The final GLM-5.2
-profile achieved three evaluable passes for every case, `18/18` in total. One
-judge timeout in the full run was replaced by a supplemental evaluable run; it
-was not counted as subject-model success or failure.
-
-Both the prompt-stability runner and the Langfuse LLM runner now use the shared
-planner goal contract in
-[`capability-planning-evaluation.ts`](../../../packages/pet-agent/evals/capability-planning-evaluation.ts).
-A regression test verifies that the correct top-level `result` cannot pass when
-the future plan loses the user's objective.
+Schema validity, filesystem containment, observation budgets, exact workspace
+membership, iteration limits, and the General invariant also have deterministic
+tests. Task count, plan-effect labels, tokens, latency, and cost remain
+diagnostics unless a case explicitly makes them part of success.
 
 ## Consequences
 
-- Plan evolution remains a language-model judgment instead of a coded queue
-  mutation policy.
-- Completed execution history is stable even when later planning changes.
-- Result-dependent work can retain its purpose without pretending that unknown
-  details are already determined.
-- The prompt can describe the planning problem directly without maintaining
-  unused temporal labels.
-- Cross-model validation remains follow-up evidence; the accepted GLM-5.2
-  profile establishes the current single-model baseline.
+- The model explores the registry as a map instead of consuming a coded ranking.
+- Capability count affects bounded workspace exploration rather than prompt
+  injection of every full document.
+- Planning and actor choice cannot drift through an intermediate candidate
+  algorithm.
+- General remains an ordinary Capability while still providing a reliable
+  no-specialist path.
+- Goal completion has one owner: `outcomeDecision`.

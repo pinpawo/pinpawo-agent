@@ -2,10 +2,10 @@
 title: Interruption And Delegation Continuation
 page_type: system
 status: validated
-updated: 2026-07-28
+updated: 2026-07-29
 sources:
   - ../LOCAL_AGENT_SESSION_PROJECTION.md
-  - ../PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md
+  - ../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../../packages/agent-session/src/domain.ts
   - ../../packages/agent-session/src/project.ts
   - ../../packages/agent-session/src/protocol.ts

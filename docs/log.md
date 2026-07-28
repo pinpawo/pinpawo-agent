@@ -313,3 +313,26 @@ lint passes, and documentation migrations.
 - Updated both documentation indexes and the existing decision, provenance,
   practical-reasoning, authoring, source-registry, and open-question
   relationships.
+
+## [2026-07-28] ingest | Interruption and delegation continuation
+
+- Registered issues #465, #466, and #478; PRs #468, #475, #481, and #485; and
+  the current local-server, orchestrator, protocol, TUI, and regression-test
+  implementations as the authoritative interruption/continuation evidence.
+- Added a validated system page separating interrupt intent, server-observed
+  `interrupting`, terminal `interrupted`, checkpoint active-delegation state,
+  and the TUI-local continuation affordance.
+- Documented both end-to-end paths: ordinary `run.interrupt`, and
+  `waiting_review` Esc consuming the review into a persisted canceled tool result
+  and guard stop before graph abort and terminal settlement.
+- Recorded that incomplete delegation lanes remain private checkpoint evidence
+  without announce or handoff; ordinary input explicitly supersedes them, while
+  `/continue <指导>` explicitly resumes the same delegation, run, lane, and
+  provenance.
+- Updated the session-projection, ownership, review-resolution, run-view, and
+  checkpoint/snapshot, message-provenance pages, both indexes, and the open
+  question around reconstructing continuation availability after a TUI process
+  restart; aligned their shared-projection references with the current
+  `@pinpawo/agent-session` package.
+- Preserved the invariant that no client or timeout fabricates a terminal state:
+  the invocation owner emits `interrupted` only after graph output settles.

@@ -2,7 +2,7 @@
 title: Documentation Wiki Index
 page_type: overview
 status: draft
-updated: 2026-07-27
+updated: 2026-07-28
 sources:
   - ../AGENTS.md
 related:
@@ -11,6 +11,7 @@ related:
   - concepts/orchestrator-practical-reasoning.md
   - decisions/capability-planner-task-boundaries.md
   - decisions/delegation-completion-acknowledgement.md
+  - interruption-and-delegation-continuation.md
   - migrations/docs-wiki-management-plan.md
 ---
 
@@ -69,6 +70,9 @@ explicitly migrated.
 - [Local-agent session projection](local-agent-session-projection.md) — system
   synthesis: how checkpoint, snapshot, shared reducer, review lifecycle, and
   transports fit together.
+- [Interruption and delegation continuation](interruption-and-delegation-continuation.md)
+  — end-to-end contract for run settlement, waiting-review Esc, retained
+  delegation lanes, and the fresh-versus-continued next request.
 - [Checkpoint, snapshot, timeline, and timeline state](concepts/checkpoint-snapshot-timeline.md)
   — the four distinct domain terms and the completion-replaces-timeline lifecycle.
 - [Session projection ownership boundaries](concepts/session-projection-ownership.md)

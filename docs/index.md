@@ -10,6 +10,7 @@ the original design and reference documents. Maintenance rules live in
 
 - [Documentation wiki](wiki/index.md)
 - [Capability / Toolkit V2 architecture](wiki/capability-toolkit-architecture.md)
+- [Interruption and delegation continuation](wiki/interruption-and-delegation-continuation.md)
 - [System prompt design knowledge map](wiki/overview.md)
 - [Orchestrator as practical reasoning](wiki/concepts/orchestrator-practical-reasoning.md)
 - [System prompt authoring and evaluation principles](wiki/concepts/system-prompt-authoring-principles.md)
@@ -90,8 +91,9 @@ the original design and reference documents. Maintenance rules live in
 ## Local agent and runtime configuration
 
 - [Local agent architecture refactor](LOCAL_AGENT_ARCHITECTURE_REFACTOR_PLAN.md)
-- [Local agent session projection](LOCAL_AGENT_SESSION_PROJECTION.md) — canonical
-  contract; ingested into [wiki](wiki/local-agent-session-projection.md).
+- [Local agent session projection](LOCAL_AGENT_SESSION_PROJECTION.md) — accepted
+  source contract; current implementation is synthesized in the
+  [wiki](wiki/local-agent-session-projection.md).
 - [Workspace runtime configuration](WORKSPACE_RUNTIME_CONFIG_DESIGN.md)
 - [Workdir-scoped runtime configuration](WORKDIR_SCOPED_RUNTIME_CONFIG_DESIGN.md)
 

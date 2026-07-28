@@ -2,18 +2,24 @@
 title: Review Resolution Progress Is Client-Local
 page_type: decision
 status: validated
-updated: 2026-07-23
+updated: 2026-07-28
 sources:
   - ../../LOCAL_AGENT_SESSION_PROJECTION.md
   - ../../../services/local-agent/src/reviewResolutionLifecycle.ts
   - ../../../services/local-agent/src/humanReviewActionRouting.ts
-  - ../../../services/local-agent/src/reviewAction.ts
+  - ../../../packages/agent-session/src/review.ts
+  - ../../../services/local-agent/src/localServerChatHandler.ts
+  - ../../../services/local-agent/src/tui/TuiRuntimeController.ts
   - https://github.com/pinpawo/pinpawo-agent/issues/385
   - https://github.com/pinpawo/pinpawo-agent/issues/390
   - https://github.com/pinpawo/pinpawo-agent/pull/411
   - https://github.com/pinpawo/pinpawo-agent/pull/425
+  - https://github.com/pinpawo/pinpawo-agent/issues/478
+  - https://github.com/pinpawo/pinpawo-agent/pull/475
+  - https://github.com/pinpawo/pinpawo-agent/pull/485
 related:
   - ../local-agent-session-projection.md
+  - ../interruption-and-delegation-continuation.md
   - ../concepts/session-projection-ownership.md
   - run-view-discriminated-union.md
 ---
@@ -23,7 +29,7 @@ related:
 ## Decision
 
 Sending a review resolution (response or cancel) is a one-shot client command. It
-does **not** mutate the shared `LocalAgentSession`. The shared projection stays at
+does **not** mutate the shared `AgentSession`. The shared projection stays at
 `waiting_review` until a server event or snapshot provides the next fact. The only
 client-side progress is the TUI-local `ReviewDraft.resolutionSent` marker.
 
@@ -65,6 +71,22 @@ interrupted resume releases its claim so the next attempt re-reads authority.
 This lifecycle is transport control state and is never projected (see
 [transport boundary](../concepts/local-agent-transport-boundary.md)).
 
+## Cancel from `waiting_review`
+
+**Decision (PR #475).** `review.cancel` resolves to the server control action
+`interrupt_run`, not to a review reject option. The resumed graph first persists
+a canceled `ToolMessage` and a guard stop, then the local server aborts the
+invocation after that checkpoint boundary. The subagent performs no subsequent
+model call or handoff, and the active delegation lane remains resumable.
+
+**Decision (PR #485).** The TUI records `/continue` availability only if a
+review cancel that it sent later ends with the matching server-observed
+`interrupted`. This causal marker is separate from `ReviewDraft.resolutionSent`
+and from the shared `ReviewAction`: the first controls a later command
+affordance, the second prevents duplicate submission, and the third remains the
+checkpoint-derived review fact. See the complete
+[interruption contract](../interruption-and-delegation-continuation.md).
+
 ## Constraints
 
 - Do not reintroduce a `status` field on `ReviewAction` or any differently named
@@ -72,6 +94,8 @@ This lifecycle is transport control state and is never projected (see
 - Batch review stays first-class: one `actionId` identifies an ordered
   `reviews[]` batch, order preserved end to end.
 - `review.cancel` and `run.interrupt` remain distinct intents.
+- `review.cancel` must consume the current review and persist the guard-stop
+  boundary before aborting; a queued cancel must not target a newer review.
 - Reconnect may discard client-local draft/submission state; the snapshot and
   runtime facts rematerialize shared state. Snapshot must not become a
   command-recovery mechanism.

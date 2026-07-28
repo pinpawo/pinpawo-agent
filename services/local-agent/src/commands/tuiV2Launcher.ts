@@ -37,6 +37,7 @@ export type ResolveTuiV2LaunchPlanOptions = {
 
 export type RunTuiV2Options = {
   workdir?: string;
+  check?: boolean;
 };
 
 export type TuiV2DistributionManifest = {
@@ -330,8 +331,11 @@ async function spawnTuiV2(
   options: RunTuiV2Options,
 ) {
   const cwd = options.workdir ?? process.cwd();
+  const args = options.check
+    ? [...plan.args, '--version']
+    : plan.args;
   await new Promise<void>((resolvePromise, reject) => {
-    const child = spawn(plan.command, plan.args, {
+    const child = spawn(plan.command, args, {
       cwd,
       env: process.env,
       stdio: 'inherit',

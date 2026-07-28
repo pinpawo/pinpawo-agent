@@ -85,12 +85,14 @@ The probe covers:
 | Phase 5 CLI entry | `pinpawo tui --v2` selects a bundled/workspace OpenTUI executable or workspace source while `--legacy` remains an explicit rollback | automated test + compiled PTY |
 | npm distribution payload | one Bun-targeted JS bundle and versioned manifest ship in `pinpawo`; npm selects Bun/OpenTUI platform packages | automated manifest tests + installed-tarball PTY |
 | distribution integrity and platform launch | launcher verifies the bundle byte count/SHA-256 before execution and resolves package-local Bun runtimes for darwin/Linux/Windows on x64/arm64; Windows uses the direct `bun.exe` rather than a command shim | automated test matrix |
+| distribution artifact boot | a fresh runtime-neutral bundle is built outside the source entrypoint, its byte count/SHA-256 are rechecked, and its non-interactive version probe loads the external OpenTUI runtime before publishing | Bun native prepublish test |
+| installed package check | `pinpawo tui --v2 --check` follows the normal launch plan without a terminal; the release smoke packs local tarballs, performs a lifecycle-enabled install in an empty project, verifies npm-selected Bun/OpenTUI assets, and runs that installed CLI path with bounded stages | passed on darwin-arm64; Linux/Windows pending |
 | raw input preview | controls are escaped and output is bounded | automated test |
 | fixed-footer composer layout | composer grows from 3–5 visible rows without changing terminal footer height | automated test |
 | native textarea regression | multiline paste and single-grapheme backspace preserve line boundaries | Bun native test |
 | TypeScript | `npm run typecheck -w @pinpawo/tui` | passed |
 | unit tests | `npm run test -w @pinpawo/tui` | passed, 124 tests |
-| native tests | `npm run test:native -w @pinpawo/tui` | passed, 27 tests including Bun-native Windows file-URL parsing, production multi-path paste, process failure cleanup, two real production-host PTY entries (the full composer flow plus reviewed-write and attachment-read toolkit calls), file-mention resize/wide-character cursor mapping, policy/command/help/notice, approval/resume resize, textarea editing/history shortcuts, 10 real ScrollbackSurface tests, a production handler vertical slice, and independent-process restart |
+| native tests | `npm run test:native -w @pinpawo/tui` | passed, 28 tests including a freshly built distribution artifact boot, Bun-native Windows file-URL parsing, production multi-path paste, process failure cleanup, two real production-host PTY entries (the full composer flow plus reviewed-write and attachment-read toolkit calls), file-mention resize/wide-character cursor mapping, policy/command/help/notice, approval/resume resize, textarea editing/history shortcuts, 10 real ScrollbackSurface tests, a production handler vertical slice, and independent-process restart |
 | focused host integration | `npm run test:host -w @pinpawo/tui` | passed; attachment boundaries, ordered chat completion, reconnect, new/list/resume, interruption, approval, cancel-to-reject, graph failure, next-turn recovery, process restart, and the real TUI PTY entry traverse production handlers |
 | focused process lifecycle | `npm run test:process -w @pinpawo/tui` | passed, 4 tests; production hosts checkpoint, restore, and continue turns; the full no-smoke PTY covers selected attachments, prompt history, Unicode workspace mention, ordered operation/subagent/streaming-Markdown rendering, checkpoint approval, real `$VISUAL`/`$PAGER`, Markdown export, and `/quit`; an independent two-turn PTY proves a real production toolkit review gates a file mutation, then derives a read-only tool call from structured attachment context, settles both operations before their final replies, and restores canonical filename-only messages without synthetic plan or internal handoff duplication |
 | alternate-screen PTY startup | `npm run smoke -w @pinpawo/tui` | passed in an automated 80×24 PTY |
@@ -101,10 +103,10 @@ The probe covers:
 | transcript pager PTY flow | `npm run smoke:transcript -w @pinpawo/tui` plus interactive `less` | passed; full ordered timeline is readable, `q` exits, split footer resumes, and terminal state is restored |
 | standalone executable | `npm run build -w @pinpawo/tui` | passed for darwin-arm64; normal and approval compiled PTY smokes passed |
 | root typecheck | `npm run typecheck` | passed |
-| root tests | `npm test` | passed, including local-agent 775/775 and Chrome extension 22/22 |
+| root tests | `npm test` | passed, including local-agent 776/776 and Chrome extension 22/22 |
 | root build | `npm run build` | passed |
 | CLI package dry-run | `npm run pack:dry -w pinpawo` | passed; `dist/tui/main.js` and its manifest are included |
-| installed tarball v2 startup | install the generated `pinpawo` tarball in an empty project and run `pinpawo tui --v2` | passed on darwin-arm64 with package-local Bun/OpenTUI runtime |
+| installed tarball v2 startup | `npm run test:tui-install -w pinpawo` installs generated local tarballs in an empty project and runs the installed `pinpawo tui --v2 --check` path | passed on darwin-arm64 with package-local Bun/OpenTUI runtime; interactive PTY remains separately covered |
 
 ## Manual terminal matrix
 

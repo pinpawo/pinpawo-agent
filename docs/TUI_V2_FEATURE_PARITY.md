@@ -47,7 +47,7 @@ Status meanings:
 | transcript | pager handoff and Markdown export | aligned | a no-smoke macOS PTY completes `/transcript` through the palette, hands all seven ordered turns plus operation/subagent rows to a real `$PAGER` child without local-path leakage, resumes the composer, and writes the seven canonical user/assistant turns through `/export`; Windows quoted executable paths preserve separators and export paths use drive plus `~\` home semantics, while actual pager and cross-terminal combinations remain |
 | editor | `$VISUAL`/`$EDITOR` handoff and draft restore | aligned | a no-smoke macOS PTY invokes a real `$VISUAL` child with inherited TTY, validates its initial file, restores a Unicode multiline draft after renderer resume, submits it to the production host, and recovers it from checkpoint; Windows quoted executable paths such as `C:\Program Files\...\editor.exe` now parse without consuming separators, while actual editor combinations remain |
 | Studio | Studio-specific workflow expansion | deferred | tracked after chat parity |
-| release | package/runtime distribution | partial | platform install matrix; no default switch during parity work |
+| release | package/runtime distribution | partial | a fresh Bun bundle boots its external OpenTUI dependency in the prepublish gate, and a real empty-project tarball install now traverses the installed CLI/manifest/package-local Bun path on darwin-arm64; Linux/Windows install execution and the default-switch decision remain |
 
 ## Work order
 

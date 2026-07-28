@@ -112,7 +112,13 @@ import { truncateTerminalLine } from './text/terminalText';
 import { withRendererSuspended } from './terminal/rendererLifecycle';
 import { exportSessionTranscript } from './transcript/transcriptExport';
 import { pageSessionTranscript } from './transcript/transcriptPager';
+import { TUI_VERSION } from './version';
 import { buildWelcomeLines } from './welcome/welcomeModel';
+
+if (process.argv.includes('--version')) {
+  process.stdout.write(`PinPawo TUI v2 ${TUI_VERSION}\n`);
+  process.exit(0);
+}
 
 const smokeReview = process.argv.includes('--smoke-review');
 const demoReview = process.argv.includes('--demo-review');

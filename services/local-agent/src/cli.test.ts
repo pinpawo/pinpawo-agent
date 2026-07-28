@@ -17,7 +17,7 @@ test('local agent CLI passes tui options to the handler', async () => {
 
 test('local agent CLI launches OpenTUI v2 without invoking the legacy handler', async () => {
   let legacyCalls = 0;
-  let received: { workdir?: string } | null = null;
+  let received: { workdir?: string; check: boolean } | null = null;
   const program = createLocalAgentCli({
     runTui: () => {
       legacyCalls += 1;
@@ -39,7 +39,40 @@ test('local agent CLI launches OpenTUI v2 without invoking the legacy handler', 
   assert.equal(legacyCalls, 0);
   assert.deepEqual(received, {
     workdir: '/tmp/pinpawo-tui-v2-workdir',
+    check: false,
   });
+});
+
+test('local agent CLI exposes a non-interactive OpenTUI v2 installation check', async () => {
+  let received: { workdir?: string; check: boolean } | null = null;
+  const handlers = {
+    runTui: () => undefined,
+    runTuiV2: (options: { workdir?: string; check: boolean }) => {
+      received = options;
+    },
+  };
+
+  await createLocalAgentCli(handlers).parseAsync([
+    'node',
+    'pinpawo',
+    'tui',
+    '--v2',
+    '--check',
+  ]);
+  assert.deepEqual(received, {
+    workdir: undefined,
+    check: true,
+  });
+
+  await assert.rejects(
+    createLocalAgentCli(handlers).parseAsync([
+      'node',
+      'pinpawo',
+      'tui',
+      '--check',
+    ]),
+    /--check requires.*--v2/,
+  );
 });
 
 test('local agent CLI keeps an explicit legacy fallback during v2 dogfood', async () => {

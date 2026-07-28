@@ -104,6 +104,11 @@ Bun as fallbacks. `PINPAWO_TUI_V2_BIN` selects an explicit standalone build and
 `PINPAWO_BUN_BIN` selects a Bun runtime. `pinpawo tui --legacy` is the rollback
 path and will remain available when v2 becomes the default.
 
+`pinpawo tui --v2 --check` walks the same launch-plan, integrity, and
+package-local runtime path without entering terminal mode. It prints the v2
+version only after the selected bundle and external OpenTUI runtime load
+successfully.
+
 The TUI client connects to the separately running local host, so start
 `pinpawo run` first. `--workdir` selects the child client's working directory;
 the host's canonical snapshot remains authoritative for the runtime workspace.
@@ -154,6 +159,8 @@ From the repository root:
 npm run typecheck
 npm test
 npm run build
+npm run test:distribution -w @pinpawo/tui
+npm run test:tui-install -w pinpawo
 npm pack --dry-run -w @pinpawo/pet-agent
 npm run pack:dry -w pinpawo
 npm publish -w @pinpawo/pet-agent --access public
@@ -162,6 +169,14 @@ npm publish -w pinpawo --access public
 
 The packaged OpenTUI launcher verifies `dist/tui/main.js` against the byte
 count and SHA-256 recorded in its versioned manifest before starting Bun.
+The prepublish gate also builds a fresh payload and executes its non-interactive
+version probe, proving that the bundle can load the package's external OpenTUI
+runtime without entering terminal mode.
+The separate `test:tui-install` release smoke packs the local runtime and CLI,
+installs both tarballs with normal dependency lifecycle scripts in an empty
+project, then runs the installed CLI's `tui --v2 --check` path. It uses a bounded
+workspace cache and per-stage timeouts so registry or install failures remain
+diagnosable; unlike the prepublish gate, it requires registry access.
 Launcher tests cover the package-local Bun runtime on darwin, Linux, and
 Windows for x64 and arm64. Windows starts the direct `bun.exe` instead of an
 npm command shim. Executable smoke tests still need to run on each target OS

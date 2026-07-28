@@ -69,6 +69,9 @@ bundle, or global `bun`. `PINPAWO_TUI_V2_BIN` can select an explicit standalone
 build and `PINPAWO_BUN_BIN` can select a Bun runtime. Direct development remains
 available with `npm run dev -w @pinpawo/tui`.
 
+Use `npm run tui:v2 -w pinpawo -- --check` to verify the resolved workspace or
+installed runtime without entering terminal mode.
+
 `@pinpawo/tui` remains a private implementation package. The public `pinpawo`
 tarball carries one runtime-neutral Bun bundle and a versioned manifest rather
 than publishing a TUI API package or six PinPawo platform binary packages.
@@ -277,6 +280,27 @@ npm run build:distribution -w @pinpawo/tui
 This writes `main.js` and a checked `manifest.json` to
 `services/local-agent/dist/tui/`. The normal `pinpawo` build runs this step
 after the local-agent bundle is created.
+
+Verify that a freshly built bundle can load its external OpenTUI runtime and
+execute outside the source entrypoint with:
+
+```sh
+npm run test:distribution -w @pinpawo/tui
+```
+
+The probe uses the bundle's non-interactive `--version` path, so it is safe in
+package and CI environments without a terminal. The `pinpawo` prepublish gate
+runs it after building the package.
+
+Run the stronger registry-backed install smoke with:
+
+```sh
+npm run test:tui-install -w pinpawo
+```
+
+It packs the local agent packages, installs them into an empty project with
+normal dependency lifecycle scripts, and exercises the installed
+`pinpawo tui --v2 --check` launcher path.
 
 Probe controls:
 

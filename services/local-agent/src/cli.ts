@@ -10,7 +10,10 @@ type LocalAgentCliHandlers = {
   runActorSelect?: () => Promise<void> | void;
   runAgent?: (opts: { workdir?: string; stdio: boolean }) => Promise<void> | void;
   runTui?: (opts: { dryRun: boolean; workdir?: string }) => Promise<void> | void;
-  runTuiV2?: (opts: { workdir?: string }) => Promise<void> | void;
+  runTuiV2?: (opts: {
+    workdir?: string;
+    check: boolean;
+  }) => Promise<void> | void;
   runDetect?: () => Promise<void> | void;
   runInit?: (opts: InitCommandOptions) => Promise<void> | void;
   runSetup?: (opts: { workdir?: string }) => Promise<void> | void;
@@ -107,8 +110,10 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
     .option('--dry-run', 'run without writing generated post changes')
     .option('--v2', 'use the OpenTUI v2 client')
     .option('--legacy', 'force the legacy Ink client')
+    .option('--check', 'verify the OpenTUI v2 runtime without entering terminal mode')
     .option('--workdir <directory>', 'agent working directory for runtime state and relative tool paths')
     .action(async (options: {
+      check?: boolean;
       dryRun?: boolean;
       legacy?: boolean;
       v2?: boolean;
@@ -116,6 +121,9 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
     }) => {
       if (options.v2 && options.legacy) {
         throw new Error('Choose either --v2 or --legacy, not both.');
+      }
+      if (options.check && !options.v2) {
+        throw new Error('--check requires the OpenTUI v2 client (`--v2`).');
       }
       const workdir = options.workdir?.trim()
         ? resolveWorkdirOption(options.workdir)
@@ -126,7 +134,10 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
         }
         const runTuiV2 = handlers.runTuiV2
           ?? (await import('./commands/tuiV2Launcher')).runTuiV2;
-        await runTuiV2({ workdir });
+        await runTuiV2({
+          workdir,
+          check: options.check ?? false,
+        });
         return;
       }
       const runTui = handlers.runTui ?? (await import('./commands/tui')).runTui;

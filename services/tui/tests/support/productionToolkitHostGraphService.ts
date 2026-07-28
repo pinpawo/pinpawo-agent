@@ -221,32 +221,24 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
             gap_note: null,
           };
         }
-        return {
-          action: 'direct_task',
-          task: messagesContain(messages, ATTACHMENT_TOOL_INPUT)
-            ? 'read the selected attachment'
-            : 'write the guarded fixture',
-          context_summary: null,
-        };
+        return { action: 'needs_plan' };
       },
     }),
   } as unknown as AgentModels['act'];
   const capabilityPlannerRunner: CapabilityPlannerRunner = {
     async invoke(input) {
-      if (input.mode !== 'direct') {
-        return {
-          result: 'answer',
-          next_task: null,
-          remaining_plan: [],
-        };
-      }
+      const readsAttachment = input.userIntentContext.includes(
+        ATTACHMENT_TOOL_INPUT,
+      );
       return {
         result: 'next_task',
         next_task: {
-          objective: input.pendingTask.task,
+          objective: readsAttachment
+            ? 'read the selected attachment'
+            : 'write the guarded fixture',
           capability_intent: 'production_tui_fixture',
           capability_name: 'general',
-          context_summary: input.pendingTask.contextSummary,
+          context_summary: null,
         },
         remaining_plan: [],
       };

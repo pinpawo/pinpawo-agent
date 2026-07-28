@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import {
   AIMessage,
   type BaseMessage,
@@ -21,6 +22,27 @@ export const PERSISTENT_HOST_INPUT = 'Persist this host conversation.';
 export const PERSISTENT_HOST_CONTINUATION = 'Continue after the host restart.';
 export const PERSISTENT_HOST_REPLY = 'Persisted host reply.';
 export const PERSISTENT_HOST_CONTINUATION_REPLY = 'Continued host reply.';
+export const PERSISTENT_HOST_ATTACHMENT_INPUT =
+  'Persist the selected host attachments.';
+export const PERSISTENT_HOST_ATTACHMENT_NAMES = [
+  'first file.txt',
+  '第二资料.md',
+] as const;
+export const PERSISTENT_HOST_REMOVED_ATTACHMENT_NAME = 'remove me.tmp';
+export const PERSISTENT_HOST_ATTACHMENT_REPLY =
+  'Persisted selected host attachments.';
+export const PERSISTENT_HOST_INVALID_ATTACHMENT_REPLY =
+  'Host attachment selection did not match.';
+export const PERSISTENT_HOST_MENTION_NAME = '指南 文档.md';
+export const PERSISTENT_HOST_MENTION_INPUT =
+  `Inspect @${PERSISTENT_HOST_MENTION_NAME} carefully.`;
+export const PERSISTENT_HOST_MENTION_REPLY =
+  'Persisted completed workspace mention.';
+export const PERSISTENT_HOST_EDITOR_INITIAL = 'original editor draft';
+export const PERSISTENT_HOST_EDITOR_INPUT =
+  'Edited by VISUAL.\n第二行。';
+export const PERSISTENT_HOST_EDITOR_REPLY =
+  'Persisted external editor draft.';
 
 export function createPersistentHostGraphService() {
   const graphs = new Map<string, ReturnType<typeof createGraph>>();
@@ -80,9 +102,7 @@ function createGraph(setup: AgentChannelSetup) {
       const continuation = input.includes(PERSISTENT_HOST_CONTINUATION);
       return {
         messages: [new AIMessage({
-          content: continuation
-            ? PERSISTENT_HOST_CONTINUATION_REPLY
-            : PERSISTENT_HOST_REPLY,
+          content: selectReply(input, setup.input.workdir),
           usage_metadata: {
             input_tokens: continuation ? 6 : 4,
             output_tokens: 3,
@@ -96,6 +116,30 @@ function createGraph(setup: AgentChannelSetup) {
     .compile({
       checkpointer: setup.graphConfig.checkpoint,
     });
+}
+
+function selectReply(input: string, workdir?: string) {
+  if (input.includes(PERSISTENT_HOST_CONTINUATION)) {
+    return PERSISTENT_HOST_CONTINUATION_REPLY;
+  }
+  if (input.includes(PERSISTENT_HOST_ATTACHMENT_INPUT)) {
+    const validSelection = input.includes('<local_attachments>')
+      && typeof workdir === 'string'
+      && PERSISTENT_HOST_ATTACHMENT_NAMES.every(
+        (name) => input.includes(resolve(workdir, name)),
+      )
+      && !input.includes(PERSISTENT_HOST_REMOVED_ATTACHMENT_NAME);
+    return validSelection
+      ? PERSISTENT_HOST_ATTACHMENT_REPLY
+      : PERSISTENT_HOST_INVALID_ATTACHMENT_REPLY;
+  }
+  if (input === PERSISTENT_HOST_MENTION_INPUT) {
+    return PERSISTENT_HOST_MENTION_REPLY;
+  }
+  if (input === PERSISTENT_HOST_EDITOR_INPUT) {
+    return PERSISTENT_HOST_EDITOR_REPLY;
+  }
+  return PERSISTENT_HOST_REPLY;
 }
 
 function configurable(setup: AgentChannelSetup) {

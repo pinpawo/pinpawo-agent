@@ -22,8 +22,8 @@ Status meanings:
 
 | Area | Capability | Status | Remaining work |
 | --- | --- | --- | --- |
-| host | authenticated local WebSocket, snapshot bootstrap, reconnect | aligned | the real v2 process reaches an authenticated host through a macOS PTY, and independent host processes restore a non-empty FileSaver checkpoint and continue the same session; full `pinpawo run` browser-runtime dogfood remains |
-| chat | submit a message through the shared protocol | aligned | a real PTY drives composer text and Kitty `Ctrl+Enter` through the production host, then rehydrates that turn after host restart; sustained live-LLM dogfood remains |
+| host | authenticated local WebSocket, snapshot bootstrap, reconnect | aligned | the no-smoke v2 production process reaches an authenticated host through a macOS PTY, exits through the user `/quit` path, and independent host processes restore a non-empty FileSaver checkpoint and continue the same session; full `pinpawo run` browser-runtime dogfood remains |
+| chat | submit a message through the shared protocol | aligned | a real PTY drives composer text and Kitty `Ctrl+Enter` through the no-smoke production entry, then rehydrates that turn after host restart; sustained live-LLM dogfood remains |
 | chat | canonical message/operation/subagent ordering | aligned | richer rendering below |
 | timeline | streaming assistant response on a live surface | aligned | real-host Markdown delta dogfood |
 | timeline | running/updated tool operation appears before completion | aligned | current branch adds an atomic live operation surface |
@@ -35,17 +35,17 @@ Status meanings:
 | scrolling | terminal-owned touchpad scroll, selection, and copy | aligned in Ghostty | Terminal.app, iTerm2, and integrated-terminal matrix |
 | scrolling | browse position survives append and delta bursts | aligned in Ghostty | cross-terminal matrix |
 | composer | multiline edit, soft wrap, paste, selection, undo/redo | aligned | remaining IME and terminal-specific key dogfood |
-| composer | prompt history with draft restoration | aligned | manual cross-terminal verification |
-| composer | slash commands and command/help palette | aligned | production workflow dogfood |
-| composer | workspace `@path` completion | aligned | production workflow dogfood |
-| attachments | quoted, escaped, `file://`, and multiple local paths | aligned | production OpenTUI paste handling now separates multiple paths into attachments while preserving ordinary multiline paste; cross-terminal drag-in matrix remains |
-| attachments | removable structured attachment chips and submit | aligned | production host integration proves full paths reach model context without eager content reads while terminal/checkpoint text remains filename-only; live tool dogfood remains |
+| composer | prompt history with draft restoration | aligned | a no-smoke macOS PTY restores and resubmits an exact prior prompt through the production host; the cross-terminal matrix remains |
+| composer | slash commands and command/help palette | aligned | a no-smoke macOS PTY uses Tab completion to open `/help`, proves help owns Esc and returns focus, then completes `/quit` and exits; remaining command workflows and the cross-terminal matrix remain |
+| composer | workspace `@path` completion | aligned | a no-smoke macOS PTY opens the production overlay, completes a Unicode filename containing a space, submits the exact text to the host, and restores it from checkpoint; the cross-terminal matrix remains |
+| attachments | quoted, escaped, `file://`, and multiple local paths | aligned | production OpenTUI paste handling now separates multiple paths into attachments while preserving ordinary multiline paste; a real macOS PTY covers quoted paths with spaces, Unicode filenames, and last-item removal, while the cross-terminal drag-in matrix remains |
+| attachments | removable structured attachment chips and submit | aligned | production host integration proves selected full paths reach model context without eager content reads while terminal/checkpoint text remains filename-only; the PTY graph also proves a removed path does not reach model input or recovery, while live tool dogfood remains |
 | review | approval, rejection, text response, batching, cancellation | aligned | production handler-chain approval and cancel-to-reject resume are covered; live guarded-tool dogfood remains |
 | session | new session and resume picker | aligned | production handler-chain new/list/resume, native scrollback boundaries, and non-empty checkpoint recovery across host processes are covered; live checkpoint dogfood remains |
 | runtime | interrupt, error notice, review policy | aligned | production interruption, graph-failure recovery, immediate stop wake-up, and process-level host restart are covered; full CLI/browser-runtime dogfood remains |
 | status | two-line run/model/workspace/token/context status | aligned | narrow-terminal dogfood |
 | transcript | pager handoff and Markdown export | aligned | production pager/editor combinations |
-| editor | `$VISUAL`/`$EDITOR` handoff and draft restore | aligned | production editor combinations |
+| editor | `$VISUAL`/`$EDITOR` handoff and draft restore | aligned | a no-smoke macOS PTY invokes a real `$VISUAL` child with inherited TTY, validates its initial file, restores a Unicode multiline draft after renderer resume, submits it to the production host, and recovers it from checkpoint; actual editor combinations remain |
 | Studio | Studio-specific workflow expansion | deferred | tracked after chat parity |
 | release | package/runtime distribution | partial | platform install matrix; no default switch during parity work |
 
@@ -69,13 +69,15 @@ Status meanings:
 4. Dogfood structured attachments with real local tools. The deterministic
    production-host integration already proves full paths reach model context,
    contents are not eagerly read, and terminal/checkpoint text remains
-   filename-only.
+   filename-only. A real PTY now also drives three bracketed-paste paths through
+   the production composer, removes the last one, submits the selected two, and
+   verifies filename-only recovery after host restart.
 
 ### P1 — daily-use interaction parity
 
-1. Complete prompt-history, command, file-mention, clipboard, external-editor,
-   and transcript dogfood.
-2. Finish multi-file drag-in and attachment removal tests in real terminals.
+1. Complete cross-terminal prompt-history/file-mention plus command, clipboard,
+   actual-editor combinations, and transcript dogfood.
+2. Complete the cross-terminal multi-file drag-in and attachment-removal matrix.
 3. Validate narrow layouts, resize, long sessions, and failure recovery.
 
 ### P2 — release readiness

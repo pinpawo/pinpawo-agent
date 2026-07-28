@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import {
   chmod,
   lstat,
+  mkdir,
   mkdtemp,
   readdir,
   readFile,
   rm,
+  symlink,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -286,8 +288,12 @@ test('workspace digest changes with compiled executor facts', async (t) => {
   assert.notEqual(first.rootPath, second.rootPath);
 });
 
-test('workspace reuses an immutable digest snapshot and detects cache tampering', async (t) => {
+test('workspace reuses a verified digest snapshot and repairs cache tampering', async (t) => {
   const root = await temporaryDirectory(t, 'capability-workspace-reuse-');
+  const warnings: unknown[][] = [];
+  t.mock.method(console, 'warn', (...args: unknown[]) => {
+    warnings.push(args);
+  });
   const registry = compileAgentRegistry({
     toolkits: [],
     capabilities: [capability({ name: 'general' })],
@@ -305,25 +311,123 @@ test('workspace reuses an immutable digest snapshot and detects cache tampering'
   assert.equal(second.reused, true);
   assert.equal(second.rootPath, first.rootPath);
   assert.equal(second.registryDigest, first.registryDigest);
-  assert.equal(
-    (await lstat(first.rootPath)).mode & 0o222,
-    0,
-  );
 
   const capabilityDir = join(first.rootPath, 'general');
   const documentPath = join(capabilityDir, 'CAPABILITY.md');
-  await chmod(first.rootPath, 0o755);
-  await chmod(capabilityDir, 0o755);
+  assert.notEqual((await lstat(first.rootPath)).mode & 0o200, 0);
+  assert.equal((await lstat(documentPath)).mode & 0o222, 0);
   await chmod(documentPath, 0o644);
   await writeFile(documentPath, 'tampered', 'utf8');
 
-  await assert.rejects(
-    materializeCapabilityDocumentWorkspace({
-      registry,
-      cacheRoot: join(root, 'cache'),
-    }),
-    /failed verification/,
+  const repaired = await materializeCapabilityDocumentWorkspace({
+    registry,
+    cacheRoot: join(root, 'cache'),
+  });
+
+  assert.equal(repaired.reused, false);
+  assert.equal(repaired.rootPath, first.rootPath);
+  assert.equal(
+    await readFile(join(repaired.rootPath, 'general', 'CAPABILITY.md'), 'utf8'),
+    renderCapabilityDocument(registry.capabilities[0]!.capability),
   );
+  assert.equal(warnings.length, 1);
+  assert.match(String(warnings[0]?.[0] ?? ''), /repairing invalid/);
+  assert.equal(
+    (warnings[0]?.[1] as { code?: unknown } | undefined)?.code,
+    'capability_workspace_snapshot_quarantined',
+  );
+  assert.deepEqual(
+    (await readdir(join(root, 'cache')))
+      .filter((entry) => entry.startsWith('.invalid-')),
+    [],
+  );
+});
+
+test('workspace repairs an incomplete digest directory', async (t) => {
+  const root = await temporaryDirectory(t, 'capability-workspace-incomplete-');
+  t.mock.method(console, 'warn', () => {});
+  const registry = compileAgentRegistry({
+    toolkits: [],
+    capabilities: [
+      capability({ name: 'general' }),
+      capability({ name: 'explore' }),
+    ],
+  });
+  const first = await materializeCapabilityDocumentWorkspace({
+    registry,
+    cacheRoot: join(root, 'cache'),
+  });
+  await rm(first.rootPath, { recursive: true, force: true });
+  await mkdir(first.rootPath);
+
+  const repaired = await materializeCapabilityDocumentWorkspace({
+    registry,
+    cacheRoot: join(root, 'cache'),
+  });
+
+  assert.equal(repaired.reused, false);
+  assert.deepEqual(repaired.capabilityNames, ['explore', 'general']);
+  assert.match(
+    await readFile(join(repaired.rootPath, 'explore', 'CAPABILITY.md'), 'utf8'),
+    /name: "explore"/,
+  );
+});
+
+test('workspace repair does not depend on deleting a read-only quarantine', async (t) => {
+  const root = await temporaryDirectory(t, 'capability-workspace-readonly-repair-');
+  t.mock.method(console, 'warn', () => {});
+  const registry = compileAgentRegistry({
+    toolkits: [],
+    capabilities: [capability({ name: 'general' })],
+  });
+  const first = await materializeCapabilityDocumentWorkspace({
+    registry,
+    cacheRoot: join(root, 'cache'),
+  });
+  const capabilityDir = join(first.rootPath, 'general');
+  const documentPath = join(capabilityDir, 'CAPABILITY.md');
+  await chmod(documentPath, 0o644);
+  await writeFile(documentPath, 'tampered', 'utf8');
+  await chmod(capabilityDir, 0o555);
+  await chmod(first.rootPath, 0o555);
+
+  const repaired = await materializeCapabilityDocumentWorkspace({
+    registry,
+    cacheRoot: join(root, 'cache'),
+  });
+
+  assert.equal(repaired.reused, false);
+  assert.match(
+    await readFile(join(repaired.rootPath, 'general', 'CAPABILITY.md'), 'utf8'),
+    /name: "general"/,
+  );
+});
+
+test('workspace replaces an invalid symlink without touching its target', async (t) => {
+  const root = await temporaryDirectory(t, 'capability-workspace-symlink-');
+  t.mock.method(console, 'warn', () => {});
+  const registry = compileAgentRegistry({
+    toolkits: [],
+    capabilities: [capability({ name: 'general' })],
+  });
+  const first = await materializeCapabilityDocumentWorkspace({
+    registry,
+    cacheRoot: join(root, 'cache'),
+  });
+  const symlinkTarget = join(root, 'symlink-target');
+  await mkdir(symlinkTarget);
+  await writeFile(join(symlinkTarget, 'keep.txt'), 'keep', 'utf8');
+  await rm(first.rootPath, { recursive: true, force: true });
+  await symlink(symlinkTarget, first.rootPath);
+
+  const repaired = await materializeCapabilityDocumentWorkspace({
+    registry,
+    cacheRoot: join(root, 'cache'),
+  });
+
+  assert.equal(repaired.reused, false);
+  assert.equal((await lstat(repaired.rootPath)).isSymbolicLink(), false);
+  assert.equal(await readFile(join(symlinkTarget, 'keep.txt'), 'utf8'), 'keep');
 });
 
 test('concurrent materialization publishes one complete snapshot', async (t) => {
@@ -349,6 +453,47 @@ test('concurrent materialization publishes one complete snapshot', async (t) => 
 
   assert.equal(left.rootPath, right.rootPath);
   assert.equal(left.registryDigest, right.registryDigest);
+  assert.equal(Number(left.reused) + Number(right.reused), 1);
+  assert.match(
+    await readFile(join(left.rootPath, 'general', 'CAPABILITY.md'), 'utf8'),
+    /name: "general"/,
+  );
+  assert.match(
+    await readFile(join(left.rootPath, 'explore', 'CAPABILITY.md'), 'utf8'),
+    /name: "explore"/,
+  );
+});
+
+test('concurrent repair publishes one complete replacement snapshot', async (t) => {
+  const root = await temporaryDirectory(t, 'capability-workspace-concurrent-repair-');
+  t.mock.method(console, 'warn', () => {});
+  const registry = compileAgentRegistry({
+    toolkits: [],
+    capabilities: [
+      capability({ name: 'general' }),
+      capability({ name: 'explore' }),
+    ],
+  });
+  const first = await materializeCapabilityDocumentWorkspace({
+    registry,
+    cacheRoot: join(root, 'cache'),
+  });
+  const documentPath = join(first.rootPath, 'general', 'CAPABILITY.md');
+  await chmod(documentPath, 0o644);
+  await writeFile(documentPath, 'tampered', 'utf8');
+
+  const [left, right] = await Promise.all([
+    materializeCapabilityDocumentWorkspace({
+      registry,
+      cacheRoot: join(root, 'cache'),
+    }),
+    materializeCapabilityDocumentWorkspace({
+      registry,
+      cacheRoot: join(root, 'cache'),
+    }),
+  ]);
+
+  assert.equal(left.rootPath, right.rootPath);
   assert.equal(Number(left.reused) + Number(right.reused), 1);
   assert.match(
     await readFile(join(left.rootPath, 'general', 'CAPABILITY.md'), 'utf8'),

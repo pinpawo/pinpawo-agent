@@ -1,11 +1,8 @@
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { CapabilityDocumentWorkspace } from './capabilityDocumentWorkspace';
-import type {
-  CapabilityPlanTask,
-  RunPendingTask,
-} from './types';
+import type { CapabilityPlanTask } from './types';
 
-export type CapabilityPlannerMode = 'direct' | 'entry' | 'boundary';
+export type CapabilityPlannerMode = 'entry' | 'boundary';
 
 type CapabilityPlannerInputBase = {
   readonly userIntentContext: string;
@@ -18,15 +15,9 @@ type CapabilityPlannerInputBase = {
   readonly workspace: CapabilityDocumentWorkspace;
 };
 
-export type CapabilityPlannerInput =
-  | (CapabilityPlannerInputBase & {
-      readonly mode: 'direct';
-      readonly pendingTask: RunPendingTask;
-    })
-  | (CapabilityPlannerInputBase & {
-      readonly mode: 'entry' | 'boundary';
-      readonly pendingTask?: null;
-    });
+export type CapabilityPlannerInput = CapabilityPlannerInputBase & {
+  readonly mode: CapabilityPlannerMode;
+};
 
 export type CapabilityPlannerNextTask = {
   readonly objective: string;
@@ -43,11 +34,6 @@ export type CapabilityPlannerResult =
         readonly objective: string;
         readonly capability_intent: string;
       }>;
-    }
-  | {
-      readonly result: 'answer';
-      readonly next_task: null;
-      readonly remaining_plan: readonly [];
     }
   | {
       readonly result: 'unavailable';

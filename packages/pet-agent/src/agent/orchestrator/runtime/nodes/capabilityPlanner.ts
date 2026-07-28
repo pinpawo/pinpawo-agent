@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { Command } from '@langchain/langgraph';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
+import { GENERAL_CAPABILITY_NAME } from '../../../../types/capability';
 import { materializeCapabilityDocumentWorkspace } from '../../capabilityDocumentWorkspace';
 import { createCapabilityPlannerAgent } from '../../capabilityPlannerAgent';
 import type {
@@ -28,7 +29,6 @@ import type {
   MessageLane,
   OrchestratorConfig,
   RunNextDelegation,
-  RunPendingTask,
 } from '../../types';
 import { readMessageText } from '../../utils';
 import {
@@ -44,9 +44,6 @@ const DEFAULT_CAPABILITY_PLANNER_WORKSPACE_ROOT = join(
 );
 
 function buildPlannerMode(state: OrchestratorStateType): CapabilityPlannerInput['mode'] {
-  if (state.runPendingTask) {
-    return 'direct';
-  }
   return state.runDelegationSummaries.length === 0
     ? 'entry'
     : 'boundary';
@@ -92,41 +89,22 @@ function normalizeRemainingPlan(
   }));
 }
 
-function assertDirectTaskUnchanged(
-  pendingTask: RunPendingTask,
-  nextTask: CapabilityPlannerNextTask,
-) {
-  if (
-    nextTask.objective !== pendingTask.task
-    || nextTask.context_summary !== pendingTask.contextSummary
-  ) {
-    throw new Error(
-      'Capability Planner changed the immutable pending task in direct mode.',
-    );
-  }
-}
-
 function materializeNextDelegation(params: {
   state: OrchestratorStateType;
   nextTask: CapabilityPlannerNextTask;
   remainingPlan: CapabilityPlanTask[];
   allowedCapabilityNames: readonly string[];
-  pendingTask: RunPendingTask | null;
 }) {
   const {
     state,
     nextTask,
     remainingPlan,
     allowedCapabilityNames,
-    pendingTask,
   } = params;
   if (!allowedCapabilityNames.includes(nextTask.capability_name)) {
     throw new Error(
       `Capability Planner selected "${nextTask.capability_name}" outside the immutable workspace.`,
     );
-  }
-  if (pendingTask) {
-    assertDirectTaskUnchanged(pendingTask, nextTask);
   }
   if (
     remainingPlan.some((item) =>
@@ -179,26 +157,10 @@ function buildPlannerTransition(params: {
   result: CapabilityPlannerResult;
 }) {
   const { state, input, result } = params;
-  if (result.result === 'answer') {
-    if (input.mode === 'direct') {
-      throw new Error('Capability Planner returned answer in direct mode.');
-    }
-    return {
-      goto: 'answer' as const,
-      update: {
-        runNextDelegation: null,
-        runPendingTask: null,
-        runCapabilityPlan: [],
-      },
-    };
-  }
   if (result.result === 'unavailable') {
-    if (
-      input.mode === 'direct'
-      && result.task !== input.pendingTask.task
-    ) {
+    if (input.workspace.capabilityNames.includes(GENERAL_CAPABILITY_NAME)) {
       throw new Error(
-        'Capability Planner changed the immutable pending task while reporting unavailable.',
+        'Capability Planner returned unavailable while the general Capability is registered.',
       );
     }
     return {
@@ -222,7 +184,6 @@ function buildPlannerTransition(params: {
       nextTask: result.next_task,
       remainingPlan,
       allowedCapabilityNames: input.workspace.capabilityNames,
-      pendingTask: input.mode === 'direct' ? input.pendingTask : null,
     }),
   };
 }
@@ -253,20 +214,12 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
     });
     const mode = buildPlannerMode(state);
     const context = buildPlannerContext(state);
-    const input: CapabilityPlannerInput = mode === 'direct'
-      ? {
-          mode,
-          pendingTask: state.runPendingTask as RunPendingTask,
-          remainingPlan: state.runCapabilityPlan,
-          workspace,
-          ...context,
-        }
-      : {
-          mode,
-          remainingPlan: state.runCapabilityPlan,
-          workspace,
-          ...context,
-        };
+    const input: CapabilityPlannerInput = {
+      mode,
+      remainingPlan: state.runCapabilityPlan,
+      workspace,
+      ...context,
+    };
     const result = await runner.invoke(input, runnableConfig);
     const transition = buildPlannerTransition({ state, input, result });
     return new Command({

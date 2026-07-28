@@ -161,9 +161,10 @@ type DelegationOutcome =
 - Only `goal_done` uses the fixed completion acknowledgement.
   `user_input_required` asks for the missing input while preserving completed
   and incomplete facts from the handed-off result.
-- `task_done` routes to the boundary planner. If the planner finds no later
-  autonomous work, ordinary answer synthesis is used rather than a user-goal
-  completion acknowledgement.
+- `task_done` means the current task is complete and the user goal still has
+  autonomous work, so it routes to the boundary planner. If the current result
+  also completes the user goal, outcomeDecision must return `goal_done`;
+  the Planner has no `answer` result.
 
 This keeps each semantic owner narrow: outcomeDecision classifies the accepted
 result, the graph transitions and records it, and answer communicates it.

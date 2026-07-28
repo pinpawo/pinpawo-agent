@@ -3,22 +3,19 @@ import assert from 'node:assert/strict';
 import {
   buildDelegationOutcomeDecisionOutputInstruction,
   buildDelegationOutcomeDecisionSchema,
-  buildTaskDecisionOutputInstruction,
-  buildTaskDecisionSchema,
+  buildEntryDecisionOutputInstruction,
+  buildEntryDecisionSchema,
 } from './schemas';
 
-test('task decision schema separates task birth from route selection', () => {
-  const schema = buildTaskDecisionSchema();
+test('entry decision schema owns only the result-availability gate', () => {
+  const schema = buildEntryDecisionSchema();
   assert.equal(schema.safeParse({ action: 'answer' }).success, true);
+  assert.equal(schema.safeParse({ action: 'needs_plan' }).success, true);
   assert.equal(schema.safeParse({
     action: 'direct_task',
     task: '读取 issue #269 并提炼需求点。',
     context_summary: '用户要求先理解 issue。',
-    search_keywords: 'github issue|需求分析',
-  }).success, true);
-  assert.equal(schema.safeParse({ action: 'direct_task', task: null }).success, false);
-  assert.equal(schema.safeParse({ action: 'direct_task', task: '   ' }).success, false);
-  assert.equal(schema.safeParse({ action: 'needs_plan' }).success, true);
+  }).success, false);
   assert.equal(schema.safeParse({
     action: 'delegate_capability.browser',
     task: '打开网页',
@@ -106,14 +103,14 @@ test('delegation outcome schema keeps gap_note on continue and strips it elsewhe
 });
 
 test('decision output instructions add schema shape only for jsonMode', () => {
-  const defaultTaskInstruction = buildTaskDecisionOutputInstruction();
-  assert.match(defaultTaskInstruction, /structured-output schema/);
-  assert.doesNotMatch(defaultTaskInstruction, /JSON Schema/);
+  const defaultEntryInstruction = buildEntryDecisionOutputInstruction();
+  assert.match(defaultEntryInstruction, /structured-output schema/);
+  assert.doesNotMatch(defaultEntryInstruction, /JSON Schema/);
 
-  const jsonModeTaskInstruction = buildTaskDecisionOutputInstruction('jsonMode');
-  assert.match(jsonModeTaskInstruction, /JSON Schema/);
-  assert.match(jsonModeTaskInstruction, /"action"/);
-  assert.doesNotMatch(jsonModeTaskInstruction, /"plan_draft"/);
+  const jsonModeEntryInstruction = buildEntryDecisionOutputInstruction('jsonMode');
+  assert.match(jsonModeEntryInstruction, /JSON Schema/);
+  assert.match(jsonModeEntryInstruction, /"action"/);
+  assert.doesNotMatch(jsonModeEntryInstruction, /"plan_draft"/);
 
   const defaultOutcomeInstruction = buildDelegationOutcomeDecisionOutputInstruction();
   assert.doesNotMatch(defaultOutcomeInstruction, /JSON Schema/);

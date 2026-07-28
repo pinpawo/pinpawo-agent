@@ -4,7 +4,6 @@ import { capabilityPlanningBasicsDataset } from './datasets/capability-planning-
 import { entryDecisionBasicsDataset } from './datasets/entry-decision-basics.ts';
 import { outcomeDecisionBasicsDataset } from './datasets/outcome-decision-basics.ts';
 import {
-  adaptTaskDecisionMode,
   scoreCapabilityPlanning,
   scoreEntryDecision,
   scoreOutcomeDecision,
@@ -14,20 +13,16 @@ function allPass(scores: Array<{ score: number }>) {
   return scores.every((score) => score.score === 1);
 }
 
-test('entry scorer gates only the structured decision mode', () => {
-  const testCase = entryDecisionBasicsDataset.cases.find((item) => item.name === 'multiple-actions-one-capability-call');
+test('entry scorer gates only result availability', () => {
+  const testCase = entryDecisionBasicsDataset.cases.find(
+    (item) => item.name === 'current-local-state-needs-observation',
+  );
   assert.ok(testCase);
-  assert.equal(testCase.expected.expectedBoundaryCount, 1);
   const scores = scoreEntryDecision({
-    mode: 'direct_task',
+    mode: 'needs_plan',
   }, testCase.expected);
   assert.deepEqual(scores.map(({ key }) => key), ['entry_mode_correct']);
   assert.ok(allPass(scores));
-});
-
-test('entryDecision adapter exposes the planning mode', () => {
-  assert.equal(adaptTaskDecisionMode('direct_task'), 'direct_task');
-  assert.equal(adaptTaskDecisionMode('needs_plan'), 'needs_plan');
 });
 
 test('entryDecision dataset covers the result-availability matrix', () => {
@@ -36,7 +31,7 @@ test('entryDecision dataset covers the result-availability matrix', () => {
   const modes = new Set(entryDecisionBasicsDataset.cases.map((testCase) => testCase.expected.mode));
 
   assert.equal(new Set(ids).size, ids.length);
-  assert.deepEqual([...modes].sort(), ['answer', 'direct_task', 'needs_plan']);
+  assert.deepEqual([...modes].sort(), ['answer', 'needs_plan']);
   assert.ok(names.has('answer-from-explicit-completion-evidence'));
   assert.ok(names.has('answer-from-stable-model-knowledge'));
   assert.ok(names.has('intention-is-not-completion-evidence'));
@@ -59,7 +54,27 @@ test('planning datasets cover entry and boundary distributions', () => {
   const modes = new Set(capabilityPlanningBasicsDataset.cases.map((testCase) => testCase.input.mode));
   assert.deepEqual([...modes].sort(), ['boundary', 'entry']);
   assert.ok(capabilityPlanningBasicsDataset.cases.some((testCase) => testCase.expected.rubberStamp));
-  assert.ok(capabilityPlanningBasicsDataset.cases.some((testCase) => testCase.expected.planEffect === 'cancelled'));
+  assert.ok(capabilityPlanningBasicsDataset.cases.some(
+    (testCase) => testCase.expected.capabilityName === 'general',
+  ));
+});
+
+test('planner scorer enforces the mandatory General fallback', () => {
+  const testCase = capabilityPlanningBasicsDataset.cases.find(
+    (item) => item.name === 'entry-uses-general-for-unmatched-work',
+  );
+  assert.ok(testCase);
+  const scores = scoreCapabilityPlanning({
+    result: 'next_task',
+    nextTask: '处理普通工作区任务并返回执行结果',
+    capabilityIntent: '通用任务执行',
+    capabilityName: 'general',
+    remainingPlan: [],
+  }, testCase.expected);
+  assert.equal(
+    scores.find(({ key }) => key === 'planner_capability_correct')?.score,
+    1,
+  );
 });
 
 test('planner scorer reconstructs an unchanged plan from next task plus future tail', () => {

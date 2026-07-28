@@ -9,7 +9,7 @@ import type {
 } from '../types';
 import {
   createOrchestrationDecisionRunner,
-  createTaskDecisionRunner,
+  createEntryDecisionRunner,
 } from './decisions/orchestrationDecision';
 import {
   DEFAULT_ORCHESTRATOR_MAX_ITERATIONS,
@@ -40,7 +40,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const afterDelegationOutcomeIterationGuard =
     createAfterDelegationOutcomeIterationGuard({ orchestratorMaxIterations });
   const runOrchestrationDecision = createOrchestrationDecisionRunner(config);
-  const runTaskDecision = createTaskDecisionRunner(config);
+  const runEntryDecision = createEntryDecisionRunner(config);
   const runCapabilityPlanner = createCapabilityPlannerNode(config);
 
   const delegationOutcomeDecision = (
@@ -60,7 +60,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const graph = new StateGraph(OrchestratorState)
     .addNode('prepare', prepare)
     .addNode('compactContext', compactContext)
-    .addNode('entryDecision', runTaskDecision, {
+    .addNode('entryDecision', runEntryDecision, {
       ends: ['answer', 'capabilityPlanner'],
     })
     .addNode('capabilityPlanner', runCapabilityPlanner, {

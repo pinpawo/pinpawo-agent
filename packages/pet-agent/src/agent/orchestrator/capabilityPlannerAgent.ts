@@ -9,6 +9,7 @@ import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { tool, type StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
+import { GENERAL_CAPABILITY_NAME } from '../../types/capability';
 import { emitRuntimeEventToStreamWriter } from '../../utils/streamWriterEvents';
 import { readMessageToolCalls } from '../../utils/messages';
 import {
@@ -87,12 +88,12 @@ const nextTaskSchema = planTaskSchema.extend({
 const submitCapabilityPlanSchema = z.object({
   registry_digest: z.string().trim().min(1)
     .describe('The exact registry_digest from the immutable workspace input.'),
-  result: z.enum(['next_task', 'answer', 'unavailable'])
-    .describe('next_task delegates current work; answer ends autonomous work; unavailable reports that no registered Capability can complete the current task.'),
+  result: z.enum(['next_task', 'unavailable'])
+    .describe('next_task delegates current work; unavailable is allowed only when no registered Capability, including general, can execute the current task.'),
   next_task: nextTaskSchema.nullable().optional()
     .describe('The current executable task. Required only for result=next_task.'),
   remaining_plan: z.array(planTaskSchema).max(MAX_PLAN_TASKS).optional()
-    .describe('Ordered, unstarted future work. It is empty for answer and unavailable.'),
+    .describe('Ordered, unstarted future work. It is empty for unavailable.'),
   task: z.string().trim().min(1).max(MAX_TASK_TEXT_CHARS).nullable().optional()
     .describe('The current task that cannot be executed. Required only for result=unavailable.'),
   reason: z.string().trim().min(1).max(MAX_REASON_CHARS).nullable().optional()
@@ -111,20 +112,6 @@ const submitCapabilityPlanSchema = z.object({
         code: z.ZodIssueCode.custom,
         path: ['task'],
         message: 'result=next_task must not include task or reason.',
-      });
-    }
-  }
-  if (submission.result === 'answer') {
-    if (
-      submission.next_task
-      || (submission.remaining_plan?.length ?? 0) > 0
-      || submission.task
-      || submission.reason
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['result'],
-        message: 'result=answer requires next_task=null and an empty remaining_plan.',
       });
     }
   }
@@ -188,13 +175,6 @@ function freezePlannerResult(
       ),
     });
   }
-  if (result.result === 'answer') {
-    return Object.freeze({
-      result: 'answer',
-      next_task: null,
-      remaining_plan: Object.freeze([]) as readonly [],
-    });
-  }
   return Object.freeze({ ...result });
 }
 
@@ -211,28 +191,12 @@ function validateSubmission(params: {
     };
   }
 
-  if (submission.result === 'answer') {
-    if (input.mode === 'direct') {
-      return {
-        code: 'direct_task_mutation',
-        message: 'direct mode must execute the immutable pending task or return unavailable.',
-      };
-    }
-    return {
-      result: freezePlannerResult({
-        result: 'answer',
-        next_task: null,
-        remaining_plan: [],
-      }),
-    };
-  }
-
   if (submission.result === 'unavailable') {
     const task = submission.task as string;
-    if (input.mode === 'direct' && task !== input.pendingTask.task) {
+    if (input.workspace.capabilityNames.includes(GENERAL_CAPABILITY_NAME)) {
       return {
-        code: 'direct_task_mutation',
-        message: 'direct mode unavailable.task must exactly match pending_task.objective.',
+        code: 'general_fallback_required',
+        message: 'The general Capability is registered. Read its CAPABILITY.md and submit next_task with capability_name=general.',
       };
     }
     if (
@@ -273,18 +237,6 @@ function validateSubmission(params: {
     return {
       code: 'capability_not_observed',
       message: 'Read or grep the selected Capability document before submitting it.',
-    };
-  }
-  if (
-    input.mode === 'direct'
-    && (
-      nextTask.objective !== input.pendingTask.task
-      || nextTask.context_summary !== input.pendingTask.contextSummary
-    )
-  ) {
-    return {
-      code: 'direct_task_mutation',
-      message: 'direct mode next_task objective and context_summary must exactly match pending_task.',
     };
   }
   const remainingPlan = submission.remaining_plan ?? [];

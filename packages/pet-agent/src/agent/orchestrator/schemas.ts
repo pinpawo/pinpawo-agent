@@ -6,10 +6,8 @@ import type {
   OrchestrationDecisionStructuredOutputOptions,
 } from './types';
 
-export type TaskDecision = {
-  action: 'answer' | 'direct_task' | 'needs_plan';
-  task?: string | null;
-  context_summary?: string | null;
+export type EntryDecision = {
+  action: 'answer' | 'needs_plan';
 };
 
 export type DelegationOutcomeDecision = {
@@ -18,25 +16,11 @@ export type DelegationOutcomeDecision = {
 };
 export type AcceptedDelegationOutcome = Exclude<DelegationOutcomeDecision['outcome'], 'continue'>;
 
-export function buildTaskDecisionSchema() {
+export function buildEntryDecisionSchema() {
   return z.object({
-    action: z.enum(['direct_task', 'needs_plan', 'answer']).describe(
-      'run 入口的下一步。answer=主对话已有回复所需结果或需要询问用户；direct_task=需要先取得一个结果；needs_plan=需要先规划多个或依赖前一结果的任务。',
+    action: z.enum(['needs_plan', 'answer']).describe(
+      'run 入口的下一步。answer=主对话已有回复所需结果或需要询问用户；needs_plan=仍需取得新结果，由 Capability Planner 形成一个或多个任务。',
     ),
-    task: z.string().nullable().optional().describe(
-      'action=direct_task 时要执行的完整任务；其他 action 为 null 或省略。',
-    ),
-    context_summary: z.string().nullable().optional().describe(
-      'action=direct_task 时执行器需要的简短上下文；其他 action 为 null 或省略。',
-    ),
-  }).superRefine((decision, ctx) => {
-    if (decision.action === 'direct_task' && !decision.task?.trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['task'],
-        message: 'action=direct_task requires a non-empty task.',
-      });
-    }
   });
 }
 
@@ -87,8 +71,8 @@ function buildDecisionOutputInstruction(
   ].join('\n');
 }
 
-export function buildTaskDecisionOutputInstruction(method?: StructuredOutputMethod): string {
-  return buildDecisionOutputInstruction('task decision', buildTaskDecisionSchema(), method);
+export function buildEntryDecisionOutputInstruction(method?: StructuredOutputMethod): string {
+  return buildDecisionOutputInstruction('entry decision', buildEntryDecisionSchema(), method);
 }
 
 export function buildDelegationOutcomeDecisionOutputInstruction(method?: StructuredOutputMethod): string {

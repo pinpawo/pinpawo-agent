@@ -10,12 +10,13 @@ export type CapabilityPlanningInput = {
 };
 
 export type CapabilityPlanningExpected = {
-  result: 'next_task' | 'answer';
+  result: 'next_task';
   nextTaskTerms?: string[];
   capabilityIntent?: string;
+  capabilityName?: string;
   remainingPlan: Array<{ objectiveTerms: string[]; capabilityIntent: string }>;
   exactRemainingPlanLength?: number;
-  planEffect: 'created' | 'revised' | 'cancelled' | 'unchanged' | 'empty';
+  planEffect: 'created' | 'revised' | 'unchanged' | 'empty';
   rubberStamp: boolean;
   reason: string;
 };
@@ -76,6 +77,58 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
     metadata: { difficulty: 'hard', reason: 'Goal scope and same-capability task grouping.', source: SOURCE_FILE },
   },
   {
+    id: `${SUITE}.entry-forms-one-current-state-task`,
+    name: 'entry-forms-one-current-state-task',
+    suite: SUITE,
+    tags: ['capability_planning', 'delegation_control'],
+    input: {
+      mode: 'entry',
+      userGoal: '确认当前仓库是否还有未提交改动，并把实际状态告诉我。',
+      capabilityRegistry: [
+        'general: inspect the current workspace and report repository state',
+      ],
+    },
+    expected: {
+      result: 'next_task',
+      nextTaskTerms: ['仓库', '未提交', '状态'],
+      capabilityIntent: '当前工作区状态检查',
+      remainingPlan: [],
+      exactRemainingPlanLength: 0,
+      planEffect: 'created',
+      rubberStamp: false,
+      reason: 'A simple request is materialized as one complete task without an artificial future tail.',
+    },
+    metadata: { difficulty: 'medium', reason: 'Planner-owned one-task boundary.', source: SOURCE_FILE },
+  },
+  {
+    id: `${SUITE}.entry-splits-independent-deliverables`,
+    name: 'entry-splits-independent-deliverables',
+    suite: SUITE,
+    tags: ['capability_planning', 'delegation_control'],
+    input: {
+      mode: 'entry',
+      userGoal: '审查 PR #450 的代码风险，并独立确认部署文档中的公开配置与实际页面一致。',
+      capabilityRegistry: [
+        'explore: inspect pull requests and code risks',
+        'browser: inspect deployed pages and compare public configuration',
+      ],
+    },
+    expected: {
+      result: 'next_task',
+      nextTaskTerms: ['PR', '450', '风险'],
+      capabilityIntent: '代码审查',
+      remainingPlan: [{
+        objectiveTerms: ['部署', '配置', '页面'],
+        capabilityIntent: '页面与配置核验',
+      }],
+      exactRemainingPlanLength: 1,
+      planEffect: 'created',
+      rubberStamp: false,
+      reason: 'Independent deliverables owned by different capabilities remain separate task boundaries.',
+    },
+    metadata: { difficulty: 'hard', reason: 'Planner-owned multi-task boundary.', source: SOURCE_FILE },
+  },
+  {
     id: `${SUITE}.boundary-materializes-from-explore-handoff`,
     name: 'boundary-materializes-from-explore-handoff',
     suite: SUITE,
@@ -106,32 +159,29 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
     metadata: { difficulty: 'hard', reason: 'planner@boundary materialization.', source: SOURCE_FILE },
   },
   {
-    id: `${SUITE}.boundary-cancels-obsolete-task`,
-    name: 'boundary-cancels-obsolete-task',
+    id: `${SUITE}.entry-uses-general-for-unmatched-work`,
+    name: 'entry-uses-general-for-unmatched-work',
     suite: SUITE,
-    tags: ['capability_planning', 'context_synthesis'],
+    tags: ['capability_planning', 'delegation_control'],
     input: {
-      mode: 'boundary',
-      userGoal: '确认配置是否正确，必要时修复。',
+      mode: 'entry',
+      userGoal: '处理这个没有专用 Capability 覆盖的普通工作区任务，并返回执行结果。',
       capabilityRegistry: [
-        'explore: inspect project configuration',
-        'general: modify and verify workspace files',
+        'general: execute ordinary workspace tasks when no specialized Capability matches',
       ],
-      completedTasks: [{
-        objective: '检查项目配置是否与文档一致',
-        result: '配置与文档完全一致，验证通过，不需要修改。',
-      }],
-      remainingPlan: [{ objective: '修复错误配置', capabilityIntent: '配置修改' }],
-      latestHandoff: '配置与文档完全一致，验证通过，不需要修改。',
     },
     expected: {
-      result: 'answer',
+      result: 'next_task',
+      nextTaskTerms: ['普通', '工作区', '执行结果'],
+      capabilityIntent: '通用任务执行',
+      capabilityName: 'general',
       remainingPlan: [],
-      planEffect: 'cancelled',
+      exactRemainingPlanLength: 0,
+      planEffect: 'created',
       rubberStamp: false,
-      reason: 'The completed result makes the planned repair unnecessary.',
+      reason: 'When no specialized Capability matches, the Planner must materialize the task with general instead of answering or reporting unavailable.',
     },
-    metadata: { difficulty: 'medium', reason: 'Boundary cancellation.', source: SOURCE_FILE },
+    metadata: { difficulty: 'medium', reason: 'Mandatory General fallback.', source: SOURCE_FILE },
   },
   {
     id: `${SUITE}.boundary-keeps-valid-next-task`,

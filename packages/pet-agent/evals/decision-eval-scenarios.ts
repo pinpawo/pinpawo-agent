@@ -9,20 +9,19 @@ import {
   buildRunDelegationSummaryContext,
   buildRuntimeContext,
   buildSubagentAnnounceContext,
-  buildTaskDecisionInput,
-  buildTaskDecisionSystemPrompt,
+  buildEntryDecisionInput,
+  buildEntryDecisionSystemPrompt,
 } from '../src/agent/orchestrator/prompts.ts';
 import {
   buildDelegationOutcomeDecisionOutputInstruction,
   buildDelegationOutcomeDecisionSchema,
   buildOrchestrationDecisionStructuredOutputOptions,
-  buildTaskDecisionOutputInstruction,
-  buildTaskDecisionSchema,
+  buildEntryDecisionOutputInstruction,
+  buildEntryDecisionSchema,
 } from '../src/agent/orchestrator/schemas.ts';
 import type { AgentModels } from '../src/types/agent.ts';
 import type { StructuredOutputMethod } from '../src/utils/structuredOutput.ts';
 import {
-  adaptTaskDecisionMode,
   scoreEntryDecision,
   scoreOutcomeDecision,
   type DecisionContractScore,
@@ -31,11 +30,7 @@ import {
   entryDecisionBasicsDataset,
   outcomeDecisionBasicsDataset,
 } from './datasets/index.ts';
-import {
-  evaluatePromptGoal,
-  type PromptEvalJudge,
-  type PromptGoalAcceptanceCriterion,
-} from './prompt-goal-evaluator.ts';
+import type { PromptEvalJudge } from './prompt-goal-evaluator.ts';
 
 export type DecisionEvalTarget = 'entry' | 'outcome';
 
@@ -55,7 +50,7 @@ export type DecisionEvalRunResult = {
 
 export type DecisionEvalScenario = {
   target: DecisionEvalTarget;
-  contract: 'entry.execution-shape'
+  contract: 'entry.result-availability'
     | 'outcome.announce-verdict';
   objective: string;
   datasetName: string;
@@ -99,11 +94,11 @@ function entryScenarios(): DecisionEvalScenario[] {
         new HumanMessage(testCase.input.userRequest),
       ];
       return {
-        system: buildTaskDecisionSystemPrompt({
+        system: buildEntryDecisionSystemPrompt({
           actor,
-          outputInstruction: buildTaskDecisionOutputInstruction(method),
+          outputInstruction: buildEntryDecisionOutputInstruction(method),
         }),
-        input: buildTaskDecisionInput({
+        input: buildEntryDecisionInput({
           runDelegationContext: buildRunDelegationSummaryContext([]),
           runtimeContext: buildRuntimeContext('/workspace', 'Node.js decision eval'),
         }),
@@ -112,57 +107,31 @@ function entryScenarios(): DecisionEvalScenario[] {
     };
     return {
       target: 'entry',
-      contract: 'entry.execution-shape',
+      contract: 'entry.result-availability',
       objective,
       datasetName: entryDecisionBasicsDataset.name,
       caseId: testCase.id,
       caseName: testCase.name,
       expectedSummary: testCase.expected.mode,
       render,
-      async run(model, method, config, judge) {
-        const schema = buildTaskDecisionSchema();
+      async run(model, method, config) {
+        const schema = buildEntryDecisionSchema();
         const raw = await model.withStructuredOutput(
           schema,
           buildOrchestrationDecisionStructuredOutputOptions({ method }),
         ).invoke(messages(render(method)), config);
         const decision = schema.parse(raw);
-        const mode = adaptTaskDecisionMode(decision.action);
         const output = {
           action: decision.action,
-          task: decision.task ?? null,
-          contextSummary: decision.context_summary ?? null,
         };
-        const semanticCriteria: PromptGoalAcceptanceCriterion[] = testCase.expected.expectedTaskTerms?.length
-          ? [{
-              id: 'direct_task_content_correct',
-              statement: [
-                'The direct task preserves all executable work required by the user request in one boundary.',
-                `Required anchors: ${testCase.expected.expectedTaskTerms.join(', ')}.`,
-              ].join(' '),
-            }]
-          : [];
-        const semanticEvaluation = semanticCriteria.length > 0
-          ? await evaluatePromptGoal({
-              judge: judge ?? { model, method, config },
-              contract: 'entry.execution-shape',
-              objective,
-              acceptanceCriteria: semanticCriteria,
-              evidence: testCase.input,
-              candidateOutput: output,
-            })
-          : null;
         return {
           output,
-          scores: [
-            ...scoreEntryDecision({ mode }, testCase.expected),
-            ...(semanticEvaluation?.scores ?? []),
-          ],
+          scores: scoreEntryDecision(
+            { mode: decision.action },
+            testCase.expected,
+          ),
           verdict: decision.action,
-          shape: decision.task ? 'task=1' : 'task=0',
-          diagnostics: {
-            expectedBoundaryCount: testCase.expected.expectedBoundaryCount,
-            ...(semanticEvaluation ? { evaluationSummary: semanticEvaluation.summary } : {}),
-          },
+          shape: `action=${decision.action}`,
         };
       },
     };

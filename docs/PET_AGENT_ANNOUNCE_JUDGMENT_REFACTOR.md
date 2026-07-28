@@ -3,7 +3,7 @@
 > 状态：已实现；2026-07-19 按显式 `announceMessageId` 与严格 provenance 协议修订。
 > 归属：announce / handoff 的 canonical 语义说明。
 > 触发：#233 review 的 P2 #1/#2，连带暴露 `completionReason → announce` 的语义偏离；进一步重新框定为 handoff 边界问题。
-> 状态生命周期命名与 task/run 拆分见 `docs/PET_AGENT_STATE_LIFECYCLE_REFACTOR.md`。本文只描述 announce/handoff 语义。
+> 当前 orchestrator decision ownership 见 `docs/PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md`。本文只描述 announce/handoff 语义。
 
 本文只依赖消息身份与 metadata，不根据消息正文是否类似
 `<delegation_briefing>`、`【委派简报】` 或其他文本形状判断消息角色。pre-lane briefing

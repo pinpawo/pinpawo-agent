@@ -67,8 +67,8 @@ model performs the existing `prompt-goal-v1` evaluation after the graph finishes
 The first complete GLM-5.2 run exposed composition failures that isolated node
 profiles had not represented:
 
-- `answer` could ignore a completed task result after the boundary planner
-  selected `answer`;
+- goal completion was previously deferred to a boundary Planner `answer`,
+  leaving terminal ownership split between outcomeDecision and the Planner;
 - `capabilityPlanner` could split one investigation result into repeated tasks
   or turn an available code-change capability into an unrequested repair goal;
 - an underspecified user-input lifecycle case allowed a valid immediate
@@ -80,8 +80,12 @@ The candidate changes stay with the narrow owners:
 
 - the user-input case now explicitly requests the public check before the
   protected deployment-state check;
-- answer receives a typed-state-derived objective to deliver the latest task
-  result, without treating `task_done` as proof that the user goal is complete;
+- outcomeDecision owns the terminal distinction: `goal_done` ends autonomous
+  work, while `task_done` guarantees that later autonomous work remains for the
+  boundary Planner;
+- the Planner never returns `answer`; when no specialized Capability matches,
+  it selects registered `general`, and only reports `unavailable` when no
+  executable Capability (including `general`) exists;
 - planner treats the user request as the source of ends and the capability
   registry as available means, and keeps evidence gathering, analysis, and
   verification for one investigation result inside one task boundary;

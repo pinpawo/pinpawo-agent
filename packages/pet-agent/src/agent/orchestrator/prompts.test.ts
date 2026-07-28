@@ -10,8 +10,8 @@ import {
   buildPreparedRequestContext,
   buildRuntimeContext,
   buildSubagentAnnounceContext,
-  buildTaskDecisionInput,
-  buildTaskDecisionSystemPrompt,
+  buildEntryDecisionInput,
+  buildEntryDecisionSystemPrompt,
 } from './prompts';
 
 function recentMessages(count: number) {
@@ -107,11 +107,11 @@ test('request contexts include bounded capability artifact refs', () => {
 });
 
 test('entry decision keeps runtime state in the input context', () => {
-  const prompt = buildTaskDecisionSystemPrompt({
+  const prompt = buildEntryDecisionSystemPrompt({
     actor: testActor,
     outputInstruction: 'ENTRY_OUTPUT_INSTRUCTION',
   });
-  const input = buildTaskDecisionInput({
+  const input = buildEntryDecisionInput({
     runDelegationContext: '<run_delegations><none>true</none></run_delegations>',
     runtimeContext: buildRuntimeContext('/repo', 'Node 20'),
   });

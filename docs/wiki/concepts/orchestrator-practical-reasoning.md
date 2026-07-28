@@ -2,12 +2,12 @@
 title: Orchestrator As Practical Reasoning
 page_type: concept
 status: draft
-updated: 2026-07-27
+updated: 2026-07-29
 sources:
   - ../../PET_AGENT_REWRITE_DESIGN.md
+  - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../../PET_AGENT_API_CAPABILITY_TOOLKIT.md
   - ../../PET_AGENT_TOOLKIT_COMPOSITION_DESIGN.md
-  - ../../PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md
   - ../../PET_AGENT_ANNOUNCE_JUDGMENT_REFACTOR.md
   - ../../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md
   - ../../CONTEXT_GOVERNANCE_REFACTOR.md
@@ -18,8 +18,8 @@ related:
   - message-context-and-provenance.md
   - prompt-knowledge-layers.md
   - system-prompt-authoring-principles.md
+  - ../decisions/capability-planner-task-boundaries.md
   - ../decisions/delegation-completion-acknowledgement.md
-  - ../investigations/entry-decision-state-query-routing.md
 ---
 
 # Orchestrator As Practical Reasoning
@@ -268,9 +268,8 @@ current action names are philosophically complete:
 | Current component | Practical-reasoning role |
 |---|---|
 | canonical main conversation | evolving common ground and situated belief |
-| `entryDecision` | judge the form of the next justified commitment |
-| `capabilityPlanner` | deliberate over dependent future commitments |
-| `capabilityDecision` | select a bounded local actor for an already-formed commitment |
+| `entryDecision` | judge whether common ground already supports a reply or a new result is required |
+| Capability Planner Agent | explore the actor map, form the next justified local commitment, select its bounded actor, and maintain future commitments |
 | capability subagent | pursue one local commitment within limited context and authority |
 | `outcomeDecision` | interpret a local result against task and purpose |
 | handoff | integrate an accepted local experience into common ground |

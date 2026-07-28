@@ -336,3 +336,22 @@ lint passes, and documentation migrations.
   `@pinpawo/agent-session` package.
 - Preserved the invariant that no client or timeout fabricates a terminal state:
   the invocation owner emits `interrupted` only after graph output settles.
+
+## [2026-07-29] ingest | Capability Planner Agent ownership and workspace exploration
+
+- Ingested issues #473/#490 and merged PRs #474/#477/#480/#483/#492 as the
+  current Capability Planner architecture.
+- Replaced the active Wiki graph and Prompt Contract Map with four semantic
+  owners: entry result availability, Planner task-and-Capability deliberation,
+  outcome verdict, and answer communication.
+- Recorded the Capability Document Workspace and private bounded file tools as
+  the model-explorable registry map; removed current guidance for coded
+  relevance search, an independent Capability Decision, and `direct_task`.
+- Made registered `general` the Planner-owned no-specialist path, restricted
+  `unavailable` to a registry with no executable Capability, and removed Planner
+  `answer` in favor of strict outcome-owned `goal_done`.
+- Rewrote the Planner decision, ownership, authoring, source-registry, and open
+  question pages; removed the superseded entry-routing investigation and every
+  Wiki reference to deleted raw design sources.
+- Validated all remaining Wiki frontmatter and local Markdown/source links
+  after the ingest.

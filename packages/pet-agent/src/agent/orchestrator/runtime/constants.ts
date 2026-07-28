@@ -10,7 +10,6 @@ export const DEFAULT_ORCHESTRATOR_MAX_ITERATIONS = 25;
 const ORCHESTRATOR_INTERNAL_AI_STREAM_NODE_NAMES = [
   'entryDecision',
   'capabilityPlanner',
-  'capabilityDecision',
   'delegationOutcomeDecision',
 ] as const;
 

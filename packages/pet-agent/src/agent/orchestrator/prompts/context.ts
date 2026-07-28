@@ -1,7 +1,6 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import type { CapabilityArtifactRef } from '../../../types/artifact';
 import type {
-  CapabilityCandidate,
   RunDelegationSummary,
   SubagentAnnounce,
   SubagentCompletionReason,
@@ -49,25 +48,6 @@ export function buildRunDelegationSummaryContext(runDelegationSummaries: RunDele
     if (delegation.resultPreview) {
       lines.push(`- 结果摘要：${clipForPrompt(delegation.resultPreview, 220)}`);
     }
-  }
-  return lines.join('\n');
-}
-
-export function buildCapabilityDecisionAvailableExecutorsContext(params: {
-  capabilityCandidates: CapabilityCandidate[];
-}): string {
-  const lines = ['当前可用执行能力：'];
-
-  if (params.capabilityCandidates.length > 0) {
-    for (const candidate of params.capabilityCandidates) {
-      lines.push(
-        `- capability.${candidate.name}：${clipForPrompt(candidate.description, 520)}`,
-      );
-    }
-  }
-
-  if (params.capabilityCandidates.length === 0) {
-    lines.push('- 无');
   }
   return lines.join('\n');
 }

@@ -205,6 +205,11 @@ function evalCapability(
 
 const mockCapabilities: AgentCapability[] = [
   evalCapability(
+    'general',
+    '处理普通文件、代码、命令和通用工具任务。',
+    '负责完成不需要专用领域能力的普通执行任务。',
+  ),
+  evalCapability(
     'explore',
     '通用探索、调查、资料检索和代码库理解 capability。适合大量阅读、搜索、检查上下文、梳理证据、先探索再决定下一步的任务。',
     '负责只读探索、代码库理解、资料检索和证据汇总。',
@@ -240,16 +245,25 @@ const testActor: AgentActor = {
 let evalCounter = 0;
 
 function resolveCapabilityList(pack: unknown): AgentCapability[] {
+  const general = mockCapabilities.filter((capability) => capability.name === 'general');
   if (pack === 'pet_content') {
-    return mockCapabilities.filter((capability) => capability.name !== 'browser' && capability.name !== 'explore');
+    return mockCapabilities.filter((capability) =>
+      capability.name !== 'browser' && capability.name !== 'explore'
+    );
   }
   if (pack === 'browser') {
-    return mockCapabilities.filter((capability) => capability.name === 'browser');
+    return [
+      ...general,
+      ...mockCapabilities.filter((capability) => capability.name === 'browser'),
+    ];
   }
   if (pack === 'explore') {
-    return mockCapabilities.filter((capability) => capability.name === 'explore');
+    return [
+      ...general,
+      ...mockCapabilities.filter((capability) => capability.name === 'explore'),
+    ];
   }
-  return [];
+  return general;
 }
 
 export async function target(
@@ -377,9 +391,9 @@ export async function target(
       })),
     );
   }
-  const capabilityCandidateNames = Array.isArray(inputs.capability_candidates)
-    ? inputs.capability_candidates.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-    : [];
+  const allowedCapabilityNames = Array.isArray(inputs.allowed_capability_names)
+    ? inputs.allowed_capability_names.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : null;
 
   // Evaluate through task/search + route decision, but stop before executing subagents.
   const result = await compiled.invoke(turnInput, {
@@ -389,7 +403,9 @@ export async function target(
       actor: testActor,
       toolkits: [mockGeneralToolkit],
       capabilities: capabilityList,
-      forcedCapabilityNames: capabilityCandidateNames,
+      ...(allowedCapabilityNames
+        ? { allowedCapabilityNames }
+        : {}),
       maxIterations: 1,
     },
   });

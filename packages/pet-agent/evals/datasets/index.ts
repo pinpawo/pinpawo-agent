@@ -1,5 +1,3 @@
-import { capabilitySearchBasicsDataset } from './capability-search-basics.ts';
-import { capabilityDecisionBasicsDataset } from './capability-decision-basics.ts';
 import { capabilityPlanningBasicsDataset } from './capability-planning-basics.ts';
 import { contextSynthesisBasicsDataset } from './context-synthesis-basics.ts';
 import { delegationControlBasicsDataset } from './delegation-control-basics.ts';
@@ -17,9 +15,7 @@ export const agentEvalDatasets = [
   answerBehaviorBasicsDataset,
   orchestratorRouteDataset,
   orchestratorFlowMockSubagentDataset,
-  capabilitySearchBasicsDataset,
   entryDecisionBasicsDataset,
-  capabilityDecisionBasicsDataset,
   outcomeDecisionBasicsDataset,
   capabilityPlanningBasicsDataset,
   delegationControlBasicsDataset,
@@ -33,8 +29,6 @@ export const agentEvalDatasets = [
 
 export {
   answerBehaviorBasicsDataset,
-  capabilitySearchBasicsDataset,
-  capabilityDecisionBasicsDataset,
   capabilityPlanningBasicsDataset,
   contextSynthesisBasicsDataset,
   delegationControlBasicsDataset,

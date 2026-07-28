@@ -25,10 +25,6 @@ import {
 } from '../createAgentRuntime';
 import { compileAgentRegistry } from './registry';
 import {
-  searchCapabilities,
-  splitCapabilitySearchTerms,
-} from './capabilitySearch';
-import {
   collectToolkitOperations,
   resolveToolkitExecution,
 } from './subagentDispatch';
@@ -63,10 +59,15 @@ import {
   ORCHESTRATOR_STATE_CHANNEL_NAMES,
   type OrchestratorStateType,
 } from './state';
-import { createCapabilityDecisionRunner } from './runtime/decisions/orchestrationDecision';
 import { applyActiveDelegationTransition } from './runtime/activeDelegationTransition';
 import { afterContextPrep } from './runtime/routes/afterContextPrep';
 import { readSubagentGuardStopReason } from '../../subagent/guardStop';
+import type {
+  CapabilityPlannerInput,
+  CapabilityPlannerResult,
+  CapabilityPlannerRunner,
+} from './capabilityPlannerRunner';
+import { readMessageText } from './utils';
 
 function capability(
   name: string,
@@ -86,7 +87,11 @@ function capability(
 function createOrchestratorGraph(
   config: Parameters<typeof createRuntimeOrchestratorGraph>[0],
 ): ReturnType<typeof createRuntimeOrchestratorGraph> {
-  const graph = createRuntimeOrchestratorGraph(config);
+  const graph = createRuntimeOrchestratorGraph({
+    ...config,
+    capabilityPlannerRunner:
+      config.capabilityPlannerRunner ?? createQueuedPlannerRunner(config.models.act),
+  });
   const withRegistry = (options: {
     configurable?: Record<string, unknown>;
   } = {}) => {
@@ -113,6 +118,71 @@ function createOrchestratorGraph(
       return typeof value === 'function' ? value.bind(target) : value;
     },
   });
+}
+
+function createQueuedPlannerRunner(
+  model: AgentModels['act'],
+): CapabilityPlannerRunner {
+  const nextStructuredValue = async () => {
+    const structured = model.withStructuredOutput(
+      z.record(z.unknown()),
+      { name: 'scripted_capability_planner' },
+    );
+    return await structured.invoke([]) as Record<string, unknown>;
+  };
+
+  return {
+    async invoke(input: CapabilityPlannerInput): Promise<CapabilityPlannerResult> {
+      if (input.mode === 'direct') {
+        const decision = await nextStructuredValue();
+        const capabilityName = String(decision.capabilityName ?? '');
+        return {
+          result: 'next_task',
+          next_task: {
+            objective: input.pendingTask.task,
+            capability_intent: 'scripted graph test',
+            capability_name: capabilityName,
+            context_summary: input.pendingTask.contextSummary,
+          },
+          remaining_plan: [],
+        };
+      }
+
+      const planning = await nextStructuredValue();
+      if (planning.result === 'answer') {
+        return {
+          result: 'answer',
+          next_task: null,
+          remaining_plan: [],
+        };
+      }
+      const nextTask = planning.next_task as {
+        objective?: unknown;
+        capability_intent?: unknown;
+      } | null;
+      if (!nextTask) {
+        throw new Error('scripted Capability Planner requires next_task');
+      }
+      const capabilityName = String(
+        (await nextStructuredValue()).capabilityName ?? '',
+      );
+      return {
+        result: 'next_task',
+        next_task: {
+          objective: String(nextTask.objective ?? ''),
+          capability_intent: String(nextTask.capability_intent ?? ''),
+          capability_name: capabilityName,
+          context_summary: null,
+        },
+        remaining_plan: Array.isArray(planning.remaining_plan)
+          ? planning.remaining_plan as Array<{
+              objective: string;
+              capability_intent: string;
+            }>
+          : [],
+      };
+    },
+  };
 }
 
 function mockTool(name: string) {
@@ -205,8 +275,8 @@ function nextTaskDecision(
   };
 }
 
-function routeCapabilityDecision(capabilityName: string) {
-  return { selection: `capability.${capabilityName}` };
+function scriptedPlannerCapability(capabilityName: string) {
+  return { capabilityName };
 }
 
 function goalDoneDecision() {
@@ -224,58 +294,6 @@ function taskDoneDecision(gapNote: string | null = '当前任务已完成，但�
 function continueDecision(gapNote: string | null = '当前 delegated task 还未达标，继续执行。') {
   return { outcome: 'continue', gap_note: gapNote };
 }
-
-test('capability search ranks matching capability and keeps original query terms', () => {
-  const results = searchCapabilities('宠物发帖|小红书日常', [
-    capability('daily_post', '生成、保存或跳过宠物 daily post、小红书日常动态、宠物发帖草稿。'),
-    capability('capability_creator', '生成和验证用户自定义 capability 插件模板。'),
-  ]);
-
-  assert.equal(results[0]?.name, 'daily_post');
-  assert.deepEqual(results[0]?.matchedTerms, ['宠物发帖', '小红书日常']);
-});
-
-test('capability search matches long Chinese intent through contained capability keywords', () => {
-  const results = searchCapabilities('根据最新热点生成三条视频脚本', [
-    capability('trend_video_script', '视频脚本助手，最新热点，热门短视频，脚本，分镜，图片。'),
-    capability('video_tail_audio', '从视频中提取音频并截取最后2秒，生成标准输出目录与metadata.json。'),
-  ]);
-
-  assert.equal(results[0]?.name, 'trend_video_script');
-  assert.deepEqual(results[0]?.matchedTerms, ['根据最新热点生成三条视频脚本']);
-});
-
-test('capability search finds video script assistant for short creation request', () => {
-  const results = searchCapabilities('帮我开始写 视频脚本', [
-    capability('trend_video_script', '视频脚本助手，视频脚本，最新热点，热门短视频，短视频脚本，分镜脚本，分镜图片。'),
-    capability('video_tail_audio', '从视频中提取音频并截取最后2秒，生成标准输出目录与metadata.json。'),
-  ]);
-
-  assert.equal(results[0]?.name, 'trend_video_script');
-  assert.deepEqual(results.map((item) => item.name), ['trend_video_script']);
-});
-
-test('capability search can select explore for read-heavy investigation requests', () => {
-  const results = searchCapabilities('代码库理解|调查|先探索再决定', [
-    capability('explore', '通用探索、调查、资料检索和代码库理解 capability。适合大量阅读、搜索、检查上下文、梳理证据、先探索再决定下一步的任务。'),
-    capability('daily_post', '生成、保存或跳过宠物 daily post、小红书日常动态、宠物发帖草稿。'),
-  ]);
-
-  assert.equal(results[0]?.name, 'explore');
-});
-
-test('capability search ranks explore over browser for code review with URL', () => {
-  const results = searchCapabilities('帮我 code review 这个 GitHub PR URL', [
-    capability('explore', '通用探索、调查、资料检索和代码库理解 capability。适合代码 review、代码审查、PR review、pull request review、diff 审查和仓库变更评审。'),
-    capability('browser', '使用本机浏览器/Chrome/browser 打开 URL、链接、网站和网页，复用登录态，点击、输入、等待页面变化并提取页面内容。'),
-  ]);
-
-  assert.equal(results[0]?.name, 'explore');
-});
-
-test('capability search splits pipe and word terms for keyword matching', () => {
-  assert.deepEqual(splitCapabilitySearchTerms('宠物发帖|宠物 发帖'), ['宠物发帖', '宠物 发帖', '宠物', '发帖']);
-});
 
 test('task decision reads full canonical main messages and excludes lane announces', async () => {
   let taskDecisionMessages: Array<{ _getType?: () => string; content?: unknown }> = [];
@@ -356,133 +374,12 @@ test('task decision reads full canonical main messages and excludes lane announc
   );
 });
 
-test('capability decision searches candidates from the pending task', async () => {
-  let routeSystemPrompt = '';
-  let routeInput = '';
-  let decisionCallCount = 0;
-  let schemaAllowsExplore = false;
-  const model = {
-    invoke: async () => new AIMessage('answered'),
-    bindTools: () => ({
-      invoke: async () => {
-        return new AIMessage('');
-      },
-    }),
-    withStructuredOutput: (schema: unknown) => ({
-      invoke: async (messages: unknown[]) => {
-        decisionCallCount += 1;
-        if (decisionCallCount === 1) {
-          return nextTaskDecision(
-            '继续调查 pet-app 仓库中 local-agent 的 capability 注册链路。',
-            '上一轮 explore 调查仍处于 progress 状态。',
-          );
-        }
-        if (decisionCallCount > 2) {
-          return goalDoneDecision();
-        }
-        schemaAllowsExplore = Boolean(
-          (schema as { safeParse?: (value: unknown) => { success: boolean } }).safeParse?.({
-            selection: 'capability.explore',
-          }).success,
-        );
-        routeSystemPrompt = String((messages.at(0) as { content?: unknown })?.content ?? '');
-        routeInput = String((messages.at(-1) as { content?: unknown })?.content ?? '');
-        return routeCapabilityDecision('explore');
-      },
-    }),
-  } as unknown as AgentModels['act'];
-
-  const graph = createOrchestratorGraph({
-    models: {
-      act: model,
-      observe: model,
-      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
-    },
-    actor: testActor,
-  });
-  const previousAnnounce = new AIMessage('(no matches)');
-  setPinpetMeta(previousAnnounce, {
-    lane: 'capability:explore',
-    runId: 'prev-turn',
-    isAnnounce: true,
-    delegationId: 'task-prev',
-    task: '调查 pet-app 仓库中 local-agent 的 capability 注册链路，列出关键文件和证据。',
-  });
-  const input = buildOrchestratorRunInput([
-    new HumanMessage('帮我调查 pet-app 里的 capability 注册链路。'),
-    previousAnnounce,
-    new HumanMessage('现在状态如何？'),
-  ]);
-  await graph.invoke(input, {
-    configurable: {
-      thread_id: 'test-in-progress-capability-candidate',
-      actor: testActor,
-      capabilities: [capability('explore', '通用探索、调查、代码库理解 capability。')],
-      tools: [],
-    },
-  });
-
-  assert.equal(schemaAllowsExplore, true);
-  assert.doesNotMatch(routeSystemPrompt, /capability\.explore/);
-  assert.doesNotMatch(routeSystemPrompt, /delegate_capability\.explore/);
-  assert.match(routeInput, /<capability_decision_input>/);
-  assert.match(routeInput, /继续调查 pet-app 仓库中 local-agent 的 capability 注册链路/);
-  assert.match(routeInput, /capability\.explore/);
-  assert.doesNotMatch(routeInput, /匹配：|search_keywords/);
-  assert.doesNotMatch(routeInput, /delegate_capability\.explore/);
-  assert.equal(decisionCallCount, 3);
-});
-
-test('capability decision excludes a Capability whose required Toolkit is missing', async () => {
-  let routeInput = '';
-  let decisionCallCount = 0;
-  const model = {
-    invoke: async () => new AIMessage(''),
-    bindTools: () => ({
-      invoke: async () => new AIMessage(''),
-    }),
-    withStructuredOutput: () => ({
-      invoke: async (messages: unknown[]) => {
-        decisionCallCount += 1;
-        routeInput = String((messages.at(-1) as { content?: unknown })?.content ?? '');
-        return routeCapabilityDecision('general');
-      },
-    }),
-  } as unknown as AgentModels['act'];
-  const runCapabilityDecision = createCapabilityDecisionRunner({
-    models: { act: model, observe: model },
-    actor: testActor,
-  });
-  const input = buildOrchestratorRunInput([new HumanMessage('use missing service')]);
-  input.runPendingTask = {
-    task: 'use missing service',
-    contextSummary: null,
-  };
-
-  await runCapabilityDecision(input as OrchestratorStateType, {
-    configurable: {
-      actor: testActor,
-      registry: compileAgentRegistry({
-        capabilities: [capability('broken', 'Broken service capability.', ['missing'])],
-        toolkits: [],
-      }),
-    },
-  });
-
-  assert.equal(decisionCallCount, 0);
-  assert.equal(routeInput, '');
-});
-
 test('task_done reroutes through capabilityPlanner before the next task', async () => {
   let structuredCallCount = 0;
   const taskDecisionInputs: string[] = [];
-  const plannerInputs: string[] = [];
-  const routeInputs: string[] = [];
+  const plannerInputs: CapabilityPlannerInput[] = [];
   const routeModel = {
     invoke: async () => new AIMessage('final summary'),
-    bindTools: () => ({
-      invoke: async () => new AIMessage(''),
-    }),
     withStructuredOutput: () => ({
       invoke: async (messages: unknown[]) => {
         structuredCallCount += 1;
@@ -492,28 +389,39 @@ test('task_done reroutes through capabilityPlanner before the next task', async 
           return nextTaskDecision('读取 issue #269 并提炼需求点。');
         }
         if (structuredCallCount === 2) {
-          routeInputs.push(inputText);
-          return routeCapabilityDecision('explore');
-        }
-        if (structuredCallCount === 3) {
           return taskDoneDecision('已提炼 issue 需求点，还需要检索本地实现。');
-        }
-        if (structuredCallCount === 4) {
-          plannerInputs.push(inputText);
-          return {
-            result: 'next_task',
-            remaining_plan: [],
-            next_task: { objective: '检索本地实现与 git log，判断需求点是否已覆盖。', capability_intent: 'codebase_exploration' },
-          };
-        }
-        if (structuredCallCount === 5) {
-          routeInputs.push(inputText);
-          return routeCapabilityDecision('explore');
         }
         return goalDoneDecision();
       },
     }),
   } as unknown as AgentModels['act'];
+  const capabilityPlannerRunner: CapabilityPlannerRunner = {
+    async invoke(input) {
+      plannerInputs.push(input);
+      if (input.mode === 'direct') {
+        return {
+          result: 'next_task',
+          next_task: {
+            objective: input.pendingTask.task,
+            capability_intent: 'codebase_exploration',
+            capability_name: 'explore',
+            context_summary: input.pendingTask.contextSummary,
+          },
+          remaining_plan: [],
+        };
+      }
+      return {
+        result: 'next_task',
+        remaining_plan: [],
+        next_task: {
+          objective: '检索本地实现与 git log，判断需求点是否已覆盖。',
+          capability_intent: 'codebase_exploration',
+          capability_name: 'explore',
+          context_summary: null,
+        },
+      };
+    },
+  };
   const graph = createOrchestratorGraph({
     models: {
       act: routeModel,
@@ -527,6 +435,7 @@ test('task_done reroutes through capabilityPlanner before the next task', async 
       }),
     },
     actor: testActor,
+    capabilityPlannerRunner,
   });
 
   const state = await graph.invoke(buildOrchestratorRunInput([
@@ -536,18 +445,19 @@ test('task_done reroutes through capabilityPlanner before the next task', async 
       thread_id: 'stage-b-task-done-loop',
       actor: testActor,
       capabilities: [capability('explore', '通用探索、调查、代码库理解 capability。')],
-      forcedCapabilityNames: ['explore'],
+      allowedCapabilityNames: ['explore'],
     },
   }) as OrchestratorStateType;
 
   assert.equal(taskDecisionInputs.length, 1);
-  assert.equal(plannerInputs.length, 1);
-  assert.equal(routeInputs.length, 2);
+  assert.equal(plannerInputs.length, 2);
   assert.doesNotMatch(taskDecisionInputs[0], /plan_draft|task_plan_draft/);
-  assert.match(plannerInputs[0], /capability_planning_input/);
-  assert.match(plannerInputs[0], /issue #269 需求点/);
-  assert.match(routeInputs[0], /读取 issue #269/);
-  assert.match(routeInputs[1], /检索本地实现与 git log/);
+  assert.equal(plannerInputs[0]?.mode, 'direct');
+  assert.equal(plannerInputs[1]?.mode, 'boundary');
+  assert.match(plannerInputs[1]?.latestHandoff ?? '', /issue #269 需求点/);
+  assert.deepEqual(plannerInputs[1]?.completedTasks.map(({ objective }) => objective), [
+    '读取 issue #269 并提炼需求点。',
+  ]);
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
   assert.equal(state.runPendingTask, null);
   assert.deepEqual(state.runCapabilityPlan, []);
@@ -558,13 +468,9 @@ test('task_done reroutes through capabilityPlanner before the next task', async 
 test('task_done returns to capabilityPlanner until the remaining goal is complete', async () => {
   let structuredCallCount = 0;
   const taskDecisionInputs: string[] = [];
-  const plannerInputs: string[] = [];
-  const routeInputs: string[] = [];
+  const plannerInputs: CapabilityPlannerInput[] = [];
   const routeModel = {
     invoke: async () => new AIMessage('final answer'),
-    bindTools: () => ({
-      invoke: async () => new AIMessage(''),
-    }),
     withStructuredOutput: () => ({
       invoke: async (messages: unknown[]) => {
         structuredCallCount += 1;
@@ -574,41 +480,47 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
           return { action: 'needs_plan' };
         }
         if (structuredCallCount === 2) {
-          plannerInputs.push(inputText);
-          return {
-            result: 'next_task',
-            remaining_plan: [
-              { objective: '检索本地实现与 git log。', capability_intent: 'codebase_exploration' },
-            ],
-            next_task: { objective: '读取 issue #269 并提炼需求点。', capability_intent: 'codebase_exploration' },
-          };
-        }
-        if (structuredCallCount === 3) {
-          routeInputs.push(inputText);
-          return routeCapabilityDecision('explore');
-        }
-        if (structuredCallCount === 4) {
           return taskDoneDecision('已提炼 issue 需求点。');
         }
-        if (structuredCallCount === 5) {
-          plannerInputs.push(inputText);
-          return {
-            result: 'next_task',
-            remaining_plan: [],
-            next_task: { objective: '检索本地实现与 git log。', capability_intent: 'codebase_exploration' },
-          };
-        }
-        if (structuredCallCount === 6) {
-          routeInputs.push(inputText);
-          return routeCapabilityDecision('explore');
-        }
-        if (structuredCallCount === 7) {
+        if (structuredCallCount === 3) {
           return goalDoneDecision();
         }
         throw new Error(`unexpected structured call ${structuredCallCount.toString()}`);
       },
     }),
   } as unknown as AgentModels['act'];
+  const capabilityPlannerRunner: CapabilityPlannerRunner = {
+    async invoke(input) {
+      plannerInputs.push(input);
+      if (input.mode === 'entry') {
+        return {
+          result: 'next_task',
+          remaining_plan: [
+            {
+              objective: '检索本地实现与 git log。',
+              capability_intent: 'codebase_exploration',
+            },
+          ],
+          next_task: {
+            objective: '读取 issue #269 并提炼需求点。',
+            capability_intent: 'codebase_exploration',
+            capability_name: 'explore',
+            context_summary: null,
+          },
+        };
+      }
+      return {
+        result: 'next_task',
+        remaining_plan: [],
+        next_task: {
+          objective: '检索本地实现与 git log。',
+          capability_intent: 'codebase_exploration',
+          capability_name: 'explore',
+          context_summary: null,
+        },
+      };
+    },
+  };
   const graph = createOrchestratorGraph({
     models: {
       act: routeModel,
@@ -622,6 +534,7 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
       }),
     },
     actor: testActor,
+    capabilityPlannerRunner,
   });
 
   const state = await graph.invoke(buildOrchestratorRunInput([
@@ -631,19 +544,22 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
       thread_id: 'stage-b-task-done-no-plan',
       actor: testActor,
       capabilities: [capability('explore', '通用探索、调查、代码库理解 capability。')],
-      forcedCapabilityNames: ['explore'],
+      allowedCapabilityNames: ['explore'],
     },
   }) as OrchestratorStateType;
 
-  assert.equal(structuredCallCount, 7);
+  assert.equal(structuredCallCount, 3);
   assert.equal(taskDecisionInputs.length, 1);
   assert.equal(plannerInputs.length, 2);
-  assert.equal(routeInputs.length, 2);
-  assert.ok(plannerInputs.every((input) => /capability_planning_input/.test(input)));
-  assert.match(plannerInputs[1], /<remaining_plan[^]*?检索本地实现与 git log[^]*?<\/remaining_plan>/);
-  assert.doesNotMatch(plannerInputs[1], /<remaining_plan[^]*?读取 issue #269[^]*?<\/remaining_plan>/);
-  assert.match(plannerInputs[1], /<completed_tasks[^]*?读取 issue #269[^]*?issue #269 需求点：需要检查本地实现[^]*?<\/completed_tasks>/);
-  assert.match(plannerInputs[1], /完整 handoff 末尾约束：必须检查兼容性/);
+  assert.deepEqual(plannerInputs.map(({ mode }) => mode), ['entry', 'boundary']);
+  assert.deepEqual(plannerInputs[1]?.remainingPlan, [{
+    objective: '检索本地实现与 git log。',
+    capabilityIntent: 'codebase_exploration',
+  }]);
+  assert.deepEqual(plannerInputs[1]?.completedTasks.map(({ objective }) => objective), [
+    '读取 issue #269 并提炼需求点。',
+  ]);
+  assert.match(plannerInputs[1]?.latestHandoff ?? '', /完整 handoff 末尾约束：必须检查兼容性/);
   assert.equal(String(state.messages.at(-1)?.content ?? ''), 'final answer');
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
   assert.equal(state.runPendingTask, null);
@@ -711,8 +627,12 @@ test('entry decision autoRepair retries direct_task without a task', async () =>
 });
 
 test('missing executable capability routes through the answer node', async () => {
+  let answerInvocationText = '';
   const model = {
-    invoke: async () => new AIMessage('当前没有可用的执行能力来读取本地文件。'),
+    invoke: async (messages: BaseMessage[]) => {
+      answerInvocationText = messages.map((message) => readMessageText(message)).join('\n');
+      return new AIMessage('当前没有可用的执行能力来读取本地文件。');
+    },
     bindTools: () => ({
       invoke: async () => new AIMessage(''),
     }),
@@ -728,6 +648,16 @@ test('missing executable capability routes through the answer node', async () =>
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
     actor: testActor,
+    capabilityPlannerRunner: {
+      async invoke(input) {
+        assert.equal(input.mode, 'direct');
+        return {
+          result: 'unavailable',
+          task: input.mode === 'direct' ? input.pendingTask.task : '读取本地文件。',
+          reason: 'No Capability documents are available.',
+        };
+      },
+    },
   });
 
   const state = await graph.invoke(buildOrchestratorRunInput([
@@ -742,13 +672,15 @@ test('missing executable capability routes through the answer node', async () =>
   }) as OrchestratorStateType;
 
   assert.match(String(mainConversationMessages(state.messages).at(-1)?.content ?? ''), /没有可用的执行能力/);
+  assert.match(answerInvocationText, /No Capability documents are available/);
   assert.equal(state.runNextDelegation, null);
   assert.equal(state.runPendingTask, null);
 });
 
 test('capability planner reports an empty compiled registry without inventing General', async () => {
   let structuredCallCount = 0;
-  let plannerInput = '';
+  let plannerMode: CapabilityPlannerInput['mode'] | null = null;
+  let plannerCapabilityNames: readonly string[] = [];
   const model = {
     invoke: async () => new AIMessage('当前没有可用 Capability。'),
     bindTools: () => ({
@@ -760,10 +692,7 @@ test('capability planner reports an empty compiled registry without inventing Ge
         if (structuredCallCount === 1) {
           return { action: 'needs_plan' };
         }
-        plannerInput = String(
-          (messages.at(-1) as { content?: unknown })?.content ?? '',
-        );
-        return { result: 'answer', remaining_plan: [], next_task: null };
+        throw new Error('Capability Planner must use the typed runner seam.');
       },
     }),
   } as unknown as AgentModels['act'];
@@ -774,6 +703,17 @@ test('capability planner reports an empty compiled registry without inventing Ge
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
     actor: testActor,
+    capabilityPlannerRunner: {
+      async invoke(input) {
+        plannerMode = input.mode;
+        plannerCapabilityNames = input.workspace.capabilityNames;
+        return {
+          result: 'answer',
+          next_task: null,
+          remaining_plan: [],
+        };
+      },
+    },
   });
 
   await graph.invoke(buildOrchestratorRunInput([
@@ -787,179 +727,8 @@ test('capability planner reports an empty compiled registry without inventing Ge
     },
   });
 
-  assert.match(plannerInput, /No capabilities are currently available\./);
-  assert.doesNotMatch(plannerInput, /general capability remains available/i);
-});
-
-test('capability decision can reject a retrieved candidate when no executor covers the task', async () => {
-  let structuredCallCount = 0;
-  let capabilityDecisionInput = '';
-  const model = {
-    invoke: async () => new AIMessage('当前没有能够完成文件修改和测试的执行能力。'),
-    bindTools: () => ({
-      invoke: async () => new AIMessage(''),
-    }),
-    withStructuredOutput: () => ({
-      invoke: async (messages: unknown[]) => {
-        structuredCallCount += 1;
-        if (structuredCallCount === 1) {
-          return nextTaskDecision('读取并修改 src/index.ts 的导出，然后运行相关测试。');
-        }
-        capabilityDecisionInput = String(
-          (messages.at(-1) as { content?: unknown })?.content ?? '',
-        );
-        return { selection: 'unavailable' };
-      },
-    }),
-  } as unknown as AgentModels['act'];
-
-  const graph = createOrchestratorGraph({
-    models: {
-      act: model,
-      observe: model,
-      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
-    },
-    actor: testActor,
-  });
-
-  const state = await graph.invoke(buildOrchestratorRunInput([
-    new HumanMessage('修改 src/index.ts 并测试'),
-  ]), {
-    configurable: {
-      thread_id: 'retrieved-candidate-unavailable',
-      actor: testActor,
-      capabilities: [
-        capability(
-          'code_review',
-          'Review an existing src/index.ts change and return comments; it cannot edit files or run tests.',
-        ),
-      ],
-      toolkits: [],
-    },
-  }) as OrchestratorStateType;
-
-  assert.equal(structuredCallCount, 2);
-  assert.match(capabilityDecisionInput, /capability\.code_review/);
-  assert.doesNotMatch(capabilityDecisionInput, /\ngeneral（/);
-  assert.match(String(mainConversationMessages(state.messages).at(-1)?.content ?? ''), /没有能够完成/);
-  assert.equal(state.runNextDelegation, null);
-  assert.equal(state.runPendingTask, null);
-  assert.equal(state.runDelegationSummaries.length, 0);
-});
-
-test('instructions-only general Capability remains an executable planner candidate', async () => {
-  let decisionInput = '';
-  const model = {
-    withStructuredOutput: () => ({
-      invoke: async (messages: unknown[]) => {
-        decisionInput = String(
-          (messages.at(-1) as { content?: unknown })?.content ?? '',
-        );
-        return routeCapabilityDecision('general');
-      },
-    }),
-  } as unknown as AgentModels['act'];
-  const runCapabilityDecision = createCapabilityDecisionRunner({
-    models: { act: model, observe: model },
-    actor: testActor,
-  });
-  const input = buildOrchestratorRunInput([new HumanMessage('summarize this')]);
-  const result = await runCapabilityDecision({
-    ...input,
-    runPendingTask: {
-      task: 'Summarize the supplied text.',
-      contextSummary: null,
-    },
-  } as OrchestratorStateType, {
-    configurable: {
-      registry: compileAgentRegistry({
-        toolkits: [],
-        capabilities: [
-          capability('general', 'Handle general tasks.'),
-        ],
-      }),
-    },
-  });
-
-  assert.equal(result.runNextDelegation?.lane, 'capability:general');
-  assert.match(decisionInput, /capability\.general/);
-  assert.match(decisionInput, /Toolkit scope：无（仅 instructions）/);
-  assert.doesNotMatch(decisionInput, /\ngeneral（|general tools/);
-});
-
-test('capability decision receives the compiled Toolkit scope as runtime fact', async () => {
-  let decisionInput = '';
-  const model = {
-    withStructuredOutput: () => ({
-      invoke: async (messages: unknown[]) => {
-        decisionInput = String(
-          (messages.at(-1) as { content?: unknown })?.content ?? '',
-        );
-        return routeCapabilityDecision('general');
-      },
-    }),
-  } as unknown as AgentModels['act'];
-  const runCapabilityDecision = createCapabilityDecisionRunner({
-    models: { act: model, observe: model },
-    actor: testActor,
-  });
-  const input = buildOrchestratorRunInput([new HumanMessage('read the prior report')]);
-
-  await runCapabilityDecision({
-    ...input,
-    runPendingTask: {
-      task: 'Read the prior report from this thread.',
-      contextSummary: null,
-    },
-  } as OrchestratorStateType, {
-    configurable: {
-      registry: compileAgentRegistry({
-        capabilities: [
-          capability('general', 'Handle general tasks.', ['artifact_discovery']),
-        ],
-        toolkits: [{
-          name: 'artifact_discovery',
-          description: 'Read Capability artifacts from the current thread.',
-          tools: toolDefinitions(mockTool('artifact_read')),
-        }],
-      }),
-    },
-  });
-
-  assert.match(
-    decisionInput,
-    /artifact_discovery（Read Capability artifacts from the current thread\.）/,
-  );
-});
-
-test('capability decision rejects missing pending task as an invariant violation', async () => {
-  const model = new FakeListChatModel({ responses: ['unused'] }) as unknown as AgentModels['act'];
-  const runCapabilityDecision = createCapabilityDecisionRunner({
-    models: { act: model, observe: model },
-    actor: testActor,
-  });
-  const input = buildOrchestratorRunInput([new HumanMessage('继续')]);
-  await assert.rejects(
-    runCapabilityDecision({
-      ...input,
-      runNextDelegation: {
-        id: 'stale',
-        lane: 'capability:general',
-        task: '旧任务',
-        contextSummary: null,
-      },
-    } as unknown as OrchestratorStateType, {
-      configurable: {
-        thread_id: 'route-missing-task-invariant',
-        actor: testActor,
-        registry: compileAgentRegistry({
-          capabilities: [],
-          toolkits: [],
-        }),
-      },
-    }),
-    /capabilityDecision requires runPendingTask/,
-  );
+  assert.equal(plannerMode, 'entry');
+  assert.deepEqual(plannerCapabilityNames, []);
 });
 
 test('entry decision schema does not advertise capability actions', async () => {
@@ -1009,34 +778,26 @@ test('entry decision schema does not advertise capability actions', async () => 
   assert.doesNotMatch(decisionSystemPrompt, /delegate_capability\.browser/);
 });
 
-test('forcedCapabilityNames pre-seeds capability candidates without keyword search', async () => {
-  let legacyToolPathCalled = false;
-  let routeSystemPrompt = '';
-  let routeInput = '';
-  let structuredCallCount = 0;
+test('allowedCapabilityNames scopes the immutable Planner workspace', async () => {
+  let plannerCapabilityNames: readonly string[] = [];
   const model = {
     invoke: async () => new AIMessage('answered'),
-    bindTools: () => ({
-      invoke: async () => {
-        legacyToolPathCalled = true;
-        return new AIMessage('');
-      },
-    }),
     withStructuredOutput: () => ({
-      invoke: async (messages: unknown[]) => {
-        structuredCallCount += 1;
-        if (structuredCallCount === 1) {
-          return nextTaskDecision('规划一支讲秋日食材的短视频。');
-        }
-        if (structuredCallCount === 2) {
-          routeSystemPrompt = String((messages.at(0) as { content?: unknown })?.content ?? '');
-          routeInput = String((messages.at(-1) as { content?: unknown })?.content ?? '');
-          return routeCapabilityDecision('studio_plan');
-        }
-        return goalDoneDecision();
-      },
+      invoke: async () => nextTaskDecision('规划一支讲秋日食材的短视频。'),
     }),
   } as unknown as AgentModels['act'];
+  const capabilityPlannerRunner: CapabilityPlannerRunner = {
+    async invoke(input) {
+      plannerCapabilityNames = input.workspace.capabilityNames;
+      return {
+        result: 'unavailable',
+        task: input.mode === 'direct'
+          ? input.pendingTask.task
+          : '规划一支讲秋日食材的短视频。',
+        reason: 'scope captured',
+      };
+    },
+  };
 
   const graph = createOrchestratorGraph({
     models: {
@@ -1045,6 +806,7 @@ test('forcedCapabilityNames pre-seeds capability candidates without keyword sear
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
     actor: testActor,
+    capabilityPlannerRunner,
   });
   const input = buildOrchestratorRunInput([new HumanMessage('做一支讲秋日食材的短视频')]);
 
@@ -1057,25 +819,119 @@ test('forcedCapabilityNames pre-seeds capability candidates without keyword sear
         capability('other_cap', '某个无关 capability。'),
       ],
       tools: [],
-      forcedCapabilityNames: ['studio_plan'],
+      allowedCapabilityNames: ['studio_plan'],
     },
   });
 
-  assert.equal(legacyToolPathCalled, false, 'forced names must not call a model tool path');
-  assert.doesNotMatch(routeSystemPrompt, /capability\.studio_plan/);
-  assert.match(routeInput, /capability\.studio_plan/);
-  // 仅强制 studio_plan,other_cap 不应被作为候选注入。
-  assert.doesNotMatch(routeInput, /capability\.other_cap/);
+  assert.deepEqual(plannerCapabilityNames, ['studio_plan']);
 });
 
-test('without forcedCapabilityNames task-first search does not call model tools', async () => {
+test('Capability Planner materializer rejects selections outside the workspace', async () => {
+  const model = {
+    invoke: async () => new AIMessage('answered'),
+    withStructuredOutput: () => ({
+      invoke: async () => nextTaskDecision('读取 src/index.ts。'),
+    }),
+  } as unknown as AgentModels['act'];
+  const graph = createOrchestratorGraph({
+    models: {
+      act: model,
+      observe: model,
+      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
+    },
+    actor: testActor,
+    capabilityPlannerRunner: {
+      async invoke(input) {
+        assert.equal(input.mode, 'direct');
+        return {
+          result: 'next_task',
+          next_task: {
+            objective: input.mode === 'direct' ? input.pendingTask.task : '',
+            capability_intent: '读取代码',
+            capability_name: 'not_registered',
+            context_summary: input.mode === 'direct'
+              ? input.pendingTask.contextSummary
+              : null,
+          },
+          remaining_plan: [],
+        };
+      },
+    },
+  });
+
+  await assert.rejects(
+    graph.invoke(
+      buildOrchestratorRunInput([new HumanMessage('帮我读取 src/index.ts')]),
+      {
+        configurable: {
+          thread_id: 'planner-selection-outside-workspace',
+          actor: testActor,
+          capabilities: [capability('general', '普通代码任务。')],
+          tools: [],
+        },
+      },
+    ),
+    /outside the immutable workspace/,
+  );
+});
+
+test('Capability Planner materializer keeps a direct task immutable', async () => {
+  const model = {
+    invoke: async () => new AIMessage('answered'),
+    withStructuredOutput: () => ({
+      invoke: async () => nextTaskDecision('读取 src/index.ts。', '只读检查。'),
+    }),
+  } as unknown as AgentModels['act'];
+  const graph = createOrchestratorGraph({
+    models: {
+      act: model,
+      observe: model,
+      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
+    },
+    actor: testActor,
+    capabilityPlannerRunner: {
+      async invoke(input) {
+        assert.equal(input.mode, 'direct');
+        return {
+          result: 'next_task',
+          next_task: {
+            objective: '改写 src/index.ts。',
+            capability_intent: '修改代码',
+            capability_name: 'general',
+            context_summary: input.mode === 'direct'
+              ? input.pendingTask.contextSummary
+              : null,
+          },
+          remaining_plan: [],
+        };
+      },
+    },
+  });
+
+  await assert.rejects(
+    graph.invoke(
+      buildOrchestratorRunInput([new HumanMessage('帮我读取 src/index.ts')]),
+      {
+        configurable: {
+          thread_id: 'planner-direct-task-immutable',
+          actor: testActor,
+          capabilities: [capability('general', '普通代码任务。')],
+          tools: [],
+        },
+      },
+    ),
+    /changed the immutable pending task/,
+  );
+});
+
+test('entry answer bypasses the Capability Planner', async () => {
   let legacyToolPathCalled = false;
   const model = {
     invoke: async () => new AIMessage('answered'),
     bindTools: () => ({
       invoke: async () => {
         legacyToolPathCalled = true;
-        // Stage A 不再发起 capability_search tool_call;taskDecision 直接 answer。
+        // Stage A 只判断是否需要执行；Capability 发现由 Planner 自己完成。
         return new AIMessage('');
       },
     }),
@@ -1096,7 +952,6 @@ test('without forcedCapabilityNames task-first search does not call model tools'
       actor: testActor,
       capabilities: [capability('studio_plan', 'Planner 唯一的目标:把用户请求拆解为一份 plan。')],
       tools: [],
-      // forcedCapabilityNames 未传 —— taskDecision 直接判断为 answer。
     },
   });
 
@@ -1870,7 +1725,7 @@ test('capability receives tools only from Toolkits authorized by fixed uses', as
           return nextTaskDecision('inspect repository');
         }
         if (routeCallCount === 2) {
-          return routeCapabilityDecision('inspect_repo');
+          return scriptedPlannerCapability('inspect_repo');
         }
         return goalDoneDecision();
       },
@@ -1923,7 +1778,7 @@ test('capability receives tools only from Toolkits authorized by fixed uses', as
           tools: toolDefinitions(mockTool('artifact_read')),
         },
       ],
-      forcedCapabilityNames: ['inspect_repo'],
+      allowedCapabilityNames: ['inspect_repo'],
     },
   });
 
@@ -1940,7 +1795,7 @@ test('artifact discovery tools reach a selected capability only when declared in
       invoke: async () => {
         decisionCallCount += 1;
         if (decisionCallCount === 1) return nextTaskDecision('inspect browser state');
-        if (decisionCallCount === 2) return routeCapabilityDecision('browser_like');
+        if (decisionCallCount === 2) return scriptedPlannerCapability('browser_like');
         return goalDoneDecision();
       },
     }),
@@ -1985,7 +1840,7 @@ test('artifact discovery tools reach a selected capability only when declared in
           ),
         },
       ],
-      forcedCapabilityNames: ['browser_like'],
+      allowedCapabilityNames: ['browser_like'],
     },
   });
 
@@ -2009,7 +1864,7 @@ test('general Capability composes its declared Toolkits', async () => {
           return nextTaskDecision('inspect workspace and prior artifacts');
         }
         if (routeCallCount === 2) {
-          return routeCapabilityDecision('general');
+          return scriptedPlannerCapability('general');
         }
         return goalDoneDecision();
       },
@@ -2087,7 +1942,7 @@ test('toolkit registration does not rely on lane authorization flags', async () 
           return nextTaskDecision('inspect with tools');
         }
         if (routeCallCount === 2) {
-          return routeCapabilityDecision('general');
+          return scriptedPlannerCapability('general');
         }
         return goalDoneDecision();
       },
@@ -2199,7 +2054,7 @@ test('capability finalize artifact refs are merged into state', async () => {
           return nextTaskDecision('inspect issue context');
         }
         if (routeCallCount === 2) {
-          return routeCapabilityDecision('explore');
+          return scriptedPlannerCapability('explore');
         }
         return goalDoneDecision();
       },
@@ -2262,7 +2117,7 @@ test('capability finalize artifact refs are merged into state', async () => {
       actor: testActor,
       capabilities: [fixtureCapability],
       toolkits: [artifactToolkit],
-      forcedCapabilityNames: ['explore'],
+      allowedCapabilityNames: ['explore'],
     },
   });
 
@@ -2286,7 +2141,7 @@ test('capability finalize stores only artifact refs in state', async () => {
           return nextTaskDecision('create post');
         }
         if (routeCallCount === 2) {
-          return routeCapabilityDecision('daily_post');
+          return scriptedPlannerCapability('daily_post');
         }
         return goalDoneDecision();
       },
@@ -2348,7 +2203,7 @@ test('capability finalize stores only artifact refs in state', async () => {
       actor: testActor,
       capabilities: [fixtureCapability],
       toolkits: [artifactToolkit],
-      forcedCapabilityNames: ['daily_post'],
+      allowedCapabilityNames: ['daily_post'],
     },
   });
 
@@ -3127,7 +2982,7 @@ test('toolkit review policy records authorization through orchestrator runtime t
           return nextTaskDecision('run shell');
         }
         if (routeCallCount === 2) {
-          return routeCapabilityDecision('general');
+          return scriptedPlannerCapability('general');
         }
         return goalDoneDecision();
       },
@@ -3270,7 +3125,7 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
           return nextTaskDecision('run shell');
         }
         if (routeCallCount === 2) {
-          return routeCapabilityDecision('general');
+          return scriptedPlannerCapability('general');
         }
         return goalDoneDecision();
       },
@@ -3415,7 +3270,7 @@ test('toolkit review rejection resumes the same subagent before parent handoff',
           return nextTaskDecision('run shell');
         }
         if (routeCallCount === 2) {
-          return routeCapabilityDecision('general');
+          return scriptedPlannerCapability('general');
         }
         return goalDoneDecision();
       },
@@ -3556,7 +3411,7 @@ test('toolkit review run interruption retains the delegation without another mod
           return nextTaskDecision('run shell');
         }
         if (routeCallCount === 2) {
-          return routeCapabilityDecision('general');
+          return scriptedPlannerCapability('general');
         }
         return goalDoneDecision();
       },
@@ -3734,7 +3589,7 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
           return nextTaskDecision('run shell twice');
         }
         if (routeCallCount === 2) {
-          return routeCapabilityDecision('general');
+          return scriptedPlannerCapability('general');
         }
         return goalDoneDecision();
       },
@@ -5329,7 +5184,7 @@ test('fresh delegated request supersedes checkpointed work without deleting its 
           return nextTaskDecision('执行全新的请求。');
         }
         if (structuredCallCount === 2) {
-          return routeCapabilityDecision('general');
+          return scriptedPlannerCapability('general');
         }
         return goalDoneDecision();
       },
@@ -5518,7 +5373,7 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
         if (structuredCallCount === 1) {
           return nextTaskDecision('关闭 GitHub Issue #272。', 'GitHub issue 操作。');
         }
-        if (structuredCallCount === 2) return routeCapabilityDecision('ops');
+        if (structuredCallCount === 2) return scriptedPlannerCapability('ops');
         if (structuredCallCount === 3) return taskDoneDecision('issue 已关闭，还需删除目录。');
         if (structuredCallCount === 4) {
           return {
@@ -5529,7 +5384,7 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
             next_task: { objective: '删除 packages/goat 目录。', capability_intent: 'file_cleanup' },
           };
         }
-        if (structuredCallCount === 5) return routeCapabilityDecision('ops');
+        if (structuredCallCount === 5) return scriptedPlannerCapability('ops');
         return goalDoneDecision();
       },
     }),
@@ -5555,7 +5410,7 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
         '仓库运维：issue 操作、文件清理。',
         ['artifact_discovery'],
       )],
-      forcedCapabilityNames: ['ops'],
+      allowedCapabilityNames: ['ops'],
       toolkits: [{
         name: 'artifact_discovery',
         description: 'artifact discovery toolkit',
@@ -5629,7 +5484,7 @@ test('continue outcome appends a continuation briefing carrying the gap note', a
         if (structuredCallCount === 1) {
           return nextTaskDecision('关闭 GitHub Issue #272。', 'GitHub issue 操作。');
         }
-        if (structuredCallCount === 2) return routeCapabilityDecision('ops');
+        if (structuredCallCount === 2) return scriptedPlannerCapability('ops');
         if (structuredCallCount === 3) return continueDecision('未验证 issue 状态，请确认已关闭。');
         return goalDoneDecision();
       },
@@ -5652,7 +5507,7 @@ test('continue outcome appends a continuation briefing carrying the gap note', a
       thread_id: 'briefing-continue-gap',
       actor: testActor,
       capabilities: [capability('ops', '仓库运维：issue 操作。')],
-      forcedCapabilityNames: ['ops'],
+      allowedCapabilityNames: ['ops'],
     },
     callbacks: recorder.callbacks,
   }) as OrchestratorStateType;

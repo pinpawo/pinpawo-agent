@@ -1,4 +1,3 @@
-import type { RunnableConfig } from '@langchain/core/runnables';
 import type { OrchestratorStateType } from './state';
 
 /**
@@ -6,8 +5,8 @@ import type { OrchestratorStateType } from './state';
  *
  * Guard rules live in `agent/orchestrator/guardDefinitions` and are evaluated
  * by their owning positions via `evaluateGuard` (see docs/GUARD_DESIGN.md).
- * This module keeps the remaining graph-local primitives: state patches,
- * recursion limits, and Decision node adaptation.
+ * This module keeps the remaining graph-local primitives: state patches and
+ * recursion limits.
  */
 
 /** A patch returned by a guard/decision; merged into orchestrator state by the graph. */
@@ -27,35 +26,3 @@ export type OrchestratorStatePatch = Partial<OrchestratorStateType>;
  * is intentional — there is no need to track the exact node-per-delegation count.
  */
 export const ORCHESTRATOR_RECURSION_LIMIT = 200;
-
-/** Shared context handed to every guard/decision (run-scoped config + derived limits). */
-export type OrchestratorControlContext = {
-  runnableConfig?: RunnableConfig;
-  /** Effective per-run delegation limit for this graph (config ?? default). */
-  orchestratorMaxIterations: number;
-};
-
-/** Route chooser (may use an LLM). Input state → state patch. */
-export type OrchestratorDecision = (
-  state: OrchestratorStateType,
-  ctx: OrchestratorControlContext,
-) => Promise<OrchestratorStatePatch>;
-
-/** The node signature LangGraph invokes. */
-export type OrchestratorNode = (
-  state: OrchestratorStateType,
-  runnableConfig?: RunnableConfig,
-) => OrchestratorStatePatch | Promise<OrchestratorStatePatch>;
-
-export function createControlContextBuilder(orchestratorMaxIterations: number) {
-  return function buildControlContext(runnableConfig?: RunnableConfig): OrchestratorControlContext {
-    return { runnableConfig, orchestratorMaxIterations };
-  };
-}
-
-export function asDecisionNode(
-  decision: OrchestratorDecision,
-  buildContext: (runnableConfig?: RunnableConfig) => OrchestratorControlContext,
-): OrchestratorNode {
-  return (state, runnableConfig) => decision(state, buildContext(runnableConfig));
-}

@@ -1,31 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { RunnableConfig } from '@langchain/core/runnables';
-import {
-  asDecisionNode,
-  ORCHESTRATOR_RECURSION_LIMIT,
-  type OrchestratorControlContext,
-  type OrchestratorDecision,
-} from './controlPrimitives';
-import type { OrchestratorStateType } from './state';
-
-const STATE = { runIterationCount: 3 } as unknown as OrchestratorStateType;
-
-function buildContext(runnableConfig?: RunnableConfig): OrchestratorControlContext {
-  return { runnableConfig, orchestratorMaxIterations: 25 };
-}
-
-test('asDecisionNode awaits the decision and forwards its patch', async () => {
-  const decision: OrchestratorDecision = async (_state, ctx) => {
-    assert.equal(ctx.orchestratorMaxIterations, 25);
-    return { runNextDelegation: null };
-  };
-
-  const node = asDecisionNode(decision, buildContext);
-  const patch = await node(STATE);
-
-  assert.deepEqual(patch, { runNextDelegation: null });
-});
+import { ORCHESTRATOR_RECURSION_LIMIT } from './controlPrimitives';
 
 test('ORCHESTRATOR_RECURSION_LIMIT comfortably exceeds a healthy run', () => {
   // The hard breaker is a flat last-resort value, not derived. It must sit well

@@ -76,7 +76,7 @@ const cases: AgentEvalCase<
     tags: [
       'route_control',
       'entry_decision',
-      'capability_decision',
+      'capability_discovery',
       'outcome_decision',
       'context_synthesis',
     ],
@@ -117,7 +117,7 @@ const cases: AgentEvalCase<
     tags: [
       'entry_decision',
       'capability_planning',
-      'capability_decision',
+      'capability_discovery',
       'outcome_decision',
       'delegation_control',
       'multi_task_flow',
@@ -164,7 +164,7 @@ const cases: AgentEvalCase<
     suite: SUITE,
     tags: [
       'entry_decision',
-      'capability_decision',
+      'capability_discovery',
       'outcome_decision',
       'delegation_control',
       'context_synthesis',
@@ -214,7 +214,7 @@ const cases: AgentEvalCase<
     suite: SUITE,
     tags: [
       'entry_decision',
-      'capability_decision',
+      'capability_discovery',
       'outcome_decision',
       'context_synthesis',
     ],
@@ -258,7 +258,7 @@ const cases: AgentEvalCase<
     suite: SUITE,
     tags: [
       'entry_decision',
-      'capability_decision',
+      'capability_discovery',
       'outcome_decision',
       'interruption_recovery',
       'delegation_control',
@@ -317,7 +317,7 @@ const cases: AgentEvalCase<
     tags: [
       'route_control',
       'entry_decision',
-      'capability_decision',
+      'capability_discovery',
       'context_synthesis',
     ],
     input: {
@@ -367,7 +367,7 @@ export const orchestratorLifecycleCompositionDataset: AgentEvalDataset<
       'route_control',
       'entry_decision',
       'capability_planning',
-      'capability_decision',
+      'capability_discovery',
       'outcome_decision',
       'delegation_control',
       'interruption_recovery',

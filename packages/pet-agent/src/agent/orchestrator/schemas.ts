@@ -6,30 +6,10 @@ import type {
   OrchestrationDecisionStructuredOutputOptions,
 } from './types';
 
-const CAPABILITY_SELECTION_PREFIX = 'capability.' as const;
-export const CAPABILITY_UNAVAILABLE_SELECTION = 'unavailable' as const;
-
-export type CapabilitySelectionValue =
-  `${typeof CAPABILITY_SELECTION_PREFIX}${string}`;
-export type CapabilitySelection =
-  | typeof CAPABILITY_UNAVAILABLE_SELECTION
-  | CapabilitySelectionValue;
-
 export type TaskDecision = {
   action: 'answer' | 'direct_task' | 'needs_plan';
   task?: string | null;
   context_summary?: string | null;
-};
-
-export type CapabilityPlanTaskDecision = {
-  objective: string;
-  capability_intent: string;
-};
-
-export type CapabilityPlanningDecision = {
-  result: 'next_task' | 'answer';
-  remaining_plan: CapabilityPlanTaskDecision[];
-  next_task: { objective: string; capability_intent: string } | null;
 };
 
 export type DelegationOutcomeDecision = {
@@ -37,52 +17,6 @@ export type DelegationOutcomeDecision = {
   gap_note: string | null;
 };
 export type AcceptedDelegationOutcome = Exclude<DelegationOutcomeDecision['outcome'], 'continue'>;
-
-export type CapabilityDecision = {
-  selection: CapabilitySelection;
-};
-
-export type CapabilityDecisionSchemaParams = {
-  capabilityCandidates: ReadonlyArray<{ name: string }>;
-};
-
-export function buildCapabilitySelection(
-  capabilityName: string,
-): CapabilitySelectionValue {
-  return `${CAPABILITY_SELECTION_PREFIX}${capabilityName}` as CapabilitySelectionValue;
-}
-
-export function parseCapabilitySelection(selection: string): {
-  kind: 'unavailable' | 'capability' | 'invalid';
-  capabilityName: string | null;
-} {
-  if (selection === CAPABILITY_UNAVAILABLE_SELECTION) {
-    return { kind: 'unavailable', capabilityName: null };
-  }
-  if (selection.startsWith(CAPABILITY_SELECTION_PREFIX)) {
-    return {
-      kind: 'capability',
-      capabilityName:
-        selection.slice(CAPABILITY_SELECTION_PREFIX.length) || null,
-    };
-  }
-  return { kind: 'invalid', capabilityName: null };
-}
-
-function validateCapabilityCandidateNames(params: CapabilityDecisionSchemaParams) {
-  const seen = new Set<string>();
-  for (const candidate of params.capabilityCandidates) {
-    if (candidate.name.includes('.')) {
-      throw new Error(
-        `capability name must not contain '.': received "${candidate.name}".`,
-      );
-    }
-    if (seen.has(candidate.name)) {
-      throw new Error(`duplicate capability name in decision schema: "${candidate.name}"`);
-    }
-    seen.add(candidate.name);
-  }
-}
 
 export function buildTaskDecisionSchema() {
   return z.object({
@@ -106,35 +40,6 @@ export function buildTaskDecisionSchema() {
   });
 }
 
-export function buildCapabilityPlanningDecisionSchema() {
-  const planTask = z.object({
-    objective: z.string().trim().min(1).describe('为达成用户目标，后续仍需独立执行的任务目标。'),
-    capability_intent: z.string().trim().min(1).describe('任务需要的能力类型。'),
-  });
-  return z.object({
-    result: z.enum(['next_task', 'answer']).describe('next_task=输出本轮要执行的任务；answer=没有后续执行。'),
-    remaining_plan: z.array(planTask).describe(
-      'result=next_task 时只包含 next_task 之后，为达成用户目标仍需独立执行的任务；result=answer 时为空数组。',
-    ),
-    next_task: z.object({
-      objective: z.string().trim().min(1).describe('本轮唯一的当前任务，应当可以直接执行并得到可验收结果。'),
-      capability_intent: z.string().trim().min(1).describe('当前任务需要的能力类型。'),
-    }).nullable().describe('result=next_task 时为当前任务；result=answer 时为 null。'),
-  }).superRefine((decision, ctx) => {
-    if (decision.result === 'next_task' && !decision.next_task) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['next_task'], message: 'next_task result requires next_task.' });
-    }
-    if (decision.next_task && decision.remaining_plan.some((item) =>
-      item.objective === decision.next_task?.objective
-      && item.capability_intent === decision.next_task.capability_intent)) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['remaining_plan'], message: 'remaining_plan must not repeat next_task.' });
-    }
-    if (decision.result === 'answer' && (decision.next_task || decision.remaining_plan.length > 0)) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['remaining_plan'], message: 'answer result must have an empty plan and no next_task.' });
-    }
-  });
-}
-
 export function buildDelegationOutcomeDecisionSchema() {
   return z.object({
     outcome: z.enum(['goal_done', 'user_input_required', 'task_done', 'continue']).describe(
@@ -154,21 +59,6 @@ export function buildDelegationOutcomeDecisionSchema() {
     ...decision,
     gap_note: decision.outcome === 'continue' ? decision.gap_note || null : null,
   }));
-}
-
-export function buildCapabilityDecisionSchema(params: CapabilityDecisionSchemaParams) {
-  validateCapabilityCandidateNames(params);
-  const selectionValues = [
-    CAPABILITY_UNAVAILABLE_SELECTION,
-    ...params.capabilityCandidates.map((candidate) =>
-      buildCapabilitySelection(candidate.name)),
-  ] as const;
-
-  return z.object({
-    selection: z.enum(selectionValues).describe(
-      '当前 task 的执行能力；unavailable=提供的执行能力都不能承担完整 task。',
-    ),
-  });
 }
 
 export function buildOrchestrationDecisionStructuredOutputOptions(
@@ -199,25 +89,6 @@ function buildDecisionOutputInstruction(
 
 export function buildTaskDecisionOutputInstruction(method?: StructuredOutputMethod): string {
   return buildDecisionOutputInstruction('task decision', buildTaskDecisionSchema(), method);
-}
-
-export function buildCapabilityPlanningDecisionOutputInstruction(method?: StructuredOutputMethod): string {
-  return buildDecisionOutputInstruction(
-    'capability planning decision',
-    buildCapabilityPlanningDecisionSchema(),
-    method,
-  );
-}
-
-export function buildCapabilityDecisionOutputInstruction(
-  params: CapabilityDecisionSchemaParams,
-  method?: StructuredOutputMethod,
-): string {
-  return buildDecisionOutputInstruction(
-    'capability decision',
-    buildCapabilityDecisionSchema(params),
-    method,
-  );
 }
 
 export function buildDelegationOutcomeDecisionOutputInstruction(method?: StructuredOutputMethod): string {

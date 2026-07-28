@@ -3,7 +3,7 @@ import { AgentEvalCase, AgentEvalDataset } from './types.ts';
 type OrchestratorFlowMockSubagentInput = {
   user_message: string;
   capability_pack?: 'browser' | 'daily_post_only' | 'explore' | 'pet_content';
-  capability_candidates?: string[];
+  allowed_capability_names?: string[];
   subagent_response?: string;
   subagent_responses?: string[];
   subagent_script?: 'tool_calls_until_carryover';
@@ -58,7 +58,7 @@ const cases: AgentEvalCase<
     id: `${SUITE}.browser-flow-finishes-after-browser-capability`,
     name: 'browser-flow-finishes-after-browser-capability',
     suite: SUITE,
-    tags: ['capability_search', 'delegation_control', 'context_synthesis', 'route_control'],
+    tags: ['capability_discovery', 'delegation_control', 'context_synthesis', 'route_control'],
     input: {
       user_message: '打开小红书探索页看看今天有什么热门内容',
       capability_pack: 'browser',
@@ -131,11 +131,11 @@ const cases: AgentEvalCase<
     id: `${SUITE}.capability-limit-orchestrator-resume-stays-on-explore-lane`,
     name: 'capability-limit-orchestrator-resume-stays-on-explore-lane',
     suite: SUITE,
-    tags: ['interruption_recovery', 'capability_search', 'delegation_control', 'context_synthesis'],
+    tags: ['interruption_recovery', 'capability_discovery', 'delegation_control', 'context_synthesis'],
     input: {
       user_message: '帮我调查 pinpawo-agent 仓库里 local-agent 的 capability 注册链路，列出关键文件和证据。',
       capability_pack: 'explore',
-      capability_candidates: ['explore'],
+      allowed_capability_names: ['explore'],
       subagent_script: 'tool_calls_until_carryover',
       subagent_final_response: '已完成 local-agent capability 注册链路调查：入口在 localAgentCapabilityRegistry，channel 装配后传入 pet-agent orchestrator。',
       max_iterations: 1,
@@ -162,11 +162,11 @@ const cases: AgentEvalCase<
     id: `${SUITE}.capability-flow-finishes-after-capability`,
     name: 'capability-flow-finishes-after-capability',
     suite: SUITE,
-    tags: ['capability_search', 'delegation_control', 'context_synthesis', 'route_control'],
+    tags: ['capability_discovery', 'delegation_control', 'context_synthesis', 'route_control'],
     input: {
       user_message: '用宠物发帖能力给小白生成今天的小红书日常草稿',
       capability_pack: 'pet_content',
-      capability_candidates: ['daily_post'],
+      allowed_capability_names: ['daily_post'],
       subagent_response: '已生成小白今天的小红书日常草稿，主题是春日晒太阳，并附带标题、正文和标签。',
     },
     expected: {
@@ -175,7 +175,7 @@ const cases: AgentEvalCase<
       expected_phase: 'after_subagent',
       expected_latest_announce_kind: 'completed',
       expected_delegation_count: 1,
-      reason: 'Route should delegate to the candidate capability once, then answer from its completed announce.',
+      reason: 'The Planner should delegate to daily_post once, then answer from its completed announce.',
     },
     metadata: {
       difficulty: 'medium',
@@ -196,7 +196,7 @@ export const orchestratorFlowMockSubagentDataset: AgentEvalDataset<
     owner: 'pet-agent',
     areas: [
       'route_control',
-      'capability_search',
+      'capability_discovery',
       'delegation_control',
       'interruption_recovery',
       'context_synthesis',

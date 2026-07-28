@@ -1,6 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { AIMessage } from '@langchain/core/messages';
-import type { AgentModels } from '../../src/types/agent';
 import { orchestratorRouteDataset } from '../datasets/orchestrator-route.ts';
 import {
   DATASET_NAME,
@@ -89,174 +87,6 @@ function scorePasses(score: ScoreResult): boolean {
 
 function scoreApplies(score: ScoreResult): boolean {
   return !score.comment?.startsWith('No expected ');
-}
-
-function messagesText(messages: unknown[]): string {
-  return messages.map((message) => {
-    if (!message || typeof message !== 'object') return String(message);
-    const content = (message as { content?: unknown }).content;
-    return typeof content === 'string' ? content : JSON.stringify(content);
-  }).join('\n');
-}
-
-function readXmlCdataTag(text: string, tag: string): string | null {
-  const match = text.match(new RegExp(`<${tag}>\\s*<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>\\s*</${tag}>`));
-  return match?.[1]?.trim() || null;
-}
-
-function searchIntentText(text: string): string {
-  return readXmlCdataTag(text, 'user_request') ?? text;
-}
-
-function chooseCapabilitySearchQuery(text: string): string | null {
-  const intent = searchIntentText(text);
-  if (/库存|仓库/.test(intent)) return '库存|仓库';
-  if (/宠物发帖|小红书日常|日常草稿|daily post/i.test(intent)) return '宠物发帖|小红书日常';
-  if (/浏览器|网页|打开 https?:\/\//.test(intent)) return '浏览器|网页|打开';
-  if (/调查|探索|代码库理解|注册链路/.test(intent)) return '代码库理解|调查|先探索再决定';
-  if (/src\/|package\.json|formatDate|npm test|LangGraph/.test(intent)) return null;
-  return null;
-}
-
-function chooseDecisionAction(text: string): string {
-  if (/delegate_capability\.explore/.test(text) && /继续|limit_reached|capability:explore/.test(text)) {
-    return 'delegate_capability.explore';
-  }
-  if (/delegate_capability\.browser/.test(text) && /打开 https?:\/\/|浏览器|页面标题/.test(text)) {
-    return 'delegate_capability.browser';
-  }
-  if (/delegate_capability\.daily_post/.test(text) && /宠物发帖|小红书日常草稿|daily post/i.test(text)) {
-    return 'delegate_capability.daily_post';
-  }
-
-  if (/已运行 npm test|测试全部通过/.test(text)) return 'answer';
-  if (/项目 package\.json 依赖列表|已读取 package\.json/.test(text) && !/然后运行 npm test/.test(text)) {
-    return 'answer';
-  }
-  const hasCompletedContext = /已搜索到|已读取|已打开|已创建|测试全部通过|已运行 npm test/.test(text);
-  if (hasCompletedContext && !/然后运行 npm test/.test(text)) {
-    return 'answer';
-  }
-  if (/已创建组件文件/.test(text)) return 'answer';
-  if (/已打开小红书发现页|已打开小红书探索页/.test(text)) return 'answer';
-  if (/已将 .*var.*const/.test(text) && /lint|校验/.test(text)) return 'delegate_general';
-  if (/读取 package\.json 的依赖列表，然后运行 npm test/.test(text) && !/已运行 npm test/.test(text)) {
-    return 'delegate_general';
-  }
-
-  if (/库存盘点|库存|仓库/.test(text) && /search_exhausted|没有可选业务 capability|No capability/.test(text)) {
-    return 'answer';
-  }
-
-  if (/你好|今天想聊点轻松|猫和狗哪个更可爱|你是谁|地球到月球|解释一下/.test(text)) {
-    return 'answer';
-  }
-
-  if (/宠物发帖|小红书日常|日常草稿|daily post/i.test(text)) {
-    return 'delegate_capability.daily_post';
-  }
-  if (/浏览器|网页|打开 https?:\/\//.test(text)) {
-    return 'delegate_capability.browser';
-  }
-  if (/调查|探索|代码库理解|注册链路/.test(text)) {
-    return 'delegate_capability.explore';
-  }
-  if (/库存盘点|库存|仓库/.test(text)) {
-    return 'delegate_general';
-  }
-
-  if (/src\/|package\.json|formatDate|npm test|LangGraph|运行一下|重构 auth|读取|搜索|改成|代码结构/.test(text)) {
-    return 'delegate_general';
-  }
-
-  return 'answer';
-}
-
-function chooseRouteLane(text: string): string {
-  if (/capability\.explore/.test(text) && /继续|limit_reached|capability:explore|调查|探索|代码库理解|注册链路/.test(text)) {
-    return 'capability.explore';
-  }
-  if (/capability\.browser/.test(text) && /浏览器|网页|打开 https?:\/\//.test(text)) {
-    return 'capability.browser';
-  }
-  if (/capability\.daily_post/.test(text) && /宠物发帖|小红书日常|日常草稿|daily post/i.test(text)) {
-    return 'capability.daily_post';
-  }
-  return 'capability.general';
-}
-
-function taskDecisionFromText(text: string) {
-  const action = chooseDecisionAction(text);
-  if (action === 'answer') {
-    return { action };
-  }
-  return {
-    action: 'direct_task',
-    task: searchIntentText(text),
-    context_summary: chooseCapabilitySearchQuery(text),
-  };
-}
-
-function delegationOutcomeDecisionFromText(text: string) {
-  if (
-    /limit_reached|还没有完成|尚未完成|需要继续|部分.+(?:文件|结果|链路)/.test(text)
-    || (/var.+const/s.test(text) && /lint/.test(text) && !/lint.+(?:通过|完成)/s.test(text))
-  ) {
-    return {
-      outcome: 'continue',
-      gap_note: 'mock current-task gap',
-    };
-  }
-  if (/仍有明确未完成|然后运行 npm test|尚未运行 lint|还需要/.test(text)) {
-    return {
-      outcome: 'task_done',
-      gap_note: 'mock remaining goal work',
-    };
-  }
-  return {
-    outcome: 'goal_done',
-    gap_note: null,
-  };
-}
-
-function createHeuristicRouteModels(): AgentModels {
-  const model = {
-    invoke: async () => new AIMessage('mock answer'),
-    bindTools: () => ({
-      invoke: async (messages: unknown[]) => {
-        const query = chooseCapabilitySearchQuery(messagesText(messages));
-        return new AIMessage({
-          content: '',
-          tool_calls: query
-            ? [{
-                id: `mock_capability_search_${randomUUID()}`,
-                name: 'capability_search',
-                args: { query },
-              }]
-            : [],
-        });
-      },
-    }),
-    withStructuredOutput: () => ({
-      invoke: async (messages: unknown[]) => {
-        const text = messagesText(messages);
-        if (/entry decision 节点/.test(text)) {
-          return taskDecisionFromText(text);
-        }
-        if (/capability decision 节点/.test(text)) {
-          return { lane: chooseRouteLane(text) };
-        }
-        if (/capability planning decision 节点/.test(text)) {
-          return { result: 'answer', remaining_plan: [], next_task: null };
-        }
-        if (/子任务结果验收节点/.test(text)) {
-          return delegationOutcomeDecisionFromText(messagesText(messages.slice(-1)));
-        }
-        throw new Error('local route eval mock received an unknown decision prompt');
-      },
-    }),
-  } as unknown as AgentModels['act'];
-  return { act: model, observe: model };
 }
 
 function traceIdFor(runName: string, caseId: string): string {
@@ -365,11 +195,9 @@ async function main() {
 
   const runName = process.env.LANGFUSE_RUN_NAME
     || `orchestrator-route-${new Date().toISOString().replace(/[:.]/g, '-')}`;
-  const routeModelMode = process.env.EVAL_ROUTE_MODEL === 'llm' ? 'llm' : 'mock';
-  const modelOverride = routeModelMode === 'mock' ? createHeuristicRouteModels() : undefined;
   console.log(`Running Langfuse route eval: ${runName}`);
   console.log(`Dataset: ${DATASET_NAME}`);
-  console.log(`Model: ${routeModelMode === 'mock' ? 'local-heuristic-mock' : `${LLM_MODEL} @ ${LLM_BASE_URL}`}`);
+  console.log(`Model: ${LLM_MODEL} @ ${LLM_BASE_URL}`);
   console.log(`Langfuse: ${config.baseUrl}`);
   console.log(`Cases: ${cases.length}\n`);
 
@@ -378,7 +206,7 @@ async function main() {
     const started = performance.now();
     const traceId = traceIdFor(runName, testCase.id);
     try {
-      const output = await target(testCase.input, modelOverride);
+      const output = await target(testCase.input);
       const scores = runEvaluators(output, testCase.expected);
       const row = {
         id: testCase.id,

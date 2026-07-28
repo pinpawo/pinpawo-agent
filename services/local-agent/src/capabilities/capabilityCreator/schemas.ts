@@ -18,21 +18,6 @@ export const validateCapabilityPluginInputSchema = z.object({
   rootDir: z.string().describe('capability 插件目录'),
 });
 
-export const checkCapabilityKeywordsInputSchema = z.object({
-  rootDir: z.string().optional().describe('capability 目录；提供后会读取 CAPABILITY.md'),
-  name: z.string().optional().describe('不读取目录时手动提供 capability name'),
-  description: z.string().optional().describe('不读取目录时手动提供 capability description'),
-  queries: z.array(z.string().min(1)).optional().describe('用于检查的用户自然语言 query，例如“根据最新热点生成三条视频脚本”'),
-});
-
-const keywordCheckSchema = z.object({
-  query: z.string(),
-  matched: z.boolean(),
-  topCandidate: z.string().nullable(),
-  score: z.number().nullable(),
-  matchedTerms: z.array(z.string()),
-});
-
 export const capabilityCreatorResultSchema = z.object({
   status: z.enum(['created', 'validated', 'failed']),
   capabilityId: z.string().nullable(),
@@ -40,9 +25,6 @@ export const capabilityCreatorResultSchema = z.object({
   files: z.array(z.string()),
   note: z.string().nullable(),
   warnings: z.array(z.string()).optional(),
-  keywords: z.array(z.string()).optional(),
-  keywordChecks: z.array(keywordCheckSchema).optional(),
-  suggestedDescriptionTerms: z.array(z.string()).optional(),
 });
 
 export type CapabilityCreatorResult = z.infer<typeof capabilityCreatorResultSchema>;

@@ -112,11 +112,10 @@ services/local-agent/src/capabilities/general/
 
 该目录和其他内建 Capability 通过同一注册入口进入 runtime。`CAPABILITY.md`
 静态声明完整 `uses`；registry 不追加、过滤或改写 General 的依赖。
-General 唯一的选择策略差异是：Capability Planner 在没有强制候选时把已成功
-编译的 `general` 作为 planner-default 候选。之后仍然统一使用：
+Capability Planner 通过与其他 Capability 相同的文档探索与选择流程决定是否
+使用 `general`。之后仍然统一使用：
 
 ```txt
-selection = capability.general
 lane = capability:general
 tools = tools from general.uses
 instructions = framework + declared Toolkit instructions + general instructions
@@ -141,12 +140,10 @@ Toolkit `availability` 在编译前由调用入口或 host 解析；
 `CapabilityArtifactStore`；host 不能通过省略 thread scope 静默移除 General
 或其他声明了 `artifact_discovery` 的 Capability。
 
-Capability Planner 与 Capability Decision 使用编译后的 Capability 描述。该描述
-由 Capability 自身的 `description` 和实际解析到的 Toolkit name/description 组成，
-因此 Toolkit scope 会参与检索和 planner 上下文，而不是只作为执行期权限信息。
-单个编译描述最多保留 2,000 个字符；Capability Planner 的 registry context 总预算
-为 6,000 个字符。新增大量 Capability 或过长 Toolkit 描述时，应通过
-capability-decision eval 检查候选召回与选择结果。
+Capability Planner 探索的是 compiled registry 物化出的只读 Capability Document
+Workspace。Capability 的 `CAPABILITY.md` 是发现与选择依据；Toolkit scope 仍然是
+执行期权限边界，并通过文档中的静态 `uses` 声明可见。Planner 不接收截断后的
+registry context，也不使用代码关键词检索。
 
 ## 5. Toolkit Policy 与 HITL
 

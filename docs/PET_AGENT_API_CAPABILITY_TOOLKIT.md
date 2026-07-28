@@ -51,7 +51,7 @@ type InstructionDocument = {
 字段语义：
 
 - `name`：稳定 route id；使用小写字母、数字、`_` 或 `-`。
-- `description`：供检索和 Capability Planner 选择执行器。
+- `description`：Capability 文档的摘要，帮助 Planner 判断是否继续阅读正文。
 - `uses`：required Toolkit 列表，也是该 Capability 的完整工具权限边界。
 - `instructions`：一个非空 Markdown 文档；digest 由
   `defineInstructionDocument()` 生成并校验。
@@ -90,7 +90,7 @@ inspect/
 ```md
 ---
 name: inspect
-description: 检查代码库并整理证据。
+description: "检查代码库并整理证据。"
 uses:
   - bash
   - git
@@ -105,6 +105,12 @@ version: 1
 `CAPABILITY.md` 同时承载路由 metadata、Toolkit 权限声明和 Markdown
 instructions。纯 Markdown 与带 `finalize` 的目录 Capability 使用同一个
 `AgentCapability` 契约；它们不是两类 runtime。
+
+`description` 应使用 YAML 双引号字符串；内容包含 `:`、`#`、引号或前后空白时，
+需要按 YAML 字符串规则正确引用和转义。解析器继续接受早期 v1 loader 生成或
+读取过的未引用 description，但新文档不应依赖该兼容语法。
+
+`uses` 的 block list 使用空格缩进，不使用 Tab；Tab 兼容仅用于读取已有 v1 文档。
 
 ## 3. Toolkit
 
@@ -211,23 +217,28 @@ capability.uses
 `CompiledCapability` 固化了本 generation 使用的 Capability、Toolkits、tools 和
 `toolNames`。执行与诊断应读取该编译结果，不再重新解释原始定义。
 
-## 5. 选择与执行
+## 5. 发现、规划与执行
 
-Capability Planner 看到的是已经成功编译的 Capability。用于检索和 planner
-上下文的描述由以下内容组成：
+运行时会把已经成功编译的 Capability 物化为一个 digest-addressed、只读的
+Capability Document Workspace。文件定义的 Capability 保留原始
+`CAPABILITY.md`；inline Capability 会生成等价文档，因此 registry 中不存在
+Planner 看不见的隐形 Capability。
+
+Planner 是一个框架内部的 tool-loop agent。它先用专用的文件探索工具查看
+workspace 目录、按需搜索并分块读取 `CAPABILITY.md`，再统一完成：
+
+1. 划分当前与后续执行任务；
+2. 为当前任务选择一个 workspace 内的 Capability；
+3. 返回尚未开始的 future plan tail。
+
+它不会把完整 registry、搜索结果或私有工具 transcript 写进父 graph state。
+`allowedCapabilityNames` 只负责限制 workspace 可见范围，不直接指定执行器。
+运行时随后确定性校验 Planner 输出：选中的名称必须存在于该 immutable
+workspace，direct task 不得被改写，future plan 不得重复当前任务。
+
+校验成功后统一进入：
 
 ```text
-Capability description + resolved Toolkit names/descriptions
-```
-
-因此 Toolkit scope 同时影响权限和执行器检索。当前每个编译描述最多 2,000
-字符，planner registry context 总预算为 6,000 字符；扩大 Capability 数量或
-Toolkit 描述时应验证 capability-decision 的召回和选择质量。
-
-选择成功后统一进入：
-
-```text
-selection = capability.<name>
 lane = capability:<name>
 executor = compiled Capability
 ```
@@ -254,9 +265,8 @@ system prompt。subagent 只获得编译到该 Capability 的 tools。
 - 运行在 `capability:general` lane；
 - 使用统一 Capability executor。
 
-它唯一的策略差异属于 Capability Planner：当 host 注册的 `general` 已成功编译、
-且没有 forced candidate 时，它作为 `planner-default` 候选保留。最终仍由
-Capability Decision 模型在当前候选中选择；代码没有 general fallback executor。
+Planner 通过与其他 Capability 相同的文档探索与选择流程决定是否使用它；代码
+没有 general fallback executor，也没有单独的 General 选择分支。
 
 local-agent 的内建 General 位于：
 

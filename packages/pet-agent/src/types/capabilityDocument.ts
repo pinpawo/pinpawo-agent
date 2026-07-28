@@ -17,6 +17,55 @@ export type CapabilityDocumentFrontmatter = {
   entry?: string;
 };
 
+/**
+ * CAPABILITY.md v1 shipped before the strict YAML parser. Preserve only the
+ * two legacy spellings that existing user documents could rely on while
+ * leaving every other field and YAML feature under the strict parser.
+ */
+function normalizeLegacyV1Frontmatter(header: string): string {
+  let inBlockUses = false;
+  return header.split('\n').map((line) => {
+    const field = line.match(/^([A-Za-z][A-Za-z0-9_]*):[ \t]*(.*)$/);
+    if (field) {
+      const [, key, rawValue = ''] = field;
+      inBlockUses = key === 'uses' && !rawValue.trim();
+      if (key === 'description') {
+        const value = rawValue.trim();
+        const hasExplicitYamlForm = [
+          '"',
+          "'",
+          '|',
+          '>',
+          '!',
+          '&',
+          '*',
+          '[',
+          '{',
+        ].some((prefix) => value.startsWith(prefix));
+        if (
+          value
+          && !hasExplicitYamlForm
+          && (value.includes('#') || value.includes(':'))
+        ) {
+          return `description: ${JSON.stringify(value)}`;
+        }
+      }
+      return line;
+    }
+
+    if (inBlockUses) {
+      const listItem = line.match(/^([ \t]+)-([ \t]+)(.+)$/);
+      if (
+        listItem
+        && (listItem[1]?.includes('\t') || listItem[2]?.includes('\t'))
+      ) {
+        return `  - ${listItem[3] ?? ''}`;
+      }
+    }
+    return line;
+  }).join('\n');
+}
+
 function parseFrontmatterYaml(
   header: string,
   path: string,
@@ -102,7 +151,10 @@ export function parseCapabilityDocument(
     );
   }
   const body = normalized.slice(end + 5).trim();
-  const raw = parseFrontmatterYaml(header, path);
+  const raw = parseFrontmatterYaml(
+    normalizeLegacyV1Frontmatter(header),
+    path,
+  );
 
   const supported = new Set([
     'name',

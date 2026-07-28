@@ -16,6 +16,14 @@ export type ReviewResponseResolutionErrorCode =
   | 'invalid_effect'
   | 'invalid_response';
 
+const HUMAN_REVIEW_RUN_CONTROL_ACTION = {
+  INTERRUPT_RUN: 'interrupt_run',
+} as const;
+
+type HumanReviewRunControlResume = {
+  action: typeof HUMAN_REVIEW_RUN_CONTROL_ACTION.INTERRUPT_RUN;
+};
+
 export class ReviewResponseResolutionError extends Error {
   readonly code: ReviewResponseResolutionErrorCode;
 
@@ -86,6 +94,17 @@ function readRecord(value: unknown): Record<string, unknown> | null {
 function hasOnlyKeys(record: Record<string, unknown>, allowedKeys: readonly string[]) {
   const allowed = new Set(allowedKeys);
   return Object.keys(record).every((key) => allowed.has(key));
+}
+
+export function isHumanReviewRunControlResume(
+  value: unknown,
+): value is HumanReviewRunControlResume {
+  const record = readRecord(value);
+  return Boolean(
+    record
+      && hasOnlyKeys(record, ['action'])
+      && record.action === HUMAN_REVIEW_RUN_CONTROL_ACTION.INTERRUPT_RUN,
+  );
 }
 
 function readReviewResponse(value: unknown): ReviewResponse | null {

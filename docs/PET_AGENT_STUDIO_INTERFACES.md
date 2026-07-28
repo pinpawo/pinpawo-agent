@@ -50,7 +50,7 @@ type PetInvokeArgs = {
   runtimeEnvironment?: string;       // 可选 runtime prompt 叠加
   toolkits?: AgentToolkit[];
   extraCapabilities?: AgentCapability[];
-  forcedCapabilityNames?: string[];
+  allowedCapabilityNames?: string[];        // Planner workspace allowlist
 };
 
 type PetInvokeResult = {

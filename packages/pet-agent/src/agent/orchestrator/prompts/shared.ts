@@ -49,8 +49,8 @@ export function buildDecisionConfig(
   ].filter((line) => line !== null).join('\n');
 }
 
-// Core decision prompt prefix shared by entryDecision, capabilityPlanner,
-// capabilityDecision, and outcomeDecision. Keep this synchronized with
+// Core decision prompt prefix shared by entryDecision, the internal Capability
+// Planner, and outcomeDecision. Keep this synchronized with
 // docs/PET_AGENT_ORCHESTRATOR_DECISION_PROMPT_PREFIX.md.
 export function buildOrchestratorDecisionPromptPrefix(): string {
   return ORCHESTRATOR_DECISION_SHARED_PREFIX;

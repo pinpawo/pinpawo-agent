@@ -7,7 +7,7 @@ export type MultiTaskFlowInput = {
 
 export type MultiTaskFlowExpected = {
   expectedTaskTerms: string[][];
-  expectedSearchQueryTerms: string[][];
+  expectedPlannedObjectiveTerms: string[][];
   expectedDelegationCount: number;
   expectedCapabilityNames: string[];
   expectedFinalMode: 'answer';
@@ -23,7 +23,7 @@ const cases: AgentEvalCase<MultiTaskFlowInput, MultiTaskFlowExpected>[] = [
     id: `${SUITE}.explore-auth-then-implement`,
     name: 'explore-auth-then-implement',
     suite: SUITE,
-    tags: ['delegation_control', 'capability_decision', 'capability_planning', 'multi_task_flow', 'context_synthesis'],
+    tags: ['delegation_control', 'capability_discovery', 'capability_planning', 'multi_task_flow', 'context_synthesis'],
     input: {
       userMessage: '先调查 auth 模块的结构和风险，再根据调查结论完成重构。',
       subagentResults: [
@@ -36,7 +36,7 @@ const cases: AgentEvalCase<MultiTaskFlowInput, MultiTaskFlowExpected>[] = [
         ['调查', 'auth', '结构', '风险'],
         ['auth', '重构', 'token validation', '循环依赖'],
       ],
-      expectedSearchQueryTerms: [
+      expectedPlannedObjectiveTerms: [
         ['auth', '调查'],
         ['auth', '重构'],
       ],
@@ -60,6 +60,6 @@ export const multiTaskFlowBasicsDataset: AgentEvalDataset<MultiTaskFlowInput, Mu
   cases,
   metadata: {
     owner: 'pet-agent',
-    areas: ['delegation_control', 'capability_decision', 'capability_planning', 'multi_task_flow', 'context_synthesis'],
+    areas: ['delegation_control', 'capability_discovery', 'capability_planning', 'multi_task_flow', 'context_synthesis'],
   },
 };

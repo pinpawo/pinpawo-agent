@@ -110,6 +110,12 @@ export {
   validateUniqueToolkitNames,
 } from './agent/createAgentRuntime';
 export type {
+  ActiveDelegationTransition,
+  CapabilityPlannerInput,
+  CapabilityPlannerMode,
+  CapabilityPlannerNextTask,
+  CapabilityPlannerResult,
+  CapabilityPlannerRunner,
   CompiledAgentRegistry,
   ExecutorCompilationIssue,
 } from './agent/createAgentRuntime';
@@ -167,11 +173,6 @@ export type {
   StructuredOutputMethod,
   StructuredOutputOptions,
 } from './utils/structuredOutput';
-export {
-  extractCapabilityKeywords,
-  searchCapabilities,
-  splitCapabilitySearchTerms,
-} from './agent/orchestrator/capabilitySearch';
 export {
   filterCapabilityArtifacts,
   matchesCapabilityArtifact,

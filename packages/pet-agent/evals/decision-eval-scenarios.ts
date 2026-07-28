@@ -1,12 +1,6 @@
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { searchCapabilities } from '../src/agent/orchestrator/capabilitySearch.ts';
 import {
-  buildCapabilityDecisionInput,
-  buildCapabilityDecisionSystemPrompt,
-  buildCapabilityDecisionAvailableExecutorsContext,
-  buildCapabilityPlanningDecisionInput,
-  buildCapabilityPlanningDecisionSystemPrompt,
   buildDelegationOutcomeCurrentTaskContext,
   buildDelegationOutcomeDecisionInput,
   buildDelegationOutcomeDecisionSystemPrompt,
@@ -19,11 +13,6 @@ import {
   buildTaskDecisionSystemPrompt,
 } from '../src/agent/orchestrator/prompts.ts';
 import {
-  CAPABILITY_UNAVAILABLE_SELECTION,
-  buildCapabilityDecisionOutputInstruction,
-  buildCapabilityDecisionSchema,
-  buildCapabilityPlanningDecisionOutputInstruction,
-  buildCapabilityPlanningDecisionSchema,
   buildDelegationOutcomeDecisionOutputInstruction,
   buildDelegationOutcomeDecisionSchema,
   buildOrchestrationDecisionStructuredOutputOptions,
@@ -31,37 +20,24 @@ import {
   buildTaskDecisionSchema,
 } from '../src/agent/orchestrator/schemas.ts';
 import type { AgentModels } from '../src/types/agent.ts';
-import {
-  defineInstructionDocument,
-  type AgentCapability,
-} from '../src/types/capability.ts';
 import type { StructuredOutputMethod } from '../src/utils/structuredOutput.ts';
 import {
-  buildCapabilityPlanningGoalContract,
-  evaluateCapabilityPlanningOutput,
-} from './capability-planning-evaluation.ts';
-import {
   adaptTaskDecisionMode,
-  derivePlanningMetrics,
-  scoreCapabilityDecision,
   scoreEntryDecision,
   scoreOutcomeDecision,
   type DecisionContractScore,
 } from './decision-contract-scorers.ts';
 import {
-  capabilityDecisionBasicsDataset,
-  capabilityPlanningBasicsDataset,
   entryDecisionBasicsDataset,
   outcomeDecisionBasicsDataset,
 } from './datasets/index.ts';
-import type { CapabilityDecisionBasicsInput } from './datasets/capability-decision-basics.ts';
 import {
   evaluatePromptGoal,
   type PromptEvalJudge,
   type PromptGoalAcceptanceCriterion,
 } from './prompt-goal-evaluator.ts';
 
-export type DecisionEvalTarget = 'entry' | 'planner' | 'capability' | 'outcome';
+export type DecisionEvalTarget = 'entry' | 'outcome';
 
 export type RenderedDecisionPrompt = {
   system: string;
@@ -80,8 +56,6 @@ export type DecisionEvalRunResult = {
 export type DecisionEvalScenario = {
   target: DecisionEvalTarget;
   contract: 'entry.execution-shape'
-    | 'planner.execution-boundary'
-    | 'capability.executor-selection'
     | 'outcome.announce-verdict';
   objective: string;
   datasetName: string;
@@ -195,191 +169,6 @@ function entryScenarios(): DecisionEvalScenario[] {
   });
 }
 
-function plannerScenarios(): DecisionEvalScenario[] {
-  return capabilityPlanningBasicsDataset.cases.map((testCase) => {
-    const goalContract = buildCapabilityPlanningGoalContract(testCase.expected);
-    const render = (method?: StructuredOutputMethod): RenderedDecisionPrompt => ({
-      system: buildCapabilityPlanningDecisionSystemPrompt({
-        actor,
-        outputInstruction: buildCapabilityPlanningDecisionOutputInstruction(method),
-      }),
-      input: buildCapabilityPlanningDecisionInput({
-        mode: testCase.input.mode,
-        userIntentContext: buildPreparedRequestContext({
-          latestUserRequest: testCase.input.userGoal,
-          recentMessages: [new HumanMessage(testCase.input.userGoal)],
-        }),
-        completedTasks: testCase.input.completedTasks ?? [],
-        remainingPlan: testCase.input.remainingPlan ?? [],
-        latestHandoff: testCase.input.latestHandoff ?? null,
-        capabilityRegistryContext: testCase.input.capabilityRegistry.join('\n'),
-      }),
-    });
-    return {
-      target: 'planner',
-      contract: 'planner.execution-boundary',
-      objective: goalContract.objective,
-      datasetName: capabilityPlanningBasicsDataset.name,
-      caseId: testCase.id,
-      caseName: testCase.name,
-      expectedSummary: `${testCase.input.mode}:${testCase.expected.result}`,
-      render,
-      async run(model, method, config, judge) {
-        const schema = buildCapabilityPlanningDecisionSchema();
-        const raw = await model.withStructuredOutput(
-          schema,
-          buildOrchestrationDecisionStructuredOutputOptions({ method }),
-        ).invoke(messages(render(method)), config);
-        const decision = schema.parse(raw);
-        const remainingPlan = decision.remaining_plan.map((item) => ({
-          objective: item.objective,
-          capabilityIntent: item.capability_intent,
-        }));
-        const nextTask = decision.next_task?.objective ?? null;
-        const capabilityIntent = decision.next_task?.capability_intent ?? null;
-        const metrics = derivePlanningMetrics(
-          testCase.input,
-          remainingPlan,
-          nextTask && capabilityIntent ? { objective: nextTask, capabilityIntent } : null,
-        );
-        const output = {
-          result: decision.result,
-          nextTask,
-          capabilityIntent,
-          remainingPlan,
-        };
-        const evaluation = await evaluateCapabilityPlanningOutput({
-          input: testCase.input,
-          expected: testCase.expected,
-          output,
-          judge: judge ?? { model, method, config },
-        });
-        return {
-          output,
-          scores: evaluation.scores,
-          verdict: decision.result,
-          shape: `tasks=${(nextTask ? 1 : 0) + remainingPlan.length},tail=${remainingPlan.length},rubberStamp=${metrics.rubberStamp.toString()}`,
-          diagnostics: {
-            planEffect: metrics.planEffect,
-            rubberStamp: metrics.rubberStamp,
-            ...(evaluation.evaluationSummary
-              ? { evaluationSummary: evaluation.evaluationSummary }
-              : {}),
-          },
-        };
-      },
-    };
-  });
-}
-
-function capabilities(input: CapabilityDecisionBasicsInput): AgentCapability[] {
-  return [
-    ...input.availableCapabilities.map((item) => ({
-      name: item.name,
-      description: `${item.description} Keywords: ${item.keywords.join('|')}`,
-      uses: [],
-      instructions: defineInstructionDocument({
-        content: `Execute the ${item.name} capability.`,
-      }),
-    })),
-    ...(input.includeGeneralCapability ? [{
-      name: 'general',
-      description: 'Handle general tasks that do not require a more specific Capability.',
-      uses: [],
-      instructions: defineInstructionDocument({
-        content: 'Execute the general capability.',
-      }),
-    }] : []),
-  ];
-}
-
-function capabilitySearchQuery(input: CapabilityDecisionBasicsInput): string {
-  return [input.task, input.contextSummary]
-    .map((item) => item?.trim())
-    .filter((item): item is string => Boolean(item))
-    .join(' | ');
-}
-
-function capabilityScenarios(): DecisionEvalScenario[] {
-  return capabilityDecisionBasicsDataset.cases.map((testCase) => {
-    const capabilityList = capabilities(testCase.input);
-    const query = capabilitySearchQuery(testCase.input);
-    const candidates = searchCapabilities(query, capabilityList);
-    const generalCapability = capabilityList.find(({ name }) => name === 'general');
-    const decisionCandidates = generalCapability
-      && !candidates.some(({ name }) => name === generalCapability.name)
-      ? [
-          ...candidates,
-          {
-            name: generalCapability.name,
-            description: generalCapability.description,
-            score: 0,
-            matchedTerms: ['planner-default'],
-          },
-        ]
-      : candidates;
-    const schemaParams = {
-      capabilityCandidates: decisionCandidates.map(({ name }) => ({ name })),
-    };
-    const render = (method?: StructuredOutputMethod): RenderedDecisionPrompt => ({
-      system: buildCapabilityDecisionSystemPrompt({
-        actor,
-        outputInstruction: buildCapabilityDecisionOutputInstruction(schemaParams, method),
-      }),
-      input: buildCapabilityDecisionInput({
-        pendingTask: {
-          task: testCase.input.task,
-          contextSummary: testCase.input.contextSummary ?? null,
-        },
-        availableExecutorsContext: buildCapabilityDecisionAvailableExecutorsContext({
-          capabilityCandidates: decisionCandidates,
-        }),
-      }),
-    });
-    return {
-      target: 'capability',
-      contract: 'capability.executor-selection',
-      objective: `Select ${testCase.expected.expectedSelection} for the immutable current task. ${testCase.expected.reason}`,
-      datasetName: capabilityDecisionBasicsDataset.name,
-      caseId: testCase.id,
-      caseName: testCase.name,
-      expectedSummary: testCase.expected.expectedSelection,
-      render,
-      async run(model, method, config) {
-        let resolvedSelection: string | null = decisionCandidates.length === 0
-          ? CAPABILITY_UNAVAILABLE_SELECTION
-          : null;
-        if (!resolvedSelection) {
-          const schema = buildCapabilityDecisionSchema(schemaParams);
-          const raw = await model.withStructuredOutput(
-            schema,
-            buildOrchestrationDecisionStructuredOutputOptions({ method }),
-          ).invoke(messages(render(method)), config);
-          resolvedSelection = schema.parse(raw).selection;
-        }
-        const candidateNames = candidates.map(({ name }) => name);
-        const output = { selection: resolvedSelection };
-        const candidateRecallCorrect = candidateNames.length === testCase.expected.expectedCandidateNames.length
-          && candidateNames.every((name) => testCase.expected.expectedCandidateNames.includes(name));
-        return {
-          output,
-          scores: scoreCapabilityDecision(
-            { selection: resolvedSelection },
-            testCase.expected,
-          ),
-          verdict: resolvedSelection,
-          shape: `candidates=${candidateNames.length.toString()}`,
-          diagnostics: {
-            candidateNames,
-            expectedCandidateNames: testCase.expected.expectedCandidateNames,
-            candidateRecallCorrect,
-          },
-        };
-      },
-    };
-  });
-}
-
 function outcomeScenarios(): DecisionEvalScenario[] {
   return outcomeDecisionBasicsDataset.cases.map((testCase) => {
     const delegationId = 'eval-delegation';
@@ -451,8 +240,6 @@ function outcomeScenarios(): DecisionEvalScenario[] {
 export function getDecisionEvalScenarios(target?: DecisionEvalTarget): DecisionEvalScenario[] {
   const scenarios = [
     ...entryScenarios(),
-    ...plannerScenarios(),
-    ...capabilityScenarios(),
     ...outcomeScenarios(),
   ];
   return target ? scenarios.filter((scenario) => scenario.target === target) : scenarios;

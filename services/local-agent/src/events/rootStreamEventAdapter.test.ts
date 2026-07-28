@@ -61,10 +61,10 @@ async function collectChatEvents(graph: {
 
 test('adapter attributes root answer tokens to assistant and drops internal decision output', async () => {
   const graph = new StateGraph(MessagesAnnotation)
-    .addNode('capabilityDecision', streamingNode(new FakeListChatModel({ responses: ['route-thinking'], sleep: 0 })))
+    .addNode('capabilityPlanner', streamingNode(new FakeListChatModel({ responses: ['route-thinking'], sleep: 0 })))
     .addNode('answer', streamingNode(new FakeListChatModel({ responses: ['你好，这是回复'], sleep: 0 })))
-    .addEdge(START, 'capabilityDecision')
-    .addEdge('capabilityDecision', 'answer')
+    .addEdge(START, 'capabilityPlanner')
+    .addEdge('capabilityPlanner', 'answer')
     .addEdge('answer', END)
     .compile();
 
@@ -227,17 +227,30 @@ test('readRootStreamChatEvent maps tool lifecycle and filters non-AI message del
     namespace: ['general:t1', 'tools:t2'],
     data: { event: 'tool-started', tool_call_id: 'call-1', tool_name: 'read_file' },
   });
+  assert.equal(readRootStreamChatEvent({
+    type: 'event',
+    seq: 2,
+    method: 'tools',
+    params: {
+      namespace: ['capabilityPlanner:t1', 'tools:t2'],
+      data: {
+        event: 'tool-started',
+        tool_call_id: 'planner-call-1',
+        tool_name: 'glob_search',
+      },
+    },
+  }, state), null);
 
   // A human-role message's deltas are not assistant output.
   assert.equal(readRootStreamChatEvent({
     type: 'event',
-    seq: 2,
+    seq: 3,
     method: 'messages',
     params: { namespace: [], data: { event: 'message-start', role: 'human', id: 'm1' } },
   }, state), null);
   assert.equal(readRootStreamChatEvent({
     type: 'event',
-    seq: 3,
+    seq: 4,
     method: 'messages',
     params: { namespace: [], data: { event: 'content-block-delta', index: 0, delta: { type: 'text-delta', text: 'x' } } },
   }, state), null);
@@ -245,7 +258,7 @@ test('readRootStreamChatEvent maps tool lifecycle and filters non-AI message del
   // Interrupt surfaces from a root values snapshot, mirroring the legacy path.
   const interruptEvent = readRootStreamChatEvent({
     type: 'event',
-    seq: 4,
+    seq: 5,
     method: 'values',
     params: { namespace: [], data: { __interrupt__: [{ value: { kind: 'review' } }] } },
   }, state);

@@ -230,6 +230,72 @@ test('run interrupt waits until the review resolution is checkpointed', async ()
   ]);
 });
 
+test('review cancellation automatically interrupts at the first resolved checkpoint', async () => {
+  const controls: unknown[] = [];
+  const fakePeer = createFakePeer();
+  const inflightRequests = new InflightRequestController<LocalServerPeer>({
+    emitOperation: () => undefined,
+    sendControl: (_peer, message) => {
+      controls.push(message);
+    },
+  });
+  const handler = new LocalServerChatHandler({
+    graphService: {} as never,
+    tuiSessions: {
+      getActiveSessionId: () => 'sess-active',
+      getChatThreadId: () => 'thread-x',
+      readActivePendingReview: async () => null,
+      buildChatSetup: () => ({
+        graphKey: 'test',
+        graphConfig: {},
+        input: { messages: [] },
+      }),
+    } as never,
+    inflightRequests,
+    loadContext: async () => ({} as never),
+    runChat: async (options) => {
+      assert.equal(options.interruptOnSettledResumeCheckpoint, true);
+      assert.deepEqual(options.request, {
+        kind: 'resume',
+        requestId: 'req-1',
+        resume: {
+          'interrupt-1': {
+            action: 'interrupt_run',
+          },
+        },
+      });
+      assert.equal(options.setup.input.signal?.aborted, false);
+      options.onResumeCheckpointed?.({ canInterrupt: true });
+      assert.equal(options.setup.input.signal?.aborted, true);
+      options.finishInterrupted();
+      return { status: 'interrupted' };
+    },
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (handler as any).recordReviewActionRoute({
+    type: 'human_review.requested',
+    interruptId: 'interrupt-1',
+    requestId: 'req-1',
+    review: {
+      id: 'review-current',
+      schemaVersion: 1,
+      view: { kind: 'plain', body: 'Approve?' },
+      options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+    },
+  }, { actorId: 'pet-1' });
+
+  await handler.handleReviewCancel(fakePeer, {
+    type: 'review.cancel',
+    requestId: 'req-1',
+    actionId: 'interrupt-1',
+  }, { actorId: 'pet-1' } as never);
+
+  assert.deepEqual(controls, [
+    { type: 'interrupting', requestId: 'req-1', message: 'interrupting' },
+    { type: 'interrupted', requestId: 'req-1', message: 'interrupted' },
+  ]);
+});
+
 test('handleHumanReviewResponse rejects stale canonical reviewId before forwarding', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
@@ -638,7 +704,7 @@ test('buildReviewActionSnapshot exposes routeable review action request ids', ()
   });
 });
 
-test('handleReviewCancel resumes pending review with canonical reject option', async () => {
+test('handleReviewCancel resumes pending review with run interruption control', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
   const fakePeer = createFakePeer(sentEvents);
@@ -710,18 +776,14 @@ test('handleReviewCancel resumes pending review with canonical reject option', a
     requestId: 'req-1',
     resume: {
       'interrupt-1': {
-        decisions: [{
-          reviewId: 'review-current',
-          selectedOptionId: 'reject',
-        }],
+        action: 'interrupt_run',
       },
     },
   });
   assert.deepEqual(forwardedSource, {
     type: 'review.cancel',
     reviewId: 'review-current',
-    selectedOptionId: 'reject',
-    decisionCount: 1,
+    decisionCount: 0,
   });
 
   await handler.handleHumanReviewResponse(
@@ -800,22 +862,18 @@ test('handleReviewCancel recovers missing route from active checkpoint review', 
     requestId: 'req-1',
     resume: {
       'interrupt-1': {
-        decisions: [{
-          reviewId: 'review-current',
-          selectedOptionId: 'reject',
-        }],
+        action: 'interrupt_run',
       },
     },
   });
   assert.deepEqual(forwardedSource, {
     type: 'review.cancel',
     reviewId: 'review-current',
-    selectedOptionId: 'reject',
-    decisionCount: 1,
+    decisionCount: 0,
   });
 });
 
-test('handleReviewCancel restores pending review when no reject option exists', async () => {
+test('handleReviewCancel interrupts an approve-only pending review', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
   const fakePeer = createFakePeer(sentEvents);
@@ -858,18 +916,18 @@ test('handleReviewCancel restores pending review when no reject option exists', 
     { actorId: 'pet-1' } as never,
   );
 
-  assert.equal(handleChatCalls.length, 0);
-  assert.equal(sentEvents.length, 2);
-  const notice = sentEvents[0] as { type: string; event?: { type: string; message: string } };
-  assert.equal(notice.event?.type, 'system.notice');
-  assert.match(notice.event?.message ?? '', /无法自动取消/);
-  const reviewEvent = sentEvents[1] as {
-    type: string;
-    event?: { type: string; requestId: string; review?: { id: string } };
-  };
-  assert.equal(reviewEvent.event?.type, 'human_review.requested');
-  assert.equal(reviewEvent.event?.requestId, 'req-1');
-  assert.equal(reviewEvent.event?.review?.id, 'review-current');
+  assert.equal(handleChatCalls.length, 1);
+  assert.equal(sentEvents.length, 0);
+  const forwardedMessage = (handleChatCalls[0] as unknown[])[1];
+  assert.deepEqual(forwardedMessage, {
+    kind: 'resume',
+    requestId: 'req-1',
+    resume: {
+      'interrupt-1': {
+        action: 'interrupt_run',
+      },
+    },
+  });
 
   await handler.handleHumanReviewResponse(
     fakePeer,
@@ -882,7 +940,7 @@ test('handleReviewCancel restores pending review when no reject option exists', 
     { actorId: 'pet-1' } as never,
   );
 
-  assert.equal(handleChatCalls.length, 1, 'route should remain available after failed interrupt');
+  assert.equal(handleChatCalls.length, 1, 'cancelled review route should be consumed');
 });
 
 test('handleHumanReviewResponse forwards canonical selected option without resolving it', async () => {

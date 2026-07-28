@@ -13,7 +13,7 @@ test('message utils read normalized tool calls from AI message shapes', () => {
     content: '',
     tool_calls: [
       { id: 'call-1', name: 'read_file', args: { path: 'README.md' } },
-      { id: '', name: 'ignored', args: {} },
+      { id: '', name: 'missing_id', args: {} },
     ],
   });
   const legacy = new AIMessage({
@@ -32,6 +32,12 @@ test('message utils read normalized tool calls from AI message shapes', () => {
 
   assert.deepEqual(readMessageToolCalls(standard), [
     { id: 'call-1', name: 'read_file', args: { path: 'README.md' } },
+  ]);
+  assert.deepEqual(readMessageToolCalls(standard, {
+    fallbackIdPrefix: 'planner:1',
+  }), [
+    { id: 'call-1', name: 'read_file', args: { path: 'README.md' } },
+    { id: 'planner:1:1', name: 'missing_id', args: {} },
   ]);
   assert.deepEqual(readMessageToolCalls(legacy), [
     { id: 'call-2', name: 'run_shell', args: { command: 'pwd' } },

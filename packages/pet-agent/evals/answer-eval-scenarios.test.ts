@@ -49,7 +49,7 @@ test('answer eval renders the production prompt and fixed completion context', (
   assert.match(resultText, /RESULT_BODY_START/);
 });
 
-test('answer eval covers a handed-off result that still requires a user choice', () => {
+test('answer eval covers a resumable result that requires a user choice', () => {
   const scenario = getAnswerEvalScenarios().find(
     ({ caseName }) => caseName === 'handoff-requires-user-choice',
   );

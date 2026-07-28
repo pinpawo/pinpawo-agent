@@ -10,16 +10,16 @@ Suites group cases by the workflow they exercise. Tags classify the agent
 capability each case covers:
 
 - `route_control`: answer directly vs delegate work.
-- `capability_search`: discover and select domain capabilities.
+- `capability_discovery`: discover and select domain capabilities.
 - `delegation_control`: avoid repeating completed work and continue unfinished work.
 - `interruption_recovery`: resume interrupted or limit-reached work on the right lane.
 - `permission_control`: preserve and apply user approvals safely.
 - `context_synthesis`: answer from completed subagent context.
 - `structured_output`: produce schema-compatible orchestration outputs.
 - `entry_decision`: choose answer, direct task, or planning at run entry.
-- `capability_decision`: search and select the capability for a current task.
 - `outcome_decision`: accept the announce and select the next transition.
-- `capability_planning`: define capability execution boundaries and materialize tasks.
+- `capability_discovery`: let the Planner explore Capability documents and select an executor.
+- `capability_planning`: define execution boundaries and materialize tasks.
 - `multi_task_flow`: complete goals across isolated task executions and handoffs.
 
 This keeps broad agent quality dimensions visible even when a suite starts as a
@@ -48,7 +48,6 @@ recreate datasets.
 
 - `orchestrator-route-decision`: legacy route-decision cases wrapped in the canonical format.
 - `orchestrator-flow-mock-subagent`: route -> subagent -> route flow cases, including limit-reached resume and natural completion.
-- `agent-capability-search-basics`: basic capability discovery and capability-vs-general routing cases.
 - `agent-delegation-control-basics`: multi-task delegation, completion detection, and finish-bias cases.
 - `agent-interruption-recovery-basics`: resume, changed-intent, approval-resume, and natural-completion-after-resume cases.
 - `agent-permission-control-basics`: HITL, auto-authorization, scoped authorization, and permission-memory cases.
@@ -56,7 +55,6 @@ recreate datasets.
 - `agent-answer-behavior-basics`: direct reply, handoff synthesis, historical replay,
   clarification, fixed completion acknowledgement, and required-user-input return control.
 - `agent-entry-decision-basics`: eval contract for `answer | direct_task | needs_plan`.
-- `agent-capability-decision-basics`: end-to-end capability search and selection from a current task.
 - `agent-outcome-decision-basics`: `continue | task_done | goal_done | user_input_required`
   verdict boundaries.
 - `agent-capability-planning-basics`: production `planner@entry` and `planner@boundary` contracts.
@@ -70,25 +68,18 @@ make the expected behavior explicit before each runner is migrated to Langfuse.
 
 ## Langfuse Route Runner
 
-The legacy Langfuse-backed route snapshot runner executes the orchestrator graph
+The Langfuse-backed route runner executes the orchestrator graph
 up to the execution boundary against `orchestrator-route-decision`:
 
 ```sh
 npm run eval:langfuse:route
 ```
 
-By default, this uses a local deterministic route model so it can run without
-sending eval cases to an external LLM. It still executes the real orchestrator
-graph and writes traces, scores, and dataset run items to Langfuse.
-
-This runner is retained as broad graph-plumbing regression coverage. It does
-not prove task text quality, capability search query quality, or a complete
-multi-task execution loop.
-
-Because capability search candidates are now local to `capabilityDecision`
-rather than graph state, this legacy runner scores route/mode/phase, active
-capability, and finish/delegate behavior. Candidate recall and search-query
-quality are covered by `eval:langfuse:capability-decision` instead.
+The runner uses the configured model for entry/outcome decisions and the real
+Capability Planner agent for document exploration and selection. It writes
+traces, scores, and dataset run items to Langfuse. The runner is broad routing
+coverage; the lifecycle eval remains the stronger signal for multi-task
+composition.
 
 The CLI summary reports results by example tag first, then by score dimension.
 Score dimensions without a matching expected field are counted as not applicable
@@ -100,13 +91,13 @@ Use `EVAL_CASES` to run a subset by case id or case name:
 EVAL_CASES=greeting,file-read-request npm run eval:langfuse:route
 ```
 
-To run the same route eval with the configured LLM instead of the local
-deterministic model, set `EVAL_ROUTE_MODEL=llm`. LLM mode reads configuration
-from `LLM_*`, `~/.pinpawo/.env`, or `~/.pinpawo/config.json`.
+Model configuration is read from `LLM_*`, `~/.pinpawo/.env`, or
+`~/.pinpawo/config.json`.
 
 ## Decision Eval Boundaries
 
-These evals exercise the production Phase 2 decision contracts:
+These evals exercise the remaining public decision boundaries and the Planner
+through complete graph runs:
 
 1. `entryDecision` chooses `answer | direct_task | needs_plan`:
 
@@ -117,22 +108,7 @@ These evals exercise the production Phase 2 decision contracts:
    The runner imports the canonical entry dataset and uses the production
    entry-decision prompt and schema.
 
-2. `capabilityDecision` starts from an already-defined current task and evaluates
-   candidate recall plus final custom/general selection. Candidate search and
-   selection are one production graph node:
-
-   ```sh
-   npm run eval:langfuse:capability-decision
-   ```
-
-   The default is deterministic and validates dataset/search/route plumbing.
-   Use the production decision model to evaluate the route prompt itself:
-
-   ```sh
-   EVAL_CAPABILITY_MODEL=llm npm run eval:langfuse:capability-decision
-   ```
-
-3. `outcomeDecision` has a standalone canonical dataset for current-task
+2. `outcomeDecision` has a standalone canonical dataset for current-task
    acceptance. `task_done` deliberately leaves next-task planning to
    `planner@boundary`:
 
@@ -141,23 +117,12 @@ These evals exercise the production Phase 2 decision contracts:
    EVAL_OUTCOME_MODEL=llm npm run eval:langfuse:outcome-decision
    ```
 
-4. `capabilityPlanner` cases are split into `planner@entry` and
-   `planner@boundary`. They define plan creation, materialization, cancellation,
-   and rubber-stamp expectations. Result is a deterministic contract; schema
-   validates the output shape, while task boundaries, order, objectives, and
-   capability intents are evaluated semantically. Task counts remain
-   diagnostics rather than fixed answers. Boundary cases include completed task
-   facts, the latest handoff, and the unstarted tail. Executor identity remains
-   owned by `capabilityDecision`. The runner imports the production planner
-   prompt and schema; its LLM mode uses the same goal evaluator as
-   `eval:prompt-stability`:
+3. The Capability Planner is a private tool-loop agent. Its transcript and
+   document observations are not a public graph decision contract, so there is
+   no standalone single-call Decision eval. Route, multi-task, and lifecycle
+   runs evaluate its document discovery, planning, and selection behavior.
 
-   ```sh
-   npm run eval:langfuse:capability-planning
-   EVAL_PLANNER_MODEL=llm npm run eval:langfuse:capability-planning
-   ```
-
-5. Multi-task loop executes the current real graph across meaningful task
+4. Multi-task loop executes the current real graph across meaningful task
    boundaries with deterministic decision/subagent models:
 
    ```sh
@@ -169,7 +134,7 @@ The package test-script lookup plus test run is intentionally an entryDecision
 single-task case because preparation, execution, and reporting belong to one
 workspace task.
 
-6. Lifecycle composition executes the production graph with the configured real
+5. Lifecycle composition executes the production graph with the configured real
    model for entry, planner, capability, outcome, and answer. Executor results
    are controlled so the final goal verdict measures orchestrator composition
    without tool or environment variance:

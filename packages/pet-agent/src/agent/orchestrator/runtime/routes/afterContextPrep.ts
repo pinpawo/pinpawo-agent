@@ -1,8 +1,18 @@
 import type { OrchestratorStateType } from '../../state';
 
 export function afterContextPrep(state: OrchestratorStateType) {
-  if (state.taskActiveDelegation?.status === 'awaiting_decision') {
+  if (
+    state.runActiveDelegationTransition === 'resume_active'
+    && state.taskActiveDelegation?.status === 'awaiting_decision'
+  ) {
     return 'delegationOutcomeIterationGuard';
+  }
+  if (
+    state.runActiveDelegationTransition === 'resume_active'
+    && state.taskActiveDelegation?.status === 'pending'
+    && state.runNextDelegation?.id === state.taskActiveDelegation.id
+  ) {
+    return 'capability';
   }
   return 'entryDecision';
 }

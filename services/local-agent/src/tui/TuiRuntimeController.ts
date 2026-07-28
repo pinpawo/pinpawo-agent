@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import type { BuiltinGlobalReviewPolicyMode, ReviewOption, ReviewResponse } from '@pinpawo/pet-agent';
+import type {
+  ActiveDelegationTransition,
+  BuiltinGlobalReviewPolicyMode,
+  ReviewOption,
+  ReviewResponse,
+} from '@pinpawo/pet-agent';
 import { loadAgentContext } from '../contextLoader';
 import type { LocalAgentServerMessage } from '../localAgentProtocol';
 import { getConfig, setConfig } from '../config';
@@ -91,6 +96,8 @@ export class TuiRuntimeController {
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private interruptPendingNoticeTimeout: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
+  private readonly pendingReviewInterruptSessions = new Map<string, string>();
+  private readonly suspendedDelegationSessionIds = new Set<string>();
   private readonly localServerClient: TuiLocalServerClient;
   private readonly connection: LocalAgentConnection;
 
@@ -135,7 +142,27 @@ export class TuiRuntimeController {
     return this.isCurrentBusy();
   }
 
+  canContinueActiveDelegation() {
+    const sessionId = this.options.getState().focusedSessionId;
+    return Boolean(sessionId && this.suspendedDelegationSessionIds.has(sessionId));
+  }
+
   sendChatRequest(message: string) {
+    return this.sendChatRequestWithTransition(message);
+  }
+
+  continueActiveDelegation(message: string) {
+    if (!this.canContinueActiveDelegation()) {
+      this.appendSystemMessage(TUI_TEXT.continueUnavailable);
+      return false;
+    }
+    return this.sendChatRequestWithTransition(message, 'resume_active');
+  }
+
+  private sendChatRequestWithTransition(
+    message: string,
+    activeDelegationTransition?: ActiveDelegationTransition,
+  ) {
     if (!this.connection.isConnected()) {
       this.appendSystemMessage(TUI_TEXT.disconnectedCannotSend);
       return false;
@@ -145,15 +172,20 @@ export class TuiRuntimeController {
       return false;
     }
 
+    const sessionId = this.options.getState().focusedSessionId;
     const requestId = randomUUID();
     const now = Date.now();
     if (!this.connection.send({
       type: 'chat_request',
       requestId,
       message,
+      ...(activeDelegationTransition ? { activeDelegationTransition } : {}),
     })) {
       this.appendSystemMessage(TUI_TEXT.disconnectedCannotSend);
       return false;
+    }
+    if (sessionId) {
+      this.suspendedDelegationSessionIds.delete(sessionId);
     }
     this.options.setNow(now);
     this.options.dispatch({
@@ -303,6 +335,10 @@ export class TuiRuntimeController {
         requestId: activeRun.requestId,
         actionId: waitingReviewAction.actionId,
       });
+      const sessionId = state.focusedSessionId;
+      if (sessionId) {
+        this.pendingReviewInterruptSessions.set(activeRun.requestId, sessionId);
+      }
     } else {
       if (!this.connection.send({
         type: 'run.interrupt',
@@ -318,6 +354,10 @@ export class TuiRuntimeController {
 
   startNewSession() {
     this.clearInterruptPendingNoticeTimeout();
+    const sessionId = this.options.getState().focusedSessionId;
+    if (sessionId) {
+      this.clearDelegationContinuationForSession(sessionId);
+    }
     this.options.dispatch({
       type: 'input.set',
       value: '',
@@ -557,6 +597,7 @@ export class TuiRuntimeController {
     if (concludesInterruptWait(msg)) {
       this.clearInterruptPendingNoticeTimeout();
     }
+    this.updateDelegationContinuationState(msg);
     const now = Date.now();
     const result = buildTuiActionsFromServerMessage(msg, {
       now,
@@ -576,6 +617,26 @@ export class TuiRuntimeController {
 
   private isCurrentBusy() {
     return selectFocusedBusy(this.options.getState());
+  }
+
+  private updateDelegationContinuationState(message: LocalAgentServerMessage) {
+    if (!('requestId' in message)) return;
+    const sessionId = this.pendingReviewInterruptSessions.get(message.requestId);
+    if (!sessionId || !concludesInterruptWait(message)) return;
+
+    this.pendingReviewInterruptSessions.delete(message.requestId);
+    if (message.type === 'interrupted') {
+      this.suspendedDelegationSessionIds.add(sessionId);
+    }
+  }
+
+  private clearDelegationContinuationForSession(sessionId: string) {
+    this.suspendedDelegationSessionIds.delete(sessionId);
+    for (const [requestId, pendingSessionId] of this.pendingReviewInterruptSessions) {
+      if (pendingSessionId === sessionId) {
+        this.pendingReviewInterruptSessions.delete(requestId);
+      }
+    }
   }
 
   private clearReconnectTimeout() {

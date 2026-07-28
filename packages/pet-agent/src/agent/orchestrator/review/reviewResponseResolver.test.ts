@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  isHumanReviewRunControlResume,
   resolveHumanReviewBatchResponse,
   ReviewResponseResolutionError,
 } from './reviewResponseResolver';
@@ -25,6 +26,13 @@ function reviewSpec(id: string): ReviewSpec {
     ],
   };
 }
+
+test('human review run control accepts only the canonical interrupt shape', () => {
+  assert.equal(isHumanReviewRunControlResume({ action: 'interrupt_run' }), true);
+  assert.equal(isHumanReviewRunControlResume({ action: 'interrupt_run', decisions: [] }), false);
+  assert.equal(isHumanReviewRunControlResume({ action: 'reject' }), false);
+  assert.equal(isHumanReviewRunControlResume(null), false);
+});
 
 test('resolveHumanReviewBatchResponse maps decisions to matching pending reviews', () => {
   const pendingReviews: ReviewResolutionContext[] = [

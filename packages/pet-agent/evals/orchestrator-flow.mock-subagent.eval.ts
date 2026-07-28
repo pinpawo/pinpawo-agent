@@ -85,7 +85,7 @@ const examples = [
       expected_mode: 'answer',
       expected_phase: 'after_subagent',
       expected_latest_announce_kind: 'completed',
-      reason: 'A completed lookup should answer even if capability discovery found a daily_post candidate from keyword overlap.',
+      reason: 'A completed lookup should answer without inventing a daily_post task.',
     },
   },
   {
@@ -149,7 +149,7 @@ const examples = [
     inputs: {
       user_message: '帮我调查 pinpawo-agent 仓库里 local-agent 的 capability 注册链路，列出关键文件和证据。',
       capability_pack: 'explore',
-      capability_candidates: ['explore'],
+      allowed_capability_names: ['explore'],
       subagent_script: 'tool_calls_until_carryover',
       subagent_final_response: '已完成 local-agent capability 注册链路调查：入口在 localAgentCapabilityRegistry，channel 装配后传入 pet-agent orchestrator。',
       max_iterations: 1,
@@ -172,7 +172,7 @@ const examples = [
     inputs: {
       user_message: '用宠物发帖能力给小白生成今天的小红书日常草稿',
       capability_pack: 'pet_content',
-      capability_candidates: ['daily_post'],
+      allowed_capability_names: ['daily_post'],
       subagent_response: '已生成小白今天的小红书日常草稿，主题是春日晒太阳，并附带标题、正文和标签。',
     },
     outputs: {
@@ -180,7 +180,7 @@ const examples = [
       expected_mode: 'answer',
       expected_phase: 'after_subagent',
       expected_latest_announce_kind: 'completed',
-      reason: 'Route should delegate to the candidate capability once, then answer from its completed announce.',
+      reason: 'The Planner should delegate to daily_post once, then answer from its completed announce.',
     },
   },
 ];
@@ -402,6 +402,11 @@ function evalCapability(
 
 const mockCapabilities: AgentCapability[] = [
   evalCapability(
+    'general',
+    '处理普通文件、代码、命令和通用工具任务。',
+    '负责完成不需要专用领域能力的普通执行任务。',
+  ),
+  evalCapability(
     'explore',
     '通用探索、调查、资料检索和代码库理解 capability。适合大量阅读、搜索、检查上下文、梳理证据、先探索再决定下一步的任务。',
     '负责只读探索、代码库理解、资料检索和证据汇总。',
@@ -424,15 +429,29 @@ const mockCapabilities: AgentCapability[] = [
 ];
 
 function resolveCapabilityList(pack: unknown): AgentCapability[] {
+  const general = mockCapabilities.filter((capability) => capability.name === 'general');
   if (pack === 'pet_content') {
     return mockCapabilities.filter((capability) => capability.name !== 'browser' && capability.name !== 'explore');
   }
-  if (pack === 'browser') return mockCapabilities.filter((capability) => capability.name === 'browser');
-  if (pack === 'explore') return mockCapabilities.filter((capability) => capability.name === 'explore');
-  if (pack === 'daily_post_only') {
-    return mockCapabilities.filter((capability) => capability.name === 'daily_post');
+  if (pack === 'browser') {
+    return [
+      ...general,
+      ...mockCapabilities.filter((capability) => capability.name === 'browser'),
+    ];
   }
-  return [];
+  if (pack === 'explore') {
+    return [
+      ...general,
+      ...mockCapabilities.filter((capability) => capability.name === 'explore'),
+    ];
+  }
+  if (pack === 'daily_post_only') {
+    return [
+      ...general,
+      ...mockCapabilities.filter((capability) => capability.name === 'daily_post'),
+    ];
+  }
+  return general;
 }
 
 function readInterruptPayload(result: Record<string, unknown>): Record<string, unknown> | null {
@@ -475,16 +494,18 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
   const compiled = await graph;
   const turnInput = buildOrchestratorTurnInput([new HumanMessage(userMessage)]);
   const capabilityList = resolveCapabilityList(inputs.capability_pack);
-  const capabilityCandidateNames = Array.isArray(inputs.capability_candidates)
-    ? inputs.capability_candidates.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-    : [];
+  const allowedCapabilityNames = Array.isArray(inputs.allowed_capability_names)
+    ? inputs.allowed_capability_names.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : null;
 
   const configurable = {
     thread_id: `eval-flow-${Date.now()}-${++evalCounter}`,
     actor: testActor,
     toolkits: [mockGeneralToolkit],
     capabilities: capabilityList,
-    forcedCapabilityNames: capabilityCandidateNames,
+    ...(allowedCapabilityNames
+      ? { allowedCapabilityNames }
+      : {}),
     maxIterations: typeof inputs.max_iterations === 'number' ? inputs.max_iterations : 3,
     workdir: '/mock/project',
   };

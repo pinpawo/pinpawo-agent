@@ -4,15 +4,10 @@ import { basename, dirname, resolve } from 'node:path';
 import { tool } from '@langchain/core/tools';
 import type { StructuredTool } from '@langchain/core/tools';
 import {
-  defineInstructionDocument,
   defineToolkit,
-  extractCapabilityKeywords,
   readRecord,
   readString,
-  readStringArray,
   resultStatusSummary,
-  searchCapabilities,
-  splitCapabilitySearchTerms,
   type AgentToolkit,
   type NamedStructuredTool,
   type ToolOperationMetadata,
@@ -20,7 +15,6 @@ import {
 import { validateCapabilityPlugin } from '../../capabilityLoader';
 import {
   capabilityCreatorResultSchema,
-  checkCapabilityKeywordsInputSchema,
   scaffoldCapabilityPluginInputSchema,
   validateCapabilityPluginInputSchema,
 } from './schemas';
@@ -87,24 +81,6 @@ function validateInputSummary(input: unknown) {
     : null;
 }
 
-function keywordInputSummary(input: unknown) {
-  const record = readRecord(input);
-  const rootDir = readString(record, 'rootDir');
-  const name = readString(record, 'name');
-  const queries = readStringArray(record, 'queries');
-  return rootDir || name
-    ? {
-        target: rootDir ?? name,
-        summary: '检查 capability 关键词',
-        details: {
-          rootDir,
-          name,
-          queryCount: queries.length,
-        },
-      }
-    : null;
-}
-
 const capabilityCreatorResultLabels: Record<string, string> = {
   created: 'capability 插件已生成',
   validated: 'capability 插件已验证',
@@ -124,14 +100,8 @@ const capabilityCreatorOperationMetadata = {
     summarizeOutput: (output) => resultStatusSummary(output, capabilityCreatorResultLabels),
     summarizeError: () => ({ summary: '验证 capability 插件失败' }),
   },
-  check_capability_keywords: {
-    title: '检查 capability 关键词',
-    summarizeInput: keywordInputSummary,
-    summarizeOutput: (output) => resultStatusSummary(output, capabilityCreatorResultLabels),
-    summarizeError: () => ({ summary: '检查 capability 关键词失败' }),
-  },
 } satisfies Record<
-  'scaffold_capability_plugin' | 'validate_capability_plugin' | 'check_capability_keywords',
+  'scaffold_capability_plugin' | 'validate_capability_plugin',
   ToolOperationMetadata
 >;
 
@@ -233,58 +203,6 @@ function renderPackageJson(id: string) {
       test: 'node index.test.mjs',
     },
   })}\n`;
-}
-
-function defaultKeywordQueries(params: { name: string; description: string; keywords: string[] }) {
-  return [
-    params.name,
-    ...params.keywords.slice(0, 3),
-    params.keywords.slice(0, 3).join('|'),
-  ].filter((query) => query.trim().length > 0);
-}
-
-function checkCapabilityKeywordQueries(params: {
-  name: string;
-  description: string;
-  queries?: string[];
-}) {
-  const capability = {
-    name: params.name,
-    description: params.description,
-    uses: [],
-    instructions: defineInstructionDocument({
-      content: 'Keyword search fixture.',
-    }),
-  };
-  const keywords = extractCapabilityKeywords(`${params.name} ${params.description}`);
-  const queries = (params.queries?.length ? params.queries : defaultKeywordQueries({
-    name: params.name,
-    description: params.description,
-    keywords,
-  }))
-    .map((query) => query.trim())
-    .filter(Boolean);
-  const keywordChecks = queries.map((query) => {
-    const top = searchCapabilities(query, [capability])[0] ?? null;
-    return {
-      query,
-      matched: top?.name === params.name,
-      topCandidate: top?.name ?? null,
-      score: top?.score ?? null,
-      matchedTerms: top?.matchedTerms ?? [],
-    };
-  });
-  const suggestedDescriptionTerms = keywordChecks
-    .filter((item) => !item.matched)
-    .flatMap((item) => splitCapabilitySearchTerms(item.query))
-    .filter((term, index, terms) => terms.indexOf(term) === index)
-    .slice(0, 8);
-
-  return {
-    keywords,
-    keywordChecks,
-    suggestedDescriptionTerms,
-  };
 }
 
 export function createScaffoldCapabilityPluginTool(): StructuredTool {
@@ -394,15 +312,6 @@ export function createValidateCapabilityPluginTool(): StructuredTool {
         }
 
         const capability = validation.capability;
-        const warnings = [...validation.warnings];
-        const keywordResult = checkCapabilityKeywordQueries({
-          name: capability.name,
-          description: capability.description,
-        });
-        if (keywordResult.keywords.length < 3) {
-          warnings.push('capability.description 可检索关键词偏少；建议加入用户会说的核心短语，并用逗号/顿号分隔');
-        }
-
         return toolResult({
           status: 'validated',
           capabilityId: capability.name,
@@ -412,8 +321,7 @@ export function createValidateCapabilityPluginTool(): StructuredTool {
             ...(validation.entryPath ? [validation.entryPath] : []),
           ],
           note: `验证完成：${basename(dir)}`,
-          warnings,
-          keywords: keywordResult.keywords,
+          warnings: validation.warnings,
         });
       } catch (error) {
         return toolResult({
@@ -434,87 +342,10 @@ export function createValidateCapabilityPluginTool(): StructuredTool {
   );
 }
 
-export function createCheckCapabilityKeywordsTool(): StructuredTool {
-  return tool(
-    async (input) => {
-      try {
-        const dir = input.rootDir ? resolve(expandHome(input.rootDir)) : null;
-        let capabilityId = input.name?.trim() || null;
-        let description = input.description?.trim() || '';
-        const files: string[] = [];
-
-        if (dir) {
-          const validation = await validateCapabilityPlugin(dir);
-          if (!validation.ok || !validation.capability) {
-            return toolResult({
-              status: 'failed',
-              capabilityId: null,
-              rootDir: dir,
-              files: existsSync(validation.capabilityPath)
-                ? [validation.capabilityPath]
-                : [],
-              note: validation.errors.join('; '),
-            });
-          }
-          files.push(validation.capabilityPath);
-          if (validation.entryPath) files.push(validation.entryPath);
-          capabilityId = validation.capability.name;
-          description = validation.capability.description;
-        }
-
-        if (!capabilityId || !description) {
-          return toolResult({
-            status: 'failed',
-            capabilityId,
-            rootDir: dir,
-            files,
-            note: '请提供 rootDir，或同时提供 name 和 description。',
-          });
-        }
-
-        const result = checkCapabilityKeywordQueries({
-          name: capabilityId,
-          description,
-          queries: input.queries,
-        });
-        const missed = result.keywordChecks.filter((item) => !item.matched);
-        return toolResult({
-          status: 'validated',
-          capabilityId,
-          rootDir: dir,
-          files,
-          note: missed.length === 0
-            ? '关键词检查通过：给定 query 都能命中该 capability。'
-            : `关键词检查完成：${missed.length} 个 query 未命中，建议把 suggestedDescriptionTerms 补进 description。`,
-          warnings: missed.map((item) => `query 未命中：${item.query}`),
-          keywords: result.keywords,
-          keywordChecks: result.keywordChecks,
-          suggestedDescriptionTerms: result.suggestedDescriptionTerms,
-        });
-      } catch (error) {
-        return toolResult({
-          status: 'failed',
-          capabilityId: null,
-          rootDir: input.rootDir ? resolve(expandHome(input.rootDir)) : null,
-          files: [],
-          note: error instanceof Error ? error.message : String(error),
-        });
-      }
-    },
-    {
-      name: 'check_capability_keywords',
-      description: '检查 capability 的 name/description 是否能被 capability_search 按用户自然语言 query 正常发现，并给出建议补充的关键词。',
-      schema: checkCapabilityKeywordsInputSchema,
-      responseFormat: 'content_and_artifact',
-    },
-  );
-}
-
 export function buildCapabilityCreatorTools(): StructuredTool[] {
   return [
     createScaffoldCapabilityPluginTool(),
     createValidateCapabilityPluginTool(),
-    createCheckCapabilityKeywordsTool(),
   ];
 }
 
@@ -522,11 +353,10 @@ export function createCapabilityCreatorToolkit(): AgentToolkit {
   const tools = buildCapabilityCreatorTools() as [
     NamedStructuredTool<'scaffold_capability_plugin'>,
     NamedStructuredTool<'validate_capability_plugin'>,
-    NamedStructuredTool<'check_capability_keywords'>,
   ];
   return defineToolkit({
     name: 'capability_creator',
-    description: '生成、验证和检查 capability 插件模板。',
+    description: '生成并验证 capability 插件模板。',
     tools: tools.map((toolItem) => ({
       tool: toolItem,
       operation: capabilityCreatorOperationMetadata[toolItem.name],

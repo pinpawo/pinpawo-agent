@@ -8,6 +8,7 @@ import {
 import { compileAgentRegistry } from './orchestrator/registry';
 import type { CompiledAgentRegistry } from './orchestrator/registry';
 import type { GlobalReviewPolicy } from './orchestrator/review/globalReviewPolicy';
+import type { ActiveDelegationTransition } from './orchestrator/types';
 import {
   buildOrchestratorRunInput,
   ORCHESTRATOR_RECURSION_LIMIT,
@@ -27,6 +28,13 @@ export type AgentInvokeInput = {
   /** Runtime environment summary injected into system prompts. Must not contain secrets. */
   runtimeEnvironment?: string;
   globalReviewPolicy?: GlobalReviewPolicy;
+  /** Optional allowlist exposed through the Planner document workspace. */
+  allowedCapabilityNames?: string[];
+  /**
+   * Explicit fresh-turn treatment of an unfinished delegation. Ordinary user
+   * requests supersede it; callers must opt in to continuation.
+   */
+  activeDelegationTransition?: ActiveDelegationTransition;
 };
 
 export type AgentRunResult = {
@@ -58,9 +66,14 @@ export async function runAgent(
   if (input.workdir) configurable.workdir = input.workdir;
   if (input.runtimeEnvironment) configurable.runtimeEnvironment = input.runtimeEnvironment;
   if (input.globalReviewPolicy) configurable.globalReviewPolicy = input.globalReviewPolicy;
+  if (input.allowedCapabilityNames) {
+    configurable.allowedCapabilityNames = input.allowedCapabilityNames;
+  }
 
   const result = await graph.invoke(
-    buildOrchestratorRunInput(input.messages),
+    buildOrchestratorRunInput(input.messages, {
+      activeDelegationTransition: input.activeDelegationTransition,
+    }),
     {
       signal: input.signal,
       configurable: Object.keys(configurable).length > 0 ? configurable : undefined,

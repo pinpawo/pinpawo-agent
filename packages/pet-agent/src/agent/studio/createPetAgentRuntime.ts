@@ -190,13 +190,16 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
       execution: input.execution ?? config.execution,
       workdir: input.workdir ?? config.workdir,
       runtimeEnvironment: input.runtimeEnvironment,
-      forcedCapabilityNames: input.forcedCapabilityNames,
+      allowedCapabilityNames: input.allowedCapabilityNames,
     };
 
     const previousStatus = status;
     status = 'active';
     try {
-      let graphInput: Parameters<OrchestratorGraph['invoke']>[0] = buildOrchestratorRunInput(messages);
+      let graphInput: Parameters<OrchestratorGraph['invoke']>[0] = buildOrchestratorRunInput(
+        messages,
+        { activeDelegationTransition: input.activeDelegationTransition },
+      );
       while (true) {
         const result = await graph.invoke(graphInput, { signal: input.signal, configurable });
         const pending = readPendingInterrupt(result);

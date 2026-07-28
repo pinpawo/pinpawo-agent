@@ -8,6 +8,7 @@ import type { CapabilityArtifactRef, CapabilityArtifactStore } from '../../types
 import type { SubagentCompletionReason } from '../../types/subagent';
 import type { AgentToolkit, ToolkitReviewCapabilities } from '../../types/toolkit';
 import type { CompiledAgentRegistry } from './registry';
+import type { CapabilityPlannerRunner } from './capabilityPlannerRunner';
 import type { GlobalReviewPolicy } from './review/globalReviewPolicy';
 import type { StructuredOutputAutoRepairConfig, StructuredOutputMethod } from '../../utils/structuredOutput';
 import type { DelegationOutcomeDecision } from './schemas';
@@ -16,6 +17,8 @@ export type MessageLane = `capability:${string}`;
 export type PinpetMessageLane = MessageLane | 'orchestrator';
 export type DelegationStatus = 'pending' | 'progress' | 'completed';
 export type { SubagentCompletionReason };
+
+export type ActiveDelegationTransition = 'supersede_active' | 'resume_active';
 
 export type RunDelegationSummary = {
   id: string;
@@ -51,13 +54,6 @@ export type TaskActiveDelegation = {
   transcriptRunId: string;
   status: 'pending' | 'awaiting_decision';
   resultPreview: string | null;
-};
-
-export type CapabilityCandidate = {
-  name: string;
-  description: string;
-  score: number;
-  matchedTerms: string[];
 };
 
 export type SubagentAnnounce = {
@@ -105,6 +101,17 @@ export type OrchestratorConfig = {
    * Optional — surfaces without a store (e.g. tests, studio) skip writes.
    */
   capabilityArtifactStore?: CapabilityArtifactStore;
+  /**
+   * Typed seam for the framework-internal Capability Planner. Production
+   * defaults to createCapabilityPlannerAgent(); graph tests may inject a
+   * scripted runner without simulating its private file-tool transcript.
+   */
+  capabilityPlannerRunner?: CapabilityPlannerRunner;
+  /**
+   * Absolute cache root for immutable Capability Document Workspaces.
+   * Defaults to a process-independent directory under the OS temp root.
+   */
+  capabilityPlannerWorkspaceRoot?: string;
 };
 
 export type OrchestratorInvokeOptions = {
@@ -118,11 +125,11 @@ export type OrchestratorInvokeOptions = {
   globalReviewPolicy?: GlobalReviewPolicy;
   maxRunIterations?: number;
   /**
-   * 强制加入本次 capabilityDecision 局部候选集的 capability 名字列表。
-   * 仅由 Studio 等明确知道需要哪个 capability 的调用方注入;通用 pet agent
-   * 不传 → 0 行为变化。
+   * Explicit Capability scope for this run. The Planner workspace contains
+   * only compiled capabilities in this allowlist. Omit to expose the complete
+   * compiled registry.
    */
-  forcedCapabilityNames?: string[];
+  allowedCapabilityNames?: string[];
 };
 
 export type OrchestrationDecisionStructuredOutputOptions = {

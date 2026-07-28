@@ -1102,7 +1102,7 @@ test('LocalAgentAppChatHandler fails closed when legacy checkpoint review recove
   assert.match(last.event?.message ?? '', /已关闭|不存在/);
 });
 
-test('LocalAgentAppChatHandler cancels pending human review with canonical reject option', async () => {
+test('LocalAgentAppChatHandler interrupts pending human review without selecting an option', async () => {
   const runRequests: unknown[] = [];
   const review = {
     id: 'review-1',
@@ -1125,6 +1125,7 @@ test('LocalAgentAppChatHandler cancels pending human review with canonical rejec
         });
         return { status: 'waiting_human' };
       }
+      assert.equal(options.interruptOnSettledResumeCheckpoint, true);
       return { status: 'completed', reply: 'interrupted' };
     },
   });
@@ -1152,10 +1153,7 @@ test('LocalAgentAppChatHandler cancels pending human review with canonical rejec
       requestId: 'req-1',
       resume: {
         'interrupt-1': {
-          decisions: [{
-            reviewId: 'review-1',
-            selectedOptionId: 'reject',
-          }],
+          action: 'interrupt_run',
         },
       },
     },

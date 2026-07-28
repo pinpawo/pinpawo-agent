@@ -11,6 +11,7 @@ test('chat request parser accepts bounded local path attachments', () => {
     type: 'chat_request',
     requestId: 'request-1',
     message: '',
+    activeDelegationTransition: 'resume_active',
     attachments: [{
       id: 'attachment-1',
       source: 'local-path',
@@ -22,6 +23,7 @@ test('chat request parser accepts bounded local path attachments', () => {
     type: 'chat_request',
     requestId: 'request-1',
     message: '',
+    activeDelegationTransition: 'resume_active',
     attachments: [{
       id: 'attachment-1',
       source: 'local-path',
@@ -112,4 +114,27 @@ test('runtime config protocol supports legacy updates and correlated acknowledge
     requestId: 'policy-2',
     message: 'config is read-only',
   });
+});
+
+test('chat_request accepts an explicit active delegation transition', () => {
+  assert.deepEqual(parseAgentClientMessage({
+    type: 'chat_request',
+    requestId: 'request-1',
+    message: '继续旧任务',
+    activeDelegationTransition: 'resume_active',
+  }), {
+    type: 'chat_request',
+    requestId: 'request-1',
+    message: '继续旧任务',
+    activeDelegationTransition: 'resume_active',
+  });
+});
+
+test('chat_request rejects an unknown active delegation transition', () => {
+  assert.equal(parseAgentClientMessage({
+    type: 'chat_request',
+    requestId: 'request-1',
+    message: '继续旧任务',
+    activeDelegationTransition: 'guess_from_text',
+  }), null);
 });

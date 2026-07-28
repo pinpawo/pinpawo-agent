@@ -29,6 +29,7 @@ import {
 } from '../../src/agent/orchestrator/messageLanes.ts';
 import type { OrchestratorStateType } from '../../src/agent/orchestrator/state.ts';
 import { readMessageText } from '../../src/agent/orchestrator/utils.ts';
+import { readMessageToolCalls } from '../../src/utils/messages.ts';
 import type { AgentModels } from '../../src/types/agent.ts';
 import {
   defineInstructionDocument,
@@ -77,7 +78,7 @@ const actor = {
   species: null,
 };
 
-type DecisionKind = 'entry' | 'planner' | 'capability' | 'outcome' | 'unknown';
+type DecisionKind = 'entry' | 'planner' | 'outcome' | 'unknown';
 
 type DecisionRecord = {
   kind: DecisionKind;
@@ -272,7 +273,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function classifyDecision(output: Record<string, unknown>): DecisionKind {
   if (typeof output.action === 'string') return 'entry';
   if (typeof output.result === 'string' && Array.isArray(output.remaining_plan)) return 'planner';
-  if (typeof output.selection === 'string') return 'capability';
   if (typeof output.outcome === 'string') return 'outcome';
   return 'unknown';
 }
@@ -297,6 +297,25 @@ function createRecordingActModel(model: AgentModels['act']) {
             output,
           });
           return raw;
+        },
+      };
+    },
+    bindTools: (tools: Parameters<NonNullable<AgentModels['act']['bindTools']>>[0], options?: Record<string, unknown>) => {
+      if (!model.bindTools) {
+        throw new Error('Lifecycle composition subject model must support Planner tool calls.');
+      }
+      const runnable = model.bindTools(tools, options);
+      return {
+        invoke: async (input: unknown, config?: RunnableConfig) => {
+          const response = await runnable.invoke(input as never, config);
+          for (const toolCall of readMessageToolCalls(response)) {
+            if (toolCall.name !== 'submit_capability_plan') continue;
+            const output = isRecord(toolCall.args)
+              ? toolCall.args
+              : { value: toolCall.args };
+            decisions.push({ kind: 'planner', output });
+          }
+          return response;
         },
       };
     },
@@ -370,13 +389,13 @@ function capabilityRuntime(profile: LifecycleCompositionCapabilityProfile) {
     return {
       capabilities: [] as AgentCapability[],
       toolkits: [],
-      forcedCapabilityNames: [] as string[],
+      allowedCapabilityNames: [] as string[],
     };
   }
   return {
     capabilities: standardCapabilities,
     toolkits: [generalToolkit],
-    forcedCapabilityNames: standardCapabilities.map(({ name }) => name),
+    allowedCapabilityNames: standardCapabilities.map(({ name }) => name),
   };
 }
 
@@ -398,7 +417,6 @@ function countDecisions(
   const counts: Record<DecisionKind | 'answer', number> = {
     entry: 0,
     planner: 0,
-    capability: 0,
     outcome: 0,
     unknown: 0,
     answer: 0,
@@ -483,7 +501,7 @@ async function runCase(params: {
             actor,
             capabilities: runtime.capabilities,
             toolkits: runtime.toolkits,
-            forcedCapabilityNames: runtime.forcedCapabilityNames,
+            allowedCapabilityNames: runtime.allowedCapabilityNames,
             maxRunIterations: 12,
             workdir: '/eval/workspace',
             runtimeEnvironment: 'Controlled lifecycle composition evaluation.',

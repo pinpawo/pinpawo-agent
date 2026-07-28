@@ -4,11 +4,6 @@ import { HumanMessage } from '@langchain/core/messages';
 import { materializeDelegation } from './delegationBriefing';
 import {
   buildCapabilityArtifactContext,
-  buildCapabilityDecisionInput,
-  buildCapabilityDecisionSystemPrompt,
-  buildCapabilityDecisionAvailableExecutorsContext,
-  buildCapabilityPlanningDecisionInput,
-  buildCapabilityPlanningDecisionSystemPrompt,
   buildDelegationOutcomeCurrentTaskContext,
   buildDelegationOutcomeDecisionInput,
   buildDelegationOutcomeOtherTasksContext,
@@ -132,67 +127,6 @@ test('entry decision keeps runtime state in the input context', () => {
   assert.doesNotMatch(input, /capability_artifacts|artifact 短引用/);
   assert.doesNotMatch(input, /<instruction>/);
   assert.doesNotMatch(input, /重新规划/);
-});
-
-test('capability decision keeps task and candidates in the input context', () => {
-  const availableExecutorsContext = buildCapabilityDecisionAvailableExecutorsContext({
-    capabilityCandidates: [{
-      name: 'explore',
-      description: '代码库理解和调查。',
-      score: 8,
-      matchedTerms: ['代码库理解'],
-    }],
-  });
-  const prompt = buildCapabilityDecisionSystemPrompt({
-    actor: testActor,
-    outputInstruction: 'CAPABILITY_OUTPUT_INSTRUCTION',
-  });
-  const input = buildCapabilityDecisionInput({
-    pendingTask: {
-      task: '在本地仓库检索相关实现。',
-      contextSummary: '用户需要判断 issue 是否已实现。',
-    },
-    availableExecutorsContext,
-    runtimeContext: buildRuntimeContext('/repo', 'Node 20'),
-  });
-
-  assert.match(prompt, /CAPABILITY_OUTPUT_INSTRUCTION/);
-  assert.match(input, /<capability_decision_input>/);
-  assert.match(input, /在本地仓库检索相关实现/);
-  assert.match(input, /capability\.explore/);
-  assert.match(input, /<available_executors role="fact" source="runtime">/);
-  assert.match(input, /<runtime_context/);
-  assert.doesNotMatch(input, /search_keywords|matchedTerms|匹配词/);
-  assert.doesNotMatch(prompt, /在本地仓库检索相关实现|capability\.explore|\/repo/);
-});
-
-test('capability planner keeps planning state in the input context', () => {
-  const prompt = buildCapabilityPlanningDecisionSystemPrompt({
-    actor: testActor,
-    outputInstruction: 'PLANNER_OUTPUT_INSTRUCTION',
-  });
-  const input = buildCapabilityPlanningDecisionInput({
-    mode: 'boundary',
-    userIntentContext: '<user_intent_context>重构 auth</user_intent_context>',
-    completedTasks: [{
-      objective: '调查 auth',
-      result: '发现 token validation 循环依赖。',
-    }, {
-      objective: '确认公开接口约束',
-      result: '现有公开接口必须保持兼容。',
-    }],
-    remainingPlan: [{ objective: '根据调查重构 auth', capabilityIntent: 'code_modification' }],
-    latestHandoff: '发现 token validation 循环依赖。',
-    capabilityRegistryContext: 'explore: codebase exploration',
-  });
-  assert.match(prompt, /PLANNER_OUTPUT_INSTRUCTION/);
-  assert.match(input, /<mode>boundary<\/mode>/);
-  assert.match(input, /<completed_tasks[^]*?调查 auth[^]*?token validation[^]*?<\/completed_tasks>/);
-  assert.match(input, /<completed_tasks[^]*?确认公开接口约束[^]*?保持兼容[^]*?<\/completed_tasks>/);
-  assert.match(input, /token validation/);
-  assert.match(input, /code_modification/);
-  assert.match(input, /explore: codebase exploration/);
-  assert.doesNotMatch(prompt, /token validation|code_modification|explore: codebase exploration/);
 });
 
 test('loop-internal router input stays focused on current run announce context', () => {

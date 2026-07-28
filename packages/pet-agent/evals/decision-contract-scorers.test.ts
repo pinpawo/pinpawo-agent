@@ -1,12 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { capabilityDecisionBasicsDataset } from './datasets/capability-decision-basics.ts';
 import { capabilityPlanningBasicsDataset } from './datasets/capability-planning-basics.ts';
 import { entryDecisionBasicsDataset } from './datasets/entry-decision-basics.ts';
 import { outcomeDecisionBasicsDataset } from './datasets/outcome-decision-basics.ts';
 import {
   adaptTaskDecisionMode,
-  scoreCapabilityDecision,
   scoreCapabilityPlanning,
   scoreEntryDecision,
   scoreOutcomeDecision,
@@ -47,16 +45,6 @@ test('entryDecision dataset covers the result-availability matrix', () => {
   assert.ok(names.has('stale-evidence-needs-refresh'));
   assert.ok(names.has('clarification-before-execution'));
   assert.ok(names.has('calculation-needs-execution'));
-});
-
-test('capability scorer gates only the model-owned executor selection', () => {
-  const testCase = capabilityDecisionBasicsDataset.cases[0];
-  assert.ok(testCase);
-  const scores = scoreCapabilityDecision({
-    selection: testCase.expected.expectedSelection,
-  }, testCase.expected);
-  assert.deepEqual(scores.map(({ key }) => key), ['capability_selection_correct']);
-  assert.ok(allPass(scores));
 });
 
 test('outcome scorer gates only the model-owned verdict', () => {

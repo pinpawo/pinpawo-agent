@@ -2,6 +2,7 @@ import {
   type BuiltinGlobalReviewPolicyMode,
   type ReviewResponse,
   type ReviewSpec,
+  type ActiveDelegationTransition,
 } from '@pinpawo/pet-agent';
 import type {
   AgentErrorCode,
@@ -38,6 +39,7 @@ export type ChatRequestMessage = {
   attachments?: AgentLocalAttachment[];
   petId?: string;
   userId?: string;
+  activeDelegationTransition?: ActiveDelegationTransition;
 };
 
 export type RunInterruptMessage = {
@@ -214,6 +216,16 @@ function readString(record: Record<string, unknown>, key: string) {
 function readOptionalString(record: Record<string, unknown>, key: string) {
   const value = record[key];
   return typeof value === 'string' ? value : undefined;
+}
+
+function readActiveDelegationTransition(
+  record: Record<string, unknown>,
+): ActiveDelegationTransition | null | undefined {
+  const value = record.activeDelegationTransition;
+  if (value === undefined) return undefined;
+  return value === 'supersede_active' || value === 'resume_active'
+    ? value
+    : null;
 }
 
 function readOptionalStringArray(record: Record<string, unknown>, key: string) {
@@ -553,12 +565,25 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
     return requestId && sessionId ? { type, requestId, sessionId } : null;
   }
   if (type === 'chat_request') {
-    if (!hasOnlyKeys(record, ['type', 'requestId', 'message', 'attachments', 'petId', 'userId'])) return null;
+    if (!hasOnlyKeys(record, [
+      'type',
+      'requestId',
+      'message',
+      'attachments',
+      'petId',
+      'userId',
+      'activeDelegationTransition',
+    ])) return null;
     const requestId = readString(record, 'requestId');
     const message = readString(record, 'message');
     const attachments = readLocalAttachments(record, 'attachments');
-    if (!requestId || message == null) return null;
-    if (attachments === null) return null;
+    const activeDelegationTransition = readActiveDelegationTransition(record);
+    if (
+      !requestId
+      || message == null
+      || attachments === null
+      || activeDelegationTransition === null
+    ) return null;
     return {
       type,
       requestId,
@@ -569,6 +594,9 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
         : {}),
       ...(readOptionalString(record, 'userId') !== undefined
         ? { userId: readOptionalString(record, 'userId') }
+        : {}),
+      ...(activeDelegationTransition
+        ? { activeDelegationTransition }
         : {}),
     };
   }

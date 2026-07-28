@@ -6,17 +6,48 @@ export type MessageToolCallInfo = {
   args: unknown;
 };
 
-export function readMessageToolCalls(message: BaseMessage): MessageToolCallInfo[] {
-  return readRawMessageToolCalls(message).flatMap((call) => {
+export function readMessageToolCalls(
+  message: BaseMessage,
+  options: {
+    /**
+     * Optional deterministic prefix used to materialize IDs for providers
+     * that emit otherwise valid ToolCalls without an id.
+     */
+    fallbackIdPrefix?: string;
+  } = {},
+): MessageToolCallInfo[] {
+  const rawCalls = readRawMessageToolCalls(message);
+  const reservedIds = new Set(rawCalls.flatMap((call) => {
+    if (!call || typeof call !== 'object') return [];
+    const id = (call as Record<string, unknown>).id;
+    return typeof id === 'string' && id ? [id] : [];
+  }));
+  return rawCalls.flatMap((call, index) => {
     if (!call || typeof call !== 'object') return [];
     const item = call as Record<string, unknown>;
-    const id = item.id;
     const functionCall = item.function && typeof item.function === 'object'
       ? item.function as Record<string, unknown>
       : null;
     const name = typeof item.name === 'string' ? item.name : functionCall?.name;
-    return typeof id === 'string' && id && typeof name === 'string' && name
-      ? [{ id, name, args: item.args ?? readFunctionCallArguments(functionCall?.arguments) }]
+    if (typeof name !== 'string' || !name) return [];
+    const rawId = item.id;
+    let id = typeof rawId === 'string' && rawId ? rawId : null;
+    if (!id && options.fallbackIdPrefix) {
+      const base = `${options.fallbackIdPrefix}:${String(index)}`;
+      id = base;
+      let collisionIndex = 1;
+      while (reservedIds.has(id)) {
+        id = `${base}:${String(collisionIndex)}`;
+        collisionIndex += 1;
+      }
+      reservedIds.add(id);
+    }
+    return id
+      ? [{
+          id,
+          name,
+          args: item.args ?? readFunctionCallArguments(functionCall?.arguments),
+        }]
       : [];
   });
 }

@@ -127,6 +127,11 @@ function defaultIsMainAssistantNode(node: string | null): boolean {
   return !DELEGATION_LANE_NODE_NAMES.has(node);
 }
 
+function isInternalOrchestratorNamespace(namespace: string[]) {
+  const node = readNamespaceNode(namespace);
+  return node !== null && isOrchestratorInternalAiStreamNode(node);
+}
+
 /**
  * Per-namespace lifecycle tracking: `content-block-delta` events carry no
  * message id — within one namespace they belong to the message opened by the
@@ -168,6 +173,13 @@ export function readRootStreamChatEvent(
   switch (event.method) {
     case 'messages': {
       if (!data) {
+        return null;
+      }
+      // Internal decision and Planner Agent model activity remains observable
+      // on the raw protocol stream, but it is not assistant output or
+      // delegated-subagent progress. This also covers the Planner's nested
+      // private tool loop (namespace depth >= 2).
+      if (isInternalOrchestratorNamespace(namespace)) {
         return null;
       }
       const key = namespaceKey(namespace);
@@ -244,6 +256,11 @@ export function readRootStreamChatEvent(
 
     case 'tools': {
       if (!data) {
+        return null;
+      }
+      // Planner file exploration tools are framework internals, not Capability
+      // Toolkit activity exposed to the chat surface.
+      if (isInternalOrchestratorNamespace(namespace)) {
         return null;
       }
       return { type: 'tool', namespace, data };

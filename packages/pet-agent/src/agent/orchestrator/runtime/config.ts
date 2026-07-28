@@ -23,8 +23,10 @@ export function getInvokeOptions(runnableConfig?: RunnableConfig): OrchestratorI
     reviewCapabilities: readToolkitReviewCapabilities(cfg.reviewCapabilities),
     globalReviewPolicy: readGlobalReviewPolicy(cfg.globalReviewPolicy),
     maxRunIterations: readRunIterationLimit(cfg.maxRunIterations),
-    forcedCapabilityNames: Array.isArray((cfg as { forcedCapabilityNames?: unknown }).forcedCapabilityNames)
-      ? (cfg as { forcedCapabilityNames: unknown[] }).forcedCapabilityNames.filter(
+    allowedCapabilityNames: Array.isArray(
+      (cfg as { allowedCapabilityNames?: unknown }).allowedCapabilityNames,
+    )
+      ? (cfg as { allowedCapabilityNames: unknown[] }).allowedCapabilityNames.filter(
           (name): name is string => typeof name === 'string' && name.length > 0,
       )
       : undefined,

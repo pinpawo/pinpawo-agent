@@ -62,6 +62,22 @@ test('message display keeps subagent content visually distinct', () => {
   );
 });
 
+test('message display keeps an actor label on one terminal row', () => {
+  assert.deepEqual(
+    buildMessageDisplayLines(message({
+      role: 'assistant',
+      text: 'done',
+    }), ' 豆包\n助手\x1B '),
+    [{
+      text: '豆包 ↵ 助手�',
+      tone: 'assistant-label',
+    }, {
+      text: '| done',
+      tone: 'assistant',
+    }],
+  );
+});
+
 function message(
   overrides: Partial<AgentMessageEntry>,
 ): AgentMessageEntry {

@@ -109,6 +109,7 @@ export class LocalHostConnection implements AgentHostConnection {
       return;
     }
     this.socket = socket;
+    let messageQueue = Promise.resolve();
 
     const onOpen = () => {
       if (this.socket === socket) {
@@ -117,19 +118,26 @@ export class LocalHostConnection implements AgentHostConnection {
     };
     const onMessage = (event: SocketEvent) => {
       if (this.socket !== socket) return;
-      void normalizeMessageData(event.data).then((raw) => {
-        if (this.socket !== socket) return;
-        const message = parseAgentServerMessage(raw);
-        if (message) {
-          this.handlers.onMessage(message);
-        } else {
-          this.handlers.onError(new Error('local-agent sent an invalid protocol message'));
-        }
-      }).catch((error) => {
-        if (this.socket === socket) {
-          this.handlers.onError(toError(error));
-        }
-      });
+      messageQueue = messageQueue
+        .then(async () => {
+          if (this.socket !== socket) return;
+          const raw = await normalizeMessageData(event.data);
+          if (this.socket !== socket) return;
+          const message = parseAgentServerMessage(raw);
+          if (message) {
+            this.handlers.onMessage(message);
+          } else {
+            this.failSocket(
+              socket,
+              new Error('local-agent sent an invalid protocol message'),
+            );
+          }
+        })
+        .catch((error) => {
+          if (this.socket === socket) {
+            this.failSocket(socket, toError(error));
+          }
+        });
     };
     const onClose = () => {
       if (this.socket !== socket) return;
@@ -138,7 +146,10 @@ export class LocalHostConnection implements AgentHostConnection {
     };
     const onError = (event: SocketEvent) => {
       if (this.socket === socket) {
-        this.handlers.onError(new Error(event.message || 'local-agent websocket error'));
+        this.failSocket(
+          socket,
+          new Error(event.message || 'local-agent websocket error'),
+        );
       }
     };
 
@@ -170,7 +181,7 @@ export class LocalHostConnection implements AgentHostConnection {
       socket.send(JSON.stringify(message));
       return true;
     } catch (error) {
-      this.handlers.onError(toError(error));
+      this.failSocket(socket, toError(error));
       return false;
     }
   }
@@ -183,6 +194,19 @@ export class LocalHostConnection implements AgentHostConnection {
     this.removeSocketListeners?.();
     this.removeSocketListeners = null;
     this.socket = null;
+  }
+
+  private failSocket(socket: WebSocketLike, error: Error) {
+    if (this.socket !== socket) return;
+    this.handlers.onError(error);
+    this.detachSocket();
+    try {
+      socket.close();
+    } catch {
+      // The connection is already detached; reconnect must not depend on a
+      // broken WebSocket implementation accepting close().
+    }
+    this.handlers.onClose();
   }
 }
 

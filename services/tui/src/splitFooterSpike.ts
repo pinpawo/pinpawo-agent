@@ -15,7 +15,7 @@ import {
   createSpikeSession,
   formatSpikeTimelineEntry,
 } from './spike/sessionHarness';
-import { installSingleGraphemeBackspaceWorkaround } from './spike/textareaWorkarounds';
+import { installTextareaWorkarounds } from './spike/textareaWorkarounds';
 
 const smoke = process.argv.includes('--smoke');
 const renderer = await createCliRenderer({
@@ -39,7 +39,7 @@ const root = new BoxRenderable(renderer, {
 });
 const header = new TextRenderable(renderer, {
   id: 'header',
-  content: 'PinPawo TUI v2 · split-footer',
+  content: 'PinPawo TUI v2 · interaction probe · no host/session',
   fg: '#f0a6ca',
   bg: RGBA.defaultBackground(),
   height: 1,
@@ -101,7 +101,7 @@ const composer = new TextareaRenderable(renderer, {
     setStatus(pendingPastePreview);
   },
 });
-installSingleGraphemeBackspaceWorkaround(composer);
+installTextareaWorkarounds(composer);
 
 root.add(header);
 root.add(live);

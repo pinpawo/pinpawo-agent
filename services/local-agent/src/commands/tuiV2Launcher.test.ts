@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import test from 'node:test';
 import {
+  buildTuiV2LaunchArgs,
   findLocalAgentPackageRoot,
   parseTuiV2DistributionManifest,
   resolveTuiV2LaunchPlan,
@@ -195,6 +196,28 @@ test('v2 launcher runs an installed distribution with its local Bun', () => {
     command: packageBun,
     args: ['run', entry],
   });
+});
+
+test('v2 launcher forwards only explicit public modes to the TUI process', () => {
+  const plan = {
+    source: 'packaged-bundle' as const,
+    command: '/app/node_modules/.bin/bun',
+    args: ['run', '/app/node_modules/pinpawo/dist/tui/main.js'],
+  };
+
+  assert.deepEqual(buildTuiV2LaunchArgs(plan), plan.args);
+  assert.deepEqual(buildTuiV2LaunchArgs(plan, { check: true }), [
+    ...plan.args,
+    '--version',
+  ]);
+  assert.deepEqual(buildTuiV2LaunchArgs(plan, { qa: true }), [
+    ...plan.args,
+    '--demo-qa',
+  ]);
+  assert.throws(
+    () => buildTuiV2LaunchArgs(plan, { check: true, qa: true }),
+    /mutually exclusive/,
+  );
 });
 
 test('v2 launcher resolves the installed Bun runtime across supported platforms', () => {

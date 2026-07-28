@@ -115,6 +115,11 @@ test('file mention completes directories and files at the composer cursor', (con
   ), {
     text: 'inspect @docs/ later',
     cursorOffset: 'inspect @docs/'.length,
+    mention: {
+      start: 'inspect '.length,
+      end: 'inspect @docs/'.length,
+      path: 'docs/',
+    },
   });
 
   const fileInput = {
@@ -131,6 +136,11 @@ test('file mention completes directories and files at the composer cursor', (con
   assert.deepEqual(completeFileMention(fileInput, fileState), {
     text: 'inspect @docs/TUI.md ',
     cursorOffset: 'inspect @docs/TUI.md '.length,
+    mention: {
+      start: 'inspect '.length,
+      end: 'inspect @docs/TUI.md'.length,
+      path: 'docs/TUI.md',
+    },
   });
 
   const middleInput = {
@@ -146,6 +156,11 @@ test('file mention completes directories and files at the composer cursor', (con
   assert.deepEqual(completeFileMention(middleInput, middleState), {
     text: '中文 @docs/ suffix',
     cursorOffset: '中文 @docs/'.length,
+    mention: {
+      start: '中文 '.length,
+      end: '中文 @docs/'.length,
+      path: 'docs/',
+    },
   });
 });
 

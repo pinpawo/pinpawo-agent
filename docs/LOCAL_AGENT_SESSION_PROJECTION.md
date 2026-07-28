@@ -44,14 +44,17 @@ represents that run as exactly one of three projection facts:
 
 - `running` carries one runtime `activity`: `thinking`, `using_tool`, or `streaming`;
 - `waiting_review` structurally carries its checkpoint-derived `ReviewAction`;
-- `interrupting` means the server run controller has begun interruption.
+- `interrupting` means an interruption command is pending for the owned run.
 
 The union cannot represent a running or interrupting run with review content, or
 a waiting review without review content. The initial `running` / `thinking` view
 is created only after the outbound run command is accepted by the transport.
 Later activity changes come from server runtime events; elapsed-time presentation
-such as busy-copy escalation remains in the render layer. Sending
-`run.interrupt` does not optimistically create the `interrupting` view.
+such as busy-copy escalation remains in the render layer. The initiating client
+may project `interrupting` only after its transport accepts `run.interrupt`;
+this acknowledges the command locally, not that the agent has stopped. A server
+event or snapshot remains authoritative for the next review, completion,
+interruption, or error state.
 
 Local snapshot readers accept only the current versioned
 `AgentSessionSnapshot`. Snapshot versions 1 and 2 are unsupported, as are

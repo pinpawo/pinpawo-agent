@@ -53,6 +53,25 @@ test('welcome remains single-row safe in a narrow terminal', () => {
   }
 });
 
+test('welcome keeps an unsafe actor label on one terminal row', () => {
+  const lines = buildWelcomeLines({
+    session: {
+      ...SESSION,
+      actor: {
+        label: ' 豆包\n助手\x1B ',
+        summary: 'Local helper',
+      },
+    },
+    width: 80,
+    connection: 'connected',
+  });
+  assert.match(
+    lines[7] ?? '',
+    /PinPawo TUI v2 · v0\.1\.0 · 豆包 ↵ 助手�/,
+  );
+  assert.doesNotMatch(lines[7] ?? '', /[\r\n\x1B]/);
+});
+
 test('displayed TUI version matches the workspace package', () => {
   const packageJson = JSON.parse(
     readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),

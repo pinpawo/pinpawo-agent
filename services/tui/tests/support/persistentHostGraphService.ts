@@ -30,6 +30,10 @@ export const PERSISTENT_HOST_INPUT = 'Persist this host conversation.';
 export const PERSISTENT_HOST_CONTINUATION = 'Continue after the host restart.';
 export const PERSISTENT_HOST_REPLY = 'Persisted host reply.';
 export const PERSISTENT_HOST_CONTINUATION_REPLY = 'Continued host reply.';
+export const PERSISTENT_HOST_RESIZE_INPUT =
+  'Keep the response active while the terminal resizes.';
+export const PERSISTENT_HOST_RESIZE_REPLY =
+  'Resize-safe host reply.';
 export const PERSISTENT_HOST_ATTACHMENT_INPUT =
   'Persist the selected host attachments.';
 export const PERSISTENT_HOST_ATTACHMENT_NAMES = [
@@ -150,8 +154,13 @@ function createGraph(setup: AgentChannelSetup) {
     throw new Error('persistent host fixture requires a production checkpointer');
   }
   return new StateGraph(MessagesAnnotation)
-    .addNode('answer', (state) => {
+    .addNode('answer', async (state) => {
       const input = String(state.messages.at(-1)?.content ?? '');
+      if (input === PERSISTENT_HOST_RESIZE_INPUT) {
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 700));
+      } else if (input === PERSISTENT_HOST_INPUT) {
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 180));
+      }
       const continuation = input.includes(PERSISTENT_HOST_CONTINUATION);
       const content = input === PERSISTENT_HOST_REVIEW_INPUT
         ? reviewReply(interrupt({
@@ -203,6 +212,9 @@ function selectReply(input: string, workdir?: string) {
   }
   if (input === PERSISTENT_HOST_EDITOR_INPUT) {
     return PERSISTENT_HOST_EDITOR_REPLY;
+  }
+  if (input === PERSISTENT_HOST_RESIZE_INPUT) {
+    return PERSISTENT_HOST_RESIZE_REPLY;
   }
   if (input === PERSISTENT_HOST_TIMELINE_INPUT) {
     return PERSISTENT_HOST_TIMELINE_REPLY;

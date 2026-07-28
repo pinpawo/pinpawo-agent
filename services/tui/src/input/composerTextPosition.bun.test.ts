@@ -46,6 +46,11 @@ test('file completion maps terminal-cell cursors to text offsets with wide chara
   assert.deepEqual(completion, {
     text: '中文 @docs/ suffix',
     cursorOffset: '中文 @docs/'.length,
+    mention: {
+      start: '中文 '.length,
+      end: '中文 @docs/'.length,
+      path: 'docs/',
+    },
   });
   if (!completion) return;
 

@@ -192,7 +192,9 @@ export class TuiSessionController {
   constructor(options: TuiSessionControllerOptions) {
     this.now = options.now ?? Date.now;
     this.requestIdFactory = options.requestIdFactory ?? (() => crypto.randomUUID());
-    this.reconnectDelaysMs = options.reconnectDelaysMs ?? DEFAULT_RECONNECT_DELAYS_MS;
+    this.reconnectDelaysMs = options.reconnectDelaysMs?.length
+      ? options.reconnectDelaysMs
+      : DEFAULT_RECONNECT_DELAYS_MS;
     this.snapshotTimeoutMs = options.snapshotTimeoutMs ?? DEFAULT_SNAPSHOT_TIMEOUT_MS;
     this.sessionCommandTimeoutMs = options.sessionCommandTimeoutMs
       ?? DEFAULT_SESSION_COMMAND_TIMEOUT_MS;
@@ -787,7 +789,11 @@ export class TuiSessionController {
           text: message.message?.trim() || 'Run interrupted.',
         }],
       }, { observedAt: this.now() }));
+      return;
     }
+
+    if (message.type === 'pong') return;
+    assertNever(message);
   }
 
   private updateDelegationContinuationState(message: AgentServerMessage) {
@@ -857,15 +863,18 @@ export class TuiSessionController {
 
   private scheduleReconnect() {
     if (!this.started || this.reconnectTimer) return;
-    if (this.reconnectAttempt >= this.reconnectDelaysMs.length) {
-      this.setConnection('disconnected', 'local-agent is unavailable');
-      return;
-    }
-    const delay = this.reconnectDelaysMs[this.reconnectAttempt] ?? 0;
+    const delayIndex = Math.min(
+      this.reconnectAttempt,
+      this.reconnectDelaysMs.length - 1,
+    );
+    const delay = this.reconnectDelaysMs[delayIndex]!;
     this.reconnectAttempt += 1;
+    const attemptDetail = this.reconnectAttempt <= this.reconnectDelaysMs.length
+      ? `${this.reconnectAttempt}/${this.reconnectDelaysMs.length}`
+      : `background attempt ${this.reconnectAttempt}`;
     this.setConnection(
       'reconnecting',
-      `retrying in ${formatDelay(delay)} (${this.reconnectAttempt}/${this.reconnectDelaysMs.length})`,
+      `retrying in ${formatDelay(delay)} (${attemptDetail})`,
     );
     this.reconnectTimer = this.setTimer(() => {
       this.reconnectTimer = null;
@@ -1008,6 +1017,10 @@ function formatDelay(delayMs: number) {
   return delayMs < 1_000
     ? `${delayMs}ms`
     : `${Math.round(delayMs / 100) / 10}s`;
+}
+
+function assertNever(value: never): never {
+  throw new Error(`unhandled agent server message: ${String(value)}`);
 }
 
 function mergeCompletionSnapshotMetadata(

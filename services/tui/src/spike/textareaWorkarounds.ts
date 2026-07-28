@@ -5,11 +5,17 @@ const graphemeSegmenter = new Intl.Segmenter(undefined, {
 });
 
 /**
- * OpenTUI 0.4.5 removes the preceding newline together with the final
- * grapheme on a line. Keep this narrow and delete it after the native editor
- * fixes single-grapheme backspace behavior.
+ * Keep OpenTUI 0.4.5 editor compatibility fixes in one narrow boundary so
+ * they can be removed when the native editor catches up.
  */
-export function installSingleGraphemeBackspaceWorkaround(
+export function installTextareaWorkarounds(
+  textarea: TextareaRenderable,
+) {
+  installSingleGraphemeBackspaceWorkaround(textarea);
+  installReverseSelectionCollapseWorkaround(textarea);
+}
+
+function installSingleGraphemeBackspaceWorkaround(
   textarea: TextareaRenderable,
 ) {
   const nativeDeleteCharBackward = textarea.deleteCharBackward.bind(textarea);
@@ -28,5 +34,26 @@ export function installSingleGraphemeBackspaceWorkaround(
       }
     }
     return nativeDeleteCharBackward();
+  };
+}
+
+/**
+ * OpenTUI 0.4.5 collapses a reverse selection one character before its end
+ * when the user presses Right. The selection end is already exclusive, so
+ * preserve normal editor behavior by moving directly to that offset.
+ */
+function installReverseSelectionCollapseWorkaround(
+  textarea: TextareaRenderable,
+) {
+  const nativeMoveCursorRight = textarea.moveCursorRight.bind(textarea);
+
+  textarea.moveCursorRight = (options) => {
+    const selection = options?.select ? null : textarea.getSelection();
+    if (selection && textarea.cursorOffset === selection.start) {
+      textarea.editBuffer.setCursorByOffset(selection.end);
+      textarea.clearSelection();
+      return true;
+    }
+    return nativeMoveCursorRight(options);
   };
 }

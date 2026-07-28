@@ -62,6 +62,18 @@ test('transcript markdown uses completed canonical user and assistant messages',
   ].join('\n'));
 });
 
+test('transcript markdown keeps actor metadata on one line', () => {
+  const session = createSession([]);
+  session.actor = {
+    label: ' 豆包\n助手\x1B ',
+    summary: 'Local agent',
+  };
+
+  const content = formatTranscriptMarkdown(session, FIXED_NOW);
+  assert.match(content, /- Actor: 豆包 ↵ 助手�/);
+  assert.doesNotMatch(content, /\x1B/);
+});
+
 test('transcript export path handles default, file, directory, and home paths', () => {
   const expectedName =
     'pinpawo-transcript-chat-pet-a-2026-06-01T01-02-03-000Z.md';

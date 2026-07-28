@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { AgentSession } from '@pinpawo/agent-session';
+import { sessionActorLabel } from '../session/sessionDisplay';
 import {
   parseTerminalCommand,
   type TerminalCommand,
@@ -70,12 +71,13 @@ export async function pageSessionTranscript(
 }
 
 export function formatTranscriptPagerText(session: AgentSession) {
+  const actor = sessionActorLabel(session);
   const lines = [
     'PinPawo Transcript',
     `Session: ${sanitizePagerText(session.sessionId)}`,
     `Kind: ${session.kind}`,
     ...(session.actor?.label
-      ? [`Actor: ${sanitizePagerText(session.actor.label)}`]
+      ? [`Actor: ${actor}`]
       : []),
     `Entries: ${session.timeline.length}`,
     'Browse: ↑↓ · PageUp/PageDown · g/G · q to return',
@@ -94,7 +96,9 @@ export function formatTranscriptPagerText(session: AgentSession) {
       ? `[${sanitizePagerText(entry.createdAt)}]\n`
       : '';
     lines.push(
-      `${timestamp}${sanitizePagerText(formatTimelineEntry(entry))}`,
+      `${timestamp}${sanitizePagerText(formatTimelineEntry(entry, {
+        actorLabel: actor,
+      }))}`,
       '',
     );
   }

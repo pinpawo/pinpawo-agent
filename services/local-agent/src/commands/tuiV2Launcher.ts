@@ -38,6 +38,7 @@ export type ResolveTuiV2LaunchPlanOptions = {
 export type RunTuiV2Options = {
   workdir?: string;
   check?: boolean;
+  qa?: boolean;
 };
 
 export type TuiV2DistributionManifest = {
@@ -331,9 +332,7 @@ async function spawnTuiV2(
   options: RunTuiV2Options,
 ) {
   const cwd = options.workdir ?? process.cwd();
-  const args = options.check
-    ? [...plan.args, '--version']
-    : plan.args;
+  const args = buildTuiV2LaunchArgs(plan, options);
   await new Promise<void>((resolvePromise, reject) => {
     const child = spawn(plan.command, args, {
       cwd,
@@ -370,6 +369,20 @@ async function spawnTuiV2(
       ));
     });
   });
+}
+
+export function buildTuiV2LaunchArgs(
+  plan: TuiV2LaunchPlan,
+  options: Pick<RunTuiV2Options, 'check' | 'qa'> = {},
+) {
+  if (options.check && options.qa) {
+    throw new Error('OpenTUI v2 check and QA modes are mutually exclusive.');
+  }
+  return [
+    ...plan.args,
+    ...(options.check ? ['--version'] : []),
+    ...(options.qa ? ['--demo-qa'] : []),
+  ];
 }
 
 function signalExitCode(signal: NodeJS.Signals | null) {

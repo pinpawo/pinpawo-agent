@@ -12,6 +12,8 @@
     "build:spike": "bun build --compile src/spike.ts --outfile dist/pinpawo-tui-spike",
     "dev": "bun run src/main.ts",
     "dev:command": "bun run src/main.ts --demo-command",
+    "dev:qa": "bun run src/main.ts --demo-qa",
+    "dev:probe": "bun run src/splitFooterSpike.ts",
     "dev:review": "bun run src/main.ts --demo-review",
     "dev:spike": "bun run src/spike.ts",
     "dev:split": "bun run src/splitFooterSpike.ts",

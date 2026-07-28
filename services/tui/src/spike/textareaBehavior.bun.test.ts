@@ -8,7 +8,7 @@ import {
   recordComposerHistoryEntry,
   resolveComposerHistoryDirection,
 } from '../input/composerHistory';
-import { installSingleGraphemeBackspaceWorkaround } from './textareaWorkarounds';
+import { installTextareaWorkarounds } from './textareaWorkarounds';
 
 test('textarea preserves pasted lines and deletes across line boundaries', async (context) => {
   const setup = await createTestRenderer({
@@ -23,7 +23,7 @@ test('textarea preserves pasted lines and deletes across line boundaries', async
     height: 4,
   });
   setup.renderer.root.add(textarea);
-  installSingleGraphemeBackspaceWorkaround(textarea);
+  installTextareaWorkarounds(textarea);
   textarea.focus();
 
   await setup.mockInput.pasteBracketedText('one\ntwo\nthree');
@@ -147,6 +147,76 @@ test('textarea supports macOS selection, word movement, and undo/redo', async (c
   await setup.mockInput.typeText('replacement');
   await setup.flush();
   assert.equal(textarea.plainText, 'replacement');
+});
+
+test('textarea preserves a rich draft through forward delete and submit', async (context) => {
+  const setup = await createTestRenderer({
+    width: 80,
+    height: 24,
+    kittyKeyboard: true,
+  });
+  context.after(() => setup.renderer.destroy());
+
+  let submitted = '';
+  const textarea = new TextareaRenderable(setup.renderer, {
+    id: 'textarea-rich-submit',
+    width: 80,
+    height: 5,
+    keyBindings: [{
+      name: 'return',
+      ctrl: true,
+      action: 'submit',
+    }],
+    onSubmit: () => {
+      submitted = textarea.plainText;
+    },
+  });
+  setup.renderer.root.add(textarea);
+  installTextareaWorkarounds(textarea);
+  textarea.focus();
+
+  const draft = [
+    '# 标题 🙂',
+    '',
+    '- **bold** and `code`',
+    '```ts',
+    'const value = \"原文\";',
+    '```',
+  ].join('\n');
+  await setup.mockInput.pasteBracketedText(draft);
+  await setup.flush();
+  assert.equal(textarea.plainText, draft);
+
+  textarea.setText('first\nsecond');
+  textarea.setCursor(0, 5);
+  setup.mockInput.pressKey('DELETE');
+  await setup.flush();
+  assert.equal(textarea.plainText, 'firstsecond');
+
+  textarea.undo();
+  await setup.flush();
+  assert.equal(textarea.plainText, 'first\nsecond');
+
+  textarea.setText(draft);
+  textarea.gotoBufferEnd();
+  setup.mockInput.pressKey('HOME', { shift: true });
+  await setup.flush();
+  assert.equal(textarea.getSelectedText(), draft);
+  setup.mockInput.pressArrow('right');
+  await setup.flush();
+  assert.equal(textarea.hasSelection(), false);
+  assert.deepEqual({
+    row: textarea.logicalCursor.row,
+    col: textarea.logicalCursor.col,
+  }, {
+    row: 5,
+    col: 3,
+  });
+
+  setup.mockInput.pressEnter({ ctrl: true });
+  await setup.flush();
+  assert.equal(submitted, draft);
+  assert.equal(textarea.plainText, draft);
 });
 
 test('textarea exposes soft-wrap boundaries for composer history routing', async (context) => {

@@ -10,6 +10,7 @@ import type {
   AgentSession,
   AgentTimelineEntry,
 } from '@pinpawo/agent-session';
+import { sessionActorLabel } from '../session/sessionDisplay';
 import {
   countSettledTimelinePrefix,
   buildTimelineDisplayLines,
@@ -80,6 +81,7 @@ export class TimelineScrollback {
   }
 
   render(session: AgentSession) {
+    const actorLabel = sessionActorLabel(session);
     if (session.sessionId !== this.sessionId) {
       const previousSessionId = this.sessionId;
       this.destroyTimelineSurface();
@@ -119,7 +121,7 @@ export class TimelineScrollback {
               [firstEntry],
               true,
               active.mode,
-              session.actor?.label,
+              actorLabel,
             );
             this.committedFingerprints.push(timelineFingerprint(firstEntry));
             this.destroyTimelineSurface();
@@ -146,7 +148,7 @@ export class TimelineScrollback {
     )) {
       this.commitSettledEntries(
         session.timeline.slice(start, end),
-        session.actor?.label,
+        actorLabel,
       );
     }
     this.reconciliationCache = timelineReconciliationCache(
@@ -166,7 +168,7 @@ export class TimelineScrollback {
         liveEntries,
         false,
         mode,
-        session.actor?.label,
+        actorLabel,
       );
     } else if (this.activeTimelineSurface) {
       this.destroyTimelineSurface();

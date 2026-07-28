@@ -2,10 +2,14 @@ import type { TuiSessionState } from '../session/sessionController';
 import { truncateTerminalLine, wrapTerminalText } from '../text/terminalText';
 
 export type NoticeOverlayState =
-  | { phase: 'closed' }
+  | {
+      phase: 'closed';
+      dismissedConnectionError?: string;
+    }
   | {
       phase: 'interrupting';
       requestId: string;
+      pendingTooLong: boolean;
     }
   | {
       phase: 'error';
@@ -30,9 +34,17 @@ export function syncNoticeOverlay(
       : {
           phase: 'interrupting',
           requestId: run.requestId,
+          pendingTooLong: false,
         };
   }
   if (state.phase === 'interrupting') {
+    return createNoticeOverlayState();
+  }
+  if (
+    state.phase === 'closed'
+    && state.dismissedConnectionError
+    && sessionState.connection === 'ready'
+  ) {
     return createNoticeOverlayState();
   }
   if (
@@ -42,11 +54,15 @@ export function syncNoticeOverlay(
       || sessionState.connection === 'disconnected'
     )
   ) {
+    const message = sessionState.connectionDetail
+      ?? 'local-agent is unavailable';
+    if (state.dismissedConnectionError === message) {
+      return state;
+    }
     return {
       phase: 'error',
       source: 'connection',
-      message: sessionState.connectionDetail
-        ?? 'local-agent is unavailable',
+      message,
     };
   }
   if (
@@ -67,8 +83,15 @@ export function openErrorNotice(message: string): NoticeOverlayState {
   };
 }
 
-export function closeNoticeOverlay(): NoticeOverlayState {
-  return createNoticeOverlayState();
+export function closeNoticeOverlay(
+  state: NoticeOverlayState = createNoticeOverlayState(),
+): NoticeOverlayState {
+  return state.phase === 'error' && state.source === 'connection'
+    ? {
+        phase: 'closed',
+        dismissedConnectionError: state.message,
+      }
+    : createNoticeOverlayState();
 }
 
 export function resolveNoticeOverlayKey(
@@ -81,6 +104,30 @@ export function resolveNoticeOverlayKey(
     : null;
 }
 
+export function shouldRestoreComposerAfterNoticeSync(
+  previous: NoticeOverlayState,
+  next: NoticeOverlayState,
+) {
+  return previous.phase !== 'closed' && next.phase === 'closed';
+}
+
+export function markInterruptNoticePendingTooLong(
+  state: NoticeOverlayState,
+  requestId: string,
+): NoticeOverlayState {
+  if (
+    state.phase !== 'interrupting'
+    || state.requestId !== requestId
+    || state.pendingTooLong
+  ) {
+    return state;
+  }
+  return {
+    ...state,
+    pendingTooLong: true,
+  };
+}
+
 export function buildNoticeOverlayViewModel(
   state: Exclude<NoticeOverlayState, { phase: 'closed' }>,
   width: number,
@@ -91,11 +138,15 @@ export function buildNoticeOverlayViewModel(
       title: ' Interrupting ',
       bottomTitle: ' Ctrl+C again to exit ',
       content: [
-        'Stopping the active response…',
+        state.pendingTooLong
+          ? 'Still stopping; the agent has not confirmed yet.'
+          : 'Stopping the active response…',
         '',
         `request: ${state.requestId}`,
         '',
-        'Timeline updates remain ordered while the host settles.',
+        state.pendingTooLong
+          ? 'Input remains locked until the host settles.'
+          : 'Timeline updates remain ordered while the host settles.',
       ].map((line) => truncateTerminalLine(line, innerWidth)).join('\n'),
     };
   }

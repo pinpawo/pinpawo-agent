@@ -106,7 +106,13 @@ test('TuiSessionController synchronizes one session and projects a chat run', ()
     message: 'hello',
   });
   assert.equal(controller.getState().session.timeline[0]?.type, 'message');
-  assert.equal(controller.getState().session.activeRun?.requestId, 'chat-1');
+  assert.deepEqual(controller.getState().session.activeRun, {
+    requestId: 'chat-1',
+    state: 'running',
+    activity: 'thinking',
+    startedAt: 1_000,
+    updatedAt: 1_000,
+  });
 
   connection.receive(eventMessage({
     type: 'message.delta',
@@ -592,6 +598,65 @@ test('TuiSessionController reconnects and rehydrates before becoming ready', () 
   assert.equal(controller.getState().connection, 'reconnecting');
   connection.receive(snapshotResult(reconnectRequest?.requestId ?? '', 'chat:one'));
   assert.equal(controller.getState().connection, 'ready');
+  controller.stop();
+});
+
+test('TuiSessionController keeps retrying at the capped delay until the host returns', () => {
+  const timers: Array<{
+    callback: () => void;
+    delayMs: number;
+    handle: ReturnType<typeof setTimeout>;
+  }> = [];
+  let connection!: FakeConnection;
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    reconnectDelaysMs: [10, 25],
+    setTimer: (callback, delayMs) => {
+      const handle = {} as ReturnType<typeof setTimeout>;
+      timers.push({ callback, delayMs, handle });
+      return handle;
+    },
+    clearTimer: (handle) => {
+      const index = timers.findIndex((timer) => timer.handle === handle);
+      if (index >= 0) timers.splice(index, 1);
+    },
+  });
+
+  controller.start();
+  connection.close();
+  assert.equal(timers[0]?.delayMs, 10);
+  assert.match(controller.getState().connectionDetail ?? '', /1\/2/);
+
+  timers.shift()?.callback();
+  assert.equal(connection.connectCount, 2);
+  connection.close();
+  assert.equal(timers[0]?.delayMs, 25);
+  assert.match(controller.getState().connectionDetail ?? '', /2\/2/);
+
+  timers.shift()?.callback();
+  assert.equal(connection.connectCount, 3);
+  connection.close();
+  assert.equal(timers[0]?.delayMs, 25);
+  assert.match(
+    controller.getState().connectionDetail ?? '',
+    /background attempt 3/,
+  );
+
+  timers.shift()?.callback();
+  assert.equal(connection.connectCount, 4);
+  connection.open();
+  const snapshotRequest = connection.sent.at(-1);
+  assert.equal(snapshotRequest?.type, 'session.snapshot.get');
+  connection.receive(snapshotResult(
+    snapshotRequest?.requestId ?? '',
+    'chat:recovered',
+  ));
+  assert.equal(controller.getState().connection, 'ready');
+  assert.equal(controller.getState().session.sessionId, 'chat:recovered');
+  assert.equal(timers.length, 0);
   controller.stop();
 });
 

@@ -106,8 +106,88 @@ try {
   process.stdout.write(
     `[tui:install-smoke] ${process.platform}-${process.arch} ${probe.stdout}`,
   );
+  if (process.platform === 'darwin') {
+    await runInstalledQaPty(
+      join(installedRoot, 'dist', 'index.js'),
+      consumerDir,
+    );
+  }
 } finally {
   await rm(tempRoot, { recursive: true, force: true });
+}
+
+async function runInstalledQaPty(
+  installedEntry: string,
+  cwd: string,
+) {
+  const expectScript = [
+    'set timeout 20',
+    'set stty_init "rows 28 columns 96"',
+    [
+      'spawn -noecho',
+      JSON.stringify(process.execPath),
+      JSON.stringify(installedEntry),
+      'tui',
+      '--v2',
+      '--qa',
+    ].join(' '),
+    'fconfigure $spawn_id -translation binary -encoding binary',
+    'expect {',
+    '  -exact "PinPawo QA" {}',
+    '  timeout { exit 181 }',
+    '  eof { exit 182 }',
+    '}',
+    'expect {',
+    '  -exact "Ctrl+Enter or Ctrl+O" {}',
+    '  timeout { exit 183 }',
+    '  eof { exit 184 }',
+    '}',
+    'send_error "qa-stage: ready\\n"',
+    'send -- "Installed QA"',
+    'expect {',
+    '  -exact "Installed QA" {}',
+    '  timeout { exit 185 }',
+    '  eof { exit 186 }',
+    '}',
+    'send_error "qa-stage: draft\\n"',
+    'send -- "\\033\\[13;5u"',
+    'expect {',
+    '  -exact "PinPawo QA is thinking" {}',
+    '  timeout { exit 187 }',
+    '  eof { exit 188 }',
+    '}',
+    'send_error "qa-stage: thinking\\n"',
+    'expect {',
+    '  -exact "Ctrl+Enter or Ctrl+O" {}',
+    '  timeout { exit 189 }',
+    '  eof { exit 190 }',
+    '}',
+    'send_error "qa-stage: composer-restored\\n"',
+    'expect {',
+    '  -exact "20,000/3,000" {}',
+    '  timeout { exit 191 }',
+    '  eof { exit 192 }',
+    '}',
+    'send_error "qa-stage: usage\\n"',
+    'after 250',
+    'send -- "/quit"',
+    'after 100',
+    'send -- "\\033\\[13;5u"',
+    'expect {',
+    '  eof {}',
+    '  timeout { exit 193 }',
+    '}',
+    'send_error "qa-stage: quit\\n"',
+    'set result [wait]',
+    'exit [lindex $result 3]',
+  ].join('\n');
+  await runProcess('/usr/bin/expect', ['-c', expectScript], cwd, {
+    env: {
+      TERM: 'xterm-256color',
+    },
+    label: 'run the installed v2 QA flow in a PTY',
+    timeoutMs: 35_000,
+  });
 }
 
 async function packWorkspacePackage(packageRoot: string, destination: string) {
@@ -168,12 +248,15 @@ async function runProcess(
     return result;
   } catch (error) {
     const failure = error as Error & {
+      code?: number | string;
+      signal?: NodeJS.Signals;
       stdout?: string;
       stderr?: string;
     };
     assert.fail([
       `${options.label} failed after ${Date.now() - startedAt}ms.`,
       `${command} ${args.join(' ')}`,
+      `code=${String(failure.code)} signal=${String(failure.signal)}`,
       failure.stderr || failure.stdout || failure.message,
     ].join('\n'));
   }

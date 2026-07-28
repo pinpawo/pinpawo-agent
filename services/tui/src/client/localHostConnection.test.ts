@@ -69,16 +69,17 @@ test('LocalHostConnection authenticates, parses shared messages, and sends share
   assert.deepEqual(socket.sent, [{ type: 'ping' }]);
 
   socket.emit('message', { data: JSON.stringify({ type: 'pong' }) });
-  await Promise.resolve();
+  await flushTasks();
   assert.deepEqual(events, ['open', 'message:pong']);
 
   socket.emit('message', { data: '{invalid' });
-  await Promise.resolve();
-  assert.match(events.at(-1) ?? '', /^error:local-agent sent an invalid protocol message$/);
-
-  socket.emit('close');
+  await flushTasks();
+  assert.deepEqual(events.slice(-2), [
+    'error:local-agent sent an invalid protocol message',
+    'close',
+  ]);
+  assert.equal(socket.closed, true);
   assert.equal(connection.isConnected(), false);
-  assert.equal(events.at(-1), 'close');
 });
 
 test('LocalHostConnection reports a missing auth token without opening a socket', () => {
@@ -106,9 +107,74 @@ test('LocalHostConnection reports a missing auth token without opening a socket'
   ]);
 });
 
+test('LocalHostConnection preserves socket arrival order across async payload decoding', async () => {
+  const socket = new FakeSocket();
+  const messages: string[] = [];
+  const connection = new LocalHostConnection({
+    onOpen: () => undefined,
+    onMessage: (message) => {
+      messages.push(
+        'requestId' in message
+          ? `${message.type}:${message.requestId}`
+          : message.type,
+      );
+    },
+    onClose: () => undefined,
+    onError: (error) => assert.fail(error.message),
+  }, {
+    tokenProvider: () => 'secret',
+    webSocketFactory: () => socket,
+  });
+  const firstText = Promise.withResolvers<string>();
+  let secondRead = false;
+  const first = blobWithText(() => firstText.promise);
+  const second = blobWithText(async () => {
+    secondRead = true;
+    return JSON.stringify({
+      type: 'interrupting',
+      requestId: 'second',
+    });
+  });
+
+  connection.connect();
+  socket.readyState = 1;
+  socket.emit('open');
+  socket.emit('message', { data: first });
+  socket.emit('message', { data: second });
+  await flushTasks();
+  assert.equal(secondRead, false);
+  assert.deepEqual(messages, []);
+
+  firstText.resolve(JSON.stringify({
+    type: 'interrupting',
+    requestId: 'first',
+  }));
+  await flushTasks();
+  assert.equal(secondRead, true);
+  assert.deepEqual(messages, [
+    'interrupting:first',
+    'interrupting:second',
+  ]);
+  connection.disconnect();
+});
+
 test('readLocalServerPort validates the configured loopback port', () => {
   assert.equal(readLocalServerPort(undefined), 3210);
   assert.equal(readLocalServerPort('4321'), 4321);
   assert.throws(() => readLocalServerPort('0'), /invalid LOCAL_SERVER_PORT/);
   assert.throws(() => readLocalServerPort('nope'), /invalid LOCAL_SERVER_PORT/);
 });
+
+function blobWithText(read: () => Promise<string>) {
+  const blob = new Blob();
+  Object.defineProperty(blob, 'text', {
+    configurable: true,
+    value: read,
+  });
+  return blob;
+}
+
+async function flushTasks() {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  await new Promise<void>((resolve) => setImmediate(resolve));
+}

@@ -13,6 +13,7 @@ type LocalAgentCliHandlers = {
   runTuiV2?: (opts: {
     workdir?: string;
     check: boolean;
+    qa: boolean;
   }) => Promise<void> | void;
   runDetect?: () => Promise<void> | void;
   runInit?: (opts: InitCommandOptions) => Promise<void> | void;
@@ -111,11 +112,13 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
     .option('--v2', 'use the OpenTUI v2 client')
     .option('--legacy', 'force the legacy Ink client')
     .option('--check', 'verify the OpenTUI v2 runtime without entering terminal mode')
+    .option('--qa', 'run the deterministic OpenTUI v2 terminal QA scenario')
     .option('--workdir <directory>', 'agent working directory for runtime state and relative tool paths')
     .action(async (options: {
       check?: boolean;
       dryRun?: boolean;
       legacy?: boolean;
+      qa?: boolean;
       v2?: boolean;
       workdir?: string;
     }) => {
@@ -124,6 +127,12 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
       }
       if (options.check && !options.v2) {
         throw new Error('--check requires the OpenTUI v2 client (`--v2`).');
+      }
+      if (options.qa && !options.v2) {
+        throw new Error('--qa requires the OpenTUI v2 client (`--v2`).');
+      }
+      if (options.check && options.qa) {
+        throw new Error('Choose either --check or --qa, not both.');
       }
       const workdir = options.workdir?.trim()
         ? resolveWorkdirOption(options.workdir)
@@ -137,6 +146,7 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
         await runTuiV2({
           workdir,
           check: options.check ?? false,
+          qa: options.qa ?? false,
         });
         return;
       }

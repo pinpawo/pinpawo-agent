@@ -1,4 +1,5 @@
 import type { AgentSession } from '@pinpawo/agent-session';
+import { sessionActorLabel } from '../session/sessionDisplay';
 import { truncateTerminalLine } from '../text/terminalText';
 import { renderHalfBlockRaster } from '../visuals/terminalRaster';
 import { TUI_VERSION } from '../version';
@@ -29,7 +30,7 @@ export function buildWelcomeLines(input: {
   version?: string;
 }) {
   const width = Math.max(1, Math.floor(input.width));
-  const actor = input.session.actor?.label?.trim() || 'PinPawo';
+  const actor = sessionActorLabel(input.session);
   const model = input.session.runtime?.model?.trim() || 'model loading';
   const cwd = input.session.runtime?.cwd?.trim() || 'workspace loading';
   const version = input.version ?? TUI_VERSION;

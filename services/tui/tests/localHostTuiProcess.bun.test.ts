@@ -61,6 +61,8 @@ import {
   PERSISTENT_HOST_MENTION_REPLY,
   PERSISTENT_HOST_REPLY,
   PERSISTENT_HOST_REMOVED_ATTACHMENT_NAME,
+  PERSISTENT_HOST_RESIZE_INPUT,
+  PERSISTENT_HOST_RESIZE_REPLY,
   PERSISTENT_HOST_REVIEW_APPROVED_REPLY,
   PERSISTENT_HOST_REVIEW_INPUT,
   PERSISTENT_HOST_REVIEW_REJECTED_REPLY,
@@ -88,6 +90,385 @@ test('process harness settles a spawn error without waiting for exit', async () 
   assert.equal(result.signal, null);
   assert.match(result.error?.message ?? '', /ENOENT/);
   await terminateProcess(child, exit, 'spawn error cleanup');
+});
+
+test('production v2 accepts input after starting before the first local host and auth token', {
+  skip: process.platform !== 'darwin'
+    ? 'macOS expect PTY smoke'
+    : false,
+  timeout: 15_000,
+}, async () => {
+  const root = mkdtempSync(join(tmpdir(), 'pinpawo-tui-v2-late-host-'));
+  const workdir = join(root, 'workspace');
+  const home = join(root, 'home');
+  mkdirSync(workdir, { recursive: true });
+  mkdirSync(join(home, '.pinpawo'), { recursive: true });
+  let host: HostProcess | null = null;
+  let tui: ChildProcessWithoutNullStreams | null = null;
+  let tuiExit: ReturnType<typeof processExit> | null = null;
+
+  try {
+    host = await spawnHostProcess({
+      port: 0,
+      workdir,
+      authToken: AUTH_TOKEN,
+    });
+    const hostPort = host.port;
+    await stopHostProcess(host);
+    host = null;
+
+    const expectScript = [
+      'set timeout 10',
+      [
+        'spawn -noecho',
+        JSON.stringify(process.execPath),
+        'run',
+        JSON.stringify(TUI_ENTRY),
+      ].join(' '),
+      'fconfigure $spawn_id -translation binary -encoding binary',
+      // Dismiss the first connection error while retries continue. Recovery
+      // must restore composer focus before the raw Ctrl+O submission below.
+      'after 700',
+      'send -- "\\033"',
+      'expect {',
+      '  -re "process-restart-model" {}',
+      '  timeout { exit 150 }',
+      '  eof { exit 151 }',
+      '}',
+      `send -- [binary format H* ${utf8Hex(PERSISTENT_HOST_INPUT)}]`,
+      'send -- "\\017"',
+      'expect {',
+      `  -exact ${JSON.stringify(PERSISTENT_HOST_REPLY)} {}`,
+      '  timeout { exit 152 }',
+      '  eof { exit 153 }',
+      '}',
+      `send -- [binary format H* ${utf8Hex('/quit')}]`,
+      'send -- "\\017"',
+      'expect {',
+      '  eof {}',
+      '  timeout { exit 154 }',
+      '}',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ].join('\n');
+    tui = spawn('/usr/bin/expect', ['-c', expectScript], {
+      cwd: workdir,
+      env: {
+        ...process.env,
+        HOME: home,
+        LOCAL_SERVER_PORT: String(hostPort),
+        TERM: 'xterm-256color',
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    tui.stdout.setEncoding('utf8');
+    tui.stderr.setEncoding('utf8');
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    tui.stdout.on('data', (chunk: string) => stdout.push(chunk));
+    tui.stderr.on('data', (chunk: string) => stderr.push(chunk));
+    tuiExit = processExit(tui);
+
+    await Bun.sleep(900);
+    writeFileSync(
+      join(home, '.pinpawo', 'local-server-token'),
+      `${AUTH_TOKEN}\n`,
+      { mode: 0o600 },
+    );
+    host = await spawnHostProcess({
+      port: hostPort,
+      workdir,
+      authToken: AUTH_TOKEN,
+    });
+
+    const result = await withTimeout(
+      tuiExit,
+      12_000,
+      'late-host production TUI PTY',
+    );
+    assert.equal(
+      result.error,
+      undefined,
+      `TUI PTY error: ${result.error?.message}`,
+    );
+    assert.equal(
+      result.code,
+      0,
+      [
+        `late-host TUI exited with signal=${result.signal}`,
+        decodeExpectBinaryOutput(stdout.join('')),
+        stderr.join(''),
+      ].join('\n'),
+    );
+  } finally {
+    if (tui && tuiExit) {
+      tui.stdin.end();
+      await terminateProcess(tui, tuiExit, 'late-host TUI PTY cleanup');
+    }
+    if (host) {
+      await stopHostProcess(host);
+    }
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('production v2 preserves an active-run draft across PTY resize', {
+  skip: process.platform !== 'darwin'
+    ? 'macOS expect PTY smoke'
+    : false,
+  timeout: 15_000,
+}, async () => {
+  const root = mkdtempSync(join(tmpdir(), 'pinpawo-tui-v2-resize-'));
+  const workdir = join(root, 'workspace');
+  const home = join(root, 'home');
+  const draft = [
+    '# Draft survives the narrow resize.',
+    '第二行 **仍然** 可以提交 `code` 🙂。',
+  ].join('\n');
+  const draftPaste = `\x1b[200~${draft}\x1b[201~`;
+  mkdirSync(workdir, { recursive: true });
+  mkdirSync(join(home, '.pinpawo'), { recursive: true });
+  writeFileSync(
+    join(home, '.pinpawo', 'local-server-token'),
+    `${AUTH_TOKEN}\n`,
+    { mode: 0o600 },
+  );
+  let host: HostProcess | null = null;
+  let tui: ChildProcessWithoutNullStreams | null = null;
+  let tuiExit: ReturnType<typeof processExit> | null = null;
+
+  try {
+    host = await spawnHostProcess({
+      port: 0,
+      workdir,
+      authToken: AUTH_TOKEN,
+    });
+    const expectScript = [
+      'set timeout 8',
+      'set stty_init "rows 24 columns 80"',
+      [
+        'spawn -noecho',
+        JSON.stringify(process.execPath),
+        'run',
+        JSON.stringify(TUI_ENTRY),
+      ].join(' '),
+      'fconfigure $spawn_id -translation binary -encoding binary',
+      'expect {',
+      '  -re "process-restart-model" {}',
+      '  timeout { exit 171 }',
+      '  eof { exit 172 }',
+      '}',
+      `send -- [binary format H* ${utf8Hex(PERSISTENT_HOST_RESIZE_INPUT)}]`,
+      'send -- "\\017"',
+      'expect {',
+      '  -exact "PinPawo is thinking" {}',
+      '  timeout { exit 173 }',
+      '  eof { exit 174 }',
+      '}',
+      `send -- [binary format H* ${utf8Hex(draftPaste)}]`,
+      'after 80',
+      'exec /bin/stty -f $spawn_out(slave,name) rows 18 columns 44',
+      'after 120',
+      'exec /bin/stty -f $spawn_out(slave,name) rows 28 columns 96',
+      'expect {',
+      `  -exact ${JSON.stringify(PERSISTENT_HOST_RESIZE_REPLY)} {}`,
+      '  timeout { exit 175 }',
+      '  eof { exit 176 }',
+      '}',
+      'send -- "\\017"',
+      'expect {',
+      `  -exact ${JSON.stringify(PERSISTENT_HOST_REPLY)} {}`,
+      '  timeout { exit 177 }',
+      '  eof { exit 178 }',
+      '}',
+      `send -- [binary format H* ${utf8Hex('/quit')}]`,
+      'send -- "\\017"',
+      'expect {',
+      '  eof {}',
+      '  timeout { exit 179 }',
+      '}',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ].join('\n');
+    tui = spawn('/usr/bin/expect', ['-c', expectScript], {
+      cwd: workdir,
+      env: {
+        ...process.env,
+        HOME: home,
+        LOCAL_SERVER_PORT: String(host.port),
+        TERM: 'xterm-256color',
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    tui.stdout.setEncoding('utf8');
+    tui.stderr.setEncoding('utf8');
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    tui.stdout.on('data', (chunk: string) => stdout.push(chunk));
+    tui.stderr.on('data', (chunk: string) => stderr.push(chunk));
+    tuiExit = processExit(tui);
+
+    const result = await withTimeout(
+      tuiExit,
+      12_000,
+      'production TUI PTY resize',
+    );
+    const output = decodeExpectBinaryOutput(stdout.join(''));
+    assert.equal(
+      result.code,
+      0,
+      [
+        `resize TUI PTY failed: signal=${result.signal}`,
+        stderr.join(''),
+        output.slice(-4_000),
+      ].join('\n'),
+    );
+    const searchableOutput = compactTerminalObservation(output);
+    assertOrderedSubstrings(searchableOutput, [
+      compactTerminalObservation(PERSISTENT_HOST_RESIZE_INPUT),
+      compactTerminalObservation('PinPawo is thinking'),
+      compactTerminalObservation(PERSISTENT_HOST_RESIZE_REPLY),
+      compactTerminalObservation(draft),
+      compactTerminalObservation(PERSISTENT_HOST_REPLY),
+    ], 'active-run resize and draft submission');
+  } finally {
+    if (tui && tuiExit) {
+      tui.stdin.end();
+      await terminateProcess(tui, tuiExit, 'resize TUI PTY cleanup');
+    }
+    if (host) {
+      await stopHostProcess(host);
+    }
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('production v2 reconciles a response completed while the pager owns the TTY', {
+  skip: process.platform !== 'darwin'
+    ? 'macOS expect PTY smoke'
+    : false,
+  timeout: 15_000,
+}, async () => {
+  const root = mkdtempSync(join(tmpdir(), 'pinpawo-tui-v2-live-pager-'));
+  const workdir = join(root, 'workspace');
+  const home = join(root, 'home');
+  const pagerScriptPath = join(root, 'blocking-pager.mjs');
+  const pagerSentinelPath = join(root, 'pager-state.txt');
+  mkdirSync(workdir, { recursive: true });
+  mkdirSync(join(home, '.pinpawo'), { recursive: true });
+  writeFileSync(
+    join(home, '.pinpawo', 'local-server-token'),
+    `${AUTH_TOKEN}\n`,
+    { mode: 0o600 },
+  );
+  writeFileSync(pagerScriptPath, [
+    "import { writeFileSync } from 'node:fs';",
+    `const sentinel = ${JSON.stringify(pagerSentinelPath)};`,
+    "writeFileSync(sentinel, 'opened', 'utf8');",
+    'await new Promise((resolve) => setTimeout(resolve, 900));',
+    "writeFileSync(sentinel, 'closed', 'utf8');",
+  ].join('\n'));
+  let host: HostProcess | null = null;
+  let tui: ChildProcessWithoutNullStreams | null = null;
+  let tuiExit: ReturnType<typeof processExit> | null = null;
+
+  try {
+    host = await spawnHostProcess({
+      port: 0,
+      workdir,
+      authToken: AUTH_TOKEN,
+    });
+    const expectScript = [
+      'set timeout 8',
+      [
+        'spawn -noecho',
+        JSON.stringify(process.execPath),
+        'run',
+        JSON.stringify(TUI_ENTRY),
+      ].join(' '),
+      'fconfigure $spawn_id -translation binary -encoding binary',
+      'expect {',
+      '  -re "process-restart-model" {}',
+      '  timeout { exit 180 }',
+      '  eof { exit 181 }',
+      '}',
+      `send -- [binary format H* ${utf8Hex(PERSISTENT_HOST_RESIZE_INPUT)}]`,
+      'send -- "\\017"',
+      'expect {',
+      '  -exact "PinPawo is thinking" {}',
+      '  timeout { exit 182 }',
+      '  eof { exit 183 }',
+      '}',
+      'send -- "\\033\\[5~"',
+      'expect {',
+      '  -exact "transcript closed" {}',
+      '  timeout { exit 184 }',
+      '  eof { exit 185 }',
+      '}',
+      `send -- [binary format H* ${utf8Hex('/quit')}]`,
+      'send -- "\\017"',
+      'expect {',
+      '  eof {}',
+      '  timeout { exit 186 }',
+      '}',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ].join('\n');
+    tui = spawn('/usr/bin/expect', ['-c', expectScript], {
+      cwd: workdir,
+      env: {
+        ...process.env,
+        HOME: home,
+        LOCAL_SERVER_PORT: String(host.port),
+        TERM: 'xterm-256color',
+        PAGER: [
+          JSON.stringify(process.execPath),
+          JSON.stringify(pagerScriptPath),
+        ].join(' '),
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    tui.stdout.setEncoding('utf8');
+    tui.stderr.setEncoding('utf8');
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    tui.stdout.on('data', (chunk: string) => stdout.push(chunk));
+    tui.stderr.on('data', (chunk: string) => stderr.push(chunk));
+    tuiExit = processExit(tui);
+
+    const result = await withTimeout(
+      tuiExit,
+      12_000,
+      'production TUI live pager',
+    );
+    const output = decodeExpectBinaryOutput(stdout.join(''));
+    assert.equal(
+      result.code,
+      0,
+      [
+        `live-pager TUI PTY failed: signal=${result.signal}`,
+        stderr.join(''),
+        output.slice(-4_000),
+      ].join('\n'),
+    );
+    assert.equal(readFileSync(pagerSentinelPath, 'utf8'), 'closed');
+    const searchableOutput = compactTerminalObservation(output);
+    assertOrderedSubstrings(searchableOutput, [
+      compactTerminalObservation(PERSISTENT_HOST_RESIZE_INPUT),
+      compactTerminalObservation('PinPawo is thinking'),
+      compactTerminalObservation(PERSISTENT_HOST_RESIZE_REPLY),
+      compactTerminalObservation('transcript closed'),
+    ], 'response completed during pager handoff');
+  } finally {
+    if (tui && tuiExit) {
+      tui.stdin.end();
+      await terminateProcess(tui, tuiExit, 'live-pager TUI PTY cleanup');
+    }
+    if (host) {
+      await stopHostProcess(host);
+    }
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('production v2 process exercises composer workflows through a real PTY', {
@@ -234,17 +615,22 @@ test('production v2 process exercises composer workflows through a real PTY', {
       `send -- [binary format H* ${utf8Hex(PERSISTENT_HOST_INPUT)}]`,
       'send -- "\\033\\[13;5u"',
       'expect {',
-      `  -exact ${JSON.stringify(PERSISTENT_HOST_REPLY)} {}`,
+      '  -exact "thinking" {}',
       '  timeout { exit 128 }',
       '  eof { exit 129 }',
+      '}',
+      'expect {',
+      `  -exact ${JSON.stringify(PERSISTENT_HOST_REPLY)} {}`,
+      '  timeout { exit 130 }',
+      '  eof { exit 131 }',
       '}',
       'send -- "\\033\\[A"',
       'after 100',
       'send -- "\\033\\[13;5u"',
       'expect {',
       `  -exact ${JSON.stringify(PERSISTENT_HOST_REPLY)} {}`,
-      '  timeout { exit 130 }',
-      '  eof { exit 131 }',
+      '  timeout { exit 132 }',
+      '  eof { exit 133 }',
       '}',
       `send -- [binary format H* ${utf8Hex('Inspect @指南')}]`,
       'after 100',
@@ -254,8 +640,8 @@ test('production v2 process exercises composer workflows through a real PTY', {
       'send -- "\\033\\[13;5u"',
       'expect {',
       `  -exact ${JSON.stringify(PERSISTENT_HOST_MENTION_REPLY)} {}`,
-      '  timeout { exit 132 }',
-      '  eof { exit 133 }',
+      '  timeout { exit 134 }',
+      '  eof { exit 135 }',
       '}',
       `send -- [binary format H* ${utf8Hex('/ed')}]`,
       'after 100',
@@ -265,36 +651,36 @@ test('production v2 process exercises composer workflows through a real PTY', {
       'send -- "\\033\\[13;5u"',
       'expect {',
       '  -exact "external editor draft loaded" {}',
-      '  timeout { exit 134 }',
-      '  eof { exit 135 }',
+      '  timeout { exit 136 }',
+      '  eof { exit 137 }',
       '}',
       'send -- "\\033\\[13;5u"',
       'expect {',
       `  -exact ${JSON.stringify(PERSISTENT_HOST_EDITOR_REPLY)} {}`,
-      '  timeout { exit 136 }',
-      '  eof { exit 137 }',
+      '  timeout { exit 138 }',
+      '  eof { exit 139 }',
       '}',
       `send -- [binary format H* ${utf8Hex(PERSISTENT_HOST_TIMELINE_INPUT)}]`,
       'send -- "\\033\\[13;5u"',
       'expect {',
       '  -exact "is aligned." {}',
-      '  timeout { exit 138 }',
-      '  eof { exit 139 }',
+      '  timeout { exit 140 }',
+      '  eof { exit 141 }',
       '}',
       `send -- [binary format H* ${utf8Hex(PERSISTENT_HOST_REVIEW_INPUT)}]`,
       'send -- "\\033\\[13;5u"',
       'expect {',
       `  -exact ${JSON.stringify(PERSISTENT_HOST_REVIEW_SPEC.view.body)} {}`,
-      '  timeout { exit 140 }',
-      '  eof { exit 141 }',
+      '  timeout { exit 142 }',
+      '  eof { exit 143 }',
       '}',
       `send -- [binary format H* ${utf8Hex('approval-input-must-not-leak')}]`,
       'after 100',
       'send -- "\\033\\[13u"',
       'expect {',
       `  -exact ${JSON.stringify(PERSISTENT_HOST_REVIEW_APPROVED_REPLY)} {}`,
-      '  timeout { exit 142 }',
-      '  eof { exit 143 }',
+      '  timeout { exit 144 }',
+      '  eof { exit 145 }',
       '}',
       `send -- [binary format H* ${utf8Hex('/tra')}]`,
       'after 100',
@@ -303,8 +689,8 @@ test('production v2 process exercises composer workflows through a real PTY', {
       'send -- "\\033\\[13;5u"',
       'expect {',
       '  -exact "transcript closed" {}',
-      '  timeout { exit 144 }',
-      '  eof { exit 145 }',
+      '  timeout { exit 146 }',
+      '  eof { exit 147 }',
       '}',
       `send -- [binary format H* ${utf8Hex('/exp')}]`,
       'after 100',
@@ -321,7 +707,7 @@ test('production v2 process exercises composer workflows through a real PTY', {
       '  }',
       '  after 25',
       '}',
-      'if {!$export_ready} { exit 146 }',
+      'if {!$export_ready} { exit 148 }',
       'after 100',
       `send -- [binary format H* ${utf8Hex('/he')}]`,
       'after 100',
@@ -330,8 +716,8 @@ test('production v2 process exercises composer workflows through a real PTY', {
       'send -- "\\033\\[13;5u"',
       'expect {',
       '  -exact "PgUp/PgDn" {}',
-      '  timeout { exit 147 }',
-      '  eof { exit 148 }',
+      '  timeout { exit 149 }',
+      '  eof { exit 150 }',
       '}',
       'send -- "\\033"',
       'after 100',
@@ -342,7 +728,7 @@ test('production v2 process exercises composer workflows through a real PTY', {
       'send -- "\\033\\[13;5u"',
       'expect {',
       '  eof {}',
-      '  timeout { exit 149 }',
+      '  timeout { exit 151 }',
       '}',
       'set result [wait]',
       'exit [lindex $result 3]',

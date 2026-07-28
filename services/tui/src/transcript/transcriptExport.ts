@@ -5,6 +5,7 @@ import type {
   AgentMessageEntry,
   AgentSession,
 } from '@pinpawo/agent-session';
+import { sessionActorLabel } from '../session/sessionDisplay';
 
 type TranscriptEntry = AgentMessageEntry & {
   role: 'user' | 'assistant';
@@ -67,12 +68,13 @@ export function formatTranscriptMarkdown(
   session: AgentSession,
   exportedAt: Date,
 ) {
+  const actor = sessionActorLabel(session);
   const lines = [
     '# PinPawo TUI Transcript',
     '',
     `- Session: ${session.sessionId}`,
     `- Kind: ${session.kind}`,
-    ...(session.actor?.label ? [`- Actor: ${session.actor.label}`] : []),
+    ...(session.actor?.label ? [`- Actor: ${actor}`] : []),
     `- Exported: ${exportedAt.toISOString()}`,
     '',
     '## Messages',

@@ -3,10 +3,24 @@ import type {
   AgentSession,
   AgentTimelineEntry,
 } from '@pinpawo/agent-session';
+import { sessionActorLabel } from '../session/sessionDisplay';
 import { buildMessageDisplayLines } from './messageDisplay';
 import { buildOperationDisplayLines } from './operationDisplay';
 
 const OPERATION_LINE_PREFIX_WIDTH = 4;
+const LIVE_ACTIVITY_FRAMES = [
+  '⠋',
+  '⠙',
+  '⠹',
+  '⠸',
+  '⠼',
+  '⠴',
+  '⠦',
+  '⠧',
+  '⠇',
+  '⠏',
+] as const;
+export const LIVE_ACTIVITY_PULSE_FRAMES = LIVE_ACTIVITY_FRAMES.length;
 
 export type TimelineDisplayLine = {
   text: string;
@@ -103,7 +117,11 @@ export function formatLiveSession(
   const pending = findLastPendingEntry(session.timeline);
   if (pending) {
     if (pending.type === 'message') {
-      return formatLiveMessageTail(pending, maxCodePoints);
+      return formatLiveMessageTail(
+        pending,
+        maxCodePoints,
+        sessionActorLabel(session),
+      );
     }
     return singleLine(formatTimelineEntry(pending));
   }
@@ -116,11 +134,58 @@ export function formatLiveSession(
   return 'thinking';
 }
 
+export function formatLiveActivity(
+  session: AgentSession,
+  frame = 0,
+  maxCodePoints = 80,
+  longWaiting = false,
+) {
+  const run = session.activeRun;
+  if (!run) return formatLiveSession(session, maxCodePoints);
+  if (run.state === 'waiting_review') return '! waiting for review';
+  if (run.state === 'interrupting') return '◌ stopping response';
+
+  const normalizedFrame = Math.max(0, Math.floor(frame));
+  const marker = normalizedFrame < LIVE_ACTIVITY_PULSE_FRAMES
+    ? LIVE_ACTIVITY_FRAMES[
+        normalizedFrame % LIVE_ACTIVITY_FRAMES.length
+      ]
+    : '·';
+  const detail = formatLiveSession(
+    session,
+    Math.max(1, Math.floor(maxCodePoints) - 2),
+  );
+  const actor = sessionActorLabel(session);
+  switch (detail) {
+    case 'thinking':
+      return `${marker} ${actor} is ${longWaiting ? 'still ' : ''}thinking`;
+    case 'using tool':
+      return `${marker} ${actor} is ${longWaiting ? 'still ' : ''}using a tool`;
+    case 'streaming response':
+      return `${marker} ${actor} is ${longWaiting ? 'still ' : ''}responding`;
+    default:
+      return `${marker} ${detail}`;
+  }
+}
+
+export function isLiveActivityPulseActive(
+  session: AgentSession,
+  frame: number,
+) {
+  return session.activeRun?.state === 'running'
+    && frame < LIVE_ACTIVITY_PULSE_FRAMES;
+}
+
 function formatLiveMessageTail(
   message: Extract<AgentTimelineEntry, { type: 'message' }>,
   maxCodePoints: number,
+  actorLabel: string,
 ) {
-  const label = `${message.role}  `;
+  const label = `${
+    message.role === 'assistant'
+      ? actorLabel
+      : message.role
+  }  `;
   const text = singleLine(message.text);
   const budget = Math.max(1, Math.floor(maxCodePoints) - [...label].length);
   const characters = [...text];

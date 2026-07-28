@@ -93,11 +93,30 @@ test('transcript pager receives a temporary snapshot and cleans it up', async ()
     spawnPager,
   });
 
-  assert.match(pagedContent, /assistant\n\| answer/);
+  assert.match(pagedContent, /Momo\n\| answer/);
   await assert.rejects(
     () => readFile(pagedFile, 'utf8'),
     /ENOENT/,
   );
+});
+
+test('transcript pager keeps an actor label single-line and canonical', () => {
+  const session = createSession([{
+    id: 'a1',
+    type: 'message',
+    role: 'assistant',
+    text: 'answer',
+    status: 'completed',
+  }]);
+  session.actor = {
+    label: ' 豆包\n助手\x1B ',
+    summary: 'Local agent',
+  };
+
+  const content = formatTranscriptPagerText(session);
+  assert.match(content, /Actor: 豆包 ↵ 助手�/);
+  assert.match(content, /豆包 ↵ 助手�\n\| answer/);
+  assert.doesNotMatch(content, /\x1B/);
 });
 
 function createSession(

@@ -26,6 +26,10 @@ import {
 } from './input/composerClipboard';
 import { syncComposerCursorForCommandOverlay } from './input/composerCursor';
 import {
+  ComposerDecorationController,
+  createComposerDecorationStyle,
+} from './input/composerDecorations';
+import {
   createComposerHistoryState,
   navigateComposerHistory,
   recordComposerHistoryEntry,
@@ -69,11 +73,16 @@ import { FileMentionView } from './overlays/fileMentionView';
 import {
   closeNoticeOverlay,
   createNoticeOverlayState,
+  markInterruptNoticePendingTooLong,
   openErrorNotice,
   resolveNoticeOverlayKey,
+  shouldRestoreComposerAfterNoticeSync,
   syncNoticeOverlay,
 } from './overlays/noticeOverlayModel';
 import { NoticeOverlayView } from './overlays/noticeOverlayView';
+import {
+  InterruptPendingNoticeController,
+} from './overlays/interruptPendingNoticeController';
 import {
   beginPolicySave,
   closePolicyPicker,
@@ -100,13 +109,19 @@ import {
 } from './overlays/sessionPickerModel';
 import { SessionPickerView } from './overlays/sessionPickerView';
 import { calculateComposerLayout } from './spike/composerLayout';
-import { installSingleGraphemeBackspaceWorkaround } from './spike/textareaWorkarounds';
+import { installTextareaWorkarounds } from './spike/textareaWorkarounds';
 import {
+  formatComposerPlaceholder,
   formatConnection,
   formatHeader,
   formatStatusLines,
 } from './status/statusModel';
-import { formatLiveSession } from './timeline/timelineModel';
+import {
+  formatLiveActivity,
+} from './timeline/timelineModel';
+import {
+  LiveActivityController,
+} from './timeline/liveActivityController';
 import { TimelineScrollback } from './timeline/timelineScrollback';
 import { truncateTerminalLine } from './text/terminalText';
 import { withRendererSuspended } from './terminal/rendererLifecycle';
@@ -124,6 +139,7 @@ const smokeReview = process.argv.includes('--smoke-review');
 const demoReview = process.argv.includes('--demo-review');
 const smokeCommand = process.argv.includes('--smoke-command');
 const demoCommand = process.argv.includes('--demo-command');
+const demoQa = process.argv.includes('--demo-qa');
 const smokeStudio = process.argv.includes('--smoke-studio');
 const smokePolicy = process.argv.includes('--smoke-policy');
 const smokeEdit = process.argv.includes('--smoke-edit');
@@ -141,7 +157,8 @@ const smoke = process.argv.includes('--smoke')
   || smokeHost;
 const useDemoConnection = (smoke && !smokeHost)
   || demoReview
-  || demoCommand;
+  || demoCommand
+  || demoQa;
 const port = readLocalServerPort();
 const renderer = await createCliRenderer({
   exitOnCtrlC: false,
@@ -225,10 +242,42 @@ let terminalHandoffOpen = false;
 let composerHistory = createComposerHistoryState();
 const controller = new TuiSessionController({
   connectionFactory: useDemoConnection
-    ? createDemoConnectionFactory({ review: smokeReview || demoReview })
+    ? createDemoConnectionFactory({
+        review: smokeReview || demoReview,
+        qa: demoQa,
+      })
     : createLocalHostConnectionFactory({ port }),
 });
+const interruptPendingNoticeController =
+  new InterruptPendingNoticeController({
+    onPendingTooLong: (requestId) => {
+      const run = controller.getState().session.activeRun;
+      if (
+        run?.requestId !== requestId
+        || run.state !== 'interrupting'
+      ) {
+        return;
+      }
+      noticeOverlay = markInterruptNoticePendingTooLong(
+        noticeOverlay,
+        requestId,
+      );
+      refreshNoticeOverlay();
+    },
+  });
 const timeline = new TimelineScrollback(renderer);
+const liveActivityController = new LiveActivityController({
+  onTick: () => {
+    if (!terminalHandoffOpen && live.height > 0) {
+      refreshLive();
+    }
+  },
+  onLongWait: () => {
+    if (!terminalHandoffOpen && live.height > 0) {
+      refreshLive();
+    }
+  },
+});
 const approvalController = new ApprovalController({
   sessionController: controller,
   getWidth: () => renderer.width,
@@ -237,12 +286,14 @@ const approvalController = new ApprovalController({
 const approvalView = new ApprovalView(renderer, {
   onDraftChange: (draft) => approvalController.setDraft(draft),
 });
+const composerDecorationStyle = createComposerDecorationStyle();
 const composer = new TextareaRenderable(renderer, {
   id: 'composer',
   width: '100%',
   height: '100%',
   backgroundColor: RGBA.defaultBackground(),
   focusedBackgroundColor: RGBA.defaultBackground(),
+  syntaxStyle: composerDecorationStyle,
   placeholder: 'Message · Ctrl+Enter or Ctrl+O to send',
   keyBindings: [
     {
@@ -257,21 +308,6 @@ const composer = new TextareaRenderable(renderer, {
     },
   ],
   onSubmit: () => submitComposerInput(),
-  onContentChange: () => {
-    const selectedHistoryText = composerHistory.selectedIndex === null
-      ? undefined
-      : composerHistory.entries[composerHistory.selectedIndex];
-    if (selectedHistoryText !== composer.plainText) {
-      composerHistory = resetComposerHistoryNavigation(composerHistory);
-    }
-    if (!composerNoticeSticky) {
-      localNotice = pendingComposerNotice;
-    }
-    pendingComposerNotice = null;
-    syncComposerInputOverlays();
-    syncComposerLayout();
-    refreshStatus();
-  },
   onCursorChange: () => syncComposerInputOverlays(),
   onPaste: (event: PasteEvent) => {
     const result = handleAttachmentPasteEvent(attachments, event);
@@ -287,8 +323,13 @@ const composer = new TextareaRenderable(renderer, {
     }
   },
 });
-installSingleGraphemeBackspaceWorkaround(composer);
-installSingleGraphemeBackspaceWorkaround(approvalView.input);
+const composerDecorations = new ComposerDecorationController(
+  composer,
+  composerDecorationStyle,
+);
+composer.onContentChange = handleComposerContentChange;
+installTextareaWorkarounds(composer);
+installTextareaWorkarounds(approvalView.input);
 
 root.add(header);
 root.add(live);
@@ -310,16 +351,16 @@ composer.focus();
 syncComposerInputOverlays();
 
 const unsubscribe = controller.subscribe((state) => {
+  liveActivityController.sync(state.session.activeRun);
   if (state.session.sessionId !== focusedSessionId) {
     focusedSessionId = state.session.sessionId;
     composerMode = state.session.kind;
     studioConversationId = null;
-    syncComposerModeUi();
   }
   syncApprovalFromSession();
   syncNoticeFromSession();
   syncComposerInputOverlays();
-  refreshHeader();
+  syncComposerModeUi();
   refreshLive();
   if (state.session.sessionId !== 'pending') {
     timeline.renderWelcome(buildWelcomeLines({
@@ -590,6 +631,8 @@ renderer.on('resize', () => {
   refreshNoticeOverlay();
 });
 renderer.on('destroy', () => {
+  liveActivityController.destroy();
+  interruptPendingNoticeController.destroy();
   sessionPickerGeneration += 1;
   policyPickerGeneration += 1;
   sessionPicker = closeSessionPicker(sessionPicker);
@@ -601,6 +644,8 @@ renderer.on('destroy', () => {
   unsubscribe();
   controller.stop();
   timeline.destroy();
+  composerDecorations.destroy();
+  composerDecorationStyle.destroy();
 });
 
 syncComposerLayout();
@@ -658,17 +703,20 @@ function refreshHeader() {
 }
 
 function syncComposerModeUi() {
-  composer.placeholder = composerMode === 'studio'
-    ? 'Studio task · Ctrl+Enter/Ctrl+O run · /chat to exit'
-    : 'Message · Ctrl+Enter or Ctrl+O to send';
+  composer.placeholder = formatComposerPlaceholder(
+    controller.getState().session,
+    composerMode,
+  );
   refreshHeader();
 }
 
 function refreshLive() {
   live.content = truncateTerminalLine(
-    `live · ${formatLiveSession(
+    `live · ${formatLiveActivity(
       controller.getState().session,
+      liveActivityController.frame,
       Math.max(1, renderer.width - 7),
+      liveActivityController.longWaiting,
     )}`,
     renderer.width,
   );
@@ -761,6 +809,7 @@ function handleFileMentionAction(action: FileMentionAction) {
   if (!completion) return;
   dismissedFileMention = null;
   composer.replaceText(completion.text);
+  composerDecorations.addCompletedFileMention(completion);
   placeComposerCursorAtTextOffset(
     composer,
     completion.text,
@@ -770,12 +819,30 @@ function handleFileMentionAction(action: FileMentionAction) {
   syncComposerLayout();
 }
 
+function handleComposerContentChange() {
+  composerDecorations.scheduleRefresh();
+  const selectedHistoryText = composerHistory.selectedIndex === null
+    ? undefined
+    : composerHistory.entries[composerHistory.selectedIndex];
+  if (selectedHistoryText !== composer.plainText) {
+    composerHistory = resetComposerHistoryNavigation(composerHistory);
+  }
+  if (!composerNoticeSticky) {
+    localNotice = pendingComposerNotice;
+  }
+  pendingComposerNotice = null;
+  syncComposerInputOverlays();
+  syncComposerLayout();
+  refreshStatus();
+}
+
 function syncNoticeFromSession() {
   const previous = noticeOverlay;
   noticeOverlay = syncNoticeOverlay(
     noticeOverlay,
     controller.getState(),
   );
+  interruptPendingNoticeController.sync(noticeOverlay);
   if (noticeOverlay.phase !== 'closed') {
     closeFileMentionOverlay();
     if (commandOverlay.phase !== 'closed') {
@@ -794,11 +861,17 @@ function syncNoticeFromSession() {
     }
     composer.blur();
   } else if (
-    previous.phase === 'interrupting'
+    shouldRestoreComposerAfterNoticeSync(previous, noticeOverlay)
     && !terminalHandoffOpen
     && approvalController.getState().phase === 'closed'
+    && sessionPicker.phase === 'closed'
+    && policyPicker.phase === 'closed'
+    && commandOverlay.phase !== 'help'
   ) {
-    if (localNotice?.startsWith('interrupt requested')) {
+    if (
+      previous.phase === 'interrupting'
+      && localNotice?.startsWith('interrupt requested')
+    ) {
       localNotice = null;
     }
     composer.focus();
@@ -808,7 +881,7 @@ function syncNoticeFromSession() {
 }
 
 function closeNoticeOverlayUi() {
-  noticeOverlay = closeNoticeOverlay();
+  noticeOverlay = closeNoticeOverlay(noticeOverlay);
   refreshNoticeOverlay();
   if (
     !terminalHandoffOpen

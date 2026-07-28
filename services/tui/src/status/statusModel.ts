@@ -5,6 +5,7 @@ import type {
   TuiSessionState,
 } from '../session/sessionController';
 import { formatPolicyMode } from '../overlays/policyPickerModel';
+import { sessionActorLabel } from '../session/sessionDisplay';
 import { truncateTerminalLine } from '../text/terminalText';
 import { TUI_VERSION } from '../version';
 
@@ -99,6 +100,32 @@ export function formatConnection(status: TuiConnectionStatus) {
     case 'error':
       return 'error';
   }
+}
+
+export function formatComposerPlaceholder(
+  session: AgentSession,
+  composerMode: AgentSession['kind'] = session.kind,
+) {
+  const actor = sessionActorLabel(session);
+  const run = session.activeRun;
+  if (run?.state === 'waiting_review') {
+    return 'Review required · use the approval panel';
+  }
+  if (run?.state === 'interrupting') {
+    return 'Stopping response…';
+  }
+  if (run?.activity === 'using_tool') {
+    return `${actor} is using a tool · draft next message · Esc interrupt`;
+  }
+  if (run?.activity === 'streaming') {
+    return `${actor} is responding · draft next message · Esc interrupt`;
+  }
+  if (run) {
+    return `Waiting for ${actor} · draft next message · Esc interrupt`;
+  }
+  return composerMode === 'studio'
+    ? 'Studio task · Ctrl+Enter/Ctrl+O run · /chat to exit'
+    : 'Message · Ctrl+Enter or Ctrl+O to send';
 }
 
 export function formatUsage(session: AgentSession) {

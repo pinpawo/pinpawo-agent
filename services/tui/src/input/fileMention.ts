@@ -34,6 +34,14 @@ export type FileMentionInput = {
   cursorOffset: number;
 };
 
+export type FileMentionCompletion = FileMentionInput & {
+  mention: {
+    start: number;
+    end: number;
+    path: string;
+  };
+};
+
 const DEFAULT_LIMIT = 6;
 const IGNORED_DIRECTORIES = new Set([
   '.git',
@@ -90,11 +98,12 @@ export function moveFileMentionSelection(
 export function completeFileMention(
   input: FileMentionInput,
   state: FileMentionState,
-): FileMentionInput | null {
+): FileMentionCompletion | null {
   if (state.phase !== 'open') return null;
   const item = state.items[state.selectedIndex];
   if (!item) return null;
-  const replacement = `@${item.path}${item.type === 'file' ? ' ' : ''}`;
+  const mentionText = `@${item.path}`;
+  const replacement = `${mentionText}${item.type === 'file' ? ' ' : ''}`;
   return {
     text: [
       input.text.slice(0, state.replacementStart),
@@ -102,6 +111,11 @@ export function completeFileMention(
       input.text.slice(state.replacementEnd),
     ].join(''),
     cursorOffset: state.replacementStart + replacement.length,
+    mention: {
+      start: state.replacementStart,
+      end: state.replacementStart + mentionText.length,
+      path: item.path,
+    },
   };
 }
 

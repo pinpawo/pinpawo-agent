@@ -17,7 +17,11 @@ test('local agent CLI passes tui options to the handler', async () => {
 
 test('local agent CLI launches OpenTUI v2 without invoking the legacy handler', async () => {
   let legacyCalls = 0;
-  let received: { workdir?: string; check: boolean } | null = null;
+  let received: {
+    workdir?: string;
+    check: boolean;
+    qa: boolean;
+  } | null = null;
   const program = createLocalAgentCli({
     runTui: () => {
       legacyCalls += 1;
@@ -40,14 +44,23 @@ test('local agent CLI launches OpenTUI v2 without invoking the legacy handler', 
   assert.deepEqual(received, {
     workdir: '/tmp/pinpawo-tui-v2-workdir',
     check: false,
+    qa: false,
   });
 });
 
 test('local agent CLI exposes a non-interactive OpenTUI v2 installation check', async () => {
-  let received: { workdir?: string; check: boolean } | null = null;
+  let received: {
+    workdir?: string;
+    check: boolean;
+    qa: boolean;
+  } | null = null;
   const handlers = {
     runTui: () => undefined,
-    runTuiV2: (options: { workdir?: string; check: boolean }) => {
+    runTuiV2: (options: {
+      workdir?: string;
+      check: boolean;
+      qa: boolean;
+    }) => {
       received = options;
     },
   };
@@ -62,6 +75,7 @@ test('local agent CLI exposes a non-interactive OpenTUI v2 installation check', 
   assert.deepEqual(received, {
     workdir: undefined,
     check: true,
+    qa: false,
   });
 
   await assert.rejects(
@@ -72,6 +86,60 @@ test('local agent CLI exposes a non-interactive OpenTUI v2 installation check', 
       '--check',
     ]),
     /--check requires.*--v2/,
+  );
+});
+
+test('local agent CLI exposes the packaged v2 terminal QA scenario', async () => {
+  let received: {
+    workdir?: string;
+    check: boolean;
+    qa: boolean;
+  } | null = null;
+  const handlers = {
+    runTui: () => undefined,
+    runTuiV2: (options: {
+      workdir?: string;
+      check: boolean;
+      qa: boolean;
+    }) => {
+      received = options;
+    },
+  };
+
+  await createLocalAgentCli(handlers).parseAsync([
+    'node',
+    'pinpawo',
+    'tui',
+    '--v2',
+    '--qa',
+    '--workdir',
+    '/tmp/pinpawo-tui-qa',
+  ]);
+  assert.deepEqual(received, {
+    workdir: '/tmp/pinpawo-tui-qa',
+    check: false,
+    qa: true,
+  });
+
+  await assert.rejects(
+    createLocalAgentCli(handlers).parseAsync([
+      'node',
+      'pinpawo',
+      'tui',
+      '--qa',
+    ]),
+    /--qa requires.*--v2/,
+  );
+  await assert.rejects(
+    createLocalAgentCli(handlers).parseAsync([
+      'node',
+      'pinpawo',
+      'tui',
+      '--v2',
+      '--qa',
+      '--check',
+    ]),
+    /either --check or --qa/,
   );
 });
 

@@ -1,12 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import stringWidth from 'string-width';
-import type { AgentTimelineEntry } from '@pinpawo/agent-session';
+import type {
+  AgentSession,
+  AgentTimelineEntry,
+} from '@pinpawo/agent-session';
 import {
   countSettledTimelinePrefix,
+  formatLiveActivity,
   formatLiveSession,
   formatTimelineEntry,
   isSettledTimelineEntry,
+  isLiveActivityPulseActive,
 } from './timelineModel';
 import {
   findFirstUncommittedEntry,
@@ -146,7 +151,7 @@ test('timeline formatting exposes apply_patch details without wrapper markers', 
 });
 
 test('live timeline shows the newest streaming tail within its footer budget', () => {
-  assert.equal(formatLiveSession({
+  const session: AgentSession = {
     sessionId: 'session',
     kind: 'chat',
     timeline: [{
@@ -159,7 +164,89 @@ test('live timeline shows the newest streaming tail within its footer budget', (
       state: 'running',
       activity: 'streaming',
     },
-  }, 20), 'assistant  …stuvwxyz');
+  };
+  assert.equal(formatLiveSession(session, 20), 'PinPawo  …qrstuvwxyz');
+  assert.equal(formatLiveActivity(session, 0, 20), '⠋ PinPawo  …stuvwxyz');
+  assert.equal(formatLiveActivity(session, 1, 20), '⠙ PinPawo  …stuvwxyz');
+  assert.equal(formatLiveActivity(session, 10, 20), '· PinPawo  …stuvwxyz');
+  assert.equal(
+    formatLiveActivity({
+      ...session,
+      actor: {
+        label: '豆包',
+        summary: 'Local helper',
+      },
+    }, 0, 20),
+    '⠋ 豆包  …nopqrstuvwxyz',
+  );
+});
+
+test('live activity distinguishes progress from paused and stopping runs', () => {
+  const session: AgentSession = {
+    sessionId: 'session',
+    kind: 'chat',
+    timeline: [],
+    activeRun: {
+      requestId: 'request',
+      state: 'running',
+      activity: 'thinking',
+    },
+  };
+  assert.equal(
+    formatLiveActivity(session, 0),
+    '⠋ PinPawo is thinking',
+  );
+  assert.equal(
+    formatLiveActivity(session, 10, 80, true),
+    '· PinPawo is still thinking',
+  );
+  assert.equal(
+    formatLiveActivity({
+      ...session,
+      actor: {
+        label: '豆包',
+        summary: 'Local helper',
+      },
+    }, 1),
+    '⠙ 豆包 is thinking',
+  );
+  assert.equal(isLiveActivityPulseActive(session, 9), true);
+  assert.equal(isLiveActivityPulseActive(session, 10), false);
+  assert.equal(
+    formatLiveActivity({
+      ...session,
+      activeRun: {
+        requestId: 'request',
+        state: 'waiting_review',
+        reviewAction: {
+          actionId: 'review-action',
+          reviews: [],
+        },
+      },
+    }),
+    '! waiting for review',
+  );
+  assert.equal(isLiveActivityPulseActive({
+    ...session,
+    activeRun: {
+      requestId: 'request',
+      state: 'waiting_review',
+      reviewAction: {
+        actionId: 'review-action',
+        reviews: [],
+      },
+    },
+  }, 0), false);
+  assert.equal(
+    formatLiveActivity({
+      ...session,
+      activeRun: {
+        requestId: 'request',
+        state: 'interrupting',
+      },
+    }),
+    '◌ stopping response',
+  );
 });
 
 test('scrollback reconciliation tolerates snapshot IDs and omitted live operations', () => {

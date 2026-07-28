@@ -51,7 +51,7 @@ export function wrapTerminalText(
   return result;
 }
 
-function normalizeTerminalLine(value: string) {
+export function normalizeTerminalLine(value: string) {
   return value
     .replace(/\r\n?|\n/g, ' ↵ ')
     .replace(/\t/g, '  ')

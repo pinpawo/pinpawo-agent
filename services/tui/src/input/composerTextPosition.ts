@@ -22,13 +22,21 @@ export function placeComposerCursorAtTextOffset(
   text: string,
   offset: number,
 ) {
+  const position = composerPositionAtTextOffset(text, offset);
+  editor.setCursor(position.row, position.column);
+}
+
+export function composerPositionAtTextOffset(
+  text: string,
+  offset: number,
+) {
   const prefix = text.slice(
     0,
     Math.max(0, Math.min(offset, text.length)),
   );
   const lines = prefix.split('\n');
-  editor.setCursor(
-    lines.length - 1,
-    stringWidth(lines.at(-1) ?? ''),
-  );
+  return {
+    row: lines.length - 1,
+    column: stringWidth(lines.at(-1) ?? ''),
+  };
 }

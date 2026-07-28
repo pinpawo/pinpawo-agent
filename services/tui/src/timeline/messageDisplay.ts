@@ -1,4 +1,5 @@
 import type { AgentMessageEntry } from '@pinpawo/agent-session';
+import { normalizeAgentLabel } from '../session/sessionDisplay';
 import { normalizeAssistantMessageMarkdown } from '../text/messageMarkdown';
 import { formatSubagentMessage } from './subagentDisplay';
 
@@ -19,6 +20,7 @@ export function buildMessageDisplayLines(
   entry: AgentMessageEntry,
   actorLabel = 'assistant',
 ): MessageDisplayLine[] {
+  const safeActorLabel = normalizeAgentLabel(actorLabel, 'assistant');
   const timestamp = entry.updatedAt ?? entry.createdAt;
   const timestampLabel = timestamp
     ? `[${formatMessageTimestamp(timestamp)}]`
@@ -42,7 +44,7 @@ export function buildMessageDisplayLines(
       }))];
     case 'assistant':
       return [{
-        text: joinLabel(timestampLabel, actorLabel),
+        text: joinLabel(timestampLabel, safeActorLabel),
         tone: 'assistant-label',
       }, ...logicalLines(
         normalizeAssistantMessageMarkdown(entry.text),

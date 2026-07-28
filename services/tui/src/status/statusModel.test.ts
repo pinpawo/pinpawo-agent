@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { TuiSessionState } from '../session/sessionController';
 import {
+  formatComposerPlaceholder,
   formatHeader,
   formatStatusLine,
   formatStatusLines,
@@ -61,4 +62,77 @@ test('status model renders connection, model, token usage, context, and compact 
     'interrupt requested',
     'in/out: 20,000/3,000',
   ]);
+});
+
+test('composer placeholder acknowledges active work without blocking drafting', () => {
+  const session: TuiSessionState['session'] = {
+    sessionId: 'chat:one',
+    kind: 'chat',
+    timeline: [],
+    activeRun: null,
+  };
+
+  assert.equal(
+    formatComposerPlaceholder(session),
+    'Message · Ctrl+Enter or Ctrl+O to send',
+  );
+  assert.equal(
+    formatComposerPlaceholder(session, 'studio'),
+    'Studio task · Ctrl+Enter/Ctrl+O run · /chat to exit',
+  );
+  assert.equal(
+    formatComposerPlaceholder({
+      ...session,
+      activeRun: {
+        requestId: 'request',
+        state: 'running',
+        activity: 'thinking',
+      },
+    }),
+    'Waiting for PinPawo · draft next message · Esc interrupt',
+  );
+  assert.equal(
+    formatComposerPlaceholder({
+      ...session,
+      actor: {
+        label: ' 豆包\n助手 ',
+        summary: 'Local helper',
+      },
+      activeRun: {
+        requestId: 'request',
+        state: 'running',
+        activity: 'using_tool',
+      },
+    }),
+    '豆包 ↵ 助手 is using a tool · draft next message · Esc interrupt',
+  );
+  assert.equal(
+    formatComposerPlaceholder({
+      ...session,
+      actor: {
+        label: '豆包',
+        summary: 'Local helper',
+      },
+      activeRun: {
+        requestId: 'request',
+        state: 'running',
+        activity: 'streaming',
+      },
+    }),
+    '豆包 is responding · draft next message · Esc interrupt',
+  );
+  assert.equal(
+    formatComposerPlaceholder({
+      ...session,
+      activeRun: {
+        requestId: 'request',
+        state: 'waiting_review',
+        reviewAction: {
+          actionId: 'review-action',
+          reviews: [],
+        },
+      },
+    }),
+    'Review required · use the approval panel',
+  );
 });

@@ -15,12 +15,17 @@ test('interrupt and error notices remain bounded across resize', async () => {
     view.render({
       phase: 'interrupting',
       requestId: 'run-1',
+      pendingTooLong: false,
     }, 60);
     await setup.renderOnce();
     expect(setup.captureCharFrame().trimEnd().split('\n')).toHaveLength(9);
 
     setup.resize(28, 18);
-    view.render(openError(), 28);
+    view.render({
+      phase: 'interrupting',
+      requestId: 'run-1',
+      pendingTooLong: true,
+    }, 28);
     await setup.renderOnce();
     const frame = setup.captureCharFrame();
     const lines = frame.trimEnd().split('\n');
@@ -28,6 +33,10 @@ test('interrupt and error notices remain bounded across resize', async () => {
     for (const line of lines) {
       expect(Bun.stringWidth(line)).toBeLessThanOrEqual(28);
     }
+
+    view.render(openError(), 28);
+    await setup.renderOnce();
+    expect(setup.captureCharFrame()).toContain('Error');
   } finally {
     setup.renderer.destroy();
   }

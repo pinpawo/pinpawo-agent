@@ -6,6 +6,7 @@ on:
       - '.github/workflows/tui-v2-install-smoke.yml'
       - 'package.json'
       - 'package-lock.json'
+      - 'packages/agent-session/**'
       - 'packages/pet-agent/**'
       - 'services/local-agent/**'
       - 'services/tui/**'
@@ -16,6 +17,7 @@ on:
       - '.github/workflows/tui-v2-install-smoke.yml'
       - 'package.json'
       - 'package-lock.json'
+      - 'packages/agent-session/**'
       - 'packages/pet-agent/**'
       - 'services/local-agent/**'
       - 'services/tui/**'
@@ -46,5 +48,7 @@ jobs:
           cache: npm
       - name: Install workspace dependencies
         run: npm ci
+      - name: Typecheck TUI v2
+        run: npm run typecheck -w @pinpawo/tui
       - name: Pack, install, and check TUI v2
         run: npm run test:tui-install -w pinpawo

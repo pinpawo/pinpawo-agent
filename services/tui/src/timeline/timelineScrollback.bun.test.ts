@@ -47,7 +47,9 @@ test('streaming timeline commits stable rows incrementally and finalizes once', 
       .join('');
     assert.equal(
       committedText.replaceAll(/\s/g, ''),
-      formatTimelineEntry(completed).replaceAll(/\s/g, ''),
+      formatTimelineEntry(completed, {
+        actorLabel: 'PinPawo',
+      }).replaceAll(/\s/g, ''),
     );
     timeline.render(session([completed]));
     assert.deepEqual(setup.externalOutput.take(), []);
@@ -81,7 +83,7 @@ test('completed assistant markdown renders rich blocks without source markers', 
     ].join('\n'), 'completed')]));
 
     const text = setup.cellOutput.takeText();
-    assert.match(text, /^assistant\n\| Result/m);
+    assert.match(text, /^PinPawo\n\| Result/m);
     assert.match(text, /Use bold and docs \(https:\/\/example\.com\)\./);
     assert.match(text, /- first/);
     assert.match(text, /quoted/);
@@ -118,7 +120,7 @@ test('streaming markdown keeps a mutable table out of committed scrollback', asy
       '| mode | initial |',
     ].join('\n'), 'streaming');
     timeline.render(session([streaming], 'request-1'));
-    assert.equal(setup.cellOutput.takeText(), 'assistant');
+    assert.equal(setup.cellOutput.takeText(), 'PinPawo');
 
     const grown = {
       ...streaming,
@@ -135,7 +137,7 @@ test('streaming markdown keeps a mutable table out of committed scrollback', asy
     assert.match(completed, /Key\s+Value/);
     assert.match(completed, /mode\s+initial/);
     assert.match(completed, /detail\s+a wider value/);
-    assert.doesNotMatch(completed, /^assistant$/m);
+    assert.doesNotMatch(completed, /^PinPawo$/m);
   } finally {
     timeline.destroy();
     setup.renderer.destroy();
@@ -292,7 +294,7 @@ test('long sessions use bounded native scrollback commits', async () => {
   }
 });
 
-test('a new submitted turn advances native scrollback after prior history', async () => {
+test('a new submitted turn commits its user row after prior history', async () => {
   const setup = await createTimelineRenderer(80);
   const timeline = new TimelineScrollback(setup.renderer);
   try {

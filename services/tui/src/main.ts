@@ -9,10 +9,9 @@ import {
 import type { AgentLocalAttachment } from '@pinpawo/agent-session';
 import {
   formatAttachmentStrip,
-  mergeAttachments,
   removeLastAttachment,
 } from './attachments/attachmentModel';
-import { ingestLocalPathPaste } from './attachments/localPathIngestion';
+import { handleAttachmentPasteEvent } from './attachments/attachmentPaste';
 import {
   createLocalHostConnectionFactory,
   readLocalServerPort,
@@ -123,13 +122,20 @@ const smokeStudio = process.argv.includes('--smoke-studio');
 const smokePolicy = process.argv.includes('--smoke-policy');
 const smokeEdit = process.argv.includes('--smoke-edit');
 const smokeTranscript = process.argv.includes('--smoke-transcript');
+const smokeHostReady = process.argv.includes('--smoke-host');
+const smokeHostChat = process.argv.includes('--smoke-host-chat');
+const smokeHost = smokeHostReady || smokeHostChat;
 const smoke = process.argv.includes('--smoke')
   || smokeReview
   || smokeCommand
   || smokeStudio
   || smokePolicy
   || smokeEdit
-  || smokeTranscript;
+  || smokeTranscript
+  || smokeHost;
+const useDemoConnection = (smoke && !smokeHost)
+  || demoReview
+  || demoCommand;
 const port = readLocalServerPort();
 const renderer = await createCliRenderer({
   exitOnCtrlC: false,
@@ -208,10 +214,11 @@ let policySmokeStarted = false;
 let policySmokeFinished = false;
 let editSmokeStarted = false;
 let transcriptSmokeStarted = false;
+let hostSmokeFinished = false;
 let terminalHandoffOpen = false;
 let composerHistory = createComposerHistoryState();
 const controller = new TuiSessionController({
-  connectionFactory: smoke || demoReview || demoCommand || smokeStudio
+  connectionFactory: useDemoConnection
     ? createDemoConnectionFactory({ review: smokeReview || demoReview })
     : createLocalHostConnectionFactory({ port }),
 });
@@ -254,26 +261,16 @@ const composer = new TextareaRenderable(renderer, {
   },
   onCursorChange: () => syncComposerInputOverlays(),
   onPaste: (event: PasteEvent) => {
-    const input = new TextDecoder().decode(event.bytes);
-    const result = ingestLocalPathPaste(input, {
-      existingPaths: new Set(attachments.map((attachment) => attachment.path)),
-    });
-    if (result.kind === 'attachments') {
-      event.preventDefault();
-      const previousCount = attachments.length;
-      attachments = mergeAttachments(attachments, result.attachments);
-      const addedCount = attachments.length - previousCount;
-      localNotice = attachmentIngestionNotice(
-        addedCount,
-        result.duplicateCount,
-        result.attachments.length - addedCount,
-      );
+    const result = handleAttachmentPasteEvent(attachments, event);
+    attachments = result.attachments;
+    if (result.handled) {
+      localNotice = result.notice;
       refreshHeader();
       syncComposerInputOverlays();
       syncComposerLayout();
       refreshStatus();
-    } else if (result.pathLike) {
-      pendingComposerNotice = `${result.issue}; inserted as text`;
+    } else if (result.pendingNotice) {
+      pendingComposerNotice = result.pendingNotice;
     }
   },
 });
@@ -373,6 +370,25 @@ const unsubscribe = controller.subscribe((state) => {
   ) {
     transcriptSmokeStarted = true;
     queueMicrotask(() => submitComposerInput('/transcript'));
+  } else if (
+    smokeHostReady
+    && !hostSmokeFinished
+    && state.connection === 'ready'
+  ) {
+    hostSmokeFinished = true;
+    setTimeout(() => renderer.destroy(), 50);
+  } else if (
+    smokeHostChat
+    && !hostSmokeFinished
+    && state.session.activeRun === null
+    && state.session.timeline.some((entry) => (
+      entry.type === 'message'
+      && entry.role === 'assistant'
+      && entry.status === 'completed'
+    ))
+  ) {
+    hostSmokeFinished = true;
+    setTimeout(() => renderer.destroy(), 50);
   }
 });
 renderer.keyInput.on('keypress', (key) => {
@@ -588,6 +604,7 @@ if (smokeCommand) {
   });
 } else if (
   smoke
+  && !smokeHost
   && !smokeStudio
   && !smokePolicy
   && !smokeEdit
@@ -1488,24 +1505,6 @@ function releaseStickyComposerNotice() {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
-}
-
-function attachmentIngestionNotice(
-  added: number,
-  duplicates: number,
-  overLimit: number,
-) {
-  if (added === 0 && overLimit > 0) {
-    return 'attachment limit reached';
-  }
-  if (added === 0 && duplicates > 0) {
-    return 'attachment already added';
-  }
-  return [
-    `attached ${added} local path${added === 1 ? '' : 's'}`,
-    ...(duplicates > 0 ? [`skipped ${duplicates} duplicate${duplicates === 1 ? '' : 's'}`] : []),
-    ...(overLimit > 0 ? [`skipped ${overLimit} over limit`] : []),
-  ].join(' · ');
 }
 
 function submitFailureText(reason: 'not-ready' | 'busy' | 'empty' | 'send-failed') {

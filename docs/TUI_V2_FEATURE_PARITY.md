@@ -22,8 +22,8 @@ Status meanings:
 
 | Area | Capability | Status | Remaining work |
 | --- | --- | --- | --- |
-| host | authenticated local WebSocket, snapshot bootstrap, reconnect | aligned | production handler/runtime and independent-process restart coverage are complete; full CLI/supervisor dogfood remains |
-| chat | submit a message through the shared protocol | aligned | production handler-chain smoke is complete; sustained live-LLM dogfood remains |
+| host | authenticated local WebSocket, snapshot bootstrap, reconnect | aligned | the real v2 process reaches an authenticated host through a macOS PTY, and independent host processes restore a non-empty FileSaver checkpoint and continue the same session; full `pinpawo run` browser-runtime dogfood remains |
+| chat | submit a message through the shared protocol | aligned | a real PTY drives composer text and Kitty `Ctrl+Enter` through the production host, then rehydrates that turn after host restart; sustained live-LLM dogfood remains |
 | chat | canonical message/operation/subagent ordering | aligned | richer rendering below |
 | timeline | streaming assistant response on a live surface | aligned | real-host Markdown delta dogfood |
 | timeline | running/updated tool operation appears before completion | aligned | current branch adds an atomic live operation surface |
@@ -38,11 +38,11 @@ Status meanings:
 | composer | prompt history with draft restoration | aligned | manual cross-terminal verification |
 | composer | slash commands and command/help palette | aligned | production workflow dogfood |
 | composer | workspace `@path` completion | aligned | production workflow dogfood |
-| attachments | quoted, escaped, `file://`, and multiple local paths | partial | complete production multi-path drag-in retest |
+| attachments | quoted, escaped, `file://`, and multiple local paths | aligned | production OpenTUI paste handling now separates multiple paths into attachments while preserving ordinary multiline paste; cross-terminal drag-in matrix remains |
 | attachments | removable structured attachment chips and submit | aligned | production host integration proves full paths reach model context without eager content reads while terminal/checkpoint text remains filename-only; live tool dogfood remains |
 | review | approval, rejection, text response, batching, cancellation | aligned | production handler-chain approval and cancel-to-reject resume are covered; live guarded-tool dogfood remains |
-| session | new session and resume picker | aligned | production handler-chain new/list/resume and native scrollback boundaries are covered; real checkpoint dogfood remains |
-| runtime | interrupt, error notice, review policy | aligned | production interruption, graph-failure recovery, and process-level host restart are covered; full CLI/supervisor dogfood remains |
+| session | new session and resume picker | aligned | production handler-chain new/list/resume, native scrollback boundaries, and non-empty checkpoint recovery across host processes are covered; live checkpoint dogfood remains |
+| runtime | interrupt, error notice, review policy | aligned | production interruption, graph-failure recovery, immediate stop wake-up, and process-level host restart are covered; full CLI/browser-runtime dogfood remains |
 | status | two-line run/model/workspace/token/context status | aligned | narrow-terminal dogfood |
 | transcript | pager handoff and Markdown export | aligned | production pager/editor combinations |
 | editor | `$VISUAL`/`$EDITOR` handoff and draft restore | aligned | production editor combinations |
@@ -64,7 +64,8 @@ Status meanings:
 3. Dogfood approval against a live guarded tool. Deterministic production-host
    coverage now includes approval, cancel-to-reject resume, interruption
    (including partial-stream settlement), reconnect across independent host
-   processes, new, list, resume, and native scrollback session boundaries.
+   processes with non-empty FileSaver history, new, list, resume, and native
+   scrollback session boundaries.
 4. Dogfood structured attachments with real local tools. The deterministic
    production-host integration already proves full paths reach model context,
    contents are not eagerly read, and terminal/checkpoint text remains

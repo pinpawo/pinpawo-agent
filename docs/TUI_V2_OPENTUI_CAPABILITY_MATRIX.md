@@ -37,11 +37,14 @@ The probe covers:
 | local-agent host integration | production session, chat adapter, inflight operation, snapshot, and authenticated WebSocket handlers drive chat submission, operation/subagent/delta/completion events, completion rehydration, and duplicate-free native scrollback | Bun native integration test |
 | local-agent reconnect integration | a transport termination triggers v2 backoff/reconnect and checkpoint rehydration; live-only operation/subagent state is intentionally omitted while committed terminal rows are not replayed | Bun native integration test |
 | local attachment host boundary | structured local attachments traverse the authenticated production protocol with full paths available only to model context, no eager file-content read, and filename-only terminal/checkpoint text before and after reconnect | Bun native integration test |
+| production multi-path paste | the production attachment reducer and OpenTUI paste callback separate quoted multi-path input into distinct attachments, keep path text out of the composer, preserve ordinary multiline paste, and report duplicates/protocol limits | unit + Bun native test |
 | production session switching | v2 new/list/resume commands traverse the authenticated host, preserve per-thread checkpoints and active-session metadata, avoid replay on an empty new session, and deliberately recommit resumed history at a native scrollback session boundary | Bun native integration test |
 | production interruption | a v2 interrupt traverses the authenticated host, aborts the graph signal, settles partial assistant output, appends the terminal notice in canonical order, and releases native scrollback for later rows | shared projection unit + Bun native integration test |
 | production review resolution | canonical review interrupts reach v2 as waiting-review state; approval and cancel-to-reject decisions traverse the authenticated host, resume the same graph thread, clear the checkpointed interrupt, complete the assistant response, and release native scrollback | Bun native integration test |
 | production failure recovery | a graph failure after assistant delta settles the partial message, appends the canonical error in order, releases the active run, and permits the next authenticated host request to complete normally | shared projection unit + Bun native integration test |
-| production process restart | the local HTTP/WebSocket transport exposes an idempotent close lifecycle; two independent Bun host processes reuse one port and state root while v2 reconnects and preserves the active session ID | local-agent lifecycle unit + Bun child-process integration test |
+| production runtime stop | `requestStop()` aborts the runtime's keepalive wait immediately instead of delaying shutdown by the configured polling interval | local-agent lifecycle unit |
+| production process restart | the local HTTP/WebSocket transport exposes an idempotent close lifecycle; two independent Bun host processes reuse one port and production FileSaver state while v2 reconnects, restores non-empty history/token usage, and continues the same session | local-agent lifecycle unit + Bun child-process integration test |
+| production TUI process entry | the real `main.ts --smoke-host-chat` process runs inside an expect-managed macOS PTY, authenticates to an independent production host, applies its snapshot, accepts composer text plus a Kitty `Ctrl+Enter` sequence, projects the completed turn, exits cleanly, and leaves a checkpoint that a restarted host rehydrates with token usage | Bun child-process PTY integration test |
 | canonical timeline order | message/operation/message order is retained | automated test |
 | operation raw payload | shared projection retains transient raw data | automated test |
 | live ordered operation tail | running/updated operations remain visible with later subagent/message rows on one transient surface, then commit atomically in canonical order | Bun native test |
@@ -85,10 +88,10 @@ The probe covers:
 | fixed-footer composer layout | composer grows from 3–5 visible rows without changing terminal footer height | automated test |
 | native textarea regression | multiline paste and single-grapheme backspace preserve line boundaries | Bun native test |
 | TypeScript | `npm run typecheck -w @pinpawo/tui` | passed |
-| unit tests | `npm run test -w @pinpawo/tui` | passed, 119 tests |
-| native tests | `npm run test:native -w @pinpawo/tui` | passed, 22 tests including file-mention resize/wide-character cursor mapping, policy/command/help/notice, approval/resume resize, textarea editing/history shortcuts, 10 real ScrollbackSurface tests, a production handler vertical slice, and an independent-process restart |
-| focused host integration | `npm run test:host -w @pinpawo/tui` | passed; attachment boundaries, ordered chat completion, reconnect, new/list/resume, interruption, approval, cancel-to-reject, graph failure, next-turn recovery, and process restart traverse production handlers |
-| focused process restart | `npm run test:process -w @pinpawo/tui` | passed; the first production host process exits cleanly, the second binds the same port/state root, and v2 rehydrates the same session ID |
+| unit tests | `npm run test -w @pinpawo/tui` | passed, 121 tests |
+| native tests | `npm run test:native -w @pinpawo/tui` | passed, 25 tests including production multi-path paste, process failure cleanup, a real production-host PTY entry, file-mention resize/wide-character cursor mapping, policy/command/help/notice, approval/resume resize, textarea editing/history shortcuts, 10 real ScrollbackSurface tests, a production handler vertical slice, and an independent-process restart |
+| focused host integration | `npm run test:host -w @pinpawo/tui` | passed; attachment boundaries, ordered chat completion, reconnect, new/list/resume, interruption, approval, cancel-to-reject, graph failure, next-turn recovery, process restart, and the real TUI PTY entry traverse production handlers |
+| focused process lifecycle | `npm run test:process -w @pinpawo/tui` | passed; production hosts checkpoint, restore, and continue turns; the real PTY composer submits a persisted turn that survives host restart; and spawn failures settle without hanging |
 | alternate-screen PTY startup | `npm run smoke -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | split-footer PTY startup | `npm run smoke:split -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | Studio PTY flow | `npm run smoke:studio -w @pinpawo/tui` | passed; user/progress/final rows committed in order and terminal state restored |
@@ -97,7 +100,7 @@ The probe covers:
 | transcript pager PTY flow | `npm run smoke:transcript -w @pinpawo/tui` plus interactive `less` | passed; full ordered timeline is readable, `q` exits, split footer resumes, and terminal state is restored |
 | standalone executable | `npm run build -w @pinpawo/tui` | passed for darwin-arm64; normal and approval compiled PTY smokes passed |
 | root typecheck | `npm run typecheck` | passed |
-| root tests | `npm test` | passed, including local-agent 773/773 and Chrome extension 22/22 |
+| root tests | `npm test` | passed, including local-agent 775/775 and Chrome extension 22/22 |
 | root build | `npm run build` | passed |
 | CLI package dry-run | `npm run pack:dry -w pinpawo` | passed; `dist/tui/main.js` and its manifest are included |
 | installed tarball v2 startup | install the generated `pinpawo` tarball in an empty project and run `pinpawo tui --v2` | passed on darwin-arm64 with package-local Bun/OpenTUI runtime |

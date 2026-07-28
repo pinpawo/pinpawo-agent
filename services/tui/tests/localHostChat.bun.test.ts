@@ -574,6 +574,10 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
       'Found transport evidence.',
       'The host transport is aligned.',
     ]);
+    // The final response also schedules OpenTUI's asynchronous Markdown
+    // highlighting. Let it settle before destroying the shared renderer/tree
+    // sitter client so native test files cannot race its fallback callback.
+    await Bun.sleep(200);
     assert.equal(chatRequestCount, 6);
     assert.equal(graphFixture.streamCount(), 8);
   } finally {

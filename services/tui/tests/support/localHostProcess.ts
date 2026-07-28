@@ -14,7 +14,7 @@ import {
   createBashToolkit,
   createGitToolkit,
 } from '../../../local-agent/src/toolkits/local/index';
-import { createHostGraphFixture } from './hostGraphFixture';
+import { createPersistentHostGraphService } from './persistentHostGraphService';
 
 const requestedPort = Number(process.argv[2]);
 const workdir = process.argv[3]?.trim();
@@ -33,7 +33,7 @@ if (
 }
 
 const runtimeConfig = buildLocalAgentRuntimeConfig(workdir);
-const graphFixture = createHostGraphFixture();
+const graphService = createPersistentHostGraphService();
 const toolkits = [createBashToolkit(), createGitToolkit()];
 const transport = await startLocalServer(requestedPort, {
   actorId: 'pet-process-restart',
@@ -54,7 +54,7 @@ const transport = await startLocalServer(requestedPort, {
 }, {
   authToken,
   handlerOptions: {
-    chatGraphService: graphFixture.service,
+    chatGraphService: graphService,
     loadContext: async (actorId) => buildLocalOnlyAgentContext(actorId),
   },
 });

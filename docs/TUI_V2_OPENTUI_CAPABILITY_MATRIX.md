@@ -34,6 +34,7 @@ The probe covers:
 | live ordered operation tail | running/updated operations remain visible with later subagent/message rows on one transient surface, then commit atomically in canonical order | Bun native test |
 | operation detail rendering | bounded output/error text and `apply_patch` payload lines are visible without importing local-agent implementation code | automated test |
 | legacy display-rule reuse | assistant Markdown normalization, subagent paragraph grouping, and `toolName(args)` operation presentation are shared as runtime-independent v2 formatters | automated test |
+| scrollback-safe assistant Markdown | headings, inline emphasis and links, lists, blockquotes, code, and tables render without changing canonical message text; mutable table tails remain transient until completion | Bun native test |
 | high-frequency delta projection | one streaming entry is updated in place | automated test |
 | shared session list/resume | host results are correlated, timeout/error paths reject, and resume applies one canonical snapshot | automated test |
 | resume race isolation | late completion snapshots from the previous session cannot replace the resumed session | automated test |
@@ -72,7 +73,7 @@ The probe covers:
 | native textarea regression | multiline paste and single-grapheme backspace preserve line boundaries | Bun native test |
 | TypeScript | `npm run typecheck -w @pinpawo/tui` | passed |
 | unit tests | `npm run test -w @pinpawo/tui` | passed, 119 tests |
-| native tests | `npm run test:native -w @pinpawo/tui` | passed, 18 tests including file-mention resize/wide-character cursor mapping, policy/command/help/notice, approval/resume resize, textarea editing/history shortcuts, WebSocket, and 7 real ScrollbackSurface tests |
+| native tests | `npm run test:native -w @pinpawo/tui` | passed, 20 tests including file-mention resize/wide-character cursor mapping, policy/command/help/notice, approval/resume resize, textarea editing/history shortcuts, WebSocket, and 9 real ScrollbackSurface tests |
 | alternate-screen PTY startup | `npm run smoke -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | split-footer PTY startup | `npm run smoke:split -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | Studio PTY flow | `npm run smoke:studio -w @pinpawo/tui` | passed; user/progress/final rows committed in order and terminal state restored |

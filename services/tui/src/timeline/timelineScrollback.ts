@@ -16,6 +16,12 @@ import {
   isSettledTimelineEntry,
   type TimelineDisplayLine,
 } from './timelineModel';
+import {
+  createAssistantMarkdownStyle,
+  createAssistantMarkdownSurface,
+  stableAssistantMarkdownRows,
+  type AssistantMarkdownSurface,
+} from './assistantMarkdown';
 
 type ActiveTimelineSurface = {
   surface: ScrollbackSurface;
@@ -41,6 +47,8 @@ export class TimelineScrollback {
     tailEntry: null,
   };
   private activeTimelineSurface: ActiveTimelineSurface | null = null;
+  private readonly assistantMarkdownStyle = createAssistantMarkdownStyle();
+  private assistantMarkdownStyleDestroyed = false;
 
   constructor(private readonly renderer: CliRenderer) {}
 
@@ -167,6 +175,10 @@ export class TimelineScrollback {
 
   destroy() {
     this.destroyTimelineSurface();
+    if (!this.assistantMarkdownStyleDestroyed) {
+      this.assistantMarkdownStyle.destroy();
+      this.assistantMarkdownStyleDestroyed = true;
+    }
   }
 
   private destroyTimelineSurface() {
@@ -190,6 +202,7 @@ export class TimelineScrollback {
       entries,
       width: this.renderer.width,
       actorLabel,
+      assistantMarkdownStyle: this.assistantMarkdownStyle,
     });
     try {
       surface.root.add(root);
@@ -237,6 +250,7 @@ export class TimelineScrollback {
         entries: [],
         width: this.renderer.width,
         actorLabel,
+        assistantMarkdownStyle: this.assistantMarkdownStyle,
       });
       surface.root.add(root);
       active = {
@@ -250,17 +264,22 @@ export class TimelineScrollback {
     }
 
     try {
-      populateTimelineRoot(
+      const populated = populateTimelineRoot(
         active.surface.renderContext,
         active.root,
         entries,
         this.renderer.width,
         actorLabel,
+        this.assistantMarkdownStyle,
       );
       active.surface.render();
       const stableRows = completed
         ? active.surface.height
-        : stableRowsForLiveMode(mode, active.surface.height);
+        : stableRowsForLiveMode(
+            mode,
+            active.surface.height,
+            populated.assistantMarkdown,
+          );
       if (stableRows > active.committedRows) {
         active.surface.commitRows(active.committedRows, stableRows);
         active.committedRows = stableRows;
@@ -407,6 +426,7 @@ function liveEntryKey(entry: AgentTimelineEntry) {
 function stableRowsForLiveMode(
   mode: ActiveTimelineSurface['mode'],
   height: number,
+  assistantMarkdown: AssistantMarkdownSurface | null,
 ) {
   if (mode === 'ordered-tail') {
     // Operation headers and output can both change until the terminal phase.
@@ -414,6 +434,12 @@ function stableRowsForLiveMode(
     // the complete ordered tail transient and commit it only after the
     // operation settles.
     return 0;
+  }
+  if (assistantMarkdown) {
+    return Math.min(
+      height,
+      stableAssistantMarkdownRows(assistantMarkdown),
+    );
   }
   return Math.max(0, height - 1);
 }
@@ -425,6 +451,7 @@ function createTimelineRoot(
     entries: readonly AgentTimelineEntry[];
     width: number;
     actorLabel?: string;
+    assistantMarkdownStyle: ReturnType<typeof createAssistantMarkdownStyle>;
   },
 ) {
   const root = new BoxRenderable(context, {
@@ -439,6 +466,7 @@ function createTimelineRoot(
     options.entries,
     options.width,
     options.actorLabel,
+    options.assistantMarkdownStyle,
   );
   return root;
 }
@@ -449,6 +477,7 @@ function populateTimelineRoot(
   entries: readonly AgentTimelineEntry[],
   width: number,
   actorLabel?: string,
+  assistantMarkdownStyle?: ReturnType<typeof createAssistantMarkdownStyle>,
 ) {
   for (const child of root.getChildren()) {
     root.remove(child);
@@ -456,19 +485,42 @@ function populateTimelineRoot(
   }
 
   const now = Date.now();
-  entries.flatMap((entry) => buildTimelineDisplayLines(entry, {
-    actorLabel,
-    now,
-    width,
-  })).forEach((line, index) => {
+  let lineIndex = 0;
+  let assistantMarkdown: AssistantMarkdownSurface | null = null;
+  const addLine = (line: TimelineDisplayLine) => {
     root.add(new TextRenderable(context, {
-      id: `${root.id}:line:${index}`,
+      id: `${root.id}:line:${lineIndex++}`,
       width: '100%',
       height: 'auto',
       content: line.text || ' ',
       ...lineStyle(line),
     }));
+  };
+
+  entries.forEach((entry, entryIndex) => {
+    const lines = buildTimelineDisplayLines(entry, {
+      actorLabel,
+      now,
+      width,
+    });
+    if (
+      entry.type === 'message'
+      && entry.role === 'assistant'
+      && assistantMarkdownStyle
+    ) {
+      const label = lines[0];
+      if (label) addLine(label);
+      assistantMarkdown = createAssistantMarkdownSurface(context, {
+        id: `${root.id}:assistant:${entryIndex}:${entry.id}`,
+        content: entry.text,
+        syntaxStyle: assistantMarkdownStyle,
+      });
+      root.add(assistantMarkdown.container);
+      return;
+    }
+    lines.forEach(addLine);
   });
+  return { assistantMarkdown };
 }
 
 function lineStyle(line: TimelineDisplayLine): {

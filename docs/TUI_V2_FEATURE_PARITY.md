@@ -25,10 +25,10 @@ Status meanings:
 | host | authenticated local WebSocket, snapshot bootstrap, reconnect | aligned | real-host disconnect/reconnect dogfood |
 | chat | submit a message through the shared protocol | aligned | sustained real-host dogfood |
 | chat | canonical message/operation/subagent ordering | aligned | richer rendering below |
-| timeline | streaming assistant response on a live surface | aligned | rich Markdown rendering |
+| timeline | streaming assistant response on a live surface | aligned | real-host Markdown delta dogfood |
 | timeline | running/updated tool operation appears before completion | aligned | current branch adds an atomic live operation surface |
 | timeline | operation target, summary, bounded output/error, and patch detail | aligned | real-host tool and patch dogfood |
-| timeline | assistant Markdown, lists, links, tables, and code blocks | partial | legacy normalization and terminal-safe tables are reused; rich list/link/code styling still needs a scrollback-safe renderer |
+| timeline | assistant Markdown, lists, links, tables, and code blocks | aligned | cross-terminal and real-host Markdown dogfood |
 | timeline | distinct subagent identity and progress presentation | aligned | v2 reuses the legacy paragraph/sentence grouping behind a distinct role surface |
 | timeline | timestamps and actor label | aligned | canonical timestamps and the session actor label feed the shared display model |
 | timeline | long-session bounded commits and session boundaries | aligned | continue performance dogfood with real sessions |
@@ -53,11 +53,11 @@ Status meanings:
 
 ### P0 — make the real chat loop complete
 
-1. Finish timeline fidelity:
-   - keep running operations visible and in canonical order;
-   - render operation output, errors, and `apply_patch` diffs;
-   - render assistant Markdown and code without changing canonical text;
-   - distinguish subagent progress from main-assistant messages.
+1. Dogfood the implemented timeline fidelity against the real host:
+   - confirm running operations remain visible and in canonical order;
+   - confirm operation output, errors, and `apply_patch` diffs;
+   - confirm scrollback-safe assistant Markdown during streaming;
+   - confirm subagent progress remains distinct from main-assistant messages.
 2. Exercise a real local-agent run containing:
    user message → streaming assistant/tool activity → subagent output →
    completed assistant message.

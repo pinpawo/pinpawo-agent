@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   BoxRenderable,
   CliRenderEvents,
+  TextAttributes,
   TextRenderable,
 } from '@opentui/core';
 import { createTestRenderer } from '@opentui/core/testing';
@@ -50,6 +51,91 @@ test('streaming timeline commits stable rows incrementally and finalizes once', 
     );
     timeline.render(session([completed]));
     assert.deepEqual(setup.externalOutput.take(), []);
+  } finally {
+    timeline.destroy();
+    setup.renderer.destroy();
+  }
+});
+
+test('completed assistant markdown renders rich blocks without source markers', async () => {
+  const setup = await createTimelineRenderer(64);
+  const timeline = new TimelineScrollback(setup.renderer);
+  try {
+    timeline.render(session([assistantMessage([
+      '# Result',
+      '',
+      'Use **bold** and [docs](https://example.com).',
+      '',
+      '- first',
+      '- second',
+      '',
+      '> quoted',
+      '',
+      '```ts',
+      'const answer = 42;',
+      '```',
+      '',
+      '| Key | Value |',
+      '| --- | --- |',
+      '| mode | rich |',
+    ].join('\n'), 'completed')]));
+
+    const text = setup.cellOutput.takeText();
+    assert.match(text, /^assistant\n\| Result/m);
+    assert.match(text, /Use bold and docs \(https:\/\/example\.com\)\./);
+    assert.match(text, /- first/);
+    assert.match(text, /quoted/);
+    assert.match(text, /code · ts/);
+    assert.match(text, /const answer = 42;/);
+    assert.match(text, /Key\s+Value/);
+    assert.match(text, /mode\s+rich/);
+    assert.doesNotMatch(text, /\*\*|```|# Result|\| ---/);
+
+    const spans = setup.styleOutput.take().flatMap((lines) =>
+      lines.flatMap((line) => line.spans)
+    );
+    assert.ok(spans.some((span) => (
+      span.text.includes('Result')
+      && (span.attributes & TextAttributes.BOLD) !== 0
+    )));
+    assert.ok(spans.some((span) => (
+      span.text.includes('bold')
+      && (span.attributes & TextAttributes.BOLD) !== 0
+    )));
+  } finally {
+    timeline.destroy();
+    setup.renderer.destroy();
+  }
+});
+
+test('streaming markdown keeps a mutable table out of committed scrollback', async () => {
+  const setup = await createTimelineRenderer(48);
+  const timeline = new TimelineScrollback(setup.renderer);
+  try {
+    const streaming = assistantMessage([
+      '| Key | Value |',
+      '| --- | --- |',
+      '| mode | initial |',
+    ].join('\n'), 'streaming');
+    timeline.render(session([streaming], 'request-1'));
+    assert.equal(setup.cellOutput.takeText(), 'assistant');
+
+    const grown = {
+      ...streaming,
+      text: `${streaming.text}\n| detail | a wider value |`,
+    };
+    timeline.render(session([grown], 'request-1'));
+    assert.equal(setup.cellOutput.takeText(), '');
+
+    timeline.render(session([{
+      ...grown,
+      status: 'completed' as const,
+    }]));
+    const completed = setup.cellOutput.takeText();
+    assert.match(completed, /Key\s+Value/);
+    assert.match(completed, /mode\s+initial/);
+    assert.match(completed, /detail\s+a wider value/);
+    assert.doesNotMatch(completed, /^assistant$/m);
   } finally {
     timeline.destroy();
     setup.renderer.destroy();
@@ -261,6 +347,9 @@ async function createTimelineRenderer(width: number) {
     externalOutputMode: 'capture-stdout',
   });
   const commits: string[][] = [];
+  const styleCommits: ReturnType<
+    typeof setup.renderer.currentRenderBuffer.getSpanLines
+  >[] = [];
   const decoder = new TextDecoder();
   setup.renderer.on(CliRenderEvents.EXTERNAL_OUTPUT, (event) => {
     // OpenTUI 0.4.5's stock recorder slices a UTF-8 byte stream by terminal
@@ -272,6 +361,7 @@ async function createTimelineRenderer(width: number) {
         .slice(0, event.snapshot.height)
         .map((line) => line.trimEnd()),
     );
+    styleCommits.push(event.snapshot.getSpanLines());
   });
   return {
     ...setup,
@@ -283,6 +373,16 @@ async function createTimelineRenderer(width: number) {
       },
       clear() {
         commits.length = 0;
+      },
+    },
+    styleOutput: {
+      take() {
+        const output = [...styleCommits];
+        styleCommits.length = 0;
+        return output;
+      },
+      clear() {
+        styleCommits.length = 0;
       },
     },
   };

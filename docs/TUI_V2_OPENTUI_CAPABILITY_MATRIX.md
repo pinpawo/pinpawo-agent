@@ -7,9 +7,12 @@ Runtime target: Bun 1.3.14
 
 ## Purpose
 
-This spike validates the terminal-dependent risks before the production TUI is
-migrated. It is not a replacement for the existing Ink TUI and does not connect
-to the local-agent host.
+This work validates the terminal-dependent risks before the production TUI is
+migrated. It is not yet a replacement for the existing Ink TUI. The production
+v2 client now connects to the local-agent host, and a deterministic native
+integration smoke exercises the production local-agent handler/session/runtime
+chain over the real authenticated WebSocket transport without requiring a live
+LLM.
 
 The probe covers:
 
@@ -17,6 +20,8 @@ The probe covers:
 - split-footer settled output in terminal scrollback with a live footer;
 - terminal-owned wheel and selection input in split-footer mode;
 - split-footer streaming through `ScrollbackSurface` stable-row commits;
+- authenticated local-agent WebSocket transport through projection and native
+  scrollback;
 - terminal selection while mouse input is enabled;
 - `TextareaRenderable` multiline editing, selection, paste, and undo/redo;
 - Unicode, CJK, and emoji cursor/render behavior;
@@ -29,6 +34,8 @@ The probe covers:
 | Check | Expected | Status |
 | --- | --- | --- |
 | shared projection import | no `services/local-agent/src/*` import | implemented |
+| local-agent host integration | production session, chat adapter, inflight operation, snapshot, and authenticated WebSocket handlers drive chat submission, operation/subagent/delta/completion events, completion rehydration, and duplicate-free native scrollback | Bun native integration test |
+| local-agent reconnect integration | a transport termination triggers v2 backoff/reconnect and checkpoint rehydration; live-only operation/subagent state is intentionally omitted while committed terminal rows are not replayed | Bun native integration test |
 | canonical timeline order | message/operation/message order is retained | automated test |
 | operation raw payload | shared projection retains transient raw data | automated test |
 | live ordered operation tail | running/updated operations remain visible with later subagent/message rows on one transient surface, then commit atomically in canonical order | Bun native test |
@@ -73,7 +80,8 @@ The probe covers:
 | native textarea regression | multiline paste and single-grapheme backspace preserve line boundaries | Bun native test |
 | TypeScript | `npm run typecheck -w @pinpawo/tui` | passed |
 | unit tests | `npm run test -w @pinpawo/tui` | passed, 119 tests |
-| native tests | `npm run test:native -w @pinpawo/tui` | passed, 20 tests including file-mention resize/wide-character cursor mapping, policy/command/help/notice, approval/resume resize, textarea editing/history shortcuts, WebSocket, and 9 real ScrollbackSurface tests |
+| native tests | `npm run test:native -w @pinpawo/tui` | passed, 21 tests including file-mention resize/wide-character cursor mapping, policy/command/help/notice, approval/resume resize, textarea editing/history shortcuts, and 10 real ScrollbackSurface tests; one spans the production local-agent handler chain and authenticated WebSocket transport |
+| focused host integration | `npm run test:host -w @pinpawo/tui` | passed; ordered user/operation/subagent/Markdown completion survives completion snapshot rehydration, and reconnect does not replay committed rows |
 | alternate-screen PTY startup | `npm run smoke -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | split-footer PTY startup | `npm run smoke:split -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | Studio PTY flow | `npm run smoke:studio -w @pinpawo/tui` | passed; user/progress/final rows committed in order and terminal state restored |

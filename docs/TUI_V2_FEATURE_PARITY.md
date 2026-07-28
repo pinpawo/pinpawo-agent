@@ -22,8 +22,8 @@ Status meanings:
 
 | Area | Capability | Status | Remaining work |
 | --- | --- | --- | --- |
-| host | authenticated local WebSocket, snapshot bootstrap, reconnect | aligned | real-host disconnect/reconnect dogfood |
-| chat | submit a message through the shared protocol | aligned | sustained real-host dogfood |
+| host | authenticated local WebSocket, snapshot bootstrap, reconnect | aligned | production handler/runtime integration is complete; real-process restart dogfood remains |
+| chat | submit a message through the shared protocol | aligned | production handler-chain smoke is complete; sustained live-LLM dogfood remains |
 | chat | canonical message/operation/subagent ordering | aligned | richer rendering below |
 | timeline | streaming assistant response on a live surface | aligned | real-host Markdown delta dogfood |
 | timeline | running/updated tool operation appears before completion | aligned | current branch adds an atomic live operation surface |

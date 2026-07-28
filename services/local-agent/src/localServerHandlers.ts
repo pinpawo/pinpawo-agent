@@ -19,6 +19,7 @@ import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
 import { LocalServerTuiSessionService } from './localServerTuiSessions';
 import { LocalStudioDueRunScheduler } from './localStudioDueRunScheduler';
 import { persistGlobalReviewPolicyMode } from './globalReviewPolicyConfig';
+import { loadAgentContext } from './contextLoader';
 import {
   createLocalServerRuntimeDepsStore,
   type LocalServerDeps,
@@ -36,6 +37,10 @@ export type LocalServerHandlers = {
 
 export type LocalServerHandlerOptions = {
   persistGlobalReviewPolicyMode?: typeof persistGlobalReviewPolicyMode;
+  /** Composition hook for embedded hosts and deterministic integration tests. */
+  chatGraphService?: LocalAgentGraphService;
+  /** Must be shared by chat execution and checkpoint-backed session reads. */
+  loadContext?: typeof loadAgentContext;
 };
 
 type SessionSummarySource = Pick<
@@ -67,9 +72,10 @@ export function createLocalServerHandlers(
   const runtimeDeps = createLocalServerRuntimeDepsStore(deps);
   const initialDeps = runtimeDeps.get();
   const effectiveRuntimeConfig = initialDeps.runtimeConfig;
-  const chatGraphService = new LocalAgentGraphService();
+  const chatGraphService = options.chatGraphService ?? new LocalAgentGraphService();
   const tuiSessions = new LocalServerTuiSessionService({
     graphService: chatGraphService,
+    ...(options.loadContext ? { loadContext: options.loadContext } : {}),
     runtimeConfig: effectiveRuntimeConfig,
   });
   const studioReviewRouter = new LocalServerStudioReviewRouter<LocalServerPeer>();
@@ -90,6 +96,7 @@ export function createLocalServerHandlers(
     graphService: chatGraphService,
     tuiSessions,
     inflightRequests,
+    ...(options.loadContext ? { loadContext: options.loadContext } : {}),
   });
   const studioHandler = new LocalServerStudioHandler({
     reviewRouter: studioReviewRouter,

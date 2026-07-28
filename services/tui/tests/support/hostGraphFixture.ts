@@ -20,6 +20,8 @@ export const REVIEW_APPROVE_MESSAGE = 'Request an approved host action.';
 export const REVIEW_CANCEL_MESSAGE = 'Request a cancelled host action.';
 export const REVIEW_APPROVED_REPLY = 'Approved host action.';
 export const REVIEW_REJECTED_REPLY = 'Rejected host action.';
+export const REVIEW_CONTINUE_GUIDANCE =
+  'Continue the suspended host action with the new constraints.';
 export const ERROR_MESSAGE = 'Trigger a deterministic host failure.';
 export const ERROR_PARTIAL = 'Partial output before failure.';
 export const GRAPH_ERROR = 'deterministic graph failure';
@@ -50,6 +52,10 @@ export function createHostGraphFixture() {
     interruptId: string;
     review: ReviewSpec;
   }>();
+  const suspendedReviews = new Map<string, {
+    interruptId: string;
+    review: ReviewSpec;
+  }>();
   const reviewResumes: unknown[] = [];
   let inputMessages: BaseMessage[] = [];
   let observedInterrupt = false;
@@ -60,7 +66,8 @@ export function createHostGraphFixture() {
       return {
         messages: messagesByThread.get(readThreadKey(setup)) ?? [],
         pendingHumanReview: pendingReview,
-        hasPendingContinuation: pendingReview !== null,
+        hasPendingContinuation:
+          pendingReview !== null || suspendedReviews.has(readThreadKey(setup)),
       };
     },
     buildResumeCommand(resume: unknown) {
@@ -75,6 +82,15 @@ export function createHostGraphFixture() {
         assert.ok(pendingReview, 'expected a pending review before graph resume');
         reviewResumes.push(fixtureResume);
         pendingReviews.delete(threadKey);
+        if (isInterruptRunResume(
+          fixtureResume,
+          pendingReview.interruptId,
+        )) {
+          suspendedReviews.set(threadKey, pendingReview);
+          return checkpointStream(
+            messagesByThread.get(threadKey) ?? [],
+          );
+        }
         const selectedOptionId = readSelectedOptionId(
           fixtureResume,
           pendingReview.interruptId,
@@ -105,6 +121,17 @@ export function createHostGraphFixture() {
         ...(messagesByThread.get(threadKey) ?? []),
         ...inputMessages,
       ];
+      const suspendedReview = suspendedReviews.get(threadKey);
+      if (
+        setup.input.activeDelegationTransition === 'resume_active'
+        && suspendedReview
+      ) {
+        suspendedReviews.delete(threadKey);
+        messagesByThread.set(threadKey, accumulatedInput);
+        pendingReviews.set(threadKey, suspendedReview);
+        return reviewInterruptStream(suspendedReview);
+      }
+      suspendedReviews.delete(threadKey);
       if (
         typeof inputText === 'string'
         && (
@@ -120,17 +147,10 @@ export function createHostGraphFixture() {
           interruptId,
           review: REVIEW_SPEC,
         });
-        return (async function* () {
-          yield protocolEvent('values', {
-            __interrupt__: [{
-              id: interruptId,
-              value: {
-                kind: 'review',
-                review: REVIEW_SPEC,
-              },
-            }],
-          });
-        })();
+        return reviewInterruptStream({
+          interruptId,
+          review: REVIEW_SPEC,
+        });
       }
       if (typeof inputText === 'string' && inputText.includes(ERROR_MESSAGE)) {
         messagesByThread.set(threadKey, accumulatedInput);
@@ -239,6 +259,29 @@ export function createHostGraphFixture() {
   };
 }
 
+function reviewInterruptStream(pending: {
+  interruptId: string;
+  review: ReviewSpec;
+}) {
+  return (async function* () {
+    yield protocolEvent('values', {
+      __interrupt__: [{
+        id: pending.interruptId,
+        value: {
+          kind: 'review',
+          review: pending.review,
+        },
+      }],
+    });
+  })();
+}
+
+function checkpointStream(messages: BaseMessage[]) {
+  return (async function* () {
+    yield protocolEvent('values', { messages });
+  })();
+}
+
 function assistantReplyStream(
   messageId: string,
   text: string,
@@ -289,6 +332,19 @@ function readSelectedOptionId(
     'expected a canonical review decision',
   );
   return selectedOptionId;
+}
+
+function isInterruptRunResume(
+  resume: Record<string, unknown>,
+  interruptId: string,
+) {
+  const resolution = resume[interruptId];
+  return Boolean(
+    resolution
+    && typeof resolution === 'object'
+    && !Array.isArray(resolution)
+    && (resolution as { action?: unknown }).action === 'interrupt_run',
+  );
 }
 
 function readThreadKey(setup: AgentChannelSetup) {

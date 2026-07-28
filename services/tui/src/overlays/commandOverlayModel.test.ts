@@ -63,6 +63,22 @@ test('command palette follows a slash token at the composer cursor', () => {
   assert.equal(commandCompletion(state), '/export ');
 
   state = syncCommandPalette(state, {
+    text: '/con',
+    cursorOffset: 4,
+    enabled: true,
+    canContinueActiveDelegation: false,
+  });
+  assert.equal(commandCompletion(state), null);
+
+  state = syncCommandPalette(state, {
+    text: '/con',
+    cursorOffset: 4,
+    enabled: true,
+    canContinueActiveDelegation: true,
+  });
+  assert.equal(commandCompletion(state), '/continue ');
+
+  state = syncCommandPalette(state, {
     text: '/re',
     cursorOffset: 3,
     enabled: false,
@@ -126,6 +142,16 @@ test('command help pages and remains terminal-width safe', () => {
   assert.match(
     buildCommandOverlayViewModel(last, 80).content,
     /Ctrl\+O is the raw-control fallback/,
+  );
+  const continuationHelp = pageCommandHelp(
+    openCommandHelp({ canContinueActiveDelegation: true }),
+    1,
+  );
+  assert.match(
+    continuationHelp.phase === 'help'
+      ? buildCommandOverlayViewModel(continuationHelp, 100).content
+      : '',
+    /\/continue <guidance>/,
   );
   assert.equal(resolveCommandOverlayKey(state, key('q')), 'close');
   for (const line of second.content.split('\n')) {

@@ -318,6 +318,7 @@ const unsubscribe = controller.subscribe((state) => {
   }
   syncApprovalFromSession();
   syncNoticeFromSession();
+  syncComposerInputOverlays();
   refreshHeader();
   refreshLive();
   if (state.session.sessionId !== 'pending') {
@@ -691,6 +692,8 @@ function syncComposerInputOverlays() {
       && policyPicker.phase === 'closed'
       && noticeOverlay.phase === 'closed'
       && approvalController.getState().phase === 'closed',
+    canContinueActiveDelegation:
+      controller.canContinueActiveDelegation(),
   });
   refreshCommandOverlay();
 
@@ -1163,7 +1166,10 @@ function handleCommandOverlayAction(action: CommandOverlayAction) {
 
 function openCommandHelpUi() {
   if (terminalHandoffOpen) return;
-  commandOverlay = openCommandHelp();
+  commandOverlay = openCommandHelp({
+    canContinueActiveDelegation:
+      controller.canContinueActiveDelegation(),
+  });
   closeFileMentionOverlay();
   composer.blur();
   refreshCommandOverlay();
@@ -1203,6 +1209,36 @@ function submitComposerInput(input = composer.plainText) {
       composer.clear();
       localNotice = null;
       openCommandHelpUi();
+      return;
+    }
+    if (parsed.name === 'continue') {
+      if (!parsed.args) {
+        clearComposerPreservingNotice();
+        localNotice = 'provide guidance: /continue <guidance>';
+        refreshStatus();
+        return;
+      }
+      if (!controller.canContinueActiveDelegation()) {
+        clearComposerPreservingNotice();
+        localNotice = 'no suspended delegation is available for this session';
+        refreshStatus();
+        return;
+      }
+      enterChatMode(false);
+      const result = controller.continueActiveDelegation(parsed.args);
+      if (result.ok) {
+        composerHistory = recordComposerHistoryEntry(
+          composerHistory,
+          parsed.args,
+        );
+        composer.clear();
+        localNotice = null;
+        refreshHeader();
+        syncComposerLayout();
+      } else {
+        localNotice = submitFailureText(result.reason);
+        refreshStatus();
+      }
       return;
     }
     if (parsed.name === 'resume') {
@@ -1520,7 +1556,14 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function submitFailureText(reason: 'not-ready' | 'busy' | 'empty' | 'send-failed') {
+function submitFailureText(
+  reason:
+    | 'not-ready'
+    | 'busy'
+    | 'empty'
+    | 'continuation-unavailable'
+    | 'send-failed',
+) {
   switch (reason) {
     case 'not-ready':
       return 'local-agent is not connected';
@@ -1528,6 +1571,8 @@ function submitFailureText(reason: 'not-ready' | 'busy' | 'empty' | 'send-failed
       return 'wait for the current response to finish';
     case 'empty':
       return 'message is empty';
+    case 'continuation-unavailable':
+      return 'no suspended delegation is available for this session';
     case 'send-failed':
       return 'message could not be sent';
   }

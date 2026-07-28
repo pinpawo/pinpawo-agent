@@ -58,7 +58,7 @@ import {
   REVIEW_APPROVE_MESSAGE,
   REVIEW_APPROVED_REPLY,
   REVIEW_CANCEL_MESSAGE,
-  REVIEW_REJECTED_REPLY,
+  REVIEW_CONTINUE_GUIDANCE,
   REVIEW_SPEC,
 } from './support/hostGraphFixture';
 
@@ -157,7 +157,8 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     'chat-review-approve',
     'snapshot-review-approve',
     'chat-review-cancel',
-    'snapshot-review-cancel',
+    'chat-review-continue',
+    'snapshot-review-continue',
     'chat-error',
     'chat-recovery',
     'snapshot-recovery',
@@ -489,26 +490,60 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
       ok: true,
     });
     await waitFor(() => (
+      controller.getState().session.activeRun === null
+      && controller.canContinueActiveDelegation()
+    ));
+    assert.deepEqual(graphFixture.reviewResumes()[1], {
+      'review-interrupt-cancel': {
+        action: 'interrupt_run',
+      },
+    });
+    assert.deepEqual(
+      controller.continueActiveDelegation(REVIEW_CONTINUE_GUIDANCE),
+      {
+        ok: true,
+        requestId: 'chat-review-continue',
+      },
+    );
+    await waitFor(() => (
+      controller.getState().session.activeRun?.state === 'waiting_review'
+    ));
+    const continuedRun = controller.getState().session.activeRun;
+    assert.ok(continuedRun?.state === 'waiting_review');
+    assert.equal(
+      continuedRun.reviewAction.actionId,
+      'review-interrupt-cancel',
+    );
+    const continuedApproval = controller.submitReviewResponse({
+      requestId: 'chat-review-continue',
+      actionId: continuedRun.reviewAction.actionId,
+      decisions: [],
+      optionId: 'approve',
+    });
+    assert.equal(continuedApproval.ok, true);
+    await waitFor(() => (
       snapshotRequestCount === 5
       && controller.getState().session.activeRun === null
       && hasCompletedRequestMessage(
         controller.getState().session,
-        'chat-review-cancel',
-        REVIEW_REJECTED_REPLY,
+        'chat-review-continue',
+        REVIEW_APPROVED_REPLY,
       )
     ));
-    assert.deepEqual(graphFixture.reviewResumes()[1], {
+    assert.deepEqual(graphFixture.reviewResumes()[2], {
       'review-interrupt-cancel': {
         decisions: [{
           reviewId: REVIEW_SPEC.id,
-          selectedOptionId: 'reject',
+          selectedOptionId: 'approve',
         }],
       },
     });
     const cancelledOutput = committedRows.join('\n');
     assertOrdered(cancelledOutput.slice(approvedOutput.length), [
       REVIEW_CANCEL_MESSAGE,
-      REVIEW_REJECTED_REPLY,
+      'interrupted',
+      REVIEW_CONTINUE_GUIDANCE,
+      REVIEW_APPROVED_REPLY,
     ]);
 
     assert.deepEqual(controller.submitChat(ERROR_MESSAGE), {
@@ -578,8 +613,8 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     // highlighting. Let it settle before destroying the shared renderer/tree
     // sitter client so native test files cannot race its fallback callback.
     await Bun.sleep(200);
-    assert.equal(chatRequestCount, 6);
-    assert.equal(graphFixture.streamCount(), 8);
+    assert.equal(chatRequestCount, 7);
+    assert.equal(graphFixture.streamCount(), 10);
   } finally {
     unsubscribe();
     controller.stop();

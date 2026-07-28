@@ -12,6 +12,7 @@ import {
   type AgentCapability,
   type AgentModels,
   type AgentToolkit,
+  type CapabilityPlannerRunner,
 } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import type {
@@ -27,6 +28,8 @@ export const GUARDED_HOST_INPUT =
   'Run the guarded production toolkit action.';
 export const GUARDED_HOST_REPLY =
   'Guarded production tool completed.';
+export const GUARDED_HOST_CONTINUATION_GUIDANCE =
+  'Apply the reviewed change after suspension.';
 export const GUARDED_HOST_TOOL_NAME =
   'write_guarded_fixture';
 export const GUARDED_HOST_REVIEW_TITLE =
@@ -54,7 +57,6 @@ export const ATTACHMENT_TOOL_OUTPUT =
 
 type ProductionToolkitFixture = {
   setup: AgentChannelSetup;
-  resetDecisionFlow: () => void;
 };
 
 export function createProductionToolkitHostGraphService() {
@@ -76,9 +78,8 @@ export function createProductionToolkitHostGraphService() {
       const fixture = fixtureFor(setup);
       fixture.setup.input.messages = setup.input.messages;
       fixture.setup.input.signal = setup.input.signal;
-      if (inputOverride === undefined) {
-        fixture.resetDecisionFlow();
-      }
+      fixture.setup.input.activeDelegationTransition =
+        setup.input.activeDelegationTransition;
       return super.streamEvents(fixture.setup, inputOverride);
     }
 
@@ -195,7 +196,6 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
     toolkits: [toolkit],
   });
 
-  let decisionCallCount = 0;
   const routeModel = {
     invoke: async (messages: BaseMessage[]) => new AIMessage({
       content: messagesContain(messages, ATTACHMENT_TOOL_INPUT)
@@ -210,32 +210,51 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
     bindTools: () => ({
       invoke: async () => new AIMessage(''),
     }),
-    withStructuredOutput: () => ({
+    withStructuredOutput: (schema: unknown) => ({
       invoke: async (messages: BaseMessage[]) => {
-        decisionCallCount += 1;
-        const phase = (decisionCallCount - 1) % 3;
-        if (phase === 0) {
+        if (schemaAccepts(schema, {
+          outcome: 'goal_done',
+          gap_note: null,
+        })) {
           return {
-            action: 'direct_task',
-            task: messagesContain(messages, ATTACHMENT_TOOL_INPUT)
-              ? 'read the selected attachment'
-              : 'write the guarded fixture',
-            context_summary: null,
+            outcome: 'goal_done',
+            gap_note: null,
           };
         }
-        if (phase === 1) {
-          return { selection: 'capability.general' };
-        }
-        return { outcome: 'goal_done', gap_note: null };
+        return {
+          action: 'direct_task',
+          task: messagesContain(messages, ATTACHMENT_TOOL_INPUT)
+            ? 'read the selected attachment'
+            : 'write the guarded fixture',
+          context_summary: null,
+        };
       },
     }),
   } as unknown as AgentModels['act'];
+  const capabilityPlannerRunner: CapabilityPlannerRunner = {
+    async invoke(input) {
+      if (input.mode !== 'direct') {
+        return {
+          result: 'answer',
+          next_task: null,
+          remaining_plan: [],
+        };
+      }
+      return {
+        result: 'next_task',
+        next_task: {
+          objective: input.pendingTask.task,
+          capability_intent: 'production_tui_fixture',
+          capability_name: 'general',
+          context_summary: input.pendingTask.contextSummary,
+        },
+        remaining_plan: [],
+      };
+    },
+  };
   const subagentModel = new ProductionToolkitToolCallingModel();
 
   return {
-    resetDecisionFlow: () => {
-      decisionCallCount = 0;
-    },
     setup: {
       ...setup,
       graphKey: `production-toolkit:${setup.graphKey}`,
@@ -246,6 +265,7 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
           observe: routeModel,
           subagent: subagentModel,
         },
+        capabilityPlannerRunner,
       },
       registry,
       input: {
@@ -318,6 +338,16 @@ function readInputRecord(input: unknown) {
   return input && typeof input === 'object' && !Array.isArray(input)
     ? input as Record<string, unknown>
     : null;
+}
+
+function schemaAccepts(schema: unknown, value: unknown) {
+  if (!schema || typeof schema !== 'object' || !('safeParse' in schema)) {
+    return false;
+  }
+  const safeParse = (schema as {
+    safeParse?: (input: unknown) => { success: boolean };
+  }).safeParse;
+  return typeof safeParse === 'function' && safeParse.call(schema, value).success;
 }
 
 function messageText(message: BaseMessage) {

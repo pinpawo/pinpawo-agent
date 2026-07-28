@@ -27,6 +27,9 @@ dogfood entrypoint from issue #454:
 - it restores canonical pending reviews from snapshots and provides an
   OpenTUI-owned approval overlay for single or batched approve, reject, respond,
   and cancel flows.
+- it treats review cancellation as delegation suspension: after the host
+  authoritatively reports `interrupted`, `/continue <guidance>` resumes only
+  that affected session and allows the guarded action to be reviewed again.
 - it provides a compact cursor-aware slash command palette above the visible
   composer, plus a separate pageable help overlay for the commands currently
   implemented by the v2 client.
@@ -72,6 +75,12 @@ available with `npm run dev -w @pinpawo/tui`.
 Use `npm run tui:v2 -w pinpawo -- --check` to verify the resolved workspace or
 installed runtime without entering terminal mode.
 
+The empty-project distribution check is verified on darwin-arm64 and Linux
+arm64 with Node 24. It rebuilds and packs the local packages, installs them
+with lifecycle scripts in a clean consumer project, verifies npm-selected Bun
+and OpenTUI assets, and runs the installed `pinpawo tui --v2 --check` path.
+Linux x64 and Windows remain release-matrix gates.
+
 `@pinpawo/tui` remains a private implementation package. The public `pinpawo`
 tarball carries one runtime-neutral Bun bundle and a versioned manifest rather
 than publishing a TUI API package or six PinPawo platform binary packages.
@@ -112,7 +121,8 @@ Production client controls:
 - `↑`/`↓`, `PageUp`/`PageDown`, and Enter navigate and resume a session; Esc
   closes the picker without changing the composer draft;
 - while an approval is open, `↑`/`↓` selects a decision, PageUp/PageDown pages
-  the review details, Enter submits, and Esc cancels the pending review;
+  the review details, Enter submits, and Esc cancels the pending review and
+  interrupts its active delegation;
 - a text-response option owns a separate multiline textarea; Shift+Enter inserts
   a newline while Enter submits, and the normal composer draft remains intact;
 - typing `/` at the end of an attachment-free composer opens a five-row command
@@ -122,7 +132,9 @@ Production client controls:
   projection, `/policy` chooses the host review policy, `/resume` opens the
   session picker, `/transcript` (or `/history`) opens the timeline pager,
   `/edit [text]` opens `$VISUAL` or `$EDITOR`, `/export [path]` writes a
-  Markdown transcript, `/review-policy` aliases `/policy`, and `/quit` exits;
+  Markdown transcript, `/continue <guidance>` resumes the current session's
+  review-suspended delegation, `/review-policy` aliases `/policy`, and `/quit`
+  exits;
 - `/studio [task]` enters Studio mode and optionally starts a task; subsequent
   prose keeps the same Studio conversation until `/chat` returns to chat mode;
 - ordinary prose containing a path remains text, and unavailable path-only
@@ -152,7 +164,11 @@ Approval selection, paging, batch decisions, and text drafts are local overlay
 state rather than Session projection fields. The controller validates each
 response against the currently focused canonical review action before sending
 `human_review_response` or `review.cancel`. A disconnect or missing canonical
-state transition releases the submitting lock so the user can retry.
+state transition releases the submitting lock so the user can retry. Cancellation
+does not masquerade as rejection: the controller offers `/continue` only after
+the matching session receives an authoritative `interrupted` event, retains
+that offer if transport submission fails, and consumes it only after a
+successful `resume_active` request.
 
 The policy picker also remains view-local, but its current value does not. The
 host exposes the process-wide policy in snapshot runtime metadata, persists

@@ -36,18 +36,18 @@ Status meanings:
 | scrolling | browse position survives append and delta bursts | aligned in Ghostty | cross-terminal matrix |
 | composer | multiline edit, soft wrap, paste, selection, undo/redo | aligned | raw `Ctrl+O` now provides an explicit submit fallback without taking ordinary Enter away from multiline input; remaining IME and terminal-specific key dogfood |
 | composer | prompt history with draft restoration | aligned | a no-smoke macOS PTY restores and resubmits an exact prior prompt through the production host; the cross-terminal matrix remains |
-| composer | slash commands and command/help palette | aligned | a no-smoke macOS PTY uses Tab completion to open `/help`, proves help owns Esc and returns focus, then completes `/quit` and exits; remaining command workflows and the cross-terminal matrix remain |
+| composer | slash commands and command/help palette | aligned | a no-smoke macOS PTY uses Tab completion to open `/help`, proves help owns Esc and returns focus, completes the session-scoped `/continue` command after a cancelled review, then completes `/quit` and exits; remaining command workflows and the cross-terminal matrix remain |
 | composer | workspace `@path` completion | aligned | a no-smoke macOS PTY opens the production overlay, completes a Unicode filename containing a space, submits the exact text to the host, and restores it from checkpoint; the cross-terminal matrix remains |
 | attachments | quoted, escaped, `file://`, and multiple local paths | aligned | production OpenTUI paste handling separates multiple paths into attachments while preserving ordinary multiline paste; parsing now preserves Windows drive/UNC separators and Windows file URLs instead of treating backslashes as POSIX escapes, while a real macOS PTY covers quoted paths with spaces, Unicode filenames, and last-item removal and the cross-terminal drag-in matrix remains |
 | attachments | removable structured attachment chips and submit | aligned | production host integration proves selected full paths reach model context without eager content reads while terminal/checkpoint text remains filename-only; the full composer PTY proves a removed path does not reach model input or recovery, and the production-toolkit PTY parses a selected Unicode attachment from actual subagent context, executes a real read tool, renders its content through the operation timeline, and preserves the filename-only terminal/checkpoint boundary across host restart |
-| review | approval, rejection, text response, batching, cancellation | aligned | production handler-chain approval and cancel-to-reject resume are covered; one no-smoke PTY drives a checkpointed LangGraph interrupt through overlay ownership, while an independent production graph makes a real reviewed toolkit call, proves its file side effect is absent before approval and present afterward, renders its operation before the completed reply, and restores only canonical messages after host restart; sustained manual local-tool dogfood remains |
+| review | approval, rejection, text response, batching, cancellation | aligned | production handler coverage distinguishes rejection from cancellation: cancelling interrupts and suspends the active delegation, and `/continue <guidance>` explicitly resumes only that session after the authoritative `interrupted` event; one no-smoke PTY drives a checkpointed LangGraph interrupt through overlay ownership, while an independent production graph cancels a real reviewed toolkit call, proves its file side effect remains absent, resumes and reopens the exact review, then approves, executes, renders its operation before the completed reply, and restores only canonical messages after host restart; sustained manual local-tool dogfood remains |
 | session | new session and resume picker | aligned | production handler-chain new/list/resume, native scrollback boundaries, and non-empty checkpoint recovery across host processes are covered; live checkpoint dogfood remains |
 | runtime | interrupt, error notice, review policy | aligned | production interruption, graph-failure recovery, immediate stop wake-up, and process-level host restart are covered; full CLI/browser-runtime dogfood remains |
 | status | two-line run/model/workspace/token/context status | aligned | narrow-terminal dogfood |
 | transcript | pager handoff and Markdown export | aligned | a no-smoke macOS PTY completes `/transcript` through the palette, hands all seven ordered turns plus operation/subagent rows to a real `$PAGER` child without local-path leakage, resumes the composer, and writes the seven canonical user/assistant turns through `/export`; Windows quoted executable paths preserve separators and export paths use drive plus `~\` home semantics, while actual pager and cross-terminal combinations remain |
 | editor | `$VISUAL`/`$EDITOR` handoff and draft restore | aligned | a no-smoke macOS PTY invokes a real `$VISUAL` child with inherited TTY, validates its initial file, restores a Unicode multiline draft after renderer resume, submits it to the production host, and recovers it from checkpoint; Windows quoted executable paths such as `C:\Program Files\...\editor.exe` now parse without consuming separators, while actual editor combinations remain |
 | Studio | Studio-specific workflow expansion | deferred | tracked after chat parity |
-| release | package/runtime distribution | partial | a fresh Bun bundle boots its external OpenTUI dependency in the prepublish gate, and a real empty-project tarball install now traverses the installed CLI/manifest/package-local Bun path on darwin-arm64; Linux/Windows install execution and the default-switch decision remain |
+| release | package/runtime distribution | partial | a fresh Bun bundle boots its external OpenTUI dependency in the prepublish gate, and real empty-project tarball installs now traverse the installed CLI/manifest/package-local Bun path on darwin-arm64 and Linux arm64; Linux x64/Windows install execution and the default-switch decision remain |
 
 ## Work order
 
@@ -64,15 +64,17 @@ Status meanings:
    `main.ts` PTY now cover this exact ordering, including a tool-output update
    and multi-delta Markdown; sustained live-model/tool dogfood remains.
 3. Dogfood approval against a live guarded tool. Deterministic production-host
-   coverage now includes approval, cancel-to-reject resume, interruption
+   coverage now includes approval, review cancellation as suspension, explicit
+   session-scoped `/continue` with guidance, interruption
    (including partial-stream settlement), reconnect across independent host
    processes with non-empty FileSaver history, new, list, resume, and native
    scrollback session boundaries. The no-smoke production PTY also drives a
    real checkpointed LangGraph review through overlay ownership, keyed resume,
    completion, and restart recovery. A second deterministic production host now
    exercises the actual toolkit review middleware and tool execution, including
-   pre-approval side-effect isolation, operation settlement, and checkpoint
-   recovery; sustained manual local-tool dogfood remains.
+   cancellation without side effects, explicit delegation continuation,
+   re-review, approved execution, operation settlement, and checkpoint recovery;
+   sustained manual local-tool dogfood remains.
 4. Dogfood structured attachments with real local tools. The deterministic
    production-host integration already proves full paths reach model context,
    contents are not eagerly read, and terminal/checkpoint text remains

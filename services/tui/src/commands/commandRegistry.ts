@@ -7,6 +7,7 @@ export type TuiCommandName =
   | 'transcript'
   | 'export'
   | 'edit'
+  | 'continue'
   | 'resume'
   | 'quit';
 
@@ -69,6 +70,10 @@ const COMMANDS: readonly TuiCommandDefinition[] = [{
   usage: '/edit [text]',
   description: 'Edit a composer draft with VISUAL or EDITOR',
 }, {
+  name: 'continue',
+  usage: '/continue <guidance>',
+  description: 'Continue the delegation suspended from review',
+}, {
   name: 'resume',
   usage: '/resume',
   description: 'Choose a previous session',
@@ -89,8 +94,17 @@ for (const command of COMMANDS) {
 
 const COMMAND_LIKE_RE = /^\/([A-Za-z][A-Za-z0-9_-]*)(?:\s+(.*))?$/;
 
-export function listTuiCommands() {
-  return [...COMMANDS];
+export type TuiCommandAvailability = {
+  canContinueActiveDelegation?: boolean;
+};
+
+export function listTuiCommands(
+  availability: TuiCommandAvailability = {},
+) {
+  return COMMANDS.filter((command) => (
+    command.name !== 'continue'
+    || availability.canContinueActiveDelegation
+  ));
 }
 
 export function parseTuiCommand(input: string): ParsedTuiCommand {

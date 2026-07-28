@@ -38,6 +38,7 @@ import {
   ATTACHMENT_TOOL_NAME,
   ATTACHMENT_TOOL_OUTPUT,
   ATTACHMENT_TOOL_REPLY,
+  GUARDED_HOST_CONTINUATION_GUIDANCE,
   GUARDED_HOST_INPUT,
   GUARDED_HOST_OUTPUT_CONTENT,
   GUARDED_HOST_OUTPUT_NAME,
@@ -605,11 +606,30 @@ test('production v2 executes reviewed and attachment toolkit calls through a rea
       '}',
       `set guarded_output ${JSON.stringify(outputPath)}`,
       'if {[file exists $guarded_output]} { exit 167 }',
+      'send -- "\\033"',
+      'expect {',
+      '  -exact "interrupted" {}',
+      '  timeout { exit 164 }',
+      '  eof { exit 165 }',
+      '}',
+      'if {[file exists $guarded_output]} { exit 171 }',
+      `send -- [binary format H* ${utf8Hex('/con')}]`,
+      'after 100',
+      'send -- "\\t"',
+      'after 100',
+      `send -- [binary format H* ${utf8Hex(GUARDED_HOST_CONTINUATION_GUIDANCE)}]`,
+      'send -- "\\017"',
+      'expect {',
+      '  -exact "Approval 1/1" {}',
+      '  timeout { exit 172 }',
+      '  eof { exit 173 }',
+      '}',
+      'if {[file exists $guarded_output]} { exit 174 }',
       'send -- "\\033\\[13u"',
       'expect {',
       `  -exact ${JSON.stringify(GUARDED_HOST_REPLY)} {}`,
-      '  timeout { exit 164 }',
-      '  eof { exit 165 }',
+      '  timeout { exit 175 }',
+      '  eof { exit 176 }',
       '}',
       `send -- [binary format H* ${utf8Hex(attachmentPaste)}]`,
       'after 100',
@@ -674,6 +694,9 @@ test('production v2 executes reviewed and attachment toolkit calls through a rea
       compactTerminalObservation(GUARDED_HOST_REPLY),
     ));
     assert.ok(searchableOutput.includes(
+      compactTerminalObservation(GUARDED_HOST_CONTINUATION_GUIDANCE),
+    ));
+    assert.ok(searchableOutput.includes(
       compactTerminalObservation(ATTACHMENT_FILE_NAME),
     ));
     assert.ok(searchableOutput.includes(
@@ -690,6 +713,8 @@ test('production v2 executes reviewed and attachment toolkit calls through a rea
     );
     assertLastOrderedSubstrings(searchableOutput, [
       compactTerminalObservation(GUARDED_HOST_INPUT),
+      compactTerminalObservation('interrupted'),
+      compactTerminalObservation(GUARDED_HOST_CONTINUATION_GUIDANCE),
       compactTerminalObservation(GUARDED_HOST_TOOL_NAME),
       compactTerminalObservation(GUARDED_HOST_TOOL_OUTPUT),
       compactTerminalObservation(GUARDED_HOST_REPLY),
@@ -727,6 +752,7 @@ test('production v2 executes reviewed and attachment toolkit calls through a rea
       )),
       [
         `user:${GUARDED_HOST_INPUT}`,
+        `user:${GUARDED_HOST_CONTINUATION_GUIDANCE}`,
         `assistant:${GUARDED_HOST_REPLY}`,
         `user:${checkpointAttachmentText}`,
         `assistant:${ATTACHMENT_TOOL_REPLY}`,

@@ -14,6 +14,7 @@ import { TuiSessionController } from './sessionController';
 class FakeConnection implements TuiAgentHostConnection {
   connected = false;
   connectCount = 0;
+  failNextSend = false;
   sent: AgentClientMessage[] = [];
 
   constructor(readonly handlers: LocalHostConnectionHandlers) {}
@@ -28,6 +29,10 @@ class FakeConnection implements TuiAgentHostConnection {
 
   send(message: AgentClientMessage) {
     if (!this.connected) return false;
+    if (this.failNextSend) {
+      this.failNextSend = false;
+      return false;
+    }
     this.sent.push(message);
     return true;
   }
@@ -1097,6 +1102,96 @@ test('review cancellation targets only the current canonical action', () => {
     requestId: 'chat',
     actionId: 'review-action',
   });
+  controller.stop();
+});
+
+test('review cancellation exposes a session-scoped explicit continuation after interruption', async () => {
+  const requestIds = [
+    'startup',
+    'resume-other',
+    'resume-original',
+    'continue-failed',
+    'continue-sent',
+  ];
+  let connection!: FakeConnection;
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => requestIds.shift() ?? 'unexpected',
+  });
+  controller.start();
+  connection.open();
+  connection.receive(reviewSnapshotResult('startup', [
+    reviewSpec('review-1', [{
+      id: 'approve',
+      label: 'Approve',
+      decision: { type: 'approve' },
+    }]),
+  ]));
+
+  assert.equal(controller.canContinueActiveDelegation(), false);
+  assert.deepEqual(controller.cancelReview({
+    requestId: 'chat',
+    actionId: 'review-action',
+  }), { ok: true });
+  assert.equal(controller.canContinueActiveDelegation(), false);
+  connection.receive({
+    type: 'interrupted',
+    requestId: 'chat',
+    message: 'review interrupted',
+  });
+  assert.equal(controller.canContinueActiveDelegation(), true);
+
+  const resumeOther = controller.resumeSession('chat:two');
+  connection.receive({
+    type: 'session.resume.result',
+    requestId: 'resume-other',
+    session: sessionSummary('chat:two', true),
+    snapshot: createAgentSessionSnapshot({
+      sessionId: 'chat:two',
+      kind: 'chat',
+      timeline: [],
+      activeRun: null,
+    }),
+  });
+  await resumeOther;
+  assert.equal(controller.canContinueActiveDelegation(), false);
+
+  const resumeOriginal = controller.resumeSession('chat:one');
+  connection.receive({
+    type: 'session.resume.result',
+    requestId: 'resume-original',
+    session: sessionSummary('chat:one', true),
+    snapshot: createAgentSessionSnapshot({
+      sessionId: 'chat:one',
+      kind: 'chat',
+      timeline: [],
+      activeRun: null,
+    }),
+  });
+  await resumeOriginal;
+  assert.equal(controller.canContinueActiveDelegation(), true);
+
+  connection.failNextSend = true;
+  assert.deepEqual(
+    controller.continueActiveDelegation('apply the new constraints'),
+    { ok: false, reason: 'send-failed' },
+  );
+  assert.equal(controller.canContinueActiveDelegation(), true);
+
+  assert.deepEqual(
+    controller.continueActiveDelegation('apply the new constraints'),
+    { ok: true, requestId: 'continue-sent' },
+  );
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'chat_request',
+    requestId: 'continue-sent',
+    message: 'apply the new constraints',
+    activeDelegationTransition: 'resume_active',
+  });
+  assert.equal(controller.canContinueActiveDelegation(), false);
   controller.stop();
 });
 

@@ -70,7 +70,7 @@ const cases: AgentEvalCase<InterruptionRecoveryInput, InterruptionRecoveryExpect
     id: `${SUITE}.capability-limit-resume-natural-completion-answers`,
     name: 'capability-limit-resume-natural-completion-answers',
     suite: SUITE,
-    tags: ['interruption_recovery', 'capability_search', 'delegation_control', 'context_synthesis'],
+    tags: ['interruption_recovery', 'capability_discovery', 'delegation_control', 'context_synthesis'],
     input: {
       userMessage: '继续刚才那个调查',
       originalUserMessage: '帮我调查 local-agent 的 capability 注册链路，列出关键文件和证据。',
@@ -176,7 +176,7 @@ const cases: AgentEvalCase<InterruptionRecoveryInput, InterruptionRecoveryExpect
     id: `${SUITE}.resume-capability-after-limit`,
     name: 'resume-capability-after-limit',
     suite: SUITE,
-    tags: ['interruption_recovery', 'capability_search', 'delegation_control'],
+    tags: ['interruption_recovery', 'capability_discovery', 'delegation_control'],
     input: {
       userMessage: '继续',
       originalUserMessage: '帮我调查 local-agent 的 capability 注册链路，列出关键文件和证据。',
@@ -220,7 +220,7 @@ const cases: AgentEvalCase<InterruptionRecoveryInput, InterruptionRecoveryExpect
     },
     metadata: {
       difficulty: 'medium',
-      reason: 'General-lane recovery should not require capability search.',
+      reason: 'General-lane recovery should not require capability discovery.',
       source: SOURCE_FILE,
     },
   },
@@ -291,7 +291,7 @@ export const interruptionRecoveryBasicsDataset: AgentEvalDataset<
     areas: [
       'interruption_recovery',
       'delegation_control',
-      'capability_search',
+      'capability_discovery',
       'permission_control',
       'context_synthesis',
       'route_control',

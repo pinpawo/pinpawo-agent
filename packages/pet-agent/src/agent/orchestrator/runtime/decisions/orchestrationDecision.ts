@@ -1,13 +1,10 @@
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { GENERAL_CAPABILITY_NAME } from '../../../../types/capability';
 import { Command } from '@langchain/langgraph';
-import { randomUUID } from 'node:crypto';
 import { evaluateGuard } from '../../../../guards';
 import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorStatePatch } from '../../controlPrimitives';
 import type {
-  MessageLane,
   OrchestratorConfig,
   RunNextDelegation,
   RunPendingTask,
@@ -16,21 +13,13 @@ import type {
 import {
   buildDelegationOutcomeDecisionOutputInstruction,
   buildDelegationOutcomeDecisionSchema,
-  buildCapabilityDecisionOutputInstruction,
-  buildCapabilityDecisionSchema,
-  buildCapabilityPlanningDecisionOutputInstruction,
-  buildCapabilityPlanningDecisionSchema,
   buildTaskDecisionOutputInstruction,
   buildTaskDecisionSchema,
   buildOrchestrationDecisionStructuredOutputOptions,
-  CAPABILITY_UNAVAILABLE_SELECTION,
-  parseCapabilitySelection,
   readDecisionText,
   type AcceptedDelegationOutcome,
-  type CapabilityDecision,
   type DelegationOutcomeDecision,
   type TaskDecision,
-  type CapabilityPlanningDecision,
 } from '../../schemas';
 import { readContextCompactionSummaries } from '../../contextCompaction';
 import {
@@ -38,11 +27,6 @@ import {
   buildDelegationOutcomeDecisionInput,
   buildDelegationOutcomeDecisionSystemPrompt,
   buildDelegationOutcomeOtherTasksContext,
-  buildCapabilityDecisionInput,
-  buildCapabilityDecisionSystemPrompt,
-  buildCapabilityDecisionAvailableExecutorsContext,
-  buildCapabilityPlanningDecisionInput,
-  buildCapabilityPlanningDecisionSystemPrompt,
   buildCompactionSummaryXmlContext,
   buildPreparedRequestContext,
   buildRunDelegationSummaryContext,
@@ -73,18 +57,12 @@ import {
   readLatestHumanRequest,
   setPinpetMeta,
 } from '../../messageLanes';
-import { clipForPrompt, readMessageText } from '../../utils';
-import { searchCapabilities } from '../../capabilitySearch';
+import { readMessageText } from '../../utils';
 import { invokeStructuredOutput } from '../../../../utils/structuredOutput';
 import {
-  buildCompiledCapabilitySearchDocuments,
   mainMessagesWithoutCompaction,
-} from './capabilityCandidates';
+} from './conversationContext';
 import {
-  createTaskActiveDelegation,
-} from './delegationLifecycle';
-import {
-  getInvokeRegistry,
   getInvokeOptions,
   resolveActor,
 } from '../config';
@@ -101,48 +79,6 @@ export function createTaskDecisionRunner(config: OrchestratorConfig) {
     const decision = await invokeTaskDecision({ config, context, runnableConfig });
     const transition = buildTaskDecisionResult({ state, decision });
     return new Command({ update: transition.update, goto: transition.goto });
-  };
-}
-
-export function createCapabilityPlanningDecisionRunner(config: OrchestratorConfig) {
-  return async function runCapabilityPlanningDecision(
-    state: OrchestratorStateType,
-    runnableConfig?: RunnableConfig,
-  ) {
-    const context = buildCapabilityPlanningContext({ config, state, runnableConfig });
-    const decision = await invokeCapabilityPlanningDecision({ config, context, runnableConfig });
-    const transition = buildCapabilityPlanningResult(decision);
-    return new Command({ update: transition.update, goto: transition.goto });
-  };
-}
-
-export function createCapabilityDecisionRunner(config: OrchestratorConfig) {
-  return async function runCapabilityDecision(
-    state: OrchestratorStateType,
-    runnableConfig?: RunnableConfig,
-  ) {
-    const context = await buildCapabilityDecisionContext({ config, state, runnableConfig });
-    if (!context.pendingTask) {
-      throw new Error('capabilityDecision requires runPendingTask');
-    }
-    const readyContext: CapabilityDecisionReadyContext = {
-      ...context,
-      pendingTask: context.pendingTask,
-    };
-    if (context.decisionCapabilityCandidates.length === 0) {
-      return buildCapabilityDecisionResult({
-        state,
-        context: readyContext,
-        selection: CAPABILITY_UNAVAILABLE_SELECTION,
-      });
-    }
-
-    const decision = await invokeCapabilityDecision({ config, context, runnableConfig });
-    return buildCapabilityDecisionResult({
-      state,
-      context: readyContext,
-      selection: decision.selection,
-    });
   };
 }
 
@@ -203,137 +139,6 @@ function buildTaskDecisionContext(params: {
 }
 
 type TaskDecisionContext = ReturnType<typeof buildTaskDecisionContext>;
-
-async function buildCapabilityDecisionContext(params: {
-  config: OrchestratorConfig;
-  state: OrchestratorStateType;
-  runnableConfig?: RunnableConfig;
-}) {
-  const { config, state, runnableConfig } = params;
-  const {
-    workdir,
-    runtimeEnvironment,
-  } = getInvokeOptions(runnableConfig);
-  const actor = resolveActor(config, runnableConfig);
-  const registry = getInvokeRegistry(runnableConfig);
-  const capabilityList = buildCompiledCapabilitySearchDocuments(registry.capabilities);
-  const query = [state.runPendingTask?.task, state.runPendingTask?.contextSummary]
-    .map((item) => item?.trim())
-    .filter((item): item is string => Boolean(item))
-    .join(' | ');
-  const forcedCapabilityNames = getInvokeOptions(runnableConfig).forcedCapabilityNames ?? [];
-  const forcedNames = new Set(forcedCapabilityNames);
-  const retrievedCandidates = forcedNames.size > 0
-    ? capabilityList
-        .filter((capability) => forcedNames.has(capability.name))
-        .map((capability) => ({ name: capability.name, description: capability.description, score: 1, matchedTerms: ['forced'] }))
-    : query ? searchCapabilities(query, capabilityList) : [];
-  const generalCapability = forcedNames.size === 0
-    ? capabilityList.find((capability) => capability.name === GENERAL_CAPABILITY_NAME)
-    : null;
-  const decisionCapabilityCandidates = generalCapability
-    && !retrievedCandidates.some((candidate) => candidate.name === generalCapability.name)
-    ? [
-        ...retrievedCandidates,
-        {
-          name: generalCapability.name,
-          description: generalCapability.description,
-          score: 0,
-          matchedTerms: ['planner-default'],
-        },
-      ]
-    : retrievedCandidates;
-  const availableExecutorsContext = buildCapabilityDecisionAvailableExecutorsContext({
-    capabilityCandidates: decisionCapabilityCandidates,
-  });
-  const systemPrompt = buildCapabilityDecisionSystemPrompt({
-    actor,
-    outputInstruction: buildCapabilityDecisionOutputInstruction(
-      {
-        capabilityCandidates: decisionCapabilityCandidates,
-      },
-      config.decisionStructuredOutput?.method,
-    ),
-  });
-  const decisionInputMessage = new HumanMessage(buildCapabilityDecisionInput({
-    pendingTask: state.runPendingTask,
-    availableExecutorsContext,
-    runtimeContext: buildRuntimeContext(workdir, runtimeEnvironment),
-  }));
-
-  return {
-    decisionCapabilityCandidates,
-    decisionInputMessage,
-    pendingTask: state.runPendingTask,
-    systemPrompt,
-  };
-}
-
-function buildCapabilityPlanningContext(params: {
-  config: OrchestratorConfig;
-  state: OrchestratorStateType;
-  runnableConfig?: RunnableConfig;
-}) {
-  const { config, state, runnableConfig } = params;
-  const actor = resolveActor(config, runnableConfig);
-  const latestHumanRequest = readLatestHumanRequest(state.messages);
-  const userIntentContext = buildPreparedRequestContext({
-    latestUserRequest: latestHumanRequest,
-    recentMessages: mainMessagesWithoutCompaction(state.messages),
-    contextSummaries: readContextCompactionSummaries(state.messages),
-  });
-  const capabilityList = buildCompiledCapabilitySearchDocuments(
-    getInvokeRegistry(runnableConfig).capabilities,
-  );
-  const latestCompletedDelegation = [...state.runDelegationSummaries]
-    .reverse()
-    .find((item) => item.status === 'completed');
-  const completedTasks = state.runDelegationSummaries
-    .filter((item) => item.status === 'completed')
-    .map((item) => ({
-      objective: item.task,
-      result: item.resultPreview,
-    }));
-  const latestHandoff = latestCompletedDelegation
-    ? [...state.messages]
-        .reverse()
-        .find((message) => {
-          const source = getMessageHandoffSource(message);
-          return source?.delegationId === latestCompletedDelegation.id
-            && source.handoffFrom === latestCompletedDelegation.lane;
-        })
-    : null;
-  const mode = state.runDelegationSummaries.length === 0 && state.runCapabilityPlan.length === 0
-    ? 'entry' as const
-    : 'boundary' as const;
-  return {
-    mode,
-    decisionInputMessage: new HumanMessage(buildCapabilityPlanningDecisionInput({
-      mode,
-      userIntentContext,
-      completedTasks,
-      remainingPlan: state.runCapabilityPlan,
-      latestHandoff: latestHandoff ? readMessageText(latestHandoff) : null,
-      capabilityRegistryContext: capabilityList.length > 0
-        ? clipForPrompt(
-            capabilityList.map((item) => `${item.name}: ${item.description}`).join('\n'),
-            6_000,
-          )
-        : 'No capabilities are currently available.',
-    })),
-    systemPrompt: buildCapabilityPlanningDecisionSystemPrompt({
-      actor,
-      outputInstruction: buildCapabilityPlanningDecisionOutputInstruction(config.decisionStructuredOutput?.method),
-    }),
-  };
-}
-
-type CapabilityPlanningContext = ReturnType<typeof buildCapabilityPlanningContext>;
-
-type CapabilityDecisionContext = Awaited<ReturnType<typeof buildCapabilityDecisionContext>>;
-type CapabilityDecisionReadyContext = Omit<CapabilityDecisionContext, 'pendingTask'> & {
-  pendingTask: RunPendingTask;
-};
 
 function buildDecisionContext(params: {
   config: OrchestratorConfig;
@@ -482,50 +287,6 @@ async function invokeTaskDecision(params: {
   }
 }
 
-async function invokeCapabilityDecision(params: {
-  config: OrchestratorConfig;
-  context: CapabilityDecisionContext;
-  runnableConfig?: RunnableConfig;
-}) {
-  const { config, context, runnableConfig } = params;
-  try {
-    return await invokeStructuredOutput({
-      model: config.models.act,
-      schema: buildCapabilityDecisionSchema({
-        capabilityCandidates: context.decisionCapabilityCandidates,
-      }),
-      options: buildOrchestrationDecisionStructuredOutputOptions(
-        config.decisionStructuredOutput,
-      ),
-      messages: [
-        new SystemMessage(context.systemPrompt),
-        context.decisionInputMessage,
-      ],
-      runnableConfig,
-    }) as CapabilityDecision;
-  } catch (error) {
-    console.warn('[pet-agent] invalid capability decision structured output:', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    throw error;
-  }
-}
-
-async function invokeCapabilityPlanningDecision(params: {
-  config: OrchestratorConfig;
-  context: CapabilityPlanningContext;
-  runnableConfig?: RunnableConfig;
-}) {
-  const { config, context, runnableConfig } = params;
-  return await invokeStructuredOutput({
-    model: config.models.act,
-    schema: buildCapabilityPlanningDecisionSchema(),
-    options: buildOrchestrationDecisionStructuredOutputOptions(config.decisionStructuredOutput),
-    messages: [new SystemMessage(context.systemPrompt), context.decisionInputMessage],
-    runnableConfig,
-  }) as CapabilityPlanningDecision;
-}
-
 async function invokeDelegationOutcomeDecision(params: {
   config: OrchestratorConfig;
   context: OrchestrationDecisionContext;
@@ -590,112 +351,12 @@ function buildTaskDecisionResult(params: {
     contextSummary: readDecisionText(decision.context_summary),
   };
   return {
-    goto: 'capabilityDecision' as const,
+    goto: 'capabilityPlanner' as const,
     update: {
       runNextDelegation: null,
       runPendingTask: pendingTask,
       runCapabilityPlan: [],
     },
-  };
-}
-
-function buildCapabilityPlanningResult(decision: CapabilityPlanningDecision) {
-  const remainingPlan = decision.remaining_plan.map((item) => ({
-    objective: item.objective.trim(),
-    capabilityIntent: item.capability_intent.trim(),
-  }));
-  if (decision.result === 'answer' || !decision.next_task) {
-    return {
-      goto: 'answer' as const,
-      update: {
-        runCapabilityPlan: remainingPlan,
-        runPendingTask: null,
-        runNextDelegation: null,
-      },
-    };
-  }
-  return {
-    goto: 'capabilityDecision' as const,
-    update: {
-      runCapabilityPlan: remainingPlan,
-      runPendingTask: {
-        task: decision.next_task.objective.trim(),
-        contextSummary: `Capability intent: ${decision.next_task.capability_intent.trim()}`,
-      },
-      runNextDelegation: null,
-    },
-  };
-}
-
-function buildCapabilityDecisionResult(params: {
-  state: OrchestratorStateType;
-  context: CapabilityDecisionReadyContext;
-  selection: CapabilityDecision['selection'];
-}) {
-  const { state, context, selection } = params;
-  const pendingTask = context.pendingTask;
-
-  const parsedSelection = parseCapabilitySelection(selection);
-  if (parsedSelection.kind === 'unavailable') {
-    return {
-      runNextDelegation: null,
-      runPendingTask: pendingTask,
-    };
-  }
-  const activeCapability = parsedSelection.kind === 'capability'
-    && parsedSelection.capabilityName
-    && context.decisionCapabilityCandidates.some(
-      (item) => item.name === parsedSelection.capabilityName,
-    )
-    ? parsedSelection.capabilityName
-    : null;
-  const delegationLane: MessageLane | null = activeCapability
-    ? `capability:${activeCapability}`
-    : null;
-  if (!delegationLane) {
-    throw new Error(
-      `capabilityDecision returned invalid selection: ${selection}`,
-    );
-  }
-  const runNextDelegation: RunNextDelegation = {
-    id: randomUUID().slice(0, 8),
-    lane: delegationLane,
-    task: pendingTask.task,
-    contextSummary: pendingTask.contextSummary ?? '继续完成用户当前请求。',
-  };
-  const runDelegationSummaries = appendRunDelegationSummary(
-    state.runDelegationSummaries,
-    runNextDelegation,
-  );
-  const nextTaskActiveDelegation = createTaskActiveDelegation(runNextDelegation, state.runId);
-
-  // Delegation briefing: the deterministic projection of the materialized
-  // delegation into its private lane. Written here — and only here — because this
-  // is the single point where both entry direct_task and planner next_task
-  // become a real delegation; bail-out paths above never leave a stale
-  // "当前执行 X" briefing behind. See issue #362.
-  const materializedDelegation = materializeDelegation({
-    mode: 'initial',
-    lane: runNextDelegation.lane,
-    runId: nextTaskActiveDelegation.transcriptRunId,
-    delegationId: runNextDelegation.id,
-    task: runNextDelegation.task,
-    // Pre-fallback value: the '继续完成用户当前请求。' placeholder that pads
-    // runNextDelegation.contextSummary carries no execution guidance, so the
-    // briefing omits its context element rather than rendering filler.
-    essentialContext: pendingTask.contextSummary,
-  });
-
-  return {
-    messages: [
-      ...materializedDelegation.mainMessages,
-      ...materializedDelegation.laneMessages,
-    ],
-    runNextDelegation,
-    runPendingTask: null,
-    taskActiveDelegation: nextTaskActiveDelegation,
-    runDelegationSummaries,
-    runLatestDelegationOutcome: null,
   };
 }
 

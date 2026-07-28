@@ -13,8 +13,8 @@ export const capabilityCreatorInstructions = `# Capability Creator
    如果当前工作目录不是 PinPawo 仓库，先用 \`glob_search\` 定位示例。
 4. 按示例改写 \`CAPABILITY.md\`、README 和测试，使其成为面向用户任务的
    完整执行协议。
-5. 使用 \`validate_capability_plugin\` 检查加载契约，使用
-   \`check_capability_keywords\` 检查自然语言 query 能否发现它。
+5. 使用 \`validate_capability_plugin\` 检查加载契约，并确认 description 与正文
+   能让 Capability Planner 理解完整职责、边界和适用场景。
 
 ## 契约边界
 

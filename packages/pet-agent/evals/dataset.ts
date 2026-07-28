@@ -31,20 +31,16 @@ export type Example = {
     resume_progress_task?: string;
     resume_progress_completion_reason?: string;
     resume_original_user_message?: string;
-    /** Optional: enable a mock capability registry for capability-search tests */
+    /** Optional: enable a mock Capability registry for Planner routing tests */
     capability_pack?: 'pet_content' | 'browser' | 'explore';
-    /** Optional: preloaded capability candidates, as if capability_search had already run */
-    capability_candidates?: string[];
+    /** Optional: restrict the Planner workspace to these Capability names */
+    allowed_capability_names?: string[];
   };
   outputs: {
     expected_route: 'answer' | 'delegate';
     expected_mode?: 'answer' | 'capability';
     expected_phase?: 'initial_request' | 'after_subagent';
-    expected_capability_state?: 'unavailable' | 'search_available' | 'candidates_available' | 'search_exhausted';
     expected_active_capability?: string | null;
-    expected_capability_candidates_include?: string[];
-    expected_capability_candidates_empty?: boolean;
-    expected_capability_search_query_terms?: string[];
     /** Brief explanation for reviewers */
     reason: string;
   };
@@ -163,15 +159,13 @@ export const examples: Example[] = [
         '已打开小红书发现页并提取到今日热门动态：科技 AI 内容、穿搭分享、春季出游和家居收纳等方向。',
       ],
       capability_pack: 'pet_content',
-      capability_candidates: ['daily_post'],
+      allowed_capability_names: ['daily_post'],
     },
     outputs: {
       expected_route: 'answer',
       expected_mode: 'answer',
       expected_phase: 'after_subagent',
-      expected_capability_state: 'unavailable',
-      expected_capability_candidates_empty: true,
-      reason: 'A stale capability candidate should not turn a completed lookup into a new daily-post task.',
+      reason: 'A completed lookup should answer even when the Planner workspace is narrowly scoped to daily_post.',
     },
   },
 
@@ -216,9 +210,7 @@ export const examples: Example[] = [
       expected_route: 'delegate',
       expected_mode: 'capability',
       expected_phase: 'initial_request',
-      expected_capability_state: 'candidates_available',
       expected_active_capability: 'browser',
-      expected_capability_candidates_include: ['browser'],
       reason: 'Browser-backed page interaction should route to the browser capability, not general tools.',
     },
   },
@@ -333,10 +325,8 @@ export const examples: Example[] = [
       expected_route: 'delegate',
       expected_mode: 'capability',
       expected_phase: 'initial_request',
-      expected_capability_state: 'candidates_available',
       expected_active_capability: 'daily_post',
-      expected_capability_candidates_include: ['daily_post'],
-      reason: 'Business capability registry is available but not injected yet — discovery should search candidates before route delegates.',
+      reason: 'The Planner should explore the available Capability documents and select daily_post.',
     },
   },
   {
@@ -349,10 +339,8 @@ export const examples: Example[] = [
       expected_route: 'delegate',
       expected_mode: 'capability',
       expected_phase: 'initial_request',
-      expected_capability_state: 'candidates_available',
       expected_active_capability: 'daily_post',
-      expected_capability_candidates_include: ['daily_post'],
-      reason: 'Full graph should search capability candidates, return to route, then delegate to the matched capability.',
+      reason: 'The full graph should let the Planner discover and delegate to daily_post.',
     },
   },
   {
@@ -360,16 +348,14 @@ export const examples: Example[] = [
     inputs: {
       user_message: '用宠物发帖能力给小白生成今天的小红书日常草稿',
       capability_pack: 'pet_content',
-      capability_candidates: ['daily_post'],
+      allowed_capability_names: ['daily_post'],
     },
     outputs: {
       expected_route: 'delegate',
       expected_mode: 'capability',
       expected_phase: 'initial_request',
-      expected_capability_state: 'candidates_available',
       expected_active_capability: 'daily_post',
-      expected_capability_candidates_include: ['daily_post'],
-      reason: 'Candidate is already injected — route should delegate to that capability.',
+      reason: 'The Planner workspace is scoped to daily_post, so delegation should use it.',
     },
   },
   {
@@ -388,7 +374,7 @@ export const examples: Example[] = [
       expected_mode: 'capability',
       expected_phase: 'initial_request',
       expected_active_capability: 'explore',
-      reason: 'A user resume after prior capability progress should expose the same capability lane as a candidate and delegate back to it.',
+      reason: 'A user resume after prior Capability progress should continue the same active lane.',
     },
   },
   {
@@ -401,10 +387,8 @@ export const examples: Example[] = [
       expected_route: 'delegate',
       expected_mode: 'capability',
       expected_phase: 'initial_request',
-      expected_capability_state: 'search_available',
       expected_active_capability: null,
-      expected_capability_candidates_empty: true,
-      reason: 'Capability search should find no matching business capability, then select the general Capability candidate.',
+      reason: 'The Planner should reject unrelated domain Capabilities and select general.',
     },
   },
   {
@@ -417,8 +401,7 @@ export const examples: Example[] = [
       expected_route: 'delegate',
       expected_mode: 'capability',
       expected_phase: 'initial_request',
-      expected_capability_state: 'search_available',
-      reason: 'File inspection is covered by general tools and should not trigger capability search.',
+      reason: 'After exploring the documents, the Planner should select general for file inspection.',
     },
   },
 ];

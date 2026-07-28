@@ -63,18 +63,10 @@ export type PetAgentRuntimeInvokeInput = {
    */
   extraCapabilities?: AgentCapability[];
   /**
-   * 强制加入本次 capabilityDecision 局部候选集的 capability 名字列表。
-   *
-   * 命中后,orchestrator 从合并后的 capability 列表
-   * (config.capabilities + extraCapabilities)中选择同名条目作为候选，
-   * 不依赖关键词匹配，也不把候选写入 graph state。
-   *
-   * 典型用途:Studio 调 planner 时强制 `studio_plan` —— 不依赖用户请求文本
-   * 与 capability 描述的 keyword 匹配。
-   *
-   * **不传时,通用 pet agent 在 capabilityDecision 内按 current task 搜索。**
+   * 本次 invoke 的 Capability allowlist。Capability Planner 的只读文档
+   * workspace 只物化这些已编译、可用的 Capability；不传时暴露完整 registry。
    */
-  forcedCapabilityNames?: string[];
+  allowedCapabilityNames?: string[];
   activeDelegationTransition?: ActiveDelegationTransition;
 };
 

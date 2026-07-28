@@ -28,7 +28,7 @@ import type { AgentModels } from '../../src/types/agent.ts';
 import type { StructuredOutputMethod } from '../../src/utils/structuredOutput.ts';
 import { createDecisionEvalModel } from './decision-eval-model.ts';
 
-const TARGETS: PromptEvalTarget[] = ['entry', 'planner', 'capability', 'outcome', 'answer'];
+const TARGETS: PromptEvalTarget[] = ['entry', 'outcome', 'answer'];
 const DEFAULT_REPEATS = 5;
 
 type PromptEvalScenario = {
@@ -193,7 +193,7 @@ async function main() {
   const structuredOutputMethod = targets.some((target) => target !== 'answer')
     ? modelConfig.method ?? 'provider-default'
     : 'not-applicable';
-  const evaluator = targets.some((target) => target === 'entry' || target === 'planner' || target === 'answer')
+  const evaluator = targets.some((target) => target === 'entry' || target === 'answer')
     ? {
         mode: 'subject-model' as const,
         version: 'prompt-goal-v1' as const,

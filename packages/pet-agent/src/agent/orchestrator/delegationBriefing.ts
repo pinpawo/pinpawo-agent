@@ -6,7 +6,7 @@ import type { MessageLane } from './types';
 
 /**
  * Delegation briefing — the downward counterpart of the (upward) subagent
- * handoff. When a delegation materializes, capabilityDecision renders the
+ * handoff. When a delegation materializes, the Capability Planner node renders the
  * structured current task into a compact delegation-lane AIMessage, so the
  * executing subagent reads its task boundary from message history instead of a
  * dynamic system prompt. Main receives only a concise plan message.

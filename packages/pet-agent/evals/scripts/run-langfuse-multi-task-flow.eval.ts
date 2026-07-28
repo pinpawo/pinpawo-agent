@@ -13,6 +13,7 @@ import {
 } from '../../src/types/capability.ts';
 import { defineToolkit } from '../../src/types/toolkit.ts';
 import type { AgentModels } from '../../src/types/agent.ts';
+import type { CapabilityPlannerRunner } from '../../src/agent/orchestrator/capabilityPlannerRunner.ts';
 import { multiTaskFlowBasicsDataset } from '../datasets/multi-task-flow-basics.ts';
 import { readRunDelegationSummaries, routeModeFromResult } from '../orchestratorStateReaders.ts';
 import { writeLangfuseEvalResult, type LangfuseEvalScore } from './langfuse-eval-writer.ts';
@@ -77,59 +78,23 @@ function buildRecordingSubagent(responses: string[]) {
 
 function buildScriptedDecisionModel() {
   let entryDecisionCount = 0;
-  let plannerDecisionCount = 0;
-  let routeDecisionCount = 0;
   let outcomeDecisionCount = 0;
-  const searchQueries: string[] = [];
-  const selectedCapabilityNames: string[] = [];
-  let secondTaskSawHandoff = false;
+  let structuredDecisionCount = 0;
   const model = {
     invoke: async () => new AIMessage(
       'auth 重构已经完成：token validation 已提取，循环依赖已移除，公开接口保持不变，测试通过。',
     ),
-    bindTools: () => ({ invoke: async () => new AIMessage('') }),
     withStructuredOutput: () => ({
-      invoke: async (messages: unknown[]) => {
-        const text = messages.map((message) => String((message as { content?: unknown })?.content ?? '')).join('\n');
-        if (/entry decision 节点/.test(text)) {
+      invoke: async () => {
+        structuredDecisionCount += 1;
+        if (structuredDecisionCount === 1) {
           entryDecisionCount += 1;
           return { action: 'needs_plan' };
         }
-        if (/capability planning decision 节点/.test(text)) {
-          plannerDecisionCount += 1;
-          if (plannerDecisionCount === 1) {
-            const objective = '调查 auth 模块的结构、依赖和风险';
-            searchQueries.push(objective);
-            return {
-              result: 'next_task',
-              remaining_plan: [
-                { objective: '根据调查结论重构 auth 模块', capability_intent: 'code_modification' },
-              ],
-              next_task: { objective, capability_intent: 'codebase_exploration' },
-            };
-          }
-          secondTaskSawHandoff = /循环依赖|token validation/.test(text);
-          const objective = '根据调查结论重构 auth 模块，提取 token validation 并移除循环依赖';
-          searchQueries.push(objective);
-          return {
-            result: 'next_task',
-            remaining_plan: [],
-            next_task: { objective, capability_intent: 'code_modification' },
-          };
-        }
-        if (/capability decision 节点/.test(text)) {
-          routeDecisionCount += 1;
-          const capabilityName = routeDecisionCount === 1 ? 'explore' : 'code_modify';
-          selectedCapabilityNames.push(capabilityName);
-          return { lane: `capability.${capabilityName}` };
-        }
-        if (/子任务结果验收节点/.test(text)) {
-          outcomeDecisionCount += 1;
-          return outcomeDecisionCount === 1
-            ? { outcome: 'task_done', gap_note: '调查完成，后续重构任务应根据 handoff 具体化。' }
-            : { outcome: 'goal_done', gap_note: null };
-        }
-        throw new Error('Unexpected decision prompt in multi-task flow eval');
+        outcomeDecisionCount += 1;
+        return outcomeDecisionCount === 1
+          ? { outcome: 'task_done', gap_note: '调查完成，后续重构任务应根据 handoff 具体化。' }
+          : { outcome: 'goal_done', gap_note: null };
       },
     }),
   } as unknown as AgentModels['act'];
@@ -137,10 +102,62 @@ function buildScriptedDecisionModel() {
     model,
     stats: () => ({
       entryDecisionCount,
-      plannerDecisionCount,
-      routeDecisionCount,
       outcomeDecisionCount,
-      searchQueries,
+    }),
+  };
+}
+
+function buildScriptedPlannerRunner() {
+  let plannerDecisionCount = 0;
+  const selectedCapabilityNames: string[] = [];
+  const plannedObjectives: string[] = [];
+  let secondTaskSawHandoff = false;
+  const runner: CapabilityPlannerRunner = {
+    async invoke(input) {
+      plannerDecisionCount += 1;
+      if (plannerDecisionCount === 1) {
+        const objective = '调查 auth 模块的结构、依赖和风险';
+        plannedObjectives.push(objective);
+        selectedCapabilityNames.push('explore');
+        return {
+          result: 'next_task',
+          remaining_plan: [
+            {
+              objective: '根据调查结论重构 auth 模块',
+              capability_intent: 'code_modification',
+            },
+          ],
+          next_task: {
+            objective,
+            capability_intent: 'codebase_exploration',
+            capability_name: 'explore',
+            context_summary: null,
+          },
+        };
+      }
+      secondTaskSawHandoff = /循环依赖|token validation/.test(
+        input.latestHandoff ?? '',
+      );
+      const objective = '根据调查结论重构 auth 模块，提取 token validation 并移除循环依赖';
+      plannedObjectives.push(objective);
+      selectedCapabilityNames.push('code_modify');
+      return {
+        result: 'next_task',
+        remaining_plan: [],
+        next_task: {
+          objective,
+          capability_intent: 'code_modification',
+          capability_name: 'code_modify',
+          context_summary: input.latestHandoff,
+        },
+      };
+    },
+  };
+  return {
+    runner,
+    stats: () => ({
+      plannerDecisionCount,
+      plannedObjectives,
       selectedCapabilityNames,
       secondTaskSawHandoff,
     }),
@@ -153,6 +170,7 @@ function taskMatches(actual: string, expectedTerms: string[]) {
 
 async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]) {
   const decisions = buildScriptedDecisionModel();
+  const planner = buildScriptedPlannerRunner();
   const subagent = buildRecordingSubagent(testCase.input.subagentResults);
   const graph = createOrchestratorGraph({
     models: {
@@ -161,6 +179,7 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
       subagent: subagent.model,
     },
     actor,
+    capabilityPlannerRunner: planner.runner,
   });
   const result = await graph.invoke(
     buildOrchestratorTurnInput([new HumanMessage(testCase.input.userMessage)]),
@@ -178,7 +197,10 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
   const summaries = readRunDelegationSummaries(result);
   const tasks = summaries.map((summary) => summary.task);
   const statuses = summaries.map((summary) => summary.status);
-  const stats = decisions.stats();
+  const stats = {
+    ...decisions.stats(),
+    ...planner.stats(),
+  };
   const messages = Array.isArray(result.messages) ? result.messages : [];
   const finalText = String((messages.at(-1) as { content?: unknown } | undefined)?.content ?? '');
   const remainingLaneMessageCount = messages.filter((message) => getMessageLane(message as never) !== null).length;
@@ -197,13 +219,13 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
     },
     {
       key: 'per_task_pipeline_correct',
-      score: stats.searchQueries.length === expected.expectedSearchQueryTerms.length
-        && stats.searchQueries.every((query, index) =>
-          (expected.expectedSearchQueryTerms[index] ?? []).every((term) => query.includes(term)))
-        && stats.routeDecisionCount === expected.expectedDelegationCount
+      score: stats.plannedObjectives.length === expected.expectedPlannedObjectiveTerms.length
+        && stats.plannedObjectives.every((objective, index) =>
+          (expected.expectedPlannedObjectiveTerms[index] ?? []).every((term) => objective.includes(term)))
+        && stats.plannerDecisionCount === expected.expectedDelegationCount
         && JSON.stringify(stats.selectedCapabilityNames) === JSON.stringify(expected.expectedCapabilityNames)
         && summaries.length === expected.expectedTaskTerms.length ? 1 : 0,
-      comment: `searchQueries=${JSON.stringify(stats.searchQueries)}, capabilityDecisions=${stats.routeDecisionCount}, selected=${JSON.stringify(stats.selectedCapabilityNames)}`,
+      comment: `plannedObjectives=${JSON.stringify(stats.plannedObjectives)}, plannerDecisions=${stats.plannerDecisionCount}, selected=${JSON.stringify(stats.selectedCapabilityNames)}`,
     },
     {
       key: 'handoff_consumed_by_next_task_correct',

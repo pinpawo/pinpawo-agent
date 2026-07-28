@@ -200,13 +200,17 @@ function buildTerminalAnswerContext(state: OrchestratorStateType, runIterationLi
   }
 
   if (state.runPendingTask && !state.runNextDelegation) {
+    const unavailableReason = state.runPendingTask.contextSummary?.trim();
     return [
       '当前状态：',
       '当前没有可用于执行这项工作的能力，目标尚未完成。',
       `尚未执行的工作：${state.runPendingTask.task}`,
+      ...(unavailableReason
+        ? [`不可执行的原因：${unavailableReason}`]
+        : []),
       '',
       '本次回复目标：',
-      '说明当前无法执行的工作以及仍需完成的内容。',
+      '说明当前无法执行的工作、具体原因以及仍需完成的内容。',
     ].join('\n');
   }
 

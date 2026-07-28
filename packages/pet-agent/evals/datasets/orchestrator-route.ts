@@ -21,11 +21,10 @@ function inferAreas(example: Example): AgentEvalArea[] {
 
   if (
     example.inputs.capability_pack
-    || example.inputs.capability_candidates
+    || example.inputs.allowed_capability_names
     || example.outputs.expected_mode === 'capability'
-    || example.outputs.expected_capability_state
   ) {
-    areas.add('capability_search');
+    areas.add('capability_discovery');
   }
 
   if (
@@ -59,9 +58,8 @@ function inferDifficulty(example: Example): AgentEvalDifficulty {
   const areas = inferAreas(example);
   if (areas.includes('interruption_recovery')) return 'hard';
   if (
-    areas.includes('capability_search')
+    areas.includes('capability_discovery')
     || areas.includes('delegation_control')
-    || example.outputs.expected_capability_search_query_terms
   ) {
     return 'medium';
   }
@@ -96,7 +94,7 @@ export const orchestratorRouteDataset: AgentEvalDataset<
     owner: 'pet-agent',
     areas: [
       'route_control',
-      'capability_search',
+      'capability_discovery',
       'delegation_control',
       'interruption_recovery',
       'context_synthesis',

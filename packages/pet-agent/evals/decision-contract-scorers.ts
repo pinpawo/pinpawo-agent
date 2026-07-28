@@ -1,4 +1,3 @@
-import type { CapabilityDecisionBasicsExpected } from './datasets/capability-decision-basics.ts';
 import type { CapabilityPlanningExpected } from './datasets/capability-planning-basics.ts';
 import type { CapabilityPlanningInput } from './datasets/capability-planning-basics.ts';
 import type { EntryDecisionExpected } from './datasets/entry-decision-basics.ts';
@@ -46,20 +45,6 @@ export function adaptTaskDecisionMode(
 ): 'answer' | 'direct_task' | 'needs_plan' {
   if (action === 'answer' || action === 'needs_plan') return action;
   return 'direct_task';
-}
-
-export function scoreCapabilityDecision(
-  output: { selection: string },
-  expected: CapabilityDecisionBasicsExpected,
-): DecisionContractScore[] {
-  return [
-    exact(
-      'capability_selection_correct',
-      `Select ${expected.expectedSelection} from the executors actually available for this task.`,
-      output.selection,
-      expected.expectedSelection,
-    ),
-  ];
 }
 
 export function scoreOutcomeDecision(

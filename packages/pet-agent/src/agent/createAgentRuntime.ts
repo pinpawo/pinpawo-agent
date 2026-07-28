@@ -5,6 +5,13 @@ export type {
   OrchestrationDecisionStructuredOutputConfig,
 } from './orchestrator/types';
 export type { OrchestratorStateType } from './orchestrator/state';
+export type {
+  CapabilityPlannerInput,
+  CapabilityPlannerMode,
+  CapabilityPlannerNextTask,
+  CapabilityPlannerResult,
+  CapabilityPlannerRunner,
+} from './orchestrator/capabilityPlannerRunner';
 export { buildOrchestratorRunInput, buildOrchestratorTurnInput } from './orchestrator/state';
 export { validateUniqueCapabilityNames, validateUniqueToolkitNames } from './orchestrator/validation';
 export {

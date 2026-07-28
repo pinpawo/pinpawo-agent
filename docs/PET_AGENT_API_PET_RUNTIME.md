@@ -26,7 +26,7 @@ type PetAgentRuntimeInvokeInput = {
   runtimeEnvironment?: string;
   toolkits?: AgentToolkit[];
   extraCapabilities?: AgentCapability[];
-  forcedCapabilityNames?: string[];
+  allowedCapabilityNames?: string[];
 };
 
 type PetAgentRuntimeInvokeResult = { reply: string };
@@ -60,7 +60,8 @@ type PetAgentRuntimeConfig = {
 1. 入参 `brief` 为必填自然语言任务文本。
 2. `wikiRoot` 可选；存在时会读取 `{wikiRoot}/index.md`，注入 `SystemMessage`。
 3. `extraCapabilities` 仅在本次调用生效，与 runtime 级能力合并。
-4. `forcedCapabilityNames` 把本次调用的 Capability Decision 候选限制为指定名称。
+4. `allowedCapabilityNames` 可把本次调用的 Capability Document Workspace
+   限制为指定名称；不传时 Planner 可以探索完整的 compiled registry。
 5. `invoke()` 是最终结果接口，不接收工具事件 callback；需要实时工具/运行时事件的宿主应消费 root `streamEvents(v3)` 并通过 adapter 投影。
 6. Toolkit availability 在每次 invoke 的 registry generation 中解析；Capability
    是否可用由编译后的 registry 及其 diagnostics 决定。

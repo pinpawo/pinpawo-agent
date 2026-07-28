@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { capabilityPlanningBasicsDataset } from './datasets/capability-planning-basics.ts';
 import { getDecisionEvalScenarios } from './decision-eval-scenarios.ts';
 import { summarizeDecisionStability } from './decision-stability.ts';
 import { measureDecisionPrompt } from './prompt-preview.ts';
@@ -11,41 +10,16 @@ function structuredModel(output: Record<string, unknown>) {
   } as never;
 }
 
-function goalJudge() {
-  return {
-    model: {
-      withStructuredOutput: () => ({
-        invoke: async (messages: Array<{ content: unknown }>) => {
-          const input = JSON.parse(String(messages.at(-1)?.content)) as {
-            acceptanceCriteria: Array<{ id: string }>;
-          };
-          return {
-            criteria: Object.fromEntries(input.acceptanceCriteria.map(({ id }) => [id, {
-              met: true,
-              reason: 'criterion met',
-            }])),
-            summary: 'goal achieved',
-          };
-        },
-      }),
-    } as never,
-  };
-}
-
 test('decision eval scenarios cover every canonical prompt distribution', () => {
   assert.deepEqual({
     entry: getDecisionEvalScenarios('entry').length,
-    planner: getDecisionEvalScenarios('planner').length,
-    capability: getDecisionEvalScenarios('capability').length,
     outcome: getDecisionEvalScenarios('outcome').length,
-  }, { entry: 14, planner: 7, capability: 8, outcome: 6 });
+  }, { entry: 14, outcome: 6 });
 });
 
 test('decision eval scenarios render complete production messages', () => {
   const inputRoots = {
     entry: 'entry_decision_context',
-    planner: 'capability_planning_input',
-    capability: 'capability_decision_input',
     outcome: 'delegation_outcome_input',
   } as const;
   for (const scenario of getDecisionEvalScenarios()) {
@@ -108,16 +82,6 @@ test('decision eval scenarios invoke, parse, normalize, and score each target', 
       output: { action: 'answer', task: null, context_summary: null },
     },
     {
-      target: 'planner' as const,
-      name: 'boundary-cancels-obsolete-task',
-      output: { result: 'answer', remaining_plan: [], next_task: null },
-    },
-    {
-      target: 'capability' as const,
-      name: 'file-read-falls-back-to-general',
-      output: { selection: 'capability.general' },
-    },
-    {
       target: 'outcome' as const,
       name: 'goal-clearly-complete',
       output: { outcome: 'goal_done', gap_note: null },
@@ -133,43 +97,4 @@ test('decision eval scenarios invoke, parse, normalize, and score each target', 
     assert.ok(result.verdict);
     assert.ok(result.shape);
   }
-});
-
-test('decision eval keeps runtime and shape evidence outside goal criteria', async () => {
-  const capability = getDecisionEvalScenarios('capability').find(
-    ({ caseName }) => caseName === 'auth-structure-routes-to-explore',
-  );
-  assert.ok(capability);
-  const capabilityResult = await capability.run(structuredModel({ selection: 'capability.explore' }));
-  assert.deepEqual(
-    capabilityResult.scores.map(({ key }) => key),
-    ['capability_selection_correct'],
-  );
-  assert.deepEqual(capabilityResult.diagnostics?.candidateNames, ['explore']);
-  assert.equal(capabilityResult.diagnostics?.candidateRecallCorrect, true);
-
-  const planner = getDecisionEvalScenarios('planner').find(
-    ({ caseName }) => caseName === 'boundary-keeps-valid-next-task',
-  );
-  assert.ok(planner);
-  const plannerCase = capabilityPlanningBasicsDataset.cases.find(
-    ({ name }) => name === 'boundary-keeps-valid-next-task',
-  );
-  const materialized = plannerCase?.input.remainingPlan?.[0];
-  assert.ok(materialized);
-  const plannerResult = await planner.run(structuredModel({
-    result: 'next_task',
-    next_task: {
-      objective: materialized.objective,
-      capability_intent: materialized.capabilityIntent,
-    },
-    remaining_plan: [],
-  }), undefined, undefined, goalJudge());
-  assert.equal(plannerResult.diagnostics?.planEffect, 'unchanged');
-  assert.equal(plannerResult.diagnostics?.rubberStamp, true);
-  assert.ok(plannerResult.scores.every(({ key }) => key !== 'rubber_stamp_correct'));
-  assert.equal(
-    plannerResult.scores.find(({ key }) => key === 'materialized_task_correct')?.evaluator,
-    'llm-judge',
-  );
 });

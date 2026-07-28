@@ -4,18 +4,11 @@ import {
   OrchestratorState,
   type OrchestratorStateType,
 } from '../state';
-import {
-  asDecisionNode,
-  createControlContextBuilder,
-  type OrchestratorDecision,
-} from '../controlPrimitives';
 import type {
   OrchestratorConfig,
 } from '../types';
 import {
   createOrchestrationDecisionRunner,
-  createCapabilityPlanningDecisionRunner,
-  createCapabilityDecisionRunner,
   createTaskDecisionRunner,
 } from './decisions/orchestrationDecision';
 import {
@@ -27,13 +20,13 @@ import {
 } from './config';
 import { createAnswerNode } from './nodes/answer';
 import { createCapabilityNode } from './nodes/capability';
+import { createCapabilityPlannerNode } from './nodes/capabilityPlanner';
 import {
   createCompactContextNode,
   createPrepareNode,
 } from './nodes/prepare';
 import { afterContextPrep } from './routes/afterContextPrep';
 import { afterCapability } from './routes/afterCapability';
-import { afterDecision } from './routes/afterDecision';
 import { createAfterDelegationOutcomeIterationGuard } from './routes/afterDelegationOutcomeIterationGuard';
 
 // --- Graph builder ---
@@ -42,21 +35,13 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const orchestratorMaxIterations = readRunIterationLimit(config.maxRunIterations)
     ?? DEFAULT_ORCHESTRATOR_MAX_ITERATIONS;
   const subagentContextWindowTokens = readSubagentContextWindowTokens(config);
-  const buildControlContext = createControlContextBuilder(orchestratorMaxIterations);
   const prepare = createPrepareNode();
   const compactContext = createCompactContextNode({ config });
   const afterDelegationOutcomeIterationGuard =
     createAfterDelegationOutcomeIterationGuard({ orchestratorMaxIterations });
   const runOrchestrationDecision = createOrchestrationDecisionRunner(config);
   const runTaskDecision = createTaskDecisionRunner(config);
-  const runCapabilityPlanningDecision = createCapabilityPlanningDecisionRunner(config);
-  const runCapabilityDecision = createCapabilityDecisionRunner(config);
-
-  // Decision nodes write state patches; graph-local route helpers keep the
-  // control-flow shape visible in this builder.
-  const capabilityDecision: OrchestratorDecision = (state, ctx) => {
-    return runCapabilityDecision(state, ctx.runnableConfig);
-  };
+  const runCapabilityPlanner = createCapabilityPlannerNode(config);
 
   const delegationOutcomeDecision = (
     state: OrchestratorStateType,
@@ -76,12 +61,11 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     .addNode('prepare', prepare)
     .addNode('compactContext', compactContext)
     .addNode('entryDecision', runTaskDecision, {
-      ends: ['answer', 'capabilityPlanner', 'capabilityDecision'],
+      ends: ['answer', 'capabilityPlanner'],
     })
-    .addNode('capabilityPlanner', runCapabilityPlanningDecision, {
-      ends: ['answer', 'capabilityDecision'],
+    .addNode('capabilityPlanner', runCapabilityPlanner, {
+      ends: ['answer', 'capability'],
     })
-    .addNode('capabilityDecision', asDecisionNode(capabilityDecision, buildControlContext))
     .addNode('delegationOutcomeIterationGuard', delegationOutcomeIterationGuard)
     .addNode('delegationOutcomeDecision', delegationOutcomeDecision, {
       ends: ['capability', 'capabilityPlanner', 'answer'],
@@ -100,10 +84,6 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     .addConditionalEdges('delegationOutcomeIterationGuard', afterDelegationOutcomeIterationGuard, {
       answer: 'answer',
       delegationOutcomeDecision: 'delegationOutcomeDecision',
-    })
-    .addConditionalEdges('capabilityDecision', afterDecision, {
-      answer: 'answer',
-      capability: 'capability',
     })
     .addEdge('answer', END)
     .addConditionalEdges('capability', afterCapability, {

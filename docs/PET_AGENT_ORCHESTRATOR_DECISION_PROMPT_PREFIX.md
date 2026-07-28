@@ -1,7 +1,7 @@
 # pet-agent orchestrator decision shared prompt prefix
 
 > 状态：#417 shared-prefix ownership consolidation implementation candidate。
-> 用途：entryDecision / capabilityPlanner / capabilityDecision / outcomeDecision 共用的 system prompt 前缀。
+> 用途：entryDecision / Capability Planner Agent / outcomeDecision 共用的 system prompt 前缀。
 > 组装位置：放在 `[配置]` 行之后、各节点自己的"当前阶段/节点边界"段之前。
 
 ```text

@@ -8,6 +8,7 @@ function createSubmitHarness(overrides: {
   openExternalEditor?: (initialText: string) => void;
   composerTarget?: 'chat' | 'studio';
   studioConversationId?: string | null;
+  canContinueActiveDelegation?: boolean;
 } = {}) {
   const messages: string[] = [];
   const actions: TuiAction[] = [];
@@ -50,6 +51,12 @@ function createSubmitHarness(overrides: {
       runtimeController: {
         isConnected: () => true,
         isBusy: () => false,
+        canContinueActiveDelegation: () =>
+          overrides.canContinueActiveDelegation ?? false,
+        continueActiveDelegation: (message) => {
+          sent.push(`continue:${message}`);
+          return true;
+        },
         sendStudioRequest: (_text, conversationId) => {
           sent.push(`studio:${conversationId ?? 'none'}`);
           return true;
@@ -110,6 +117,46 @@ test('submitCurrentInputFromController selects the chat composer target for /cha
   assert.equal(harness.studioConversationId, null);
   assert.deepEqual(harness.actions.map((action) => action.type), ['session.configured']);
   assert.deepEqual(harness.sent, ['clear']);
+});
+
+test('submitCurrentInputFromController continues only an available suspended delegation', () => {
+  const harness = createSubmitHarness({
+    inputValue: '/continue apply the new constraints',
+    composerTarget: 'studio',
+    studioConversationId: 'conversation-1',
+    canContinueActiveDelegation: true,
+  });
+
+  harness.submit();
+
+  assert.equal(harness.composerTarget, 'chat');
+  assert.equal(harness.studioConversationId, null);
+  assert.deepEqual(harness.actions.map((action) => action.type), ['session.configured']);
+  assert.deepEqual(harness.sent, ['continue:apply the new constraints']);
+});
+
+test('submitCurrentInputFromController rejects unavailable or empty continuation', () => {
+  const unavailable = createSubmitHarness({
+    inputValue: '/continue apply the new constraints',
+  });
+
+  unavailable.submit();
+
+  assert.deepEqual(unavailable.sent, ['clear']);
+  assert.deepEqual(unavailable.messages, ['当前没有可继续的挂起委派。']);
+  assert.deepEqual(unavailable.actions, []);
+
+  const empty = createSubmitHarness({
+    inputValue: '/continue',
+    canContinueActiveDelegation: true,
+  });
+
+  empty.submit();
+
+  assert.deepEqual(empty.sent, ['clear']);
+  assert.deepEqual(empty.messages, [
+    '请提供继续当前委派的指导：/continue <指导>',
+  ]);
 });
 
 test('submitCurrentInputFromController resets the composer target before /resume and /new', () => {

@@ -21,7 +21,17 @@ type TuiCommandSubmitInput = {
   appendSystemMessage: (text: string) => void;
   clearInputValue: () => void;
   dispatch: (action: TuiAction) => void;
-  runtimeController: Pick<TuiRuntimeController, 'isConnected' | 'isBusy' | 'sendStudioRequest' | 'sendChatRequest' | 'startNewSession' | 'submitReviewResponse'>;
+  runtimeController: Pick<
+    TuiRuntimeController,
+    | 'isConnected'
+    | 'isBusy'
+    | 'canContinueActiveDelegation'
+    | 'continueActiveDelegation'
+    | 'sendStudioRequest'
+    | 'sendChatRequest'
+    | 'startNewSession'
+    | 'submitReviewResponse'
+  >;
 };
 
 export function submitCurrentInputFromController(options: TuiCommandSubmitInput) {
@@ -35,7 +45,10 @@ export function submitCurrentInputFromController(options: TuiCommandSubmitInput)
     }
 
     if (parsed.name === 'help') {
-      options.appendSystemMessage(formatTuiCommandHelp());
+      options.appendSystemMessage(formatTuiCommandHelp({
+        canContinueActiveDelegation:
+          options.runtimeController.canContinueActiveDelegation(),
+      }));
       options.clearInputValue();
       return;
     }
@@ -83,6 +96,26 @@ export function submitCurrentInputFromController(options: TuiCommandSubmitInput)
       });
       options.openResumePicker();
       options.clearInputValue();
+      return;
+    }
+
+    if (parsed.name === 'continue') {
+      if (!parsed.args) {
+        options.appendSystemMessage(TUI_TEXT.continueRequiresGuidance);
+        options.clearInputValue();
+        return;
+      }
+      if (!options.runtimeController.canContinueActiveDelegation()) {
+        options.appendSystemMessage(TUI_TEXT.continueUnavailable);
+        options.clearInputValue();
+        return;
+      }
+      options.selectChatComposerTarget();
+      options.dispatch({
+        type: 'session.configured',
+        kind: 'chat',
+      });
+      options.runtimeController.continueActiveDelegation(parsed.args);
       return;
     }
 

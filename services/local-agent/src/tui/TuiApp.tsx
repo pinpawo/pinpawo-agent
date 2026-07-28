@@ -277,14 +277,23 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     dispatch,
   });
   const inputValue = textArea.value;
+  const canContinueActiveDelegation =
+    runtimeController.canContinueActiveDelegation();
   const commandPalette = useMemo(() => (
     inputFocused && !pendingApproval
       ? buildCommandPaletteModel({
           text: inputValue,
           cursorOffset: textArea.cursorOffset,
-        }, commandPaletteIndex)
+        }, commandPaletteIndex, { canContinueActiveDelegation })
       : buildCommandPaletteModel({ text: '', cursorOffset: 0 })
-  ), [commandPaletteIndex, inputFocused, inputValue, pendingApproval, textArea.cursorOffset]);
+  ), [
+    canContinueActiveDelegation,
+    commandPaletteIndex,
+    inputFocused,
+    inputValue,
+    pendingApproval,
+    textArea.cursorOffset,
+  ]);
   const fileMentionRoot = focusedSession?.runtime.cwd ?? workdir;
   const fileMention = useMemo(() => (
     inputFocused && !pendingApproval

@@ -28,6 +28,27 @@ test('buildCommandPaletteModel filters command names and aliases', () => {
   assert.deepEqual(quitAlias.items.map((command) => command.name), ['quit']);
 });
 
+test('buildCommandPaletteModel offers continuation only while a delegation is suspended', () => {
+  const unavailable = buildCommandPaletteModel({
+    text: '/con',
+    cursorOffset: 4,
+  });
+  assert.equal(unavailable.open, true);
+  assert.deepEqual(unavailable.items, []);
+
+  const available = buildCommandPaletteModel(
+    { text: '/con', cursorOffset: 4 },
+    0,
+    { canContinueActiveDelegation: true },
+  );
+  assert.equal(available.open, true);
+  assert.deepEqual(available.items.map((command) => command.name), ['continue']);
+  assert.deepEqual(completeCommandPaletteInput(available), {
+    text: '/continue ',
+    cursorOffset: '/continue '.length,
+  });
+});
+
 test('buildCommandPaletteModel stays closed outside the active slash prefix', () => {
   assert.equal(buildCommandPaletteModel({ text: 'hello', cursorOffset: 5 }).open, false);
   assert.equal(buildCommandPaletteModel({ text: '/studio task', cursorOffset: 12 }).open, false);

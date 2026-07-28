@@ -22,7 +22,7 @@ Status meanings:
 
 | Area | Capability | Status | Remaining work |
 | --- | --- | --- | --- |
-| host | authenticated local WebSocket, snapshot bootstrap, reconnect | aligned | production handler/runtime integration is complete; real-process restart dogfood remains |
+| host | authenticated local WebSocket, snapshot bootstrap, reconnect | aligned | production handler/runtime and independent-process restart coverage are complete; full CLI/supervisor dogfood remains |
 | chat | submit a message through the shared protocol | aligned | production handler-chain smoke is complete; sustained live-LLM dogfood remains |
 | chat | canonical message/operation/subagent ordering | aligned | richer rendering below |
 | timeline | streaming assistant response on a live surface | aligned | real-host Markdown delta dogfood |
@@ -39,10 +39,10 @@ Status meanings:
 | composer | slash commands and command/help palette | aligned | production workflow dogfood |
 | composer | workspace `@path` completion | aligned | production workflow dogfood |
 | attachments | quoted, escaped, `file://`, and multiple local paths | partial | complete production multi-path drag-in retest |
-| attachments | removable structured attachment chips and submit | aligned | confirm real host/tool behavior for files and directories |
-| review | approval, rejection, text response, batching, cancellation | aligned | real guarded-tool dogfood |
-| session | new session and resume picker | aligned | real checkpoint/session-list dogfood |
-| runtime | interrupt, error notice, review policy | aligned | disconnect and host failure dogfood |
+| attachments | removable structured attachment chips and submit | aligned | production host integration proves full paths reach model context without eager content reads while terminal/checkpoint text remains filename-only; live tool dogfood remains |
+| review | approval, rejection, text response, batching, cancellation | aligned | production handler-chain approval and cancel-to-reject resume are covered; live guarded-tool dogfood remains |
+| session | new session and resume picker | aligned | production handler-chain new/list/resume and native scrollback boundaries are covered; real checkpoint dogfood remains |
+| runtime | interrupt, error notice, review policy | aligned | production interruption, graph-failure recovery, and process-level host restart are covered; full CLI/supervisor dogfood remains |
 | status | two-line run/model/workspace/token/context status | aligned | narrow-terminal dogfood |
 | transcript | pager handoff and Markdown export | aligned | production pager/editor combinations |
 | editor | `$VISUAL`/`$EDITOR` handoff and draft restore | aligned | production editor combinations |
@@ -61,10 +61,14 @@ Status meanings:
 2. Exercise a real local-agent run containing:
    user message → streaming assistant/tool activity → subagent output →
    completed assistant message.
-3. Exercise approval, interruption, reconnect, new, and resume against the real
-   host rather than demo-only connections.
-4. Verify structured attachments reach the real host unchanged and remain
-   local until submission.
+3. Dogfood approval against a live guarded tool. Deterministic production-host
+   coverage now includes approval, cancel-to-reject resume, interruption
+   (including partial-stream settlement), reconnect across independent host
+   processes, new, list, resume, and native scrollback session boundaries.
+4. Dogfood structured attachments with real local tools. The deterministic
+   production-host integration already proves full paths reach model context,
+   contents are not eagerly read, and terminal/checkpoint text remains
+   filename-only.
 
 ### P1 — daily-use interaction parity
 

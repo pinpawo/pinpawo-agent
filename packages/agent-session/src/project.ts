@@ -389,9 +389,10 @@ function finishOwnedRun(
   context: AgentSessionReductionContext,
 ) {
   if (!ownsRun(session, requestId)) return session;
+  const settledSession = settleStreamingAssistant(session, requestId);
   let nextSession: AgentSession = {
-    ...session,
-    timeline: finalizeSubagentMessages(session.timeline, requestId),
+    ...settledSession,
+    timeline: finalizeSubagentMessages(settledSession.timeline, requestId),
     activeRun: null,
   };
   for (const message of messages) {

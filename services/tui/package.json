@@ -24,7 +24,8 @@
     "smoke:studio": "bun run src/main.ts --smoke-studio",
     "smoke:spike": "bun run src/spike.ts --smoke",
     "smoke:split": "bun run src/splitFooterSpike.ts --smoke",
-    "test:host": "bun test tests/localHostChat.bun.test.ts",
+    "test:host": "bun test tests/localHost*.bun.test.ts",
+    "test:process": "bun test tests/localHostProcessRestart.bun.test.ts",
     "test:native": "bun test $(find src tests -name '*.bun.test.ts' | sort)",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.host.json",
     "test": "node --import tsx/esm --test $(find src -name '*.test.ts' ! -name '*.bun.test.ts' | sort)"

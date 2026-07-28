@@ -4,6 +4,6 @@
     "noEmit": true
   },
   "include": [
-    "tests/localHostChat.bun.test.ts"
+    "tests/*.bun.test.ts"
   ]
 }

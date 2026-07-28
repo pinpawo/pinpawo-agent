@@ -94,8 +94,15 @@ export async function runAgent(options: RunAgentOptions = {}) {
       await transport.closed;
       runtime.requestStop();
     } else {
-      await startLocalServer(getConfig().localServerPort, deps);
-      await runtime.runForever({ skipInit: true });
+      const transport = await startLocalServer(getConfig().localServerPort, deps);
+      closeLocalTransport = transport.close;
+      try {
+        await runtime.runForever({ skipInit: true });
+      } finally {
+        transport.close();
+        await transport.closed;
+        closeLocalTransport = null;
+      }
     }
   } finally {
     process.off('SIGINT', handleSigint);

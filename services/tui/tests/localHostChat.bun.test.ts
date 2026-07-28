@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import {
-  AIMessage,
-  type BaseMessage,
-} from '@langchain/core/messages';
 import {
   CliRenderEvents,
   type CliRenderer,
@@ -17,18 +17,15 @@ import type {
   AgentSession,
   AgentTimelineEntry,
 } from '@pinpawo/agent-session';
-import type {
-  AgentChannelSetup,
-} from '../../local-agent/src/agentChannel';
 import {
   FileCapabilityArtifactStore,
 } from '../../local-agent/src/capabilityArtifactStore';
 import {
   buildLocalOnlyAgentContext,
 } from '../../local-agent/src/contextLoader';
-import type {
-  LocalAgentGraphService,
-} from '../../local-agent/src/agentGraphService';
+import {
+  readLocalChatDisplayText,
+} from '../../local-agent/src/localChatAttachments';
 import {
   createLocalServerHandlers,
 } from '../../local-agent/src/localServerHandlers';
@@ -50,16 +47,34 @@ import {
 } from '../src/client/localHostConnection';
 import { TuiSessionController } from '../src/session/sessionController';
 import { TimelineScrollback } from '../src/timeline/timelineScrollback';
+import {
+  ASSISTANT_MESSAGE,
+  createHostGraphFixture,
+  ERROR_MESSAGE,
+  ERROR_PARTIAL,
+  GRAPH_ERROR,
+  INTERRUPT_MESSAGE,
+  INTERRUPT_PARTIAL,
+  REVIEW_APPROVE_MESSAGE,
+  REVIEW_APPROVED_REPLY,
+  REVIEW_CANCEL_MESSAGE,
+  REVIEW_REJECTED_REPLY,
+  REVIEW_SPEC,
+} from './support/hostGraphFixture';
 
 const AUTH_TOKEN = 'tui-v2-host-integration-token';
 const USER_MESSAGE = 'Inspect the host integration.';
-const ASSISTANT_MESSAGE = '# Result\n\nThe **host transport** is aligned.';
+const RECOVERY_MESSAGE = 'Verify the host recovers.';
+const ATTACHMENT_NAME = '资料 with spaces.txt';
+const ATTACHMENT_CONTENT = 'fixture contents must remain unread until a tool inspects this path';
 const REQUIRED_TOOLKITS = [createBashToolkit(), createGitToolkit()];
 
-test('production local-agent handlers drive ordered v2 scrollback and reconnect', async () => {
+test('production local-agent handlers drive the v2 host vertical slice', async () => {
   const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-tui-v2-host-'));
+  const attachmentPath = join(workdir, ATTACHMENT_NAME);
+  writeFileSync(attachmentPath, ATTACHMENT_CONTENT);
   const runtimeConfig = buildLocalAgentRuntimeConfig(workdir);
-  const graphFixture = createGraphFixture();
+  const graphFixture = createHostGraphFixture();
   const localServerHandlers = createLocalServerHandlers({
     actorId: 'pet-host-integration',
     actorName: 'PinPawo',
@@ -135,6 +150,17 @@ test('production local-agent handlers drive ordered v2 scrollback and reconnect'
     'chat-request',
     'snapshot-completion',
     'snapshot-reconnect',
+    'session-new',
+    'session-list',
+    'session-resume',
+    'chat-interrupt',
+    'chat-review-approve',
+    'snapshot-review-approve',
+    'chat-review-cancel',
+    'snapshot-review-cancel',
+    'chat-error',
+    'chat-recovery',
+    'snapshot-recovery',
   ];
   const observedSessions: AgentSession[] = [];
   const observedConnections: string[] = [];
@@ -170,7 +196,13 @@ test('production local-agent handlers drive ordered v2 scrollback and reconnect'
       ].join('\n'));
     }
 
-    assert.deepEqual(controller.submitChat(USER_MESSAGE), {
+    assert.deepEqual(controller.submitChat(USER_MESSAGE, [{
+      id: 'attachment-1',
+      source: 'local-path',
+      kind: 'file',
+      path: attachmentPath,
+      name: ATTACHMENT_NAME,
+    }]), {
       ok: true,
       requestId: 'chat-request',
     });
@@ -190,6 +222,19 @@ test('production local-agent handlers drive ordered v2 scrollback and reconnect'
 
     assert.equal(chatRequestCount, 1);
     assert.equal(graphFixture.streamCount(), 1);
+    const graphInputMessage = graphFixture.inputMessages().at(-1);
+    assert.ok(graphInputMessage);
+    const graphInputText = graphInputMessage.content;
+    if (typeof graphInputText !== 'string') {
+      assert.fail('expected the local attachment model input to be text');
+    }
+    assert.match(graphInputText, /<local_attachments>/);
+    assert.ok(graphInputText.includes(attachmentPath));
+    assert.ok(!graphInputText.includes(ATTACHMENT_CONTENT));
+    assert.equal(
+      readLocalChatDisplayText(graphInputMessage),
+      `${USER_MESSAGE}\n\nAttachments:\n- file: ${ATTACHMENT_NAME}`,
+    );
     assert.deepEqual(transportErrors, []);
     assert.equal(controller.getState().connection, 'ready');
     assert.equal(controller.getState().session.runtime?.model, 'host-integration-model');
@@ -218,6 +263,17 @@ test('production local-agent handlers drive ordered v2 scrollback and reconnect'
         'message:assistant:completed',
       ],
     );
+    const visibleUserMessage = controller.getState().session.timeline.find((entry) => (
+      entry.type === 'message' && entry.role === 'user'
+    ));
+    assert.equal(
+      visibleUserMessage?.type === 'message' ? visibleUserMessage.text : null,
+      `${USER_MESSAGE}\n\nAttachments:\n- file: ${ATTACHMENT_NAME}`,
+    );
+    assert.doesNotMatch(
+      visibleUserMessage?.type === 'message' ? visibleUserMessage.text : '',
+      new RegExp(escapeRegExp(attachmentPath)),
+    );
     assert.ok(observedSessions.some((session) => session.timeline.some((entry) => (
       entry.type === 'operation' && entry.phase === 'started'
     ))));
@@ -230,6 +286,7 @@ test('production local-agent handlers drive ordered v2 scrollback and reconnect'
     const output = committedRows.join('\n');
     assertOrdered(output, [
       USER_MESSAGE,
+      ATTACHMENT_NAME,
       'read_fixture',
       'host output',
       'Found transport evidence.',
@@ -237,6 +294,8 @@ test('production local-agent handlers drive ordered v2 scrollback and reconnect'
       'The host transport is aligned.',
     ]);
     assert.doesNotMatch(output, /# Result|\*\*host transport\*\*/);
+    assert.doesNotMatch(output, new RegExp(escapeRegExp(attachmentPath)));
+    assert.doesNotMatch(output, new RegExp(escapeRegExp(ATTACHMENT_CONTENT)));
     assert.equal(countOccurrences(output, USER_MESSAGE), 1);
     assert.equal(countOccurrences(output, 'The host transport is aligned.'), 1);
 
@@ -267,6 +326,17 @@ test('production local-agent handlers drive ordered v2 scrollback and reconnect'
         'message:assistant:completed',
       ],
     );
+    const checkpointUserMessage = controller.getState().session.timeline.find((entry) => (
+      entry.type === 'message' && entry.role === 'user'
+    ));
+    assert.equal(
+      checkpointUserMessage?.type === 'message' ? checkpointUserMessage.text : null,
+      `${USER_MESSAGE}\n\nAttachments:\n- file: ${ATTACHMENT_NAME}`,
+    );
+    assert.doesNotMatch(
+      checkpointUserMessage?.type === 'message' ? checkpointUserMessage.text : '',
+      new RegExp(escapeRegExp(attachmentPath)),
+    );
     assert.equal(
       committedRows.join('\n'),
       output,
@@ -277,6 +347,235 @@ test('production local-agent handlers drive ordered v2 scrollback and reconnect'
         message === '[local-server] TUI client connected'
       )).length >= 2,
     );
+
+    const originalSessionId = controller.getState().session.sessionId;
+    const committedBeforeSessionSwitch = committedRows.join('\n');
+    const newSession = await controller.startNewSession();
+    assert.notEqual(newSession.session.id, originalSessionId);
+    assert.equal(newSession.session.active, true);
+    assert.equal(controller.getState().session.sessionId, newSession.session.id);
+    assert.deepEqual(controller.getState().session.timeline, []);
+    const committedAfterNewSession = committedRows.join('\n');
+    assert.ok(committedAfterNewSession.startsWith(committedBeforeSessionSwitch));
+    assert.match(
+      committedAfterNewSession.slice(committedBeforeSessionSwitch.length),
+      /── session .* ──/,
+    );
+    assert.equal(countOccurrences(committedAfterNewSession, USER_MESSAGE), 1);
+    assert.equal(
+      countOccurrences(committedAfterNewSession, 'The host transport is aligned.'),
+      1,
+    );
+
+    const sessions = await controller.listSessions();
+    assert.equal(sessions.length, 2);
+    assert.equal(sessions[0]?.id, newSession.session.id);
+    assert.equal(sessions[0]?.active, true);
+    const originalSession = sessions.find((session) => session.id === originalSessionId);
+    assert.ok(originalSession);
+    assert.equal(originalSession.active, false);
+    assert.match(originalSession.title, /Inspect the host integration/);
+
+    const resumedSession = await controller.resumeSession(originalSessionId);
+    assert.equal(resumedSession.session.id, originalSessionId);
+    assert.equal(resumedSession.session.active, true);
+    assert.equal(controller.getState().session.sessionId, originalSessionId);
+    assert.deepEqual(
+      controller.getState().session.timeline.map(timelineEntryShape),
+      [
+        'message:user:completed',
+        'message:assistant:completed',
+      ],
+    );
+    await Bun.sleep(200);
+    const resumedOutput = committedRows.join('\n');
+    assert.equal(countOccurrences(resumedOutput, USER_MESSAGE), 2);
+    assert.equal(countOccurrences(resumedOutput, 'The host transport is aligned.'), 2);
+    assert.doesNotMatch(resumedOutput, new RegExp(escapeRegExp(attachmentPath)));
+
+    assert.deepEqual(controller.submitChat(INTERRUPT_MESSAGE), {
+      ok: true,
+      requestId: 'chat-interrupt',
+    });
+    await waitFor(() => {
+      const run = controller.getState().session.activeRun;
+      return run?.state === 'running' && run.activity === 'streaming';
+    });
+    assert.deepEqual(controller.interruptRun(), {
+      ok: true,
+      requestId: 'chat-interrupt',
+    });
+    assert.equal(controller.getState().session.activeRun?.state, 'interrupting');
+    await waitFor(() => (
+      graphFixture.interruptObserved()
+      && controller.getState().session.activeRun === null
+    ));
+    const interruptedEntries = controller.getState().session.timeline.filter(
+      (entry): entry is Extract<AgentTimelineEntry, { type: 'message' }> => (
+        entry.type === 'message' && entry.requestId === 'chat-interrupt'
+      ),
+    );
+    assert.deepEqual(
+      interruptedEntries.map((entry) => `${entry.role}:${entry.status}:${entry.text}`),
+      [
+        `user:completed:${INTERRUPT_MESSAGE}`,
+        `assistant:completed:${INTERRUPT_PARTIAL}`,
+        'system:completed:interrupted',
+      ],
+    );
+    const interruptedOutput = committedRows.join('\n');
+    assertOrdered(interruptedOutput.slice(resumedOutput.length), [
+      INTERRUPT_MESSAGE,
+      INTERRUPT_PARTIAL,
+      'interrupted',
+    ]);
+
+    assert.deepEqual(controller.submitChat(REVIEW_APPROVE_MESSAGE), {
+      ok: true,
+      requestId: 'chat-review-approve',
+    });
+    await waitFor(() => (
+      controller.getState().session.activeRun?.state === 'waiting_review'
+    ));
+    const approvalRun = controller.getState().session.activeRun;
+    assert.ok(approvalRun?.state === 'waiting_review');
+    assert.equal(approvalRun.reviewAction.actionId, 'review-interrupt-approve');
+    assert.equal(approvalRun.reviewAction.reviews[0]?.id, REVIEW_SPEC.id);
+    const approvalResult = controller.submitReviewResponse({
+      requestId: 'chat-review-approve',
+      actionId: approvalRun.reviewAction.actionId,
+      decisions: [],
+      optionId: 'approve',
+    });
+    assert.equal(approvalResult.ok, true);
+    assert.equal(approvalResult.ok ? approvalResult.status : null, 'sent');
+    await waitFor(() => (
+      snapshotRequestCount === 4
+      && controller.getState().session.activeRun === null
+      && hasCompletedRequestMessage(
+        controller.getState().session,
+        'chat-review-approve',
+        REVIEW_APPROVED_REPLY,
+      )
+    ));
+    assert.deepEqual(graphFixture.reviewResumes()[0], {
+      'review-interrupt-approve': {
+        decisions: [{
+          reviewId: REVIEW_SPEC.id,
+          selectedOptionId: 'approve',
+        }],
+      },
+    });
+    const approvedOutput = committedRows.join('\n');
+    assertOrdered(approvedOutput.slice(interruptedOutput.length), [
+      REVIEW_APPROVE_MESSAGE,
+      REVIEW_APPROVED_REPLY,
+    ]);
+
+    assert.deepEqual(controller.submitChat(REVIEW_CANCEL_MESSAGE), {
+      ok: true,
+      requestId: 'chat-review-cancel',
+    });
+    await waitFor(() => (
+      controller.getState().session.activeRun?.state === 'waiting_review'
+    ));
+    const cancellationRun = controller.getState().session.activeRun;
+    assert.ok(cancellationRun?.state === 'waiting_review');
+    assert.equal(cancellationRun.reviewAction.actionId, 'review-interrupt-cancel');
+    assert.deepEqual(controller.cancelReview({
+      requestId: 'chat-review-cancel',
+      actionId: cancellationRun.reviewAction.actionId,
+    }), {
+      ok: true,
+    });
+    await waitFor(() => (
+      snapshotRequestCount === 5
+      && controller.getState().session.activeRun === null
+      && hasCompletedRequestMessage(
+        controller.getState().session,
+        'chat-review-cancel',
+        REVIEW_REJECTED_REPLY,
+      )
+    ));
+    assert.deepEqual(graphFixture.reviewResumes()[1], {
+      'review-interrupt-cancel': {
+        decisions: [{
+          reviewId: REVIEW_SPEC.id,
+          selectedOptionId: 'reject',
+        }],
+      },
+    });
+    const cancelledOutput = committedRows.join('\n');
+    assertOrdered(cancelledOutput.slice(approvedOutput.length), [
+      REVIEW_CANCEL_MESSAGE,
+      REVIEW_REJECTED_REPLY,
+    ]);
+
+    assert.deepEqual(controller.submitChat(ERROR_MESSAGE), {
+      ok: true,
+      requestId: 'chat-error',
+    });
+    await waitFor(() => (
+      controller.getState().session.activeRun === null
+      && hasCompletedRequestMessage(
+        controller.getState().session,
+        'chat-error',
+        GRAPH_ERROR,
+        'system',
+      )
+    ));
+    const errorEntries = requestMessageEntries(
+      controller.getState().session,
+      'chat-error',
+    );
+    assert.deepEqual(
+      errorEntries.map((entry) => `${entry.role}:${entry.status}:${entry.text}`),
+      [
+        `user:completed:${ERROR_MESSAGE}`,
+        `assistant:completed:${ERROR_PARTIAL}`,
+        `system:completed:${GRAPH_ERROR}`,
+      ],
+    );
+    const errorOutput = committedRows.join('\n');
+    assertOrdered(errorOutput.slice(cancelledOutput.length), [
+      ERROR_MESSAGE,
+      ERROR_PARTIAL,
+      GRAPH_ERROR,
+    ]);
+
+    assert.deepEqual(controller.submitChat(RECOVERY_MESSAGE), {
+      ok: true,
+      requestId: 'chat-recovery',
+    });
+    await waitFor(() => (
+      snapshotRequestCount === 6
+      && controller.getState().session.activeRun === null
+      && hasCompletedRequestMessage(
+        controller.getState().session,
+        'chat-recovery',
+        ASSISTANT_MESSAGE,
+      )
+    ));
+    assert.deepEqual(
+      controller.getState().session.timeline
+        .filter((entry) => entry.requestId === 'chat-recovery')
+        .map(timelineEntryShape),
+      [
+        'message:user:completed',
+        'operation:runtime.read_fixture:completed',
+        'message:subagent:completed',
+        'message:assistant:completed',
+      ],
+    );
+    const recoveryOutput = committedRows.join('\n');
+    assertOrdered(recoveryOutput.slice(errorOutput.length), [
+      RECOVERY_MESSAGE,
+      'read_fixture',
+      'Found transport evidence.',
+      'The host transport is aligned.',
+    ]);
+    assert.equal(chatRequestCount, 6);
+    assert.equal(graphFixture.streamCount(), 8);
   } finally {
     unsubscribe();
     controller.stop();
@@ -293,105 +592,36 @@ test('production local-agent handlers drive ordered v2 scrollback and reconnect'
   }
 });
 
-function createGraphFixture() {
-  let messages: BaseMessage[] = [];
-  let streams = 0;
-  const service = {
-    async readThreadState() {
-      return {
-        messages,
-        pendingHumanReview: null,
-        hasPendingContinuation: false,
-      };
-    },
-    streamEvents(setup: AgentChannelSetup) {
-      streams += 1;
-      const finalReply = new AIMessage({
-        content: ASSISTANT_MESSAGE,
-        usage_metadata: {
-          input_tokens: 20,
-          output_tokens: 8,
-          total_tokens: 28,
-        },
-      });
-      finalReply.id = 'assistant-final';
-      messages = [...setup.input.messages, finalReply];
-      return (async function* () {
-        const toolNamespace = ['general:host', 'tools:read'];
-        yield protocolEvent('tools', {
-          event: 'tool-started',
-          tool_call_id: 'operation-1',
-          tool_name: 'read_fixture',
-          input: { path: 'services/tui' },
-        }, toolNamespace);
-
-        const subagentNamespace = ['general:host', 'model_request:explore'];
-        yield protocolEvent('messages', {
-          event: 'message-start',
-          id: 'subagent-1',
-        }, subagentNamespace);
-        yield protocolEvent('messages', {
-          event: 'content-block-delta',
-          delta: {
-            type: 'text-delta',
-            text: 'Found transport evidence.',
-          },
-        }, subagentNamespace);
-        yield protocolEvent('messages', {
-          event: 'message-finish',
-        }, subagentNamespace);
-
-        yield protocolEvent('tools', {
-          event: 'tool-finished',
-          tool_call_id: 'operation-1',
-          output: 'host output',
-        }, toolNamespace);
-
-        yield protocolEvent('messages', {
-          event: 'message-start',
-          id: 'assistant-final',
-        });
-        yield protocolEvent('messages', {
-          event: 'content-block-delta',
-          delta: {
-            type: 'text-delta',
-            text: ASSISTANT_MESSAGE,
-          },
-        });
-        yield protocolEvent('messages', {
-          event: 'message-finish',
-        });
-        yield protocolEvent('values', { messages });
-      })();
-    },
-  } as unknown as LocalAgentGraphService;
-
-  return {
-    service,
-    streamCount: () => streams,
-  };
-}
-
-function protocolEvent(
-  method: string,
-  data: unknown,
-  namespace: string[] = [],
-) {
-  return {
-    type: 'event' as const,
-    seq: 0,
-    method,
-    params: {
-      namespace,
-      data,
-    },
-  };
-}
-
 function timelineEntryShape(entry: AgentTimelineEntry) {
   return entry.type === 'operation'
     ? `operation:${entry.kind}:${entry.phase}`
     : `message:${entry.role}:${entry.status}`;
+}
+
+function hasCompletedRequestMessage(
+  session: AgentSession,
+  requestId: string,
+  text: string,
+  role: 'assistant' | 'system' = 'assistant',
+) {
+  return session.timeline.some((entry) => (
+    entry.type === 'message'
+    && entry.role === role
+    && entry.requestId === requestId
+    && entry.status === 'completed'
+    && entry.text === text
+  ));
+}
+
+function requestMessageEntries(
+  session: AgentSession,
+  requestId: string,
+) {
+  return session.timeline.filter(
+    (entry): entry is Extract<AgentTimelineEntry, { type: 'message' }> => (
+      entry.type === 'message' && entry.requestId === requestId
+    ),
+  );
 }
 
 function captureCommittedRows(renderer: CliRenderer) {
@@ -422,6 +652,10 @@ function assertOrdered(text: string, parts: readonly string[]) {
 
 function countOccurrences(text: string, value: string) {
   return text.split(value).length - 1;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 async function waitFor(

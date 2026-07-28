@@ -36,6 +36,12 @@ The probe covers:
 | shared projection import | no `services/local-agent/src/*` import | implemented |
 | local-agent host integration | production session, chat adapter, inflight operation, snapshot, and authenticated WebSocket handlers drive chat submission, operation/subagent/delta/completion events, completion rehydration, and duplicate-free native scrollback | Bun native integration test |
 | local-agent reconnect integration | a transport termination triggers v2 backoff/reconnect and checkpoint rehydration; live-only operation/subagent state is intentionally omitted while committed terminal rows are not replayed | Bun native integration test |
+| local attachment host boundary | structured local attachments traverse the authenticated production protocol with full paths available only to model context, no eager file-content read, and filename-only terminal/checkpoint text before and after reconnect | Bun native integration test |
+| production session switching | v2 new/list/resume commands traverse the authenticated host, preserve per-thread checkpoints and active-session metadata, avoid replay on an empty new session, and deliberately recommit resumed history at a native scrollback session boundary | Bun native integration test |
+| production interruption | a v2 interrupt traverses the authenticated host, aborts the graph signal, settles partial assistant output, appends the terminal notice in canonical order, and releases native scrollback for later rows | shared projection unit + Bun native integration test |
+| production review resolution | canonical review interrupts reach v2 as waiting-review state; approval and cancel-to-reject decisions traverse the authenticated host, resume the same graph thread, clear the checkpointed interrupt, complete the assistant response, and release native scrollback | Bun native integration test |
+| production failure recovery | a graph failure after assistant delta settles the partial message, appends the canonical error in order, releases the active run, and permits the next authenticated host request to complete normally | shared projection unit + Bun native integration test |
+| production process restart | the local HTTP/WebSocket transport exposes an idempotent close lifecycle; two independent Bun host processes reuse one port and state root while v2 reconnects and preserves the active session ID | local-agent lifecycle unit + Bun child-process integration test |
 | canonical timeline order | message/operation/message order is retained | automated test |
 | operation raw payload | shared projection retains transient raw data | automated test |
 | live ordered operation tail | running/updated operations remain visible with later subagent/message rows on one transient surface, then commit atomically in canonical order | Bun native test |
@@ -80,8 +86,9 @@ The probe covers:
 | native textarea regression | multiline paste and single-grapheme backspace preserve line boundaries | Bun native test |
 | TypeScript | `npm run typecheck -w @pinpawo/tui` | passed |
 | unit tests | `npm run test -w @pinpawo/tui` | passed, 119 tests |
-| native tests | `npm run test:native -w @pinpawo/tui` | passed, 21 tests including file-mention resize/wide-character cursor mapping, policy/command/help/notice, approval/resume resize, textarea editing/history shortcuts, and 10 real ScrollbackSurface tests; one spans the production local-agent handler chain and authenticated WebSocket transport |
-| focused host integration | `npm run test:host -w @pinpawo/tui` | passed; ordered user/operation/subagent/Markdown completion survives completion snapshot rehydration, and reconnect does not replay committed rows |
+| native tests | `npm run test:native -w @pinpawo/tui` | passed, 22 tests including file-mention resize/wide-character cursor mapping, policy/command/help/notice, approval/resume resize, textarea editing/history shortcuts, 10 real ScrollbackSurface tests, a production handler vertical slice, and an independent-process restart |
+| focused host integration | `npm run test:host -w @pinpawo/tui` | passed; attachment boundaries, ordered chat completion, reconnect, new/list/resume, interruption, approval, cancel-to-reject, graph failure, next-turn recovery, and process restart traverse production handlers |
+| focused process restart | `npm run test:process -w @pinpawo/tui` | passed; the first production host process exits cleanly, the second binds the same port/state root, and v2 rehydrates the same session ID |
 | alternate-screen PTY startup | `npm run smoke -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | split-footer PTY startup | `npm run smoke:split -w @pinpawo/tui` | passed in an automated 80×24 PTY |
 | Studio PTY flow | `npm run smoke:studio -w @pinpawo/tui` | passed; user/progress/final rows committed in order and terminal state restored |

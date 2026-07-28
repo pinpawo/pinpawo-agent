@@ -2,15 +2,19 @@
 title: Active Run View As A Discriminated Union
 page_type: decision
 status: validated
-updated: 2026-07-23
+updated: 2026-07-28
 sources:
-  - ../../../services/local-agent/src/localAgentSession.ts
-  - ../../../services/local-agent/src/localAgentSessionReducer.ts
+  - ../../../packages/agent-session/src/domain.ts
+  - ../../../packages/agent-session/src/project.ts
   - ../../../services/local-agent/src/tui/tuiLocalServerClient.ts
+  - ../../../services/local-agent/src/inflightRequestController.ts
+  - ../../../services/local-agent/src/chatSessionAdapter.ts
   - https://github.com/pinpawo/pinpawo-agent/issues/385
   - https://github.com/pinpawo/pinpawo-agent/pull/389
+  - https://github.com/pinpawo/pinpawo-agent/pull/468
 related:
   - ../local-agent-session-projection.md
+  - ../interruption-and-delegation-continuation.md
   - ../concepts/session-projection-ownership.md
   - review-resolution-is-client-local.md
 ---
@@ -19,10 +23,10 @@ related:
 
 ## Decision
 
-The active run in a `LocalAgentSession` is a discriminated union
-(`LocalAgentRunView`) of exactly three server-observed facts, carried in snapshot
+The active run in an `AgentSession` is a discriminated union
+(`AgentRunView`) of exactly three server-observed facts, carried in snapshot
 version 3
-([`localAgentSession.ts`](../../../services/local-agent/src/localAgentSession.ts)):
+([`domain.ts`](../../../packages/agent-session/src/domain.ts)):
 
 - `running` — carries one runtime `activity`: `thinking`, `using_tool`, or
   `streaming`;
@@ -51,6 +55,11 @@ the local snapshot boundary parser.
   never carry review content.
 - Sending `run.interrupt` does **not** optimistically create the `interrupting`
   view; only the server run controller does.
+- `interrupting` is non-terminal. It remains the active run until the invocation
+  owner has observed graph output settlement and emits terminal `interrupted`;
+  a client timer cannot perform this transition.
+- Whether an interrupted review delegation may be offered through `/continue`
+  is a separate TUI-local fact, not a fourth `AgentRunView` variant.
 - Snapshot versions 1 and 2, `runs[] + activeRunId`, legacy pending-review
   payloads, and message-only restore are unsupported by the current reader.
 
@@ -61,3 +70,5 @@ around PR #367/#388) become type-level impossibilities rather than review
 findings. This is the type-system counterpart to keeping review command progress
 client-local; see
 [Review resolution is client-local](review-resolution-is-client-local.md).
+The lifecycle beyond `interrupting` is detailed in
+[Interruption and delegation continuation](../interruption-and-delegation-continuation.md).

@@ -2,14 +2,16 @@
 title: Checkpoint, Snapshot, Timeline, and Timeline State
 page_type: concept
 status: validated
-updated: 2026-07-23
+updated: 2026-07-28
 sources:
   - ../../LOCAL_AGENT_SESSION_PROJECTION.md
-  - ../../../services/local-agent/src/localAgentSessionReducer.ts
+  - ../../../packages/agent-session/src/project.ts
+  - ../../../packages/agent-session/src/snapshot.ts
   - ../../../services/local-agent/src/localAgentSessionSnapshot.ts
   - https://github.com/pinpawo/pinpawo-agent/issues/377
 related:
   - ../local-agent-session-projection.md
+  - ../interruption-and-delegation-continuation.md
   - session-projection-ownership.md
   - ../decisions/run-view-discriminated-union.md
 ---

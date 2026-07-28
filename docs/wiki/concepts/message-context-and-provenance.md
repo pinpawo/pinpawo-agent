@@ -2,7 +2,7 @@
 title: Message Context And Provenance
 page_type: concept
 status: validated
-updated: 2026-07-27
+updated: 2026-07-28
 sources:
   - ../../PET_AGENT_ANNOUNCE_JUDGMENT_REFACTOR.md
   - ../../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md
@@ -10,8 +10,13 @@ sources:
   - ../../capability-artifact-pipeline/prompt-integration.md
   - ../../../packages/pet-agent/src/agent/orchestrator/messageLanes.ts
   - ../../../packages/pet-agent/src/agent/orchestrator/runtime/decisions/orchestrationDecision.ts
+  - ../../../packages/pet-agent/src/agent/orchestrator/runtime/activeDelegationTransition.ts
+  - ../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/capability.ts
+  - https://github.com/pinpawo/pinpawo-agent/pull/475
+  - https://github.com/pinpawo/pinpawo-agent/pull/481
 related:
   - ../capability-toolkit-architecture.md
+  - ../interruption-and-delegation-continuation.md
   - orchestrator-practical-reasoning.md
   - decision-node-ownership.md
   - ../decisions/delegation-completion-acknowledgement.md
@@ -66,3 +71,23 @@ outcomeDecision.
 
 This boundary prevents old executor output from outranking a newer user request
 and keeps private execution transcripts out of run-entry intent resolution.
+
+## Interruption preserves evidence without accepting it
+
+**Decision (PRs #475 and #481).** An interrupted or otherwise incomplete
+delegation retains its exact private lane, including prior model/tool messages,
+the human-interrupt cancellation result, and guard-stop evidence. It creates no
+announce or handoff and therefore contributes no accepted result to canonical
+main context.
+
+The next request makes the boundary explicit:
+
+- ordinary input uses `supersede_active`, clears the active pointer, and enters
+  with canonical main context while the old lane remains historical checkpoint
+  evidence;
+- `resume_active` reuses the same delegation, run, and lane so the selected
+  capability can continue with its original provenance.
+
+This is why “retain the lane” does not pollute a fresh turn and why “interrupted”
+must not be modeled as a completed handoff. See
+[Interruption and delegation continuation](../interruption-and-delegation-continuation.md).

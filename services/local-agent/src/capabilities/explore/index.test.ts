@@ -42,6 +42,25 @@ function fakeSummaryModel(
   } as unknown as BaseChatModel;
 }
 
+async function captureConsoleWarnings<T>(run: () => Promise<T>): Promise<{
+  result: T;
+  warnings: string[];
+}> {
+  const originalWarn = console.warn;
+  const warnings: string[] = [];
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args.map(String).join(' '));
+  };
+  try {
+    return {
+      result: await run(),
+      warnings,
+    };
+  } finally {
+    console.warn = originalWarn;
+  }
+}
+
 async function createFinalizeHarness(
   model: BaseChatModel,
   opts: {
@@ -135,6 +154,7 @@ test('explore final ingest includes LangChain context summaries and persists one
     proves: 'subagent uses built-in summarization',
     value: 'context management no longer needs capability callbacks',
   }];
+  let capturedSystem = '';
   let capturedHuman = '';
   let capturedOptions: unknown;
   const writes: Array<{ content?: string; evidence?: unknown[] }> = [];
@@ -154,6 +174,7 @@ test('explore final ingest includes LangChain context summaries and persists one
   } as unknown as CapabilityArtifactStore;
   const structuredOutput: OrchestrationDecisionStructuredOutputConfig = { method: 'functionCalling' };
   const harness = await createFinalizeHarness(fakeSummaryModel(summary, ({ messages, options }) => {
+    capturedSystem = String(messages[0]?.content ?? '');
     capturedHuman = String(messages.at(-1)?.content ?? '');
     capturedOptions = options;
   }, evidence), { artifactStore: store, structuredOutput });
@@ -186,6 +207,7 @@ test('explore final ingest includes LangChain context summaries and persists one
   assert.match(capturedHuman, /已查看 src\/old\.ts/);
   assert.match(capturedHuman, /createSubagent 已切换/);
   assert.match(capturedHuman, /最终判断：可以删除 rewriteAsync/);
+  assert.match(capturedSystem, /只返回一个顶层 JSON object/);
   assert.deepEqual(capturedOptions, {
     name: 'explore_knowledge_ingest',
     method: 'functionCalling',
@@ -287,6 +309,85 @@ test('explore finalize uses the previous summary when final ingest fails', async
 
   assert.deepEqual(writes, [previous]);
   assert.equal(returned?.messages?.length, 2);
+});
+
+test('explore finalize safely classifies malformed structured output without logging payloads', {
+  concurrency: false,
+}, async () => {
+  const cases: Array<{
+    expectedReason: string;
+    invoke: () => Promise<unknown>;
+    secret: string;
+  }> = [
+    {
+      expectedReason: 'schema_mismatch',
+      invoke: async () => [20261020],
+      secret: '20261020',
+    },
+    {
+      expectedReason: 'schema_mismatch',
+      invoke: async () => [],
+      secret: 'empty-array-payload',
+    },
+    {
+      expectedReason: 'schema_mismatch',
+      invoke: async () => {
+        throw new SyntaxError('Unexpected token while parsing private-invalid-json');
+      },
+      secret: 'private-invalid-json',
+    },
+    {
+      expectedReason: 'context_overflow',
+      invoke: async () => {
+        throw new Error('maximum context length exceeded for private-context');
+      },
+      secret: 'private-context',
+    },
+    {
+      expectedReason: 'output_truncated',
+      invoke: async () => {
+        throw new Error('finish_reason: length for private-output');
+      },
+      secret: 'private-output',
+    },
+    {
+      expectedReason: 'provider_failure',
+      invoke: async () => {
+        throw new Error('provider unavailable for private-provider');
+      },
+      secret: 'private-provider',
+    },
+  ];
+
+  for (const item of cases) {
+    const model = {
+      withStructuredOutput: () => ({ invoke: item.invoke }),
+    } as unknown as BaseChatModel;
+    const harness = await createFinalizeHarness(model, {
+      structuredOutput: { method: 'jsonMode' },
+    });
+    const originalMessages = [new AIMessage('original explore result')];
+    const { result, warnings } = await captureConsoleWarnings(() =>
+      harness.middleware?.afterRun?.({
+        messages: originalMessages,
+        artifacts: [],
+        completionReason: 'natural',
+        announceMessageId: null,
+      }, {
+        recordCapabilityArtifact: () => {},
+        threadId: 'thread-malformed',
+        capabilityId: 'explore',
+        delegationId: 'dg-malformed',
+        runId: 'run-malformed',
+      }));
+
+    // A void finalize patch leaves the caller-owned SubagentResult unchanged.
+    assert.equal(result, undefined);
+    assert.deepEqual(warnings, [
+      `[explore] finalize ingest failed, continuing without crash: stage=finalize reason=${item.expectedReason} method=jsonMode`,
+    ]);
+    assert.doesNotMatch(warnings.join('\n'), new RegExp(item.secret));
+  }
 });
 
 test('explore finalize appends a refreshed summary after a continuation', async () => {

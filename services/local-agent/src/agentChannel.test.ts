@@ -217,6 +217,12 @@ test('buildDecisionStructuredOutput selects structured output strategy by provid
 
   assert.deepEqual(buildDecisionStructuredOutput({
     apiKey: 'test-key',
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    model: 'glm-5.2',
+  }), { method: 'jsonMode' });
+
+  assert.deepEqual(buildDecisionStructuredOutput({
+    apiKey: 'test-key',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     model: 'kimi-k2.6',
   }), { method: 'jsonMode' });

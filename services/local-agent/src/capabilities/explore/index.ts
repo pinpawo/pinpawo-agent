@@ -52,6 +52,80 @@ const EXPLORE_SUMMARY_MESSAGE_MAX_CHARS = 2_000;
 const EXPLORE_FINAL_SUMMARY_EVIDENCE_MAX_CHARS = 18_000;
 const EXPLORE_SUMMARY_MESSAGE_PREFIX = 'Explore summary:';
 
+type ExploreIngestFailureReason =
+  | 'context_overflow'
+  | 'output_truncated'
+  | 'schema_mismatch'
+  | 'provider_failure';
+
+function collectExploreIngestFailureSignals(
+  value: unknown,
+  seen = new Set<object>(),
+): string[] {
+  if (typeof value === 'string') return [value];
+  if (!value || typeof value !== 'object' || seen.has(value)) return [];
+  seen.add(value);
+
+  const record = value as Record<string, unknown>;
+  const directFields = [
+    'name',
+    'message',
+    'code',
+    'type',
+    'finish_reason',
+    'finishReason',
+  ];
+  const nestedFields = [
+    'cause',
+    'response_metadata',
+    'responseMetadata',
+    'llmOutput',
+  ];
+  return [
+    ...directFields.flatMap((field) =>
+      typeof record[field] === 'string' ? [record[field]] : []),
+    ...nestedFields.flatMap((field) =>
+      collectExploreIngestFailureSignals(record[field], seen)),
+  ];
+}
+
+function classifyExploreIngestFailure(error: unknown): ExploreIngestFailureReason {
+  const signal = collectExploreIngestFailureSignals(error).join(' ').toLowerCase();
+  if (
+    /context(?:[_ -](?:length|window))|maximum context|prompt (?:is )?too long|too many (?:input )?tokens|context_length_exceeded/.test(
+      signal,
+    )
+  ) {
+    return 'context_overflow';
+  }
+  if (
+    /finish[_ -]?reason[^a-z0-9]*(?:length|max_tokens)|max(?:imum)? output tokens|output (?:was )?truncat|incomplete output/.test(
+      signal,
+    )
+  ) {
+    return 'output_truncated';
+  }
+  if (
+    /invalid structured output|expected object|zod|json|syntaxerror|unexpected (?:token|end)|parse/.test(
+      signal,
+    )
+  ) {
+    return 'schema_mismatch';
+  }
+  return 'provider_failure';
+}
+
+function reportExploreIngestFailure(
+  error: unknown,
+  structuredOutput?: OrchestrationDecisionStructuredOutputConfig,
+): void {
+  const reason = classifyExploreIngestFailure(error);
+  const method = structuredOutput?.method ?? 'provider_default';
+  console.warn(
+    `[explore] finalize ingest failed, continuing without crash: stage=finalize reason=${reason} method=${method}`,
+  );
+}
+
 function readMessageText(message: { content?: unknown }): string {
   const content = message.content;
   if (typeof content === 'string') return content;
@@ -210,6 +284,7 @@ async function ingestExploreKnowledge(params: {
         '- source：参考来源（文件路径、URL、issue/PR 编号、命令输出来源）。',
         '- proves：该来源确认/证明了什么事实。',
         '- value：它对当前推理或下一步的价值。',
+        '只返回一个顶层 JSON object；不要返回数组、标量、Markdown code fence 或解释文字。',
         '不要复制大段原始工具输出。',
         '不要编造未查看过的文件、URL、issue、PR 或命令结果。',
       ].join('\n')),
@@ -349,7 +424,10 @@ URL、issue / PR 编号或命令输出来源）和建议下一步。`,
               structuredOutput: options.structuredOutput,
               previousSummary: summaryFromMetadata ?? contextSummary ?? previousSummary,
               resultMessages: messagesFromMetadata,
-            }).catch(() => null)
+            }).catch((error) => {
+              reportExploreIngestFailure(error, options.structuredOutput);
+              return null;
+            })
             ?? (summaryFromMetadata || contextSummary
               ? { summary: summaryFromMetadata ?? contextSummary ?? '', evidence: [] }
               : null);

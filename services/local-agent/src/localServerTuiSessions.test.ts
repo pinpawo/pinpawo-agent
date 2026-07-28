@@ -44,6 +44,24 @@ test('readTuiCheckpointMessages keeps visible user/assistant messages only', () 
       content: 'subagent hidden',
       additional_kwargs: { pinpawo: { lane: 'subagent' } },
     }),
+    new AIMessage({
+      content: 'synthetic plan hidden',
+      additional_kwargs: {
+        pinpawo: {
+          source: 'delegation_plan',
+          synthetic: true,
+        },
+      },
+    }),
+    new AIMessage({
+      content: 'handoff copy hidden',
+      additional_kwargs: {
+        pinpawo: {
+          handoffFrom: 'capability:general',
+          delegationId: 'delegation-1',
+        },
+      },
+    }),
     assistantMessage,
   ]);
 

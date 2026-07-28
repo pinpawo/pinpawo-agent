@@ -15,10 +15,14 @@ import {
   createGitToolkit,
 } from '../../../local-agent/src/toolkits/local/index';
 import { createPersistentHostGraphService } from './persistentHostGraphService';
+import {
+  createProductionToolkitHostGraphService,
+} from './productionToolkitHostGraphService';
 
 const requestedPort = Number(process.argv[2]);
 const workdir = process.argv[3]?.trim();
 const authToken = process.argv[4]?.trim();
+const fixture = process.argv[5]?.trim() || 'persistent';
 
 if (
   !Number.isInteger(requestedPort)
@@ -26,14 +30,17 @@ if (
   || requestedPort > 65_535
   || !workdir
   || !authToken
+  || (fixture !== 'persistent' && fixture !== 'toolkit')
 ) {
   throw new Error(
-    'usage: localHostProcess.ts <port> <workdir> <auth-token>',
+    'usage: localHostProcess.ts <port> <workdir> <auth-token> [persistent|toolkit]',
   );
 }
 
 const runtimeConfig = buildLocalAgentRuntimeConfig(workdir);
-const graphService = createPersistentHostGraphService();
+const graphService = fixture === 'toolkit'
+  ? createProductionToolkitHostGraphService()
+  : createPersistentHostGraphService();
 const toolkits = [createBashToolkit(), createGitToolkit()];
 const transport = await startLocalServer(requestedPort, {
   actorId: 'pet-process-restart',

@@ -39,8 +39,8 @@ Status meanings:
 | composer | slash commands and command/help palette | aligned | a no-smoke macOS PTY uses Tab completion to open `/help`, proves help owns Esc and returns focus, then completes `/quit` and exits; remaining command workflows and the cross-terminal matrix remain |
 | composer | workspace `@path` completion | aligned | a no-smoke macOS PTY opens the production overlay, completes a Unicode filename containing a space, submits the exact text to the host, and restores it from checkpoint; the cross-terminal matrix remains |
 | attachments | quoted, escaped, `file://`, and multiple local paths | aligned | production OpenTUI paste handling now separates multiple paths into attachments while preserving ordinary multiline paste; a real macOS PTY covers quoted paths with spaces, Unicode filenames, and last-item removal, while the cross-terminal drag-in matrix remains |
-| attachments | removable structured attachment chips and submit | aligned | production host integration proves selected full paths reach model context without eager content reads while terminal/checkpoint text remains filename-only; the PTY graph also proves a removed path does not reach model input or recovery, while live tool dogfood remains |
-| review | approval, rejection, text response, batching, cancellation | aligned | production handler-chain approval and cancel-to-reject resume are covered; a no-smoke PTY now drives a real checkpointed LangGraph interrupt through the approval overlay, proves non-input keys do not leak into the composer, approves, resumes, and restores the completed turn after host restart; live guarded-tool dogfood remains |
+| attachments | removable structured attachment chips and submit | aligned | production host integration proves selected full paths reach model context without eager content reads while terminal/checkpoint text remains filename-only; the full composer PTY proves a removed path does not reach model input or recovery, and the production-toolkit PTY parses a selected Unicode attachment from actual subagent context, executes a real read tool, renders its content through the operation timeline, and preserves the filename-only terminal/checkpoint boundary across host restart |
+| review | approval, rejection, text response, batching, cancellation | aligned | production handler-chain approval and cancel-to-reject resume are covered; one no-smoke PTY drives a checkpointed LangGraph interrupt through overlay ownership, while an independent production graph makes a real reviewed toolkit call, proves its file side effect is absent before approval and present afterward, renders its operation before the completed reply, and restores only canonical messages after host restart; sustained manual local-tool dogfood remains |
 | session | new session and resume picker | aligned | production handler-chain new/list/resume, native scrollback boundaries, and non-empty checkpoint recovery across host processes are covered; live checkpoint dogfood remains |
 | runtime | interrupt, error notice, review policy | aligned | production interruption, graph-failure recovery, immediate stop wake-up, and process-level host restart are covered; full CLI/browser-runtime dogfood remains |
 | status | two-line run/model/workspace/token/context status | aligned | narrow-terminal dogfood |
@@ -69,13 +69,19 @@ Status meanings:
    processes with non-empty FileSaver history, new, list, resume, and native
    scrollback session boundaries. The no-smoke production PTY also drives a
    real checkpointed LangGraph review through overlay ownership, keyed resume,
-   completion, and restart recovery; only actual guarded-tool dogfood remains.
+   completion, and restart recovery. A second deterministic production host now
+   exercises the actual toolkit review middleware and tool execution, including
+   pre-approval side-effect isolation, operation settlement, and checkpoint
+   recovery; sustained manual local-tool dogfood remains.
 4. Dogfood structured attachments with real local tools. The deterministic
    production-host integration already proves full paths reach model context,
    contents are not eagerly read, and terminal/checkpoint text remains
    filename-only. A real PTY now also drives three bracketed-paste paths through
    the production composer, removes the last one, submits the selected two, and
-   verifies filename-only recovery after host restart.
+   verifies filename-only recovery after host restart. An independent production
+   graph now consumes a selected Unicode attachment with a real read-only
+   Toolkit tool whose call path is parsed from the model context rather than
+   hard-coded, while the terminal and restored checkpoint expose only its name.
 
 ### P1 — daily-use interaction parity
 

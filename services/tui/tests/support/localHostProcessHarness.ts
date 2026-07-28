@@ -27,6 +27,7 @@ export async function spawnHostProcess(options: {
   port: number;
   workdir: string;
   authToken: string;
+  fixture?: 'persistent' | 'toolkit';
 }): Promise<HostProcess> {
   const child = spawn(
     process.execPath,
@@ -36,6 +37,7 @@ export async function spawnHostProcess(options: {
       String(options.port),
       options.workdir,
       options.authToken,
+      options.fixture ?? 'persistent',
     ],
     {
       cwd: options.workdir,

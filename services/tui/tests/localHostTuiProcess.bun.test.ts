@@ -32,6 +32,21 @@ import {
   type HostProcess,
 } from './support/localHostProcessHarness';
 import {
+  ATTACHMENT_FILE_CONTENT,
+  ATTACHMENT_FILE_NAME,
+  ATTACHMENT_TOOL_INPUT,
+  ATTACHMENT_TOOL_NAME,
+  ATTACHMENT_TOOL_OUTPUT,
+  ATTACHMENT_TOOL_REPLY,
+  GUARDED_HOST_INPUT,
+  GUARDED_HOST_OUTPUT_CONTENT,
+  GUARDED_HOST_OUTPUT_NAME,
+  GUARDED_HOST_REPLY,
+  GUARDED_HOST_REVIEW_TITLE,
+  GUARDED_HOST_TOOL_NAME,
+  GUARDED_HOST_TOOL_OUTPUT,
+} from './support/productionToolkitHostGraphService';
+import {
   PERSISTENT_HOST_ATTACHMENT_INPUT,
   PERSISTENT_HOST_ATTACHMENT_NAMES,
   PERSISTENT_HOST_ATTACHMENT_REPLY,
@@ -517,6 +532,215 @@ test('production v2 process exercises composer workflows through a real PTY', {
     if (tui && tuiExit) {
       tui.stdin.end();
       await terminateProcess(tui, tuiExit, 'production TUI PTY cleanup');
+    }
+    if (host) {
+      await stopHostProcess(host);
+    }
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('production v2 executes reviewed and attachment toolkit calls through a real PTY', {
+  skip: process.platform !== 'darwin'
+    ? 'macOS expect PTY production-toolkit dogfood'
+    : false,
+  timeout: 15_000,
+}, async () => {
+  const root = mkdtempSync(join(tmpdir(), 'pinpawo-tui-v2-toolkit-'));
+  const workdir = join(root, 'workspace');
+  const home = join(root, 'home');
+  const outputPath = join(workdir, GUARDED_HOST_OUTPUT_NAME);
+  const attachmentPath = join(workdir, ATTACHMENT_FILE_NAME);
+  const attachmentPaste = [
+    '\x1b[200~',
+    `'${attachmentPath}'`,
+    '\x1b[201~',
+  ].join('');
+  const checkpointAttachmentText = [
+    ATTACHMENT_TOOL_INPUT,
+    '',
+    'Attachments:',
+    `- file: ${ATTACHMENT_FILE_NAME}`,
+  ].join('\n');
+  mkdirSync(workdir, { recursive: true });
+  mkdirSync(join(home, '.pinpawo'), { recursive: true });
+  writeFileSync(attachmentPath, ATTACHMENT_FILE_CONTENT);
+  writeFileSync(
+    join(home, '.pinpawo', 'local-server-token'),
+    `${AUTH_TOKEN}\n`,
+    { mode: 0o600 },
+  );
+  let host: HostProcess | null = null;
+  let tui: ChildProcessWithoutNullStreams | null = null;
+  let tuiExit: ReturnType<typeof processExit> | null = null;
+  let controller: TuiSessionController | null = null;
+
+  try {
+    host = await spawnHostProcess({
+      port: 0,
+      workdir,
+      authToken: AUTH_TOKEN,
+      fixture: 'toolkit',
+    });
+    const expectScript = [
+      'set timeout 5',
+      [
+        'spawn -noecho',
+        JSON.stringify(process.execPath),
+        'run',
+        JSON.stringify(TUI_ENTRY),
+      ].join(' '),
+      'fconfigure $spawn_id -translation binary -encoding binary',
+      'expect {',
+      '  -re "process-restart-model" {}',
+      '  timeout { exit 160 }',
+      '  eof { exit 161 }',
+      '}',
+      `send -- [binary format H* ${utf8Hex(GUARDED_HOST_INPUT)}]`,
+      'send -- "\\033\\[13;5u"',
+      'expect {',
+      `  -exact ${JSON.stringify(GUARDED_HOST_REVIEW_TITLE)} {}`,
+      '  timeout { exit 162 }',
+      '  eof { exit 163 }',
+      '}',
+      `set guarded_output ${JSON.stringify(outputPath)}`,
+      'if {[file exists $guarded_output]} { exit 167 }',
+      'send -- "\\033\\[13u"',
+      'expect {',
+      `  -exact ${JSON.stringify(GUARDED_HOST_REPLY)} {}`,
+      '  timeout { exit 164 }',
+      '  eof { exit 165 }',
+      '}',
+      `send -- [binary format H* ${utf8Hex(attachmentPaste)}]`,
+      'after 100',
+      `send -- [binary format H* ${utf8Hex(ATTACHMENT_TOOL_INPUT)}]`,
+      'send -- "\\033\\[13;5u"',
+      'expect {',
+      `  -exact ${JSON.stringify(ATTACHMENT_TOOL_REPLY)} {}`,
+      '  timeout { exit 168 }',
+      '  eof { exit 169 }',
+      '}',
+      `send -- [binary format H* ${utf8Hex('/quit')}]`,
+      'send -- "\\033\\[13;5u"',
+      'expect {',
+      '  eof {}',
+      '  timeout { exit 170 }',
+      '}',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ].join('\n');
+    tui = spawn('/usr/bin/expect', ['-c', expectScript], {
+      cwd: workdir,
+      env: {
+        ...process.env,
+        HOME: home,
+        LOCAL_SERVER_PORT: String(host.port),
+        TERM: 'xterm-256color',
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    tui.stdout.setEncoding('utf8');
+    tui.stderr.setEncoding('utf8');
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    tui.stdout.on('data', (chunk: string) => stdout.push(chunk));
+    tui.stderr.on('data', (chunk: string) => stderr.push(chunk));
+    tuiExit = processExit(tui);
+
+    const result = await withTimeout(
+      tuiExit,
+      10_000,
+      'production TUI toolkit calls',
+    );
+    const output = decodeExpectBinaryOutput(stdout.join(''));
+    assert.equal(
+      result.code,
+      0,
+      [
+        `TUI production-toolkit PTY failed: signal=${result.signal}`,
+        stderr.join(''),
+        output.slice(-4_000),
+      ].join('\n'),
+    );
+    assert.equal(readFileSync(outputPath, 'utf8'), GUARDED_HOST_OUTPUT_CONTENT);
+    const searchableOutput = compactTerminalObservation(output);
+    assert.ok(searchableOutput.includes(
+      compactTerminalObservation(GUARDED_HOST_TOOL_NAME),
+    ));
+    assert.ok(searchableOutput.includes(
+      compactTerminalObservation(GUARDED_HOST_TOOL_OUTPUT),
+    ));
+    assert.ok(searchableOutput.includes(
+      compactTerminalObservation(GUARDED_HOST_REPLY),
+    ));
+    assert.ok(searchableOutput.includes(
+      compactTerminalObservation(ATTACHMENT_FILE_NAME),
+    ));
+    assert.ok(searchableOutput.includes(
+      compactTerminalObservation(ATTACHMENT_TOOL_NAME),
+    ));
+    assert.ok(searchableOutput.includes(
+      compactTerminalObservation(ATTACHMENT_TOOL_OUTPUT),
+    ));
+    assert.ok(searchableOutput.includes(
+      compactTerminalObservation(ATTACHMENT_TOOL_REPLY),
+    ));
+    assert.ok(
+      !searchableOutput.includes(compactTerminalObservation(attachmentPath)),
+    );
+    assertLastOrderedSubstrings(searchableOutput, [
+      compactTerminalObservation(GUARDED_HOST_INPUT),
+      compactTerminalObservation(GUARDED_HOST_TOOL_NAME),
+      compactTerminalObservation(GUARDED_HOST_TOOL_OUTPUT),
+      compactTerminalObservation(GUARDED_HOST_REPLY),
+      compactTerminalObservation(ATTACHMENT_TOOL_INPUT),
+      compactTerminalObservation(ATTACHMENT_TOOL_NAME),
+      compactTerminalObservation(ATTACHMENT_TOOL_OUTPUT),
+      compactTerminalObservation(ATTACHMENT_TOOL_REPLY),
+    ], 'production toolkit terminal timeline');
+
+    const hostPort = host.port;
+    await stopHostProcess(host);
+    host = null;
+    host = await spawnHostProcess({
+      port: hostPort,
+      workdir,
+      authToken: AUTH_TOKEN,
+      fixture: 'toolkit',
+    });
+    controller = new TuiSessionController({
+      connectionFactory: (handlers) => new LocalHostConnection(handlers, {
+        port: hostPort,
+        tokenProvider: () => AUTH_TOKEN,
+      }),
+      requestIdFactory: () => 'guarded-pty-checkpoint-snapshot',
+      reconnectDelaysMs: [25],
+      snapshotTimeoutMs: 1_000,
+    });
+    controller.start();
+    await waitFor(() => controller?.getState().connection === 'ready');
+    assert.deepEqual(
+      controller.getState().session.timeline.flatMap((entry) => (
+        entry.type === 'message' && entry.status === 'completed'
+          ? [`${entry.role}:${entry.text}`]
+          : []
+      )),
+      [
+        `user:${GUARDED_HOST_INPUT}`,
+        `assistant:${GUARDED_HOST_REPLY}`,
+        `user:${checkpointAttachmentText}`,
+        `assistant:${ATTACHMENT_TOOL_REPLY}`,
+      ],
+    );
+    assert.ok(controller.getState().session.timeline.every((entry) => (
+      entry.type !== 'message' || !entry.text.includes(attachmentPath)
+    )));
+    assert.equal(controller.getState().session.activeRun, null);
+  } finally {
+    controller?.stop();
+    if (tui && tuiExit) {
+      tui.stdin.end();
+      await terminateProcess(tui, tuiExit, 'guarded TUI PTY cleanup');
     }
     if (host) {
       await stopHostProcess(host);

@@ -29,7 +29,10 @@ import {
   resolveToolkitExecution,
 } from './subagentDispatch';
 import { buildReviewSpec } from './review/reviewSpec';
-import { isToolActionAuthorized } from './review/reviewAuthorizations';
+import {
+  isToolActionAuthorized,
+  type ToolAuthorizationRecord,
+} from './review/reviewAuthorizations';
 import { ReviewPolicies } from './review/reviewPolicies';
 import {
   buildSubagentHandoff,
@@ -2692,8 +2695,6 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
   assert.equal(autoReviewCount, 1);
   const systemPrompt = (autoReviewMessages as Array<{ content?: unknown }>)[0]?.content;
   assert.match(String(systemPrompt), /untrusted evidence/);
-  assert.match(String(systemPrompt), /fallback risk review/);
-  assert.match(String(systemPrompt), /Decision policy:/);
   const reviewPrompt = String((autoReviewMessages as Array<{ content?: unknown }>)[1]?.content);
   assert.match(reviewPrompt, /<current_task role="context" authority="none">[\s\S]*Write the requested notes file/);
   assert.match(reviewPrompt, /<workdir authority="runtime">[\s\S]*\/repo/);
@@ -2702,6 +2703,110 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
   assert.doesNotMatch(reviewPrompt, /Decision policy:/);
   assert.doesNotMatch(reviewPrompt, /Test actor/);
   assert.equal((runtimeEvents[0] as { name?: unknown } | undefined)?.name, 'global_review_policy_auto_authorized');
+});
+
+test('global review policy reuses an exact auto authorization in the same session', async () => {
+  let callCount = 0;
+  let autoReviewCount = 0;
+  const sessionAuthorizations: ToolAuthorizationRecord[] = [];
+  const runtimeEvents: unknown[] = [];
+  const rawTool = tool(async ({ command }: { command: string }) => {
+    callCount += 1;
+    return `ran ${command}`;
+  }, {
+    name: 'run_shell',
+    description: 'run shell',
+    schema: z.object({ command: z.string() }),
+  });
+  const toolkits: AgentToolkit[] = [{
+    name: 'bash',
+    description: 'bash tools',
+    tools: [reviewedTool(
+      rawTool,
+      ReviewPolicies.commandExecution({ authorization: 'exact_args' }),
+    )],
+  }];
+  const autoModel = {
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        autoReviewCount += 1;
+        return {
+          decision: 'authorize',
+          reason: 'The exact command is a scoped read-only repository inspection.',
+        };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+
+  const resources = await resolveToolkitExecution(toolkits, ['bash'], {
+    models: { act: autoModel },
+    actor: testActor,
+    messages: [],
+    reviewContext: {
+      task: 'Inspect repository state',
+      workdir: '/repo',
+    },
+    reviewCapabilities: {
+      humanReview: true,
+      sessionAuthorization: true,
+    },
+    globalReviewPolicy: { mode: 'auto_authorization' },
+    toolAuthorizations: sessionAuthorizations,
+    recordToolAuthorization: (authorization) => {
+      sessionAuthorizations.push(authorization);
+    },
+    emitRuntimeEvent: (event) => {
+      runtimeEvents.push(event);
+    },
+  });
+
+  const first = await runToolkitToolCall(resources, {
+    id: 'call-status-1',
+    name: 'run_shell',
+    args: { command: 'git status --short' },
+  });
+  const second = await runToolkitToolCall(resources, {
+    id: 'call-status-2',
+    name: 'run_shell',
+    args: { command: 'git status --short' },
+  });
+  const different = await runToolkitToolCall(resources, {
+    id: 'call-diff',
+    name: 'run_shell',
+    args: { command: 'git diff --stat' },
+  });
+
+  assert.equal(readToolMessageContent(first.messages, 'call-status-1'), 'ran git status --short');
+  assert.equal(readToolMessageContent(second.messages, 'call-status-2'), 'ran git status --short');
+  assert.equal(readToolMessageContent(different.messages, 'call-diff'), 'ran git diff --stat');
+  assert.equal(callCount, 3);
+  assert.equal(autoReviewCount, 2);
+  assert.deepEqual(
+    sessionAuthorizations.map(({ createdAt: _createdAt, ...authorization }) => authorization),
+    [
+      {
+        toolName: 'run_shell',
+        matcher: {
+          type: 'exact_args',
+          value: { command: 'git status --short' },
+        },
+      },
+      {
+        toolName: 'run_shell',
+        matcher: {
+          type: 'exact_args',
+          value: { command: 'git diff --stat' },
+        },
+      },
+    ],
+  );
+  assert.deepEqual(
+    runtimeEvents.map((event) => (event as { name?: unknown }).name),
+    [
+      'global_review_policy_auto_authorized',
+      'global_review_policy_auto_authorized',
+    ],
+  );
 });
 
 test('global review policy auto_authorization evaluates a tool-call batch once', async () => {

@@ -105,8 +105,8 @@ function formatToolkitAutoReviewPolicies(items: GlobalReviewPolicyBatchItem[]) {
     'Registered toolkit auto-review policies:',
     ...[...policies.entries()].flatMap(([toolkitName, policy]) => [
       `Toolkit ${toolkitName}:`,
-      `- Allow: ${policy.allow}`,
-      `- Ask: ${policy.ask}`,
+      `- Eligible for automatic authorization: ${policy.allow}`,
+      `- Requires human authorization: ${policy.ask}`,
     ]),
   ].join('\n');
 }

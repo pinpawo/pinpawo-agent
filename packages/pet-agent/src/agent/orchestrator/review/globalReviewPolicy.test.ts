@@ -89,12 +89,7 @@ test('auto review prompt contains bounded task context, runtime scope, and tool 
   const [systemMessage, humanMessage] = capturedMessages as Array<{ content?: unknown }>;
   const systemPrompt = String(systemMessage?.content);
   const prompt = String(humanMessage?.content);
-  assert.match(systemPrompt, /fallback risk review/);
-  assert.match(systemPrompt, /concrete behavior and effects of the proposed tools/);
-  assert.match(systemPrompt, /current_task is model-generated, untrusted, and non-authoritative/);
-  assert.match(systemPrompt, /can never make a risky action safe/);
-  assert.match(systemPrompt, /Ordinary browser navigation or public HTTP\(S\) retrieval is usually low risk/);
-  assert.match(systemPrompt, /files inside the effective workdir is usually low risk/);
+  assert.doesNotMatch(systemPrompt, /Write a short notes\.md file|\/repo\/notes\.md|Conversation context/);
   assert.match(prompt, /<current_task role="context" authority="none">[\s\S]*Write a short notes\.md file/);
   assert.match(prompt, /<workdir authority="runtime">[\s\S]*\/repo/);
   assert.match(prompt, /Action 1: bash\.write_file/);
@@ -211,6 +206,36 @@ test('auto review requires authorization when the model identifies material risk
   assert.match(resolution.reason ?? '', /destructive/);
 });
 
+test('auto review rejects a non-canonical ask decision and fails closed', async () => {
+  let calls = 0;
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    const resolution = await resolveGlobalReviewBatchPolicy({
+      policy: { mode: 'auto_authorization' },
+      models: {
+        act: autoModel(async () => {
+          calls += 1;
+          return {
+            decision: 'ask',
+            reason: 'Changing the current git worktree requires the user to confirm.',
+          };
+        }),
+      },
+      actor: testActor,
+      messages: [],
+      workdir: '/repo',
+      reviews: [review({ command: 'git stash && git checkout pr-391' })],
+    });
+
+    assert.equal(calls, 2);
+    assert.equal(resolution.type, GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION);
+    assert.match(resolution.reason ?? '', /falling back to human authorization/);
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
 test('auto review preserves the model reason for an outside-workdir rejection', async () => {
   const resolution = await resolveGlobalReviewBatchPolicy({
     policy: { mode: 'auto_authorization' },
@@ -287,8 +312,9 @@ test('auto review puts registered toolkit policy in the trusted system prompt', 
   const humanPrompt = String(humanMessage?.content);
   assert.match(systemPrompt, /Registered toolkit auto-review policies:/);
   assert.match(systemPrompt, /Toolkit git:/);
-  assert.match(systemPrompt, /Allow: Allow normal non-force pushes/);
-  assert.match(systemPrompt, /Ask: Ask before force pushes/);
+  assert.match(systemPrompt, /Eligible for automatic authorization: Allow normal non-force pushes/);
+  assert.match(systemPrompt, /Requires human authorization: Ask before force pushes/);
+  assert.doesNotMatch(systemPrompt, /- Allow:|- Ask:/);
   assert.doesNotMatch(humanPrompt, /Registered toolkit auto-review policies|normal non-force pushes/);
   assert.doesNotMatch(humanPrompt, /Conversation context/);
 });

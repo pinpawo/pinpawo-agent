@@ -118,8 +118,10 @@ const AUTO_REVIEW_DECISION_SCHEMA = z.object({
   decision: z.enum([
     GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE,
     GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION,
-  ]),
-  reason: z.string().optional().default(''),
+  ]).describe('Whether the complete batch may run automatically or requires human authorization.'),
+  reason: z.string().optional().default('').describe(
+    'A concise explanation grounded in the concrete action facts and authorization policy.',
+  ),
 });
 
 const DEFAULT_AUTO_REVIEW_REASON = 'Auto authorization did not approve this tool-call batch.';

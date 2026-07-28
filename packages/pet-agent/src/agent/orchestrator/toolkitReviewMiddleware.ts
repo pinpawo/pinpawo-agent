@@ -13,6 +13,7 @@ import type { AgentActor, AgentModels } from '../../types/agent';
 import type { SubagentRuntimeEvent } from '../../types/subagent';
 import {
   applyReviewEffects,
+  buildToolAuthorizationRecord,
   ReviewEffectApplicationError,
   type ToolAuthorizationRecord,
 } from './review/reviewAuthorizations';
@@ -321,6 +322,7 @@ async function buildRuntimeReviewAuthorizations(params: {
 async function recordToolAuthorizations(
   ctx: ToolkitReviewRuntimeContext,
   authorizations: ToolAuthorizationRecord[],
+  options: { emitRecordedEvent?: boolean } = {},
 ) {
   if (authorizations.length === 0) {
     return;
@@ -334,10 +336,45 @@ async function recordToolAuthorizations(
   for (const authorization of authorizations) {
     await ctx.recordToolAuthorization(authorization);
   }
+  if (options.emitRecordedEvent === false) {
+    return;
+  }
   await ctx.emitRuntimeEvent?.({
     event: 'on_runtime_event',
     name: 'tool_authorization_recorded',
     data: { authorizations },
+  });
+}
+
+/**
+ * Auto review owns only the concrete batch it inspected. Reuse that approval
+ * for exact matching arguments in the same checkpointed session, but never
+ * widen it to a shell wildcard, URL domain, or toolkit-defined broad matcher.
+ */
+function buildAutoReviewSessionAuthorizations(params: {
+  ctx: ToolkitReviewRuntimeContext;
+  reviews: PreparedToolkitReview[];
+}) {
+  if (
+    params.ctx.globalReviewPolicy?.mode !== GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION
+    || params.ctx.reviewCapabilities?.sessionAuthorization !== true
+    || !params.ctx.recordToolAuthorization
+  ) {
+    return [];
+  }
+
+  return params.reviews.flatMap((review) => {
+    const pendingAction = review.reviewPayload.pendingAction;
+    if (!pendingAction) {
+      return [];
+    }
+    return [buildToolAuthorizationRecord({
+      toolName: review.toolName,
+      matcher: {
+        type: 'exact_args',
+        value: { ...pendingAction.args },
+      },
+    })];
   });
 }
 
@@ -797,6 +834,15 @@ async function resolvePreparedToolkitReviews(params: {
   });
 
   if (policyResolution.type === GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE) {
+    const sessionAuthorizations = buildAutoReviewSessionAuthorizations({
+      ctx: params.ctx,
+      reviews: params.prepared.reviews,
+    });
+    // AUTO_AUTHORIZED is already the user-facing event for this decision.
+    // Persist silently to avoid emitting a second authorization notice.
+    await recordToolAuthorizations(params.ctx, sessionAuthorizations, {
+      emitRecordedEvent: false,
+    });
     await emitGlobalReviewAuthorizationEvent({
       ctx: params.ctx,
       resolution: policyResolution,

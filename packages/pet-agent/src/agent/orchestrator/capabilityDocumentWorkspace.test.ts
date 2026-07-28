@@ -13,6 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { type TestContext } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import {
@@ -63,6 +64,10 @@ async function makeWritable(path: string): Promise<void> {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
     throw error;
   }
+  if (pathStats.isSymbolicLink()) {
+    await rm(path, { force: true });
+    return;
+  }
   if (!pathStats.isDirectory()) {
     await chmod(path, 0o644);
     return;
@@ -70,6 +75,20 @@ async function makeWritable(path: string): Promise<void> {
   await chmod(path, 0o755);
   const entries = await readdir(path);
   await Promise.all(entries.map((entry) => makeWritable(join(path, entry))));
+}
+
+async function waitForDirectoryEntry(
+  path: string,
+  predicate: (entry: string) => boolean,
+) {
+  const deadline = Date.now() + 1_000;
+  while (Date.now() < deadline) {
+    if ((await readdir(path)).some(predicate)) {
+      return;
+    }
+    await delay(5);
+  }
+  throw new Error(`Timed out waiting for a matching entry in "${path}"`);
 }
 
 test('workspace renders inline Capabilities as discoverable CAPABILITY.md files', async (t) => {
@@ -336,10 +355,11 @@ test('workspace reuses a verified digest snapshot and repairs cache tampering', 
     (warnings[0]?.[1] as { code?: unknown } | undefined)?.code,
     'capability_workspace_snapshot_quarantined',
   );
-  assert.deepEqual(
+  assert.equal(
     (await readdir(join(root, 'cache')))
-      .filter((entry) => entry.startsWith('.invalid-')),
-    [],
+      .filter((entry) => entry.startsWith('.invalid-'))
+      .length,
+    1,
   );
 });
 
@@ -502,6 +522,59 @@ test('concurrent repair publishes one complete replacement snapshot', async (t) 
   assert.match(
     await readFile(join(left.rootPath, 'explore', 'CAPABILITY.md'), 'utf8'),
     /name: "explore"/,
+  );
+});
+
+test('repair revalidates the snapshot after acquiring the digest lock', async (t) => {
+  const root = await temporaryDirectory(t, 'capability-workspace-repair-lock-');
+  const warnings: unknown[][] = [];
+  t.mock.method(console, 'warn', (...args: unknown[]) => {
+    warnings.push(args);
+  });
+  const registry = compileAgentRegistry({
+    toolkits: [],
+    capabilities: [capability({ name: 'general' })],
+  });
+  const cacheRoot = join(root, 'cache');
+  const first = await materializeCapabilityDocumentWorkspace({
+    registry,
+    cacheRoot,
+  });
+  const documentPath = join(first.rootPath, 'general', 'CAPABILITY.md');
+  await chmod(documentPath, 0o644);
+  await writeFile(documentPath, 'tampered', 'utf8');
+
+  const repairLockPath = join(
+    cacheRoot,
+    `.repair-${first.registryDigest}.lock`,
+  );
+  await mkdir(repairLockPath);
+  await writeFile(
+    join(repairLockPath, 'owner.json'),
+    JSON.stringify({ pid: process.pid, token: 'test-owner' }),
+    'utf8',
+  );
+  const materialization = materializeCapabilityDocumentWorkspace({
+    registry,
+    cacheRoot,
+  });
+  await waitForDirectoryEntry(
+    cacheRoot,
+    (entry) => entry.startsWith(`.pending-repair-${first.registryDigest}-`),
+  );
+  await writeFile(
+    documentPath,
+    renderCapabilityDocument(registry.capabilities[0]!.capability),
+    'utf8',
+  );
+  await rm(repairLockPath, { recursive: true, force: true });
+
+  const reused = await materialization;
+  assert.equal(reused.reused, true);
+  assert.equal(warnings.length, 0);
+  assert.deepEqual(
+    (await readdir(cacheRoot)).filter((entry) => entry.startsWith('.invalid-')),
+    [],
   );
 });
 

@@ -10,6 +10,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { AgentCapability } from '../../types/capability';
 import { CAPABILITY_DOCUMENT_FILE_NAME } from '../../types/capabilityDocument';
 import type { CompiledAgentRegistry } from './registry';
@@ -20,6 +21,8 @@ export const CAPABILITY_DOCUMENT_WORKSPACE_SCHEMA_VERSION = 1;
 // unbounded recovery loop under continuous external mutation.
 const MAX_WORKSPACE_MATERIALIZATION_ATTEMPTS = 4;
 const MAX_WORKSPACE_REPAIRS = 1;
+const REPAIR_LOCK_POLL_INTERVAL_MS = 10;
+const REPAIR_LOCK_WAIT_TIMEOUT_MS = 5_000;
 
 export type CapabilityDocumentWorkspaceEntry = {
   readonly capabilityName: string;
@@ -138,6 +141,142 @@ async function pathExists(path: string) {
   }
 }
 
+type RepairLockOwner = {
+  pid: number;
+  token: string;
+};
+
+function parseRepairLockOwner(value: string): RepairLockOwner | null {
+  try {
+    const owner = JSON.parse(value) as Partial<RepairLockOwner>;
+    if (
+      !Number.isSafeInteger(owner.pid)
+      || (owner.pid ?? 0) <= 0
+      || typeof owner.token !== 'string'
+      || owner.token.length === 0
+    ) {
+      return null;
+    }
+    return {
+      pid: owner.pid!,
+      token: owner.token,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isProcessAlive(pid: number) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+}
+
+async function isRepairLockActive(lockPath: string) {
+  try {
+    const lockStats = await lstat(lockPath);
+    if (!lockStats.isDirectory() || lockStats.isSymbolicLink()) {
+      return false;
+    }
+    const owner = parseRepairLockOwner(
+      await readFile(join(lockPath, 'owner.json'), 'utf8'),
+    );
+    return owner ? isProcessAlive(owner.pid) : false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+async function acquireRepairLock(params: {
+  cacheRoot: string;
+  registryDigest: string;
+}) {
+  const lockPath = join(
+    params.cacheRoot,
+    `.repair-${params.registryDigest}.lock`,
+  );
+  const owner: RepairLockOwner = {
+    pid: process.pid,
+    token: randomUUID(),
+  };
+  const pendingLockPath = join(
+    params.cacheRoot,
+    `.pending-repair-${params.registryDigest}-${owner.token}`,
+  );
+  const deadline = Date.now() + REPAIR_LOCK_WAIT_TIMEOUT_MS;
+  // Publish a fully initialized lock directory atomically. Contenders never
+  // observe a partially written owner record and mistake it for a dead owner.
+  await mkdir(pendingLockPath);
+  await writeFile(
+    join(pendingLockPath, 'owner.json'),
+    JSON.stringify(owner),
+    { encoding: 'utf8', flag: 'wx' },
+  );
+  let acquired = false;
+
+  try {
+    while (true) {
+      try {
+        await rename(pendingLockPath, lockPath);
+        acquired = true;
+        return async () => {
+          try {
+            const currentOwner = parseRepairLockOwner(
+              await readFile(join(lockPath, 'owner.json'), 'utf8'),
+            );
+            if (currentOwner?.token === owner.token) {
+              await rm(lockPath, { recursive: true, force: true });
+            }
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+              throw error;
+            }
+          }
+        };
+      } catch (error) {
+        if (
+          !['EEXIST', 'ENOTEMPTY'].includes(
+            (error as NodeJS.ErrnoException).code ?? '',
+          )
+        ) {
+          throw error;
+        }
+      }
+
+      if (!(await isRepairLockActive(lockPath))) {
+        const abandonedPath = join(
+          params.cacheRoot,
+          `.abandoned-repair-${params.registryDigest}-${randomUUID()}`,
+        );
+        try {
+          await rename(lockPath, abandonedPath);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+            throw error;
+          }
+        }
+        // Abandoned lock generations are tiny and follow the same deferred-GC
+        // policy as invalid workspace generations.
+        continue;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `Timed out waiting for Capability Document Workspace repair lock "${lockPath}"`,
+        );
+      }
+      await delay(REPAIR_LOCK_POLL_INTERVAL_MS);
+    }
+  } finally {
+    if (!acquired) {
+      await rm(pendingLockPath, { recursive: true, force: true });
+    }
+  }
+}
+
 async function verifySnapshot(
   rootPath: string,
   documents: readonly ResolvedCapabilityDocument[],
@@ -218,50 +357,50 @@ function freezeWorkspace(params: {
   });
 }
 
-async function removeSnapshotTreeBestEffort(path: string) {
-  try {
-    await rm(path, { recursive: true, force: true });
-  } catch (error) {
-    // The invalid tree has already left the canonical digest path. Old V1
-    // snapshots may still be directory-read-only, so cleanup failure is a GC
-    // concern and must not put the repaired workspace back on the critical path.
-    console.warn('[pet-agent] failed to remove quarantined Capability Document Workspace:', {
-      code: 'capability_workspace_quarantine_cleanup_failed',
-      path,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-}
-
 async function quarantineInvalidSnapshot(params: {
   rootPath: string;
   cacheRoot: string;
   registryDigest: string;
-  verificationError: unknown;
+  documents: readonly ResolvedCapabilityDocument[];
 }) {
-  const quarantinePath = join(
-    params.cacheRoot,
-    `.invalid-${params.registryDigest}-${randomUUID()}`,
-  );
+  const releaseLock = await acquireRepairLock(params);
   try {
-    await rename(params.rootPath, quarantinePath);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    if (!(await pathExists(params.rootPath))) {
       return false;
     }
-    throw error;
+    try {
+      await verifySnapshot(params.rootPath, params.documents);
+      return false;
+    } catch (verificationError) {
+      const quarantinePath = join(
+        params.cacheRoot,
+        `.invalid-${params.registryDigest}-${randomUUID()}`,
+      );
+      try {
+        await rename(params.rootPath, quarantinePath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          return false;
+        }
+        throw error;
+      }
+      console.warn('[pet-agent] repairing invalid Capability Document Workspace:', {
+        code: 'capability_workspace_snapshot_quarantined',
+        rootPath: params.rootPath,
+        quarantinePath,
+        registryDigest: params.registryDigest,
+        error: verificationError instanceof Error
+          ? verificationError.message
+          : String(verificationError),
+      });
+      // Quarantine cleanup is deliberately outside materialization. The
+      // canonical path is rebuilt first; a later GC policy may remove invalid
+      // generations without delaying the Capability Planner.
+      return true;
+    }
+  } finally {
+    await releaseLock();
   }
-  console.warn('[pet-agent] repairing invalid Capability Document Workspace:', {
-    code: 'capability_workspace_snapshot_quarantined',
-    rootPath: params.rootPath,
-    quarantinePath,
-    registryDigest: params.registryDigest,
-    error: params.verificationError instanceof Error
-      ? params.verificationError.message
-      : String(params.verificationError),
-  });
-  await removeSnapshotTreeBestEffort(quarantinePath);
-  return true;
 }
 
 async function publishSnapshot(params: {
@@ -359,7 +498,7 @@ export async function materializeCapabilityDocumentWorkspace(params: {
       rootPath,
       cacheRoot,
       registryDigest,
-      verificationError: error,
+      documents,
     });
     if (quarantined) {
       repairs += 1;

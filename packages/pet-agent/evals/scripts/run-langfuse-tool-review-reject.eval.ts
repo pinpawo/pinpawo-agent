@@ -11,6 +11,10 @@ import {
   getMessageHandoffSource,
   mainConversationMessages,
 } from '../../src/agent/orchestrator/messageLanes';
+import {
+  defineCapability,
+  defineInstructionDocument,
+} from '../../src/types/capability';
 import { defineToolkit } from '../../src/types/toolkit';
 import {
   toolReviewRejectRuntimeDataset,
@@ -92,7 +96,7 @@ function compactError(error: unknown): string {
   return String(error).slice(0, 800);
 }
 
-function createRouteModel(task: string): AgentModels['act'] {
+function createRouteModel(): AgentModels['act'] {
   let decisionCount = 0;
   return {
     invoke: async () => new AIMessage('任务已完成。'),
@@ -103,11 +107,7 @@ function createRouteModel(task: string): AgentModels['act'] {
       invoke: async () => {
         decisionCount += 1;
         if (decisionCount === 1) {
-          return {
-            action: 'direct_task',
-            task,
-            context_summary: null,
-          };
+          return { action: 'needs_plan' };
         }
         return { outcome: 'goal_done', gap_note: null };
       },
@@ -224,7 +224,7 @@ async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> 
     }],
   })];
 
-  const routeModel = createRouteModel(input.delegatedTask);
+  const routeModel = createRouteModel();
   const subagentModel = new ToolReviewRejectSubagentModel(
     input.reviewedTool,
     input.firstToolCall,
@@ -238,6 +238,20 @@ async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> 
     },
     actor: testActor,
     checkpoint: new MemorySaver(),
+    capabilityPlannerRunner: {
+      async invoke(_plannerInput) {
+        return {
+          result: 'next_task',
+          next_task: {
+            objective: input.delegatedTask,
+            capability_intent: 'exercise reviewed tool rejection',
+            capability_name: 'general',
+            context_summary: null,
+          },
+          remaining_plan: [],
+        };
+      },
+    },
   });
   const recorder = createSubagentInputRecorder();
   const config = {
@@ -245,7 +259,14 @@ async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> 
     configurable: {
       thread_id: `eval-tool-review-reject-${Date.now()}-${randomUUID()}`,
       actor: testActor,
-      capabilities: [],
+      capabilities: [defineCapability({
+        name: 'general',
+        description: 'Execute the reviewed tool rejection eval task.',
+        uses: ['eval_general'],
+        instructions: defineInstructionDocument({
+          content: 'Use the requested reviewed tool and respond to rejection feedback.',
+        }),
+      })],
       toolkits,
     },
   };

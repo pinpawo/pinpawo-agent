@@ -1,6 +1,6 @@
 import { AgentEvalCase, AgentEvalDataset } from './types.ts';
 
-export type EntryDecisionMode = 'answer' | 'direct_task' | 'needs_plan';
+export type EntryDecisionMode = 'answer' | 'needs_plan';
 
 export type EntryDecisionInput = {
   userRequest: string;
@@ -9,8 +9,6 @@ export type EntryDecisionInput = {
 
 export type EntryDecisionExpected = {
   mode: EntryDecisionMode;
-  expectedTaskTerms?: string[];
-  expectedBoundaryCount: number;
   reason: string;
 };
 
@@ -31,7 +29,6 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     },
     expected: {
       mode: 'answer',
-      expectedBoundaryCount: 0,
       reason: 'The requested answer is already present in conversation context.',
     },
     metadata: { difficulty: 'easy', reason: 'Direct answer at run entry.', source: SOURCE_FILE },
@@ -49,7 +46,6 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     },
     expected: {
       mode: 'answer',
-      expectedBoundaryCount: 0,
       reason: 'The main conversation explicitly records the matching completed result.',
     },
     metadata: { difficulty: 'easy', reason: 'Explicit completion evidence should not be re-verified.', source: SOURCE_FILE },
@@ -64,7 +60,6 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     },
     expected: {
       mode: 'answer',
-      expectedBoundaryCount: 0,
       reason: 'Stable conceptual knowledge can be expressed directly without obtaining current external state.',
     },
     metadata: { difficulty: 'medium', reason: 'The route must not over-execute an ordinary explanation.', source: SOURCE_FILE },
@@ -81,9 +76,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
       ],
     },
     expected: {
-      mode: 'direct_task',
-      expectedTaskTerms: ['提交'],
-      expectedBoundaryCount: 1,
+      mode: 'needs_plan',
       reason: 'An intention to commit is not evidence that the commit succeeded.',
     },
     metadata: { difficulty: 'hard', reason: 'An explicitly reality-grounded question must not treat intent as result evidence.', source: SOURCE_FILE },
@@ -98,9 +91,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
       conversationContext: ['之前已经完成代码修改，但没有读取之后的工作区状态。'],
     },
     expected: {
-      mode: 'direct_task',
-      expectedTaskTerms: ['未提交'],
-      expectedBoundaryCount: 1,
+      mode: 'needs_plan',
       reason: 'The current workspace state requires a new read even though the question refers to recent work.',
     },
     metadata: { difficulty: 'medium', reason: 'Read-only current-state checks are still execution.', source: SOURCE_FILE },
@@ -114,9 +105,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
       userRequest: '以 GitHub 上的当前状态为准，pinpawo-agent 的 issue #417 现在还是 open 吗？',
     },
     expected: {
-      mode: 'direct_task',
-      expectedTaskTerms: ['417'],
-      expectedBoundaryCount: 1,
+      mode: 'needs_plan',
       reason: 'The requested remote state is not present in the conversation and needs a lookup.',
     },
     metadata: { difficulty: 'medium', reason: 'Remote reads are execution when evidence is absent.', source: SOURCE_FILE },
@@ -134,9 +123,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
       ],
     },
     expected: {
-      mode: 'direct_task',
-      expectedTaskTerms: ['部署', '8450'],
-      expectedBoundaryCount: 1,
+      mode: 'needs_plan',
       reason: 'The previous observation belongs to an older run; the new deployment run still needs observation.',
     },
     metadata: { difficulty: 'hard', reason: 'Freshness is part of evidence sufficiency.', source: SOURCE_FILE },
@@ -153,9 +140,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
       ],
     },
     expected: {
-      mode: 'direct_task',
-      expectedTaskTerms: ['部署状态'],
-      expectedBoundaryCount: 1,
+      mode: 'needs_plan',
       reason: 'Newly supplied information removes the blocker but is not the result of the original deployment check.',
     },
     metadata: { difficulty: 'hard', reason: 'A resumed run must continue the original goal after user-owned input arrives.', source: SOURCE_FILE },
@@ -171,7 +156,6 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     },
     expected: {
       mode: 'answer',
-      expectedBoundaryCount: 0,
       reason: 'The target must be clarified before a safe executable task can be formed.',
     },
     metadata: { difficulty: 'medium', reason: 'Clarification is a user-visible answer path, not speculative execution.', source: SOURCE_FILE },
@@ -186,9 +170,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
       conversationContext: ['CSV 位于 /workspace/latency.csv，当前还没有计算结果。'],
     },
     expected: {
-      mode: 'direct_task',
-      expectedTaskTerms: ['p95'],
-      expectedBoundaryCount: 1,
+      mode: 'needs_plan',
       reason: 'Producing the answer requires a new calculation result.',
     },
     metadata: { difficulty: 'medium', reason: 'Computation is execution even without an external write.', source: SOURCE_FILE },
@@ -202,9 +184,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
       userRequest: '当前仓库的测试能通过吗？把实际结果告诉我，以项目现有的测试配置为准。',
     },
     expected: {
-      mode: 'direct_task',
-      expectedTaskTerms: ['测试'],
-      expectedBoundaryCount: 1,
+      mode: 'needs_plan',
       reason: 'Establishing the project test result is one independently verifiable workspace task.',
     },
     metadata: { difficulty: 'hard', reason: 'One workspace task may require internal preparation without becoming a plan.', source: SOURCE_FILE },
@@ -222,9 +202,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
       ],
     },
     expected: {
-      mode: 'direct_task',
-      expectedTaskTerms: ['distribution-worker', 'issue'],
-      expectedBoundaryCount: 1,
+      mode: 'needs_plan',
       reason: 'The demonstrative refers to the latest review, not the older already-published findings.',
     },
     metadata: { difficulty: 'hard', reason: 'Native message recency must resolve the latest review referent.', source: SOURCE_FILE },
@@ -239,7 +217,6 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     },
     expected: {
       mode: 'needs_plan',
-      expectedBoundaryCount: 2,
       reason: 'The exploration handoff determines the later implementation task.',
     },
     metadata: { difficulty: 'hard', reason: 'Dynamic explore-then-materialize planning.', source: SOURCE_FILE },
@@ -257,7 +234,6 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     },
     expected: {
       mode: 'needs_plan',
-      expectedBoundaryCount: 2,
       reason: 'The request contains independently routed and independently verifiable capability work.',
     },
     metadata: { difficulty: 'medium', reason: 'Different capability intents require boundaries.', source: SOURCE_FILE },
@@ -266,7 +242,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
 
 export const entryDecisionBasicsDataset: AgentEvalDataset<EntryDecisionInput, EntryDecisionExpected> = {
   name: SUITE,
-  description: 'Defines run-entry decision modes and task-boundary expectations independently of the current graph schema.',
+  description: 'Defines the run-entry result-availability gate: answer from existing evidence or invoke the Capability Planner for new results.',
   cases,
-  metadata: { owner: 'pet-agent', areas: ['entry_decision', 'capability_planning', 'context_synthesis'] },
+  metadata: { owner: 'pet-agent', areas: ['entry_decision', 'route_control', 'context_synthesis'] },
 };

@@ -48,6 +48,7 @@ test('applyReviewEffects builds policy-derived authorization records', async () 
     toolName: 'run_shell',
     matcher: { type: 'shell_pattern', value: 'git status' },
     createdAt: '2026-06-09T00:00:00.000Z',
+    source: 'human',
   }]);
   assert.equal(
     isToolActionAuthorized({
@@ -221,4 +222,29 @@ test('mergeToolAuthorizations appends unique records and dedupes matcher keys', 
       createdAt: '2026-06-09T00:00:03.000Z',
     },
   ]);
+});
+
+test('mergeToolAuthorizations upgrades an auto-review grant to a human grant', () => {
+  const matcher = { type: 'exact_args' as const, value: { command: 'npm test' } };
+  const merged = mergeToolAuthorizations(
+    [{
+      toolName: 'run_shell',
+      matcher,
+      createdAt: '2026-07-29T00:00:00.000Z',
+      source: 'auto_review',
+    }],
+    [{
+      toolName: 'run_shell',
+      matcher,
+      createdAt: '2026-07-29T00:01:00.000Z',
+      source: 'human',
+    }],
+  );
+
+  assert.deepEqual(merged, [{
+    toolName: 'run_shell',
+    matcher,
+    createdAt: '2026-07-29T00:01:00.000Z',
+    source: 'human',
+  }]);
 });

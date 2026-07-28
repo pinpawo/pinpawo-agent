@@ -29,7 +29,10 @@ import {
   resolveToolkitExecution,
 } from './subagentDispatch';
 import { buildReviewSpec } from './review/reviewSpec';
-import { isToolActionAuthorized } from './review/reviewAuthorizations';
+import {
+  isToolActionAuthorized,
+  type ToolAuthorizationRecord,
+} from './review/reviewAuthorizations';
 import { ReviewPolicies } from './review/reviewPolicies';
 import {
   buildSubagentHandoff,
@@ -133,32 +136,11 @@ function createQueuedPlannerRunner(
 
   return {
     async invoke(input: CapabilityPlannerInput): Promise<CapabilityPlannerResult> {
-      if (input.mode === 'direct') {
-        const decision = await nextStructuredValue();
-        const capabilityName = String(decision.capabilityName ?? '');
-        return {
-          result: 'next_task',
-          next_task: {
-            objective: input.pendingTask.task,
-            capability_intent: 'scripted graph test',
-            capability_name: capabilityName,
-            context_summary: input.pendingTask.contextSummary,
-          },
-          remaining_plan: [],
-        };
-      }
-
       const planning = await nextStructuredValue();
-      if (planning.result === 'answer') {
-        return {
-          result: 'answer',
-          next_task: null,
-          remaining_plan: [],
-        };
-      }
       const nextTask = planning.next_task as {
         objective?: unknown;
         capability_intent?: unknown;
+        context_summary?: unknown;
       } | null;
       if (!nextTask) {
         throw new Error('scripted Capability Planner requires next_task');
@@ -172,7 +154,9 @@ function createQueuedPlannerRunner(
           objective: String(nextTask.objective ?? ''),
           capability_intent: String(nextTask.capability_intent ?? ''),
           capability_name: capabilityName,
-          context_summary: null,
+          context_summary: typeof nextTask.context_summary === 'string'
+            ? nextTask.context_summary
+            : null,
         },
         remaining_plan: Array.isArray(planning.remaining_plan)
           ? planning.remaining_plan as Array<{
@@ -264,14 +248,23 @@ const testActor: AgentActor = {
   species: 'cat',
 };
 
-function nextTaskDecision(
-  task: string,
+function needsPlanDecision() {
+  return { action: 'needs_plan' };
+}
+
+function scriptedPlannerTask(
+  objective: string,
   contextSummary: string | null = null,
+  remainingPlan: Array<{ objective: string; capability_intent: string }> = [],
 ) {
   return {
-    action: 'direct_task',
-    task,
-    context_summary: contextSummary,
+    result: 'next_task',
+    next_task: {
+      objective,
+      capability_intent: 'scripted graph test',
+      context_summary: contextSummary,
+    },
+    remaining_plan: remainingPlan,
   };
 }
 
@@ -295,8 +288,8 @@ function continueDecision(gapNote: string | null = '当前 delegated task 还未
   return { outcome: 'continue', gap_note: gapNote };
 }
 
-test('task decision reads full canonical main messages and excludes lane announces', async () => {
-  let taskDecisionMessages: Array<{ _getType?: () => string; content?: unknown }> = [];
+test('entry decision reads full canonical main messages and excludes lane announces', async () => {
+  let entryDecisionMessages: Array<{ _getType?: () => string; content?: unknown }> = [];
   const model = {
     invoke: async () => new AIMessage('answered'),
     bindTools: () => ({
@@ -304,7 +297,7 @@ test('task decision reads full canonical main messages and excludes lane announc
     }),
     withStructuredOutput: () => ({
       invoke: async (messages: unknown[]) => {
-        taskDecisionMessages = messages as Array<{ _getType?: () => string; content?: unknown }>;
+        entryDecisionMessages = messages as Array<{ _getType?: () => string; content?: unknown }>;
         return { action: 'answer' };
       },
     }),
@@ -356,27 +349,27 @@ test('task decision reads full canonical main messages and excludes lane announc
   });
 
   assert.deepEqual(
-    taskDecisionMessages.map((message) => message._getType?.()),
+    entryDecisionMessages.map((message) => message._getType?.()),
     ['system', 'human', 'ai', 'human', 'ai', 'ai', 'human'],
   );
-  const contextText = String(taskDecisionMessages[1]?.content ?? '');
+  const contextText = String(entryDecisionMessages[1]?.content ?? '');
   assert.match(contextText, /<entry_decision_context[^>]*>/);
   assert.match(contextText, /trust="read_only"/);
   assert.doesNotMatch(contextText, /<user_request>|<recent_messages>|<recent_subagent_announces>|context_summaries/);
-  assert.match(String(taskDecisionMessages[2]?.content ?? ''), /COMPACTED_MAIN_CONTEXT/);
-  assert.equal(String(taskDecisionMessages.at(-1)?.content ?? ''), 'OK，把这些问题也发 issue 帮我。');
-  assert.equal(String(taskDecisionMessages[4]?.content ?? ''), '上一轮 10 个全仓库架构问题已经发布为 issue。');
-  assert.match(String(taskDecisionMessages[5]?.content ?? ''), /NEW_DISTRIBUTION_FINDING_A/);
-  assert.match(String(taskDecisionMessages[5]?.content ?? ''), /NEW_DISTRIBUTION_FINDING_B/);
+  assert.match(String(entryDecisionMessages[2]?.content ?? ''), /COMPACTED_MAIN_CONTEXT/);
+  assert.equal(String(entryDecisionMessages.at(-1)?.content ?? ''), 'OK，把这些问题也发 issue 帮我。');
+  assert.equal(String(entryDecisionMessages[4]?.content ?? ''), '上一轮 10 个全仓库架构问题已经发布为 issue。');
+  assert.match(String(entryDecisionMessages[5]?.content ?? ''), /NEW_DISTRIBUTION_FINDING_A/);
+  assert.match(String(entryDecisionMessages[5]?.content ?? ''), /NEW_DISTRIBUTION_FINDING_B/);
   assert.doesNotMatch(
-    taskDecisionMessages.map((message) => String(message.content ?? '')).join('\n'),
+    entryDecisionMessages.map((message) => String(message.content ?? '')).join('\n'),
     /未 handoff 的 lane announce|这条消息的正文不参与分类/,
   );
 });
 
 test('task_done reroutes through capabilityPlanner before the next task', async () => {
   let structuredCallCount = 0;
-  const taskDecisionInputs: string[] = [];
+  const entryDecisionInputs: string[] = [];
   const plannerInputs: CapabilityPlannerInput[] = [];
   const routeModel = {
     invoke: async () => new AIMessage('final summary'),
@@ -385,8 +378,8 @@ test('task_done reroutes through capabilityPlanner before the next task', async 
         structuredCallCount += 1;
         const inputText = String((messages.at(-1) as { content?: unknown })?.content ?? '');
         if (structuredCallCount === 1) {
-          taskDecisionInputs.push(inputText);
-          return nextTaskDecision('读取 issue #269 并提炼需求点。');
+          entryDecisionInputs.push(inputText);
+          return needsPlanDecision();
         }
         if (structuredCallCount === 2) {
           return taskDoneDecision('已提炼 issue 需求点，还需要检索本地实现。');
@@ -398,14 +391,14 @@ test('task_done reroutes through capabilityPlanner before the next task', async 
   const capabilityPlannerRunner: CapabilityPlannerRunner = {
     async invoke(input) {
       plannerInputs.push(input);
-      if (input.mode === 'direct') {
+      if (plannerInputs.length === 1) {
         return {
           result: 'next_task',
           next_task: {
-            objective: input.pendingTask.task,
+            objective: '读取 issue #269 并提炼需求点。',
             capability_intent: 'codebase_exploration',
             capability_name: 'explore',
-            context_summary: input.pendingTask.contextSummary,
+            context_summary: null,
           },
           remaining_plan: [],
         };
@@ -449,10 +442,10 @@ test('task_done reroutes through capabilityPlanner before the next task', async 
     },
   }) as OrchestratorStateType;
 
-  assert.equal(taskDecisionInputs.length, 1);
+  assert.equal(entryDecisionInputs.length, 1);
   assert.equal(plannerInputs.length, 2);
-  assert.doesNotMatch(taskDecisionInputs[0], /plan_draft|task_plan_draft/);
-  assert.equal(plannerInputs[0]?.mode, 'direct');
+  assert.doesNotMatch(entryDecisionInputs[0], /plan_draft|task_plan_draft/);
+  assert.equal(plannerInputs[0]?.mode, 'entry');
   assert.equal(plannerInputs[1]?.mode, 'boundary');
   assert.match(plannerInputs[1]?.latestHandoff ?? '', /issue #269 需求点/);
   assert.deepEqual(plannerInputs[1]?.completedTasks.map(({ objective }) => objective), [
@@ -467,7 +460,7 @@ test('task_done reroutes through capabilityPlanner before the next task', async 
 
 test('task_done returns to capabilityPlanner until the remaining goal is complete', async () => {
   let structuredCallCount = 0;
-  const taskDecisionInputs: string[] = [];
+  const entryDecisionInputs: string[] = [];
   const plannerInputs: CapabilityPlannerInput[] = [];
   const routeModel = {
     invoke: async () => new AIMessage('final answer'),
@@ -476,7 +469,7 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
         structuredCallCount += 1;
         const inputText = String((messages.at(-1) as { content?: unknown })?.content ?? '');
         if (structuredCallCount === 1) {
-          taskDecisionInputs.push(inputText);
+          entryDecisionInputs.push(inputText);
           return { action: 'needs_plan' };
         }
         if (structuredCallCount === 2) {
@@ -549,7 +542,7 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
   }) as OrchestratorStateType;
 
   assert.equal(structuredCallCount, 3);
-  assert.equal(taskDecisionInputs.length, 1);
+  assert.equal(entryDecisionInputs.length, 1);
   assert.equal(plannerInputs.length, 2);
   assert.deepEqual(plannerInputs.map(({ mode }) => mode), ['entry', 'boundary']);
   assert.deepEqual(plannerInputs[1]?.remainingPlan, [{
@@ -568,7 +561,7 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
   assert.equal(state.taskActiveDelegation, null);
 });
 
-test('entry decision autoRepair retries direct_task without a task', async () => {
+test('entry decision autoRepair rejects the removed direct_task action', async () => {
   const invokedMessages: unknown[] = [];
   let invokeCount = 0;
   let capturedOptions: unknown;
@@ -581,7 +574,7 @@ test('entry decision autoRepair retries direct_task without a task', async () =>
           invokeCount += 1;
           invokedMessages.push(messages);
           return invokeCount === 1
-            ? { action: 'direct_task', task: null }
+            ? { action: 'direct_task', task: 'legacy task' }
             : { action: 'answer' };
         },
       };
@@ -637,7 +630,7 @@ test('missing executable capability routes through the answer node', async () =>
       invoke: async () => new AIMessage(''),
     }),
     withStructuredOutput: () => ({
-      invoke: async () => nextTaskDecision('读取本地文件。', '用户需要本地执行器。'),
+      invoke: async () => needsPlanDecision(),
     }),
   } as unknown as AgentModels['act'];
 
@@ -650,10 +643,10 @@ test('missing executable capability routes through the answer node', async () =>
     actor: testActor,
     capabilityPlannerRunner: {
       async invoke(input) {
-        assert.equal(input.mode, 'direct');
+        assert.equal(input.mode, 'entry');
         return {
           result: 'unavailable',
-          task: input.mode === 'direct' ? input.pendingTask.task : '读取本地文件。',
+          task: '读取本地文件。',
           reason: 'No Capability documents are available.',
         };
       },
@@ -708,9 +701,9 @@ test('capability planner reports an empty compiled registry without inventing Ge
         plannerMode = input.mode;
         plannerCapabilityNames = input.workspace.capabilityNames;
         return {
-          result: 'answer',
-          next_task: null,
-          remaining_plan: [],
+          result: 'unavailable',
+          task: '完成一个需要执行能力的任务',
+          reason: 'The compiled Capability registry is empty.',
         };
       },
     },
@@ -729,6 +722,45 @@ test('capability planner reports an empty compiled registry without inventing Ge
 
   assert.equal(plannerMode, 'entry');
   assert.deepEqual(plannerCapabilityNames, []);
+});
+
+test('Capability Planner cannot report unavailable while general is registered', async () => {
+  const model = {
+    invoke: async () => new AIMessage('done'),
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async () => needsPlanDecision(),
+    }),
+  } as unknown as AgentModels['act'];
+  const graph = createOrchestratorGraph({
+    models: { act: model },
+    actor: testActor,
+    capabilityPlannerRunner: {
+      async invoke() {
+        return {
+          result: 'unavailable',
+          task: '完成普通工作区任务',
+          reason: 'No specialized Capability matched.',
+        };
+      },
+    },
+  });
+
+  await assert.rejects(
+    graph.invoke(buildOrchestratorRunInput([
+      new HumanMessage('完成普通工作区任务'),
+    ]), {
+      configurable: {
+        thread_id: 'general-fallback-runtime-invariant',
+        actor: testActor,
+        capabilities: [capability('general', '处理普通任务。')],
+        toolkits: [],
+      },
+    }),
+    /returned unavailable while the general Capability is registered/,
+  );
 });
 
 test('entry decision schema does not advertise capability actions', async () => {
@@ -783,7 +815,7 @@ test('allowedCapabilityNames scopes the immutable Planner workspace', async () =
   const model = {
     invoke: async () => new AIMessage('answered'),
     withStructuredOutput: () => ({
-      invoke: async () => nextTaskDecision('规划一支讲秋日食材的短视频。'),
+      invoke: async () => needsPlanDecision(),
     }),
   } as unknown as AgentModels['act'];
   const capabilityPlannerRunner: CapabilityPlannerRunner = {
@@ -791,9 +823,7 @@ test('allowedCapabilityNames scopes the immutable Planner workspace', async () =
       plannerCapabilityNames = input.workspace.capabilityNames;
       return {
         result: 'unavailable',
-        task: input.mode === 'direct'
-          ? input.pendingTask.task
-          : '规划一支讲秋日食材的短视频。',
+        task: '规划一支讲秋日食材的短视频。',
         reason: 'scope captured',
       };
     },
@@ -830,7 +860,7 @@ test('Capability Planner materializer rejects selections outside the workspace',
   const model = {
     invoke: async () => new AIMessage('answered'),
     withStructuredOutput: () => ({
-      invoke: async () => nextTaskDecision('读取 src/index.ts。'),
+      invoke: async () => needsPlanDecision(),
     }),
   } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
@@ -842,16 +872,14 @@ test('Capability Planner materializer rejects selections outside the workspace',
     actor: testActor,
     capabilityPlannerRunner: {
       async invoke(input) {
-        assert.equal(input.mode, 'direct');
+        assert.equal(input.mode, 'entry');
         return {
           result: 'next_task',
           next_task: {
-            objective: input.mode === 'direct' ? input.pendingTask.task : '',
+            objective: '读取 src/index.ts。',
             capability_intent: '读取代码',
             capability_name: 'not_registered',
-            context_summary: input.mode === 'direct'
-              ? input.pendingTask.contextSummary
-              : null,
+            context_summary: null,
           },
           remaining_plan: [],
         };
@@ -875,11 +903,17 @@ test('Capability Planner materializer rejects selections outside the workspace',
   );
 });
 
-test('Capability Planner materializer keeps a direct task immutable', async () => {
+test('Capability Planner owns the executable task boundary at entry', async () => {
+  let structuredCallCount = 0;
   const model = {
     invoke: async () => new AIMessage('answered'),
     withStructuredOutput: () => ({
-      invoke: async () => nextTaskDecision('读取 src/index.ts。', '只读检查。'),
+      invoke: async () => {
+        structuredCallCount += 1;
+        return structuredCallCount === 1
+          ? needsPlanDecision()
+          : goalDoneDecision();
+      },
     }),
   } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
@@ -891,16 +925,14 @@ test('Capability Planner materializer keeps a direct task immutable', async () =
     actor: testActor,
     capabilityPlannerRunner: {
       async invoke(input) {
-        assert.equal(input.mode, 'direct');
+        assert.equal(input.mode, 'entry');
         return {
           result: 'next_task',
           next_task: {
-            objective: '改写 src/index.ts。',
-            capability_intent: '修改代码',
+            objective: '检查 src/index.ts 并整理其公开接口。',
+            capability_intent: '代码检查',
             capability_name: 'general',
-            context_summary: input.mode === 'direct'
-              ? input.pendingTask.contextSummary
-              : null,
+            context_summary: '只读检查。',
           },
           remaining_plan: [],
         };
@@ -908,19 +940,21 @@ test('Capability Planner materializer keeps a direct task immutable', async () =
     },
   });
 
-  await assert.rejects(
-    graph.invoke(
-      buildOrchestratorRunInput([new HumanMessage('帮我读取 src/index.ts')]),
-      {
-        configurable: {
-          thread_id: 'planner-direct-task-immutable',
-          actor: testActor,
-          capabilities: [capability('general', '普通代码任务。')],
-          tools: [],
-        },
+  const state = await graph.invoke(
+    buildOrchestratorRunInput([new HumanMessage('帮我看看 src/index.ts')]),
+    {
+      configurable: {
+        thread_id: 'planner-owns-entry-task-boundary',
+        actor: testActor,
+        capabilities: [capability('general', '普通代码任务。')],
+        tools: [],
       },
-    ),
-    /changed the immutable pending task/,
+    },
+  ) as OrchestratorStateType;
+
+  assert.equal(
+    state.runDelegationSummaries[0]?.task,
+    '检查 src/index.ts 并整理其公开接口。',
   );
 });
 
@@ -1363,84 +1397,6 @@ test('capability errors retain the active delegation and lane without a handoff'
   );
 });
 
-test('task_done followed by planner answer does not imply user-goal completion', async () => {
-  let structuredCallCount = 0;
-  let answerInput = '';
-  const routeModel = {
-    invoke: async (messages: unknown[]) => {
-      answerInput = (messages as Array<{ content?: unknown }>)
-        .map((message) => String(message?.content ?? ''))
-        .join('\n');
-      return new AIMessage('调查结果已经整理完成；当前没有继续执行的任务。');
-    },
-    bindTools: () => ({
-      invoke: async () => new AIMessage(''),
-    }),
-    withStructuredOutput: () => ({
-      invoke: async () => {
-        structuredCallCount += 1;
-        return structuredCallCount === 1
-          ? taskDoneDecision()
-          : { result: 'answer', remaining_plan: [], next_task: null };
-      },
-    }),
-  } as unknown as AgentModels['act'];
-  const graph = createOrchestratorGraph({
-    models: { act: routeModel },
-    actor: testActor,
-  });
-  const input = {
-    ...buildOrchestratorRunInput([
-      new HumanMessage('调查 auth 模块，并根据调查结果决定是否重构。'),
-    ], { activeDelegationTransition: 'resume_active' }),
-    taskActiveDelegation: null as TaskActiveDelegation | null,
-  };
-  const task = '调查 auth 模块结构、依赖和风险';
-  const announceText = '调查完成：认证入口集中在 auth/index.ts，主要风险是循环依赖。';
-  const announceMessage = new AIMessage(announceText);
-  setPinpetMeta(announceMessage, {
-    lane: 'capability:general',
-    runId: input.runId,
-    isAnnounce: true,
-    completionReason: 'natural',
-    delegationId: 'task-auth-investigation',
-    task,
-  });
-  input.messages.push(announceMessage);
-  input.runDelegationSummaries = [{
-    id: 'task-auth-investigation',
-    lane: 'capability:general',
-    task,
-    status: 'progress',
-    resultPreview: announceText,
-  }];
-  input.taskActiveDelegation = {
-    id: 'task-auth-investigation',
-    lane: 'capability:general',
-    task,
-    contextSummary: null,
-    transcriptRunId: input.runId,
-    status: 'awaiting_decision',
-    resultPreview: announceText,
-  };
-
-  const result = await graph.invoke(input, {
-    configurable: {
-      thread_id: 'task-done-planner-answer-not-goal-done',
-      actor: testActor,
-      capabilities: [],
-      toolkits: [],
-    },
-  }) as OrchestratorStateType;
-
-  assert.equal(structuredCallCount, 2);
-  assert.match(answerInput, /调查完成：认证入口集中在 auth\/index\.ts/);
-  assert.match(answerInput, /上一条消息是本轮执行得到的结果/);
-  assert.doesNotMatch(answerInput, /本次用户目标（已完成）/);
-  assert.doesNotMatch(answerInput, /"调查 auth 模块结构、依赖和风险"已完成/);
-  assert.equal(result.runDelegationSummaries[0]?.status, 'completed');
-});
-
 test('answer decision emits no reply itself and routes to the dedicated answer node', async () => {
   let answerCalled = false;
   const model = {
@@ -1722,9 +1678,12 @@ test('capability receives tools only from Toolkits authorized by fixed uses', as
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return nextTaskDecision('inspect repository');
+          return needsPlanDecision();
         }
         if (routeCallCount === 2) {
+          return scriptedPlannerTask('inspect repository');
+        }
+        if (routeCallCount === 3) {
           return scriptedPlannerCapability('inspect_repo');
         }
         return goalDoneDecision();
@@ -1794,8 +1753,9 @@ test('artifact discovery tools reach a selected capability only when declared in
     withStructuredOutput: () => ({
       invoke: async () => {
         decisionCallCount += 1;
-        if (decisionCallCount === 1) return nextTaskDecision('inspect browser state');
-        if (decisionCallCount === 2) return scriptedPlannerCapability('browser_like');
+        if (decisionCallCount === 1) return needsPlanDecision();
+        if (decisionCallCount === 2) return scriptedPlannerTask('inspect browser state');
+        if (decisionCallCount === 3) return scriptedPlannerCapability('browser_like');
         return goalDoneDecision();
       },
     }),
@@ -1861,9 +1821,12 @@ test('general Capability composes its declared Toolkits', async () => {
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return nextTaskDecision('inspect workspace and prior artifacts');
+          return needsPlanDecision();
         }
         if (routeCallCount === 2) {
+          return scriptedPlannerTask('inspect workspace and prior artifacts');
+        }
+        if (routeCallCount === 3) {
           return scriptedPlannerCapability('general');
         }
         return goalDoneDecision();
@@ -1939,9 +1902,12 @@ test('toolkit registration does not rely on lane authorization flags', async () 
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return nextTaskDecision('inspect with tools');
+          return needsPlanDecision();
         }
         if (routeCallCount === 2) {
+          return scriptedPlannerTask('inspect with tools');
+        }
+        if (routeCallCount === 3) {
           return scriptedPlannerCapability('general');
         }
         return goalDoneDecision();
@@ -2051,9 +2017,12 @@ test('capability finalize artifact refs are merged into state', async () => {
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return nextTaskDecision('inspect issue context');
+          return needsPlanDecision();
         }
         if (routeCallCount === 2) {
+          return scriptedPlannerTask('inspect issue context');
+        }
+        if (routeCallCount === 3) {
           return scriptedPlannerCapability('explore');
         }
         return goalDoneDecision();
@@ -2138,9 +2107,12 @@ test('capability finalize stores only artifact refs in state', async () => {
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return nextTaskDecision('create post');
+          return needsPlanDecision();
         }
         if (routeCallCount === 2) {
+          return scriptedPlannerTask('create post');
+        }
+        if (routeCallCount === 3) {
           return scriptedPlannerCapability('daily_post');
         }
         return goalDoneDecision();
@@ -2692,8 +2664,6 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
   assert.equal(autoReviewCount, 1);
   const systemPrompt = (autoReviewMessages as Array<{ content?: unknown }>)[0]?.content;
   assert.match(String(systemPrompt), /untrusted evidence/);
-  assert.match(String(systemPrompt), /fallback risk review/);
-  assert.match(String(systemPrompt), /Decision policy:/);
   const reviewPrompt = String((autoReviewMessages as Array<{ content?: unknown }>)[1]?.content);
   assert.match(reviewPrompt, /<current_task role="context" authority="none">[\s\S]*Write the requested notes file/);
   assert.match(reviewPrompt, /<workdir authority="runtime">[\s\S]*\/repo/);
@@ -2702,6 +2672,191 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
   assert.doesNotMatch(reviewPrompt, /Decision policy:/);
   assert.doesNotMatch(reviewPrompt, /Test actor/);
   assert.equal((runtimeEvents[0] as { name?: unknown } | undefined)?.name, 'global_review_policy_auto_authorized');
+});
+
+test('global review policy reuses an exact auto authorization in the same session', async () => {
+  let callCount = 0;
+  let autoReviewCount = 0;
+  const sessionAuthorizations: ToolAuthorizationRecord[] = [];
+  const runtimeEvents: unknown[] = [];
+  const rawTool = tool(async ({ command }: { command: string }) => {
+    callCount += 1;
+    return `ran ${command}`;
+  }, {
+    name: 'run_shell',
+    description: 'run shell',
+    schema: z.object({ command: z.string() }),
+  });
+  const toolkits: AgentToolkit[] = [{
+    name: 'bash',
+    description: 'bash tools',
+    tools: [reviewedTool(
+      rawTool,
+      ReviewPolicies.commandExecution({ authorization: 'exact_args' }),
+    )],
+  }];
+  const autoModel = {
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        autoReviewCount += 1;
+        return {
+          decision: 'authorize',
+          reason: 'The exact command is a scoped read-only repository inspection.',
+        };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+
+  const resources = await resolveToolkitExecution(toolkits, ['bash'], {
+    models: { act: autoModel },
+    actor: testActor,
+    messages: [],
+    reviewContext: {
+      task: 'Inspect repository state',
+      workdir: '/repo',
+    },
+    reviewCapabilities: {
+      humanReview: true,
+      sessionAuthorization: true,
+    },
+    globalReviewPolicy: { mode: 'auto_authorization' },
+    toolAuthorizations: sessionAuthorizations,
+    recordToolAuthorization: (authorization) => {
+      sessionAuthorizations.push(authorization);
+    },
+    emitRuntimeEvent: (event) => {
+      runtimeEvents.push(event);
+    },
+  });
+
+  const first = await runToolkitToolCall(resources, {
+    id: 'call-status-1',
+    name: 'run_shell',
+    args: { command: 'git status --short' },
+  });
+  const second = await runToolkitToolCall(resources, {
+    id: 'call-status-2',
+    name: 'run_shell',
+    args: { command: 'git status --short' },
+  });
+  const different = await runToolkitToolCall(resources, {
+    id: 'call-diff',
+    name: 'run_shell',
+    args: { command: 'git diff --stat' },
+  });
+
+  assert.equal(readToolMessageContent(first.messages, 'call-status-1'), 'ran git status --short');
+  assert.equal(readToolMessageContent(second.messages, 'call-status-2'), 'ran git status --short');
+  assert.equal(readToolMessageContent(different.messages, 'call-diff'), 'ran git diff --stat');
+  assert.equal(callCount, 3);
+  assert.equal(autoReviewCount, 2);
+  assert.deepEqual(
+    sessionAuthorizations.map(({ createdAt: _createdAt, ...authorization }) => authorization),
+    [
+      {
+        toolName: 'run_shell',
+        source: 'auto_review',
+        matcher: {
+          type: 'exact_args',
+          value: { command: 'git status --short' },
+        },
+      },
+      {
+        toolName: 'run_shell',
+        source: 'auto_review',
+        matcher: {
+          type: 'exact_args',
+          value: { command: 'git diff --stat' },
+        },
+      },
+    ],
+  );
+  assert.deepEqual(
+    runtimeEvents.map((event) => (event as { name?: unknown }).name),
+    [
+      'global_review_policy_auto_authorized',
+      'global_review_policy_auto_authorized',
+    ],
+  );
+
+  const downgradedResources = await resolveToolkitExecution(toolkits, ['bash'], {
+    models: { act: autoModel },
+    actor: testActor,
+    messages: [],
+    reviewCapabilities: {
+      humanReview: false,
+      sessionAuthorization: true,
+    },
+    globalReviewPolicy: { mode: 'require_authorization' },
+    toolAuthorizations: sessionAuthorizations,
+  });
+  const afterDowngrade = await runToolkitToolCall(downgradedResources, {
+    id: 'call-status-after-downgrade',
+    name: 'run_shell',
+    args: { command: 'git status --short' },
+  });
+  const downgradeResult = JSON.parse(String(readToolMessageContent(
+    afterDowngrade.messages,
+    'call-status-after-downgrade',
+  ))) as { cancelled?: boolean; source?: string };
+  assert.equal(downgradeResult.cancelled, true);
+  assert.equal(downgradeResult.source, 'policy_block');
+  assert.equal(callCount, 3);
+  assert.equal(autoReviewCount, 2);
+});
+
+test('global review policy does not record auto grants for policies without session authorization', async () => {
+  let autoReviewCount = 0;
+  const sessionAuthorizations: ToolAuthorizationRecord[] = [];
+  const rawTool = tool(async ({ command }: { command: string }) => `ran ${command}`, {
+    name: 'run_shell',
+    description: 'run shell',
+    schema: z.object({ command: z.string() }),
+  });
+  const toolkits: AgentToolkit[] = [{
+    name: 'bash',
+    description: 'bash tools',
+    tools: [reviewedTool(rawTool, ReviewPolicies.commandExecution())],
+  }];
+  const autoModel = {
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        autoReviewCount += 1;
+        return {
+          decision: 'authorize',
+          reason: 'The command is safe but the tool policy does not support session authorization.',
+        };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const resources = await resolveToolkitExecution(toolkits, ['bash'], {
+    models: { act: autoModel },
+    actor: testActor,
+    messages: [],
+    reviewCapabilities: {
+      humanReview: true,
+      sessionAuthorization: true,
+    },
+    globalReviewPolicy: { mode: 'auto_authorization' },
+    toolAuthorizations: sessionAuthorizations,
+    recordToolAuthorization: (authorization) => {
+      sessionAuthorizations.push(authorization);
+    },
+  });
+
+  await runToolkitToolCall(resources, {
+    id: 'call-status-no-grant-1',
+    name: 'run_shell',
+    args: { command: 'git status --short' },
+  });
+  await runToolkitToolCall(resources, {
+    id: 'call-status-no-grant-2',
+    name: 'run_shell',
+    args: { command: 'git status --short' },
+  });
+
+  assert.equal(autoReviewCount, 2);
+  assert.deepEqual(sessionAuthorizations, []);
 });
 
 test('global review policy auto_authorization evaluates a tool-call batch once', async () => {
@@ -2797,14 +2952,14 @@ test('global review policy auto_authorization evaluates a tool-call batch once',
   assert.match(reviewPrompt, /b\.txt/);
   assert.match(systemPrompt, /Toolkit local:/);
   assert.equal(
-    systemPrompt.match(/Allow narrow writes to user-requested files\./g)?.length,
+    systemPrompt.match(/Automatic-authorization eligibility: narrow writes to user-requested files\./g)?.length,
     1,
   );
   assert.equal(
-    systemPrompt.match(/Ask before broad or destructive writes\./g)?.length,
+    systemPrompt.match(/Human-authorization conditions: before broad or destructive writes\./g)?.length,
     1,
   );
-  assert.doesNotMatch(reviewPrompt, /Toolkit local:|Allow narrow writes/);
+  assert.doesNotMatch(reviewPrompt, /Toolkit local:|narrow writes to user-requested files/);
   const authorizationEvent = runtimeEvents[0] as {
     name?: unknown;
     data?: { batchSize?: unknown; toolCalls?: unknown[] };
@@ -2979,9 +3134,12 @@ test('toolkit review policy records authorization through orchestrator runtime t
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return nextTaskDecision('run shell');
+          return needsPlanDecision();
         }
         if (routeCallCount === 2) {
+          return scriptedPlannerTask('run shell');
+        }
+        if (routeCallCount === 3) {
           return scriptedPlannerCapability('general');
         }
         return goalDoneDecision();
@@ -3062,6 +3220,7 @@ test('toolkit review policy records authorization through orchestrator runtime t
   assert.deepEqual(finalState.sessionToolAuthorizations.map(({ createdAt: _createdAt, ...item }) => item), [{
     toolName: 'run_shell',
     matcher: { type: 'shell_pattern', value: 'git status' },
+    source: 'human',
   }]);
   const authorizationEvents = runtimeEvents.filter((event) =>
     event
@@ -3078,6 +3237,7 @@ test('toolkit review policy records authorization through orchestrator runtime t
   assert.deepEqual(eventAuthorizations.map(({ createdAt: _createdAt, ...item }) => item), [{
     toolName: 'run_shell',
     matcher: { type: 'shell_pattern', value: 'git status' },
+    source: 'human',
   }]);
   assert.equal(reviewCount, 2);
   assert.equal(runCount, 1);
@@ -3122,9 +3282,12 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return nextTaskDecision('run shell');
+          return needsPlanDecision();
         }
         if (routeCallCount === 2) {
+          return scriptedPlannerTask('run shell');
+        }
+        if (routeCallCount === 3) {
           return scriptedPlannerCapability('general');
         }
         return goalDoneDecision();
@@ -3267,9 +3430,12 @@ test('toolkit review rejection resumes the same subagent before parent handoff',
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return nextTaskDecision('run shell');
+          return needsPlanDecision();
         }
         if (routeCallCount === 2) {
+          return scriptedPlannerTask('run shell');
+        }
+        if (routeCallCount === 3) {
           return scriptedPlannerCapability('general');
         }
         return goalDoneDecision();
@@ -3345,7 +3511,7 @@ test('toolkit review rejection resumes the same subagent before parent handoff',
   // Resume replays the interrupted review policy once, then returns to the
   // same child agent loop for its next model call.
   assert.equal(reviewCount, 2);
-  assert.equal(routeCallCount, 3);
+  assert.equal(routeCallCount, 4);
   const resumedSubagentInput = recorder.subagentInputs.at(-1) ?? [];
   const rejectedToolResult = resumedSubagentInput.find((message) =>
     message instanceof ToolMessage
@@ -3408,9 +3574,12 @@ test('toolkit review run interruption retains the delegation without another mod
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return nextTaskDecision('run shell');
+          return needsPlanDecision();
         }
         if (routeCallCount === 2) {
+          return scriptedPlannerTask('run shell');
+        }
+        if (routeCallCount === 3) {
           return scriptedPlannerCapability('general');
         }
         return goalDoneDecision();
@@ -3483,7 +3652,7 @@ test('toolkit review run interruption retains the delegation without another mod
   assert.equal(finalState.__interrupt__, undefined);
   assert.equal(runCount, 0);
   assert.equal(reviewCount, 2);
-  assert.equal(routeCallCount, 2);
+  assert.equal(routeCallCount, 3);
   assert.equal(recorder.subagentInputs.length, 1);
   assert.equal(finalizeCallCount, 0);
   assert.equal(finalState.runNextDelegation, null);
@@ -3528,7 +3697,7 @@ test('toolkit review run interruption retains the delegation without another mod
     taskActiveDelegation: TaskActiveDelegation | null;
   };
 
-  assert.equal(routeCallCount, 3);
+  assert.equal(routeCallCount, 4);
   assert.equal(recorder.subagentInputs.length, 2);
   assert.equal(finalizeCallCount, 1);
   const continuedSubagentInput = recorder.subagentInputs.at(-1) ?? [];
@@ -3586,9 +3755,12 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return nextTaskDecision('run shell twice');
+          return needsPlanDecision();
         }
         if (routeCallCount === 2) {
+          return scriptedPlannerTask('run shell twice');
+        }
+        if (routeCallCount === 3) {
           return scriptedPlannerCapability('general');
         }
         return goalDoneDecision();
@@ -5181,9 +5353,12 @@ test('fresh delegated request supersedes checkpointed work without deleting its 
       invoke: async () => {
         structuredCallCount += 1;
         if (structuredCallCount === 1) {
-          return nextTaskDecision('执行全新的请求。');
+          return needsPlanDecision();
         }
         if (structuredCallCount === 2) {
+          return scriptedPlannerTask('执行全新的请求。');
+        }
+        if (structuredCallCount === 3) {
           return scriptedPlannerCapability('general');
         }
         return goalDoneDecision();
@@ -5234,7 +5409,7 @@ test('fresh delegated request supersedes checkpointed work without deleting its 
     config,
   ) as OrchestratorStateType;
 
-  assert.equal(structuredCallCount, 3);
+  assert.equal(structuredCallCount, 4);
   const observedFreshDelegation = executedDelegation as {
     delegationId: string;
     runId: string;
@@ -5371,11 +5546,18 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
       invoke: async () => {
         structuredCallCount += 1;
         if (structuredCallCount === 1) {
-          return nextTaskDecision('关闭 GitHub Issue #272。', 'GitHub issue 操作。');
+          return needsPlanDecision();
         }
-        if (structuredCallCount === 2) return scriptedPlannerCapability('ops');
-        if (structuredCallCount === 3) return taskDoneDecision('issue 已关闭，还需删除目录。');
-        if (structuredCallCount === 4) {
+        if (structuredCallCount === 2) {
+          return scriptedPlannerTask(
+            '关闭 GitHub Issue #272。',
+            'GitHub issue 操作。',
+            [{ objective: '删除 packages/goat 目录。', capability_intent: 'file_cleanup' }],
+          );
+        }
+        if (structuredCallCount === 3) return scriptedPlannerCapability('ops');
+        if (structuredCallCount === 4) return taskDoneDecision('issue 已关闭，还需删除目录。');
+        if (structuredCallCount === 5) {
           return {
             result: 'next_task',
             remaining_plan: [
@@ -5384,7 +5566,7 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
             next_task: { objective: '删除 packages/goat 目录。', capability_intent: 'file_cleanup' },
           };
         }
-        if (structuredCallCount === 5) return scriptedPlannerCapability('ops');
+        if (structuredCallCount === 6) return scriptedPlannerCapability('ops');
         return goalDoneDecision();
       },
     }),
@@ -5482,10 +5664,13 @@ test('continue outcome appends a continuation briefing carrying the gap note', a
       invoke: async () => {
         structuredCallCount += 1;
         if (structuredCallCount === 1) {
-          return nextTaskDecision('关闭 GitHub Issue #272。', 'GitHub issue 操作。');
+          return needsPlanDecision();
         }
-        if (structuredCallCount === 2) return scriptedPlannerCapability('ops');
-        if (structuredCallCount === 3) return continueDecision('未验证 issue 状态，请确认已关闭。');
+        if (structuredCallCount === 2) {
+          return scriptedPlannerTask('关闭 GitHub Issue #272。', 'GitHub issue 操作。');
+        }
+        if (structuredCallCount === 3) return scriptedPlannerCapability('ops');
+        if (structuredCallCount === 4) return continueDecision('未验证 issue 状态，请确认已关闭。');
         return goalDoneDecision();
       },
     }),

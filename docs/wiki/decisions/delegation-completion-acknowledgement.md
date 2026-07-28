@@ -2,7 +2,7 @@
 title: Delegation Completion Acknowledgement
 page_type: decision
 status: validated
-updated: 2026-07-26
+updated: 2026-07-29
 sources:
   - ../../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
@@ -12,6 +12,7 @@ sources:
   - ../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/answer.ts
   - https://github.com/pinpawo/pinpawo-agent/pull/338
   - https://github.com/pinpawo/pinpawo-agent/pull/467
+  - https://github.com/pinpawo/pinpawo-agent/pull/492
 related:
   - ../concepts/orchestrator-practical-reasoning.md
   - ../concepts/message-context-and-provenance.md
@@ -31,13 +32,17 @@ complete.
 | Outcome | Meaning | Next owner |
 |---|---|---|
 | `continue` | The current task is incomplete and the same executor can continue | current executor |
-| `task_done` | The current task is complete, but user-goal completion is not established | boundary planner |
+| `task_done` | The current task is complete and the user goal still has autonomous follow-up work | boundary Planner |
 | `goal_done` | The user goal is complete | answer fixed completion acknowledgement |
 | `user_input_required` | The user goal is incomplete and continuation requires user input | answer return-control close |
 
 The fixed acknowledgement remains a distinct final main message for
 `goal_done`. It gives main messages a stable completed lifecycle shape without
 repeating the full deliverable that already entered main through handoff.
+
+The boundary Planner has no `answer` result. If the current result makes a
+conditional follow-up unnecessary and therefore completes the user goal,
+`outcomeDecision` must choose `goal_done`, not `task_done`.
 
 For `user_input_required`, answer instead states the accepted progress and
 unfinished effect, then asks for the missing information. Returning control is

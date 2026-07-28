@@ -40,13 +40,6 @@ export function scoreEntryDecision(
   ];
 }
 
-export function adaptTaskDecisionMode(
-  action: 'answer' | 'direct_task' | 'needs_plan',
-): 'answer' | 'direct_task' | 'needs_plan' {
-  if (action === 'answer' || action === 'needs_plan') return action;
-  return 'direct_task';
-}
-
 export function scoreOutcomeDecision(
   output: { outcome?: string },
   expected: OutcomeDecisionExpected,
@@ -66,6 +59,7 @@ export function scoreCapabilityPlanning(
     result: string;
     nextTask?: string | null;
     capabilityIntent?: string | null;
+    capabilityName?: string | null;
     remainingPlan: Array<{ objective: string; capabilityIntent: string }>;
   },
   expected: CapabilityPlanningExpected,
@@ -77,6 +71,14 @@ export function scoreCapabilityPlanning(
       output.result,
       expected.result,
     ),
+    ...(expected.capabilityName === undefined
+      ? []
+      : [exact(
+          'planner_capability_correct',
+          `Select ${expected.capabilityName} as the concrete Capability.`,
+          output.capabilityName,
+          expected.capabilityName,
+        )]),
     ...(expected.exactRemainingPlanLength === undefined
       ? []
       : [exact(
@@ -111,9 +113,6 @@ export function derivePlanningMetrics(
   }
   if (unchanged) {
     return { planEffect: before.length > 0 ? 'unchanged' : 'empty', rubberStamp: before.length > 0 };
-  }
-  if (before.length > 0 && after.length === 0) {
-    return { planEffect: 'cancelled', rubberStamp: false };
   }
   return { planEffect: 'revised', rubberStamp: false };
 }

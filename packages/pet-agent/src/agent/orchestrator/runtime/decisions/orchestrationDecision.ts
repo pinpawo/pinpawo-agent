@@ -7,19 +7,18 @@ import type { OrchestratorStatePatch } from '../../controlPrimitives';
 import type {
   OrchestratorConfig,
   RunNextDelegation,
-  RunPendingTask,
   TaskActiveDelegation,
 } from '../../types';
 import {
   buildDelegationOutcomeDecisionOutputInstruction,
   buildDelegationOutcomeDecisionSchema,
-  buildTaskDecisionOutputInstruction,
-  buildTaskDecisionSchema,
+  buildEntryDecisionOutputInstruction,
+  buildEntryDecisionSchema,
   buildOrchestrationDecisionStructuredOutputOptions,
   readDecisionText,
   type AcceptedDelegationOutcome,
   type DelegationOutcomeDecision,
-  type TaskDecision,
+  type EntryDecision,
 } from '../../schemas';
 import { readContextCompactionSummaries } from '../../contextCompaction';
 import {
@@ -32,8 +31,8 @@ import {
   buildRunDelegationSummaryContext,
   buildRuntimeContext,
   buildSubagentAnnounceContext,
-  buildTaskDecisionInput,
-  buildTaskDecisionSystemPrompt,
+  buildEntryDecisionInput,
+  buildEntryDecisionSystemPrompt,
 } from '../../prompts';
 import {
   appendRunDelegationSummary,
@@ -70,14 +69,14 @@ import { guardDecisionEmitter } from '../guards/decisionEvents';
 
 type DecisionKind = 'delegation_outcome';
 
-export function createTaskDecisionRunner(config: OrchestratorConfig) {
-  return async function runTaskDecision(
+export function createEntryDecisionRunner(config: OrchestratorConfig) {
+  return async function runEntryDecision(
     state: OrchestratorStateType,
     runnableConfig?: RunnableConfig,
   ) {
-    const context = buildTaskDecisionContext({ config, state, runnableConfig });
-    const decision = await invokeTaskDecision({ config, context, runnableConfig });
-    const transition = buildTaskDecisionResult({ state, decision });
+    const context = buildEntryDecisionContext({ config, state, runnableConfig });
+    const decision = await invokeEntryDecision({ config, context, runnableConfig });
+    const transition = buildEntryDecisionResult({ decision });
     return new Command({ update: transition.update, goto: transition.goto });
   };
 }
@@ -98,7 +97,7 @@ export function createOrchestrationDecisionRunner(config: OrchestratorConfig) {
   };
 }
 
-function buildTaskDecisionContext(params: {
+function buildEntryDecisionContext(params: {
   config: OrchestratorConfig;
   state: OrchestratorStateType;
   runnableConfig?: RunnableConfig;
@@ -116,13 +115,13 @@ function buildTaskDecisionContext(params: {
     ...mainMessagesWithoutCompaction(state.messages)
       .filter((message) => message._getType() === 'human' || message._getType() === 'ai'),
   ];
-  const systemPrompt = buildTaskDecisionSystemPrompt({
+  const systemPrompt = buildEntryDecisionSystemPrompt({
     actor,
-    outputInstruction: buildTaskDecisionOutputInstruction(
+    outputInstruction: buildEntryDecisionOutputInstruction(
       config.decisionStructuredOutput?.method,
     ),
   });
-  const decisionContextMessage = new HumanMessage(buildTaskDecisionInput({
+  const decisionContextMessage = new HumanMessage(buildEntryDecisionInput({
     runDelegationContext: buildRunDelegationSummaryContext(state.runDelegationSummaries),
     runtimeContext: buildRuntimeContext(workdir, runtimeEnvironment),
   }));
@@ -138,7 +137,7 @@ function buildTaskDecisionContext(params: {
   };
 }
 
-type TaskDecisionContext = ReturnType<typeof buildTaskDecisionContext>;
+type EntryDecisionContext = ReturnType<typeof buildEntryDecisionContext>;
 
 function buildDecisionContext(params: {
   config: OrchestratorConfig;
@@ -259,16 +258,16 @@ function buildDecisionContext(params: {
 
 type OrchestrationDecisionContext = ReturnType<typeof buildDecisionContext>;
 
-async function invokeTaskDecision(params: {
+async function invokeEntryDecision(params: {
   config: OrchestratorConfig;
-  context: TaskDecisionContext;
+  context: EntryDecisionContext;
   runnableConfig?: RunnableConfig;
 }) {
   const { config, context, runnableConfig } = params;
   try {
     return await invokeStructuredOutput({
       model: config.models.act,
-      schema: buildTaskDecisionSchema(),
+      schema: buildEntryDecisionSchema(),
       options: buildOrchestrationDecisionStructuredOutputOptions(
         config.decisionStructuredOutput,
       ),
@@ -278,9 +277,9 @@ async function invokeTaskDecision(params: {
         ...context.conversationMessages,
       ],
       runnableConfig,
-    }) as TaskDecision;
+    }) as EntryDecision;
   } catch (error) {
-    console.warn('[pet-agent] invalid task decision structured output:', {
+    console.warn('[pet-agent] invalid entry decision structured output:', {
       error: error instanceof Error ? error.message : String(error),
     });
     throw error;
@@ -316,12 +315,10 @@ async function invokeDelegationOutcomeDecision(params: {
   return decision;
 }
 
-function buildTaskDecisionResult(params: {
-  state: OrchestratorStateType;
-  decision: TaskDecision;
+function buildEntryDecisionResult(params: {
+  decision: EntryDecision;
 }) {
-  const { state, decision } = params;
-  const task = readDecisionText(decision.task);
+  const { decision } = params;
   if (decision.action === 'answer') {
     return {
       goto: 'answer' as const,
@@ -332,29 +329,11 @@ function buildTaskDecisionResult(params: {
       },
     };
   }
-  if (decision.action === 'needs_plan') {
-    return {
-      goto: 'capabilityPlanner' as const,
-      update: {
-        runNextDelegation: null,
-        runPendingTask: null,
-        runCapabilityPlan: [],
-      },
-    };
-  }
-  if (!task) {
-    throw new Error('entryDecision returned direct_task without a task');
-  }
-
-  const pendingTask: RunPendingTask = {
-    task,
-    contextSummary: readDecisionText(decision.context_summary),
-  };
   return {
     goto: 'capabilityPlanner' as const,
     update: {
       runNextDelegation: null,
-      runPendingTask: pendingTask,
+      runPendingTask: null,
       runCapabilityPlan: [],
     },
   };

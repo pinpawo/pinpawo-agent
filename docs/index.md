@@ -10,11 +10,12 @@ the original design and reference documents. Maintenance rules live in
 
 - [Documentation wiki](wiki/index.md)
 - [Capability / Toolkit V2 architecture](wiki/capability-toolkit-architecture.md)
+- [Interruption and delegation continuation](wiki/interruption-and-delegation-continuation.md)
 - [System prompt design knowledge map](wiki/overview.md)
 - [Orchestrator as practical reasoning](wiki/concepts/orchestrator-practical-reasoning.md)
 - [System prompt authoring and evaluation principles](wiki/concepts/system-prompt-authoring-principles.md)
 - [Orchestrator decision node ownership](wiki/concepts/decision-node-ownership.md)
-- [CapabilityPlanner task boundaries](wiki/decisions/capability-planner-task-boundaries.md)
+- [Capability Planner task boundaries and Capability selection](wiki/decisions/capability-planner-task-boundaries.md)
 - [Delegation completion acknowledgement and terminal close](wiki/decisions/delegation-completion-acknowledgement.md)
 - [Documentation wiki management plan](wiki/migrations/docs-wiki-management-plan.md)
 
@@ -33,11 +34,7 @@ the original design and reference documents. Maintenance rules live in
 ## Orchestrator, decisions, and state
 
 - [Pet Agent rewrite requirements](PET_AGENT_REWRITE_DESIGN.md)
-- [Delegation state and task routing](PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md)
-- [State lifecycle refactor](PET_AGENT_STATE_LIFECYCLE_REFACTOR.md)
-- [Decision node ownership audit](PET_AGENT_DECISION_NODE_OWNERSHIP_AUDIT.md)
 - [Decision system prompt design](PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md)
-- [CapabilityPlanner task-horizon design](CAPABILITY_PLANNER_TASK_HORIZON_DRAFT.md)
 - [Orchestrator terminal-semantics validation](ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md)
 - [Orchestrator lifecycle composition eval](ORCHESTRATOR_LIFECYCLE_COMPOSITION_EVAL.md)
 - [Decision shared prompt prefix](PET_AGENT_ORCHESTRATOR_DECISION_PROMPT_PREFIX.md)
@@ -70,7 +67,6 @@ the original design and reference documents. Maintenance rules live in
   - [Architecture](capability-artifact-pipeline/architecture.md)
   - [Store contract](capability-artifact-pipeline/store-contract.md)
   - [Explore ingest](capability-artifact-pipeline/explore-ingest.md)
-  - [Prompt integration](capability-artifact-pipeline/prompt-integration.md)
   - [Compatibility notes](capability-artifact-pipeline/compatibility-notes.md)
 
 ## Studio
@@ -90,8 +86,9 @@ the original design and reference documents. Maintenance rules live in
 ## Local agent and runtime configuration
 
 - [Local agent architecture refactor](LOCAL_AGENT_ARCHITECTURE_REFACTOR_PLAN.md)
-- [Local agent session projection](LOCAL_AGENT_SESSION_PROJECTION.md) — canonical
-  contract; ingested into [wiki](wiki/local-agent-session-projection.md).
+- [Local agent session projection](LOCAL_AGENT_SESSION_PROJECTION.md) — accepted
+  source contract; current implementation is synthesized in the
+  [wiki](wiki/local-agent-session-projection.md).
 - [Workspace runtime configuration](WORKSPACE_RUNTIME_CONFIG_DESIGN.md)
 - [Workdir-scoped runtime configuration](WORKDIR_SCOPED_RUNTIME_CONFIG_DESIGN.md)
 

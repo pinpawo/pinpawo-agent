@@ -10,7 +10,14 @@ export type ToolAuthorizationRecord = {
   toolName: string;
   matcher: ToolAuthorizationMatcher;
   createdAt: string;
+  /**
+   * Omitted records predate source tracking and are treated as human grants.
+   * Auto-review grants are valid only while auto authorization is active.
+   */
+  source?: ToolAuthorizationSource;
 };
+
+export type ToolAuthorizationSource = 'human' | 'auto_review';
 
 export type ApplyReviewEffectsOptions = {
   pendingAction: PendingReviewAction;
@@ -177,6 +184,7 @@ function matchesAuthorizationRule(rule: ToolAuthorizationRecord, params: {
 export function buildToolAuthorizationRecord(params: {
   toolName: string;
   matcher: ToolAuthorizationMatcher;
+  source?: ToolAuthorizationSource;
   now?: () => Date;
 }): ToolAuthorizationRecord {
   const matcher = assertToolAuthorizationMatcher(params.matcher, 'authorizeToolAction');
@@ -185,6 +193,7 @@ export function buildToolAuthorizationRecord(params: {
     toolName: params.toolName,
     matcher,
     createdAt,
+    ...(params.source ? { source: params.source } : {}),
   };
 }
 
@@ -208,7 +217,7 @@ export function mergeToolAuthorizations(
   next: ToolAuthorizationRecord[],
 ) {
   const merged: ToolAuthorizationRecord[] = [];
-  const seen = new Set<string>();
+  const indexes = new Map<string, number>();
 
   for (const rule of [...(current ?? []), ...next]) {
     const matcher = readToolAuthorizationMatcher(rule.matcher);
@@ -217,10 +226,18 @@ export function mergeToolAuthorizations(
     }
     const normalized = { ...rule, matcher };
     const key = toolAuthorizationKey(normalized);
-    if (!key || seen.has(key)) {
+    if (!key) {
       continue;
     }
-    seen.add(key);
+    const existingIndex = indexes.get(key);
+    if (existingIndex !== undefined) {
+      const existing = merged[existingIndex]!;
+      if (existing.source === 'auto_review' && normalized.source !== 'auto_review') {
+        merged[existingIndex] = normalized;
+      }
+      continue;
+    }
+    indexes.set(key, merged.length);
     merged.push(normalized);
   }
 
@@ -332,6 +349,7 @@ export async function applyReviewEffects(options: ApplyReviewEffectsOptions) {
     const rule = buildToolAuthorizationRecord({
       toolName: options.pendingAction.toolName,
       matcher,
+      source: 'human',
       now: options.now,
     });
     applied.push(rule);

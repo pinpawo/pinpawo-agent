@@ -1,4 +1,5 @@
 import type { GlobalReviewPolicyBatchItem } from '../review/globalReviewPolicy';
+import type { StructuredOutputMethod } from '../../../utils/structuredOutput';
 import { reviewViewToText } from '../review/reviewSpec';
 import { promptBlock, xmlTextBlock } from './shared';
 import {
@@ -105,15 +106,38 @@ function formatToolkitAutoReviewPolicies(items: GlobalReviewPolicyBatchItem[]) {
     'Registered toolkit auto-review policies:',
     ...[...policies.entries()].flatMap(([toolkitName, policy]) => [
       `Toolkit ${toolkitName}:`,
-      `- Allow: ${policy.allow}`,
-      `- Ask: ${policy.ask}`,
+      `- Automatic-authorization eligibility: ${stripGuidanceDirective(policy.allow, 'allow')}`,
+      `- Human-authorization conditions: ${stripGuidanceDirective(policy.ask, 'ask')}`,
     ]),
   ].join('\n');
 }
 
-export function buildAutoReviewSystemPrompt(reviews: GlobalReviewPolicyBatchItem[] = []) {
+function stripGuidanceDirective(value: string, directive: 'allow' | 'ask') {
+  const trimmed = value.trim();
+  const prefix = directive === 'ask'
+    ? '(?:ask|require human authorization)'
+    : 'allow';
+  return trimmed.replace(new RegExp(`^${prefix}\\b[\\s:]*`, 'i'), '');
+}
+
+function buildAutoReviewOutputInstruction(method?: StructuredOutputMethod) {
+  if (method !== 'jsonMode') return '';
+  return [
+    '',
+    'Output protocol:',
+    'Return only one JSON object with:',
+    '- "decision": exactly "authorize" or "require_authorization".',
+    '- "reason": a concise explanation grounded in the action facts and policy.',
+  ].join('\n');
+}
+
+export function buildAutoReviewSystemPrompt(
+  reviews: GlobalReviewPolicyBatchItem[] = [],
+  method?: StructuredOutputMethod,
+) {
   return AUTO_REVIEW_SYSTEM_PROMPT.render({
     toolkitPolicyBlock: formatToolkitAutoReviewPolicies(reviews),
+    outputInstruction: buildAutoReviewOutputInstruction(method),
   });
 }
 

@@ -54,7 +54,8 @@ recreate datasets.
 - `agent-context-synthesis-basics`: answer-from-context and missing-information cases.
 - `agent-answer-behavior-basics`: direct reply, handoff synthesis, historical replay,
   clarification, fixed completion acknowledgement, and required-user-input return control.
-- `agent-entry-decision-basics`: eval contract for `answer | direct_task | needs_plan`.
+- `agent-entry-decision-basics`: binary result-availability gate for
+  `answer | needs_plan`.
 - `agent-outcome-decision-basics`: `continue | task_done | goal_done | user_input_required`
   verdict boundaries.
 - `agent-capability-planning-basics`: production `planner@entry` and `planner@boundary` contracts.
@@ -99,14 +100,16 @@ Model configuration is read from `LLM_*`, `~/.pinpawo/.env`, or
 These evals exercise the remaining public decision boundaries and the Planner
 through complete graph runs:
 
-1. `entryDecision` chooses `answer | direct_task | needs_plan`:
+1. `entryDecision` decides whether the requested result is already available:
 
    ```sh
-   npm run eval:task-decision
+   npm run eval:entry-decision
    ```
 
    The runner imports the canonical entry dataset and uses the production
-   entry-decision prompt and schema.
+   entry-decision prompt and schema. It deliberately does not evaluate task
+   boundaries; all work that still needs execution is delegated to the
+   Capability Planner.
 
 2. `outcomeDecision` has a standalone canonical dataset for current-task
    acceptance. `task_done` deliberately leaves next-task planning to
@@ -203,7 +206,7 @@ Useful filters:
 DECISION_EVAL_TARGETS=entry,planner DECISION_EVAL_REPEATS=5 \
   npm run eval:decision-stability
 
-DECISION_EVAL_CASES=boundary-cancels-obsolete-task DECISION_EVAL_REPEATS=3 \
+DECISION_EVAL_CASES=entry-uses-general-for-unmatched-work DECISION_EVAL_REPEATS=3 \
   npm run eval:decision-stability
 
 DECISION_EVAL_TIMEOUT_MS=180000 npm run eval:decision-stability
@@ -212,8 +215,8 @@ DECISION_EVAL_STRUCTURED_OUTPUT_METHOD=jsonMode npm run eval:decision-stability
 ```
 
 Model configuration is resolved from `LLM_*`, then `~/.pinpawo/.env`, then
-`~/.pinpawo/config.json`. Entry scoring covers mode and direct-task content;
-planner scoring owns plan boundary count and plan contents.
+`~/.pinpawo/config.json`. Entry scoring covers only result availability;
+Planner scoring owns task boundaries, plan contents, and Capability selection.
 
 ## Prompt Contract Evaluation
 
@@ -338,25 +341,27 @@ human review, the reject resume must finish without executing the rejected
 tool, and the same subagent invocation must receive the cancellation ToolMessage
 before producing its real final result for normal handoff.
 
-## Task Decision Stability Runner
+## Entry Decision Stability Runner
 
-The task-decision runner calls the production `taskDecision` prompt and schema
-directly with the configured real LLM. It repeats each case so prompt drift is
-visible without subagent or graph noise:
+The entry-decision runner calls the production `entryDecision` prompt and schema
+directly with the configured real LLM. It repeats each case so drift in the
+binary result-availability gate is visible without Capability Planner or graph
+noise:
 
 ```sh
-npm run eval:task-decision
+npm run eval:entry-decision
 ```
 
-It covers direct answer, single delegated task, multi-step investigation,
-PR review keywords, task continuation from completed summaries, and completed-goal
-answer. The summary shows per-case pass counts, action distribution, and task output
-distribution.
+It covers answers already present in context, requests requiring observation or
+execution, multi-step work, continuation after a completed task, and completed
+goals. The summary shows per-case pass counts and action distribution. Task
+formation and task splitting belong to the Capability Planner datasets and
+graph-level evals.
 
 Useful knobs:
 
 ```sh
-TASK_DECISION_REPEATS=5 npm run eval:task-decision
-TASK_DECISION_CASES=agent-entry-decision-basics.explore-before-implementation-needs-plan,after-first-handoff-remaining-work npm run eval:task-decision
-DECISION_STRUCTURED_OUTPUT_METHOD=jsonMode npm run eval:task-decision
+ENTRY_DECISION_REPEATS=5 npm run eval:entry-decision
+ENTRY_DECISION_CASES=agent-entry-decision-basics.explore-before-implementation-needs-plan,agent-entry-decision-basics.current-local-state-needs-observation npm run eval:entry-decision
+DECISION_STRUCTURED_OUTPUT_METHOD=jsonMode npm run eval:entry-decision
 ```

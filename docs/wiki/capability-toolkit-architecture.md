@@ -2,7 +2,7 @@
 title: Capability / Toolkit V2 Architecture
 page_type: system
 status: validated
-updated: 2026-07-27
+updated: 2026-07-29
 sources:
   - ../PET_AGENT_API_CAPABILITY_TOOLKIT.md
   - ../PET_AGENT_TOOLKIT_COMPOSITION_DESIGN.md
@@ -10,11 +10,14 @@ sources:
   - ../../packages/pet-agent/src/types/capability.ts
   - ../../packages/pet-agent/src/types/toolkit.ts
   - ../../packages/pet-agent/src/agent/orchestrator/registry.ts
+  - ../../packages/pet-agent/src/agent/orchestrator/capabilityPlannerAgent.ts
+  - ../../packages/pet-agent/src/agent/orchestrator/capabilityDocumentWorkspace.ts
   - ../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/capability.ts
   - ../../services/local-agent/src/agentRegistryPreparation.ts
   - ../../services/local-agent/src/capabilities/general/CAPABILITY.md
   - https://github.com/pinpawo/pinpawo-agent/issues/447
   - https://github.com/pinpawo/pinpawo-agent/pull/470
+  - https://github.com/pinpawo/pinpawo-agent/pull/492
 related:
   - index.md
   - overview.md
@@ -36,8 +39,9 @@ flowchart LR
   T["ToolDefinition"] --> K["AgentToolkit<br/>coded tools and policies"]
   K -->|name referenced by uses| C["AgentCapability<br/>delegatable business ability"]
   C --> R["CompiledAgentRegistry"]
-  R --> S["Capability search and decision"]
-  S -->|capability.name| E["Unified capability executor"]
+  R --> W["Capability Document Workspace"]
+  W --> P["Capability Planner Agent"]
+  P -->|next_task + capability_name| E["Unified capability executor"]
   E --> L["capability:name private lane"]
   L --> H["accepted announce handoff"]
   E --> A["CapabilityArtifactRef"]
@@ -60,14 +64,15 @@ orchestrator decides when each Capability runs
 | `AgentToolkit` | A coded family of tools, tool instructions, availability, and review guidance | A delegatable skill |
 | `AgentCapability` | A named business executor with description, required `uses`, Markdown instructions, and optional deterministic finalize lifecycle | A tool container or nested orchestrator |
 | `CompiledCapability` | The immutable registry-generation binding of one Capability to its resolved Toolkits, tools, and captured tool names | A third extension contract |
-| `general` | A well-known ordinary Capability registered by a host | A fallback executor, special lane, or special registry slot |
+| `general` | A well-known ordinary Capability selected by Planner policy when no specialist fits | A special executor, lane, or registry slot |
 
 **Fact:** The public contracts are defined in
 [`types/capability.ts`](../../packages/pet-agent/src/types/capability.ts) and
 [`types/toolkit.ts`](../../packages/pet-agent/src/types/toolkit.ts). The
 compiler in
 [`registry.ts`](../../packages/pet-agent/src/agent/orchestrator/registry.ts)
-produces the execution inventory consumed by both selection and execution.
+produces the execution inventory consumed by workspace publication and
+execution.
 
 ## Accepted composition decision
 
@@ -195,17 +200,21 @@ The compiled registry is the one availability authority for a run. HTTP, UI,
 planner, and executor projections should consume it rather than independently
 recompute missing dependencies.
 
-## Selection and execution
+## Planning, selection, and execution
 
-Only successfully compiled Capabilities enter search and Capability Decision.
-The search document includes the Capability description and the resolved
-Toolkit names/descriptions, so executable scope informs candidate retrieval.
+Only successfully compiled Capabilities enter the Capability Document
+Workspace. Each document exposes the registered Capability contract, including
+its description, instructions, and declared Toolkit scope.
+
+The Capability Planner explores that filesystem map with private bounded read
+tools. It forms the current task and selects its concrete Capability in one
+submission; no intermediary layer ranks or reinterprets that choice.
 
 The selected value and lane are uniform:
 
 ```text
-selection: capability.<name>
-lane:      capability:<name>
+planner capability_name: <name>
+lane:                    capability:<name>
 ```
 
 [`capability.ts`](../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/capability.ts)
@@ -228,11 +237,15 @@ private lane. Tools come only from the compiled `uses` binding.
 through the same Markdown contract and registers it with other Capabilities.
 Its Toolkit permission is static in that document.
 
-General has one planner policy distinction: when it is compiled and no forced
-candidate set is active, it remains in the candidate set as
-`planner-default`. The decision model still selects between it and retrieved
-specific candidates. The schema contains `capability.<candidate>` and explicit
-`unavailable`; it does not contain a special `general` selection.
+General has one Planner policy distinction: when no specialized Capability
+completely matches the current task and compiled `general` is present in the
+Workspace, the Planner reads `general/CAPABILITY.md` and selects
+`capability_name: "general"`.
+`unavailable` is valid only when no executable Capability, including General,
+exists.
+
+The Planner still owns this choice. Submission and graph validators reject a
+false `unavailable`; code does not silently select General behind the model.
 
 Consequently there is no:
 
@@ -240,7 +253,8 @@ Consequently there is no:
 - `registry.general`;
 - general executor node;
 - `general` lane alias;
-- code fallback that bypasses Capability Decision.
+- ranked General candidate injection;
+- code fallback that bypasses Planner selection.
 
 The well-known name is reserved by local-agent so a user plugin cannot replace
 the host's General definition.
@@ -271,7 +285,8 @@ The host owns environment-specific assembly:
 4. add scoped Toolkits such as artifact discovery;
 5. compile one registry generation;
 6. report unavailable Capability diagnostics;
-7. pass that same registry to planner and executor.
+7. publish that compiled inventory as the Planner workspace and pass the same
+   generation to execution.
 
 `packages/pet-agent` owns the contracts and compiler. `services/local-agent`
 owns local files, browser/shell implementations, user directory loading,
@@ -308,6 +323,10 @@ cover:
 - Toolkit availability and host diagnostics;
 - artifact discovery scope and cross-thread rejection;
 - Capability instruction and Toolkit prompt injection.
+
+PR [#492](https://github.com/pinpawo/pinpawo-agent/pull/492) additionally
+validates that the filesystem-exploring Planner selects ordinary General when no
+specialized Capability matches and that no separate selection contract remains.
 
 Future changes should preserve these invariants or record a new decision that
 explicitly replaces them.

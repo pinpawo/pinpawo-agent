@@ -2,16 +2,23 @@
 title: Session Projection Ownership Boundaries
 page_type: concept
 status: validated
-updated: 2026-07-23
+updated: 2026-07-28
 sources:
   - ../../LOCAL_AGENT_SESSION_PROJECTION.md
-  - ../../../services/local-agent/src/localAgentSession.ts
+  - ../../../packages/agent-session/src/domain.ts
+  - ../../../packages/agent-session/src/project.ts
+  - ../../../packages/agent-session/src/snapshot.ts
   - ../../../services/local-agent/src/tui/state/tuiState.ts
+  - ../../../services/local-agent/src/tui/TuiRuntimeController.ts
   - ../../../services/local-agent/src/reviewResolutionLifecycle.ts
   - https://github.com/pinpawo/pinpawo-agent/issues/385
   - https://github.com/pinpawo/pinpawo-agent/issues/390
+  - https://github.com/pinpawo/pinpawo-agent/pull/468
+  - https://github.com/pinpawo/pinpawo-agent/pull/475
+  - https://github.com/pinpawo/pinpawo-agent/pull/485
 related:
   - ../local-agent-session-projection.md
+  - ../interruption-and-delegation-continuation.md
   - checkpoint-snapshot-timeline.md
   - ../decisions/review-resolution-is-client-local.md
 ---
@@ -58,6 +65,16 @@ projection or snapshot.
   keeps late/background runtime events scoped to their owning session instead of
   mutating the focused one. It is single-focus / single-connection today;
   retaining the map does not imply multiple panes or a second durable store.
+- The pending correlation between a TUI-sent `review.cancel` and its request's
+  terminal result, plus the session-local `/continue` availability marker, are
+  also TUI-owned. The marker is set only after the matching server-observed
+  `interrupted`, is consumed by the next accepted request, and is not serialized
+  in `AgentSessionSnapshot`.
+
+**Decision (PR #485).** The continuation marker is deliberately narrower than
+checkpoint resumability. It records what this TUI can safely explain to the user,
+not every active delegation the graph might be able to resume. See
+[Interruption and delegation continuation](../interruption-and-delegation-continuation.md).
 
 ## What the shared reducer must never depend on
 
@@ -70,6 +87,11 @@ the hosted adapter run the same transition logic. See
 
 **Decision (issue #390).** `ReviewResolutionLifecycle` and the run command
 sequencing it absorbed are server-local transport control state. They are never
-projected into `LocalAgentSession` or a snapshot. Client-command progress and
+projected into `AgentSession` or a snapshot. Client-command progress and
 one-shot run-interrupt handling stay out of the shared model; a user-triggered
 `run.interrupt` adds no client-side pending domain state.
+
+**Fact.** Inflight request ownership is another server-local control fact. An
+interrupt signal changes the projected run to `interrupting`, but the invocation
+owner retains control until graph output settles, emits terminal `interrupted`,
+and clears the request. Neither the TUI nor a timeout may terminalize it.

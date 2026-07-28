@@ -138,7 +138,7 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
     instructions: bashToolkitInstructions.join('\n'),
     reviewGuidance: {
       allow: 'A shell invocation is an execution mechanism, so its risk comes from the concrete command and scope. Treat commands confined to the current workspace as eligible for automatic authorization when their effects are clear and limited, such as build, test, typecheck, lint, format, inspection, other reversible development operations, and deletion of explicitly named non-sensitive files inside the current workspace.',
-      ask: 'Ask when a command has broad or unclear effects, deletes recursively, deletes outside the current workspace, deletes user data or sensitive files, elevates privileges, changes permissions or system services, installs or executes untrusted software, exposes credentials or data, publishes or deploys artifacts, or rewrites shared version-control history.',
+      ask: 'Require human authorization when a command has broad or unclear effects, deletes recursively, deletes outside the current workspace, deletes user data or sensitive files, elevates privileges, changes permissions or system services, installs or executes untrusted software, exposes credentials or data, publishes or deploys artifacts, or rewrites shared version-control history.',
     },
   });
 }
@@ -158,7 +158,7 @@ export function createGitToolkit(): AgentToolkit {
     instructions: gitToolkitInstructions.join('\n'),
     reviewGuidance: {
       allow: 'Treat routine, scoped version-control collaboration as eligible for automatic authorization, including staging files, creating a local commit, a normal non-force push, and creating a pull request or issue.',
-      ask: 'Ask for destructive worktree or history changes, force pushes, deleting branches or tags, merging a pull request, changing repository settings or access, managing secrets, deleting or closing remote resources, and publishing packages or releases.',
+      ask: 'Require human authorization for destructive worktree or history changes, force pushes, deleting branches or tags, merging a pull request, changing repository settings or access, managing secrets, deleting or closing remote resources, and publishing packages or releases.',
     },
   });
 }

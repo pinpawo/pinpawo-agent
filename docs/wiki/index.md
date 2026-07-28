@@ -2,7 +2,7 @@
 title: Documentation Wiki Index
 page_type: overview
 status: draft
-updated: 2026-07-27
+updated: 2026-07-29
 sources:
   - ../AGENTS.md
 related:
@@ -11,6 +11,7 @@ related:
   - concepts/orchestrator-practical-reasoning.md
   - decisions/capability-planner-task-boundaries.md
   - decisions/delegation-completion-acknowledgement.md
+  - interruption-and-delegation-continuation.md
   - migrations/docs-wiki-management-plan.md
 ---
 
@@ -28,7 +29,7 @@ explicitly migrated.
   compilation, General as an ordinary Capability, execution, artifacts, and
   host responsibilities.
 - [Decision node ownership](concepts/decision-node-ownership.md) — the
-  Capability Decision boundary and planner-default General selection policy.
+  four semantic owners and the Planner-owned task/Capability boundary.
 - [Message context and provenance](concepts/message-context-and-provenance.md) —
   private Capability lanes, announce, and accepted handoff.
 
@@ -45,18 +46,16 @@ explicitly migrated.
   — positive-first contracts, narrow negative boundaries, harness ownership,
   objective-derived eval targets, and eval-backed prompt changes.
 - [Decision node ownership](concepts/decision-node-ownership.md) — semantic owner
-  of each orchestrator decision, including whole-task executor selection and
-  explicit capability unavailability.
+  of result availability, task and Capability planning, announce verdicts, and
+  user-visible replies.
 - [CapabilityPlanner task boundaries](decisions/capability-planner-task-boundaries.md)
-  — completed facts, mutable future work, result-driven replanning, and the
-  current/future task boundary.
+  — filesystem exploration, current task and Capability selection, General
+  fallback, and result-driven future-plan revision.
 - [Message context and provenance](concepts/message-context-and-provenance.md) —
   canonical main messages, private lanes, announce, handoff, and trusted identity.
 - [Delegation completion acknowledgement](decisions/delegation-completion-acknowledgement.md)
   — why the fixed completion close exists, why handoff alone cannot trigger it,
   and how answer returns control when user input is required.
-- [State-query routing investigation](investigations/entry-decision-state-query-routing.md)
-  — current regression analysis around `answer` versus new execution.
 - [System prompt source registry](sources/system-prompts-source-registry.md) — source
   coverage and authority.
 - [Model prompting and harness references](sources/model-prompting-and-harness-references.md)
@@ -69,6 +68,9 @@ explicitly migrated.
 - [Local-agent session projection](local-agent-session-projection.md) — system
   synthesis: how checkpoint, snapshot, shared reducer, review lifecycle, and
   transports fit together.
+- [Interruption and delegation continuation](interruption-and-delegation-continuation.md)
+  — end-to-end contract for run settlement, waiting-review Esc, retained
+  delegation lanes, and the fresh-versus-continued next request.
 - [Checkpoint, snapshot, timeline, and timeline state](concepts/checkpoint-snapshot-timeline.md)
   — the four distinct domain terms and the completion-replaces-timeline lifecycle.
 - [Session projection ownership boundaries](concepts/session-projection-ownership.md)

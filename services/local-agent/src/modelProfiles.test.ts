@@ -102,6 +102,98 @@ test('stored registry isolates an invalid non-default profile with diagnostics',
   assert.match(registry.unavailableProfiles.broken?.[0]?.message ?? '', /baseUrl/);
 });
 
+test('registry lookups do not resolve inherited object properties as profiles', () => {
+  assert.throws(
+    () => buildModelProfileRegistry({
+      stored: storedConfig({
+        primary: storedProfile(),
+      }),
+      env: {
+        PINPAWO_MODEL_PROFILE: 'constructor',
+      },
+    }),
+    /Selected model profile "constructor" does not exist/,
+  );
+});
+
+test('stored profile ids that match object internals remain ordinary own keys', () => {
+  const profiles = {
+    primary: storedProfile(),
+    constructor: storedProfile({
+      id: 'constructor',
+      label: 'Constructor',
+    }),
+  };
+  const registry = buildModelProfileRegistry({
+    stored: storedConfig(profiles),
+    env: {
+      PINPAWO_MODEL_PROFILE: 'constructor',
+    },
+  });
+
+  assert.equal(resolveModelProfile(registry).id, 'constructor');
+  assert.equal(Object.hasOwn(registry.profiles, 'constructor'), true);
+});
+
+test('stored profiles cannot claim the reserved environment profile id', () => {
+  const registry = buildModelProfileRegistry({
+    stored: storedConfig({
+      primary: storedProfile(),
+      env: storedProfile({
+        id: ENV_MODEL_PROFILE_ID,
+        label: 'Stored env',
+      }),
+    }),
+    env: {},
+  });
+
+  assert.equal(Object.hasOwn(registry.profiles, ENV_MODEL_PROFILE_ID), false);
+  assert.match(
+    registry.unavailableProfiles[ENV_MODEL_PROFILE_ID]?.[0]?.message ?? '',
+    /reserved/,
+  );
+});
+
+test('reserved environment id cannot be configured as the stored default', () => {
+  assert.throws(
+    () => buildModelProfileRegistry({
+      stored: storedConfig({
+        env: storedProfile({
+          id: ENV_MODEL_PROFILE_ID,
+        }),
+      }, ENV_MODEL_PROFILE_ID),
+      env: {
+        LLM_API_KEY: 'environment-secret',
+        LLM_BASE_URL: 'https://environment.example.test/v1',
+        LLM_MODEL: 'environment-model',
+      },
+    }),
+    /defaultProfileId cannot use reserved profile id "env"/,
+  );
+});
+
+test('ephemeral environment profile replaces reserved-id diagnostics', () => {
+  const registry = buildModelProfileRegistry({
+    stored: storedConfig({
+      primary: storedProfile(),
+      env: storedProfile({
+        id: ENV_MODEL_PROFILE_ID,
+      }),
+    }),
+    env: {
+      LLM_API_KEY: 'environment-secret',
+      LLM_BASE_URL: 'https://environment.example.test/v1',
+      LLM_MODEL: 'environment-model',
+    },
+  });
+
+  assert.equal(resolveModelProfile(registry).id, ENV_MODEL_PROFILE_ID);
+  assert.equal(
+    Object.hasOwn(registry.unavailableProfiles, ENV_MODEL_PROFILE_ID),
+    false,
+  );
+});
+
 test('invalid configured default blocks resolution instead of falling back', () => {
   assert.throws(
     () => buildModelProfileRegistry({

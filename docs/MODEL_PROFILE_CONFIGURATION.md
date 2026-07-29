@@ -36,7 +36,7 @@ Model names are not identities. Two profiles may use the same model name with di
 
 The API key is host-private. It must never be included in client protocol payloads, logs, reports, or telemetry.
 
-Profile IDs use 1–64 lowercase letters, digits, dots, underscores, or hyphens. The record key must match the profile's `id`.
+Profile IDs use 1–64 lowercase letters, digits, dots, underscores, or hyphens. The record key must match the profile's `id`. The ID `env` is reserved for the ephemeral environment profile and cannot be stored.
 
 `inputModalities` is authoritative. Custom profiles with no modality metadata are treated as text-only. Runtime code must not infer image support from a model name.
 

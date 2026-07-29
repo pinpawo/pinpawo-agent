@@ -14,7 +14,12 @@ import {
   type ModelProfileV1,
   writeDefaultModelProfile,
 } from '../modelProfiles';
-import { loadStoredConfig, saveStoredConfig, configPath } from '../storage';
+import {
+  loadStoredConfig,
+  saveStoredConfig,
+  configPath,
+  type StoredConfig,
+} from '../storage';
 
 type AuthResponse = {
   accessToken: string;
@@ -60,12 +65,19 @@ function fail(message: string): never {
   throw new Error(message);
 }
 
-function readCurrentModelProfile(): ModelProfileV1 | undefined {
+export function resolveLoginDefaultModelProfile(
+  stored: StoredConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): ModelProfileV1 | undefined {
   try {
-    return resolveModelProfile(buildModelProfileRegistry({
-      stored: loadStoredConfig(),
-      env: process.env,
-    }));
+    const registry = buildModelProfileRegistry({
+      stored,
+      env: {
+        ...env,
+        PINPAWO_MODEL_PROFILE: '',
+      },
+    });
+    return resolveModelProfile(registry, registry.defaultProfileId);
   } catch {
     return undefined;
   }
@@ -92,7 +104,7 @@ export async function runLogin() {
 
   try {
     const stored = loadStoredConfig();
-    const currentModelProfile = readCurrentModelProfile();
+    const defaultModelProfile = resolveLoginDefaultModelProfile(stored);
 
     console.log('\nPinPawo Local Agent — Login\n');
 
@@ -149,8 +161,8 @@ export async function runLogin() {
     console.log('Available presets:');
     console.log(formatPresetChoices());
 
-    const defaultLlmKey = currentModelProfile?.apiKey ?? '';
-    const defaultPresetKey = currentModelProfile?.sourcePreset ?? '';
+    const defaultLlmKey = defaultModelProfile?.apiKey ?? '';
+    const defaultPresetKey = defaultModelProfile?.sourcePreset ?? '';
 
     let llmPresetKey = await prompt(
       rl,
@@ -165,12 +177,12 @@ export async function runLogin() {
 
     const defaultLlmBase = selectedPreset
       ? (selectedPreset.baseUrl ?? '')
-      : (currentModelProfile?.baseUrl ?? 'https://api.deepseek.com');
+      : (defaultModelProfile?.baseUrl ?? 'https://api.deepseek.com');
     const defaultLlmModel = selectedPreset
       ? selectedPreset.model
-      : (currentModelProfile?.model ?? 'deepseek-v4-pro');
+      : (defaultModelProfile?.model ?? 'deepseek-v4-pro');
     const defaultLlmContextWindow = selectedPreset?.contextWindowTokens
-      ?? currentModelProfile?.contextWindowTokens
+      ?? defaultModelProfile?.contextWindowTokens
       ?? inferLlmContextWindowTokens(defaultLlmModel);
 
     let llmApiKey = await prompt(rl, `LLM API Key${defaultLlmKey ? ' [already set, press Enter to keep]' : ''}: `);

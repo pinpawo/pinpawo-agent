@@ -2,6 +2,7 @@ import type {
   PromptEvalModelMetadata,
   PromptEvalReport,
 } from './prompt-eval-report.ts';
+import type { PromptEvalPricing } from './prompt-eval-usage.ts';
 import type { ProviderTokenUsage } from '../src/agent/tokenUsage.ts';
 
 export const PROMPT_EVAL_MATRIX_VERSION = 1 as const;
@@ -75,6 +76,32 @@ export type PromptEvalMatrixManifest = {
     imageSkippedUnsupported: number;
   };
 };
+
+export function assertPromptEvalMatrixPricing(input: {
+  judge: {
+    profileId: string;
+    pricing: PromptEvalPricing | null;
+  };
+  subjects: Array<{
+    profileId: string;
+    pricing: PromptEvalPricing | null;
+  }>;
+}) {
+  const missingProfileIds = [
+    input.judge,
+    ...input.subjects,
+  ].filter(({ pricing }) => pricing === null)
+    .map(({ profileId }) => profileId)
+    .filter((profileId, index, profileIds) => (
+      profileIds.indexOf(profileId) === index
+    ));
+  if (missingProfileIds.length > 0) {
+    throw new Error(
+      'A matrix cost budget requires PROMPT_EVAL_PRICING_JSON entries for: '
+      + `${missingProfileIds.join(', ')}.`,
+    );
+  }
+}
 
 function assertFixedJudge(
   child: PromptEvalMatrixChild,

@@ -17,7 +17,7 @@ export type EvalModelInputModality = 'text' | 'image';
 type StoredEvalModelProfile = {
   id: string;
   label: string;
-  provider: string;
+  provider?: string;
   model: string;
   baseUrl: string;
   apiKey: string;
@@ -34,6 +34,14 @@ type StoredEvalModelProfiles = {
 };
 
 type EvalModelEnvironment = NodeJS.ProcessEnv;
+
+type ResolvedEvalModelProfile = Omit<
+  StoredEvalModelProfile,
+  'provider' | 'inputModalities'
+> & {
+  provider: string;
+  inputModalities: EvalModelInputModality[];
+};
 
 const PROFILE_ID_PATTERN = /^[a-z0-9](?:[a-z0-9._-]{0,63})$/;
 
@@ -76,11 +84,17 @@ function readFiniteNumber(
   return parsed;
 }
 
-function sanitizeBaseUrl(value: string): string {
-  const url = new URL(value);
+function normalizeRunnableBaseUrl(value: string): string {
+  const url = new URL(value.trim());
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new Error(`Model profile baseUrl must use HTTP(S): ${value}`);
   }
+  url.hash = '';
+  return url.toString().replace(/\/$/, '');
+}
+
+function sanitizeEndpoint(value: string): string {
+  const url = new URL(value);
   url.username = '';
   url.password = '';
   url.search = '';
@@ -139,9 +153,7 @@ function readInputModalities(
 function readProfile(
   profileId: string,
   env: EvalModelEnvironment,
-): StoredEvalModelProfile & {
-  inputModalities: EvalModelInputModality[];
-} {
+): ResolvedEvalModelProfile {
   if (!profileId.trim()) throw new Error('Model profile id is required.');
   if (!PROFILE_ID_PATTERN.test(profileId)) {
     throw new Error(
@@ -170,7 +182,6 @@ function readProfile(
   }
   for (const [field, value] of Object.entries({
     label: profile.label,
-    provider: profile.provider,
     model: profile.model,
     baseUrl: profile.baseUrl,
     apiKey: profile.apiKey,
@@ -206,22 +217,25 @@ function readProfile(
       `Model profile "${profileId}" structuredOutputMethod is invalid.`,
     );
   }
+  const baseUrl = normalizeRunnableBaseUrl(profile.baseUrl);
   return {
     ...profile,
-    baseUrl: sanitizeBaseUrl(profile.baseUrl),
+    label: profile.label.trim(),
+    provider: profile.provider?.trim() || new URL(baseUrl).hostname,
+    model: profile.model.trim(),
+    baseUrl,
+    apiKey: profile.apiKey.trim(),
     inputModalities: readInputModalities(profileId, profile.inputModalities),
   };
 }
 
 function fingerprintProfile(
-  profile: StoredEvalModelProfile & {
-    inputModalities: EvalModelInputModality[];
-  },
+  profile: ResolvedEvalModelProfile,
 ): string {
   const sanitized = {
     provider: profile.provider,
     model: profile.model,
-    endpoint: sanitizeBaseUrl(profile.baseUrl),
+    endpoint: sanitizeEndpoint(profile.baseUrl),
     contextWindowTokens: profile.contextWindowTokens,
     maxOutputTokens: profile.maxOutputTokens ?? null,
     structuredOutputMethod: profile.structuredOutputMethod

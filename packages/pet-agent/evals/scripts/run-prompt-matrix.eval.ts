@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { deflateSync } from 'node:zlib';
 import type { PromptEvalReport } from '../prompt-eval-report.ts';
 import {
+  assertPromptEvalMatrixPricing,
   createPromptEvalMatrixManifest,
   type PromptEvalMatrixChild,
   type PromptEvalModalityResult,
@@ -247,6 +248,18 @@ async function main() {
         Number.POSITIVE_INFINITY,
       )
     : null;
+  if (maxEstimatedCostUsd !== null) {
+    assertPromptEvalMatrixPricing({
+      judge: {
+        profileId: judge.metadata.profileId,
+        pricing: judge.pricing,
+      },
+      subjects: subjects.map((subject) => ({
+        profileId: subject.metadata.profileId,
+        pricing: subject.pricing,
+      })),
+    });
+  }
   const matrixRoot = resolve(
     process.env.PROMPT_EVAL_MATRIX_DIR
       ?? resolve(
@@ -296,8 +309,8 @@ async function main() {
           : child.imageUnderstanding.estimatedCostUsd;
         if (promptCost === null || judgeCost === null || imageCost === null) {
           throw new Error(
-            'A matrix cost budget requires subject and judge pricing for every profile '
-            + 'through PROMPT_EVAL_PRICING_JSON.',
+            'Matrix cost budget enforcement requires complete provider usage '
+            + 'and estimated-cost coverage for every completed run.',
           );
         }
         return sum + promptCost + judgeCost + imageCost;

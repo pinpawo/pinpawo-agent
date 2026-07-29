@@ -16,7 +16,6 @@ function writeProfiles() {
         'endpoint-a': {
           id: 'endpoint-a',
           label: 'Endpoint A',
-          provider: 'test',
           model: 'same-model',
           baseUrl: 'https://a.example.test/v1/secret-path-a?secret=query',
           apiKey: 'secret-a',
@@ -61,8 +60,16 @@ test('eval model profiles preserve stable identities without projecting secrets'
 
     assert.equal(subject.metadata.profileId, 'endpoint-a');
     assert.equal(subject.metadata.role, 'subject');
+    assert.equal(subject.metadata.provider, 'a.example.test');
     assert.equal(subject.metadata.endpointOrigin, 'https://a.example.test');
     assert.deepEqual(judge.metadata.inputModalities, ['text', 'image']);
+    assert.equal(
+      (subject.model as unknown as {
+        clientConfig: { baseURL: string };
+      }).clientConfig.baseURL,
+      'https://a.example.test/v1/secret-path-a?secret=query',
+      'the runnable profile must keep endpoint path and query parameters',
+    );
     assert.notEqual(
       subject.metadata.fingerprint,
       judge.metadata.fingerprint,

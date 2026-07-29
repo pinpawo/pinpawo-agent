@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { PromptEvalModelMetadata, PromptEvalReport } from './prompt-eval-report.ts';
-import { createPromptEvalMatrixManifest } from './prompt-eval-matrix.ts';
+import {
+  assertPromptEvalMatrixPricing,
+  createPromptEvalMatrixManifest,
+} from './prompt-eval-matrix.ts';
 
 function metadata(
   role: 'subject' | 'judge',
@@ -228,4 +231,46 @@ test('matrix manifest rejects a subject that resolves to the judge fingerprint',
     }),
     /resolves to the fixed judge fingerprint/,
   );
+});
+
+test('matrix pricing preflight rejects every unpriced profile before execution', () => {
+  assert.throws(
+    () => assertPromptEvalMatrixPricing({
+      judge: {
+        profileId: 'judge',
+        pricing: null,
+      },
+      subjects: [
+        {
+          profileId: 'priced-subject',
+          pricing: {
+            inputUsdPerMillionTokens: 1,
+            outputUsdPerMillionTokens: 2,
+          },
+        },
+        {
+          profileId: 'unpriced-subject',
+          pricing: null,
+        },
+      ],
+    }),
+    /judge, unpriced-subject/,
+  );
+});
+
+test('matrix pricing preflight accepts complete subject and judge pricing', () => {
+  const pricing = {
+    inputUsdPerMillionTokens: 1,
+    outputUsdPerMillionTokens: 2,
+  };
+  assert.doesNotThrow(() => assertPromptEvalMatrixPricing({
+    judge: {
+      profileId: 'judge',
+      pricing,
+    },
+    subjects: [{
+      profileId: 'subject',
+      pricing,
+    }],
+  }));
 });

@@ -7,6 +7,7 @@ import {
 } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
+import { pathToFileURL } from 'node:url';
 import {
   AIMessage,
   AIMessageChunk,
@@ -67,8 +68,8 @@ import type {
 import { createDecisionEvalModel } from './decision-eval-model.ts';
 
 const DEFAULT_REPEATS = 3;
-const REPORT_VERSION = 1;
 const EVALUATOR_VERSION = 'prompt-goal-v1';
+export const LIFECYCLE_COMPOSITION_REPORT_VERSION = 2 as const;
 
 const actor = {
   petId: 'eval-pet',
@@ -143,8 +144,8 @@ type LifecycleRunResult = {
   } | null;
 };
 
-type LifecycleCompositionReport = {
-  reportVersion: typeof REPORT_VERSION;
+export type LifecycleCompositionReport = {
+  reportVersion: typeof LIFECYCLE_COMPOSITION_REPORT_VERSION;
   kind: 'orchestrator-lifecycle-composition';
   createdAt: string;
   revision: PromptEvalRevision;
@@ -176,6 +177,18 @@ type LifecycleCompositionReport = {
     estimatedCostUsd: number | null;
   };
 };
+
+export function createLifecycleCompositionReport(input: Omit<
+  LifecycleCompositionReport,
+  'reportVersion' | 'kind' | 'createdAt'
+>): LifecycleCompositionReport {
+  return {
+    reportVersion: LIFECYCLE_COMPOSITION_REPORT_VERSION,
+    kind: 'orchestrator-lifecycle-composition',
+    createdAt: new Date().toISOString(),
+    ...input,
+  };
+}
 
 const generalToolkit = defineToolkit({
   name: 'lifecycle_composition_general',
@@ -789,10 +802,7 @@ async function main() {
     subjectUsage = addUsage(subjectUsage, result.usage.subject);
     evaluatorUsage = addUsage(evaluatorUsage, result.usage.evaluator);
   }
-  const report: LifecycleCompositionReport = {
-    reportVersion: REPORT_VERSION,
-    kind: 'orchestrator-lifecycle-composition',
-    createdAt: new Date().toISOString(),
+  const report = createLifecycleCompositionReport({
     revision,
     model: modelConfig.metadata,
     structuredOutputMethod,
@@ -816,7 +826,7 @@ async function main() {
         estimatePromptEvalCost(evaluatorUsage, judgeConfig.pricing),
       ),
     },
-  };
+  });
   const defaultPath = resolve(
     '.eval-results',
     `lifecycle-composition-${revision.commit.slice(0, 12)}-${Date.now().toString()}.json`,
@@ -850,7 +860,9 @@ async function main() {
   if (achieved !== results.length) process.exitCode = 1;
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? `${error.name}: ${error.message}` : String(error));
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? `${error.name}: ${error.message}` : String(error));
+    process.exitCode = 1;
+  });
+}

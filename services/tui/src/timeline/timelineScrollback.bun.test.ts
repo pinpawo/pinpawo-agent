@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   BoxRenderable,
   CliRenderEvents,
+  RGBA,
   TextAttributes,
   TextRenderable,
 } from '@opentui/core';
@@ -161,6 +162,25 @@ test('welcome is committed once before the first timeline rows', async () => {
       setup.cellOutput.takeText(),
       formatTimelineEntry(userMessage('hello')),
     );
+  } finally {
+    timeline.destroy();
+    setup.renderer.destroy();
+  }
+});
+
+test('welcome paints solid raster cells without font line-height seams', async () => {
+  const setup = await createTimelineRenderer(20);
+  const timeline = new TimelineScrollback(setup.renderer);
+  try {
+    timeline.renderWelcome(['█▄ paw']);
+    assert.equal(setup.cellOutput.takeText(), ' ▄ paw');
+
+    const spans = setup.styleOutput.take().flatMap((lines) =>
+      lines.flatMap((line) => line.spans)
+    );
+    const solidCell = spans.find((span) => span.text === ' ');
+    assert.ok(solidCell);
+    assert.ok(solidCell.bg.equals(RGBA.fromHex('#69c0c8')));
   } finally {
     timeline.destroy();
     setup.renderer.destroy();

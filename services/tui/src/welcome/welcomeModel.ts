@@ -31,6 +31,9 @@ const PAW_RASTER = [
 
 const PAW_LINES = renderHalfBlockRaster(PAW_RASTER);
 
+export const WELCOME_LOGO_HEIGHT = PAW_LINES.length;
+export const WELCOME_LOGO_WIDTH = terminalBlockWidth(PAW_LINES);
+
 export function buildWelcomeLines(input: {
   session: AgentSession;
   width: number;

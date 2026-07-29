@@ -1,5 +1,8 @@
 import {
+  bg,
   BoxRenderable,
+  fg,
+  StyledText,
   TextAttributes,
   TextRenderable,
   type CliRenderer,
@@ -12,6 +15,10 @@ import type {
 } from '@pinpawo/agent-session';
 import { sessionActorLabel } from '../session/sessionDisplay';
 import {
+  WELCOME_LOGO_HEIGHT,
+  WELCOME_LOGO_WIDTH,
+} from '../welcome/welcomeModel';
+import {
   countSettledTimelinePrefix,
   buildTimelineDisplayLines,
   isSettledTimelineEntry,
@@ -23,6 +30,8 @@ import {
   stableAssistantMarkdownRows,
   type AssistantMarkdownSurface,
 } from './assistantMarkdown';
+
+const WELCOME_COLOR = '#69c0c8';
 
 type ActiveTimelineSurface = {
   surface: ScrollbackSurface;
@@ -67,8 +76,8 @@ export class TimelineScrollback {
           id: `pinpawo-welcome:${index}`,
           width: '100%',
           height: 1,
-          content: line || ' ',
-          fg: '#69c0c8',
+          content: styleWelcomeRasterLine(line || ' ', index),
+          fg: WELCOME_COLOR,
         }));
       });
       return {
@@ -317,6 +326,21 @@ export class TimelineScrollback {
       };
     });
   }
+}
+
+function styleWelcomeRasterLine(line: string, row: number) {
+  if (row >= WELCOME_LOGO_HEIGHT) return line;
+  const logo = line.slice(0, WELCOME_LOGO_WIDTH);
+  if (!logo.includes('█')) return line;
+  const chunks = logo
+    .split(/(█+)/)
+    .filter(Boolean)
+    .map((value) => value[0] === '█'
+      ? bg(WELCOME_COLOR)(' '.repeat(value.length))
+      : fg(WELCOME_COLOR)(value));
+  const remainder = line.slice(WELCOME_LOGO_WIDTH);
+  if (remainder) chunks.push(fg(WELCOME_COLOR)(remainder));
+  return new StyledText(chunks);
 }
 
 export function findFirstUncommittedEntry(

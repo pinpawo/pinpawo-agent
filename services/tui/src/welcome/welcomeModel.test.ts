@@ -36,17 +36,16 @@ test('welcome includes the raster paw, version, runtime, and shortcuts', () => {
       ],
     },
   });
-  assert.deepEqual(lines.slice(0, 12), [
+  assert.deepEqual(lines.slice(0, 11), [
     '       ███     ███       ',
     '      █████   █████      ',
     ' ███   ███     ███   ███     PinPawo TUI v2 · 豆包',
     '█████               █████    tui v0.1.0 · local-agent v0.2.0',
     ' ███                 ███     connected',
-    '                             model         gpt-test',
-    '         ███████             directory     /Users/mac/Develop/pinpawo-agent',
-    '       ███████████           capabilities  general · explore · daily_post',
+    '         ███████             model         gpt-test',
+    '       ███████████           directory     /Users/mac/Develop/pinpawo-agent',
+    '      █████████████          capabilities  general · explore · daily_post',
     '      █████████████                        capability_creator',
-    '      █████████████      ',
     '       ███████████       ',
     '         ███████         ',
   ]);

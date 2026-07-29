@@ -16,8 +16,9 @@ import {
   createLocalHostConnectionFactory,
   readLocalServerPort,
 } from './client/localHostConnection';
-import { parseTuiCommand } from './commands/commandRegistry';
-import { createDemoConnectionFactory } from './demo/demoConnection';
+import { parseTuiLaunchOptions } from './cli/launchOptions';
+import { resolveComposerIntent } from './commands/composerIntent';
+import { createDemoConnectionFactory } from './qa/demoConnection';
 import { editTextWithExternalEditor } from './editor/externalEditor';
 import {
   applyClipboardAction,
@@ -49,11 +50,17 @@ import {
   type FileMentionAction,
 } from './input/fileMention';
 import { resolveGlobalInterruptAction } from './input/globalInterrupt';
+import {
+  interactionOwnerBlocksPaste,
+  resolveInteractionOwner,
+  type InteractionOwner,
+} from './input/inputRouter';
 import { shouldOpenTranscriptPager } from './input/transcriptShortcut';
 import { TuiSessionController } from './session/sessionController';
 import {
   approvalAcceptsTextInput,
   resolveApprovalKey,
+  type ApprovalState,
 } from './overlays/approvalModel';
 import { ApprovalController } from './overlays/approvalController';
 import { ApprovalView } from './overlays/approvalView';
@@ -108,8 +115,9 @@ import {
   type SessionPickerAction,
 } from './overlays/sessionPickerModel';
 import { SessionPickerView } from './overlays/sessionPickerView';
-import { calculateComposerLayout } from './spike/composerLayout';
-import { installTextareaWorkarounds } from './spike/textareaWorkarounds';
+import { QaLifecycleDriver } from './qa/qaLifecycleDriver';
+import { calculateComposerLayout } from './layout/composerLayout';
+import { installTextareaWorkarounds } from './terminal/textareaCompatibility';
 import {
   formatComposerPlaceholder,
   formatConnection,
@@ -130,35 +138,14 @@ import { pageSessionTranscript } from './transcript/transcriptPager';
 import { TUI_VERSION } from './version';
 import { buildWelcomeLines } from './welcome/welcomeModel';
 
-if (process.argv.includes('--version')) {
+const launchOptions = parseTuiLaunchOptions(process.argv.slice(2));
+const { demo, smoke } = launchOptions;
+
+if (launchOptions.showVersion) {
   process.stdout.write(`PinPawo TUI v2 ${TUI_VERSION}\n`);
   process.exit(0);
 }
 
-const smokeReview = process.argv.includes('--smoke-review');
-const demoReview = process.argv.includes('--demo-review');
-const smokeCommand = process.argv.includes('--smoke-command');
-const demoCommand = process.argv.includes('--demo-command');
-const demoQa = process.argv.includes('--demo-qa');
-const smokeStudio = process.argv.includes('--smoke-studio');
-const smokePolicy = process.argv.includes('--smoke-policy');
-const smokeEdit = process.argv.includes('--smoke-edit');
-const smokeTranscript = process.argv.includes('--smoke-transcript');
-const smokeHostReady = process.argv.includes('--smoke-host');
-const smokeHostChat = process.argv.includes('--smoke-host-chat');
-const smokeHost = smokeHostReady || smokeHostChat;
-const smoke = process.argv.includes('--smoke')
-  || smokeReview
-  || smokeCommand
-  || smokeStudio
-  || smokePolicy
-  || smokeEdit
-  || smokeTranscript
-  || smokeHost;
-const useDemoConnection = (smoke && !smokeHost)
-  || demoReview
-  || demoCommand
-  || demoQa;
 const port = readLocalServerPort();
 const renderer = await createCliRenderer({
   exitOnCtrlC: false,
@@ -231,20 +218,13 @@ let sessionListRequest: ReturnType<TuiSessionController['listSessions']> | null 
 let composerMode: 'chat' | 'studio' = 'chat';
 let studioConversationId: string | null = null;
 let focusedSessionId = 'pending';
-let studioSmokeStarted = false;
-let studioSmokeFinished = false;
-let policySmokeStarted = false;
-let policySmokeFinished = false;
-let editSmokeStarted = false;
-let transcriptSmokeStarted = false;
-let hostSmokeFinished = false;
 let terminalHandoffOpen = false;
 let composerHistory = createComposerHistoryState();
 const controller = new TuiSessionController({
-  connectionFactory: useDemoConnection
+  connectionFactory: launchOptions.useDemoConnection
     ? createDemoConnectionFactory({
-        review: smokeReview || demoReview,
-        qa: demoQa,
+        review: smoke.review || demo.review,
+        qa: demo.qa,
       })
     : createLocalHostConnectionFactory({ port }),
 });
@@ -343,12 +323,29 @@ root.add(policyPickerView.frame);
 root.add(noticeOverlayView.frame);
 root.add(approvalView.frame);
 renderer.root.add(root);
-if (smokeCommand || demoCommand) {
+if (smoke.command || demo.command) {
   composer.setText('/');
   composer.gotoBufferEnd();
 }
 composer.focus();
 syncComposerInputOverlays();
+
+const qaLifecycle = new QaLifecycleDriver(launchOptions, {
+  destroySoon: () => {
+    setTimeout(() => renderer.destroy(), 50);
+  },
+  onFrame: (callback) => renderer.once('frame', callback),
+  runPolicySelection: () => {
+    handlePolicyPickerAction('move-down');
+    handlePolicyPickerAction('select');
+  },
+  setComposerText: (text) => {
+    composer.setText(text);
+    composer.gotoBufferEnd();
+  },
+  submitCurrentComposer: () => submitComposerInput(),
+  submitInput: (input) => submitComposerInput(input),
+});
 
 const unsubscribe = controller.subscribe((state) => {
   liveActivityController.sync(state.session.activeRun);
@@ -373,78 +370,7 @@ const unsubscribe = controller.subscribe((state) => {
     timeline.render(state.session);
   }
   refreshStatus();
-  if (
-    smokeStudio
-    && !studioSmokeStarted
-    && state.connection === 'ready'
-  ) {
-    studioSmokeStarted = true;
-    queueMicrotask(() => submitComposerInput('/studio verify Studio mode'));
-  } else if (
-    smokeStudio
-    && studioSmokeStarted
-    && !studioSmokeFinished
-    && !state.session.activeRun
-    && state.session.timeline.some((entry) => (
-      entry.type === 'message'
-      && entry.text === 'Studio demo completed.'
-    ))
-  ) {
-    studioSmokeFinished = true;
-    setTimeout(() => renderer.destroy(), 50);
-  } else if (
-    smokePolicy
-    && !policySmokeStarted
-    && state.connection === 'ready'
-  ) {
-    policySmokeStarted = true;
-    queueMicrotask(() => {
-      submitComposerInput('/policy');
-      handlePolicyPickerAction('move-down');
-      handlePolicyPickerAction('select');
-    });
-  } else if (
-    smokePolicy
-    && policySmokeStarted
-    && !policySmokeFinished
-    && state.session.runtime?.globalReviewPolicyMode === 'auto_authorization'
-  ) {
-    policySmokeFinished = true;
-    setTimeout(() => renderer.destroy(), 50);
-  } else if (
-    smokeEdit
-    && !editSmokeStarted
-    && state.connection === 'ready'
-  ) {
-    editSmokeStarted = true;
-    queueMicrotask(() => submitComposerInput('/edit smoke draft'));
-  } else if (
-    smokeTranscript
-    && !transcriptSmokeStarted
-    && state.connection === 'ready'
-  ) {
-    transcriptSmokeStarted = true;
-    queueMicrotask(() => submitComposerInput('/transcript'));
-  } else if (
-    smokeHostReady
-    && !hostSmokeFinished
-    && state.connection === 'ready'
-  ) {
-    hostSmokeFinished = true;
-    setTimeout(() => renderer.destroy(), 50);
-  } else if (
-    smokeHostChat
-    && !hostSmokeFinished
-    && state.session.activeRun === null
-    && state.session.timeline.some((entry) => (
-      entry.type === 'message'
-      && entry.role === 'assistant'
-      && entry.status === 'completed'
-    ))
-  ) {
-    hostSmokeFinished = true;
-    setTimeout(() => renderer.destroy(), 50);
-  }
+  qaLifecycle.handleState(state);
 });
 renderer.keyInput.on('keypress', (key) => {
   const approval = approvalController.getState();
@@ -475,71 +401,97 @@ renderer.keyInput.on('keypress', (key) => {
       return;
     }
   }
-  const approvalAction = resolveApprovalKey(approval, key);
-  if (approval.phase !== 'closed') {
-    if (approvalAction) {
+
+  syncComposerInputOverlays();
+  const owner = currentInteractionOwner(approval);
+  switch (owner.type) {
+    case 'approval': {
+      const action = resolveApprovalKey(approval, key);
+      if (action) {
+        key.preventDefault();
+        key.stopPropagation();
+        approvalController.handle(action);
+        return;
+      }
+      if (owner.acceptsTextInput) return;
       key.preventDefault();
       key.stopPropagation();
-      approvalController.handle(approvalAction);
       return;
     }
-    if (approvalAcceptsTextInput(approval)) return;
-    key.preventDefault();
-    key.stopPropagation();
-    return;
-  }
-  const noticeAction = resolveNoticeOverlayKey(noticeOverlay, key);
-  if (noticeOverlay.phase !== 'closed') {
-    key.preventDefault();
-    key.stopPropagation();
-    if (noticeAction === 'close') {
-      closeNoticeOverlayUi();
+    case 'notice': {
+      const action = resolveNoticeOverlayKey(noticeOverlay, key);
+      key.preventDefault();
+      key.stopPropagation();
+      if (action === 'close') closeNoticeOverlayUi();
+      return;
     }
-    return;
+    case 'policy-picker': {
+      const action = resolvePolicyPickerKey(policyPicker, key);
+      key.preventDefault();
+      key.stopPropagation();
+      handlePolicyPickerAction(action);
+      return;
+    }
+    case 'command-help': {
+      const action = resolveCommandOverlayKey(commandOverlay, key);
+      key.preventDefault();
+      key.stopPropagation();
+      handleCommandOverlayAction(action);
+      return;
+    }
+    case 'session-picker': {
+      const action = resolveSessionPickerKey(sessionPicker, key);
+      key.preventDefault();
+      key.stopPropagation();
+      handleSessionPickerAction(action);
+      return;
+    }
+    case 'command-palette': {
+      const pickerAction = resolveSessionPickerKey(sessionPicker, key);
+      if (pickerAction === 'open') {
+        key.preventDefault();
+        key.stopPropagation();
+        openSessionPicker();
+        return;
+      }
+      const action = resolveCommandOverlayKey(commandOverlay, key);
+      if (action) {
+        key.preventDefault();
+        key.stopPropagation();
+        handleCommandOverlayAction(action);
+        return;
+      }
+      break;
+    }
+    case 'file-mention': {
+      const pickerAction = resolveSessionPickerKey(sessionPicker, key);
+      if (pickerAction === 'open') {
+        key.preventDefault();
+        key.stopPropagation();
+        openSessionPicker();
+        return;
+      }
+      const action = resolveFileMentionKey(fileMention, key);
+      if (action) {
+        key.preventDefault();
+        key.stopPropagation();
+        handleFileMentionAction(action);
+        return;
+      }
+      break;
+    }
+    case 'composer': {
+      const pickerAction = resolveSessionPickerKey(sessionPicker, key);
+      if (pickerAction === 'open') {
+        key.preventDefault();
+        key.stopPropagation();
+        openSessionPicker();
+        return;
+      }
+      break;
+    }
   }
-  const policyAction = resolvePolicyPickerKey(policyPicker, key);
-  if (policyPicker.phase !== 'closed') {
-    key.preventDefault();
-    key.stopPropagation();
-    handlePolicyPickerAction(policyAction);
-    return;
-  }
-  syncComposerInputOverlays();
-  const commandAction = resolveCommandOverlayKey(commandOverlay, key);
-  if (
-    commandOverlay.phase === 'help'
-  ) {
-    key.preventDefault();
-    key.stopPropagation();
-    handleCommandOverlayAction(commandAction);
-    return;
-  }
-  const pickerAction = resolveSessionPickerKey(sessionPicker, key);
-  if (sessionPicker.phase !== 'closed') {
-    key.preventDefault();
-    key.stopPropagation();
-    handleSessionPickerAction(pickerAction);
-    return;
-  }
-  if (pickerAction === 'open') {
-    key.preventDefault();
-    key.stopPropagation();
-    openSessionPicker();
-    return;
-  }
-  if (commandOverlay.phase === 'palette' && commandAction) {
-    key.preventDefault();
-    key.stopPropagation();
-    handleCommandOverlayAction(commandAction);
-    return;
-  }
-  const fileMentionAction = resolveFileMentionKey(fileMention, key);
-  if (fileMention.phase === 'open' && fileMentionAction) {
-    key.preventDefault();
-    key.stopPropagation();
-    handleFileMentionAction(fileMentionAction);
-    return;
-  }
+
   const historyDirection = resolveComposerHistoryDirection(
     key,
     composer,
@@ -591,34 +543,15 @@ renderer.keyInput.on('keypress', (key) => {
   }
 });
 renderer.keyInput.on('paste', (event) => {
-  const approval = approvalController.getState();
-  if (approval.phase !== 'closed') {
-    if (approvalAcceptsTextInput(approval)) return;
+  const owner = currentInteractionOwner(
+    approvalController.getState(),
+  );
+  if (interactionOwnerBlocksPaste(owner)) {
     event.preventDefault();
     event.stopPropagation();
     return;
   }
-  if (noticeOverlay.phase !== 'closed') {
-    event.preventDefault();
-    event.stopPropagation();
-    return;
-  }
-  if (policyPicker.phase !== 'closed') {
-    event.preventDefault();
-    event.stopPropagation();
-    return;
-  }
-  if (commandOverlay.phase === 'help') {
-    event.preventDefault();
-    event.stopPropagation();
-    return;
-  }
-  if (sessionPicker.phase === 'closed') {
-    releaseStickyComposerNotice();
-    return;
-  }
-  event.preventDefault();
-  event.stopPropagation();
+  releaseStickyComposerNotice();
 });
 renderer.on('resize', () => {
   syncComposerLayout();
@@ -651,28 +584,7 @@ renderer.on('destroy', () => {
 syncComposerLayout();
 syncComposerModeUi();
 controller.start();
-
-if (smokeCommand) {
-  renderer.once('frame', () => {
-    composer.setText('Smoke footer repaint.');
-    composer.gotoBufferEnd();
-    submitComposerInput();
-    renderer.once('frame', () => {
-      setTimeout(() => renderer.destroy(), 50);
-    });
-  });
-} else if (
-  smoke
-  && !smokeHost
-  && !smokeStudio
-  && !smokePolicy
-  && !smokeEdit
-  && !smokeTranscript
-) {
-  renderer.once('frame', () => {
-    setTimeout(() => renderer.destroy(), 50);
-  });
-}
+qaLifecycle.installInitialFrameBehavior();
 
 function syncComposerLayout() {
   const layout = calculateComposerLayout(
@@ -769,6 +681,23 @@ function syncComposerInputOverlays() {
       && approvalController.getState().phase === 'closed',
   );
   refreshFileMention();
+}
+
+function currentInteractionOwner(
+  approval: ApprovalState,
+): InteractionOwner {
+  return resolveInteractionOwner({
+    approval: {
+      open: approval.phase !== 'closed',
+      acceptsTextInput: approvalAcceptsTextInput(approval),
+    },
+    noticeOpen: noticeOverlay.phase !== 'closed',
+    policyPickerOpen: policyPicker.phase !== 'closed',
+    commandHelpOpen: commandOverlay.phase === 'help',
+    sessionPickerOpen: sessionPicker.phase !== 'closed',
+    commandPaletteOpen: commandOverlay.phase === 'palette',
+    fileMentionOpen: fileMention.phase === 'open',
+  });
 }
 
 function refreshCommandOverlay() {
@@ -1263,46 +1192,37 @@ function closeCommandOverlayUi() {
 }
 
 function submitComposerInput(input = composer.plainText) {
-  const parsed = attachments.length === 0
-    ? parseTuiCommand(input)
-    : { type: 'text' as const, text: input };
-  if (parsed.type === 'empty') return;
-  if (parsed.type === 'unknown') {
-    clearComposerPreservingNotice();
-    localNotice = `unknown command: ${parsed.raw} · use /help`;
-    refreshStatus();
-    return;
-  }
-  if (parsed.type === 'command') {
-    if (parsed.name === 'quit') {
+  const intent = resolveComposerIntent({
+    text: input,
+    attachmentCount: attachments.length,
+    mode: composerMode,
+    canContinueActiveDelegation:
+      controller.canContinueActiveDelegation(),
+  });
+
+  switch (intent.type) {
+    case 'none':
+      return;
+    case 'notice':
+      clearComposerPreservingNotice();
+      localNotice = intent.message;
+      refreshStatus();
+      return;
+    case 'quit':
       renderer.destroy();
       return;
-    }
-    if (parsed.name === 'help') {
+    case 'open-help':
       composer.clear();
       localNotice = null;
       openCommandHelpUi();
       return;
-    }
-    if (parsed.name === 'continue') {
-      if (!parsed.args) {
-        clearComposerPreservingNotice();
-        localNotice = 'provide guidance: /continue <guidance>';
-        refreshStatus();
-        return;
-      }
-      if (!controller.canContinueActiveDelegation()) {
-        clearComposerPreservingNotice();
-        localNotice = 'no suspended delegation is available for this session';
-        refreshStatus();
-        return;
-      }
+    case 'continue-delegation': {
       enterChatMode(false);
-      const result = controller.continueActiveDelegation(parsed.args);
+      const result = controller.continueActiveDelegation(intent.guidance);
       if (result.ok) {
         composerHistory = recordComposerHistoryEntry(
           composerHistory,
-          parsed.args,
+          intent.guidance,
         );
         composer.clear();
         localNotice = null;
@@ -1314,48 +1234,38 @@ function submitComposerInput(input = composer.plainText) {
       }
       return;
     }
-    if (parsed.name === 'resume') {
+    case 'open-resume':
       composer.clear();
       localNotice = null;
       openSessionPicker();
       return;
-    }
-    if (parsed.name === 'policy') {
+    case 'open-policy':
       composer.clear();
       localNotice = null;
       openPolicyPickerUi();
       return;
-    }
-    if (parsed.name === 'transcript') {
+    case 'open-transcript':
       openTranscriptPager();
       return;
-    }
-    if (parsed.name === 'export') {
-      exportCurrentTranscript(parsed.args || undefined);
+    case 'export-transcript':
+      exportCurrentTranscript(intent.path);
       return;
-    }
-    if (parsed.name === 'edit') {
-      openExternalEditor(parsed.args);
+    case 'open-editor':
+      openExternalEditor(intent.text);
       return;
-    }
-    if (parsed.name === 'chat') {
+    case 'enter-chat':
       enterChatMode();
       return;
-    }
-    if (parsed.name === 'studio') {
-      if (!parsed.args) {
-        if (composerMode === 'studio') {
-          enterChatMode();
-        } else {
-          enterStudioMode();
-        }
-        return;
-      }
-      enterStudioMode(false);
-      submitStudioInput(parsed.args);
+    case 'enter-studio':
+      enterStudioMode();
       return;
-    }
-    if (parsed.name === 'new') {
+    case 'submit-studio':
+      if (intent.enterMode) {
+        enterStudioMode(false);
+      }
+      submitStudioInput(intent.text);
+      return;
+    case 'start-new-session':
       clearComposerPreservingNotice();
       localNotice = 'creating new session…';
       refreshStatus();
@@ -1370,29 +1280,23 @@ function submitComposerInput(input = composer.plainText) {
         showErrorNotice(errorMessage(error));
       });
       return;
+    case 'submit-chat': {
+      const result = controller.submitChat(intent.text, attachments);
+      if (result.ok) {
+        composerHistory = recordComposerHistoryEntry(
+          composerHistory,
+          intent.text,
+        );
+        attachments = [];
+        composer.clear();
+        localNotice = null;
+        refreshHeader();
+        syncComposerLayout();
+      } else {
+        localNotice = submitFailureText(result.reason);
+        refreshStatus();
+      }
     }
-    return;
-  }
-
-  if (composerMode === 'studio') {
-    submitStudioInput(parsed.text);
-    return;
-  }
-
-  const result = controller.submitChat(parsed.text, attachments);
-  if (result.ok) {
-    composerHistory = recordComposerHistoryEntry(
-      composerHistory,
-      parsed.text,
-    );
-    attachments = [];
-    composer.clear();
-    localNotice = null;
-    refreshHeader();
-    syncComposerLayout();
-  } else {
-    localNotice = submitFailureText(result.reason);
-    refreshStatus();
   }
 }
 
@@ -1476,7 +1380,7 @@ function openExternalEditor(initialText: string) {
   localNotice = 'external editor active';
   refreshStatus();
 
-  const operation = smokeEdit
+  const operation = smoke.edit
     ? async () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
         return `${initialText}\nedited in external editor\n`;
@@ -1516,7 +1420,7 @@ function openExternalEditor(initialText: string) {
       composer.focus();
       syncComposerInputOverlays();
     }
-    if (smokeEdit) {
+    if (smoke.edit) {
       setTimeout(() => renderer.destroy(), 50);
     }
   });
@@ -1541,7 +1445,7 @@ function openTranscriptPager() {
   const operation = () => pageSessionTranscript({
     session,
     cwd: process.cwd(),
-    ...(smokeTranscript
+    ...(smoke.transcript
       ? { env: { ...process.env, PAGER: 'cat' } }
       : {}),
   });
@@ -1565,7 +1469,7 @@ function openTranscriptPager() {
       composer.focus();
       syncComposerInputOverlays();
     }
-    if (smokeTranscript) {
+    if (smoke.transcript) {
       setTimeout(() => renderer.destroy(), 50);
     }
   });

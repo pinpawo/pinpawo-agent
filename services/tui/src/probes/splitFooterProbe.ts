@@ -9,13 +9,13 @@ import {
   type ScrollbackRenderContext,
   type ScrollbackSurface,
 } from '@opentui/core';
-import { calculateComposerLayout } from './spike/composerLayout';
-import { formatInputProbe } from './spike/inputProbe';
+import { calculateComposerLayout } from '../layout/composerLayout';
+import { formatInputProbe } from './inputProbe';
 import {
   createSpikeSession,
   formatSpikeTimelineEntry,
-} from './spike/sessionHarness';
-import { installTextareaWorkarounds } from './spike/textareaWorkarounds';
+} from './sessionHarness';
+import { installTextareaWorkarounds } from '../terminal/textareaCompatibility';
 
 const smoke = process.argv.includes('--smoke');
 const renderer = await createCliRenderer({

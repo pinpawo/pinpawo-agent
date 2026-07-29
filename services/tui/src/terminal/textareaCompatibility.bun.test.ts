@@ -8,7 +8,7 @@ import {
   recordComposerHistoryEntry,
   resolveComposerHistoryDirection,
 } from '../input/composerHistory';
-import { installTextareaWorkarounds } from './textareaWorkarounds';
+import { installTextareaWorkarounds } from './textareaCompatibility';
 
 test('textarea preserves pasted lines and deletes across line boundaries', async (context) => {
   const setup = await createTestRenderer({

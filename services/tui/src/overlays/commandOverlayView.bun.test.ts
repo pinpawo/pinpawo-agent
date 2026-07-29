@@ -8,7 +8,7 @@ import {
 } from '@opentui/core';
 import { createTestRenderer } from '@opentui/core/testing';
 import { syncComposerCursorForCommandOverlay } from '../input/composerCursor';
-import { calculateComposerLayout } from '../spike/composerLayout';
+import { calculateComposerLayout } from '../layout/composerLayout';
 import {
   closeCommandOverlay,
   createCommandOverlayState,

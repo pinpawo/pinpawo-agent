@@ -19,6 +19,7 @@ import {
 } from './localServerTypes';
 import type { LoadedUserCapability } from './capabilityLoader';
 import { clearAgentRunActivity, recordOperationActivity } from './operationActivityState';
+import { readLocalAgentPackageVersion } from './packageVersion';
 import { checkBrowserAvailability } from './toolkits/browser';
 import { resolveToolkitAvailability } from './toolkits/toolkitAvailability';
 
@@ -666,6 +667,7 @@ test('handleLocalHttpRequest exposes canonical workdir Studio paths on runtime e
 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(JSON.parse(res.body), {
+    local_agent_version: readLocalAgentPackageVersion(),
     llm_model: 'test-model',
     llm_context_window_tokens: 32000,
     workdir,

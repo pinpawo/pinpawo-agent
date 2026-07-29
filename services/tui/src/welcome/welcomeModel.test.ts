@@ -26,17 +26,32 @@ test('welcome includes the raster paw, version, runtime, and shortcuts', () => {
     session: SESSION,
     width: 80,
     connection: 'connected',
+    hostMetadata: {
+      localAgentVersion: '0.2.0',
+      capabilities: [
+        'general',
+        'explore',
+        'daily_post',
+        'capability_creator',
+      ],
+    },
   });
-  assert.deepEqual(lines.slice(0, 7), [
-    '   ▄█▄ ▄█▄   ',
-    '   ███ ███   ',
-    '▄█▄ ▀   ▀ ▄█▄',
-    '██▀ ▄███▄ ▀██',
-    '  ▄███████▄  ',
-    ' ███████████ ',
-    '  ▀███▀███▀  ',
+  assert.deepEqual(lines.slice(0, 10), [
+    '       ████   ████       ',
+    '      ██████ ██████          PinPawo TUI v2 · 豆包',
+    '  ████ ████   ████ ████      v0.1.0 · local-agent v0.2.0',
+    ' ██████           ██████     connected',
+    '  ████   ███████   ████  ',
+    '       ███████████           model         gpt-test',
+    '      █████████████          directory     /Users/mac/Develop/pinpawo-agent',
+    '      █████████████          capabilities  general · explore · daily_post',
+    '       ███████████                         capability_creator',
+    '         ███████         ',
   ]);
-  assert.match(lines[7] ?? '', /PinPawo TUI v2 · v0\.1\.0 · 豆包/);
+  assert.ok(lines.some((line) => line.includes('PinPawo TUI v2')));
+  assert.ok(lines.some((line) => line.includes('v0.1.0')));
+  assert.ok(lines.some((line) => line.includes('local-agent v0.2.0')));
+  assert.ok(lines.some((line) => line.includes('capability_creator')));
   assert.ok(lines.some((line) => line.includes('PgUp history')));
   assert.ok(lines.some((line) => line.includes('Ctrl+R sessions')));
   assert.ok(lines.some((line) => line.includes('Enter send')));
@@ -67,11 +82,9 @@ test('welcome keeps an unsafe actor label on one terminal row', () => {
     width: 80,
     connection: 'connected',
   });
-  assert.match(
-    lines[7] ?? '',
-    /PinPawo TUI v2 · v0\.1\.0 · 豆包 ↵ 助手�/,
-  );
-  assert.doesNotMatch(lines[7] ?? '', /[\r\n\x1B]/);
+  const title = lines.find((line) => line.includes('PinPawo TUI v2 ·'));
+  assert.match(title ?? '', /PinPawo TUI v2 · 豆包 ↵ 助手�/);
+  assert.doesNotMatch(title ?? '', /[\r\n\x1B]/);
 });
 
 test('displayed TUI version matches the workspace package', () => {

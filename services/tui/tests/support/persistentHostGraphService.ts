@@ -394,7 +394,8 @@ function protocolEvent(
 }
 
 async function timelineFixturePause() {
-  await new Promise((resolve) => setTimeout(resolve, 15));
+  // Keep each transient state visible across at least two 60 fps frames.
+  await new Promise((resolve) => setTimeout(resolve, 40));
 }
 
 function configurable(setup: AgentChannelSetup) {

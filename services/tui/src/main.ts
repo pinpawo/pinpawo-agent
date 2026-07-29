@@ -16,6 +16,10 @@ import {
   createLocalHostConnectionFactory,
   readLocalServerPort,
 } from './client/localHostConnection';
+import {
+  loadLocalHostMetadata,
+  type LocalHostMetadata,
+} from './client/localHostMetadata';
 import { parseTuiLaunchOptions } from './cli/launchOptions';
 import { resolveComposerIntent } from './commands/composerIntent';
 import { createDemoConnectionFactory } from './qa/demoConnection';
@@ -151,6 +155,12 @@ if (launchOptions.showVersion) {
 }
 
 const port = readLocalServerPort();
+const hostMetadata: LocalHostMetadata = launchOptions.useDemoConnection
+  ? {
+      localAgentVersion: 'demo',
+      capabilities: ['general', 'explore', 'browser'],
+    }
+  : await loadLocalHostMetadata({ port });
 const renderer = await createCliRenderer({
   exitOnCtrlC: false,
   targetFps: 60,
@@ -357,6 +367,7 @@ const unsubscribe = controller.subscribe((state) => {
       session: state.session,
       width: renderer.width,
       connection: formatConnection(state.connection),
+      hostMetadata,
     }));
   }
   if (!terminalHandoffOpen) {

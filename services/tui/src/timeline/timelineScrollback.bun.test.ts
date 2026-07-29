@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   BoxRenderable,
   CliRenderEvents,
+  RGBA,
   TextAttributes,
   TextRenderable,
 } from '@opentui/core';
@@ -11,6 +12,7 @@ import type {
   AgentSession,
   AgentTimelineEntry,
 } from '@pinpawo/agent-session';
+import { buildWelcomeLines } from '../welcome/welcomeModel';
 import { formatTimelineEntry } from './timelineModel';
 import {
   MAX_SETTLED_ENTRIES_PER_COMMIT,
@@ -161,6 +163,64 @@ test('welcome is committed once before the first timeline rows', async () => {
       setup.cellOutput.takeText(),
       formatTimelineEntry(userMessage('hello')),
     );
+  } finally {
+    timeline.destroy();
+    setup.renderer.destroy();
+  }
+});
+
+test('welcome paints solid raster cells without font line-height seams', async () => {
+  const setup = await createTimelineRenderer(20);
+  const timeline = new TimelineScrollback(setup.renderer);
+  try {
+    timeline.renderWelcome(['█ paw']);
+    assert.equal(setup.cellOutput.takeText(), '  paw');
+
+    const spans = setup.styleOutput.take().flatMap((lines) =>
+      lines.flatMap((line) => line.spans)
+    );
+    const solidCell = spans.find((span) => span.text === ' ');
+    assert.ok(solidCell);
+    assert.ok(solidCell.bg.equals(RGBA.fromHex('#69c0c8')));
+  } finally {
+    timeline.destroy();
+    setup.renderer.destroy();
+  }
+});
+
+test('welcome uses visual hierarchy for identity, metadata, and shortcuts', async () => {
+  const setup = await createTimelineRenderer(80);
+  const timeline = new TimelineScrollback(setup.renderer);
+  try {
+    timeline.renderWelcome(buildWelcomeLines({
+      session: session([]),
+      width: 80,
+      connection: 'connected',
+      hostMetadata: {
+        localAgentVersion: '0.2.0',
+        capabilities: ['general'],
+      },
+    }));
+    const text = setup.cellOutput.takeText();
+    assert.match(text, /PinPawo TUI v2/);
+
+    const spans = setup.styleOutput.take().flatMap((lines) =>
+      lines.flatMap((line) => line.spans)
+    );
+    const title = spans.find((span) => (
+      span.fg.equals(RGBA.fromHex('#efa6ca'))
+      && (span.attributes & TextAttributes.BOLD) !== 0
+    ));
+    const status = spans.find((span) =>
+      span.fg.equals(RGBA.fromHex('#7fcf9b'))
+    );
+    const muted = spans.filter((span) => (
+      span.fg.equals(RGBA.fromHex('#789da3'))
+      && (span.attributes & TextAttributes.DIM) !== 0
+    ));
+    assert.ok(title);
+    assert.ok(status);
+    assert.ok(muted.length >= 3);
   } finally {
     timeline.destroy();
     setup.renderer.destroy();

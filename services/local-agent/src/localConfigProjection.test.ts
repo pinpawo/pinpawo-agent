@@ -7,6 +7,7 @@ import {
   buildLocalHttpRuntimeProjection,
   buildLocalRuntimeProjection,
 } from './localConfigProjection';
+import { readLocalAgentPackageVersion } from './packageVersion';
 import {
   getLocalServerWorkdir,
   normalizeLocalServerDeps,
@@ -51,6 +52,7 @@ test('HTTP and TUI projections expose the same normalized runtime values', () =>
   const http = buildLocalHttpRuntimeProjection(deps);
 
   assert.equal(runtime.workdir, runtimeConfig.workdir);
+  assert.equal(http.local_agent_version, readLocalAgentPackageVersion());
   assert.equal(http.workdir, runtime.workdir);
   assert.equal(http.workspace_id, runtime.workspaceId);
   assert.equal(http.state_root, runtime.stateRoot);

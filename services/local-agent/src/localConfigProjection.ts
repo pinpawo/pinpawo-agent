@@ -2,6 +2,7 @@ import {
   GLOBAL_REVIEW_POLICY_MODE,
   type BuiltinGlobalReviewPolicyMode,
 } from '@pinpawo/pet-agent';
+import { readLocalAgentPackageVersion } from './packageVersion';
 import type { LocalServerDeps } from './localServerTypes';
 
 export type LocalRuntimeProjection = {
@@ -48,6 +49,7 @@ export function buildLocalRuntimeProjection(deps: LocalServerDeps): LocalRuntime
 export function buildLocalHttpRuntimeProjection(deps: LocalServerDeps) {
   const runtime = buildLocalRuntimeProjection(deps);
   return {
+    local_agent_version: readLocalAgentPackageVersion(),
     llm_model: runtime.model,
     ...(runtime.contextWindow !== undefined
       ? { llm_context_window_tokens: runtime.contextWindow }

@@ -46,8 +46,9 @@ dogfood entrypoint from issue #454:
 - it provides a compact cursor-aware slash command palette above the visible
   composer, plus a separate pageable help overlay for the commands currently
   implemented by the v2 client.
-- it commits a borderless, terminal-rasterized paw welcome with the v2 package
-  version before the first timeline rows.
+- it commits a borderless, terminal-rasterized paw welcome with the TUI and
+  local-agent versions, actor, model, workdir, and loaded capabilities before
+  the first timeline rows.
 - it keeps run/connection state and session token/context facts in a compact
   two-line status area, with width-priority degradation.
 - it acknowledges an accepted message immediately with an animated live

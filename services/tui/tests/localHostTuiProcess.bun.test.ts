@@ -669,10 +669,15 @@ test('production v2 process exercises composer workflows through a real PTY', {
       '}',
       `send -- [binary format H* ${utf8Hex(PERSISTENT_HOST_REVIEW_INPUT)}]`,
       'send -- "\\033\\[13;5u"',
-      'expect {',
-      `  -exact ${JSON.stringify(PERSISTENT_HOST_REVIEW_SPEC.view.body)} {}`,
-      '  timeout { exit 142 }',
-      '  eof { exit 143 }',
+      'set review_body_ready 0',
+      'set review_footer_ready 0',
+      'while {!$review_body_ready || !$review_footer_ready} {',
+      '  expect {',
+      `    -exact ${JSON.stringify(PERSISTENT_HOST_REVIEW_SPEC.view.body)} { set review_body_ready 1 }`,
+      '    -exact "PgUp/PgDn details" { set review_footer_ready 1 }',
+      '    timeout { exit 142 }',
+      '    eof { exit 143 }',
+      '  }',
       '}',
       `send -- [binary format H* ${utf8Hex('approval-input-must-not-leak')}]`,
       'after 100',
@@ -816,6 +821,9 @@ test('production v2 process exercises composer workflows through a real PTY', {
     const searchableOutput = compactTerminalObservation(output);
     assert.ok(searchableOutput.includes(
       compactTerminalObservation(PERSISTENT_HOST_REVIEW_SPEC.view.title),
+    ));
+    assert.ok(searchableOutput.includes(
+      compactTerminalObservation(PERSISTENT_HOST_REVIEW_SPEC.view.body),
     ));
     assert.ok(searchableOutput.includes(
       compactTerminalObservation(PERSISTENT_HOST_TIMELINE_TOOL_UPDATE),

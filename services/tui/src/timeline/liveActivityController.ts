@@ -3,7 +3,7 @@ import {
   LIVE_ACTIVITY_PULSE_FRAMES,
 } from './timelineModel';
 
-const DEFAULT_TICK_MS = 120;
+const DEFAULT_TICK_MS = 240;
 const DEFAULT_LONG_WAIT_MS = 10_000;
 
 type TimerHandle = ReturnType<typeof setTimeout>;
@@ -81,7 +81,6 @@ export class LiveActivityController {
       this.destroyed
       || !this.run
       || this.run.state !== 'running'
-      || this.currentFrame >= LIVE_ACTIVITY_PULSE_FRAMES
     ) {
       return;
     }

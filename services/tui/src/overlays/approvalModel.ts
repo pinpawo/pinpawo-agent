@@ -54,6 +54,10 @@ export type ApprovalViewModel = {
 
 const MAX_REVIEW_CONTENT_CHARACTERS = 100_000;
 const MAX_REVIEW_CONTENT_LINES = 500;
+const APPROVAL_CONTENT_ROWS = 6;
+const APPROVAL_TEXT_INPUT_BODY_ROWS = 1;
+const APPROVAL_TEXT_INPUT_OPTION_ROWS = 1;
+const APPROVAL_LONG_CONTENT_OPTION_ROWS = 2;
 
 export function createApprovalState(): ApprovalState {
   return { phase: 'closed' };
@@ -159,8 +163,15 @@ export function scrollApprovalContent(
   if (state.phase === 'closed' || state.phase === 'submitting') return state;
   const review = currentApprovalReview(state);
   if (!review) return state;
-  const bodyRows = approvalBodyRows(state);
-  const lineCount = buildReviewContentLines(review, Math.max(1, width - 4)).length;
+  const lineCount = buildReviewContentLines(
+    review,
+    Math.max(1, width - 4),
+  ).length;
+  const bodyRows = approvalLayoutRows(
+    state,
+    lineCount,
+    review.options.length,
+  ).bodyRows;
   const maximum = Math.max(0, lineCount - bodyRows);
   return {
     ...state,
@@ -245,11 +256,14 @@ export function buildApprovalViewModel(
 ): ApprovalViewModel {
   const innerWidth = Math.max(1, width - 4);
   const review = currentApprovalReview(state);
-  const bodyRows = approvalBodyRows(state);
-  const optionRows = approvalOptionRows(state);
   const allBodyLines = review
     ? buildReviewContentLines(review, innerWidth)
     : ['Review is no longer available.'];
+  const { bodyRows, optionRows } = approvalLayoutRows(
+    state,
+    allBodyLines.length,
+    review?.options.length ?? 0,
+  );
   const maxOffset = Math.max(0, allBodyLines.length - bodyRows);
   const offset = Math.min(state.contentOffset, maxOffset);
   const bodyLines = allBodyLines.slice(offset, offset + bodyRows);
@@ -291,12 +305,33 @@ export function buildApprovalViewModel(
   };
 }
 
-export function approvalBodyRows(state: ApprovalState) {
-  return approvalAcceptsTextInput(state) ? 1 : 3;
-}
+function approvalLayoutRows(
+  state: ApprovalState,
+  bodyLineCount: number,
+  optionCount: number,
+) {
+  if (approvalAcceptsTextInput(state)) {
+    return {
+      bodyRows: APPROVAL_TEXT_INPUT_BODY_ROWS,
+      optionRows: APPROVAL_TEXT_INPUT_OPTION_ROWS,
+    };
+  }
 
-export function approvalOptionRows(state: ApprovalState) {
-  return approvalAcceptsTextInput(state) ? 1 : 3;
+  const availableBodyLines = Math.max(1, bodyLineCount);
+  const availableOptions = Math.max(1, optionCount);
+  const reservedOptionRows = Math.min(
+    availableOptions,
+    APPROVAL_LONG_CONTENT_OPTION_ROWS,
+  );
+  const bodyRows = Math.max(1, Math.min(
+    availableBodyLines,
+    APPROVAL_CONTENT_ROWS - reservedOptionRows,
+  ));
+  const optionRows = Math.max(1, Math.min(
+    availableOptions,
+    APPROVAL_CONTENT_ROWS - bodyRows,
+  ));
+  return { bodyRows, optionRows };
 }
 
 function formatApprovalOptions(

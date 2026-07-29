@@ -95,7 +95,7 @@ test('approval diff details page within a bounded CJK footer view', () => {
     ? null
     : buildApprovalViewModel(state, 32);
   assert.ok(first);
-  assert.match(first?.title ?? '', /1-3\//);
+  assert.match(first?.title ?? '', /1-4\//);
 
   state = scrollApprovalContent(state, 1, 32);
   const second = state.phase === 'closed'
@@ -105,6 +105,61 @@ test('approval diff details page within a bounded CJK footer view', () => {
   for (const line of `${second?.body}\n${second?.options}`.split('\n')) {
     assert.ok(stringWidth(line) <= 28, line);
   }
+});
+
+test('approval shares fixed footer rows dynamically between content and options', () => {
+  const base = review('review-dynamic');
+  const options: ReviewSpec['options'] = [
+    base.options[0]!,
+    {
+      id: 'authorize',
+      label: '批准并授权',
+      decision: { type: 'approve' },
+    },
+    ...base.options.slice(1),
+  ];
+  const shortReview: ReviewSpec = {
+    ...base,
+    view: {
+      kind: 'plain',
+      title: '写文件',
+      body: 'Target: /tmp/example.txt',
+    },
+    options,
+  };
+  const shortState = syncApprovalState(
+    createApprovalState(),
+    waitingReview([shortReview]),
+  );
+  const short = shortState.phase === 'closed'
+    ? null
+    : buildApprovalViewModel(shortState, 80);
+  assert.equal(short?.bodyRows, 2);
+  assert.equal(short?.optionRows, 4);
+  assert.match(short?.body ?? '', /example\.txt/);
+  assert.match(short?.options ?? '', /拒绝/);
+
+  const longReview: ReviewSpec = {
+    ...shortReview,
+    view: {
+      kind: 'plain',
+      title: '写文件',
+      body: Array.from(
+        { length: 8 },
+        (_, index) => `Detail ${index + 1}`,
+      ).join('\n'),
+    },
+  };
+  const longState = syncApprovalState(
+    createApprovalState(),
+    waitingReview([longReview]),
+  );
+  const long = longState.phase === 'closed'
+    ? null
+    : buildApprovalViewModel(longState, 80);
+  assert.equal(long?.bodyRows, 4);
+  assert.equal(long?.optionRows, 2);
+  assert.match(long?.title ?? '', /details 1-4\/9/);
 });
 
 function waitingReview(reviews: ReviewSpec[]): AgentRunView {

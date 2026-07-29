@@ -168,7 +168,7 @@ test('live timeline shows the newest streaming tail within its footer budget', (
   assert.equal(formatLiveSession(session, 20), 'PinPawo  …qrstuvwxyz');
   assert.equal(formatLiveActivity(session, 0, 20), '⠋ PinPawo  …stuvwxyz');
   assert.equal(formatLiveActivity(session, 1, 20), '⠙ PinPawo  …stuvwxyz');
-  assert.equal(formatLiveActivity(session, 10, 20), '· PinPawo  …stuvwxyz');
+  assert.equal(formatLiveActivity(session, 10, 20), '⠋ PinPawo  …stuvwxyz');
   assert.equal(
     formatLiveActivity({
       ...session,
@@ -198,7 +198,7 @@ test('live activity distinguishes progress from paused and stopping runs', () =>
   );
   assert.equal(
     formatLiveActivity(session, 10, 80, true),
-    '· PinPawo is still thinking',
+    '⠋ PinPawo is still thinking',
   );
   assert.equal(
     formatLiveActivity({
@@ -211,7 +211,7 @@ test('live activity distinguishes progress from paused and stopping runs', () =>
     '⠙ 豆包 is thinking',
   );
   assert.equal(isLiveActivityPulseActive(session, 9), true);
-  assert.equal(isLiveActivityPulseActive(session, 10), false);
+  assert.equal(isLiveActivityPulseActive(session, 10_000), true);
   assert.equal(
     formatLiveActivity({
       ...session,

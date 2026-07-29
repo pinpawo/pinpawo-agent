@@ -7,7 +7,7 @@ import {
   liveActivityStateKey,
 } from './liveActivityController';
 
-test('live activity pulse resets on a real run phase change and then settles', () => {
+test('live activity pulse resets on a real run phase change and continues until settlement', () => {
   const timers: Array<{
     callback: () => void;
     delayMs: number;
@@ -37,7 +37,7 @@ test('live activity pulse resets on a real run phase change and then settles', (
   assert.equal(controller.longWaiting, false);
   assert.equal(timers.length, 2);
 
-  runTimer(timers, 120);
+  runTimer(timers, 240);
   assert.equal(controller.frame, 1);
   assert.deepEqual(frames, [1]);
   assert.equal(timers.length, 2);
@@ -52,10 +52,10 @@ test('live activity pulse resets on a real run phase change and then settles', (
   assert.equal(timers.length, 2);
 
   for (let index = 0; index < LIVE_ACTIVITY_PULSE_FRAMES; index += 1) {
-    runTimer(timers, 120);
+    runTimer(timers, 240);
   }
   assert.equal(controller.frame, LIVE_ACTIVITY_PULSE_FRAMES);
-  assert.equal(timers.length, 1);
+  assert.equal(timers.length, 2);
   assert.deepEqual(
     frames.slice(-LIVE_ACTIVITY_PULSE_FRAMES),
     Array.from(
@@ -66,6 +66,11 @@ test('live activity pulse resets on a real run phase change and then settles', (
   runTimer(timers, 10_000);
   assert.equal(controller.longWaiting, true);
   assert.equal(longWaits, 1);
+  assert.equal(timers.length, 1);
+  runTimer(timers, 240);
+  assert.equal(controller.frame, LIVE_ACTIVITY_PULSE_FRAMES + 1);
+  assert.equal(timers.length, 1);
+  controller.sync(null);
   assert.equal(timers.length, 0);
 });
 

@@ -6,6 +6,8 @@ export type ModelProfilePickerState = TuiModelProfileList & {
   loading: boolean;
 };
 
+export const MODEL_PROFILE_PICKER_VISIBLE_LIMIT = 4;
+
 export function createLoadingModelProfilePicker(
   currentProfileId?: string,
 ): ModelProfilePickerState {
@@ -58,6 +60,32 @@ export function moveModelProfilePickerSelection(
     0,
     Math.min(state.profiles.length - 1, state.selectedIndex + delta),
   );
+}
+
+export function windowModelProfilePickerProfiles(
+  profiles: readonly AgentModelProfileSummary[],
+  selectedIndex: number,
+  limit = MODEL_PROFILE_PICKER_VISIBLE_LIMIT,
+) {
+  if (profiles.length === 0 || limit <= 0) {
+    return {
+      start: 0,
+      profiles: [] as AgentModelProfileSummary[],
+    };
+  }
+  const boundedIndex = Math.max(
+    0,
+    Math.min(profiles.length - 1, selectedIndex),
+  );
+  const maxStart = Math.max(0, profiles.length - limit);
+  const start = Math.max(
+    0,
+    Math.min(maxStart, boundedIndex - 1),
+  );
+  return {
+    start,
+    profiles: profiles.slice(start, start + limit),
+  };
 }
 
 export function canSelectModelProfile(profile: AgentModelProfileSummary) {

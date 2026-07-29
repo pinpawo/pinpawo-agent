@@ -103,6 +103,19 @@ import {
 } from './overlays/policyPickerModel';
 import { PolicyPickerView } from './overlays/policyPickerView';
 import {
+  beginModelPickerLoad,
+  beginModelSelection,
+  closeModelPicker,
+  createModelPickerState,
+  failModelPicker,
+  loadModelPickerProfiles,
+  moveModelPickerSelection,
+  resolveModelPickerKey,
+  selectedModelProfile,
+  type ModelPickerAction,
+} from './overlays/modelPickerModel';
+import { ModelPickerView } from './overlays/modelPickerView';
+import {
   applySessionPickerAction,
   beginSessionPickerLoad,
   beginSessionResume,
@@ -195,6 +208,7 @@ const status = new TextRenderable(renderer, {
 });
 const sessionPickerView = new SessionPickerView(renderer);
 const policyPickerView = new PolicyPickerView(renderer);
+const modelPickerView = new ModelPickerView(renderer);
 const commandOverlayView = new CommandOverlayView(renderer);
 const fileMentionView = new FileMentionView(renderer);
 const noticeOverlayView = new NoticeOverlayView(renderer);
@@ -212,8 +226,10 @@ let dismissedFileMention: {
 let noticeOverlay = createNoticeOverlayState();
 let sessionPicker = createSessionPickerState();
 let policyPicker = createPolicyPickerState();
+let modelPicker = createModelPickerState();
 let sessionPickerGeneration = 0;
 let policyPickerGeneration = 0;
+let modelPickerGeneration = 0;
 let sessionListRequest: ReturnType<TuiSessionController['listSessions']> | null = null;
 let composerMode: 'chat' | 'studio' = 'chat';
 let studioConversationId: string | null = null;
@@ -320,6 +336,7 @@ root.add(commandOverlayView.frame);
 root.add(fileMentionView.frame);
 root.add(sessionPickerView.frame);
 root.add(policyPickerView.frame);
+root.add(modelPickerView.frame);
 root.add(noticeOverlayView.frame);
 root.add(approvalView.frame);
 renderer.root.add(root);
@@ -430,6 +447,13 @@ renderer.keyInput.on('keypress', (key) => {
       key.preventDefault();
       key.stopPropagation();
       handlePolicyPickerAction(action);
+      return;
+    }
+    case 'model-picker': {
+      const action = resolveModelPickerKey(modelPicker, key);
+      key.preventDefault();
+      key.stopPropagation();
+      handleModelPickerAction(action);
       return;
     }
     case 'command-help': {
@@ -558,6 +582,7 @@ renderer.on('resize', () => {
   refreshLive();
   refreshSessionPicker();
   refreshPolicyPicker();
+  refreshModelPicker();
   refreshApproval();
   refreshCommandOverlay();
   refreshFileMention();
@@ -568,8 +593,10 @@ renderer.on('destroy', () => {
   interruptPendingNoticeController.destroy();
   sessionPickerGeneration += 1;
   policyPickerGeneration += 1;
+  modelPickerGeneration += 1;
   sessionPicker = closeSessionPicker(sessionPicker);
   policyPicker = closePolicyPicker(policyPicker);
+  modelPicker = closeModelPicker(modelPicker);
   commandOverlay = closeCommandOverlay();
   fileMention = createFileMentionState();
   noticeOverlay = closeNoticeOverlay();
@@ -650,6 +677,7 @@ function syncComposerInputOverlays() {
       && !terminalHandoffOpen
       && sessionPicker.phase === 'closed'
       && policyPicker.phase === 'closed'
+      && modelPicker.phase === 'closed'
       && noticeOverlay.phase === 'closed'
       && approvalController.getState().phase === 'closed',
     canContinueActiveDelegation:
@@ -677,6 +705,7 @@ function syncComposerInputOverlays() {
       && !terminalHandoffOpen
       && sessionPicker.phase === 'closed'
       && policyPicker.phase === 'closed'
+      && modelPicker.phase === 'closed'
       && noticeOverlay.phase === 'closed'
       && approvalController.getState().phase === 'closed',
   );
@@ -693,6 +722,7 @@ function currentInteractionOwner(
     },
     noticeOpen: noticeOverlay.phase !== 'closed',
     policyPickerOpen: policyPicker.phase !== 'closed',
+    modelPickerOpen: modelPicker.phase !== 'closed',
     commandHelpOpen: commandOverlay.phase === 'help',
     sessionPickerOpen: sessionPicker.phase !== 'closed',
     commandPaletteOpen: commandOverlay.phase === 'palette',
@@ -788,6 +818,12 @@ function syncNoticeFromSession() {
       policyPicker = closePolicyPicker(policyPicker);
       refreshPolicyPicker();
     }
+    if (modelPicker.phase !== 'closed') {
+      modelPickerGeneration += 1;
+      controller.cancelModelProfileList();
+      modelPicker = closeModelPicker(modelPicker);
+      refreshModelPicker();
+    }
     composer.blur();
   } else if (
     shouldRestoreComposerAfterNoticeSync(previous, noticeOverlay)
@@ -795,6 +831,7 @@ function syncNoticeFromSession() {
     && approvalController.getState().phase === 'closed'
     && sessionPicker.phase === 'closed'
     && policyPicker.phase === 'closed'
+    && modelPicker.phase === 'closed'
     && commandOverlay.phase !== 'help'
   ) {
     if (
@@ -816,6 +853,7 @@ function closeNoticeOverlayUi() {
     !terminalHandoffOpen
     && approvalController.getState().phase === 'closed'
     && policyPicker.phase === 'closed'
+    && modelPicker.phase === 'closed'
   ) {
     composer.focus();
     syncComposerInputOverlays();
@@ -888,12 +926,19 @@ function syncApprovalFromSession() {
       policyPicker = closePolicyPicker(policyPicker);
       refreshPolicyPicker();
     }
+    if (modelPicker.phase !== 'closed') {
+      modelPickerGeneration += 1;
+      controller.cancelModelProfileList();
+      modelPicker = closeModelPicker(modelPicker);
+      refreshModelPicker();
+    }
     composer.blur();
   } else if (
     previous.phase !== 'closed'
     && !terminalHandoffOpen
     && sessionPicker.phase === 'closed'
     && policyPicker.phase === 'closed'
+    && modelPicker.phase === 'closed'
     && noticeOverlay.phase === 'closed'
   ) {
     composer.focus();
@@ -917,9 +962,13 @@ function refreshApproval() {
 
 function openSessionPicker() {
   if (terminalHandoffOpen || sessionPicker.phase !== 'closed') return;
+  modelPickerGeneration += 1;
+  controller.cancelModelProfileList();
+  modelPicker = closeModelPicker(modelPicker);
   commandOverlay = closeCommandOverlay();
   closeFileMentionOverlay();
   refreshCommandOverlay();
+  refreshModelPicker();
   const generation = sessionPickerGeneration + 1;
   sessionPickerGeneration = generation;
   sessionPicker = beginSessionPickerLoad(sessionPicker);
@@ -1017,7 +1066,11 @@ function closeSessionPickerUi() {
   sessionPickerGeneration += 1;
   sessionPicker = closeSessionPicker(sessionPicker);
   refreshSessionPicker();
-  if (!terminalHandoffOpen && noticeOverlay.phase === 'closed') {
+  if (
+    !terminalHandoffOpen
+    && modelPicker.phase === 'closed'
+    && noticeOverlay.phase === 'closed'
+  ) {
     composer.focus();
     syncComposerInputOverlays();
   }
@@ -1047,11 +1100,15 @@ function openPolicyPickerUi() {
   closeFileMentionOverlay();
   sessionPickerGeneration += 1;
   sessionPicker = closeSessionPicker(sessionPicker);
+  modelPickerGeneration += 1;
+  controller.cancelModelProfileList();
+  modelPicker = closeModelPicker(modelPicker);
   policyPickerGeneration += 1;
   policyPicker = openPolicyPicker(policyPicker, currentMode);
   composer.blur();
   refreshCommandOverlay();
   refreshSessionPicker();
+  refreshModelPicker();
   refreshPolicyPicker();
 }
 
@@ -1117,6 +1174,7 @@ function closePolicyPickerUi() {
   if (
     !terminalHandoffOpen
     && sessionPicker.phase === 'closed'
+    && modelPicker.phase === 'closed'
     && noticeOverlay.phase === 'closed'
     && approvalController.getState().phase === 'closed'
   ) {
@@ -1127,6 +1185,152 @@ function closePolicyPickerUi() {
 
 function refreshPolicyPicker() {
   policyPickerView.render(policyPicker, renderer.width);
+}
+
+function openModelPickerUi() {
+  if (terminalHandoffOpen || modelPicker.phase !== 'closed') return;
+  const state = controller.getState();
+  if (state.connection !== 'ready') {
+    showErrorNotice('local-agent is not connected');
+    return;
+  }
+  if (state.session.activeRun) {
+    showErrorNotice('wait for the current response to finish');
+    return;
+  }
+  commandOverlay = closeCommandOverlay();
+  closeFileMentionOverlay();
+  sessionPickerGeneration += 1;
+  sessionPicker = closeSessionPicker(sessionPicker);
+  policyPickerGeneration += 1;
+  policyPicker = closePolicyPicker(policyPicker);
+  const generation = modelPickerGeneration + 1;
+  modelPickerGeneration = generation;
+  modelPicker = beginModelPickerLoad(
+    modelPicker,
+    state.session.runtime?.modelProfileId,
+  );
+  composer.blur();
+  refreshCommandOverlay();
+  refreshSessionPicker();
+  refreshPolicyPicker();
+  refreshModelPicker();
+
+  void controller.listModelProfiles().then((result) => {
+    if (
+      modelPickerGeneration !== generation
+      || modelPicker.phase !== 'loading'
+    ) {
+      return;
+    }
+    modelPicker = loadModelPickerProfiles(result);
+    refreshModelPicker();
+  }).catch((error: unknown) => {
+    if (
+      modelPickerGeneration !== generation
+      || modelPicker.phase !== 'loading'
+    ) {
+      return;
+    }
+    modelPicker = failModelPicker(modelPicker, errorMessage(error));
+    refreshModelPicker();
+  });
+}
+
+function handleModelPickerAction(action: ModelPickerAction) {
+  if (action === 'close') {
+    closeModelPickerUi();
+    return;
+  }
+  if (action === 'move-up' || action === 'move-down') {
+    modelPicker = moveModelPickerSelection(
+      modelPicker,
+      action === 'move-up' ? -1 : 1,
+    );
+    refreshModelPicker();
+    return;
+  }
+  if (action === 'select') {
+    selectCurrentModelProfile();
+  }
+}
+
+function selectCurrentModelProfile() {
+  const profile = selectedModelProfile(modelPicker);
+  if (!profile || modelPicker.phase === 'loading' || modelPicker.phase === 'selecting') {
+    return;
+  }
+  const next = beginModelSelection(modelPicker);
+  if (next.phase === 'error') {
+    modelPicker = next;
+    refreshModelPicker();
+    return;
+  }
+  if (profile.id === modelPicker.selectedProfileId) {
+    closeModelPickerUi();
+    return;
+  }
+  const generation = modelPickerGeneration + 1;
+  modelPickerGeneration = generation;
+  modelPicker = next;
+  refreshModelPicker();
+  void controller.selectModelProfile(
+    profile.id,
+    modelPicker.sessionId,
+  ).then(() => {
+    if (
+      modelPickerGeneration !== generation
+      || modelPicker.phase !== 'selecting'
+    ) {
+      return;
+    }
+    modelPicker = closeModelPicker({
+      ...modelPicker,
+      selectedProfileId: profile.id,
+    });
+    localNotice = `session model: ${profile.label}`;
+    refreshModelPicker();
+    refreshHeader();
+    refreshStatus();
+    if (!terminalHandoffOpen) {
+      composer.focus();
+      syncComposerInputOverlays();
+    }
+  }).catch((error: unknown) => {
+    if (
+      modelPickerGeneration !== generation
+      || modelPicker.phase !== 'selecting'
+    ) {
+      return;
+    }
+    modelPicker = failModelPicker(modelPicker, errorMessage(error));
+    refreshModelPicker();
+  });
+}
+
+function closeModelPickerUi() {
+  if (modelPicker.phase === 'selecting') return;
+  modelPickerGeneration += 1;
+  if (modelPicker.phase === 'loading') {
+    controller.cancelModelProfileList();
+  }
+  modelPicker = closeModelPicker(modelPicker);
+  refreshModelPicker();
+  if (
+    !terminalHandoffOpen
+    && sessionPicker.phase === 'closed'
+    && policyPicker.phase === 'closed'
+    && modelPicker.phase === 'closed'
+    && noticeOverlay.phase === 'closed'
+    && approvalController.getState().phase === 'closed'
+  ) {
+    composer.focus();
+    syncComposerInputOverlays();
+  }
+}
+
+function refreshModelPicker() {
+  modelPickerView.render(modelPicker, renderer.width);
 }
 
 function handleCommandOverlayAction(action: CommandOverlayAction) {
@@ -1238,6 +1442,12 @@ function submitComposerInput(input = composer.plainText) {
       composer.clear();
       localNotice = null;
       openSessionPicker();
+      return;
+    case 'open-model':
+      composer.clear();
+      localNotice = null;
+      enterChatMode(false);
+      openModelPickerUi();
       return;
     case 'open-policy':
       composer.clear();
@@ -1414,6 +1624,7 @@ function openExternalEditor(initialText: string) {
     if (
       sessionPicker.phase === 'closed'
       && policyPicker.phase === 'closed'
+      && modelPicker.phase === 'closed'
       && noticeOverlay.phase === 'closed'
       && approvalController.getState().phase === 'closed'
     ) {
@@ -1463,6 +1674,7 @@ function openTranscriptPager() {
     if (
       sessionPicker.phase === 'closed'
       && policyPicker.phase === 'closed'
+      && modelPicker.phase === 'closed'
       && noticeOverlay.phase === 'closed'
       && approvalController.getState().phase === 'closed'
     ) {
@@ -1493,6 +1705,7 @@ function activeClipboardEditor(
     approval.phase === 'closed'
     && noticeOverlay.phase === 'closed'
     && policyPicker.phase === 'closed'
+    && modelPicker.phase === 'closed'
     && sessionPicker.phase === 'closed'
     && commandOverlay.phase !== 'help'
     && !terminalHandoffOpen

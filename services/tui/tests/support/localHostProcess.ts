@@ -11,6 +11,9 @@ import {
   buildLocalAgentRuntimeConfig,
 } from '../../../local-agent/src/runtimeConfig';
 import {
+  createTestModelServerDeps,
+} from '../../../local-agent/src/testing/modelProfiles';
+import {
   createBashToolkit,
   createGitToolkit,
 } from '../../../local-agent/src/toolkits/local/index';
@@ -47,12 +50,12 @@ const transport = await startLocalServer(requestedPort, {
   actorName: 'PinPawo',
   workdir,
   runtimeConfig,
-  llmConfig: {
+  ...createTestModelServerDeps({
     apiKey: 'offline-process-key',
     baseUrl: 'http://127.0.0.1:1/v1',
     model: 'process-restart-model',
     contextWindowTokens: 32_000,
-  },
+  }),
   localToolkitDefinitions: toolkits,
   localToolkits: toolkits,
   capabilityArtifactStore: new FileCapabilityArtifactStore(

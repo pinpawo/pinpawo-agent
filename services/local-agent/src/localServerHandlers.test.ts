@@ -248,6 +248,69 @@ test('model protocol lists sanitized profiles and persists an acknowledged sessi
   }
 });
 
+test('model selection keeps the previous profile when checkpoint preparation fails', async () => {
+  const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-model-select-failure-'));
+  const runtimeConfig = buildLocalAgentRuntimeConfig(workdir);
+  const sent: LocalAgentServerMessage[] = [];
+  const peer = createPeer(sent);
+  const graphService = {
+    readThreadState: async () => {
+      throw new Error('checkpoint unavailable');
+    },
+  } as unknown as LocalAgentGraphService;
+  const handlers = createLocalServerHandlers({
+    actorId: 'pet-a',
+    workdir,
+    runtimeConfig,
+    modelProfiles: createTestModelProfileRegistry([
+      { modelProfileId: 'primary' },
+      { modelProfileId: 'secondary' },
+    ], 'primary'),
+    globalReviewPolicyMode: 'require_authorization',
+    capabilityArtifactStore: testArtifactStore,
+  }, {
+    loadContext: loadTestContext,
+    chatGraphService: graphService,
+  });
+
+  try {
+    await handlers.peerHandlers.onSessionNew(peer, {
+      type: 'session.new',
+      requestId: 'new-selection-failure',
+    });
+    const created = sent.find((message) => message.type === 'session.new.result');
+    assert.equal(created?.type, 'session.new.result');
+    if (created?.type !== 'session.new.result') return;
+
+    await handlers.peerHandlers.onModelSelect(peer, {
+      type: 'model.select',
+      requestId: 'select-failure',
+      sessionId: created.session.id,
+      modelProfileId: 'secondary',
+    });
+    const failed = sent.find((message) => (
+      message.type === 'model.select.error'
+      && message.requestId === 'select-failure'
+    ));
+    assert.equal(failed?.type, 'model.select.error');
+    if (failed?.type !== 'model.select.error') return;
+    assert.equal(failed.code, 'selection_failed');
+
+    const persisted = JSON.parse(
+      readFileSync(runtimeConfig.tuiSessionPath, 'utf8'),
+    ) as {
+      sessions: Record<string, { modelProfileId?: string }>;
+    };
+    assert.equal(
+      persisted.sessions[created.session.id]?.modelProfileId,
+      'primary',
+    );
+  } finally {
+    handlers.close();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
 test('removed session profile stays visible and blocks runs until explicitly replaced', async () => {
   const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-model-removed-'));
   const runtimeConfig = buildLocalAgentRuntimeConfig(workdir);
@@ -423,6 +486,95 @@ test('model selection is rejected while the active session is running', async ()
     await running;
   } finally {
     release.resolve();
+    handlers.close();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test('model selection blocks a chat admitted by another peer until the selection settles', async () => {
+  const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-model-cross-peer-'));
+  const selectionSent: LocalAgentServerMessage[] = [];
+  const chatSent: LocalAgentServerMessage[] = [];
+  const selectionPeer = createPeer(selectionSent);
+  const chatPeer = createPeer(chatSent);
+  const selectionReadStarted = deferred<void>();
+  const releaseSelectionRead = deferred<void>();
+  const chatStarted = deferred<void>();
+  const releaseChat = deferred<void>();
+  let chatStartCount = 0;
+  const graphService = {
+    readThreadState: async () => {
+      selectionReadStarted.resolve();
+      await releaseSelectionRead.promise;
+      return {
+        messages: [],
+        pendingHumanReview: null,
+        hasPendingContinuation: false,
+      };
+    },
+  } as unknown as LocalAgentGraphService;
+  const handlers = createLocalServerHandlers({
+    actorId: 'pet-a',
+    workdir,
+    runtimeConfig: buildLocalAgentRuntimeConfig(workdir),
+    modelProfiles: createTestModelProfileRegistry([
+      { modelProfileId: 'primary' },
+      { modelProfileId: 'secondary' },
+    ], 'primary'),
+    globalReviewPolicyMode: 'require_authorization',
+    capabilityArtifactStore: testArtifactStore,
+  }, {
+    loadContext: loadTestContext,
+    chatGraphService: graphService,
+    runChat: async () => {
+      chatStartCount += 1;
+      chatStarted.resolve();
+      await releaseChat.promise;
+      return { status: 'interrupted' };
+    },
+  });
+
+  try {
+    await handlers.peerHandlers.onSessionNew(selectionPeer, {
+      type: 'session.new',
+      requestId: 'new-cross-peer',
+    });
+    const created = selectionSent.find((message) => (
+      message.type === 'session.new.result'
+    ));
+    assert.equal(created?.type, 'session.new.result');
+    if (created?.type !== 'session.new.result') return;
+
+    const selecting = handlers.peerHandlers.onModelSelect(selectionPeer, {
+      type: 'model.select',
+      requestId: 'select-cross-peer',
+      sessionId: created.session.id,
+      modelProfileId: 'secondary',
+    });
+    await selectionReadStarted.promise;
+    const running = handlers.peerHandlers.onChatRequest(chatPeer, {
+      type: 'chat_request',
+      requestId: 'chat-cross-peer',
+      message: 'wait for selection',
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(chatStartCount, 0);
+
+    releaseSelectionRead.resolve();
+    await selecting;
+    await chatStarted.promise;
+    assert.equal(chatStartCount, 1);
+    const selected = selectionSent.find((message) => (
+      message.type === 'model.select.result'
+      && message.requestId === 'select-cross-peer'
+    ));
+    assert.equal(selected?.type, 'model.select.result');
+
+    releaseChat.resolve();
+    await running;
+  } finally {
+    releaseSelectionRead.resolve();
+    releaseChat.resolve();
     handlers.close();
     rmSync(workdir, { recursive: true, force: true });
   }

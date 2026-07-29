@@ -26,6 +26,7 @@ function createSubmitHarness(overrides: {
       return studioConversationId;
     },
     policyOpened: () => sent.includes('policy'),
+    modelOpened: () => sent.includes('model'),
     transcriptOpened: () => sent.includes('transcript'),
     submit: () => submitCurrentInputFromController({
       inputValue: overrides.inputValue ?? '',
@@ -41,6 +42,7 @@ function createSubmitHarness(overrides: {
         studioConversationId = null;
       },
       openResumePicker: () => sent.push('resume'),
+      openModelProfilePicker: () => sent.push('model'),
       openGlobalReviewPolicyPicker: () => sent.push('policy'),
       openTranscriptViewer: () => sent.push('transcript'),
       openExternalEditor: overrides.openExternalEditor,
@@ -182,6 +184,25 @@ test('submitCurrentInputFromController resets the composer target before /resume
   assert.equal(newHarness.composerTarget, 'chat');
   assert.equal(newHarness.studioConversationId, null);
   assert.deepEqual(newHarness.sent, ['new']);
+});
+
+test('submitCurrentInputFromController opens the session model picker', () => {
+  const harness = createSubmitHarness({
+    inputValue: '/model',
+    composerTarget: 'studio',
+    studioConversationId: 'conversation-1',
+  });
+
+  harness.submit();
+
+  assert.equal(harness.composerTarget, 'chat');
+  assert.equal(harness.studioConversationId, null);
+  assert.equal(harness.modelOpened(), true);
+  assert.deepEqual(
+    harness.actions.map((action) => action.type),
+    ['session.configured'],
+  );
+  assert.deepEqual(harness.sent, ['model', 'clear']);
 });
 
 test('submitCurrentInputFromController opens global review policy picker for /policy', () => {

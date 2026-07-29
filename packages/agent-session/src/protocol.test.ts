@@ -188,6 +188,21 @@ test('model protocol accepts correlated selection messages and sanitized profile
     code: 'profile_incompatible',
     message: 'session requires image input',
   });
+  assert.deepEqual(parseAgentServerMessage({
+    type: 'model.select.error',
+    requestId: 'select-3',
+    sessionId: 'session-1',
+    modelProfileId: 'vision',
+    code: 'selection_failed',
+    message: 'checkpoint unavailable',
+  }), {
+    type: 'model.select.error',
+    requestId: 'select-3',
+    sessionId: 'session-1',
+    modelProfileId: 'vision',
+    code: 'selection_failed',
+    message: 'checkpoint unavailable',
+  });
 
   const snapshot = createAgentSessionSnapshot({
     sessionId: 'session-1',

@@ -15,6 +15,12 @@ import {
 } from './localServerTuiSessions';
 import { createLocalChatHumanMessage } from './localChatAttachments';
 import { createLocalServerRuntimeDepsStore } from './localServerTypes';
+import {
+  createTestModelProfiles,
+  createTestModelServerDeps,
+} from './testing/modelProfiles';
+
+const TEST_MODEL_PROFILE_ID = 'test-profile';
 
 const testArtifactStore: CapabilityArtifactStore = {
   writeArtifact: async () => {
@@ -147,6 +153,7 @@ test('LocalServerTuiSessionService creates and resets active sessions', async ()
       saved.push(1);
     },
     checkpointer,
+    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
   });
 
   const first = service.getActiveSession('pet-a');
@@ -167,15 +174,12 @@ test('LocalServerTuiSessionService injects active session createdAt into runtime
   const service = new LocalServerTuiSessionService({
     state,
     saveState: () => {},
+    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
   });
   const session = service.getActiveSession('pet-a');
   const setup = service.buildChatSetup({
     actorId: 'pet-a',
-    llmConfig: {
-      apiKey: 'test',
-      baseUrl: 'http://localhost',
-      model: 'test-model',
-    },
+    ...createTestModelServerDeps(),
     workdir: '/tmp/pinpawo-tui-workdir',
     capabilityArtifactStore: testArtifactStore,
   } as never, {
@@ -207,16 +211,13 @@ test('LocalServerTuiSessionService rejects chat setup without a thread-scoped ar
   const service = new LocalServerTuiSessionService({
     state: createEmptyTuiSessionState(),
     saveState: () => {},
+    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
   });
 
   assert.throws(
     () => service.buildChatSetup({
       actorId: 'pet-a',
-      llmConfig: {
-        apiKey: 'test',
-        baseUrl: 'http://localhost',
-        model: 'test-model',
-      },
+      ...createTestModelServerDeps(),
       workdir: '/tmp/pinpawo-missing-artifact-store',
     }, {
       pet: {
@@ -244,15 +245,14 @@ test('runtime config updates reach the next chat setup through the normalized de
   const service = new LocalServerTuiSessionService({
     state: createEmptyTuiSessionState(),
     saveState: () => {},
+    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
   });
   const runtimeDeps = createLocalServerRuntimeDepsStore({
     actorId: 'pet-a',
-    llmConfig: {
-      apiKey: 'test',
-      baseUrl: 'http://localhost',
-      model: 'test-model',
+    modelProfiles: createTestModelProfiles({
       globalReviewPolicyMode: 'require_authorization',
-    },
+    }),
+    globalReviewPolicyMode: 'require_authorization',
     workdir: '/tmp/pinpawo-policy-update',
     capabilityArtifactStore: testArtifactStore,
   });
@@ -277,13 +277,13 @@ test('runtime config updates reach the next chat setup through the normalized de
 
   const beforeDeps = runtimeDeps.get();
   const before = service.buildChatSetup(beforeDeps, context);
-  runtimeDeps.updateLlmConfig({ globalReviewPolicyMode: 'auto_authorization' });
+  runtimeDeps.updateGlobalReviewPolicyMode('auto_authorization');
   const afterDeps = runtimeDeps.get();
   const after = service.buildChatSetup(afterDeps, context);
 
   assert.notEqual(afterDeps, beforeDeps);
   assert.equal(Object.isFrozen(afterDeps), true);
-  assert.equal(Object.isFrozen(afterDeps.llmConfig), true);
+  assert.equal(Object.isFrozen(afterDeps.modelProfiles), true);
   assert.equal(before.input.globalReviewPolicy?.mode, 'require_authorization');
   assert.equal(after.input.globalReviewPolicy?.mode, 'auto_authorization');
 });
@@ -334,16 +334,13 @@ test('LocalServerTuiSessionService reads one checkpoint point for messages and p
         today: '2026-06-11',
       },
     }),
+    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
   });
 
   const session = service.getActiveSession('pet-a');
   const checkpoint = await service.readActiveCheckpointPoint({
     actorId: 'pet-a',
-    llmConfig: {
-      apiKey: 'test',
-      baseUrl: 'http://localhost',
-      model: 'test-model',
-    },
+    ...createTestModelServerDeps(),
     capabilityArtifactStore: testArtifactStore,
   } as never);
 

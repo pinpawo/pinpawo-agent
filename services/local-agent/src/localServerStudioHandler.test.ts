@@ -12,6 +12,7 @@ import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
 import { StudioNotConfiguredError, type BuildStudioInput, type BuildStudioResult } from './studio/studioRuntime';
 import type { LocalServerDeps } from './localServerTypes';
 import { sendLocalServerPeerEvent, type LocalServerPeer } from './localServerPeer';
+import { createTestModelServerDeps } from './testing/modelProfiles';
 
 const PEER_OUTBOUND: LocalServerStudioOutbound<LocalServerPeer> = {
   sendMessage: (peer, message) => peer.send(message),
@@ -56,12 +57,7 @@ function createDeps(): LocalServerDeps {
     actorId: 'pet-a',
     actorName: 'Pet A',
     workdir: '/tmp/pinpawo-test',
-    llmConfig: {
-      provider: 'openai',
-      model: 'test-model',
-      apiKey: 'test-key',
-      baseUrl: 'https://example.test/v1',
-    } as unknown as LocalServerDeps['llmConfig'],
+    ...createTestModelServerDeps(),
     runtimeConfig: {
       workdir: '/tmp/pinpawo-test',
       stateRoot: '/tmp/pinpawo-test/.pinpawo',

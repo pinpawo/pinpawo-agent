@@ -10,9 +10,9 @@ import {
 import { FileStudioDueRunStore } from '@pinpawo/pet-agent';
 import { collectPluginHooks, loadPlugins } from './pluginLoader';
 import type { LoadedUserCapability } from './capabilityLoader';
-import type { AgentLlmConfig } from './agentConfig';
 import {
-  buildLocalLlmConfig,
+  buildLocalModelProfileRegistry,
+  type LocalModelProfileRegistry,
 } from './llmConfig';
 import { LocalAgentGraphService } from './agentGraphService';
 import { ensureActorSelected, loadSelectedActorName, LOCAL_ONLY_ACTOR_NAME } from './actorSelection';
@@ -45,7 +45,7 @@ export class LocalAgentRuntime {
   private readonly stopController = new AbortController();
   private actorId: string | null = null;
   private actorName: string | null = null;
-  private llmConfig: AgentLlmConfig | null = null;
+  private modelProfiles: LocalModelProfileRegistry | null = null;
   private hooks: ReturnType<typeof collectPluginHooks> | null = null;
   private pluginToolkitDefinitions: AgentToolkit[] = [];
   private pluginToolkits: AgentToolkit[] = [];
@@ -99,7 +99,7 @@ export class LocalAgentRuntime {
       inflightRequests: this.inflightRequests,
       isCurrentSocket: (ws) => this.appWsClient?.isCurrentSocket(ws) ?? false,
       getActorId: () => this.getActorId(),
-      getLlmConfig: () => this.llmConfig,
+      getModelProfiles: () => this.getModelProfiles(),
       getPluginToolkitDefinitions: () => this.pluginToolkitDefinitions,
       getPluginToolkits: () => this.pluginToolkits,
       getLocalToolkitDefinitions: () => this.capabilityRegistry.getLocalToolkitDefinitions(),
@@ -121,7 +121,8 @@ export class LocalAgentRuntime {
     return {
       actorId: this.getActorId(),
       actorName: this.actorName ?? undefined,
-      llmConfig: this.getLlmConfig(),
+      modelProfiles: this.getModelProfiles(),
+      globalReviewPolicyMode: getConfig().globalReviewPolicyMode,
       workdir: this.runtimeConfig.workdir,
       runtimeConfig: this.runtimeConfig,
       studioDueRunScheduler: this.studioDueRunScheduler,
@@ -152,7 +153,7 @@ export class LocalAgentRuntime {
       }
     }
     const { plugins, toolkitDefinitions, toolkits } = await loadPlugins();
-    this.llmConfig = buildLocalLlmConfig();
+    this.modelProfiles = buildLocalModelProfileRegistry();
     this.pluginToolkitDefinitions = toolkitDefinitions;
     this.pluginToolkits = toolkits;
     await this.capabilityRegistry.load();
@@ -176,8 +177,8 @@ export class LocalAgentRuntime {
     this.disconnectWs();
   }
 
-  getLlmConfig(): AgentLlmConfig {
-    return this.llmConfig ?? buildLocalLlmConfig();
+  getModelProfiles(): LocalModelProfileRegistry {
+    return this.modelProfiles ?? buildLocalModelProfileRegistry();
   }
 
   getPluginToolkits(): AgentToolkit[] {

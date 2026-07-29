@@ -35,6 +35,9 @@ export function buildTuiActionsFromServerMessage(
     || message.type === 'session.error'
     || message.type === 'runtime_config.result'
     || message.type === 'runtime_config.error'
+    || message.type === 'model.list.result'
+    || message.type === 'model.select.result'
+    || message.type === 'model.select.error'
   ) {
     // Request/response clients own correlation; session results are not live
     // run events and must never enter the timeline reducer.

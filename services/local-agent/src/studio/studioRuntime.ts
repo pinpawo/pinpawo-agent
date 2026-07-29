@@ -17,7 +17,7 @@ import {
 } from '@pinpawo/pet-agent';
 
 import { buildLocalAgentModels } from '../agentModels';
-import type { AgentLlmConfig } from '../agentConfig';
+import type { LocalModelProfileRegistry } from '../llmConfig';
 import { buildDecisionStructuredOutput } from '../agentChannel';
 import { createExploreCapability } from '../capabilities/explore';
 import { loadGeneralCapability } from '../capabilities/general';
@@ -56,8 +56,8 @@ export type StudioBridgeContext = {
 };
 
 export type BuildStudioInput = {
-  /** 全局 LLM config(来自 LocalAgentRuntime.getLlmConfig());pet 没指定 model 时用此 */
-  llmConfig: AgentLlmConfig;
+  /** Host-owned model profiles; one profile is resolved per Studio turn/pet. */
+  modelProfiles: LocalModelProfileRegistry;
   /** 全局 capability 池(local + user 合并);按 pet config 的 capability 名筛选 */
   capabilities: AgentCapability[];
   /** 全局 toolkit 池(plugin + local);所有 pet 共享 */
@@ -112,8 +112,8 @@ function getWorkdirRunQueueStore(filePath: string): {
  * - petId / name / personality / species / stage → 合成 AgentActor
  * - role / serviceSummary                       → 传给 createPetAgentRuntime,
  *                                                 planner 选 pet 时通过 availableAgents 看见
- * - model(若指定)                             → 该 pet 的 AgentModels 用此 model;
- *                                                 未指定走全局 llmConfig.model
+ * - modelProfileId(若指定)                    → 该 pet 使用对应 profile;
+ *                                                 未指定走 host default profile
  * - capabilities                                → 按名筛选成 AgentCapability[]
  * - serverBinding                               → MVP 不消费(forward-compat)
  */
@@ -133,23 +133,24 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
   const pets = await loadPetLocalConfigs(petsDir);
   const resolved = resolveStudio(studio, pets);
 
-  // curator 用全局 models(不参与 pet 的 model 覆盖)
-  const globalModels: AgentModels = buildLocalAgentModels(input.llmConfig);
+  const globalLlmConfig = input.modelProfiles.resolve();
+  // curator 用 host default profile(不参与 pet 的 profile 覆盖)
+  const globalModels: AgentModels = buildLocalAgentModels(globalLlmConfig);
   // 复用 chat 路径的 decisionStructuredOutput 策略,避免某些 LLM
   // 不支持 json_schema response_format 时 orchestrator decision 调用 400。
-  const globalDecisionStructuredOutput = buildDecisionStructuredOutput(input.llmConfig);
+  const globalDecisionStructuredOutput = buildDecisionStructuredOutput(globalLlmConfig);
   const capabilitiesByName = new Map(input.capabilities.map((c) => [c.name, c]));
   const generalCapability = loadGeneralCapability();
 
   const petAgents: PetAgentRuntime[] = resolved.agents.map((petConfig) => {
-    // 每个 pet 按需挑 model:pet 自己声明了就 build pet-级 models + 重算 decisionStructuredOutput
-    const petLlmConfig = petConfig.model
-      ? { ...input.llmConfig, model: petConfig.model }
-      : input.llmConfig;
-    const petModels: AgentModels = petConfig.model
+    // 每个 pet 按稳定 profile id 解析完整 endpoint/key/model 组合。
+    const petLlmConfig = petConfig.modelProfileId
+      ? input.modelProfiles.resolve(petConfig.modelProfileId)
+      : globalLlmConfig;
+    const petModels: AgentModels = petConfig.modelProfileId
       ? buildLocalAgentModels(petLlmConfig)
       : globalModels;
-    const petDecisionStructuredOutput = petConfig.model
+    const petDecisionStructuredOutput = petConfig.modelProfileId
       ? buildDecisionStructuredOutput(petLlmConfig)
       : globalDecisionStructuredOutput;
     const capsForThisPet: AgentCapability[] = petConfig.capabilities.map((name) => {
@@ -176,8 +177,9 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
         ...capsForThisPet.filter(({ name }) => name !== GENERAL_CAPABILITY_NAME),
       ],
       toolkits: input.toolkits,
-      contextWindowTokens: input.llmConfig.contextWindowTokens,
-      subagentContextWindowTokens: input.llmConfig.subagentContextWindowTokens ?? input.llmConfig.contextWindowTokens,
+      contextWindowTokens: petLlmConfig.contextWindowTokens,
+      subagentContextWindowTokens: petLlmConfig.subagentContextWindowTokens
+        ?? petLlmConfig.contextWindowTokens,
       decisionStructuredOutput: petDecisionStructuredOutput,
       workdir: effectiveWorkdir,
       humanReviewer: createWsHumanReviewer({

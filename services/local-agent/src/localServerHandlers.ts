@@ -4,6 +4,7 @@ import { LocalAgentGraphService } from './agentGraphService';
 import { InflightRequestController } from './inflightRequestController';
 import { buildLocalAgentSessionSnapshot } from './localAgentSessionSnapshot';
 import type {
+  AgentModelProfileSummary,
   AgentSessionSummary,
 } from '@pinpawo/agent-session';
 import type {
@@ -14,6 +15,10 @@ import { sendLocalServerPeerEvent, type LocalServerPeer } from './localServerPee
 import type { LocalServerPeerHandlers } from './localServerMessageDispatcher';
 import { LocalServerSessionCommandQueue } from './localServerSessionCommandQueue';
 import { LocalServerChatHandler } from './localServerChatHandler';
+import type {
+  ChatSessionAdapterOptions,
+  ChatSessionResult,
+} from './chatSessionAdapter';
 import { LocalServerStudioHandler } from './localServerStudioHandler';
 import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
 import { LocalServerTuiSessionService } from './localServerTuiSessions';
@@ -41,6 +46,10 @@ export type LocalServerHandlerOptions = {
   chatGraphService?: LocalAgentGraphService;
   /** Must be shared by chat execution and checkpoint-backed session reads. */
   loadContext?: typeof loadAgentContext;
+  /** Deterministic run-boundary hook for embedded hosts and tests. */
+  runChat?: (
+    options: ChatSessionAdapterOptions,
+  ) => Promise<ChatSessionResult>;
 };
 
 type SessionSummarySource = Pick<
@@ -77,6 +86,7 @@ export function createLocalServerHandlers(
     graphService: chatGraphService,
     ...(options.loadContext ? { loadContext: options.loadContext } : {}),
     runtimeConfig: effectiveRuntimeConfig,
+    defaultModelProfileId: initialDeps.modelProfiles.defaultProfileId,
   });
   const studioReviewRouter = new LocalServerStudioReviewRouter<LocalServerPeer>();
   const ownsStudioDueRunScheduler = !initialDeps.studioDueRunScheduler;
@@ -97,6 +107,7 @@ export function createLocalServerHandlers(
     tuiSessions,
     inflightRequests,
     ...(options.loadContext ? { loadContext: options.loadContext } : {}),
+    ...(options.runChat ? { runChat: options.runChat } : {}),
   });
   const studioHandler = new LocalServerStudioHandler({
     reviewRouter: studioReviewRouter,
@@ -124,6 +135,7 @@ export function createLocalServerHandlers(
       kind: 'chat',
       messages: checkpoint.messages,
       deps: requestDeps,
+      modelProfileId: checkpoint.modelProfileId,
       sessionTokenUsage: checkpoint.sessionTokenUsage,
       pendingReview,
     });
@@ -132,6 +144,173 @@ export function createLocalServerHandlers(
   const listSessions = async () => {
     const sessions = await tuiSessions.listSessions(runtimeDeps.get());
     return sessions.map(projectChatSessionSummary);
+  };
+
+  const listModelProfiles = (sessionId: string) => {
+    const requestDeps = runtimeDeps.get();
+    const activeSession = tuiSessions.getActiveSession(requestDeps.actorId);
+    if (!tuiSessions.getSession(requestDeps.actorId, sessionId)) {
+      throw Object.assign(
+        new Error('session not found'),
+        { code: 'session_not_found' },
+      );
+    }
+    if (activeSession.id !== sessionId) {
+      throw Object.assign(
+        new Error('model listing requires the active session'),
+        { code: 'session_not_active' },
+      );
+    }
+    const profiles: AgentModelProfileSummary[] = [
+      ...requestDeps.modelProfiles.listAvailable().map((profile) => ({
+        ...profile,
+        inputModalities: [...profile.inputModalities],
+        available: true,
+        compatible: true,
+        issues: [],
+      })),
+      ...Object.entries(
+        requestDeps.modelProfiles.snapshot.unavailableProfiles,
+      ).map(([id, issues]) => ({
+        id,
+        label: id,
+        inputModalities: ['text' as const],
+        available: false,
+        compatible: false,
+        issues: issues.map((issue) => issue.message),
+      })),
+    ];
+    if (!profiles.some((profile) => profile.id === activeSession.modelProfileId)) {
+      profiles.push({
+        id: activeSession.modelProfileId,
+        label: activeSession.modelProfileId,
+        inputModalities: ['text'],
+        available: false,
+        compatible: false,
+        issues: [
+          `Selected model profile "${activeSession.modelProfileId}" is no longer configured`,
+        ],
+      });
+    }
+    return {
+      sessionId,
+      defaultProfileId: requestDeps.modelProfiles.defaultProfileId,
+      selectedProfileId: activeSession.modelProfileId,
+      requiredInputModalities: ['text' as const],
+      profiles,
+    };
+  };
+
+  const sendModelSelectionError = (
+    peer: LocalServerPeer,
+    message: {
+      requestId: string;
+      sessionId: string;
+      modelProfileId?: string;
+    },
+    code:
+      | 'session_not_found'
+      | 'session_not_active'
+      | 'run_active'
+      | 'review_pending'
+      | 'profile_unavailable'
+      | 'profile_incompatible',
+    detail: string,
+  ) => {
+    peer.send({
+      type: 'model.select.error',
+      requestId: message.requestId,
+      sessionId: message.sessionId,
+      ...(message.modelProfileId
+        ? { modelProfileId: message.modelProfileId }
+        : {}),
+      code,
+      message: detail,
+    });
+  };
+
+  const selectModelProfile = async (
+    peer: LocalServerPeer,
+    message: {
+      requestId: string;
+      sessionId: string;
+      modelProfileId: string;
+    },
+  ) => {
+    const requestDeps = runtimeDeps.get();
+    const activeSession = tuiSessions.getActiveSession(requestDeps.actorId);
+    if (!tuiSessions.getSession(requestDeps.actorId, message.sessionId)) {
+      sendModelSelectionError(
+        peer,
+        message,
+        'session_not_found',
+        'session not found',
+      );
+      return;
+    }
+    if (activeSession.id !== message.sessionId) {
+      sendModelSelectionError(
+        peer,
+        message,
+        'session_not_active',
+        'model selection requires the active session',
+      );
+      return;
+    }
+    if (activeChatOperations > 0) {
+      sendModelSelectionError(
+        peer,
+        message,
+        'run_active',
+        'cannot switch models while a session run is active',
+      );
+      return;
+    }
+    try {
+      requestDeps.modelProfiles.resolve(message.modelProfileId);
+    } catch (error) {
+      sendModelSelectionError(
+        peer,
+        message,
+        'profile_unavailable',
+        error instanceof Error ? error.message : 'model profile is unavailable',
+      );
+      return;
+    }
+    const pendingReview = await tuiSessions.readActivePendingReview(requestDeps);
+    if (pendingReview) {
+      sendModelSelectionError(
+        peer,
+        message,
+        'review_pending',
+        'cannot switch models while human review is pending',
+      );
+      return;
+    }
+    const session = tuiSessions.selectModelProfile(
+      requestDeps.actorId,
+      message.sessionId,
+      message.modelProfileId,
+    );
+    const checkpoint = await tuiSessions.readSessionCheckpointPoint(
+      requestDeps,
+      session,
+    );
+    peer.send({
+      type: 'model.select.result',
+      requestId: message.requestId,
+      sessionId: session.id,
+      selectedProfileId: session.modelProfileId,
+      snapshot: buildLocalAgentSessionSnapshot({
+        sessionId: session.id,
+        kind: 'chat',
+        messages: checkpoint.messages,
+        deps: requestDeps,
+        modelProfileId: session.modelProfileId,
+        sessionTokenUsage: checkpoint.sessionTokenUsage,
+        pendingReview: null,
+      }),
+    });
   };
 
   const createSession = async () => {
@@ -163,6 +342,7 @@ export function createLocalServerHandlers(
           kind: 'chat',
           messages: [],
           deps: requestDeps,
+          modelProfileId: session.modelProfileId,
           sessionTokenUsage: null,
           pendingReview: null,
         }),
@@ -207,6 +387,7 @@ export function createLocalServerHandlers(
           kind: 'chat',
           messages: result.messages,
           deps: requestDeps,
+          modelProfileId: result.session.modelProfileId,
           sessionTokenUsage: result.sessionTokenUsage,
           pendingReview,
         }),
@@ -303,9 +484,7 @@ export function createLocalServerHandlers(
           (options.persistGlobalReviewPolicyMode ?? persistGlobalReviewPolicyMode)(
             message.globalReviewPolicyMode,
           );
-          runtimeDeps.updateLlmConfig({
-            globalReviewPolicyMode: message.globalReviewPolicyMode,
-          });
+          runtimeDeps.updateGlobalReviewPolicyMode(message.globalReviewPolicyMode);
           if (message.requestId) {
             client.send({
               type: 'runtime_config.result',
@@ -381,6 +560,31 @@ export function createLocalServerHandlers(
           };
         },
       ),
+    ),
+    onModelList: (client, message) => sessionCommands.enqueue(
+      client,
+      async () => {
+        try {
+          client.send({
+            type: 'model.list.result',
+            requestId: message.requestId,
+            ...listModelProfiles(message.sessionId),
+          });
+        } catch (error) {
+          sendModelSelectionError(
+            client,
+            message,
+            (error as { code?: string }).code === 'session_not_active'
+              ? 'session_not_active'
+              : 'session_not_found',
+            error instanceof Error ? error.message : 'session not found',
+          );
+        }
+      },
+    ),
+    onModelSelect: (client, message) => sessionCommands.enqueue(
+      client,
+      () => selectModelProfile(client, message),
     ),
     onClose: (client) => {
       sessionCommands.clear(client);

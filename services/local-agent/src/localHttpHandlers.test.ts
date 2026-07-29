@@ -21,6 +21,7 @@ import type { LoadedUserCapability } from './capabilityLoader';
 import { clearAgentRunActivity, recordOperationActivity } from './operationActivityState';
 import { checkBrowserAvailability } from './toolkits/browser';
 import { resolveToolkitAvailability } from './toolkits/toolkitAvailability';
+import { createTestModelServerDeps } from './testing/modelProfiles';
 
 function makeReq(url: string, authorization?: string): IncomingMessage {
   return {
@@ -264,7 +265,7 @@ test('handleLocalHttpRequest preserves browser availability diagnostics', async 
     res,
     {
       actorId: 'pet-a',
-      llmConfig: { model: 'test-model' },
+      ...createTestModelServerDeps(),
       workdir: '/tmp/pinpawo-browser-health',
     } as LocalServerDeps,
     {
@@ -315,11 +316,7 @@ test('capability rescan replaces frozen runtime capability snapshots', async () 
   } as LoadedUserCapability;
   const runtimeDeps = createLocalServerRuntimeDepsStore({
     actorId: 'pet-a',
-    llmConfig: {
-      apiKey: 'test',
-      baseUrl: 'http://localhost',
-      model: 'test-model',
-    },
+    ...createTestModelServerDeps(),
     workdir: '/tmp/pinpawo-capability-rescan',
     userCapabilities: [],
     rescanUserCapabilities: async () => [definition],
@@ -364,7 +361,7 @@ test('/capabilities projects run-scoped routability from the compiled registry',
   };
   const deps = {
     actorId: 'pet-a',
-    llmConfig: { model: 'test-model' },
+    ...createTestModelServerDeps(),
     workdir: '/tmp/pinpawo-capability-routability',
     localCapabilities: [explore],
     capabilityArtifactStore: {} as CapabilityArtifactStore,
@@ -453,7 +450,7 @@ test('/capabilities exposes registry compilation issues instead of recomputing m
     res,
     {
       actorId: 'pet-a',
-      llmConfig: { model: 'test-model' },
+      ...createTestModelServerDeps(),
       workdir: '/tmp/pinpawo-capability-duplicate-tool',
       localCapabilities: [explore],
       localToolkits: duplicateToolkits,
@@ -498,11 +495,7 @@ test('/capabilities attaches the cached reason for a known unavailable Toolkit',
     res,
     {
       actorId: 'pet-a',
-      llmConfig: {
-        apiKey: 'test',
-        baseUrl: 'http://localhost',
-        model: 'test-model',
-      },
+      ...createTestModelServerDeps(),
       workdir: '/tmp/pinpawo-capability-unavailable-toolkit',
       localCapabilities: [{
         name: 'explore',
@@ -545,11 +538,7 @@ test('Toolkit refresh updates frozen runtime lists with copy-on-write', async ()
   } as NonNullable<LocalServerDeps['localToolkits']>[number];
   const runtimeDeps = createLocalServerRuntimeDepsStore({
     actorId: 'pet-a',
-    llmConfig: {
-      apiKey: 'test',
-      baseUrl: 'http://localhost',
-      model: 'test-model',
-    },
+    ...createTestModelServerDeps(),
     workdir: '/tmp/pinpawo-capability-refresh',
     localToolkitDefinitions: [toolkit],
     localToolkits: [],
@@ -587,11 +576,7 @@ test('Toolkit refresh can restore an unavailable plugin Toolkit', async () => {
   } as NonNullable<LocalServerDeps['pluginToolkitDefinitions']>[number];
   const runtimeDeps = createLocalServerRuntimeDepsStore({
     actorId: 'pet-a',
-    llmConfig: {
-      apiKey: 'test',
-      baseUrl: 'http://localhost',
-      model: 'test-model',
-    },
+    ...createTestModelServerDeps(),
     workdir: '/tmp/pinpawo-plugin-toolkit-refresh',
     pluginToolkitDefinitions: [toolkit],
     pluginToolkits: [],
@@ -633,10 +618,7 @@ test('handleLocalHttpRequest exposes canonical workdir Studio paths on runtime e
   const res = makeRes();
   assert.equal(handleLocalHttpRequest(makeReq('/runtime', 'Bearer secret'), res, {
     actorId: 'pet-a',
-    llmConfig: {
-      model: 'test-model',
-      contextWindowTokens: 32000,
-    },
+    ...createTestModelServerDeps({ contextWindowTokens: 32000 }),
     workdir: `${workdir}-legacy`,
     runtimeConfig: {
       workdir,
@@ -666,6 +648,9 @@ test('handleLocalHttpRequest exposes canonical workdir Studio paths on runtime e
 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(JSON.parse(res.body), {
+    model_profile_id: 'test-profile',
+    model_profile_label: 'Test profile',
+    model_profile_available: true,
     llm_model: 'test-model',
     llm_context_window_tokens: 32000,
     workdir,
@@ -696,10 +681,7 @@ test('handleLocalHttpRequest serves studio due-runs trace when scheduler is avai
   const res = makeRes();
   assert.equal(handleLocalHttpRequest(makeReq('/studio_due_runs', 'Bearer secret'), res, {
     actorId: 'pet-a',
-    llmConfig: {
-      model: 'test-model',
-      contextWindowTokens: 32000,
-    },
+    ...createTestModelServerDeps({ contextWindowTokens: 32000 }),
     workdir,
     runtimeConfig: {
       workdir,
@@ -786,10 +768,7 @@ test('handleLocalHttpRequest filters studio due-runs trace by status and limit',
   const res = makeRes();
   assert.equal(handleLocalHttpRequest(makeReq('/studio_due_runs?status=success&limit=2', 'Bearer secret'), res, {
     actorId: 'pet-a',
-    llmConfig: {
-      model: 'test-model',
-      contextWindowTokens: 32000,
-    },
+    ...createTestModelServerDeps({ contextWindowTokens: 32000 }),
     workdir,
     runtimeConfig: {
       workdir,
@@ -828,10 +807,7 @@ test('handleLocalHttpRequest rejects invalid studio_due_runs limit', async () =>
   const res = makeRes();
   assert.equal(handleLocalHttpRequest(makeReq('/studio_due_runs?limit=xx', 'Bearer secret'), res, {
     actorId: 'pet-a',
-    llmConfig: {
-      model: 'test-model',
-      contextWindowTokens: 32000,
-    },
+    ...createTestModelServerDeps({ contextWindowTokens: 32000 }),
     workdir: '/tmp/workspace',
     runtimeConfig: {
       workdir: '/tmp/workspace',
@@ -868,10 +844,7 @@ test('handleLocalHttpRequest returns 404 when studio due-runs scheduler is unava
   const res = makeRes();
   assert.equal(handleLocalHttpRequest(makeReq('/studio_due_runs', 'Bearer secret'), res, {
     actorId: 'pet-a',
-    llmConfig: {
-      model: 'test-model',
-      contextWindowTokens: 32000,
-    },
+    ...createTestModelServerDeps({ contextWindowTokens: 32000 }),
     workdir: '/tmp/workspace',
   } as LocalServerDeps, {
     authToken: 'secret',
@@ -935,10 +908,7 @@ test('handleLocalHttpRequest returns due-run metrics when include=metrics', asyn
   const res = makeRes();
   assert.equal(handleLocalHttpRequest(makeReq('/studio_due_runs?include=metrics', 'Bearer secret'), res, {
     actorId: 'pet-a',
-    llmConfig: {
-      model: 'test-model',
-      contextWindowTokens: 32000,
-    },
+    ...createTestModelServerDeps({ contextWindowTokens: 32000 }),
     workdir,
     runtimeConfig: {
       workdir,

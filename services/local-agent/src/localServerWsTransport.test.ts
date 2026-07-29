@@ -166,6 +166,8 @@ function createHandlers(): LocalServerPeerHandlers {
     onSessionList: () => undefined,
     onSessionNew: () => undefined,
     onSessionResume: () => undefined,
+    onModelList: () => undefined,
+    onModelSelect: () => undefined,
     onClose: () => undefined,
     log: () => undefined,
     logWarn: () => undefined,

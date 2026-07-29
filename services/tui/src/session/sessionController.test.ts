@@ -1177,6 +1177,50 @@ test('review cancellation targets only the current canonical action', () => {
   controller.stop();
 });
 
+test('a sent review resolution can be followed by an ordered run interrupt', () => {
+  let connection!: FakeConnection;
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => 'startup',
+  });
+  controller.start();
+  connection.open();
+  connection.receive(reviewSnapshotResult('startup', [
+    reviewSpec('review-1', [{
+      id: 'approve',
+      label: 'Approve',
+      decision: { type: 'approve' },
+    }]),
+  ]));
+
+  assert.deepEqual(controller.interruptResolvedReview({
+    requestId: 'other',
+    actionId: 'review-action',
+  }), {
+    ok: false,
+    reason: 'stale',
+  });
+  assert.deepEqual(controller.interruptResolvedReview({
+    requestId: 'chat',
+    actionId: 'review-action',
+  }), {
+    ok: true,
+    requestId: 'chat',
+  });
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'run.interrupt',
+    requestId: 'chat',
+  });
+  assert.equal(
+    controller.getState().session.activeRun?.state,
+    'waiting_review',
+  );
+  controller.stop();
+});
+
 test('server-reported delegation continuation survives refresh and resume', async () => {
   const requestIds = [
     'startup',

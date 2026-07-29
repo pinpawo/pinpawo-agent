@@ -61,6 +61,13 @@ export type InterruptRunResult =
         | 'send-failed';
     };
 
+export type InterruptResolvedReviewResult =
+  | { ok: true; requestId: string }
+  | {
+      ok: false;
+      reason: 'not-ready' | 'closed' | 'stale' | 'send-failed';
+    };
+
 type SnapshotReason = 'startup' | 'reconnect' | 'completion';
 type ActiveDelegationTransition = NonNullable<
   ChatRequestMessage['activeDelegationTransition']
@@ -347,6 +354,32 @@ export class TuiSessionController {
       },
       { observedAt: this.now() },
     ));
+    return { ok: true, requestId: run.requestId };
+  }
+
+  interruptResolvedReview(params: {
+    requestId: string;
+    actionId: string;
+  }): InterruptResolvedReviewResult {
+    if (this.state.connection !== 'ready' || !this.connection.isConnected()) {
+      return { ok: false, reason: 'not-ready' };
+    }
+    const run = this.state.session.activeRun;
+    if (!run || run.state !== 'waiting_review') {
+      return { ok: false, reason: 'closed' };
+    }
+    if (
+      run.requestId !== params.requestId
+      || run.reviewAction.actionId !== params.actionId
+    ) {
+      return { ok: false, reason: 'stale' };
+    }
+    if (!this.connection.send({
+      type: 'run.interrupt',
+      requestId: run.requestId,
+    })) {
+      return { ok: false, reason: 'send-failed' };
+    }
     return { ok: true, requestId: run.requestId };
   }
 

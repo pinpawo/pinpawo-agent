@@ -10,7 +10,7 @@ import {
   wrapTerminalText,
 } from '../text/terminalText';
 
-export type ApprovalPhase = 'ready' | 'submitting' | 'error';
+export type ApprovalPhase = 'ready' | 'resolution-sent' | 'error';
 
 export type ApprovalState =
   | { phase: 'closed' }
@@ -23,6 +23,7 @@ export type ApprovalState =
       selectedIndex: number;
       contentOffset: number;
       draft: string;
+      interruptSent: boolean;
       message?: string;
     };
 
@@ -95,6 +96,7 @@ export function syncApprovalState(
     selectedIndex: defaultOptionIndex(run.reviewAction.reviews[0]),
     contentOffset: 0,
     draft: '',
+    interruptSent: false,
   };
 }
 
@@ -111,7 +113,7 @@ export function selectedApprovalOption(state: ApprovalState) {
 
 export function approvalAcceptsTextInput(state: ApprovalState) {
   return state.phase !== 'closed'
-    && state.phase !== 'submitting'
+    && state.phase !== 'resolution-sent'
     && selectedApprovalOption(state)?.input?.kind === 'text';
 }
 
@@ -121,7 +123,7 @@ export function moveApprovalSelection(
 ): ApprovalState {
   if (
     state.phase === 'closed'
-    || state.phase === 'submitting'
+    || state.phase === 'resolution-sent'
     || state.draft.trim()
   ) {
     return state;
@@ -160,7 +162,7 @@ export function scrollApprovalContent(
   direction: -1 | 1,
   width: number,
 ): ApprovalState {
-  if (state.phase === 'closed' || state.phase === 'submitting') return state;
+  if (state.phase === 'closed' || state.phase === 'resolution-sent') return state;
   const review = currentApprovalReview(state);
   if (!review) return state;
   const lineCount = buildReviewContentLines(
@@ -198,6 +200,7 @@ export function advanceApproval(
     selectedIndex: defaultOptionIndex(review),
     contentOffset: 0,
     draft: '',
+    interruptSent: false,
     message: undefined,
   };
 }
@@ -209,8 +212,25 @@ export function beginApprovalSubmission(
     ? state
     : {
         ...state,
-        phase: 'submitting',
+        phase: 'resolution-sent',
+        interruptSent: false,
         message: undefined,
+      };
+}
+
+export function updateApprovalResolutionSent(
+  state: ApprovalState,
+  update: {
+    message: string;
+    interruptSent?: boolean;
+  },
+): ApprovalState {
+  return state.phase !== 'resolution-sent'
+    ? state
+    : {
+        ...state,
+        interruptSent: update.interruptSent ?? state.interruptSent,
+        message: update.message,
       };
 }
 
@@ -232,7 +252,7 @@ export function resolveApprovalKey(
   key: ApprovalKey,
 ): ApprovalAction {
   if (state.phase === 'closed' || (key.ctrl && key.name === 'c')) return null;
-  if (state.phase === 'submitting') return null;
+  if (state.phase === 'resolution-sent') return null;
   if (key.name === 'escape') return 'cancel';
   if (key.name === 'pageup') return 'page-up';
   if (key.name === 'pagedown') return 'page-down';
@@ -269,8 +289,11 @@ export function buildApprovalViewModel(
   const bodyLines = allBodyLines.slice(offset, offset + bodyRows);
   if (state.phase === 'error' && state.message) {
     bodyLines[0] = truncateTerminalLine(`Error: ${state.message}`, innerWidth);
-  } else if (state.phase === 'submitting') {
-    bodyLines[0] = 'Submitting decision…';
+  } else if (state.phase === 'resolution-sent') {
+    bodyLines[0] = truncateTerminalLine(
+      state.message ?? 'Decision sent; waiting for the run to continue…',
+      innerWidth,
+    );
   }
   const reviewCount = state.action.reviews.length;
   const contentProgress = allBodyLines.length > bodyRows
@@ -289,8 +312,10 @@ export function buildApprovalViewModel(
   );
   return {
     title: ` ${title} `,
-    bottomTitle: state.phase === 'submitting'
-      ? ' Please wait '
+    bottomTitle: state.phase === 'resolution-sent'
+      ? state.interruptSent
+        ? ' Interrupt requested '
+        : ' Esc interrupt · Ctrl+C interrupt '
       : approvalHelp(width),
     body: bodyLines.join('\n'),
     options: formatApprovalOptions(state, innerWidth, optionRows),

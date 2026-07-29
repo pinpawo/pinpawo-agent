@@ -194,12 +194,15 @@ Late completion snapshots from the previous session are ignored.
 Approval selection, paging, batch decisions, and text drafts are local overlay
 state rather than Session projection fields. The controller validates each
 response against the currently focused canonical review action before sending
-`human_review_response` or `review.cancel`. A disconnect or missing canonical
-state transition releases the submitting lock so the user can retry. Cancellation
-does not masquerade as rejection: the controller offers `/continue` only after
-the matching session receives an authoritative `interrupted` event, retains
-that offer if transport submission fails, and consumes it only after a
-successful `resume_active` request.
+`human_review_response` or `review.cancel`. Once transport accepts a resolution,
+the local one-shot marker continues to gate duplicate decisions across timeout
+and reconnect; only a server-observed review or run transition clears it.
+Esc or Ctrl+C after that marker sends an ordered `run.interrupt`, while another
+Ctrl+C exits. Cancellation does not masquerade as rejection. Delegation
+continuation is a separate checkpoint capability: the controller offers
+`/continue` while the focused snapshot reports `hasResumableDelegation`, sends
+`resume_active` for that command, and sends `supersede_active` for ordinary
+chat input.
 
 The policy picker also remains view-local, but its current value does not. The
 host exposes the process-wide policy in snapshot runtime metadata, persists

@@ -13,6 +13,7 @@ import {
   selectedApprovalOption,
   setApprovalDraft,
   syncApprovalState,
+  updateApprovalResolutionSent,
   type ApprovalAction,
   type ApprovalState,
 } from './approvalModel';
@@ -61,13 +62,16 @@ export class ApprovalController {
 
   sync(run: AgentRunView | null, connection: TuiConnectionStatus) {
     let next = syncApprovalState(this.state, run);
-    if (next.phase !== 'submitting') {
+    if (next.phase !== 'resolution-sent') {
       this.clearSubmissionTimer();
     } else if (connection !== 'ready') {
       this.clearSubmissionTimer();
-      next = failApproval(
+      next = updateApprovalResolutionSent(
         next,
-        'connection changed before the review was confirmed; retry when connected',
+        {
+          message:
+            'Connection changed; waiting for authoritative review state…',
+        },
       );
     }
     this.update(next);
@@ -78,7 +82,13 @@ export class ApprovalController {
   }
 
   handle(action: ApprovalAction) {
-    if (this.state.phase === 'closed' || !action) return;
+    if (
+      this.state.phase === 'closed'
+      || this.state.phase === 'resolution-sent'
+      || !action
+    ) {
+      return;
+    }
     if (action === 'previous-option' || action === 'next-option') {
       this.update(moveApprovalSelection(
         this.state,
@@ -131,25 +141,39 @@ export class ApprovalController {
     this.state = createApprovalState();
   }
 
+  markInterruptSent() {
+    this.update(updateApprovalResolutionSent(this.state, {
+      interruptSent: true,
+      message: 'Interrupt requested; waiting for the run to stop…',
+    }));
+  }
+
+  noteResolutionWait(message: string) {
+    this.update(updateApprovalResolutionSent(this.state, { message }));
+  }
+
   private beginSubmission(state: ApprovalState) {
     this.clearSubmissionTimer();
-    const submitting = beginApprovalSubmission(state);
-    if (submitting.phase === 'closed') return submitting;
-    const actionId = submitting.action.actionId;
+    const resolutionSent = beginApprovalSubmission(state);
+    if (resolutionSent.phase === 'closed') return resolutionSent;
+    const actionId = resolutionSent.action.actionId;
     this.submissionTimer = this.setTimer(() => {
       this.submissionTimer = null;
       if (
-        this.state.phase !== 'submitting'
+        this.state.phase !== 'resolution-sent'
         || this.state.action.actionId !== actionId
       ) {
         return;
       }
-      this.update(failApproval(
+      this.update(updateApprovalResolutionSent(
         this.state,
-        'no confirmation received; the decision can be retried',
+        {
+          message:
+            'Still waiting for authoritative review state…',
+        },
       ));
     }, this.submissionTimeoutMs);
-    return submitting;
+    return resolutionSent;
   }
 
   private clearSubmissionTimer() {

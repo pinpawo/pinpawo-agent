@@ -7,11 +7,13 @@ export type GlobalInterruptAction =
   | 'exit';
 
 export function resolveGlobalInterruptAction(input: {
-  approvalPhase: ApprovalState['phase'];
+  approval: ApprovalState;
   activeRun: AgentRunView | null;
 }): GlobalInterruptAction {
-  if (input.approvalPhase === 'submitting') return 'exit';
-  if (input.approvalPhase !== 'closed') return 'cancel-review';
+  if (input.approval.phase === 'resolution-sent') {
+    return input.approval.interruptSent ? 'exit' : 'interrupt-run';
+  }
+  if (input.approval.phase !== 'closed') return 'cancel-review';
   if (input.activeRun?.state === 'interrupting') return 'exit';
   return input.activeRun ? 'interrupt-run' : 'exit';
 }

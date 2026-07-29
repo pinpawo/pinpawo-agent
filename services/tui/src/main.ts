@@ -370,7 +370,15 @@ renderer.keyInput.on('keypress', (key) => {
   if (key.ctrl && !key.shift && key.name === 'c') {
     key.preventDefault();
     key.stopPropagation();
-    handleGlobalInterrupt(approval.phase);
+    handleGlobalInterrupt(approval);
+    return;
+  }
+  if (key.name === 'escape' && approval.phase === 'resolution-sent') {
+    key.preventDefault();
+    key.stopPropagation();
+    if (!approval.interruptSent) {
+      requestReviewResolutionInterrupt(approval);
+    }
     return;
   }
   const clipboardAction = resolveClipboardAction(key);
@@ -827,10 +835,10 @@ function refreshNoticeOverlay() {
 }
 
 function handleGlobalInterrupt(
-  approvalPhase: ReturnType<ApprovalController['getState']>['phase'],
+  approval: ReturnType<ApprovalController['getState']>,
 ) {
   const action = resolveGlobalInterruptAction({
-    approvalPhase,
+    approval,
     activeRun: controller.getState().session.activeRun,
   });
   if (action === 'cancel-review') {
@@ -838,10 +846,37 @@ function handleGlobalInterrupt(
     return;
   }
   if (action === 'interrupt-run') {
-    requestRunInterrupt();
+    if (approval.phase === 'resolution-sent') {
+      requestReviewResolutionInterrupt(approval);
+    } else {
+      requestRunInterrupt();
+    }
     return;
   }
   renderer.destroy();
+}
+
+function requestReviewResolutionInterrupt(
+  approval: Exclude<
+    ReturnType<ApprovalController['getState']>,
+    { phase: 'closed' }
+  >,
+) {
+  const result = controller.interruptResolvedReview({
+    requestId: approval.requestId,
+    actionId: approval.action.actionId,
+  });
+  if (result.ok) {
+    approvalController.markInterruptSent();
+    localNotice = 'interrupt requested · Ctrl+C again to exit';
+  } else {
+    approvalController.noteResolutionWait(
+      reviewResolutionInterruptFailureText(result.reason),
+    );
+  }
+  refreshApproval();
+  refreshLive();
+  refreshStatus();
 }
 
 function requestRunInterrupt() {
@@ -1560,5 +1595,20 @@ function interruptFailureText(
       return 'close the active review before interrupting';
     case 'send-failed':
       return 'interrupt request could not be sent';
+  }
+}
+
+function reviewResolutionInterruptFailureText(
+  reason: 'not-ready' | 'closed' | 'stale' | 'send-failed',
+) {
+  switch (reason) {
+    case 'not-ready':
+      return 'Connection changed; waiting for authoritative review state…';
+    case 'closed':
+      return 'Review closed; waiting for the refreshed run state…';
+    case 'stale':
+      return 'Review changed; waiting for the refreshed review state…';
+    case 'send-failed':
+      return 'Interrupt could not be sent; press Esc to retry interruption.';
   }
 }

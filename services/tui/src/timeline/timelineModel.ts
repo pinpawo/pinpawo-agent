@@ -146,11 +146,9 @@ export function formatLiveActivity(
   if (run.state === 'interrupting') return '◌ stopping response';
 
   const normalizedFrame = Math.max(0, Math.floor(frame));
-  const marker = normalizedFrame < LIVE_ACTIVITY_PULSE_FRAMES
-    ? LIVE_ACTIVITY_FRAMES[
-        normalizedFrame % LIVE_ACTIVITY_FRAMES.length
-      ]
-    : '·';
+  const marker = LIVE_ACTIVITY_FRAMES[
+    normalizedFrame % LIVE_ACTIVITY_FRAMES.length
+  ];
   const detail = formatLiveSession(
     session,
     Math.max(1, Math.floor(maxCodePoints) - 2),
@@ -170,10 +168,9 @@ export function formatLiveActivity(
 
 export function isLiveActivityPulseActive(
   session: AgentSession,
-  frame: number,
+  _frame: number,
 ) {
-  return session.activeRun?.state === 'running'
-    && frame < LIVE_ACTIVITY_PULSE_FRAMES;
+  return session.activeRun?.state === 'running';
 }
 
 function formatLiveMessageTail(

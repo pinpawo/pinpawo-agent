@@ -117,13 +117,25 @@ through complete graph runs:
 
    ```sh
    npm run eval:langfuse:outcome-decision
-   EVAL_OUTCOME_MODEL=llm npm run eval:langfuse:outcome-decision
+   EVAL_OUTCOME_MODEL=deterministic npm run eval:langfuse:outcome-decision
    ```
 
+   The production model is the default because this suite evaluates prompt
+   semantics. The deterministic mode only smoke-tests dataset and writer
+   plumbing.
+
 3. The Capability Planner is a private tool-loop agent. Its transcript and
-   document observations are not a public graph decision contract, so there is
-   no standalone single-call Decision eval. Route, multi-task, and lifecycle
-   runs evaluate its document discovery, planning, and selection behavior.
+   document observations are not a public graph decision contract, so its eval
+   invokes the complete production Planner loop against a materialized
+   Capability Document Workspace rather than simulating a single Decision call:
+
+   ```sh
+   npm run eval:langfuse:capability-planning
+   ```
+
+   The same run semantically judges task formation, completed-work exclusion,
+   future-tail preservation, document-backed Capability selection, and General
+   fallback.
 
 4. Multi-task loop executes the current real graph across meaningful task
    boundaries with deterministic decision/subagent models:

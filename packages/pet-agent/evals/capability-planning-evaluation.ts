@@ -35,6 +35,7 @@ export function buildCapabilityPlanningGoalContract(
             statement: [
               'The next task is the one independently executable current task required at this boundary.',
               'It preserves the required work and incorporates relevant handoff evidence without absorbing future tasks.',
+              'It does not repeat work already satisfied by completed tasks or the latest handoff.',
               `Expected anchors: ${(expected.nextTaskTerms ?? []).join(', ')}.`,
             ].join(' '),
           }, {

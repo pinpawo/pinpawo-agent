@@ -269,6 +269,14 @@ test('Planner Agent explores CAPABILITY.md files and submits current selection w
     CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
     CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
   ]);
+  const initialPrompt = model.invocations[0]
+    ?.map((message) => String(message.content))
+    .join('\n') ?? '';
+  assert.match(
+    initialPrompt,
+    /<remaining_plan role="planning_context" authority="advisory">/,
+  );
+  assert.match(initialPrompt, /不得把已经完成的工作重新委派/);
   assert.deepEqual(result, {
     result: 'next_task',
     next_task: {

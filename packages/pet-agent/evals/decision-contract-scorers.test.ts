@@ -50,6 +50,18 @@ test('outcome scorer gates only the model-owned verdict', () => {
   assert.ok(allPass(scores));
 });
 
+test('outcome dataset covers advisory future-plan terminal distinctions', () => {
+  assert.ok(outcomeDecisionBasicsDataset.cases.some((testCase) =>
+    testCase.expected.outcome === 'task_done'
+    && (testCase.input.remainingPlan?.length ?? 0) > 0));
+  assert.ok(outcomeDecisionBasicsDataset.cases.some((testCase) =>
+    testCase.expected.outcome === 'goal_done'
+    && (testCase.input.remainingPlan?.length ?? 0) === 0));
+  assert.ok(outcomeDecisionBasicsDataset.cases.some((testCase) =>
+    testCase.expected.outcome === 'goal_done'
+    && (testCase.input.remainingPlan?.length ?? 0) > 0));
+});
+
 test('planning datasets cover entry and boundary distributions', () => {
   const modes = new Set(capabilityPlanningBasicsDataset.cases.map((testCase) => testCase.input.mode));
   assert.deepEqual([...modes].sort(), ['boundary', 'entry']);

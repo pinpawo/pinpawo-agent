@@ -1,6 +1,6 @@
 import type { AgentActor } from '../../../types/agent';
 import type { CapabilityArtifactRef } from '../../../types/artifact';
-import type { RunDelegationSummary } from '../types';
+import type { CapabilityPlanTask, RunDelegationSummary } from '../types';
 import { clipForPrompt, formatDelegationStatus } from '../utils';
 import { buildCapabilityArtifactContext } from './context';
 import {
@@ -15,6 +15,8 @@ import {
   OUTCOME_DECISION_INPUT_PROMPT,
   OUTCOME_DECISION_SYSTEM_PROMPT,
 } from './templates/outcomeDecision.prompt';
+
+const MAX_OUTCOME_REMAINING_PLAN_TASKS = 24;
 
 export function buildDelegationOutcomeCurrentTaskContext(task: {
   id: string;
@@ -63,6 +65,38 @@ export function buildDelegationOutcomeOtherTasksContext(
   return lines.join('\n');
 }
 
+export function buildDelegationOutcomeRemainingPlanContext(
+  remainingPlan: readonly CapabilityPlanTask[],
+): string {
+  const lines = [
+    '<remaining_plan role="planning_context" authority="advisory">',
+  ];
+  if (remainingPlan.length === 0) {
+    lines.push('  <none>true</none>');
+  } else {
+    for (
+      const [index, task]
+      of remainingPlan.slice(0, MAX_OUTCOME_REMAINING_PLAN_TASKS).entries()
+    ) {
+      lines.push('  <planned_task>');
+      lines.push(`    <position>${(index + 1).toString()}</position>`);
+      lines.push(indentXmlBlock(xmlTextBlock('objective', clipForPrompt(task.objective, 320)), 4));
+      lines.push(indentXmlBlock(
+        xmlTextBlock('capability_intent', clipForPrompt(task.capabilityIntent, 240)),
+        4,
+      ));
+      lines.push('  </planned_task>');
+    }
+    if (remainingPlan.length > MAX_OUTCOME_REMAINING_PLAN_TASKS) {
+      lines.push(
+        `  <truncated omitted="${(remainingPlan.length - MAX_OUTCOME_REMAINING_PLAN_TASKS).toString()}" />`,
+      );
+    }
+  }
+  lines.push('</remaining_plan>');
+  return lines.join('\n');
+}
+
 export function buildDelegationOutcomeDecisionSystemPrompt(params: {
   actor: AgentActor;
   outputInstruction: string;
@@ -79,6 +113,7 @@ export function buildDelegationOutcomeDecisionInput(params: {
   currentTaskContext: string | null;
   subagentAnnounceContext: string | null;
   otherTasksContext?: string | null;
+  remainingPlanContext: string;
   capabilityArtifacts?: CapabilityArtifactRef[];
 }): string {
   const artifactContext = buildCapabilityArtifactContext(params.capabilityArtifacts);
@@ -93,6 +128,7 @@ export function buildDelegationOutcomeDecisionInput(params: {
       2,
     ),
     otherDelegationsBlock: promptBlock(params.otherTasksContext, 2),
+    remainingPlanBlock: promptBlock(params.remainingPlanContext, 2),
     capabilityArtifactsBlock: promptBlock(
       artifactContext ? xmlTextBlock('capability_artifacts', artifactContext) : null,
       2,

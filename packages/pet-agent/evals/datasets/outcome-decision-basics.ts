@@ -5,6 +5,7 @@ export type OutcomeDecisionInput = {
   currentTask: string;
   announce: string;
   completedHandoffs?: string[];
+  remainingPlan?: Array<{ objective: string; capabilityIntent: string }>;
 };
 
 export type OutcomeDecisionExpected = {
@@ -25,6 +26,10 @@ const cases: AgentEvalCase<OutcomeDecisionInput, OutcomeDecisionExpected>[] = [
       userGoal: '确认测试失败原因并修复。',
       currentTask: '运行测试并定位失败原因。',
       announce: '测试已运行，发现两个失败，但尚未定位具体原因。',
+      remainingPlan: [{
+        objective: '根据定位结果修复测试失败并验证',
+        capabilityIntent: '代码修改与测试验证',
+      }],
     },
     expected: { outcome: 'continue', reason: 'The current task acceptance condition is not met.' },
     metadata: { difficulty: 'easy', reason: 'Incomplete announce.', source: SOURCE_FILE },
@@ -38,10 +43,14 @@ const cases: AgentEvalCase<OutcomeDecisionInput, OutcomeDecisionExpected>[] = [
       userGoal: '调查 auth 模块，并根据结论完成重构。',
       currentTask: '调查 auth 模块结构、依赖和风险。',
       announce: '调查完成：认证入口集中在 auth/index.ts，主要风险是循环依赖。',
+      remainingPlan: [{
+        objective: '根据调查结果完成 auth 模块重构',
+        capabilityIntent: '代码修改与验证',
+      }],
     },
     expected: {
       outcome: 'task_done',
-      reason: 'The current task is complete; planner@boundary owns whether and how work continues.',
+      reason: 'The current task is complete and applicable autonomous work remains; planner@boundary owns what task comes next and how the plan changes.',
     },
     metadata: { difficulty: 'medium', reason: 'task_done does not generate the next task.', source: SOURCE_FILE },
   },
@@ -54,6 +63,7 @@ const cases: AgentEvalCase<OutcomeDecisionInput, OutcomeDecisionExpected>[] = [
       userGoal: '运行 npm test 并告诉我结果。',
       currentTask: '运行 npm test 并记录结果。',
       announce: 'npm test 已完成，568 项测试全部通过，退出码 0。',
+      remainingPlan: [],
     },
     expected: { outcome: 'goal_done', reason: 'The announce directly and clearly completes the user goal.' },
     metadata: { difficulty: 'easy', reason: 'Goal-complete short circuit.', source: SOURCE_FILE },
@@ -64,15 +74,36 @@ const cases: AgentEvalCase<OutcomeDecisionInput, OutcomeDecisionExpected>[] = [
     suite: SUITE,
     tags: ['outcome_decision', 'capability_planning'],
     input: {
-      userGoal: '确认配置是否正确，必要时修复。',
+      userGoal: '检查配置，并根据检查结果处理对应问题。',
       currentTask: '检查项目配置是否与文档一致。',
-      announce: '配置与文档完全一致，验证通过，不需要修改。',
+      announce: '配置与文档完全一致，检查通过；没有需要处理的问题。',
+      remainingPlan: [{
+        objective: '根据检查结果处理对应问题',
+        capabilityIntent: '配置问题处理与验证',
+      }],
     },
     expected: {
       outcome: 'goal_done',
-      reason: 'The conditional repair is unnecessary, so the user goal is complete and must not reach the Planner as task_done.',
+      reason: 'The latest result establishes that the result-dependent future work has nothing to handle, so the user goal is complete.',
     },
-    metadata: { difficulty: 'medium', reason: 'Goal completion cancels an unnecessary conditional follow-up before planning.', source: SOURCE_FILE },
+    metadata: { difficulty: 'medium', reason: 'Latest facts can make an advisory future task inapplicable.', source: SOURCE_FILE },
+  },
+  {
+    id: `${SUITE}.single-planned-task-completes-investigation-goal`,
+    name: 'single-planned-task-completes-investigation-goal',
+    suite: SUITE,
+    tags: ['outcome_decision', 'capability_planning'],
+    input: {
+      userGoal: '读取 issue #345，并整理其中与架构演进有关的正文和评论内容。',
+      currentTask: '获取并阅读 issue #345 的完整内容，提取其中关于架构演进的描述、讨论和提案，返回标题、状态、正文和相关评论摘要。',
+      announce: '已读取 issue #345：返回了标题、状态和正文，并汇总了全部评论中与架构演进相关的讨论和提案。',
+      remainingPlan: [],
+    },
+    expected: {
+      outcome: 'goal_done',
+      reason: 'The sole planned task and its accepted result cover the complete user goal, with no future work retained.',
+    },
+    metadata: { difficulty: 'medium', reason: 'Regression for a complete single-task run re-entering the Planner.', source: SOURCE_FILE },
   },
   {
     id: `${SUITE}.other-results-do-not-complete-current-task`,

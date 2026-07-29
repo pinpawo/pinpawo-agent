@@ -461,6 +461,7 @@ test('task_done reroutes through capabilityPlanner before the next task', async 
 test('task_done returns to capabilityPlanner until the remaining goal is complete', async () => {
   let structuredCallCount = 0;
   const entryDecisionInputs: string[] = [];
+  const outcomeDecisionInputs: string[] = [];
   const plannerInputs: CapabilityPlannerInput[] = [];
   const routeModel = {
     invoke: async () => new AIMessage('final answer'),
@@ -473,9 +474,11 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
           return { action: 'needs_plan' };
         }
         if (structuredCallCount === 2) {
+          outcomeDecisionInputs.push(inputText);
           return taskDoneDecision('已提炼 issue 需求点。');
         }
         if (structuredCallCount === 3) {
+          outcomeDecisionInputs.push(inputText);
           return goalDoneDecision();
         }
         throw new Error(`unexpected structured call ${structuredCallCount.toString()}`);
@@ -543,6 +546,13 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
 
   assert.equal(structuredCallCount, 3);
   assert.equal(entryDecisionInputs.length, 1);
+  assert.equal(outcomeDecisionInputs.length, 2);
+  assert.match(
+    outcomeDecisionInputs[0] ?? '',
+    /<remaining_plan role="planning_context" authority="advisory">/,
+  );
+  assert.match(outcomeDecisionInputs[0] ?? '', /检索本地实现与 git log/);
+  assert.match(outcomeDecisionInputs[1] ?? '', /<remaining_plan[^>]*>\s+<none>true<\/none>/);
   assert.equal(plannerInputs.length, 2);
   assert.deepEqual(plannerInputs.map(({ mode }) => mode), ['entry', 'boundary']);
   assert.deepEqual(plannerInputs[1]?.remainingPlan, [{

@@ -14,7 +14,7 @@ test('decision eval scenarios cover every canonical prompt distribution', () => 
   assert.deepEqual({
     entry: getDecisionEvalScenarios('entry').length,
     outcome: getDecisionEvalScenarios('outcome').length,
-  }, { entry: 14, outcome: 7 });
+  }, { entry: 14, outcome: 8 });
 });
 
 test('decision eval scenarios render complete production messages', () => {
@@ -35,6 +35,11 @@ test('decision eval scenarios render complete production messages', () => {
     if (scenario.target === 'entry') {
       assert.ok(prompt.conversationMessages?.length);
       assert.equal(prompt.conversationMessages?.at(-1)?._getType(), 'human');
+    } else {
+      assert.match(
+        prompt.input,
+        /<remaining_plan role="planning_context" authority="advisory">/,
+      );
     }
     assert.ok(metrics.approximateTokens > 0);
     assert.ok(metrics.sharedPrefixPercent > 0);

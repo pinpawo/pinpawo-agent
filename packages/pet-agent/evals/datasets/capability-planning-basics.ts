@@ -251,6 +251,46 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
     metadata: { difficulty: 'hard', reason: 'Separated next_task and future tail.', source: SOURCE_FILE },
   },
   {
+    id: `${SUITE}.boundary-removes-completed-work-before-materializing-next-task`,
+    name: 'boundary-removes-completed-work-before-materializing-next-task',
+    suite: SUITE,
+    tags: ['capability_planning', 'delegation_control'],
+    input: {
+      mode: 'boundary',
+      userGoal: '读取 issue #345 的架构演进内容，再检查当前仓库实现是否已经覆盖。',
+      capabilityRegistry: [
+        'explore: inspect issues, repositories, and implementation history',
+        'general: perform ordinary workspace tasks',
+      ],
+      completedTasks: [{
+        objective: '读取 issue #345 并整理架构演进内容',
+        result: 'issue 正文和评论中的架构演进提案已经完整整理。',
+      }],
+      remainingPlan: [
+        {
+          objective: '读取 issue #345 并整理架构演进内容',
+          capabilityIntent: 'GitHub issue 调查',
+        },
+        {
+          objective: '检查当前仓库实现是否覆盖 issue 中的架构演进提案',
+          capabilityIntent: '代码库调查与对照',
+        },
+      ],
+      latestHandoff: 'issue 正文和评论中的架构演进提案已经完整整理；下一步只需对照当前仓库实现。',
+    },
+    expected: {
+      result: 'next_task',
+      nextTaskTerms: ['当前仓库', '实现', 'issue', '架构演进'],
+      capabilityIntent: '代码库调查与对照',
+      remainingPlan: [],
+      exactRemainingPlanLength: 0,
+      planEffect: 'revised',
+      rubberStamp: false,
+      reason: 'Boundary planning removes already completed work before materializing the next still-useful task.',
+    },
+    metadata: { difficulty: 'hard', reason: 'Completed work must not re-enter the execution loop.', source: SOURCE_FILE },
+  },
+  {
     id: `${SUITE}.entry-preserves-result-dependent-followup`,
     name: 'entry-preserves-result-dependent-followup',
     suite: SUITE,

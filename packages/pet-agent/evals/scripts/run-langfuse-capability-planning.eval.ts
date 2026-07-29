@@ -1,0 +1,172 @@
+import { HumanMessage } from '@langchain/core/messages';
+import { tool } from '@langchain/core/tools';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { z } from 'zod';
+import { createCapabilityPlannerAgent } from '../../src/agent/orchestrator/capabilityPlannerAgent.ts';
+import type { CapabilityPlannerResult } from '../../src/agent/orchestrator/capabilityPlannerRunner.ts';
+import { materializeCapabilityDocumentWorkspace } from '../../src/agent/orchestrator/capabilityDocumentWorkspace.ts';
+import { compileAgentRegistry } from '../../src/agent/orchestrator/registry.ts';
+import { buildPreparedRequestContext } from '../../src/agent/orchestrator/prompts.ts';
+import {
+  defineCapability,
+  defineInstructionDocument,
+  type AgentCapability,
+} from '../../src/types/capability.ts';
+import { defineToolkit } from '../../src/types/toolkit.ts';
+import {
+  evaluateCapabilityPlanningOutput,
+  type CapabilityPlanningEvalOutput,
+} from '../capability-planning-evaluation.ts';
+import { capabilityPlanningBasicsDataset } from '../datasets/capability-planning-basics.ts';
+import { createDecisionEvalModel } from './decision-eval-model.ts';
+import { resolveLangfuseConfig } from './langfuse-api.ts';
+import { writeLangfuseEvalResult } from './langfuse-eval-writer.ts';
+
+const evalExecutionToolkit = defineToolkit({
+  name: 'eval_execution',
+  description: 'Synthetic execution adapter for Capability Planner semantic evaluation.',
+  tools: [{
+    tool: tool(async () => 'ok', {
+      name: 'eval_execute',
+      description: 'Execute the task described by the selected eval Capability.',
+      schema: z.object({}),
+    }),
+  }],
+});
+
+function capabilityFromRegistryEntry(entry: string): AgentCapability {
+  const separator = entry.indexOf(':');
+  const name = (separator >= 0 ? entry.slice(0, separator) : entry).trim();
+  const description = (separator >= 0 ? entry.slice(separator + 1) : entry).trim();
+  return defineCapability({
+    name,
+    description: description || `Execute work assigned to ${name}.`,
+    uses: [evalExecutionToolkit.name],
+    instructions: defineInstructionDocument({
+      content: [
+        `# ${name}`,
+        '',
+        description || `Complete the task assigned to ${name}.`,
+        '',
+        'Complete the delegated task and return a concise evidence-based result.',
+      ].join('\n'),
+    }),
+  });
+}
+
+function plannerOutput(
+  result: CapabilityPlannerResult,
+): CapabilityPlanningEvalOutput {
+  if (result.result === 'unavailable') {
+    return {
+      result: result.result,
+      nextTask: null,
+      capabilityIntent: null,
+      capabilityName: null,
+      remainingPlan: [],
+    };
+  }
+  return {
+    result: result.result,
+    nextTask: result.next_task.objective,
+    capabilityIntent: result.next_task.capability_intent,
+    capabilityName: result.next_task.capability_name,
+    remainingPlan: result.remaining_plan.map((task) => ({
+      objective: task.objective,
+      capabilityIntent: task.capability_intent,
+    })),
+  };
+}
+
+async function main() {
+  const config = resolveLangfuseConfig();
+  const modelConfig = createDecisionEvalModel();
+  const runName = process.env.LANGFUSE_RUN_NAME
+    || `capability-planning-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+  const cacheRoot = await mkdtemp(join(tmpdir(), 'pinpawo-capability-planning-eval-'));
+  let passed = 0;
+
+  console.log(`Running ${capabilityPlanningBasicsDataset.name}: ${runName}`);
+  console.log(`Mode: ${modelConfig.label}`);
+  try {
+    for (const testCase of capabilityPlanningBasicsDataset.cases) {
+      const started = performance.now();
+      try {
+        const registry = compileAgentRegistry({
+          toolkits: [evalExecutionToolkit],
+          capabilities: testCase.input.capabilityRegistry.map(capabilityFromRegistryEntry),
+        });
+        const workspace = await materializeCapabilityDocumentWorkspace({
+          registry,
+          cacheRoot,
+        });
+        const result = await createCapabilityPlannerAgent({
+          model: modelConfig.model,
+        }).invoke({
+          mode: testCase.input.mode,
+          userIntentContext: buildPreparedRequestContext({
+            latestUserRequest: testCase.input.userGoal,
+            recentMessages: [new HumanMessage(testCase.input.userGoal)],
+          }),
+          completedTasks: testCase.input.completedTasks ?? [],
+          remainingPlan: testCase.input.remainingPlan ?? [],
+          latestHandoff: testCase.input.latestHandoff ?? null,
+          workspace,
+        });
+        const output = plannerOutput(result);
+        const evaluation = await evaluateCapabilityPlanningOutput({
+          input: testCase.input,
+          expected: testCase.expected,
+          output,
+          judge: {
+            model: modelConfig.model,
+            method: modelConfig.method,
+          },
+        });
+        const ok = evaluation.scores.every(({ score }) => score === 1);
+        if (ok) passed += 1;
+        await writeLangfuseEvalResult({
+          config,
+          datasetName: capabilityPlanningBasicsDataset.name,
+          runName,
+          traceName: 'capability-planning-eval',
+          testCase,
+          output: {
+            ...output,
+            evaluationSummary: evaluation.evaluationSummary,
+          },
+          scores: evaluation.scores,
+          durationMs: Math.round(performance.now() - started),
+        });
+        console.log(
+          `[${ok ? 'PASS' : 'FAIL'}] ${testCase.name}: `
+          + evaluation.scores.map(({ key, score }) => `${key}=${score}`).join(' '),
+        );
+      } catch (error) {
+        await writeLangfuseEvalResult({
+          config,
+          datasetName: capabilityPlanningBasicsDataset.name,
+          runName,
+          traceName: 'capability-planning-eval',
+          testCase,
+          output: {},
+          scores: [],
+          durationMs: Math.round(performance.now() - started),
+          error: error instanceof Error ? error.message : String(error),
+        });
+        console.log(`[ERROR] ${testCase.name}: ${String(error)}`);
+      }
+    }
+  } finally {
+    await rm(cacheRoot, { recursive: true, force: true });
+  }
+  console.log(`Cases: ${passed}/${capabilityPlanningBasicsDataset.cases.length} passed`);
+  if (passed !== capabilityPlanningBasicsDataset.cases.length) process.exitCode = 1;
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

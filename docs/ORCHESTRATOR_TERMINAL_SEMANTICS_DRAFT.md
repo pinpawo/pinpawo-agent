@@ -165,6 +165,11 @@ type DelegationOutcome =
   autonomous work, so it routes to the boundary planner. If the current result
   also completes the user goal, outcomeDecision must return `goal_done`;
   the Planner has no `answer` result.
+- outcomeDecision receives the Planner's existing future tail as advisory
+  context for that distinction. The tail is neither a fact nor a mandatory
+  queue: empty and non-empty tails must both be reconciled with the user goal
+  and the current announce. Outcome may determine that planned future work is
+  no longer applicable, but it does not generate or rewrite the plan.
 
 This keeps each semantic owner narrow: outcomeDecision classifies the accepted
 result, the graph transitions and records it, and answer communicates it.

@@ -5,6 +5,7 @@ import {
   buildDelegationOutcomeDecisionInput,
   buildDelegationOutcomeDecisionSystemPrompt,
   buildDelegationOutcomeOtherTasksContext,
+  buildDelegationOutcomeRemainingPlanContext,
   buildPreparedRequestContext,
   buildRunDelegationSummaryContext,
   buildRuntimeContext,
@@ -172,6 +173,9 @@ function outcomeScenarios(): DecisionEvalScenario[] {
             resultPreview,
           })),
           delegationId,
+        ),
+        remainingPlanContext: buildDelegationOutcomeRemainingPlanContext(
+          testCase.input.remainingPlan ?? [],
         ),
       }),
     });

@@ -6,7 +6,9 @@ import {
   buildCapabilityArtifactContext,
   buildDelegationOutcomeCurrentTaskContext,
   buildDelegationOutcomeDecisionInput,
+  buildDelegationOutcomeDecisionSystemPrompt,
   buildDelegationOutcomeOtherTasksContext,
+  buildDelegationOutcomeRemainingPlanContext,
   buildPreparedRequestContext,
   buildRuntimeContext,
   buildSubagentAnnounceContext,
@@ -135,6 +137,7 @@ test('loop-internal router input stays focused on current run announce context',
     currentTaskContext: '<current_delegation>\n  <delegation_id>task-1</delegation_id>\n</current_delegation>',
     subagentAnnounceContext: '<subagent_announce>\n  <result>completed</result>\n</subagent_announce>',
     otherTasksContext: '<other_delegations>\n  <none>true</none>\n</other_delegations>',
+    remainingPlanContext: buildDelegationOutcomeRemainingPlanContext([]),
     capabilityArtifacts: [],
   });
 
@@ -172,6 +175,41 @@ test('delegation outcome input carries current task context separately', () => {
   assert.doesNotMatch(currentTaskContext ?? '', /continuation_action/);
   assert.match(otherTasksContext, /<delegation_id>task-0<\/delegation_id>/);
   assert.doesNotMatch(otherTasksContext, /<!\[CDATA\[\n修复 lint\n\s+\]\]>/);
+});
+
+test('delegation outcome remaining plan is advisory planning context', () => {
+  const prompt = buildDelegationOutcomeDecisionSystemPrompt({
+    actor: testActor,
+    outputInstruction: 'OUTCOME_OUTPUT_INSTRUCTION',
+  });
+  assert.match(prompt, /remaining_plan 是 Planner/);
+  assert.match(prompt, /为空或非空都不是单独的终态条件/);
+  assert.match(prompt, /OUTCOME_OUTPUT_INSTRUCTION/);
+
+  const context = buildDelegationOutcomeRemainingPlanContext([{
+    objective: '根据检查结果处理对应问题',
+    capabilityIntent: '配置问题处理与验证',
+  }]);
+
+  assert.match(
+    context,
+    /<remaining_plan role="planning_context" authority="advisory">/,
+  );
+  assert.match(context, /根据检查结果处理对应问题/);
+  assert.match(context, /配置问题处理与验证/);
+  assert.doesNotMatch(context, /role="fact"/);
+
+  const empty = buildDelegationOutcomeRemainingPlanContext([]);
+  assert.match(empty, /<none>true<\/none>/);
+
+  const bounded = buildDelegationOutcomeRemainingPlanContext(
+    Array.from({ length: 25 }, (_, index) => ({
+      objective: `future-${index.toString()}`,
+      capabilityIntent: 'bounded planning context',
+    })),
+  );
+  assert.match(bounded, /<truncated omitted="1" \/>/);
+  assert.doesNotMatch(bounded, /future-24/);
 });
 
 test('completed subagent announce context includes the full current result text', () => {
@@ -279,6 +317,7 @@ test('delegation outcome input does not duplicate the active task in announce co
       text: '已完成验证。',
     }, 'natural'),
     otherTasksContext: buildDelegationOutcomeOtherTasksContext([], 'task-1'),
+    remainingPlanContext: buildDelegationOutcomeRemainingPlanContext([]),
     capabilityArtifacts: [],
   });
 

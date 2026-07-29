@@ -130,7 +130,12 @@ outcomeDecision 只验收当前 execution boundary：
 - `goal_done`：用户目标已经完成；
 - `user_input_required`：下一步必须等待用户补充、澄清或确认。
 
-它不生成下一 task、不选择 Capability、不读取或修改 future plan。
+它读取 Planner 为当前 task 保留的 future tail，作为判断“当前 task 是完整目标还是阶段性结果”的
+advisory planning context。future tail 不是事实或固定队列：Outcome 必须结合用户目标和最新 announce
+判断其中是否仍有适用的自主工作。空 tail 或非空 tail 都不能单独决定终态。
+
+它不生成下一 task、不选择 Capability，也不修改 future plan。`task_done` 只确认仍有适用的自主工作；
+具体下一 task 和 future tail 修订仍由 boundary Planner 负责。
 
 ## 6. Prompt 数据边界
 
@@ -138,14 +143,15 @@ outcomeDecision 只验收当前 execution boundary：
 |---|---|---|
 | entryDecision | canonical main messages、compaction summary、runtime facts | Capability registry、artifact inventory、task draft |
 | Capability Planner | user intent、Workspace、completed tasks、latest handoff、future tail | parent graph 私有状态、执行工具 |
-| outcomeDecision | current task、announce、user goal、其他 task facts | Capability 文档、future plan 的控制权 |
+| outcomeDecision | current task、announce、user goal、其他 task facts、advisory future tail | Capability 文档、future plan 的生成或修改权 |
 | answer | canonical main conversation、accepted handoff、unavailable payload | lane transcript、隐式 artifact body |
 
 ## 7. Eval ownership
 
 - `agent-entry-decision-basics`：`answer` 与 `needs_plan` 的 result-availability matrix。
 - `agent-capability-planning-basics`：单 task、依赖拆分、独立 deliverables、boundary 修订和 `general` fallback。
-- `agent-outcome-decision-basics`：announce verdict。
+- `agent-outcome-decision-basics`：结合 current announce 与 advisory future tail 判断
+  `continue | task_done | goal_done | user_input_required`。
 - lifecycle / multi-task eval：验证完整 graph 的 task 数量、handoff、调用次数、tokens 和 latency。
 
 Prompt 测试不得通过 prompt 文本猜测当前调用的是哪个 Decision；应通过 typed runner、事件或结构化输出契约观察行为。

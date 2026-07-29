@@ -26,6 +26,7 @@ import {
   buildDelegationOutcomeDecisionInput,
   buildDelegationOutcomeDecisionSystemPrompt,
   buildDelegationOutcomeOtherTasksContext,
+  buildDelegationOutcomeRemainingPlanContext,
   buildCompactionSummaryXmlContext,
   buildPreparedRequestContext,
   buildRunDelegationSummaryContext,
@@ -243,6 +244,9 @@ function buildDecisionContext(params: {
     otherTasksContext: buildDelegationOutcomeOtherTasksContext(
       state.runDelegationSummaries,
       activeDelegation?.id ?? null,
+    ),
+    remainingPlanContext: buildDelegationOutcomeRemainingPlanContext(
+      state.runCapabilityPlan,
     ),
     capabilityArtifacts: state.sessionCapabilityArtifacts,
   }));

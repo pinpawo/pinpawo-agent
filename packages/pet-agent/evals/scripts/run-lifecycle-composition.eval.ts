@@ -20,6 +20,7 @@ import { MemorySaver } from '@langchain/langgraph';
 import { z } from 'zod';
 import {
   buildOrchestratorTurnInput,
+  compileAgentRegistry,
   createOrchestratorGraph,
 } from '../../src/agent/createAgentRuntime.ts';
 import {
@@ -462,6 +463,10 @@ async function runCase(params: {
       : undefined,
   });
   const runtime = capabilityRuntime(testCase.input.capabilityProfile);
+  const registry = compileAgentRegistry({
+    capabilities: runtime.capabilities,
+    toolkits: runtime.toolkits,
+  });
   const threadId = `lifecycle-composition-${testCase.name}-${repeat.toString()}-${Date.now().toString()}`;
   const turns: LifecycleTurnOutput[] = [];
   let finalState: OrchestratorStateType | null = null;
@@ -499,8 +504,7 @@ async function runCase(params: {
           configurable: {
             thread_id: threadId,
             actor,
-            capabilities: runtime.capabilities,
-            toolkits: runtime.toolkits,
+            registry,
             allowedCapabilityNames: runtime.allowedCapabilityNames,
             maxRunIterations: 12,
             workdir: '/eval/workspace',

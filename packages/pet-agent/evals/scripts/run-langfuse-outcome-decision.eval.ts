@@ -4,6 +4,7 @@ import {
   buildDelegationOutcomeDecisionInput,
   buildDelegationOutcomeDecisionSystemPrompt,
   buildDelegationOutcomeOtherTasksContext,
+  buildDelegationOutcomeRemainingPlanContext,
   buildPreparedRequestContext,
   buildSubagentAnnounceContext,
 } from '../../src/agent/orchestrator/prompts.ts';
@@ -67,6 +68,9 @@ async function runCase(testCase: typeof outcomeDecisionBasicsDataset.cases[numbe
       })),
       delegationId,
     ),
+    remainingPlanContext: buildDelegationOutcomeRemainingPlanContext(
+      testCase.input.remainingPlan ?? [],
+    ),
   });
   const output = await structured.invoke([new SystemMessage(systemPrompt), new HumanMessage(input)]) as Record<string, unknown>;
   return { output, scores: scoreOutcomeDecision(output, testCase.expected) };
@@ -74,7 +78,7 @@ async function runCase(testCase: typeof outcomeDecisionBasicsDataset.cases[numbe
 
 async function main() {
   const config = resolveLangfuseConfig();
-  const useLlm = process.env.EVAL_OUTCOME_MODEL === 'llm';
+  const useLlm = process.env.EVAL_OUTCOME_MODEL !== 'deterministic';
   const runName = process.env.LANGFUSE_RUN_NAME || `outcome-decision-${new Date().toISOString().replace(/[:.]/g, '-')}`;
   console.log(`Running ${outcomeDecisionBasicsDataset.name}: ${runName}`);
   console.log(`Mode: ${useLlm ? createDecisionEvalModel().label : 'local deterministic contract model'}`);

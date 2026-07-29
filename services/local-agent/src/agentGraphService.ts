@@ -48,7 +48,6 @@ export type LocalAgentGraphThreadState = {
   messages: BaseMessage[];
   pendingHumanReview: LocalAgentGraphPendingHumanReview | null;
   hasPendingContinuation: boolean;
-  hasResumableDelegation: boolean;
 };
 
 /**
@@ -94,18 +93,6 @@ function hasPendingContinuation(snapshot: unknown) {
   }
   const tasks = Array.isArray(record?.tasks) ? record.tasks : [];
   return tasks.length > 0;
-}
-
-export function readHasResumableDelegation(snapshot: unknown) {
-  const values = (
-    snapshot
-    && typeof snapshot === 'object'
-    && (snapshot as { values?: unknown }).values
-    && typeof (snapshot as { values?: unknown }).values === 'object'
-  )
-    ? (snapshot as { values: Record<string, unknown> }).values
-    : null;
-  return values?.taskActiveDelegation != null;
 }
 
 function readPendingHumanReview(snapshot: unknown): LocalAgentGraphPendingHumanReview | null {
@@ -206,7 +193,6 @@ export class LocalAgentGraphService {
       messages: readSnapshotMessages(snapshot),
       pendingHumanReview: readPendingHumanReview(snapshot),
       hasPendingContinuation: hasPendingContinuation(snapshot),
-      hasResumableDelegation: readHasResumableDelegation(snapshot),
     };
   }
 

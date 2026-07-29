@@ -434,7 +434,6 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
       'interrupted',
     ]);
     assert.equal(snapshotRequestCount, 4);
-    assert.equal(controller.canContinueActiveDelegation(), false);
 
     assert.deepEqual(controller.submitChat(REVIEW_APPROVE_MESSAGE), {
       ok: true,
@@ -494,10 +493,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     }), {
       ok: true,
     });
-    await waitFor(() => (
-      controller.getState().session.activeRun === null
-      && controller.canContinueActiveDelegation()
-    ));
+    await waitFor(() => controller.getState().session.activeRun === null);
     assert.equal(snapshotRequestCount, 6);
     assert.deepEqual(graphFixture.reviewResumes()[1], {
       'review-interrupt-cancel': {

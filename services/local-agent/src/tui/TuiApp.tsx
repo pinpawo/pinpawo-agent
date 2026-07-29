@@ -277,17 +277,14 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     dispatch,
   });
   const inputValue = textArea.value;
-  const canContinueActiveDelegation =
-    runtimeController.canContinueActiveDelegation();
   const commandPalette = useMemo(() => (
     inputFocused && !pendingApproval
       ? buildCommandPaletteModel({
           text: inputValue,
           cursorOffset: textArea.cursorOffset,
-        }, commandPaletteIndex, { canContinueActiveDelegation })
+        }, commandPaletteIndex)
       : buildCommandPaletteModel({ text: '', cursorOffset: 0 })
   ), [
-    canContinueActiveDelegation,
     commandPaletteIndex,
     inputFocused,
     inputValue,

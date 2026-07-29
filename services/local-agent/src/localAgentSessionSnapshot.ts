@@ -18,7 +18,6 @@ export function buildLocalAgentSessionSnapshot(params: {
   deps: LocalServerDeps;
   sessionTokenUsage?: AgentSession['sessionTokenUsage'] | null;
   pendingReview?: ReviewActionSnapshot | null;
-  hasResumableDelegation: boolean;
 }): AgentSessionSnapshot {
   const timeline = timelineFromCheckpointMessages(params.messages);
   const pendingReview = params.pendingReview ?? null;
@@ -40,7 +39,6 @@ export function buildLocalAgentSessionSnapshot(params: {
         pendingReview,
       })
       : null,
-    hasResumableDelegation: params.hasResumableDelegation,
     runtime,
     ...(sessionTokenUsage ? { sessionTokenUsage } : {}),
   });

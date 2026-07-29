@@ -350,12 +350,9 @@ test('TuiRuntimeController requests review cancellation separately from run inte
   });
 });
 
-test('TuiRuntimeController reads continuation availability from the focused session', () => {
-  const state = idleState();
-  state.sessions['sess-1']!.hasResumableDelegation = true;
-  const harness = createController(state);
+test('TuiRuntimeController sends explicit delegation continuation', () => {
+  const harness = createController(idleState());
 
-  assert.equal(harness.controller.canContinueActiveDelegation(), true);
   assert.equal(
     harness.controller.continueActiveDelegation('apply the new constraints'),
     true,
@@ -367,13 +364,10 @@ test('TuiRuntimeController reads continuation availability from the focused sess
     assert.equal(continuation.message, 'apply the new constraints');
     assert.equal(continuation.activeDelegationTransition, 'resume_active');
   }
-  assert.equal(harness.controller.canContinueActiveDelegation(), false);
 });
 
-test('TuiRuntimeController explicitly supersedes a suspended delegation for ordinary chat', () => {
-  const state = idleState();
-  state.sessions['sess-1']!.hasResumableDelegation = true;
-  const harness = createController(state);
+test('TuiRuntimeController explicitly supersedes checkpoint state for ordinary chat', () => {
+  const harness = createController(idleState());
 
   assert.equal(harness.controller.sendChatRequest('answer a new question'), true);
   const request = harness.sent[0];
@@ -387,33 +381,11 @@ test('TuiRuntimeController explicitly supersedes a suspended delegation for ordi
   }
 });
 
-test('TuiRuntimeController denies continuation when the snapshot omits availability', () => {
+test('TuiRuntimeController reports transport rejection for continuation', () => {
   const harness = createController(idleState());
-  assert.equal(harness.controller.canContinueActiveDelegation(), false);
-});
-
-test('TuiRuntimeController hides checkpoint continuation while its session has an active run', () => {
-  const state = idleState();
-  state.sessions['sess-1']!.hasResumableDelegation = true;
-  state.sessions['sess-1']!.activeRun = {
-    requestId: 'req-active',
-    state: 'running',
-    activity: 'thinking',
-  };
-  const harness = createController(state);
-
-  assert.equal(harness.controller.canContinueActiveDelegation(), false);
-});
-
-test('TuiRuntimeController preserves review continuation when transport rejects the request', () => {
-  const state = idleState();
-  state.sessions['sess-1']!.hasResumableDelegation = true;
-  const harness = createController(state);
-  assert.equal(harness.controller.canContinueActiveDelegation(), true);
 
   harness.connection.send = () => false;
   assert.equal(harness.controller.continueActiveDelegation('keep going'), false);
-  assert.equal(harness.controller.canContinueActiveDelegation(), true);
 });
 
 test('TuiRuntimeController interrupts the resumed run after a review resolution was sent', () => {
@@ -694,7 +666,7 @@ test('TuiRuntimeController applies completed-message snapshots without resetting
   );
 });
 
-test('TuiRuntimeController refreshes resumable delegation after interruption', async () => {
+test('TuiRuntimeController refreshes the session after interruption', async () => {
   const harness = createController(pendingReviewState());
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (harness.controller as any).localServerClient = {
@@ -705,7 +677,6 @@ test('TuiRuntimeController refreshes resumable delegation after interruption', a
         kind: 'chat',
         timeline: [],
         activeRun: null,
-        hasResumableDelegation: true,
       },
     }),
   };
@@ -719,15 +690,10 @@ test('TuiRuntimeController refreshes resumable delegation after interruption', a
   const snapshotAction = harness.actions.find((action) => (
     action.type === 'session.snapshot.loaded'
   ));
-  assert.equal(
-    snapshotAction?.type === 'session.snapshot.loaded'
-      ? snapshotAction.snapshot.session.hasResumableDelegation
-      : undefined,
-    true,
-  );
+  assert.equal(snapshotAction?.type, 'session.snapshot.loaded');
 });
 
-test('TuiRuntimeController refreshes denied continuation after a run error', async () => {
+test('TuiRuntimeController refreshes the session after a run error', async () => {
   const harness = createController(pendingReviewState());
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (harness.controller as any).localServerClient = {
@@ -738,7 +704,6 @@ test('TuiRuntimeController refreshes denied continuation after a run error', asy
         kind: 'chat',
         timeline: [],
         activeRun: null,
-        hasResumableDelegation: false,
       },
     }),
   };
@@ -757,10 +722,5 @@ test('TuiRuntimeController refreshes denied continuation after a run error', asy
   const snapshotAction = harness.actions.find((action) => (
     action.type === 'session.snapshot.loaded'
   ));
-  assert.equal(
-    snapshotAction?.type === 'session.snapshot.loaded'
-      ? snapshotAction.snapshot.session.hasResumableDelegation
-      : undefined,
-    false,
-  );
+  assert.equal(snapshotAction?.type, 'session.snapshot.loaded');
 });

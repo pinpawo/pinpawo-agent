@@ -122,18 +122,12 @@ for (const command of COMMANDS) {
   }
 }
 
-export type TuiCommandAvailability = {
-  canContinueActiveDelegation?: boolean;
-};
-
-export function listTuiCommands(availability: TuiCommandAvailability = {}) {
-  return COMMANDS.filter((command) => (
-    command.name !== 'continue' || availability.canContinueActiveDelegation
-  ));
+export function listTuiCommands() {
+  return [...COMMANDS];
 }
 
-export function formatTuiCommandHelp(availability: TuiCommandAvailability = {}) {
-  return listTuiCommands(availability)
+export function formatTuiCommandHelp() {
+  return listTuiCommands()
     .map((command) => command.helpText)
     .join(' · ');
 }

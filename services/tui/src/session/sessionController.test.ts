@@ -166,7 +166,6 @@ test('TuiSessionController synchronizes one session and projects a chat run', ()
         status: 'completed',
       }],
       activeRun: null,
-      hasResumableDelegation: true,
       sessionTokenUsage: {
         inputTokens: 20,
         outputTokens: 5,
@@ -719,10 +718,6 @@ test('completion snapshot refresh cannot erase a newer optimistic run', () => {
   const latest = controller.getState().session.timeline.at(-1);
   assert.equal(latest?.type === 'message' ? latest.text : null, 'second');
   assert.equal(controller.getState().session.sessionTokenUsage?.totalTokens, 15);
-  assert.equal(
-    controller.getState().session.hasResumableDelegation,
-    false,
-  );
   controller.stop();
 });
 
@@ -1221,7 +1216,7 @@ test('a sent review resolution can be followed by an ordered run interrupt', () 
   controller.stop();
 });
 
-test('server-reported delegation continuation survives refresh and resume', async () => {
+test('delegation continuation sends resume_active without client-owned availability', async () => {
   const requestIds = [
     'startup',
     'interrupted-refresh',
@@ -1249,18 +1244,15 @@ test('server-reported delegation continuation survives refresh and resume', asyn
     }]),
   ]));
 
-  assert.equal(controller.canContinueActiveDelegation(), false);
   assert.deepEqual(controller.cancelReview({
     requestId: 'chat',
     actionId: 'review-action',
   }), { ok: true });
-  assert.equal(controller.canContinueActiveDelegation(), false);
   connection.receive({
     type: 'interrupted',
     requestId: 'chat',
     message: 'review interrupted',
   });
-  assert.equal(controller.canContinueActiveDelegation(), false);
   assert.deepEqual(connection.sent.at(-1), {
     type: 'session.snapshot.get',
     requestId: 'interrupted-refresh',
@@ -1273,10 +1265,8 @@ test('server-reported delegation continuation survives refresh and resume', asyn
       kind: 'chat',
       timeline: [],
       activeRun: null,
-      hasResumableDelegation: true,
     }),
   });
-  assert.equal(controller.canContinueActiveDelegation(), true);
 
   const resumeOther = controller.resumeSession('chat:two');
   connection.receive({
@@ -1288,11 +1278,9 @@ test('server-reported delegation continuation survives refresh and resume', asyn
       kind: 'chat',
       timeline: [],
       activeRun: null,
-      hasResumableDelegation: false,
     }),
   });
   await resumeOther;
-  assert.equal(controller.canContinueActiveDelegation(), false);
 
   const resumeOriginal = controller.resumeSession('chat:one');
   connection.receive({
@@ -1304,18 +1292,15 @@ test('server-reported delegation continuation survives refresh and resume', asyn
       kind: 'chat',
       timeline: [],
       activeRun: null,
-      hasResumableDelegation: true,
     }),
   });
   await resumeOriginal;
-  assert.equal(controller.canContinueActiveDelegation(), true);
 
   connection.failNextSend = true;
   assert.deepEqual(
     controller.continueActiveDelegation('apply the new constraints'),
     { ok: false, reason: 'send-failed' },
   );
-  assert.equal(controller.canContinueActiveDelegation(), true);
 
   assert.deepEqual(
     controller.continueActiveDelegation('apply the new constraints'),
@@ -1327,10 +1312,9 @@ test('server-reported delegation continuation survives refresh and resume', asyn
     message: 'apply the new constraints',
     activeDelegationTransition: 'resume_active',
   });
-  assert.equal(controller.canContinueActiveDelegation(), false);
-  assert.equal(
-    controller.getState().session.hasResumableDelegation,
-    true,
+  assert.deepEqual(
+    controller.continueActiveDelegation('cannot overlap the active run'),
+    { ok: false, reason: 'busy' },
   );
   connection.receive(eventMessage({
     type: 'message.completed',
@@ -1338,7 +1322,6 @@ test('server-reported delegation continuation survives refresh and resume', asyn
     role: 'assistant',
     text: 'continued',
   }));
-  assert.equal(controller.canContinueActiveDelegation(), false);
   assert.deepEqual(connection.sent.at(-1), {
     type: 'session.snapshot.get',
     requestId: 'continue-refresh',
@@ -1351,42 +1334,8 @@ test('server-reported delegation continuation survives refresh and resume', asyn
       kind: 'chat',
       timeline: [],
       activeRun: null,
-      hasResumableDelegation: false,
     }),
   });
-  assert.equal(controller.canContinueActiveDelegation(), false);
-  assert.equal(
-    controller.getState().session.hasResumableDelegation,
-    false,
-  );
-  controller.stop();
-});
-
-test('startup snapshot restores server-reported delegation continuation', () => {
-  let connection!: FakeConnection;
-  const controller = new TuiSessionController({
-    connectionFactory: (handlers) => {
-      connection = new FakeConnection(handlers);
-      return connection;
-    },
-    requestIdFactory: () => 'startup',
-  });
-
-  controller.start();
-  connection.open();
-  connection.receive({
-    type: 'session.snapshot.result',
-    requestId: 'startup',
-    snapshot: createAgentSessionSnapshot({
-      sessionId: 'chat:restored',
-      kind: 'chat',
-      timeline: [],
-      activeRun: null,
-      hasResumableDelegation: true,
-    }),
-  });
-
-  assert.equal(controller.canContinueActiveDelegation(), true);
   controller.stop();
 });
 

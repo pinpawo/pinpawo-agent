@@ -66,15 +66,6 @@ test('command palette follows a slash token at the composer cursor', () => {
     text: '/con',
     cursorOffset: 4,
     enabled: true,
-    canContinueActiveDelegation: false,
-  });
-  assert.equal(commandCompletion(state), null);
-
-  state = syncCommandPalette(state, {
-    text: '/con',
-    cursorOffset: 4,
-    enabled: true,
-    canContinueActiveDelegation: true,
   });
   assert.equal(commandCompletion(state), '/continue ');
 
@@ -144,7 +135,7 @@ test('command help pages and remains terminal-width safe', () => {
     /Shift\+Enter \/ Ctrl\+J — Insert a newline/,
   );
   const continuationHelp = pageCommandHelp(
-    openCommandHelp({ canContinueActiveDelegation: true }),
+    openCommandHelp(),
     1,
   );
   assert.match(

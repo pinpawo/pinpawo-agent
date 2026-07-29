@@ -155,7 +155,7 @@ test('QA demo interrupt cancels future stream events and settles the run', () =>
   connection.disconnect();
 });
 
-test('review demo reports resumable delegation after cancellation', () => {
+test('review demo settles the active run after cancellation', () => {
   const received: AgentServerMessage[] = [];
   const connection = createDemoConnectionFactory({
     review: true,
@@ -177,11 +177,7 @@ test('review demo reports resumable delegation after cancellation', () => {
     requestId: 'after-cancel',
   }), true);
 
-  assert.equal(
-    readSnapshot(received, 'after-cancel')
-      .session.hasResumableDelegation,
-    true,
-  );
+  assert.equal(readSnapshot(received, 'after-cancel').session.activeRun, null);
   connection.disconnect();
 });
 

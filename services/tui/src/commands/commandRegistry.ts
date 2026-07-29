@@ -94,17 +94,8 @@ for (const command of COMMANDS) {
 
 const COMMAND_LIKE_RE = /^\/([A-Za-z][A-Za-z0-9_-]*)(?:\s+(.*))?$/;
 
-export type TuiCommandAvailability = {
-  canContinueActiveDelegation?: boolean;
-};
-
-export function listTuiCommands(
-  availability: TuiCommandAvailability = {},
-) {
-  return COMMANDS.filter((command) => (
-    command.name !== 'continue'
-    || availability.canContinueActiveDelegation
-  ));
+export function listTuiCommands() {
+  return [...COMMANDS];
 }
 
 export function parseTuiCommand(input: string): ParsedTuiCommand {

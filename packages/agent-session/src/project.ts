@@ -76,7 +76,7 @@ export function reduceSession(
       };
     case 'session.cleared':
       return {
-        ...omitResumableDelegation(omitAllTokenUsage(session)),
+        ...omitAllTokenUsage(session),
         kind: 'chat',
         timeline: [],
         activeRun: null,
@@ -130,7 +130,6 @@ export function applySessionSnapshot(
     activeRun: incoming.activeRun
       ? normalizeSnapshotRun(incoming.activeRun, session.activeRun, context)
       : null,
-    hasResumableDelegation: incoming.hasResumableDelegation ?? false,
     ...(Object.keys(runtime).length ? { runtime } : {}),
     ...(incoming.tokenUsage
       ? { tokenUsage: incoming.tokenUsage }
@@ -168,18 +167,6 @@ function acceptUserInput(
     requestId: input.requestId,
     text: input.text,
   }, context);
-}
-
-function omitResumableDelegation(
-  session: AgentSession,
-): AgentSession {
-  if (session.hasResumableDelegation === undefined) return session;
-  const {
-    hasResumableDelegation: _hasResumableDelegation,
-    ...rest
-  } = session;
-  void _hasResumableDelegation;
-  return rest;
 }
 
 function reduceRuntimeEvent(

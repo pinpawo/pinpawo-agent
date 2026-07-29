@@ -47,7 +47,6 @@ export type TuiCheckpointPoint = {
   messages: TuiCheckpointMessage[];
   sessionTokenUsage: (TokenUsageSnapshot & { scope: 'session' }) | null;
   pendingReview: ActivePendingReview | null;
-  hasResumableDelegation: boolean;
 };
 
 export type TuiSessionCheckpointer = BaseCheckpointSaver & Pick<FileSaver, 'deleteThread'>;
@@ -234,7 +233,6 @@ export class LocalServerTuiSessionService {
       messages: readTuiCheckpointMessages(state.messages),
       sessionTokenUsage: readTuiCheckpointTokenUsage(state.messages),
       pendingReview,
-      hasResumableDelegation: state.hasResumableDelegation,
     };
   }
 
@@ -324,7 +322,6 @@ export class LocalServerTuiSessionService {
       messages: checkpoint.messages,
       sessionTokenUsage: checkpoint.sessionTokenUsage,
       pendingReview: checkpoint.pendingReview,
-      hasResumableDelegation: checkpoint.hasResumableDelegation,
     };
   }
 

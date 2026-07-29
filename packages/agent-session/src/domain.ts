@@ -111,8 +111,6 @@ export type AgentSession = {
   actor?: AgentActorView;
   timeline: AgentTimelineEntry[];
   activeRun: AgentRunView | null;
-  /** The host checkpoint still owns a delegation that chat can resume. */
-  hasResumableDelegation?: boolean;
   runtime?: AgentRuntimeView;
   /** Latest completed run usage, when the provider reports it. */
   tokenUsage?: TokenUsageSnapshot;

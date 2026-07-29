@@ -25,7 +25,6 @@ type TuiCommandSubmitInput = {
     TuiRuntimeController,
     | 'isConnected'
     | 'isBusy'
-    | 'canContinueActiveDelegation'
     | 'continueActiveDelegation'
     | 'sendStudioRequest'
     | 'sendChatRequest'
@@ -45,10 +44,7 @@ export function submitCurrentInputFromController(options: TuiCommandSubmitInput)
     }
 
     if (parsed.name === 'help') {
-      options.appendSystemMessage(formatTuiCommandHelp({
-        canContinueActiveDelegation:
-          options.runtimeController.canContinueActiveDelegation(),
-      }));
+      options.appendSystemMessage(formatTuiCommandHelp());
       options.clearInputValue();
       return;
     }
@@ -102,11 +98,6 @@ export function submitCurrentInputFromController(options: TuiCommandSubmitInput)
     if (parsed.name === 'continue') {
       if (!parsed.args) {
         options.appendSystemMessage(TUI_TEXT.continueRequiresGuidance);
-        options.clearInputValue();
-        return;
-      }
-      if (!options.runtimeController.canContinueActiveDelegation()) {
-        options.appendSystemMessage(TUI_TEXT.continueUnavailable);
         options.clearInputValue();
         return;
       }

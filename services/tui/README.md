@@ -39,10 +39,10 @@ dogfood entrypoint from issue #454:
 - it restores canonical pending reviews from snapshots and provides an
   OpenTUI-owned approval overlay for single or batched approve, reject, respond,
   and cancel flows.
-- it projects unfinished delegation availability from the focused session's
-  authoritative checkpoint: while that session is idle, `/continue <guidance>`
-  resumes the exact delegation whether it was suspended by this TUI, another
-  client, or a previous process.
+- it keeps delegation continuation out of the Session projection:
+  `/continue <guidance>` explicitly sends `resume_active`, ordinary chat sends
+  `supersede_active`, and the checkpoint's `taskActiveDelegation` pointer alone
+  decides whether an exact delegation is resumed.
 - it provides a compact cursor-aware slash command palette above the visible
   composer, plus a separate pageable help overlay for the commands currently
   implemented by the v2 client.
@@ -200,13 +200,11 @@ the local one-shot marker continues to gate duplicate decisions across timeout
 and reconnect; only a server-observed review or run transition clears it.
 Esc or Ctrl+C after that marker sends an ordered `run.interrupt`, while another
 Ctrl+C exits. Cancellation does not masquerade as rejection. Delegation
-continuation is a separate checkpoint capability: the controller offers
-`/continue` while the focused snapshot reports `hasResumableDelegation` and the
-session is idle, sends `resume_active` for that command, and sends
-`supersede_active` for ordinary chat input. Accepted input does not mutate the
-checkpoint-owned capability; the active run hides the affordance until the
-next authoritative snapshot. The idle status and composer placeholder make the
-choice visible without introducing a second editor or composer target.
+continuation is an explicit command rather than Session state: the controller
+sends `resume_active` for `/continue <guidance>` and `supersede_active` for
+ordinary chat input. The orchestrator applies that intent to its authoritative
+`taskActiveDelegation`; no client-local availability flag or cancellation
+history participates.
 
 The policy picker also remains view-local, but its current value does not. The
 host exposes the process-wide policy in snapshot runtime metadata, persists

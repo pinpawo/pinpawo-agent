@@ -1,6 +1,5 @@
 import {
   listTuiCommands,
-  type TuiCommandAvailability,
   type TuiCommandDefinition,
 } from './commandRegistry';
 
@@ -33,12 +32,11 @@ const CLOSED_COMMAND_PALETTE: CommandPaletteModel = {
 export function buildCommandPaletteModel(
   input: CommandPaletteInput,
   selectedIndex = 0,
-  availability: TuiCommandAvailability = {},
 ): CommandPaletteModel {
   const query = resolveCommandPaletteQuery(input);
   if (query === null) return CLOSED_COMMAND_PALETTE;
 
-  const items = listTuiCommands(availability)
+  const items = listTuiCommands()
     .filter((command) => commandMatchesQuery(command, query));
   return {
     open: true,

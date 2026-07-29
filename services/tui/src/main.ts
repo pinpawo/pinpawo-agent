@@ -653,8 +653,6 @@ function syncComposerInputOverlays() {
       && policyPicker.phase === 'closed'
       && noticeOverlay.phase === 'closed'
       && approvalController.getState().phase === 'closed',
-    canContinueActiveDelegation:
-      controller.canContinueActiveDelegation(),
   });
   refreshCommandOverlay();
 
@@ -1196,10 +1194,7 @@ function handleCommandOverlayAction(action: CommandOverlayAction) {
 
 function openCommandHelpUi() {
   if (terminalHandoffOpen) return;
-  commandOverlay = openCommandHelp({
-    canContinueActiveDelegation:
-      controller.canContinueActiveDelegation(),
-  });
+  commandOverlay = openCommandHelp();
   closeFileMentionOverlay();
   composer.blur();
   refreshCommandOverlay();
@@ -1224,8 +1219,6 @@ function submitComposerInput(input = composer.plainText) {
     text: input,
     attachmentCount: attachments.length,
     mode: composerMode,
-    canContinueActiveDelegation:
-      controller.canContinueActiveDelegation(),
   });
 
   switch (intent.type) {
@@ -1566,7 +1559,6 @@ function submitFailureText(
     | 'not-ready'
     | 'busy'
     | 'empty'
-    | 'continuation-unavailable'
     | 'send-failed',
 ) {
   switch (reason) {
@@ -1576,8 +1568,6 @@ function submitFailureText(
       return 'wait for the current response to finish';
     case 'empty':
       return 'message is empty';
-    case 'continuation-unavailable':
-      return 'no suspended delegation is available for this session';
     case 'send-failed':
       return 'message could not be sent';
   }

@@ -8,7 +8,6 @@ function createSubmitHarness(overrides: {
   openExternalEditor?: (initialText: string) => void;
   composerTarget?: 'chat' | 'studio';
   studioConversationId?: string | null;
-  canContinueActiveDelegation?: boolean;
 } = {}) {
   const messages: string[] = [];
   const actions: TuiAction[] = [];
@@ -51,8 +50,6 @@ function createSubmitHarness(overrides: {
       runtimeController: {
         isConnected: () => true,
         isBusy: () => false,
-        canContinueActiveDelegation: () =>
-          overrides.canContinueActiveDelegation ?? false,
         continueActiveDelegation: (message) => {
           sent.push(`continue:${message}`);
           return true;
@@ -119,12 +116,11 @@ test('submitCurrentInputFromController selects the chat composer target for /cha
   assert.deepEqual(harness.sent, ['clear']);
 });
 
-test('submitCurrentInputFromController continues only an available suspended delegation', () => {
+test('submitCurrentInputFromController sends explicit delegation continuation', () => {
   const harness = createSubmitHarness({
     inputValue: '/continue apply the new constraints',
     composerTarget: 'studio',
     studioConversationId: 'conversation-1',
-    canContinueActiveDelegation: true,
   });
 
   harness.submit();
@@ -135,20 +131,9 @@ test('submitCurrentInputFromController continues only an available suspended del
   assert.deepEqual(harness.sent, ['continue:apply the new constraints']);
 });
 
-test('submitCurrentInputFromController rejects unavailable or empty continuation', () => {
-  const unavailable = createSubmitHarness({
-    inputValue: '/continue apply the new constraints',
-  });
-
-  unavailable.submit();
-
-  assert.deepEqual(unavailable.sent, ['clear']);
-  assert.deepEqual(unavailable.messages, ['当前没有可继续的挂起委派。']);
-  assert.deepEqual(unavailable.actions, []);
-
+test('submitCurrentInputFromController rejects empty continuation guidance', () => {
   const empty = createSubmitHarness({
     inputValue: '/continue',
-    canContinueActiveDelegation: true,
   });
 
   empty.submit();

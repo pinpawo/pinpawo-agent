@@ -23,7 +23,6 @@ export function resolveComposerIntent(input: {
   text: string;
   attachmentCount: number;
   mode: ComposerMode;
-  canContinueActiveDelegation: boolean;
 }): ComposerIntent {
   const parsed = input.attachmentCount === 0
     ? parseTuiCommand(input.text)
@@ -52,12 +51,6 @@ export function resolveComposerIntent(input: {
         return {
           type: 'notice',
           message: 'provide guidance: /continue <guidance>',
-        };
-      }
-      if (!input.canContinueActiveDelegation) {
-        return {
-          type: 'notice',
-          message: 'no suspended delegation is available for this session',
         };
       }
       return {

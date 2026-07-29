@@ -5256,6 +5256,18 @@ function interruptedLaneMessages(params: {
 }
 
 test('fresh-turn active delegation transitions are explicit for pending and awaiting states', () => {
+  const noActiveDelegation = {
+    ...buildOrchestratorRunInput(
+      [new HumanMessage('没有挂起任务时继续')],
+      { activeDelegationTransition: 'resume_active' },
+    ),
+    taskActiveDelegation: null,
+  } as OrchestratorStateType;
+  assert.deepEqual(
+    applyActiveDelegationTransition(noActiveDelegation),
+    {},
+  );
+
   for (const status of ['pending', 'awaiting_decision'] as const) {
     const activeDelegation: TaskActiveDelegation = {
       id: `old-${status}`,

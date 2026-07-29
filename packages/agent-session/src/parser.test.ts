@@ -79,30 +79,3 @@ test('parseAgentSessionSnapshot retains and validates global review policy runti
     },
   }), null);
 });
-
-test('parseAgentSessionSnapshot retains and validates resumable delegation state', () => {
-  const base = {
-    version: 3,
-    session: {
-      sessionId: 'chat:pet',
-      kind: 'chat',
-      timeline: [],
-      activeRun: null,
-    },
-  } as const;
-
-  assert.equal(parseAgentSessionSnapshot({
-    ...base,
-    session: {
-      ...base.session,
-      hasResumableDelegation: true,
-    },
-  })?.session.hasResumableDelegation, true);
-  assert.equal(parseAgentSessionSnapshot({
-    ...base,
-    session: {
-      ...base.session,
-      hasResumableDelegation: 'yes',
-    },
-  }), null);
-});

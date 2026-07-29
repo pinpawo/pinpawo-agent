@@ -157,7 +157,7 @@ test('reduceSession deterministically replays canonical run inputs', () => {
   });
 });
 
-test('chat acceptance clears resumable delegation while Studio leaves it untouched', () => {
+test('accepted input does not overwrite checkpoint-owned continuation availability', () => {
   const resumable: AgentSession = {
     ...createDomainSession(),
     hasResumableDelegation: true,
@@ -168,7 +168,7 @@ test('chat acceptance clears resumable delegation while Studio leaves it untouch
     kind: 'chat',
     text: 'continue as a fresh turn',
   }, { observedAt: 1_000 });
-  assert.equal(chat.hasResumableDelegation, undefined);
+  assert.equal(chat.hasResumableDelegation, true);
 
   const studio = reduceSession(resumable, {
     type: 'user.accepted',

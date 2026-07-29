@@ -39,9 +39,10 @@ dogfood entrypoint from issue #454:
 - it restores canonical pending reviews from snapshots and provides an
   OpenTUI-owned approval overlay for single or batched approve, reject, respond,
   and cancel flows.
-- it treats review cancellation as delegation suspension: after the host
-  authoritatively reports `interrupted`, `/continue <guidance>` resumes only
-  that affected session and allows the guarded action to be reviewed again.
+- it projects unfinished delegation availability from the focused session's
+  authoritative checkpoint: while that session is idle, `/continue <guidance>`
+  resumes the exact delegation whether it was suspended by this TUI, another
+  client, or a previous process.
 - it provides a compact cursor-aware slash command palette above the visible
   composer, plus a separate pageable help overlay for the commands currently
   implemented by the v2 client.
@@ -154,8 +155,8 @@ Production client controls:
   session picker, `/transcript` (or `/history`) opens the timeline pager,
   `/edit [text]` opens `$VISUAL` or `$EDITOR`, `/export [path]` writes a
   Markdown transcript, `/continue <guidance>` resumes the current session's
-  review-suspended delegation, `/review-policy` aliases `/policy`, and `/quit`
-  exits;
+  unfinished checkpointed delegation, `/review-policy` aliases `/policy`, and
+  `/quit` exits;
 - `/studio [task]` enters Studio mode and optionally starts a task; subsequent
   prose keeps the same Studio conversation until `/chat` returns to chat mode;
 - ordinary prose containing a path remains text, and unavailable path-only
@@ -200,9 +201,12 @@ and reconnect; only a server-observed review or run transition clears it.
 Esc or Ctrl+C after that marker sends an ordered `run.interrupt`, while another
 Ctrl+C exits. Cancellation does not masquerade as rejection. Delegation
 continuation is a separate checkpoint capability: the controller offers
-`/continue` while the focused snapshot reports `hasResumableDelegation`, sends
-`resume_active` for that command, and sends `supersede_active` for ordinary
-chat input.
+`/continue` while the focused snapshot reports `hasResumableDelegation` and the
+session is idle, sends `resume_active` for that command, and sends
+`supersede_active` for ordinary chat input. Accepted input does not mutate the
+checkpoint-owned capability; the active run hides the affordance until the
+next authoritative snapshot. The idle status and composer placeholder make the
+choice visible without introducing a second editor or composer target.
 
 The policy picker also remains view-local, but its current value does not. The
 host exposes the process-wide policy in snapshot runtime metadata, persists

@@ -127,6 +127,9 @@ export function formatComposerPlaceholder(
   if (run) {
     return `Waiting for ${actor} · draft next message · Esc interrupt`;
   }
+  if (session.hasResumableDelegation) {
+    return 'Suspended delegation available · /continue <guidance> or type a new request';
+  }
   return composerMode === 'studio'
     ? STUDIO_COMPOSER_PLACEHOLDER
     : COMPOSER_PLACEHOLDER;
@@ -176,7 +179,11 @@ function formatCompactUsage(session: AgentSession) {
 
 function formatRunStatus(session: AgentSession) {
   const run = session.activeRun;
-  if (!run) return 'idle';
+  if (!run) {
+    return session.hasResumableDelegation
+      ? 'delegation paused · /continue'
+      : 'idle';
+  }
   if (run.state === 'waiting_review') return 'review';
   if (run.state === 'interrupting') return 'interrupting';
   if (run.activity === 'using_tool') return 'tool';

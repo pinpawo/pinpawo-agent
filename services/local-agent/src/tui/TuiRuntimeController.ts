@@ -103,6 +103,7 @@ export class TuiRuntimeController {
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private interruptPendingNoticeTimeout: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
+  private readonly continuationRefreshPendingSessionIds = new Set<string>();
   private readonly localServerClient: TuiLocalServerClient;
   private readonly connection: LocalAgentConnection;
 
@@ -148,9 +149,10 @@ export class TuiRuntimeController {
   }
 
   canContinueActiveDelegation() {
-    return selectFocusedSession(
-      this.options.getState(),
-    )?.hasResumableDelegation === true;
+    const session = selectFocusedSession(this.options.getState());
+    return session?.activeRun === null
+      && session.hasResumableDelegation === true
+      && !this.continuationRefreshPendingSessionIds.has(session.sessionId);
   }
 
   sendChatRequest(message: string) {
@@ -188,6 +190,10 @@ export class TuiRuntimeController {
     })) {
       this.appendSystemMessage(TUI_TEXT.disconnectedCannotSend);
       return false;
+    }
+    const sessionId = selectFocusedSession(this.options.getState())?.sessionId;
+    if (sessionId) {
+      this.continuationRefreshPendingSessionIds.add(sessionId);
     }
     this.options.setNow(now);
     this.options.dispatch({
@@ -449,6 +455,9 @@ export class TuiRuntimeController {
       if (reason === 'completion' && selectFocusedBusy(this.options.getState())) {
         return false;
       }
+      this.continuationRefreshPendingSessionIds.delete(
+        snapshot.session.sessionId,
+      );
       this.options.dispatch({
         type: 'session.snapshot.loaded',
         reason,

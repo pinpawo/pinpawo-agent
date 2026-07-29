@@ -72,7 +72,7 @@ const COMMANDS: readonly TuiCommandDefinition[] = [{
 }, {
   name: 'continue',
   usage: '/continue <guidance>',
-  description: 'Continue the delegation suspended from review',
+  description: 'Continue the unfinished delegation in this session',
 }, {
   name: 'resume',
   usage: '/resume',

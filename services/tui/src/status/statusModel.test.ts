@@ -83,6 +83,13 @@ test('composer placeholder acknowledges active work without blocking drafting', 
   assert.equal(
     formatComposerPlaceholder({
       ...session,
+      hasResumableDelegation: true,
+    }),
+    'Suspended delegation available · /continue <guidance> or type a new request',
+  );
+  assert.equal(
+    formatComposerPlaceholder({
+      ...session,
       activeRun: {
         requestId: 'request',
         state: 'running',
@@ -135,4 +142,22 @@ test('composer placeholder acknowledges active work without blocking drafting', 
     }),
     'Review required · use the approval panel',
   );
+});
+
+test('idle continuation capability is visible in status without changing run state', () => {
+  const state: TuiSessionState = {
+    connection: 'ready',
+    session: {
+      sessionId: 'chat:one',
+      kind: 'chat',
+      timeline: [],
+      activeRun: null,
+      hasResumableDelegation: true,
+    },
+  };
+
+  assert.deepEqual(formatStatusLines(state, 80), [
+    'connected · delegation paused · /continue',
+    'in/out: –/–',
+  ]);
 });

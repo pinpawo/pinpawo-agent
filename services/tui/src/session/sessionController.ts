@@ -170,6 +170,7 @@ export class TuiSessionController {
   private readonly snapshotRequests = new Map<string, SnapshotReason>();
   private readonly sessionCommands = new Map<string, PendingSessionCommand>();
   private runtimeConfigUpdate: PendingRuntimeConfigUpdate | null = null;
+  private continuationRefreshPendingSessionId: string | null = null;
   private state: TuiSessionState = {
     connection: 'idle',
     session: createPendingSession(),
@@ -241,7 +242,10 @@ export class TuiSessionController {
   }
 
   canContinueActiveDelegation() {
-    return this.state.session.hasResumableDelegation === true;
+    return this.state.session.activeRun === null
+      && this.state.session.hasResumableDelegation === true
+      && this.continuationRefreshPendingSessionId
+        !== this.state.session.sessionId;
   }
 
   continueActiveDelegation(message: string): SubmitChatResult {
@@ -280,6 +284,8 @@ export class TuiSessionController {
     })) {
       return { ok: false, reason: 'send-failed' };
     }
+    this.continuationRefreshPendingSessionId =
+      this.state.session.sessionId;
     this.updateSession(reduceSession(this.state.session, {
       type: 'user.accepted',
       requestId,
@@ -645,6 +651,7 @@ export class TuiSessionController {
       this.clearSessionCommand(pending);
       this.clearSnapshotTimer();
       this.snapshotRequests.clear();
+      this.acceptContinuationSnapshot(message.snapshot.session.sessionId);
       this.updateSession(applySessionSnapshot(
         this.state.session,
         message.snapshot,
@@ -673,6 +680,7 @@ export class TuiSessionController {
       this.clearSessionCommand(pending);
       this.clearSnapshotTimer();
       this.snapshotRequests.clear();
+      this.acceptContinuationSnapshot(message.snapshot.session.sessionId);
       this.updateSession(applySessionSnapshot(
         this.state.session,
         message.snapshot,
@@ -700,6 +708,7 @@ export class TuiSessionController {
       const session = reason === 'completion'
         ? mergeCompletionSnapshotMetadata(this.state.session, applied)
         : applied;
+      this.acceptContinuationSnapshot(message.snapshot.session.sessionId);
       if (reason === 'startup' || reason === 'reconnect') {
         this.reconnectAttempt = 0;
         this.state = {
@@ -948,6 +957,12 @@ export class TuiSessionController {
     if (session === this.state.session) return;
     this.state = { ...this.state, session };
     this.notify();
+  }
+
+  private acceptContinuationSnapshot(sessionId: string) {
+    if (this.continuationRefreshPendingSessionId === sessionId) {
+      this.continuationRefreshPendingSessionId = null;
+    }
   }
 
   private setConnection(

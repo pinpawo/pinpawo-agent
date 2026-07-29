@@ -367,6 +367,7 @@ test('TuiRuntimeController reads continuation availability from the focused sess
     assert.equal(continuation.message, 'apply the new constraints');
     assert.equal(continuation.activeDelegationTransition, 'resume_active');
   }
+  assert.equal(harness.controller.canContinueActiveDelegation(), false);
 });
 
 test('TuiRuntimeController explicitly supersedes a suspended delegation for ordinary chat', () => {
@@ -388,6 +389,19 @@ test('TuiRuntimeController explicitly supersedes a suspended delegation for ordi
 
 test('TuiRuntimeController denies continuation when the snapshot omits availability', () => {
   const harness = createController(idleState());
+  assert.equal(harness.controller.canContinueActiveDelegation(), false);
+});
+
+test('TuiRuntimeController hides checkpoint continuation while its session has an active run', () => {
+  const state = idleState();
+  state.sessions['sess-1']!.hasResumableDelegation = true;
+  state.sessions['sess-1']!.activeRun = {
+    requestId: 'req-active',
+    state: 'running',
+    activity: 'thinking',
+  };
+  const harness = createController(state);
+
   assert.equal(harness.controller.canContinueActiveDelegation(), false);
 });
 

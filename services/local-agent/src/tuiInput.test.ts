@@ -129,7 +129,7 @@ test('formatTuiCommandHelp is generated from visible command metadata', () => {
   );
   assert.equal(
     formatTuiCommandHelp({ canContinueActiveDelegation: true }),
-    '/new 新会话 · /studio [任务] 进入 Studio 模式 · /chat 退出 Studio · /policy 选择授权策略 · /help · /transcript 浏览历史 · /export [path] 导出 transcript(默认当前目录) · /edit [文本] 外部编辑 · /continue <指导> 继续挂起委派 · /resume 恢复会话 · /quit',
+    '/new 新会话 · /studio [任务] 进入 Studio 模式 · /chat 退出 Studio · /policy 选择授权策略 · /help · /transcript 浏览历史 · /export [path] 导出 transcript(默认当前目录) · /edit [文本] 外部编辑 · /continue <指导> 继续当前会话中未完成的委派 · /resume 恢复会话 · /quit',
   );
 });
 

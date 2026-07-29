@@ -150,11 +150,7 @@ function acceptUserInput(
   input: Extract<AgentSessionInput, { type: 'user.accepted' }>,
   context: AgentSessionReductionContext,
 ) {
-  const withoutUsage = omitRunTokenUsage(
-    input.kind === 'chat'
-      ? omitResumableDelegation(session)
-      : session,
-  );
+  const withoutUsage = omitRunTokenUsage(session);
   const message = input.message ?? {};
   return appendMessage({
     ...withoutUsage,

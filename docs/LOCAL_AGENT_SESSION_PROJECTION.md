@@ -86,6 +86,17 @@ client-local interaction state and are not part of the shared snapshot.
 `ReviewAction` contains only the checkpoint-derived batch identity and ordered
 review specifications; it does not contain review-command progress.
 
+Delegation continuation is checkpoint-owned rather than inferred from a
+particular client's review-cancellation history. The local-agent derives
+`AgentSession.hasResumableDelegation` only from the checkpoint's non-null
+`taskActiveDelegation` pointer and includes that capability in snapshots.
+Clients expose continuation only while the projected session is idle. A
+`resume_active` request re-enters that exact delegation, while ordinary chat
+uses `supersede_active`. Optimistic `user.accepted` projection must not clear the
+checkpoint-owned capability. The sending client may locally suppress the
+affordance until a fresh snapshot reports the result of either transition, but
+that one-way gate cannot grant continuation or mutate shared Session state.
+
 Live TUI actions carry `AgentSessionMessageInput` directly. The TUI no
 longer defines a separate `MessageCell` model. Message `createdAt` / `updatedAt`
 values use ISO timestamps in state, and terminal-local time formatting happens

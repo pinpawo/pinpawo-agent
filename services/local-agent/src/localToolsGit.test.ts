@@ -15,8 +15,10 @@ import {
   ghIssueCreateTool,
   ghIssueCommentsTool,
   ghIssueViewTool,
+  ghPrCommentsTool,
   ghPrCreateTool,
   ghPrDiffTool,
+  ghPrViewTool,
   ghReadContentTool,
   gitStatusTool,
 } from './toolkits/local/gitTools';
@@ -166,6 +168,85 @@ esac`);
       repository: 'pinpawo/pinpawo-agent',
     }),
     'https://github.com/pinpawo/pinpawo-agent/issues/34',
+  );
+});
+
+test('gh_pr_view reads bounded overview while gh_pr_comments owns discussion', async (t) => {
+  const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-gh-pr-view-'));
+  t.after(() => rmSync(workdir, { recursive: true, force: true }));
+  const prUrl = 'https://github.com/pinpawo/pinpawo-agent/pull/12';
+  const fakeGh = createFakeGh(t, `
+case "$*" in
+  "pr view 12"|"pr view ${prUrl}"|"pr view codex/fix")
+    printf 'Fix empty PR comments\\nstate: OPEN\\nauthor: octocat\\nbody: Details\\n'
+    ;;
+  "pr view 12 --comments"|"pr view ${prUrl} --comments"|"pr view codex/fix --comments")
+    exit 0
+    ;;
+  *)
+    printf 'unexpected gh arguments: %s\\n' "$*" >&2
+    exit 2
+    ;;
+esac`);
+
+  const expected = 'Fix empty PR comments\nstate: OPEN\nauthor: octocat\nbody: Details';
+  assert.equal(await ghPrViewTool.invoke({ cwd: workdir, pr: '12' }), expected);
+  assert.equal(await ghPrViewTool.invoke({ cwd: workdir, pr: prUrl }), expected);
+  assert.equal(await ghPrViewTool.invoke({ cwd: workdir, pr: 'codex/fix' }), expected);
+  assert.equal(
+    await ghPrCommentsTool.invoke({ cwd: workdir, pr: '12' }),
+    '(no PR comments or reviews)',
+  );
+  assert.equal(
+    await ghPrCommentsTool.invoke({ cwd: workdir, pr: prUrl }),
+    '(no PR comments or reviews)',
+  );
+
+  writeFileSync(fakeGh, `#!/bin/sh
+case "$*" in
+  "pr view 12")
+    awk 'BEGIN { for (i = 0; i < 30001; i++) printf "x" }'
+    ;;
+esac
+`, 'utf-8');
+  const boundedOverview = String(await ghPrViewTool.invoke({ cwd: workdir, pr: '12' }));
+  assert.equal(boundedOverview.startsWith('x'.repeat(30_000)), true);
+  assert.match(boundedOverview, /\[truncated 1 chars\]$/);
+
+  writeFileSync(fakeGh, `#!/bin/sh
+case "$*" in
+  "pr view 12 --comments")
+    printf 'Reviewed PR\\nreview: CHANGES_REQUESTED\\ncomment: Please add a test.\\n'
+    ;;
+  *)
+    printf 'fallback should not run: %s\\n' "$*" >&2
+    exit 2
+    ;;
+esac
+`, 'utf-8');
+  assert.match(
+    String(await ghPrCommentsTool.invoke({ cwd: workdir, pr: '12' })),
+    /comment: Please add a test\./,
+  );
+
+  writeFileSync(fakeGh, '#!/bin/sh\nexit 0\n', 'utf-8');
+  await assert.rejects(
+    () => ghPrViewTool.invoke({ cwd: workdir, pr: '12' }),
+    /gh command returned no output/,
+  );
+  assert.equal(
+    await ghPrCommentsTool.invoke({ cwd: workdir, pr: '12' }),
+    '(no PR comments or reviews)',
+  );
+
+  writeFileSync(fakeGh, '#!/bin/sh\nprintf \'authentication required\\n\' >&2\nexit 1\n', 'utf-8');
+  await assert.rejects(
+    () => ghPrViewTool.invoke({ cwd: workdir, pr: '12' }),
+    /gh command failed \(exit 1\):\nauthentication required/,
+  );
+  await assert.rejects(
+    () => ghPrCommentsTool.invoke({ cwd: workdir, pr: '12' }),
+    /gh command failed \(exit 1\):\nauthentication required/,
   );
 });
 
@@ -364,6 +445,7 @@ test('loadCoreLocalTools keeps git tools available for toolkit composition', asy
   assert.equal(tools.some((item) => item.name === 'git_commit'), true);
   assert.equal(tools.some((item) => item.name === 'git_push'), true);
   assert.equal(tools.some((item) => item.name === 'gh_pr_create'), true);
+  assert.equal(tools.some((item) => item.name === 'gh_pr_comments'), true);
   assert.equal(tools.some((item) => item.name === 'gh_issue_create'), true);
 });
 
@@ -385,6 +467,7 @@ test('createGitToolkit exposes a dedicated git capability surface', async () => 
       'git_push',
       'gh_pr_create',
       'gh_pr_view',
+      'gh_pr_comments',
       'gh_pr_diff',
       'gh_issue_create',
       'gh_issue_view',
@@ -397,6 +480,7 @@ test('createGitToolkit exposes a dedicated git capability surface', async () => 
   assert.equal(definition(toolkit, 'git_push')?.operation?.title, '推送 git 分支');
   assert.equal(definition(toolkit, 'gh_pr_create')?.operation?.title, '创建 GitHub PR');
   assert.equal(definition(toolkit, 'gh_pr_view')?.operation?.title, '查看 GitHub PR');
+  assert.equal(definition(toolkit, 'gh_pr_comments')?.operation?.title, '查看 GitHub PR 评论');
   assert.equal(definition(toolkit, 'gh_pr_diff')?.operation?.title, '查看 GitHub PR diff');
   assert.equal(definition(toolkit, 'gh_issue_comments')?.operation?.title, '查看 GitHub issue 评论');
   assert.equal(definition(toolkit, 'gh_read_content')?.operation?.title, '读取 GitHub 临时内容');

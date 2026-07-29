@@ -717,14 +717,36 @@ export const ghIssueCreateTool = tool(
 export const ghPrViewTool = tool(
   async ({ cwd, pr }: { cwd?: string; pr: string }, runtime: ToolRuntime) => {
     try {
-      return await runGh(['pr', 'view', normalizeGhTarget(pr, 'pr'), '--comments'], cwd);
+      return await runGh(['pr', 'view', normalizeGhTarget(pr, 'pr')], cwd);
     } catch (error) {
       return createGhToolError('gh_pr_view', error, runtime);
     }
   },
   {
     name: 'gh_pr_view',
-    description: '使用 GitHub CLI 查看 PR 元数据、描述、review 和评论。pr 可为 PR 编号、URL 或分支名；默认当前 workdir 仓库。',
+    description: '使用 GitHub CLI 查看 PR 概览、元数据和描述，不读取评论。pr 可为 PR 编号、URL 或分支名；默认当前 workdir 仓库。',
+    schema: z.object({
+      cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
+      pr: z.string().min(1).describe('PR 编号、URL 或分支名'),
+    }),
+  },
+);
+
+export const ghPrCommentsTool = tool(
+  async ({ cwd, pr }: { cwd?: string; pr: string }, runtime: ToolRuntime) => {
+    try {
+      return await runGh(
+        ['pr', 'view', normalizeGhTarget(pr, 'pr'), '--comments'],
+        cwd,
+        '(no PR comments or reviews)',
+      );
+    } catch (error) {
+      return createGhToolError('gh_pr_comments', error, runtime);
+    }
+  },
+  {
+    name: 'gh_pr_comments',
+    description: '使用 GitHub CLI 查看 PR review 和评论；没有 review 或评论时返回明确的空结果。pr 可为 PR 编号、URL 或分支名；输出受统一长度上限约束。',
     schema: z.object({
       cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
       pr: z.string().min(1).describe('PR 编号、URL 或分支名'),
@@ -853,6 +875,7 @@ export const gitTools = [
   gitPushTool as NamedStructuredTool<'git_push'>,
   ghPrCreateTool as NamedStructuredTool<'gh_pr_create'>,
   ghPrViewTool as NamedStructuredTool<'gh_pr_view'>,
+  ghPrCommentsTool as NamedStructuredTool<'gh_pr_comments'>,
   ghPrDiffTool as NamedStructuredTool<'gh_pr_diff'>,
   ghIssueCreateTool as NamedStructuredTool<'gh_issue_create'>,
   ghIssueViewTool as NamedStructuredTool<'gh_issue_view'>,
@@ -946,6 +969,15 @@ export const gitOperationMetadata = {
   },
   gh_pr_view: {
     title: '查看 GitHub PR',
+    summarizeInput: (input) => {
+      const record = readRecord(input);
+      return {
+        target: readString(record, 'pr') ?? readString(record, 'cwd'),
+      };
+    },
+  },
+  gh_pr_comments: {
+    title: '查看 GitHub PR 评论',
     summarizeInput: (input) => {
       const record = readRecord(input);
       return {

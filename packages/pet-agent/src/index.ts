@@ -39,9 +39,11 @@ export {
 
 export type {
   SubagentInputState,
+  SubagentExecutionScope,
   SubagentPromptSection,
   SubagentResult,
   SubagentRunInput,
+  SubagentRuntimeContext,
   SubagentRuntimeEvent,
   SubagentToolLifecycleEvent,
   SubagentToolOperationMetadata,

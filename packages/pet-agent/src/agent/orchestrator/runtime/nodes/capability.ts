@@ -164,6 +164,13 @@ export function createCapabilityNode(params: {
       maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
       contextWindowTokens: subagentContextWindowTokens,
       middleware: usedResolvedToolkitExecution.middleware,
+      runtimeContext: {
+        executionScope: {
+          threadId,
+          runId: transcriptRunId,
+          delegationId: runNextDelegation.id,
+        },
+      },
       runnableConfig,
       signal: runnableConfig?.signal,
       artifacts: artifactRefs,

@@ -19,6 +19,10 @@ import { ChromeExtensionBrowserSession } from './drivers/chromeExtension/session
 import { browserRuntime } from './runtime';
 import { persistBrowserScreenshot } from './screenshot';
 import { BrowserOperationError } from './errors';
+import {
+  BrowserContextOwnership,
+  type BrowserExecutionOwner,
+} from './ownership';
 
 export {
   buildBrowserExtractPayload,
@@ -637,6 +641,13 @@ type BrowserImpl = PlaywrightBrowserSession | ChromeExtensionBrowserSession;
 export class BrowserSession {
   private impl: BrowserImpl | null = null;
   private initPromise: Promise<BrowserImpl> | null = null;
+  private readonly ownership: BrowserContextOwnership | null;
+
+  constructor(options: { requireExecutionOwner?: boolean } = {}) {
+    this.ownership = options.requireExecutionOwner
+      ? new BrowserContextOwnership()
+      : null;
+  }
 
   private ensureImpl(requiresPlaywright = false): Promise<BrowserImpl> {
     if (this.impl) return Promise.resolve(this.impl);
@@ -654,33 +665,112 @@ export class BrowserSession {
     return this.initPromise;
   }
 
-  async open(url: string, opts?: BrowserOpenOptions) {
-    const requiresPlaywright = Boolean(
-      opts?.headless
-      || opts?.userDataDir
-      || (opts?.session && opts.session !== DEFAULT_SESSION),
+  async open(
+    url: string,
+    opts?: BrowserOpenOptions,
+    owner: BrowserExecutionOwner | null = null,
+  ) {
+    const operation = async () => {
+      const requiresPlaywright = Boolean(
+        opts?.headless
+        || opts?.userDataDir
+        || (opts?.session && opts.session !== DEFAULT_SESSION),
+      );
+      return (await this.ensureImpl(requiresPlaywright)).open(url, opts);
+    };
+    return this.ownership
+      ? this.ownership.runOpen(owner, operation)
+      : operation();
+  }
+  async openWithProfile(
+    url: string,
+    userDataDir: string,
+    opts?: Omit<BrowserOpenOptions, 'session' | 'userDataDir'>,
+    owner: BrowserExecutionOwner | null = null,
+  ) {
+    const operation = async () => (
+      (await this.ensureImpl(true)).open(url, { ...opts, userDataDir })
     );
-    return (await this.ensureImpl(requiresPlaywright)).open(url, opts);
+    return this.ownership
+      ? this.ownership.runOpen(owner, operation)
+      : operation();
   }
-  async openWithProfile(url: string, userDataDir: string, opts?: Omit<BrowserOpenOptions, 'session' | 'userDataDir'>) {
-    return (await this.ensureImpl(true)).open(url, { ...opts, userDataDir });
+  async snapshot(owner: BrowserExecutionOwner | null = null) {
+    const operation = async () => (await this.ensureImpl()).snapshot();
+    return this.ownership
+      ? this.ownership.runOwned(owner, operation)
+      : operation();
   }
-  async snapshot() { return (await this.ensureImpl()).snapshot(); }
-  async click(target: string | BrowserElementTarget) { return (await this.ensureImpl()).click(target); }
-  async type(target: string | BrowserElementTarget, text: string, submit?: boolean) {
-    return (await this.ensureImpl()).type(target, text, submit);
+  async click(
+    target: string | BrowserElementTarget,
+    owner: BrowserExecutionOwner | null = null,
+  ) {
+    const operation = async () => (await this.ensureImpl()).click(target);
+    return this.ownership
+      ? this.ownership.runOwned(owner, operation)
+      : operation();
   }
-  async scroll(options?: BrowserScrollOptions) { return (await this.ensureImpl()).scroll(options); }
+  async type(
+    target: string | BrowserElementTarget,
+    text: string,
+    submit?: boolean,
+    owner: BrowserExecutionOwner | null = null,
+  ) {
+    const operation = async () => (await this.ensureImpl()).type(target, text, submit);
+    return this.ownership
+      ? this.ownership.runOwned(owner, operation)
+      : operation();
+  }
+  async scroll(
+    options?: BrowserScrollOptions,
+    owner: BrowserExecutionOwner | null = null,
+  ) {
+    const operation = async () => (await this.ensureImpl()).scroll(options);
+    return this.ownership
+      ? this.ownership.runOwned(owner, operation)
+      : operation();
+  }
   async wait(
     target?: string | BrowserElementTarget,
     timeoutMs?: number,
     state?: BrowserWaitState,
+    owner: BrowserExecutionOwner | null = null,
   ) {
-    return (await this.ensureImpl()).wait(target, timeoutMs, state);
+    const operation = async () => (
+      (await this.ensureImpl()).wait(target, timeoutMs, state)
+    );
+    return this.ownership
+      ? this.ownership.runOwned(owner, operation)
+      : operation();
   }
-  async extract(options?: BrowserExtractOptions) { return (await this.ensureImpl()).extract(options); }
-  async screenshot() { return (await this.ensureImpl()).screenshot(); }
-  async close() {
+  async extract(
+    options?: BrowserExtractOptions,
+    owner: BrowserExecutionOwner | null = null,
+  ) {
+    const operation = async () => (await this.ensureImpl()).extract(options);
+    return this.ownership
+      ? this.ownership.runOwned(owner, operation)
+      : operation();
+  }
+  async screenshot(owner: BrowserExecutionOwner | null = null) {
+    const operation = async () => (await this.ensureImpl()).screenshot();
+    return this.ownership
+      ? this.ownership.runOwned(owner, operation)
+      : operation();
+  }
+  async close(owner: BrowserExecutionOwner | null = null) {
+    const operation = async () => this.closeImpl();
+    return this.ownership
+      ? this.ownership.closeOwned(owner, operation)
+      : operation();
+  }
+  async shutdown() {
+    const operation = async () => this.closeImpl();
+    return this.ownership
+      ? this.ownership.shutdown(operation)
+      : operation();
+  }
+  private async closeImpl() {
     const impl = this.impl ?? (this.initPromise ? await this.initPromise : null);
     if (!impl) return 'browser session closed';
     try {
@@ -693,7 +783,9 @@ export class BrowserSession {
   async listSessions() { return (await this.ensureImpl()).listSessions(); }
 }
 
-export const browserSession = new BrowserSession();
+export const browserSession = new BrowserSession({
+  requireExecutionOwner: true,
+});
 
 // ── Lightweight detection (no browser launch) ─────────────────────────────────
 export async function detectBrowserStatus(): Promise<BrowserStatus> {

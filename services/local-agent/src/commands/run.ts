@@ -109,7 +109,7 @@ export async function runAgent(options: RunAgentOptions = {}) {
     process.off('SIGTERM', handleSigterm);
     closeLocalTransport?.();
     runtime?.requestStop();
-    await browserSession.close().catch((error) => {
+    await browserSession.shutdown().catch((error) => {
       console.warn('[local-agent] failed to close browser session:', error instanceof Error ? error.message : error);
     });
     if (browserRuntimeStarted) {

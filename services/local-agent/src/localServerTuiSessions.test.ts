@@ -313,6 +313,7 @@ test('LocalServerTuiSessionService reads one checkpoint point for messages and p
           messages: [new HumanMessage('checkpoint prompt')],
           pendingHumanReview: { review },
           hasPendingContinuation: true,
+          hasResumableDelegation: true,
         };
       },
     } as never,
@@ -353,6 +354,7 @@ test('LocalServerTuiSessionService reads one checkpoint point for messages and p
   });
   assert.deepEqual(checkpoint.messages, [{ role: 'user', text: 'checkpoint prompt' }]);
   assert.equal(checkpoint.sessionTokenUsage, null);
+  assert.equal(checkpoint.hasResumableDelegation, true);
   assert.equal(capturedThreadId, session.threadId);
   assert.equal(readCount, 1);
 });

@@ -92,6 +92,48 @@ test('adapter attributes root answer tokens to assistant and drops internal deci
     && Array.isArray((event.values as { messages?: unknown }).messages)));
 });
 
+test('adapter drops synthetic assistant messages written by prepare', () => {
+  const state: RootStreamAdapterState = new Map();
+  const namespace = ['prepare:task-1'];
+  const events = [
+    readRootStreamChatEvent({
+      type: 'event',
+      seq: 1,
+      method: 'messages',
+      params: {
+        namespace,
+        data: { event: 'message-start', role: 'ai', id: 'briefing-1' },
+      },
+    }, state),
+    readRootStreamChatEvent({
+      type: 'event',
+      seq: 2,
+      method: 'messages',
+      params: {
+        namespace,
+        data: {
+          event: 'content-block-delta',
+          delta: {
+            type: 'text-delta',
+            text: '<delegation_briefing mode="continue">',
+          },
+        },
+      },
+    }, state),
+    readRootStreamChatEvent({
+      type: 'event',
+      seq: 3,
+      method: 'messages',
+      params: {
+        namespace,
+        data: { event: 'message-finish' },
+      },
+    }, state),
+  ];
+
+  assert.deepEqual(events, [null, null, null]);
+});
+
 test('adapter emits one completed subagent message per child lifecycle across multiple messages', async () => {
   // The P1-review scenario: a subagent emits several messages where a later
   // one extends earlier text ('foo' then 'foobar'). Lane-cumulative token

@@ -65,6 +65,10 @@ function parseAgentSession(value: unknown): AgentSession | null {
     || !isSessionKind(value.kind)
     || !Array.isArray(value.timeline)
     || (value.activeRun !== null && !isRecord(value.activeRun))
+    || (
+      value.hasResumableDelegation !== undefined
+      && typeof value.hasResumableDelegation !== 'boolean'
+    )
   ) {
     return null;
   }
@@ -94,6 +98,9 @@ function parseAgentSession(value: unknown): AgentSession | null {
     kind: value.kind,
     timeline,
     activeRun,
+    ...(typeof value.hasResumableDelegation === 'boolean'
+      ? { hasResumableDelegation: value.hasResumableDelegation }
+      : {}),
     ...(actor ? { actor } : {}),
     ...(runtime ? { runtime } : {}),
     ...(isAgentTokenUsageSnapshot(value.tokenUsage) ? { tokenUsage: value.tokenUsage } : {}),

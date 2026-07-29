@@ -229,6 +229,10 @@ export function createDemoConnectionFactory(
                 text: 'Review demo cancelled.',
               }],
             });
+            session = {
+              ...session,
+              hasResumableDelegation: true,
+            };
             handlers.onMessage({
               type: 'interrupted',
               requestId: 'smoke-run',

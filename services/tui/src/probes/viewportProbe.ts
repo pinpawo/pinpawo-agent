@@ -7,6 +7,7 @@ import {
   type KeyEvent,
   type PasteEvent,
 } from '@opentui/core';
+import { COMPOSER_KEY_BINDINGS } from '../input/composerKeyBindings';
 import { formatInputProbe } from './inputProbe';
 import {
   createSpikeSession,
@@ -59,11 +60,7 @@ const composer = new TextareaRenderable(renderer, {
   width: '100%',
   height: '100%',
   placeholder: '多行输入、宽字符、emoji、paste；拖入文件路径观察 raw input…',
-  keyBindings: [{
-    name: 'return',
-    ctrl: true,
-    action: 'submit',
-  }],
+  keyBindings: COMPOSER_KEY_BINDINGS,
   onSubmit: () => {
     status.content = `submit (${[...composer.plainText].length} code points): ${composer.plainText}`;
   },

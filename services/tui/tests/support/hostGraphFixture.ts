@@ -68,6 +68,8 @@ export function createHostGraphFixture() {
         pendingHumanReview: pendingReview,
         hasPendingContinuation:
           pendingReview !== null || suspendedReviews.has(readThreadKey(setup)),
+        hasResumableDelegation:
+          pendingReview !== null || suspendedReviews.has(readThreadKey(setup)),
       };
     },
     buildResumeCommand(resume: unknown) {

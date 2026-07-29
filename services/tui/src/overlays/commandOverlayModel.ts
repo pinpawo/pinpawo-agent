@@ -266,7 +266,8 @@ function helpLines(availability: TuiCommandAvailability) {
       `  ${command.usage} — ${command.description}`
     )),
     '  Ctrl+R — Resume a session',
-    '  Ctrl+Enter / Ctrl+O — Send (Ctrl+O is the raw-control fallback)',
+    '  Enter — Send the composer',
+    '  Shift+Enter / Ctrl+J — Insert a newline',
     '  @path — Complete workspace files in chat',
     '  ↑/↓ at composer edge — Recall prompts / restore draft',
     '  Shift+Enter — Insert a newline in review responses',

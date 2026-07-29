@@ -126,6 +126,7 @@ export function createLocalServerHandlers(
       deps: requestDeps,
       sessionTokenUsage: checkpoint.sessionTokenUsage,
       pendingReview,
+      hasResumableDelegation: checkpoint.hasResumableDelegation,
     });
   };
 
@@ -165,6 +166,7 @@ export function createLocalServerHandlers(
           deps: requestDeps,
           sessionTokenUsage: null,
           pendingReview: null,
+          hasResumableDelegation: false,
         }),
       };
     } finally {
@@ -209,6 +211,7 @@ export function createLocalServerHandlers(
           deps: requestDeps,
           sessionTokenUsage: result.sessionTokenUsage,
           pendingReview,
+          hasResumableDelegation: result.hasResumableDelegation,
         }),
       };
     } finally {

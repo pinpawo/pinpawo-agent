@@ -141,6 +141,7 @@ export function createPersistentHostGraphService() {
           : [],
         pendingHumanReview: readPendingReview(snapshot),
         hasPendingContinuation: hasPendingContinuation(snapshot),
+        hasResumableDelegation: false,
       };
     },
     buildResumeCommand(resume: unknown) {

@@ -157,6 +157,33 @@ test('reduceSession deterministically replays canonical run inputs', () => {
   });
 });
 
+test('chat acceptance clears resumable delegation while Studio leaves it untouched', () => {
+  const resumable: AgentSession = {
+    ...createDomainSession(),
+    hasResumableDelegation: true,
+  };
+  const chat = reduceSession(resumable, {
+    type: 'user.accepted',
+    requestId: 'chat-1',
+    kind: 'chat',
+    text: 'continue as a fresh turn',
+  }, { observedAt: 1_000 });
+  assert.equal(chat.hasResumableDelegation, undefined);
+
+  const studio = reduceSession(resumable, {
+    type: 'user.accepted',
+    requestId: 'studio-1',
+    kind: 'studio',
+    text: 'run Studio',
+  }, { observedAt: 1_000 });
+  assert.equal(studio.hasResumableDelegation, true);
+
+  const cleared = reduceSession(resumable, {
+    type: 'session.cleared',
+  }, { observedAt: 1_000 });
+  assert.equal(cleared.hasResumableDelegation, undefined);
+});
+
 test('reduceSession accumulates usage across runs and clears only run usage on submit', () => {
   let session = reduceSession(createDomainSession(), {
     type: 'user.accepted',
@@ -358,6 +385,7 @@ test('applySessionSnapshot rematerializes timeline state from a checkpoint point
   ]);
   const withUsage = {
     ...live,
+    hasResumableDelegation: true,
     tokenUsage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 },
     sessionTokenUsage: {
       inputTokens: 13,
@@ -405,6 +433,16 @@ test('applySessionSnapshot rematerializes timeline state from a checkpoint point
   assert.equal(completed.activeRun?.startedAt, 1_700_000_000_000);
   assert.deepEqual(completed.tokenUsage, withUsage.tokenUsage);
   assert.deepEqual(completed.sessionTokenUsage, withUsage.sessionTokenUsage);
+  assert.equal(completed.hasResumableDelegation, false);
+
+  const resumable = applySessionSnapshot(withUsage, {
+    ...snapshot,
+    session: {
+      ...snapshot.session,
+      hasResumableDelegation: true,
+    },
+  });
+  assert.equal(resumable.hasResumableDelegation, true);
 
   const started = applySessionSnapshot(withUsage, snapshot, {
     observedAt: 1_700_000_000_200,

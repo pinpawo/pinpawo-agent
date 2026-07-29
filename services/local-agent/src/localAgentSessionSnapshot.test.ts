@@ -46,6 +46,7 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
       source: 'provider',
       scope: 'session',
     },
+    hasResumableDelegation: true,
     pendingReview: {
       requestId: 'req-review',
       sessionId: 'chat:pet-a',
@@ -73,6 +74,7 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
     '2026-06-01T01:00:00.000Z',
   );
   assert.equal(snapshot.session.activeRun?.requestId, 'req-review');
+  assert.equal(snapshot.session.hasResumableDelegation, true);
   assert.equal(snapshot.session.activeRun?.state, 'waiting_review');
   if (snapshot.session.activeRun?.state !== 'waiting_review') assert.fail('expected waiting review');
   assert.equal(snapshot.session.activeRun.reviewAction.reviews[0]?.id, 'review-1');

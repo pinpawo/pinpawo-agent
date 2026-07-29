@@ -8,6 +8,7 @@ import {
   recordComposerHistoryEntry,
   resolveComposerHistoryDirection,
 } from '../input/composerHistory';
+import { COMPOSER_KEY_BINDINGS } from '../input/composerKeyBindings';
 import { installTextareaWorkarounds } from './textareaCompatibility';
 
 test('textarea preserves pasted lines and deletes across line boundaries', async (context) => {
@@ -149,7 +150,7 @@ test('textarea supports macOS selection, word movement, and undo/redo', async (c
   assert.equal(textarea.plainText, 'replacement');
 });
 
-test('textarea preserves a rich draft through forward delete and submit', async (context) => {
+test('composer sends on Enter and keeps multiline shortcuts distinct', async (context) => {
   const setup = await createTestRenderer({
     width: 80,
     height: 24,
@@ -157,18 +158,14 @@ test('textarea preserves a rich draft through forward delete and submit', async 
   });
   context.after(() => setup.renderer.destroy());
 
-  let submitted = '';
+  const submitted: string[] = [];
   const textarea = new TextareaRenderable(setup.renderer, {
     id: 'textarea-rich-submit',
     width: 80,
     height: 5,
-    keyBindings: [{
-      name: 'return',
-      ctrl: true,
-      action: 'submit',
-    }],
+    keyBindings: COMPOSER_KEY_BINDINGS,
     onSubmit: () => {
-      submitted = textarea.plainText;
+      submitted.push(textarea.plainText);
     },
   });
   setup.renderer.root.add(textarea);
@@ -213,10 +210,29 @@ test('textarea preserves a rich draft through forward delete and submit', async 
     col: 3,
   });
 
-  setup.mockInput.pressEnter({ ctrl: true });
+  setup.mockInput.pressEnter();
   await setup.flush();
-  assert.equal(submitted, draft);
+  assert.deepEqual(submitted, [draft]);
   assert.equal(textarea.plainText, draft);
+
+  textarea.setText('first');
+  textarea.gotoBufferEnd();
+  setup.mockInput.pressEnter({ shift: true });
+  await setup.mockInput.typeText('second');
+  await setup.flush();
+  assert.equal(textarea.plainText, 'first\nsecond');
+  assert.deepEqual(submitted, [draft]);
+
+  setup.mockInput.pressKey('j', { ctrl: true });
+  await setup.mockInput.typeText('third');
+  await setup.flush();
+  assert.equal(textarea.plainText, 'first\nsecond\nthird');
+  assert.deepEqual(submitted, [draft]);
+
+  setup.mockInput.pressEnter({ ctrl: true });
+  setup.mockInput.pressKey('o', { ctrl: true });
+  await setup.flush();
+  assert.deepEqual(submitted, [draft]);
 });
 
 test('textarea exposes soft-wrap boundaries for composer history routing', async (context) => {

@@ -68,7 +68,7 @@ The probe covers:
 | global review policy | snapshot metadata restores the host policy; `/policy` persists a correlated update before changing visible state | automated test + OpenTUI PTY |
 | policy overlay ownership | arrows/Enter/Esc remain isolated from the composer and the overlay stays bounded across resize | automated + Bun native test |
 | slash command parsing | exact implemented commands resolve while absolute paths and slash-prefixed prose remain chat input | automated test |
-| raw-control composer submit fallback | Kitty `Ctrl+Enter` remains the primary send chord, while raw `Ctrl+O` submits through the same production composer as a fallback for terminals that cannot distinguish modified Enter; ordinary Enter remains multiline input | automated help model + child-process production PTY test |
+| composer send/newline policy | Enter submits through the production composer; Shift+Enter inserts a newline where the terminal exposes the modifier and `Ctrl+J` is the terminal-independent newline path | automated help model + Bun native editor test + child-process production PTY test |
 | command palette ownership | cursor-at-end slash tokens own navigation/submit while ordinary edit keys remain composer-owned; production Tab completion opens help and completes quit | automated + child-process PTY test |
 | command palette cursor ownership | the five-row candidate menu stays above a compact visible composer while the footer remains fixed at nine rows; full-footer help alone hides the composer cursor and returns focus after Esc | automated + Bun native + child-process PTY test |
 | help paging and resize | command help pages within the fixed footer, remains bounded at narrow widths, and owns Esc in the production process | automated + Bun native + child-process PTY test |
@@ -91,7 +91,7 @@ The probe covers:
 | npm distribution payload | one Bun-targeted JS bundle and versioned manifest ship in `pinpawo`; npm selects Bun/OpenTUI platform packages | automated manifest tests + installed-tarball PTY |
 | distribution integrity and platform launch | launcher verifies the bundle byte count/SHA-256 before execution and resolves package-local Bun runtimes for darwin/Linux/Windows on x64/arm64; Windows uses the direct `bun.exe` rather than a command shim | automated test matrix |
 | distribution artifact boot | a fresh runtime-neutral bundle is built outside the source entrypoint, its byte count/SHA-256 are rechecked, and its non-interactive version probe loads the external OpenTUI runtime before publishing | Bun native prepublish test |
-| installed package check and QA | `pinpawo tui --v2 --check` follows the normal launch plan without a terminal; the release smoke packs local tarballs, performs a lifecycle-enabled install in an empty project, verifies npm-selected Bun/OpenTUI assets, and runs that installed CLI path with bounded stages; on macOS the same clean install enters the packaged `--qa` bundle through a real `xterm-256color` PTY, waits for composer readiness, submits with Kitty `Ctrl+Enter`, observes waiting plus final usage, verifies composer recovery, and exits through `/quit` | non-interactive check passed on local darwin-arm64 and clean Node 24 Linux arm64/x64 containers plus the first GitHub Actions macOS, Ubuntu, and Windows matrix; installed interactive QA passed on local darwin-arm64 and is now part of the macOS workflow |
+| installed package check and QA | `pinpawo tui --v2 --check` follows the normal launch plan without a terminal; the release smoke packs local tarballs, performs a lifecycle-enabled install in an empty project, verifies npm-selected Bun/OpenTUI assets, and runs that installed CLI path with bounded stages; on macOS the same clean install enters the packaged `--qa` bundle through a real `xterm-256color` PTY, waits for composer readiness, submits with Enter, observes waiting plus final usage, verifies composer recovery, and exits through `/quit` | non-interactive check passed on local darwin-arm64 and clean Node 24 Linux arm64/x64 containers plus the first GitHub Actions macOS, Ubuntu, and Windows matrix; installed interactive QA passed on local darwin-arm64 and is now part of the macOS workflow |
 | raw input preview | controls are escaped and output is bounded | automated test |
 | fixed-footer composer layout | composer grows from 3–5 visible rows without changing terminal footer height | automated test |
 | native textarea regression | multiline paste and single-grapheme backspace preserve line boundaries | Bun native test |
@@ -126,7 +126,7 @@ from an automated PTY run alone.
 | scrolling back to bottom resumes sticky follow | pending | pending | pending | pending |
 | terminal/app text selection and copy | pending | pending | passed | pending |
 | composer internal selection copy/cut | pending | pending | pending | pending |
-| `Ctrl+Enter` or `Ctrl+O` composer submit | pending | pending | passed | pending |
+| Enter submit; Shift+Enter / `Ctrl+J` newline | pending | pending | pending | pending |
 | composer prompt history and draft restore | pending | pending | pending | pending |
 | chat `@path` completion and Esc dismissal | pending | pending | pending | pending |
 | command palette stays above the visible search composer | pending | pending | passed | pending |
@@ -181,8 +181,8 @@ destructively replay it after resize.
 
 A later production `--qa` pass in Ghostty confirmed the immediate waiting
 state, live operation/subagent/streaming updates without stealing a browsed
-scrollback position, terminal text selection and copy, `Ctrl+Enter`/`Ctrl+O`
-submission, multiline CJK/emoji/Markdown editing, Chinese IME composition,
+scrollback position, terminal text selection and copy, Enter submission,
+multiline CJK/emoji/Markdown editing, Chinese IME composition,
 resize recovery, final `in/out` usage, a second turn, and `/quit`.
 
 ## Phase 1 decision

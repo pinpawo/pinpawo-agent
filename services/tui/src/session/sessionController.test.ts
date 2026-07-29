@@ -104,6 +104,7 @@ test('TuiSessionController synchronizes one session and projects a chat run', ()
     type: 'chat_request',
     requestId: 'chat-1',
     message: 'hello',
+    activeDelegationTransition: 'supersede_active',
   });
   assert.equal(controller.getState().session.timeline[0]?.type, 'message');
   assert.deepEqual(controller.getState().session.activeRun, {
@@ -165,6 +166,7 @@ test('TuiSessionController synchronizes one session and projects a chat run', ()
         status: 'completed',
       }],
       activeRun: null,
+      hasResumableDelegation: true,
       sessionTokenUsage: {
         inputTokens: 20,
         outputTokens: 5,
@@ -212,6 +214,7 @@ test('TuiSessionController submits local attachments and keeps paths out of opti
       path: '/Users/example/private/spec.md',
       name: 'spec.md',
     }],
+    activeDelegationTransition: 'supersede_active',
   });
   const optimistic = controller.getState().session.timeline[0];
   assert.equal(
@@ -716,6 +719,10 @@ test('completion snapshot refresh cannot erase a newer optimistic run', () => {
   const latest = controller.getState().session.timeline.at(-1);
   assert.equal(latest?.type === 'message' ? latest.text : null, 'second');
   assert.equal(controller.getState().session.sessionTokenUsage?.totalTokens, 15);
+  assert.equal(
+    controller.getState().session.hasResumableDelegation,
+    false,
+  );
   controller.stop();
 });
 
@@ -1170,9 +1177,10 @@ test('review cancellation targets only the current canonical action', () => {
   controller.stop();
 });
 
-test('review cancellation exposes a session-scoped explicit continuation after interruption', async () => {
+test('server-reported delegation continuation survives refresh and resume', async () => {
   const requestIds = [
     'startup',
+    'interrupted-refresh',
     'resume-other',
     'resume-original',
     'continue-failed',
@@ -1207,6 +1215,22 @@ test('review cancellation exposes a session-scoped explicit continuation after i
     requestId: 'chat',
     message: 'review interrupted',
   });
+  assert.equal(controller.canContinueActiveDelegation(), false);
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'session.snapshot.get',
+    requestId: 'interrupted-refresh',
+  });
+  connection.receive({
+    type: 'session.snapshot.result',
+    requestId: 'interrupted-refresh',
+    snapshot: createAgentSessionSnapshot({
+      sessionId: 'chat:one',
+      kind: 'chat',
+      timeline: [],
+      activeRun: null,
+      hasResumableDelegation: true,
+    }),
+  });
   assert.equal(controller.canContinueActiveDelegation(), true);
 
   const resumeOther = controller.resumeSession('chat:two');
@@ -1219,6 +1243,7 @@ test('review cancellation exposes a session-scoped explicit continuation after i
       kind: 'chat',
       timeline: [],
       activeRun: null,
+      hasResumableDelegation: false,
     }),
   });
   await resumeOther;
@@ -1234,6 +1259,7 @@ test('review cancellation exposes a session-scoped explicit continuation after i
       kind: 'chat',
       timeline: [],
       activeRun: null,
+      hasResumableDelegation: true,
     }),
   });
   await resumeOriginal;
@@ -1257,6 +1283,34 @@ test('review cancellation exposes a session-scoped explicit continuation after i
     activeDelegationTransition: 'resume_active',
   });
   assert.equal(controller.canContinueActiveDelegation(), false);
+  controller.stop();
+});
+
+test('startup snapshot restores server-reported delegation continuation', () => {
+  let connection!: FakeConnection;
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => 'startup',
+  });
+
+  controller.start();
+  connection.open();
+  connection.receive({
+    type: 'session.snapshot.result',
+    requestId: 'startup',
+    snapshot: createAgentSessionSnapshot({
+      sessionId: 'chat:restored',
+      kind: 'chat',
+      timeline: [],
+      activeRun: null,
+      hasResumableDelegation: true,
+    }),
+  });
+
+  assert.equal(controller.canContinueActiveDelegation(), true);
   controller.stop();
 });
 

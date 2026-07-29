@@ -21,6 +21,7 @@ import {
   selectFocusedBusy,
   selectFocusedPendingApproval,
   selectFocusedReviewResolutionSent,
+  selectFocusedSession,
 } from './state/tuiStateReducer';
 import type { TuiAction, TuiSnapshotApplyReason, TuiState } from './state/tuiState';
 
@@ -64,14 +65,20 @@ type RuntimeSnapshotRefreshReason = 'completion' | 'review-refresh';
 function getSnapshotRefreshReason(
   message: LocalAgentServerMessage,
 ): RuntimeSnapshotRefreshReason | null {
+  if (message.type === 'interrupted') return 'completion';
   if (message.type !== 'event') return null;
-  if (message.event.type === 'message.completed') return 'completion';
   if (
-    message.event.type === 'error'
-    && message.event.code
-    && REVIEW_SNAPSHOT_REFRESH_ERROR_CODES.has(message.event.code)
+    message.event.type === 'message.completed'
+    || message.event.type === 'error'
   ) {
-    return 'review-refresh';
+    if (
+      message.event.type === 'error'
+      && message.event.code
+      && REVIEW_SNAPSHOT_REFRESH_ERROR_CODES.has(message.event.code)
+    ) {
+      return 'review-refresh';
+    }
+    return 'completion';
   }
   return null;
 }
@@ -96,8 +103,6 @@ export class TuiRuntimeController {
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private interruptPendingNoticeTimeout: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
-  private readonly pendingReviewInterruptSessions = new Map<string, string>();
-  private readonly suspendedDelegationSessionIds = new Set<string>();
   private readonly localServerClient: TuiLocalServerClient;
   private readonly connection: LocalAgentConnection;
 
@@ -143,12 +148,13 @@ export class TuiRuntimeController {
   }
 
   canContinueActiveDelegation() {
-    const sessionId = this.options.getState().focusedSessionId;
-    return Boolean(sessionId && this.suspendedDelegationSessionIds.has(sessionId));
+    return selectFocusedSession(
+      this.options.getState(),
+    )?.hasResumableDelegation === true;
   }
 
   sendChatRequest(message: string) {
-    return this.sendChatRequestWithTransition(message);
+    return this.sendChatRequestWithTransition(message, 'supersede_active');
   }
 
   continueActiveDelegation(message: string) {
@@ -172,7 +178,6 @@ export class TuiRuntimeController {
       return false;
     }
 
-    const sessionId = this.options.getState().focusedSessionId;
     const requestId = randomUUID();
     const now = Date.now();
     if (!this.connection.send({
@@ -183,9 +188,6 @@ export class TuiRuntimeController {
     })) {
       this.appendSystemMessage(TUI_TEXT.disconnectedCannotSend);
       return false;
-    }
-    if (sessionId) {
-      this.suspendedDelegationSessionIds.delete(sessionId);
     }
     this.options.setNow(now);
     this.options.dispatch({
@@ -335,10 +337,6 @@ export class TuiRuntimeController {
         requestId: activeRun.requestId,
         actionId: waitingReviewAction.actionId,
       });
-      const sessionId = state.focusedSessionId;
-      if (sessionId) {
-        this.pendingReviewInterruptSessions.set(activeRun.requestId, sessionId);
-      }
     } else {
       if (!this.connection.send({
         type: 'run.interrupt',
@@ -354,10 +352,6 @@ export class TuiRuntimeController {
 
   startNewSession() {
     this.clearInterruptPendingNoticeTimeout();
-    const sessionId = this.options.getState().focusedSessionId;
-    if (sessionId) {
-      this.clearDelegationContinuationForSession(sessionId);
-    }
     this.options.dispatch({
       type: 'input.set',
       value: '',
@@ -543,7 +537,7 @@ export class TuiRuntimeController {
     }
   }
 
-  private async refreshSnapshotAfterCompletedMessage() {
+  private async refreshSnapshotAfterRunSettlement() {
     await this.applyLatestSessionSnapshot('completion');
   }
 
@@ -597,7 +591,6 @@ export class TuiRuntimeController {
     if (concludesInterruptWait(msg)) {
       this.clearInterruptPendingNoticeTimeout();
     }
-    this.updateDelegationContinuationState(msg);
     const now = Date.now();
     const result = buildTuiActionsFromServerMessage(msg, {
       now,
@@ -611,32 +604,12 @@ export class TuiRuntimeController {
       void this.refreshSnapshotAfterReviewError();
     }
     if (refreshReason === 'completion') {
-      void this.refreshSnapshotAfterCompletedMessage();
+      void this.refreshSnapshotAfterRunSettlement();
     }
   }
 
   private isCurrentBusy() {
     return selectFocusedBusy(this.options.getState());
-  }
-
-  private updateDelegationContinuationState(message: LocalAgentServerMessage) {
-    if (!('requestId' in message)) return;
-    const sessionId = this.pendingReviewInterruptSessions.get(message.requestId);
-    if (!sessionId || !concludesInterruptWait(message)) return;
-
-    this.pendingReviewInterruptSessions.delete(message.requestId);
-    if (message.type === 'interrupted') {
-      this.suspendedDelegationSessionIds.add(sessionId);
-    }
-  }
-
-  private clearDelegationContinuationForSession(sessionId: string) {
-    this.suspendedDelegationSessionIds.delete(sessionId);
-    for (const [requestId, pendingSessionId] of this.pendingReviewInterruptSessions) {
-      if (pendingSessionId === sessionId) {
-        this.pendingReviewInterruptSessions.delete(requestId);
-      }
-    }
   }
 
   private clearReconnectTimeout() {

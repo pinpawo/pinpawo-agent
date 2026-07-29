@@ -38,6 +38,10 @@ import {
   resolveComposerHistoryDirection,
 } from './input/composerHistory';
 import {
+  COMPOSER_KEY_BINDINGS,
+  COMPOSER_PLACEHOLDER,
+} from './input/composerKeyBindings';
+import {
   placeComposerCursorAtTextOffset,
   readComposerTextInput,
 } from './input/composerTextPosition';
@@ -274,19 +278,8 @@ const composer = new TextareaRenderable(renderer, {
   backgroundColor: RGBA.defaultBackground(),
   focusedBackgroundColor: RGBA.defaultBackground(),
   syntaxStyle: composerDecorationStyle,
-  placeholder: 'Message · Ctrl+Enter or Ctrl+O to send',
-  keyBindings: [
-    {
-      name: 'return',
-      ctrl: true,
-      action: 'submit',
-    },
-    {
-      name: 'o',
-      ctrl: true,
-      action: 'submit',
-    },
-  ],
+  placeholder: COMPOSER_PLACEHOLDER,
+  keyBindings: COMPOSER_KEY_BINDINGS,
   onSubmit: () => submitComposerInput(),
   onCursorChange: () => syncComposerInputOverlays(),
   onPaste: (event: PasteEvent) => {

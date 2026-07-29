@@ -141,7 +141,7 @@ test('command help pages and remains terminal-width safe', () => {
   );
   assert.match(
     buildCommandOverlayViewModel(last, 80).content,
-    /Ctrl\+O is the raw-control fallback/,
+    /Shift\+Enter \/ Ctrl\+J — Insert a newline/,
   );
   const continuationHelp = pageCommandHelp(
     openCommandHelp({ canContinueActiveDelegation: true }),

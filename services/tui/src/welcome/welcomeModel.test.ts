@@ -39,6 +39,8 @@ test('welcome includes the raster paw, version, runtime, and shortcuts', () => {
   assert.match(lines[7] ?? '', /PinPawo TUI v2 · v0\.1\.0 · 豆包/);
   assert.ok(lines.some((line) => line.includes('PgUp history')));
   assert.ok(lines.some((line) => line.includes('Ctrl+R sessions')));
+  assert.ok(lines.some((line) => line.includes('Enter send')));
+  assert.ok(lines.some((line) => line.includes('Ctrl+J newline')));
 });
 
 test('welcome remains single-row safe in a narrow terminal', () => {

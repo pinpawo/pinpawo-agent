@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { promises as fs } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
 import {
   stampMessageCreatedAtUtc,
@@ -15,6 +18,7 @@ import {
 } from './localServerTuiSessions';
 import { createLocalChatHumanMessage } from './localChatAttachments';
 import { createLocalServerRuntimeDepsStore } from './localServerTypes';
+import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
 import {
   createTestModelProfiles,
   createTestModelServerDeps,
@@ -193,6 +197,54 @@ test('LocalServerTuiSessionService rolls back a model selection when persistence
     state.sessions[session.id]?.modelProfileId,
     TEST_MODEL_PROFILE_ID,
   );
+});
+
+test('LocalServerTuiSessionService rolls back image requirements when persistence fails', async () => {
+  const root = await fs.mkdtemp(join(tmpdir(), 'pinpawo-image-ledger-save-'));
+  const imagePath = join(root, 'image.png');
+  await fs.writeFile(imagePath, Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.from('ledger-save'),
+  ]));
+  const state = createEmptyTuiSessionState();
+  let failSave = false;
+  const service = new LocalServerTuiSessionService({
+    state,
+    saveState: () => {
+      if (failSave) {
+        throw new Error('session store unavailable');
+      }
+    },
+    runtimeConfig: buildLocalAgentRuntimeConfig(root),
+    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
+  });
+  const session = service.getActiveSession('pet-a');
+  failSave = true;
+
+  try {
+    await assert.rejects(
+      () => service.createUserMessage({
+        actorId: 'pet-a',
+        ...createTestModelServerDeps({
+          inputModalities: ['text', 'image'],
+        }),
+      } as never, 'describe this image', [{
+        id: 'image-1',
+        source: 'local-path',
+        kind: 'file',
+        path: imagePath,
+        name: 'image.png',
+      }]),
+      /session store unavailable/,
+    );
+    assert.equal(state.sessions[session.id], session);
+    assert.deepEqual(
+      state.sessions[session.id]?.requiredInputModalities,
+      ['text'],
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
 });
 
 test('LocalServerTuiSessionService injects active session createdAt into runtime environment', () => {

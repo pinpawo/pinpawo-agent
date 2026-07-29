@@ -336,7 +336,14 @@ export class LocalServerTuiSessionService {
     if (!updated) {
       throw new Error('session not found while recording model input');
     }
-    if (updated !== session) this.save();
+    if (updated !== session) {
+      try {
+        this.save();
+      } catch (error) {
+        this.state.sessions[session.id] = session;
+        throw error;
+      }
+    }
   }
 
   selectModelProfile(

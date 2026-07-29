@@ -352,6 +352,23 @@ test('graph identity distinguishes stable profiles with the same model on differ
   assert.match(second.graphKey, /account-b/);
 });
 
+test('graph identity isolates session-scoped model input adapters', () => {
+  const params = {
+    context: createContext(),
+    userMessage: 'hello',
+  };
+  const first = buildTestLocalChatAgentInput({
+    ...params,
+    modelInputCacheKey: 'session-a',
+  });
+  const second = buildTestLocalChatAgentInput({
+    ...params,
+    modelInputCacheKey: 'session-b',
+  });
+
+  assert.notEqual(first.graphKey, second.graphKey);
+});
+
 test('buildLocalChatAgentInput passes global review policy mode to graph input', () => {
   const setup = buildTestLocalChatAgentInput({
     context: createContext(),

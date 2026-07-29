@@ -575,9 +575,11 @@ export class LocalAgentAppChatHandler {
           modelProfiles.snapshot.profiles[modelProfiles.defaultProfileId]?.label
           ?? modelProfiles.defaultProfileId,
         modelProfileAvailable: true,
+        modelProfileCompatible: true,
         modelProfileIssues: [],
         model: llmConfig.model,
         inputModalities: [...(llmConfig.inputModalities ?? ['text'])],
+        requiredInputModalities: ['text'],
         ...(llmConfig.contextWindowTokens
           ? { contextWindow: llmConfig.contextWindowTokens }
           : {}),

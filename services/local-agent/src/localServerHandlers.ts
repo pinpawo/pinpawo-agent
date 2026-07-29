@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { FileStudioDueRunStore } from '@pinpawo/pet-agent';
+import type { AgentLlmConfig } from './agentConfig';
 import { LocalAgentGraphService } from './agentGraphService';
 import { InflightRequestController } from './inflightRequestController';
 import { buildLocalAgentSessionSnapshot } from './localAgentSessionSnapshot';
@@ -25,6 +26,10 @@ import { LocalServerTuiSessionService } from './localServerTuiSessions';
 import { LocalStudioDueRunScheduler } from './localStudioDueRunScheduler';
 import { persistGlobalReviewPolicyMode } from './globalReviewPolicyConfig';
 import { loadAgentContext } from './contextLoader';
+import {
+  missingInputModalities,
+  supportsInputModalities,
+} from './modelProfiles';
 import {
   createLocalServerRuntimeDepsStore,
   type LocalServerDeps,
@@ -136,6 +141,7 @@ export function createLocalServerHandlers(
       messages: checkpoint.messages,
       deps: requestDeps,
       modelProfileId: checkpoint.modelProfileId,
+      requiredInputModalities: checkpoint.requiredInputModalities,
       sessionTokenUsage: checkpoint.sessionTokenUsage,
       pendingReview,
     });
@@ -162,13 +168,28 @@ export function createLocalServerHandlers(
       );
     }
     const profiles: AgentModelProfileSummary[] = [
-      ...requestDeps.modelProfiles.listAvailable().map((profile) => ({
-        ...profile,
-        inputModalities: [...profile.inputModalities],
-        available: true,
-        compatible: true,
-        issues: [],
-      })),
+      ...requestDeps.modelProfiles.listAvailable().map((profile) => {
+        const compatible = supportsInputModalities(
+          activeSession.requiredInputModalities,
+          profile.inputModalities,
+        );
+        return {
+          ...profile,
+          inputModalities: [...profile.inputModalities],
+          available: true,
+          compatible,
+          issues: compatible
+            ? []
+            : [
+                `Session requires ${activeSession.requiredInputModalities.join(', ')} input; model is missing ${
+                  missingInputModalities(
+                    activeSession.requiredInputModalities,
+                    profile.inputModalities,
+                  ).join(', ')
+                }`,
+              ],
+        };
+      }),
       ...Object.entries(
         requestDeps.modelProfiles.snapshot.unavailableProfiles,
       ).map(([id, issues]) => ({
@@ -196,7 +217,7 @@ export function createLocalServerHandlers(
       sessionId,
       defaultProfileId: requestDeps.modelProfiles.defaultProfileId,
       selectedProfileId: activeSession.modelProfileId,
-      requiredInputModalities: ['text' as const],
+      requiredInputModalities: [...activeSession.requiredInputModalities],
       profiles,
     };
   };
@@ -266,14 +287,32 @@ export function createLocalServerHandlers(
       );
       return;
     }
+    let selectedProfile: Readonly<AgentLlmConfig>;
     try {
-      requestDeps.modelProfiles.resolve(message.modelProfileId);
+      selectedProfile = requestDeps.modelProfiles.resolve(message.modelProfileId);
     } catch (error) {
       sendModelSelectionError(
         peer,
         message,
         'profile_unavailable',
         error instanceof Error ? error.message : 'model profile is unavailable',
+      );
+      return;
+    }
+    if (!supportsInputModalities(
+      activeSession.requiredInputModalities,
+      selectedProfile.inputModalities ?? ['text'],
+    )) {
+      sendModelSelectionError(
+        peer,
+        message,
+        'profile_incompatible',
+        `Session requires ${activeSession.requiredInputModalities.join(', ')} input; model is missing ${
+          missingInputModalities(
+            activeSession.requiredInputModalities,
+            selectedProfile.inputModalities ?? ['text'],
+          ).join(', ')
+        }`,
       );
       return;
     }
@@ -307,6 +346,7 @@ export function createLocalServerHandlers(
         messages: checkpoint.messages,
         deps: requestDeps,
         modelProfileId: session.modelProfileId,
+        requiredInputModalities: session.requiredInputModalities,
         sessionTokenUsage: checkpoint.sessionTokenUsage,
         pendingReview: null,
       }),
@@ -343,6 +383,7 @@ export function createLocalServerHandlers(
           messages: [],
           deps: requestDeps,
           modelProfileId: session.modelProfileId,
+          requiredInputModalities: session.requiredInputModalities,
           sessionTokenUsage: null,
           pendingReview: null,
         }),
@@ -388,6 +429,7 @@ export function createLocalServerHandlers(
           messages: result.messages,
           deps: requestDeps,
           modelProfileId: result.session.modelProfileId,
+          requiredInputModalities: result.session.requiredInputModalities,
           sessionTokenUsage: result.sessionTokenUsage,
           pendingReview,
         }),

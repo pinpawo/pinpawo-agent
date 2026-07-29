@@ -987,6 +987,7 @@ test('runChatSession rejects stale resume with user-facing message', async () =>
 test('runChatSession does not map pending review free text to review response', async () => {
   const streamInputs: unknown[] = [];
   const emittedEvents: AgentRuntimeEvent[] = [];
+  let preparedUserMessages = 0;
   const review = {
     id: 'review-respond',
     schemaVersion: 1,
@@ -1044,11 +1045,16 @@ test('runChatSession does not map pending review free text to review response', 
       emittedEvents.push(event);
     },
     emitToolEvent: () => {},
+    prepareUserMessage: async () => {
+      preparedUserMessages += 1;
+      return new HumanMessage('must not be admitted');
+    },
   });
 
   assert.deepEqual(result, { status: 'waiting_human' });
   assert.deepEqual(streamInputs, []);
   assert.deepEqual(setup.input.messages, []);
+  assert.equal(preparedUserMessages, 0);
   assert.equal(emittedEvents[0]?.type, 'system.notice');
   assert.match(
     emittedEvents[0]?.type === 'system.notice' ? emittedEvents[0].message : '',

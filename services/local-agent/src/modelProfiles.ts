@@ -15,6 +15,20 @@ export const ENV_MODEL_PROFILE_ID = 'env';
 
 export type ModelInputModality = 'text' | 'image';
 
+export function missingInputModalities(
+  required: readonly ModelInputModality[],
+  supported: readonly ModelInputModality[],
+): ModelInputModality[] {
+  return required.filter((modality) => !supported.includes(modality));
+}
+
+export function supportsInputModalities(
+  required: readonly ModelInputModality[],
+  supported: readonly ModelInputModality[],
+): boolean {
+  return missingInputModalities(required, supported).length === 0;
+}
+
 export type ModelProfileV1 = Readonly<{
   id: string;
   label: string;

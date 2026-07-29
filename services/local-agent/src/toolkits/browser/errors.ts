@@ -1,5 +1,7 @@
 export type BrowserErrorCode =
   | 'browser_not_open'
+  | 'browser_context_missing'
+  | 'browser_context_conflict'
   | 'browser_timeout'
   | 'stale_element_reference'
   | 'target_closed'

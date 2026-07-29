@@ -128,6 +128,12 @@ function parseAgentRuntime(value: unknown): AgentRuntimeView | null {
     return null;
   }
   if (
+    value.modelProfileCompatible !== undefined
+    && typeof value.modelProfileCompatible !== 'boolean'
+  ) {
+    return null;
+  }
+  if (
     value.modelProfileIssues !== undefined
     && (
       !Array.isArray(value.modelProfileIssues)
@@ -142,6 +148,18 @@ function parseAgentRuntime(value: unknown): AgentRuntimeView | null {
       !Array.isArray(value.inputModalities)
       || value.inputModalities.length === 0
       || !value.inputModalities.every((item) => item === 'text' || item === 'image')
+    )
+  ) {
+    return null;
+  }
+  if (
+    value.requiredInputModalities !== undefined
+    && (
+      !Array.isArray(value.requiredInputModalities)
+      || value.requiredInputModalities.length === 0
+      || !value.requiredInputModalities.every(
+        (item) => item === 'text' || item === 'image',
+      )
     )
   ) {
     return null;
@@ -172,12 +190,21 @@ function parseAgentRuntime(value: unknown): AgentRuntimeView | null {
     ...(typeof value.modelProfileAvailable === 'boolean'
       ? { modelProfileAvailable: value.modelProfileAvailable }
       : {}),
+    ...(typeof value.modelProfileCompatible === 'boolean'
+      ? { modelProfileCompatible: value.modelProfileCompatible }
+      : {}),
     ...(Array.isArray(value.modelProfileIssues)
       ? { modelProfileIssues: [...value.modelProfileIssues] as string[] }
       : {}),
     ...(typeof value.model === 'string' ? { model: value.model } : {}),
     ...(Array.isArray(value.inputModalities)
       ? { inputModalities: value.inputModalities as AgentRuntimeView['inputModalities'] }
+      : {}),
+    ...(Array.isArray(value.requiredInputModalities)
+      ? {
+          requiredInputModalities:
+            value.requiredInputModalities as AgentRuntimeView['requiredInputModalities'],
+        }
       : {}),
     ...(isBuiltinGlobalReviewPolicyMode(value.globalReviewPolicyMode)
       ? { globalReviewPolicyMode: value.globalReviewPolicyMode }

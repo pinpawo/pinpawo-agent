@@ -109,9 +109,11 @@ export type AgentRuntimeView = {
   modelProfileId?: string;
   modelProfileLabel?: string;
   modelProfileAvailable?: boolean;
+  modelProfileCompatible?: boolean;
   modelProfileIssues?: string[];
   model?: string;
   inputModalities?: AgentInputModality[];
+  requiredInputModalities?: AgentInputModality[];
   globalReviewPolicyMode?: BuiltinGlobalReviewPolicyMode;
   cwd?: string;
   workspaceId?: string;

@@ -115,3 +115,42 @@ API keys, full endpoint paths, query parameters, or credential objects.
 A successful selection is persisted before `model.select.result` is sent. The
 client updates visible state from that acknowledgement and its authoritative
 session snapshot, not from its original request.
+
+## Session modality ledger
+
+Each TUI session persists a monotonic `requiredInputModalities` ledger. New and
+pre-ledger sessions start with `["text"]`. Once a real image content block is
+admitted, the ledger becomes `["text", "image"]` and never downgrades, even if
+later context compaction removes or summarizes the original image.
+
+A model profile is compatible only when it supports every modality already
+required by the session. This subset check runs both when selecting a profile
+and at run admission. A text-only profile therefore remains usable for a new
+text session, but cannot be selected for—or silently used by—an image-bearing
+session. `model.list.result` and session snapshots expose the durable
+requirement so clients can explain disabled choices.
+
+Model-input guards apply to tool-produced image blocks as well as user
+attachments. The ledger is persisted before the next provider invocation.
+
+## Canonical local image admission
+
+Local path attachments are classified by the host from file signatures, never
+from the client-provided extension. V1 accepts PNG, JPEG, and WebP, with these
+limits:
+
+- at most 4 images per message;
+- at most 10 MiB per image; and
+- at most 20 MiB of images per message.
+
+Accepted bytes are copied into the local state root as content-addressed,
+SHA-256-verified objects. Checkpoint messages contain a
+`pinpawo-local-image://sha256/<digest>` content-block reference plus bounded
+metadata (MIME type, byte size, digest, and filename). They do not contain an
+absolute source path or base64 image payload.
+
+Immediately before a provider invocation, the local model adapter verifies the
+session/profile modality contract, reads and hashes the local object, and
+rehydrates that reference into a transient image data URL. The durable
+checkpoint remains reference-based. Transcript projection shows only the
+attachment filename.

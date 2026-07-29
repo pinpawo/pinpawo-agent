@@ -1,4 +1,5 @@
 import type {
+  AgentInputModality,
   AgentRunView,
   AgentRuntimeView,
   AgentSession,
@@ -10,6 +11,10 @@ import type { ReviewActionSnapshot } from './localServerChatHandler';
 import type { LocalServerDeps } from './localServerTypes';
 import type { TuiCheckpointMessage } from './localServerTuiSessions';
 import { buildLocalRuntimeProjection } from './localConfigProjection';
+import {
+  missingInputModalities,
+  supportsInputModalities,
+} from './modelProfiles';
 
 export function buildLocalAgentSessionSnapshot(params: {
   sessionId: string;
@@ -17,6 +22,7 @@ export function buildLocalAgentSessionSnapshot(params: {
   messages: TuiCheckpointMessage[];
   deps: LocalServerDeps;
   modelProfileId?: string;
+  requiredInputModalities?: readonly AgentInputModality[];
   sessionTokenUsage?: AgentSession['sessionTokenUsage'] | null;
   pendingReview?: ReviewActionSnapshot | null;
 }): AgentSessionSnapshot {
@@ -25,6 +31,7 @@ export function buildLocalAgentSessionSnapshot(params: {
   const runtime = buildLocalAgentRuntimeView(
     params.deps,
     params.modelProfileId,
+    params.requiredInputModalities,
   );
   const sessionTokenUsage = params.sessionTokenUsage
     ? {
@@ -51,19 +58,43 @@ export function buildLocalAgentSessionSnapshot(params: {
 export function buildLocalAgentRuntimeView(
   deps: LocalServerDeps,
   modelProfileId = deps.modelProfiles.defaultProfileId,
+  requiredInputModalities: readonly AgentInputModality[] = ['text'],
 ): AgentRuntimeView {
   const runtime = buildLocalRuntimeProjection(deps, modelProfileId);
+  const supportedInputModalities = runtime.inputModalities ?? ['text'];
+  const modelProfileCompatible = runtime.modelProfileAvailable
+    && supportsInputModalities(
+      requiredInputModalities,
+      supportedInputModalities,
+    );
+  const compatibilityIssues = modelProfileCompatible
+    ? []
+    : runtime.modelProfileAvailable
+      ? [
+          `Session input is incompatible with this model profile: missing ${
+            missingInputModalities(
+              requiredInputModalities,
+              supportedInputModalities,
+            ).join(', ')
+          }`,
+        ]
+      : [];
   return {
     modelProfileId: runtime.modelProfileId,
     modelProfileLabel: runtime.modelProfileLabel,
     modelProfileAvailable: runtime.modelProfileAvailable,
-    modelProfileIssues: [...runtime.modelProfileIssues],
+    modelProfileCompatible,
+    modelProfileIssues: [
+      ...runtime.modelProfileIssues,
+      ...compatibilityIssues,
+    ],
     ...(runtime.model ? { model: runtime.model } : {}),
     ...(runtime.inputModalities ? {
       inputModalities: runtime.inputModalities.map((modality) => (
         modality === 'image' ? 'image' as const : 'text' as const
       )),
     } : {}),
+    requiredInputModalities: [...requiredInputModalities],
     globalReviewPolicyMode: runtime.globalReviewPolicyMode,
     ...(runtime.contextWindow !== undefined ? { contextWindow: runtime.contextWindow } : {}),
     cwd: runtime.workdir,

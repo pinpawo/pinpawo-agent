@@ -1,5 +1,10 @@
+import { resolve } from 'node:path';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
+import type {
+  AgentInputModality,
+  AgentLocalAttachment,
+} from '@pinpawo/agent-session';
 import {
   readMessageCreatedAtUtc,
   readLatestProviderInputTokens,
@@ -14,10 +19,20 @@ import { readFinalMessageText } from './agentStreamEvents';
 import { loadAgentContext } from './contextLoader';
 import { FileSaver } from './fileSaver';
 import { getLocalServerRuntimeConfig, type LocalServerDeps } from './localServerTypes';
-import { readLocalChatDisplayText } from './localChatAttachments';
+import {
+  createAdmittedLocalChatHumanMessage,
+  createLocalChatHumanMessage,
+  readLocalChatDisplayText,
+} from './localChatAttachments';
+import { LocalChatImageStore } from './localImageAttachments';
+import {
+  missingInputModalities,
+  supportsInputModalities,
+} from './modelProfiles';
 import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
 import type { LocalAgentRuntimeConfig } from './runtimeConfig';
 import {
+  addTuiSessionRequiredInputModalities,
   createTuiSession,
   ensureActiveTuiSession,
   listTuiSessions,
@@ -46,6 +61,7 @@ export type ActivePendingReview = {
 export type TuiCheckpointPoint = {
   sessionId: string;
   modelProfileId: string;
+  requiredInputModalities: AgentInputModality[];
   messages: TuiCheckpointMessage[];
   sessionTokenUsage: (TokenUsageSnapshot & { scope: 'session' }) | null;
   pendingReview: ActivePendingReview | null;
@@ -122,6 +138,7 @@ export class LocalServerTuiSessionService {
   private readonly graphService: TuiSessionGraphService;
   private readonly loadContext: typeof loadAgentContext;
   private readonly defaultModelProfileId: string;
+  private readonly imageStore: LocalChatImageStore;
   private readonly reportCapabilityDiagnostics = createCapabilityDiagnosticReporter();
 
   constructor(options: {
@@ -138,6 +155,9 @@ export class LocalServerTuiSessionService {
     const runtimeConfig = options.runtimeConfig ?? buildLocalAgentRuntimeConfig();
     const sessionStatePath = options.sessionStatePath ?? runtimeConfig.tuiSessionPath;
     this.defaultModelProfileId = options.defaultModelProfileId;
+    this.imageStore = new LocalChatImageStore(
+      resolve(runtimeConfig.stateRoot, 'input-images'),
+    );
     this.state = options.state ?? loadTuiSessionState(
       this.defaultModelProfileId,
       sessionStatePath,
@@ -214,13 +234,41 @@ export class LocalServerTuiSessionService {
       .find((candidate) => candidate.threadId === threadId)
       ?? this.getActiveSession(deps.actorId);
     const modelProfileId = modelProfileIdOverride ?? session.modelProfileId;
+    const llmConfig = deps.modelProfiles.resolve(modelProfileId);
+    if (
+      modelProfileIdOverride === undefined
+      && !supportsInputModalities(
+        session.requiredInputModalities,
+        llmConfig.inputModalities ?? ['text'],
+      )
+    ) {
+      throw new Error(
+        `Model profile "${modelProfileId}" is incompatible with session input modalities: missing ${
+          missingInputModalities(
+            session.requiredInputModalities,
+            llmConfig.inputModalities ?? ['text'],
+          ).join(', ')
+        }`,
+      );
+    }
     return buildLocalChatAgentInput({
       context: ctx,
       userMessage: '',
       llmConfig: {
-        ...deps.modelProfiles.resolve(modelProfileId),
+        ...llmConfig,
         globalReviewPolicyMode: deps.globalReviewPolicyMode,
       },
+      modelInput: {
+        imageStore: this.imageStore,
+        admitInputModalities: (required) => {
+          this.admitSessionInputModalities(
+            deps,
+            session.id,
+            required,
+          );
+        },
+      },
+      modelInputCacheKey: session.id,
       toolkits: [...(deps.pluginToolkits ?? []), ...(deps.localToolkits ?? [])],
       toolkitDefinitions: [
         ...(deps.pluginToolkitDefinitions ?? []),
@@ -237,6 +285,58 @@ export class LocalServerTuiSessionService {
       workdir: deps.workdir,
       sessionStartedAt: session.createdAt,
     });
+  }
+
+  async createUserMessage(
+    deps: LocalServerDeps,
+    message: string,
+    attachments: readonly AgentLocalAttachment[],
+  ) {
+    if (attachments.length === 0) {
+      return createLocalChatHumanMessage(message);
+    }
+    const session = this.getActiveSession(deps.actorId);
+    const profile = deps.modelProfiles.resolve(session.modelProfileId);
+    const admitted = await this.imageStore.admit(attachments, {
+      allowImages: (profile.inputModalities ?? ['text']).includes('image'),
+    });
+    if (admitted.some((attachment) => attachment.source === 'local-image')) {
+      this.admitSessionInputModalities(
+        deps,
+        session.id,
+        ['text', 'image'],
+      );
+    }
+    return createAdmittedLocalChatHumanMessage(message, admitted);
+  }
+
+  private admitSessionInputModalities(
+    deps: LocalServerDeps,
+    sessionId: string,
+    required: readonly AgentInputModality[],
+  ) {
+    const session = this.getSession(deps.actorId, sessionId);
+    if (!session) {
+      throw new Error('session not found while admitting model input');
+    }
+    const profile = deps.modelProfiles.resolve(session.modelProfileId);
+    const supported = profile.inputModalities ?? ['text'];
+    if (!supportsInputModalities(required, supported)) {
+      throw new Error(
+        `Model profile "${profile.modelProfileId ?? session.modelProfileId}" does not support required input modalities: ${
+          missingInputModalities(required, supported).join(', ')
+        }`,
+      );
+    }
+    const updated = addTuiSessionRequiredInputModalities(
+      this.state,
+      session.id,
+      required,
+    );
+    if (!updated) {
+      throw new Error('session not found while recording model input');
+    }
+    if (updated !== session) this.save();
   }
 
   selectModelProfile(
@@ -299,6 +399,7 @@ export class LocalServerTuiSessionService {
     return {
       sessionId: session.id,
       modelProfileId: session.modelProfileId,
+      requiredInputModalities: [...session.requiredInputModalities],
       messages: readTuiCheckpointMessages(state.messages),
       sessionTokenUsage: readTuiCheckpointTokenUsage(state.messages),
       pendingReview,

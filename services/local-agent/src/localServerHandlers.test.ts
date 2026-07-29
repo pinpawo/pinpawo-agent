@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import {
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -480,6 +485,215 @@ test('model selection is rejected while checkpoint state has pending review', as
     assert.equal(rejected?.type, 'model.select.error');
     if (rejected?.type !== 'model.select.error') return;
     assert.equal(rejected.code, 'review_pending');
+  } finally {
+    handlers.close();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test('image admission persists a monotonic requirement and gates model selection', async () => {
+  const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-model-image-ledger-'));
+  const imagePath = join(workdir, 'renamed.bin');
+  writeFileSync(imagePath, Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.from('image-ledger'),
+  ]));
+  const runtimeConfig = buildLocalAgentRuntimeConfig(workdir);
+  const sent: LocalAgentServerMessage[] = [];
+  const peer = createPeer(sent);
+  let providerMessage: { content?: unknown } | undefined;
+  const handlers = createLocalServerHandlers({
+    actorId: 'pet-a',
+    workdir,
+    runtimeConfig,
+    modelProfiles: createTestModelProfileRegistry([
+      {
+        modelProfileId: 'vision-a',
+        inputModalities: ['text', 'image'],
+      },
+      {
+        modelProfileId: 'text-only',
+        inputModalities: ['text'],
+      },
+      {
+        modelProfileId: 'vision-b',
+        inputModalities: ['text', 'image'],
+      },
+    ], 'vision-a'),
+    globalReviewPolicyMode: 'require_authorization',
+    capabilityArtifactStore: testArtifactStore,
+  }, {
+    loadContext: loadTestContext,
+    runChat: async (options) => {
+      providerMessage = await options.prepareUserMessage?.();
+      return { status: 'interrupted' };
+    },
+  });
+
+  try {
+    await handlers.peerHandlers.onSessionNew(peer, {
+      type: 'session.new',
+      requestId: 'new-image',
+    });
+    const created = sent.find((message) => message.type === 'session.new.result');
+    assert.equal(created?.type, 'session.new.result');
+    if (created?.type !== 'session.new.result') return;
+    const sessionId = created.session.id;
+
+    await handlers.peerHandlers.onChatRequest(peer, {
+      type: 'chat_request',
+      requestId: 'chat-image',
+      message: 'understand this',
+      attachments: [{
+        id: 'image-1',
+        source: 'local-path',
+        kind: 'file',
+        path: imagePath,
+        name: 'renamed.bin',
+      }],
+    });
+    const serializedMessage = JSON.stringify(providerMessage?.content);
+    assert.match(serializedMessage, /pinpawo-local-image:/);
+    assert.doesNotMatch(serializedMessage, /base64|renamed\.bin/);
+
+    await handlers.peerHandlers.onModelList(peer, {
+      type: 'model.list',
+      requestId: 'list-after-image',
+      sessionId,
+    });
+    const listed = sent.find((message) => (
+      message.type === 'model.list.result'
+      && message.requestId === 'list-after-image'
+    ));
+    assert.equal(listed?.type, 'model.list.result');
+    if (listed?.type !== 'model.list.result') return;
+    assert.deepEqual(listed.requiredInputModalities, ['text', 'image']);
+    assert.equal(
+      listed.profiles.find((profile) => profile.id === 'text-only')?.compatible,
+      false,
+    );
+
+    await handlers.peerHandlers.onModelSelect(peer, {
+      type: 'model.select',
+      requestId: 'select-text-after-image',
+      sessionId,
+      modelProfileId: 'text-only',
+    });
+    const incompatible = sent.find((message) => (
+      message.type === 'model.select.error'
+      && message.requestId === 'select-text-after-image'
+    ));
+    assert.equal(incompatible?.type, 'model.select.error');
+    if (incompatible?.type !== 'model.select.error') return;
+    assert.equal(incompatible.code, 'profile_incompatible');
+
+    await handlers.peerHandlers.onModelSelect(peer, {
+      type: 'model.select',
+      requestId: 'select-vision-after-image',
+      sessionId,
+      modelProfileId: 'vision-b',
+    });
+    const selected = sent.find((message) => (
+      message.type === 'model.select.result'
+      && message.requestId === 'select-vision-after-image'
+    ));
+    assert.equal(selected?.type, 'model.select.result');
+    if (selected?.type !== 'model.select.result') return;
+    assert.equal(selected.selectedProfileId, 'vision-b');
+    assert.deepEqual(
+      selected.snapshot.session.runtime?.requiredInputModalities,
+      ['text', 'image'],
+    );
+    assert.equal(
+      selected.snapshot.session.runtime?.modelProfileCompatible,
+      true,
+    );
+
+    const persisted = JSON.parse(
+      readFileSync(runtimeConfig.tuiSessionPath, 'utf8'),
+    ) as {
+      sessions: Record<string, { requiredInputModalities?: string[] }>;
+    };
+    assert.deepEqual(
+      persisted.sessions[sessionId]?.requiredInputModalities,
+      ['text', 'image'],
+    );
+  } finally {
+    handlers.close();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test('text-only selected profile rejects image admission before graph invocation', async () => {
+  const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-model-image-reject-'));
+  const imagePath = join(workdir, 'image.png');
+  writeFileSync(imagePath, Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.from('reject-image'),
+  ]));
+  const runtimeConfig = buildLocalAgentRuntimeConfig(workdir);
+  const sent: LocalAgentServerMessage[] = [];
+  const peer = createPeer(sent);
+  let graphInvocations = 0;
+  const handlers = createLocalServerHandlers({
+    actorId: 'pet-a',
+    workdir,
+    runtimeConfig,
+    modelProfiles: createTestModelProfileRegistry([
+      {
+        modelProfileId: 'text-only',
+        inputModalities: ['text'],
+      },
+    ]),
+    globalReviewPolicyMode: 'require_authorization',
+    capabilityArtifactStore: testArtifactStore,
+  }, {
+    loadContext: loadTestContext,
+    runChat: async (options) => {
+      await options.prepareUserMessage?.();
+      graphInvocations += 1;
+      return { status: 'interrupted' };
+    },
+  });
+
+  try {
+    await handlers.peerHandlers.onSessionNew(peer, {
+      type: 'session.new',
+      requestId: 'new-text-only',
+    });
+    const created = sent.find((message) => message.type === 'session.new.result');
+    assert.equal(created?.type, 'session.new.result');
+    if (created?.type !== 'session.new.result') return;
+    await handlers.peerHandlers.onChatRequest(peer, {
+      type: 'chat_request',
+      requestId: 'reject-image',
+      message: 'describe',
+      attachments: [{
+        id: 'image-1',
+        source: 'local-path',
+        kind: 'file',
+        path: imagePath,
+        name: 'image.png',
+      }],
+    });
+    assert.equal(graphInvocations, 0);
+    const error = sent.find((message) => (
+      message.type === 'event'
+      && message.event.type === 'error'
+      && message.event.requestId === 'reject-image'
+    ));
+    assert.equal(error?.type, 'event');
+    if (error?.type !== 'event' || error.event.type !== 'error') return;
+    assert.match(error.event.message, /does not support image input/);
+    const persisted = JSON.parse(
+      readFileSync(runtimeConfig.tuiSessionPath, 'utf8'),
+    ) as {
+      sessions: Record<string, { requiredInputModalities?: string[] }>;
+    };
+    assert.deepEqual(
+      persisted.sessions[created.session.id]?.requiredInputModalities,
+      ['text'],
+    );
   } finally {
     handlers.close();
     rmSync(workdir, { recursive: true, force: true });

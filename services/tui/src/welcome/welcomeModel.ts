@@ -36,13 +36,14 @@ export function buildWelcomeLines(input: {
   const version = input.version ?? TUI_VERSION;
   const shortcuts = width >= 54
     ? [
-        '/ commands · PgUp history · Ctrl+Enter send',
-        'Ctrl+R sessions · Esc interrupt · Ctrl+C exit',
+        '/ commands · PgUp history · Enter send',
+        'Ctrl+J newline · Ctrl+R sessions · Esc interrupt · Ctrl+C exit',
       ]
     : [
         '/ commands · PgUp history',
         'Ctrl+R sessions',
-        'Ctrl+Enter send · Esc interrupt',
+        'Enter send · Ctrl+J newline',
+        'Esc interrupt',
         'Ctrl+C exit',
       ];
   return [

@@ -154,12 +154,15 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     'session-list',
     'session-resume',
     'chat-interrupt',
+    'snapshot-interrupt',
     'chat-review-approve',
     'snapshot-review-approve',
     'chat-review-cancel',
+    'snapshot-review-cancel',
     'chat-review-continue',
     'snapshot-review-continue',
     'chat-error',
+    'snapshot-error',
     'chat-recovery',
     'snapshot-recovery',
   ];
@@ -430,6 +433,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
       INTERRUPT_PARTIAL,
       'interrupted',
     ]);
+    assert.equal(snapshotRequestCount, 4);
 
     assert.deepEqual(controller.submitChat(REVIEW_APPROVE_MESSAGE), {
       ok: true,
@@ -451,7 +455,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     assert.equal(approvalResult.ok, true);
     assert.equal(approvalResult.ok ? approvalResult.status : null, 'sent');
     await waitFor(() => (
-      snapshotRequestCount === 4
+      snapshotRequestCount === 5
       && controller.getState().session.activeRun === null
       && hasCompletedRequestMessage(
         controller.getState().session,
@@ -489,10 +493,8 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     }), {
       ok: true,
     });
-    await waitFor(() => (
-      controller.getState().session.activeRun === null
-      && controller.canContinueActiveDelegation()
-    ));
+    await waitFor(() => controller.getState().session.activeRun === null);
+    assert.equal(snapshotRequestCount, 6);
     assert.deepEqual(graphFixture.reviewResumes()[1], {
       'review-interrupt-cancel': {
         action: 'interrupt_run',
@@ -522,7 +524,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     });
     assert.equal(continuedApproval.ok, true);
     await waitFor(() => (
-      snapshotRequestCount === 5
+      snapshotRequestCount === 7
       && controller.getState().session.activeRun === null
       && hasCompletedRequestMessage(
         controller.getState().session,
@@ -551,7 +553,8 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
       requestId: 'chat-error',
     });
     await waitFor(() => (
-      controller.getState().session.activeRun === null
+      snapshotRequestCount === 8
+      && controller.getState().session.activeRun === null
       && hasCompletedRequestMessage(
         controller.getState().session,
         'chat-error',
@@ -583,7 +586,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
       requestId: 'chat-recovery',
     });
     await waitFor(() => (
-      snapshotRequestCount === 6
+      snapshotRequestCount === 9
       && controller.getState().session.activeRun === null
       && hasCompletedRequestMessage(
         controller.getState().session,

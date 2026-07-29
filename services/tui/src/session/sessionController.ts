@@ -45,7 +45,6 @@ export type SubmitChatResult =
         | 'not-ready'
         | 'busy'
         | 'empty'
-        | 'continuation-unavailable'
         | 'send-failed';
     };
 
@@ -59,6 +58,13 @@ export type InterruptRunResult =
         | 'review-active'
         | 'already-interrupting'
         | 'send-failed';
+    };
+
+export type InterruptResolvedReviewResult =
+  | { ok: true; requestId: string }
+  | {
+      ok: false;
+      reason: 'not-ready' | 'closed' | 'stale' | 'send-failed';
     };
 
 type SnapshotReason = 'startup' | 'reconnect' | 'completion';
@@ -118,21 +124,6 @@ const DEFAULT_RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000] as const;
 const DEFAULT_SNAPSHOT_TIMEOUT_MS = 5_000;
 const DEFAULT_SESSION_COMMAND_TIMEOUT_MS = 5_000;
 
-function concludesReviewInterrupt(message: AgentServerMessage) {
-  if (
-    message.type === 'interrupted'
-    || message.type === 'studio_response'
-    || message.type === 'studio_error'
-  ) {
-    return true;
-  }
-  return message.type === 'event' && (
-    message.event.type === 'human_review.requested'
-    || message.event.type === 'message.completed'
-    || message.event.type === 'error'
-  );
-}
-
 type PendingSessionCommand =
   | {
       operation: 'list';
@@ -177,8 +168,6 @@ export class TuiSessionController {
   private readonly listeners = new Set<(state: TuiSessionState) => void>();
   private readonly snapshotRequests = new Map<string, SnapshotReason>();
   private readonly sessionCommands = new Map<string, PendingSessionCommand>();
-  private readonly pendingReviewInterruptSessions = new Map<string, string>();
-  private readonly suspendedDelegationSessionIds = new Set<string>();
   private runtimeConfigUpdate: PendingRuntimeConfigUpdate | null = null;
   private state: TuiSessionState = {
     connection: 'idle',
@@ -243,19 +232,14 @@ export class TuiSessionController {
     message: string,
     attachments: readonly AgentLocalAttachment[] = [],
   ): SubmitChatResult {
-    return this.submitChatWithTransition(message, attachments);
-  }
-
-  canContinueActiveDelegation() {
-    return this.suspendedDelegationSessionIds.has(
-      this.state.session.sessionId,
+    return this.submitChatWithTransition(
+      message,
+      attachments,
+      'supersede_active',
     );
   }
 
   continueActiveDelegation(message: string): SubmitChatResult {
-    if (!this.canContinueActiveDelegation()) {
-      return { ok: false, reason: 'continuation-unavailable' };
-    }
     return this.submitChatWithTransition(message, [], 'resume_active');
   }
 
@@ -279,9 +263,6 @@ export class TuiSessionController {
     }
 
     const requestId = this.requestIdFactory();
-    const sessionId = this.state.session.sessionId;
-    const hadSuspendedDelegation =
-      this.suspendedDelegationSessionIds.delete(sessionId);
     if (!this.connection.send({
       type: 'chat_request',
       requestId,
@@ -289,9 +270,6 @@ export class TuiSessionController {
       ...(attachments.length ? { attachments: [...attachments] } : {}),
       ...(activeDelegationTransition ? { activeDelegationTransition } : {}),
     })) {
-      if (hadSuspendedDelegation) {
-        this.suspendedDelegationSessionIds.add(sessionId);
-      }
       return { ok: false, reason: 'send-failed' };
     }
     this.updateSession(reduceSession(this.state.session, {
@@ -371,12 +349,37 @@ export class TuiSessionController {
     return { ok: true, requestId: run.requestId };
   }
 
+  interruptResolvedReview(params: {
+    requestId: string;
+    actionId: string;
+  }): InterruptResolvedReviewResult {
+    if (this.state.connection !== 'ready' || !this.connection.isConnected()) {
+      return { ok: false, reason: 'not-ready' };
+    }
+    const run = this.state.session.activeRun;
+    if (!run || run.state !== 'waiting_review') {
+      return { ok: false, reason: 'closed' };
+    }
+    if (
+      run.requestId !== params.requestId
+      || run.reviewAction.actionId !== params.actionId
+    ) {
+      return { ok: false, reason: 'stale' };
+    }
+    if (!this.connection.send({
+      type: 'run.interrupt',
+      requestId: run.requestId,
+    })) {
+      return { ok: false, reason: 'send-failed' };
+    }
+    return { ok: true, requestId: run.requestId };
+  }
+
   startNewSession(): Promise<StartNewSessionResult> {
     const unavailable = this.sessionCommandUnavailable();
     if (unavailable) return Promise.reject(new Error(unavailable));
 
     const requestId = this.requestIdFactory();
-    const currentSessionId = this.state.session.sessionId;
     return new Promise((resolve, reject) => {
       const pending: PendingSessionCommand = {
         operation: 'new',
@@ -390,10 +393,6 @@ export class TuiSessionController {
       if (!this.connection.send({ type: 'session.new', requestId })) {
         this.clearSessionCommand(pending);
         reject(new Error('session new request could not be sent'));
-      } else {
-        this.clearDelegationContinuationForSession(
-          currentSessionId,
-        );
       }
     });
   }
@@ -572,16 +571,11 @@ export class TuiSessionController {
     ) {
       return { ok: false, reason: 'stale' };
     }
-    const sessionId = this.state.session.sessionId;
-    if (sessionId !== 'pending') {
-      this.pendingReviewInterruptSessions.set(run.requestId, sessionId);
-    }
     if (!this.connection.send({
       type: 'review.cancel',
       requestId: run.requestId,
       actionId: run.reviewAction.actionId,
     })) {
-      this.pendingReviewInterruptSessions.delete(run.requestId);
       return { ok: false, reason: 'send-failed' };
     }
     return { ok: true };
@@ -601,7 +595,6 @@ export class TuiSessionController {
   }
 
   private handleMessage(message: AgentServerMessage) {
-    this.updateDelegationContinuationState(message);
     if (
       message.type === 'runtime_config.result'
       || message.type === 'runtime_config.error'
@@ -744,7 +737,10 @@ export class TuiSessionController {
         event: message.event,
         ...(projectedMessage ? { message: projectedMessage } : {}),
       }, { observedAt: this.now() }));
-      if (message.event.type === 'message.completed') {
+      if (
+        message.event.type === 'message.completed'
+        || message.event.type === 'error'
+      ) {
         this.requestSnapshot('completion');
       }
       return;
@@ -789,33 +785,12 @@ export class TuiSessionController {
           text: message.message?.trim() || 'Run interrupted.',
         }],
       }, { observedAt: this.now() }));
+      this.requestSnapshot('completion');
       return;
     }
 
     if (message.type === 'pong') return;
     assertNever(message);
-  }
-
-  private updateDelegationContinuationState(message: AgentServerMessage) {
-    if (!('requestId' in message)) return;
-    const sessionId = this.pendingReviewInterruptSessions.get(
-      message.requestId,
-    );
-    if (!sessionId || !concludesReviewInterrupt(message)) return;
-
-    this.pendingReviewInterruptSessions.delete(message.requestId);
-    if (message.type === 'interrupted') {
-      this.suspendedDelegationSessionIds.add(sessionId);
-    }
-  }
-
-  private clearDelegationContinuationForSession(sessionId: string) {
-    this.suspendedDelegationSessionIds.delete(sessionId);
-    for (const [requestId, pendingSessionId] of this.pendingReviewInterruptSessions) {
-      if (pendingSessionId === sessionId) {
-        this.pendingReviewInterruptSessions.delete(requestId);
-      }
-    }
   }
 
   private handleClose() {

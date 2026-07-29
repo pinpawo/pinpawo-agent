@@ -1,10 +1,14 @@
 import type { AgentSession } from '@pinpawo/agent-session';
 import stringWidth from 'string-width';
+import {
+  COMPOSER_PLACEHOLDER,
+  STUDIO_COMPOSER_PLACEHOLDER,
+} from '../input/composerKeyBindings';
+import { formatPolicyMode } from '../overlays/policyPickerModel';
 import type {
   TuiConnectionStatus,
   TuiSessionState,
 } from '../session/sessionController';
-import { formatPolicyMode } from '../overlays/policyPickerModel';
 import { sessionActorLabel } from '../session/sessionDisplay';
 import { truncateTerminalLine } from '../text/terminalText';
 import { TUI_VERSION } from '../version';
@@ -124,8 +128,8 @@ export function formatComposerPlaceholder(
     return `Waiting for ${actor} · draft next message · Esc interrupt`;
   }
   return composerMode === 'studio'
-    ? 'Studio task · Ctrl+Enter/Ctrl+O run · /chat to exit'
-    : 'Message · Ctrl+Enter or Ctrl+O to send';
+    ? STUDIO_COMPOSER_PLACEHOLDER
+    : COMPOSER_PLACEHOLDER;
 }
 
 export function formatUsage(session: AgentSession) {

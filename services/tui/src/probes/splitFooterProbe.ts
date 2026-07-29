@@ -9,13 +9,14 @@ import {
   type ScrollbackRenderContext,
   type ScrollbackSurface,
 } from '@opentui/core';
+import { COMPOSER_KEY_BINDINGS } from '../input/composerKeyBindings';
 import { calculateComposerLayout } from '../layout/composerLayout';
+import { installTextareaWorkarounds } from '../terminal/textareaCompatibility';
 import { formatInputProbe } from './inputProbe';
 import {
   createSpikeSession,
   formatSpikeTimelineEntry,
 } from './sessionHarness';
-import { installTextareaWorkarounds } from '../terminal/textareaCompatibility';
 
 const smoke = process.argv.includes('--smoke');
 const renderer = await createCliRenderer({
@@ -74,11 +75,7 @@ const composer = new TextareaRenderable(renderer, {
   backgroundColor: RGBA.defaultBackground(),
   focusedBackgroundColor: RGBA.defaultBackground(),
   placeholder: 'Message · multiline / paste / IME / file paths',
-  keyBindings: [{
-    name: 'return',
-    ctrl: true,
-    action: 'submit',
-  }],
+  keyBindings: COMPOSER_KEY_BINDINGS,
   onSubmit: () => {
     if (!composer.plainText.trim()) return;
     writeScrollbackLine(`user       ${composer.plainText}`);

@@ -11,7 +11,7 @@ import type {
 } from '../session/sessionController';
 import { ApprovalController } from './approvalController';
 
-test('approval controller advances a batch, sends the final review, and unlocks on timeout', () => {
+test('approval controller keeps the one-shot resolution gate after a wait timeout', () => {
   const firstDecision: ReviewResponse = {
     reviewId: 'review-1',
     selectedOptionId: 'approve',
@@ -60,16 +60,23 @@ test('approval controller advances a batch, sends the final review, and unlocks 
   assert.equal(advanced.reviewIndex, 1);
 
   controller.handle('submit');
-  assert.equal(controller.getState().phase, 'submitting');
+  assert.equal(controller.getState().phase, 'resolution-sent');
   assert.equal(timers.length, 1);
   timers[0]?.callback();
   const timedOut = controller.getState();
-  assert.equal(timedOut.phase, 'error');
-  assert.match(timedOut.message ?? '', /can be retried/);
-  assert.deepEqual(changes, ['ready', 'ready', 'submitting', 'error']);
+  assert.equal(timedOut.phase, 'resolution-sent');
+  assert.match(timedOut.message ?? '', /authoritative review state/);
+  controller.handle('submit');
+  assert.equal(sessionController.submitCalls.length, 2);
+  assert.deepEqual(changes, [
+    'ready',
+    'ready',
+    'resolution-sent',
+    'resolution-sent',
+  ]);
 });
 
-test('approval controller releases a submitting lock when connection changes', () => {
+test('approval controller preserves the one-shot resolution gate when connection changes', () => {
   const sessionController = new FakeReviewSessionController();
   const decision: ReviewResponse = {
     reviewId: 'review-1',
@@ -92,13 +99,13 @@ test('approval controller releases a submitting lock when connection changes', (
   const run = waitingReview([review('review-1')]);
   controller.sync(run, 'ready');
   controller.handle('submit');
-  assert.equal(controller.getState().phase, 'submitting');
+  assert.equal(controller.getState().phase, 'resolution-sent');
 
   controller.sync(run, 'reconnecting');
   const disconnected = controller.getState();
-  assert.equal(disconnected.phase, 'error');
+  assert.equal(disconnected.phase, 'resolution-sent');
   assert.equal(cleared.length, 1);
-  assert.match(disconnected.message ?? '', /connection changed/);
+  assert.match(disconnected.message ?? '', /connection changed/i);
 });
 
 test('approval controller sends canonical cancellation for the active action', () => {
@@ -116,7 +123,13 @@ test('approval controller sends canonical cancellation for the active action', (
     requestId: 'request-1',
     actionId: 'action-1',
   }]);
-  assert.equal(controller.getState().phase, 'submitting');
+  assert.equal(controller.getState().phase, 'resolution-sent');
+  controller.markInterruptSent();
+  const interrupted = controller.getState();
+  assert.equal(
+    interrupted.phase === 'closed' ? false : interrupted.interruptSent,
+    true,
+  );
   controller.destroy();
   assert.equal(controller.getState().phase, 'closed');
 });

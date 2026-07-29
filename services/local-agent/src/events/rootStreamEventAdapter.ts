@@ -22,8 +22,8 @@ import {
  * - the node name is the first segment of a namespace entry (`"answer:<task>"`).
  *
  * Scope granularities differ on purpose:
- * - The main assistant reply streams as token deltas (the user is waiting on
- *   it) with the legacy prefix dedup against the state echo.
+ * - The main assistant reply streams only from the root `answer` node (or an
+ *   unnamed root model scope) with prefix dedup against the state echo.
  * - Subagent output is an ambient progress feed with MULTIPLE messages per
  *   run; it is emitted as one completed `subagent.message` per model message
  *   lifecycle. Token-level dedup across messages is unsound there (a legit
@@ -64,16 +64,7 @@ export type RootStreamChatEvent =
   /** The run paused on an interrupt (human review etc.). */
   | { type: 'interrupt'; interrupts: unknown[] };
 
-/**
- * Nodes whose depth-1 message activity belongs to a delegation lane, not the
- * main assistant reply. Mirrors the legacy `isLaneTaggedAiMessage` filter:
- * lane tags live on `additional_kwargs`, which protocol message events do not
- * carry, so under root streaming the lane boundary is expressed by node name.
- * Depth-1 lane message events are echoes of state the lane node writes
- * (announces, copied child messages); the live subagent feed comes from the
- * depth >= 2 child scopes, so lane echoes are dropped — as legacy does.
- */
-const DELEGATION_LANE_NODE_NAMES = new Set(['capability']);
+const MAIN_ASSISTANT_NODE_NAMES = new Set(['answer']);
 const INTERNAL_SUBAGENT_MESSAGE_NODE_NAMES = new Set([
   'SummarizationMiddleware.before_model',
 ]);
@@ -111,8 +102,9 @@ function isGuardDecisionCustomData(data: Record<string, unknown>): boolean {
 export type RootStreamAdapterOptions = {
   /**
    * Assistant-reply node filter for depth-1 message activity. Defaults to the
-   * legacy behavior: drop orchestrator-internal AI stream nodes and
-   * delegation-lane nodes; everything else is main assistant output.
+   * production orchestrator contract: only `answer` is user-facing. Internal
+   * nodes can write synthetic AI messages such as delegation briefings, which
+   * stay observable on the raw stream without becoming chat output.
    */
   isMainAssistantNode?: (node: string | null) => boolean;
 };
@@ -121,10 +113,7 @@ function defaultIsMainAssistantNode(node: string | null): boolean {
   if (node === null) {
     return true;
   }
-  if (isOrchestratorInternalAiStreamNode(node)) {
-    return false;
-  }
-  return !DELEGATION_LANE_NODE_NAMES.has(node);
+  return MAIN_ASSISTANT_NODE_NAMES.has(node);
 }
 
 function isInternalOrchestratorNamespace(namespace: string[]) {

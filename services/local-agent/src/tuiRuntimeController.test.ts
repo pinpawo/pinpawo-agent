@@ -350,103 +350,42 @@ test('TuiRuntimeController requests review cancellation separately from run inte
   });
 });
 
-test('TuiRuntimeController enables continuation only after review cancellation is authoritatively interrupted', () => {
-  const harness = createController(pendingReviewState());
+test('TuiRuntimeController sends explicit delegation continuation', () => {
+  const harness = createController(idleState());
 
-  assert.equal(harness.controller.requestInterrupt(), true);
-  assert.equal(harness.controller.canContinueActiveDelegation(), false);
-
-  harness.connectionHandlers.onMessage({
-    type: 'interrupted',
-    requestId: 'req-1',
-  });
-
-  assert.equal(harness.controller.canContinueActiveDelegation(), true);
   assert.equal(
     harness.controller.continueActiveDelegation('apply the new constraints'),
     true,
   );
-  assert.deepEqual(harness.sent[0], {
-    type: 'review.cancel',
-    requestId: 'req-1',
-    actionId: 'interrupt-1',
-  });
-  const continuation = harness.sent[1];
+  const continuation = harness.sent[0];
   assert.equal(continuation?.type, 'chat_request');
   if (continuation?.type === 'chat_request') {
     assert.equal(typeof continuation.requestId, 'string');
     assert.equal(continuation.message, 'apply the new constraints');
     assert.equal(continuation.activeDelegationTransition, 'resume_active');
   }
-  assert.equal(harness.controller.canContinueActiveDelegation(), false);
 });
 
-test('TuiRuntimeController does not offer continuation after ordinary interruption', () => {
-  const harness = createController(busyRunState());
+test('TuiRuntimeController explicitly supersedes checkpoint state for ordinary chat', () => {
+  const harness = createController(idleState());
 
-  assert.equal(harness.controller.requestInterrupt(), true);
-  harness.connectionHandlers.onMessage({
-    type: 'interrupted',
-    requestId: 'req-1',
-  });
-
-  assert.equal(harness.controller.canContinueActiveDelegation(), false);
-});
-
-test('TuiRuntimeController clears review continuation when an ordinary request supersedes it', () => {
-  const harness = createController(pendingReviewState());
-
-  assert.equal(harness.controller.requestInterrupt(), true);
-  harness.connectionHandlers.onMessage({
-    type: 'interrupted',
-    requestId: 'req-1',
-  });
-  assert.equal(harness.controller.canContinueActiveDelegation(), true);
-
-  assert.equal(harness.controller.sendChatRequest('start something new'), true);
-  assert.equal(harness.sent[1]?.type, 'chat_request');
-  if (harness.sent[1]?.type === 'chat_request') {
-    assert.equal(harness.sent[1].activeDelegationTransition, undefined);
+  assert.equal(harness.controller.sendChatRequest('answer a new question'), true);
+  const request = harness.sent[0];
+  assert.equal(request?.type, 'chat_request');
+  if (request?.type === 'chat_request') {
+    assert.equal(request.message, 'answer a new question');
+    assert.equal(
+      request.activeDelegationTransition,
+      'supersede_active',
+    );
   }
-  assert.equal(harness.controller.canContinueActiveDelegation(), false);
 });
 
-test('TuiRuntimeController preserves review continuation when transport rejects the request', () => {
-  const harness = createController(pendingReviewState());
-
-  assert.equal(harness.controller.requestInterrupt(), true);
-  harness.connectionHandlers.onMessage({
-    type: 'interrupted',
-    requestId: 'req-1',
-  });
-  assert.equal(harness.controller.canContinueActiveDelegation(), true);
+test('TuiRuntimeController reports transport rejection for continuation', () => {
+  const harness = createController(idleState());
 
   harness.connection.send = () => false;
   assert.equal(harness.controller.continueActiveDelegation('keep going'), false);
-  assert.equal(harness.controller.canContinueActiveDelegation(), true);
-});
-
-test('TuiRuntimeController rejects continuation when review cancellation settles another way', () => {
-  const harness = createController(pendingReviewState());
-
-  assert.equal(harness.controller.requestInterrupt(), true);
-  harness.connectionHandlers.onMessage({
-    type: 'event',
-    requestId: 'req-1',
-    event: {
-      type: 'error',
-      requestId: 'req-1',
-      message: 'review already closed',
-    },
-  });
-
-  assert.equal(harness.controller.canContinueActiveDelegation(), false);
-  assert.equal(harness.controller.continueActiveDelegation('keep going'), false);
-  assert.equal(harness.sent.length, 1);
-  assert.equal(harness.actions.some((action) => (
-    action.type === 'message.appended'
-    && action.message.text === '当前没有可继续的挂起委派。'
-  )), true);
 });
 
 test('TuiRuntimeController interrupts the resumed run after a review resolution was sent', () => {
@@ -725,4 +664,63 @@ test('TuiRuntimeController applies completed-message snapshots without resetting
       : undefined,
     'completion',
   );
+});
+
+test('TuiRuntimeController refreshes the session after interruption', async () => {
+  const harness = createController(pendingReviewState());
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (harness.controller as any).localServerClient = {
+    readSessionSnapshot: async () => ({
+      version: 3,
+      session: {
+        sessionId: 'sess-1',
+        kind: 'chat',
+        timeline: [],
+        activeRun: null,
+      },
+    }),
+  };
+
+  harness.connectionHandlers.onMessage({
+    type: 'interrupted',
+    requestId: 'req-1',
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const snapshotAction = harness.actions.find((action) => (
+    action.type === 'session.snapshot.loaded'
+  ));
+  assert.equal(snapshotAction?.type, 'session.snapshot.loaded');
+});
+
+test('TuiRuntimeController refreshes the session after a run error', async () => {
+  const harness = createController(pendingReviewState());
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (harness.controller as any).localServerClient = {
+    readSessionSnapshot: async () => ({
+      version: 3,
+      session: {
+        sessionId: 'sess-1',
+        kind: 'chat',
+        timeline: [],
+        activeRun: null,
+      },
+    }),
+  };
+
+  harness.connectionHandlers.onMessage({
+    type: 'event',
+    requestId: 'req-1',
+    event: {
+      type: 'error',
+      requestId: 'req-1',
+      message: 'review already closed',
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const snapshotAction = harness.actions.find((action) => (
+    action.type === 'session.snapshot.loaded'
+  ));
+  assert.equal(snapshotAction?.type, 'session.snapshot.loaded');
 });

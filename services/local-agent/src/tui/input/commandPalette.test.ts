@@ -14,7 +14,7 @@ test('buildCommandPaletteModel opens for slash command prefixes', () => {
   assert.equal(model.query, '');
   assert.deepEqual(
     model.items.map((command) => command.name),
-    ['new', 'studio', 'chat', 'policy', 'help', 'transcript', 'export', 'edit', 'resume', 'quit'],
+    ['new', 'studio', 'chat', 'policy', 'help', 'transcript', 'export', 'edit', 'continue', 'resume', 'quit'],
   );
 });
 
@@ -28,22 +28,14 @@ test('buildCommandPaletteModel filters command names and aliases', () => {
   assert.deepEqual(quitAlias.items.map((command) => command.name), ['quit']);
 });
 
-test('buildCommandPaletteModel offers continuation only while a delegation is suspended', () => {
-  const unavailable = buildCommandPaletteModel({
+test('buildCommandPaletteModel always offers explicit continuation', () => {
+  const continuation = buildCommandPaletteModel({
     text: '/con',
     cursorOffset: 4,
   });
-  assert.equal(unavailable.open, true);
-  assert.deepEqual(unavailable.items, []);
-
-  const available = buildCommandPaletteModel(
-    { text: '/con', cursorOffset: 4 },
-    0,
-    { canContinueActiveDelegation: true },
-  );
-  assert.equal(available.open, true);
-  assert.deepEqual(available.items.map((command) => command.name), ['continue']);
-  assert.deepEqual(completeCommandPaletteInput(available), {
+  assert.equal(continuation.open, true);
+  assert.deepEqual(continuation.items.map((command) => command.name), ['continue']);
+  assert.deepEqual(completeCommandPaletteInput(continuation), {
     text: '/continue ',
     cursorOffset: '/continue '.length,
   });

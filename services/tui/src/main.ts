@@ -38,6 +38,10 @@ import {
   resolveComposerHistoryDirection,
 } from './input/composerHistory';
 import {
+  COMPOSER_KEY_BINDINGS,
+  COMPOSER_PLACEHOLDER,
+} from './input/composerKeyBindings';
+import {
   placeComposerCursorAtTextOffset,
   readComposerTextInput,
 } from './input/composerTextPosition';
@@ -274,19 +278,8 @@ const composer = new TextareaRenderable(renderer, {
   backgroundColor: RGBA.defaultBackground(),
   focusedBackgroundColor: RGBA.defaultBackground(),
   syntaxStyle: composerDecorationStyle,
-  placeholder: 'Message · Ctrl+Enter or Ctrl+O to send',
-  keyBindings: [
-    {
-      name: 'return',
-      ctrl: true,
-      action: 'submit',
-    },
-    {
-      name: 'o',
-      ctrl: true,
-      action: 'submit',
-    },
-  ],
+  placeholder: COMPOSER_PLACEHOLDER,
+  keyBindings: COMPOSER_KEY_BINDINGS,
   onSubmit: () => submitComposerInput(),
   onCursorChange: () => syncComposerInputOverlays(),
   onPaste: (event: PasteEvent) => {
@@ -377,7 +370,15 @@ renderer.keyInput.on('keypress', (key) => {
   if (key.ctrl && !key.shift && key.name === 'c') {
     key.preventDefault();
     key.stopPropagation();
-    handleGlobalInterrupt(approval.phase);
+    handleGlobalInterrupt(approval);
+    return;
+  }
+  if (key.name === 'escape' && approval.phase === 'resolution-sent') {
+    key.preventDefault();
+    key.stopPropagation();
+    if (!approval.interruptSent) {
+      requestReviewResolutionInterrupt(approval);
+    }
     return;
   }
   const clipboardAction = resolveClipboardAction(key);
@@ -652,8 +653,6 @@ function syncComposerInputOverlays() {
       && policyPicker.phase === 'closed'
       && noticeOverlay.phase === 'closed'
       && approvalController.getState().phase === 'closed',
-    canContinueActiveDelegation:
-      controller.canContinueActiveDelegation(),
   });
   refreshCommandOverlay();
 
@@ -834,10 +833,10 @@ function refreshNoticeOverlay() {
 }
 
 function handleGlobalInterrupt(
-  approvalPhase: ReturnType<ApprovalController['getState']>['phase'],
+  approval: ReturnType<ApprovalController['getState']>,
 ) {
   const action = resolveGlobalInterruptAction({
-    approvalPhase,
+    approval,
     activeRun: controller.getState().session.activeRun,
   });
   if (action === 'cancel-review') {
@@ -845,10 +844,37 @@ function handleGlobalInterrupt(
     return;
   }
   if (action === 'interrupt-run') {
-    requestRunInterrupt();
+    if (approval.phase === 'resolution-sent') {
+      requestReviewResolutionInterrupt(approval);
+    } else {
+      requestRunInterrupt();
+    }
     return;
   }
   renderer.destroy();
+}
+
+function requestReviewResolutionInterrupt(
+  approval: Exclude<
+    ReturnType<ApprovalController['getState']>,
+    { phase: 'closed' }
+  >,
+) {
+  const result = controller.interruptResolvedReview({
+    requestId: approval.requestId,
+    actionId: approval.action.actionId,
+  });
+  if (result.ok) {
+    approvalController.markInterruptSent();
+    localNotice = 'interrupt requested · Ctrl+C again to exit';
+  } else {
+    approvalController.noteResolutionWait(
+      reviewResolutionInterruptFailureText(result.reason),
+    );
+  }
+  refreshApproval();
+  refreshLive();
+  refreshStatus();
 }
 
 function requestRunInterrupt() {
@@ -1168,10 +1194,7 @@ function handleCommandOverlayAction(action: CommandOverlayAction) {
 
 function openCommandHelpUi() {
   if (terminalHandoffOpen) return;
-  commandOverlay = openCommandHelp({
-    canContinueActiveDelegation:
-      controller.canContinueActiveDelegation(),
-  });
+  commandOverlay = openCommandHelp();
   closeFileMentionOverlay();
   composer.blur();
   refreshCommandOverlay();
@@ -1196,8 +1219,6 @@ function submitComposerInput(input = composer.plainText) {
     text: input,
     attachmentCount: attachments.length,
     mode: composerMode,
-    canContinueActiveDelegation:
-      controller.canContinueActiveDelegation(),
   });
 
   switch (intent.type) {
@@ -1538,7 +1559,6 @@ function submitFailureText(
     | 'not-ready'
     | 'busy'
     | 'empty'
-    | 'continuation-unavailable'
     | 'send-failed',
 ) {
   switch (reason) {
@@ -1548,8 +1568,6 @@ function submitFailureText(
       return 'wait for the current response to finish';
     case 'empty':
       return 'message is empty';
-    case 'continuation-unavailable':
-      return 'no suspended delegation is available for this session';
     case 'send-failed':
       return 'message could not be sent';
   }
@@ -1567,5 +1585,20 @@ function interruptFailureText(
       return 'close the active review before interrupting';
     case 'send-failed':
       return 'interrupt request could not be sent';
+  }
+}
+
+function reviewResolutionInterruptFailureText(
+  reason: 'not-ready' | 'closed' | 'stale' | 'send-failed',
+) {
+  switch (reason) {
+    case 'not-ready':
+      return 'Connection changed; waiting for authoritative review state…';
+    case 'closed':
+      return 'Review closed; waiting for the refreshed run state…';
+    case 'stale':
+      return 'Review changed; waiting for the refreshed review state…';
+    case 'send-failed':
+      return 'Interrupt could not be sent; press Esc to retry interruption.';
   }
 }

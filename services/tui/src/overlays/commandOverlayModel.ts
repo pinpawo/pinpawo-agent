@@ -1,7 +1,6 @@
 import stringWidth from 'string-width';
 import {
   listTuiCommands,
-  type TuiCommandAvailability,
   type TuiCommandDefinition,
 } from '../commands/commandRegistry';
 import { truncateTerminalLine } from '../text/terminalText';
@@ -13,12 +12,10 @@ export type CommandOverlayState =
       query: string;
       selectedIndex: number;
       items: TuiCommandDefinition[];
-      canContinueActiveDelegation: boolean;
     }
   | {
       phase: 'help';
       offset: number;
-      canContinueActiveDelegation: boolean;
     };
 
 export type CommandOverlayAction =
@@ -62,12 +59,9 @@ export function syncCommandPalette(
     text: string;
     cursorOffset: number;
     enabled: boolean;
-    canContinueActiveDelegation?: boolean;
   },
 ): CommandOverlayState {
   if (state.phase === 'help') return state;
-  const canContinueActiveDelegation =
-    input.canContinueActiveDelegation ?? false;
   const query = input.enabled
     ? commandPaletteQuery(input.text, input.cursorOffset)
     : null;
@@ -77,9 +71,8 @@ export function syncCommandPalette(
   if (
     state.phase === 'palette'
     && state.query === query
-    && state.canContinueActiveDelegation === canContinueActiveDelegation
   ) return state;
-  const items = matchingCommands(query, { canContinueActiveDelegation });
+  const items = matchingCommands(query);
   const selectedIndex = state.phase === 'palette'
     ? clampIndex(state.selectedIndex, items.length)
     : 0;
@@ -88,18 +81,13 @@ export function syncCommandPalette(
     query,
     selectedIndex,
     items,
-    canContinueActiveDelegation,
   };
 }
 
-export function openCommandHelp(
-  availability: TuiCommandAvailability = {},
-): CommandOverlayState {
+export function openCommandHelp(): CommandOverlayState {
   return {
     phase: 'help',
     offset: 0,
-    canContinueActiveDelegation:
-      availability.canContinueActiveDelegation ?? false,
   };
 }
 
@@ -125,7 +113,7 @@ export function pageCommandHelp(
   if (state.phase !== 'help') return state;
   const maximum = Math.max(
     0,
-    helpLines(state).length - HELP_CONTENT_ROWS,
+    helpLines().length - HELP_CONTENT_ROWS,
   );
   return {
     ...state,
@@ -189,7 +177,7 @@ export function buildCommandOverlayViewModel(
   }
 
   const innerWidth = Math.max(1, width - 4);
-  const lines = helpLines(state);
+  const lines = helpLines();
   const maximum = Math.max(0, lines.length - HELP_CONTENT_ROWS);
   const offset = Math.min(state.offset, maximum);
   const progress = lines.length > HELP_CONTENT_ROWS
@@ -214,11 +202,8 @@ function commandPaletteQuery(text: string, cursorOffset: number) {
   return /^[A-Za-z0-9_-]*$/.test(query) ? query.toLowerCase() : null;
 }
 
-function matchingCommands(
-  query: string,
-  availability: TuiCommandAvailability,
-) {
-  const commands = listTuiCommands(availability);
+function matchingCommands(query: string) {
+  const commands = listTuiCommands();
   if (!query) return commands;
   const nameMatches = commands.filter((command) => (
     command.name.startsWith(query)
@@ -260,13 +245,14 @@ function formatCommandLine(
   return truncateTerminalLine(`${prefix}${usage}${suffix}`, width);
 }
 
-function helpLines(availability: TuiCommandAvailability) {
+function helpLines() {
   return [
-    ...listTuiCommands(availability).map((command) => (
+    ...listTuiCommands().map((command) => (
       `  ${command.usage} — ${command.description}`
     )),
     '  Ctrl+R — Resume a session',
-    '  Ctrl+Enter / Ctrl+O — Send (Ctrl+O is the raw-control fallback)',
+    '  Enter — Send the composer',
+    '  Shift+Enter / Ctrl+J — Insert a newline',
     '  @path — Complete workspace files in chat',
     '  ↑/↓ at composer edge — Recall prompts / restore draft',
     '  Shift+Enter — Insert a newline in review responses',

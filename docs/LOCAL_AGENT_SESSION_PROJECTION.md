@@ -86,6 +86,15 @@ client-local interaction state and are not part of the shared snapshot.
 `ReviewAction` contains only the checkpoint-derived batch identity and ordered
 review specifications; it does not contain review-command progress.
 
+Delegation continuation is checkpoint-owned rather than inferred from a
+particular client's review-cancellation history. Continuation availability is
+not projected into `AgentSession`: `/continue <guidance>` is an explicit client
+command that sends `resume_active`, while ordinary chat sends
+`supersede_active`. The checkpoint's `taskActiveDelegation` pointer is the sole
+authority for either transition. When no active delegation exists,
+`resume_active` is a no-op and the supplied guidance proceeds as an ordinary
+chat turn.
+
 Live TUI actions carry `AgentSessionMessageInput` directly. The TUI no
 longer defines a separate `MessageCell` model. Message `createdAt` / `updatedAt`
 values use ISO timestamps in state, and terminal-local time formatting happens

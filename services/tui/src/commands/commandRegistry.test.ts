@@ -17,22 +17,6 @@ test('command registry exposes only implemented OpenTUI commands', () => {
       'transcript',
       'export',
       'edit',
-      'resume',
-      'quit',
-    ],
-  );
-  assert.deepEqual(
-    listTuiCommands({ canContinueActiveDelegation: true })
-      .map((command) => command.name),
-    [
-      'help',
-      'new',
-      'studio',
-      'chat',
-      'policy',
-      'transcript',
-      'export',
-      'edit',
       'continue',
       'resume',
       'quit',
@@ -44,7 +28,7 @@ test('command parser resolves commands and aliases', () => {
   assert.equal(parseTuiCommand('/').type, 'command');
   assert.deepEqual(parseTuiCommand('/exit'), {
     type: 'command',
-    command: listTuiCommands()[9],
+    command: listTuiCommands()[10],
     name: 'quit',
     raw: '/exit',
     args: '',
@@ -52,9 +36,7 @@ test('command parser resolves commands and aliases', () => {
   assert.equal(parseTuiCommand('/ReSuMe').type, 'command');
   assert.deepEqual(parseTuiCommand('/continue   apply the new constraints'), {
     type: 'command',
-    command: listTuiCommands({
-      canContinueActiveDelegation: true,
-    })[8],
+    command: listTuiCommands()[8],
     name: 'continue',
     raw: '/continue   apply the new constraints',
     args: 'apply the new constraints',

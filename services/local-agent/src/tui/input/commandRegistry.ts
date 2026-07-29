@@ -97,7 +97,7 @@ const COMMANDS: TuiCommandDefinition[] = [
     name: 'continue',
     usage: '/continue <指导>',
     description: '继续从确认等待中打断的委派',
-    helpText: '/continue <指导> 继续挂起委派',
+    helpText: '/continue <指导> 继续当前会话中未完成的委派',
   },
   {
     name: 'resume',
@@ -122,18 +122,12 @@ for (const command of COMMANDS) {
   }
 }
 
-export type TuiCommandAvailability = {
-  canContinueActiveDelegation?: boolean;
-};
-
-export function listTuiCommands(availability: TuiCommandAvailability = {}) {
-  return COMMANDS.filter((command) => (
-    command.name !== 'continue' || availability.canContinueActiveDelegation
-  ));
+export function listTuiCommands() {
+  return [...COMMANDS];
 }
 
-export function formatTuiCommandHelp(availability: TuiCommandAvailability = {}) {
-  return listTuiCommands(availability)
+export function formatTuiCommandHelp() {
+  return listTuiCommands()
     .map((command) => command.helpText)
     .join(' · ');
 }

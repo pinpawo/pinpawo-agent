@@ -104,6 +104,7 @@ test('TuiSessionController synchronizes one session and projects a chat run', ()
     type: 'chat_request',
     requestId: 'chat-1',
     message: 'hello',
+    activeDelegationTransition: 'supersede_active',
   });
   assert.equal(controller.getState().session.timeline[0]?.type, 'message');
   assert.deepEqual(controller.getState().session.activeRun, {
@@ -212,6 +213,7 @@ test('TuiSessionController submits local attachments and keeps paths out of opti
       path: '/Users/example/private/spec.md',
       name: 'spec.md',
     }],
+    activeDelegationTransition: 'supersede_active',
   });
   const optimistic = controller.getState().session.timeline[0];
   assert.equal(
@@ -1170,13 +1172,59 @@ test('review cancellation targets only the current canonical action', () => {
   controller.stop();
 });
 
-test('review cancellation exposes a session-scoped explicit continuation after interruption', async () => {
+test('a sent review resolution can be followed by an ordered run interrupt', () => {
+  let connection!: FakeConnection;
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => 'startup',
+  });
+  controller.start();
+  connection.open();
+  connection.receive(reviewSnapshotResult('startup', [
+    reviewSpec('review-1', [{
+      id: 'approve',
+      label: 'Approve',
+      decision: { type: 'approve' },
+    }]),
+  ]));
+
+  assert.deepEqual(controller.interruptResolvedReview({
+    requestId: 'other',
+    actionId: 'review-action',
+  }), {
+    ok: false,
+    reason: 'stale',
+  });
+  assert.deepEqual(controller.interruptResolvedReview({
+    requestId: 'chat',
+    actionId: 'review-action',
+  }), {
+    ok: true,
+    requestId: 'chat',
+  });
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'run.interrupt',
+    requestId: 'chat',
+  });
+  assert.equal(
+    controller.getState().session.activeRun?.state,
+    'waiting_review',
+  );
+  controller.stop();
+});
+
+test('delegation continuation sends resume_active without client-owned availability', async () => {
   const requestIds = [
     'startup',
+    'interrupted-refresh',
     'resume-other',
     'resume-original',
     'continue-failed',
     'continue-sent',
+    'continue-refresh',
   ];
   let connection!: FakeConnection;
   const controller = new TuiSessionController({
@@ -1196,18 +1244,29 @@ test('review cancellation exposes a session-scoped explicit continuation after i
     }]),
   ]));
 
-  assert.equal(controller.canContinueActiveDelegation(), false);
   assert.deepEqual(controller.cancelReview({
     requestId: 'chat',
     actionId: 'review-action',
   }), { ok: true });
-  assert.equal(controller.canContinueActiveDelegation(), false);
   connection.receive({
     type: 'interrupted',
     requestId: 'chat',
     message: 'review interrupted',
   });
-  assert.equal(controller.canContinueActiveDelegation(), true);
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'session.snapshot.get',
+    requestId: 'interrupted-refresh',
+  });
+  connection.receive({
+    type: 'session.snapshot.result',
+    requestId: 'interrupted-refresh',
+    snapshot: createAgentSessionSnapshot({
+      sessionId: 'chat:one',
+      kind: 'chat',
+      timeline: [],
+      activeRun: null,
+    }),
+  });
 
   const resumeOther = controller.resumeSession('chat:two');
   connection.receive({
@@ -1222,7 +1281,6 @@ test('review cancellation exposes a session-scoped explicit continuation after i
     }),
   });
   await resumeOther;
-  assert.equal(controller.canContinueActiveDelegation(), false);
 
   const resumeOriginal = controller.resumeSession('chat:one');
   connection.receive({
@@ -1237,14 +1295,12 @@ test('review cancellation exposes a session-scoped explicit continuation after i
     }),
   });
   await resumeOriginal;
-  assert.equal(controller.canContinueActiveDelegation(), true);
 
   connection.failNextSend = true;
   assert.deepEqual(
     controller.continueActiveDelegation('apply the new constraints'),
     { ok: false, reason: 'send-failed' },
   );
-  assert.equal(controller.canContinueActiveDelegation(), true);
 
   assert.deepEqual(
     controller.continueActiveDelegation('apply the new constraints'),
@@ -1256,7 +1312,30 @@ test('review cancellation exposes a session-scoped explicit continuation after i
     message: 'apply the new constraints',
     activeDelegationTransition: 'resume_active',
   });
-  assert.equal(controller.canContinueActiveDelegation(), false);
+  assert.deepEqual(
+    controller.continueActiveDelegation('cannot overlap the active run'),
+    { ok: false, reason: 'busy' },
+  );
+  connection.receive(eventMessage({
+    type: 'message.completed',
+    requestId: 'continue-sent',
+    role: 'assistant',
+    text: 'continued',
+  }));
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'session.snapshot.get',
+    requestId: 'continue-refresh',
+  });
+  connection.receive({
+    type: 'session.snapshot.result',
+    requestId: 'continue-refresh',
+    snapshot: createAgentSessionSnapshot({
+      sessionId: 'chat:one',
+      kind: 'chat',
+      timeline: [],
+      activeRun: null,
+    }),
+  });
   controller.stop();
 });
 

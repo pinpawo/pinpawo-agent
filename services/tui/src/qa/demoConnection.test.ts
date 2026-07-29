@@ -155,6 +155,32 @@ test('QA demo interrupt cancels future stream events and settles the run', () =>
   connection.disconnect();
 });
 
+test('review demo settles the active run after cancellation', () => {
+  const received: AgentServerMessage[] = [];
+  const connection = createDemoConnectionFactory({
+    review: true,
+  })({
+    onOpen: () => {},
+    onMessage: (message) => received.push(message),
+    onClose: () => {},
+    onError: () => {},
+  });
+  connection.connect();
+
+  assert.equal(connection.send({
+    type: 'review.cancel',
+    requestId: 'smoke-run',
+    actionId: 'smoke-review-action',
+  }), true);
+  assert.equal(connection.send({
+    type: 'session.snapshot.get',
+    requestId: 'after-cancel',
+  }), true);
+
+  assert.equal(readSnapshot(received, 'after-cancel').session.activeRun, null);
+  connection.disconnect();
+});
+
 test('QA demo disconnect settles an orphaned run before reconnect snapshot', () => {
   const scheduler = createScheduler();
   const received: AgentServerMessage[] = [];

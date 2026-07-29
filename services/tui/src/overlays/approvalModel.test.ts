@@ -19,6 +19,7 @@ import {
   selectedApprovalOption,
   setApprovalDraft,
   syncApprovalState,
+  updateApprovalResolutionSent,
 } from './approvalModel';
 
 test('approval state follows the canonical waiting review and defaults to primary', () => {
@@ -61,8 +62,19 @@ test('approved batch decisions advance locally before transport submission', () 
   assert.equal(state.phase === 'closed' ? null : state.draft, '');
 
   state = beginApprovalSubmission(state);
-  assert.equal(state.phase, 'submitting');
+  assert.equal(state.phase, 'resolution-sent');
   assert.equal(resolveApprovalKey(state, key('escape')), null);
+  state = updateApprovalResolutionSent(state, {
+    interruptSent: true,
+    message: 'Interrupt requested',
+  });
+  assert.equal(state.phase === 'closed' ? false : state.interruptSent, true);
+  assert.match(
+    state.phase === 'closed'
+      ? ''
+      : buildApprovalViewModel(state, 80).bottomTitle,
+    /Interrupt requested/,
+  );
 });
 
 test('approval diff details page within a bounded CJK footer view', () => {

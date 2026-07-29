@@ -39,9 +39,10 @@ dogfood entrypoint from issue #454:
 - it restores canonical pending reviews from snapshots and provides an
   OpenTUI-owned approval overlay for single or batched approve, reject, respond,
   and cancel flows.
-- it treats review cancellation as delegation suspension: after the host
-  authoritatively reports `interrupted`, `/continue <guidance>` resumes only
-  that affected session and allows the guarded action to be reviewed again.
+- it keeps delegation continuation out of the Session projection:
+  `/continue <guidance>` explicitly sends `resume_active`, ordinary chat sends
+  `supersede_active`, and the checkpoint's `taskActiveDelegation` pointer alone
+  decides whether an exact delegation is resumed.
 - it provides a compact cursor-aware slash command palette above the visible
   composer, plus a separate pageable help overlay for the commands currently
   implemented by the v2 client.
@@ -98,7 +99,7 @@ runners. It rebuilds and packs the local packages, installs them with lifecycle
 scripts in a clean consumer project, verifies npm-selected Bun and OpenTUI
 assets, and runs the installed `pinpawo tui --v2 --check` path. On macOS the
 same clean install also enters `pinpawo tui --v2 --qa` through a real PTY,
-submits with Kitty `Ctrl+Enter`, waits for deterministic completion and usage,
+submits with Enter, waits for deterministic completion and usage,
 verifies the composer returns, and exits through `/quit`.
 
 `@pinpawo/tui` remains a private implementation package. The public `pinpawo`
@@ -120,9 +121,9 @@ at the capped interval until the host returns and a fresh snapshot is applied.
 
 Production client controls:
 
-- `Ctrl+Enter` submits the composer; terminals without distinguishable modified
-  Enter input can use the raw `Ctrl+O` fallback without changing multiline
-  Enter behavior;
+- Enter submits the composer; Shift+Enter inserts a newline when the terminal
+  exposes the modifier, and `Ctrl+J` is the terminal-independent newline
+  fallback;
 - `Cmd+A`, `Cmd+Z`/`Shift+Cmd+Z`, Option+arrows, Home/End, and Shift-modified
   movement use the native multiline editor selection and history behavior;
 - plain `↑` on the first visual row recalls sent chat prompts; plain `↓` on
@@ -154,8 +155,8 @@ Production client controls:
   session picker, `/transcript` (or `/history`) opens the timeline pager,
   `/edit [text]` opens `$VISUAL` or `$EDITOR`, `/export [path]` writes a
   Markdown transcript, `/continue <guidance>` resumes the current session's
-  review-suspended delegation, `/review-policy` aliases `/policy`, and `/quit`
-  exits;
+  unfinished checkpointed delegation, `/review-policy` aliases `/policy`, and
+  `/quit` exits;
 - `/studio [task]` enters Studio mode and optionally starts a task; subsequent
   prose keeps the same Studio conversation until `/chat` returns to chat mode;
 - ordinary prose containing a path remains text, and unavailable path-only
@@ -194,12 +195,16 @@ Late completion snapshots from the previous session are ignored.
 Approval selection, paging, batch decisions, and text drafts are local overlay
 state rather than Session projection fields. The controller validates each
 response against the currently focused canonical review action before sending
-`human_review_response` or `review.cancel`. A disconnect or missing canonical
-state transition releases the submitting lock so the user can retry. Cancellation
-does not masquerade as rejection: the controller offers `/continue` only after
-the matching session receives an authoritative `interrupted` event, retains
-that offer if transport submission fails, and consumes it only after a
-successful `resume_active` request.
+`human_review_response` or `review.cancel`. Once transport accepts a resolution,
+the local one-shot marker continues to gate duplicate decisions across timeout
+and reconnect; only a server-observed review or run transition clears it.
+Esc or Ctrl+C after that marker sends an ordered `run.interrupt`, while another
+Ctrl+C exits. Cancellation does not masquerade as rejection. Delegation
+continuation is an explicit command rather than Session state: the controller
+sends `resume_active` for `/continue <guidance>` and `supersede_active` for
+ordinary chat input. The orchestrator applies that intent to its authoritative
+`taskActiveDelegation`; no client-local availability flag or cancellation
+history participates.
 
 The policy picker also remains view-local, but its current value does not. The
 host exposes the process-wide policy in snapshot runtime metadata, persists
@@ -279,7 +284,8 @@ Session projection. Its local deterministic transport
 preloads enough history to browse, then turns each submitted message into a
 timed thinking → operation started/updated/completed → subagent → multi-delta
 Markdown → completed response sequence. The final response also supplies
-predictable token/context usage. Submit with `Ctrl+Enter` or `Ctrl+O`, browse
+predictable token/context usage. Submit with Enter, use Shift+Enter or `Ctrl+J`
+for a newline, browse
 native history while events arrive, edit a multiline CJK/emoji draft during
 the run, resize, and use Esc to verify interruption. `/quit` exits normally.
 The transport is reachable only through the explicit `--qa` flag; normal v2
@@ -383,7 +389,8 @@ Probe controls:
 - `F3`: focus the textarea
 - `Ctrl+D`: run a high-frequency streaming-delta burst (stable-row commits in split-footer)
 - `Ctrl+T`: append a burst of timeline rows
-- `Ctrl+Enter`: submit the textarea without changing the production agent
+- Enter: submit the textarea without changing the production agent
+- Shift+Enter / `Ctrl+J`: insert a newline
 - `Ctrl+C`: exit
 
 Drag one or more files into the terminal while the textarea is focused. The

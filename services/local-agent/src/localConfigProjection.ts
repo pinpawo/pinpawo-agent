@@ -3,9 +3,15 @@ import {
   type BuiltinGlobalReviewPolicyMode,
 } from '@pinpawo/pet-agent';
 import type { LocalServerDeps } from './localServerTypes';
+import type { ModelInputModality } from './modelProfiles';
 
 export type LocalRuntimeProjection = {
-  model: string;
+  modelProfileId: string;
+  modelProfileLabel: string;
+  modelProfileAvailable: boolean;
+  modelProfileIssues: readonly string[];
+  model?: string;
+  inputModalities?: readonly ModelInputModality[];
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
   contextWindow?: number;
   workdir: string;
@@ -19,15 +25,51 @@ export type LocalRuntimeProjection = {
   studioWikiBaseDir?: string;
 };
 
-export function buildLocalRuntimeProjection(deps: LocalServerDeps): LocalRuntimeProjection {
+export function buildLocalRuntimeProjection(
+  deps: LocalServerDeps,
+  modelProfileId = deps.modelProfiles.defaultProfileId,
+): LocalRuntimeProjection {
   const runtimeConfig = deps.runtimeConfig;
+  const profile = deps.modelProfiles.snapshot.profiles[modelProfileId];
+  if (!profile) {
+    return {
+      modelProfileId,
+      modelProfileLabel: modelProfileId,
+      modelProfileAvailable: false,
+      modelProfileIssues:
+        deps.modelProfiles.snapshot.unavailableProfiles[modelProfileId]
+          ?.map((issue) => issue.message)
+        ?? [`Unknown model profile "${modelProfileId}"`],
+      globalReviewPolicyMode: deps.globalReviewPolicyMode
+        ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
+      workdir: runtimeConfig?.workdir ?? deps.workdir,
+      ...(runtimeConfig?.workspace ? {
+        workspaceId: runtimeConfig.workspace.id,
+        workspaceName: runtimeConfig.workspace.name,
+        workspaceRoot: runtimeConfig.workspace.rootPath,
+      } : {}),
+      ...(runtimeConfig ? {
+        stateRoot: runtimeConfig.stateRoot,
+        studioConfigPath: runtimeConfig.studioConfigPath,
+        studioDueRunsPath: runtimeConfig.studioDueRunsPath,
+        petsDir: runtimeConfig.petsDir,
+        studioWikiBaseDir: runtimeConfig.studioWikiBaseDir,
+      } : {}),
+    };
+  }
+  const llmConfig = deps.modelProfiles.resolve(modelProfileId);
 
   return {
-    model: deps.llmConfig.model,
-    globalReviewPolicyMode: deps.llmConfig.globalReviewPolicyMode
+    modelProfileId,
+    modelProfileLabel: profile.label,
+    modelProfileAvailable: true,
+    modelProfileIssues: [],
+    model: llmConfig.model,
+    inputModalities: llmConfig.inputModalities ?? ['text'],
+    globalReviewPolicyMode: deps.globalReviewPolicyMode
       ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
-    ...(deps.llmConfig.contextWindowTokens !== undefined
-      ? { contextWindow: deps.llmConfig.contextWindowTokens }
+    ...(llmConfig.contextWindowTokens !== undefined
+      ? { contextWindow: llmConfig.contextWindowTokens }
       : {}),
     workdir: runtimeConfig?.workdir ?? deps.workdir,
     ...(runtimeConfig?.workspace ? {
@@ -48,7 +90,10 @@ export function buildLocalRuntimeProjection(deps: LocalServerDeps): LocalRuntime
 export function buildLocalHttpRuntimeProjection(deps: LocalServerDeps) {
   const runtime = buildLocalRuntimeProjection(deps);
   return {
-    llm_model: runtime.model,
+    model_profile_id: runtime.modelProfileId,
+    model_profile_label: runtime.modelProfileLabel,
+    model_profile_available: runtime.modelProfileAvailable,
+    ...(runtime.model ? { llm_model: runtime.model } : {}),
     ...(runtime.contextWindow !== undefined
       ? { llm_context_window_tokens: runtime.contextWindow }
       : {}),

@@ -6,16 +6,16 @@ import path from 'node:path';
 
 import { buildStudioForTurn, StudioNotConfiguredError } from './studioRuntime';
 import { createPendingReviewSlot } from './studioBridge';
-import type { AgentLlmConfig } from '../agentConfig';
+import { createTestModelProfiles } from '../testing/modelProfiles';
 async function mkTempDir(prefix: string): Promise<string> {
   return await fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
 
-const llmConfig: AgentLlmConfig = {
+const modelProfiles = createTestModelProfiles({
   apiKey: 'test-key',
   baseUrl: 'http://127.0.0.1:1/v1',
   model: 'gpt-test',
-};
+});
 
 test('buildStudioForTurn requires the workdir-scoped Studio config', async () => {
   const workdir = await mkTempDir('pinpawo-studio-runtime-missing-');
@@ -23,7 +23,7 @@ test('buildStudioForTurn requires the workdir-scoped Studio config', async () =>
 
   await assert.rejects(
     () => buildStudioForTurn({
-      llmConfig,
+      modelProfiles,
       capabilities: [],
       ownerUserId: null,
       workdir,
@@ -65,7 +65,7 @@ test('buildStudioForTurn defaults Studio paths from effective runtime workdir', 
   process.env.PINPAWO_WORKDIR = workdir;
   try {
     const result = await buildStudioForTurn({
-      llmConfig,
+      modelProfiles,
       capabilities: [],
       ownerUserId: null,
       bridge: {
@@ -137,7 +137,7 @@ test('buildStudioForTurn prefers explicit workdir over env default', async () =>
   process.env.PINPAWO_WORKDIR = envWorkdir;
   try {
     const result = await buildStudioForTurn({
-      llmConfig,
+      modelProfiles,
       capabilities: [],
       ownerUserId: null,
       workdir: explicitWorkdir,

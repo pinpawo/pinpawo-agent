@@ -6,16 +6,12 @@ import type { LocalServerDeps } from './localServerTypes';
 import {
   StudioRunService,
 } from './studioRunService';
+import { createTestModelServerDeps } from './testing/modelProfiles';
 
 function createDeps(): LocalServerDeps {
   return {
     actorId: 'pet-a',
-    llmConfig: {
-      provider: 'openai',
-      model: 'test-model',
-      apiKey: 'test-key',
-      baseUrl: 'https://example.test/v1',
-    } as unknown as LocalServerDeps['llmConfig'],
+    ...createTestModelServerDeps(),
     workdir: '/tmp/legacy-workdir',
     runtimeConfig: {
       workdir: '/tmp/workspace',

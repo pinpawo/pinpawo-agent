@@ -319,6 +319,8 @@ export function buildLocalChatAgentInput(params: {
       'local',
       'chat',
       actor.petId,
+      llmConfig.modelProfileId,
+      llmConfig.modelProfileFingerprint,
       llmConfig.model,
       llmConfig.observeModel ?? llmConfig.model,
       String(llmConfig.contextWindowTokens ?? 32000),

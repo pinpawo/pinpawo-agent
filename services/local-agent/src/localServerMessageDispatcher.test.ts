@@ -56,6 +56,14 @@ test('local server dispatcher routes typed client messages and pong', async () =
     onSessionResume: (_peer, message) => {
       seen.push(`resume:${message.requestId}:${message.sessionId}`);
     },
+    onModelList: (_peer, message) => {
+      seen.push(`model-list:${message.requestId}:${message.sessionId ?? ''}`);
+    },
+    onModelSelect: (_peer, message) => {
+      seen.push(
+        `model-select:${message.requestId}:${message.sessionId}:${message.modelProfileId}`,
+      );
+    },
     onClose: () => {
       seen.push('close');
     },

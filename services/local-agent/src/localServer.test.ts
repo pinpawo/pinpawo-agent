@@ -11,6 +11,7 @@ import {
   type LocalServerDeps,
 } from './localServer';
 import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
+import { createTestModelServerDeps } from './testing/modelProfiles';
 
 test('local server close is idempotent and releases its listening port', async () => {
   const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-local-server-'));
@@ -46,11 +47,10 @@ function createDeps(workdir: string): LocalServerDeps {
     actorId: 'pet-local-server-lifecycle',
     workdir,
     runtimeConfig: buildLocalAgentRuntimeConfig(workdir),
-    llmConfig: {
-      provider: 'openai',
+    ...createTestModelServerDeps({
       model: 'offline-lifecycle-model',
       apiKey: 'offline-lifecycle-key',
       baseUrl: 'http://127.0.0.1:1/v1',
-    } as LocalServerDeps['llmConfig'],
+    }),
   };
 }

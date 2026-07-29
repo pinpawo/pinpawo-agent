@@ -35,14 +35,14 @@ test('parsePetLocalConfig keeps optional fields when provided', () => {
       personality: '创意丰富',
       role: '脚本撰写',
       serviceSummary: '短视频脚本',
-      model: 'qwen-max',
+      modelProfileId: 'qwen-max',
       capabilities: ['script-creator', 'wiki-reader'],
       serverBinding: { petId: 'srv-001' },
     },
     'test-source',
   );
   assert.equal(config.personality, '创意丰富');
-  assert.equal(config.model, 'qwen-max');
+  assert.equal(config.modelProfileId, 'qwen-max');
   assert.deepEqual(config.capabilities, ['script-creator', 'wiki-reader']);
   assert.deepEqual(config.serverBinding, { petId: 'srv-001' });
 });
@@ -69,6 +69,16 @@ test('parsePetLocalConfig rejects bad types in optional fields', () => {
   assert.throws(
     () => parsePetLocalConfig({ petId: 'p1', name: 'X', capabilities: ['ok', 123] }, 'src'),
     /"capabilities" must be a string\[\]/,
+  );
+});
+
+test('parsePetLocalConfig rejects the retired raw model override', () => {
+  assert.throws(
+    () => parsePetLocalConfig(
+      { petId: 'p1', name: 'X', model: 'qwen-max' },
+      'src',
+    ),
+    /"model" was replaced by stable "modelProfileId"/,
   );
 });
 

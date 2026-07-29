@@ -318,6 +318,15 @@ export class LocalServerChatHandler {
           if (!isCurrent()) return;
           overlayInflightDelegationOperations(inflight, operations);
         },
+        ...(request.kind === 'user_message'
+          ? {
+              prepareUserMessage: () => this.tuiSessions.createUserMessage(
+                deps,
+                request.message,
+                request.attachments ?? [],
+              ),
+            }
+          : {}),
         ...(source.type === 'review.cancel'
           ? { interruptOnSettledResumeCheckpoint: true }
           : {}),

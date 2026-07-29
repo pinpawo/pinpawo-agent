@@ -35,6 +35,7 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
         capabilityArtifactRoot: '/tmp/work/.pinpawo/capability-artifacts',
       },
     } as LocalServerDeps,
+    requiredInputModalities: ['text', 'image'],
     sessionTokenUsage: {
       inputTokens: 100,
       outputTokens: 20,
@@ -75,6 +76,11 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
   assert.equal(snapshot.session.activeRun.reviewAction.petId, 'pet-a');
   assert.equal(snapshot.session.runtime?.model, 'test-model');
   assert.equal(snapshot.session.runtime?.modelProfileId, 'test-profile');
+  assert.deepEqual(
+    snapshot.session.runtime?.requiredInputModalities,
+    ['text', 'image'],
+  );
+  assert.equal(snapshot.session.runtime?.modelProfileCompatible, false);
   assert.equal(snapshot.session.runtime?.contextWindow, 32000);
   assert.equal(snapshot.session.runtime?.cwd, '/tmp/work');
   assert.equal(snapshot.session.runtime?.workspaceId, 'workspace-test');

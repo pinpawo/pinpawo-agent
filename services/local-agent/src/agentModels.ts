@@ -1,9 +1,15 @@
-import { ChatOpenAI } from '@langchain/openai';
 import type { AgentModels } from '@pinpawo/pet-agent';
 import type { AgentLlmConfig } from './agentConfig';
 import { buildLlmModelKwargs, requiresLlmStreaming } from './llmModelPresets';
+import {
+  LocalImageChatOpenAI,
+  type LocalImageModelInputOptions,
+} from './localImageModelInput';
 
-export function buildLocalAgentModels(llmConfig: AgentLlmConfig): AgentModels {
+export function buildLocalAgentModels(
+  llmConfig: AgentLlmConfig,
+  options: Partial<LocalImageModelInputOptions> = {},
+): AgentModels {
   const subagentThinking = llmConfig.subagentThinking ?? false;
 
   const buildModel = (role: 'act' | 'observe' | 'subagent') => {
@@ -14,7 +20,7 @@ export function buildLocalAgentModels(llmConfig: AgentLlmConfig): AgentModels {
     const thinking = role === 'subagent' ? subagentThinking : false;
     const modelKwargs = buildLlmModelKwargs(model, thinking);
 
-    return new ChatOpenAI({
+    return new LocalImageChatOpenAI({
       model,
       ...(typeof llmConfig.temperature === 'number'
         ? { temperature: llmConfig.temperature }
@@ -29,6 +35,12 @@ export function buildLocalAgentModels(llmConfig: AgentLlmConfig): AgentModels {
         baseURL: llmConfig.baseUrl,
         defaultHeaders: { Authorization: `Bearer ${llmConfig.apiKey}` },
       },
+    }, {
+      supportedInputModalities: llmConfig.inputModalities ?? ['text'],
+      ...(options.imageStore ? { imageStore: options.imageStore } : {}),
+      ...(options.admitInputModalities
+        ? { admitInputModalities: options.admitInputModalities }
+        : {}),
     });
   };
 

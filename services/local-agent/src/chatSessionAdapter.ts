@@ -76,6 +76,11 @@ export type ChatSessionAdapterOptions = {
    * delegation-scoped toolkit tools (#322 Phase 4).
    */
   acceptDelegationOperations?: (operations: Record<string, SubagentToolOperationMetadata>) => void;
+  /**
+   * Host admission hook for durable local attachments. It runs only after
+   * pending-review checks and before graph invocation.
+   */
+  prepareUserMessage?: () => Promise<BaseMessage>;
 };
 
 function throwUnexpectedInterruptPayload(): never {
@@ -321,9 +326,12 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
     : undefined;
   if (!isResumeRequest) {
     setup.input.activeDelegationTransition = request.activeDelegationTransition;
+    const userMessage = options.prepareUserMessage
+      ? await options.prepareUserMessage()
+      : createLocalChatHumanMessage(message, attachments);
     setup.input.messages = [
       ...setup.input.messages.slice(0, -1),
-      createLocalChatHumanMessage(message, attachments),
+      userMessage,
     ];
   }
 

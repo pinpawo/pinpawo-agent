@@ -7,11 +7,11 @@ import {
   type KeyEvent,
   type PasteEvent,
 } from '@opentui/core';
-import { formatInputProbe } from './spike/inputProbe';
+import { formatInputProbe } from './inputProbe';
 import {
   createSpikeSession,
   formatSpikeTimelineEntry,
-} from './spike/sessionHarness';
+} from './sessionHarness';
 
 const renderer = await createCliRenderer({
   exitOnCtrlC: true,

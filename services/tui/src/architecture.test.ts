@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 
 test('TUI source does not import local-agent implementation files', () => {
-  const sourceRoot = new URL('../', import.meta.url);
+  const sourceRoot = new URL('./', import.meta.url);
   const forbiddenPath = ['services', 'local-agent', 'src'].join('/');
   const forbiddenRelativeImport = ['..', '..', 'local-agent'].join('/');
 

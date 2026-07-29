@@ -3,12 +3,18 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import {
+  buildModelProfileRegistry,
+  fingerprintModelProfile,
+  resolveModelProfile,
+} from '../../../../services/local-agent/src/modelProfiles.ts';
+import type { StoredConfig } from '../../../../services/local-agent/src/storage.ts';
 import { createDecisionEvalModel } from './decision-eval-model.ts';
 
 function writeProfiles() {
   const root = mkdtempSync(join(tmpdir(), 'pinpawo-eval-profiles-'));
   const configPath = join(root, 'config.json');
-  writeFileSync(configPath, JSON.stringify({
+  const stored = {
     models: {
       version: 1,
       defaultProfileId: 'endpoint-a',
@@ -34,10 +40,21 @@ function writeProfiles() {
           structuredOutputMethod: 'jsonSchema',
           inputModalities: ['text', 'image'],
         },
+        'preset-derived': {
+          id: 'preset-derived',
+          label: 'Preset-derived provider',
+          sourcePreset: 'qwen',
+          model: 'qwen3.7-max',
+          baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+          apiKey: 'secret-preset',
+          contextWindowTokens: 1_000_000,
+          inputModalities: ['text'],
+        },
       },
     },
-  }), 'utf8');
-  return { root, configPath };
+  };
+  writeFileSync(configPath, JSON.stringify(stored), 'utf8');
+  return { root, configPath, stored };
 }
 
 test('eval model profiles preserve stable identities without projecting secrets', () => {
@@ -79,6 +96,34 @@ test('eval model profiles preserve stable identities without projecting secrets'
     assert.doesNotMatch(
       projected,
       /secret-a|secret-b|secret-path-a|secret=query/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('eval model identity uses the canonical local-agent profile contract', () => {
+  const { root, configPath, stored } = writeProfiles();
+  try {
+    const evaluated = createDecisionEvalModel({
+      profileId: 'preset-derived',
+      role: 'subject',
+      env: {
+        PROMPT_EVAL_CONFIG_PATH: configPath,
+      },
+    });
+    const registry = buildModelProfileRegistry({
+      stored: stored as unknown as StoredConfig,
+      env: {
+        PINPAWO_MODEL_PROFILE: 'preset-derived',
+      },
+    });
+    const hostProfile = resolveModelProfile(registry, 'preset-derived');
+
+    assert.equal(evaluated.metadata.provider, 'aliyun');
+    assert.equal(
+      evaluated.metadata.fingerprint,
+      fingerprintModelProfile(hostProfile).fingerprint,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });

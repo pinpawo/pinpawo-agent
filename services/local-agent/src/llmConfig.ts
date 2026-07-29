@@ -63,6 +63,7 @@ export function createLocalModelProfileRegistry(options: {
       const profile = resolveModelProfile(options.snapshot, profileId);
       const fingerprint = fingerprintModelProfile(profile).fingerprint;
       return Object.freeze({
+        ...llmDefaults,
         apiKey: profile.apiKey,
         baseUrl: profile.baseUrl,
         model: profile.model,
@@ -75,7 +76,6 @@ export function createLocalModelProfileRegistry(options: {
         ...(profile.maxOutputTokens ? { maxOutputTokens: profile.maxOutputTokens } : {}),
         observeModel: profile.model,
         contextWindowTokens: profile.contextWindowTokens,
-        ...llmDefaults,
       });
     },
     listAvailable: () => Object.freeze(

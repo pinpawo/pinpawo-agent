@@ -1,47 +1,31 @@
 import { ChatOpenAI } from '@langchain/openai';
-import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
+// These repository-only eval scripts consume local-agent's stored Profile
+// contract. Reuse the host parser and fingerprint instead of maintaining a
+// second interpretation inside the published pet-agent runtime.
+import {
+  buildModelProfileRegistry,
+  fingerprintModelProfile,
+  MODEL_PROFILES_VERSION,
+  resolveModelProfile,
+  type ModelInputModality,
+  type ModelProfileV1,
+} from '../../../../services/local-agent/src/modelProfiles.ts';
+import { inferLlmStructuredOutputMethod } from '../../../../services/local-agent/src/llmModelPresets.ts';
+import type { StoredConfig } from '../../../../services/local-agent/src/storage.ts';
 import type { AgentModels } from '../../src/types/agent.ts';
 import type { StructuredOutputMethod } from '../../src/utils/structuredOutput.ts';
-import { inferStructuredOutputMethod } from '../../src/utils/structuredOutput.ts';
 import type {
   PromptEvalModelMetadata,
   PromptEvalModelRole,
 } from '../prompt-eval-report.ts';
 import type { PromptEvalPricing } from '../prompt-eval-usage.ts';
 
-export type EvalModelInputModality = 'text' | 'image';
-
-type StoredEvalModelProfile = {
-  id: string;
-  label: string;
-  provider?: string;
-  model: string;
-  baseUrl: string;
-  apiKey: string;
-  contextWindowTokens: number;
-  maxOutputTokens?: number;
-  structuredOutputMethod?: StructuredOutputMethod;
-  inputModalities?: EvalModelInputModality[];
-};
-
-type StoredEvalModelProfiles = {
-  version: 1;
-  defaultProfileId: string;
-  profiles: Record<string, StoredEvalModelProfile>;
-};
+export type EvalModelInputModality = ModelInputModality;
 
 type EvalModelEnvironment = NodeJS.ProcessEnv;
-
-type ResolvedEvalModelProfile = Omit<
-  StoredEvalModelProfile,
-  'provider' | 'inputModalities'
-> & {
-  provider: string;
-  inputModalities: EvalModelInputModality[];
-};
 
 const PROFILE_ID_PATTERN = /^[a-z0-9](?:[a-z0-9._-]{0,63})$/;
 
@@ -55,13 +39,9 @@ function readStructuredOutputMethod(
   throw new Error(`Invalid decision structured output method: ${value}`);
 }
 
-function readConfig(configPath: string): {
-  models?: StoredEvalModelProfiles;
-} {
+function readConfig(configPath: string): StoredConfig {
   try {
-    return JSON.parse(readFileSync(configPath, 'utf8')) as {
-      models?: StoredEvalModelProfiles;
-    };
+    return JSON.parse(readFileSync(configPath, 'utf8')) as StoredConfig;
   } catch (error) {
     throw new Error(
       `Could not read model profiles from ${configPath}: ${
@@ -82,24 +62,6 @@ function readFiniteNumber(
     throw new Error(`Invalid ${name}: ${value ?? ''}`);
   }
   return parsed;
-}
-
-function normalizeRunnableBaseUrl(value: string): string {
-  const url = new URL(value.trim());
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error(`Model profile baseUrl must use HTTP(S): ${value}`);
-  }
-  url.hash = '';
-  return url.toString().replace(/\/$/, '');
-}
-
-function sanitizeEndpoint(value: string): string {
-  const url = new URL(value);
-  url.username = '';
-  url.password = '';
-  url.search = '';
-  url.hash = '';
-  return url.toString().replace(/\/$/, '');
 }
 
 function projectEndpointOrigin(value: string) {
@@ -127,33 +89,10 @@ function inferModelFamily(model: string): string {
     ?? 'unknown';
 }
 
-function readInputModalities(
-  profileId: string,
-  value: unknown,
-): EvalModelInputModality[] {
-  if (value === undefined) return ['text'];
-  if (!Array.isArray(value) || value.length === 0) {
-    throw new Error(`Model profile "${profileId}" inputModalities must be a non-empty array.`);
-  }
-  const modalities: EvalModelInputModality[] = [];
-  for (const item of value) {
-    if (item !== 'text' && item !== 'image') {
-      throw new Error(
-        `Model profile "${profileId}" has unsupported input modality ${JSON.stringify(item)}.`,
-      );
-    }
-    if (!modalities.includes(item)) modalities.push(item);
-  }
-  if (!modalities.includes('text')) {
-    throw new Error(`Model profile "${profileId}" inputModalities must include "text".`);
-  }
-  return modalities;
-}
-
 function readProfile(
   profileId: string,
   env: EvalModelEnvironment,
-): ResolvedEvalModelProfile {
+): ModelProfileV1 {
   if (!profileId.trim()) throw new Error('Model profile id is required.');
   if (!PROFILE_ID_PATTERN.test(profileId)) {
     throw new Error(
@@ -165,87 +104,27 @@ function readProfile(
     env.PROMPT_EVAL_CONFIG_PATH
       ?? resolve(homedir(), '.pinpawo', 'config.json'),
   );
-  const models = readConfig(configPath).models;
-  if (!models || models.version !== 1 || !models.profiles) {
+  const stored = readConfig(configPath);
+  const models = stored.models;
+  if (
+    !models
+    || models.version !== MODEL_PROFILES_VERSION
+    || !models.profiles
+  ) {
     throw new Error(
       `Prompt eval requires a version 1 models configuration in ${configPath}.`,
     );
   }
-  const profile = models.profiles[profileId];
-  if (!profile) {
+  if (!Object.hasOwn(models.profiles, profileId)) {
     throw new Error(`Unknown model profile "${profileId}" in ${configPath}.`);
   }
-  if (profile.id !== profileId) {
-    throw new Error(
-      `Model profile record key "${profileId}" does not match id "${profile.id}".`,
-    );
-  }
-  for (const [field, value] of Object.entries({
-    label: profile.label,
-    model: profile.model,
-    baseUrl: profile.baseUrl,
-    apiKey: profile.apiKey,
-  })) {
-    if (typeof value !== 'string' || !value.trim()) {
-      throw new Error(`Model profile "${profileId}" ${field} must be a non-empty string.`);
-    }
-  }
-  if (
-    !Number.isInteger(profile.contextWindowTokens)
-    || profile.contextWindowTokens <= 0
-  ) {
-    throw new Error(
-      `Model profile "${profileId}" contextWindowTokens must be a positive integer.`,
-    );
-  }
-  if (
-    profile.maxOutputTokens !== undefined
-    && (
-      !Number.isInteger(profile.maxOutputTokens)
-      || profile.maxOutputTokens <= 0
-    )
-  ) {
-    throw new Error(
-      `Model profile "${profileId}" maxOutputTokens must be a positive integer.`,
-    );
-  }
-  if (
-    profile.structuredOutputMethod !== undefined
-    && readStructuredOutputMethod(profile.structuredOutputMethod) === undefined
-  ) {
-    throw new Error(
-      `Model profile "${profileId}" structuredOutputMethod is invalid.`,
-    );
-  }
-  const baseUrl = normalizeRunnableBaseUrl(profile.baseUrl);
-  return {
-    ...profile,
-    label: profile.label.trim(),
-    provider: profile.provider?.trim() || new URL(baseUrl).hostname,
-    model: profile.model.trim(),
-    baseUrl,
-    apiKey: profile.apiKey.trim(),
-    inputModalities: readInputModalities(profileId, profile.inputModalities),
-  };
-}
-
-function fingerprintProfile(
-  profile: ResolvedEvalModelProfile,
-): string {
-  const sanitized = {
-    provider: profile.provider,
-    model: profile.model,
-    endpoint: sanitizeEndpoint(profile.baseUrl),
-    contextWindowTokens: profile.contextWindowTokens,
-    maxOutputTokens: profile.maxOutputTokens ?? null,
-    structuredOutputMethod: profile.structuredOutputMethod
-      ?? inferStructuredOutputMethod(profile.model, profile.baseUrl)
-      ?? null,
-    inputModalities: [...profile.inputModalities].sort(),
-  };
-  return createHash('sha256')
-    .update(JSON.stringify(sanitized))
-    .digest('hex');
+  const registry = buildModelProfileRegistry({
+    stored,
+    env: {
+      PINPAWO_MODEL_PROFILE: profileId,
+    },
+  });
+  return resolveModelProfile(registry, profileId);
 }
 
 function readPricing(
@@ -343,8 +222,8 @@ export function createDecisionEvalModel(options: {
           ?? env.DECISION_STRUCTURED_OUTPUT_METHOD
         : undefined),
   ) ?? profile.structuredOutputMethod
-    ?? inferStructuredOutputMethod(profile.model, profile.baseUrl);
-  const fingerprint = fingerprintProfile(profile);
+    ?? inferLlmStructuredOutputMethod(profile.model, profile.baseUrl);
+  const fingerprint = fingerprintModelProfile(profile).fingerprint;
 
   return {
     model: new ChatOpenAI({

@@ -227,6 +227,7 @@ export class LocalServerChatHandler {
       kind: 'user_message',
       requestId: msg.requestId,
       message: msg.message,
+      ...(msg.attachments ? { attachments: msg.attachments } : {}),
       ...(msg.activeDelegationTransition
         ? { activeDelegationTransition: msg.activeDelegationTransition }
         : {}),

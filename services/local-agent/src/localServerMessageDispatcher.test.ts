@@ -50,6 +50,9 @@ test('local server dispatcher routes typed client messages and pong', async () =
     onSessionList: (_peer, message) => {
       seen.push(`sessions:${message.requestId}`);
     },
+    onSessionNew: (_peer, message) => {
+      seen.push(`session-new:${message.requestId}`);
+    },
     onSessionResume: (_peer, message) => {
       seen.push(`resume:${message.requestId}:${message.sessionId}`);
     },
@@ -96,12 +99,21 @@ test('local server dispatcher routes typed client messages and pong', async () =
     globalReviewPolicyMode: 'auto_authorization',
   }), handlers);
   dispatchLocalServerMessage(peer, JSON.stringify({
+    type: 'runtime_config.update',
+    requestId: 'policy-1',
+    globalReviewPolicyMode: 'full_access',
+  }), handlers);
+  dispatchLocalServerMessage(peer, JSON.stringify({
     type: 'session.snapshot.get',
     requestId: 'snapshot-1',
   }), handlers);
   dispatchLocalServerMessage(peer, JSON.stringify({
     type: 'session.list',
     requestId: 'sessions-1',
+  }), handlers);
+  dispatchLocalServerMessage(peer, JSON.stringify({
+    type: 'session.new',
+    requestId: 'new-1',
   }), handlers);
   dispatchLocalServerMessage(peer, JSON.stringify({
     type: 'session.resume',
@@ -117,6 +129,11 @@ test('local server dispatcher routes typed client messages and pong', async () =
   dispatchLocalServerMessage(peer, JSON.stringify({
     type: 'session.resume',
     requestId: 'resume-invalid',
+  }), handlers);
+  dispatchLocalServerMessage(peer, JSON.stringify({
+    type: 'runtime_config.update',
+    requestId: 'policy-invalid',
+    globalReviewPolicyMode: 'custom',
   }), handlers);
   dispatchLocalServerMessage(peer, '{bad json', handlers);
 
@@ -138,6 +155,11 @@ test('local server dispatcher routes typed client messages and pong', async () =
         operation: 'resume',
         message: '客户端 session 消息协议不兼容或格式无效，请升级客户端后重试。',
       },
+      {
+        type: 'runtime_config.error',
+        requestId: 'policy-invalid',
+        message: '客户端 runtime config 消息协议不兼容或格式无效，请升级客户端后重试。',
+      },
     ]);
     assert.deepEqual(seen, [
       'chat:chat-1:hi',
@@ -147,13 +169,16 @@ test('local server dispatcher routes typed client messages and pong', async () =
       'review-cancel:review-1:action-1',
       'new:user-1',
       'policy:auto_authorization',
+      'policy:full_access',
       'snapshot:snapshot-1',
       'sessions:sessions-1',
+      'session-new:new-1',
       'resume:resume-1:chat:one',
     ]);
     assert.deepEqual(warnings, [
       '[local-server] ignored malformed client message type=chat_request requestId=chat-old',
       '[local-server] ignored malformed client message type=session.resume requestId=resume-invalid',
+      '[local-server] ignored malformed client message type=runtime_config.update requestId=policy-invalid',
       '[local-server] ignored malformed client message type=unknown requestId=unknown',
     ]);
   });

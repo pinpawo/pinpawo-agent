@@ -167,6 +167,41 @@ test('LocalAgentAppChatHandler rejects chat requests without userId', async () =
   }]);
 });
 
+test('LocalAgentAppChatHandler rejects local path attachments on the remote socket', async () => {
+  let ranChat = false;
+  const { handler, ws, sent } = createHandler({
+    runChat: async () => {
+      ranChat = true;
+      return { status: 'completed', reply: 'unexpected' };
+    },
+  });
+
+  await handler.handleChatRequest(ws, {
+    type: 'chat_request',
+    requestId: 'req-local-path',
+    message: 'inspect this',
+    userId: 'user-1',
+    attachments: [{
+      id: 'attachment-1',
+      source: 'local-path',
+      kind: 'file',
+      path: '/Users/example/private/spec.md',
+      name: 'spec.md',
+    }],
+  });
+
+  assert.equal(ranChat, false);
+  assert.deepEqual(sent, [{
+    type: 'event',
+    requestId: 'req-local-path',
+    event: {
+      type: 'error',
+      requestId: 'req-local-path',
+      message: 'local path attachments are only supported by the local TUI',
+    },
+  }]);
+});
+
 test('LocalAgentAppChatHandler resets app chat checkpoint by explicit user thread', async () => {
   const { handler, deletedThreads } = createHandler();
 

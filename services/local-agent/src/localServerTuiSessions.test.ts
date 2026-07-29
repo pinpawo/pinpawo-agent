@@ -13,6 +13,7 @@ import {
   summarizeTuiCheckpointMessages,
   type TuiSessionCheckpointer,
 } from './localServerTuiSessions';
+import { createLocalChatHumanMessage } from './localChatAttachments';
 import { createLocalServerRuntimeDepsStore } from './localServerTypes';
 
 const testArtifactStore: CapabilityArtifactStore = {
@@ -43,6 +44,24 @@ test('readTuiCheckpointMessages keeps visible user/assistant messages only', () 
       content: 'subagent hidden',
       additional_kwargs: { pinpawo: { lane: 'subagent' } },
     }),
+    new AIMessage({
+      content: 'synthetic plan hidden',
+      additional_kwargs: {
+        pinpawo: {
+          source: 'delegation_plan',
+          synthetic: true,
+        },
+      },
+    }),
+    new AIMessage({
+      content: 'handoff copy hidden',
+      additional_kwargs: {
+        pinpawo: {
+          handoffFrom: 'capability:general',
+          delegationId: 'delegation-1',
+        },
+      },
+    }),
     assistantMessage,
   ]);
 
@@ -50,6 +69,25 @@ test('readTuiCheckpointMessages keeps visible user/assistant messages only', () 
     { role: 'user', text: 'hello', createdAt: '2026-06-01T01:00:00.000Z' },
     { role: 'assistant', text: 'assistant reply', createdAt: '2026-06-01T01:00:01.000Z' },
   ]);
+});
+
+test('readTuiCheckpointMessages uses attachment display metadata instead of local paths', () => {
+  const messages = readTuiCheckpointMessages([
+    createLocalChatHumanMessage('review this', [{
+      id: 'attachment-1',
+      source: 'local-path',
+      kind: 'file',
+      path: '/Users/example/private/spec.md',
+      name: 'spec.md',
+    }]),
+  ]);
+
+  assert.equal(messages.length, 1);
+  assert.equal(
+    messages[0]?.text,
+    'review this\n\nAttachments:\n- file: spec.md',
+  );
+  assert.doesNotMatch(messages[0]?.text ?? '', /Users\/example/);
 });
 
 test('readTuiCheckpointTokenUsage aggregates every provider call in the session', () => {

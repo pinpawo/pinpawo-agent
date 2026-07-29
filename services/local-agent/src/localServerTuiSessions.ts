@@ -14,6 +14,7 @@ import { readFinalMessageText } from './agentStreamEvents';
 import { loadAgentContext } from './contextLoader';
 import { FileSaver } from './fileSaver';
 import { getLocalServerRuntimeConfig, type LocalServerDeps } from './localServerTypes';
+import { readLocalChatDisplayText } from './localChatAttachments';
 import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
 import type { LocalAgentRuntimeConfig } from './runtimeConfig';
 import {
@@ -55,7 +56,7 @@ export function readTuiCheckpointMessages(messages: BaseMessage[]): TuiCheckpoin
   return messages.flatMap((message) => {
     if (!isTuiCheckpointMessage(message)) return [];
     const type = message._getType();
-    const text = readFinalMessageText(message);
+    const text = readLocalChatDisplayText(message) ?? readFinalMessageText(message);
     if (!text) {
       return [];
     }
@@ -90,7 +91,10 @@ function isTuiCheckpointMessage(message: BaseMessage) {
   if (type !== 'human' && type !== 'ai') return false;
   if (type !== 'ai') return true;
   const pinpawo = message.additional_kwargs?.pinpawo;
-  return !(pinpawo && typeof pinpawo === 'object' && 'lane' in pinpawo);
+  if (!pinpawo || typeof pinpawo !== 'object') return true;
+  return !('lane' in pinpawo)
+    && !('handoffFrom' in pinpawo)
+    && (pinpawo as Record<string, unknown>).synthetic !== true;
 }
 
 export function summarizeTuiCheckpointMessages(

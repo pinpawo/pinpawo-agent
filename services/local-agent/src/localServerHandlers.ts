@@ -18,6 +18,8 @@ import { LocalServerStudioHandler } from './localServerStudioHandler';
 import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
 import { LocalServerTuiSessionService } from './localServerTuiSessions';
 import { LocalStudioDueRunScheduler } from './localStudioDueRunScheduler';
+import { persistGlobalReviewPolicyMode } from './globalReviewPolicyConfig';
+import { loadAgentContext } from './contextLoader';
 import {
   createLocalServerRuntimeDepsStore,
   type LocalServerDeps,
@@ -31,6 +33,14 @@ export type LocalServerHandlers = {
     authToken: string,
   ) => boolean;
   close: () => void;
+};
+
+export type LocalServerHandlerOptions = {
+  persistGlobalReviewPolicyMode?: typeof persistGlobalReviewPolicyMode;
+  /** Composition hook for embedded hosts and deterministic integration tests. */
+  chatGraphService?: LocalAgentGraphService;
+  /** Must be shared by chat execution and checkpoint-backed session reads. */
+  loadContext?: typeof loadAgentContext;
 };
 
 type SessionSummarySource = Pick<
@@ -55,13 +65,17 @@ function projectChatSessionSummary(session: SessionSummarySource): AgentSessionS
  * the outer boundary. HTTP endpoints and stdio session commands call the same
  * checkpoint-backed operations below.
  */
-export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHandlers {
+export function createLocalServerHandlers(
+  deps: LocalServerDeps,
+  options: LocalServerHandlerOptions = {},
+): LocalServerHandlers {
   const runtimeDeps = createLocalServerRuntimeDepsStore(deps);
   const initialDeps = runtimeDeps.get();
   const effectiveRuntimeConfig = initialDeps.runtimeConfig;
-  const chatGraphService = new LocalAgentGraphService();
+  const chatGraphService = options.chatGraphService ?? new LocalAgentGraphService();
   const tuiSessions = new LocalServerTuiSessionService({
     graphService: chatGraphService,
+    ...(options.loadContext ? { loadContext: options.loadContext } : {}),
     runtimeConfig: effectiveRuntimeConfig,
   });
   const studioReviewRouter = new LocalServerStudioReviewRouter<LocalServerPeer>();
@@ -82,6 +96,7 @@ export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHan
     graphService: chatGraphService,
     tuiSessions,
     inflightRequests,
+    ...(options.loadContext ? { loadContext: options.loadContext } : {}),
   });
   const studioHandler = new LocalServerStudioHandler({
     reviewRouter: studioReviewRouter,
@@ -117,6 +132,45 @@ export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHan
   const listSessions = async () => {
     const sessions = await tuiSessions.listSessions(runtimeDeps.get());
     return sessions.map(projectChatSessionSummary);
+  };
+
+  const createSession = async () => {
+    while (sessionSwitch) {
+      await sessionSwitch;
+    }
+    if (activeChatOperations > 0 || inflightRequests.hasActiveRequest()) {
+      throw Object.assign(
+        new Error('cannot create a session while a run is active'),
+        { code: 'session_new_conflict' },
+      );
+    }
+
+    let releaseSessionSwitch!: () => void;
+    const currentSwitch = new Promise<void>((resolve) => {
+      releaseSessionSwitch = resolve;
+    });
+    sessionSwitch = currentSwitch;
+    try {
+      const requestDeps = runtimeDeps.get();
+      const session = tuiSessions.createNewSession(requestDeps.actorId);
+      return {
+        session: projectChatSessionSummary({
+          ...session,
+          active: true,
+        }),
+        snapshot: buildLocalAgentSessionSnapshot({
+          sessionId: session.id,
+          kind: 'chat',
+          messages: [],
+          deps: requestDeps,
+          sessionTokenUsage: null,
+          pendingReview: null,
+        }),
+      };
+    } finally {
+      sessionSwitch = null;
+      releaseSessionSwitch();
+    }
   };
 
   const resumeSession = async (sessionId: string) => {
@@ -166,7 +220,7 @@ export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHan
   const respondToSessionRequest = async (
     peer: LocalServerPeer,
     requestId: string,
-    operation: 'snapshot' | 'list' | 'resume',
+    operation: 'snapshot' | 'list' | 'new' | 'resume',
     load: () => Promise<LocalAgentSessionServerMessage>,
   ) => {
     try {
@@ -242,12 +296,38 @@ export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHan
       tuiSessions.createNewSession(actorId);
       console.log(`[local-server] new session created for pet ${actorId}`);
     },
-    onRuntimeConfigUpdate: (_client, message) => {
-      runtimeDeps.updateLlmConfig({
-        globalReviewPolicyMode: message.globalReviewPolicyMode,
-      });
-      console.log(`[local-server] global review policy set to ${message.globalReviewPolicyMode}`);
-    },
+    onRuntimeConfigUpdate: (client, message) => sessionCommands.enqueue(
+      client,
+      async () => {
+        try {
+          (options.persistGlobalReviewPolicyMode ?? persistGlobalReviewPolicyMode)(
+            message.globalReviewPolicyMode,
+          );
+          runtimeDeps.updateLlmConfig({
+            globalReviewPolicyMode: message.globalReviewPolicyMode,
+          });
+          if (message.requestId) {
+            client.send({
+              type: 'runtime_config.result',
+              requestId: message.requestId,
+              globalReviewPolicyMode: message.globalReviewPolicyMode,
+            });
+          }
+          console.log(
+            `[local-server] global review policy set to ${message.globalReviewPolicyMode}`,
+          );
+        } catch (error) {
+          if (!message.requestId) throw error;
+          client.send({
+            type: 'runtime_config.error',
+            requestId: message.requestId,
+            message: error instanceof Error
+              ? error.message
+              : 'global review policy could not be saved',
+          });
+        }
+      },
+    ),
     onSessionSnapshotGet: (client, message) => sessionCommands.enqueue(
       client,
       () => respondToSessionRequest(
@@ -271,6 +351,19 @@ export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHan
           type: 'session.list.result',
           requestId: message.requestId,
           sessions: await listSessions(),
+        }),
+      ),
+    ),
+    onSessionNew: (client, message) => sessionCommands.enqueue(
+      client,
+      () => respondToSessionRequest(
+        client,
+        message.requestId,
+        'new',
+        async () => ({
+          type: 'session.new.result',
+          requestId: message.requestId,
+          ...await createSession(),
         }),
       ),
     ),

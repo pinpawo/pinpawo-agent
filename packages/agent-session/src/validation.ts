@@ -7,7 +7,9 @@ import {
   parseTokenUsageSnapshot,
 } from '@pinpawo/pet-agent/protocol-validation';
 
-const BUILTIN_GLOBAL_REVIEW_POLICY_MODES = {
+export type { BuiltinGlobalReviewPolicyMode } from '@pinpawo/pet-agent';
+
+export const BUILTIN_GLOBAL_REVIEW_POLICY_MODES = {
   require_authorization: true,
   auto_authorization: true,
   full_access: true,

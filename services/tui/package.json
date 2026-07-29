@@ -7,23 +7,44 @@
     "bun": ">=1.3.0"
   },
   "scripts": {
+    "build": "bun build --compile src/main.ts --outfile dist/pinpawo-tui",
+    "build:distribution": "bun run scripts/buildDistribution.ts",
     "build:spike": "bun build --compile src/spike.ts --outfile dist/pinpawo-tui-spike",
-    "dev": "bun run src/spike.ts",
+    "dev": "bun run src/main.ts",
+    "dev:command": "bun run src/main.ts --demo-command",
+    "dev:qa": "bun run src/main.ts --demo-qa",
+    "dev:probe": "bun run src/splitFooterSpike.ts",
+    "dev:review": "bun run src/main.ts --demo-review",
+    "dev:spike": "bun run src/spike.ts",
     "dev:split": "bun run src/splitFooterSpike.ts",
-    "smoke": "bun run src/spike.ts --smoke",
+    "smoke": "bun run src/main.ts --smoke",
+    "smoke:command": "bun run src/main.ts --smoke-command",
+    "smoke:review": "bun run src/main.ts --smoke-review",
+    "smoke:edit": "bun run src/main.ts --smoke-edit",
+    "smoke:transcript": "bun run src/main.ts --smoke-transcript",
+    "smoke:policy": "bun run src/main.ts --smoke-policy",
+    "smoke:host": "bun run src/main.ts --smoke-host",
+    "smoke:host-chat": "bun run src/main.ts --smoke-host-chat",
+    "smoke:studio": "bun run src/main.ts --smoke-studio",
+    "smoke:spike": "bun run src/spike.ts --smoke",
     "smoke:split": "bun run src/splitFooterSpike.ts --smoke",
-    "test:native": "bun test $(find src -name '*.bun.test.ts' | sort)",
-    "typecheck": "tsc --noEmit",
+    "test:host": "bun test tests/localHost*.bun.test.ts",
+    "test:process": "bun test tests/localHost*Process*.bun.test.ts",
+    "test:distribution": "bun test tests/distributionArtifact.bun.test.ts",
+    "test:native": "bun test $(find src tests -name '*.bun.test.ts' | sort)",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.host.json",
     "test": "node --import tsx/esm --test $(find src -name '*.test.ts' ! -name '*.bun.test.ts' | sort)"
   },
   "dependencies": {
     "@opentui/core": "0.4.5",
     "@pinpawo/agent-session": "*",
+    "string-width": "8.2.1",
     "web-tree-sitter": "0.25.10"
   },
   "devDependencies": {
     "@types/bun": "1.3.14",
     "@types/node": "^24.0.0",
+    "bun": "1.3.14",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   }

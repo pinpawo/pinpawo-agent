@@ -8,18 +8,21 @@ test('composer grows by reclaiming auxiliary footer rows', () => {
     frameHeight: 5,
     headerHeight: 1,
     liveHeight: 1,
+    statusHeight: 2,
   });
   assert.deepEqual(calculateComposerLayout('one\ntwo', 1), {
     visibleContentRows: 4,
     frameHeight: 6,
     headerHeight: 0,
     liveHeight: 1,
+    statusHeight: 2,
   });
   assert.deepEqual(calculateComposerLayout('one\ntwo\nthree', 1), {
     visibleContentRows: 5,
     frameHeight: 7,
     headerHeight: 0,
     liveHeight: 0,
+    statusHeight: 2,
   });
 });
 
@@ -29,5 +32,42 @@ test('composer caps soft-wrapped content without resizing the terminal footer', 
     frameHeight: 7,
     headerHeight: 0,
     liveHeight: 0,
+    statusHeight: 2,
   });
+});
+
+test('composer reserves a persistent attachment header inside the fixed footer', () => {
+  assert.deepEqual(calculateComposerLayout('one', 1, { persistentHeader: true }), {
+    visibleContentRows: 3,
+    frameHeight: 5,
+    headerHeight: 1,
+    liveHeight: 1,
+    statusHeight: 2,
+  });
+  assert.deepEqual(calculateComposerLayout('one\ntwo\nthree', 1, {
+    persistentHeader: true,
+  }), {
+    visibleContentRows: 4,
+    frameHeight: 6,
+    headerHeight: 1,
+    liveHeight: 0,
+    statusHeight: 2,
+  });
+});
+
+test('command palette reclaims footer rows without changing footer height', () => {
+  const layout = calculateComposerLayout('/', 1, {
+    commandPalette: true,
+  });
+  assert.deepEqual(layout, {
+    visibleContentRows: 1,
+    frameHeight: 2,
+    headerHeight: 5,
+    liveHeight: 0,
+    statusHeight: 2,
+  });
+  assert.equal(
+    layout.headerHeight + layout.liveHeight + layout.frameHeight + layout.statusHeight,
+    9,
+  );
 });

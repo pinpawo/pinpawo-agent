@@ -8,6 +8,7 @@ import {
   type RunInterruptMessage,
   type RuntimeConfigUpdateMessage,
   type SessionListMessage,
+  type SessionNewMessage,
   type SessionResumeMessage,
   type SessionSnapshotGetMessage,
   type StudioRequestMessage,
@@ -37,6 +38,7 @@ export type LocalServerPeerHandlers = {
     message: SessionSnapshotGetMessage,
   ) => MaybePromise<void>;
   onSessionList: (peer: LocalServerPeer, message: SessionListMessage) => MaybePromise<void>;
+  onSessionNew: (peer: LocalServerPeer, message: SessionNewMessage) => MaybePromise<void>;
   onSessionResume: (peer: LocalServerPeer, message: SessionResumeMessage) => MaybePromise<void>;
   onClose: (peer: LocalServerPeer) => MaybePromise<void>;
   log?: (message: string) => void;
@@ -67,8 +69,10 @@ function sendMalformedClientMessageError(peer: LocalServerPeer, data: Buffer | s
     ? 'snapshot'
     : envelope.type === 'session.list'
       ? 'list'
-      : envelope.type === 'session.resume'
-        ? 'resume'
+      : envelope.type === 'session.new'
+        ? 'new'
+        : envelope.type === 'session.resume'
+          ? 'resume'
         : null;
   if (sessionOperation) {
     peer.send({
@@ -76,6 +80,14 @@ function sendMalformedClientMessageError(peer: LocalServerPeer, data: Buffer | s
       requestId: envelope.requestId,
       operation: sessionOperation,
       message: '客户端 session 消息协议不兼容或格式无效，请升级客户端后重试。',
+    });
+    return;
+  }
+  if (envelope.type === 'runtime_config.update') {
+    peer.send({
+      type: 'runtime_config.error',
+      requestId: envelope.requestId,
+      message: '客户端 runtime config 消息协议不兼容或格式无效，请升级客户端后重试。',
     });
     return;
   }
@@ -165,6 +177,12 @@ export function dispatchLocalServerMessage(
       return runLocalServerPeerHandler(
         'handleSessionList',
         () => handlers.onSessionList(peer, msg),
+        logError,
+      );
+    } else if (msg.type === 'session.new') {
+      return runLocalServerPeerHandler(
+        'handleSessionNew',
+        () => handlers.onSessionNew(peer, msg),
         logError,
       );
     } else if (msg.type === 'session.resume') {

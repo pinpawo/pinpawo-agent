@@ -275,6 +275,46 @@ test('reduceSession keeps review and terminal control scoped to the owning run',
   assert.equal(session.activeRun && 'reviewAction' in session.activeRun, false);
 });
 
+test('run completion settles partial assistant output before its terminal notice', () => {
+  let session = reduceSession(createDomainSession(), {
+    type: 'user.accepted',
+    requestId: 'req-interrupt',
+    kind: 'chat',
+    text: 'start a long task',
+  }, { observedAt: 1_000 });
+  session = reduceSession(session, {
+    type: 'runtime.event',
+    event: {
+      type: 'message.delta',
+      requestId: 'req-interrupt',
+      role: 'assistant',
+      text: 'Partial output',
+    },
+  }, { observedAt: 1_100 });
+  session = reduceSession(session, {
+    type: 'run.finished',
+    requestId: 'req-interrupt',
+    messages: [{
+      role: 'system',
+      text: 'interrupted',
+    }],
+  }, { observedAt: 1_200 });
+
+  assert.equal(session.activeRun, null);
+  assert.deepEqual(
+    session.timeline.map((entry) => (
+      entry.type === 'message'
+        ? `${entry.role}:${entry.status}:${entry.text}`
+        : entry.type
+    )),
+    [
+      'user:completed:start a long task',
+      'assistant:completed:Partial output',
+      'system:completed:interrupted',
+    ],
+  );
+});
+
 test('applySessionSnapshot rematerializes timeline state from a checkpoint point', () => {
   const live = replay(createDomainSession(), [
     {

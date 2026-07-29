@@ -30,8 +30,11 @@ export function buildTuiActionsFromServerMessage(
   if (
     message.type === 'session.snapshot.result'
     || message.type === 'session.list.result'
+    || message.type === 'session.new.result'
     || message.type === 'session.resume.result'
     || message.type === 'session.error'
+    || message.type === 'runtime_config.result'
+    || message.type === 'runtime_config.error'
   ) {
     // Request/response clients own correlation; session results are not live
     // run events and must never enter the timeline reducer.

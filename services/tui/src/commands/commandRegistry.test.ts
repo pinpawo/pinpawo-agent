@@ -1,0 +1,122 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  listTuiCommands,
+  parseTuiCommand,
+} from './commandRegistry';
+
+test('command registry exposes only implemented OpenTUI commands', () => {
+  assert.deepEqual(
+    listTuiCommands().map((command) => command.name),
+    [
+      'help',
+      'new',
+      'studio',
+      'chat',
+      'policy',
+      'transcript',
+      'export',
+      'edit',
+      'resume',
+      'quit',
+    ],
+  );
+  assert.deepEqual(
+    listTuiCommands({ canContinueActiveDelegation: true })
+      .map((command) => command.name),
+    [
+      'help',
+      'new',
+      'studio',
+      'chat',
+      'policy',
+      'transcript',
+      'export',
+      'edit',
+      'continue',
+      'resume',
+      'quit',
+    ],
+  );
+});
+
+test('command parser resolves commands and aliases', () => {
+  assert.equal(parseTuiCommand('/').type, 'command');
+  assert.deepEqual(parseTuiCommand('/exit'), {
+    type: 'command',
+    command: listTuiCommands()[9],
+    name: 'quit',
+    raw: '/exit',
+    args: '',
+  });
+  assert.equal(parseTuiCommand('/ReSuMe').type, 'command');
+  assert.deepEqual(parseTuiCommand('/continue   apply the new constraints'), {
+    type: 'command',
+    command: listTuiCommands({
+      canContinueActiveDelegation: true,
+    })[8],
+    name: 'continue',
+    raw: '/continue   apply the new constraints',
+    args: 'apply the new constraints',
+  });
+  assert.deepEqual(parseTuiCommand('/studio   ship the release '), {
+    type: 'command',
+    command: listTuiCommands()[2],
+    name: 'studio',
+    raw: '/studio   ship the release',
+    args: 'ship the release',
+  });
+  assert.deepEqual(parseTuiCommand('/export transcripts/today.md'), {
+    type: 'command',
+    command: listTuiCommands()[6],
+    name: 'export',
+    raw: '/export transcripts/today.md',
+    args: 'transcripts/today.md',
+  });
+  assert.deepEqual(parseTuiCommand('/edit   draft text'), {
+    type: 'command',
+    command: listTuiCommands()[7],
+    name: 'edit',
+    raw: '/edit   draft text',
+    args: 'draft text',
+  });
+  assert.deepEqual(parseTuiCommand('/history'), {
+    type: 'command',
+    command: listTuiCommands()[5],
+    name: 'transcript',
+    raw: '/history',
+    args: '',
+  });
+  assert.deepEqual(parseTuiCommand('/review-policy'), {
+    type: 'command',
+    command: listTuiCommands()[4],
+    name: 'policy',
+    raw: '/review-policy',
+    args: '',
+  });
+});
+
+test('command parser keeps paths and slash-prefixed prose as chat text', () => {
+  assert.deepEqual(parseTuiCommand('/Users/mac/file.txt'), {
+    type: 'text',
+    text: '/Users/mac/file.txt',
+  });
+  assert.deepEqual(parseTuiCommand('// comment'), {
+    type: 'text',
+    text: '// comment',
+  });
+  assert.deepEqual(parseTuiCommand('/123'), {
+    type: 'text',
+    text: '/123',
+  });
+  assert.equal(parseTuiCommand('/help please').type, 'command');
+  assert.deepEqual(parseTuiCommand('  code block  '), {
+    type: 'text',
+    text: '  code block  ',
+  });
+  assert.deepEqual(parseTuiCommand('/missing'), {
+    type: 'unknown',
+    raw: '/missing',
+    name: 'missing',
+  });
+});

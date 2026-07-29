@@ -42,6 +42,7 @@ const WS_PING_INTERVAL_MS = 30000;
 export class LocalAgentRuntime {
   private readonly runtimeConfig: LocalAgentRuntimeConfig;
   private stopRequested = false;
+  private readonly stopController = new AbortController();
   private actorId: string | null = null;
   private actorName: string | null = null;
   private llmConfig: AgentLlmConfig | null = null;
@@ -170,6 +171,7 @@ export class LocalAgentRuntime {
 
   requestStop() {
     this.stopRequested = true;
+    this.stopController.abort();
     this.studioDueRunScheduler.stop();
     this.disconnectWs();
   }
@@ -237,7 +239,18 @@ export class LocalAgentRuntime {
 
     // Keep the process alive for the local server + WebSocket relay until stop.
     while (!this.stopRequested) {
-      await sleep(config.pollIntervalSeconds * 1000);
+      try {
+        await sleep(
+          config.pollIntervalSeconds * 1000,
+          undefined,
+          { signal: this.stopController.signal },
+        );
+      } catch (error) {
+        if (this.stopController.signal.aborted) {
+          break;
+        }
+        throw error;
+      }
     }
 
     console.log('[local-agent] stopped');

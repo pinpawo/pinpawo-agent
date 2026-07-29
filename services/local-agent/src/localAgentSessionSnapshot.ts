@@ -50,6 +50,7 @@ export function buildLocalAgentRuntimeView(
   const runtime = buildLocalRuntimeProjection(deps);
   return {
     model: runtime.model,
+    globalReviewPolicyMode: runtime.globalReviewPolicyMode,
     ...(runtime.contextWindow !== undefined ? { contextWindow: runtime.contextWindow } : {}),
     cwd: runtime.workdir,
     ...(runtime.workspaceId ? { workspaceId: runtime.workspaceId } : {}),

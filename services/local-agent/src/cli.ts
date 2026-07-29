@@ -10,6 +10,11 @@ type LocalAgentCliHandlers = {
   runActorSelect?: () => Promise<void> | void;
   runAgent?: (opts: { workdir?: string; stdio: boolean }) => Promise<void> | void;
   runTui?: (opts: { dryRun: boolean; workdir?: string }) => Promise<void> | void;
+  runTuiV2?: (opts: {
+    workdir?: string;
+    check: boolean;
+    qa: boolean;
+  }) => Promise<void> | void;
   runDetect?: () => Promise<void> | void;
   runInit?: (opts: InitCommandOptions) => Promise<void> | void;
   runSetup?: (opts: { workdir?: string }) => Promise<void> | void;
@@ -104,12 +109,51 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
     .command('tui')
     .description('Start the interactive terminal UI')
     .option('--dry-run', 'run without writing generated post changes')
+    .option('--v2', 'use the OpenTUI v2 client')
+    .option('--legacy', 'force the legacy Ink client')
+    .option('--check', 'verify the OpenTUI v2 runtime without entering terminal mode')
+    .option('--qa', 'run the deterministic OpenTUI v2 terminal QA scenario')
     .option('--workdir <directory>', 'agent working directory for runtime state and relative tool paths')
-    .action(async (options: { dryRun?: boolean; workdir?: string }) => {
+    .action(async (options: {
+      check?: boolean;
+      dryRun?: boolean;
+      legacy?: boolean;
+      qa?: boolean;
+      v2?: boolean;
+      workdir?: string;
+    }) => {
+      if (options.v2 && options.legacy) {
+        throw new Error('Choose either --v2 or --legacy, not both.');
+      }
+      if (options.check && !options.v2) {
+        throw new Error('--check requires the OpenTUI v2 client (`--v2`).');
+      }
+      if (options.qa && !options.v2) {
+        throw new Error('--qa requires the OpenTUI v2 client (`--v2`).');
+      }
+      if (options.check && options.qa) {
+        throw new Error('Choose either --check or --qa, not both.');
+      }
+      const workdir = options.workdir?.trim()
+        ? resolveWorkdirOption(options.workdir)
+        : undefined;
+      if (options.v2) {
+        if (options.dryRun) {
+          throw new Error('--dry-run is only supported by the legacy Ink TUI.');
+        }
+        const runTuiV2 = handlers.runTuiV2
+          ?? (await import('./commands/tuiV2Launcher')).runTuiV2;
+        await runTuiV2({
+          workdir,
+          check: options.check ?? false,
+          qa: options.qa ?? false,
+        });
+        return;
+      }
       const runTui = handlers.runTui ?? (await import('./commands/tui')).runTui;
       await runTui({
         dryRun: options.dryRun ?? false,
-        workdir: options.workdir?.trim() ? resolveWorkdirOption(options.workdir) : undefined,
+        workdir,
       });
     });
 

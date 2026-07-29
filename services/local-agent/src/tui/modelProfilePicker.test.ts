@@ -5,6 +5,7 @@ import {
   createLoadedModelProfilePicker,
   moveModelProfilePickerSelection,
   readModelProfileSelectionIssue,
+  windowModelProfilePickerProfiles,
 } from './modelProfilePicker';
 
 const profiles = [
@@ -43,4 +44,26 @@ test('model profile picker focuses the current profile and preserves disabled en
     'Session requires image input.',
   );
   assert.equal(canSelectModelProfile(state.profiles[1]!), true);
+});
+
+test('model profile picker windows a large registry around the selection', () => {
+  const largeRegistry = Array.from({ length: 8 }, (_, index) => ({
+    id: `profile-${index}`,
+    label: `Profile ${index}`,
+    inputModalities: ['text' as const],
+    available: true,
+    compatible: true,
+    issues: [],
+  }));
+
+  const middle = windowModelProfilePickerProfiles(largeRegistry, 6);
+  assert.equal(middle.start, 4);
+  assert.deepEqual(
+    middle.profiles.map((profile) => profile.id),
+    ['profile-4', 'profile-5', 'profile-6', 'profile-7'],
+  );
+
+  const beginning = windowModelProfilePickerProfiles(largeRegistry, 0);
+  assert.equal(beginning.start, 0);
+  assert.equal(beginning.profiles.length, 4);
 });

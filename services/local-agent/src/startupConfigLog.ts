@@ -1,4 +1,8 @@
 import { getConfig } from './config';
+import {
+  resolveModelProfile,
+  summarizeModelProfile,
+} from './modelProfiles';
 
 export type StartupConfigSnapshot = {
   mode: 'run' | 'tui';
@@ -8,8 +12,10 @@ export type StartupConfigSnapshot = {
   localServerPort: number;
   localOnlyMode: boolean;
   apiConnected: boolean;
+  modelProfileId: string;
+  modelProfileFingerprint: string;
   llmModel: string;
-  llmBaseUrl: string;
+  llmEndpointHost: string;
   llmModelPreset: string;
   llmContextWindowTokens: number;
   globalReviewPolicyMode: string;
@@ -39,6 +45,10 @@ export function buildStartupConfigSnapshot(params: {
   actorName?: string | null;
 }): StartupConfigSnapshot {
   const config = getConfig();
+  const profile = resolveModelProfile(
+    config.modelProfileRegistry,
+    config.modelProfileId,
+  );
   return {
     mode: params.mode,
     workdir: params.workdir,
@@ -47,10 +57,12 @@ export function buildStartupConfigSnapshot(params: {
     localServerPort: config.localServerPort,
     localOnlyMode: config.localOnlyMode,
     apiConnected: config.apiConnected,
-    llmModel: config.llmModel,
-    llmBaseUrl: config.llmBaseUrl,
-    llmModelPreset: config.llmModelPreset || 'auto',
-    llmContextWindowTokens: config.llmContextWindowTokens,
+    modelProfileId: profile.id,
+    modelProfileFingerprint: config.modelProfileFingerprint,
+    llmModel: profile.model,
+    llmEndpointHost: summarizeModelProfile(profile).endpointHost,
+    llmModelPreset: profile.sourcePreset ?? 'custom',
+    llmContextWindowTokens: profile.contextWindowTokens,
     globalReviewPolicyMode: config.globalReviewPolicyMode,
     browserBackend: config.browserBackend,
     langsmithTracing: readLangSmithTracingEnabled(),
@@ -69,8 +81,10 @@ export function formatStartupConfigSnapshot(snapshot: StartupConfigSnapshot) {
     `  localServerPort=${snapshot.localServerPort}`,
     `  localOnlyMode=${snapshot.localOnlyMode}`,
     `  apiConnected=${snapshot.apiConnected}`,
+    `  modelProfileId=${snapshot.modelProfileId}`,
+    `  modelProfileFingerprint=${snapshot.modelProfileFingerprint}`,
     `  llmModel=${snapshot.llmModel}`,
-    `  llmBaseUrl=${snapshot.llmBaseUrl}`,
+    `  llmEndpointHost=${snapshot.llmEndpointHost}`,
     `  llmModelPreset=${snapshot.llmModelPreset}`,
     `  llmContextWindowTokens=${snapshot.llmContextWindowTokens}`,
     `  globalReviewPolicyMode=${snapshot.globalReviewPolicyMode}`,

@@ -2,8 +2,12 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { isMissingOrGeneratedApiPlaceholder } from './configDiagnostics';
-import { inferLlmContextWindowTokens } from './llmContextWindow';
-import { findLlmModelPresetByKey, inferLlmModelPreset } from './llmModelPresets';
+import {
+  buildModelProfileRegistry,
+  fingerprintModelProfile,
+  resolveModelProfile,
+  type ModelProfileRegistrySnapshot,
+} from './modelProfiles';
 import { loadStoredConfig } from './storage';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
@@ -117,16 +121,6 @@ function getGlobalReviewPolicyMode(): BuiltinGlobalReviewPolicyMode {
     ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION;
 }
 
-function required(envKey: string, storedKey: keyof typeof stored, label: string): string {
-  const val = get(envKey, storedKey);
-  if (!val) {
-    throw new Error(
-      `Missing: ${label}\nRun "pinpawo login" or set ${envKey} in .env`
-    );
-  }
-  return val;
-}
-
 const apiBaseUrl = optional('API_BASE_URL', 'api_base_url').replace(/\/$/, '');
 const hasuraEndpoint = optional('HASURA_ENDPOINT', 'hasura_endpoint').replace(/\/$/, '');
 const agentToken = optional('AGENT_TOKEN', 'agent_token');
@@ -148,34 +142,12 @@ const apiSetupMessage = localOnlyMode
     ? `API login is not configured (${missingOrPlaceholderApiConfig.join(', ')}). Local-only mode is enabled; run "pinpawo login" to enable the hosted app, chat relay, and Hasura-backed context.`
     : '';
 
-const llmPresetKey = optional('LLM_MODEL_PRESET', 'llm_model_preset');
-const selectedLlmPreset = findLlmModelPresetByKey(llmPresetKey);
-const envPresetRequested = Boolean(process.env.LLM_MODEL_PRESET?.trim());
-const envModelRequested = Boolean(process.env.LLM_MODEL?.trim());
-const llmModelFromConfig = process.env.LLM_MODEL
-  || (!envPresetRequested ? (typeof stored.llm_model === 'string' ? stored.llm_model : '') : '');
-const llmBaseUrlFromConfig = process.env.LLM_BASE_URL
-  || (!envPresetRequested ? (typeof stored.llm_base_url === 'string' ? stored.llm_base_url : '') : '');
-const llmModel = llmModelFromConfig || selectedLlmPreset?.model || 'deepseek-v4-pro';
-const inferredModelPreset = inferLlmModelPreset(llmModel);
-const effectiveLlmPreset = selectedLlmPreset ?? inferredModelPreset;
-const llmBaseUrlRaw = llmBaseUrlFromConfig
-  || effectiveLlmPreset?.baseUrl
-  || (llmPresetKey ? '' : 'https://api.deepseek.com');
-if (!llmBaseUrlRaw) {
-  throw new Error(
-    `Missing: LLM_BASE_URL\nPreset "${llmPresetKey}" requires an OpenAI-compatible gateway URL.`
-  );
-}
-const llmBaseUrl = llmBaseUrlRaw.replace(/\/$/, '');
-const llmStoredContextWindow = envPresetRequested || envModelRequested
-  ? undefined
-  : stored.llm_context_window_tokens;
-const llmContextWindowTokens =
-  resolveNumberConfigValue(process.env.LLM_CONTEXT_WINDOW_TOKENS, llmStoredContextWindow)
-  ?? effectiveLlmPreset?.contextWindowTokens
-  ?? inferLlmContextWindowTokens(llmModel)
-  ?? 32000;
+const modelProfileRegistry = buildModelProfileRegistry({
+  stored,
+  env: process.env,
+});
+const selectedModelProfile = resolveModelProfile(modelProfileRegistry);
+const selectedModelProfileFingerprint = fingerprintModelProfile(selectedModelProfile).fingerprint;
 
 export type Config = Readonly<{
   apiBaseUrl: string;
@@ -185,11 +157,9 @@ export type Config = Readonly<{
   localOnlyMode: boolean;
   apiConnected: boolean;
   apiSetupMessage: string;
-  llmApiKey: string;
-  llmModelPreset: string;
-  llmBaseUrl: string;
-  llmModel: string;
-  llmContextWindowTokens: number;
+  modelProfileRegistry: ModelProfileRegistrySnapshot;
+  modelProfileId: string;
+  modelProfileFingerprint: string;
   structuredOutputAutoRepair: boolean;
   structuredOutputRepairMaxRetries?: number;
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
@@ -214,11 +184,9 @@ function readConfigDefaults(): Config {
     localOnlyMode,
     apiConnected,
     apiSetupMessage,
-    llmApiKey: required('LLM_API_KEY', 'llm_api_key', 'LLM_API_KEY'),
-    llmModelPreset: effectiveLlmPreset?.key ?? '',
-    llmBaseUrl,
-    llmModel,
-    llmContextWindowTokens,
+    modelProfileRegistry,
+    modelProfileId: selectedModelProfile.id,
+    modelProfileFingerprint: selectedModelProfileFingerprint,
     structuredOutputAutoRepair: getBoolean(
       'LLM_STRUCTURED_OUTPUT_AUTO_REPAIR',
       'structured_output_auto_repair',

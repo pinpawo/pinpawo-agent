@@ -205,11 +205,17 @@ Common configuration keys:
 | `LLM_BASE_URL` | OpenAI-compatible LLM base URL. |
 | `LLM_MODEL` | Default model used by the local agent. |
 | `LLM_CONTEXT_WINDOW_TOKENS` | Optional explicit context-window override for custom models. |
+| `PINPAWO_MODEL_PROFILE` | Selects a stored model profile by stable ID. |
 | `PINPAWO_WORKDIR` | Default local working directory for tools that need one. |
 | `PINPAWO_BROWSER_BACKEND` | Browser backend mode: `auto` (connected extension first for compatible operations, otherwise Playwright), `playwright`, or `extension`. |
 | `LOCAL_SERVER_PORT` | Local HTTP/WebSocket server port. |
 | `MEDIACRAWLER_DIR` | Optional MediaCrawler checkout path. |
 | `XHS_COOKIE` | Optional Xiaohongshu cookie for crawler-backed workflows. |
+
+Versioned multi-model configuration lives under `config.json#models`. A complete
+`LLM_API_KEY` + `LLM_BASE_URL` + `LLM_MODEL` tuple creates an ephemeral `env`
+profile; partial environment tuples are never mixed with stored profiles. See
+[Model Profile Configuration](docs/MODEL_PROFILE_CONFIGURATION.md).
 
 ## CLI Reference
 

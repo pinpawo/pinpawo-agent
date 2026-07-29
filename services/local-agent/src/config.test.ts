@@ -15,6 +15,8 @@ const REQUIRED_ENV = {
   AGENT_TOKEN: 'agent-token',
   HASURA_JWT: 'hasura-jwt',
   LLM_API_KEY: 'llm-key',
+  LLM_BASE_URL: 'https://models.example.test/v1',
+  LLM_MODEL: 'test-model',
 };
 
 function readGlobalReviewPolicyMode(
@@ -95,6 +97,8 @@ test('config workdir defaults to process cwd when env and stored config are abse
       HOME: home,
       PINPAWO_WORKDIR: '',
       LLM_API_KEY: 'llm-key',
+      LLM_BASE_URL: 'https://models.example.test/v1',
+      LLM_MODEL: 'test-model',
     },
     encoding: 'utf8',
   });
@@ -185,4 +189,107 @@ test('setConfig replaces the current frozen snapshot without mutating previous s
   } finally {
     setConfig(original);
   }
+});
+
+test('config resolves a stored versioned model profile without legacy singleton fields', () => {
+  const home = mkdtempSync(resolve(tmpdir(), 'pinpawo-config-home-'));
+  writeStoredConfig(home, {
+    models: {
+      version: 1,
+      defaultProfileId: 'primary',
+      profiles: {
+        primary: {
+          id: 'primary',
+          label: 'Primary',
+          provider: 'example',
+          model: 'stored-model',
+          baseUrl: 'https://stored.example.test/v1',
+          apiKey: 'stored-secret',
+          contextWindowTokens: 128000,
+          inputModalities: ['text'],
+        },
+      },
+    },
+  });
+
+  const output = execFileSync(process.execPath, [
+    '--import',
+    'tsx',
+    '-e',
+    [
+      `const { getConfig } = await import(${JSON.stringify(CONFIG_IMPORT_PATH)});`,
+      'const config = getConfig();',
+      'process.stdout.write(JSON.stringify({ id: config.modelProfileId, fingerprint: config.modelProfileFingerprint }));',
+    ].join('\n'),
+  ], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      HOME: home,
+      LLM_API_KEY: '',
+      LLM_BASE_URL: '',
+      LLM_MODEL: '',
+      LLM_MODEL_PRESET: '',
+      PINPAWO_MODEL_PROFILE: '',
+    },
+    encoding: 'utf8',
+  });
+
+  const parsed = JSON.parse(output) as {
+    id: string;
+    fingerprint: string;
+  };
+  assert.equal(parsed.id, 'primary');
+  assert.match(parsed.fingerprint, /^[a-f0-9]{64}$/);
+});
+
+test('config never combines a partial environment override with a stored profile', () => {
+  const home = mkdtempSync(resolve(tmpdir(), 'pinpawo-config-home-'));
+  writeStoredConfig(home, {
+    models: {
+      version: 1,
+      defaultProfileId: 'primary',
+      profiles: {
+        primary: {
+          id: 'primary',
+          label: 'Primary',
+          provider: 'example',
+          model: 'stored-model',
+          baseUrl: 'https://stored.example.test/v1',
+          apiKey: 'stored-secret',
+          contextWindowTokens: 128000,
+          inputModalities: ['text'],
+        },
+      },
+    },
+  });
+
+  const output = execFileSync(process.execPath, [
+    '--import',
+    'tsx',
+    '-e',
+    [
+      `const { buildLocalLlmConfig } = await import(${JSON.stringify(CONFIG_IMPORT_PATH.replace('config.ts', 'llmConfig.ts'))});`,
+      'const config = buildLocalLlmConfig();',
+      'process.stdout.write(JSON.stringify({ model: config.model, baseUrl: config.baseUrl, apiKey: config.apiKey }));',
+    ].join('\n'),
+  ], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      HOME: home,
+      LLM_API_KEY: 'wrong-provider-secret',
+      LLM_BASE_URL: '',
+      LLM_MODEL: '',
+      LLM_MODEL_PRESET: '',
+      PINPAWO_MODEL_PROFILE: '',
+    },
+    encoding: 'utf8',
+  });
+
+  assert.deepEqual(JSON.parse(output), {
+    model: 'stored-model',
+    baseUrl: 'https://stored.example.test/v1',
+    apiKey: 'stored-secret',
+  });
 });

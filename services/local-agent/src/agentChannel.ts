@@ -185,7 +185,8 @@ function appendCapability(
 }
 
 export function buildDecisionStructuredOutput(llmConfig: AgentLlmConfig): OrchestratorConfig['decisionStructuredOutput'] {
-  const method = inferLlmStructuredOutputMethod(llmConfig.model, llmConfig.baseUrl);
+  const method = llmConfig.structuredOutputMethod
+    ?? inferLlmStructuredOutputMethod(llmConfig.model, llmConfig.baseUrl);
   if (!method) return undefined;
 
   const autoRepair = llmConfig.structuredOutputAutoRepair

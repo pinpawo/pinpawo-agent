@@ -20,7 +20,7 @@ export function formatHeader(
   width = Number.POSITIVE_INFINITY,
   composerMode: AgentSession['kind'] = state.session.kind,
 ) {
-  const model = state.session.runtime?.model?.trim();
+  const model = formatRuntimeModel(state.session);
   return fitStatusSegments([
     `PinPawo TUI v2 · v${TUI_VERSION}`,
     formatConnection(state.connection),
@@ -68,6 +68,7 @@ export function formatStatusLines(
   width: number,
   notice?: string | null,
 ): readonly [string, string] {
+  const runtimeModel = formatRuntimeModel(state.session);
   const primary = notice?.trim()
     || state.connectionDetail?.trim()
     || [
@@ -76,9 +77,7 @@ export function formatStatusLines(
       ...(state.session.runtime?.globalReviewPolicyMode
         ? [`policy: ${formatPolicyMode(state.session.runtime.globalReviewPolicyMode)}`]
         : []),
-      ...(state.session.runtime?.model?.trim()
-        ? [state.session.runtime.model.trim()]
-        : []),
+      ...(runtimeModel ? [runtimeModel] : []),
     ].join(' · ');
   return [
     truncateTerminalLine(primary, width),
@@ -87,6 +86,15 @@ export function formatStatusLines(
       connectionDetail: undefined,
     }, width),
   ];
+}
+
+export function formatRuntimeModel(session: AgentSession) {
+  const profileLabel = session.runtime?.modelProfileLabel?.trim();
+  const providerModel = session.runtime?.model?.trim();
+  if (profileLabel && providerModel && profileLabel !== providerModel) {
+    return `${profileLabel} (${providerModel})`;
+  }
+  return profileLabel || providerModel;
 }
 
 export function formatConnection(status: TuiConnectionStatus) {

@@ -67,6 +67,10 @@ test('resolveTuiInteractionOwner applies one priority across all interaction own
       expected: { type: 'globalReviewPolicyPicker' },
     },
     {
+      state: { ...IDLE, busy: true, modelProfilePickerOpen: true },
+      expected: { type: 'modelProfilePicker' },
+    },
+    {
       state: { ...IDLE, busy: true, commandPaletteOpen: true },
       expected: { type: 'busy' },
     },

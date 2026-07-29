@@ -2,6 +2,7 @@ import type { AgentSession } from '@pinpawo/agent-session';
 import stringWidth from 'string-width';
 import type { LocalHostMetadata } from '../client/localHostMetadata';
 import { sessionActorLabel } from '../session/sessionDisplay';
+import { formatRuntimeModel } from '../status/statusModel';
 import { truncateTerminalLine } from '../text/terminalText';
 import { TUI_VERSION } from '../version';
 
@@ -30,7 +31,7 @@ export function buildWelcomeLines(input: {
 }) {
   const width = Math.max(1, Math.floor(input.width));
   const actor = sessionActorLabel(input.session);
-  const model = input.session.runtime?.model?.trim() || 'model loading';
+  const model = formatRuntimeModel(input.session) || 'model loading';
   const cwd = input.session.runtime?.cwd?.trim() || 'workspace loading';
   const version = input.version ?? TUI_VERSION;
   const localAgentVersion = formatVersion(

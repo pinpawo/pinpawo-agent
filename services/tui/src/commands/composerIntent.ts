@@ -9,6 +9,7 @@ export type ComposerIntent =
   | { type: 'open-help' }
   | { type: 'continue-delegation'; guidance: string }
   | { type: 'open-resume' }
+  | { type: 'open-model' }
   | { type: 'open-policy' }
   | { type: 'open-transcript' }
   | { type: 'export-transcript'; path?: string }
@@ -59,6 +60,8 @@ export function resolveComposerIntent(input: {
       };
     case 'resume':
       return { type: 'open-resume' };
+    case 'model':
+      return { type: 'open-model' };
     case 'policy':
       return { type: 'open-policy' };
     case 'transcript':

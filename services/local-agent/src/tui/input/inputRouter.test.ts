@@ -95,6 +95,25 @@ test('resolveTuiInputCommand routes global review policy picker commands', () =>
   );
 });
 
+test('resolveTuiInputCommand routes model profile picker commands', () => {
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'cursor.up' }, { type: 'modelProfilePicker' }),
+    { target: 'modelProfile', action: 'previous' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'cursor.down' }, { type: 'modelProfilePicker' }),
+    { target: 'modelProfile', action: 'next' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'submit' }, { type: 'modelProfilePicker' }),
+    { target: 'modelProfile', action: 'submit' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'escape' }, { type: 'modelProfilePicker' }),
+    { target: 'modelProfile', action: 'dismiss' },
+  );
+});
+
 test('resolveTuiInputCommand routes approval commands and free text edits', () => {
   const approvalOwner = { type: 'approval', freeTextActive: false } as const;
   const activeFreeTextApprovalOwner = { type: 'approval', freeTextActive: true } as const;

@@ -73,6 +73,7 @@ export type TuiSnapshotApplyReason =
   | 'startup'
   | 'reconnect'
   | 'resume'
+  | 'model-select'
   | 'completion'
   | 'review-refresh';
 

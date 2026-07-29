@@ -295,6 +295,121 @@ test('TuiSessionController updates review policy only after a correlated host ac
   controller.stop();
 });
 
+test('TuiSessionController lists and switches session model profiles authoritatively', async () => {
+  const requestIds = ['snapshot-1', 'model-list-1', 'model-select-1', 'model-select-2'];
+  let connection!: FakeConnection;
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => requestIds.shift() ?? 'unexpected',
+  });
+  controller.start();
+  connection.open();
+  connection.receive({
+    type: 'session.snapshot.result',
+    requestId: 'snapshot-1',
+    snapshot: createAgentSessionSnapshot({
+      sessionId: 'chat:one',
+      kind: 'chat',
+      timeline: [],
+      activeRun: null,
+      runtime: {
+        modelProfileId: 'text',
+        modelProfileLabel: 'Text',
+        requiredInputModalities: ['text', 'image'],
+      },
+    }),
+  });
+
+  const listed = controller.listModelProfiles();
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'model.list',
+    requestId: 'model-list-1',
+    sessionId: 'chat:one',
+  });
+  assert.deepEqual(controller.submitChat('must wait'), {
+    ok: false,
+    reason: 'busy',
+  });
+  connection.receive({
+    type: 'model.list.result',
+    requestId: 'model-list-1',
+    sessionId: 'chat:one',
+    defaultProfileId: 'text',
+    selectedProfileId: 'text',
+    requiredInputModalities: ['text', 'image'],
+    profiles: [{
+      id: 'text',
+      label: 'Text',
+      inputModalities: ['text'],
+      available: true,
+      compatible: false,
+      issues: ['Session requires image input.'],
+    }, {
+      id: 'vision',
+      label: 'Vision',
+      inputModalities: ['text', 'image'],
+      available: true,
+      compatible: true,
+      issues: [],
+    }],
+  });
+  const modelList = await listed;
+  assert.equal(modelList.profiles[0]?.compatible, false);
+
+  const selected = controller.selectModelProfile('vision', 'chat:one');
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'model.select',
+    requestId: 'model-select-1',
+    sessionId: 'chat:one',
+    modelProfileId: 'vision',
+  });
+  const snapshot = createAgentSessionSnapshot({
+    sessionId: 'chat:one',
+    kind: 'chat',
+    timeline: [],
+    activeRun: null,
+    runtime: {
+      modelProfileId: 'vision',
+      modelProfileLabel: 'Vision',
+      requiredInputModalities: ['text', 'image'],
+    },
+  });
+  connection.receive({
+    type: 'model.select.result',
+    requestId: 'model-select-1',
+    sessionId: 'chat:one',
+    selectedProfileId: 'vision',
+    snapshot,
+  });
+  assert.equal(await selected, snapshot);
+  assert.equal(
+    controller.getState().session.runtime?.modelProfileId,
+    'vision',
+  );
+
+  const rejected = controller.selectModelProfile('text', 'chat:one');
+  connection.receive({
+    type: 'model.select.error',
+    requestId: 'model-select-2',
+    sessionId: 'chat:one',
+    modelProfileId: 'text',
+    code: 'profile_incompatible',
+    message: 'Session requires image input.',
+  });
+  await assert.rejects(rejected, (error: Error & { code?: string }) => (
+    error.message === 'Session requires image input.'
+    && error.code === 'profile_incompatible'
+  ));
+  assert.equal(
+    controller.getState().session.runtime?.modelProfileId,
+    'vision',
+  );
+  controller.stop();
+});
+
 test('TuiSessionController projects Studio progress and terminal responses', () => {
   const requestIds = ['snapshot-1', 'studio-1', 'studio-2'];
   let connection!: FakeConnection;

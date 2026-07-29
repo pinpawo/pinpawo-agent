@@ -15,6 +15,7 @@ const SESSION: AgentSession = {
   },
   runtime: {
     model: 'gpt-test',
+    modelProfileLabel: 'Primary coding',
     cwd: '/Users/mac/Develop/pinpawo-agent',
   },
   timeline: [],
@@ -42,7 +43,7 @@ test('welcome includes the raster paw, version, runtime, and shortcuts', () => {
     '  ████ ████   ████ ████      v0.1.0 · local-agent v0.2.0',
     ' ██████           ██████     connected',
     '  ████   ███████   ████  ',
-    '       ███████████           model         gpt-test',
+    '       ███████████           model         Primary coding (gpt-test)',
     '      █████████████          directory     /Users/mac/Develop/pinpawo-agent',
     '      █████████████          capabilities  general · explore · daily_post',
     '       ███████████                         capability_creator',
@@ -52,6 +53,9 @@ test('welcome includes the raster paw, version, runtime, and shortcuts', () => {
   assert.ok(lines.some((line) => line.includes('v0.1.0')));
   assert.ok(lines.some((line) => line.includes('local-agent v0.2.0')));
   assert.ok(lines.some((line) => line.includes('capability_creator')));
+  assert.ok(
+    lines.some((line) => line.includes('Primary coding (gpt-test)')),
+  );
   assert.ok(lines.some((line) => line.includes('PgUp history')));
   assert.ok(lines.some((line) => line.includes('Ctrl+R sessions')));
   assert.ok(lines.some((line) => line.includes('Enter send')));

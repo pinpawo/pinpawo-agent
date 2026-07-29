@@ -511,6 +511,105 @@ test('TuiRuntimeController resets the timeline viewport for new sessions', () =>
   assert.deepEqual(harness.sent, [{ type: 'new_session' }]);
 });
 
+test('TuiRuntimeController correlates model list and selection responses', async () => {
+  const harness = createController(idleState());
+  const listPromise = harness.controller.listModelProfiles();
+  const listRequest = harness.sent[0];
+  assert.equal(listRequest?.type, 'model.list');
+  if (listRequest?.type !== 'model.list') assert.fail('expected model list request');
+
+  harness.connectionHandlers.onMessage({
+    type: 'model.list.result',
+    requestId: listRequest.requestId,
+    sessionId: 'sess-1',
+    defaultProfileId: 'text',
+    selectedProfileId: 'text',
+    requiredInputModalities: ['text'],
+    profiles: [{
+      id: 'text',
+      label: 'Text',
+      inputModalities: ['text'],
+      available: true,
+      compatible: true,
+      issues: [],
+    }, {
+      id: 'vision',
+      label: 'Vision',
+      inputModalities: ['text', 'image'],
+      available: true,
+      compatible: true,
+      issues: [],
+    }],
+  });
+
+  const listed = await listPromise;
+  assert.equal(listed.selectedProfileId, 'text');
+  assert.deepEqual(listed.requiredInputModalities, ['text']);
+
+  const selectPromise = harness.controller.selectModelProfile('vision');
+  const selectRequest = harness.sent[1];
+  assert.equal(selectRequest?.type, 'model.select');
+  if (selectRequest?.type !== 'model.select') {
+    assert.fail('expected model select request');
+  }
+  const snapshot = {
+    version: 3 as const,
+    session: {
+      sessionId: 'sess-1',
+      kind: 'chat' as const,
+      runtime: {
+        modelProfileId: 'vision',
+        modelProfileLabel: 'Vision',
+      },
+      timeline: [],
+      activeRun: null,
+    },
+  };
+  harness.connectionHandlers.onMessage({
+    type: 'model.select.result',
+    requestId: selectRequest.requestId,
+    sessionId: 'sess-1',
+    selectedProfileId: 'vision',
+    snapshot,
+  });
+
+  assert.equal(await selectPromise, snapshot);
+  const applied = harness.actions.find(
+    (action) => action.type === 'session.snapshot.loaded',
+  );
+  assert.equal(applied?.type, 'session.snapshot.loaded');
+  if (applied?.type === 'session.snapshot.loaded') {
+    assert.equal(applied.reason, 'model-select');
+    assert.equal(applied.snapshot.session.runtime?.modelProfileId, 'vision');
+  }
+});
+
+test('TuiRuntimeController exposes model selection errors without applying a snapshot', async () => {
+  const harness = createController(idleState());
+  const selected = harness.controller.selectModelProfile('text');
+  const request = harness.sent[0];
+  assert.equal(request?.type, 'model.select');
+  if (request?.type !== 'model.select') assert.fail('expected model select request');
+
+  harness.connectionHandlers.onMessage({
+    type: 'model.select.error',
+    requestId: request.requestId,
+    sessionId: 'sess-1',
+    modelProfileId: 'text',
+    code: 'profile_incompatible',
+    message: 'Session requires image input.',
+  });
+
+  await assert.rejects(selected, (error: Error & { code?: string }) => (
+    error.message === 'Session requires image input.'
+    && error.code === 'profile_incompatible'
+  ));
+  assert.equal(
+    harness.actions.some((action) => action.type === 'session.snapshot.loaded'),
+    false,
+  );
+});
+
 test('TuiRuntimeController applies the latest snapshot without resetting inline output before reconnecting', async () => {
   const state = pendingReviewState();
   const events: string[] = [];

@@ -37,6 +37,7 @@ test('interaction owner uses one explicit overlay precedence', () => {
     sessionPickerOpen: true,
     commandHelpOpen: true,
     policyPickerOpen: true,
+    modelPickerOpen: true,
     noticeOpen: true,
     approval: {
       open: true,
@@ -59,6 +60,7 @@ test('paste reaches only composer-like or free-text owners', () => {
   }), true);
   assert.equal(interactionOwnerBlocksPaste({ type: 'notice' }), true);
   assert.equal(interactionOwnerBlocksPaste({ type: 'policy-picker' }), true);
+  assert.equal(interactionOwnerBlocksPaste({ type: 'model-picker' }), true);
   assert.equal(interactionOwnerBlocksPaste({ type: 'command-help' }), true);
   assert.equal(interactionOwnerBlocksPaste({ type: 'session-picker' }), true);
   assert.equal(interactionOwnerBlocksPaste({ type: 'command-palette' }), false);

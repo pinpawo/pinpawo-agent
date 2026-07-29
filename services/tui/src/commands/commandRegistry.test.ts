@@ -13,6 +13,7 @@ test('command registry exposes only implemented OpenTUI commands', () => {
       'new',
       'studio',
       'chat',
+      'model',
       'policy',
       'transcript',
       'export',
@@ -25,10 +26,12 @@ test('command registry exposes only implemented OpenTUI commands', () => {
 });
 
 test('command parser resolves commands and aliases', () => {
+  const command = (name: string) => listTuiCommands()
+    .find((candidate) => candidate.name === name);
   assert.equal(parseTuiCommand('/').type, 'command');
   assert.deepEqual(parseTuiCommand('/exit'), {
     type: 'command',
-    command: listTuiCommands()[10],
+    command: command('quit'),
     name: 'quit',
     raw: '/exit',
     args: '',
@@ -36,42 +39,42 @@ test('command parser resolves commands and aliases', () => {
   assert.equal(parseTuiCommand('/ReSuMe').type, 'command');
   assert.deepEqual(parseTuiCommand('/continue   apply the new constraints'), {
     type: 'command',
-    command: listTuiCommands()[8],
+    command: command('continue'),
     name: 'continue',
     raw: '/continue   apply the new constraints',
     args: 'apply the new constraints',
   });
   assert.deepEqual(parseTuiCommand('/studio   ship the release '), {
     type: 'command',
-    command: listTuiCommands()[2],
+    command: command('studio'),
     name: 'studio',
     raw: '/studio   ship the release',
     args: 'ship the release',
   });
   assert.deepEqual(parseTuiCommand('/export transcripts/today.md'), {
     type: 'command',
-    command: listTuiCommands()[6],
+    command: command('export'),
     name: 'export',
     raw: '/export transcripts/today.md',
     args: 'transcripts/today.md',
   });
   assert.deepEqual(parseTuiCommand('/edit   draft text'), {
     type: 'command',
-    command: listTuiCommands()[7],
+    command: command('edit'),
     name: 'edit',
     raw: '/edit   draft text',
     args: 'draft text',
   });
   assert.deepEqual(parseTuiCommand('/history'), {
     type: 'command',
-    command: listTuiCommands()[5],
+    command: command('transcript'),
     name: 'transcript',
     raw: '/history',
     args: '',
   });
   assert.deepEqual(parseTuiCommand('/review-policy'), {
     type: 'command',
-    command: listTuiCommands()[4],
+    command: command('policy'),
     name: 'policy',
     raw: '/review-policy',
     args: '',

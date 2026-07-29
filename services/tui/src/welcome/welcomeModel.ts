@@ -3,33 +3,22 @@ import stringWidth from 'string-width';
 import type { LocalHostMetadata } from '../client/localHostMetadata';
 import { sessionActorLabel } from '../session/sessionDisplay';
 import { truncateTerminalLine } from '../text/terminalText';
-import { renderHalfBlockRaster } from '../visuals/terminalRaster';
 import { TUI_VERSION } from '../version';
 
-const PAW_RASTER = [
-  '.......................',
-  '.......##.....##.......',
-  '......####...####......',
-  '......####...####......',
-  '...#..####...####..#...',
-  '..###.............###..',
-  '.#####...........#####.',
-  '..###.............###..',
-  '...#...............#...',
-  '.......................',
-  '.........#####.........',
-  '.......#########.......',
-  '.......#########.......',
-  '......###########......',
-  '......###########......',
-  '......###########......',
-  '......###########......',
-  '.......#########.......',
-  '.......#########.......',
-  '.........#####.........',
+const PAW_LINES = [
+  '       ███     ███       ',
+  '      █████   █████      ',
+  ' ███   ███     ███   ███ ',
+  '█████               █████',
+  ' ███                 ███ ',
+  '                         ',
+  '         ███████         ',
+  '       ███████████       ',
+  '      █████████████      ',
+  '      █████████████      ',
+  '       ███████████       ',
+  '         ███████         ',
 ] as const;
-
-const PAW_LINES = renderHalfBlockRaster(PAW_RASTER);
 
 export const WELCOME_LOGO_HEIGHT = PAW_LINES.length;
 export const WELCOME_LOGO_WIDTH = terminalBlockWidth(PAW_LINES);

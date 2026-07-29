@@ -172,8 +172,8 @@ test('welcome paints solid raster cells without font line-height seams', async (
   const setup = await createTimelineRenderer(20);
   const timeline = new TimelineScrollback(setup.renderer);
   try {
-    timeline.renderWelcome(['█▄ paw']);
-    assert.equal(setup.cellOutput.takeText(), ' ▄ paw');
+    timeline.renderWelcome(['█ paw']);
+    assert.equal(setup.cellOutput.takeText(), '  paw');
 
     const spans = setup.styleOutput.take().flatMap((lines) =>
       lines.flatMap((line) => line.spans)

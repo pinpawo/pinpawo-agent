@@ -359,7 +359,12 @@ export class LocalServerTuiSessionService {
     if (!updated) {
       throw new Error('session not found');
     }
-    this.save();
+    try {
+      this.save();
+    } catch (error) {
+      this.state.sessions[sessionId] = session;
+      throw error;
+    }
     return updated;
   }
 

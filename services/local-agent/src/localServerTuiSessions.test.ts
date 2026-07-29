@@ -169,6 +169,32 @@ test('LocalServerTuiSessionService creates and resets active sessions', async ()
   assert.equal(saved.length >= 4, true);
 });
 
+test('LocalServerTuiSessionService rolls back a model selection when persistence fails', () => {
+  const state = createEmptyTuiSessionState();
+  let failSave = false;
+  const service = new LocalServerTuiSessionService({
+    state,
+    saveState: () => {
+      if (failSave) {
+        throw new Error('session store unavailable');
+      }
+    },
+    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
+  });
+  const session = service.getActiveSession('pet-a');
+  failSave = true;
+
+  assert.throws(
+    () => service.selectModelProfile('pet-a', session.id, 'secondary'),
+    /session store unavailable/,
+  );
+  assert.equal(state.sessions[session.id], session);
+  assert.equal(
+    state.sessions[session.id]?.modelProfileId,
+    TEST_MODEL_PROFILE_ID,
+  );
+});
+
 test('LocalServerTuiSessionService injects active session createdAt into runtime environment', () => {
   const state = createEmptyTuiSessionState();
   const service = new LocalServerTuiSessionService({

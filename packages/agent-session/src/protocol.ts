@@ -230,7 +230,8 @@ export type AgentModelServerMessage =
         | 'run_active'
         | 'review_pending'
         | 'profile_unavailable'
-        | 'profile_incompatible';
+        | 'profile_incompatible'
+        | 'selection_failed';
       message: string;
     };
 
@@ -970,6 +971,7 @@ function parseAgentServerRecord(record: Record<string, unknown>): AgentServerMes
         && code !== 'review_pending'
         && code !== 'profile_unavailable'
         && code !== 'profile_incompatible'
+        && code !== 'selection_failed'
       )
     ) {
       return null;

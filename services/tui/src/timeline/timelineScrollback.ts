@@ -1,6 +1,8 @@
 import {
   bg,
+  bold,
   BoxRenderable,
+  dim,
   fg,
   StyledText,
   TextAttributes,
@@ -8,6 +10,7 @@ import {
   type CliRenderer,
   type RenderContext,
   type ScrollbackSurface,
+  type TextChunk,
 } from '@opentui/core';
 import type {
   AgentSession,
@@ -32,6 +35,9 @@ import {
 } from './assistantMarkdown';
 
 const WELCOME_COLOR = '#69c0c8';
+const WELCOME_MUTED_COLOR = '#789da3';
+const WELCOME_STATUS_COLOR = '#7fcf9b';
+const WELCOME_TITLE_COLOR = '#efa6ca';
 
 type ActiveTimelineSurface = {
   surface: ScrollbackSurface;
@@ -76,7 +82,7 @@ export class TimelineScrollback {
           id: `pinpawo-welcome:${index}`,
           width: '100%',
           height: 1,
-          content: styleWelcomeRasterLine(line || ' ', index),
+          content: styleWelcomeLine(line || ' ', index),
           fg: WELCOME_COLOR,
         }));
       });
@@ -328,19 +334,56 @@ export class TimelineScrollback {
   }
 }
 
-function styleWelcomeRasterLine(line: string, row: number) {
-  if (row >= WELCOME_LOGO_HEIGHT) return line;
-  const logo = line.slice(0, WELCOME_LOGO_WIDTH);
-  if (!logo.includes('█')) return line;
-  const chunks = logo
-    .split(/(█+)/)
-    .filter(Boolean)
-    .map((value) => value[0] === '█'
-      ? bg(WELCOME_COLOR)(' '.repeat(value.length))
-      : fg(WELCOME_COLOR)(value));
-  const remainder = line.slice(WELCOME_LOGO_WIDTH);
-  if (remainder) chunks.push(fg(WELCOME_COLOR)(remainder));
+function styleWelcomeLine(line: string, row: number) {
+  const chunks: TextChunk[] = [];
+  let remainder = line;
+  if (row < WELCOME_LOGO_HEIGHT) {
+    const logo = line.slice(0, WELCOME_LOGO_WIDTH);
+    chunks.push(...logo
+      .split(/(█+)/)
+      .filter(Boolean)
+      .map((value) => value[0] === '█'
+        ? bg(WELCOME_COLOR)(' '.repeat(value.length))
+        : fg(WELCOME_COLOR)(value)));
+    remainder = line.slice(WELCOME_LOGO_WIDTH);
+  }
+  chunks.push(...styleWelcomeText(remainder));
   return new StyledText(chunks);
+}
+
+function styleWelcomeText(text: string): TextChunk[] {
+  if (!text) return [];
+  const leading = text.match(/^\s*/)?.[0] ?? '';
+  const value = text.slice(leading.length);
+  const chunks: TextChunk[] = leading ? [fg(WELCOME_COLOR)(leading)] : [];
+
+  if (value.startsWith('PinPawo TUI v2')) {
+    chunks.push(bold(fg(WELCOME_TITLE_COLOR)(value)));
+    return chunks;
+  }
+  if (/^v\S+\s+·\s+local-agent\b/.test(value)) {
+    chunks.push(dim(fg(WELCOME_MUTED_COLOR)(value)));
+    return chunks;
+  }
+  if (/^(?:connected|connecting|reconnecting|disconnected)\b/.test(value)) {
+    chunks.push(fg(WELCOME_STATUS_COLOR)(value));
+    return chunks;
+  }
+  const detail = value.match(/^(model|directory|capabilities)(\s+)(.*)$/);
+  if (detail) {
+    chunks.push(
+      dim(fg(WELCOME_MUTED_COLOR)(detail[1]!)),
+      fg(WELCOME_MUTED_COLOR)(detail[2]!),
+      fg(WELCOME_COLOR)(detail[3]!),
+    );
+    return chunks;
+  }
+  if (value.startsWith('/ commands') || value.startsWith('Ctrl+')) {
+    chunks.push(dim(fg(WELCOME_MUTED_COLOR)(value)));
+    return chunks;
+  }
+  chunks.push(fg(WELCOME_COLOR)(value));
+  return chunks;
 }
 
 export function findFirstUncommittedEntry(

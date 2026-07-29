@@ -57,8 +57,9 @@ export function buildWelcomeLines(input: {
     : width;
   const details = [
     `PinPawo TUI v2 · ${actor}`,
-    `tui v${version} · local-agent ${localAgentVersion}`,
+    `v${version} · local-agent ${localAgentVersion}`,
     input.connection,
+    '',
     `model         ${model}`,
     `directory     ${cwd}`,
     ...wrapCapabilityLines(capabilities, detailWidth, sideBySide ? 3 : 4),

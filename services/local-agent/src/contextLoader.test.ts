@@ -3,6 +3,8 @@ import test from 'node:test';
 
 test('buildLocalOnlyAgentContext returns an API-free fallback context', async () => {
   process.env.LLM_API_KEY = 'test-key';
+  process.env.LLM_BASE_URL = 'https://models.example.test/v1';
+  process.env.LLM_MODEL = 'test-model';
   const { LOCAL_ONLY_ACTOR_ID, LOCAL_ONLY_ACTOR_NAME } = await import('./actorSelection');
   const { buildLocalOnlyAgentContext } = await import('./contextLoader');
   const context = buildLocalOnlyAgentContext();

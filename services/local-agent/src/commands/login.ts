@@ -1,7 +1,19 @@
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { inferLlmContextWindowTokens } from '../llmContextWindow';
-import { findLlmModelPresetByKey, listLlmModelPresets } from '../llmModelPresets';
+import {
+  findLlmModelPresetByKey,
+  inferLlmModelPreset,
+  listLlmModelPresets,
+} from '../llmModelPresets';
+import {
+  buildModelProfileRegistry,
+  createModelProfile,
+  LEGACY_DEFAULT_MODEL_PROFILE_ID,
+  resolveModelProfile,
+  type ModelProfileV1,
+  writeDefaultModelProfile,
+} from '../modelProfiles';
 import { loadStoredConfig, saveStoredConfig, configPath } from '../storage';
 
 type AuthResponse = {
@@ -48,6 +60,17 @@ function fail(message: string): never {
   throw new Error(message);
 }
 
+function readCurrentModelProfile(): ModelProfileV1 | undefined {
+  try {
+    return resolveModelProfile(buildModelProfileRegistry({
+      stored: loadStoredConfig(),
+      env: process.env,
+    }));
+  } catch {
+    return undefined;
+  }
+}
+
 async function apiPost<T>(url: string, body: unknown, authToken?: string): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
@@ -69,6 +92,7 @@ export async function runLogin() {
 
   try {
     const stored = loadStoredConfig();
+    const currentModelProfile = readCurrentModelProfile();
 
     console.log('\nPinPawo Local Agent — Login\n');
 
@@ -125,8 +149,8 @@ export async function runLogin() {
     console.log('Available presets:');
     console.log(formatPresetChoices());
 
-    const defaultLlmKey = stored.llm_api_key ?? process.env.LLM_API_KEY ?? '';
-    const defaultPresetKey = process.env.LLM_MODEL_PRESET ?? stored.llm_model_preset ?? '';
+    const defaultLlmKey = currentModelProfile?.apiKey ?? '';
+    const defaultPresetKey = currentModelProfile?.sourcePreset ?? '';
 
     let llmPresetKey = await prompt(
       rl,
@@ -141,13 +165,12 @@ export async function runLogin() {
 
     const defaultLlmBase = selectedPreset
       ? (selectedPreset.baseUrl ?? '')
-      : (stored.llm_base_url ?? process.env.LLM_BASE_URL ?? 'https://api.deepseek.com');
+      : (currentModelProfile?.baseUrl ?? 'https://api.deepseek.com');
     const defaultLlmModel = selectedPreset
       ? selectedPreset.model
-      : (stored.llm_model ?? process.env.LLM_MODEL ?? 'deepseek-v4-pro');
+      : (currentModelProfile?.model ?? 'deepseek-v4-pro');
     const defaultLlmContextWindow = selectedPreset?.contextWindowTokens
-      ?? parsePositiveInteger(process.env.LLM_CONTEXT_WINDOW_TOKENS)
-      ?? stored.llm_context_window_tokens
+      ?? currentModelProfile?.contextWindowTokens
       ?? inferLlmContextWindowTokens(defaultLlmModel);
 
     let llmApiKey = await prompt(rl, `LLM API Key${defaultLlmKey ? ' [already set, press Enter to keep]' : ''}: `);
@@ -190,19 +213,29 @@ export async function runLogin() {
     }
 
     // Save config
+    const defaultProfileId = stored.models?.defaultProfileId
+      ?? LEGACY_DEFAULT_MODEL_PROFILE_ID;
+    const resolvedPreset = selectedPreset?.key === inferLlmModelPreset(llmModel)?.key
+      ? selectedPreset
+      : undefined;
+    const profile = createModelProfile({
+      id: defaultProfileId,
+      label: resolvedPreset?.label ?? llmModel,
+      sourcePreset: resolvedPreset?.key,
+      apiKey: llmApiKey,
+      baseUrl: llmBaseUrl,
+      model: llmModel,
+      contextWindowTokens: parsedContextWindow,
+      inputModalities: resolvedPreset?.inputModalities ?? ['text'],
+    });
     const nextConfig = {
-      ...stored,
+      ...writeDefaultModelProfile(stored, profile),
       api_base_url: apiBaseUrl,
       hasura_endpoint: hasuraEndpoint,
       agent_token: tokenRes.token,
       hasura_jwt: tokenRes.hasura_jwt,
       user_id: authRes.user.id,
       nickname: authRes.user.nickname,
-      llm_api_key: llmApiKey,
-      llm_model_preset: selectedPreset?.key,
-      llm_base_url: llmBaseUrl,
-      llm_model: llmModel,
-      llm_context_window_tokens: parsedContextWindow,
     };
     saveStoredConfig(nextConfig);
 

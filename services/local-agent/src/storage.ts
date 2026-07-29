@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { homedir } from 'node:os';
+import type { StoredModelProfilesV1 } from './modelProfiles';
 
 const CONFIG_PATH = resolve(homedir(), '.pinpawo', 'config.json');
 
@@ -21,6 +22,8 @@ export type StoredConfig = {
   llm_model?: string;
   llm_observe_model?: string;
   llm_context_window_tokens?: number;
+  /** Versioned multi-profile model configuration. */
+  models?: StoredModelProfilesV1;
   workdir?: string;
   browser_backend?: string;
   /**

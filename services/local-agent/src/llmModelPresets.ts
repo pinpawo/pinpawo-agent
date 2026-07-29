@@ -1,4 +1,5 @@
 import type { StructuredOutputMethod } from '@pinpawo/pet-agent';
+import type { ModelInputModality } from './modelProfiles';
 
 export type LlmThinkingControl =
   | 'extra_body_enable_thinking'
@@ -15,6 +16,13 @@ export type LlmModelPreset = {
   contextWindowTokens?: number;
   maxOutputTokens?: number;
   structuredOutputMethod?: StructuredOutputMethod;
+  /**
+   * Inputs accepted by the model API represented by this preset.
+   *
+   * This is explicit capability metadata. Runtime code must never infer image
+   * support from a model name.
+   */
+  inputModalities: readonly ModelInputModality[];
   thinkingControl?: LlmThinkingControl;
   requiresStreaming?: boolean;
   aliases: readonly string[];
@@ -31,6 +39,7 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     contextWindowTokens: 1_000_000,
     maxOutputTokens: 128_000,
     structuredOutputMethod: 'jsonSchema',
+    inputModalities: ['text', 'image'],
     thinkingControl: 'none',
     aliases: [
       'gpt-5.5',
@@ -50,6 +59,7 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     contextWindowTokens: 1_000_000,
     maxOutputTokens: 64_000,
     structuredOutputMethod: 'functionCalling',
+    inputModalities: ['text', 'image'],
     thinkingControl: 'none',
     aliases: [
       'claude-sonnet-4-6',
@@ -70,6 +80,7 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     contextWindowTokens: 1_000_000,
     structuredOutputMethod: 'jsonMode',
+    inputModalities: ['text'],
     thinkingControl: 'extra_body_enable_thinking',
     aliases: [
       'qwen3.7-',
@@ -89,6 +100,7 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     baseUrl: 'https://api.minimax.chat/v1',
     contextWindowTokens: 192_000,
     structuredOutputMethod: 'jsonMode',
+    inputModalities: ['text'],
     thinkingControl: 'extra_body_enable_thinking',
     aliases: [
       'minimax-m2.7',
@@ -109,6 +121,7 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     contextWindowTokens: 1_000_000,
     maxOutputTokens: 128_000,
     structuredOutputMethod: 'jsonMode',
+    inputModalities: ['text'],
     thinkingControl: 'thinking_type',
     aliases: [
       'glm-5.2',
@@ -126,6 +139,7 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     baseUrl: 'https://api.kimi.com/coding/v1',
     contextWindowTokens: 1_048_576,
     structuredOutputMethod: 'jsonSchema',
+    inputModalities: ['text'],
     thinkingControl: 'always_enabled',
     aliases: [
       'k3',
@@ -143,6 +157,7 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     baseUrl: 'https://api.moonshot.ai/v1',
     contextWindowTokens: 256_000,
     structuredOutputMethod: 'jsonSchema',
+    inputModalities: ['text'],
     thinkingControl: 'always_enabled',
     aliases: [
       'kimi-k2.7-code',
@@ -163,6 +178,7 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     contextWindowTokens: 1_000_000,
     maxOutputTokens: 384_000,
     structuredOutputMethod: 'jsonMode',
+    inputModalities: ['text'],
     thinkingControl: 'thinking_type',
     aliases: [
       'deepseek-v4-pro',
@@ -184,6 +200,7 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     contextWindowTokens: 1_048_576,
     maxOutputTokens: 65_536,
     structuredOutputMethod: 'jsonSchema',
+    inputModalities: ['text', 'image'],
     thinkingControl: 'none',
     aliases: [
       'gemini-3.5-',

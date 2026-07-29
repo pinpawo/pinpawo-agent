@@ -2,6 +2,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { buildLocalAgentRuntimeConfig, type LocalAgentRuntimeConfig } from './runtimeConfig';
+import {
+  buildModelProfileRegistry,
+  ModelProfileConfigError,
+  resolveModelProfile,
+} from './modelProfiles';
 import type { StoredConfig } from './storage';
 import { configPath } from './storage';
 
@@ -62,7 +67,20 @@ export function buildSetupGuide(options: {
       ?? (typeof options.stored.workdir === 'string' ? options.stored.workdir : undefined)
       ?? homedir(),
     );
-  const llmApiKey = readConfigValue(env, options.stored, 'LLM_API_KEY', 'llm_api_key');
+  let resolvedModelLabel = '';
+  let modelConfigError = '';
+  try {
+    const registry = buildModelProfileRegistry({
+      stored: options.stored,
+      env,
+    });
+    const profile = resolveModelProfile(registry);
+    resolvedModelLabel = `${profile.label} (${profile.id})`;
+  } catch (error) {
+    modelConfigError = error instanceof ModelProfileConfigError
+      ? error.message
+      : String(error);
+  }
   const apiValues = [
     ['API_BASE_URL', readConfigValue(env, options.stored, 'API_BASE_URL', 'api_base_url')],
     ['HASURA_ENDPOINT', readConfigValue(env, options.stored, 'HASURA_ENDPOINT', 'hasura_endpoint')],
@@ -76,21 +94,21 @@ export function buildSetupGuide(options: {
   const hostedApiConfigured = missingApiKeys.length === 0;
   const hostedApiEnabled = hostedApiConfigured && !localOnlyMode;
   const actorId = options.stored.actor_id?.trim() ?? '';
-  const readyForLocalRun = Boolean(llmApiKey.trim());
+  const readyForLocalRun = Boolean(resolvedModelLabel);
   const checks: SetupCheck[] = [
     readyForLocalRun
       ? {
           id: 'llm',
           label: 'LLM API',
           status: 'ok',
-          detail: 'LLM_API_KEY is configured.',
+          detail: `Default model profile is runnable: ${resolvedModelLabel}.`,
         }
       : {
           id: 'llm',
           label: 'LLM API',
           status: 'missing',
-          detail: 'LLM_API_KEY is missing. Local chat/TUI cannot run until it is configured.',
-          nextStep: 'Run "pinpawo login" or set LLM_API_KEY in ~/.pinpawo/.env.',
+          detail: `No runnable default model profile. ${modelConfigError}`,
+          nextStep: 'Run "pinpawo login" or configure LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL together in ~/.pinpawo/.env.',
         },
     localOnlyMode
       ? {

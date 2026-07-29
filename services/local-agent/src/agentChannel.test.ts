@@ -311,6 +311,17 @@ test('buildDecisionStructuredOutput selects structured output strategy by provid
   });
 });
 
+test('buildDecisionStructuredOutput honors the resolved profile strategy before inference', () => {
+  assert.deepEqual(buildDecisionStructuredOutput({
+    apiKey: 'test-key',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'custom-model',
+    structuredOutputMethod: 'jsonSchema',
+  }), {
+    method: 'jsonSchema',
+  });
+});
+
 test('buildLocalChatAgentInput passes global review policy mode to graph input', () => {
   const setup = buildTestLocalChatAgentInput({
     context: createContext(),

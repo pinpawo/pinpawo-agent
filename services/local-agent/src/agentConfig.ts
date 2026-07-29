@@ -1,9 +1,18 @@
-import type { BuiltinGlobalReviewPolicyMode } from '@pinpawo/pet-agent';
+import type {
+  BuiltinGlobalReviewPolicyMode,
+  StructuredOutputMethod,
+} from '@pinpawo/pet-agent';
+import type { ModelInputModality } from './modelProfiles';
 
 export type AgentLlmConfig = {
   apiKey: string;
   baseUrl: string;
   model: string;
+  modelProfileId?: string;
+  modelProfileFingerprint?: string;
+  inputModalities?: readonly ModelInputModality[];
+  structuredOutputMethod?: StructuredOutputMethod;
+  maxOutputTokens?: number;
   observeModel?: string;
   contextWindowTokens?: number;
   subagentContextWindowTokens?: number;

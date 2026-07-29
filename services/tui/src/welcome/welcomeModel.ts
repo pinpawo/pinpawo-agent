@@ -7,20 +7,26 @@ import { renderHalfBlockRaster } from '../visuals/terminalRaster';
 import { TUI_VERSION } from '../version';
 
 const PAW_RASTER = [
-  '.....#...#......',
-  '....###.###.....',
-  '....###.###.....',
-  '....###.###.....',
-  '..#..#...#..#...',
-  '.###.......###..',
-  '.###..###..###..',
-  '.##..#####..##..',
-  '....#######.....',
-  '...#########....',
-  '..###########...',
-  '..###########...',
-  '...#########....',
-  '....###.###.....',
+  '.......................',
+  '.......##.....##.......',
+  '......####...####......',
+  '......####...####......',
+  '...#..####...####..#...',
+  '..###.............###..',
+  '.#####...........#####.',
+  '..###.............###..',
+  '...#...............#...',
+  '.......................',
+  '.........#####.........',
+  '.......#########.......',
+  '.......#########.......',
+  '......###########......',
+  '......###########......',
+  '......###########......',
+  '......###########......',
+  '.......#########.......',
+  '.......#########.......',
+  '.........#####.........',
 ] as const;
 
 const PAW_LINES = renderHalfBlockRaster(PAW_RASTER);
@@ -55,7 +61,8 @@ export function buildWelcomeLines(input: {
         'Esc interrupt',
         'Ctrl+C exit',
       ];
-  const detailWidth = width >= 58
+  const sideBySide = width >= 64;
+  const detailWidth = sideBySide
     ? Math.max(1, width - terminalBlockWidth(PAW_LINES) - 4)
     : width;
   const details = [
@@ -64,9 +71,9 @@ export function buildWelcomeLines(input: {
     input.connection,
     `model         ${model}`,
     `directory     ${cwd}`,
-    ...wrapCapabilityLines(capabilities, detailWidth, width >= 58 ? 3 : 4),
+    ...wrapCapabilityLines(capabilities, detailWidth, sideBySide ? 3 : 4),
   ];
-  const identity = width >= 58
+  const identity = sideBySide
     ? joinTerminalColumns(PAW_LINES, details, width, 4)
     : [
         ...PAW_LINES,
@@ -115,10 +122,11 @@ function joinTerminalColumns(
   gap: number,
 ) {
   const leftWidth = terminalBlockWidth(left);
-  const rowCount = Math.max(left.length, right.length);
+  const rightOffset = Math.max(0, Math.floor((left.length - right.length) / 2));
+  const rowCount = Math.max(left.length, rightOffset + right.length);
   return Array.from({ length: rowCount }, (_, index) => {
     const leftLine = left[index] ?? '';
-    const rightLine = right[index] ?? '';
+    const rightLine = right[index - rightOffset] ?? '';
     if (!rightLine) return leftLine;
     return `${padTerminalLine(leftLine, leftWidth)}${' '.repeat(gap)}${rightLine}`;
   }).map((line) => truncateTerminalLine(line, width));

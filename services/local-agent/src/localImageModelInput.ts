@@ -73,19 +73,34 @@ export async function prepareLocalImageModelMessages(
         );
       }
       const image = await options.imageStore.read(imageUrl);
-      content.push({
-        ...block,
-        image_url: {
-          ...(typeof block === 'object'
-            && block !== null
-            && 'image_url' in block
-            && typeof block.image_url === 'object'
-            && block.image_url !== null
-            ? block.image_url
-            : {}),
-          url: `data:${image.mimeType};base64,${image.bytes.toString('base64')}`,
-        },
-      });
+      const dataUrl = `data:${image.mimeType};base64,${
+        image.bytes.toString('base64')
+      }`;
+      if (
+        typeof block === 'object'
+        && block !== null
+        && 'type' in block
+        && block.type === 'image'
+      ) {
+        content.push({
+          ...block,
+          url: dataUrl,
+        });
+      } else {
+        content.push({
+          ...block,
+          image_url: {
+            ...(typeof block === 'object'
+              && block !== null
+              && 'image_url' in block
+              && typeof block.image_url === 'object'
+              && block.image_url !== null
+              ? block.image_url
+              : {}),
+            url: dataUrl,
+          },
+        });
+      }
       messageChanged = true;
     }
     if (!messageChanged) {

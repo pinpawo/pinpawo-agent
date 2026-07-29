@@ -78,6 +78,26 @@ test('local image messages persist references and rehydrate only for provider in
       JSON.stringify(preparedTool[0]?.content),
       /data:image\/png;base64,/,
     );
+
+    const standardImageMessage = new HumanMessage({
+      content: [{
+        type: 'image',
+        url: image.uri,
+      }],
+    });
+    const preparedStandardImage = await prepareLocalImageModelMessages(
+      [standardImageMessage],
+      {
+        imageStore: store,
+        supportedInputModalities: ['text', 'image'],
+      },
+    );
+    const serializedStandardImage = JSON.stringify(
+      preparedStandardImage[0]?.content,
+    );
+    assert.match(serializedStandardImage, /data:image\/png;base64,/);
+    assert.doesNotMatch(serializedStandardImage, /pinpawo-local-image:/);
+    assert.doesNotMatch(serializedStandardImage, /"image_url"/);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

@@ -72,7 +72,7 @@ export class StudioRunService {
 function buildStudioInputFromDeps(request: StudioRunServiceRequest): BuildStudioInput {
   const { deps } = request;
   return {
-    llmConfig: deps.llmConfig,
+    modelProfiles: deps.modelProfiles,
     capabilities: [
       ...(deps.localCapabilities ?? []),
       ...(deps.userCapabilities ?? []).map((u) => u.capability),

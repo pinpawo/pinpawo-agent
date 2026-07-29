@@ -9,8 +9,7 @@ import type {
 import { buildLocalChatAgentInput, type AgentChannelSetup } from './agentChannel';
 import { createCapabilityDiagnosticReporter } from './agentRegistryPreparation';
 import { loadAgentContext, type AgentContext } from './contextLoader';
-import { buildLocalLlmConfig } from './llmConfig';
-import type { AgentLlmConfig } from './agentConfig';
+import type { LocalModelProfileRegistry } from './llmConfig';
 import type { LoadedUserCapability } from './capabilityLoader';
 import { buildAppChatThreadId } from './chatInterface';
 import {
@@ -77,7 +76,7 @@ export type LocalAgentAppChatHandlerOptions = {
   inflightRequests: InflightRequestController<WebSocket>;
   isCurrentSocket: (ws: WebSocket) => boolean;
   getActorId: () => string;
-  getLlmConfig: () => AgentLlmConfig | null;
+  getModelProfiles: () => LocalModelProfileRegistry;
   getPluginToolkitDefinitions?: () => AgentToolkit[];
   getPluginToolkits: () => AgentToolkit[];
   getLocalToolkitDefinitions?: () => AgentToolkit[];
@@ -104,7 +103,7 @@ export class LocalAgentAppChatHandler {
   private readonly inflightRequests: InflightRequestController<WebSocket>;
   private readonly isCurrentSocket: (ws: WebSocket) => boolean;
   private readonly getActorId: () => string;
-  private readonly getLlmConfig: () => AgentLlmConfig | null;
+  private readonly getModelProfiles: () => LocalModelProfileRegistry;
   private readonly getPluginToolkitDefinitions: () => AgentToolkit[];
   private readonly getPluginToolkits: () => AgentToolkit[];
   private readonly getLocalToolkitDefinitions: () => AgentToolkit[];
@@ -136,7 +135,7 @@ export class LocalAgentAppChatHandler {
     this.inflightRequests = options.inflightRequests;
     this.isCurrentSocket = options.isCurrentSocket;
     this.getActorId = options.getActorId;
-    this.getLlmConfig = options.getLlmConfig;
+    this.getModelProfiles = options.getModelProfiles;
     this.getPluginToolkitDefinitions = options.getPluginToolkitDefinitions ?? (() => []);
     this.getPluginToolkits = options.getPluginToolkits;
     this.getLocalToolkitDefinitions = options.getLocalToolkitDefinitions ?? (() => []);
@@ -562,7 +561,8 @@ export class LocalAgentAppChatHandler {
   }
 
   private createRemoteSession(userId: string): AgentSession {
-    const llmConfig = this.getLlmConfig();
+    const modelProfiles = this.getModelProfiles();
+    const llmConfig = modelProfiles.resolve();
     return {
       sessionId: this.getChatThreadId(userId),
       kind: 'chat',
@@ -570,7 +570,17 @@ export class LocalAgentAppChatHandler {
       activeRun: null,
       runtime: {
         cwd: this.getWorkdir(),
-        ...(llmConfig?.model ? { model: llmConfig.model } : {}),
+        modelProfileId: modelProfiles.defaultProfileId,
+        modelProfileLabel:
+          modelProfiles.snapshot.profiles[modelProfiles.defaultProfileId]?.label
+          ?? modelProfiles.defaultProfileId,
+        modelProfileAvailable: true,
+        modelProfileIssues: [],
+        model: llmConfig.model,
+        inputModalities: [...(llmConfig.inputModalities ?? ['text'])],
+        ...(llmConfig.contextWindowTokens
+          ? { contextWindow: llmConfig.contextWindowTokens }
+          : {}),
       },
     };
   }
@@ -661,10 +671,11 @@ export class LocalAgentAppChatHandler {
 
   private buildSetup(ctx: AgentContext, userMessage: string, userId: string): AgentChannelSetup {
     const threadId = this.getChatThreadId(userId);
+    const modelProfiles = this.getModelProfiles();
     return this.buildChatSetup({
       context: ctx,
       userMessage,
-      llmConfig: this.getLlmConfig() ?? buildLocalLlmConfig(),
+      llmConfig: modelProfiles.resolve(),
       toolkits: [...this.getPluginToolkits(), ...this.getLocalToolkits()],
       toolkitDefinitions: [
         ...this.getPluginToolkitDefinitions(),

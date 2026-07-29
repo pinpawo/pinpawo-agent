@@ -16,12 +16,16 @@ export function buildLocalAgentSessionSnapshot(params: {
   kind: AgentSession['kind'];
   messages: TuiCheckpointMessage[];
   deps: LocalServerDeps;
+  modelProfileId?: string;
   sessionTokenUsage?: AgentSession['sessionTokenUsage'] | null;
   pendingReview?: ReviewActionSnapshot | null;
 }): AgentSessionSnapshot {
   const timeline = timelineFromCheckpointMessages(params.messages);
   const pendingReview = params.pendingReview ?? null;
-  const runtime = buildLocalAgentRuntimeView(params.deps);
+  const runtime = buildLocalAgentRuntimeView(
+    params.deps,
+    params.modelProfileId,
+  );
   const sessionTokenUsage = params.sessionTokenUsage
     ? {
         ...params.sessionTokenUsage,
@@ -46,10 +50,20 @@ export function buildLocalAgentSessionSnapshot(params: {
 
 export function buildLocalAgentRuntimeView(
   deps: LocalServerDeps,
+  modelProfileId = deps.modelProfiles.defaultProfileId,
 ): AgentRuntimeView {
-  const runtime = buildLocalRuntimeProjection(deps);
+  const runtime = buildLocalRuntimeProjection(deps, modelProfileId);
   return {
-    model: runtime.model,
+    modelProfileId: runtime.modelProfileId,
+    modelProfileLabel: runtime.modelProfileLabel,
+    modelProfileAvailable: runtime.modelProfileAvailable,
+    modelProfileIssues: [...runtime.modelProfileIssues],
+    ...(runtime.model ? { model: runtime.model } : {}),
+    ...(runtime.inputModalities ? {
+      inputModalities: runtime.inputModalities.map((modality) => (
+        modality === 'image' ? 'image' as const : 'text' as const
+      )),
+    } : {}),
     globalReviewPolicyMode: runtime.globalReviewPolicyMode,
     ...(runtime.contextWindow !== undefined ? { contextWindow: runtime.contextWindow } : {}),
     cwd: runtime.workdir,

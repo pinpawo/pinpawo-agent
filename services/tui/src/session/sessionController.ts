@@ -789,6 +789,14 @@ export class TuiSessionController {
       return;
     }
 
+    if (
+      message.type === 'model.list.result'
+      || message.type === 'model.select.result'
+      || message.type === 'model.select.error'
+    ) {
+      return;
+    }
+
     if (message.type === 'pong') return;
     assertNever(message);
   }

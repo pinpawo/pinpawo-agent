@@ -24,6 +24,7 @@ import {
   loadTuiSessionState,
   resumeTuiSession,
   saveTuiSessionState,
+  updateTuiSessionModelProfile,
   updateTuiSessionSummary,
   type TuiSessionRecord,
   type TuiSessionState,
@@ -44,6 +45,7 @@ export type ActivePendingReview = {
 
 export type TuiCheckpointPoint = {
   sessionId: string;
+  modelProfileId: string;
   messages: TuiCheckpointMessage[];
   sessionTokenUsage: (TokenUsageSnapshot & { scope: 'session' }) | null;
   pendingReview: ActivePendingReview | null;
@@ -119,6 +121,7 @@ export class LocalServerTuiSessionService {
   private readonly checkpointer: TuiSessionCheckpointer;
   private readonly graphService: TuiSessionGraphService;
   private readonly loadContext: typeof loadAgentContext;
+  private readonly defaultModelProfileId: string;
   private readonly reportCapabilityDiagnostics = createCapabilityDiagnosticReporter();
 
   constructor(options: {
@@ -130,10 +133,15 @@ export class LocalServerTuiSessionService {
     runtimeConfig?: LocalAgentRuntimeConfig;
     sessionStatePath?: string;
     checkpointPath?: string;
-  } = {}) {
+    defaultModelProfileId: string;
+  }) {
     const runtimeConfig = options.runtimeConfig ?? buildLocalAgentRuntimeConfig();
     const sessionStatePath = options.sessionStatePath ?? runtimeConfig.tuiSessionPath;
-    this.state = options.state ?? loadTuiSessionState(sessionStatePath);
+    this.defaultModelProfileId = options.defaultModelProfileId;
+    this.state = options.state ?? loadTuiSessionState(
+      this.defaultModelProfileId,
+      sessionStatePath,
+    );
     this.saveState = options.saveState ?? ((state) => saveTuiSessionState(state, sessionStatePath));
     this.checkpointer = options.checkpointer ?? new FileSaver(
       options.checkpointPath ?? runtimeConfig.tuiCheckpointPath,
@@ -143,7 +151,11 @@ export class LocalServerTuiSessionService {
   }
 
   getActiveSession(petId: string) {
-    const session = ensureActiveTuiSession(this.state, petId);
+    const session = ensureActiveTuiSession(
+      this.state,
+      petId,
+      this.defaultModelProfileId,
+    );
     this.save();
     return session;
   }
@@ -156,16 +168,29 @@ export class LocalServerTuiSessionService {
     return this.getActiveSession(petId).id;
   }
 
+  getSession(petId: string, sessionId: string) {
+    const session = this.state.sessions[sessionId];
+    return session?.petId === petId ? session : null;
+  }
+
   createNewSession(petId: string) {
     this.getActiveSession(petId);
-    const next = createTuiSession(this.state, petId);
+    const next = createTuiSession(
+      this.state,
+      petId,
+      this.defaultModelProfileId,
+    );
     this.save();
     return next;
   }
 
   async resetSession(petId: string, options: { deletePrevious?: boolean } = {}) {
     const previous = this.getActiveSession(petId);
-    const next = createTuiSession(this.state, petId);
+    const next = createTuiSession(
+      this.state,
+      petId,
+      this.defaultModelProfileId,
+    );
     if (options.deletePrevious) {
       await this.checkpointer.deleteThread(previous.threadId);
       delete this.state.sessions[previous.id];
@@ -178,6 +203,7 @@ export class LocalServerTuiSessionService {
     deps: LocalServerDeps,
     ctx: Awaited<ReturnType<typeof loadAgentContext>>,
     threadId = this.getChatThreadId(deps.actorId),
+    modelProfileIdOverride?: string,
   ) {
     if (!deps.capabilityArtifactStore) {
       throw new Error(
@@ -187,10 +213,14 @@ export class LocalServerTuiSessionService {
     const session = Object.values(this.state.sessions)
       .find((candidate) => candidate.threadId === threadId)
       ?? this.getActiveSession(deps.actorId);
+    const modelProfileId = modelProfileIdOverride ?? session.modelProfileId;
     return buildLocalChatAgentInput({
       context: ctx,
       userMessage: '',
-      llmConfig: deps.llmConfig,
+      llmConfig: {
+        ...deps.modelProfiles.resolve(modelProfileId),
+        globalReviewPolicyMode: deps.globalReviewPolicyMode,
+      },
       toolkits: [...(deps.pluginToolkits ?? []), ...(deps.localToolkits ?? [])],
       toolkitDefinitions: [
         ...(deps.pluginToolkitDefinitions ?? []),
@@ -209,12 +239,50 @@ export class LocalServerTuiSessionService {
     });
   }
 
+  selectModelProfile(
+    petId: string,
+    sessionId: string,
+    modelProfileId: string,
+  ) {
+    const session = this.state.sessions[sessionId];
+    if (!session || session.petId !== petId) {
+      throw new Error('session not found');
+    }
+    if (this.state.activeSessionIds[petId] !== sessionId) {
+      throw new Error('model selection requires the active session');
+    }
+    const updated = updateTuiSessionModelProfile(
+      this.state,
+      sessionId,
+      modelProfileId,
+    );
+    if (!updated) {
+      throw new Error('session not found');
+    }
+    this.save();
+    return updated;
+  }
+
   async readSessionCheckpointPoint(
     deps: LocalServerDeps,
     session: TuiSessionRecord,
   ): Promise<TuiCheckpointPoint> {
     const ctx = await this.loadContext(deps.actorId);
-    const setup = this.buildChatSetup(deps, ctx, session.threadId);
+    let checkpointReaderProfileId = session.modelProfileId;
+    try {
+      deps.modelProfiles.resolve(checkpointReaderProfileId);
+    } catch {
+      // Reading a checkpoint does not invoke a model. Build a readable graph
+      // with the valid host default so an unavailable session can still be
+      // resumed, inspected, and repaired by an explicit model selection.
+      checkpointReaderProfileId = deps.modelProfiles.defaultProfileId;
+    }
+    const setup = this.buildChatSetup(
+      deps,
+      ctx,
+      session.threadId,
+      checkpointReaderProfileId,
+    );
     const state = await this.graphService.readThreadState(setup);
     const pendingReview = state.pendingHumanReview
       ? {
@@ -230,6 +298,7 @@ export class LocalServerTuiSessionService {
       : null;
     return {
       sessionId: session.id,
+      modelProfileId: session.modelProfileId,
       messages: readTuiCheckpointMessages(state.messages),
       sessionTokenUsage: readTuiCheckpointTokenUsage(state.messages),
       pendingReview,

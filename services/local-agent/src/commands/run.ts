@@ -69,7 +69,8 @@ export async function runAgent(options: RunAgentOptions = {}) {
     const deps: LocalServerDeps = {
       actorId: runtime.getActorId(),
       actorName: runtime.getActorName() ?? undefined,
-      llmConfig: runtime.getLlmConfig(),
+      modelProfiles: runtime.getModelProfiles(),
+      globalReviewPolicyMode: getConfig().globalReviewPolicyMode,
       workdir: runtimeConfig.workdir,
       runtimeConfig,
       localToolkitDefinitions: runtime.getLocalToolkitDefinitions(),

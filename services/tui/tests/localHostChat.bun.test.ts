@@ -39,6 +39,9 @@ import {
   buildLocalAgentRuntimeConfig,
 } from '../../local-agent/src/runtimeConfig';
 import {
+  createTestModelServerDeps,
+} from '../../local-agent/src/testing/modelProfiles';
+import {
   createBashToolkit,
   createGitToolkit,
 } from '../../local-agent/src/toolkits/local/index';
@@ -80,12 +83,12 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     actorName: 'PinPawo',
     workdir,
     runtimeConfig,
-    llmConfig: {
+    ...createTestModelServerDeps({
       apiKey: 'offline-integration-key',
       baseUrl: 'http://127.0.0.1:1/v1',
       model: 'host-integration-model',
       contextWindowTokens: 32_000,
-    },
+    }),
     localToolkitDefinitions: REQUIRED_TOOLKITS,
     localToolkits: REQUIRED_TOOLKITS,
     capabilityArtifactStore: new FileCapabilityArtifactStore(

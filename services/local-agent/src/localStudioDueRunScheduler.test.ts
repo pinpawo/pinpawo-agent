@@ -6,6 +6,7 @@ import type { LocalServerDeps } from './localServerTypes';
 import { LocalStudioDueRunScheduler } from './localStudioDueRunScheduler';
 import type { BuildStudioInput, BuildStudioResult } from './studio/studioRuntime';
 import { StudioRunService } from './studioRunService';
+import { createTestModelServerDeps } from './testing/modelProfiles';
 
 function createRuntimeConfig(workdir: string) {
   return {
@@ -25,12 +26,7 @@ function createRuntimeConfig(workdir: string) {
 function createDeps(workdir: string): LocalServerDeps {
   return {
     actorId: 'pet-a',
-    llmConfig: {
-      provider: 'openai',
-      model: 'test-model',
-      apiKey: 'test-key',
-      baseUrl: 'https://example.test/v1',
-    } as LocalServerDeps['llmConfig'],
+    ...createTestModelServerDeps(),
     workdir,
     runtimeConfig: createRuntimeConfig(workdir),
   };

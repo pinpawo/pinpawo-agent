@@ -19,6 +19,7 @@ import { LocalAgentAppChatHandler } from './localAgentAppChatHandler';
 import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 import { createInitialTuiState, createSession } from './tui/state/tuiState';
 import { tuiStateReducer } from './tui/state/tuiStateReducer';
+import { createTestModelProfiles } from './testing/modelProfiles';
 
 function createFakeWebSocket(sent: unknown[]) {
   return {
@@ -106,12 +107,7 @@ function createHandler(overrides: Partial<ConstructorParameters<typeof LocalAgen
     inflightRequests: createInflightController(),
     isCurrentSocket: (candidate) => candidate === ws,
     getActorId: () => 'pet-a',
-    getLlmConfig: () => ({
-      provider: 'openai',
-      model: 'test-model',
-      apiKey: 'test-key',
-      baseUrl: 'https://example.test/v1',
-    } as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getLlmConfig'] extends () => infer T ? T : never),
+    getModelProfiles: () => createTestModelProfiles(),
     getPluginToolkitDefinitions: () => [{ name: 'plugin-definition' }] as NonNullable<ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getPluginToolkitDefinitions']> extends () => infer T ? T : never,
     getPluginToolkits: () => [{ name: 'plugin-toolkit' }] as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getPluginToolkits'] extends () => infer T ? T : never,
     getLocalToolkitDefinitions: () => [{ name: 'local-definition' }] as NonNullable<ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getLocalToolkitDefinitions']> extends () => infer T ? T : never,

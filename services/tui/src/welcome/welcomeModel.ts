@@ -6,16 +6,16 @@ import { truncateTerminalLine } from '../text/terminalText';
 import { TUI_VERSION } from '../version';
 
 const PAW_LINES = [
-  '        ███   ███        ',
-  '       █████ █████       ',
-  '    ███ ███   ███ ███    ',
-  '   █████         █████   ',
-  '    ███  ███████  ███    ',
-  '       ███████████       ',
-  '      █████████████      ',
-  '      █████████████      ',
-  '       ███████████       ',
-  '         ███████         ',
+  '       █████   █████       ',
+  '      ███████ ███████      ',
+  ' █████ █████   █████ █████ ',
+  '███████             ███████',
+  ' █████    ███████    █████ ',
+  '        ███████████        ',
+  '       █████████████       ',
+  '       █████████████       ',
+  '        ███████████        ',
+  '          ███████          ',
 ] as const;
 
 export const WELCOME_LOGO_HEIGHT = PAW_LINES.length;
@@ -51,7 +51,7 @@ export function buildWelcomeLines(input: {
         'Esc interrupt',
         'Ctrl+C exit',
       ];
-  const sideBySide = width >= 64;
+  const sideBySide = width >= 66;
   const detailWidth = sideBySide
     ? Math.max(1, width - terminalBlockWidth(PAW_LINES) - 4)
     : width;

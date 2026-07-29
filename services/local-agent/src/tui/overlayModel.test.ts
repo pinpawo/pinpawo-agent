@@ -116,6 +116,42 @@ test('buildTuiOverlayModel renders policy picker when it owns interaction', () =
   assert.equal(model.current?.label, 'Policy');
 });
 
+test('buildTuiOverlayModel renders model profile picker when it owns interaction', () => {
+  const model = buildTuiOverlayModel({
+    width: 80,
+    owner: { type: 'modelProfilePicker' },
+    resumePicker: { open: false, sessions: [], selectedIndex: 0, loading: false },
+    approval: { request: null, selectedIndex: 0 },
+    globalReviewPolicyPicker: {
+      open: false,
+      currentMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
+      selectedIndex: 0,
+    },
+    modelProfilePicker: {
+      open: true,
+      profiles: [{
+        id: 'vision',
+        label: 'Vision',
+        inputModalities: ['text', 'image'],
+        available: true,
+        compatible: true,
+        issues: [],
+      }],
+      selectedProfileId: 'vision',
+      defaultProfileId: 'vision',
+      requiredInputModalities: ['text', 'image'],
+      selectedIndex: 0,
+      loading: false,
+      applying: false,
+    },
+    commandPalette: buildCommandPaletteModel({ text: '/', cursorOffset: 1 }),
+    fileMention: OPEN_FILE_MENTION,
+  });
+
+  assert.equal(model.current?.type, 'modelProfilePicker');
+  assert.equal(model.current?.label, 'Model');
+});
+
 test('buildTuiOverlayModel returns no owner when all overlays are closed', () => {
   const model = buildTuiOverlayModel({
     width: 80,

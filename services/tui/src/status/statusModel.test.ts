@@ -18,6 +18,7 @@ test('status model renders connection, model, token usage, context, and compact 
       activeRun: null,
       runtime: {
         model: 'gpt-test',
+        modelProfileLabel: 'Primary coding',
         globalReviewPolicyMode: 'require_authorization',
         cwd: '/Users/me/project',
         contextWindow: 128_000,
@@ -35,11 +36,11 @@ test('status model renders connection, model, token usage, context, and compact 
 
   assert.equal(
     formatHeader(state),
-    'PinPawo TUI v2 · v0.1.0 · connected · gpt-test',
+    'PinPawo TUI v2 · v0.1.0 · connected · Primary coding (gpt-test)',
   );
   assert.equal(
     formatHeader(state, Number.POSITIVE_INFINITY, 'studio'),
-    'PinPawo TUI v2 · v0.1.0 · connected · studio · gpt-test',
+    'PinPawo TUI v2 · v0.1.0 · connected · studio · Primary coding (gpt-test)',
   );
   assert.equal(
     formatStatusLine(state),
@@ -55,7 +56,7 @@ test('status model renders connection, model, token usage, context, and compact 
   );
   assert.equal(formatHeader(state, 28), 'PinPawo TUI v2 · v0.1.0');
   assert.deepEqual(formatStatusLines(state, 80), [
-    'connected · idle · policy: ask · gpt-test',
+    'connected · idle · policy: ask · Primary coding (gpt-test)',
     'in/out: 20,000/3,000 · context: 98,000 left · …/me/project',
   ]);
   assert.deepEqual(formatStatusLines(state, 32, 'interrupt requested'), [

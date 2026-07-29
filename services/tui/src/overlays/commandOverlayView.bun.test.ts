@@ -91,7 +91,7 @@ test('command palette stays above the composer while help owns the footer', asyn
   const initial = setup.captureCharFrame();
   const initialRows = frameRows(initial);
   assert.match(initialRows[0] ?? '', /help/);
-  assert.match(initialRows[4] ?? '', /policy/);
+  assert.match(initialRows[4] ?? '', /model/);
   assert.ok(initialRows.slice(0, 5).every((line) => line.includes('/')));
   assert.match(initialRows.slice(5).join('\n'), /\//);
   assert.equal(composer.showCursor, true);

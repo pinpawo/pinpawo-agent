@@ -1,4 +1,5 @@
 import type { BuiltinGlobalReviewPolicyMode } from '@pinpawo/pet-agent';
+import type { AgentModelProfileSummary } from '@pinpawo/agent-session';
 import type { CommandPaletteModel } from './input/commandPalette';
 import type { FileMentionModel } from './input/fileMention';
 import type { TuiInteractionOwner } from './interactionOwner';
@@ -31,6 +32,17 @@ export type TuiOverlay =
       selectedIndex: number;
     }
   | {
+      type: 'modelProfilePicker';
+      label: 'Model';
+      profiles: AgentModelProfileSummary[];
+      selectedProfileId: string;
+      defaultProfileId: string;
+      requiredInputModalities: string[];
+      selectedIndex: number;
+      loading: boolean;
+      applying: boolean;
+    }
+  | {
       type: 'commandPalette';
       label: 'Command';
       model: CommandPaletteModel;
@@ -58,6 +70,16 @@ export function buildTuiOverlayModel(input: {
     open: boolean;
     currentMode: BuiltinGlobalReviewPolicyMode;
     selectedIndex: number;
+  };
+  modelProfilePicker?: {
+    open: boolean;
+    profiles: AgentModelProfileSummary[];
+    selectedProfileId: string;
+    defaultProfileId: string;
+    requiredInputModalities: string[];
+    selectedIndex: number;
+    loading: boolean;
+    applying: boolean;
   };
   commandPalette: CommandPaletteModel;
   fileMention: FileMentionModel;
@@ -97,6 +119,21 @@ function resolveCurrentOverlay(input: Parameters<typeof buildTuiOverlayModel>[0]
             label: 'Policy',
             currentMode: input.globalReviewPolicyPicker.currentMode,
             selectedIndex: input.globalReviewPolicyPicker.selectedIndex,
+          }
+        : null;
+    case 'modelProfilePicker':
+      return input.modelProfilePicker?.open
+        ? {
+            type: 'modelProfilePicker',
+            label: 'Model',
+            profiles: input.modelProfilePicker.profiles,
+            selectedProfileId: input.modelProfilePicker.selectedProfileId,
+            defaultProfileId: input.modelProfilePicker.defaultProfileId,
+            requiredInputModalities:
+              input.modelProfilePicker.requiredInputModalities,
+            selectedIndex: input.modelProfilePicker.selectedIndex,
+            loading: input.modelProfilePicker.loading,
+            applying: input.modelProfilePicker.applying,
           }
         : null;
     case 'commandPalette':

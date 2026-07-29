@@ -116,6 +116,21 @@ A successful selection is persisted before `model.select.result` is sent. The
 client updates visible state from that acknowledgement and its authoritative
 session snapshot, not from its original request.
 
+## TUI model selection
+
+`/model` opens the current session's model-profile picker. The picker shows the
+stable profile ID and sanitized provider/model/endpoint metadata, marks the
+host default and current selection, and identifies image-capable profiles.
+Unavailable profiles and profiles incompatible with the session modality
+ledger remain visible with diagnostics, but cannot be selected.
+
+The TUI correlates list and selection requests over the trusted local
+protocol. It changes the visible runtime model only after receiving
+`model.select.result` and applying its authoritative snapshot. A disconnect,
+active run, pending review, unavailable profile, or incompatible modality
+produces an explicit error; none of these paths silently change or fall back
+from the session's selected profile.
+
 ## Session modality ledger
 
 Each TUI session persists a monotonic `requiredInputModalities` ledger. New and

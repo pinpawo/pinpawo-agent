@@ -15,6 +15,7 @@ const SESSION: AgentSession = {
   },
   runtime: {
     model: 'gpt-test',
+    modelProfileLabel: 'Primary coding',
     cwd: '/Users/mac/Develop/pinpawo-agent',
   },
   timeline: [],
@@ -37,6 +38,9 @@ test('welcome includes the raster paw, version, runtime, and shortcuts', () => {
     '  ▀███▀███▀  ',
   ]);
   assert.match(lines[7] ?? '', /PinPawo TUI v2 · v0\.1\.0 · 豆包/);
+  assert.ok(
+    lines.some((line) => line.includes('Primary coding (gpt-test)')),
+  );
   assert.ok(lines.some((line) => line.includes('PgUp history')));
   assert.ok(lines.some((line) => line.includes('Ctrl+R sessions')));
 });

@@ -19,6 +19,7 @@ export type TuiInputCommand =
   | { target: 'transcript'; action: 'line_up' | 'line_down' | 'page_up' | 'page_down' | 'top' | 'bottom' | 'dismiss' }
   | { target: 'approval'; action: 'previous' | 'next' | 'submit' }
   | { target: 'resume'; action: 'previous' | 'next' | 'submit' | 'dismiss' }
+  | { target: 'modelProfile'; action: 'previous' | 'next' | 'submit' | 'dismiss' }
   | { target: 'globalReviewPolicy'; action: 'previous' | 'next' | 'submit' | 'dismiss' }
   | { target: 'commandPalette'; action: 'previous' | 'next' | 'accept' | 'submit' }
   | { target: 'fileMention'; action: 'previous' | 'next' | 'accept' }
@@ -93,6 +94,13 @@ export function resolveTuiInputCommand(
       if (isNextNavigation(event)) return { target: 'globalReviewPolicy', action: 'next' };
       if (isReturn) return { target: 'globalReviewPolicy', action: 'submit' };
       if (event.type === 'escape') return { target: 'globalReviewPolicy', action: 'dismiss' };
+      return { target: 'none' };
+
+    case 'modelProfilePicker':
+      if (isPreviousNavigation(event)) return { target: 'modelProfile', action: 'previous' };
+      if (isNextNavigation(event)) return { target: 'modelProfile', action: 'next' };
+      if (isReturn) return { target: 'modelProfile', action: 'submit' };
+      if (event.type === 'escape') return { target: 'modelProfile', action: 'dismiss' };
       return { target: 'none' };
 
     case 'approval':

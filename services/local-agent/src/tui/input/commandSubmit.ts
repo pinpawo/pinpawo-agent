@@ -14,6 +14,7 @@ type TuiCommandSubmitInput = {
   selectStudioComposerTarget: (conversationId: string) => void;
   selectChatComposerTarget: () => void;
   openResumePicker: () => void;
+  openModelProfilePicker: () => void;
   openGlobalReviewPolicyPicker: () => void;
   openTranscriptViewer: () => void;
   openExternalEditor?: (initialText: string) => void;
@@ -95,6 +96,17 @@ export function submitCurrentInputFromController(options: TuiCommandSubmitInput)
         kind: 'chat',
       });
       options.openResumePicker();
+      options.clearInputValue();
+      return;
+    }
+
+    if (parsed.name === 'model') {
+      options.selectChatComposerTarget();
+      options.dispatch({
+        type: 'session.configured',
+        kind: 'chat',
+      });
+      options.openModelProfilePicker();
       options.clearInputValue();
       return;
     }

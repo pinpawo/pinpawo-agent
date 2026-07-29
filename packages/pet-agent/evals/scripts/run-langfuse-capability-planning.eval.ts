@@ -82,7 +82,24 @@ function plannerOutput(
 
 async function main() {
   const config = resolveLangfuseConfig();
-  const modelConfig = createDecisionEvalModel();
+  const subjectProfileId = process.env.PROMPT_EVAL_MODEL_PROFILE_ID?.trim();
+  const judgeProfileId = process.env.PROMPT_EVAL_JUDGE_PROFILE_ID?.trim();
+  if (!subjectProfileId || !judgeProfileId) {
+    throw new Error(
+      'PROMPT_EVAL_MODEL_PROFILE_ID and PROMPT_EVAL_JUDGE_PROFILE_ID are required.',
+    );
+  }
+  const modelConfig = createDecisionEvalModel({
+    profileId: subjectProfileId,
+    role: 'subject',
+  });
+  const judgeConfig = createDecisionEvalModel({
+    profileId: judgeProfileId,
+    role: 'judge',
+  });
+  if (modelConfig.metadata.fingerprint === judgeConfig.metadata.fingerprint) {
+    throw new Error('Capability planning subject and judge fingerprints must differ.');
+  }
   const runName = process.env.LANGFUSE_RUN_NAME
     || `capability-planning-${new Date().toISOString().replace(/[:.]/g, '-')}`;
   const cacheRoot = await mkdtemp(join(tmpdir(), 'pinpawo-capability-planning-eval-'));
@@ -90,6 +107,7 @@ async function main() {
 
   console.log(`Running ${capabilityPlanningBasicsDataset.name}: ${runName}`);
   console.log(`Mode: ${modelConfig.label}`);
+  console.log(`Judge: ${judgeConfig.label}`);
   try {
     for (const testCase of capabilityPlanningBasicsDataset.cases) {
       const started = performance.now();
@@ -104,25 +122,41 @@ async function main() {
         });
         const result = await createCapabilityPlannerAgent({
           model: modelConfig.model,
-        }).invoke({
-          mode: testCase.input.mode,
-          userIntentContext: buildPreparedRequestContext({
-            latestUserRequest: testCase.input.userGoal,
-            recentMessages: [new HumanMessage(testCase.input.userGoal)],
-          }),
-          completedTasks: testCase.input.completedTasks ?? [],
-          remainingPlan: testCase.input.remainingPlan ?? [],
-          latestHandoff: testCase.input.latestHandoff ?? null,
-          workspace,
-        });
+        }).invoke(
+          {
+            mode: testCase.input.mode,
+            userIntentContext: buildPreparedRequestContext({
+              latestUserRequest: testCase.input.userGoal,
+              recentMessages: [new HumanMessage(testCase.input.userGoal)],
+            }),
+            completedTasks: testCase.input.completedTasks ?? [],
+            remainingPlan: testCase.input.remainingPlan ?? [],
+            latestHandoff: testCase.input.latestHandoff ?? null,
+            workspace,
+          },
+          {
+            metadata: {
+              promptEvalModelRole: 'subject',
+              modelProfileId: modelConfig.metadata.profileId,
+              modelProfileFingerprint: modelConfig.metadata.fingerprint,
+            },
+          },
+        );
         const output = plannerOutput(result);
         const evaluation = await evaluateCapabilityPlanningOutput({
           input: testCase.input,
           expected: testCase.expected,
           output,
           judge: {
-            model: modelConfig.model,
-            method: modelConfig.method,
+            model: judgeConfig.model,
+            method: judgeConfig.method,
+            config: {
+              metadata: {
+                promptEvalModelRole: 'judge',
+                modelProfileId: judgeConfig.metadata.profileId,
+                modelProfileFingerprint: judgeConfig.metadata.fingerprint,
+              },
+            },
           },
         });
         const ok = evaluation.scores.every(({ score }) => score === 1);
@@ -139,6 +173,12 @@ async function main() {
           },
           scores: evaluation.scores,
           durationMs: Math.round(performance.now() - started),
+          metadata: {
+            subjectModelProfileId: modelConfig.metadata.profileId,
+            subjectModelProfileFingerprint: modelConfig.metadata.fingerprint,
+            judgeModelProfileId: judgeConfig.metadata.profileId,
+            judgeModelProfileFingerprint: judgeConfig.metadata.fingerprint,
+          },
         });
         console.log(
           `[${ok ? 'PASS' : 'FAIL'}] ${testCase.name}: `
@@ -155,6 +195,12 @@ async function main() {
           scores: [],
           durationMs: Math.round(performance.now() - started),
           error: error instanceof Error ? error.message : String(error),
+          metadata: {
+            subjectModelProfileId: modelConfig.metadata.profileId,
+            subjectModelProfileFingerprint: modelConfig.metadata.fingerprint,
+            judgeModelProfileId: judgeConfig.metadata.profileId,
+            judgeModelProfileFingerprint: judgeConfig.metadata.fingerprint,
+          },
         });
         console.log(`[ERROR] ${testCase.name}: ${String(error)}`);
       }

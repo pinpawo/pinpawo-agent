@@ -1,9 +1,11 @@
 import { type BaseMessage } from '@langchain/core/messages';
+import type { RunnableConfig } from '@langchain/core/runnables';
 import { createHash, randomUUID } from 'node:crypto';
 import type {
   SubagentInputState,
   SubagentResult,
   SubagentRunInput,
+  SubagentRuntimeContext,
 } from '../types/subagent';
 import {
   evaluateGuard,
@@ -33,6 +35,9 @@ import {
 } from './prompts/templates/contextSummary.prompt';
 import { SUBAGENT_GOVERNING_PROMPT } from './prompts/templates/governing.prompt';
 import { messageHasToolCalls } from '../utils/messages';
+import {
+  subagentRuntimeContextSchema,
+} from './runtimeContext';
 
 // Fallback model-call budget when the caller does not pass maxIterations. The
 // subagent iteration guard should stop gracefully first; LangGraph recursionLimit
@@ -292,6 +297,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     model: input.model,
     tools: input.tools,
     systemPrompt,
+    contextSchema: subagentRuntimeContextSchema,
     ...(middleware.length > 0 ? { middleware } : {}),
   });
 
@@ -308,6 +314,15 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
 
   let latestMessages = inputState.messages;
   try {
+    const parentRuntimeContext = (
+      input.runnableConfig as (RunnableConfig & {
+        context?: SubagentRuntimeContext;
+      }) | undefined
+    )?.context;
+    const runtimeContext: SubagentRuntimeContext = {
+      ...parentRuntimeContext,
+      ...input.runtimeContext,
+    };
     // The crucial #322 shape: invoke with the parent config passed through
     // untouched, instead of consuming a child streamEvents() run behind a
     // stripped config and a cleared ALS scope. Tokens, tool lifecycle,
@@ -318,6 +333,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
       { messages: inputState.messages },
       {
         ...input.runnableConfig,
+        context: runtimeContext,
         signal: input.signal,
         // Normal stopping is controlled by the subagent iteration guard.
         // LangGraph recursionLimit stays intentionally high as a final breaker.

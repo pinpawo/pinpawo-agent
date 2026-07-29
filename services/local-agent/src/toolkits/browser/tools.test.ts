@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { withSubagentExecutionScope } from '@pinpawo/pet-agent';
 import { browserTools } from './tools';
 
 process.env.LANGCHAIN_TRACING_V2 = 'false';
@@ -23,10 +22,14 @@ test('browser tools require the delegation scope supplied through tool runtime',
   const missingScope = await snapshotTool.invoke({});
   assert.equal(readErrorCode(missingScope), 'browser_context_missing');
 
-  const scoped = await snapshotTool.invoke({}, withSubagentExecutionScope(undefined, {
-    threadId: 'thread-1',
-    runId: 'run-1',
-    delegationId: 'delegation-1',
-  }));
+  const scoped = await snapshotTool.invoke({}, {
+    context: {
+      executionScope: {
+        threadId: 'thread-1',
+        runId: 'run-1',
+        delegationId: 'delegation-1',
+      },
+    },
+  });
   assert.equal(readErrorCode(scoped), 'browser_not_open');
 });

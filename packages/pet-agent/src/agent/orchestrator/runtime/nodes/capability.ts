@@ -1,6 +1,5 @@
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { createSubagent } from '../../../../subagent/createSubagent';
-import { withSubagentExecutionScope } from '../../../../subagent/executionScope';
 import type { CapabilityArtifactRef } from '../../../../types/artifact';
 import type { SubagentRunInput } from '../../../../types/subagent';
 import type { OrchestratorStateType } from '../../state';
@@ -126,11 +125,6 @@ export function createCapabilityNode(params: {
       scopedMessages,
       canExploreArtifacts,
     );
-    const subagentRunnableConfig = withSubagentExecutionScope(runnableConfig, {
-      threadId,
-      runId: transcriptRunId,
-      delegationId: runNextDelegation.id,
-    });
     const subagentInput: SubagentRunInput = {
       model: config.models.subagent ?? config.models.act,
       tools: selectedTools,
@@ -170,8 +164,15 @@ export function createCapabilityNode(params: {
       maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
       contextWindowTokens: subagentContextWindowTokens,
       middleware: usedResolvedToolkitExecution.middleware,
-      runnableConfig: subagentRunnableConfig,
-      signal: subagentRunnableConfig.signal,
+      runtimeContext: {
+        executionScope: {
+          threadId,
+          runId: transcriptRunId,
+          delegationId: runNextDelegation.id,
+        },
+      },
+      runnableConfig,
+      signal: runnableConfig?.signal,
       artifacts: artifactRefs,
     };
     let result = await createSubagent(subagentInput);

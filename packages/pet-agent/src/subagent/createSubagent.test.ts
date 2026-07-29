@@ -5,7 +5,7 @@ import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messa
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { FakeListChatModel } from '@langchain/core/utils/testing';
-import { tool } from '@langchain/core/tools';
+import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { createMiddleware, FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
 import {
@@ -21,7 +21,10 @@ import {
   SUBAGENT_PROMPT_SECTIONS_EVENT,
 } from './createSubagent';
 import { NamespacedProtocolToolEventReader } from './protocolToolEvents';
-import type { SubagentToolLifecycleEvent } from '../types/subagent';
+import type {
+  SubagentRuntimeContext,
+  SubagentToolLifecycleEvent,
+} from '../types/subagent';
 import type { GuardDecisionRecord } from '../guards';
 import {
   SUBAGENT_GUARD_STOP_MARKER_KEY,
@@ -80,6 +83,50 @@ test('createSubagent rejects duplicate prompt section ids before invoking the mo
     }),
     /Duplicate subagent prompt section id: capability:test/,
   );
+});
+
+test('createSubagent exposes invocation context to tool runtime', async () => {
+  let seenExecutionScope: SubagentRuntimeContext['executionScope'];
+  const inspectContext = tool(async (
+    _input,
+    runtime: ToolRuntime<unknown, SubagentRuntimeContext>,
+  ) => {
+    seenExecutionScope = runtime.context.executionScope;
+    return 'context inspected';
+  }, {
+    name: 'inspect_context',
+    description: 'Inspect the subagent runtime context.',
+    schema: z.object({}),
+  });
+
+  await createSubagent({
+    model: new FakeToolCallingModel({
+      toolCalls: [
+        [{
+          id: 'call-inspect-context',
+          name: 'inspect_context',
+          args: {},
+        }],
+        [],
+      ],
+    }),
+    tools: [inspectContext],
+    promptSections: [],
+    messages: [new HumanMessage('Inspect the context.')],
+    runtimeContext: {
+      executionScope: {
+        threadId: 'thread-1',
+        runId: 'run-1',
+        delegationId: 'delegation-1',
+      },
+    },
+  });
+
+  assert.deepEqual(seenExecutionScope, {
+    threadId: 'thread-1',
+    runId: 'run-1',
+    delegationId: 'delegation-1',
+  });
 });
 
 /**

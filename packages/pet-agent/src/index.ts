@@ -39,21 +39,15 @@ export {
 
 export type {
   SubagentInputState,
+  SubagentExecutionScope,
   SubagentPromptSection,
   SubagentResult,
   SubagentRunInput,
+  SubagentRuntimeContext,
   SubagentRuntimeEvent,
   SubagentToolLifecycleEvent,
   SubagentToolOperationMetadata,
 } from './types/subagent';
-export {
-  readSubagentExecutionScope,
-  SUBAGENT_EXECUTION_SCOPE_CONFIG_KEY,
-  withSubagentExecutionScope,
-} from './subagent/executionScope';
-export type {
-  SubagentExecutionScope,
-} from './subagent/executionScope';
 
 export type {
   Guard,

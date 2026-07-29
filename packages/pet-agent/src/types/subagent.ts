@@ -6,6 +6,17 @@ import type { AnyAgentMiddleware } from 'langchain';
 import type { CapabilityArtifactRef } from './artifact';
 import type { ToolOperationMetadata } from './toolkit';
 
+export type SubagentExecutionScope = {
+  threadId: string | null;
+  runId: string;
+  delegationId: string;
+};
+
+export type SubagentRuntimeContext = {
+  executionScope?: SubagentExecutionScope;
+  [key: string]: unknown;
+};
+
 export type SubagentToolOperationMetadata = ToolOperationMetadata & {
   source?: {
     provider: 'toolkit' | 'runtime';
@@ -69,6 +80,8 @@ export type SubagentRunInput = SubagentInputState & {
   model: BaseChatModel;
   tools: StructuredTool[];
   middleware?: AnyAgentMiddleware[];
+  /** Read-only invocation data exposed to tools as ToolRuntime.context. */
+  runtimeContext?: SubagentRuntimeContext;
   runnableConfig?: RunnableConfig;
   signal?: AbortSignal;
 };

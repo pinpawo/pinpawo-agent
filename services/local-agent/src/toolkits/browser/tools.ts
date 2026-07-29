@@ -1,6 +1,6 @@
 import { tool } from '@langchain/core/tools';
 import type { StructuredTool, ToolRuntime } from '@langchain/core/tools';
-import { readSubagentExecutionScope } from '@pinpawo/pet-agent';
+import type { SubagentRuntimeContext } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import { browserSession } from './session';
 import type { BrowserExtractOptions, BrowserWaitState } from './session';
@@ -20,14 +20,16 @@ function readBrowserTarget(input: BrowserTargetInput) {
   return { selector: input.selector, ref: input.ref };
 }
 
-function readBrowserExecutionOwner(runtime: ToolRuntime) {
-  return readSubagentExecutionScope(runtime);
+type BrowserToolRuntime = ToolRuntime<unknown, SubagentRuntimeContext>;
+
+function readBrowserExecutionOwner(runtime: BrowserToolRuntime) {
+  return runtime.context?.executionScope ?? null;
 }
 
 const browserOpenTool = tool(
   async (
     { url, headless }: { url: string; headless?: boolean },
-    runtime: ToolRuntime,
+    runtime: BrowserToolRuntime,
   ) => {
     try {
       return await browserSession.open(
@@ -59,7 +61,7 @@ const browserOpenTool = tool(
 const browserOpenWithSessionTool = tool(
   async (
     { url, session, headless }: { url: string; session: string; headless?: boolean },
-    runtime: ToolRuntime,
+    runtime: BrowserToolRuntime,
   ) => {
     try {
       return await browserSession.open(
@@ -96,7 +98,7 @@ const browserOpenWithSessionTool = tool(
 const browserOpenWithProfileTool = tool(
   async (
     { url, userDataDir, headless }: { url: string; userDataDir: string; headless?: boolean },
-    runtime: ToolRuntime,
+    runtime: BrowserToolRuntime,
   ) => {
     try {
       return await browserSession.openWithProfile(
@@ -132,7 +134,7 @@ const browserOpenWithProfileTool = tool(
 );
 
 const browserSnapshotTool = tool(
-  async (_input, runtime: ToolRuntime) => {
+  async (_input, runtime: BrowserToolRuntime) => {
     try {
       return await browserSession.snapshot(readBrowserExecutionOwner(runtime));
     } catch (err) {
@@ -149,7 +151,7 @@ const browserSnapshotTool = tool(
 );
 
 const browserClickTool = tool(
-  async (input: BrowserTargetInput, runtime: ToolRuntime) => {
+  async (input: BrowserTargetInput, runtime: BrowserToolRuntime) => {
     try {
       return await browserSession.click(
         readBrowserTarget(input),
@@ -173,7 +175,7 @@ const browserClickTool = tool(
 const browserTypeTool = tool(
   async (
     { selector, ref, text, submit }: BrowserTargetInput & { text: string; submit?: boolean },
-    runtime: ToolRuntime,
+    runtime: BrowserToolRuntime,
   ) => {
     try {
       return await browserSession.type(
@@ -203,7 +205,7 @@ const browserTypeTool = tool(
 const browserScrollTool = tool(
   async (
     { deltaX, deltaY, selector, ref }: BrowserTargetInput & { deltaX?: number; deltaY?: number },
-    runtime: ToolRuntime,
+    runtime: BrowserToolRuntime,
   ) => {
     try {
       const target = selector || ref ? readBrowserTarget({ selector, ref }) : undefined;
@@ -234,7 +236,7 @@ const browserWaitTool = tool(
   async ({ selector, ref, timeoutMs, state }: BrowserTargetInput & {
     timeoutMs?: number;
     state?: BrowserWaitState;
-  }, runtime: ToolRuntime) => {
+  }, runtime: BrowserToolRuntime) => {
     try {
       const target = selector || ref ? readBrowserTarget({ selector, ref }) : undefined;
       return await browserSession.wait(
@@ -273,7 +275,7 @@ const browserWaitTool = tool(
 const browserExtractTool = tool(
   async (
     { selector, offset, limit }: BrowserExtractOptions,
-    runtime: ToolRuntime,
+    runtime: BrowserToolRuntime,
   ) => {
     try {
       return await browserSession.extract(
@@ -311,7 +313,7 @@ const browserExtractTool = tool(
 );
 
 const browserCloseTool = tool(
-  async (_input, runtime: ToolRuntime) => {
+  async (_input, runtime: BrowserToolRuntime) => {
     try {
       return await browserSession.close(readBrowserExecutionOwner(runtime));
     } catch (err) {
@@ -326,7 +328,7 @@ const browserCloseTool = tool(
 );
 
 const browserScreenshotTool = tool(
-  async (_input, runtime: ToolRuntime) => {
+  async (_input, runtime: BrowserToolRuntime) => {
     try {
       return await browserSession.screenshot(readBrowserExecutionOwner(runtime));
     } catch (err) {

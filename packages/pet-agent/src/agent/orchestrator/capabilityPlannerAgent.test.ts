@@ -39,11 +39,27 @@ type ScriptedStructuredOutput = {
   args: Record<string, unknown>;
 };
 
+function collectJsonSchemaReferences(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap(collectJsonSchemaReferences);
+  }
+  if (!value || typeof value !== 'object') {
+    return [];
+  }
+  return Object.entries(value).flatMap(([key, child]) => {
+    if (key === '$ref' && typeof child === 'string') {
+      return [child];
+    }
+    return collectJsonSchemaReferences(child);
+  });
+}
+
 class ScriptedPlannerModel extends BaseChatModel {
   readonly invocations: BaseMessage[][] = [];
   readonly boundToolNames: string[] = [];
   readonly boundToolOptions: Record<string, unknown>[] = [];
   readonly structuredOutputToolNames = new Map<string, string>();
+  readonly structuredOutputSchemaReferences: string[] = [];
   #responseIndex = 0;
 
   constructor(
@@ -72,7 +88,7 @@ class ScriptedPlannerModel extends BaseChatModel {
           properties?: {
             result?: { const?: unknown };
           };
-        };
+        } & Record<string, unknown>;
       };
     }>;
     this.boundToolNames.splice(
@@ -84,11 +100,19 @@ class ScriptedPlannerModel extends BaseChatModel {
       }),
     );
     this.structuredOutputToolNames.clear();
+    this.structuredOutputSchemaReferences.splice(
+      0,
+      this.structuredOutputSchemaReferences.length,
+    );
     for (const entry of toolEntries) {
       const name = entry.function?.name;
-      const result = entry.function?.parameters?.properties?.result?.const;
+      const parameters = entry.function?.parameters;
+      const result = parameters?.properties?.result?.const;
       if (name && typeof result === 'string') {
         this.structuredOutputToolNames.set(result, name);
+        this.structuredOutputSchemaReferences.push(
+          ...collectJsonSchemaReferences(parameters),
+        );
       }
     }
     this.boundToolOptions.push({ ...options });
@@ -298,6 +322,9 @@ test('Planner Agent explores CAPABILITY.md files and returns a structured curren
   assert.equal(model.structuredOutputToolNames.size, 2);
   assert.ok(model.structuredOutputToolNames.has('next_task'));
   assert.ok(model.structuredOutputToolNames.has('unavailable'));
+  assert.ok(model.structuredOutputSchemaReferences.every(
+    (reference) => reference.startsWith('#/$defs/'),
+  ));
   assert.ok(model.boundToolOptions.length > 0);
   assert.ok(model.boundToolOptions.every(
     (options) => options.parallel_tool_calls === false,

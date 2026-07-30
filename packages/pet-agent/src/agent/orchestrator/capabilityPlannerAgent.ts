@@ -66,12 +66,14 @@ function createPlannerModelMiddleware(maxIterations: number) {
   });
 }
 
-const planTaskSchema = z.object({
-  objective: z.string().trim().min(1).max(MAX_TASK_TEXT_CHARS)
-    .describe('The useful, independently executable result this future task must produce.'),
-  capability_intent: z.string().trim().min(1).max(MAX_TASK_TEXT_CHARS)
-    .describe('The kind of execution ability the future task will need, without naming a concrete Capability.'),
-}).strict();
+function createPlanTaskSchema() {
+  return z.object({
+    objective: z.string().trim().min(1).max(MAX_TASK_TEXT_CHARS)
+      .describe('The useful, independently executable result this future task must produce.'),
+    capability_intent: z.string().trim().min(1).max(MAX_TASK_TEXT_CHARS)
+      .describe('The kind of execution ability the future task will need, without naming a concrete Capability.'),
+  }).strict();
+}
 
 const unavailablePlanSchema = z.object({
   result: z.literal('unavailable')
@@ -93,7 +95,7 @@ function createCapabilityPlannerResponseFormat(
     });
   }
 
-  const nextTaskSchema = planTaskSchema.extend({
+  const nextTaskSchema = createPlanTaskSchema().extend({
     capability_name: z.enum([
       firstCapabilityName,
       ...otherCapabilityNames,
@@ -108,7 +110,9 @@ function createCapabilityPlannerResponseFormat(
       .describe('Delegate the current task to a Capability.'),
     next_task: nextTaskSchema
       .describe('The current executable task and selected Capability.'),
-    remaining_plan: z.array(planTaskSchema).max(MAX_PLAN_TASKS)
+    // Keep this instance independent from nextTaskSchema. Reusing the same
+    // Zod nodes creates property-path $refs that Moonshot rejects.
+    remaining_plan: z.array(createPlanTaskSchema()).max(MAX_PLAN_TASKS)
       .describe('Ordered, unstarted future work; use an empty array when none remains.'),
   }).strict().describe('Return the next executable task and future plan tail.');
 

@@ -22,6 +22,7 @@ import {
   studioProgressMessage,
   studioUserMessage,
 } from './studioProjection';
+import { reconcileCompletionSnapshot } from './completionSnapshot';
 
 export type TuiConnectionStatus =
   | 'idle'
@@ -684,14 +685,17 @@ export class TuiSessionController {
       if (reason !== 'completion') {
         this.clearSnapshotTimer();
       }
-      const applied = applySessionSnapshot(this.state.session, message.snapshot, {
-        observedAt: this.now(),
-        preserveOmittedTokenUsage: reason !== 'startup',
-        preserveOmittedSessionTokenUsage: reason !== 'startup',
-      });
       const session = reason === 'completion'
-        ? mergeCompletionSnapshotMetadata(this.state.session, applied)
-        : applied;
+        ? reconcileCompletionSnapshot(
+          this.state.session,
+          message.snapshot,
+          this.now(),
+        )
+        : applySessionSnapshot(this.state.session, message.snapshot, {
+          observedAt: this.now(),
+          preserveOmittedTokenUsage: reason !== 'startup',
+          preserveOmittedSessionTokenUsage: reason !== 'startup',
+        });
       if (reason === 'startup' || reason === 'reconnect') {
         this.reconnectAttempt = 0;
         this.state = {
@@ -996,20 +1000,6 @@ function formatDelay(delayMs: number) {
 
 function assertNever(value: never): never {
   throw new Error(`unhandled agent server message: ${String(value)}`);
-}
-
-function mergeCompletionSnapshotMetadata(
-  live: AgentSession,
-  snapshot: AgentSession,
-): AgentSession {
-  return {
-    ...live,
-    ...(snapshot.actor ? { actor: snapshot.actor } : {}),
-    ...(snapshot.runtime ? { runtime: snapshot.runtime } : {}),
-    ...(snapshot.sessionTokenUsage
-      ? { sessionTokenUsage: snapshot.sessionTokenUsage }
-      : {}),
-  };
 }
 
 function reviewDecisionsMatch(

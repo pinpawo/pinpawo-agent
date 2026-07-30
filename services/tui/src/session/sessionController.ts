@@ -867,7 +867,7 @@ export class TuiSessionController {
         preserveOmittedTokenUsage: reason !== 'startup',
         preserveOmittedSessionTokenUsage: reason !== 'startup',
       });
-      const session = reason === 'completion'
+      const session = reason === 'completion' && this.state.session.activeRun
         ? mergeCompletionSnapshotMetadata(this.state.session, applied)
         : applied;
       if (reason === 'startup' || reason === 'reconnect') {

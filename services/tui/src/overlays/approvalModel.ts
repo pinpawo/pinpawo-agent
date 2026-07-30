@@ -1,10 +1,10 @@
 import type {
   AgentReviewAction,
   AgentRunView,
-  ReviewOption,
   ReviewResponse,
   ReviewSpec,
 } from '@pinpawo/agent-session';
+import { reviewDecisionsRemainValid } from '../session/reviewDecision';
 import {
   truncateTerminalLine,
   wrapTerminalText,
@@ -442,19 +442,4 @@ function currentReviewFrom(
   decisions: readonly ReviewResponse[],
 ) {
   return action.reviews[decisions.length];
-}
-
-function reviewDecisionsRemainValid(
-  action: AgentReviewAction,
-  decisions: readonly ReviewResponse[],
-) {
-  if (decisions.length >= action.reviews.length) return false;
-  return decisions.every((decision, index) => {
-    const review = action.reviews[index];
-    const option = review?.options.find((candidate: ReviewOption) => (
-      candidate.id === decision.selectedOptionId
-    ));
-    return review?.id === decision.reviewId
-      && option?.decision.type === 'approve';
-  });
 }

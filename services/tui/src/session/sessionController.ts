@@ -1,22 +1,13 @@
 import {
   applySessionSnapshot,
   reduceSession,
-  type AgentServerMessage,
   type AgentLocalAttachment,
-  type AgentInputModality,
-  type AgentModelProfileSummary,
   type ChatRequestMessage,
-  type AgentReviewAction,
   type AgentSession,
   type AgentSessionSnapshot,
-  type AgentSessionSummary,
   type BuiltinGlobalReviewPolicyMode,
   type ReviewResponse,
 } from '@pinpawo/agent-session';
-import type {
-  AgentHostConnection,
-  AgentHostConnectionFactory,
-} from '../client/localHostConnection';
 import { formatAttachmentDisplayText } from '../attachments/attachmentModel';
 import {
   studioCompletionMessages,
@@ -24,217 +15,179 @@ import {
   studioProgressMessage,
   studioUserMessage,
 } from './studioProjection';
-import { reconcileCompletionSnapshot } from './completionSnapshot';
+import { prepareReviewDecision } from './reviewDecision';
+import {
+  RuntimeConfigCoordinator,
+  type UpdateGlobalReviewPolicyResult,
+} from './runtimeConfigCoordinator';
+import {
+  SessionCommandCoordinator,
+  type ResumeSessionResult,
+  type StartNewSessionResult,
+} from './sessionCommandCoordinator';
+import {
+  reconcileSessionSnapshot,
+} from './sessionSnapshot';
+import {
+  SessionTransportCoordinator,
+  type SessionApplicationServerMessage,
+} from './sessionTransportCoordinator';
+import {
+  ModelProfileCoordinator,
+  type ListModelProfilesResult,
+} from './modelProfileCoordinator';
+import type {
+  CancelReviewResult,
+  InterruptResolvedReviewResult,
+  InterruptRunResult,
+  SubmitChatResult,
+  SubmitReviewResponseResult,
+  TuiConnectionStatus,
+  TuiSessionControllerOptions,
+  TuiSessionState,
+} from './sessionControllerTypes';
 
-export type TuiConnectionStatus =
-  | 'idle'
-  | 'connecting'
-  | 'reconnecting'
-  | 'ready'
-  | 'disconnected'
-  | 'error';
+export type {
+  ResumeSessionResult,
+  StartNewSessionResult,
+} from './sessionCommandCoordinator';
+export type {
+  UpdateGlobalReviewPolicyResult,
+} from './runtimeConfigCoordinator';
+export {
+  ModelProfileCommandError,
+} from './modelProfileCoordinator';
+export type {
+  ListModelProfilesResult,
+} from './modelProfileCoordinator';
+export type {
+  CancelReviewResult,
+  InterruptResolvedReviewResult,
+  InterruptRunResult,
+  SubmitChatResult,
+  SubmitReviewResponseResult,
+  TuiConnectionStatus,
+  TuiSessionControllerOptions,
+  TuiSessionState,
+} from './sessionControllerTypes';
 
-export type TuiSessionState = {
-  connection: TuiConnectionStatus;
-  connectionDetail?: string;
-  session: AgentSession;
-};
-
-export type SubmitChatResult =
-  | { ok: true; requestId: string }
-  | {
-      ok: false;
-      reason:
-        | 'not-ready'
-        | 'busy'
-        | 'empty'
-        | 'send-failed';
-    };
-
-export type InterruptRunResult =
-  | { ok: true; requestId: string }
-  | {
-      ok: false;
-      reason:
-        | 'not-ready'
-        | 'idle'
-        | 'review-active'
-        | 'already-interrupting'
-        | 'send-failed';
-    };
-
-export type InterruptResolvedReviewResult =
-  | { ok: true; requestId: string }
-  | {
-      ok: false;
-      reason: 'not-ready' | 'closed' | 'stale' | 'send-failed';
-    };
-
-type SnapshotReason = 'startup' | 'reconnect' | 'completion';
 type ActiveDelegationTransition = NonNullable<
   ChatRequestMessage['activeDelegationTransition']
 >;
-
-type TimerHandle = ReturnType<typeof setTimeout>;
-
-export type ResumeSessionResult = {
-  session: AgentSessionSummary;
-  snapshot: AgentSessionSnapshot;
-};
-
-export type StartNewSessionResult = ResumeSessionResult;
-
-export type SubmitReviewResponseResult =
-  | {
-      ok: true;
-      status: 'advanced' | 'sent';
-      decision: ReviewResponse;
-      decisions: ReviewResponse[];
-    }
-  | {
-      ok: false;
-      reason:
-        | 'not-ready'
-        | 'closed'
-        | 'stale'
-        | 'input-required'
-        | 'send-failed';
-    };
-
-export type CancelReviewResult =
-  | { ok: true }
-  | {
-      ok: false;
-      reason: 'not-ready' | 'closed' | 'stale' | 'send-failed';
-    };
-
-export type UpdateGlobalReviewPolicyResult = {
-  globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
-};
-
-export type ListModelProfilesResult = {
-  sessionId: string;
-  defaultProfileId: string;
-  selectedProfileId: string;
-  requiredInputModalities: AgentInputModality[];
-  profiles: AgentModelProfileSummary[];
-};
-
-export class ModelProfileCommandError extends Error {
-  constructor(
-    message: string,
-    readonly code?: string,
-  ) {
-    super(message);
-    this.name = 'ModelProfileCommandError';
-  }
-}
-
-export type TuiSessionControllerOptions = {
-  connectionFactory: AgentHostConnectionFactory;
-  now?: () => number;
-  requestIdFactory?: () => string;
-  reconnectDelaysMs?: readonly number[];
-  snapshotTimeoutMs?: number;
-  sessionCommandTimeoutMs?: number;
-  setTimer?: (callback: () => void, delayMs: number) => TimerHandle;
-  clearTimer?: (timer: TimerHandle) => void;
-};
 
 const DEFAULT_RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000] as const;
 const DEFAULT_SNAPSHOT_TIMEOUT_MS = 5_000;
 const DEFAULT_SESSION_COMMAND_TIMEOUT_MS = 5_000;
 
-type PendingSessionCommand =
-  | {
-      operation: 'list';
-      requestId: string;
-      timer: TimerHandle | null;
-      resolve: (sessions: AgentSessionSummary[]) => void;
-      reject: (error: Error) => void;
-    }
-  | {
-      operation: 'new';
-      requestId: string;
-      timer: TimerHandle | null;
-      resolve: (result: StartNewSessionResult) => void;
-      reject: (error: Error) => void;
-    }
-  | {
-      operation: 'resume';
-      requestId: string;
-      sessionId: string;
-      timer: TimerHandle | null;
-      resolve: (result: ResumeSessionResult) => void;
-      reject: (error: Error) => void;
-    };
-
-type PendingRuntimeConfigUpdate = {
-  requestId: string;
-  globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
-  timer: TimerHandle | null;
-  resolve: (result: UpdateGlobalReviewPolicyResult) => void;
-  reject: (error: Error) => void;
-};
-
-type PendingModelCommand =
-  | {
-      operation: 'list';
-      requestId: string;
-      sessionId: string;
-      timer: TimerHandle | null;
-      resolve: (result: ListModelProfilesResult) => void;
-      reject: (error: Error) => void;
-    }
-  | {
-      operation: 'select';
-      requestId: string;
-      sessionId: string;
-      modelProfileId: string;
-      timer: TimerHandle | null;
-      resolve: (snapshot: AgentSessionSnapshot) => void;
-      reject: (error: Error) => void;
-    };
-
 export class TuiSessionController {
   private readonly now: () => number;
   private readonly requestIdFactory: () => string;
-  private readonly reconnectDelaysMs: readonly number[];
-  private readonly snapshotTimeoutMs: number;
-  private readonly sessionCommandTimeoutMs: number;
-  private readonly setTimer: (callback: () => void, delayMs: number) => TimerHandle;
-  private readonly clearTimer: (timer: TimerHandle) => void;
-  private readonly connection: AgentHostConnection;
+  private readonly transport: SessionTransportCoordinator;
   private readonly listeners = new Set<(state: TuiSessionState) => void>();
-  private readonly snapshotRequests = new Map<string, SnapshotReason>();
-  private readonly sessionCommands = new Map<string, PendingSessionCommand>();
-  private readonly modelCommands = new Map<string, PendingModelCommand>();
-  private runtimeConfigUpdate: PendingRuntimeConfigUpdate | null = null;
+  private readonly sessionCommands: SessionCommandCoordinator;
+  private readonly modelProfiles: ModelProfileCoordinator;
+  private readonly runtimeConfig: RuntimeConfigCoordinator;
   private state: TuiSessionState = {
     connection: 'idle',
     session: createPendingSession(),
   };
-  private started = false;
-  private reconnectAttempt = 0;
-  private reconnectTimer: TimerHandle | null = null;
-  private snapshotTimer: TimerHandle | null = null;
 
   constructor(options: TuiSessionControllerOptions) {
     this.now = options.now ?? Date.now;
     this.requestIdFactory = options.requestIdFactory ?? (() => crypto.randomUUID());
-    this.reconnectDelaysMs = options.reconnectDelaysMs?.length
-      ? options.reconnectDelaysMs
-      : DEFAULT_RECONNECT_DELAYS_MS;
-    this.snapshotTimeoutMs = options.snapshotTimeoutMs ?? DEFAULT_SNAPSHOT_TIMEOUT_MS;
-    this.sessionCommandTimeoutMs = options.sessionCommandTimeoutMs
+    const sessionCommandTimeoutMs = options.sessionCommandTimeoutMs
       ?? DEFAULT_SESSION_COMMAND_TIMEOUT_MS;
-    this.setTimer = options.setTimer ?? setTimeout;
-    this.clearTimer = options.clearTimer ?? clearTimeout;
-    this.connection = options.connectionFactory({
-      onOpen: () => this.handleOpen(),
+    const setTimer = options.setTimer ?? setTimeout;
+    const clearTimer = options.clearTimer ?? clearTimeout;
+    this.transport = new SessionTransportCoordinator({
+      connectionFactory: options.connectionFactory,
+      requestIdFactory: this.requestIdFactory,
+      reconnectDelaysMs: options.reconnectDelaysMs?.length
+        ? options.reconnectDelaysMs
+        : DEFAULT_RECONNECT_DELAYS_MS,
+      snapshotTimeoutMs: options.snapshotTimeoutMs
+        ?? DEFAULT_SNAPSHOT_TIMEOUT_MS,
+      setTimer,
+      clearTimer,
+      onConnection: (connection, detail) => {
+        this.setConnection(connection, detail);
+      },
+      onSnapshot: (snapshot, reason) => {
+        const session = reconcileSessionSnapshot(
+          this.state.session,
+          snapshot,
+          reason,
+          this.now(),
+        );
+        if (reason === 'startup' || reason === 'reconnect') {
+          this.state = {
+            connection: 'ready',
+            session,
+          };
+          this.notify();
+        } else {
+          this.updateSession(session);
+        }
+      },
       onMessage: (message) => this.handleMessage(message),
-      onClose: () => this.handleClose(),
-      onError: (error) => this.handleError(error),
+      onDisconnected: () => {
+        this.sessionCommands.cancelAll('local-agent disconnected');
+        this.modelProfiles.cancelAll('local-agent disconnected');
+        this.runtimeConfig.cancel('local-agent disconnected');
+      },
+    });
+    this.sessionCommands = new SessionCommandCoordinator({
+      requestIdFactory: this.requestIdFactory,
+      send: (message) => this.transport.send(message),
+      getUnavailableReason: () => this.sessionCommandUnavailable(),
+      onSnapshot: (snapshot) => {
+        this.transport.clearSnapshotRequests();
+        this.updateSession(applySessionSnapshot(
+          this.state.session,
+          snapshot,
+          { observedAt: this.now() },
+        ));
+      },
+      timeoutMs: sessionCommandTimeoutMs,
+      setTimer,
+      clearTimer,
+    });
+    this.modelProfiles = new ModelProfileCoordinator({
+      requestIdFactory: this.requestIdFactory,
+      send: (message) => this.transport.send(message),
+      getUnavailableReason: () => this.modelCommandUnavailable(),
+      getSessionId: () => this.state.session.sessionId,
+      onSelected: (snapshot) => {
+        this.updateSession(applySessionSnapshot(
+          this.state.session,
+          snapshot,
+          {
+            observedAt: this.now(),
+            preserveOmittedTokenUsage: true,
+            preserveOmittedSessionTokenUsage: true,
+          },
+        ));
+      },
+      timeoutMs: sessionCommandTimeoutMs,
+      setTimer,
+      clearTimer,
+    });
+    this.runtimeConfig = new RuntimeConfigCoordinator({
+      requestIdFactory: this.requestIdFactory,
+      send: (message) => this.transport.send(message),
+      getUnavailableReason: () => this.runtimeConfigUpdateUnavailable(),
+      onUpdated: (globalReviewPolicyMode) => {
+        this.updateSession({
+          ...this.state.session,
+          runtime: {
+            ...this.state.session.runtime,
+            globalReviewPolicyMode,
+          },
+        });
+      },
+      timeoutMs: sessionCommandTimeoutMs,
+      setTimer,
+      clearTimer,
     });
   }
 
@@ -251,23 +204,14 @@ export class TuiSessionController {
   }
 
   start() {
-    if (this.started) return;
-    this.started = true;
-    this.reconnectAttempt = 0;
-    this.setConnection('connecting', 'connecting to local-agent');
-    this.connection.connect();
+    this.transport.start();
   }
 
   stop() {
-    this.started = false;
-    this.clearReconnectTimer();
-    this.clearSnapshotTimer();
-    this.snapshotRequests.clear();
-    this.rejectSessionCommands('session command cancelled');
-    this.rejectModelCommands('model command cancelled');
-    this.rejectRuntimeConfigUpdate('runtime config update cancelled');
-    this.connection.disconnect();
-    this.setConnection('idle');
+    this.sessionCommands.cancelAll('session command cancelled');
+    this.modelProfiles.cancelAll('model command cancelled');
+    this.runtimeConfig.cancel('runtime config update cancelled');
+    this.transport.stop();
   }
 
   submitChat(
@@ -293,20 +237,20 @@ export class TuiSessionController {
     if (!message.trim() && attachments.length === 0) {
       return { ok: false, reason: 'empty' };
     }
-    if (this.state.connection !== 'ready' || !this.connection.isConnected()) {
+    if (this.state.connection !== 'ready' || !this.transport.isConnected()) {
       return { ok: false, reason: 'not-ready' };
     }
     if (
       this.state.session.activeRun
-      || this.sessionCommands.size > 0
-      || this.modelCommands.size > 0
-      || this.runtimeConfigUpdate
+      || this.sessionCommands.hasPending()
+      || this.modelProfiles.hasPending()
+      || this.runtimeConfig.hasPending()
     ) {
       return { ok: false, reason: 'busy' };
     }
 
     const requestId = this.requestIdFactory();
-    if (!this.connection.send({
+    if (!this.transport.send({
       type: 'chat_request',
       requestId,
       message,
@@ -332,20 +276,20 @@ export class TuiSessionController {
     if (!request) {
       return { ok: false, reason: 'empty' };
     }
-    if (this.state.connection !== 'ready' || !this.connection.isConnected()) {
+    if (this.state.connection !== 'ready' || !this.transport.isConnected()) {
       return { ok: false, reason: 'not-ready' };
     }
     if (
       this.state.session.activeRun
-      || this.sessionCommands.size > 0
-      || this.modelCommands.size > 0
-      || this.runtimeConfigUpdate
+      || this.sessionCommands.hasPending()
+      || this.modelProfiles.hasPending()
+      || this.runtimeConfig.hasPending()
     ) {
       return { ok: false, reason: 'busy' };
     }
 
     const requestId = this.requestIdFactory();
-    if (!this.connection.send({
+    if (!this.transport.send({
       type: 'studio_request',
       requestId,
       userRequest: request,
@@ -363,7 +307,7 @@ export class TuiSessionController {
   }
 
   interruptRun(): InterruptRunResult {
-    if (this.state.connection !== 'ready' || !this.connection.isConnected()) {
+    if (this.state.connection !== 'ready' || !this.transport.isConnected()) {
       return { ok: false, reason: 'not-ready' };
     }
     const run = this.state.session.activeRun;
@@ -376,7 +320,7 @@ export class TuiSessionController {
     if (run.state === 'interrupting') {
       return { ok: false, reason: 'already-interrupting' };
     }
-    if (!this.connection.send({
+    if (!this.transport.send({
       type: 'run.interrupt',
       requestId: run.requestId,
     })) {
@@ -397,7 +341,7 @@ export class TuiSessionController {
     requestId: string;
     actionId: string;
   }): InterruptResolvedReviewResult {
-    if (this.state.connection !== 'ready' || !this.connection.isConnected()) {
+    if (this.state.connection !== 'ready' || !this.transport.isConnected()) {
       return { ok: false, reason: 'not-ready' };
     }
     const run = this.state.session.activeRun;
@@ -410,7 +354,7 @@ export class TuiSessionController {
     ) {
       return { ok: false, reason: 'stale' };
     }
-    if (!this.connection.send({
+    if (!this.transport.send({
       type: 'run.interrupt',
       requestId: run.requestId,
     })) {
@@ -420,190 +364,36 @@ export class TuiSessionController {
   }
 
   startNewSession(): Promise<StartNewSessionResult> {
-    const unavailable = this.sessionCommandUnavailable();
-    if (unavailable) return Promise.reject(new Error(unavailable));
-
-    const requestId = this.requestIdFactory();
-    return new Promise((resolve, reject) => {
-      const pending: PendingSessionCommand = {
-        operation: 'new',
-        requestId,
-        timer: null,
-        resolve,
-        reject,
-      };
-      this.sessionCommands.set(requestId, pending);
-      pending.timer = this.scheduleSessionCommandTimeout(pending);
-      if (!this.connection.send({ type: 'session.new', requestId })) {
-        this.clearSessionCommand(pending);
-        reject(new Error('session new request could not be sent'));
-      }
-    });
+    return this.sessionCommands.startNewSession();
   }
 
-  listSessions(): Promise<AgentSessionSummary[]> {
-    const unavailable = this.sessionCommandUnavailable();
-    if (unavailable) return Promise.reject(new Error(unavailable));
-
-    const requestId = this.requestIdFactory();
-    return new Promise((resolve, reject) => {
-      const pending: PendingSessionCommand = {
-        operation: 'list',
-        requestId,
-        timer: null,
-        resolve,
-        reject,
-      };
-      this.sessionCommands.set(requestId, pending);
-      pending.timer = this.scheduleSessionCommandTimeout(pending);
-      if (!this.connection.send({ type: 'session.list', requestId })) {
-        this.clearSessionCommand(pending);
-        reject(new Error('session list request could not be sent'));
-      }
-    });
+  listSessions() {
+    return this.sessionCommands.listSessions();
   }
 
   resumeSession(sessionId: string): Promise<ResumeSessionResult> {
-    const normalizedSessionId = sessionId.trim();
-    if (!normalizedSessionId) {
-      return Promise.reject(new Error('session id is required'));
-    }
-    const unavailable = this.sessionCommandUnavailable();
-    if (unavailable) return Promise.reject(new Error(unavailable));
-
-    const requestId = this.requestIdFactory();
-    return new Promise((resolve, reject) => {
-      const pending: PendingSessionCommand = {
-        operation: 'resume',
-        requestId,
-        sessionId: normalizedSessionId,
-        timer: null,
-        resolve,
-        reject,
-      };
-      this.sessionCommands.set(requestId, pending);
-      pending.timer = this.scheduleSessionCommandTimeout(pending);
-      if (!this.connection.send({
-        type: 'session.resume',
-        requestId,
-        sessionId: normalizedSessionId,
-      })) {
-        this.clearSessionCommand(pending);
-        reject(new Error('session resume request could not be sent'));
-      }
-    });
+    return this.sessionCommands.resumeSession(sessionId);
   }
 
   updateGlobalReviewPolicy(
     globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode,
   ): Promise<UpdateGlobalReviewPolicyResult> {
-    const unavailable = this.runtimeConfigUpdateUnavailable();
-    if (unavailable) return Promise.reject(new Error(unavailable));
-
-    const requestId = this.requestIdFactory();
-    return new Promise((resolve, reject) => {
-      const pending: PendingRuntimeConfigUpdate = {
-        requestId,
-        globalReviewPolicyMode,
-        timer: null,
-        resolve,
-        reject,
-      };
-      this.runtimeConfigUpdate = pending;
-      pending.timer = this.setTimer(() => {
-        if (this.runtimeConfigUpdate !== pending) return;
-        this.runtimeConfigUpdate = null;
-        pending.timer = null;
-        pending.reject(new Error('runtime config update timed out'));
-      }, this.sessionCommandTimeoutMs);
-      if (!this.connection.send({
-        type: 'runtime_config.update',
-        requestId,
-        globalReviewPolicyMode,
-      })) {
-        this.clearRuntimeConfigUpdate(pending);
-        reject(new Error('runtime config update could not be sent'));
-      }
-    });
+    return this.runtimeConfig.updateGlobalReviewPolicy(globalReviewPolicyMode);
   }
 
   listModelProfiles(): Promise<ListModelProfilesResult> {
-    const unavailable = this.modelCommandUnavailable();
-    if (unavailable) return Promise.reject(new Error(unavailable));
-
-    const sessionId = this.state.session.sessionId;
-    const requestId = this.requestIdFactory();
-    return new Promise((resolve, reject) => {
-      const pending: PendingModelCommand = {
-        operation: 'list',
-        requestId,
-        sessionId,
-        timer: null,
-        resolve,
-        reject,
-      };
-      this.modelCommands.set(requestId, pending);
-      pending.timer = this.scheduleModelCommandTimeout(pending);
-      if (!this.connection.send({
-        type: 'model.list',
-        requestId,
-        sessionId,
-      })) {
-        this.clearModelCommand(pending);
-        reject(new Error('model list request could not be sent'));
-      }
-    });
+    return this.modelProfiles.list();
   }
 
   selectModelProfile(
     modelProfileId: string,
     expectedSessionId: string,
   ): Promise<AgentSessionSnapshot> {
-    const profileId = modelProfileId.trim();
-    if (!profileId) {
-      return Promise.reject(new Error('model profile id is required'));
-    }
-    const unavailable = this.modelCommandUnavailable();
-    if (unavailable) return Promise.reject(new Error(unavailable));
-    const sessionId = this.state.session.sessionId;
-    if (sessionId !== expectedSessionId) {
-      return Promise.reject(new ModelProfileCommandError(
-        'the active session changed; reopen the model picker',
-        'session_changed',
-      ));
-    }
-
-    const requestId = this.requestIdFactory();
-    return new Promise((resolve, reject) => {
-      const pending: PendingModelCommand = {
-        operation: 'select',
-        requestId,
-        sessionId,
-        modelProfileId: profileId,
-        timer: null,
-        resolve,
-        reject,
-      };
-      this.modelCommands.set(requestId, pending);
-      pending.timer = this.scheduleModelCommandTimeout(pending);
-      if (!this.connection.send({
-        type: 'model.select',
-        requestId,
-        sessionId,
-        modelProfileId: profileId,
-      })) {
-        this.clearModelCommand(pending);
-        reject(new Error('model selection request could not be sent'));
-      }
-    });
+    return this.modelProfiles.select(modelProfileId, expectedSessionId);
   }
 
   cancelModelProfileList() {
-    for (const command of [...this.modelCommands.values()]) {
-      if (command.operation !== 'list') continue;
-      this.clearModelCommand(command);
-      command.reject(new Error('model list request cancelled'));
-    }
+    this.modelProfiles.cancelLists();
   }
 
   submitReviewResponse(params: {
@@ -626,54 +416,41 @@ export class TuiSessionController {
     ) {
       return { ok: false, reason: 'stale' };
     }
-    if (!reviewDecisionsMatch(run.reviewAction, params.decisions)) {
-      return { ok: false, reason: 'stale' };
+    const prepared = prepareReviewDecision({
+      action: run.reviewAction,
+      decisions: params.decisions,
+      optionId: params.optionId,
+      inputText: params.inputText,
+    });
+    if (!prepared.ok) {
+      return prepared;
     }
-
-    const review = run.reviewAction.reviews[params.decisions.length];
-    const option = review?.options.find((candidate) => candidate.id === params.optionId);
-    if (!review || !option) {
-      return { ok: false, reason: 'stale' };
-    }
-    const inputText = params.inputText?.trim() ?? '';
-    if (option.input?.kind === 'text' && !inputText) {
-      return { ok: false, reason: 'input-required' };
-    }
-    const input = option.input?.kind === 'text'
-      ? { [option.input.key]: inputText }
-      : undefined;
-    const decision: ReviewResponse = {
-      reviewId: review.id,
-      selectedOptionId: option.id,
-      ...(input ? { input } : {}),
-    };
-    const decisions = [...params.decisions, decision];
-    const shouldSend = option.decision.type !== 'approve'
-      || decisions.length >= run.reviewAction.reviews.length;
-    if (!shouldSend) {
+    if (!prepared.shouldSend) {
       return {
         ok: true,
         status: 'advanced',
-        decision,
-        decisions,
+        decision: prepared.decision,
+        decisions: prepared.decisions,
       };
     }
-    if (!this.connection.send({
+    if (!this.transport.send({
       type: 'human_review_response',
       requestId: run.requestId,
       actionId: run.reviewAction.actionId,
-      reviewId: review.id,
-      selectedOptionId: option.id,
-      ...(input ? { input } : {}),
-      decisions,
+      reviewId: prepared.decision.reviewId,
+      selectedOptionId: prepared.decision.selectedOptionId,
+      ...(prepared.decision.input
+        ? { input: prepared.decision.input }
+        : {}),
+      decisions: prepared.decisions,
     })) {
       return { ok: false, reason: 'send-failed' };
     }
     return {
       ok: true,
       status: 'sent',
-      decision,
-      decisions,
+      decision: prepared.decision,
+      decisions: prepared.decisions,
     };
   }
 
@@ -694,7 +471,7 @@ export class TuiSessionController {
     ) {
       return { ok: false, reason: 'stale' };
     }
-    if (!this.connection.send({
+    if (!this.transport.send({
       type: 'review.cancel',
       requestId: run.requestId,
       actionId: run.reviewAction.actionId,
@@ -704,206 +481,35 @@ export class TuiSessionController {
     return { ok: true };
   }
 
-  private handleOpen() {
-    if (!this.started) {
-      this.connection.disconnect();
+  private handleMessage(message: SessionApplicationServerMessage) {
+    if (
+      message.type === 'model.list.result'
+      || message.type === 'model.select.result'
+      || message.type === 'model.select.error'
+    ) {
+      this.modelProfiles.handleMessage(message);
       return;
     }
-    const reason: SnapshotReason = this.reconnectAttempt > 0 ? 'reconnect' : 'startup';
-    this.setConnection(
-      reason === 'reconnect' ? 'reconnecting' : 'connecting',
-      'synchronizing session',
-    );
-    this.requestSnapshot(reason);
-  }
 
-  private handleMessage(message: AgentServerMessage) {
-    if (message.type === 'model.list.result') {
-      const pending = this.modelCommands.get(message.requestId);
-      if (pending?.operation !== 'list') return;
-      this.clearModelCommand(pending);
-      if (message.sessionId !== pending.sessionId) {
-        pending.reject(new Error(
-          'model list response did not match the requested session',
-        ));
-        return;
-      }
-      pending.resolve({
-        sessionId: message.sessionId,
-        defaultProfileId: message.defaultProfileId,
-        selectedProfileId: message.selectedProfileId,
-        requiredInputModalities: [...message.requiredInputModalities],
-        profiles: message.profiles.map((profile) => ({
-          ...profile,
-          inputModalities: [...profile.inputModalities],
-          issues: [...profile.issues],
-        })),
-      });
-      return;
-    }
-    if (message.type === 'model.select.result') {
-      const pending = this.modelCommands.get(message.requestId);
-      if (pending?.operation !== 'select') return;
-      this.clearModelCommand(pending);
-      if (
-        message.sessionId !== pending.sessionId
-        || message.selectedProfileId !== pending.modelProfileId
-        || message.snapshot.session.sessionId !== pending.sessionId
-      ) {
-        pending.reject(new Error(
-          'model selection response did not match the request',
-        ));
-        return;
-      }
-      this.updateSession(applySessionSnapshot(
-        this.state.session,
-        message.snapshot,
-        {
-          observedAt: this.now(),
-          preserveOmittedTokenUsage: true,
-          preserveOmittedSessionTokenUsage: true,
-        },
-      ));
-      pending.resolve(message.snapshot);
-      return;
-    }
-    if (message.type === 'model.select.error') {
-      const pending = this.modelCommands.get(message.requestId);
-      if (pending?.operation !== 'select') return;
-      this.clearModelCommand(pending);
-      pending.reject(new ModelProfileCommandError(message.message, message.code));
-      return;
-    }
     if (
       message.type === 'runtime_config.result'
       || message.type === 'runtime_config.error'
     ) {
-      const pending = this.runtimeConfigUpdate;
-      if (!pending || pending.requestId !== message.requestId) return;
-      this.clearRuntimeConfigUpdate(pending);
-      if (message.type === 'runtime_config.error') {
-        pending.reject(new Error(message.message));
-        return;
-      }
-      if (message.globalReviewPolicyMode !== pending.globalReviewPolicyMode) {
-        pending.reject(new Error('runtime config response did not match the requested policy'));
-        return;
-      }
-      this.updateSession({
-        ...this.state.session,
-        runtime: {
-          ...this.state.session.runtime,
-          globalReviewPolicyMode: message.globalReviewPolicyMode,
-        },
-      });
-      pending.resolve({
-        globalReviewPolicyMode: message.globalReviewPolicyMode,
-      });
+      this.runtimeConfig.handleMessage(message);
       return;
     }
 
-    if (message.type === 'session.list.result') {
-      const pending = this.sessionCommands.get(message.requestId);
-      if (pending?.operation !== 'list') return;
-      this.clearSessionCommand(pending);
-      pending.resolve(message.sessions);
-      return;
-    }
-
-    if (message.type === 'session.new.result') {
-      const pending = this.sessionCommands.get(message.requestId);
-      if (pending?.operation !== 'new') return;
-      this.clearSessionCommand(pending);
-      this.clearSnapshotTimer();
-      this.snapshotRequests.clear();
-      this.updateSession(applySessionSnapshot(
-        this.state.session,
-        message.snapshot,
-        { observedAt: this.now() },
-      ));
-      pending.resolve({
-        session: message.session,
-        snapshot: message.snapshot,
-      });
-      return;
-    }
-
-    if (message.type === 'session.resume.result') {
-      const pending = this.sessionCommands.get(message.requestId);
-      if (pending?.operation !== 'resume') return;
-      if (
-        pending.sessionId !== message.session.id
-        || pending.sessionId !== message.snapshot.session.sessionId
-      ) {
-        this.clearSessionCommand(pending);
-        pending.reject(new Error(
-          'session resume response did not match the requested session',
-        ));
-        return;
-      }
-      this.clearSessionCommand(pending);
-      this.clearSnapshotTimer();
-      this.snapshotRequests.clear();
-      this.updateSession(applySessionSnapshot(
-        this.state.session,
-        message.snapshot,
-        { observedAt: this.now() },
-      ));
-      pending.resolve({
-        session: message.session,
-        snapshot: message.snapshot,
-      });
-      return;
-    }
-
-    if (message.type === 'session.snapshot.result') {
-      const reason = this.snapshotRequests.get(message.requestId);
-      if (!reason) return;
-      this.snapshotRequests.delete(message.requestId);
-      if (reason !== 'completion') {
-        this.clearSnapshotTimer();
-      }
-      const session = reason === 'completion'
-        ? reconcileCompletionSnapshot(
-          this.state.session,
-          message.snapshot,
-          this.now(),
-        )
-        : applySessionSnapshot(this.state.session, message.snapshot, {
-          observedAt: this.now(),
-          preserveOmittedTokenUsage: reason !== 'startup',
-          preserveOmittedSessionTokenUsage: reason !== 'startup',
-        });
-      if (reason === 'startup' || reason === 'reconnect') {
-        this.reconnectAttempt = 0;
-        this.state = {
-          connection: 'ready',
-          session,
-        };
-        this.notify();
-      } else {
-        this.updateSession(session);
-      }
+    if (
+      message.type === 'session.list.result'
+      || message.type === 'session.new.result'
+      || message.type === 'session.resume.result'
+    ) {
+      this.sessionCommands.handleMessage(message);
       return;
     }
 
     if (message.type === 'session.error') {
-      const command = this.sessionCommands.get(message.requestId);
-      if (command?.operation === message.operation) {
-        this.clearSessionCommand(command);
-        command.reject(new Error(message.message));
-        return;
-      }
-      const reason = this.snapshotRequests.get(message.requestId);
-      if (reason) {
-        this.snapshotRequests.delete(message.requestId);
-        if (reason !== 'completion') {
-          this.clearSnapshotTimer();
-          this.setConnection('error', message.message);
-        } else {
-          this.setConnection('ready', `snapshot refresh failed: ${message.message}`);
-        }
-      }
+      this.sessionCommands.handleMessage(message);
       return;
     }
 
@@ -923,7 +529,7 @@ export class TuiSessionController {
         message.event.type === 'message.completed'
         || message.event.type === 'error'
       ) {
-        this.requestSnapshot('completion');
+        this.transport.requestCompletionSnapshot();
       }
       return;
     }
@@ -967,7 +573,7 @@ export class TuiSessionController {
           text: message.message?.trim() || 'Run interrupted.',
         }],
       }, { observedAt: this.now() }));
-      this.requestSnapshot('completion');
+      this.transport.requestCompletionSnapshot();
       return;
     }
 
@@ -975,117 +581,44 @@ export class TuiSessionController {
     assertNever(message);
   }
 
-  private handleClose() {
-    if (!this.started) return;
-    this.clearSnapshotTimer();
-    this.snapshotRequests.clear();
-    this.rejectSessionCommands('local-agent disconnected');
-    this.rejectModelCommands('local-agent disconnected');
-    this.rejectRuntimeConfigUpdate('local-agent disconnected');
-    this.scheduleReconnect();
-  }
-
-  private handleError(error: Error) {
-    if (!this.started) return;
-    this.setConnection('error', error.message);
-  }
-
-  private requestSnapshot(reason: SnapshotReason) {
-    if (!this.connection.isConnected()) {
-      if (reason !== 'completion') {
-        this.scheduleReconnect();
-      }
-      return;
-    }
-    const requestId = this.requestIdFactory();
-    this.snapshotRequests.set(requestId, reason);
-    if (!this.connection.send({ type: 'session.snapshot.get', requestId })) {
-      this.snapshotRequests.delete(requestId);
-      if (reason !== 'completion') {
-        this.scheduleReconnect();
-      }
-      return;
-    }
-    if (reason !== 'completion') {
-      this.clearSnapshotTimer();
-      this.snapshotTimer = this.setTimer(() => {
-        this.snapshotTimer = null;
-        if (!this.started || !this.snapshotRequests.has(requestId)) return;
-        this.snapshotRequests.delete(requestId);
-        this.connection.disconnect();
-        this.setConnection('reconnecting', 'session synchronization timed out');
-        this.scheduleReconnect();
-      }, this.snapshotTimeoutMs);
-    }
-  }
-
-  private scheduleReconnect() {
-    if (!this.started || this.reconnectTimer) return;
-    const delayIndex = Math.min(
-      this.reconnectAttempt,
-      this.reconnectDelaysMs.length - 1,
-    );
-    const delay = this.reconnectDelaysMs[delayIndex]!;
-    this.reconnectAttempt += 1;
-    const attemptDetail = this.reconnectAttempt <= this.reconnectDelaysMs.length
-      ? `${this.reconnectAttempt}/${this.reconnectDelaysMs.length}`
-      : `background attempt ${this.reconnectAttempt}`;
-    this.setConnection(
-      'reconnecting',
-      `retrying in ${formatDelay(delay)} (${attemptDetail})`,
-    );
-    this.reconnectTimer = this.setTimer(() => {
-      this.reconnectTimer = null;
-      if (this.started) {
-        this.connection.connect();
-      }
-    }, delay);
-  }
-
   private sessionCommandUnavailable() {
-    if (this.state.connection !== 'ready' || !this.connection.isConnected()) {
+    if (this.state.connection !== 'ready' || !this.transport.isConnected()) {
       return 'local-agent is not connected';
     }
     if (this.state.session.activeRun) {
       return 'wait for the current response to finish';
     }
-    if (this.sessionCommands.size > 0) {
-      return 'another session command is already in progress';
-    }
-    if (this.modelCommands.size > 0) {
+    if (this.modelProfiles.hasPending()) {
       return 'a model command is already in progress';
     }
-    if (this.runtimeConfigUpdate) {
+    if (this.runtimeConfig.hasPending()) {
       return 'runtime config is being updated';
     }
     return null;
   }
 
   private runtimeConfigUpdateUnavailable() {
-    if (this.state.connection !== 'ready' || !this.connection.isConnected()) {
+    if (this.state.connection !== 'ready' || !this.transport.isConnected()) {
       return 'local-agent is not connected';
     }
     if (this.state.session.activeRun) {
       return 'wait for the current response to finish';
     }
-    if (this.sessionCommands.size > 0) {
+    if (this.sessionCommands.hasPending()) {
       return 'a session command is in progress';
     }
-    if (this.modelCommands.size > 0) {
+    if (this.modelProfiles.hasPending()) {
       return 'a model command is in progress';
-    }
-    if (this.runtimeConfigUpdate) {
-      return 'runtime config is already being updated';
     }
     return null;
   }
 
   private reviewTransportReady() {
-    return this.state.connection === 'ready' && this.connection.isConnected();
+    return this.state.connection === 'ready' && this.transport.isConnected();
   }
 
   private modelCommandUnavailable() {
-    if (this.state.connection !== 'ready' || !this.connection.isConnected()) {
+    if (this.state.connection !== 'ready' || !this.transport.isConnected()) {
       return 'local-agent is not connected';
     }
     if (this.state.session.sessionId === 'pending') {
@@ -1094,81 +627,16 @@ export class TuiSessionController {
     if (this.state.session.activeRun) {
       return 'wait for the current response to finish';
     }
-    if (this.sessionCommands.size > 0) {
+    if (this.sessionCommands.hasPending()) {
       return 'a session command is in progress';
     }
-    if (this.modelCommands.size > 0) {
+    if (this.modelProfiles.hasPending()) {
       return 'another model command is already in progress';
     }
-    if (this.runtimeConfigUpdate) {
+    if (this.runtimeConfig.hasPending()) {
       return 'runtime config is being updated';
     }
     return null;
-  }
-
-  private scheduleSessionCommandTimeout(command: PendingSessionCommand) {
-    return this.setTimer(() => {
-      if (this.sessionCommands.get(command.requestId) !== command) return;
-      this.sessionCommands.delete(command.requestId);
-      command.timer = null;
-      command.reject(new Error(`session ${command.operation} request timed out`));
-    }, this.sessionCommandTimeoutMs);
-  }
-
-  private clearSessionCommand(command: PendingSessionCommand) {
-    if (command.timer) {
-      this.clearTimer(command.timer);
-      command.timer = null;
-    }
-    this.sessionCommands.delete(command.requestId);
-  }
-
-  private scheduleModelCommandTimeout(command: PendingModelCommand) {
-    return this.setTimer(() => {
-      if (this.modelCommands.get(command.requestId) !== command) return;
-      this.modelCommands.delete(command.requestId);
-      command.timer = null;
-      command.reject(new Error(`model ${command.operation} request timed out`));
-    }, this.sessionCommandTimeoutMs);
-  }
-
-  private clearModelCommand(command: PendingModelCommand) {
-    if (command.timer) {
-      this.clearTimer(command.timer);
-      command.timer = null;
-    }
-    this.modelCommands.delete(command.requestId);
-  }
-
-  private rejectModelCommands(message: string) {
-    for (const command of [...this.modelCommands.values()]) {
-      this.clearModelCommand(command);
-      command.reject(new Error(message));
-    }
-  }
-
-  private rejectSessionCommands(message: string) {
-    for (const command of [...this.sessionCommands.values()]) {
-      this.clearSessionCommand(command);
-      command.reject(new Error(message));
-    }
-  }
-
-  private clearRuntimeConfigUpdate(update: PendingRuntimeConfigUpdate) {
-    if (update.timer) {
-      this.clearTimer(update.timer);
-      update.timer = null;
-    }
-    if (this.runtimeConfigUpdate === update) {
-      this.runtimeConfigUpdate = null;
-    }
-  }
-
-  private rejectRuntimeConfigUpdate(message: string) {
-    const update = this.runtimeConfigUpdate;
-    if (!update) return;
-    this.clearRuntimeConfigUpdate(update);
-    update.reject(new Error(message));
   }
 
   private updateSession(session: AgentSession) {
@@ -1195,18 +663,6 @@ export class TuiSessionController {
     this.notify();
   }
 
-  private clearReconnectTimer() {
-    if (!this.reconnectTimer) return;
-    this.clearTimer(this.reconnectTimer);
-    this.reconnectTimer = null;
-  }
-
-  private clearSnapshotTimer() {
-    if (!this.snapshotTimer) return;
-    this.clearTimer(this.snapshotTimer);
-    this.snapshotTimer = null;
-  }
-
   private notify() {
     for (const listener of this.listeners) {
       listener(this.state);
@@ -1223,27 +679,6 @@ function createPendingSession(): AgentSession {
   };
 }
 
-function formatDelay(delayMs: number) {
-  return delayMs < 1_000
-    ? `${delayMs}ms`
-    : `${Math.round(delayMs / 100) / 10}s`;
-}
-
 function assertNever(value: never): never {
   throw new Error(`unhandled agent server message: ${String(value)}`);
-}
-
-function reviewDecisionsMatch(
-  action: AgentReviewAction,
-  decisions: readonly ReviewResponse[],
-) {
-  if (decisions.length >= action.reviews.length) return false;
-  return decisions.every((decision, index) => {
-    const review = action.reviews[index];
-    const option = review?.options.find((candidate) => (
-      candidate.id === decision.selectedOptionId
-    ));
-    return review?.id === decision.reviewId
-      && option?.decision.type === 'approve';
-  });
 }

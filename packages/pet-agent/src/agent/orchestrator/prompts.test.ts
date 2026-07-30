@@ -15,6 +15,10 @@ import {
   buildEntryDecisionInput,
   buildEntryDecisionSystemPrompt,
 } from './prompts';
+import {
+  buildCapabilityPlannerAgentInput,
+} from './prompts/capabilityPlannerAgent';
+import type { CapabilityPlannerInput } from './capabilityPlannerRunner';
 
 function recentMessages(count: number) {
   return Array.from({ length: count }, (_, index) => new HumanMessage(`recent-${index}`));
@@ -42,6 +46,62 @@ test('start-loop router request context includes compaction summaries outside re
   assert.match(requestContext, /<recent_messages purpose="coreference">/);
   assert.match(requestContext, /recent-7/);
   assert.doesNotMatch(requestContext, /recent-0/);
+});
+
+test('prepared request context does not repeat the current user request in recent messages', () => {
+  const requestContext = buildPreparedRequestContext({
+    latestUserRequest: '打开小红书',
+    recentMessages: [
+      new HumanMessage('更早的请求'),
+      new HumanMessage('打开小红书'),
+    ],
+  });
+
+  assert.equal((requestContext.match(/打开小红书/g) ?? []).length, 1);
+  assert.match(requestContext, /更早的请求/);
+});
+
+test('Capability Planner input uses compact single-layer XML', () => {
+  const input = buildCapabilityPlannerAgentInput({
+    mode: 'boundary',
+    workspace: {
+      rootPath: '/tmp/capabilities',
+      registryDigest: 'a'.repeat(64),
+      capabilityNames: ['browser'],
+      entries: [{
+        capabilityName: 'browser',
+        relativePath: 'browser/CAPABILITY.md',
+        documentDigest: 'b'.repeat(64),
+        provenance: 'authored',
+      }],
+      reused: false,
+    },
+    userIntentContext: [
+      '<user_request>',
+      '<![CDATA[',
+      '打开小红书',
+      ']]>',
+      '</user_request>',
+    ].join('\n'),
+    completedTasks: [{
+      objective: '确认浏览器可用',
+      result: '浏览器正常',
+    }],
+    remainingPlan: [{
+      objective: '浏览相关内容',
+      capabilityIntent: '浏览器交互',
+    }],
+    latestHandoff: '已确认浏览器可用。',
+  } satisfies CapabilityPlannerInput);
+
+  assert.match(input, /^<capability_planner_input mode="boundary">/);
+  assert.match(input, /<workspace registry_digest="[a-f0-9]{64}" document_count="1" \/>/);
+  assert.match(input, /<user_request>\n\s*<!\[CDATA\[\n打开小红书/);
+  assert.match(input, /<completed_tasks>/);
+  assert.match(input, /<remaining_plan>/);
+  assert.match(input, /<latest_handoff>/);
+  assert.doesNotMatch(input, /&lt;user_request&gt;/);
+  assert.doesNotMatch(input, /<user_intent|default_document_glob|role=|authority=/);
 });
 
 test('decision recent messages label delegation briefings as scheduling context', () => {

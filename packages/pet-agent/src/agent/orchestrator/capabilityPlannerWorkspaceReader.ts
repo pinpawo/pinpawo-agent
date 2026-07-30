@@ -25,6 +25,7 @@ export type PlannerFileToolErrorCode =
   | 'document_not_found'
   | 'document_tampered'
   | 'invalid_path'
+  | 'invalid_query'
   | 'invalid_range'
   | 'planning_limit_reached'
   | 'workspace_invalid'

@@ -78,7 +78,7 @@ entry eval 只评估 result availability。task grouping 和 task 内容质量�
 
 ### 4.1 Ownership
 
-Capability Planner 是 framework-internal tool-loop agent。它：
+Capability Planner 是由 LangChain `createAgent` 驱动的 framework-internal tool-loop agent。它：
 
 1. 通过 `glob_search`、`grep_search`、`view_file_chunk` 自主探索 `CAPABILITY.md`；
 2. 根据用户目的、已完成事实和 Capability 文档形成当前 task boundary；
@@ -87,6 +87,18 @@ Capability Planner 是 framework-internal tool-loop agent。它：
 
 Planner 不使用内存 relevance query 或传统搜索结果替代模型探索。Workspace 是代码给模型画出的能力地图，
 文件工具和私有 transcript 都封装在 Planner 黑盒内部。
+
+标准 Agent runtime 负责模型与工具之间的循环和 tool message。Planner 的模型调用设置
+`parallel_tool_calls: false`，使每轮只产生一个工具调用。终态使用 `createAgent` 的
+`responseFormat`/`structuredResponse` 标准链路：runtime 负责 schema 校验、错误反馈和终止，
+Planner 直接从 invoke result 取得规划对象。`capability_name` 由当前 registry 动态形成枚举；
+证据充分性和 `general` fallback 属于模型判断，不通过调用历史或文本匹配重复实现。
+
+Planner 必须先根据用户目标和已完成事实形成当前 task boundary，再探索能够完整承担该任务的
+Capability。文档搜索只是取得 Capability 证据，不能反向扩张或改写用户目标。具体搜索方法由文件
+工具的名称、schema 和返回结果表达：`grep_search` 接收从当前任务及所需能力提炼的区分性字面词，
+`view_file_chunk` 在摘要不足时读取候选文档，`glob_search` 用于无法搜索候选或需要确认 registry
+范围的情况。生产 system prompt 保留规划语义，不重复一套工具调用流程。
 
 ### 4.2 Modes
 

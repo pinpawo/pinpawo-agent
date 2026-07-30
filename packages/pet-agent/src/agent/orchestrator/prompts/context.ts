@@ -148,23 +148,59 @@ function buildRecentMessagesXmlContext(messages: BaseMessage[]): string | null {
   return lines.join('\n');
 }
 
-export function buildPreparedRequestContext(params: {
+type PreparedRequestContextParams = {
   latestUserRequest: string | null;
   recentMessages: BaseMessage[];
   contextSummaries?: string[];
   capabilityArtifacts?: CapabilityArtifactRef[];
-}): string {
+};
+
+function recentMessagesWithoutCurrentRequest(
+  messages: BaseMessage[],
+  latestUserRequest: string | null,
+) {
+  if (!latestUserRequest) return messages;
+  const visibleMessages = [...messages];
+  for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
+    const message = visibleMessages[index];
+    if (
+      message._getType() === 'human'
+      && readMessageText(message) === latestUserRequest
+    ) {
+      visibleMessages.splice(index, 1);
+      break;
+    }
+  }
+  return visibleMessages;
+}
+
+export function buildPreparedRequestContextFragment(
+  params: PreparedRequestContextParams,
+): string {
   const compactionSummaryContext = buildCompactionSummaryXmlContext(params.contextSummaries);
   const artifactContext = buildCapabilityArtifactContext(params.capabilityArtifacts);
-  const recentMessagesContext = buildRecentMessagesXmlContext(params.recentMessages);
+  const recentMessagesContext = buildRecentMessagesXmlContext(
+    recentMessagesWithoutCurrentRequest(
+      params.recentMessages,
+      params.latestUserRequest,
+    ),
+  );
+  return [
+    params.latestUserRequest
+      ? xmlTextBlock('user_request', clipForPrompt(params.latestUserRequest, 420))
+      : '<user_request missing="true" />',
+    compactionSummaryContext,
+    artifactContext ? xmlTextBlock('capability_artifacts', artifactContext) : null,
+    recentMessagesContext,
+  ].filter((line) => line !== null).join('\n');
+}
+
+export function buildPreparedRequestContext(
+  params: PreparedRequestContextParams,
+): string {
   return [
     '<user_intent_context>',
-    params.latestUserRequest
-      ? indentXmlBlock(xmlTextBlock('user_request', clipForPrompt(params.latestUserRequest, 420)), 2)
-      : '  <user_request missing="true" />',
-    compactionSummaryContext ? indentXmlBlock(compactionSummaryContext, 2) : null,
-    artifactContext ? indentXmlBlock(xmlTextBlock('capability_artifacts', artifactContext), 2) : null,
-    recentMessagesContext ? indentXmlBlock(recentMessagesContext, 2) : null,
+    indentXmlBlock(buildPreparedRequestContextFragment(params), 2),
     '</user_intent_context>',
-  ].filter((line) => line !== null).join('\n');
+  ].join('\n');
 }

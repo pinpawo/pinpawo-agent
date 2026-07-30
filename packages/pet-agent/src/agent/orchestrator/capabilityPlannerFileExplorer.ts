@@ -49,6 +49,8 @@ export type CapabilityPlannerFileExplorer = {
   readonly hasReachedObservationLimit: () => boolean;
 };
 
+type GrepSearchScope = 'summary' | 'document';
+
 class ObservationBudget {
   readonly maxDocumentBytes: number;
   #consumedDocumentBytes = 0;
@@ -212,6 +214,31 @@ function consumeDocumentObservation(
   budget.consume(utf8Bytes(content));
 }
 
+function grepQueryTerms(query: string, caseSensitive: boolean) {
+  const terms = query
+    .split('|')
+    .map((term) => term.trim())
+    .filter(Boolean);
+  if (terms.length === 0) {
+    throw new PlannerFileToolError(
+      'invalid_query',
+      'grep query must contain at least one non-empty term',
+    );
+  }
+  return caseSensitive ? terms : terms.map((term) => term.toLowerCase());
+}
+
+function grepSearchLines(content: string, scope: GrepSearchScope) {
+  const lines = content.split('\n');
+  if (scope === 'document') return lines;
+  const closingDelimiterIndex = lines.findIndex(
+    (line, index) => index > 0 && line.replace(/\r$/, '') === '---',
+  );
+  return closingDelimiterIndex < 0
+    ? lines
+    : lines.slice(0, closingDelimiterIndex + 1);
+}
+
 export function createCapabilityPlannerFileExplorer(params: {
   workspace: CapabilityDocumentWorkspace;
   maxObservationBytes?: number;
@@ -292,7 +319,7 @@ export function createCapabilityPlannerFileExplorer(params: {
     },
     {
       name: CAPABILITY_PLANNER_GLOB_SEARCH_TOOL_NAME,
-      description: 'List CAPABILITY.md files in the current immutable Capability Document Workspace. Paths are workspace-relative and ordered. Use cursor to continue a truncated result.',
+      description: 'Enumerate CAPABILITY.md paths in the immutable Workspace when candidate search is not possible or the registry scope must be confirmed. Paths are workspace-relative and ordered; use cursor to continue a truncated result.',
       schema: z.object({
         pattern: z.string().min(1).max(MAX_GLOB_PATTERN_CHARS).optional()
           .describe('Relative glob using *, **, and ?. Defaults to **/CAPABILITY.md.'),
@@ -308,12 +335,14 @@ export function createCapabilityPlannerFileExplorer(params: {
     async ({
       query,
       path,
+      scope,
       caseSensitive,
       cursor,
       limit,
     }: {
       query: string;
       path?: string;
+      scope?: GrepSearchScope;
       caseSensitive?: boolean;
       cursor?: number;
       limit?: number;
@@ -330,13 +359,15 @@ export function createCapabilityPlannerFileExplorer(params: {
         const selectedPaths = path
           ? [reader.assertDocumentPath(path)]
           : documentPaths;
-        const normalizedQuery = caseSensitive ? query : query.toLowerCase();
+        const normalizedTerms = grepQueryTerms(query, caseSensitive ?? false);
+        const searchScope = scope ?? 'summary';
         const start = cursor ?? 0;
         const maxResults = limit ?? DEFAULT_GREP_LIMIT;
         const matches: Array<{
           path: string;
           lineNumber: number;
           text: string;
+          matchedTerms: string[];
           truncated: boolean;
         }> = [];
         let matchIndex = 0;
@@ -349,35 +380,54 @@ export function createCapabilityPlannerFileExplorer(params: {
             selectedPath,
             runtime.signal,
           );
-          const lines = content.split('\n');
+          const lines = grepSearchLines(content, searchScope);
+          let firstMatch: {
+            lineNumber: number;
+            text: string;
+            truncated: boolean;
+          } | null = null;
+          const documentMatchedTerms = new Set<string>();
           for (let index = 0; index < lines.length; index += 1) {
             const rawLine = lines[index]?.replace(/\r$/, '') ?? '';
             const candidate = caseSensitive ? rawLine : rawLine.toLowerCase();
-            if (!candidate.includes(normalizedQuery)) continue;
-            if (matchIndex < start) {
-              matchIndex += 1;
-              continue;
+            const matchedTerms = normalizedTerms.filter(
+              (term) => candidate.includes(term),
+            );
+            if (matchedTerms.length === 0) continue;
+            matchedTerms.forEach((term) => documentMatchedTerms.add(term));
+            if (!firstMatch) {
+              const text = truncateUtf8(rawLine, MAX_GREP_LINE_BYTES);
+              firstMatch = {
+                lineNumber: index + 1,
+                text,
+                truncated: text !== rawLine,
+              };
             }
-            if (matches.length >= maxResults) {
-              stoppedBy = 'result_limit';
-              break search;
-            }
-            const text = truncateUtf8(rawLine, MAX_GREP_LINE_BYTES);
-            const item = {
-              path: selectedPath,
-              lineNumber: index + 1,
-              text,
-              truncated: text !== rawLine,
-            };
-            const itemBytes = utf8Bytes(JSON.stringify(item));
-            if (usedBytes + itemBytes > availableBytes) {
-              stoppedBy = 'observation_budget';
-              break search;
-            }
-            matches.push(item);
-            usedBytes += itemBytes;
-            matchIndex += 1;
           }
+          if (!firstMatch) continue;
+          if (matchIndex < start) {
+            matchIndex += 1;
+            continue;
+          }
+          if (matches.length >= maxResults) {
+            stoppedBy = 'result_limit';
+            break search;
+          }
+          const item = {
+            path: selectedPath,
+            lineNumber: firstMatch.lineNumber,
+            text: firstMatch.text,
+            matchedTerms: [...documentMatchedTerms],
+            truncated: firstMatch.truncated,
+          };
+          const itemBytes = utf8Bytes(JSON.stringify(item));
+          if (usedBytes + itemBytes > availableBytes) {
+            stoppedBy = 'observation_budget';
+            break search;
+          }
+          matches.push(item);
+          usedBytes += itemBytes;
+          matchIndex += 1;
         }
         if (matches.length === 0 && stoppedBy === 'observation_budget') {
           throw new PlannerFileToolError(
@@ -394,6 +444,7 @@ export function createCapabilityPlannerFileExplorer(params: {
           {
             query,
             path: path ?? null,
+            scope: searchScope,
             matches,
             range: { start, end },
             nextCursor: stoppedBy ? end : null,
@@ -412,14 +463,16 @@ export function createCapabilityPlannerFileExplorer(params: {
     },
     {
       name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-      description: 'Search literal text across CAPABILITY.md files in the current immutable workspace. Results contain stable relative paths and line numbers; use cursor to continue.',
+      description: 'Find candidate Capabilities in the immutable Workspace from discriminative literal terms derived from the current task and required ability. Terms separated by | use OR semantics. The default summary scope searches routing frontmatter; document scope searches complete documents. Each result represents one matching Capability.',
       schema: z.object({
         query: z.string().min(1).max(MAX_GREP_QUERY_CHARS)
-          .describe('Literal text to search for.'),
+          .describe('A few discriminative literal terms from the current task and required ability, joined by | for OR matching. This is literal text, not a regular expression.'),
         path: z.string().min(1)
           .max(CAPABILITY_PLANNER_DOCUMENT_PATH_MAX_CHARS)
           .optional()
           .describe('Optional exact workspace-relative CAPABILITY.md path.'),
+        scope: z.enum(['summary', 'document']).optional()
+          .describe('summary searches routing frontmatter and is the default; document searches the complete Capability document.'),
         caseSensitive: z.boolean().optional()
           .describe('Whether matching is case-sensitive; defaults to false.'),
         cursor: z.number().int().nonnegative().optional()
@@ -535,7 +588,7 @@ export function createCapabilityPlannerFileExplorer(params: {
     },
     {
       name: CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
-      description: 'Read a bounded, line-numbered chunk of one CAPABILITY.md from the immutable workspace. Use nextStartLine to continue; paths must come from glob_search or grep_search.',
+      description: 'Read a bounded, line-numbered chunk of a candidate CAPABILITY.md when its routing summary is insufficient to judge whether it can complete the current task. Use nextStartLine to continue.',
       schema: z.object({
         path: z.string().min(1)
           .max(CAPABILITY_PLANNER_DOCUMENT_PATH_MAX_CHARS)

@@ -2,7 +2,7 @@
 title: System Prompt Source Registry
 page_type: source
 status: validated
-updated: 2026-07-29
+updated: 2026-07-31
 sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md
@@ -10,6 +10,7 @@ sources:
   - ../../../packages/pet-agent/src/agent/orchestrator/capabilityPlannerAgent.ts
   - https://github.com/pinpawo/pinpawo-agent/issues/490
   - https://github.com/pinpawo/pinpawo-agent/pull/492
+  - https://github.com/pinpawo/pinpawo-agent/pull/515
 related:
   - ../overview.md
   - ../capability-toolkit-architecture.md
@@ -96,6 +97,7 @@ detail.
 - [PR #483 — graph cutover](https://github.com/pinpawo/pinpawo-agent/pull/483)
 - [Issue #490 — task-boundary and entry contract consolidation](https://github.com/pinpawo/pinpawo-agent/issues/490)
 - [PR #492 — unified Planner task and Capability ownership](https://github.com/pinpawo/pinpawo-agent/pull/492)
+- [PR #515 — standard Agent runtime, structured result handoff, and simplified Planner prompts](https://github.com/pinpawo/pinpawo-agent/pull/515)
 
 ## Historical evolution
 

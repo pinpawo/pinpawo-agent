@@ -2,11 +2,12 @@
 title: Prompt Knowledge Layers
 page_type: concept
 status: validated
-updated: 2026-07-29
+updated: 2026-07-31
 sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../../../packages/pet-agent/src/agent/orchestrator/capabilityPlannerAgent.ts
   - https://github.com/pinpawo/pinpawo-agent/pull/492
+  - https://github.com/pinpawo/pinpawo-agent/pull/515
 related:
   - orchestrator-practical-reasoning.md
   - decision-node-ownership.md
@@ -27,7 +28,7 @@ model input; the fourth belongs to the runtime.
 | Static contract | Stable meaning of a node and its output | entry chooses result availability; Planner forms a task and selects its Capability; outcome validates an announce |
 | Conditional protocol | Protocol selected by provider or product configuration without changing graph semantics | JSON mode schema rendering |
 | Injected facts | Values that vary per call | user request, workspace digest, completed tasks, future tail, announce, workdir |
-| Deterministic enforcement | State and safety rules that code can derive | guards, workspace containment, availability, schema validation, routing, cleanup |
+| Deterministic enforcement | State and safety rules that code can derive | guards, workspace containment, workspace-derived result availability, schema validation, routing, cleanup |
 
 This model is defined by
 [the decision prompt design](../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md)

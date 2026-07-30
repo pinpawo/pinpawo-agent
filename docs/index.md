@@ -15,7 +15,7 @@ the original design and reference documents. Maintenance rules live in
 - [Orchestrator as practical reasoning](wiki/concepts/orchestrator-practical-reasoning.md)
 - [System prompt authoring and evaluation principles](wiki/concepts/system-prompt-authoring-principles.md)
 - [Orchestrator decision node ownership](wiki/concepts/decision-node-ownership.md)
-- [Capability Planner task boundaries and Capability selection](wiki/decisions/capability-planner-task-boundaries.md)
+- [Capability Planner task boundaries, structured results, and Capability selection](wiki/decisions/capability-planner-task-boundaries.md)
 - [Delegation completion acknowledgement and terminal close](wiki/decisions/delegation-completion-acknowledgement.md)
 - [Documentation wiki management plan](wiki/migrations/docs-wiki-management-plan.md)
 

@@ -355,3 +355,22 @@ lint passes, and documentation migrations.
   Wiki reference to deleted raw design sources.
 - Validated all remaining Wiki frontmatter and local Markdown/source links
   after the ingest.
+
+## [2026-07-31] ingest | Capability Planner standard agent and prompt contract
+
+- Registered merged PR #515 and the current Planner prompt, structured-output
+  harness, tests, and raw decision design as authoritative implementation
+  evidence.
+- Recorded the standard `createAgent` `responseFormat` / `structuredResponse`
+  handoff and removed stale Wiki descriptions of a custom submission tool.
+- Clarified the model-visible evidence boundary: `user_request` carries the
+  current purpose, while recent messages and compaction summaries support
+  reference resolution, continuity, and background.
+- Derived the allowed terminal result schemas from the current Workspace:
+  empty exposes only `unavailable`, registered `general` exposes only
+  `next_task`, and another non-empty Workspace exposes both.
+- Recorded deterministic Moonshot JSON Schema compatibility coverage while
+  keeping cross-model exploration and planning quality open.
+- Updated the existing Planner decision, ownership, knowledge-layer,
+  authoring-principle, source-registry, open-question, and index pages without
+  adding a new Prompt Contract Map row.

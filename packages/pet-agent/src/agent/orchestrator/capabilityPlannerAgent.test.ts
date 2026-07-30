@@ -319,9 +319,9 @@ test('Planner Agent explores CAPABILITY.md files and returns a structured curren
     CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
     CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
   ]);
-  assert.equal(model.structuredOutputToolNames.size, 2);
+  assert.equal(model.structuredOutputToolNames.size, 1);
   assert.ok(model.structuredOutputToolNames.has('next_task'));
-  assert.ok(model.structuredOutputToolNames.has('unavailable'));
+  assert.equal(model.structuredOutputToolNames.has('unavailable'), false);
   assert.ok(model.structuredOutputSchemaReferences.every(
     (reference) => reference.startsWith('#/$defs/'),
   ));
@@ -388,6 +388,9 @@ test('entry mode forms one executable task after Capability exploration', async 
   }).invoke(plannerInput(workspace));
 
   assert.equal(model.invocations.length, 2);
+  assert.equal(model.structuredOutputToolNames.size, 2);
+  assert.ok(model.structuredOutputToolNames.has('next_task'));
+  assert.ok(model.structuredOutputToolNames.has('unavailable'));
   assert.equal(result.result, 'next_task');
   assert.equal(
     result.next_task.objective,
@@ -453,6 +456,9 @@ test('an empty workspace can produce a truthful unavailable result', async (t) =
     plannerInput(workspace),
   );
 
+  assert.equal(model.structuredOutputToolNames.size, 1);
+  assert.equal(model.structuredOutputToolNames.has('next_task'), false);
+  assert.ok(model.structuredOutputToolNames.has('unavailable'));
   assert.deepEqual(result, {
     result: 'unavailable',
     task: 'Publish a browser automation report.',

@@ -2,7 +2,7 @@
 title: System Prompt Design Knowledge Map
 page_type: overview
 status: validated
-updated: 2026-07-29
+updated: 2026-07-31
 sources:
   - ../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md
@@ -11,6 +11,7 @@ sources:
   - ../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/capabilityPlanner.ts
   - https://github.com/pinpawo/pinpawo-agent/issues/490
   - https://github.com/pinpawo/pinpawo-agent/pull/492
+  - https://github.com/pinpawo/pinpawo-agent/pull/515
 related:
   - capability-toolkit-architecture.md
   - concepts/orchestrator-practical-reasoning.md

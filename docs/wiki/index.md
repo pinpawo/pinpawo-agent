@@ -2,7 +2,7 @@
 title: Documentation Wiki Index
 page_type: overview
 status: draft
-updated: 2026-07-29
+updated: 2026-07-31
 sources:
   - ../AGENTS.md
 related:
@@ -49,8 +49,9 @@ explicitly migrated.
   of result availability, task and Capability planning, announce verdicts, and
   user-visible replies.
 - [CapabilityPlanner task boundaries](decisions/capability-planner-task-boundaries.md)
-  — filesystem exploration, current task and Capability selection, General
-  fallback, and result-driven future-plan revision.
+  — filesystem exploration, current task and Capability selection,
+  Workspace-derived structured results, General fallback, and result-driven
+  future-plan revision.
 - [Message context and provenance](concepts/message-context-and-provenance.md) —
   canonical main messages, private lanes, announce, handoff, and trusted identity.
 - [Delegation completion acknowledgement](decisions/delegation-completion-acknowledgement.md)

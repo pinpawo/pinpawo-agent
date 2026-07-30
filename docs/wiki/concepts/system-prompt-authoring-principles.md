@@ -2,7 +2,7 @@
 title: System Prompt Authoring Principles
 page_type: concept
 status: validated
-updated: 2026-07-29
+updated: 2026-07-31
 sources:
   - ../sources/model-prompting-and-harness-references.md
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
@@ -12,6 +12,7 @@ sources:
   - https://github.com/pinpawo/pinpawo-agent/issues/417
   - https://github.com/pinpawo/pinpawo-agent/issues/490
   - https://github.com/pinpawo/pinpawo-agent/pull/492
+  - https://github.com/pinpawo/pinpawo-agent/pull/515
 related:
   - ../overview.md
   - ../capability-toolkit-architecture.md
@@ -106,8 +107,8 @@ Critical behavior needs enforcement or detection outside prose when feasible:
 - filesystem code owns containment, symlink safety, digest verification, and
   read budgets;
 - registry compilation owns executable availability;
-- runtime validation owns selected-name membership and the General fallback
-  invariant;
+- response-format construction and runtime validation own selected-name
+  membership and the General fallback invariant;
 - semantic evals own judgments that code cannot prove.
 
 ### 6. Treat tools and observations as the agent-computer interface
@@ -170,7 +171,7 @@ announce verdicts, and replies.
 
 The Planner is evaluated as a tool-loop behavior, not as a single-call Decision.
 Its private transcript and file observations are implementation evidence; the
-submitted plan and graph lifecycle remain the externally meaningful result.
+structured plan and graph lifecycle remain the externally meaningful result.
 
 ## Capability Planner-specific review
 

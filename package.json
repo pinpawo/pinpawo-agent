@@ -29,6 +29,7 @@
     "eval:langfuse:tool-review-reject": "npm -w @pinpawo/pet-agent run eval:langfuse:tool-review-reject",
     "eval:decision-stability": "npm -w @pinpawo/pet-agent run eval:decision-stability",
     "eval:prompt-stability": "npm -w @pinpawo/pet-agent run eval:prompt-stability",
+    "eval:prompt-matrix": "npm -w @pinpawo/pet-agent run eval:prompt-matrix",
     "eval:prompt-compare": "npm -w @pinpawo/pet-agent run eval:prompt-compare --",
     "prompt:preview": "npm -w @pinpawo/pet-agent run prompt:preview --"
   },

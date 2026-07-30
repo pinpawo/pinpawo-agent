@@ -43,13 +43,19 @@ function report(input: { commit: string; passed: boolean; meanDurationMs: number
       changedPaths: [],
     },
     model: {
+      role: 'subject',
+      profileId: 'subject',
+      fingerprint: 'subject-fingerprint',
       provider: 'test',
       family: 'test-family',
       model: 'test-model',
-      baseUrl: 'https://example.test',
+      endpointOrigin: 'https://example.test',
+      contextWindowTokens: 32_000,
+      maxOutputTokens: null,
       temperature: 0,
       reasoningEffort: 'low',
       timeoutMs: 1000,
+      inputModalities: ['text'],
     },
     structuredOutputMethod: 'jsonSchema',
     evaluator: {
@@ -92,7 +98,7 @@ function report(input: { commit: string; passed: boolean; meanDurationMs: number
 
 test('report totals preserve usage and cost coverage', () => {
   const value = report({ commit: 'baseline', passed: true, meanDurationMs: 20 });
-  assert.equal(value.reportVersion, 3);
+  assert.equal(value.reportVersion, 4);
   assert.deepEqual(value.totals, {
     runs: 1,
     goalsAchieved: 1,
@@ -138,12 +144,28 @@ test('comparison rejects different evaluator settings', () => {
   const baseline = report({ commit: 'baseline', passed: true, meanDurationMs: 20 });
   const candidate = report({ commit: 'candidate', passed: true, meanDurationMs: 20 });
   candidate.evaluator = {
-    mode: 'subject-model',
+    mode: 'fixed-model',
     version: 'prompt-goal-v1',
-    model: candidate.model,
+    model: {
+      ...candidate.model,
+      role: 'judge',
+      profileId: 'judge',
+      fingerprint: 'judge-fingerprint',
+    },
     structuredOutputMethod: 'jsonSchema',
   };
   const comparison = comparePromptEvalReports(baseline, candidate);
   assert.equal(comparison.compatible, false);
   assert.ok(comparison.compatibilityNotes.includes('evaluator mode differs'));
+});
+
+test('comparison rejects a different subject fingerprint', () => {
+  const baseline = report({ commit: 'baseline', passed: true, meanDurationMs: 20 });
+  const candidate = report({ commit: 'candidate', passed: true, meanDurationMs: 20 });
+  candidate.model.fingerprint = 'another-endpoint';
+  const comparison = comparePromptEvalReports(baseline, candidate);
+  assert.equal(comparison.compatible, false);
+  assert.ok(
+    comparison.compatibilityNotes.includes('subject fingerprint differs'),
+  );
 });

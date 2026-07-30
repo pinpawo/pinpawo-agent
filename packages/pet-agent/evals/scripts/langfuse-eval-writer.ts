@@ -18,6 +18,7 @@ export async function writeLangfuseEvalResult(params: {
   scores: LangfuseEvalScore[];
   durationMs: number;
   error?: string;
+  metadata?: Record<string, unknown>;
 }) {
   const traceId = `${params.runName}.${params.testCase.name}.${randomUUID()}`
     .replace(/[^a-zA-Z0-9_.:-]/g, '-')
@@ -30,6 +31,7 @@ export async function writeLangfuseEvalResult(params: {
       input: params.testCase.input,
       output: params.error ? { ...params.output, error: params.error } : params.output,
       metadata: {
+        ...params.metadata,
         runName: params.runName,
         datasetName: params.datasetName,
         datasetItemId: params.testCase.id,

@@ -169,3 +169,39 @@ session/profile modality contract, reads and hashes the local object, and
 rehydrates that reference into a transient image data URL. The durable
 checkpoint remains reference-based. Transcript projection shows only the
 attachment filename.
+
+## Eval profile matrix
+
+Prompt and lifecycle evals resolve explicit Model Profile IDs from the same
+versioned configuration. They do not construct a runnable model by partially
+overlaying `LLM_*` values.
+
+One subject report:
+
+```sh
+PROMPT_EVAL_MODEL_PROFILE_ID=qwen-max \
+PROMPT_EVAL_JUDGE_PROFILE_ID=gpt-judge \
+  npm run eval:prompt-stability
+```
+
+Sequential cross-model matrix:
+
+```sh
+PROMPT_EVAL_MODEL_PROFILE_IDS=deepseek-pro,qwen-max \
+PROMPT_EVAL_JUDGE_PROFILE_ID=gpt-judge \
+PROMPT_EVAL_MATRIX_MAX_RUNS=300 \
+  npm run eval:prompt-matrix
+```
+
+Every child remains an ordinary single-profile prompt report for same-profile
+regression comparison. Its subject and fixed judge each carry a stable profile
+ID, role, sanitized fingerprint, endpoint origin, runtime settings, and declared
+modalities. Raw credentials and full endpoint paths never enter reports or
+Langfuse metadata.
+
+The matrix manifest references those child reports and aggregates pass rate,
+latency, subject/judge token usage, cost coverage, schema/invocation failures,
+and modality results. Text-only profiles explicitly skip the known-image case
+as `unsupported-modality`; image-capable profiles run it. Cross-model ranking
+uses the matrix manifest, while the existing prompt comparator rejects different
+subject fingerprints or judge/harness identities.

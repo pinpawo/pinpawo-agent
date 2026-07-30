@@ -105,7 +105,7 @@ test('completion snapshot trusts a future full canonical timeline', () => {
   );
 });
 
-test('completion snapshot aligns request ids after an omitted live-only reply', () => {
+test('completion snapshot retains an omitted live-only reply and aligns later request ids', () => {
   const live = session([
     { ...message('first-user', 'user', 'First prompt.'), requestId: 'first' },
     { ...message('partial', 'assistant', 'Interrupted partial.'), requestId: 'first' },
@@ -124,7 +124,7 @@ test('completion snapshot aligns request ids after an omitted live-only reply', 
     reconciled.timeline
       .filter((entry) => entry.type === 'message')
       .map((entry) => entry.requestId),
-    ['first', 'second', 'second'],
+    ['first', 'first', 'second', 'second'],
   );
 });
 

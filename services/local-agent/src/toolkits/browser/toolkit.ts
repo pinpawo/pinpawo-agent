@@ -5,7 +5,10 @@ import {
   type ToolReviewPolicy,
 } from '@pinpawo/pet-agent';
 import { loadStoredConfig } from '../../storage';
-import { detectBrowserStatus } from './session';
+import {
+  detectBrowserStatus,
+  type BrowserStatus,
+} from './session';
 import { browserTools } from './tools';
 import { browserOperationMetadata } from './operationMetadata';
 import { browserRuntime } from './runtime';
@@ -58,6 +61,39 @@ function disabledAvailability(): BrowserAvailabilitySnapshot {
   };
 }
 
+export function buildBrowserAvailabilitySnapshot(
+  status: BrowserStatus,
+  bridge = status.mode === 'extension'
+    ? browserRuntime.getExtensionStatus()
+    : undefined,
+): BrowserAvailabilitySnapshot {
+  // Toolkit availability is cached and filters the runtime registry. Keep a
+  // waiting extension routable so a later reconnect can recover without
+  // rebuilding the agent; commandReady is the live execution signal.
+  const available = status.readiness !== 'unavailable';
+  return {
+    available,
+    reason: available ? undefined : status.detail,
+    detail: status.detail,
+    metadata: {
+      mode: status.mode,
+      configured: status.configured,
+      readiness: status.readiness,
+      commandReady: status.commandReady,
+      ...(bridge ? {
+        listening: bridge.listening,
+        hostConnected: bridge.hostConnected,
+        extensionConnected: bridge.extensionConnected,
+        debuggerAttached: bridge.debuggerAttached,
+        targetAlive: bridge.targetAlive,
+        activeTabOwnership: bridge.activeTabOwnership,
+        extensionId: bridge.extensionId,
+        stateRevision: bridge.stateRevision,
+      } : {}),
+    },
+  };
+}
+
 export async function checkBrowserAvailability() {
   const storedCaps = loadStoredConfig().capabilities;
   if (storedCaps?.browser === false) {
@@ -69,24 +105,7 @@ export async function checkBrowserAvailability() {
     const bridge = status.mode === 'extension'
       ? browserRuntime.getExtensionStatus()
       : undefined;
-    return rememberBrowserAvailability({
-      available: status.mode !== 'none',
-      reason: status.mode === 'none' ? status.detail : undefined,
-      detail: status.detail,
-      metadata: {
-        mode: status.mode,
-        configured: status.configured,
-        ...(bridge ? {
-          hostConnected: bridge.hostConnected,
-          extensionConnected: bridge.extensionConnected,
-          debuggerAttached: bridge.debuggerAttached,
-          targetAlive: bridge.targetAlive,
-          activeTabOwnership: bridge.activeTabOwnership,
-          extensionId: bridge.extensionId,
-          stateRevision: bridge.stateRevision,
-        } : {}),
-      },
-    });
+    return rememberBrowserAvailability(buildBrowserAvailabilitySnapshot(status, bridge));
   } catch (error) {
     return rememberBrowserAvailability({
       available: false,

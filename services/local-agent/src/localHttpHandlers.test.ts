@@ -293,6 +293,16 @@ test('handleLocalHttpRequest preserves browser availability diagnostics', async 
     payload.browser_detail,
     availability.detail ?? availability.reason,
   );
+  if (mode === 'extension') {
+    assert.equal(
+      payload.browser_command_ready,
+      availability.metadata?.commandReady,
+    );
+    assert.equal(
+      typeof payload.browser_runtime_state,
+      'string',
+    );
+  }
 });
 
 test('capability rescan replaces frozen runtime capability snapshots', async () => {

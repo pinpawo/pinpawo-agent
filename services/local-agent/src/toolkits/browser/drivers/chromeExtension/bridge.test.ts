@@ -74,6 +74,7 @@ test('local browser bridge authenticates, registers and resolves commands', asyn
   });
   await bridge.start();
   t.after(async () => bridge.stop());
+  assert.equal(bridge.getStatus().commandReady, false);
 
   assert.equal((await readFile(tokenPath, 'utf8')).trim(), 'test-token');
   assert.equal((await stat(tokenPath)).mode & 0o777, 0o600);
@@ -107,6 +108,7 @@ test('local browser bridge authenticates, registers and resolves commands', asyn
   });
   await waitUntil(() => bridge.getStatus().extensionConnected);
   assert.equal(bridge.getStatus().extensionConnected, true);
+  assert.equal(bridge.getStatus().commandReady, true);
   assert.equal(bridge.getStatus().activeTabId, 42);
   assert.equal(bridge.getStatus().debuggerAttached, true);
   assert.equal(bridge.getStatus().stateRevision, 2);

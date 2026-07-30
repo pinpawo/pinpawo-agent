@@ -16,7 +16,10 @@ import {
   type BrowserRawSnapshot,
 } from './snapshotPayload';
 import { ChromeExtensionBrowserSession } from './drivers/chromeExtension/session';
-import { browserRuntime } from './runtime';
+import {
+  browserRuntime,
+  describeBrowserExtensionStatus,
+} from './runtime';
 import { persistBrowserScreenshot } from './screenshot';
 import { BrowserOperationError } from './errors';
 import {
@@ -86,19 +89,22 @@ function listSessionNames(): string[] {
 // ── Backend detection ─────────────────────────────────────────────────────────
 
 export type BrowserBackend = 'extension' | 'playwright';
+export type BrowserReadiness = 'ready' | 'waiting' | 'unavailable';
 export type BrowserStatus = {
   mode: BrowserBackend | 'none';
   detail: string;
   configured: string;
+  readiness: BrowserReadiness;
+  commandReady: boolean;
 };
 
 export function selectAutoBrowserBackend(input: {
-  extensionConnected: boolean;
+  extensionCommandReady: boolean;
   extensionListening?: boolean;
   playwrightAvailable: boolean;
   requiresPlaywright?: boolean;
 }): BrowserBackend | null {
-  if (!input.requiresPlaywright && input.extensionConnected) return 'extension';
+  if (!input.requiresPlaywright && input.extensionCommandReady) return 'extension';
   if (input.playwrightAvailable) return 'playwright';
   if (!input.requiresPlaywright && input.extensionListening) return 'extension';
   return null;
@@ -146,7 +152,7 @@ async function detectBackend(requiresPlaywright = false): Promise<BrowserBackend
   const extensionStatus = browserRuntime.getExtensionStatus();
   const playwrightAvailable = await canUsePlaywright();
   const autoBackend = selectAutoBrowserBackend({
-    extensionConnected: extensionStatus.extensionConnected,
+    extensionCommandReady: extensionStatus.commandReady,
     extensionListening: extensionStatus.listening,
     playwrightAvailable,
     requiresPlaywright,
@@ -798,22 +804,34 @@ export async function detectBrowserStatus(): Promise<BrowserStatus> {
   // Respect the configured backend — same priority as detectBackend()
   if (configured === 'playwright') {
     if (await canUsePlaywright()) {
-      return { mode: 'playwright', detail: chromeExecPath, configured };
+      return {
+        mode: 'playwright',
+        detail: chromeExecPath,
+        configured,
+        readiness: 'ready',
+        commandReady: true,
+      };
     }
     return {
       mode: 'none',
       detail: `configured playwright but unavailable: missing playwright-core or Chrome at ${chromeExecPath}`,
       configured,
+      readiness: 'unavailable',
+      commandReady: false,
     };
   }
   if (configured === 'extension') {
     const status = browserRuntime.getExtensionStatus();
     return {
       mode: 'extension',
-      detail: status.extensionConnected
-        ? `connected extension ${status.extensionId ?? '(unknown)'}`
-        : `configured; waiting for extension via ${status.socketPath}`,
+      detail: describeBrowserExtensionStatus(status),
       configured,
+      readiness: status.commandReady
+        ? 'ready'
+        : status.listening
+          ? 'waiting'
+          : 'unavailable',
+      commandReady: status.commandReady,
     };
   }
   if (configured === 'agent-browser') {
@@ -821,6 +839,8 @@ export async function detectBrowserStatus(): Promise<BrowserStatus> {
       mode: 'none',
       detail: 'configured agent-browser but that backend is no longer supported',
       configured,
+      readiness: 'unavailable',
+      commandReady: false,
     };
   }
   if (configured !== 'auto') {
@@ -828,29 +848,47 @@ export async function detectBrowserStatus(): Promise<BrowserStatus> {
       mode: 'none',
       detail: `unknown browser backend "${configured}"; use auto, playwright, or extension`,
       configured,
+      readiness: 'unavailable',
+      commandReady: false,
     };
   }
 
   // auto-detect
   const extension = browserRuntime.getExtensionStatus();
-  if (extension.extensionConnected) {
+  if (extension.commandReady) {
     return {
       mode: 'extension',
-      detail: `connected extension ${extension.extensionId ?? '(unknown)'}`,
+      detail: describeBrowserExtensionStatus(extension),
       configured,
+      readiness: 'ready',
+      commandReady: true,
     };
   }
   if (await canUsePlaywright()) {
-    return { mode: 'playwright', detail: chromeExecPath, configured };
+    return {
+      mode: 'playwright',
+      detail: chromeExecPath,
+      configured,
+      readiness: 'ready',
+      commandReady: true,
+    };
   }
   if (extension.listening) {
     return {
       mode: 'extension',
-      detail: `waiting for extension via ${extension.socketPath}`,
+      detail: describeBrowserExtensionStatus(extension),
       configured,
+      readiness: 'waiting',
+      commandReady: false,
     };
   }
-  return { mode: 'none', detail: `missing playwright-core or Chrome at ${chromeExecPath}`, configured };
+  return {
+    mode: 'none',
+    detail: `missing playwright-core or Chrome at ${chromeExecPath}`,
+    configured,
+    readiness: 'unavailable',
+    commandReady: false,
+  };
 }
 
 // ── Full environment detection (for CLI `detect` command / Settings UI) ──────

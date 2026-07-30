@@ -41,6 +41,7 @@ export type BrowserBridgeStatus = {
   listening: boolean;
   hostConnected: boolean;
   extensionConnected: boolean;
+  commandReady: boolean;
   debuggerAttached: boolean;
   targetAlive: boolean;
   connectionId: string | null;
@@ -136,10 +137,13 @@ export class LocalAgentBrowserBridge {
   getStatus(): BrowserBridgeStatus {
     const activeTab = this.registration?.state?.activeTab
       ?? this.registration?.activeTab;
+    const hostConnected = this.activeSocket !== null && !this.activeSocket.destroyed;
+    const extensionConnected = this.registration !== null;
     return {
       listening: this.server?.listening ?? false,
-      hostConnected: this.activeSocket !== null && !this.activeSocket.destroyed,
-      extensionConnected: this.registration !== null,
+      hostConnected,
+      extensionConnected,
+      commandReady: hostConnected && extensionConnected,
       debuggerAttached: this.debuggerAttached,
       targetAlive: this.targetAlive,
       connectionId: this.registration?.connectionId ?? null,

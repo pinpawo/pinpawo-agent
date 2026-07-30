@@ -10,6 +10,8 @@ Set `PINPAWO_BROWSER_BACKEND=extension` (or save `browser_backend: "extension"`)
 
 In `auto`, local-agent listens for the installed extension and chooses it first for compatible default-session, visible-browser operations. If no extension is connected, or the initial open explicitly requires headless, a named session or a custom profile, selection uses Playwright. Selection is still one-time for that active `BrowserSession`.
 
+Toolkit availability is structural and cached when the runtime registry is built; transient extension connectivity does not remove the Browser Toolkit. Runtime status separately exposes `commandReady`: a listening bridge without a registered extension remains routable but is reported as `waiting`, while only a registered live connection is `ready`. This lets a later extension reconnect recover without rebuilding the agent registry and avoids presenting transport setup as command readiness.
+
 ## Process boundary
 
 ```text

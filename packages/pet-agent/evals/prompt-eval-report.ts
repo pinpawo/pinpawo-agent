@@ -6,7 +6,7 @@ import type {
 } from './decision-stability.ts';
 import type { PromptEvalPricing } from './prompt-eval-usage.ts';
 
-export const PROMPT_EVAL_REPORT_VERSION = 3;
+export const PROMPT_EVAL_REPORT_VERSION = 4;
 
 export type PromptEvalRevision = {
   commit: string;
@@ -16,14 +16,22 @@ export type PromptEvalRevision = {
   changedPaths: string[];
 };
 
+export type PromptEvalModelRole = 'subject' | 'judge';
+
 export type PromptEvalModelMetadata = {
+  role: PromptEvalModelRole;
+  profileId: string;
+  fingerprint: string;
   provider: string;
   family: string;
   model: string;
-  baseUrl: string;
+  endpointOrigin: string;
+  contextWindowTokens: number;
+  maxOutputTokens: number | null;
   temperature: number;
   reasoningEffort: string;
   timeoutMs: number;
+  inputModalities: Array<'text' | 'image'>;
 };
 
 export type PromptEvalReport = {
@@ -34,7 +42,7 @@ export type PromptEvalReport = {
   model: PromptEvalModelMetadata;
   structuredOutputMethod: StructuredOutputMethod | 'provider-default' | 'not-applicable';
   evaluator: {
-    mode: 'subject-model' | 'not-applicable';
+    mode: 'fixed-model' | 'not-applicable';
     version: 'prompt-goal-v1' | 'not-applicable';
     model: PromptEvalModelMetadata | null;
     structuredOutputMethod: StructuredOutputMethod | 'provider-default' | 'not-applicable';
@@ -146,9 +154,12 @@ export function comparePromptEvalReports(
   if (baseline.revision.harnessCommit !== candidate.revision.harnessCommit) {
     blockingNotes.push('harness commit differs');
   }
-  if (baseline.model.provider !== candidate.model.provider) blockingNotes.push('provider differs');
-  if (baseline.model.model !== candidate.model.model) blockingNotes.push('model differs');
-  if (baseline.model.baseUrl !== candidate.model.baseUrl) blockingNotes.push('base URL differs');
+  if (baseline.model.profileId !== candidate.model.profileId) {
+    blockingNotes.push('subject profile differs');
+  }
+  if (baseline.model.fingerprint !== candidate.model.fingerprint) {
+    blockingNotes.push('subject fingerprint differs');
+  }
   if (baseline.model.reasoningEffort !== candidate.model.reasoningEffort) {
     blockingNotes.push('reasoning effort differs');
   }
@@ -159,9 +170,8 @@ export function comparePromptEvalReports(
   if (baseline.evaluator.version !== candidate.evaluator.version) {
     blockingNotes.push('evaluator version differs');
   }
-  if (baseline.evaluator.model?.provider !== candidate.evaluator.model?.provider
-    || baseline.evaluator.model?.model !== candidate.evaluator.model?.model
-    || baseline.evaluator.model?.baseUrl !== candidate.evaluator.model?.baseUrl
+  if (baseline.evaluator.model?.profileId !== candidate.evaluator.model?.profileId
+    || baseline.evaluator.model?.fingerprint !== candidate.evaluator.model?.fingerprint
     || baseline.evaluator.model?.temperature !== candidate.evaluator.model?.temperature
     || baseline.evaluator.model?.reasoningEffort !== candidate.evaluator.model?.reasoningEffort
     || baseline.evaluator.structuredOutputMethod !== candidate.evaluator.structuredOutputMethod) {

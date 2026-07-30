@@ -29,8 +29,10 @@ function deterministicModel(outcome: string): AgentModels['act'] {
   } as unknown as AgentModels['act'];
 }
 
-async function runCase(testCase: typeof outcomeDecisionBasicsDataset.cases[number], useLlm: boolean) {
-  const modelConfig = useLlm ? createDecisionEvalModel() : null;
+async function runCase(
+  testCase: typeof outcomeDecisionBasicsDataset.cases[number],
+  modelConfig: ReturnType<typeof createDecisionEvalModel> | null,
+) {
   const model = modelConfig?.model ?? deterministicModel(testCase.expected.outcome);
   const structured = model.withStructuredOutput(
     buildDelegationOutcomeDecisionSchema(),
@@ -72,24 +74,62 @@ async function runCase(testCase: typeof outcomeDecisionBasicsDataset.cases[numbe
       testCase.input.remainingPlan ?? [],
     ),
   });
-  const output = await structured.invoke([new SystemMessage(systemPrompt), new HumanMessage(input)]) as Record<string, unknown>;
+  const output = await structured.invoke(
+    [new SystemMessage(systemPrompt), new HumanMessage(input)],
+    modelConfig
+      ? {
+          metadata: {
+            promptEvalModelRole: 'subject',
+            modelProfileId: modelConfig.metadata.profileId,
+            modelProfileFingerprint: modelConfig.metadata.fingerprint,
+          },
+        }
+      : undefined,
+  ) as Record<string, unknown>;
   return { output, scores: scoreOutcomeDecision(output, testCase.expected) };
 }
 
 async function main() {
   const config = resolveLangfuseConfig();
   const useLlm = process.env.EVAL_OUTCOME_MODEL !== 'deterministic';
+  const profileId = process.env.PROMPT_EVAL_MODEL_PROFILE_ID?.trim();
+  if (useLlm && !profileId) {
+    throw new Error('PROMPT_EVAL_MODEL_PROFILE_ID is required for real-model mode.');
+  }
+  const modelConfig = useLlm
+    ? createDecisionEvalModel({
+        profileId: profileId!,
+        role: 'subject',
+      })
+    : null;
   const runName = process.env.LANGFUSE_RUN_NAME || `outcome-decision-${new Date().toISOString().replace(/[:.]/g, '-')}`;
   console.log(`Running ${outcomeDecisionBasicsDataset.name}: ${runName}`);
-  console.log(`Mode: ${useLlm ? createDecisionEvalModel().label : 'local deterministic contract model'}`);
+  console.log(`Mode: ${modelConfig?.label ?? 'local deterministic contract model'}`);
   let passed = 0;
   for (const testCase of outcomeDecisionBasicsDataset.cases) {
     const started = performance.now();
     try {
-      const { output, scores } = await runCase(testCase, useLlm);
+      const { output, scores } = await runCase(testCase, modelConfig);
       const ok = scores.every(({ score }) => score === 1);
       if (ok) passed += 1;
-      await writeLangfuseEvalResult({ config, datasetName: outcomeDecisionBasicsDataset.name, runName, traceName: 'outcome-decision-eval', testCase, output, scores, durationMs: Math.round(performance.now() - started) });
+      await writeLangfuseEvalResult({
+        config,
+        datasetName: outcomeDecisionBasicsDataset.name,
+        runName,
+        traceName: 'outcome-decision-eval',
+        testCase,
+        output,
+        scores,
+        durationMs: Math.round(performance.now() - started),
+        ...(modelConfig
+          ? {
+              metadata: {
+                subjectModelProfileId: modelConfig.metadata.profileId,
+                subjectModelProfileFingerprint: modelConfig.metadata.fingerprint,
+              },
+            }
+          : {}),
+      });
       console.log(`[${ok ? 'PASS' : 'FAIL'}] ${testCase.name}: ${scores.map(({ key, score }) => `${key}=${score}`).join(' ')}`);
     } catch (error) {
       console.log(`[ERROR] ${testCase.name}: ${String(error)}`);

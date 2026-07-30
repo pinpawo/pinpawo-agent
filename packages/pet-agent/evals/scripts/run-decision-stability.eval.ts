@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
+import { pathToFileURL } from 'node:url';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { getAnswerEvalScenarios } from '../answer-eval-scenarios.ts';
 import {
@@ -46,7 +47,7 @@ type PromptEvalScenario = {
   ): Promise<DecisionEvalRunResult & { diagnostics?: Record<string, unknown> }>;
 };
 
-function splitList(value: string | undefined): string[] {
+export function splitList(value: string | undefined): string[] {
   return (value ?? '').split(',').map((item) => item.trim()).filter(Boolean);
 }
 
@@ -59,12 +60,14 @@ function validateTargets(values: string[], source: string): PromptEvalTarget[] {
   return values as PromptEvalTarget[];
 }
 
-function readTargets(): PromptEvalTarget[] {
+export function readTargets(
+  env: NodeJS.ProcessEnv = process.env,
+): PromptEvalTarget[] {
   const requested = splitList(
-    process.env.PROMPT_EVAL_TARGETS ?? process.env.DECISION_EVAL_TARGETS,
+    env.PROMPT_EVAL_TARGETS ?? env.DECISION_EVAL_TARGETS,
   );
   if (requested.length === 0) {
-    const defaults = splitList(process.env.PROMPT_EVAL_DEFAULT_TARGETS);
+    const defaults = splitList(env.PROMPT_EVAL_DEFAULT_TARGETS);
     return defaults.length > 0
       ? validateTargets(defaults, 'PROMPT_EVAL_DEFAULT_TARGETS')
       : TARGETS;
@@ -144,7 +147,7 @@ function hashWorkingTreeDiff(changedPaths: string[]): string {
   return hash.digest('hex');
 }
 
-function getPromptEvalScenarios(): PromptEvalScenario[] {
+export function getPromptEvalScenarios(): PromptEvalScenario[] {
   return [
     ...getDecisionEvalScenarios().map((scenario) => ({
       ...scenario,
@@ -167,19 +170,26 @@ function getPromptEvalScenarios(): PromptEvalScenario[] {
   ];
 }
 
-async function main() {
+export function readPromptEvalRepeats(
+  env: NodeJS.ProcessEnv = process.env,
+) {
   const repeats = Number(
-    process.env.PROMPT_EVAL_REPEATS
-    ?? process.env.DECISION_EVAL_REPEATS
+    env.PROMPT_EVAL_REPEATS
+    ?? env.DECISION_EVAL_REPEATS
     ?? DEFAULT_REPEATS,
   );
   if (!Number.isInteger(repeats) || repeats <= 0) {
-    throw new Error(`Invalid PROMPT_EVAL_REPEATS: ${process.env.PROMPT_EVAL_REPEATS ?? ''}`);
+    throw new Error(`Invalid PROMPT_EVAL_REPEATS: ${env.PROMPT_EVAL_REPEATS ?? ''}`);
   }
-  const revision = readRevision();
-  const targets = readTargets();
+  return repeats;
+}
+
+export function selectPromptEvalScenarios(
+  env: NodeJS.ProcessEnv = process.env,
+) {
+  const targets = readTargets(env);
   const requestedCases = splitList(
-    process.env.PROMPT_EVAL_CASES ?? process.env.DECISION_EVAL_CASES,
+    env.PROMPT_EVAL_CASES ?? env.DECISION_EVAL_CASES,
   );
   const scenarios = getPromptEvalScenarios().filter((scenario) => (
     targets.includes(scenario.target)
@@ -187,25 +197,47 @@ async function main() {
       || requestedCases.includes(scenario.caseId)
       || requestedCases.includes(scenario.caseName))
   ));
-  if (scenarios.length === 0) throw new Error('No prompt eval scenarios matched the requested filters.');
+  if (scenarios.length === 0) {
+    throw new Error('No prompt eval scenarios matched the requested filters.');
+  }
+  return { targets, scenarios };
+}
 
-  const modelConfig = createDecisionEvalModel();
+async function main() {
+  const repeats = readPromptEvalRepeats();
+  const revision = readRevision();
+  const { targets, scenarios } = selectPromptEvalScenarios();
+  const subjectProfileId = process.env.PROMPT_EVAL_MODEL_PROFILE_ID?.trim();
+  const judgeProfileId = process.env.PROMPT_EVAL_JUDGE_PROFILE_ID?.trim();
+  if (!subjectProfileId) {
+    throw new Error('PROMPT_EVAL_MODEL_PROFILE_ID is required.');
+  }
+  if (!judgeProfileId) {
+    throw new Error('PROMPT_EVAL_JUDGE_PROFILE_ID is required.');
+  }
+  const modelConfig = createDecisionEvalModel({
+    profileId: subjectProfileId,
+    role: 'subject',
+  });
+  const judgeConfig = createDecisionEvalModel({
+    profileId: judgeProfileId,
+    role: 'judge',
+  });
+  if (modelConfig.metadata.fingerprint === judgeConfig.metadata.fingerprint) {
+    throw new Error(
+      'The prompt eval judge must have a different resolved profile fingerprint '
+      + 'from the subject model.',
+    );
+  }
   const structuredOutputMethod = targets.some((target) => target !== 'answer')
     ? modelConfig.method ?? 'provider-default'
     : 'not-applicable';
-  const evaluator = targets.some((target) => target === 'entry' || target === 'answer')
-    ? {
-        mode: 'subject-model' as const,
-        version: 'prompt-goal-v1' as const,
-        model: modelConfig.metadata,
-        structuredOutputMethod: modelConfig.method ?? 'provider-default' as const,
-      }
-    : {
-        mode: 'not-applicable' as const,
-        version: 'not-applicable' as const,
-        model: null,
-        structuredOutputMethod: 'not-applicable' as const,
-      };
+  const evaluator = {
+    mode: 'fixed-model' as const,
+    version: 'prompt-goal-v1' as const,
+    model: judgeConfig.metadata,
+    structuredOutputMethod: judgeConfig.method ?? 'provider-default' as const,
+  };
   console.log('Orchestrator prompt stability eval');
   console.log(`Revision: ${revision.commit}${revision.dirty ? ' (dirty)' : ''}`);
   console.log(`Harness revision: ${revision.harnessCommit}`);
@@ -213,9 +245,10 @@ async function main() {
   console.log(`Model family: ${modelConfig.metadata.family}`);
   console.log(`Reasoning effort: ${modelConfig.metadata.reasoningEffort}`);
   console.log(`Structured output method: ${structuredOutputMethod}`);
-  if (evaluator.mode !== 'not-applicable') {
-    console.log(`Evaluator: ${evaluator.version} (${evaluator.mode}, ${evaluator.structuredOutputMethod})`);
-  }
+  console.log(
+    `Evaluator: ${judgeConfig.label} `
+    + `(${evaluator.version}, ${evaluator.structuredOutputMethod})`,
+  );
   console.log(`Targets: ${targets.join(', ')}`);
   console.log(`Repeats: ${repeats.toString()}`);
   console.log(`Cases: ${scenarios.length.toString()}`);
@@ -235,10 +268,13 @@ async function main() {
             promptEvalRevision: revision.commit,
             promptEvalCaseId: scenario.caseId,
             promptEvalRepeat: repeat,
+            promptEvalModelRole: 'subject',
+            modelProfileId: modelConfig.metadata.profileId,
+            modelProfileFingerprint: modelConfig.metadata.fingerprint,
           },
         }, {
-          model: modelConfig.model,
-          method: modelConfig.method,
+          model: judgeConfig.model,
+          method: judgeConfig.method,
           config: {
             callbacks: [evaluationUsageCollector.callback],
             runName: `prompt-eval-judge-${scenario.target}-${scenario.caseName}`,
@@ -247,6 +283,9 @@ async function main() {
               promptEvalCaseId: scenario.caseId,
               promptEvalRepeat: repeat,
               promptEvalEvaluator: 'prompt-goal-v1',
+              promptEvalModelRole: 'judge',
+              modelProfileId: judgeConfig.metadata.profileId,
+              modelProfileFingerprint: judgeConfig.metadata.fingerprint,
             },
           },
         });
@@ -275,7 +314,7 @@ async function main() {
           evaluationUsage,
           evaluationEstimatedCostUsd: estimatePromptEvalCost(
             evaluationUsage,
-            modelConfig.pricing,
+            judgeConfig.pricing,
           ),
         });
         console.log(
@@ -309,7 +348,7 @@ async function main() {
           evaluationUsage,
           evaluationEstimatedCostUsd: estimatePromptEvalCost(
             evaluationUsage,
-            modelConfig.pricing,
+            judgeConfig.pricing,
           ),
         });
         console.log(
@@ -373,7 +412,9 @@ async function main() {
   if (achieved < results.length) process.exitCode = 1;
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? `${error.name}: ${error.message}` : String(error));
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? `${error.name}: ${error.message}` : String(error));
+    process.exitCode = 1;
+  });
+}

@@ -55,6 +55,7 @@ export type ModelProfileIssue = Readonly<{
     | 'invalid_models_contract'
     | 'invalid_profile'
     | 'profile_id_mismatch'
+    | 'reserved_profile_id'
     | 'incomplete_environment_profile';
   message: string;
 }>;
@@ -116,6 +117,17 @@ const STRUCTURED_OUTPUT_METHODS = new Set<StructuredOutputMethod>([
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function createDictionary<T>(): Record<string, T> {
+  return Object.create(null) as Record<string, T>;
+}
+
+function readOwnValue<T>(
+  record: Readonly<Record<string, T>>,
+  key: string,
+): T | undefined {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
 }
 
 function readNonEmptyString(
@@ -465,13 +477,26 @@ function parseStoredProfiles(
   if (typeof value.defaultProfileId !== 'string' || !value.defaultProfileId.trim()) {
     throw new ModelProfileConfigError('models.defaultProfileId must be a non-empty string');
   }
+  if (value.defaultProfileId.trim() === ENV_MODEL_PROFILE_ID) {
+    throw new ModelProfileConfigError(
+      `models.defaultProfileId cannot use reserved profile id "${ENV_MODEL_PROFILE_ID}"`,
+      { profileId: ENV_MODEL_PROFILE_ID },
+    );
+  }
   if (!isRecord(value.profiles)) {
     throw new ModelProfileConfigError('models.profiles must be an object');
   }
 
-  const profiles: Record<string, ModelProfileV1> = {};
-  const unavailableProfiles: Record<string, readonly ModelProfileIssue[]> = {};
+  const profiles = createDictionary<ModelProfileV1>();
+  const unavailableProfiles = createDictionary<readonly ModelProfileIssue[]>();
   for (const [profileId, rawProfile] of Object.entries(value.profiles)) {
+    if (profileId === ENV_MODEL_PROFILE_ID) {
+      unavailableProfiles[profileId] = Object.freeze([{
+        code: 'reserved_profile_id',
+        message: `profile id "${ENV_MODEL_PROFILE_ID}" is reserved for environment configuration`,
+      }]);
+      continue;
+    }
     const parsed = parseModelProfile(rawProfile, profileId);
     if (parsed.profile) {
       profiles[profileId] = parsed.profile;
@@ -494,8 +519,8 @@ export function buildModelProfileRegistry(options: {
   const storedResult = options.stored.models === undefined
     ? {
         defaultProfileId: undefined,
-        profiles: {} as Record<string, ModelProfileV1>,
-        unavailableProfiles: {} as Record<string, readonly ModelProfileIssue[]>,
+        profiles: createDictionary<ModelProfileV1>(),
+        unavailableProfiles: createDictionary<readonly ModelProfileIssue[]>(),
       }
     : parseStoredProfiles(options.stored.models);
 
@@ -510,6 +535,7 @@ export function buildModelProfileRegistry(options: {
   const environment = buildEnvironmentProfile(env);
   if (environment.profile) {
     storedResult.profiles[environment.profile.id] = environment.profile;
+    delete storedResult.unavailableProfiles[environment.profile.id];
   } else if (environment.issues) {
     storedResult.unavailableProfiles[ENV_MODEL_PROFILE_ID] = environment.issues;
   }
@@ -525,8 +551,11 @@ export function buildModelProfileRegistry(options: {
     );
   }
 
-  const defaultIssues = storedResult.unavailableProfiles[configuredDefaultProfileId];
-  if (!storedResult.profiles[configuredDefaultProfileId]) {
+  const defaultIssues = readOwnValue(
+    storedResult.unavailableProfiles,
+    configuredDefaultProfileId,
+  );
+  if (!readOwnValue(storedResult.profiles, configuredDefaultProfileId)) {
     throw new ModelProfileConfigError(
       defaultIssues
         ? `Default model profile "${configuredDefaultProfileId}" is invalid: ${defaultIssues.map((issue) => issue.message).join('; ')}`
@@ -538,8 +567,11 @@ export function buildModelProfileRegistry(options: {
     );
   }
 
-  const selectedIssues = storedResult.unavailableProfiles[selectedProfileId];
-  if (!storedResult.profiles[selectedProfileId]) {
+  const selectedIssues = readOwnValue(
+    storedResult.unavailableProfiles,
+    selectedProfileId,
+  );
+  if (!readOwnValue(storedResult.profiles, selectedProfileId)) {
     throw new ModelProfileConfigError(
       selectedIssues
         ? `Selected model profile "${selectedProfileId}" is invalid: ${selectedIssues.map((issue) => issue.message).join('; ')}`
@@ -564,9 +596,9 @@ export function resolveModelProfile(
   registry: ModelProfileRegistrySnapshot,
   profileId: string = registry.selectedProfileId,
 ): ModelProfileV1 {
-  const profile = registry.profiles[profileId];
+  const profile = readOwnValue(registry.profiles, profileId);
   if (profile) return profile;
-  const issues = registry.unavailableProfiles[profileId];
+  const issues = readOwnValue(registry.unavailableProfiles, profileId);
   throw new ModelProfileConfigError(
     issues
       ? `Model profile "${profileId}" is unavailable: ${issues.map((issue) => issue.message).join('; ')}`
@@ -640,6 +672,12 @@ export function writeDefaultModelProfile(
 ): StoredConfig {
   const defaultProfileId = stored.models?.defaultProfileId
     ?? LEGACY_DEFAULT_MODEL_PROFILE_ID;
+  if (defaultProfileId === ENV_MODEL_PROFILE_ID || profile.id === ENV_MODEL_PROFILE_ID) {
+    throw new ModelProfileConfigError(
+      `Profile id "${ENV_MODEL_PROFILE_ID}" is reserved for environment configuration`,
+      { profileId: ENV_MODEL_PROFILE_ID },
+    );
+  }
   if (profile.id !== defaultProfileId) {
     throw new ModelProfileConfigError(
       `Default profile write expected id "${defaultProfileId}", received "${profile.id}"`,

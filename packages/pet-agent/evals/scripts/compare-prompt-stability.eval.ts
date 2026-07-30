@@ -38,7 +38,17 @@ function main() {
   console.log(`Baseline: ${baseline.revision.commit}${baseline.revision.dirty ? ' (dirty)' : ''}`);
   console.log(`Candidate: ${candidate.revision.commit}${candidate.revision.dirty ? ' (dirty)' : ''}`);
   console.log(`Harness: ${candidate.revision.harnessCommit}`);
-  console.log(`Model: ${candidate.model.provider}/${candidate.model.model}`);
+  console.log(
+    `Model: ${candidate.model.profileId} · `
+    + `${candidate.model.provider}/${candidate.model.model} · `
+    + candidate.model.fingerprint.slice(0, 12),
+  );
+  if (candidate.evaluator.model) {
+    console.log(
+      `Judge: ${candidate.evaluator.model.profileId} · `
+      + candidate.evaluator.model.fingerprint.slice(0, 12),
+    );
+  }
   console.log(`Comparable settings: ${comparison.compatible ? 'yes' : 'no'}`);
   if (comparison.compatibilityNotes.length > 0) {
     console.log(`Notes: ${comparison.compatibilityNotes.join('; ')}`);

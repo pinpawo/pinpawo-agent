@@ -23,6 +23,7 @@ import {
   randomDelayMs,
 } from './interaction.js';
 import { createTargetStack } from './targetLifecycle.js';
+import { createBrowserStateTracker } from './browserState.js';
 
 const CDP_VERSION = '1.3';
 const ALLOWED_CDP_COMMANDS = new Set([
@@ -46,6 +47,7 @@ let reconnectTimer = null;
 let attachedTabId = null;
 const enqueueExtensionWork = createSerialExecutor();
 const targets = createTargetStack();
+const browserState = createBrowserStateTracker();
 const recentPopupByOpener = new Map();
 
 class ExtensionError extends Error {
@@ -73,11 +75,12 @@ async function saveTarget(nextTarget, options = {}) {
   const target = targets.bind(nextTarget, options);
   if (target) await chrome.storage.local.set({ [SESSION_KEY]: target });
   else await chrome.storage.local.remove(SESSION_KEY);
-  sendRegister();
+  publishBrowserStateChange();
 }
 
 function registerMessage() {
   const target = targets.current();
+  const state = browserState.snapshot(target, attachedTabId);
   return {
     type: 'browser.register',
     protocolVersion: PROTOCOL_VERSION,
@@ -85,11 +88,17 @@ function registerMessage() {
     extensionId: chrome.runtime.id,
     capabilities: CAPABILITIES,
     ...(target ? { activeTab: { tabId: target.tabId, ownership: target.ownership } } : {}),
+    state,
   };
 }
 
 function sendRegister() {
   if (port) port.postMessage(registerMessage());
+}
+
+function publishBrowserStateChange() {
+  browserState.advance();
+  sendRegister();
 }
 
 function scheduleReconnect() {
@@ -133,6 +142,7 @@ async function attach(tabId) {
   try {
     await chrome.debugger.attach({ tabId }, CDP_VERSION);
     attachedTabId = tabId;
+    publishBrowserStateChange();
     port?.postMessage({
       type: 'browser.event',
       protocolVersion: PROTOCOL_VERSION,
@@ -166,6 +176,7 @@ async function detach() {
   const tabId = attachedTabId;
   attachedTabId = null;
   await chrome.debugger.detach({ tabId }).catch(() => {});
+  publishBrowserStateChange();
   port?.postMessage({
     type: 'browser.event',
     protocolVersion: PROTOCOL_VERSION,
@@ -845,6 +856,7 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
 chrome.debugger.onDetach.addListener((source, reason) => {
   if (source.tabId !== attachedTabId) return;
   attachedTabId = null;
+  publishBrowserStateChange();
   port?.postMessage({
     type: 'browser.event',
     protocolVersion: PROTOCOL_VERSION,

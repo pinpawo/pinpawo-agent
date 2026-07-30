@@ -83,6 +83,7 @@ export async function checkBrowserAvailability() {
           targetAlive: bridge.targetAlive,
           activeTabOwnership: bridge.activeTabOwnership,
           extensionId: bridge.extensionId,
+          stateRevision: bridge.stateRevision,
         } : {}),
       },
     });

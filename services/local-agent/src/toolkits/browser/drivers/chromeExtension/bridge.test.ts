@@ -61,11 +61,16 @@ test('local browser bridge authenticates, registers and resolves commands', asyn
   const root = await mkdtemp(resolve(tmpdir(), 'pinpawo-browser-bridge-'));
   const socketPath = resolve(root, 'bridge.sock');
   const tokenPath = resolve(root, 'bridge.token');
+  const warnings: string[] = [];
   const bridge = new LocalAgentBrowserBridge({
     socketPath,
     tokenPath,
     tokenFactory: () => 'test-token',
-    logger: { info() {}, warn() {}, error() {} },
+    logger: {
+      info() {},
+      warn(message) { warnings.push(String(message)); },
+      error() {},
+    },
   });
   await bridge.start();
   t.after(async () => bridge.stop());
@@ -94,10 +99,49 @@ test('local browser bridge authenticates, registers and resolves commands', asyn
     extensionId: 'extension-1',
     capabilities: ['navigate', 'snapshot', 'detach'],
     activeTab: { tabId: 42, ownership: 'agent' },
+    state: {
+      revision: 2,
+      debuggerAttached: true,
+      activeTab: { tabId: 42, ownership: 'agent' },
+    },
   });
   await waitUntil(() => bridge.getStatus().extensionConnected);
   assert.equal(bridge.getStatus().extensionConnected, true);
   assert.equal(bridge.getStatus().activeTabId, 42);
+  assert.equal(bridge.getStatus().debuggerAttached, true);
+  assert.equal(bridge.getStatus().stateRevision, 2);
+
+  peer.send({
+    type: 'browser.register',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    extensionId: 'extension-1',
+    capabilities: ['navigate', 'snapshot', 'detach'],
+    activeTab: { tabId: 7, ownership: 'user' },
+    state: {
+      revision: 1,
+      debuggerAttached: false,
+      activeTab: { tabId: 7, ownership: 'user' },
+    },
+  });
+  await waitUntil(() => warnings.some((message) => message.includes('stale browser state revision')));
+  assert.equal(bridge.getStatus().activeTabId, 42);
+  assert.equal(bridge.getStatus().debuggerAttached, true);
+  assert.equal(bridge.getStatus().stateRevision, 2);
+
+  warnings.length = 0;
+  peer.send({
+    type: 'browser.register',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    extensionId: 'extension-1',
+    capabilities: ['navigate', 'snapshot', 'detach'],
+    activeTab: { tabId: 9, ownership: 'user' },
+  });
+  await waitUntil(() => warnings.some((message) => message.includes('revision legacy')));
+  assert.equal(bridge.getStatus().activeTabId, 42);
+  assert.equal(bridge.getStatus().debuggerAttached, true);
+  assert.equal(bridge.getStatus().stateRevision, 2);
 
   const resultPromise = bridge.sendCommand('snapshot', { approvedOrigin: 'https://example.com' });
   const command = await peer.nextLine();

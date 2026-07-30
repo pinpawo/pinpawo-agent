@@ -159,10 +159,10 @@ test('TuiSessionController synchronizes one session and projects a chat run', ()
         text: 'hello',
         status: 'completed',
       }, {
-        id: 'message:1:assistant',
+        id: 'snapshot-message:1:assistant',
         type: 'message',
         role: 'assistant',
-        text: 'hi there',
+        text: 'authoritative reply',
         status: 'completed',
       }],
       activeRun: null,
@@ -178,6 +178,12 @@ test('TuiSessionController synchronizes one session and projects a chat run', ()
   });
   assert.equal(controller.getState().session.sessionTokenUsage?.totalTokens, 25);
   assert.equal(controller.getState().session.timeline.length, 2);
+  const reconciled = controller.getState().session.timeline[1];
+  assert.equal(reconciled?.id, 'snapshot-message:1:assistant');
+  assert.equal(
+    reconciled?.type === 'message' ? reconciled.text : null,
+    'authoritative reply',
+  );
   controller.stop();
 });
 

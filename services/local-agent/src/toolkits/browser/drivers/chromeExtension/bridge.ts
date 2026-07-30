@@ -47,6 +47,7 @@ export type BrowserBridgeStatus = {
   extensionId: string | null;
   activeTabId: number | null;
   activeTabOwnership: 'agent' | 'user' | null;
+  stateRevision: number | null;
   capabilities: BrowserExtensionCapability[];
   socketPath: string;
 };
@@ -133,6 +134,8 @@ export class LocalAgentBrowserBridge {
   }
 
   getStatus(): BrowserBridgeStatus {
+    const activeTab = this.registration?.state?.activeTab
+      ?? this.registration?.activeTab;
     return {
       listening: this.server?.listening ?? false,
       hostConnected: this.activeSocket !== null && !this.activeSocket.destroyed,
@@ -141,8 +144,9 @@ export class LocalAgentBrowserBridge {
       targetAlive: this.targetAlive,
       connectionId: this.registration?.connectionId ?? null,
       extensionId: this.registration?.extensionId ?? null,
-      activeTabId: this.registration?.activeTab?.tabId ?? null,
-      activeTabOwnership: this.registration?.activeTab?.ownership ?? null,
+      activeTabId: activeTab?.tabId ?? null,
+      activeTabOwnership: activeTab?.ownership ?? null,
+      stateRevision: this.registration?.state?.revision ?? null,
       capabilities: [...(this.registration?.capabilities ?? [])],
       socketPath: this.socketPath,
     };
@@ -381,9 +385,22 @@ export class LocalAgentBrowserBridge {
           true,
         ));
       }
+      const previousRevision = this.registration?.state?.revision;
+      const nextRevision = message.state?.revision;
+      if (
+        this.registration?.connectionId === message.connectionId
+        && previousRevision !== undefined
+        && (nextRevision === undefined || nextRevision <= previousRevision)
+      ) {
+        this.logger.warn(
+          `[browser-bridge] ignored stale browser state revision ${nextRevision ?? 'legacy'}; current=${previousRevision}`,
+        );
+        return;
+      }
       this.registration = message;
-      this.targetAlive = message.activeTab !== undefined;
-      this.debuggerAttached = false;
+      const activeTab = message.state?.activeTab ?? message.activeTab;
+      this.targetAlive = activeTab !== undefined;
+      this.debuggerAttached = message.state?.debuggerAttached ?? false;
       this.logger.info(
         `[browser-bridge] browser.register extension=${message.extensionId} connection=${message.connectionId}`,
       );
@@ -397,6 +414,10 @@ export class LocalAgentBrowserBridge {
 
     if (message.type === 'browser.result') {
       this.resolveResult(message);
+      return;
+    }
+
+    if (this.registration.state) {
       return;
     }
 

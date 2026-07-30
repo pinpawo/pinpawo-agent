@@ -98,6 +98,11 @@ test('native host replays extension registration when the local bridge restarts'
     extensionId: 'abcdefghijklmnopabcdefghijklmnop',
     capabilities: ['navigate', 'snapshot', 'detach'],
     activeTab: { tabId: 8, ownership: 'agent' },
+    state: {
+      revision: 4,
+      debuggerAttached: true,
+      activeTab: { tabId: 8, ownership: 'agent' },
+    },
   }));
   await waitUntil(() => firstBridge.getStatus().extensionConnected);
   await firstBridge.stop();
@@ -109,4 +114,55 @@ test('native host replays extension registration when the local bridge restarts'
 
   assert.equal(secondBridge.getStatus().connectionId, 'extension-worker-restart');
   assert.equal(secondBridge.getStatus().activeTabId, 8);
+  assert.equal(secondBridge.getStatus().debuggerAttached, true);
+  assert.equal(secondBridge.getStatus().stateRevision, 4);
+});
+
+test('native host drops stale lifecycle events while retaining the latest registration', async (t) => {
+  const root = await mkdtemp(resolve(tmpdir(), 'pinpawo-native-host-stale-events-'));
+  const socketPath = resolve(root, 'bridge.sock');
+  const tokenPath = resolve(root, 'bridge.token');
+  const logger = { info() {}, warn() {}, error() {} };
+  const input = new PassThrough();
+  const relay = new NativeHostRelay({
+    input,
+    output: new PassThrough(),
+    socketPath,
+    tokenPath,
+    reconnectDelayMs: 5,
+    logger,
+  });
+  relay.start();
+  t.after(() => relay.stop());
+
+  input.write(encodeNativeMessage({
+    type: 'browser.event',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'extension-worker-stale-events',
+    event: 'target.closed',
+    tabId: 7,
+  }));
+  input.write(encodeNativeMessage({
+    type: 'browser.register',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'extension-worker-stale-events',
+    extensionId: 'abcdefghijklmnopabcdefghijklmnop',
+    capabilities: ['navigate', 'snapshot', 'detach'],
+    activeTab: { tabId: 8, ownership: 'agent' },
+    state: {
+      revision: 2,
+      debuggerAttached: true,
+      activeTab: { tabId: 8, ownership: 'agent' },
+    },
+  }));
+
+  const bridge = new LocalAgentBrowserBridge({ socketPath, tokenPath, logger });
+  await bridge.start();
+  t.after(async () => bridge.stop());
+  await waitUntil(() => bridge.getStatus().extensionConnected);
+
+  assert.equal(bridge.getStatus().activeTabId, 8);
+  assert.equal(bridge.getStatus().debuggerAttached, true);
+  assert.equal(bridge.getStatus().stateRevision, 2);
+  assert.equal(bridge.getStatus().targetAlive, true);
 });

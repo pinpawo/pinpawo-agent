@@ -36,6 +36,7 @@ class BrowserRuntime {
       browser_target_alive: status.targetAlive,
       browser_active_tab_ownership: status.activeTabOwnership,
       browser_extension_id: status.extensionId,
+      browser_state_revision: status.stateRevision,
     };
   }
 }

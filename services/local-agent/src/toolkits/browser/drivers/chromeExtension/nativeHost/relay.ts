@@ -5,7 +5,6 @@ import {
   parseAgentToExtensionMessage,
   parseExtensionToAgentMessage,
   type BrowserRegisterMessage,
-  type ExtensionToAgentMessage,
 } from '../protocol';
 import {
   DEFAULT_BROWSER_BRIDGE_SOCKET_PATH,
@@ -14,7 +13,6 @@ import {
 } from '../bridge';
 import { encodeNativeMessage, NativeMessageDecoder } from './framing';
 
-const MAX_QUEUED_MESSAGES = 32;
 const RECONNECT_DELAY_MS = 1_000;
 const MAX_SOCKET_LINE_BYTES = 4 * 1024 * 1024;
 
@@ -42,7 +40,6 @@ export class NativeHostRelay {
   private socketBuffer = '';
   private reconnectTimer: NodeJS.Timeout | null = null;
   private stopped = false;
-  private queued: ExtensionToAgentMessage[] = [];
   private registration: BrowserRegisterMessage | null = null;
 
   constructor(options: NativeHostOptions = {}) {
@@ -85,9 +82,9 @@ export class NativeHostRelay {
         if (message.type === 'browser.register') this.registration = message;
         if (this.socketReady && this.socket && !this.socket.destroyed) {
           this.socket.write(`${JSON.stringify(message)}\n`);
-        } else {
-          this.queued.push(message);
-          if (this.queued.length > MAX_QUEUED_MESSAGES) this.queued.shift();
+        } else if (message.type === 'browser.register') {
+          // Results and lifecycle events belong to the disconnected bridge
+          // epoch. Only the latest full registration is safe to reconcile.
           void this.connectToAgent();
         }
       }
@@ -168,11 +165,6 @@ export class NativeHostRelay {
         if (this.registration) {
           socket.write(`${JSON.stringify(this.registration)}\n`);
         }
-        for (const message of this.queued) {
-          if (this.registration && message.type === 'browser.register') continue;
-          socket.write(`${JSON.stringify(message)}\n`);
-        }
-        this.queued = [];
         return;
       }
       const message = parseAgentToExtensionMessage(value);

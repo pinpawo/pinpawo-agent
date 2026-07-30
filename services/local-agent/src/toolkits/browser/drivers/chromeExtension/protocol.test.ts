@@ -15,6 +15,11 @@ test('browser extension protocol validates register and deduplicates capabilitie
     extensionId: 'extension-1',
     capabilities: ['navigate', 'snapshot', 'click', 'type', 'scroll', 'extract', 'screenshot', 'snapshot', 'detach'],
     activeTab: { tabId: 42, ownership: 'user' },
+    state: {
+      revision: 3,
+      debuggerAttached: true,
+      activeTab: { tabId: 42, ownership: 'user' },
+    },
   });
 
   assert.equal(message.type, 'browser.register');
@@ -29,6 +34,11 @@ test('browser extension protocol validates register and deduplicates capabilitie
     'detach',
   ]);
   assert.deepEqual(message.activeTab, { tabId: 42, ownership: 'user' });
+  assert.deepEqual(message.state, {
+    revision: 3,
+    debuggerAttached: true,
+    activeTab: { tabId: 42, ownership: 'user' },
+  });
 });
 
 test('browser extension protocol rejects mismatched versions and malformed results', () => {
@@ -52,6 +62,38 @@ test('browser extension protocol rejects mismatched versions and malformed resul
       ok: false,
     }),
     /failed browser.result must include error/,
+  );
+
+  assert.throws(
+    () => parseExtensionToAgentMessage({
+      type: 'browser.register',
+      protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+      connectionId: 'connection-1',
+      extensionId: 'extension-1',
+      capabilities: [],
+      state: {
+        revision: -1,
+        debuggerAttached: false,
+      },
+    }),
+    /state\.revision must be a non-negative safe integer/,
+  );
+
+  assert.throws(
+    () => parseExtensionToAgentMessage({
+      type: 'browser.register',
+      protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+      connectionId: 'connection-1',
+      extensionId: 'extension-1',
+      capabilities: [],
+      activeTab: { tabId: 1, ownership: 'agent' },
+      state: {
+        revision: 1,
+        debuggerAttached: false,
+        activeTab: { tabId: 2, ownership: 'agent' },
+      },
+    }),
+    /activeTab must match state\.activeTab/,
   );
 });
 

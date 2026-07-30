@@ -23,6 +23,15 @@ export type BrowserExtensionError = {
   details?: Record<string, unknown>;
 };
 
+export type BrowserExtensionStateSnapshot = {
+  revision: number;
+  debuggerAttached: boolean;
+  activeTab?: {
+    tabId: number;
+    ownership: 'agent' | 'user';
+  };
+};
+
 export type BrowserRegisterMessage = {
   type: 'browser.register';
   protocolVersion: typeof BROWSER_EXTENSION_PROTOCOL_VERSION;
@@ -33,6 +42,7 @@ export type BrowserRegisterMessage = {
     tabId: number;
     ownership: 'agent' | 'user';
   };
+  state?: BrowserExtensionStateSnapshot;
 };
 
 export type BrowserCommandMessage = {
@@ -148,17 +158,42 @@ function parseError(value: unknown): BrowserExtensionError {
   };
 }
 
-function parseActiveTab(value: unknown): BrowserRegisterMessage['activeTab'] {
+function parseActiveTab(
+  value: unknown,
+  field = 'activeTab',
+): BrowserRegisterMessage['activeTab'] {
   if (value === undefined) return undefined;
   if (!isRecord(value) || !Number.isInteger(value.tabId) || (value.tabId as number) < 0) {
-    throw new Error('browser.register activeTab.tabId must be a non-negative integer');
+    throw new Error(`browser.register ${field}.tabId must be a non-negative integer`);
   }
   if (value.ownership !== 'agent' && value.ownership !== 'user') {
-    throw new Error('browser.register activeTab.ownership must be agent or user');
+    throw new Error(`browser.register ${field}.ownership must be agent or user`);
   }
   return {
     tabId: value.tabId as number,
     ownership: value.ownership,
+  };
+}
+
+function parseStateSnapshot(value: unknown): BrowserExtensionStateSnapshot | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) {
+    throw new Error('browser.register state must be an object');
+  }
+  if (!Number.isSafeInteger(value.revision) || (value.revision as number) < 0) {
+    throw new Error('browser.register state.revision must be a non-negative safe integer');
+  }
+  if (typeof value.debuggerAttached !== 'boolean') {
+    throw new Error('browser.register state.debuggerAttached must be a boolean');
+  }
+  const activeTab = parseActiveTab(value.activeTab, 'state.activeTab');
+  if (value.debuggerAttached && !activeTab) {
+    throw new Error('browser.register state cannot attach the debugger without an active tab');
+  }
+  return {
+    revision: value.revision as number,
+    debuggerAttached: value.debuggerAttached,
+    activeTab,
   };
 }
 
@@ -168,13 +203,27 @@ export function parseExtensionToAgentMessage(value: unknown): ExtensionToAgentMe
   const connectionId = requireNonEmptyString(record, 'connectionId');
 
   if (type === 'browser.register') {
+    const activeTab = parseActiveTab(record.activeTab);
+    const state = parseStateSnapshot(record.state);
+    if (
+      activeTab
+      && state
+      && (
+        !state.activeTab
+        || activeTab.tabId !== state.activeTab.tabId
+        || activeTab.ownership !== state.activeTab.ownership
+      )
+    ) {
+      throw new Error('browser.register activeTab must match state.activeTab');
+    }
     return {
       type,
       protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
       connectionId,
       extensionId: requireNonEmptyString(record, 'extensionId'),
       capabilities: parseCapabilities(record.capabilities),
-      activeTab: parseActiveTab(record.activeTab),
+      activeTab,
+      state,
     };
   }
 

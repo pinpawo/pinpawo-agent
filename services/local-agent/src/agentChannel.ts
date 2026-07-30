@@ -27,6 +27,7 @@ import {
 } from './capabilities/dailyPost';
 import { createPetProfileToolkit } from './toolkits/petProfile';
 import { buildLocalAgentModels } from './agentModels';
+import type { LocalImageModelInputOptions } from './localImageModelInput';
 import type { AgentLlmConfig } from './agentConfig';
 import type { AgentContext } from './contextLoader';
 import { buildLocalLlmConfig } from './llmConfig';
@@ -204,6 +205,10 @@ export function buildLocalChatAgentInput(params: {
   context: AgentContext;
   userMessage: string;
   llmConfig?: AgentLlmConfig;
+  /** Host-private model input adapter for local image rehydration/admission. */
+  modelInput?: Partial<LocalImageModelInputOptions>;
+  /** Cache identity for adapters that close over one durable session ledger. */
+  modelInputCacheKey?: string;
   toolkits?: AgentToolkit[];
   /** Complete host Toolkit definitions, including currently unavailable instances. */
   toolkitDefinitions?: readonly AgentToolkit[];
@@ -236,7 +241,7 @@ export function buildLocalChatAgentInput(params: {
   const llmConfig = params.llmConfig ?? buildLocalLlmConfig();
   const decisionStructuredOutput = buildDecisionStructuredOutput(llmConfig);
   const actor = buildActor(params.context);
-  const models = buildLocalAgentModels(llmConfig);
+  const models = buildLocalAgentModels(llmConfig, params.modelInput);
   const trendItems = toTrendPromptItems(params.context.context.trendItems);
   const sharedToolkits: AgentToolkit[] = [
     createPetProfileToolkit({
@@ -319,6 +324,9 @@ export function buildLocalChatAgentInput(params: {
       'local',
       'chat',
       actor.petId,
+      llmConfig.modelProfileId,
+      llmConfig.modelProfileFingerprint,
+      params.modelInputCacheKey,
       llmConfig.model,
       llmConfig.observeModel ?? llmConfig.model,
       String(llmConfig.contextWindowTokens ?? 32000),

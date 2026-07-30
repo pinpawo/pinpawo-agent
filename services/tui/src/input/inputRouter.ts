@@ -5,6 +5,7 @@ export type InteractionOwner =
     }
   | { type: 'notice' }
   | { type: 'policy-picker' }
+  | { type: 'model-picker' }
   | { type: 'command-help' }
   | { type: 'session-picker' }
   | { type: 'command-palette' }
@@ -18,6 +19,7 @@ export type InteractionOwnerState = {
   };
   noticeOpen: boolean;
   policyPickerOpen: boolean;
+  modelPickerOpen?: boolean;
   commandHelpOpen: boolean;
   sessionPickerOpen: boolean;
   commandPaletteOpen: boolean;
@@ -35,6 +37,7 @@ export function resolveInteractionOwner(
   }
   if (state.noticeOpen) return { type: 'notice' };
   if (state.policyPickerOpen) return { type: 'policy-picker' };
+  if (state.modelPickerOpen) return { type: 'model-picker' };
   if (state.commandHelpOpen) return { type: 'command-help' };
   if (state.sessionPickerOpen) return { type: 'session-picker' };
   if (state.commandPaletteOpen) return { type: 'command-palette' };
@@ -50,6 +53,7 @@ export function interactionOwnerBlocksPaste(
       return !owner.acceptsTextInput;
     case 'notice':
     case 'policy-picker':
+    case 'model-picker':
     case 'command-help':
     case 'session-picker':
       return true;

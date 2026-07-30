@@ -1,9 +1,11 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { FileStudioDueRunStore } from '@pinpawo/pet-agent';
+import type { AgentLlmConfig } from './agentConfig';
 import { LocalAgentGraphService } from './agentGraphService';
 import { InflightRequestController } from './inflightRequestController';
 import { buildLocalAgentSessionSnapshot } from './localAgentSessionSnapshot';
 import type {
+  AgentModelProfileSummary,
   AgentSessionSummary,
 } from '@pinpawo/agent-session';
 import type {
@@ -14,12 +16,20 @@ import { sendLocalServerPeerEvent, type LocalServerPeer } from './localServerPee
 import type { LocalServerPeerHandlers } from './localServerMessageDispatcher';
 import { LocalServerSessionCommandQueue } from './localServerSessionCommandQueue';
 import { LocalServerChatHandler } from './localServerChatHandler';
+import type {
+  ChatSessionAdapterOptions,
+  ChatSessionResult,
+} from './chatSessionAdapter';
 import { LocalServerStudioHandler } from './localServerStudioHandler';
 import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
 import { LocalServerTuiSessionService } from './localServerTuiSessions';
 import { LocalStudioDueRunScheduler } from './localStudioDueRunScheduler';
 import { persistGlobalReviewPolicyMode } from './globalReviewPolicyConfig';
 import { loadAgentContext } from './contextLoader';
+import {
+  missingInputModalities,
+  supportsInputModalities,
+} from './modelProfiles';
 import {
   createLocalServerRuntimeDepsStore,
   type LocalServerDeps,
@@ -41,6 +51,10 @@ export type LocalServerHandlerOptions = {
   chatGraphService?: LocalAgentGraphService;
   /** Must be shared by chat execution and checkpoint-backed session reads. */
   loadContext?: typeof loadAgentContext;
+  /** Deterministic run-boundary hook for embedded hosts and tests. */
+  runChat?: (
+    options: ChatSessionAdapterOptions,
+  ) => Promise<ChatSessionResult>;
 };
 
 type SessionSummarySource = Pick<
@@ -77,6 +91,7 @@ export function createLocalServerHandlers(
     graphService: chatGraphService,
     ...(options.loadContext ? { loadContext: options.loadContext } : {}),
     runtimeConfig: effectiveRuntimeConfig,
+    defaultModelProfileId: initialDeps.modelProfiles.defaultProfileId,
   });
   const studioReviewRouter = new LocalServerStudioReviewRouter<LocalServerPeer>();
   const ownsStudioDueRunScheduler = !initialDeps.studioDueRunScheduler;
@@ -97,6 +112,7 @@ export function createLocalServerHandlers(
     tuiSessions,
     inflightRequests,
     ...(options.loadContext ? { loadContext: options.loadContext } : {}),
+    ...(options.runChat ? { runChat: options.runChat } : {}),
   });
   const studioHandler = new LocalServerStudioHandler({
     reviewRouter: studioReviewRouter,
@@ -108,9 +124,9 @@ export function createLocalServerHandlers(
     studioDueRunScheduler,
   });
   const sessionCommands = new LocalServerSessionCommandQueue();
-  // Actor-wide admission: a session switch and chat operations never overlap.
+  // Actor-wide admission: session transitions and chat operations never overlap.
   let activeChatOperations = 0;
-  let sessionSwitch: Promise<void> | null = null;
+  let sessionTransition: Promise<void> | null = null;
 
   const loadSnapshot = async () => {
     const requestDeps = runtimeDeps.get();
@@ -124,6 +140,8 @@ export function createLocalServerHandlers(
       kind: 'chat',
       messages: checkpoint.messages,
       deps: requestDeps,
+      modelProfileId: checkpoint.modelProfileId,
+      requiredInputModalities: checkpoint.requiredInputModalities,
       sessionTokenUsage: checkpoint.sessionTokenUsage,
       pendingReview,
     });
@@ -134,9 +152,247 @@ export function createLocalServerHandlers(
     return sessions.map(projectChatSessionSummary);
   };
 
+  const listModelProfiles = (sessionId: string) => {
+    const requestDeps = runtimeDeps.get();
+    const activeSession = tuiSessions.getActiveSession(requestDeps.actorId);
+    if (!tuiSessions.getSession(requestDeps.actorId, sessionId)) {
+      throw Object.assign(
+        new Error('session not found'),
+        { code: 'session_not_found' },
+      );
+    }
+    if (activeSession.id !== sessionId) {
+      throw Object.assign(
+        new Error('model listing requires the active session'),
+        { code: 'session_not_active' },
+      );
+    }
+    const profiles: AgentModelProfileSummary[] = [
+      ...requestDeps.modelProfiles.listAvailable().map((profile) => {
+        const compatible = supportsInputModalities(
+          activeSession.requiredInputModalities,
+          profile.inputModalities,
+        );
+        return {
+          ...profile,
+          inputModalities: [...profile.inputModalities],
+          available: true,
+          compatible,
+          issues: compatible
+            ? []
+            : [
+                `Session requires ${activeSession.requiredInputModalities.join(', ')} input; model is missing ${
+                  missingInputModalities(
+                    activeSession.requiredInputModalities,
+                    profile.inputModalities,
+                  ).join(', ')
+                }`,
+              ],
+        };
+      }),
+      ...Object.entries(
+        requestDeps.modelProfiles.snapshot.unavailableProfiles,
+      ).map(([id, issues]) => ({
+        id,
+        label: id,
+        inputModalities: ['text' as const],
+        available: false,
+        compatible: false,
+        issues: issues.map((issue) => issue.message),
+      })),
+    ];
+    if (!profiles.some((profile) => profile.id === activeSession.modelProfileId)) {
+      profiles.push({
+        id: activeSession.modelProfileId,
+        label: activeSession.modelProfileId,
+        inputModalities: ['text'],
+        available: false,
+        compatible: false,
+        issues: [
+          `Selected model profile "${activeSession.modelProfileId}" is no longer configured`,
+        ],
+      });
+    }
+    return {
+      sessionId,
+      defaultProfileId: requestDeps.modelProfiles.defaultProfileId,
+      selectedProfileId: activeSession.modelProfileId,
+      requiredInputModalities: [...activeSession.requiredInputModalities],
+      profiles,
+    };
+  };
+
+  const sendModelSelectionError = (
+    peer: LocalServerPeer,
+    message: {
+      requestId: string;
+      sessionId: string;
+      modelProfileId?: string;
+    },
+    code:
+      | 'session_not_found'
+      | 'session_not_active'
+      | 'run_active'
+      | 'review_pending'
+      | 'profile_unavailable'
+      | 'profile_incompatible'
+      | 'selection_failed',
+    detail: string,
+  ) => {
+    peer.send({
+      type: 'model.select.error',
+      requestId: message.requestId,
+      sessionId: message.sessionId,
+      ...(message.modelProfileId
+        ? { modelProfileId: message.modelProfileId }
+        : {}),
+      code,
+      message: detail,
+    });
+  };
+
+  const selectModelProfile = async (
+    peer: LocalServerPeer,
+    message: {
+      requestId: string;
+      sessionId: string;
+      modelProfileId: string;
+    },
+  ) => {
+    while (sessionTransition) {
+      await sessionTransition;
+    }
+    if (activeChatOperations > 0) {
+      sendModelSelectionError(
+        peer,
+        message,
+        'run_active',
+        'cannot switch models while a session run is active',
+      );
+      return;
+    }
+    let releaseSessionTransition!: () => void;
+    const currentTransition = new Promise<void>((resolve) => {
+      releaseSessionTransition = resolve;
+    });
+    sessionTransition = currentTransition;
+    let selectionCommitted = false;
+    try {
+      const requestDeps = runtimeDeps.get();
+      const activeSession = tuiSessions.getActiveSession(requestDeps.actorId);
+      if (!tuiSessions.getSession(requestDeps.actorId, message.sessionId)) {
+        sendModelSelectionError(
+          peer,
+          message,
+          'session_not_found',
+          'session not found',
+        );
+        return;
+      }
+      if (activeSession.id !== message.sessionId) {
+        sendModelSelectionError(
+          peer,
+          message,
+          'session_not_active',
+          'model selection requires the active session',
+        );
+        return;
+      }
+      let selectedProfile: Readonly<AgentLlmConfig>;
+      try {
+        selectedProfile = requestDeps.modelProfiles.resolve(message.modelProfileId);
+      } catch (error) {
+        sendModelSelectionError(
+          peer,
+          message,
+          'profile_unavailable',
+          error instanceof Error ? error.message : 'model profile is unavailable',
+        );
+        return;
+      }
+      if (!supportsInputModalities(
+        activeSession.requiredInputModalities,
+        selectedProfile.inputModalities ?? ['text'],
+      )) {
+        sendModelSelectionError(
+          peer,
+          message,
+          'profile_incompatible',
+          `Session requires ${activeSession.requiredInputModalities.join(', ')} input; model is missing ${
+            missingInputModalities(
+              activeSession.requiredInputModalities,
+              selectedProfile.inputModalities ?? ['text'],
+            ).join(', ')
+          }`,
+        );
+        return;
+      }
+
+      const candidateSession = {
+        ...activeSession,
+        modelProfileId: message.modelProfileId,
+      };
+      const checkpoint = await tuiSessions.readSessionCheckpointPoint(
+        requestDeps,
+        candidateSession,
+      );
+      if (checkpoint.pendingReview) {
+        sendModelSelectionError(
+          peer,
+          message,
+          'review_pending',
+          'cannot switch models while human review is pending',
+        );
+        return;
+      }
+      const snapshot = buildLocalAgentSessionSnapshot({
+        sessionId: candidateSession.id,
+        kind: 'chat',
+        messages: checkpoint.messages,
+        deps: requestDeps,
+        modelProfileId: candidateSession.modelProfileId,
+        requiredInputModalities: candidateSession.requiredInputModalities,
+        sessionTokenUsage: checkpoint.sessionTokenUsage,
+        pendingReview: null,
+      });
+      const session = tuiSessions.selectModelProfile(
+        requestDeps.actorId,
+        message.sessionId,
+        message.modelProfileId,
+      );
+      selectionCommitted = true;
+      peer.send({
+        type: 'model.select.result',
+        requestId: message.requestId,
+        sessionId: session.id,
+        selectedProfileId: session.modelProfileId,
+        snapshot,
+      });
+    } catch (error) {
+      if (selectionCommitted) {
+        console.warn(
+          '[local-server] model selection was committed but acknowledgement failed:',
+          error instanceof Error ? error.message : error,
+        );
+        return;
+      }
+      sendModelSelectionError(
+        peer,
+        message,
+        'selection_failed',
+        error instanceof Error ? error.message : 'model selection failed',
+      );
+    } finally {
+      if (sessionTransition === currentTransition) {
+        sessionTransition = null;
+      }
+      releaseSessionTransition();
+    }
+  };
+
   const createSession = async () => {
-    while (sessionSwitch) {
-      await sessionSwitch;
+    while (sessionTransition) {
+      await sessionTransition;
     }
     if (activeChatOperations > 0 || inflightRequests.hasActiveRequest()) {
       throw Object.assign(
@@ -145,11 +401,11 @@ export function createLocalServerHandlers(
       );
     }
 
-    let releaseSessionSwitch!: () => void;
-    const currentSwitch = new Promise<void>((resolve) => {
-      releaseSessionSwitch = resolve;
+    let releaseSessionTransition!: () => void;
+    const currentTransition = new Promise<void>((resolve) => {
+      releaseSessionTransition = resolve;
     });
-    sessionSwitch = currentSwitch;
+    sessionTransition = currentTransition;
     try {
       const requestDeps = runtimeDeps.get();
       const session = tuiSessions.createNewSession(requestDeps.actorId);
@@ -163,19 +419,21 @@ export function createLocalServerHandlers(
           kind: 'chat',
           messages: [],
           deps: requestDeps,
+          modelProfileId: session.modelProfileId,
+          requiredInputModalities: session.requiredInputModalities,
           sessionTokenUsage: null,
           pendingReview: null,
         }),
       };
     } finally {
-      sessionSwitch = null;
-      releaseSessionSwitch();
+      sessionTransition = null;
+      releaseSessionTransition();
     }
   };
 
   const resumeSession = async (sessionId: string) => {
-    while (sessionSwitch) {
-      await sessionSwitch;
+    while (sessionTransition) {
+      await sessionTransition;
     }
     // Disconnect aborts active runs but deliberately leaves ownership with
     // their invocation owners until graph output settles. Keep that brief
@@ -188,11 +446,11 @@ export function createLocalServerHandlers(
       );
     }
 
-    let releaseSessionSwitch!: () => void;
-    const currentSwitch = new Promise<void>((resolve) => {
-      releaseSessionSwitch = resolve;
+    let releaseSessionTransition!: () => void;
+    const currentTransition = new Promise<void>((resolve) => {
+      releaseSessionTransition = resolve;
     });
-    sessionSwitch = currentSwitch;
+    sessionTransition = currentTransition;
     try {
       const requestDeps = runtimeDeps.get();
       const result = await tuiSessions.resumeSession(requestDeps, sessionId);
@@ -207,13 +465,15 @@ export function createLocalServerHandlers(
           kind: 'chat',
           messages: result.messages,
           deps: requestDeps,
+          modelProfileId: result.session.modelProfileId,
+          requiredInputModalities: result.session.requiredInputModalities,
           sessionTokenUsage: result.sessionTokenUsage,
           pendingReview,
         }),
       };
     } finally {
-      sessionSwitch = null;
-      releaseSessionSwitch();
+      sessionTransition = null;
+      releaseSessionTransition();
     }
   };
 
@@ -240,8 +500,8 @@ export function createLocalServerHandlers(
     admit: () => Promise<void>,
   ) => {
     await sessionCommands.waitForIdle(peer);
-    while (sessionSwitch) {
-      await sessionSwitch;
+    while (sessionTransition) {
+      await sessionTransition;
     }
     if (!peer.isConnected()) {
       return;
@@ -303,9 +563,7 @@ export function createLocalServerHandlers(
           (options.persistGlobalReviewPolicyMode ?? persistGlobalReviewPolicyMode)(
             message.globalReviewPolicyMode,
           );
-          runtimeDeps.updateLlmConfig({
-            globalReviewPolicyMode: message.globalReviewPolicyMode,
-          });
+          runtimeDeps.updateGlobalReviewPolicyMode(message.globalReviewPolicyMode);
           if (message.requestId) {
             client.send({
               type: 'runtime_config.result',
@@ -381,6 +639,31 @@ export function createLocalServerHandlers(
           };
         },
       ),
+    ),
+    onModelList: (client, message) => sessionCommands.enqueue(
+      client,
+      async () => {
+        try {
+          client.send({
+            type: 'model.list.result',
+            requestId: message.requestId,
+            ...listModelProfiles(message.sessionId),
+          });
+        } catch (error) {
+          sendModelSelectionError(
+            client,
+            message,
+            (error as { code?: string }).code === 'session_not_active'
+              ? 'session_not_active'
+              : 'session_not_found',
+            error instanceof Error ? error.message : 'session not found',
+          );
+        }
+      },
+    ),
+    onModelSelect: (client, message) => sessionCommands.enqueue(
+      client,
+      () => selectModelProfile(client, message),
     ),
     onClose: (client) => {
       sessionCommands.clear(client);

@@ -3,6 +3,7 @@ import { ApprovalPanel } from './ApprovalPanel';
 import { CommandPalette } from './CommandPalette';
 import { FileMentionPopup } from './FileMentionPopup';
 import { GlobalReviewPolicyPicker } from './GlobalReviewPolicyPicker';
+import { ModelProfilePicker } from './ModelProfilePicker';
 import { ResumePicker } from './ResumePicker';
 import type { TuiOverlayModel } from '../overlayModel';
 
@@ -38,6 +39,19 @@ export function OverlayLayer(props: {
         <GlobalReviewPolicyPicker
           currentMode={overlay.currentMode}
           selectedIndex={overlay.selectedIndex}
+          width={props.model.width}
+        />
+      );
+    case 'modelProfilePicker':
+      return (
+        <ModelProfilePicker
+          profiles={overlay.profiles}
+          selectedProfileId={overlay.selectedProfileId}
+          defaultProfileId={overlay.defaultProfileId}
+          requiredInputModalities={overlay.requiredInputModalities}
+          selectedIndex={overlay.selectedIndex}
+          loading={overlay.loading}
+          applying={overlay.applying}
           width={props.model.width}
         />
       );

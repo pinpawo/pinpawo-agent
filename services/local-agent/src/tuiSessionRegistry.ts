@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import type { AgentInputModality } from '@pinpawo/agent-session';
 import { buildTuiChatThreadId } from './chatInterface';
 
 export const DEFAULT_TUI_SESSION_STATE_PATH = resolve(homedir(), '.pinpawo', 'tui-sessions.json');
@@ -11,6 +12,8 @@ export type TuiSessionRecord = {
   petId: string;
   suffix: string;
   threadId: string;
+  modelProfileId: string;
+  requiredInputModalities: AgentInputModality[];
   title: string;
   messageCount: number;
   createdAt: string;
@@ -18,7 +21,7 @@ export type TuiSessionRecord = {
 };
 
 export type TuiSessionState = {
-  version: 2;
+  version: 4;
   activeSessionIds: Record<string, string>;
   sessions: Record<string, TuiSessionRecord>;
 };
@@ -31,17 +34,20 @@ export type TuiSessionSummaryInput = {
 
 export function createEmptyTuiSessionState(): TuiSessionState {
   return {
-    version: 2,
+    version: 4,
     activeSessionIds: {},
     sessions: {},
   };
 }
 
-export function loadTuiSessionState(filePath = DEFAULT_TUI_SESSION_STATE_PATH): TuiSessionState {
+export function loadTuiSessionState(
+  defaultModelProfileId: string,
+  filePath = DEFAULT_TUI_SESSION_STATE_PATH,
+): TuiSessionState {
   try {
     if (!existsSync(filePath)) return createEmptyTuiSessionState();
     const parsed = JSON.parse(readFileSync(filePath, 'utf-8')) as unknown;
-    return parseTuiSessionState(parsed);
+    return parseTuiSessionState(parsed, defaultModelProfileId);
   } catch {
     return createEmptyTuiSessionState();
   }
@@ -58,17 +64,19 @@ export function saveTuiSessionState(
 export function ensureActiveTuiSession(
   state: TuiSessionState,
   petId: string,
+  defaultModelProfileId: string,
   now = new Date(),
 ) {
   const activeId = state.activeSessionIds[petId];
   const active = activeId ? state.sessions[activeId] : undefined;
   if (active?.petId === petId) return active;
-  return createTuiSession(state, petId, now);
+  return createTuiSession(state, petId, defaultModelProfileId, now);
 }
 
 export function createTuiSession(
   state: TuiSessionState,
   petId: string,
+  defaultModelProfileId: string,
   now = new Date(),
 ) {
   const suffix = randomUUID().slice(0, 8);
@@ -79,6 +87,8 @@ export function createTuiSession(
     petId,
     suffix,
     threadId: buildTuiChatThreadId({ petId, sessionSuffix: suffix }),
+    modelProfileId: defaultModelProfileId,
+    requiredInputModalities: ['text'],
     title: '新会话',
     messageCount: 0,
     createdAt: timestamp,
@@ -128,17 +138,72 @@ export function updateTuiSessionSummary(
   return next;
 }
 
-function parseTuiSessionState(value: unknown): TuiSessionState {
+export function updateTuiSessionModelProfile(
+  state: TuiSessionState,
+  sessionId: string,
+  modelProfileId: string,
+) {
+  const record = state.sessions[sessionId];
+  if (!record) return null;
+  const next: TuiSessionRecord = {
+    ...record,
+    modelProfileId,
+    updatedAt: new Date().toISOString(),
+  };
+  state.sessions[sessionId] = next;
+  return next;
+}
+
+export function addTuiSessionRequiredInputModalities(
+  state: TuiSessionState,
+  sessionId: string,
+  modalities: readonly AgentInputModality[],
+) {
+  const record = state.sessions[sessionId];
+  if (!record) return null;
+  const requiredInputModalities: AgentInputModality[] = [
+    'text',
+    ...(record.requiredInputModalities.includes('image')
+      || modalities.includes('image')
+      ? ['image' as const]
+      : []),
+  ];
+  if (
+    requiredInputModalities.length === record.requiredInputModalities.length
+    && requiredInputModalities.every(
+      (modality, index) => record.requiredInputModalities[index] === modality,
+    )
+  ) {
+    return record;
+  }
+  const next: TuiSessionRecord = {
+    ...record,
+    requiredInputModalities,
+    updatedAt: new Date().toISOString(),
+  };
+  state.sessions[sessionId] = next;
+  return next;
+}
+
+function parseTuiSessionState(
+  value: unknown,
+  defaultModelProfileId: string,
+): TuiSessionState {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return createEmptyTuiSessionState();
   }
   const record = value as Record<string, unknown>;
-  return record.version === 2
-    ? parseCurrentState(record)
-    : createEmptyTuiSessionState();
+  if (record.version !== 2 && record.version !== 3 && record.version !== 4) {
+    return createEmptyTuiSessionState();
+  }
+  return parseCurrentState(record, defaultModelProfileId, record.version);
 }
 
-function parseCurrentState(record: Record<string, unknown>): TuiSessionState {
+function parseCurrentState(
+  record: Record<string, unknown>,
+  defaultModelProfileId: string,
+  version: 2 | 3 | 4,
+): TuiSessionState {
   const state = createEmptyTuiSessionState();
   const activeSessionIds = readRecord(record.activeSessionIds);
   const sessions = readRecord(record.sessions);
@@ -148,7 +213,12 @@ function parseCurrentState(record: Record<string, unknown>): TuiSessionState {
     }
   }
   for (const [sessionId, rawSession] of Object.entries(sessions ?? {})) {
-    const parsed = parseSessionRecord(sessionId, rawSession);
+    const parsed = parseSessionRecord(
+      sessionId,
+      rawSession,
+      version < 3 ? defaultModelProfileId : undefined,
+      version < 4 ? ['text'] : undefined,
+    );
     if (parsed) {
       state.sessions[parsed.id] = parsed;
     }
@@ -161,13 +231,24 @@ function parseCurrentState(record: Record<string, unknown>): TuiSessionState {
   return state;
 }
 
-function parseSessionRecord(id: string, value: unknown): TuiSessionRecord | null {
+function parseSessionRecord(
+  id: string,
+  value: unknown,
+  migratedModelProfileId?: string,
+  migratedInputModalities?: AgentInputModality[],
+): TuiSessionRecord | null {
   const record = readRecord(value);
   if (!record) return null;
   const recordId = readString(record.id);
   const petId = readString(record.petId);
   const suffix = readString(record.suffix);
   const threadId = readString(record.threadId);
+  const modelProfileId = readString(record.modelProfileId)
+    ?? migratedModelProfileId
+    ?? null;
+  const requiredInputModalities = readInputModalities(
+    record.requiredInputModalities,
+  ) ?? migratedInputModalities ?? null;
   const title = readString(record.title);
   const messageCount = readNonNegativeInteger(record.messageCount);
   const createdAt = readString(record.createdAt);
@@ -179,6 +260,8 @@ function parseSessionRecord(id: string, value: unknown): TuiSessionRecord | null
     || !suffix
     || recordId !== `${petId}:${suffix}`
     || !threadId
+    || !modelProfileId
+    || !requiredInputModalities
     || threadId !== buildTuiChatThreadId({ petId, sessionSuffix: suffix })
     || !title
     || messageCount === null
@@ -192,11 +275,25 @@ function parseSessionRecord(id: string, value: unknown): TuiSessionRecord | null
     petId,
     suffix,
     threadId,
+    modelProfileId,
+    requiredInputModalities,
     title,
     messageCount,
     createdAt,
     updatedAt,
   };
+}
+
+function readInputModalities(value: unknown): AgentInputModality[] | null {
+  if (
+    !Array.isArray(value)
+    || value.length === 0
+    || value[0] !== 'text'
+    || !value.every((item) => item === 'text' || item === 'image')
+  ) {
+    return null;
+  }
+  return [...new Set(value)] as AgentInputModality[];
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {

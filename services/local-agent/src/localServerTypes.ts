@@ -1,13 +1,19 @@
-import type { AgentCapability, AgentToolkit, CapabilityArtifactStore } from '@pinpawo/pet-agent';
+import type {
+  AgentCapability,
+  AgentToolkit,
+  BuiltinGlobalReviewPolicyMode,
+  CapabilityArtifactStore,
+} from '@pinpawo/pet-agent';
 import type { LocalStudioDueRunScheduler } from './localStudioDueRunScheduler';
-import type { AgentLlmConfig } from './agentConfig';
 import type { LoadedUserCapability } from './capabilityLoader';
+import type { LocalModelProfileRegistry } from './llmConfig';
 import { buildWorkspaceRuntimeConfig, type LocalAgentRuntimeConfig } from './runtimeConfig';
 
 export type LocalServerDeps = {
   actorId: string;
   actorName?: string;
-  llmConfig: AgentLlmConfig;
+  modelProfiles: LocalModelProfileRegistry;
+  globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
   workdir: string;
   runtimeConfig?: LocalAgentRuntimeConfig;
   studioDueRunScheduler?: LocalStudioDueRunScheduler;
@@ -37,7 +43,9 @@ export type LocalServerCapabilityStatePatch = Partial<Pick<LocalServerDeps,
 
 export type LocalServerRuntimeDepsStore = Readonly<{
   get: () => NormalizedLocalServerDeps;
-  updateLlmConfig: (patch: Partial<AgentLlmConfig>) => NormalizedLocalServerDeps;
+  updateGlobalReviewPolicyMode: (
+    mode: BuiltinGlobalReviewPolicyMode,
+  ) => NormalizedLocalServerDeps;
   updateCapabilities: (patch: LocalServerCapabilityStatePatch) => NormalizedLocalServerDeps;
 }>;
 
@@ -69,7 +77,6 @@ export function normalizeLocalServerDeps(deps: LocalServerDeps): NormalizedLocal
   const runtimeConfig = getLocalServerRuntimeConfig(deps);
   return Object.freeze(freezeCapabilityLists({
     ...deps,
-    llmConfig: Object.freeze({ ...deps.llmConfig }),
     workdir: runtimeConfig.workdir,
     runtimeConfig,
   }));
@@ -81,13 +88,10 @@ export function createLocalServerRuntimeDepsStore(
   let current = normalizeLocalServerDeps(deps);
   return Object.freeze({
     get: () => current,
-    updateLlmConfig: (patch: Partial<AgentLlmConfig>) => {
+    updateGlobalReviewPolicyMode: (globalReviewPolicyMode) => {
       current = Object.freeze({
         ...current,
-        llmConfig: Object.freeze({
-          ...current.llmConfig,
-          ...patch,
-        }),
+        globalReviewPolicyMode,
       });
       return current;
     },

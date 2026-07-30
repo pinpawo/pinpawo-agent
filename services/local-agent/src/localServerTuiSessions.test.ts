@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { promises as fs } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
 import {
   stampMessageCreatedAtUtc,
@@ -15,6 +18,13 @@ import {
 } from './localServerTuiSessions';
 import { createLocalChatHumanMessage } from './localChatAttachments';
 import { createLocalServerRuntimeDepsStore } from './localServerTypes';
+import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
+import {
+  createTestModelProfiles,
+  createTestModelServerDeps,
+} from './testing/modelProfiles';
+
+const TEST_MODEL_PROFILE_ID = 'test-profile';
 
 const testArtifactStore: CapabilityArtifactStore = {
   writeArtifact: async () => {
@@ -147,6 +157,7 @@ test('LocalServerTuiSessionService creates and resets active sessions', async ()
       saved.push(1);
     },
     checkpointer,
+    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
   });
 
   const first = service.getActiveSession('pet-a');
@@ -162,20 +173,91 @@ test('LocalServerTuiSessionService creates and resets active sessions', async ()
   assert.equal(saved.length >= 4, true);
 });
 
+test('LocalServerTuiSessionService rolls back a model selection when persistence fails', () => {
+  const state = createEmptyTuiSessionState();
+  let failSave = false;
+  const service = new LocalServerTuiSessionService({
+    state,
+    saveState: () => {
+      if (failSave) {
+        throw new Error('session store unavailable');
+      }
+    },
+    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
+  });
+  const session = service.getActiveSession('pet-a');
+  failSave = true;
+
+  assert.throws(
+    () => service.selectModelProfile('pet-a', session.id, 'secondary'),
+    /session store unavailable/,
+  );
+  assert.equal(state.sessions[session.id], session);
+  assert.equal(
+    state.sessions[session.id]?.modelProfileId,
+    TEST_MODEL_PROFILE_ID,
+  );
+});
+
+test('LocalServerTuiSessionService rolls back image requirements when persistence fails', async () => {
+  const root = await fs.mkdtemp(join(tmpdir(), 'pinpawo-image-ledger-save-'));
+  const imagePath = join(root, 'image.png');
+  await fs.writeFile(imagePath, Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.from('ledger-save'),
+  ]));
+  const state = createEmptyTuiSessionState();
+  let failSave = false;
+  const service = new LocalServerTuiSessionService({
+    state,
+    saveState: () => {
+      if (failSave) {
+        throw new Error('session store unavailable');
+      }
+    },
+    runtimeConfig: buildLocalAgentRuntimeConfig(root),
+    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
+  });
+  const session = service.getActiveSession('pet-a');
+  failSave = true;
+
+  try {
+    await assert.rejects(
+      () => service.createUserMessage({
+        actorId: 'pet-a',
+        ...createTestModelServerDeps({
+          inputModalities: ['text', 'image'],
+        }),
+      } as never, 'describe this image', [{
+        id: 'image-1',
+        source: 'local-path',
+        kind: 'file',
+        path: imagePath,
+        name: 'image.png',
+      }]),
+      /session store unavailable/,
+    );
+    assert.equal(state.sessions[session.id], session);
+    assert.deepEqual(
+      state.sessions[session.id]?.requiredInputModalities,
+      ['text'],
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('LocalServerTuiSessionService injects active session createdAt into runtime environment', () => {
   const state = createEmptyTuiSessionState();
   const service = new LocalServerTuiSessionService({
     state,
     saveState: () => {},
+    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
   });
   const session = service.getActiveSession('pet-a');
   const setup = service.buildChatSetup({
     actorId: 'pet-a',
-    llmConfig: {
-      apiKey: 'test',
-      baseUrl: 'http://localhost',
-      model: 'test-model',
-    },
+    ...createTestModelServerDeps(),
     workdir: '/tmp/pinpawo-tui-workdir',
     capabilityArtifactStore: testArtifactStore,
   } as never, {
@@ -207,16 +289,13 @@ test('LocalServerTuiSessionService rejects chat setup without a thread-scoped ar
   const service = new LocalServerTuiSessionService({
     state: createEmptyTuiSessionState(),
     saveState: () => {},
+    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
   });
 
   assert.throws(
     () => service.buildChatSetup({
       actorId: 'pet-a',
-      llmConfig: {
-        apiKey: 'test',
-        baseUrl: 'http://localhost',
-        model: 'test-model',
-      },
+      ...createTestModelServerDeps(),
       workdir: '/tmp/pinpawo-missing-artifact-store',
     }, {
       pet: {
@@ -244,15 +323,14 @@ test('runtime config updates reach the next chat setup through the normalized de
   const service = new LocalServerTuiSessionService({
     state: createEmptyTuiSessionState(),
     saveState: () => {},
+    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
   });
   const runtimeDeps = createLocalServerRuntimeDepsStore({
     actorId: 'pet-a',
-    llmConfig: {
-      apiKey: 'test',
-      baseUrl: 'http://localhost',
-      model: 'test-model',
+    modelProfiles: createTestModelProfiles({
       globalReviewPolicyMode: 'require_authorization',
-    },
+    }),
+    globalReviewPolicyMode: 'require_authorization',
     workdir: '/tmp/pinpawo-policy-update',
     capabilityArtifactStore: testArtifactStore,
   });
@@ -277,13 +355,13 @@ test('runtime config updates reach the next chat setup through the normalized de
 
   const beforeDeps = runtimeDeps.get();
   const before = service.buildChatSetup(beforeDeps, context);
-  runtimeDeps.updateLlmConfig({ globalReviewPolicyMode: 'auto_authorization' });
+  runtimeDeps.updateGlobalReviewPolicyMode('auto_authorization');
   const afterDeps = runtimeDeps.get();
   const after = service.buildChatSetup(afterDeps, context);
 
   assert.notEqual(afterDeps, beforeDeps);
   assert.equal(Object.isFrozen(afterDeps), true);
-  assert.equal(Object.isFrozen(afterDeps.llmConfig), true);
+  assert.equal(Object.isFrozen(afterDeps.modelProfiles), true);
   assert.equal(before.input.globalReviewPolicy?.mode, 'require_authorization');
   assert.equal(after.input.globalReviewPolicy?.mode, 'auto_authorization');
 });
@@ -334,16 +412,13 @@ test('LocalServerTuiSessionService reads one checkpoint point for messages and p
         today: '2026-06-11',
       },
     }),
+    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
   });
 
   const session = service.getActiveSession('pet-a');
   const checkpoint = await service.readActiveCheckpointPoint({
     actorId: 'pet-a',
-    llmConfig: {
-      apiKey: 'test',
-      baseUrl: 'http://localhost',
-      model: 'test-model',
-    },
+    ...createTestModelServerDeps(),
     capabilityArtifactStore: testArtifactStore,
   } as never);
 

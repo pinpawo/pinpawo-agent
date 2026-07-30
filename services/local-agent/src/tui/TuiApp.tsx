@@ -55,6 +55,13 @@ import {
   GLOBAL_REVIEW_POLICY_PICKER_OPTIONS,
   findGlobalReviewPolicyPickerIndex,
 } from './globalReviewPolicyPicker';
+import {
+  canSelectModelProfile,
+  createLoadedModelProfilePicker,
+  createLoadingModelProfilePicker,
+  moveModelProfilePickerSelection,
+  readModelProfileSelectionIssue,
+} from './modelProfilePicker';
 import type { TuiState } from './state/tuiState';
 import type { MessageRole } from './types';
 import {
@@ -128,6 +135,12 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
   const [globalReviewPolicyIndex, setGlobalReviewPolicyIndex] = useState(
     () => findGlobalReviewPolicyPickerIndex(config.globalReviewPolicyMode),
   );
+  const [modelProfilePickerOpen, setModelProfilePickerOpen] = useState(false);
+  const [modelProfilePicker, setModelProfilePicker] = useState(
+    () => createLoadingModelProfilePicker(),
+  );
+  const [modelProfileApplying, setModelProfileApplying] = useState(false);
+  const modelProfileRequestRef = useRef(0);
 
   const stateRef = useRef<TuiState>(tuiState);
   const dispatch = useCallback((action: Parameters<typeof tuiStateReducer>[1]) => {
@@ -212,6 +225,14 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
   }, [busy, globalReviewPolicyPickerOpen, pendingApproval?.requestId]);
 
   useEffect(() => {
+    if (modelProfilePickerOpen && (busy || pendingApproval)) {
+      modelProfileRequestRef.current += 1;
+      setModelProfilePickerOpen(false);
+      setModelProfileApplying(false);
+    }
+  }, [busy, modelProfilePickerOpen, pendingApproval?.requestId]);
+
+  useEffect(() => {
     setApprovalIndex((current) => Math.min(current, Math.max(0, reviewOptions.length - 1)));
   }, [reviewOptions.length]);
 
@@ -267,6 +288,7 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
   const inputFocused = ready
     && !busy
     && !resumePickerOpen
+    && !modelProfilePickerOpen
     && !globalReviewPolicyPickerOpen
     && !externalEditorOpen;
   const textArea = useTextAreaController({
@@ -311,12 +333,14 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     fileMentionOpen: fileMention.open,
     transcriptViewerOpen,
     externalEditorOpen,
+    modelProfilePickerOpen,
   }), [
     busy,
     commandPalette.open,
     externalEditorOpen,
     fileMention.open,
     globalReviewPolicyPickerOpen,
+    modelProfilePickerOpen,
     inputValue,
     pendingApproval,
     ready,
@@ -341,6 +365,16 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
       currentMode: globalReviewPolicyMode,
       selectedIndex: globalReviewPolicyIndex,
     },
+    modelProfilePicker: {
+      open: modelProfilePickerOpen,
+      profiles: modelProfilePicker.profiles,
+      selectedProfileId: modelProfilePicker.selectedProfileId,
+      defaultProfileId: modelProfilePicker.defaultProfileId,
+      requiredInputModalities: modelProfilePicker.requiredInputModalities,
+      selectedIndex: modelProfilePicker.selectedIndex,
+      loading: modelProfilePicker.loading,
+      applying: modelProfileApplying,
+    },
     commandPalette,
     fileMention,
   }), [
@@ -351,6 +385,9 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     globalReviewPolicyMode,
     globalReviewPolicyPickerOpen,
     interactionOwner,
+    modelProfileApplying,
+    modelProfilePicker,
+    modelProfilePickerOpen,
     pendingApproval,
     resumePicker.sessions,
     resumePicker.selectedIndex,
@@ -390,6 +427,71 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
   const openGlobalReviewPolicyPicker = () => {
     setGlobalReviewPolicyIndex(findGlobalReviewPolicyPickerIndex(globalReviewPolicyMode));
     setGlobalReviewPolicyPickerOpen(true);
+  };
+
+  const closeModelProfilePicker = () => {
+    modelProfileRequestRef.current += 1;
+    setModelProfilePickerOpen(false);
+    setModelProfileApplying(false);
+  };
+
+  const openModelProfilePicker = () => {
+    const requestToken = modelProfileRequestRef.current + 1;
+    modelProfileRequestRef.current = requestToken;
+    setModelProfilePicker(createLoadingModelProfilePicker(
+      focusedSession?.runtime.modelProfileId,
+    ));
+    setModelProfileApplying(false);
+    setModelProfilePickerOpen(true);
+    void runtimeController.listModelProfiles().then((result) => {
+      if (modelProfileRequestRef.current !== requestToken) return;
+      setModelProfilePicker(createLoadedModelProfilePicker(result));
+    }).catch((err) => {
+      if (modelProfileRequestRef.current !== requestToken) return;
+      const message = err instanceof Error ? err.message : String(err);
+      setModelProfilePickerOpen(false);
+      appendMessage('system', TUI_TEXT.modelProfileLoadFailed(message));
+    });
+  };
+
+  const applyModelProfileSelection = () => {
+    if (modelProfilePicker.loading || modelProfileApplying) return;
+    const profile = modelProfilePicker.profiles[modelProfilePicker.selectedIndex];
+    if (!profile) return;
+    const issue = readModelProfileSelectionIssue(profile);
+    if (!canSelectModelProfile(profile) || issue) {
+      appendMessage(
+        'system',
+        TUI_TEXT.modelProfileSelectionBlocked(issue ?? '该模型当前不可选择。'),
+      );
+      return;
+    }
+    if (profile.id === modelProfilePicker.selectedProfileId) {
+      closeModelProfilePicker();
+      return;
+    }
+    const requestToken = modelProfileRequestRef.current;
+    setModelProfileApplying(true);
+    void runtimeController.selectModelProfile(
+      profile.id,
+      modelProfilePicker.sessionId,
+    ).then(() => {
+      if (modelProfileRequestRef.current !== requestToken) return;
+      setModelProfilePicker((current) => ({
+        ...current,
+        selectedProfileId: profile.id,
+      }));
+      setModelProfilePickerOpen(false);
+      appendMessage('system', TUI_TEXT.modelProfileSelected(profile.label));
+    }).catch((err) => {
+      if (modelProfileRequestRef.current !== requestToken) return;
+      const message = err instanceof Error ? err.message : String(err);
+      appendMessage('system', TUI_TEXT.modelProfileSelectionBlocked(message));
+    }).finally(() => {
+      if (modelProfileRequestRef.current === requestToken) {
+        setModelProfileApplying(false);
+      }
+    });
   };
 
   const openTranscriptViewer = (initialPageUp = false) => {
@@ -436,6 +538,7 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
       selectStudioComposerTarget,
       selectChatComposerTarget,
       openResumePicker,
+      openModelProfilePicker,
       openGlobalReviewPolicyPicker,
       openTranscriptViewer,
       openExternalEditor,
@@ -607,6 +710,31 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
           return;
         }
         setGlobalReviewPolicyPickerOpen(false);
+        return;
+
+      case 'modelProfile':
+        // Selection is an acknowledged, non-cancellable session command.
+        // Keep the picker stable until the server commits or rejects it.
+        if (modelProfileApplying) return;
+        if (action.action === 'previous') {
+          setModelProfilePicker((current) => ({
+            ...current,
+            selectedIndex: moveModelProfilePickerSelection(current, -1),
+          }));
+          return;
+        }
+        if (action.action === 'next') {
+          setModelProfilePicker((current) => ({
+            ...current,
+            selectedIndex: moveModelProfilePickerSelection(current, 1),
+          }));
+          return;
+        }
+        if (action.action === 'submit') {
+          applyModelProfileSelection();
+          return;
+        }
+        closeModelProfilePicker();
         return;
 
       case 'commandPalette':

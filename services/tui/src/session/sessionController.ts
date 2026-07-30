@@ -3,6 +3,8 @@ import {
   reduceSession,
   type AgentServerMessage,
   type AgentLocalAttachment,
+  type AgentInputModality,
+  type AgentModelProfileSummary,
   type ChatRequestMessage,
   type AgentReviewAction,
   type AgentSession,
@@ -109,6 +111,24 @@ export type UpdateGlobalReviewPolicyResult = {
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
 };
 
+export type ListModelProfilesResult = {
+  sessionId: string;
+  defaultProfileId: string;
+  selectedProfileId: string;
+  requiredInputModalities: AgentInputModality[];
+  profiles: AgentModelProfileSummary[];
+};
+
+export class ModelProfileCommandError extends Error {
+  constructor(
+    message: string,
+    readonly code?: string,
+  ) {
+    super(message);
+    this.name = 'ModelProfileCommandError';
+  }
+}
+
 export type TuiSessionControllerOptions = {
   connectionFactory: AgentHostConnectionFactory;
   now?: () => number;
@@ -156,6 +176,25 @@ type PendingRuntimeConfigUpdate = {
   reject: (error: Error) => void;
 };
 
+type PendingModelCommand =
+  | {
+      operation: 'list';
+      requestId: string;
+      sessionId: string;
+      timer: TimerHandle | null;
+      resolve: (result: ListModelProfilesResult) => void;
+      reject: (error: Error) => void;
+    }
+  | {
+      operation: 'select';
+      requestId: string;
+      sessionId: string;
+      modelProfileId: string;
+      timer: TimerHandle | null;
+      resolve: (snapshot: AgentSessionSnapshot) => void;
+      reject: (error: Error) => void;
+    };
+
 export class TuiSessionController {
   private readonly now: () => number;
   private readonly requestIdFactory: () => string;
@@ -168,6 +207,7 @@ export class TuiSessionController {
   private readonly listeners = new Set<(state: TuiSessionState) => void>();
   private readonly snapshotRequests = new Map<string, SnapshotReason>();
   private readonly sessionCommands = new Map<string, PendingSessionCommand>();
+  private readonly modelCommands = new Map<string, PendingModelCommand>();
   private runtimeConfigUpdate: PendingRuntimeConfigUpdate | null = null;
   private state: TuiSessionState = {
     connection: 'idle',
@@ -223,6 +263,7 @@ export class TuiSessionController {
     this.clearSnapshotTimer();
     this.snapshotRequests.clear();
     this.rejectSessionCommands('session command cancelled');
+    this.rejectModelCommands('model command cancelled');
     this.rejectRuntimeConfigUpdate('runtime config update cancelled');
     this.connection.disconnect();
     this.setConnection('idle');
@@ -257,6 +298,7 @@ export class TuiSessionController {
     if (
       this.state.session.activeRun
       || this.sessionCommands.size > 0
+      || this.modelCommands.size > 0
       || this.runtimeConfigUpdate
     ) {
       return { ok: false, reason: 'busy' };
@@ -295,6 +337,7 @@ export class TuiSessionController {
     if (
       this.state.session.activeRun
       || this.sessionCommands.size > 0
+      || this.modelCommands.size > 0
       || this.runtimeConfigUpdate
     ) {
       return { ok: false, reason: 'busy' };
@@ -483,6 +526,85 @@ export class TuiSessionController {
     });
   }
 
+  listModelProfiles(): Promise<ListModelProfilesResult> {
+    const unavailable = this.modelCommandUnavailable();
+    if (unavailable) return Promise.reject(new Error(unavailable));
+
+    const sessionId = this.state.session.sessionId;
+    const requestId = this.requestIdFactory();
+    return new Promise((resolve, reject) => {
+      const pending: PendingModelCommand = {
+        operation: 'list',
+        requestId,
+        sessionId,
+        timer: null,
+        resolve,
+        reject,
+      };
+      this.modelCommands.set(requestId, pending);
+      pending.timer = this.scheduleModelCommandTimeout(pending);
+      if (!this.connection.send({
+        type: 'model.list',
+        requestId,
+        sessionId,
+      })) {
+        this.clearModelCommand(pending);
+        reject(new Error('model list request could not be sent'));
+      }
+    });
+  }
+
+  selectModelProfile(
+    modelProfileId: string,
+    expectedSessionId: string,
+  ): Promise<AgentSessionSnapshot> {
+    const profileId = modelProfileId.trim();
+    if (!profileId) {
+      return Promise.reject(new Error('model profile id is required'));
+    }
+    const unavailable = this.modelCommandUnavailable();
+    if (unavailable) return Promise.reject(new Error(unavailable));
+    const sessionId = this.state.session.sessionId;
+    if (sessionId !== expectedSessionId) {
+      return Promise.reject(new ModelProfileCommandError(
+        'the active session changed; reopen the model picker',
+        'session_changed',
+      ));
+    }
+
+    const requestId = this.requestIdFactory();
+    return new Promise((resolve, reject) => {
+      const pending: PendingModelCommand = {
+        operation: 'select',
+        requestId,
+        sessionId,
+        modelProfileId: profileId,
+        timer: null,
+        resolve,
+        reject,
+      };
+      this.modelCommands.set(requestId, pending);
+      pending.timer = this.scheduleModelCommandTimeout(pending);
+      if (!this.connection.send({
+        type: 'model.select',
+        requestId,
+        sessionId,
+        modelProfileId: profileId,
+      })) {
+        this.clearModelCommand(pending);
+        reject(new Error('model selection request could not be sent'));
+      }
+    });
+  }
+
+  cancelModelProfileList() {
+    for (const command of [...this.modelCommands.values()]) {
+      if (command.operation !== 'list') continue;
+      this.clearModelCommand(command);
+      command.reject(new Error('model list request cancelled'));
+    }
+  }
+
   submitReviewResponse(params: {
     requestId: string;
     actionId: string;
@@ -595,6 +717,62 @@ export class TuiSessionController {
   }
 
   private handleMessage(message: AgentServerMessage) {
+    if (message.type === 'model.list.result') {
+      const pending = this.modelCommands.get(message.requestId);
+      if (pending?.operation !== 'list') return;
+      this.clearModelCommand(pending);
+      if (message.sessionId !== pending.sessionId) {
+        pending.reject(new Error(
+          'model list response did not match the requested session',
+        ));
+        return;
+      }
+      pending.resolve({
+        sessionId: message.sessionId,
+        defaultProfileId: message.defaultProfileId,
+        selectedProfileId: message.selectedProfileId,
+        requiredInputModalities: [...message.requiredInputModalities],
+        profiles: message.profiles.map((profile) => ({
+          ...profile,
+          inputModalities: [...profile.inputModalities],
+          issues: [...profile.issues],
+        })),
+      });
+      return;
+    }
+    if (message.type === 'model.select.result') {
+      const pending = this.modelCommands.get(message.requestId);
+      if (pending?.operation !== 'select') return;
+      this.clearModelCommand(pending);
+      if (
+        message.sessionId !== pending.sessionId
+        || message.selectedProfileId !== pending.modelProfileId
+        || message.snapshot.session.sessionId !== pending.sessionId
+      ) {
+        pending.reject(new Error(
+          'model selection response did not match the request',
+        ));
+        return;
+      }
+      this.updateSession(applySessionSnapshot(
+        this.state.session,
+        message.snapshot,
+        {
+          observedAt: this.now(),
+          preserveOmittedTokenUsage: true,
+          preserveOmittedSessionTokenUsage: true,
+        },
+      ));
+      pending.resolve(message.snapshot);
+      return;
+    }
+    if (message.type === 'model.select.error') {
+      const pending = this.modelCommands.get(message.requestId);
+      if (pending?.operation !== 'select') return;
+      this.clearModelCommand(pending);
+      pending.reject(new ModelProfileCommandError(message.message, message.code));
+      return;
+    }
     if (
       message.type === 'runtime_config.result'
       || message.type === 'runtime_config.error'
@@ -798,6 +976,7 @@ export class TuiSessionController {
     this.clearSnapshotTimer();
     this.snapshotRequests.clear();
     this.rejectSessionCommands('local-agent disconnected');
+    this.rejectModelCommands('local-agent disconnected');
     this.rejectRuntimeConfigUpdate('local-agent disconnected');
     this.scheduleReconnect();
   }
@@ -869,6 +1048,9 @@ export class TuiSessionController {
     if (this.sessionCommands.size > 0) {
       return 'another session command is already in progress';
     }
+    if (this.modelCommands.size > 0) {
+      return 'a model command is already in progress';
+    }
     if (this.runtimeConfigUpdate) {
       return 'runtime config is being updated';
     }
@@ -885,6 +1067,9 @@ export class TuiSessionController {
     if (this.sessionCommands.size > 0) {
       return 'a session command is in progress';
     }
+    if (this.modelCommands.size > 0) {
+      return 'a model command is in progress';
+    }
     if (this.runtimeConfigUpdate) {
       return 'runtime config is already being updated';
     }
@@ -893,6 +1078,28 @@ export class TuiSessionController {
 
   private reviewTransportReady() {
     return this.state.connection === 'ready' && this.connection.isConnected();
+  }
+
+  private modelCommandUnavailable() {
+    if (this.state.connection !== 'ready' || !this.connection.isConnected()) {
+      return 'local-agent is not connected';
+    }
+    if (this.state.session.sessionId === 'pending') {
+      return 'wait for session synchronization';
+    }
+    if (this.state.session.activeRun) {
+      return 'wait for the current response to finish';
+    }
+    if (this.sessionCommands.size > 0) {
+      return 'a session command is in progress';
+    }
+    if (this.modelCommands.size > 0) {
+      return 'another model command is already in progress';
+    }
+    if (this.runtimeConfigUpdate) {
+      return 'runtime config is being updated';
+    }
+    return null;
   }
 
   private scheduleSessionCommandTimeout(command: PendingSessionCommand) {
@@ -910,6 +1117,30 @@ export class TuiSessionController {
       command.timer = null;
     }
     this.sessionCommands.delete(command.requestId);
+  }
+
+  private scheduleModelCommandTimeout(command: PendingModelCommand) {
+    return this.setTimer(() => {
+      if (this.modelCommands.get(command.requestId) !== command) return;
+      this.modelCommands.delete(command.requestId);
+      command.timer = null;
+      command.reject(new Error(`model ${command.operation} request timed out`));
+    }, this.sessionCommandTimeoutMs);
+  }
+
+  private clearModelCommand(command: PendingModelCommand) {
+    if (command.timer) {
+      this.clearTimer(command.timer);
+      command.timer = null;
+    }
+    this.modelCommands.delete(command.requestId);
+  }
+
+  private rejectModelCommands(message: string) {
+    for (const command of [...this.modelCommands.values()]) {
+      this.clearModelCommand(command);
+      command.reject(new Error(message));
+    }
   }
 
   private rejectSessionCommands(message: string) {

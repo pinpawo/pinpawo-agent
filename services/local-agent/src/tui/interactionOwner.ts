@@ -4,6 +4,7 @@ export type TuiInteractionState = {
   pendingApproval: boolean;
   approvalFreeTextActive?: boolean;
   resumePickerOpen: boolean;
+  modelProfilePickerOpen?: boolean;
   globalReviewPolicyPickerOpen?: boolean;
   commandPaletteOpen?: boolean;
   fileMentionOpen?: boolean;
@@ -17,6 +18,7 @@ export type TuiInteractionOwner =
   | { type: 'unready' }
   | { type: 'resumePicker' }
   | { type: 'approval'; freeTextActive: boolean }
+  | { type: 'modelProfilePicker' }
   | { type: 'globalReviewPolicyPicker' }
   | { type: 'busy' }
   | { type: 'commandPalette' }
@@ -31,6 +33,7 @@ export function resolveTuiInteractionOwner(state: TuiInteractionState): TuiInter
   if (state.pendingApproval) {
     return { type: 'approval', freeTextActive: Boolean(state.approvalFreeTextActive) };
   }
+  if (state.modelProfilePickerOpen) return { type: 'modelProfilePicker' };
   if (state.globalReviewPolicyPickerOpen) return { type: 'globalReviewPolicyPicker' };
   if (state.busy) return { type: 'busy' };
   if (state.commandPaletteOpen) return { type: 'commandPalette' };

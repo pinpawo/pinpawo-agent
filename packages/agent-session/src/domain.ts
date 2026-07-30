@@ -90,8 +90,30 @@ export type AgentActorView = {
   summary: string;
 };
 
-export type AgentRuntimeView = {
+export type AgentInputModality = 'text' | 'image';
+
+export type AgentModelProfileSummary = {
+  id: string;
+  label: string;
+  provider?: string;
   model?: string;
+  endpointHost?: string;
+  contextWindowTokens?: number;
+  inputModalities: AgentInputModality[];
+  available: boolean;
+  compatible: boolean;
+  issues: string[];
+};
+
+export type AgentRuntimeView = {
+  modelProfileId?: string;
+  modelProfileLabel?: string;
+  modelProfileAvailable?: boolean;
+  modelProfileCompatible?: boolean;
+  modelProfileIssues?: string[];
+  model?: string;
+  inputModalities?: AgentInputModality[];
+  requiredInputModalities?: AgentInputModality[];
   globalReviewPolicyMode?: BuiltinGlobalReviewPolicyMode;
   cwd?: string;
   workspaceId?: string;

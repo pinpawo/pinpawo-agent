@@ -21,8 +21,8 @@ export type PetLocalConfig = {
   role?: string;
   /** 简短服务能力概述,planner 在路由 task → pet 时参考 */
   serviceSummary?: string;
-  /** 该 pet 用的模型 id,留空则继承全局 llmConfig */
-  model?: string;
+  /** 该 pet 使用的 model profile id；留空则继承 host default profile。 */
+  modelProfileId?: string;
   /** 该 pet 允许使用的 capability 名列表 */
   capabilities: string[];
   /** 可选:绑定到服务端 pet,仅用于 app 同步通道,不存业务数据 */
@@ -73,8 +73,13 @@ export function parsePetLocalConfig(raw: unknown, source: string): PetLocalConfi
   if (!isOptionalNonEmptyString(r.serviceSummary)) {
     throw new Error(`pet config ${source}: "serviceSummary" must be a non-empty string when present`);
   }
-  if (!isOptionalNonEmptyString(r.model)) {
-    throw new Error(`pet config ${source}: "model" must be a non-empty string when present`);
+  if (!isOptionalNonEmptyString(r.modelProfileId)) {
+    throw new Error(`pet config ${source}: "modelProfileId" must be a non-empty string when present`);
+  }
+  if (r.model !== undefined) {
+    throw new Error(
+      `pet config ${source}: "model" was replaced by stable "modelProfileId"`,
+    );
   }
 
   const capabilitiesRaw = r.capabilities ?? [];
@@ -103,7 +108,9 @@ export function parsePetLocalConfig(raw: unknown, source: string): PetLocalConfi
     ...(r.stage !== undefined ? { stage: r.stage as string } : {}),
     ...(r.role !== undefined ? { role: r.role as string } : {}),
     ...(r.serviceSummary !== undefined ? { serviceSummary: r.serviceSummary as string } : {}),
-    ...(r.model !== undefined ? { model: r.model as string } : {}),
+    ...(r.modelProfileId !== undefined
+      ? { modelProfileId: r.modelProfileId as string }
+      : {}),
     capabilities: capabilitiesRaw,
     ...(serverBinding ? { serverBinding } : {}),
   };

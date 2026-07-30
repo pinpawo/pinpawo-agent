@@ -12,6 +12,8 @@ import {
 export type {
   ChatRequestMessage,
   HumanReviewResponseMessage,
+  ModelListMessage,
+  ModelSelectMessage,
   NewSessionMessage,
   ReviewCancelMessage,
   RunInterruptMessage,
@@ -51,6 +53,9 @@ const AGENT_SERVER_MESSAGE_TYPES = {
   'session.new.result': true,
   'session.resume.result': true,
   'session.error': true,
+  'model.list.result': true,
+  'model.select.result': true,
+  'model.select.error': true,
 } as const satisfies Record<AgentServerMessage['type'], true>;
 
 export type LocalAgentTransportAudience = 'trusted-local' | 'remote';

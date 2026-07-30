@@ -24,6 +24,8 @@ function createHandlers(
     onSessionList: () => undefined,
     onSessionNew: () => undefined,
     onSessionResume: () => undefined,
+    onModelList: () => undefined,
+    onModelSelect: () => undefined,
     onClose: () => undefined,
     ...overrides,
   };

@@ -475,3 +475,25 @@ test('default model profile write migrates legacy fields and preserves peer prof
   assert.equal(migrated.models?.profiles.primary.label, 'Replacement');
   assert.equal(migrated.models?.profiles.secondary.label, 'Secondary');
 });
+
+test('default model profile write rejects the reserved environment identity', () => {
+  const profile = createModelProfile({
+    id: ENV_MODEL_PROFILE_ID,
+    label: 'Environment',
+    apiKey: 'environment-secret',
+    baseUrl: 'https://environment.example.test/v1',
+    model: 'environment-model',
+    contextWindowTokens: 64_000,
+  });
+
+  assert.throws(
+    () => writeDefaultModelProfile({
+      models: {
+        version: MODEL_PROFILES_VERSION,
+        defaultProfileId: ENV_MODEL_PROFILE_ID,
+        profiles: {},
+      },
+    }, profile),
+    /reserved for environment configuration/,
+  );
+});

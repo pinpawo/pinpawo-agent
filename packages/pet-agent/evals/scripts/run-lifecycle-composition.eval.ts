@@ -7,6 +7,7 @@ import {
 } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
+import { pathToFileURL } from 'node:url';
 import {
   AIMessage,
   AIMessageChunk,
@@ -67,8 +68,8 @@ import type {
 import { createDecisionEvalModel } from './decision-eval-model.ts';
 
 const DEFAULT_REPEATS = 3;
-const REPORT_VERSION = 1;
 const EVALUATOR_VERSION = 'prompt-goal-v1';
+export const LIFECYCLE_COMPOSITION_REPORT_VERSION = 2 as const;
 
 const actor = {
   petId: 'eval-pet',
@@ -143,8 +144,8 @@ type LifecycleRunResult = {
   } | null;
 };
 
-type LifecycleCompositionReport = {
-  reportVersion: typeof REPORT_VERSION;
+export type LifecycleCompositionReport = {
+  reportVersion: typeof LIFECYCLE_COMPOSITION_REPORT_VERSION;
   kind: 'orchestrator-lifecycle-composition';
   createdAt: string;
   revision: PromptEvalRevision;
@@ -176,6 +177,18 @@ type LifecycleCompositionReport = {
     estimatedCostUsd: number | null;
   };
 };
+
+export function createLifecycleCompositionReport(input: Omit<
+  LifecycleCompositionReport,
+  'reportVersion' | 'kind' | 'createdAt'
+>): LifecycleCompositionReport {
+  return {
+    reportVersion: LIFECYCLE_COMPOSITION_REPORT_VERSION,
+    kind: 'orchestrator-lifecycle-composition',
+    createdAt: new Date().toISOString(),
+    ...input,
+  };
+}
 
 const generalToolkit = defineToolkit({
   name: 'lifecycle_composition_general',
@@ -412,6 +425,14 @@ function addUsage(
   };
 }
 
+function sumKnownCosts(
+  subjectCost: number | null,
+  evaluatorCost: number | null,
+): number | null {
+  if (subjectCost === null || evaluatorCost === null) return null;
+  return Number((subjectCost + evaluatorCost).toFixed(8));
+}
+
 function countDecisions(
   turns: LifecycleTurnOutput[],
 ): Record<DecisionKind | 'answer', number> {
@@ -435,6 +456,11 @@ async function runCase(params: {
   subjectModel: AgentModels['act'];
   judgeModel: AgentModels['act'];
   structuredOutputMethod?: StructuredOutputMethod;
+  judgeStructuredOutputMethod?: StructuredOutputMethod;
+  subjectProfileId: string;
+  subjectProfileFingerprint: string;
+  judgeProfileId: string;
+  judgeProfileFingerprint: string;
 }): Promise<LifecycleRunResult> {
   const {
     testCase,
@@ -442,6 +468,7 @@ async function runCase(params: {
     subjectModel,
     judgeModel,
     structuredOutputMethod,
+    judgeStructuredOutputMethod,
   } = params;
   const started = performance.now();
   const subjectUsage = createPromptEvalUsageCollector();
@@ -511,6 +538,11 @@ async function runCase(params: {
             runtimeEnvironment: 'Controlled lifecycle composition evaluation.',
           },
           callbacks: [subjectUsage.callback],
+          metadata: {
+            modelProfileId: params.subjectProfileId,
+            modelProfileFingerprint: params.subjectProfileFingerprint,
+            promptEvalModelRole: 'subject',
+          },
           recursionLimit: 80,
         },
       ) as OrchestratorStateType;
@@ -530,8 +562,15 @@ async function runCase(params: {
     const evaluation = await evaluatePromptGoal({
       judge: {
         model: judgeModel,
-        method: structuredOutputMethod,
-        config: { callbacks: [evaluatorUsage.callback] },
+        method: judgeStructuredOutputMethod,
+        config: {
+          callbacks: [evaluatorUsage.callback],
+          metadata: {
+            modelProfileId: params.judgeProfileId,
+            modelProfileFingerprint: params.judgeProfileFingerprint,
+            promptEvalModelRole: 'judge',
+          },
+        },
       },
       contract: 'orchestrator.lifecycle-composition',
       objective: testCase.expected.objective,
@@ -679,12 +718,44 @@ async function main() {
     throw new Error('No lifecycle composition cases matched LIFECYCLE_EVAL_CASES.');
   }
   const revision = readRevision();
-  const modelConfig = createDecisionEvalModel();
+  const subjectProfileId = (
+    process.env.LIFECYCLE_EVAL_MODEL_PROFILE_ID
+    ?? process.env.PROMPT_EVAL_MODEL_PROFILE_ID
+  )?.trim();
+  const judgeProfileId = (
+    process.env.LIFECYCLE_EVAL_JUDGE_PROFILE_ID
+    ?? process.env.PROMPT_EVAL_JUDGE_PROFILE_ID
+  )?.trim();
+  if (!subjectProfileId) {
+    throw new Error(
+      'LIFECYCLE_EVAL_MODEL_PROFILE_ID or PROMPT_EVAL_MODEL_PROFILE_ID is required.',
+    );
+  }
+  if (!judgeProfileId) {
+    throw new Error(
+      'LIFECYCLE_EVAL_JUDGE_PROFILE_ID or PROMPT_EVAL_JUDGE_PROFILE_ID is required.',
+    );
+  }
+  const modelConfig = createDecisionEvalModel({
+    profileId: subjectProfileId,
+    role: 'subject',
+  });
+  const judgeConfig = createDecisionEvalModel({
+    profileId: judgeProfileId,
+    role: 'judge',
+  });
+  if (modelConfig.metadata.fingerprint === judgeConfig.metadata.fingerprint) {
+    throw new Error(
+      'The lifecycle eval judge must have a different resolved profile fingerprint '
+      + 'from the subject model.',
+    );
+  }
   const structuredOutputMethod = modelConfig.method ?? 'provider-default';
   console.log('Orchestrator lifecycle composition eval');
   console.log(`Revision: ${revision.commit}`);
   console.log(`Harness revision: ${revision.harnessCommit}`);
   console.log(`Model: ${modelConfig.label}`);
+  console.log(`Judge: ${judgeConfig.label}`);
   console.log(`Structured output method: ${structuredOutputMethod}`);
   console.log(`Cases: ${selectedCases.length.toString()}`);
   console.log(`Repeats: ${repeats.toString()}`);
@@ -696,8 +767,13 @@ async function main() {
         testCase,
         repeat,
         subjectModel: modelConfig.model,
-        judgeModel: modelConfig.model,
+        judgeModel: judgeConfig.model,
         structuredOutputMethod: modelConfig.method,
+        judgeStructuredOutputMethod: judgeConfig.method,
+        subjectProfileId: modelConfig.metadata.profileId,
+        subjectProfileFingerprint: modelConfig.metadata.fingerprint,
+        judgeProfileId: judgeConfig.metadata.profileId,
+        judgeProfileFingerprint: judgeConfig.metadata.fingerprint,
       });
       results.push(result);
       const failedScores = result.scores.filter(({ score }) => score !== 1)
@@ -726,18 +802,14 @@ async function main() {
     subjectUsage = addUsage(subjectUsage, result.usage.subject);
     evaluatorUsage = addUsage(evaluatorUsage, result.usage.evaluator);
   }
-  const totalUsage = addUsage(subjectUsage, evaluatorUsage);
-  const report: LifecycleCompositionReport = {
-    reportVersion: REPORT_VERSION,
-    kind: 'orchestrator-lifecycle-composition',
-    createdAt: new Date().toISOString(),
+  const report = createLifecycleCompositionReport({
     revision,
     model: modelConfig.metadata,
     structuredOutputMethod,
     evaluator: {
       version: EVALUATOR_VERSION,
-      model: modelConfig.metadata,
-      structuredOutputMethod,
+      model: judgeConfig.metadata,
+      structuredOutputMethod: judgeConfig.method ?? 'provider-default',
     },
     selection: {
       dataset: orchestratorLifecycleCompositionDataset.name,
@@ -749,9 +821,12 @@ async function main() {
     usage: {
       subject: subjectUsage,
       evaluator: evaluatorUsage,
-      estimatedCostUsd: estimatePromptEvalCost(totalUsage, modelConfig.pricing),
+      estimatedCostUsd: sumKnownCosts(
+        estimatePromptEvalCost(subjectUsage, modelConfig.pricing),
+        estimatePromptEvalCost(evaluatorUsage, judgeConfig.pricing),
+      ),
     },
-  };
+  });
   const defaultPath = resolve(
     '.eval-results',
     `lifecycle-composition-${revision.commit.slice(0, 12)}-${Date.now().toString()}.json`,
@@ -785,7 +860,9 @@ async function main() {
   if (achieved !== results.length) process.exitCode = 1;
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? `${error.name}: ${error.message}` : String(error));
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? `${error.name}: ${error.message}` : String(error));
+    process.exitCode = 1;
+  });
+}

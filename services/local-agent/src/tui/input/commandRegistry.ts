@@ -4,6 +4,7 @@ export type TuiCommandName =
   | 'chat'
   | 'studio'
   | 'new'
+  | 'model'
   | 'policy'
   | 'transcript'
   | 'export'
@@ -47,6 +48,12 @@ const COMMANDS: TuiCommandDefinition[] = [
     usage: '/new',
     description: '创建新会话',
     helpText: '/new 新会话',
+  },
+  {
+    name: 'model',
+    usage: '/model',
+    description: '查看并切换当前会话的模型',
+    helpText: '/model 选择模型',
   },
   {
     name: 'studio',

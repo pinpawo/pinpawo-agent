@@ -193,11 +193,13 @@ function applyLoadedSessionSnapshot(
         observedAt: action.now ?? 0,
         preserveOmittedTokenUsage:
           action.reason === 'reconnect'
+          || action.reason === 'model-select'
           || action.reason === 'completion'
           || action.reason === 'review-refresh',
         preserveOmittedSessionTokenUsage:
           action.reason === 'reconnect'
           || action.reason === 'resume'
+          || action.reason === 'model-select'
           || action.reason === 'completion'
           || action.reason === 'review-refresh',
       },

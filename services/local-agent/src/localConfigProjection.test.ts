@@ -14,16 +14,12 @@ import {
   type LocalServerDeps,
 } from './localServerTypes';
 import { buildWorkspaceRuntimeConfig } from './runtimeConfig';
+import { createTestModelServerDeps } from './testing/modelProfiles';
 
 function createDeps(workdir: string): LocalServerDeps {
   return {
     actorId: 'pet-test',
-    llmConfig: {
-      apiKey: 'test',
-      baseUrl: 'http://localhost',
-      model: 'test-model',
-      contextWindowTokens: 32000,
-    },
+    ...createTestModelServerDeps({ contextWindowTokens: 32000 }),
     workdir,
   };
 }
@@ -66,4 +62,14 @@ test('projection without runtime config does not synthesize Studio paths', () =>
   assert.equal(runtime.workdir, '/tmp/runtime-without-config');
   assert.equal(runtime.stateRoot, undefined);
   assert.equal(runtime.studioConfigPath, undefined);
+});
+
+test('session projection surfaces an unavailable selected profile without fallback', () => {
+  const deps = createDeps('/tmp/runtime-unavailable-profile');
+  const runtime = buildLocalRuntimeProjection(deps, 'removed-profile');
+
+  assert.equal(runtime.modelProfileId, 'removed-profile');
+  assert.equal(runtime.modelProfileAvailable, false);
+  assert.equal(runtime.model, undefined);
+  assert.match(runtime.modelProfileIssues[0] ?? '', /Unknown model profile/);
 });

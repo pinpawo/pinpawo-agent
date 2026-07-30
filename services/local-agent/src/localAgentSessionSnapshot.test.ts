@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildLocalAgentSessionSnapshot } from './localAgentSessionSnapshot';
 import type { LocalServerDeps } from './localServerTypes';
+import { createTestModelServerDeps } from './testing/modelProfiles';
 
 test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot', () => {
   const snapshot = buildLocalAgentSessionSnapshot({
@@ -14,12 +15,7 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
     ],
     deps: {
       actorId: 'pet-a',
-      llmConfig: {
-        apiKey: 'test',
-        baseUrl: 'http://localhost',
-        model: 'test-model',
-        contextWindowTokens: 32000,
-      },
+      ...createTestModelServerDeps({ contextWindowTokens: 32000 }),
       workdir: '/tmp/legacy-work',
       runtimeConfig: {
         workdir: '/tmp/work',
@@ -39,6 +35,7 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
         capabilityArtifactRoot: '/tmp/work/.pinpawo/capability-artifacts',
       },
     } as LocalServerDeps,
+    requiredInputModalities: ['text', 'image'],
     sessionTokenUsage: {
       inputTokens: 100,
       outputTokens: 20,
@@ -78,6 +75,12 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
   assert.equal(snapshot.session.activeRun.reviewAction.reviews[0]?.id, 'review-1');
   assert.equal(snapshot.session.activeRun.reviewAction.petId, 'pet-a');
   assert.equal(snapshot.session.runtime?.model, 'test-model');
+  assert.equal(snapshot.session.runtime?.modelProfileId, 'test-profile');
+  assert.deepEqual(
+    snapshot.session.runtime?.requiredInputModalities,
+    ['text', 'image'],
+  );
+  assert.equal(snapshot.session.runtime?.modelProfileCompatible, false);
   assert.equal(snapshot.session.runtime?.contextWindow, 32000);
   assert.equal(snapshot.session.runtime?.cwd, '/tmp/work');
   assert.equal(snapshot.session.runtime?.workspaceId, 'workspace-test');

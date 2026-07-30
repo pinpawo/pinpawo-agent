@@ -3,6 +3,8 @@ import {
   readLocalAgentClientMessageEnvelope,
   type ChatRequestMessage,
   type HumanReviewResponseMessage,
+  type ModelListMessage,
+  type ModelSelectMessage,
   type NewSessionMessage,
   type ReviewCancelMessage,
   type RunInterruptMessage,
@@ -40,6 +42,8 @@ export type LocalServerPeerHandlers = {
   onSessionList: (peer: LocalServerPeer, message: SessionListMessage) => MaybePromise<void>;
   onSessionNew: (peer: LocalServerPeer, message: SessionNewMessage) => MaybePromise<void>;
   onSessionResume: (peer: LocalServerPeer, message: SessionResumeMessage) => MaybePromise<void>;
+  onModelList: (peer: LocalServerPeer, message: ModelListMessage) => MaybePromise<void>;
+  onModelSelect: (peer: LocalServerPeer, message: ModelSelectMessage) => MaybePromise<void>;
   onClose: (peer: LocalServerPeer) => MaybePromise<void>;
   log?: (message: string) => void;
   logError?: LocalServerLogError;
@@ -189,6 +193,18 @@ export function dispatchLocalServerMessage(
       return runLocalServerPeerHandler(
         'handleSessionResume',
         () => handlers.onSessionResume(peer, msg),
+        logError,
+      );
+    } else if (msg.type === 'model.list') {
+      return runLocalServerPeerHandler(
+        'handleModelList',
+        () => handlers.onModelList(peer, msg),
+        logError,
+      );
+    } else if (msg.type === 'model.select') {
+      return runLocalServerPeerHandler(
+        'handleModelSelect',
+        () => handlers.onModelSelect(peer, msg),
         logError,
       );
     } else if (msg.type === 'ping') {

@@ -158,8 +158,8 @@ workspace task.
    npm run eval:lifecycle-composition
    ```
 
-   The fixed V1 single-model profile contains seven cases and defaults to three
-   repeats. It evaluates the complete user-visible lifecycle with
+   The fixed V1 profile contains seven cases and defaults to three repeats. It
+   evaluates the complete user-visible lifecycle with
    `prompt-goal-v1`; terminal-state cleanup, lane isolation, assistant output,
    and controlled-evidence availability are separate mechanical invariants.
    Executor-call counts, decision paths, and delegation summaries remain
@@ -168,6 +168,8 @@ workspace task.
    ```sh
    LIFECYCLE_EVAL_CASES=dynamic-multi-task \
    LIFECYCLE_EVAL_REPEATS=1 \
+   LIFECYCLE_EVAL_MODEL_PROFILE_ID=qwen-max \
+   LIFECYCLE_EVAL_JUDGE_PROFILE_ID=gpt-judge \
      npm run eval:lifecycle-composition
    ```
 
@@ -226,9 +228,10 @@ DECISION_EVAL_TIMEOUT_MS=180000 npm run eval:decision-stability
 DECISION_EVAL_STRUCTURED_OUTPUT_METHOD=jsonMode npm run eval:decision-stability
 ```
 
-Model configuration is resolved from `LLM_*`, then `~/.pinpawo/.env`, then
-`~/.pinpawo/config.json`. Entry scoring covers only result availability;
-Planner scoring owns task boundaries, plan contents, and Capability selection.
+Model configuration is resolved by explicit Model Profile ID from the versioned
+`models` section in `~/.pinpawo/config.json`. Entry scoring covers only result
+availability; Planner scoring owns task boundaries, plan contents, and
+Capability selection.
 
 ## Prompt Contract Evaluation
 
@@ -247,9 +250,18 @@ npm run eval:prompt-v1
 ```
 
 It runs 35 canonical cases across `entry`, `planner`, `capability`, `outcome`,
-and `answer`, with three repeats per case. Model and provider configuration still
-come from `LLM_*`, `~/.pinpawo/.env`, or `~/.pinpawo/config.json`; the generated
-report records the resolved values.
+and `answer`, with three repeats per case. Select one subject and one independent
+fixed judge from the configured Model Profiles:
+
+```sh
+PROMPT_EVAL_MODEL_PROFILE_ID=qwen-max \
+PROMPT_EVAL_JUDGE_PROFILE_ID=gpt-judge \
+  npm run eval:prompt-v1 -w @pinpawo/pet-agent
+```
+
+The subject and judge must resolve to different sanitized fingerprints. The
+generated report records their stable profile IDs, roles, fingerprints,
+modalities, endpoints without credentials, and independent runtime settings.
 
 It writes a versioned JSON report under `.eval-results/`. Each case instantiates
 an existing Prompt Contract as one concrete objective with explicit acceptance
@@ -264,9 +276,9 @@ marked as dirty.
 
 Exact actions, verdicts, enums, and mechanical plan relationships use
 deterministic contract criteria. Free-form entry tasks, planner task/tail
-objectives, and `answer` outputs use the same configured model with the
-versioned `prompt-goal-v1` evaluator. The report records that evaluator
-configuration and keeps subject-model usage separate from evaluator usage. A
+objectives, and `answer` outputs use the independently selected fixed judge with
+the versioned `prompt-goal-v1` evaluator. The report records both profile
+identities and keeps subject-model usage separate from evaluator usage. A
 malformed or failed evaluator call makes the run not evaluable; it does not
 count as a failed objective.
 
@@ -304,6 +316,42 @@ PROMPT_EVAL_INPUT_USD_PER_MILLION="$CURRENT_INPUT_RATE" \
 PROMPT_EVAL_OUTPUT_USD_PER_MILLION="$CURRENT_OUTPUT_RATE" \
   npm run eval:prompt-stability
 ```
+
+For a multi-provider run, pass pricing by profile so subject and judge usage are
+attributed independently:
+
+```sh
+PROMPT_EVAL_PRICING_JSON='{
+  "qwen-max":{"inputUsdPerMillionTokens":1,"outputUsdPerMillionTokens":4},
+  "gpt-judge":{"inputUsdPerMillionTokens":2,"outputUsdPerMillionTokens":8}
+}' npm run eval:prompt-stability
+```
+
+## Multi-model prompt matrix
+
+The matrix runner executes ordinary single-profile prompt reports sequentially
+and writes a separate manifest for cross-model comparison:
+
+```sh
+PROMPT_EVAL_MODEL_PROFILE_IDS=deepseek-pro,qwen-max \
+PROMPT_EVAL_JUDGE_PROFILE_ID=gpt-judge \
+PROMPT_EVAL_MATRIX_MAX_RUNS=300 \
+  npm run eval:prompt-matrix
+```
+
+Every child report uses the same fixed judge fingerprint and remains compatible
+with `eval:prompt-compare` for same-profile regressions. The matrix manifest
+aggregates pass rate, latency, token usage, cost coverage, schema/invocation
+failures, and subject capability metadata. Text-only profiles record the image
+case as `skipped: unsupported-modality`; image-capable profiles receive a
+bounded known-image understanding check. The runner rejects mixed harness,
+revision, subject, or judge identities.
+
+`PROMPT_EVAL_MATRIX_MAX_RUNS` is a hard preflight limit on scenario and image
+evaluation runs (not internal Planner loop iterations) and defaults to 500.
+`PROMPT_EVAL_MATRIX_MAX_ESTIMATED_COST_USD` is an optional sequential stop
+budget; using it requires complete per-profile pricing through
+`PROMPT_EVAL_PRICING_JSON`.
 
 For a prompt change, first stabilize the objectives, criteria, evaluator
 ownership, case selection, and repetitions on one supported model. Run the same

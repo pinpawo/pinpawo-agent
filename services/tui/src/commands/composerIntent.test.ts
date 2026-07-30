@@ -36,6 +36,13 @@ test('composer intent routes chat, Studio, and slash commands', () => {
   }), {
     type: 'enter-chat',
   });
+  assert.deepEqual(resolveComposerIntent({
+    text: '/model',
+    attachmentCount: 0,
+    mode: 'studio',
+  }), {
+    type: 'open-model',
+  });
 });
 
 test('composer intent keeps slash text literal when attachments are selected', () => {

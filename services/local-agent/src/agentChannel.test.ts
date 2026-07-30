@@ -18,6 +18,7 @@ import {
 } from '@pinpawo/pet-agent';
 import { FileCapabilityArtifactStore } from './capabilityArtifactStore';
 import { createBashToolkit, createGitToolkit } from './toolkits/local';
+import { createTestModelProfileRegistry } from './testing/modelProfiles';
 
 function createContext(): AgentContext {
   return {
@@ -320,6 +321,52 @@ test('buildDecisionStructuredOutput honors the resolved profile strategy before 
   }), {
     method: 'jsonSchema',
   });
+});
+
+test('graph identity distinguishes stable profiles with the same model on different endpoints', () => {
+  const profiles = createTestModelProfileRegistry([
+    {
+      modelProfileId: 'account-a',
+      model: 'same-model',
+      baseUrl: 'https://account-a.example.test/v1',
+    },
+    {
+      modelProfileId: 'account-b',
+      model: 'same-model',
+      baseUrl: 'https://account-b.example.test/v1',
+    },
+  ]);
+  const first = buildTestLocalChatAgentInput({
+    context: createContext(),
+    userMessage: 'hello',
+    llmConfig: profiles.resolve('account-a'),
+  });
+  const second = buildTestLocalChatAgentInput({
+    context: createContext(),
+    userMessage: 'hello',
+    llmConfig: profiles.resolve('account-b'),
+  });
+
+  assert.notEqual(first.graphKey, second.graphKey);
+  assert.match(first.graphKey, /account-a/);
+  assert.match(second.graphKey, /account-b/);
+});
+
+test('graph identity isolates session-scoped model input adapters', () => {
+  const params = {
+    context: createContext(),
+    userMessage: 'hello',
+  };
+  const first = buildTestLocalChatAgentInput({
+    ...params,
+    modelInputCacheKey: 'session-a',
+  });
+  const second = buildTestLocalChatAgentInput({
+    ...params,
+    modelInputCacheKey: 'session-b',
+  });
+
+  assert.notEqual(first.graphKey, second.graphKey);
 });
 
 test('buildLocalChatAgentInput passes global review policy mode to graph input', () => {

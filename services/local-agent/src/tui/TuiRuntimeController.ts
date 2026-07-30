@@ -5,6 +5,11 @@ import type {
   ReviewOption,
   ReviewResponse,
 } from '@pinpawo/pet-agent';
+import type {
+  AgentInputModality,
+  AgentModelProfileSummary,
+  AgentSessionSnapshot,
+} from '@pinpawo/agent-session';
 import { loadAgentContext } from '../contextLoader';
 import type { LocalAgentServerMessage } from '../localAgentProtocol';
 import { getConfig, setConfig } from '../config';
@@ -30,6 +35,7 @@ const LOCAL_SERVER_CONNECT_RETRY_DELAY_MS = 2000;
 const LOCAL_SERVER_RECONNECT_RETRIES = 5;
 const LOCAL_SERVER_RECONNECT_DELAY_MS = 2000;
 const INTERRUPT_PENDING_NOTICE_DELAY_MS = 10_000;
+const MODEL_PROFILE_REQUEST_TIMEOUT_MS = 10_000;
 const REVIEW_SNAPSHOT_REFRESH_ERROR_CODES = new Set([
   'review_closed',
   'review_stale',
@@ -61,6 +67,39 @@ function buildPetSummary(context: Awaited<ReturnType<typeof loadAgentContext>>) 
 
 type RuntimeSnapshotApplyReason = Exclude<TuiSnapshotApplyReason, 'resume'>;
 type RuntimeSnapshotRefreshReason = 'completion' | 'review-refresh';
+
+export type TuiModelProfileList = {
+  sessionId: string;
+  defaultProfileId: string;
+  selectedProfileId: string;
+  requiredInputModalities: AgentInputModality[];
+  profiles: AgentModelProfileSummary[];
+};
+
+export class TuiModelProfileRequestError extends Error {
+  constructor(
+    message: string,
+    readonly code?: string,
+  ) {
+    super(message);
+    this.name = 'TuiModelProfileRequestError';
+  }
+}
+
+type PendingModelListRequest = {
+  sessionId: string;
+  resolve: (result: TuiModelProfileList) => void;
+  reject: (error: Error) => void;
+  timeout: ReturnType<typeof setTimeout>;
+};
+
+type PendingModelSelectRequest = {
+  sessionId: string;
+  modelProfileId: string;
+  resolve: (snapshot: AgentSessionSnapshot) => void;
+  reject: (error: Error) => void;
+  timeout: ReturnType<typeof setTimeout>;
+};
 
 function getSnapshotRefreshReason(
   message: LocalAgentServerMessage,
@@ -103,6 +142,8 @@ export class TuiRuntimeController {
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private interruptPendingNoticeTimeout: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
+  private readonly pendingModelListRequests = new Map<string, PendingModelListRequest>();
+  private readonly pendingModelSelectRequests = new Map<string, PendingModelSelectRequest>();
   private readonly localServerClient: TuiLocalServerClient;
   private readonly connection: LocalAgentConnection;
 
@@ -136,6 +177,9 @@ export class TuiRuntimeController {
     this.disposed = true;
     this.clearReconnectTimeout();
     this.clearInterruptPendingNoticeTimeout();
+    this.rejectPendingModelRequests(
+      new TuiModelProfileRequestError('Model profile request was cancelled.'),
+    );
     this.connection.disconnect();
   }
 
@@ -380,6 +424,84 @@ export class TuiRuntimeController {
     return this.localServerClient.resumeSession(sessionId);
   }
 
+  listModelProfiles(): Promise<TuiModelProfileList> {
+    let sessionId: string;
+    try {
+      sessionId = this.requireFocusedModelSession();
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    const requestId = randomUUID();
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pendingModelListRequests.delete(requestId);
+        reject(new TuiModelProfileRequestError('加载模型列表超时。'));
+      }, MODEL_PROFILE_REQUEST_TIMEOUT_MS);
+      this.pendingModelListRequests.set(requestId, {
+        sessionId,
+        resolve,
+        reject,
+        timeout,
+      });
+      if (!this.connection.send({
+        type: 'model.list',
+        requestId,
+        sessionId,
+      })) {
+        this.pendingModelListRequests.delete(requestId);
+        clearTimeout(timeout);
+        reject(new TuiModelProfileRequestError(TUI_TEXT.disconnectedCannotSend));
+      }
+    });
+  }
+
+  selectModelProfile(
+    modelProfileId: string,
+    expectedSessionId?: string,
+  ): Promise<AgentSessionSnapshot> {
+    let sessionId: string;
+    try {
+      sessionId = this.requireFocusedModelSession();
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    if (expectedSessionId && sessionId !== expectedSessionId) {
+      return Promise.reject(new TuiModelProfileRequestError(
+        '当前会话已经变化，请重新打开模型选择器。',
+        'session_changed',
+      ));
+    }
+    if (this.isCurrentBusy()) {
+      return Promise.reject(
+        new TuiModelProfileRequestError(TUI_TEXT.busyCannotSend, 'run_active'),
+      );
+    }
+    const requestId = randomUUID();
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pendingModelSelectRequests.delete(requestId);
+        reject(new TuiModelProfileRequestError('切换模型超时。'));
+      }, MODEL_PROFILE_REQUEST_TIMEOUT_MS);
+      this.pendingModelSelectRequests.set(requestId, {
+        sessionId,
+        modelProfileId,
+        resolve,
+        reject,
+        timeout,
+      });
+      if (!this.connection.send({
+        type: 'model.select',
+        requestId,
+        sessionId,
+        modelProfileId,
+      })) {
+        this.pendingModelSelectRequests.delete(requestId);
+        clearTimeout(timeout);
+        reject(new TuiModelProfileRequestError(TUI_TEXT.disconnectedCannotSend));
+      }
+    });
+  }
+
   private async initialize() {
     this.options.dispatch({
       type: 'connection.set',
@@ -546,6 +668,9 @@ export class TuiRuntimeController {
 
   private handleConnectionClose() {
     if (this.disposed) return;
+    this.rejectPendingModelRequests(
+      new TuiModelProfileRequestError('连接已断开，模型请求已取消。'),
+    );
     this.options.dispatch({
       type: 'connection.set',
       status: 'disconnected',
@@ -578,6 +703,7 @@ export class TuiRuntimeController {
   }
 
   private handleServerMessage(msg: LocalAgentServerMessage) {
+    if (this.resolveModelProfileMessage(msg)) return;
     if (concludesInterruptWait(msg)) {
       this.clearInterruptPendingNoticeTimeout();
     }
@@ -602,6 +728,85 @@ export class TuiRuntimeController {
     return selectFocusedBusy(this.options.getState());
   }
 
+  private requireFocusedModelSession() {
+    if (!this.connection.isConnected()) {
+      throw new TuiModelProfileRequestError(TUI_TEXT.disconnectedCannotSend);
+    }
+    const sessionId = this.options.getState().focusedSessionId;
+    if (!sessionId) {
+      throw new TuiModelProfileRequestError('当前没有可配置模型的会话。');
+    }
+    return sessionId;
+  }
+
+  private resolveModelProfileMessage(message: LocalAgentServerMessage) {
+    if (message.type === 'model.list.result') {
+      const pending = this.pendingModelListRequests.get(message.requestId);
+      if (!pending || pending.sessionId !== message.sessionId) return true;
+      this.pendingModelListRequests.delete(message.requestId);
+      clearTimeout(pending.timeout);
+      pending.resolve({
+        sessionId: message.sessionId,
+        defaultProfileId: message.defaultProfileId,
+        selectedProfileId: message.selectedProfileId,
+        requiredInputModalities: [...message.requiredInputModalities],
+        profiles: message.profiles.map((profile) => ({
+          ...profile,
+          inputModalities: [...profile.inputModalities],
+          issues: [...profile.issues],
+        })),
+      });
+      return true;
+    }
+    if (message.type === 'model.select.result') {
+      const pending = this.pendingModelSelectRequests.get(message.requestId);
+      if (!pending || pending.sessionId !== message.sessionId) return true;
+      this.pendingModelSelectRequests.delete(message.requestId);
+      clearTimeout(pending.timeout);
+      if (message.selectedProfileId !== pending.modelProfileId) {
+        pending.reject(new TuiModelProfileRequestError(
+          'Model selection response did not match the requested profile.',
+        ));
+        return true;
+      }
+      if (message.snapshot.session.sessionId !== pending.sessionId) {
+        pending.reject(new TuiModelProfileRequestError(
+          'Model selection snapshot did not match the requested session.',
+        ));
+        return true;
+      }
+      this.options.dispatch({
+        type: 'session.snapshot.loaded',
+        reason: 'model-select',
+        snapshot: message.snapshot,
+        now: Date.now(),
+      });
+      pending.resolve(message.snapshot);
+      return true;
+    }
+    if (message.type === 'model.select.error') {
+      const pending = this.pendingModelSelectRequests.get(message.requestId);
+      if (!pending || pending.sessionId !== message.sessionId) return true;
+      this.pendingModelSelectRequests.delete(message.requestId);
+      clearTimeout(pending.timeout);
+      pending.reject(new TuiModelProfileRequestError(message.message, message.code));
+      return true;
+    }
+    return false;
+  }
+
+  private rejectPendingModelRequests(error: Error) {
+    for (const pending of this.pendingModelListRequests.values()) {
+      clearTimeout(pending.timeout);
+      pending.reject(error);
+    }
+    this.pendingModelListRequests.clear();
+    for (const pending of this.pendingModelSelectRequests.values()) {
+      clearTimeout(pending.timeout);
+      pending.reject(error);
+    }
+    this.pendingModelSelectRequests.clear();
+  }
   private clearReconnectTimeout() {
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);

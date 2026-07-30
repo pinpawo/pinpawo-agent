@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   AGENT_LOCAL_ATTACHMENT_LIMIT,
+  createAgentSessionSnapshot,
   parseAgentClientMessage,
   parseAgentServerMessage,
 } from './index';
@@ -114,6 +115,121 @@ test('runtime config protocol supports legacy updates and correlated acknowledge
     requestId: 'policy-2',
     message: 'config is read-only',
   });
+});
+
+test('model protocol accepts correlated selection messages and sanitized profile lists', () => {
+  assert.deepEqual(parseAgentClientMessage({
+    type: 'model.list',
+    requestId: 'models-1',
+    sessionId: 'session-1',
+  }), {
+    type: 'model.list',
+    requestId: 'models-1',
+    sessionId: 'session-1',
+  });
+  assert.deepEqual(parseAgentClientMessage({
+    type: 'model.select',
+    requestId: 'select-1',
+    sessionId: 'session-1',
+    modelProfileId: 'vision',
+  }), {
+    type: 'model.select',
+    requestId: 'select-1',
+    sessionId: 'session-1',
+    modelProfileId: 'vision',
+  });
+  assert.equal(parseAgentClientMessage({
+    type: 'model.select',
+    requestId: 'select-1',
+    sessionId: 'session-1',
+    modelProfileId: '',
+  }), null);
+
+  const list = {
+    type: 'model.list.result',
+    requestId: 'models-1',
+    sessionId: 'session-1',
+    defaultProfileId: 'vision',
+    selectedProfileId: 'vision',
+    requiredInputModalities: ['text', 'image'],
+    profiles: [{
+      id: 'vision',
+      label: 'Vision',
+      provider: 'openai',
+      model: 'vision-model',
+      endpointHost: 'models.example.test',
+      contextWindowTokens: 64_000,
+      inputModalities: ['text', 'image'],
+      available: true,
+      compatible: true,
+      issues: [],
+    }],
+  };
+  assert.deepEqual(parseAgentServerMessage(list), list);
+  assert.equal(parseAgentServerMessage({
+    ...list,
+    profiles: [{
+      ...list.profiles[0],
+      apiKey: 'must-never-be-accepted',
+    }],
+  }), null);
+  assert.deepEqual(parseAgentServerMessage({
+    type: 'model.select.error',
+    requestId: 'select-2',
+    sessionId: 'session-1',
+    modelProfileId: 'text',
+    code: 'profile_incompatible',
+    message: 'session requires image input',
+  }), {
+    type: 'model.select.error',
+    requestId: 'select-2',
+    sessionId: 'session-1',
+    modelProfileId: 'text',
+    code: 'profile_incompatible',
+    message: 'session requires image input',
+  });
+  assert.deepEqual(parseAgentServerMessage({
+    type: 'model.select.error',
+    requestId: 'select-3',
+    sessionId: 'session-1',
+    modelProfileId: 'vision',
+    code: 'selection_failed',
+    message: 'checkpoint unavailable',
+  }), {
+    type: 'model.select.error',
+    requestId: 'select-3',
+    sessionId: 'session-1',
+    modelProfileId: 'vision',
+    code: 'selection_failed',
+    message: 'checkpoint unavailable',
+  });
+
+  const snapshot = createAgentSessionSnapshot({
+    sessionId: 'session-1',
+    kind: 'chat',
+    timeline: [],
+    activeRun: null,
+    runtime: {
+      modelProfileId: 'vision',
+      modelProfileLabel: 'Vision',
+      modelProfileAvailable: true,
+      modelProfileIssues: [],
+      model: 'vision-model',
+      inputModalities: ['text', 'image'],
+    },
+  });
+  const selected = {
+    type: 'model.select.result',
+    requestId: 'select-1',
+    sessionId: 'session-1',
+    selectedProfileId: 'vision',
+    snapshot,
+  };
+  assert.deepEqual(parseAgentServerMessage(selected), selected);
+  assert.equal(parseAgentServerMessage({
+    ...selected,
+    selectedProfileId: 'text',
+  }), null);
 });
 
 test('chat_request accepts an explicit active delegation transition', () => {

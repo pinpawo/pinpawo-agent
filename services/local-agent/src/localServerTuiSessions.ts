@@ -1,5 +1,10 @@
+import { resolve } from 'node:path';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
+import type {
+  AgentInputModality,
+  AgentLocalAttachment,
+} from '@pinpawo/agent-session';
 import {
   readMessageCreatedAtUtc,
   readLatestProviderInputTokens,
@@ -14,16 +19,27 @@ import { readFinalMessageText } from './agentStreamEvents';
 import { loadAgentContext } from './contextLoader';
 import { FileSaver } from './fileSaver';
 import { getLocalServerRuntimeConfig, type LocalServerDeps } from './localServerTypes';
-import { readLocalChatDisplayText } from './localChatAttachments';
+import {
+  createAdmittedLocalChatHumanMessage,
+  createLocalChatHumanMessage,
+  readLocalChatDisplayText,
+} from './localChatAttachments';
+import { LocalChatImageStore } from './localImageAttachments';
+import {
+  missingInputModalities,
+  supportsInputModalities,
+} from './modelProfiles';
 import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
 import type { LocalAgentRuntimeConfig } from './runtimeConfig';
 import {
+  addTuiSessionRequiredInputModalities,
   createTuiSession,
   ensureActiveTuiSession,
   listTuiSessions,
   loadTuiSessionState,
   resumeTuiSession,
   saveTuiSessionState,
+  updateTuiSessionModelProfile,
   updateTuiSessionSummary,
   type TuiSessionRecord,
   type TuiSessionState,
@@ -44,6 +60,8 @@ export type ActivePendingReview = {
 
 export type TuiCheckpointPoint = {
   sessionId: string;
+  modelProfileId: string;
+  requiredInputModalities: AgentInputModality[];
   messages: TuiCheckpointMessage[];
   sessionTokenUsage: (TokenUsageSnapshot & { scope: 'session' }) | null;
   pendingReview: ActivePendingReview | null;
@@ -119,6 +137,8 @@ export class LocalServerTuiSessionService {
   private readonly checkpointer: TuiSessionCheckpointer;
   private readonly graphService: TuiSessionGraphService;
   private readonly loadContext: typeof loadAgentContext;
+  private readonly defaultModelProfileId: string;
+  private readonly imageStore: LocalChatImageStore;
   private readonly reportCapabilityDiagnostics = createCapabilityDiagnosticReporter();
 
   constructor(options: {
@@ -130,10 +150,18 @@ export class LocalServerTuiSessionService {
     runtimeConfig?: LocalAgentRuntimeConfig;
     sessionStatePath?: string;
     checkpointPath?: string;
-  } = {}) {
+    defaultModelProfileId: string;
+  }) {
     const runtimeConfig = options.runtimeConfig ?? buildLocalAgentRuntimeConfig();
     const sessionStatePath = options.sessionStatePath ?? runtimeConfig.tuiSessionPath;
-    this.state = options.state ?? loadTuiSessionState(sessionStatePath);
+    this.defaultModelProfileId = options.defaultModelProfileId;
+    this.imageStore = new LocalChatImageStore(
+      resolve(runtimeConfig.stateRoot, 'input-images'),
+    );
+    this.state = options.state ?? loadTuiSessionState(
+      this.defaultModelProfileId,
+      sessionStatePath,
+    );
     this.saveState = options.saveState ?? ((state) => saveTuiSessionState(state, sessionStatePath));
     this.checkpointer = options.checkpointer ?? new FileSaver(
       options.checkpointPath ?? runtimeConfig.tuiCheckpointPath,
@@ -143,7 +171,11 @@ export class LocalServerTuiSessionService {
   }
 
   getActiveSession(petId: string) {
-    const session = ensureActiveTuiSession(this.state, petId);
+    const session = ensureActiveTuiSession(
+      this.state,
+      petId,
+      this.defaultModelProfileId,
+    );
     this.save();
     return session;
   }
@@ -156,16 +188,29 @@ export class LocalServerTuiSessionService {
     return this.getActiveSession(petId).id;
   }
 
+  getSession(petId: string, sessionId: string) {
+    const session = this.state.sessions[sessionId];
+    return session?.petId === petId ? session : null;
+  }
+
   createNewSession(petId: string) {
     this.getActiveSession(petId);
-    const next = createTuiSession(this.state, petId);
+    const next = createTuiSession(
+      this.state,
+      petId,
+      this.defaultModelProfileId,
+    );
     this.save();
     return next;
   }
 
   async resetSession(petId: string, options: { deletePrevious?: boolean } = {}) {
     const previous = this.getActiveSession(petId);
-    const next = createTuiSession(this.state, petId);
+    const next = createTuiSession(
+      this.state,
+      petId,
+      this.defaultModelProfileId,
+    );
     if (options.deletePrevious) {
       await this.checkpointer.deleteThread(previous.threadId);
       delete this.state.sessions[previous.id];
@@ -178,6 +223,7 @@ export class LocalServerTuiSessionService {
     deps: LocalServerDeps,
     ctx: Awaited<ReturnType<typeof loadAgentContext>>,
     threadId = this.getChatThreadId(deps.actorId),
+    modelProfileIdOverride?: string,
   ) {
     if (!deps.capabilityArtifactStore) {
       throw new Error(
@@ -187,10 +233,42 @@ export class LocalServerTuiSessionService {
     const session = Object.values(this.state.sessions)
       .find((candidate) => candidate.threadId === threadId)
       ?? this.getActiveSession(deps.actorId);
+    const modelProfileId = modelProfileIdOverride ?? session.modelProfileId;
+    const llmConfig = deps.modelProfiles.resolve(modelProfileId);
+    if (
+      modelProfileIdOverride === undefined
+      && !supportsInputModalities(
+        session.requiredInputModalities,
+        llmConfig.inputModalities ?? ['text'],
+      )
+    ) {
+      throw new Error(
+        `Model profile "${modelProfileId}" is incompatible with session input modalities: missing ${
+          missingInputModalities(
+            session.requiredInputModalities,
+            llmConfig.inputModalities ?? ['text'],
+          ).join(', ')
+        }`,
+      );
+    }
     return buildLocalChatAgentInput({
       context: ctx,
       userMessage: '',
-      llmConfig: deps.llmConfig,
+      llmConfig: {
+        ...llmConfig,
+        globalReviewPolicyMode: deps.globalReviewPolicyMode,
+      },
+      modelInput: {
+        imageStore: this.imageStore,
+        admitInputModalities: (required) => {
+          this.admitSessionInputModalities(
+            deps,
+            session.id,
+            required,
+          );
+        },
+      },
+      modelInputCacheKey: session.id,
       toolkits: [...(deps.pluginToolkits ?? []), ...(deps.localToolkits ?? [])],
       toolkitDefinitions: [
         ...(deps.pluginToolkitDefinitions ?? []),
@@ -209,12 +287,114 @@ export class LocalServerTuiSessionService {
     });
   }
 
+  async createUserMessage(
+    deps: LocalServerDeps,
+    message: string,
+    attachments: readonly AgentLocalAttachment[],
+  ) {
+    if (attachments.length === 0) {
+      return createLocalChatHumanMessage(message);
+    }
+    const session = this.getActiveSession(deps.actorId);
+    const profile = deps.modelProfiles.resolve(session.modelProfileId);
+    const admitted = await this.imageStore.admit(attachments, {
+      allowImages: (profile.inputModalities ?? ['text']).includes('image'),
+    });
+    if (admitted.some((attachment) => attachment.source === 'local-image')) {
+      this.admitSessionInputModalities(
+        deps,
+        session.id,
+        ['text', 'image'],
+      );
+    }
+    return createAdmittedLocalChatHumanMessage(message, admitted);
+  }
+
+  private admitSessionInputModalities(
+    deps: LocalServerDeps,
+    sessionId: string,
+    required: readonly AgentInputModality[],
+  ) {
+    const session = this.getSession(deps.actorId, sessionId);
+    if (!session) {
+      throw new Error('session not found while admitting model input');
+    }
+    const profile = deps.modelProfiles.resolve(session.modelProfileId);
+    const supported = profile.inputModalities ?? ['text'];
+    if (!supportsInputModalities(required, supported)) {
+      throw new Error(
+        `Model profile "${profile.modelProfileId ?? session.modelProfileId}" does not support required input modalities: ${
+          missingInputModalities(required, supported).join(', ')
+        }`,
+      );
+    }
+    const updated = addTuiSessionRequiredInputModalities(
+      this.state,
+      session.id,
+      required,
+    );
+    if (!updated) {
+      throw new Error('session not found while recording model input');
+    }
+    if (updated !== session) {
+      try {
+        this.save();
+      } catch (error) {
+        this.state.sessions[session.id] = session;
+        throw error;
+      }
+    }
+  }
+
+  selectModelProfile(
+    petId: string,
+    sessionId: string,
+    modelProfileId: string,
+  ) {
+    const session = this.state.sessions[sessionId];
+    if (!session || session.petId !== petId) {
+      throw new Error('session not found');
+    }
+    if (this.state.activeSessionIds[petId] !== sessionId) {
+      throw new Error('model selection requires the active session');
+    }
+    const updated = updateTuiSessionModelProfile(
+      this.state,
+      sessionId,
+      modelProfileId,
+    );
+    if (!updated) {
+      throw new Error('session not found');
+    }
+    try {
+      this.save();
+    } catch (error) {
+      this.state.sessions[sessionId] = session;
+      throw error;
+    }
+    return updated;
+  }
+
   async readSessionCheckpointPoint(
     deps: LocalServerDeps,
     session: TuiSessionRecord,
   ): Promise<TuiCheckpointPoint> {
     const ctx = await this.loadContext(deps.actorId);
-    const setup = this.buildChatSetup(deps, ctx, session.threadId);
+    let checkpointReaderProfileId = session.modelProfileId;
+    try {
+      deps.modelProfiles.resolve(checkpointReaderProfileId);
+    } catch {
+      // Reading a checkpoint does not invoke a model. Build a readable graph
+      // with the valid host default so an unavailable session can still be
+      // resumed, inspected, and repaired by an explicit model selection.
+      checkpointReaderProfileId = deps.modelProfiles.defaultProfileId;
+    }
+    const setup = this.buildChatSetup(
+      deps,
+      ctx,
+      session.threadId,
+      checkpointReaderProfileId,
+    );
     const state = await this.graphService.readThreadState(setup);
     const pendingReview = state.pendingHumanReview
       ? {
@@ -230,6 +410,8 @@ export class LocalServerTuiSessionService {
       : null;
     return {
       sessionId: session.id,
+      modelProfileId: session.modelProfileId,
+      requiredInputModalities: [...session.requiredInputModalities],
       messages: readTuiCheckpointMessages(state.messages),
       sessionTokenUsage: readTuiCheckpointTokenUsage(state.messages),
       pendingReview,

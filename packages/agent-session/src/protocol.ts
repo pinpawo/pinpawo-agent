@@ -11,6 +11,8 @@ import type {
   AgentRuntimeEvent,
 } from './events';
 import type {
+  AgentInputModality,
+  AgentModelProfileSummary,
   AgentSessionSummary,
 } from './domain';
 import type {
@@ -107,6 +109,19 @@ export type SessionResumeMessage = {
   sessionId: string;
 };
 
+export type ModelListMessage = {
+  type: 'model.list';
+  requestId: string;
+  sessionId: string;
+};
+
+export type ModelSelectMessage = {
+  type: 'model.select';
+  requestId: string;
+  sessionId: string;
+  modelProfileId: string;
+};
+
 export type AgentClientMessage =
   | ChatRequestMessage
   | RunInterruptMessage
@@ -119,6 +134,8 @@ export type AgentClientMessage =
   | SessionListMessage
   | SessionNewMessage
   | SessionResumeMessage
+  | ModelListMessage
+  | ModelSelectMessage
   | { type: 'ping' };
 
 export type AgentRuntimeEventEnvelope = {
@@ -185,10 +202,44 @@ export type AgentSessionServerMessage =
       message: string;
     };
 
+export type AgentModelServerMessage =
+  | {
+      type: 'model.list.result';
+      requestId: string;
+      sessionId: string;
+      defaultProfileId: string;
+      selectedProfileId: string;
+      requiredInputModalities: AgentInputModality[];
+      profiles: AgentModelProfileSummary[];
+    }
+  | {
+      type: 'model.select.result';
+      requestId: string;
+      sessionId: string;
+      selectedProfileId: string;
+      snapshot: AgentSessionSnapshot;
+    }
+  | {
+      type: 'model.select.error';
+      requestId: string;
+      sessionId: string;
+      modelProfileId?: string;
+      code:
+        | 'session_not_found'
+        | 'session_not_active'
+        | 'run_active'
+        | 'review_pending'
+        | 'profile_unavailable'
+        | 'profile_incompatible'
+        | 'selection_failed';
+      message: string;
+    };
+
 export type AgentServerMessage =
   | AgentRuntimeEventEnvelope
   | AgentControlServerMessage
-  | AgentSessionServerMessage;
+  | AgentSessionServerMessage
+  | AgentModelServerMessage;
 
 export type AgentClientMessageEnvelope = {
   type?: string;
@@ -234,6 +285,97 @@ function readOptionalStringArray(record: Record<string, unknown>, key: string) {
   return Array.isArray(value) && value.every((item) => typeof item === 'string')
     ? value as string[]
     : null;
+}
+
+function readInputModalities(value: unknown): AgentInputModality[] | null {
+  if (
+    !Array.isArray(value)
+    || value.length === 0
+    || !value.every((item) => item === 'text' || item === 'image')
+  ) {
+    return null;
+  }
+  return [...new Set(value)] as AgentInputModality[];
+}
+
+function readModelProfileSummaries(
+  value: unknown,
+): AgentModelProfileSummary[] | null {
+  if (!Array.isArray(value)) return null;
+  const profiles: AgentModelProfileSummary[] = [];
+  const profileIds = new Set<string>();
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+    const profile = item as Record<string, unknown>;
+    if (!hasOnlyKeys(profile, [
+      'id',
+      'label',
+      'provider',
+      'model',
+      'endpointHost',
+      'contextWindowTokens',
+      'inputModalities',
+      'available',
+      'compatible',
+      'issues',
+    ])) {
+      return null;
+    }
+    const id = typeof profile.id === 'string' ? profile.id : '';
+    const label = typeof profile.label === 'string' ? profile.label : '';
+    const inputModalities = readInputModalities(profile.inputModalities);
+    const available = profile.available;
+    const compatible = profile.compatible;
+    const issues = profile.issues;
+    if (
+      !id
+      || !label
+      || !inputModalities
+      || typeof available !== 'boolean'
+      || typeof compatible !== 'boolean'
+      || !Array.isArray(issues)
+      || !issues.every((issue) => typeof issue === 'string')
+    ) {
+      return null;
+    }
+    if (profileIds.has(id)) return null;
+    profileIds.add(id);
+    const contextWindowTokens = profile.contextWindowTokens;
+    if (
+      contextWindowTokens !== undefined
+      && (
+        typeof contextWindowTokens !== 'number'
+        || !Number.isSafeInteger(contextWindowTokens)
+        || contextWindowTokens <= 0
+      )
+    ) {
+      return null;
+    }
+    for (const field of ['provider', 'model', 'endpointHost'] as const) {
+      if (profile[field] !== undefined && typeof profile[field] !== 'string') {
+        return null;
+      }
+    }
+    profiles.push({
+      id,
+      label,
+      ...(typeof profile.provider === 'string'
+        ? { provider: profile.provider }
+        : {}),
+      ...(typeof profile.model === 'string' ? { model: profile.model } : {}),
+      ...(typeof profile.endpointHost === 'string'
+        ? { endpointHost: profile.endpointHost }
+        : {}),
+      ...(typeof contextWindowTokens === 'number'
+        ? { contextWindowTokens }
+        : {}),
+      inputModalities,
+      available,
+      compatible,
+      issues: [...issues],
+    });
+  }
+  return profiles;
 }
 
 function readRecord(record: Record<string, unknown>, key: string) {
@@ -564,6 +706,26 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
     const sessionId = readString(record, 'sessionId');
     return requestId && sessionId ? { type, requestId, sessionId } : null;
   }
+  if (type === 'model.list') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'sessionId'])) return null;
+    const requestId = readString(record, 'requestId');
+    const sessionId = readString(record, 'sessionId');
+    return requestId && sessionId ? { type, requestId, sessionId } : null;
+  }
+  if (type === 'model.select') {
+    if (!hasOnlyKeys(record, [
+      'type',
+      'requestId',
+      'sessionId',
+      'modelProfileId',
+    ])) return null;
+    const requestId = readString(record, 'requestId');
+    const sessionId = readString(record, 'sessionId');
+    const modelProfileId = readString(record, 'modelProfileId');
+    return requestId && sessionId && modelProfileId
+      ? { type, requestId, sessionId, modelProfileId }
+      : null;
+  }
   if (type === 'chat_request') {
     if (!hasOnlyKeys(record, [
       'type',
@@ -732,6 +894,96 @@ function parseAgentServerRecord(record: Record<string, unknown>): AgentServerMes
       return null;
     }
     return { type, requestId, operation, message };
+  }
+  if (type === 'model.list.result') {
+    if (!hasOnlyKeys(record, [
+      'type',
+      'requestId',
+      'sessionId',
+      'defaultProfileId',
+      'selectedProfileId',
+      'requiredInputModalities',
+      'profiles',
+    ])) return null;
+    const sessionId = readString(record, 'sessionId');
+    const defaultProfileId = readString(record, 'defaultProfileId');
+    const selectedProfileId = readString(record, 'selectedProfileId');
+    const requiredInputModalities = readInputModalities(
+      record.requiredInputModalities,
+    );
+    const profiles = readModelProfileSummaries(record.profiles);
+    return sessionId
+      && defaultProfileId
+      && selectedProfileId
+      && requiredInputModalities
+      && profiles
+      && profiles.some((profile) => profile.id === defaultProfileId)
+      && profiles.some((profile) => profile.id === selectedProfileId)
+      ? {
+          type,
+          requestId,
+          sessionId,
+          defaultProfileId,
+          selectedProfileId,
+          requiredInputModalities,
+          profiles,
+        }
+      : null;
+  }
+  if (type === 'model.select.result') {
+    if (!hasOnlyKeys(record, [
+      'type',
+      'requestId',
+      'sessionId',
+      'selectedProfileId',
+      'snapshot',
+    ])) return null;
+    const sessionId = readString(record, 'sessionId');
+    const selectedProfileId = readString(record, 'selectedProfileId');
+    const snapshot = parseAgentSessionSnapshot(record.snapshot);
+    return sessionId
+      && selectedProfileId
+      && snapshot?.session.sessionId === sessionId
+      && snapshot.session.runtime?.modelProfileId === selectedProfileId
+      ? { type, requestId, sessionId, selectedProfileId, snapshot }
+      : null;
+  }
+  if (type === 'model.select.error') {
+    if (!hasOnlyKeys(record, [
+      'type',
+      'requestId',
+      'sessionId',
+      'modelProfileId',
+      'code',
+      'message',
+    ])) return null;
+    const sessionId = readString(record, 'sessionId');
+    const modelProfileId = readOptionalString(record, 'modelProfileId');
+    const code = readString(record, 'code');
+    const message = readString(record, 'message');
+    if (
+      !sessionId
+      || message === null
+      || (
+        code !== 'session_not_found'
+        && code !== 'session_not_active'
+        && code !== 'run_active'
+        && code !== 'review_pending'
+        && code !== 'profile_unavailable'
+        && code !== 'profile_incompatible'
+        && code !== 'selection_failed'
+      )
+    ) {
+      return null;
+    }
+    return {
+      type,
+      requestId,
+      sessionId,
+      ...(modelProfileId ? { modelProfileId } : {}),
+      code,
+      message,
+    };
   }
   if (type === 'runtime_config.result') {
     if (!hasOnlyKeys(record, ['type', 'requestId', 'globalReviewPolicyMode'])) return null;

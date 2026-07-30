@@ -734,7 +734,7 @@ test('capability planner reports an empty compiled registry without inventing Ge
   assert.deepEqual(plannerCapabilityNames, []);
 });
 
-test('Capability Planner cannot report unavailable while general is registered', async () => {
+test('Capability Planner unavailable result is materialized without a second semantic policy check', async () => {
   const model = {
     invoke: async () => new AIMessage('done'),
     bindTools: () => ({
@@ -758,19 +758,18 @@ test('Capability Planner cannot report unavailable while general is registered',
     },
   });
 
-  await assert.rejects(
-    graph.invoke(buildOrchestratorRunInput([
+  const result = await graph.invoke(buildOrchestratorRunInput([
       new HumanMessage('完成普通工作区任务'),
-    ]), {
-      configurable: {
-        thread_id: 'general-fallback-runtime-invariant',
-        actor: testActor,
-        capabilities: [capability('general', '处理普通任务。')],
-        toolkits: [],
-      },
-    }),
-    /returned unavailable while the general Capability is registered/,
-  );
+  ]), {
+    configurable: {
+      thread_id: 'general-fallback-model-policy',
+      actor: testActor,
+      capabilities: [capability('general', '处理普通任务。')],
+      toolkits: [],
+    },
+  });
+
+  assert.equal(result.messages.at(-1)?.content, 'done');
 });
 
 test('entry decision schema does not advertise capability actions', async () => {

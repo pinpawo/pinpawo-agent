@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { Command } from '@langchain/langgraph';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { GENERAL_CAPABILITY_NAME } from '../../../../types/capability';
 import { materializeCapabilityDocumentWorkspace } from '../../capabilityDocumentWorkspace';
 import { createCapabilityPlannerAgent } from '../../capabilityPlannerAgent';
 import type {
@@ -17,7 +16,7 @@ import { readContextCompactionSummaries } from '../../contextCompaction';
 import { materializeDelegation } from '../../delegationBriefing';
 import { appendRunDelegationSummary } from '../../delegations';
 import {
-  buildPreparedRequestContext,
+  buildPreparedRequestContextFragment,
 } from '../../prompts';
 import {
   getMessageHandoffSource,
@@ -65,7 +64,7 @@ function buildPlannerContext(state: OrchestratorStateType) {
     : null;
 
   return {
-    userIntentContext: buildPreparedRequestContext({
+    userIntentContext: buildPreparedRequestContextFragment({
       latestUserRequest: latestHumanRequest,
       recentMessages: mainMessagesWithoutCompaction(state.messages),
       contextSummaries: readContextCompactionSummaries(state.messages),
@@ -106,14 +105,6 @@ function materializeNextDelegation(params: {
       `Capability Planner selected "${nextTask.capability_name}" outside the immutable workspace.`,
     );
   }
-  if (
-    remainingPlan.some((item) =>
-      item.objective === nextTask.objective
-      && item.capabilityIntent === nextTask.capability_intent)
-  ) {
-    throw new Error('Capability Planner remaining plan repeats the current task.');
-  }
-
   const lane: MessageLane = `capability:${nextTask.capability_name}`;
   const runNextDelegation: RunNextDelegation = {
     id: randomUUID().slice(0, 8),
@@ -158,11 +149,6 @@ function buildPlannerTransition(params: {
 }) {
   const { state, input, result } = params;
   if (result.result === 'unavailable') {
-    if (input.workspace.capabilityNames.includes(GENERAL_CAPABILITY_NAME)) {
-      throw new Error(
-        'Capability Planner returned unavailable while the general Capability is registered.',
-      );
-    }
     return {
       goto: 'answer' as const,
       update: {

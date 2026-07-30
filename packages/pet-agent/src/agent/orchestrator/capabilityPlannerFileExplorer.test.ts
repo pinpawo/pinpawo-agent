@@ -78,11 +78,13 @@ async function workspaceFixture(
     }),
     capability({
       name: 'browser',
-      instructions: '# Browser\n\nInspect web pages in a browser.',
+      description: 'Use a browser to inspect web pages.',
+      instructions: '# Browser\n\nOpen and inspect web pages.',
     }),
     capability({
       name: 'explore',
-      instructions: '# Explore\n\nResearch sources and inspect evidence.',
+      description: 'Research sources and inspect evidence.',
+      instructions: '# Explore\n\nDo not use browser for repository research.',
     }),
   ],
 ) {
@@ -165,16 +167,17 @@ test('Planner file explorer exposes only private read tools and paginates filesy
   assert.equal(second.data?.complete, true);
 });
 
-test('grep_search lets the model explore literal matches without relevance ranking', async (t) => {
+test('grep_search recalls summary candidates with case-insensitive OR terms', async (t) => {
   const { workspace } = await workspaceFixture(t);
   const explorer = createCapabilityPlannerFileExplorer({ workspace });
 
   const first = await invoke(
     explorer,
     CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-    { query: 'INSPECT', limit: 1 },
+    { query: 'BROWSER|research', limit: 1 },
   );
   assert.equal(first.ok, true);
+  assert.equal(first.data?.scope, 'summary');
   assert.deepEqual(
     (first.data?.matches as Array<Record<string, unknown>>).map(
       ({ path }) => path,
@@ -187,7 +190,7 @@ test('grep_search lets the model explore literal matches without relevance ranki
   const second = await invoke(
     explorer,
     CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-    { query: 'inspect', cursor: 1 },
+    { query: 'browser|RESEARCH', cursor: 1 },
   );
   assert.deepEqual(
     (second.data?.matches as Array<Record<string, unknown>>).map(
@@ -197,6 +200,37 @@ test('grep_search lets the model explore literal matches without relevance ranki
   );
   assert.equal(second.data?.nextCursor, null);
   assert.equal(second.data?.complete, true);
+});
+
+test('grep_search ignores body-only matches unless document scope is requested', async (t) => {
+  const { workspace } = await workspaceFixture(t);
+  const explorer = createCapabilityPlannerFileExplorer({ workspace });
+
+  const summary = await invoke(
+    explorer,
+    CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+    { query: 'browser' },
+  );
+  assert.deepEqual(
+    (summary.data?.matches as Array<Record<string, unknown>>).map(
+      ({ path }) => path,
+    ),
+    ['browser/CAPABILITY.md'],
+  );
+
+  const document = await invoke(
+    explorer,
+    CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+    { query: 'browser', scope: 'document' },
+  );
+  assert.deepEqual(
+    [...new Set(
+      (document.data?.matches as Array<Record<string, unknown>>).map(
+        ({ path }) => path,
+      ),
+    )],
+    ['browser/CAPABILITY.md', 'explore/CAPABILITY.md'],
+  );
 });
 
 test('view_file_chunk returns stable line ranges and a continuation cursor', async (t) => {

@@ -39,6 +39,7 @@ type ScriptedToolCall = {
 class ScriptedPlannerModel extends BaseChatModel {
   readonly invocations: BaseMessage[][] = [];
   readonly boundToolNames: string[] = [];
+  readonly boundToolOptions: Record<string, unknown>[] = [];
   #responseIndex = 0;
 
   constructor(
@@ -54,12 +55,16 @@ class ScriptedPlannerModel extends BaseChatModel {
     return 'scripted-capability-planner';
   }
 
-  bindTools(tools: StructuredTool[]) {
+  bindTools(
+    tools: StructuredTool[],
+    options?: Record<string, unknown>,
+  ) {
     this.boundToolNames.splice(
       0,
       this.boundToolNames.length,
       ...tools.map(({ name }) => name),
     );
+    this.boundToolOptions.push({ ...options });
     return this;
   }
 
@@ -79,8 +84,11 @@ class ScriptedPlannerModel extends BaseChatModel {
 }
 
 class DelayedSubmitToolPlannerModel extends ScriptedPlannerModel {
-  override bindTools(tools: StructuredTool[]) {
-    super.bindTools(tools);
+  override bindTools(
+    tools: StructuredTool[],
+    options?: Record<string, unknown>,
+  ) {
+    super.bindTools(tools, options);
     const submitTool = tools.find(
       ({ name }) => name === CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
     );
@@ -192,7 +200,13 @@ function plannerInput(
 ): CapabilityPlannerInput {
   return {
     mode: 'entry',
-    userIntentContext: 'Research the repository and then prepare a review.',
+    userIntentContext: [
+      '<user_request>',
+      '<![CDATA[',
+      'Research the repository and then prepare a review.',
+      ']]>',
+      '</user_request>',
+    ].join('\n'),
     completedTasks: [],
     remainingPlan: [],
     latestHandoff: null,
@@ -202,11 +216,9 @@ function plannerInput(
 }
 
 function submitArgs(
-  workspace: CapabilityDocumentWorkspace,
   capabilityName: string,
 ) {
   return {
-    registry_digest: workspace.registryDigest,
     result: 'next_task',
     next_task: {
       objective: 'Research the repository.',
@@ -253,7 +265,7 @@ test('Planner Agent explores CAPABILITY.md files and submits current selection w
       toolCalls: [{
         id: 'submit',
         name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
-        args: submitArgs(workspace, 'explore'),
+        args: submitArgs('explore'),
       }],
     },
   ]);
@@ -269,14 +281,10 @@ test('Planner Agent explores CAPABILITY.md files and submits current selection w
     CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
     CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
   ]);
-  const initialPrompt = model.invocations[0]
-    ?.map((message) => String(message.content))
-    .join('\n') ?? '';
-  assert.match(
-    initialPrompt,
-    /<remaining_plan role="planning_context" authority="advisory">/,
-  );
-  assert.match(initialPrompt, /不得把已经完成的工作重新委派/);
+  assert.ok(model.boundToolOptions.length > 0);
+  assert.ok(model.boundToolOptions.every(
+    (options) => options.parallel_tool_calls === false,
+  ));
   assert.deepEqual(result, {
     result: 'next_task',
     next_task: {
@@ -294,40 +302,6 @@ test('Planner Agent explores CAPABILITY.md files and submits current selection w
     'capability_name' in result.remaining_plan[0],
     false,
   );
-});
-
-test('Planner Agent materializes deterministic IDs for provider ToolCalls without ids', async (t) => {
-  const workspace = await createWorkspace(t, {
-    general: capabilityDocument({
-      name: 'general',
-      description: 'Handle ordinary tasks.',
-      instructions: 'Complete the requested work.',
-    }),
-  });
-  const model = new ScriptedPlannerModel([
-    {
-      toolCalls: [{
-        name: CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
-        args: { path: 'general/CAPABILITY.md', startLine: 1, endLine: 20 },
-      }],
-    },
-    {
-      toolCalls: [{
-        name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
-        args: submitArgs(workspace, 'general'),
-      }],
-    },
-  ]);
-
-  const result = await createCapabilityPlannerAgent({ model }).invoke(
-    plannerInput(workspace),
-  );
-
-  assert.equal(result.result, 'next_task');
-  assert.equal(result.next_task.capability_name, 'general');
-  assert.ok(model.invocations[1]?.some((message) =>
-    message instanceof ToolMessage
-    && message.tool_call_id === 'capability_planner:1:0'));
 });
 
 test('entry mode forms one executable task after Capability exploration', async (t) => {
@@ -351,7 +325,6 @@ test('entry mode forms one executable task after Capability exploration', async 
         id: 'submit',
         name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
         args: {
-          registry_digest: workspace.registryDigest,
           result: 'next_task',
           next_task: {
             objective: 'Inspect issue #473 and report the Planner Agent constraints.',
@@ -378,7 +351,7 @@ test('entry mode forms one executable task after Capability exploration', async 
   assert.equal(result.remaining_plan.length, 0);
 });
 
-test('an unknown or unobserved Capability returns tool feedback and can be repaired in-loop', async (t) => {
+test('an unknown Capability returns tool feedback and can be repaired in-loop', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -391,28 +364,14 @@ test('an unknown or unobserved Capability returns tool feedback and can be repai
       toolCalls: [{
         id: 'unknown-submit',
         name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
-        args: submitArgs(workspace, 'missing'),
-      }],
-    },
-    {
-      toolCalls: [{
-        id: 'unobserved-submit',
-        name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
-        args: submitArgs(workspace, 'general'),
-      }],
-    },
-    {
-      toolCalls: [{
-        id: 'view',
-        name: CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
-        args: { path: 'general/CAPABILITY.md', startLine: 1, endLine: 20 },
+        args: submitArgs('missing'),
       }],
     },
     {
       toolCalls: [{
         id: 'valid-submit',
         name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
-        args: submitArgs(workspace, 'general'),
+        args: submitArgs('general'),
       }],
     },
   ]);
@@ -424,14 +383,14 @@ test('an unknown or unobserved Capability returns tool feedback and can be repai
 
   assert.equal(result.result, 'next_task');
   assert.equal(result.next_task.capability_name, 'general');
-  assert.ok(model.invocations[1]?.some((message) =>
+  const feedback = model.invocations[1]?.find((message) =>
     message instanceof ToolMessage
-    && typeof message.content === 'string'
-    && message.content.includes('unknown_capability')));
-  assert.ok(model.invocations[2]?.some((message) =>
-    message instanceof ToolMessage
-    && typeof message.content === 'string'
-    && message.content.includes('capability_not_observed')));
+    && message.name === CAPABILITY_PLANNER_SUBMIT_TOOL_NAME);
+  assert.ok(feedback instanceof ToolMessage);
+  const payload = JSON.parse(String(feedback.content)) as {
+    error?: { code?: unknown };
+  };
+  assert.equal(payload.error?.code, 'unknown_capability');
 });
 
 test('an empty workspace can produce a truthful unavailable result', async (t) => {
@@ -441,7 +400,6 @@ test('an empty workspace can produce a truthful unavailable result', async (t) =
       id: 'unavailable',
       name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
       args: {
-        registry_digest: workspace.registryDigest,
         result: 'unavailable',
         task: 'Publish a browser automation report.',
         reason: 'The current workspace contains no Capability documents.',
@@ -460,77 +418,6 @@ test('an empty workspace can produce a truthful unavailable result', async (t) =
   });
 });
 
-test('a registered general Capability is the mandatory fallback for unmatched work', async (t) => {
-  const workspace = await createWorkspace(t, {
-    general: capabilityDocument({
-      name: 'general',
-      description: 'Handle ordinary tasks.',
-      instructions: 'Complete the requested work.',
-    }),
-  });
-  const unavailable = {
-    registry_digest: workspace.registryDigest,
-    result: 'unavailable',
-    task: 'Perform an unsupported specialist operation.',
-    reason: 'No Capability covers the operation.',
-  };
-  const model = new ScriptedPlannerModel([
-    {
-      toolCalls: [{
-        id: 'premature-unavailable',
-        name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
-        args: unavailable,
-      }],
-    },
-    {
-      toolCalls: [{
-        id: 'view',
-        name: CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
-        args: { path: 'general/CAPABILITY.md', startLine: 1, endLine: 20 },
-      }],
-    },
-    {
-      toolCalls: [{
-        id: 'still-unavailable',
-        name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
-        args: unavailable,
-      }],
-    },
-    {
-      toolCalls: [{
-        id: 'general-fallback',
-        name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
-        args: {
-          registry_digest: workspace.registryDigest,
-          result: 'next_task',
-          next_task: {
-            objective: unavailable.task,
-            capability_intent: 'General execution fallback',
-            capability_name: 'general',
-            context_summary: unavailable.reason,
-          },
-          remaining_plan: [],
-        },
-      }],
-    },
-  ]);
-
-  const result = await createCapabilityPlannerAgent({ model }).invoke(
-    plannerInput(workspace),
-  );
-
-  assert.equal(result.result, 'next_task');
-  assert.equal(result.next_task.capability_name, 'general');
-  assert.ok(model.invocations[1]?.some((message) =>
-    message instanceof ToolMessage
-    && typeof message.content === 'string'
-    && message.content.includes('general_fallback_required')));
-  assert.ok(model.invocations[3]?.some((message) =>
-    message instanceof ToolMessage
-    && typeof message.content === 'string'
-    && message.content.includes('general_fallback_required')));
-});
-
 test('boundary mode rejects answer and materializes remaining work with general', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
@@ -545,7 +432,6 @@ test('boundary mode rejects answer and materializes remaining work with general'
         id: 'answer',
         name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
         args: {
-          registry_digest: workspace.registryDigest,
           result: 'answer',
           next_task: null,
           remaining_plan: [],
@@ -564,7 +450,6 @@ test('boundary mode rejects answer and materializes remaining work with general'
         id: 'submit-general',
         name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
         args: {
-          registry_digest: workspace.registryDigest,
           result: 'next_task',
           next_task: {
             objective: 'Prepare the review from the completed research.',
@@ -600,8 +485,8 @@ test('boundary mode rejects answer and materializes remaining work with general'
   assert.equal(result.next_task.capability_name, 'general');
   assert.ok(model.invocations[1]?.some((message) =>
     message instanceof ToolMessage
-    && typeof message.content === 'string'
-    && message.content.includes('invalid_arguments')));
+    && message.name === CAPABILITY_PLANNER_SUBMIT_TOOL_NAME
+    && message.tool_call_id === 'answer'));
 });
 
 test('document observation exhaustion is reported as planning_limit_reached, not unavailable', async (t) => {
@@ -695,7 +580,6 @@ test('Planner Agent rejects a valid submission whose tool invocation completes a
       id: 'late-submit',
       name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
       args: {
-        registry_digest: workspace.registryDigest,
         result: 'unavailable',
         task: 'Perform an unsupported operation.',
         reason: 'The workspace is empty.',

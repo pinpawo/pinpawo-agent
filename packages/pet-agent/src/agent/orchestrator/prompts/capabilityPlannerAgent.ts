@@ -1,5 +1,8 @@
 import {
   buildOrchestratorDecisionPromptPrefix,
+  indentXmlBlock,
+  promptBlock,
+  xmlTextBlock,
 } from './shared';
 import type { CapabilityPlannerInput } from '../capabilityPlannerRunner';
 import {
@@ -7,15 +10,48 @@ import {
   CAPABILITY_PLANNER_AGENT_SYSTEM_PROMPT,
 } from './templates/capabilityPlannerAgent.prompt';
 
-function escapedJson(value: unknown) {
-  return escapeXml(JSON.stringify(value));
-}
-
-function escapeXml(value: string) {
+function escapeXmlAttribute(value: string) {
   return value
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;');
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&apos;');
+}
+
+function buildCompletedTasksBlock(
+  tasks: CapabilityPlannerInput['completedTasks'],
+) {
+  if (tasks.length === 0) return null;
+  const lines = ['<completed_tasks>'];
+  for (const task of tasks) {
+    lines.push('  <task>');
+    lines.push(indentXmlBlock(xmlTextBlock('objective', task.objective), 4));
+    if (task.result) {
+      lines.push(indentXmlBlock(xmlTextBlock('result', task.result), 4));
+    }
+    lines.push('  </task>');
+  }
+  lines.push('</completed_tasks>');
+  return lines.join('\n');
+}
+
+function buildRemainingPlanBlock(
+  tasks: CapabilityPlannerInput['remainingPlan'],
+) {
+  if (tasks.length === 0) return null;
+  const lines = ['<remaining_plan>'];
+  for (const task of tasks) {
+    lines.push('  <task>');
+    lines.push(indentXmlBlock(xmlTextBlock('objective', task.objective), 4));
+    lines.push(indentXmlBlock(
+      xmlTextBlock('capability_intent', task.capabilityIntent),
+      4,
+    ));
+    lines.push('  </task>');
+  }
+  lines.push('</remaining_plan>');
+  return lines.join('\n');
 }
 
 export function buildCapabilityPlannerAgentSystemPrompt() {
@@ -27,17 +63,22 @@ export function buildCapabilityPlannerAgentSystemPrompt() {
 export function buildCapabilityPlannerAgentInput(input: CapabilityPlannerInput) {
   return CAPABILITY_PLANNER_AGENT_INPUT_PROMPT.render({
     mode: input.mode,
-    workspaceContext: escapedJson({
-      registry_digest: input.workspace.registryDigest,
-      logical_root: '.',
-      document_count: input.workspace.entries.length,
-      default_document_glob: '**/CAPABILITY.md',
-    }),
-    userIntentContext: escapeXml(input.userIntentContext),
-    completedTasksContext: escapedJson(input.completedTasks),
-    remainingPlanContext: escapedJson(input.remainingPlan),
-    latestHandoffContext: input.latestHandoff
-      ? escapeXml(input.latestHandoff)
-      : 'null',
+    registryDigest: escapeXmlAttribute(input.workspace.registryDigest),
+    documentCount: String(input.workspace.entries.length),
+    userIntentContextBlock: promptBlock(input.userIntentContext, 2),
+    completedTasksBlock: promptBlock(
+      buildCompletedTasksBlock(input.completedTasks),
+      2,
+    ),
+    remainingPlanBlock: promptBlock(
+      buildRemainingPlanBlock(input.remainingPlan),
+      2,
+    ),
+    latestHandoffBlock: promptBlock(
+      input.latestHandoff
+        ? xmlTextBlock('latest_handoff', input.latestHandoff)
+        : null,
+      2,
+    ),
   });
 }

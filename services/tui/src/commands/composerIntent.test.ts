@@ -40,7 +40,6 @@ test('composer intent routes chat, Studio, and slash commands', () => {
     text: '/model',
     attachmentCount: 0,
     mode: 'studio',
-    canContinueActiveDelegation: false,
   }), {
     type: 'open-model',
   });

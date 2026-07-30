@@ -39,35 +39,32 @@ function mergeCheckpointMessagesWithLiveDetails(
 ) {
   const checkpointMessages = checkpoint.filter(isConversationMessage);
   const liveMessages = live.filter(isConversationMessage);
-  const reconciledMessages = reconcileMessageRequestIds(
+  const reconciledMessages = reconcileCheckpointMessages(
     checkpointMessages,
     liveMessages,
   );
-  const detailsByMessageSlot = Array.from(
-    { length: checkpointMessages.length + 1 },
-    () => [] as AgentTimelineEntry[],
+  const replacements = new Map(
+    reconciledMessages.flatMap(({ message, liveIndex }) => (
+      liveIndex >= 0 ? [[liveMessages[liveIndex]!, message] as const] : []
+    )),
   );
-  let messageSlot = 0;
+  const timeline: AgentTimelineEntry[] = [];
   for (const entry of live) {
-    if (isConversationMessage(entry)) {
-      messageSlot = Math.min(
-        messageSlot + 1,
-        checkpointMessages.length,
-      );
+    const replacement = isConversationMessage(entry)
+      ? replacements.get(entry)
+      : undefined;
+    if (replacement) {
+      timeline.push(replacement);
       continue;
     }
     if (isSettledSupplementaryEntry(entry)) {
-      detailsByMessageSlot[messageSlot]!.push(entry);
+      timeline.push(entry);
     }
   }
-
-  return reconciledMessages.flatMap((message, index) => [
-    ...detailsByMessageSlot[index]!,
-    message,
-    ...(index === checkpointMessages.length - 1
-      ? detailsByMessageSlot[index + 1]!
-      : []),
-  ]);
+  timeline.push(...reconciledMessages.flatMap(({ message, liveIndex }) => (
+    liveIndex < 0 ? [message] : []
+  )));
+  return timeline;
 }
 
 function isConversationMessage(
@@ -77,7 +74,7 @@ function isConversationMessage(
     && (entry.role === 'user' || entry.role === 'assistant');
 }
 
-function reconcileMessageRequestIds(
+function reconcileCheckpointMessages(
   checkpoint: readonly AgentMessageEntry[],
   live: readonly AgentMessageEntry[],
 ) {
@@ -93,12 +90,17 @@ function reconcileMessageRequestIds(
       : live.findIndex((candidate, index) => (
         index >= liveIndex && candidate.role === message.role
       ));
-    if (matchingIndex < 0) return message;
+    if (matchingIndex < 0) {
+      return { message, liveIndex: -1 };
+    }
     liveIndex = matchingIndex + 1;
     const matched = live[matchingIndex]!;
-    return matched.requestId
-      ? { ...message, requestId: matched.requestId }
-      : message;
+    return {
+      message: matched.requestId
+        ? { ...message, requestId: matched.requestId }
+        : message,
+      liveIndex: matchingIndex,
+    };
   });
 }
 

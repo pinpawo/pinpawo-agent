@@ -89,10 +89,10 @@ Planner 不使用内存 relevance query 或传统搜索结果替代模型探索�
 文件工具和私有 transcript 都封装在 Planner 黑盒内部。
 
 标准 Agent runtime 负责模型与工具之间的循环和 tool message。Planner 的模型调用设置
-`parallel_tool_calls: false`，使每轮只产生一个工具调用，并让终态提交可靠结束当前循环。Planner
-自身只保留超时、模型调用次数和文档读取预算等运行边界。`submit_capability_plan` 只校验输出
-schema 与 `capability_name` 是否存在于当前 registry；证据充分性和 `general` fallback 属于模型
-判断，不通过调用历史或文本匹配重复实现。
+`parallel_tool_calls: false`，使每轮只产生一个工具调用。终态使用 `createAgent` 的
+`responseFormat`/`structuredResponse` 标准链路：runtime 负责 schema 校验、错误反馈和终止，
+Planner 直接从 invoke result 取得规划对象。`capability_name` 由当前 registry 动态形成枚举；
+证据充分性和 `general` fallback 属于模型判断，不通过调用历史或文本匹配重复实现。
 
 Planner 必须先根据用户目标和已完成事实形成当前 task boundary，再探索能够完整承担该任务的
 Capability。文档搜索只是取得 Capability 证据，不能反向扩张或改写用户目标。具体搜索方法由文件

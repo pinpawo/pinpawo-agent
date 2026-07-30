@@ -18,10 +18,10 @@ export const CAPABILITY_PLANNER_AGENT_SYSTEM_PROMPT = definePromptTemplate<{
 - 计划保持用户目的与已完成事实的连续性，并随新事实修订尚未开始的工作。
 
 终态：
-- 取得足够的 Capability 证据后，使用 submit_capability_plan 提交规划结果。
+- 取得足够的 Capability 证据后，返回结构化规划结果。
 - 能完整承担当前 task 的专用 Capability 优先；没有专用匹配但 Workspace 中存在 general 时，选择 general。
 - unavailable 表示当前 Workspace 中没有任何 Capability 能推进当前 task，且 general 不存在。
-- Planner 只提交 next_task 或 unavailable，不生成 answer；用户目标完成由 outcomeDecision 判断。`, ['sharedPrefix']);
+- 规划结果只使用 next_task 或 unavailable，不生成 answer；用户目标完成由 outcomeDecision 判断。`, ['sharedPrefix']);
 
 export const CAPABILITY_PLANNER_AGENT_INPUT_PROMPT = definePromptTemplate<{
   mode: string;

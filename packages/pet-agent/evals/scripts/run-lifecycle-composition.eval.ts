@@ -310,10 +310,15 @@ function createRecordingActModel(model: AgentModels['act']) {
         invoke: async (input: unknown, config?: RunnableConfig) => {
           const response = await runnable.invoke(input as never, config);
           for (const toolCall of readMessageToolCalls(response)) {
-            if (toolCall.name !== 'submit_capability_plan') continue;
             const output = isRecord(toolCall.args)
               ? toolCall.args
               : { value: toolCall.args };
+            if (
+              output.result !== 'next_task'
+              && output.result !== 'unavailable'
+            ) {
+              continue;
+            }
             decisions.push({ kind: 'planner', output });
           }
           return response;

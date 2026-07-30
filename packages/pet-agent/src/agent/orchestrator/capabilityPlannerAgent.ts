@@ -1,13 +1,11 @@
 import { HumanMessage } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { tool, type ClientTool } from '@langchain/core/tools';
-import { Command, END } from '@langchain/langgraph';
 import {
   createAgent,
   createMiddleware,
-  modelCallLimitMiddleware,
-  type AnyAgentMiddleware,
+  toolStrategy,
+  type TypedToolStrategy,
 } from 'langchain';
 import { z } from 'zod';
 import { emitRuntimeEventToStreamWriter } from '../../utils/streamWriterEvents';
@@ -22,7 +20,6 @@ import type {
   CapabilityPlannerRunner,
 } from './capabilityPlannerRunner';
 
-export const CAPABILITY_PLANNER_SUBMIT_TOOL_NAME = 'submit_capability_plan';
 export const CAPABILITY_PLANNER_RUNTIME_EVENT = 'capability_planner_agent';
 
 const DEFAULT_MAX_MODEL_ITERATIONS = 12;
@@ -46,20 +43,28 @@ export class CapabilityPlannerAgentError extends Error {
   }
 }
 
-type SubmitToolState = {
-  result: CapabilityPlannerResult | null;
-};
-
-const singleToolCallMiddleware = createMiddleware({
-  name: 'CapabilityPlannerSingleToolCall',
-  wrapModelCall: (request, handler) => handler({
-    ...request,
-    modelSettings: {
-      ...request.modelSettings,
-      parallel_tool_calls: false,
+function createPlannerModelMiddleware(maxIterations: number) {
+  let modelCalls = 0;
+  return createMiddleware({
+    name: 'CapabilityPlannerModelBoundary',
+    wrapModelCall: (request, handler) => {
+      if (modelCalls >= maxIterations) {
+        throw new CapabilityPlannerAgentError(
+          'planning_limit_reached',
+          `Capability Planner exceeded ${String(maxIterations)} model iterations without a valid structured result.`,
+        );
+      }
+      modelCalls += 1;
+      return handler({
+        ...request,
+        modelSettings: {
+          ...request.modelSettings,
+          parallel_tool_calls: false,
+        },
+      });
     },
-  }),
-});
+  });
+}
 
 const planTaskSchema = z.object({
   objective: z.string().trim().min(1).max(MAX_TASK_TEXT_CHARS)
@@ -68,139 +73,51 @@ const planTaskSchema = z.object({
     .describe('The kind of execution ability the future task will need, without naming a concrete Capability.'),
 }).strict();
 
-const nextTaskSchema = planTaskSchema.extend({
-  capability_name: z.string().trim().min(1).max(128)
-    .describe('The frontmatter name from an observed CAPABILITY.md that can complete the whole current task.'),
-  context_summary: z.string().trim().max(MAX_TASK_TEXT_CHARS).nullable()
-    .describe('Execution context needed by the selected Capability, or null when no additional context is needed.'),
-}).strict();
+const unavailablePlanSchema = z.object({
+  result: z.literal('unavailable')
+    .describe('No Capability in the current workspace can advance the current task.'),
+  task: z.string().trim().min(1).max(MAX_TASK_TEXT_CHARS)
+    .describe('The current task that cannot be executed.'),
+  reason: z.string().trim().min(1).max(MAX_REASON_CHARS)
+    .describe('Why no Capability in the current workspace can complete the task.'),
+}).strict().describe('Report that the current task cannot be delegated.');
 
-const submitCapabilityPlanSchema = z.object({
-  result: z.enum(['next_task', 'unavailable'])
-    .describe('Whether to delegate the current task or report it unavailable.'),
-  next_task: nextTaskSchema.optional()
-    .describe('The structured current executable task object, not a JSON-encoded string. Required only for result=next_task.'),
-  remaining_plan: z.array(planTaskSchema).max(MAX_PLAN_TASKS).optional()
-    .describe('Ordered, unstarted future work. It is empty for unavailable.'),
-  task: z.string().trim().min(1).max(MAX_TASK_TEXT_CHARS).optional()
-    .describe('The current task that cannot be executed. Required only for result=unavailable.'),
-  reason: z.string().trim().min(1).max(MAX_REASON_CHARS).optional()
-    .describe('Why no Capability in the current registry can complete the unavailable task.'),
-}).strict().superRefine((submission, ctx) => {
-  if (submission.result === 'next_task') {
-    if (!submission.next_task) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['next_task'],
-        message: 'result=next_task requires next_task.',
-      });
-    }
-    if (submission.task || submission.reason) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['task'],
-        message: 'result=next_task must not include task or reason.',
-      });
-    }
+function createCapabilityPlannerResponseFormat(
+  input: CapabilityPlannerInput,
+): TypedToolStrategy<CapabilityPlannerResult> {
+  const [firstCapabilityName, ...otherCapabilityNames] =
+    input.workspace.capabilityNames;
+  if (!firstCapabilityName) {
+    return toolStrategy(unavailablePlanSchema, {
+      toolMessageContent: 'Capability planning result accepted.',
+    });
   }
-  if (submission.result === 'unavailable') {
-    if (!submission.task || !submission.reason) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['task'],
-        message: 'result=unavailable requires task and reason.',
-      });
-    }
-    if (submission.next_task || (submission.remaining_plan?.length ?? 0) > 0) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['remaining_plan'],
-        message: 'result=unavailable must not include next_task or remaining_plan.',
-      });
-    }
-  }
-});
 
-function plannerToolError(
-  code: string,
-  message: string,
-) {
-  return JSON.stringify({
-    ok: false,
-    tool: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
-    error: { code, message },
+  const nextTaskSchema = planTaskSchema.extend({
+    capability_name: z.enum([
+      firstCapabilityName,
+      ...otherCapabilityNames,
+    ]).describe(
+      'The frontmatter name of the Capability that can complete the whole current task.',
+    ),
+    context_summary: z.string().trim().max(MAX_TASK_TEXT_CHARS).nullable()
+      .describe('Execution context needed by the selected Capability, or null.'),
+  }).strict();
+  const nextTaskPlanSchema = z.object({
+    result: z.literal('next_task')
+      .describe('Delegate the current task to a Capability.'),
+    next_task: nextTaskSchema
+      .describe('The current executable task and selected Capability.'),
+    remaining_plan: z.array(planTaskSchema).max(MAX_PLAN_TASKS)
+      .describe('Ordered, unstarted future work; use an empty array when none remains.'),
+  }).strict().describe('Return the next executable task and future plan tail.');
+
+  return toolStrategy([
+    nextTaskPlanSchema,
+    unavailablePlanSchema,
+  ], {
+    toolMessageContent: 'Capability planning result accepted.',
   });
-}
-
-function validateSubmission(params: {
-  input: CapabilityPlannerInput;
-  submission: z.infer<typeof submitCapabilityPlanSchema>;
-}): { result: CapabilityPlannerResult } | { code: string; message: string } {
-  const { input, submission } = params;
-
-  if (submission.result === 'unavailable') {
-    return {
-      result: {
-        result: 'unavailable',
-        task: submission.task as string,
-        reason: submission.reason as string,
-      },
-    };
-  }
-
-  const nextTask = submission.next_task;
-  if (!nextTask) {
-    return {
-      code: 'invalid_plan',
-      message: 'next_task submission is missing next_task.',
-    };
-  }
-  const workspaceEntry = input.workspace.entries.find(
-    (entry) => entry.capabilityName === nextTask.capability_name,
-  );
-  if (!workspaceEntry) {
-    return {
-      code: 'unknown_capability',
-      message: 'capability_name is not present in this Capability Document Workspace.',
-    };
-  }
-  const remainingPlan = submission.remaining_plan ?? [];
-  return {
-    result: {
-      result: 'next_task',
-      next_task: {
-        objective: nextTask.objective,
-        capability_intent: nextTask.capability_intent,
-        capability_name: nextTask.capability_name,
-        context_summary: nextTask.context_summary,
-      },
-      remaining_plan: remainingPlan,
-    },
-  };
-}
-
-function createSubmitCapabilityPlanTool(params: {
-  input: CapabilityPlannerInput;
-  state: SubmitToolState;
-}) {
-  return tool(
-    async (submission) => {
-      const validated = validateSubmission({
-        input: params.input,
-        submission,
-      });
-      if (!('result' in validated)) {
-        return plannerToolError(validated.code, validated.message);
-      }
-      params.state.result = validated.result;
-      return new Command({ goto: END });
-    },
-    {
-      name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
-      description: 'Submit the terminal Capability planning result. A valid submission ends planning; an unknown capability_name returns feedback for correction.',
-      schema: submitCapabilityPlanSchema,
-    },
-  );
 }
 
 function mergePlannerSignal(
@@ -272,25 +189,12 @@ async function invokePlannerAgent(params: {
       ? { maxObservationBytes: params.maxObservationBytes }
       : {}),
   });
-  const submitState: SubmitToolState = { result: null };
-  const submitTool = createSubmitCapabilityPlanTool({
-    input: params.input,
-    state: submitState,
-  });
-  const tools: ClientTool[] = [...explorer.tools, submitTool];
-  const middleware: AnyAgentMiddleware[] = [
-    singleToolCallMiddleware,
-    modelCallLimitMiddleware({
-      runLimit: params.maxIterations,
-      exitBehavior: 'error',
-    }),
-  ];
   const agent = createAgent({
     model: params.model,
-    tools,
+    tools: [...explorer.tools],
     systemPrompt: buildCapabilityPlannerAgentSystemPrompt(),
-    middleware,
-    responseFormat: undefined,
+    middleware: [createPlannerModelMiddleware(params.maxIterations)],
+    responseFormat: createCapabilityPlannerResponseFormat(params.input),
   });
   const timeout = mergePlannerSignal(
     params.runnableConfig?.signal,
@@ -314,7 +218,7 @@ async function invokePlannerAgent(params: {
 
   try {
     timeout.signal.throwIfAborted();
-    await agent.invoke(
+    const result = await agent.invoke(
       {
         messages: [
           new HumanMessage(buildCapabilityPlannerAgentInput(params.input)),
@@ -332,7 +236,8 @@ async function invokePlannerAgent(params: {
     // aborted. Never accept a result produced after the deadline.
     timeout.signal.throwIfAborted();
 
-    if (!submitState.result) {
+    const structuredResponse = result.structuredResponse;
+    if (!structuredResponse) {
       if (explorer.hasReachedObservationLimit()) {
         throw new CapabilityPlannerAgentError(
           'planning_limit_reached',
@@ -341,7 +246,7 @@ async function invokePlannerAgent(params: {
       }
       throw new CapabilityPlannerAgentError(
         'submission_required',
-        `Capability Planner must finish with ${CAPABILITY_PLANNER_SUBMIT_TOOL_NAME}.`,
+        'Capability Planner must finish with a structured planning result.',
       );
     }
 
@@ -350,25 +255,23 @@ async function invokePlannerAgent(params: {
       mode: params.input.mode,
       registryDigest: params.input.workspace.registryDigest,
       observationBudget: explorer.getObservationBudget(),
-      result: submitState.result.result,
-      capabilityName: submitState.result.result === 'next_task'
-        ? submitState.result.next_task.capability_name
+      result: structuredResponse.result,
+      capabilityName: structuredResponse.result === 'next_task'
+        ? structuredResponse.next_task.capability_name
         : null,
     });
-    return submitState.result;
+    return structuredResponse;
   } catch (error) {
+    const middlewareCause = error instanceof Error
+      && error.cause instanceof CapabilityPlannerAgentError
+      ? error.cause
+      : null;
     const plannerError = timeout.didTimeOut()
       ? new CapabilityPlannerAgentError(
           'planning_timeout',
           `Capability Planner exceeded its ${String(params.timeoutMs)}ms timeout.`,
         )
-      : error instanceof Error
-        && error.name === 'ModelCallLimitMiddlewareError'
-        ? new CapabilityPlannerAgentError(
-            'planning_limit_reached',
-            `Capability Planner exceeded ${String(params.maxIterations)} model iterations without a valid submission.`,
-          )
-      : error;
+      : middlewareCause ?? error;
     emitPlannerEvent({
       phase: 'error',
       mode: params.input.mode,

@@ -15,7 +15,6 @@ import {
   type BaseMessage,
 } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import type { RunnableConfig } from '@langchain/core/runnables';
 import type { StructuredTool } from '@langchain/core/tools';
 import {
   CAPABILITY_PLANNER_GLOB_SEARCH_TOOL_NAME,
@@ -24,7 +23,6 @@ import {
 } from './capabilityPlannerFileExplorer';
 import type { CapabilityDocumentWorkspace } from './capabilityDocumentWorkspace';
 import {
-  CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
   CapabilityPlannerAgentError,
   createCapabilityPlannerAgent,
 } from './capabilityPlannerAgent';
@@ -36,16 +34,23 @@ type ScriptedToolCall = {
   args: Record<string, unknown>;
 };
 
+type ScriptedStructuredOutput = {
+  kind: 'next_task' | 'unavailable';
+  args: Record<string, unknown>;
+};
+
 class ScriptedPlannerModel extends BaseChatModel {
   readonly invocations: BaseMessage[][] = [];
   readonly boundToolNames: string[] = [];
   readonly boundToolOptions: Record<string, unknown>[] = [];
+  readonly structuredOutputToolNames = new Map<string, string>();
   #responseIndex = 0;
 
   constructor(
     private readonly responses: ReadonlyArray<{
       content?: string;
       toolCalls?: readonly ScriptedToolCall[];
+      structuredOutput?: ScriptedStructuredOutput;
     }>,
   ) {
     super({});
@@ -59,11 +64,33 @@ class ScriptedPlannerModel extends BaseChatModel {
     tools: StructuredTool[],
     options?: Record<string, unknown>,
   ) {
+    const toolEntries = tools as unknown as Array<{
+      name?: string;
+      function?: {
+        name?: string;
+        parameters?: {
+          properties?: {
+            result?: { const?: unknown };
+          };
+        };
+      };
+    }>;
     this.boundToolNames.splice(
       0,
       this.boundToolNames.length,
-      ...tools.map(({ name }) => name),
+      ...toolEntries.flatMap((entry) => {
+        const name = entry.name ?? entry.function?.name;
+        return name ? [name] : [];
+      }),
     );
+    this.structuredOutputToolNames.clear();
+    for (const entry of toolEntries) {
+      const name = entry.function?.name;
+      const result = entry.function?.parameters?.properties?.result?.const;
+      if (name && typeof result === 'string') {
+        this.structuredOutputToolNames.set(result, name);
+      }
+    }
     this.boundToolOptions.push({ ...options });
     return this;
   }
@@ -72,9 +99,18 @@ class ScriptedPlannerModel extends BaseChatModel {
     this.invocations.push([...messages]);
     const response = this.responses[this.#responseIndex] ?? { content: 'done' };
     this.#responseIndex += 1;
+    const structuredToolCall = response.structuredOutput
+      ? [{
+          id: `structured-${String(this.#responseIndex)}`,
+          name: this.structuredOutputToolNames.get(
+            response.structuredOutput.kind,
+          ) ?? `missing-${response.structuredOutput.kind}-output-tool`,
+          args: response.structuredOutput.args,
+        }]
+      : undefined;
     const message = new AIMessage({
       content: response.content ?? '',
-      tool_calls: response.toolCalls?.map((call) => ({
+      tool_calls: (response.toolCalls ?? structuredToolCall)?.map((call) => ({
         ...call,
         type: 'tool_call' as const,
       })),
@@ -83,33 +119,13 @@ class ScriptedPlannerModel extends BaseChatModel {
   }
 }
 
-class DelayedSubmitToolPlannerModel extends ScriptedPlannerModel {
-  override bindTools(
-    tools: StructuredTool[],
-    options?: Record<string, unknown>,
-  ) {
-    super.bindTools(tools, options);
-    const submitTool = tools.find(
-      ({ name }) => name === CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
-    );
-    if (!submitTool) {
-      throw new Error('submit tool is missing');
-    }
-    const originalInvoke = submitTool.invoke.bind(submitTool) as unknown as (
-      input: unknown,
-      runnableConfig?: RunnableConfig,
-    ) => Promise<unknown>;
-    Object.defineProperty(submitTool, 'invoke', {
-      configurable: true,
-      value: async (input: unknown, runnableConfig?: RunnableConfig) => {
-        const output = await originalInvoke(input, runnableConfig);
-        await new Promise<void>((resolve) => {
-          setTimeout(resolve, 30);
-        });
-        return output;
-      },
+class DelayedStructuredPlannerModel extends ScriptedPlannerModel {
+  override async _generate(messages: BaseMessage[]) {
+    const result = await super._generate(messages);
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 30);
     });
-    return this;
+    return result;
   }
 }
 
@@ -233,7 +249,7 @@ function submitArgs(
   };
 }
 
-test('Planner Agent explores CAPABILITY.md files and submits current selection with an intent-only future tail', async (t) => {
+test('Planner Agent explores CAPABILITY.md files and returns a structured current selection with an intent-only future tail', async (t) => {
   const workspace = await createWorkspace(t, {
     explore: capabilityDocument({
       name: 'explore',
@@ -262,11 +278,10 @@ test('Planner Agent explores CAPABILITY.md files and submits current selection w
       }],
     },
     {
-      toolCalls: [{
-        id: 'submit',
-        name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
+      structuredOutput: {
+        kind: 'next_task',
         args: submitArgs('explore'),
-      }],
+      },
     },
   ]);
 
@@ -275,16 +290,19 @@ test('Planner Agent explores CAPABILITY.md files and submits current selection w
     maxIterations: 5,
   }).invoke(plannerInput(workspace));
 
-  assert.deepEqual(model.boundToolNames, [
+  assert.deepEqual(model.boundToolNames.slice(0, 3), [
     CAPABILITY_PLANNER_GLOB_SEARCH_TOOL_NAME,
     CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
     CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
-    CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
   ]);
+  assert.equal(model.structuredOutputToolNames.size, 2);
+  assert.ok(model.structuredOutputToolNames.has('next_task'));
+  assert.ok(model.structuredOutputToolNames.has('unavailable'));
   assert.ok(model.boundToolOptions.length > 0);
   assert.ok(model.boundToolOptions.every(
     (options) => options.parallel_tool_calls === false,
   ));
+  assert.equal(model.invocations.length, 3);
   assert.deepEqual(result, {
     result: 'next_task',
     next_task: {
@@ -321,9 +339,8 @@ test('entry mode forms one executable task after Capability exploration', async 
       }],
     },
     {
-      toolCalls: [{
-        id: 'submit',
-        name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
+      structuredOutput: {
+        kind: 'next_task',
         args: {
           result: 'next_task',
           next_task: {
@@ -334,15 +351,16 @@ test('entry mode forms one executable task after Capability exploration', async 
           },
           remaining_plan: [],
         },
-      }],
+      },
     },
   ]);
 
   const result = await createCapabilityPlannerAgent({
     model,
-    maxIterations: 4,
+    maxIterations: 2,
   }).invoke(plannerInput(workspace));
 
+  assert.equal(model.invocations.length, 2);
   assert.equal(result.result, 'next_task');
   assert.equal(
     result.next_task.objective,
@@ -361,18 +379,16 @@ test('an unknown Capability returns tool feedback and can be repaired in-loop', 
   });
   const model = new ScriptedPlannerModel([
     {
-      toolCalls: [{
-        id: 'unknown-submit',
-        name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
+      structuredOutput: {
+        kind: 'next_task',
         args: submitArgs('missing'),
-      }],
+      },
     },
     {
-      toolCalls: [{
-        id: 'valid-submit',
-        name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
+      structuredOutput: {
+        kind: 'next_task',
         args: submitArgs('general'),
-      }],
+      },
     },
   ]);
 
@@ -385,26 +401,25 @@ test('an unknown Capability returns tool feedback and can be repaired in-loop', 
   assert.equal(result.next_task.capability_name, 'general');
   const feedback = model.invocations[1]?.find((message) =>
     message instanceof ToolMessage
-    && message.name === CAPABILITY_PLANNER_SUBMIT_TOOL_NAME);
+    && message.tool_call_id === 'structured-1');
   assert.ok(feedback instanceof ToolMessage);
-  const payload = JSON.parse(String(feedback.content)) as {
-    error?: { code?: unknown };
-  };
-  assert.equal(payload.error?.code, 'unknown_capability');
+  assert.match(
+    String(feedback.content),
+    /capability_name.*does not match schema/is,
+  );
 });
 
 test('an empty workspace can produce a truthful unavailable result', async (t) => {
   const workspace = await createWorkspace(t, {});
   const model = new ScriptedPlannerModel([{
-    toolCalls: [{
-      id: 'unavailable',
-      name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
+    structuredOutput: {
+      kind: 'unavailable',
       args: {
         result: 'unavailable',
         task: 'Publish a browser automation report.',
         reason: 'The current workspace contains no Capability documents.',
       },
-    }],
+    },
   }]);
 
   const result = await createCapabilityPlannerAgent({ model }).invoke(
@@ -428,15 +443,14 @@ test('boundary mode rejects answer and materializes remaining work with general'
   });
   const model = new ScriptedPlannerModel([
     {
-      toolCalls: [{
-        id: 'answer',
-        name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
+      structuredOutput: {
+        kind: 'next_task',
         args: {
           result: 'answer',
           next_task: null,
           remaining_plan: [],
         },
-      }],
+      },
     },
     {
       toolCalls: [{
@@ -446,9 +460,8 @@ test('boundary mode rejects answer and materializes remaining work with general'
       }],
     },
     {
-      toolCalls: [{
-        id: 'submit-general',
-        name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
+      structuredOutput: {
+        kind: 'next_task',
         args: {
           result: 'next_task',
           next_task: {
@@ -459,7 +472,7 @@ test('boundary mode rejects answer and materializes remaining work with general'
           },
           remaining_plan: [],
         },
-      }],
+      },
     },
   ]);
 
@@ -485,8 +498,7 @@ test('boundary mode rejects answer and materializes remaining work with general'
   assert.equal(result.next_task.capability_name, 'general');
   assert.ok(model.invocations[1]?.some((message) =>
     message instanceof ToolMessage
-    && message.name === CAPABILITY_PLANNER_SUBMIT_TOOL_NAME
-    && message.tool_call_id === 'answer'));
+    && message.tool_call_id === 'structured-1'));
 });
 
 test('document observation exhaustion is reported as planning_limit_reached, not unavailable', async (t) => {
@@ -547,7 +559,7 @@ test('model iteration exhaustion is an explicit planning limit', async (t) => {
   assert.equal(model.invocations.length, 2);
 });
 
-test('natural language completion without submit_capability_plan is rejected', async (t) => {
+test('natural language completion without a structured result is rejected', async (t) => {
   const workspace = await createWorkspace(t, {});
   const model = new ScriptedPlannerModel([{ content: 'The plan is ready.' }]);
 
@@ -573,18 +585,17 @@ test('Planner Agent enforces a total timeout', async (t) => {
   );
 });
 
-test('Planner Agent rejects a valid submission whose tool invocation completes after timeout', async (t) => {
+test('Planner Agent rejects a structured result produced after timeout', async (t) => {
   const workspace = await createWorkspace(t, {});
-  const model = new DelayedSubmitToolPlannerModel([{
-    toolCalls: [{
-      id: 'late-submit',
-      name: CAPABILITY_PLANNER_SUBMIT_TOOL_NAME,
+  const model = new DelayedStructuredPlannerModel([{
+    structuredOutput: {
+      kind: 'unavailable',
       args: {
         result: 'unavailable',
         task: 'Perform an unsupported operation.',
         reason: 'The workspace is empty.',
       },
-    }],
+    },
   }]);
 
   await assert.rejects(

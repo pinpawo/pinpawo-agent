@@ -2,7 +2,7 @@
 title: System Prompt Design Open Questions
 page_type: question
 status: draft
-updated: 2026-07-29
+updated: 2026-07-31
 sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../../PET_AGENT_API_CAPABILITY_TOOLKIT.md
@@ -11,6 +11,7 @@ sources:
   - ../../../packages/pet-agent/evals/datasets/capability-planning-basics.ts
   - https://github.com/pinpawo/pinpawo-agent/issues/435
   - https://github.com/pinpawo/pinpawo-agent/issues/490
+  - https://github.com/pinpawo/pinpawo-agent/pull/515
 related:
   - ../overview.md
   - ../capability-toolkit-architecture.md
@@ -48,9 +49,14 @@ provider-level evidence trail.
 ### Does filesystem exploration generalize across model families?
 
 The Planner now discovers and reads `CAPABILITY.md` files through private tools.
-Local tests prove tool protocol, containment, budgets, submission validation, and
-runtime mapping. They do not prove that every supported model explores enough
-documents or chooses the best Capability.
+Local tests prove tool protocol, containment, budgets, structured-output
+validation, and runtime mapping. They do not prove that every supported model
+explores enough documents or chooses the best Capability.
+
+The standard `createAgent` structured-output path now has deterministic coverage
+for Workspace-derived result availability and Moonshot-compatible JSON Schema
+references. This closes those protocol conditions, not cross-model exploration
+or planning quality.
 
 Closure evidence:
 

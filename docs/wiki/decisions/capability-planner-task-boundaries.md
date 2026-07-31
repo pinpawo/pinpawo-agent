@@ -2,7 +2,7 @@
 title: Capability Planner Owns Task Boundaries And Capability Selection
 page_type: decision
 status: validated
-updated: 2026-07-29
+updated: 2026-07-31
 sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../../../packages/pet-agent/src/agent/orchestrator/capabilityPlannerAgent.ts
@@ -18,6 +18,7 @@ sources:
   - https://github.com/pinpawo/pinpawo-agent/pull/480
   - https://github.com/pinpawo/pinpawo-agent/pull/483
   - https://github.com/pinpawo/pinpawo-agent/pull/492
+  - https://github.com/pinpawo/pinpawo-agent/pull/515
 related:
   - ../overview.md
   - ../capability-toolkit-architecture.md
@@ -127,9 +128,9 @@ change what remains useful. Completed work cannot re-enter the future plan.
 
 There is no `direct` mode and no externally staged immutable pending task.
 
-## Submission contract
+## Structured result contract
 
-The Planner submits one of two results:
+The Planner returns one of two result shapes:
 
 ```ts
 type CapabilityPlannerResult =
@@ -169,12 +170,20 @@ present in the current Workspace:
 - if a specialized Capability completely fits the current task, select it;
 - otherwise, if `general` exists, read its document and select
   `capability_name: "general"`;
-- submit `unavailable` only when no executable Capability, including `general`,
+- return `unavailable` only when no executable Capability, including `general`,
   can proceed.
 
-The submission tool returns correctable feedback when a model reports
-`unavailable` while `general` is present. The graph node independently
-rejects the same contract violation from an injected Planner runner.
+The Planner uses the standard `createAgent` `responseFormat` and
+`structuredResponse` path. The available result schemas are derived from the
+Workspace:
+
+- an empty Workspace exposes only `unavailable`;
+- a Workspace containing `general` exposes only `next_task`;
+- another non-empty Workspace exposes both result shapes.
+
+Schema errors return correctable tool feedback inside the standard agent loop.
+This makes a false `unavailable` invalid when `general` is present without
+silently selecting an executor in code.
 
 This is not a code-selected fallback: the Planner still owns the task,
 Capability selection, and evidence trail.
@@ -184,10 +193,9 @@ Capability selection, and evidence trail.
 For `next_task`, runtime code:
 
 1. verifies that the selected name belongs to the immutable workspace;
-2. rejects duplicate current/future objectives;
-3. materializes one `RunNextDelegation`;
-4. replaces the future tail with `remaining_plan`;
-5. routes to the unified Capability executor.
+2. materializes one `RunNextDelegation`;
+3. replaces the future tail with `remaining_plan`;
+4. routes to the unified Capability executor.
 
 For truthful `unavailable`, runtime preserves the unexecuted task and reason as
 answer context and creates no delegation.

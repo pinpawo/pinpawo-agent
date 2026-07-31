@@ -116,6 +116,12 @@ function createCapabilityPlannerResponseFormat(
       .describe('Ordered, unstarted future work; use an empty array when none remains.'),
   }).strict().describe('Return the next executable task and future plan tail.');
 
+  if (input.workspace.capabilityNames.includes('general')) {
+    return toolStrategy(nextTaskPlanSchema, {
+      toolMessageContent: 'Capability planning result accepted.',
+    });
+  }
+
   return toolStrategy([
     nextTaskPlanSchema,
     unavailablePlanSchema,

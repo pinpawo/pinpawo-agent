@@ -14,8 +14,10 @@ the original design and reference documents. Maintenance rules live in
 - [System prompt design knowledge map](wiki/overview.md)
 - [Orchestrator as practical reasoning](wiki/concepts/orchestrator-practical-reasoning.md)
 - [System prompt authoring and evaluation principles](wiki/concepts/system-prompt-authoring-principles.md)
+- [Dynamic context governance](wiki/concepts/dynamic-context-governance.md) —
+  proposed ownership and placement contract
 - [Orchestrator decision node ownership](wiki/concepts/decision-node-ownership.md)
-- [Capability Planner task boundaries and Capability selection](wiki/decisions/capability-planner-task-boundaries.md)
+- [Capability Planner task boundaries, structured results, and Capability selection](wiki/decisions/capability-planner-task-boundaries.md)
 - [Delegation completion acknowledgement and terminal close](wiki/decisions/delegation-completion-acknowledgement.md)
 - [Documentation wiki management plan](wiki/migrations/docs-wiki-management-plan.md)
 
@@ -47,6 +49,8 @@ the original design and reference documents. Maintenance rules live in
 
 ## Context, guards, and review
 
+- [Dynamic context governance design](DYNAMIC_CONTEXT_GOVERNANCE_DESIGN.md) —
+  proposed; not yet current implementation
 - [Context governance refactor](CONTEXT_GOVERNANCE_REFACTOR.md)
 - [Guard design](GUARD_DESIGN.md)
 - [Guard registry design](GUARD_REGISTRY_DESIGN.md)

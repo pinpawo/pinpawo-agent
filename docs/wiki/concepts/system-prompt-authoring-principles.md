@@ -2,21 +2,24 @@
 title: System Prompt Authoring Principles
 page_type: concept
 status: validated
-updated: 2026-07-29
+updated: 2026-07-31
 sources:
   - ../sources/model-prompting-and-harness-references.md
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md
   - ../../PET_AGENT_API_CAPABILITY_TOOLKIT.md
+  - ../../DYNAMIC_CONTEXT_GOVERNANCE_DESIGN.md
   - ../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityPlannerAgent.prompt.ts
   - https://github.com/pinpawo/pinpawo-agent/issues/417
   - https://github.com/pinpawo/pinpawo-agent/issues/490
   - https://github.com/pinpawo/pinpawo-agent/pull/492
+  - https://github.com/pinpawo/pinpawo-agent/pull/515
 related:
   - ../overview.md
   - ../capability-toolkit-architecture.md
   - orchestrator-practical-reasoning.md
   - prompt-knowledge-layers.md
+  - dynamic-context-governance.md
   - decision-node-ownership.md
   - ../decisions/capability-planner-task-boundaries.md
   - ../decisions/delegation-completion-acknowledgement.md
@@ -87,6 +90,19 @@ Use [Prompt Knowledge Layers](prompt-knowledge-layers.md):
 Invocation facts must not become an untrusted second instruction channel.
 Mechanical invariants should not depend on model obedience.
 
+#### Govern dynamic context before optimizing it
+
+Before changing XML, message ordering, or cache layout, record the context's
+producer, consumer, typed fields, role, placement, authority, bounds, and
+prohibited content. Runtime code projects facts; the consumer's prompt package
+owns rendering and invocation assembly. A shared helper owns only mechanical
+serialization unless multiple consumers truly share one semantic contract.
+
+Stable prefixes, duplicate tokens, and cache reads are downstream diagnostics.
+They do not decide context ownership. The proposed repository-wide contract is
+described in [Dynamic Context Governance](dynamic-context-governance.md); target
+placement must remain distinct from current implementation facts.
+
 ### 4. Express outcomes, not a hand-written reasoning trace
 
 Specify the mission, evidence, allowed results, stopping conditions, and
@@ -106,8 +122,8 @@ Critical behavior needs enforcement or detection outside prose when feasible:
 - filesystem code owns containment, symlink safety, digest verification, and
   read budgets;
 - registry compilation owns executable availability;
-- runtime validation owns selected-name membership and the General fallback
-  invariant;
+- response-format construction and runtime validation own selected-name
+  membership and the General fallback invariant;
 - semantic evals own judgments that code cannot prove.
 
 ### 6. Treat tools and observations as the agent-computer interface
@@ -170,7 +186,7 @@ announce verdicts, and replies.
 
 The Planner is evaluated as a tool-loop behavior, not as a single-call Decision.
 Its private transcript and file observations are implementation evidence; the
-submitted plan and graph lifecycle remain the externally meaningful result.
+structured plan and graph lifecycle remain the externally meaningful result.
 
 ## Capability Planner-specific review
 

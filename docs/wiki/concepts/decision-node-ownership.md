@@ -2,7 +2,7 @@
 title: Orchestrator Decision Node Ownership
 page_type: concept
 status: validated
-updated: 2026-07-29
+updated: 2026-07-31
 sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md
@@ -12,10 +12,12 @@ sources:
   - ../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/capabilityPlanner.ts
   - https://github.com/pinpawo/pinpawo-agent/issues/490
   - https://github.com/pinpawo/pinpawo-agent/pull/492
+  - https://github.com/pinpawo/pinpawo-agent/pull/515
 related:
   - ../capability-toolkit-architecture.md
   - orchestrator-practical-reasoning.md
   - prompt-knowledge-layers.md
+  - dynamic-context-governance.md
   - system-prompt-authoring-principles.md
   - message-context-and-provenance.md
   - ../decisions/capability-planner-task-boundaries.md
@@ -76,8 +78,8 @@ The Planner returns:
 
 When specialized Capabilities do not match but `general` exists, selecting
 `general` is Planner policy expressed through the same document-reading and
-submission contract. Code rejects a false `unavailable`; it does not silently
-rewrite the selected Capability.
+structured-result contract. Response-format construction omits `unavailable`
+when `general` exists; code does not silently rewrite the selected Capability.
 
 ## Task and future-plan boundary
 
@@ -117,9 +119,9 @@ Code remains responsible for:
 - registry compilation and the immutable Capability workspace generation;
 - filesystem containment, digest verification, read budgets, and iteration
   limits;
-- submission schema validation and rejection of unknown/unobserved
-  Capabilities;
-- the `general` fallback invariant;
+- structured-output validation and selected-name membership;
+- workspace-derived result availability, including the `general` fallback
+  invariant;
 - lane creation, state updates, routing, and cleanup.
 
 These invariants may be described to the Planner when needed for correction,

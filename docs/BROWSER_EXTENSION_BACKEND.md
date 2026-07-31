@@ -10,7 +10,7 @@ Set `PINPAWO_BROWSER_BACKEND=extension` (or save `browser_backend: "extension"`)
 
 In `auto`, local-agent listens for the installed extension and chooses it first for compatible default-session, visible-browser operations. If no extension is connected, or the initial open explicitly requires headless, a named session or a custom profile, selection uses Playwright. Selection is still one-time for that active `BrowserSession`.
 
-Toolkit availability is structural and cached when the runtime registry is built; transient extension connectivity does not remove the Browser Toolkit. Runtime status separately exposes `commandReady`: a listening bridge without a registered extension remains routable but is reported as `waiting`, while only a registered live connection is `ready`. This lets a later extension reconnect recover without rebuilding the agent registry and avoids presenting transport setup as command readiness.
+Toolkit availability is structural and cached when the runtime registry is built; transient extension connectivity does not remove the Browser Toolkit. Browser Runtime owns one live extension snapshot that distinguishes bridge listening, Native Host connectivity, extension registration and command readiness. Session selection, Toolkit diagnostics and HTTP health consume that projection instead of independently combining Bridge booleans. A listening bridge without a registered extension remains routable but is not command-ready, so a later reconnect can recover without rebuilding the agent registry.
 
 ## Process boundary
 
@@ -101,7 +101,7 @@ Inspect host registration and bridge runtime-file diagnostics with:
 pinpawo browser extension status
 ```
 
-The running local-agent HTTP health response exposes separate host, extension, debugger and target fields while extension mode is selected. Remove registration with `pinpawo browser extension unregister`.
+The running local-agent HTTP health response keeps the cached Toolkit selection in `browser_mode`, while always exposing the live extension runtime state plus separate bridge, host, extension command-readiness, debugger and target fields. This keeps Extension diagnostics visible even when `auto` initially selected Playwright for Toolkit availability. Remove registration with `pinpawo browser extension unregister`.
 
 ## Attribution
 

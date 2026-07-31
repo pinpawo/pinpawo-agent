@@ -18,7 +18,7 @@ import {
 import { ChromeExtensionBrowserSession } from './drivers/chromeExtension/session';
 import {
   browserRuntime,
-  describeBrowserExtensionStatus,
+  type BrowserRuntimeSnapshot,
 } from './runtime';
 import { persistBrowserScreenshot } from './screenshot';
 import { BrowserOperationError } from './errors';
@@ -89,12 +89,10 @@ function listSessionNames(): string[] {
 // ── Backend detection ─────────────────────────────────────────────────────────
 
 export type BrowserBackend = 'extension' | 'playwright';
-export type BrowserReadiness = 'ready' | 'waiting' | 'unavailable';
 export type BrowserStatus = {
   mode: BrowserBackend | 'none';
   detail: string;
   configured: string;
-  readiness: BrowserReadiness;
   commandReady: boolean;
 };
 
@@ -149,11 +147,11 @@ async function detectBackend(requiresPlaywright = false): Promise<BrowserBackend
   }
 
   // auto-detect
-  const extensionStatus = browserRuntime.getExtensionStatus();
+  const extensionStatus = browserRuntime.getSnapshot().extension;
   const playwrightAvailable = await canUsePlaywright();
   const autoBackend = selectAutoBrowserBackend({
     extensionCommandReady: extensionStatus.commandReady,
-    extensionListening: extensionStatus.listening,
+    extensionListening: extensionStatus.bridgeListening,
     playwrightAvailable,
     requiresPlaywright,
   });
@@ -794,7 +792,9 @@ export const browserSession = new BrowserSession({
 });
 
 // ── Lightweight detection (no browser launch) ─────────────────────────────────
-export async function detectBrowserStatus(): Promise<BrowserStatus> {
+export async function detectBrowserStatus(
+  runtime: BrowserRuntimeSnapshot = browserRuntime.getSnapshot(),
+): Promise<BrowserStatus> {
   const fromEnv = process.env.PINPAWO_BROWSER_BACKEND?.trim();
   const fromConfig = getConfig().browserBackend;
   const configured = fromEnv || fromConfig || 'auto';
@@ -808,7 +808,6 @@ export async function detectBrowserStatus(): Promise<BrowserStatus> {
         mode: 'playwright',
         detail: chromeExecPath,
         configured,
-        readiness: 'ready',
         commandReady: true,
       };
     }
@@ -816,22 +815,16 @@ export async function detectBrowserStatus(): Promise<BrowserStatus> {
       mode: 'none',
       detail: `configured playwright but unavailable: missing playwright-core or Chrome at ${chromeExecPath}`,
       configured,
-      readiness: 'unavailable',
       commandReady: false,
     };
   }
   if (configured === 'extension') {
-    const status = browserRuntime.getExtensionStatus();
+    const extension = runtime.extension;
     return {
-      mode: 'extension',
-      detail: describeBrowserExtensionStatus(status),
+      mode: extension.bridgeListening ? 'extension' : 'none',
+      detail: extension.detail,
       configured,
-      readiness: status.commandReady
-        ? 'ready'
-        : status.listening
-          ? 'waiting'
-          : 'unavailable',
-      commandReady: status.commandReady,
+      commandReady: extension.commandReady,
     };
   }
   if (configured === 'agent-browser') {
@@ -839,7 +832,6 @@ export async function detectBrowserStatus(): Promise<BrowserStatus> {
       mode: 'none',
       detail: 'configured agent-browser but that backend is no longer supported',
       configured,
-      readiness: 'unavailable',
       commandReady: false,
     };
   }
@@ -848,19 +840,17 @@ export async function detectBrowserStatus(): Promise<BrowserStatus> {
       mode: 'none',
       detail: `unknown browser backend "${configured}"; use auto, playwright, or extension`,
       configured,
-      readiness: 'unavailable',
       commandReady: false,
     };
   }
 
   // auto-detect
-  const extension = browserRuntime.getExtensionStatus();
+  const extension = runtime.extension;
   if (extension.commandReady) {
     return {
       mode: 'extension',
-      detail: describeBrowserExtensionStatus(extension),
+      detail: extension.detail,
       configured,
-      readiness: 'ready',
       commandReady: true,
     };
   }
@@ -869,16 +859,14 @@ export async function detectBrowserStatus(): Promise<BrowserStatus> {
       mode: 'playwright',
       detail: chromeExecPath,
       configured,
-      readiness: 'ready',
       commandReady: true,
     };
   }
-  if (extension.listening) {
+  if (extension.bridgeListening) {
     return {
       mode: 'extension',
-      detail: describeBrowserExtensionStatus(extension),
+      detail: extension.detail,
       configured,
-      readiness: 'waiting',
       commandReady: false,
     };
   }
@@ -886,7 +874,6 @@ export async function detectBrowserStatus(): Promise<BrowserStatus> {
     mode: 'none',
     detail: `missing playwright-core or Chrome at ${chromeExecPath}`,
     configured,
-    readiness: 'unavailable',
     commandReady: false,
   };
 }

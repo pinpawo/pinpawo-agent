@@ -108,12 +108,28 @@ The current change implements the minimum Answer baseline:
 - contract and projection tests cover role, provenance, closed modes, escaping,
   bounds, terminal meaning, and absence of a free-form instruction field.
 
-This baseline deliberately preserves current Answer output behavior through a
-named legacy renderer. It does not yet move the facts message into production
-invocations, remove dynamic Answer system prose, bypass the model for
-`goal_done`, or delete `buildDelegationCompletionAnswerContext()`. Those changes
-remain the P0.5 containment slice, so the reproduced incident is not considered
-fixed by P0 alone.
+The baseline deliberately preserved Answer output behavior through a named
+legacy renderer. It established the contract without claiming that the
+reproduced incident was fixed.
+
+### 3.2 P0.5 containment implementation status
+
+The Answer containment slice now applies that contract to production:
+
+- `prompts/answer.ts` owns the stable system contract, facts rendering, message
+  roles/order, and final model-invocation assembly;
+- Answer workdir, runtime-environment, task, result, and terminal-state values no
+  longer enter the system message;
+- model-backed modes receive a bounded synthetic Human facts message after
+  canonical history;
+- genuine `goal_done` returns one fixed acknowledgement from runtime without an
+  Answer-model invocation;
+- the legacy runtime prose builders, including
+  `buildDelegationCompletionAnswerContext()`, are removed;
+- deterministic tests cover invocation count, output, roles, order, provenance,
+  bounds, and absence of dynamic system data;
+- redacted long-imperative and instruction-like completion fixtures cover the
+  reproduced failure shape without storing real URLs or credentials.
 
 ## 4. Context lifecycle
 

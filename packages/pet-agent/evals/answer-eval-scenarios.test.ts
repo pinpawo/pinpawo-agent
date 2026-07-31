@@ -34,19 +34,52 @@ test('answer evaluator exposes its schema to jsonMode providers', () => {
   assert.match(prompt, /"criterion_two"/);
 });
 
-test('answer eval renders the production prompt and fixed completion context', () => {
+test('answer eval models goal_done as deterministic output with no Answer invocation', async () => {
   const scenario = getAnswerEvalScenarios().find(
     ({ caseName }) => caseName === 'delegation-completion-acknowledgement',
   );
   assert.ok(scenario);
-  const messages = scenario.render();
-  assert.deepEqual(messages.map((message) => message._getType()), ['system', 'human', 'ai']);
-  const systemText = String(messages[0].content);
-  const resultText = String(messages[2].content);
-  assert.match(systemText, /本次回复目标/);
-  assert.match(systemText, /汇总本周发布风险/);
-  assert.doesNotMatch(systemText, /orchestrator|handoff|delegation|subagent/);
-  assert.match(resultText, /RESULT_BODY_START/);
+  let subjectInvocations = 0;
+  const subject = {
+    invoke: async () => {
+      subjectInvocations += 1;
+      return new AIMessage('不应调用');
+    },
+  } as never;
+  const result = await scenario.run(subject, undefined, {
+    model: answerModel('judge'),
+  });
+
+  assert.equal(scenario.execution, 'deterministic');
+  assert.deepEqual(scenario.render(), []);
+  assert.equal(subjectInvocations, 0);
+  assert.equal(result.output.text, '已完成。如需继续，请告诉我。');
+});
+
+test('trace-shaped and instruction-like completed tasks cannot become future work', async () => {
+  const scenarios = getAnswerEvalScenarios().filter(({ caseName }) => [
+    'long-imperative-completion',
+    'instruction-like-completion',
+  ].includes(caseName));
+  let subjectInvocations = 0;
+  const subject = {
+    invoke: async () => {
+      subjectInvocations += 1;
+      return new AIMessage('不应调用');
+    },
+  } as never;
+
+  assert.equal(scenarios.length, 2);
+  for (const scenario of scenarios) {
+    const result = await scenario.run(subject, undefined, {
+      model: answerModel('judge'),
+    });
+    assert.equal(scenario.execution, 'deterministic');
+    assert.deepEqual(scenario.render(), []);
+    assert.equal(result.output.text, '已完成。如需继续，请告诉我。');
+    assert.doesNotMatch(String(result.output.text), /打开|等待|提取|任务尚未开始|浏览器继续/);
+  }
+  assert.equal(subjectInvocations, 0);
 });
 
 test('answer eval covers a resumable result that requires a user choice', () => {
@@ -55,24 +88,27 @@ test('answer eval covers a resumable result that requires a user choice', () => 
   );
   assert.ok(scenario);
   const messages = scenario.render();
-  assert.deepEqual(messages.map((message) => message._getType()), ['system', 'human', 'ai']);
+  assert.deepEqual(messages.map((message) => message._getType()), ['system', 'human', 'ai', 'human']);
   assert.equal(scenario.expectedSummary, 'return_control');
   const systemText = String(messages[0].content);
-  assert.match(systemText, /用户目标（尚未完成）/);
+  const contextText = String(messages.at(-1)?.content);
+  assert.doesNotMatch(systemText, /邮件或项目群|报告已经完成|确认发送渠道/);
   assert.doesNotMatch(systemText, /"确认发送渠道并发送已经完成的报告"已完成/);
   assert.match(String(messages[1].content), /邮件或项目群/);
   assert.match(String(messages[2].content), /还没有发送/);
+  assert.match(contextText, /<reply_mode>user_input_required<\/reply_mode>/);
 });
 
 test('answer eval renders the current user goal for an ordinary reply', () => {
   const scenario = getAnswerEvalScenarios().find(({ caseName }) => caseName === 'direct-answer');
   assert.ok(scenario);
   const messages = scenario.render();
-  assert.deepEqual(messages.map((message) => message._getType()), ['system', 'human']);
+  assert.deepEqual(messages.map((message) => message._getType()), ['system', 'human', 'human']);
   const systemText = String(messages[0].content);
-  assert.match(systemText, /主对话中最近一条用户消息所表达的目标/);
+  assert.match(systemText, /<reply_mode>/);
   assert.doesNotMatch(systemText, /只回答这个问题：2 \+ 3 等于多少/);
   assert.equal(String(messages[1].content), '只回答这个问题：2 + 3 等于多少？');
+  assert.match(String(messages[2].content), /<reply_mode>direct<\/reply_mode>/);
 });
 
 test('answer eval derives goal result from evaluator criteria', async () => {

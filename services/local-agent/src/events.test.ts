@@ -222,6 +222,12 @@ test('browser open review policy offers session authorization', async () => {
   const toolkit = createBrowserToolkit();
   const policy = definition(toolkit, 'browser_open')?.review;
   assert.ok(policy);
+  const matcher = await policy.authorization?.buildMatcher({
+    toolkitName: 'browser',
+    toolName: 'browser_open',
+    input: { url: 'https://Example.test/path', headless: true },
+    operation: definition(toolkit, 'browser_open')?.operation,
+  });
 
   const review = await policy.request({
     toolkitName: 'browser',
@@ -232,6 +238,7 @@ test('browser open review policy offers session authorization', async () => {
       humanReview: true,
       sessionAuthorization: true,
     },
+    authorizationMatcher: matcher,
   });
 
   assert.deepEqual(
@@ -240,24 +247,8 @@ test('browser open review policy offers session authorization', async () => {
   );
 
   assert.deepEqual(
-    await policy.buildAuthorizationMatcher?.({
-      toolkitName: 'browser',
-      toolName: 'browser_open',
-      input: { url: 'https://Example.test/path', headless: true },
-      operation: definition(toolkit, 'browser_open')?.operation,
-      pendingAction: {
-        actionId: 'call-1',
-        toolName: 'browser_open',
-        args: { url: 'https://Example.test/path', headless: true },
-      },
-      effect: {
-        type: 'graph.authorize_tool_action',
-        scope: 'thread',
-        actionRef: { type: 'pending_action' },
-        matcher: { type: 'policy_hook' },
-      },
-    }),
-    { type: 'url_domain', value: { origin: 'https://example.test' } },
+    matcher,
+    { type: 'url_origin', origin: 'https://example.test' },
   );
 });
 

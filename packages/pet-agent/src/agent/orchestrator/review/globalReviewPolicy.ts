@@ -104,6 +104,8 @@ export type GlobalReviewPolicy =
       mode: typeof GLOBAL_REVIEW_POLICY_MODE.CUSTOM;
       resolve: GlobalReviewPolicyResolver;
       resolveBatch?: GlobalReviewPolicyBatchResolver;
+      /** Opt in to reusing grants originally established by auto review. */
+      reuseAutoAuthorizations?: boolean;
     };
 
 export type ResolveGlobalReviewPolicyOptions = GlobalReviewPolicyContext & {

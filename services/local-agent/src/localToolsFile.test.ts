@@ -165,8 +165,13 @@ test('bash toolkit reviews write_file with preset policy', async (t) => {
   writeFileSync(filePath, 'before\n', 'utf-8');
   const input = { path: filePath, content: 'after\n' };
   const policy = reviewPolicyFor('write_file');
+  const context = reviewContext('write_file', input);
+  const authorizationMatcher = await policy.authorization?.buildMatcher(context);
 
-  const review = await policy.request(reviewContext('write_file', input));
+  const review = await policy.request({
+    ...context,
+    authorizationMatcher,
+  });
   const view = review && 'schemaVersion' in review ? review.view : null;
   assert.ok(view && view.kind === 'plain');
   assert.equal(view.title, '写文件');

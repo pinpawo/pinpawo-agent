@@ -8,6 +8,10 @@ import {
 } from '../../types/capability';
 import { defineToolkit } from '../../types/toolkit';
 import { compileAgentRegistry } from './registry';
+import {
+  AuthorizationPolicies,
+  ReviewPolicies,
+} from './review/reviewPolicies';
 
 function mockTool(name: string) {
   return tool(async () => 'ok', {
@@ -156,4 +160,50 @@ test('compiled registry snapshots Toolkit definitions for one generation', () =>
   assert.deepEqual(registry.capabilities[0]?.toolNames, ['original']);
   assert.equal(registry.capabilities[0]?.tools[0], original);
   assert.ok(Object.isFrozen(registry.capabilities[0]?.toolkits[0]?.tools));
+});
+
+test('authorization generation is stable across rebuilds and changes with policy semantics', () => {
+  const executable = mockTool('run_shell');
+  const buildRegistry = (projected: boolean) => compileAgentRegistry({
+    toolkits: [defineToolkit({
+      name: 'local',
+      description: 'Local tools.',
+      tools: [{
+        tool: executable,
+        review: ReviewPolicies.commandExecution({
+          authorization: projected
+            ? AuthorizationPolicies.exact({ subject: ({ input }) => input })
+            : AuthorizationPolicies.exact(),
+        }),
+      }],
+    })],
+    capabilities: [capability('general', ['local'])],
+  });
+
+  const first = buildRegistry(false);
+  const rebuilt = buildRegistry(false);
+  const changedPolicy = buildRegistry(true);
+
+  assert.match(first.authorizationGeneration, /^[a-f0-9]{64}$/);
+  assert.equal(rebuilt.authorizationGeneration, first.authorizationGeneration);
+  assert.notEqual(changedPolicy.authorizationGeneration, first.authorizationGeneration);
+});
+
+test('compiled registry snapshots authorization policy functions for its generation', () => {
+  const review = ReviewPolicies.commandExecution({ authorization: 'exact' });
+  const originalBuilder = review.authorization?.buildMatcher;
+  const registry = compileAgentRegistry({
+    toolkits: [defineToolkit({
+      name: 'local',
+      description: 'Local tools.',
+      tools: [{ tool: mockTool('run_shell'), review }],
+    })],
+    capabilities: [capability('general', ['local'])],
+  });
+
+  review.authorization!.buildMatcher = () => null;
+
+  const compiledReview = registry.toolkits[0]?.tools[0]?.review;
+  assert.equal(compiledReview?.authorization?.buildMatcher, originalBuilder);
+  assert.ok(Object.isFrozen(compiledReview?.authorization));
 });

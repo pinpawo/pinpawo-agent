@@ -178,20 +178,15 @@ function formatToolAuthorizationNotice(name: string, rawData: unknown): string |
     return null;
   }
   const data = readRuntimeEventData(rawData);
-  const authorizations = Array.isArray(data?.authorizations) ? data.authorizations : [];
-  const toolNames = [...new Set(authorizations
-    .map((item) => item && typeof item === 'object'
-      ? (item as { toolName?: unknown }).toolName
-      : null)
-    .filter((toolName): toolName is string => typeof toolName === 'string' && toolName.trim().length > 0))];
-
-  if (toolNames.length === 1) {
-    return `已授权当前会话中的 ${toolNames[0]} 操作。`;
+  if (data?.source === 'auto_review') {
+    return null;
   }
-  if (toolNames.length > 1) {
-    return `已授权当前会话中的 ${toolNames.length} 个工具操作。`;
-  }
-  return '已授权当前会话中的工具操作。';
+  const toolName = typeof data?.toolName === 'string' && data.toolName.trim()
+    ? data.toolName
+    : null;
+  return toolName
+    ? `已授权当前会话中的 ${toolName} 操作。`
+    : '已授权当前会话中的工具操作。';
 }
 
 function readDelegationOperations(data: unknown): Record<string, SubagentToolOperationMetadata> | null {

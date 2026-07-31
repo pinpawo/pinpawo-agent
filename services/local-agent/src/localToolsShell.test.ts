@@ -85,7 +85,7 @@ test('shell review policy reviews configured command execution', async () => {
   const policy = definition(toolkit, 'run_shell')?.review;
   assert.ok(policy);
 
-  const review = await policy.request({
+  const context = {
     toolkitName: 'bash',
     toolName: 'run_shell',
     input: { command: 'pwd' },
@@ -94,6 +94,10 @@ test('shell review policy reviews configured command execution', async () => {
       humanReview: true,
       sessionAuthorization: true,
     },
+  };
+  const review = await policy.request({
+    ...context,
+    authorizationMatcher: await policy.authorization?.buildMatcher(context),
   });
   assert.equal(review && 'schemaVersion' in review ? review.view.title : null, '执行命令');
   assert.deepEqual(

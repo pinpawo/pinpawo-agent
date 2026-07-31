@@ -490,7 +490,9 @@ test('createGitToolkit exposes a dedicated git capability surface', async () => 
   assert.equal(Boolean(definition(toolkit, 'gh_pr_create')?.review), true);
   assert.equal(Boolean(definition(toolkit, 'gh_issue_create')?.review), true);
 
-  const review = await definition(toolkit, 'git_commit')?.review?.request({
+  const gitCommitPolicy = definition(toolkit, 'git_commit')?.review;
+  assert.ok(gitCommitPolicy);
+  const reviewContext = {
     toolkitName: 'git',
     toolName: 'git_commit',
     input: { cwd: '/repo', message: 'test: commit' },
@@ -499,6 +501,11 @@ test('createGitToolkit exposes a dedicated git capability surface', async () => 
       humanReview: true,
       sessionAuthorization: true,
     },
+  };
+  const authorizationMatcher = await gitCommitPolicy.authorization?.buildMatcher(reviewContext);
+  const review = await gitCommitPolicy.request({
+    ...reviewContext,
+    authorizationMatcher,
   });
   assert.deepEqual(
     review && 'schemaVersion' in review ? review.options.map((option) => option.id) : [],

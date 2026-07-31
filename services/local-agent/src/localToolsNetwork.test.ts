@@ -65,11 +65,15 @@ test('bash toolkit external access policy reviews configured network calls', asy
     },
   };
 
-  const getReview = await httpPolicy.request({
+  const getContext = {
     ...baseContext,
     toolName: 'http_fetch',
     input: { url: 'https://example.test/page' },
     operation: definition(toolkit, 'http_fetch')?.operation,
+  };
+  const getReview = await httpPolicy.request({
+    ...getContext,
+    authorizationMatcher: await httpPolicy.authorization?.buildMatcher(getContext),
   });
   assert.equal(getReview && 'schemaVersion' in getReview ? getReview.view.title : null, '请求网页');
   assert.deepEqual(
@@ -77,19 +81,27 @@ test('bash toolkit external access policy reviews configured network calls', asy
     ['approve', 'approve-and-authorize-thread', 'reject', 'respond'],
   );
 
-  const postReview = await httpPolicy.request({
+  const postContext = {
     ...baseContext,
     toolName: 'http_fetch',
     input: { url: 'https://example.test/page', method: 'POST', body: 'ok' },
     operation: definition(toolkit, 'http_fetch')?.operation,
+  };
+  const postReview = await httpPolicy.request({
+    ...postContext,
+    authorizationMatcher: await httpPolicy.authorization?.buildMatcher(postContext),
   });
   assert.equal(postReview && 'schemaVersion' in postReview ? postReview.view.title : null, '请求网页');
 
-  const downloadReview = await downloadPolicy.request({
+  const downloadContext = {
     ...baseContext,
     toolName: 'download_file',
     input: { url: 'https://example.test/file.txt' },
     operation: definition(toolkit, 'download_file')?.operation,
+  };
+  const downloadReview = await downloadPolicy.request({
+    ...downloadContext,
+    authorizationMatcher: await downloadPolicy.authorization?.buildMatcher(downloadContext),
   });
   assert.equal(downloadReview && 'schemaVersion' in downloadReview ? downloadReview.view.title : null, '下载文件');
   assert.deepEqual(

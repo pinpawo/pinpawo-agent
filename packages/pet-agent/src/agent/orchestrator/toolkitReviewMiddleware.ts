@@ -14,10 +14,14 @@ import type { SubagentRuntimeEvent } from '../../types/subagent';
 import {
   applyReviewEffects,
   buildToolAuthorizationRecord,
+  findToolAuthorization,
+  mergeToolAuthorizations,
   readToolAuthorizationMatcher,
   ReviewEffectApplicationError,
+  toolAuthorizationRecordKey,
   type ToolAuthorizationRecord,
 } from './review/reviewAuthorizations';
+import type { ToolAuthorizationMatcher } from './review/authorizationMatchers';
 import {
   isHumanReviewRunControlResume,
   resolveHumanReviewBatchResume,
@@ -32,7 +36,6 @@ import type {
   PendingReviewAction,
   ReviewResponseResolution,
   ReviewSpec,
-  ToolAuthorizationMatcher,
   HumanReviewBatchInterruptPayload,
   HumanReviewInterruptPayload,
 } from './review/reviewSpec';
@@ -57,7 +60,9 @@ export type ToolkitReviewRuntimeContext = {
   reviewCapabilities?: ToolkitReviewCapabilities;
   globalReviewPolicy?: GlobalReviewPolicy;
   toolAuthorizations?: ToolAuthorizationRecord[];
-  recordToolAuthorization?: (authorization: ToolAuthorizationRecord) => void | Promise<void>;
+  recordToolAuthorizations?: (
+    authorizations: ToolAuthorizationRecord[],
+  ) => void | Promise<void>;
   emitRuntimeEvent?: (event: SubagentRuntimeEvent) => void | Promise<void>;
 };
 
@@ -113,7 +118,13 @@ function runtimeCanCollectHumanReview(ctx: ToolkitReviewRuntimeContext) {
 }
 
 function toolAuthorizationsForGlobalPolicy(ctx: ToolkitReviewRuntimeContext) {
-  if (ctx.globalReviewPolicy?.mode === GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION) {
+  if (
+    ctx.globalReviewPolicy?.mode === GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION
+    || (
+      ctx.globalReviewPolicy?.mode === GLOBAL_REVIEW_POLICY_MODE.CUSTOM
+      && ctx.globalReviewPolicy.reuseAutoAuthorizations === true
+    )
+  ) {
     return ctx.toolAuthorizations;
   }
   return ctx.toolAuthorizations?.filter((authorization) =>
@@ -310,50 +321,67 @@ function buildInvalidDecisionRequest(
 }
 
 async function buildRuntimeReviewAuthorizations(params: {
-  reviewPayload: HumanReviewInterruptPayload;
+  review: PreparedToolkitReview;
   resolution: ReviewResponseResolution;
-  toolkits: AgentToolkit[];
 }): Promise<ToolAuthorizationRecord[]> {
-  if (params.resolution.effects.length > 0 && !params.reviewPayload.pendingAction) {
-    throw new ReviewEffectApplicationError(
-      'missing_pending_action',
-      'Cannot apply review effects without a pending action.',
-    );
-  }
-  return params.reviewPayload.pendingAction
-    ? await applyReviewEffects({
-        pendingAction: params.reviewPayload.pendingAction,
-        effects: params.resolution.effects,
-        toolkits: params.toolkits,
-      })
-    : [];
+  return applyReviewEffects({
+    toolName: params.review.toolName,
+    matcher: params.review.authorizationMatcher,
+    effects: params.resolution.effects,
+  });
 }
 
 async function recordToolAuthorizations(
   ctx: ToolkitReviewRuntimeContext,
   authorizations: ToolAuthorizationRecord[],
-  options: { emitRecordedEvent?: boolean } = {},
 ) {
   if (authorizations.length === 0) {
     return;
   }
-  if (!ctx.recordToolAuthorization) {
+  if (!ctx.recordToolAuthorizations) {
     throw new ReviewEffectApplicationError(
       'missing_thread',
       'Cannot apply authorization effects without an orchestrator authorization recorder.',
     );
   }
-  for (const authorization of authorizations) {
-    await ctx.recordToolAuthorization(authorization);
-  }
-  if (options.emitRecordedEvent === false) {
-    return;
-  }
-  await ctx.emitRuntimeEvent?.({
-    event: 'on_runtime_event',
-    name: 'tool_authorization_recorded',
-    data: { authorizations },
+  const existingByKey = new Map(
+    mergeToolAuthorizations([], ctx.toolAuthorizations ?? []).map((authorization) => [
+      toolAuthorizationRecordKey(authorization),
+      authorization,
+    ]),
+  );
+  const changes = mergeToolAuthorizations([], authorizations).filter((authorization) => {
+    const existing = existingByKey.get(toolAuthorizationRecordKey(authorization));
+    return !existing
+      || (existing.source === 'auto_review' && authorization.source === 'human');
   });
+  const upgrades = changes.filter((authorization) =>
+    existingByKey.get(toolAuthorizationRecordKey(authorization))?.source === 'auto_review');
+  await ctx.recordToolAuthorizations(authorizations);
+  for (const authorization of changes) {
+    await ctx.emitRuntimeEvent?.({
+      event: 'on_runtime_event',
+      name: 'tool_authorization_recorded',
+      data: {
+        toolName: authorization.toolName,
+        matcherType: authorization.matcher.type,
+        source: authorization.source,
+        scope: 'thread',
+      },
+    });
+  }
+  for (const authorization of upgrades) {
+    await ctx.emitRuntimeEvent?.({
+      event: 'on_runtime_event',
+      name: 'tool_authorization_upgraded',
+      data: {
+        toolName: authorization.toolName,
+        matcherType: authorization.matcher.type,
+        source: authorization.source,
+        scope: 'thread',
+      },
+    });
+  }
 }
 
 /**
@@ -368,51 +396,19 @@ async function buildAutoReviewSessionAuthorizations(params: {
   if (
     params.ctx.globalReviewPolicy?.mode !== GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION
     || params.ctx.reviewCapabilities?.sessionAuthorization !== true
-    || !params.ctx.recordToolAuthorization
+    || !params.ctx.recordToolAuthorizations
   ) {
     return [];
   }
 
-  const authorizations: ToolAuthorizationRecord[] = [];
-  for (const review of params.reviews) {
-    const pendingAction = review.reviewPayload.pendingAction;
-    const buildAuthorizationMatcher = review.reviewPolicy.buildAuthorizationMatcher;
-    if (!pendingAction || !buildAuthorizationMatcher) {
-      continue;
-    }
-    let declaredMatcher: ToolAuthorizationMatcher | null;
-    try {
-      declaredMatcher = await buildAuthorizationMatcher({
-        toolkitName: review.toolkitName,
-        toolName: review.toolName,
-        input: pendingAction.args,
-        operation: review.operation,
-        pendingAction,
-        effect: {
-          type: 'graph.authorize_tool_action',
-          scope: 'thread',
-          actionRef: { type: 'pending_action' },
-          matcher: { type: 'policy_hook' },
-        },
-      });
-    } catch {
-      // Session reuse is optional; a broken matcher hook must not overturn the
-      // auto-review decision for the current concrete action.
-      continue;
-    }
-    if (!readToolAuthorizationMatcher(declaredMatcher)) {
-      continue;
-    }
-    authorizations.push(buildToolAuthorizationRecord({
-      toolName: review.toolName,
-      matcher: {
-        type: 'exact_args',
-        value: { ...pendingAction.args },
-      },
-      source: 'auto_review',
-    }));
-  }
-  return authorizations;
+  return params.reviews.flatMap((review) =>
+    review.authorizationMatcher?.type === 'exact'
+      ? [buildToolAuthorizationRecord({
+          toolName: review.toolName,
+          matcher: review.authorizationMatcher,
+          source: 'auto_review',
+        })]
+      : []);
 }
 
 export type ToolkitReviewBinding = {
@@ -432,6 +428,7 @@ type PreparedToolkitReview = GlobalReviewPolicyBatchItem & {
   toolCall: ToolCall;
   reviewPolicy: ToolReviewPolicy;
   reviewPayload: HumanReviewInterruptPayload;
+  authorizationMatcher: ToolAuthorizationMatcher | null;
 };
 
 type ToolkitReviewPreparation =
@@ -525,6 +522,28 @@ function buildToolMessage(toolCall: ToolCall, content: string) {
   });
 }
 
+async function buildCandidateAuthorizationMatcher(params: {
+  binding: ToolkitReviewBinding;
+  input: unknown;
+}): Promise<ToolAuthorizationMatcher | null> {
+  const buildMatcher = params.binding.reviewPolicy.authorization?.buildMatcher;
+  if (!buildMatcher) {
+    return null;
+  }
+  try {
+    return readToolAuthorizationMatcher(await buildMatcher({
+      toolkitName: params.binding.toolkit.name,
+      toolName: params.binding.toolName,
+      input: params.input,
+      operation: params.binding.operation,
+    }));
+  } catch {
+    // Matcher construction is optional reuse metadata. A policy bug must fail
+    // closed into the normal review path, never authorize the current call.
+    return null;
+  }
+}
+
 async function prepareToolkitToolReview(params: {
   binding: ToolkitReviewBinding;
   ctx: ToolkitReviewRuntimeContext;
@@ -536,13 +555,50 @@ async function prepareToolkitToolReview(params: {
     return { type: 'allow' };
   }
   const currentInput = toolCall.args;
+  const reviewCapabilities = reviewCapabilitiesForGlobalPolicy(ctx);
+  const authorizationMatcher = await buildCandidateAuthorizationMatcher({
+    binding,
+    input: currentInput,
+  });
+  const activeAuthorization = authorizationMatcher
+    && reviewCapabilities?.sessionAuthorization === true
+    ? findToolAuthorization({
+      authorizations: toolAuthorizationsForGlobalPolicy(ctx) ?? [],
+      toolName: binding.toolName,
+      candidateMatcher: authorizationMatcher,
+    })
+    : undefined;
+  if (activeAuthorization) {
+    await ctx.emitRuntimeEvent?.({
+      event: 'on_runtime_event',
+      name: 'tool_authorization_hit',
+      data: {
+        toolName: binding.toolName,
+        matcherType: authorizationMatcher?.type,
+        source: activeAuthorization.source,
+        scope: 'thread',
+      },
+    });
+    return { type: 'allow' };
+  }
+  if (binding.reviewPolicy.authorization) {
+    await ctx.emitRuntimeEvent?.({
+      event: 'on_runtime_event',
+      name: 'tool_authorization_miss',
+      data: {
+        toolName: binding.toolName,
+        matcherType: authorizationMatcher?.type,
+        scope: 'thread',
+      },
+    });
+  }
   const reviewSpec = await binding.reviewPolicy.request({
     toolkitName: binding.toolkit.name,
     toolName: binding.toolName,
     input: currentInput,
     operation: binding.operation,
-    reviewCapabilities: reviewCapabilitiesForGlobalPolicy(ctx),
-    toolAuthorizations: toolAuthorizationsForGlobalPolicy(ctx),
+    reviewCapabilities,
+    authorizationMatcher,
   });
 
   if (!reviewSpec) {
@@ -583,6 +639,7 @@ async function prepareToolkitToolReview(params: {
       input: currentInput,
       operation: binding.operation,
       reviewPolicy: binding.reviewPolicy,
+      authorizationMatcher,
       autoReviewContext: binding.toolkit.reviewGuidance,
       review: reviewPayload.review,
       reviewPayload,
@@ -618,7 +675,6 @@ async function resolveReviewActionResume(params: {
 async function authorizeApprovedReviewAction(params: {
   reviews: PreparedToolkitReview[];
   resolutions: ReviewResponseResolution[];
-  toolkits: AgentToolkit[];
 }): Promise<ToolAuthorizationRecord[]> {
   if (params.resolutions.length !== params.reviews.length) {
     throw new ReviewResponseResolutionError(
@@ -632,9 +688,8 @@ async function authorizeApprovedReviewAction(params: {
     const resolution = params.resolutions[index]!;
     const review = params.reviews[index]!;
     authorizations.push(...await buildRuntimeReviewAuthorizations({
-      reviewPayload: review.reviewPayload,
+      review,
       resolution,
-      toolkits: params.toolkits,
     }));
   }
   return authorizations;
@@ -779,7 +834,6 @@ async function prepareToolkitReviews(params: {
 
 async function resolveHumanToolkitReviews(params: {
   reviews: PreparedToolkitReview[];
-  toolkits: AgentToolkit[];
 }): Promise<ToolkitReviewResolution> {
   let reviewPayload = buildHumanReviewActionInterruptPayload(params.reviews);
   let resume = interrupt(reviewPayload);
@@ -822,7 +876,6 @@ async function resolveHumanToolkitReviews(params: {
       const authorizations = await authorizeApprovedReviewAction({
         reviews: params.reviews,
         resolutions,
-        toolkits: params.toolkits,
       });
       return {
         type: 'authorize',
@@ -845,7 +898,6 @@ async function resolveHumanToolkitReviews(params: {
 async function resolvePreparedToolkitReviews(params: {
   prepared: PreparedToolkitReviews;
   ctx: ToolkitReviewRuntimeContext;
-  toolkits: AgentToolkit[];
 }): Promise<ToolkitReviewResolution> {
   if (params.prepared.cancellation) {
     return {
@@ -878,10 +930,8 @@ async function resolvePreparedToolkitReviews(params: {
       reviews: params.prepared.reviews,
     });
     // AUTO_AUTHORIZED is already the user-facing event for this decision.
-    // Persist silently to avoid emitting a second authorization notice.
-    await recordToolAuthorizations(params.ctx, sessionAuthorizations, {
-      emitRecordedEvent: false,
-    });
+    // The chat adapter treats auto_review record diagnostics as non-visible.
+    await recordToolAuthorizations(params.ctx, sessionAuthorizations);
     await emitGlobalReviewAuthorizationEvent({
       ctx: params.ctx,
       resolution: policyResolution,
@@ -908,7 +958,6 @@ async function resolvePreparedToolkitReviews(params: {
 
   return resolveHumanToolkitReviews({
     reviews: params.prepared.reviews,
-    toolkits: params.toolkits,
   });
 }
 
@@ -951,7 +1000,6 @@ async function reviewToolkitToolCalls(params: {
   toolCalls: ToolCall[];
   bindingsByToolName: Map<string, ToolkitReviewBinding>;
   ctx: ToolkitReviewRuntimeContext;
-  toolkits: AgentToolkit[];
   approvedReviewIds: Set<string>;
 }): Promise<ToolkitReviewResults> {
   const prepared = await prepareToolkitReviews({
@@ -963,7 +1011,6 @@ async function reviewToolkitToolCalls(params: {
   const resolution = await resolvePreparedToolkitReviews({
     prepared,
     ctx: params.ctx,
-    toolkits: params.toolkits,
   });
 
   if (resolution.type === 'cancel') {
@@ -1032,7 +1079,6 @@ function buildToolkitReviewStateUpdate(params: {
 export function createToolkitReviewMiddleware(
   bindings: ToolkitReviewBinding[],
   ctx: ToolkitReviewRuntimeContext,
-  toolkits: AgentToolkit[],
 ): AnyAgentMiddleware | null {
   if (bindings.length === 0) {
     return null;
@@ -1058,7 +1104,6 @@ export function createToolkitReviewMiddleware(
           toolCalls: reviewedMessage.toolCalls,
           bindingsByToolName,
           ctx,
-          toolkits,
           approvedReviewIds,
         });
 

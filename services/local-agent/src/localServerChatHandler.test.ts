@@ -1126,8 +1126,6 @@ test('handleHumanReviewResponse forwards effect-bearing options without local au
         effects: [{
           type: 'graph.authorize_tool_action',
           scope: 'thread',
-          actionRef: { type: 'pending_action' },
-          matcher: { type: 'policy_hook' },
         }],
       }],
     },
@@ -1143,21 +1141,7 @@ test('handleHumanReviewResponse forwards effect-bearing options without local au
     },
     {
       actorId: 'pet-1',
-      localToolkits: [{
-        name: 'local',
-        description: 'local tools',
-        policy: {
-          toolReview: {
-            run_shell: {
-              request: () => null,
-              buildAuthorizationMatcher: (ctx: { input: unknown }) => ({
-                type: 'shell_pattern',
-                value: (ctx.input as { command: string }).command,
-              }),
-            },
-          },
-        },
-      }],
+      localToolkits: [],
     } as never,
   );
 

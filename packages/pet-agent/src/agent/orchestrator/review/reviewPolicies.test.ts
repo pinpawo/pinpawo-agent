@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type {
-  ToolAuthorizationMatcherContext,
+  ToolAuthorizationContext,
   ToolReviewContext,
 } from '../../../types/toolkit';
-import { authorizeToolAction } from './reviewAuthorizations';
-import { ReviewPolicies } from './reviewPolicies';
+import {
+  AuthorizationPolicies,
+  ReviewPolicies,
+} from './reviewPolicies';
 
 function reviewContext(overrides: Partial<ToolReviewContext> = {}): ToolReviewContext {
   return {
@@ -28,23 +30,14 @@ function reviewContext(overrides: Partial<ToolReviewContext> = {}): ToolReviewCo
   };
 }
 
-function matcherContext(overrides: Partial<ToolAuthorizationMatcherContext> = {}): ToolAuthorizationMatcherContext {
+function authorizationContext(
+  overrides: Partial<ToolAuthorizationContext> = {},
+): ToolAuthorizationContext {
   return {
     toolkitName: 'local',
     toolName: 'write_file',
     input: { path: 'notes.md', content: 'hello' },
     operation: reviewContext().operation,
-    pendingAction: {
-      actionId: 'call-1',
-      toolName: 'write_file',
-      args: { path: 'notes.md', content: 'hello' },
-    },
-    effect: {
-      type: 'graph.authorize_tool_action',
-      scope: 'thread',
-      actionRef: { type: 'pending_action' },
-      matcher: { type: 'policy_hook' },
-    },
     ...overrides,
   };
 }
@@ -65,68 +58,98 @@ test('localMutation builds ReviewSpec from operation metadata', async () => {
   );
 });
 
-test('presets can opt into exact args authorization', async () => {
-  const policy = ReviewPolicies.localMutation({ authorization: 'exact_args' });
-  const matcher = await policy.buildAuthorizationMatcher?.(matcherContext());
-  assert.deepEqual(matcher, {
-    type: 'exact_args',
-    value: { path: 'notes.md', content: 'hello' },
-  });
+test('presets can opt into exact authorization without retaining raw input', async () => {
+  const policy = ReviewPolicies.localMutation({ authorization: 'exact' });
+  const matcher = await policy.authorization?.buildMatcher(authorizationContext());
+  assert.equal(matcher?.type, 'exact');
+  assert.match(
+    matcher?.type === 'exact' ? matcher.key : '',
+    /^exact:v1:sha256:[a-f0-9]{64}$/,
+  );
+  assert.doesNotMatch(JSON.stringify(matcher), /notes\.md|hello/);
 
   const review = await policy.request(reviewContext({
-    toolAuthorizations: [authorizeToolAction({
-      toolName: 'write_file',
-      matcher: matcher!,
-      now: () => new Date('2026-06-15T00:00:00.000Z'),
-    })],
+    authorizationMatcher: matcher,
   }));
-
-  assert.equal(review, null);
+  assert.deepEqual(
+    review && 'schemaVersion' in review ? review.options.map((option) => option.id) : [],
+    ['approve', 'approve-and-authorize-thread', 'reject', 'respond'],
+  );
 });
 
-test('externalAccess can opt into URL domain authorization', async () => {
-  const policy = ReviewPolicies.externalAccess({ authorization: 'url_domain' });
-  const matcher = await policy.buildAuthorizationMatcher?.(matcherContext({
+test('exact authorization supports a tool-owned minimal subject', async () => {
+  const policy = ReviewPolicies.commandExecution({
+    authorization: AuthorizationPolicies.exact({
+      subject: ({ input }) => {
+        const command = input as {
+          command: string;
+          cwd: string;
+          timeoutSeconds?: number;
+        };
+        return {
+          command: command.command,
+          cwd: command.cwd,
+        };
+      },
+    }),
+  });
+  const first = await policy.authorization?.buildMatcher(authorizationContext({
+    toolName: 'run_shell',
+    input: { command: 'npm test', cwd: '/repo', timeoutSeconds: 60 },
+  }));
+  const changedTimeout = await policy.authorization?.buildMatcher(authorizationContext({
+    toolName: 'run_shell',
+    input: { command: 'npm test', cwd: '/repo', timeoutSeconds: 300 },
+  }));
+  const changedCwd = await policy.authorization?.buildMatcher(authorizationContext({
+    toolName: 'run_shell',
+    input: { command: 'npm test', cwd: '/other', timeoutSeconds: 60 },
+  }));
+
+  assert.deepEqual(first, changedTimeout);
+  assert.notDeepEqual(first, changedCwd);
+});
+
+test('externalAccess can opt into URL origin authorization', async () => {
+  const policy = ReviewPolicies.externalAccess({ authorization: 'url_origin' });
+  const matcher = await policy.authorization?.buildMatcher(authorizationContext({
     toolName: 'browser_open',
     input: { url: 'https://Example.test/a', headless: true },
-    pendingAction: {
-      actionId: 'call-1',
-      toolName: 'browser_open',
-      args: { url: 'https://Example.test/a', headless: true },
-    },
   }));
   assert.deepEqual(matcher, {
-    type: 'url_domain',
-    value: { origin: 'https://example.test' },
+    type: 'url_origin',
+    origin: 'https://example.test',
   });
 
   const review = await policy.request(reviewContext({
     toolName: 'browser_open',
     input: { url: 'https://example.test/b', headless: false },
-    toolAuthorizations: [authorizeToolAction({
-      toolName: 'browser_open',
-      matcher: matcher!,
-      now: () => new Date('2026-06-15T00:00:00.000Z'),
-    })],
+    authorizationMatcher: matcher,
   }));
-
-  assert.equal(review, null);
-});
-
-test('URL domain authorization option uses domain-specific description', async () => {
-  const policy = ReviewPolicies.externalAccess({ authorization: 'url_domain' });
-
-  const review = await policy.request(reviewContext({
-    toolName: 'browser_open',
-    input: { url: 'https://example.test/a', headless: true },
-  }));
-
   const authorizeOption = review && 'schemaVersion' in review
     ? review.options.find((option) => option.id === 'approve-and-authorize-thread')
     : null;
   assert.equal(
     authorizeOption?.description,
     'Approve this action and authorize the same URL domain in this thread.',
+  );
+});
+
+test('a null matcher does not expose approve-and-authorize', async () => {
+  const policy = ReviewPolicies.localMutation({
+    authorization: AuthorizationPolicies.exact({
+      subject: () => null,
+    }),
+  });
+  const matcher = await policy.authorization?.buildMatcher(authorizationContext());
+  const review = await policy.request(reviewContext({
+    authorizationMatcher: matcher,
+  }));
+
+  assert.equal(matcher, null);
+  assert.deepEqual(
+    review && 'schemaVersion' in review ? review.options.map((option) => option.id) : [],
+    ['approve', 'reject', 'respond'],
   );
 });
 
@@ -167,8 +190,5 @@ test('localMutation blocks when HITL is unavailable by default', async () => {
 
 test('never leaves tool calls unaffected', async () => {
   const policy = ReviewPolicies.never();
-
-  const review = await policy.request(reviewContext());
-
-  assert.equal(review, null);
+  assert.equal(await policy.request(reviewContext()), null);
 });

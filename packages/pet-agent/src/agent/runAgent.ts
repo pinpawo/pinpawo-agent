@@ -4,6 +4,7 @@ import type { AgentActor, AgentExecution } from '../types/agent';
 import {
   filterAvailableToolkits,
   type AgentToolkit,
+  type ToolkitReviewCapabilities,
 } from '../types/toolkit';
 import { compileAgentRegistry } from './orchestrator/registry';
 import type { CompiledAgentRegistry } from './orchestrator/registry';
@@ -53,6 +54,8 @@ export async function runAgent(
   options: {
     /** Host-precompiled registry. Reused as-is when the host owns run preparation. */
     registry?: CompiledAgentRegistry;
+    /** Host runtime capabilities; independent from whether a human UI exists. */
+    reviewCapabilities?: ToolkitReviewCapabilities;
   } = {},
 ): Promise<AgentRunResult> {
   const configurable: Record<string, unknown> = {};
@@ -66,6 +69,7 @@ export async function runAgent(
   if (input.workdir) configurable.workdir = input.workdir;
   if (input.runtimeEnvironment) configurable.runtimeEnvironment = input.runtimeEnvironment;
   if (input.globalReviewPolicy) configurable.globalReviewPolicy = input.globalReviewPolicy;
+  if (options.reviewCapabilities) configurable.reviewCapabilities = options.reviewCapabilities;
   if (input.allowedCapabilityNames) {
     configurable.allowedCapabilityNames = input.allowedCapabilityNames;
   }

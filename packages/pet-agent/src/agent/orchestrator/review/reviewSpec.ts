@@ -28,26 +28,10 @@ export type ReviewResolvedDecision =
   | { type: 'reject'; message?: string }
   | { type: 'respond'; message: string };
 
-export type ReviewActionRef =
-  | { type: 'pending_action' };
-
-export type ToolAuthorizationMatcherTemplate =
-  | { type: 'policy_hook' }
-  | { type: 'shell_pattern'; source: 'args.command' }
-  | { type: 'exact_args'; source: 'action.args' }
-  | { type: 'url_domain'; source: 'args.url' };
-
-export type ToolAuthorizationMatcher =
-  | { type: 'exact_args'; value: Record<string, unknown> }
-  | { type: 'shell_pattern'; value: string }
-  | { type: 'url_domain'; value: { origin: string } };
-
 export type ReviewEffect =
   | {
       type: 'graph.authorize_tool_action';
       scope: 'thread';
-      actionRef: ReviewActionRef;
-      matcher: ToolAuthorizationMatcherTemplate;
     };
 
 export type ReviewOption = {

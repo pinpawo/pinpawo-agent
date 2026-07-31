@@ -3,101 +3,147 @@ import test from 'node:test';
 import {
   applyReviewEffects,
   authorizeToolAction,
+  exactAuthorization,
   isToolActionAuthorized,
   mergeToolAuthorizations,
   readToolAuthorizationMatcher,
   ReviewEffectApplicationError,
+  urlOriginAuthorization,
 } from './review/reviewAuthorizations';
-import type { AgentToolkit, NamedStructuredTool } from '../../types/toolkit';
 
-const runShellTool = { name: 'run_shell' } as NamedStructuredTool<'run_shell'>;
+test('exactAuthorization recursively canonicalizes objects while preserving array order', () => {
+  const first = exactAuthorization({
+    argv: ['kubectl', 'get', 'pods'],
+    options: { namespace: 'production', output: 'json' },
+  });
+  const reordered = exactAuthorization({
+    options: { output: 'json', namespace: 'production' },
+    argv: ['kubectl', 'get', 'pods'],
+  });
+  const differentArgv = exactAuthorization({
+    argv: ['kubectl', 'get', 'services'],
+    options: { namespace: 'production', output: 'json' },
+  });
 
-test('applyReviewEffects builds policy-derived authorization records', async () => {
-  const toolkits: AgentToolkit[] = [{
-    name: 'local',
-    description: 'local tools',
-    tools: [{
-      tool: runShellTool,
-      review: {
-          request: () => null,
-          buildAuthorizationMatcher: ({ input }) => ({
-            type: 'shell_pattern',
-            value: (input as { command: string }).command,
-          }),
-      },
-    }],
-  }];
+  assert.deepEqual(first, reordered);
+  assert.notDeepEqual(first, differentArgv);
+  assert.equal(first.type, 'exact');
+  assert.match(first.type === 'exact' ? first.key : '', /^exact:v1:sha256:[a-f0-9]{64}$/);
+});
 
+test('exactAuthorization rejects non-JSON and circular subjects', () => {
+  assert.throws(
+    () => exactAuthorization({ timeout: Number.POSITIVE_INFINITY }),
+    /non-finite numbers/,
+  );
+  assert.throws(
+    () => exactAuthorization({ createdAt: new Date() }),
+    /only JSON values/,
+  );
+  const circular: Record<string, unknown> = {};
+  circular.self = circular;
+  assert.throws(
+    () => exactAuthorization(circular),
+    /circular references/,
+  );
+});
+
+test('applyReviewEffects stores the prepared matcher as a human grant', async () => {
+  const matcher = exactAuthorization({
+    argv: ['git', 'status'],
+    cwd: '/repo',
+  });
   const applied = await applyReviewEffects({
-    pendingAction: {
-      actionId: 'pending_action',
-      toolName: 'run_shell',
-      args: { command: 'git status', cwd: '/repo' },
-    },
+    toolName: 'run_process',
+    matcher,
     effects: [{
       type: 'graph.authorize_tool_action',
       scope: 'thread',
-      actionRef: { type: 'pending_action' },
-      matcher: { type: 'policy_hook' },
     }],
-    toolkits,
     now: () => new Date('2026-06-09T00:00:00.000Z'),
   });
 
   assert.deepEqual(applied, [{
-    toolName: 'run_shell',
-    matcher: { type: 'shell_pattern', value: 'git status' },
+    toolName: 'run_process',
+    matcher,
     createdAt: '2026-06-09T00:00:00.000Z',
     source: 'human',
   }]);
+});
+
+test('readToolAuthorizationMatcher accepts only converged matcher structures', () => {
+  const exact = exactAuthorization({ path: 'README.md' });
+  assert.deepEqual(readToolAuthorizationMatcher(exact), exact);
+  assert.deepEqual(
+    readToolAuthorizationMatcher({
+      type: 'url_origin',
+      origin: 'HTTPS://Example.test:443/a',
+    }),
+    { type: 'url_origin', origin: 'https://example.test' },
+  );
+  assert.equal(
+    readToolAuthorizationMatcher({ type: 'exact_args', value: { path: 'README.md' } }),
+    null,
+  );
+  assert.equal(
+    readToolAuthorizationMatcher({ type: 'shell_pattern', value: 'git *' }),
+    null,
+  );
+  assert.equal(
+    readToolAuthorizationMatcher({ type: 'url_domain', value: { origin: 'https://example.test' } }),
+    null,
+  );
+  assert.equal(readToolAuthorizationMatcher({ type: 'exact', key: 'invalid' }), null);
+});
+
+test('authorization matching compares tool name and candidate matcher only', () => {
+  const matcher = exactAuthorization({ argv: ['npm', 'test'], cwd: '/repo' });
+  const authorizations = [authorizeToolAction({
+    toolName: 'run_process',
+    matcher,
+    source: 'human',
+  })];
+
   assert.equal(
     isToolActionAuthorized({
-      authorizations: applied,
-      toolName: 'run_shell',
-      args: { command: 'git   status', cwd: '/repo' },
+      authorizations,
+      toolName: 'run_process',
+      candidateMatcher: exactAuthorization({ cwd: '/repo', argv: ['npm', 'test'] }),
     }),
     true,
   );
   assert.equal(
     isToolActionAuthorized({
-      authorizations: applied,
-      toolName: 'run_shell',
-      args: { command: 'git push', cwd: '/repo' },
+      authorizations,
+      toolName: 'run_process',
+      candidateMatcher: exactAuthorization({ argv: ['npm', 'build'], cwd: '/repo' }),
+    }),
+    false,
+  );
+  assert.equal(
+    isToolActionAuthorized({
+      authorizations,
+      toolName: 'other_process_tool',
+      candidateMatcher: matcher,
     }),
     false,
   );
 });
 
-test('readToolAuthorizationMatcher accepts only declared matcher structures', () => {
-  assert.deepEqual(
-    readToolAuthorizationMatcher({ type: 'shell_pattern', value: ' git   status ' }),
-    { type: 'shell_pattern', value: 'git status' },
-  );
-  assert.deepEqual(
-    readToolAuthorizationMatcher({ type: 'exact_args', value: { path: 'README.md' } }),
-    { type: 'exact_args', value: { path: 'README.md' } },
-  );
-  assert.deepEqual(
-    readToolAuthorizationMatcher({ type: 'url_domain', value: { origin: 'HTTPS://Example.test:443/a' } }),
-    { type: 'url_domain', value: { origin: 'https://example.test' } },
-  );
-  assert.equal(readToolAuthorizationMatcher({ type: 'shell_pattern', value: '   ' }), null);
-  assert.equal(readToolAuthorizationMatcher({ type: 'path_glob', value: '*.ts' }), null);
-  assert.equal(readToolAuthorizationMatcher({ type: 'exact_args', value: ['README.md'] }), null);
-  assert.equal(readToolAuthorizationMatcher({ type: 'url_domain', value: { origin: 'not a url' } }), null);
-});
-
-test('url domain authorizations match the same URL origin only', () => {
+test('URL origin grants compare normalized origins', () => {
+  const matcher = urlOriginAuthorization('https://Example.test/a');
+  assert.ok(matcher);
   const authorizations = [authorizeToolAction({
     toolName: 'browser_open',
-    matcher: { type: 'url_domain', value: { origin: 'https://example.test' } },
+    matcher,
+    source: 'human',
   })];
 
   assert.equal(
     isToolActionAuthorized({
       authorizations,
       toolName: 'browser_open',
-      args: { url: 'https://example.test/a', headless: true },
+      candidateMatcher: urlOriginAuthorization('https://example.test/b')!,
     }),
     true,
   );
@@ -105,146 +151,92 @@ test('url domain authorizations match the same URL origin only', () => {
     isToolActionAuthorized({
       authorizations,
       toolName: 'browser_open',
-      args: { url: 'https://example.test/b', headless: false },
-    }),
-    true,
-  );
-  assert.equal(
-    isToolActionAuthorized({
-      authorizations,
-      toolName: 'browser_open',
-      args: { url: 'http://example.test/a', headless: true },
-    }),
-    false,
-  );
-  assert.equal(
-    isToolActionAuthorized({
-      authorizations,
-      toolName: 'browser_open_with_session',
-      args: { url: 'https://example.test/a', session: 'work' },
+      candidateMatcher: urlOriginAuthorization('http://example.test/a')!,
     }),
     false,
   );
 });
 
-test('applyReviewEffects rejects policy hooks that return undeclared matcher structures', async () => {
-  const toolkits: AgentToolkit[] = [{
-    name: 'local',
-    description: 'local tools',
-    tools: [{
-      tool: runShellTool,
-      review: {
-          request: () => null,
-          buildAuthorizationMatcher: () => ({ type: 'path_glob', value: '*.ts' }) as never,
-      },
-    }],
-  }];
-
+test('applyReviewEffects rejects authorization without a prepared matcher', async () => {
   await assert.rejects(
     () => applyReviewEffects({
-      pendingAction: {
-        actionId: 'pending_action',
-        toolName: 'run_shell',
-        args: { command: 'git status' },
-      },
+      toolName: 'run_process',
+      matcher: null,
       effects: [{
         type: 'graph.authorize_tool_action',
         scope: 'thread',
-        actionRef: { type: 'pending_action' },
-        matcher: { type: 'policy_hook' },
       }],
-      toolkits,
     }),
     (error) => error instanceof ReviewEffectApplicationError
-      && error.code === 'invalid_matcher',
+      && error.code === 'missing_policy_matcher',
   );
 });
 
 test('authorizeToolAction validates matcher shape before storing state', () => {
   assert.throws(
     () => authorizeToolAction({
-      toolName: 'run_shell',
-      matcher: { type: 'shell_pattern', value: '   ' },
+      toolName: 'run_process',
+      matcher: { type: 'exact', key: 'invalid' },
+      source: 'human',
     }),
     (error) => error instanceof ReviewEffectApplicationError
       && error.code === 'invalid_matcher',
   );
-  assert.equal(
-    isToolActionAuthorized({
-      authorizations: [],
-      toolName: 'run_shell',
-      args: { command: 'git status' },
-    }),
-    false,
-  );
 });
 
-test('mergeToolAuthorizations appends unique records and dedupes matcher keys', () => {
+test('mergeToolAuthorizations dedupes records and upgrades auto grants to human', () => {
+  const firstMatcher = exactAuthorization({ argv: ['npm', 'test'], cwd: '/repo' });
+  const secondMatcher = exactAuthorization({ argv: ['npm', 'run', 'build'], cwd: '/repo' });
   const merged = mergeToolAuthorizations(
     [{
-      toolName: 'run_shell',
-      matcher: { type: 'shell_pattern', value: ' git   status ' },
-      createdAt: '2026-06-09T00:00:00.000Z',
+      toolName: 'run_process',
+      matcher: firstMatcher,
+      createdAt: '2026-07-29T00:00:00.000Z',
+      source: 'auto_review',
     }],
     [
       {
-        toolName: 'run_shell',
-        matcher: { type: 'shell_pattern', value: 'git status' },
-        createdAt: '2026-06-09T00:00:01.000Z',
+        toolName: 'run_process',
+        matcher: firstMatcher,
+        createdAt: '2026-07-29T00:01:00.000Z',
+        source: 'human',
       },
       {
-        toolName: 'run_shell',
-        matcher: { type: 'shell_pattern', value: 'git push' },
-        createdAt: '2026-06-09T00:00:02.000Z',
-      },
-      {
-        toolName: 'read_file',
-        matcher: { type: 'exact_args', value: { path: 'README.md' } },
-        createdAt: '2026-06-09T00:00:03.000Z',
+        toolName: 'run_process',
+        matcher: secondMatcher,
+        createdAt: '2026-07-29T00:02:00.000Z',
+        source: 'auto_review',
       },
     ],
   );
 
   assert.deepEqual(merged, [
     {
-      toolName: 'run_shell',
-      matcher: { type: 'shell_pattern', value: 'git status' },
-      createdAt: '2026-06-09T00:00:00.000Z',
+      toolName: 'run_process',
+      matcher: firstMatcher,
+      createdAt: '2026-07-29T00:01:00.000Z',
+      source: 'human',
     },
     {
-      toolName: 'run_shell',
-      matcher: { type: 'shell_pattern', value: 'git push' },
-      createdAt: '2026-06-09T00:00:02.000Z',
-    },
-    {
-      toolName: 'read_file',
-      matcher: { type: 'exact_args', value: { path: 'README.md' } },
-      createdAt: '2026-06-09T00:00:03.000Z',
+      toolName: 'run_process',
+      matcher: secondMatcher,
+      createdAt: '2026-07-29T00:02:00.000Z',
+      source: 'auto_review',
     },
   ]);
 });
 
-test('mergeToolAuthorizations upgrades an auto-review grant to a human grant', () => {
-  const matcher = { type: 'exact_args' as const, value: { command: 'npm test' } };
-  const merged = mergeToolAuthorizations(
-    [{
-      toolName: 'run_shell',
-      matcher,
-      createdAt: '2026-07-29T00:00:00.000Z',
-      source: 'auto_review',
-    }],
-    [{
-      toolName: 'run_shell',
-      matcher,
-      createdAt: '2026-07-29T00:01:00.000Z',
-      source: 'human',
-    }],
-  );
-
-  assert.deepEqual(merged, [{
+test('mergeToolAuthorizations ignores legacy records', () => {
+  const legacy = {
     toolName: 'run_shell',
-    matcher,
-    createdAt: '2026-07-29T00:01:00.000Z',
+    matcher: { type: 'exact_args', value: { command: 'npm test' } },
+    createdAt: '2026-07-29T00:00:00.000Z',
+  } as never;
+
+  assert.deepEqual(mergeToolAuthorizations([legacy], []), []);
+  assert.deepEqual(mergeToolAuthorizations([{
+    toolName: 'run_shell',
+    matcher: exactAuthorization({ command: 'npm test' }),
     source: 'human',
-  }]);
+  } as never], []), []);
 });

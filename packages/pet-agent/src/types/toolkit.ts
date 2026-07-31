@@ -2,13 +2,8 @@ import {
   isStructuredTool,
   type StructuredTool,
 } from '@langchain/core/tools';
-import type {
-  PendingReviewAction,
-  ReviewEffect,
-  ReviewSpec,
-  ToolAuthorizationMatcher,
-} from '../agent/orchestrator/review/reviewSpec';
-import type { ToolAuthorizationRecord } from '../agent/orchestrator/review/reviewAuthorizations';
+import type { ReviewSpec } from '../agent/orchestrator/review/reviewSpec';
+import type { ToolAuthorizationMatcher } from '../agent/orchestrator/review/authorizationMatchers';
 
 export type ToolkitReviewCapabilities = {
   humanReview: boolean;
@@ -35,16 +30,20 @@ export type ToolReviewContext = {
   input: unknown;
   operation?: ToolOperationMetadata;
   reviewCapabilities?: ToolkitReviewCapabilities;
-  toolAuthorizations?: ToolAuthorizationRecord[];
+  authorizationMatcher?: ToolAuthorizationMatcher | null;
 };
 
-export type ToolAuthorizationMatcherContext = {
+export type ToolAuthorizationContext = {
   toolkitName: string;
   toolName: string;
   input: unknown;
   operation?: ToolOperationMetadata;
-  pendingAction: PendingReviewAction;
-  effect: Extract<ReviewEffect, { type: 'graph.authorize_tool_action' }>;
+};
+
+export type ToolAuthorizationPolicy = {
+  buildMatcher: (
+    ctx: ToolAuthorizationContext,
+  ) => ToolAuthorizationMatcher | null | Promise<ToolAuthorizationMatcher | null>;
 };
 
 export type ToolReviewBlock = {
@@ -64,9 +63,7 @@ export type ToolReviewPolicy = {
   request: (
     ctx: ToolReviewContext,
   ) => ToolReviewResult | Promise<ToolReviewResult>;
-  buildAuthorizationMatcher?: (
-    ctx: ToolAuthorizationMatcherContext,
-  ) => ToolAuthorizationMatcher | null | Promise<ToolAuthorizationMatcher | null>;
+  authorization?: ToolAuthorizationPolicy;
 };
 
 export type ToolkitReviewGuidance = {
@@ -274,10 +271,19 @@ export function validateToolkitDefinition(toolkit: AgentToolkit) {
       );
     }
     if (definition.review) {
-      assertOptionalFunction(
-        `Toolkit "${toolkit.name}" tool "${toolName}" review.buildAuthorizationMatcher`,
-        definition.review.buildAuthorizationMatcher,
-      );
+      const authorization = definition.review.authorization;
+      if (
+        authorization !== undefined
+        && (
+          typeof authorization !== 'object'
+          || Array.isArray(authorization)
+          || typeof authorization.buildMatcher !== 'function'
+        )
+      ) {
+        throw new Error(
+          `Toolkit "${toolkit.name}" tool "${toolName}" review.authorization must define buildMatcher()`,
+        );
+      }
     }
     toolNames.add(toolName);
   }

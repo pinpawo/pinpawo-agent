@@ -34,8 +34,8 @@ import { Command } from '@langchain/langgraph';
 import {
   applyReviewEffects,
   buildReviewSpec,
+  exactAuthorization,
   isToolActionAuthorized,
-  type AgentToolkit,
   type ToolAuthorizationRecord,
 } from '@pinpawo/pet-agent';
 import { runChatSession } from '../src/chatSessionAdapter';
@@ -57,7 +57,7 @@ type ExampleInputs = {
 type ExampleOutputs = {
   expected_interrupt_received: boolean;
   expected_authorization_option_present: boolean;
-  expected_resume_authorized_pattern?: string | null;
+  expected_resume_authorized_matcher_type?: 'exact' | null;
   expected_final_status: 'completed' | 'waiting_human' | 'interrupted';
   expected_final_reply?: string;
   expected_authorization_recorded?: boolean;
@@ -80,7 +80,7 @@ const examples: Array<{
     outputs: {
       expected_interrupt_received: true,
       expected_authorization_option_present: true,
-      expected_resume_authorized_pattern: 'git status',
+      expected_resume_authorized_matcher_type: 'exact',
       expected_final_status: 'completed',
       expected_final_reply: '已执行 git status。',
       expected_authorization_recorded: true,
@@ -98,7 +98,7 @@ const examples: Array<{
     outputs: {
       expected_interrupt_received: true,
       expected_authorization_option_present: true,
-      expected_resume_authorized_pattern: null,
+      expected_resume_authorized_matcher_type: null,
       expected_final_status: 'completed',
       expected_final_reply: '已执行 git status。',
       expected_authorization_recorded: false,
@@ -116,7 +116,7 @@ const examples: Array<{
     outputs: {
       expected_interrupt_received: true,
       expected_authorization_option_present: true,
-      expected_resume_authorized_pattern: null,
+      expected_resume_authorized_matcher_type: null,
       expected_final_status: 'completed',
       expected_final_reply: '已拒绝执行。',
       expected_authorization_recorded: false,
@@ -142,22 +142,6 @@ const examples: Array<{
 const FAKE_THREAD_ID = 'eval-thread';
 const FAKE_REQUEST_ID = 'eval-req';
 const FAKE_REVIEW_ID = 'review-shell-action';
-const FAKE_TOOLKITS: AgentToolkit[] = [{
-  name: 'local',
-  description: 'local tools',
-  policy: {
-    toolReview: {
-      run_shell: {
-        request: () => null,
-        buildAuthorizationMatcher: ({ input }) => ({
-          type: 'shell_pattern',
-          value: (input as { command: string }).command,
-        }),
-      },
-    },
-  },
-}];
-
 function buildShellReviewInterrupt(command: string) {
   return {
     kind: 'review',
@@ -182,8 +166,6 @@ function buildShellReviewInterrupt(command: string) {
           effects: [{
             type: 'graph.authorize_tool_action',
             scope: 'thread',
-            actionRef: { type: 'pending_action' },
-            matcher: { type: 'policy_hook' },
           }],
         },
         {
@@ -314,7 +296,6 @@ function buildFakeSetup() {
       messages: [new HumanMessage('start')],
       actor: { petId: 'eval-pet', userId: 'eval-user' },
       threadId: FAKE_THREAD_ID,
-      toolkits: FAKE_TOOLKITS,
     },
     interfaceContext: { kind: 'tui' as const },
   } as unknown as Parameters<typeof runChatSession>[0]['setup'];
@@ -354,7 +335,7 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
         ),
       ),
       interrupt_received: firstTurn.status === 'waiting_human',
-      authorized_pattern: null,
+      authorized_matcher_type: null,
       authorization_recorded: false,
       final_reply: '',
       final_status: firstTurn.status,
@@ -372,20 +353,18 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
       option.effects?.some((effect) => effect.type === 'graph.authorize_tool_action'),
     ),
   );
-  let authorizedPattern: string | null = null;
+  let authorizedMatcherType: 'exact' | null = null;
   let appliedAuthorizations: ToolAuthorizationRecord[] = [];
   if (selectedOption?.effects?.length) {
-    appliedAuthorizations = await applyReviewEffects({
-      pendingAction: {
-        actionId: 'pending_action',
-        toolName: 'run_shell',
-        args: { command: inputs.pending_shell_command },
-      },
-      effects: selectedOption.effects,
-      toolkits: FAKE_TOOLKITS,
+    const matcher = exactAuthorization({
+      command: inputs.pending_shell_command,
     });
-    const matcher = appliedAuthorizations[0]?.matcher;
-    authorizedPattern = matcher?.type === 'shell_pattern' ? matcher.value : null;
+    appliedAuthorizations = await applyReviewEffects({
+      toolName: 'run_shell',
+      matcher,
+      effects: selectedOption.effects,
+    });
+    authorizedMatcherType = appliedAuthorizations[0]?.matcher.type ?? null;
   }
 
   const secondTurnEvents: AgentRuntimeEvent[] = [];
@@ -411,11 +390,13 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
     first_turn_status: firstTurn.status,
     interrupt_received: firstTurn.status === 'waiting_human',
     authorization_option_present: authorizationOptionPresent,
-    authorized_pattern: authorizedPattern,
+    authorized_matcher_type: authorizedMatcherType,
     authorization_recorded: isToolActionAuthorized({
       authorizations: appliedAuthorizations,
       toolName: 'run_shell',
-      args: { command: inputs.pending_shell_command },
+      candidateMatcher: exactAuthorization({
+        command: inputs.pending_shell_command,
+      }),
     }),
     final_reply: finalReplyEvent?.text ?? '',
     final_status: secondTurn.status,
@@ -482,7 +463,11 @@ async function main() {
       booleanCorrectness('interrupt_received', 'expected_interrupt_received', 'interrupt_received_correct'),
       booleanCorrectness('authorization_option_present', 'expected_authorization_option_present', 'authorization_option_correct'),
       booleanCorrectness('authorization_recorded', 'expected_authorization_recorded', 'authorization_recorded_correct'),
-      equalsCorrectness('authorized_pattern', 'expected_resume_authorized_pattern', 'authorized_pattern_correct'),
+      equalsCorrectness(
+        'authorized_matcher_type',
+        'expected_resume_authorized_matcher_type',
+        'authorized_matcher_type_correct',
+      ),
       equalsCorrectness('final_status', 'expected_final_status', 'final_status_correct'),
       equalsCorrectness('final_reply', 'expected_final_reply', 'final_reply_correct'),
     ],
@@ -493,7 +478,7 @@ async function main() {
     'interrupt_received_correct',
     'authorization_option_correct',
     'authorization_recorded_correct',
-    'authorized_pattern_correct',
+    'authorized_matcher_type_correct',
     'final_status_correct',
     'final_reply_correct',
   ];

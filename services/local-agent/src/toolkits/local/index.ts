@@ -3,6 +3,7 @@ import {
   ARTIFACT_DISCOVERY_LIST_TOOL_NAME,
   ARTIFACT_DISCOVERY_READ_TOOL_NAME,
   ARTIFACT_DISCOVERY_TOOLKIT_NAME,
+  AuthorizationPolicies,
   defineToolkit,
   ReviewPolicies,
   type AgentToolkit,
@@ -29,7 +30,12 @@ import { createArtifactDiscoveryTools } from './artifactDiscoveryTools';
 import { downloadFileTool, httpFetchTool, networkOperationMetadata } from './networkTools';
 import { gitTools, gitOperationMetadata } from './gitTools';
 import { globSearchTool, grepSearchTool, searchOperationMetadata } from './searchTools';
-import { getCurrentTimeTool, runShellTool, shellOperationMetadata } from './shellTools';
+import {
+  getCurrentTimeTool,
+  normalizeShellActionInput,
+  runShellTool,
+  shellOperationMetadata,
+} from './shellTools';
 
 const localUtilityTools: StructuredTool[] = [
   readFileTool,
@@ -123,14 +129,18 @@ const gitToolkitInstructions = [
 
 export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): AgentToolkit {
   const reviews = {
-    write_file: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
-    apply_patch: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
-    move_path: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
-    copy_path: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
-    mkdir_path: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
-    http_fetch: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
-    download_file: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
-    run_shell: ReviewPolicies.commandExecution({ authorization: 'exact_args' }),
+    write_file: ReviewPolicies.localMutation({ authorization: 'exact' }),
+    apply_patch: ReviewPolicies.localMutation({ authorization: 'exact' }),
+    move_path: ReviewPolicies.localMutation({ authorization: 'exact' }),
+    copy_path: ReviewPolicies.localMutation({ authorization: 'exact' }),
+    mkdir_path: ReviewPolicies.localMutation({ authorization: 'exact' }),
+    http_fetch: ReviewPolicies.externalAccess({ authorization: 'exact' }),
+    download_file: ReviewPolicies.externalAccess({ authorization: 'exact' }),
+    run_shell: ReviewPolicies.commandExecution({
+      authorization: AuthorizationPolicies.exact({
+        subject: ({ input }) => normalizeShellActionInput(input),
+      }),
+    }),
   };
   return defineToolkit({
     name: 'bash',
@@ -146,11 +156,11 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
 
 export function createGitToolkit(): AgentToolkit {
   const reviews = {
-    git_add: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
-    git_commit: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
-    git_push: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
-    gh_pr_create: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
-    gh_issue_create: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
+    git_add: ReviewPolicies.localMutation({ authorization: 'exact' }),
+    git_commit: ReviewPolicies.localMutation({ authorization: 'exact' }),
+    git_push: ReviewPolicies.externalAccess({ authorization: 'exact' }),
+    gh_pr_create: ReviewPolicies.externalAccess({ authorization: 'exact' }),
+    gh_issue_create: ReviewPolicies.externalAccess({ authorization: 'exact' }),
   };
   return defineToolkit({
     name: 'git',

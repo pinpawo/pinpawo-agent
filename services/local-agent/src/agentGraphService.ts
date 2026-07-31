@@ -17,10 +17,16 @@ import { LOCAL_AGENT_INTERFACE_CONFIG_KEY } from './chatInterface';
 
 const HEADLESS_REVIEW_CAPABILITIES = {
   humanReview: false,
-  sessionAuthorization: false,
+  sessionAuthorization: true,
 };
 
-function buildConfigurable(setup: AgentChannelSetup) {
+function resolveReviewCapabilities(setup: AgentChannelSetup) {
+  return setup.interfaceContext?.kind
+    ? setup.interfaceContext.capabilities
+    : HEADLESS_REVIEW_CAPABILITIES;
+}
+
+export function buildAgentGraphConfigurable(setup: AgentChannelSetup) {
   const configurable: Record<string, unknown> = {};
   configurable.registry = setup.registry;
   configurable.actor = setup.input.actor;
@@ -31,10 +37,8 @@ function buildConfigurable(setup: AgentChannelSetup) {
   if (setup.input.globalReviewPolicy) configurable.globalReviewPolicy = setup.input.globalReviewPolicy;
   if (setup.interfaceContext?.kind) {
     configurable[LOCAL_AGENT_INTERFACE_CONFIG_KEY] = setup.interfaceContext;
-    configurable.reviewCapabilities = setup.interfaceContext.capabilities;
-  } else {
-    configurable.reviewCapabilities = HEADLESS_REVIEW_CAPABILITIES;
   }
+  configurable.reviewCapabilities = resolveReviewCapabilities(setup);
   return Object.keys(configurable).length > 0 ? configurable : undefined;
 }
 
@@ -138,6 +142,7 @@ export class LocalAgentGraphService {
   async run(setup: AgentChannelSetup): Promise<AgentRunResult> {
     return runAgent(this.getGraph(setup), setup.input, {
       registry: setup.registry,
+      reviewCapabilities: resolveReviewCapabilities(setup),
     });
   }
 
@@ -160,7 +165,7 @@ export class LocalAgentGraphService {
       {
         version: 'v3',
         signal: setup.input.signal,
-        configurable: buildConfigurable(setup),
+        configurable: buildAgentGraphConfigurable(setup),
         recursionLimit: ORCHESTRATOR_RECURSION_LIMIT,
       },
     ) as LocalAgentGraphEventStream;
@@ -174,7 +179,7 @@ export class LocalAgentGraphService {
       }),
       {
         signal: setup.input.signal,
-        configurable: buildConfigurable(setup),
+        configurable: buildAgentGraphConfigurable(setup),
         recursionLimit: ORCHESTRATOR_RECURSION_LIMIT,
       },
     ) as OrchestratorStateType;
@@ -183,7 +188,7 @@ export class LocalAgentGraphService {
   private async getRawState(setup: AgentChannelSetup) {
     const graph = this.getGraph(setup);
     return graph.getState({
-      configurable: buildConfigurable(setup),
+      configurable: buildAgentGraphConfigurable(setup),
     });
   }
 
@@ -204,7 +209,7 @@ export class LocalAgentGraphService {
     const graph = this.getGraph(setup);
     return graph.updateState(
       {
-        configurable: buildConfigurable(setup),
+        configurable: buildAgentGraphConfigurable(setup),
       },
       values,
       asNode,

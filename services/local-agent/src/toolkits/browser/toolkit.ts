@@ -99,9 +99,9 @@ export async function checkBrowserAvailability() {
 
 export function createBrowserToolkit(): AgentToolkit {
   const reviews: Record<string, ToolReviewPolicy> = {
-    browser_open: ReviewPolicies.externalAccess({ authorization: 'url_domain' }),
-    browser_open_with_session: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
-    browser_open_with_profile: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
+    browser_open: ReviewPolicies.externalAccess({ authorization: 'url_origin' }),
+    browser_open_with_session: ReviewPolicies.externalAccess({ authorization: 'exact' }),
+    browser_open_with_profile: ReviewPolicies.externalAccess({ authorization: 'exact' }),
   };
   return defineToolkit({
     name: BROWSER_TOOLKIT_NAME,

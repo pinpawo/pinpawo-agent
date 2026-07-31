@@ -64,8 +64,14 @@ const orchestratorStateChannels = {
     default: () => '',
   }),
   sessionToolAuthorizations: Annotation<ToolAuthorizationRecord[]>({
-    reducer: (prev, next) => mergeToolAuthorizations(prev, next),
+    // Capability nodes return the complete generation-scoped snapshot. A
+    // replacement reducer allows a new registry generation to clear old grants.
+    reducer: (_prev, next) => mergeToolAuthorizations([], next),
     default: () => [],
+  }),
+  sessionToolAuthorizationRegistryGeneration: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => '',
   }),
 };
 

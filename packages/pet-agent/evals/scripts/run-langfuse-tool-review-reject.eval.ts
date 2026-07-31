@@ -308,7 +308,7 @@ async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> 
   const finalState = await resumedRun.output as {
     __interrupt__?: unknown;
     messages?: BaseMessage[];
-    sessionToolAuthorizations?: unknown[];
+    sessionToolAuthorizations?: { records?: unknown[] };
   };
   const messages = Array.isArray(finalState.messages)
     ? finalState.messages
@@ -327,7 +327,7 @@ async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> 
     rejectedToolResultSeenBySubagent,
     handoffPresent: Boolean(handoffText),
     handoffText,
-    authorizationCount: finalState.sessionToolAuthorizations?.length ?? 0,
+    authorizationCount: finalState.sessionToolAuthorizations?.records?.length ?? 0,
     finalReply: readLastText(messages),
   };
 }

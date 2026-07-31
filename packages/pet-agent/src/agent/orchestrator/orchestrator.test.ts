@@ -2942,11 +2942,17 @@ test('exact auto authorization survives graph rebuild but expires on registry re
   const firstState = await firstGraph.invoke(
     buildOrchestratorRunInput([new HumanMessage('inspect repository status')]),
     invokeConfig,
-  ) as { sessionToolAuthorizations: ToolAuthorizationRecord[] };
+  ) as {
+    sessionToolAuthorizations: {
+      generation: string;
+      records: ToolAuthorizationRecord[];
+    };
+  };
   assert.equal(runCount, 1);
   assert.equal(autoReviewCount, 1);
   assert.deepEqual(
-    firstState.sessionToolAuthorizations.map(({ createdAt: _createdAt, ...record }) => record),
+    firstState.sessionToolAuthorizations.records
+      .map(({ createdAt: _createdAt, ...record }) => record),
     [{
       toolName: 'run_shell',
       matcher: exactAuthorization({ command: 'git status --short' }),
@@ -2954,16 +2960,21 @@ test('exact auto authorization survives graph rebuild but expires on registry re
     }],
   );
   assert.doesNotMatch(JSON.stringify(firstState.sessionToolAuthorizations), /git status --short/);
+  assert.match(firstState.sessionToolAuthorizations.generation, /^[a-f0-9]{64}$/);
 
   const rebuiltGraph = createOrchestratorGraph(graphConfig);
   const secondState = await rebuiltGraph.invoke(
     buildOrchestratorRunInput([new HumanMessage('inspect repository status again')]),
     invokeConfig,
-  ) as { sessionToolAuthorizations: ToolAuthorizationRecord[] };
+  ) as typeof firstState;
 
   assert.equal(runCount, 2);
   assert.equal(autoReviewCount, 1);
-  assert.equal(secondState.sessionToolAuthorizations.length, 1);
+  assert.equal(secondState.sessionToolAuthorizations.records.length, 1);
+  assert.equal(
+    secondState.sessionToolAuthorizations.generation,
+    firstState.sessionToolAuthorizations.generation,
+  );
 
   const reloadedToolkits: AgentToolkit[] = [{
     name: 'bash',
@@ -2986,11 +2997,15 @@ test('exact auto authorization survives graph rebuild but expires on registry re
   const reloadedState = await rebuiltGraph.invoke(
     buildOrchestratorRunInput([new HumanMessage('inspect after plugin reload')]),
     reloadedConfig,
-  ) as { sessionToolAuthorizations: ToolAuthorizationRecord[] };
+  ) as typeof firstState;
 
   assert.equal(runCount, 3);
   assert.equal(autoReviewCount, 2);
-  assert.equal(reloadedState.sessionToolAuthorizations.length, 1);
+  assert.equal(reloadedState.sessionToolAuthorizations.records.length, 1);
+  assert.notEqual(
+    reloadedState.sessionToolAuthorizations.generation,
+    firstState.sessionToolAuthorizations.generation,
+  );
 
   await rebuiltGraph.invoke(
     buildOrchestratorRunInput([new HumanMessage('inspect from a new session')]),
@@ -3573,15 +3588,22 @@ test('toolkit review policy records authorization through orchestrator runtime t
   }
   const finalState = await resumedRun.output as {
     __interrupt__?: unknown;
-    sessionToolAuthorizations: Array<{ toolName: string; matcher: unknown; createdAt: string }>;
+    sessionToolAuthorizations: {
+      generation: string;
+      records: Array<{ toolName: string; matcher: unknown; createdAt: string }>;
+    };
   };
 
   assert.equal(finalState.__interrupt__, undefined);
-  assert.deepEqual(finalState.sessionToolAuthorizations.map(({ createdAt: _createdAt, ...item }) => item), [{
-    toolName: 'run_shell',
-    matcher: exactAuthorization({ command: 'git status' }),
-    source: 'human',
-  }]);
+  assert.deepEqual(
+    finalState.sessionToolAuthorizations.records
+      .map(({ createdAt: _createdAt, ...item }) => item),
+    [{
+      toolName: 'run_shell',
+      matcher: exactAuthorization({ command: 'git status' }),
+      source: 'human',
+    }],
+  );
   const authorizationEvents = runtimeEvents.filter((event) =>
     event
     && typeof event === 'object'

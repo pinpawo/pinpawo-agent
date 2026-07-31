@@ -64,37 +64,19 @@ function functionSource(value: unknown): string | null {
 }
 
 function computeAuthorizationGeneration(toolkits: readonly AgentToolkit[]) {
-  const subject = toolkits.map((toolkit) => ({
-    name: toolkit.name,
-    description: toolkit.description,
-    tools: toolkit.tools.map((definition) => {
-      const executable = definition.tool as StructuredTool & {
-        func?: unknown;
-      };
+  const subject = toolkits.flatMap((toolkit) => {
+    const tools = toolkit.tools.flatMap((definition) => {
       const authorization = definition.review?.authorization;
-      return {
-        name: definition.tool.name,
-        description: definition.tool.description,
-        implementation: functionSource(executable.func)
-          ?? functionSource(definition.tool.invoke),
-        operation: definition.operation
-          ? {
-              title: definition.operation.title ?? null,
-              titleKey: definition.operation.titleKey ?? null,
-            }
-          : null,
-        review: definition.review
-          ? {
-              request: functionSource(definition.review.request),
-              authorization: authorization
-                ? readAuthorizationPolicyGeneration(authorization)
-                  ?? functionSource(authorization.buildMatcher)
-                : null,
-            }
-          : null,
-      };
-    }),
-  }));
+      return authorization
+        ? [{
+            name: definition.tool.name,
+            authorization: readAuthorizationPolicyGeneration(authorization)
+              ?? functionSource(authorization.buildMatcher),
+          }]
+        : [];
+    });
+    return tools.length > 0 ? [{ name: toolkit.name, tools }] : [];
+  });
   return createHash('sha256')
     .update(JSON.stringify(subject))
     .digest('hex');

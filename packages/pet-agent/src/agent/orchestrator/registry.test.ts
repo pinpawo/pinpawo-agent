@@ -13,10 +13,10 @@ import {
   ReviewPolicies,
 } from './review/reviewPolicies';
 
-function mockTool(name: string) {
+function mockTool(name: string, description = `${name} tool`) {
   return tool(async () => 'ok', {
     name,
-    description: `${name} tool`,
+    description,
     schema: z.object({}),
   });
 }
@@ -187,6 +187,56 @@ test('authorization generation is stable across rebuilds and changes with policy
   assert.match(first.authorizationGeneration, /^[a-f0-9]{64}$/);
   assert.equal(rebuilt.authorizationGeneration, first.authorizationGeneration);
   assert.notEqual(changedPolicy.authorizationGeneration, first.authorizationGeneration);
+});
+
+test('authorization generation ignores display metadata', () => {
+  const buildRegistry = (suffix: string) => compileAgentRegistry({
+    toolkits: [defineToolkit({
+      name: 'local',
+      description: `Local tools ${suffix}`,
+      tools: [{
+        tool: mockTool('run_shell', `Run shell ${suffix}`),
+        operation: { title: `Shell operation ${suffix}` },
+        review: ReviewPolicies.commandExecution({ authorization: 'exact' }),
+      }],
+    })],
+    capabilities: [capability('general', ['local'])],
+  });
+
+  assert.equal(
+    buildRegistry('first').authorizationGeneration,
+    buildRegistry('second').authorizationGeneration,
+  );
+});
+
+test('authorization generation is scoped to authorization policy, not tool implementation', () => {
+  const executable = (result: 'first' | 'second') => result === 'first'
+    ? tool(async () => 'first', {
+        name: 'run_shell',
+        description: 'Run shell',
+        schema: z.object({}),
+      })
+    : tool(async () => 'second', {
+        name: 'run_shell',
+        description: 'Run shell',
+        schema: z.object({}),
+      });
+  const buildRegistry = (result: 'first' | 'second') => compileAgentRegistry({
+    toolkits: [defineToolkit({
+      name: 'local',
+      description: 'Local tools',
+      tools: [{
+        tool: executable(result),
+        review: ReviewPolicies.commandExecution({ authorization: 'exact' }),
+      }],
+    })],
+    capabilities: [capability('general', ['local'])],
+  });
+
+  assert.equal(
+    buildRegistry('first').authorizationGeneration,
+    buildRegistry('second').authorizationGeneration,
+  );
 });
 
 test('compiled registry snapshots authorization policy functions for its generation', () => {

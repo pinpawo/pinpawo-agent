@@ -89,8 +89,8 @@ export function createCapabilityNode(params: {
     const threadId = readThreadId(runnableConfig);
 
     const authorizationRecorder = createToolAuthorizationRecorder(
-      state.sessionToolAuthorizationRegistryGeneration === registry.authorizationGeneration
-        ? state.sessionToolAuthorizations
+      state.sessionToolAuthorizations.generation === registry.authorizationGeneration
+        ? state.sessionToolAuthorizations.records
         : [],
     );
     const artifactRefs: CapabilityArtifactRef[] = [];
@@ -255,8 +255,10 @@ export function createCapabilityNode(params: {
         resultPreview,
       },
       runIterationCount: state.runIterationCount + 1,
-      sessionToolAuthorizations: authorizationRecorder.active,
-      sessionToolAuthorizationRegistryGeneration: registry.authorizationGeneration,
+      sessionToolAuthorizations: {
+        generation: registry.authorizationGeneration,
+        records: authorizationRecorder.active,
+      },
     };
   };
 }

@@ -374,3 +374,20 @@ lint passes, and documentation migrations.
 - Updated the existing Planner decision, ownership, knowledge-layer,
   authoring-principle, source-registry, open-question, and index pages without
   adding a new Prompt Contract Map row.
+
+## [2026-07-31] ingest | Dynamic context governance proposal
+
+- Added the raw dynamic-context governance design and synthesized its reusable
+  ownership model into the Wiki.
+- Established governance structure as the first priority: runtime projection,
+  closed typed facts, consumer-owned rendering, explicit message authority and
+  placement, and prompt-package-owned invocation assembly.
+- Added a draft Wiki concept and Context Contract Map while preserving the
+  existing Prompt Contract Map as the index of stable semantic behavior.
+- Kept the terminal meanings and fixed `goal_done` decision accepted while
+  recording the general authority conflict in the current Answer implementation.
+- Updated prompt-layer, authoring, provenance, source-registry, open-question,
+  overview, and index pages. Every page distinguishes current implementation
+  from the proposed target; no production implementation is claimed.
+- Kept issue progress, incident evidence, trace identifiers, and delivery stages
+  outside the Wiki; those remain in the raw design and external tracker.

@@ -17,6 +17,7 @@ related:
   - ../capability-toolkit-architecture.md
   - orchestrator-practical-reasoning.md
   - prompt-knowledge-layers.md
+  - dynamic-context-governance.md
   - system-prompt-authoring-principles.md
   - message-context-and-provenance.md
   - ../decisions/capability-planner-task-boundaries.md

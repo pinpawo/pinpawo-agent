@@ -7,6 +7,7 @@ sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md
   - ../../PET_AGENT_API_CAPABILITY_TOOLKIT.md
+  - ../../DYNAMIC_CONTEXT_GOVERNANCE_DESIGN.md
   - ../../../packages/pet-agent/src/agent/orchestrator/capabilityPlannerAgent.ts
   - https://github.com/pinpawo/pinpawo-agent/issues/490
   - https://github.com/pinpawo/pinpawo-agent/pull/492
@@ -16,6 +17,7 @@ related:
   - ../capability-toolkit-architecture.md
   - ../decisions/capability-planner-task-boundaries.md
   - ../decisions/delegation-completion-acknowledgement.md
+  - ../concepts/dynamic-context-governance.md
   - ../questions/system-prompts-open-questions.md
   - model-prompting-and-harness-references.md
 ---
@@ -98,6 +100,13 @@ detail.
 - [Issue #490 — task-boundary and entry contract consolidation](https://github.com/pinpawo/pinpawo-agent/issues/490)
 - [PR #492 — unified Planner task and Capability ownership](https://github.com/pinpawo/pinpawo-agent/pull/492)
 - [PR #515 — standard Agent runtime, structured result handoff, and simplified Planner prompts](https://github.com/pinpawo/pinpawo-agent/pull/515)
+
+## Proposed design
+
+- [Dynamic context governance design](../../DYNAMIC_CONTEXT_GOVERNANCE_DESIGN.md)
+
+This source proposes a governance target. It does not override the current
+implementation entries above until implementation and verification land.
 
 ## Historical evolution
 

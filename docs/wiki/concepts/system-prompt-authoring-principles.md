@@ -8,6 +8,7 @@ sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md
   - ../../PET_AGENT_API_CAPABILITY_TOOLKIT.md
+  - ../../DYNAMIC_CONTEXT_GOVERNANCE_DESIGN.md
   - ../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityPlannerAgent.prompt.ts
   - https://github.com/pinpawo/pinpawo-agent/issues/417
   - https://github.com/pinpawo/pinpawo-agent/issues/490
@@ -18,6 +19,7 @@ related:
   - ../capability-toolkit-architecture.md
   - orchestrator-practical-reasoning.md
   - prompt-knowledge-layers.md
+  - dynamic-context-governance.md
   - decision-node-ownership.md
   - ../decisions/capability-planner-task-boundaries.md
   - ../decisions/delegation-completion-acknowledgement.md
@@ -87,6 +89,19 @@ Use [Prompt Knowledge Layers](prompt-knowledge-layers.md):
 
 Invocation facts must not become an untrusted second instruction channel.
 Mechanical invariants should not depend on model obedience.
+
+#### Govern dynamic context before optimizing it
+
+Before changing XML, message ordering, or cache layout, record the context's
+producer, consumer, typed fields, role, placement, authority, bounds, and
+prohibited content. Runtime code projects facts; the consumer's prompt package
+owns rendering and invocation assembly. A shared helper owns only mechanical
+serialization unless multiple consumers truly share one semantic contract.
+
+Stable prefixes, duplicate tokens, and cache reads are downstream diagnostics.
+They do not decide context ownership. The proposed repository-wide contract is
+described in [Dynamic Context Governance](dynamic-context-governance.md); target
+placement must remain distinct from current implementation facts.
 
 ### 4. Express outcomes, not a hand-written reasoning trace
 

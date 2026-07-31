@@ -98,6 +98,7 @@ function collectDiagnostics(
 
 function render(testCase: AnswerBehaviorCase): BaseMessage[] {
   const delegationOutcome = testCase.input.delegationOutcome;
+  const hasUserGoal = testCase.input.messages.some(({ role }) => role === 'user');
   return buildAnswerInvocationMessages({
     actor,
     workdir: '/workspace',
@@ -105,17 +106,18 @@ function render(testCase: AnswerBehaviorCase): BaseMessage[] {
     history: testCase.input.messages.map((message) => message.role === 'user'
       ? new HumanMessage(message.text)
       : new AIMessage(message.text)),
-    acceptedHandoff: delegationOutcome?.outcome === 'goal_done'
+    contextFacts: delegationOutcome?.outcome === 'goal_done'
+      ? { mode: 'goal_done', hasUserGoal }
+      : delegationOutcome?.outcome === 'user_input_required'
+        ? { mode: 'user_input_required', hasUserGoal }
+        : { mode: 'direct', hasUserGoal },
+    legacyCompletionSource: delegationOutcome?.outcome === 'goal_done'
       ? {
-          outcome: delegationOutcome.outcome,
-          source: {
-            ...delegationOutcome,
-            delegationId: 'answer-eval-delegation',
-            announceMessageId: 'answer-eval-announce',
-          },
+          ...delegationOutcome,
+          delegationId: 'answer-eval-delegation',
+          announceMessageId: 'answer-eval-announce',
         }
       : null,
-    awaitingUserInput: delegationOutcome?.outcome === 'user_input_required',
   });
 }
 

@@ -8,6 +8,7 @@ sources:
 related:
   - overview.md
   - capability-toolkit-architecture.md
+  - concepts/dynamic-context-governance.md
   - concepts/orchestrator-practical-reasoning.md
   - decisions/capability-planner-task-boundaries.md
   - decisions/delegation-completion-acknowledgement.md
@@ -42,6 +43,9 @@ explicitly migrated.
   action, responsibility, time, and completion.
 - [Prompt knowledge layers](concepts/prompt-knowledge-layers.md) — static contract,
   conditional protocol, injected facts, and deterministic enforcement.
+- [Dynamic context governance](concepts/dynamic-context-governance.md) — draft
+  ownership contract for projection, typed facts, rendering, message placement,
+  and invocation assembly.
 - [System prompt authoring principles](concepts/system-prompt-authoring-principles.md)
   — positive-first contracts, narrow negative boundaries, harness ownership,
   objective-derived eval targets, and eval-backed prompt changes.

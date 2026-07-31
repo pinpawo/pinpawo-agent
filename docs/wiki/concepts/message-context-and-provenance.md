@@ -2,12 +2,13 @@
 title: Message Context And Provenance
 page_type: concept
 status: validated
-updated: 2026-07-29
+updated: 2026-07-31
 sources:
   - ../../PET_AGENT_ANNOUNCE_JUDGMENT_REFACTOR.md
   - ../../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md
   - ../../PET_AGENT_API_CAPABILITY_TOOLKIT.md
   - ../../capability-artifact-pipeline/index.md
+  - ../../DYNAMIC_CONTEXT_GOVERNANCE_DESIGN.md
   - ../../../packages/pet-agent/src/agent/orchestrator/messageLanes.ts
   - ../../../packages/pet-agent/src/agent/orchestrator/runtime/decisions/orchestrationDecision.ts
   - ../../../packages/pet-agent/src/agent/orchestrator/runtime/activeDelegationTransition.ts
@@ -19,6 +20,7 @@ related:
   - ../interruption-and-delegation-continuation.md
   - orchestrator-practical-reasoning.md
   - decision-node-ownership.md
+  - dynamic-context-governance.md
   - ../decisions/delegation-completion-acknowledgement.md
 ---
 
@@ -91,3 +93,16 @@ The next request makes the boundary explicit:
 This is why “retain the lane” does not pollute a fresh turn and why “interrupted”
 must not be modeled as a completed handoff. See
 [Interruption and delegation continuation](../interruption-and-delegation-continuation.md).
+
+## Dynamic-context authority gap
+
+Canonical identity and terminal provenance are validated contracts. Dynamic
+context placement is not yet consistently governed by them: Answer currently
+adds state-derived reply prose to its system message, Capability construction
+mixes runtime-dependent sections with stable instructions, and main compaction
+restores generated summaries as `SystemMessage` content.
+
+[Dynamic Context Governance](dynamic-context-governance.md) proposes that these
+values become bounded, provenance-tagged, non-authoritative context assembled by
+the consuming prompt package. This is a target contract; the preceding paragraph
+describes the current implementation gap.

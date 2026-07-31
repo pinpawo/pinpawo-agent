@@ -1,11 +1,12 @@
 ---
 title: Delegation Completion Acknowledgement
 page_type: decision
-status: validated
-updated: 2026-07-29
+status: contested
+updated: 2026-07-31
 sources:
   - ../../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
+  - ../../DYNAMIC_CONTEXT_GOVERNANCE_DESIGN.md
   - ../../../packages/pet-agent/src/agent/orchestrator/schemas.ts
   - ../../../packages/pet-agent/src/agent/orchestrator/state.ts
   - ../../../packages/pet-agent/src/agent/orchestrator/runtime/decisions/orchestrationDecision.ts
@@ -17,6 +18,7 @@ related:
   - ../concepts/orchestrator-practical-reasoning.md
   - ../concepts/message-context-and-provenance.md
   - ../concepts/decision-node-ownership.md
+  - ../concepts/dynamic-context-governance.md
 ---
 
 # Delegation Completion Acknowledgement
@@ -75,6 +77,16 @@ outcome state remains the source of terminal meaning. The context shown to the
 answer model uses user-facing goal and status terms; it does not require the
 model to understand handoff, delegation, run identifiers, or the rest of the
 orchestration flow.
+
+## Current implementation conflict
+
+The terminal meanings and fixed `goal_done` acknowledgement remain accepted.
+Their current model-facing implementation is contested because
+`buildDelegationCompletionAnswerContext()` embeds task-derived completion prose
+in the system message. The target dynamic-context contract makes the fixed close
+deterministic and represents other Answer modes as bounded facts outside the
+stable system contract. This preserves the semantic decision while replacing
+the conflicting authority and placement mechanism.
 
 ## Constraints
 

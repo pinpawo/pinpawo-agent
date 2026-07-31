@@ -1,0 +1,135 @@
+---
+title: Dynamic Context Governance
+page_type: concept
+status: draft
+updated: 2026-07-31
+sources:
+  - ../../DYNAMIC_CONTEXT_GOVERNANCE_DESIGN.md
+  - ../../../packages/pet-agent/src/agent/orchestrator/prompts/context.ts
+  - ../../../packages/pet-agent/src/agent/orchestrator/prompts/answer.ts
+  - ../../../packages/pet-agent/src/agent/orchestrator/prompts/answer.test.ts
+  - ../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/answer.ts
+  - ../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/answer.test.ts
+  - ../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/capability.ts
+  - ../../../packages/pet-agent/src/agent/orchestrator/contextCompaction.ts
+related:
+  - ../overview.md
+  - prompt-knowledge-layers.md
+  - system-prompt-authoring-principles.md
+  - message-context-and-provenance.md
+  - decision-node-ownership.md
+  - ../decisions/delegation-completion-acknowledgement.md
+---
+
+# Dynamic Context Governance
+
+## Status and evidence
+
+This page records the repository's dynamic-context governance model. The raw
+design retains delivery planning; this Wiki page keeps only reusable contracts
+and current implementation facts.
+
+Current code assembles model-visible dynamic context in several places and with
+different authority:
+
+- shared serializers live in `prompts/context.ts`;
+- Answer builds terminal reply prose in its runtime node and places it in the
+  leading system message;
+- Capability execution concatenates stable instructions and runtime-dependent
+  `promptSections` into one agent system prompt;
+- main-conversation compaction restores a generated summary as a
+  `SystemMessage`.
+
+Answer currently defines a closed `AnswerContextFacts` union, runtime projection,
+a bounded synthetic Human facts-message builder, and structural tests. Its
+production invocation still uses the legacy system-prose renderer. The typed
+contract is therefore current code, while the target placement is not yet
+current runtime behavior.
+
+## Governance priority
+
+The order is structural:
+
+1. define the owner, location, typed shape, role, placement, and bounds of each
+   context;
+2. prevent dynamic facts and summaries from gaining system authority;
+3. minimize propagation to the consumers that need each fact;
+4. then measure stable prefixes, duplicate tokens, provider cache behavior,
+   latency, and cost.
+
+A stable cacheable prefix is an acceptance diagnostic. It is not the primary
+abstraction and does not decide where context belongs.
+
+## Context lifecycle
+
+Every model-visible dynamic context should follow one reviewable path:
+
+```text
+runtime state and canonical messages
+  -> context projection
+  -> typed context facts
+  -> context rendering
+  -> invocation assembly
+  -> model
+```
+
+- **Projection** belongs to the runtime semantic owner. It selects values and
+  returns typed data, not prompt prose.
+- **Typed facts** use closed variants and bounded fields. They do not expose an
+  `extraSystemPrompt`, `replyInstruction`, or similar policy channel.
+- **Rendering** belongs to the consumer's prompt package. It serializes facts
+  as role-labelled data without inventing policy.
+- **Invocation assembly** belongs to the same prompt package and owns message
+  roles, ordering, omission, and bounds.
+
+Runtime nodes retain graph transitions, state cleanup, invocation, and typed
+projection. They should not concatenate model-facing context strings.
+
+## Code ownership
+
+The existing flat prompt-package layout is sufficient. Each model-facing actor
+owns its stable contract, context renderer, and invocation builder in one review
+location. Shared prompt helpers provide only mechanical escaping, clipping,
+indentation, and provenance operations.
+
+| Stage | Naming pattern | Return value |
+|---|---|---|
+| Runtime projection | `select<Node>ContextFacts` | typed facts |
+| Static contract | `build<Node>SystemPrompt` | stable string |
+| Fact rendering | `render<Node>Context` | bounded data string |
+| Context message | `create<Node>ContextMessage` | synthetic message |
+| Invocation assembly | `build<Node>InvocationMessages` | ordered messages |
+
+The broad `prompts/context.ts` should be decomposed incrementally. A shared
+module is justified only when multiple consumers have the same semantic
+contract, not merely because their values are serialized with similar XML.
+
+## Context Contract Map
+
+The Prompt Contract Map indexes stable behavior. This separate map governs how
+invocation facts reach those semantic owners.
+
+| Context | Semantic owner | Target role and placement | Authority | Principal exclusions |
+|---|---|---|---|---|
+| Entry facts | `entryDecision` | synthetic facts for the current decision | read-only facts | registry, task drafts, private lanes |
+| Planner input | Capability Planner | Human input after the stable agent contract | facts plus advisory plan | graph-private state, execution tools |
+| Outcome input | `outcomeDecision` | Human input after the stable decision contract | evidence plus advisory future plan | Capability documents, mutation policy |
+| Answer context | `answer` | bounded context after canonical main history | typed reply-mode facts | copied request, full handoff, URL, arbitrary instruction |
+| Delegation briefing | selected Capability | latest task-boundary message in its private lane | current task boundary | future plan, framework policy |
+| Capability runtime facts | selected Capability | bounded context before the briefing | runtime facts | Capability or Toolkit policy |
+| Compaction summary | downstream consumers | provenance-tagged context before retained messages | non-authoritative derived context | new policy, terminal meaning, current-user override |
+| Auto-review facts | security reviewer | Human data after trusted review policy | untrusted evidence | action text in system policy |
+
+Each maintained row also needs source state, typed fields, bounds, persistence,
+provenance, prohibited content, and deterministic/model verification.
+
+## Verification contract
+
+Deterministic tests should protect role, order, provenance, bounds, typed
+variants, absence of dynamic system data, Capability system-prompt invariance,
+and zero Answer-model calls for fixed completion. Model evals should cover long
+imperative completed tasks, instruction-like context, required-user-input
+closes, and newer user messages overriding older summaries.
+
+Tests should verify behavior and invocation structure, not the presence of a
+particular natural-language clause.

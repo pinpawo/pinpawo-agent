@@ -5,6 +5,7 @@ status: validated
 updated: 2026-07-31
 sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
+  - ../../DYNAMIC_CONTEXT_GOVERNANCE_DESIGN.md
   - ../../../packages/pet-agent/src/agent/orchestrator/capabilityPlannerAgent.ts
   - https://github.com/pinpawo/pinpawo-agent/pull/492
   - https://github.com/pinpawo/pinpawo-agent/pull/515
@@ -12,6 +13,7 @@ related:
   - orchestrator-practical-reasoning.md
   - decision-node-ownership.md
   - message-context-and-provenance.md
+  - dynamic-context-governance.md
   - system-prompt-authoring-principles.md
   - ../questions/system-prompts-open-questions.md
 ---
@@ -44,16 +46,16 @@ Injected facts must not become a second instruction channel. Dynamic task or
 candidate content describes the current situation; it does not get to redefine
 the node.
 
-A runtime may materialize a stable contract for the current typed state. Such
-context remains bounded by code: callers cannot supply arbitrary policy text,
-and the injected objective cannot add a new behavior outside the node's accepted
-contract. For `answer`, the runtime identifies the latest user goal and selects
-the applicable reply objective from conversation provenance or terminal state.
-The static prompt therefore does not need the vocabulary of the full execution
-flow. The stable contract and this state-derived context are composed into the
-leading system message, followed by the canonical role-ordered conversation.
-The system context references the latest user message without copying its text,
-so user input retains its original message role and authority.
+A runtime may project typed state for the current invocation. Such facts remain
+bounded by code: callers cannot supply arbitrary policy text, and an injected
+objective cannot add behavior outside the node's accepted contract.
+
+Current Answer code identifies terminal state and composes state-derived reply
+prose into the leading system message. That is implementation fact, not the
+target placement rule. The
+[Dynamic Context Governance](dynamic-context-governance.md) contract places
+bounded facts through an explicit typed context message and keeps the stable
+system contract free of invocation data.
 
 Deterministic conditions should be enforced in code even if the prompt mentions
 them for context. The model is not the sole guard for availability, iteration

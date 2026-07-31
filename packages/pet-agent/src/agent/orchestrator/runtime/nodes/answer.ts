@@ -13,7 +13,10 @@ import {
   stampMessageCreatedAtUtc,
   type HandoffSource,
 } from '../../messageLanes';
-import { buildAnswerSystemPrompt } from '../../prompts';
+import {
+  buildAnswerSystemPrompt,
+  type AnswerContextFacts,
+} from '../../prompts';
 import type { AcceptedDelegationOutcome } from '../../schemas';
 import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
@@ -77,22 +80,22 @@ export function createAnswerNode(config: OrchestratorConfig) {
     const answerHistory = userInputRequiredContext
       ? [...history, new AIMessage(userInputRequiredContext)]
       : history;
-    const terminalContext = awaitingUserInput
-      ? null
-      : buildTerminalAnswerContext(
-          state,
-          maxRunIterations
-            ?? readRunIterationLimit(config.maxRunIterations)
-            ?? DEFAULT_ORCHESTRATOR_MAX_ITERATIONS,
-        );
+    const answerContextFacts = selectAnswerContextFacts({
+      state,
+      history: answerHistory,
+      acceptedHandoffOutcome: acceptedHandoff?.outcome ?? null,
+      awaitingUserInput,
+      runIterationLimit: maxRunIterations
+        ?? readRunIterationLimit(config.maxRunIterations)
+        ?? DEFAULT_ORCHESTRATOR_MAX_ITERATIONS,
+    });
     const answerMessages = buildAnswerInvocationMessages({
       actor,
       history: answerHistory,
       workdir,
       runtimeEnvironment,
-      acceptedHandoff,
-      awaitingUserInput,
-      terminalContext,
+      contextFacts: answerContextFacts,
+      legacyCompletionSource: acceptedHandoff?.source ?? null,
     });
     const response = await config.models.act.invoke(answerMessages, runnableConfig);
     if (!readMessageText(response).trim()) {
@@ -114,21 +117,14 @@ export function buildAnswerInvocationMessages(params: {
   history: BaseMessage[];
   workdir?: string;
   runtimeEnvironment?: string;
-  acceptedHandoff?: {
-    source: HandoffSource;
-    outcome: Exclude<AcceptedDelegationOutcome, 'user_input_required'>;
-  } | null;
-  awaitingUserInput?: boolean;
-  terminalContext?: string | null;
+  contextFacts: AnswerContextFacts;
+  /** Removed with the P0.5 deterministic goal_done close. */
+  legacyCompletionSource?: HandoffSource | null;
 }): BaseMessage[] {
-  const hasUserGoal = Boolean(readLatestHumanRequest(params.history));
-  const replyContext = params.awaitingUserInput
-    ? buildUserInputRequiredAnswerContext(hasUserGoal)
-    : params.acceptedHandoff?.outcome === 'goal_done'
-      ? buildDelegationCompletionAnswerContext(params.acceptedHandoff.source, hasUserGoal)
-      : params.acceptedHandoff?.outcome === 'task_done'
-        ? buildTaskResultAnswerContext(hasUserGoal)
-        : hasUserGoal ? buildAnswerReplyContext() : null;
+  const replyContext = buildLegacyAnswerContext(
+    params.contextFacts,
+    params.legacyCompletionSource,
+  );
   const systemContext = [
     buildAnswerSystemPrompt({
       actor: params.actor,
@@ -136,12 +132,85 @@ export function buildAnswerInvocationMessages(params: {
       runtimeEnvironment: params.runtimeEnvironment,
     }),
     replyContext,
-    params.terminalContext,
   ].filter((value): value is string => Boolean(value)).join('\n\n');
   return [
     new SystemMessage(systemContext),
     ...params.history,
   ];
+}
+
+export function selectAnswerContextFacts(params: {
+  state: OrchestratorStateType;
+  history: BaseMessage[];
+  acceptedHandoffOutcome: Exclude<AcceptedDelegationOutcome, 'user_input_required'> | null;
+  awaitingUserInput: boolean;
+  runIterationLimit: number;
+}): AnswerContextFacts {
+  const hasUserGoal = Boolean(readLatestHumanRequest(params.history));
+  if (params.awaitingUserInput) {
+    return { mode: 'user_input_required', hasUserGoal };
+  }
+  if (params.acceptedHandoffOutcome === 'goal_done') {
+    return { mode: 'goal_done', hasUserGoal };
+  }
+  if (params.acceptedHandoffOutcome === 'task_done') {
+    return { mode: 'task_result', hasUserGoal };
+  }
+
+  const activeDelegation = params.state.taskActiveDelegation;
+  if (activeDelegation && params.state.runIterationCount >= params.runIterationLimit) {
+    return {
+      mode: 'blocked',
+      hasUserGoal,
+      reason: 'iteration_limit',
+      unfinishedTask: activeDelegation.task,
+      detail: null,
+    };
+  }
+
+  if (activeDelegation) {
+    const completionReason = readLatestAnnounceCompletionReason(params.state.messages, {
+      runId: activeDelegation.transcriptRunId,
+      delegationId: activeDelegation.id,
+    });
+    return {
+      mode: 'blocked',
+      hasUserGoal,
+      reason: completionReason === 'limit_reached' ? 'execution_limit' : 'incomplete',
+      unfinishedTask: activeDelegation.task,
+      detail: null,
+    };
+  }
+
+  if (params.state.runPendingTask && !params.state.runNextDelegation) {
+    return {
+      mode: 'blocked',
+      hasUserGoal,
+      reason: 'capability_unavailable',
+      unfinishedTask: params.state.runPendingTask.task,
+      detail: params.state.runPendingTask.contextSummary?.trim() || null,
+    };
+  }
+
+  return { mode: 'direct', hasUserGoal };
+}
+
+function buildLegacyAnswerContext(
+  facts: AnswerContextFacts,
+  completionSource: HandoffSource | null | undefined,
+): string | null {
+  switch (facts.mode) {
+    case 'direct':
+      return facts.hasUserGoal ? buildAnswerReplyContext() : null;
+    case 'task_result':
+      return buildTaskResultAnswerContext(facts.hasUserGoal);
+    case 'goal_done':
+      return buildDelegationCompletionAnswerContext(completionSource, facts.hasUserGoal);
+    case 'user_input_required':
+      return buildUserInputRequiredAnswerContext(facts.hasUserGoal);
+    case 'blocked':
+      return buildTerminalAnswerContext(facts);
+  }
 }
 
 function buildAnswerReplyContext() {
@@ -194,68 +263,56 @@ function buildUserInputRequiredAnswerContext(hasUserGoal: boolean) {
   ].join('\n');
 }
 
-function buildTerminalAnswerContext(state: OrchestratorStateType, runIterationLimit: number) {
-  const activeDelegation = state.taskActiveDelegation;
-  if (activeDelegation && state.runIterationCount >= runIterationLimit) {
+function buildTerminalAnswerContext(facts: Extract<AnswerContextFacts, { mode: 'blocked' }>) {
+  if (facts.reason === 'iteration_limit') {
     return [
       '当前状态：',
       '本次处理已达到执行上限，目标尚未完成。',
-      `尚未完成的工作：${activeDelegation.task}`,
+      `尚未完成的工作：${facts.unfinishedTask ?? '本次工作'}`,
       '',
       '本次回复目标：',
       '根据已有信息说明当前进度、执行限制和待继续的工作。',
     ].join('\n');
   }
 
-  if (activeDelegation) {
-    const completionReason = readLatestAnnounceCompletionReason(state.messages, {
-      runId: activeDelegation.transcriptRunId,
-      delegationId: activeDelegation.id,
-    });
-    if (completionReason === 'limit_reached') {
-      return [
-        '当前状态：',
-        '当前执行已达到限制，目标尚未完成，暂时没有可交付结果。',
-        `尚未完成的工作：${activeDelegation.task}`,
-        '',
-        '本次回复目标：',
-        '根据已有信息说明当前进度、执行限制和待继续的工作。',
-      ].join('\n');
-    }
+  if (facts.reason === 'execution_limit') {
+    return [
+      '当前状态：',
+      '当前执行已达到限制，目标尚未完成，暂时没有可交付结果。',
+      `尚未完成的工作：${facts.unfinishedTask ?? '本次工作'}`,
+      '',
+      '本次回复目标：',
+      '根据已有信息说明当前进度、执行限制和待继续的工作。',
+    ].join('\n');
+  }
 
+  if (facts.reason === 'incomplete') {
     return [
       '当前状态：',
       '当前工作尚未完成，暂时没有可交付结果。',
-      `尚未完成的工作：${activeDelegation.task}`,
+      `尚未完成的工作：${facts.unfinishedTask ?? '本次工作'}`,
       '',
       '本次回复目标：',
       '根据已有信息说明当前状态和待继续的工作。',
     ].join('\n');
   }
 
-  if (state.runPendingTask && !state.runNextDelegation) {
-    const unavailableReason = state.runPendingTask.contextSummary?.trim();
-    return [
-      '当前状态：',
-      '当前没有可用于执行这项工作的能力，目标尚未完成。',
-      `尚未执行的工作：${state.runPendingTask.task}`,
-      ...(unavailableReason
-        ? [`不可执行的原因：${unavailableReason}`]
-        : []),
-      '',
-      '本次回复目标：',
-      '说明当前无法执行的工作、具体原因以及仍需完成的内容。',
-    ].join('\n');
-  }
-
-  return null;
+  return [
+    '当前状态：',
+    '当前没有可用于执行这项工作的能力，目标尚未完成。',
+    `尚未执行的工作：${facts.unfinishedTask ?? '本次工作'}`,
+    ...(facts.detail ? [`不可执行的原因：${facts.detail}`] : []),
+    '',
+    '本次回复目标：',
+    '说明当前无法执行的工作、具体原因以及仍需完成的内容。',
+  ].join('\n');
 }
 
 function buildDelegationCompletionAnswerContext(
-  source: HandoffSource,
+  source: HandoffSource | null | undefined,
   hasUserGoal = false,
 ) {
-  const completedWork = source.task?.trim() || '本次工作';
+  const completedWork = source?.task?.trim() || '本次工作';
   return [
     ...(hasUserGoal ? [
       '本次用户目标（已完成）：',

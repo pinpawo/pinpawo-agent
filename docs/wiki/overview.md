@@ -5,6 +5,7 @@ status: validated
 updated: 2026-07-31
 sources:
   - ../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
+  - ../DYNAMIC_CONTEXT_GOVERNANCE_DESIGN.md
   - ../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md
   - ../PET_AGENT_API_CAPABILITY_TOOLKIT.md
   - ../../packages/pet-agent/src/agent/orchestrator/capabilityPlannerAgent.ts
@@ -16,6 +17,7 @@ related:
   - capability-toolkit-architecture.md
   - concepts/orchestrator-practical-reasoning.md
   - concepts/prompt-knowledge-layers.md
+  - concepts/dynamic-context-governance.md
   - concepts/system-prompt-authoring-principles.md
   - concepts/decision-node-ownership.md
   - concepts/message-context-and-provenance.md
@@ -76,6 +78,9 @@ The current architecture has these relationships:
 7. [Terminal outcome semantics](decisions/delegation-completion-acknowledgement.md)
    keep task completion, user-goal completion, required user input, and the
    answer close distinct.
+8. [Dynamic context governance](concepts/dynamic-context-governance.md) proposes
+   one ownership path from runtime projection through typed facts and prompt
+   package assembly. It is an active migration design, not current behavior.
 
 ## Prompt Contract Map
 
@@ -132,4 +137,6 @@ evidence work is tracked in [open questions](questions/system-prompts-open-quest
 - cross-model behavior of filesystem-based Capability exploration;
 - context and iteration budgets as the Capability registry grows;
 - evidence sufficiency and freshness at run entry;
-- automated Wiki source/link freshness checks.
+- automated Wiki source/link freshness checks;
+- alignment between current dynamic-context placement and the governance
+  contract described in [Dynamic Context Governance](concepts/dynamic-context-governance.md).

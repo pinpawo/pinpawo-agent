@@ -77,9 +77,8 @@ test('planner scorer enforces the mandatory General fallback', () => {
   );
   assert.ok(testCase);
   const scores = scoreCapabilityPlanning({
-    result: 'next_task',
+    result: 'plan',
     nextTask: '处理普通工作区任务并返回执行结果',
-    capabilityIntent: '通用任务执行',
     capabilityName: 'general',
     remainingPlan: [],
   }, testCase.expected);
@@ -95,15 +94,15 @@ test('planner scorer reconstructs an unchanged plan from next task plus future t
   const materialized = testCase.input.remainingPlan?.[0];
   assert.ok(materialized);
   const scores = scoreCapabilityPlanning({
-    result: 'next_task',
-    nextTask: materialized.objective,
-    capabilityIntent: materialized.capabilityIntent,
+    result: 'plan',
+    nextTask: materialized.task,
+    capabilityName: materialized.capability,
     remainingPlan: [],
   }, testCase.expected);
   assert.ok(allPass(scores));
 });
 
-test('planner deterministic scorer does not treat capability intent as executor identity', () => {
+test('planner deterministic scorer treats Capability as executor identity', () => {
   const testCase = capabilityPlanningBasicsDataset.cases.find(
     (item) => item.name === 'boundary-keeps-valid-next-task',
   );
@@ -111,15 +110,14 @@ test('planner deterministic scorer does not treat capability intent as executor 
   const materialized = testCase.input.remainingPlan?.[0];
   assert.ok(materialized);
   const scores = scoreCapabilityPlanning({
-    result: 'next_task',
-    nextTask: materialized.objective,
-    capabilityIntent: 'deliver a completed document to its intended recipient',
+    result: 'plan',
+    nextTask: materialized.task,
+    capabilityName: 'general',
     remainingPlan: [],
   }, testCase.expected);
-  assert.ok(allPass(scores));
-  assert.deepEqual(
-    scores.map(({ key }) => key),
-    ['planner_result_correct'],
+  assert.equal(
+    scores.find(({ key }) => key === 'planner_capability_correct')?.score,
+    0,
   );
 });
 
@@ -129,12 +127,12 @@ test('planner deterministic scorer can enforce a case-specific future task count
   );
   assert.ok(testCase);
   const scores = scoreCapabilityPlanning({
-    result: 'next_task',
+    result: 'plan',
     nextTask: '调查失败测试并形成完整结论',
-    capabilityIntent: 'workspace_analysis',
+    capabilityName: 'workspace_analysis',
     remainingPlan: [{
-      objective: '修复代码',
-      capabilityIntent: 'code_change',
+      capability: 'code_change',
+      task: '修复代码',
     }],
   }, testCase.expected);
   assert.equal(

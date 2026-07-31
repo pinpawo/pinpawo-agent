@@ -1,4 +1,4 @@
-import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import { AIMessage, AIMessageChunk, HumanMessage } from '@langchain/core/messages';
 import { FakeListChatModel } from '@langchain/core/utils/testing';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
@@ -14,6 +14,8 @@ import {
 import { defineToolkit } from '../../src/types/toolkit.ts';
 import type { AgentModels } from '../../src/types/agent.ts';
 import type { CapabilityPlannerRunner } from '../../src/agent/orchestrator/capabilityPlannerRunner.ts';
+import { compileAgentRegistry } from '../../src/agent/orchestrator/registry.ts';
+import { GOAL_DONE_ACKNOWLEDGEMENT } from '../../src/agent/orchestrator/runtime/nodes/answer.ts';
 import { multiTaskFlowBasicsDataset } from '../datasets/multi-task-flow-basics.ts';
 import { readRunDelegationSummaries, routeModeFromResult } from '../orchestratorStateReaders.ts';
 import { writeLangfuseEvalResult, type LangfuseEvalScore } from './langfuse-eval-writer.ts';
@@ -59,17 +61,24 @@ const capabilities: AgentCapability[] = [
   },
 ];
 
+const registry = compileAgentRegistry({
+  toolkits: [generalToolkit],
+  capabilities,
+});
+
 function buildRecordingSubagent(responses: string[]) {
-  const model = new FakeListChatModel({ responses, sleep: 0 });
+  const model = new FakeListChatModel({ responses: ['unused'], sleep: 0 });
   const laneMessageCounts: number[] = [];
+  let responseIndex = 0;
   const bindTools = model.bindTools.bind(model);
   model.bindTools = ((tools) => {
     const runnable = bindTools(tools);
-    const invoke = runnable.invoke.bind(runnable);
-    runnable.invoke = async (input, options) => {
+    runnable.invoke = async (input) => {
       const messages = Array.isArray(input) ? input : [];
       laneMessageCounts.push(messages.filter((message) => getMessageLane(message as never) !== null).length);
-      return invoke(input, options);
+      const response = responses[responseIndex] ?? responses.at(-1) ?? '';
+      responseIndex += 1;
+      return new AIMessageChunk(response);
     };
     return runnable;
   }) as typeof model.bindTools;
@@ -120,36 +129,26 @@ function buildScriptedPlannerRunner() {
         plannedObjectives.push(objective);
         selectedCapabilityNames.push('explore');
         return {
-          result: 'next_task',
-          remaining_plan: [
-            {
-              objective: '根据调查结论重构 auth 模块',
-              capability_intent: 'code_modification',
-            },
-          ],
-          next_task: {
-            objective,
-            capability_intent: 'codebase_exploration',
-            capability_name: 'explore',
-            context_summary: null,
-          },
+          tasks: [{
+            capability: 'explore',
+            task: objective,
+          }, {
+            capability: 'code_modify',
+            task: '根据调查结论重构 auth 模块',
+          }],
         };
       }
       secondTaskSawHandoff = /循环依赖|token validation/.test(
-        input.latestHandoff ?? '',
+        input.messages.map((message) => String(message.content)).join('\n'),
       );
       const objective = '根据调查结论重构 auth 模块，提取 token validation 并移除循环依赖';
       plannedObjectives.push(objective);
       selectedCapabilityNames.push('code_modify');
       return {
-        result: 'next_task',
-        remaining_plan: [],
-        next_task: {
-          objective,
-          capability_intent: 'code_modification',
-          capability_name: 'code_modify',
-          context_summary: input.latestHandoff,
-        },
+        tasks: [{
+          capability: 'code_modify',
+          task: objective,
+        }],
       };
     },
   };
@@ -187,9 +186,8 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
       configurable: {
         thread_id: `multi-task-flow-${Date.now()}`,
         actor,
-        toolkits: [generalToolkit],
-        capabilities,
-        maxIterations: 10,
+        registry,
+        maxRunIterations: 10,
         workdir: '/mock/project',
       },
     },
@@ -197,6 +195,9 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
   const summaries = readRunDelegationSummaries(result);
   const tasks = summaries.map((summary) => summary.task);
   const statuses = summaries.map((summary) => summary.status);
+  const acceptedResultText = summaries
+    .map((summary) => summary.resultPreview ?? '')
+    .join('\n');
   const stats = {
     ...decisions.stats(),
     ...planner.stats(),
@@ -236,7 +237,7 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
       key: 'lane_isolation_correct',
       score: remainingLaneMessageCount === 0
         && subagent.laneMessageCounts.length === expected.expectedDelegationCount
-        && subagent.laneMessageCounts.every((count) => count === 0) ? 1 : 0,
+        && subagent.laneMessageCounts.every((count) => count === 1) ? 1 : 0,
       comment: `subagentInputLaneMessages=${JSON.stringify(subagent.laneMessageCounts)}, remainingLaneMessages=${remainingLaneMessageCount}`,
     },
     {
@@ -245,16 +246,25 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
       comment: `statuses=${statuses.join(',')}`,
     },
     {
+      key: 'result_evidence_retained_correct',
+      score: expected.expectedResultTerms.every((term) =>
+        acceptedResultText.includes(term)) ? 1 : 0,
+      comment: `acceptedResultTermsPresent=${String(
+        expected.expectedResultTerms.every((term) => acceptedResultText.includes(term)),
+      )}`,
+    },
+    {
       key: 'final_answer_correct',
       score: routeModeFromResult(result) === expected.expectedFinalMode
-        && expected.expectedResultTerms.every((term) => finalText.includes(term)) ? 1 : 0,
-      comment: finalText,
+        && finalText === GOAL_DONE_ACKNOWLEDGEMENT ? 1 : 0,
+      comment: `final=${finalText}`,
     },
   ];
   return {
     output: {
       tasks,
       statuses,
+      resultPreviews: summaries.map((summary) => summary.resultPreview),
       delegationCount: summaries.length,
       ...stats,
       finalMode: routeModeFromResult(result),

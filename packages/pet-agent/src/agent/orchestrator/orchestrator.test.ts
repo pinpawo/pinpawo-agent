@@ -139,35 +139,28 @@ function createQueuedPlannerRunner(
   };
 
   return {
-    async invoke(input: CapabilityPlannerInput): Promise<CapabilityPlannerResult> {
+    async invoke(_input: CapabilityPlannerInput): Promise<CapabilityPlannerResult> {
       const planning = await nextStructuredValue();
-      const nextTask = planning.next_task as {
-        objective?: unknown;
-        capability_intent?: unknown;
-        context_summary?: unknown;
-      } | null;
+      const [nextTask, ...remainingTasks] = Array.isArray(planning.tasks)
+        ? planning.tasks as Array<{ capability?: unknown; task?: unknown }>
+        : [];
       if (!nextTask) {
-        throw new Error('scripted Capability Planner requires next_task');
+        throw new Error('scripted Capability Planner requires at least one task');
       }
       const capabilityName = String(
         (await nextStructuredValue()).capabilityName ?? '',
       );
       return {
-        result: 'next_task',
-        next_task: {
-          objective: String(nextTask.objective ?? ''),
-          capability_intent: String(nextTask.capability_intent ?? ''),
-          capability_name: capabilityName,
-          context_summary: typeof nextTask.context_summary === 'string'
-            ? nextTask.context_summary
-            : null,
-        },
-        remaining_plan: Array.isArray(planning.remaining_plan)
-          ? planning.remaining_plan as Array<{
-              objective: string;
-              capability_intent: string;
-            }>
-          : [],
+        tasks: [
+          {
+            capability: capabilityName,
+            task: String(nextTask.task ?? ''),
+          },
+          ...remainingTasks.map((task) => ({
+            capability: String(task.capability ?? ''),
+            task: String(task.task ?? ''),
+          })),
+        ],
       };
     },
   };
@@ -257,18 +250,11 @@ function needsPlanDecision() {
 }
 
 function scriptedPlannerTask(
-  objective: string,
-  contextSummary: string | null = null,
-  remainingPlan: Array<{ objective: string; capability_intent: string }> = [],
+  task: string,
+  remainingPlan: Array<{ capability: string; task: string }> = [],
 ) {
   return {
-    result: 'next_task',
-    next_task: {
-      objective,
-      capability_intent: 'scripted graph test',
-      context_summary: contextSummary,
-    },
-    remaining_plan: remainingPlan,
+    tasks: [{ capability: '', task }, ...remainingPlan],
   };
 }
 
@@ -397,25 +383,17 @@ test('task_done reroutes through capabilityPlanner before the next task', async 
       plannerInputs.push(input);
       if (plannerInputs.length === 1) {
         return {
-          result: 'next_task',
-          next_task: {
-            objective: '读取 issue #269 并提炼需求点。',
-            capability_intent: 'codebase_exploration',
-            capability_name: 'explore',
-            context_summary: null,
-          },
-          remaining_plan: [],
+          tasks: [{
+            capability: 'explore',
+            task: '读取 issue #269 并提炼需求点。',
+          }],
         };
       }
       return {
-        result: 'next_task',
-        remaining_plan: [],
-        next_task: {
-          objective: '检索本地实现与 git log，判断需求点是否已覆盖。',
-          capability_intent: 'codebase_exploration',
-          capability_name: 'explore',
-          context_summary: null,
-        },
+        tasks: [{
+          capability: 'explore',
+          task: '检索本地实现与 git log，判断需求点是否已覆盖。',
+        }],
       };
     },
   };
@@ -435,7 +413,12 @@ test('task_done reroutes through capabilityPlanner before the next task', async 
     capabilityPlannerRunner,
   });
 
+  const dynamicSystemContext = new SystemMessage('DYNAMIC_WIKI_SYSTEM_CONTEXT');
+  const compactionContext = new SystemMessage('FRAMEWORK_COMPACTION_CONTEXT');
+  compactionContext.name = CONTEXT_COMPACTION_MESSAGE_NAME;
   const state = await graph.invoke(buildOrchestratorRunInput([
+    dynamicSystemContext,
+    compactionContext,
     new HumanMessage('看 issue #269，再查本地实现，最后总结。'),
   ]), {
     configurable: {
@@ -451,10 +434,24 @@ test('task_done reroutes through capabilityPlanner before the next task', async 
   assert.doesNotMatch(entryDecisionInputs[0], /plan_draft|task_plan_draft/);
   assert.equal(plannerInputs[0]?.mode, 'entry');
   assert.equal(plannerInputs[1]?.mode, 'boundary');
-  assert.match(plannerInputs[1]?.latestHandoff ?? '', /issue #269 需求点/);
-  assert.deepEqual(plannerInputs[1]?.completedTasks.map(({ objective }) => objective), [
-    '读取 issue #269 并提炼需求点。',
-  ]);
+  assert.doesNotMatch(
+    plannerInputs[0]?.messages.map(readMessageText).join('\n') ?? '',
+    /DYNAMIC_WIKI_SYSTEM_CONTEXT/,
+  );
+  assert.match(
+    plannerInputs[0]?.messages.map(readMessageText).join('\n') ?? '',
+    /FRAMEWORK_COMPACTION_CONTEXT/,
+  );
+  assert.equal(plannerInputs[0]?.messages[0]?._getType(), 'ai');
+  assert.match(
+    plannerInputs[1]?.messages.map(readMessageText).join('\n') ?? '',
+    /issue #269 需求点/,
+  );
+  assert.match(
+    plannerInputs[1]?.messages.map(readMessageText).join('\n') ?? '',
+    /接下来我会先处理这项任务：读取 issue #269 并提炼需求点/,
+  );
+  assert.equal(plannerInputs[1]?.completedTask, '读取 issue #269 并提炼需求点。');
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
   assert.equal(state.runPendingTask, null);
   assert.deepEqual(state.runCapabilityPlan, []);
@@ -498,30 +495,20 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
       plannerInputs.push(input);
       if (input.mode === 'entry') {
         return {
-          result: 'next_task',
-          remaining_plan: [
-            {
-              objective: '检索本地实现与 git log。',
-              capability_intent: 'codebase_exploration',
-            },
-          ],
-          next_task: {
-            objective: '读取 issue #269 并提炼需求点。',
-            capability_intent: 'codebase_exploration',
-            capability_name: 'explore',
-            context_summary: null,
-          },
+          tasks: [{
+            capability: 'explore',
+            task: '读取 issue #269 并提炼需求点。',
+          }, {
+            capability: 'explore',
+            task: '检索本地实现与 git log。',
+          }],
         };
       }
       return {
-        result: 'next_task',
-        remaining_plan: [],
-        next_task: {
-          objective: '检索本地实现与 git log。',
-          capability_intent: 'codebase_exploration',
-          capability_name: 'explore',
-          context_summary: null,
-        },
+        tasks: [{
+          capability: 'explore',
+          task: '检索本地实现与 git log。',
+        }],
       };
     },
   };
@@ -564,13 +551,14 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
   assert.equal(plannerInputs.length, 2);
   assert.deepEqual(plannerInputs.map(({ mode }) => mode), ['entry', 'boundary']);
   assert.deepEqual(plannerInputs[1]?.remainingPlan, [{
-    objective: '检索本地实现与 git log。',
-    capabilityIntent: 'codebase_exploration',
+    capability: 'explore',
+    task: '检索本地实现与 git log。',
   }]);
-  assert.deepEqual(plannerInputs[1]?.completedTasks.map(({ objective }) => objective), [
-    '读取 issue #269 并提炼需求点。',
-  ]);
-  assert.match(plannerInputs[1]?.latestHandoff ?? '', /完整 handoff 末尾约束：必须检查兼容性/);
+  assert.match(
+    plannerInputs[1]?.messages.map(readMessageText).join('\n') ?? '',
+    /完整 handoff 末尾约束：必须检查兼容性/,
+  );
+  assert.equal(plannerInputs[1]?.completedTask, '读取 issue #269 并提炼需求点。');
   assert.equal(answerModelInvocations, 0);
   assert.equal(String(state.messages.at(-1)?.content ?? ''), GOAL_DONE_ACKNOWLEDGEMENT);
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
@@ -759,7 +747,6 @@ test('Capability Planner unavailable result is materialized without a second sem
     capabilityPlannerRunner: {
       async invoke() {
         return {
-          result: 'unavailable',
           task: '完成普通工作区任务',
           reason: 'No specialized Capability matched.',
         };
@@ -892,14 +879,10 @@ test('Capability Planner materializer rejects selections outside the workspace',
       async invoke(input) {
         assert.equal(input.mode, 'entry');
         return {
-          result: 'next_task',
-          next_task: {
-            objective: '读取 src/index.ts。',
-            capability_intent: '读取代码',
-            capability_name: 'not_registered',
-            context_summary: null,
-          },
-          remaining_plan: [],
+          tasks: [{
+            capability: 'not_registered',
+            task: '读取 src/index.ts。',
+          }],
         };
       },
     },
@@ -945,14 +928,10 @@ test('Capability Planner owns the executable task boundary at entry', async () =
       async invoke(input) {
         assert.equal(input.mode, 'entry');
         return {
-          result: 'next_task',
-          next_task: {
-            objective: '检查 src/index.ts 并整理其公开接口。',
-            capability_intent: '代码检查',
-            capability_name: 'general',
-            context_summary: '只读检查。',
-          },
-          remaining_plan: [],
+          tasks: [{
+            capability: 'general',
+            task: '检查 src/index.ts 并整理其公开接口。',
+          }],
         };
       },
     },
@@ -5953,19 +5932,17 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
         if (structuredCallCount === 2) {
           return scriptedPlannerTask(
             '关闭 GitHub Issue #272。',
-            'GitHub issue 操作。',
-            [{ objective: '删除 packages/goat 目录。', capability_intent: 'file_cleanup' }],
+            [{ capability: 'ops', task: '删除 packages/goat 目录。' }],
           );
         }
         if (structuredCallCount === 3) return scriptedPlannerCapability('ops');
         if (structuredCallCount === 4) return taskDoneDecision('issue 已关闭，还需删除目录。');
         if (structuredCallCount === 5) {
           return {
-            result: 'next_task',
-            remaining_plan: [
-              { objective: '汇总执行结果。', capability_intent: 'summary' },
+            tasks: [
+              { capability: '', task: '删除 packages/goat 目录。' },
+              { capability: 'ops', task: '汇总执行结果。' },
             ],
-            next_task: { objective: '删除 packages/goat 目录。', capability_intent: 'file_cleanup' },
           };
         }
         if (structuredCallCount === 6) return scriptedPlannerCapability('ops');
@@ -6023,6 +6000,7 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
   assert.match(briefingA, /^<delegation_briefing[^>]*mode="initial">/);
   assert.match(briefingA, /<task>[\s\S]*关闭 GitHub Issue #272。[\s\S]*<\/task>/);
   assert.match(briefingB, /<task>[\s\S]*删除 packages\/goat 目录。[\s\S]*<\/task>/);
+  assert.doesNotMatch(briefingB, /<essential_context>/);
   assert.doesNotMatch(briefingB, /计划进度|剩余计划|\[已完成\]/);
 
   // The original user request is intact — no copy, rewrite, or demotion.
@@ -6069,7 +6047,7 @@ test('continue outcome appends a continuation briefing carrying the gap note', a
           return needsPlanDecision();
         }
         if (structuredCallCount === 2) {
-          return scriptedPlannerTask('关闭 GitHub Issue #272。', 'GitHub issue 操作。');
+          return scriptedPlannerTask('关闭 GitHub Issue #272。');
         }
         if (structuredCallCount === 3) return scriptedPlannerCapability('ops');
         if (structuredCallCount === 4) return continueDecision('未验证 issue 状态，请确认已关闭。');

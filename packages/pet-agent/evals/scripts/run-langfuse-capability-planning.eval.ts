@@ -1,4 +1,4 @@
-import { HumanMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { tool } from '@langchain/core/tools';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -8,7 +8,6 @@ import { createCapabilityPlannerAgent } from '../../src/agent/orchestrator/capab
 import type { CapabilityPlannerResult } from '../../src/agent/orchestrator/capabilityPlannerRunner.ts';
 import { materializeCapabilityDocumentWorkspace } from '../../src/agent/orchestrator/capabilityDocumentWorkspace.ts';
 import { compileAgentRegistry } from '../../src/agent/orchestrator/registry.ts';
-import { buildPreparedRequestContext } from '../../src/agent/orchestrator/prompts.ts';
 import {
   defineCapability,
   defineInstructionDocument,
@@ -59,29 +58,43 @@ function capabilityFromRegistryEntry(entry: string): AgentCapability {
 function plannerOutput(
   result: CapabilityPlannerResult,
 ): CapabilityPlanningEvalOutput {
-  if (result.result === 'unavailable') {
+  if (!('tasks' in result)) {
     return {
-      result: result.result,
+      result: 'unavailable',
       nextTask: null,
-      capabilityIntent: null,
       capabilityName: null,
       remainingPlan: [],
     };
   }
+  const [nextTask, ...remainingPlan] = result.tasks;
   return {
-    result: result.result,
-    nextTask: result.next_task.objective,
-    capabilityIntent: result.next_task.capability_intent,
-    capabilityName: result.next_task.capability_name,
-    remainingPlan: result.remaining_plan.map((task) => ({
-      objective: task.objective,
-      capabilityIntent: task.capability_intent,
-    })),
+    result: 'plan',
+    nextTask: nextTask?.task ?? null,
+    capabilityName: nextTask?.capability ?? null,
+    remainingPlan: remainingPlan.map((task) => ({ ...task })),
   };
+}
+
+function splitList(value: string | undefined): string[] {
+  return value?.split(',')
+    .map((item) => item.trim())
+    .filter(Boolean) ?? [];
+}
+
+function selectedCases() {
+  const requested = new Set(splitList(process.env.EVAL_CASES));
+  if (requested.size === 0) return capabilityPlanningBasicsDataset.cases;
+  return capabilityPlanningBasicsDataset.cases.filter((testCase) =>
+    requested.has(testCase.id) || requested.has(testCase.name),
+  );
 }
 
 async function main() {
   const config = resolveLangfuseConfig();
+  const cases = selectedCases();
+  if (cases.length === 0) {
+    throw new Error(`No eval cases selected. EVAL_CASES=${process.env.EVAL_CASES ?? '(unset)'}`);
+  }
   const subjectProfileId = process.env.PROMPT_EVAL_MODEL_PROFILE_ID?.trim();
   const judgeProfileId = process.env.PROMPT_EVAL_JUDGE_PROFILE_ID?.trim();
   if (!subjectProfileId || !judgeProfileId) {
@@ -109,7 +122,7 @@ async function main() {
   console.log(`Mode: ${modelConfig.label}`);
   console.log(`Judge: ${judgeConfig.label}`);
   try {
-    for (const testCase of capabilityPlanningBasicsDataset.cases) {
+    for (const testCase of cases) {
       const started = performance.now();
       try {
         const registry = compileAgentRegistry({
@@ -125,13 +138,12 @@ async function main() {
         }).invoke(
           {
             mode: testCase.input.mode,
-            userIntentContext: buildPreparedRequestContext({
-              latestUserRequest: testCase.input.userGoal,
-              recentMessages: [new HumanMessage(testCase.input.userGoal)],
-            }),
-            completedTasks: testCase.input.completedTasks ?? [],
+            messages: testCase.input.messages.map((message) =>
+              message.role === 'user'
+                ? new HumanMessage(message.content)
+                : new AIMessage(message.content)),
+            completedTask: testCase.input.completedTask ?? null,
             remainingPlan: testCase.input.remainingPlan ?? [],
-            latestHandoff: testCase.input.latestHandoff ?? null,
             workspace,
           },
           {
@@ -208,8 +220,8 @@ async function main() {
   } finally {
     await rm(cacheRoot, { recursive: true, force: true });
   }
-  console.log(`Cases: ${passed}/${capabilityPlanningBasicsDataset.cases.length} passed`);
-  if (passed !== capabilityPlanningBasicsDataset.cases.length) process.exitCode = 1;
+  console.log(`Cases: ${passed}/${cases.length} passed`);
+  if (passed !== cases.length) process.exitCode = 1;
 }
 
 main().catch((error) => {

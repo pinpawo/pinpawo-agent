@@ -286,7 +286,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function classifyDecision(output: Record<string, unknown>): DecisionKind {
   if (typeof output.action === 'string') return 'entry';
-  if (typeof output.result === 'string' && Array.isArray(output.remaining_plan)) return 'planner';
+  if (Array.isArray(output.tasks)) return 'planner';
   if (typeof output.outcome === 'string') return 'outcome';
   return 'unknown';
 }
@@ -326,10 +326,7 @@ function createRecordingActModel(model: AgentModels['act']) {
             const output = isRecord(toolCall.args)
               ? toolCall.args
               : { value: toolCall.args };
-            if (
-              output.result !== 'next_task'
-              && output.result !== 'unavailable'
-            ) {
+            if (toolCall.name !== 'submit_plan' && toolCall.name !== 'report_unavailable') {
               continue;
             }
             decisions.push({ kind: 'planner', output });

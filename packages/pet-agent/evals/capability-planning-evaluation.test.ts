@@ -36,10 +36,10 @@ test('planner goal contract keeps semantic plan checks outside the deterministic
     buildCapabilityPlanningGoalContract(testCase.expected).acceptanceCriteria.map(({ id }) => id),
     [
       'materialized_task_correct',
-      'current_capability_intent_correct',
+      'current_capability_selection_correct',
       'task_boundaries_justified',
       'remaining_plan_objectives_correct',
-      'remaining_capability_intents_correct',
+      'remaining_capability_selections_correct',
     ],
   );
 });
@@ -65,12 +65,12 @@ test('planner goal evaluation rejects a semantically wrong plan with the correct
     input: testCase.input,
     expected: testCase.expected,
     output: {
-      result: 'next_task',
+      result: 'plan',
       nextTask: '探索 auth 模块现有结构和风险',
-      capabilityIntent: '代码库分析',
+      capabilityName: 'explore',
       remainingPlan: [{
-        objective: '撰写一篇与 auth 重构无关的博客',
-        capabilityIntent: '内容创作',
+        capability: 'general',
+        task: '撰写一篇与 auth 重构无关的博客',
       }],
     },
     judge: goalJudgeWithFailure('remaining_plan_objectives_correct'),

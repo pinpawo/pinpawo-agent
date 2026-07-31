@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import {
   AIMessage,
+  HumanMessage,
   ToolMessage,
   type BaseMessage,
 } from '@langchain/core/messages';
@@ -35,7 +36,7 @@ type ScriptedToolCall = {
 };
 
 type ScriptedStructuredOutput = {
-  kind: 'next_task' | 'unavailable';
+  kind: 'plan' | 'unavailable';
   args: Record<string, unknown>;
 };
 
@@ -60,6 +61,8 @@ class ScriptedPlannerModel extends BaseChatModel {
   readonly boundToolOptions: Record<string, unknown>[] = [];
   readonly structuredOutputToolNames = new Map<string, string>();
   readonly structuredOutputSchemaReferences: string[] = [];
+  readonly structuredOutputPlanLimits: number[] = [];
+  readonly structuredOutputCapabilityEnums: string[][] = [];
   #responseIndex = 0;
 
   constructor(
@@ -84,11 +87,7 @@ class ScriptedPlannerModel extends BaseChatModel {
       name?: string;
       function?: {
         name?: string;
-        parameters?: {
-          properties?: {
-            result?: { const?: unknown };
-          };
-        } & Record<string, unknown>;
+        parameters?: Record<string, unknown>;
       };
     }>;
     this.boundToolNames.splice(
@@ -104,15 +103,52 @@ class ScriptedPlannerModel extends BaseChatModel {
       0,
       this.structuredOutputSchemaReferences.length,
     );
+    this.structuredOutputPlanLimits.splice(
+      0,
+      this.structuredOutputPlanLimits.length,
+    );
+    this.structuredOutputCapabilityEnums.splice(
+      0,
+      this.structuredOutputCapabilityEnums.length,
+    );
     for (const entry of toolEntries) {
       const name = entry.function?.name;
       const parameters = entry.function?.parameters;
-      const result = parameters?.properties?.result?.const;
-      if (name && typeof result === 'string') {
-        this.structuredOutputToolNames.set(result, name);
+      const kind = name === 'submit_plan'
+        ? 'plan'
+        : name === 'report_unavailable' ? 'unavailable' : null;
+      if (name && kind) {
+        this.structuredOutputToolNames.set(kind, name);
         this.structuredOutputSchemaReferences.push(
           ...collectJsonSchemaReferences(parameters),
         );
+        const properties = parameters?.properties;
+        const tasks = properties && typeof properties === 'object'
+          ? (properties as Record<string, unknown>).tasks
+          : null;
+        const maxItems = tasks && typeof tasks === 'object'
+          ? (tasks as Record<string, unknown>).maxItems
+          : null;
+        if (kind === 'plan' && typeof maxItems === 'number') {
+          this.structuredOutputPlanLimits.push(maxItems);
+        }
+        const items = tasks && typeof tasks === 'object'
+          ? (tasks as Record<string, unknown>).items
+          : null;
+        const itemProperties = items && typeof items === 'object'
+          ? (items as Record<string, unknown>).properties
+          : null;
+        const capability = itemProperties && typeof itemProperties === 'object'
+          ? (itemProperties as Record<string, unknown>).capability
+          : null;
+        const capabilityEnum = capability && typeof capability === 'object'
+          ? (capability as Record<string, unknown>).enum
+          : null;
+        if (kind === 'plan' && Array.isArray(capabilityEnum)) {
+          this.structuredOutputCapabilityEnums.push(
+            capabilityEnum.filter((name): name is string => typeof name === 'string'),
+          );
+        }
       }
     }
     this.boundToolOptions.push({ ...options });
@@ -240,16 +276,11 @@ function plannerInput(
 ): CapabilityPlannerInput {
   return {
     mode: 'entry',
-    userIntentContext: [
-      '<user_request>',
-      '<![CDATA[',
-      'Research the repository and then prepare a review.',
-      ']]>',
-      '</user_request>',
-    ].join('\n'),
-    completedTasks: [],
+    messages: [
+      new HumanMessage('Research the repository and then prepare a review.'),
+    ],
+    completedTask: null,
     remainingPlan: [],
-    latestHandoff: null,
     workspace,
     ...overrides,
   } as CapabilityPlannerInput;
@@ -259,21 +290,17 @@ function submitArgs(
   capabilityName: string,
 ) {
   return {
-    result: 'next_task',
-    next_task: {
-      objective: 'Research the repository.',
-      capability_intent: 'Repository exploration',
-      capability_name: capabilityName,
-      context_summary: null,
-    },
-    remaining_plan: [{
-      objective: 'Prepare the review from the findings.',
-      capability_intent: 'Review synthesis',
+    tasks: [{
+      capability: capabilityName,
+      task: 'Research the repository.',
+    }, {
+      capability: 'general',
+      task: 'Prepare the review from the findings.',
     }],
   };
 }
 
-test('Planner Agent explores CAPABILITY.md files and returns a structured current selection with an intent-only future tail', async (t) => {
+test('Planner Agent explores CAPABILITY.md files and returns a compact ordered task plan', async (t) => {
   const workspace = await createWorkspace(t, {
     explore: capabilityDocument({
       name: 'explore',
@@ -303,7 +330,7 @@ test('Planner Agent explores CAPABILITY.md files and returns a structured curren
     },
     {
       structuredOutput: {
-        kind: 'next_task',
+        kind: 'plan',
         args: submitArgs('explore'),
       },
     },
@@ -320,33 +347,28 @@ test('Planner Agent explores CAPABILITY.md files and returns a structured curren
     CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
   ]);
   assert.equal(model.structuredOutputToolNames.size, 1);
-  assert.ok(model.structuredOutputToolNames.has('next_task'));
+  assert.ok(model.structuredOutputToolNames.has('plan'));
   assert.equal(model.structuredOutputToolNames.has('unavailable'), false);
-  assert.ok(model.structuredOutputSchemaReferences.every(
-    (reference) => reference.startsWith('#/$defs/'),
-  ));
+  assert.deepEqual(model.structuredOutputSchemaReferences, []);
+  assert.deepEqual(model.structuredOutputPlanLimits, [24]);
+  assert.deepEqual(model.structuredOutputCapabilityEnums, [['explore', 'general']]);
   assert.ok(model.boundToolOptions.length > 0);
   assert.ok(model.boundToolOptions.every(
     (options) => options.parallel_tool_calls === false,
   ));
   assert.equal(model.invocations.length, 3);
+  assert.ok(model.invocations[0]?.some((message) =>
+    message instanceof HumanMessage
+    && message.content === 'Research the repository and then prepare a review.'));
   assert.deepEqual(result, {
-    result: 'next_task',
-    next_task: {
-      objective: 'Research the repository.',
-      capability_intent: 'Repository exploration',
-      capability_name: 'explore',
-      context_summary: null,
-    },
-    remaining_plan: [{
-      objective: 'Prepare the review from the findings.',
-      capability_intent: 'Review synthesis',
+    tasks: [{
+      capability: 'explore',
+      task: 'Research the repository.',
+    }, {
+      capability: 'general',
+      task: 'Prepare the review from the findings.',
     }],
   });
-  assert.equal(
-    'capability_name' in result.remaining_plan[0],
-    false,
-  );
 });
 
 test('entry mode forms one executable task after Capability exploration', async (t) => {
@@ -367,16 +389,12 @@ test('entry mode forms one executable task after Capability exploration', async 
     },
     {
       structuredOutput: {
-        kind: 'next_task',
+        kind: 'plan',
         args: {
-          result: 'next_task',
-          next_task: {
-            objective: 'Inspect issue #473 and report the Planner Agent constraints.',
-            capability_intent: 'Repository exploration',
-            capability_name: 'explore',
-            context_summary: 'Use the issue and repository as evidence.',
-          },
-          remaining_plan: [],
+          tasks: [{
+            capability: 'explore',
+            task: 'Inspect issue #473 and report the Planner Agent constraints.',
+          }],
         },
       },
     },
@@ -389,14 +407,14 @@ test('entry mode forms one executable task after Capability exploration', async 
 
   assert.equal(model.invocations.length, 2);
   assert.equal(model.structuredOutputToolNames.size, 2);
-  assert.ok(model.structuredOutputToolNames.has('next_task'));
+  assert.ok(model.structuredOutputToolNames.has('plan'));
   assert.ok(model.structuredOutputToolNames.has('unavailable'));
-  assert.equal(result.result, 'next_task');
+  assert.ok('tasks' in result);
   assert.equal(
-    result.next_task.objective,
+    'tasks' in result ? result.tasks[0]?.task : null,
     'Inspect issue #473 and report the Planner Agent constraints.',
   );
-  assert.equal(result.remaining_plan.length, 0);
+  assert.equal('tasks' in result ? result.tasks.length : 0, 1);
 });
 
 test('an unknown Capability returns tool feedback and can be repaired in-loop', async (t) => {
@@ -410,13 +428,13 @@ test('an unknown Capability returns tool feedback and can be repaired in-loop', 
   const model = new ScriptedPlannerModel([
     {
       structuredOutput: {
-        kind: 'next_task',
+        kind: 'plan',
         args: submitArgs('missing'),
       },
     },
     {
       structuredOutput: {
-        kind: 'next_task',
+        kind: 'plan',
         args: submitArgs('general'),
       },
     },
@@ -427,15 +445,15 @@ test('an unknown Capability returns tool feedback and can be repaired in-loop', 
     maxIterations: 6,
   }).invoke(plannerInput(workspace));
 
-  assert.equal(result.result, 'next_task');
-  assert.equal(result.next_task.capability_name, 'general');
+  assert.ok('tasks' in result);
+  assert.equal('tasks' in result ? result.tasks[0]?.capability : null, 'general');
   const feedback = model.invocations[1]?.find((message) =>
     message instanceof ToolMessage
     && message.tool_call_id === 'structured-1');
   assert.ok(feedback instanceof ToolMessage);
   assert.match(
     String(feedback.content),
-    /capability_name.*does not match schema/is,
+    /capability.*does not match schema/is,
   );
 });
 
@@ -445,7 +463,6 @@ test('an empty workspace can produce a truthful unavailable result', async (t) =
     structuredOutput: {
       kind: 'unavailable',
       args: {
-        result: 'unavailable',
         task: 'Publish a browser automation report.',
         reason: 'The current workspace contains no Capability documents.',
       },
@@ -457,10 +474,9 @@ test('an empty workspace can produce a truthful unavailable result', async (t) =
   );
 
   assert.equal(model.structuredOutputToolNames.size, 1);
-  assert.equal(model.structuredOutputToolNames.has('next_task'), false);
+  assert.equal(model.structuredOutputToolNames.has('plan'), false);
   assert.ok(model.structuredOutputToolNames.has('unavailable'));
   assert.deepEqual(result, {
-    result: 'unavailable',
     task: 'Publish a browser automation report.',
     reason: 'The current workspace contains no Capability documents.',
   });
@@ -468,6 +484,11 @@ test('an empty workspace can produce a truthful unavailable result', async (t) =
 
 test('boundary mode rejects answer and materializes remaining work with general', async (t) => {
   const workspace = await createWorkspace(t, {
+    explore: capabilityDocument({
+      name: 'explore',
+      description: 'Investigate repositories.',
+      instructions: 'Inspect repository evidence.',
+    }),
     general: capabilityDocument({
       name: 'general',
       description: 'Handle ordinary tasks.',
@@ -477,11 +498,9 @@ test('boundary mode rejects answer and materializes remaining work with general'
   const model = new ScriptedPlannerModel([
     {
       structuredOutput: {
-        kind: 'next_task',
+        kind: 'plan',
         args: {
-          result: 'answer',
-          next_task: null,
-          remaining_plan: [],
+          tasks: [],
         },
       },
     },
@@ -494,20 +513,17 @@ test('boundary mode rejects answer and materializes remaining work with general'
     },
     {
       structuredOutput: {
-        kind: 'next_task',
+        kind: 'plan',
         args: {
-          result: 'next_task',
-          next_task: {
-            objective: 'Prepare the review from the completed research.',
-            capability_intent: 'Review synthesis',
-            capability_name: 'general',
-            context_summary: 'Use the accepted research handoff as evidence.',
-          },
-          remaining_plan: [],
+          tasks: [{
+            capability: 'general',
+            task: 'Prepare the review from the completed research.',
+          }],
         },
       },
     },
   ]);
+  const fullHandoff = `Research completed. ${'Evidence detail. '.repeat(40)}Final constraint: preserve the public API.`;
 
   const result = await createCapabilityPlannerAgent({
     model,
@@ -515,20 +531,31 @@ test('boundary mode rejects answer and materializes remaining work with general'
   }).invoke(
     plannerInput(workspace, {
       mode: 'boundary',
-      completedTasks: [{
-        objective: 'Research the repository.',
-        result: 'The requested evidence was delivered; review synthesis remains.',
-      }],
-      latestHandoff: 'Research complete; prepare the review.',
+      messages: [
+        new HumanMessage('Research the repository and then prepare a review.'),
+        new AIMessage('Next I will research the repository.'),
+        new AIMessage(fullHandoff),
+      ],
+      completedTask: 'Research the repository.',
       remainingPlan: [{
-        objective: 'Prepare the review from the findings.',
-        capabilityIntent: 'Review synthesis',
+        capability: 'general',
+        task: 'Prepare the review from the findings.',
       }],
     }),
   );
 
-  assert.equal(result.result, 'next_task');
-  assert.equal(result.next_task.capability_name, 'general');
+  assert.ok('tasks' in result);
+  assert.equal('tasks' in result ? result.tasks[0]?.capability : null, 'general');
+  assert.deepEqual(model.structuredOutputCapabilityEnums, [['general', 'explore']]);
+  assert.ok(model.invocations[0]?.some((message) =>
+    message instanceof AIMessage && message.content === fullHandoff));
+  assert.ok(model.invocations[0]?.some((message) =>
+    message instanceof HumanMessage
+    && String(message.content).includes('<planning_state mode="boundary">')));
+  assert.match(
+    model.invocations[0]?.map((message) => String(message.content)).join('\n') ?? '',
+    /Final constraint: preserve the public API/,
+  );
   assert.ok(model.invocations[1]?.some((message) =>
     message instanceof ToolMessage
     && message.tool_call_id === 'structured-1'));

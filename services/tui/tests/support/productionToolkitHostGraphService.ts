@@ -227,20 +227,19 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
   } as unknown as AgentModels['act'];
   const capabilityPlannerRunner: CapabilityPlannerRunner = {
     async invoke(input) {
-      const readsAttachment = input.userIntentContext.includes(
+      const readsAttachment = messagesContain(
+        input.messages,
         ATTACHMENT_TOOL_INPUT,
       );
       return {
-        result: 'next_task',
-        next_task: {
-          objective: readsAttachment
+        tasks: [
+          {
+            capability: 'general',
+            task: readsAttachment
             ? 'read the selected attachment'
             : 'write the guarded fixture',
-          capability_intent: 'production_tui_fixture',
-          capability_name: 'general',
-          context_summary: null,
-        },
-        remaining_plan: [],
+          },
+        ],
       };
     },
   };
@@ -354,7 +353,7 @@ function messageText(message: BaseMessage) {
       )).join('\n');
 }
 
-function messagesContain(messages: BaseMessage[], value: string) {
+function messagesContain(messages: readonly BaseMessage[], value: string) {
   return messages.some((message) => messageText(message).includes(value));
 }
 

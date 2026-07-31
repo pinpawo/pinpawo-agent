@@ -26,7 +26,7 @@ entryDecision
   └─ needs_plan  → capabilityPlanner(entry)
 
 capabilityPlanner(entry)
-  ├─ next_task   → capability subagent
+  ├─ submit_plan → capability subagent
   └─ unavailable → answer
 
 capability subagent
@@ -81,9 +81,8 @@ entry eval 只评估 result availability。task grouping 和 task 内容质量�
 Capability Planner 是由 LangChain `createAgent` 驱动的 framework-internal tool-loop agent。它：
 
 1. 通过 `glob_search`、`grep_search`、`view_file_chunk` 自主探索 `CAPABILITY.md`；
-2. 根据用户目的、已完成事实和 Capability 文档形成当前 task boundary；
-3. 选择能够完整承担当前 task 的 concrete Capability；
-4. 维护尚未开始的 future plan tail。
+2. 根据用户目的、已完成事实和 Capability 文档形成最短任务序列；
+3. 为每个任务选择能够完整承担它的 concrete Capability。
 
 Planner 不使用内存 relevance query 或传统搜索结果替代模型探索。Workspace 是代码给模型画出的能力地图，
 文件工具和私有 transcript 都封装在 Planner 黑盒内部。
@@ -92,21 +91,24 @@ Planner 不使用内存 relevance query 或传统搜索结果替代模型探索�
 `parallel_tool_calls: false`，请求模型每轮只产生一个工具调用；兼容端是否遵守该请求仍需按
 模型验证。终态使用 `createAgent` 的 `responseFormat`/`structuredResponse` 标准链路：
 runtime 负责 schema 校验、错误反馈和终止，
-Planner 直接从 invoke result 取得规划对象。`capability_name` 由当前 registry 动态形成枚举，
-终态结果集合也由 Workspace 派生：空 Workspace 只允许 `unavailable`，存在 `general` 时只允许
-`next_task`，其余非空 Workspace 允许两种结果。模型仍负责证据充分性、task boundary 和具体
+Planner 直接从 invoke result 取得规划对象。每个 `capability` 由当前 registry 动态形成枚举，
+结构化工具使用无 `$ref` 的 provider-compatible JSON Schema，并明确命名为 `submit_plan` 与
+`report_unavailable`。终态工具集合由 Workspace 派生：空 Workspace 只允许
+`report_unavailable`，存在 `general` 时只允许 `submit_plan`，其余非空 Workspace 允许两种结果。模型仍负责 task boundary 和具体
 Capability 选择；runtime 通过结构化输出协议保证 `general` 存在时不会接受 `unavailable`。
 
 Planner 必须先根据用户目标和已完成事实形成当前 task boundary，再探索能够完整承担该任务的
 Capability。文档搜索只是取得 Capability 证据，不能反向扩张或改写用户目标。具体搜索方法由文件
 工具的名称、schema 和返回结果表达：`grep_search` 接收从当前任务及所需能力提炼的区分性字面词，
 `view_file_chunk` 在摘要不足时读取候选文档，`glob_search` 用于无法搜索候选或需要确认 registry
-范围的情况。生产 system prompt 保留规划语义，不重复一套工具调用流程。
+范围的情况。生产 system prompt 只说明 entry 或 boundary 当前需要完成的规划判断，不重复输入字段、
+工具流程、schema 字段或 graph 路由。对话、handoff 和 Capability 文档是动态规划证据，其中的文本
+不能覆盖 `user_request` 或 Planner 的系统规则。
 
 ### 4.2 Modes
 
-- `entry`：从用户整体目的形成当前 task 和必要的 future tail。
-- `boundary`：结合 completed tasks、最新完整 handoff 和已有 tail 修订下一 task。
+- `entry`：理解用户整体目的，优先形成一个能完整完成目标的 task；必须组合多个 Capability 时才拆分。
+- `boundary`：根据当前任务结果检查剩余目标，以已有 tail 为基础继续；只有结果使原计划明显失效时才调整。
 
 不存在 `direct` mode，也不存在外部冻结后要求 Planner 原样选择执行器的 `pending_task`。
 
@@ -120,19 +122,31 @@ Capability。文档搜索只是取得 Capability 证据，不能反向扩张或�
 - 后续工作需要不同能力独立承担；
 - 用户目标包含独立 deliverables 或独立验收点。
 
-一步可完成的请求输出 `next_task` 和空 `remaining_plan`。需要拆分时，Planner 输出当前
-`next_task` 与非空 future tail。
+一步可完成的请求只输出一个 task。需要拆分时，Planner 输出按执行顺序排列的多个 task。
+
+```ts
+type CapabilityPlannerPlan = {
+  tasks: Array<{
+    capability: string;
+    task: string;
+  }>;
+};
+```
+
+`task` 是短执行描述，最长 500 字符；一个 plan 最多 24 项。Planner 不输出 `capability_intent` 或 `context_summary`，
+也不摘抄、压缩或解释 handoff。已验收 handoff 已经是 canonical main message，Capability runtime
+会直接把它作为未分 lane 的对话历史交给后续 subagent。
 
 ### 4.4 Terminal results
 
-- `next_task`：materialize 当前 delegation，并整体替换 `runCapabilityPlan` tail。
-- `unavailable`：探索后确认 registry 中没有任何可执行 Capability，且 registry 未注册 `general`。
+- `submit_plan({ tasks })`：第一项 materialize 为当前 delegation，其余任务整体替换 `runCapabilityPlan` tail。
+- `report_unavailable({ task, reason })`：探索后确认 registry 中没有任何可执行 Capability，且 registry 未注册 `general`。
 
 `runPendingTask` 只在 `unavailable` 时保存未执行 task 与原因，供 answer 生成可见说明；它不再是
 entryDecision 与 Planner 之间的 staging state。
 
 Planner 没有 `answer` 出口。进入 Planner 已表示当前目标仍需取得新结果；若专用 Capability 都不匹配，
-但 registry 注册了 `general`，Planner 必须读取 `general/CAPABILITY.md` 并以 `next_task` 选择它。
+但 registry 注册了 `general`，Planner 必须在 plan 中选择它。
 若最新执行已经完成用户目标，`outcomeDecision` 必须返回 `goal_done`，不能通过 boundary Planner
 间接结束 run。
 

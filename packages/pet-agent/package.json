@@ -40,7 +40,7 @@
     "eval:langfuse:route": "node --env-file=.env --import tsx/esm evals/scripts/run-langfuse-route.eval.ts",
     "eval:langfuse:capability-planning": "node --env-file-if-exists=.env --import tsx/esm evals/scripts/run-langfuse-capability-planning.eval.ts",
     "eval:langfuse:outcome-decision": "node --env-file-if-exists=.env --import tsx/esm evals/scripts/run-langfuse-outcome-decision.eval.ts",
-    "eval:langfuse:multi-task-flow": "node --env-file=.env --import tsx/esm evals/scripts/run-langfuse-multi-task-flow.eval.ts",
+    "eval:langfuse:multi-task-flow": "node --env-file-if-exists=.env --import tsx/esm evals/scripts/run-langfuse-multi-task-flow.eval.ts",
     "eval:langfuse:tool-review-reject": "node --env-file=.env --import tsx/esm evals/scripts/run-langfuse-tool-review-reject.eval.ts",
     "eval:route": "node --env-file=.env --import tsx/esm evals/orchestrator-route.eval.ts",
     "eval:flow:mock-subagent": "node --env-file=.env --import tsx/esm evals/orchestrator-flow.mock-subagent.eval.ts",

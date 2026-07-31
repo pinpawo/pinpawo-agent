@@ -2,25 +2,22 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Command } from '@langchain/langgraph';
-import type { BaseMessage } from '@langchain/core/messages';
+import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { materializeCapabilityDocumentWorkspace } from '../../capabilityDocumentWorkspace';
 import { createCapabilityPlannerAgent } from '../../capabilityPlannerAgent';
 import type {
   CapabilityPlannerInput,
-  CapabilityPlannerNextTask,
   CapabilityPlannerResult,
   CapabilityPlannerRunner,
+  CapabilityPlannerTask,
 } from '../../capabilityPlannerRunner';
-import { readContextCompactionSummaries } from '../../contextCompaction';
 import { materializeDelegation } from '../../delegationBriefing';
 import { appendRunDelegationSummary } from '../../delegations';
+import { isContextCompactionMessage } from '../../contextCompaction';
 import {
-  buildPreparedRequestContextFragment,
-} from '../../prompts';
-import {
-  getMessageHandoffSource,
-  readLatestHumanRequest,
+  mainConversationMessages,
+  toolProtocolSafeMessages,
 } from '../../messageLanes';
 import type { OrchestratorStateType } from '../../state';
 import type {
@@ -29,12 +26,10 @@ import type {
   OrchestratorConfig,
   RunNextDelegation,
 } from '../../types';
-import { readMessageText } from '../../utils';
 import {
   getInvokeOptions,
   getInvokeRegistry,
 } from '../config';
-import { mainMessagesWithoutCompaction } from '../decisions/conversationContext';
 import { createTaskActiveDelegation } from '../decisions/delegationLifecycle';
 
 const DEFAULT_CAPABILITY_PLANNER_WORKSPACE_ROOT = join(
@@ -48,49 +43,42 @@ function buildPlannerMode(state: OrchestratorStateType): CapabilityPlannerInput[
     : 'boundary';
 }
 
+function buildPlannerMessages(messages: BaseMessage[]) {
+  // Planner policy comes only from its own system prompt. Main Human/AI turns
+  // remain verbatim; framework compaction is retained as lower-authority evidence.
+  const projectedMessages = mainConversationMessages(messages).flatMap((message) => {
+    const type = message._getType();
+    if (type === 'human' || type === 'ai') return [message];
+    if (isContextCompactionMessage(message)) {
+      return [new AIMessage(message.content)];
+    }
+    return [];
+  });
+  return toolProtocolSafeMessages(projectedMessages);
+}
+
 function buildPlannerContext(state: OrchestratorStateType) {
-  const latestHumanRequest = readLatestHumanRequest(state.messages);
   const latestCompletedDelegation = [...state.runDelegationSummaries]
     .reverse()
     .find((item) => item.status === 'completed');
-  const latestHandoff = latestCompletedDelegation
-    ? [...state.messages]
-        .reverse()
-        .find((message) => {
-          const source = getMessageHandoffSource(message);
-          return source?.delegationId === latestCompletedDelegation.id
-            && source.handoffFrom === latestCompletedDelegation.lane;
-        })
-    : null;
-
   return {
-    userIntentContext: buildPreparedRequestContextFragment({
-      latestUserRequest: latestHumanRequest,
-      recentMessages: mainMessagesWithoutCompaction(state.messages),
-      contextSummaries: readContextCompactionSummaries(state.messages),
-    }),
-    completedTasks: state.runDelegationSummaries
-      .filter((item) => item.status === 'completed')
-      .map((item) => ({
-        objective: item.task,
-        result: item.resultPreview,
-      })),
-    latestHandoff: latestHandoff ? readMessageText(latestHandoff) : null,
+    messages: buildPlannerMessages(state.messages),
+    completedTask: latestCompletedDelegation?.task ?? null,
   };
 }
 
 function normalizeRemainingPlan(
-  result: Extract<CapabilityPlannerResult, { result: 'next_task' }>,
+  tasks: readonly CapabilityPlannerTask[],
 ): CapabilityPlanTask[] {
-  return result.remaining_plan.map((item) => ({
-    objective: item.objective.trim(),
-    capabilityIntent: item.capability_intent.trim(),
+  return tasks.map((item) => ({
+    capability: item.capability.trim(),
+    task: item.task.trim(),
   }));
 }
 
 function materializeNextDelegation(params: {
   state: OrchestratorStateType;
-  nextTask: CapabilityPlannerNextTask;
+  nextTask: CapabilityPlannerTask;
   remainingPlan: CapabilityPlanTask[];
   allowedCapabilityNames: readonly string[];
 }) {
@@ -100,17 +88,17 @@ function materializeNextDelegation(params: {
     remainingPlan,
     allowedCapabilityNames,
   } = params;
-  if (!allowedCapabilityNames.includes(nextTask.capability_name)) {
+  if (!allowedCapabilityNames.includes(nextTask.capability)) {
     throw new Error(
-      `Capability Planner selected "${nextTask.capability_name}" outside the immutable workspace.`,
+      `Capability Planner selected "${nextTask.capability}" outside the immutable workspace.`,
     );
   }
-  const lane: MessageLane = `capability:${nextTask.capability_name}`;
+  const lane: MessageLane = `capability:${nextTask.capability}`;
   const runNextDelegation: RunNextDelegation = {
     id: randomUUID().slice(0, 8),
     lane,
-    task: nextTask.objective,
-    contextSummary: nextTask.context_summary,
+    task: nextTask.task,
+    contextSummary: null,
   };
   const taskActiveDelegation = createTaskActiveDelegation(
     runNextDelegation,
@@ -122,7 +110,7 @@ function materializeNextDelegation(params: {
     runId: taskActiveDelegation.transcriptRunId,
     delegationId: runNextDelegation.id,
     task: runNextDelegation.task,
-    essentialContext: nextTask.context_summary,
+    essentialContext: null,
   });
 
   return {
@@ -148,7 +136,7 @@ function buildPlannerTransition(params: {
   result: CapabilityPlannerResult;
 }) {
   const { state, input, result } = params;
-  if (result.result === 'unavailable') {
+  if (!('tasks' in result)) {
     return {
       goto: 'answer' as const,
       update: {
@@ -162,12 +150,16 @@ function buildPlannerTransition(params: {
     };
   }
 
-  const remainingPlan = normalizeRemainingPlan(result);
+  const [nextTask, ...remainingTasks] = result.tasks;
+  if (!nextTask) {
+    throw new Error('Capability Planner submitted an empty task list.');
+  }
+  const remainingPlan = normalizeRemainingPlan(remainingTasks);
   return {
     goto: 'capability' as const,
     update: materializeNextDelegation({
       state,
-      nextTask: result.next_task,
+      nextTask,
       remainingPlan,
       allowedCapabilityNames: input.workspace.capabilityNames,
     }),

@@ -50,6 +50,16 @@ function writeProfiles() {
           contextWindowTokens: 1_000_000,
           inputModalities: ['text'],
         },
+        'deepseek-default': {
+          id: 'deepseek-default',
+          label: 'DeepSeek default',
+          sourcePreset: 'deepseek',
+          model: 'deepseek-v4-pro',
+          baseUrl: 'https://api.deepseek.com',
+          apiKey: 'secret-deepseek',
+          contextWindowTokens: 1_000_000,
+          inputModalities: ['text'],
+        },
       },
     },
   };
@@ -141,6 +151,53 @@ test('eval model resolution requires an explicit configured profile', () => {
       }),
       /Unknown model profile "missing"/,
     );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('eval models use the production default thinking control', () => {
+  const { root, configPath } = writeProfiles();
+  try {
+    const evaluated = createDecisionEvalModel({
+      profileId: 'deepseek-default',
+      role: 'subject',
+      env: {
+        PROMPT_EVAL_CONFIG_PATH: configPath,
+      },
+    });
+
+    assert.deepEqual(
+      (evaluated.model as unknown as {
+        modelKwargs: Record<string, unknown>;
+      }).modelKwargs,
+      { thinking: { type: 'disabled' } },
+    );
+    assert.equal(evaluated.metadata.reasoningEffort, 'disabled');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('explicit eval reasoning effort overrides the production default', () => {
+  const { root, configPath } = writeProfiles();
+  try {
+    const evaluated = createDecisionEvalModel({
+      profileId: 'deepseek-default',
+      role: 'subject',
+      env: {
+        PROMPT_EVAL_CONFIG_PATH: configPath,
+        PROMPT_EVAL_SUBJECT_REASONING_EFFORT: 'low',
+      },
+    });
+
+    assert.deepEqual(
+      (evaluated.model as unknown as {
+        modelKwargs: Record<string, unknown>;
+      }).modelKwargs,
+      { reasoning_effort: 'low' },
+    );
+    assert.equal(evaluated.metadata.reasoningEffort, 'low');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

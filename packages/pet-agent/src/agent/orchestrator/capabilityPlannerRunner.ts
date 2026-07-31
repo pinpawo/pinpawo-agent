@@ -1,17 +1,14 @@
 import type { RunnableConfig } from '@langchain/core/runnables';
+import type { BaseMessage } from '@langchain/core/messages';
 import type { CapabilityDocumentWorkspace } from './capabilityDocumentWorkspace';
 import type { CapabilityPlanTask } from './types';
 
 export type CapabilityPlannerMode = 'entry' | 'boundary';
 
 type CapabilityPlannerInputBase = {
-  readonly userIntentContext: string;
-  readonly completedTasks: ReadonlyArray<{
-    readonly objective: string;
-    readonly result: string | null;
-  }>;
+  readonly messages: readonly BaseMessage[];
+  readonly completedTask: string | null;
   readonly remainingPlan: readonly CapabilityPlanTask[];
-  readonly latestHandoff: string | null;
   readonly workspace: CapabilityDocumentWorkspace;
 };
 
@@ -19,24 +16,16 @@ export type CapabilityPlannerInput = CapabilityPlannerInputBase & {
   readonly mode: CapabilityPlannerMode;
 };
 
-export type CapabilityPlannerNextTask = {
-  readonly objective: string;
-  readonly capability_intent: string;
-  readonly capability_name: string;
-  readonly context_summary: string | null;
+export type CapabilityPlannerTask = {
+  readonly capability: string;
+  readonly task: string;
 };
 
 export type CapabilityPlannerResult =
   | {
-      readonly result: 'next_task';
-      readonly next_task: CapabilityPlannerNextTask;
-      readonly remaining_plan: ReadonlyArray<{
-        readonly objective: string;
-        readonly capability_intent: string;
-      }>;
+      readonly tasks: readonly CapabilityPlannerTask[];
     }
   | {
-      readonly result: 'unavailable';
       readonly task: string;
       readonly reason: string;
     };

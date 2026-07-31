@@ -42,8 +42,8 @@ export type RunPendingTask = {
 
 export type CapabilityPlanTask = {
   /** Planned capability boundary that has not started yet. */
-  objective: string;
-  capabilityIntent: string;
+  capability: string;
+  task: string;
 };
 
 export type TaskActiveDelegation = {

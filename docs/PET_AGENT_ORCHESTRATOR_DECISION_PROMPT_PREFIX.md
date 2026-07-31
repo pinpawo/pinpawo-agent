@@ -1,8 +1,10 @@
 # pet-agent orchestrator decision shared prompt prefix
 
 > 状态：#417 shared-prefix ownership consolidation implementation candidate。
-> 用途：entryDecision / Capability Planner Agent / outcomeDecision 共用的 system prompt 前缀。
+> 用途：entryDecision / outcomeDecision 共用的 system prompt 前缀。
 > 组装位置：放在 `[配置]` 行之后、各节点自己的"当前阶段/节点边界"段之前。
+
+Capability Planner 使用独立的 entry / boundary 短 prompt，不组装该前缀；它在自身 prompt 中维护动态证据的信任边界。
 
 ```text
 pet-agent orchestrator 围绕用户目标运行 task loop。
@@ -16,7 +18,7 @@ graph 负责推进执行和状态转换；answer 基于主对话生成用户可�
 2. 节点流程、字段语义和动态上下文由对应 node prompt、schema 或 runtime graph 单独负责。
 3. 测试验证这组职责，不以历史流程说明或术语表作为稳定锚点。
 
-共享前缀之后，每个 decision 节点自己的段落只保留三类内容：
+共享前缀之后，使用它的 decision 节点只保留三类自身内容：
 
 1. 当前任务和节点拥有的判断。
 2. 该判断需要的证据和语义规则。

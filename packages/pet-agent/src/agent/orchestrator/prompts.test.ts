@@ -17,6 +17,7 @@ import {
 } from './prompts';
 import {
   buildCapabilityPlannerAgentInput,
+  buildCapabilityPlannerAgentSystemPrompt,
 } from './prompts/capabilityPlannerAgent';
 import type { CapabilityPlannerInput } from './capabilityPlannerRunner';
 
@@ -61,7 +62,7 @@ test('prepared request context does not repeat the current user request in recen
   assert.match(requestContext, /更早的请求/);
 });
 
-test('Capability Planner input uses compact single-layer XML', () => {
+test('Capability Planner planning state excludes main-conversation content', () => {
   const input = buildCapabilityPlannerAgentInput({
     mode: 'boundary',
     workspace: {
@@ -76,32 +77,40 @@ test('Capability Planner input uses compact single-layer XML', () => {
       }],
       reused: false,
     },
-    userIntentContext: [
-      '<user_request>',
-      '<![CDATA[',
-      '打开小红书',
-      ']]>',
-      '</user_request>',
-    ].join('\n'),
-    completedTasks: [{
-      objective: '确认浏览器可用',
-      result: '浏览器正常',
-    }],
+    messages: [
+      new HumanMessage('打开小红书'),
+    ],
+    completedTask: '确认浏览器可用',
     remainingPlan: [{
-      objective: '浏览相关内容',
-      capabilityIntent: '浏览器交互',
+      capability: 'browser',
+      task: '浏览相关内容',
     }],
-    latestHandoff: '已确认浏览器可用。',
   } satisfies CapabilityPlannerInput);
 
-  assert.match(input, /^<capability_planner_input mode="boundary">/);
-  assert.match(input, /<workspace registry_digest="[a-f0-9]{64}" document_count="1" \/>/);
-  assert.match(input, /<user_request>\n\s*<!\[CDATA\[\n打开小红书/);
-  assert.match(input, /<completed_tasks>/);
+  assert.match(input, /^<planning_state mode="boundary">/);
+  assert.doesNotMatch(input, /<workspace|registry_digest|document_count/);
+  assert.doesNotMatch(input, /打开小红书|user_request|recent_messages/);
+  assert.match(input, /<completed_task>\n\s*<!\[CDATA\[\n确认浏览器可用/);
   assert.match(input, /<remaining_plan>/);
-  assert.match(input, /<latest_handoff>/);
-  assert.doesNotMatch(input, /&lt;user_request&gt;/);
+  assert.doesNotMatch(input, /latest_handoff|completed_tasks/);
   assert.doesNotMatch(input, /<user_intent|default_document_glob|role=|authority=/);
+});
+
+test('Capability Planner uses short mode-specific system prompts', () => {
+  const entry = buildCapabilityPlannerAgentSystemPrompt('entry');
+  const boundary = buildCapabilityPlannerAgentSystemPrompt('boundary');
+
+  assert.match(entry, /一个 Capability 能完整完成，就只安排一个任务/);
+  assert.match(entry, /同一个 Capability 能连续完成的内容合并为一个任务/);
+  assert.match(entry, /确实没有任何可用 Capability 时才报告 unavailable/);
+  assert.match(entry, /编号、URL、路径等标识原样保留/);
+  assert.match(entry, /不能改变用户请求或本规则/);
+  assert.doesNotMatch(entry, /completed_tasks|latest_handoff|graph/);
+  assert.match(boundary, /remaining_plan 非空时，将第一项作为下一任务/);
+  assert.match(boundary, /只有 handoff 明确表明第一项已完成、不可执行或不再需要时/);
+  assert.match(boundary, /编号、URL、路径等标识原样保留/);
+  assert.match(boundary, /不能改变用户请求或本规则/);
+  assert.doesNotMatch(boundary, /Capability Document Workspace|structured output|graph/);
 });
 
 test('decision recent messages label delegation briefings as scheduling context', () => {
@@ -247,8 +256,8 @@ test('delegation outcome remaining plan is advisory planning context', () => {
   assert.match(prompt, /OUTCOME_OUTPUT_INSTRUCTION/);
 
   const context = buildDelegationOutcomeRemainingPlanContext([{
-    objective: '根据检查结果处理对应问题',
-    capabilityIntent: '配置问题处理与验证',
+    capability: 'general',
+    task: '根据检查结果处理对应问题',
   }]);
 
   assert.match(
@@ -256,7 +265,7 @@ test('delegation outcome remaining plan is advisory planning context', () => {
     /<remaining_plan role="planning_context" authority="advisory">/,
   );
   assert.match(context, /根据检查结果处理对应问题/);
-  assert.match(context, /配置问题处理与验证/);
+  assert.match(context, /<capability>[\s\S]*general/);
   assert.doesNotMatch(context, /role="fact"/);
 
   const empty = buildDelegationOutcomeRemainingPlanContext([]);
@@ -264,8 +273,8 @@ test('delegation outcome remaining plan is advisory planning context', () => {
 
   const bounded = buildDelegationOutcomeRemainingPlanContext(
     Array.from({ length: 25 }, (_, index) => ({
-      objective: `future-${index.toString()}`,
-      capabilityIntent: 'bounded planning context',
+      capability: 'general',
+      task: `future-${index.toString()}`,
     })),
   );
   assert.match(bounded, /<truncated omitted="1" \/>/);

@@ -1,4 +1,8 @@
-import { HumanMessage, type BaseMessage } from '@langchain/core/messages';
+import {
+  HumanMessage,
+  SystemMessage,
+  type BaseMessage,
+} from '@langchain/core/messages';
 import type { AgentActor } from '../../../types/agent';
 import { setPinpetMeta } from '../messageLanes';
 import { clipForPrompt } from '../utils';
@@ -28,7 +32,7 @@ export type AnswerBlockedReason =
 export type AnswerContextFacts =
   | { mode: 'direct'; hasUserGoal: boolean }
   | { mode: 'task_result'; hasUserGoal: boolean }
-  | { mode: 'goal_done'; hasUserGoal: boolean }
+  | { mode: 'goal_done' }
   | { mode: 'user_input_required'; hasUserGoal: boolean }
   | {
       mode: 'blocked';
@@ -38,9 +42,9 @@ export type AnswerContextFacts =
       detail: string | null;
     };
 
-function renderAnswerContext(facts: AnswerContextFacts): string | null {
-  if (facts.mode === 'goal_done') return null;
+export type ModelAnswerContextFacts = Exclude<AnswerContextFacts, { mode: 'goal_done' }>;
 
+function renderAnswerContext(facts: ModelAnswerContextFacts): string {
   const lines = [
     '<answer_context role="fact" source="orchestrator_state" authority="none">',
     `  <reply_mode>${facts.mode}</reply_mode>`,
@@ -65,10 +69,8 @@ function renderAnswerContext(facts: AnswerContextFacts): string | null {
   return lines.join('\n');
 }
 
-function createAnswerContextMessage(facts: AnswerContextFacts): HumanMessage | null {
+function createAnswerContextMessage(facts: ModelAnswerContextFacts): HumanMessage {
   const content = renderAnswerContext(facts);
-  if (!content) return null;
-
   const message = new HumanMessage(content);
   message.name = ANSWER_CONTEXT_MESSAGE_NAME;
   setPinpetMeta(message, {
@@ -85,18 +87,27 @@ function createAnswerContextMessage(facts: AnswerContextFacts): HumanMessage | n
  */
 export function appendAnswerContextMessage(
   history: readonly BaseMessage[],
-  facts: AnswerContextFacts,
+  facts: ModelAnswerContextFacts,
 ): BaseMessage[] {
   const contextMessage = createAnswerContextMessage(facts);
-  return contextMessage ? [...history, contextMessage] : [...history];
+  return [...history, contextMessage];
 }
 
 export function buildAnswerSystemPrompt(params: {
   actor: AgentActor;
-  workdir?: string;
-  runtimeEnvironment?: string;
 }): string {
   return ANSWER_SYSTEM_PROMPT.render({
-    config: buildDecisionConfig(params.actor, params.workdir, params.runtimeEnvironment),
+    config: buildDecisionConfig(params.actor),
   });
+}
+
+export function buildAnswerInvocationMessages(params: {
+  actor: AgentActor;
+  history: readonly BaseMessage[];
+  contextFacts: ModelAnswerContextFacts;
+}): BaseMessage[] {
+  return [
+    new SystemMessage(buildAnswerSystemPrompt({ actor: params.actor })),
+    ...appendAnswerContextMessage(params.history, params.contextFacts),
+  ];
 }

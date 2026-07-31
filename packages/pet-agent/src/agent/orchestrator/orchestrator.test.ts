@@ -63,6 +63,7 @@ import {
   type OrchestratorStateType,
 } from './state';
 import { applyActiveDelegationTransition } from './runtime/activeDelegationTransition';
+import { GOAL_DONE_ACKNOWLEDGEMENT } from './runtime/nodes/answer';
 import { afterContextPrep } from './runtime/routes/afterContextPrep';
 import { readSubagentGuardStopReason } from '../../subagent/guardStop';
 import type {
@@ -460,11 +461,15 @@ test('task_done reroutes through capabilityPlanner before the next task', async 
 
 test('task_done returns to capabilityPlanner until the remaining goal is complete', async () => {
   let structuredCallCount = 0;
+  let answerModelInvocations = 0;
   const entryDecisionInputs: string[] = [];
   const outcomeDecisionInputs: string[] = [];
   const plannerInputs: CapabilityPlannerInput[] = [];
   const routeModel = {
-    invoke: async () => new AIMessage('final answer'),
+    invoke: async () => {
+      answerModelInvocations += 1;
+      return new AIMessage('不应调用');
+    },
     withStructuredOutput: () => ({
       invoke: async (messages: unknown[]) => {
         structuredCallCount += 1;
@@ -563,7 +568,8 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
     '读取 issue #269 并提炼需求点。',
   ]);
   assert.match(plannerInputs[1]?.latestHandoff ?? '', /完整 handoff 末尾约束：必须检查兼容性/);
-  assert.equal(String(state.messages.at(-1)?.content ?? ''), 'final answer');
+  assert.equal(answerModelInvocations, 0);
+  assert.equal(String(state.messages.at(-1)?.content ?? ''), GOAL_DONE_ACKNOWLEDGEMENT);
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
   assert.equal(state.runPendingTask, null);
   assert.deepEqual(state.runCapabilityPlan, []);
@@ -1001,14 +1007,12 @@ test('entry answer bypasses the Capability Planner', async () => {
   assert.equal(legacyToolPathCalled, false, 'Stage A removed the LLM tool-call search path');
 });
 
-test('a completed subagent announce reaches the decision, while answer node only acknowledges delegation completion', async () => {
+test('a completed subagent announce reaches the decision, then Answer closes without a model call', async () => {
   let decisionInput = '';
-  let answerInput = '';
+  let answerModelInvocations = 0;
   const model = {
-    invoke: async (messages: unknown[]) => {
-      answerInput = (messages as Array<{ content?: unknown }>)
-        .map((m) => String(m?.content ?? ''))
-        .join('\n');
+    invoke: async () => {
+      answerModelInvocations += 1;
       return new AIMessage('answered');
     },
     bindTools: () => ({
@@ -1078,17 +1082,12 @@ test('a completed subagent announce reaches the decision, while answer node only
   // copy, surfaced via mainConversationMessages.
   assert.match(decisionInput, /文件读取完成，lint 已通过/);
   assert.match(decisionInput, /END_OF_FULL_SUBAGENT_RESULT/);
-  // The dedicated answer node generates the final reply...
-  assert.equal(result.messages.at(-1)?.content, 'answered');
-  // ...and still receives complete main history; the extra completion context
-  // tells it to close the delegation turn instead of re-summarizing the result.
-  assert.match(answerInput, /END_OF_FULL_SUBAGENT_RESULT/);
-  assert.ok(answerInput.includes('A'.repeat(1400)), 'answer node should still see complete main history');
-  assert.match(answerInput, /本次用户目标（已完成）/);
-  assert.match(answerInput, /读取文件并运行 lint/);
-  assert.match(answerInput, /上一条消息已经完整呈现工作结果/);
-  assert.match(answerInput, /"读取文件并运行 lint"已完成。如需继续，请告诉我/);
-  assert.doesNotMatch(answerInput, /orchestrator|handoff|delegation|subagent/);
+  assert.equal(answerModelInvocations, 0);
+  assert.equal(result.messages.at(-1)?.content, GOAL_DONE_ACKNOWLEDGEMENT);
+  assert.equal(
+    result.messages.some((message) => String(message.content).includes('END_OF_FULL_SUBAGENT_RESULT')),
+    true,
+  );
 });
 
 test('answer node still sees compacted older results when the user asks to re-show them', async () => {
@@ -1131,14 +1130,12 @@ test('answer node still sees compacted older results when the user asks to re-sh
   assert.match(answerInput, /COMPACTED_RESULT_MARKER/);
 });
 
-test('delegation outcome answer asks LLM for a short delegation completion reply with full main history', async () => {
-  let answerInput = '';
+test('delegation goal_done emits the fixed close and preserves the handed-off result', async () => {
+  let answerModelInvocations = 0;
   const announceMarker = 'Vibe Coding 模型排行榜：1. Claude Sonnet 4；2. GPT-5；3. Gemini 2.5 Pro。';
   const routeModel = {
-    invoke: async (messages: unknown[]) => {
-      answerInput = (messages as Array<{ content?: unknown }>)
-        .map((m) => String(m?.content ?? ''))
-        .join('\n');
+    invoke: async () => {
+      answerModelInvocations += 1;
       return new AIMessage('执行器已经交付结果，我这边已完成收尾。');
     },
     bindTools: () => ({
@@ -1195,20 +1192,19 @@ test('delegation outcome answer asks LLM for a short delegation completion reply
   });
   const finalMessageText = String(result.messages.at(-1)?.content ?? '');
 
-  assert.equal(finalMessageText, '执行器已经交付结果，我这边已完成收尾。');
-  assert.match(answerInput, new RegExp(announceMarker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  assert.match(answerInput, /上一条消息已经完整呈现工作结果/);
-  assert.match(answerInput, /"搜索并整理 vibecoding 模型排行榜。"已完成。如需继续，请告诉我/);
-  assert.doesNotMatch(answerInput, /orchestrator|handoff|delegation|subagent/);
+  assert.equal(answerModelInvocations, 0);
+  assert.equal(finalMessageText, GOAL_DONE_ACKNOWLEDGEMENT);
+  assert.equal(
+    result.messages.some((message) => String(message.content).includes(announceMarker)),
+    true,
+  );
 });
 
 test('user_input_required returns control without claiming delegation completion', async () => {
-  let answerInput = '';
+  let answerMessages: BaseMessage[] = [];
   const routeModel = {
     invoke: async (messages: unknown[]) => {
-      answerInput = (messages as Array<{ content?: unknown }>)
-        .map((message) => String(message?.content ?? ''))
-        .join('\n');
+      answerMessages = messages as BaseMessage[];
       return new AIMessage('报告已经准备好，但还没有发送。请选择发送到邮件还是项目群。');
     },
     bindTools: () => ({
@@ -1290,11 +1286,20 @@ test('user_input_required returns control without claiming delegation completion
     result.messages.at(-1)?.content,
     '报告已经准备好，但还没有发送。请选择发送到邮件还是项目群。',
   );
-  assert.match(answerInput, /用户目标（尚未完成）/);
-  assert.match(answerInput, /报告已经完成，但用户尚未选择邮件或项目群/);
-  assert.match(answerInput, /<artifacts>/);
-  assert.match(answerInput, /capability-artifact:\/\/thread\/user-choice\/report/);
-  assert.doesNotMatch(answerInput, /"确认发送渠道并发送已经完成的报告"已完成/);
+  assert.deepEqual(
+    answerMessages.map((message) => message._getType()),
+    ['system', 'human', 'ai', 'human'],
+  );
+  const answerSystem = String(answerMessages[0]?.content ?? '');
+  const answerFacts = String(answerMessages.at(-1)?.content ?? '');
+  assert.doesNotMatch(answerSystem, /确认发送渠道|报告已经完成|artifact-awaiting-user-choice/);
+  assert.match(answerFacts, /<reply_mode>user_input_required<\/reply_mode>/);
+  assert.equal(answerMessages.some((message) => (
+    message._getType() === 'ai'
+    && String(message.content).includes('报告已经完成，但用户尚未选择邮件或项目群')
+    && String(message.content).includes('<artifacts>')
+    && String(message.content).includes('capability-artifact://thread/user-choice/report')
+  )), true);
   assert.equal(result.runDelegationSummaries[0]?.status, 'progress');
   assert.equal(result.taskActiveDelegation?.id, 'task-user-choice');
   assert.equal(result.taskActiveDelegation?.status, 'awaiting_decision');
@@ -4158,7 +4163,7 @@ test('buildSubagentHandoff rejects an announce without a message id', () => {
 
 test('terminal outcome decision keeps active delegation when handoff cannot be built', async () => {
   let toolRunCount = 0;
-  let answerSystemContext = '';
+  let answerMessages: BaseMessage[] = [];
   const rawTool = tool(async () => {
     toolRunCount += 1;
     return 'ran';
@@ -4169,9 +4174,7 @@ test('terminal outcome decision keeps active delegation when handoff cannot be b
   });
   const routeModel = {
     invoke: async (messages: unknown[]) => {
-      answerSystemContext = messages.map((message) => String(
-        (message as { content?: unknown }).content ?? '',
-      )).join('\n');
+      answerMessages = messages as BaseMessage[];
       return new AIMessage('当前 delegated task 还没有可交接结果，暂不能完成任务边界切换。');
     },
     bindTools: () => ({
@@ -4237,8 +4240,10 @@ test('terminal outcome decision keeps active delegation when handoff cannot be b
   assert.equal(state.taskActiveDelegation?.id, 'active-1');
   assert.equal(state.taskActiveDelegation?.lane, 'capability:explore');
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.id), ['active-1']);
-  assert.doesNotMatch(answerSystemContext, /达到执行上限/);
-  assert.match(answerSystemContext, /暂时没有可交付结果/);
+  assert.doesNotMatch(String(answerMessages[0]?.content ?? ''), /当前 explore 任务|已有任务仍待判断/);
+  assert.match(String(answerMessages.at(-1)?.content ?? ''), /<reply_mode>blocked<\/reply_mode>/);
+  assert.match(String(answerMessages.at(-1)?.content ?? ''), /<blocked_reason>incomplete<\/blocked_reason>/);
+  assert.match(String(answerMessages.at(-1)?.content ?? ''), /当前 explore 任务/);
   assert.match(String(mainConversationMessages(state.messages).at(-1)?.content ?? ''), /暂不能完成任务边界切换/);
 });
 
@@ -4849,12 +4854,10 @@ test('delegation outcome does not handoff a limit_reached announce', async () =>
 });
 
 test('delegation outcome uses a unified run-iteration guard before invoking decision', async () => {
-  let answerSystemContext = '';
+  let answerMessages: BaseMessage[] = [];
   const routeModel = {
     invoke: async (messages: unknown[]) => {
-      answerSystemContext = messages.map((message) => String(
-        (message as { content?: unknown }).content ?? '',
-      )).join('\n');
+      answerMessages = messages as BaseMessage[];
       return new AIMessage('主流程循环已达到上限，当前任务仍可续跑。');
     },
     bindTools: () => ({
@@ -4927,7 +4930,10 @@ test('delegation outcome uses a unified run-iteration guard before invoking deci
     },
   }) as OrchestratorStateType;
 
-  assert.match(answerSystemContext, /本次处理已达到执行上限/);
+  assert.doesNotMatch(String(answerMessages[0]?.content ?? ''), /持续执行大规模迁移|最近卡住/);
+  assert.match(String(answerMessages.at(-1)?.content ?? ''), /<reply_mode>blocked<\/reply_mode>/);
+  assert.match(String(answerMessages.at(-1)?.content ?? ''), /<blocked_reason>iteration_limit<\/blocked_reason>/);
+  assert.match(String(answerMessages.at(-1)?.content ?? ''), /持续执行大规模迁移/);
   assert.equal(state.messages.at(-1)?.content?.toString().includes('主流程循环已达到上限'), true);
   assert.equal(state.runIterationCount, 0);
   assert.equal(state.runPendingTask, null);

@@ -15,9 +15,8 @@ import {
 export type CapabilityPlanningEvalOutput = {
   result: string;
   nextTask: string | null;
-  capabilityIntent: string | null;
-  capabilityName?: string | null;
-  remainingPlan: Array<{ objective: string; capabilityIntent: string }>;
+  capabilityName: string | null;
+  remainingPlan: Array<{ capability: string; task: string }>;
 };
 
 export function buildCapabilityPlanningGoalContract(
@@ -29,7 +28,7 @@ export function buildCapabilityPlanningGoalContract(
   return {
     objective: `Produce ${expected.result} at this planning boundary. ${expected.reason}`,
     acceptanceCriteria: [
-      ...(expected.result === 'next_task'
+      ...(expected.result === 'plan'
         ? [{
             id: 'materialized_task_correct',
             statement: [
@@ -37,13 +36,6 @@ export function buildCapabilityPlanningGoalContract(
               'It preserves the required work and incorporates relevant handoff evidence without absorbing future tasks.',
               'It does not repeat work already satisfied by completed tasks or the latest handoff.',
               `Expected anchors: ${(expected.nextTaskTerms ?? []).join(', ')}.`,
-            ].join(' '),
-          }, {
-            id: 'current_capability_intent_correct',
-            statement: [
-              'The current capability intent describes the kind of ability needed for the materialized task.',
-              'It must not select a concrete executor.',
-              `Reference ability: ${expected.capabilityIntent ?? 'none'}.`,
             ].join(' '),
           }, ...(expected.capabilityName
             ? [{
@@ -63,8 +55,8 @@ export function buildCapabilityPlanningGoalContract(
               ? [
                   'The remaining plan collectively preserves all future work needed to realize the user goal, in execution order.',
                   'An intermediate objective is valid when it requires its own execution boundary and the plan still preserves the ultimate outcome it supports.',
-                  `Expected objective anchors: ${expected.remainingPlan
-                    .map(({ objectiveTerms }) => objectiveTerms.join(', '))
+                  `Expected task anchors: ${expected.remainingPlan
+                    .map(({ taskTerms }) => taskTerms.join(', '))
                     .join(' | ')}.`,
                 ].join(' ')
               : 'The remaining plan is empty because the current task covers all work required for the user goal at this boundary.',
@@ -72,12 +64,11 @@ export function buildCapabilityPlanningGoalContract(
         : []),
       ...(expected.remainingPlan.length > 0
         ? [{
-            id: 'remaining_capability_intents_correct',
+            id: 'remaining_capability_selections_correct',
             statement: [
-              'Each future capability intent semantically describes the ability needed for its objective.',
-              'The intents must not choose concrete executors.',
-              `Reference abilities: ${expected.remainingPlan
-                .map(({ capabilityIntent }) => capabilityIntent)
+              'Each future task selects the Capability that can execute it.',
+              `Expected Capabilities: ${expected.remainingPlan
+                .map(({ capability }) => capability)
                 .join(' | ')}.`,
             ].join(' '),
           }]

@@ -8,9 +8,9 @@ import { materializeCapabilityDocumentWorkspace } from '../../capabilityDocument
 import { createCapabilityPlannerAgent } from '../../capabilityPlannerAgent';
 import type {
   CapabilityPlannerInput,
-  CapabilityPlannerNextTask,
   CapabilityPlannerResult,
   CapabilityPlannerRunner,
+  CapabilityPlannerTask,
 } from '../../capabilityPlannerRunner';
 import { readContextCompactionSummaries } from '../../contextCompaction';
 import { materializeDelegation } from '../../delegationBriefing';
@@ -80,17 +80,17 @@ function buildPlannerContext(state: OrchestratorStateType) {
 }
 
 function normalizeRemainingPlan(
-  result: Extract<CapabilityPlannerResult, { result: 'next_task' }>,
+  tasks: readonly CapabilityPlannerTask[],
 ): CapabilityPlanTask[] {
-  return result.remaining_plan.map((item) => ({
-    objective: item.objective.trim(),
-    capabilityIntent: item.capability_intent.trim(),
+  return tasks.map((item) => ({
+    capability: item.capability.trim(),
+    task: item.task.trim(),
   }));
 }
 
 function materializeNextDelegation(params: {
   state: OrchestratorStateType;
-  nextTask: CapabilityPlannerNextTask;
+  nextTask: CapabilityPlannerTask;
   remainingPlan: CapabilityPlanTask[];
   allowedCapabilityNames: readonly string[];
 }) {
@@ -100,17 +100,17 @@ function materializeNextDelegation(params: {
     remainingPlan,
     allowedCapabilityNames,
   } = params;
-  if (!allowedCapabilityNames.includes(nextTask.capability_name)) {
+  if (!allowedCapabilityNames.includes(nextTask.capability)) {
     throw new Error(
-      `Capability Planner selected "${nextTask.capability_name}" outside the immutable workspace.`,
+      `Capability Planner selected "${nextTask.capability}" outside the immutable workspace.`,
     );
   }
-  const lane: MessageLane = `capability:${nextTask.capability_name}`;
+  const lane: MessageLane = `capability:${nextTask.capability}`;
   const runNextDelegation: RunNextDelegation = {
     id: randomUUID().slice(0, 8),
     lane,
-    task: nextTask.objective,
-    contextSummary: nextTask.context_summary,
+    task: nextTask.task,
+    contextSummary: null,
   };
   const taskActiveDelegation = createTaskActiveDelegation(
     runNextDelegation,
@@ -122,7 +122,7 @@ function materializeNextDelegation(params: {
     runId: taskActiveDelegation.transcriptRunId,
     delegationId: runNextDelegation.id,
     task: runNextDelegation.task,
-    essentialContext: nextTask.context_summary,
+    essentialContext: null,
   });
 
   return {
@@ -148,7 +148,7 @@ function buildPlannerTransition(params: {
   result: CapabilityPlannerResult;
 }) {
   const { state, input, result } = params;
-  if (result.result === 'unavailable') {
+  if (!('tasks' in result)) {
     return {
       goto: 'answer' as const,
       update: {
@@ -162,12 +162,16 @@ function buildPlannerTransition(params: {
     };
   }
 
-  const remainingPlan = normalizeRemainingPlan(result);
+  const [nextTask, ...remainingTasks] = result.tasks;
+  if (!nextTask) {
+    throw new Error('Capability Planner submitted an empty task list.');
+  }
+  const remainingPlan = normalizeRemainingPlan(remainingTasks);
   return {
     goto: 'capability' as const,
     update: materializeNextDelegation({
       state,
-      nextTask: result.next_task,
+      nextTask,
       remainingPlan,
       allowedCapabilityNames: input.workspace.capabilityNames,
     }),

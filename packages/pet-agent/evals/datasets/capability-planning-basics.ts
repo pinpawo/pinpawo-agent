@@ -5,16 +5,15 @@ export type CapabilityPlanningInput = {
   userGoal: string;
   capabilityRegistry: string[];
   completedTasks?: Array<{ objective: string; result: string | null }>;
-  remainingPlan?: Array<{ objective: string; capabilityIntent: string }>;
+  remainingPlan?: Array<{ capability: string; task: string }>;
   latestHandoff?: string;
 };
 
 export type CapabilityPlanningExpected = {
-  result: 'next_task';
+  result: 'plan';
   nextTaskTerms?: string[];
-  capabilityIntent?: string;
   capabilityName?: string;
-  remainingPlan: Array<{ objectiveTerms: string[]; capabilityIntent: string }>;
+  remainingPlan: Array<{ taskTerms: string[]; capability: string }>;
   exactRemainingPlanLength?: number;
   planEffect: 'created' | 'revised' | 'unchanged' | 'empty';
   rubberStamp: boolean;
@@ -39,11 +38,11 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
       ],
     },
     expected: {
-      result: 'next_task',
+      result: 'plan',
       nextTaskTerms: ['auth', '结构', '风险'],
-      capabilityIntent: '代码库分析',
+      capabilityName: 'explore',
       remainingPlan: [
-        { objectiveTerms: ['auth', '重构'], capabilityIntent: '代码修改' },
+        { taskTerms: ['auth', '重构'], capability: 'general' },
       ],
       planEffect: 'created',
       rubberStamp: false,
@@ -65,9 +64,9 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
       ],
     },
     expected: {
-      result: 'next_task',
+      result: 'plan',
       nextTaskTerms: ['支付', '失败测试', '根因', '代码', '触发条件', '完整'],
-      capabilityIntent: '代码库调查',
+      capabilityName: 'workspace_analysis',
       remainingPlan: [],
       exactRemainingPlanLength: 0,
       planEffect: 'created',
@@ -89,9 +88,9 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
       ],
     },
     expected: {
-      result: 'next_task',
+      result: 'plan',
       nextTaskTerms: ['仓库', '未提交', '状态'],
-      capabilityIntent: '当前工作区状态检查',
+      capabilityName: 'general',
       remainingPlan: [],
       exactRemainingPlanLength: 0,
       planEffect: 'created',
@@ -114,12 +113,12 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
       ],
     },
     expected: {
-      result: 'next_task',
+      result: 'plan',
       nextTaskTerms: ['PR', '450', '风险'],
-      capabilityIntent: '代码审查',
+      capabilityName: 'explore',
       remainingPlan: [{
-        objectiveTerms: ['部署', '配置', '页面'],
-        capabilityIntent: '页面与配置核验',
+        taskTerms: ['部署', '配置', '页面'],
+        capability: 'browser',
       }],
       exactRemainingPlanLength: 1,
       planEffect: 'created',
@@ -144,13 +143,13 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
         objective: '调查 auth 模块的现有结构和风险',
         result: 'auth/index.ts 存在循环依赖；应提取 token validation 并保持现有公开接口。',
       }],
-      remainingPlan: [{ objective: '根据调查结论重构 auth 模块', capabilityIntent: '代码修改' }],
+      remainingPlan: [{ capability: 'general', task: '根据调查结论重构 auth 模块' }],
       latestHandoff: 'auth/index.ts 存在循环依赖；应提取 token validation 并保持现有公开接口。',
     },
     expected: {
-      result: 'next_task',
+      result: 'plan',
       nextTaskTerms: ['循环依赖', 'token', '接口'],
-      capabilityIntent: '代码修改',
+      capabilityName: 'general',
       remainingPlan: [],
       planEffect: 'revised',
       rubberStamp: false,
@@ -171,9 +170,8 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
       ],
     },
     expected: {
-      result: 'next_task',
+      result: 'plan',
       nextTaskTerms: ['普通', '工作区', '执行结果'],
-      capabilityIntent: '通用任务执行',
       capabilityName: 'general',
       remainingPlan: [],
       exactRemainingPlanLength: 0,
@@ -200,13 +198,13 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
         objective: '生成项目报告',
         result: '报告已生成，路径为 /tmp/report.pdf，内容检查通过。',
       }],
-      remainingPlan: [{ objective: '把完成的报告发送给项目负责人', capabilityIntent: '文档发送' }],
+      remainingPlan: [{ capability: 'messaging', task: '把完成的报告发送给项目负责人' }],
       latestHandoff: '报告已生成，路径为 /tmp/report.pdf，内容检查通过。',
     },
     expected: {
-      result: 'next_task',
+      result: 'plan',
       nextTaskTerms: ['报告', '发送', '负责人'],
-      capabilityIntent: '文档发送',
+      capabilityName: 'messaging',
       remainingPlan: [],
       planEffect: 'unchanged',
       rubberStamp: true,
@@ -231,24 +229,24 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
         result: '调查确认 token validation 存在循环依赖，需要保持公开接口。',
       }],
       remainingPlan: [
-        { objective: '根据调查结论修复 auth 风险', capabilityIntent: '代码修改' },
-        { objective: '独立运行 release verification', capabilityIntent: '发布质量验证' },
+        { capability: 'general', task: '根据调查结论修复 auth 风险' },
+        { capability: 'release_check', task: '独立运行 release verification' },
       ],
       latestHandoff: '调查确认 token validation 存在循环依赖，需要保持公开接口。',
     },
     expected: {
-      result: 'next_task',
+      result: 'plan',
       nextTaskTerms: ['token', '循环依赖', '公开接口'],
-      capabilityIntent: '代码修改',
+      capabilityName: 'general',
       remainingPlan: [{
-        objectiveTerms: ['release', 'verification'],
-        capabilityIntent: '发布质量验证',
+        taskTerms: ['release', 'verification'],
+        capability: 'release_check',
       }],
       planEffect: 'revised',
       rubberStamp: false,
-      reason: 'Boundary planning materializes only the next task and preserves later future work as tail.',
+      reason: 'Boundary planning materializes the first task and preserves later work in the ordered plan.',
     },
-    metadata: { difficulty: 'hard', reason: 'Separated next_task and future tail.', source: SOURCE_FILE },
+    metadata: { difficulty: 'hard', reason: 'Revises a multi-task plan after handoff.', source: SOURCE_FILE },
   },
   {
     id: `${SUITE}.boundary-removes-completed-work-before-materializing-next-task`,
@@ -268,20 +266,20 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
       }],
       remainingPlan: [
         {
-          objective: '读取 issue #345 并整理架构演进内容',
-          capabilityIntent: 'GitHub issue 调查',
+          capability: 'explore',
+          task: '读取 issue #345 并整理架构演进内容',
         },
         {
-          objective: '检查当前仓库实现是否覆盖 issue 中的架构演进提案',
-          capabilityIntent: '代码库调查与对照',
+          capability: 'explore',
+          task: '检查当前仓库实现是否覆盖 issue 中的架构演进提案',
         },
       ],
       latestHandoff: 'issue 正文和评论中的架构演进提案已经完整整理；下一步只需对照当前仓库实现。',
     },
     expected: {
-      result: 'next_task',
+      result: 'plan',
       nextTaskTerms: ['当前仓库', '实现', 'issue', '架构演进'],
-      capabilityIntent: '代码库调查与对照',
+      capabilityName: 'explore',
       remainingPlan: [],
       exactRemainingPlanLength: 0,
       planEffect: 'revised',
@@ -304,12 +302,12 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
       ],
     },
     expected: {
-      result: 'next_task',
+      result: 'plan',
       nextTaskTerms: ['仓库', '测试', '结果'],
-      capabilityIntent: '项目测试与结果确认',
+      capabilityName: 'general',
       remainingPlan: [{
-        objectiveTerms: ['issue', '417', '结论'],
-        capabilityIntent: 'GitHub issue 更新',
+        taskTerms: ['issue', '417', '结论'],
+        capability: 'github',
       }],
       planEffect: 'created',
       rubberStamp: false,

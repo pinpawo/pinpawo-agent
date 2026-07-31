@@ -19,24 +19,16 @@ export type CapabilityPlannerInput = CapabilityPlannerInputBase & {
   readonly mode: CapabilityPlannerMode;
 };
 
-export type CapabilityPlannerNextTask = {
-  readonly objective: string;
-  readonly capability_intent: string;
-  readonly capability_name: string;
-  readonly context_summary: string | null;
+export type CapabilityPlannerTask = {
+  readonly capability: string;
+  readonly task: string;
 };
 
 export type CapabilityPlannerResult =
   | {
-      readonly result: 'next_task';
-      readonly next_task: CapabilityPlannerNextTask;
-      readonly remaining_plan: ReadonlyArray<{
-        readonly objective: string;
-        readonly capability_intent: string;
-      }>;
+      readonly tasks: readonly CapabilityPlannerTask[];
     }
   | {
-      readonly result: 'unavailable';
       readonly task: string;
       readonly reason: string;
     };

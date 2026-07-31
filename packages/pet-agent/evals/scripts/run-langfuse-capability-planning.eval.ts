@@ -59,24 +59,20 @@ function capabilityFromRegistryEntry(entry: string): AgentCapability {
 function plannerOutput(
   result: CapabilityPlannerResult,
 ): CapabilityPlanningEvalOutput {
-  if (result.result === 'unavailable') {
+  if (!('tasks' in result)) {
     return {
-      result: result.result,
+      result: 'unavailable',
       nextTask: null,
-      capabilityIntent: null,
       capabilityName: null,
       remainingPlan: [],
     };
   }
+  const [nextTask, ...remainingPlan] = result.tasks;
   return {
-    result: result.result,
-    nextTask: result.next_task.objective,
-    capabilityIntent: result.next_task.capability_intent,
-    capabilityName: result.next_task.capability_name,
-    remainingPlan: result.remaining_plan.map((task) => ({
-      objective: task.objective,
-      capabilityIntent: task.capability_intent,
-    })),
+    result: 'plan',
+    nextTask: nextTask?.task ?? null,
+    capabilityName: nextTask?.capability ?? null,
+    remainingPlan: remainingPlan.map((task) => ({ ...task })),
   };
 }
 

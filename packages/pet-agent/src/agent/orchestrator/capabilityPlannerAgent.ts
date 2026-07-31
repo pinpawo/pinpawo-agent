@@ -7,7 +7,6 @@ import {
   toolStrategy,
   type TypedToolStrategy,
 } from 'langchain';
-import { z } from 'zod';
 import { emitRuntimeEventToStreamWriter } from '../../utils/streamWriterEvents';
 import { createCapabilityPlannerFileExplorer } from './capabilityPlannerFileExplorer';
 import {
@@ -25,8 +24,8 @@ export const CAPABILITY_PLANNER_RUNTIME_EVENT = 'capability_planner_agent';
 const DEFAULT_MAX_MODEL_ITERATIONS = 12;
 const DEFAULT_TIMEOUT_MS = 60_000;
 const MAX_PLAN_TASKS = 24;
-const MAX_TASK_TEXT_CHARS = 8_000;
-const MAX_REASON_CHARS = 4_000;
+const MAX_TASK_TEXT_CHARS = 500;
+const MAX_REASON_CHARS = 1_000;
 
 export type CapabilityPlannerAgentErrorCode =
   | 'planning_limit_reached'
@@ -66,23 +65,63 @@ function createPlannerModelMiddleware(maxIterations: number) {
   });
 }
 
-function createPlanTaskSchema() {
-  return z.object({
-    objective: z.string().trim().min(1).max(MAX_TASK_TEXT_CHARS)
-      .describe('The useful, independently executable result this future task must produce.'),
-    capability_intent: z.string().trim().min(1).max(MAX_TASK_TEXT_CHARS)
-      .describe('The kind of execution ability the future task will need, without naming a concrete Capability.'),
-  }).strict();
+function createSubmitPlanSchema(capabilityNames: readonly string[]) {
+  return {
+    title: 'submit_plan',
+    description: 'Submit the shortest task sequence that completes the user goal.',
+    type: 'object' as const,
+    properties: {
+      tasks: {
+        type: 'array',
+        minItems: 1,
+        maxItems: MAX_PLAN_TASKS,
+        description: 'Ordered tasks. The first task runs now; the rest remain planned.',
+        items: {
+          type: 'object',
+          properties: {
+            capability: {
+              type: 'string',
+              enum: [...capabilityNames],
+              description: 'Capability that executes this task.',
+            },
+            task: {
+              type: 'string',
+              minLength: 1,
+              maxLength: MAX_TASK_TEXT_CHARS,
+              description: 'Short, executable task description.',
+            },
+          },
+          required: ['capability', 'task'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['tasks'],
+    additionalProperties: false,
+  };
 }
 
-const unavailablePlanSchema = z.object({
-  result: z.literal('unavailable')
-    .describe('No Capability in the current workspace can advance the current task.'),
-  task: z.string().trim().min(1).max(MAX_TASK_TEXT_CHARS)
-    .describe('The current task that cannot be executed.'),
-  reason: z.string().trim().min(1).max(MAX_REASON_CHARS)
-    .describe('Why no Capability in the current workspace can complete the task.'),
-}).strict().describe('Report that the current task cannot be delegated.');
+const unavailablePlanSchema = {
+  title: 'report_unavailable',
+  description: 'Report that no Capability can execute the required task.',
+  type: 'object' as const,
+  properties: {
+    task: {
+      type: 'string',
+      minLength: 1,
+      maxLength: MAX_TASK_TEXT_CHARS,
+      description: 'Task that cannot be executed.',
+    },
+    reason: {
+      type: 'string',
+      minLength: 1,
+      maxLength: MAX_REASON_CHARS,
+      description: 'Why the Capability Workspace cannot execute it.',
+    },
+  },
+  required: ['task', 'reason'],
+  additionalProperties: false,
+};
 
 function createCapabilityPlannerResponseFormat(
   input: CapabilityPlannerInput,
@@ -92,42 +131,26 @@ function createCapabilityPlannerResponseFormat(
   if (!firstCapabilityName) {
     return toolStrategy(unavailablePlanSchema, {
       toolMessageContent: 'Capability planning result accepted.',
-    });
+    }) as TypedToolStrategy<CapabilityPlannerResult>;
   }
 
-  const nextTaskSchema = createPlanTaskSchema().extend({
-    capability_name: z.enum([
-      firstCapabilityName,
-      ...otherCapabilityNames,
-    ]).describe(
-      'The frontmatter name of the Capability that can complete the whole current task.',
-    ),
-    context_summary: z.string().trim().max(MAX_TASK_TEXT_CHARS).nullable()
-      .describe('Execution context needed by the selected Capability, or null.'),
-  }).strict();
-  const nextTaskPlanSchema = z.object({
-    result: z.literal('next_task')
-      .describe('Delegate the current task to a Capability.'),
-    next_task: nextTaskSchema
-      .describe('The current executable task and selected Capability.'),
-    // Keep this instance independent from nextTaskSchema. Reusing the same
-    // Zod nodes creates property-path $refs that Moonshot rejects.
-    remaining_plan: z.array(createPlanTaskSchema()).max(MAX_PLAN_TASKS)
-      .describe('Ordered, unstarted future work; use an empty array when none remains.'),
-  }).strict().describe('Return the next executable task and future plan tail.');
+  const submitPlanSchema = createSubmitPlanSchema([
+    firstCapabilityName,
+    ...otherCapabilityNames,
+  ]);
 
   if (input.workspace.capabilityNames.includes('general')) {
-    return toolStrategy(nextTaskPlanSchema, {
+    return toolStrategy(submitPlanSchema, {
       toolMessageContent: 'Capability planning result accepted.',
-    });
+    }) as TypedToolStrategy<CapabilityPlannerResult>;
   }
 
   return toolStrategy([
-    nextTaskPlanSchema,
+    submitPlanSchema,
     unavailablePlanSchema,
   ], {
     toolMessageContent: 'Capability planning result accepted.',
-  });
+  }) as TypedToolStrategy<CapabilityPlannerResult>;
 }
 
 function mergePlannerSignal(
@@ -202,7 +225,7 @@ async function invokePlannerAgent(params: {
   const agent = createAgent({
     model: params.model,
     tools: [...explorer.tools],
-    systemPrompt: buildCapabilityPlannerAgentSystemPrompt(),
+    systemPrompt: buildCapabilityPlannerAgentSystemPrompt(params.input.mode),
     middleware: [createPlannerModelMiddleware(params.maxIterations)],
     responseFormat: createCapabilityPlannerResponseFormat(params.input),
   });
@@ -265,9 +288,9 @@ async function invokePlannerAgent(params: {
       mode: params.input.mode,
       registryDigest: params.input.workspace.registryDigest,
       observationBudget: explorer.getObservationBudget(),
-      result: structuredResponse.result,
-      capabilityName: structuredResponse.result === 'next_task'
-        ? structuredResponse.next_task.capability_name
+      result: 'tasks' in structuredResponse ? 'plan' : 'unavailable',
+      capabilityName: 'tasks' in structuredResponse
+        ? structuredResponse.tasks[0]?.capability ?? null
         : null,
     });
     return structuredResponse;

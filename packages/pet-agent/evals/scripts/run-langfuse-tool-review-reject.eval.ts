@@ -241,14 +241,10 @@ async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> 
     capabilityPlannerRunner: {
       async invoke(_plannerInput) {
         return {
-          result: 'next_task',
-          next_task: {
-            objective: input.delegatedTask,
-            capability_intent: 'exercise reviewed tool rejection',
-            capability_name: 'general',
-            context_summary: null,
-          },
-          remaining_plan: [],
+          tasks: [{
+            capability: 'general',
+            task: input.delegatedTask,
+          }],
         };
       },
     },

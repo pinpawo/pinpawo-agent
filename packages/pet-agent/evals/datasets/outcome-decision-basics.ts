@@ -5,7 +5,7 @@ export type OutcomeDecisionInput = {
   currentTask: string;
   announce: string;
   completedHandoffs?: string[];
-  remainingPlan?: Array<{ objective: string; capabilityIntent: string }>;
+  remainingPlan?: Array<{ capability: string; task: string }>;
 };
 
 export type OutcomeDecisionExpected = {
@@ -27,8 +27,8 @@ const cases: AgentEvalCase<OutcomeDecisionInput, OutcomeDecisionExpected>[] = [
       currentTask: '运行测试并定位失败原因。',
       announce: '测试已运行，发现两个失败，但尚未定位具体原因。',
       remainingPlan: [{
-        objective: '根据定位结果修复测试失败并验证',
-        capabilityIntent: '代码修改与测试验证',
+        capability: 'general',
+        task: '根据定位结果修复测试失败并验证',
       }],
     },
     expected: { outcome: 'continue', reason: 'The current task acceptance condition is not met.' },
@@ -44,8 +44,8 @@ const cases: AgentEvalCase<OutcomeDecisionInput, OutcomeDecisionExpected>[] = [
       currentTask: '调查 auth 模块结构、依赖和风险。',
       announce: '调查完成：认证入口集中在 auth/index.ts，主要风险是循环依赖。',
       remainingPlan: [{
-        objective: '根据调查结果完成 auth 模块重构',
-        capabilityIntent: '代码修改与验证',
+        capability: 'general',
+        task: '根据调查结果完成 auth 模块重构',
       }],
     },
     expected: {
@@ -78,8 +78,8 @@ const cases: AgentEvalCase<OutcomeDecisionInput, OutcomeDecisionExpected>[] = [
       currentTask: '检查项目配置是否与文档一致。',
       announce: '配置与文档完全一致，检查通过；没有需要处理的问题。',
       remainingPlan: [{
-        objective: '根据检查结果处理对应问题',
-        capabilityIntent: '配置问题处理与验证',
+        capability: 'general',
+        task: '根据检查结果处理对应问题',
       }],
     },
     expected: {

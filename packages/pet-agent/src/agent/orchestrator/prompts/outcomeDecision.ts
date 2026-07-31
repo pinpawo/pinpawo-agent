@@ -80,9 +80,12 @@ export function buildDelegationOutcomeRemainingPlanContext(
     ) {
       lines.push('  <planned_task>');
       lines.push(`    <position>${(index + 1).toString()}</position>`);
-      lines.push(indentXmlBlock(xmlTextBlock('objective', clipForPrompt(task.objective, 320)), 4));
       lines.push(indentXmlBlock(
-        xmlTextBlock('capability_intent', clipForPrompt(task.capabilityIntent, 240)),
+        xmlTextBlock('capability', clipForPrompt(task.capability, 120)),
+        4,
+      ));
+      lines.push(indentXmlBlock(
+        xmlTextBlock('description', clipForPrompt(task.task, 320)),
         4,
       ));
       lines.push('  </planned_task>');

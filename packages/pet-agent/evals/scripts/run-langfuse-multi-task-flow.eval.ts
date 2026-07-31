@@ -120,19 +120,13 @@ function buildScriptedPlannerRunner() {
         plannedObjectives.push(objective);
         selectedCapabilityNames.push('explore');
         return {
-          result: 'next_task',
-          remaining_plan: [
-            {
-              objective: '根据调查结论重构 auth 模块',
-              capability_intent: 'code_modification',
-            },
-          ],
-          next_task: {
-            objective,
-            capability_intent: 'codebase_exploration',
-            capability_name: 'explore',
-            context_summary: null,
-          },
+          tasks: [{
+            capability: 'explore',
+            task: objective,
+          }, {
+            capability: 'code_modify',
+            task: '根据调查结论重构 auth 模块',
+          }],
         };
       }
       secondTaskSawHandoff = /循环依赖|token validation/.test(
@@ -142,14 +136,10 @@ function buildScriptedPlannerRunner() {
       plannedObjectives.push(objective);
       selectedCapabilityNames.push('code_modify');
       return {
-        result: 'next_task',
-        remaining_plan: [],
-        next_task: {
-          objective,
-          capability_intent: 'code_modification',
-          capability_name: 'code_modify',
-          context_summary: input.latestHandoff,
-        },
+        tasks: [{
+          capability: 'code_modify',
+          task: objective,
+        }],
       };
     },
   };

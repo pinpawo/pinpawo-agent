@@ -1,5 +1,4 @@
 import {
-  buildOrchestratorDecisionPromptPrefix,
   indentXmlBlock,
   promptBlock,
   xmlTextBlock,
@@ -7,17 +6,9 @@ import {
 import type { CapabilityPlannerInput } from '../capabilityPlannerRunner';
 import {
   CAPABILITY_PLANNER_AGENT_INPUT_PROMPT,
-  CAPABILITY_PLANNER_AGENT_SYSTEM_PROMPT,
+  CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT,
+  CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT,
 } from './templates/capabilityPlannerAgent.prompt';
-
-function escapeXmlAttribute(value: string) {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&apos;');
-}
 
 function buildCompletedTasksBlock(
   tasks: CapabilityPlannerInput['completedTasks'],
@@ -43,28 +34,25 @@ function buildRemainingPlanBlock(
   const lines = ['<remaining_plan>'];
   for (const task of tasks) {
     lines.push('  <task>');
-    lines.push(indentXmlBlock(xmlTextBlock('objective', task.objective), 4));
-    lines.push(indentXmlBlock(
-      xmlTextBlock('capability_intent', task.capabilityIntent),
-      4,
-    ));
+    lines.push(indentXmlBlock(xmlTextBlock('capability', task.capability), 4));
+    lines.push(indentXmlBlock(xmlTextBlock('description', task.task), 4));
     lines.push('  </task>');
   }
   lines.push('</remaining_plan>');
   return lines.join('\n');
 }
 
-export function buildCapabilityPlannerAgentSystemPrompt() {
-  return CAPABILITY_PLANNER_AGENT_SYSTEM_PROMPT.render({
-    sharedPrefix: buildOrchestratorDecisionPromptPrefix(),
-  });
+export function buildCapabilityPlannerAgentSystemPrompt(
+  mode: CapabilityPlannerInput['mode'],
+) {
+  return mode === 'entry'
+    ? CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT.render({})
+    : CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT.render({});
 }
 
 export function buildCapabilityPlannerAgentInput(input: CapabilityPlannerInput) {
   return CAPABILITY_PLANNER_AGENT_INPUT_PROMPT.render({
     mode: input.mode,
-    registryDigest: escapeXmlAttribute(input.workspace.registryDigest),
-    documentCount: String(input.workspace.entries.length),
     userIntentContextBlock: promptBlock(input.userIntentContext, 2),
     completedTasksBlock: promptBlock(
       buildCompletedTasksBlock(input.completedTasks),

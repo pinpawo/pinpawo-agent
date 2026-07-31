@@ -231,16 +231,14 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
         ATTACHMENT_TOOL_INPUT,
       );
       return {
-        result: 'next_task',
-        next_task: {
-          objective: readsAttachment
+        tasks: [
+          {
+            capability: 'general',
+            task: readsAttachment
             ? 'read the selected attachment'
             : 'write the guarded fixture',
-          capability_intent: 'production_tui_fixture',
-          capability_name: 'general',
-          context_summary: null,
-        },
-        remaining_plan: [],
+          },
+        ],
       };
     },
   };

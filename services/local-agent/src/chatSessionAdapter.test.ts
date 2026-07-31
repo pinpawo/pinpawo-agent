@@ -320,11 +320,20 @@ test('runChatSession maps authorization runtime events to system notices', async
           event: 'on_runtime_event',
           name: 'tool_authorization_recorded',
           data: {
-            authorizations: [{
-              toolName: 'run_shell',
-              matcher: { type: 'shell_pattern', value: 'git status' },
-              createdAt: '2026-01-01T00:00:00.000Z',
-            }],
+            toolName: 'write_file',
+            matcherType: 'exact',
+            source: 'auto_review',
+            scope: 'thread',
+          },
+        }, ['general:t1']);
+        yield protocolEvent('custom', {
+          event: 'on_runtime_event',
+          name: 'tool_authorization_recorded',
+          data: {
+            toolName: 'run_shell',
+            matcherType: 'exact',
+            source: 'human',
+            scope: 'thread',
           },
         }, ['general:t1']);
         yield protocolEvent('values', { messages: [new AIMessage('done')] });

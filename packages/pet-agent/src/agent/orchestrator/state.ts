@@ -18,6 +18,11 @@ import {
 } from './review/reviewAuthorizations';
 import type { AcceptedDelegationOutcome } from './schemas';
 
+export type SessionToolAuthorizationState = {
+  generation: string;
+  records: ToolAuthorizationRecord[];
+};
+
 const orchestratorStateChannels = {
   messages: Annotation<BaseMessage[]>({
     reducer: messagesStateReducer,
@@ -63,9 +68,14 @@ const orchestratorStateChannels = {
     reducer: (_prev, next) => next,
     default: () => '',
   }),
-  sessionToolAuthorizations: Annotation<ToolAuthorizationRecord[]>({
-    reducer: (prev, next) => mergeToolAuthorizations(prev, next),
-    default: () => [],
+  sessionToolAuthorizations: Annotation<SessionToolAuthorizationState>({
+    // Replace the complete generation-scoped snapshot atomically so grants
+    // cannot outlive or become detached from the registry generation that owns them.
+    reducer: (_prev, next) => ({
+      generation: next.generation,
+      records: mergeToolAuthorizations([], next.records),
+    }),
+    default: () => ({ generation: '', records: [] }),
   }),
 };
 

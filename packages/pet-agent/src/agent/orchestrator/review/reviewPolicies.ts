@@ -1,30 +1,42 @@
 import type {
+  ToolAuthorizationContext,
+  ToolAuthorizationPolicy,
   ToolOperationSummary,
   ToolReviewBlock,
   ToolReviewContext,
   ToolReviewPolicy,
 } from '../../../types/toolkit';
-import { isToolActionAuthorized } from './reviewAuthorizations';
+import {
+  exactAuthorization,
+  markAuthorizationPolicyGeneration,
+  urlOriginAuthorization,
+  type ToolAuthorizationMatcher,
+} from './authorizationMatchers';
 import {
   buildReviewSpec,
   type ReviewOption,
   type ReviewView,
-  type ToolAuthorizationMatcher,
-  type ToolAuthorizationMatcherTemplate,
 } from './reviewSpec';
 
 export type ReviewUnavailableBehavior = 'block' | 'allow';
-export type AuthorizationMode = 'none' | 'exact_args' | 'url_domain';
+export type AuthorizationMode = 'exact' | 'url_origin';
+
+export type ExactAuthorizationSubjectBuilder = (
+  ctx: ToolAuthorizationContext,
+) => unknown | null | Promise<unknown | null>;
+
+export type ExactAuthorizationPolicyOptions = {
+  subject?: ExactAuthorizationSubjectBuilder;
+};
 
 export type HitlPresetOptions = {
-  authorization?: AuthorizationMode;
+  authorization?: AuthorizationMode | ToolAuthorizationPolicy;
   unavailable?: ReviewUnavailableBehavior;
 };
 
 type PresetOptions = HitlPresetOptions & {
   requiresHitl: boolean;
   defaultUnavailable: ReviewUnavailableBehavior;
-  defaultAuthorization: AuthorizationMode;
 };
 
 const DEFAULT_DETAILS_LIMIT = 4_000;
@@ -109,7 +121,7 @@ function buildReviewTitle(ctx: ToolReviewContext) {
 }
 
 export function buildStandardReviewOptions(params: {
-  authorizeMatcher?: ToolAuthorizationMatcherTemplate;
+  authorize?: boolean;
   authorizeDescription?: string;
 } = {}): ReviewOption[] {
   return [
@@ -119,7 +131,7 @@ export function buildStandardReviewOptions(params: {
       variant: 'primary',
       decision: { type: 'approve' },
     },
-    ...(params.authorizeMatcher ? [{
+    ...(params.authorize ? [{
       id: 'approve-and-authorize-thread',
       label: 'Approve and authorize',
       description: params.authorizeDescription
@@ -128,8 +140,6 @@ export function buildStandardReviewOptions(params: {
       effects: [{
         type: 'graph.authorize_tool_action' as const,
         scope: 'thread' as const,
-        actionRef: { type: 'pending_action' as const },
-        matcher: params.authorizeMatcher,
       }],
     }] : []),
     {
@@ -153,46 +163,52 @@ export function buildStandardReviewOptions(params: {
   ];
 }
 
-function buildExactArgsMatcher(ctx: { input: unknown }): ToolAuthorizationMatcher {
-  return {
-    type: 'exact_args',
-    value: inputToRecord(ctx.input),
-  };
-}
-
-function normalizeUrlOrigin(value: unknown) {
-  if (typeof value !== 'string') return '';
-  try {
-    const origin = new URL(value).origin;
-    return origin === 'null' ? '' : origin;
-  } catch {
-    return '';
-  }
-}
-
-function buildUrlDomainMatcher(ctx: { input: unknown }): ToolAuthorizationMatcher | null {
-  const input = inputToRecord(ctx.input);
-  const origin = normalizeUrlOrigin(input.url);
-  return origin
-    ? { type: 'url_domain', value: { origin } }
-    : null;
-}
-
-function buildAuthorizationMatcher(mode: AuthorizationMode, ctx: { input: unknown }) {
-  if (mode === 'exact_args') {
-    return buildExactArgsMatcher(ctx);
-  }
-  if (mode === 'url_domain') {
-    return buildUrlDomainMatcher(ctx);
-  }
-  return null;
-}
-
 function authorizationDescription(matcher: ToolAuthorizationMatcher) {
-  if (matcher.type === 'url_domain') {
+  if (matcher.type === 'url_origin') {
     return 'Approve this action and authorize the same URL domain in this thread.';
   }
   return 'Approve this action and authorize exact matching arguments in this thread.';
+}
+
+export const AuthorizationPolicies = {
+  exact(options: ExactAuthorizationPolicyOptions = {}): ToolAuthorizationPolicy {
+    const policy: ToolAuthorizationPolicy = {
+      buildMatcher: async (ctx) => {
+        const subject = options.subject
+          ? await options.subject(ctx)
+          : ctx.input;
+        return subject === null ? null : exactAuthorization(subject);
+      },
+    };
+    return markAuthorizationPolicyGeneration(
+      policy,
+      options.subject
+        ? `exact:v1:projector:${Function.prototype.toString.call(options.subject)}`
+        : 'exact:v1:full-input',
+    );
+  },
+
+  urlOrigin(): ToolAuthorizationPolicy {
+    const policy: ToolAuthorizationPolicy = {
+      buildMatcher: (ctx) => {
+        const input = inputToRecord(ctx.input);
+        return urlOriginAuthorization(input.url);
+      },
+    };
+    return markAuthorizationPolicyGeneration(policy, 'url_origin:v1');
+  },
+};
+
+function resolveAuthorizationPolicy(
+  authorization: HitlPresetOptions['authorization'],
+): ToolAuthorizationPolicy | undefined {
+  if (authorization === 'exact') {
+    return AuthorizationPolicies.exact();
+  }
+  if (authorization === 'url_origin') {
+    return AuthorizationPolicies.urlOrigin();
+  }
+  return authorization;
 }
 
 function blockReview(ctx: ToolReviewContext): ToolReviewBlock {
@@ -203,7 +219,7 @@ function blockReview(ctx: ToolReviewContext): ToolReviewBlock {
 }
 
 function createPresetPolicy(options: PresetOptions): ToolReviewPolicy {
-  const authorization = options.authorization ?? options.defaultAuthorization;
+  const authorization = resolveAuthorizationPolicy(options.authorization);
   const unavailable = options.unavailable ?? options.defaultUnavailable;
 
   return {
@@ -217,19 +233,6 @@ function createPresetPolicy(options: PresetOptions): ToolReviewPolicy {
         sessionAuthorization: false,
       };
 
-      const matcher = buildAuthorizationMatcher(authorization, ctx);
-
-      if (matcher && capabilities.sessionAuthorization) {
-        const args = matcher.type === 'exact_args' ? matcher.value : inputToRecord(ctx.input);
-        if (isToolActionAuthorized({
-          authorizations: ctx.toolAuthorizations ?? [],
-          toolName: ctx.toolName,
-          args,
-        })) {
-          return null;
-        }
-      }
-
       if (!capabilities.humanReview) {
         return unavailable === 'block'
           ? blockReview(ctx)
@@ -240,15 +243,14 @@ function createPresetPolicy(options: PresetOptions): ToolReviewPolicy {
       return buildReviewSpec({
         view: buildReviewView(ctx, summary),
         options: buildStandardReviewOptions({
-          authorizeMatcher: matcher && capabilities.sessionAuthorization
-            ? { type: 'policy_hook' }
+          authorize: Boolean(ctx.authorizationMatcher && capabilities.sessionAuthorization),
+          authorizeDescription: ctx.authorizationMatcher
+            ? authorizationDescription(ctx.authorizationMatcher)
             : undefined,
-          authorizeDescription: matcher ? authorizationDescription(matcher) : undefined,
         }),
       });
     },
-    buildAuthorizationMatcher: (ctx) =>
-      buildAuthorizationMatcher(authorization, ctx),
+    ...(authorization ? { authorization } : {}),
   };
 }
 
@@ -257,7 +259,6 @@ export const ReviewPolicies = {
     return createPresetPolicy({
       ...options,
       requiresHitl: true,
-      defaultAuthorization: 'none',
       defaultUnavailable: 'block',
     });
   },
@@ -266,7 +267,6 @@ export const ReviewPolicies = {
     return createPresetPolicy({
       ...options,
       requiresHitl: true,
-      defaultAuthorization: 'none',
       defaultUnavailable: 'block',
     });
   },
@@ -275,7 +275,6 @@ export const ReviewPolicies = {
     return createPresetPolicy({
       ...options,
       requiresHitl: true,
-      defaultAuthorization: 'none',
       defaultUnavailable: 'block',
     });
   },
@@ -284,7 +283,6 @@ export const ReviewPolicies = {
     return createPresetPolicy({
       ...options,
       requiresHitl: true,
-      defaultAuthorization: 'none',
       defaultUnavailable: 'block',
     });
   },
@@ -292,7 +290,6 @@ export const ReviewPolicies = {
   never(): ToolReviewPolicy {
     return createPresetPolicy({
       requiresHitl: false,
-      defaultAuthorization: 'none',
       defaultUnavailable: 'allow',
     });
   },

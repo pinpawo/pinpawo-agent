@@ -128,11 +128,13 @@ test('toolkit registration rejects malformed static contract fields', () => {
         tool: alphaTool,
         review: {
           request: () => null,
-          buildAuthorizationMatcher: 1,
+          authorization: {
+            buildMatcher: 1,
+          },
         },
       }],
     } as never),
-    /review\.buildAuthorizationMatcher must be a function/,
+    /review\.authorization must define buildMatcher\(\)/,
   );
 });
 

@@ -5,6 +5,7 @@ import type { CompiledAgentRegistry } from '../registry';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
   type GlobalReviewPolicy,
+  type GlobalReviewPolicyBatchResolver,
   type GlobalReviewPolicyMode,
   type GlobalReviewPolicyResolver,
   type GlobalReviewPolicyStructuredOutputConfig,
@@ -92,6 +93,12 @@ function readGlobalReviewPolicy(value: unknown): GlobalReviewPolicy | undefined 
     return {
       mode,
       resolve: record.resolve as GlobalReviewPolicyResolver,
+      ...(typeof record.resolveBatch === 'function'
+        ? { resolveBatch: record.resolveBatch as GlobalReviewPolicyBatchResolver }
+        : {}),
+      ...(record.reuseAutoAuthorizations === true
+        ? { reuseAutoAuthorizations: true }
+        : {}),
     };
   }
   const structuredOutput = record.structuredOutput

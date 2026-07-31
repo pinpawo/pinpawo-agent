@@ -35,8 +35,6 @@ function samplePendingReview(): ReviewResolutionContext {
           effects: [{
             type: 'graph.authorize_tool_action',
             scope: 'thread',
-            actionRef: { type: 'pending_action' },
-            matcher: { type: 'policy_hook' },
           }],
         },
         {
@@ -157,8 +155,6 @@ test('resolveHumanReviewResponse resolves approve option and declared effects', 
     effects: [{
       type: 'graph.authorize_tool_action',
       scope: 'thread',
-      actionRef: { type: 'pending_action' },
-      matcher: { type: 'policy_hook' },
     }],
     display: {
       label: 'Approve and authorize',
@@ -194,8 +190,6 @@ test('resolveHumanReviewResume resolves canonical responses only', () => {
     [{
       type: 'graph.authorize_tool_action',
       scope: 'thread',
-      actionRef: { type: 'pending_action' },
-      matcher: { type: 'policy_hook' },
     }],
   );
 });
@@ -325,8 +319,6 @@ test('resolveHumanReviewResponse rejects authorization effects on non-approve op
     effects: [{
       type: 'graph.authorize_tool_action',
       scope: 'thread',
-      actionRef: { type: 'pending_action' },
-      matcher: { type: 'policy_hook' },
     }],
   });
 

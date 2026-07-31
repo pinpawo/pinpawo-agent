@@ -1,5 +1,7 @@
 # Toolkit HITL Policy Presets Design
 
+> authorization 部分已由 [AUTHORIZATION_MATCHER_LIFECYCLE.md](./AUTHORIZATION_MATCHER_LIFECYCLE.md) 收敛。当前 preset 使用 `exact` / `url_origin`，不再保存原始 args。
+
 > 状态：Draft v2
 > 日期：2026-06-16
 > 关联：issue #133
@@ -214,11 +216,11 @@ body:
 
 ```ts
 ReviewPolicies.localMutation({
-  authorization: 'exact_args',
+  authorization: 'exact',
 })
 ```
 
-`exact_args` 只适合参数小、稳定、无敏感信息的工具。复杂 identity 应进入 `custom()`，并在 review 中说明为什么不能使用 preset 默认行为。
+`exact` 默认对完整 input 生成不透明 digest。需要排除无关运行参数时，由工具提供可信 subject projector；无法安全定义 subject 时不建立 session grant。
 
 ## 6. 无头或非交互 Runtime
 
@@ -247,14 +249,14 @@ local toolkit 使用 preset 配置表达默认 HITL：
 
 ```ts
 toolReview: {
-  write_file: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
-  apply_patch: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
-  move_path: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
-  copy_path: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
-  mkdir_path: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
-  http_fetch: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
-  download_file: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
-  run_shell: ReviewPolicies.commandExecution({ authorization: 'exact_args' }),
+  write_file: ReviewPolicies.localMutation({ authorization: 'exact' }),
+  apply_patch: ReviewPolicies.localMutation({ authorization: 'exact' }),
+  move_path: ReviewPolicies.localMutation({ authorization: 'exact' }),
+  copy_path: ReviewPolicies.localMutation({ authorization: 'exact' }),
+  mkdir_path: ReviewPolicies.localMutation({ authorization: 'exact' }),
+  http_fetch: ReviewPolicies.externalAccess({ authorization: 'exact' }),
+  download_file: ReviewPolicies.externalAccess({ authorization: 'exact' }),
+  run_shell: ReviewPolicies.commandExecution({ authorization: 'exact' }),
 }
 ```
 
@@ -262,8 +264,8 @@ git toolkit：
 
 ```ts
 toolReview: {
-  git_add: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
-  git_commit: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
+  git_add: ReviewPolicies.localMutation({ authorization: 'exact' }),
+  git_commit: ReviewPolicies.localMutation({ authorization: 'exact' }),
 }
 ```
 
@@ -271,9 +273,9 @@ browser toolkit：
 
 ```ts
 toolReview: {
-  browser_open: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
-  browser_open_with_session: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
-  browser_open_with_profile: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
+  browser_open: ReviewPolicies.externalAccess({ authorization: 'exact' }),
+  browser_open_with_session: ReviewPolicies.externalAccess({ authorization: 'exact' }),
+  browser_open_with_profile: ReviewPolicies.externalAccess({ authorization: 'exact' }),
 }
 ```
 

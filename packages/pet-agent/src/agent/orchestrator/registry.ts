@@ -1,4 +1,5 @@
 import type { StructuredTool } from '@langchain/core/tools';
+import { createHash } from 'node:crypto';
 import type { AgentCapability } from '../../types/capability';
 import type {
   AgentToolkit,
@@ -10,6 +11,10 @@ import {
   validateUniqueCapabilityNames,
   validateUniqueToolkitNames,
 } from './validation';
+import {
+  markAuthorizationPolicyGeneration,
+  readAuthorizationPolicyGeneration,
+} from './review/authorizationMatchers';
 
 export type ExecutorCompilationIssue =
   | {
@@ -39,10 +44,43 @@ type UnavailableCapability = {
 };
 
 export type CompiledAgentRegistry = {
+  /**
+   * Stable digest of the executable Toolkit generation. Session grants are
+   * scoped to this value, but the value is not part of matcher identity.
+   */
+  authorizationGeneration: string;
   toolkits: readonly AgentToolkit[];
   capabilities: readonly CompiledCapability[];
   unavailableCapabilities: readonly UnavailableCapability[];
 };
+
+function functionSource(value: unknown): string | null {
+  if (typeof value !== 'function') return null;
+  try {
+    return Function.prototype.toString.call(value);
+  } catch {
+    return null;
+  }
+}
+
+function computeAuthorizationGeneration(toolkits: readonly AgentToolkit[]) {
+  const subject = toolkits.flatMap((toolkit) => {
+    const tools = toolkit.tools.flatMap((definition) => {
+      const authorization = definition.review?.authorization;
+      return authorization
+        ? [{
+            name: definition.tool.name,
+            authorization: readAuthorizationPolicyGeneration(authorization)
+              ?? functionSource(authorization.buildMatcher),
+          }]
+        : [];
+    });
+    return tools.length > 0 ? [{ name: toolkit.name, tools }] : [];
+  });
+  return createHash('sha256')
+    .update(JSON.stringify(subject))
+    .digest('hex');
+}
 
 function formatExecutorCompilationIssue(issue: ExecutorCompilationIssue) {
   if (issue.code === 'duplicate_toolkit_dependency') {
@@ -134,7 +172,20 @@ function snapshotOperation(
 function snapshotReview(
   review: ToolReviewPolicy | undefined,
 ): ToolReviewPolicy | undefined {
-  return review ? Object.freeze({ ...review }) : undefined;
+  if (!review) return undefined;
+  const authorization = review.authorization;
+  if (!authorization) {
+    return Object.freeze({ ...review });
+  }
+  const authorizationSnapshot = { ...authorization };
+  const generation = readAuthorizationPolicyGeneration(authorization);
+  if (generation) {
+    markAuthorizationPolicyGeneration(authorizationSnapshot, generation);
+  }
+  return Object.freeze({
+    ...review,
+    authorization: Object.freeze(authorizationSnapshot),
+  });
 }
 
 function snapshotToolDefinition(definition: ToolDefinition): ToolDefinition {
@@ -187,6 +238,7 @@ export function compileAgentRegistry(params: {
   validateUniqueCapabilityNames(rawCapabilityDefinitions);
 
   const toolkits = toolkitDefinitions.map(snapshotToolkit);
+  const authorizationGeneration = computeAuthorizationGeneration(toolkits);
   const capabilityDefinitions = rawCapabilityDefinitions.map(snapshotCapability);
   const toolkitsByName = new Map(toolkits.map((toolkit) => [toolkit.name, toolkit]));
 
@@ -208,6 +260,7 @@ export function compileAgentRegistry(params: {
   }
 
   return Object.freeze({
+    authorizationGeneration,
     toolkits: Object.freeze(toolkits),
     capabilities: Object.freeze(capabilities),
     unavailableCapabilities: Object.freeze(unavailableCapabilities),

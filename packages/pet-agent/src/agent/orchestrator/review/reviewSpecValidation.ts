@@ -5,7 +5,6 @@ import type {
   ReviewOptionInput,
   ReviewSpec,
   ReviewView,
-  ToolAuthorizationMatcherTemplate,
 } from './reviewSpec';
 
 function readRecordValue(value: unknown): Record<string, unknown> | null {
@@ -75,39 +74,11 @@ function isReviewOptionDecisionValue(value: unknown): value is ReviewOptionDecis
   return false;
 }
 
-function isToolAuthorizationMatcherTemplateValue(
-  value: unknown,
-): value is ToolAuthorizationMatcherTemplate {
-  const record = readRecordValue(value);
-  if (!record) return false;
-  if (record.type === 'policy_hook') {
-    return hasOnlyKeys(record, ['type']);
-  }
-  if (record.type === 'shell_pattern') {
-    return hasOnlyKeys(record, ['type', 'source'])
-      && record.source === 'args.command';
-  }
-  if (record.type === 'exact_args') {
-    return hasOnlyKeys(record, ['type', 'source'])
-      && record.source === 'action.args';
-  }
-  if (record.type === 'url_domain') {
-    return hasOnlyKeys(record, ['type', 'source'])
-      && record.source === 'args.url';
-  }
-  return false;
-}
-
 function isReviewEffectValue(value: unknown): value is ReviewEffect {
   const record = readRecordValue(value);
-  if (!record || !hasOnlyKeys(record, ['type', 'scope', 'actionRef', 'matcher'])) return false;
-  const actionRef = readRecordValue(record.actionRef);
+  if (!record || !hasOnlyKeys(record, ['type', 'scope'])) return false;
   return record.type === 'graph.authorize_tool_action'
-    && record.scope === 'thread'
-    && Boolean(actionRef)
-    && hasOnlyKeys(actionRef as Record<string, unknown>, ['type'])
-    && actionRef?.type === 'pending_action'
-    && isToolAuthorizationMatcherTemplateValue(record.matcher);
+    && record.scope === 'thread';
 }
 
 function isReviewOptionValue(value: unknown): value is ReviewOption {

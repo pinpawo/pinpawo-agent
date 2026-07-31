@@ -88,7 +88,11 @@ export function createCapabilityNode(params: {
     const scopedMessages = laneMessages(state.messages, lane, transcriptRunId, runNextDelegation.id);
     const threadId = readThreadId(runnableConfig);
 
-    const authorizationRecorder = createToolAuthorizationRecorder(state.sessionToolAuthorizations);
+    const authorizationRecorder = createToolAuthorizationRecorder(
+      state.sessionToolAuthorizations.generation === registry.authorizationGeneration
+        ? state.sessionToolAuthorizations.records
+        : [],
+    );
     const artifactRefs: CapabilityArtifactRef[] = [];
     const toolkitContext = {
       models: config.models,
@@ -101,7 +105,7 @@ export function createCapabilityNode(params: {
       reviewCapabilities,
       globalReviewPolicy,
       toolAuthorizations: authorizationRecorder.active,
-      recordToolAuthorization: authorizationRecorder.recordToolAuthorization,
+      recordToolAuthorizations: authorizationRecorder.recordToolAuthorizations,
       // Runtime events (authorization notices) surface as `custom` protocol
       // events on the root stream (#322); review emits from afterModel
       // middleware, where the writer is reachable at call time.
@@ -251,7 +255,10 @@ export function createCapabilityNode(params: {
         resultPreview,
       },
       runIterationCount: state.runIterationCount + 1,
-      sessionToolAuthorizations: authorizationRecorder.recorded,
+      sessionToolAuthorizations: {
+        generation: registry.authorizationGeneration,
+        records: authorizationRecorder.active,
+      },
     };
   };
 }

@@ -76,7 +76,8 @@ export {
 export type {
   AgentToolkit,
   NamedStructuredTool,
-  ToolAuthorizationMatcherContext,
+  ToolAuthorizationContext,
+  ToolAuthorizationPolicy,
   ToolDefinition,
   ToolOperationMetadata,
   ToolOperationSummary,
@@ -210,25 +211,35 @@ export {
   applyReviewEffects,
   authorizeToolAction,
   buildToolAuthorizationRecord,
+  exactAuthorization,
+  findToolAuthorization,
   isToolActionAuthorized,
   mergeToolAuthorizations,
-  normalizeShellPattern,
   readToolAuthorizationMatcher,
+  readToolAuthorizationRecord,
   ReviewEffectApplicationError,
+  toolAuthorizationMatcherKey,
+  toolAuthorizationMatchersEqual,
+  toolAuthorizationRecordKey,
+  urlOriginAuthorization,
 } from './agent/orchestrator/review/reviewAuthorizations';
 export type {
   ApplyReviewEffectsOptions,
   ReviewEffectApplicationErrorCode,
+  ToolAuthorizationMatcher,
   ToolAuthorizationRecord,
   ToolAuthorizationSource,
 } from './agent/orchestrator/review/reviewAuthorizations';
 export {
+  AuthorizationPolicies,
   buildStandardReviewOptions,
   ReviewPolicies,
   reviewPolicies,
 } from './agent/orchestrator/review/reviewPolicies';
 export type {
   AuthorizationMode,
+  ExactAuthorizationPolicyOptions,
+  ExactAuthorizationSubjectBuilder,
   HitlPresetOptions,
   ReviewUnavailableBehavior,
 } from './agent/orchestrator/review/reviewPolicies';
@@ -259,7 +270,6 @@ export {
 export type {
   BuildReviewSpecParams,
   PendingReviewAction,
-  ReviewActionRef,
   ReviewEffect,
   ReviewOption,
   ReviewOptionDecision,
@@ -274,8 +284,6 @@ export type {
   HumanReviewBatchInterruptPayload,
   HumanReviewInterrupt,
   HumanReviewInterruptPayload,
-  ToolAuthorizationMatcher,
-  ToolAuthorizationMatcherTemplate,
 } from './agent/orchestrator/review/reviewSpec';
 export {
   messageHasToolCalls,

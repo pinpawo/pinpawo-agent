@@ -30,10 +30,13 @@ import {
 } from './subagentDispatch';
 import { buildReviewSpec } from './review/reviewSpec';
 import {
-  isToolActionAuthorized,
+  exactAuthorization,
   type ToolAuthorizationRecord,
 } from './review/reviewAuthorizations';
-import { ReviewPolicies } from './review/reviewPolicies';
+import {
+  AuthorizationPolicies,
+  ReviewPolicies,
+} from './review/reviewPolicies';
 import {
   buildSubagentHandoff,
   getMessageDelegationId,
@@ -2231,6 +2234,10 @@ test('runAgent reuses a host-precompiled artifact discovery registry', async () 
     ],
   }, {
     registry: preparedRegistry,
+    reviewCapabilities: {
+      humanReview: false,
+      sessionAuthorization: true,
+    },
   });
 
   assert.equal(result.reply, 'done');
@@ -2243,6 +2250,10 @@ test('runAgent reuses a host-precompiled artifact discovery registry', async () 
     }>;
   };
   assert.equal(registry, preparedRegistry);
+  assert.deepEqual(calls[0]?.configurable?.reviewCapabilities, {
+    humanReview: false,
+    sessionAuthorization: true,
+  });
   assert.deepEqual(registry.toolkits?.map(({ name }) => name), ['artifact_discovery']);
   assert.deepEqual(
     registry.capabilities?.find(
@@ -2353,10 +2364,10 @@ test('toolkit review policy runs after model without changing tool identity', as
   assert.equal(callCount, 1);
   assert.deepEqual(order, ['review', 'tool']);
   assert.deepEqual(reviewContextKeys, [
+    'authorizationMatcher',
     'input',
     'operation',
     'reviewCapabilities',
-    'toolAuthorizations',
     'toolName',
     'toolkitName',
   ]);
@@ -2701,7 +2712,7 @@ test('global review policy reuses an exact auto authorization in the same sessio
     description: 'bash tools',
     tools: [reviewedTool(
       rawTool,
-      ReviewPolicies.commandExecution({ authorization: 'exact_args' }),
+      ReviewPolicies.commandExecution({ authorization: 'exact' }),
     )],
   }];
   const autoModel = {
@@ -2730,8 +2741,8 @@ test('global review policy reuses an exact auto authorization in the same sessio
     },
     globalReviewPolicy: { mode: 'auto_authorization' },
     toolAuthorizations: sessionAuthorizations,
-    recordToolAuthorization: (authorization) => {
-      sessionAuthorizations.push(authorization);
+    recordToolAuthorizations: (authorizations) => {
+      sessionAuthorizations.push(...authorizations);
     },
     emitRuntimeEvent: (event) => {
       runtimeEvents.push(event);
@@ -2765,29 +2776,31 @@ test('global review policy reuses an exact auto authorization in the same sessio
       {
         toolName: 'run_shell',
         source: 'auto_review',
-        matcher: {
-          type: 'exact_args',
-          value: { command: 'git status --short' },
-        },
+        matcher: exactAuthorization({ command: 'git status --short' }),
       },
       {
         toolName: 'run_shell',
         source: 'auto_review',
-        matcher: {
-          type: 'exact_args',
-          value: { command: 'git diff --stat' },
-        },
+        matcher: exactAuthorization({ command: 'git diff --stat' }),
       },
     ],
   );
-  assert.deepEqual(
-    runtimeEvents.map((event) => (event as { name?: unknown }).name),
-    [
-      'global_review_policy_auto_authorized',
-      'global_review_policy_auto_authorized',
-    ],
+  const runtimeEventNames = runtimeEvents.map((event) =>
+    (event as { name?: unknown }).name);
+  assert.equal(
+    runtimeEventNames.filter((name) => name === 'global_review_policy_auto_authorized').length,
+    2,
   );
+  assert.equal(runtimeEventNames.filter((name) => name === 'tool_authorization_hit').length, 1);
+  assert.equal(runtimeEventNames.filter((name) => name === 'tool_authorization_miss').length, 2);
+  assert.equal(runtimeEventNames.filter((name) => name === 'tool_authorization_recorded').length, 2);
 
+  sessionAuthorizations.push({
+    toolName: 'run_shell',
+    matcher: exactAuthorization({ command: 'git log -1' }),
+    source: 'human',
+    createdAt: '2026-07-31T00:00:00.000Z',
+  });
   const downgradedResources = await resolveToolkitExecution(toolkits, ['bash'], {
     models: { act: autoModel },
     actor: testActor,
@@ -2812,6 +2825,198 @@ test('global review policy reuses an exact auto authorization in the same sessio
   assert.equal(downgradeResult.source, 'policy_block');
   assert.equal(callCount, 3);
   assert.equal(autoReviewCount, 2);
+
+  const humanAuthorized = await runToolkitToolCall(downgradedResources, {
+    id: 'call-human-grant-after-downgrade',
+    name: 'run_shell',
+    args: { command: 'git log -1' },
+  });
+  assert.equal(
+    readToolMessageContent(humanAuthorized.messages, 'call-human-grant-after-downgrade'),
+    'ran git log -1',
+  );
+  assert.equal(callCount, 4);
+});
+
+test('exact auto authorization survives graph rebuild but expires on registry reload', async () => {
+  let runCount = 0;
+  let routeCallCount = 0;
+  let autoReviewCount = 0;
+  const rawTool = tool(async ({ command }: { command: string }) => {
+    runCount += 1;
+    return `ran ${command}`;
+  }, {
+    name: 'run_shell',
+    description: 'run shell',
+    schema: z.object({ command: z.string() }),
+  });
+  const toolkits: AgentToolkit[] = [{
+    name: 'bash',
+    description: 'bash tools',
+    tools: [reviewedTool(
+      rawTool,
+      ReviewPolicies.commandExecution({ authorization: 'exact' }),
+    )],
+  }];
+  const routeModel = {
+    invoke: async () => new AIMessage('answered'),
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        routeCallCount += 1;
+        const step = (routeCallCount - 1) % 4;
+        if (step === 0) return needsPlanDecision();
+        if (step === 1) return scriptedPlannerTask('inspect repository');
+        if (step === 2) return scriptedPlannerCapability('general');
+        return goalDoneDecision();
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const autoReviewModel = {
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        autoReviewCount += 1;
+        return {
+          decision: 'authorize',
+          reason: 'The exact command is a scoped repository inspection.',
+        };
+      },
+    }),
+  } as unknown as AgentModels['observe'];
+  const subagentModel = new FakeToolCallingModel({
+    toolCalls: [
+      [{
+        id: 'call-status-first-turn',
+        name: 'run_shell',
+        args: { command: 'git status --short' },
+      }],
+      [],
+      [{
+        id: 'call-status-second-turn',
+        name: 'run_shell',
+        args: { command: 'git status --short' },
+      }],
+      [],
+      [{
+        id: 'call-status-after-registry-reload',
+        name: 'run_shell',
+        args: { command: 'git status --short' },
+      }],
+      [],
+      [{
+        id: 'call-status-new-session',
+        name: 'run_shell',
+        args: { command: 'git status --short' },
+      }],
+      [],
+    ],
+  });
+  const checkpoint = new MemorySaver();
+  const graphConfig = {
+    models: {
+      act: routeModel,
+      observe: autoReviewModel,
+      subagent: subagentModel,
+    },
+    actor: testActor,
+    checkpoint,
+  };
+  const invokeConfig = {
+    configurable: {
+      thread_id: 'auto-authorization-across-graph-rebuild',
+      actor: testActor,
+      capabilities: [capability('general', 'General-purpose capability.', ['bash'])],
+      toolkits,
+      reviewCapabilities: {
+        humanReview: false,
+        sessionAuthorization: true,
+      },
+      globalReviewPolicy: { mode: 'auto_authorization' },
+    },
+  };
+
+  const firstGraph = createOrchestratorGraph(graphConfig);
+  const firstState = await firstGraph.invoke(
+    buildOrchestratorRunInput([new HumanMessage('inspect repository status')]),
+    invokeConfig,
+  ) as {
+    sessionToolAuthorizations: {
+      generation: string;
+      records: ToolAuthorizationRecord[];
+    };
+  };
+  assert.equal(runCount, 1);
+  assert.equal(autoReviewCount, 1);
+  assert.deepEqual(
+    firstState.sessionToolAuthorizations.records
+      .map(({ createdAt: _createdAt, ...record }) => record),
+    [{
+      toolName: 'run_shell',
+      matcher: exactAuthorization({ command: 'git status --short' }),
+      source: 'auto_review',
+    }],
+  );
+  assert.doesNotMatch(JSON.stringify(firstState.sessionToolAuthorizations), /git status --short/);
+  assert.match(firstState.sessionToolAuthorizations.generation, /^[a-f0-9]{64}$/);
+
+  const rebuiltGraph = createOrchestratorGraph(graphConfig);
+  const secondState = await rebuiltGraph.invoke(
+    buildOrchestratorRunInput([new HumanMessage('inspect repository status again')]),
+    invokeConfig,
+  ) as typeof firstState;
+
+  assert.equal(runCount, 2);
+  assert.equal(autoReviewCount, 1);
+  assert.equal(secondState.sessionToolAuthorizations.records.length, 1);
+  assert.equal(
+    secondState.sessionToolAuthorizations.generation,
+    firstState.sessionToolAuthorizations.generation,
+  );
+
+  const reloadedToolkits: AgentToolkit[] = [{
+    name: 'bash',
+    description: 'bash tools',
+    tools: [reviewedTool(
+      rawTool,
+      ReviewPolicies.commandExecution({
+        authorization: AuthorizationPolicies.exact({
+          subject: ({ input }) => input,
+        }),
+      }),
+    )],
+  }];
+  const reloadedConfig = {
+    configurable: {
+      ...invokeConfig.configurable,
+      toolkits: reloadedToolkits,
+    },
+  };
+  const reloadedState = await rebuiltGraph.invoke(
+    buildOrchestratorRunInput([new HumanMessage('inspect after plugin reload')]),
+    reloadedConfig,
+  ) as typeof firstState;
+
+  assert.equal(runCount, 3);
+  assert.equal(autoReviewCount, 2);
+  assert.equal(reloadedState.sessionToolAuthorizations.records.length, 1);
+  assert.notEqual(
+    reloadedState.sessionToolAuthorizations.generation,
+    firstState.sessionToolAuthorizations.generation,
+  );
+
+  await rebuiltGraph.invoke(
+    buildOrchestratorRunInput([new HumanMessage('inspect from a new session')]),
+    {
+      configurable: {
+        ...reloadedConfig.configurable,
+        thread_id: 'auto-authorization-isolated-session',
+      },
+    },
+  );
+  assert.equal(runCount, 4);
+  assert.equal(autoReviewCount, 3);
 });
 
 test('global review policy does not record auto grants for policies without session authorization', async () => {
@@ -2848,8 +3053,8 @@ test('global review policy does not record auto grants for policies without sess
     },
     globalReviewPolicy: { mode: 'auto_authorization' },
     toolAuthorizations: sessionAuthorizations,
-    recordToolAuthorization: (authorization) => {
-      sessionAuthorizations.push(authorization);
+    recordToolAuthorizations: (authorizations) => {
+      sessionAuthorizations.push(...authorizations);
     },
   });
 
@@ -2864,6 +3069,124 @@ test('global review policy does not record auto grants for policies without sess
     args: { command: 'git status --short' },
   });
 
+  assert.equal(autoReviewCount, 2);
+  assert.deepEqual(sessionAuthorizations, []);
+});
+
+test('auto review never persists url_origin grants', async () => {
+  let callCount = 0;
+  let autoReviewCount = 0;
+  const sessionAuthorizations: ToolAuthorizationRecord[] = [];
+  const rawTool = tool(async ({ url }: { url: string }) => {
+    callCount += 1;
+    return `opened ${url}`;
+  }, {
+    name: 'browser_open',
+    description: 'open browser URL',
+    schema: z.object({ url: z.string() }),
+  });
+  const toolkits: AgentToolkit[] = [{
+    name: 'browser',
+    description: 'browser tools',
+    tools: [reviewedTool(
+      rawTool,
+      ReviewPolicies.externalAccess({ authorization: 'url_origin' }),
+    )],
+  }];
+  const autoModel = {
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        autoReviewCount += 1;
+        return { decision: 'authorize', reason: 'Scoped browser navigation.' };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const resources = await resolveToolkitExecution(toolkits, ['browser'], {
+    models: { act: autoModel },
+    actor: testActor,
+    messages: [],
+    reviewCapabilities: {
+      humanReview: false,
+      sessionAuthorization: true,
+    },
+    globalReviewPolicy: { mode: 'auto_authorization' },
+    toolAuthorizations: sessionAuthorizations,
+    recordToolAuthorizations: (authorizations) => {
+      sessionAuthorizations.push(...authorizations);
+    },
+  });
+
+  for (const id of ['call-browser-1', 'call-browser-2']) {
+    await runToolkitToolCall(resources, {
+      id,
+      name: 'browser_open',
+      args: { url: 'https://example.test/docs' },
+    });
+  }
+
+  assert.equal(callCount, 2);
+  assert.equal(autoReviewCount, 2);
+  assert.deepEqual(sessionAuthorizations, []);
+});
+
+test('matcher builder failures fail closed into review and never persist a grant', async () => {
+  let callCount = 0;
+  let autoReviewCount = 0;
+  const sessionAuthorizations: ToolAuthorizationRecord[] = [];
+  const rawTool = tool(async () => {
+    callCount += 1;
+    return 'ran';
+  }, {
+    name: 'run_shell',
+    description: 'run shell',
+    schema: z.object({ command: z.string() }),
+  });
+  const toolkits: AgentToolkit[] = [{
+    name: 'bash',
+    description: 'bash tools',
+    tools: [reviewedTool(
+      rawTool,
+      ReviewPolicies.commandExecution({
+        authorization: AuthorizationPolicies.exact({
+          subject: () => {
+            throw new Error('invalid authorization subject');
+          },
+        }),
+      }),
+    )],
+  }];
+  const autoModel = {
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        autoReviewCount += 1;
+        return { decision: 'authorize', reason: 'Allow this current call only.' };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const resources = await resolveToolkitExecution(toolkits, ['bash'], {
+    models: { act: autoModel },
+    actor: testActor,
+    messages: [],
+    reviewCapabilities: {
+      humanReview: false,
+      sessionAuthorization: true,
+    },
+    globalReviewPolicy: { mode: 'auto_authorization' },
+    toolAuthorizations: sessionAuthorizations,
+    recordToolAuthorizations: (authorizations) => {
+      sessionAuthorizations.push(...authorizations);
+    },
+  });
+
+  for (const id of ['call-invalid-matcher-1', 'call-invalid-matcher-2']) {
+    await runToolkitToolCall(resources, {
+      id,
+      name: 'run_shell',
+      args: { command: 'npm test' },
+    });
+  }
+
+  assert.equal(callCount, 2);
   assert.equal(autoReviewCount, 2);
   assert.deepEqual(sessionAuthorizations, []);
 });
@@ -3085,6 +3408,61 @@ test('global review policy custom resolver can authorize reviewed tool calls', a
   assert.equal(customReviewTitle, 'write_file');
 });
 
+test('custom review policy explicitly opts in before reusing auto grants', async () => {
+  let callCount = 0;
+  let customReviewCount = 0;
+  const input = { path: 'notes.md', content: 'hello' };
+  const rawTool = tool(async () => {
+    callCount += 1;
+    return 'raw ok';
+  }, {
+    name: 'write_file',
+    description: 'write file',
+    schema: z.object({ path: z.string(), content: z.string() }),
+  });
+  const toolkits: AgentToolkit[] = [{
+    name: 'local',
+    description: 'local tools',
+    tools: [reviewedTool(
+      rawTool,
+      ReviewPolicies.localMutation({ authorization: 'exact' }),
+    )],
+  }];
+  const resources = await resolveToolkitExecution(toolkits, ['local'], {
+    models: {} as AgentModels,
+    actor: testActor,
+    messages: [],
+    reviewCapabilities: {
+      humanReview: false,
+      sessionAuthorization: true,
+    },
+    globalReviewPolicy: {
+      mode: 'custom',
+      reuseAutoAuthorizations: true,
+      resolve: () => {
+        customReviewCount += 1;
+        return { type: 'authorize', reason: 'custom policy allowed it' };
+      },
+    },
+    toolAuthorizations: [{
+      toolName: 'write_file',
+      matcher: exactAuthorization(input),
+      source: 'auto_review',
+      createdAt: '2026-07-31T00:00:00.000Z',
+    }],
+  });
+
+  const result = await runToolkitToolCall(resources, {
+    id: 'call-custom-reused-auto-grant',
+    name: 'write_file',
+    args: input,
+  });
+
+  assert.equal(readToolMessageContent(result.messages, 'call-custom-reused-auto-grant'), 'raw ok');
+  assert.equal(callCount, 1);
+  assert.equal(customReviewCount, 0);
+});
+
 test('toolkit review policy records authorization through orchestrator runtime topology', async () => {
   let runCount = 0;
   let reviewCount = 0;
@@ -3100,15 +3478,7 @@ test('toolkit review policy records authorization through orchestrator runtime t
     name: 'local',
     description: 'local tools',
     tools: [reviewedTool(rawTool, {
-          request: ({ input, toolAuthorizations }) => {
-            const args = input as { command: string };
-            if (isToolActionAuthorized({
-              authorizations: toolAuthorizations ?? [],
-              toolName: 'run_shell',
-              args,
-            })) {
-              return null;
-            }
+          request: () => {
             reviewCount += 1;
             return buildReviewSpec({
               view: { kind: 'plain', body: 'Approve shell?' },
@@ -3119,16 +3489,11 @@ test('toolkit review policy records authorization through orchestrator runtime t
                 effects: [{
                   type: 'graph.authorize_tool_action',
                   scope: 'thread',
-                  actionRef: { type: 'pending_action' },
-                  matcher: { type: 'policy_hook' },
                 }],
               }],
             });
           },
-          buildAuthorizationMatcher: ({ input }) => ({
-            type: 'shell_pattern',
-            value: (input as { command: string }).command,
-          }),
+          authorization: AuthorizationPolicies.exact(),
     })],
   }];
 
@@ -3222,32 +3587,42 @@ test('toolkit review policy records authorization through orchestrator runtime t
   }
   const finalState = await resumedRun.output as {
     __interrupt__?: unknown;
-    sessionToolAuthorizations: Array<{ toolName: string; matcher: unknown; createdAt: string }>;
+    sessionToolAuthorizations: {
+      generation: string;
+      records: Array<{ toolName: string; matcher: unknown; createdAt: string }>;
+    };
   };
 
   assert.equal(finalState.__interrupt__, undefined);
-  assert.deepEqual(finalState.sessionToolAuthorizations.map(({ createdAt: _createdAt, ...item }) => item), [{
-    toolName: 'run_shell',
-    matcher: { type: 'shell_pattern', value: 'git status' },
-    source: 'human',
-  }]);
+  assert.deepEqual(
+    finalState.sessionToolAuthorizations.records
+      .map(({ createdAt: _createdAt, ...item }) => item),
+    [{
+      toolName: 'run_shell',
+      matcher: exactAuthorization({ command: 'git status' }),
+      source: 'human',
+    }],
+  );
   const authorizationEvents = runtimeEvents.filter((event) =>
     event
     && typeof event === 'object'
     && (event as { event?: unknown }).event === 'on_runtime_event'
     && (event as { name?: unknown }).name === 'tool_authorization_recorded');
   assert.equal(authorizationEvents.length, 1);
-  const eventData = (authorizationEvents[0] as { data?: { authorizations?: unknown[] } }).data;
-  const eventAuthorizations = eventData?.authorizations as Array<{
+  const eventAuthorization = (authorizationEvents[0] as { data?: {
     toolName: string;
-    matcher: unknown;
-    createdAt: string;
-  }>;
-  assert.deepEqual(eventAuthorizations.map(({ createdAt: _createdAt, ...item }) => item), [{
+    matcherType: string;
+    source: string;
+    scope: string;
+  } }).data;
+  assert.deepEqual(eventAuthorization, {
     toolName: 'run_shell',
-    matcher: { type: 'shell_pattern', value: 'git status' },
+    matcherType: 'exact',
     source: 'human',
-  }]);
+    scope: 'thread',
+  });
+  // Resuming a LangGraph interrupt replays the node and rebuilds the same
+  // deterministic review request before consuming the saved decision.
   assert.equal(reviewCount, 2);
   assert.equal(runCount, 1);
 });

@@ -1,5 +1,7 @@
 # Human Review Approval Refactor Design
 
+> 本文保留为早期 review protocol 的历史设计。authorization matcher 与 session grant 生命周期已经由 [AUTHORIZATION_MATCHER_LIFECYCLE.md](./AUTHORIZATION_MATCHER_LIFECYCLE.md) 取代；下文中的 matcher template、`shell_pattern` 和 `exact_args` 不再是当前实现。
+
 > 状态：Draft v2
 > 日期：2026-06-09
 > 关联：issue #82，PR #76

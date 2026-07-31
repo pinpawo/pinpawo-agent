@@ -107,7 +107,7 @@ export async function resolveToolkitExecution(
       }
     }
   }
-  const reviewMiddleware = createToolkitReviewMiddleware(reviewBindings, ctx, selectedToolkits);
+  const reviewMiddleware = createToolkitReviewMiddleware(reviewBindings, ctx);
 
   return {
     toolkits: selectedToolkits,

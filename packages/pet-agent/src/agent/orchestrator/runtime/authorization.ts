@@ -1,20 +1,21 @@
 import {
   mergeToolAuthorizations,
+  readToolAuthorizationRecord,
   type ToolAuthorizationRecord,
 } from '../review/reviewAuthorizations';
 
 export function createToolAuthorizationRecorder(current: ToolAuthorizationRecord[]) {
   const active = mergeToolAuthorizations([], current);
-  const recorded: ToolAuthorizationRecord[] = [];
 
   return {
     active,
-    recorded,
-    recordToolAuthorization: (authorization: ToolAuthorizationRecord) => {
-      const merged = mergeToolAuthorizations(active, [authorization]);
-      if (merged.length > active.length) {
-        recorded.push(authorization);
+    recordToolAuthorizations: (authorizations: ToolAuthorizationRecord[]) => {
+      const normalized = authorizations.map(readToolAuthorizationRecord);
+      if (normalized.some((authorization) => !authorization)) {
+        throw new TypeError('Authorization batches must contain only valid records.');
       }
+      const validAuthorizations = normalized as ToolAuthorizationRecord[];
+      const merged = mergeToolAuthorizations(active, validAuthorizations);
       active.splice(0, active.length, ...merged);
     },
   };

@@ -66,7 +66,6 @@ import {
   type OrchestratorStateType,
 } from './state';
 import { applyActiveDelegationTransition } from './runtime/activeDelegationTransition';
-import { GOAL_DONE_ACKNOWLEDGEMENT } from './runtime/nodes/answer';
 import { afterContextPrep } from './runtime/routes/afterContextPrep';
 import { readSubagentGuardStopReason } from '../../subagent/guardStop';
 import type {
@@ -468,7 +467,7 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
   const routeModel = {
     invoke: async () => {
       answerModelInvocations += 1;
-      return new AIMessage('不应调用');
+      return new AIMessage('issue #269 的需求与本地实现检查均已完成，并确认了兼容性要求。');
     },
     withStructuredOutput: () => ({
       invoke: async (messages: unknown[]) => {
@@ -559,8 +558,11 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
     /完整 handoff 末尾约束：必须检查兼容性/,
   );
   assert.equal(plannerInputs[1]?.completedTask, '读取 issue #269 并提炼需求点。');
-  assert.equal(answerModelInvocations, 0);
-  assert.equal(String(state.messages.at(-1)?.content ?? ''), GOAL_DONE_ACKNOWLEDGEMENT);
+  assert.equal(answerModelInvocations, 1);
+  assert.equal(
+    String(state.messages.at(-1)?.content ?? ''),
+    'issue #269 的需求与本地实现检查均已完成，并确认了兼容性要求。',
+  );
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
   assert.equal(state.runPendingTask, null);
   assert.deepEqual(state.runCapabilityPlan, []);
@@ -989,13 +991,15 @@ test('entry answer bypasses the Capability Planner', async () => {
   assert.equal(legacyToolPathCalled, false, 'Stage A removed the LLM tool-call search path');
 });
 
-test('a completed subagent announce reaches the decision, then Answer closes without a model call', async () => {
+test('a completed subagent announce reaches the decision, then Answer summarizes the result', async () => {
   let decisionInput = '';
   let answerModelInvocations = 0;
+  let answerInput: BaseMessage[] = [];
   const model = {
-    invoke: async () => {
+    invoke: async (messages: BaseMessage[]) => {
       answerModelInvocations += 1;
-      return new AIMessage('answered');
+      answerInput = messages;
+      return new AIMessage('文件读取和 lint 检查已完成，lint 已通过。');
     },
     bindTools: () => ({
       invoke: async () => new AIMessage(''),
@@ -1064,8 +1068,10 @@ test('a completed subagent announce reaches the decision, then Answer closes wit
   // copy, surfaced via mainConversationMessages.
   assert.match(decisionInput, /文件读取完成，lint 已通过/);
   assert.match(decisionInput, /END_OF_FULL_SUBAGENT_RESULT/);
-  assert.equal(answerModelInvocations, 0);
-  assert.equal(result.messages.at(-1)?.content, GOAL_DONE_ACKNOWLEDGEMENT);
+  assert.equal(answerModelInvocations, 1);
+  assert.equal(result.messages.at(-1)?.content, '文件读取和 lint 检查已完成，lint 已通过。');
+  assert.match(answerInput.map(readMessageText).join('\n'), /END_OF_FULL_SUBAGENT_RESULT/);
+  assert.match(String(answerInput.at(-1)?.content), /<reply_mode>goal_done<\/reply_mode>/);
   assert.equal(
     result.messages.some((message) => String(message.content).includes('END_OF_FULL_SUBAGENT_RESULT')),
     true,
@@ -1112,13 +1118,15 @@ test('answer node still sees compacted older results when the user asks to re-sh
   assert.match(answerInput, /COMPACTED_RESULT_MARKER/);
 });
 
-test('delegation goal_done emits the fixed close and preserves the handed-off result', async () => {
+test('delegation goal_done summarizes and preserves the handed-off result', async () => {
   let answerModelInvocations = 0;
+  let answerInput: BaseMessage[] = [];
   const announceMarker = 'Vibe Coding 模型排行榜：1. Claude Sonnet 4；2. GPT-5；3. Gemini 2.5 Pro。';
   const routeModel = {
-    invoke: async () => {
+    invoke: async (messages: BaseMessage[]) => {
       answerModelInvocations += 1;
-      return new AIMessage('执行器已经交付结果，我这边已完成收尾。');
+      answerInput = messages;
+      return new AIMessage('Vibe Coding 模型排行榜已整理：1. Claude Sonnet 4；2. GPT-5；3. Gemini 2.5 Pro。');
     },
     bindTools: () => ({
       invoke: async () => new AIMessage(''),
@@ -1174,8 +1182,13 @@ test('delegation goal_done emits the fixed close and preserves the handed-off re
   });
   const finalMessageText = String(result.messages.at(-1)?.content ?? '');
 
-  assert.equal(answerModelInvocations, 0);
-  assert.equal(finalMessageText, GOAL_DONE_ACKNOWLEDGEMENT);
+  assert.equal(answerModelInvocations, 1);
+  assert.equal(
+    finalMessageText,
+    'Vibe Coding 模型排行榜已整理：1. Claude Sonnet 4；2. GPT-5；3. Gemini 2.5 Pro。',
+  );
+  assert.match(answerInput.map(readMessageText).join('\n'), /Claude Sonnet 4/);
+  assert.match(String(answerInput.at(-1)?.content), /<reply_mode>goal_done<\/reply_mode>/);
   assert.equal(
     result.messages.some((message) => String(message.content).includes(announceMarker)),
     true,

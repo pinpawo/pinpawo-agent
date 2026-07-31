@@ -81,7 +81,8 @@ wait for every consumer to migrate:
    rendering, and invocation assembly;
 2. **P0.5 — urgent Answer containment:** after agreeing the minimum Answer
    Context Contract, remove delegated task text from the Answer system message,
-   make `goal_done` deterministic, and add the reproduced regression case;
+   give `goal_done` a closed task-summary mode, and add the reproduced
+   regression case;
 3. **P1 — authority and safety migration:** prevent dynamic facts and summaries
    in the remaining consumers from becoming system instructions;
 4. **P2 — relevance and propagation:** expose only the facts required by the
@@ -122,8 +123,8 @@ The Answer containment slice now applies that contract to production:
   longer enter the system message;
 - model-backed modes receive a bounded synthetic Human facts message after
   canonical history;
-- genuine `goal_done` returns one fixed acknowledgement from runtime without an
-  Answer-model invocation;
+- genuine `goal_done` invokes Answer with canonical history plus a closed,
+  low-authority task-summary mode;
 - the legacy runtime prose builders, including
   `buildDelegationCompletionAnswerContext()`, are removed;
 - deterministic tests cover invocation count, output, roles, order, provenance,
@@ -168,9 +169,10 @@ modes, never an arbitrary instruction channel.
 
 ```ts
 type AnswerContextFacts =
-  | { mode: 'direct' }
-  | { mode: 'task_result' }
-  | { mode: 'user_input_required' }
+  | { mode: 'direct'; hasUserGoal: boolean }
+  | { mode: 'task_result'; hasUserGoal: boolean }
+  | { mode: 'goal_done'; hasUserGoal: boolean }
+  | { mode: 'user_input_required'; hasUserGoal: boolean }
   | {
       mode: 'blocked';
       reason: 'iteration_limit' | 'capability_unavailable';
@@ -179,8 +181,9 @@ type AnswerContextFacts =
 ```
 
 Fields such as `extraSystemPrompt`, `replyInstruction`, or a caller-supplied
-policy string are not valid context facts. `goal_done` needs no Answer context:
-the fixed lifecycle acknowledgement is deterministic runtime output.
+policy string are not valid context facts. `goal_done` is a closed reply mode:
+its stable policy asks Answer to summarize the completed task from canonical
+history rather than accepting caller-authored reply instructions.
 
 ### 4.3 Context rendering
 
@@ -338,8 +341,8 @@ repository-wide migration:
   `runtime/nodes/answer.ts` to `prompts/answer.ts`;
 - keep typed state projection and cleanup in the runtime node;
 - remove workdir and runtime-environment data from the Answer system contract;
-- return the fixed `goal_done` acknowledgement directly from runtime without an
-  Answer model call;
+- route `goal_done` through Answer with canonical history and a typed summary
+  mode;
 - replace terminal prose injection with a bounded Answer facts message;
 - delete `buildDelegationCompletionAnswerContext()`;
 - replace prompt-phrase assertions with invocation-count, output, role, order,
@@ -350,7 +353,7 @@ repository-wide migration:
 The P0.5 acceptance gate is narrow:
 
 - the completed-task text never enters the Answer system message;
-- `goal_done` emits the fixed acknowledgement without an Answer model call;
+- `goal_done` produces a grounded task summary without dynamic system prose;
 - other terminal modes receive only bounded typed facts;
 - the reproduced trace-shaped case no longer turns completed work into a
   future-tense promise.
@@ -440,7 +443,7 @@ Deterministic suites protect:
 - no runtime-generated task, URL, result, or user text in system prompts;
 - typed context variants with no arbitrary policy fields;
 - message role, order, provenance, bounds, and omission;
-- deterministic `goal_done` with zero Answer-model calls;
+- model-backed `goal_done` with canonical history and a closed summary mode;
 - Capability system invariance across dynamic runtime facts;
 - non-system compaction authority;
 - untrusted Auto Review actions remaining outside the trusted policy block.

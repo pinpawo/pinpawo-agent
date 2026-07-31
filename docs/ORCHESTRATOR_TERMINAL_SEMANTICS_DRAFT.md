@@ -12,8 +12,8 @@ The orchestrator must distinguish two questions:
 The former outcome contract collapsed these questions. `goal_done` meant either
 that the user goal is complete or that execution cannot continue without user
 input. Both routes accept the current handoff, mark the delegation completed,
-and enter `answer`. Because `answer` derives its fixed completion acknowledgement
-from the accepted handoff, a run that merely needs a user choice can claim that
+and enter `answer`. Because `answer` formerly derived a fixed completion acknowledgement
+from the accepted handoff, a run that merely needed a user choice could claim that
 the task and user goal are complete.
 
 This conflicts with the existing practical-reasoning distinction:
@@ -24,8 +24,8 @@ execution stopped
   != user goal completed
 ```
 
-The fixed post-delegation acknowledgement remains an accepted behavior. The
-problem is its semantic trigger, not its existence.
+A truthful post-delegation close remains required. Its behavior must follow the
+typed terminal meaning and canonical result evidence.
 
 ## Baseline composition
 
@@ -57,7 +57,7 @@ These are behavioral distinctions, not proposed enum names:
 |---|---:|---:|---:|---:|---|
 | Current executor can close a concrete gap | no | yes | no | no | continue the same task |
 | Current task is complete and later work remains | yes | yes | no | no | plan from the accepted result |
-| User goal is complete | yes | no | yes | no | fixed completion acknowledgement |
+| User goal is complete | yes | no | yes | no | grounded task completion summary |
 | Execution needs a user choice or clarification | not necessarily | no | no | yes | state what is complete and ask for the missing commitment |
 | No available executor can perform the task | no | no | no | possibly | state the unexecuted work and limitation |
 
@@ -101,9 +101,9 @@ The accepted final behavior must:
 - ask the user to choose the channel;
 - avoid claiming that the current task or user goal is complete.
 
-This case is intentionally paired with the existing genuine-completion
-acknowledgement case. Both must pass; removing or weakening the completion
-acknowledgement is not an acceptable repair.
+This case is intentionally paired with a genuine-completion summary case. Both
+must pass: completed work must be summarized, while incomplete work must not be
+presented as complete.
 
 ## Baseline result
 
@@ -158,7 +158,8 @@ type DelegationOutcome =
 - The graph carries the accepted outcome through run-scoped state. `answer`
   receives that state directly and does not infer it from handoff metadata or
   announce text.
-- Only `goal_done` uses the fixed completion acknowledgement.
+- Only `goal_done` uses the task completion summary mode. Answer grounds that
+  summary in canonical conversation and handoff evidence.
   `user_input_required` asks for the missing input while preserving completed
   and incomplete facts from the handed-off result.
 - `task_done` means the current task is complete and the user goal still has
@@ -206,6 +207,6 @@ packages/pet-agent/.eval-results/prompt-stability-bbd546d7819a-1785054440560.jso
 ```
 
 The decision gate is satisfied: the paired lifecycle case is reproducible,
-both terminal meanings are represented, genuine completion retains its fixed
-acknowledgement, the graph transition is deterministic, and outcome and answer
-evals now share the same typed meaning.
+both terminal meanings are represented, the graph transition is deterministic,
+and outcome and answer evals share the same typed meaning. The current Answer
+contract additionally turns genuine completion into a grounded task summary.

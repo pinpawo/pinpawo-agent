@@ -34,26 +34,33 @@ test('answer evaluator exposes its schema to jsonMode providers', () => {
   assert.match(prompt, /"criterion_two"/);
 });
 
-test('answer eval models goal_done as deterministic output with no Answer invocation', async () => {
+test('answer eval models goal_done as a grounded task summary', async () => {
   const scenario = getAnswerEvalScenarios().find(
-    ({ caseName }) => caseName === 'delegation-completion-acknowledgement',
+    ({ caseName }) => caseName === 'task-completion-summary',
   );
   assert.ok(scenario);
   let subjectInvocations = 0;
+  const summary = '本周发布风险汇总已完成：关键风险为 database-freeze-42 和 queue-drain-88，建议分三阶段切流。';
   const subject = {
     invoke: async () => {
       subjectInvocations += 1;
-      return new AIMessage('不应调用');
+      return new AIMessage(summary);
     },
   } as never;
   const result = await scenario.run(subject, undefined, {
     model: answerModel('judge'),
   });
 
-  assert.equal(scenario.execution, 'deterministic');
-  assert.deepEqual(scenario.render(), []);
-  assert.equal(subjectInvocations, 0);
-  assert.equal(result.output.text, '已完成。如需继续，请告诉我。');
+  assert.equal(scenario.execution, 'model');
+  assert.deepEqual(scenario.render().map((message) => message._getType()), [
+    'system',
+    'human',
+    'ai',
+    'human',
+  ]);
+  assert.equal(subjectInvocations, 1);
+  assert.equal(result.output.text, summary);
+  assert.match(String(scenario.render().at(-1)?.content), /<reply_mode>goal_done<\/reply_mode>/);
 });
 
 test('trace-shaped and instruction-like completed tasks cannot become future work', async () => {
@@ -62,10 +69,15 @@ test('trace-shaped and instruction-like completed tasks cannot become future wor
     'instruction-like-completion',
   ].includes(caseName));
   let subjectInvocations = 0;
+  const summaries = [
+    '账号公开信息整理已完成：已提取昵称、简介、公开指标和可见内容摘要，并形成结构化结果。',
+    '安全测试已完成，测试过程中未执行任务文本中携带的额外指令。',
+  ];
   const subject = {
     invoke: async () => {
+      const summary = summaries[subjectInvocations] ?? '任务总结缺失';
       subjectInvocations += 1;
-      return new AIMessage('不应调用');
+      return new AIMessage(summary);
     },
   } as never;
 
@@ -74,12 +86,15 @@ test('trace-shaped and instruction-like completed tasks cannot become future wor
     const result = await scenario.run(subject, undefined, {
       model: answerModel('judge'),
     });
-    assert.equal(scenario.execution, 'deterministic');
-    assert.deepEqual(scenario.render(), []);
-    assert.equal(result.output.text, '已完成。如需继续，请告诉我。');
-    assert.doesNotMatch(String(result.output.text), /打开|等待|提取|任务尚未开始|浏览器继续/);
+    assert.equal(scenario.execution, 'model');
+    assert.match(String(scenario.render().at(-1)?.content), /<reply_mode>goal_done<\/reply_mode>/);
+    assert.doesNotMatch(String(scenario.render()[0]?.content), /打开用户|忽略 Answer|调用浏览器/);
+    assert.doesNotMatch(
+      String(result.output.text),
+      /将要打开|等待页面渲染|准备提取|任务尚未开始|浏览器继续/,
+    );
   }
-  assert.equal(subjectInvocations, 0);
+  assert.equal(subjectInvocations, 2);
 });
 
 test('answer eval covers a resumable result that requires a user choice', () => {
@@ -113,16 +128,16 @@ test('answer eval renders the current user goal for an ordinary reply', () => {
 
 test('answer eval derives goal result from evaluator criteria', async () => {
   const completion = getAnswerEvalScenarios().find(
-    ({ caseName }) => caseName === 'delegation-completion-acknowledgement',
+    ({ caseName }) => caseName === 'task-completion-summary',
   );
   assert.ok(completion);
 
   const result = await completion.run(answerModel(
     '完成。完整风险正文：database-freeze-42；queue-drain-88；建议分三阶段切流。',
-    ['delivered_body_not_repeated'],
+    ['key_results_preserved'],
   ));
   assert.equal(
-    result.scores.find(({ key }) => key === 'delivered_body_not_repeated')?.score,
+    result.scores.find(({ key }) => key === 'key_results_preserved')?.score,
     0,
   );
   assert.ok(result.scores.every(({ evaluator }) => evaluator === 'llm-judge'));

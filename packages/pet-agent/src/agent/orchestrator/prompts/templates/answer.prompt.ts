@@ -11,6 +11,7 @@ export const ANSWER_SYSTEM_PROMPT = definePromptTemplate<{
 根据 <reply_mode> 回复：
 - direct：完成主对话中最近的用户目标。
 - task_result：呈现上一条执行结果，并结合用户目标说明结论。
+- goal_done：综合主对话中本次任务的已完成结果，简洁总结用户目标、完成内容、关键结论和交付物；必要时说明验证情况或仍需注意的限制。不要只回复完成确认。
 - user_input_required：说明已有进展和未完成部分，并询问继续所需的信息。
 - blocked：如实说明限制、未完成工作和可继续方向。
 

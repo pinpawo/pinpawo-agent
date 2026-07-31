@@ -85,12 +85,6 @@ export function createAnswerNode(config: OrchestratorConfig) {
         ?? readRunIterationLimit(config.maxRunIterations)
         ?? DEFAULT_ORCHESTRATOR_MAX_ITERATIONS,
     });
-    if (answerContextFacts.mode === 'goal_done') {
-      return {
-        messages: [stampMessageCreatedAtUtc(new AIMessage(GOAL_DONE_ACKNOWLEDGEMENT))],
-        ...buildAnswerCleanup(),
-      };
-    }
     const answerMessages = buildAnswerInvocationMessages({
       actor,
       history: answerHistory,
@@ -111,8 +105,6 @@ export function createAnswerNode(config: OrchestratorConfig) {
   };
 }
 
-export const GOAL_DONE_ACKNOWLEDGEMENT = '已完成。如需继续，请告诉我。';
-
 export function selectAnswerContextFacts(params: {
   state: OrchestratorStateType;
   history: BaseMessage[];
@@ -125,7 +117,7 @@ export function selectAnswerContextFacts(params: {
     return { mode: 'user_input_required', hasUserGoal };
   }
   if (params.acceptedHandoffOutcome === 'goal_done') {
-    return { mode: 'goal_done' };
+    return { mode: 'goal_done', hasUserGoal };
   }
   if (params.acceptedHandoffOutcome === 'task_done') {
     return { mode: 'task_result', hasUserGoal };

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Command } from '@langchain/langgraph';
-import type { BaseMessage } from '@langchain/core/messages';
+import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { materializeCapabilityDocumentWorkspace } from '../../capabilityDocumentWorkspace';
 import { createCapabilityPlannerAgent } from '../../capabilityPlannerAgent';
@@ -12,15 +12,12 @@ import type {
   CapabilityPlannerRunner,
   CapabilityPlannerTask,
 } from '../../capabilityPlannerRunner';
-import { readContextCompactionSummaries } from '../../contextCompaction';
 import { materializeDelegation } from '../../delegationBriefing';
 import { appendRunDelegationSummary } from '../../delegations';
+import { isContextCompactionMessage } from '../../contextCompaction';
 import {
-  buildPreparedRequestContextFragment,
-} from '../../prompts';
-import {
-  getMessageHandoffSource,
-  readLatestHumanRequest,
+  mainConversationMessages,
+  toolProtocolSafeMessages,
 } from '../../messageLanes';
 import type { OrchestratorStateType } from '../../state';
 import type {
@@ -29,12 +26,10 @@ import type {
   OrchestratorConfig,
   RunNextDelegation,
 } from '../../types';
-import { readMessageText } from '../../utils';
 import {
   getInvokeOptions,
   getInvokeRegistry,
 } from '../config';
-import { mainMessagesWithoutCompaction } from '../decisions/conversationContext';
 import { createTaskActiveDelegation } from '../decisions/delegationLifecycle';
 
 const DEFAULT_CAPABILITY_PLANNER_WORKSPACE_ROOT = join(
@@ -48,34 +43,27 @@ function buildPlannerMode(state: OrchestratorStateType): CapabilityPlannerInput[
     : 'boundary';
 }
 
+function buildPlannerMessages(messages: BaseMessage[]) {
+  // Planner policy comes only from its own system prompt. Main Human/AI turns
+  // remain verbatim; framework compaction is retained as lower-authority evidence.
+  const projectedMessages = mainConversationMessages(messages).flatMap((message) => {
+    const type = message._getType();
+    if (type === 'human' || type === 'ai') return [message];
+    if (isContextCompactionMessage(message)) {
+      return [new AIMessage(message.content)];
+    }
+    return [];
+  });
+  return toolProtocolSafeMessages(projectedMessages);
+}
+
 function buildPlannerContext(state: OrchestratorStateType) {
-  const latestHumanRequest = readLatestHumanRequest(state.messages);
   const latestCompletedDelegation = [...state.runDelegationSummaries]
     .reverse()
     .find((item) => item.status === 'completed');
-  const latestHandoff = latestCompletedDelegation
-    ? [...state.messages]
-        .reverse()
-        .find((message) => {
-          const source = getMessageHandoffSource(message);
-          return source?.delegationId === latestCompletedDelegation.id
-            && source.handoffFrom === latestCompletedDelegation.lane;
-        })
-    : null;
-
   return {
-    userIntentContext: buildPreparedRequestContextFragment({
-      latestUserRequest: latestHumanRequest,
-      recentMessages: mainMessagesWithoutCompaction(state.messages),
-      contextSummaries: readContextCompactionSummaries(state.messages),
-    }),
-    completedTasks: state.runDelegationSummaries
-      .filter((item) => item.status === 'completed')
-      .map((item) => ({
-        objective: item.task,
-        result: item.resultPreview,
-      })),
-    latestHandoff: latestHandoff ? readMessageText(latestHandoff) : null,
+    messages: buildPlannerMessages(state.messages),
+    completedTask: latestCompletedDelegation?.task ?? null,
   };
 }
 

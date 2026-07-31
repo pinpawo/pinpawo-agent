@@ -227,7 +227,8 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
   } as unknown as AgentModels['act'];
   const capabilityPlannerRunner: CapabilityPlannerRunner = {
     async invoke(input) {
-      const readsAttachment = input.userIntentContext.includes(
+      const readsAttachment = messagesContain(
+        input.messages,
         ATTACHMENT_TOOL_INPUT,
       );
       return {
@@ -352,7 +353,7 @@ function messageText(message: BaseMessage) {
       )).join('\n');
 }
 
-function messagesContain(messages: BaseMessage[], value: string) {
+function messagesContain(messages: readonly BaseMessage[], value: string) {
   return messages.some((message) => messageText(message).includes(value));
 }
 

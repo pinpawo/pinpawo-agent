@@ -413,7 +413,12 @@ test('task_done reroutes through capabilityPlanner before the next task', async 
     capabilityPlannerRunner,
   });
 
+  const dynamicSystemContext = new SystemMessage('DYNAMIC_WIKI_SYSTEM_CONTEXT');
+  const compactionContext = new SystemMessage('FRAMEWORK_COMPACTION_CONTEXT');
+  compactionContext.name = CONTEXT_COMPACTION_MESSAGE_NAME;
   const state = await graph.invoke(buildOrchestratorRunInput([
+    dynamicSystemContext,
+    compactionContext,
     new HumanMessage('看 issue #269，再查本地实现，最后总结。'),
   ]), {
     configurable: {
@@ -429,10 +434,24 @@ test('task_done reroutes through capabilityPlanner before the next task', async 
   assert.doesNotMatch(entryDecisionInputs[0], /plan_draft|task_plan_draft/);
   assert.equal(plannerInputs[0]?.mode, 'entry');
   assert.equal(plannerInputs[1]?.mode, 'boundary');
-  assert.match(plannerInputs[1]?.latestHandoff ?? '', /issue #269 需求点/);
-  assert.deepEqual(plannerInputs[1]?.completedTasks.map(({ objective }) => objective), [
-    '读取 issue #269 并提炼需求点。',
-  ]);
+  assert.doesNotMatch(
+    plannerInputs[0]?.messages.map(readMessageText).join('\n') ?? '',
+    /DYNAMIC_WIKI_SYSTEM_CONTEXT/,
+  );
+  assert.match(
+    plannerInputs[0]?.messages.map(readMessageText).join('\n') ?? '',
+    /FRAMEWORK_COMPACTION_CONTEXT/,
+  );
+  assert.equal(plannerInputs[0]?.messages[0]?._getType(), 'ai');
+  assert.match(
+    plannerInputs[1]?.messages.map(readMessageText).join('\n') ?? '',
+    /issue #269 需求点/,
+  );
+  assert.match(
+    plannerInputs[1]?.messages.map(readMessageText).join('\n') ?? '',
+    /接下来我会先处理这项任务：读取 issue #269 并提炼需求点/,
+  );
+  assert.equal(plannerInputs[1]?.completedTask, '读取 issue #269 并提炼需求点。');
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
   assert.equal(state.runPendingTask, null);
   assert.deepEqual(state.runCapabilityPlan, []);
@@ -535,10 +554,11 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
     capability: 'explore',
     task: '检索本地实现与 git log。',
   }]);
-  assert.deepEqual(plannerInputs[1]?.completedTasks.map(({ objective }) => objective), [
-    '读取 issue #269 并提炼需求点。',
-  ]);
-  assert.match(plannerInputs[1]?.latestHandoff ?? '', /完整 handoff 末尾约束：必须检查兼容性/);
+  assert.match(
+    plannerInputs[1]?.messages.map(readMessageText).join('\n') ?? '',
+    /完整 handoff 末尾约束：必须检查兼容性/,
+  );
+  assert.equal(plannerInputs[1]?.completedTask, '读取 issue #269 并提炼需求点。');
   assert.equal(answerModelInvocations, 0);
   assert.equal(String(state.messages.at(-1)?.content ?? ''), GOAL_DONE_ACKNOWLEDGEMENT);
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);

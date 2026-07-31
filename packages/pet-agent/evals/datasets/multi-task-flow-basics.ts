@@ -27,7 +27,7 @@ const cases: AgentEvalCase<MultiTaskFlowInput, MultiTaskFlowExpected>[] = [
     input: {
       userMessage: '先调查 auth 模块的结构和风险，再根据调查结论完成重构。',
       subagentResults: [
-        '调查完成：auth/index.ts 存在循环依赖，建议提取 token validation 并保持公开接口。',
+        `调查过程和证据已经整理。${'补充背景信息。'.repeat(60)}最终结论：auth/index.ts 存在循环依赖，建议提取 token validation 并保持公开接口。`,
         '重构完成：已提取 token validation，移除循环依赖，公开接口保持不变，测试通过。',
       ],
     },

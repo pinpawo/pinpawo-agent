@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import {
   AIMessage,
+  HumanMessage,
   ToolMessage,
   type BaseMessage,
 } from '@langchain/core/messages';
@@ -61,6 +62,7 @@ class ScriptedPlannerModel extends BaseChatModel {
   readonly structuredOutputToolNames = new Map<string, string>();
   readonly structuredOutputSchemaReferences: string[] = [];
   readonly structuredOutputPlanLimits: number[] = [];
+  readonly structuredOutputCapabilityEnums: string[][] = [];
   #responseIndex = 0;
 
   constructor(
@@ -105,6 +107,10 @@ class ScriptedPlannerModel extends BaseChatModel {
       0,
       this.structuredOutputPlanLimits.length,
     );
+    this.structuredOutputCapabilityEnums.splice(
+      0,
+      this.structuredOutputCapabilityEnums.length,
+    );
     for (const entry of toolEntries) {
       const name = entry.function?.name;
       const parameters = entry.function?.parameters;
@@ -125,6 +131,23 @@ class ScriptedPlannerModel extends BaseChatModel {
           : null;
         if (kind === 'plan' && typeof maxItems === 'number') {
           this.structuredOutputPlanLimits.push(maxItems);
+        }
+        const items = tasks && typeof tasks === 'object'
+          ? (tasks as Record<string, unknown>).items
+          : null;
+        const itemProperties = items && typeof items === 'object'
+          ? (items as Record<string, unknown>).properties
+          : null;
+        const capability = itemProperties && typeof itemProperties === 'object'
+          ? (itemProperties as Record<string, unknown>).capability
+          : null;
+        const capabilityEnum = capability && typeof capability === 'object'
+          ? (capability as Record<string, unknown>).enum
+          : null;
+        if (kind === 'plan' && Array.isArray(capabilityEnum)) {
+          this.structuredOutputCapabilityEnums.push(
+            capabilityEnum.filter((name): name is string => typeof name === 'string'),
+          );
         }
       }
     }
@@ -253,16 +276,11 @@ function plannerInput(
 ): CapabilityPlannerInput {
   return {
     mode: 'entry',
-    userIntentContext: [
-      '<user_request>',
-      '<![CDATA[',
-      'Research the repository and then prepare a review.',
-      ']]>',
-      '</user_request>',
-    ].join('\n'),
-    completedTasks: [],
+    messages: [
+      new HumanMessage('Research the repository and then prepare a review.'),
+    ],
+    completedTask: null,
     remainingPlan: [],
-    latestHandoff: null,
     workspace,
     ...overrides,
   } as CapabilityPlannerInput;
@@ -333,11 +351,15 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
   assert.equal(model.structuredOutputToolNames.has('unavailable'), false);
   assert.deepEqual(model.structuredOutputSchemaReferences, []);
   assert.deepEqual(model.structuredOutputPlanLimits, [24]);
+  assert.deepEqual(model.structuredOutputCapabilityEnums, [['explore', 'general']]);
   assert.ok(model.boundToolOptions.length > 0);
   assert.ok(model.boundToolOptions.every(
     (options) => options.parallel_tool_calls === false,
   ));
   assert.equal(model.invocations.length, 3);
+  assert.ok(model.invocations[0]?.some((message) =>
+    message instanceof HumanMessage
+    && message.content === 'Research the repository and then prepare a review.'));
   assert.deepEqual(result, {
     tasks: [{
       capability: 'explore',
@@ -462,6 +484,11 @@ test('an empty workspace can produce a truthful unavailable result', async (t) =
 
 test('boundary mode rejects answer and materializes remaining work with general', async (t) => {
   const workspace = await createWorkspace(t, {
+    explore: capabilityDocument({
+      name: 'explore',
+      description: 'Investigate repositories.',
+      instructions: 'Inspect repository evidence.',
+    }),
     general: capabilityDocument({
       name: 'general',
       description: 'Handle ordinary tasks.',
@@ -496,6 +523,7 @@ test('boundary mode rejects answer and materializes remaining work with general'
       },
     },
   ]);
+  const fullHandoff = `Research completed. ${'Evidence detail. '.repeat(40)}Final constraint: preserve the public API.`;
 
   const result = await createCapabilityPlannerAgent({
     model,
@@ -503,11 +531,12 @@ test('boundary mode rejects answer and materializes remaining work with general'
   }).invoke(
     plannerInput(workspace, {
       mode: 'boundary',
-      completedTasks: [{
-        objective: 'Research the repository.',
-        result: 'The requested evidence was delivered; review synthesis remains.',
-      }],
-      latestHandoff: 'Research complete; prepare the review.',
+      messages: [
+        new HumanMessage('Research the repository and then prepare a review.'),
+        new AIMessage('Next I will research the repository.'),
+        new AIMessage(fullHandoff),
+      ],
+      completedTask: 'Research the repository.',
       remainingPlan: [{
         capability: 'general',
         task: 'Prepare the review from the findings.',
@@ -517,6 +546,16 @@ test('boundary mode rejects answer and materializes remaining work with general'
 
   assert.ok('tasks' in result);
   assert.equal('tasks' in result ? result.tasks[0]?.capability : null, 'general');
+  assert.deepEqual(model.structuredOutputCapabilityEnums, [['general', 'explore']]);
+  assert.ok(model.invocations[0]?.some((message) =>
+    message instanceof AIMessage && message.content === fullHandoff));
+  assert.ok(model.invocations[0]?.some((message) =>
+    message instanceof HumanMessage
+    && String(message.content).includes('<planning_state mode="boundary">')));
+  assert.match(
+    model.invocations[0]?.map((message) => String(message.content)).join('\n') ?? '',
+    /Final constraint: preserve the public API/,
+  );
   assert.ok(model.invocations[1]?.some((message) =>
     message instanceof ToolMessage
     && message.tool_call_id === 'structured-1'));

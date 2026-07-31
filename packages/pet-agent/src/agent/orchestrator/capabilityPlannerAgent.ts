@@ -126,8 +126,14 @@ const unavailablePlanSchema = {
 function createCapabilityPlannerResponseFormat(
   input: CapabilityPlannerInput,
 ): TypedToolStrategy<CapabilityPlannerResult> {
-  const [firstCapabilityName, ...otherCapabilityNames] =
-    input.workspace.capabilityNames;
+  const availableCapabilityNames = new Set(input.workspace.capabilityNames);
+  const orderedCapabilityNames = [...new Set([
+    ...(input.mode === 'boundary'
+      ? input.remainingPlan.map((task) => task.capability)
+      : []),
+    ...input.workspace.capabilityNames,
+  ])].filter((name) => availableCapabilityNames.has(name));
+  const [firstCapabilityName, ...otherCapabilityNames] = orderedCapabilityNames;
   if (!firstCapabilityName) {
     return toolStrategy(unavailablePlanSchema, {
       toolMessageContent: 'Capability planning result accepted.',
@@ -139,7 +145,7 @@ function createCapabilityPlannerResponseFormat(
     ...otherCapabilityNames,
   ]);
 
-  if (input.workspace.capabilityNames.includes('general')) {
+  if (orderedCapabilityNames.includes('general')) {
     return toolStrategy(submitPlanSchema, {
       toolMessageContent: 'Capability planning result accepted.',
     }) as TypedToolStrategy<CapabilityPlannerResult>;
@@ -254,7 +260,10 @@ async function invokePlannerAgent(params: {
     const result = await agent.invoke(
       {
         messages: [
-          new HumanMessage(buildCapabilityPlannerAgentInput(params.input)),
+          ...params.input.messages,
+          ...(params.input.mode === 'boundary'
+            ? [new HumanMessage(buildCapabilityPlannerAgentInput(params.input))]
+            : []),
         ],
       },
       {

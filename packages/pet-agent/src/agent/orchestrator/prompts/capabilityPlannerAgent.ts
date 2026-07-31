@@ -10,21 +10,10 @@ import {
   CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT,
 } from './templates/capabilityPlannerAgent.prompt';
 
-function buildCompletedTasksBlock(
-  tasks: CapabilityPlannerInput['completedTasks'],
+function buildCompletedTaskBlock(
+  task: CapabilityPlannerInput['completedTask'],
 ) {
-  if (tasks.length === 0) return null;
-  const lines = ['<completed_tasks>'];
-  for (const task of tasks) {
-    lines.push('  <task>');
-    lines.push(indentXmlBlock(xmlTextBlock('objective', task.objective), 4));
-    if (task.result) {
-      lines.push(indentXmlBlock(xmlTextBlock('result', task.result), 4));
-    }
-    lines.push('  </task>');
-  }
-  lines.push('</completed_tasks>');
-  return lines.join('\n');
+  return task ? xmlTextBlock('completed_task', task) : null;
 }
 
 function buildRemainingPlanBlock(
@@ -53,19 +42,12 @@ export function buildCapabilityPlannerAgentSystemPrompt(
 export function buildCapabilityPlannerAgentInput(input: CapabilityPlannerInput) {
   return CAPABILITY_PLANNER_AGENT_INPUT_PROMPT.render({
     mode: input.mode,
-    userIntentContextBlock: promptBlock(input.userIntentContext, 2),
-    completedTasksBlock: promptBlock(
-      buildCompletedTasksBlock(input.completedTasks),
+    completedTaskBlock: promptBlock(
+      buildCompletedTaskBlock(input.completedTask),
       2,
     ),
     remainingPlanBlock: promptBlock(
       buildRemainingPlanBlock(input.remainingPlan),
-      2,
-    ),
-    latestHandoffBlock: promptBlock(
-      input.latestHandoff
-        ? xmlTextBlock('latest_handoff', input.latestHandoff)
-        : null,
       2,
     ),
   });

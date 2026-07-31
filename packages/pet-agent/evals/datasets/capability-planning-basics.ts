@@ -2,11 +2,13 @@ import { AgentEvalCase, AgentEvalDataset } from './types.ts';
 
 export type CapabilityPlanningInput = {
   mode: 'entry' | 'boundary';
-  userGoal: string;
+  messages: Array<{
+    role: 'user' | 'assistant';
+    content: string;
+  }>;
   capabilityRegistry: string[];
-  completedTasks?: Array<{ objective: string; result: string | null }>;
+  completedTask?: string;
   remainingPlan?: Array<{ capability: string; task: string }>;
-  latestHandoff?: string;
 };
 
 export type CapabilityPlanningExpected = {
@@ -31,7 +33,10 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
     tags: ['capability_planning', 'entry_decision'],
     input: {
       mode: 'entry',
-      userGoal: '在当前仓库中完成 auth 模块重构。具体改动必须以模块现有结构和风险为依据。',
+      messages: [{
+        role: 'user',
+        content: '在当前仓库中完成 auth 模块重构。具体改动必须以模块现有结构和风险为依据。',
+      }],
       capabilityRegistry: [
         'explore: inspect code structure and risks',
         'general: use workspace tools to edit and verify code',
@@ -57,7 +62,10 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
     tags: ['capability_planning', 'entry_decision'],
     input: {
       mode: 'entry',
-      userGoal: '调查支付模块失败测试的根因、涉及代码和触发条件，确认调查完整后再结束。',
+      messages: [{
+        role: 'user',
+        content: '调查支付模块失败测试的根因、涉及代码和触发条件，确认调查完整后再结束。',
+      }],
       capabilityRegistry: [
         'workspace_analysis: inspect tests, source code, and failure conditions',
         'code_change: modify code and verify tests',
@@ -82,7 +90,10 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
     tags: ['capability_planning', 'delegation_control'],
     input: {
       mode: 'entry',
-      userGoal: '确认当前仓库是否还有未提交改动，并把实际状态告诉我。',
+      messages: [{
+        role: 'user',
+        content: '确认当前仓库是否还有未提交改动，并把实际状态告诉我。',
+      }],
       capabilityRegistry: [
         'general: inspect the current workspace and report repository state',
       ],
@@ -106,7 +117,10 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
     tags: ['capability_planning', 'delegation_control'],
     input: {
       mode: 'entry',
-      userGoal: '审查 PR #450 的代码风险，并独立确认部署文档中的公开配置与实际页面一致。',
+      messages: [{
+        role: 'user',
+        content: '审查 PR #450 的代码风险，并独立确认部署文档中的公开配置与实际页面一致。',
+      }],
       capabilityRegistry: [
         'explore: inspect pull requests and code risks',
         'browser: inspect deployed pages and compare public configuration',
@@ -134,17 +148,22 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
     tags: ['capability_planning', 'delegation_control'],
     input: {
       mode: 'boundary',
-      userGoal: '在当前仓库中完成 auth 模块重构。具体改动必须以模块现有结构和风险为依据。',
+      messages: [{
+        role: 'user',
+        content: '在当前仓库中完成 auth 模块重构。具体改动必须以模块现有结构和风险为依据。',
+      }, {
+        role: 'assistant',
+        content: '接下来我会先处理这项任务：调查 auth 模块的现有结构和风险',
+      }, {
+        role: 'assistant',
+        content: 'auth/index.ts 存在循环依赖；应提取 token validation 并保持现有公开接口。',
+      }],
       capabilityRegistry: [
         'explore: inspect code structure and risks',
         'general: use workspace tools to edit and verify code',
       ],
-      completedTasks: [{
-        objective: '调查 auth 模块的现有结构和风险',
-        result: 'auth/index.ts 存在循环依赖；应提取 token validation 并保持现有公开接口。',
-      }],
+      completedTask: '调查 auth 模块的现有结构和风险',
       remainingPlan: [{ capability: 'general', task: '根据调查结论重构 auth 模块' }],
-      latestHandoff: 'auth/index.ts 存在循环依赖；应提取 token validation 并保持现有公开接口。',
     },
     expected: {
       result: 'plan',
@@ -164,7 +183,10 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
     tags: ['capability_planning', 'delegation_control'],
     input: {
       mode: 'entry',
-      userGoal: '处理这个没有专用 Capability 覆盖的普通工作区任务，并返回执行结果。',
+      messages: [{
+        role: 'user',
+        content: '处理这个没有专用 Capability 覆盖的普通工作区任务，并返回执行结果。',
+      }],
       capabilityRegistry: [
         'general: execute ordinary workspace tasks when no specialized Capability matches',
       ],
@@ -188,18 +210,23 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
     tags: ['capability_planning', 'delegation_control'],
     input: {
       mode: 'boundary',
-      userGoal: '生成报告并发送给项目负责人。',
+      messages: [{
+        role: 'user',
+        content: '生成报告并发送给项目负责人。',
+      }, {
+        role: 'assistant',
+        content: '接下来我会先处理这项任务：生成项目报告',
+      }, {
+        role: 'assistant',
+        content: '报告已生成，路径为 /tmp/report.pdf，内容检查通过。',
+      }],
       capabilityRegistry: [
         'document_writer: create report documents',
         'messaging: deliver messages and attachments',
         'general: perform other available work',
       ],
-      completedTasks: [{
-        objective: '生成项目报告',
-        result: '报告已生成，路径为 /tmp/report.pdf，内容检查通过。',
-      }],
+      completedTask: '生成项目报告',
       remainingPlan: [{ capability: 'messaging', task: '把完成的报告发送给项目负责人' }],
-      latestHandoff: '报告已生成，路径为 /tmp/report.pdf，内容检查通过。',
     },
     expected: {
       result: 'plan',
@@ -219,20 +246,25 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
     tags: ['capability_planning', 'delegation_control'],
     input: {
       mode: 'boundary',
-      userGoal: '根据调查修复 auth 风险，然后独立运行 release verification。',
+      messages: [{
+        role: 'user',
+        content: '根据调查修复 auth 风险，然后独立运行 release verification。',
+      }, {
+        role: 'assistant',
+        content: '接下来我会先处理这项任务：调查 auth 风险',
+      }, {
+        role: 'assistant',
+        content: '调查确认 token validation 存在循环依赖，需要保持公开接口。',
+      }],
       capabilityRegistry: [
         'general: modify source code',
         'release_check: run release verification',
       ],
-      completedTasks: [{
-        objective: '调查 auth 风险',
-        result: '调查确认 token validation 存在循环依赖，需要保持公开接口。',
-      }],
+      completedTask: '调查 auth 风险',
       remainingPlan: [
         { capability: 'general', task: '根据调查结论修复 auth 风险' },
         { capability: 'release_check', task: '独立运行 release verification' },
       ],
-      latestHandoff: '调查确认 token validation 存在循环依赖，需要保持公开接口。',
     },
     expected: {
       result: 'plan',
@@ -255,15 +287,21 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
     tags: ['capability_planning', 'delegation_control'],
     input: {
       mode: 'boundary',
-      userGoal: '读取 issue #345 的架构演进内容，再检查当前仓库实现是否已经覆盖。',
+      messages: [{
+        role: 'user',
+        content: '读取 issue #345 的架构演进内容，再检查当前仓库实现是否已经覆盖。',
+      }, {
+        role: 'assistant',
+        content: '接下来我会先处理这项任务：读取 issue #345 并整理架构演进内容',
+      }, {
+        role: 'assistant',
+        content: 'issue 正文和评论中的架构演进提案已经完整整理；下一步只需对照当前仓库实现。',
+      }],
       capabilityRegistry: [
         'explore: inspect issues, repositories, and implementation history',
         'general: perform ordinary workspace tasks',
       ],
-      completedTasks: [{
-        objective: '读取 issue #345 并整理架构演进内容',
-        result: 'issue 正文和评论中的架构演进提案已经完整整理。',
-      }],
+      completedTask: '读取 issue #345 并整理架构演进内容',
       remainingPlan: [
         {
           capability: 'explore',
@@ -274,7 +312,6 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
           task: '检查当前仓库实现是否覆盖 issue 中的架构演进提案',
         },
       ],
-      latestHandoff: 'issue 正文和评论中的架构演进提案已经完整整理；下一步只需对照当前仓库实现。',
     },
     expected: {
       result: 'plan',
@@ -295,7 +332,10 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
     tags: ['capability_planning', 'entry_decision'],
     input: {
       mode: 'entry',
-      userGoal: '确认当前仓库测试是否通过，并把最终结论更新到 issue #417。',
+      messages: [{
+        role: 'user',
+        content: '确认当前仓库测试是否通过，并把最终结论更新到 issue #417。',
+      }],
       capabilityRegistry: [
         'general: inspect the workspace and run project tests',
         'github: read and update repository issues',

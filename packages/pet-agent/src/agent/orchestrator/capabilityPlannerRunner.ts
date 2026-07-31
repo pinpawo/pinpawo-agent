@@ -1,17 +1,14 @@
 import type { RunnableConfig } from '@langchain/core/runnables';
+import type { BaseMessage } from '@langchain/core/messages';
 import type { CapabilityDocumentWorkspace } from './capabilityDocumentWorkspace';
 import type { CapabilityPlanTask } from './types';
 
 export type CapabilityPlannerMode = 'entry' | 'boundary';
 
 type CapabilityPlannerInputBase = {
-  readonly userIntentContext: string;
-  readonly completedTasks: ReadonlyArray<{
-    readonly objective: string;
-    readonly result: string | null;
-  }>;
+  readonly messages: readonly BaseMessage[];
+  readonly completedTask: string | null;
   readonly remainingPlan: readonly CapabilityPlanTask[];
-  readonly latestHandoff: string | null;
   readonly workspace: CapabilityDocumentWorkspace;
 };
 

@@ -20,7 +20,10 @@ import {
 import type { LoadedUserCapability } from './capabilityLoader';
 import { clearAgentRunActivity, recordOperationActivity } from './operationActivityState';
 import { readLocalAgentPackageVersion } from './packageVersion';
-import { checkBrowserAvailability } from './toolkits/browser';
+import {
+  browserRuntime,
+  checkBrowserAvailability,
+} from './toolkits/browser';
 import { resolveToolkitAvailability } from './toolkits/toolkitAvailability';
 import { createTestModelServerDeps } from './testing/modelProfiles';
 
@@ -259,6 +262,7 @@ test('handleLocalHttpRequest exposes active operation health fields', async () =
 
 test('handleLocalHttpRequest preserves browser availability diagnostics', async () => {
   const availability = await checkBrowserAvailability();
+  const extension = browserRuntime.getSnapshot().extension;
   const res = makeRes();
 
   handleLocalHttpRequest(
@@ -291,18 +295,22 @@ test('handleLocalHttpRequest preserves browser availability diagnostics', async 
   );
   assert.equal(
     payload.browser_detail,
-    availability.detail ?? availability.reason,
+    mode === 'extension'
+      ? extension.detail
+      : availability.detail ?? availability.reason,
   );
-  if (mode === 'extension') {
-    assert.equal(
-      payload.browser_command_ready,
-      availability.metadata?.commandReady,
-    );
-    assert.equal(
-      typeof payload.browser_runtime_state,
-      'string',
-    );
-  }
+  assert.equal(payload.browser_runtime_state, extension.state);
+  assert.equal(payload.browser_extension_detail, extension.detail);
+  assert.equal(payload.browser_bridge_listening, extension.bridgeListening);
+  assert.equal(payload.browser_host_connected, extension.nativeHostConnected);
+  assert.equal(payload.browser_extension_connected, extension.extensionRegistered);
+  assert.equal(
+    payload.browser_command_ready,
+    mode === 'extension'
+      ? extension.commandReady
+      : availability.metadata?.commandReady ?? false,
+  );
+  assert.equal(payload.browser_extension_command_ready, extension.commandReady);
 });
 
 test('capability rescan replaces frozen runtime capability snapshots', async () => {

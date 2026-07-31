@@ -41,7 +41,6 @@ export type BrowserBridgeStatus = {
   listening: boolean;
   hostConnected: boolean;
   extensionConnected: boolean;
-  commandReady: boolean;
   debuggerAttached: boolean;
   targetAlive: boolean;
   connectionId: string | null;
@@ -143,7 +142,6 @@ export class LocalAgentBrowserBridge {
       listening: this.server?.listening ?? false,
       hostConnected,
       extensionConnected,
-      commandReady: hostConnected && extensionConnected,
       debuggerAttached: this.debuggerAttached,
       targetAlive: this.targetAlive,
       connectionId: this.registration?.connectionId ?? null,

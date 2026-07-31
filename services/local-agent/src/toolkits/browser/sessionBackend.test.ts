@@ -1,12 +1,34 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { selectAutoBrowserBackend } from './session';
 import {
-  buildBrowserExtensionHealthFields,
-  getBrowserExtensionRuntimeState,
+  detectBrowserStatus,
+  selectAutoBrowserBackend,
+} from './session';
+import {
+  projectBrowserRuntimeSnapshot,
   shouldStartBrowserExtensionBridge,
 } from './runtime';
 import type { BrowserBridgeStatus } from './drivers/chromeExtension/bridge';
+
+function bridgeStatus(
+  overrides: Partial<BrowserBridgeStatus> = {},
+): BrowserBridgeStatus {
+  return {
+    listening: false,
+    hostConnected: false,
+    extensionConnected: false,
+    debuggerAttached: false,
+    targetAlive: false,
+    connectionId: null,
+    extensionId: null,
+    activeTabId: null,
+    activeTabOwnership: null,
+    stateRevision: null,
+    capabilities: [],
+    socketPath: '/tmp/browser.sock',
+    ...overrides,
+  };
+}
 
 test('auto is extension-first only for operations compatible with the extension driver', () => {
   assert.equal(selectAutoBrowserBackend({
@@ -45,56 +67,92 @@ test('browser runtime listens for the extension in auto and explicit extension m
   assert.equal(shouldStartBrowserExtensionBridge('playwright'), false);
 });
 
-test('browser extension runtime state distinguishes transport and command readiness', () => {
-  assert.equal(getBrowserExtensionRuntimeState({
-    listening: false,
-    hostConnected: false,
-    commandReady: false,
-  }), 'stopped');
-  assert.equal(getBrowserExtensionRuntimeState({
-    listening: true,
-    hostConnected: false,
-    commandReady: false,
-  }), 'listening');
-  assert.equal(getBrowserExtensionRuntimeState({
+test('browser runtime snapshot is the canonical live extension projection', () => {
+  assert.equal(
+    projectBrowserRuntimeSnapshot(bridgeStatus()).extension.state,
+    'stopped',
+  );
+  assert.equal(
+    projectBrowserRuntimeSnapshot(bridgeStatus({
+      listening: true,
+    })).extension.state,
+    'listening',
+  );
+  assert.equal(
+    projectBrowserRuntimeSnapshot(bridgeStatus({
+      listening: true,
+      hostConnected: true,
+    })).extension.state,
+    'host_connected',
+  );
+
+  const snapshot = projectBrowserRuntimeSnapshot(bridgeStatus({
     listening: true,
     hostConnected: true,
-    commandReady: false,
-  }), 'host_connected');
-  assert.equal(getBrowserExtensionRuntimeState({
-    listening: true,
-    hostConnected: true,
+    extensionConnected: true,
+    connectionId: 'connection-1',
+    extensionId: 'extension-1',
+    activeTabId: 42,
+    activeTabOwnership: 'agent',
+    stateRevision: 3,
+    capabilities: ['navigate'],
+  }));
+  assert.deepEqual(snapshot.extension, {
+    state: 'ready',
+    detail: 'connected extension extension-1',
+    bridgeListening: true,
+    nativeHostConnected: true,
+    extensionRegistered: true,
     commandReady: true,
-  }), 'ready');
+    debuggerAttached: false,
+    targetAlive: false,
+    connectionId: 'connection-1',
+    extensionId: 'extension-1',
+    activeTabId: 42,
+    activeTabOwnership: 'agent',
+    stateRevision: 3,
+    capabilities: ['navigate'],
+    socketPath: '/tmp/browser.sock',
+  });
 });
 
-test('browser extension health projects live command readiness separately from connectivity', () => {
-  const status: BrowserBridgeStatus = {
+test('browser runtime snapshot distinguishes native host connectivity from registration', () => {
+  const snapshot = projectBrowserRuntimeSnapshot(bridgeStatus({
     listening: true,
     hostConnected: true,
     extensionConnected: false,
-    commandReady: false,
-    debuggerAttached: false,
-    targetAlive: false,
-    connectionId: null,
-    extensionId: null,
-    activeTabId: null,
-    activeTabOwnership: null,
-    stateRevision: null,
-    capabilities: [],
-    socketPath: '/tmp/browser.sock',
-  };
+  }));
 
-  assert.deepEqual(buildBrowserExtensionHealthFields(status), {
-    browser_detail: 'native host connected; waiting for extension registration',
-    browser_runtime_state: 'host_connected',
-    browser_host_connected: true,
-    browser_extension_connected: false,
-    browser_command_ready: false,
-    browser_debugger_attached: false,
-    browser_target_alive: false,
-    browser_active_tab_ownership: null,
-    browser_extension_id: null,
-    browser_state_revision: null,
+  assert.equal(snapshot.extension.state, 'host_connected');
+  assert.equal(
+    snapshot.extension.detail,
+    'native host connected; waiting for extension registration',
+  );
+  assert.equal(snapshot.extension.nativeHostConnected, true);
+  assert.equal(snapshot.extension.extensionRegistered, false);
+  assert.equal(snapshot.extension.commandReady, false);
+});
+
+test('browser status consumes the provided runtime snapshot without a second bridge projection', async (t) => {
+  const previousBackend = process.env.PINPAWO_BROWSER_BACKEND;
+  process.env.PINPAWO_BROWSER_BACKEND = 'extension';
+  t.after(() => {
+    if (previousBackend === undefined) {
+      delete process.env.PINPAWO_BROWSER_BACKEND;
+    } else {
+      process.env.PINPAWO_BROWSER_BACKEND = previousBackend;
+    }
+  });
+
+  const status = await detectBrowserStatus(projectBrowserRuntimeSnapshot(bridgeStatus({
+    listening: true,
+    hostConnected: true,
+  })));
+
+  assert.deepEqual(status, {
+    mode: 'extension',
+    detail: 'native host connected; waiting for extension registration',
+    configured: 'extension',
+    commandReady: false,
   });
 });

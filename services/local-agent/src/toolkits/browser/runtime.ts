@@ -3,6 +3,7 @@ import {
   localAgentBrowserBridge,
   type BrowserBridgeStatus,
 } from './drivers/chromeExtension/bridge';
+import type { BrowserExtensionCapability } from './drivers/chromeExtension/protocol';
 
 export type BrowserExtensionRuntimeState =
   | 'stopped'
@@ -10,47 +11,78 @@ export type BrowserExtensionRuntimeState =
   | 'host_connected'
   | 'ready';
 
-export function getBrowserExtensionRuntimeState(
-  status: Pick<
-    BrowserBridgeStatus,
-    'listening' | 'hostConnected' | 'commandReady'
-  >,
+export type BrowserExtensionRuntimeSnapshot = Readonly<{
+  state: BrowserExtensionRuntimeState;
+  detail: string;
+  bridgeListening: boolean;
+  nativeHostConnected: boolean;
+  extensionRegistered: boolean;
+  commandReady: boolean;
+  debuggerAttached: boolean;
+  targetAlive: boolean;
+  connectionId: string | null;
+  extensionId: string | null;
+  activeTabId: number | null;
+  activeTabOwnership: 'agent' | 'user' | null;
+  stateRevision: number | null;
+  capabilities: readonly BrowserExtensionCapability[];
+  socketPath: string;
+}>;
+
+export type BrowserRuntimeSnapshot = Readonly<{
+  extension: BrowserExtensionRuntimeSnapshot;
+}>;
+
+function resolveBrowserExtensionRuntimeState(
+  status: BrowserBridgeStatus,
+  commandReady: boolean,
 ): BrowserExtensionRuntimeState {
   if (!status.listening) return 'stopped';
   if (!status.hostConnected) return 'listening';
-  if (!status.commandReady) return 'host_connected';
+  if (!commandReady) return 'host_connected';
   return 'ready';
 }
 
-export function describeBrowserExtensionStatus(status: BrowserBridgeStatus): string {
-  const runtimeState = getBrowserExtensionRuntimeState(status);
-  if (runtimeState === 'ready') {
+function describeBrowserExtensionStatus(
+  state: BrowserExtensionRuntimeState,
+  status: BrowserBridgeStatus,
+): string {
+  if (state === 'ready') {
     return `connected extension ${status.extensionId ?? '(unknown)'}`;
   }
-  if (runtimeState === 'host_connected') {
+  if (state === 'host_connected') {
     return 'native host connected; waiting for extension registration';
   }
-  if (runtimeState === 'listening') {
+  if (state === 'listening') {
     return `waiting for extension via ${status.socketPath}`;
   }
   return 'browser extension bridge is not running';
 }
 
-export function buildBrowserExtensionHealthFields(
+export function projectBrowserRuntimeSnapshot(
   status: BrowserBridgeStatus,
-): Record<string, unknown> {
-  return {
-    browser_detail: describeBrowserExtensionStatus(status),
-    browser_runtime_state: getBrowserExtensionRuntimeState(status),
-    browser_host_connected: status.hostConnected,
-    browser_extension_connected: status.extensionConnected,
-    browser_command_ready: status.commandReady,
-    browser_debugger_attached: status.debuggerAttached,
-    browser_target_alive: status.targetAlive,
-    browser_active_tab_ownership: status.activeTabOwnership,
-    browser_extension_id: status.extensionId,
-    browser_state_revision: status.stateRevision,
-  };
+): BrowserRuntimeSnapshot {
+  const commandReady = status.hostConnected && status.extensionConnected;
+  const state = resolveBrowserExtensionRuntimeState(status, commandReady);
+  return Object.freeze({
+    extension: Object.freeze({
+      state,
+      detail: describeBrowserExtensionStatus(state, status),
+      bridgeListening: status.listening,
+      nativeHostConnected: status.hostConnected,
+      extensionRegistered: status.extensionConnected,
+      commandReady,
+      debuggerAttached: status.debuggerAttached,
+      targetAlive: status.targetAlive,
+      connectionId: status.connectionId,
+      extensionId: status.extensionId,
+      activeTabId: status.activeTabId,
+      activeTabOwnership: status.activeTabOwnership,
+      stateRevision: status.stateRevision,
+      capabilities: Object.freeze([...status.capabilities]),
+      socketPath: status.socketPath,
+    }),
+  });
 }
 
 class BrowserRuntime {
@@ -71,13 +103,8 @@ class BrowserRuntime {
     }
   }
 
-  getExtensionStatus(): BrowserBridgeStatus {
-    return localAgentBrowserBridge.getStatus();
-  }
-
-  getHealthFields(mode: unknown): Record<string, unknown> {
-    if (mode !== 'extension') return {};
-    return buildBrowserExtensionHealthFields(this.getExtensionStatus());
+  getSnapshot(): BrowserRuntimeSnapshot {
+    return projectBrowserRuntimeSnapshot(localAgentBrowserBridge.getStatus());
   }
 }
 

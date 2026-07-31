@@ -11,7 +11,6 @@ import {
 } from './session';
 import { browserTools } from './tools';
 import { browserOperationMetadata } from './operationMetadata';
-import { browserRuntime } from './runtime';
 
 export const BROWSER_TOOLKIT_NAME = 'browser';
 
@@ -63,14 +62,11 @@ function disabledAvailability(): BrowserAvailabilitySnapshot {
 
 export function buildBrowserAvailabilitySnapshot(
   status: BrowserStatus,
-  bridge = status.mode === 'extension'
-    ? browserRuntime.getExtensionStatus()
-    : undefined,
 ): BrowserAvailabilitySnapshot {
   // Toolkit availability is cached and filters the runtime registry. Keep a
   // waiting extension routable so a later reconnect can recover without
   // rebuilding the agent; commandReady is the live execution signal.
-  const available = status.readiness !== 'unavailable';
+  const available = status.mode !== 'none';
   return {
     available,
     reason: available ? undefined : status.detail,
@@ -78,18 +74,7 @@ export function buildBrowserAvailabilitySnapshot(
     metadata: {
       mode: status.mode,
       configured: status.configured,
-      readiness: status.readiness,
       commandReady: status.commandReady,
-      ...(bridge ? {
-        listening: bridge.listening,
-        hostConnected: bridge.hostConnected,
-        extensionConnected: bridge.extensionConnected,
-        debuggerAttached: bridge.debuggerAttached,
-        targetAlive: bridge.targetAlive,
-        activeTabOwnership: bridge.activeTabOwnership,
-        extensionId: bridge.extensionId,
-        stateRevision: bridge.stateRevision,
-      } : {}),
     },
   };
 }
@@ -102,10 +87,7 @@ export async function checkBrowserAvailability() {
 
   try {
     const status = await detectBrowserStatus();
-    const bridge = status.mode === 'extension'
-      ? browserRuntime.getExtensionStatus()
-      : undefined;
-    return rememberBrowserAvailability(buildBrowserAvailabilitySnapshot(status, bridge));
+    return rememberBrowserAvailability(buildBrowserAvailabilitySnapshot(status));
   } catch (error) {
     return rememberBrowserAvailability({
       available: false,

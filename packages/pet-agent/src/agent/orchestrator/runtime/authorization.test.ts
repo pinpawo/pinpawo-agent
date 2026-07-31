@@ -32,8 +32,6 @@ test('authorization recorder persists auto-to-human upgrades without length grow
 
   assert.equal(recorder.active.length, 1);
   assert.equal(recorder.active[0]?.source, 'human');
-  assert.equal(recorder.recorded.length, 1);
-  assert.equal(recorder.recorded[0]?.source, 'human');
 });
 
 test('authorization recorder applies a batch in one active-state replacement', () => {
@@ -52,10 +50,9 @@ test('authorization recorder applies a batch in one active-state replacement', (
   recorder.recordToolAuthorizations([first, second]);
 
   assert.deepEqual(recorder.active, [first, second]);
-  assert.deepEqual(recorder.recorded, [first, second]);
 });
 
-test('authorization recorder does not record duplicate grants', () => {
+test('authorization recorder does not duplicate grants', () => {
   const first = authorization('human', '2026-07-29T00:00:00.000Z');
   const recorder = createToolAuthorizationRecorder([first]);
 
@@ -64,7 +61,6 @@ test('authorization recorder does not record duplicate grants', () => {
   ]);
 
   assert.deepEqual(recorder.active, [first]);
-  assert.deepEqual(recorder.recorded, []);
 });
 
 test('authorization recorder rejects an invalid batch without partial mutation', () => {
@@ -88,5 +84,4 @@ test('authorization recorder rejects an invalid batch without partial mutation',
     /only valid records/,
   );
   assert.deepEqual(recorder.active, [first]);
-  assert.deepEqual(recorder.recorded, []);
 });

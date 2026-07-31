@@ -23,7 +23,7 @@ type ToolAuthorizationMatcher =
   | { type: 'url_origin'; origin: string };
 ```
 
-`exactAuthorization(subject)` 对 JSON subject 做确定性 canonicalization 和 SHA-256。checkpoint 只保存带版本的 opaque digest，不保存命令、argv、文件内容、headers 或 body。
+`exactAuthorization(subject)` 对严格的 JSON subject 做确定性 canonicalization 和 SHA-256。`undefined`、非有限数值、非普通对象和循环引用都会 fail closed，不会被折叠成其他授权身份。checkpoint 只保存带版本的 opaque digest，不保存命令、argv、文件内容、headers 或 body。
 
 `url_origin` 是人工授权可使用的 origin 范围。auto-review 只能持久化 `exact`，不能自动建立 origin grant。
 
@@ -39,6 +39,8 @@ type ToolAuthorizationMatcher =
 6. 同 key 的 human grant 替换 auto grant；auto grant 不能覆盖 human grant。
 7. capability node 返回完整授权快照，checkpoint 跨 delegation、turn 和 graph rebuild 持久化。
 8. registry authorization generation 改变时，旧快照整体失效。
+
+authorization generation 只标识注册的可授权工具和 authorization policy。函数源码 fallback 不捕获 closure state；如果闭包数据改变了 subject 投影语义，policy 定义也必须同步升级。generation 不是工具实现或完整运行时代码的完整性证明。
 
 `require_authorization` 不使用 auto grant，但不会删除它；human grant 在 require 和 auto 模式下均可使用。custom policy 默认也不使用 auto grant，只有显式设置 `reuseAutoAuthorizations: true` 才会复用。新 thread 使用独立 checkpoint state，不复用旧 grant。
 

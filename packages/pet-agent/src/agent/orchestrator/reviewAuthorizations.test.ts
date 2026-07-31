@@ -33,6 +33,10 @@ test('exactAuthorization recursively canonicalizes objects while preserving arra
 
 test('exactAuthorization rejects non-JSON and circular subjects', () => {
   assert.throws(
+    () => exactAuthorization({ command: 'npm test', cwd: undefined }),
+    /only JSON values/,
+  );
+  assert.throws(
     () => exactAuthorization({ timeout: Number.POSITIVE_INFINITY }),
     /non-finite numbers/,
   );

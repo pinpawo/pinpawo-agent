@@ -667,6 +667,13 @@ test('production v2 process exercises composer workflows through a real PTY', {
       '  timeout { exit 140 }',
       '  eof { exit 141 }',
       '}',
+      // The matching phrase is visible in a delta. Wait for the authoritative
+      // run settlement reflected by the live row before starting another turn.
+      'expect {',
+      '  -exact "idle" {}',
+      '  timeout { exit 152 }',
+      '  eof { exit 153 }',
+      '}',
       `send -- [binary format H* ${utf8Hex(PERSISTENT_HOST_REVIEW_INPUT)}]`,
       'send -- "\\r"',
       'set review_body_ready 0',

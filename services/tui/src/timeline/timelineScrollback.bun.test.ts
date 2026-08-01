@@ -161,7 +161,7 @@ test('welcome is committed once before the first timeline rows', async () => {
     timeline.render(session([userMessage('hello')]));
     assert.equal(
       setup.cellOutput.takeText(),
-      formatTimelineEntry(userMessage('hello')),
+      `${formatTimelineEntry(userMessage('hello'))}\n`,
     );
   } finally {
     timeline.destroy();
@@ -246,7 +246,7 @@ test('an empty subagent entry is ignored without blocking later timeline rows', 
     timeline.render(session([emptySubagent, next]));
     assert.equal(
       setup.cellOutput.takeText(),
-      formatTimelineEntry(next),
+      `${formatTimelineEntry(next)}\n`,
     );
   } finally {
     timeline.destroy();
@@ -308,6 +308,7 @@ test('a running operation gets a live surface without committing later rows out 
       [
         formatTimelineEntry(operation),
         formatTimelineEntry(subagent),
+        ' ',
       ].join('\n'),
     );
 
@@ -320,7 +321,9 @@ test('a running operation gets a live surface without committing later rows out 
       setup.cellOutput.takeText(),
       [
         formatTimelineEntry(completedOperation),
+        '',
         formatTimelineEntry(subagent),
+        '',
       ].join('\n'),
     );
   } finally {
@@ -343,9 +346,9 @@ test('long sessions use bounded native scrollback commits', async () => {
     assert.deepEqual(
       commits.map((commit) => commit.height),
       [
-        MAX_SETTLED_ENTRIES_PER_COMMIT * 2,
-        MAX_SETTLED_ENTRIES_PER_COMMIT * 2,
-        2,
+        MAX_SETTLED_ENTRIES_PER_COMMIT * 3,
+        MAX_SETTLED_ENTRIES_PER_COMMIT * 3,
+        3,
       ],
     );
   } finally {
@@ -367,7 +370,7 @@ test('a new submitted turn commits its user row after prior history', async () =
     timeline.render(session([first, second], 'request-2'));
     assert.equal(
       setup.cellOutput.takeText(),
-      formatTimelineEntry(second),
+      `${formatTimelineEntry(second)}\n`,
     );
   } finally {
     timeline.destroy();
@@ -392,7 +395,7 @@ test('an authoritative session boundary allows identical text in the new session
     ], undefined, 'session-new'));
     assert.equal(
       setup.cellOutput.takeText(),
-      formatTimelineEntry(repeated),
+      `${formatTimelineEntry(repeated)}\n`,
     );
   } finally {
     timeline.destroy();

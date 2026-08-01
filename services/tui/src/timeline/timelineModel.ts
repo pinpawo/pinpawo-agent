@@ -139,11 +139,22 @@ export function formatLiveActivity(
   frame = 0,
   maxCodePoints = 80,
   longWaiting = false,
+  now = Date.now(),
 ) {
   const run = session.activeRun;
   if (!run) return formatLiveSession(session, maxCodePoints);
-  if (run.state === 'waiting_review') return '! waiting for review';
-  if (run.state === 'interrupting') return '◌ stopping response';
+  const elapsed = formatElapsed(run.startedAt, now);
+  const suffix = elapsed ? ` · ${elapsed}` : '';
+  const activityWidth = Math.max(
+    1,
+    Math.floor(maxCodePoints) - [...suffix].length,
+  );
+  if (run.state === 'waiting_review') {
+    return appendElapsed('! waiting for review', suffix, activityWidth);
+  }
+  if (run.state === 'interrupting') {
+    return appendElapsed('◌ stopping response', suffix, activityWidth);
+  }
 
   const normalizedFrame = Math.max(0, Math.floor(frame));
   const marker = LIVE_ACTIVITY_FRAMES[
@@ -151,19 +162,24 @@ export function formatLiveActivity(
   ];
   const detail = formatLiveSession(
     session,
-    Math.max(1, Math.floor(maxCodePoints) - 2),
+    Math.max(1, activityWidth - 2),
   );
   const actor = sessionActorLabel(session);
+  let activity: string;
   switch (detail) {
     case 'thinking':
-      return `${marker} ${actor} is ${longWaiting ? 'still ' : ''}thinking`;
+      activity = `${marker} ${actor} is ${longWaiting ? 'still ' : ''}thinking`;
+      break;
     case 'using tool':
-      return `${marker} ${actor} is ${longWaiting ? 'still ' : ''}using a tool`;
+      activity = `${marker} ${actor} is ${longWaiting ? 'still ' : ''}using a tool`;
+      break;
     case 'streaming response':
-      return `${marker} ${actor} is ${longWaiting ? 'still ' : ''}responding`;
+      activity = `${marker} ${actor} is ${longWaiting ? 'still ' : ''}responding`;
+      break;
     default:
-      return `${marker} ${detail}`;
+      activity = `${marker} ${detail}`;
   }
+  return appendElapsed(activity, suffix, activityWidth);
 }
 
 export function isLiveActivityPulseActive(
@@ -209,6 +225,27 @@ export function operationMark(phase: AgentOperationEntry['phase']) {
 
 function singleLine(text: string) {
   return text.replace(/\s*\n\s*/g, ' ↵ ');
+}
+
+function formatElapsed(startedAt: number | undefined, now: number) {
+  if (
+    typeof startedAt !== 'number'
+    || !Number.isFinite(startedAt)
+    || !Number.isFinite(now)
+  ) return null;
+  const elapsedMs = Math.max(0, now - startedAt);
+  if (elapsedMs > 24 * 60 * 60 * 1_000) return null;
+  const totalSeconds = Math.floor(elapsedMs / 1_000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+}
+
+function appendElapsed(activity: string, suffix: string, activityWidth: number) {
+  const characters = [...activity];
+  if (characters.length <= activityWidth) return `${activity}${suffix}`;
+  if (activityWidth === 1) return `…${suffix}`;
+  return `${characters.slice(0, activityWidth - 1).join('')}…${suffix}`;
 }
 
 function findLastPendingEntry(timeline: readonly AgentTimelineEntry[]) {

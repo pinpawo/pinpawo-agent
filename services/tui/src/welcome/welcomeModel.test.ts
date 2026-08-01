@@ -37,18 +37,8 @@ test('welcome includes the raster paw, version, runtime, and shortcuts', () => {
       ],
     },
   });
-  assert.deepEqual(lines.slice(0, 10), [
-    '       ████   ████       ',
-    '      ██████ ██████          PinPawo TUI v2 · 豆包',
-    '  ████ ████   ████ ████      v0.1.0 · local-agent v0.2.0',
-    ' ██████           ██████     connected',
-    '  ████   ███████   ████  ',
-    '       ███████████           model         Primary coding (gpt-test)',
-    '      █████████████          directory     /Users/mac/Develop/pinpawo-agent',
-    '      █████████████          capabilities  general · explore · daily_post',
-    '       ███████████                         capability_creator',
-    '         ███████         ',
-  ]);
+  assert.equal(lines[0], `╭${'─'.repeat(78)}╮`);
+  assert.ok(lines.some((line) => line.includes('██████ ██████')));
   assert.ok(lines.some((line) => line.includes('PinPawo TUI v2')));
   assert.ok(lines.some((line) => line.includes('v0.1.0')));
   assert.ok(lines.some((line) => line.includes('local-agent v0.2.0')));
@@ -60,6 +50,10 @@ test('welcome includes the raster paw, version, runtime, and shortcuts', () => {
   assert.ok(lines.some((line) => line.includes('Ctrl+R sessions')));
   assert.ok(lines.some((line) => line.includes('Enter send')));
   assert.ok(lines.some((line) => line.includes('Ctrl+J newline')));
+  assert.equal(lines.at(-2), `╰${'─'.repeat(78)}╯`);
+  for (const line of lines.slice(0, -1)) {
+    assert.equal(stringWidth(line), 80, line);
+  }
 });
 
 test('welcome remains single-row safe in a narrow terminal', () => {
@@ -72,6 +66,8 @@ test('welcome remains single-row safe in a narrow terminal', () => {
     assert.ok(stringWidth(line) <= 24, line);
     assert.doesNotMatch(line, /[\r\n]/);
   }
+  assert.match(lines[0] ?? '', /^╭─+╮$/);
+  assert.match(lines.at(-2) ?? '', /^╰─+╯$/);
 });
 
 test('welcome keeps an unsafe actor label on one terminal row', () => {

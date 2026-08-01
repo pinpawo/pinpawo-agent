@@ -80,13 +80,13 @@ export class ApprovalView {
     this.frame.add(this.inputFrame);
   }
 
-  render(state: ApprovalState, width: number) {
+  render(state: ApprovalState, width: number, height: number) {
     if (state.phase === 'closed') {
       this.frame.visible = false;
       this.input.blur();
       return;
     }
-    const model = buildApprovalViewModel(state, width);
+    const model = buildApprovalViewModel(state, width, height);
     this.frame.visible = true;
     this.frame.title = model.title;
     this.frame.bottomTitle = model.bottomTitle;

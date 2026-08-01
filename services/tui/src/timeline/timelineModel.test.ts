@@ -203,6 +203,26 @@ test('live activity distinguishes progress from paused and stopping runs', () =>
   assert.equal(
     formatLiveActivity({
       ...session,
+      activeRun: {
+        ...session.activeRun!,
+        startedAt: 1_000,
+      },
+    }, 0, 80, false, 66_500),
+    '⠋ PinPawo is thinking · 1m 5s',
+  );
+  assert.equal(
+    formatLiveActivity({
+      ...session,
+      activeRun: {
+        ...session.activeRun!,
+        startedAt: 1_000,
+      },
+    }, 0, 20, false, 66_500),
+    '⠋ PinPawo i… · 1m 5s',
+  );
+  assert.equal(
+    formatLiveActivity({
+      ...session,
       actor: {
         label: '豆包',
         summary: 'Local helper',

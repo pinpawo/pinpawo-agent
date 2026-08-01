@@ -55,9 +55,10 @@ export type ApprovalViewModel = {
 
 const MAX_REVIEW_CONTENT_CHARACTERS = 100_000;
 const MAX_REVIEW_CONTENT_LINES = 500;
-const APPROVAL_CONTENT_ROWS = 6;
-const APPROVAL_TEXT_INPUT_BODY_ROWS = 1;
-const APPROVAL_TEXT_INPUT_OPTION_ROWS = 1;
+export const APPROVAL_FOOTER_ROWS = 13;
+const APPROVAL_CONTENT_ROWS = 10;
+const APPROVAL_TEXT_INPUT_BODY_ROWS = 4;
+const APPROVAL_TEXT_INPUT_OPTION_ROWS = 2;
 const APPROVAL_LONG_CONTENT_OPTION_ROWS = 2;
 
 export function createApprovalState(): ApprovalState {
@@ -161,6 +162,7 @@ export function scrollApprovalContent(
   state: ApprovalState,
   direction: -1 | 1,
   width: number,
+  footerRows = APPROVAL_FOOTER_ROWS,
 ): ApprovalState {
   if (state.phase === 'closed' || state.phase === 'resolution-sent') return state;
   const review = currentApprovalReview(state);
@@ -173,6 +175,7 @@ export function scrollApprovalContent(
     state,
     lineCount,
     review.options.length,
+    approvalContentRows(footerRows),
   ).bodyRows;
   const maximum = Math.max(0, lineCount - bodyRows);
   return {
@@ -273,6 +276,7 @@ export function resolveApprovalKey(
 export function buildApprovalViewModel(
   state: Exclude<ApprovalState, { phase: 'closed' }>,
   width: number,
+  footerRows = APPROVAL_FOOTER_ROWS,
 ): ApprovalViewModel {
   const innerWidth = Math.max(1, width - 4);
   const review = currentApprovalReview(state);
@@ -283,6 +287,7 @@ export function buildApprovalViewModel(
     state,
     allBodyLines.length,
     review?.options.length ?? 0,
+    approvalContentRows(footerRows),
   );
   const maxOffset = Math.max(0, allBodyLines.length - bodyRows);
   const offset = Math.min(state.contentOffset, maxOffset);
@@ -334,11 +339,21 @@ function approvalLayoutRows(
   state: ApprovalState,
   bodyLineCount: number,
   optionCount: number,
+  contentRows: number,
 ) {
   if (approvalAcceptsTextInput(state)) {
+    const optionRows = contentRows >= 8
+      ? APPROVAL_TEXT_INPUT_OPTION_ROWS
+      : 1;
     return {
-      bodyRows: APPROVAL_TEXT_INPUT_BODY_ROWS,
-      optionRows: APPROVAL_TEXT_INPUT_OPTION_ROWS,
+      bodyRows: Math.max(
+        1,
+        Math.min(
+          APPROVAL_TEXT_INPUT_BODY_ROWS,
+          contentRows - 4 - optionRows,
+        ),
+      ),
+      optionRows,
     };
   }
 
@@ -347,16 +362,27 @@ function approvalLayoutRows(
   const reservedOptionRows = Math.min(
     availableOptions,
     APPROVAL_LONG_CONTENT_OPTION_ROWS,
+    Math.max(1, contentRows - 1),
   );
   const bodyRows = Math.max(1, Math.min(
     availableBodyLines,
-    APPROVAL_CONTENT_ROWS - reservedOptionRows,
+    contentRows - reservedOptionRows,
   ));
   const optionRows = Math.max(1, Math.min(
     availableOptions,
-    APPROVAL_CONTENT_ROWS - bodyRows,
+    contentRows - bodyRows,
   ));
   return { bodyRows, optionRows };
+}
+
+function approvalContentRows(footerRows: number) {
+  return Math.max(
+    6,
+    Math.min(
+      APPROVAL_CONTENT_ROWS,
+      Math.floor(footerRows) - 3,
+    ),
+  );
 }
 
 function formatApprovalOptions(

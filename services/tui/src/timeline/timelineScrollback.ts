@@ -335,6 +335,20 @@ export class TimelineScrollback {
 }
 
 function styleWelcomeLine(line: string, row: number) {
+  if (line.startsWith('╭') || line.startsWith('╰')) {
+    return new StyledText([dim(fg(WELCOME_MUTED_COLOR)(line))]);
+  }
+  if (line.startsWith('│ ') && line.endsWith(' │')) {
+    return new StyledText([
+      dim(fg(WELCOME_MUTED_COLOR)('│ ')),
+      ...styleWelcomeContent(line.slice(2, -2), row - 1),
+      dim(fg(WELCOME_MUTED_COLOR)(' │')),
+    ]);
+  }
+  return new StyledText(styleWelcomeContent(line, row));
+}
+
+function styleWelcomeContent(line: string, row: number) {
   const chunks: TextChunk[] = [];
   let remainder = line;
   if (row < WELCOME_LOGO_HEIGHT) {
@@ -348,7 +362,7 @@ function styleWelcomeLine(line: string, row: number) {
     remainder = line.slice(WELCOME_LOGO_WIDTH);
   }
   chunks.push(...styleWelcomeText(remainder));
-  return new StyledText(chunks);
+  return chunks;
 }
 
 function styleWelcomeText(text: string): TextChunk[] {
@@ -567,6 +581,7 @@ function populateTimelineRoot(
   };
 
   entries.forEach((entry, entryIndex) => {
+    const childCountBeforeEntry = root.getChildrenCount();
     const lines = buildTimelineDisplayLines(entry, {
       actorLabel,
       now,
@@ -585,9 +600,21 @@ function populateTimelineRoot(
         syntaxStyle: assistantMarkdownStyle,
       });
       root.add(assistantMarkdown.container);
+      if (
+        isSettledTimelineEntry(entry)
+        && root.getChildrenCount() > childCountBeforeEntry
+      ) {
+        addLine({ text: ' ', tone: 'muted' });
+      }
       return;
     }
     lines.forEach(addLine);
+    if (
+      isSettledTimelineEntry(entry)
+      && root.getChildrenCount() > childCountBeforeEntry
+    ) {
+      addLine({ text: ' ', tone: 'muted' });
+    }
   });
   return { assistantMarkdown };
 }

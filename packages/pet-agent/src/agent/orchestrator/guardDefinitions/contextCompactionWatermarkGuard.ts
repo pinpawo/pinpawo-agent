@@ -38,6 +38,7 @@ export const contextCompactionWatermarkGuard = defineGuard<
     const watermark = checkProviderInputWatermark(
       readLatestProviderInputTokens(triggerMessages),
       config.contextWindowTokens,
+      config.generationReserveTokens,
     );
     if (!watermark) {
       return guardProceed();

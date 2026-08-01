@@ -180,11 +180,17 @@ function createSubagentSummarizationMiddleware(
     return null;
   }
 
+  const rawGenerationReserveTokens = inputState.generationReserveTokens;
+  const generationReserveTokens = typeof rawGenerationReserveTokens === 'number'
+    && Number.isFinite(rawGenerationReserveTokens)
+    ? Math.max(0, Math.floor(rawGenerationReserveTokens))
+    : 0;
+  const usableInputTokens = Math.max(1, contextWindowTokens - generationReserveTokens);
   const triggerTokens = Math.max(1, Math.floor(
-    contextWindowTokens * SUBAGENT_CONTEXT_SUMMARY_TRIGGER_RATIO,
+    usableInputTokens * SUBAGENT_CONTEXT_SUMMARY_TRIGGER_RATIO,
   ));
   const keepTokens = Math.max(1, Math.floor(
-    contextWindowTokens * SUBAGENT_CONTEXT_SUMMARY_KEEP_RATIO,
+    usableInputTokens * SUBAGENT_CONTEXT_SUMMARY_KEEP_RATIO,
   ));
 
   return failFastOnInvalidContextSummary(summarizationMiddleware({
@@ -194,7 +200,7 @@ function createSubagentSummarizationMiddleware(
     // LangChain defaults this to 4k tokens, which would inspect only a small
     // slice when our model window is large. The derived budget covers the
     // expected summarized prefix while leaving room for the summary prompt.
-    trimTokensToSummarize: Math.max(1, Math.floor(contextWindowTokens * 0.5)),
+    trimTokensToSummarize: Math.max(1, Math.floor(usableInputTokens * 0.5)),
     summaryPrompt: SUBAGENT_CONTEXT_SUMMARY_PROMPT,
     summaryPrefix: SUBAGENT_CONTEXT_SUMMARY_PREFIX,
   }));
@@ -244,6 +250,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     messages: input.messages,
     maxIterations: input.maxIterations,
     contextWindowTokens: input.contextWindowTokens,
+    generationReserveTokens: input.generationReserveTokens,
     artifacts: input.artifacts,
   };
   const inputMessageIds = new Set(inputState.messages.map((message) => message.id as string));

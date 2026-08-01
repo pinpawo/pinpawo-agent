@@ -17,6 +17,7 @@ import {
 import {
   readRunIterationLimit,
   readSubagentContextWindowTokens,
+  readSubagentGenerationReserveTokens,
 } from './config';
 import { createAnswerNode } from './nodes/answer';
 import { createCapabilityNode } from './nodes/capability';
@@ -35,6 +36,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const orchestratorMaxIterations = readRunIterationLimit(config.maxRunIterations)
     ?? DEFAULT_ORCHESTRATOR_MAX_ITERATIONS;
   const subagentContextWindowTokens = readSubagentContextWindowTokens(config);
+  const subagentGenerationReserveTokens = readSubagentGenerationReserveTokens(config);
   const prepare = createPrepareNode();
   const compactContext = createCompactContextNode({ config });
   const afterDelegationOutcomeIterationGuard =
@@ -51,7 +53,11 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   };
 
   const answerNode = createAnswerNode(config);
-  const capabilityNode = createCapabilityNode({ config, subagentContextWindowTokens });
+  const capabilityNode = createCapabilityNode({
+    config,
+    subagentContextWindowTokens,
+    subagentGenerationReserveTokens,
+  });
   // Graph-visible anchor shared by resume and post-execution paths. Its
   // conditional edge owns deterministic guard evaluation and telemetry only;
   // it must not grow state updates or user-facing output.

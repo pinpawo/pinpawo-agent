@@ -176,6 +176,14 @@ test('checkProviderInputWatermark reports the crossed watermark with its evidenc
   assert.equal(checkProviderInputWatermark(900, 0), null);
 });
 
+test('checkProviderInputWatermark reserves generation capacity before applying the ratio', () => {
+  assert.deepEqual(checkProviderInputWatermark(600, 1000, 200), {
+    latestInputTokens: 600,
+    watermarkTokens: 600,
+  });
+  assert.equal(checkProviderInputWatermark(599, 1000, 200), null);
+});
+
 test('streamOrchestratorGraph streams graph chunks without injecting callbacks', async () => {
   let receivedOptions: unknown = null;
   const graph = {

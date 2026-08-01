@@ -87,6 +87,23 @@ test('buildLocalChatAgentInput omits empty toolkit configurable arrays', () => {
   assert.ok(setup.input.toolkits);
 });
 
+test('buildLocalChatAgentInput passes the generation reserve to main and subagent contexts', () => {
+  const setup = buildTestLocalChatAgentInput({
+    context: createContext(),
+    userMessage: 'hello',
+    llmConfig: {
+      apiKey: 'test-key',
+      baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      model: 'qwen3.8-max-preview',
+      contextWindowTokens: 983_616,
+      maxOutputTokens: 131_072,
+    },
+  });
+
+  assert.equal(setup.graphConfig.generationReserveTokens, 147_456);
+  assert.equal(setup.graphConfig.subagentGenerationReserveTokens, 147_456);
+});
+
 test('buildLocalChatAgentInput rejects an empty artifact discovery scope', () => {
   assert.throws(
     () => buildTestLocalChatAgentInput({

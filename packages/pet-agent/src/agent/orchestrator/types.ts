@@ -90,11 +90,15 @@ export type OrchestratorConfig = {
   maxRunIterations?: number;
   decisionStructuredOutput?: OrchestrationDecisionStructuredOutputConfig;
   contextWindowTokens?: number;
+  /** Output + reasoning capacity reserved before deriving input maintenance thresholds. */
+  generationReserveTokens?: number;
   /**
    * Context window for subagent model calls. Defaults to `contextWindowTokens`
    * when subagents use the same model/window as the main orchestrator.
    */
   subagentContextWindowTokens?: number;
+  /** Defaults to `generationReserveTokens` when the same model serves subagents. */
+  subagentGenerationReserveTokens?: number;
   /**
    * Artifact store (a port; the host supplies the concrete adapter). Injected
    * into the selected capability's narrow `CapabilityFinalizeContext`.

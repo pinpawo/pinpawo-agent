@@ -258,9 +258,7 @@ export function buildLocalChatAgentInput(params: {
   }
 
   if (isCapabilityEnabled('explore')) {
-    appendCapability(capabilities, createExploreCapability({
-      structuredOutput: decisionStructuredOutput,
-    }));
+    appendCapability(capabilities, createExploreCapability());
   }
 
   if (isCapabilityEnabled('daily_post')) {

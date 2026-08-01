@@ -187,43 +187,14 @@ instructing the model to call a write tool inside the loop:
   a `kind: "result"` artifact via `ctx.artifactStore`. No model-facing write tool
   and no write instruction — the persistence is unconditional code.
 - `capability_creator` does the same via `afterRun` (uses `['bash']`).
-- `explore` persists through `afterRun` only. It performs one structured ingest
-  from the shared LangChain context summary, recent tool results and final answer,
-  then writes a `kind: "report"` artifact.
+- Built-in `explore` does not define `lifecycle.finalize` and does not
+  automatically persist execution context as an artifact.
 
-## Explore ingest
+## Explore cleanup
 
-Explore consumes the shared subagent summary and owns only the **finalize** path
-for durable run summaries.
-
-**Trigger.**
-
-- Shared LangChain `summarizationMiddleware` runs before subagent model calls when
-  the token trigger derived from `contextWindowTokens` is reached. It persistently
-  replaces older execution context and marks the summary with
-  `lc_source: summarization`; it does not write artifacts.
-- **Finalize persistence** runs once in `afterRun`, re-ingests the latest context
-  summary, recent tool results and final answer, and writes one `kind: "report"`
-  artifact with evidence metadata.
-
-**What final ingest does.** It normalizes the compacted execution record into
-**summary + evidence**, persisted as one artifact:
-  - `kind: "report"`, `mimeType: "text/markdown"` — the prose summary.
-  - structured **evidence** list, where each entry is `{ source, proves, value }`
-    — the reference source, what it established, and why it matters to the
-    reasoning. (Carried in the artifact's structured content / metadata; the
-    markdown body holds the readable summary.)
-
-(`status`, `summary`, `nextSteps`) is still not persisted as a `kind: "result"`
-artifact; it is persisted as a `kind: "report"` artifact body (`content`) with
-optional evidence metadata.
-
-**Implemented shape.** `ingestExploreKnowledge` returns
-`{ summary, evidence: { source, proves, value }[] }`. `afterRun` writes the
-latest ingest payload via
-`recordExploreIngestArtifact(artifactStore, middlewareContext, ingest)`
-(summary → markdown content, evidence → metadata).
-
-**Failure-safe.** If final structured ingest fails, Explore falls back to an
-existing Explore/LangChain summary when available. `afterRun` catches store errors;
-failed writes are non-fatal and the run keeps returning normal completion state.
+Issue #532 removed the synchronous post-run knowledge ingest. The Explore
+announce follows the normal orchestrator handoff path; subagent context summaries
+remain continuation state and are not promoted automatically into durable
+artifacts. No replacement artifact-production mechanism is defined here. The
+core value and production contract of CapabilityArtifacts must be decided
+separately before Explore writes artifacts again.

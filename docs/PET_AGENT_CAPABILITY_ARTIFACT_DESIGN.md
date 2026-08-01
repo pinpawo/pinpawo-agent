@@ -2,12 +2,14 @@
 
 > 状态：Draft v1
 > 日期：2026-06-16
-> 关联：`PET_AGENT_API_CAPABILITY_TOOLKIT.md`、`CONTEXT_GOVERNANCE_REFACTOR.md`、`EXPLORE_KNOWLEDGE_INGEST_DESIGN.md`
+> 关联：`PET_AGENT_API_CAPABILITY_TOOLKIT.md`、`CONTEXT_GOVERNANCE_REFACTOR.md`
 > 状态补充：Historical draft。当前实现以
 > `capability-artifact-pipeline/architecture.md` 和
 > `PET_AGENT_API_CAPABILITY_TOOLKIT.md` 为准。本文保留为设计背景；
 > 其中 `resultSchema`、Capability write tool、旧 discovery tool 名称和
 > orchestrator 读取 artifact 全文均不是 V2 接口。
+> 2026-08-02：#532 删除了 Explore 的自动 post-run ingest 与 report artifact；
+> 下文涉及 Explore 自动产物的历史设想不再代表当前实现。
 > 2026-07-19：entryDecision 不再接收 artifact inventory；selected subagent 只在需要时
 > 通过当前 thread 的 scoped `artifact_list_dir` / `artifact_view_file_chunk` 自主发现。下文 Phase/State 示例是历史草案，
 > 不作为当前接口定义。
@@ -350,8 +352,8 @@ capability_artifact_search({
 
 - dailyPost / capabilityCreator 不再从消息里抓 `ToolMessage.artifact`。
   它们在能力 `afterRun` 中直接持久化 `result` artifact，main agent 只消费 `CapabilityArtifactRef`。
-- explore 用 `AIMessage` 的 `Explore summary:` marker 为当前 run 提供可读摘要；持久化仍由
-  capability 侧在 `afterRun` 写 `report` artifact。
+- built-in Explore 不再解析私有 summary marker，也不通过 `afterRun`
+  自动写 report artifact；它只通过标准 announce/handoff 交付结果。
 - pet-agent runtime 需要知道每个 capability 的读取函数。
 - 结果提取发生在完整 lane transcript 上，容易让人误以为 main agent 可以理解 subagent 场景。
 
@@ -363,40 +365,6 @@ capability_artifact_search({
 - main agent 只消费 `CapabilityArtifactRef`。
 
 lanes message 机制继续负责对话隔离；artifact 不再借 message metadata 过境。
-
-## 14. Explore 的落点
-
-`explore` 可以产出两个 artifact：
-
-```text
-kind: result
-mimeType: application/json
-schema: ExploreResult v1
-content:
-  status
-  summaryPreview
-  nextSteps
-
-kind: report
-mimeType: text/markdown
-title: issue explore result
-preview: 已确认的关键事实和下一步
-content:
-  ## 目标
-  ## 已查看文件
-  ## 关键知识点 / 概念
-  ## 已确认事实
-  ## 未确认 / 风险
-  ## 下一步
-```
-
-route / outcome decision 默认看到 `preview`，知道“这个 issue 已经探索过”。如果后续需要细节，再通过 `capability_artifact_read(uri)` 读取报告。
-
-这样可以避免：
-
-- 每次都重复 explore。
-- 把整份 explore report 塞进全局 context。
-- pet-agent runtime 解析 explore 私有 summary 字段。
 
 ## 15. 媒体与文件类 capability
 
@@ -462,7 +430,7 @@ v1 不需要复杂 GC。只要确保 session 删除时不会留下无限增长�
 ### Phase 3：迁移现有 capability
 
 - `dailyPost` / `capabilityCreator`：通过 `capability_artifact_write` 保存 JSON result artifact。
-- `explore`：通过 `capability_artifact_write` 保存 JSON result artifact + markdown report artifact。
+- `explore`：不自动写 artifact；是否需要显式 artifact 生产机制留待后续设计。
 - 废弃 capability-specific `readResult(laneOutputMessages)` 和 message marker collector。
 
 ### Phase 4：UI 与媒体产物

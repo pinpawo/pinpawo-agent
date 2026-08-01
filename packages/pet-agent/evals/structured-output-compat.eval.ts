@@ -60,15 +60,6 @@ const orchestrationDecisionSchema = z.object({
   context_summary: z.string().nullable().optional(),
 });
 
-const exploreIngestSchema = z.object({
-  summary: z.string().min(1),
-  evidence: z.array(z.object({
-    source: z.string().min(1),
-    proves: z.string().min(1),
-    value: z.string().min(1),
-  })),
-});
-
 const wikiCuratorSchema = z.object({
   topicUpdates: z.array(z.object({
     filename: z.string().min(1),
@@ -90,16 +81,6 @@ const EVAL_CASES: EvalCase[] = [
       '可选 capability：explore。',
       '应选择 delegate_capability.explore，并给出明确 task 和 context_summary。',
       '正确示例：{"action":"delegate_capability.explore","task":"检查 typecheck 失败原因并修复。","context_summary":"用户要求定位并修复当前项目 typecheck 失败。"}',
-    ].join('\n'),
-  },
-  {
-    id: 'explore_ingest',
-    name: 'explore ingest nested evidence shape',
-    schema: exploreIngestSchema,
-    prompt: [
-      '把以下探索证据总结为 Markdown summary，并给出 evidence 数组 JSON。',
-      '证据：services/local-agent/src/agentChannel.ts 的 auto 策略按模型官方文档优先选择结构化输出方式；',
-      'GLM、DeepSeek 和 Qwen 主要使用 JSON Mode，并由下游做 JSON Schema 校验。',
     ].join('\n'),
   },
   {

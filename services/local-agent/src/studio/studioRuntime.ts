@@ -155,9 +155,7 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
       : globalDecisionStructuredOutput;
     const capsForThisPet: AgentCapability[] = petConfig.capabilities.map((name) => {
       if (name === 'explore') {
-        return createExploreCapability({
-          structuredOutput: petDecisionStructuredOutput,
-        });
+        return createExploreCapability();
       }
       const cap = capabilitiesByName.get(name);
       if (!cap) {

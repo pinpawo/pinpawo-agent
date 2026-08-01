@@ -47,7 +47,10 @@ export async function prepareLocalImageModelMessages(
   messages: readonly BaseMessage[],
   options: LocalImageModelInputOptions,
 ): Promise<BaseMessage[]> {
-  const required = readRequiredInputModalities(messages);
+  const modelMessages = options.supportedInputModalities.includes('image')
+    ? await appendCurrentToolImageMessages(messages)
+    : messages;
+  const required = readRequiredInputModalities(modelMessages);
   if (
     required.includes('image')
     && !options.supportedInputModalities.includes('image')
@@ -57,9 +60,6 @@ export async function prepareLocalImageModelMessages(
     );
   }
   await options.admitInputModalities?.(required);
-  const modelMessages = options.supportedInputModalities.includes('image')
-    ? await appendCurrentToolImageMessages(messages)
-    : messages;
   let changed = false;
   const prepared: BaseMessage[] = [];
   for (const message of modelMessages) {

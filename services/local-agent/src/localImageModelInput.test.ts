@@ -182,9 +182,14 @@ test('browser screenshot artifacts are relayed only to image-capable profiles', 
     screenshot,
   ];
 
+  const visionAdmissions: string[][] = [];
   const vision = await prepareLocalImageModelMessages(messages, {
     supportedInputModalities: ['text', 'image'],
+    admitInputModalities: (modalities) => {
+      visionAdmissions.push([...modalities]);
+    },
   });
+  assert.deepEqual(visionAdmissions, [['text', 'image']]);
   assert.equal(vision.length, messages.length + 1);
   assert.equal(vision.at(-1)?._getType(), 'human');
   assert.match(
@@ -193,9 +198,14 @@ test('browser screenshot artifacts are relayed only to image-capable profiles', 
   );
   assert.equal(vision[2], screenshot);
 
+  const textOnlyAdmissions: string[][] = [];
   const textOnly = await prepareLocalImageModelMessages(messages, {
     supportedInputModalities: ['text'],
+    admitInputModalities: (modalities) => {
+      textOnlyAdmissions.push([...modalities]);
+    },
   });
+  assert.deepEqual(textOnlyAdmissions, [['text']]);
   assert.equal(textOnly.length, messages.length);
   assert.equal(textOnly[2], screenshot);
   assert.doesNotMatch(JSON.stringify(textOnly), /data:image\/jpeg;base64,/);
@@ -211,9 +221,14 @@ test('browser screenshot artifacts are relayed only to image-capable profiles', 
 
   const screenshotPath = (JSON.parse(serialized) as { path: string }).path;
   await fs.unlink(screenshotPath);
+  const unavailableAdmissions: string[][] = [];
   const unavailable = await prepareLocalImageModelMessages(messages, {
     supportedInputModalities: ['text', 'image'],
+    admitInputModalities: (modalities) => {
+      unavailableAdmissions.push([...modalities]);
+    },
   });
+  assert.deepEqual(unavailableAdmissions, [['text']]);
   assert.equal(unavailable.length, messages.length + 1);
   assert.match(
     JSON.stringify(unavailable.at(-1)?.content),

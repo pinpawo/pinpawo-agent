@@ -4,8 +4,6 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
-import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import { AIMessage } from '@langchain/core/messages';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { buildDecisionStructuredOutput, buildLocalChatAgentInput } from './agentChannel';
@@ -524,49 +522,4 @@ test('buildLocalChatAgentInput uses caller-provided stable session time', () => 
   assert.equal(first.input.runtimeEnvironment, second.input.runtimeEnvironment);
   assert.match(first.input.runtimeEnvironment ?? '', /会话开始时间：2026-06-23T10:30:00\+08:00/);
   assert.match(first.input.runtimeEnvironment ?? '', /时区：Asia\/Shanghai/);
-});
-
-test('buildLocalChatAgentInput passes model structured output strategy to explore', async () => {
-  const setup = buildTestLocalChatAgentInput({
-    context: createContext(),
-    userMessage: 'hello',
-    llmConfig: {
-      apiKey: 'test-key',
-      baseUrl: 'https://api.deepseek.com',
-      model: 'deepseek-v4-pro',
-    },
-  });
-  const explore = setup.input.capabilities?.find((capability) => capability.name === 'explore');
-  assert.ok(explore);
-
-  let capturedOptions: unknown;
-  const model = {
-    withStructuredOutput: (_schema: unknown, options: unknown) => {
-      capturedOptions = options;
-      return {
-        invoke: async () => ({ summary: 'summary with viewed files' }),
-      };
-    },
-  } as unknown as BaseChatModel;
-  const finalize = explore.lifecycle?.finalize;
-  assert.ok(finalize);
-  const result = await finalize({
-    messages: [new AIMessage('final explore evidence')],
-    artifacts: [],
-    completionReason: 'natural',
-    announceMessageId: null,
-  }, {
-    models: { act: model },
-    actor: {} as never,
-    messages: [],
-    capabilityId: 'explore',
-    delegationId: 'dg-1',
-    runId: 'run-1',
-  });
-
-  assert.match(String(result?.messages?.at(-1)?.content ?? ''), /summary with viewed files/);
-  assert.deepEqual(capturedOptions, {
-    name: 'explore_knowledge_ingest',
-    method: 'jsonMode',
-  });
 });

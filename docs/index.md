@@ -61,7 +61,6 @@ the original design and reference documents. Maintenance rules live in
 
 - [Toolkit composition design](PET_AGENT_TOOLKIT_COMPOSITION_DESIGN.md)
 - [Daily post capability](PET_AGENT_DAILY_POST_CAPABILITY.md)
-- [Explore knowledge ingest](EXPLORE_KNOWLEDGE_INGEST_DESIGN.md)
 - [Capability artifact design](PET_AGENT_CAPABILITY_ARTIFACT_DESIGN.md) —
   historical draft
 - [Capability artifact redesign](PET_AGENT_CAPABILITY_ARTIFACT_REDESIGN.md) —
@@ -70,7 +69,6 @@ the original design and reference documents. Maintenance rules live in
 - [Capability artifact pipeline](capability-artifact-pipeline/index.md)
   - [Architecture](capability-artifact-pipeline/architecture.md)
   - [Store contract](capability-artifact-pipeline/store-contract.md)
-  - [Explore ingest](capability-artifact-pipeline/explore-ingest.md)
   - [Compatibility notes](capability-artifact-pipeline/compatibility-notes.md)
 
 ## Studio

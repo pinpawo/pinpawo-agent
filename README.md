@@ -395,7 +395,6 @@ Start with these documents:
 - [Capability / Toolkit V2 Contract](docs/PET_AGENT_API_CAPABILITY_TOOLKIT.md)
 - [Toolkit Composition Design](docs/PET_AGENT_TOOLKIT_COMPOSITION_DESIGN.md)
 - [Context Governance Refactor](docs/CONTEXT_GOVERNANCE_REFACTOR.md)
-- [Explore Knowledge Ingest Design](docs/EXPLORE_KNOWLEDGE_INGEST_DESIGN.md)
 - [Human Review Approval Refactor](docs/HUMAN_REVIEW_APPROVAL_REFACTOR.md)
 - [Local Agent Architecture Refactor Plan](docs/LOCAL_AGENT_ARCHITECTURE_REFACTOR_PLAN.md)
 

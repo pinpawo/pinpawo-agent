@@ -128,6 +128,7 @@ export function inferLlmContextWindowTokens(model: string | null | undefined): n
       'qwen3.5-plus',
       'qwen3.5-flash',
       'qwen3.5-turbo',
+      'qwen3.8-',
       'qwen3.7-',
       'qwen3.6-',
       'qwen2.5-turbo',
@@ -142,7 +143,7 @@ export function inferLlmContextWindowTokens(model: string | null | undefined): n
       return 256_000;
     }
 
-    if (normalized.startsWith('qwen3.7-') || normalized.startsWith('qwen3.6-') || normalized.startsWith('qwen3.5-')) {
+    if (normalized.startsWith('qwen3.8-') || normalized.startsWith('qwen3.7-') || normalized.startsWith('qwen3.6-') || normalized.startsWith('qwen3.5-')) {
       return 1_000_000;
     }
 

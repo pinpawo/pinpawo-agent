@@ -1,6 +1,10 @@
 import type { AgentModels } from '@pinpawo/pet-agent';
 import type { AgentLlmConfig } from './agentConfig';
-import { buildLlmModelKwargs, requiresLlmStreaming } from './llmModelPresets';
+import {
+  buildLlmModelKwargs,
+  inferLlmToolChoiceSupport,
+  requiresLlmStreaming,
+} from './llmModelPresets';
 import {
   LocalImageChatOpenAI,
   type LocalImageModelInputOptions,
@@ -40,6 +44,7 @@ export function buildLocalAgentModels(
       },
     }, {
       supportedInputModalities: llmConfig.inputModalities ?? ['text'],
+      toolChoiceSupport: inferLlmToolChoiceSupport(model),
       ...(options.imageStore ? { imageStore: options.imageStore } : {}),
       ...(options.admitInputModalities
         ? { admitInputModalities: options.admitInputModalities }

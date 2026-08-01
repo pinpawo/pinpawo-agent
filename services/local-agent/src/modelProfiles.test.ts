@@ -62,6 +62,17 @@ test('DeepSeek V4 Flash has its own preset and does not resolve as V4 Pro', () =
   assert.equal(inferLlmModelPreset('deepseek-v4-flash')?.key, 'deepseek-flash');
 });
 
+test('Qwen 3.8 Max Preview has a Token Plan-specific preset', () => {
+  const preset = findLlmModelPresetByKey('qwen-token-plan');
+
+  assert.equal(preset?.model, 'qwen3.8-max-preview');
+  assert.equal(preset?.baseUrl, undefined);
+  assert.deepEqual(preset?.inputModalities, ['text', 'image']);
+  assert.equal(preset?.toolChoiceSupport, 'auto_only');
+  assert.equal(inferLlmModelPreset('qwen3.8-max-preview')?.key, 'qwen-token-plan');
+  assert.equal(inferLlmModelPreset('qwen3.7-max')?.key, 'qwen');
+});
+
 test('custom profiles default missing modality metadata to text-only', () => {
   const parsed = parseModelProfile(storedProfile({
     inputModalities: undefined,

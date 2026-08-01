@@ -7,6 +7,8 @@ export type LlmThinkingControl =
   | 'always_enabled'
   | 'none';
 
+export type LlmToolChoiceSupport = 'full' | 'auto_only';
+
 export type LlmModelPreset = {
   key: string;
   label: string;
@@ -24,6 +26,8 @@ export type LlmModelPreset = {
    */
   inputModalities: readonly ModelInputModality[];
   thinkingControl?: LlmThinkingControl;
+  /** Tool selection modes accepted while the preset's thinking mode is active. */
+  toolChoiceSupport?: LlmToolChoiceSupport;
   requiresStreaming?: boolean;
   aliases: readonly string[];
   officialDocs: readonly string[];
@@ -89,6 +93,25 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     ],
     officialDocs: [
       'https://help.aliyun.com/zh/model-studio/models',
+      'https://help.aliyun.com/zh/model-studio/qwen-structured-output',
+    ],
+  },
+  {
+    key: 'qwen-token-plan',
+    label: 'Qwen 3.8 Max Preview',
+    provider: 'aliyun',
+    model: 'qwen3.8-max-preview',
+    contextWindowTokens: 1_000_000,
+    structuredOutputMethod: 'jsonMode',
+    inputModalities: ['text', 'image'],
+    thinkingControl: 'always_enabled',
+    toolChoiceSupport: 'auto_only',
+    aliases: [
+      'qwen3.8-',
+    ],
+    officialDocs: [
+      'https://help.aliyun.com/zh/model-studio/models',
+      'https://help.aliyun.com/zh/model-studio/token-plan-overview',
       'https://help.aliyun.com/zh/model-studio/qwen-structured-output',
     ],
   },
@@ -320,6 +343,9 @@ export function buildLlmModelKwargs(model: string, thinking: boolean): Record<st
   if (control === 'thinking_type') {
     return { thinking: { type: thinking ? 'enabled' : 'disabled' } };
   }
+  if (control === 'always_enabled') {
+    return undefined;
+  }
   if (normalized.includes('qwen') || normalized.includes('minimax')) {
     return { extra_body: { enable_thinking: thinking } };
   }
@@ -327,6 +353,10 @@ export function buildLlmModelKwargs(model: string, thinking: boolean): Record<st
     return { thinking: { type: thinking ? 'enabled' : 'disabled' } };
   }
   return undefined;
+}
+
+export function inferLlmToolChoiceSupport(model: string): LlmToolChoiceSupport {
+  return inferLlmModelPreset(model)?.toolChoiceSupport ?? 'full';
 }
 
 export function requiresLlmStreaming(model: string): boolean {

@@ -341,10 +341,7 @@ test('auto review gives jsonMode providers the canonical output protocol', async
   assert.match(systemPrompt, /Output protocol:/);
   assert.match(systemPrompt, /"decision": exactly "authorize" or "require_authorization"/);
   assert.match(systemPrompt, /"reason": a concise explanation/);
-  assert.match(
-    systemPrompt,
-    /\{"decision":"require_authorization","reason":"The action requires explicit approval\."\}/,
-  );
+  assert.doesNotMatch(systemPrompt, /Example:/);
   assert.doesNotMatch(systemPrompt, /"ask"/);
 });
 

@@ -109,12 +109,18 @@ test('decision output instructions add schema shape only for jsonMode', () => {
 
   const jsonModeEntryInstruction = buildEntryDecisionOutputInstruction('jsonMode');
   assert.match(jsonModeEntryInstruction, /JSON Schema/);
+  assert.match(jsonModeEntryInstruction, /JSON 输出示例/);
+  assert.match(jsonModeEntryInstruction, /\{"action":"needs_plan"\}/);
   assert.match(jsonModeEntryInstruction, /"action"/);
   assert.doesNotMatch(jsonModeEntryInstruction, /"plan_draft"/);
 
   const defaultOutcomeInstruction = buildDelegationOutcomeDecisionOutputInstruction();
   assert.doesNotMatch(defaultOutcomeInstruction, /JSON Schema/);
   const jsonModeOutcomeInstruction = buildDelegationOutcomeDecisionOutputInstruction('jsonMode');
+  assert.match(
+    jsonModeOutcomeInstruction,
+    /\{"outcome":"goal_done","gap_note":null\}/,
+  );
   assert.match(jsonModeOutcomeInstruction, /"outcome"/);
   assert.match(jsonModeOutcomeInstruction, /"gap_note"/);
   assert.match(jsonModeOutcomeInstruction, /"required":\["outcome"\]/);

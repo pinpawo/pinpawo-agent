@@ -575,8 +575,7 @@ test('entry decision autoRepair rejects the removed direct_task action', async (
   const invokedMessages: unknown[] = [];
   let invokeCount = 0;
   let capturedOptions: unknown;
-  const model = {
-    invoke: async () => new AIMessage('answered'),
+  const decisionModel = {
     withStructuredOutput: (_schema: unknown, options: unknown) => {
       capturedOptions = options;
       return {
@@ -590,9 +589,22 @@ test('entry decision autoRepair rejects the removed direct_task action', async (
       };
     },
   } as unknown as AgentModels['act'];
+  const answerModel = {
+    invoke: async () => new AIMessage('answered'),
+  } as unknown as AgentModels['act'];
+  const unusedActModel = {
+    invoke: async () => {
+      throw new Error('legacy act fallback should not be used');
+    },
+  } as unknown as AgentModels['act'];
 
   const graph = createOrchestratorGraph({
-    models: { act: model, observe: model },
+    models: {
+      act: unusedActModel,
+      decision: decisionModel,
+      answer: answerModel,
+      observe: decisionModel,
+    },
     actor: testActor,
     decisionStructuredOutput: {
       method: 'jsonMode',

@@ -128,7 +128,6 @@ function buildAutoReviewOutputInstruction(method?: StructuredOutputMethod) {
     'Return only one JSON object with:',
     '- "decision": exactly "authorize" or "require_authorization".',
     '- "reason": a concise explanation grounded in the action facts and policy.',
-    'Example: {"decision":"require_authorization","reason":"The action requires explicit approval."}',
   ].join('\n');
 }
 

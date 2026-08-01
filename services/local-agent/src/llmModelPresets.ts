@@ -3,6 +3,7 @@ import type { ModelInputModality } from './modelProfiles';
 
 export type LlmThinkingControl =
   | 'extra_body_enable_thinking'
+  | 'reasoning_effort'
   | 'thinking_type'
   | 'always_enabled'
   | 'none';
@@ -89,6 +90,24 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     ],
     officialDocs: [
       'https://help.aliyun.com/zh/model-studio/models',
+      'https://help.aliyun.com/zh/model-studio/qwen-structured-output',
+    ],
+  },
+  {
+    key: 'qwen-token-plan',
+    label: 'Qwen 3.8 Max Preview',
+    provider: 'aliyun',
+    model: 'qwen3.8-max-preview',
+    contextWindowTokens: 1_000_000,
+    structuredOutputMethod: 'jsonMode',
+    inputModalities: ['text', 'image'],
+    thinkingControl: 'reasoning_effort',
+    aliases: [
+      'qwen3.8-',
+    ],
+    officialDocs: [
+      'https://help.aliyun.com/zh/model-studio/models',
+      'https://help.aliyun.com/zh/model-studio/token-plan-overview',
       'https://help.aliyun.com/zh/model-studio/qwen-structured-output',
     ],
   },
@@ -316,6 +335,9 @@ export function buildLlmModelKwargs(model: string, thinking: boolean): Record<st
   const control = inferLlmModelPreset(model)?.thinkingControl;
   if (control === 'extra_body_enable_thinking') {
     return { extra_body: { enable_thinking: thinking } };
+  }
+  if (control === 'reasoning_effort') {
+    return { reasoning_effort: thinking ? 'xhigh' : 'none' };
   }
   if (control === 'thinking_type') {
     return { thinking: { type: thinking ? 'enabled' : 'disabled' } };

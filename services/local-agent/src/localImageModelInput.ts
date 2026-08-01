@@ -1,6 +1,7 @@
 import type { CallbackManagerForLLMRun } from '@langchain/core/callbacks/manager';
 import type { ChatModelStreamEvent } from '@langchain/core/language_models/event';
 import {
+  HumanMessage,
   type BaseMessage,
   mapStoredMessageToChatMessage,
 } from '@langchain/core/messages';
@@ -15,6 +16,10 @@ import {
   LOCAL_IMAGE_REFERENCE_SCHEME,
   LocalChatImageStore,
 } from './localImageAttachments';
+import {
+  readBrowserScreenshotArtifact,
+  readBrowserScreenshotDataUrl,
+} from './toolkits/browser/screenshot';
 
 export type LocalImageModelInputOptions = {
   imageStore?: LocalChatImageStore;
@@ -52,9 +57,12 @@ export async function prepareLocalImageModelMessages(
     );
   }
   await options.admitInputModalities?.(required);
+  const modelMessages = options.supportedInputModalities.includes('image')
+    ? await appendCurrentToolImageMessages(messages)
+    : messages;
   let changed = false;
   const prepared: BaseMessage[] = [];
-  for (const message of messages) {
+  for (const message of modelMessages) {
     if (!Array.isArray(message.content)) {
       prepared.push(message);
       continue;
@@ -112,7 +120,58 @@ export async function prepareLocalImageModelMessages(
     (stored.data as { content: unknown }).content = content;
     prepared.push(mapStoredMessageToChatMessage(stored));
   }
-  return changed ? prepared : [...messages];
+  return changed || modelMessages !== messages ? prepared : [...messages];
+}
+
+async function appendCurrentToolImageMessages(
+  messages: readonly BaseMessage[],
+): Promise<readonly BaseMessage[]> {
+  let lastAiMessage = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?._getType() === 'ai') {
+      lastAiMessage = index;
+      break;
+    }
+  }
+
+  const imageUrls: string[] = [];
+  let unavailableImageCount = 0;
+  for (let index = lastAiMessage + 1; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (!message || message._getType() !== 'tool') continue;
+    const artifact = readBrowserScreenshotArtifact(
+      (message as BaseMessage & { artifact?: unknown }).artifact,
+    );
+    if (!artifact) continue;
+    try {
+      imageUrls.push(await readBrowserScreenshotDataUrl(artifact.screenshot));
+    } catch {
+      unavailableImageCount += 1;
+    }
+  }
+  if (!imageUrls.length && unavailableImageCount === 0) return messages;
+
+  const imageStatusText = imageUrls.length
+    ? unavailableImageCount > 0
+      ? 'Browser screenshots from the preceding tool results are attached below, but one or more screenshots could not be loaded. Inspect only the attached images and call browser_screenshot again for any unavailable image.'
+      : 'Browser screenshot from the preceding tool result. Inspect the visible page using this image.'
+    : 'The browser screenshot from the preceding tool result could not be loaded. Do not claim to have inspected the image; call browser_screenshot again before making a visual judgment.';
+
+  return [
+    ...messages,
+    new HumanMessage({
+      content: [
+        {
+          type: 'text',
+          text: imageStatusText,
+        },
+        ...imageUrls.map((url) => ({
+          type: 'image_url' as const,
+          image_url: { url },
+        })),
+      ],
+    }),
+  ];
 }
 
 export class LocalImageChatOpenAI<

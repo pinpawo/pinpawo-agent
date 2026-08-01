@@ -3,7 +3,6 @@ import type { ModelInputModality } from './modelProfiles';
 
 export type LlmThinkingControl =
   | 'extra_body_enable_thinking'
-  | 'reasoning_effort'
   | 'thinking_type'
   | 'always_enabled'
   | 'none';
@@ -101,7 +100,7 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     contextWindowTokens: 1_000_000,
     structuredOutputMethod: 'jsonMode',
     inputModalities: ['text', 'image'],
-    thinkingControl: 'reasoning_effort',
+    thinkingControl: 'always_enabled',
     aliases: [
       'qwen3.8-',
     ],
@@ -336,11 +335,11 @@ export function buildLlmModelKwargs(model: string, thinking: boolean): Record<st
   if (control === 'extra_body_enable_thinking') {
     return { extra_body: { enable_thinking: thinking } };
   }
-  if (control === 'reasoning_effort') {
-    return { reasoning_effort: thinking ? 'xhigh' : 'none' };
-  }
   if (control === 'thinking_type') {
     return { thinking: { type: thinking ? 'enabled' : 'disabled' } };
+  }
+  if (control === 'always_enabled') {
+    return undefined;
   }
   if (normalized.includes('qwen') || normalized.includes('minimax')) {
     return { extra_body: { enable_thinking: thinking } };

@@ -90,16 +90,16 @@ test('an explicit subagent thinking override remains available', () => {
   });
 });
 
-test('Qwen 3.8 roles use the Token Plan reasoning effort contract', () => {
+test('Qwen 3.8 roles preserve the provider-enforced thinking mode', () => {
   const models = buildLocalAgentModels({
     apiKey: 'test-key',
     baseUrl: 'https://workspace-id.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
     model: 'qwen3.8-max-preview',
   });
 
-  assert.deepEqual(readModelKwargs(models.act), { reasoning_effort: 'none' });
-  assert.deepEqual(readModelKwargs(models.decision), { reasoning_effort: 'none' });
-  assert.deepEqual(readModelKwargs(models.answer), { reasoning_effort: 'xhigh' });
-  assert.deepEqual(readModelKwargs(models.observe), { reasoning_effort: 'none' });
-  assert.deepEqual(readModelKwargs(models.subagent), { reasoning_effort: 'xhigh' });
+  assert.deepEqual(readModelKwargs(models.act), {});
+  assert.deepEqual(readModelKwargs(models.decision), {});
+  assert.deepEqual(readModelKwargs(models.answer), {});
+  assert.deepEqual(readModelKwargs(models.observe), {});
+  assert.deepEqual(readModelKwargs(models.subagent), {});
 });

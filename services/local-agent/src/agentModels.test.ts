@@ -69,7 +69,7 @@ test('DeepSeek model roles apply the node-level thinking policy', () => {
   assert.deepEqual(readModelKwargs(models.subagent), {
     thinking: { type: 'enabled' },
   });
-  assert.equal(readMaxTokens(models.decision), 256);
+  assert.equal(readMaxTokens(models.decision), undefined);
   assert.equal(readMaxTokens(models.act), undefined);
   assert.equal(readMaxTokens(models.answer), undefined);
 });

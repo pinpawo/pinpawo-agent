@@ -6,8 +6,6 @@ import {
   type LocalImageModelInputOptions,
 } from './localImageModelInput';
 
-const DECISION_MAX_OUTPUT_TOKENS = 256;
-
 export function buildLocalAgentModels(
   llmConfig: AgentLlmConfig,
   options: Partial<LocalImageModelInputOptions> = {},
@@ -32,7 +30,6 @@ export function buildLocalAgentModels(
         : {}),
       timeout: llmConfig.timeoutMs ?? 45000,
       maxRetries: llmConfig.maxRetries ?? 2,
-      ...(role === 'decision' ? { maxTokens: DECISION_MAX_OUTPUT_TOKENS } : {}),
       apiKey: llmConfig.apiKey,
       streaming: requiresLlmStreaming(model),
       streamUsage: true,

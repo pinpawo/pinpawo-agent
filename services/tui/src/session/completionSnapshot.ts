@@ -16,13 +16,13 @@ export function reconcileCompletionSnapshot(
     preserveOmittedTokenUsage: true,
     preserveOmittedSessionTokenUsage: true,
   });
-  if (live.activeRun || hasSupplementaryTimelineEntries(applied.timeline)) {
+  if (live.activeRun || hasCanonicalOperationEntries(applied.timeline)) {
     return live.activeRun
       ? mergeCompletionSnapshotMetadata(live, applied)
       : applied;
   }
-  // Checkpoints currently persist the conversation message spine, while
-  // operation, subagent, and system entries exist only in the live projection.
+  // Checkpoints persist the conversation spine and canonical subagent handoffs,
+  // while operation and system entries still exist only in the live projection.
   // Replace checkpoint-owned messages without discarding those settled details.
   return {
     ...applied,
@@ -37,8 +37,8 @@ function mergeCheckpointMessagesWithLiveDetails(
   live: readonly AgentTimelineEntry[],
   checkpoint: readonly AgentTimelineEntry[],
 ) {
-  const checkpointMessages = checkpoint.filter(isConversationMessage);
-  const liveMessages = live.filter(isConversationMessage);
+  const checkpointMessages = checkpoint.filter(isCheckpointMessage);
+  const liveMessages = live.filter(isCheckpointMessage);
   const reconciledMessages = reconcileCheckpointMessages(
     checkpointMessages,
     liveMessages,
@@ -48,9 +48,27 @@ function mergeCheckpointMessagesWithLiveDetails(
       liveIndex >= 0 ? [[liveMessages[liveIndex]!, message] as const] : []
     )),
   );
+  const insertionsBefore = new Map<AgentMessageEntry, AgentMessageEntry[]>();
+  let pendingInsertions: AgentMessageEntry[] = [];
+  for (const reconciled of reconciledMessages) {
+    if (reconciled.liveIndex < 0) {
+      pendingInsertions.push(reconciled.message);
+      continue;
+    }
+    if (pendingInsertions.length > 0) {
+      insertionsBefore.set(
+        liveMessages[reconciled.liveIndex]!,
+        pendingInsertions,
+      );
+      pendingInsertions = [];
+    }
+  }
   const timeline: AgentTimelineEntry[] = [];
   for (const entry of live) {
-    const replacement = isConversationMessage(entry)
+    if (isCheckpointMessage(entry)) {
+      timeline.push(...(insertionsBefore.get(entry) ?? []));
+    }
+    const replacement = isCheckpointMessage(entry)
       ? replacements.get(entry)
       : undefined;
     if (replacement) {
@@ -61,17 +79,15 @@ function mergeCheckpointMessagesWithLiveDetails(
       timeline.push(entry);
     }
   }
-  timeline.push(...reconciledMessages.flatMap(({ message, liveIndex }) => (
-    liveIndex < 0 ? [message] : []
-  )));
+  timeline.push(...pendingInsertions);
   return timeline;
 }
 
-function isConversationMessage(
+function isCheckpointMessage(
   entry: AgentTimelineEntry,
 ): entry is AgentMessageEntry {
   return entry.type === 'message'
-    && (entry.role === 'user' || entry.role === 'assistant');
+    && entry.role !== 'system';
 }
 
 function reconcileCheckpointMessages(
@@ -83,7 +99,7 @@ function reconcileCheckpointMessages(
     const exactIndex = live.findIndex((candidate, index) => (
       index >= liveIndex
       && candidate.role === message.role
-      && candidate.text === message.text
+      && checkpointMessageTextMatchesLive(message, candidate)
     ));
     const matchingIndex = exactIndex >= 0
       ? exactIndex
@@ -112,10 +128,21 @@ function isSettledSupplementaryEntry(entry: AgentTimelineEntry) {
       || entry.phase === 'interrupted';
 }
 
-function hasSupplementaryTimelineEntries(
+function checkpointMessageTextMatchesLive(
+  checkpoint: AgentMessageEntry,
+  live: AgentMessageEntry,
+) {
+  return checkpoint.text === live.text
+    || (
+      checkpoint.role === 'subagent'
+      && checkpoint.text.startsWith(live.text)
+    );
+}
+
+function hasCanonicalOperationEntries(
   timeline: readonly AgentTimelineEntry[],
 ) {
-  return timeline.some((entry) => !isConversationMessage(entry));
+  return timeline.some((entry) => entry.type === 'operation');
 }
 
 function mergeCompletionSnapshotMetadata(

@@ -1147,8 +1147,10 @@ test('production v2 executes reviewed and attachment toolkit calls through a rea
       [
         `user:${GUARDED_HOST_INPUT}`,
         `user:${GUARDED_HOST_CONTINUATION_GUIDANCE}`,
+        `subagent:${GUARDED_HOST_TOOL_OUTPUT}`,
         `assistant:${GUARDED_HOST_REPLY}`,
         `user:${checkpointAttachmentText}`,
+        `subagent:${ATTACHMENT_TOOL_OUTPUT}`,
         `assistant:${ATTACHMENT_TOOL_REPLY}`,
       ],
     );

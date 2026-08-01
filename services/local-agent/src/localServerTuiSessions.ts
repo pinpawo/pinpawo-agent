@@ -46,10 +46,19 @@ import {
 } from './tuiSessionRegistry';
 
 export type TuiCheckpointMessage = {
-  role: string;
+  role: 'user' | 'assistant';
+  text: string;
+  createdAt?: string;
+} | {
+  role: 'subagent';
+  requestId: string;
   text: string;
   createdAt?: string;
 };
+
+type TuiCheckpointMessageSource =
+  | { role: 'user' | 'assistant' }
+  | { role: 'subagent'; requestId: string };
 
 export type ActivePendingReview = {
   sessionId: string;
@@ -72,15 +81,15 @@ type TuiSessionGraphService = Pick<LocalAgentGraphService, 'readThreadState'>;
 
 export function readTuiCheckpointMessages(messages: BaseMessage[]): TuiCheckpointMessage[] {
   return messages.flatMap((message) => {
-    if (!isTuiCheckpointMessage(message)) return [];
-    const type = message._getType();
+    const source = readTuiCheckpointMessageSource(message);
+    if (!source) return [];
     const text = readLocalChatDisplayText(message) ?? readFinalMessageText(message);
     if (!text) {
       return [];
     }
     const createdAt = readMessageCreatedAtUtc(message);
     return [{
-      role: type === 'human' ? 'user' : 'assistant',
+      ...source,
       text,
       ...(createdAt ? { createdAt } : {}),
     }];
@@ -104,15 +113,22 @@ export function readTuiCheckpointTokenUsage(
     : null;
 }
 
-function isTuiCheckpointMessage(message: BaseMessage) {
+function readTuiCheckpointMessageSource(
+  message: BaseMessage,
+): TuiCheckpointMessageSource | null {
   const type = message._getType();
-  if (type !== 'human' && type !== 'ai') return false;
-  if (type !== 'ai') return true;
+  if (type === 'human') return { role: 'user' };
+  if (type !== 'ai') return null;
   const pinpawo = message.additional_kwargs?.pinpawo;
-  if (!pinpawo || typeof pinpawo !== 'object') return true;
-  return !('lane' in pinpawo)
-    && !('handoffFrom' in pinpawo)
-    && (pinpawo as Record<string, unknown>).synthetic !== true;
+  if (!pinpawo || typeof pinpawo !== 'object') return { role: 'assistant' };
+  if ('lane' in pinpawo || (pinpawo as Record<string, unknown>).synthetic === true) {
+    return null;
+  }
+  if (!('handoffFrom' in pinpawo)) return { role: 'assistant' };
+  const runId = (pinpawo as Record<string, unknown>).runId;
+  return typeof runId === 'string' && runId.trim()
+    ? { role: 'subagent', requestId: runId }
+    : null;
 }
 
 export function summarizeTuiCheckpointMessages(

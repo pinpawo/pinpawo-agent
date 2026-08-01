@@ -52,8 +52,13 @@ function buildCapabilityActorContext(actor: ReturnType<typeof resolveActor>): st
 export function createCapabilityNode(params: {
   config: OrchestratorConfig;
   subagentContextWindowTokens: number | undefined;
+  subagentGenerationReserveTokens: number | undefined;
 }) {
-  const { config, subagentContextWindowTokens } = params;
+  const {
+    config,
+    subagentContextWindowTokens,
+    subagentGenerationReserveTokens,
+  } = params;
 
   // Node: capability — reads capabilities, tools, execution from configurable
   return async function capabilityNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
@@ -167,6 +172,7 @@ export function createCapabilityNode(params: {
       messages: subagentMessages,
       maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
       contextWindowTokens: subagentContextWindowTokens,
+      generationReserveTokens: subagentGenerationReserveTokens,
       middleware: usedResolvedToolkitExecution.middleware,
       runtimeContext: {
         executionScope: {

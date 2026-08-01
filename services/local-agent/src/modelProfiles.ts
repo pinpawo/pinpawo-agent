@@ -634,12 +634,15 @@ export function summarizeModelProfile(profile: ModelProfileV1): ModelProfileSumm
 }
 
 export function fingerprintModelProfile(profile: ModelProfileV1): ModelProfileFingerprint {
+  const preset = profile.sourcePreset
+    ? findLlmModelPresetByKey(profile.sourcePreset)
+    : undefined;
   const sanitized = {
     provider: profile.provider,
     model: profile.model,
     endpoint: sanitizeEndpoint(profile.baseUrl).endpoint,
     contextWindowTokens: profile.contextWindowTokens,
-    maxOutputTokens: profile.maxOutputTokens ?? null,
+    maxOutputTokens: profile.maxOutputTokens ?? preset?.maxOutputTokens ?? null,
     structuredOutputMethod: profile.structuredOutputMethod
       ?? inferLlmStructuredOutputMethod(profile.model, profile.baseUrl)
       ?? null,

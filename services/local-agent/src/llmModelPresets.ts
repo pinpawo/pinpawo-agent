@@ -9,6 +9,9 @@ export type LlmThinkingControl =
 
 export type LlmToolChoiceSupport = 'full' | 'auto_only';
 
+export type LlmRuntimeRole = 'act' | 'decision' | 'answer' | 'observe' | 'subagent';
+export type LlmReasoningEffort = 'low' | 'medium' | 'xhigh';
+
 export type LlmModelPreset = {
   key: string;
   label: string;
@@ -101,7 +104,8 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     label: 'Qwen 3.8 Max Preview',
     provider: 'aliyun',
     model: 'qwen3.8-max-preview',
-    contextWindowTokens: 1_000_000,
+    contextWindowTokens: 983_616,
+    maxOutputTokens: 131_072,
     structuredOutputMethod: 'jsonMode',
     inputModalities: ['text', 'image'],
     thinkingControl: 'always_enabled',
@@ -334,7 +338,23 @@ export function inferLlmStructuredOutputMethod(
   )?.method;
 }
 
-export function buildLlmModelKwargs(model: string, thinking: boolean): Record<string, unknown> | undefined {
+export function inferLlmRoleReasoningEffort(
+  model: string,
+  role: LlmRuntimeRole,
+): LlmReasoningEffort | undefined {
+  if (inferLlmModelPreset(model)?.key !== 'qwen-token-plan') return undefined;
+  return role === 'decision' || role === 'observe' ? 'low' : 'medium';
+}
+
+export function inferLlmAdditionalThinkingReserveTokens(model: string): number {
+  return inferLlmModelPreset(model)?.key === 'qwen-token-plan' ? 16_384 : 0;
+}
+
+export function buildLlmModelKwargs(
+  model: string,
+  thinking: boolean,
+  reasoningEffort?: LlmReasoningEffort,
+): Record<string, unknown> | undefined {
   const normalized = normalizeModelName(model);
   const control = inferLlmModelPreset(model)?.thinkingControl;
   if (control === 'extra_body_enable_thinking') {
@@ -344,7 +364,9 @@ export function buildLlmModelKwargs(model: string, thinking: boolean): Record<st
     return { thinking: { type: thinking ? 'enabled' : 'disabled' } };
   }
   if (control === 'always_enabled') {
-    return undefined;
+    return reasoningEffort
+      ? { reasoning_effort: reasoningEffort }
+      : undefined;
   }
   if (normalized.includes('qwen') || normalized.includes('minimax')) {
     return { extra_body: { enable_thinking: thinking } };

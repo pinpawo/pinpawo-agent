@@ -20,6 +20,7 @@ import {
   writeDefaultModelProfile,
 } from './modelProfiles';
 import type { StoredConfig } from './storage';
+import { createLocalModelProfileRegistry } from './llmConfig';
 
 function storedProfile(overrides: Record<string, unknown> = {}) {
   return {
@@ -69,8 +70,46 @@ test('Qwen 3.8 Max Preview has a Token Plan-specific preset', () => {
   assert.equal(preset?.baseUrl, undefined);
   assert.deepEqual(preset?.inputModalities, ['text', 'image']);
   assert.equal(preset?.toolChoiceSupport, 'auto_only');
+  assert.equal(preset?.contextWindowTokens, 983_616);
+  assert.equal(preset?.maxOutputTokens, 131_072);
   assert.equal(inferLlmModelPreset('qwen3.8-max-preview')?.key, 'qwen-token-plan');
   assert.equal(inferLlmModelPreset('qwen3.7-max')?.key, 'qwen');
+});
+
+test('Qwen preset output limits backfill older stored profiles at runtime', () => {
+  const snapshot = buildModelProfileRegistry({
+    stored: storedConfig({
+      primary: storedProfile({
+        provider: 'aliyun',
+        sourcePreset: 'qwen-token-plan',
+        model: 'qwen3.8-max-preview',
+        baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        contextWindowTokens: 983_616,
+        maxOutputTokens: undefined,
+        inputModalities: ['text', 'image'],
+      }),
+    }),
+    env: {},
+  });
+  const registry = createLocalModelProfileRegistry({ snapshot });
+
+  assert.equal(registry.resolve().maxOutputTokens, 131_072);
+});
+
+test('preset output limits do not leak into custom profiles with a matching model name', () => {
+  const snapshot = buildModelProfileRegistry({
+    stored: storedConfig({
+      primary: storedProfile({
+        model: 'qwen3.8-max-preview',
+        sourcePreset: undefined,
+        maxOutputTokens: undefined,
+      }),
+    }),
+    env: {},
+  });
+  const registry = createLocalModelProfileRegistry({ snapshot });
+
+  assert.equal(registry.resolve().maxOutputTokens, undefined);
 });
 
 test('custom profiles default missing modality metadata to text-only', () => {

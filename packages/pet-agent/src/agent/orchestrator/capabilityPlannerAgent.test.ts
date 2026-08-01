@@ -457,6 +457,42 @@ test('an unknown Capability returns tool feedback and can be repaired in-loop', 
   );
 });
 
+test('Planner Agent rejects whitespace-only task text', async (t) => {
+  const workspace = await createWorkspace(t, {
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary tasks.',
+      instructions: 'Complete the requested work.',
+    }),
+  });
+  const model = new ScriptedPlannerModel([
+    {
+      structuredOutput: {
+        kind: 'plan',
+        args: { tasks: [{ capability: 'general', task: '   ' }] },
+      },
+    },
+    {
+      structuredOutput: {
+        kind: 'plan',
+        args: { tasks: [{ capability: 'general', task: 'Complete the requested work.' }] },
+      },
+    },
+  ]);
+
+  const result = await createCapabilityPlannerAgent({ model }).invoke(
+    plannerInput(workspace),
+  );
+
+  assert.deepEqual(result, {
+    tasks: [{ capability: 'general', task: 'Complete the requested work.' }],
+  });
+  assert.equal(model.invocations.length, 2);
+  assert.ok(model.invocations[1]?.some((message) =>
+    message instanceof ToolMessage
+    && message.tool_call_id === 'structured-1'));
+});
+
 test('an empty workspace can produce a truthful unavailable result', async (t) => {
   const workspace = await createWorkspace(t, {});
   const model = new ScriptedPlannerModel([{

@@ -66,6 +66,7 @@ import {
   type OrchestratorStateType,
 } from './state';
 import { applyActiveDelegationTransition } from './runtime/activeDelegationTransition';
+import { assertBoundaryPlanContinuity } from './runtime/nodes/capabilityPlanner';
 import { afterContextPrep } from './runtime/routes/afterContextPrep';
 import { readSubagentGuardStopReason } from '../../subagent/guardStop';
 import type {
@@ -768,6 +769,38 @@ test('Capability Planner unavailable result is materialized without a second sem
   });
 
   assert.equal(result.messages.at(-1)?.content, 'done');
+});
+
+test('boundary planner preserves the existing remaining plan order', () => {
+  const input: CapabilityPlannerInput = {
+    mode: 'boundary',
+    messages: [],
+    completedTask: '调查现有实现',
+    remainingPlan: [
+      { capability: 'explore', task: '继续检查实现' },
+      { capability: 'general', task: '根据结果修改代码' },
+    ],
+    workspace: {
+      rootPath: '/tmp/planner-workspace',
+      registryDigest: 'digest',
+      capabilityNames: ['explore', 'general'],
+      entries: [],
+      reused: false,
+    },
+  };
+
+  assert.doesNotThrow(() => assertBoundaryPlanContinuity(input, {
+    tasks: [{ capability: 'explore', task: '继续检查实现' }],
+  }));
+  assert.doesNotThrow(() => assertBoundaryPlanContinuity(input, {
+    tasks: [{ capability: 'general', task: '根据结果修改代码' }],
+  }));
+  assert.throws(
+    () => assertBoundaryPlanContinuity(input, {
+      tasks: [{ capability: 'general', task: '插入一个未计划的新任务' }],
+    }),
+    /changed boundary remaining_plan/,
+  );
 });
 
 test('entry decision schema does not advertise capability actions', async () => {
@@ -5951,12 +5984,7 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
         if (structuredCallCount === 3) return scriptedPlannerCapability('ops');
         if (structuredCallCount === 4) return taskDoneDecision('issue 已关闭，还需删除目录。');
         if (structuredCallCount === 5) {
-          return {
-            tasks: [
-              { capability: '', task: '删除 packages/goat 目录。' },
-              { capability: 'ops', task: '汇总执行结果。' },
-            ],
-          };
+          return scriptedPlannerTask('删除 packages/goat 目录。');
         }
         if (structuredCallCount === 6) return scriptedPlannerCapability('ops');
         return goalDoneDecision();

@@ -70,15 +70,71 @@ function buildPlannerContext(state: OrchestratorStateType) {
 function normalizeRemainingPlan(
   tasks: readonly CapabilityPlannerTask[],
 ): CapabilityPlanTask[] {
-  return tasks.map((item) => ({
-    capability: item.capability.trim(),
-    task: item.task.trim(),
-  }));
+  return tasks.map(normalizePlannerTask);
+}
+
+function normalizePlannerTask(task: CapabilityPlannerTask): CapabilityPlanTask {
+  const capability = task.capability.trim();
+  const description = task.task.trim();
+  if (!capability || !description) {
+    throw new Error('Capability Planner submitted a task with an empty capability or description.');
+  }
+  return {
+    capability,
+    task: description,
+  };
+}
+
+function samePlannerTask(left: CapabilityPlanTask, right: CapabilityPlanTask) {
+  return left.capability === right.capability && left.task === right.task;
+}
+
+function normalizeUnavailableResult(result: Extract<CapabilityPlannerResult, { task: string }>) {
+  const task = result.task.trim();
+  const reason = result.reason.trim();
+  if (!task || !reason) {
+    throw new Error('Capability Planner submitted an unavailable result with empty text.');
+  }
+  return { task, reason };
+}
+
+/**
+ * Boundary planning starts from an already accepted future plan. Keep that
+ * plan stable unless its Capability disappeared from the current workspace;
+ * completed items can be removed by returning a later plan item as the new
+ * first task.
+ */
+export function assertBoundaryPlanContinuity(
+  input: CapabilityPlannerInput,
+  result: CapabilityPlannerResult,
+) {
+  if (input.mode !== 'boundary' || input.remainingPlan.length === 0 || !('tasks' in result)) {
+    return;
+  }
+  const firstPlannedCapability = input.remainingPlan[0]?.capability;
+  if (!firstPlannedCapability
+    || !input.workspace.capabilityNames.includes(firstPlannedCapability)) {
+    return;
+  }
+
+  const plannedTasks = input.remainingPlan.map(normalizePlannerTask);
+  const returnedTasks = result.tasks.map(normalizePlannerTask);
+  let plannedIndex = 0;
+  for (const task of returnedTasks) {
+    const matchIndex = plannedTasks.findIndex((plannedTask, index) =>
+      index >= plannedIndex && samePlannerTask(plannedTask, task));
+    if (matchIndex < 0) {
+      throw new Error(
+        'Capability Planner changed boundary remaining_plan without an invalidated first task.',
+      );
+    }
+    plannedIndex = matchIndex + 1;
+  }
 }
 
 function materializeNextDelegation(params: {
   state: OrchestratorStateType;
-  nextTask: CapabilityPlannerTask;
+  nextTask: CapabilityPlanTask;
   remainingPlan: CapabilityPlanTask[];
   allowedCapabilityNames: readonly string[];
 }) {
@@ -136,24 +192,27 @@ function buildPlannerTransition(params: {
   result: CapabilityPlannerResult;
 }) {
   const { state, input, result } = params;
+  assertBoundaryPlanContinuity(input, result);
   if (!('tasks' in result)) {
+    const unavailable = normalizeUnavailableResult(result);
     return {
       goto: 'answer' as const,
       update: {
         runNextDelegation: null,
         runPendingTask: {
-          task: result.task,
-          contextSummary: result.reason,
+          task: unavailable.task,
+          contextSummary: unavailable.reason,
         },
         runCapabilityPlan: [],
       },
     };
   }
 
-  const [nextTask, ...remainingTasks] = result.tasks;
-  if (!nextTask) {
+  const [rawNextTask, ...remainingTasks] = result.tasks;
+  if (!rawNextTask) {
     throw new Error('Capability Planner submitted an empty task list.');
   }
+  const nextTask = normalizePlannerTask(rawNextTask);
   const remainingPlan = normalizeRemainingPlan(remainingTasks);
   return {
     goto: 'capability' as const,

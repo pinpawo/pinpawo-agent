@@ -111,9 +111,6 @@ export function buildLocalAgentRuntimeView(
 
 function timelineFromCheckpointMessages(messages: TuiCheckpointMessage[]): AgentTimelineEntry[] {
   return messages.flatMap((message, index) => {
-    if (message.role !== 'user' && message.role !== 'assistant') {
-      return [];
-    }
     const text = message.text.trim();
     if (!text) {
       return [];
@@ -124,6 +121,9 @@ function timelineFromCheckpointMessages(messages: TuiCheckpointMessage[]): Agent
       role: message.role,
       text,
       status: 'completed',
+      ...(message.role === 'subagent'
+        ? { requestId: message.requestId }
+        : {}),
       ...(message.createdAt ? { createdAt: message.createdAt } : {}),
     } satisfies AgentTimelineEntry];
   });

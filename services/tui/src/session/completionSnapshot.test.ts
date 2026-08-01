@@ -128,6 +128,78 @@ test('completion snapshot retains an omitted live-only reply and aligns later re
   );
 });
 
+test('completion snapshot keeps handoff messages and live operations together', () => {
+  const liveHandoff: AgentTimelineEntry = {
+    id: 'live-handoff',
+    type: 'message',
+    role: 'subagent',
+    requestId: 'run',
+    text: 'Prepared the result.',
+    status: 'completed',
+  };
+  const live = session([
+    message('live-user', 'user', 'Delegate it.'),
+    {
+      id: 'operation',
+      type: 'operation',
+      requestId: 'run',
+      operationKey: 'runtime.delegate:operation',
+      kind: 'runtime.delegate',
+      title: 'Delegate task',
+      phase: 'completed',
+    },
+    liveHandoff,
+    message('live-assistant', 'assistant', 'Done.'),
+  ]);
+  const snapshot = createAgentSessionSnapshot(session([
+    message('snapshot-user', 'user', 'Delegate it.'),
+    {
+      ...liveHandoff,
+      id: 'snapshot-handoff',
+      text: 'Prepared the result.\n\nArtifacts:\n- report.md',
+    },
+    message('snapshot-assistant', 'assistant', 'Done.'),
+  ]));
+
+  const reconciled = reconcileCompletionSnapshot(live, snapshot, 1_000);
+
+  assert.deepEqual(
+    reconciled.timeline.map((entry) => entry.id),
+    ['snapshot-user', 'operation', 'snapshot-handoff', 'snapshot-assistant'],
+  );
+  assert.equal(
+    reconciled.timeline[2]?.type === 'message'
+      ? reconciled.timeline[2].text
+      : null,
+    'Prepared the result.\n\nArtifacts:\n- report.md',
+  );
+});
+
+test('completion snapshot inserts a missing handoff before the final reply', () => {
+  const live = session([
+    message('live-user', 'user', 'Delegate it.'),
+    message('live-assistant', 'assistant', 'Done.'),
+  ]);
+  const snapshot = createAgentSessionSnapshot(session([
+    message('snapshot-user', 'user', 'Delegate it.'),
+    {
+      id: 'snapshot-handoff',
+      type: 'message',
+      role: 'subagent',
+      text: 'Prepared the result.',
+      status: 'completed',
+    },
+    message('snapshot-assistant', 'assistant', 'Done.'),
+  ]));
+
+  const reconciled = reconcileCompletionSnapshot(live, snapshot, 1_000);
+
+  assert.deepEqual(
+    reconciled.timeline.map((entry) => entry.id),
+    ['snapshot-user', 'snapshot-handoff', 'snapshot-assistant'],
+  );
+});
+
 function session(timeline: AgentTimelineEntry[]): AgentSession {
   return {
     sessionId: 'chat:one',

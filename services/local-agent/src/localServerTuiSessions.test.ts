@@ -38,7 +38,7 @@ const testArtifactStore: CapabilityArtifactStore = {
   getDownloadUri: async (uri) => uri,
 };
 
-test('readTuiCheckpointMessages keeps visible user/assistant messages only', () => {
+test('readTuiCheckpointMessages keeps visible conversation and handoff messages', () => {
   const userMessage = stampMessageCreatedAtUtc(
     new HumanMessage(' hello '),
     '2026-06-01T01:00:00.000Z',
@@ -64,11 +64,20 @@ test('readTuiCheckpointMessages keeps visible user/assistant messages only', () 
       },
     }),
     new AIMessage({
-      content: 'handoff copy hidden',
+      content: 'malformed handoff hidden',
+      additional_kwargs: {
+        pinpawo: {
+          handoffFrom: 'capability:general',
+        },
+      },
+    }),
+    new AIMessage({
+      content: 'handoff result visible',
       additional_kwargs: {
         pinpawo: {
           handoffFrom: 'capability:general',
           delegationId: 'delegation-1',
+          runId: 'run-1',
         },
       },
     }),
@@ -77,6 +86,7 @@ test('readTuiCheckpointMessages keeps visible user/assistant messages only', () 
 
   assert.deepEqual(messages, [
     { role: 'user', text: 'hello', createdAt: '2026-06-01T01:00:00.000Z' },
+    { role: 'subagent', requestId: 'run-1', text: 'handoff result visible' },
     { role: 'assistant', text: 'assistant reply', createdAt: '2026-06-01T01:00:01.000Z' },
   ]);
 });

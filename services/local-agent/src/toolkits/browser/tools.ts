@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { browserSession } from './session';
 import type { BrowserExtractOptions, BrowserWaitState } from './session';
 import { formatBrowserToolError } from './errors';
+import { createBrowserScreenshotArtifact } from './screenshot';
 
 type BrowserTargetInput = { selector?: string; ref?: string };
 
@@ -328,17 +329,19 @@ const browserCloseTool = tool(
 );
 
 const browserScreenshotTool = tool(
-  async (_input, runtime: BrowserToolRuntime) => {
+  async (_input, runtime: BrowserToolRuntime): Promise<[string, unknown]> => {
     try {
-      return await browserSession.screenshot(readBrowserExecutionOwner(runtime));
+      const result = await browserSession.screenshot(readBrowserExecutionOwner(runtime));
+      return [result, createBrowserScreenshotArtifact(result)];
     } catch (err) {
-      return formatBrowserToolError(err);
+      return [formatBrowserToolError(err), undefined];
     }
   },
   {
     name: 'browser_screenshot',
     description: '截取当前可见浏览器视口并保存到当前 workdir 的 .pinpawo/browser/screenshots 目录。',
     schema: z.object({}),
+    responseFormat: 'content_and_artifact',
   },
 );
 

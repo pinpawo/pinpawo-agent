@@ -33,3 +33,10 @@ test('browser tools require the delegation scope supplied through tool runtime',
   });
   assert.equal(readErrorCode(scoped), 'browser_not_open');
 });
+
+test('browser screenshot keeps image metadata as a tool artifact', () => {
+  const screenshotTool = browserTools.find((toolItem) =>
+    toolItem.name === 'browser_screenshot');
+  assert.ok(screenshotTool);
+  assert.equal(screenshotTool.responseFormat, 'content_and_artifact');
+});

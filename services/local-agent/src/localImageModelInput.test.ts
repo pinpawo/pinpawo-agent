@@ -3,7 +3,12 @@ import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { HumanMessage, ToolMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
+import { getLocalToolsWorkdir, setLocalToolsWorkdir } from './toolkits/local/pathUtils';
+import {
+  createBrowserScreenshotArtifact,
+  persistBrowserScreenshot,
+} from './toolkits/browser/screenshot';
 import { createAdmittedLocalChatHumanMessage } from './localChatAttachments';
 import { LocalChatImageStore } from './localImageAttachments';
 import {
@@ -149,5 +154,88 @@ test('tool image blocks use the same modality admission guard', async () => {
   assert.deepEqual(
     readRequiredInputModalities([standardImage]),
     ['text', 'image'],
+  );
+});
+
+test('browser screenshot artifacts are relayed only to image-capable profiles', async (t) => {
+  const previousWorkdir = getLocalToolsWorkdir();
+  const workdir = await fs.mkdtemp(join(tmpdir(), 'pinpawo-browser-model-image-'));
+  setLocalToolsWorkdir(workdir);
+  t.after(() => setLocalToolsWorkdir(previousWorkdir));
+
+  const serialized = await persistBrowserScreenshot({
+    mimeType: 'image/jpeg',
+    data: Buffer.from('browser-image').toString('base64'),
+  });
+  const screenshot = new ToolMessage({
+    content: serialized,
+    name: 'browser_screenshot',
+    tool_call_id: 'browser-shot-1',
+    artifact: createBrowserScreenshotArtifact(serialized),
+  });
+  const messages = [
+    new HumanMessage('Inspect the page'),
+    new AIMessage({
+      content: '',
+      tool_calls: [{ name: 'browser_screenshot', args: {}, id: 'browser-shot-1' }],
+    }),
+    screenshot,
+  ];
+
+  const visionAdmissions: string[][] = [];
+  const vision = await prepareLocalImageModelMessages(messages, {
+    supportedInputModalities: ['text', 'image'],
+    admitInputModalities: (modalities) => {
+      visionAdmissions.push([...modalities]);
+    },
+  });
+  assert.deepEqual(visionAdmissions, [['text', 'image']]);
+  assert.equal(vision.length, messages.length + 1);
+  assert.equal(vision.at(-1)?._getType(), 'human');
+  assert.match(
+    JSON.stringify(vision.at(-1)?.content),
+    /data:image\/jpeg;base64,/,
+  );
+  assert.equal(vision[2], screenshot);
+
+  const textOnlyAdmissions: string[][] = [];
+  const textOnly = await prepareLocalImageModelMessages(messages, {
+    supportedInputModalities: ['text'],
+    admitInputModalities: (modalities) => {
+      textOnlyAdmissions.push([...modalities]);
+    },
+  });
+  assert.deepEqual(textOnlyAdmissions, [['text']]);
+  assert.equal(textOnly.length, messages.length);
+  assert.equal(textOnly[2], screenshot);
+  assert.doesNotMatch(JSON.stringify(textOnly), /data:image\/jpeg;base64,/);
+
+  const alreadyObserved = await prepareLocalImageModelMessages([
+    ...messages,
+    new AIMessage('I inspected the screenshot.'),
+  ], {
+    supportedInputModalities: ['text', 'image'],
+  });
+  assert.equal(alreadyObserved.length, messages.length + 1);
+  assert.equal(alreadyObserved.at(-1)?._getType(), 'ai');
+
+  const screenshotPath = (JSON.parse(serialized) as { path: string }).path;
+  await fs.unlink(screenshotPath);
+  const unavailableAdmissions: string[][] = [];
+  const unavailable = await prepareLocalImageModelMessages(messages, {
+    supportedInputModalities: ['text', 'image'],
+    admitInputModalities: (modalities) => {
+      unavailableAdmissions.push([...modalities]);
+    },
+  });
+  assert.deepEqual(unavailableAdmissions, [['text']]);
+  assert.equal(unavailable.length, messages.length + 1);
+  assert.match(
+    JSON.stringify(unavailable.at(-1)?.content),
+    /could not be loaded.*call browser_screenshot again/,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(unavailable.at(-1)?.content),
+    /data:image\/jpeg;base64,/,
   );
 });

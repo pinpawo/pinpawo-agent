@@ -14,6 +14,20 @@ function readMaxTokens(model: unknown): number | undefined {
   return (model as { maxTokens?: number }).maxTokens;
 }
 
+function readBoundToolChoice(model: unknown, toolChoice: unknown): unknown {
+  const bindTools = (model as {
+    bindTools?: (
+      tools: unknown[],
+      options?: Record<string, unknown>,
+    ) => unknown;
+  }).bindTools;
+  assert.ok(bindTools);
+  const bound = bindTools.call(model, [], { tool_choice: toolChoice });
+  return (bound as {
+    defaultOptions?: Record<string, unknown>;
+  }).defaultOptions?.tool_choice;
+}
+
 test('models use the provider temperature default when no override is configured', () => {
   const models = buildLocalAgentModels({
     apiKey: 'test-key',
@@ -102,4 +116,23 @@ test('Qwen 3.8 roles preserve the provider-enforced thinking mode', () => {
   assert.deepEqual(readModelKwargs(models.answer), {});
   assert.deepEqual(readModelKwargs(models.observe), {});
   assert.deepEqual(readModelKwargs(models.subagent), {});
+  assert.equal(readBoundToolChoice(models.act, 'any'), 'auto');
+  assert.equal(readBoundToolChoice(models.act, 'required'), 'auto');
+  assert.equal(readBoundToolChoice(models.act, 'submit_plan'), 'auto');
+  assert.equal(readBoundToolChoice(models.act, {
+    type: 'function',
+    function: { name: 'submit_plan' },
+  }), 'auto');
+  assert.equal(readBoundToolChoice(models.act, 'none'), 'none');
+  assert.equal(readBoundToolChoice(models.act, 'auto'), 'auto');
+});
+
+test('models with full tool-choice support preserve forced tool selection', () => {
+  const models = buildLocalAgentModels({
+    apiKey: 'test-key',
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-5.5',
+  });
+
+  assert.equal(readBoundToolChoice(models.act, 'any'), 'any');
 });

@@ -10,6 +10,7 @@ import {
   type ChatOpenAICallOptions,
   type ChatOpenAIFields,
 } from '@langchain/openai';
+import type { LlmToolChoiceSupport } from './llmModelPresets';
 import type { ModelInputModality } from './modelProfiles';
 import {
   LOCAL_IMAGE_REFERENCE_SCHEME,
@@ -22,6 +23,10 @@ export type LocalImageModelInputOptions = {
   admitInputModalities?: (
     required: readonly ModelInputModality[],
   ) => void | Promise<void>;
+};
+
+export type LocalChatModelOptions = LocalImageModelInputOptions & {
+  toolChoiceSupport?: LlmToolChoiceSupport;
 };
 
 export function readRequiredInputModalities(
@@ -118,14 +123,28 @@ export async function prepareLocalImageModelMessages(
 export class LocalImageChatOpenAI<
   CallOptions extends ChatOpenAICallOptions = ChatOpenAICallOptions,
 > extends ChatOpenAI<CallOptions> {
-  private readonly localImageInput: LocalImageModelInputOptions;
+  private readonly localModelOptions: LocalChatModelOptions;
 
   constructor(
     fields: ChatOpenAIFields,
-    localImageInput: LocalImageModelInputOptions,
+    localModelOptions: LocalChatModelOptions,
   ) {
     super(fields);
-    this.localImageInput = localImageInput;
+    this.localModelOptions = localModelOptions;
+  }
+
+  override bindTools(
+    tools: Parameters<ChatOpenAI<CallOptions>['bindTools']>[0],
+    kwargs?: Parameters<ChatOpenAI<CallOptions>['bindTools']>[1],
+  ): ReturnType<ChatOpenAI<CallOptions>['bindTools']> {
+    const toolChoice = kwargs?.tool_choice;
+    const normalizedKwargs = this.localModelOptions.toolChoiceSupport === 'auto_only'
+      && toolChoice !== undefined
+      && toolChoice !== 'auto'
+      && toolChoice !== 'none'
+      ? { ...kwargs, tool_choice: 'auto' } as Partial<CallOptions>
+      : kwargs;
+    return super.bindTools(tools, normalizedKwargs);
   }
 
   override async _generate(
@@ -134,7 +153,7 @@ export class LocalImageChatOpenAI<
     runManager?: CallbackManagerForLLMRun,
   ): Promise<ChatResult> {
     return super._generate(
-      await prepareLocalImageModelMessages(messages, this.localImageInput),
+      await prepareLocalImageModelMessages(messages, this.localModelOptions),
       options,
       runManager,
     );
@@ -146,7 +165,7 @@ export class LocalImageChatOpenAI<
     runManager?: CallbackManagerForLLMRun,
   ): AsyncGenerator<ChatGenerationChunk> {
     yield* super._streamResponseChunks(
-      await prepareLocalImageModelMessages(messages, this.localImageInput),
+      await prepareLocalImageModelMessages(messages, this.localModelOptions),
       options,
       runManager,
     );
@@ -158,7 +177,7 @@ export class LocalImageChatOpenAI<
     runManager?: CallbackManagerForLLMRun,
   ): AsyncGenerator<ChatModelStreamEvent> {
     yield* super._streamChatModelEvents(
-      await prepareLocalImageModelMessages(messages, this.localImageInput),
+      await prepareLocalImageModelMessages(messages, this.localModelOptions),
       options,
       runManager,
     );

@@ -68,6 +68,7 @@ test('Qwen 3.8 Max Preview has a Token Plan-specific preset', () => {
   assert.equal(preset?.model, 'qwen3.8-max-preview');
   assert.equal(preset?.baseUrl, undefined);
   assert.deepEqual(preset?.inputModalities, ['text', 'image']);
+  assert.equal(preset?.toolChoiceSupport, 'auto_only');
   assert.equal(inferLlmModelPreset('qwen3.8-max-preview')?.key, 'qwen-token-plan');
   assert.equal(inferLlmModelPreset('qwen3.7-max')?.key, 'qwen');
 });

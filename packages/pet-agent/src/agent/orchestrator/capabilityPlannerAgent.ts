@@ -26,7 +26,6 @@ const DEFAULT_TIMEOUT_MS = 60_000;
 const MAX_PLAN_TASKS = 24;
 const MAX_TASK_TEXT_CHARS = 500;
 const MAX_REASON_CHARS = 1_000;
-const NON_WHITESPACE_PATTERN = '\\S';
 
 export type CapabilityPlannerAgentErrorCode =
   | 'planning_limit_reached'
@@ -88,7 +87,6 @@ function createSubmitPlanSchema(capabilityNames: readonly string[]) {
             task: {
               type: 'string',
               minLength: 1,
-              pattern: NON_WHITESPACE_PATTERN,
               maxLength: MAX_TASK_TEXT_CHARS,
               description: 'Short, executable task description.',
             },
@@ -111,14 +109,12 @@ const unavailablePlanSchema = {
     task: {
       type: 'string',
       minLength: 1,
-      pattern: NON_WHITESPACE_PATTERN,
       maxLength: MAX_TASK_TEXT_CHARS,
       description: 'Task that cannot be executed.',
     },
     reason: {
       type: 'string',
       minLength: 1,
-      pattern: NON_WHITESPACE_PATTERN,
       maxLength: MAX_REASON_CHARS,
       description: 'Why the Capability Workspace cannot execute it.',
     },

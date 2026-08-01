@@ -59,7 +59,6 @@ export function buildOrchestrationDecisionStructuredOutputOptions(
 function buildDecisionOutputInstruction(
   label: string,
   schema: z.ZodTypeAny,
-  example: object,
   method?: StructuredOutputMethod,
 ): string {
   const baseInstruction = `输出符合 structured-output schema 的 ${label}；不要输出 schema 未声明的字段。`;
@@ -68,25 +67,18 @@ function buildDecisionOutputInstruction(
   return [
     baseInstruction,
     '当前 provider 使用 jsonMode：只输出一个 JSON object，不要输出 Markdown 代码围栏或额外文本。',
-    `JSON 输出示例：${JSON.stringify(example)}`,
     `JSON Schema：${JSON.stringify(toJsonSchema(schema))}`,
   ].join('\n');
 }
 
 export function buildEntryDecisionOutputInstruction(method?: StructuredOutputMethod): string {
-  return buildDecisionOutputInstruction(
-    'entry decision',
-    buildEntryDecisionSchema(),
-    { action: 'needs_plan' },
-    method,
-  );
+  return buildDecisionOutputInstruction('entry decision', buildEntryDecisionSchema(), method);
 }
 
 export function buildDelegationOutcomeDecisionOutputInstruction(method?: StructuredOutputMethod): string {
   return buildDecisionOutputInstruction(
     'delegation outcome decision',
     buildDelegationOutcomeDecisionSchema(),
-    { outcome: 'goal_done', gap_note: null },
     method,
   );
 }

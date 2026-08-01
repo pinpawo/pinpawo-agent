@@ -107,7 +107,7 @@ test('approval diff details page within a bounded CJK footer view', () => {
     ? null
     : buildApprovalViewModel(state, 32);
   assert.ok(first);
-  assert.match(first?.title ?? '', /1-4\//);
+  assert.match(first?.title ?? '', /1-8\//);
 
   state = scrollApprovalContent(state, 1, 32);
   const second = state.phase === 'closed'
@@ -169,9 +169,22 @@ test('approval shares fixed footer rows dynamically between content and options'
   const long = longState.phase === 'closed'
     ? null
     : buildApprovalViewModel(longState, 80);
-  assert.equal(long?.bodyRows, 4);
+  assert.equal(long?.bodyRows, 8);
   assert.equal(long?.optionRows, 2);
-  assert.match(long?.title ?? '', /details 1-4\/9/);
+  assert.match(long?.title ?? '', /details 1-8\/9/);
+
+  const compact = longState.phase === 'closed'
+    ? null
+    : buildApprovalViewModel(longState, 80, 9);
+  assert.equal(compact?.bodyRows, 4);
+  assert.equal(compact?.optionRows, 2);
+  assert.match(compact?.title ?? '', /details 1-4\/9/);
+
+  const compactNextState = scrollApprovalContent(longState, 1, 80, 9);
+  const compactNext = compactNextState.phase === 'closed'
+    ? null
+    : buildApprovalViewModel(compactNextState, 80, 9);
+  assert.match(compactNext?.title ?? '', /details 5-8\/9/);
 });
 
 function waitingReview(reviews: ReviewSpec[]): AgentRunView {

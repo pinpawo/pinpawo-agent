@@ -66,6 +66,7 @@ import {
 import { shouldOpenTranscriptPager } from './input/transcriptShortcut';
 import { TuiSessionController } from './session/sessionController';
 import {
+  APPROVAL_FOOTER_ROWS,
   approvalAcceptsTextInput,
   resolveApprovalKey,
   type ApprovalState,
@@ -142,7 +143,6 @@ import { installTextareaWorkarounds } from './terminal/textareaCompatibility';
 import {
   formatComposerPlaceholder,
   formatConnection,
-  formatHeader,
   formatStatusLines,
 } from './status/statusModel';
 import {
@@ -193,8 +193,8 @@ const root = new BoxRenderable(renderer, {
 });
 const header = new TextRenderable(renderer, {
   id: 'header',
-  content: 'PinPawo TUI v2 · connecting',
-  fg: '#f0a6ca',
+  content: '',
+  fg: '#69c0c8',
   bg: RGBA.defaultBackground(),
   height: 1,
 });
@@ -291,6 +291,7 @@ const liveActivityController = new LiveActivityController({
 const approvalController = new ApprovalController({
   sessionController: controller,
   getWidth: () => renderer.width,
+  getHeight: () => renderer.height,
   onChange: () => refreshApproval(),
 });
 const approvalView = new ApprovalView(renderer, {
@@ -641,16 +642,15 @@ function syncComposerLayout() {
   header.height = layout.headerHeight;
   live.height = layout.liveHeight;
   status.height = layout.statusHeight;
+  renderer.footerHeight = approvalController.getState().phase === 'closed'
+    ? layout.footerHeight
+    : APPROVAL_FOOTER_ROWS;
 }
 
 function refreshHeader() {
-  header.content = truncateTerminalLine(attachments.length
-    ? formatAttachmentStrip(attachments)
-    : formatHeader(
-        controller.getState(),
-        renderer.width,
-        composerMode,
-      ), renderer.width);
+  header.content = attachments.length
+    ? truncateTerminalLine(formatAttachmentStrip(attachments), renderer.width)
+    : '';
 }
 
 function syncComposerModeUi() {
@@ -668,6 +668,7 @@ function refreshLive() {
       liveActivityController.frame,
       Math.max(1, renderer.width - 7),
       liveActivityController.longWaiting,
+      Date.now(),
     )}`,
     renderer.width,
   );
@@ -986,7 +987,8 @@ function syncApprovalFromSession() {
 
 function refreshApproval() {
   const approval = approvalController.getState();
-  approvalView.render(approval, renderer.width);
+  syncComposerLayout();
+  approvalView.render(approval, renderer.width, renderer.height);
   if (approval.phase === 'closed') return;
   composer.blur();
   if (

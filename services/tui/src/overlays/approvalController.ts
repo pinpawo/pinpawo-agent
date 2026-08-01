@@ -4,6 +4,7 @@ import type {
   TuiConnectionStatus,
 } from '../session/sessionController';
 import {
+  APPROVAL_FOOTER_ROWS,
   advanceApproval,
   beginApprovalSubmission,
   createApprovalState,
@@ -28,6 +29,7 @@ type ReviewSessionController = Pick<
 export type ApprovalControllerOptions = {
   sessionController: ReviewSessionController;
   getWidth: () => number;
+  getHeight?: () => number;
   onChange: (state: ApprovalState) => void;
   submissionTimeoutMs?: number;
   setTimer?: (callback: () => void, delayMs: number) => TimerHandle;
@@ -39,6 +41,7 @@ const DEFAULT_SUBMISSION_TIMEOUT_MS = 10_000;
 export class ApprovalController {
   private readonly sessionController: ReviewSessionController;
   private readonly getWidth: () => number;
+  private readonly getHeight: () => number;
   private readonly onChange: (state: ApprovalState) => void;
   private readonly submissionTimeoutMs: number;
   private readonly setTimer: (callback: () => void, delayMs: number) => TimerHandle;
@@ -49,6 +52,7 @@ export class ApprovalController {
   constructor(options: ApprovalControllerOptions) {
     this.sessionController = options.sessionController;
     this.getWidth = options.getWidth;
+    this.getHeight = options.getHeight ?? (() => APPROVAL_FOOTER_ROWS);
     this.onChange = options.onChange;
     this.submissionTimeoutMs = options.submissionTimeoutMs
       ?? DEFAULT_SUBMISSION_TIMEOUT_MS;
@@ -101,6 +105,7 @@ export class ApprovalController {
         this.state,
         action === 'page-up' ? -1 : 1,
         this.getWidth(),
+        this.getHeight(),
       ));
       return;
     }

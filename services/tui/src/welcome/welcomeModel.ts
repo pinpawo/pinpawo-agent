@@ -30,6 +30,8 @@ export function buildWelcomeLines(input: {
   hostMetadata?: LocalHostMetadata | null;
 }) {
   const width = Math.max(1, Math.floor(input.width));
+  const bordered = width >= 6;
+  const contentWidth = bordered ? width - 4 : width;
   const actor = sessionActorLabel(input.session);
   const model = formatRuntimeModel(input.session) || 'model loading';
   const cwd = input.session.runtime?.cwd?.trim() || 'workspace loading';
@@ -40,7 +42,7 @@ export function buildWelcomeLines(input: {
   const capabilities = input.hostMetadata?.capabilities.length
     ? input.hostMetadata.capabilities
     : ['unavailable'];
-  const shortcuts = width >= 54
+  const shortcuts = contentWidth >= 54
     ? [
         '/ commands · PgUp history · Enter send',
         'Ctrl+J newline · Ctrl+R sessions · Esc interrupt · Ctrl+C exit',
@@ -52,10 +54,10 @@ export function buildWelcomeLines(input: {
         'Esc interrupt',
         'Ctrl+C exit',
       ];
-  const sideBySide = width >= 64;
+  const sideBySide = contentWidth >= 64;
   const detailWidth = sideBySide
-    ? Math.max(1, width - terminalBlockWidth(PAW_LINES) - 4)
-    : width;
+    ? Math.max(1, contentWidth - terminalBlockWidth(PAW_LINES) - 4)
+    : contentWidth;
   const details = [
     `PinPawo TUI v2 · ${actor}`,
     `v${version} · local-agent ${localAgentVersion}`,
@@ -66,18 +68,25 @@ export function buildWelcomeLines(input: {
     ...wrapCapabilityLines(capabilities, detailWidth, sideBySide ? 3 : 4),
   ];
   const identity = sideBySide
-    ? joinTerminalColumns(PAW_LINES, details, width, 4)
+    ? joinTerminalColumns(PAW_LINES, details, contentWidth, 4)
     : [
         ...PAW_LINES,
         '',
         ...details,
       ];
-  return [
+  const content = [
     ...identity,
     '',
     ...shortcuts,
     '',
-  ].map((line) => truncateTerminalLine(line, width));
+  ].map((line) => truncateTerminalLine(line, contentWidth));
+  if (!bordered) return content;
+  return [
+    `╭${'─'.repeat(width - 2)}╮`,
+    ...content.map((line) => `│ ${padTerminalLine(line, contentWidth)} │`),
+    `╰${'─'.repeat(width - 2)}╯`,
+    '',
+  ];
 }
 
 function wrapCapabilityLines(

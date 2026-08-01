@@ -11,23 +11,8 @@ import type {
 } from '../session/sessionController';
 import { sessionActorLabel } from '../session/sessionDisplay';
 import { truncateTerminalLine } from '../text/terminalText';
-import { TUI_VERSION } from '../version';
 
 const COUNT_FORMATTER = new Intl.NumberFormat('en-US');
-
-export function formatHeader(
-  state: TuiSessionState,
-  width = Number.POSITIVE_INFINITY,
-  composerMode: AgentSession['kind'] = state.session.kind,
-) {
-  const model = formatRuntimeModel(state.session);
-  return fitStatusSegments([
-    `PinPawo TUI v2 · v${TUI_VERSION}`,
-    formatConnection(state.connection),
-    ...(composerMode === 'studio' ? ['studio'] : []),
-    ...(model ? [model] : []),
-  ], width);
-}
 
 export function formatStatusLine(
   state: TuiSessionState,
@@ -73,7 +58,6 @@ export function formatStatusLines(
     || state.connectionDetail?.trim()
     || [
       formatConnection(state.connection),
-      formatRunStatus(state.session),
       ...(state.session.runtime?.globalReviewPolicyMode
         ? [`policy: ${formatPolicyMode(state.session.runtime.globalReviewPolicyMode)}`]
         : []),
@@ -180,24 +164,6 @@ function formatCompactUsage(session: AgentSession) {
     `in/out: ${formatCount(usage.inputTokens)}/${formatCount(usage.outputTokens)}`,
     ...(remainingPercent !== null ? [`ctx: ${remainingPercent}% left`] : []),
   ].join(' · ');
-}
-
-function formatRunStatus(session: AgentSession) {
-  const run = session.activeRun;
-  if (!run) return 'idle';
-  if (run.state === 'waiting_review') return 'review';
-  if (run.state === 'interrupting') return 'interrupting';
-  if (run.activity === 'using_tool') return 'tool';
-  if (run.activity === 'streaming') return 'streaming';
-  return 'thinking';
-}
-
-function fitStatusSegments(segments: string[], width: number) {
-  const kept = [...segments];
-  while (kept.length > 1 && displayWidth(kept) > width) {
-    kept.pop();
-  }
-  return truncateTerminalLine(kept.join(' · '), width);
 }
 
 function displayWidth(segments: string[]) {

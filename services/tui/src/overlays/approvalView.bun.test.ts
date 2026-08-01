@@ -16,7 +16,7 @@ test('approval view remains bounded and accepts multiline input after resize', a
     width: 60,
     height: 24,
     screenMode: 'split-footer',
-    footerHeight: 9,
+    footerHeight: 13,
   });
   context.after(() => setup.renderer.destroy());
   const root = new BoxRenderable(setup.renderer, {
@@ -34,28 +34,36 @@ test('approval view remains bounded and accepts multiline input after resize', a
   setup.renderer.root.add(root);
 
   let state = syncApprovalState(createApprovalState(), waitingReview());
-  view.render(state, 60);
+  view.render(state, 60, setup.renderer.height);
   await setup.flush();
   const initial = setup.captureCharFrame();
   assert.match(initial, /Approval 1\/1/);
   assert.match(initial, /是否允许执行/);
   assert.match(initial, /批准/);
-  assert.equal(frameRows(initial).length, 9);
+  assert.equal(frameRows(initial).length, 13);
 
   state = moveApprovalSelection(state, 1);
-  view.render(state, 60);
+  view.render(state, 60, setup.renderer.height);
   view.focusInput();
   await setup.mockInput.pasteBracketedText('第一行\nsecond line');
   state = setApprovalDraft(state, draft);
   setup.resize(34, 18);
-  view.render(state, 34);
+  view.render(state, 34, setup.renderer.height);
   await setup.flush();
 
   assert.equal(view.input.plainText, '第一行\nsecond line');
   const resized = setup.captureCharFrame();
   assert.match(resized, /回复/);
-  assert.equal(frameRows(resized).length, 9);
+  assert.equal(frameRows(resized).length, 13);
   assert.ok(frameRows(resized).every((line) => line.length <= 34), resized);
+
+  setup.resize(34, 9);
+  view.render(state, 34, setup.renderer.height);
+  await setup.flush();
+  const compact = setup.captureCharFrame();
+  assert.match(compact, /回复/);
+  assert.match(compact, /第一行/);
+  assert.equal(frameRows(compact).length, 9);
 });
 
 function waitingReview(): AgentRunView {

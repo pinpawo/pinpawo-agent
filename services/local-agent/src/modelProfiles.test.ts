@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { listLlmModelPresets } from './llmModelPresets';
+import {
+  findLlmModelPresetByKey,
+  inferLlmModelPreset,
+  listLlmModelPresets,
+} from './llmModelPresets';
 import {
   buildModelProfileRegistry,
   createModelProfile,
@@ -50,6 +54,12 @@ test('all built-in presets declare authoritative input modalities', () => {
     assert.ok(preset.inputModalities.includes('text'), preset.key);
     assert.equal(new Set(preset.inputModalities).size, preset.inputModalities.length);
   }
+});
+
+test('DeepSeek V4 Flash has its own preset and does not resolve as V4 Pro', () => {
+  assert.equal(findLlmModelPresetByKey('deepseek-flash')?.model, 'deepseek-v4-flash');
+  assert.equal(inferLlmModelPreset('deepseek-v4-pro')?.key, 'deepseek');
+  assert.equal(inferLlmModelPreset('deepseek-v4-flash')?.key, 'deepseek-flash');
 });
 
 test('custom profiles default missing modality metadata to text-only', () => {

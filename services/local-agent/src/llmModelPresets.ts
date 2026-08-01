@@ -182,10 +182,28 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     thinkingControl: 'thinking_type',
     aliases: [
       'deepseek-v4-pro',
-      'deepseek-v4-flash',
       'deepseek-v4',
       'deepseek-chat',
       'deepseek-reasoner',
+    ],
+    officialDocs: [
+      'https://api-docs.deepseek.com/quick_start/pricing',
+      'https://api-docs.deepseek.com/guides/json_mode',
+    ],
+  },
+  {
+    key: 'deepseek-flash',
+    label: 'DeepSeek V4 Flash',
+    provider: 'deepseek',
+    model: 'deepseek-v4-flash',
+    baseUrl: 'https://api.deepseek.com',
+    contextWindowTokens: 1_000_000,
+    maxOutputTokens: 384_000,
+    structuredOutputMethod: 'jsonMode',
+    inputModalities: ['text'],
+    thinkingControl: 'thinking_type',
+    aliases: [
+      'deepseek-v4-flash',
     ],
     officialDocs: [
       'https://api-docs.deepseek.com/quick_start/pricing',
@@ -245,6 +263,17 @@ function matchesAlias(normalizedModel: string, alias: string) {
   return normalizedModel === normalizedAlias || normalizedModel.startsWith(normalizedAlias);
 }
 
+function matchesPresetExactly(normalizedModel: string, preset: LlmModelPreset) {
+  return normalizedModel === preset.key.toLowerCase()
+    || normalizedModel === normalizeModelName(preset.model)
+    || preset.aliases.some((alias) => normalizedModel === normalizeModelName(alias));
+}
+
+function matchesPreset(normalizedModel: string, preset: LlmModelPreset) {
+  return matchesAlias(normalizedModel, preset.model)
+    || preset.aliases.some((alias) => matchesAlias(normalizedModel, alias));
+}
+
 export function listLlmModelPresets() {
   return LLM_MODEL_PRESETS;
 }
@@ -252,20 +281,15 @@ export function listLlmModelPresets() {
 export function findLlmModelPresetByKey(key: string | null | undefined): LlmModelPreset | undefined {
   if (!key) return undefined;
   const normalized = normalizeModelName(key);
-  return LLM_MODEL_PRESETS.find((preset) => (
-    normalized === preset.key.toLowerCase()
-    || matchesAlias(normalized, preset.model)
-    || preset.aliases.some((alias) => matchesAlias(normalized, alias))
-  ));
+  return LLM_MODEL_PRESETS.find((preset) => matchesPresetExactly(normalized, preset))
+    ?? LLM_MODEL_PRESETS.find((preset) => matchesPreset(normalized, preset));
 }
 
 export function inferLlmModelPreset(model: string | null | undefined): LlmModelPreset | undefined {
   const normalized = normalizeModelName(model ?? '');
   if (!normalized) return undefined;
-  return LLM_MODEL_PRESETS.find((preset) =>
-    matchesAlias(normalized, preset.model)
-    || preset.aliases.some((alias) => matchesAlias(normalized, alias)),
-  );
+  return LLM_MODEL_PRESETS.find((preset) => matchesPresetExactly(normalized, preset))
+    ?? LLM_MODEL_PRESETS.find((preset) => matchesPreset(normalized, preset));
 }
 
 export function inferLlmStructuredOutputMethod(

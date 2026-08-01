@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
+  chmod,
   lstat,
   mkdir,
   mkdtemp,
@@ -379,10 +380,37 @@ async function quarantineInvalidSnapshot(params: {
       try {
         await rename(params.rootPath, quarantinePath);
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT') {
           return false;
         }
-        throw error;
+        if (!['EACCES', 'EPERM'].includes(code ?? '')) {
+          throw error;
+        }
+        let rootStats;
+        try {
+          rootStats = await lstat(params.rootPath);
+        } catch (statError) {
+          if ((statError as NodeJS.ErrnoException).code === 'ENOENT') {
+            return false;
+          }
+          throw statError;
+        }
+        if (!rootStats.isDirectory() || rootStats.isSymbolicLink()) {
+          throw error;
+        }
+        // macOS refuses to rename a read-only directory even when its parent
+        // is writable. Restore owner write permission only on the invalid
+        // snapshot root, then quarantine it without following symlinks.
+        try {
+          await chmod(params.rootPath, (rootStats.mode & 0o777) | 0o200);
+          await rename(params.rootPath, quarantinePath);
+        } catch (retryError) {
+          if ((retryError as NodeJS.ErrnoException).code === 'ENOENT') {
+            return false;
+          }
+          throw retryError;
+        }
       }
       console.warn('[pet-agent] repairing invalid Capability Document Workspace:', {
         code: 'capability_workspace_snapshot_quarantined',

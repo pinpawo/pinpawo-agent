@@ -94,7 +94,10 @@ export function createAnswerNode(config: OrchestratorConfig) {
       awaitingUserInput,
       terminalContext,
     });
-    const response = await config.models.act.invoke(answerMessages, runnableConfig);
+    const response = await (config.models.answer ?? config.models.act).invoke(
+      answerMessages,
+      runnableConfig,
+    );
     if (!readMessageText(response).trim()) {
       const fallback = new AIMessage('我这边暂时没有可展示的回复，麻烦你再说一下需要我做什么。');
       return {

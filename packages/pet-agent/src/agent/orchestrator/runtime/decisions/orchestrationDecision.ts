@@ -270,7 +270,7 @@ async function invokeEntryDecision(params: {
   const { config, context, runnableConfig } = params;
   try {
     return await invokeStructuredOutput({
-      model: config.models.act,
+      model: config.models.decision ?? config.models.act,
       schema: buildEntryDecisionSchema(),
       options: buildOrchestrationDecisionStructuredOutputOptions(
         config.decisionStructuredOutput,
@@ -299,7 +299,7 @@ async function invokeDelegationOutcomeDecision(params: {
   let decision: DelegationOutcomeDecision;
   try {
     decision = await invokeStructuredOutput({
-      model: config.models.act,
+      model: config.models.decision ?? config.models.act,
       schema: buildDelegationOutcomeDecisionSchema(),
       options: buildOrchestrationDecisionStructuredOutputOptions(
         config.decisionStructuredOutput,

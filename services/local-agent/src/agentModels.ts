@@ -6,18 +6,23 @@ import {
   type LocalImageModelInputOptions,
 } from './localImageModelInput';
 
+const DECISION_MAX_OUTPUT_TOKENS = 256;
+
 export function buildLocalAgentModels(
   llmConfig: AgentLlmConfig,
   options: Partial<LocalImageModelInputOptions> = {},
 ): AgentModels {
-  const subagentThinking = llmConfig.subagentThinking ?? false;
+  const subagentThinking = llmConfig.subagentThinking ?? true;
 
-  const buildModel = (role: 'act' | 'observe' | 'subagent') => {
+  const buildModel = (
+    role: 'act' | 'decision' | 'answer' | 'observe' | 'subagent',
+  ) => {
     const model = role === 'observe' && llmConfig.observeModel
       ? llmConfig.observeModel
       : llmConfig.model;
 
-    const thinking = role === 'subagent' ? subagentThinking : false;
+    const thinking = role === 'answer'
+      || (role === 'subagent' && subagentThinking);
     const modelKwargs = buildLlmModelKwargs(model, thinking);
 
     return new LocalImageChatOpenAI({
@@ -27,6 +32,7 @@ export function buildLocalAgentModels(
         : {}),
       timeout: llmConfig.timeoutMs ?? 45000,
       maxRetries: llmConfig.maxRetries ?? 2,
+      ...(role === 'decision' ? { maxTokens: DECISION_MAX_OUTPUT_TOKENS } : {}),
       apiKey: llmConfig.apiKey,
       streaming: requiresLlmStreaming(model),
       streamUsage: true,
@@ -46,6 +52,8 @@ export function buildLocalAgentModels(
 
   return {
     act: buildModel('act'),
+    decision: buildModel('decision'),
+    answer: buildModel('answer'),
     observe: buildModel('observe'),
     subagent: buildModel('subagent'),
   };

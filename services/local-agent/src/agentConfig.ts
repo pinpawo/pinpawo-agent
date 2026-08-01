@@ -20,7 +20,7 @@ export type AgentLlmConfig = {
   timeoutMs?: number;
   maxRetries?: number;
   verbose?: boolean;
-  /** Enable thinking/reasoning for subagent calls. Default: false. */
+  /** Enable thinking/reasoning for subagent calls. Default: true. */
   subagentThinking?: boolean;
   /** Retry the same structured-output LLM call after parse/schema failure. Default: false. */
   structuredOutputAutoRepair?: boolean;

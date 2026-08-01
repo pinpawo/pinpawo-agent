@@ -140,7 +140,7 @@ async function resolveAutoAuthorization(
     'models' | 'policy' | 'reviews' | 'task' | 'workdir'
   >,
 ): Promise<GlobalReviewPolicyResolution> {
-  const model = options.models.observe ?? options.models.act;
+  const model = options.models.decision ?? options.models.observe ?? options.models.act;
   const prompt = buildAutoReviewPrompt({
     task: options.task,
     workdir: options.workdir,

@@ -36,7 +36,7 @@ function readModelIndependentLlmConfig(): ModelIndependentLlmConfig {
   return {
     timeoutMs: 120000,
     maxRetries: 2,
-    subagentThinking: stored.subagent_thinking ?? false,
+    subagentThinking: stored.subagent_thinking ?? true,
     structuredOutputAutoRepair: config.structuredOutputAutoRepair,
     structuredOutputRepairMaxRetries: config.structuredOutputRepairMaxRetries,
     globalReviewPolicyMode: config.globalReviewPolicyMode,

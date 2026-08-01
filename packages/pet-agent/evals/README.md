@@ -53,7 +53,7 @@ recreate datasets.
 - `agent-permission-control-basics`: HITL, auto-authorization, scoped authorization, and permission-memory cases.
 - `agent-context-synthesis-basics`: answer-from-context and missing-information cases.
 - `agent-answer-behavior-basics`: direct reply, handoff synthesis, historical replay,
-  clarification, fixed completion acknowledgement, and required-user-input return control.
+  clarification, task completion summary, and required-user-input return control.
 - `agent-entry-decision-basics`: binary result-availability gate for
   `answer | needs_plan`.
 - `agent-outcome-decision-basics`: `continue | task_done | goal_done | user_input_required`

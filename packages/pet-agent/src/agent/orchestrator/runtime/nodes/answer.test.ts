@@ -1,12 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import type { AgentModels } from '../../../../types/agent';
 import { setPinpetMeta } from '../../messageLanes';
 import type { OrchestratorStateType } from '../../state';
 import {
   createAnswerNode,
-  GOAL_DONE_ACKNOWLEDGEMENT,
   selectAnswerContextFacts,
 } from './answer';
 
@@ -34,6 +33,7 @@ test('Answer runtime projects accepted terminal meaning into closed facts', () =
     runIterationLimit: 4,
   }), {
     mode: 'goal_done',
+    hasUserGoal: true,
   });
 
   assert.deepEqual(selectAnswerContextFacts({
@@ -48,12 +48,15 @@ test('Answer runtime projects accepted terminal meaning into closed facts', () =
   });
 });
 
-test('goal_done returns a fixed acknowledgement without invoking the Answer model', async () => {
+test('goal_done asks Answer to summarize the completed task from canonical history', async () => {
   let modelInvocations = 0;
+  let invocationMessages: BaseMessage[] = [];
+  const summary = '账号公开信息整理已完成：已提取昵称、简介、公开指标和可见内容，并形成结构化结果。';
   const model = {
-    invoke: async () => {
+    invoke: async (messages: BaseMessage[]) => {
       modelInvocations += 1;
-      return new AIMessage('不应调用');
+      invocationMessages = messages;
+      return new AIMessage(summary);
     },
   } as unknown as AgentModels['act'];
   const completedTask = [
@@ -86,9 +89,12 @@ test('goal_done returns a fixed acknowledgement without invoking the Answer mode
   }));
   const output = String(result.messages?.at(-1)?.content ?? '');
 
-  assert.equal(modelInvocations, 0);
-  assert.equal(output, GOAL_DONE_ACKNOWLEDGEMENT);
-  assert.doesNotMatch(output, /浏览器|账号主页|等待页面|提取昵称/);
+  assert.equal(modelInvocations, 1);
+  assert.equal(output, summary);
+  assert.match(String(invocationMessages[2]?.content), /公开信息已经提取并结构化返回/);
+  assert.match(String(invocationMessages.at(-1)?.content), /<reply_mode>goal_done<\/reply_mode>/);
+  assert.match(String(invocationMessages.at(-1)?.content), /<user_goal_present>true<\/user_goal_present>/);
+  assert.doesNotMatch(String(invocationMessages[0]?.content), /账号主页|等待页面|提取昵称/);
   assert.equal(result.runLatestDelegationOutcome, null);
 });
 

@@ -15,7 +15,6 @@ import { defineToolkit } from '../../src/types/toolkit.ts';
 import type { AgentModels } from '../../src/types/agent.ts';
 import type { CapabilityPlannerRunner } from '../../src/agent/orchestrator/capabilityPlannerRunner.ts';
 import { compileAgentRegistry } from '../../src/agent/orchestrator/registry.ts';
-import { GOAL_DONE_ACKNOWLEDGEMENT } from '../../src/agent/orchestrator/runtime/nodes/answer.ts';
 import { multiTaskFlowBasicsDataset } from '../datasets/multi-task-flow-basics.ts';
 import { readRunDelegationSummaries, routeModeFromResult } from '../orchestratorStateReaders.ts';
 import { writeLangfuseEvalResult, type LangfuseEvalScore } from './langfuse-eval-writer.ts';
@@ -256,7 +255,7 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
     {
       key: 'final_answer_correct',
       score: routeModeFromResult(result) === expected.expectedFinalMode
-        && finalText === GOAL_DONE_ACKNOWLEDGEMENT ? 1 : 0,
+        && expected.expectedResultTerms.every((term) => finalText.includes(term)) ? 1 : 0,
       comment: `final=${finalText}`,
     },
   ];

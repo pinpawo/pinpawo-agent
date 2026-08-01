@@ -1,7 +1,6 @@
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { buildAnswerInvocationMessages } from '../src/agent/orchestrator/prompts/answer.ts';
-import { GOAL_DONE_ACKNOWLEDGEMENT } from '../src/agent/orchestrator/runtime/nodes/answer.ts';
 import { readMessageText } from '../src/agent/orchestrator/utils.ts';
 import type { AgentModels } from '../src/types/agent.ts';
 import type { DecisionContractScore } from './decision-contract-scorers.ts';
@@ -25,7 +24,7 @@ export type AnswerEvalRunResult = {
 
 export type AnswerEvalScenario = {
   target: 'answer';
-  execution: 'model' | 'deterministic';
+  execution: 'model';
   contract: AnswerBehaviorExpectation['contract'];
   objective: string;
   datasetName: string;
@@ -100,26 +99,24 @@ function collectDiagnostics(
 
 function render(testCase: AnswerBehaviorCase): BaseMessage[] {
   const delegationOutcome = testCase.input.delegationOutcome;
-  if (delegationOutcome?.outcome === 'goal_done') return [];
-
   const hasUserGoal = testCase.input.messages.some(({ role }) => role === 'user');
   return buildAnswerInvocationMessages({
     actor,
     history: testCase.input.messages.map((message) => message.role === 'user'
       ? new HumanMessage(message.text)
       : new AIMessage(message.text)),
-    contextFacts: delegationOutcome?.outcome === 'user_input_required'
-      ? { mode: 'user_input_required', hasUserGoal }
-      : { mode: 'direct', hasUserGoal },
+    contextFacts: delegationOutcome?.outcome === 'goal_done'
+      ? { mode: 'goal_done', hasUserGoal }
+      : delegationOutcome?.outcome === 'user_input_required'
+        ? { mode: 'user_input_required', hasUserGoal }
+        : { mode: 'direct', hasUserGoal },
   });
 }
 
 export function getAnswerEvalScenarios(): AnswerEvalScenario[] {
   return answerBehaviorBasicsDataset.cases.map((testCase) => ({
     target: 'answer',
-    execution: testCase.input.delegationOutcome?.outcome === 'goal_done'
-      ? 'deterministic'
-      : 'model',
+    execution: 'model',
     contract: testCase.expected.contract,
     objective: testCase.expected.objective,
     datasetName: answerBehaviorBasicsDataset.name,
@@ -128,9 +125,7 @@ export function getAnswerEvalScenarios(): AnswerEvalScenario[] {
     expectedSummary: testCase.expected.expectedBehavior,
     render: () => render(testCase),
     async run(model, config, judge) {
-      const text = testCase.input.delegationOutcome?.outcome === 'goal_done'
-        ? GOAL_DONE_ACKNOWLEDGEMENT
-        : readMessageText(await model.invoke(render(testCase), config)).trim();
+      const text = readMessageText(await model.invoke(render(testCase), config)).trim();
       const priorAssistantText = testCase.input.messages
         .filter(({ role }) => role === 'assistant')
         .map(({ text: messageText }) => messageText)

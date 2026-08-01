@@ -26,13 +26,12 @@ export type AnswerBlockedReason =
  * Closed invocation facts owned by Answer.
  *
  * This type intentionally contains no caller-supplied prompt or policy field.
- * `goal_done` produces no context message because its target close is a
- * deterministic runtime acknowledgement.
+ * Every mode is rendered as low-authority context for the Answer model.
  */
 export type AnswerContextFacts =
   | { mode: 'direct'; hasUserGoal: boolean }
   | { mode: 'task_result'; hasUserGoal: boolean }
-  | { mode: 'goal_done' }
+  | { mode: 'goal_done'; hasUserGoal: boolean }
   | { mode: 'user_input_required'; hasUserGoal: boolean }
   | {
       mode: 'blocked';
@@ -42,7 +41,7 @@ export type AnswerContextFacts =
       detail: string | null;
     };
 
-export type ModelAnswerContextFacts = Exclude<AnswerContextFacts, { mode: 'goal_done' }>;
+export type ModelAnswerContextFacts = AnswerContextFacts;
 
 function renderAnswerContext(facts: ModelAnswerContextFacts): string {
   const lines = [

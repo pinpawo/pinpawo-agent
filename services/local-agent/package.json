@@ -1,6 +1,6 @@
 {
   "name": "pinpawo",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "PinPawo CLI, TUI, and local agent runtime",
   "license": "MIT",
   "publishConfig": {
@@ -51,7 +51,7 @@
     "@langchain/langgraph": "^1.4.7",
     "@langchain/langgraph-checkpoint": "^1.1.3",
     "@langchain/openai": "^1.5.3",
-    "@pinpawo/pet-agent": "^0.2.0",
+    "@pinpawo/pet-agent": "^0.2.1",
     "@tavily/core": "^0.7.1",
     "@vscode/ripgrep": "1.18.0",
     "commander": "^12.1.0",

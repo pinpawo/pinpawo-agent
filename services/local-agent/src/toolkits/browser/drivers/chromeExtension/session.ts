@@ -128,57 +128,67 @@ export class ChromeExtensionBrowserSession {
     return this.approvedOrigin;
   }
 
-  async open(url: string, opts: BrowserOpenOptions = {}): Promise<string> {
+  async open(
+    url: string,
+    opts: BrowserOpenOptions = {},
+    signal?: AbortSignal,
+  ): Promise<string> {
     this.validateOpenOptions(opts);
     const approvedOrigin = approvedOriginFor(url);
     const raw = await this.bridge.sendCommand('navigate', {
       url,
       approvedOrigin,
-    });
+    }, undefined, signal);
     const snapshot = this.buildSnapshot(raw, approvedOrigin);
     this.approvedOrigin = approvedOrigin;
     return snapshot;
   }
 
-  async snapshot(): Promise<string> {
+  async snapshot(signal?: AbortSignal): Promise<string> {
     const approvedOrigin = this.requireApprovedOrigin();
     return this.buildSnapshot(await this.bridge.sendCommand('snapshot', {
       approvedOrigin,
-    }), approvedOrigin);
+    }, undefined, signal), approvedOrigin);
   }
 
-  async click(target: string | BrowserElementTarget): Promise<string> {
+  async click(target: string | BrowserElementTarget, signal?: AbortSignal): Promise<string> {
     const approvedOrigin = this.requireApprovedOrigin();
     return this.buildSnapshot(await this.bridge.sendCommand('click', {
       approvedOrigin,
       target: normalizeTarget(target),
-    }), approvedOrigin);
+    }, undefined, signal), approvedOrigin);
   }
 
-  async type(target: string | BrowserElementTarget, text: string, submit = false): Promise<string> {
+  async type(
+    target: string | BrowserElementTarget,
+    text: string,
+    submit = false,
+    signal?: AbortSignal,
+  ): Promise<string> {
     const approvedOrigin = this.requireApprovedOrigin();
     return this.buildSnapshot(await this.bridge.sendCommand('type', {
       approvedOrigin,
       target: normalizeTarget(target),
       text,
       submit,
-    }, extensionTypeCommandTimeoutMs(text)), approvedOrigin);
+    }, extensionTypeCommandTimeoutMs(text), signal), approvedOrigin);
   }
 
-  async scroll(options: BrowserScrollOptions = {}): Promise<string> {
+  async scroll(options: BrowserScrollOptions = {}, signal?: AbortSignal): Promise<string> {
     const approvedOrigin = this.requireApprovedOrigin();
     return this.buildSnapshot(await this.bridge.sendCommand('scroll', {
       approvedOrigin,
       deltaX: options.deltaX ?? 0,
       deltaY: options.deltaY ?? 600,
       ...(options.target ? { target: normalizeTarget(options.target) } : {}),
-    }), approvedOrigin);
+    }, undefined, signal), approvedOrigin);
   }
 
   async wait(
     target?: string | BrowserElementTarget,
     timeoutMs = 3_000,
     state: BrowserWaitState = 'visible',
+    signal?: AbortSignal,
   ): Promise<string> {
     const approvedOrigin = this.requireApprovedOrigin();
     return this.buildSnapshot(await this.bridge.sendCommand('wait', {
@@ -186,17 +196,17 @@ export class ChromeExtensionBrowserSession {
       timeoutMs,
       state,
       ...(target ? { target: normalizeTarget(target) } : {}),
-    }), approvedOrigin);
+    }, undefined, signal), approvedOrigin);
   }
 
-  async extract(options: BrowserExtractOptions = {}): Promise<string> {
+  async extract(options: BrowserExtractOptions = {}, signal?: AbortSignal): Promise<string> {
     const approvedOrigin = this.requireApprovedOrigin();
     const window = normalizeBrowserExtractOptions(options);
     const raw = parseBrowserRawExtract(await this.bridge.sendCommand('extract', {
       approvedOrigin,
       selector: options.selector,
       ...window,
-    }));
+    }, undefined, signal));
     if (approvedOriginFor(raw.url) !== approvedOrigin) {
       throw new BrowserBridgeError(
         'origin_changed',
@@ -206,9 +216,9 @@ export class ChromeExtensionBrowserSession {
     return JSON.stringify(buildBrowserExtractPayloadFromRaw(raw), null, 2);
   }
 
-  async screenshot(): Promise<string> {
+  async screenshot(signal?: AbortSignal): Promise<string> {
     const approvedOrigin = this.requireApprovedOrigin();
-    const value = await this.bridge.sendCommand('screenshot', { approvedOrigin });
+    const value = await this.bridge.sendCommand('screenshot', { approvedOrigin }, undefined, signal);
     if (
       !value
       || typeof value !== 'object'
@@ -223,9 +233,9 @@ export class ChromeExtensionBrowserSession {
     });
   }
 
-  async close(): Promise<string> {
+  async close(signal?: AbortSignal): Promise<string> {
     this.approvedOrigin = null;
-    const result = await this.bridge.sendCommand('detach', {});
+    const result = await this.bridge.sendCommand('detach', {}, undefined, signal);
     return `Chrome extension browser detached: ${JSON.stringify(result)}`;
   }
 

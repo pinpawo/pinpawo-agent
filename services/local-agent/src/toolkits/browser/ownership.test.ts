@@ -79,6 +79,35 @@ test('ownership transfer waits for an in-flight operation', async () => {
   assert.deepEqual(events, ['first:start', 'first:end', 'second:open']);
 });
 
+test('an aborted queued operation never reaches the browser driver', async () => {
+  const ownership = new BrowserContextOwnership();
+  const delegation = owner('delegation-1');
+  let releaseOperation: (() => void) | undefined;
+  let cancelledOperationStarted = false;
+
+  await ownership.runOpen(delegation, async () => 'opened');
+  const inFlight = ownership.runOwned(delegation, async () => {
+    await new Promise<void>((resolve) => { releaseOperation = resolve; });
+  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const controller = new AbortController();
+  const cancelled = ownership.runOwned(delegation, async () => {
+    cancelledOperationStarted = true;
+  }, controller.signal);
+  controller.abort();
+  assert.ok(releaseOperation);
+  releaseOperation();
+
+  await inFlight;
+  await assert.rejects(
+    cancelled,
+    (error: unknown) => error instanceof Error
+      && 'code' in error
+      && error.code === 'browser_command_cancelled',
+  );
+  assert.equal(cancelledOperationStarted, false);
+});
+
 test('failed open clears ownership instead of exposing the previous context', async () => {
   const ownership = new BrowserContextOwnership();
   const first = owner('delegation-1');

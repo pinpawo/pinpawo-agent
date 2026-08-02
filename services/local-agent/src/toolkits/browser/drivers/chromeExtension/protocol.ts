@@ -57,6 +57,13 @@ export type BrowserCommandMessage = {
   params: Record<string, unknown>;
 };
 
+export type BrowserCancelMessage = {
+  type: 'browser.cancel';
+  protocolVersion: typeof BROWSER_EXTENSION_PROTOCOL_VERSION;
+  connectionId: string;
+  requestId: string;
+};
+
 export type BrowserResultMessage = {
   type: 'browser.result';
   protocolVersion: typeof BROWSER_EXTENSION_PROTOCOL_VERSION;
@@ -82,7 +89,7 @@ export type ExtensionToAgentMessage =
   | BrowserResultMessage
   | BrowserEventMessage;
 
-export type AgentToExtensionMessage = BrowserCommandMessage;
+export type AgentToExtensionMessage = BrowserCommandMessage | BrowserCancelMessage;
 
 export type BridgeHelloMessage = {
   type: 'bridge.hello';
@@ -309,6 +316,14 @@ export function parseExtensionToAgentMessage(value: unknown): ExtensionToAgentMe
 
 export function parseAgentToExtensionMessage(value: unknown): AgentToExtensionMessage {
   const record = readProtocolRecord(value);
+  if (record.type === 'browser.cancel') {
+    return {
+      type: 'browser.cancel',
+      protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+      connectionId: requireNonEmptyString(record, 'connectionId'),
+      requestId: requireNonEmptyString(record, 'requestId'),
+    };
+  }
   if (record.type !== 'browser.command') {
     throw new Error(`unsupported agent message type: ${String(record.type)}`);
   }

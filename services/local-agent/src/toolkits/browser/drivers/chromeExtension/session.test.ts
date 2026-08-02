@@ -24,10 +24,14 @@ const rawSnapshot = {
 };
 
 test('extension session uses one approved origin and the shared payload builder', async () => {
-  const calls: Array<{ command: string; params: Record<string, unknown> }> = [];
+  const calls: Array<{
+    command: string;
+    params: Record<string, unknown>;
+    signal: AbortSignal | undefined;
+  }> = [];
   const session = new ChromeExtensionBrowserSession({
-    async sendCommand(command, params) {
-      calls.push({ command, params });
+    async sendCommand(command, params, _timeoutMs, signal) {
+      calls.push({ command, params, signal });
       if (command === 'detach') return { detached: true };
       return rawSnapshot;
     },
@@ -42,12 +46,15 @@ test('extension session uses one approved origin and the shared payload builder'
   assert.deepEqual(calls[0], {
     command: 'navigate',
     params: { url: 'https://example.com/page', approvedOrigin: 'https://example.com' },
+    signal: undefined,
   });
 
-  await session.snapshot();
+  const controller = new AbortController();
+  await session.snapshot(controller.signal);
   assert.deepEqual(calls[1], {
     command: 'snapshot',
     params: { approvedOrigin: 'https://example.com' },
+    signal: controller.signal,
   });
   await session.close();
   assert.equal(calls[2]?.command, 'detach');

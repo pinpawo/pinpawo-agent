@@ -36,6 +36,21 @@ export function parseBrowserCommand(value) {
   return value;
 }
 
+export function parseBrowserCancel(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('browser cancel must be an object');
+  }
+  if (value.type !== 'browser.cancel' || value.protocolVersion !== PROTOCOL_VERSION) {
+    throw new Error('unsupported browser cancel protocol');
+  }
+  for (const key of ['connectionId', 'requestId']) {
+    if (typeof value[key] !== 'string' || !value[key]) {
+      throw new Error(`browser cancel ${key} must be a non-empty string`);
+    }
+  }
+  return value;
+}
+
 export function successResult(command, result) {
   return {
     type: 'browser.result',

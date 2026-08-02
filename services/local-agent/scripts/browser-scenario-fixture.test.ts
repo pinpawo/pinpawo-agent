@@ -16,6 +16,7 @@ test('browser scenario fixture provides deterministic dynamic, form, popup and l
     assert.match(html, /closed-shadow-host/);
     assert.match(html, /shadow-marker/);
     assert.match(html, /id="long-content"/);
+    assert.match(html, /id="never-visible"/);
     assert.ok(html.length > 50_000);
 
     const child = await fetch(fixture.url('/child'));

@@ -109,6 +109,20 @@ try {
       );
     }
   });
+  await reporter.run('extension_wait_cancellation', 'first_pass', async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 250);
+    try {
+      await assert.rejects(
+        browser.wait('#never-visible', 30_000, 'visible', controller.signal),
+        (error: BrowserCommandError) => error.code === 'browser_command_cancelled',
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+    const snapshot = JSON.parse(await browser.snapshot()) as Snapshot;
+    assert.equal(new URL(snapshot.url).pathname, '/parent');
+  });
 
   await reporter.run('same_origin_popup_recovery', 'recovery', async () => {
     const child = JSON.parse(await browser.click('#open-popup')) as Snapshot;

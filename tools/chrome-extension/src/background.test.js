@@ -64,6 +64,21 @@ test('commands and target changes share the extension-owned serial queue', async
   assert.match(source, /tabs\.onRemoved\.addListener[\s\S]*?enqueueExtensionWork/);
 });
 
+test('cancellation bypasses the command queue and is observed at command safe points', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    'utf8',
+  );
+
+  const nativeMessageHandler = source.match(
+    /nextPort\.onMessage\.addListener\(\(message\) => \{([\s\S]*?)\n    \}\);/,
+  )?.[1] ?? '';
+  assert.match(nativeMessageHandler, /message\?\.type === 'browser\.cancel'[\s\S]*?handleCancel\(message\)[\s\S]*?return/);
+  assert.match(nativeMessageHandler, /enqueueExtensionWork\(\(\) => handleCommand\(message\)\)/);
+  assert.match(source, /function ensureCommandAlive\(deadlineAt\) \{[\s\S]*?cancelledCommandRequestIds\.has\(activeCommandRequestId\)/);
+  assert.match(source, /await delay\(100, deadlineAt\);/);
+});
+
 test('native host reconnect uses bounded backoff and reports Chrome disconnect errors', async () => {
   const source = await readFile(
     resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),

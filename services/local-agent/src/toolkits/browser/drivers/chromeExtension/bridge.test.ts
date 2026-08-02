@@ -162,6 +162,36 @@ test('local browser bridge authenticates, registers and resolves commands', asyn
   });
   assert.deepEqual(await resultPromise, { title: 'Example' });
 
+  const cancellationController = new AbortController();
+  const cancelledPromise = bridge.sendCommand(
+    'snapshot',
+    { approvedOrigin: 'https://example.com' },
+    undefined,
+    cancellationController.signal,
+  );
+  const cancelledCommand = await peer.nextLine();
+  cancellationController.abort();
+  await assert.rejects(
+    cancelledPromise,
+    (error: unknown) => error instanceof BrowserBridgeError
+      && error.code === 'browser_command_cancelled',
+  );
+  const cancellation = await peer.nextLine();
+  assert.deepEqual(cancellation, {
+    type: 'browser.cancel',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    requestId: cancelledCommand.requestId,
+  });
+  peer.send({
+    type: 'browser.result',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    requestId: cancelledCommand.requestId,
+    ok: true,
+    result: { ignored: true },
+  });
+
   const failedPromise = bridge.sendCommand('snapshot', {
     approvedOrigin: 'https://example.com',
   });

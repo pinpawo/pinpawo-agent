@@ -13,6 +13,7 @@ import { connect, createServer, type Server, type Socket } from 'node:net';
 import {
   BROWSER_EXTENSION_PROTOCOL_VERSION,
   type BrowserCommandMessage,
+  type BrowserCancelMessage,
   type BrowserExtensionCapability,
   type BrowserExtensionCommandName,
   type BrowserRegisterMessage,
@@ -58,6 +59,8 @@ type PendingCommand = {
   resolve: (result: unknown) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
+  signal?: AbortSignal;
+  abortHandler?: () => void;
 };
 
 type BridgeLogger = Pick<Console, 'info' | 'warn' | 'error'>;
@@ -243,7 +246,15 @@ export class LocalAgentBrowserBridge {
     command: BrowserExtensionCommandName,
     params: Record<string, unknown>,
     timeoutMs = this.commandTimeoutMs,
+    signal?: AbortSignal,
   ): Promise<unknown> {
+    if (signal?.aborted) {
+      throw new BrowserBridgeError(
+        'browser_command_cancelled',
+        'Browser command was cancelled before dispatch.',
+        true,
+      );
+    }
     const socket = this.activeSocket;
     const registration = this.registration;
     if (!socket || socket.destroyed || !registration) {
@@ -277,25 +288,44 @@ export class LocalAgentBrowserBridge {
 
     return await new Promise<unknown>((resolvePromise, rejectPromise) => {
       const timer = setTimeout(() => {
-        this.pending.delete(requestId);
+        this.removePending(requestId);
         rejectPromise(new BrowserBridgeError(
           'browser_command_timeout',
           `Chrome extension command ${command} timed out after ${timeoutMs}ms`,
           true,
         ));
       }, timeoutMs);
+      const abortHandler = () => {
+        const pending = this.removePending(requestId);
+        if (!pending) return;
+        const cancellation: BrowserCancelMessage = {
+          type: 'browser.cancel',
+          protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+          connectionId: registration.connectionId,
+          requestId,
+        };
+        if (!socket.destroyed) {
+          socket.write(serializeLine(cancellation), () => {});
+        }
+        pending.reject(new BrowserBridgeError(
+          'browser_command_cancelled',
+          'Browser command was cancelled.',
+          true,
+        ));
+      };
       this.pending.set(requestId, {
         connectionId: registration.connectionId,
         resolve: resolvePromise,
         reject: rejectPromise,
         timer,
+        signal,
+        abortHandler,
       });
+      signal?.addEventListener('abort', abortHandler, { once: true });
       socket.write(serializeLine(message), (error) => {
         if (!error) return;
-        const pending = this.pending.get(requestId);
+        const pending = this.removePending(requestId);
         if (!pending) return;
-        clearTimeout(pending.timer);
-        this.pending.delete(requestId);
         pending.reject(new BrowserBridgeError(
           'browser_bridge_write_failed',
           `failed to send Chrome extension command: ${error.message}`,
@@ -464,10 +494,10 @@ export class LocalAgentBrowserBridge {
   }
 
   private resolveResult(message: BrowserResultMessage) {
-    const pending = this.pending.get(message.requestId);
-    if (!pending || pending.connectionId !== message.connectionId) return;
-    clearTimeout(pending.timer);
-    this.pending.delete(message.requestId);
+    const current = this.pending.get(message.requestId);
+    if (!current || current.connectionId !== message.connectionId) return;
+    const pending = this.removePending(message.requestId);
+    if (!pending) return;
     if (message.ok) {
       pending.resolve(message.result);
       return;
@@ -481,11 +511,20 @@ export class LocalAgentBrowserBridge {
   }
 
   private rejectPending(error: Error) {
-    for (const [requestId, pending] of this.pending) {
-      clearTimeout(pending.timer);
+    for (const requestId of this.pending.keys()) {
+      const pending = this.removePending(requestId);
+      if (!pending) continue;
       pending.reject(error);
-      this.pending.delete(requestId);
     }
+  }
+
+  private removePending(requestId: string): PendingCommand | undefined {
+    const pending = this.pending.get(requestId);
+    if (!pending) return undefined;
+    this.pending.delete(requestId);
+    clearTimeout(pending.timer);
+    pending.signal?.removeEventListener('abort', pending.abortHandler!);
+    return pending;
   }
 }
 

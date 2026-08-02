@@ -3,6 +3,7 @@ import {
   NATIVE_HOST_NAME,
   PROTOCOL_VERSION,
   errorResult,
+  parseBrowserCancel,
   parseBrowserCommand,
   successResult,
 } from './protocol.js';
@@ -55,6 +56,9 @@ const enqueueExtensionWork = createSerialExecutor();
 const targets = createTargetStack();
 const browserState = createBrowserStateTracker();
 const recentPopupByOpener = new Map();
+const queuedCommandRequestIds = new Set();
+const cancelledCommandRequestIds = new Set();
+let activeCommandRequestId = null;
 
 class ExtensionError extends Error {
   constructor(code, message, retryable = false, details) {
@@ -140,6 +144,13 @@ function connectNativeHost() {
     const nextPort = chrome.runtime.connectNative(NATIVE_HOST_NAME);
     port = nextPort;
     nextPort.onMessage.addListener((message) => {
+      if (message?.type === 'browser.cancel') {
+        handleCancel(message);
+        return;
+      }
+      if (message?.type === 'browser.command' && typeof message.requestId === 'string') {
+        queuedCommandRequestIds.add(message.requestId);
+      }
       void enqueueExtensionWork(() => handleCommand(message));
     });
     nextPort.onDisconnect.addListener(() => {
@@ -375,9 +386,10 @@ function validateSnapshotOrigin(snapshot, approvedOrigin, tabId) {
 
 async function waitForTab(tabId, deadlineAt) {
   while (Date.now() < Date.parse(deadlineAt)) {
+    ensureCommandAlive(deadlineAt);
     const tab = await chrome.tabs.get(tabId);
     if (tab.status === 'complete') return;
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await delay(100, deadlineAt);
   }
   throw new ExtensionError('navigation_timeout', 'Navigation did not finish before the command deadline', true);
 }
@@ -457,6 +469,9 @@ function requirePageResult(value) {
 }
 
 function ensureCommandAlive(deadlineAt) {
+  if (activeCommandRequestId && cancelledCommandRequestIds.has(activeCommandRequestId)) {
+    throw new ExtensionError('browser_command_cancelled', 'Browser command was cancelled.', true);
+  }
   if (Date.now() > Date.parse(deadlineAt)) {
     throw new ExtensionError('command_expired', 'Browser command expired during execution', true);
   }
@@ -752,9 +767,16 @@ async function captureScreenshot(tabId, approvedOrigin) {
 }
 
 async function executeCommand(command) {
-  if (Date.now() > Date.parse(command.deadlineAt)) {
-    throw new ExtensionError('command_expired', 'Browser command deadline has already passed', true);
+  activeCommandRequestId = command.requestId;
+  try {
+    return await executeCommandBody(command);
+  } finally {
+    activeCommandRequestId = null;
   }
+}
+
+async function executeCommandBody(command) {
+  ensureCommandAlive(command.deadlineAt);
   if (command.command === 'detach') return await detach();
 
   const activeTarget = await ensureTarget();
@@ -832,15 +854,38 @@ async function executeCommand(command) {
   return await readSnapshot(activeTarget.tabId, approvedOrigin);
 }
 
+function handleCancel(value) {
+  try {
+    const cancellation = parseBrowserCancel(value);
+    if (
+      cancellation.connectionId === connectionId
+      && queuedCommandRequestIds.has(cancellation.requestId)
+    ) {
+      cancelledCommandRequestIds.add(cancellation.requestId);
+    }
+  } catch {
+    // Malformed cancellation cannot change browser state.
+  }
+}
+
 async function handleCommand(value) {
+  const requestId = typeof value?.requestId === 'string' ? value.requestId : null;
   let command;
   try {
     command = parseBrowserCommand(value);
     if (command.connectionId !== connectionId) return;
     const result = await executeCommand(command);
+    if (cancelledCommandRequestIds.has(command.requestId)) {
+      throw new ExtensionError('browser_command_cancelled', 'Browser command was cancelled.', true);
+    }
     port?.postMessage(successResult(command, result));
   } catch (error) {
     if (command) port?.postMessage(errorResult(command, error));
+  } finally {
+    if (requestId) {
+      queuedCommandRequestIds.delete(requestId);
+      cancelledCommandRequestIds.delete(requestId);
+    }
   }
 }
 

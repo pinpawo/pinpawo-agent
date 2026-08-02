@@ -183,7 +183,22 @@ test('browser extension protocol validates commands and bridge authentication me
     deadlineAt: new Date(Date.now() + 5_000).toISOString(),
     params: { approvedOrigin: 'https://example.com' },
   });
+  assert.equal(command.type, 'browser.command');
+  if (command.type !== 'browser.command') assert.fail('expected browser command');
   assert.equal(command.command, 'snapshot');
+
+  const cancellation = parseAgentToExtensionMessage({
+    type: 'browser.cancel',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    requestId: 'request-1',
+  });
+  assert.deepEqual(cancellation, {
+    type: 'browser.cancel',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    requestId: 'request-1',
+  });
 
   const hello = parseBridgeHelloMessage({
     type: 'bridge.hello',

@@ -55,6 +55,7 @@ export async function startBrowserScenarioFixture(): Promise<BrowserScenarioFixt
       <span id="shadow-marker">Open shadow not clicked</span>
       <span id="scroll-marker">Not scrolled</span>
       <div id="delayed" hidden>Ready</div>
+      <div id="never-visible" hidden>Never visible</div>
       <article id="long-content">${LONG_CONTENT}</article>
       <script>
         setTimeout(() => { document.querySelector('#delayed').hidden = false; }, 250);

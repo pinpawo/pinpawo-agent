@@ -10,6 +10,10 @@ type Snapshot = {
   interactive: Array<{ ref?: string; placeholder: string | null; hint: string }>;
 };
 type Extract = { text: string; textLength: number; returnedTextLength: number; hasMore: boolean; nextOffset: number | null };
+type BrowserCommandError = Error & {
+  code?: string;
+  details?: Record<string, unknown>;
+};
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
@@ -84,6 +88,24 @@ try {
   console.log('[browser-extension-smoke] parent restored');
   await browser.wait('#close-popup', 2_000, 'hidden');
   console.log('[browser-extension-smoke] popup follow, parent fallback and waits passed');
+
+  await assert.rejects(
+    browser.click('#open-cross-origin-popup'),
+    (error: BrowserCommandError) => {
+      assert.equal(error.code, 'origin_changed');
+      assert.equal(error.details?.manualActionRequired, true);
+      assert.equal(error.details?.interactionDispatched, true);
+      assert.equal(error.details?.recovery, 'complete_popup_manually');
+      assert.equal(error.details?.approvedOrigin, new URL(parentUrl).origin);
+      assert.equal(error.details?.actualOrigin, new URL(fixture.foreignUrl('/child')).origin);
+      assert.doesNotMatch(JSON.stringify(error.details), /\/child/);
+      return true;
+    },
+  );
+  await delay(1_000);
+  const recovered = JSON.parse(await browser.snapshot()) as Snapshot;
+  assert.equal(new URL(recovered.url).pathname, '/parent');
+  console.log('[browser-extension-smoke] cross-origin manual takeover and recovery passed');
 } finally {
   if (extensionConnected) await browser.close().catch(() => {});
   await browserRuntime.stop();

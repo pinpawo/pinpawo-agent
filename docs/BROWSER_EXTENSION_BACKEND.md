@@ -84,8 +84,11 @@ Both smoke tests use the same loopback-only fixture: delayed SPA-style content,
 long-content extraction in consecutive chunks, opaque-ref form type/click, scrolling,
 and parent page → popup → parent fallback. The first runs headless with Playwright;
 the extension smoke requires the unpacked extension and registered Native Host in the
-user's Chrome. It is the baseline regression set, not evidence that iframe, dialogs,
-file transfer, or shadow-DOM support is complete.
+user's Chrome. The extension smoke also verifies the cross-origin popup safety path:
+the dispatched click reports manual takeover without exposing its URL path, then the
+fixture closes the popup so the agent can recover the original page. It is the baseline
+regression set, not evidence that iframe, dialogs, file transfer, or shadow-DOM support
+is complete.
 
 Then:
 

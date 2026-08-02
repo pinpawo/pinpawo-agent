@@ -114,10 +114,7 @@ export class ChromeExtensionBrowserSession {
 
   private requireApprovedOrigin(): string {
     const userBoundOrigin = this.userBoundOrigin();
-    if (userBoundOrigin) {
-      this.approvedOrigin = userBoundOrigin;
-      return userBoundOrigin;
-    }
+    if (userBoundOrigin) return userBoundOrigin;
     if (!this.approvedOrigin) {
       throw new BrowserOperationError(
         'browser_not_open',

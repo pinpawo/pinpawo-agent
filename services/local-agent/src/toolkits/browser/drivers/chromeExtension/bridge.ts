@@ -123,6 +123,7 @@ export class LocalAgentBrowserBridge {
   private readonly tokenFactory: () => string;
   private server: Server | null = null;
   private activeSocket: Socket | null = null;
+  private readonly sockets = new Set<Socket>();
   private token: string | null = null;
   private registration: BrowserRegisterMessage | null = null;
   private debuggerAttached = false;
@@ -225,7 +226,8 @@ export class LocalAgentBrowserBridge {
       'browser extension bridge stopped',
       true,
     ));
-    this.activeSocket?.destroy();
+    for (const socket of this.sockets) socket.destroy();
+    this.sockets.clear();
     this.activeSocket = null;
     this.registration = null;
     this.debuggerAttached = false;
@@ -336,6 +338,7 @@ export class LocalAgentBrowserBridge {
   }
 
   private acceptSocket(socket: Socket) {
+    this.sockets.add(socket);
     socket.setEncoding('utf8');
     let authenticated = false;
     let buffer = '';
@@ -369,14 +372,13 @@ export class LocalAgentBrowserBridge {
                 return;
               }
               authenticated = true;
-              if (this.activeSocket && !this.activeSocket.destroyed && this.activeSocket !== socket) {
-                this.logger.warn(
-                  '[browser-bridge] rejected an additional native host while another extension is active',
+              if (!this.activeSocket || this.activeSocket.destroyed) {
+                this.replaceActiveSocket(socket);
+              } else if (this.activeSocket !== socket) {
+                this.logger.info(
+                  '[browser-bridge] authenticated a candidate native host pending extension registration',
                 );
-                socket.destroy();
-                return;
               }
-              this.replaceActiveSocket(socket);
               socket.write(serializeLine({
                 type: 'bridge.ready',
                 protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
@@ -399,6 +401,7 @@ export class LocalAgentBrowserBridge {
       this.logger.warn(`[browser-bridge] native host socket error: ${error.message}`);
     });
     socket.on('close', () => {
+      this.sockets.delete(socket);
       if (this.activeSocket === socket) {
         this.activeSocket = null;
         this.registration = null;
@@ -434,7 +437,20 @@ export class LocalAgentBrowserBridge {
     message: ReturnType<typeof parseExtensionToAgentMessage>,
     socket: Socket,
   ) {
-    if (socket !== this.activeSocket) return;
+    if (socket !== this.activeSocket) {
+      if (message.type !== 'browser.register') {
+        this.logger.warn('[browser-bridge] ignored message from an inactive native host');
+        return;
+      }
+      if (this.registration && this.registration.extensionId !== message.extensionId) {
+        this.logger.warn(
+          '[browser-bridge] rejected an additional native host from a different extension',
+        );
+        socket.destroy();
+        return;
+      }
+      this.replaceActiveSocket(socket);
+    }
 
     if (message.type === 'browser.register') {
       if (this.registration?.connectionId !== message.connectionId) {

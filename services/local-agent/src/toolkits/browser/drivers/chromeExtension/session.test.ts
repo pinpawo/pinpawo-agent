@@ -104,6 +104,36 @@ test('extension session adopts an origin only from an explicit user tab binding'
   await assert.rejects(unapproved.snapshot(), /Use browser_open first or click the extension action/);
 });
 
+test('extension session does not persist a live user-bound origin as agent approval', async () => {
+  const calls: Array<{ command: string; params: Record<string, unknown> }> = [];
+  let userBoundOrigin: string | null = null;
+  const session = new ChromeExtensionBrowserSession({
+    getStatus() {
+      return {
+        activeTabBinding: userBoundOrigin ? 'user' : null,
+        userBoundOrigin,
+      } as BrowserBridgeStatus;
+    },
+    async sendCommand(command, params) {
+      calls.push({ command, params });
+      const approvedOrigin = String(params.approvedOrigin);
+      return { ...rawSnapshot, url: `${approvedOrigin}/page` };
+    },
+  });
+
+  await session.open('https://agent.example/page');
+  userBoundOrigin = 'https://user.example';
+  await session.snapshot();
+  userBoundOrigin = null;
+  await session.snapshot();
+
+  assert.deepEqual(calls.map((call) => call.params.approvedOrigin), [
+    'https://agent.example',
+    'https://user.example',
+    'https://agent.example',
+  ]);
+});
+
 test('extension session maps P1 interactions and normalizes extract and screenshot results', async (t) => {
   const calls: Array<{ command: string; params: Record<string, unknown> }> = [];
   const previousWorkdir = getLocalToolsWorkdir();

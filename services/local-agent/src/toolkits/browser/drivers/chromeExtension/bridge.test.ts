@@ -307,6 +307,15 @@ test('local browser bridge retains the first active extension connection', async
     token: 'test-token',
     hostPid: process.pid + 1,
   });
+  await second.nextLine();
+  second.send({
+    type: 'browser.register',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'second-extension',
+    extensionId: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    capabilities: ['snapshot'],
+    state: { revision: 1, debuggerAttached: false },
+  });
   await secondClosed;
 
   assert.equal(bridge.getStatus().connectionId, 'first-extension');
@@ -325,4 +334,82 @@ test('local browser bridge retains the first active extension connection', async
     result: { title: 'First extension retained' },
   });
   assert.deepEqual(await commandPromise, { title: 'First extension retained' });
+});
+
+test('local browser bridge promotes a reconnect from the active extension', async (t) => {
+  const root = await mkdtemp(resolve(tmpdir(), 'pinpawo-browser-bridge-reconnect-'));
+  const bridge = new LocalAgentBrowserBridge({
+    socketPath: resolve(root, 'bridge.sock'),
+    tokenPath: resolve(root, 'bridge.token'),
+    tokenFactory: () => 'test-token',
+    logger: { info() {}, warn() {}, error() {} },
+  });
+  await bridge.start();
+  t.after(async () => bridge.stop());
+
+  const first = await connectLinePeer(bridge.getStatus().socketPath);
+  t.after(() => first.socket.destroy());
+  first.send({
+    type: 'bridge.hello',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    token: 'test-token',
+    hostPid: process.pid,
+  });
+  await first.nextLine();
+  first.send({
+    type: 'browser.register',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'extension-worker-1',
+    extensionId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    capabilities: ['snapshot'],
+    state: { revision: 1, debuggerAttached: false },
+  });
+  await waitUntil(() => bridge.getStatus().connectionId === 'extension-worker-1');
+
+  const pending = bridge.sendCommand('snapshot', { approvedOrigin: 'https://example.com' });
+  const pendingRejected = assert.rejects(
+    pending,
+    (error: unknown) => error instanceof BrowserBridgeError
+      && error.code === 'browser_connection_replaced',
+  );
+  await first.nextLine();
+  const firstClosed = new Promise<void>((resolvePromise) => first.socket.once('close', resolvePromise));
+
+  const reconnect = await connectLinePeer(bridge.getStatus().socketPath);
+  t.after(() => reconnect.socket.destroy());
+  reconnect.send({
+    type: 'bridge.hello',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    token: 'test-token',
+    hostPid: process.pid + 1,
+  });
+  assert.deepEqual(await reconnect.nextLine(), {
+    type: 'bridge.ready',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+  });
+  reconnect.send({
+    type: 'browser.register',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'extension-worker-2',
+    extensionId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    capabilities: ['snapshot'],
+    state: { revision: 1, debuggerAttached: false },
+  });
+
+  await firstClosed;
+  await pendingRejected;
+  await waitUntil(() => bridge.getStatus().connectionId === 'extension-worker-2');
+
+  const recovered = bridge.sendCommand('snapshot', { approvedOrigin: 'https://example.com' });
+  const command = await reconnect.nextLine();
+  assert.equal(command.connectionId, 'extension-worker-2');
+  reconnect.send({
+    type: 'browser.result',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'extension-worker-2',
+    requestId: command.requestId,
+    ok: true,
+    result: { title: 'Reconnected extension' },
+  });
+  assert.deepEqual(await recovered, { title: 'Reconnected extension' });
 });

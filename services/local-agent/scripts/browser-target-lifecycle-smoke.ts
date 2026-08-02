@@ -67,6 +67,29 @@ try {
     assert.match((JSON.parse(await browser.snapshot()) as Snapshot).text, /Scrolled/);
   });
 
+  await reporter.run('frame_and_shadow_snapshot_observation', 'first_pass', async () => {
+    const snapshot = JSON.parse(await browser.snapshot()) as Snapshot;
+    reporter.observe('sameOriginIframeTextVisible', snapshot.text.includes('Same-origin iframe fixture content'));
+    reporter.observe('crossOriginIframeTextVisible', snapshot.text.includes('Cross-origin iframe fixture content'));
+    reporter.observe('openShadowTextVisible', snapshot.text.includes('Open shadow fixture content'));
+    reporter.observe('closedShadowTextVisible', snapshot.text.includes('Closed shadow fixture content'));
+  });
+  await reporter.run('open_shadow_selector_observation', 'first_pass', async () => {
+    try {
+      const snapshot = JSON.parse(await browser.click('#open-shadow-button')) as Snapshot;
+      reporter.observe('openShadowSelectorClickSucceeded', snapshot.text.includes('Open shadow clicked'));
+      reporter.observe('openShadowSelectorErrorCode', 'none');
+    } catch (error) {
+      reporter.observe('openShadowSelectorClickSucceeded', false);
+      reporter.observe(
+        'openShadowSelectorErrorCode',
+        typeof (error as { code?: unknown }).code === 'string'
+          ? (error as { code: string }).code
+          : 'unexpected_error',
+      );
+    }
+  });
+
   const context = (browser as unknown as BrowserSessionInternals).impl?.context;
   assert.ok(context, 'Playwright smoke requires an active browser context');
   const unrelated = await context.newPage();

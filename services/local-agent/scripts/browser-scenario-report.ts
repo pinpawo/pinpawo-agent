@@ -1,6 +1,7 @@
 export type BrowserScenarioDriver = 'playwright' | 'extension';
 export type BrowserScenarioPhaseKind = 'first_pass' | 'guard' | 'recovery';
 export type BrowserScenarioPhaseStatus = 'passed' | 'failed' | 'skipped';
+export type BrowserScenarioObservation = boolean | number | string;
 
 export type BrowserScenarioReport = {
   schemaVersion: 1;
@@ -11,6 +12,7 @@ export type BrowserScenarioReport = {
   firstPass: BrowserScenarioPhaseStatus;
   recovery: BrowserScenarioPhaseStatus | 'not_applicable';
   finalErrorCode: string | null;
+  observations: Record<string, BrowserScenarioObservation>;
   phases: Array<{
     name: string;
     kind: BrowserScenarioPhaseKind;
@@ -51,6 +53,7 @@ function aggregatePhaseStatus(
 export class BrowserScenarioReporter {
   private readonly startedAt: number;
   private readonly phases: BrowserScenarioReport['phases'] = [];
+  private readonly observations = new Map<string, BrowserScenarioObservation>();
 
   constructor(
     private readonly driver: BrowserScenarioDriver,
@@ -91,6 +94,19 @@ export class BrowserScenarioReporter {
     this.phases.push({ name, kind, status: 'skipped', durationMs: 0, reason });
   }
 
+  observe(name: string, value: BrowserScenarioObservation): void {
+    if (!/^[a-z][A-Za-z0-9]*$/.test(name)) {
+      throw new Error('browser scenario observation names must use lower camel case');
+    }
+    if (typeof value === 'number' && !Number.isFinite(value)) {
+      throw new Error('browser scenario observations must be finite');
+    }
+    if (typeof value === 'string' && !/^[a-z][a-z0-9_]{0,79}$/.test(value)) {
+      throw new Error('browser scenario string observations must be stable identifiers');
+    }
+    this.observations.set(name, value);
+  }
+
   finish(finalError?: unknown): BrowserScenarioReport {
     const finalFailedPhase = this.phases.find((phase) => phase.status === 'failed');
     const firstPass = aggregatePhaseStatus(this.phases, 'first_pass');
@@ -105,6 +121,9 @@ export class BrowserScenarioReporter {
       finalErrorCode: finalError
         ? readErrorCode(finalError)
         : finalFailedPhase?.errorCode ?? null,
+      observations: Object.fromEntries(
+        [...this.observations.entries()].sort(([left], [right]) => left.localeCompare(right)),
+      ),
       phases: [...this.phases],
     };
   }

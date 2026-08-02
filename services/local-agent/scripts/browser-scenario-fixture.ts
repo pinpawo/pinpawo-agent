@@ -9,8 +9,12 @@ export type BrowserScenarioFixture = {
 const LONG_CONTENT = 'PinPawo browser fixture content. '.repeat(2_200);
 
 export async function startBrowserScenarioFixture(): Promise<BrowserScenarioFixture> {
-  const foreignServer = createServer((_request, response) => {
+  const foreignServer = createServer((request, response) => {
     response.setHeader('content-type', 'text/html; charset=utf-8');
+    if (request.url === '/iframe-child') {
+      response.end('<!doctype html><p>Cross-origin iframe fixture content</p>');
+      return;
+    }
     response.end(`<!doctype html>
       <title>Browser fixture cross-origin popup</title>
       <p>This popup closes without agent interaction.</p>
@@ -25,6 +29,10 @@ export async function startBrowserScenarioFixture(): Promise<BrowserScenarioFixt
   const foreignUrl = (path: string) => `http://127.0.0.1:${foreignAddress.port}${path}`;
   const server = createServer((request, response) => {
     response.setHeader('content-type', 'text/html; charset=utf-8');
+    if (request.url === '/iframe-child') {
+      response.end('<!doctype html><p>Same-origin iframe fixture content</p>');
+      return;
+    }
     if (request.url === '/child') {
       response.end(`<!doctype html>
         <title>Browser fixture popup child</title>
@@ -40,12 +48,24 @@ export async function startBrowserScenarioFixture(): Promise<BrowserScenarioFixt
       <span id="save-marker">Not saved</span>
       <a id="open-popup" href="/child" target="_blank" rel="opener">Open popup</a>
       <a id="open-cross-origin-popup" href="${foreignUrl('/child')}" target="_blank" rel="opener">Open cross-origin popup</a>
+      <iframe id="same-origin-frame" src="/iframe-child"></iframe>
+      <iframe id="cross-origin-frame" src="${foreignUrl('/iframe-child')}"></iframe>
+      <div id="open-shadow-host"></div>
+      <div id="closed-shadow-host"></div>
+      <span id="shadow-marker">Open shadow not clicked</span>
       <span id="scroll-marker">Not scrolled</span>
       <div id="delayed" hidden>Ready</div>
       <article id="long-content">${LONG_CONTENT}</article>
       <script>
         setTimeout(() => { document.querySelector('#delayed').hidden = false; }, 250);
         addEventListener('scroll', () => { document.querySelector('#scroll-marker').textContent = 'Scrolled'; }, { once: true });
+        const openShadow = document.querySelector('#open-shadow-host').attachShadow({ mode: 'open' });
+        openShadow.innerHTML = '<button id="open-shadow-button">Open shadow fixture content</button>';
+        openShadow.querySelector('#open-shadow-button').addEventListener('click', () => {
+          document.querySelector('#shadow-marker').textContent = 'Open shadow clicked';
+        });
+        const closedShadow = document.querySelector('#closed-shadow-host').attachShadow({ mode: 'closed' });
+        closedShadow.innerHTML = '<button id="closed-shadow-button">Closed shadow fixture content</button>';
       </script>`);
   });
   await listen(server);

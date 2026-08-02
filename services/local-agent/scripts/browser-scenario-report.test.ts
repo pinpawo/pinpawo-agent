@@ -9,6 +9,9 @@ test('browser scenario reporter records stable phase, recovery and error summari
   await reporter.run('open', 'first_pass', async () => {
     currentTime = 150;
   });
+  reporter.observe('snapshotTextLength', 42);
+  reporter.observe('sameOriginFrameVisible', false);
+  reporter.observe('openShadowSelectorErrorCode', 'element_not_found');
   currentTime = 160;
   reporter.skip('bridge_restart', 'recovery', 'not supported by this driver');
 
@@ -21,6 +24,11 @@ test('browser scenario reporter records stable phase, recovery and error summari
     firstPass: 'passed',
     recovery: 'skipped',
     finalErrorCode: null,
+    observations: {
+      sameOriginFrameVisible: false,
+      openShadowSelectorErrorCode: 'element_not_found',
+      snapshotTextLength: 42,
+    },
     phases: [
       { name: 'open', kind: 'first_pass', status: 'passed', durationMs: 30 },
       {
@@ -46,6 +54,7 @@ test('browser scenario reporter preserves driver error codes without error text'
   assert.equal(result.status, 'failed');
   assert.equal(result.firstPass, 'failed');
   assert.equal(result.finalErrorCode, 'origin_changed');
+  assert.deepEqual(result.observations, {});
   assert.deepEqual(result.phases[0], {
     name: 'snapshot',
     kind: 'first_pass',

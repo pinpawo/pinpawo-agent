@@ -10,6 +10,11 @@ test('browser scenario fixture provides deterministic dynamic, form, popup and l
     assert.match(html, /id="task-name"/);
     assert.match(html, /id="open-popup"/);
     assert.match(html, /id="open-cross-origin-popup"/);
+    assert.match(html, /id="same-origin-frame"/);
+    assert.match(html, /id="cross-origin-frame"/);
+    assert.match(html, /open-shadow-host/);
+    assert.match(html, /closed-shadow-host/);
+    assert.match(html, /shadow-marker/);
     assert.match(html, /id="long-content"/);
     assert.ok(html.length > 50_000);
 
@@ -18,6 +23,11 @@ test('browser scenario fixture provides deterministic dynamic, form, popup and l
 
     const foreignChild = await fetch(fixture.foreignUrl('/child'));
     assert.match(await foreignChild.text(), /cross-origin popup/);
+
+    const sameOriginFrame = await fetch(fixture.url('/iframe-child'));
+    assert.match(await sameOriginFrame.text(), /Same-origin iframe fixture content/);
+    const crossOriginFrame = await fetch(fixture.foreignUrl('/iframe-child'));
+    assert.match(await crossOriginFrame.text(), /Cross-origin iframe fixture content/);
   } finally {
     await fixture.close();
   }

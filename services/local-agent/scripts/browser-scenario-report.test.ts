@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { BrowserScenarioReporter } from './browser-scenario-report';
+import {
+  BrowserScenarioReporter,
+  classifyBrowserScenarioErrorCode,
+} from './browser-scenario-report';
 
 test('browser scenario reporter records stable phase, recovery and error summaries', async () => {
   let currentTime = 100;
@@ -24,6 +27,7 @@ test('browser scenario reporter records stable phase, recovery and error summari
     firstPass: 'passed',
     recovery: 'skipped',
     finalErrorCode: null,
+    finalErrorCategory: null,
     observations: {
       sameOriginFrameVisible: false,
       openShadowSelectorErrorCode: 'element_not_found',
@@ -54,6 +58,7 @@ test('browser scenario reporter preserves driver error codes without error text'
   assert.equal(result.status, 'failed');
   assert.equal(result.firstPass, 'failed');
   assert.equal(result.finalErrorCode, 'origin_changed');
+  assert.equal(result.finalErrorCategory, 'origin_manual_takeover');
   assert.deepEqual(result.observations, {});
   assert.deepEqual(result.phases[0], {
     name: 'snapshot',
@@ -61,5 +66,16 @@ test('browser scenario reporter preserves driver error codes without error text'
     status: 'failed',
     durationMs: 0,
     errorCode: 'origin_changed',
+    errorCategory: 'origin_manual_takeover',
   });
+});
+
+test('browser scenario error codes map to durable evaluation categories', () => {
+  assert.equal(classifyBrowserScenarioErrorCode('element_not_found'), 'ref_selector');
+  assert.equal(classifyBrowserScenarioErrorCode('wait_timeout'), 'stability_wait');
+  assert.equal(classifyBrowserScenarioErrorCode('target_closed'), 'target_lifecycle');
+  assert.equal(classifyBrowserScenarioErrorCode('origin_changed'), 'origin_manual_takeover');
+  assert.equal(classifyBrowserScenarioErrorCode('native_host_disconnected'), 'bridge_lifecycle');
+  assert.equal(classifyBrowserScenarioErrorCode('screenshot_unavailable'), 'snapshot_content');
+  assert.equal(classifyBrowserScenarioErrorCode('unknown_failure'), 'unexpected');
 });

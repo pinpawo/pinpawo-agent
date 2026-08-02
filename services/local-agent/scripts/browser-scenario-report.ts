@@ -2,6 +2,17 @@ export type BrowserScenarioDriver = 'playwright' | 'extension';
 export type BrowserScenarioPhaseKind = 'first_pass' | 'guard' | 'recovery';
 export type BrowserScenarioPhaseStatus = 'passed' | 'failed' | 'skipped';
 export type BrowserScenarioObservation = boolean | number | string;
+export type BrowserScenarioFailureCategory =
+  | 'snapshot_content'
+  | 'ref_selector'
+  | 'frame_shadow'
+  | 'stability_wait'
+  | 'target_lifecycle'
+  | 'origin_manual_takeover'
+  | 'dialog'
+  | 'file_transfer'
+  | 'bridge_lifecycle'
+  | 'unexpected';
 
 export type BrowserScenarioReport = {
   schemaVersion: 1;
@@ -12,6 +23,7 @@ export type BrowserScenarioReport = {
   firstPass: BrowserScenarioPhaseStatus;
   recovery: BrowserScenarioPhaseStatus | 'not_applicable';
   finalErrorCode: string | null;
+  finalErrorCategory: BrowserScenarioFailureCategory | null;
   observations: Record<string, BrowserScenarioObservation>;
   phases: Array<{
     name: string;
@@ -19,6 +31,7 @@ export type BrowserScenarioReport = {
     status: BrowserScenarioPhaseStatus;
     durationMs: number;
     errorCode?: string;
+    errorCategory?: BrowserScenarioFailureCategory;
     reason?: string;
   }>;
 };
@@ -33,6 +46,25 @@ function readErrorCode(error: unknown): string {
     if (name === 'AssertionError') return 'assertion_failed';
   }
   return 'unexpected_error';
+}
+
+export function classifyBrowserScenarioErrorCode(
+  code: string,
+): BrowserScenarioFailureCategory {
+  if (/^(stale_element_reference|element_not_found|element_not_visible|element_not_editable|invalid_selector)$/.test(code)) {
+    return 'ref_selector';
+  }
+  if (/(^|_)(frame|iframe|shadow)(_|$)/.test(code)) return 'frame_shadow';
+  if (/(timeout|navigation_failed|command_expired)/.test(code)) return 'stability_wait';
+  if (/(target_closed|target_create_failed|target_url_unavailable)/.test(code)) return 'target_lifecycle';
+  if (/origin/.test(code)) return 'origin_manual_takeover';
+  if (/(dialog|alert|confirm|prompt)/.test(code)) return 'dialog';
+  if (/(upload|download|file)/.test(code)) return 'file_transfer';
+  if (/(bridge|extension|native_host|socket|connection|registration|debugger)/.test(code)) {
+    return 'bridge_lifecycle';
+  }
+  if (/(snapshot|screenshot|extract)/.test(code)) return 'snapshot_content';
+  return 'unexpected';
 }
 
 function aggregatePhaseStatus(
@@ -85,6 +117,7 @@ export class BrowserScenarioReporter {
         status: 'failed',
         durationMs: this.now() - startedAt,
         errorCode: readErrorCode(error),
+        errorCategory: classifyBrowserScenarioErrorCode(readErrorCode(error)),
       });
       throw error;
     }
@@ -109,6 +142,9 @@ export class BrowserScenarioReporter {
 
   finish(finalError?: unknown): BrowserScenarioReport {
     const finalFailedPhase = this.phases.find((phase) => phase.status === 'failed');
+    const finalErrorCode = finalError
+      ? readErrorCode(finalError)
+      : finalFailedPhase?.errorCode ?? null;
     const firstPass = aggregatePhaseStatus(this.phases, 'first_pass');
     return {
       schemaVersion: 1,
@@ -118,9 +154,10 @@ export class BrowserScenarioReporter {
       status: finalError || finalFailedPhase ? 'failed' : 'passed',
       firstPass: firstPass === 'not_applicable' ? 'skipped' : firstPass,
       recovery: aggregatePhaseStatus(this.phases, 'recovery'),
-      finalErrorCode: finalError
-        ? readErrorCode(finalError)
-        : finalFailedPhase?.errorCode ?? null,
+      finalErrorCode,
+      finalErrorCategory: finalErrorCode
+        ? classifyBrowserScenarioErrorCode(finalErrorCode)
+        : null,
       observations: Object.fromEntries(
         [...this.observations.entries()].sort(([left], [right]) => left.localeCompare(right)),
       ),

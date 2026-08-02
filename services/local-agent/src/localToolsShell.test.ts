@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -7,11 +7,9 @@ import type { AgentToolkit } from '@pinpawo/pet-agent';
 import {
   buildCurrentTimeSnapshot,
   getCurrentTimeTool,
-  getBlockedShellReason,
-  getShellConfirmationRisk,
-  hasBlockedOutputRedirection,
   normalizeShellActionInput,
   runShellTool,
+  shellOperationMetadata,
   truncateShellOutput,
 } from './toolkits/local/shellTools';
 import { createBashToolkit } from './toolkits/local';
@@ -60,26 +58,6 @@ test('bash toolkit exposes get_current_time without command review', () => {
   assert.equal(definition(toolkit, 'get_current_time')?.review, undefined);
 });
 
-test('shell policy blocks output redirection write commands', () => {
-  assert.equal(hasBlockedOutputRedirection('echo ok > out.txt'), true);
-  assert.equal(hasBlockedOutputRedirection('echo ok 2>&1'), false);
-  assert.equal(hasBlockedOutputRedirection('grep -r foo . 2>/dev/null'), false);
-  assert.equal(hasBlockedOutputRedirection('noisy-tool >/dev/null 2>&1'), false);
-  assert.equal(hasBlockedOutputRedirection('echo ok 2>/dev/null > out.txt'), true);
-  assert.match(
-    getBlockedShellReason('echo ok > out.txt') ?? '',
-    /write_file/,
-  );
-});
-
-test('shell policy marks risky commands for review', () => {
-  assert.match(
-    getShellConfirmationRisk('git commit -m test') ?? '',
-    /git/,
-  );
-  assert.equal(getShellConfirmationRisk('printf ok'), null);
-});
-
 test('shell review policy reviews configured command execution', async () => {
   const toolkit = createBashToolkit();
   const policy = definition(toolkit, 'run_shell')?.review;
@@ -116,16 +94,32 @@ test('normalizeShellActionInput trims commands and expands home cwd', () => {
   );
 });
 
-test('runShellTool executes safe commands and rejects shell write fallbacks', async () => {
+test('shell operation metadata exposes the resolved cwd without classifying command text', () => {
+  assert.deepEqual(
+    shellOperationMetadata.run_shell?.summarizeInput?.({
+      command: "printf 'value' > output.txt",
+      cwd: '~',
+    }),
+    {
+      target: homedir(),
+      summary: "printf 'value' > output.txt",
+    },
+  );
+});
+
+test('runShellTool executes commands and explicit output writes', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'pinpawo-shell-write-'));
+  const file = join(dir, 'output.txt');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
   assert.equal(
     await runShellTool.invoke({ command: 'printf ok' }),
     'ok',
   );
-
-  assert.match(
-    String(await runShellTool.invoke({ command: 'cat > file.txt' })),
-    /write_file/,
-  );
+  assert.equal(await runShellTool.invoke({ command: `printf written > ${file}` }), '(no output)');
+  assert.equal(readFileSync(file, 'utf-8'), 'written');
+  assert.equal(await runShellTool.invoke({ command: `printf piped | cat > ${file}` }), '(no output)');
+  assert.equal(readFileSync(file, 'utf-8'), 'piped');
 });
 
 test('runShellTool relies on toolkit review instead of a second interface gate', async (t) => {

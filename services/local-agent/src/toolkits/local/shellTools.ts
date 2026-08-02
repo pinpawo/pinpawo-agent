@@ -6,37 +6,6 @@ import type { ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { readRecord, readString } from '../operationMetadata';
 import { getLocalToolsWorkdir, resolveUserPath } from './pathUtils';
 
-export function getBlockedShellReason(command: string) {
-  const normalized = command.trim();
-
-  const blockedPatterns: Array<[RegExp, string]> = [
-    [/(^|[\s;&|])mv(\s|$)/, '禁止直接使用 mv；请改用 move_path。'],
-    [/\bgit\s+reset\s+--hard\b/, '禁止使用 git reset --hard 这类破坏性命令。'],
-    [/(^|[\s;&|])sudo(\s|$)/, '禁止通过 sudo 提权执行命令。'],
-    [/(^|[\s;&|])(mkfs|fdisk|shutdown|reboot|dd)(\s|$)/, '禁止执行高风险系统命令。'],
-    [/\bcat\s*>\s*/, 'run_shell 不支持依赖 stdin 的 cat > 写文件；请改用 write_file。'],
-    [/<<[-\w'"]*/, 'run_shell 不支持 heredoc；请改用 write_file。'],
-  ];
-
-  for (const [pattern, reason] of blockedPatterns) {
-    if (pattern.test(normalized)) {
-      return reason;
-    }
-  }
-
-  if (hasBlockedOutputRedirection(normalized)) {
-    return 'run_shell 不支持输出重定向写文件；请改用 write_file。';
-  }
-
-  return null;
-}
-
-export function hasBlockedOutputRedirection(command: string) {
-  const withoutFdDuplication = command.replace(/(^|[\s;&|])\d*>\s*&\d+\b/g, '$1');
-  const withoutDevNull = withoutFdDuplication.replace(/[&\d]*>>?\s*\/dev\/null\b/g, '');
-  return /(^|[^=>])\d*>>?/.test(withoutDevNull);
-}
-
 function processOutputToString(output: unknown) {
   if (typeof output === 'string') {
     return output.trimEnd();
@@ -45,29 +14,6 @@ function processOutputToString(output: unknown) {
     return output.toString('utf-8').trimEnd();
   }
   return '';
-}
-
-export function getShellConfirmationRisk(command: string) {
-  const normalized = command.trim();
-
-  const confirmPatterns: Array<[RegExp, string]> = [
-    [/(^|[\s;&|])rm(\s|$)/, '删除文件或目录'],
-    [/\bgit\s+(push|tag|rebase|merge|cherry-pick|commit)\b/, 'git 写操作或远端变更'],
-    [/\b(npm|pnpm|yarn)\s+publish\b/, '包发布'],
-    [/\b(kubectl|helm)\s+(apply|delete|rollout|upgrade|uninstall)\b/, '集群部署变更'],
-    [/\bdocker\s+(push|buildx\s+build|compose\s+(up|down)|run)\b/, '容器构建或运行变更'],
-    [/\b(chmod|chown)\b/, '权限或属主变更'],
-    [/\bfind\b[\s\S]*\s-delete\b/, '批量删除'],
-    [/\bcurl\b[\s\S]*\|\s*(sh|bash|zsh)\b/, '远程脚本直接执行'],
-  ];
-
-  for (const [pattern, risk] of confirmPatterns) {
-    if (pattern.test(normalized)) {
-      return risk;
-    }
-  }
-
-  return null;
 }
 
 export function normalizeShellActionInput(input: unknown) {
@@ -166,11 +112,6 @@ export const runShellTool = tool(
       return `Error: ${err instanceof Error ? err.message : err}`;
     }
 
-    const blockedReason = getBlockedShellReason(shellAction.command);
-    if (blockedReason) {
-      return `Error: ${blockedReason}`;
-    }
-
     const timeoutMs = resolveShellTimeoutMs(input.timeoutSeconds);
 
     try {
@@ -204,7 +145,7 @@ export const runShellTool = tool(
   },
   {
     name: 'run_shell',
-    description: '兜底工具：异步执行非交互 shell 命令并返回输出。只有没有更具体的专用工具覆盖时才使用；不要用它替代 view_file_chunk/read_file/write_file/apply_patch/move_path/copy_path/mkdir_path/list_dir/glob_search/grep_search/http_fetch/download_file。默认在当前 workdir 执行，相对路径也默认相对于该目录；如有需要可显式传 cwd 覆盖。默认超时 60s，可通过 timeoutSeconds 调整（上限 600s）；输出过长时保留开头和结尾并标注截断。不要用于需要输入、全屏 TTY、持续运行，或依赖 stdin 的命令（例如 cat > file）。高风险命令会先进入 toolkit 审批，可批准、拒绝或给出新的处理方向。',
+    description: '兜底工具：异步执行非交互 shell 命令并返回输出。只有没有更具体的专用工具覆盖时才使用；不要用它替代 view_file_chunk/read_file/jq_query/write_file/apply_patch/move_path/copy_path/mkdir_path/list_dir/glob_search/grep_search/http_fetch/download_file。默认在当前 workdir 执行，相对路径也默认相对于该目录；如有需要可显式传 cwd 覆盖。支持命令自身携带内容的 heredoc 和输出重定向，写入效果仍受 toolkit 审批约束。默认超时 60s，可通过 timeoutSeconds 调整（上限 600s）；输出过长时保留开头和结尾并标注截断。不要用于需要交互输入、全屏 TTY 或持续运行的命令。命令会先进入 toolkit 审批，可批准、拒绝或给出新的处理方向。',
     schema: z.object({
       command: z.string().describe('要执行的 shell 命令'),
       cwd: z.string().optional().describe('命令执行目录；默认当前 workdir'),
@@ -226,14 +167,10 @@ export const shellOperationMetadata: Record<string, ToolOperationMetadata> = {
   run_shell: {
     title: '执行命令',
     summarizeInput: (input) => {
-      const record = readRecord(input);
-      const command = readString(record, 'command');
+      const shellAction = normalizeShellActionInput(input);
       return {
-        target: readString(record, 'cwd'),
-        summary: command,
-        details: {
-          risk: command ? getShellConfirmationRisk(command) : undefined,
-        },
+        target: shellAction.cwd,
+        summary: shellAction.command,
       };
     },
   },

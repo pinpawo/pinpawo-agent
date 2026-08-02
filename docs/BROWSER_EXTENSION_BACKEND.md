@@ -91,6 +91,12 @@ local bridge to verify re-authentication and target recovery. It is the baseline
 regression set, not evidence that iframe, dialogs, file transfer, or shadow-DOM support
 is complete.
 
+Each smoke ends with one URL-free `[browser-evaluation]` JSON record. It includes the
+driver, scenario, overall status, first-pass and recovery outcomes, per-phase duration,
+and a stable final error code when a phase fails. Keep these records with CI or manual
+run output when deciding whether a repeated failure should become a focused Browser
+issue; they are not product telemetry and do not persist page content or URLs.
+
 Then:
 
 1. Open `chrome://extensions` and enable Developer mode.

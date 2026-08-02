@@ -2,10 +2,11 @@ function normalizeTarget(value) {
   if (!value || !Number.isInteger(value.tabId)) {
     throw new Error('browser target requires an integer tabId');
   }
-  if (value.ownership !== 'agent' && value.ownership !== 'user') {
-    throw new Error('browser target ownership must be agent or user');
+  const binding = value.binding ?? value.ownership;
+  if (binding !== 'agent' && binding !== 'user') {
+    throw new Error('browser target binding must be agent or user');
   }
-  return { tabId: value.tabId, ownership: value.ownership };
+  return { tabId: value.tabId, binding };
 }
 
 export function createTargetStack(initialTarget = null, maxDepth = 16) {

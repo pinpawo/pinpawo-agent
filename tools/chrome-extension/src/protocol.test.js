@@ -8,8 +8,8 @@ import {
   parseBrowserCommand,
 } from './protocol.js';
 
-test('P1 protocol advertises interaction capabilities at version 2', () => {
-  assert.equal(PROTOCOL_VERSION, 2);
+test('P1 protocol advertises interaction capabilities at version 3', () => {
+  assert.equal(PROTOCOL_VERSION, 3);
   assert.deepEqual(CAPABILITIES, [
     'navigate',
     'snapshot',

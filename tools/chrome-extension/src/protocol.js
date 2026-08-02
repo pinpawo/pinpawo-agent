@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 export const NATIVE_HOST_NAME = 'com.pinpawo.browser_bridge';
 export const CAPABILITIES = [
   'navigate',

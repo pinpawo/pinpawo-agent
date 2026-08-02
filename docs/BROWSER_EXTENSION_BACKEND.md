@@ -1,6 +1,6 @@
 # Chrome extension browser backend
 
-The Chrome extension backend uses an existing Chrome installation and its login state. Protocol v2 supports `browser_open`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_scroll`, `browser_wait`, `browser_extract`, `browser_screenshot` and `browser_close` (debugger detach). Named sessions, custom profiles and headless mode remain Playwright-only semantics.
+The Chrome extension backend uses an existing Chrome installation and its login state. Protocol v3 supports `browser_open`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_scroll`, `browser_wait`, `browser_extract`, `browser_screenshot` and `browser_close` (debugger detach). Named sessions, custom profiles and headless mode remain Playwright-only semantics.
 
 Architecturally, the extension is a driver of the Browser capability, not a top-level local-agent subsystem. Its Native Messaging host is a private companion process of that driver. Local-agent lifecycle and health code depend only on the Browser runtime boundary; no generic host-server abstraction is introduced until another concrete integration proves the shared contract.
 
@@ -56,11 +56,11 @@ These builders are a reusable normalization boundary, not a frozen cross-backend
 - Extract slices text inside the page before IPC and local-agent validates and builds the final chunk metadata.
 - Screenshot captures the exact attached viewport through allowlisted CDP, retries with bounded JPEG quality, then local-agent stores the image under `.pinpawo/browser/screenshots/` with mode `0600`.
 
-## Security and tab ownership
+## Security and tab binding
 
 - The extension requests `debugger`, `nativeMessaging`, `storage` and `tabs`; it has no broad host permission.
 - `browser_open` creates an agent-owned tab if none is bound.
-- Clicking the extension action explicitly binds the current user tab and approves only its current http(s) origin for the local-agent Browser session. The approval is held only in the live extension state, is not persisted by the extension, and is never updated by subsequent user navigation; after an extension/service-worker restart the user must click the action again. The health response distinguishes `agent` and `user` ownership.
+- Clicking the extension action explicitly binds the current user tab and approves only its current http(s) origin for the local-agent Browser session. The approval is held only in the live extension state, is not persisted by the extension, and is never updated by subsequent user navigation; after an extension/service-worker restart the user must click the action again. The health response exposes an `agent` or `user` tab binding; it is unrelated to delegation execution ownership.
 - Browser commands and target-binding changes run through one extension-owned serial queue. The local-agent tool layer remains backend-neutral and does not impose extension scheduling semantics.
 - Tool cancellation propagates through the Browser session and local bridge as a connection-scoped `browser.cancel` message. The extension observes cancellation before a queued command begins and at bounded wait/type/action safe points; it does not undo an input event that Chrome has already dispatched, and cancelled commands are never retried or replayed. Take a fresh snapshot before deciding what, if anything, needs to happen next.
 - A popup/new tab whose `openerTabId` is the current target becomes the active browser target. The extension keeps a bounded in-memory target history so closing a popup can return to its live parent; Playwright applies the same active-target behavior inside its own driver.
@@ -68,7 +68,7 @@ These builders are a reusable normalization boundary, not a frozen cross-backend
 - Cross-origin popup errors are non-retryable and include `manualActionRequired: true`; a post-click/type failure also includes `interactionDispatched: true` so callers do not replay an interaction that was already sent. There is intentionally no API for silently adopting the popup origin in this phase.
 - Each navigation carries an origin already authorized by the local-agent review policy.
 - Before and after every read, interaction result and screenshot, the extension reads the committed top-level URL through CDP and refuses access if the origin changed. Trusted mouse/key events and bulk text chunks also re-check the origin immediately before dispatch. The extension checks returned payload URLs, and local-agent repeats that check before building final payloads.
-- CDP remains allowlisted. Protocol v2 adds only the `Input.dispatch*`, viewport screenshot and DOM box/scroll commands required by the declared Browser operations; arbitrary CDP is never relayed.
+- CDP remains allowlisted. Protocol v3 permits only the `Input.dispatch*`, viewport screenshot and DOM box/scroll commands required by the declared Browser operations; arbitrary CDP is never relayed.
 - The socket directory is mode `0700`; the socket and per-run random token file are mode `0600`. The token is removed when the local-agent stops.
 - Protocol messages include `protocolVersion`, `connectionId`, `requestId` and `deadlineAt`; malformed, stale and oversized messages fail closed.
 - Driver failures retain structured `code`, `retryable` and safe `details` fields through the bridge. Cross-origin failures expose origins only, never an unapproved URL path or query.

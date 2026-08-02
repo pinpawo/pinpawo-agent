@@ -1,6 +1,6 @@
 # PinPawo Browser Bridge
 
-This MV3 extension connects one Chrome tab to a running PinPawo local agent through Chrome Native Messaging. Protocol v2 supports navigation, snapshot, trusted click/type/scroll input, wait, chunked text extraction, viewport screenshots and debugger detach.
+This MV3 extension connects one Chrome tab to a running PinPawo local agent through Chrome Native Messaging. Protocol v3 supports navigation, snapshot, trusted click/type/scroll input, wait, chunked text extraction, viewport screenshots and debugger detach.
 
 ## Development setup
 

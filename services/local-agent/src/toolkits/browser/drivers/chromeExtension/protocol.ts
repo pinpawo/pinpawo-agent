@@ -1,4 +1,4 @@
-export const BROWSER_EXTENSION_PROTOCOL_VERSION = 2 as const;
+export const BROWSER_EXTENSION_PROTOCOL_VERSION = 3 as const;
 export const BROWSER_NATIVE_HOST_NAME = 'com.pinpawo.browser_bridge';
 
 export const BROWSER_EXTENSION_CAPABILITIES = [
@@ -28,7 +28,7 @@ export type BrowserExtensionStateSnapshot = {
   debuggerAttached: boolean;
   activeTab?: {
     tabId: number;
-    ownership: 'agent' | 'user';
+    binding: 'agent' | 'user';
   };
   /** Origin explicitly approved by the user clicking the extension action. */
   userBoundOrigin?: string;
@@ -42,7 +42,7 @@ export type BrowserRegisterMessage = {
   capabilities: BrowserExtensionCapability[];
   activeTab?: {
     tabId: number;
-    ownership: 'agent' | 'user';
+    binding: 'agent' | 'user';
   };
   state?: BrowserExtensionStateSnapshot;
 };
@@ -175,12 +175,12 @@ function parseActiveTab(
   if (!isRecord(value) || !Number.isInteger(value.tabId) || (value.tabId as number) < 0) {
     throw new Error(`browser.register ${field}.tabId must be a non-negative integer`);
   }
-  if (value.ownership !== 'agent' && value.ownership !== 'user') {
-    throw new Error(`browser.register ${field}.ownership must be agent or user`);
+  if (value.binding !== 'agent' && value.binding !== 'user') {
+    throw new Error(`browser.register ${field}.binding must be agent or user`);
   }
   return {
     tabId: value.tabId as number,
-    ownership: value.ownership,
+    binding: value.binding,
   };
 }
 
@@ -216,7 +216,7 @@ function parseStateSnapshot(value: unknown): BrowserExtensionStateSnapshot | und
     ) {
       throw new Error('browser.register state.userBoundOrigin must be an http(s) origin');
     }
-    if (activeTab?.ownership !== 'user') {
+    if (activeTab?.binding !== 'user') {
       throw new Error('browser.register state.userBoundOrigin requires a user-bound tab');
     }
     userBoundOrigin = value.userBoundOrigin;
@@ -243,7 +243,7 @@ export function parseExtensionToAgentMessage(value: unknown): ExtensionToAgentMe
       && (
         !state.activeTab
         || activeTab.tabId !== state.activeTab.tabId
-        || activeTab.ownership !== state.activeTab.ownership
+        || activeTab.binding !== state.activeTab.binding
       )
     ) {
       throw new Error('browser.register activeTab must match state.activeTab');

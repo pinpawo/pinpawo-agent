@@ -76,7 +76,7 @@ test('extension session adopts an origin only from an explicit user tab binding'
   const session = new ChromeExtensionBrowserSession({
     getStatus() {
       return {
-        activeTabOwnership: 'user',
+        activeTabBinding: 'user',
         userBoundOrigin: 'https://example.com',
       } as BrowserBridgeStatus;
     },
@@ -95,7 +95,7 @@ test('extension session adopts an origin only from an explicit user tab binding'
   const unapproved = new ChromeExtensionBrowserSession({
     getStatus() {
       return {
-        activeTabOwnership: 'user',
+        activeTabBinding: 'user',
         userBoundOrigin: null,
       } as BrowserBridgeStatus;
     },

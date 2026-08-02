@@ -67,7 +67,7 @@ export class ChromeExtensionBrowserSession {
 
   private userBoundOrigin(): string | null {
     const status = this.bridge.getStatus?.() as BrowserBridgeStatus | undefined;
-    if (status?.activeTabOwnership !== 'user' || !status.userBoundOrigin) return null;
+    if (status?.activeTabBinding !== 'user' || !status.userBoundOrigin) return null;
     try {
       const origin = approvedOriginFor(status.userBoundOrigin);
       return origin === status.userBoundOrigin ? origin : null;

@@ -85,7 +85,7 @@ async function saveTarget(nextTarget, options = {}) {
   const target = targets.bind(nextTarget, options);
   if (Object.hasOwn(options, 'userBoundOrigin')) {
     userBoundOrigin = options.userBoundOrigin;
-  } else if (target?.ownership !== 'user') {
+  } else if (target?.binding !== 'user') {
     userBoundOrigin = null;
   }
   if (target) await chrome.storage.local.set({ [SESSION_KEY]: target });
@@ -102,7 +102,7 @@ function registerMessage() {
     connectionId,
     extensionId: chrome.runtime.id,
     capabilities: CAPABILITIES,
-    ...(target ? { activeTab: { tabId: target.tabId, ownership: target.ownership } } : {}),
+    ...(target ? { activeTab: { tabId: target.tabId, binding: target.binding } } : {}),
     state,
   };
 }
@@ -242,7 +242,7 @@ async function ensureTarget() {
   if (!Number.isInteger(tab.id)) {
     throw new ExtensionError('target_create_failed', 'Chrome did not return a tab id');
   }
-  await saveTarget({ tabId: tab.id, ownership: 'agent' });
+  await saveTarget({ tabId: tab.id, binding: 'agent' });
   return targets.current();
 }
 
@@ -265,7 +265,7 @@ async function switchToPopup(tabId, parentTarget, deadlineAt) {
   await detach();
   try {
     await saveTarget(
-      { tabId, ownership: parentTarget.ownership },
+      { tabId, binding: parentTarget.binding },
       { rememberCurrent: true },
     );
     await attach(tabId);
@@ -901,7 +901,7 @@ chrome.action.onClicked.addListener(async (tab) => {
   await enqueueExtensionWork(async () => {
     await detach();
     await saveTarget(
-      { tabId: tab.id, ownership: 'user' },
+      { tabId: tab.id, binding: 'user' },
       { resetHistory: true, userBoundOrigin: approvedOrigin },
     );
   });

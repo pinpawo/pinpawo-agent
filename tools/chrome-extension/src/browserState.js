@@ -11,7 +11,7 @@ export function createBrowserStateTracker() {
         revision,
         debuggerAttached: activeTab?.tabId === attachedTabId,
         ...(activeTab ? { activeTab: { ...activeTab } } : {}),
-        ...(activeTab?.ownership === 'user' && userBoundOrigin
+        ...(activeTab?.binding === 'user' && userBoundOrigin
           ? { userBoundOrigin }
           : {}),
       };

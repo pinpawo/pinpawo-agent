@@ -54,7 +54,7 @@ test('native host relays framed Chrome messages to the authenticated local bridg
     connectionId: 'extension-worker-1',
     extensionId: 'abcdefghijklmnopabcdefghijklmnop',
     capabilities: ['navigate', 'snapshot', 'detach'],
-    activeTab: { tabId: 7, ownership: 'user' },
+    activeTab: { tabId: 7, binding: 'user' },
   }));
   await waitUntil(() => bridge.getStatus().extensionConnected);
 
@@ -103,11 +103,11 @@ test('native host replays extension registration when the local bridge restarts'
     connectionId: 'extension-worker-restart',
     extensionId: 'abcdefghijklmnopabcdefghijklmnop',
     capabilities: ['navigate', 'snapshot', 'detach'],
-    activeTab: { tabId: 8, ownership: 'agent' },
+    activeTab: { tabId: 8, binding: 'agent' },
     state: {
       revision: 4,
       debuggerAttached: true,
-      activeTab: { tabId: 8, ownership: 'agent' },
+      activeTab: { tabId: 8, binding: 'agent' },
     },
   }));
   await waitUntil(() => firstBridge.getStatus().extensionConnected);
@@ -154,11 +154,11 @@ test('native host drops stale lifecycle events while retaining the latest regist
     connectionId: 'extension-worker-stale-events',
     extensionId: 'abcdefghijklmnopabcdefghijklmnop',
     capabilities: ['navigate', 'snapshot', 'detach'],
-    activeTab: { tabId: 8, ownership: 'agent' },
+    activeTab: { tabId: 8, binding: 'agent' },
     state: {
       revision: 2,
       debuggerAttached: true,
-      activeTab: { tabId: 8, ownership: 'agent' },
+      activeTab: { tabId: 8, binding: 'agent' },
     },
   }));
 

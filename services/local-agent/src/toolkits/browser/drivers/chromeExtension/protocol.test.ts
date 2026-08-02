@@ -14,11 +14,11 @@ test('browser extension protocol validates register and deduplicates capabilitie
     connectionId: 'connection-1',
     extensionId: 'extension-1',
     capabilities: ['navigate', 'snapshot', 'click', 'type', 'scroll', 'extract', 'screenshot', 'snapshot', 'detach'],
-    activeTab: { tabId: 42, ownership: 'user' },
+    activeTab: { tabId: 42, binding: 'user' },
     state: {
       revision: 3,
       debuggerAttached: true,
-      activeTab: { tabId: 42, ownership: 'user' },
+      activeTab: { tabId: 42, binding: 'user' },
     },
   });
 
@@ -33,11 +33,11 @@ test('browser extension protocol validates register and deduplicates capabilitie
     'screenshot',
     'detach',
   ]);
-  assert.deepEqual(message.activeTab, { tabId: 42, ownership: 'user' });
+  assert.deepEqual(message.activeTab, { tabId: 42, binding: 'user' });
   assert.deepEqual(message.state, {
     revision: 3,
     debuggerAttached: true,
-    activeTab: { tabId: 42, ownership: 'user' },
+    activeTab: { tabId: 42, binding: 'user' },
   });
 });
 
@@ -86,11 +86,11 @@ test('browser extension protocol rejects mismatched versions and malformed resul
       connectionId: 'connection-1',
       extensionId: 'extension-1',
       capabilities: [],
-      activeTab: { tabId: 1, ownership: 'agent' },
+      activeTab: { tabId: 1, binding: 'agent' },
       state: {
         revision: 1,
         debuggerAttached: false,
-        activeTab: { tabId: 2, ownership: 'agent' },
+        activeTab: { tabId: 2, binding: 'agent' },
       },
     }),
     /activeTab must match state\.activeTab/,
@@ -107,7 +107,7 @@ test('browser extension protocol accepts a user-bound origin only for a user-bou
     state: {
       revision: 1,
       debuggerAttached: false,
-      activeTab: { tabId: 42, ownership: 'user' },
+      activeTab: { tabId: 42, binding: 'user' },
       userBoundOrigin: 'https://example.com',
     },
   });
@@ -123,7 +123,7 @@ test('browser extension protocol accepts a user-bound origin only for a user-bou
     state: {
       revision: 1,
       debuggerAttached: false,
-      activeTab: { tabId: 42, ownership: 'agent' },
+      activeTab: { tabId: 42, binding: 'agent' },
       userBoundOrigin: 'https://example.com',
     },
   }), /requires a user-bound tab/);
@@ -136,7 +136,7 @@ test('browser extension protocol accepts a user-bound origin only for a user-bou
     state: {
       revision: 1,
       debuggerAttached: false,
-      activeTab: { tabId: 42, ownership: 'user' },
+      activeTab: { tabId: 42, binding: 'user' },
       userBoundOrigin: 'https://example.com/path',
     },
   }), /must be an http\(s\) origin/);

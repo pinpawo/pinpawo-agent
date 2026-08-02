@@ -3,40 +3,40 @@ import test from 'node:test';
 import { createTargetStack } from './targetLifecycle.js';
 
 test('target stack follows child tabs and falls back when they close', () => {
-  const targets = createTargetStack({ tabId: 10, ownership: 'user' });
+  const targets = createTargetStack({ tabId: 10, binding: 'user' });
 
   targets.bind(
-    { tabId: 11, ownership: 'user' },
+    { tabId: 11, binding: 'user' },
     { rememberCurrent: true },
   );
   targets.bind(
-    { tabId: 12, ownership: 'user' },
+    { tabId: 12, binding: 'user' },
     { rememberCurrent: true },
   );
 
-  assert.deepEqual(targets.current(), { tabId: 12, ownership: 'user' });
+  assert.deepEqual(targets.current(), { tabId: 12, binding: 'user' });
   assert.deepEqual(targets.history(), [
-    { tabId: 10, ownership: 'user' },
-    { tabId: 11, ownership: 'user' },
+    { tabId: 10, binding: 'user' },
+    { tabId: 11, binding: 'user' },
   ]);
   assert.deepEqual(targets.remove(12), {
     closedCurrent: true,
-    current: { tabId: 11, ownership: 'user' },
+    current: { tabId: 11, binding: 'user' },
   });
   assert.deepEqual(targets.remove(11), {
     closedCurrent: true,
-    current: { tabId: 10, ownership: 'user' },
+    current: { tabId: 10, binding: 'user' },
   });
 });
 
 test('explicit tab binding resets popup history', () => {
-  const targets = createTargetStack({ tabId: 10, ownership: 'agent' });
+  const targets = createTargetStack({ tabId: 10, binding: 'agent' });
   targets.bind(
-    { tabId: 11, ownership: 'agent' },
+    { tabId: 11, binding: 'agent' },
     { rememberCurrent: true },
   );
   targets.bind(
-    { tabId: 20, ownership: 'user' },
+    { tabId: 20, binding: 'user' },
     { resetHistory: true },
   );
 
@@ -45,10 +45,10 @@ test('explicit tab binding resets popup history', () => {
 });
 
 test('target history remains bounded during popup chains', () => {
-  const targets = createTargetStack({ tabId: 1, ownership: 'agent' }, 2);
-  targets.bind({ tabId: 2, ownership: 'agent' }, { rememberCurrent: true });
-  targets.bind({ tabId: 3, ownership: 'agent' }, { rememberCurrent: true });
-  targets.bind({ tabId: 4, ownership: 'agent' }, { rememberCurrent: true });
+  const targets = createTargetStack({ tabId: 1, binding: 'agent' }, 2);
+  targets.bind({ tabId: 2, binding: 'agent' }, { rememberCurrent: true });
+  targets.bind({ tabId: 3, binding: 'agent' }, { rememberCurrent: true });
+  targets.bind({ tabId: 4, binding: 'agent' }, { rememberCurrent: true });
 
   assert.deepEqual(targets.history().map((target) => target.tabId), [2, 3]);
 });

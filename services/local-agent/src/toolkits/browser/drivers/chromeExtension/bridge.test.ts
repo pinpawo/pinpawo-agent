@@ -98,11 +98,11 @@ test('local browser bridge authenticates, registers and resolves commands', asyn
     connectionId: 'connection-1',
     extensionId: 'extension-1',
     capabilities: ['navigate', 'snapshot', 'detach'],
-    activeTab: { tabId: 42, ownership: 'user' },
+    activeTab: { tabId: 42, binding: 'user' },
     state: {
       revision: 2,
       debuggerAttached: true,
-      activeTab: { tabId: 42, ownership: 'user' },
+      activeTab: { tabId: 42, binding: 'user' },
       userBoundOrigin: 'https://example.com',
     },
   });
@@ -119,11 +119,11 @@ test('local browser bridge authenticates, registers and resolves commands', asyn
     connectionId: 'connection-1',
     extensionId: 'extension-1',
     capabilities: ['navigate', 'snapshot', 'detach'],
-    activeTab: { tabId: 7, ownership: 'user' },
+    activeTab: { tabId: 7, binding: 'user' },
     state: {
       revision: 1,
       debuggerAttached: false,
-      activeTab: { tabId: 7, ownership: 'user' },
+      activeTab: { tabId: 7, binding: 'user' },
     },
   });
   await waitUntil(() => warnings.some((message) => message.includes('stale browser state revision')));
@@ -138,7 +138,7 @@ test('local browser bridge authenticates, registers and resolves commands', asyn
     connectionId: 'connection-1',
     extensionId: 'extension-1',
     capabilities: ['navigate', 'snapshot', 'detach'],
-    activeTab: { tabId: 9, ownership: 'user' },
+    activeTab: { tabId: 9, binding: 'user' },
   });
   await waitUntil(() => warnings.some((message) => message.includes('revision legacy')));
   assert.equal(bridge.getStatus().activeTabId, 42);

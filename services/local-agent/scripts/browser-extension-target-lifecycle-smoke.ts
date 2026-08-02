@@ -106,6 +106,15 @@ try {
   const recovered = JSON.parse(await browser.snapshot()) as Snapshot;
   assert.equal(new URL(recovered.url).pathname, '/parent');
   console.log('[browser-extension-smoke] cross-origin manual takeover and recovery passed');
+
+  await browserRuntime.stop();
+  extensionConnected = false;
+  await browserRuntime.start();
+  await waitForExtension();
+  extensionConnected = true;
+  const afterBridgeRestart = JSON.parse(await browser.snapshot()) as Snapshot;
+  assert.equal(new URL(afterBridgeRestart.url).pathname, '/parent');
+  console.log('[browser-extension-smoke] bridge restart recovery passed');
 } finally {
   if (extensionConnected) await browser.close().catch(() => {});
   await browserRuntime.stop();

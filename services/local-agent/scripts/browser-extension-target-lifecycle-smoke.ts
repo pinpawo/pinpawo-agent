@@ -111,6 +111,7 @@ try {
   });
   await reporter.run('extension_wait_cancellation', 'first_pass', async () => {
     const controller = new AbortController();
+    const startedAt = Date.now();
     const timer = setTimeout(() => controller.abort(), 250);
     try {
       await assert.rejects(
@@ -122,6 +123,10 @@ try {
     }
     const snapshot = JSON.parse(await browser.snapshot()) as Snapshot;
     assert.equal(new URL(snapshot.url).pathname, '/parent');
+    assert.ok(
+      Date.now() - startedAt < 2_000,
+      'extension cancellation must release the serial queue without waiting for the original command deadline',
+    );
   });
 
   await reporter.run('same_origin_popup_recovery', 'recovery', async () => {

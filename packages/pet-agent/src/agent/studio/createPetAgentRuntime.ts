@@ -10,6 +10,7 @@ import {
   filterAvailableToolkits,
   type AgentToolkit,
 } from '../../types/toolkit';
+import { ToolkitRuntimeManager } from '../orchestrator/toolkitRuntime';
 import type {
   PetAgentCapabilitySummary,
   PetAgentStartupMode,
@@ -62,6 +63,8 @@ export type PetAgentRuntimeConfig = {
   generationReserveTokens?: OrchestratorConfig['generationReserveTokens'];
   subagentContextWindowTokens?: OrchestratorConfig['subagentContextWindowTokens'];
   subagentGenerationReserveTokens?: OrchestratorConfig['subagentGenerationReserveTokens'];
+  /** Host-owned when a process has a durable Toolkit runtime lifecycle. */
+  toolkitRuntimeManager?: ToolkitRuntimeManager;
 };
 
 function buildCapabilitySummaries(config: PetAgentRuntimeConfig): PetAgentCapabilitySummary[] {
@@ -139,6 +142,11 @@ async function buildInvokeMessages(brief: string, wikiRoot: string | undefined):
 export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRuntime {
   let status = initialStatus(config);
   const startupMode = config.startupMode ?? 'standby';
+  // A caller-supplied graph is already responsible for its graph config. Do
+  // not create and start an unreachable manager beside it.
+  const ownsToolkitRuntimeManager = !config.toolkitRuntimeManager && !config.graph;
+  const toolkitRuntimeManager = config.toolkitRuntimeManager
+    ?? (config.graph ? null : new ToolkitRuntimeManager());
   const graph = config.graph ?? createOrchestratorGraph({
     models: config.models,
     actor: config.actor,
@@ -148,6 +156,7 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
     generationReserveTokens: config.generationReserveTokens,
     subagentContextWindowTokens: config.subagentContextWindowTokens,
     subagentGenerationReserveTokens: config.subagentGenerationReserveTokens,
+    toolkitRuntimeManager: toolkitRuntimeManager ?? undefined,
   });
 
   function descriptor(): PetAgentRuntimeDescriptor {
@@ -173,6 +182,7 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
       ...(input.wikiRoot ? [createWikiReadToolkit(input.wikiRoot)] : []),
     ];
     const toolkits = await filterAvailableToolkits(toolkitDefinitions);
+    await toolkitRuntimeManager?.start(toolkits, { signal: input.signal });
     const configuredCapabilities = [
       ...(config.capabilities ?? []),
       ...(input.extraCapabilities ?? []),
@@ -226,6 +236,11 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
   return {
     descriptor,
     invoke,
+    shutdown: async () => {
+      if (ownsToolkitRuntimeManager && toolkitRuntimeManager) {
+        await toolkitRuntimeManager.stop();
+      }
+    },
   };
 }
 

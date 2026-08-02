@@ -1,42 +1,41 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { browserTools } from './tools';
+import { createBrowserTools, type BrowserToolkitSession } from './tools';
 
-process.env.LANGCHAIN_TRACING_V2 = 'false';
-process.env.LANGSMITH_TRACING = 'false';
-
-function readErrorCode(result: unknown): string | undefined {
-  const parsed = JSON.parse(String(result)) as {
-    error?: {
-      code?: string;
-    };
+function session(value: string): BrowserToolkitSession {
+  const result = async () => value;
+  return {
+    open: result,
+    openWithProfile: result,
+    snapshot: result,
+    click: result,
+    type: result,
+    scroll: result,
+    wait: result,
+    extract: result,
+    screenshot: result,
+    close: result,
+    listSessions: async () => [],
   };
-  return parsed.error?.code;
 }
 
-test('browser tools require the delegation scope supplied through tool runtime', async () => {
-  const snapshotTool = browserTools.find((toolItem) =>
-    toolItem.name === 'browser_snapshot');
-  assert.ok(snapshotTool);
+test('Browser tools execute through their resolved runtime binding', async () => {
+  const first = createBrowserTools(session('first'));
+  const second = createBrowserTools(session('second'));
+  const firstSnapshot = first.find(({ name }) => name === 'browser_snapshot');
+  const secondSnapshot = second.find(({ name }) => name === 'browser_snapshot');
 
-  const missingScope = await snapshotTool.invoke({});
-  assert.equal(readErrorCode(missingScope), 'browser_context_missing');
-
-  const scoped = await snapshotTool.invoke({}, {
-    context: {
-      executionScope: {
-        threadId: 'thread-1',
-        runId: 'run-1',
-        delegationId: 'delegation-1',
-      },
-    },
-  });
-  assert.equal(readErrorCode(scoped), 'browser_not_open');
+  assert.ok(firstSnapshot);
+  assert.ok(secondSnapshot);
+  assert.equal(await firstSnapshot.invoke({}), 'first');
+  assert.equal(await secondSnapshot.invoke({}), 'second');
+  assert.notEqual(firstSnapshot, secondSnapshot);
 });
 
-test('browser screenshot keeps image metadata as a tool artifact', () => {
-  const screenshotTool = browserTools.find((toolItem) =>
+test('bound browser screenshot keeps image metadata as a tool artifact', () => {
+  const screenshotTool = createBrowserTools(session('image')).find((toolItem) =>
     toolItem.name === 'browser_screenshot');
+
   assert.ok(screenshotTool);
   assert.equal(screenshotTool.responseFormat, 'content_and_artifact');
 });

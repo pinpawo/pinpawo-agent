@@ -16,10 +16,7 @@ import {
   type BrowserRawSnapshot,
 } from './snapshotPayload';
 import { ChromeExtensionBrowserSession } from './drivers/chromeExtension/session';
-import {
-  browserRuntime,
-  type BrowserRuntimeSnapshot,
-} from './runtime';
+import type { BrowserRuntimeSnapshot } from './runtime';
 import { persistBrowserScreenshot } from './screenshot';
 import { BrowserOperationError } from './errors';
 import {
@@ -117,7 +114,10 @@ export function selectAutoBrowserBackend(input: {
   return null;
 }
 
-async function detectBackend(requiresPlaywright = false): Promise<BrowserBackend> {
+async function detectBackend(
+  runtime: BrowserRuntimeSnapshot,
+  requiresPlaywright = false,
+): Promise<BrowserBackend> {
   // Env var takes precedence; falls back to stored config (written by Settings UI)
   const fromEnv = process.env.PINPAWO_BROWSER_BACKEND?.trim();
   const fromConfig = getConfig().browserBackend;
@@ -156,7 +156,7 @@ async function detectBackend(requiresPlaywright = false): Promise<BrowserBackend
   }
 
   // auto-detect
-  const extensionStatus = browserRuntime.getSnapshot().extension;
+  const extensionStatus = runtime.extension;
   const playwrightAvailable = await canUsePlaywright();
   const autoBackend = selectAutoBrowserBackend({
     extensionCommandReady: extensionStatus.commandReady,
@@ -665,17 +665,25 @@ export class BrowserSession {
   private impl: BrowserImpl | null = null;
   private initPromise: Promise<BrowserImpl> | null = null;
   private readonly ownership: BrowserContextOwnership | null;
+  private readonly getRuntimeSnapshot: (() => BrowserRuntimeSnapshot) | null;
 
-  constructor(options: { requireExecutionOwner?: boolean } = {}) {
+  constructor(options: {
+    requireExecutionOwner?: boolean;
+    getRuntimeSnapshot?: () => BrowserRuntimeSnapshot;
+  } = {}) {
     this.ownership = options.requireExecutionOwner
       ? new BrowserContextOwnership()
       : null;
+    this.getRuntimeSnapshot = options.getRuntimeSnapshot ?? null;
   }
 
   private ensureImpl(requiresPlaywright = false): Promise<BrowserImpl> {
     if (this.impl) return Promise.resolve(this.impl);
     if (!this.initPromise) {
-      this.initPromise = detectBackend(requiresPlaywright).then((backend) => {
+      if (!this.getRuntimeSnapshot) {
+        throw new Error('Browser session requires a Browser Runtime snapshot provider.');
+      }
+      this.initPromise = detectBackend(this.getRuntimeSnapshot(), requiresPlaywright).then((backend) => {
         this.impl = backend === 'extension'
           ? new ChromeExtensionBrowserSession()
           : new PlaywrightBrowserSession();
@@ -837,13 +845,9 @@ export class BrowserSession {
   async listSessions() { return (await this.ensureImpl()).listSessions(); }
 }
 
-export const browserSession = new BrowserSession({
-  requireExecutionOwner: true,
-});
-
 // ── Lightweight detection (no browser launch) ─────────────────────────────────
 export async function detectBrowserStatus(
-  runtime: BrowserRuntimeSnapshot = browserRuntime.getSnapshot(),
+  runtime: BrowserRuntimeSnapshot,
 ): Promise<BrowserStatus> {
   const fromEnv = process.env.PINPAWO_BROWSER_BACKEND?.trim();
   const fromConfig = getConfig().browserBackend;

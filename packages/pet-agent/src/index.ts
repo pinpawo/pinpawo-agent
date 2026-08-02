@@ -89,6 +89,12 @@ export type {
   ToolkitAvailabilityCheck,
   ToolkitReviewCapabilities,
   ToolkitReviewGuidance,
+  ToolkitRuntimeDefinition,
+  ToolkitRuntimeExecutionScope,
+  ToolkitRuntimeReleaseContext,
+  ToolkitRuntimeResolveContext,
+  ToolkitRuntimeStartContext,
+  ToolkitRuntimeStopContext,
 } from './types/toolkit';
 export {
   defineToolkit,
@@ -127,6 +133,12 @@ export {
   materializeCapabilityDocumentWorkspace,
   renderCapabilityDocument,
 } from './agent/orchestrator/capabilityDocumentWorkspace';
+export {
+  ToolkitRuntimeManager,
+} from './agent/orchestrator/toolkitRuntime';
+export type {
+  ToolkitRuntimeExecution,
+} from './agent/orchestrator/toolkitRuntime';
 export type {
   CapabilityDocumentWorkspace,
   CapabilityDocumentWorkspaceEntry,

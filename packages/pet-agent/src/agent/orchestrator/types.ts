@@ -10,6 +10,7 @@ import type { AgentToolkit, ToolkitReviewCapabilities } from '../../types/toolki
 import type { CompiledAgentRegistry } from './registry';
 import type { CapabilityPlannerRunner } from './capabilityPlannerRunner';
 import type { GlobalReviewPolicy } from './review/globalReviewPolicy';
+import type { ToolkitRuntimeManager } from './toolkitRuntime';
 import type { StructuredOutputAutoRepairConfig, StructuredOutputMethod } from '../../utils/structuredOutput';
 import type { DelegationOutcomeDecision } from './schemas';
 
@@ -116,6 +117,12 @@ export type OrchestratorConfig = {
    * Defaults to a process-independent directory under the OS temp root.
    */
   capabilityPlannerWorkspaceRoot?: string;
+  /**
+   * Host-owned optional Toolkit runtime lifecycle. The orchestrator resolves
+   * per-subagent bindings through it, but the manager itself remains outside
+   * model context and checkpoint state.
+   */
+  toolkitRuntimeManager?: ToolkitRuntimeManager;
 };
 
 export type OrchestratorInvokeOptions = {

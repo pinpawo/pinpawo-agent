@@ -11,6 +11,7 @@ import {
   type CapabilityArtifactStore,
   type CompiledAgentRegistry,
   type OrchestratorConfig,
+  type ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
 import {
   createCapabilityCreatorCapability,
@@ -215,6 +216,7 @@ export function buildLocalChatAgentInput(params: {
   toolkits?: AgentToolkit[];
   /** Complete host Toolkit definitions, including currently unavailable instances. */
   toolkitDefinitions?: readonly AgentToolkit[];
+  toolkitRuntimeManager?: ToolkitRuntimeManager;
   /** Host-owned diagnostic reporter whose dedupe state follows the host lifecycle. */
   reportCapabilityDiagnostics?: CapabilityDiagnosticReporter;
   /** Stable thread scope required by artifact discovery and checkpoint routing. */
@@ -346,6 +348,7 @@ export function buildLocalChatAgentInput(params: {
       generationReserveTokens,
       subagentGenerationReserveTokens: generationReserveTokens,
       capabilityArtifactStore: params.capabilityArtifactStore,
+      toolkitRuntimeManager: params.toolkitRuntimeManager,
     },
     registry: preparedRegistry.registry,
     input: {

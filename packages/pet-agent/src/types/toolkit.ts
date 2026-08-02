@@ -105,6 +105,63 @@ export type ToolkitAvailabilityCheck = () =>
   | ToolkitAvailability
   | Promise<ToolkitAvailability>;
 
+/**
+ * Generic identity supplied when a Toolkit resolves resources for one
+ * subagent execution. It deliberately contains no provider/session/backend
+ * concepts: those remain private to the Toolkit runtime implementation.
+ */
+export type ToolkitRuntimeExecutionScope = {
+  threadId: string | null;
+  runId: string;
+  delegationId: string;
+  workdir: string | null;
+  signal?: AbortSignal;
+};
+
+export type ToolkitRuntimeStartContext = {
+  signal?: AbortSignal;
+};
+
+export type ToolkitRuntimeResolveContext = {
+  execution: ToolkitRuntimeExecutionScope;
+};
+
+export type ToolkitRuntimeReleaseContext = ToolkitRuntimeResolveContext;
+
+export type ToolkitRuntimeStopContext = {
+  signal?: AbortSignal;
+};
+
+/**
+ * Optional Toolkit-owned execution lifecycle.
+ *
+ * The root may be shared across executions. A resolved binding is opaque to
+ * the framework and is only handed back to the same Toolkit's bindTools and
+ * release hooks. bindTools may replace executable Tool instances, but the
+ * framework verifies that the static tool inventory is unchanged.
+ */
+export type ToolkitRuntimeDefinition<TRoot = unknown, TBinding = TRoot> = {
+  start: (
+    context: ToolkitRuntimeStartContext,
+  ) => TRoot | Promise<TRoot>;
+  resolve?: (
+    root: TRoot,
+    context: ToolkitRuntimeResolveContext,
+  ) => TBinding | Promise<TBinding>;
+  bindTools?: (
+    binding: TBinding,
+    context: ToolkitRuntimeResolveContext,
+  ) => readonly NamedStructuredTool[] | Promise<readonly NamedStructuredTool[]>;
+  release?: (
+    binding: TBinding,
+    context: ToolkitRuntimeReleaseContext,
+  ) => void | Promise<void>;
+  stop?: (
+    root: TRoot,
+    context: ToolkitRuntimeStopContext,
+  ) => void | Promise<void>;
+};
+
 export async function evaluateToolkitAvailability(
   toolkit: AgentToolkit,
 ): Promise<ToolkitAvailability> {
@@ -163,6 +220,7 @@ export type AgentToolkit = {
   readonly instructions?: string;
   readonly availability?: ToolkitAvailabilityCheck;
   readonly reviewGuidance?: ToolkitReviewGuidance;
+  readonly runtime?: ToolkitRuntimeDefinition;
 };
 
 function assertToolkitReviewGuidance(
@@ -214,6 +272,20 @@ export function validateToolkitDefinition(toolkit: AgentToolkit) {
   }
   if (toolkit.availability !== undefined && typeof toolkit.availability !== 'function') {
     throw new Error(`Toolkit "${toolkit.name}" availability must be a function`);
+  }
+  if (toolkit.runtime !== undefined) {
+    if (
+      typeof toolkit.runtime !== 'object'
+      || Array.isArray(toolkit.runtime)
+      || typeof toolkit.runtime.start !== 'function'
+    ) {
+      throw new Error(`Toolkit "${toolkit.name}" runtime must define start()`);
+    }
+    for (const hook of ['resolve', 'bindTools', 'release', 'stop'] as const) {
+      if (toolkit.runtime[hook] !== undefined && typeof toolkit.runtime[hook] !== 'function') {
+        throw new Error(`Toolkit "${toolkit.name}" runtime.${hook} must be a function`);
+      }
+    }
   }
 
   assertToolkitReviewGuidance(toolkit.name, toolkit.reviewGuidance);

@@ -78,6 +78,7 @@ function buildStudioInputFromDeps(request: StudioRunServiceRequest): BuildStudio
       ...(deps.userCapabilities ?? []).map((u) => u.capability),
     ],
     toolkits: [...(deps.pluginToolkits ?? []), ...(deps.localToolkits ?? [])],
+    toolkitRuntimeManager: deps.toolkitRuntimeManager,
     ownerUserId: request.ownerUserId ?? null,
     bridge: request.bridge,
     workdir: getLocalServerWorkdir(deps),

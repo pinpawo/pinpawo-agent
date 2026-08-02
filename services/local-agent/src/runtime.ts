@@ -6,6 +6,7 @@ import { loadAgentContext } from './contextLoader';
 import {
   type AgentCapability,
   type AgentToolkit,
+  ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
 import { FileStudioDueRunStore } from '@pinpawo/pet-agent';
 import { collectPluginHooks, loadPlugins } from './pluginLoader';
@@ -25,6 +26,7 @@ import { InflightRequestController } from './inflightRequestController';
 import { LocalAgentAppWsClient } from './localAgentAppWsClient';
 import { LocalAgentAppChatHandler } from './localAgentAppChatHandler';
 import { LocalAgentCapabilityRegistry } from './localAgentCapabilityRegistry';
+import { resolveAvailableToolkits } from './toolkits/toolkitAvailability';
 import {
   buildLocalAgentRuntimeConfig,
   findLegacyLocalAgentState,
@@ -49,6 +51,7 @@ export class LocalAgentRuntime {
   private hooks: ReturnType<typeof collectPluginHooks> | null = null;
   private pluginToolkitDefinitions: AgentToolkit[] = [];
   private pluginToolkits: AgentToolkit[] = [];
+  private readonly toolkitRuntimeManager = new ToolkitRuntimeManager();
   private readonly capabilityRegistry: LocalAgentCapabilityRegistry;
   private readonly chatCheckpointer: FileSaver;
   private readonly studioDueRunStore: FileStudioDueRunStore;
@@ -104,6 +107,7 @@ export class LocalAgentRuntime {
       getPluginToolkits: () => this.pluginToolkits,
       getLocalToolkitDefinitions: () => this.capabilityRegistry.getLocalToolkitDefinitions(),
       getLocalToolkits: () => this.capabilityRegistry.getLocalToolkits(),
+      getToolkitRuntimeManager: () => this.toolkitRuntimeManager,
       getLocalCapabilities: () => this.capabilityRegistry.getLocalCapabilities(),
       getUserCapabilities: () => this.capabilityRegistry.getUserCapabilities(),
       getCapabilityArtifactStore: () => this.capabilityRegistry.getCapabilityArtifactStore(),
@@ -130,6 +134,7 @@ export class LocalAgentRuntime {
       localToolkits: this.getLocalToolkits(),
       pluginToolkitDefinitions: this.getPluginToolkitDefinitions(),
       pluginToolkits: this.getPluginToolkits(),
+      toolkitRuntimeManager: this.getToolkitRuntimeManager(),
       localCapabilities: this.getLocalCapabilities(),
       userCapabilities: this.getUserCapabilities(),
       capabilityArtifactStore: this.capabilityRegistry.getCapabilityArtifactStore(),
@@ -152,11 +157,18 @@ export class LocalAgentRuntime {
         );
       }
     }
-    const { plugins, toolkitDefinitions, toolkits } = await loadPlugins();
+    const { plugins, toolkitDefinitions } = await loadPlugins({ resolveAvailability: false });
     this.modelProfiles = buildLocalModelProfileRegistry();
     this.pluginToolkitDefinitions = toolkitDefinitions;
-    this.pluginToolkits = toolkits;
-    await this.capabilityRegistry.load();
+    await this.capabilityRegistry.load({
+      startToolkitRuntimes: async (localToolkitDefinitions) => {
+        await this.toolkitRuntimeManager.start([
+          ...this.pluginToolkitDefinitions,
+          ...localToolkitDefinitions,
+        ]);
+      },
+    });
+    this.pluginToolkits = await resolveAvailableToolkits(this.pluginToolkitDefinitions);
     this.hooks = collectPluginHooks(plugins);
     this.actorId = await ensureActorSelected({ interactive: false });
     this.actorName = getConfig().apiConnected ? loadSelectedActorName() : LOCAL_ONLY_ACTOR_NAME;
@@ -175,6 +187,15 @@ export class LocalAgentRuntime {
     this.stopController.abort();
     this.studioDueRunScheduler.stop();
     this.disconnectWs();
+  }
+
+  async shutdown() {
+    this.requestStop();
+    await this.toolkitRuntimeManager.stop();
+  }
+
+  getToolkitRuntimeManager(): ToolkitRuntimeManager {
+    return this.toolkitRuntimeManager;
   }
 
   getModelProfiles(): LocalModelProfileRegistry {

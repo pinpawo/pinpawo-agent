@@ -124,6 +124,7 @@ type AgentToolkit = {
   readonly instructions?: string;
   readonly availability?: ToolkitAvailabilityCheck;
   readonly reviewGuidance?: ToolkitReviewGuidance;
+  readonly runtime?: ToolkitRuntimeDefinition;
 };
 
 type ToolDefinition = {
@@ -141,6 +142,7 @@ type ToolDefinition = {
   system prompt。
 - `availability`：host 组装本次 registry generation 前执行的可用性检查。
 - `reviewGuidance`：Toolkit 提供给全局 review 判断的允许/询问边界。
+- `runtime`：可选、由 Toolkit 自己实现的 root / execution binding 生命周期。
 - `ToolDefinition.operation`：工具调用的展示和摘要 metadata。
 - `ToolDefinition.review`：单个工具的确定性 review policy。
 
@@ -163,7 +165,47 @@ LangChain Tool 可能包含可变运行时内部状态。registry 会冻结
 `ToolDefinition` 绑定和 metadata，但保留原始 Tool 实例身份；host 必须约定在
 一个 registry generation 内不修改已注册 Tool 的 `name`。
 
-### 3.2 可用性
+### 3.2 可选 Runtime 生命周期
+
+需要持久连接、共享进程、登录态或执行作用域绑定的 Toolkit 可以声明
+`runtime`；它不是另一套 Capability，也不改变 `uses`、tool permission、review
+或 instructions 的静态含义：
+
+```ts
+type ToolkitRuntimeDefinition<TRoot, TBinding = TRoot> = {
+  start(context: { signal?: AbortSignal }): Promise<TRoot> | TRoot;
+  resolve?(root: TRoot, context: {
+    execution: {
+      threadId: string | null;
+      runId: string;
+      delegationId: string;
+      workdir: string | null;
+      signal?: AbortSignal;
+    };
+  }): Promise<TBinding> | TBinding;
+  bindTools?(binding: TBinding, context: ToolkitRuntimeResolveContext):
+    Promise<readonly NamedStructuredTool[]> | readonly NamedStructuredTool[];
+  release?(binding: TBinding, context: ToolkitRuntimeReleaseContext): Promise<void> | void;
+  stop?(root: TRoot, context: { signal?: AbortSignal }): Promise<void> | void;
+};
+```
+
+Host 使用 `ToolkitRuntimeManager` 在启动期按 Toolkit 顺序启动 root；每个
+Capability subagent 开始时为其声明的 Toolkit resolve 不透明 binding，并在
+subagent 结束（成功、失败或取消）后逆序 release。host 关闭时先清理仍活动的
+binding，再逆序 stop root。并发 subagent 可以同时 resolve，但同一个 root 只会
+启动一次。
+
+`bindTools` 只能替换当前执行实际调用的 Tool 实例；框架会验证工具数量和名称与
+静态 inventory 相同，并保留 `operation`、`review`、权限与 instructions。因此
+runtime 数据不会进入 registry、planner workspace、prompt 或 checkpoint。
+
+`ToolkitRuntimeManager` 是 host-owned：长期 local-agent 在进程启动/关闭时调用
+它；独立 `createPetAgentRuntime()` 创建的私有 manager 可通过其 `shutdown()`
+释放。若由 host 注入共享 manager，则由该 host 统一 stop，不能由单个 pet
+runtime 终止。
+
+### 3.3 可用性
 
 `compileAgentRegistry()` 只负责编译传入的有效 Toolkit inventory，不执行
 `availability`。调用入口或 host 必须先解析可用性：

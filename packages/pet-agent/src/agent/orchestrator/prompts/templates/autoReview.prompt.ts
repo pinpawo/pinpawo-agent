@@ -19,10 +19,11 @@ Evidence and authority:
 Automatic-authorization boundary:
 - Automatic authorization is available only when every action is low risk, narrowly scoped, and observational, reversible, or routine auditable collaboration eligible under its registered toolkit policy.
 - Ordinary browser navigation or public HTTP(S) retrieval is usually low risk. Network access alone is not credential exfiltration.
+- A command that only reads, lists, stats, searches, or summarizes explicitly named non-sensitive paths may be authorized even when those paths or its cwd are outside the effective workdir. Location alone does not make an observational command a write.
 - Creating or editing a narrow set of files inside the effective workdir is usually low risk.
 - Toolkit eligibility guidance identifies operations that may qualify for automatic authorization; it never authorizes a concrete action by itself.
 - Toolkit human-authorization guidance and the global boundaries take precedence over eligibility guidance.
-- Human authorization is required for destructive or broad changes, writes outside the workdir, credentials or secret exposure, permission or repository-administration changes, software installation, spending money, force pushes or history rewrites, deployments or releases, or shell commands with unclear effects.
+- Human authorization is required for destructive or broad changes, mutations outside the workdir, access to credentials or sensitive data, permission or repository-administration changes, software installation, spending money, force pushes or history rewrites, deployments or releases, or shell commands with unclear effects.
 - Evaluate the complete batch. One unsafe or unclear action makes the batch require authorization.
 {toolkitPolicyBlock}
 {outputInstruction}`,

@@ -14,8 +14,7 @@ export function getBlockedShellReason(command: string) {
     [/\bgit\s+reset\s+--hard\b/, '禁止使用 git reset --hard 这类破坏性命令。'],
     [/(^|[\s;&|])sudo(\s|$)/, '禁止通过 sudo 提权执行命令。'],
     [/(^|[\s;&|])(mkfs|fdisk|shutdown|reboot|dd)(\s|$)/, '禁止执行高风险系统命令。'],
-    [/\bcat\s*>\s*/, 'run_shell 不支持依赖 stdin 的 cat > 写文件；请改用 write_file。'],
-    [/<<[-\w'"]*/, 'run_shell 不支持 heredoc；请改用 write_file。'],
+    [/\bcat\s*>\s*(?![^;&|\n]*<<)/, 'run_shell 不支持等待交互式 stdin 的 cat > 写文件；请提供 heredoc 内容或改用 write_file。'],
   ];
 
   for (const [pattern, reason] of blockedPatterns) {
@@ -24,17 +23,7 @@ export function getBlockedShellReason(command: string) {
     }
   }
 
-  if (hasBlockedOutputRedirection(normalized)) {
-    return 'run_shell 不支持输出重定向写文件；请改用 write_file。';
-  }
-
   return null;
-}
-
-export function hasBlockedOutputRedirection(command: string) {
-  const withoutFdDuplication = command.replace(/(^|[\s;&|])\d*>\s*&\d+\b/g, '$1');
-  const withoutDevNull = withoutFdDuplication.replace(/[&\d]*>>?\s*\/dev\/null\b/g, '');
-  return /(^|[^=>])\d*>>?/.test(withoutDevNull);
 }
 
 function processOutputToString(output: unknown) {
@@ -204,7 +193,7 @@ export const runShellTool = tool(
   },
   {
     name: 'run_shell',
-    description: '兜底工具：异步执行非交互 shell 命令并返回输出。只有没有更具体的专用工具覆盖时才使用；不要用它替代 view_file_chunk/read_file/write_file/apply_patch/move_path/copy_path/mkdir_path/list_dir/glob_search/grep_search/http_fetch/download_file。默认在当前 workdir 执行，相对路径也默认相对于该目录；如有需要可显式传 cwd 覆盖。默认超时 60s，可通过 timeoutSeconds 调整（上限 600s）；输出过长时保留开头和结尾并标注截断。不要用于需要输入、全屏 TTY、持续运行，或依赖 stdin 的命令（例如 cat > file）。高风险命令会先进入 toolkit 审批，可批准、拒绝或给出新的处理方向。',
+    description: '兜底工具：异步执行非交互 shell 命令并返回输出。只有没有更具体的专用工具覆盖时才使用；不要用它替代 view_file_chunk/read_file/jq_query/write_file/apply_patch/move_path/copy_path/mkdir_path/list_dir/glob_search/grep_search/http_fetch/download_file。默认在当前 workdir 执行，相对路径也默认相对于该目录；如有需要可显式传 cwd 覆盖。支持命令自身携带内容的 heredoc 和输出重定向，写入效果仍受 toolkit 审批约束。默认超时 60s，可通过 timeoutSeconds 调整（上限 600s）；输出过长时保留开头和结尾并标注截断。不要用于需要交互输入、全屏 TTY 或持续运行的命令。高风险命令会先进入 toolkit 审批，可批准、拒绝或给出新的处理方向。',
     schema: z.object({
       command: z.string().describe('要执行的 shell 命令'),
       cwd: z.string().optional().describe('命令执行目录；默认当前 workdir'),

@@ -186,7 +186,7 @@ wrapper 的职责：
 
 shell policy 使用确定性规则做默认判断：
 
-- 硬性禁止：保留在 `run_shell` raw tool 内，例如 `sudo`、`git reset --hard`、heredoc、输出重定向写文件。
+- 硬性禁止：保留在 `run_shell` raw tool 内，例如 `sudo`、`git reset --hard`、破坏性系统命令和会等待交互式 stdin 的命令。命令自身携带内容的 heredoc 与输出重定向不是独立安全边界，其效果由 review policy 根据具体 command 和 scope 判断。
 - 已授权或低风险：`request()` 返回 `null`，直接执行，例如普通只读命令，或当前会话已经授权的命令范式。
 - 高风险：返回 `ReviewSpec`，例如删除文件、git 写操作、发布、部署、权限变更、远程脚本执行。
 - 不支持 HITL 的执行界面：`request()` 返回 `null`，raw tool 返回“需要 human review”的确定性错误，不触发无法恢复的 interrupt。

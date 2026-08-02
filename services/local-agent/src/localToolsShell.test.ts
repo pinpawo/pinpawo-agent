@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -9,7 +9,6 @@ import {
   getCurrentTimeTool,
   getBlockedShellReason,
   getShellConfirmationRisk,
-  hasBlockedOutputRedirection,
   normalizeShellActionInput,
   runShellTool,
   truncateShellOutput,
@@ -60,16 +59,10 @@ test('bash toolkit exposes get_current_time without command review', () => {
   assert.equal(definition(toolkit, 'get_current_time')?.review, undefined);
 });
 
-test('shell policy blocks output redirection write commands', () => {
-  assert.equal(hasBlockedOutputRedirection('echo ok > out.txt'), true);
-  assert.equal(hasBlockedOutputRedirection('echo ok 2>&1'), false);
-  assert.equal(hasBlockedOutputRedirection('grep -r foo . 2>/dev/null'), false);
-  assert.equal(hasBlockedOutputRedirection('noisy-tool >/dev/null 2>&1'), false);
-  assert.equal(hasBlockedOutputRedirection('echo ok 2>/dev/null > out.txt'), true);
-  assert.match(
-    getBlockedShellReason('echo ok > out.txt') ?? '',
-    /write_file/,
-  );
+test('shell policy allows explicit writes but blocks an interactive cat redirect', () => {
+  assert.equal(getBlockedShellReason('printf ok > out.txt'), null);
+  assert.equal(getBlockedShellReason("cat <<'EOF' > out.txt\nok\nEOF"), null);
+  assert.match(getBlockedShellReason('cat > out.txt') ?? '', /stdin/);
 });
 
 test('shell policy marks risky commands for review', () => {
@@ -116,16 +109,17 @@ test('normalizeShellActionInput trims commands and expands home cwd', () => {
   );
 });
 
-test('runShellTool executes safe commands and rejects shell write fallbacks', async () => {
+test('runShellTool executes commands and explicit output writes', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'pinpawo-shell-write-'));
+  const file = join(dir, 'output.txt');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
   assert.equal(
     await runShellTool.invoke({ command: 'printf ok' }),
     'ok',
   );
-
-  assert.match(
-    String(await runShellTool.invoke({ command: 'cat > file.txt' })),
-    /write_file/,
-  );
+  assert.equal(await runShellTool.invoke({ command: `printf written > ${file}` }), '(no output)');
+  assert.equal(readFileSync(file, 'utf-8'), 'written');
 });
 
 test('runShellTool relies on toolkit review instead of a second interface gate', async (t) => {

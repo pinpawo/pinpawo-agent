@@ -1720,6 +1720,82 @@ test('toolkits compose tools and instructions for capability runtimes', async ()
 
 });
 
+test('toolkits bind model-context tools only to compatible model profiles', async () => {
+  const inspectText = mockTool('inspect_text');
+  const inspectImage = mockTool('inspect_image');
+  const toolkit: AgentToolkit = {
+    name: 'inspect',
+    description: 'inspection toolkit',
+    instructions: 'general inspection rules',
+    tools: [
+      { tool: inspectText },
+      {
+        tool: inspectImage,
+        modelContext: {
+          requiredInputModalities: ['image'],
+          instructions: 'image inspection rules',
+          buildMessages: () => [new HumanMessage('ephemeral image')],
+        },
+      },
+    ],
+  };
+
+  const textOnly = await resolveToolkitExecution([toolkit], undefined, {
+    models: {} as AgentModels,
+    modelInputModalities: ['text'],
+    actor: testActor,
+    messages: [],
+  });
+  assert.deepEqual(textOnly.tools.map((toolItem) => toolItem.name), ['inspect_text']);
+  assert.equal(textOnly.toolkits[0]?.instructions, 'general inspection rules');
+
+  const unspecified = await resolveToolkitExecution([toolkit], undefined, {
+    models: {} as AgentModels,
+    actor: testActor,
+    messages: [],
+  });
+  assert.deepEqual(unspecified.tools.map((toolItem) => toolItem.name), ['inspect_text']);
+
+  const vision = await resolveToolkitExecution([toolkit], undefined, {
+    models: {} as AgentModels,
+    modelInputModalities: ['text', 'image'],
+    actor: testActor,
+    messages: [],
+  });
+  assert.deepEqual(
+    vision.tools.map((toolItem) => toolItem.name),
+    ['inspect_text', 'inspect_image'],
+  );
+  assert.equal(
+    vision.toolkits[0]?.instructions,
+    'general inspection rules\nimage inspection rules',
+  );
+  assert.equal(vision.middleware.length, 1);
+  const wrapModelCall = vision.middleware[0]?.wrapModelCall;
+  assert.equal(typeof wrapModelCall, 'function');
+  let providerMessages: BaseMessage[] = [];
+  if (typeof wrapModelCall === 'function') {
+    await wrapModelCall({
+      messages: [
+        new AIMessage({
+          content: '',
+          tool_calls: [{ id: 'image-1', name: 'inspect_image', args: {} }],
+        }),
+        new ToolMessage({
+          content: 'artifact only',
+          name: 'inspect_image',
+          tool_call_id: 'image-1',
+        }),
+      ],
+    } as never, async (request) => {
+      providerMessages = [...request.messages];
+      return new AIMessage('done');
+    });
+  }
+  assert.equal(providerMessages.length, 3);
+  assert.equal(providerMessages.at(-1)?.content, 'ephemeral image');
+});
+
 test('capability receives tools only from Toolkits authorized by fixed uses', async () => {
   let routeCallCount = 0;
   let capabilityToolNames: string[] = [];

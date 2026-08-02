@@ -3,9 +3,11 @@ import { mkdtemp, readFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
+import { ToolMessage } from '@langchain/core/messages';
 import { getLocalToolsWorkdir, setLocalToolsWorkdir } from '../local/pathUtils';
 import {
   createBrowserScreenshotArtifact,
+  buildBrowserScreenshotModelMessages,
   persistBrowserScreenshot,
   readBrowserScreenshotDataUrl,
 } from './screenshot';
@@ -42,4 +44,15 @@ test('browser screenshots are persisted inside the workdir with private permissi
     await readBrowserScreenshotDataUrl(artifact.screenshot),
     `data:image/png;base64,${Buffer.from('image-bytes').toString('base64')}`,
   );
+
+  const toolMessage = new ToolMessage({
+    content: serialized,
+    artifact,
+    name: 'browser_screenshot',
+    tool_call_id: 'screenshot-1',
+  });
+  const modelMessages = await buildBrowserScreenshotModelMessages(toolMessage);
+  assert.equal(modelMessages.length, 1);
+  assert.match(JSON.stringify(modelMessages[0]?.content), /data:image\/png;base64,/);
+  assert.doesNotMatch(JSON.stringify(toolMessage.content), /data:image\/png;base64,/);
 });

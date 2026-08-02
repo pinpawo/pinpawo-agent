@@ -333,6 +333,7 @@ export function buildLocalChatAgentInput(params: {
     ]),
     graphConfig: {
       models,
+      modelInputModalities: llmConfig.inputModalities ?? ['text'],
       actor,
       checkpoint: params.checkpoint,
       decisionStructuredOutput,

@@ -96,6 +96,7 @@ export function createCapabilityNode(params: {
     const artifactRefs: CapabilityArtifactRef[] = [];
     const toolkitContext = {
       models: config.models,
+      modelInputModalities: config.modelInputModalities,
       actor,
       messages: scopedMessages,
       reviewContext: {

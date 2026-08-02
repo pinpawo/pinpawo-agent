@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import type { AgentCapability } from '../../types/capability';
 import type {
   AgentToolkit,
+  ToolModelContext,
   ToolDefinition,
   ToolOperationMetadata,
   ToolReviewPolicy,
@@ -188,6 +189,19 @@ function snapshotReview(
   });
 }
 
+function snapshotModelContext(
+  modelContext: ToolModelContext | undefined,
+): ToolModelContext | undefined {
+  return modelContext
+    ? Object.freeze({
+        ...modelContext,
+        requiredInputModalities: Object.freeze([
+          ...modelContext.requiredInputModalities,
+        ]),
+      })
+    : undefined;
+}
+
 function snapshotToolDefinition(definition: ToolDefinition): ToolDefinition {
   // Preserve the executable Tool instance by identity: LangChain Tools may own
   // mutable runtime internals and cannot be safely cloned or deep-frozen.
@@ -200,6 +214,9 @@ function snapshotToolDefinition(definition: ToolDefinition): ToolDefinition {
       : {}),
     ...(definition.review
       ? { review: snapshotReview(definition.review) }
+      : {}),
+    ...(definition.modelContext
+      ? { modelContext: snapshotModelContext(definition.modelContext) }
       : {}),
   });
 }

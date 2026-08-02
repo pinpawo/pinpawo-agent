@@ -75,12 +75,14 @@ export {
 
 export type {
   AgentToolkit,
+  ModelInputModality,
   NamedStructuredTool,
   ToolAuthorizationContext,
   ToolAuthorizationPolicy,
   ToolDefinition,
   ToolOperationMetadata,
   ToolOperationSummary,
+  ToolModelContext,
   ToolReviewBlock,
   ToolReviewContext,
   ToolReviewPolicy,

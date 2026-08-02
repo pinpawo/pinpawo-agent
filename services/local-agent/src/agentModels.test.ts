@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildLocalAgentModels } from './agentModels';
+import { LocalImageChatOpenAI } from './localImageModelInput';
 
 function readTemperature(model: unknown): number | undefined {
   return (model as { temperature?: number }).temperature;
@@ -26,6 +27,14 @@ function readBoundToolChoice(model: unknown, toolChoice: unknown): unknown {
   return (bound as {
     defaultOptions?: Record<string, unknown>;
   }).defaultOptions?.tool_choice;
+}
+
+function bindModelTools(model: unknown): unknown {
+  const bindTools = (model as {
+    bindTools?: (tools: unknown[]) => unknown;
+  }).bindTools;
+  assert.ok(bindTools);
+  return bindTools.call(model, []);
 }
 
 test('models use the provider temperature default when no override is configured', () => {
@@ -125,6 +134,7 @@ test('Qwen 3.8 roles preserve the provider-enforced thinking mode', () => {
   }), 'auto');
   assert.equal(readBoundToolChoice(models.act, 'none'), 'none');
   assert.equal(readBoundToolChoice(models.act, 'auto'), 'auto');
+  assert.ok(bindModelTools(models.act) instanceof LocalImageChatOpenAI);
 });
 
 test('models with full tool-choice support preserve forced tool selection', () => {

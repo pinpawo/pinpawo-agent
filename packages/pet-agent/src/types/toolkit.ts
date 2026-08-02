@@ -2,6 +2,7 @@ import {
   isStructuredTool,
   type StructuredTool,
 } from '@langchain/core/tools';
+import type { BaseMessage, ToolMessage } from '@langchain/core/messages';
 import type { ReviewSpec } from '../agent/orchestrator/review/reviewSpec';
 import type { ToolAuthorizationMatcher } from '../agent/orchestrator/review/authorizationMatchers';
 
@@ -89,12 +90,30 @@ export type NamedStructuredTool<TName extends string = string> = StructuredTool 
   name: TName;
 };
 
+export type ModelInputModality = 'text' | 'image';
+
+export type ToolModelContext = {
+  /** Model input capabilities required before this tool may be bound. */
+  readonly requiredInputModalities: readonly ModelInputModality[];
+  /** Instructions included only when this tool is available to the model. */
+  readonly instructions?: string;
+  /**
+   * Build provider-facing messages from a tool result. These messages are
+   * appended only to the current model request and are not written to graph
+   * state or checkpoints.
+   */
+  readonly buildMessages: (
+    message: ToolMessage,
+  ) => readonly BaseMessage[] | Promise<readonly BaseMessage[]>;
+};
+
 export type ToolDefinition<
   TTool extends NamedStructuredTool = NamedStructuredTool,
 > = {
   readonly tool: TTool;
   readonly operation?: ToolOperationMetadata;
   readonly review?: ToolReviewPolicy;
+  readonly modelContext?: ToolModelContext;
 };
 
 export type ToolkitAvailability =
@@ -283,6 +302,35 @@ export function validateToolkitDefinition(toolkit: AgentToolkit) {
         throw new Error(
           `Toolkit "${toolkit.name}" tool "${toolName}" review.authorization must define buildMatcher()`,
         );
+      }
+    }
+    if (definition.modelContext !== undefined) {
+      const owner = `Toolkit "${toolkit.name}" tool "${toolName}" modelContext`;
+      if (
+        typeof definition.modelContext !== 'object'
+        || Array.isArray(definition.modelContext)
+      ) {
+        throw new Error(`${owner} must be an object`);
+      }
+      if (
+        !Array.isArray(definition.modelContext.requiredInputModalities)
+        || definition.modelContext.requiredInputModalities.length === 0
+        || definition.modelContext.requiredInputModalities.some(
+          (modality: unknown) => modality !== 'text' && modality !== 'image',
+        )
+      ) {
+        throw new Error(
+          `${owner}.requiredInputModalities must contain supported modalities`,
+        );
+      }
+      if (
+        definition.modelContext.instructions !== undefined
+        && typeof definition.modelContext.instructions !== 'string'
+      ) {
+        throw new Error(`${owner}.instructions must be a string`);
+      }
+      if (typeof definition.modelContext.buildMessages !== 'function') {
+        throw new Error(`${owner}.buildMessages must be a function`);
       }
     }
     toolNames.add(toolName);

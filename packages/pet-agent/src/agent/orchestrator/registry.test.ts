@@ -6,7 +6,10 @@ import {
   defineInstructionDocument,
   type AgentCapability,
 } from '../../types/capability';
-import { defineToolkit } from '../../types/toolkit';
+import {
+  defineToolkit,
+  type ModelInputModality,
+} from '../../types/toolkit';
 import { compileAgentRegistry } from './registry';
 import {
   AuthorizationPolicies,
@@ -160,6 +163,39 @@ test('compiled registry snapshots Toolkit definitions for one generation', () =>
   assert.deepEqual(registry.capabilities[0]?.toolNames, ['original']);
   assert.equal(registry.capabilities[0]?.tools[0], original);
   assert.ok(Object.isFrozen(registry.capabilities[0]?.toolkits[0]?.tools));
+});
+
+test('compiled registry preserves and snapshots tool model context', () => {
+  const requiredInputModalities: ModelInputModality[] = ['image'];
+  const modelContext = {
+    requiredInputModalities,
+    instructions: 'Inspect the image.',
+    buildMessages: () => [],
+  };
+  const registry = compileAgentRegistry({
+    toolkits: [defineToolkit({
+      name: 'vision',
+      description: 'Vision tools.',
+      tools: [{
+        tool: mockTool('inspect_image'),
+        modelContext,
+      }],
+    })],
+    capabilities: [capability('inspect', ['vision'])],
+  });
+
+  requiredInputModalities[0] = 'text';
+  modelContext.instructions = 'Changed after compilation.';
+
+  const compiledContext = registry.capabilities[0]
+    ?.toolkits[0]
+    ?.tools[0]
+    ?.modelContext;
+  assert.deepEqual(compiledContext?.requiredInputModalities, ['image']);
+  assert.equal(compiledContext?.instructions, 'Inspect the image.');
+  assert.equal(compiledContext?.buildMessages, modelContext.buildMessages);
+  assert.ok(Object.isFrozen(compiledContext));
+  assert.ok(Object.isFrozen(compiledContext?.requiredInputModalities));
 });
 
 test('authorization generation is stable across rebuilds and changes with policy semantics', () => {

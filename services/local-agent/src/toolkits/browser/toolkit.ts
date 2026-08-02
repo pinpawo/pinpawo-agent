@@ -11,6 +11,7 @@ import {
 } from './session';
 import { browserTools } from './tools';
 import { browserOperationMetadata } from './operationMetadata';
+import { buildBrowserScreenshotModelMessages } from './screenshot';
 
 export const BROWSER_TOOLKIT_NAME = 'browser';
 
@@ -25,7 +26,7 @@ let latestBrowserAvailability: BrowserAvailabilitySnapshot | null = null;
 
 const browserToolkitInstructions = [
   '你负责需要真实浏览器参与的网页访问、页面交互、登录态复用、JS 渲染内容读取和页面内容提取。',
-  '优先使用 browser_open 打开目标页面，再根据页面状态使用 browser_snapshot、browser_click、browser_type、browser_scroll、browser_wait、browser_extract 或 browser_screenshot。',
+  '优先使用 browser_open 打开目标页面，再根据页面状态使用 browser_snapshot、browser_click、browser_type、browser_scroll、browser_wait 或 browser_extract。',
   'browser_open 永远使用 default session；不要根据 URL、网站名、域名、平台名或任务名创建特殊 session。',
   '只有用户明确要求隔离登录状态、复用某个专属浏览器会话，或直接给出会话名称时，才使用 browser_open_with_session。',
   '如果用户明确提供了本机浏览器 profile 或 user-data-dir 路径，使用 browser_open_with_profile；不要把本机 profile 路径填到 browser_open 的 session 参数里。',
@@ -33,7 +34,6 @@ const browserToolkitInstructions = [
   '需要登录、验证码或用户手动操作时保持可见浏览器窗口；纯读取或抓取时可以使用 headless。',
   '当 PINPAWO_BROWSER_BACKEND=extension 时，使用 snapshot 返回的 ref 进行 click/type/wait 最稳定；ref 在下一次页面变化或 snapshot 后可能失效，遇到 stale reference 时重新 snapshot。命名 session、profile 和 headless 对 extension 后端仍不适用。',
   'browser_open、browser_snapshot、点击、输入和等待返回的是页面预览；如果结果里的 truncated 或 hasMore 为 true，说明模型只看到了片段。',
-  '页面需要视觉判断时使用 browser_screenshot；兼容图片输入的 model profile 会直接看到截图，其他 profile 只能读取保存路径和元数据。',
   '长文章、Gist、文档、GitHub 页面或搜索结果页在总结、引用、判断前，必须用 browser_extract({ offset, limit }) 按 nextOffset 分块读取，直到 hasMore 为 false。',
   'browser_extract 不给 selector 时会读取当前页面正文全文分块；不要为了绕过截断而从不完整 snapshot 里猜 selector。',
   '点击或提交打开 popup/新标签页时，browser capability 会跟随新目标；新目标关闭后会尽量回到上一目标。',
@@ -121,6 +121,15 @@ export function createBrowserToolkit(): AgentToolkit {
       tool: toolItem,
       operation: browserOperationMetadata[toolItem.name],
       review: reviews[toolItem.name],
+      ...(toolItem.name === 'browser_screenshot'
+        ? {
+            modelContext: {
+              requiredInputModalities: ['image'] as const,
+              instructions: '页面需要视觉判断时使用 browser_screenshot；工具返回的当前视口截图会作为临时图片上下文提供给模型。',
+              buildMessages: buildBrowserScreenshotModelMessages,
+            },
+          }
+        : {}),
     })),
     instructions: browserToolkitInstructions.join('\n'),
   });

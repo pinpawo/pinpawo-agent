@@ -1,6 +1,10 @@
+import { ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import type { StructuredTool } from '@langchain/core/tools';
+import { createMiddleware } from 'langchain';
 import type {
   AgentToolkit,
+  ModelInputModality,
+  ToolModelContext,
 } from '../../types/toolkit';
 import type { SubagentToolOperationMetadata } from '../../types/subagent';
 import {
@@ -73,6 +77,52 @@ export function collectToolkitOperations(
   return operations;
 }
 
+type ToolModelContextBinding = {
+  toolName: string;
+  context: ToolModelContext;
+};
+
+function supportsModelInputModalities(
+  required: readonly ModelInputModality[],
+  supported: readonly ModelInputModality[] | undefined,
+) {
+  const available = supported ?? ['text'];
+  return required.every((modality) => available.includes(modality));
+}
+
+function createToolkitModelContextMiddleware(
+  bindings: readonly ToolModelContextBinding[],
+) {
+  if (bindings.length === 0) return null;
+  const byToolName = new Map(bindings.map((binding) => [binding.toolName, binding.context]));
+
+  return createMiddleware({
+    name: 'ToolkitModelContext',
+    wrapModelCall: async (request, handler) => {
+      let lastAiMessage = -1;
+      for (let index = request.messages.length - 1; index >= 0; index -= 1) {
+        if (request.messages[index]?._getType() === 'ai') {
+          lastAiMessage = index;
+          break;
+        }
+      }
+
+      const appended: BaseMessage[] = [];
+      for (let index = lastAiMessage + 1; index < request.messages.length; index += 1) {
+        const message = request.messages[index];
+        if (!message || !ToolMessage.isInstance(message) || !message.name) continue;
+        const context = byToolName.get(message.name);
+        if (!context) continue;
+        appended.push(...await context.buildMessages(message));
+      }
+
+      return handler(appended.length > 0
+        ? { ...request, messages: [...request.messages, ...appended] }
+        : request);
+    },
+  });
+}
+
 export async function resolveToolkitExecution(
   toolkits: AgentToolkit[],
   names: string[] | undefined,
@@ -90,11 +140,40 @@ export async function resolveToolkitExecution(
 
   const tools: StructuredTool[] = [];
   const reviewBindings: ToolkitReviewBinding[] = [];
+  const modelContextBindings: ToolModelContextBinding[] = [];
+  const compatibleToolkits: AgentToolkit[] = [];
   for (const toolkit of selectedToolkits) {
-    const toolkitTools = toolkit.tools.map((definition) => definition.tool);
+    const compatibleDefinitions = toolkit.tools.filter((definition) => (
+      !definition.modelContext
+      || supportsModelInputModalities(
+        definition.modelContext.requiredInputModalities,
+        ctx.modelInputModalities,
+      )
+    ));
+    if (compatibleDefinitions.length === 0) continue;
+    const conditionalInstructions = compatibleDefinitions
+      .map((definition) => definition.modelContext?.instructions?.trim())
+      .filter((value): value is string => Boolean(value));
+    const compatibleToolkit: AgentToolkit = {
+      ...toolkit,
+      tools: compatibleDefinitions,
+      instructions: [toolkit.instructions?.trim(), ...conditionalInstructions]
+        .filter((value): value is string => Boolean(value))
+        .join('\n'),
+    };
+    compatibleToolkits.push(compatibleToolkit);
+    const toolkitTools = compatibleDefinitions.map((definition) => definition.tool);
     tools.push(...toolkitTools);
+    for (const definition of compatibleDefinitions) {
+      if (definition.modelContext) {
+        modelContextBindings.push({
+          toolName: definition.tool.name,
+          context: definition.modelContext,
+        });
+      }
+    }
     if (ctx.globalReviewPolicy?.mode !== GLOBAL_REVIEW_POLICY_MODE.FULL_ACCESS) {
-      for (const definition of toolkit.tools) {
+      for (const definition of compatibleDefinitions) {
         if (!definition.review) {
           continue;
         }
@@ -108,10 +187,12 @@ export async function resolveToolkitExecution(
     }
   }
   const reviewMiddleware = createToolkitReviewMiddleware(reviewBindings, ctx);
+  const modelContextMiddleware = createToolkitModelContextMiddleware(modelContextBindings);
 
   return {
-    toolkits: selectedToolkits,
+    toolkits: compatibleToolkits,
     tools,
-    middleware: reviewMiddleware ? [reviewMiddleware] : [],
+    middleware: [reviewMiddleware, modelContextMiddleware]
+      .filter((middleware) => middleware !== null),
   };
 }

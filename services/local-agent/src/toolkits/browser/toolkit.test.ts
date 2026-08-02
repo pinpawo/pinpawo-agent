@@ -3,8 +3,18 @@ import test from 'node:test';
 import {
   buildBrowserAvailabilitySnapshot,
   checkBrowserAvailability,
+  createBrowserToolkit,
   getCachedBrowserAvailability,
 } from './toolkit';
+
+test('browser screenshot declares image-only model context', () => {
+  const toolkit = createBrowserToolkit();
+  const screenshot = toolkit.tools.find(({ tool }) => tool.name === 'browser_screenshot');
+
+  assert.ok(screenshot?.modelContext);
+  assert.deepEqual(screenshot.modelContext.requiredInputModalities, ['image']);
+  assert.match(screenshot.modelContext.instructions ?? '', /browser_screenshot/);
+});
 
 test('browser availability caches only the structural backend decision', async () => {
   const availability = await checkBrowserAvailability();

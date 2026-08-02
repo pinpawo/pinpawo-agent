@@ -1,26 +1,15 @@
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
 import { ChromeExtensionBrowserSession } from '../src/toolkits/browser/drivers/chromeExtension/session';
 import { browserRuntime } from '../src/toolkits/browser/runtime';
+import { startBrowserScenarioFixture } from './browser-scenario-fixture';
 
-type Snapshot = { title: string; url: string };
-
-const server = createServer((request, response) => {
-  response.setHeader('content-type', 'text/html; charset=utf-8');
-  if (request.url === '/child') {
-    response.end(`<!doctype html>
-      <title>Extension popup child</title>
-      <button id="close-popup" onclick="window.close()">Close popup</button>`);
-    return;
-  }
-  response.end(`<!doctype html>
-    <title>Extension popup parent</title>
-    <a id="open-popup" href="/child" target="_blank" rel="opener"
-      onclick="document.querySelector('#click-marker').textContent = 'clicked'">Open popup</a>
-    <span id="click-marker">not clicked</span>
-    <div id="delayed" hidden>Ready</div>
-    <script>setTimeout(() => { document.querySelector('#delayed').hidden = false; }, 250)</script>`);
-});
+type Snapshot = {
+  title: string;
+  url: string;
+  text: string;
+  interactive: Array<{ ref?: string; placeholder: string | null; hint: string }>;
+};
+type Extract = { text: string; textLength: number; returnedTextLength: number; hasMore: boolean; nextOffset: number | null };
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
@@ -37,17 +26,8 @@ async function waitForExtension(timeoutMs = 15_000): Promise<void> {
   );
 }
 
-await new Promise<void>((resolvePromise, rejectPromise) => {
-  server.once('error', rejectPromise);
-  server.listen(0, '127.0.0.1', resolvePromise);
-});
-
-const address = server.address();
-if (!address || typeof address === 'string') {
-  throw new Error('Smoke server did not expose a TCP port');
-}
-
 const browser = new ChromeExtensionBrowserSession();
+const fixture = await startBrowserScenarioFixture();
 let extensionConnected = false;
 
 try {
@@ -56,12 +36,41 @@ try {
   extensionConnected = true;
   console.log('[browser-extension-smoke] extension connected');
 
-  const parentUrl = `http://127.0.0.1:${address.port}/parent`;
+  const parentUrl = fixture.url('/parent');
   const opened = JSON.parse(await browser.open(parentUrl)) as Snapshot;
   assert.equal(new URL(opened.url).pathname, '/parent');
+  assert.equal(opened.title, 'Browser fixture parent');
   console.log('[browser-extension-smoke] parent opened');
   await browser.wait('#delayed', 2_000, 'visible');
   console.log('[browser-extension-smoke] visible wait passed');
+
+  const longContent = JSON.parse(await browser.extract({
+    selector: '#long-content',
+    limit: 10_000,
+  })) as Extract;
+  assert.ok(longContent.textLength > 50_000);
+  assert.equal(longContent.returnedTextLength, 10_000);
+  assert.equal(longContent.hasMore, true);
+  assert.equal(longContent.nextOffset, 10_000);
+  const continuation = JSON.parse(await browser.extract({
+    selector: '#long-content',
+    offset: longContent.nextOffset!,
+    limit: 10_000,
+  })) as Extract;
+  assert.equal(continuation.text.length, 10_000);
+  console.log('[browser-extension-smoke] long-content extract passed');
+
+  const formSnapshot = JSON.parse(await browser.snapshot()) as Snapshot;
+  const taskName = formSnapshot.interactive.find((element) => element.placeholder === 'Task name');
+  assert.ok(taskName?.ref, 'snapshot must expose an opaque ref for the form field');
+  const typed = JSON.parse(await browser.type({ ref: taskName.ref }, 'Browser fixture')) as Snapshot;
+  const save = typed.interactive.find((element) => element.hint.includes('#save'));
+  assert.ok(save?.ref, 'snapshot must expose an opaque ref for the save button');
+  const saved = JSON.parse(await browser.click({ ref: save.ref })) as Snapshot;
+  assert.match(saved.text, /Saved: Browser fixture/);
+  await browser.scroll({ deltaY: 800 });
+  assert.match((JSON.parse(await browser.snapshot()) as Snapshot).text, /Scrolled/);
+  console.log('[browser-extension-smoke] opaque-ref form and scroll passed');
 
   const child = JSON.parse(await browser.click('#open-popup')) as Snapshot;
   if (new URL(child.url).pathname !== '/child') {
@@ -78,6 +87,5 @@ try {
 } finally {
   if (extensionConnected) await browser.close().catch(() => {});
   await browserRuntime.stop();
-  server.closeAllConnections();
-  await new Promise<void>((resolvePromise) => server.close(() => resolvePromise()));
+  await fixture.close();
 }

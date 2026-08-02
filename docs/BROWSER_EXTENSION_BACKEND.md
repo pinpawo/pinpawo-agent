@@ -80,7 +80,12 @@ npm run test:browser-smoke -w pinpawo
 npm run test:browser-extension-smoke -w pinpawo
 ```
 
-The first smoke test uses headless Playwright against a local fixture. The extension smoke requires the unpacked extension and registered native host, then verifies parent page → popup → parent fallback, conditional waits and bridge restart recovery in the user's Chrome.
+Both smoke tests use the same loopback-only fixture: delayed SPA-style content,
+long-content extraction in consecutive chunks, opaque-ref form type/click, scrolling,
+and parent page → popup → parent fallback. The first runs headless with Playwright;
+the extension smoke requires the unpacked extension and registered Native Host in the
+user's Chrome. It is the baseline regression set, not evidence that iframe, dialogs,
+file transfer, or shadow-DOM support is complete.
 
 Then:
 

@@ -4,6 +4,7 @@ import {
   TextRenderable,
   type CliRenderer,
 } from '@opentui/core';
+import { buildLoadingCellLine } from '../visuals/loadingCells';
 import {
   formatModelPicker,
   type ModelPickerState,
@@ -40,7 +41,7 @@ export class ModelPickerView {
     this.frame.add(this.content);
   }
 
-  render(state: ModelPickerState, width: number) {
+  render(state: ModelPickerState, width: number, loadingFrame = 0) {
     const visible = state.phase !== 'closed';
     this.frame.visible = visible;
     if (!visible) return;
@@ -54,6 +55,13 @@ export class ModelPickerView {
     this.frame.bottomTitle = state.phase === 'selecting'
       ? ' Please wait '
       : ' ↑↓ · Enter switch · Esc ';
-    this.content.content = formatModelPicker(state, width);
+    const loading = state.phase === 'loading' || state.phase === 'selecting';
+    const content = formatModelPicker(
+      state,
+      loading ? Math.max(1, width - 4) : width,
+    );
+    this.content.content = loading
+      ? buildLoadingCellLine(content, loadingFrame)
+      : content;
   }
 }

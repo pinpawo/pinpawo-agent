@@ -142,6 +142,10 @@ export function readSubagentContextWindowTokens(config: OrchestratorConfig): num
   return config.subagentContextWindowTokens ?? config.contextWindowTokens;
 }
 
+export function readSubagentGenerationReserveTokens(config: OrchestratorConfig): number | undefined {
+  return config.subagentGenerationReserveTokens ?? config.generationReserveTokens;
+}
+
 export function resolveActor(config: OrchestratorConfig, runnableConfig?: RunnableConfig): AgentActor {
   const invokeActor = getInvokeOptions(runnableConfig).actor;
   if (invokeActor) {

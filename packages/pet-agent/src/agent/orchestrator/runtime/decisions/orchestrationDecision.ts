@@ -67,6 +67,7 @@ import {
   resolveActor,
 } from '../config';
 import { guardDecisionEmitter } from '../guards/decisionEvents';
+import { prepareModelRequestMessages } from '../../modelRequestPolicy';
 
 type DecisionKind = 'delegation_outcome';
 
@@ -275,11 +276,11 @@ async function invokeEntryDecision(params: {
       options: buildOrchestrationDecisionStructuredOutputOptions(
         config.decisionStructuredOutput,
       ),
-      messages: [
+      messages: await prepareModelRequestMessages(config.modelRequestPolicy, [
         new SystemMessage(context.systemPrompt),
         context.decisionContextMessage,
         ...context.conversationMessages,
-      ],
+      ]),
       runnableConfig,
     }) as EntryDecision;
   } catch (error) {
@@ -304,10 +305,10 @@ async function invokeDelegationOutcomeDecision(params: {
       options: buildOrchestrationDecisionStructuredOutputOptions(
         config.decisionStructuredOutput,
       ),
-      messages: [
+      messages: await prepareModelRequestMessages(config.modelRequestPolicy, [
         new SystemMessage(context.systemPrompt),
         context.decisionInputMessage,
-      ],
+      ]),
       runnableConfig,
     }) as DelegationOutcomeDecision;
   } catch (error) {

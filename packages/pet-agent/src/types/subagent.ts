@@ -73,6 +73,7 @@ export type SubagentInputState = {
   messages: BaseMessage[];
   maxIterations?: number;
   contextWindowTokens?: number;
+  generationReserveTokens?: number;
   artifacts?: CapabilityArtifactRef[];
 };
 

@@ -58,8 +58,11 @@ export type PetAgentRuntimeConfig = {
   graph?: OrchestratorGraph;
   checkpoint?: OrchestratorConfig['checkpoint'];
   decisionStructuredOutput?: OrchestratorConfig['decisionStructuredOutput'];
+  modelRequestPolicy?: OrchestratorConfig['modelRequestPolicy'];
   contextWindowTokens?: OrchestratorConfig['contextWindowTokens'];
+  generationReserveTokens?: OrchestratorConfig['generationReserveTokens'];
   subagentContextWindowTokens?: OrchestratorConfig['subagentContextWindowTokens'];
+  subagentGenerationReserveTokens?: OrchestratorConfig['subagentGenerationReserveTokens'];
 };
 
 function buildCapabilitySummaries(config: PetAgentRuntimeConfig): PetAgentCapabilitySummary[] {
@@ -142,8 +145,11 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
     actor: config.actor,
     checkpoint: config.checkpoint,
     decisionStructuredOutput: config.decisionStructuredOutput,
+    modelRequestPolicy: config.modelRequestPolicy,
     contextWindowTokens: config.contextWindowTokens,
+    generationReserveTokens: config.generationReserveTokens,
     subagentContextWindowTokens: config.subagentContextWindowTokens,
+    subagentGenerationReserveTokens: config.subagentGenerationReserveTokens,
   });
 
   function descriptor(): PetAgentRuntimeDescriptor {

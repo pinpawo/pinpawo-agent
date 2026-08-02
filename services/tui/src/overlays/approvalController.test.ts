@@ -34,6 +34,7 @@ test('approval controller keeps the one-shot resolution gate after a wait timeou
   });
   const timers: Array<{
     callback: () => void;
+    delayMs: number;
     handle: ReturnType<typeof setTimeout>;
   }> = [];
   const changes: string[] = [];
@@ -42,9 +43,9 @@ test('approval controller keeps the one-shot resolution gate after a wait timeou
     getWidth: () => 80,
     onChange: (state) => changes.push(state.phase),
     submissionTimeoutMs: 25,
-    setTimer: (callback) => {
+    setTimer: (callback, delayMs) => {
       const handle = {} as ReturnType<typeof setTimeout>;
-      timers.push({ callback, handle });
+      timers.push({ callback, delayMs, handle });
       return handle;
     },
     clearTimer: (handle) => {
@@ -54,6 +55,7 @@ test('approval controller keeps the one-shot resolution gate after a wait timeou
   });
 
   controller.sync(waitingReview(), 'ready');
+  assert.equal(timers.length, 0);
   controller.handle('submit');
   const advanced = controller.getState();
   assert.equal(advanced.phase, 'ready');
@@ -61,8 +63,16 @@ test('approval controller keeps the one-shot resolution gate after a wait timeou
 
   controller.handle('submit');
   assert.equal(controller.getState().phase, 'resolution-sent');
-  assert.equal(timers.length, 1);
-  timers[0]?.callback();
+  assert.equal(timers.length, 2);
+  runTimer(timers, 240);
+  const pulsing = controller.getState();
+  assert.equal(
+    pulsing.phase === 'closed'
+      ? null
+      : pulsing.submissionFrame,
+    1,
+  );
+  runTimer(timers, 25);
   const timedOut = controller.getState();
   assert.equal(timedOut.phase, 'resolution-sent');
   assert.match(timedOut.message ?? '', /authoritative review state/);
@@ -73,7 +83,10 @@ test('approval controller keeps the one-shot resolution gate after a wait timeou
     'ready',
     'resolution-sent',
     'resolution-sent',
+    'resolution-sent',
   ]);
+  controller.sync(null, 'ready');
+  assert.equal(timers.length, 0);
 });
 
 test('approval controller preserves the one-shot resolution gate when connection changes', () => {
@@ -182,4 +195,18 @@ function review(id: string): ReviewSpec {
       decision: { type: 'approve' },
     }],
   };
+}
+
+function runTimer(
+  timers: Array<{
+    callback: () => void;
+    delayMs: number;
+    handle: ReturnType<typeof setTimeout>;
+  }>,
+  delayMs: number,
+) {
+  const index = timers.findIndex((timer) => timer.delayMs === delayMs);
+  assert.notEqual(index, -1, `timer ${delayMs}ms was not scheduled`);
+  const [timer] = timers.splice(index, 1);
+  timer?.callback();
 }

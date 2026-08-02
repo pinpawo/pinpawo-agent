@@ -4,6 +4,7 @@ import {
   TextRenderable,
   type CliRenderer,
 } from '@opentui/core';
+import { buildLoadingCellLine } from '../visuals/loadingCells';
 import {
   formatPolicyPicker,
   type PolicyPickerState,
@@ -40,7 +41,7 @@ export class PolicyPickerView {
     this.frame.add(this.content);
   }
 
-  render(state: PolicyPickerState, width: number) {
+  render(state: PolicyPickerState, width: number, loadingFrame = 0) {
     const visible = state.phase !== 'closed';
     this.frame.visible = visible;
     if (!visible) return;
@@ -53,6 +54,12 @@ export class PolicyPickerView {
     this.frame.bottomTitle = state.phase === 'saving'
       ? ' Please wait '
       : ' ↑↓ · Enter save · Esc ';
-    this.content.content = formatPolicyPicker(state, width);
+    const content = formatPolicyPicker(
+      state,
+      state.phase === 'saving' ? Math.max(1, width - 4) : width,
+    );
+    this.content.content = state.phase === 'saving'
+      ? buildLoadingCellLine(content, loadingFrame)
+      : content;
   }
 }

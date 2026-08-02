@@ -1,6 +1,7 @@
 export type {
   AgentActor,
   AgentExecution,
+  AgentModelRequestPolicy,
   AgentModels,
 } from './types/agent';
 

@@ -5,6 +5,7 @@ import {
   createAgent,
   createMiddleware,
   toolStrategy,
+  type AnyAgentMiddleware,
   type TypedToolStrategy,
 } from 'langchain';
 import { emitRuntimeEventToStreamWriter } from '../../utils/streamWriterEvents';
@@ -220,6 +221,7 @@ async function invokePlannerAgent(params: {
   maxIterations: number;
   timeoutMs: number;
   maxObservationBytes?: number;
+  middleware?: AnyAgentMiddleware[];
   runnableConfig?: RunnableConfig;
 }): Promise<CapabilityPlannerResult> {
   const explorer = createCapabilityPlannerFileExplorer({
@@ -232,7 +234,10 @@ async function invokePlannerAgent(params: {
     model: params.model,
     tools: [...explorer.tools],
     systemPrompt: buildCapabilityPlannerAgentSystemPrompt(params.input.mode),
-    middleware: [createPlannerModelMiddleware(params.maxIterations)],
+    middleware: [
+      createPlannerModelMiddleware(params.maxIterations),
+      ...(params.middleware ?? []),
+    ],
     responseFormat: createCapabilityPlannerResponseFormat(params.input),
   });
   const timeout = mergePlannerSignal(
@@ -334,6 +339,7 @@ export function createCapabilityPlannerAgent(params: {
   maxIterations?: number;
   timeoutMs?: number;
   maxObservationBytes?: number;
+  middleware?: AnyAgentMiddleware[];
 }): CapabilityPlannerRunner {
   const maxIterations = params.maxIterations ?? DEFAULT_MAX_MODEL_ITERATIONS;
   const timeoutMs = params.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -358,6 +364,7 @@ export function createCapabilityPlannerAgent(params: {
       ...(params.maxObservationBytes
         ? { maxObservationBytes: params.maxObservationBytes }
         : {}),
+      ...(params.middleware ? { middleware: params.middleware } : {}),
       runnableConfig,
     }),
   });

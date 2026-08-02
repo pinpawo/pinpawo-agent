@@ -26,8 +26,12 @@ import {
   type TrendPromptItem,
 } from './capabilities/dailyPost';
 import { createPetProfileToolkit } from './toolkits/petProfile';
-import { buildLocalAgentModels } from './agentModels';
+import {
+  buildLocalAgentModels,
+  resolveLlmGenerationReserveTokens,
+} from './agentModels';
 import type { LocalImageModelInputOptions } from './localImageModelInput';
+import { createLocalModelRequestPolicy } from './localModelRequestPolicy';
 import type { AgentLlmConfig } from './agentConfig';
 import type { AgentContext } from './contextLoader';
 import { buildLocalLlmConfig } from './llmConfig';
@@ -241,7 +245,8 @@ export function buildLocalChatAgentInput(params: {
   const llmConfig = params.llmConfig ?? buildLocalLlmConfig();
   const decisionStructuredOutput = buildDecisionStructuredOutput(llmConfig);
   const actor = buildActor(params.context);
-  const models = buildLocalAgentModels(llmConfig, params.modelInput);
+  const models = buildLocalAgentModels(llmConfig);
+  const generationReserveTokens = resolveLlmGenerationReserveTokens(llmConfig);
   const trendItems = toTrendPromptItems(params.context.context.trendItems);
   const sharedToolkits: AgentToolkit[] = [
     createPetProfileToolkit({
@@ -329,16 +334,20 @@ export function buildLocalChatAgentInput(params: {
       llmConfig.observeModel ?? llmConfig.model,
       String(llmConfig.contextWindowTokens ?? 32000),
       String(llmConfig.subagentContextWindowTokens ?? llmConfig.contextWindowTokens ?? 32000),
+      String(generationReserveTokens ?? 0),
       params.checkpoint ? 'checkpoint' : 'memory',
     ]),
     graphConfig: {
       models,
+      modelRequestPolicy: createLocalModelRequestPolicy(llmConfig, params.modelInput),
       modelInputModalities: llmConfig.inputModalities ?? ['text'],
       actor,
       checkpoint: params.checkpoint,
       decisionStructuredOutput,
       contextWindowTokens: llmConfig.contextWindowTokens,
       subagentContextWindowTokens: llmConfig.subagentContextWindowTokens ?? llmConfig.contextWindowTokens,
+      generationReserveTokens,
+      subagentGenerationReserveTokens: generationReserveTokens,
       capabilityArtifactStore: params.capabilityArtifactStore,
     },
     registry: preparedRegistry.registry,

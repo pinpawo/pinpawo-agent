@@ -16,9 +16,13 @@ import {
   type StudioRunQueueStore,
 } from '@pinpawo/pet-agent';
 
-import { buildLocalAgentModels } from '../agentModels';
+import {
+  buildLocalAgentModels,
+  resolveLlmGenerationReserveTokens,
+} from '../agentModels';
 import type { LocalModelProfileRegistry } from '../llmConfig';
 import { buildDecisionStructuredOutput } from '../agentChannel';
+import { createLocalModelRequestPolicy } from '../localModelRequestPolicy';
 import { createExploreCapability } from '../capabilities/explore';
 import { loadGeneralCapability } from '../capabilities/general';
 import { buildLocalAgentRuntimeConfig } from '../runtimeConfig';
@@ -153,6 +157,7 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
     const petDecisionStructuredOutput = petConfig.modelProfileId
       ? buildDecisionStructuredOutput(petLlmConfig)
       : globalDecisionStructuredOutput;
+    const generationReserveTokens = resolveLlmGenerationReserveTokens(petLlmConfig);
     const capsForThisPet: AgentCapability[] = petConfig.capabilities.map((name) => {
       if (name === 'explore') {
         return createExploreCapability();
@@ -178,7 +183,10 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
       contextWindowTokens: petLlmConfig.contextWindowTokens,
       subagentContextWindowTokens: petLlmConfig.subagentContextWindowTokens
         ?? petLlmConfig.contextWindowTokens,
+      generationReserveTokens,
+      subagentGenerationReserveTokens: generationReserveTokens,
       decisionStructuredOutput: petDecisionStructuredOutput,
+      modelRequestPolicy: createLocalModelRequestPolicy(petLlmConfig),
       workdir: effectiveWorkdir,
       humanReviewer: createWsHumanReviewer({
         send: input.bridge.send,

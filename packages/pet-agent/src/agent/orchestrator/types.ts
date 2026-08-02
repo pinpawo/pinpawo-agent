@@ -3,7 +3,12 @@ import type { RunnableConfig } from '@langchain/core/runnables';
 import type { StructuredTool } from '@langchain/core/tools';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { AgentCapability } from '../../types/capability';
-import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent';
+import type {
+  AgentActor,
+  AgentExecution,
+  AgentModelRequestPolicy,
+  AgentModels,
+} from '../../types/agent';
 import type { CapabilityArtifactRef, CapabilityArtifactStore } from '../../types/artifact';
 import type { SubagentCompletionReason } from '../../types/subagent';
 import type {
@@ -85,6 +90,8 @@ export type StructuredOrchestrationDecisionModel = {
 
 export type OrchestratorConfig = {
   models: AgentModels;
+  /** Host/provider request adaptation without subclassing the chat model. */
+  modelRequestPolicy?: AgentModelRequestPolicy;
   /** Input modalities supported by the active model profile. */
   modelInputModalities?: readonly ModelInputModality[];
   actor?: AgentActor;
@@ -96,11 +103,15 @@ export type OrchestratorConfig = {
   maxRunIterations?: number;
   decisionStructuredOutput?: OrchestrationDecisionStructuredOutputConfig;
   contextWindowTokens?: number;
+  /** Output + reasoning capacity reserved before deriving input maintenance thresholds. */
+  generationReserveTokens?: number;
   /**
    * Context window for subagent model calls. Defaults to `contextWindowTokens`
    * when subagents use the same model/window as the main orchestrator.
    */
   subagentContextWindowTokens?: number;
+  /** Defaults to `generationReserveTokens` when the same model serves subagents. */
+  subagentGenerationReserveTokens?: number;
   /**
    * Artifact store (a port; the host supplies the concrete adapter). Injected
    * into the selected capability's narrow `CapabilityFinalizeContext`.

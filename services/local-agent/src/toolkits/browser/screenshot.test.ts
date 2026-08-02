@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, stat, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
@@ -55,4 +55,16 @@ test('browser screenshots are persisted inside the workdir with private permissi
   assert.equal(modelMessages.length, 1);
   assert.match(JSON.stringify(modelMessages[0]?.content), /data:image\/png;base64,/);
   assert.doesNotMatch(JSON.stringify(toolMessage.content), /data:image\/png;base64,/);
+
+  await unlink(payload.path);
+  const missingImageMessages = await buildBrowserScreenshotModelMessages(toolMessage);
+  assert.equal(missingImageMessages.length, 1);
+  assert.match(
+    JSON.stringify(missingImageMessages[0]?.content),
+    /could not be loaded/,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(missingImageMessages[0]?.content),
+    /data:image\/png;base64,/,
+  );
 });

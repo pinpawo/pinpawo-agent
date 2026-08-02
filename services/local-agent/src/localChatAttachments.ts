@@ -72,8 +72,7 @@ export function createAdmittedLocalChatHumanMessage(
       pinpawo: {
         [DISPLAY_TEXT_METADATA_KEY]: displayText,
         ...(imageAttachments.length ? {
-          localImageReferences: imageAttachments.map((image) => ({
-            uri: image.uri,
+          localImages: imageAttachments.map((image) => ({
             name: image.name,
             mimeType: image.mimeType,
             byteSize: image.byteSize,

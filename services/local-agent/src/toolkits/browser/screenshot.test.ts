@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, stat, unlink } from 'node:fs/promises';
+import { mkdtemp, readFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
-import { ToolMessage } from '@langchain/core/messages';
 import { getLocalToolsWorkdir, setLocalToolsWorkdir } from '../local/pathUtils';
 import {
   createBrowserScreenshotArtifact,
-  buildBrowserScreenshotModelMessages,
+  buildBrowserScreenshotMessages,
   persistBrowserScreenshot,
   readBrowserScreenshotDataUrl,
 } from './screenshot';
@@ -45,26 +44,11 @@ test('browser screenshots are persisted inside the workdir with private permissi
     `data:image/png;base64,${Buffer.from('image-bytes').toString('base64')}`,
   );
 
-  const toolMessage = new ToolMessage({
-    content: serialized,
-    artifact,
-    name: 'browser_screenshot',
-    tool_call_id: 'screenshot-1',
-  });
-  const modelMessages = await buildBrowserScreenshotModelMessages(toolMessage);
-  assert.equal(modelMessages.length, 1);
-  assert.match(JSON.stringify(modelMessages[0]?.content), /data:image\/png;base64,/);
-  assert.doesNotMatch(JSON.stringify(toolMessage.content), /data:image\/png;base64,/);
-
-  await unlink(payload.path);
-  const missingImageMessages = await buildBrowserScreenshotModelMessages(toolMessage);
-  assert.equal(missingImageMessages.length, 1);
-  assert.match(
-    JSON.stringify(missingImageMessages[0]?.content),
-    /could not be loaded/,
-  );
-  assert.doesNotMatch(
-    JSON.stringify(missingImageMessages[0]?.content),
-    /data:image\/png;base64,/,
-  );
+  const messages = await buildBrowserScreenshotMessages(serialized, 'screenshot-1');
+  assert.equal(messages.length, 2);
+  assert.equal(messages[0]._getType(), 'tool');
+  assert.equal(messages[1]._getType(), 'human');
+  assert.doesNotMatch(JSON.stringify(messages[0].content), /data:image\/png;base64,/);
+  assert.match(JSON.stringify(messages[1].content), /data:image\/png;base64,/);
+  assert.match(JSON.stringify(messages.map((message) => message.toDict())), /data:image\/png;base64,/);
 });

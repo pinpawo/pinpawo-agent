@@ -36,12 +36,12 @@ test('plain local chat messages keep their original model and transcript text', 
   assert.equal(readLocalChatDisplayText(message), null);
 });
 
-test('admitted images use durable content blocks and filename-only transcript text', () => {
+test('admitted images use model-readable content blocks and filename-only transcript text', () => {
   const message = createAdmittedLocalChatHumanMessage('describe it', [{
     id: 'image-1',
     source: 'local-image',
     kind: 'image',
-    uri: `pinpawo-local-image://sha256/${'a'.repeat(64)}`,
+    uri: 'data:image/png;base64,aW1hZ2U=',
     name: 'private-photo.png',
     mimeType: 'image/png',
     byteSize: 128,
@@ -49,8 +49,7 @@ test('admitted images use durable content blocks and filename-only transcript te
   }]);
 
   assert.equal(Array.isArray(message.content), true);
-  assert.match(JSON.stringify(message.content), /pinpawo-local-image:/);
-  assert.doesNotMatch(JSON.stringify(message.content), /base64/);
+  assert.match(JSON.stringify(message.content), /data:image\/png;base64,aW1hZ2U=/);
   assert.equal(
     readLocalChatDisplayText(message),
     'describe it\n\nAttachments:\n- image: private-photo.png',

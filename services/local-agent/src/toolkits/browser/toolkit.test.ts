@@ -7,13 +7,13 @@ import {
   getCachedBrowserAvailability,
 } from './toolkit';
 
-test('browser screenshot declares image-only model context', () => {
+test('browser screenshot declares image-only model requirements', () => {
   const toolkit = createBrowserToolkit();
   const screenshot = toolkit.tools.find(({ tool }) => tool.name === 'browser_screenshot');
 
-  assert.ok(screenshot?.modelContext);
-  assert.deepEqual(screenshot.modelContext.requiredInputModalities, ['image']);
-  assert.match(screenshot.modelContext.instructions ?? '', /browser_screenshot/);
+  assert.ok(screenshot?.modelRequirements);
+  assert.deepEqual(screenshot.modelRequirements.requiredInputModalities, ['image']);
+  assert.match(screenshot.modelRequirements.instructions ?? '', /browser_screenshot/);
 });
 
 test('browser availability caches only the structural backend decision', async () => {

@@ -6,7 +6,6 @@ import type { AgentCapability } from '../../types/capability';
 import type {
   AgentActor,
   AgentExecution,
-  AgentModelRequestPolicy,
   AgentModels,
 } from '../../types/agent';
 import type { CapabilityArtifactRef, CapabilityArtifactStore } from '../../types/artifact';
@@ -90,10 +89,14 @@ export type StructuredOrchestrationDecisionModel = {
 
 export type OrchestratorConfig = {
   models: AgentModels;
-  /** Host/provider request adaptation without subclassing the chat model. */
-  modelRequestPolicy?: AgentModelRequestPolicy;
   /** Input modalities supported by the active model profile. */
   modelInputModalities?: readonly ModelInputModality[];
+  /** Record input modalities introduced by tool results. */
+  admitInputModalities?: (
+    modalities: readonly ModelInputModality[],
+  ) => void | Promise<void>;
+  /** Override the planner's structured-result tool selection for limited providers. */
+  capabilityPlannerToolChoice?: 'auto';
   actor?: AgentActor;
   checkpoint?: BaseCheckpointSaver;
   /**

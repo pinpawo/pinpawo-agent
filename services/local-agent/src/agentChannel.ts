@@ -30,8 +30,6 @@ import {
   buildLocalAgentModels,
   resolveLlmGenerationReserveTokens,
 } from './agentModels';
-import type { LocalImageModelInputOptions } from './localImageModelInput';
-import { createLocalModelRequestPolicy } from './localModelRequestPolicy';
 import type { AgentLlmConfig } from './agentConfig';
 import type { AgentContext } from './contextLoader';
 import { buildLocalLlmConfig } from './llmConfig';
@@ -44,7 +42,10 @@ import {
   type LocalAgentInterfaceContext,
   type LocalAgentInterfaceKind,
 } from './chatInterface';
-import { inferLlmStructuredOutputMethod } from './llmModelPresets';
+import {
+  inferLlmStructuredOutputMethod,
+  inferLlmToolChoiceSupport,
+} from './llmModelPresets';
 import {
   prepareAgentRegistry,
   type CapabilityDiagnosticReporter,
@@ -209,10 +210,10 @@ export function buildLocalChatAgentInput(params: {
   context: AgentContext;
   userMessage: string;
   llmConfig?: AgentLlmConfig;
-  /** Host-private model input adapter for local image rehydration/admission. */
-  modelInput?: Partial<LocalImageModelInputOptions>;
-  /** Cache identity for adapters that close over one durable session ledger. */
-  modelInputCacheKey?: string;
+  /** Record model input modalities introduced by tool results. */
+  admitInputModalities?: OrchestratorConfig['admitInputModalities'];
+  /** Cache identity for callbacks that close over one durable session ledger. */
+  sessionContextCacheKey?: string;
   toolkits?: AgentToolkit[];
   /** Complete host Toolkit definitions, including currently unavailable instances. */
   toolkitDefinitions?: readonly AgentToolkit[];
@@ -329,7 +330,7 @@ export function buildLocalChatAgentInput(params: {
       actor.petId,
       llmConfig.modelProfileId,
       llmConfig.modelProfileFingerprint,
-      params.modelInputCacheKey,
+      params.sessionContextCacheKey,
       llmConfig.model,
       llmConfig.observeModel ?? llmConfig.model,
       String(llmConfig.contextWindowTokens ?? 32000),
@@ -339,8 +340,11 @@ export function buildLocalChatAgentInput(params: {
     ]),
     graphConfig: {
       models,
-      modelRequestPolicy: createLocalModelRequestPolicy(llmConfig, params.modelInput),
       modelInputModalities: llmConfig.inputModalities ?? ['text'],
+      admitInputModalities: params.admitInputModalities,
+      ...(inferLlmToolChoiceSupport(llmConfig.model) === 'auto_only'
+        ? { capabilityPlannerToolChoice: 'auto' }
+        : {}),
       actor,
       checkpoint: params.checkpoint,
       decisionStructuredOutput,

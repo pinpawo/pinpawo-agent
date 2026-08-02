@@ -1,11 +1,12 @@
 import { tool } from '@langchain/core/tools';
 import type { StructuredTool, ToolRuntime } from '@langchain/core/tools';
+import { Command } from '@langchain/langgraph';
 import type { SubagentRuntimeContext } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import { browserSession } from './session';
 import type { BrowserExtractOptions, BrowserWaitState } from './session';
 import { formatBrowserToolError } from './errors';
-import { createBrowserScreenshotArtifact } from './screenshot';
+import { buildBrowserScreenshotMessages } from './screenshot';
 
 type BrowserTargetInput = { selector?: string; ref?: string };
 
@@ -329,19 +330,24 @@ const browserCloseTool = tool(
 );
 
 const browserScreenshotTool = tool(
-  async (_input, runtime: BrowserToolRuntime): Promise<[string, unknown]> => {
+  async (_input, runtime: BrowserToolRuntime) => {
     try {
       const result = await browserSession.screenshot(readBrowserExecutionOwner(runtime));
-      return [result, createBrowserScreenshotArtifact(result)];
+      const messages = await buildBrowserScreenshotMessages(result, runtime.toolCallId);
+      await runtime.context?.admitInputModalities?.(['text', 'image']);
+      return new Command({
+        update: {
+          messages,
+        },
+      });
     } catch (err) {
-      return [formatBrowserToolError(err), undefined];
+      return formatBrowserToolError(err);
     }
   },
   {
     name: 'browser_screenshot',
     description: '截取当前可见浏览器视口并保存到当前 workdir 的 .pinpawo/browser/screenshots 目录。',
     schema: z.object({}),
-    responseFormat: 'content_and_artifact',
   },
 );
 

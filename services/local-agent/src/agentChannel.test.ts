@@ -102,10 +102,7 @@ test('buildLocalChatAgentInput passes the generation reserve to main and subagen
 
   assert.equal(setup.graphConfig.generationReserveTokens, 147_456);
   assert.equal(setup.graphConfig.subagentGenerationReserveTokens, 147_456);
-  assert.equal(
-    setup.graphConfig.modelRequestPolicy?.normalizeToolChoice?.('required'),
-    'auto',
-  );
+  assert.equal(setup.graphConfig.capabilityPlannerToolChoice, 'auto');
 });
 
 test('buildLocalChatAgentInput rejects an empty artifact discovery scope', () => {
@@ -371,18 +368,18 @@ test('graph identity distinguishes stable profiles with the same model on differ
   assert.match(second.graphKey, /account-b/);
 });
 
-test('graph identity isolates session-scoped model input adapters', () => {
+test('graph identity isolates session-scoped modality callbacks', () => {
   const params = {
     context: createContext(),
     userMessage: 'hello',
   };
   const first = buildTestLocalChatAgentInput({
     ...params,
-    modelInputCacheKey: 'session-a',
+    sessionContextCacheKey: 'session-a',
   });
   const second = buildTestLocalChatAgentInput({
     ...params,
-    modelInputCacheKey: 'session-b',
+    sessionContextCacheKey: 'session-b',
   });
 
   assert.notEqual(first.graphKey, second.graphKey);

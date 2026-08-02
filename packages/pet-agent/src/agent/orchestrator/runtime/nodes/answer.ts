@@ -26,7 +26,6 @@ import {
   resolveActor,
 } from '../config';
 import { DEFAULT_ORCHESTRATOR_MAX_ITERATIONS } from '../constants';
-import { prepareModelRequestMessages } from '../../modelRequestPolicy';
 
 export function createAnswerNode(config: OrchestratorConfig) {
   // Node: answer — the dedicated final-reply node. The decision nodes only route
@@ -92,7 +91,7 @@ export function createAnswerNode(config: OrchestratorConfig) {
       contextFacts: answerContextFacts,
     });
     const response = await (config.models.answer ?? config.models.act).invoke(
-      await prepareModelRequestMessages(config.modelRequestPolicy, answerMessages),
+      answerMessages,
       runnableConfig,
     );
     if (!readMessageText(response).trim()) {

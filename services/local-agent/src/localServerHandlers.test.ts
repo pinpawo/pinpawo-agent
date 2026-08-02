@@ -705,8 +705,8 @@ test('image admission persists a monotonic requirement and gates model selection
       }],
     });
     const serializedMessage = JSON.stringify(providerMessage?.content);
-    assert.match(serializedMessage, /pinpawo-local-image:/);
-    assert.doesNotMatch(serializedMessage, /base64|renamed\.bin/);
+    assert.match(serializedMessage, /data:image\/png;base64,/);
+    assert.doesNotMatch(serializedMessage, /renamed\.bin/);
 
     await handlers.peerHandlers.onModelList(peer, {
       type: 'model.list',

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import type { AgentCapability } from '../../types/capability';
 import type {
   AgentToolkit,
-  ToolModelContext,
+  ToolModelRequirements,
   ToolDefinition,
   ToolOperationMetadata,
   ToolReviewPolicy,
@@ -189,14 +189,14 @@ function snapshotReview(
   });
 }
 
-function snapshotModelContext(
-  modelContext: ToolModelContext | undefined,
-): ToolModelContext | undefined {
-  return modelContext
+function snapshotModelRequirements(
+  modelRequirements: ToolModelRequirements | undefined,
+): ToolModelRequirements | undefined {
+  return modelRequirements
     ? Object.freeze({
-        ...modelContext,
+        ...modelRequirements,
         requiredInputModalities: Object.freeze([
-          ...modelContext.requiredInputModalities,
+          ...modelRequirements.requiredInputModalities,
         ]),
       })
     : undefined;
@@ -215,8 +215,8 @@ function snapshotToolDefinition(definition: ToolDefinition): ToolDefinition {
     ...(definition.review
       ? { review: snapshotReview(definition.review) }
       : {}),
-    ...(definition.modelContext
-      ? { modelContext: snapshotModelContext(definition.modelContext) }
+    ...(definition.modelRequirements
+      ? { modelRequirements: snapshotModelRequirements(definition.modelRequirements) }
       : {}),
   });
 }

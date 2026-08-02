@@ -1,5 +1,4 @@
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import type { BaseMessage } from '@langchain/core/messages';
 
 export type AgentActor = {
   petId: string;
@@ -20,18 +19,6 @@ export type AgentModels = {
   observe?: BaseChatModel;
   /** Dedicated model variant for subagent execution. Falls back to `act` when omitted. */
   subagent?: BaseChatModel;
-};
-
-/**
- * Host-owned model request adaptation applied immediately before provider
- * invocation. This keeps transport concerns such as local attachment
- * rehydration and provider tool-choice limits outside model subclasses.
- */
-export type AgentModelRequestPolicy = {
-  prepareMessages?: (
-    messages: readonly BaseMessage[],
-  ) => readonly BaseMessage[] | Promise<readonly BaseMessage[]>;
-  normalizeToolChoice?: (toolChoice: unknown) => unknown;
 };
 
 export type AgentExecution = {

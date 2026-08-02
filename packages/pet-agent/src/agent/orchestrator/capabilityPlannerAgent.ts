@@ -5,7 +5,6 @@ import {
   createAgent,
   createMiddleware,
   toolStrategy,
-  type AnyAgentMiddleware,
   type TypedToolStrategy,
 } from 'langchain';
 import { emitRuntimeEventToStreamWriter } from '../../utils/streamWriterEvents';
@@ -43,7 +42,10 @@ export class CapabilityPlannerAgentError extends Error {
   }
 }
 
-function createPlannerModelMiddleware(maxIterations: number) {
+function createPlannerModelMiddleware(
+  maxIterations: number,
+  toolChoice?: 'auto',
+) {
   let modelCalls = 0;
   return createMiddleware({
     name: 'CapabilityPlannerModelBoundary',
@@ -57,6 +59,7 @@ function createPlannerModelMiddleware(maxIterations: number) {
       modelCalls += 1;
       return handler({
         ...request,
+        ...(toolChoice ? { toolChoice } : {}),
         modelSettings: {
           ...request.modelSettings,
           parallel_tool_calls: false,
@@ -221,7 +224,7 @@ async function invokePlannerAgent(params: {
   maxIterations: number;
   timeoutMs: number;
   maxObservationBytes?: number;
-  middleware?: AnyAgentMiddleware[];
+  toolChoice?: 'auto';
   runnableConfig?: RunnableConfig;
 }): Promise<CapabilityPlannerResult> {
   const explorer = createCapabilityPlannerFileExplorer({
@@ -234,10 +237,7 @@ async function invokePlannerAgent(params: {
     model: params.model,
     tools: [...explorer.tools],
     systemPrompt: buildCapabilityPlannerAgentSystemPrompt(params.input.mode),
-    middleware: [
-      createPlannerModelMiddleware(params.maxIterations),
-      ...(params.middleware ?? []),
-    ],
+    middleware: [createPlannerModelMiddleware(params.maxIterations, params.toolChoice)],
     responseFormat: createCapabilityPlannerResponseFormat(params.input),
   });
   const timeout = mergePlannerSignal(
@@ -339,7 +339,7 @@ export function createCapabilityPlannerAgent(params: {
   maxIterations?: number;
   timeoutMs?: number;
   maxObservationBytes?: number;
-  middleware?: AnyAgentMiddleware[];
+  toolChoice?: 'auto';
 }): CapabilityPlannerRunner {
   const maxIterations = params.maxIterations ?? DEFAULT_MAX_MODEL_ITERATIONS;
   const timeoutMs = params.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -364,7 +364,7 @@ export function createCapabilityPlannerAgent(params: {
       ...(params.maxObservationBytes
         ? { maxObservationBytes: params.maxObservationBytes }
         : {}),
-      ...(params.middleware ? { middleware: params.middleware } : {}),
+      ...(params.toolChoice ? { toolChoice: params.toolChoice } : {}),
       runnableConfig,
     }),
   });

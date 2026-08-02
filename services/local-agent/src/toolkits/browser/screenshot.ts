@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
-import { HumanMessage, type BaseMessage, type ToolMessage } from '@langchain/core/messages';
+import { HumanMessage, ToolMessage } from '@langchain/core/messages';
 import { getLocalToolsWorkdir } from '../local/pathUtils';
 
 const MAX_BROWSER_SCREENSHOT_BYTES = 4 * 1024 * 1024;
@@ -119,14 +119,20 @@ export async function readBrowserScreenshotDataUrl(
   return `data:${screenshot.mimeType};base64,${bytes.toString('base64')}`;
 }
 
-export async function buildBrowserScreenshotModelMessages(
-  message: ToolMessage,
-): Promise<readonly BaseMessage[]> {
-  const artifact = readBrowserScreenshotArtifact(message.artifact);
-  if (!artifact) return [];
-  try {
-    const imageUrl = await readBrowserScreenshotDataUrl(artifact.screenshot);
-    return [new HumanMessage({
+export async function buildBrowserScreenshotMessages(
+  serialized: string,
+  toolCallId: string,
+) {
+  const artifact = createBrowserScreenshotArtifact(serialized);
+  const imageUrl = await readBrowserScreenshotDataUrl(artifact.screenshot);
+  return [
+    new ToolMessage({
+      content: serialized,
+      artifact,
+      name: 'browser_screenshot',
+      tool_call_id: toolCallId,
+    }),
+    new HumanMessage({
       content: [
         {
           type: 'text',
@@ -137,12 +143,8 @@ export async function buildBrowserScreenshotModelMessages(
           image_url: { url: imageUrl },
         },
       ],
-    })];
-  } catch {
-    return [new HumanMessage({
-      content: 'The browser screenshot from the preceding tool result could not be loaded. Do not claim to have inspected the image; call browser_screenshot again before making a visual judgment.',
-    })];
-  }
+    }),
+  ] as const;
 }
 
 export async function persistBrowserScreenshot(input: BrowserScreenshotData): Promise<string> {

@@ -22,10 +22,10 @@ import {
 } from '../agentModels';
 import type { LocalModelProfileRegistry } from '../llmConfig';
 import { buildDecisionStructuredOutput } from '../agentChannel';
-import { createLocalModelRequestPolicy } from '../localModelRequestPolicy';
 import { createExploreCapability } from '../capabilities/explore';
 import { loadGeneralCapability } from '../capabilities/general';
 import { buildLocalAgentRuntimeConfig } from '../runtimeConfig';
+import { inferLlmToolChoiceSupport } from '../llmModelPresets';
 import { loadPetLocalConfigs } from './petConfig';
 import {
   loadStudioLocalConfig,
@@ -186,7 +186,9 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
       generationReserveTokens,
       subagentGenerationReserveTokens: generationReserveTokens,
       decisionStructuredOutput: petDecisionStructuredOutput,
-      modelRequestPolicy: createLocalModelRequestPolicy(petLlmConfig),
+      ...(inferLlmToolChoiceSupport(petLlmConfig.model) === 'auto_only'
+        ? { capabilityPlannerToolChoice: 'auto' }
+        : {}),
       workdir: effectiveWorkdir,
       humanReviewer: createWsHumanReviewer({
         send: input.bridge.send,

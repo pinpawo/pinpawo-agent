@@ -58,7 +58,7 @@ export type PetAgentRuntimeConfig = {
   graph?: OrchestratorGraph;
   checkpoint?: OrchestratorConfig['checkpoint'];
   decisionStructuredOutput?: OrchestratorConfig['decisionStructuredOutput'];
-  modelRequestPolicy?: OrchestratorConfig['modelRequestPolicy'];
+  capabilityPlannerToolChoice?: OrchestratorConfig['capabilityPlannerToolChoice'];
   contextWindowTokens?: OrchestratorConfig['contextWindowTokens'];
   generationReserveTokens?: OrchestratorConfig['generationReserveTokens'];
   subagentContextWindowTokens?: OrchestratorConfig['subagentContextWindowTokens'];
@@ -145,7 +145,7 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
     actor: config.actor,
     checkpoint: config.checkpoint,
     decisionStructuredOutput: config.decisionStructuredOutput,
-    modelRequestPolicy: config.modelRequestPolicy,
+    capabilityPlannerToolChoice: config.capabilityPlannerToolChoice,
     contextWindowTokens: config.contextWindowTokens,
     generationReserveTokens: config.generationReserveTokens,
     subagentContextWindowTokens: config.subagentContextWindowTokens,

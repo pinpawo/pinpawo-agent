@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
-import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
+import {
+  AIMessage,
+  HumanMessage,
+  ToolMessage,
+  type BaseMessage,
+} from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { FakeListChatModel } from '@langchain/core/utils/testing';
@@ -13,6 +18,7 @@ import {
   StateGraph,
   START,
   END,
+  Command,
 } from '@langchain/langgraph';
 import {
   createSubagent,
@@ -127,6 +133,57 @@ test('createSubagent exposes invocation context to tool runtime', async () => {
     runId: 'run-1',
     delegationId: 'delegation-1',
   });
+});
+
+test('createSubagent sends tool-authored image messages to the next model call', async () => {
+  const screenshot = tool(async (
+    _input,
+    runtime: ToolRuntime<unknown, SubagentRuntimeContext>,
+  ) => new Command({
+    update: {
+      messages: [
+        new ToolMessage({
+          content: 'screenshot captured',
+          tool_call_id: runtime.toolCallId,
+        }),
+        new HumanMessage({
+          content: [{
+            type: 'image_url',
+            image_url: { url: 'data:image/png;base64,aW1hZ2U=' },
+          }],
+        }),
+      ],
+    },
+  }), {
+    name: 'screenshot',
+    description: 'Capture a screenshot.',
+    schema: z.object({}),
+  });
+  const modelRequests: BaseMessage[][] = [];
+  const captureModelRequests = createMiddleware({
+    name: 'CaptureImageMessages',
+    wrapModelCall: async (request, handler) => {
+      modelRequests.push([...request.messages]);
+      return handler(request);
+    },
+  });
+
+  const result = await createSubagent({
+    model: new FakeToolCallingModel({
+      toolCalls: [
+        [{ id: 'call-screenshot', name: 'screenshot', args: {} }],
+        [],
+      ],
+    }),
+    tools: [screenshot],
+    middleware: [captureModelRequests],
+    promptSections: [],
+    messages: [new HumanMessage('Inspect the page visually.')],
+  });
+
+  assert.equal(modelRequests.length, 2);
+  assert.match(JSON.stringify(modelRequests[1]), /data:image\/png;base64,aW1hZ2U=/);
+  assert.match(JSON.stringify(result.messages), /data:image\/png;base64,aW1hZ2U=/);
 });
 
 /**

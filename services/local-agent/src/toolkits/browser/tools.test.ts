@@ -1,5 +1,12 @@
 import assert from 'node:assert/strict';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
 import test from 'node:test';
+import { Command } from '@langchain/langgraph';
+import { getLocalToolsWorkdir, setLocalToolsWorkdir } from '../local/pathUtils';
+import { persistBrowserScreenshot } from './screenshot';
+import { browserSession } from './session';
 import { browserTools } from './tools';
 
 process.env.LANGCHAIN_TRACING_V2 = 'false';
@@ -34,9 +41,46 @@ test('browser tools require the delegation scope supplied through tool runtime',
   assert.equal(readErrorCode(scoped), 'browser_not_open');
 });
 
-test('browser screenshot keeps image metadata as a tool artifact', () => {
+test('browser screenshot manages its own graph message update', () => {
   const screenshotTool = browserTools.find((toolItem) =>
     toolItem.name === 'browser_screenshot');
   assert.ok(screenshotTool);
-  assert.equal(screenshotTool.responseFormat, 'content_and_artifact');
+  assert.equal(screenshotTool.responseFormat, 'content');
+});
+
+test('browser screenshot returns a checkpointed image message command', async (t) => {
+  const screenshotTool = browserTools.find((toolItem) =>
+    toolItem.name === 'browser_screenshot');
+  assert.ok(screenshotTool);
+
+  const previousWorkdir = getLocalToolsWorkdir();
+  const workdir = await mkdtemp(resolve(tmpdir(), 'pinpawo-browser-tool-'));
+  const originalScreenshot = browserSession.screenshot;
+  setLocalToolsWorkdir(workdir);
+  browserSession.screenshot = async () => persistBrowserScreenshot({
+    mimeType: 'image/png',
+    data: Buffer.from('screenshot').toString('base64'),
+  });
+  t.after(() => {
+    browserSession.screenshot = originalScreenshot;
+    setLocalToolsWorkdir(previousWorkdir);
+  });
+
+  const admitted: string[][] = [];
+  const result = await screenshotTool.invoke({}, {
+    context: {
+      executionScope: {
+        threadId: 'thread-1',
+        runId: 'run-1',
+        delegationId: 'delegation-1',
+      },
+      admitInputModalities: (modalities: readonly ('text' | 'image')[]) => (
+        admitted.push([...modalities])
+      ),
+    },
+  });
+
+  assert.ok(result instanceof Command);
+  assert.deepEqual(admitted, [['text', 'image']]);
+  assert.match(JSON.stringify(result.update), /data:image\/png;base64,/);
 });

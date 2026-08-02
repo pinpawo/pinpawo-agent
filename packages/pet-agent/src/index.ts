@@ -1,7 +1,6 @@
 export type {
   AgentActor,
   AgentExecution,
-  AgentModelRequestPolicy,
   AgentModels,
 } from './types/agent';
 
@@ -83,7 +82,7 @@ export type {
   ToolDefinition,
   ToolOperationMetadata,
   ToolOperationSummary,
-  ToolModelContext,
+  ToolModelRequirements,
   ToolReviewBlock,
   ToolReviewContext,
   ToolReviewPolicy,

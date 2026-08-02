@@ -11,7 +11,6 @@ import {
 } from './session';
 import { browserTools } from './tools';
 import { browserOperationMetadata } from './operationMetadata';
-import { buildBrowserScreenshotModelMessages } from './screenshot';
 
 export const BROWSER_TOOLKIT_NAME = 'browser';
 
@@ -123,10 +122,9 @@ export function createBrowserToolkit(): AgentToolkit {
       review: reviews[toolItem.name],
       ...(toolItem.name === 'browser_screenshot'
         ? {
-            modelContext: {
+            modelRequirements: {
               requiredInputModalities: ['image'] as const,
-              instructions: '页面需要视觉判断时使用 browser_screenshot；工具返回的当前视口截图会作为临时图片上下文提供给模型。',
-              buildMessages: buildBrowserScreenshotModelMessages,
+              instructions: '页面需要视觉判断时使用 browser_screenshot；工具返回的当前视口截图会直接作为图片消息提供给模型。',
             },
           }
         : {}),

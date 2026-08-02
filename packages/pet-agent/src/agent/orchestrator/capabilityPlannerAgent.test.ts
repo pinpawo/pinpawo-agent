@@ -339,6 +339,7 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
   const result = await createCapabilityPlannerAgent({
     model,
     maxIterations: 5,
+    toolChoice: 'auto',
   }).invoke(plannerInput(workspace));
 
   assert.deepEqual(model.boundToolNames.slice(0, 3), [
@@ -355,6 +356,9 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
   assert.ok(model.boundToolOptions.length > 0);
   assert.ok(model.boundToolOptions.every(
     (options) => options.parallel_tool_calls === false,
+  ));
+  assert.ok(model.boundToolOptions.every(
+    (options) => options.tool_choice === 'auto',
   ));
   assert.equal(model.invocations.length, 3);
   assert.ok(model.invocations[0]?.some((message) =>

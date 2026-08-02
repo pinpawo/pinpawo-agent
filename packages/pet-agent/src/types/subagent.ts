@@ -4,7 +4,7 @@ import type { RunnableConfig } from '@langchain/core/runnables';
 import type { StructuredTool } from '@langchain/core/tools';
 import type { AnyAgentMiddleware } from 'langchain';
 import type { CapabilityArtifactRef } from './artifact';
-import type { ToolOperationMetadata } from './toolkit';
+import type { ModelInputModality, ToolOperationMetadata } from './toolkit';
 
 export type SubagentExecutionScope = {
   threadId: string | null;
@@ -14,6 +14,10 @@ export type SubagentExecutionScope = {
 
 export type SubagentRuntimeContext = {
   executionScope?: SubagentExecutionScope;
+  /** Record model input modalities introduced by a tool result. */
+  admitInputModalities?: (
+    modalities: readonly ModelInputModality[],
+  ) => void | Promise<void>;
   [key: string]: unknown;
 };
 

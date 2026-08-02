@@ -19,7 +19,6 @@ import type {
   OrchestratorConfig,
 } from '../../types';
 import { emitRuntimeEventToStreamWriter } from '../../../../utils/streamWriterEvents';
-import { createModelRequestPolicyMiddleware } from '../../modelRequestPolicy';
 import { createToolAuthorizationRecorder } from '../authorization';
 import {
   CAPABILITY_SUBAGENT_MAX_ITERATIONS,
@@ -123,9 +122,6 @@ export function createCapabilityNode(params: {
       undefined,
       toolkitContext,
     );
-    const modelRequestMiddleware = createModelRequestPolicyMiddleware(
-      config.modelRequestPolicy,
-    );
     const selectedTools = usedResolvedToolkitExecution.tools;
     const canExploreArtifacts = hasArtifactDiscoveryToolkit(
       usedResolvedToolkitExecution.toolkits,
@@ -178,16 +174,16 @@ export function createCapabilityNode(params: {
       maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
       contextWindowTokens: subagentContextWindowTokens,
       generationReserveTokens: subagentGenerationReserveTokens,
-      middleware: [
-        ...usedResolvedToolkitExecution.middleware,
-        ...(modelRequestMiddleware ? [modelRequestMiddleware] : []),
-      ],
+      middleware: usedResolvedToolkitExecution.middleware,
       runtimeContext: {
         executionScope: {
           threadId,
           runId: transcriptRunId,
           delegationId: runNextDelegation.id,
         },
+        ...(config.admitInputModalities
+          ? { admitInputModalities: config.admitInputModalities }
+          : {}),
       },
       runnableConfig,
       signal: runnableConfig?.signal,

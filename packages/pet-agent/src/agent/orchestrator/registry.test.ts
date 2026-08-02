@@ -165,12 +165,11 @@ test('compiled registry snapshots Toolkit definitions for one generation', () =>
   assert.ok(Object.isFrozen(registry.capabilities[0]?.toolkits[0]?.tools));
 });
 
-test('compiled registry preserves and snapshots tool model context', () => {
+test('compiled registry preserves and snapshots tool model requirements', () => {
   const requiredInputModalities: ModelInputModality[] = ['image'];
-  const modelContext = {
+  const modelRequirements = {
     requiredInputModalities,
     instructions: 'Inspect the image.',
-    buildMessages: () => [],
   };
   const registry = compileAgentRegistry({
     toolkits: [defineToolkit({
@@ -178,22 +177,21 @@ test('compiled registry preserves and snapshots tool model context', () => {
       description: 'Vision tools.',
       tools: [{
         tool: mockTool('inspect_image'),
-        modelContext,
+        modelRequirements,
       }],
     })],
     capabilities: [capability('inspect', ['vision'])],
   });
 
   requiredInputModalities[0] = 'text';
-  modelContext.instructions = 'Changed after compilation.';
+  modelRequirements.instructions = 'Changed after compilation.';
 
   const compiledContext = registry.capabilities[0]
     ?.toolkits[0]
     ?.tools[0]
-    ?.modelContext;
+    ?.modelRequirements;
   assert.deepEqual(compiledContext?.requiredInputModalities, ['image']);
   assert.equal(compiledContext?.instructions, 'Inspect the image.');
-  assert.equal(compiledContext?.buildMessages, modelContext.buildMessages);
   assert.ok(Object.isFrozen(compiledContext));
   assert.ok(Object.isFrozen(compiledContext?.requiredInputModalities));
 });

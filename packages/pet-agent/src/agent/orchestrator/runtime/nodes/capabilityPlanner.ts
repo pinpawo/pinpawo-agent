@@ -6,7 +6,6 @@ import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { materializeCapabilityDocumentWorkspace } from '../../capabilityDocumentWorkspace';
 import { createCapabilityPlannerAgent } from '../../capabilityPlannerAgent';
-import { createModelRequestPolicyMiddleware } from '../../modelRequestPolicy';
 import type {
   CapabilityPlannerInput,
   CapabilityPlannerResult,
@@ -227,12 +226,11 @@ function buildPlannerTransition(params: {
 }
 
 function createDefaultPlannerRunner(config: OrchestratorConfig): CapabilityPlannerRunner {
-  const modelRequestMiddleware = createModelRequestPolicyMiddleware(
-    config.modelRequestPolicy,
-  );
   return createCapabilityPlannerAgent({
     model: config.models.act,
-    ...(modelRequestMiddleware ? { middleware: [modelRequestMiddleware] } : {}),
+    ...(config.capabilityPlannerToolChoice
+      ? { toolChoice: config.capabilityPlannerToolChoice }
+      : {}),
   });
 }
 

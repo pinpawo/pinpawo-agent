@@ -1720,7 +1720,7 @@ test('toolkits compose tools and instructions for capability runtimes', async ()
 
 });
 
-test('toolkits bind model-context tools only to compatible model profiles', async () => {
+test('toolkits bind model-required tools only to compatible model profiles', async () => {
   const inspectText = mockTool('inspect_text');
   const inspectImage = mockTool('inspect_image');
   const toolkit: AgentToolkit = {
@@ -1731,10 +1731,9 @@ test('toolkits bind model-context tools only to compatible model profiles', asyn
       { tool: inspectText },
       {
         tool: inspectImage,
-        modelContext: {
+        modelRequirements: {
           requiredInputModalities: ['image'],
           instructions: 'image inspection rules',
-          buildMessages: () => [new HumanMessage('ephemeral image')],
         },
       },
     ],
@@ -1770,30 +1769,7 @@ test('toolkits bind model-context tools only to compatible model profiles', asyn
     vision.toolkits[0]?.instructions,
     'general inspection rules\nimage inspection rules',
   );
-  assert.equal(vision.middleware.length, 1);
-  const wrapModelCall = vision.middleware[0]?.wrapModelCall;
-  assert.equal(typeof wrapModelCall, 'function');
-  let providerMessages: BaseMessage[] = [];
-  if (typeof wrapModelCall === 'function') {
-    await wrapModelCall({
-      messages: [
-        new AIMessage({
-          content: '',
-          tool_calls: [{ id: 'image-1', name: 'inspect_image', args: {} }],
-        }),
-        new ToolMessage({
-          content: 'artifact only',
-          name: 'inspect_image',
-          tool_call_id: 'image-1',
-        }),
-      ],
-    } as never, async (request) => {
-      providerMessages = [...request.messages];
-      return new AIMessage('done');
-    });
-  }
-  assert.equal(providerMessages.length, 3);
-  assert.equal(providerMessages.at(-1)?.content, 'ephemeral image');
+  assert.equal(vision.middleware.length, 0);
 });
 
 test('capability receives tools only from Toolkits authorized by fixed uses', async () => {

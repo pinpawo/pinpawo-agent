@@ -24,7 +24,7 @@ import {
   createLocalChatHumanMessage,
   readLocalChatDisplayText,
 } from './localChatAttachments';
-import { LocalChatImageStore } from './localImageAttachments';
+import { LocalImageAttachmentAdmission } from './localImageAttachments';
 import {
   missingInputModalities,
   supportsInputModalities,
@@ -154,7 +154,7 @@ export class LocalServerTuiSessionService {
   private readonly graphService: TuiSessionGraphService;
   private readonly loadContext: typeof loadAgentContext;
   private readonly defaultModelProfileId: string;
-  private readonly imageStore: LocalChatImageStore;
+  private readonly imageAdmission = new LocalImageAttachmentAdmission();
   private readonly reportCapabilityDiagnostics = createCapabilityDiagnosticReporter();
 
   constructor(options: {
@@ -171,9 +171,6 @@ export class LocalServerTuiSessionService {
     const runtimeConfig = options.runtimeConfig ?? buildLocalAgentRuntimeConfig();
     const sessionStatePath = options.sessionStatePath ?? runtimeConfig.tuiSessionPath;
     this.defaultModelProfileId = options.defaultModelProfileId;
-    this.imageStore = new LocalChatImageStore(
-      resolve(runtimeConfig.stateRoot, 'input-images'),
-    );
     this.state = options.state ?? loadTuiSessionState(
       this.defaultModelProfileId,
       sessionStatePath,
@@ -274,17 +271,14 @@ export class LocalServerTuiSessionService {
         ...llmConfig,
         globalReviewPolicyMode: deps.globalReviewPolicyMode,
       },
-      modelInput: {
-        imageStore: this.imageStore,
-        admitInputModalities: (required) => {
-          this.admitSessionInputModalities(
-            deps,
-            session.id,
-            required,
-          );
-        },
+      admitInputModalities: (required) => {
+        this.admitSessionInputModalities(
+          deps,
+          session.id,
+          required,
+        );
       },
-      modelInputCacheKey: session.id,
+      sessionContextCacheKey: session.id,
       toolkits: [...(deps.pluginToolkits ?? []), ...(deps.localToolkits ?? [])],
       toolkitDefinitions: [
         ...(deps.pluginToolkitDefinitions ?? []),
@@ -313,7 +307,7 @@ export class LocalServerTuiSessionService {
     }
     const session = this.getActiveSession(deps.actorId);
     const profile = deps.modelProfiles.resolve(session.modelProfileId);
-    const admitted = await this.imageStore.admit(attachments, {
+    const admitted = await this.imageAdmission.admit(attachments, {
       allowImages: (profile.inputModalities ?? ['text']).includes('image'),
     });
     if (admitted.some((attachment) => attachment.source === 'local-image')) {

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
-import { NativeHostRelay } from './relay';
+import { calculateReconnectDelay, NativeHostRelay } from './relay';
 import { encodeNativeMessage, NativeMessageDecoder } from './framing';
 import { BROWSER_EXTENSION_PROTOCOL_VERSION } from '../protocol';
 import { LocalAgentBrowserBridge } from '../bridge';
@@ -16,6 +16,12 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 1_000) {
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 5));
   }
 }
+
+test('native host reconnect backoff grows exponentially within a bounded jitter range', () => {
+  assert.equal(calculateReconnectDelay(0, 1_000, 30_000, () => 0), 500);
+  assert.equal(calculateReconnectDelay(1, 1_000, 30_000, () => 0.5), 1_500);
+  assert.equal(calculateReconnectDelay(10, 1_000, 30_000, () => 1), 30_000);
+});
 
 test('native host relays framed Chrome messages to the authenticated local bridge', async (t) => {
   const root = await mkdtemp(resolve(tmpdir(), 'pinpawo-native-host-'));
@@ -48,7 +54,7 @@ test('native host relays framed Chrome messages to the authenticated local bridg
     connectionId: 'extension-worker-1',
     extensionId: 'abcdefghijklmnopabcdefghijklmnop',
     capabilities: ['navigate', 'snapshot', 'detach'],
-    activeTab: { tabId: 7, ownership: 'user' },
+    activeTab: { tabId: 7, binding: 'user' },
   }));
   await waitUntil(() => bridge.getStatus().extensionConnected);
 
@@ -97,11 +103,11 @@ test('native host replays extension registration when the local bridge restarts'
     connectionId: 'extension-worker-restart',
     extensionId: 'abcdefghijklmnopabcdefghijklmnop',
     capabilities: ['navigate', 'snapshot', 'detach'],
-    activeTab: { tabId: 8, ownership: 'agent' },
+    activeTab: { tabId: 8, binding: 'agent' },
     state: {
       revision: 4,
       debuggerAttached: true,
-      activeTab: { tabId: 8, ownership: 'agent' },
+      activeTab: { tabId: 8, binding: 'agent' },
     },
   }));
   await waitUntil(() => firstBridge.getStatus().extensionConnected);
@@ -148,11 +154,11 @@ test('native host drops stale lifecycle events while retaining the latest regist
     connectionId: 'extension-worker-stale-events',
     extensionId: 'abcdefghijklmnopabcdefghijklmnop',
     capabilities: ['navigate', 'snapshot', 'detach'],
-    activeTab: { tabId: 8, ownership: 'agent' },
+    activeTab: { tabId: 8, binding: 'agent' },
     state: {
       revision: 2,
       debuggerAttached: true,
-      activeTab: { tabId: 8, ownership: 'agent' },
+      activeTab: { tabId: 8, binding: 'agent' },
     },
   }));
 

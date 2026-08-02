@@ -2,6 +2,7 @@ import {
   chmod,
   mkdir,
   readFile,
+  stat,
   unlink,
   writeFile,
 } from 'node:fs/promises';
@@ -32,8 +33,27 @@ export type BrowserExtensionInstallOptions = {
 
 export type BrowserExtensionStatus = {
   registered: boolean;
+  healthy: boolean;
+  repairRecommended: boolean;
+  diagnostics: string[];
   extensionIds: string[];
-  manifests: Array<{ path: string; installed: boolean }>;
+  manifests: Array<{
+    path: string;
+    installed: boolean;
+    valid: boolean;
+    wrapperPath: string | null;
+    wrapperPathMatches: boolean;
+    extensionIds: string[];
+  }>;
+  wrapper: {
+    path: string;
+    exists: boolean;
+    executable: boolean;
+  };
+  nativeHostEntry: {
+    path: string;
+    exists: boolean;
+  };
   nativeHostEntryPath: string;
   extensionPath: string;
   extensionBuilt: boolean;
@@ -107,6 +127,18 @@ async function unlinkIfPresent(path: string) {
   });
 }
 
+async function fileStatus(path: string): Promise<{ exists: boolean; executable: boolean }> {
+  try {
+    const details = await stat(path);
+    return {
+      exists: details.isFile(),
+      executable: details.isFile() && (details.mode & 0o111) !== 0,
+    };
+  } catch {
+    return { exists: false, executable: false };
+  }
+}
+
 export async function registerBrowserExtensionHost(
   options: BrowserExtensionInstallOptions = {},
 ): Promise<BrowserExtensionInstallPaths> {
@@ -169,25 +201,71 @@ export async function getBrowserExtensionHostStatus(
   const manifests = await Promise.all(paths.manifestPaths.map(async (manifestPath) => {
     try {
       const parsed = JSON.parse(await readFile(manifestPath, 'utf8')) as {
+        name?: unknown;
+        path?: unknown;
+        type?: unknown;
         allowed_origins?: unknown;
       };
+      const manifestExtensionIds: string[] = [];
       if (Array.isArray(parsed.allowed_origins)) {
         for (const origin of parsed.allowed_origins) {
           const match = typeof origin === 'string'
             ? EXTENSION_ORIGIN_PATTERN.exec(origin)
             : null;
-          if (match?.[1]) extensionIds.add(match[1]);
+          if (match?.[1]) {
+            extensionIds.add(match[1]);
+            manifestExtensionIds.push(match[1]);
+          }
         }
       }
-      return { path: manifestPath, installed: true };
+      const wrapperPath = typeof parsed.path === 'string' ? parsed.path : null;
+      return {
+        path: manifestPath,
+        installed: true,
+        valid: parsed.name === BROWSER_NATIVE_HOST_NAME && parsed.type === 'stdio',
+        wrapperPath,
+        wrapperPathMatches: wrapperPath === paths.wrapperPath,
+        extensionIds: manifestExtensionIds.sort(),
+      };
     } catch {
-      return { path: manifestPath, installed: false };
+      return {
+        path: manifestPath,
+        installed: false,
+        valid: false,
+        wrapperPath: null,
+        wrapperPathMatches: false,
+        extensionIds: [],
+      };
     }
   }));
+  const [wrapper, nativeHostEntry] = await Promise.all([
+    fileStatus(paths.wrapperPath),
+    fileStatus(paths.nativeHostEntryPath),
+  ]);
+  const usableManifest = manifests.some((manifest) => manifest.installed
+    && manifest.valid
+    && manifest.wrapperPathMatches
+    && manifest.extensionIds.length > 0);
+  const diagnostics: string[] = [];
+  if (!wrapper.exists) diagnostics.push('native_host_wrapper_missing');
+  else if (!wrapper.executable) diagnostics.push('native_host_wrapper_not_executable');
+  if (!nativeHostEntry.exists) diagnostics.push('native_host_entry_missing');
+  if (!usableManifest) diagnostics.push('no_usable_native_host_manifest');
   return {
     registered: manifests.some((manifest) => manifest.installed),
+    healthy: wrapper.exists && wrapper.executable && nativeHostEntry.exists && usableManifest,
+    repairRecommended: !(wrapper.exists && wrapper.executable && nativeHostEntry.exists && usableManifest),
+    diagnostics,
     extensionIds: [...extensionIds],
     manifests,
+    wrapper: {
+      path: paths.wrapperPath,
+      ...wrapper,
+    },
+    nativeHostEntry: {
+      path: paths.nativeHostEntryPath,
+      exists: nativeHostEntry.exists,
+    },
     nativeHostEntryPath: paths.nativeHostEntryPath,
     extensionPath: resolve(dirname(paths.nativeHostEntryPath), 'chrome-extension'),
     extensionBuilt: existsSync(resolve(dirname(paths.nativeHostEntryPath), 'chrome-extension', 'manifest.json')),

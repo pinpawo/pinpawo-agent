@@ -3,6 +3,7 @@ import {
   NATIVE_HOST_NAME,
   PROTOCOL_VERSION,
   errorResult,
+  parseBrowserCancel,
   parseBrowserCommand,
   successResult,
 } from './protocol.js';
@@ -24,6 +25,7 @@ import {
 } from './interaction.js';
 import { createTargetStack } from './targetLifecycle.js';
 import { createBrowserStateTracker } from './browserState.js';
+import { calculateReconnectDelay } from './reconnect.js';
 
 const CDP_VERSION = '1.3';
 const ALLOWED_CDP_COMMANDS = new Set([
@@ -40,15 +42,23 @@ const ALLOWED_CDP_COMMANDS = new Set([
 ]);
 const SESSION_KEY = 'pinpawoBrowserTarget';
 const RECONNECT_DELAY_MS = 1_000;
+const MAX_RECONNECT_DELAY_MS = 30_000;
+const STABLE_CONNECTION_RESET_MS = 10_000;
 const POPUP_NAVIGATION_TIMEOUT_MS = 15_000;
 const connectionId = crypto.randomUUID();
 let port = null;
 let reconnectTimer = null;
+let stableConnectionTimer = null;
+let reconnectAttempt = 0;
 let attachedTabId = null;
+let userBoundOrigin = null;
 const enqueueExtensionWork = createSerialExecutor();
 const targets = createTargetStack();
 const browserState = createBrowserStateTracker();
 const recentPopupByOpener = new Map();
+const queuedCommandRequestIds = new Set();
+const cancelledCommandRequestIds = new Set();
+let activeCommandRequestId = null;
 
 class ExtensionError extends Error {
   constructor(code, message, retryable = false, details) {
@@ -73,6 +83,11 @@ async function restoreTarget() {
 
 async function saveTarget(nextTarget, options = {}) {
   const target = targets.bind(nextTarget, options);
+  if (Object.hasOwn(options, 'userBoundOrigin')) {
+    userBoundOrigin = options.userBoundOrigin;
+  } else if (target?.binding !== 'user') {
+    userBoundOrigin = null;
+  }
   if (target) await chrome.storage.local.set({ [SESSION_KEY]: target });
   else await chrome.storage.local.remove(SESSION_KEY);
   publishBrowserStateChange();
@@ -80,14 +95,14 @@ async function saveTarget(nextTarget, options = {}) {
 
 function registerMessage() {
   const target = targets.current();
-  const state = browserState.snapshot(target, attachedTabId);
+  const state = browserState.snapshot(target, attachedTabId, userBoundOrigin);
   return {
     type: 'browser.register',
     protocolVersion: PROTOCOL_VERSION,
     connectionId,
     extensionId: chrome.runtime.id,
     capabilities: CAPABILITIES,
-    ...(target ? { activeTab: { tabId: target.tabId, ownership: target.ownership } } : {}),
+    ...(target ? { activeTab: { tabId: target.tabId, binding: target.binding } } : {}),
     state,
   };
 }
@@ -103,10 +118,24 @@ function publishBrowserStateChange() {
 
 function scheduleReconnect() {
   if (reconnectTimer) return;
+  const delay = calculateReconnectDelay(
+    reconnectAttempt,
+    RECONNECT_DELAY_MS,
+    MAX_RECONNECT_DELAY_MS,
+  );
+  reconnectAttempt += 1;
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     connectNativeHost();
-  }, RECONNECT_DELAY_MS);
+  }, delay);
+}
+
+function scheduleStableConnectionReset(nextPort) {
+  if (stableConnectionTimer) clearTimeout(stableConnectionTimer);
+  stableConnectionTimer = setTimeout(() => {
+    stableConnectionTimer = null;
+    if (port === nextPort) reconnectAttempt = 0;
+  }, STABLE_CONNECTION_RESET_MS);
 }
 
 function connectNativeHost() {
@@ -115,14 +144,26 @@ function connectNativeHost() {
     const nextPort = chrome.runtime.connectNative(NATIVE_HOST_NAME);
     port = nextPort;
     nextPort.onMessage.addListener((message) => {
+      if (message?.type === 'browser.cancel') {
+        handleCancel(message);
+        return;
+      }
+      if (message?.type === 'browser.command' && typeof message.requestId === 'string') {
+        queuedCommandRequestIds.add(message.requestId);
+      }
       void enqueueExtensionWork(() => handleCommand(message));
     });
     nextPort.onDisconnect.addListener(() => {
       if (port !== nextPort) return;
+      if (stableConnectionTimer) clearTimeout(stableConnectionTimer);
+      stableConnectionTimer = null;
+      const message = chrome.runtime.lastError?.message;
+      if (message) console.warn(`[pinpawo-extension] native host disconnected: ${message}`);
       port = null;
       scheduleReconnect();
     });
     sendRegister();
+    scheduleStableConnectionReset(nextPort);
   } catch {
     port = null;
     scheduleReconnect();
@@ -201,7 +242,7 @@ async function ensureTarget() {
   if (!Number.isInteger(tab.id)) {
     throw new ExtensionError('target_create_failed', 'Chrome did not return a tab id');
   }
-  await saveTarget({ tabId: tab.id, ownership: 'agent' });
+  await saveTarget({ tabId: tab.id, binding: 'agent' });
   return targets.current();
 }
 
@@ -224,7 +265,7 @@ async function switchToPopup(tabId, parentTarget, deadlineAt) {
   await detach();
   try {
     await saveTarget(
-      { tabId, ownership: parentTarget.ownership },
+      { tabId, binding: parentTarget.binding },
       { rememberCurrent: true },
     );
     await attach(tabId);
@@ -345,9 +386,10 @@ function validateSnapshotOrigin(snapshot, approvedOrigin, tabId) {
 
 async function waitForTab(tabId, deadlineAt) {
   while (Date.now() < Date.parse(deadlineAt)) {
+    ensureCommandAlive(deadlineAt);
     const tab = await chrome.tabs.get(tabId);
     if (tab.status === 'complete') return;
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await delay(100, deadlineAt);
   }
   throw new ExtensionError('navigation_timeout', 'Navigation did not finish before the command deadline', true);
 }
@@ -427,6 +469,9 @@ function requirePageResult(value) {
 }
 
 function ensureCommandAlive(deadlineAt) {
+  if (activeCommandRequestId && cancelledCommandRequestIds.has(activeCommandRequestId)) {
+    throw new ExtensionError('browser_command_cancelled', 'Browser command was cancelled.', true);
+  }
   if (Date.now() > Date.parse(deadlineAt)) {
     throw new ExtensionError('command_expired', 'Browser command expired during execution', true);
   }
@@ -722,9 +767,16 @@ async function captureScreenshot(tabId, approvedOrigin) {
 }
 
 async function executeCommand(command) {
-  if (Date.now() > Date.parse(command.deadlineAt)) {
-    throw new ExtensionError('command_expired', 'Browser command deadline has already passed', true);
+  activeCommandRequestId = command.requestId;
+  try {
+    return await executeCommandBody(command);
+  } finally {
+    activeCommandRequestId = null;
   }
+}
+
+async function executeCommandBody(command) {
+  ensureCommandAlive(command.deadlineAt);
   if (command.command === 'detach') return await detach();
 
   const activeTarget = await ensureTarget();
@@ -802,25 +854,55 @@ async function executeCommand(command) {
   return await readSnapshot(activeTarget.tabId, approvedOrigin);
 }
 
+function handleCancel(value) {
+  try {
+    const cancellation = parseBrowserCancel(value);
+    if (
+      cancellation.connectionId === connectionId
+      && queuedCommandRequestIds.has(cancellation.requestId)
+    ) {
+      cancelledCommandRequestIds.add(cancellation.requestId);
+    }
+  } catch {
+    // Malformed cancellation cannot change browser state.
+  }
+}
+
 async function handleCommand(value) {
+  const requestId = typeof value?.requestId === 'string' ? value.requestId : null;
   let command;
   try {
     command = parseBrowserCommand(value);
     if (command.connectionId !== connectionId) return;
     const result = await executeCommand(command);
+    if (cancelledCommandRequestIds.has(command.requestId)) {
+      throw new ExtensionError('browser_command_cancelled', 'Browser command was cancelled.', true);
+    }
     port?.postMessage(successResult(command, result));
   } catch (error) {
     if (command) port?.postMessage(errorResult(command, error));
+  } finally {
+    if (requestId) {
+      queuedCommandRequestIds.delete(requestId);
+      cancelledCommandRequestIds.delete(requestId);
+    }
   }
 }
 
 chrome.action.onClicked.addListener(async (tab) => {
   if (!Number.isInteger(tab.id)) return;
+  let approvedOrigin = null;
+  try {
+    approvedOrigin = typeof tab.url === 'string' ? originOf(tab.url) : null;
+  } catch {
+    // The binding remains visible, but only an http(s) user gesture can
+    // authorize browser reads or interactions.
+  }
   await enqueueExtensionWork(async () => {
     await detach();
     await saveTarget(
-      { tabId: tab.id, ownership: 'user' },
-      { resetHistory: true },
+      { tabId: tab.id, binding: 'user' },
+      { resetHistory: true, userBoundOrigin: approvedOrigin },
     );
   });
 });

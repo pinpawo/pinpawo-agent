@@ -485,7 +485,7 @@ function readBrowserHealthFields() {
     browser_extension_command_ready: extension.commandReady,
     browser_debugger_attached: extension.debuggerAttached,
     browser_target_alive: extension.targetAlive,
-    browser_active_tab_ownership: extension.activeTabOwnership,
+    browser_active_tab_binding: extension.activeTabBinding,
     browser_extension_id: extension.extensionId,
     browser_state_revision: extension.stateRevision,
   };

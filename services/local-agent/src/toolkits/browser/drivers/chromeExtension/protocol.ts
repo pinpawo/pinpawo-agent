@@ -1,4 +1,4 @@
-export const BROWSER_EXTENSION_PROTOCOL_VERSION = 2 as const;
+export const BROWSER_EXTENSION_PROTOCOL_VERSION = 3 as const;
 export const BROWSER_NATIVE_HOST_NAME = 'com.pinpawo.browser_bridge';
 
 export const BROWSER_EXTENSION_CAPABILITIES = [
@@ -28,8 +28,10 @@ export type BrowserExtensionStateSnapshot = {
   debuggerAttached: boolean;
   activeTab?: {
     tabId: number;
-    ownership: 'agent' | 'user';
+    binding: 'agent' | 'user';
   };
+  /** Origin explicitly approved by the user clicking the extension action. */
+  userBoundOrigin?: string;
 };
 
 export type BrowserRegisterMessage = {
@@ -40,7 +42,7 @@ export type BrowserRegisterMessage = {
   capabilities: BrowserExtensionCapability[];
   activeTab?: {
     tabId: number;
-    ownership: 'agent' | 'user';
+    binding: 'agent' | 'user';
   };
   state?: BrowserExtensionStateSnapshot;
 };
@@ -53,6 +55,13 @@ export type BrowserCommandMessage = {
   command: BrowserExtensionCommandName;
   deadlineAt: string;
   params: Record<string, unknown>;
+};
+
+export type BrowserCancelMessage = {
+  type: 'browser.cancel';
+  protocolVersion: typeof BROWSER_EXTENSION_PROTOCOL_VERSION;
+  connectionId: string;
+  requestId: string;
 };
 
 export type BrowserResultMessage = {
@@ -80,7 +89,7 @@ export type ExtensionToAgentMessage =
   | BrowserResultMessage
   | BrowserEventMessage;
 
-export type AgentToExtensionMessage = BrowserCommandMessage;
+export type AgentToExtensionMessage = BrowserCommandMessage | BrowserCancelMessage;
 
 export type BridgeHelloMessage = {
   type: 'bridge.hello';
@@ -166,12 +175,12 @@ function parseActiveTab(
   if (!isRecord(value) || !Number.isInteger(value.tabId) || (value.tabId as number) < 0) {
     throw new Error(`browser.register ${field}.tabId must be a non-negative integer`);
   }
-  if (value.ownership !== 'agent' && value.ownership !== 'user') {
-    throw new Error(`browser.register ${field}.ownership must be agent or user`);
+  if (value.binding !== 'agent' && value.binding !== 'user') {
+    throw new Error(`browser.register ${field}.binding must be agent or user`);
   }
   return {
     tabId: value.tabId as number,
-    ownership: value.ownership,
+    binding: value.binding,
   };
 }
 
@@ -190,10 +199,33 @@ function parseStateSnapshot(value: unknown): BrowserExtensionStateSnapshot | und
   if (value.debuggerAttached && !activeTab) {
     throw new Error('browser.register state cannot attach the debugger without an active tab');
   }
+  let userBoundOrigin: string | undefined;
+  if (value.userBoundOrigin !== undefined) {
+    if (typeof value.userBoundOrigin !== 'string') {
+      throw new Error('browser.register state.userBoundOrigin must be a string');
+    }
+    let parsedOrigin: URL;
+    try {
+      parsedOrigin = new URL(value.userBoundOrigin);
+    } catch {
+      throw new Error('browser.register state.userBoundOrigin must be an http(s) origin');
+    }
+    if (
+      (parsedOrigin.protocol !== 'http:' && parsedOrigin.protocol !== 'https:')
+      || parsedOrigin.origin !== value.userBoundOrigin
+    ) {
+      throw new Error('browser.register state.userBoundOrigin must be an http(s) origin');
+    }
+    if (activeTab?.binding !== 'user') {
+      throw new Error('browser.register state.userBoundOrigin requires a user-bound tab');
+    }
+    userBoundOrigin = value.userBoundOrigin;
+  }
   return {
     revision: value.revision as number,
     debuggerAttached: value.debuggerAttached,
     activeTab,
+    ...(userBoundOrigin ? { userBoundOrigin } : {}),
   };
 }
 
@@ -211,7 +243,7 @@ export function parseExtensionToAgentMessage(value: unknown): ExtensionToAgentMe
       && (
         !state.activeTab
         || activeTab.tabId !== state.activeTab.tabId
-        || activeTab.ownership !== state.activeTab.ownership
+        || activeTab.binding !== state.activeTab.binding
       )
     ) {
       throw new Error('browser.register activeTab must match state.activeTab');
@@ -284,6 +316,14 @@ export function parseExtensionToAgentMessage(value: unknown): ExtensionToAgentMe
 
 export function parseAgentToExtensionMessage(value: unknown): AgentToExtensionMessage {
   const record = readProtocolRecord(value);
+  if (record.type === 'browser.cancel') {
+    return {
+      type: 'browser.cancel',
+      protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+      connectionId: requireNonEmptyString(record, 'connectionId'),
+      requestId: requireNonEmptyString(record, 'requestId'),
+    };
+  }
   if (record.type !== 'browser.command') {
     throw new Error(`unsupported agent message type: ${String(record.type)}`);
   }

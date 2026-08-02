@@ -102,6 +102,7 @@ export function createCapabilityNode(params: {
     const toolkitContext = {
       models: config.models,
       modelInputModalities: config.modelInputModalities,
+      modelSupportsImageToolResults: config.modelSupportsImageToolResults,
       actor,
       messages: scopedMessages,
       reviewContext: {

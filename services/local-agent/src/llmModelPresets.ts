@@ -28,6 +28,8 @@ export type LlmModelPreset = {
    * support from a model name.
    */
   inputModalities: readonly ModelInputModality[];
+  /** The configured provider transport accepts image content in tool results. */
+  supportsImageToolResults?: true;
   thinkingControl?: LlmThinkingControl;
   /** Tool selection modes accepted while the preset's thinking mode is active. */
   toolChoiceSupport?: LlmToolChoiceSupport;
@@ -47,6 +49,7 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     maxOutputTokens: 128_000,
     structuredOutputMethod: 'jsonSchema',
     inputModalities: ['text', 'image'],
+    supportsImageToolResults: true,
     thinkingControl: 'none',
     aliases: [
       'gpt-5.5',

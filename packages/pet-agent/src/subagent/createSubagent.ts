@@ -12,6 +12,7 @@ import {
   type GuardDecisionEmitter,
 } from '../guards';
 import {
+  countTokensApproximately,
   createAgent,
   createMiddleware,
   summarizationMiddleware,
@@ -46,11 +47,33 @@ const DEFAULT_SUBAGENT_MAX_ITERATIONS = 100;
 const SUBAGENT_HARD_RECURSION_LIMIT = 10_000;
 const SUBAGENT_CONTEXT_SUMMARY_TRIGGER_RATIO = 0.65;
 const SUBAGENT_CONTEXT_SUMMARY_KEEP_RATIO = 0.3;
+const APPROXIMATE_IMAGE_INPUT_TOKENS = 4096;
 const INVALID_CONTEXT_SUMMARY_MESSAGES = new Set([
   'No previous conversation history.',
   'Previous conversation was too long to summarize.',
 ]);
 const CONTEXT_SUMMARY_ERROR_PREFIX = 'Error generating summary:';
+
+function isImageContentBlock(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const block = value as Record<string, unknown>;
+  return block.type === 'image'
+    || block.type === 'image_url'
+    || block.type === 'input_image'
+    || (block.type === 'file'
+      && typeof block.mimeType === 'string'
+      && block.mimeType.startsWith('image/'));
+}
+
+export function countSubagentTokensApproximately(messages: BaseMessage[]) {
+  const imageCount = messages.reduce((total, message) => (
+    total + (Array.isArray(message.content)
+      ? message.content.filter(isImageContentBlock).length
+      : 0)
+  ), 0);
+  return countTokensApproximately(messages)
+    + imageCount * APPROXIMATE_IMAGE_INPUT_TOKENS;
+}
 
 /**
  * Runtime-event name carrying subagent guard decision records. Written to the
@@ -197,6 +220,7 @@ function createSubagentSummarizationMiddleware(
     model,
     trigger: { tokens: triggerTokens },
     keep: { tokens: keepTokens },
+    tokenCounter: countSubagentTokensApproximately,
     // LangChain defaults this to 4k tokens, which would inspect only a small
     // slice when our model window is large. The derived budget covers the
     // expected summarized prefix while leaving room for the summary prompt.

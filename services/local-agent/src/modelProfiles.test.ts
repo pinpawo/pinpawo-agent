@@ -57,6 +57,11 @@ test('all built-in presets declare authoritative input modalities', () => {
   }
 });
 
+test('only transports with native image tool results opt into that capability', () => {
+  assert.equal(findLlmModelPresetByKey('gpt-5')?.supportsImageToolResults, true);
+  assert.equal(findLlmModelPresetByKey('qwen-token-plan')?.supportsImageToolResults, undefined);
+});
+
 test('DeepSeek V4 Flash has its own preset and does not resolve as V4 Pro', () => {
   assert.equal(findLlmModelPresetByKey('deepseek-flash')?.model, 'deepseek-v4-flash');
   assert.equal(inferLlmModelPreset('deepseek-v4-pro')?.key, 'deepseek');
@@ -110,6 +115,28 @@ test('preset output limits do not leak into custom profiles with a matching mode
   const registry = createLocalModelProfileRegistry({ snapshot });
 
   assert.equal(registry.resolve().maxOutputTokens, undefined);
+  assert.equal(registry.resolve().supportsImageToolResults, false);
+});
+
+test('OpenAI preset enables native image tool results in the resolved runtime config', () => {
+  const snapshot = buildModelProfileRegistry({
+    stored: storedConfig({
+      primary: storedProfile({
+        provider: 'openai',
+        sourcePreset: 'gpt-5',
+        model: 'gpt-5.5',
+        baseUrl: 'https://api.openai.com/v1',
+        contextWindowTokens: 1_000_000,
+        inputModalities: ['text', 'image'],
+      }),
+    }),
+    env: {},
+  });
+
+  assert.equal(
+    createLocalModelProfileRegistry({ snapshot }).resolve().supportsImageToolResults,
+    true,
+  );
 });
 
 test('custom profiles default missing modality metadata to text-only', () => {

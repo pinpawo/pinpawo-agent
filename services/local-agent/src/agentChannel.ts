@@ -336,11 +336,13 @@ export function buildLocalChatAgentInput(params: {
       String(llmConfig.contextWindowTokens ?? 32000),
       String(llmConfig.subagentContextWindowTokens ?? llmConfig.contextWindowTokens ?? 32000),
       String(generationReserveTokens ?? 0),
+      llmConfig.supportsImageToolResults ? 'image-tool-results' : 'text-tool-results',
       params.checkpoint ? 'checkpoint' : 'memory',
     ]),
     graphConfig: {
       models,
       modelInputModalities: llmConfig.inputModalities ?? ['text'],
+      modelSupportsImageToolResults: llmConfig.supportsImageToolResults === true,
       admitInputModalities: params.admitInputModalities,
       ...(inferLlmToolChoiceSupport(llmConfig.model) === 'auto_only'
         ? { capabilityPlannerToolChoice: 'auto' }

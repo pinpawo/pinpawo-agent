@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
-import { HumanMessage, ToolMessage } from '@langchain/core/messages';
+import { ToolMessage } from '@langchain/core/messages';
 import { getLocalToolsWorkdir } from '../local/pathUtils';
 
 const MAX_BROWSER_SCREENSHOT_BYTES = 4 * 1024 * 1024;
@@ -119,32 +119,28 @@ export async function readBrowserScreenshotDataUrl(
   return `data:${screenshot.mimeType};base64,${bytes.toString('base64')}`;
 }
 
-export async function buildBrowserScreenshotMessages(
+export async function buildBrowserScreenshotToolMessage(
   serialized: string,
   toolCallId: string,
 ) {
   const artifact = createBrowserScreenshotArtifact(serialized);
   const imageUrl = await readBrowserScreenshotDataUrl(artifact.screenshot);
-  return [
-    new ToolMessage({
-      content: serialized,
-      artifact,
-      name: 'browser_screenshot',
-      tool_call_id: toolCallId,
-    }),
-    new HumanMessage({
-      content: [
-        {
-          type: 'text',
-          text: 'Browser screenshot from the preceding tool result. Inspect the visible page using this image.',
-        },
-        {
-          type: 'image_url',
-          image_url: { url: imageUrl },
-        },
-      ],
-    }),
-  ] as const;
+  return new ToolMessage({
+    content: [
+      {
+        type: 'input_text',
+        text: `Browser screenshot from the current viewport.\n${serialized}`,
+      },
+      {
+        type: 'input_image',
+        image_url: imageUrl,
+        detail: 'auto',
+      },
+    ],
+    artifact,
+    name: 'browser_screenshot',
+    tool_call_id: toolCallId,
+  });
 }
 
 export async function persistBrowserScreenshot(input: BrowserScreenshotData): Promise<string> {

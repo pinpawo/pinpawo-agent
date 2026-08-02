@@ -1723,6 +1723,7 @@ test('toolkits compose tools and instructions for capability runtimes', async ()
 test('toolkits bind model-required tools only to compatible model profiles', async () => {
   const inspectText = mockTool('inspect_text');
   const inspectImage = mockTool('inspect_image');
+  const inspectScreenshot = mockTool('inspect_screenshot');
   const toolkit: AgentToolkit = {
     name: 'inspect',
     description: 'inspection toolkit',
@@ -1734,6 +1735,14 @@ test('toolkits bind model-required tools only to compatible model profiles', asy
         modelRequirements: {
           requiredInputModalities: ['image'],
           instructions: 'image inspection rules',
+        },
+      },
+      {
+        tool: inspectScreenshot,
+        modelRequirements: {
+          requiredInputModalities: ['image'],
+          requiresImageToolResult: true,
+          instructions: 'screenshot inspection rules',
         },
       },
     ],
@@ -1770,6 +1779,22 @@ test('toolkits bind model-required tools only to compatible model profiles', asy
     'general inspection rules\nimage inspection rules',
   );
   assert.equal(vision.middleware.length, 0);
+
+  const visionWithImageToolResults = await resolveToolkitExecution([toolkit], undefined, {
+    models: {} as AgentModels,
+    modelInputModalities: ['text', 'image'],
+    modelSupportsImageToolResults: true,
+    actor: testActor,
+    messages: [],
+  });
+  assert.deepEqual(
+    visionWithImageToolResults.tools.map((toolItem) => toolItem.name),
+    ['inspect_text', 'inspect_image', 'inspect_screenshot'],
+  );
+  assert.equal(
+    visionWithImageToolResults.toolkits[0]?.instructions,
+    'general inspection rules\nimage inspection rules\nscreenshot inspection rules',
+  );
 });
 
 test('capability receives tools only from Toolkits authorized by fixed uses', async () => {

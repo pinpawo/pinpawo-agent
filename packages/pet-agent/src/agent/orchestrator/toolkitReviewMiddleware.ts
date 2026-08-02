@@ -53,6 +53,7 @@ import {
 export type ToolkitReviewRuntimeContext = {
   models: AgentModels;
   modelInputModalities?: readonly ModelInputModality[];
+  modelSupportsImageToolResults?: boolean;
   actor: AgentActor;
   messages: BaseMessage[];
   reviewContext?: {

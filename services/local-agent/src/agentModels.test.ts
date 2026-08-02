@@ -18,6 +18,10 @@ function readMaxTokens(model: unknown): number | undefined {
   return (model as { maxTokens?: number }).maxTokens;
 }
 
+function readsImageToolResults(model: unknown): boolean | undefined {
+  return (model as { useResponsesApi?: boolean }).useResponsesApi;
+}
+
 function readInvocationParams(model: unknown): Record<string, unknown> {
   const invocationParams = (model as {
     invocationParams?: () => Record<string, unknown>;
@@ -127,6 +131,22 @@ test('Qwen 3.8 roles preserve the provider-enforced thinking mode', () => {
   assert.ok(models.answer instanceof ChatOpenAI);
   assert.ok(models.observe instanceof ChatOpenAI);
   assert.ok(models.subagent instanceof ChatOpenAI);
+  assert.equal(readsImageToolResults(models.subagent), false);
+});
+
+test('image tool results select the Responses API for every model role', () => {
+  const models = buildLocalAgentModels({
+    apiKey: 'test-key',
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-5.5',
+    supportsImageToolResults: true,
+  });
+
+  assert.equal(readsImageToolResults(models.act), true);
+  assert.equal(readsImageToolResults(models.decision), true);
+  assert.equal(readsImageToolResults(models.answer), true);
+  assert.equal(readsImageToolResults(models.observe), true);
+  assert.equal(readsImageToolResults(models.subagent), true);
 });
 
 test('generation reserve includes Qwen thinking and configured output budgets', () => {

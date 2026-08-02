@@ -1,12 +1,11 @@
 import { tool } from '@langchain/core/tools';
 import type { StructuredTool, ToolRuntime } from '@langchain/core/tools';
-import { Command } from '@langchain/langgraph';
 import type { SubagentRuntimeContext } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import { browserSession } from './session';
 import type { BrowserExtractOptions, BrowserWaitState } from './session';
 import { formatBrowserToolError } from './errors';
-import { buildBrowserScreenshotMessages } from './screenshot';
+import { buildBrowserScreenshotToolMessage } from './screenshot';
 
 type BrowserTargetInput = { selector?: string; ref?: string };
 
@@ -333,13 +332,9 @@ const browserScreenshotTool = tool(
   async (_input, runtime: BrowserToolRuntime) => {
     try {
       const result = await browserSession.screenshot(readBrowserExecutionOwner(runtime));
-      const messages = await buildBrowserScreenshotMessages(result, runtime.toolCallId);
+      const message = await buildBrowserScreenshotToolMessage(result, runtime.toolCallId);
       await runtime.context?.admitInputModalities?.(['text', 'image']);
-      return new Command({
-        update: {
-          messages,
-        },
-      });
+      return message;
     } catch (err) {
       return formatBrowserToolError(err);
     }

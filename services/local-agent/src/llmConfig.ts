@@ -18,6 +18,7 @@ type ModelIndependentLlmConfig = Omit<
   | 'modelProfileId'
   | 'modelProfileFingerprint'
   | 'inputModalities'
+  | 'supportsImageToolResults'
   | 'structuredOutputMethod'
   | 'maxOutputTokens'
   | 'observeModel'
@@ -75,6 +76,7 @@ export function createLocalModelProfileRegistry(options: {
         modelProfileId: profile.id,
         modelProfileFingerprint: fingerprint,
         inputModalities: profile.inputModalities,
+        supportsImageToolResults: preset?.supportsImageToolResults === true,
         ...(profile.structuredOutputMethod
           ? { structuredOutputMethod: profile.structuredOutputMethod }
           : {}),

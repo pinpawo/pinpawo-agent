@@ -103,6 +103,23 @@ test('buildLocalChatAgentInput passes the generation reserve to main and subagen
   assert.equal(setup.graphConfig.generationReserveTokens, 147_456);
   assert.equal(setup.graphConfig.subagentGenerationReserveTokens, 147_456);
   assert.equal(setup.graphConfig.capabilityPlannerToolChoice, 'auto');
+  assert.equal(setup.graphConfig.modelSupportsImageToolResults, false);
+});
+
+test('buildLocalChatAgentInput projects image tool-result transport support', () => {
+  const setup = buildTestLocalChatAgentInput({
+    context: createContext(),
+    userMessage: 'inspect the page',
+    llmConfig: {
+      apiKey: 'test-key',
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'gpt-5.5',
+      inputModalities: ['text', 'image'],
+      supportsImageToolResults: true,
+    },
+  });
+
+  assert.equal(setup.graphConfig.modelSupportsImageToolResults, true);
 });
 
 test('buildLocalChatAgentInput rejects an empty artifact discovery scope', () => {

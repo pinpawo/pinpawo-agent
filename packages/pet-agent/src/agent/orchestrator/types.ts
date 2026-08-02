@@ -91,6 +91,8 @@ export type OrchestratorConfig = {
   models: AgentModels;
   /** Input modalities supported by the active model profile. */
   modelInputModalities?: readonly ModelInputModality[];
+  /** Whether the active provider transport accepts images in tool results. */
+  modelSupportsImageToolResults?: boolean;
   /** Record input modalities introduced by tool results. */
   admitInputModalities?: (
     modalities: readonly ModelInputModality[],

@@ -11,6 +11,7 @@ export type AgentLlmConfig = {
   modelProfileId?: string;
   modelProfileFingerprint?: string;
   inputModalities?: readonly ModelInputModality[];
+  supportsImageToolResults?: boolean;
   structuredOutputMethod?: StructuredOutputMethod;
   maxOutputTokens?: number;
   observeModel?: string;

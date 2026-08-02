@@ -22,6 +22,7 @@ import {
 } from '@langchain/langgraph';
 import {
   createSubagent,
+  countSubagentTokensApproximately,
   SUBAGENT_GUARD_DECISION_EVENT,
   SUBAGENT_OPERATIONS_EVENT,
   SUBAGENT_PROMPT_SECTIONS_EVENT,
@@ -75,6 +76,26 @@ class FailingSummaryModel extends BaseChatModel {
     return this;
   }
 }
+
+test('subagent token estimates include image content blocks', () => {
+  const textOnly = new ToolMessage({
+    content: [{ type: 'input_text', text: 'screenshot' }],
+    tool_call_id: 'call-1',
+  });
+  const withImage = new ToolMessage({
+    content: [
+      { type: 'input_text', text: 'screenshot' },
+      { type: 'input_image', image_url: 'data:image/png;base64,aW1hZ2U=' },
+    ],
+    tool_call_id: 'call-1',
+  });
+
+  assert.equal(
+    countSubagentTokensApproximately([withImage])
+      - countSubagentTokensApproximately([textOnly]),
+    4096,
+  );
+});
 
 test('createSubagent rejects duplicate prompt section ids before invoking the model', async () => {
   await assert.rejects(
@@ -135,25 +156,19 @@ test('createSubagent exposes invocation context to tool runtime', async () => {
   });
 });
 
-test('createSubagent sends tool-authored image messages to the next model call', async () => {
+test('createSubagent sends image tool results to the next model call without a synthetic human message', async () => {
   const screenshot = tool(async (
     _input,
     runtime: ToolRuntime<unknown, SubagentRuntimeContext>,
-  ) => new Command({
-    update: {
-      messages: [
-        new ToolMessage({
-          content: 'screenshot captured',
-          tool_call_id: runtime.toolCallId,
-        }),
-        new HumanMessage({
-          content: [{
-            type: 'image_url',
-            image_url: { url: 'data:image/png;base64,aW1hZ2U=' },
-          }],
-        }),
-      ],
-    },
+  ) => new ToolMessage({
+    content: [
+      { type: 'input_text', text: 'screenshot captured' },
+      {
+        type: 'input_image',
+        image_url: 'data:image/png;base64,aW1hZ2U=',
+      },
+    ],
+    tool_call_id: runtime.toolCallId,
   }), {
     name: 'screenshot',
     description: 'Capture a screenshot.',
@@ -183,7 +198,68 @@ test('createSubagent sends tool-authored image messages to the next model call',
 
   assert.equal(modelRequests.length, 2);
   assert.match(JSON.stringify(modelRequests[1]), /data:image\/png;base64,aW1hZ2U=/);
+  assert.equal(
+    modelRequests[1].filter((message) => message._getType() === 'human').length,
+    1,
+  );
   assert.match(JSON.stringify(result.messages), /data:image\/png;base64,aW1hZ2U=/);
+});
+
+test('parallel image and text tools keep every result adjacent to the calling AI message', async () => {
+  const screenshot = tool(async (
+    _input,
+    runtime: ToolRuntime<unknown, SubagentRuntimeContext>,
+  ) => new ToolMessage({
+    content: [
+      { type: 'input_text', text: 'screenshot captured' },
+      { type: 'input_image', image_url: 'data:image/png;base64,aW1hZ2U=' },
+    ],
+    tool_call_id: runtime.toolCallId,
+  }), {
+    name: 'screenshot',
+    description: 'Capture a screenshot.',
+    schema: z.object({}),
+  });
+  const inspectText = tool(async () => 'text inspected', {
+    name: 'inspect_text',
+    description: 'Inspect text.',
+    schema: z.object({}),
+  });
+  const modelRequests: BaseMessage[][] = [];
+
+  await createSubagent({
+    model: new FakeToolCallingModel({
+      toolCalls: [
+        [
+          { id: 'call-screenshot', name: 'screenshot', args: {} },
+          { id: 'call-text', name: 'inspect_text', args: {} },
+        ],
+        [],
+      ],
+    }),
+    tools: [screenshot, inspectText],
+    middleware: [createMiddleware({
+      name: 'CaptureParallelToolMessages',
+      wrapModelCall: async (request, handler) => {
+        modelRequests.push([...request.messages]);
+        return handler(request);
+      },
+    })],
+    promptSections: [],
+    messages: [new HumanMessage('Inspect both forms of context.')],
+  });
+
+  const secondRequest = modelRequests[1];
+  const callingMessageIndex = secondRequest.findIndex((message) => (
+    message instanceof AIMessage && message.tool_calls?.length === 2
+  ));
+  assert.ok(callingMessageIndex >= 0);
+  assert.deepEqual(
+    secondRequest
+      .slice(callingMessageIndex + 1, callingMessageIndex + 3)
+      .map((message) => message._getType()),
+    ['tool', 'tool'],
+  );
 });
 
 /**

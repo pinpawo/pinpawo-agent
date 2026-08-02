@@ -103,9 +103,15 @@ export async function resolveToolkitExecution(
   for (const toolkit of selectedToolkits) {
     const compatibleDefinitions = toolkit.tools.filter((definition) => (
       !definition.modelRequirements
-      || supportsModelInputModalities(
-        definition.modelRequirements.requiredInputModalities,
-        ctx.modelInputModalities,
+      || (
+        supportsModelInputModalities(
+          definition.modelRequirements.requiredInputModalities,
+          ctx.modelInputModalities,
+        )
+        && (
+          !definition.modelRequirements.requiresImageToolResult
+          || ctx.modelSupportsImageToolResults === true
+        )
       )
     ));
     if (compatibleDefinitions.length === 0) continue;

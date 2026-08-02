@@ -13,6 +13,7 @@ test('browser screenshot declares image-only model requirements', () => {
 
   assert.ok(screenshot?.modelRequirements);
   assert.deepEqual(screenshot.modelRequirements.requiredInputModalities, ['image']);
+  assert.equal(screenshot.modelRequirements.requiresImageToolResult, true);
   assert.match(screenshot.modelRequirements.instructions ?? '', /browser_screenshot/);
 });
 

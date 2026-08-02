@@ -124,7 +124,8 @@ export function createBrowserToolkit(): AgentToolkit {
         ? {
             modelRequirements: {
               requiredInputModalities: ['image'] as const,
-              instructions: '页面需要视觉判断时使用 browser_screenshot；工具返回的当前视口截图会直接作为图片消息提供给模型。',
+              requiresImageToolResult: true as const,
+              instructions: '页面需要视觉判断时使用 browser_screenshot；工具返回的当前视口截图会直接作为图片 tool result 提供给模型。',
             },
           }
         : {}),

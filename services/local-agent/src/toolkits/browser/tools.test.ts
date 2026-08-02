@@ -3,7 +3,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
-import { Command } from '@langchain/langgraph';
+import { ToolMessage } from '@langchain/core/messages';
 import { getLocalToolsWorkdir, setLocalToolsWorkdir } from '../local/pathUtils';
 import { persistBrowserScreenshot } from './screenshot';
 import { browserSession } from './session';
@@ -48,7 +48,7 @@ test('browser screenshot manages its own graph message update', () => {
   assert.equal(screenshotTool.responseFormat, 'content');
 });
 
-test('browser screenshot returns a checkpointed image message command', async (t) => {
+test('browser screenshot directly returns an image tool result', async (t) => {
   const screenshotTool = browserTools.find((toolItem) =>
     toolItem.name === 'browser_screenshot');
   assert.ok(screenshotTool);
@@ -80,7 +80,8 @@ test('browser screenshot returns a checkpointed image message command', async (t
     },
   });
 
-  assert.ok(result instanceof Command);
+  assert.ok(result instanceof ToolMessage);
   assert.deepEqual(admitted, [['text', 'image']]);
-  assert.match(JSON.stringify(result.update), /data:image\/png;base64,/);
+  assert.match(JSON.stringify(result.content), /"type":"input_image"/);
+  assert.match(JSON.stringify(result.content), /data:image\/png;base64,/);
 });

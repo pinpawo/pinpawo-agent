@@ -37,9 +37,11 @@ type HumanReviewerRequest = HumanReviewInterruptPayload;
 ## 3. 常见中断处理结果（`ReviewResponse`）
 
 1. `approve`：继续执行
-2. `reject`：终止或回退（由策略决定）
+2. `reject`：撤销承载本批未执行 tool calls 的 AI action，不写入 synthetic `ToolMessage`，并以 interrupted 结束本次 run；active delegation 保持 pending，供后续显式继续
 3. `edit`：带修正输入继续
 4. `respond`：带附加 `input` 的应答
+
+TUI `Esc` / `review.cancel` 与 `reject` 使用相同的 action rollback 和 run 生命周期语义；两者只在来源与审计事件上区分。
 
 ## 4. 典型集成模式
 

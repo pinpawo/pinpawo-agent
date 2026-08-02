@@ -14,6 +14,8 @@ import {
 import { encodeNativeMessage, NativeMessageDecoder } from './framing';
 
 const RECONNECT_DELAY_MS = 1_000;
+const MAX_RECONNECT_DELAY_MS = 30_000;
+const STABLE_CONNECTION_RESET_MS = 10_000;
 const MAX_SOCKET_LINE_BYTES = 4 * 1024 * 1024;
 
 type NativeHostLogger = Pick<Console, 'error'>;
@@ -25,7 +27,20 @@ export type NativeHostOptions = {
   tokenPath?: string;
   logger?: NativeHostLogger;
   reconnectDelayMs?: number;
+  maxReconnectDelayMs?: number;
+  stableConnectionResetMs?: number;
+  random?: () => number;
 };
+
+export function calculateReconnectDelay(
+  attempt: number,
+  initialDelayMs = RECONNECT_DELAY_MS,
+  maxDelayMs = MAX_RECONNECT_DELAY_MS,
+  random: () => number = Math.random,
+): number {
+  const exponentialDelay = Math.min(maxDelayMs, initialDelayMs * 2 ** Math.max(0, attempt));
+  return Math.max(1, Math.round(exponentialDelay * (0.5 + Math.min(1, Math.max(0, random())) / 2)));
+}
 
 export class NativeHostRelay {
   private readonly input: Readable;
@@ -34,11 +49,16 @@ export class NativeHostRelay {
   private readonly tokenPath: string;
   private readonly logger: NativeHostLogger;
   private readonly reconnectDelayMs: number;
+  private readonly maxReconnectDelayMs: number;
+  private readonly stableConnectionResetMs: number;
+  private readonly random: () => number;
   private readonly decoder = new NativeMessageDecoder();
   private socket: Socket | null = null;
   private socketReady = false;
   private socketBuffer = '';
   private reconnectTimer: NodeJS.Timeout | null = null;
+  private stableConnectionTimer: NodeJS.Timeout | null = null;
+  private reconnectAttempt = 0;
   private stopped = false;
   private registration: BrowserRegisterMessage | null = null;
 
@@ -49,6 +69,9 @@ export class NativeHostRelay {
     this.tokenPath = options.tokenPath ?? DEFAULT_BROWSER_BRIDGE_TOKEN_PATH;
     this.logger = options.logger ?? console;
     this.reconnectDelayMs = options.reconnectDelayMs ?? RECONNECT_DELAY_MS;
+    this.maxReconnectDelayMs = options.maxReconnectDelayMs ?? MAX_RECONNECT_DELAY_MS;
+    this.stableConnectionResetMs = options.stableConnectionResetMs ?? STABLE_CONNECTION_RESET_MS;
+    this.random = options.random ?? Math.random;
   }
 
   start() {
@@ -65,6 +88,8 @@ export class NativeHostRelay {
     this.input.off('error', this.handleInputError);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
+    if (this.stableConnectionTimer) clearTimeout(this.stableConnectionTimer);
+    this.stableConnectionTimer = null;
     this.socket?.destroy();
     this.socket = null;
     this.socketReady = false;
@@ -126,6 +151,8 @@ export class NativeHostRelay {
     });
     socket.once('close', () => {
       if (this.socket !== socket) return;
+      if (this.stableConnectionTimer) clearTimeout(this.stableConnectionTimer);
+      this.stableConnectionTimer = null;
       this.socket = null;
       this.socketReady = false;
       this.socketBuffer = '';
@@ -162,6 +189,7 @@ export class NativeHostRelay {
           throw new Error('local bridge protocol version mismatch');
         }
         this.socketReady = true;
+        this.scheduleStableConnectionReset(socket);
         if (this.registration) {
           socket.write(`${JSON.stringify(this.registration)}\n`);
         }
@@ -179,11 +207,27 @@ export class NativeHostRelay {
 
   private scheduleReconnect() {
     if (this.stopped || this.reconnectTimer) return;
+    const delay = calculateReconnectDelay(
+      this.reconnectAttempt,
+      this.reconnectDelayMs,
+      this.maxReconnectDelayMs,
+      this.random,
+    );
+    this.reconnectAttempt += 1;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       void this.connectToAgent();
-    }, this.reconnectDelayMs);
+    }, delay);
     this.reconnectTimer.unref();
+  }
+
+  private scheduleStableConnectionReset(socket: Socket) {
+    if (this.stableConnectionTimer) clearTimeout(this.stableConnectionTimer);
+    this.stableConnectionTimer = setTimeout(() => {
+      this.stableConnectionTimer = null;
+      if (this.socket === socket && this.socketReady) this.reconnectAttempt = 0;
+    }, this.stableConnectionResetMs);
+    this.stableConnectionTimer.unref();
   }
 }
 

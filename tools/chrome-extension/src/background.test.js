@@ -64,6 +64,18 @@ test('commands and target changes share the extension-owned serial queue', async
   assert.match(source, /tabs\.onRemoved\.addListener[\s\S]*?enqueueExtensionWork/);
 });
 
+test('native host reconnect uses bounded backoff and reports Chrome disconnect errors', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    'utf8',
+  );
+
+  assert.match(source, /calculateReconnectDelay\(/);
+  assert.match(source, /MAX_RECONNECT_DELAY_MS/);
+  assert.match(source, /scheduleStableConnectionReset/);
+  assert.match(source, /chrome\.runtime\.lastError\?\.message/);
+});
+
 test('explicit user tab binding reports only the origin approved by the action click', async () => {
   const source = await readFile(
     resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),

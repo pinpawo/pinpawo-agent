@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
-import { NativeHostRelay } from './relay';
+import { calculateReconnectDelay, NativeHostRelay } from './relay';
 import { encodeNativeMessage, NativeMessageDecoder } from './framing';
 import { BROWSER_EXTENSION_PROTOCOL_VERSION } from '../protocol';
 import { LocalAgentBrowserBridge } from '../bridge';
@@ -16,6 +16,12 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 1_000) {
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 5));
   }
 }
+
+test('native host reconnect backoff grows exponentially within a bounded jitter range', () => {
+  assert.equal(calculateReconnectDelay(0, 1_000, 30_000, () => 0), 500);
+  assert.equal(calculateReconnectDelay(1, 1_000, 30_000, () => 0.5), 1_500);
+  assert.equal(calculateReconnectDelay(10, 1_000, 30_000, () => 1), 30_000);
+});
 
 test('native host relays framed Chrome messages to the authenticated local bridge', async (t) => {
   const root = await mkdtemp(resolve(tmpdir(), 'pinpawo-native-host-'));

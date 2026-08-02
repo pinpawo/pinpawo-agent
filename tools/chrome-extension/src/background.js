@@ -24,6 +24,7 @@ import {
 } from './interaction.js';
 import { createTargetStack } from './targetLifecycle.js';
 import { createBrowserStateTracker } from './browserState.js';
+import { calculateReconnectDelay } from './reconnect.js';
 
 const CDP_VERSION = '1.3';
 const ALLOWED_CDP_COMMANDS = new Set([
@@ -40,10 +41,14 @@ const ALLOWED_CDP_COMMANDS = new Set([
 ]);
 const SESSION_KEY = 'pinpawoBrowserTarget';
 const RECONNECT_DELAY_MS = 1_000;
+const MAX_RECONNECT_DELAY_MS = 30_000;
+const STABLE_CONNECTION_RESET_MS = 10_000;
 const POPUP_NAVIGATION_TIMEOUT_MS = 15_000;
 const connectionId = crypto.randomUUID();
 let port = null;
 let reconnectTimer = null;
+let stableConnectionTimer = null;
+let reconnectAttempt = 0;
 let attachedTabId = null;
 let userBoundOrigin = null;
 const enqueueExtensionWork = createSerialExecutor();
@@ -109,10 +114,24 @@ function publishBrowserStateChange() {
 
 function scheduleReconnect() {
   if (reconnectTimer) return;
+  const delay = calculateReconnectDelay(
+    reconnectAttempt,
+    RECONNECT_DELAY_MS,
+    MAX_RECONNECT_DELAY_MS,
+  );
+  reconnectAttempt += 1;
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     connectNativeHost();
-  }, RECONNECT_DELAY_MS);
+  }, delay);
+}
+
+function scheduleStableConnectionReset(nextPort) {
+  if (stableConnectionTimer) clearTimeout(stableConnectionTimer);
+  stableConnectionTimer = setTimeout(() => {
+    stableConnectionTimer = null;
+    if (port === nextPort) reconnectAttempt = 0;
+  }, STABLE_CONNECTION_RESET_MS);
 }
 
 function connectNativeHost() {
@@ -125,10 +144,15 @@ function connectNativeHost() {
     });
     nextPort.onDisconnect.addListener(() => {
       if (port !== nextPort) return;
+      if (stableConnectionTimer) clearTimeout(stableConnectionTimer);
+      stableConnectionTimer = null;
+      const message = chrome.runtime.lastError?.message;
+      if (message) console.warn(`[pinpawo-extension] native host disconnected: ${message}`);
       port = null;
       scheduleReconnect();
     });
     sendRegister();
+    scheduleStableConnectionReset(nextPort);
   } catch {
     port = null;
     scheduleReconnect();

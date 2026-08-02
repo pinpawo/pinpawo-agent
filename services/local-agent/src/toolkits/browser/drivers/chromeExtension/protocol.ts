@@ -30,6 +30,8 @@ export type BrowserExtensionStateSnapshot = {
     tabId: number;
     ownership: 'agent' | 'user';
   };
+  /** Origin explicitly approved by the user clicking the extension action. */
+  userBoundOrigin?: string;
 };
 
 export type BrowserRegisterMessage = {
@@ -190,10 +192,33 @@ function parseStateSnapshot(value: unknown): BrowserExtensionStateSnapshot | und
   if (value.debuggerAttached && !activeTab) {
     throw new Error('browser.register state cannot attach the debugger without an active tab');
   }
+  let userBoundOrigin: string | undefined;
+  if (value.userBoundOrigin !== undefined) {
+    if (typeof value.userBoundOrigin !== 'string') {
+      throw new Error('browser.register state.userBoundOrigin must be a string');
+    }
+    let parsedOrigin: URL;
+    try {
+      parsedOrigin = new URL(value.userBoundOrigin);
+    } catch {
+      throw new Error('browser.register state.userBoundOrigin must be an http(s) origin');
+    }
+    if (
+      (parsedOrigin.protocol !== 'http:' && parsedOrigin.protocol !== 'https:')
+      || parsedOrigin.origin !== value.userBoundOrigin
+    ) {
+      throw new Error('browser.register state.userBoundOrigin must be an http(s) origin');
+    }
+    if (activeTab?.ownership !== 'user') {
+      throw new Error('browser.register state.userBoundOrigin requires a user-bound tab');
+    }
+    userBoundOrigin = value.userBoundOrigin;
+  }
   return {
     revision: value.revision as number,
     debuggerAttached: value.debuggerAttached,
     activeTab,
+    ...(userBoundOrigin ? { userBoundOrigin } : {}),
   };
 }
 

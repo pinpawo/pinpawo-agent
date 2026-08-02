@@ -6,11 +6,14 @@ export function createBrowserStateTracker() {
       revision += 1;
       return revision;
     },
-    snapshot(activeTab, attachedTabId) {
+    snapshot(activeTab, attachedTabId, userBoundOrigin = null) {
       return {
         revision,
         debuggerAttached: activeTab?.tabId === attachedTabId,
         ...(activeTab ? { activeTab: { ...activeTab } } : {}),
+        ...(activeTab?.ownership === 'user' && userBoundOrigin
+          ? { userBoundOrigin }
+          : {}),
       };
     },
   };

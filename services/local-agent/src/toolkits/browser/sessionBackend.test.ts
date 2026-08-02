@@ -23,6 +23,7 @@ function bridgeStatus(
     extensionId: null,
     activeTabId: null,
     activeTabOwnership: null,
+    userBoundOrigin: null,
     stateRevision: null,
     capabilities: [],
     socketPath: '/tmp/browser.sock',

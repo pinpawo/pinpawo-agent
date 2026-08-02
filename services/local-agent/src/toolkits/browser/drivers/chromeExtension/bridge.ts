@@ -47,6 +47,7 @@ export type BrowserBridgeStatus = {
   extensionId: string | null;
   activeTabId: number | null;
   activeTabOwnership: 'agent' | 'user' | null;
+  userBoundOrigin: string | null;
   stateRevision: number | null;
   capabilities: BrowserExtensionCapability[];
   socketPath: string;
@@ -148,6 +149,7 @@ export class LocalAgentBrowserBridge {
       extensionId: this.registration?.extensionId ?? null,
       activeTabId: activeTab?.tabId ?? null,
       activeTabOwnership: activeTab?.ownership ?? null,
+      userBoundOrigin: this.registration?.state?.userBoundOrigin ?? null,
       stateRevision: this.registration?.state?.revision ?? null,
       capabilities: [...(this.registration?.capabilities ?? [])],
       socketPath: this.socketPath,

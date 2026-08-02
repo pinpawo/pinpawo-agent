@@ -64,6 +64,20 @@ test('commands and target changes share the extension-owned serial queue', async
   assert.match(source, /tabs\.onRemoved\.addListener[\s\S]*?enqueueExtensionWork/);
 });
 
+test('explicit user tab binding reports only the origin approved by the action click', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    'utf8',
+  );
+  const actionHandler = source.match(
+    /chrome\.action\.onClicked\.addListener\(async \(tab\) => \{([\s\S]*?)\n\}\);/,
+  )?.[1] ?? '';
+
+  assert.match(actionHandler, /originOf\(tab\.url\)/);
+  assert.match(actionHandler, /userBoundOrigin: approvedOrigin/);
+  assert.doesNotMatch(actionHandler, /chrome\.storage\.local\.set\([^)]*userBoundOrigin/);
+});
+
 test('popup tabs are followed inside the extension target lifecycle', async () => {
   const source = await readFile(
     resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),

@@ -16,6 +16,7 @@ import {
   BrowserBridgeError,
   localAgentBrowserBridge,
   type LocalAgentBrowserBridge,
+  type BrowserBridgeStatus,
 } from './bridge';
 import { persistBrowserScreenshot } from '../../screenshot';
 import { BrowserOperationError } from '../../errors';
@@ -60,8 +61,20 @@ export class ChromeExtensionBrowserSession {
   private approvedOrigin: string | null = null;
 
   constructor(
-    private readonly bridge: Pick<LocalAgentBrowserBridge, 'sendCommand'> = localAgentBrowserBridge,
+    private readonly bridge: Pick<LocalAgentBrowserBridge, 'sendCommand'>
+      & Partial<Pick<LocalAgentBrowserBridge, 'getStatus'>> = localAgentBrowserBridge,
   ) {}
+
+  private userBoundOrigin(): string | null {
+    const status = this.bridge.getStatus?.() as BrowserBridgeStatus | undefined;
+    if (status?.activeTabOwnership !== 'user' || !status.userBoundOrigin) return null;
+    try {
+      const origin = approvedOriginFor(status.userBoundOrigin);
+      return origin === status.userBoundOrigin ? origin : null;
+    } catch {
+      return null;
+    }
+  }
 
   private validateOpenOptions(opts: BrowserOpenOptions) {
     if (opts.headless === true) {
@@ -100,10 +113,15 @@ export class ChromeExtensionBrowserSession {
   }
 
   private requireApprovedOrigin(): string {
+    const userBoundOrigin = this.userBoundOrigin();
+    if (userBoundOrigin) {
+      this.approvedOrigin = userBoundOrigin;
+      return userBoundOrigin;
+    }
     if (!this.approvedOrigin) {
       throw new BrowserOperationError(
         'browser_not_open',
-        'No approved Chrome extension page. Use browser_open first.',
+        'No approved Chrome extension page. Use browser_open first or click the extension action on the tab to bind it.',
         true,
       );
     }

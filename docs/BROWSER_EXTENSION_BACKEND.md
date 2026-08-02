@@ -60,7 +60,7 @@ These builders are a reusable normalization boundary, not a frozen cross-backend
 
 - The extension requests `debugger`, `nativeMessaging`, `storage` and `tabs`; it has no broad host permission.
 - `browser_open` creates an agent-owned tab if none is bound.
-- Clicking the extension action explicitly binds the current user tab. The health response distinguishes `agent` and `user` ownership.
+- Clicking the extension action explicitly binds the current user tab and approves only its current http(s) origin for the local-agent Browser session. The approval is held only in the live extension state, is not persisted by the extension, and is never updated by subsequent user navigation; after an extension/service-worker restart the user must click the action again. The health response distinguishes `agent` and `user` ownership.
 - Browser commands and target-binding changes run through one extension-owned serial queue. The local-agent tool layer remains backend-neutral and does not impose extension scheduling semantics.
 - A popup/new tab whose `openerTabId` is the current target becomes the active browser target. The extension keeps a bounded in-memory target history so closing a popup can return to its live parent; Playwright applies the same active-target behavior inside its own driver.
 - Same-origin popups remain fully readable and interactive. A cross-origin popup is followed only for lifecycle recovery: its content, screenshots and trusted input remain blocked, and the user must complete that step manually in visible Chrome. After the popup closes or returns to the previously approved origin, the agent can take a new snapshot and continue.

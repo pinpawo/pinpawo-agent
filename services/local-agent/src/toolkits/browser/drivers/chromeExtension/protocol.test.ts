@@ -97,6 +97,51 @@ test('browser extension protocol rejects mismatched versions and malformed resul
   );
 });
 
+test('browser extension protocol accepts a user-bound origin only for a user-bound tab', () => {
+  const message = parseExtensionToAgentMessage({
+    type: 'browser.register',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    extensionId: 'extension-1',
+    capabilities: ['snapshot'],
+    state: {
+      revision: 1,
+      debuggerAttached: false,
+      activeTab: { tabId: 42, ownership: 'user' },
+      userBoundOrigin: 'https://example.com',
+    },
+  });
+  assert.equal(message.type, 'browser.register');
+  assert.equal(message.state?.userBoundOrigin, 'https://example.com');
+
+  assert.throws(() => parseExtensionToAgentMessage({
+    type: 'browser.register',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    extensionId: 'extension-1',
+    capabilities: ['snapshot'],
+    state: {
+      revision: 1,
+      debuggerAttached: false,
+      activeTab: { tabId: 42, ownership: 'agent' },
+      userBoundOrigin: 'https://example.com',
+    },
+  }), /requires a user-bound tab/);
+  assert.throws(() => parseExtensionToAgentMessage({
+    type: 'browser.register',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    extensionId: 'extension-1',
+    capabilities: ['snapshot'],
+    state: {
+      revision: 1,
+      debuggerAttached: false,
+      activeTab: { tabId: 42, ownership: 'user' },
+      userBoundOrigin: 'https://example.com/path',
+    },
+  }), /must be an http\(s\) origin/);
+});
+
 test('browser extension protocol validates structured error details', () => {
   const message = parseExtensionToAgentMessage({
     type: 'browser.result',

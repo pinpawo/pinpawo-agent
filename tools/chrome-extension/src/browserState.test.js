@@ -22,3 +22,21 @@ test('browser state snapshots retain the current revision until a state change i
   assert.equal(state.advance(), 2);
   assert.equal(state.snapshot(null, null).revision, 2);
 });
+
+test('browser state exposes an origin only for an explicit user binding', () => {
+  const state = createBrowserStateTracker();
+  const userTarget = { tabId: 42, ownership: 'user' };
+  const agentTarget = { tabId: 7, ownership: 'agent' };
+
+  assert.deepEqual(state.snapshot(userTarget, null, 'https://example.com'), {
+    revision: 0,
+    debuggerAttached: false,
+    activeTab: userTarget,
+    userBoundOrigin: 'https://example.com',
+  });
+  assert.deepEqual(state.snapshot(agentTarget, null, 'https://example.com'), {
+    revision: 0,
+    debuggerAttached: false,
+    activeTab: agentTarget,
+  });
+});

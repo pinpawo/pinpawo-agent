@@ -98,11 +98,12 @@ test('local browser bridge authenticates, registers and resolves commands', asyn
     connectionId: 'connection-1',
     extensionId: 'extension-1',
     capabilities: ['navigate', 'snapshot', 'detach'],
-    activeTab: { tabId: 42, ownership: 'agent' },
+    activeTab: { tabId: 42, ownership: 'user' },
     state: {
       revision: 2,
       debuggerAttached: true,
-      activeTab: { tabId: 42, ownership: 'agent' },
+      activeTab: { tabId: 42, ownership: 'user' },
+      userBoundOrigin: 'https://example.com',
     },
   });
   await waitUntil(() => bridge.getStatus().extensionConnected);
@@ -110,6 +111,7 @@ test('local browser bridge authenticates, registers and resolves commands', asyn
   assert.equal(bridge.getStatus().activeTabId, 42);
   assert.equal(bridge.getStatus().debuggerAttached, true);
   assert.equal(bridge.getStatus().stateRevision, 2);
+  assert.equal(bridge.getStatus().userBoundOrigin, 'https://example.com');
 
   peer.send({
     type: 'browser.register',

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import { ChromeExtensionBrowserSession } from './session';
-import { BrowserBridgeError } from './bridge';
+import { BrowserBridgeError, type BrowserBridgeStatus } from './bridge';
 import { getLocalToolsWorkdir, setLocalToolsWorkdir } from '../../../local/pathUtils';
 
 const rawSnapshot = {
@@ -62,6 +62,39 @@ test('extension session rejects unsupported modes and requires an approved page 
   await assert.rejects(session.open('file:///tmp/page.html'), /only supports http/);
   await assert.rejects(session.open('https://example.com', { headless: true }), /does not support headless/);
   await assert.rejects(session.click('#submit'), /Use browser_open first/);
+});
+
+test('extension session adopts an origin only from an explicit user tab binding', async () => {
+  const calls: Array<{ command: string; params: Record<string, unknown> }> = [];
+  const session = new ChromeExtensionBrowserSession({
+    getStatus() {
+      return {
+        activeTabOwnership: 'user',
+        userBoundOrigin: 'https://example.com',
+      } as BrowserBridgeStatus;
+    },
+    async sendCommand(command, params) {
+      calls.push({ command, params });
+      return rawSnapshot;
+    },
+  });
+
+  await session.snapshot();
+  assert.deepEqual(calls, [{
+    command: 'snapshot',
+    params: { approvedOrigin: 'https://example.com' },
+  }]);
+
+  const unapproved = new ChromeExtensionBrowserSession({
+    getStatus() {
+      return {
+        activeTabOwnership: 'user',
+        userBoundOrigin: null,
+      } as BrowserBridgeStatus;
+    },
+    async sendCommand() { return rawSnapshot; },
+  });
+  await assert.rejects(unapproved.snapshot(), /Use browser_open first or click the extension action/);
 });
 
 test('extension session maps P1 interactions and normalizes extract and screenshot results', async (t) => {

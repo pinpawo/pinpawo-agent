@@ -45,6 +45,7 @@ const connectionId = crypto.randomUUID();
 let port = null;
 let reconnectTimer = null;
 let attachedTabId = null;
+let userBoundOrigin = null;
 const enqueueExtensionWork = createSerialExecutor();
 const targets = createTargetStack();
 const browserState = createBrowserStateTracker();
@@ -73,6 +74,11 @@ async function restoreTarget() {
 
 async function saveTarget(nextTarget, options = {}) {
   const target = targets.bind(nextTarget, options);
+  if (Object.hasOwn(options, 'userBoundOrigin')) {
+    userBoundOrigin = options.userBoundOrigin;
+  } else if (target?.ownership !== 'user') {
+    userBoundOrigin = null;
+  }
   if (target) await chrome.storage.local.set({ [SESSION_KEY]: target });
   else await chrome.storage.local.remove(SESSION_KEY);
   publishBrowserStateChange();
@@ -80,7 +86,7 @@ async function saveTarget(nextTarget, options = {}) {
 
 function registerMessage() {
   const target = targets.current();
-  const state = browserState.snapshot(target, attachedTabId);
+  const state = browserState.snapshot(target, attachedTabId, userBoundOrigin);
   return {
     type: 'browser.register',
     protocolVersion: PROTOCOL_VERSION,
@@ -816,11 +822,18 @@ async function handleCommand(value) {
 
 chrome.action.onClicked.addListener(async (tab) => {
   if (!Number.isInteger(tab.id)) return;
+  let approvedOrigin = null;
+  try {
+    approvedOrigin = typeof tab.url === 'string' ? originOf(tab.url) : null;
+  } catch {
+    // The binding remains visible, but only an http(s) user gesture can
+    // authorize browser reads or interactions.
+  }
   await enqueueExtensionWork(async () => {
     await detach();
     await saveTarget(
       { tabId: tab.id, ownership: 'user' },
-      { resetHistory: true },
+      { resetHistory: true, userBoundOrigin: approvedOrigin },
     );
   });
 });

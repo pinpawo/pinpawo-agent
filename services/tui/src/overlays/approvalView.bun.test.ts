@@ -73,11 +73,12 @@ test('approval view remains bounded and accepts multiline input after resize', a
   const submitting = setup.captureCharFrame();
   assert.match(submitting, /Submitting review/);
   assert.doesNotMatch(submitting, /批准|回复|第一行/);
+  assert.doesNotMatch(submitting, /[\u2800-\u28ff]/);
 
   state = advanceApprovalSubmissionFrame(state);
   view.render(state, 34, setup.renderer.height);
   await setup.flush();
-  assert.notEqual(setup.captureCharFrame(), submitting);
+  assert.equal(setup.captureCharFrame(), submitting);
 });
 
 function waitingReview(): AgentRunView {

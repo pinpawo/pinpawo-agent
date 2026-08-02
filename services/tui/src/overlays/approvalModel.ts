@@ -52,6 +52,7 @@ export type ApprovalViewModel = {
   inputPlaceholder: string;
   bodyRows: number;
   optionRows: number;
+  loadingFrame: number | null;
 };
 
 const MAX_REVIEW_CONTENT_CHARACTERS = 100_000;
@@ -61,19 +62,6 @@ const APPROVAL_CONTENT_ROWS = 10;
 const APPROVAL_TEXT_INPUT_BODY_ROWS = 4;
 const APPROVAL_TEXT_INPUT_OPTION_ROWS = 2;
 const APPROVAL_LONG_CONTENT_OPTION_ROWS = 2;
-const APPROVAL_SUBMISSION_FRAMES = [
-  '⠋',
-  '⠙',
-  '⠹',
-  '⠸',
-  '⠼',
-  '⠴',
-  '⠦',
-  '⠧',
-  '⠇',
-  '⠏',
-] as const;
-
 export function createApprovalState(): ApprovalState {
   return { phase: 'closed' };
 }
@@ -310,10 +298,6 @@ export function buildApprovalViewModel(
   const reviewCount = state.action.reviews.length;
   const pet = state.action.petId ? ` · ${state.action.petId}` : '';
   if (state.phase === 'resolution-sent') {
-    const marker = APPROVAL_SUBMISSION_FRAMES[
-      Math.max(0, Math.floor(state.submissionFrame))
-        % APPROVAL_SUBMISSION_FRAMES.length
-    ];
     const message = state.message ?? 'Submitting review decision…';
     const rawTitle = width >= 50
       ? `Approval ${state.reviewIndex + 1}/${reviewCount}${pet}`
@@ -323,12 +307,13 @@ export function buildApprovalViewModel(
       bottomTitle: state.interruptSent
         ? ' Interrupt requested '
         : ' Esc interrupt · Ctrl+C interrupt ',
-      body: truncateTerminalLine(`${marker} ${message}`, innerWidth),
+      body: truncateTerminalLine(message, Math.max(1, innerWidth - 4)),
       options: '',
       inputVisible: false,
       inputPlaceholder: '',
       bodyRows: approvalContentRows(footerRows),
       optionRows: 0,
+      loadingFrame: state.submissionFrame,
     };
   }
   const allBodyLines = review
@@ -372,6 +357,7 @@ export function buildApprovalViewModel(
         : 'Type a response'),
     bodyRows,
     optionRows,
+    loadingFrame: null,
   };
 }
 

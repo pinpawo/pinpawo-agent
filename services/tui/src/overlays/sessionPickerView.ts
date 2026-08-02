@@ -4,6 +4,7 @@ import {
   TextRenderable,
   type CliRenderer,
 } from '@opentui/core';
+import { buildLoadingCellLine } from '../visuals/loadingCells';
 import {
   formatSessionPicker,
   type SessionPickerState,
@@ -40,7 +41,7 @@ export class SessionPickerView {
     this.frame.add(this.content);
   }
 
-  render(state: SessionPickerState, width: number) {
+  render(state: SessionPickerState, width: number, loadingFrame = 0) {
     const visible = state.phase !== 'closed';
     this.frame.visible = visible;
     if (!visible) return;
@@ -55,6 +56,13 @@ export class SessionPickerView {
       : state.phase === 'resuming'
         ? ' Please wait '
         : ' Esc ';
-    this.content.content = formatSessionPicker(state, width);
+    const loading = state.phase === 'loading' || state.phase === 'resuming';
+    const content = formatSessionPicker(
+      state,
+      loading ? Math.max(1, width - 4) : width,
+    );
+    this.content.content = loading
+      ? buildLoadingCellLine(content, loadingFrame)
+      : content;
   }
 }

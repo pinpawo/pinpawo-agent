@@ -77,7 +77,9 @@ test('approved batch decisions advance locally before transport submission', () 
   assert.equal(submitting.optionRows, 0);
   assert.equal(submitting.inputVisible, false);
   assert.match(submitting.body, /Submitting review decision/);
-  assert.notEqual(nextSubmittingFrame.body, submitting.body);
+  assert.equal(submitting.loadingFrame, 0);
+  assert.equal(nextSubmittingFrame.loadingFrame, 1);
+  assert.equal(nextSubmittingFrame.body, submitting.body);
   state = updateApprovalResolutionSent(state, {
     interruptSent: true,
     message: 'Interrupt requested',

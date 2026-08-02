@@ -166,6 +166,10 @@ export function formatModelPicker(
   if (state.phase === 'loading') {
     return 'Loading model profiles…';
   }
+  if (state.phase === 'selecting') {
+    const label = selectedModelProfile(state)?.label ?? 'model';
+    return truncateTerminalLine(`Switching to ${label}…`, innerWidth);
+  }
   if (state.profiles.length === 0) {
     return state.phase === 'error'
       ? truncateTerminalLine(
@@ -225,10 +229,7 @@ export function formatModelPicker(
     const detail = selected.issues[0] ?? metadata;
     if (detail) lines.push(truncateTerminalLine(`  ${detail}`, innerWidth));
   }
-  if (state.phase === 'selecting') {
-    const label = selectedModelProfile(state)?.label ?? 'model';
-    lines.push(truncateTerminalLine(`Switching to ${label}…`, innerWidth));
-  } else if (state.phase === 'error' && state.message) {
+  if (state.phase === 'error' && state.message) {
     lines.push(truncateTerminalLine(`Could not switch: ${state.message}`, innerWidth));
   }
   return lines.join('\n');

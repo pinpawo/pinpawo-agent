@@ -159,43 +159,61 @@ export class LocalAgentBrowserBridge {
   async start(): Promise<void> {
     if (this.server?.listening) return;
 
-    await mkdir(dirname(this.socketPath), { recursive: true, mode: 0o700 });
-    await chmod(dirname(this.socketPath), 0o700);
-    if (dirname(this.tokenPath) !== dirname(this.socketPath)) {
-      await mkdir(dirname(this.tokenPath), { recursive: true, mode: 0o700 });
-      await chmod(dirname(this.tokenPath), 0o700);
-    }
-    if (await isSocketAcceptingConnections(this.socketPath)) {
-      throw new BrowserBridgeError(
-        'browser_bridge_already_running',
-        `another local-agent browser bridge is already listening at ${this.socketPath}`,
-      );
-    }
-    await unlinkIfPresent(this.socketPath);
-
-    this.token = this.tokenFactory();
+    let socketPathPrepared = false;
+    let tokenPathPrepared = false;
     const temporaryTokenPath = `${this.tokenPath}.${process.pid}.tmp`;
-    await writeFile(temporaryTokenPath, `${this.token}\n`, { mode: 0o600 });
-    await chmod(temporaryTokenPath, 0o600);
-    await rename(temporaryTokenPath, this.tokenPath);
+    try {
+      await mkdir(dirname(this.socketPath), { recursive: true, mode: 0o700 });
+      await chmod(dirname(this.socketPath), 0o700);
+      if (dirname(this.tokenPath) !== dirname(this.socketPath)) {
+        await mkdir(dirname(this.tokenPath), { recursive: true, mode: 0o700 });
+        await chmod(dirname(this.tokenPath), 0o700);
+      }
+      if (await isSocketAcceptingConnections(this.socketPath)) {
+        throw new BrowserBridgeError(
+          'browser_bridge_already_running',
+          `another local-agent browser bridge is already listening at ${this.socketPath}`,
+        );
+      }
+      await unlinkIfPresent(this.socketPath);
+      socketPathPrepared = true;
 
-    const server = createServer((socket) => this.acceptSocket(socket));
-    this.server = server;
-    await new Promise<void>((resolvePromise, rejectPromise) => {
-      const handleError = (error: Error) => {
-        server.off('listening', handleListening);
-        rejectPromise(error);
-      };
-      const handleListening = () => {
-        server.off('error', handleError);
-        resolvePromise();
-      };
-      server.once('error', handleError);
-      server.once('listening', handleListening);
-      server.listen(this.socketPath);
-    });
-    await chmod(this.socketPath, 0o600);
-    this.logger.info(`[browser-bridge] listening on ${this.socketPath}`);
+      this.token = this.tokenFactory();
+      await writeFile(temporaryTokenPath, `${this.token}\n`, { mode: 0o600 });
+      await chmod(temporaryTokenPath, 0o600);
+      await rename(temporaryTokenPath, this.tokenPath);
+      tokenPathPrepared = true;
+
+      const server = createServer((socket) => this.acceptSocket(socket));
+      this.server = server;
+      await new Promise<void>((resolvePromise, rejectPromise) => {
+        const handleError = (error: Error) => {
+          server.off('listening', handleListening);
+          rejectPromise(error);
+        };
+        const handleListening = () => {
+          server.off('error', handleError);
+          resolvePromise();
+        };
+        server.once('error', handleError);
+        server.once('listening', handleListening);
+        server.listen(this.socketPath);
+      });
+      await chmod(this.socketPath, 0o600);
+      this.logger.info(`[browser-bridge] listening on ${this.socketPath}`);
+    } catch (error) {
+      if (this.server) {
+        await this.stop();
+      } else {
+        await Promise.allSettled([
+          unlinkIfPresent(temporaryTokenPath),
+          ...(tokenPathPrepared ? [unlinkIfPresent(this.tokenPath)] : []),
+          ...(socketPathPrepared ? [unlinkIfPresent(this.socketPath)] : []),
+        ]);
+        this.token = null;
+      }
+      throw error;
+    }
   }
 
   async stop(): Promise<void> {

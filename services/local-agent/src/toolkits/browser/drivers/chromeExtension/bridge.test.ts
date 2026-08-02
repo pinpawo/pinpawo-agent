@@ -218,6 +218,21 @@ test('local browser bridge rejects wrong tokens and reports disconnected extensi
   assert.equal(bridge.getStatus().hostConnected, false);
 });
 
+test('local browser bridge cleans up token and state when socket startup fails', async () => {
+  const root = await mkdtemp(resolve(tmpdir(), 'pinpawo-browser-bridge-start-failure-'));
+  const tokenPath = resolve(root, 'bridge.token');
+  const bridge = new LocalAgentBrowserBridge({
+    socketPath: resolve(root, 'x'.repeat(160), 'bridge.sock'),
+    tokenPath,
+    tokenFactory: () => 'test-token',
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  await assert.rejects(bridge.start());
+  assert.equal(bridge.getStatus().listening, false);
+  await assert.rejects(readFile(tokenPath, 'utf8'), { code: 'ENOENT' });
+});
+
 test('local browser bridge retains the first active extension connection', async (t) => {
   const root = await mkdtemp(resolve(tmpdir(), 'pinpawo-browser-bridge-single-active-'));
   const warnings: string[] = [];

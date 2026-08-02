@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import test from 'node:test';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
 import { createBashToolkit } from './toolkits/local';
-import { runJqQuery } from './toolkits/local/jsonTools';
+import { runJqProcess, runJqQuery } from './toolkits/local/jsonTools';
 
 function definition(toolkit: AgentToolkit, toolName: string) {
   return toolkit.tools.find((item) => item.tool.name === toolName);
@@ -62,4 +62,36 @@ test('jq_query rejects directories before invoking jq', async (t) => {
 
   assert.match(output, /not a file/);
   assert.equal(calls, 0);
+});
+
+test('jq_query returns a truncation marker for streamed output beyond its preview', async (t) => {
+  const root = mkdtempSync(resolve(tmpdir(), 'pinpawo-jq-query-large-'));
+  const filePath = resolve(root, 'trace.json');
+  writeFileSync(filePath, '{}', 'utf-8');
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+
+  const output = await runJqQuery({ path: filePath, filter: '.' }, async () => ({
+    stdout: 'x'.repeat(50_000),
+    stderr: '',
+    stdoutTotalChars: 5 * 1024 * 1024,
+  }));
+
+  assert.match(output, /^x{50000}\n\[truncated 5192880 chars\]$/);
+});
+
+test('jq process drains large output while retaining a bounded preview', async () => {
+  const outputChars = 5 * 1024 * 1024;
+  const result = await runJqProcess(process.execPath, [
+    '-e',
+    `process.stdout.write('x'.repeat(${outputChars.toString()}))`,
+  ], {
+    cwd: process.cwd(),
+    encoding: 'utf-8',
+    env: {},
+    timeout: 30_000,
+  });
+
+  assert.equal(String(result.stdout).length, 50_000);
+  assert.equal(result.stdoutTotalChars, outputChars);
+  assert.equal(result.stderr, '');
 });

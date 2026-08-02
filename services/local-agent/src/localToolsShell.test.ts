@@ -7,10 +7,9 @@ import type { AgentToolkit } from '@pinpawo/pet-agent';
 import {
   buildCurrentTimeSnapshot,
   getCurrentTimeTool,
-  getBlockedShellReason,
-  getShellConfirmationRisk,
   normalizeShellActionInput,
   runShellTool,
+  shellOperationMetadata,
   truncateShellOutput,
 } from './toolkits/local/shellTools';
 import { createBashToolkit } from './toolkits/local';
@@ -59,20 +58,6 @@ test('bash toolkit exposes get_current_time without command review', () => {
   assert.equal(definition(toolkit, 'get_current_time')?.review, undefined);
 });
 
-test('shell policy allows explicit writes but blocks an interactive cat redirect', () => {
-  assert.equal(getBlockedShellReason('printf ok > out.txt'), null);
-  assert.equal(getBlockedShellReason("cat <<'EOF' > out.txt\nok\nEOF"), null);
-  assert.match(getBlockedShellReason('cat > out.txt') ?? '', /stdin/);
-});
-
-test('shell policy marks risky commands for review', () => {
-  assert.match(
-    getShellConfirmationRisk('git commit -m test') ?? '',
-    /git/,
-  );
-  assert.equal(getShellConfirmationRisk('printf ok'), null);
-});
-
 test('shell review policy reviews configured command execution', async () => {
   const toolkit = createBashToolkit();
   const policy = definition(toolkit, 'run_shell')?.review;
@@ -109,6 +94,19 @@ test('normalizeShellActionInput trims commands and expands home cwd', () => {
   );
 });
 
+test('shell operation metadata exposes the resolved cwd without classifying command text', () => {
+  assert.deepEqual(
+    shellOperationMetadata.run_shell?.summarizeInput?.({
+      command: "printf 'value' > output.txt",
+      cwd: '~',
+    }),
+    {
+      target: homedir(),
+      summary: "printf 'value' > output.txt",
+    },
+  );
+});
+
 test('runShellTool executes commands and explicit output writes', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'pinpawo-shell-write-'));
   const file = join(dir, 'output.txt');
@@ -120,6 +118,8 @@ test('runShellTool executes commands and explicit output writes', async (t) => {
   );
   assert.equal(await runShellTool.invoke({ command: `printf written > ${file}` }), '(no output)');
   assert.equal(readFileSync(file, 'utf-8'), 'written');
+  assert.equal(await runShellTool.invoke({ command: `printf piped | cat > ${file}` }), '(no output)');
+  assert.equal(readFileSync(file, 'utf-8'), 'piped');
 });
 
 test('runShellTool relies on toolkit review instead of a second interface gate', async (t) => {

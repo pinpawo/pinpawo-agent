@@ -1,6 +1,6 @@
-import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { statSync } from 'node:fs';
-import { promisify } from 'node:util';
+import { StringDecoder } from 'node:string_decoder';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import type { ToolOperationMetadata } from '@pinpawo/pet-agent';
@@ -8,36 +8,105 @@ import { readRecord, readString } from '../operationMetadata';
 import { resolveUserPath } from './pathUtils';
 
 const JQ_TIMEOUT_MS = 30_000;
-const JQ_MAX_BUFFER_BYTES = 4 * 1024 * 1024;
 const JQ_OUTPUT_LIMIT_CHARS = 50_000;
 
 type JqExecResult = {
   stdout: string | Buffer;
   stderr: string | Buffer;
+  stdoutTotalChars?: number;
+  stderrTotalChars?: number;
+};
+
+type JqExecOptions = {
+  cwd: string;
+  encoding: 'utf-8';
+  env: Record<string, string>;
+  timeout: number;
 };
 
 type JqExec = (
   file: string,
   args: string[],
-  options: {
-    cwd: string;
-    encoding: 'utf-8';
-    env: Record<string, string>;
-    maxBuffer: number;
-    timeout: number;
-  },
+  options: JqExecOptions,
 ) => Promise<JqExecResult>;
 
-const execFileAsync = promisify(execFile) as unknown as JqExec;
+function createBoundedTextCollector(limit: number) {
+  const decoder = new StringDecoder('utf-8');
+  let text = '';
+  let totalChars = 0;
+
+  const append = (value: string) => {
+    totalChars += value.length;
+    if (text.length < limit) {
+      text += value.slice(0, limit - text.length);
+    }
+  };
+
+  return {
+    push(chunk: Buffer) {
+      append(decoder.write(chunk));
+    },
+    finish() {
+      append(decoder.end());
+      return { text, totalChars };
+    },
+  };
+}
+
+export const runJqProcess: JqExec = (file, args, options) => new Promise((resolve, reject) => {
+  const child = spawn(file, args, {
+    cwd: options.cwd,
+    env: options.env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  });
+  const stdout = createBoundedTextCollector(JQ_OUTPUT_LIMIT_CHARS);
+  const stderr = createBoundedTextCollector(JQ_OUTPUT_LIMIT_CHARS);
+  let timedOut = false;
+
+  child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
+  child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
+
+  const timer = setTimeout(() => {
+    timedOut = true;
+    child.kill('SIGTERM');
+  }, options.timeout);
+
+  child.once('error', (error) => {
+    clearTimeout(timer);
+    reject(error);
+  });
+  child.once('close', (code, signal) => {
+    clearTimeout(timer);
+    const stdoutResult = stdout.finish();
+    const stderrResult = stderr.finish();
+    const result: JqExecResult = {
+      stdout: stdoutResult.text,
+      stderr: stderrResult.text,
+      stdoutTotalChars: stdoutResult.totalChars,
+      stderrTotalChars: stderrResult.totalChars,
+    };
+    if (code === 0 && !timedOut) {
+      resolve(result);
+      return;
+    }
+    reject(Object.assign(new Error(`jq exited with code ${code?.toString() ?? '?'}${signal ? ` (${signal})` : ''}`), {
+      code,
+      killed: timedOut,
+      signal,
+      ...result,
+    }));
+  });
+});
 
 function outputText(value: string | Buffer) {
   return Buffer.isBuffer(value) ? value.toString('utf-8') : value;
 }
 
-function truncateJqOutput(output: string) {
-  if (output.length <= JQ_OUTPUT_LIMIT_CHARS) return output;
+function truncateJqOutput(output: string, totalChars = output.length) {
+  if (totalChars <= JQ_OUTPUT_LIMIT_CHARS) return output;
   const kept = output.slice(0, JQ_OUTPUT_LIMIT_CHARS);
-  return `${kept}\n[truncated ${(output.length - JQ_OUTPUT_LIMIT_CHARS).toString()} chars]`;
+  return `${kept}\n[truncated ${(totalChars - kept.length).toString()} chars]`;
 }
 
 export type JqQueryInput = {
@@ -47,7 +116,7 @@ export type JqQueryInput = {
   compactOutput?: boolean;
 };
 
-export async function runJqQuery(input: JqQueryInput, run: JqExec = execFileAsync) {
+export async function runJqQuery(input: JqQueryInput, run: JqExec = runJqProcess) {
   const filePath = resolveUserPath(input.path);
   const filter = input.filter.trim();
   if (!filter) return 'Error: jq_query requires a filter';
@@ -71,7 +140,12 @@ export async function runJqQuery(input: JqQueryInput, run: JqExec = execFileAsyn
   ];
 
   try {
-    const { stdout, stderr } = await run('jq', args, {
+    const {
+      stdout,
+      stderr,
+      stdoutTotalChars,
+      stderrTotalChars,
+    } = await run('jq', args, {
       cwd: process.cwd(),
       encoding: 'utf-8',
       env: {
@@ -79,11 +153,10 @@ export async function runJqQuery(input: JqQueryInput, run: JqExec = execFileAsyn
         LC_ALL: 'C.UTF-8',
         PATH: process.env.PATH ?? '/usr/bin:/bin:/usr/sbin:/sbin',
       },
-      maxBuffer: JQ_MAX_BUFFER_BYTES,
       timeout: JQ_TIMEOUT_MS,
     });
-    const out = truncateJqOutput(outputText(stdout).trimEnd());
-    const err = truncateJqOutput(outputText(stderr).trimEnd());
+    const out = truncateJqOutput(outputText(stdout).trimEnd(), stdoutTotalChars);
+    const err = truncateJqOutput(outputText(stderr).trimEnd(), stderrTotalChars);
     return [out || '(no output)', err ? `--- stderr ---\n${err}` : '']
       .filter(Boolean)
       .join('\n');
@@ -93,13 +166,19 @@ export async function runJqQuery(input: JqQueryInput, run: JqExec = execFileAsyn
       signal?: string | null;
       stderr?: string | Buffer;
       stdout?: string | Buffer;
+      stderrTotalChars?: number;
+      stdoutTotalChars?: number;
     };
     if (typed.code === 'ENOENT') {
       return 'Error: jq is not installed or is not available on PATH.';
     }
     const stderr = typed.stderr ? outputText(typed.stderr).trimEnd() : '';
     const stdout = typed.stdout ? outputText(typed.stdout).trimEnd() : '';
-    const detail = truncateJqOutput([stderr, stdout].filter(Boolean).join('\n'));
+    const combined = [stderr, stdout].filter(Boolean).join('\n');
+    const combinedTotalChars = (typed.stderrTotalChars ?? stderr.length)
+      + (typed.stdoutTotalChars ?? stdout.length)
+      + (stderr && stdout ? 1 : 0);
+    const detail = truncateJqOutput(combined, combinedTotalChars);
     if (typed.killed || typed.signal === 'SIGTERM') {
       return `Error: jq_query timed out after 30s${detail ? `\n${detail}` : ''}`;
     }

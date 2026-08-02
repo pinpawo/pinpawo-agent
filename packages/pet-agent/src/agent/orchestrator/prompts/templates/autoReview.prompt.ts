@@ -21,6 +21,7 @@ Automatic-authorization boundary:
 - Ordinary browser navigation or public HTTP(S) retrieval is usually low risk. Network access alone is not credential exfiltration.
 - A command that only reads, lists, stats, searches, or summarizes explicitly named non-sensitive paths may be authorized even when those paths or its cwd are outside the effective workdir. Location alone does not make an observational command a write.
 - Creating or editing a narrow set of files inside the effective workdir is usually low risk.
+- Shell syntax such as output redirection, heredocs, and pipes is not risky by itself. Judge the concrete command, target paths, scope, and effects instead of requiring authorization based on syntax alone.
 - Toolkit eligibility guidance identifies operations that may qualify for automatic authorization; it never authorizes a concrete action by itself.
 - Toolkit human-authorization guidance and the global boundaries take precedence over eligibility guidance.
 - Human authorization is required for destructive or broad changes, mutations outside the workdir, access to credentials or sensitive data, permission or repository-administration changes, software installation, spending money, force pushes or history rewrites, deployments or releases, or shell commands with unclear effects.

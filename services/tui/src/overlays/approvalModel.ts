@@ -24,6 +24,7 @@ export type ApprovalState =
       contentOffset: number;
       draft: string;
       interruptSent: boolean;
+      submissionFrame: number;
       message?: string;
     };
 
@@ -51,6 +52,7 @@ export type ApprovalViewModel = {
   inputPlaceholder: string;
   bodyRows: number;
   optionRows: number;
+  loadingFrame: number | null;
 };
 
 const MAX_REVIEW_CONTENT_CHARACTERS = 100_000;
@@ -60,7 +62,6 @@ const APPROVAL_CONTENT_ROWS = 10;
 const APPROVAL_TEXT_INPUT_BODY_ROWS = 4;
 const APPROVAL_TEXT_INPUT_OPTION_ROWS = 2;
 const APPROVAL_LONG_CONTENT_OPTION_ROWS = 2;
-
 export function createApprovalState(): ApprovalState {
   return { phase: 'closed' };
 }
@@ -98,6 +99,7 @@ export function syncApprovalState(
     contentOffset: 0,
     draft: '',
     interruptSent: false,
+    submissionFrame: 0,
   };
 }
 
@@ -204,6 +206,7 @@ export function advanceApproval(
     contentOffset: 0,
     draft: '',
     interruptSent: false,
+    submissionFrame: 0,
     message: undefined,
   };
 }
@@ -217,7 +220,19 @@ export function beginApprovalSubmission(
         ...state,
         phase: 'resolution-sent',
         interruptSent: false,
+        submissionFrame: 0,
         message: undefined,
+      };
+}
+
+export function advanceApprovalSubmissionFrame(
+  state: ApprovalState,
+): ApprovalState {
+  return state.phase !== 'resolution-sent'
+    ? state
+    : {
+        ...state,
+        submissionFrame: state.submissionFrame + 1,
       };
 }
 
@@ -280,6 +295,27 @@ export function buildApprovalViewModel(
 ): ApprovalViewModel {
   const innerWidth = Math.max(1, width - 4);
   const review = currentApprovalReview(state);
+  const reviewCount = state.action.reviews.length;
+  const pet = state.action.petId ? ` · ${state.action.petId}` : '';
+  if (state.phase === 'resolution-sent') {
+    const message = state.message ?? 'Submitting review decision…';
+    const rawTitle = width >= 50
+      ? `Approval ${state.reviewIndex + 1}/${reviewCount}${pet}`
+      : `Approval ${state.reviewIndex + 1}/${reviewCount}`;
+    return {
+      title: ` ${truncateTerminalLine(rawTitle, innerWidth)} `,
+      bottomTitle: state.interruptSent
+        ? ' Interrupt requested '
+        : ' Esc interrupt · Ctrl+C interrupt ',
+      body: truncateTerminalLine(message, Math.max(1, innerWidth - 4)),
+      options: '',
+      inputVisible: false,
+      inputPlaceholder: '',
+      bodyRows: approvalContentRows(footerRows),
+      optionRows: 0,
+      loadingFrame: state.submissionFrame,
+    };
+  }
   const allBodyLines = review
     ? buildReviewContentLines(review, innerWidth)
     : ['Review is no longer available.'];
@@ -294,20 +330,13 @@ export function buildApprovalViewModel(
   const bodyLines = allBodyLines.slice(offset, offset + bodyRows);
   if (state.phase === 'error' && state.message) {
     bodyLines[0] = truncateTerminalLine(`Error: ${state.message}`, innerWidth);
-  } else if (state.phase === 'resolution-sent') {
-    bodyLines[0] = truncateTerminalLine(
-      state.message ?? 'Decision sent; waiting for the run to continue…',
-      innerWidth,
-    );
   }
-  const reviewCount = state.action.reviews.length;
   const contentProgress = allBodyLines.length > bodyRows
     ? ` · details ${offset + 1}-${Math.min(offset + bodyRows, allBodyLines.length)}/${allBodyLines.length}`
     : '';
   const compactContentProgress = allBodyLines.length > bodyRows
     ? ` · ${offset + 1}-${Math.min(offset + bodyRows, allBodyLines.length)}/${allBodyLines.length}`
     : '';
-  const pet = state.action.petId ? ` · ${state.action.petId}` : '';
   const rawTitle = width >= 50
     ? `Approval ${state.reviewIndex + 1}/${reviewCount}${pet}${contentProgress}`
     : `Approval ${state.reviewIndex + 1}/${reviewCount}${compactContentProgress}`;
@@ -317,11 +346,7 @@ export function buildApprovalViewModel(
   );
   return {
     title: ` ${title} `,
-    bottomTitle: state.phase === 'resolution-sent'
-      ? state.interruptSent
-        ? ' Interrupt requested '
-        : ' Esc interrupt · Ctrl+C interrupt '
-      : approvalHelp(width),
+    bottomTitle: approvalHelp(width),
     body: bodyLines.join('\n'),
     options: formatApprovalOptions(state, innerWidth, optionRows),
     inputVisible: approvalAcceptsTextInput(state),
@@ -332,6 +357,7 @@ export function buildApprovalViewModel(
         : 'Type a response'),
     bodyRows,
     optionRows,
+    loadingFrame: null,
   };
 }
 

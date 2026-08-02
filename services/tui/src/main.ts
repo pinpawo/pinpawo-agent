@@ -147,6 +147,7 @@ import {
 } from './status/statusModel';
 import {
   formatLiveActivity,
+  isLiveActivityPulseActive,
 } from './timeline/timelineModel';
 import {
   LiveActivityController,
@@ -157,6 +158,8 @@ import { withRendererSuspended } from './terminal/rendererLifecycle';
 import { exportSessionTranscript } from './transcript/transcriptExport';
 import { pageSessionTranscript } from './transcript/transcriptPager';
 import { TUI_VERSION } from './version';
+import { LoadingCellController } from './visuals/loadingCellController';
+import { buildLoadingCellLine } from './visuals/loadingCells';
 import { buildWelcomeLines } from './welcome/welcomeModel';
 
 const launchOptions = parseTuiLaunchOptions(process.argv.slice(2));
@@ -296,6 +299,18 @@ const approvalController = new ApprovalController({
 });
 const approvalView = new ApprovalView(renderer, {
   onDraftChange: (draft) => approvalController.setDraft(draft),
+});
+const overlayLoadingController = new LoadingCellController({
+  onTick: () => {
+    if (noticeOverlay.phase === 'interrupting') refreshNoticeOverlay();
+    if (sessionPicker.phase === 'loading' || sessionPicker.phase === 'resuming') {
+      refreshSessionPicker();
+    }
+    if (policyPicker.phase === 'saving') refreshPolicyPicker();
+    if (modelPicker.phase === 'loading' || modelPicker.phase === 'selecting') {
+      refreshModelPicker();
+    }
+  },
 });
 const composerDecorationStyle = createComposerDecorationStyle();
 const composer = new TextareaRenderable(renderer, {
@@ -603,6 +618,7 @@ renderer.on('resize', () => {
 });
 renderer.on('destroy', () => {
   liveActivityController.destroy();
+  overlayLoadingController.destroy();
   interruptPendingNoticeController.destroy();
   sessionPickerGeneration += 1;
   policyPickerGeneration += 1;
@@ -662,16 +678,22 @@ function syncComposerModeUi() {
 }
 
 function refreshLive() {
-  live.content = truncateTerminalLine(
-    `live · ${formatLiveActivity(
-      controller.getState().session,
-      liveActivityController.frame,
-      Math.max(1, renderer.width - 7),
-      liveActivityController.longWaiting,
-      Date.now(),
-    )}`,
-    renderer.width,
+  const session = controller.getState().session;
+  const activity = formatLiveActivity(
+    session,
+    liveActivityController.frame,
+    Math.max(1, renderer.width - 7),
+    liveActivityController.longWaiting,
+    Date.now(),
   );
+  live.content = isLiveActivityPulseActive(
+    session,
+    liveActivityController.frame,
+  )
+    ? buildLoadingCellLine(activity, liveActivityController.frame, {
+        prefix: 'live · ',
+      })
+    : truncateTerminalLine(`live · ${activity}`, renderer.width);
 }
 
 function refreshStatus() {
@@ -879,7 +901,12 @@ function showErrorNotice(message: string) {
 }
 
 function refreshNoticeOverlay() {
-  noticeOverlayView.render(noticeOverlay, renderer.width);
+  syncOverlayLoading();
+  noticeOverlayView.render(
+    noticeOverlay,
+    renderer.width,
+    overlayLoadingController.frame,
+  );
 }
 
 function handleGlobalInterrupt(
@@ -1116,7 +1143,12 @@ function closeSessionPickerUi() {
 }
 
 function refreshSessionPicker() {
-  sessionPickerView.render(sessionPicker, renderer.width);
+  syncOverlayLoading();
+  sessionPickerView.render(
+    sessionPicker,
+    renderer.width,
+    overlayLoadingController.frame,
+  );
 }
 
 function openPolicyPickerUi() {
@@ -1223,7 +1255,12 @@ function closePolicyPickerUi() {
 }
 
 function refreshPolicyPicker() {
-  policyPickerView.render(policyPicker, renderer.width);
+  syncOverlayLoading();
+  policyPickerView.render(
+    policyPicker,
+    renderer.width,
+    overlayLoadingController.frame,
+  );
 }
 
 function openModelPickerUi() {
@@ -1369,7 +1406,23 @@ function closeModelPickerUi() {
 }
 
 function refreshModelPicker() {
-  modelPickerView.render(modelPicker, renderer.width);
+  syncOverlayLoading();
+  modelPickerView.render(
+    modelPicker,
+    renderer.width,
+    overlayLoadingController.frame,
+  );
+}
+
+function syncOverlayLoading() {
+  overlayLoadingController.sync(
+    noticeOverlay.phase === 'interrupting'
+      || sessionPicker.phase === 'loading'
+      || sessionPicker.phase === 'resuming'
+      || policyPicker.phase === 'saving'
+      || modelPicker.phase === 'loading'
+      || modelPicker.phase === 'selecting',
+  );
 }
 
 function handleCommandOverlayAction(action: CommandOverlayAction) {

@@ -5,6 +5,7 @@ import {
   TextRenderable,
   type CliRenderer,
 } from '@opentui/core';
+import { buildLoadingCellLine } from '../visuals/loadingCells';
 import {
   buildApprovalViewModel,
   type ApprovalState,
@@ -91,7 +92,9 @@ export class ApprovalView {
     this.frame.title = model.title;
     this.frame.bottomTitle = model.bottomTitle;
     this.body.height = model.bodyRows;
-    this.body.content = model.body;
+    this.body.content = model.loadingFrame === null
+      ? model.body
+      : buildLoadingCellLine(model.body, model.loadingFrame);
     this.options.height = model.optionRows;
     this.options.content = model.options;
     this.inputFrame.visible = model.inputVisible;

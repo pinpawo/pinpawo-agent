@@ -75,5 +75,6 @@ function approvalState(phase: 'ready' | 'resolution-sent') {
     contentOffset: 0,
     draft: '',
     interruptSent: false,
+    submissionFrame: 0,
   } satisfies ApprovalState;
 }

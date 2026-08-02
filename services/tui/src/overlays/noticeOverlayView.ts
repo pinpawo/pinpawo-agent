@@ -4,6 +4,7 @@ import {
   TextRenderable,
   type CliRenderer,
 } from '@opentui/core';
+import { buildLoadingCellLine } from '../visuals/loadingCells';
 import {
   buildNoticeOverlayViewModel,
   type NoticeOverlayState,
@@ -41,15 +42,20 @@ export class NoticeOverlayView {
     this.frame.add(this.content);
   }
 
-  render(state: NoticeOverlayState, width: number) {
+  render(state: NoticeOverlayState, width: number, loadingFrame = 0) {
     if (state.phase === 'closed') {
       this.frame.visible = false;
       return;
     }
-    const model = buildNoticeOverlayViewModel(state, width);
+    const model = buildNoticeOverlayViewModel(
+      state,
+      state.phase === 'interrupting' ? Math.max(1, width - 4) : width,
+    );
     this.frame.visible = true;
     this.frame.title = model.title;
     this.frame.bottomTitle = model.bottomTitle;
-    this.content.content = model.content;
+    this.content.content = state.phase === 'interrupting'
+      ? buildLoadingCellLine(model.content, loadingFrame)
+      : model.content;
   }
 }

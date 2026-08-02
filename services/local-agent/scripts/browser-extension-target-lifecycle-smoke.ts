@@ -18,7 +18,7 @@ function delay(ms: number): Promise<void> {
 async function waitForExtension(timeoutMs = 15_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (browserRuntime.getExtensionStatus().extensionConnected) return;
+    if (browserRuntime.getSnapshot().extension.commandReady) return;
     await delay(100);
   }
   throw new Error(

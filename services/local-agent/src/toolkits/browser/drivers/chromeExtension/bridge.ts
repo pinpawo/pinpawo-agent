@@ -319,6 +319,13 @@ export class LocalAgentBrowserBridge {
                 return;
               }
               authenticated = true;
+              if (this.activeSocket && !this.activeSocket.destroyed && this.activeSocket !== socket) {
+                this.logger.warn(
+                  '[browser-bridge] rejected an additional native host while another extension is active',
+                );
+                socket.destroy();
+                return;
+              }
               this.replaceActiveSocket(socket);
               socket.write(serializeLine({
                 type: 'bridge.ready',

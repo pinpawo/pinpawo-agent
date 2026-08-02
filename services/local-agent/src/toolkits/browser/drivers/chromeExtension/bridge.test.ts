@@ -215,3 +215,67 @@ test('local browser bridge rejects wrong tokens and reports disconnected extensi
   await new Promise<void>((resolvePromise) => peer.socket.once('close', () => resolvePromise()));
   assert.equal(bridge.getStatus().hostConnected, false);
 });
+
+test('local browser bridge retains the first active extension connection', async (t) => {
+  const root = await mkdtemp(resolve(tmpdir(), 'pinpawo-browser-bridge-single-active-'));
+  const warnings: string[] = [];
+  const bridge = new LocalAgentBrowserBridge({
+    socketPath: resolve(root, 'bridge.sock'),
+    tokenPath: resolve(root, 'bridge.token'),
+    tokenFactory: () => 'test-token',
+    logger: {
+      info() {},
+      warn(message) { warnings.push(String(message)); },
+      error() {},
+    },
+  });
+  await bridge.start();
+  t.after(async () => bridge.stop());
+
+  const first = await connectLinePeer(bridge.getStatus().socketPath);
+  t.after(() => first.socket.destroy());
+  first.send({
+    type: 'bridge.hello',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    token: 'test-token',
+    hostPid: process.pid,
+  });
+  await first.nextLine();
+  first.send({
+    type: 'browser.register',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'first-extension',
+    extensionId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    capabilities: ['snapshot'],
+    state: { revision: 1, debuggerAttached: false },
+  });
+  await waitUntil(() => bridge.getStatus().connectionId === 'first-extension');
+
+  const second = await connectLinePeer(bridge.getStatus().socketPath);
+  t.after(() => second.socket.destroy());
+  const secondClosed = new Promise<void>((resolvePromise) => second.socket.once('close', resolvePromise));
+  second.send({
+    type: 'bridge.hello',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    token: 'test-token',
+    hostPid: process.pid + 1,
+  });
+  await secondClosed;
+
+  assert.equal(bridge.getStatus().connectionId, 'first-extension');
+  assert.equal(bridge.getStatus().extensionId, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+  assert.ok(warnings.some((message) => message.includes('additional native host')));
+
+  const commandPromise = bridge.sendCommand('snapshot', { approvedOrigin: 'https://example.com' });
+  const command = await first.nextLine();
+  assert.equal(command.connectionId, 'first-extension');
+  first.send({
+    type: 'browser.result',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'first-extension',
+    requestId: command.requestId,
+    ok: true,
+    result: { title: 'First extension retained' },
+  });
+  assert.deepEqual(await commandPromise, { title: 'First extension retained' });
+});

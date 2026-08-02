@@ -38,6 +38,10 @@ const WELCOME_COLOR = '#69c0c8';
 const WELCOME_MUTED_COLOR = '#789da3';
 const WELCOME_STATUS_COLOR = '#7fcf9b';
 const WELCOME_TITLE_COLOR = '#efa6ca';
+const USER_MESSAGE_BACKGROUND = '#303842';
+const USER_MESSAGE_LABEL_COLOR = '#9fcbd2';
+const USER_MESSAGE_TEXT_COLOR = '#e7ecee';
+const ASSISTANT_LABEL_COLOR = '#69c0c8';
 
 type ActiveTimelineSurface = {
   surface: ScrollbackSurface;
@@ -570,8 +574,11 @@ function populateTimelineRoot(
   const now = Date.now();
   let lineIndex = 0;
   let assistantMarkdown: AssistantMarkdownSurface | null = null;
-  const addLine = (line: TimelineDisplayLine) => {
-    root.add(new TextRenderable(context, {
+  const addLine = (
+    line: TimelineDisplayLine,
+    parent: BoxRenderable = root,
+  ) => {
+    parent.add(new TextRenderable(context, {
       id: `${root.id}:line:${lineIndex++}`,
       width: '100%',
       height: 'auto',
@@ -587,6 +594,23 @@ function populateTimelineRoot(
       now,
       width,
     });
+    if (entry.type === 'message' && entry.role === 'user') {
+      const userMessageSurface = new BoxRenderable(context, {
+        id: `${root.id}:user:${entryIndex}:${entry.id}`,
+        width: '100%',
+        height: 'auto',
+        flexDirection: 'column',
+        paddingLeft: 1,
+        paddingRight: 1,
+        backgroundColor: USER_MESSAGE_BACKGROUND,
+      });
+      root.add(userMessageSurface);
+      lines.forEach((line) => addLine(line, userMessageSurface));
+      if (isSettledTimelineEntry(entry)) {
+        addLine({ text: ' ', tone: 'muted' });
+      }
+      return;
+    }
     if (
       entry.type === 'message'
       && entry.role === 'assistant'
@@ -608,7 +632,7 @@ function populateTimelineRoot(
       }
       return;
     }
-    lines.forEach(addLine);
+    lines.forEach((line) => addLine(line));
     if (
       isSettledTimelineEntry(entry)
       && root.getChildrenCount() > childCountBeforeEntry
@@ -622,15 +646,25 @@ function populateTimelineRoot(
 function lineStyle(line: TimelineDisplayLine): {
   attributes?: number;
   fg?: string;
+  bg?: string;
 } {
   switch (line.tone) {
     case 'user-label':
+      return {
+        attributes: TextAttributes.BOLD,
+        fg: USER_MESSAGE_LABEL_COLOR,
+        bg: USER_MESSAGE_BACKGROUND,
+      };
     case 'assistant-label':
       return {
         attributes: TextAttributes.BOLD,
-        fg: '#5fd75f',
+        fg: ASSISTANT_LABEL_COLOR,
       };
     case 'user':
+      return {
+        fg: USER_MESSAGE_TEXT_COLOR,
+        bg: USER_MESSAGE_BACKGROUND,
+      };
     case 'added':
     case 'operation-completed':
       return { fg: '#5fd75f' };

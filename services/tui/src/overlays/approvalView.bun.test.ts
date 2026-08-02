@@ -4,6 +4,8 @@ import { BoxRenderable, RGBA } from '@opentui/core';
 import { createTestRenderer } from '@opentui/core/testing';
 import type { AgentRunView, ReviewSpec } from '@pinpawo/agent-session';
 import {
+  advanceApprovalSubmissionFrame,
+  beginApprovalSubmission,
   createApprovalState,
   moveApprovalSelection,
   setApprovalDraft,
@@ -64,6 +66,18 @@ test('approval view remains bounded and accepts multiline input after resize', a
   assert.match(compact, /回复/);
   assert.match(compact, /第一行/);
   assert.equal(frameRows(compact).length, 9);
+
+  state = beginApprovalSubmission(state);
+  view.render(state, 34, setup.renderer.height);
+  await setup.flush();
+  const submitting = setup.captureCharFrame();
+  assert.match(submitting, /Submitting review/);
+  assert.doesNotMatch(submitting, /批准|回复|第一行/);
+
+  state = advanceApprovalSubmissionFrame(state);
+  view.render(state, 34, setup.renderer.height);
+  await setup.flush();
+  assert.notEqual(setup.captureCharFrame(), submitting);
 });
 
 function waitingReview(): AgentRunView {

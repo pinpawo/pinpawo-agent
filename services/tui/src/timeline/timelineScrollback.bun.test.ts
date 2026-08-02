@@ -112,6 +112,33 @@ test('completed assistant markdown renders rich blocks without source markers', 
   }
 });
 
+test('user messages render as a neutral full-width surface', async () => {
+  const setup = await createTimelineRenderer(40);
+  const timeline = new TimelineScrollback(setup.renderer);
+  try {
+    timeline.render(session([userMessage('hello\nsecond line')]));
+    const text = setup.cellOutput.takeText();
+    assert.match(text, /你\n > hello\n   second line/);
+
+    const spans = setup.styleOutput.take().flatMap((lines) =>
+      lines.flatMap((line) => line.spans)
+    );
+    const messageBackground = RGBA.fromHex('#303842');
+    const messageText = spans.find((span) => span.text.includes('hello'));
+    assert.ok(messageText);
+    assert.ok(messageText.bg.equals(messageBackground));
+    assert.ok(messageText.fg.equals(RGBA.fromHex('#e7ecee')));
+    assert.ok(spans.some((span) => (
+      span.text.includes('你')
+      && span.bg.equals(messageBackground)
+      && span.fg.equals(RGBA.fromHex('#9fcbd2'))
+    )));
+  } finally {
+    timeline.destroy();
+    setup.renderer.destroy();
+  }
+});
+
 test('streaming markdown keeps a mutable table out of committed scrollback', async () => {
   const setup = await createTimelineRenderer(48);
   const timeline = new TimelineScrollback(setup.renderer);
@@ -161,7 +188,7 @@ test('welcome is committed once before the first timeline rows', async () => {
     timeline.render(session([userMessage('hello')]));
     assert.equal(
       setup.cellOutput.takeText(),
-      `${formatTimelineEntry(userMessage('hello'))}\n`,
+      `${formatUserMessageSurface(userMessage('hello'))}\n`,
     );
   } finally {
     timeline.destroy();
@@ -246,7 +273,7 @@ test('an empty subagent entry is ignored without blocking later timeline rows', 
     timeline.render(session([emptySubagent, next]));
     assert.equal(
       setup.cellOutput.takeText(),
-      `${formatTimelineEntry(next)}\n`,
+      `${formatUserMessageSurface(next)}\n`,
     );
   } finally {
     timeline.destroy();
@@ -370,7 +397,7 @@ test('a new submitted turn commits its user row after prior history', async () =
     timeline.render(session([first, second], 'request-2'));
     assert.equal(
       setup.cellOutput.takeText(),
-      `${formatTimelineEntry(second)}\n`,
+      `${formatUserMessageSurface(second)}\n`,
     );
   } finally {
     timeline.destroy();
@@ -395,7 +422,7 @@ test('an authoritative session boundary allows identical text in the new session
     ], undefined, 'session-new'));
     assert.equal(
       setup.cellOutput.takeText(),
-      `${formatTimelineEntry(repeated)}\n`,
+      `${formatUserMessageSurface(repeated)}\n`,
     );
   } finally {
     timeline.destroy();
@@ -483,6 +510,13 @@ function userMessage(
     text,
     status: 'completed',
   };
+}
+
+function formatUserMessageSurface(entry: AgentTimelineEntry): string {
+  return formatTimelineEntry(entry)
+    .split('\n')
+    .map((line) => ` ${line}`)
+    .join('\n');
 }
 
 function assistantMessage(

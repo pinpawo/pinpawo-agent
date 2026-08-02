@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { AIMessage, RemoveMessage, ToolMessage, type BaseMessage, type ToolCall } from '@langchain/core/messages';
-import { REMOVE_ALL_MESSAGES, interrupt } from '@langchain/langgraph';
+import { REMOVE_ALL_MESSAGES, getConfig, interrupt } from '@langchain/langgraph';
 import { createMiddleware, type AnyAgentMiddleware } from 'langchain';
 import { z } from 'zod';
 import type {
@@ -27,7 +27,6 @@ import {
   resolveHumanReviewBatchResume,
   ReviewResponseResolutionError,
 } from './review/reviewResponseResolver';
-import { buildSubagentReviewInterruptStopNotice } from '../../subagent/guardStop';
 import {
   appendReviewViewMessage,
   reviewViewToText,
@@ -48,6 +47,10 @@ import {
   type GlobalReviewPolicyBatchItem,
   type GlobalReviewPolicyResolution,
 } from './review/globalReviewPolicy';
+import {
+  TOOLKIT_REVIEW_RUN_CONTROL,
+  TOOLKIT_REVIEW_RUN_CONTROL_STATE_KEY,
+} from './review/reviewRunControl';
 
 export type ToolkitReviewRuntimeContext = {
   models: AgentModels;
@@ -115,6 +118,31 @@ function reviewCapabilitiesForGlobalPolicy(ctx: ToolkitReviewRuntimeContext) {
 
 function runtimeCanCollectHumanReview(ctx: ToolkitReviewRuntimeContext) {
   return ctx.reviewCapabilities?.humanReview !== false;
+}
+
+function hasPendingReviewInterruptResume() {
+  try {
+    const configurable = getConfig().configurable as Record<string, unknown> | undefined;
+    const scratchpad = configurable?.__pregel_scratchpad;
+    if (!scratchpad || typeof scratchpad !== 'object') {
+      return false;
+    }
+    const record = scratchpad as {
+      interruptCounter?: unknown;
+      nullResume?: unknown;
+      resume?: unknown;
+    };
+    const interruptCounter = typeof record.interruptCounter === 'number'
+      ? record.interruptCounter
+      : -1;
+    const nextInterruptIndex = interruptCounter + 1;
+    return (
+      Array.isArray(record.resume)
+      && nextInterruptIndex < record.resume.length
+    ) || record.nullResume !== undefined;
+  } catch {
+    return false;
+  }
 }
 
 function toolAuthorizationsForGlobalPolicy(ctx: ToolkitReviewRuntimeContext) {
@@ -420,6 +448,9 @@ export type ToolkitReviewBinding = {
 
 const ToolkitReviewStateSchema = z.object({
   toolkitReviewApprovals: z.record(z.boolean()).default({}),
+  [TOOLKIT_REVIEW_RUN_CONTROL_STATE_KEY]: z.literal(
+    TOOLKIT_REVIEW_RUN_CONTROL.INTERRUPTED,
+  ).nullable().default(null),
 });
 
 type ToolkitReviewState = z.infer<typeof ToolkitReviewStateSchema>;
@@ -474,11 +505,10 @@ type MaterializedToolCallMessage = {
 };
 
 type ToolkitReviewResults = {
-  cancelledToolCallIds: Set<string>;
   toolMessages: ToolMessage[];
   terminalMessage: AIMessage | null;
   resumeModel: boolean;
-  stopRun: boolean;
+  rollbackAction: boolean;
   newlyApprovedReviewIds: Set<string>;
 };
 
@@ -914,15 +944,23 @@ async function resolvePreparedToolkitReviews(params: {
     };
   }
 
-  const policyResolution = await resolveGlobalReviewBatchPolicy({
-    policy: params.ctx.globalReviewPolicy,
-    models: params.ctx.models,
-    actor: params.ctx.actor,
-    messages: params.ctx.messages,
-    task: params.ctx.reviewContext?.task,
-    workdir: params.ctx.reviewContext?.workdir,
-    reviews: params.prepared.reviews,
-  });
+  // LangGraph replays the enclosing afterModel node when a pending interrupt is
+  // resumed. The task-local scratchpad identifies whether the next interrupt
+  // slot already has a resume value for this exact checkpoint. In that case the
+  // action necessarily passed global policy into human review before pausing,
+  // so consume that review directly without running auto-review again. A later
+  // capability has a fresh graph task/scratchpad and evaluates new reviews.
+  const policyResolution = hasPendingReviewInterruptResume()
+    ? { type: GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION } as const
+    : await resolveGlobalReviewBatchPolicy({
+        policy: params.ctx.globalReviewPolicy,
+        models: params.ctx.models,
+        actor: params.ctx.actor,
+        messages: params.ctx.messages,
+        task: params.ctx.reviewContext?.task,
+        workdir: params.ctx.reviewContext?.workdir,
+        reviews: params.prepared.reviews,
+      });
 
   if (policyResolution.type === GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE) {
     const sessionAuthorizations = await buildAutoReviewSessionAuthorizations({
@@ -965,10 +1003,20 @@ function buildCancelledToolCallResults(
   toolCalls: ToolCall[],
   cancellation: ToolkitReviewCancellation,
 ): ToolkitReviewResults {
-  const cancelledToolCallIds = new Set<string>();
+  const rollbackAction = cancellation.source === 'human_reject'
+    || cancellation.source === 'human_interrupt';
+  if (rollbackAction) {
+    return {
+      toolMessages: [],
+      terminalMessage: null,
+      resumeModel: false,
+      rollbackAction: true,
+      newlyApprovedReviewIds: new Set<string>(),
+    };
+  }
+
   const toolMessages: ToolMessage[] = [];
   for (const toolCall of toolCalls) {
-    cancelledToolCallIds.add(readToolCallId(toolCall));
     toolMessages.push(buildToolMessage(
       toolCall,
       toolCall === cancellation.toolCall
@@ -977,7 +1025,6 @@ function buildCancelledToolCallResults(
     ));
   }
   return {
-    cancelledToolCallIds,
     toolMessages,
     terminalMessage: cancellation.source === 'policy_block'
       || cancellation.source === 'review_unavailable'
@@ -986,12 +1033,9 @@ function buildCancelledToolCallResults(
             ? `工具调用 ${cancellation.toolCall.name} 被策略阻止，未执行。原因：${cancellation.reason}`
             : `工具调用 ${cancellation.toolCall.name} 需要人工确认，但当前运行环境无法收集确认，因此未执行。原因：${cancellation.reason}`,
         })
-      : cancellation.source === 'human_interrupt'
-        ? buildSubagentReviewInterruptStopNotice()
-        : null,
-    resumeModel: cancellation.source === 'human_reject'
-      || cancellation.source === 'human_respond',
-    stopRun: cancellation.source === 'human_interrupt',
+      : null,
+    resumeModel: cancellation.source === 'human_respond',
+    rollbackAction: false,
     newlyApprovedReviewIds: new Set<string>(),
   };
 }
@@ -1019,11 +1063,10 @@ async function reviewToolkitToolCalls(params: {
 
   await recordToolAuthorizations(params.ctx, resolution.authorizations);
   return {
-    cancelledToolCallIds: new Set<string>(),
     toolMessages: [],
     terminalMessage: null,
     resumeModel: false,
-    stopRun: false,
+    rollbackAction: false,
     newlyApprovedReviewIds: resolution.newlyApprovedReviewIds,
   };
 }
@@ -1039,6 +1082,17 @@ function buildToolkitReviewStateUpdate(params: {
   const approvalUpdate = reviewResults.newlyApprovedReviewIds.size > 0
     ? { toolkitReviewApprovals: mergeApprovedReviewIds(params.state, reviewResults.newlyApprovedReviewIds) }
     : {};
+  if (reviewResults.rollbackAction) {
+    if (!reviewedMessage.message.id) {
+      throw new Error('Cannot roll back a reviewed AI tool-call action without a message id.');
+    }
+    return {
+      ...approvalUpdate,
+      [TOOLKIT_REVIEW_RUN_CONTROL_STATE_KEY]: TOOLKIT_REVIEW_RUN_CONTROL.INTERRUPTED,
+      jumpTo: 'end' as const,
+      messages: [new RemoveMessage({ id: reviewedMessage.message.id }) as BaseMessage],
+    };
+  }
   if (reviewResults.toolMessages.length === 0) {
     // Return {} when no state or message updates are needed, so middleware can
     // emit a stable state object in this no-op branch.
@@ -1054,13 +1108,11 @@ function buildToolkitReviewStateUpdate(params: {
 
   // Once every pending tool call has a ToolMessage, LangChain's normal
   // after-model router considers the turn complete and exits the child agent.
-  // Human reject/respond is task guidance, so explicitly return to the same
-  // child model. Deterministic policy blocks keep their terminal semantics.
-  const cancellationUpdate = reviewResults.stopRun
-    ? { jumpTo: 'end' as const }
-    : reviewResults.resumeModel
-      ? { jumpTo: 'model' as const }
-      : {};
+  // Human respond is task guidance, so explicitly return to the same child
+  // model. Deterministic policy blocks keep their terminal semantics.
+  const cancellationUpdate = reviewResults.resumeModel
+    ? { jumpTo: 'model' as const }
+    : {};
   const appendedMessages = reviewResults.terminalMessage
     ? [...reviewResults.toolMessages, reviewResults.terminalMessage]
     : reviewResults.toolMessages;

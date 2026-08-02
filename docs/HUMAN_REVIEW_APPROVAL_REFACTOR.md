@@ -319,7 +319,7 @@ type ReviewResolvedDecision =
 三种 decision 的语义：
 
 - `approve`：批准当前 pending action，tool wrapper 可以继续执行原 action。
-- `reject`：拒绝当前 pending action，tool wrapper 不执行该 action，并把拒绝信息返回给 graph/model。
+- `reject`：拒绝当前 pending action，tool wrapper 不执行该 action；runtime 删除承载整批未执行 tool calls 的 AI message，以 interrupted 结束本次 run，不把拒绝伪装成 tool result 返回给 model。
 - `respond`：不执行当前 pending action，而是把用户的一段反馈/新指令返回给 graph/model，让模型重新规划下一步。例如用户看到 `rm -rf tmp` 后回复“不要删除，先列出目录看看”。它需要用户输入文本。
 
 V1 的 TUI materialize 这四类 option：
@@ -592,7 +592,7 @@ local-agent server 可以缓存 requestId/reviewId/sessionId 到 active graph th
 
 `pendingAction` 只在 review 代表某个待执行 tool action，且后续 effect resolution 需要这个 action 上下文时存在；iteration-limit 这类 runtime gate 不应该伪造成 tool action。`pendingAction` 是 graph/tool runtime 自己保存的执行上下文，不来自 client response。matcher hook 必须读取这个 `pendingAction`，不能反向读取 UI payload。
 
-长期免审只能来自 `graph.authorize_tool_action` effect 写入的 graph authorization state。普通 approve/reject/respond 不需要额外的 one-shot graph state；resume 会回到原来的 interrupted stack frame，wrapper 直接消费解析后的 decision。
+长期免审只能来自 `graph.authorize_tool_action` effect 写入的 graph authorization state。普通 approve/respond 不需要额外的 one-shot graph state；reject 使用仅供 runtime 消费的 run-control state，不能写进后续 model message context。resume 会回到原来的 interrupted stack frame，wrapper 直接消费解析后的 decision。
 
 ### 6.3 UI 渲染 review spec
 
@@ -765,7 +765,7 @@ V1 需要明确几个运行时边界：
 
 V1 cancellation 默认策略：
 
-- 用户主动 `/interrupt`、TUI approval 面板中按 Esc、或 pending review 期间按 Ctrl+C：如果当前 session/thread 有 pending review，server 应 resume 当前 review 为 reject，例如 `{ type: 'reject', message: 'interrupted by user' }`，并清理本地 active run 状态。TUI 不能只本地关闭 approval 面板，因为 graph checkpoint 仍然停在同一个 interrupt。
+- 用户主动 `/interrupt`、TUI approval 面板中按 Esc、或 pending review 期间按 Ctrl+C：如果当前 session/thread 有 pending review，server 应以显式 `interrupt_run` control 消费具体 interrupt，并采用与 reject 相同的未执行 action rollback 语义。TUI 不能只本地关闭 approval 面板，因为 graph checkpoint 仍然停在同一个 interrupt。
 - WebSocket 断开：默认保留 graph checkpoint 中的 pending review，不自动 reject。下次客户端连接并恢复同一 session/thread 时，server 应重新发送当前 pending `ReviewSpec`。
 - TUI 进程崩溃或 local-agent 重启：只要 graph checkpoint 仍存在，pending review 继续保留；启动后通过 session/thread recovery 重新发现并展示。内存里的 `pendingReviewRoutes` 丢失不代表 review 已关闭，TUI local server 必须能从 checkpoint pending interrupt 重建 route。只有用户明确中断或 session 被显式删除时，才 resume reject 或删除对应 checkpoint。
 - App chat 也应收敛到同样的 checkpoint recovery 语义，但需要先补清楚 app user/session route API。当前实现只支持运行中内存 route，不应把这个临时限制写成已完成能力。

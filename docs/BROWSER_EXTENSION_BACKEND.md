@@ -101,6 +101,15 @@ Inspect host registration and bridge runtime-file diagnostics with:
 pinpawo browser extension status
 ```
 
+The `host.healthy` field verifies the Native Messaging wrapper is executable, its
+entry exists, and at least one installed manifest points at that wrapper with an
+allowed extension ID. If `host.repairRecommended` is true, repair the registration
+and restart the local agent:
+
+```bash
+pinpawo browser extension repair
+```
+
 The running local-agent HTTP health response keeps the cached Toolkit selection in `browser_mode`, while always exposing the live extension runtime state plus separate bridge, host, extension command-readiness, debugger and target fields. This keeps Extension diagnostics visible even when `auto` initially selected Playwright for Toolkit availability. Remove registration with `pinpawo browser extension unregister`.
 
 ## Attribution

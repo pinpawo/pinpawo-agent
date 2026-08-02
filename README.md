@@ -232,7 +232,8 @@ The published package installs a `pinpawo` binary.
 | `pinpawo run` | Starts the local agent service. |
 | `pinpawo run --stdio` | Starts one local-agent peer over JSONL stdio. |
 | `pinpawo browser extension register --extension-id <id>` | Registers the Chrome Native Messaging host for the Browser extension driver. |
-| `pinpawo browser extension status` | Shows the Browser extension driver's host registration and runtime-file diagnostics. |
+| `pinpawo browser extension repair --extension-id <id>` | Rewrites the Native Messaging wrapper and manifests while retaining registered extension IDs. |
+| `pinpawo browser extension status` | Shows the Browser extension driver's host health and runtime-file diagnostics. |
 | `pinpawo browser extension unregister` | Removes the Browser extension driver's Native Messaging host registration. |
 | `pinpawo tui` | Starts the interactive terminal UI. |
 | `pinpawo tui --dry-run` | Runs the TUI without writing generated post changes. |

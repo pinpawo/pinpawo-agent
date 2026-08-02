@@ -171,7 +171,7 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
 
   browserCommand
     .command('extension <action>')
-    .description('Register, inspect or unregister the Chrome extension driver')
+    .description('Register, repair, inspect or unregister the Chrome extension driver')
     .option('--extension-id <id>', 'Chrome extension ID; defaults to the official Web Store extension')
     .action(async (action: string, options: { extensionId?: string }) => {
       const runBrowser = handlers.runBrowser

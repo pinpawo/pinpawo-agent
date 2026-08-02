@@ -93,9 +93,12 @@ is complete.
 
 Each smoke ends with one URL-free `[browser-evaluation]` JSON record. It includes the
 driver, scenario, overall status, first-pass and recovery outcomes, per-phase duration,
-and a stable final error code when a phase fails. Keep these records with CI or manual
-run output when deciding whether a repeated failure should become a focused Browser
-issue; they are not product telemetry and do not persist page content or URLs.
+and a stable final error code/category when a phase fails. Categories cover
+snapshot/content, ref/selector, frame/shadow, stability/wait, target lifecycle,
+origin/manual takeover, dialog, file transfer, and bridge lifecycle. Keep these records
+with CI or manual run output when deciding whether a repeated failure should become a
+focused Browser issue; they are not product telemetry and do not persist page content
+or URLs.
 
 Then:
 

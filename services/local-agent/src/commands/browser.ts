@@ -22,12 +22,15 @@ export async function runBrowserCommand(
   if (target !== 'extension') {
     throw new Error(`Unknown browser integration: ${target}`);
   }
-  if (action === 'register') {
+  if (action === 'register' || action === 'repair') {
     const extensionId = options.extensionId ?? PINPAWO_CHROME_WEB_STORE_EXTENSION_ID;
     const paths = await registerBrowserExtensionHost({ extensionId });
     const status = await getBrowserExtensionHostStatus();
     process.stdout.write(JSON.stringify({
       registered: true,
+      repaired: action === 'repair',
+      healthy: status.healthy,
+      diagnostics: status.diagnostics,
       extensionId,
       extensionIds: status.extensionIds,
       nativeHostEntryPath: paths.nativeHostEntryPath,

@@ -17,6 +17,7 @@ for (const file of [
   'browserState.js',
   'interaction.js',
   'protocol.js',
+  'reconnect.js',
   'snapshot.js',
   'targetLifecycle.js',
 ]) {

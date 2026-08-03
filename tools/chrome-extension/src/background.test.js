@@ -64,6 +64,47 @@ test('commands and target changes share the extension-owned serial queue', async
   assert.match(source, /tabs\.onRemoved\.addListener[\s\S]*?enqueueExtensionWork/);
 });
 
+test('cancellation bypasses the command queue and is observed at command safe points', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    'utf8',
+  );
+
+  const nativeMessageHandler = source.match(
+    /nextPort\.onMessage\.addListener\(\(message\) => \{([\s\S]*?)\n    \}\);/,
+  )?.[1] ?? '';
+  assert.match(nativeMessageHandler, /message\?\.type === 'browser\.cancel'[\s\S]*?handleCancel\(message\)[\s\S]*?return/);
+  assert.match(nativeMessageHandler, /enqueueExtensionWork\(\(\) => handleCommand\(message\)\)/);
+  assert.match(source, /function ensureCommandAlive\(deadlineAt\) \{[\s\S]*?cancelledCommandRequestIds\.has\(activeCommandRequestId\)/);
+  assert.match(source, /await delay\(100, deadlineAt\);/);
+});
+
+test('native host reconnect uses bounded backoff and reports Chrome disconnect errors', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    'utf8',
+  );
+
+  assert.match(source, /calculateReconnectDelay\(/);
+  assert.match(source, /MAX_RECONNECT_DELAY_MS/);
+  assert.match(source, /scheduleStableConnectionReset/);
+  assert.match(source, /chrome\.runtime\.lastError\?\.message/);
+});
+
+test('explicit user tab binding reports only the origin approved by the action click', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    'utf8',
+  );
+  const actionHandler = source.match(
+    /chrome\.action\.onClicked\.addListener\(async \(tab\) => \{([\s\S]*?)\n\}\);/,
+  )?.[1] ?? '';
+
+  assert.match(actionHandler, /originOf\(tab\.url\)/);
+  assert.match(actionHandler, /userBoundOrigin: approvedOrigin/);
+  assert.doesNotMatch(actionHandler, /chrome\.storage\.local\.set\([^)]*userBoundOrigin/);
+});
+
 test('popup tabs are followed inside the extension target lifecycle', async () => {
   const source = await readFile(
     resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),

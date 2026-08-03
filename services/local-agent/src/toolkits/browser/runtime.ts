@@ -23,7 +23,7 @@ export type BrowserExtensionRuntimeSnapshot = Readonly<{
   connectionId: string | null;
   extensionId: string | null;
   activeTabId: number | null;
-  activeTabOwnership: 'agent' | 'user' | null;
+  activeTabBinding: 'agent' | 'user' | null;
   stateRevision: number | null;
   capabilities: readonly BrowserExtensionCapability[];
   socketPath: string;
@@ -77,7 +77,7 @@ export function projectBrowserRuntimeSnapshot(
       connectionId: status.connectionId,
       extensionId: status.extensionId,
       activeTabId: status.activeTabId,
-      activeTabOwnership: status.activeTabOwnership,
+      activeTabBinding: status.activeTabBinding,
       stateRevision: status.stateRevision,
       capabilities: Object.freeze([...status.capabilities]),
       socketPath: status.socketPath,

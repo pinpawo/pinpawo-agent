@@ -178,7 +178,8 @@ wrapper 的职责：
 - `request()` 返回 `ReviewSpec`：wrapper 生成 canonical `review` interrupt payload，包含 `review`；tool action review 额外携带当前 `pendingAction`，恢复后读取人类决策。
 - human `approve`：调用原始工具。
 - human `edit`：V1 review options 不暴露 edit；后续如需要再以结构化 option/input 扩展。
-- human `reject/respond`：不调用原始工具，返回结构化 cancelled 结果。
+- human `respond`：不调用原始工具，返回结构化 cancelled 结果并把用户补充作为新的规划指导。
+- human `reject` / run interrupt：不调用本批任何工具；用 `RemoveMessage` 撤销承载整批 tool calls 的 AI action，不生成 synthetic cancelled `ToolMessage`，并保留 pending delegation 供显式 continuation。
 
 `ReviewSpec` 是 UI/runtime 的 canonical 交互协议；旧 request adapter 已移除。这样 shell、browser、filesystem 等工具族可以独立定义自己的 HITL 策略，同一个底层工具在不同 toolkit 中也可以有不同 review policy。
 
@@ -186,7 +187,7 @@ wrapper 的职责：
 
 shell policy 使用确定性规则做默认判断：
 
-- 硬性禁止：保留在 `run_shell` raw tool 内，例如 `sudo`、`git reset --hard`、heredoc、输出重定向写文件。
+- 硬性禁止：保留在 `run_shell` raw tool 内，例如 `sudo`、`git reset --hard`、破坏性系统命令和会等待交互式 stdin 的命令。命令自身携带内容的 heredoc 与输出重定向不是独立安全边界，其效果由 review policy 根据具体 command 和 scope 判断。
 - 已授权或低风险：`request()` 返回 `null`，直接执行，例如普通只读命令，或当前会话已经授权的命令范式。
 - 高风险：返回 `ReviewSpec`，例如删除文件、git 写操作、发布、部署、权限变更、远程脚本执行。
 - 不支持 HITL 的执行界面：`request()` 返回 `null`，raw tool 返回“需要 human review”的确定性错误，不触发无法恢复的 interrupt。

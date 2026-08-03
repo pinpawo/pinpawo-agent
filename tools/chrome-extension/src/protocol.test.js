@@ -4,11 +4,12 @@ import {
   CAPABILITIES,
   PROTOCOL_VERSION,
   errorResult,
+  parseBrowserCancel,
   parseBrowserCommand,
 } from './protocol.js';
 
-test('P1 protocol advertises interaction capabilities at version 2', () => {
-  assert.equal(PROTOCOL_VERSION, 2);
+test('P1 protocol advertises interaction capabilities at version 3', () => {
+  assert.equal(PROTOCOL_VERSION, 3);
   assert.deepEqual(CAPABILITIES, [
     'navigate',
     'snapshot',
@@ -29,6 +30,12 @@ test('P1 protocol advertises interaction capabilities at version 2', () => {
     command: 'click',
     params: { target: { ref: 'snapshot:1' } },
   }).command, 'click');
+  assert.equal(parseBrowserCancel({
+    type: 'browser.cancel',
+    protocolVersion: PROTOCOL_VERSION,
+    connectionId: 'connection',
+    requestId: 'request',
+  }).requestId, 'request');
 });
 
 test('extension errors preserve structured recovery details', () => {

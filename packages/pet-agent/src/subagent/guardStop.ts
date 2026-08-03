@@ -2,13 +2,10 @@ import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 
 export const SUBAGENT_GUARD_STOP_MARKER_KEY = 'subagentGuardStop' as const;
 
-export type SubagentGuardStopReason =
-  | 'subagent_iteration_limit_reached'
-  | 'human_review_run_interrupted';
+export type SubagentGuardStopReason = 'subagent_iteration_limit_reached';
 
 const SUBAGENT_GUARD_STOP_REASONS: readonly SubagentGuardStopReason[] = [
   'subagent_iteration_limit_reached',
-  'human_review_run_interrupted',
 ];
 
 export function buildSubagentGuardStopNotice(
@@ -35,19 +32,6 @@ export function buildSubagentIterationLimitStopNotice(
     `Subagent loop reached its iteration limit: attempted ${attemptedIteration}, limit ${maxIterations}.`,
     'Stop the loop and report the current progress instead of waiting for LangGraph recursionLimit.',
   ].join('\n'));
-}
-
-/**
- * Closes the current child invocation after its pending review interrupt was
- * consumed. The parent retains the delegation as pending so a later explicit
- * continuation can re-enter the same transcript.
- */
-export function buildSubagentReviewInterruptStopNotice(): AIMessage {
-  return buildSubagentGuardStopNotice(
-    'human_review_run_interrupted',
-    'Human review was cancelled because the current run was interrupted. '
-      + 'Stop this invocation without calling the model again or handing off the delegation.',
-  );
 }
 
 function isSubagentGuardStopReason(value: unknown): value is SubagentGuardStopReason {

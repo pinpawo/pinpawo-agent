@@ -60,20 +60,29 @@ function readOperationSummary(item: GlobalReviewPolicyBatchItem) {
 function formatAutoReviewItem(item: GlobalReviewPolicyBatchItem, index: number, limit: number) {
   const summary = readOperationSummary(item);
   const identity = `Action ${index + 1}: ${clipText(item.toolkitName, 80)}.${clipText(item.toolName, 100)}`;
-  const contextLines = [
+  const essentialLines = [
     identity,
     item.operation?.title ? `Title: ${clipText(item.operation.title, 120)}` : null,
-    summary?.target ? `Target: ${clipText(summary.target, 500)}` : null,
-    summary?.summary ? `Summary: ${clipText(summary.summary, 400)}` : null,
-    summary?.details ? `Facts: ${safeJson(summary.details, 400)}` : null,
-    !summary ? `Review: ${clipText(reviewViewToText(item.review.view), 400)}` : null,
+    summary?.target ? `Target: ${summary.target}` : null,
+    summary?.summary ? `Summary: ${summary.summary}` : null,
+    !summary ? `Review: ${reviewViewToText(item.review.view)}` : null,
   ].filter((line): line is string => Boolean(line));
-  const inputBudget = Math.max(140, Math.floor(limit * 0.4));
+  const inputBudget = Math.max(140, Math.floor(limit * (summary ? 0.25 : 0.4)));
   const contextBudget = Math.max(120, limit - inputBudget - 20);
-  return clipText([
-    clipText(contextLines.join('\n'), contextBudget),
-    `Input facts: ${safeJson(item.input, inputBudget)}`,
-  ].join('\n'), limit);
+  const essentialContext = essentialLines.join('\n');
+  if (essentialContext.length > contextBudget) {
+    return { text: '', complete: false };
+  }
+  const optionalContext = summary?.details
+    ? `Facts: ${safeJson(summary.details, Math.max(80, contextBudget - essentialContext.length - 1))}`
+    : null;
+  return {
+    text: clipText([
+      [essentialContext, optionalContext].filter(Boolean).join('\n'),
+      `Input facts: ${safeJson(item.input, inputBudget)}`,
+    ].join('\n'), limit),
+    complete: true,
+  };
 }
 
 function formatAutoReviewItems(items: GlobalReviewPolicyBatchItem[]) {
@@ -84,8 +93,12 @@ function formatAutoReviewItems(items: GlobalReviewPolicyBatchItem[]) {
     return { text: '', complete: false };
   }
   const perItemLimit = Math.floor(MAX_ACTIONS_CHARS / items.length);
+  const formatted = items.map((item, index) => formatAutoReviewItem(item, index, perItemLimit));
+  if (formatted.some((item) => !item.complete)) {
+    return { text: '', complete: false };
+  }
   return {
-    text: items.map((item, index) => formatAutoReviewItem(item, index, perItemLimit)).join('\n\n'),
+    text: formatted.map((item) => item.text).join('\n\n'),
     complete: true,
   };
 }

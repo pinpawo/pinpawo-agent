@@ -37,6 +37,7 @@ const browserOpenTool = tool(
         url,
         { headless },
         readBrowserExecutionOwner(runtime),
+        runtime.signal,
       );
     } catch (err) {
       return formatBrowserToolError(err);
@@ -69,6 +70,7 @@ const browserOpenWithSessionTool = tool(
         url,
         { headless, session: session.trim() },
         readBrowserExecutionOwner(runtime),
+        runtime.signal,
       );
     } catch (err) {
       return formatBrowserToolError(err);
@@ -107,6 +109,7 @@ const browserOpenWithProfileTool = tool(
         userDataDir,
         { headless },
         readBrowserExecutionOwner(runtime),
+        runtime.signal,
       );
     } catch (err) {
       return formatBrowserToolError(err);
@@ -137,7 +140,7 @@ const browserOpenWithProfileTool = tool(
 const browserSnapshotTool = tool(
   async (_input, runtime: BrowserToolRuntime) => {
     try {
-      return await browserSession.snapshot(readBrowserExecutionOwner(runtime));
+      return await browserSession.snapshot(readBrowserExecutionOwner(runtime), runtime.signal);
     } catch (err) {
       return formatBrowserToolError(err);
     }
@@ -157,6 +160,7 @@ const browserClickTool = tool(
       return await browserSession.click(
         readBrowserTarget(input),
         readBrowserExecutionOwner(runtime),
+        runtime.signal,
       );
     } catch (err) {
       return formatBrowserToolError(err);
@@ -184,6 +188,7 @@ const browserTypeTool = tool(
         text,
         submit ?? false,
         readBrowserExecutionOwner(runtime),
+        runtime.signal,
       );
     } catch (err) {
       return formatBrowserToolError(err);
@@ -214,7 +219,7 @@ const browserScrollTool = tool(
         deltaX: deltaX ?? 0,
         deltaY: deltaY ?? 600,
         target,
-      }, readBrowserExecutionOwner(runtime));
+      }, readBrowserExecutionOwner(runtime), runtime.signal);
     } catch (err) {
       return formatBrowserToolError(err);
     }
@@ -245,6 +250,7 @@ const browserWaitTool = tool(
         timeoutMs ?? 3_000,
         state ?? 'visible',
         readBrowserExecutionOwner(runtime),
+        runtime.signal,
       );
     } catch (err) {
       return formatBrowserToolError(err);
@@ -282,6 +288,7 @@ const browserExtractTool = tool(
       return await browserSession.extract(
         { selector, offset, limit },
         readBrowserExecutionOwner(runtime),
+        runtime.signal,
       );
     } catch (err) {
       return formatBrowserToolError(err);
@@ -316,7 +323,7 @@ const browserExtractTool = tool(
 const browserCloseTool = tool(
   async (_input, runtime: BrowserToolRuntime) => {
     try {
-      return await browserSession.close(readBrowserExecutionOwner(runtime));
+      return await browserSession.close(readBrowserExecutionOwner(runtime), runtime.signal);
     } catch (err) {
       return formatBrowserToolError(err);
     }
@@ -331,7 +338,10 @@ const browserCloseTool = tool(
 const browserScreenshotTool = tool(
   async (_input, runtime: BrowserToolRuntime) => {
     try {
-      const result = await browserSession.screenshot(readBrowserExecutionOwner(runtime));
+      const result = await browserSession.screenshot(
+        readBrowserExecutionOwner(runtime),
+        runtime.signal,
+      );
       const message = await buildBrowserScreenshotToolMessage(result, runtime.toolCallId);
       await runtime.context?.admitInputModalities?.(['text', 'image']);
       return message;

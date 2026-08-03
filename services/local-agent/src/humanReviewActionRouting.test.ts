@@ -269,3 +269,49 @@ test('human review cancellation interrupts an approve-only review without fabric
   }]);
   assert.deepEqual(lifecycle.routes(), []);
 });
+
+test('human review rejection queues the same checkpoint interruption as cancellation', async () => {
+  const route = {
+    ...reviewRoute(['review-1'], 'interrupt-1'),
+    requestId: 'req-1',
+  };
+  const lifecycle = new ReviewResolutionLifecycle<typeof route>();
+  lifecycle.register(route);
+  const runs: unknown[] = [];
+
+  await resolveHumanReviewAction({
+    lifecycle,
+    message: {
+      type: 'human_review_response',
+      requestId: 'req-1',
+      actionId: 'interrupt-1',
+      reviewId: 'review-1',
+      selectedOptionId: 'reject',
+    },
+    recover: async () => null,
+    emitClosed: () => undefined,
+    emitEvent: () => undefined,
+    isConnected: () => true,
+    run: async (_route, resume, source) => {
+      runs.push({ resume, source });
+      assert.equal(lifecycle.checkpoint('req-1'), true);
+      return 'interrupted';
+    },
+  });
+
+  assert.deepEqual(runs, [{
+    resume: {
+      'interrupt-1': {
+        decisions: [{ reviewId: 'review-1', selectedOptionId: 'reject' }],
+      },
+    },
+    source: {
+      type: 'human_review_response',
+      reviewId: 'review-1',
+      selectedOptionId: 'reject',
+      decisionCount: 1,
+      interruptRun: true,
+    },
+  }]);
+  assert.deepEqual(lifecycle.routes(), []);
+});

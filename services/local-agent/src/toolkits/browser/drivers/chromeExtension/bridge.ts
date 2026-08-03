@@ -13,6 +13,7 @@ import { connect, createServer, type Server, type Socket } from 'node:net';
 import {
   BROWSER_EXTENSION_PROTOCOL_VERSION,
   type BrowserCommandMessage,
+  type BrowserCancelMessage,
   type BrowserExtensionCapability,
   type BrowserExtensionCommandName,
   type BrowserRegisterMessage,
@@ -46,7 +47,8 @@ export type BrowserBridgeStatus = {
   connectionId: string | null;
   extensionId: string | null;
   activeTabId: number | null;
-  activeTabOwnership: 'agent' | 'user' | null;
+  activeTabBinding: 'agent' | 'user' | null;
+  userBoundOrigin: string | null;
   stateRevision: number | null;
   capabilities: BrowserExtensionCapability[];
   socketPath: string;
@@ -57,6 +59,8 @@ type PendingCommand = {
   resolve: (result: unknown) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
+  signal?: AbortSignal;
+  abortHandler?: () => void;
 };
 
 type BridgeLogger = Pick<Console, 'info' | 'warn' | 'error'>;
@@ -119,6 +123,7 @@ export class LocalAgentBrowserBridge {
   private readonly tokenFactory: () => string;
   private server: Server | null = null;
   private activeSocket: Socket | null = null;
+  private readonly sockets = new Set<Socket>();
   private token: string | null = null;
   private registration: BrowserRegisterMessage | null = null;
   private debuggerAttached = false;
@@ -147,7 +152,8 @@ export class LocalAgentBrowserBridge {
       connectionId: this.registration?.connectionId ?? null,
       extensionId: this.registration?.extensionId ?? null,
       activeTabId: activeTab?.tabId ?? null,
-      activeTabOwnership: activeTab?.ownership ?? null,
+      activeTabBinding: activeTab?.binding ?? null,
+      userBoundOrigin: this.registration?.state?.userBoundOrigin ?? null,
       stateRevision: this.registration?.state?.revision ?? null,
       capabilities: [...(this.registration?.capabilities ?? [])],
       socketPath: this.socketPath,
@@ -157,43 +163,61 @@ export class LocalAgentBrowserBridge {
   async start(): Promise<void> {
     if (this.server?.listening) return;
 
-    await mkdir(dirname(this.socketPath), { recursive: true, mode: 0o700 });
-    await chmod(dirname(this.socketPath), 0o700);
-    if (dirname(this.tokenPath) !== dirname(this.socketPath)) {
-      await mkdir(dirname(this.tokenPath), { recursive: true, mode: 0o700 });
-      await chmod(dirname(this.tokenPath), 0o700);
-    }
-    if (await isSocketAcceptingConnections(this.socketPath)) {
-      throw new BrowserBridgeError(
-        'browser_bridge_already_running',
-        `another local-agent browser bridge is already listening at ${this.socketPath}`,
-      );
-    }
-    await unlinkIfPresent(this.socketPath);
-
-    this.token = this.tokenFactory();
+    let socketPathPrepared = false;
+    let tokenPathPrepared = false;
     const temporaryTokenPath = `${this.tokenPath}.${process.pid}.tmp`;
-    await writeFile(temporaryTokenPath, `${this.token}\n`, { mode: 0o600 });
-    await chmod(temporaryTokenPath, 0o600);
-    await rename(temporaryTokenPath, this.tokenPath);
+    try {
+      await mkdir(dirname(this.socketPath), { recursive: true, mode: 0o700 });
+      await chmod(dirname(this.socketPath), 0o700);
+      if (dirname(this.tokenPath) !== dirname(this.socketPath)) {
+        await mkdir(dirname(this.tokenPath), { recursive: true, mode: 0o700 });
+        await chmod(dirname(this.tokenPath), 0o700);
+      }
+      if (await isSocketAcceptingConnections(this.socketPath)) {
+        throw new BrowserBridgeError(
+          'browser_bridge_already_running',
+          `another local-agent browser bridge is already listening at ${this.socketPath}`,
+        );
+      }
+      await unlinkIfPresent(this.socketPath);
+      socketPathPrepared = true;
 
-    const server = createServer((socket) => this.acceptSocket(socket));
-    this.server = server;
-    await new Promise<void>((resolvePromise, rejectPromise) => {
-      const handleError = (error: Error) => {
-        server.off('listening', handleListening);
-        rejectPromise(error);
-      };
-      const handleListening = () => {
-        server.off('error', handleError);
-        resolvePromise();
-      };
-      server.once('error', handleError);
-      server.once('listening', handleListening);
-      server.listen(this.socketPath);
-    });
-    await chmod(this.socketPath, 0o600);
-    this.logger.info(`[browser-bridge] listening on ${this.socketPath}`);
+      this.token = this.tokenFactory();
+      await writeFile(temporaryTokenPath, `${this.token}\n`, { mode: 0o600 });
+      await chmod(temporaryTokenPath, 0o600);
+      await rename(temporaryTokenPath, this.tokenPath);
+      tokenPathPrepared = true;
+
+      const server = createServer((socket) => this.acceptSocket(socket));
+      this.server = server;
+      await new Promise<void>((resolvePromise, rejectPromise) => {
+        const handleError = (error: Error) => {
+          server.off('listening', handleListening);
+          rejectPromise(error);
+        };
+        const handleListening = () => {
+          server.off('error', handleError);
+          resolvePromise();
+        };
+        server.once('error', handleError);
+        server.once('listening', handleListening);
+        server.listen(this.socketPath);
+      });
+      await chmod(this.socketPath, 0o600);
+      this.logger.info(`[browser-bridge] listening on ${this.socketPath}`);
+    } catch (error) {
+      if (this.server) {
+        await this.stop();
+      } else {
+        await Promise.allSettled([
+          unlinkIfPresent(temporaryTokenPath),
+          ...(tokenPathPrepared ? [unlinkIfPresent(this.tokenPath)] : []),
+          ...(socketPathPrepared ? [unlinkIfPresent(this.socketPath)] : []),
+        ]);
+        this.token = null;
+      }
+      throw error;
+    }
   }
 
   async stop(): Promise<void> {
@@ -202,7 +226,8 @@ export class LocalAgentBrowserBridge {
       'browser extension bridge stopped',
       true,
     ));
-    this.activeSocket?.destroy();
+    for (const socket of this.sockets) socket.destroy();
+    this.sockets.clear();
     this.activeSocket = null;
     this.registration = null;
     this.debuggerAttached = false;
@@ -223,7 +248,15 @@ export class LocalAgentBrowserBridge {
     command: BrowserExtensionCommandName,
     params: Record<string, unknown>,
     timeoutMs = this.commandTimeoutMs,
+    signal?: AbortSignal,
   ): Promise<unknown> {
+    if (signal?.aborted) {
+      throw new BrowserBridgeError(
+        'browser_command_cancelled',
+        'Browser command was cancelled before dispatch.',
+        true,
+      );
+    }
     const socket = this.activeSocket;
     const registration = this.registration;
     if (!socket || socket.destroyed || !registration) {
@@ -257,25 +290,44 @@ export class LocalAgentBrowserBridge {
 
     return await new Promise<unknown>((resolvePromise, rejectPromise) => {
       const timer = setTimeout(() => {
-        this.pending.delete(requestId);
+        this.removePending(requestId);
         rejectPromise(new BrowserBridgeError(
           'browser_command_timeout',
           `Chrome extension command ${command} timed out after ${timeoutMs}ms`,
           true,
         ));
       }, timeoutMs);
+      const abortHandler = () => {
+        const pending = this.removePending(requestId);
+        if (!pending) return;
+        const cancellation: BrowserCancelMessage = {
+          type: 'browser.cancel',
+          protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+          connectionId: registration.connectionId,
+          requestId,
+        };
+        if (!socket.destroyed) {
+          socket.write(serializeLine(cancellation), () => {});
+        }
+        pending.reject(new BrowserBridgeError(
+          'browser_command_cancelled',
+          'Browser command was cancelled.',
+          true,
+        ));
+      };
       this.pending.set(requestId, {
         connectionId: registration.connectionId,
         resolve: resolvePromise,
         reject: rejectPromise,
         timer,
+        signal,
+        abortHandler,
       });
+      signal?.addEventListener('abort', abortHandler, { once: true });
       socket.write(serializeLine(message), (error) => {
         if (!error) return;
-        const pending = this.pending.get(requestId);
+        const pending = this.removePending(requestId);
         if (!pending) return;
-        clearTimeout(pending.timer);
-        this.pending.delete(requestId);
         pending.reject(new BrowserBridgeError(
           'browser_bridge_write_failed',
           `failed to send Chrome extension command: ${error.message}`,
@@ -286,6 +338,7 @@ export class LocalAgentBrowserBridge {
   }
 
   private acceptSocket(socket: Socket) {
+    this.sockets.add(socket);
     socket.setEncoding('utf8');
     let authenticated = false;
     let buffer = '';
@@ -319,7 +372,13 @@ export class LocalAgentBrowserBridge {
                 return;
               }
               authenticated = true;
-              this.replaceActiveSocket(socket);
+              if (!this.activeSocket || this.activeSocket.destroyed) {
+                this.replaceActiveSocket(socket);
+              } else if (this.activeSocket !== socket) {
+                this.logger.info(
+                  '[browser-bridge] authenticated a candidate native host pending extension registration',
+                );
+              }
               socket.write(serializeLine({
                 type: 'bridge.ready',
                 protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
@@ -342,6 +401,7 @@ export class LocalAgentBrowserBridge {
       this.logger.warn(`[browser-bridge] native host socket error: ${error.message}`);
     });
     socket.on('close', () => {
+      this.sockets.delete(socket);
       if (this.activeSocket === socket) {
         this.activeSocket = null;
         this.registration = null;
@@ -377,7 +437,20 @@ export class LocalAgentBrowserBridge {
     message: ReturnType<typeof parseExtensionToAgentMessage>,
     socket: Socket,
   ) {
-    if (socket !== this.activeSocket) return;
+    if (socket !== this.activeSocket) {
+      if (message.type !== 'browser.register') {
+        this.logger.warn('[browser-bridge] ignored message from an inactive native host');
+        return;
+      }
+      if (this.registration && this.registration.extensionId !== message.extensionId) {
+        this.logger.warn(
+          '[browser-bridge] rejected an additional native host from a different extension',
+        );
+        socket.destroy();
+        return;
+      }
+      this.replaceActiveSocket(socket);
+    }
 
     if (message.type === 'browser.register') {
       if (this.registration?.connectionId !== message.connectionId) {
@@ -437,10 +510,10 @@ export class LocalAgentBrowserBridge {
   }
 
   private resolveResult(message: BrowserResultMessage) {
-    const pending = this.pending.get(message.requestId);
-    if (!pending || pending.connectionId !== message.connectionId) return;
-    clearTimeout(pending.timer);
-    this.pending.delete(message.requestId);
+    const current = this.pending.get(message.requestId);
+    if (!current || current.connectionId !== message.connectionId) return;
+    const pending = this.removePending(message.requestId);
+    if (!pending) return;
     if (message.ok) {
       pending.resolve(message.result);
       return;
@@ -454,11 +527,20 @@ export class LocalAgentBrowserBridge {
   }
 
   private rejectPending(error: Error) {
-    for (const [requestId, pending] of this.pending) {
-      clearTimeout(pending.timer);
+    for (const requestId of this.pending.keys()) {
+      const pending = this.removePending(requestId);
+      if (!pending) continue;
       pending.reject(error);
-      this.pending.delete(requestId);
     }
+  }
+
+  private removePending(requestId: string): PendingCommand | undefined {
+    const pending = this.pending.get(requestId);
+    if (!pending) return undefined;
+    this.pending.delete(requestId);
+    clearTimeout(pending.timer);
+    pending.signal?.removeEventListener('abort', pending.abortHandler!);
+    return pending;
   }
 }
 

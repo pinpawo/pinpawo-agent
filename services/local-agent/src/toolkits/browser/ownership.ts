@@ -3,6 +3,15 @@ import { BrowserOperationError } from './errors';
 
 export type BrowserExecutionOwner = SubagentExecutionScope;
 
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  throw new BrowserOperationError(
+    'browser_command_cancelled',
+    'Browser command was cancelled before it started.',
+    true,
+  );
+}
+
 function isSameOwner(
   left: BrowserExecutionOwner,
   right: BrowserExecutionOwner,
@@ -16,8 +25,11 @@ export class BrowserContextOwnership {
   private owner: BrowserExecutionOwner | null = null;
   private operationTail: Promise<void> = Promise.resolve();
 
-  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.operationTail.then(operation);
+  private enqueue<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    const result = this.operationTail.then(async () => {
+      throwIfAborted(signal);
+      return await operation();
+    });
     this.operationTail = result.then(
       () => undefined,
       () => undefined,
@@ -56,6 +68,7 @@ export class BrowserContextOwnership {
   runOpen<T>(
     owner: BrowserExecutionOwner | null,
     operation: () => Promise<T>,
+    signal?: AbortSignal,
   ): Promise<T> {
     return this.enqueue(async () => {
       const nextOwner = this.requireOwner(owner);
@@ -69,23 +82,25 @@ export class BrowserContextOwnership {
         this.owner = null;
         throw error;
       }
-    });
+    }, signal);
   }
 
   runOwned<T>(
     owner: BrowserExecutionOwner | null,
     operation: () => Promise<T>,
+    signal?: AbortSignal,
   ): Promise<T> {
     return this.enqueue(async () => {
       const currentOwner = this.requireOwner(owner);
       this.assertCurrentOwner(currentOwner);
       return operation();
-    });
+    }, signal);
   }
 
   closeOwned<T>(
     owner: BrowserExecutionOwner | null,
     operation: () => Promise<T>,
+    signal?: AbortSignal,
   ): Promise<T> {
     return this.enqueue(async () => {
       const currentOwner = this.requireOwner(owner);
@@ -95,7 +110,7 @@ export class BrowserContextOwnership {
       } finally {
         this.owner = null;
       }
-    });
+    }, signal);
   }
 
   shutdown<T>(operation: () => Promise<T>): Promise<T> {

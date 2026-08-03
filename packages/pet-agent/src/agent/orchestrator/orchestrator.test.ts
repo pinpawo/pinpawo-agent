@@ -68,7 +68,6 @@ import {
 import { applyActiveDelegationTransition } from './runtime/activeDelegationTransition';
 import { assertBoundaryPlanContinuity } from './runtime/nodes/capabilityPlanner';
 import { afterContextPrep } from './runtime/routes/afterContextPrep';
-import { readSubagentGuardStopReason } from '../../subagent/guardStop';
 import type {
   CapabilityPlannerInput,
   CapabilityPlannerResult,
@@ -3867,9 +3866,10 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
   assert.equal(readLatestAnnounce(finalState.messages, { runId: finalState.runId }), null);
 });
 
-test('toolkit review rejection resumes the same subagent before parent handoff', async () => {
+test('toolkit review rejection rolls back the full action and retains the delegation', async () => {
   let runCount = 0;
   let reviewCount = 0;
+  let autoReviewCount = 0;
   const rawTool = tool(async ({ command }: { command: string }) => {
     runCount += 1;
     return `ran ${command}`;
@@ -3930,10 +3930,22 @@ test('toolkit review rejection resumes the same subagent before parent handoff',
   } as unknown as AgentModels['act'];
   const subagentModel = new FakeToolCallingModel({
     toolCalls: [
+      [
+        {
+          id: 'call-rejected-first',
+          name: 'run_shell',
+          args: { command: 'git status' },
+        },
+        {
+          id: 'call-rejected-second',
+          name: 'run_shell',
+          args: { command: 'git diff --stat' },
+        },
+      ],
       [{
-        id: 'call-rejected',
+        id: 'call-after-continue',
         name: 'run_shell',
-        args: { command: 'git status' },
+        args: { command: 'git log -1' },
       }],
       [],
     ],
@@ -3955,6 +3967,17 @@ test('toolkit review rejection resumes the same subagent before parent handoff',
       actor: testActor,
       capabilities: [capability('general', 'General-purpose capability.', ['local'])],
       toolkits,
+      reviewCapabilities: {
+        humanReview: true,
+        sessionAuthorization: false,
+      },
+      globalReviewPolicy: {
+        mode: 'custom',
+        resolve: () => {
+          autoReviewCount += 1;
+          return { type: 'require_authorization' as const };
+        },
+      },
     },
   };
 
@@ -3971,12 +3994,13 @@ test('toolkit review rejection resumes the same subagent before parent handoff',
   } | undefined;
   assert.equal(payload?.kind, 'review_batch');
   assert.deepEqual(payload?.reviews?.map((item) => item.review?.id), [
-    'tool-review:run_shell:call-rejected',
+    'tool-review:run_shell:call-rejected-first',
+    'tool-review:run_shell:call-rejected-second',
   ]);
 
   const reviewResume = {
     decisions: [{
-      reviewId: 'tool-review:run_shell:call-rejected',
+      reviewId: 'tool-review:run_shell:call-rejected-first',
       selectedOptionId: 'reject',
     }],
   };
@@ -3994,31 +4018,62 @@ test('toolkit review rejection resumes the same subagent before parent handoff',
 
   assert.equal(finalState.__interrupt__, undefined);
   assert.equal(runCount, 0);
-  // Resume replays the interrupted review policy once, then returns to the
-  // same child agent loop for its next model call.
-  assert.equal(reviewCount, 2);
-  assert.equal(routeCallCount, 4);
-  const resumedSubagentInput = recorder.subagentInputs.at(-1) ?? [];
-  const rejectedToolResult = resumedSubagentInput.find((message) =>
-    message instanceof ToolMessage
-    && message.tool_call_id === 'call-rejected');
-  assert.ok(rejectedToolResult);
-  const rejectedResult = JSON.parse(String(rejectedToolResult.content)) as {
-    guidance?: string;
-    reason?: string;
-    source?: string;
-  };
-  assert.equal(rejectedResult.source, 'human_reject');
-  assert.equal(rejectedResult.reason, '不要发 PR comment，直接给我结果。');
-  assert.match(rejectedResult.guidance ?? '', /updated direction/);
-  assert.equal(
-    resumedSubagentInput.some((message) => message instanceof HumanMessage),
-    true,
-  );
+  assert.equal(reviewCount, 4);
+  assert.equal(autoReviewCount, 1, 'pending review resume must reuse its checkpointed auto-review');
+  assert.equal(routeCallCount, 3);
+  assert.equal(recorder.subagentInputs.length, 1);
   const handoffCopy = mainConversationMessages(finalState.messages)
     .find((message) => Boolean(getMessageHandoffSource(message)));
-  assert.ok(handoffCopy);
-  assert.equal(finalState.taskActiveDelegation, null);
+  assert.equal(handoffCopy, undefined);
+  assert.equal(finalState.taskActiveDelegation?.status, 'pending');
+
+  const activeDelegation = finalState.taskActiveDelegation;
+  assert.ok(activeDelegation);
+  const retainedLane = laneMessages(
+    finalState.messages,
+    activeDelegation.lane,
+    activeDelegation.transcriptRunId,
+    activeDelegation.id,
+  );
+  assert.equal(
+    retainedLane.some((message) => ToolMessage.isInstance(message)),
+    false,
+  );
+  assert.equal(
+    retainedLane.some((message) =>
+      AIMessage.isInstance(message)
+      && (message.tool_calls ?? []).some((toolCall) =>
+        toolCall.id === 'call-rejected-first' || toolCall.id === 'call-rejected-second')),
+    false,
+  );
+
+  const nextReview = await graph.invoke(
+    buildOrchestratorRunInput(
+      [new HumanMessage('continue without the rejected action')],
+      { activeDelegationTransition: 'resume_active' },
+    ),
+    config,
+  ) as {
+    __interrupt__?: Array<{ id?: string; value?: unknown }>;
+  };
+  const nextPayload = nextReview.__interrupt__?.[0]?.value as {
+    reviews?: Array<{ review?: { id?: string } }>;
+  } | undefined;
+  assert.deepEqual(nextPayload?.reviews?.map((item) => item.review?.id), [
+    'tool-review:run_shell:call-after-continue',
+  ]);
+  assert.equal(autoReviewCount, 2, 'a later capability review must run auto-review normally');
+  const continuedSubagentInput = recorder.subagentInputs.at(-1) ?? [];
+  assert.equal(
+    continuedSubagentInput.some((message) => ToolMessage.isInstance(message)),
+    false,
+  );
+  assert.equal(
+    continuedSubagentInput.some((message) =>
+      HumanMessage.isInstance(message)
+      && String(message.content).includes('continue without the rejected action')),
+    true,
+  );
 });
 
 test('toolkit review run interruption retains the delegation without another model call or handoff', async () => {
@@ -4160,15 +4215,12 @@ test('toolkit review run interruption retains the delegation without another mod
   const cancelledToolResult = retainedLane.find((message) =>
     message instanceof ToolMessage
     && message.tool_call_id === 'call-interrupted');
-  assert.ok(cancelledToolResult);
-  assert.equal(
-    (JSON.parse(String(cancelledToolResult.content)) as { source?: string }).source,
-    'human_interrupt',
-  );
+  assert.equal(cancelledToolResult, undefined);
   assert.equal(
     retainedLane.some((message) =>
-      readSubagentGuardStopReason(message) === 'human_review_run_interrupted'),
-    true,
+      AIMessage.isInstance(message)
+      && (message.tool_calls ?? []).some((toolCall) => toolCall.id === 'call-interrupted')),
+    false,
   );
 
   const retainedDelegationId = activeDelegation.id;
@@ -4188,12 +4240,8 @@ test('toolkit review run interruption retains the delegation without another mod
   assert.equal(finalizeCallCount, 1);
   const continuedSubagentInput = recorder.subagentInputs.at(-1) ?? [];
   assert.equal(
-    continuedSubagentInput.some((message) => {
-      if (!(message instanceof ToolMessage)) return false;
-      const content = JSON.parse(String(message.content)) as { source?: string };
-      return content.source === 'human_interrupt';
-    }),
-    true,
+    continuedSubagentInput.some((message) => ToolMessage.isInstance(message)),
+    false,
   );
   const resumedHandoff = mainConversationMessages(continuedState.messages)
     .map((message) => getMessageHandoffSource(message))

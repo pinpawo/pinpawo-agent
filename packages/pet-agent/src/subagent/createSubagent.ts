@@ -27,6 +27,7 @@ import {
   buildSubagentIterationLimitStopNotice,
   readSubagentGuardStopReason,
 } from './guardStop';
+import { readToolkitReviewRunControl } from '../agent/orchestrator/review/reviewRunControl';
 import { Command, END } from '@langchain/langgraph';
 import { emitRuntimeEventToStreamWriter } from '../utils/streamWriterEvents';
 import {
@@ -378,6 +379,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     );
     latestMessages = readResultMessages(result) ?? latestMessages;
     ensureSubagentMessageIds(latestMessages);
+    const reviewRunControl = readToolkitReviewRunControl(result);
 
     // A guard may have gracefully ended the agent by appending its stop
     // notice as the FINAL message (via Command goto END). That is a clean "limit
@@ -386,7 +388,9 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     // Summarization may rewrite the list so an index-based slice is unreliable.
     const lastMessage = latestMessages.at(-1);
     const stopReason = lastMessage ? readSubagentGuardStopReason(lastMessage) : null;
-    const announceMessageId = stopReason
+    const announceMessageId = reviewRunControl
+      ? null
+      : stopReason
       ? findLatestDeliverableMessageId(latestMessages, inputMessageIds)
       : lastMessage?._getType() === 'ai'
         && !messageHasToolCalls(lastMessage)
@@ -395,14 +399,12 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     return {
       messages: latestMessages,
       artifacts: inputState.artifacts ?? [],
-      completionReason: stopReason === 'human_review_run_interrupted'
+      completionReason: reviewRunControl
         ? 'interrupted'
         : stopReason === 'subagent_iteration_limit_reached'
           ? 'limit_reached'
           : 'natural',
-      announceMessageId: stopReason === 'human_review_run_interrupted'
-        ? null
-        : announceMessageId,
+      announceMessageId,
     };
   } catch (err) {
     // The agent's hard recursion breaker (recursionLimit) fired. The iteration

@@ -14,11 +14,11 @@ test('browser extension protocol validates register and deduplicates capabilitie
     connectionId: 'connection-1',
     extensionId: 'extension-1',
     capabilities: ['navigate', 'snapshot', 'click', 'type', 'scroll', 'extract', 'screenshot', 'snapshot', 'detach'],
-    activeTab: { tabId: 42, ownership: 'user' },
+    activeTab: { tabId: 42, binding: 'user' },
     state: {
       revision: 3,
       debuggerAttached: true,
-      activeTab: { tabId: 42, ownership: 'user' },
+      activeTab: { tabId: 42, binding: 'user' },
     },
   });
 
@@ -33,11 +33,11 @@ test('browser extension protocol validates register and deduplicates capabilitie
     'screenshot',
     'detach',
   ]);
-  assert.deepEqual(message.activeTab, { tabId: 42, ownership: 'user' });
+  assert.deepEqual(message.activeTab, { tabId: 42, binding: 'user' });
   assert.deepEqual(message.state, {
     revision: 3,
     debuggerAttached: true,
-    activeTab: { tabId: 42, ownership: 'user' },
+    activeTab: { tabId: 42, binding: 'user' },
   });
 });
 
@@ -86,15 +86,60 @@ test('browser extension protocol rejects mismatched versions and malformed resul
       connectionId: 'connection-1',
       extensionId: 'extension-1',
       capabilities: [],
-      activeTab: { tabId: 1, ownership: 'agent' },
+      activeTab: { tabId: 1, binding: 'agent' },
       state: {
         revision: 1,
         debuggerAttached: false,
-        activeTab: { tabId: 2, ownership: 'agent' },
+        activeTab: { tabId: 2, binding: 'agent' },
       },
     }),
     /activeTab must match state\.activeTab/,
   );
+});
+
+test('browser extension protocol accepts a user-bound origin only for a user-bound tab', () => {
+  const message = parseExtensionToAgentMessage({
+    type: 'browser.register',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    extensionId: 'extension-1',
+    capabilities: ['snapshot'],
+    state: {
+      revision: 1,
+      debuggerAttached: false,
+      activeTab: { tabId: 42, binding: 'user' },
+      userBoundOrigin: 'https://example.com',
+    },
+  });
+  assert.equal(message.type, 'browser.register');
+  assert.equal(message.state?.userBoundOrigin, 'https://example.com');
+
+  assert.throws(() => parseExtensionToAgentMessage({
+    type: 'browser.register',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    extensionId: 'extension-1',
+    capabilities: ['snapshot'],
+    state: {
+      revision: 1,
+      debuggerAttached: false,
+      activeTab: { tabId: 42, binding: 'agent' },
+      userBoundOrigin: 'https://example.com',
+    },
+  }), /requires a user-bound tab/);
+  assert.throws(() => parseExtensionToAgentMessage({
+    type: 'browser.register',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    extensionId: 'extension-1',
+    capabilities: ['snapshot'],
+    state: {
+      revision: 1,
+      debuggerAttached: false,
+      activeTab: { tabId: 42, binding: 'user' },
+      userBoundOrigin: 'https://example.com/path',
+    },
+  }), /must be an http\(s\) origin/);
 });
 
 test('browser extension protocol validates structured error details', () => {
@@ -138,7 +183,22 @@ test('browser extension protocol validates commands and bridge authentication me
     deadlineAt: new Date(Date.now() + 5_000).toISOString(),
     params: { approvedOrigin: 'https://example.com' },
   });
+  assert.equal(command.type, 'browser.command');
+  if (command.type !== 'browser.command') assert.fail('expected browser command');
   assert.equal(command.command, 'snapshot');
+
+  const cancellation = parseAgentToExtensionMessage({
+    type: 'browser.cancel',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    requestId: 'request-1',
+  });
+  assert.deepEqual(cancellation, {
+    type: 'browser.cancel',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    requestId: 'request-1',
+  });
 
   const hello = parseBridgeHelloMessage({
     type: 'bridge.hello',

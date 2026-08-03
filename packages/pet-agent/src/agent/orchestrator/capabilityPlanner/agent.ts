@@ -7,17 +7,17 @@ import {
   toolStrategy,
   type TypedToolStrategy,
 } from 'langchain';
-import { createCapabilityPlannerFileExplorer } from './capabilityPlannerFileExplorer';
-import type { CapabilityRegistryBackend } from './capabilityRegistryDocuments';
+import { createCapabilityPlannerFileExplorer } from './fileExplorer';
+import type { CapabilityRegistryBackend } from './registryDocuments';
 import {
   buildCapabilityPlannerAgentInput,
   buildCapabilityPlannerAgentSystemPrompt,
-} from './prompts/capabilityPlannerAgent';
+} from '../prompts/capabilityPlannerAgent';
 import type {
   CapabilityPlannerInput,
   CapabilityPlannerResult,
   CapabilityPlannerRunner,
-} from './capabilityPlannerRunner';
+} from './runner';
 
 const DEFAULT_MAX_MODEL_ITERATIONS = 12;
 const DEFAULT_TIMEOUT_MS = 60_000;

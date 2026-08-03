@@ -4,13 +4,13 @@ import { tmpdir } from 'node:os';
 import { Command } from '@langchain/langgraph';
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { materializeCapabilityDocumentWorkspace } from '../../capabilityDocumentWorkspace';
-import { createCapabilityPlannerAgent } from '../../capabilityPlannerAgent';
+import { materializeCapabilityDocumentWorkspace } from '../../capabilityPlanner/documentWorkspace';
+import { createCapabilityPlannerAgent } from '../../capabilityPlanner/agent';
 import type {
   CapabilityPlannerInput,
   CapabilityPlannerResult,
   CapabilityPlannerRunner,
-} from '../../capabilityPlannerRunner';
+} from '../../capabilityPlanner/runner';
 import { materializeDelegation } from '../../delegationBriefing';
 import { appendRunDelegationSummary } from '../../delegations';
 import { isContextCompactionMessage } from '../../contextCompaction';

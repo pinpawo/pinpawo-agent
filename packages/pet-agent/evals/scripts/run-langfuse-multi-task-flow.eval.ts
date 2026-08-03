@@ -13,7 +13,7 @@ import {
 } from '../../src/types/capability.ts';
 import { defineToolkit } from '../../src/types/toolkit.ts';
 import type { AgentModels } from '../../src/types/agent.ts';
-import type { CapabilityPlannerRunner } from '../../src/agent/orchestrator/capabilityPlannerRunner.ts';
+import type { CapabilityPlannerRunner } from '../../src/agent/orchestrator/capabilityPlanner/runner.ts';
 import { compileAgentRegistry } from '../../src/agent/orchestrator/registry.ts';
 import { multiTaskFlowBasicsDataset } from '../datasets/multi-task-flow-basics.ts';
 import { readRunDelegationSummaries, routeModeFromResult } from '../orchestratorStateReaders.ts';

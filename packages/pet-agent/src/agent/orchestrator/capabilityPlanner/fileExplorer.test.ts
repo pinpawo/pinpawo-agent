@@ -14,18 +14,18 @@ import test, { type TestContext } from 'node:test';
 import {
   defineCapability,
   defineInstructionDocument,
-} from '../../types/capability';
+} from '../../../types/capability';
 import {
   materializeCapabilityDocumentWorkspace,
   type CapabilityDocumentWorkspace,
-} from './capabilityDocumentWorkspace';
+} from './documentWorkspace';
 import {
   CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
   CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
   createCapabilityPlannerFileExplorer,
   type CapabilityPlannerFileExplorer,
-} from './capabilityPlannerFileExplorer';
-import { compileAgentRegistry } from './registry';
+} from './fileExplorer';
+import { compileAgentRegistry } from '../registry';
 
 async function makeWritable(path: string): Promise<void> {
   let stats;

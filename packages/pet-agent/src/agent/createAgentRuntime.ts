@@ -1,9 +1,9 @@
 export type {
   CapabilityRegistryBackend,
-} from './orchestrator/capabilityRegistryDocuments';
+} from './orchestrator/capabilityPlanner/registryDocuments';
 export {
   CAPABILITY_REGISTRY_BACKEND,
-} from './orchestrator/capabilityRegistryDocuments';
+} from './orchestrator/capabilityPlanner/registryDocuments';
 export type {
   ActiveDelegationTransition,
   OrchestratorConfig,
@@ -16,7 +16,7 @@ export type {
   CapabilityPlannerMode,
   CapabilityPlannerResult,
   CapabilityPlannerRunner,
-} from './orchestrator/capabilityPlannerRunner';
+} from './orchestrator/capabilityPlanner/runner';
 export { buildOrchestratorRunInput, buildOrchestratorTurnInput } from './orchestrator/state';
 export { validateUniqueCapabilityNames, validateUniqueToolkitNames } from './orchestrator/validation';
 export {

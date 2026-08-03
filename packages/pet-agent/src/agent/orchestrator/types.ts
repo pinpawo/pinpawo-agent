@@ -8,8 +8,8 @@ import type { CapabilityArtifactRef, CapabilityArtifactStore } from '../../types
 import type { SubagentCompletionReason } from '../../types/subagent';
 import type { AgentToolkit, ToolkitReviewCapabilities } from '../../types/toolkit';
 import type { CompiledAgentRegistry } from './registry';
-import type { CapabilityPlannerRunner } from './capabilityPlannerRunner';
-import type { CapabilityRegistryBackend } from './capabilityRegistryDocuments';
+import type { CapabilityPlannerRunner } from './capabilityPlanner/runner';
+import type { CapabilityRegistryBackend } from './capabilityPlanner/registryDocuments';
 import type { GlobalReviewPolicy } from './review/globalReviewPolicy';
 import type { StructuredOutputAutoRepairConfig, StructuredOutputMethod } from '../../utils/structuredOutput';
 import type { DelegationOutcomeDecision } from './schemas';

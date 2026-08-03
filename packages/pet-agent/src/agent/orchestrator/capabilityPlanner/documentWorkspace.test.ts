@@ -21,13 +21,13 @@ import {
   defineCapabilityDocumentSource,
   defineInstructionDocument,
   type AgentCapability,
-} from '../../types/capability';
-import { defineToolkit } from '../../types/toolkit';
+} from '../../../types/capability';
+import { defineToolkit } from '../../../types/toolkit';
 import {
   materializeCapabilityDocumentWorkspace,
   renderCapabilityDocument,
-} from './capabilityDocumentWorkspace';
-import { compileAgentRegistry } from './registry';
+} from './documentWorkspace';
+import { compileAgentRegistry } from '../registry';
 
 function capability(params: {
   name: string;

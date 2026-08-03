@@ -127,11 +127,11 @@ export {
   CAPABILITY_DOCUMENT_WORKSPACE_SCHEMA_VERSION,
   materializeCapabilityDocumentWorkspace,
   renderCapabilityDocument,
-} from './agent/orchestrator/capabilityDocumentWorkspace';
+} from './agent/orchestrator/capabilityPlanner/documentWorkspace';
 export type {
   CapabilityDocumentWorkspace,
   CapabilityDocumentWorkspaceEntry,
-} from './agent/orchestrator/capabilityDocumentWorkspace';
+} from './agent/orchestrator/capabilityPlanner/documentWorkspace';
 export {
   assertCapabilityDocumentMatches,
   CAPABILITY_DOCUMENT_FILE_NAME,

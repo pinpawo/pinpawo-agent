@@ -11,9 +11,9 @@ import {
 } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import type { AgentCapability } from '../../types/capability';
-import { CAPABILITY_DOCUMENT_FILE_NAME } from '../../types/capabilityDocument';
-import type { CompiledAgentRegistry } from './registry';
+import type { AgentCapability } from '../../../types/capability';
+import { CAPABILITY_DOCUMENT_FILE_NAME } from '../../../types/capabilityDocument';
+import type { CompiledAgentRegistry } from '../registry';
 
 export const CAPABILITY_DOCUMENT_WORKSPACE_SCHEMA_VERSION = 1;
 // One repair is enough for a derived digest snapshot. Extra attempts only

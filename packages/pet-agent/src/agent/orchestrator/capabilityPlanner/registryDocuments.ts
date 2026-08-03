@@ -1,10 +1,10 @@
 import { spawn } from 'node:child_process';
-import type { CapabilityDocumentWorkspace } from './capabilityDocumentWorkspace';
+import type { CapabilityDocumentWorkspace } from './documentWorkspace';
 import {
   CapabilityPlannerWorkspaceReader,
   PlannerFileToolError,
   throwIfPlannerFileExplorationAborted,
-} from './capabilityPlannerWorkspaceReader';
+} from './workspaceReader';
 
 export const CAPABILITY_REGISTRY_BACKEND = {
   FILESYSTEM: 'filesystem',

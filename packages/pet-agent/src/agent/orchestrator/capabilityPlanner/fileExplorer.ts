@@ -1,16 +1,16 @@
 import { tool, type StructuredTool, type ToolRuntime } from '@langchain/core/tools';
 import { z } from 'zod';
-import type { CapabilityDocumentWorkspace } from './capabilityDocumentWorkspace';
+import type { CapabilityDocumentWorkspace } from './documentWorkspace';
 import {
   CAPABILITY_REGISTRY_BACKEND,
   createCapabilityRegistryDocuments,
   type CapabilityRegistryBackend,
-} from './capabilityRegistryDocuments';
+} from './registryDocuments';
 import {
   CAPABILITY_PLANNER_DOCUMENT_PATH_MAX_CHARS,
   PlannerFileToolError,
   stablePlannerFileToolError,
-} from './capabilityPlannerWorkspaceReader';
+} from './workspaceReader';
 
 export const CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME = 'grep_search';
 export const CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME = 'view_file_chunk';

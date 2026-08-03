@@ -1,7 +1,7 @@
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { BaseMessage } from '@langchain/core/messages';
-import type { CapabilityDocumentWorkspace } from './capabilityDocumentWorkspace';
-import type { CapabilityPlanTask } from './types';
+import type { CapabilityDocumentWorkspace } from './documentWorkspace';
+import type { CapabilityPlanTask } from '../types';
 
 export type CapabilityPlannerMode = 'entry' | 'boundary';
 

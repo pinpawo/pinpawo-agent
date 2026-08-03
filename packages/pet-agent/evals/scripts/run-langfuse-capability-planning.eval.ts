@@ -4,9 +4,9 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { createCapabilityPlannerAgent } from '../../src/agent/orchestrator/capabilityPlannerAgent.ts';
-import type { CapabilityPlannerResult } from '../../src/agent/orchestrator/capabilityPlannerRunner.ts';
-import { materializeCapabilityDocumentWorkspace } from '../../src/agent/orchestrator/capabilityDocumentWorkspace.ts';
+import { createCapabilityPlannerAgent } from '../../src/agent/orchestrator/capabilityPlanner/agent.ts';
+import type { CapabilityPlannerResult } from '../../src/agent/orchestrator/capabilityPlanner/runner.ts';
+import { materializeCapabilityDocumentWorkspace } from '../../src/agent/orchestrator/capabilityPlanner/documentWorkspace.ts';
 import { compileAgentRegistry } from '../../src/agent/orchestrator/registry.ts';
 import {
   defineCapability,

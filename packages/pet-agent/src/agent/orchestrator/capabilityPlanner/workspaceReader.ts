@@ -12,11 +12,11 @@ import {
   relative,
   sep,
 } from 'node:path';
-import { CAPABILITY_DOCUMENT_FILE_NAME } from '../../types/capabilityDocument';
+import { CAPABILITY_DOCUMENT_FILE_NAME } from '../../../types/capabilityDocument';
 import type {
   CapabilityDocumentWorkspace,
   CapabilityDocumentWorkspaceEntry,
-} from './capabilityDocumentWorkspace';
+} from './documentWorkspace';
 
 export const CAPABILITY_PLANNER_DOCUMENT_PATH_MAX_CHARS = 512;
 

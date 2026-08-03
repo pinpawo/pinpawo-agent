@@ -16,7 +16,7 @@ import {
   buildEntryDecisionSystemPrompt,
 } from './prompts';
 import { buildCapabilityPlannerAgentInput } from './prompts/capabilityPlannerAgent';
-import type { CapabilityPlannerInput } from './capabilityPlannerRunner';
+import type { CapabilityPlannerInput } from './capabilityPlanner/runner';
 
 function recentMessages(count: number) {
   return Array.from({ length: count }, (_, index) => new HumanMessage(`recent-${index}`));

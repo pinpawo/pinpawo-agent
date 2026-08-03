@@ -3,7 +3,7 @@ import {
   promptBlock,
   xmlTextBlock,
 } from './shared';
-import type { CapabilityPlannerInput } from '../capabilityPlannerRunner';
+import type { CapabilityPlannerInput } from '../capabilityPlanner/runner';
 import {
   CAPABILITY_PLANNER_AGENT_INPUT_PROMPT,
   CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT,

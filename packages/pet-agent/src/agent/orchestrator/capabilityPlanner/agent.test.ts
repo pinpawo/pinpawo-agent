@@ -20,13 +20,13 @@ import type { StructuredTool } from '@langchain/core/tools';
 import {
   CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
   CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
-} from './capabilityPlannerFileExplorer';
-import type { CapabilityDocumentWorkspace } from './capabilityDocumentWorkspace';
+} from './fileExplorer';
+import type { CapabilityDocumentWorkspace } from './documentWorkspace';
 import {
   CapabilityPlannerAgentError,
   createCapabilityPlannerAgent,
-} from './capabilityPlannerAgent';
-import type { CapabilityPlannerInput } from './capabilityPlannerRunner';
+} from './agent';
+import type { CapabilityPlannerInput } from './runner';
 
 type ScriptedToolCall = {
   id?: string;

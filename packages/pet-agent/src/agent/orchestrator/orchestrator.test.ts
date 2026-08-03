@@ -71,7 +71,7 @@ import type {
   CapabilityPlannerInput,
   CapabilityPlannerResult,
   CapabilityPlannerRunner,
-} from './capabilityPlannerRunner';
+} from './capabilityPlanner/runner';
 import { readMessageText } from './utils';
 
 function capability(

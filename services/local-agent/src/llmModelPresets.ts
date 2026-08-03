@@ -101,7 +101,7 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
   },
   {
     key: 'qwen-token-plan',
-    label: 'Qwen 3.8 Max Preview',
+    label: 'Qwen 3.8 Max',
     provider: 'aliyun',
     model: 'qwen3.8-max-preview',
     contextWindowTokens: 983_616,

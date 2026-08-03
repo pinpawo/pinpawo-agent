@@ -104,6 +104,23 @@ test('buildLocalChatAgentInput passes the generation reserve to main and subagen
   assert.equal(setup.graphConfig.subagentGenerationReserveTokens, 147_456);
 });
 
+test('buildLocalChatAgentInput keeps the Capability registry backend explicit', () => {
+  const filesystem = buildTestLocalChatAgentInput({
+    context: createContext(),
+    userMessage: 'hello',
+    capabilityRegistryBackend: 'filesystem',
+  });
+  const memory = buildTestLocalChatAgentInput({
+    context: createContext(),
+    userMessage: 'hello',
+    capabilityRegistryBackend: 'memory',
+  });
+
+  assert.equal(filesystem.graphConfig.capabilityRegistryBackend, 'filesystem');
+  assert.equal(memory.graphConfig.capabilityRegistryBackend, 'memory');
+  assert.notEqual(filesystem.graphKey, memory.graphKey);
+});
+
 test('buildLocalChatAgentInput rejects an empty artifact discovery scope', () => {
   assert.throws(
     () => buildTestLocalChatAgentInput({

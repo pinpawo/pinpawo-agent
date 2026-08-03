@@ -69,6 +69,17 @@ test('resolveNumberConfigValue prefers valid env number over stored number', asy
   assert.equal(resolveNumberConfigValue('64000', 131072), 64000);
 });
 
+test('Capability registry backend is explicit and rejects unknown values', async () => {
+  const { resolveCapabilityRegistryBackend } = await loadConfigHelpers();
+  assert.equal(resolveCapabilityRegistryBackend(undefined), undefined);
+  assert.equal(resolveCapabilityRegistryBackend('filesystem'), 'filesystem');
+  assert.equal(resolveCapabilityRegistryBackend(' MEMORY '), 'memory');
+  assert.throws(
+    () => resolveCapabilityRegistryBackend('auto'),
+    /filesystem.*memory/,
+  );
+});
+
 test('isMissingOrGeneratedApiPlaceholder detects init scaffold values', async () => {
   const { isMissingOrGeneratedApiPlaceholder } = await loadConfigHelpers();
 

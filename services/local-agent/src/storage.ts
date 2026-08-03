@@ -26,6 +26,8 @@ export type StoredConfig = {
   models?: StoredModelProfilesV1;
   workdir?: string;
   browser_backend?: string;
+  /** Capability document registry search backend: filesystem or memory. */
+  capability_registry_backend?: string;
   /**
    * Per-capability enabled/disabled overrides.
    * Keys match AgentCapability.name / CapabilityMeta.id.

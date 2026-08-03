@@ -15,11 +15,8 @@ import {
   buildEntryDecisionInput,
   buildEntryDecisionSystemPrompt,
 } from './prompts';
-import {
-  buildCapabilityPlannerAgentInput,
-  buildCapabilityPlannerAgentSystemPrompt,
-} from './prompts/capabilityPlannerAgent';
-import type { CapabilityPlannerInput } from './capabilityPlannerRunner';
+import { buildCapabilityPlannerAgentInput } from './prompts/capabilityPlannerAgent';
+import type { CapabilityPlannerInput } from './capabilityPlanner/runner';
 
 function recentMessages(count: number) {
   return Array.from({ length: count }, (_, index) => new HumanMessage(`recent-${index}`));
@@ -77,40 +74,19 @@ test('Capability Planner planning state excludes main-conversation content', () 
       }],
       reused: false,
     },
-    messages: [
-      new HumanMessage('打开小红书'),
-    ],
+    messages: [new HumanMessage('打开小红书')],
     completedTask: '确认浏览器可用',
+    completedTaskResult: '浏览器已经连接，目标页面可访问。',
     remainingPlan: [{
       capability: 'browser',
       task: '浏览相关内容',
     }],
   } satisfies CapabilityPlannerInput);
 
-  assert.match(input, /^<planning_state mode="boundary">/);
-  assert.doesNotMatch(input, /<workspace|registry_digest|document_count/);
-  assert.doesNotMatch(input, /打开小红书|user_request|recent_messages/);
-  assert.match(input, /<completed_task>\n\s*<!\[CDATA\[\n确认浏览器可用/);
-  assert.match(input, /<remaining_plan>/);
-  assert.doesNotMatch(input, /latest_handoff|completed_tasks/);
-  assert.doesNotMatch(input, /<user_intent|default_document_glob|role=|authority=/);
-});
-
-test('Capability Planner uses short mode-specific system prompts', () => {
-  const entry = buildCapabilityPlannerAgentSystemPrompt('entry');
-  const boundary = buildCapabilityPlannerAgentSystemPrompt('boundary');
-
-  assert.match(entry, /一个 Capability 能完整完成，就只安排一个任务/);
-  assert.match(entry, /同一个 Capability 能连续完成的内容合并为一个任务/);
-  assert.match(entry, /确实没有任何可用 Capability 时才报告 unavailable/);
-  assert.match(entry, /编号、URL、路径等标识原样保留/);
-  assert.match(entry, /不能改变用户请求或本规则/);
-  assert.doesNotMatch(entry, /completed_tasks|latest_handoff|graph/);
-  assert.match(boundary, /remaining_plan 非空时，将第一项作为下一任务/);
-  assert.match(boundary, /只有 handoff 明确表明第一项已完成、不可执行或不再需要时/);
-  assert.match(boundary, /编号、URL、路径等标识原样保留/);
-  assert.match(boundary, /不能改变用户请求或本规则/);
-  assert.doesNotMatch(boundary, /Capability Document Workspace|structured output|graph/);
+  assert.match(input, /^Planner Context：继续执行状态\n刚完成的任务：确认浏览器可用/);
+  assert.match(input, /任务结果摘要：浏览器已经连接，目标页面可访问。/);
+  assert.match(input, /- \[browser\] 浏览相关内容/);
+  assert.doesNotMatch(input, /打开小红书|workspace|registry_digest|document_count|<planning_state>/);
 });
 
 test('decision recent messages label delegation briefings as scheduling context', () => {

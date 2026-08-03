@@ -80,7 +80,11 @@ const entryCases: EvalCase[] = entryDecisionBasicsDataset.cases.map((testCase) =
   id: testCase.id,
   name: testCase.name,
   latestUserRequest: testCase.input.userRequest,
-  recentMessages: testCase.input.conversationContext?.map((text) => new AIMessage(text)),
+  recentMessages: testCase.input.conversationMessages?.map((message) =>
+    message.role === 'user'
+      ? new HumanMessage(message.content)
+      : new AIMessage(message.content),
+  ) ?? testCase.input.conversationContext?.map((text) => new AIMessage(text)),
   expectedAction: testCase.expected.mode,
 }));
 

@@ -57,8 +57,8 @@ test('transcript pager text includes the complete ordered canonical timeline', (
     status: 'completed',
   }]));
 
-  assert.ok(content.indexOf('你') < content.indexOf('Read'));
-  assert.ok(content.indexOf('Read') < content.indexOf('subagent\n  done'));
+  assert.ok(content.indexOf('[09:00:00]') < content.indexOf('Read'));
+  assert.ok(content.indexOf('Read') < content.indexOf('done�[31m'));
   assert.doesNotMatch(content, /\u001b/);
   assert.match(content, /done�\[31m/);
 });
@@ -93,7 +93,7 @@ test('transcript pager receives a temporary snapshot and cleans it up', async ()
     spawnPager,
   });
 
-  assert.match(pagedContent, /Momo\n\| answer/);
+  assert.match(pagedContent, /\| answer/);
   await assert.rejects(
     () => readFile(pagedFile, 'utf8'),
     /ENOENT/,
@@ -115,7 +115,7 @@ test('transcript pager keeps an actor label single-line and canonical', () => {
 
   const content = formatTranscriptPagerText(session);
   assert.match(content, /Actor: 豆包 ↵ 助手�/);
-  assert.match(content, /豆包 ↵ 助手�\n\| answer/);
+  assert.match(content, /\| answer/);
   assert.doesNotMatch(content, /\x1B/);
 });
 

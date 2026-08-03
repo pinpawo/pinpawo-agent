@@ -47,7 +47,6 @@ export function countSettledTimelinePrefix(
 export function formatTimelineEntry(
   entry: AgentTimelineEntry,
   options: {
-    actorLabel?: string;
     now?: number;
     width?: number;
   } = {},
@@ -60,7 +59,6 @@ export function formatTimelineEntry(
 export function buildTimelineDisplayLines(
   entry: AgentTimelineEntry,
   options: {
-    actorLabel?: string;
     now?: number;
     width?: number;
   } = {},
@@ -91,10 +89,7 @@ export function buildTimelineDisplayLines(
           }
     ));
   }
-  return buildMessageDisplayLines(
-    entry,
-    options.actorLabel,
-  );
+  return buildMessageDisplayLines(entry);
 }
 
 export function formatLiveSession(

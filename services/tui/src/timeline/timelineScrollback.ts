@@ -16,7 +16,6 @@ import type {
   AgentSession,
   AgentTimelineEntry,
 } from '@pinpawo/agent-session';
-import { sessionActorLabel } from '../session/sessionDisplay';
 import {
   WELCOME_LOGO_HEIGHT,
   WELCOME_LOGO_WIDTH,
@@ -100,7 +99,6 @@ export class TimelineScrollback {
   }
 
   render(session: AgentSession) {
-    const actorLabel = sessionActorLabel(session);
     if (session.sessionId !== this.sessionId) {
       const previousSessionId = this.sessionId;
       this.destroyTimelineSurface();
@@ -140,7 +138,6 @@ export class TimelineScrollback {
               [firstEntry],
               true,
               active.mode,
-              actorLabel,
             );
             this.committedFingerprints.push(timelineFingerprint(firstEntry));
             this.destroyTimelineSurface();
@@ -167,7 +164,6 @@ export class TimelineScrollback {
     )) {
       this.commitSettledEntries(
         session.timeline.slice(start, end),
-        actorLabel,
       );
     }
     this.reconciliationCache = timelineReconciliationCache(
@@ -187,7 +183,6 @@ export class TimelineScrollback {
         liveEntries,
         false,
         mode,
-        actorLabel,
       );
     } else if (this.activeTimelineSurface) {
       this.destroyTimelineSurface();
@@ -214,7 +209,6 @@ export class TimelineScrollback {
 
   private commitSettledEntries(
     entries: readonly AgentTimelineEntry[],
-    actorLabel?: string,
   ) {
     if (entries.length === 0) return;
     const surface = this.renderer.createScrollbackSurface({ startOnNewLine: true });
@@ -222,7 +216,6 @@ export class TimelineScrollback {
       id: 'timeline-settled',
       entries,
       width: this.renderer.width,
-      actorLabel,
       assistantMarkdownStyle: this.assistantMarkdownStyle,
     });
     try {
@@ -252,7 +245,6 @@ export class TimelineScrollback {
     entries: readonly AgentTimelineEntry[],
     completed: boolean,
     mode: ActiveTimelineSurface['mode'],
-    actorLabel?: string,
   ) {
     const entry = entries[0];
     if (!entry) return;
@@ -270,7 +262,6 @@ export class TimelineScrollback {
         id: `timeline-live-${entry.id}`,
         entries: [],
         width: this.renderer.width,
-        actorLabel,
         assistantMarkdownStyle: this.assistantMarkdownStyle,
       });
       surface.root.add(root);
@@ -290,7 +281,6 @@ export class TimelineScrollback {
         active.root,
         entries,
         this.renderer.width,
-        actorLabel,
         this.assistantMarkdownStyle,
       );
       active.surface.render();
@@ -537,7 +527,6 @@ function createTimelineRoot(
     id: string;
     entries: readonly AgentTimelineEntry[];
     width: number;
-    actorLabel?: string;
     assistantMarkdownStyle: ReturnType<typeof createAssistantMarkdownStyle>;
   },
 ) {
@@ -552,7 +541,6 @@ function createTimelineRoot(
     root,
     options.entries,
     options.width,
-    options.actorLabel,
     options.assistantMarkdownStyle,
   );
   return root;
@@ -563,7 +551,6 @@ function populateTimelineRoot(
   root: BoxRenderable,
   entries: readonly AgentTimelineEntry[],
   width: number,
-  actorLabel?: string,
   assistantMarkdownStyle?: ReturnType<typeof createAssistantMarkdownStyle>,
 ) {
   for (const child of root.getChildren()) {
@@ -590,7 +577,6 @@ function populateTimelineRoot(
   entries.forEach((entry, entryIndex) => {
     const childCountBeforeEntry = root.getChildrenCount();
     const lines = buildTimelineDisplayLines(entry, {
-      actorLabel,
       now,
       width,
     });
@@ -600,8 +586,8 @@ function populateTimelineRoot(
         width: '100%',
         height: 'auto',
         flexDirection: 'column',
-        paddingLeft: 1,
-        paddingRight: 1,
+        paddingTop: 1,
+        paddingBottom: 1,
         backgroundColor: USER_MESSAGE_BACKGROUND,
       });
       root.add(userMessageSurface);
@@ -613,13 +599,14 @@ function populateTimelineRoot(
     }
     if (
       entry.type === 'message'
-      && entry.role === 'assistant'
+      && (entry.role === 'assistant' || entry.role === 'subagent')
+      && entry.text.trim()
       && assistantMarkdownStyle
     ) {
-      const label = lines[0];
+      const label = entry.updatedAt ?? entry.createdAt ? lines[0] : undefined;
       if (label) addLine(label);
       assistantMarkdown = createAssistantMarkdownSurface(context, {
-        id: `${root.id}:assistant:${entryIndex}:${entry.id}`,
+        id: `${root.id}:${entry.role}:${entryIndex}:${entry.id}`,
         content: entry.text,
         syntaxStyle: assistantMarkdownStyle,
       });

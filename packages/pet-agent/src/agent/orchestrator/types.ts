@@ -8,7 +8,8 @@ import type { CapabilityArtifactRef, CapabilityArtifactStore } from '../../types
 import type { SubagentCompletionReason } from '../../types/subagent';
 import type { AgentToolkit, ToolkitReviewCapabilities } from '../../types/toolkit';
 import type { CompiledAgentRegistry } from './registry';
-import type { CapabilityPlannerRunner } from './capabilityPlannerRunner';
+import type { CapabilityPlannerRunner } from './capabilityPlanner/runner';
+import type { CapabilityRegistryBackend } from './capabilityPlanner/registryDocuments';
 import type { GlobalReviewPolicy } from './review/globalReviewPolicy';
 import type { ToolkitRuntimeManager } from './toolkitRuntime';
 import type { StructuredOutputAutoRepairConfig, StructuredOutputMethod } from '../../utils/structuredOutput';
@@ -113,10 +114,10 @@ export type OrchestratorConfig = {
    */
   capabilityPlannerRunner?: CapabilityPlannerRunner;
   /**
-   * Absolute cache root for immutable Capability Document Workspaces.
-   * Defaults to a process-independent directory under the OS temp root.
+   * Storage/search backend for the immutable Capability registry documents.
+   * Defaults to filesystem. Memory is opt-in and never used as an automatic fallback.
    */
-  capabilityPlannerWorkspaceRoot?: string;
+  capabilityRegistryBackend?: CapabilityRegistryBackend;
   /**
    * Host-owned optional Toolkit runtime lifecycle. The orchestrator resolves
    * per-subagent bindings through it, but the manager itself remains outside

@@ -49,9 +49,7 @@ test('streaming timeline commits stable rows incrementally and finalizes once', 
       .join('');
     assert.equal(
       committedText.replaceAll(/\s/g, ''),
-      formatTimelineEntry(completed, {
-        actorLabel: 'PinPawo',
-      }).replaceAll(/\s/g, ''),
+      formatTimelineEntry(completed).replaceAll(/\s/g, ''),
     );
     timeline.render(session([completed]));
     assert.deepEqual(setup.externalOutput.take(), []);
@@ -85,7 +83,7 @@ test('completed assistant markdown renders rich blocks without source markers', 
     ].join('\n'), 'completed')]));
 
     const text = setup.cellOutput.takeText();
-    assert.match(text, /^PinPawo\n\| Result/m);
+    assert.match(text, /^\| Result/m);
     assert.match(text, /Use bold and docs \(https:\/\/example\.com\)\./);
     assert.match(text, /- first/);
     assert.match(text, /quoted/);
@@ -112,13 +110,45 @@ test('completed assistant markdown renders rich blocks without source markers', 
   }
 });
 
+test('completed subagent messages render rich Markdown without an actor label', async () => {
+  const setup = await createTimelineRenderer(64);
+  const timeline = new TimelineScrollback(setup.renderer);
+  try {
+    timeline.render(session([{
+      id: 'subagent-markdown',
+      type: 'message',
+      role: 'subagent',
+      text: [
+        '# Result',
+        '',
+        'Use **bold** and [docs](https://example.com).',
+        '',
+        '| Key | Value |',
+        '| --- | --- |',
+        '| mode | rich |',
+      ].join('\n'),
+      status: 'completed',
+    }]));
+
+    const text = setup.cellOutput.takeText();
+    assert.match(text, /^\| Result/m);
+    assert.match(text, /Use bold and docs \(https:\/\/example\.com\)\./);
+    assert.match(text, /Key\s+Value/);
+    assert.match(text, /mode\s+rich/);
+    assert.doesNotMatch(text, /subagent|\*\*|# Result|\| ---/);
+  } finally {
+    timeline.destroy();
+    setup.renderer.destroy();
+  }
+});
+
 test('user messages render as a neutral full-width surface', async () => {
   const setup = await createTimelineRenderer(40);
   const timeline = new TimelineScrollback(setup.renderer);
   try {
     timeline.render(session([userMessage('hello\nsecond line')]));
     const text = setup.cellOutput.takeText();
-    assert.match(text, /你\n > hello\n   second line/);
+    assert.match(text, /hello\nsecond line/);
 
     const spans = setup.styleOutput.take().flatMap((lines) =>
       lines.flatMap((line) => line.spans)
@@ -129,10 +159,46 @@ test('user messages render as a neutral full-width surface', async () => {
     assert.ok(messageText.bg.equals(messageBackground));
     assert.ok(messageText.fg.equals(RGBA.fromHex('#e7ecee')));
     assert.ok(spans.some((span) => (
-      span.text.includes('你')
+      span.text.includes('hello')
       && span.bg.equals(messageBackground)
-      && span.fg.equals(RGBA.fromHex('#9fcbd2'))
     )));
+  } finally {
+    timeline.destroy();
+    setup.renderer.destroy();
+  }
+});
+
+test('message timestamps align without actor labels', async () => {
+  const setup = await createTimelineRenderer(64);
+  const timeline = new TimelineScrollback(setup.renderer);
+  const createdAt = '2026-07-15T02:00:00.000Z';
+  const updatedAt = '2026-07-15T02:00:01.000Z';
+  const completedAt = '2026-07-15T02:00:02.000Z';
+  const entries: AgentTimelineEntry[] = [{
+    ...userMessage('user message', 'user-timestamp'),
+    createdAt,
+  }, {
+    ...assistantMessage('assistant message', 'completed'),
+    id: 'assistant-timestamp',
+    updatedAt,
+  }, {
+    id: 'subagent-timestamp',
+    type: 'message',
+    role: 'subagent',
+    text: 'worker message',
+    status: 'completed',
+    createdAt: completedAt,
+  }];
+  try {
+    timeline.render(session(entries));
+    const text = setup.cellOutput.takeText();
+    const headers = entries.map((entry) => (
+      formatTimelineEntry(entry).split('\n')[0]
+    ));
+    const rows = text.split('\n').filter((row) => headers.includes(row));
+
+    assert.deepEqual(rows, headers);
+    assert.doesNotMatch(text, /\b(?:PinPawo|subagent)\b|你/);
   } finally {
     timeline.destroy();
     setup.renderer.destroy();
@@ -149,7 +215,7 @@ test('streaming markdown keeps a mutable table out of committed scrollback', asy
       '| mode | initial |',
     ].join('\n'), 'streaming');
     timeline.render(session([streaming], 'request-1'));
-    assert.equal(setup.cellOutput.takeText(), 'PinPawo');
+    assert.equal(setup.cellOutput.takeText(), '');
 
     const grown = {
       ...streaming,
@@ -327,17 +393,12 @@ test('a running operation gets a live surface without committing later rows out 
       'timeline-live-operation-1',
     );
     assert.ok(liveRoot instanceof BoxRenderable);
-    assert.equal(
-      liveRoot.getChildren().map((child) => {
-        assert.ok(child instanceof TextRenderable);
-        return child.plainText;
-      }).join('\n'),
-      [
-        formatTimelineEntry(operation),
-        formatTimelineEntry(subagent),
-        ' ',
-      ].join('\n'),
-    );
+    const [operationLine, subagentMarkdown, spacer] = liveRoot.getChildren();
+    assert.ok(operationLine instanceof TextRenderable);
+    assert.equal(operationLine.plainText, formatTimelineEntry(operation));
+    assert.ok(subagentMarkdown instanceof BoxRenderable);
+    assert.ok(spacer instanceof TextRenderable);
+    assert.equal(spacer.plainText, ' ');
 
     const completedOperation = {
       ...operation,
@@ -349,7 +410,7 @@ test('a running operation gets a live surface without committing later rows out 
       [
         formatTimelineEntry(completedOperation),
         '',
-        formatTimelineEntry(subagent),
+        '| found evidence',
         '',
       ].join('\n'),
     );
@@ -373,9 +434,9 @@ test('long sessions use bounded native scrollback commits', async () => {
     assert.deepEqual(
       commits.map((commit) => commit.height),
       [
-        MAX_SETTLED_ENTRIES_PER_COMMIT * 3,
-        MAX_SETTLED_ENTRIES_PER_COMMIT * 3,
-        3,
+        MAX_SETTLED_ENTRIES_PER_COMMIT * 4,
+        MAX_SETTLED_ENTRIES_PER_COMMIT * 4,
+        4,
       ],
     );
   } finally {
@@ -502,7 +563,7 @@ function session(
 function userMessage(
   text: string,
   id = 'user-1',
-): AgentTimelineEntry {
+): Extract<AgentTimelineEntry, { type: 'message' }> {
   return {
     id,
     type: 'message',
@@ -513,10 +574,7 @@ function userMessage(
 }
 
 function formatUserMessageSurface(entry: AgentTimelineEntry): string {
-  return formatTimelineEntry(entry)
-    .split('\n')
-    .map((line) => ` ${line}`)
-    .join('\n');
+  return `\n${formatTimelineEntry(entry)}\n`;
 }
 
 function assistantMessage(

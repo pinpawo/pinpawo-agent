@@ -92,13 +92,8 @@ export function formatTranscriptPagerText(session: AgentSession) {
   }
 
   for (const entry of session.timeline) {
-    const timestamp = entry.type === 'message' && entry.createdAt
-      ? `[${sanitizePagerText(entry.createdAt)}]\n`
-      : '';
     lines.push(
-      `${timestamp}${sanitizePagerText(formatTimelineEntry(entry, {
-        actorLabel: actor,
-      }))}`,
+      sanitizePagerText(formatTimelineEntry(entry)),
       '',
     );
   }

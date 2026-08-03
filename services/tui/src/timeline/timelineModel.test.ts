@@ -56,7 +56,7 @@ test('timeline model commits only the settled ordered prefix', () => {
 });
 
 test('timeline formatting keeps multiline messages and operation state readable', () => {
-  assert.equal(formatTimelineEntry(user), '你\n> hello\n  world');
+  assert.equal(formatTimelineEntry(user), 'hello\nworld');
   assert.equal(
     formatTimelineEntry({ ...operation, phase: 'completed', summary: 'ok' }),
     '  ● Read file(ok)（完成）',
@@ -366,10 +366,10 @@ test('a pending operation keeps later settled entries in the live ordered tail',
       formatTimelineEntry(entry)
     )),
     [
-      '你\n> hello\n  world',
+      'hello\nworld',
       '  ◌ Read file（开始）',
-      'subagent\n  progress',
-      'assistant\n| done',
+      'progress',
+      '| done',
     ],
   );
 });

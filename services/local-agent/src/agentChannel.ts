@@ -9,6 +9,7 @@ import {
   type AgentInvokeInput,
   type AgentToolkit,
   type CapabilityArtifactStore,
+  type CapabilityRegistryBackend,
   type CompiledAgentRegistry,
   type OrchestratorConfig,
   type ToolkitRuntimeManager,
@@ -35,6 +36,7 @@ import type { LocalImageModelInputOptions } from './localImageModelInput';
 import type { AgentLlmConfig } from './agentConfig';
 import type { AgentContext } from './contextLoader';
 import { buildLocalLlmConfig } from './llmConfig';
+import { getConfig } from './config';
 import { agentStore } from './agentStore';
 import { loadStoredConfig } from './storage';
 import { buildRuntimeEnvironmentSummary } from './runtimeEnvironment';
@@ -236,6 +238,8 @@ export function buildLocalChatAgentInput(params: {
   sessionStartedAt?: string;
   /** IANA timezone name for interpreting relative dates in this session. */
   timezone?: string;
+  /** Explicit Capability registry backend. Defaults to local-agent configuration. */
+  capabilityRegistryBackend?: CapabilityRegistryBackend;
 }): AgentChannelSetup {
   if (!params.threadId.trim()) {
     throw new Error('Local chat requires a non-empty threadId');
@@ -244,6 +248,8 @@ export function buildLocalChatAgentInput(params: {
     throw new Error('Local chat requires a capability artifact store');
   }
   const llmConfig = params.llmConfig ?? buildLocalLlmConfig();
+  const capabilityRegistryBackend = params.capabilityRegistryBackend
+    ?? getConfig().capabilityRegistryBackend;
   const decisionStructuredOutput = buildDecisionStructuredOutput(llmConfig);
   const actor = buildActor(params.context);
   const models = buildLocalAgentModels(llmConfig, params.modelInput);
@@ -337,6 +343,7 @@ export function buildLocalChatAgentInput(params: {
       String(llmConfig.subagentContextWindowTokens ?? llmConfig.contextWindowTokens ?? 32000),
       String(generationReserveTokens ?? 0),
       params.checkpoint ? 'checkpoint' : 'memory',
+      capabilityRegistryBackend,
     ]),
     graphConfig: {
       models,
@@ -349,6 +356,7 @@ export function buildLocalChatAgentInput(params: {
       subagentGenerationReserveTokens: generationReserveTokens,
       capabilityArtifactStore: params.capabilityArtifactStore,
       toolkitRuntimeManager: params.toolkitRuntimeManager,
+      capabilityRegistryBackend,
     },
     registry: preparedRegistry.registry,
     input: {

@@ -1,7 +1,5 @@
 import type { AgentMessageEntry } from '@pinpawo/agent-session';
-import { normalizeAgentLabel } from '../session/sessionDisplay';
 import { normalizeAssistantMessageMarkdown } from '../text/messageMarkdown';
-import { formatSubagentMessage } from './subagentDisplay';
 
 export type MessageDisplayTone =
   | 'assistant'
@@ -18,9 +16,7 @@ export type MessageDisplayLine = {
 
 export function buildMessageDisplayLines(
   entry: AgentMessageEntry,
-  actorLabel = 'assistant',
 ): MessageDisplayLine[] {
-  const safeActorLabel = normalizeAgentLabel(actorLabel, 'assistant');
   const timestamp = entry.updatedAt ?? entry.createdAt;
   const timestampLabel = timestamp
     ? `[${formatMessageTimestamp(timestamp)}]`
@@ -35,33 +31,34 @@ export function buildMessageDisplayLines(
         tone: 'system',
       }));
     case 'user':
-      return [{
-        text: joinLabel(timestampLabel, '你'),
-        tone: 'user-label',
-      }, ...logicalLines(entry.text).map((line, index) => ({
-        text: `${index === 0 ? '> ' : '  '}${line}`,
-        tone: 'user' as const,
-      }))];
+      return [
+        ...timestampLine(timestampLabel, 'user-label'),
+        ...logicalLines(entry.text).map((line) => ({
+          text: line,
+          tone: 'user' as const,
+        })),
+      ];
     case 'assistant':
-      return [{
-        text: joinLabel(timestampLabel, safeActorLabel),
-        tone: 'assistant-label',
-      }, ...logicalLines(
-        normalizeAssistantMessageMarkdown(entry.text),
-      ).map((line) => ({
-        text: `| ${line}`,
-        tone: 'assistant' as const,
-      }))];
+      return [
+        ...timestampLine(timestampLabel, 'assistant-label'),
+        ...logicalLines(
+          normalizeAssistantMessageMarkdown(entry.text),
+        ).map((line) => ({
+          text: `| ${line}`,
+          tone: 'assistant' as const,
+        })),
+      ];
     case 'subagent': {
-      const text = formatSubagentMessage(entry.text);
-      if (!text) return [];
-      return [{
-        text: joinLabel(timestampLabel, 'subagent'),
-        tone: 'subagent',
-      }, ...logicalLines(text).map((line) => ({
-        text: `  ${line}`,
-        tone: 'subagent' as const,
-      }))];
+      if (!entry.text.trim()) return [];
+      return [
+        ...timestampLine(timestampLabel, 'subagent'),
+        ...logicalLines(
+          normalizeAssistantMessageMarkdown(entry.text),
+        ).map((line) => ({
+          text: line,
+          tone: 'subagent' as const,
+        })),
+      ];
     }
   }
 }
@@ -83,4 +80,14 @@ function logicalLines(text: string) {
 
 function joinLabel(...parts: string[]) {
   return parts.filter(Boolean).join(' ');
+}
+
+function timestampLine(
+  timestampLabel: string,
+  tone: Extract<
+    MessageDisplayTone,
+    'assistant-label' | 'subagent' | 'user-label'
+  >,
+): MessageDisplayLine[] {
+  return timestampLabel ? [{ text: timestampLabel, tone }] : [];
 }

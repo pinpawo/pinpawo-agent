@@ -63,7 +63,7 @@ test('DeepSeek V4 Flash has its own preset and does not resolve as V4 Pro', () =
   assert.equal(inferLlmModelPreset('deepseek-v4-flash')?.key, 'deepseek-flash');
 });
 
-test('Qwen 3.8 Max Preview has a Token Plan-specific preset', () => {
+test('Qwen 3.8 Max has a Token Plan-specific preset', () => {
   const preset = findLlmModelPresetByKey('qwen-token-plan');
 
   assert.equal(preset?.model, 'qwen3.8-max-preview');

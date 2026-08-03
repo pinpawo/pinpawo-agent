@@ -57,7 +57,6 @@ function collectJsonSchemaReferences(value: unknown): string[] {
 class ScriptedPlannerModel extends BaseChatModel {
   readonly invocations: BaseMessage[][] = [];
   readonly boundToolNames: string[] = [];
-  readonly boundToolOptions: Record<string, unknown>[] = [];
   readonly structuredOutputToolNames = new Map<string, string>();
   readonly structuredOutputSchemaReferences: string[] = [];
   readonly structuredOutputPlanLimits: number[] = [];
@@ -78,10 +77,7 @@ class ScriptedPlannerModel extends BaseChatModel {
     return 'scripted-capability-planner';
   }
 
-  bindTools(
-    tools: StructuredTool[],
-    options?: Record<string, unknown>,
-  ) {
+  bindTools(tools: StructuredTool[]) {
     const toolEntries = tools as unknown as Array<{
       name?: string;
       function?: {
@@ -150,7 +146,6 @@ class ScriptedPlannerModel extends BaseChatModel {
         }
       }
     }
-    this.boundToolOptions.push({ ...options });
     return this;
   }
 
@@ -335,10 +330,8 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
     },
   ]);
 
-  const result = await createCapabilityPlannerAgent({
-    model,
-    maxIterations: 5,
-  }).invoke(plannerInput(workspace));
+  const result = await createCapabilityPlannerAgent({ model })
+    .invoke(plannerInput(workspace));
 
   assert.deepEqual(model.boundToolNames.slice(0, 2), [
     CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
@@ -350,10 +343,6 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
   assert.deepEqual(model.structuredOutputSchemaReferences, []);
   assert.deepEqual(model.structuredOutputPlanLimits, [24]);
   assert.deepEqual(model.structuredOutputCapabilityEnums, [['explore', 'general']]);
-  assert.ok(model.boundToolOptions.length > 0);
-  assert.ok(model.boundToolOptions.every(
-    (options) => options.parallel_tool_calls === false,
-  ));
   assert.equal(model.invocations.length, 3);
   assert.equal(model.invocations.flat().some((message) =>
     message._getType() === 'system'
@@ -401,10 +390,8 @@ test('entry mode forms one executable task after Capability exploration', async 
     },
   ]);
 
-  const result = await createCapabilityPlannerAgent({
-    model,
-    maxIterations: 2,
-  }).invoke(plannerInput(workspace));
+  const result = await createCapabilityPlannerAgent({ model })
+    .invoke(plannerInput(workspace));
 
   assert.equal(model.invocations.length, 2);
   assert.equal(model.structuredOutputToolNames.size, 2);
@@ -441,10 +428,8 @@ test('an unknown Capability returns tool feedback and can be repaired in-loop', 
     },
   ]);
 
-  const result = await createCapabilityPlannerAgent({
-    model,
-    maxIterations: 6,
-  }).invoke(plannerInput(workspace));
+  const result = await createCapabilityPlannerAgent({ model })
+    .invoke(plannerInput(workspace));
 
   assert.ok('tasks' in result);
   assert.equal('tasks' in result ? result.tasks[0]?.capability : null, 'general');
@@ -526,10 +511,7 @@ test('boundary mode rejects answer and materializes remaining work with general'
   ]);
   const fullHandoff = `Research completed. ${'Evidence detail. '.repeat(40)}Final constraint: preserve the public API.`;
 
-  const result = await createCapabilityPlannerAgent({
-    model,
-    maxIterations: 5,
-  }).invoke(
+  const result = await createCapabilityPlannerAgent({ model }).invoke(
     plannerInput(workspace, {
       mode: 'boundary',
       messages: [
@@ -587,37 +569,6 @@ test('document read exhaustion is reported as planning_limit_reached, not unavai
       error instanceof CapabilityPlannerAgentError
       && error.code === 'planning_limit_reached',
   );
-});
-
-test('model iteration exhaustion is an explicit planning limit', async (t) => {
-  const workspace = await createWorkspace(t, {});
-  const model = new ScriptedPlannerModel([
-    {
-      toolCalls: [{
-        id: 'grep-1',
-        name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-        args: { query: 'general' },
-      }],
-    },
-    {
-      toolCalls: [{
-        id: 'grep-2',
-        name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-        args: { query: 'general' },
-      }],
-    },
-  ]);
-
-  await assert.rejects(
-    createCapabilityPlannerAgent({
-      model,
-      maxIterations: 2,
-    }).invoke(plannerInput(workspace)),
-    (error: unknown) =>
-      error instanceof CapabilityPlannerAgentError
-      && error.code === 'planning_limit_reached',
-  );
-  assert.equal(model.invocations.length, 2);
 });
 
 test('natural language completion without a structured result is rejected', async (t) => {

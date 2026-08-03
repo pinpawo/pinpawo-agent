@@ -3,7 +3,6 @@ import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import type { RunnableConfig } from '@langchain/core/runnables';
 import {
   createAgent,
-  createMiddleware,
   toolStrategy,
   type TypedToolStrategy,
 } from 'langchain';
@@ -19,7 +18,6 @@ import type {
   CapabilityPlannerRunner,
 } from './runner';
 
-const DEFAULT_MAX_MODEL_ITERATIONS = 12;
 const DEFAULT_TIMEOUT_MS = 60_000;
 const MAX_PLAN_TASKS = 24;
 const MAX_TASK_TEXT_CHARS = 500;
@@ -38,29 +36,6 @@ export class CapabilityPlannerAgentError extends Error {
     this.name = 'CapabilityPlannerAgentError';
     this.code = code;
   }
-}
-
-function createPlannerModelMiddleware(maxIterations: number) {
-  let modelCalls = 0;
-  return createMiddleware({
-    name: 'CapabilityPlannerModelBoundary',
-    wrapModelCall: (request, handler) => {
-      if (modelCalls >= maxIterations) {
-        throw new CapabilityPlannerAgentError(
-          'planning_limit_reached',
-          `Capability Planner exceeded ${String(maxIterations)} model iterations without a valid structured result.`,
-        );
-      }
-      modelCalls += 1;
-      return handler({
-        ...request,
-        modelSettings: {
-          ...request.modelSettings,
-          parallel_tool_calls: false,
-        },
-      });
-    },
-  });
 }
 
 function createSubmitPlanSchema(capabilityNames: readonly string[]) {
@@ -207,7 +182,6 @@ function buildPlannerRunnableConfig(params: {
 async function invokePlannerAgent(params: {
   input: CapabilityPlannerInput;
   model: BaseChatModel;
-  maxIterations: number;
   timeoutMs: number;
   registryBackend: CapabilityRegistryBackend;
   maxDocumentReadBytes?: number;
@@ -224,7 +198,6 @@ async function invokePlannerAgent(params: {
     model: params.model,
     tools: [...explorer.tools],
     systemPrompt: buildCapabilityPlannerAgentSystemPrompt(params.input.mode),
-    middleware: [createPlannerModelMiddleware(params.maxIterations)],
     responseFormat: createCapabilityPlannerResponseFormat(params.input),
   });
   const timeout = mergePlannerSignal(
@@ -248,13 +221,7 @@ async function invokePlannerAgent(params: {
             : []),
         ],
       },
-      {
-        ...runnableConfig,
-        recursionLimit: Math.max(
-          runnableConfig.recursionLimit ?? 0,
-          params.maxIterations * 10 + 10,
-        ),
-      },
+      runnableConfig,
     );
     // Some providers or callbacks do not stop immediately when their signal is
     // aborted. Never accept a result produced after the deadline.
@@ -276,16 +243,12 @@ async function invokePlannerAgent(params: {
 
     return structuredResponse;
   } catch (error) {
-    const middlewareCause = error instanceof Error
-      && error.cause instanceof CapabilityPlannerAgentError
-      ? error.cause
-      : null;
     const plannerError = timeout.didTimeOut()
       ? new CapabilityPlannerAgentError(
           'planning_timeout',
           `Capability Planner exceeded its ${String(params.timeoutMs)}ms timeout.`,
         )
-      : middlewareCause ?? error;
+      : error;
     throw plannerError;
   } finally {
     timeout.dispose();
@@ -294,14 +257,11 @@ async function invokePlannerAgent(params: {
 
 export function createCapabilityPlannerAgent(params: {
   model: BaseChatModel;
-  maxIterations?: number;
   timeoutMs?: number;
   registryBackend?: CapabilityRegistryBackend;
   maxDocumentReadBytes?: number;
 }): CapabilityPlannerRunner {
-  const maxIterations = params.maxIterations ?? DEFAULT_MAX_MODEL_ITERATIONS;
   const timeoutMs = params.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  assertPositiveInteger(maxIterations, 'Capability Planner maxIterations');
   assertPositiveInteger(timeoutMs, 'Capability Planner timeoutMs');
   if (params.maxDocumentReadBytes !== undefined) {
     assertPositiveInteger(
@@ -317,7 +277,6 @@ export function createCapabilityPlannerAgent(params: {
     ) => invokePlannerAgent({
       input,
       model: params.model,
-      maxIterations,
       timeoutMs,
       registryBackend: params.registryBackend ?? 'filesystem',
       ...(params.maxDocumentReadBytes

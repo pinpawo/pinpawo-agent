@@ -6,8 +6,11 @@ import type { CapabilityPlanTask } from '../types';
 export type CapabilityPlannerMode = 'entry' | 'boundary';
 
 type CapabilityPlannerInputBase = {
+  /** Main-conversation transcript only; delegation lanes never enter this view. */
   readonly messages: readonly BaseMessage[];
   readonly completedTask: string | null;
+  /** Structured result preview for the latest completed delegation, if any. */
+  readonly completedTaskResult: string | null;
   readonly remainingPlan: readonly CapabilityPlanTask[];
   readonly workspace: CapabilityDocumentWorkspace;
 };

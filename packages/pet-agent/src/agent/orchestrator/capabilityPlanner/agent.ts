@@ -1,11 +1,13 @@
-import { HumanMessage } from '@langchain/core/messages';
+import {
+  HumanMessage,
+  ToolMessage,
+  type BaseMessage,
+} from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import {
-  createAgent,
-  toolStrategy,
-  type TypedToolStrategy,
-} from 'langchain';
+import { tool, type StructuredTool } from '@langchain/core/tools';
+import { createAgent } from 'langchain';
+import { z } from 'zod';
 import { createCapabilityPlannerFileExplorer } from './fileExplorer';
 import type { CapabilityRegistryBackend } from './registryDocuments';
 import {
@@ -22,6 +24,8 @@ const DEFAULT_TIMEOUT_MS = 60_000;
 const MAX_PLAN_TASKS = 24;
 const MAX_TASK_TEXT_CHARS = 500;
 const MAX_REASON_CHARS = 1_000;
+const SUBMIT_PLAN_TOOL_NAME = 'submit_plan';
+const REPORT_UNAVAILABLE_TOOL_NAME = 'report_unavailable';
 
 export type CapabilityPlannerAgentErrorCode =
   | 'planning_limit_reached'
@@ -38,98 +42,113 @@ export class CapabilityPlannerAgentError extends Error {
   }
 }
 
-function createSubmitPlanSchema(capabilityNames: readonly string[]) {
-  return {
-    title: 'submit_plan',
-    description: 'Submit the shortest task sequence that completes the user goal.',
-    type: 'object' as const,
-    properties: {
-      tasks: {
-        type: 'array',
-        minItems: 1,
-        maxItems: MAX_PLAN_TASKS,
-        description: 'Ordered tasks. The first task runs now; the rest remain planned.',
-        items: {
-          type: 'object',
-          properties: {
-            capability: {
-              type: 'string',
-              enum: [...capabilityNames],
-              description: 'Capability that executes this task.',
-            },
-            task: {
-              type: 'string',
-              minLength: 1,
-              maxLength: MAX_TASK_TEXT_CHARS,
-              description: 'Short, executable task description.',
-            },
-          },
-          required: ['capability', 'task'],
-          additionalProperties: false,
-        },
-      },
-    },
-    required: ['tasks'],
-    additionalProperties: false,
-  };
-}
-
-const unavailablePlanSchema = {
-  title: 'report_unavailable',
-  description: 'Report that no Capability can execute the required task.',
-  type: 'object' as const,
-  properties: {
-    task: {
-      type: 'string',
-      minLength: 1,
-      maxLength: MAX_TASK_TEXT_CHARS,
-      description: 'Task that cannot be executed.',
-    },
-    reason: {
-      type: 'string',
-      minLength: 1,
-      maxLength: MAX_REASON_CHARS,
-      description: 'Why the Capability Workspace cannot execute it.',
-    },
-  },
-  required: ['task', 'reason'],
-  additionalProperties: false,
-};
-
-function createCapabilityPlannerResponseFormat(
-  input: CapabilityPlannerInput,
-): TypedToolStrategy<CapabilityPlannerResult> {
+function plannerCapabilityNames(input: CapabilityPlannerInput) {
   const availableCapabilityNames = new Set(input.workspace.capabilityNames);
-  const orderedCapabilityNames = [...new Set([
+  return [...new Set([
     ...(input.mode === 'boundary'
       ? input.remainingPlan.map((task) => task.capability)
       : []),
     ...input.workspace.capabilityNames,
   ])].filter((name) => availableCapabilityNames.has(name));
+}
+
+function createPlannerSubmissionTools(
+  input: CapabilityPlannerInput,
+): StructuredTool[] {
+  const orderedCapabilityNames = plannerCapabilityNames(input);
   const [firstCapabilityName, ...otherCapabilityNames] = orderedCapabilityNames;
+  const unavailableTool = tool(
+    async ({ task, reason }: { task: string; reason: string }) => JSON.stringify({
+      task,
+      reason,
+    }),
+    {
+      name: REPORT_UNAVAILABLE_TOOL_NAME,
+      description: 'Report that no Capability can execute the required task.',
+      schema: z.object({
+        task: z.string().min(1).max(MAX_TASK_TEXT_CHARS)
+          .describe('Task that cannot be executed.'),
+        reason: z.string().min(1).max(MAX_REASON_CHARS)
+          .describe('Why the Capability Workspace cannot execute it.'),
+      }),
+    },
+  );
   if (!firstCapabilityName) {
-    return toolStrategy(unavailablePlanSchema, {
-      toolMessageContent: 'Capability planning result accepted.',
-    }) as TypedToolStrategy<CapabilityPlannerResult>;
+    return [unavailableTool];
   }
 
-  const submitPlanSchema = createSubmitPlanSchema([
+  const capabilityNames = [
     firstCapabilityName,
     ...otherCapabilityNames,
-  ]);
+  ] as [string, ...string[]];
+  const submitPlanTool = tool(
+    async ({ tasks }: {
+      tasks: Array<{ capability: string; task: string }>;
+    }) => JSON.stringify({ tasks }),
+    {
+      name: SUBMIT_PLAN_TOOL_NAME,
+      description: 'Submit the shortest task sequence that completes the user goal.',
+      schema: z.object({
+        tasks: z.array(z.object({
+          capability: z.enum(capabilityNames)
+            .describe('Capability that executes this task.'),
+          task: z.string().min(1).max(MAX_TASK_TEXT_CHARS)
+            .describe('Short, executable task description.'),
+        })).min(1).max(MAX_PLAN_TASKS)
+          .describe('Ordered tasks. The first task runs now; the rest remain planned.'),
+      }),
+    },
+  );
 
   if (orderedCapabilityNames.includes('general')) {
-    return toolStrategy(submitPlanSchema, {
-      toolMessageContent: 'Capability planning result accepted.',
-    }) as TypedToolStrategy<CapabilityPlannerResult>;
+    return [submitPlanTool];
   }
 
-  return toolStrategy([
-    submitPlanSchema,
-    unavailablePlanSchema,
-  ], {
-    toolMessageContent: 'Capability planning result accepted.',
-  }) as TypedToolStrategy<CapabilityPlannerResult>;
+  return [submitPlanTool, unavailableTool];
+}
+
+function readPlannerSubmission(
+  messages: readonly BaseMessage[],
+): CapabilityPlannerResult | null {
+  for (const message of [...messages].reverse()) {
+    if (!(message instanceof ToolMessage)
+      || (message.name !== SUBMIT_PLAN_TOOL_NAME
+        && message.name !== REPORT_UNAVAILABLE_TOOL_NAME)
+      || typeof message.content !== 'string') {
+      continue;
+    }
+
+    let value: unknown;
+    try {
+      value = JSON.parse(message.content);
+    } catch {
+      // Tool validation errors are also ToolMessages. They are feedback for the
+      // model, not a completed planner submission.
+      continue;
+    }
+    if (!value || typeof value !== 'object') continue;
+
+    if (message.name === SUBMIT_PLAN_TOOL_NAME) {
+      const tasks = (value as { tasks?: unknown }).tasks;
+      if (!Array.isArray(tasks) || tasks.some((task) =>
+        !task || typeof task !== 'object'
+        || typeof (task as { capability?: unknown }).capability !== 'string'
+        || typeof (task as { task?: unknown }).task !== 'string',
+      )) {
+        continue;
+      }
+      return {
+        tasks: tasks as Array<{ capability: string; task: string }>,
+      };
+    }
+
+    const { task, reason } = value as { task?: unknown; reason?: unknown };
+    if (typeof task === 'string' && typeof reason === 'string') {
+      return { task, reason };
+    }
+  }
+
+  return null;
 }
 
 function mergePlannerSignal(
@@ -196,9 +215,8 @@ async function invokePlannerAgent(params: {
   });
   const agent = createAgent({
     model: params.model,
-    tools: [...explorer.tools],
+    tools: [...explorer.tools, ...createPlannerSubmissionTools(params.input)],
     systemPrompt: buildCapabilityPlannerAgentSystemPrompt(params.input.mode),
-    responseFormat: createCapabilityPlannerResponseFormat(params.input),
   });
   const timeout = mergePlannerSignal(
     params.runnableConfig?.signal,
@@ -227,8 +245,8 @@ async function invokePlannerAgent(params: {
     // aborted. Never accept a result produced after the deadline.
     timeout.signal.throwIfAborted();
 
-    const structuredResponse = result.structuredResponse;
-    if (!structuredResponse) {
+    const submission = readPlannerSubmission(result.messages);
+    if (!submission) {
       if (explorer.didReachDocumentReadLimit()) {
         throw new CapabilityPlannerAgentError(
           'planning_limit_reached',
@@ -241,7 +259,7 @@ async function invokePlannerAgent(params: {
       );
     }
 
-    return structuredResponse;
+    return submission;
   } catch (error) {
     const plannerError = timeout.didTimeOut()
       ? new CapabilityPlannerAgentError(

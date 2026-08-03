@@ -57,6 +57,7 @@ function collectJsonSchemaReferences(value: unknown): string[] {
 class ScriptedPlannerModel extends BaseChatModel {
   readonly invocations: BaseMessage[][] = [];
   readonly boundToolNames: string[] = [];
+  readonly boundToolOptions: Array<Record<string, unknown> | undefined> = [];
   readonly structuredOutputToolNames = new Map<string, string>();
   readonly structuredOutputSchemaReferences: string[] = [];
   readonly structuredOutputPlanLimits: number[] = [];
@@ -77,9 +78,13 @@ class ScriptedPlannerModel extends BaseChatModel {
     return 'scripted-capability-planner';
   }
 
-  bindTools(tools: StructuredTool[]) {
+  bindTools(tools: StructuredTool[], options?: Record<string, unknown>) {
+    this.boundToolOptions.push(options);
     const toolEntries = tools as unknown as Array<{
       name?: string;
+      schema?: {
+        shape?: Record<string, unknown>;
+      };
       function?: {
         name?: string;
         parameters?: Record<string, unknown>;
@@ -107,7 +112,7 @@ class ScriptedPlannerModel extends BaseChatModel {
       this.structuredOutputCapabilityEnums.length,
     );
     for (const entry of toolEntries) {
-      const name = entry.function?.name;
+      const name = entry.name ?? entry.function?.name;
       const parameters = entry.function?.parameters;
       const kind = name === 'submit_plan'
         ? 'plan'
@@ -117,28 +122,22 @@ class ScriptedPlannerModel extends BaseChatModel {
         this.structuredOutputSchemaReferences.push(
           ...collectJsonSchemaReferences(parameters),
         );
-        const properties = parameters?.properties;
-        const tasks = properties && typeof properties === 'object'
-          ? (properties as Record<string, unknown>).tasks
-          : null;
-        const maxItems = tasks && typeof tasks === 'object'
-          ? (tasks as Record<string, unknown>).maxItems
-          : null;
+        const tasks = entry.schema?.shape?.tasks as {
+          _def?: {
+            maxLength?: { value?: unknown } | null;
+            type?: {
+              shape?: Record<string, unknown>;
+            };
+          };
+        } | undefined;
+        const maxItems = tasks?._def?.maxLength?.value;
         if (kind === 'plan' && typeof maxItems === 'number') {
           this.structuredOutputPlanLimits.push(maxItems);
         }
-        const items = tasks && typeof tasks === 'object'
-          ? (tasks as Record<string, unknown>).items
-          : null;
-        const itemProperties = items && typeof items === 'object'
-          ? (items as Record<string, unknown>).properties
-          : null;
-        const capability = itemProperties && typeof itemProperties === 'object'
-          ? (itemProperties as Record<string, unknown>).capability
-          : null;
-        const capabilityEnum = capability && typeof capability === 'object'
-          ? (capability as Record<string, unknown>).enum
-          : null;
+        const capability = tasks?._def?.type?.shape?.capability as {
+          _def?: { values?: unknown };
+        } | undefined;
+        const capabilityEnum = capability?._def?.values;
         if (kind === 'plan' && Array.isArray(capabilityEnum)) {
           this.structuredOutputCapabilityEnums.push(
             capabilityEnum.filter((name): name is string => typeof name === 'string'),
@@ -270,10 +269,9 @@ function plannerInput(
 ): CapabilityPlannerInput {
   return {
     mode: 'entry',
-    messages: [
-      new HumanMessage('Research the repository and then prepare a review.'),
-    ],
+    messages: [new HumanMessage('Research the repository and then prepare a review.')],
     completedTask: null,
+    completedTaskResult: null,
     remainingPlan: [],
     workspace,
     ...overrides,
@@ -343,13 +341,15 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
   assert.deepEqual(model.structuredOutputSchemaReferences, []);
   assert.deepEqual(model.structuredOutputPlanLimits, [24]);
   assert.deepEqual(model.structuredOutputCapabilityEnums, [['explore', 'general']]);
-  assert.equal(model.invocations.length, 3);
+  assert.ok(model.boundToolOptions.every((options) =>
+    options?.tool_choice === undefined));
+  assert.equal(model.invocations.length, 4);
   assert.equal(model.invocations.flat().some((message) =>
     message._getType() === 'system'
     && String(message.content).includes(workspace.rootPath)), false);
   assert.ok(model.invocations[0]?.some((message) =>
     message instanceof HumanMessage
-    && message.content === 'Research the repository and then prepare a review.'));
+    && String(message.content).includes('Research the repository and then prepare a review.')));
   assert.deepEqual(result, {
     tasks: [{
       capability: 'explore',
@@ -393,7 +393,7 @@ test('entry mode forms one executable task after Capability exploration', async 
   const result = await createCapabilityPlannerAgent({ model })
     .invoke(plannerInput(workspace));
 
-  assert.equal(model.invocations.length, 2);
+  assert.equal(model.invocations.length, 3);
   assert.equal(model.structuredOutputToolNames.size, 2);
   assert.ok(model.structuredOutputToolNames.has('plan'));
   assert.ok(model.structuredOutputToolNames.has('unavailable'));
@@ -439,7 +439,7 @@ test('an unknown Capability returns tool feedback and can be repaired in-loop', 
   assert.ok(feedback instanceof ToolMessage);
   assert.match(
     String(feedback.content),
-    /capability.*does not match schema/is,
+    /invalid enum value.*received 'missing'/is,
   );
 });
 
@@ -520,6 +520,7 @@ test('boundary mode rejects answer and materializes remaining work with general'
         new AIMessage(fullHandoff),
       ],
       completedTask: 'Research the repository.',
+      completedTaskResult: fullHandoff,
       remainingPlan: [{
         capability: 'general',
         task: 'Prepare the review from the findings.',
@@ -534,7 +535,7 @@ test('boundary mode rejects answer and materializes remaining work with general'
     message instanceof AIMessage && message.content === fullHandoff));
   assert.ok(model.invocations[0]?.some((message) =>
     message instanceof HumanMessage
-    && String(message.content).includes('<planning_state>')));
+    && String(message.content).includes('Planner Context：继续执行状态')));
   assert.match(
     model.invocations[0]?.map((message) => String(message.content)).join('\n') ?? '',
     /Final constraint: preserve the public API/,

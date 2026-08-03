@@ -74,23 +74,19 @@ test('Capability Planner planning state excludes main-conversation content', () 
       }],
       reused: false,
     },
-    messages: [
-      new HumanMessage('打开小红书'),
-    ],
+    messages: [new HumanMessage('打开小红书')],
     completedTask: '确认浏览器可用',
+    completedTaskResult: '浏览器已经连接，目标页面可访问。',
     remainingPlan: [{
       capability: 'browser',
       task: '浏览相关内容',
     }],
   } satisfies CapabilityPlannerInput);
 
-  assert.match(input, /^<planning_state>/);
-  assert.doesNotMatch(input, /<workspace|registry_digest|document_count/);
-  assert.doesNotMatch(input, /打开小红书|user_request|recent_messages/);
-  assert.match(input, /<completed_task>\n\s*<!\[CDATA\[\n确认浏览器可用/);
-  assert.match(input, /<remaining_plan>/);
-  assert.doesNotMatch(input, /latest_handoff|completed_tasks/);
-  assert.doesNotMatch(input, /<user_intent|default_document_glob|role=|authority=/);
+  assert.match(input, /^Planner Context：继续执行状态\n刚完成的任务：确认浏览器可用/);
+  assert.match(input, /任务结果摘要：浏览器已经连接，目标页面可访问。/);
+  assert.match(input, /- \[browser\] 浏览相关内容/);
+  assert.doesNotMatch(input, /打开小红书|workspace|registry_digest|document_count|<planning_state>/);
 });
 
 test('decision recent messages label delegation briefings as scheduling context', () => {

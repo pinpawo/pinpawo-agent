@@ -14,10 +14,7 @@ import type {
 import { materializeDelegation } from '../../delegationBriefing';
 import { appendRunDelegationSummary } from '../../delegations';
 import { isContextCompactionMessage } from '../../contextCompaction';
-import {
-  mainConversationMessages,
-  toolProtocolSafeMessages,
-} from '../../messageLanes';
+import { mainConversationMessages } from '../../messageLanes';
 import type { OrchestratorStateType } from '../../state';
 import type {
   CapabilityPlanTask,
@@ -41,25 +38,19 @@ function buildPlannerMode(state: OrchestratorStateType): CapabilityPlannerInput[
     : 'boundary';
 }
 
-function buildPlannerMessages(messages: BaseMessage[]) {
-  const projectedMessages = mainConversationMessages(messages).flatMap((message) => {
+function buildPlannerContext(state: OrchestratorStateType) {
+  const messages = mainConversationMessages(state.messages).flatMap((message) => {
     const type = message._getType();
     if (type === 'human' || type === 'ai') return [message];
-    if (isContextCompactionMessage(message)) {
-      return [new AIMessage(message.content)];
-    }
-    return [];
+    return isContextCompactionMessage(message) ? [new AIMessage(message.content)] : [];
   });
-  return toolProtocolSafeMessages(projectedMessages);
-}
-
-function buildPlannerContext(state: OrchestratorStateType) {
   const latestCompletedDelegation = [...state.runDelegationSummaries]
     .reverse()
     .find((item) => item.status === 'completed');
   return {
-    messages: buildPlannerMessages(state.messages),
+    messages,
     completedTask: latestCompletedDelegation?.task ?? null,
+    completedTaskResult: latestCompletedDelegation?.resultPreview ?? null,
   };
 }
 

@@ -450,6 +450,7 @@ test('task_done reroutes through capabilityPlanner before the next task', async 
     /接下来我会先处理这项任务：读取 issue #269 并提炼需求点/,
   );
   assert.equal(plannerInputs[1]?.completedTask, '读取 issue #269 并提炼需求点。');
+  assert.match(plannerInputs[1]?.completedTaskResult ?? '', /issue #269 需求点/);
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
   assert.equal(state.runPendingTask, null);
   assert.deepEqual(state.runCapabilityPlan, []);
@@ -552,11 +553,8 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
     capability: 'explore',
     task: '检索本地实现与 git log。',
   }]);
-  assert.match(
-    plannerInputs[1]?.messages.map(readMessageText).join('\n') ?? '',
-    /完整 handoff 末尾约束：必须检查兼容性/,
-  );
   assert.equal(plannerInputs[1]?.completedTask, '读取 issue #269 并提炼需求点。');
+  assert.match(plannerInputs[1]?.completedTaskResult ?? '', /issue #269 需求点：需要检查本地实现/);
   assert.equal(answerModelInvocations, 1);
   assert.equal(
     String(state.messages.at(-1)?.content ?? ''),

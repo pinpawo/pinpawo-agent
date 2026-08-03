@@ -90,7 +90,11 @@ function selectedCases() {
 }
 
 async function main() {
-  const config = resolveLangfuseConfig();
+  const writeLangfuseResults = process.env.CAPABILITY_PLANNING_EVAL_WRITE_LANGFUSE
+    !== '0';
+  const showFailureDetails = process.env.CAPABILITY_PLANNING_EVAL_SHOW_FAILURE_DETAILS
+    === '1';
+  const config = writeLangfuseResults ? resolveLangfuseConfig() : null;
   const cases = selectedCases();
   if (cases.length === 0) {
     throw new Error(`No eval cases selected. EVAL_CASES=${process.env.EVAL_CASES ?? '(unset)'}`);
@@ -121,6 +125,7 @@ async function main() {
   console.log(`Running ${capabilityPlanningBasicsDataset.name}: ${runName}`);
   console.log(`Mode: ${modelConfig.label}`);
   console.log(`Judge: ${judgeConfig.label}`);
+  console.log(`Result sink: ${config ? 'Langfuse' : 'stdout only'}`);
   try {
     for (const testCase of cases) {
       const started = performance.now();
@@ -143,6 +148,7 @@ async function main() {
                 ? new HumanMessage(message.content)
                 : new AIMessage(message.content)),
             completedTask: testCase.input.completedTask ?? null,
+            completedTaskResult: testCase.input.completedTaskResult ?? null,
             remainingPlan: testCase.input.remainingPlan ?? [],
             workspace,
           },
@@ -173,47 +179,57 @@ async function main() {
         });
         const ok = evaluation.scores.every(({ score }) => score === 1);
         if (ok) passed += 1;
-        await writeLangfuseEvalResult({
-          config,
-          datasetName: capabilityPlanningBasicsDataset.name,
-          runName,
-          traceName: 'capability-planning-eval',
-          testCase,
-          output: {
-            ...output,
-            evaluationSummary: evaluation.evaluationSummary,
-          },
-          scores: evaluation.scores,
-          durationMs: Math.round(performance.now() - started),
-          metadata: {
-            subjectModelProfileId: modelConfig.metadata.profileId,
-            subjectModelProfileFingerprint: modelConfig.metadata.fingerprint,
-            judgeModelProfileId: judgeConfig.metadata.profileId,
-            judgeModelProfileFingerprint: judgeConfig.metadata.fingerprint,
-          },
-        });
+        if (config) {
+          await writeLangfuseEvalResult({
+            config,
+            datasetName: capabilityPlanningBasicsDataset.name,
+            runName,
+            traceName: 'capability-planning-eval',
+            testCase,
+            output: {
+              ...output,
+              evaluationSummary: evaluation.evaluationSummary,
+            },
+            scores: evaluation.scores,
+            durationMs: Math.round(performance.now() - started),
+            metadata: {
+              subjectModelProfileId: modelConfig.metadata.profileId,
+              subjectModelProfileFingerprint: modelConfig.metadata.fingerprint,
+              judgeModelProfileId: judgeConfig.metadata.profileId,
+              judgeModelProfileFingerprint: judgeConfig.metadata.fingerprint,
+            },
+          });
+        }
         console.log(
           `[${ok ? 'PASS' : 'FAIL'}] ${testCase.name}: `
           + evaluation.scores.map(({ key, score }) => `${key}=${score}`).join(' '),
         );
+        if (!ok && showFailureDetails) {
+          console.log(JSON.stringify({
+            output,
+            evaluationSummary: evaluation.evaluationSummary,
+          }, null, 2));
+        }
       } catch (error) {
-        await writeLangfuseEvalResult({
-          config,
-          datasetName: capabilityPlanningBasicsDataset.name,
-          runName,
-          traceName: 'capability-planning-eval',
-          testCase,
-          output: {},
-          scores: [],
-          durationMs: Math.round(performance.now() - started),
-          error: error instanceof Error ? error.message : String(error),
-          metadata: {
-            subjectModelProfileId: modelConfig.metadata.profileId,
-            subjectModelProfileFingerprint: modelConfig.metadata.fingerprint,
-            judgeModelProfileId: judgeConfig.metadata.profileId,
-            judgeModelProfileFingerprint: judgeConfig.metadata.fingerprint,
-          },
-        });
+        if (config) {
+          await writeLangfuseEvalResult({
+            config,
+            datasetName: capabilityPlanningBasicsDataset.name,
+            runName,
+            traceName: 'capability-planning-eval',
+            testCase,
+            output: {},
+            scores: [],
+            durationMs: Math.round(performance.now() - started),
+            error: error instanceof Error ? error.message : String(error),
+            metadata: {
+              subjectModelProfileId: modelConfig.metadata.profileId,
+              subjectModelProfileFingerprint: modelConfig.metadata.fingerprint,
+              judgeModelProfileId: judgeConfig.metadata.profileId,
+              judgeModelProfileFingerprint: judgeConfig.metadata.fingerprint,
+            },
+          });
+        }
         console.log(`[ERROR] ${testCase.name}: ${String(error)}`);
       }
     }

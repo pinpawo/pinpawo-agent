@@ -6,7 +6,6 @@ import { markTransientModelMedia } from '@pinpawo/pet-agent';
 import { getLocalToolsWorkdir } from '../local/pathUtils';
 
 const MAX_BROWSER_SCREENSHOT_BYTES = 4 * 1024 * 1024;
-export const BROWSER_SCREENSHOT_ARTIFACT_TYPE = 'pinpawo.browser-screenshot.v1';
 
 export type BrowserScreenshotData = {
   mimeType: 'image/jpeg' | 'image/png';
@@ -18,11 +17,6 @@ export type PersistedBrowserScreenshot = {
   mimeType: BrowserScreenshotData['mimeType'];
   byteLength: number;
   sha256: string;
-};
-
-export type BrowserScreenshotArtifact = {
-  type: typeof BROWSER_SCREENSHOT_ARTIFACT_TYPE;
-  screenshot: PersistedBrowserScreenshot;
 };
 
 function screenshotDirectory() {
@@ -60,9 +54,9 @@ function parsePersistedBrowserScreenshot(value: unknown): PersistedBrowserScreen
   };
 }
 
-export function createBrowserScreenshotArtifact(
+export function parseBrowserScreenshot(
   serialized: string,
-): BrowserScreenshotArtifact {
+): PersistedBrowserScreenshot {
   let parsed: unknown;
   try {
     parsed = JSON.parse(serialized);
@@ -73,22 +67,7 @@ export function createBrowserScreenshotArtifact(
   if (!screenshot) {
     throw new Error('browser screenshot payload is invalid');
   }
-  return {
-    type: BROWSER_SCREENSHOT_ARTIFACT_TYPE,
-    screenshot,
-  };
-}
-
-export function readBrowserScreenshotArtifact(
-  value: unknown,
-): BrowserScreenshotArtifact | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const record = value as Record<string, unknown>;
-  if (record.type !== BROWSER_SCREENSHOT_ARTIFACT_TYPE) return null;
-  const screenshot = parsePersistedBrowserScreenshot(record.screenshot);
-  return screenshot
-    ? { type: BROWSER_SCREENSHOT_ARTIFACT_TYPE, screenshot }
-    : null;
+  return screenshot;
 }
 
 export async function readBrowserScreenshotDataUrl(
@@ -137,16 +116,15 @@ export async function buildBrowserScreenshotMessages(
   serialized: string,
   toolCallId: string,
 ): Promise<BaseMessage[]> {
-  const artifact = createBrowserScreenshotArtifact(serialized);
+  const screenshot = parseBrowserScreenshot(serialized);
   const toolMessage = new ToolMessage({
     content: `Browser screenshot saved.\n${serialized}`,
-    artifact,
     name: 'browser_screenshot',
     tool_call_id: toolCallId,
   });
   let imageUrl: string;
   try {
-    imageUrl = await readBrowserScreenshotDataUrl(artifact.screenshot);
+    imageUrl = await readBrowserScreenshotDataUrl(screenshot);
   } catch {
     return [
       toolMessage,

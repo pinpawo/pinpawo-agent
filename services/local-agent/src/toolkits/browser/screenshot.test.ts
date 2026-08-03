@@ -7,7 +7,7 @@ import { isTransientModelMedia } from '@pinpawo/pet-agent';
 import { getLocalToolsWorkdir, setLocalToolsWorkdir } from '../local/pathUtils';
 import {
   buildBrowserScreenshotMessages,
-  createBrowserScreenshotArtifact,
+  parseBrowserScreenshot,
   persistBrowserScreenshot,
   readBrowserScreenshotDataUrl,
 } from './screenshot';
@@ -39,9 +39,8 @@ test('browser screenshots are persisted inside the workdir with private permissi
     /must be base64/,
   );
 
-  const artifact = createBrowserScreenshotArtifact(serialized);
   assert.equal(
-    await readBrowserScreenshotDataUrl(artifact.screenshot),
+    await readBrowserScreenshotDataUrl(parseBrowserScreenshot(serialized)),
     `data:image/png;base64,${Buffer.from('image-bytes').toString('base64')}`,
   );
 });

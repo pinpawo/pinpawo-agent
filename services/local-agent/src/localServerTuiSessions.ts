@@ -465,6 +465,9 @@ export class LocalServerTuiSessionService {
     return {
       session: {
         ...(this.state.sessions[session.id] ?? session),
+        // Report what the restored transcript actually holds, not the value
+        // the record was persisted with.
+        requiredInputModalities: checkpoint.requiredInputModalities,
         active: true,
       },
       messages: checkpoint.messages,

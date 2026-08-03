@@ -75,6 +75,7 @@ export {
 
 export type {
   AgentToolkit,
+  ModelInputModality,
   NamedStructuredTool,
   ToolAuthorizationContext,
   ToolAuthorizationPolicy,
@@ -319,6 +320,10 @@ export {
   NamespacedProtocolToolEventReader,
   SubagentProtocolToolEventReader,
 } from './subagent/protocolToolEvents';
+export {
+  isTransientModelMedia,
+  markTransientModelMedia,
+} from './subagent/transientModelMedia';
 export {
   GUARD_DECISION_EVENT,
   isGuardDecisionStreamChunk,

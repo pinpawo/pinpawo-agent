@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
+import { HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
+import { markTransientModelMedia } from '@pinpawo/pet-agent';
 import { getLocalToolsWorkdir } from '../local/pathUtils';
 
 const MAX_BROWSER_SCREENSHOT_BYTES = 4 * 1024 * 1024;
@@ -116,6 +118,55 @@ export async function readBrowserScreenshotDataUrl(
     throw new Error('browser screenshot reference failed integrity validation');
   }
   return `data:${screenshot.mimeType};base64,${bytes.toString('base64')}`;
+}
+
+/**
+ * Build the graph messages for one screenshot: the tool result itself, plus a
+ * user message carrying the image.
+ *
+ * The image rides a HumanMessage rather than the ToolMessage because provider
+ * transports disagree about images inside tool results — the OpenAI Chat
+ * Completions converter drops every non-text block from a tool result. A user
+ * message is accepted everywhere, so this needs no per-provider branch.
+ *
+ * The image message is marked transient: it stays in graph state so later turns
+ * can still see the screenshot, but context summarization strips it instead of
+ * stringifying base64 into a summary prompt.
+ */
+export async function buildBrowserScreenshotMessages(
+  serialized: string,
+  toolCallId: string,
+): Promise<BaseMessage[]> {
+  const artifact = createBrowserScreenshotArtifact(serialized);
+  const toolMessage = new ToolMessage({
+    content: `Browser screenshot saved.\n${serialized}`,
+    artifact,
+    name: 'browser_screenshot',
+    tool_call_id: toolCallId,
+  });
+  let imageUrl: string;
+  try {
+    imageUrl = await readBrowserScreenshotDataUrl(artifact.screenshot);
+  } catch {
+    return [
+      toolMessage,
+      markTransientModelMedia(new HumanMessage({
+        content: 'The browser screenshot could not be loaded. Do not claim to have inspected it; call browser_screenshot again before making a visual judgment.',
+      })),
+    ];
+  }
+  return [
+    toolMessage,
+    markTransientModelMedia(new HumanMessage({
+      content: [
+        {
+          type: 'text',
+          text: 'Browser screenshot from the preceding tool result. Inspect the visible page using this image.',
+        },
+        { type: 'image_url', image_url: { url: imageUrl } },
+      ],
+    })),
+  ];
 }
 
 export async function persistBrowserScreenshot(input: BrowserScreenshotData): Promise<string> {

@@ -1,4 +1,4 @@
-import { type BaseMessage } from '@langchain/core/messages';
+import { HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { createHash, randomUUID } from 'node:crypto';
 import type {
@@ -39,6 +39,7 @@ import { messageHasToolCalls } from '../utils/messages';
 import {
   subagentRuntimeContextSchema,
 } from './runtimeContext';
+import { isTransientModelMedia } from './transientModelMedia';
 
 // Fallback model-call budget when the caller does not pass maxIterations. The
 // subagent iteration guard should stop gracefully first; LangGraph recursionLimit
@@ -150,6 +151,46 @@ function assertValidContextSummaryUpdate(update: unknown) {
   }
 }
 
+/**
+ * Stand-in used while summarization inspects history. Keeps the message id so
+ * the original can be restored if summarization preserves rather than folds it.
+ */
+function redactTransientModelMedia(message: BaseMessage): BaseMessage {
+  const redacted = new HumanMessage({
+    content: '[screenshot image omitted from summary]',
+    additional_kwargs: message.additional_kwargs,
+  });
+  redacted.id = message.id;
+  return redacted;
+}
+
+/**
+ * Summarization returns the full replacement message list. Any transient media
+ * it preserved comes back redacted, so swap the originals back in; anything it
+ * folded into the summary is intentionally gone.
+ */
+function restoreTransientModelMedia<TUpdate>(
+  update: TUpdate,
+  originalMessages: readonly BaseMessage[],
+): TUpdate {
+  if (!update || typeof update !== 'object' || !('messages' in update)) return update;
+  const messages = (update as { messages?: unknown }).messages;
+  if (!Array.isArray(messages)) return update;
+  const originalById = new Map<string, BaseMessage>();
+  for (const message of originalMessages) {
+    if (isTransientModelMedia(message) && message.id) {
+      originalById.set(message.id, message);
+    }
+  }
+  if (originalById.size === 0) return update;
+  return {
+    ...update,
+    messages: (messages as BaseMessage[]).map(
+      (message) => (message?.id ? originalById.get(message.id) ?? message : message),
+    ),
+  };
+}
+
 function failFastOnInvalidContextSummary(
   middleware: AnyAgentMiddleware,
 ): AnyAgentMiddleware {
@@ -159,12 +200,26 @@ function failFastOnInvalidContextSummary(
   }
   const hook = typeof beforeModel === 'function' ? beforeModel : beforeModel.hook;
   const wrappedHook: typeof hook = async (state, runtime) => {
-    const update = await hook(state, runtime);
+    // Summarization renders the summarized span with `getBufferString`, which
+    // would inline a base64 image as plain text. Replace transient media with a
+    // text stand-in so the summarizer sees that a screenshot happened without
+    // the payload. Messages the summarizer preserves keep their real content,
+    // because summarization replaces graph state with exactly what it returns.
+    const originalMessages: BaseMessage[] = state.messages;
+    const redactedMessages = originalMessages.map((message) => (
+      isTransientModelMedia(message) ? redactTransientModelMedia(message) : message
+    ));
+    const update = await hook(
+      redactedMessages.some((message, index) => message !== originalMessages[index])
+        ? { ...state, messages: redactedMessages }
+        : state,
+      runtime,
+    );
     // LangChain currently represents summarization failures as summary text
     // inside a destructive RemoveMessage update. Reject that update before the
     // graph can commit it, preserving the existing transcript on failure.
     assertValidContextSummaryUpdate(update);
-    return update;
+    return restoreTransientModelMedia(update, originalMessages);
   };
   middleware.beforeModel = typeof beforeModel === 'function'
     ? wrappedHook

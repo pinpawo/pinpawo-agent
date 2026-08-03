@@ -1,9 +1,7 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
-import { resolve } from 'node:path';
 import type { AgentLocalAttachment } from '@pinpawo/agent-session';
 
-export const LOCAL_IMAGE_REFERENCE_SCHEME = 'pinpawo-local-image:';
 export const MAX_LOCAL_IMAGE_ATTACHMENTS = 4;
 export const MAX_LOCAL_IMAGE_BYTES = 10 * 1024 * 1024;
 export const MAX_LOCAL_IMAGE_TOTAL_BYTES = 20 * 1024 * 1024;
@@ -35,8 +33,7 @@ export class LocalImageAdmissionError extends Error {
       | 'image_count_limit'
       | 'image_size_limit'
       | 'image_total_size_limit'
-      | 'image_reference_invalid'
-      | 'image_reference_corrupt',
+      | 'image_invalid',
     message: string,
   ) {
     super(message);
@@ -51,13 +48,12 @@ type ClassifiedImage = {
   sha256: string;
 };
 
-export class LocalChatImageStore {
-  readonly rootPath: string;
-
-  constructor(rootPath: string) {
-    this.rootPath = resolve(rootPath);
-  }
-
+/**
+ * Admits user image attachments as standard data URLs. The bytes travel in the
+ * message itself, so there is no separate content store to keep in sync with
+ * the transcript and no reference to rehydrate before a model call.
+ */
+export class LocalImageAttachmentAdmission {
   async admit(
     attachments: readonly AgentLocalAttachment[],
     options: { allowImages: boolean },
@@ -91,12 +87,11 @@ export class LocalChatImageStore {
 
     const admittedById = new Map<string, AdmittedLocalImageAttachment>();
     for (const image of images) {
-      await this.persist(image.sha256, image.bytes);
       admittedById.set(image.attachment.id, Object.freeze({
         id: image.attachment.id,
         source: 'local-image',
         kind: 'image',
-        uri: buildLocalImageReferenceUri(image.sha256),
+        uri: `data:${image.mimeType};base64,${image.bytes.toString('base64')}`,
         name: image.attachment.name,
         mimeType: image.mimeType,
         byteSize: image.bytes.length,
@@ -108,45 +103,6 @@ export class LocalChatImageStore {
     ));
   }
 
-  async read(referenceUri: string): Promise<{
-    bytes: Buffer;
-    mimeType: SupportedLocalImageMimeType;
-    sha256: string;
-  }> {
-    const sha256 = parseLocalImageReferenceUri(referenceUri);
-    if (!sha256) {
-      throw new LocalImageAdmissionError(
-        'image_reference_invalid',
-        'Local image reference is invalid.',
-      );
-    }
-    let bytes: Buffer;
-    try {
-      bytes = await fs.readFile(resolve(this.rootPath, sha256));
-    } catch {
-      throw new LocalImageAdmissionError(
-        'image_reference_invalid',
-        'Local image reference is unavailable.',
-      );
-    }
-    if (
-      bytes.length > MAX_LOCAL_IMAGE_BYTES
-      || sha256Digest(bytes) !== sha256
-    ) {
-      throw new LocalImageAdmissionError(
-        'image_reference_corrupt',
-        'Local image reference failed integrity validation.',
-      );
-    }
-    const mimeType = detectSupportedImageMimeType(bytes);
-    if (!mimeType) {
-      throw new LocalImageAdmissionError(
-        'image_reference_corrupt',
-        'Local image reference no longer contains a supported image.',
-      );
-    }
-    return { bytes, mimeType, sha256 };
-  }
 
   private async classify(
     attachment: AgentLocalAttachment,
@@ -181,7 +137,7 @@ export class LocalChatImageStore {
       const verifiedMimeType = detectSupportedImageMimeType(bytes);
       if (!verifiedMimeType || verifiedMimeType !== mimeType) {
         throw new LocalImageAdmissionError(
-          'image_reference_corrupt',
+          'image_invalid',
           `Image "${attachment.name}" changed while it was being admitted.`,
         );
       }
@@ -196,57 +152,8 @@ export class LocalChatImageStore {
     }
   }
 
-  private async persist(sha256: string, bytes: Buffer) {
-    await fs.mkdir(this.rootPath, { recursive: true, mode: 0o700 });
-    const targetPath = resolve(this.rootPath, sha256);
-    try {
-      const existing = await fs.readFile(targetPath);
-      if (sha256Digest(existing) !== sha256) {
-        throw new LocalImageAdmissionError(
-          'image_reference_corrupt',
-          'Existing local image content failed integrity validation.',
-        );
-      }
-      return;
-    } catch (error) {
-      if (
-        error instanceof LocalImageAdmissionError
-        || (error as NodeJS.ErrnoException).code !== 'ENOENT'
-      ) {
-        throw error;
-      }
-    }
-
-    const temporaryPath = resolve(
-      this.rootPath,
-      `.${sha256}.${randomUUID()}.tmp`,
-    );
-    try {
-      await fs.writeFile(temporaryPath, bytes, {
-        flag: 'wx',
-        mode: 0o600,
-      });
-      await fs.rename(temporaryPath, targetPath);
-    } finally {
-      await fs.rm(temporaryPath, { force: true });
-    }
-  }
 }
 
-export function buildLocalImageReferenceUri(sha256: string) {
-  if (!/^[a-f0-9]{64}$/.test(sha256)) {
-    throw new LocalImageAdmissionError(
-      'image_reference_invalid',
-      'Local image digest is invalid.',
-    );
-  }
-  return `${LOCAL_IMAGE_REFERENCE_SCHEME}//sha256/${sha256}`;
-}
-
-export function parseLocalImageReferenceUri(value: string) {
-  const match = /^pinpawo-local-image:\/\/sha256\/([a-f0-9]{64})$/.exec(value);
-  return match?.[1] ?? null;
-}
 
 export function detectSupportedImageMimeType(
   bytes: Uint8Array,

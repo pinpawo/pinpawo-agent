@@ -154,36 +154,6 @@ export function updateTuiSessionModelProfile(
   return next;
 }
 
-export function addTuiSessionRequiredInputModalities(
-  state: TuiSessionState,
-  sessionId: string,
-  modalities: readonly AgentInputModality[],
-) {
-  const record = state.sessions[sessionId];
-  if (!record) return null;
-  const requiredInputModalities: AgentInputModality[] = [
-    'text',
-    ...(record.requiredInputModalities.includes('image')
-      || modalities.includes('image')
-      ? ['image' as const]
-      : []),
-  ];
-  if (
-    requiredInputModalities.length === record.requiredInputModalities.length
-    && requiredInputModalities.every(
-      (modality, index) => record.requiredInputModalities[index] === modality,
-    )
-  ) {
-    return record;
-  }
-  const next: TuiSessionRecord = {
-    ...record,
-    requiredInputModalities,
-    updatedAt: new Date().toISOString(),
-  };
-  state.sessions[sessionId] = next;
-  return next;
-}
 
 function parseTuiSessionState(
   value: unknown,

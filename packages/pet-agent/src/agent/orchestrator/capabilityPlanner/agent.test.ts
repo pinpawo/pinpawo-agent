@@ -405,6 +405,41 @@ test('entry mode forms one executable task after Capability exploration', async 
   assert.equal('tasks' in result ? result.tasks.length : 0, 1);
 });
 
+test('Planner can report unavailable when a scoped workspace has no general fallback', async (t) => {
+  const workspace = await createWorkspace(t, {
+    explore: capabilityDocument({
+      name: 'explore',
+      description: 'Investigate repositories.',
+      instructions: 'Inspect files and report evidence.',
+    }),
+  });
+  const model = new ScriptedPlannerModel([{
+    toolCalls: [{
+      id: 'grep',
+      name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+      args: { query: 'unrelated task' },
+    }],
+  }, {
+    structuredOutput: {
+      kind: 'unavailable',
+      args: {
+        task: 'Perform unrelated work.',
+        reason: 'No matching Capability is available in this scoped workspace.',
+      },
+    },
+  }]);
+
+  const result = await createCapabilityPlannerAgent({ model })
+    .invoke(plannerInput(workspace));
+
+  assert.deepEqual(result, {
+    task: 'Perform unrelated work.',
+    reason: 'No matching Capability is available in this scoped workspace.',
+  });
+  assert.ok(model.structuredOutputToolNames.has('unavailable'));
+  assert.deepEqual(model.structuredOutputCapabilityEnums, [['explore']]);
+});
+
 test('an unknown Capability returns tool feedback and can be repaired in-loop', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({

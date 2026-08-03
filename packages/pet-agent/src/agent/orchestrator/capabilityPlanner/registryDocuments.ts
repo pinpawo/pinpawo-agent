@@ -253,9 +253,6 @@ class FileSystemCapabilityRegistryDocuments implements CapabilityRegistryDocumen
 
   async search(params: Parameters<CapabilityRegistryDocuments['search']>[0]) {
     const documentPaths = await this.#reader.listDocumentPaths(params.signal);
-    for (const path of documentPaths) {
-      await this.#reader.readDocument(path, params.signal);
-    }
     const result = await runFilesystemGrep({
       rootPath: this.#workspace.rootPath,
       documentPaths,

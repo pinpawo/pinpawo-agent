@@ -6,7 +6,7 @@ export const CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT = definePromptTemplate<Recor
 
 选择 Capability：
 - 使用 grep_search 搜索与用户任务相关的 Capability。
-- 第一次搜索没有返回候选时，直接提交由 general 执行的 plan，不继续搜索或读取文档。
+- 第一次搜索没有返回候选时，不继续搜索或读取文档；general 可用时由它执行，否则报告当前 Workspace 没有可执行该任务的 Capability。
 - 第一次搜索返回候选时，使用 view_file_chunk 阅读相关的 Capability 文档，再选择能够执行任务的 Capability。
 
 按照最简单、最高效的方式编排任务：
@@ -29,7 +29,7 @@ export const CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT = definePromptTemplate<Re
 
 需要重新选择 Capability 时：
 - 使用 grep_search 搜索与待执行任务相关的 Capability。
-- 第一次搜索没有返回候选时，直接提交由 general 执行的 plan，不继续搜索或读取文档。
+- 第一次搜索没有返回候选时，不继续搜索或读取文档；general 可用时由它执行，否则报告当前 Workspace 没有可执行该任务的 Capability。
 - 第一次搜索返回候选时，使用 view_file_chunk 阅读相关的 Capability 文档，再决定如何调整计划。
 
 将仍需执行的 tasks 按顺序提交为 plan。不生成面向用户的回答。`, []);

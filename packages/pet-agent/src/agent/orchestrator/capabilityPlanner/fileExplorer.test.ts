@@ -290,17 +290,30 @@ test('Planner file tools reject paths outside the materialized generation', asyn
   assert.equal(missing.error?.code, 'document_not_found');
 });
 
-test('Planner file tools reject document tampering after workspace publication', async (t) => {
+test('Planner file tools reject tampered documents when they are returned by search', async (t) => {
   const { workspace } = await workspaceFixture(t);
   const documentPath = join(workspace.rootPath, 'general', 'CAPABILITY.md');
   await chmod(documentPath, 0o644);
   await writeFile(documentPath, 'tampered', 'utf8');
   const explorer = createCapabilityPlannerFileExplorer({ workspace });
 
+  const unaffectedSearch = await invoke(
+    explorer,
+    CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+    { query: 'browser' },
+  );
+  assert.equal(unaffectedSearch.ok, true);
+  assert.deepEqual(
+    (unaffectedSearch.data?.matches as Array<Record<string, unknown>>).map(
+      ({ path }) => path,
+    ),
+    ['browser/CAPABILITY.md', 'explore/CAPABILITY.md'],
+  );
+
   const searchResult = await invoke(
     explorer,
     CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-    { query: 'general' },
+    { query: 'tampered' },
   );
   assert.equal(searchResult.ok, false);
   assert.equal(searchResult.error?.code, 'document_tampered');

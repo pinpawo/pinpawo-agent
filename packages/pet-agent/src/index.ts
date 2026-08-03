@@ -117,7 +117,6 @@ export type {
   ActiveDelegationTransition,
   CapabilityPlannerInput,
   CapabilityPlannerMode,
-  CapabilityPlannerTask,
   CapabilityPlannerResult,
   CapabilityPlannerRunner,
   CapabilityRegistryBackend,

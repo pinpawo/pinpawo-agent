@@ -145,7 +145,6 @@ test('grep_search finds candidates from immutable Workspace documents', async (t
     { query: 'BROWSER|research' },
   );
   assert.equal(first.ok, true);
-  assert.equal(first.data?.source, 'filesystem');
   assert.deepEqual(
     (first.data?.matches as Array<Record<string, unknown>>).map(
       ({ path, matchedTerms }) => ({ path, matchedTerms }),
@@ -196,8 +195,6 @@ test('memory backend is explicit and preserves registry search/read semantics', 
     CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
     { query: 'browser|research' },
   );
-  assert.equal(filesystemSearch.data?.source, 'filesystem');
-  assert.equal(memorySearch.data?.source, 'memory');
   assert.deepEqual(memorySearch.data?.matches, filesystemSearch.data?.matches);
 
   const memoryDocument = await invoke(

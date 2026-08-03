@@ -552,7 +552,7 @@ test('boundary mode rejects answer and materializes remaining work with general'
     message instanceof AIMessage && message.content === fullHandoff));
   assert.ok(model.invocations[0]?.some((message) =>
     message instanceof HumanMessage
-    && String(message.content).includes('<planning_state mode="boundary">')));
+    && String(message.content).includes('<planning_state>')));
   assert.match(
     model.invocations[0]?.map((message) => String(message.content)).join('\n') ?? '',
     /Final constraint: preserve the public API/,

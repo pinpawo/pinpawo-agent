@@ -143,8 +143,6 @@ export function createCapabilityPlannerFileExplorer(params: {
         }
         return formatSuccess(
           {
-            query,
-            source: registryBackend,
             matches: result.matches,
             complete: result.complete,
             stoppedBy: result.stoppedBy,

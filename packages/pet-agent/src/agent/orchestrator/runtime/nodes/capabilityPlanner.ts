@@ -10,7 +10,6 @@ import type {
   CapabilityPlannerInput,
   CapabilityPlannerResult,
   CapabilityPlannerRunner,
-  CapabilityPlannerTask,
 } from '../../capabilityPlannerRunner';
 import { materializeDelegation } from '../../delegationBriefing';
 import { appendRunDelegationSummary } from '../../delegations';
@@ -64,13 +63,7 @@ function buildPlannerContext(state: OrchestratorStateType) {
   };
 }
 
-function normalizeRemainingPlan(
-  tasks: readonly CapabilityPlannerTask[],
-): CapabilityPlanTask[] {
-  return tasks.map(normalizePlannerTask);
-}
-
-function normalizePlannerTask(task: CapabilityPlannerTask): CapabilityPlanTask {
+function normalizePlannerTask(task: CapabilityPlanTask): CapabilityPlanTask {
   const capability = task.capability.trim();
   const description = task.task.trim();
   if (!capability || !description) {
@@ -82,10 +75,6 @@ function normalizePlannerTask(task: CapabilityPlannerTask): CapabilityPlanTask {
   };
 }
 
-function samePlannerTask(left: CapabilityPlanTask, right: CapabilityPlanTask) {
-  return left.capability === right.capability && left.task === right.task;
-}
-
 function normalizeUnavailableResult(result: Extract<CapabilityPlannerResult, { task: string }>) {
   const task = result.task.trim();
   const reason = result.reason.trim();
@@ -93,40 +82,6 @@ function normalizeUnavailableResult(result: Extract<CapabilityPlannerResult, { t
     throw new Error('Capability Planner submitted an unavailable result with empty text.');
   }
   return { task, reason };
-}
-
-/**
- * Boundary planning starts from an already accepted future plan. Keep that
- * plan stable unless its Capability disappeared from the current workspace;
- * completed items can be removed by returning a later plan item as the new
- * first task.
- */
-export function assertBoundaryPlanContinuity(
-  input: CapabilityPlannerInput,
-  result: CapabilityPlannerResult,
-) {
-  if (input.mode !== 'boundary' || input.remainingPlan.length === 0 || !('tasks' in result)) {
-    return;
-  }
-  const firstPlannedCapability = input.remainingPlan[0]?.capability;
-  if (!firstPlannedCapability
-    || !input.workspace.capabilityNames.includes(firstPlannedCapability)) {
-    return;
-  }
-
-  const plannedTasks = input.remainingPlan.map(normalizePlannerTask);
-  const returnedTasks = result.tasks.map(normalizePlannerTask);
-  let plannedIndex = 0;
-  for (const task of returnedTasks) {
-    const matchIndex = plannedTasks.findIndex((plannedTask, index) =>
-      index >= plannedIndex && samePlannerTask(plannedTask, task));
-    if (matchIndex < 0) {
-      throw new Error(
-        'Capability Planner changed boundary remaining_plan without an invalidated first task.',
-      );
-    }
-    plannedIndex = matchIndex + 1;
-  }
 }
 
 function materializeNextDelegation(params: {
@@ -189,7 +144,6 @@ function buildPlannerTransition(params: {
   result: CapabilityPlannerResult;
 }) {
   const { state, input, result } = params;
-  assertBoundaryPlanContinuity(input, result);
   if (!('tasks' in result)) {
     const unavailable = normalizeUnavailableResult(result);
     return {
@@ -210,7 +164,7 @@ function buildPlannerTransition(params: {
     throw new Error('Capability Planner submitted an empty task list.');
   }
   const nextTask = normalizePlannerTask(rawNextTask);
-  const remainingPlan = normalizeRemainingPlan(remainingTasks);
+  const remainingPlan = remainingTasks.map(normalizePlannerTask);
   return {
     goto: 'capability' as const,
     update: materializeNextDelegation({
@@ -232,8 +186,6 @@ function createDefaultPlannerRunner(config: OrchestratorConfig): CapabilityPlann
 export function createCapabilityPlannerNode(config: OrchestratorConfig) {
   const runner = config.capabilityPlannerRunner
     ?? createDefaultPlannerRunner(config);
-  const workspaceRoot = config.capabilityPlannerWorkspaceRoot
-    ?? DEFAULT_CAPABILITY_PLANNER_WORKSPACE_ROOT;
 
   return async function capabilityPlannerNode(
     state: OrchestratorStateType,
@@ -244,7 +196,7 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
       getInvokeOptions(runnableConfig).allowedCapabilityNames;
     const workspace = await materializeCapabilityDocumentWorkspace({
       registry,
-      cacheRoot: workspaceRoot,
+      cacheRoot: DEFAULT_CAPABILITY_PLANNER_WORKSPACE_ROOT,
       ...(allowedCapabilityNames ? { allowedCapabilityNames } : {}),
     });
     const mode = buildPlannerMode(state);

@@ -7,7 +7,6 @@ import {
   toolStrategy,
   type TypedToolStrategy,
 } from 'langchain';
-import { emitRuntimeEventToStreamWriter } from '../../utils/streamWriterEvents';
 import { createCapabilityPlannerFileExplorer } from './capabilityPlannerFileExplorer';
 import type { CapabilityRegistryBackend } from './capabilityRegistryDocuments';
 import {
@@ -19,8 +18,6 @@ import type {
   CapabilityPlannerResult,
   CapabilityPlannerRunner,
 } from './capabilityPlannerRunner';
-
-export const CAPABILITY_PLANNER_RUNTIME_EVENT = 'capability_planner_agent';
 
 const DEFAULT_MAX_MODEL_ITERATIONS = 12;
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -179,14 +176,6 @@ function mergePlannerSignal(
   };
 }
 
-function emitPlannerEvent(data: unknown) {
-  emitRuntimeEventToStreamWriter({
-    event: 'on_runtime_event',
-    name: CAPABILITY_PLANNER_RUNTIME_EVENT,
-    data,
-  });
-}
-
 function assertPositiveInteger(value: number, label: string) {
   if (!Number.isSafeInteger(value) || value <= 0) {
     throw new Error(`${label} must be a positive integer`);
@@ -248,14 +237,6 @@ async function invokePlannerAgent(params: {
     signal: timeout.signal,
   });
 
-  emitPlannerEvent({
-    phase: 'start',
-    mode: params.input.mode,
-    registryDigest: params.input.workspace.registryDigest,
-    documentCount: params.input.workspace.entries.length,
-    maxIterations: params.maxIterations,
-  });
-
   try {
     timeout.signal.throwIfAborted();
     const result = await agent.invoke(
@@ -293,15 +274,6 @@ async function invokePlannerAgent(params: {
       );
     }
 
-    emitPlannerEvent({
-      phase: 'complete',
-      mode: params.input.mode,
-      registryDigest: params.input.workspace.registryDigest,
-      result: 'tasks' in structuredResponse ? 'plan' : 'unavailable',
-      capabilityName: 'tasks' in structuredResponse
-        ? structuredResponse.tasks[0]?.capability ?? null
-        : null,
-    });
     return structuredResponse;
   } catch (error) {
     const middlewareCause = error instanceof Error
@@ -314,14 +286,6 @@ async function invokePlannerAgent(params: {
           `Capability Planner exceeded its ${String(params.timeoutMs)}ms timeout.`,
         )
       : middlewareCause ?? error;
-    emitPlannerEvent({
-      phase: 'error',
-      mode: params.input.mode,
-      registryDigest: params.input.workspace.registryDigest,
-      errorCode: plannerError instanceof CapabilityPlannerAgentError
-        ? plannerError.code
-        : 'planner_failed',
-    });
     throw plannerError;
   } finally {
     timeout.dispose();

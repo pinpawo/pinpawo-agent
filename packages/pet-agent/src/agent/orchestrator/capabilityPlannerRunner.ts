@@ -16,14 +16,9 @@ export type CapabilityPlannerInput = CapabilityPlannerInputBase & {
   readonly mode: CapabilityPlannerMode;
 };
 
-export type CapabilityPlannerTask = {
-  readonly capability: string;
-  readonly task: string;
-};
-
 export type CapabilityPlannerResult =
   | {
-      readonly tasks: readonly CapabilityPlannerTask[];
+      readonly tasks: readonly CapabilityPlanTask[];
     }
   | {
       readonly task: string;

@@ -41,7 +41,6 @@ export function buildCapabilityPlannerAgentSystemPrompt(
 
 export function buildCapabilityPlannerAgentInput(input: CapabilityPlannerInput) {
   return CAPABILITY_PLANNER_AGENT_INPUT_PROMPT.render({
-    mode: input.mode,
     completedTaskBlock: promptBlock(
       buildCompletedTaskBlock(input.completedTask),
       2,

@@ -84,7 +84,7 @@ test('Capability Planner planning state excludes main-conversation content', () 
     }],
   } satisfies CapabilityPlannerInput);
 
-  assert.match(input, /^<planning_state mode="boundary">/);
+  assert.match(input, /^<planning_state>/);
   assert.doesNotMatch(input, /<workspace|registry_digest|document_count/);
   assert.doesNotMatch(input, /打开小红书|user_request|recent_messages/);
   assert.match(input, /<completed_task>\n\s*<!\[CDATA\[\n确认浏览器可用/);

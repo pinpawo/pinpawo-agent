@@ -16,7 +16,6 @@ export type {
   CapabilityPlannerMode,
   CapabilityPlannerResult,
   CapabilityPlannerRunner,
-  CapabilityPlannerTask,
 } from './orchestrator/capabilityPlannerRunner';
 export { buildOrchestratorRunInput, buildOrchestratorTurnInput } from './orchestrator/state';
 export { validateUniqueCapabilityNames, validateUniqueToolkitNames } from './orchestrator/validation';

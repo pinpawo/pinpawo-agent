@@ -113,11 +113,6 @@ export type OrchestratorConfig = {
    */
   capabilityPlannerRunner?: CapabilityPlannerRunner;
   /**
-   * Absolute cache root for immutable Capability Document Workspaces.
-   * Defaults to a process-independent directory under the OS temp root.
-   */
-  capabilityPlannerWorkspaceRoot?: string;
-  /**
    * Storage/search backend for the immutable Capability registry documents.
    * Defaults to filesystem. Memory is opt-in and never used as an automatic fallback.
    */

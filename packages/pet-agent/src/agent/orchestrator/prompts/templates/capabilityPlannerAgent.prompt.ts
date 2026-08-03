@@ -36,13 +36,11 @@ planning_state 提供已完成任务和此前保留的 remaining_plan，作为�
 将仍需执行的 tasks 按顺序提交为 plan。不生成面向用户的回答。`, []);
 
 export const CAPABILITY_PLANNER_AGENT_INPUT_PROMPT = definePromptTemplate<{
-  mode: string;
   completedTaskBlock: string;
   remainingPlanBlock: string;
-}>(`<planning_state mode="{mode}">
+}>(`<planning_state>
 {completedTaskBlock}{remainingPlanBlock}
 </planning_state>`, [
-  'mode',
   'completedTaskBlock',
   'remainingPlanBlock',
 ]);

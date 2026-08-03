@@ -36,7 +36,6 @@ const DEFAULT_CAPABILITY_PLANNER_WORKSPACE_ROOT = join(
   tmpdir(),
   'pinpawo-capability-workspaces',
 );
-
 function buildPlannerMode(state: OrchestratorStateType): CapabilityPlannerInput['mode'] {
   return state.runDelegationSummaries.length === 0
     ? 'entry'
@@ -44,8 +43,6 @@ function buildPlannerMode(state: OrchestratorStateType): CapabilityPlannerInput[
 }
 
 function buildPlannerMessages(messages: BaseMessage[]) {
-  // Planner policy comes only from its own system prompt. Main Human/AI turns
-  // remain verbatim; framework compaction is retained as lower-authority evidence.
   const projectedMessages = mainConversationMessages(messages).flatMap((message) => {
     const type = message._getType();
     if (type === 'human' || type === 'ai') return [message];
@@ -228,6 +225,7 @@ function buildPlannerTransition(params: {
 function createDefaultPlannerRunner(config: OrchestratorConfig): CapabilityPlannerRunner {
   return createCapabilityPlannerAgent({
     model: config.models.act,
+    registryBackend: config.capabilityRegistryBackend ?? 'filesystem',
   });
 }
 

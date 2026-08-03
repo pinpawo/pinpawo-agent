@@ -18,7 +18,6 @@ import {
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { StructuredTool } from '@langchain/core/tools';
 import {
-  CAPABILITY_PLANNER_GLOB_SEARCH_TOOL_NAME,
   CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
   CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
 } from './capabilityPlannerFileExplorer';
@@ -316,16 +315,16 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
   const model = new ScriptedPlannerModel([
     {
       toolCalls: [{
-        id: 'glob',
-        name: CAPABILITY_PLANNER_GLOB_SEARCH_TOOL_NAME,
-        args: {},
+        id: 'grep',
+        name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+        args: { query: 'research' },
       }],
     },
     {
       toolCalls: [{
-        id: 'grep',
-        name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-        args: { query: 'Research', path: 'explore/CAPABILITY.md' },
+        id: 'view',
+        name: CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
+        args: { path: 'explore/CAPABILITY.md' },
       }],
     },
     {
@@ -341,8 +340,7 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
     maxIterations: 5,
   }).invoke(plannerInput(workspace));
 
-  assert.deepEqual(model.boundToolNames.slice(0, 3), [
-    CAPABILITY_PLANNER_GLOB_SEARCH_TOOL_NAME,
+  assert.deepEqual(model.boundToolNames.slice(0, 2), [
     CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
     CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
   ]);
@@ -357,6 +355,9 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
     (options) => options.parallel_tool_calls === false,
   ));
   assert.equal(model.invocations.length, 3);
+  assert.equal(model.invocations.flat().some((message) =>
+    message._getType() === 'system'
+    && String(message.content).includes(workspace.rootPath)), false);
   assert.ok(model.invocations[0]?.some((message) =>
     message instanceof HumanMessage
     && message.content === 'Research the repository and then prepare a review.'));
@@ -561,7 +562,7 @@ test('boundary mode rejects answer and materializes remaining work with general'
     && message.tool_call_id === 'structured-1'));
 });
 
-test('document observation exhaustion is reported as planning_limit_reached, not unavailable', async (t) => {
+test('document read exhaustion is reported as planning_limit_reached, not unavailable', async (t) => {
   const workspace = await createWorkspace(t, {
     explore: capabilityDocument({
       name: 'explore',
@@ -571,16 +572,16 @@ test('document observation exhaustion is reported as planning_limit_reached, not
   });
   const model = new ScriptedPlannerModel([{
     toolCalls: [{
-      id: 'glob',
-      name: CAPABILITY_PLANNER_GLOB_SEARCH_TOOL_NAME,
-      args: {},
+      id: 'view',
+      name: CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
+      args: { path: 'explore/CAPABILITY.md' },
     }],
   }]);
 
   await assert.rejects(
     createCapabilityPlannerAgent({
       model,
-      maxObservationBytes: 1,
+      maxDocumentReadBytes: 1,
     }).invoke(plannerInput(workspace)),
     (error: unknown) =>
       error instanceof CapabilityPlannerAgentError
@@ -593,16 +594,16 @@ test('model iteration exhaustion is an explicit planning limit', async (t) => {
   const model = new ScriptedPlannerModel([
     {
       toolCalls: [{
-        id: 'glob-1',
-        name: CAPABILITY_PLANNER_GLOB_SEARCH_TOOL_NAME,
-        args: {},
+        id: 'grep-1',
+        name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+        args: { query: 'general' },
       }],
     },
     {
       toolCalls: [{
-        id: 'glob-2',
-        name: CAPABILITY_PLANNER_GLOB_SEARCH_TOOL_NAME,
-        args: {},
+        id: 'grep-2',
+        name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+        args: { query: 'general' },
       }],
     },
   ]);

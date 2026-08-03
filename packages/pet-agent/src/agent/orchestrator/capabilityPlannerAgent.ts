@@ -9,6 +9,7 @@ import {
 } from 'langchain';
 import { emitRuntimeEventToStreamWriter } from '../../utils/streamWriterEvents';
 import { createCapabilityPlannerFileExplorer } from './capabilityPlannerFileExplorer';
+import type { CapabilityRegistryBackend } from './capabilityRegistryDocuments';
 import {
   buildCapabilityPlannerAgentInput,
   buildCapabilityPlannerAgentSystemPrompt,
@@ -219,13 +220,15 @@ async function invokePlannerAgent(params: {
   model: BaseChatModel;
   maxIterations: number;
   timeoutMs: number;
-  maxObservationBytes?: number;
+  registryBackend: CapabilityRegistryBackend;
+  maxDocumentReadBytes?: number;
   runnableConfig?: RunnableConfig;
 }): Promise<CapabilityPlannerResult> {
   const explorer = createCapabilityPlannerFileExplorer({
     workspace: params.input.workspace,
-    ...(params.maxObservationBytes
-      ? { maxObservationBytes: params.maxObservationBytes }
+    registryBackend: params.registryBackend,
+    ...(params.maxDocumentReadBytes
+      ? { maxDocumentReadBytes: params.maxDocumentReadBytes }
       : {}),
   });
   const agent = createAgent({
@@ -251,8 +254,6 @@ async function invokePlannerAgent(params: {
     registryDigest: params.input.workspace.registryDigest,
     documentCount: params.input.workspace.entries.length,
     maxIterations: params.maxIterations,
-    maxObservationBytes:
-      explorer.getObservationBudget().maxDocumentBytes,
   });
 
   try {
@@ -280,10 +281,10 @@ async function invokePlannerAgent(params: {
 
     const structuredResponse = result.structuredResponse;
     if (!structuredResponse) {
-      if (explorer.hasReachedObservationLimit()) {
+      if (explorer.didReachDocumentReadLimit()) {
         throw new CapabilityPlannerAgentError(
           'planning_limit_reached',
-          'Capability Planner document observation budget was reached before a valid submission.',
+          'Capability Planner document read limit was reached before a valid submission.',
         );
       }
       throw new CapabilityPlannerAgentError(
@@ -296,7 +297,6 @@ async function invokePlannerAgent(params: {
       phase: 'complete',
       mode: params.input.mode,
       registryDigest: params.input.workspace.registryDigest,
-      observationBudget: explorer.getObservationBudget(),
       result: 'tasks' in structuredResponse ? 'plan' : 'unavailable',
       capabilityName: 'tasks' in structuredResponse
         ? structuredResponse.tasks[0]?.capability ?? null
@@ -318,7 +318,6 @@ async function invokePlannerAgent(params: {
       phase: 'error',
       mode: params.input.mode,
       registryDigest: params.input.workspace.registryDigest,
-      observationBudget: explorer.getObservationBudget(),
       errorCode: plannerError instanceof CapabilityPlannerAgentError
         ? plannerError.code
         : 'planner_failed',
@@ -333,16 +332,17 @@ export function createCapabilityPlannerAgent(params: {
   model: BaseChatModel;
   maxIterations?: number;
   timeoutMs?: number;
-  maxObservationBytes?: number;
+  registryBackend?: CapabilityRegistryBackend;
+  maxDocumentReadBytes?: number;
 }): CapabilityPlannerRunner {
   const maxIterations = params.maxIterations ?? DEFAULT_MAX_MODEL_ITERATIONS;
   const timeoutMs = params.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   assertPositiveInteger(maxIterations, 'Capability Planner maxIterations');
   assertPositiveInteger(timeoutMs, 'Capability Planner timeoutMs');
-  if (params.maxObservationBytes !== undefined) {
+  if (params.maxDocumentReadBytes !== undefined) {
     assertPositiveInteger(
-      params.maxObservationBytes,
-      'Capability Planner maxObservationBytes',
+      params.maxDocumentReadBytes,
+      'Capability Planner maxDocumentReadBytes',
     );
   }
 
@@ -355,8 +355,9 @@ export function createCapabilityPlannerAgent(params: {
       model: params.model,
       maxIterations,
       timeoutMs,
-      ...(params.maxObservationBytes
-        ? { maxObservationBytes: params.maxObservationBytes }
+      registryBackend: params.registryBackend ?? 'filesystem',
+      ...(params.maxDocumentReadBytes
+        ? { maxDocumentReadBytes: params.maxDocumentReadBytes }
         : {}),
       runnableConfig,
     }),

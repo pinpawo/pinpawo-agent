@@ -1,4 +1,10 @@
 export type {
+  CapabilityRegistryBackend,
+} from './orchestrator/capabilityRegistryDocuments';
+export {
+  CAPABILITY_REGISTRY_BACKEND,
+} from './orchestrator/capabilityRegistryDocuments';
+export type {
   ActiveDelegationTransition,
   OrchestratorConfig,
   OrchestratorInvokeOptions,

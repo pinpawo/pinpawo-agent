@@ -101,6 +101,7 @@ export {
 export {
   buildOrchestratorRunInput,
   buildOrchestratorTurnInput,
+  CAPABILITY_REGISTRY_BACKEND,
   createOrchestratorGraph,
   DEFAULT_ORCHESTRATOR_MAX_ITERATIONS,
   isOrchestratorInternalAiStreamNode,
@@ -119,6 +120,7 @@ export type {
   CapabilityPlannerTask,
   CapabilityPlannerResult,
   CapabilityPlannerRunner,
+  CapabilityRegistryBackend,
   CompiledAgentRegistry,
   ExecutorCompilationIssue,
 } from './agent/createAgentRuntime';

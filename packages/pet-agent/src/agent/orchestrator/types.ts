@@ -9,6 +9,7 @@ import type { SubagentCompletionReason } from '../../types/subagent';
 import type { AgentToolkit, ToolkitReviewCapabilities } from '../../types/toolkit';
 import type { CompiledAgentRegistry } from './registry';
 import type { CapabilityPlannerRunner } from './capabilityPlannerRunner';
+import type { CapabilityRegistryBackend } from './capabilityRegistryDocuments';
 import type { GlobalReviewPolicy } from './review/globalReviewPolicy';
 import type { StructuredOutputAutoRepairConfig, StructuredOutputMethod } from '../../utils/structuredOutput';
 import type { DelegationOutcomeDecision } from './schemas';
@@ -116,6 +117,11 @@ export type OrchestratorConfig = {
    * Defaults to a process-independent directory under the OS temp root.
    */
   capabilityPlannerWorkspaceRoot?: string;
+  /**
+   * Storage/search backend for the immutable Capability registry documents.
+   * Defaults to filesystem. Memory is opt-in and never used as an automatic fallback.
+   */
+  capabilityRegistryBackend?: CapabilityRegistryBackend;
 };
 
 export type OrchestratorInvokeOptions = {

@@ -22,6 +22,11 @@
 - Keep runtime-independent agent logic in `packages/pet-agent/`.
 - Keep local machine, CLI, browser, and desktop integration in `services/local-agent/` or `tools/agent-macos/`.
 
+## Testing
+
+- Do not add tests that only compare prompt prose with literal strings or regular expressions. Prompt wording is not a stable unit-test contract.
+- Test prompt-related changes through observable behavior, structured schemas, dynamic data boundaries, or dedicated model evaluations instead.
+
 ## Wiki Ingest
 
 - Do not modify `docs/wiki/` or `docs/log.md` unless the user explicitly asks to ingest.

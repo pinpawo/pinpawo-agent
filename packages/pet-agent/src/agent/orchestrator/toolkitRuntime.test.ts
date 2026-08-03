@@ -5,11 +5,13 @@ import { z } from 'zod';
 import { defineToolkit, type AgentToolkit } from '../../types/toolkit';
 import { ToolkitRuntimeManager } from './toolkitRuntime';
 
-function createTool(name: string, value: string) {
+function createTool(name: string, value: string, withInput = false) {
   return tool(async () => value, {
     name,
     description: name,
-    schema: z.object({}),
+    schema: withInput
+      ? z.object({ input: z.string() })
+      : z.object({}),
   });
 }
 
@@ -18,6 +20,7 @@ function createRuntimeToolkit(params: {
   events: string[];
   failResolve?: boolean;
   bindToolName?: string;
+  changeBoundSchema?: boolean;
   startBarrier?: Promise<void>;
   onStart?: () => void;
 }): AgentToolkit {
@@ -43,6 +46,7 @@ function createRuntimeToolkit(params: {
         return [createTool(
           params.bindToolName ?? staticTool.name,
           `bound:${(binding as { delegationId: string }).delegationId}`,
+          params.changeBoundSchema,
         )];
       },
       async release(binding) {
@@ -127,6 +131,77 @@ test('ToolkitRuntimeManager does not start one root twice for concurrent subagen
   await manager.stop();
 });
 
+test('ToolkitRuntimeManager shares one release between shutdown and the execution handle', async () => {
+  const events: string[] = [];
+  const toolkit = createRuntimeToolkit({ events });
+  const manager = new ToolkitRuntimeManager();
+  const active = await manager.resolve({
+    toolkits: [toolkit],
+    execution: execution('delegation-a'),
+  });
+
+  await manager.stop();
+  await active.release();
+
+  assert.equal(
+    events.filter((event) => event === 'release:runtime_toolkit:delegation-a').length,
+    1,
+  );
+});
+
+test('ToolkitRuntimeManager waits for an in-flight resolve before stopping roots', async () => {
+  const events: string[] = [];
+  let observeResolve: (() => void) | undefined;
+  const resolveStarted = new Promise<void>((resolve) => {
+    observeResolve = resolve;
+  });
+  let finishResolve: (() => void) | undefined;
+  const resolveBarrier = new Promise<void>((resolve) => {
+    finishResolve = resolve;
+  });
+  const staticTool = createTool('wait_tool', 'static');
+  const toolkit = defineToolkit({
+    name: 'wait_runtime',
+    description: 'wait runtime',
+    tools: [{ tool: staticTool }],
+    runtime: {
+      start: () => {
+        events.push('start');
+        return {};
+      },
+      resolve: async () => {
+        events.push('resolve:start');
+        observeResolve?.();
+        await resolveBarrier;
+        events.push('resolve:end');
+        return {};
+      },
+      bindTools: () => [createTool('wait_tool', 'bound')],
+      release: () => {
+        events.push('release');
+      },
+      stop: () => {
+        events.push('stop');
+      },
+    },
+  });
+  const manager = new ToolkitRuntimeManager();
+
+  const resolving = manager.resolve({
+    toolkits: [toolkit],
+    execution: execution('delegation-a'),
+  });
+  await resolveStarted;
+  const stopping = manager.stop();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.deepEqual(events, ['start', 'resolve:start']);
+  finishResolve?.();
+
+  await assert.rejects(resolving, /stopped during execution binding resolution/);
+  await stopping;
+  assert.deepEqual(events, ['start', 'resolve:start', 'resolve:end', 'release', 'stop']);
+});
+
 test('ToolkitRuntimeManager rolls back resolved bindings in reverse order', async () => {
   const events: string[] = [];
   const first = createRuntimeToolkit({ name: 'first', events });
@@ -160,5 +235,29 @@ test('ToolkitRuntimeManager rejects a runtime that changes a static tool name', 
     manager.resolve({ toolkits: [toolkit], execution: execution('delegation-a') }),
     /changed tool/,
   );
+  await manager.stop();
+});
+
+test('ToolkitRuntimeManager preserves the static tool contract while binding execution', async () => {
+  const manager = new ToolkitRuntimeManager();
+  const toolkit = createRuntimeToolkit({
+    events: [],
+    changeBoundSchema: true,
+  });
+
+  const runtimeExecution = await manager.resolve({
+    toolkits: [toolkit],
+    execution: execution('delegation-a'),
+  });
+  const staticTool = toolkit.tools[0]?.tool;
+  const executableTool = runtimeExecution.toolkits[0]?.tools[0]?.tool;
+  assert.ok(staticTool);
+  assert.ok(executableTool);
+  assert.equal(executableTool.schema, staticTool.schema);
+  assert.equal(executableTool.description, staticTool.description);
+  assert.equal(executableTool.responseFormat, staticTool.responseFormat);
+  assert.equal(await executableTool.invoke({}), 'bound:delegation-a');
+
+  await runtimeExecution.release();
   await manager.stop();
 });

@@ -22,6 +22,11 @@ type ResolvedToolkitBinding = {
   context: ToolkitRuntimeResolveContext;
 };
 
+type ActiveToolkitRuntimeExecution = {
+  bindings: ResolvedToolkitBinding[];
+  releasePromise: Promise<void> | null;
+};
+
 export type ToolkitRuntimeExecution = {
   /**
    * The same static Toolkit inventory, with executable Tool instances bound to
@@ -33,6 +38,31 @@ export type ToolkitRuntimeExecution = {
 
 function describeError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function bindToolImplementation(params: {
+  staticTool: NamedStructuredTool;
+  boundTool: NamedStructuredTool;
+}): NamedStructuredTool {
+  const boundCall = Reflect.get(
+    params.boundTool as object,
+    '_call',
+    params.boundTool,
+  );
+  if (typeof boundCall !== 'function') {
+    throw new Error(
+      `Bound tool "${params.staticTool.name}" does not expose a StructuredTool execution implementation.`,
+    );
+  }
+  // Keep the complete static Tool object as the public/model-visible contract.
+  // StructuredTool.invoke() validates against that object's schema and then
+  // dispatches through `_call`; only that implementation hook is replaced.
+  return new Proxy(params.staticTool, {
+    get(target, property, receiver) {
+      if (property === '_call') return boundCall.bind(params.boundTool);
+      return Reflect.get(target, property, receiver);
+    },
+  });
 }
 
 function assertSameRuntime(
@@ -69,11 +99,15 @@ function bindToolkitTools(params: {
         `Toolkit runtime "${toolkit.name}" changed tool "${definition.tool.name}" while binding one execution.`,
       );
     }
+    const executableTool = bindToolImplementation({
+      staticTool: definition.tool,
+      boundTool,
+    });
     // Operation metadata and review policy remain owned by the static Toolkit
     // contract; a runtime may only swap the executable implementation.
     return Object.freeze({
       ...definition,
-      tool: boundTool,
+      tool: executableTool,
     });
   });
 
@@ -92,12 +126,15 @@ function bindToolkitTools(params: {
 export class ToolkitRuntimeManager {
   private readonly roots = new Map<string, StartedToolkitRuntime>();
   private readonly startOrder: string[] = [];
-  private readonly activeExecutions = new Set<ResolvedToolkitBinding[]>();
+  private readonly activeExecutions = new Set<ActiveToolkitRuntimeExecution>();
+  private readonly pendingResolutions = new Set<Promise<void>>();
   /** Serializes root lifecycle transitions so concurrent subagents cannot
    * start the same runtime twice. Execution binding itself remains concurrent.
    */
   private lifecycleTail: Promise<void> = Promise.resolve();
+  private stopping = false;
   private stopped = false;
+  private stopPromise: Promise<void> | null = null;
 
   async start(
     toolkits: readonly AgentToolkit[],
@@ -110,8 +147,8 @@ export class ToolkitRuntimeManager {
     toolkits: readonly AgentToolkit[],
     context: ToolkitRuntimeStartContext,
   ): Promise<void> {
-    if (this.stopped) {
-      throw new Error('Toolkit runtime manager has already stopped.');
+    if (this.stopping || this.stopped) {
+      throw new Error('Toolkit runtime manager is stopping or has already stopped.');
     }
 
     const startedNow: string[] = [];
@@ -142,11 +179,21 @@ export class ToolkitRuntimeManager {
     toolkits: readonly AgentToolkit[];
     execution: ToolkitRuntimeExecutionScope;
   }): Promise<ToolkitRuntimeExecution> {
+    if (this.stopping || this.stopped) {
+      throw new Error('Toolkit runtime manager is stopping or has already stopped.');
+    }
+    let finishPendingResolution!: () => void;
+    const pendingResolution = new Promise<void>((resolve) => {
+      finishPendingResolution = resolve;
+    });
+    this.pendingResolutions.add(pendingResolution);
     const context: ToolkitRuntimeResolveContext = { execution: params.execution };
-    await this.start(params.toolkits, { signal: params.execution.signal });
-
     const bindings: ResolvedToolkitBinding[] = [];
     try {
+      await this.start(params.toolkits, { signal: params.execution.signal });
+      if (this.stopping || this.stopped) {
+        throw new Error('Toolkit runtime manager stopped during execution binding resolution.');
+      }
       const toolkits: AgentToolkit[] = [];
       for (const toolkit of params.toolkits) {
         const runtime = toolkit.runtime;
@@ -171,25 +218,32 @@ export class ToolkitRuntimeManager {
           : toolkit);
       }
 
-      this.activeExecutions.add(bindings);
-      let released = false;
+      if (this.stopping || this.stopped) {
+        throw new Error('Toolkit runtime manager stopped during execution binding resolution.');
+      }
+      const execution: ActiveToolkitRuntimeExecution = {
+        bindings,
+        releasePromise: null,
+      };
+      this.activeExecutions.add(execution);
       return Object.freeze({
         toolkits: Object.freeze(toolkits),
-        release: async () => {
-          if (released) return;
-          released = true;
-          this.activeExecutions.delete(bindings);
-          await this.releaseBindings(bindings);
-        },
+        release: async () => await this.releaseExecution(execution),
       });
     } catch (error) {
       await this.releaseBindings(bindings).catch(() => undefined);
       throw new Error(`Toolkit runtime resolution failed: ${describeError(error)}`);
+    } finally {
+      this.pendingResolutions.delete(pendingResolution);
+      finishPendingResolution();
     }
   }
 
-  async stop(context: ToolkitRuntimeStopContext = {}): Promise<void> {
-    return this.queueLifecycle(() => this.stopRootsAndBindings(context));
+  stop(context: ToolkitRuntimeStopContext = {}): Promise<void> {
+    if (this.stopPromise) return this.stopPromise;
+    this.stopping = true;
+    this.stopPromise = this.queueLifecycle(() => this.stopRootsAndBindings(context));
+    return this.stopPromise;
   }
 
   private async stopRootsAndBindings(context: ToolkitRuntimeStopContext): Promise<void> {
@@ -197,10 +251,10 @@ export class ToolkitRuntimeManager {
     this.stopped = true;
 
     const errors: unknown[] = [];
-    for (const bindings of [...this.activeExecutions]) {
-      this.activeExecutions.delete(bindings);
+    await Promise.all([...this.pendingResolutions]);
+    for (const execution of [...this.activeExecutions]) {
       try {
-        await this.releaseBindings(bindings);
+        await this.releaseExecution(execution);
       } catch (error) {
         errors.push(error);
       }
@@ -222,6 +276,17 @@ export class ToolkitRuntimeManager {
       () => undefined,
     );
     return queued;
+  }
+
+  private releaseExecution(execution: ActiveToolkitRuntimeExecution): Promise<void> {
+    if (execution.releasePromise) return execution.releasePromise;
+    const releasePromise = this.releaseBindings(execution.bindings);
+    execution.releasePromise = releasePromise;
+    releasePromise.then(
+      () => this.activeExecutions.delete(execution),
+      () => this.activeExecutions.delete(execution),
+    );
+    return releasePromise;
   }
 
   private async releaseBindings(bindings: readonly ResolvedToolkitBinding[]): Promise<void> {

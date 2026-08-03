@@ -1818,8 +1818,12 @@ test('capability receives tools only from Toolkits authorized by fixed uses', as
   });
 
   assert.deepEqual(capabilityToolNames, ['read_file']);
-  assert.equal(capabilityTools[0], boundReadFile);
   assert.notEqual(capabilityTools[0], staticReadFile);
+  assert.notEqual(capabilityTools[0], boundReadFile);
+  assert.equal(
+    (capabilityTools[0] as StructuredTool | undefined)?.schema,
+    staticReadFile.schema,
+  );
   assert.equal(runtimeEvents[0], 'start');
   assert.match(runtimeEvents[1] ?? '', /^resolve:/);
   assert.equal(runtimeEvents[2], 'release');

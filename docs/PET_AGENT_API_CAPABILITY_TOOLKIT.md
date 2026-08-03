@@ -196,9 +196,10 @@ subagent 结束（成功、失败或取消）后逆序 release。host 关闭时�
 binding，再逆序 stop root。并发 subagent 可以同时 resolve，但同一个 root 只会
 启动一次。
 
-`bindTools` 只能替换当前执行实际调用的 Tool 实例；框架会验证工具数量和名称与
-静态 inventory 相同，并保留 `operation`、`review`、权限与 instructions。因此
-runtime 数据不会进入 registry、planner workspace、prompt 或 checkpoint。
+`bindTools` 只能提供当前执行的 Tool implementation；框架会验证工具数量和名称与
+静态 inventory 相同，并继续使用静态 Tool 的 schema、description、response
+format，以及静态 `operation`、`review`、权限与 instructions。runtime 数据不会
+进入 registry、planner workspace、prompt 或 checkpoint。
 
 `ToolkitRuntimeManager` 是 host-owned：长期 local-agent 在进程启动/关闭时调用
 它；独立 `createPetAgentRuntime()` 创建的私有 manager 可通过其 `shutdown()`
@@ -212,6 +213,7 @@ runtime 终止。
 
 ```text
 Toolkit definitions
+  -> start optional root runtimes
   -> evaluate/filter availability for this generation
   -> compileAgentRegistry(effective Toolkits, Capabilities)
 ```

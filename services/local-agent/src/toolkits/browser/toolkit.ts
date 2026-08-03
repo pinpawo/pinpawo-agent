@@ -160,7 +160,10 @@ export function createBrowserToolkit(): AgentToolkit {
           listSessions: () => browser.session.listSessions(),
         });
       },
-      release: async () => undefined,
+      release: async (binding) => {
+        const browser = binding as BrowserRuntimeBinding;
+        await browser.session.release(browser.owner);
+      },
       stop: async () => await browserRuntime.stop(),
     },
     instructions: browserToolkitInstructions.join('\n'),

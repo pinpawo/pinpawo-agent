@@ -22,6 +22,32 @@ test('same delegation can reuse its browser ownership', async () => {
   assert.equal(await ownership.runOwned({ ...delegation }, async () => 'snapshot'), 'snapshot');
 });
 
+test('release drops active ownership and only the same execution can resume it', async () => {
+  const ownership = new BrowserContextOwnership();
+  const first = owner('delegation-1');
+  const second = owner('delegation-2');
+
+  await ownership.runOpen(first, async () => 'opened');
+  await ownership.release(first);
+  await assert.rejects(
+    ownership.runOwned(first, async () => 'snapshot'),
+    (error: unknown) => error instanceof Error
+      && 'code' in error
+      && error.code === 'browser_not_open',
+  );
+
+  await ownership.acquire(second);
+  await assert.rejects(
+    ownership.runOwned(second, async () => 'foreign snapshot'),
+    (error: unknown) => error instanceof Error
+      && 'code' in error
+      && error.code === 'browser_not_open',
+  );
+
+  await ownership.acquire({ ...first });
+  assert.equal(await ownership.runOwned(first, async () => 'resumed'), 'resumed');
+});
+
 test('another delegation must explicitly open before using the browser', async () => {
   const ownership = new BrowserContextOwnership();
   const first = owner('delegation-1');

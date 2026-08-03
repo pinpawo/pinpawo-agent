@@ -124,8 +124,8 @@ class BrowserRuntime {
     }
   }
 
-  resolve(execution: ToolkitRuntimeExecutionScope): BrowserRuntimeBinding {
-    return Object.freeze({
+  async resolve(execution: ToolkitRuntimeExecutionScope): Promise<BrowserRuntimeBinding> {
+    const binding = Object.freeze({
       session: this.session,
       owner: {
         threadId: execution.threadId,
@@ -133,6 +133,8 @@ class BrowserRuntime {
         delegationId: execution.delegationId,
       },
     });
+    await this.session.acquire(binding.owner);
+    return binding;
   }
 
   getSnapshot(): BrowserRuntimeSnapshot {

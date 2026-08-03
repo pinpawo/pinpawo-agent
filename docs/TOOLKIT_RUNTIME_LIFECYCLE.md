@@ -39,19 +39,23 @@ host shutdown
 Root starts are serialized: concurrent subagents cannot start the same Toolkit
 twice. Binding resolution remains concurrent and must be isolated by the Toolkit.
 On a partial start or resolve failure, already-created resources are rolled back
-in reverse order.
+in reverse order. Shutdown marks the manager as stopping before it waits for
+in-flight resolutions; each execution owns one shared release promise, so its
+normal finally path and host shutdown cannot invoke release twice.
 
 ## 静态与动态边界
 
 `AgentToolkit` 中的 tools、`operation` metadata、review policy、authorization、
-instructions、availability 和 Capability 的 `uses` 均是静态契约。`bindTools` 仅可
-替换同名、同数量的可执行 Tool；管理器拒绝更名、增删或非 StructuredTool 的返回值。
-因此 planner、checkpoint、registry 与 review 决策永远引用静态契约，不携带运行时
-binding。
+instructions、availability 和 Capability 的 `uses` 均是静态契约。`bindTools` 仅为
+同名、同数量的 Tool 提供 execution implementation；管理器保留原始 Tool 对象的
+schema、description、response format 等公开契约，只把底层 `_call` 分派给 bound
+implementation。管理器拒绝更名、增删或非 StructuredTool 的返回值。因此 planner、
+checkpoint、registry 与 review 决策永远引用静态契约，不携带 runtime binding。
 
 Browser 的 binding 仅把同一个 `BrowserSession` 封装为带 execution owner 的闭包。
-它保留 Browser Toolkit 的既有 ownership/origin/review 策略；通用 manager 不接触
-这些 provider 细节。
+release 会在 Browser 自己的串行队列中撤销 active owner；保留的页面只能由相同
+thread/run/delegation scope 在下一次 resolve 时恢复，其他 execution 仍需显式
+`browser_open`。通用 manager 不接触这些 ownership/origin/review 细节。
 
 ## 宿主责任
 

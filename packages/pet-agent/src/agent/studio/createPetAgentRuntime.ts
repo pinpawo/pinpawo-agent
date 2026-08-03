@@ -181,8 +181,8 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
       ...(input.toolkits ?? []),
       ...(input.wikiRoot ? [createWikiReadToolkit(input.wikiRoot)] : []),
     ];
+    await toolkitRuntimeManager?.start(toolkitDefinitions, { signal: input.signal });
     const toolkits = await filterAvailableToolkits(toolkitDefinitions);
-    await toolkitRuntimeManager?.start(toolkits, { signal: input.signal });
     const configuredCapabilities = [
       ...(config.capabilities ?? []),
       ...(input.extraCapabilities ?? []),

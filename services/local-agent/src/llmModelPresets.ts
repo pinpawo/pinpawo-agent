@@ -1,4 +1,5 @@
 import type { StructuredOutputMethod } from '@pinpawo/pet-agent';
+import type { LocalToolResultImageMode } from './agentConfig';
 import type { ModelInputModality } from './modelProfiles';
 
 export type LlmThinkingControl =
@@ -28,8 +29,10 @@ export type LlmModelPreset = {
    * support from a model name.
    */
   inputModalities: readonly ModelInputModality[];
-  /** The configured provider transport accepts image content in tool results. */
-  supportsImageToolResults?: true;
+  /** Select the OpenAI Responses transport independently of image capability. */
+  useResponsesApi?: true;
+  /** Projection used for image attachments returned by tools. */
+  toolResultImageMode?: LocalToolResultImageMode;
   thinkingControl?: LlmThinkingControl;
   /** Tool selection modes accepted while the preset's thinking mode is active. */
   toolChoiceSupport?: LlmToolChoiceSupport;
@@ -49,7 +52,8 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     maxOutputTokens: 128_000,
     structuredOutputMethod: 'jsonSchema',
     inputModalities: ['text', 'image'],
-    supportsImageToolResults: true,
+    useResponsesApi: true,
+    toolResultImageMode: 'native',
     thinkingControl: 'none',
     aliases: [
       'gpt-5.5',
@@ -169,7 +173,7 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     baseUrl: 'https://api.kimi.com/coding/v1',
     contextWindowTokens: 1_048_576,
     structuredOutputMethod: 'jsonSchema',
-    inputModalities: ['text'],
+    inputModalities: ['text', 'image'],
     thinkingControl: 'always_enabled',
     aliases: [
       'k3',

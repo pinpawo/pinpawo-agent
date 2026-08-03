@@ -79,13 +79,13 @@ class FailingSummaryModel extends BaseChatModel {
 
 test('subagent token estimates include image content blocks', () => {
   const textOnly = new ToolMessage({
-    content: [{ type: 'input_text', text: 'screenshot' }],
+    contentBlocks: [{ type: 'text', text: 'screenshot' }],
     tool_call_id: 'call-1',
   });
   const withImage = new ToolMessage({
-    content: [
-      { type: 'input_text', text: 'screenshot' },
-      { type: 'input_image', image_url: 'data:image/png;base64,aW1hZ2U=' },
+    contentBlocks: [
+      { type: 'text', text: 'screenshot' },
+      { type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' },
     ],
     tool_call_id: 'call-1',
   });
@@ -156,16 +156,17 @@ test('createSubagent exposes invocation context to tool runtime', async () => {
   });
 });
 
-test('createSubagent sends image tool results to the next model call without a synthetic human message', async () => {
+test('createSubagent projects native image tool results for the next model call', async () => {
   const screenshot = tool(async (
     _input,
     runtime: ToolRuntime<unknown, SubagentRuntimeContext>,
   ) => new ToolMessage({
-    content: [
-      { type: 'input_text', text: 'screenshot captured' },
+    contentBlocks: [
+      { type: 'text', text: 'screenshot captured' },
       {
-        type: 'input_image',
-        image_url: 'data:image/png;base64,aW1hZ2U=',
+        type: 'image',
+        data: 'aW1hZ2U=',
+        mimeType: 'image/png',
       },
     ],
     tool_call_id: runtime.toolCallId,
@@ -191,6 +192,7 @@ test('createSubagent sends image tool results to the next model call without a s
       ],
     }),
     tools: [screenshot],
+    toolResultImageMode: 'native',
     middleware: [captureModelRequests],
     promptSections: [],
     messages: [new HumanMessage('Inspect the page visually.')],
@@ -202,17 +204,18 @@ test('createSubagent sends image tool results to the next model call without a s
     modelRequests[1].filter((message) => message._getType() === 'human').length,
     1,
   );
-  assert.match(JSON.stringify(result.messages), /data:image\/png;base64,aW1hZ2U=/);
+  assert.match(JSON.stringify(result.messages), /"type":"image"/);
+  assert.match(JSON.stringify(result.messages), /"data":"aW1hZ2U="/);
 });
 
-test('parallel image and text tools keep every result adjacent to the calling AI message', async () => {
+test('fallback image projection keeps parallel results adjacent before synthetic media', async () => {
   const screenshot = tool(async (
     _input,
     runtime: ToolRuntime<unknown, SubagentRuntimeContext>,
   ) => new ToolMessage({
-    content: [
-      { type: 'input_text', text: 'screenshot captured' },
-      { type: 'input_image', image_url: 'data:image/png;base64,aW1hZ2U=' },
+    contentBlocks: [
+      { type: 'text', text: 'screenshot captured' },
+      { type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' },
     ],
     tool_call_id: runtime.toolCallId,
   }), {
@@ -238,6 +241,7 @@ test('parallel image and text tools keep every result adjacent to the calling AI
       ],
     }),
     tools: [screenshot, inspectText],
+    toolResultImageMode: 'user_message',
     middleware: [createMiddleware({
       name: 'CaptureParallelToolMessages',
       wrapModelCall: async (request, handler) => {
@@ -259,6 +263,11 @@ test('parallel image and text tools keep every result adjacent to the calling AI
       .slice(callingMessageIndex + 1, callingMessageIndex + 3)
       .map((message) => message._getType()),
     ['tool', 'tool'],
+  );
+  assert.equal(secondRequest[callingMessageIndex + 3]?._getType(), 'human');
+  assert.equal(
+    secondRequest[callingMessageIndex + 3]?.additional_kwargs.pinpawo_synthetic_tool_media,
+    true,
   );
 });
 

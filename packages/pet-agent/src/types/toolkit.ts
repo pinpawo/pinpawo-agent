@@ -94,8 +94,6 @@ export type ModelInputModality = 'text' | 'image';
 export type ToolModelRequirements = {
   /** Model input capabilities required before this tool may be bound. */
   readonly requiredInputModalities: readonly ModelInputModality[];
-  /** The active model transport must accept images inside a tool result. */
-  readonly requiresImageToolResult?: true;
   /** Instructions included only when this tool is available to the model. */
   readonly instructions?: string;
 };
@@ -321,12 +319,6 @@ export function validateToolkitDefinition(toolkit: AgentToolkit) {
         && typeof definition.modelRequirements.instructions !== 'string'
       ) {
         throw new Error(`${owner}.instructions must be a string`);
-      }
-      if (
-        definition.modelRequirements.requiresImageToolResult !== undefined
-        && definition.modelRequirements.requiresImageToolResult !== true
-      ) {
-        throw new Error(`${owner}.requiresImageToolResult must be true when present`);
       }
     }
     toolNames.add(toolName);

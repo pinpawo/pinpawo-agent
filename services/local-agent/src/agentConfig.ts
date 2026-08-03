@@ -4,6 +4,8 @@ import type {
 } from '@pinpawo/pet-agent';
 import type { ModelInputModality } from './modelProfiles';
 
+export type LocalToolResultImageMode = 'native' | 'user_message';
+
 export type AgentLlmConfig = {
   apiKey: string;
   baseUrl: string;
@@ -11,7 +13,8 @@ export type AgentLlmConfig = {
   modelProfileId?: string;
   modelProfileFingerprint?: string;
   inputModalities?: readonly ModelInputModality[];
-  supportsImageToolResults?: boolean;
+  useResponsesApi?: boolean;
+  toolResultImageMode?: LocalToolResultImageMode;
   structuredOutputMethod?: StructuredOutputMethod;
   maxOutputTokens?: number;
   observeModel?: string;

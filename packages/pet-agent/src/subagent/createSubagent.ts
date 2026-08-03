@@ -39,6 +39,7 @@ import { messageHasToolCalls } from '../utils/messages';
 import {
   subagentRuntimeContextSchema,
 } from './runtimeContext';
+import { createToolResultImageProjectionMiddleware } from './toolResultImageProjection';
 
 // Fallback model-call budget when the caller does not pass maxIterations. The
 // subagent iteration guard should stop gracefully first; LangGraph recursionLimit
@@ -315,9 +316,13 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
   };
   const contextSummaryMiddleware = createSubagentSummarizationMiddleware(inputState, input.model);
   const iterationGuardMiddleware = createSubagentIterationGuardMiddleware(maxIterations, emitGuardDecision);
+  const toolResultImageProjectionMiddleware = createToolResultImageProjectionMiddleware(
+    input.toolResultImageMode,
+  );
   const middleware: AnyAgentMiddleware[] = [
     contextSummaryMiddleware,
     iterationGuardMiddleware,
+    toolResultImageProjectionMiddleware,
     ...(input.middleware ?? []),
   ].filter((item): item is NonNullable<typeof item> => Boolean(item));
 

@@ -169,7 +169,6 @@ test('compiled registry preserves and snapshots tool model requirements', () => 
   const requiredInputModalities: ModelInputModality[] = ['image'];
   const modelRequirements = {
     requiredInputModalities,
-    requiresImageToolResult: true as const,
     instructions: 'Inspect the image.',
   };
   const registry = compileAgentRegistry({
@@ -192,7 +191,6 @@ test('compiled registry preserves and snapshots tool model requirements', () => 
     ?.tools[0]
     ?.modelRequirements;
   assert.deepEqual(compiledContext?.requiredInputModalities, ['image']);
-  assert.equal(compiledContext?.requiresImageToolResult, true);
   assert.equal(compiledContext?.instructions, 'Inspect the image.');
   assert.ok(Object.isFrozen(compiledContext));
   assert.ok(Object.isFrozen(compiledContext?.requiredInputModalities));

@@ -57,9 +57,11 @@ test('all built-in presets declare authoritative input modalities', () => {
   }
 });
 
-test('only transports with native image tool results opt into that capability', () => {
-  assert.equal(findLlmModelPresetByKey('gpt-5')?.supportsImageToolResults, true);
-  assert.equal(findLlmModelPresetByKey('qwen-token-plan')?.supportsImageToolResults, undefined);
+test('Responses selection and tool-image projection are independent transport metadata', () => {
+  assert.equal(findLlmModelPresetByKey('gpt-5')?.useResponsesApi, true);
+  assert.equal(findLlmModelPresetByKey('gpt-5')?.toolResultImageMode, 'native');
+  assert.equal(findLlmModelPresetByKey('qwen-token-plan')?.useResponsesApi, undefined);
+  assert.equal(findLlmModelPresetByKey('qwen-token-plan')?.toolResultImageMode, undefined);
 });
 
 test('DeepSeek V4 Flash has its own preset and does not resolve as V4 Pro', () => {
@@ -115,10 +117,11 @@ test('preset output limits do not leak into custom profiles with a matching mode
   const registry = createLocalModelProfileRegistry({ snapshot });
 
   assert.equal(registry.resolve().maxOutputTokens, undefined);
-  assert.equal(registry.resolve().supportsImageToolResults, false);
+  assert.equal(registry.resolve().useResponsesApi, false);
+  assert.equal(registry.resolve().toolResultImageMode, 'user_message');
 });
 
-test('OpenAI preset enables native image tool results in the resolved runtime config', () => {
+test('OpenAI preset enables Responses and native image tool results in runtime config', () => {
   const snapshot = buildModelProfileRegistry({
     stored: storedConfig({
       primary: storedProfile({
@@ -133,10 +136,36 @@ test('OpenAI preset enables native image tool results in the resolved runtime co
     env: {},
   });
 
-  assert.equal(
-    createLocalModelProfileRegistry({ snapshot }).resolve().supportsImageToolResults,
-    true,
-  );
+  const resolved = createLocalModelProfileRegistry({ snapshot }).resolve();
+  assert.equal(resolved.useResponsesApi, true);
+  assert.equal(resolved.toolResultImageMode, 'native');
+});
+
+test('Kimi Code K3 preset declares image input with user-message tool fallback', () => {
+  const preset = findLlmModelPresetByKey('kimi-code');
+  assert.deepEqual(preset?.inputModalities, ['text', 'image']);
+  assert.equal(preset?.useResponsesApi, undefined);
+  assert.equal(preset?.toolResultImageMode, undefined);
+});
+
+test('preset modality corrections backfill older stored profiles at runtime', () => {
+  const snapshot = buildModelProfileRegistry({
+    stored: storedConfig({
+      primary: storedProfile({
+        provider: 'kimi-code',
+        sourcePreset: 'kimi-code',
+        model: 'k3',
+        baseUrl: 'https://api.kimi.com/coding/v1',
+        contextWindowTokens: 1_048_576,
+        inputModalities: ['text'],
+      }),
+    }),
+    env: {},
+  });
+  const registry = createLocalModelProfileRegistry({ snapshot });
+
+  assert.deepEqual(registry.resolve().inputModalities, ['text', 'image']);
+  assert.deepEqual(registry.listAvailable()[0]?.inputModalities, ['text', 'image']);
 });
 
 test('custom profiles default missing modality metadata to text-only', () => {

@@ -336,13 +336,14 @@ export function buildLocalChatAgentInput(params: {
       String(llmConfig.contextWindowTokens ?? 32000),
       String(llmConfig.subagentContextWindowTokens ?? llmConfig.contextWindowTokens ?? 32000),
       String(generationReserveTokens ?? 0),
-      llmConfig.supportsImageToolResults ? 'image-tool-results' : 'text-tool-results',
+      llmConfig.useResponsesApi ? 'responses-api' : 'chat-completions-api',
+      llmConfig.toolResultImageMode ?? 'user_message',
       params.checkpoint ? 'checkpoint' : 'memory',
     ]),
     graphConfig: {
       models,
       modelInputModalities: llmConfig.inputModalities ?? ['text'],
-      modelSupportsImageToolResults: llmConfig.supportsImageToolResults === true,
+      toolResultImageMode: llmConfig.toolResultImageMode ?? 'user_message',
       admitInputModalities: params.admitInputModalities,
       ...(inferLlmToolChoiceSupport(llmConfig.model) === 'auto_only'
         ? { capabilityPlannerToolChoice: 'auto' }

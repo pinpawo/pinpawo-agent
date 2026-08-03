@@ -102,7 +102,6 @@ export function createCapabilityNode(params: {
     const toolkitContext = {
       models: config.models,
       modelInputModalities: config.modelInputModalities,
-      modelSupportsImageToolResults: config.modelSupportsImageToolResults,
       actor,
       messages: scopedMessages,
       reviewContext: {
@@ -139,6 +138,7 @@ export function createCapabilityNode(params: {
     const subagentInput: SubagentRunInput = {
       model: config.models.subagent ?? config.models.act,
       tools: selectedTools,
+      toolResultImageMode: config.toolResultImageMode,
       promptSections: [
         {
           id: 'delegation-context',

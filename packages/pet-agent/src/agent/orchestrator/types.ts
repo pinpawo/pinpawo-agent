@@ -20,6 +20,7 @@ import type { CapabilityPlannerRunner } from './capabilityPlannerRunner';
 import type { GlobalReviewPolicy } from './review/globalReviewPolicy';
 import type { StructuredOutputAutoRepairConfig, StructuredOutputMethod } from '../../utils/structuredOutput';
 import type { DelegationOutcomeDecision } from './schemas';
+import type { ToolResultImageMode } from '../../subagent/toolResultImageProjection';
 
 export type MessageLane = `capability:${string}`;
 export type PinpetMessageLane = MessageLane | 'orchestrator';
@@ -91,8 +92,8 @@ export type OrchestratorConfig = {
   models: AgentModels;
   /** Input modalities supported by the active model profile. */
   modelInputModalities?: readonly ModelInputModality[];
-  /** Whether the active provider transport accepts images in tool results. */
-  modelSupportsImageToolResults?: boolean;
+  /** How the active provider receives image attachments returned by tools. */
+  toolResultImageMode?: ToolResultImageMode;
   /** Record input modalities introduced by tool results. */
   admitInputModalities?: (
     modalities: readonly ModelInputModality[],

@@ -41,7 +41,7 @@ export function buildLocalAgentModels(
         : {}),
       streaming: requiresLlmStreaming(model),
       streamUsage: true,
-      useResponsesApi: llmConfig.supportsImageToolResults === true,
+      useResponsesApi: llmConfig.useResponsesApi === true,
       modelKwargs,
       configuration: {
         baseURL: llmConfig.baseUrl,

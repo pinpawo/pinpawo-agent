@@ -82,6 +82,6 @@ test('browser screenshot directly returns an image tool result', async (t) => {
 
   assert.ok(result instanceof ToolMessage);
   assert.deepEqual(admitted, [['text', 'image']]);
-  assert.match(JSON.stringify(result.content), /"type":"input_image"/);
+  assert.match(JSON.stringify(result.content), /"type":"image"/);
   assert.match(JSON.stringify(result.content), /data:image\/png;base64,/);
 });

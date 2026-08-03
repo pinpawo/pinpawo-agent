@@ -317,6 +317,11 @@ export {
   SUBAGENT_PROMPT_SECTIONS_EVENT,
 } from './subagent/createSubagent';
 export {
+  createToolResultImageProjectionMiddleware,
+  projectToolResultImages,
+  type ToolResultImageMode,
+} from './subagent/toolResultImageProjection';
+export {
   NamespacedProtocolToolEventReader,
   SubagentProtocolToolEventReader,
 } from './subagent/protocolToolEvents';

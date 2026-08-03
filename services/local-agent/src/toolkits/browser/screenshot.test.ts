@@ -3,7 +3,11 @@ import { mkdtemp, readFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
-import { convertMessagesToResponsesInput } from '@langchain/openai';
+import {
+  convertMessagesToCompletionsMessageParams,
+  convertMessagesToResponsesInput,
+} from '@langchain/openai';
+import { projectToolResultImages } from '@pinpawo/pet-agent';
 import { getLocalToolsWorkdir, setLocalToolsWorkdir } from '../local/pathUtils';
 import {
   createBrowserScreenshotArtifact,
@@ -48,14 +52,17 @@ test('browser screenshots are persisted inside the workdir with private permissi
   const message = await buildBrowserScreenshotToolMessage(serialized, 'screenshot-1');
   assert.equal(message._getType(), 'tool');
   assert.equal(message.tool_call_id, 'screenshot-1');
-  assert.match(JSON.stringify(message.content), /"type":"input_text"/);
-  assert.match(JSON.stringify(message.content), /"type":"input_image"/);
+  assert.match(JSON.stringify(message.content), /"type":"text"/);
+  assert.match(JSON.stringify(message.content), /"type":"image"/);
   assert.match(JSON.stringify(message.content), /data:image\/png;base64,/);
   assert.match(JSON.stringify(message.toDict()), /data:image\/png;base64,/);
 
+  const nativeMessages = projectToolResultImages([message], 'native');
+  const nativeToolMessage = nativeMessages[0];
+
   assert.deepEqual(
     convertMessagesToResponsesInput({
-      messages: [message],
+      messages: nativeMessages,
       zdrEnabled: false,
       model: 'gpt-5.5',
     }),
@@ -63,7 +70,17 @@ test('browser screenshots are persisted inside the workdir with private permissi
       type: 'function_call_output',
       call_id: 'screenshot-1',
       id: undefined,
-      output: message.content,
+      output: nativeToolMessage.content,
     }],
   );
+
+  const fallbackMessages = projectToolResultImages([message], 'user_message');
+  const completionMessages = convertMessagesToCompletionsMessageParams({
+    messages: fallbackMessages,
+    model: 'qwen3.8-max-preview',
+  });
+  assert.equal(completionMessages[0]?.role, 'tool');
+  assert.equal(completionMessages[1]?.role, 'user');
+  assert.match(JSON.stringify(completionMessages[1]), /"type":"image_url"/);
+  assert.match(JSON.stringify(completionMessages[1]), /data:image\/png;base64,/);
 });

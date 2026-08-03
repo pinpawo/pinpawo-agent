@@ -1741,7 +1741,6 @@ test('toolkits bind model-required tools only to compatible model profiles', asy
         tool: inspectScreenshot,
         modelRequirements: {
           requiredInputModalities: ['image'],
-          requiresImageToolResult: true,
           instructions: 'screenshot inspection rules',
         },
       },
@@ -1772,29 +1771,13 @@ test('toolkits bind model-required tools only to compatible model profiles', asy
   });
   assert.deepEqual(
     vision.tools.map((toolItem) => toolItem.name),
-    ['inspect_text', 'inspect_image'],
-  );
-  assert.equal(
-    vision.toolkits[0]?.instructions,
-    'general inspection rules\nimage inspection rules',
-  );
-  assert.equal(vision.middleware.length, 0);
-
-  const visionWithImageToolResults = await resolveToolkitExecution([toolkit], undefined, {
-    models: {} as AgentModels,
-    modelInputModalities: ['text', 'image'],
-    modelSupportsImageToolResults: true,
-    actor: testActor,
-    messages: [],
-  });
-  assert.deepEqual(
-    visionWithImageToolResults.tools.map((toolItem) => toolItem.name),
     ['inspect_text', 'inspect_image', 'inspect_screenshot'],
   );
   assert.equal(
-    visionWithImageToolResults.toolkits[0]?.instructions,
+    vision.toolkits[0]?.instructions,
     'general inspection rules\nimage inspection rules\nscreenshot inspection rules',
   );
+  assert.equal(vision.middleware.length, 0);
 });
 
 test('capability receives tools only from Toolkits authorized by fixed uses', async () => {

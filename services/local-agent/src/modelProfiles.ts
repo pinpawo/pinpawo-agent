@@ -29,6 +29,13 @@ export function supportsInputModalities(
   return missingInputModalities(required, supported).length === 0;
 }
 
+function effectiveInputModalities(profile: ModelProfileV1) {
+  const preset = profile.sourcePreset
+    ? findLlmModelPresetByKey(profile.sourcePreset)
+    : undefined;
+  return preset?.inputModalities ?? profile.inputModalities;
+}
+
 export type ModelProfileV1 = Readonly<{
   id: string;
   label: string;
@@ -627,7 +634,7 @@ export function summarizeModelProfile(profile: ModelProfileV1): ModelProfileSumm
     model: profile.model,
     endpointHost: sanitizeEndpoint(profile.baseUrl).endpointHost,
     contextWindowTokens: profile.contextWindowTokens,
-    inputModalities: Object.freeze([...profile.inputModalities]),
+    inputModalities: Object.freeze([...effectiveInputModalities(profile)]),
     available: true,
     issues: Object.freeze([]),
   });
@@ -646,7 +653,7 @@ export function fingerprintModelProfile(profile: ModelProfileV1): ModelProfileFi
     structuredOutputMethod: profile.structuredOutputMethod
       ?? inferLlmStructuredOutputMethod(profile.model, profile.baseUrl)
       ?? null,
-    inputModalities: [...profile.inputModalities].sort(),
+    inputModalities: [...effectiveInputModalities(profile)].sort(),
   };
   return Object.freeze({
     profileId: profile.id,

@@ -126,15 +126,16 @@ export async function buildBrowserScreenshotToolMessage(
   const artifact = createBrowserScreenshotArtifact(serialized);
   const imageUrl = await readBrowserScreenshotDataUrl(artifact.screenshot);
   return new ToolMessage({
-    content: [
+    contentBlocks: [
       {
-        type: 'input_text',
+        type: 'text',
         text: `Browser screenshot from the current viewport.\n${serialized}`,
       },
       {
-        type: 'input_image',
-        image_url: imageUrl,
-        detail: 'auto',
+        type: 'image',
+        url: imageUrl,
+        mimeType: artifact.screenshot.mimeType,
+        metadata: { detail: 'auto' },
       },
     ],
     artifact,

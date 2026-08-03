@@ -5,6 +5,7 @@ import type { StructuredTool } from '@langchain/core/tools';
 import type { AnyAgentMiddleware } from 'langchain';
 import type { CapabilityArtifactRef } from './artifact';
 import type { ModelInputModality, ToolOperationMetadata } from './toolkit';
+import type { ToolResultImageMode } from '../subagent/toolResultImageProjection';
 
 export type SubagentExecutionScope = {
   threadId: string | null;
@@ -84,6 +85,8 @@ export type SubagentInputState = {
 export type SubagentRunInput = SubagentInputState & {
   model: BaseChatModel;
   tools: StructuredTool[];
+  /** Provider projection used for image attachments returned by tools. */
+  toolResultImageMode?: ToolResultImageMode;
   middleware?: AnyAgentMiddleware[];
   /** Read-only invocation data exposed to tools as ToolRuntime.context. */
   runtimeContext?: SubagentRuntimeContext;

@@ -25,20 +25,6 @@ function readInvocationParams(model: unknown): Record<string, unknown> {
   return invocationParams.call(model);
 }
 
-function readBoundToolChoice(model: unknown, toolChoice: unknown): unknown {
-  const bindTools = (model as {
-    bindTools?: (
-      tools: unknown[],
-      options?: Record<string, unknown>,
-    ) => unknown;
-  }).bindTools;
-  assert.ok(bindTools);
-  const bound = bindTools.call(model, [], { tool_choice: toolChoice });
-  return (bound as {
-    defaultOptions?: Record<string, unknown>;
-  }).defaultOptions?.tool_choice;
-}
-
 test('models use the provider temperature default when no override is configured', () => {
   const models = buildLocalAgentModels({
     apiKey: 'test-key',
@@ -135,15 +121,6 @@ test('Qwen 3.8 roles preserve the provider-enforced thinking mode', () => {
   assert.equal(readMaxTokens(models.answer), 131_072);
   assert.equal(readMaxTokens(models.observe), 131_072);
   assert.equal(readMaxTokens(models.subagent), 131_072);
-  assert.equal(readBoundToolChoice(models.act, 'any'), 'auto');
-  assert.equal(readBoundToolChoice(models.act, 'required'), 'auto');
-  assert.equal(readBoundToolChoice(models.act, 'submit_plan'), 'auto');
-  assert.equal(readBoundToolChoice(models.act, {
-    type: 'function',
-    function: { name: 'submit_plan' },
-  }), 'auto');
-  assert.equal(readBoundToolChoice(models.act, 'none'), 'none');
-  assert.equal(readBoundToolChoice(models.act, 'auto'), 'auto');
 });
 
 test('generation reserve includes Qwen thinking and configured output budgets', () => {
@@ -160,12 +137,3 @@ test('generation reserve includes Qwen thinking and configured output budgets', 
   }), undefined);
 });
 
-test('models with full tool-choice support preserve forced tool selection', () => {
-  const models = buildLocalAgentModels({
-    apiKey: 'test-key',
-    baseUrl: 'https://api.openai.com/v1',
-    model: 'gpt-5.5',
-  });
-
-  assert.equal(readBoundToolChoice(models.act, 'any'), 'any');
-});

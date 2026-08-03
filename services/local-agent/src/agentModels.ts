@@ -1,13 +1,12 @@
 import type { AgentModels } from '@pinpawo/pet-agent';
 import type { AgentLlmConfig } from './agentConfig';
+import { ChatOpenAI } from '@langchain/openai';
 import {
   buildLlmModelKwargs,
   inferLlmAdditionalThinkingReserveTokens,
   inferLlmRoleReasoningEffort,
-  inferLlmToolChoiceSupport,
   requiresLlmStreaming,
 } from './llmModelPresets';
-import { LocalChatOpenAI } from './localChatModel';
 
 export function buildLocalAgentModels(
   llmConfig: AgentLlmConfig,
@@ -29,7 +28,7 @@ export function buildLocalAgentModels(
       inferLlmRoleReasoningEffort(model, role),
     );
 
-    return new LocalChatOpenAI({
+    return new ChatOpenAI({
       model,
       ...(typeof llmConfig.temperature === 'number'
         ? { temperature: llmConfig.temperature }
@@ -47,8 +46,6 @@ export function buildLocalAgentModels(
         baseURL: llmConfig.baseUrl,
         defaultHeaders: { Authorization: `Bearer ${llmConfig.apiKey}` },
       },
-    }, {
-      toolChoiceSupport: inferLlmToolChoiceSupport(model),
     });
   };
 

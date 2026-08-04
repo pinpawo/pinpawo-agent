@@ -148,7 +148,7 @@ test('user messages render as a neutral full-width surface', async () => {
   try {
     timeline.render(session([userMessage('hello\nsecond line')]));
     const text = setup.cellOutput.takeText();
-    assert.match(text, /hello\nsecond line/);
+    assert.match(text, /  hello\n  second line/);
 
     const spans = setup.styleOutput.take().flatMap((lines) =>
       lines.flatMap((line) => line.spans)

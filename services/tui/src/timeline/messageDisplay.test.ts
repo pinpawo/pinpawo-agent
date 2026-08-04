@@ -18,10 +18,10 @@ test('message display uses timestamps without role labels', () => {
       text: `[${formatMessageTimestamp(createdAt)}]`,
       tone: 'user-label',
     }, {
-      text: '第一行',
+      text: '  第一行',
       tone: 'user',
     }, {
-      text: '第二行',
+      text: '  第二行',
       tone: 'user',
     }],
   );

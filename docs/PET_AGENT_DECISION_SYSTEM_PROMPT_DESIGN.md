@@ -100,6 +100,9 @@ registry 动态形成枚举，结构化工具使用无 `$ref` 的 provider-compa
 模型仍负责 task boundary 和具体 Capability 选择；runtime 只校验结构化结果的字段与边界，不对
 `return_to_answer.reason` 进行枚举分类。
 
+Capability 文档是选择后续 executor 的证据，不是验证 executor runtime 的场所。Planner 不检查或推断具体执行工具的
+加载与可用状态；执行能力、过程和失败信息只由选定 Capability 的 runtime 产生。
+
 若内部 Agent loop 没有有效终态工具但产生了新的普通 assistant text，Planner 边界将最后一条非空文本转换为
 `runPlannerReturn`：`reason` 固定为 `plan direct text`，文本作为有长度边界的 `context` 交给 Answer。历史
 assistant 消息不参与该 fallback，Planner 也不会因此再次调用模型。若结构化结果与新的文本都不存在，才报告

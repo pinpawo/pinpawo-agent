@@ -177,7 +177,7 @@ export type Config = Readonly<{
   modelProfileRegistry: ModelProfileRegistrySnapshot;
   modelProfileId: string;
   modelProfileFingerprint: string;
-  structuredOutputAutoRepair: boolean;
+  structuredOutputAutoRepair?: boolean;
   structuredOutputRepairMaxRetries?: number;
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
   workdir: string;
@@ -208,7 +208,7 @@ function readConfigDefaults(): Config {
     structuredOutputAutoRepair: getBoolean(
       'LLM_STRUCTURED_OUTPUT_AUTO_REPAIR',
       'structured_output_auto_repair',
-    ) ?? false,
+    ),
     structuredOutputRepairMaxRetries: getNumber(
       'LLM_STRUCTURED_OUTPUT_REPAIR_MAX_RETRIES',
       'structured_output_repair_max_retries',

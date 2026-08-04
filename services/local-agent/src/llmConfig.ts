@@ -38,8 +38,12 @@ function readModelIndependentLlmConfig(): ModelIndependentLlmConfig {
     timeoutMs: 120000,
     maxRetries: 2,
     subagentThinking: stored.subagent_thinking ?? true,
-    structuredOutputAutoRepair: config.structuredOutputAutoRepair,
-    structuredOutputRepairMaxRetries: config.structuredOutputRepairMaxRetries,
+    ...(config.structuredOutputAutoRepair !== undefined
+      ? { structuredOutputAutoRepair: config.structuredOutputAutoRepair }
+      : {}),
+    ...(config.structuredOutputRepairMaxRetries !== undefined
+      ? { structuredOutputRepairMaxRetries: config.structuredOutputRepairMaxRetries }
+      : {}),
     globalReviewPolicyMode: config.globalReviewPolicyMode,
   };
 }

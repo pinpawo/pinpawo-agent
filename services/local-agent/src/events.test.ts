@@ -149,6 +149,36 @@ test('buildToolOperationEvent uses explicit toolkit metadata', () => {
   });
 });
 
+test('normalizes an incomplete run_shell start without interrupting the run', () => {
+  const warnings: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (message: unknown) => warnings.push(String(message));
+  let event;
+  try {
+    event = normalizeToolStreamEvent(
+      'req-1',
+      {
+        event: 'on_tool_start',
+        name: 'run_shell',
+        toolCallId: 'call-1',
+        input: {},
+      },
+      localToolOperationRegistry,
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.equal(event?.phase, 'started');
+  assert.equal(event?.operation.title, '执行命令');
+  assert.equal(event?.operation.target, undefined);
+  assert.equal(event?.operation.summary, undefined);
+  assert.deepEqual(event?.raw?.input, {});
+  assert.deepEqual(warnings, [
+    '[agent-stream] omitted input summary for run_shell; input was incomplete or invalid',
+  ]);
+});
+
 test('buildToolOperationEvent uses git toolkit metadata', () => {
   const event = buildToolOperationEvent('req-1', {
     event: 'on_tool_start',

@@ -8,7 +8,7 @@ import { capabilityCreatorInstructions } from './instructions';
 export function createCapabilityCreatorCapability(): AgentCapability {
   return defineCapability({
     name: 'capability_creator',
-    description: '生成、修改并验证用户自定义 CAPABILITY.md 目录。',
+    description: '设计、生成、修改并验证用户自定义 Capability；包含 CAPABILITY.md、Toolkit 权限、执行流程、路由描述与边界契约。',
     uses: ['bash', 'capability_creator'],
     instructions: defineInstructionDocument({
       content: capabilityCreatorInstructions,

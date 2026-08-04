@@ -5,6 +5,7 @@ import { tool } from '@langchain/core/tools';
 import type { StructuredTool } from '@langchain/core/tools';
 import {
   defineToolkit,
+  GENERAL_CAPABILITY_NAME,
   readRecord,
   readString,
   resultStatusSummary,
@@ -65,6 +66,7 @@ function scaffoldInputSummary(input: unknown) {
           includePackageJson: record?.includePackageJson,
           includeReadme: record?.includeReadme,
           includeSmokeTest: record?.includeSmokeTest,
+          uses: record?.uses,
         },
       }
     : null;
@@ -112,12 +114,44 @@ function renderCapabilityDocument(params: {
   icon: string;
   color: string;
   task: string;
+  uses: string[];
+  workflow?: string[];
+  boundaries?: string[];
+  outputRequirements?: string[];
 }) {
+  const workflow = params.workflow?.length
+    ? params.workflow
+    : [
+        '确认当前请求是否属于本 Capability 的职责边界，信息不足时先说明缺口。',
+        '按最小必要步骤执行任务，只使用 frontmatter `uses` 声明的 Toolkit。',
+        '对关键结果做必要验证；工具结果未确认成功时，不要声称已完成。',
+      ];
+  const boundaries = params.boundaries?.length
+    ? params.boundaries
+    : [
+        '严格限定在本 Capability 的职责内；超出范围时明确说明并建议更合适的处理方式。',
+        '不假设未声明的工具、权限、数据源或外部状态已经可用。',
+      ];
+  const outputRequirements = params.outputRequirements?.length
+    ? params.outputRequirements
+    : [
+        '给出简洁、可执行的结果，并区分已确认事实、局限和待确认项。',
+      ];
+  const normalizeListItem = (item: string) => item.replace(/\s*\n\s*/g, ' ');
+  const orderedList = (items: string[]) => items
+    .map((item, index) => `${String(index + 1)}. ${normalizeListItem(item)}`)
+    .join('\n');
+  const bulletList = (items: string[]) => items
+    .map((item) => `- ${normalizeListItem(item)}`)
+    .join('\n');
+  const renderedUses = params.uses.length > 0
+    ? `uses:\n${params.uses.map((name) => `  - ${JSON.stringify(name)}`).join('\n')}`
+    : 'uses: []';
+
   return `---
 name: ${params.id}
 description: ${JSON.stringify(params.description)}
-uses:
-  - bash
+${renderedUses}
 version: 1
 icon: ${JSON.stringify(params.icon)}
 color: ${JSON.stringify(params.color)}
@@ -126,21 +160,21 @@ defaultEnabled: true
 
 # ${params.name}
 
-## 目标
+## 职责
 
 ${params.task}
 
-## 工作流程
+## 执行流程
 
-1. 先把用户目标拆成明确步骤，再决定要读取、写入或更新哪些文件。
-2. 修改文件前先确认目录和现有内容。
-3. 可读文本优先使用 \`view_file_chunk\`；PDF、Word、表格、图片等非文本文件才使用对应工具。
-4. 编辑优先使用 \`apply_patch\`，只有需要整体重写时才使用 \`write_file\`。
-5. 完成后总结产出的文件、验证结果，以及用户接下来需要手动确认或补充的内容。
+${orderedList(workflow)}
 
 ## 约束与边界
 
-所有工具都来自 frontmatter 的 \`uses\` 所声明的 Toolkit。不要在 Capability 中创建、替换或动态注入工具。
+${bulletList(boundaries)}
+
+## 输出要求
+
+${bulletList(outputRequirements)}
 `;
 }
 
@@ -165,7 +199,7 @@ ${params.description}
 
 ## Validate
 \`\`\`bash
-node ${JSON.stringify(resolve(params.rootDir, 'index.test.mjs'))}
+npm test
 \`\`\`
 
 ## Notes
@@ -179,15 +213,14 @@ ${params.description}
 `;
 }
 
-function renderSmokeTest(params: { id: string; rootDir: string }) {
-  const capabilityPath = resolve(params.rootDir, 'CAPABILITY.md');
+function renderSmokeTest(params: { id: string }) {
   return `import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const document = await readFile(${JSON.stringify(capabilityPath)}, 'utf-8');
+const document = await readFile(new URL('./CAPABILITY.md', import.meta.url), 'utf-8');
 assert.match(document, /^---\\n/);
 assert.match(document, /name:\\s*${params.id}/);
-assert.match(document, /uses:\\n(?:\\s+-\\s+.+\\n)+/);
+assert.match(document, /uses:(?: \\[\\]|\\n(?:\\s+-\\s+.+\\n)+)/);
 assert.match(document, /\\n---\\n\\n# /);
 
 console.log('capability scaffold ok');
@@ -219,8 +252,18 @@ export function createScaffoldCapabilityPluginTool(): StructuredTool {
             note: 'capability id 不能为空，且必须能归一化成合法的 snake_case 标识。',
           });
         }
+        if (capabilityId === GENERAL_CAPABILITY_NAME) {
+          return toolResult({
+            status: 'failed',
+            capabilityId,
+            rootDir: null,
+            files: [],
+            note: `capability id "${GENERAL_CAPABILITY_NAME}" 由 local-agent host 保留，请使用其他 id。`,
+          });
+        }
 
         const rootDir = resolveCapabilityRoot(input.rootDir, capabilityId);
+        const uses = input.uses ?? ['bash'];
         const files = [
           { path: resolve(rootDir, 'CAPABILITY.md'), content: renderCapabilityDocument({
             id: capabilityId,
@@ -229,6 +272,10 @@ export function createScaffoldCapabilityPluginTool(): StructuredTool {
             icon: input.icon?.trim() || 'wand.and.stars',
             color: input.color?.trim() || 'purple',
             task: input.task.trim(),
+            uses,
+            workflow: input.workflow,
+            boundaries: input.boundaries,
+            outputRequirements: input.outputRequirements,
           }) },
           ...((input.includeReadme ?? true)
             ? [{ path: resolve(rootDir, 'README.md'), content: renderReadme({
@@ -241,7 +288,6 @@ export function createScaffoldCapabilityPluginTool(): StructuredTool {
           ...((input.includeSmokeTest ?? true)
             ? [{ path: resolve(rootDir, 'index.test.mjs'), content: renderSmokeTest({
               id: capabilityId,
-              rootDir,
             }) }]
             : []),
           ...((input.includePackageJson ?? true)
@@ -266,12 +312,28 @@ export function createScaffoldCapabilityPluginTool(): StructuredTool {
           writeFileSync(file.path, file.content, 'utf-8');
         }
 
+        const validation = await validateCapabilityPlugin(rootDir);
+        if (!validation.ok || !validation.capability) {
+          return toolResult({
+            status: 'failed',
+            capabilityId,
+            rootDir,
+            files: files.map((file) => file.path),
+            note: `文件已写入，但加载契约验证失败：${validation.errors.join('; ')}`,
+          });
+        }
+
+        const warnings = [...validation.warnings];
+        if (capabilityId !== input.id) {
+          warnings.push(`capability id 已从 "${input.id}" 归一化为 "${capabilityId}"`);
+        }
         return toolResult({
           status: 'created',
           capabilityId,
           rootDir,
           files: files.map((file) => file.path),
-          note: `capability 模板已生成到 ${rootDir}`,
+          note: `capability 模板已生成并通过加载契约验证：${rootDir}`,
+          warnings,
         });
       } catch (error) {
         return toolResult({
@@ -285,7 +347,7 @@ export function createScaffoldCapabilityPluginTool(): StructuredTool {
     },
     {
       name: 'scaffold_capability_plugin',
-      description: '在本地生成一个可加载的 PinPawo CAPABILITY.md 模板。默认写到 ~/.pinpawo/capabilities/<id>/；只有确定需要 finalize 时才应另加代码 entry。',
+      description: '在本地生成并立即验证 PinPawo CAPABILITY.md。可显式声明 Toolkit、执行流程、边界和输出契约；默认写到 ~/.pinpawo/capabilities/<id>/。',
       schema: scaffoldCapabilityPluginInputSchema,
       responseFormat: 'content_and_artifact',
     },
@@ -356,7 +418,7 @@ export function createCapabilityCreatorToolkit(): AgentToolkit {
   ];
   return defineToolkit({
     name: 'capability_creator',
-    description: '生成并验证 capability 插件模板。',
+    description: '设计、生成并验证可加载的 capability 插件。',
     tools: tools.map((toolItem) => ({
       tool: toolItem,
       operation: capabilityCreatorOperationMetadata[toolItem.name],

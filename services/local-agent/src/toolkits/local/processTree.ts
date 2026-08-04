@@ -46,7 +46,13 @@ export type ShellRunHandle = {
 };
 
 export type ShellRunOutcome =
-  | { status: 'exited'; code: number | null; stdout: string; stderr: string }
+  /**
+   * `pid` doubles as the process group id. A command can exit cleanly having
+   * left background children behind (`npm run dev &`); those stay in the
+   * original group even though its leader is gone, so the caller can still use
+   * this to find and clean them up.
+   */
+  | { status: 'exited'; code: number | null; pid: number | undefined; stdout: string; stderr: string }
   | { status: 'timeout'; stdout: string; stderr: string }
   | { status: 'aborted'; stdout: string; stderr: string }
   | { status: 'spawn_failed'; error: Error }
@@ -273,7 +279,7 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
         settle({ status: 'aborted', stdout, stderr });
         return;
       }
-      settle({ status: 'exited', code, stdout, stderr });
+      settle({ status: 'exited', code, pid, stdout, stderr });
     });
   });
 }

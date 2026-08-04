@@ -37,7 +37,7 @@ test('lifecycle composition pass requires semantic goals and mechanical invarian
     finalState: {
       messages: [new AIMessage('done')],
       runNextDelegation: null,
-      runPendingTask: null,
+      runPlannerReturn: null,
       runCapabilityPlan: [],
       taskActiveDelegation: null,
       runIterationCount: 0,

@@ -5,6 +5,7 @@ import { createMiddleware, type AnyAgentMiddleware } from 'langchain';
 import { z } from 'zod';
 import type {
   AgentToolkit,
+  ModelInputModality,
   ToolkitReviewCapabilities,
   ToolReviewPolicy,
   ToolOperationMetadata,
@@ -54,6 +55,8 @@ import {
 
 export type ToolkitReviewRuntimeContext = {
   models: AgentModels;
+  /** Input modalities the active model profile accepts. */
+  modelInputModalities?: readonly ModelInputModality[];
   actor: AgentActor;
   messages: BaseMessage[];
   reviewContext?: {

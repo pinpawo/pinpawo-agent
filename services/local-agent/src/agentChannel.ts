@@ -32,7 +32,6 @@ import {
   buildLocalAgentModels,
   resolveLlmGenerationReserveTokens,
 } from './agentModels';
-import type { LocalImageModelInputOptions } from './localImageModelInput';
 import type { AgentLlmConfig } from './agentConfig';
 import type { AgentContext } from './contextLoader';
 import { buildLocalLlmConfig } from './llmConfig';
@@ -211,10 +210,8 @@ export function buildLocalChatAgentInput(params: {
   context: AgentContext;
   userMessage: string;
   llmConfig?: AgentLlmConfig;
-  /** Host-private model input adapter for local image rehydration/admission. */
-  modelInput?: Partial<LocalImageModelInputOptions>;
-  /** Cache identity for adapters that close over one durable session ledger. */
-  modelInputCacheKey?: string;
+  /** Cache identity for hosts that key a graph to one durable session ledger. */
+  sessionContextCacheKey?: string;
   toolkits?: AgentToolkit[];
   /** Complete host Toolkit definitions, including currently unavailable instances. */
   toolkitDefinitions?: readonly AgentToolkit[];
@@ -252,7 +249,7 @@ export function buildLocalChatAgentInput(params: {
     ?? getConfig().capabilityRegistryBackend;
   const decisionStructuredOutput = buildDecisionStructuredOutput(llmConfig);
   const actor = buildActor(params.context);
-  const models = buildLocalAgentModels(llmConfig, params.modelInput);
+  const models = buildLocalAgentModels(llmConfig);
   const generationReserveTokens = resolveLlmGenerationReserveTokens(llmConfig);
   const trendItems = toTrendPromptItems(params.context.context.trendItems);
   const sharedToolkits: AgentToolkit[] = [
@@ -336,7 +333,7 @@ export function buildLocalChatAgentInput(params: {
       actor.petId,
       llmConfig.modelProfileId,
       llmConfig.modelProfileFingerprint,
-      params.modelInputCacheKey,
+      params.sessionContextCacheKey,
       llmConfig.model,
       llmConfig.observeModel ?? llmConfig.model,
       String(llmConfig.contextWindowTokens ?? 32000),
@@ -347,6 +344,7 @@ export function buildLocalChatAgentInput(params: {
     ]),
     graphConfig: {
       models,
+      modelInputModalities: llmConfig.inputModalities ?? ['text'],
       actor,
       checkpoint: params.checkpoint,
       decisionStructuredOutput,

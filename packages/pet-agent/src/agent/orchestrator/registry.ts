@@ -201,6 +201,13 @@ function snapshotToolDefinition(definition: ToolDefinition): ToolDefinition {
     ...(definition.review
       ? { review: snapshotReview(definition.review) }
       : {}),
+    ...(definition.requiresInputModalities
+      ? {
+          requiresInputModalities: Object.freeze([
+            ...definition.requiresInputModalities,
+          ]),
+        }
+      : {}),
   });
 }
 

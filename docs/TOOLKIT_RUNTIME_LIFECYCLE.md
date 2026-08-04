@@ -32,7 +32,8 @@ capability subagent start
   -> release(binding, reverse order; also on error/cancellation)
 
 host shutdown
-  -> release any remaining bindings
+  -> host cancels in-flight executions
+  -> wait for active executions to release their own bindings
   -> stop roots (reverse start order)
 ```
 
@@ -41,7 +42,10 @@ twice. Binding resolution remains concurrent and must be isolated by the Toolkit
 On a partial start or resolve failure, already-created resources are rolled back
 in reverse order. Shutdown marks the manager as stopping before it waits for
 in-flight resolutions; each execution owns one shared release promise, so its
-normal finally path and host shutdown cannot invoke release twice.
+normal finally path and any repeated release call cannot invoke the hook twice.
+Shutdown does not take bindings away from an active subagent. The host owns
+cancellation policy; the manager waits for those executions to unwind and run
+their normal release path before it stops shared roots.
 
 ## 静态与动态边界
 

@@ -1,5 +1,6 @@
 import { tool } from '@langchain/core/tools';
 import type { StructuredTool, ToolRuntime } from '@langchain/core/tools';
+import { Command } from '@langchain/langgraph';
 import { z } from 'zod';
 import type {
   BrowserElementTarget,
@@ -9,7 +10,7 @@ import type {
   BrowserWaitState,
 } from './session';
 import { formatBrowserToolError } from './errors';
-import { createBrowserScreenshotArtifact } from './screenshot';
+import { buildBrowserScreenshotMessages } from './screenshot';
 
 type BrowserTargetInput = { selector?: string; ref?: string };
 
@@ -351,19 +352,24 @@ const browserCloseTool = tool(
 );
 
 const browserScreenshotTool = tool(
-  async (_input, runtime: BrowserToolRuntime): Promise<[string, unknown]> => {
+  async (_input, runtime: BrowserToolRuntime) => {
     try {
       const result = await session.screenshot(runtime.signal);
-      return [result, createBrowserScreenshotArtifact(result)];
+      // The screenshot needs its own user message to carry the image, so this
+      // tool writes the graph update itself instead of returning tool content.
+      return new Command({
+        update: {
+          messages: await buildBrowserScreenshotMessages(result, runtime.toolCallId),
+        },
+      });
     } catch (err) {
-      return [formatBrowserToolError(err), undefined];
+      return formatBrowserToolError(err);
     }
   },
   {
     name: 'browser_screenshot',
     description: '截取当前可见浏览器视口并保存到当前 workdir 的 .pinpawo/browser/screenshots 目录。',
     schema: z.object({}),
-    responseFormat: 'content_and_artifact',
   },
 );
 

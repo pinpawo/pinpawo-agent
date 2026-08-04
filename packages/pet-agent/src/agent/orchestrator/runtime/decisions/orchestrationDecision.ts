@@ -328,7 +328,7 @@ function buildEntryDecisionResult(params: {
       goto: 'answer' as const,
       update: {
         runNextDelegation: null,
-        runPendingTask: null,
+        runPlannerReturn: null,
         runCapabilityPlan: [],
       },
     };
@@ -337,7 +337,7 @@ function buildEntryDecisionResult(params: {
     goto: 'capabilityPlanner' as const,
     update: {
       runNextDelegation: null,
-      runPendingTask: null,
+      runPlannerReturn: null,
       runCapabilityPlan: [],
     },
   };
@@ -381,7 +381,7 @@ function buildDelegationOutcomeDecisionResult(params: {
       goto: 'answer' as const,
       update: {
         runNextDelegation: null,
-        runPendingTask: null,
+        runPlannerReturn: null,
       },
     };
   }
@@ -396,7 +396,7 @@ function buildDelegationOutcomeDecisionResult(params: {
       goto: 'answer',
       update: {
         runNextDelegation: null,
-        runPendingTask: null,
+        runPlannerReturn: null,
       },
     };
   }
@@ -422,7 +422,7 @@ function buildUserInputRequiredDelegationResult(params: {
 
   return {
     runNextDelegation: null,
-    runPendingTask: null,
+    runPlannerReturn: null,
     taskActiveDelegation: activeDelegation,
     runDelegationSummaries,
     runLatestDelegationOutcome: 'user_input_required' as const,
@@ -466,7 +466,7 @@ function buildContinueDelegationResult(params: {
   return {
     messages: materializedDelegation.laneMessages,
     runNextDelegation,
-    runPendingTask: null,
+    runPlannerReturn: null,
     taskActiveDelegation: nextTaskActiveDelegation,
     runDelegationSummaries,
     runLatestDelegationOutcome: null,
@@ -521,7 +521,7 @@ function buildAcceptedDelegationResult(params: {
   return {
     messages: handoffMessages,
     runNextDelegation: null,
-    runPendingTask: null,
+    runPlannerReturn: null,
     taskActiveDelegation: null,
     runDelegationSummaries,
     runLatestDelegationOutcome: outcome,

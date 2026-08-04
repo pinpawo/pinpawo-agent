@@ -4,6 +4,7 @@ import {
 } from '@langchain/core/tools';
 import type { ReviewSpec } from '../agent/orchestrator/review/reviewSpec';
 import type { ToolAuthorizationMatcher } from '../agent/orchestrator/review/authorizationMatchers';
+import { wrapToolCancellation } from './toolCancellation';
 
 export type ToolkitReviewCapabilities = {
   humanReview: boolean;
@@ -89,12 +90,21 @@ export type NamedStructuredTool<TName extends string = string> = StructuredTool 
   name: TName;
 };
 
+export type ModelInputModality = 'text' | 'image';
+
 export type ToolDefinition<
   TTool extends NamedStructuredTool = NamedStructuredTool,
 > = {
   readonly tool: TTool;
   readonly operation?: ToolOperationMetadata;
   readonly review?: ToolReviewPolicy;
+  /**
+   * Model input capabilities this tool needs before it may be bound. Tools that
+   * feed content back to the model in a non-text modality declare it here, so
+   * binding is decided from the active model profile instead of being inferred
+   * from a model name at call time.
+   */
+  readonly requiresInputModalities?: readonly ModelInputModality[];
 };
 
 export type ToolkitAvailability =
@@ -357,6 +367,19 @@ export function validateToolkitDefinition(toolkit: AgentToolkit) {
         );
       }
     }
+    if (definition.requiresInputModalities !== undefined) {
+      if (
+        !Array.isArray(definition.requiresInputModalities)
+        || definition.requiresInputModalities.length === 0
+        || definition.requiresInputModalities.some(
+          (modality: unknown) => modality !== 'text' && modality !== 'image',
+        )
+      ) {
+        throw new Error(
+          `Toolkit "${toolkit.name}" tool "${toolName}" requiresInputModalities must contain supported modalities`,
+        );
+      }
+    }
     toolNames.add(toolName);
   }
 }
@@ -367,5 +390,14 @@ export function defineToolkit<
   definition: Omit<AgentToolkit, 'tools'> & { tools: TTools },
 ): Omit<AgentToolkit, 'tools'> & { tools: TTools } {
   validateToolkitDefinition(definition);
-  return definition;
+  return {
+    ...definition,
+    // Cancellation must never reach the graph as a successful result. How a
+    // tool cleans up when cancelled is its own business; that it propagates
+    // at all is the toolkit contract's.
+    tools: definition.tools.map((toolDefinition) => ({
+      ...toolDefinition,
+      tool: wrapToolCancellation(toolDefinition.tool),
+    })) as unknown as TTools,
+  };
 }

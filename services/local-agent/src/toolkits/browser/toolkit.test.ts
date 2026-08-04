@@ -3,8 +3,18 @@ import test from 'node:test';
 import {
   buildBrowserAvailabilitySnapshot,
   checkBrowserAvailability,
+  createBrowserToolkit,
   getCachedBrowserAvailability,
 } from './toolkit';
+
+test('only browser_screenshot requires image input', () => {
+  const toolkit = createBrowserToolkit();
+  const requiringImage = toolkit.tools
+    .filter((definition) => definition.requiresInputModalities?.includes('image'))
+    .map((definition) => definition.tool.name);
+
+  assert.deepEqual(requiringImage, ['browser_screenshot']);
+});
 
 test('browser availability caches only the structural backend decision', async () => {
   const availability = await checkBrowserAvailability();

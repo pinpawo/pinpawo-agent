@@ -174,6 +174,7 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
     });
     return createPetAgentRuntime({
       models: petModels,
+      modelInputModalities: petLlmConfig.inputModalities ?? ['text'],
       actor: buildPetActorFromLocalConfig(petConfig, input.ownerUserId),
       role: petConfig.role ?? null,
       serviceSummary: petConfig.serviceSummary ?? null,

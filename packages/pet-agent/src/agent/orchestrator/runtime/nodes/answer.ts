@@ -119,6 +119,13 @@ export function selectAnswerContextFacts(params: {
   if (params.awaitingUserInput) {
     return { mode: 'user_input_required', hasUserGoal };
   }
+  if (params.state.runPlannerReturn) {
+    return {
+      mode: 'planner_return',
+      hasUserGoal,
+      ...params.state.runPlannerReturn,
+    };
+  }
   if (params.acceptedHandoffOutcome === 'goal_done') {
     return { mode: 'goal_done', hasUserGoal };
   }
@@ -151,23 +158,13 @@ export function selectAnswerContextFacts(params: {
     };
   }
 
-  if (params.state.runPendingTask && !params.state.runNextDelegation) {
-    return {
-      mode: 'blocked',
-      hasUserGoal,
-      reason: 'capability_unavailable',
-      unfinishedTask: params.state.runPendingTask.task,
-      detail: params.state.runPendingTask.contextSummary?.trim() || null,
-    };
-  }
-
   return { mode: 'direct', hasUserGoal };
 }
 
 function buildAnswerCleanup() {
   return {
     runNextDelegation: null,
-    runPendingTask: null,
+    runPlannerReturn: null,
     runCapabilityPlan: [],
     runIterationCount: 0,
     runLatestDelegationOutcome: null,

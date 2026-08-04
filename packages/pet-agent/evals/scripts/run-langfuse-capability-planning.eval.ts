@@ -60,7 +60,7 @@ function plannerOutput(
 ): CapabilityPlanningEvalOutput {
   if (!('tasks' in result)) {
     return {
-      result: 'unavailable',
+      result: 'return_to_answer',
       nextTask: null,
       capabilityName: null,
       remainingPlan: [],

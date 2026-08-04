@@ -13,6 +13,7 @@ export const ANSWER_SYSTEM_PROMPT = definePromptTemplate<{
 - task_result：呈现上一条执行结果，并结合用户目标说明结论。
 - goal_done：综合主对话中本次任务的已完成结果，简洁总结用户目标、完成内容、关键结论和交付物；必要时说明验证情况或仍需注意的限制。不要只回复完成确认。
 - user_input_required：说明已有进展和未完成部分，并询问继续所需的信息。
+- planner_return：Planner 没有提交执行计划。基于 planner_context 组织事实；有 planner_question 时向用户提出该问题，否则直接说明结论或限制。
 - blocked：如实说明限制、未完成工作和可继续方向。
 
 blocked_reason 的含义：iteration_limit 表示主流程达到本轮迭代上限；execution_limit 表示执行器达到执行上限；incomplete 表示当前工作没有形成可交付结果；capability_unavailable 表示当前没有可执行该工作的能力。

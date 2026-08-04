@@ -24,15 +24,10 @@ import {
   createLocalChatHumanMessage,
   readLocalChatDisplayText,
 } from './localChatAttachments';
-import { LocalChatImageStore } from './localImageAttachments';
-import {
-  missingInputModalities,
-  supportsInputModalities,
-} from './modelProfiles';
+import { LocalImageAttachmentAdmission } from './localImageAttachments';
 import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
 import type { LocalAgentRuntimeConfig } from './runtimeConfig';
 import {
-  addTuiSessionRequiredInputModalities,
   createTuiSession,
   ensureActiveTuiSession,
   listTuiSessions,
@@ -96,6 +91,27 @@ export function readTuiCheckpointMessages(messages: BaseMessage[]): TuiCheckpoin
   });
 }
 
+/**
+ * Input modalities the transcript actually contains. Derived from checkpoint
+ * messages rather than recorded as tools run: the image blocks are the fact,
+ * so nothing has to report back up to the host to keep a separate ledger in
+ * sync — and a session repaired or rolled back stays consistent for free.
+ */
+export function readTuiCheckpointInputModalities(
+  messages: BaseMessage[],
+): AgentInputModality[] {
+  const hasImage = messages.some((message) => (
+    Array.isArray(message.content)
+    && message.content.some((block) => (
+      typeof block === 'object'
+      && block !== null
+      && 'type' in block
+      && (block.type === 'image' || block.type === 'image_url')
+    ))
+  ));
+  return hasImage ? ['text', 'image'] : ['text'];
+}
+
 export function readTuiCheckpointTokenUsage(
   messages: BaseMessage[],
 ): TuiCheckpointPoint['sessionTokenUsage'] {
@@ -154,7 +170,7 @@ export class LocalServerTuiSessionService {
   private readonly graphService: TuiSessionGraphService;
   private readonly loadContext: typeof loadAgentContext;
   private readonly defaultModelProfileId: string;
-  private readonly imageStore: LocalChatImageStore;
+  private readonly imageAdmission = new LocalImageAttachmentAdmission();
   private readonly reportCapabilityDiagnostics = createCapabilityDiagnosticReporter();
 
   constructor(options: {
@@ -171,9 +187,6 @@ export class LocalServerTuiSessionService {
     const runtimeConfig = options.runtimeConfig ?? buildLocalAgentRuntimeConfig();
     const sessionStatePath = options.sessionStatePath ?? runtimeConfig.tuiSessionPath;
     this.defaultModelProfileId = options.defaultModelProfileId;
-    this.imageStore = new LocalChatImageStore(
-      resolve(runtimeConfig.stateRoot, 'input-images'),
-    );
     this.state = options.state ?? loadTuiSessionState(
       this.defaultModelProfileId,
       sessionStatePath,
@@ -251,22 +264,10 @@ export class LocalServerTuiSessionService {
       ?? this.getActiveSession(deps.actorId);
     const modelProfileId = modelProfileIdOverride ?? session.modelProfileId;
     const llmConfig = deps.modelProfiles.resolve(modelProfileId);
-    if (
-      modelProfileIdOverride === undefined
-      && !supportsInputModalities(
-        session.requiredInputModalities,
-        llmConfig.inputModalities ?? ['text'],
-      )
-    ) {
-      throw new Error(
-        `Model profile "${modelProfileId}" is incompatible with session input modalities: missing ${
-          missingInputModalities(
-            session.requiredInputModalities,
-            llmConfig.inputModalities ?? ['text'],
-          ).join(', ')
-        }`,
-      );
-    }
+    // Compatibility is enforced where the transcript is readable: model
+    // selection checks the checkpoint, and image attachments are refused at
+    // admission. Building the graph is synchronous, so it does not re-check
+    // against a stored copy that could disagree with the transcript.
     return buildLocalChatAgentInput({
       context: ctx,
       userMessage: '',
@@ -274,17 +275,7 @@ export class LocalServerTuiSessionService {
         ...llmConfig,
         globalReviewPolicyMode: deps.globalReviewPolicyMode,
       },
-      modelInput: {
-        imageStore: this.imageStore,
-        admitInputModalities: (required) => {
-          this.admitSessionInputModalities(
-            deps,
-            session.id,
-            required,
-          );
-        },
-      },
-      modelInputCacheKey: session.id,
+      sessionContextCacheKey: session.id,
       toolkits: [...(deps.pluginToolkits ?? []), ...(deps.localToolkits ?? [])],
       toolkitDefinitions: [
         ...(deps.pluginToolkitDefinitions ?? []),
@@ -314,53 +305,12 @@ export class LocalServerTuiSessionService {
     }
     const session = this.getActiveSession(deps.actorId);
     const profile = deps.modelProfiles.resolve(session.modelProfileId);
-    const admitted = await this.imageStore.admit(attachments, {
+    const admitted = await this.imageAdmission.admit(attachments, {
       allowImages: (profile.inputModalities ?? ['text']).includes('image'),
     });
-    if (admitted.some((attachment) => attachment.source === 'local-image')) {
-      this.admitSessionInputModalities(
-        deps,
-        session.id,
-        ['text', 'image'],
-      );
-    }
+    // Nothing is recorded here: the admitted image blocks live in the message
+    // itself, so the session's modalities are read back off the transcript.
     return createAdmittedLocalChatHumanMessage(message, admitted);
-  }
-
-  private admitSessionInputModalities(
-    deps: LocalServerDeps,
-    sessionId: string,
-    required: readonly AgentInputModality[],
-  ) {
-    const session = this.getSession(deps.actorId, sessionId);
-    if (!session) {
-      throw new Error('session not found while admitting model input');
-    }
-    const profile = deps.modelProfiles.resolve(session.modelProfileId);
-    const supported = profile.inputModalities ?? ['text'];
-    if (!supportsInputModalities(required, supported)) {
-      throw new Error(
-        `Model profile "${profile.modelProfileId ?? session.modelProfileId}" does not support required input modalities: ${
-          missingInputModalities(required, supported).join(', ')
-        }`,
-      );
-    }
-    const updated = addTuiSessionRequiredInputModalities(
-      this.state,
-      session.id,
-      required,
-    );
-    if (!updated) {
-      throw new Error('session not found while recording model input');
-    }
-    if (updated !== session) {
-      try {
-        this.save();
-      } catch (error) {
-        this.state.sessions[session.id] = session;
-        throw error;
-      }
-    }
   }
 
   selectModelProfile(
@@ -428,7 +378,7 @@ export class LocalServerTuiSessionService {
     return {
       sessionId: session.id,
       modelProfileId: session.modelProfileId,
-      requiredInputModalities: [...session.requiredInputModalities],
+      requiredInputModalities: readTuiCheckpointInputModalities(state.messages),
       messages: readTuiCheckpointMessages(state.messages),
       sessionTokenUsage: readTuiCheckpointTokenUsage(state.messages),
       pendingReview,
@@ -516,6 +466,9 @@ export class LocalServerTuiSessionService {
     return {
       session: {
         ...(this.state.sessions[session.id] ?? session),
+        // Report what the restored transcript actually holds, not the value
+        // the record was persisted with.
+        requiredInputModalities: checkpoint.requiredInputModalities,
         active: true,
       },
       messages: checkpoint.messages,

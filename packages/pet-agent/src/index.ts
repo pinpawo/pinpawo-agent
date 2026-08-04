@@ -75,6 +75,7 @@ export {
 
 export type {
   AgentToolkit,
+  ModelInputModality,
   NamedStructuredTool,
   ToolAuthorizationContext,
   ToolAuthorizationPolicy,
@@ -103,6 +104,11 @@ export {
   TOOLKIT_REVIEW_GUIDANCE_FIELD_MAX_CHARS,
   validateToolkitDefinition,
 } from './types/toolkit';
+export {
+  createAbortError,
+  isAbortError,
+  wrapToolCancellation,
+} from './types/toolCancellation';
 
 export {
   buildOrchestratorRunInput,
@@ -331,6 +337,10 @@ export {
   NamespacedProtocolToolEventReader,
   SubagentProtocolToolEventReader,
 } from './subagent/protocolToolEvents';
+export {
+  isTransientModelMedia,
+  markTransientModelMedia,
+} from './subagent/transientModelMedia';
 export {
   GUARD_DECISION_EVENT,
   isGuardDecisionStreamChunk,

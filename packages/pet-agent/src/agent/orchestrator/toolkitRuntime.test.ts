@@ -19,6 +19,7 @@ function createRuntimeToolkit(params: {
   name?: string;
   events: string[];
   failResolve?: boolean;
+  resolveError?: Error;
   bindToolName?: string;
   changeBoundSchema?: boolean;
   startBarrier?: Promise<void>;
@@ -39,6 +40,7 @@ function createRuntimeToolkit(params: {
       },
       async resolve(_root, context) {
         params.events.push(`resolve:${name}:${context.execution.delegationId}`);
+        if (params.resolveError) throw params.resolveError;
         if (params.failResolve) throw new Error(`cannot resolve ${name}`);
         return { delegationId: context.execution.delegationId };
       },
@@ -131,7 +133,7 @@ test('ToolkitRuntimeManager does not start one root twice for concurrent subagen
   await manager.stop();
 });
 
-test('ToolkitRuntimeManager shares one release between shutdown and the execution handle', async () => {
+test('ToolkitRuntimeManager waits for active executions to release before stopping roots', async () => {
   const events: string[] = [];
   const toolkit = createRuntimeToolkit({ events });
   const manager = new ToolkitRuntimeManager();
@@ -140,13 +142,46 @@ test('ToolkitRuntimeManager shares one release between shutdown and the executio
     execution: execution('delegation-a'),
   });
 
-  await manager.stop();
+  let stopped = false;
+  const stopping = manager.stop().then(() => {
+    stopped = true;
+  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.equal(stopped, false);
+  assert.deepEqual(events, [
+    'start:runtime_toolkit',
+    'resolve:runtime_toolkit:delegation-a',
+  ]);
+
+  await active.release();
+  await stopping;
   await active.release();
 
   assert.equal(
     events.filter((event) => event === 'release:runtime_toolkit:delegation-a').length,
     1,
   );
+  assert.deepEqual(events.slice(-2), [
+    'release:runtime_toolkit:delegation-a',
+    'stop:runtime_toolkit',
+  ]);
+});
+
+test('ToolkitRuntimeManager preserves the original resolution error as cause', async () => {
+  const cause = new Error('binding failed');
+  const toolkit = createRuntimeToolkit({ events: [], resolveError: cause });
+  const manager = new ToolkitRuntimeManager();
+
+  await assert.rejects(
+    manager.resolve({ toolkits: [toolkit], execution: execution('delegation-a') }),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal(error.cause, cause);
+      return true;
+    },
+  );
+  await manager.stop();
 });
 
 test('ToolkitRuntimeManager waits for an in-flight resolve before stopping roots', async () => {

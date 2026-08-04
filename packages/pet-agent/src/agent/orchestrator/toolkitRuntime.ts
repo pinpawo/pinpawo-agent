@@ -25,6 +25,8 @@ type ResolvedToolkitBinding = {
 type ActiveToolkitRuntimeExecution = {
   bindings: ResolvedToolkitBinding[];
   releasePromise: Promise<void> | null;
+  settledPromise: Promise<unknown | null>;
+  settle: (error: unknown | null) => void;
 };
 
 export type ToolkitRuntimeExecution = {
@@ -38,6 +40,16 @@ export type ToolkitRuntimeExecution = {
 
 function describeError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function lifecycleError(message: string, errors: readonly unknown[]) {
+  const cause = errors.length === 1
+    ? errors[0]
+    : new AggregateError(errors, message);
+  return new Error(
+    `${message}: ${errors.map(describeError).join('; ')}`,
+    { cause },
+  );
 }
 
 function bindToolImplementation(params: {
@@ -171,7 +183,10 @@ export class ToolkitRuntimeManager {
       }
     } catch (error) {
       await this.stopRoots([...startedNow].reverse(), context).catch(() => undefined);
-      throw new Error(`Toolkit runtime startup failed: ${describeError(error)}`);
+      throw new Error(
+        `Toolkit runtime startup failed: ${describeError(error)}`,
+        { cause: error },
+      );
     }
   }
 
@@ -221,9 +236,15 @@ export class ToolkitRuntimeManager {
       if (this.stopping || this.stopped) {
         throw new Error('Toolkit runtime manager stopped during execution binding resolution.');
       }
+      let settleExecution!: (error: unknown | null) => void;
+      const settledPromise = new Promise<unknown | null>((resolve) => {
+        settleExecution = resolve;
+      });
       const execution: ActiveToolkitRuntimeExecution = {
         bindings,
         releasePromise: null,
+        settledPromise,
+        settle: settleExecution,
       };
       this.activeExecutions.add(execution);
       return Object.freeze({
@@ -232,7 +253,10 @@ export class ToolkitRuntimeManager {
       });
     } catch (error) {
       await this.releaseBindings(bindings).catch(() => undefined);
-      throw new Error(`Toolkit runtime resolution failed: ${describeError(error)}`);
+      throw new Error(
+        `Toolkit runtime resolution failed: ${describeError(error)}`,
+        { cause: error },
+      );
     } finally {
       this.pendingResolutions.delete(pendingResolution);
       finishPendingResolution();
@@ -252,20 +276,21 @@ export class ToolkitRuntimeManager {
 
     const errors: unknown[] = [];
     await Promise.all([...this.pendingResolutions]);
-    for (const execution of [...this.activeExecutions]) {
-      try {
-        await this.releaseExecution(execution);
-      } catch (error) {
-        errors.push(error);
-      }
-    }
+    // Active executions own their bindings until their subagent has finished.
+    // The host cancels executions before stopping the manager; waiting here
+    // lets each execution's finally path release its own binding without
+    // invalidating tools that are still unwinding.
+    const releaseErrors = await Promise.all(
+      [...this.activeExecutions].map((execution) => execution.settledPromise),
+    );
+    errors.push(...releaseErrors.filter((error) => error !== null));
     try {
       await this.stopRoots([...this.startOrder].reverse(), context);
     } catch (error) {
       errors.push(error);
     }
     if (errors.length > 0) {
-      throw new Error(`Toolkit runtime shutdown failed: ${errors.map(describeError).join('; ')}`);
+      throw lifecycleError('Toolkit runtime shutdown failed', errors);
     }
   }
 
@@ -283,8 +308,14 @@ export class ToolkitRuntimeManager {
     const releasePromise = this.releaseBindings(execution.bindings);
     execution.releasePromise = releasePromise;
     releasePromise.then(
-      () => this.activeExecutions.delete(execution),
-      () => this.activeExecutions.delete(execution),
+      () => {
+        this.activeExecutions.delete(execution);
+        execution.settle(null);
+      },
+      (error) => {
+        this.activeExecutions.delete(execution);
+        execution.settle(error);
+      },
     );
     return releasePromise;
   }
@@ -299,7 +330,7 @@ export class ToolkitRuntimeManager {
       }
     }
     if (errors.length > 0) {
-      throw new Error(`Toolkit runtime release failed: ${errors.map(describeError).join('; ')}`);
+      throw lifecycleError('Toolkit runtime release failed', errors);
     }
   }
 
@@ -321,7 +352,7 @@ export class ToolkitRuntimeManager {
       }
     }
     if (errors.length > 0) {
-      throw new Error(`Toolkit runtime stop failed: ${errors.map(describeError).join('; ')}`);
+      throw lifecycleError('Toolkit runtime stop failed', errors);
     }
   }
 }

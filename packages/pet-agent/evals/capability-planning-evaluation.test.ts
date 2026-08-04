@@ -56,6 +56,17 @@ test('planner goal contract evaluates an expected empty future plan', () => {
   assert.match(criterion.statement, /remaining plan is empty/i);
 });
 
+test('planner return-to-Answer is evaluated as a structured terminal result', () => {
+  const testCase = capabilityPlanningBasicsDataset.cases.find(
+    ({ name }) => name === 'entry-returns-to-answer-before-execution',
+  );
+  assert.ok(testCase);
+  assert.deepEqual(
+    buildCapabilityPlanningGoalContract(testCase.expected).acceptanceCriteria,
+    [],
+  );
+});
+
 test('planner goal evaluation rejects a semantically wrong plan with the correct result', async () => {
   const testCase = capabilityPlanningBasicsDataset.cases.find(
     ({ name }) => name === 'entry-explore-then-implementation',

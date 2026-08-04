@@ -19,7 +19,6 @@ import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { StructuredTool } from '@langchain/core/tools';
 import {
   CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-  CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
 } from './fileExplorer';
 import type { CapabilityDocumentWorkspace } from './documentWorkspace';
 import {
@@ -35,7 +34,7 @@ type ScriptedToolCall = {
 };
 
 type ScriptedStructuredOutput = {
-  kind: 'plan' | 'unavailable';
+  kind: 'plan' | 'return_to_answer';
   args: Record<string, unknown>;
 };
 
@@ -116,7 +115,7 @@ class ScriptedPlannerModel extends BaseChatModel {
       const parameters = entry.function?.parameters;
       const kind = name === 'submit_plan'
         ? 'plan'
-        : name === 'report_unavailable' ? 'unavailable' : null;
+        : name === 'return_to_answer' ? 'return_to_answer' : null;
       if (name && kind) {
         this.structuredOutputToolNames.set(kind, name);
         this.structuredOutputSchemaReferences.push(
@@ -314,13 +313,6 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
       }],
     },
     {
-      toolCalls: [{
-        id: 'view',
-        name: CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
-        args: { path: 'explore/CAPABILITY.md' },
-      }],
-    },
-    {
       structuredOutput: {
         kind: 'plan',
         args: submitArgs('explore'),
@@ -331,19 +323,18 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
   const result = await createCapabilityPlannerAgent({ model })
     .invoke(plannerInput(workspace));
 
-  assert.deepEqual(model.boundToolNames.slice(0, 2), [
+  assert.deepEqual(model.boundToolNames.slice(0, 1), [
     CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-    CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
   ]);
-  assert.equal(model.structuredOutputToolNames.size, 1);
+  assert.equal(model.structuredOutputToolNames.size, 2);
   assert.ok(model.structuredOutputToolNames.has('plan'));
-  assert.equal(model.structuredOutputToolNames.has('unavailable'), false);
+  assert.ok(model.structuredOutputToolNames.has('return_to_answer'));
   assert.deepEqual(model.structuredOutputSchemaReferences, []);
   assert.deepEqual(model.structuredOutputPlanLimits, [24]);
   assert.deepEqual(model.structuredOutputCapabilityEnums, [['explore', 'general']]);
   assert.ok(model.boundToolOptions.every((options) =>
     options?.tool_choice === undefined));
-  assert.equal(model.invocations.length, 4);
+  assert.equal(model.invocations.length, 3);
   assert.equal(model.invocations.flat().some((message) =>
     message._getType() === 'system'
     && String(message.content).includes(workspace.rootPath)), false);
@@ -372,9 +363,9 @@ test('entry mode forms one executable task after Capability exploration', async 
   const model = new ScriptedPlannerModel([
     {
       toolCalls: [{
-        id: 'view',
-        name: CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
-        args: { path: 'explore/CAPABILITY.md', startLine: 1, endLine: 20 },
+        id: 'grep',
+        name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+        args: { query: 'investigate|repository' },
       }],
     },
     {
@@ -396,7 +387,7 @@ test('entry mode forms one executable task after Capability exploration', async 
   assert.equal(model.invocations.length, 3);
   assert.equal(model.structuredOutputToolNames.size, 2);
   assert.ok(model.structuredOutputToolNames.has('plan'));
-  assert.ok(model.structuredOutputToolNames.has('unavailable'));
+  assert.ok(model.structuredOutputToolNames.has('return_to_answer'));
   assert.ok('tasks' in result);
   assert.equal(
     'tasks' in result ? result.tasks[0]?.task : null,
@@ -405,7 +396,7 @@ test('entry mode forms one executable task after Capability exploration', async 
   assert.equal('tasks' in result ? result.tasks.length : 0, 1);
 });
 
-test('Planner can report unavailable when a scoped workspace has no general fallback', async (t) => {
+test('Planner can return bounded facts to Answer without submitting a plan', async (t) => {
   const workspace = await createWorkspace(t, {
     explore: capabilityDocument({
       name: 'explore',
@@ -421,10 +412,11 @@ test('Planner can report unavailable when a scoped workspace has no general fall
     }],
   }, {
     structuredOutput: {
-      kind: 'unavailable',
+      kind: 'return_to_answer',
       args: {
-        task: 'Perform unrelated work.',
         reason: 'No matching Capability is available in this scoped workspace.',
+        context: 'The scoped workspace contains only the explore Capability.',
+        question: 'Should I broaden the Capability scope?',
       },
     },
   }]);
@@ -433,10 +425,13 @@ test('Planner can report unavailable when a scoped workspace has no general fall
     .invoke(plannerInput(workspace));
 
   assert.deepEqual(result, {
-    task: 'Perform unrelated work.',
-    reason: 'No matching Capability is available in this scoped workspace.',
+    answer: {
+      reason: 'No matching Capability is available in this scoped workspace.',
+      context: 'The scoped workspace contains only the explore Capability.',
+      question: 'Should I broaden the Capability scope?',
+    },
   });
-  assert.ok(model.structuredOutputToolNames.has('unavailable'));
+  assert.ok(model.structuredOutputToolNames.has('return_to_answer'));
   assert.deepEqual(model.structuredOutputCapabilityEnums, [['explore']]);
 });
 
@@ -478,14 +473,14 @@ test('an unknown Capability returns tool feedback and can be repaired in-loop', 
   );
 });
 
-test('an empty workspace can produce a truthful unavailable result', async (t) => {
+test('an empty workspace can return truthful facts to Answer', async (t) => {
   const workspace = await createWorkspace(t, {});
   const model = new ScriptedPlannerModel([{
     structuredOutput: {
-      kind: 'unavailable',
+      kind: 'return_to_answer',
       args: {
-        task: 'Publish a browser automation report.',
         reason: 'The current workspace contains no Capability documents.',
+        context: 'There are no registered Capability documents to execute browser automation.',
       },
     },
   }]);
@@ -496,10 +491,13 @@ test('an empty workspace can produce a truthful unavailable result', async (t) =
 
   assert.equal(model.structuredOutputToolNames.size, 1);
   assert.equal(model.structuredOutputToolNames.has('plan'), false);
-  assert.ok(model.structuredOutputToolNames.has('unavailable'));
+  assert.ok(model.structuredOutputToolNames.has('return_to_answer'));
   assert.deepEqual(result, {
-    task: 'Publish a browser automation report.',
-    reason: 'The current workspace contains no Capability documents.',
+    answer: {
+      reason: 'The current workspace contains no Capability documents.',
+      context: 'There are no registered Capability documents to execute browser automation.',
+      question: null,
+    },
   });
 });
 
@@ -527,9 +525,9 @@ test('boundary mode rejects answer and materializes remaining work with general'
     },
     {
       toolCalls: [{
-        id: 'view-general',
-        name: CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
-        args: { path: 'general/CAPABILITY.md', startLine: 1, endLine: 20 },
+        id: 'grep-general',
+        name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+        args: { query: 'ordinary|task' },
       }],
     },
     {
@@ -580,7 +578,7 @@ test('boundary mode rejects answer and materializes remaining work with general'
     && message.tool_call_id === 'structured-1'));
 });
 
-test('document read exhaustion is reported as planning_limit_reached, not unavailable', async (t) => {
+test('oversized discovery is reported as planning_limit_reached', async (t) => {
   const workspace = await createWorkspace(t, {
     explore: capabilityDocument({
       name: 'explore',
@@ -590,11 +588,11 @@ test('document read exhaustion is reported as planning_limit_reached, not unavai
   });
   const model = new ScriptedPlannerModel([{
     toolCalls: [{
-      id: 'view',
-      name: CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
-      args: { path: 'explore/CAPABILITY.md' },
+      id: 'grep',
+      name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+      args: { query: 'investigate' },
     }],
-  }]);
+  }, { content: '' }]);
 
   await assert.rejects(
     createCapabilityPlannerAgent({
@@ -607,16 +605,42 @@ test('document read exhaustion is reported as planning_limit_reached, not unavai
   );
 });
 
-test('natural language completion without a structured result is rejected', async (t) => {
+test('natural language completion falls back to a Planner return', async (t) => {
   const workspace = await createWorkspace(t, {});
-  const model = new ScriptedPlannerModel([{ content: 'The plan is ready.' }]);
+  const model = new ScriptedPlannerModel([{
+    content: 'The user needs to choose a target first.',
+  }]);
+
+  const result = await createCapabilityPlannerAgent({ model })
+    .invoke(plannerInput(workspace));
+
+  assert.equal(model.invocations.length, 1);
+  assert.deepEqual(result, {
+    answer: {
+      reason: 'plan direct text',
+      context: 'The user needs to choose a target first.',
+      question: null,
+    },
+  });
+});
+
+test('missing structured output and direct text is rejected', async (t) => {
+  const workspace = await createWorkspace(t, {});
+  const model = new ScriptedPlannerModel([{ content: '' }]);
 
   await assert.rejects(
-    createCapabilityPlannerAgent({ model }).invoke(plannerInput(workspace)),
+    createCapabilityPlannerAgent({ model }).invoke(plannerInput(workspace, {
+      messages: [
+        new HumanMessage('Earlier question.'),
+        new AIMessage('Historical answer must not become a Planner return.'),
+        new HumanMessage('Current request.'),
+      ],
+    })),
     (error: unknown) =>
       error instanceof CapabilityPlannerAgentError
       && error.code === 'submission_required',
   );
+  assert.equal(model.invocations.length, 1);
 });
 
 test('Planner Agent enforces a total timeout', async (t) => {
@@ -637,11 +661,10 @@ test('Planner Agent rejects a structured result produced after timeout', async (
   const workspace = await createWorkspace(t, {});
   const model = new DelayedStructuredPlannerModel([{
     structuredOutput: {
-      kind: 'unavailable',
+      kind: 'return_to_answer',
       args: {
-        result: 'unavailable',
-        task: 'Perform an unsupported operation.',
         reason: 'The workspace is empty.',
+        context: 'No Capability documents are available.',
       },
     },
   }]);

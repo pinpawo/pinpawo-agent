@@ -16,10 +16,9 @@ export type CapabilityRegistryBackend =
 
 export type CapabilityRegistrySearchMatch = {
   readonly path: string;
-  readonly lineNumber: number;
-  readonly text: string;
+  /** Complete verified CAPABILITY.md content; matches are never line excerpts. */
+  readonly content: string;
   readonly matchedTerms: readonly string[];
-  readonly truncated: boolean;
 };
 
 export type CapabilityRegistrySearchResult = {
@@ -33,61 +32,35 @@ export interface CapabilityRegistryDocuments {
     terms: readonly string[];
     maxResults: number;
     maxResultBytes: number;
-    maxLineBytes: number;
     signal?: AbortSignal;
   }): Promise<CapabilityRegistrySearchResult>;
-  readDocument(path: string, signal?: AbortSignal): Promise<string>;
 }
 
 function utf8Bytes(content: string) {
   return Buffer.byteLength(content, 'utf8');
 }
 
-function truncateUtf8(content: string, maxBytes: number) {
-  if (utf8Bytes(content) <= maxBytes) return content;
-  if (maxBytes <= 0) return '';
-
-  const codePoints = Array.from(content);
-  let low = 0;
-  let high = codePoints.length;
-  while (low < high) {
-    const middle = Math.ceil((low + high) / 2);
-    if (utf8Bytes(codePoints.slice(0, middle).join('')) <= maxBytes) {
-      low = middle;
-    } else {
-      high = middle - 1;
-    }
-  }
-  return codePoints.slice(0, low).join('');
-}
-
-function matchedTerms(line: string, terms: readonly string[]) {
-  const normalizedLine = line.toLowerCase();
-  return terms.filter((term) => normalizedLine.includes(term));
+function matchedTerms(content: string, terms: readonly string[]) {
+  const normalizedContent = content.toLowerCase();
+  return terms.filter((term) => normalizedContent.includes(term));
 }
 
 function appendMatch(params: {
   matches: CapabilityRegistrySearchMatch[];
   path: string;
-  lineNumber: number;
-  line: string;
+  content: string;
   terms: readonly string[];
   maxResults: number;
   maxResultBytes: number;
-  maxLineBytes: number;
   usedBytes: number;
-  sourceTruncated?: boolean;
 }) {
   if (params.matches.length >= params.maxResults) {
     return { usedBytes: params.usedBytes, stoppedBy: 'result_limit' as const };
   }
-  const text = truncateUtf8(params.line, params.maxLineBytes);
   const item = {
     path: params.path,
-    lineNumber: params.lineNumber,
-    text,
-    matchedTerms: matchedTerms(params.line, params.terms),
-    truncated: params.sourceTruncated === true || text !== params.line,
+    content: params.content,
+    matchedTerms: matchedTerms(params.content, params.terms),
   } satisfies CapabilityRegistrySearchMatch;
   const itemBytes = utf8Bytes(JSON.stringify(item));
   if (params.usedBytes + itemBytes > params.maxResultBytes) {
@@ -109,31 +82,29 @@ async function runFilesystemGrep(params: {
   documentPaths: readonly string[];
   terms: readonly string[];
   maxResults: number;
-  maxResultBytes: number;
-  maxLineBytes: number;
   signal?: AbortSignal;
-}): Promise<CapabilityRegistrySearchResult> {
+}): Promise<{
+  paths: readonly string[];
+  complete: boolean;
+  stoppedBy: 'result_limit' | null;
+}> {
   if (params.signal?.aborted) throw createAbortError();
   if (params.documentPaths.length === 0) {
-    return { matches: [], complete: true, stoppedBy: null };
+    return { paths: [], complete: true, stoppedBy: null };
   }
 
   const args = [
-    '-H',
-    '-n',
+    '-l',
     '-i',
     '-F',
-    '-m',
-    '1',
     ...params.terms.flatMap((term) => ['-e', term]),
     '--',
     ...params.documentPaths,
   ];
-  const matches: CapabilityRegistrySearchMatch[] = [];
-  let usedBytes = 0;
-  let stoppedBy: CapabilityRegistrySearchResult['stoppedBy'] = null;
+  const paths: string[] = [];
+  const allowedPaths = new Set(params.documentPaths);
+  let stoppedBy: 'result_limit' | null = null;
   let buffer = '';
-  let recordTruncated = false;
   let stderr = '';
 
   await new Promise<void>((resolve, reject) => {
@@ -152,45 +123,24 @@ async function runFilesystemGrep(params: {
       stopped = true;
       child.kill('SIGTERM');
     };
-    const consumeLine = (record: string, sourceTruncated = false) => {
+    const consumeLine = (record: string) => {
       if (!record || stoppedBy) return;
-      const parsed = /^(.+?):(\d+):(.*)$/.exec(record);
-      if (!parsed) return;
-      const path = parsed[1] ?? '';
-      const lineNumber = Number(parsed[2]);
-      const line = parsed[3] ?? '';
-      const appended = appendMatch({
-        matches,
-        path,
-        lineNumber,
-        line,
-        terms: params.terms,
-        maxResults: params.maxResults,
-        maxResultBytes: params.maxResultBytes,
-        maxLineBytes: params.maxLineBytes,
-        usedBytes,
-        sourceTruncated,
-      });
-      usedBytes = appended.usedBytes;
-      stoppedBy = appended.stoppedBy;
-      if (stoppedBy) stop();
+      const path = record.replace(/\r$/, '');
+      if (!allowedPaths.has(path)) return;
+      if (paths.length >= params.maxResults) {
+        stoppedBy = 'result_limit';
+        stop();
+        return;
+      }
+      paths.push(path);
     };
     const consumeChunk = (chunk: string) => {
-      let remaining = chunk;
-      while (remaining) {
-        const newline = remaining.indexOf('\n');
-        const segment = newline >= 0 ? remaining.slice(0, newline) : remaining;
-        if (!recordTruncated) {
-          const candidate = buffer + segment;
-          const bounded = truncateUtf8(candidate, params.maxLineBytes + 1_024);
-          buffer = bounded;
-          recordTruncated = bounded !== candidate;
-        }
-        if (newline < 0) break;
-        consumeLine(buffer.replace(/\r$/, ''), recordTruncated);
-        buffer = '';
-        recordTruncated = false;
-        remaining = remaining.slice(newline + 1);
+      buffer += chunk;
+      let newline = buffer.indexOf('\n');
+      while (newline >= 0) {
+        consumeLine(buffer.slice(0, newline));
+        buffer = buffer.slice(newline + 1);
+        newline = buffer.indexOf('\n');
       }
     };
     const abort = () => {
@@ -209,7 +159,7 @@ async function runFilesystemGrep(params: {
     });
     child.on('close', (code) => {
       params.signal?.removeEventListener('abort', abort);
-      if (buffer) consumeLine(buffer.replace(/\r$/, ''), recordTruncated);
+      if (buffer) consumeLine(buffer);
       if (aborted) {
         reject(createAbortError());
         return;
@@ -236,7 +186,7 @@ async function runFilesystemGrep(params: {
   });
 
   return {
-    matches,
+    paths,
     complete: stoppedBy === null,
     stoppedBy,
   };
@@ -253,20 +203,36 @@ class FileSystemCapabilityRegistryDocuments implements CapabilityRegistryDocumen
 
   async search(params: Parameters<CapabilityRegistryDocuments['search']>[0]) {
     const documentPaths = await this.#reader.listDocumentPaths(params.signal);
-    const result = await runFilesystemGrep({
+    const candidates = await runFilesystemGrep({
       rootPath: this.#workspace.rootPath,
       documentPaths,
-      ...params,
+      terms: params.terms,
+      maxResults: params.maxResults,
+      signal: params.signal,
     });
-    for (const { path } of result.matches) {
-      await this.#reader.readDocument(path, params.signal);
+    const matches: CapabilityRegistrySearchMatch[] = [];
+    let usedBytes = 0;
+    let stoppedBy: CapabilityRegistrySearchResult['stoppedBy'] = null;
+    for (const path of candidates.paths) {
+      const content = await this.#reader.readDocument(path, params.signal);
+      const appended = appendMatch({
+        matches,
+        path,
+        content,
+        terms: params.terms,
+        maxResults: params.maxResults,
+        maxResultBytes: params.maxResultBytes,
+        usedBytes,
+      });
+      usedBytes = appended.usedBytes;
+      stoppedBy = appended.stoppedBy;
+      if (stoppedBy) break;
     }
-    return result;
-  }
-
-  async readDocument(path: string, signal?: AbortSignal) {
-    await this.#reader.listDocumentPaths(signal);
-    return this.#reader.readDocument(path, signal);
+    return {
+      matches,
+      complete: candidates.complete && stoppedBy === null,
+      stoppedBy: stoppedBy ?? candidates.stoppedBy,
+    };
   }
 }
 
@@ -298,40 +264,21 @@ class InMemoryCapabilityRegistryDocuments implements CapabilityRegistryDocuments
 
     search: for (const [path, content] of documents) {
       throwIfPlannerFileExplorationAborted(params.signal);
-      const lines = content.split('\n').map((line) => line.replace(/\r$/, ''));
-      for (const [index, line] of lines.entries()) {
-        if (matchedTerms(line, params.terms).length === 0) continue;
-        const appended = appendMatch({
-          matches,
-          path,
-          lineNumber: index + 1,
-          line,
-          terms: params.terms,
-          maxResults: params.maxResults,
-          maxResultBytes: params.maxResultBytes,
-          maxLineBytes: params.maxLineBytes,
-          usedBytes,
-        });
-        usedBytes = appended.usedBytes;
-        stoppedBy = appended.stoppedBy;
-        if (stoppedBy) break search;
-        break;
-      }
+      if (matchedTerms(content, params.terms).length === 0) continue;
+      const appended = appendMatch({
+        matches,
+        path,
+        content,
+        terms: params.terms,
+        maxResults: params.maxResults,
+        maxResultBytes: params.maxResultBytes,
+        usedBytes,
+      });
+      usedBytes = appended.usedBytes;
+      stoppedBy = appended.stoppedBy;
+      if (stoppedBy) break search;
     }
     return { matches, complete: stoppedBy === null, stoppedBy };
-  }
-
-  async readDocument(path: string, signal?: AbortSignal) {
-    throwIfPlannerFileExplorationAborted(signal);
-    const relativePath = this.#reader.assertDocumentPath(path);
-    const content = (await this.#load(signal)).get(relativePath);
-    if (content === undefined) {
-      throw new PlannerFileToolError(
-        'document_not_found',
-        `Capability document "${relativePath}" is not available in memory.`,
-      );
-    }
-    return content;
   }
 }
 

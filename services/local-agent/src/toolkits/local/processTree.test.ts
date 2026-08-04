@@ -262,6 +262,62 @@ test('a yielded handle keeps accumulating output', async () => {
   assert.match((await outcome.handle.wait()).stdout, /second/);
 });
 
+test('onOutput streams post-yield chunks and can be unsubscribed', async () => {
+  const outcome = await runShellCommand({
+    command: 'echo one; sleep 0.3; echo two; sleep 0.3; echo three',
+    cwd: CWD,
+    timeoutMs: 200,
+    maxOutputChars: 1024,
+    yieldOnTimeout: true,
+  });
+  assert.equal(outcome.status, 'yielded');
+  if (outcome.status !== 'yielded') return;
+
+  const seen: string[] = [];
+  const unsubscribe = outcome.handle.onOutput((_stream, chunk) => {
+    seen.push(chunk.trim());
+    unsubscribe();
+  });
+  await outcome.handle.wait();
+
+  assert.equal(seen.length, 1, 'unsubscribe must stop further delivery');
+});
+
+test('a yielded handle releases its subscribers once the process exits', async () => {
+  const outcome = await runShellCommand({
+    command: 'sleep 0.4',
+    cwd: CWD,
+    timeoutMs: 200,
+    maxOutputChars: 1024,
+    yieldOnTimeout: true,
+  });
+  assert.equal(outcome.status, 'yielded');
+  if (outcome.status !== 'yielded') return;
+
+  let delivered = 0;
+  outcome.handle.onOutput(() => { delivered += 1; });
+  await outcome.handle.wait();
+  assert.equal(delivered, 0, 'no output was produced after the yield');
+});
+
+test('terminating a yielded handle repeatedly is safe', async () => {
+  const outcome = await runShellCommand({
+    command: 'sleep 5',
+    cwd: CWD,
+    timeoutMs: 200,
+    maxOutputChars: 1024,
+    yieldOnTimeout: true,
+  });
+  assert.equal(outcome.status, 'yielded');
+  if (outcome.status !== 'yielded') return;
+
+  outcome.handle.terminate(200);
+  outcome.handle.terminate(200);
+  await outcome.handle.wait();
+  // Terminating after exit must not throw either.
+  outcome.handle.terminate(200);
+});
+
 test('yieldOnTimeout leaves short commands unchanged', async () => {
   const outcome = await runShellCommand({
     command: 'echo quick',

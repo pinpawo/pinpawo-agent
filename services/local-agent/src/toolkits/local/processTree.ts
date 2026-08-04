@@ -32,8 +32,14 @@ export type ShellRunHandle = {
   /** Output captured up to the moment of yielding. */
   stdout: string;
   stderr: string;
-  /** Continues to accumulate into the same caps after the yield. */
-  onOutput: (listener: (stream: 'stdout' | 'stderr', chunk: string) => void) => void;
+  /**
+   * Subscribe to output produced after the yield; returns an unsubscribe
+   * function. Output also keeps accumulating into `stdout`/`stderr` under the
+   * same caps whether or not anyone subscribes.
+   */
+  onOutput: (
+    listener: (stream: 'stdout' | 'stderr', chunk: string) => void,
+  ) => () => void;
   /** Resolves once the process exits on its own or is terminated. */
   wait: () => Promise<{ code: number | null; stdout: string; stderr: string }>;
   terminate: (killGraceMs?: number) => void;
@@ -226,7 +232,10 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
         pid,
         get stdout() { return stdout; },
         get stderr() { return stderr; },
-        onOutput: (listener) => outputListeners.add(listener),
+        onOutput: (listener) => {
+          outputListeners.add(listener);
+          return () => outputListeners.delete(listener);
+        },
         wait: () => exitPromise,
         terminate: (grace = killGraceMs) => {
           if (exited) return;
@@ -251,6 +260,9 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
       if (yielded) {
         if (killTimer) clearTimeout(killTimer);
         resolveExit({ code, stdout, stderr });
+        // Nothing more will be emitted; do not keep subscriber closures alive
+        // for as long as the handle is retained.
+        outputListeners.clear();
         return;
       }
       if (reason === 'timeout') {

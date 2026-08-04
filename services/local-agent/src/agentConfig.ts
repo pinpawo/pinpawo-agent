@@ -22,7 +22,10 @@ export type AgentLlmConfig = {
   verbose?: boolean;
   /** Enable thinking/reasoning for subagent calls. Default: true. */
   subagentThinking?: boolean;
-  /** Retry the same structured-output LLM call after parse/schema failure. Default: false. */
+  /**
+   * Override structured-output retry behavior after parse/schema failure.
+   * When unset, jsonMode retries once and other methods do not retry.
+   */
   structuredOutputAutoRepair?: boolean;
   /** Additional repair retries after the initial structured-output call. Default: 1 when enabled. */
   structuredOutputRepairMaxRetries?: number;

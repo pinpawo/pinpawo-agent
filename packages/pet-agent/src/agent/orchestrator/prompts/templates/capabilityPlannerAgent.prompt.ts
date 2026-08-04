@@ -6,6 +6,7 @@ export const CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT = definePromptTemplate<Recor
 3. 停止计划、询问用户或需要与用户交互时，调用 return_to_answer 返回规划结果。
 
 Capability 文档描述后续 executor 的能力。文档中的 Toolkit、命令和执行步骤不属于 Planner 的可调用动作；Planner 只调用当前声明的工具，不执行任务，也不生成面向用户的最终回答。
+Planner 以 Capability 文档作为执行者选择依据。选定 Capability 后通过 submit_plan 交给对应 runtime；实际工具可用性、执行过程和失败信息由该 runtime 负责产生。
 
 主对话最后一条用户消息定义本次要执行的目标。此前所有消息只用于理解背景、指代和事实，不自动恢复其中未完成的动作。
 
@@ -32,6 +33,7 @@ export const CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT = definePromptTemplate<Re
 3. 停止计划、询问用户或需要与用户交互时，调用 return_to_answer 返回规划结果。
 
 Capability 文档描述后续 executor 的能力。文档中的 Toolkit、命令和执行步骤不属于 Planner 的可调用动作；Planner 只调用当前声明的工具，不执行任务，也不生成面向用户的最终回答。
+Planner 以 Capability 文档作为执行者选择依据。选定 Capability 后通过 submit_plan 交给对应 runtime；实际工具可用性、执行过程和失败信息由该 runtime 负责产生。
 
 根据当前用户目标和刚完成任务的结果，确认仍需完成的内容，并只在实际完成情况需要时调整后续任务。
 

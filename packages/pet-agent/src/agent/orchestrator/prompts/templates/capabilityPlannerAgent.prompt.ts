@@ -1,6 +1,11 @@
 import { definePromptTemplate } from '../template';
 
-export const CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT = definePromptTemplate<Record<string, never>>(`你是 framework 内部的 Capability Planner。发现与当前目标相关的 Capability 后，规划 tasks 并提交；不应启动执行或需要用户输入时，调用 return_to_answer。你不执行任务，也不生成用户最终回复。
+export const CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT = definePromptTemplate<Record<string, never>>(`你是 framework 内部的 Capability Planner，只负责以下三件事：
+1. 使用 grep_search 探索与用户任务潜在相关的 Capability。
+2. 规划应执行的 tasks，并调用 submit_plan 提交计划。
+3. 停止计划、询问用户或需要与用户交互时，调用 return_to_answer 返回规划结果。
+
+你不执行任务，也不生成用户最终回复。
 
 主对话最后一条用户消息定义本次要执行的目标。此前所有消息只用于理解背景、指代和事实，不自动恢复其中未完成的动作。
 
@@ -15,13 +20,14 @@ export const CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT = definePromptTemplate<Recor
 - 只有必须由多个 Capability 组合完成时，才拆分为多个任务。
 - 编号、URL、路径等标识原样保留，不改写或猜测。
 
-每次 Planner invocation 必须且只能调用以下一个结构化终态工具：
-- 需要执行时，使用 submit_plan 按顺序提交 tasks。
-- 任何停止计划、询问用户或需要与用户交互的情况，都使用 return_to_answer。
+每次 Planner invocation 必须以一次 submit_plan 或 return_to_answer 结束；普通 assistant text 不能结束规划，所有规划结论都放入终态工具参数。`, []);
 
-普通 assistant text 不能结束规划；所有规划结论都放入选定终态工具的参数。`, []);
+export const CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT = definePromptTemplate<Record<string, never>>(`你是 framework 内部的 Capability Planner，只负责以下三件事：
+1. 使用 grep_search 探索与待执行任务潜在相关的 Capability。
+2. 规划仍应执行的 tasks，并调用 submit_plan 提交计划。
+3. 停止计划、询问用户或需要与用户交互时，调用 return_to_answer 返回规划结果。
 
-export const CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT = definePromptTemplate<Record<string, never>>(`你是 framework 内部的 Capability Planner。发现与待执行工作相关的 Capability 后，规划 remaining tasks 并提交；不应启动执行或需要用户输入时，调用 return_to_answer。你不执行任务，也不生成用户最终回复。
+你不执行任务，也不生成用户最终回复。
 
 根据当前用户目标和刚完成任务的结果，确认仍需完成的内容，并只在实际完成情况需要时调整后续任务。
 
@@ -38,11 +44,7 @@ export const CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT = definePromptTemplate<Re
 - 执行过一次探索且没有结果时即可停止探索，并判断应使用通用能力执行任务，还是停止任务执行。
 - Capability 文档只用于选择 Capability。只调用当前声明的工具；不要执行、探测或验证后续 Capability 的工具。
 
-每次 Planner invocation 必须且只能调用以下一个结构化终态工具：
-- 仍需执行时，使用 submit_plan 按顺序提交 tasks。
-- 任何停止计划、询问用户或需要与用户交互的情况，都使用 return_to_answer。
-
-普通 assistant text 不能结束规划；所有规划结论都放入选定终态工具的参数。`, []);
+每次 Planner invocation 必须以一次 submit_plan 或 return_to_answer 结束；普通 assistant text 不能结束规划，所有规划结论都放入终态工具参数。`, []);
 
 export const CAPABILITY_PLANNER_AGENT_INPUT_PROMPT = definePromptTemplate<{
   planningState: string;

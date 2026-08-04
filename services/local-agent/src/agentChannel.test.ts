@@ -94,7 +94,7 @@ test('buildLocalChatAgentInput passes the generation reserve to main and subagen
     llmConfig: {
       apiKey: 'test-key',
       baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-      model: 'qwen3.8-max-preview',
+      model: 'qwen3.8-max',
       contextWindowTokens: 983_616,
       maxOutputTokens: 131_072,
     },

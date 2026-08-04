@@ -105,7 +105,7 @@ test('Qwen 3.8 roles preserve the provider-enforced thinking mode', () => {
   const models = buildLocalAgentModels({
     apiKey: 'test-key',
     baseUrl: 'https://workspace-id.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
-    model: 'qwen3.8-max-preview',
+    model: 'qwen3.8-max',
     maxOutputTokens: 131_072,
   });
 
@@ -125,7 +125,7 @@ test('Qwen 3.8 roles preserve the provider-enforced thinking mode', () => {
 
 test('generation reserve includes Qwen thinking and configured output budgets', () => {
   assert.equal(resolveLlmGenerationReserveTokens({
-    model: 'qwen3.8-max-preview',
+    model: 'qwen3.8-max',
     maxOutputTokens: 131_072,
   }), 147_456);
   assert.equal(resolveLlmGenerationReserveTokens({
@@ -136,4 +136,3 @@ test('generation reserve includes Qwen thinking and configured output budgets', 
     model: 'custom-model',
   }), undefined);
 });
-

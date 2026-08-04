@@ -89,12 +89,21 @@ export type NamedStructuredTool<TName extends string = string> = StructuredTool 
   name: TName;
 };
 
+export type ModelInputModality = 'text' | 'image';
+
 export type ToolDefinition<
   TTool extends NamedStructuredTool = NamedStructuredTool,
 > = {
   readonly tool: TTool;
   readonly operation?: ToolOperationMetadata;
   readonly review?: ToolReviewPolicy;
+  /**
+   * Model input capabilities this tool needs before it may be bound. Tools that
+   * feed content back to the model in a non-text modality declare it here, so
+   * binding is decided from the active model profile instead of being inferred
+   * from a model name at call time.
+   */
+  readonly requiresInputModalities?: readonly ModelInputModality[];
 };
 
 export type ToolkitAvailability =
@@ -282,6 +291,19 @@ export function validateToolkitDefinition(toolkit: AgentToolkit) {
       ) {
         throw new Error(
           `Toolkit "${toolkit.name}" tool "${toolName}" review.authorization must define buildMatcher()`,
+        );
+      }
+    }
+    if (definition.requiresInputModalities !== undefined) {
+      if (
+        !Array.isArray(definition.requiresInputModalities)
+        || definition.requiresInputModalities.length === 0
+        || definition.requiresInputModalities.some(
+          (modality: unknown) => modality !== 'text' && modality !== 'image',
+        )
+      ) {
+        throw new Error(
+          `Toolkit "${toolkit.name}" tool "${toolName}" requiresInputModalities must contain supported modalities`,
         );
       }
     }

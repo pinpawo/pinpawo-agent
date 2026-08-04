@@ -1,20 +1,15 @@
 import type { AgentModels } from '@pinpawo/pet-agent';
 import type { AgentLlmConfig } from './agentConfig';
+import { ChatOpenAI } from '@langchain/openai';
 import {
   buildLlmModelKwargs,
   inferLlmAdditionalThinkingReserveTokens,
   inferLlmRoleReasoningEffort,
-  inferLlmToolChoiceSupport,
   requiresLlmStreaming,
 } from './llmModelPresets';
-import {
-  LocalImageChatOpenAI,
-  type LocalImageModelInputOptions,
-} from './localImageModelInput';
 
 export function buildLocalAgentModels(
   llmConfig: AgentLlmConfig,
-  options: Partial<LocalImageModelInputOptions> = {},
 ): AgentModels {
   const subagentThinking = llmConfig.subagentThinking ?? true;
 
@@ -33,7 +28,7 @@ export function buildLocalAgentModels(
       inferLlmRoleReasoningEffort(model, role),
     );
 
-    return new LocalImageChatOpenAI({
+    return new ChatOpenAI({
       model,
       ...(typeof llmConfig.temperature === 'number'
         ? { temperature: llmConfig.temperature }
@@ -51,13 +46,6 @@ export function buildLocalAgentModels(
         baseURL: llmConfig.baseUrl,
         defaultHeaders: { Authorization: `Bearer ${llmConfig.apiKey}` },
       },
-    }, {
-      supportedInputModalities: llmConfig.inputModalities ?? ['text'],
-      toolChoiceSupport: inferLlmToolChoiceSupport(model),
-      ...(options.imageStore ? { imageStore: options.imageStore } : {}),
-      ...(options.admitInputModalities
-        ? { admitInputModalities: options.admitInputModalities }
-        : {}),
     });
   };
 

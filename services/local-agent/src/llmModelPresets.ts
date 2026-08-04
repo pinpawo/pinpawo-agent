@@ -7,8 +7,6 @@ export type LlmThinkingControl =
   | 'always_enabled'
   | 'none';
 
-export type LlmToolChoiceSupport = 'full' | 'auto_only';
-
 export type LlmRuntimeRole = 'act' | 'decision' | 'answer' | 'observe' | 'subagent';
 export type LlmReasoningEffort = 'low' | 'medium' | 'xhigh';
 
@@ -29,8 +27,6 @@ export type LlmModelPreset = {
    */
   inputModalities: readonly ModelInputModality[];
   thinkingControl?: LlmThinkingControl;
-  /** Tool selection modes accepted while the preset's thinking mode is active. */
-  toolChoiceSupport?: LlmToolChoiceSupport;
   requiresStreaming?: boolean;
   aliases: readonly string[];
   officialDocs: readonly string[];
@@ -109,7 +105,6 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     structuredOutputMethod: 'jsonMode',
     inputModalities: ['text', 'image'],
     thinkingControl: 'always_enabled',
-    toolChoiceSupport: 'auto_only',
     aliases: [
       'qwen3.8-',
     ],
@@ -375,10 +370,6 @@ export function buildLlmModelKwargs(
     return { thinking: { type: thinking ? 'enabled' : 'disabled' } };
   }
   return undefined;
-}
-
-export function inferLlmToolChoiceSupport(model: string): LlmToolChoiceSupport {
-  return inferLlmModelPreset(model)?.toolChoiceSupport ?? 'full';
 }
 
 export function requiresLlmStreaming(model: string): boolean {

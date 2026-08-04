@@ -391,11 +391,11 @@ test('graph identity isolates session-scoped model input adapters', () => {
   };
   const first = buildTestLocalChatAgentInput({
     ...params,
-    modelInputCacheKey: 'session-a',
+    sessionContextCacheKey: 'session-a',
   });
   const second = buildTestLocalChatAgentInput({
     ...params,
-    modelInputCacheKey: 'session-b',
+    sessionContextCacheKey: 'session-b',
   });
 
   assert.notEqual(first.graphKey, second.graphKey);

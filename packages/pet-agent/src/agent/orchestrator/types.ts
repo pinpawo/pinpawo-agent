@@ -6,7 +6,11 @@ import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent';
 import type { CapabilityArtifactRef, CapabilityArtifactStore } from '../../types/artifact';
 import type { SubagentCompletionReason } from '../../types/subagent';
-import type { AgentToolkit, ToolkitReviewCapabilities } from '../../types/toolkit';
+import type {
+  AgentToolkit,
+  ModelInputModality,
+  ToolkitReviewCapabilities,
+} from '../../types/toolkit';
 import type { CompiledAgentRegistry } from './registry';
 import type { CapabilityPlannerRunner } from './capabilityPlanner/runner';
 import type { CapabilityRegistryBackend } from './capabilityPlanner/registryDocuments';
@@ -87,6 +91,12 @@ export type StructuredOrchestrationDecisionModel = {
 
 export type OrchestratorConfig = {
   models: AgentModels;
+  /**
+   * Input modalities accepted by the active model profile. Tools declaring
+   * `requiresInputModalities` bind only when this covers them; omitting it is
+   * read as text-only.
+   */
+  modelInputModalities?: readonly ModelInputModality[];
   actor?: AgentActor;
   checkpoint?: BaseCheckpointSaver;
   /**

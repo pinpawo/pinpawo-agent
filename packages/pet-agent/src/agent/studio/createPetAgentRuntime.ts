@@ -56,6 +56,7 @@ export type PetAgentRuntimeConfig = {
    */
   humanReviewer?: HumanReviewer;
   graph?: OrchestratorGraph;
+  modelInputModalities?: OrchestratorConfig['modelInputModalities'];
   checkpoint?: OrchestratorConfig['checkpoint'];
   decisionStructuredOutput?: OrchestratorConfig['decisionStructuredOutput'];
   contextWindowTokens?: OrchestratorConfig['contextWindowTokens'];
@@ -141,6 +142,7 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
   const startupMode = config.startupMode ?? 'standby';
   const graph = config.graph ?? createOrchestratorGraph({
     models: config.models,
+    modelInputModalities: config.modelInputModalities,
     actor: config.actor,
     checkpoint: config.checkpoint,
     decisionStructuredOutput: config.decisionStructuredOutput,

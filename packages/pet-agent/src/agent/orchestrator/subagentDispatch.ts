@@ -1,6 +1,7 @@
 import type { StructuredTool } from '@langchain/core/tools';
 import type {
   AgentToolkit,
+  ModelInputModality,
 } from '../../types/toolkit';
 import type { SubagentToolOperationMetadata } from '../../types/subagent';
 import {
@@ -73,6 +74,20 @@ export function collectToolkitOperations(
   return operations;
 }
 
+/**
+ * A tool binds when the active model profile covers every modality it needs.
+ * Profiles that do not declare modalities are treated as text-only, so a tool
+ * that needs more is withheld rather than bound to a model that cannot use it.
+ */
+function supportsInputModalities(
+  required: readonly ModelInputModality[] | undefined,
+  supported: readonly ModelInputModality[] | undefined,
+) {
+  if (!required || required.length === 0) return true;
+  const available = supported ?? ['text'];
+  return required.every((modality) => available.includes(modality));
+}
+
 export async function resolveToolkitExecution(
   toolkits: AgentToolkit[],
   names: string[] | undefined,
@@ -91,10 +106,13 @@ export async function resolveToolkitExecution(
   const tools: StructuredTool[] = [];
   const reviewBindings: ToolkitReviewBinding[] = [];
   for (const toolkit of selectedToolkits) {
-    const toolkitTools = toolkit.tools.map((definition) => definition.tool);
+    const boundDefinitions = toolkit.tools.filter((definition) => (
+      supportsInputModalities(definition.requiresInputModalities, ctx.modelInputModalities)
+    ));
+    const toolkitTools = boundDefinitions.map((definition) => definition.tool);
     tools.push(...toolkitTools);
     if (ctx.globalReviewPolicy?.mode !== GLOBAL_REVIEW_POLICY_MODE.FULL_ACCESS) {
-      for (const definition of toolkit.tools) {
+      for (const definition of boundDefinitions) {
         if (!definition.review) {
           continue;
         }

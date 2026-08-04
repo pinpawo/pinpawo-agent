@@ -21,6 +21,7 @@ import {
   SUBAGENT_PROMPT_SECTIONS_EVENT,
 } from './createSubagent';
 import { NamespacedProtocolToolEventReader } from './protocolToolEvents';
+import { markTransientModelMedia } from './transientModelMedia';
 import type {
   SubagentRuntimeContext,
   SubagentToolLifecycleEvent,
@@ -295,6 +296,97 @@ test('createSubagent summarizes persisted history from contextWindowTokens', asy
   assert.match(String(summary.content), /Earlier subagent context summary:/);
   assert.match(String(summary.content), /preserved summary with src\/a\.ts/);
   assert.equal(result.messages.some((message) => message.content === oldContext), false);
+});
+
+test('context summarization never sees transient image payloads', async () => {
+  const imageUrl = `data:image/png;base64,${'A'.repeat(4000)}`;
+  const summarizerInputs: string[] = [];
+  class RecordingSummaryModel extends FakeListChatModel {
+    override async _generate(messages: never, options: never, runManager: never) {
+      summarizerInputs.push(JSON.stringify(messages));
+      return super._generate(messages, options, runManager);
+    }
+  }
+  const screenshot = markTransientModelMedia(new HumanMessage({
+    content: [
+      { type: 'text', text: 'Browser screenshot from the preceding tool result.' },
+      { type: 'image_url', image_url: { url: imageUrl } },
+    ],
+  }));
+
+  const result = await createSubagent({
+    model: new RecordingSummaryModel({
+      responses: ['summary of the earlier investigation', 'subagent result'],
+      sleep: 0,
+    }),
+    tools: [],
+    promptSections: [],
+    contextWindowTokens: 1000,
+    messages: [
+      new HumanMessage(`old investigation evidence\n${'x'.repeat(1200)}`),
+      new AIMessage(`Looking at the page.\n${'y'.repeat(1200)}`),
+      screenshot,
+      new AIMessage(`The layout is broken.\n${'w'.repeat(1200)}`),
+      new HumanMessage('Continue the delegated task.'),
+    ],
+    maxIterations: 4,
+  });
+
+  assert.equal(result.completionReason, 'natural');
+  assert.ok(
+    result.messages.some(
+      (message) => message.additional_kwargs?.lc_source === 'summarization',
+    ),
+    'expected summarization to run',
+  );
+  // The summary prompt renders history as text, so a base64 payload reaching it
+  // would be inlined verbatim and blow up the summarization request.
+  assert.ok(summarizerInputs.length > 0);
+  for (const input of summarizerInputs) {
+    assert.doesNotMatch(input, /base64,A{100}/);
+  }
+  assert.ok(
+    summarizerInputs.some((input) => input.includes('omitted from summary')),
+    'expected the image to be replaced by a text stand-in',
+  );
+});
+
+test('summarization preserves the real image when it keeps the message', async () => {
+  const imageUrl = `data:image/png;base64,${'B'.repeat(4000)}`;
+  const screenshot = markTransientModelMedia(new HumanMessage({
+    content: [
+      { type: 'text', text: 'Browser screenshot from the preceding tool result.' },
+      { type: 'image_url', image_url: { url: imageUrl } },
+    ],
+  }));
+
+  const result = await createSubagent({
+    model: new FakeListChatModel({
+      responses: ['summary of the earlier investigation', 'subagent result'],
+      sleep: 0,
+    }),
+    tools: [],
+    promptSections: [],
+    contextWindowTokens: 1000,
+    messages: [
+      new HumanMessage(`old investigation evidence\n${'x'.repeat(1600)}`),
+      new AIMessage(`Older reasoning.\n${'y'.repeat(1600)}`),
+      new HumanMessage('Continue the delegated task.'),
+      screenshot,
+    ],
+    maxIterations: 4,
+  });
+
+  assert.equal(result.completionReason, 'natural');
+  assert.ok(
+    result.messages.some(
+      (message) => message.additional_kwargs?.lc_source === 'summarization',
+    ),
+    'expected summarization to run',
+  );
+  // A screenshot recent enough to survive the cutoff must come back with its
+  // image intact, not as the summary-only stand-in.
+  assert.match(JSON.stringify(result.messages), /base64,B{100}/);
 });
 
 test('createSubagent throws instead of committing an error summary', async () => {

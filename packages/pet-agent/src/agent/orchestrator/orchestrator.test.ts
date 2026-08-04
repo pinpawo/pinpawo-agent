@@ -14,6 +14,7 @@ import {
 import type { AgentActor, AgentModels } from '../../types/agent';
 import type {
   AgentToolkit,
+  ModelInputModality,
   ToolDefinition,
   ToolReviewPolicy,
 } from '../../types/toolkit';
@@ -1694,6 +1695,41 @@ test('toolkits compose tools and instructions for capability runtimes', async ()
   assert.equal(browserExecution.toolkits[0]?.instructions, 'browser rules');
   assert.deepEqual(allExecution.tools.map((toolItem) => toolItem.name), ['browser_open', 'read_file']);
 
+});
+
+test('tools requiring an input modality bind only to model profiles that accept it', async () => {
+  const readText = mockTool('read_text');
+  const readImage = mockTool('read_image');
+  const toolkits: AgentToolkit[] = [{
+    name: 'inspect',
+    description: 'inspection toolkit',
+    tools: [
+      { tool: readText },
+      { tool: readImage, requiresInputModalities: ['image'] },
+    ],
+  }];
+  const resolve = (modelInputModalities?: readonly ModelInputModality[]) =>
+    resolveToolkitExecution(toolkits, undefined, {
+      models: {} as AgentModels,
+      ...(modelInputModalities ? { modelInputModalities } : {}),
+      actor: testActor,
+      messages: [],
+    });
+
+  assert.deepEqual(
+    (await resolve(['text'])).tools.map((toolItem) => toolItem.name),
+    ['read_text'],
+  );
+  assert.deepEqual(
+    (await resolve(['text', 'image'])).tools.map((toolItem) => toolItem.name),
+    ['read_text', 'read_image'],
+  );
+  // An unstated profile is text-only, so the image tool stays unbound rather
+  // than reaching a model that cannot read its result.
+  assert.deepEqual(
+    (await resolve()).tools.map((toolItem) => toolItem.name),
+    ['read_text'],
+  );
 });
 
 test('capability receives tools only from Toolkits authorized by fixed uses', async () => {

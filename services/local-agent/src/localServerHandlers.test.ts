@@ -8,6 +8,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import type { BaseMessage } from '@langchain/core/messages';
 import type { CapabilityArtifactStore } from '@pinpawo/pet-agent';
 import type { LocalAgentGraphService } from './agentGraphService';
 import { createLocalServerHandlers } from './localServerHandlers';
@@ -643,7 +644,7 @@ test('model selection is rejected while checkpoint state has pending review', as
   }
 });
 
-test('image admission persists a monotonic requirement and gates model selection', async () => {
+test('admitted images gate model selection through the transcript', async () => {
   const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-model-image-ledger-'));
   const imagePath = join(workdir, 'renamed.bin');
   writeFileSync(imagePath, Buffer.concat([
@@ -654,6 +655,17 @@ test('image admission persists a monotonic requirement and gates model selection
   const sent: LocalAgentServerMessage[] = [];
   const peer = createPeer(sent);
   let providerMessage: { content?: unknown } | undefined;
+  // The graph is stubbed, so stand in for the checkpoint the real run would
+  // have written: the admitted message is what the session's modalities are
+  // derived from.
+  const persistedMessages: BaseMessage[] = [];
+  const graphService = {
+    readThreadState: async () => ({
+      messages: persistedMessages,
+      pendingHumanReview: null,
+      hasPendingContinuation: false,
+    }),
+  } as unknown as LocalAgentGraphService;
   const handlers = createLocalServerHandlers({
     actorId: 'pet-a',
     workdir,
@@ -676,8 +688,12 @@ test('image admission persists a monotonic requirement and gates model selection
     capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,
+    chatGraphService: graphService,
     runChat: async (options) => {
       providerMessage = await options.prepareUserMessage?.();
+      if (providerMessage) {
+        persistedMessages.push(providerMessage as BaseMessage);
+      }
       return { status: 'interrupted' };
     },
   });
@@ -704,9 +720,11 @@ test('image admission persists a monotonic requirement and gates model selection
         name: 'renamed.bin',
       }],
     });
+    // Images travel as standard data URLs, so nothing has to resolve a custom
+    // reference scheme before the model call.
     const serializedMessage = JSON.stringify(providerMessage?.content);
-    assert.match(serializedMessage, /pinpawo-local-image:/);
-    assert.doesNotMatch(serializedMessage, /base64|renamed\.bin/);
+    assert.match(serializedMessage, /data:image\/png;base64,/);
+    assert.doesNotMatch(serializedMessage, /renamed\.bin/);
 
     await handlers.peerHandlers.onModelList(peer, {
       type: 'model.list',
@@ -761,6 +779,8 @@ test('image admission persists a monotonic requirement and gates model selection
       true,
     );
 
+    // The session file carries no modality ledger: the requirement is read back
+    // off the transcript, so there is no second copy that could drift from it.
     const persisted = JSON.parse(
       readFileSync(runtimeConfig.tuiSessionPath, 'utf8'),
     ) as {
@@ -768,7 +788,7 @@ test('image admission persists a monotonic requirement and gates model selection
     };
     assert.deepEqual(
       persisted.sessions[sessionId]?.requiredInputModalities,
-      ['text', 'image'],
+      ['text'],
     );
   } finally {
     handlers.close();

@@ -115,7 +115,11 @@ test('adapter drops synthetic assistant messages written by prepare', () => {
           event: 'content-block-delta',
           delta: {
             type: 'text-delta',
-            text: '<delegation_briefing mode="continue">',
+            text: [
+              '<delegation_briefing role="task_boundary" source="orchestrator" mode="continue">',
+              '  <task><![CDATA[continue the delegated task]]></task>',
+              '</delegation_briefing>',
+            ].join('\n'),
           },
         },
       },
@@ -134,45 +138,14 @@ test('adapter drops synthetic assistant messages written by prepare', () => {
   assert.deepEqual(events, [null, null, null]);
 });
 
-test('adapter hides private delegation briefing XML in child message scopes', () => {
+test('adapter preserves briefing-shaped subagent output from a user-visible child scope', () => {
   const state: RootStreamAdapterState = new Map();
   const namespace = ['general:task-1', 'model:task-2'];
-  const briefing = [
+  const text = [
     '<delegation_briefing role="task_boundary" source="orchestrator" mode="continue">',
     '  <task><![CDATA[continue the delegated task]]></task>',
     '</delegation_briefing>',
   ].join('\n');
-
-  assert.equal(readRootStreamChatEvent({
-    type: 'event',
-    seq: 1,
-    method: 'messages',
-    params: { namespace, data: { event: 'message-start', id: 'briefing-1' } },
-  }, state), null);
-  assert.equal(readRootStreamChatEvent({
-    type: 'event',
-    seq: 2,
-    method: 'messages',
-    params: {
-      namespace,
-      data: {
-        event: 'content-block-delta',
-        delta: { type: 'text-delta', text: briefing },
-      },
-    },
-  }, state), null);
-  assert.equal(readRootStreamChatEvent({
-    type: 'event',
-    seq: 3,
-    method: 'messages',
-    params: { namespace, data: { event: 'message-finish' } },
-  }, state), null);
-});
-
-test('adapter preserves subagent output that merely uses delegation briefing tags', () => {
-  const state: RootStreamAdapterState = new Map();
-  const namespace = ['general:task-1', 'model:task-2'];
-  const text = '<delegation_briefing mode="initial">low-quality result</delegation_briefing>';
 
   readRootStreamChatEvent({
     type: 'event',

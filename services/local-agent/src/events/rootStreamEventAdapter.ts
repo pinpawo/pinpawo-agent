@@ -121,17 +121,6 @@ function isInternalOrchestratorNamespace(namespace: string[]) {
   return node !== null && isOrchestratorInternalAiStreamNode(node);
 }
 
-function isPrivateDelegationBriefing(message: string) {
-  const text = message.trim();
-  const openingTagEnd = text.indexOf('>');
-  if (openingTagEnd < 0 || !text.endsWith('</delegation_briefing>')) {
-    return false;
-  }
-  const openingTag = text.slice(0, openingTagEnd + 1);
-  return /^<delegation_briefing\b/.test(openingTag)
-    && /\bsource=(['"])orchestrator\1/.test(openingTag);
-}
-
 /**
  * Per-namespace lifecycle tracking: `content-block-delta` events carry no
  * message id — within one namespace they belong to the message opened by the
@@ -222,9 +211,6 @@ export function readRootStreamChatEvent(
           const message = current.buffer;
           current.buffer = '';
           if (!message) {
-            return null;
-          }
-          if (isPrivateDelegationBriefing(message)) {
             return null;
           }
           // A same-namespace state echo replays the message as a second

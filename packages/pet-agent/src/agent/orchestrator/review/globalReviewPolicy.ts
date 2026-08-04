@@ -171,6 +171,9 @@ async function resolveAutoAuthorization(
         new SystemMessage(buildAutoReviewSystemPrompt(options.reviews, structuredOutput?.method)),
         new HumanMessage(prompt.text),
       ],
+      // The decision is private verifier output, not delegated-agent progress.
+      // Do not inherit the root stream callbacks that project model messages.
+      runnableConfig: { callbacks: [] },
     });
 
     if (decision.decision === GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE) {

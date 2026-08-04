@@ -155,25 +155,74 @@ function readRuntimeEventData(data: unknown): Record<string, unknown> | null {
     : null;
 }
 
-/**
- * Toolkit authorization runtime events arrive as `runtime.custom` chat events
- * from the root protocol stream (#322); map the known names to user notices.
- */
+function readRuntimeText(value: unknown, maxLength = 500): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value.replace(/\s+/g, ' ').trim();
+  return text ? text.slice(0, maxLength) : null;
+}
+
+function readRuntimeToolActions(data: Record<string, unknown> | null) {
+  const toolCalls = Array.isArray(data?.toolCalls) ? data.toolCalls : [];
+  const actions = toolCalls.flatMap((toolCall) => {
+    const entry = readRuntimeEventData(toolCall);
+    const toolName = readRuntimeText(entry?.toolName, 80);
+    if (!toolName) return [];
+    const toolkitName = readRuntimeText(entry?.toolkitName, 80);
+    return [toolkitName ? `${toolkitName} · ${toolName}` : toolName];
+  });
+  if (actions.length > 0) return [...new Set(actions)].slice(0, 6);
+  const toolName = readRuntimeText(data?.toolName, 80);
+  return toolName ? [toolName] : [];
+}
+
+function authorizationOperationEvent(
+  name: string,
+  rawData: unknown,
+  requestId: string,
+  sequence: number,
+): Extract<AgentRuntimeEvent, { type: 'operation' }> | null {
+  const isAuto = name === GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.AUTO_AUTHORIZED;
+  const isCustom = name === GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.CUSTOM_AUTHORIZED;
+  if (!isAuto && !isCustom) return null;
+
+  const data = readRuntimeEventData(rawData);
+  const actions = readRuntimeToolActions(data);
+  const reason = readRuntimeText(data?.reason);
+  const reportedBatchSize = typeof data?.batchSize === 'number'
+    && Number.isInteger(data.batchSize)
+    && data.batchSize > 0
+    ? data.batchSize
+    : null;
+  const batchSize = reportedBatchSize ?? Math.max(1, actions.length);
+  const label = isAuto ? '自动授权' : '按策略授权';
+
+  return {
+    type: 'operation',
+    requestId,
+    phase: 'completed',
+    operation: {
+      id: `authorization:${name}:${sequence}`,
+      kind: 'runtime.authorization',
+      title: batchSize > 1 ? `${label} · ${batchSize} 项操作` : label,
+      ...(actions.length > 0 ? { summary: actions.join(' · ') } : {}),
+      ...((actions.length > 0 || reason)
+        ? {
+            details: {
+              ...(actions.length > 0 ? { actions } : {}),
+              ...(reason ? { reason } : {}),
+            },
+          }
+        : {}),
+      source: {
+        provider: 'runtime',
+        name: 'global_review_policy',
+      },
+    },
+  };
+}
+
+/** Keep human-recorded session authorization as a compact notice. */
 function formatToolAuthorizationNotice(name: string, rawData: unknown): string | null {
-  if (name === GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.AUTO_AUTHORIZED) {
-    const data = readRuntimeEventData(rawData);
-    const toolName = typeof data?.toolName === 'string' ? data.toolName : null;
-    return toolName
-      ? `已自动授权 ${toolName} 操作。`
-      : '已自动授权工具操作。';
-  }
-  if (name === GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.CUSTOM_AUTHORIZED) {
-    const data = readRuntimeEventData(rawData);
-    const toolName = typeof data?.toolName === 'string' ? data.toolName : null;
-    return toolName
-      ? `已根据全局策略授权 ${toolName} 操作。`
-      : '已根据全局策略授权工具操作。';
-  }
   if (name !== 'tool_authorization_recorded') {
     return null;
   }
@@ -407,6 +456,16 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
             if (operations) {
               acceptDelegationOperations?.(operations);
             }
+            break;
+          }
+          const authorization = authorizationOperationEvent(
+            chatEvent.name,
+            chatEvent.data,
+            requestId,
+            chatEvent.sequence,
+          );
+          if (authorization) {
+            emitEvent(authorization);
             break;
           }
           const notice = formatToolAuthorizationNotice(chatEvent.name, chatEvent.data);

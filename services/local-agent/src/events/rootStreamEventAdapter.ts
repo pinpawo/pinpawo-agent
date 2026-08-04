@@ -58,7 +58,7 @@ export type RootStreamChatEvent =
   /** A guard decision record (orchestrator via stream writer; subagent after Phase 4). */
   | { type: 'guard.decision'; record: GuardDecisionRecord }
   /** Any other custom runtime event written to the stream writer. */
-  | { type: 'runtime.custom'; name: string; data: unknown }
+  | { type: 'runtime.custom'; sequence: number; name: string; data: unknown }
   /** Root state snapshot (drives final-messages tracking). */
   | { type: 'values'; values: Record<string, unknown> }
   /** The run paused on an interrupt (human review etc.). */
@@ -119,6 +119,17 @@ function defaultIsMainAssistantNode(node: string | null): boolean {
 function isInternalOrchestratorNamespace(namespace: string[]) {
   const node = readNamespaceNode(namespace);
   return node !== null && isOrchestratorInternalAiStreamNode(node);
+}
+
+function isPrivateDelegationBriefing(message: string) {
+  const text = message.trim();
+  const openingTagEnd = text.indexOf('>');
+  if (openingTagEnd < 0 || !text.endsWith('</delegation_briefing>')) {
+    return false;
+  }
+  const openingTag = text.slice(0, openingTagEnd + 1);
+  return /^<delegation_briefing\b/.test(openingTag)
+    && /\bsource=(['"])orchestrator\1/.test(openingTag);
 }
 
 /**
@@ -213,6 +224,9 @@ export function readRootStreamChatEvent(
           if (!message) {
             return null;
           }
+          if (isPrivateDelegationBriefing(message)) {
+            return null;
+          }
           // A same-namespace state echo replays the message as a second
           // full-content lifecycle; drop consecutive identical messages.
           if (message === current.lastEmitted) {
@@ -264,9 +278,19 @@ export function readRootStreamChatEvent(
         return record ? { type: 'guard.decision', record: record as GuardDecisionRecord } : null;
       }
       if (typeof data.name === 'string') {
-        return { type: 'runtime.custom', name: data.name, data: data.data };
+        return {
+          type: 'runtime.custom',
+          sequence: event.seq,
+          name: data.name,
+          data: data.data,
+        };
       }
-      return { type: 'runtime.custom', name: 'unknown', data: data.payload ?? data };
+      return {
+        type: 'runtime.custom',
+        sequence: event.seq,
+        name: 'unknown',
+        data: data.payload ?? data,
+      };
     }
 
     case 'values': {

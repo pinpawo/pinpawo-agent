@@ -103,6 +103,33 @@ test('operation display keeps running and terminal phases distinct', () => {
   assert.match(interrupted, /已中断/);
 });
 
+test('operation display renders structured authorization details without raw field labels', () => {
+  const lines = buildOperationDisplayLines(operation({
+    kind: 'runtime.authorization',
+    title: '自动授权 · 2 项操作',
+    phase: 'completed',
+    summary: 'shell · which · shell · version',
+    details: {
+      actions: ['shell · which', 'shell · version'],
+      reason: 'Both actions are read-only observations.',
+    },
+    operationSource: {
+      provider: 'runtime',
+      name: 'global_review_policy',
+    },
+  }), 3_500, 100);
+
+  assert.deepEqual(lines, [{
+    text: '自动授权 · 2 项操作（完成）',
+  }, {
+    text: '  shell · which · shell · version',
+    tone: 'muted',
+  }, {
+    text: '  原因：Both actions are read-only observations.',
+    tone: 'muted',
+  }]);
+});
+
 function operation(
   overrides: Partial<AgentOperationEntry>,
 ): AgentOperationEntry {

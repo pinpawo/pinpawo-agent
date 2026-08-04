@@ -25,6 +25,8 @@ export function buildOperationDisplayLines(
   width = Number.POSITIVE_INFINITY,
   headerWidth = width,
 ): OperationDisplayLine[] {
+  const authorizationLines = buildAuthorizationDisplayLines(entry, now, width, headerWidth);
+  if (authorizationLines) return authorizationLines;
   return [{
     text: buildOperationHeader(entry, now, headerWidth),
   }, ...buildOperationPayloadLines(entry, width)];
@@ -35,14 +37,54 @@ function buildOperationHeader(
   now: number,
   width: number,
 ) {
+  return buildOperationHeaderText(operationBody(entry), entry, now, width);
+}
+
+function buildOperationHeaderText(
+  body: string,
+  entry: AgentOperationEntry,
+  now: number,
+  width: number,
+) {
   const suffix = `（${operationStatus(entry, now)}）`;
-  const body = operationBody(entry);
   const line = `${body}${suffix}`;
   if (stringWidth(line) <= width) return sanitizeLine(line, width);
 
   const suffixWidth = stringWidth(suffix);
   if (suffixWidth >= width) return sanitizeLine(suffix, width);
   return `${sanitizeLine(body, width - suffixWidth)}${suffix}`;
+}
+
+function buildAuthorizationDisplayLines(
+  entry: AgentOperationEntry,
+  now: number,
+  width: number,
+  headerWidth: number,
+): OperationDisplayLine[] | null {
+  if (entry.kind !== 'runtime.authorization') return null;
+  const actions = readDetailStrings(entry.details?.actions);
+  const reason = readDetailText(entry.details?.reason);
+  return [{
+    text: buildOperationHeaderText(entry.title, entry, now, headerWidth),
+  }, ...(actions.length > 0 ? [{
+    text: sanitizeLine(`  ${actions.join(' · ')}`, width),
+    tone: 'muted' as const,
+  }] : []), ...(reason ? [{
+    text: sanitizeLine(`  原因：${reason}`, width),
+    tone: 'muted' as const,
+  }] : [])];
+}
+
+function readDetailStrings(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const text = readDetailText(item);
+    return text ? [text] : [];
+  });
+}
+
+function readDetailText(value: unknown) {
+  return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : null;
 }
 
 function operationStatus(entry: AgentOperationEntry, now: number) {

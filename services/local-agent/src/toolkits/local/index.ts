@@ -31,7 +31,6 @@ import { downloadFileTool, httpFetchTool, networkOperationMetadata } from './net
 import { jqQueryTool, jsonOperationMetadata } from './jsonTools';
 import { gitTools, gitOperationMetadata } from './gitTools';
 import { globSearchTool, grepSearchTool, searchOperationMetadata } from './searchTools';
-import { wrapToolCancellation } from './toolCancellation';
 import {
   getCurrentTimeTool,
   normalizeShellActionInput,
@@ -76,7 +75,7 @@ function createToolDefinitions(
   reviews: Record<string, ToolReviewPolicy> = {},
 ) {
   return tools.map((toolItem) => ({
-    tool: wrapToolCancellation(toolItem),
+    tool: toolItem,
     operation: operations[toolItem.name],
     review: reviews[toolItem.name],
   }));

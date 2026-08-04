@@ -97,6 +97,11 @@ export {
   TOOLKIT_REVIEW_GUIDANCE_FIELD_MAX_CHARS,
   validateToolkitDefinition,
 } from './types/toolkit';
+export {
+  createAbortError,
+  isAbortError,
+  wrapToolCancellation,
+} from './types/toolCancellation';
 
 export {
   buildOrchestratorRunInput,

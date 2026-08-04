@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { isAbortError, wrapToolCancellation } from './toolCancellation';
+import { defineToolkit } from './toolkit';
 
 function makeTool(
   name: string,
@@ -95,4 +96,47 @@ test('preserves tool identity used for review and operation lookup', async () =>
   assert.equal(wrapped.name, 'run_shell');
   assert.equal(wrapped.description, 'run_shell');
   assert.ok(wrapped.schema, 'schema must remain reachable');
+});
+
+test('defineToolkit applies the guard to every tool it defines', async () => {
+  // The contract-level guarantee: a toolkit author gets cancellation
+  // propagation without opting in.
+  const controller = new AbortController();
+  const toolkit = defineToolkit({
+    name: 'demo',
+    description: 'demo toolkit',
+    tools: [
+      {
+        tool: makeTool('swallows', async () => {
+          controller.abort();
+          return 'Error: aborted but swallowed';
+        }),
+      },
+    ],
+  });
+
+  await assert.rejects(
+    () => toolkit.tools[0].tool.invoke({}, { signal: controller.signal }),
+    (err: unknown) => isAbortError(err),
+  );
+});
+
+test('defineToolkit keeps operation and review metadata intact', () => {
+  const review = { request: () => null };
+  const toolkit = defineToolkit({
+    name: 'demo',
+    description: 'demo toolkit',
+    tools: [
+      {
+        tool: makeTool('kept', async () => 'ok'),
+        operation: { title: '保留' },
+        review,
+      },
+    ],
+  });
+
+  const [definition] = toolkit.tools;
+  assert.equal(definition.tool.name, 'kept');
+  assert.equal(definition.operation?.title, '保留');
+  assert.equal(definition.review, review);
 });

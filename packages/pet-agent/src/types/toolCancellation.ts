@@ -8,9 +8,17 @@ import type { StructuredTool } from '@langchain/core/tools';
  * tool's own catch block, and comes back as an ordinary result. LangGraph then
  * treats the interrupted call as a successful one and keeps the run going.
  *
- * This wrapper closes that gap at the toolkit boundary instead of asking every
- * tool to handle it. Whatever a tool returns or throws, an aborted signal turns
- * the call into a thrown `AbortError` so the graph unwinds.
+ * Two things are easy to conflate here, and only one of them belongs to the
+ * toolkit contract:
+ *
+ * - *Whether* cancellation propagates is uniform. No tool — half-written file,
+ *   interrupted browser action, partial remote write — should let the model
+ *   believe an aborted step succeeded. That is protocol correctness, so
+ *   `defineToolkit` enforces it for every toolkit.
+ * - *How* a tool cleans up when cancelled varies: roll back, delete a partial
+ *   file, close a tab, or do nothing. That is the tool's own decision, and
+ *   this wrapper deliberately does not touch it. A tool is free to catch the
+ *   abort, clean up, and rethrow.
  */
 
 export function createAbortError() {

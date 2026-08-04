@@ -4,6 +4,7 @@ import {
 } from '@langchain/core/tools';
 import type { ReviewSpec } from '../agent/orchestrator/review/reviewSpec';
 import type { ToolAuthorizationMatcher } from '../agent/orchestrator/review/authorizationMatchers';
+import { wrapToolCancellation } from './toolCancellation';
 
 export type ToolkitReviewCapabilities = {
   humanReview: boolean;
@@ -295,5 +296,14 @@ export function defineToolkit<
   definition: Omit<AgentToolkit, 'tools'> & { tools: TTools },
 ): Omit<AgentToolkit, 'tools'> & { tools: TTools } {
   validateToolkitDefinition(definition);
-  return definition;
+  return {
+    ...definition,
+    // Cancellation must never reach the graph as a successful result. How a
+    // tool cleans up when cancelled is its own business; that it propagates
+    // at all is the toolkit contract's.
+    tools: definition.tools.map((toolDefinition) => ({
+      ...toolDefinition,
+      tool: wrapToolCancellation(toolDefinition.tool),
+    })) as unknown as TTools,
+  };
 }

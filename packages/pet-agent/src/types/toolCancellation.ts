@@ -49,7 +49,8 @@ function readSignal(config: unknown): AbortSignal | undefined {
  * missing file still reaches the model as its usual string result.
  */
 export function wrapToolCancellation<TTool extends StructuredTool>(tool: TTool): TTool {
-  return new Proxy(tool, {
+  let wrapped!: TTool;
+  wrapped = new Proxy(tool, {
     get(target, prop, receiver) {
       if (prop !== 'invoke') {
         return Reflect.get(target, prop, receiver);
@@ -68,8 +69,14 @@ export function wrapToolCancellation<TTool extends StructuredTool>(tool: TTool):
           throw createAbortError();
         }
         try {
+          // A runtime binding may layer another Proxy around this cancellation
+          // guard to replace only the execution implementation. Preserve that
+          // outer receiver; only unwrap calls made directly on this guard.
+          const invocationReceiver = this === wrapped || this == null
+            ? target
+            : this;
           const result = await (invoke as (i: unknown, c?: unknown) => Promise<unknown>)
-            .call(this === receiver ? target : this, input, config);
+            .call(invocationReceiver, input, config);
           // The tool may have caught the abort internally and returned a
           // normal value; the signal is the authority on whether the result
           // is still wanted.
@@ -86,4 +93,5 @@ export function wrapToolCancellation<TTool extends StructuredTool>(tool: TTool):
       };
     },
   });
+  return wrapped;
 }

@@ -6,56 +6,53 @@ import test from 'node:test';
 import { isCommand } from '@langchain/langgraph';
 import { getLocalToolsWorkdir, setLocalToolsWorkdir } from '../local/pathUtils';
 import { persistBrowserScreenshot } from './screenshot';
-import { browserSession } from './session';
-import { browserTools } from './tools';
+import { createBrowserTools, type BrowserToolkitSession } from './tools';
 
-process.env.LANGCHAIN_TRACING_V2 = 'false';
-process.env.LANGSMITH_TRACING = 'false';
-
-function readErrorCode(result: unknown): string | undefined {
-  const parsed = JSON.parse(String(result)) as {
-    error?: {
-      code?: string;
-    };
+function session(value: string): BrowserToolkitSession {
+  const result = async () => value;
+  return {
+    open: result,
+    openWithProfile: result,
+    snapshot: result,
+    click: result,
+    type: result,
+    scroll: result,
+    wait: result,
+    extract: result,
+    screenshot: result,
+    close: result,
+    listSessions: async () => [],
   };
-  return parsed.error?.code;
 }
 
-test('browser tools require the delegation scope supplied through tool runtime', async () => {
-  const snapshotTool = browserTools.find((toolItem) =>
-    toolItem.name === 'browser_snapshot');
-  assert.ok(snapshotTool);
+test('Browser tools execute through their resolved runtime binding', async () => {
+  const first = createBrowserTools(session('first'));
+  const second = createBrowserTools(session('second'));
+  const firstSnapshot = first.find(({ name }) => name === 'browser_snapshot');
+  const secondSnapshot = second.find(({ name }) => name === 'browser_snapshot');
 
-  const missingScope = await snapshotTool.invoke({});
-  assert.equal(readErrorCode(missingScope), 'browser_context_missing');
-
-  const scoped = await snapshotTool.invoke({}, {
-    context: {
-      executionScope: {
-        threadId: 'thread-1',
-        runId: 'run-1',
-        delegationId: 'delegation-1',
-      },
-    },
-  });
-  assert.equal(readErrorCode(scoped), 'browser_not_open');
+  assert.ok(firstSnapshot);
+  assert.ok(secondSnapshot);
+  assert.equal(await firstSnapshot.invoke({}), 'first');
+  assert.equal(await secondSnapshot.invoke({}), 'second');
+  assert.notEqual(firstSnapshot, secondSnapshot);
 });
 
-test('browser screenshot writes its own tool result and image message', async (t) => {
-  const screenshotTool = browserTools.find((toolItem) =>
+test('bound browser screenshot writes its own tool result and image message', async (t) => {
+  const boundSession = session('image');
+  const screenshotTool = createBrowserTools(boundSession).find((toolItem) =>
     toolItem.name === 'browser_screenshot');
+
   assert.ok(screenshotTool);
 
   const previousWorkdir = getLocalToolsWorkdir();
   const workdir = await mkdtemp(resolve(tmpdir(), 'pinpawo-browser-tool-'));
-  const originalScreenshot = browserSession.screenshot;
   setLocalToolsWorkdir(workdir);
-  browserSession.screenshot = async () => persistBrowserScreenshot({
+  boundSession.screenshot = async () => persistBrowserScreenshot({
     mimeType: 'image/png',
     data: Buffer.from('screenshot').toString('base64'),
   });
   t.after(() => {
-    browserSession.screenshot = originalScreenshot;
     setLocalToolsWorkdir(previousWorkdir);
   });
 

@@ -9,8 +9,9 @@ import {
   detectBrowserStatus,
   type BrowserStatus,
 } from './session';
-import { browserTools } from './tools';
+import { browserTools, createBrowserTools } from './tools';
 import { browserOperationMetadata } from './operationMetadata';
+import { browserRuntime, type BrowserRuntimeBinding } from './runtime';
 
 export const BROWSER_TOOLKIT_NAME = 'browser';
 
@@ -87,7 +88,7 @@ export async function checkBrowserAvailability() {
   }
 
   try {
-    const status = await detectBrowserStatus();
+    const status = await detectBrowserStatus(browserRuntime.getSnapshot());
     return rememberBrowserAvailability(buildBrowserAvailabilitySnapshot(status));
   } catch (error) {
     return rememberBrowserAvailability({
@@ -127,6 +128,49 @@ export function createBrowserToolkit(): AgentToolkit {
         ? { requiresInputModalities: ['image'] as const }
         : {}),
     })),
+    runtime: {
+      start: async () => await browserRuntime.start(),
+      resolve: (_root, context) => browserRuntime.resolve(context.execution),
+      bindTools: (binding) => {
+        const browser = binding as BrowserRuntimeBinding;
+        return createBrowserTools({
+          open: (url, options, signal) => browser.session.open(url, options, browser.owner, signal),
+          openWithProfile: (url, userDataDir, options, signal) => browser.session.openWithProfile(
+            url,
+            userDataDir,
+            options,
+            browser.owner,
+            signal,
+          ),
+          snapshot: (signal) => browser.session.snapshot(browser.owner, signal),
+          click: (target, signal) => browser.session.click(target, browser.owner, signal),
+          type: (target, text, submit, signal) => browser.session.type(
+            target,
+            text,
+            submit,
+            browser.owner,
+            signal,
+          ),
+          scroll: (options, signal) => browser.session.scroll(options, browser.owner, signal),
+          wait: (target, timeoutMs, state, signal) => browser.session.wait(
+            target,
+            timeoutMs,
+            state,
+            browser.owner,
+            signal,
+          ),
+          extract: (options, signal) => browser.session.extract(options, browser.owner, signal),
+          screenshot: (signal) => browser.session.screenshot(browser.owner, signal),
+          close: (signal) => browser.session.close(browser.owner, signal),
+          listSessions: () => browser.session.listSessions(),
+        });
+      },
+      release: async (binding) => {
+        const browser = binding as BrowserRuntimeBinding;
+        await browser.session.release(browser.owner);
+      },
+      stop: async () => await browserRuntime.stop(),
+    },
     instructions: browserToolkitInstructions.join('\n'),
   });
 }

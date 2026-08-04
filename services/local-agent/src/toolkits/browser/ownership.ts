@@ -23,6 +23,8 @@ function isSameOwner(
 
 export class BrowserContextOwnership {
   private owner: BrowserExecutionOwner | null = null;
+  /** Last cleanly released owner, eligible to resume the retained page. */
+  private resumableOwner: BrowserExecutionOwner | null = null;
   private operationTail: Promise<void> = Promise.resolve();
 
   private enqueue<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
@@ -65,6 +67,29 @@ export class BrowserContextOwnership {
     }
   }
 
+  acquire(owner: BrowserExecutionOwner | null): Promise<void> {
+    return this.enqueue(async () => {
+      const nextOwner = this.requireOwner(owner);
+      if (
+        !this.owner
+        && this.resumableOwner
+        && isSameOwner(this.resumableOwner, nextOwner)
+      ) {
+        this.owner = nextOwner;
+      }
+    });
+  }
+
+  release(owner: BrowserExecutionOwner | null): Promise<void> {
+    return this.enqueue(async () => {
+      const releasedOwner = this.requireOwner(owner);
+      if (this.owner && isSameOwner(this.owner, releasedOwner)) {
+        this.owner = null;
+        this.resumableOwner = releasedOwner;
+      }
+    });
+  }
+
   runOpen<T>(
     owner: BrowserExecutionOwner | null,
     operation: () => Promise<T>,
@@ -75,11 +100,13 @@ export class BrowserContextOwnership {
       // browser_open is the explicit handoff boundary. Serializing the claim
       // with page operations prevents the previous delegation from acting on
       // the newly opened page after ownership changes.
+      this.resumableOwner = null;
       this.owner = nextOwner;
       try {
         return await operation();
       } catch (error) {
         this.owner = null;
+        this.resumableOwner = null;
         throw error;
       }
     }, signal);
@@ -109,6 +136,7 @@ export class BrowserContextOwnership {
         return await operation();
       } finally {
         this.owner = null;
+        this.resumableOwner = null;
       }
     }, signal);
   }
@@ -119,6 +147,7 @@ export class BrowserContextOwnership {
         return await operation();
       } finally {
         this.owner = null;
+        this.resumableOwner = null;
       }
     });
   }

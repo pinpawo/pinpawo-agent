@@ -2,7 +2,6 @@ import { LocalAgentRuntime } from '../runtime';
 import { startLocalServer } from '../localServer';
 import { getConfig } from '../config';
 import { ensureActorSelected } from '../actorSelection';
-import { browserRuntime, browserSession } from '../toolkits/browser';
 import { applyRuntimeWorkdir } from '../runtimeWorkdir';
 import { logStartupConfig } from '../startupConfigLog';
 import {
@@ -27,7 +26,6 @@ export async function runAgent(options: RunAgentOptions = {}) {
   let stopping = false;
   let runtime: LocalAgentRuntime | null = null;
   let closeLocalTransport: (() => void) | null = null;
-  let browserRuntimeStarted = false;
   const handleSigint = () => {
     if (stopping) {
       console.log('\n[local-agent] force exit now');
@@ -55,10 +53,8 @@ export async function runAgent(options: RunAgentOptions = {}) {
     const runtimeConfig = buildRunAgentRuntimeConfig(options);
     runtime = new LocalAgentRuntime(runtimeConfig);
 
-    await browserRuntime.start();
-    browserRuntimeStarted = true;
-
-    // Init runtime first to load plugins and the effective LLM config.
+    // Init loads Toolkit definitions and starts their optional runtimes before
+    // any local transport begins accepting execution requests.
     await runtime.init();
     logStartupConfig({
       mode: 'run',
@@ -77,6 +73,7 @@ export async function runAgent(options: RunAgentOptions = {}) {
       localToolkits: runtime.getLocalToolkits(),
       pluginToolkitDefinitions: runtime.getPluginToolkitDefinitions(),
       pluginToolkits: runtime.getPluginToolkits(),
+      toolkitRuntimeManager: runtime.getToolkitRuntimeManager(),
       localCapabilities: runtime.getLocalCapabilities(),
       userCapabilities: runtime.getUserCapabilities(),
       capabilityArtifactStore: runtime.getCapabilityArtifactStore(),
@@ -109,15 +106,9 @@ export async function runAgent(options: RunAgentOptions = {}) {
     process.off('SIGINT', handleSigint);
     process.off('SIGTERM', handleSigterm);
     closeLocalTransport?.();
-    runtime?.requestStop();
-    await browserSession.shutdown().catch((error) => {
-      console.warn('[local-agent] failed to close browser session:', error instanceof Error ? error.message : error);
+    await runtime?.shutdown().catch((error) => {
+      console.warn('[local-agent] failed to stop Toolkit runtimes:', error instanceof Error ? error.message : error);
     });
-    if (browserRuntimeStarted) {
-      await browserRuntime.stop().catch((error) => {
-        console.warn('[local-agent] failed to stop browser runtime:', error instanceof Error ? error.message : error);
-      });
-    }
     restoreConsole();
   }
 }

@@ -281,6 +281,7 @@ export class LocalServerTuiSessionService {
         ...(deps.pluginToolkitDefinitions ?? []),
         ...(deps.localToolkitDefinitions ?? []),
       ],
+      toolkitRuntimeManager: deps.toolkitRuntimeManager,
       reportCapabilityDiagnostics: this.reportCapabilityDiagnostics,
       extraCapabilities: deps.localCapabilities,
       threadId,

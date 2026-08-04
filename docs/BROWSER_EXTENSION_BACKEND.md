@@ -2,7 +2,7 @@
 
 The Chrome extension backend uses an existing Chrome installation and its login state. Protocol v3 supports `browser_open`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_scroll`, `browser_wait`, `browser_extract`, `browser_screenshot` and `browser_close` (debugger detach). Named sessions, custom profiles and headless mode remain Playwright-only semantics.
 
-Architecturally, the extension is a driver of the Browser capability, not a top-level local-agent subsystem. Its Native Messaging host is a private companion process of that driver. Local-agent lifecycle and health code depend only on the Browser runtime boundary; no generic host-server abstraction is introduced until another concrete integration proves the shared contract.
+Architecturally, the extension is a driver of the Browser capability, not a top-level local-agent subsystem. Its Native Messaging host is a private companion process of that driver. Browser Runtime owns the bridge, its live snapshot and the `BrowserSession`; the generic Toolkit runtime lifecycle starts that root with the local-agent host, then resolves an execution-bound Browser tool facade for each capability subagent. No Browser-specific branch belongs in the generic host or orchestrator lifecycle.
 
 ## Fixed backend selection
 

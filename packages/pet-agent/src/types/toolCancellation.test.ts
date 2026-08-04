@@ -98,6 +98,20 @@ test('preserves tool identity used for review and operation lookup', async () =>
   assert.ok(wrapped.schema, 'schema must remain reachable');
 });
 
+test('preserves an outer runtime implementation proxy', async () => {
+  const wrapped = wrapToolCancellation(makeTool('runtime_bound', async () => 'static'));
+  const bound = makeTool('runtime_bound', async () => 'bound');
+  const boundCall = Reflect.get(bound as object, '_call', bound) as (...args: unknown[]) => unknown;
+  const executable = new Proxy(wrapped, {
+    get(target, property, receiver) {
+      if (property === '_call') return boundCall.bind(bound);
+      return Reflect.get(target, property, receiver);
+    },
+  });
+
+  assert.equal(await executable.invoke({}), 'bound');
+});
+
 test('defineToolkit applies the guard to every tool it defines', async () => {
   // The contract-level guarantee: a toolkit author gets cancellation
   // propagation without opting in.

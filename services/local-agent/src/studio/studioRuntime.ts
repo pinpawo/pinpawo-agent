@@ -14,6 +14,7 @@ import {
   type PetAgentRuntime,
   type StudioOrchestrator,
   type StudioRunQueueStore,
+  type ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
 
 import {
@@ -65,6 +66,8 @@ export type BuildStudioInput = {
   capabilities: AgentCapability[];
   /** 全局 toolkit 池(plugin + local);所有 pet 共享 */
   toolkits?: AgentToolkit[];
+  /** local-agent process-owned Toolkit runtime lifecycle. */
+  toolkitRuntimeManager?: ToolkitRuntimeManager;
   /** 当前 local-agent 进程的 owner user id;无服务端绑定时为 null */
   ownerUserId: string | null;
   /** ws 桥三件套:供 humanReviewer 绑定到本次 turn 的 ws 连接 */
@@ -180,6 +183,7 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
         ...capsForThisPet.filter(({ name }) => name !== GENERAL_CAPABILITY_NAME),
       ],
       toolkits: input.toolkits,
+      toolkitRuntimeManager: input.toolkitRuntimeManager,
       contextWindowTokens: petLlmConfig.contextWindowTokens,
       subagentContextWindowTokens: petLlmConfig.subagentContextWindowTokens
         ?? petLlmConfig.contextWindowTokens,

@@ -17,6 +17,7 @@ import type {
   ModelInputModality,
   ToolDefinition,
   ToolReviewPolicy,
+  ToolkitRuntimeResolveContext,
 } from '../../types/toolkit';
 import { createSubagent } from '../../subagent/createSubagent';
 import { runAgent } from '../runAgent';
@@ -25,6 +26,7 @@ import {
   createOrchestratorGraph as createRuntimeOrchestratorGraph,
 } from '../createAgentRuntime';
 import { compileAgentRegistry } from './registry';
+import { ToolkitRuntimeManager } from './toolkitRuntime';
 import {
   collectToolkitOperations,
   resolveToolkitExecution,
@@ -1735,6 +1737,8 @@ test('tools requiring an input modality bind only to model profiles that accept 
 test('capability receives tools only from Toolkits authorized by fixed uses', async () => {
   let routeCallCount = 0;
   let capabilityToolNames: string[] = [];
+  let capabilityTools: Array<{ name: string }> = [];
+  const runtimeEvents: string[] = [];
   const routeModel = {
     invoke: async () => new AIMessage('answered'),
     bindTools: () => ({
@@ -1762,8 +1766,12 @@ test('capability receives tools only from Toolkits authorized by fixed uses', as
     bindTools: (tools: Array<{ name: string }>) => unknown;
   }).bindTools = (tools) => {
     capabilityToolNames = tools.map((toolItem) => toolItem.name);
+    capabilityTools = tools;
     return bindTools(tools as never);
   };
+  const staticReadFile = mockTool('read_file');
+  const boundReadFile = mockTool('read_file');
+  const toolkitRuntimeManager = new ToolkitRuntimeManager();
   const runtimeCapability: AgentCapability = {
     name: 'inspect_repo',
     description: 'Inspect repository with bash tools.',
@@ -1779,6 +1787,7 @@ test('capability receives tools only from Toolkits authorized by fixed uses', as
       subagent: subagentModel,
     },
     actor: testActor,
+    toolkitRuntimeManager,
   });
 
   await graph.invoke(buildOrchestratorRunInput([new HumanMessage('inspect')]), {
@@ -1790,7 +1799,21 @@ test('capability receives tools only from Toolkits authorized by fixed uses', as
         {
           name: 'bash',
           description: 'bash toolkit',
-          tools: toolDefinitions(mockTool('read_file')),
+          tools: toolDefinitions(staticReadFile),
+          runtime: {
+            start: () => {
+              runtimeEvents.push('start');
+              return { host: 'local' };
+            },
+            resolve: (_root: unknown, context: ToolkitRuntimeResolveContext) => {
+              runtimeEvents.push(`resolve:${context.execution.delegationId}`);
+              return { host: 'local' };
+            },
+            bindTools: () => [boundReadFile],
+            release: () => {
+              runtimeEvents.push('release');
+            },
+          },
         },
         {
           name: 'browser',
@@ -1808,6 +1831,16 @@ test('capability receives tools only from Toolkits authorized by fixed uses', as
   });
 
   assert.deepEqual(capabilityToolNames, ['read_file']);
+  assert.notEqual(capabilityTools[0], staticReadFile);
+  assert.notEqual(capabilityTools[0], boundReadFile);
+  assert.equal(
+    (capabilityTools[0] as StructuredTool | undefined)?.schema,
+    staticReadFile.schema,
+  );
+  assert.equal(runtimeEvents[0], 'start');
+  assert.match(runtimeEvents[1] ?? '', /^resolve:/);
+  assert.equal(runtimeEvents[2], 'release');
+  await toolkitRuntimeManager.stop();
 });
 
 test('artifact discovery tools reach a selected capability only when declared in uses', async () => {

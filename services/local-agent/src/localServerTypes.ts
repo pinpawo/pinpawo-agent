@@ -3,6 +3,7 @@ import type {
   AgentToolkit,
   BuiltinGlobalReviewPolicyMode,
   CapabilityArtifactStore,
+  ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
 import type { LocalStudioDueRunScheduler } from './localStudioDueRunScheduler';
 import type { LoadedUserCapability } from './capabilityLoader';
@@ -21,6 +22,7 @@ export type LocalServerDeps = {
   localToolkits?: AgentToolkit[];
   pluginToolkitDefinitions?: AgentToolkit[];
   pluginToolkits?: AgentToolkit[];
+  toolkitRuntimeManager?: ToolkitRuntimeManager;
   localCapabilities?: AgentCapability[];
   userCapabilities?: LoadedUserCapability[];
   capabilityArtifactStore?: CapabilityArtifactStore;

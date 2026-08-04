@@ -26,6 +26,11 @@ type LocalAgentCapabilityRegistryOptions = Partial<LocalAgentCapabilityRegistryD
   capabilityArtifactRoot?: string;
 };
 
+export type LoadLocalAgentCapabilityRegistryOptions = {
+  /** Runs after static Toolkit validation and before availability checks. */
+  startToolkitRuntimes?: (toolkits: readonly AgentToolkit[]) => Promise<void>;
+};
+
 const defaultDeps: LocalAgentCapabilityRegistryDeps = {
   loadLocalTools: loadCoreLocalTools,
   loadUserCapabilities,
@@ -59,10 +64,11 @@ export class LocalAgentCapabilityRegistry {
     this.capabilityArtifactStore = new FileCapabilityArtifactStore(capabilityArtifactRoot);
   }
 
-  async load() {
+  async load(options: LoadLocalAgentCapabilityRegistryOptions = {}) {
     this.localTools = await this.deps.loadLocalTools();
     this.localToolkitDefinitions = this.deps.createLocalToolkits(this.localTools);
     this.localToolkitDefinitions.forEach(validateToolkitDefinition);
+    await options.startToolkitRuntimes?.(this.localToolkitDefinitions);
     this.localToolkits = await this.deps.resolveAvailableToolkits(this.localToolkitDefinitions);
     this.localCapabilities = this.deps.createLocalCapabilities();
     this.userCapabilities = await this.deps.loadUserCapabilities();

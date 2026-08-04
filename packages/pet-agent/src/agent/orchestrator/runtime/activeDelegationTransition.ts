@@ -84,7 +84,7 @@ export function applyActiveDelegationTransition(
   return {
     messages: materializedDelegation.laneMessages,
     runNextDelegation,
-    runPendingTask: null,
+    runPlannerReturn: null,
     taskActiveDelegation: {
       ...activeDelegation,
       contextSummary: runNextDelegation.contextSummary,

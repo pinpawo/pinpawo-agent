@@ -13,7 +13,7 @@ export type CapabilityPlanningInput = {
 };
 
 export type CapabilityPlanningExpected = {
-  result: 'plan';
+  result: 'plan' | 'return_to_answer';
   nextTaskTerms?: string[];
   capabilityName?: string;
   remainingPlan: Array<{ taskTerms: string[]; capability: string }>;
@@ -486,6 +486,35 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
       reason: 'A stale pseudo-tool snippet is conversation content, not an available tool; the planner must submit the read-only verification task through its declared tool protocol.',
     },
     metadata: { difficulty: 'hard', reason: 'Trace-derived regression: historic pseudo-tool syntax must not become a planner tool call.', source: SOURCE_FILE },
+  },
+  {
+    id: `${SUITE}.entry-returns-to-answer-before-execution`,
+    name: 'entry-returns-to-answer-before-execution',
+    suite: SUITE,
+    tags: ['capability_planning', 'structured_output', 'context_synthesis'],
+    input: {
+      mode: 'entry',
+      messages: [{
+        role: 'assistant',
+        content: '之前尝试通过浏览器发送钉钉消息失败；目前只确认钉钉由本地 CLI 控制。',
+      }, {
+        role: 'user',
+        content: '看看钉钉 CLI 的使用方式应该直接记录到 wiki，还是创建一个 Capability 来记录。先给我建议并确认方向，不要开始创建。',
+      }],
+      capabilityRegistry: [
+        'capability_creator: create and validate a user-defined Capability',
+        'wiki: read and maintain project knowledge in the wiki',
+      ],
+    },
+    expected: {
+      result: 'return_to_answer',
+      remainingPlan: [],
+      exactRemainingPlanLength: 0,
+      planEffect: 'empty',
+      rubberStamp: false,
+      reason: 'The user requests a recommendation and explicit confirmation before execution, so the Planner returns structured facts to Answer instead of emitting prose or invoking executor tools.',
+    },
+    metadata: { difficulty: 'medium', reason: 'Planner structured no-plan terminal.', source: SOURCE_FILE },
   },
 ];
 

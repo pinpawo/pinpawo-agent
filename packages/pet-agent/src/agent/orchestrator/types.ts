@@ -36,15 +36,20 @@ export type RunNextDelegation = {
   contextSummary: string | null;
 };
 
-export type RunPendingTask = {
-  task: string;
-  contextSummary: string | null;
-};
-
 export type CapabilityPlanTask = {
   /** Planned capability boundary that has not started yet. */
   capability: string;
   task: string;
+};
+
+/**
+ * Bounded planning facts that Answer turns into the user-facing reply when no
+ * execution plan should start in this run.
+ */
+export type PlannerAnswerDisposition = {
+  reason: string;
+  context: string;
+  question: string | null;
 };
 
 export type TaskActiveDelegation = {

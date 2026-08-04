@@ -69,6 +69,9 @@ test('planning datasets cover entry and boundary distributions', () => {
   assert.ok(capabilityPlanningBasicsDataset.cases.some(
     (testCase) => testCase.expected.capabilityName === 'general',
   ));
+  assert.ok(capabilityPlanningBasicsDataset.cases.some(
+    (testCase) => testCase.expected.result === 'return_to_answer',
+  ));
 });
 
 test('planner scorer enforces the mandatory General fallback', () => {

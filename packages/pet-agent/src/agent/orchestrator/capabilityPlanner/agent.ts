@@ -14,6 +14,7 @@ import {
   buildCapabilityPlannerAgentInput,
   buildCapabilityPlannerAgentSystemPrompt,
 } from '../prompts/capabilityPlannerAgent';
+import { readMessageText } from '../utils';
 import type {
   CapabilityPlannerInput,
   CapabilityPlannerResult,
@@ -24,8 +25,11 @@ const DEFAULT_TIMEOUT_MS = 60_000;
 const MAX_PLAN_TASKS = 24;
 const MAX_TASK_TEXT_CHARS = 500;
 const MAX_REASON_CHARS = 1_000;
+const MAX_ANSWER_CONTEXT_CHARS = 2_000;
+const MAX_QUESTION_CHARS = 1_000;
 const SUBMIT_PLAN_TOOL_NAME = 'submit_plan';
-const REPORT_UNAVAILABLE_TOOL_NAME = 'report_unavailable';
+const RETURN_TO_ANSWER_TOOL_NAME = 'return_to_answer';
+const DIRECT_TEXT_REASON = 'plan direct text';
 
 export type CapabilityPlannerAgentErrorCode =
   | 'planning_limit_reached'
@@ -57,24 +61,35 @@ function createPlannerSubmissionTools(
 ): StructuredTool[] {
   const orderedCapabilityNames = plannerCapabilityNames(input);
   const [firstCapabilityName, ...otherCapabilityNames] = orderedCapabilityNames;
-  const unavailableTool = tool(
-    async ({ task, reason }: { task: string; reason: string }) => JSON.stringify({
-      task,
+  const returnToAnswerTool = tool(
+    async ({
       reason,
+      context,
+      question,
+    }: {
+      reason: string;
+      context: string;
+      question?: string;
+    }) => JSON.stringify({
+      reason,
+      context,
+      question: question ?? null,
     }),
     {
-      name: REPORT_UNAVAILABLE_TOOL_NAME,
-      description: 'Report that no Capability can execute the required task.',
+      name: RETURN_TO_ANSWER_TOOL_NAME,
+      description: 'Terminal Planner action. Use this instead of assistant text whenever planning stops, needs user input, or should return facts without starting execution. This does not send a user-facing reply.',
       schema: z.object({
-        task: z.string().min(1).max(MAX_TASK_TEXT_CHARS)
-          .describe('Task that cannot be executed.'),
         reason: z.string().min(1).max(MAX_REASON_CHARS)
-          .describe('Why the Capability Workspace cannot execute it.'),
+          .describe('Why no execution plan should be submitted.'),
+        context: z.string().min(1).max(MAX_ANSWER_CONTEXT_CHARS)
+          .describe('Facts discovered during planning that Answer may use.'),
+        question: z.string().min(1).max(MAX_QUESTION_CHARS).optional()
+          .describe('Question Answer should ask the user when more input is needed.'),
       }),
     },
   );
   if (!firstCapabilityName) {
-    return [unavailableTool];
+    return [returnToAnswerTool];
   }
 
   const capabilityNames = [
@@ -87,7 +102,7 @@ function createPlannerSubmissionTools(
     }) => JSON.stringify({ tasks }),
     {
       name: SUBMIT_PLAN_TOOL_NAME,
-      description: 'Submit the shortest task sequence that completes the user goal.',
+      description: 'Terminal Planner action. Submit the shortest executable task sequence that completes the user goal.',
       schema: z.object({
         tasks: z.array(z.object({
           capability: z.enum(capabilityNames)
@@ -100,20 +115,17 @@ function createPlannerSubmissionTools(
     },
   );
 
-  if (orderedCapabilityNames.includes('general')) {
-    return [submitPlanTool];
-  }
-
-  return [submitPlanTool, unavailableTool];
+  return [submitPlanTool, returnToAnswerTool];
 }
 
 function readPlannerSubmission(
   messages: readonly BaseMessage[],
+  plannerMessageStart: number,
 ): CapabilityPlannerResult | null {
   for (const message of [...messages].reverse()) {
     if (!(message instanceof ToolMessage)
       || (message.name !== SUBMIT_PLAN_TOOL_NAME
-        && message.name !== REPORT_UNAVAILABLE_TOOL_NAME)
+        && message.name !== RETURN_TO_ANSWER_TOOL_NAME)
       || typeof message.content !== 'string') {
       continue;
     }
@@ -142,10 +154,46 @@ function readPlannerSubmission(
       };
     }
 
-    const { task, reason } = value as { task?: unknown; reason?: unknown };
-    if (typeof task === 'string' && typeof reason === 'string') {
-      return { task, reason };
+    const {
+      reason,
+      context,
+      question,
+    } = value as {
+      reason?: unknown;
+      context?: unknown;
+      question?: unknown;
+    };
+    if (
+      typeof reason === 'string'
+      && typeof context === 'string'
+      && (typeof question === 'string' || question === null || question === undefined)
+    ) {
+      return {
+        answer: {
+          reason,
+          context,
+          question: typeof question === 'string' ? question : null,
+        },
+      };
     }
+  }
+
+  for (
+    let index = messages.length - 1;
+    index >= plannerMessageStart;
+    index -= 1
+  ) {
+    const message = messages[index];
+    if (!message || message._getType() !== 'ai') continue;
+    const text = readMessageText(message);
+    if (!text) continue;
+    return {
+      answer: {
+        reason: DIRECT_TEXT_REASON,
+        context: text.slice(0, MAX_ANSWER_CONTEXT_CHARS),
+        question: null,
+      },
+    };
   }
 
   return null;
@@ -229,37 +277,36 @@ async function invokePlannerAgent(params: {
   });
 
   try {
+    const messages = [
+      ...params.input.messages,
+      ...(params.input.mode === 'boundary'
+        ? [new HumanMessage(buildCapabilityPlannerAgentInput(params.input))]
+        : []),
+    ];
     timeout.signal.throwIfAborted();
-    const result = await agent.invoke(
-      {
-        messages: [
-          ...params.input.messages,
-          ...(params.input.mode === 'boundary'
-            ? [new HumanMessage(buildCapabilityPlannerAgentInput(params.input))]
-            : []),
-        ],
-      },
-      runnableConfig,
-    );
+    const result = await agent.invoke({ messages }, runnableConfig);
     // Some providers or callbacks do not stop immediately when their signal is
     // aborted. Never accept a result produced after the deadline.
     timeout.signal.throwIfAborted();
 
-    const submission = readPlannerSubmission(result.messages);
-    if (!submission) {
-      if (explorer.didReachDocumentReadLimit()) {
-        throw new CapabilityPlannerAgentError(
-          'planning_limit_reached',
-          'Capability Planner document read limit was reached before a valid submission.',
-        );
-      }
+    const submission = readPlannerSubmission(
+      result.messages,
+      messages.length,
+    );
+    if (submission) {
+      return submission;
+    }
+    if (explorer.didReachDocumentReadLimit()) {
       throw new CapabilityPlannerAgentError(
-        'submission_required',
-        'Capability Planner must finish with a structured planning result.',
+        'planning_limit_reached',
+        'Capability Planner document read limit was reached before a valid submission.',
       );
     }
 
-    return submission;
+    throw new CapabilityPlannerAgentError(
+      'submission_required',
+      'Capability Planner must finish with a structured planning result.',
+    );
   } catch (error) {
     const plannerError = timeout.didTimeOut()
       ? new CapabilityPlannerAgentError(

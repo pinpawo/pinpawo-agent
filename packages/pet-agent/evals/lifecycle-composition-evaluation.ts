@@ -39,7 +39,7 @@ export function evaluateLifecycleCompositionInvariants(params: {
     OrchestratorStateType,
     | 'messages'
     | 'runNextDelegation'
-    | 'runPendingTask'
+    | 'runPlannerReturn'
     | 'runCapabilityPlan'
     | 'taskActiveDelegation'
     | 'runIterationCount'
@@ -52,7 +52,7 @@ export function evaluateLifecycleCompositionInvariants(params: {
     (message: BaseMessage) => getMessageLane(message) !== null,
   ).length;
   const terminalStateClean = state.runNextDelegation === null
-    && state.runPendingTask === null
+    && state.runPlannerReturn === null
     && state.runCapabilityPlan.length === 0
     && state.taskActiveDelegation === null
     && state.runIterationCount === 0
@@ -63,7 +63,7 @@ export function evaluateLifecycleCompositionInvariants(params: {
       passed: terminalStateClean,
       details: JSON.stringify({
         runNextDelegation: state.runNextDelegation,
-        runPendingTask: state.runPendingTask,
+        runPlannerReturn: state.runPlannerReturn,
         runCapabilityPlanLength: state.runCapabilityPlan.length,
         taskActiveDelegation: state.taskActiveDelegation,
         runIterationCount: state.runIterationCount,

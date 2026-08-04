@@ -4,9 +4,9 @@ import { randomUUID } from 'node:crypto';
 import type {
   MessageLane,
   RunNextDelegation,
-  RunPendingTask,
   RunDelegationSummary,
   CapabilityPlanTask,
+  PlannerAnswerDisposition,
   TaskActiveDelegation,
   ActiveDelegationTransition,
 } from './types';
@@ -32,7 +32,7 @@ const orchestratorStateChannels = {
     reducer: (_prev, next) => next,
     default: () => null,
   }),
-  runPendingTask: Annotation<RunPendingTask | null>({
+  runPlannerReturn: Annotation<PlannerAnswerDisposition | null>({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
@@ -88,7 +88,7 @@ export type OrchestratorStateType = typeof OrchestratorState.State;
 export type OrchestratorRunState = Pick<
   OrchestratorStateType,
   | 'runNextDelegation'
-  | 'runPendingTask'
+  | 'runPlannerReturn'
   | 'runCapabilityPlan'
   | 'runDelegationSummaries'
   | 'runIterationCount'
@@ -106,7 +106,7 @@ export function buildRunStateReset(
 ): OrchestratorRunState {
   return {
     runNextDelegation: null,
-    runPendingTask: null,
+    runPlannerReturn: null,
     runCapabilityPlan: [],
     runDelegationSummaries: [],
     runIterationCount: 0,

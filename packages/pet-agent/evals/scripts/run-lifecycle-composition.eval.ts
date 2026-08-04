@@ -326,7 +326,7 @@ function createRecordingActModel(model: AgentModels['act']) {
             const output = isRecord(toolCall.args)
               ? toolCall.args
               : { value: toolCall.args };
-            if (toolCall.name !== 'submit_plan' && toolCall.name !== 'report_unavailable') {
+            if (toolCall.name !== 'submit_plan' && toolCall.name !== 'return_to_answer') {
               continue;
             }
             decisions.push({ kind: 'planner', output });

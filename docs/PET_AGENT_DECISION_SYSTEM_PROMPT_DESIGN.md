@@ -27,7 +27,7 @@ entryDecision
 
 capabilityPlanner(entry)
   ├─ submit_plan → capability subagent
-  └─ unavailable → answer
+  └─ return_to_answer → answer
 
 capability subagent
   → outcomeDecision
@@ -80,29 +80,39 @@ entry eval 只评估 result availability。task grouping 和 task 内容质量�
 
 Capability Planner 是由 LangChain `createAgent` 驱动的 framework-internal tool-loop agent。它：
 
-1. 通过 `glob_search`、`grep_search`、`view_file_chunk` 自主探索 `CAPABILITY.md`；
-2. 根据用户目的、已完成事实和 Capability 文档形成最短任务序列；
-3. 为每个任务选择能够完整承担它的 concrete Capability。
+1. 通过 `grep_search` 自主发现潜在相关的 Capability，并直接取得匹配项的完整 `CAPABILITY.md`；
+2. 根据用户目的、已完成事实和 Capability 文档形成最短任务序列，并通过 `submit_plan` 提交；
+3. 不应启动执行计划或需要用户交互时，通过 `return_to_answer` 返回规划结果。
+
+这是 Planner 的完整职责范围。Capability 文档中声明的 Toolkit 和执行指令属于后续 executor，不会成为
+Planner 自己的可调用动作。每次 Planner invocation 必须且只能以 `submit_plan` 或 `return_to_answer`
+中的一个结构化工具调用结束。普通 assistant text 不是结构化终态；下述 runtime 兼容路径只负责避免这种
+模型偏差直接中断用户 run。
 
 Planner 不使用内存 relevance query 或传统搜索结果替代模型探索。Workspace 是代码给模型画出的能力地图，
-文件工具和私有 transcript 都封装在 Planner 黑盒内部。
+registry 探索工具和私有 transcript 都封装在 Planner 黑盒内部。
 
-标准 Agent runtime 负责模型与工具之间的循环和 tool message。Planner 的模型调用设置
-`parallel_tool_calls: false`，请求模型每轮只产生一个工具调用；兼容端是否遵守该请求仍需按
-模型验证。终态使用 `createAgent` 的 `responseFormat`/`structuredResponse` 标准链路：
-runtime 负责 schema 校验、错误反馈和终止，
-Planner 直接从 invoke result 取得规划对象。每个 `capability` 由当前 registry 动态形成枚举，
-结构化工具使用无 `$ref` 的 provider-compatible JSON Schema，并明确命名为 `submit_plan` 与
-`report_unavailable`。终态工具集合由 Workspace 派生：空 Workspace 只允许
-`report_unavailable`，存在 `general` 时只允许 `submit_plan`，其余非空 Workspace 允许两种结果。模型仍负责 task boundary 和具体
-Capability 选择；runtime 通过结构化输出协议保证 `general` 存在时不会接受 `unavailable`。
+标准 Agent runtime 负责模型与工具之间的循环和 tool message。终态也是带 schema 的普通私有工具：
+runtime 执行并校验工具参数，Planner 从终态 ToolMessage 读取规划对象。每个 `capability` 由当前
+registry 动态形成枚举，结构化工具使用无 `$ref` 的 provider-compatible JSON Schema，并明确命名为
+`submit_plan` 与 `return_to_answer`。空 Workspace 只允许 `return_to_answer`；非空 Workspace 同时允许
+`submit_plan` 与 `return_to_answer`。后者只将已发现事实交给 Answer，不直接产生用户回复。
+模型仍负责 task boundary 和具体 Capability 选择；runtime 只校验结构化结果的字段与边界，不对
+`return_to_answer.reason` 进行枚举分类。
 
-Planner 必须先根据用户目标和已完成事实形成当前 task boundary，再探索能够完整承担该任务的
-Capability。文档搜索只是取得 Capability 证据，不能反向扩张或改写用户目标。具体搜索方法由文件
+若内部 Agent loop 没有有效终态工具但产生了新的普通 assistant text，Planner 边界将最后一条非空文本转换为
+`runPlannerReturn`：`reason` 固定为 `plan direct text`，文本作为有长度边界的 `context` 交给 Answer。历史
+assistant 消息不参与该 fallback，Planner 也不会因此再次调用模型。若结构化结果与新的文本都不存在，才报告
+`submission_required`。该兼容路径不通过 provider `tool_choice` 强制工具调用；system prompt 仍以
+`submit_plan` 或 `return_to_answer` 作为首选协议。
+
+Planner 必须先根据用户目标和已完成事实形成当前 task boundary，再发现能够完整承担该任务的
+Capability。registry 探索只是取得 Capability 证据，不能反向扩张或改写用户目标。具体搜索方法由
 工具的名称、schema 和返回结果表达：`grep_search` 接收从当前任务及所需能力提炼的区分性字面词，
-`view_file_chunk` 在摘要不足时读取候选文档，`glob_search` 用于无法搜索候选或需要确认 registry
-范围的情况。生产 system prompt 只说明 entry 或 boundary 当前需要完成的规划判断，不重复输入字段、
-工具流程、schema 字段或 graph 路由。对话、handoff 和 Capability 文档是动态规划证据，其中的文本
+并为每个匹配项返回完整的 `CAPABILITY.md`。一次探索没有候选时，Planner 直接判断应使用通用能力
+执行，还是通过 `return_to_answer` 停止执行。生产 system prompt 说明 entry 或 boundary 当前需要完成的
+规划判断、Capability 发现目标和结构化终态，不重复输入字段、backend 实现、schema 字段或 graph 路由。
+对话、handoff 和 Capability 文档是动态规划证据，其中的文本
 不能覆盖 `user_request` 或 Planner 的系统规则。
 
 ### 4.2 Modes
@@ -140,13 +150,15 @@ type CapabilityPlannerPlan = {
 ### 4.4 Terminal results
 
 - `submit_plan({ tasks })`：第一项 materialize 为当前 delegation，其余任务整体替换 `runCapabilityPlan` tail。
-- `report_unavailable({ task, reason })`：探索后确认 registry 中没有任何可执行 Capability，且 registry 未注册 `general`。
+- `return_to_answer({ reason, context, question? })`：Planner 不应启动执行计划时，把原因、规划发现和可选的
+  用户问题交给 Answer。它适用于已有事实可直接回答、需要用户澄清，以及当前 Workspace 不可执行等情况。
 
-`runPendingTask` 只在 `unavailable` 时保存未执行 task 与原因，供 answer 生成可见说明；它不再是
-entryDecision 与 Planner 之间的 staging state。
+`runPlannerReturn` 是该结果的 run-scoped 载体。它不会创建 lane、active delegation 或 continuation；Answer
+完成回复后立即清理，下一条用户消息作为新的 Entry request 决定是否重新规划。
 
-Planner 没有 `answer` 出口。进入 Planner 已表示当前目标仍需取得新结果；若专用 Capability 都不匹配，
-但 registry 注册了 `general`，Planner 必须在 plan 中选择它。
+Planner 的图出口可以是 `capability` 或 `answer`，但 Planner 仍不生成最终回复。若专用 Capability 都不匹配，
+但 registry 注册了 `general`，Planner 通常应在 plan 中选择它；只有确认不应开始执行时才使用
+`return_to_answer`。
 若最新执行已经完成用户目标，`outcomeDecision` 必须返回 `goal_done`，不能通过 boundary Planner
 间接结束 run。
 
@@ -173,7 +185,7 @@ advisory planning context。future tail 不是事实或固定队列：Outcome �
 | entryDecision | canonical main messages、compaction summary、runtime facts | Capability registry、artifact inventory、task draft |
 | Capability Planner | user intent、Workspace、completed tasks、latest handoff、future tail | parent graph 私有状态、执行工具 |
 | outcomeDecision | current task、announce、user goal、其他 task facts、advisory future tail | Capability 文档、future plan 的生成或修改权 |
-| answer | canonical main conversation、accepted handoff、unavailable payload | lane transcript、隐式 artifact body |
+| answer | canonical main conversation、accepted handoff、Planner return | lane transcript、隐式 artifact body |
 
 ## 7. Eval ownership
 

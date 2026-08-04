@@ -1,7 +1,10 @@
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { CapabilityDocumentWorkspace } from './documentWorkspace';
-import type { CapabilityPlanTask } from '../types';
+import type {
+  CapabilityPlanTask,
+  PlannerAnswerDisposition,
+} from '../types';
 
 export type CapabilityPlannerMode = 'entry' | 'boundary';
 
@@ -24,8 +27,7 @@ export type CapabilityPlannerResult =
       readonly tasks: readonly CapabilityPlanTask[];
     }
   | {
-      readonly task: string;
-      readonly reason: string;
+      readonly answer: PlannerAnswerDisposition;
     };
 
 /**

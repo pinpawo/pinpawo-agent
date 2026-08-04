@@ -20,6 +20,7 @@ import type {
   CapabilityPlanTask,
   MessageLane,
   OrchestratorConfig,
+  PlannerAnswerDisposition,
   RunNextDelegation,
 } from '../../types';
 import {
@@ -66,13 +67,16 @@ function normalizePlannerTask(task: CapabilityPlanTask): CapabilityPlanTask {
   };
 }
 
-function normalizeUnavailableResult(result: Extract<CapabilityPlannerResult, { task: string }>) {
-  const task = result.task.trim();
-  const reason = result.reason.trim();
-  if (!task || !reason) {
-    throw new Error('Capability Planner submitted an unavailable result with empty text.');
+function normalizePlannerAnswer(
+  answer: PlannerAnswerDisposition,
+): PlannerAnswerDisposition {
+  const reason = answer.reason.trim();
+  const context = answer.context.trim();
+  const question = answer.question?.trim() || null;
+  if (!reason || !context) {
+    throw new Error('Capability Planner returned Answer facts with empty text.');
   }
-  return { task, reason };
+  return { reason, context, question };
 }
 
 function materializeNextDelegation(params: {
@@ -118,7 +122,7 @@ function materializeNextDelegation(params: {
       ...materializedDelegation.laneMessages,
     ] as BaseMessage[],
     runNextDelegation,
-    runPendingTask: null,
+    runPlannerReturn: null,
     runCapabilityPlan: remainingPlan,
     taskActiveDelegation,
     runDelegationSummaries: appendRunDelegationSummary(
@@ -136,15 +140,12 @@ function buildPlannerTransition(params: {
 }) {
   const { state, input, result } = params;
   if (!('tasks' in result)) {
-    const unavailable = normalizeUnavailableResult(result);
+    const answer = normalizePlannerAnswer(result.answer);
     return {
       goto: 'answer' as const,
       update: {
         runNextDelegation: null,
-        runPendingTask: {
-          task: unavailable.task,
-          contextSummary: unavailable.reason,
-        },
+        runPlannerReturn: answer,
         runCapabilityPlan: [],
       },
     };

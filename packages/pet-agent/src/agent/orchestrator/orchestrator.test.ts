@@ -452,7 +452,7 @@ test('task_done reroutes through capabilityPlanner before the next task', async 
   assert.equal(plannerInputs[1]?.completedTask, '读取 issue #269 并提炼需求点。');
   assert.match(plannerInputs[1]?.completedTaskResult ?? '', /issue #269 需求点/);
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
-  assert.equal(state.runPendingTask, null);
+  assert.equal(state.runPlannerReturn, null);
   assert.deepEqual(state.runCapabilityPlan, []);
   assert.equal(state.runNextDelegation, null);
   assert.equal(state.taskActiveDelegation, null);
@@ -561,7 +561,7 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
     'issue #269 的需求与本地实现检查均已完成，并确认了兼容性要求。',
   );
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
-  assert.equal(state.runPendingTask, null);
+  assert.equal(state.runPlannerReturn, null);
   assert.deepEqual(state.runCapabilityPlan, []);
   assert.equal(state.runNextDelegation, null);
   assert.equal(state.taskActiveDelegation, null);
@@ -634,15 +634,15 @@ test('entry decision autoRepair rejects the removed direct_task action', async (
   // After the retry resolves to answer, the dedicated answer node produces the reply.
   assert.equal(mainConversationMessages(state.messages).at(-1)?.content, 'answered');
   assert.equal(state.runNextDelegation, null);
-  assert.equal(state.runPendingTask, null);
+  assert.equal(state.runPlannerReturn, null);
 });
 
-test('missing executable capability routes through the answer node', async () => {
+test('Planner return routes bounded facts through the answer node', async () => {
   let answerInvocationText = '';
   const model = {
     invoke: async (messages: BaseMessage[]) => {
       answerInvocationText = messages.map((message) => readMessageText(message)).join('\n');
-      return new AIMessage('当前没有可用的执行能力来读取本地文件。');
+      return new AIMessage('请确认是否要扩大当前 Capability 的可用范围。');
     },
     bindTools: () => ({
       invoke: async () => new AIMessage(''),
@@ -663,9 +663,11 @@ test('missing executable capability routes through the answer node', async () =>
       async invoke(input) {
         assert.equal(input.mode, 'entry');
         return {
-          result: 'unavailable',
-          task: '读取本地文件。',
-          reason: 'No Capability documents are available.',
+          answer: {
+            reason: 'No Capability documents are available.',
+            context: 'The compiled Capability registry is empty.',
+            question: 'Should I broaden the Capability scope?',
+          },
         };
       },
     },
@@ -682,10 +684,13 @@ test('missing executable capability routes through the answer node', async () =>
     },
   }) as OrchestratorStateType;
 
-  assert.match(String(mainConversationMessages(state.messages).at(-1)?.content ?? ''), /没有可用的执行能力/);
-  assert.match(answerInvocationText, /No Capability documents are available/);
+  assert.match(String(mainConversationMessages(state.messages).at(-1)?.content ?? ''), /扩大当前 Capability/);
+  assert.match(answerInvocationText, /The compiled Capability registry is empty/);
+  assert.match(answerInvocationText, /<reply_mode>planner_return<\/reply_mode>/);
+  assert.match(answerInvocationText, /Should I broaden the Capability scope/);
   assert.equal(state.runNextDelegation, null);
-  assert.equal(state.runPendingTask, null);
+  assert.equal(state.runPlannerReturn, null);
+  assert.equal(state.taskActiveDelegation, null);
 });
 
 test('capability planner reports an empty compiled registry without inventing General', async () => {
@@ -719,9 +724,11 @@ test('capability planner reports an empty compiled registry without inventing Ge
         plannerMode = input.mode;
         plannerCapabilityNames = input.workspace.capabilityNames;
         return {
-          result: 'unavailable',
-          task: '完成一个需要执行能力的任务',
-          reason: 'The compiled Capability registry is empty.',
+          answer: {
+            reason: 'The compiled Capability registry is empty.',
+            context: 'No Capability document can execute the requested work.',
+            question: null,
+          },
         };
       },
     },
@@ -742,7 +749,7 @@ test('capability planner reports an empty compiled registry without inventing Ge
   assert.deepEqual(plannerCapabilityNames, []);
 });
 
-test('Capability Planner unavailable result is materialized without a second semantic policy check', async () => {
+test('Capability Planner return is materialized without a second semantic policy check', async () => {
   const model = {
     invoke: async () => new AIMessage('done'),
     bindTools: () => ({
@@ -758,8 +765,11 @@ test('Capability Planner unavailable result is materialized without a second sem
     capabilityPlannerRunner: {
       async invoke() {
         return {
-          task: '完成普通工作区任务',
-          reason: 'No specialized Capability matched.',
+          answer: {
+            reason: 'No specialized Capability matched.',
+            context: 'The Planner determined no execution plan should start.',
+            question: null,
+          },
         };
       },
     },
@@ -838,9 +848,11 @@ test('allowedCapabilityNames scopes the immutable Planner workspace', async () =
     async invoke(input) {
       plannerCapabilityNames = input.workspace.capabilityNames;
       return {
-        result: 'unavailable',
-        task: '规划一支讲秋日食材的短视频。',
-        reason: 'scope captured',
+        answer: {
+          reason: 'scope captured',
+          context: 'The scoped workspace was inspected.',
+          question: null,
+        },
       };
     },
   };
@@ -4840,7 +4852,7 @@ test('delegation outcome continuation path rechecks run iteration guard before n
   assert.equal(routeCallCount, 1);
   assert.equal(state.taskActiveDelegation?.id, activeDelegation.id);
   assert.equal(state.runIterationCount, 0);
-  assert.equal(state.runPendingTask, null);
+  assert.equal(state.runPlannerReturn, null);
   const finalText = String(state.messages.at(-1)?.content ?? '');
   assert.match(finalText, /主流程循环已达到上限/);
 });
@@ -5361,7 +5373,7 @@ test('delegation outcome uses a unified run-iteration guard before invoking deci
   assert.match(String(answerMessages.at(-1)?.content ?? ''), /持续执行大规模迁移/);
   assert.equal(state.messages.at(-1)?.content?.toString().includes('主流程循环已达到上限'), true);
   assert.equal(state.runIterationCount, 0);
-  assert.equal(state.runPendingTask, null);
+  assert.equal(state.runPlannerReturn, null);
   assert.equal(state.taskActiveDelegation?.id, activeDelegation.id);
 });
 

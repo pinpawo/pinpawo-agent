@@ -21,7 +21,6 @@ import {
 } from './documentWorkspace';
 import {
   CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-  CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
   createCapabilityPlannerFileExplorer,
   type CapabilityPlannerFileExplorer,
 } from './fileExplorer';
@@ -121,16 +120,13 @@ async function invoke(
   };
 }
 
-test('Planner file explorer exposes only candidate search and document reading', async (t) => {
+test('Planner file explorer exposes one registry discovery tool', async (t) => {
   const { workspace } = await workspaceFixture(t);
   const explorer = createCapabilityPlannerFileExplorer({ workspace });
 
   assert.deepEqual(
     explorer.tools.map(({ name }) => name),
-    [
-      CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-      CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
-    ],
+    [CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME],
   );
   assert.equal('uses' in explorer, false);
 });
@@ -154,8 +150,14 @@ test('grep_search finds candidates from immutable Workspace documents', async (t
       matchedTerms: ['browser'],
     }, {
       path: 'explore/CAPABILITY.md',
-      matchedTerms: ['research'],
+      matchedTerms: ['browser', 'research'],
     }],
+  );
+  const matches = first.data?.matches as Array<Record<string, unknown>>;
+  assert.match(String(matches[0]?.content), /# Browser\n\nOpen and inspect web pages\./);
+  assert.match(
+    String(matches[1]?.content),
+    /# Explore\n\nDo not use browser for repository research\./,
   );
   assert.equal(first.data?.complete, true);
 });
@@ -177,7 +179,7 @@ test('grep_search searches complete Capability documents', async (t) => {
   );
 });
 
-test('memory backend is explicit and preserves registry search/read semantics', async (t) => {
+test('memory backend is explicit and preserves complete registry search results', async (t) => {
   const { workspace } = await workspaceFixture(t);
   const filesystem = createCapabilityPlannerFileExplorer({ workspace });
   const memory = createCapabilityPlannerFileExplorer({
@@ -196,14 +198,6 @@ test('memory backend is explicit and preserves registry search/read semantics', 
     { query: 'browser|research' },
   );
   assert.deepEqual(memorySearch.data?.matches, filesystemSearch.data?.matches);
-
-  const memoryDocument = await invoke(
-    memory,
-    CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
-    { path: 'browser/CAPABILITY.md', startLine: 1, endLine: 4 },
-  );
-  assert.equal(memoryDocument.ok, true);
-  assert.match(String(memoryDocument.data?.content), /description:.*browser/i);
 });
 
 test('grep_search enforces compact queries without owning Planner workflow state', async (t) => {
@@ -232,65 +226,7 @@ test('grep_search enforces compact queries without owning Planner workflow state
   assert.equal(second.ok, true);
 });
 
-test('view_file_chunk returns stable line ranges and a continuation cursor', async (t) => {
-  const { workspace } = await workspaceFixture(t);
-  const explorer = createCapabilityPlannerFileExplorer({ workspace });
-
-  const first = await invoke(
-    explorer,
-    CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
-    {
-      path: 'general/CAPABILITY.md',
-      startLine: 1,
-      endLine: 3,
-    },
-  );
-  assert.equal(first.ok, true);
-  assert.match(String(first.data?.content), /^1: ---\n2: name:/);
-  assert.deepEqual(first.data?.range, {
-    startLine: 1,
-    endLine: 3,
-    totalLines: 11,
-  });
-  assert.equal(first.data?.nextStartLine, 4);
-  assert.equal(first.data?.complete, false);
-
-  const second = await invoke(
-    explorer,
-    CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
-    {
-      path: 'general/CAPABILITY.md',
-      startLine: 4,
-      endLine: 100,
-    },
-  );
-  assert.equal(second.data?.nextStartLine, null);
-  assert.equal(second.data?.complete, true);
-  assert.match(String(second.data?.content), /Handle ordinary local work\./);
-});
-
-test('Planner file tools reject paths outside the materialized generation', async (t) => {
-  const { workspace } = await workspaceFixture(t);
-  const explorer = createCapabilityPlannerFileExplorer({ workspace });
-
-  const traversal = await invoke(
-    explorer,
-    CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
-    { path: '../outside/CAPABILITY.md' },
-  );
-  assert.equal(traversal.ok, false);
-  assert.equal(traversal.error?.code, 'invalid_path');
-
-  const missing = await invoke(
-    explorer,
-    CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
-    { path: 'missing/CAPABILITY.md' },
-  );
-  assert.equal(missing.ok, false);
-  assert.equal(missing.error?.code, 'document_not_found');
-});
-
-test('Planner file tools reject tampered documents when they are returned by search', async (t) => {
+test('grep_search rejects tampered documents when they are returned', async (t) => {
   const { workspace } = await workspaceFixture(t);
   const documentPath = join(workspace.rootPath, 'general', 'CAPABILITY.md');
   await chmod(documentPath, 0o644);
@@ -317,17 +253,9 @@ test('Planner file tools reject tampered documents when they are returned by sea
   );
   assert.equal(searchResult.ok, false);
   assert.equal(searchResult.error?.code, 'document_tampered');
-
-  const viewResult = await invoke(
-    explorer,
-    CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
-    { path: 'general/CAPABILITY.md' },
-  );
-  assert.equal(viewResult.ok, false);
-  assert.equal(viewResult.error?.code, 'document_tampered');
 });
 
-test('Planner file tools reject a symlink introduced after workspace publication', async (t) => {
+test('grep_search rejects a symlink introduced after workspace publication', async (t) => {
   const { root, workspace } = await workspaceFixture(t);
   const capabilityDir = join(workspace.rootPath, 'general');
   const documentPath = join(capabilityDir, 'CAPABILITY.md');
@@ -340,15 +268,15 @@ test('Planner file tools reject a symlink introduced after workspace publication
 
   const result = await invoke(
     explorer,
-    CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
-    { path: 'general/CAPABILITY.md' },
+    CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+    { query: 'outside secret' },
   );
   assert.equal(result.ok, false);
   assert.equal(result.error?.code, 'workspace_invalid');
   assert.doesNotMatch(JSON.stringify(result), /outside secret/);
 });
 
-test('document read limit applies only to document contents', async (t) => {
+test('grep_search never returns a partial Capability document', async (t) => {
   const { workspace } = await workspaceFixture(t, [
     capability({
       name: 'budget',
@@ -360,38 +288,15 @@ test('document read limit applies only to document contents', async (t) => {
     maxDocumentReadBytes: 80,
   });
 
-  const first = await invoke(
-    explorer,
-    CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
-    {
-      path: 'budget/CAPABILITY.md',
-      startLine: 10,
-      endLine: 10,
-    },
-  );
-  assert.equal(first.ok, true);
-  assert.equal(first.data?.stoppedBy, 'line_too_long');
-
-  const second = await invoke(
+  const result = await invoke(
     explorer,
     CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
     { query: 'budget' },
   );
-  assert.equal(second.ok, true);
-  assert.deepEqual(
-    (second.data?.matches as Array<Record<string, unknown>>).map(({ path }) => path),
-    ['budget/CAPABILITY.md'],
-  );
-
-  const third = await invoke(
-    explorer,
-    CAPABILITY_PLANNER_VIEW_FILE_CHUNK_TOOL_NAME,
-    { path: 'budget/CAPABILITY.md' },
-  );
-  assert.equal(third.ok, false);
-  assert.equal(third.error?.code, 'planning_limit_reached');
+  assert.equal(result.ok, false);
+  assert.equal(result.error?.code, 'planning_limit_reached');
   assert.equal(explorer.didReachDocumentReadLimit(), true);
-  assert.doesNotMatch(JSON.stringify(second), /registryDigest|observationBudget/);
+  assert.doesNotMatch(JSON.stringify(result), /x{40}/);
 });
 
 test('grep_search returns no candidates for an empty Capability workspace', async (t) => {

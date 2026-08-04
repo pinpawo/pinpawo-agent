@@ -31,6 +31,7 @@ import { downloadFileTool, httpFetchTool, networkOperationMetadata } from './net
 import { jqQueryTool, jsonOperationMetadata } from './jsonTools';
 import { gitTools, gitOperationMetadata } from './gitTools';
 import { globSearchTool, grepSearchTool, searchOperationMetadata } from './searchTools';
+import { shellRuntime } from './shellRuntime';
 import {
   getCurrentTimeTool,
   normalizeShellActionInput,
@@ -154,6 +155,18 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
     reviewGuidance: {
       allow: 'A shell invocation is an execution mechanism, so its risk comes from the concrete command and scope. Treat commands as eligible for automatic authorization when their effects are clear and limited, including read-only inspection of explicitly named non-sensitive paths outside the current workspace, and scoped build, test, typecheck, lint, format, inspection, other reversible development operations, or deletion of explicitly named non-sensitive files inside the current workspace.',
       ask: 'Require human authorization when a command has broad or unclear effects, deletes recursively, deletes outside the current workspace, deletes user data or sensitive files, elevates privileges, changes permissions or system services, installs or executes untrusted software, exposes credentials or data, publishes or deploys artifacts, or rewrites shared version-control history.',
+    },
+    runtime: {
+      start: () => {
+        shellRuntime.start();
+        return shellRuntime;
+      },
+      resolve: (_root, context) => shellRuntime.resolve(context.execution),
+      // No bindTools yet: the shell tools do not consume the registry until
+      // the tool protocol lands. The lifecycle is wired first so host
+      // shutdown can already reach anything the registry holds.
+      release: () => shellRuntime.release(),
+      stop: async () => { await shellRuntime.stop(); },
     },
   });
 }

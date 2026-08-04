@@ -5,15 +5,6 @@ import { readRecord, readString } from '../operationMetadata';
 import { getLocalToolsWorkdir, resolveUserPath } from './pathUtils';
 import { runShellCommand } from './processTree';
 
-function processOutputToString(output: unknown) {
-  if (typeof output === 'string') {
-    return output.trimEnd();
-  }
-  if (Buffer.isBuffer(output)) {
-    return output.toString('utf-8').trimEnd();
-  }
-  return '';
-}
 
 export function normalizeShellActionInput(input: unknown) {
   if (!input || typeof input !== 'object') {
@@ -34,7 +25,7 @@ export function normalizeShellActionInput(input: unknown) {
 
 const DEFAULT_SHELL_TIMEOUT_SECONDS = 60;
 const MAX_SHELL_TIMEOUT_SECONDS = 600;
-const SHELL_MAX_BUFFER_BYTES = 4 * 1024 * 1024;
+const SHELL_MAX_CAPTURE_CHARS = 4 * 1024 * 1024;
 const SHELL_OUTPUT_LIMIT_CHARS = 20_000;
 
 function resolveCurrentTimezone(timezone?: string) {
@@ -117,7 +108,7 @@ export const runShellTool = tool(
       command: shellAction.command,
       cwd: shellAction.cwd,
       timeoutMs,
-      maxOutputBytes: SHELL_MAX_BUFFER_BYTES,
+      maxOutputChars: SHELL_MAX_CAPTURE_CHARS,
       ...(runtime.signal ? { signal: runtime.signal } : {}),
     });
 
@@ -131,8 +122,8 @@ export const runShellTool = tool(
       throw createAbortError();
     }
 
-    const out = truncateShellOutput(processOutputToString(outcome.stdout));
-    const err = truncateShellOutput(processOutputToString(outcome.stderr));
+    const out = truncateShellOutput(outcome.stdout.trimEnd());
+    const err = truncateShellOutput(outcome.stderr.trimEnd());
 
     if (outcome.status === 'timeout') {
       const output = [err, out].filter(Boolean).join('\n');

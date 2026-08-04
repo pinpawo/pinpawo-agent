@@ -28,7 +28,12 @@ export type ShellRunOptions = {
   command: string;
   cwd: string;
   timeoutMs: number;
-  maxOutputBytes: number;
+  /**
+   * Cap on captured characters per stream. Counted in characters, not bytes,
+   * so it stays consistent with the character-based truncation applied to the
+   * result; the byte cost of multi-byte output is a small multiple of this.
+   */
+  maxOutputChars: number;
   signal?: AbortSignal;
   /** Grace period between SIGTERM and SIGKILL for the process group. */
   killGraceMs?: number;
@@ -61,7 +66,7 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
     command,
     cwd,
     timeoutMs,
-    maxOutputBytes,
+    maxOutputChars,
     signal,
     killGraceMs = DEFAULT_KILL_GRACE_MS,
   } = options;
@@ -104,13 +109,13 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
     };
 
     collect(child.stdout, (chunk) => {
-      if (stdout.length < maxOutputBytes) {
-        stdout += chunk.slice(0, maxOutputBytes - stdout.length);
+      if (stdout.length < maxOutputChars) {
+        stdout += chunk.slice(0, maxOutputChars - stdout.length);
       }
     });
     collect(child.stderr, (chunk) => {
-      if (stderr.length < maxOutputBytes) {
-        stderr += chunk.slice(0, maxOutputBytes - stderr.length);
+      if (stderr.length < maxOutputChars) {
+        stderr += chunk.slice(0, maxOutputChars - stderr.length);
       }
     });
 

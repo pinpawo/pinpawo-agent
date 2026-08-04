@@ -127,6 +127,10 @@ export class ProcessRegistry {
     }
 
     const processId = randomUUID();
+    // A handle can arrive already finished: the process may exit between
+    // yielding and being adopted. Reporting it as running would be a lie the
+    // caller acts on.
+    const alreadyExited = params.handle.hasExited;
     const record: ManagedProcess = {
       processId,
       owner: params.owner,
@@ -134,9 +138,9 @@ export class ProcessRegistry {
       cwd: params.cwd,
       pid: params.handle.pid,
       startedAt: Date.now(),
-      status: 'running',
+      status: alreadyExited ? 'exited' : 'running',
       exitCode: null,
-      exitedAt: null,
+      exitedAt: alreadyExited ? Date.now() : null,
     };
 
     const entry: Entry = {
@@ -264,7 +268,13 @@ export class ProcessRegistry {
     this.entries.clear();
 
     for (const pid of this.orphanGroups) {
-      killProcessGroup(pid, 'SIGTERM');
+      // Unlike a managed process, nothing here has been holding this group
+      // open, so its id could since have been recycled by an unrelated
+      // process. Only signal a group that is still alive, and accept that the
+      // check is advisory — this narrows the window rather than closing it.
+      if (isProcessGroupAlive(pid)) {
+        killProcessGroup(pid, 'SIGTERM');
+      }
     }
     this.orphanGroups.clear();
   }

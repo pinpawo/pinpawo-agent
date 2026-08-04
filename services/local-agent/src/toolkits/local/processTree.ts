@@ -29,9 +29,17 @@ import { spawn } from 'node:child_process';
  */
 export type ShellRunHandle = {
   pid: number;
-  /** Output captured up to the moment of yielding. */
+  /** Everything captured so far, including output produced after the yield. */
   stdout: string;
   stderr: string;
+  /**
+   * Whether the process has already finished.
+   *
+   * A handle can be taken over after its process exited — the gap between
+   * yielding and being adopted is enough — so an owner needs to tell a live
+   * process from a finished one without waiting on it.
+   */
+  hasExited: boolean;
   /**
    * Subscribe to output produced after the yield; returns an unsubscribe
    * function. Output also keeps accumulating into `stdout`/`stderr` under the
@@ -238,6 +246,7 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
         pid,
         get stdout() { return stdout; },
         get stderr() { return stderr; },
+        get hasExited() { return exited; },
         onOutput: (listener) => {
           outputListeners.add(listener);
           return () => outputListeners.delete(listener);

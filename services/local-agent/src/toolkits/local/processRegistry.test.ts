@@ -134,6 +134,20 @@ test('another execution cannot touch a process it did not start', async () => {
   await registry.stopAll(200);
 });
 
+test('adopting an already finished process reports it as finished', async () => {
+  const registry = new ProcessRegistry();
+  const handle = await yieldedHandle('echo before; sleep 0.2; echo after; exit 3');
+  // The process exits in the gap between yielding and being adopted.
+  await handle.wait();
+
+  const record = register(registry, handle);
+  assert.equal(record.status, 'exited', 'must not claim a finished process is running');
+
+  const drained = await registry.drain(record.processId, OWNER);
+  assert.match(drained.stdout, /before/);
+  assert.match(drained.stdout, /after/, 'output produced before adoption is not lost');
+});
+
 test('an unknown process id is reported as such', async () => {
   const registry = new ProcessRegistry();
   await assert.rejects(
@@ -249,6 +263,26 @@ test('tracks a process group that outlived its command', async () => {
   const alive = execSync(`pgrep -f ${JSON.stringify(marker)} || true`).toString().trim();
   execSync(`pkill -9 -f ${JSON.stringify(marker)} || true`);
   assert.equal(alive, '', 'shutdown must clean up a surviving process group');
+});
+
+test('does not signal an orphan group that has since died', async () => {
+  const registry = new ProcessRegistry();
+  const marker = `pinpawo-registry-dead-${Date.now().toString()}`;
+  const outcome = await runShellCommand({
+    command:
+      `node -e "process.title='${marker}'; setTimeout(() => {}, 400)" >/dev/null 2>&1 & echo started`,
+    cwd: CWD,
+    timeoutMs: 5_000,
+    maxOutputChars: 1024,
+  });
+  assert.equal(outcome.status, 'exited');
+  if (outcome.status !== 'exited' || !outcome.pid) return;
+
+  assert.equal(registry.trackOrphanGroup(outcome.pid), true);
+  // Let the background child finish on its own; the group id may be recycled
+  // by then, so shutdown must not fire blindly at it.
+  await new Promise((r) => setTimeout(r, 700));
+  await registry.stopAll(200);
 });
 
 test('does not track a group that left nothing behind', async () => {

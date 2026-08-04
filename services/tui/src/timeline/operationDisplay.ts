@@ -25,6 +25,8 @@ export function buildOperationDisplayLines(
   width = Number.POSITIVE_INFINITY,
   headerWidth = width,
 ): OperationDisplayLine[] {
+  const runtimeLines = buildRuntimeActivityDisplayLines(entry, now, width, headerWidth);
+  if (runtimeLines) return runtimeLines;
   return [{
     text: buildOperationHeader(entry, now, headerWidth),
   }, ...buildOperationPayloadLines(entry, width)];
@@ -35,14 +37,77 @@ function buildOperationHeader(
   now: number,
   width: number,
 ) {
+  return buildOperationHeaderText(operationBody(entry), entry, now, width);
+}
+
+function buildOperationHeaderText(
+  body: string,
+  entry: AgentOperationEntry,
+  now: number,
+  width: number,
+) {
   const suffix = `（${operationStatus(entry, now)}）`;
-  const body = operationBody(entry);
   const line = `${body}${suffix}`;
   if (stringWidth(line) <= width) return sanitizeLine(line, width);
 
   const suffixWidth = stringWidth(suffix);
   if (suffixWidth >= width) return sanitizeLine(suffix, width);
   return `${sanitizeLine(body, width - suffixWidth)}${suffix}`;
+}
+
+function buildRuntimeActivityDisplayLines(
+  entry: AgentOperationEntry,
+  now: number,
+  width: number,
+  headerWidth: number,
+): OperationDisplayLine[] | null {
+  if (entry.kind === 'runtime.authorization') {
+    const actions = readRuntimeDetailStrings(entry.details?.actions);
+    const reason = readRuntimeDetailText(entry.details?.reason);
+    return [{
+      text: buildOperationHeaderText(entry.title, entry, now, headerWidth),
+    }, ...(actions.length > 0 ? [{
+      text: sanitizeLine(`  ${actions.join(' · ')}`, width),
+      tone: 'muted' as const,
+    }] : []), ...(reason ? [{
+      text: sanitizeLine(`  原因：${reason}`, width),
+      tone: 'muted' as const,
+    }] : [])];
+  }
+  if (entry.kind === 'runtime.delegation') {
+    const state = readRuntimeDetailText(entry.details?.state);
+    const status = state === 'handed_off'
+      ? '结果已交给主 agent 汇总'
+      : state === 'waiting_for_input'
+        ? '等待你的补充后继续'
+        : state === 'interrupted'
+          ? '可使用 /continue 继续'
+          : state === 'failed'
+            ? '执行未完成，请查看后续错误信息'
+        : null;
+    return [{
+      text: buildOperationHeaderText(entry.title, entry, now, headerWidth),
+    }, ...(entry.summary?.trim() ? [{
+      text: sanitizeLine(`  ${entry.summary.trim()}`, width),
+      tone: 'muted' as const,
+    }] : []), ...(status ? [{
+      text: sanitizeLine(`  ${status}`, width),
+      tone: 'muted' as const,
+    }] : [])];
+  }
+  return null;
+}
+
+function readRuntimeDetailStrings(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const text = readRuntimeDetailText(item);
+    return text ? [text] : [];
+  });
+}
+
+function readRuntimeDetailText(value: unknown) {
+  return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : null;
 }
 
 function operationStatus(entry: AgentOperationEntry, now: number) {

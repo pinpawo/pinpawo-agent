@@ -171,6 +171,10 @@ async function resolveAutoAuthorization(
         new SystemMessage(buildAutoReviewSystemPrompt(options.reviews, structuredOutput?.method)),
         new HumanMessage(prompt.text),
       ],
+      // The decision is an internal verifier result. Do not inherit the
+      // root stream callback, otherwise providers that stream `.invoke()`
+      // responses expose the raw JSON as a subagent message.
+      runnableConfig: { callbacks: [] },
     });
 
     if (decision.decision === GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE) {

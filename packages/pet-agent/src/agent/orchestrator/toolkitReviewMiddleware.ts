@@ -814,6 +814,7 @@ async function emitGlobalReviewAuthorizationEvent(params: {
       policyMode,
       reason: params.resolution.reason,
       batchSize: params.reviews.length,
+      reviewIds: params.reviews.map((review) => review.reviewPayload.review.id),
       toolCalls: params.reviews.map((review) => ({
         toolName: review.toolName,
         toolkitName: review.toolkitName,

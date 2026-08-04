@@ -67,6 +67,11 @@ import {
   resolveActor,
 } from '../config';
 import { guardDecisionEmitter } from '../guards/decisionEvents';
+import {
+  delegationRuntimeActivityEvent,
+  readCapabilityNameFromLane,
+} from './delegationLifecycle';
+import { emitRuntimeEventToStreamWriter } from '../../../../utils/streamWriterEvents';
 
 type DecisionKind = 'delegation_outcome';
 
@@ -91,11 +96,45 @@ export function createOrchestrationDecisionRunner(config: OrchestratorConfig) {
     const context = buildDecisionContext({ config, kind, state, runnableConfig });
     const decision = await invokeDelegationOutcomeDecision({ config, context, runnableConfig });
     const transition = buildDelegationOutcomeDecisionResult({ state, context, decision });
+    emitDelegationRuntimeActivityForDecision({
+      activeDelegation: context.activeDelegation,
+      decision,
+      transition,
+    });
     return new Command({
       update: transition.update,
       goto: transition.goto,
     });
   };
+}
+
+function emitDelegationRuntimeActivityForDecision(params: {
+  activeDelegation: TaskActiveDelegation | null;
+  decision: DelegationOutcomeDecision;
+  transition: DelegationOutcomeTransition;
+}) {
+  const { activeDelegation, decision, transition } = params;
+  if (!activeDelegation || decision.outcome === 'continue') {
+    return;
+  }
+  const capability = readCapabilityNameFromLane(activeDelegation.lane);
+  if (!capability) {
+    return;
+  }
+  const state = decision.outcome === 'user_input_required'
+    ? 'waiting_for_input'
+    : transition.update.taskActiveDelegation === null
+      ? 'handed_off'
+      : null;
+  if (!state) {
+    return;
+  }
+  emitRuntimeEventToStreamWriter(delegationRuntimeActivityEvent({
+    delegationId: activeDelegation.id,
+    capability,
+    task: activeDelegation.task,
+    state,
+  }));
 }
 
 function buildEntryDecisionContext(params: {

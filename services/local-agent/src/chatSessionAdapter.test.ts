@@ -4,6 +4,7 @@ import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
   GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
+  DELEGATION_RUNTIME_EVENT,
   readMessageCreatedAtUtc,
   SUBAGENT_OPERATIONS_EVENT,
 } from '@pinpawo/pet-agent';
@@ -281,7 +282,7 @@ test('runChatSession falls back to checkpoint final message when stream values o
   assert.equal(completed?.text, 'checkpoint answer');
 });
 
-test('runChatSession maps authorization runtime events to system notices', async () => {
+test('runChatSession maps authorization runtime events to completed operations', async () => {
   const emittedTools: StreamToolsPayload[] = [];
   const emittedEvents: AgentRuntimeEvent[] = [];
   const setup = {
@@ -306,6 +307,9 @@ test('runChatSession maps authorization runtime events to system notices', async
           data: {
             toolName: 'write_file',
             policyMode: GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION,
+            reviewIds: ['review-write'],
+            toolCalls: [{ toolName: 'write_file', toolkitName: 'workspace' }],
+            reason: 'The action is limited to the current workspace.',
           },
         }, ['general:t1']);
         yield protocolEvent('custom', {
@@ -314,6 +318,9 @@ test('runChatSession maps authorization runtime events to system notices', async
           data: {
             toolName: 'custom_tool',
             policyMode: GLOBAL_REVIEW_POLICY_MODE.CUSTOM,
+            reviewIds: ['review-custom'],
+            toolCalls: [{ toolName: 'custom_tool', toolkitName: 'custom' }],
+            reason: 'The configured policy approved this action.',
           },
         }, ['general:t1']);
         yield protocolEvent('custom', {
@@ -364,14 +371,127 @@ test('runChatSession maps authorization runtime events to system notices', async
   assert.deepEqual(result, { status: 'completed', reply: 'done' });
   assert.deepEqual(emittedTools, []);
   assert.deepEqual(
+    emittedEvents.filter((event) => event.type === 'operation'),
+    [{
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'completed',
+      operation: {
+        id: 'authorization:review-write',
+        kind: 'runtime.authorization',
+        title: '自动授权 · workspace · write_file',
+        summary: 'workspace · write_file',
+        details: {
+          actions: ['workspace · write_file'],
+          reason: 'The action is limited to the current workspace.',
+        },
+        source: { provider: 'runtime', name: 'global_review_policy' },
+      },
+    }, {
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'completed',
+      operation: {
+        id: 'authorization:review-custom',
+        kind: 'runtime.authorization',
+        title: '按策略授权 · custom · custom_tool',
+        summary: 'custom · custom_tool',
+        details: {
+          actions: ['custom · custom_tool'],
+          reason: 'The configured policy approved this action.',
+        },
+        source: { provider: 'runtime', name: 'global_review_policy' },
+      },
+    }],
+  );
+  assert.deepEqual(
     emittedEvents
       .filter((event) => event.type === 'system.notice')
       .map((event) => event.message),
     [
-      '已自动授权 write_file 操作。',
-      '已根据全局策略授权 custom_tool 操作。',
       '已授权当前会话中的 run_shell 操作。',
     ],
+  );
+});
+
+test('runChatSession maps delegation activity to one ordered operation', async () => {
+  const emittedEvents: AgentRuntimeEvent[] = [];
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: { messages: [] },
+  } as unknown as AgentChannelSetup;
+  const graphService = {
+    async readThreadState() {
+      return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
+    },
+    streamEvents() {
+      return (async function* () {
+        yield protocolEvent('custom', {
+          event: 'on_runtime_event',
+          name: DELEGATION_RUNTIME_EVENT,
+          data: {
+            delegationId: 'delegate-1',
+            capability: 'general',
+            task: 'Check whether coscli is installed.',
+            state: 'started',
+          },
+        }, ['capability:t1']);
+        yield protocolEvent('custom', {
+          event: 'on_runtime_event',
+          name: DELEGATION_RUNTIME_EVENT,
+          data: {
+            delegationId: 'delegate-1',
+            capability: 'general',
+            task: 'Check whether coscli is installed.',
+            state: 'handed_off',
+          },
+        }, ['delegationOutcomeDecision:t2']);
+        yield protocolEvent('values', { messages: [new AIMessage('done')] });
+      })();
+    },
+  };
+
+  const result = await runChatSession({
+    request: { kind: 'user_message', requestId: 'req-1', message: 'hello' },
+    setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => true,
+    finishInterrupted: () => {
+      throw new Error('should not interrupt');
+    },
+    emitEvent: (event) => emittedEvents.push(event),
+    emitToolEvent: () => {},
+  });
+
+  assert.deepEqual(result, { status: 'completed', reply: 'done' });
+  assert.deepEqual(
+    emittedEvents.filter((event) => event.type === 'operation'),
+    [{
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'started',
+      operation: {
+        id: 'delegation:delegate-1',
+        kind: 'runtime.delegation',
+        title: '委派任务 · general',
+        summary: 'Check whether coscli is installed.',
+        details: { state: 'started' },
+        source: { provider: 'runtime', name: 'delegation' },
+      },
+    }, {
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'completed',
+      operation: {
+        id: 'delegation:delegate-1',
+        kind: 'runtime.delegation',
+        title: '子任务已交接 · general',
+        summary: 'Check whether coscli is installed.',
+        details: { state: 'handed_off' },
+        source: { provider: 'runtime', name: 'delegation' },
+      },
+    }],
   );
 });
 

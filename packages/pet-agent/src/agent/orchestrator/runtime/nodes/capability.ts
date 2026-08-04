@@ -31,6 +31,7 @@ import {
 } from '../config';
 import {
   createTaskActiveDelegation,
+  delegationRuntimeActivityEvent,
   readCapabilityNameFromLane,
   resolveDelegationTranscriptRunId,
 } from '../decisions/delegationLifecycle';
@@ -93,6 +94,13 @@ export function createCapabilityNode(params: {
     const transcriptRunId = resolveDelegationTranscriptRunId(state, runNextDelegation);
     const scopedMessages = laneMessages(state.messages, lane, transcriptRunId, runNextDelegation.id);
     const threadId = readThreadId(runnableConfig);
+
+    emitRuntimeEventToStreamWriter(delegationRuntimeActivityEvent({
+      delegationId: runNextDelegation.id,
+      capability: capability.name,
+      task: runNextDelegation.task,
+      state: 'started',
+    }));
 
     const authorizationRecorder = createToolAuthorizationRecorder(
       state.sessionToolAuthorizations.generation === registry.authorizationGeneration
@@ -206,6 +214,14 @@ export function createCapabilityNode(params: {
         artifacts: artifactRefs,
       };
       result = await createSubagent(subagentInput);
+    } catch (error) {
+      emitRuntimeEventToStreamWriter(delegationRuntimeActivityEvent({
+        delegationId: runNextDelegation.id,
+        capability: capability.name,
+        task: runNextDelegation.task,
+        state: 'failed',
+      }));
+      throw error;
     } finally {
       await runtimeExecution?.release();
     }
@@ -256,6 +272,14 @@ export function createCapabilityNode(params: {
     );
     const delegationAnnounce = readLatestAnnounce(laneOutputMessages, { delegationId: runNextDelegation.id });
     const interrupted = result.completionReason === 'interrupted';
+    if (interrupted) {
+      emitRuntimeEventToStreamWriter(delegationRuntimeActivityEvent({
+        delegationId: runNextDelegation.id,
+        capability: capability.name,
+        task: runNextDelegation.task,
+        state: 'interrupted',
+      }));
+    }
     const currentResultPreview = state.taskActiveDelegation?.resultPreview ?? null;
     const resultPreview = interrupted
       ? currentResultPreview

@@ -278,6 +278,13 @@ export {
   GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
 } from './agent/orchestrator/review/globalReviewPolicy';
 export {
+  DELEGATION_RUNTIME_EVENT,
+  delegationRuntimeActivityEvent,
+} from './agent/orchestrator/runtime/decisions/delegationLifecycle';
+export type {
+  DelegationRuntimeActivity,
+} from './agent/orchestrator/runtime/decisions/delegationLifecycle';
+export {
   appendReviewViewMessage,
   buildReviewSpec,
   isHumanReviewBatchInterruptPayload,

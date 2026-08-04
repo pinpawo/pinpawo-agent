@@ -103,6 +103,37 @@ test('operation display keeps running and terminal phases distinct', () => {
   assert.match(interrupted, /已中断/);
 });
 
+test('operation display gives runtime authorization and delegation compact activity rows', () => {
+  const authorization = buildOperationDisplayLines(operation({
+    kind: 'runtime.authorization',
+    title: '自动授权 · 2 项操作',
+    phase: 'completed',
+    details: {
+      actions: ['local · which', 'local · version'],
+      reason: 'Both checks are read-only.',
+    },
+  }), 3_500, 100);
+  const delegation = buildOperationDisplayLines(operation({
+    kind: 'runtime.delegation',
+    title: '子任务已交接 · general',
+    phase: 'completed',
+    summary: 'Check whether coscli is installed.',
+    details: { state: 'handed_off' },
+  }), 3_500, 100);
+
+  assert.deepEqual(authorization.map((line) => line.text), [
+    '自动授权 · 2 项操作（完成）',
+    '  local · which · local · version',
+    '  原因：Both checks are read-only.',
+  ]);
+  assert.deepEqual(delegation.map((line) => line.text), [
+    '子任务已交接 · general（完成）',
+    '  Check whether coscli is installed.',
+    '  结果已交给主 agent 汇总',
+  ]);
+  assert.ok([...authorization, ...delegation].every((line) => stringWidth(line.text) <= 100));
+});
+
 function operation(
   overrides: Partial<AgentOperationEntry>,
 ): AgentOperationEntry {

@@ -188,3 +188,166 @@ test('bounds captured output', async () => {
     'stdout must respect maxOutputChars',
   );
 });
+
+test('yieldOnTimeout hands back a handle instead of killing', async () => {
+  const marker = `pinpawo-yield-${Date.now().toString()}`;
+  const outcome = await runShellCommand({
+    command: `node -e "process.title='${marker}'; setTimeout(() => {}, 4000)"`,
+    cwd: CWD,
+    timeoutMs: 300,
+    maxOutputChars: 1024,
+    yieldOnTimeout: true,
+  });
+
+  assert.equal(outcome.status, 'yielded');
+  if (outcome.status !== 'yielded') return;
+  assert.notDeepEqual(descendantsAlive(marker), [], 'process must survive the yield');
+
+  outcome.handle.terminate(200);
+  await outcome.handle.wait();
+  killMarker(marker);
+});
+
+test('a yielded process survives cancellation of the call that started it', async () => {
+  // The whole point of yielding: the run outlives the tool call, so that
+  // call's abort must no longer reach it.
+  const marker = `pinpawo-yield-abort-${Date.now().toString()}`;
+  const controller = new AbortController();
+  const outcome = await runShellCommand({
+    command: `node -e "process.title='${marker}'; setTimeout(() => {}, 4000)"`,
+    cwd: CWD,
+    timeoutMs: 300,
+    maxOutputChars: 1024,
+    yieldOnTimeout: true,
+    signal: controller.signal,
+  });
+
+  assert.equal(outcome.status, 'yielded');
+  if (outcome.status !== 'yielded') return;
+
+  controller.abort();
+  await new Promise((r) => setTimeout(r, 500));
+  const survivors = descendantsAlive(marker);
+
+  outcome.handle.terminate(200);
+  await outcome.handle.wait();
+  killMarker(marker);
+  assert.notDeepEqual(survivors, [], 'abort of the original call must not kill it');
+});
+
+test('a yielded handle reports the eventual exit code', async () => {
+  const outcome = await runShellCommand({
+    command: 'sleep 0.6; exit 7',
+    cwd: CWD,
+    timeoutMs: 200,
+    maxOutputChars: 1024,
+    yieldOnTimeout: true,
+  });
+  assert.equal(outcome.status, 'yielded');
+  if (outcome.status !== 'yielded') return;
+  assert.equal((await outcome.handle.wait()).code, 7);
+});
+
+test('a yielded handle keeps accumulating output', async () => {
+  const outcome = await runShellCommand({
+    command: 'echo first; sleep 0.5; echo second',
+    cwd: CWD,
+    timeoutMs: 250,
+    maxOutputChars: 1024,
+    yieldOnTimeout: true,
+  });
+  assert.equal(outcome.status, 'yielded');
+  if (outcome.status !== 'yielded') return;
+  assert.match(outcome.handle.stdout, /first/);
+  assert.match((await outcome.handle.wait()).stdout, /second/);
+});
+
+test('onOutput streams post-yield chunks and can be unsubscribed', async () => {
+  const outcome = await runShellCommand({
+    command: 'echo one; sleep 0.3; echo two; sleep 0.3; echo three',
+    cwd: CWD,
+    timeoutMs: 200,
+    maxOutputChars: 1024,
+    yieldOnTimeout: true,
+  });
+  assert.equal(outcome.status, 'yielded');
+  if (outcome.status !== 'yielded') return;
+
+  const seen: string[] = [];
+  const unsubscribe = outcome.handle.onOutput((_stream, chunk) => {
+    seen.push(chunk.trim());
+    unsubscribe();
+  });
+  await outcome.handle.wait();
+
+  assert.equal(seen.length, 1, 'unsubscribe must stop further delivery');
+});
+
+test('a yielded handle releases its subscribers once the process exits', async () => {
+  const outcome = await runShellCommand({
+    command: 'sleep 0.4',
+    cwd: CWD,
+    timeoutMs: 200,
+    maxOutputChars: 1024,
+    yieldOnTimeout: true,
+  });
+  assert.equal(outcome.status, 'yielded');
+  if (outcome.status !== 'yielded') return;
+
+  let delivered = 0;
+  outcome.handle.onOutput(() => { delivered += 1; });
+  await outcome.handle.wait();
+  assert.equal(delivered, 0, 'no output was produced after the yield');
+});
+
+test('terminating a yielded handle repeatedly is safe', async () => {
+  const outcome = await runShellCommand({
+    command: 'sleep 5',
+    cwd: CWD,
+    timeoutMs: 200,
+    maxOutputChars: 1024,
+    yieldOnTimeout: true,
+  });
+  assert.equal(outcome.status, 'yielded');
+  if (outcome.status !== 'yielded') return;
+
+  outcome.handle.terminate(200);
+  outcome.handle.terminate(200);
+  await outcome.handle.wait();
+  // Terminating after exit must not throw either.
+  outcome.handle.terminate(200);
+});
+
+test('yieldOnTimeout leaves short commands unchanged', async () => {
+  const outcome = await runShellCommand({
+    command: 'echo quick',
+    cwd: CWD,
+    timeoutMs: 5_000,
+    maxOutputChars: 1024,
+    yieldOnTimeout: true,
+  });
+  assert.equal(outcome.status, 'exited');
+  assert.match(outcome.status === 'exited' ? outcome.stdout : '', /quick/);
+});
+
+test('abort still terminates a run that has not yielded', async () => {
+  const marker = `pinpawo-yield-preabort-${Date.now().toString()}`;
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), 200);
+
+  const outcome = await runShellCommand({
+    command: forkingCommand(marker),
+    cwd: CWD,
+    timeoutMs: 30_000,
+    maxOutputChars: 1024,
+    killGraceMs: 200,
+    signal: controller.signal,
+    yieldOnTimeout: true,
+  });
+
+  assert.equal(outcome.status, 'aborted');
+  await new Promise((r) => setTimeout(r, 500));
+  const survivors = descendantsAlive(marker);
+  killMarker(marker);
+  assert.deepEqual(survivors, [], 'pre-yield abort must still kill the group');
+});

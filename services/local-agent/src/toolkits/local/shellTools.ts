@@ -122,6 +122,13 @@ export const runShellTool = tool(
       throw createAbortError();
     }
 
+    if (outcome.status === 'yielded') {
+      // Unreachable until run_shell opts into yieldOnTimeout (#513). Terminate
+      // rather than leak a handle nothing is holding.
+      outcome.handle.terminate();
+      return 'Error: command was still running and could not be handed back.';
+    }
+
     const out = truncateShellOutput(outcome.stdout.trimEnd());
     const err = truncateShellOutput(outcome.stderr.trimEnd());
 
@@ -130,6 +137,8 @@ export const runShellTool = tool(
       return [
         `Error: command timed out after ${(timeoutMs / 1000).toString()}s`,
         'and was terminated along with its child processes.',
+        'If it needs longer and is not waiting for interactive input,'
+        + ' retry with a larger timeoutSeconds.',
         output,
       ].filter(Boolean).join('\n').trimEnd();
     }

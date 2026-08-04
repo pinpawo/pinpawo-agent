@@ -34,7 +34,9 @@ export function buildMessageDisplayLines(
       return [
         ...timestampLine(timestampLabel, 'user-label'),
         ...logicalLines(entry.text).map((line) => ({
-          text: line,
+          // Align user text with the two-cell gutter used by rich agent
+          // messages while keeping its timestamp aligned with every entry.
+          text: `  ${line}`,
           tone: 'user' as const,
         })),
       ];

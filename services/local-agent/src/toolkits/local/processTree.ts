@@ -18,11 +18,33 @@ import { spawn } from 'node:child_process';
  * process-group handling.
  */
 
+/**
+ * Ownership of a still-running process, handed over when the caller yields
+ * instead of waiting.
+ *
+ * Yielding detaches the run from the call that started it: the abort listener
+ * and the timeout are cleared, so a later cancellation of that call can no
+ * longer kill the process. Whoever takes the handle owns termination from then
+ * on.
+ */
+export type ShellRunHandle = {
+  pid: number;
+  /** Output captured up to the moment of yielding. */
+  stdout: string;
+  stderr: string;
+  /** Continues to accumulate into the same caps after the yield. */
+  onOutput: (listener: (stream: 'stdout' | 'stderr', chunk: string) => void) => void;
+  /** Resolves once the process exits on its own or is terminated. */
+  wait: () => Promise<{ code: number | null; stdout: string; stderr: string }>;
+  terminate: (killGraceMs?: number) => void;
+};
+
 export type ShellRunOutcome =
   | { status: 'exited'; code: number | null; stdout: string; stderr: string }
   | { status: 'timeout'; stdout: string; stderr: string }
   | { status: 'aborted'; stdout: string; stderr: string }
-  | { status: 'spawn_failed'; error: Error };
+  | { status: 'spawn_failed'; error: Error }
+  | { status: 'yielded'; handle: ShellRunHandle };
 
 export type ShellRunOptions = {
   command: string;
@@ -37,6 +59,14 @@ export type ShellRunOptions = {
   signal?: AbortSignal;
   /** Grace period between SIGTERM and SIGKILL for the process group. */
   killGraceMs?: number;
+  /**
+   * Hand back a handle instead of terminating when `timeoutMs` elapses.
+   *
+   * A timeout means the command is slow, not that it failed; killing it loses
+   * work and, because the caller reads that as failure, invites a concurrent
+   * retry. Yielding lets the run continue under new ownership.
+   */
+  yieldOnTimeout?: boolean;
 };
 
 const DEFAULT_KILL_GRACE_MS = 2_000;
@@ -69,6 +99,7 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
     maxOutputChars,
     signal,
     killGraceMs = DEFAULT_KILL_GRACE_MS,
+    yieldOnTimeout = false,
   } = options;
 
   return new Promise<ShellRunOutcome>((resolve) => {
@@ -96,42 +127,72 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
     let stdout = '';
     let stderr = '';
     let settled = false;
+    let yielded = false;
+    let exited = false;
     let reason: 'timeout' | 'aborted' | null = null;
     let killTimer: NodeJS.Timeout | null = null;
 
+    const outputListeners = new Set<
+      (stream: 'stdout' | 'stderr', chunk: string) => void
+    >();
+    let resolveExit!: (value: {
+      code: number | null;
+      stdout: string;
+      stderr: string;
+    }) => void;
+    const exitPromise = new Promise<{
+      code: number | null;
+      stdout: string;
+      stderr: string;
+    }>((r) => { resolveExit = r; });
+
     const collect = (
       stream: NodeJS.ReadableStream | null,
+      name: 'stdout' | 'stderr',
       append: (chunk: string) => void,
     ) => {
       if (!stream) return;
       stream.setEncoding('utf-8');
-      stream.on('data', (chunk: string) => append(chunk));
+      stream.on('data', (chunk: string) => {
+        append(chunk);
+        for (const listener of outputListeners) listener(name, chunk);
+      });
     };
 
-    collect(child.stdout, (chunk) => {
+    collect(child.stdout, 'stdout', (chunk) => {
       if (stdout.length < maxOutputChars) {
         stdout += chunk.slice(0, maxOutputChars - stdout.length);
       }
     });
-    collect(child.stderr, (chunk) => {
+    collect(child.stderr, 'stderr', (chunk) => {
       if (stderr.length < maxOutputChars) {
         stderr += chunk.slice(0, maxOutputChars - stderr.length);
       }
     });
 
-    const terminate = (why: 'timeout' | 'aborted') => {
-      if (settled || reason) return;
-      reason = why;
+    const terminateGroup = (grace: number) => {
       if (pid === undefined) return;
       killProcessGroup(pid, 'SIGTERM');
       killTimer = setTimeout(() => {
         killProcessGroup(pid, 'SIGKILL');
-      }, killGraceMs);
+      }, grace);
       // Do not hold the event loop open just to escalate a kill.
       killTimer.unref?.();
     };
 
-    const timeoutTimer = setTimeout(() => terminate('timeout'), timeoutMs);
+    const terminate = (why: 'timeout' | 'aborted') => {
+      if (settled || reason) return;
+      reason = why;
+      terminateGroup(killGraceMs);
+    };
+
+    const timeoutTimer = setTimeout(() => {
+      if (yieldOnTimeout) {
+        yieldOwnership();
+        return;
+      }
+      terminate('timeout');
+    }, timeoutMs);
     const onAbort = () => terminate('aborted');
     signal?.addEventListener('abort', onAbort, { once: true });
 
@@ -148,11 +209,50 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
       resolve(outcome);
     };
 
+    /**
+     * Detach the run from this call and resolve with a handle.
+     *
+     * `cleanup()` is what makes the handover safe: it removes the abort
+     * listener so a later cancellation of the originating tool call cannot
+     * kill a process that has outlived it, and clears the timeout that has
+     * already fired.
+     */
+    function yieldOwnership() {
+      if (settled || reason || pid === undefined) return;
+      yielded = true;
+      cleanup();
+
+      const handle: ShellRunHandle = {
+        pid,
+        get stdout() { return stdout; },
+        get stderr() { return stderr; },
+        onOutput: (listener) => outputListeners.add(listener),
+        wait: () => exitPromise,
+        terminate: (grace = killGraceMs) => {
+          if (exited) return;
+          terminateGroup(grace);
+        },
+      };
+      settle({ status: 'yielded', handle });
+    }
+
     child.on('error', (err) => {
+      if (yielded) {
+        // The handle owns the outcome now; a late spawn error simply ends it.
+        exited = true;
+        resolveExit({ code: null, stdout, stderr });
+        return;
+      }
       settle({ status: 'spawn_failed', error: err });
     });
 
     child.on('close', (code) => {
+      exited = true;
+      if (yielded) {
+        if (killTimer) clearTimeout(killTimer);
+        resolveExit({ code, stdout, stderr });
+        return;
+      }
       if (reason === 'timeout') {
         settle({ status: 'timeout', stdout, stderr });
         return;

@@ -17,7 +17,7 @@ test('inferLlmContextWindowTokens covers mainstream model families', () => {
   assert.equal(inferLlmContextWindowTokens('glm-5.1'), 200_000);
   assert.equal(inferLlmContextWindowTokens('kimi-k2.6'), 256_000);
   assert.equal(inferLlmContextWindowTokens('MiniMax-M2.7'), 192_000);
-  assert.equal(inferLlmContextWindowTokens('qwen3.8-max-preview'), 983_616);
+  assert.equal(inferLlmContextWindowTokens('qwen3.8-max'), 983_616);
   assert.equal(inferLlmContextWindowTokens('qwen3.7-max'), 1_000_000);
   assert.equal(inferLlmContextWindowTokens('qwen3.6-flash'), 1_000_000);
   assert.equal(inferLlmContextWindowTokens('qwen3.5-plus'), 1_000_000);

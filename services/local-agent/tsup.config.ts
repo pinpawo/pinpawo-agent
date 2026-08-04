@@ -30,12 +30,14 @@ export default defineConfig({
   clean: true,
   splitting: false,
   onSuccess: async () => {
-    const targetDir = 'dist/capabilities/general';
-    await mkdir(targetDir, { recursive: true });
-    await copyFile(
-      'src/capabilities/general/CAPABILITY.md',
-      `${targetDir}/CAPABILITY.md`,
-    );
+    await Promise.all(['general', 'capabilityCreator'].map(async (capability) => {
+      const targetDir = `dist/capabilities/${capability}`;
+      await mkdir(targetDir, { recursive: true });
+      await copyFile(
+        `src/capabilities/${capability}/CAPABILITY.md`,
+        `${targetDir}/CAPABILITY.md`,
+      );
+    }));
   },
   // Manually inject createRequire so the bundled CJS __require shim can
   // resolve Node.js built-ins (events, stream, punycode, …) at runtime.

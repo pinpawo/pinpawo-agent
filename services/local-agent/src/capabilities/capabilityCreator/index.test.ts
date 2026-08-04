@@ -20,6 +20,17 @@ test('capability_creator relies on the shared subagent context window policy', (
   assert.equal('contextPolicy' in capability, false);
 });
 
+test('capability_creator retains its authored CAPABILITY.md provenance', async () => {
+  const capability = createCapabilityCreatorCapability();
+
+  assert.match(capability.document?.filePath ?? '', /CAPABILITY\.md$/);
+  assert.match(capability.document?.digest ?? '', /^[a-f0-9]{64}$/);
+  assert.match(
+    await readFile(capability.document!.filePath, 'utf8'),
+    /name:\s*capability_creator/,
+  );
+});
+
 test('capability_creator keeps artifact persistence out of model tool calls', () => {
   const capability = createCapabilityCreatorCapability();
 

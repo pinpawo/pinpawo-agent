@@ -1,10 +1,9 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { tool } from '@langchain/core/tools';
+import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { z } from 'zod';
-import type { ToolOperationMetadata } from '@pinpawo/pet-agent';
+import { createAbortError, type ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { readRecord, readString } from '../operationMetadata';
 import { getLocalToolsWorkdir, resolveUserPath } from './pathUtils';
+import { runShellCommand } from './processTree';
 
 function processOutputToString(output: unknown) {
   if (typeof output === 'string') {
@@ -32,8 +31,6 @@ export function normalizeShellActionInput(input: unknown) {
     : getLocalToolsWorkdir();
   return { command, cwd };
 }
-
-const execFileAsync = promisify(execFile);
 
 const DEFAULT_SHELL_TIMEOUT_SECONDS = 60;
 const MAX_SHELL_TIMEOUT_SECONDS = 600;
@@ -103,7 +100,10 @@ export const getCurrentTimeTool = tool(
 );
 
 export const runShellTool = tool(
-  async (input: { command: string; cwd?: string; timeoutSeconds?: number }) => {
+  async (
+    input: { command: string; cwd?: string; timeoutSeconds?: number },
+    runtime: ToolRuntime,
+  ) => {
     let shellAction: { command: string; cwd: string };
 
     try {
@@ -113,35 +113,45 @@ export const runShellTool = tool(
     }
 
     const timeoutMs = resolveShellTimeoutMs(input.timeoutSeconds);
+    const outcome = await runShellCommand({
+      command: shellAction.command,
+      cwd: shellAction.cwd,
+      timeoutMs,
+      maxOutputBytes: SHELL_MAX_BUFFER_BYTES,
+      ...(runtime.signal ? { signal: runtime.signal } : {}),
+    });
 
-    try {
-      const { stdout, stderr } = await execFileAsync('/bin/sh', ['-c', shellAction.command], {
-        encoding: 'utf-8',
-        timeout: timeoutMs,
-        maxBuffer: SHELL_MAX_BUFFER_BYTES,
-        cwd: shellAction.cwd,
-      });
-      const out = truncateShellOutput(processOutputToString(stdout));
-      const err = truncateShellOutput(processOutputToString(stderr));
-      return [out || '(no output)', err ? `--- stderr ---\n${err}` : '']
-        .filter(Boolean)
-        .join('\n');
-    } catch (err) {
-      if (err instanceof Error && ('stdout' in err || 'stderr' in err)) {
-        const stdout = truncateShellOutput(processOutputToString((err as { stdout?: unknown }).stdout));
-        const stderr = truncateShellOutput(processOutputToString((err as { stderr?: unknown }).stderr));
-        const output = [stderr, stdout].filter(Boolean).join('\n');
-        const killed = Boolean((err as { killed?: boolean }).killed);
-        const signal = (err as { signal?: string | null }).signal;
-        if (killed || signal === 'SIGTERM') {
-          return `Error: command timed out after ${(timeoutMs / 1000).toString()}s\n${output}`.trimEnd();
-        }
-        const status = (err as NodeJS.ErrnoException & { code?: unknown }).code;
-        const exitCode = typeof status === 'number' ? status : '?';
-        return `Error (exit ${exitCode.toString()}):\n${output || err.message}`;
-      }
-      return `Error: ${err instanceof Error ? err.message : err}`;
+    if (outcome.status === 'spawn_failed') {
+      return `Error: ${outcome.error.message}`;
     }
+
+    // Cancellation is not a result. Let it propagate so the graph unwinds
+    // instead of feeding the model a string that reads like a failure.
+    if (outcome.status === 'aborted') {
+      throw createAbortError();
+    }
+
+    const out = truncateShellOutput(processOutputToString(outcome.stdout));
+    const err = truncateShellOutput(processOutputToString(outcome.stderr));
+
+    if (outcome.status === 'timeout') {
+      const output = [err, out].filter(Boolean).join('\n');
+      return [
+        `Error: command timed out after ${(timeoutMs / 1000).toString()}s`,
+        'and was terminated along with its child processes.',
+        output,
+      ].filter(Boolean).join('\n').trimEnd();
+    }
+
+    if (outcome.code !== 0) {
+      const output = [err, out].filter(Boolean).join('\n');
+      const exitCode = outcome.code === null ? '?' : outcome.code.toString();
+      return `Error (exit ${exitCode}):\n${output || '(no output)'}`;
+    }
+
+    return [out || '(no output)', err ? `--- stderr ---\n${err}` : '']
+      .filter(Boolean)
+      .join('\n');
   },
   {
     name: 'run_shell',

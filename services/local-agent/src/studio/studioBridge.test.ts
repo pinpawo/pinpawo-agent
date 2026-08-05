@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { HumanReviewInterruptPayload } from '@pinpawo/pet-agent';
+import {
+  projectHumanReviewRequest,
+  type HumanReviewInterruptPayload,
+} from '@pinpawo/pet-agent';
 
 import {
   buildPetActorFromLocalConfig,
@@ -52,7 +55,7 @@ test('resolveReview / rejectReview return false when slot empty', () => {
   assert.equal(rejectReview(slot, new Error('x')), false);
 });
 
-test('createWsHumanReviewer forwards canonical review specs unchanged', async () => {
+test('createWsHumanReviewer projects review specs to public interactions', async () => {
   const sent: Array<Record<string, unknown>> = [];
   const slot = createPendingReviewSlot();
   const reviewer = createWsHumanReviewer({
@@ -67,11 +70,11 @@ test('createWsHumanReviewer forwards canonical review specs unchanged', async ()
 
   assert.equal(sent.length, 1);
   const event = sent[0].event as {
-    review: { id: string; view: { title?: string; body: string } };
+    review: { interactionId: string; view: { title?: string; body: string } };
   };
   assert.equal(slot.current?.reviewId, 'review-direct');
-  assert.equal(event.review.id, 'review-direct');
-  assert.equal(event.review, request.review);
+  assert.equal(event.review.interactionId, 'review-direct');
+  assert.deepEqual(event.review, projectHumanReviewRequest(request.review));
 
   assert.equal(resolveReview(slot, { reviewId: 'review-direct', selectedOptionId: 'approve' }), true);
   assert.deepEqual(await promise, { reviewId: 'review-direct', selectedOptionId: 'approve' });

@@ -6,6 +6,8 @@ import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import {
   compileAgentRegistry,
   defineInstructionDocument,
+  projectHumanReviewRequest,
+  type ReviewSpec,
 } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import {
@@ -16,6 +18,7 @@ import type { AgentChannelSetup } from './agentChannel';
 import type { AgentContext } from './contextLoader';
 import { InflightRequestController } from './inflightRequestController';
 import { LocalAgentAppChatHandler } from './localAgentAppChatHandler';
+import type { ChatSessionAdapterOptions } from './chatSessionAdapter';
 import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 import { createInitialTuiState, createSession } from './tui/state/tuiState';
 import { tuiStateReducer } from './tui/state/tuiStateReducer';
@@ -34,6 +37,23 @@ function createInflightController() {
   return new InflightRequestController<WebSocket>({
     emitOperation: (ws, event) => sendLocalAgentEvent(ws, event),
     sendControl: (ws, message) => sendLocalAgentMessage(ws, message),
+  });
+}
+
+function emitPendingReview(
+  options: Pick<ChatSessionAdapterOptions, 'emitEvent' | 'onInternalHumanReviewRequested'>,
+  params: { requestId: string; interruptId: string; review: ReviewSpec },
+) {
+  options.onInternalHumanReviewRequested?.({
+    requestId: params.requestId,
+    interruptId: params.interruptId,
+    reviews: [params.review],
+  });
+  options.emitEvent({
+    type: 'human_review.requested',
+    requestId: params.requestId,
+    interruptId: params.interruptId,
+    review: projectHumanReviewRequest(params.review),
   });
 }
 
@@ -672,12 +692,7 @@ test('LocalAgentAppChatHandler resumes canonical human review responses through 
     runChat: async (options) => {
       runRequests.push(options.request);
       if (options.request.kind === 'user_message') {
-        options.emitEvent({
-          type: 'human_review.requested',
-          requestId: 'req-1',
-          interruptId: 'interrupt-1',
-          review,
-        });
+        emitPendingReview(options, { requestId: 'req-1', interruptId: 'interrupt-1', review });
         return { status: 'waiting_human' };
       }
       return { status: 'completed', reply: 'done after review' };
@@ -1113,12 +1128,7 @@ test('LocalAgentAppChatHandler interrupts pending human review without selecting
     runChat: async (options) => {
       runRequests.push(options.request);
       if (options.request.kind === 'user_message') {
-        options.emitEvent({
-          type: 'human_review.requested',
-          requestId: 'req-1',
-          interruptId: 'interrupt-1',
-          review,
-        });
+        emitPendingReview(options, { requestId: 'req-1', interruptId: 'interrupt-1', review });
         return { status: 'waiting_human' };
       }
       assert.equal(options.interruptOnSettledResumeCheckpoint, true);
@@ -1171,12 +1181,7 @@ test('LocalAgentAppChatHandler interrupts a rejected review after checkpointing 
     runChat: async (options) => {
       runRequests.push(options.request);
       if (options.request.kind === 'user_message') {
-        options.emitEvent({
-          type: 'human_review.requested',
-          requestId: 'req-1',
-          interruptId: 'interrupt-1',
-          review,
-        });
+        emitPendingReview(options, { requestId: 'req-1', interruptId: 'interrupt-1', review });
         return { status: 'waiting_human' };
       }
       assert.equal(options.interruptOnSettledResumeCheckpoint, true);
@@ -1228,12 +1233,7 @@ test('LocalAgentAppChatHandler rejects cancellation for a stale review action', 
     runChat: async (options) => {
       runRequests.push(options.request);
       if (options.request.kind === 'user_message') {
-        options.emitEvent({
-          type: 'human_review.requested',
-          requestId: 'req-1',
-          interruptId: 'interrupt-current',
-          review,
-        });
+        emitPendingReview(options, { requestId: 'req-1', interruptId: 'interrupt-current', review });
         return { status: 'waiting_human' };
       }
       return { status: 'completed', reply: 'unexpected' };

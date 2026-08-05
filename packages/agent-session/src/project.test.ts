@@ -234,10 +234,10 @@ test('reduceSession keeps review and terminal control scoped to the owning run',
       type: 'human_review.requested',
       requestId: 'req-1',
       review: {
-        id: 'review-1',
+        interactionId: 'review-1',
         schemaVersion: 1,
         view: { kind: 'plain', body: 'Approve?' },
-        options: [],
+        options: [{ id: 'approve', label: 'Approve' }],
       },
     },
   }, { observedAt: 1_100 });

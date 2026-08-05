@@ -3,9 +3,7 @@ import {
   AIMessage,
   type BaseMessage,
 } from '@langchain/core/messages';
-import type {
-  ReviewSpec,
-} from '@pinpawo/agent-session';
+import type { ReviewSpec } from '@pinpawo/pet-agent';
 import type {
   AgentChannelSetup,
 } from '../../../local-agent/src/agentChannel';

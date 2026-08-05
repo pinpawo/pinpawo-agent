@@ -1,4 +1,7 @@
-import type { ReviewSpec } from '@pinpawo/pet-agent';
+import {
+  parseHumanReviewRequest,
+  type HumanReviewRequest,
+} from '@pinpawo/agent-contracts';
 import {
   AGENT_SESSION_SNAPSHOT_VERSION,
   type AgentOperationEntry,
@@ -400,12 +403,12 @@ function parseNativeReviewAction(value: unknown): AgentReviewAction | null {
   };
 }
 
-function readReviewSpecs(value: unknown): ReviewSpec[] | null {
+function readReviewSpecs(value: unknown): HumanReviewRequest[] | null {
   if (!Array.isArray(value)) return null;
-  const reviews = value.filter((item): item is ReviewSpec =>
-    Boolean(item && typeof item === 'object' && !Array.isArray(item)
-      && typeof (item as Record<string, unknown>).id === 'string'
-      && isJsonValue(item)));
+  const reviews = value.flatMap((item) => {
+    const review = parseHumanReviewRequest(item);
+    return review ? [review] : [];
+  });
   return reviews.length === value.length && reviews.length > 0 ? reviews : null;
 }
 

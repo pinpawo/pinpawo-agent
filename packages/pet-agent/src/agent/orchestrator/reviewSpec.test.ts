@@ -9,7 +9,9 @@ import {
   appendReviewViewMessage,
   isHumanReviewInterruptPayload,
   isReviewSpecValue,
+  projectHumanReviewRequest,
   reviewViewToText,
+  toInternalReviewResponse,
 } from './review/reviewSpec';
 import type { ReviewResolutionContext } from './review/reviewSpec';
 
@@ -96,6 +98,44 @@ test('review spec guards accept canonical values only', () => {
     ...reviewSpec,
     extra: true,
   }), false);
+});
+
+test('review spec projects a presentation-only human interaction boundary', () => {
+  const internal = samplePendingReview().reviewSpec;
+  const request = projectHumanReviewRequest(internal);
+
+  assert.deepEqual(request, {
+    interactionId: 'review-1',
+    schemaVersion: 1,
+    view: internal.view,
+    options: [
+      { id: 'approve', label: 'Approve', continuesInteraction: true },
+      { id: 'approve-with-auth', label: 'Approve and authorize', continuesInteraction: true },
+      { id: 'reject', label: 'Reject', continuesInteraction: false },
+      {
+        id: 'respond',
+        label: 'Respond',
+        input: {
+          kind: 'text',
+          key: 'message',
+          required: true,
+          multiline: true,
+        },
+        continuesInteraction: false,
+      },
+    ],
+  });
+  assert.equal('decision' in request.options[0]!, false);
+  assert.equal('effects' in request.options[1]!, false);
+  assert.deepEqual(toInternalReviewResponse({
+    interactionId: request.interactionId,
+    selectedOptionId: 'respond',
+    input: { message: 'explain the change' },
+  }), {
+    reviewId: 'review-1',
+    selectedOptionId: 'respond',
+    input: { message: 'explain the change' },
+  });
 });
 
 test('review spec guards accept a diff view and reject malformed ones', () => {

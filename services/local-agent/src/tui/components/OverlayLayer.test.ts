@@ -108,7 +108,7 @@ function resumeSession(): ResumeSessionSummary {
 
 function approvalRequest(): ApprovalRequestModel {
   const review = {
-    id: 'review-1',
+    interactionId: 'review-1',
     schemaVersion: 1,
     view: { kind: 'plain' as const, body: 'Need review' },
     options: [],

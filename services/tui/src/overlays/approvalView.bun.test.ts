@@ -95,7 +95,7 @@ function waitingReview(): AgentRunView {
 
 function review(): ReviewSpec {
   return {
-    id: 'review-1',
+    interactionId: 'review-1',
     schemaVersion: 1,
     view: {
       kind: 'plain',
@@ -105,7 +105,7 @@ function review(): ReviewSpec {
     options: [{
       id: 'approve',
       label: '批准',
-      decision: { type: 'approve' },
+      continuesInteraction: true,
     }, {
       id: 'respond',
       label: '回复',
@@ -114,10 +114,7 @@ function review(): ReviewSpec {
         key: 'message',
         multiline: true,
       },
-      decision: {
-        type: 'respond',
-        messageInputKey: 'message',
-      },
+      continuesInteraction: false,
     }],
   };
 }

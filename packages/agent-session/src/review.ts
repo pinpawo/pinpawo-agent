@@ -1,33 +1,42 @@
-import type { ReviewSpec } from '@pinpawo/pet-agent';
+import type {
+  HumanReviewOption,
+  HumanReviewOptionInput,
+  HumanReviewRequest,
+  HumanReviewResponse,
+  HumanReviewView,
+} from '@pinpawo/agent-contracts';
 
 export type {
-  ReviewOption,
-  ReviewOptionInput,
-  ReviewResponse,
-  ReviewSpec,
-  ReviewView,
-} from '@pinpawo/pet-agent';
+  HumanReviewRequest,
+  HumanReviewResponse,
+} from '@pinpawo/agent-contracts';
+
+export type ReviewSpec = HumanReviewRequest;
+export type ReviewOption = HumanReviewOption;
+export type ReviewOptionInput = HumanReviewOptionInput;
+export type ReviewResponse = HumanReviewResponse;
+export type ReviewView = HumanReviewView;
 
 export type ReviewAction = {
   actionId: string;
-  reviews: ReviewSpec[];
+  reviews: HumanReviewRequest[];
 };
 
 export function reviewActionId(params: {
   requestId: string;
   interruptId?: string;
-  reviews?: ReviewSpec[];
+  reviews?: HumanReviewRequest[];
 }) {
   if (params.interruptId) return params.interruptId;
   const reviewKey = params.reviews?.length
-    ? params.reviews.map((review) => encodeURIComponent(review.id)).join(',')
+    ? params.reviews.map((review) => encodeURIComponent(review.interactionId)).join(',')
     : 'unknown';
   return `request:${params.requestId}:reviews:${reviewKey}`;
 }
 
 export function reviewActionReviews(
-  review: ReviewSpec,
-  reviews?: ReviewSpec[],
+  review: HumanReviewRequest,
+  reviews?: HumanReviewRequest[],
 ) {
   return reviews?.length ? reviews : [review];
 }

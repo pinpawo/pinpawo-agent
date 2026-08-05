@@ -13,11 +13,11 @@ import { ApprovalController } from './approvalController';
 
 test('approval controller keeps the one-shot resolution gate after a wait timeout', () => {
   const firstDecision: ReviewResponse = {
-    reviewId: 'review-1',
+    interactionId: 'review-1',
     selectedOptionId: 'approve',
   };
   const secondDecision: ReviewResponse = {
-    reviewId: 'review-2',
+    interactionId: 'review-2',
     selectedOptionId: 'approve',
   };
   const sessionController = new FakeReviewSessionController();
@@ -92,7 +92,7 @@ test('approval controller keeps the one-shot resolution gate after a wait timeou
 test('approval controller preserves the one-shot resolution gate when connection changes', () => {
   const sessionController = new FakeReviewSessionController();
   const decision: ReviewResponse = {
-    reviewId: 'review-1',
+    interactionId: 'review-1',
     selectedOptionId: 'approve',
   };
   sessionController.submitResults.push({
@@ -182,7 +182,7 @@ function waitingReview(
 
 function review(id: string): ReviewSpec {
   return {
-    id,
+    interactionId: id,
     schemaVersion: 1,
     view: {
       kind: 'plain',
@@ -192,7 +192,7 @@ function review(id: string): ReviewSpec {
       id: 'approve',
       label: 'Approve',
       variant: 'primary',
-      decision: { type: 'approve' },
+      continuesInteraction: true,
     }],
   };
 }

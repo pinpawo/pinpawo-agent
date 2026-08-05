@@ -22,12 +22,12 @@ test('review responses advance approved batches and send the final canonical dec
     reviewSpec('review-1', [{
       id: 'approve-1',
       label: 'Approve first',
-      decision: { type: 'approve' },
+      continuesInteraction: true,
     }]),
     reviewSpec('review-2', [{
       id: 'approve-2',
       label: 'Approve second',
-      decision: { type: 'approve' },
+      continuesInteraction: true,
     }]),
   ]));
 
@@ -53,13 +53,13 @@ test('review responses advance approved batches and send the final canonical dec
     type: 'human_review_response',
     requestId: 'chat',
     actionId: 'review-action',
-    reviewId: 'review-2',
+    interactionId: 'review-2',
     selectedOptionId: 'approve-2',
     decisions: [{
-      reviewId: 'review-1',
+      interactionId: 'review-1',
       selectedOptionId: 'approve-1',
     }, {
-      reviewId: 'review-2',
+      interactionId: 'review-2',
       selectedOptionId: 'approve-2',
     }],
   });
@@ -87,10 +87,7 @@ test('review responses validate free text and reject stale local drafts', () => 
         required: true,
         multiline: true,
       },
-      decision: {
-        type: 'respond',
-        messageInputKey: 'message',
-      },
+      continuesInteraction: false,
     }]),
   ]));
 
@@ -108,7 +105,7 @@ test('review responses validate free text and reject stale local drafts', () => 
     requestId: 'chat',
     actionId: 'review-action',
     decisions: [{
-      reviewId: 'wrong-review',
+      interactionId: 'wrong-review',
       selectedOptionId: 'respond',
     }],
     optionId: 'respond',
@@ -130,11 +127,11 @@ test('review responses validate free text and reject stale local drafts', () => 
     type: 'human_review_response',
     requestId: 'chat',
     actionId: 'review-action',
-    reviewId: 'review-1',
+    interactionId: 'review-1',
     selectedOptionId: 'respond',
     input: { message: 'needs changes' },
     decisions: [{
-      reviewId: 'review-1',
+      interactionId: 'review-1',
       selectedOptionId: 'respond',
       input: { message: 'needs changes' },
     }],
@@ -157,7 +154,7 @@ test('review cancellation targets only the current canonical action', () => {
     reviewSpec('review-1', [{
       id: 'approve',
       label: 'Approve',
-      decision: { type: 'approve' },
+      continuesInteraction: false,
     }]),
   ]));
 
@@ -197,7 +194,7 @@ test('a sent review resolution can be followed by an ordered run interrupt', () 
     reviewSpec('review-1', [{
       id: 'approve',
       label: 'Approve',
-      decision: { type: 'approve' },
+      continuesInteraction: false,
     }]),
   ]));
 

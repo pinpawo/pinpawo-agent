@@ -117,7 +117,7 @@ export function reviewSpec(
   >['reviewAction']['reviews'][number]['options'],
 ) {
   return {
-    id,
+    interactionId: id,
     schemaVersion: 1,
     view: {
       kind: 'plain' as const,

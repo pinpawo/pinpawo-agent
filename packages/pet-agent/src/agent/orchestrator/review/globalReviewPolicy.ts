@@ -1,5 +1,6 @@
 import { HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import { z } from 'zod';
+import type { ToolAuthorizationMode } from '@pinpawo/agent-contracts';
 import type { AgentActor, AgentModels } from '../../../types/agent';
 import type { StructuredOutputOptions } from '../../../utils/structuredOutput';
 import { invokeStructuredOutput } from '../../../utils/structuredOutput';
@@ -26,10 +27,8 @@ export const GLOBAL_REVIEW_POLICY_RUNTIME_EVENT = {
   CUSTOM_AUTHORIZED: 'global_review_policy_custom_authorized',
 } as const;
 
-export type BuiltinGlobalReviewPolicyMode =
-  | typeof GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION
-  | typeof GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION
-  | typeof GLOBAL_REVIEW_POLICY_MODE.FULL_ACCESS;
+/** @deprecated Use ToolAuthorizationMode from @pinpawo/agent-contracts. */
+export type BuiltinGlobalReviewPolicyMode = ToolAuthorizationMode;
 export type GlobalReviewPolicyMode = BuiltinGlobalReviewPolicyMode | typeof GLOBAL_REVIEW_POLICY_MODE.CUSTOM;
 
 export type GlobalReviewPolicyStructuredOutputConfig = Omit<StructuredOutputOptions, 'name'>;

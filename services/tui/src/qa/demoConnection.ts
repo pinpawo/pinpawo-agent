@@ -358,7 +358,7 @@ function createDemoSession(
             actionId: 'smoke-review-action',
             petId: 'paws',
             reviews: [{
-              id: 'smoke-review',
+              interactionId: 'smoke-review',
               schemaVersion: 1,
               view: {
                 kind: 'plain',
@@ -369,7 +369,7 @@ function createDemoSession(
                 id: 'approve',
                 label: 'Approve',
                 variant: 'primary',
-                decision: { type: 'approve' },
+                continuesInteraction: false,
               }, {
                 id: 'respond',
                 label: 'Respond',
@@ -378,15 +378,12 @@ function createDemoSession(
                   key: 'message',
                   multiline: true,
                 },
-                decision: {
-                  type: 'respond',
-                  messageInputKey: 'message',
-                },
+                continuesInteraction: false,
               }, {
                 id: 'reject',
                 label: 'Reject',
                 variant: 'danger',
-                decision: { type: 'reject' },
+                continuesInteraction: false,
               }],
             }],
           },

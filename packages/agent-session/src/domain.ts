@@ -1,7 +1,7 @@
 import type {
-  BuiltinGlobalReviewPolicyMode,
+  ToolAuthorizationMode,
   TokenUsageSnapshot,
-} from '@pinpawo/pet-agent';
+} from '@pinpawo/agent-contracts';
 import type {
   AgentOperationPhase,
   AgentOperationRaw,
@@ -126,7 +126,9 @@ export type AgentRuntimeView = {
   model?: string;
   inputModalities?: AgentInputModality[];
   requiredInputModalities?: AgentInputModality[];
-  globalReviewPolicyMode?: BuiltinGlobalReviewPolicyMode;
+  /** @deprecated Use toolAuthorizationMode for new consumers. */
+  globalReviewPolicyMode?: ToolAuthorizationMode;
+  toolAuthorizationMode?: ToolAuthorizationMode;
   cwd?: string;
   workspaceId?: string;
   workspaceName?: string;

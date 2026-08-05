@@ -4,6 +4,7 @@ import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
   GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
+  projectHumanReviewRequest,
   readMessageCreatedAtUtc,
   SUBAGENT_OPERATIONS_EVENT,
 } from '@pinpawo/pet-agent';
@@ -623,7 +624,7 @@ test('runChatSession merges subagent_operations announcements through acceptDele
   }]);
 });
 
-test('runChatSession forwards canonical review interrupt specs unchanged', async () => {
+test('runChatSession projects review interrupts to public interaction contracts', async () => {
   const emittedEvents: AgentRuntimeEvent[] = [];
   const setup = {
     graphKey: 'test',
@@ -691,7 +692,7 @@ test('runChatSession forwards canonical review interrupt specs unchanged', async
   assert.deepEqual(result, { status: 'waiting_human' });
   const event = emittedEvents[0];
   assert.equal(event?.type, 'human_review.requested');
-  assert.deepEqual(event.review, review);
+  assert.deepEqual(event.review, projectHumanReviewRequest(review));
 });
 
 test('runChatSession resumes explicit response after state update clears interrupt payload', async () => {
@@ -889,7 +890,7 @@ test('runChatSession confirms the original resolution without interrupting a new
   assert.equal(emittedEvents[0]?.type, 'human_review.requested');
   assert.equal(
     emittedEvents[0]?.type === 'human_review.requested'
-      ? emittedEvents[0].review.id
+      ? emittedEvents[0].review.interactionId
       : null,
     'review-next',
   );
@@ -1196,7 +1197,7 @@ test('runChatSession does not map pending review free text to review response', 
   assert.equal(emittedEvents[1]?.type, 'human_review.requested');
   assert.deepEqual(
     emittedEvents[1]?.type === 'human_review.requested' ? emittedEvents[1].review : null,
-    review,
+    projectHumanReviewRequest(review),
   );
 });
 

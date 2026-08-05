@@ -1,4 +1,4 @@
-import type { ReviewResponse } from '@pinpawo/pet-agent';
+import type { ReviewResponse } from '@pinpawo/agent-session';
 import type { ReviewAction } from '@pinpawo/agent-session';
 
 export type ReviewDraft = {

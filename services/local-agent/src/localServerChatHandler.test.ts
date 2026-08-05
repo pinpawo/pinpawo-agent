@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { projectHumanReviewRequest } from '@pinpawo/pet-agent';
 import { isToolProtocolHistoryError, LocalServerChatHandler } from './localServerChatHandler';
 import { InflightRequestController } from './inflightRequestController';
 import type { LocalServerPeer } from './localServerPeer';
@@ -663,7 +664,7 @@ test('buildReviewActionSnapshot exposes routeable review action request ids', ()
     sessionId: 'sess-active',
     reviewAction: {
       actionId: 'interrupt-1',
-      reviews: [review],
+      reviews: [projectHumanReviewRequest(review)],
     },
     actor: { petId: 'pet-a' },
   });
@@ -684,7 +685,7 @@ test('buildReviewActionSnapshot exposes routeable review action request ids', ()
     sessionId: 'sess-active',
     reviewAction: {
       actionId: 'interrupt-1',
-      reviews: [review],
+      reviews: [projectHumanReviewRequest(review)],
     },
   });
 
@@ -699,7 +700,7 @@ test('buildReviewActionSnapshot exposes routeable review action request ids', ()
     sessionId: 'sess-active',
     reviewAction: {
       actionId: 'interrupt-1',
-      reviews: [review],
+      reviews: [projectHumanReviewRequest(review)],
     },
   });
 });

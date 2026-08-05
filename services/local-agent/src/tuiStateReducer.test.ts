@@ -379,7 +379,7 @@ test('tuiStateReducer keeps the current review draft when an older request compl
       type: 'human_review.requested',
       requestId: 'req-new',
       review: {
-        id: 'review-new',
+        interactionId: 'review-new',
         schemaVersion: 1,
         view: { kind: 'plain', body: 'Approve the new run?' },
         options: [],
@@ -441,7 +441,7 @@ test('tuiStateReducer records composer prompt history only for run starts', () =
     type: 'review.resolution.sent',
     requestId: 'req-2',
     actionId: 'request:req-2:reviews:unknown',
-    decision: { reviewId: 'review-2', selectedOptionId: 'approve' },
+    decision: { interactionId: 'review-2', selectedOptionId: 'approve' },
   });
   assert.deepEqual(state.input.history.entries, ['hello']);
 });
@@ -1236,10 +1236,10 @@ test('tuiStateReducer restores checkpoint-owned pending approval from a snapshot
           actionId: 'interrupt-1',
           petId: 'pet-a',
           reviews: [{
-            id: 'review-1',
+            interactionId: 'review-1',
             schemaVersion: 1,
             view: { kind: 'plain', body: 'Approve?' },
-            options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+            options: [{ id: 'approve', label: 'Approve', continuesInteraction: true }],
           }],
         },
       },
@@ -1248,9 +1248,9 @@ test('tuiStateReducer restores checkpoint-owned pending approval from a snapshot
 
   const pending = selectFocusedPendingApproval(state);
   assert.equal((state.sessions['chat:pet']?.activeRun?.requestId ?? null), 'req-review');
-  assert.equal(activeReviewAction(activeRun(state, 'req-review'))?.reviews[0]?.id, 'review-1');
+  assert.equal(activeReviewAction(activeRun(state, 'req-review'))?.reviews[0]?.interactionId, 'review-1');
   assert.equal(pending?.requestId, 'req-review');
-  assert.equal(pending?.review.id, 'review-1');
+  assert.equal(pending?.review.interactionId, 'review-1');
   assert.equal(pending?.petId, 'pet-a');
 });
 
@@ -1536,7 +1536,7 @@ test('tuiStateReducer handles human review and interrupt state', () => {
       type: 'human_review.requested',
       requestId: 'req-1',
       review: {
-        id: 'review-1',
+        interactionId: 'review-1',
         schemaVersion: 1,
         view: { kind: 'plain', body: 'Approve?' },
         options: [],
@@ -1552,13 +1552,13 @@ test('tuiStateReducer handles human review and interrupt state', () => {
     requestId: 'req-1',
     actionId: 'request:req-1:reviews:review-1',
     review: {
-      id: 'review-1',
+      interactionId: 'review-1',
       schemaVersion: 1,
       view: { kind: 'plain', body: 'Approve?' },
       options: [],
     },
     reviews: [{
-      id: 'review-1',
+      interactionId: 'review-1',
       schemaVersion: 1,
       view: { kind: 'plain', body: 'Approve?' },
       options: [],
@@ -1574,7 +1574,7 @@ test('tuiStateReducer handles human review and interrupt state', () => {
     type: 'review.resolution.sent',
     requestId: 'req-1',
     actionId: 'request:req-1:reviews:review-1',
-    decision: { reviewId: 'review-1', selectedOptionId: 'approve' },
+    decision: { interactionId: 'review-1', selectedOptionId: 'approve' },
   });
 
   assert.equal(selectFocusedBusy(state), true);
@@ -1600,10 +1600,10 @@ test('tuiStateReducer handles human review and interrupt state', () => {
 test('tuiStateReducer keeps batch draft local and out of the conversation timeline', () => {
   let state = startRun(initialState(), 'req-1');
   const reviews = ['review-1', 'review-2'].map((id) => ({
-    id,
+    interactionId: id,
     schemaVersion: 1,
     view: { kind: 'plain' as const, body: id },
-    options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' as const } }],
+    options: [{ id: 'approve', label: 'Approve', continuesInteraction: true }],
   }));
   state = tuiStateReducer(state, {
     type: 'event.received',
@@ -1622,7 +1622,7 @@ test('tuiStateReducer keeps batch draft local and out of the conversation timeli
     type: 'review.draft.record',
     requestId: 'req-1',
     actionId: 'interrupt-stale',
-    decision: { reviewId: 'review-1', selectedOptionId: 'approve' },
+    decision: { interactionId: 'review-1', selectedOptionId: 'approve' },
   });
   assert.equal(stateAfterStaleDecision, state);
 
@@ -1630,12 +1630,12 @@ test('tuiStateReducer keeps batch draft local and out of the conversation timeli
     type: 'review.draft.record',
     requestId: 'req-1',
     actionId: 'interrupt-1',
-    decision: { reviewId: 'review-1', selectedOptionId: 'approve' },
+    decision: { interactionId: 'review-1', selectedOptionId: 'approve' },
   });
 
-  assert.equal(selectFocusedPendingApproval(state)?.review.id, 'review-2');
+  assert.equal(selectFocusedPendingApproval(state)?.review.interactionId, 'review-2');
   assert.deepEqual(state.reviewDrafts['interrupt-1']?.decisions, [
-    { reviewId: 'review-1', selectedOptionId: 'approve' },
+    { interactionId: 'review-1', selectedOptionId: 'approve' },
   ]);
   assert.deepEqual(selectFocusedTimeline(state), timelineBefore);
 
@@ -1658,7 +1658,7 @@ test('tuiStateReducer keeps batch draft local and out of the conversation timeli
   });
 
   assert.deepEqual(state.reviewDrafts['interrupt-1']?.decisions, []);
-  assert.equal(selectFocusedPendingApproval(state)?.review.id, 'review-1');
+  assert.equal(selectFocusedPendingApproval(state)?.review.interactionId, 'review-1');
 });
 
 test('tuiStateReducer keeps a sent review resolution local until the server responds', () => {
@@ -1670,7 +1670,7 @@ test('tuiStateReducer keeps a sent review resolution local until the server resp
       type: 'human_review.requested',
       requestId: 'req-1',
       review: {
-        id: 'review-1',
+        interactionId: 'review-1',
         schemaVersion: 1,
         view: { kind: 'plain', body: 'Approve?' },
         options: [],
@@ -1696,7 +1696,7 @@ test('tuiStateReducer keeps a sent review resolution local until the server resp
       type: 'human_review.requested',
       requestId: 'req-1',
       review: {
-        id: 'review-1',
+        interactionId: 'review-1',
         schemaVersion: 1,
         view: { kind: 'plain', body: 'Approve?' },
         options: [],
@@ -1707,7 +1707,7 @@ test('tuiStateReducer keeps a sent review resolution local until the server resp
 
   assert.equal(state.reviewDrafts['request:req-1:reviews:review-1']?.resolutionSent, undefined);
   assert.equal(selectFocusedBusy(state), false);
-  assert.equal(selectFocusedPendingApproval(state)?.review.id, 'review-1');
+  assert.equal(selectFocusedPendingApproval(state)?.review.interactionId, 'review-1');
 });
 
 test('tuiStateReducer sent review resolution preserves the owning run', () => {
@@ -1718,7 +1718,7 @@ test('tuiStateReducer sent review resolution preserves the owning run', () => {
       type: 'human_review.requested',
       requestId: 'req-1',
       review: {
-        id: 'review-1',
+        interactionId: 'review-1',
         schemaVersion: 1,
         view: { kind: 'plain', body: 'Approve?' },
         options: [],
@@ -1732,7 +1732,7 @@ test('tuiStateReducer sent review resolution preserves the owning run', () => {
     type: 'review.resolution.sent',
     requestId: 'req-1',
     actionId: 'request:req-1:reviews:review-1',
-    decision: { reviewId: 'review-1', selectedOptionId: 'approve' },
+    decision: { interactionId: 'review-1', selectedOptionId: 'approve' },
   });
 
   assert.equal(state.sessions['chat:pet']?.activeRun?.requestId, 'req-1');
@@ -1765,7 +1765,7 @@ test('tuiStateReducer accepts canonical human review specs without legacy payloa
       type: 'human_review.requested',
       requestId: 'req-1',
       review: {
-        id: 'review-1',
+        interactionId: 'review-1',
         schemaVersion: 1,
         view: {
           kind: 'plain',
@@ -1775,7 +1775,7 @@ test('tuiStateReducer accepts canonical human review specs without legacy payloa
         options: [{
           id: 'approve',
           label: 'Approve',
-          decision: { type: 'approve' },
+          continuesInteraction: true,
         }],
       },
     },
@@ -1786,7 +1786,7 @@ test('tuiStateReducer accepts canonical human review specs without legacy payloa
     requestId: 'req-1',
     actionId: 'request:req-1:reviews:review-1',
     review: {
-      id: 'review-1',
+      interactionId: 'review-1',
       schemaVersion: 1,
       view: {
         kind: 'plain',
@@ -1796,11 +1796,11 @@ test('tuiStateReducer accepts canonical human review specs without legacy payloa
       options: [{
         id: 'approve',
         label: 'Approve',
-        decision: { type: 'approve' },
+        continuesInteraction: true,
       }],
     },
     reviews: [{
-      id: 'review-1',
+      interactionId: 'review-1',
       schemaVersion: 1,
       view: {
         kind: 'plain',
@@ -1810,7 +1810,7 @@ test('tuiStateReducer accepts canonical human review specs without legacy payloa
       options: [{
         id: 'approve',
         label: 'Approve',
-        decision: { type: 'approve' },
+        continuesInteraction: true,
       }],
     }],
     decisions: [],

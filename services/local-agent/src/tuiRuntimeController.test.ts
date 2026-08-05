@@ -11,7 +11,7 @@ import type { TuiAction, TuiState } from './tui/state/tuiState';
 
 function pendingReviewState(): TuiState {
   const review = {
-    id: 'review-1',
+    interactionId: 'review-1',
     schemaVersion: 1,
     view: { kind: 'plain' as const, body: 'Need review' },
     options: [],
@@ -54,13 +54,13 @@ function pendingReviewActionState(reviewIndex = 0): TuiState {
   const state = pendingReviewState();
   const reviews = [
     {
-      id: 'review-1',
+      interactionId: 'review-1',
       schemaVersion: 1,
       view: { kind: 'plain' as const, body: 'First review' },
       options: [],
     },
     {
-      id: 'review-2',
+      interactionId: 'review-2',
       schemaVersion: 1,
       view: { kind: 'plain' as const, body: 'Second review' },
       options: [],
@@ -75,7 +75,7 @@ function pendingReviewActionState(reviewIndex = 0): TuiState {
   state.reviewDrafts['interrupt-1'] = {
     actionId: 'interrupt-1',
     decisions: reviewIndex > 0
-      ? [{ reviewId: 'review-1', selectedOptionId: 'approve' }]
+      ? [{ interactionId: 'review-1', selectedOptionId: 'approve' }]
       : [],
   };
   return state;
@@ -212,7 +212,7 @@ test('TuiRuntimeController submits canonical review responses without legacy res
     id: 'respond',
     label: 'Respond',
     input: { kind: 'text', key: 'message', required: true, multiline: true },
-    decision: { type: 'respond', messageInputKey: 'message' },
+    continuesInteraction: false,
   }, '请先解释风险');
 
   assert.equal(submitted, true);
@@ -220,12 +220,12 @@ test('TuiRuntimeController submits canonical review responses without legacy res
     type: 'human_review_response',
     requestId: 'req-1',
     actionId: 'interrupt-1',
-    reviewId: 'review-1',
+    interactionId: 'review-1',
     selectedOptionId: 'respond',
     input: { message: '请先解释风险' },
     decisions: [
       {
-        reviewId: 'review-1',
+        interactionId: 'review-1',
         selectedOptionId: 'respond',
         input: { message: '请先解释风险' },
       },
@@ -240,7 +240,7 @@ test('TuiRuntimeController queues review action decisions until the final approv
   const firstSubmitted = first.controller.submitReviewResponse({
     id: 'approve',
     label: 'Approve',
-    decision: { type: 'approve' },
+    continuesInteraction: true,
   });
 
   assert.equal(firstSubmitted, true);
@@ -249,14 +249,14 @@ test('TuiRuntimeController queues review action decisions until the final approv
   assert.equal(advance?.type, 'review.draft.record');
   if (advance?.type === 'review.draft.record') {
     assert.equal(advance.requestId, 'req-1');
-    assert.deepEqual(advance.decision, { reviewId: 'review-1', selectedOptionId: 'approve' });
+    assert.deepEqual(advance.decision, { interactionId: 'review-1', selectedOptionId: 'approve' });
   }
 
   const final = createController(pendingReviewActionState(1));
   const finalSubmitted = final.controller.submitReviewResponse({
     id: 'approve',
     label: 'Approve',
-    decision: { type: 'approve' },
+    continuesInteraction: true,
   });
 
   assert.equal(finalSubmitted, true);
@@ -264,11 +264,11 @@ test('TuiRuntimeController queues review action decisions until the final approv
     type: 'human_review_response',
     requestId: 'req-1',
     actionId: 'interrupt-1',
-    reviewId: 'review-2',
+    interactionId: 'review-2',
     selectedOptionId: 'approve',
     decisions: [
-      { reviewId: 'review-1', selectedOptionId: 'approve' },
-      { reviewId: 'review-2', selectedOptionId: 'approve' },
+      { interactionId: 'review-1', selectedOptionId: 'approve' },
+      { interactionId: 'review-2', selectedOptionId: 'approve' },
     ],
   }]);
   assert.equal(final.actions.some((action) => action.type === 'review.resolution.sent'), true);
@@ -280,7 +280,7 @@ test('TuiRuntimeController sends a review action response when the first review 
   const submitted = controller.submitReviewResponse({
     id: 'reject',
     label: 'Reject',
-    decision: { type: 'reject' },
+    continuesInteraction: false,
   });
 
   assert.equal(submitted, true);
@@ -288,10 +288,10 @@ test('TuiRuntimeController sends a review action response when the first review 
     type: 'human_review_response',
     requestId: 'req-1',
     actionId: 'interrupt-1',
-    reviewId: 'review-1',
+    interactionId: 'review-1',
     selectedOptionId: 'reject',
     decisions: [
-      { reviewId: 'review-1', selectedOptionId: 'reject' },
+      { interactionId: 'review-1', selectedOptionId: 'reject' },
     ],
   }]);
   assert.equal(actions.some((action) => action.type === 'review.resolution.sent'), true);
@@ -305,7 +305,7 @@ test('TuiRuntimeController blocks empty required review input', () => {
     id: 'respond',
     label: 'Respond',
     input: { kind: 'text', key: 'message', required: true },
-    decision: { type: 'respond', messageInputKey: 'message' },
+    continuesInteraction: false,
   });
 
   assert.equal(submitted, false);
@@ -323,7 +323,7 @@ test('TuiRuntimeController keeps review open when the resolution cannot be sent'
   const submitted = controller.submitReviewResponse({
     id: 'approve',
     label: 'Approve',
-    decision: { type: 'approve' },
+    continuesInteraction: true,
   });
 
   assert.equal(submitted, false);
@@ -477,7 +477,7 @@ test('TuiRuntimeController cancels the delayed interrupt notice on an authoritat
         type: 'human_review.requested',
         requestId: 'req-1',
         review: {
-          id: 'review-2',
+          interactionId: 'review-2',
           schemaVersion: 1,
           view: { kind: 'plain', body: 'A new review' },
           options: [],

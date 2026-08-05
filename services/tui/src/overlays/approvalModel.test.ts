@@ -55,11 +55,11 @@ test('approved batch decisions advance locally before transport submission', () 
     review('review-2'),
   ]));
   const decisions: ReviewResponse[] = [{
-    reviewId: 'review-1',
+    interactionId: 'review-1',
     selectedOptionId: 'approve',
   }];
   state = advanceApproval(state, decisions);
-  assert.equal(currentApprovalReview(state)?.id, 'review-2');
+  assert.equal(currentApprovalReview(state)?.interactionId, 'review-2');
   assert.deepEqual(state.phase === 'closed' ? null : state.decisions, decisions);
   assert.equal(state.phase === 'closed' ? null : state.draft, '');
 
@@ -96,7 +96,7 @@ test('approved batch decisions advance locally before transport submission', () 
 
 test('approval diff details page within a bounded CJK footer view', () => {
   const diffReview: ReviewSpec = {
-    id: 'review-diff',
+    interactionId: 'review-diff',
     schemaVersion: 1,
     view: {
       kind: 'diff',
@@ -111,12 +111,12 @@ test('approval diff details page within a bounded CJK footer view', () => {
     options: [{
       id: 'approve',
       label: '批准',
-      decision: { type: 'approve' },
+      continuesInteraction: true,
     }, {
       id: 'reject',
       label: '拒绝',
       variant: 'danger',
-      decision: { type: 'reject' },
+      continuesInteraction: false,
     }],
   };
   let state = syncApprovalState(createApprovalState(), waitingReview([diffReview]));
@@ -143,7 +143,7 @@ test('approval shares fixed footer rows dynamically between content and options'
     {
       id: 'authorize',
       label: '批准并授权',
-      decision: { type: 'approve' },
+      continuesInteraction: true,
     },
     ...base.options.slice(1),
   ];
@@ -233,7 +233,7 @@ function waitingReview(reviews: ReviewSpec[]): AgentRunView {
 
 function review(id: string): ReviewSpec {
   return {
-    id,
+    interactionId: id,
     schemaVersion: 1,
     view: {
       kind: 'plain',
@@ -244,7 +244,7 @@ function review(id: string): ReviewSpec {
       id: 'approve',
       label: '批准',
       variant: 'primary',
-      decision: { type: 'approve' },
+      continuesInteraction: true,
     }, {
       id: 'respond',
       label: '回复',
@@ -253,15 +253,12 @@ function review(id: string): ReviewSpec {
         key: 'message',
         multiline: true,
       },
-      decision: {
-        type: 'respond',
-        messageInputKey: 'message',
-      },
+      continuesInteraction: false,
     }, {
       id: 'reject',
       label: '拒绝',
       variant: 'danger',
-      decision: { type: 'reject' },
+      continuesInteraction: false,
     }],
   };
 }

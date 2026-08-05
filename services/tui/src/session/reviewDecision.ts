@@ -41,7 +41,7 @@ export function prepareReviewDecision(params: {
     ? { [option.input.key]: inputText }
     : undefined;
   const decision: ReviewResponse = {
-    reviewId: review.id,
+    interactionId: review.interactionId,
     selectedOptionId: option.id,
     ...(input ? { input } : {}),
   };
@@ -50,7 +50,7 @@ export function prepareReviewDecision(params: {
     ok: true,
     decision,
     decisions,
-    shouldSend: option.decision.type !== 'approve'
+    shouldSend: option.continuesInteraction !== true
       || decisions.length >= params.action.reviews.length,
   };
 }
@@ -65,7 +65,7 @@ export function reviewDecisionsRemainValid(
     const option = review?.options.find((candidate) => (
       candidate.id === decision.selectedOptionId
     ));
-    return review?.id === decision.reviewId
-      && option?.decision.type === 'approve';
+    return review?.interactionId === decision.interactionId
+      && option?.continuesInteraction === true;
   });
 }

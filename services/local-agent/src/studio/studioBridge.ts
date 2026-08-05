@@ -2,6 +2,7 @@ import {
   type AgentActor,
   type HumanReviewer,
   type HumanReviewerRequest,
+  projectHumanReviewRequest,
   type ReviewResponse,
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
@@ -85,7 +86,7 @@ export function createWsHumanReviewer(opts: {
         event: {
           type: 'human_review.requested',
           requestId: opts.requestId,
-          review,
+          review: projectHumanReviewRequest(review),
           actor: { petId: opts.petId },
         },
       });

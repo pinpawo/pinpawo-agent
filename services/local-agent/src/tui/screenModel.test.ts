@@ -141,7 +141,7 @@ test('buildTuiScreenModel keeps approval status visible while composer accepts r
   const state = createInitialTuiState(createSession({ id: 'chat:pet' }));
   state.connection = { status: 'ready' };
   const review = {
-    id: 'review-1',
+    interactionId: 'review-1',
     schemaVersion: 1,
     view: { kind: 'plain' as const, body: 'Need review' },
     options: [],

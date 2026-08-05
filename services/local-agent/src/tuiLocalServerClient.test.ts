@@ -329,10 +329,14 @@ function sessionSnapshot(sessionId: string) {
           actionId: 'interrupt-1',
           status: 'waiting',
           reviews: [{
-            id: 'review-1',
+            interactionId: 'review-1',
             schemaVersion: 1,
             view: { kind: 'plain', body: 'Approve?' },
-            options: [],
+            options: [{
+              id: 'approve',
+              label: 'Approve',
+              continuesInteraction: false,
+            }],
           }],
         },
       },

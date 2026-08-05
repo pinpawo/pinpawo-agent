@@ -1,14 +1,17 @@
 import type {
-  BuiltinGlobalReviewPolicyMode,
   TokenUsageSnapshot,
-} from '@pinpawo/pet-agent';
+  ToolAuthorizationMode,
+} from '@pinpawo/agent-contracts';
 import type { AgentPlan } from './domain';
 import {
-  isReviewSpecValue,
+  isHumanReviewRequest,
+  isToolAuthorizationMode,
   parseTokenUsageSnapshot,
-} from '@pinpawo/pet-agent/protocol-validation';
+} from '@pinpawo/agent-contracts';
 
-export type { BuiltinGlobalReviewPolicyMode } from '@pinpawo/pet-agent';
+/** @deprecated Use ToolAuthorizationMode from @pinpawo/agent-contracts. */
+export type BuiltinGlobalReviewPolicyMode = ToolAuthorizationMode;
+export type { ToolAuthorizationMode } from '@pinpawo/agent-contracts';
 
 export const BUILTIN_GLOBAL_REVIEW_POLICY_MODES = {
   require_authorization: true,
@@ -17,7 +20,7 @@ export const BUILTIN_GLOBAL_REVIEW_POLICY_MODES = {
 } as const satisfies Record<BuiltinGlobalReviewPolicyMode, true>;
 
 export {
-  isReviewSpecValue as isAgentReviewSpecValue,
+  isHumanReviewRequest as isAgentReviewSpecValue,
   parseTokenUsageSnapshot as parseAgentTokenUsageSnapshot,
 };
 
@@ -30,11 +33,7 @@ export function isAgentTokenUsageSnapshot(
 export function isBuiltinGlobalReviewPolicyMode(
   value: unknown,
 ): value is BuiltinGlobalReviewPolicyMode {
-  return typeof value === 'string'
-    && Object.prototype.hasOwnProperty.call(
-      BUILTIN_GLOBAL_REVIEW_POLICY_MODES,
-      value,
-    );
+  return isToolAuthorizationMode(value);
 }
 
 export function parseAgentPlan(value: unknown): AgentPlan | null {

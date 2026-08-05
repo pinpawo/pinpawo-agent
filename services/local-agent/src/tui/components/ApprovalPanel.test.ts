@@ -14,7 +14,7 @@ test('ApprovalPanel renders a diff review through the patch preview', () => {
   ].join('\n');
   const element = ApprovalPanel({
     review: {
-      id: 'review-1',
+      interactionId: 'review-1',
       schemaVersion: 1,
       view: {
         kind: 'diff',

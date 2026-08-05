@@ -1,4 +1,4 @@
-import type { ReviewResponse, ReviewSpec } from '@pinpawo/pet-agent';
+import type { ReviewResponse, ReviewSpec } from '@pinpawo/agent-session';
 import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 import type {
   AgentActorView,

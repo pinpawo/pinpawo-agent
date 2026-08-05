@@ -51,10 +51,14 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
       reviewAction: {
         actionId: 'interrupt-1',
         reviews: [{
-          id: 'review-1',
+          interactionId: 'review-1',
           schemaVersion: 1,
           view: { kind: 'plain', body: 'Approve?' },
-          options: [],
+          options: [{
+            id: 'approve',
+            label: 'Approve',
+            continuesInteraction: false,
+          }],
         }],
       },
     },
@@ -89,7 +93,7 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
   assert.equal(snapshot.session.activeRun?.requestId, 'req-review');
   assert.equal(snapshot.session.activeRun?.state, 'waiting_review');
   if (snapshot.session.activeRun?.state !== 'waiting_review') assert.fail('expected waiting review');
-  assert.equal(snapshot.session.activeRun.reviewAction.reviews[0]?.id, 'review-1');
+  assert.equal(snapshot.session.activeRun.reviewAction.reviews[0]?.interactionId, 'review-1');
   assert.equal(snapshot.session.activeRun.reviewAction.petId, 'pet-a');
   assert.deepEqual(snapshot.session.currentPlan, {
     items: [{

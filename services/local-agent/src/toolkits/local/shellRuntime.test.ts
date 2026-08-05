@@ -8,6 +8,10 @@ import { ShellRuntime } from './shellRuntime';
 
 const CWD = process.cwd();
 
+// Exercises the default (POSIX on this platform) executor end to end with
+// real sh commands and pgrep probes.
+const isWindows = process.platform === 'win32';
+
 function scope(overrides: Partial<ToolkitRuntimeExecutionScope> = {}): ToolkitRuntimeExecutionScope {
   return {
     threadId: 'thread-1',
@@ -35,7 +39,7 @@ function alive(marker: string) {
   return execSync(`pgrep -f ${JSON.stringify(marker)} || true`).toString().trim();
 }
 
-test('resolve carries the execution identity into the binding', () => {
+test('resolve carries the execution identity into the binding', { skip: isWindows }, () => {
   const runtime = new ShellRuntime();
   runtime.start();
 
@@ -48,7 +52,7 @@ test('resolve carries the execution identity into the binding', () => {
   assert.equal(binding.registry, runtime.getRegistry());
 });
 
-test('every execution shares one registry', () => {
+test('every execution shares one registry', { skip: isWindows }, () => {
   const runtime = new ShellRuntime();
   runtime.start();
 
@@ -61,7 +65,7 @@ test('every execution shares one registry', () => {
   assert.notDeepEqual(first.owner, second.owner);
 });
 
-test('release leaves a running process alone', async () => {
+test('release leaves a running process alone', { skip: isWindows }, async () => {
   const runtime = new ShellRuntime();
   runtime.start();
   const marker = `pinpawo-runtime-release-${Date.now().toString()}`;
@@ -87,7 +91,7 @@ test('release leaves a running process alone', async () => {
   execSync(`pkill -9 -f ${JSON.stringify(marker)} || true`);
 });
 
-test('a process registered by one execution is still reachable after release', async () => {
+test('a process registered by one execution is still reachable after release', { skip: isWindows }, async () => {
   const runtime = new ShellRuntime();
   runtime.start();
   const binding = runtime.resolve(scope());
@@ -109,7 +113,7 @@ test('a process registered by one execution is still reachable after release', a
   await runtime.stop();
 });
 
-test('stop terminates everything the registry holds', async () => {
+test('stop terminates everything the registry holds', { skip: isWindows }, async () => {
   const runtime = new ShellRuntime();
   runtime.start();
   const marker = `pinpawo-runtime-stop-${Date.now().toString()}`;
@@ -132,7 +136,7 @@ test('stop terminates everything the registry holds', async () => {
   assert.equal(runtime.getRegistry().size, 0);
 });
 
-test('stop is safe with nothing registered', async () => {
+test('stop is safe with nothing registered', { skip: isWindows }, async () => {
   const runtime = new ShellRuntime();
   runtime.start();
   await runtime.stop();

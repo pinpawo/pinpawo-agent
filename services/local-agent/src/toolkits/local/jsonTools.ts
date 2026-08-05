@@ -69,7 +69,8 @@ export const runJqProcess: JqExec = (file, args, options) => new Promise((resolv
 
   const timer = setTimeout(() => {
     timedOut = true;
-    child.kill('SIGTERM');
+    // Default signal: 'SIGTERM' on POSIX, TerminateProcess on Windows.
+    child.kill();
   }, options.timeout);
 
   child.once('error', (error) => {
@@ -179,7 +180,10 @@ export async function runJqQuery(input: JqQueryInput, run: JqExec = runJqProcess
       + (typed.stdoutTotalChars ?? stdout.length)
       + (stderr && stdout ? 1 : 0);
     const detail = truncateJqOutput(combined, combinedTotalChars);
-    if (typed.killed || typed.signal === 'SIGTERM') {
+    // `timedOut` (surfaced as `killed`) is the only portable timeout signal:
+    // on Windows the close event carries no 'SIGTERM' name to compare
+    // against, so checking the signal would misreport a timeout as an error.
+    if (typed.killed) {
       return `Error: jq_query timed out after 30s${detail ? `\n${detail}` : ''}`;
     }
     return `Error: ${detail || (error instanceof Error ? error.message : error)}`;

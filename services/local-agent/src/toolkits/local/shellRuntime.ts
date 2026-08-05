@@ -1,6 +1,7 @@
 import type { ToolkitRuntimeExecutionScope } from '@pinpawo/pet-agent';
 import type { ProcessExecutor } from './processExecutor';
 import { posixProcessExecutor } from './processTree';
+import { windowsProcessExecutor } from './windowsProcessExecutor';
 import {
   ProcessRegistry,
   type ManagedProcessOwner,
@@ -29,7 +30,11 @@ export class ShellRuntime {
    * Windows arrives here as another implementation (#562), leaving the
    * registry and the tools untouched.
    */
-  constructor(executor: ProcessExecutor = posixProcessExecutor) {
+  constructor(
+    executor: ProcessExecutor = process.platform === 'win32'
+      ? windowsProcessExecutor
+      : posixProcessExecutor,
+  ) {
     this.registry = new ProcessRegistry(executor);
   }
 

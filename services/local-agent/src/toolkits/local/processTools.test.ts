@@ -19,6 +19,9 @@ const OWNER: ManagedProcessOwner = {
   delegationId: 'delegation-1',
 };
 
+// End-to-end through the POSIX executor (sh commands, pgrep/pkill probes).
+const isWindows = process.platform === 'win32';
+
 function bind() {
   const registry = new ProcessRegistry(posixProcessExecutor);
   const binding = { registry, owner: OWNER };
@@ -39,7 +42,7 @@ function processIdFrom(output: string) {
   return match[1]!;
 }
 
-test('a bound run_shell hands a slow command to the background', async () => {
+test('a bound run_shell hands a slow command to the background', { skip: isWindows }, async () => {
   const { runShell, registry } = bind();
   const output = String(await runShell.invoke({
     command: 'echo starting; sleep 4',
@@ -54,7 +57,7 @@ test('a bound run_shell hands a slow command to the background', async () => {
   await registry.stopAll();
 });
 
-test('an unbound run_shell still terminates on timeout', async () => {
+test('an unbound run_shell still terminates on timeout', { skip: isWindows }, async () => {
   // Without a registry there is nothing to hold the process, so the previous
   // behaviour has to stand.
   const runShell = createRunShellTool(null);
@@ -66,7 +69,7 @@ test('an unbound run_shell still terminates on timeout', async () => {
   assert.doesNotMatch(output, /Process id/);
 });
 
-test('short commands are unaffected by binding', async () => {
+test('short commands are unaffected by binding', { skip: isWindows }, async () => {
   const { runShell, registry } = bind();
   const output = String(await runShell.invoke({ command: 'echo quick' }));
   assert.match(output, /quick/);
@@ -74,7 +77,7 @@ test('short commands are unaffected by binding', async () => {
   assert.equal(registry.size, 0, 'a finished command is not registered');
 });
 
-test('wait_process reports progress and then the exit code', async () => {
+test('wait_process reports progress and then the exit code', { skip: isWindows }, async () => {
   const { runShell, waitTool } = bind();
   const started = String(await runShell.invoke({
     command: 'echo one; sleep 1; echo two; exit 4',
@@ -88,7 +91,7 @@ test('wait_process reports progress and then the exit code', async () => {
   assert.doesNotMatch(finished, /one/, 'already-delivered output is not repeated');
 });
 
-test('wait_process returns early while the command is still running', async () => {
+test('wait_process returns early while the command is still running', { skip: isWindows }, async () => {
   const { runShell, waitTool, registry } = bind();
   const started = String(await runShell.invoke({
     command: 'sleep 6',
@@ -106,7 +109,7 @@ test('wait_process returns early while the command is still running', async () =
   await registry.stopAll();
 });
 
-test('terminate_process stops a background command', async () => {
+test('terminate_process stops a background command', { skip: isWindows }, async () => {
   const { runShell, terminateTool } = bind();
   const marker = `pinpawo-tools-terminate-${Date.now().toString()}`;
   const started = String(await runShell.invoke({
@@ -124,7 +127,7 @@ test('terminate_process stops a background command', async () => {
   assert.equal(alive, '', 'terminate must reach the process');
 });
 
-test('list_processes shows what this execution started', async () => {
+test('list_processes shows what this execution started', { skip: isWindows }, async () => {
   const { runShell, listTool, registry } = bind();
   assert.match(String(await listTool.invoke({})), /No background processes/);
 
@@ -135,7 +138,7 @@ test('list_processes shows what this execution started', async () => {
   await registry.stopAll();
 });
 
-test('an unknown process id is reported, not thrown', async () => {
+test('an unknown process id is reported, not thrown', { skip: isWindows }, async () => {
   const { waitTool, terminateTool } = bind();
   // Tool errors belong in the result so the model can react to them.
   assert.match(
@@ -148,7 +151,7 @@ test('an unknown process id is reported, not thrown', async () => {
   );
 });
 
-test('another execution cannot reach a process it did not start', async () => {
+test('another execution cannot reach a process it did not start', { skip: isWindows }, async () => {
   const { runShell, registry } = bind();
   const started = String(await runShell.invoke({
     command: 'sleep 4',
@@ -168,14 +171,14 @@ test('another execution cannot reach a process it did not start', async () => {
   await registry.stopAll();
 });
 
-test('the tools report themselves as unavailable without a binding', async () => {
+test('the tools report themselves as unavailable without a binding', { skip: isWindows }, async () => {
   const [waitTool, terminateTool, listTool] = createProcessTools(null);
   assert.match(String(await waitTool!.invoke({ processId: 'x' })), /No background processes/);
   assert.match(String(await terminateTool!.invoke({ processId: 'x' })), /No background processes/);
   assert.match(String(await listTool!.invoke({})), /No background processes/);
 });
 
-test('the bash toolkit binds through the framework without changing its inventory', async () => {
+test('the bash toolkit binds through the framework without changing its inventory', { skip: isWindows }, async () => {
   // Exercising the tools directly cannot catch an inventory mismatch: the
   // framework matches bound tools to the static list by position, and rejects
   // the whole toolkit if they disagree.
@@ -206,7 +209,7 @@ test('the bash toolkit binds through the framework without changing its inventor
   }
 });
 
-test('the static inventory matches what a binding produces', () => {
+test('the static inventory matches what a binding produces', { skip: isWindows }, () => {
   // bindTools may only swap implementations, never the tool inventory.
   const staticNames = createProcessTools(null).map((item) => item.name);
   const boundNames = createProcessTools({

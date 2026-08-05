@@ -6,6 +6,7 @@ import { getLocalToolsWorkdir, resolveUserPath } from './pathUtils';
 import type { ShellRunHandle } from './processExecutor';
 import { runShellCommand } from './processTree';
 import type { ShellProcessBinding } from './processRegistry';
+import { windowsProcessExecutor } from './windowsProcessExecutor';
 
 
 export function normalizeShellActionInput(input: unknown) {
@@ -93,6 +94,13 @@ export const getCurrentTimeTool = tool(
 );
 
 export function createRunShellTool(binding: ShellProcessBinding | null) {
+  // Run through the same executor the registry will terminate through.
+  // Without a binding there is no registry, so pick by platform the same
+  // way ShellRuntime does.
+  const run = binding
+    ? binding.registry.processExecutor.run
+    : (process.platform === 'win32' ? windowsProcessExecutor.run : runShellCommand);
+
   return tool(
     async (
       input: { command: string; cwd?: string; timeoutSeconds?: number },
@@ -107,7 +115,7 @@ export function createRunShellTool(binding: ShellProcessBinding | null) {
       }
 
       const timeoutMs = resolveShellTimeoutMs(input.timeoutSeconds);
-      const outcome = await runShellCommand({
+      const outcome = await run({
         command: shellAction.command,
         cwd: shellAction.cwd,
         timeoutMs,

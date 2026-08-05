@@ -1,4 +1,6 @@
 import type { ToolkitRuntimeExecutionScope } from '@pinpawo/pet-agent';
+import type { ProcessExecutor } from './processExecutor';
+import { posixProcessExecutor } from './processTree';
 import {
   ProcessRegistry,
   type ManagedProcessOwner,
@@ -20,7 +22,16 @@ export type ShellRuntimeBinding = Readonly<{
 }>;
 
 export class ShellRuntime {
-  private readonly registry = new ProcessRegistry();
+  private readonly registry: ProcessRegistry;
+
+  /**
+   * Choosing the executor is the one place that knows which platform this is.
+   * Windows arrives here as another implementation (#562), leaving the
+   * registry and the tools untouched.
+   */
+  constructor(executor: ProcessExecutor = posixProcessExecutor) {
+    this.registry = new ProcessRegistry(executor);
+  }
 
   start(): void {
     // Nothing to acquire up front: process groups are created per command.

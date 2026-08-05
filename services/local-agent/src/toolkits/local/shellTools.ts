@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { createAbortError, type ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { readRecord, readString } from '../operationMetadata';
 import { getLocalToolsWorkdir, resolveUserPath } from './pathUtils';
-import { runShellCommand, type ShellRunHandle } from './processTree';
+import type { ShellRunHandle } from './processExecutor';
+import { runShellCommand } from './processTree';
 import type { ShellProcessBinding } from './processRegistry';
 
 

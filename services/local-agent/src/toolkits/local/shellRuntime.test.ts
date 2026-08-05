@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
 import { test } from 'node:test';
 import type { ToolkitRuntimeExecutionScope } from '@pinpawo/pet-agent';
-import { runShellCommand, type ShellRunHandle } from './processTree';
+import type { ShellRunHandle } from './processExecutor';
+import { runShellCommand } from './processTree';
 import { ShellRuntime } from './shellRuntime';
 
 const CWD = process.cwd();

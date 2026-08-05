@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { ToolkitRuntimeExecutionScope } from '@pinpawo/pet-agent';
-import { killProcessGroup, type ShellRunHandle } from './processTree';
+import type { ProcessExecutor, ShellRunHandle } from './processExecutor';
 
 /**
  * Session-lifetime registry for shell processes that outlive the tool call
@@ -80,6 +80,14 @@ export const MAX_ACTIVE_PROCESSES = 16;
 /** How long a finished process stays readable before it is reaped. */
 export const EXITED_PROCESS_TTL_MS = 5 * 60_000;
 
+/**
+ * Grace given to an orphaned group at shutdown.
+ *
+ * Short on purpose: nothing is waiting on these, and shutdown should not stall
+ * on a group that ignores a graceful signal.
+ */
+const ORPHAN_GROUP_KILL_GRACE_MS = 1_000;
+
 function sameOwner(left: ManagedProcessOwner, right: ManagedProcessOwner) {
   return left.threadId === right.threadId
     && left.runId === right.runId
@@ -107,6 +115,19 @@ export class ProcessRegistry {
 
   /** Process groups that outlived their command, kept only for cleanup. */
   private readonly orphanGroups = new Set<number>();
+
+  /**
+   * How this registry reaches the OS.
+   *
+   * Ownership, quota, buffering and lifetime are the same everywhere, so the
+   * registry never signals a process itself; it asks the executor to.
+   *
+   * Required rather than defaulted on purpose: defaulting would let a caller
+   * pick up POSIX behaviour without meaning to, and the registry is precisely
+   * the layer that should not know which platform it is on. `ShellRuntime`
+   * makes that choice once, for everyone.
+   */
+  constructor(private readonly executor: ProcessExecutor) {}
 
   get size() {
     return this.entries.size;
@@ -200,7 +221,7 @@ export class ProcessRegistry {
    * exactly what that command started.
    */
   trackOrphanGroup(pid: number) {
-    if (!isProcessGroupAlive(pid)) return false;
+    if (!this.executor.isGroupAlive(pid)) return false;
     this.orphanGroups.add(pid);
     return true;
   }
@@ -290,8 +311,8 @@ export class ProcessRegistry {
       // open, so its id could since have been recycled by an unrelated
       // process. Only signal a group that is still alive, and accept that the
       // check is advisory — this narrows the window rather than closing it.
-      if (isProcessGroupAlive(pid)) {
-        killProcessGroup(pid, 'SIGTERM');
+      if (this.executor.isGroupAlive(pid)) {
+        this.executor.terminateGroup(pid, ORPHAN_GROUP_KILL_GRACE_MS);
       }
     }
     this.orphanGroups.clear();
@@ -335,17 +356,5 @@ export class ProcessRegistry {
         this.entries.delete(processId);
       }
     }
-  }
-}
-
-/** Probe whether any member of a process group is still alive. */
-export function isProcessGroupAlive(pid: number) {
-  try {
-    process.kill(-pid, 0);
-    return true;
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    // EPERM means the group exists but is no longer ours to signal.
-    return code === 'EPERM';
   }
 }

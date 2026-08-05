@@ -9,6 +9,7 @@ import {
   WAIT_PROCESS_TOOL_NAME,
 } from './processTools';
 import { createRunShellTool } from './shellTools';
+import { posixProcessExecutor } from './processTree';
 import { ToolkitRuntimeManager } from '@pinpawo/pet-agent';
 import { createBashToolkit } from './index';
 
@@ -19,7 +20,7 @@ const OWNER: ManagedProcessOwner = {
 };
 
 function bind() {
-  const registry = new ProcessRegistry();
+  const registry = new ProcessRegistry(posixProcessExecutor);
   const binding = { registry, owner: OWNER };
   const [waitTool, terminateTool, listTool] = createProcessTools(binding);
   return {
@@ -209,7 +210,7 @@ test('the static inventory matches what a binding produces', () => {
   // bindTools may only swap implementations, never the tool inventory.
   const staticNames = createProcessTools(null).map((item) => item.name);
   const boundNames = createProcessTools({
-    registry: new ProcessRegistry(),
+    registry: new ProcessRegistry(posixProcessExecutor),
     owner: OWNER,
   }).map((item) => item.name);
 

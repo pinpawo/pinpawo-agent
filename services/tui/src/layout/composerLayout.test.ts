@@ -78,3 +78,9 @@ test('command palette reclaims footer rows without changing footer height', () =
     9,
   );
 });
+
+test('composer layout reserves the adaptive current-plan rows', () => {
+  const layout = calculateComposerLayout('one', 1, { planHeight: 4 });
+  assert.equal(layout.planHeight, 4);
+  assert.equal(layout.footerHeight, 13);
+});

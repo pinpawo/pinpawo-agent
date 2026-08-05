@@ -1,9 +1,11 @@
 import type { ReviewSpec, TokenUsageSnapshot } from '@pinpawo/pet-agent';
+import type { AgentPlan } from './domain';
 
 export type AgentRuntimeEvent =
   | AgentAssistantMessageEvent
   | AgentSubagentMessageCompletedEvent
   | AgentOperationEvent
+  | AgentPlanUpdatedEvent
   | AgentHumanReviewRequestedEvent
   | AgentStudioProgressEvent
   | AgentSystemNoticeEvent
@@ -75,6 +77,13 @@ export type AgentOperationEvent = {
    * stable display behavior.
    */
   raw?: AgentOperationRaw;
+};
+
+/** Replaces the current delegation plan; `null` clears it. */
+export type AgentPlanUpdatedEvent = {
+  type: 'plan.updated';
+  requestId: string;
+  plan: AgentPlan | null;
 };
 
 export type AgentHumanReviewRequestedEvent = {

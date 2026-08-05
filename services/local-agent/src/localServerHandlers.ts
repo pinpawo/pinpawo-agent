@@ -144,6 +144,7 @@ export function createLocalServerHandlers(
       requiredInputModalities: checkpoint.requiredInputModalities,
       sessionTokenUsage: checkpoint.sessionTokenUsage,
       pendingReview,
+      currentPlan: checkpoint.currentPlan,
     });
   };
 
@@ -362,6 +363,7 @@ export function createLocalServerHandlers(
         requiredInputModalities: checkpoint.requiredInputModalities,
         sessionTokenUsage: checkpoint.sessionTokenUsage,
         pendingReview: null,
+        currentPlan: checkpoint.currentPlan,
       });
       const session = tuiSessions.selectModelProfile(
         requestDeps.actorId,
@@ -431,6 +433,7 @@ export function createLocalServerHandlers(
           requiredInputModalities: session.requiredInputModalities,
           sessionTokenUsage: null,
           pendingReview: null,
+          currentPlan: null,
         }),
       };
     } finally {
@@ -477,6 +480,7 @@ export function createLocalServerHandlers(
           requiredInputModalities: result.session.requiredInputModalities,
           sessionTokenUsage: result.sessionTokenUsage,
           pendingReview,
+          currentPlan: result.currentPlan,
         }),
       };
     } finally {

@@ -4,6 +4,7 @@ import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type {
   AgentInputModality,
   AgentLocalAttachment,
+  AgentPlan,
 } from '@pinpawo/agent-session';
 import {
   readMessageCreatedAtUtc,
@@ -69,6 +70,7 @@ export type TuiCheckpointPoint = {
   messages: TuiCheckpointMessage[];
   sessionTokenUsage: (TokenUsageSnapshot & { scope: 'session' }) | null;
   pendingReview: ActivePendingReview | null;
+  currentPlan: AgentPlan | null;
 };
 
 export type TuiSessionCheckpointer = BaseCheckpointSaver & Pick<FileSaver, 'deleteThread'>;
@@ -382,6 +384,7 @@ export class LocalServerTuiSessionService {
       messages: readTuiCheckpointMessages(state.messages),
       sessionTokenUsage: readTuiCheckpointTokenUsage(state.messages),
       pendingReview,
+      currentPlan: state.currentPlan,
     };
   }
 
@@ -474,6 +477,7 @@ export class LocalServerTuiSessionService {
       messages: checkpoint.messages,
       sessionTokenUsage: checkpoint.sessionTokenUsage,
       pendingReview: checkpoint.pendingReview,
+      currentPlan: checkpoint.currentPlan,
     };
   }
 

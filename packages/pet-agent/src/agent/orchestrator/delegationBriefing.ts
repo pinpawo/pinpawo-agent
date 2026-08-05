@@ -66,6 +66,14 @@ function stampBriefingMeta(message: AIMessage, spec: DelegationSpec) {
     lane: spec.lane,
     runId: spec.runId,
     delegationId: spec.delegationId,
+    delegationMode: spec.mode,
+    task: spec.task,
+    ...(spec.mode === 'initial' && spec.essentialContext
+      ? { essentialContext: spec.essentialContext }
+      : {}),
+    ...(spec.mode === 'continue' && spec.gapNote
+      ? { gapNote: spec.gapNote }
+      : {}),
   });
   return message;
 }

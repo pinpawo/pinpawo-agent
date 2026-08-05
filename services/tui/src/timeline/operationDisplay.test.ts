@@ -158,6 +158,36 @@ test('operation display renders structured authorization details without raw fie
   }]);
 });
 
+test('operation display renders a delegation briefing without XML protocol text', () => {
+  const lines = buildOperationDisplayLines(operation({
+    kind: 'runtime.delegation',
+    title: '委派 · 继续',
+    phase: 'completed',
+    summary: 'Review PR #572',
+    details: {
+      capability: 'general',
+      gapNote: 'Read the remaining files and finish the review.',
+    },
+    operationSource: {
+      provider: 'runtime',
+      name: 'delegation_briefing',
+    },
+  }), 3_500, 100);
+
+  assert.deepEqual(lines, [{
+    text: '◆ 委派 · 继续',
+  }, {
+    text: '  任务：Review PR #572',
+    tone: 'muted',
+  }, {
+    text: '  Capability：general',
+    tone: 'muted',
+  }, {
+    text: '  交接：Read the remaining files and finish the review.',
+    tone: 'muted',
+  }]);
+});
+
 function operation(
   overrides: Partial<AgentOperationEntry>,
 ): AgentOperationEntry {

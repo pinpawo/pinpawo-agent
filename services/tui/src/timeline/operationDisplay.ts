@@ -27,6 +27,8 @@ export function buildOperationDisplayLines(
 ): OperationDisplayLine[] {
   const authorizationLines = buildAuthorizationDisplayLines(entry, now, width, headerWidth);
   if (authorizationLines) return authorizationLines;
+  const delegationLines = buildDelegationDisplayLines(entry, width, headerWidth);
+  if (delegationLines) return delegationLines;
   return [{
     text: buildOperationHeader(entry, now, headerWidth),
   }, ...buildOperationPayloadLines(entry, width)];
@@ -53,6 +55,32 @@ function buildOperationHeaderText(
   const suffixWidth = stringWidth(suffix);
   if (suffixWidth >= width) return sanitizeLine(suffix, width);
   return `${sanitizeLine(body, width - suffixWidth)}${suffix}`;
+}
+
+function buildDelegationDisplayLines(
+  entry: AgentOperationEntry,
+  width: number,
+  headerWidth: number,
+): OperationDisplayLine[] | null {
+  if (entry.kind !== 'runtime.delegation') return null;
+  const capability = readDetailText(entry.details?.capability);
+  const essentialContext = readDetailText(entry.details?.essentialContext);
+  const gapNote = readDetailText(entry.details?.gapNote);
+  return [{
+    text: sanitizeLine(`◆ ${entry.title}`, headerWidth),
+  }, ...(entry.summary ? [{
+    text: sanitizeLine(`  任务：${entry.summary}`, width),
+    tone: 'muted' as const,
+  }] : []), ...(capability ? [{
+    text: sanitizeLine(`  Capability：${capability}`, width),
+    tone: 'muted' as const,
+  }] : []), ...(essentialContext ? [{
+    text: sanitizeLine(`  补充：${essentialContext}`, width),
+    tone: 'muted' as const,
+  }] : []), ...(gapNote ? [{
+    text: sanitizeLine(`  交接：${gapNote}`, width),
+    tone: 'muted' as const,
+  }] : [])];
 }
 
 function buildAuthorizationDisplayLines(

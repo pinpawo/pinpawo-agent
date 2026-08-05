@@ -568,6 +568,89 @@ test('runChatSession emits one completed subagent block per child model message 
   );
 });
 
+test('runChatSession projects a structured delegation briefing instead of its XML', async () => {
+  const emittedEvents: AgentRuntimeEvent[] = [];
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: { messages: [] },
+  } as unknown as AgentChannelSetup;
+  const briefingText = [
+    '<delegation_briefing role="task_boundary" source="orchestrator" mode="continue">',
+    '  <task>Review PR #572</task>',
+    '  <gap_note>Finish the remaining review.</gap_note>',
+    '</delegation_briefing>',
+  ].join('\n');
+  const briefing = new AIMessage(briefingText);
+  briefing.id = 'briefing-1';
+  briefing.additional_kwargs = {
+    pinpawo: {
+      source: 'delegation_briefing',
+      delegationId: 'delegation-1',
+      lane: 'capability:general',
+      delegationMode: 'continue',
+      task: 'Review PR #572',
+      gapNote: 'Finish the remaining review.',
+    },
+  };
+  const graphService = {
+    async readThreadState() {
+      return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
+    },
+    streamEvents() {
+      return (async function* () {
+        yield protocolEvent('values', { messages: [briefing] });
+        yield* messageLifecycle(
+          briefingText,
+          ['general:t1', 'model_request:t2'],
+          'fresh-child-id',
+        );
+        yield protocolEvent('values', { messages: [briefing, new AIMessage('done')] });
+      })();
+    },
+  };
+
+  const result = await runChatSession({
+    request: { kind: 'user_message', requestId: 'req-1', message: 'continue' },
+    setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => true,
+    finishInterrupted: () => {
+      throw new Error('should not interrupt');
+    },
+    emitEvent: (event) => emittedEvents.push(event),
+    emitToolEvent: () => {},
+  });
+
+  assert.deepEqual(result, { status: 'completed', reply: 'done' });
+  assert.deepEqual(
+    emittedEvents.filter((event) => event.type === 'operation'),
+    [{
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'completed',
+      operation: {
+        id: 'delegation:briefing-1',
+        kind: 'runtime.delegation',
+        title: '委派 · 继续',
+        summary: 'Review PR #572',
+        details: {
+          capability: 'general',
+          gapNote: 'Finish the remaining review.',
+        },
+        source: {
+          provider: 'runtime',
+          name: 'delegation_briefing',
+        },
+      },
+    }],
+  );
+  assert.deepEqual(
+    emittedEvents.filter((event) => event.type === 'subagent.message.completed'),
+    [],
+  );
+});
+
 test('runChatSession merges subagent_operations announcements through acceptDelegationOperations', async () => {
   const accepted: unknown[] = [];
   const setup = {

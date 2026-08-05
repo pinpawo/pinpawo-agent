@@ -68,6 +68,7 @@ import { TuiSessionController } from './session/sessionController';
 import {
   APPROVAL_FOOTER_ROWS,
   approvalAcceptsTextInput,
+  calculateApprovalDialogLayout,
   resolveApprovalKey,
   type ApprovalState,
 } from './overlays/approvalModel';
@@ -302,8 +303,14 @@ const liveActivityController = new LiveActivityController({
 });
 const approvalController = new ApprovalController({
   sessionController: controller,
-  getWidth: () => renderer.width,
-  getHeight: () => renderer.height,
+  getWidth: () => calculateApprovalDialogLayout(
+    renderer.width,
+    renderer.height,
+  ).width,
+  getHeight: () => calculateApprovalDialogLayout(
+    renderer.width,
+    renderer.height,
+  ).height,
   onChange: () => refreshApproval(),
 });
 const approvalView = new ApprovalView(renderer, {

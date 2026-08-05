@@ -127,24 +127,79 @@ function isInternalOrchestratorNamespace(namespace: string[]) {
  * most recent `message-start` there. Subagent lifecycles additionally buffer
  * their text so the message can be emitted whole on `message-finish`.
  */
-export type RootStreamAdapterState = Map<string, {
+type MessageLifecycle = {
   messageId: string;
   role: string;
   buffer: string;
   lastEmitted: string;
-}>;
+};
+
+/**
+ * Per-run adapter state. Briefing identity is populated from existing root
+ * values snapshots, whose serialized LangChain messages retain PinPawo
+ * provenance. The protocol message lifecycle itself carries only role/id/model
+ * metadata, so this is the structured boundary at which the adapter can keep a
+ * briefing out of the raw subagent-message stream after the session adapter
+ * projects it as a delegation operation.
+ */
+export type RootStreamAdapterState = {
+  lifecycles: Map<string, MessageLifecycle>;
+  projectedBriefingMessageIds: Set<string>;
+  projectedBriefingTexts: Set<string>;
+};
+
+export function createRootStreamAdapterState(): RootStreamAdapterState {
+  return {
+    lifecycles: new Map(),
+    projectedBriefingMessageIds: new Set(),
+    projectedBriefingTexts: new Set(),
+  };
+}
 
 export function namespaceKey(namespace: string[]): string {
   return namespace.join('|');
 }
 
 function currentLifecycle(state: RootStreamAdapterState, key: string) {
-  let entry = state.get(key);
+  let entry = state.lifecycles.get(key);
   if (!entry) {
     entry = { messageId: '', role: '', buffer: '', lastEmitted: '' };
-    state.set(key, entry);
+    state.lifecycles.set(key, entry);
   }
   return entry;
+}
+
+function recordProjectedBriefings(
+  state: RootStreamAdapterState,
+  values: Record<string, unknown>,
+) {
+  const messages = values.messages;
+  if (!Array.isArray(messages)) return;
+  for (const message of messages) {
+    const record = readRecord(message);
+    // `streamEvents(v3)` values carry serialized LangChain messages, where
+    // the message fields live under `kwargs`; direct message objects are kept
+    // for tests and alternate protocol producers.
+    const fields = readRecord(record?.kwargs) ?? record;
+    const id = fields?.id;
+    const additionalKwargs = readRecord(fields?.additional_kwargs);
+    const pinpawo = readRecord(additionalKwargs?.pinpawo);
+    const mode = pinpawo?.delegationMode;
+    const task = pinpawo?.task;
+    if (
+      pinpawo?.source === 'delegation_briefing'
+      && (mode === 'initial' || mode === 'continue')
+      && typeof task === 'string'
+      && task.trim()
+    ) {
+      if (typeof id === 'string') {
+        state.projectedBriefingMessageIds.add(id);
+      }
+      if (typeof fields?.content === 'string') {
+        state.projectedBriefingTexts.add(fields.content);
+      }
+    }
+  }
 }
 
 /**
@@ -173,8 +228,8 @@ export function readRootStreamChatEvent(
       }
       const key = namespaceKey(namespace);
       if (data.event === 'message-start') {
-        const previous = state.get(key);
-        state.set(key, {
+        const previous = state.lifecycles.get(key);
+        state.lifecycles.set(key, {
           messageId: typeof data.id === 'string' ? data.id : '',
           role: typeof data.role === 'string' ? data.role : '',
           buffer: '',
@@ -187,6 +242,18 @@ export function readRootStreamChatEvent(
       // the role on message-start (they are AI-authored by construction), so
       // only a KNOWN non-assistant role excludes a lifecycle.
       if (current.role && current.role !== 'ai' && current.role !== 'assistant') {
+        return null;
+      }
+
+      // A structured delegation briefing is projected by the session adapter
+      // as a user-visible operation. Its protocol lifecycle is otherwise
+      // indistinguishable from a child model reply, so keep the raw XML out of
+      // the subagent-message stream by its existing message provenance — never
+      // by parsing its XML text.
+      if (state.projectedBriefingMessageIds.has(current.messageId)) {
+        if (data.event === 'message-finish') {
+          current.buffer = '';
+        }
         return null;
       }
 
@@ -211,6 +278,13 @@ export function readRootStreamChatEvent(
           const message = current.buffer;
           current.buffer = '';
           if (!message) {
+            return null;
+          }
+          // Some model/protocol combinations assign a fresh stream id when
+          // they replay a prior AI input. The values snapshot gives us the
+          // opaque briefing body associated with the structured provenance;
+          // replace only an exact replay, not merely XML-looking model text.
+          if (state.projectedBriefingTexts.has(message)) {
             return null;
           }
           // A same-namespace state echo replays the message as a second
@@ -288,6 +362,7 @@ export function readRootStreamChatEvent(
       if ('__interrupt__' in data && Array.isArray(data.__interrupt__)) {
         return { type: 'interrupt', interrupts: data.__interrupt__ };
       }
+      recordProjectedBriefings(state, data);
       return { type: 'values', values: data };
     }
 
@@ -310,7 +385,7 @@ export async function* adaptRootStream(
   protocolEvents: AsyncIterable<RootProtocolEvent>,
   options: RootStreamAdapterOptions = {},
 ): AsyncGenerator<RootStreamChatEvent> {
-  const state: RootStreamAdapterState = new Map();
+  const state = createRootStreamAdapterState();
   let assistantReply = '';
   for await (const event of protocolEvents) {
     const chatEvent = readRootStreamChatEvent(event, state, options);

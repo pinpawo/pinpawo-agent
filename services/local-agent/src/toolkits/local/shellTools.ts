@@ -4,12 +4,7 @@ import { createAbortError, type ToolOperationMetadata } from '@pinpawo/pet-agent
 import { readRecord, readString } from '../operationMetadata';
 import { getLocalToolsWorkdir, resolveUserPath } from './pathUtils';
 import { runShellCommand, type ShellRunHandle } from './processTree';
-import type { ManagedProcessOwner, ProcessRegistry } from './processRegistry';
-
-export type ShellToolsBinding = {
-  registry: ProcessRegistry;
-  owner: ManagedProcessOwner;
-};
+import type { ShellProcessBinding } from './processRegistry';
 
 
 export function normalizeShellActionInput(input: unknown) {
@@ -96,7 +91,7 @@ export const getCurrentTimeTool = tool(
   },
 );
 
-export function createRunShellTool(binding: ShellToolsBinding | null) {
+export function createRunShellTool(binding: ShellProcessBinding | null) {
   return tool(
     async (
       input: { command: string; cwd?: string; timeoutSeconds?: number },
@@ -195,7 +190,7 @@ export function createRunShellTool(binding: ShellToolsBinding | null) {
  * ongoing work with a handle rather than an error.
  */
 function adoptYieldedProcess(params: {
-  binding: ShellToolsBinding | null;
+  binding: ShellProcessBinding | null;
   handle: ShellRunHandle;
   command: string;
   cwd: string;

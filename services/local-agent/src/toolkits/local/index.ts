@@ -115,6 +115,7 @@ const bashToolkitInstructions = [
   '编辑已有文件一律使用 apply_patch（V4A 上下文补丁，支持一次修改多个文件）；只有新建文件或完全重写整个文件时才用 write_file。',
   '查询当前时间优先使用 get_current_time；不要用 run_shell 包装 date 命令。',
   'run_shell 只作为兜底工具；不要用它替代已有的读写、移动、复制、下载或 HTTP 工具。',
+  '命令超时不代表失败，它会转入后台并返回进程 id：用 wait_process 跟进进度，terminate_process 终止不再需要的命令，list_processes 查看本次执行启动的后台命令。不要因为超时就重复执行同一命令。',
   '常规 git 操作由 git toolkit 提供；不要用 run_shell 包装这些常规 git 操作。',
   '执行高风险 shell 命令时必须遵守 toolkit 的人类审批流程，不要绕过审批。',
   '修改文件前先读取现状；修改后优先用 validate_structured_file、grep_search 或 run_shell 做必要验证。',
@@ -154,6 +155,11 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
         subject: ({ input }) => normalizeShellActionInput(input),
       }),
     }),
+    // The process tools carry no review policy on purpose. They only address
+    // processes this same execution already started through an approved
+    // run_shell, so waiting on one, listing them, or stopping one grants no
+    // authority the command did not already have — the same reasoning that
+    // leaves browser_close unreviewed.
   };
   return defineToolkit({
     name: 'bash',
@@ -172,10 +178,15 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
       resolve: (_root, context) => shellRuntime.resolve(context.execution),
       bindTools: (binding) => {
         const shell = binding as ShellRuntimeBinding;
-        return [
-          createRunShellTool(shell),
-          ...createProcessTools(shell),
-        ];
+        // The framework matches bound tools to the static inventory by
+        // position, so this must return the whole list in order. Only the
+        // process-aware tools get a bound implementation; the rest are handed
+        // back as they are.
+        const bound = new Map<string, StructuredTool>(
+          [createRunShellTool(shell), ...createProcessTools(shell)]
+            .map((item) => [item.name, item]),
+        );
+        return tools.map((staticTool) => bound.get(staticTool.name) ?? staticTool);
       },
       release: () => shellRuntime.release(),
       stop: async () => { await shellRuntime.stop(); },

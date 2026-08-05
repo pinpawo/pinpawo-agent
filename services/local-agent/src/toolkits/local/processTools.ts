@@ -4,9 +4,8 @@ import type { ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { readRecord, readString } from '../operationMetadata';
 import {
   ProcessRegistryError,
-  type ManagedProcessOwner,
-  type ProcessRegistry,
   type ProcessSnapshot,
+  type ShellProcessBinding,
 } from './processRegistry';
 import { truncateShellOutput } from './shellTools';
 
@@ -18,11 +17,6 @@ import { truncateShellOutput } from './shellTools';
  * one there is no registry to address, and no process ids will have been
  * issued either, so the tools report that plainly rather than pretending.
  */
-
-export type ProcessToolsBinding = {
-  registry: ProcessRegistry;
-  owner: ManagedProcessOwner;
-};
 
 const DEFAULT_WAIT_SECONDS = 30;
 const MAX_WAIT_SECONDS = 600;
@@ -57,7 +51,7 @@ function formatRegistryError(err: unknown) {
 }
 
 export function createProcessTools(
-  binding: ProcessToolsBinding | null,
+  binding: ShellProcessBinding | null,
 ): StructuredTool[] {
   const requireBinding = () => {
     if (!binding) {

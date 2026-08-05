@@ -41,6 +41,15 @@ export type ManagedProcess = {
 
 export type ProcessSnapshot = Omit<ManagedProcess, never>;
 
+/**
+ * What a tool needs to reach the registry on behalf of one execution: the
+ * shared registry, plus the identity that scopes access to it.
+ */
+export type ShellProcessBinding = {
+  registry: ProcessRegistry;
+  owner: ManagedProcessOwner;
+};
+
 export type DrainResult = {
   process: ProcessSnapshot;
   /** Output produced since the previous drain. */

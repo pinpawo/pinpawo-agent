@@ -9,6 +9,8 @@ import {
   WAIT_PROCESS_TOOL_NAME,
 } from './processTools';
 import { createRunShellTool } from './shellTools';
+import { ToolkitRuntimeManager } from '@pinpawo/pet-agent';
+import { createBashToolkit } from './index';
 
 const OWNER: ManagedProcessOwner = {
   threadId: 'thread-1',
@@ -170,6 +172,37 @@ test('the tools report themselves as unavailable without a binding', async () =>
   assert.match(String(await waitTool!.invoke({ processId: 'x' })), /No background processes/);
   assert.match(String(await terminateTool!.invoke({ processId: 'x' })), /No background processes/);
   assert.match(String(await listTool!.invoke({})), /No background processes/);
+});
+
+test('the bash toolkit binds through the framework without changing its inventory', async () => {
+  // Exercising the tools directly cannot catch an inventory mismatch: the
+  // framework matches bound tools to the static list by position, and rejects
+  // the whole toolkit if they disagree.
+  const toolkit = createBashToolkit();
+  const manager = new ToolkitRuntimeManager();
+  await manager.start([toolkit]);
+
+  try {
+    const execution = await manager.resolve({
+      toolkits: [toolkit],
+      execution: {
+        threadId: 'thread-1',
+        runId: 'run-1',
+        delegationId: 'delegation-1',
+        workdir: process.cwd(),
+      },
+    });
+    const bound = execution.toolkits.find((item) => item.name === 'bash');
+    assert.ok(bound);
+    assert.deepEqual(
+      bound.tools.map((item) => item.tool.name),
+      toolkit.tools.map((item) => item.tool.name),
+      'bindTools must return the whole inventory, in order',
+    );
+    await execution.release();
+  } finally {
+    await manager.stop();
+  }
 });
 
 test('the static inventory matches what a binding produces', () => {

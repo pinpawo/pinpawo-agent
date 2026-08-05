@@ -63,3 +63,29 @@ test('compares plans structurally to avoid duplicate transport events', () => {
   assert.equal(currentPlansEqual(plan, { items: [{ ...plan.items[0] }] }), true);
   assert.equal(currentPlansEqual(plan, null), false);
 });
+
+test('keeps delegation identifiers exact while normalizing display text', () => {
+  const plan = projectCurrentPlan({
+    taskActiveDelegation: {
+      id: ' delegation-1 ',
+      lane: 'capability:explore',
+      task: ' Inspect the repository ',
+    },
+    runDelegationSummaries: [{
+      id: ' delegation-1 ',
+      lane: 'capability:explore',
+      task: ' Inspect the repository ',
+      status: 'progress',
+    }],
+    runCapabilityPlan: [],
+  });
+
+  assert.deepEqual(plan, {
+    items: [{
+      id: ' delegation-1 ',
+      capability: 'explore',
+      task: 'Inspect the repository',
+      status: 'active',
+    }],
+  });
+});

@@ -83,9 +83,9 @@ export function currentPlansEqual(
 function readActiveDelegation(value: unknown): ActiveDelegation | null {
   const record = asRecord(value);
   if (!record) return null;
-  const id = readText(record.id);
-  const lane = readText(record.lane);
-  const task = readText(record.task);
+  const id = readIdentifier(record.id);
+  const lane = readIdentifier(record.lane);
+  const task = readDisplayText(record.task);
   return id && lane && task ? { id, lane, task } : null;
 }
 
@@ -93,9 +93,9 @@ function readDelegationSummaries(value: unknown): DelegationSummary[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((entry) => {
     const record = asRecord(entry);
-    const id = readText(record?.id);
-    const lane = readText(record?.lane);
-    const task = readText(record?.task);
+    const id = readIdentifier(record?.id);
+    const lane = readIdentifier(record?.lane);
+    const task = readDisplayText(record?.task);
     const status = record?.status;
     if (
       !id
@@ -113,8 +113,8 @@ function readRemainingPlan(value: unknown): RemainingPlanTask[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((entry) => {
     const record = asRecord(entry);
-    const capability = readText(record?.capability);
-    const task = readText(record?.task);
+    const capability = readDisplayText(record?.capability);
+    const task = readDisplayText(record?.task);
     return capability && task ? [{ capability, task }] : [];
   });
 }
@@ -129,6 +129,10 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function readText(value: unknown) {
+function readIdentifier(value: unknown) {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function readDisplayText(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }

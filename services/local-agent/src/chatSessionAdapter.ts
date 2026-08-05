@@ -20,6 +20,7 @@ import type {
   LocalAgentGraphThreadState,
 } from './agentGraphService';
 import type {
+  AgentPlan,
   AgentLocalAttachment,
   AgentRuntimeEvent,
 } from '@pinpawo/agent-session';
@@ -33,6 +34,10 @@ import {
 } from './events/rootStreamEventAdapter';
 import { clearAgentRunActivity, recordAgentRunActivity } from './operationActivityState';
 import { createLocalChatHumanMessage } from './localChatAttachments';
+import {
+  currentPlansEqual,
+  projectCurrentPlan,
+} from './currentPlanProjection';
 
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 32000;
 const STALE_RESUME_MESSAGE = '这个 review 已关闭或不存在，请等待当前确认面板刷新后再应答。';
@@ -381,6 +386,17 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
 
   let finalMessages: BaseMessage[] = [];
   let streamedReply = '';
+  let emittedPlan: AgentPlan | null = null;
+  const emitCurrentPlan = (plan: AgentPlan | null) => {
+    if (currentPlansEqual(emittedPlan, plan)) return;
+    emittedPlan = plan;
+    emitEvent({
+      type: 'plan.updated',
+      requestId,
+      plan,
+    });
+  };
+  emitCurrentPlan(initialThreadState.currentPlan ?? null);
   let resumeCheckpointed = false;
   const confirmResumeCheckpoint = (state: LocalAgentGraphThreadState, runIsActive: boolean) => {
     if (
@@ -487,6 +503,7 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
           if (Array.isArray(messages)) {
             finalMessages = messages;
           }
+          emitCurrentPlan(projectCurrentPlan(chatEvent.values));
           break;
         }
         case 'interrupt': {
@@ -536,6 +553,7 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
   }
 
   const finalThreadState = await graphService.readThreadState(setup);
+  emitCurrentPlan(finalThreadState.currentPlan ?? null);
   confirmResumeCheckpoint(
     finalThreadState,
     options.interruptOnSettledResumeCheckpoint === true,

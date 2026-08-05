@@ -139,6 +139,7 @@ import {
 import { SessionPickerView } from './overlays/sessionPickerView';
 import { QaLifecycleDriver } from './qa/qaLifecycleDriver';
 import { calculateComposerLayout } from './layout/composerLayout';
+import { buildCurrentPlanPanel } from './plan/planPanelModel';
 import { installTextareaWorkarounds } from './terminal/textareaCompatibility';
 import {
   formatComposerPlaceholder,
@@ -206,6 +207,14 @@ const live = new TextRenderable(renderer, {
   content: 'live · idle',
   bg: RGBA.defaultBackground(),
   height: 1,
+});
+const currentPlan = new TextRenderable(renderer, {
+  id: 'current-plan',
+  content: '',
+  fg: '#a8b6c5',
+  bg: RGBA.defaultBackground(),
+  height: 0,
+  overflow: 'hidden',
 });
 const composerFrame = new BoxRenderable(renderer, {
   id: 'composer-frame',
@@ -347,6 +356,7 @@ installTextareaWorkarounds(composer);
 installTextareaWorkarounds(approvalView.input);
 
 root.add(header);
+root.add(currentPlan);
 root.add(live);
 composerFrame.add(composer);
 root.add(composerFrame);
@@ -394,6 +404,7 @@ const unsubscribe = controller.subscribe((state) => {
   syncNoticeFromSession();
   syncComposerInputOverlays();
   syncComposerModeUi();
+  syncComposerLayout();
   refreshLive();
   if (state.session.sessionId !== 'pending') {
     timeline.renderWelcome(buildWelcomeLines({
@@ -643,12 +654,14 @@ controller.start();
 qaLifecycle.installInitialFrameBehavior();
 
 function syncComposerLayout() {
+  refreshCurrentPlan();
   const layout = calculateComposerLayout(
     composer.plainText,
     composer.virtualLineCount,
     {
       commandPalette: commandOverlay.phase === 'palette',
       persistentHeader: attachments.length > 0,
+      planHeight: currentPlan.height,
     },
   );
   composerFrame.border = commandOverlay.phase === 'palette'
@@ -661,6 +674,26 @@ function syncComposerLayout() {
   renderer.footerHeight = approvalController.getState().phase === 'closed'
     ? layout.footerHeight
     : APPROVAL_FOOTER_ROWS;
+}
+
+function refreshCurrentPlan() {
+  const overlayOpen = commandOverlay.phase !== 'closed'
+    || fileMention.phase !== 'closed'
+    || sessionPicker.phase !== 'closed'
+    || policyPicker.phase !== 'closed'
+    || modelPicker.phase !== 'closed'
+    || noticeOverlay.phase !== 'closed'
+    || approvalController.getState().phase !== 'closed';
+  const panel = buildCurrentPlanPanel(
+    controller.getState().session.currentPlan,
+    {
+      width: renderer.width,
+      terminalHeight: renderer.height,
+      overlayOpen,
+    },
+  );
+  currentPlan.content = panel.content;
+  currentPlan.height = panel.height;
 }
 
 function refreshHeader() {

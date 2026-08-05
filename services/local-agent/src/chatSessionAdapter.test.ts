@@ -281,6 +281,86 @@ test('runChatSession falls back to checkpoint final message when stream values o
   assert.equal(completed?.text, 'checkpoint answer');
 });
 
+test('runChatSession replaces the current plan from root values and clears it at settlement', async () => {
+  const emittedEvents: AgentRuntimeEvent[] = [];
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: { messages: [] },
+  } as unknown as AgentChannelSetup;
+  const finalMessages = [new AIMessage('done')];
+  let threadStateRead = 0;
+  const graphService = {
+    async readThreadState() {
+      threadStateRead += 1;
+      return {
+        messages: threadStateRead === 1 ? [] : finalMessages,
+        pendingHumanReview: null,
+        hasPendingContinuation: false,
+        currentPlan: null,
+      };
+    },
+    streamEvents() {
+      return (async function* () {
+        yield protocolEvent('values', {
+          messages: finalMessages,
+          taskActiveDelegation: {
+            id: 'delegation-1',
+            lane: 'capability:explore',
+            task: 'Inspect code',
+          },
+          runDelegationSummaries: [{
+            id: 'delegation-1',
+            lane: 'capability:explore',
+            task: 'Inspect code',
+            status: 'progress',
+          }],
+          runCapabilityPlan: [{ capability: 'browser', task: 'Verify result' }],
+        });
+      })();
+    },
+  };
+
+  await runChatSession({
+    request: { kind: 'user_message', requestId: 'req-1', message: 'hello' },
+    setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => true,
+    finishInterrupted: () => {
+      throw new Error('should not interrupt');
+    },
+    emitEvent: (event) => emittedEvents.push(event),
+    emitToolEvent: () => {},
+  });
+
+  const plans = emittedEvents.filter((event): event is Extract<AgentRuntimeEvent, { type: 'plan.updated' }> =>
+    event.type === 'plan.updated');
+  assert.deepEqual(plans, [{
+    type: 'plan.updated',
+    requestId: 'req-1',
+    plan: {
+      items: [
+        {
+          id: 'delegation-1',
+          capability: 'explore',
+          task: 'Inspect code',
+          status: 'active',
+        },
+        {
+          id: 'pending:browser:0',
+          capability: 'browser',
+          task: 'Verify result',
+          status: 'pending',
+        },
+      ],
+    },
+  }, {
+    type: 'plan.updated',
+    requestId: 'req-1',
+    plan: null,
+  }]);
+});
+
 test('runChatSession projects global policy authorization as completed operations', async () => {
   const emittedTools: StreamToolsPayload[] = [];
   const emittedEvents: AgentRuntimeEvent[] = [];

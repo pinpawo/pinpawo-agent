@@ -66,6 +66,18 @@ export type AgentRunActivity =
   | 'using_tool'
   | 'streaming';
 
+/** A compact, display-ready projection of the active delegation plan. */
+export type AgentPlan = {
+  items: AgentPlanItem[];
+};
+
+export type AgentPlanItem = {
+  id: string;
+  capability: string;
+  task: string;
+  status: 'completed' | 'active' | 'pending';
+};
+
 type AgentRunViewBase = {
   requestId: string;
   startedAt?: number;
@@ -133,6 +145,8 @@ export type AgentSession = {
   actor?: AgentActorView;
   timeline: AgentTimelineEntry[];
   activeRun: AgentRunView | null;
+  /** Ephemeral delegation plan, separate from the durable conversation timeline. */
+  currentPlan?: AgentPlan | null;
   runtime?: AgentRuntimeView;
   /** Latest completed run usage, when the provider reports it. */
   tokenUsage?: TokenUsageSnapshot;

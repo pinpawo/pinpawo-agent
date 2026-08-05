@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { tool } from '@langchain/core/tools';
@@ -7,6 +6,7 @@ import { z } from 'zod';
 import type { AgentActor, AgentModels } from '../../src/types/agent';
 import { createOrchestratorGraph, buildOrchestratorRunInput } from '../../src/agent/createAgentRuntime';
 import { buildReviewSpec } from '../../src/agent/orchestrator/review/reviewSpec';
+import { randomUUID } from 'node:crypto';
 import {
   getMessageHandoffSource,
   mainConversationMessages,
@@ -21,10 +21,9 @@ import {
   type ToolReviewRejectRuntimeExpected,
   type ToolReviewRejectRuntimeInput,
 } from '../datasets/tool-review-reject-runtime.ts';
-import {
-  langfuseFetch,
-  resolveLangfuseConfig,
-} from './langfuse-api.ts';
+import { resolveLangfuseConfig } from './langfuse-api.ts';
+import { writeLangfuseEvalResult } from './langfuse-eval-writer.ts';
+import { LangfuseV4Runtime, createLangfuseV4Runtime } from './langfuse-v4-runtime.ts';
 
 type ScoreResult = {
   key: string;
@@ -380,60 +379,23 @@ function scorePasses(score: ScoreResult): boolean {
   return score.score === 1;
 }
 
-function traceIdFor(runName: string, caseId: string): string {
-  const slug = `${runName}.${caseId}`
-    .replace(/[^a-zA-Z0-9_.:-]/g, '-')
-    .slice(0, 160);
-  return `${slug}.${randomUUID()}`;
-}
-
 async function writeLangfuseResult(params: {
-  config: ReturnType<typeof resolveLangfuseConfig>;
+  runtime: LangfuseV4Runtime;
   runName: string;
-  traceId: string;
   testCase: typeof toolReviewRejectRuntimeDataset.cases[number];
   row: EvalRow;
 }) {
-  await langfuseFetch(params.config, '/traces', {
-    method: 'POST',
-    body: JSON.stringify({
-      id: params.traceId,
-      name: 'tool-review-reject-runtime-eval',
-      input: params.testCase.input,
-      output: params.row.error
-        ? { error: params.row.error, ...params.row.output }
-        : params.row.output,
-      metadata: {
-        runName: params.runName,
-        datasetName: toolReviewRejectRuntimeDataset.name,
-        datasetItemId: params.testCase.id,
-        caseName: params.testCase.name,
-        tags: params.testCase.tags,
-        durationMs: params.row.durationMs,
-        ok: params.row.ok,
-      },
-    }),
-  });
-
-  for (const score of params.row.scores) {
-    await langfuseFetch(params.config, '/scores', {
-      method: 'POST',
-      body: JSON.stringify({
-        traceId: params.traceId,
-        name: score.key,
-        value: score.score,
-        comment: score.comment,
-      }),
-    });
-  }
-
-  await langfuseFetch(params.config, '/dataset-run-items', {
-    method: 'POST',
-    body: JSON.stringify({
-      runName: params.runName,
-      datasetItemId: params.testCase.id,
-      traceId: params.traceId,
-    }),
+  await writeLangfuseEvalResult({
+    runtime: params.runtime,
+    datasetName: toolReviewRejectRuntimeDataset.name,
+    runName: params.runName,
+    traceName: 'tool-review-reject-runtime-eval',
+    testCase: params.testCase,
+    output: params.row.output,
+    scores: params.row.scores,
+    durationMs: params.row.durationMs,
+    error: params.row.error,
+    metadata: { ok: params.row.ok },
   });
 }
 
@@ -461,6 +423,7 @@ function printSummary(rows: EvalRow[]) {
 
 async function main() {
   const config = resolveLangfuseConfig();
+  const runtime = createLangfuseV4Runtime(config);
   const cases = selectedCases();
   if (cases.length === 0) {
     throw new Error(`No eval cases selected. EVAL_CASES=${process.env.EVAL_CASES ?? '(unset)'}`);
@@ -476,7 +439,6 @@ async function main() {
   const rows: EvalRow[] = [];
   for (const testCase of cases) {
     const started = performance.now();
-    const traceId = traceIdFor(runName, testCase.id);
     try {
       const output = await target(testCase.input);
       const scores = runEvaluators(output, testCase.expected);
@@ -490,7 +452,7 @@ async function main() {
         scores,
         output,
       };
-      await writeLangfuseResult({ config, runName, traceId, testCase, row });
+      await writeLangfuseResult({ runtime, runName, testCase, row });
       rows.push(row);
       console.log(`[${row.ok ? 'PASS' : 'FAIL'}] ${testCase.name} (${row.durationMs}ms)`);
     } catch (error) {
@@ -505,15 +467,16 @@ async function main() {
         output: {},
         error: compactError(error),
       };
-      await writeLangfuseResult({ config, runName, traceId, testCase, row });
+      await writeLangfuseResult({ runtime, runName, testCase, row });
       rows.push(row);
       console.log(`[ERROR] ${testCase.name} (${row.durationMs}ms): ${row.error}`);
     }
   }
 
   printSummary(rows);
+  await runtime.shutdown();
   if (rows.some((row) => !row.ok)) {
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 

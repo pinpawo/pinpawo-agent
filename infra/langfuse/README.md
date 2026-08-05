@@ -6,7 +6,11 @@ Langfuse is not a drop-in replacement for the `langsmith/evaluation` SDK used by
 
 ## Services
 
-The compose file runs the Langfuse v3 low-scale self-host stack:
+The compose file runs Langfuse 4.4.0 in the v4-native `events_only` mode.
+PinPawo's evaluation scripts emit OpenTelemetry observations and v4 experiment
+attributes, and use the supported Scores and Dataset APIs. The historic
+backfill runs in the background; it needs roughly three times the existing
+ClickHouse data volume in temporary disk headroom.
 
 - `langfuse-web` on `http://localhost:3000`
 - `langfuse-worker` on `127.0.0.1:3030`

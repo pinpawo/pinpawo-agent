@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { orchestratorRouteDataset } from '../datasets/orchestrator-route.ts';
 import {
   DATASET_NAME,
@@ -12,10 +11,9 @@ import {
   routeCorrectness,
   target,
 } from '../orchestrator-route.eval.ts';
-import {
-  langfuseFetch,
-  resolveLangfuseConfig,
-} from './langfuse-api.ts';
+import { resolveLangfuseConfig } from './langfuse-api.ts';
+import { writeLangfuseEvalResult } from './langfuse-eval-writer.ts';
+import { LangfuseV4Runtime, createLangfuseV4Runtime } from './langfuse-v4-runtime.ts';
 
 type ScoreResult = {
   key: string;
@@ -89,60 +87,23 @@ function scoreApplies(score: ScoreResult): boolean {
   return !score.comment?.startsWith('No expected ');
 }
 
-function traceIdFor(runName: string, caseId: string): string {
-  const slug = `${runName}.${caseId}`
-    .replace(/[^a-zA-Z0-9_.:-]/g, '-')
-    .slice(0, 160);
-  return `${slug}.${randomUUID()}`;
-}
-
 async function writeLangfuseResult(params: {
-  config: ReturnType<typeof resolveLangfuseConfig>;
+  runtime: LangfuseV4Runtime;
   runName: string;
-  traceId: string;
   testCase: typeof orchestratorRouteDataset.cases[number];
   row: EvalRow;
 }) {
-  await langfuseFetch(params.config, '/traces', {
-    method: 'POST',
-    body: JSON.stringify({
-      id: params.traceId,
-      name: 'orchestrator-route-eval',
-      input: params.testCase.input,
-      output: params.row.error
-        ? { error: params.row.error, ...params.row.output }
-        : params.row.output,
-      metadata: {
-        runName: params.runName,
-        datasetName: DATASET_NAME,
-        datasetItemId: params.testCase.id,
-        caseName: params.testCase.name,
-        tags: params.testCase.tags,
-        durationMs: params.row.durationMs,
-        ok: params.row.ok,
-      },
-    }),
-  });
-
-  for (const score of params.row.scores) {
-    await langfuseFetch(params.config, '/scores', {
-      method: 'POST',
-      body: JSON.stringify({
-        traceId: params.traceId,
-        name: score.key,
-        value: score.score,
-        comment: score.comment,
-      }),
-    });
-  }
-
-  await langfuseFetch(params.config, '/dataset-run-items', {
-    method: 'POST',
-    body: JSON.stringify({
-      runName: params.runName,
-      datasetItemId: params.testCase.id,
-      traceId: params.traceId,
-    }),
+  await writeLangfuseEvalResult({
+    runtime: params.runtime,
+    datasetName: DATASET_NAME,
+    runName: params.runName,
+    traceName: 'orchestrator-route-eval',
+    testCase: params.testCase,
+    output: params.row.output,
+    scores: params.row.scores,
+    durationMs: params.row.durationMs,
+    error: params.row.error,
+    metadata: { ok: params.row.ok },
   });
 }
 
@@ -188,6 +149,7 @@ function printSummary(rows: EvalRow[]) {
 
 async function main() {
   const config = resolveLangfuseConfig();
+  const runtime = createLangfuseV4Runtime(config);
   const cases = selectedCases();
   if (cases.length === 0) {
     throw new Error(`No eval cases selected. EVAL_CASES=${process.env.EVAL_CASES ?? '(unset)'}`);
@@ -204,7 +166,6 @@ async function main() {
   const rows: EvalRow[] = [];
   for (const testCase of cases) {
     const started = performance.now();
-    const traceId = traceIdFor(runName, testCase.id);
     try {
       const output = await target(testCase.input);
       const scores = runEvaluators(output, testCase.expected);
@@ -218,7 +179,7 @@ async function main() {
         scores,
         output,
       };
-      await writeLangfuseResult({ config, runName, traceId, testCase, row });
+      await writeLangfuseResult({ runtime, runName, testCase, row });
       rows.push(row);
       console.log(`[${row.ok ? 'PASS' : 'FAIL'}] ${testCase.name} (${row.durationMs}ms)`);
     } catch (error) {
@@ -233,15 +194,16 @@ async function main() {
         output: {},
         error: compactError(error),
       };
-      await writeLangfuseResult({ config, runName, traceId, testCase, row });
+      await writeLangfuseResult({ runtime, runName, testCase, row });
       rows.push(row);
       console.log(`[ERROR] ${testCase.name} (${row.durationMs}ms): ${row.error}`);
     }
   }
 
   printSummary(rows);
+  await runtime.shutdown();
   if (rows.some((row) => !row.ok)) {
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 

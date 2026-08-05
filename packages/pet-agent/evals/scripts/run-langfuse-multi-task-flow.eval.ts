@@ -19,6 +19,7 @@ import { multiTaskFlowBasicsDataset } from '../datasets/multi-task-flow-basics.t
 import { readRunDelegationSummaries, routeModeFromResult } from '../orchestratorStateReaders.ts';
 import { writeLangfuseEvalResult, type LangfuseEvalScore } from './langfuse-eval-writer.ts';
 import { resolveLangfuseConfig } from './langfuse-api.ts';
+import { createLangfuseV4Runtime } from './langfuse-v4-runtime.ts';
 
 const actor = {
   petId: 'eval-pet',
@@ -277,6 +278,7 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
 
 async function main() {
   const config = resolveLangfuseConfig();
+  const runtime = createLangfuseV4Runtime(config);
   const runName = process.env.LANGFUSE_RUN_NAME
     || `multi-task-flow-${new Date().toISOString().replace(/[:.]/g, '-')}`;
   console.log(`Running ${multiTaskFlowBasicsDataset.name}: ${runName}`);
@@ -288,7 +290,7 @@ async function main() {
       const ok = scores.every((score) => score.score === 1);
       if (ok) passed += 1;
       await writeLangfuseEvalResult({
-        config,
+        runtime,
         datasetName: multiTaskFlowBasicsDataset.name,
         runName,
         traceName: 'multi-task-flow-eval',
@@ -303,6 +305,7 @@ async function main() {
       console.log(`[ERROR] ${testCase.name}: ${String(error)}`);
     }
   }
+  await runtime.shutdown();
   console.log(`Cases: ${passed}/${multiTaskFlowBasicsDataset.cases.length} passed`);
   if (passed !== multiTaskFlowBasicsDataset.cases.length) process.exitCode = 1;
 }

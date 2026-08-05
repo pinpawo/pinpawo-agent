@@ -30,7 +30,9 @@ import {
 } from './agentStreamEvents';
 import {
   adaptRootStream,
+  readNamespaceNode,
   type RootProtocolEvent,
+  type RootStreamChatEvent,
 } from './events/rootStreamEventAdapter';
 import { clearAgentRunActivity, recordAgentRunActivity } from './operationActivityState';
 import { createLocalChatHumanMessage } from './localChatAttachments';
@@ -226,61 +228,12 @@ function projectGlobalPolicyAuthorization(
   };
 }
 
-type DelegationBriefing = {
-  id: string;
-  delegationId: string | null;
-  lane: string | null;
-  mode: 'initial' | 'continue';
-  task: string;
-  essentialContext: string | null;
-  gapNote: string | null;
-};
-
-/**
- * Briefing messages are the one authoritative delegation dispatch record. The
- * runtime writes their display fields alongside the XML protocol payload, so
- * the local session can surface a readable operation without reverse-parsing
- * private prompt text or requiring the TUI to know the XML format.
- */
-function readDelegationBriefings(values: Record<string, unknown>): DelegationBriefing[] {
-  const messages = values.messages;
-  if (!Array.isArray(messages)) return [];
-  return messages.flatMap((message) => {
-    const record = readCustomEventData(message);
-    const fields = readCustomEventData(record?.kwargs) ?? record;
-    const pinpawo = readCustomEventData(
-      readCustomEventData(fields?.additional_kwargs)?.pinpawo,
-    );
-    const mode = pinpawo?.delegationMode;
-    const task = readDisplayText(pinpawo?.task);
-    if (
-      pinpawo?.source !== 'delegation_briefing'
-      || (mode !== 'initial' && mode !== 'continue')
-      || !task
-    ) {
-      return [];
-    }
-    const messageId = readDisplayText(fields?.id, 160);
-    const delegationId = readDisplayText(pinpawo.delegationId, 160);
-    return [{
-      id: messageId ?? `delegation:${delegationId ?? task}:${mode}`,
-      delegationId,
-      lane: readDisplayText(pinpawo.lane, 160),
-      mode,
-      task,
-      essentialContext: readDisplayText(pinpawo.essentialContext),
-      gapNote: readDisplayText(pinpawo.gapNote),
-    }];
-  });
-}
-
 function projectDelegationBriefing(
-  briefing: DelegationBriefing,
+  event: Extract<RootStreamChatEvent, { type: 'delegation.briefing' }>,
   requestId: string,
 ): Extract<AgentRuntimeEvent, { type: 'operation' }> {
-  const capability = briefing.lane?.startsWith('capability:')
-    ? briefing.lane.slice('capability:'.length)
-    : briefing.lane;
+  const { briefing } = event;
+  const capability = readNamespaceNode(event.namespace);
   return {
     type: 'operation',
     requestId,
@@ -288,7 +241,7 @@ function projectDelegationBriefing(
     // remains the authority for whether its delegated work is still active.
     phase: 'completed',
     operation: {
-      id: `delegation:${briefing.id}`,
+      id: `delegation:${event.messageId}`,
       kind: 'runtime.delegation',
       title: briefing.mode === 'continue' ? '委派 · 继续' : '委派任务',
       summary: briefing.task,
@@ -468,7 +421,6 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
   let finalMessages: BaseMessage[] = [];
   let streamedReply = '';
   let emittedPlan: AgentPlan | null = null;
-  const emittedDelegationBriefingIds = new Set<string>();
   const emitCurrentPlan = (plan: AgentPlan | null) => {
     if (currentPlansEqual(emittedPlan, plan)) return;
     emittedPlan = plan;
@@ -541,6 +493,10 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
           });
           break;
         }
+        case 'delegation.briefing': {
+          emitEvent(projectDelegationBriefing(chatEvent, requestId));
+          break;
+        }
         case 'tool': {
           const lifecycle = toolReader.readToolsData(chatEvent.namespace, chatEvent.data);
           if (lifecycle) {
@@ -584,11 +540,6 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
           const messages = (chatEvent.values as { messages?: BaseMessage[] }).messages;
           if (Array.isArray(messages)) {
             finalMessages = messages;
-          }
-          for (const briefing of readDelegationBriefings(chatEvent.values)) {
-            if (emittedDelegationBriefingIds.has(briefing.id)) continue;
-            emittedDelegationBriefingIds.add(briefing.id);
-            emitEvent(projectDelegationBriefing(briefing, requestId));
           }
           emitCurrentPlan(projectCurrentPlan(chatEvent.values));
           break;

@@ -53,6 +53,13 @@ export type RootStreamChatEvent =
   | { type: 'assistant.delta'; messageId: string; node: string | null; text: string }
   /** One completed subagent model message (ambient progress, block-level). */
   | { type: 'subagent.message'; namespace: string[]; messageId: string; text: string }
+  /** A system-authored delegation briefing, projected from its protocol message. */
+  | {
+      type: 'delegation.briefing';
+      namespace: string[];
+      messageId: string;
+      briefing: DelegationBriefing;
+    }
   /** Tool lifecycle from any scope; Phase 3 joins operation metadata. */
   | { type: 'tool'; namespace: string[]; data: Record<string, unknown> }
   /** A guard decision record (orchestrator via stream writer; subagent after Phase 4). */
@@ -95,6 +102,88 @@ function readTextDelta(data: Record<string, unknown>): string | null {
   return typeof delta.text === 'string' && delta.text.length > 0 ? delta.text : null;
 }
 
+export type DelegationBriefing = {
+  mode: 'initial' | 'continue';
+  task: string;
+  essentialContext: string | null;
+  gapNote: string | null;
+};
+
+/**
+ * Read the fixed, system-authored delegation protocol at the stream boundary.
+ * This is deliberately not a general XML parser: only the exact protocol
+ * shape emitted by `materializeDelegation` is recognized. Any model-authored
+ * XML-like text remains a normal subagent message.
+ */
+export function parseDelegationBriefing(text: string): DelegationBriefing | null {
+  const header = /^<delegation_briefing role="task_boundary" source="orchestrator" mode="(initial|continue)">\s*/.exec(text);
+  if (!header) return null;
+
+  let offset = header[0].length;
+  const task = readBriefingCdataElement(text, offset, 'task');
+  if (!task) return null;
+  offset = task.offset;
+
+  const contextTag = header[1] === 'initial' ? 'essential_context' : 'gap_note';
+  const context = readBriefingCdataElement(text, offset, contextTag);
+  if (context) {
+    offset = context.offset;
+  }
+
+  if (text.slice(offset).trim() !== '</delegation_briefing>') {
+    return null;
+  }
+
+  const taskText = task.text.trim();
+  if (!taskText) return null;
+  return {
+    mode: header[1] as DelegationBriefing['mode'],
+    task: taskText,
+    essentialContext: header[1] === 'initial' ? normalizeBriefingText(context?.text) : null,
+    gapNote: header[1] === 'continue' ? normalizeBriefingText(context?.text) : null,
+  };
+}
+
+function readBriefingCdataElement(
+  source: string,
+  initialOffset: number,
+  tag: 'task' | 'essential_context' | 'gap_note',
+): { text: string; offset: number } | null {
+  let offset = skipWhitespace(source, initialOffset);
+  const openTag = `<${tag}>`;
+  if (!source.startsWith(openTag, offset)) return null;
+  offset = skipWhitespace(source, offset + openTag.length);
+  if (!source.startsWith('<![CDATA[', offset)) return null;
+  offset += '<![CDATA['.length;
+
+  let text = '';
+  while (true) {
+    const cdataEnd = source.indexOf(']]>', offset);
+    if (cdataEnd < 0) return null;
+    text += source.slice(offset, cdataEnd);
+    offset = cdataEnd + 3;
+    if (!source.startsWith('<![CDATA[', offset)) break;
+    offset += '<![CDATA['.length;
+  }
+
+  offset = skipWhitespace(source, offset);
+  const closeTag = `</${tag}>`;
+  if (!source.startsWith(closeTag, offset)) return null;
+  return { text, offset: offset + closeTag.length };
+}
+
+function skipWhitespace(source: string, offset: number) {
+  while (offset < source.length && /\s/.test(source[offset] ?? '')) {
+    offset += 1;
+  }
+  return offset;
+}
+
+function normalizeBriefingText(value: string | undefined) {
+  const text = value?.trim();
+  return text ? text : null;
+}
+
 function isGuardDecisionCustomData(data: Record<string, unknown>): boolean {
   return data.name === GUARD_DECISION_EVENT || data.name === SUBAGENT_GUARD_DECISION_EVENT;
 }
@@ -134,72 +223,19 @@ type MessageLifecycle = {
   lastEmitted: string;
 };
 
-/**
- * Per-run adapter state. Briefing identity is populated from existing root
- * values snapshots, whose serialized LangChain messages retain PinPawo
- * provenance. The protocol message lifecycle itself carries only role/id/model
- * metadata, so this is the structured boundary at which the adapter can keep a
- * briefing out of the raw subagent-message stream after the session adapter
- * projects it as a delegation operation.
- */
-export type RootStreamAdapterState = {
-  lifecycles: Map<string, MessageLifecycle>;
-  projectedBriefingMessageIds: Set<string>;
-  projectedBriefingTexts: Set<string>;
-};
-
-export function createRootStreamAdapterState(): RootStreamAdapterState {
-  return {
-    lifecycles: new Map(),
-    projectedBriefingMessageIds: new Set(),
-    projectedBriefingTexts: new Set(),
-  };
-}
+export type RootStreamAdapterState = Map<string, MessageLifecycle>;
 
 export function namespaceKey(namespace: string[]): string {
   return namespace.join('|');
 }
 
 function currentLifecycle(state: RootStreamAdapterState, key: string) {
-  let entry = state.lifecycles.get(key);
+  let entry = state.get(key);
   if (!entry) {
     entry = { messageId: '', role: '', buffer: '', lastEmitted: '' };
-    state.lifecycles.set(key, entry);
+    state.set(key, entry);
   }
   return entry;
-}
-
-function recordProjectedBriefings(
-  state: RootStreamAdapterState,
-  values: Record<string, unknown>,
-) {
-  const messages = values.messages;
-  if (!Array.isArray(messages)) return;
-  for (const message of messages) {
-    const record = readRecord(message);
-    // `streamEvents(v3)` values carry serialized LangChain messages, where
-    // the message fields live under `kwargs`; direct message objects are kept
-    // for tests and alternate protocol producers.
-    const fields = readRecord(record?.kwargs) ?? record;
-    const id = fields?.id;
-    const additionalKwargs = readRecord(fields?.additional_kwargs);
-    const pinpawo = readRecord(additionalKwargs?.pinpawo);
-    const mode = pinpawo?.delegationMode;
-    const task = pinpawo?.task;
-    if (
-      pinpawo?.source === 'delegation_briefing'
-      && (mode === 'initial' || mode === 'continue')
-      && typeof task === 'string'
-      && task.trim()
-    ) {
-      if (typeof id === 'string') {
-        state.projectedBriefingMessageIds.add(id);
-      }
-      if (typeof fields?.content === 'string') {
-        state.projectedBriefingTexts.add(fields.content);
-      }
-    }
-  }
 }
 
 /**
@@ -228,8 +264,8 @@ export function readRootStreamChatEvent(
       }
       const key = namespaceKey(namespace);
       if (data.event === 'message-start') {
-        const previous = state.lifecycles.get(key);
-        state.lifecycles.set(key, {
+        const previous = state.get(key);
+        state.set(key, {
           messageId: typeof data.id === 'string' ? data.id : '',
           role: typeof data.role === 'string' ? data.role : '',
           buffer: '',
@@ -242,18 +278,6 @@ export function readRootStreamChatEvent(
       // the role on message-start (they are AI-authored by construction), so
       // only a KNOWN non-assistant role excludes a lifecycle.
       if (current.role && current.role !== 'ai' && current.role !== 'assistant') {
-        return null;
-      }
-
-      // A structured delegation briefing is projected by the session adapter
-      // as a user-visible operation. Its protocol lifecycle is otherwise
-      // indistinguishable from a child model reply, so keep the raw XML out of
-      // the subagent-message stream by its existing message provenance — never
-      // by parsing its XML text.
-      if (state.projectedBriefingMessageIds.has(current.messageId)) {
-        if (data.event === 'message-finish') {
-          current.buffer = '';
-        }
         return null;
       }
 
@@ -280,19 +304,21 @@ export function readRootStreamChatEvent(
           if (!message) {
             return null;
           }
-          // Some model/protocol combinations assign a fresh stream id when
-          // they replay a prior AI input. The values snapshot gives us the
-          // opaque briefing body associated with the structured provenance;
-          // replace only an exact replay, not merely XML-looking model text.
-          if (state.projectedBriefingTexts.has(message)) {
-            return null;
-          }
           // A same-namespace state echo replays the message as a second
           // full-content lifecycle; drop consecutive identical messages.
           if (message === current.lastEmitted) {
             return null;
           }
           current.lastEmitted = message;
+          const briefing = parseDelegationBriefing(message);
+          if (briefing) {
+            return {
+              type: 'delegation.briefing',
+              namespace,
+              messageId: current.messageId || `${key}:${event.seq}`,
+              briefing,
+            };
+          }
           return {
             type: 'subagent.message',
             namespace,
@@ -362,7 +388,6 @@ export function readRootStreamChatEvent(
       if ('__interrupt__' in data && Array.isArray(data.__interrupt__)) {
         return { type: 'interrupt', interrupts: data.__interrupt__ };
       }
-      recordProjectedBriefings(state, data);
       return { type: 'values', values: data };
     }
 
@@ -385,7 +410,7 @@ export async function* adaptRootStream(
   protocolEvents: AsyncIterable<RootProtocolEvent>,
   options: RootStreamAdapterOptions = {},
 ): AsyncGenerator<RootStreamChatEvent> {
-  const state = createRootStreamAdapterState();
+  const state: RootStreamAdapterState = new Map();
   let assistantReply = '';
   for await (const event of protocolEvents) {
     const chatEvent = readRootStreamChatEvent(event, state, options);

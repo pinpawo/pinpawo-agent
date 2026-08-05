@@ -577,22 +577,20 @@ test('runChatSession projects a structured delegation briefing instead of its XM
   } as unknown as AgentChannelSetup;
   const briefingText = [
     '<delegation_briefing role="task_boundary" source="orchestrator" mode="continue">',
-    '  <task>Review PR #572</task>',
-    '  <gap_note>Finish the remaining review.</gap_note>',
+    '  <task>',
+    '<![CDATA[',
+    'Review PR #572',
+    ']]>',
+    '  </task>',
+    '  <gap_note>',
+    '<![CDATA[',
+    'Finish the remaining review.',
+    ']]>',
+    '  </gap_note>',
     '</delegation_briefing>',
   ].join('\n');
   const briefing = new AIMessage(briefingText);
   briefing.id = 'briefing-1';
-  briefing.additional_kwargs = {
-    pinpawo: {
-      source: 'delegation_briefing',
-      delegationId: 'delegation-1',
-      lane: 'capability:general',
-      delegationMode: 'continue',
-      task: 'Review PR #572',
-      gapNote: 'Finish the remaining review.',
-    },
-  };
   const graphService = {
     async readThreadState() {
       return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
@@ -630,7 +628,7 @@ test('runChatSession projects a structured delegation briefing instead of its XM
       requestId: 'req-1',
       phase: 'completed',
       operation: {
-        id: 'delegation:briefing-1',
+        id: 'delegation:fresh-child-id',
         kind: 'runtime.delegation',
         title: '委派 · 继续',
         summary: 'Review PR #572',

@@ -12,7 +12,6 @@ import {
 import { createSubagent, GUARD_DECISION_EVENT } from '@pinpawo/pet-agent';
 import {
   adaptRootStream,
-  createRootStreamAdapterState,
   readRootStreamChatEvent,
   readNamespaceNode,
   type RootProtocolEvent,
@@ -94,7 +93,7 @@ test('adapter attributes root answer tokens to assistant and drops internal deci
 });
 
 test('adapter drops synthetic assistant messages written by prepare', () => {
-  const state: RootStreamAdapterState = createRootStreamAdapterState();
+  const state: RootStreamAdapterState = new Map();
   const namespace = ['prepare:task-1'];
   const events = [
     readRootStreamChatEvent({
@@ -139,37 +138,23 @@ test('adapter drops synthetic assistant messages written by prepare', () => {
   assert.deepEqual(events, [null, null, null]);
 });
 
-test('adapter replaces a metadata-tagged delegation briefing replayed from a child scope', () => {
-  const state: RootStreamAdapterState = createRootStreamAdapterState();
+test('adapter projects a canonical delegation briefing from a child message lifecycle', () => {
+  const state: RootStreamAdapterState = new Map();
   const namespace = ['general:task-1', 'model:task-2'];
   const text = [
     '<delegation_briefing role="task_boundary" source="orchestrator" mode="continue">',
-    '  <task><![CDATA[continue the delegated task]]></task>',
+    '  <task>',
+    '<![CDATA[',
+    'continue the delegated task',
+    ']]>',
+    '  </task>',
+    '  <gap_note>',
+    '<![CDATA[',
+    'Finish the remaining review.',
+    ']]>',
+    '  </gap_note>',
     '</delegation_briefing>',
   ].join('\n');
-
-  const valuesEvent = readRootStreamChatEvent({
-    type: 'event',
-    seq: 0,
-    method: 'values',
-    params: {
-      data: {
-        messages: [{
-          kwargs: {
-            content: text,
-            additional_kwargs: {
-              pinpawo: {
-                source: 'delegation_briefing',
-                delegationMode: 'continue',
-                task: 'Resume the review.',
-              },
-            },
-          },
-        }],
-      },
-    },
-  }, state);
-  assert.equal(valuesEvent?.type, 'values');
 
   readRootStreamChatEvent({
     type: 'event',
@@ -190,16 +175,70 @@ test('adapter replaces a metadata-tagged delegation briefing replayed from a chi
     },
   }, state);
 
-  assert.equal(readRootStreamChatEvent({
+  assert.deepEqual(readRootStreamChatEvent({
     type: 'event',
     seq: 3,
     method: 'messages',
     params: { namespace, data: { event: 'message-finish' } },
-  }, state), null);
+  }, state), {
+    type: 'delegation.briefing',
+    namespace,
+    messageId: 'replayed-by-model',
+    briefing: {
+      mode: 'continue',
+      task: 'continue the delegated task',
+      essentialContext: null,
+      gapNote: 'Finish the remaining review.',
+    },
+  });
+});
+
+test('adapter restores split CDATA content in a canonical delegation briefing', () => {
+  const state: RootStreamAdapterState = new Map();
+  const namespace = ['general:task-1', 'model:task-2'];
+  const text = [
+    '<delegation_briefing role="task_boundary" source="orchestrator" mode="initial">',
+    '  <task>',
+    '<![CDATA[',
+    'Inspect the literal ]]]]><![CDATA[> marker.',
+    ']]>',
+    '  </task>',
+    '</delegation_briefing>',
+  ].join('\n');
+
+  readRootStreamChatEvent({
+    type: 'event',
+    seq: 1,
+    method: 'messages',
+    params: { namespace, data: { event: 'message-start', id: 'briefing-2' } },
+  }, state);
+  readRootStreamChatEvent({
+    type: 'event',
+    seq: 2,
+    method: 'messages',
+    params: {
+      namespace,
+      data: {
+        event: 'content-block-delta',
+        delta: { type: 'text-delta', text },
+      },
+    },
+  }, state);
+
+  const event = readRootStreamChatEvent({
+    type: 'event',
+    seq: 3,
+    method: 'messages',
+    params: { namespace, data: { event: 'message-finish' } },
+  }, state);
+  assert.equal(event?.type, 'delegation.briefing');
+  if (event?.type === 'delegation.briefing') {
+    assert.equal(event.briefing.task, 'Inspect the literal ]]> marker.');
+  }
 });
 
 test('adapter preserves a briefing-shaped subagent response without briefing provenance', () => {
-  const state: RootStreamAdapterState = createRootStreamAdapterState();
+  const state: RootStreamAdapterState = new Map();
   const namespace = ['general:task-1', 'model:task-2'];
   const text = '<delegation_briefing>model-authored response</delegation_briefing>';
 
@@ -354,7 +393,7 @@ test('adapter surfaces guard decision records written to the stream writer', asy
 });
 
 test('readRootStreamChatEvent maps tool lifecycle and filters non-AI message deltas', () => {
-  const state: RootStreamAdapterState = createRootStreamAdapterState();
+  const state: RootStreamAdapterState = new Map();
 
   const toolEvent = readRootStreamChatEvent({
     type: 'event',

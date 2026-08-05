@@ -121,6 +121,11 @@ export class ProcessRegistry {
    *
    * Ownership, quota, buffering and lifetime are the same everywhere, so the
    * registry never signals a process itself; it asks the executor to.
+   *
+   * Required rather than defaulted on purpose: defaulting would let a caller
+   * pick up POSIX behaviour without meaning to, and the registry is precisely
+   * the layer that should not know which platform it is on. `ShellRuntime`
+   * makes that choice once, for everyone.
    */
   constructor(private readonly executor: ProcessExecutor) {}
 

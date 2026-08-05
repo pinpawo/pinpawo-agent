@@ -20,12 +20,6 @@ import type {
  * the child's pid, so `kill(-pid)` reaches every descendant.
  */
 
-export type {
-  ProcessExecutor,
-  ShellRunHandle,
-  ShellRunOptions,
-  ShellRunOutcome,
-};
 
 const DEFAULT_KILL_GRACE_MS = 2_000;
 
@@ -248,6 +242,12 @@ export function isProcessGroupAlive(pid: number) {
  *
  * The forceful follow-up is unref'd: it must not hold the event loop open
  * merely to escalate a kill.
+ *
+ * `runShellCommand` has a near-identical closure rather than calling this one,
+ * and the difference is not incidental: that one keeps the escalation timer so
+ * `cleanup` can cancel it when the process exits on its own, which avoids
+ * signalling a pid that may since have been reused. Here there is no exit to
+ * observe — the caller holds no handle — so the timer simply expires.
  */
 function terminateProcessGroup(pid: number, graceMs: number) {
   killProcessGroup(pid, 'SIGTERM');

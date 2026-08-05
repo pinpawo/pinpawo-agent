@@ -7,11 +7,11 @@ import {
   ProcessRegistryError,
   type ManagedProcessOwner,
 } from './processRegistry';
+import type { ShellRunHandle } from './processExecutor';
 import {
   isProcessGroupAlive,
   posixProcessExecutor,
   runShellCommand,
-  type ShellRunHandle,
 } from './processTree';
 
 const CWD = process.cwd();

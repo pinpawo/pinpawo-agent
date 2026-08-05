@@ -22,18 +22,6 @@ import type { MessageLane } from './types';
 export const DELEGATION_BRIEFING_SOURCE = 'delegation_briefing';
 export const DELEGATION_PLAN_SOURCE = 'delegation_plan';
 
-/**
- * Stable subagent protocol for reading briefings. Goes into the subagent
- * system prompt; the per-delegation task itself lives only in the briefing.
- */
-export const DELEGATION_BRIEFING_PROTOCOL = [
-  '## 委派简报协议',
-  '当前 delegation lane 中最新的 <delegation_briefing> 描述当前委派任务。',
-  '只执行其中 <task> 标记的任务；<essential_context> 只补充完成该任务所需的上下文。',
-  '完成当前任务后将结果交还 orchestrator，不要自行推进后续计划。',
-  '若 mode="continue"，结合已有执行记录和 <gap_note> 继续，不要重新开始。',
-].join('\n');
-
 type DelegationSpecBase = {
   lane: MessageLane;
   runId: string;

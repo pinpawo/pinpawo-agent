@@ -31,8 +31,14 @@ import { downloadFileTool, httpFetchTool, networkOperationMetadata } from './net
 import { jqQueryTool, jsonOperationMetadata } from './jsonTools';
 import { gitTools, gitOperationMetadata } from './gitTools';
 import { globSearchTool, grepSearchTool, searchOperationMetadata } from './searchTools';
-import { shellRuntime } from './shellRuntime';
+import { shellRuntime, type ShellRuntimeBinding } from './shellRuntime';
 import {
+  createProcessTools,
+  processOperationMetadata,
+  processTools,
+} from './processTools';
+import {
+  createRunShellTool,
   getCurrentTimeTool,
   normalizeShellActionInput,
   runShellTool,
@@ -61,6 +67,7 @@ const bashToolkitTools: StructuredTool[] = [
   ...localUtilityTools,
   getCurrentTimeTool,
   runShellTool,
+  ...processTools,
 ];
 
 const coreLocalTools: StructuredTool[] = [
@@ -119,6 +126,7 @@ const bashToolkitOperations = {
   ...networkOperationMetadata,
   ...jsonOperationMetadata,
   ...shellOperationMetadata,
+  ...processOperationMetadata,
 };
 
 const gitToolkitInstructions = [
@@ -162,9 +170,13 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
         return shellRuntime;
       },
       resolve: (_root, context) => shellRuntime.resolve(context.execution),
-      // No bindTools yet: the shell tools do not consume the registry until
-      // the tool protocol lands. The lifecycle is wired first so host
-      // shutdown can already reach anything the registry holds.
+      bindTools: (binding) => {
+        const shell = binding as ShellRuntimeBinding;
+        return [
+          createRunShellTool(shell),
+          ...createProcessTools(shell),
+        ];
+      },
       release: () => shellRuntime.release(),
       stop: async () => { await shellRuntime.stop(); },
     },

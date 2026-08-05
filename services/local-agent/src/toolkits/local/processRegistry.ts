@@ -114,6 +114,14 @@ export class ProcessRegistry {
     owner: ManagedProcessOwner;
     command: string;
     cwd: string;
+    /**
+     * Treat the output captured so far as already delivered.
+     *
+     * `run_shell` shows what a command printed before it went to the
+     * background, so replaying it on the first `wait_process` would show the
+     * model the same lines twice.
+     */
+    outputAlreadyDelivered?: boolean;
   }): ManagedProcess {
     this.reapExpired();
     const active = [...this.entries.values()]
@@ -146,9 +154,10 @@ export class ProcessRegistry {
     const entry: Entry = {
       record,
       handle: params.handle,
-      // Output captured before the handover still belongs to the owner.
-      pendingStdout: params.handle.stdout,
-      pendingStderr: params.handle.stderr,
+      // Output captured before the handover still belongs to the owner,
+      // unless the caller has already shown it.
+      pendingStdout: params.outputAlreadyDelivered ? '' : params.handle.stdout,
+      pendingStderr: params.outputAlreadyDelivered ? '' : params.handle.stderr,
       unsubscribe: () => undefined,
       lock: Promise.resolve(),
     };

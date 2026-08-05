@@ -5,6 +5,10 @@ import { runShellCommand } from './processTree';
 
 const CWD = process.cwd();
 
+// These cases exercise the POSIX executor through sh, pgrep and pkill; the
+// Windows implementation has its own suite in windowsProcessExecutor.test.ts.
+const isWindows = process.platform === 'win32';
+
 function descendantsAlive(marker: string) {
   const found = execSync(`pgrep -f ${JSON.stringify(marker)} || true`)
     .toString()
@@ -24,7 +28,7 @@ function forkingCommand(marker: string) {
   return `sleep 30 & echo ${marker}-child $!; wait`;
 }
 
-test('runs a bounded command and reports its exit code', async () => {
+test('runs a bounded command and reports its exit code', { skip: isWindows }, async () => {
   const outcome = await runShellCommand({
     command: 'echo hello; exit 0',
     cwd: CWD,
@@ -36,7 +40,7 @@ test('runs a bounded command and reports its exit code', async () => {
   assert.match(outcome.status === 'exited' ? outcome.stdout : '', /hello/);
 });
 
-test('separates stdout and stderr', async () => {
+test('separates stdout and stderr', { skip: isWindows }, async () => {
   const outcome = await runShellCommand({
     command: 'echo out; echo err 1>&2; exit 3',
     cwd: CWD,
@@ -50,7 +54,7 @@ test('separates stdout and stderr', async () => {
   assert.match(outcome.stderr, /err/);
 });
 
-test('timeout kills the whole process group, not just the shell', async () => {
+test('timeout kills the whole process group, not just the shell', { skip: isWindows }, async () => {
   const marker = `pinpawo-tree-timeout-${Date.now().toString()}`;
   const outcome = await runShellCommand({
     command: forkingCommand(marker),
@@ -67,7 +71,7 @@ test('timeout kills the whole process group, not just the shell', async () => {
   assert.deepEqual(survivors, [], 'no descendant may outlive the timeout');
 });
 
-test('abort kills the whole process group', async () => {
+test('abort kills the whole process group', { skip: isWindows }, async () => {
   const marker = `pinpawo-tree-abort-${Date.now().toString()}`;
   const controller = new AbortController();
   setTimeout(() => controller.abort(), 300);
@@ -88,7 +92,7 @@ test('abort kills the whole process group', async () => {
   assert.deepEqual(survivors, [], 'no descendant may outlive the abort');
 });
 
-test('an already aborted signal never spawns the command', async () => {
+test('an already aborted signal never spawns the command', { skip: isWindows }, async () => {
   const marker = `pinpawo-tree-pre-${Date.now().toString()}`;
   const controller = new AbortController();
   controller.abort();
@@ -105,7 +109,7 @@ test('an already aborted signal never spawns the command', async () => {
   assert.equal(descendantsAlive(marker).length, 0);
 });
 
-test('distinguishes abort from timeout when both are possible', async () => {
+test('distinguishes abort from timeout when both are possible', { skip: isWindows }, async () => {
   // The signal fires well before the timeout would; the outcome must say so,
   // because the two mean different things to the caller.
   const controller = new AbortController();
@@ -121,7 +125,7 @@ test('distinguishes abort from timeout when both are possible', async () => {
   assert.equal(outcome.status, 'aborted');
 });
 
-test('reports spawn failure for an unusable cwd', async () => {
+test('reports spawn failure for an unusable cwd', { skip: isWindows }, async () => {
   const outcome = await runShellCommand({
     command: 'echo nope',
     cwd: '/definitely/not/a/directory',
@@ -131,7 +135,7 @@ test('reports spawn failure for an unusable cwd', async () => {
   assert.equal(outcome.status, 'spawn_failed');
 });
 
-test('escalates to SIGKILL for a descendant that ignores SIGTERM', async () => {
+test('escalates to SIGKILL for a descendant that ignores SIGTERM', { skip: isWindows }, async () => {
   const marker = `pinpawo-tree-stubborn-${Date.now().toString()}`;
   const outcome = await runShellCommand({
     command: `node -e "process.title='${marker}'; process.on('SIGTERM', () => {}); setTimeout(() => {}, 30000)" & echo go; wait`,
@@ -148,7 +152,7 @@ test('escalates to SIGKILL for a descendant that ignores SIGTERM', async () => {
   assert.deepEqual(survivors, [], 'SIGTERM-ignoring descendant must still be killed');
 });
 
-test('keeps output produced before a timeout', async () => {
+test('keeps output produced before a timeout', { skip: isWindows }, async () => {
   // The command still ran and said something; losing that would hide why it
   // was slow.
   const outcome = await runShellCommand({
@@ -162,7 +166,7 @@ test('keeps output produced before a timeout', async () => {
   assert.match(outcome.status === 'timeout' ? outcome.stdout : '', /early-output/);
 });
 
-test('caps each stream independently', async () => {
+test('caps each stream independently', { skip: isWindows }, async () => {
   const outcome = await runShellCommand({
     command: 'node -e "process.stdout.write(\'a\'.repeat(500)); process.stderr.write(\'b\'.repeat(500))"',
     cwd: CWD,
@@ -175,7 +179,7 @@ test('caps each stream independently', async () => {
   assert.equal(outcome.stderr.length, 100);
 });
 
-test('bounds captured output', async () => {
+test('bounds captured output', { skip: isWindows }, async () => {
   const outcome = await runShellCommand({
     command: 'node -e "process.stdout.write(\'x\'.repeat(5000))"',
     cwd: CWD,
@@ -189,7 +193,7 @@ test('bounds captured output', async () => {
   );
 });
 
-test('yieldOnTimeout hands back a handle instead of killing', async () => {
+test('yieldOnTimeout hands back a handle instead of killing', { skip: isWindows }, async () => {
   const marker = `pinpawo-yield-${Date.now().toString()}`;
   const outcome = await runShellCommand({
     command: `node -e "process.title='${marker}'; setTimeout(() => {}, 4000)"`,
@@ -208,7 +212,7 @@ test('yieldOnTimeout hands back a handle instead of killing', async () => {
   killMarker(marker);
 });
 
-test('a yielded process survives cancellation of the call that started it', async () => {
+test('a yielded process survives cancellation of the call that started it', { skip: isWindows }, async () => {
   // The whole point of yielding: the run outlives the tool call, so that
   // call's abort must no longer reach it.
   const marker = `pinpawo-yield-abort-${Date.now().toString()}`;
@@ -235,7 +239,7 @@ test('a yielded process survives cancellation of the call that started it', asyn
   assert.notDeepEqual(survivors, [], 'abort of the original call must not kill it');
 });
 
-test('a yielded handle reports the eventual exit code', async () => {
+test('a yielded handle reports the eventual exit code', { skip: isWindows }, async () => {
   const outcome = await runShellCommand({
     command: 'sleep 0.6; exit 7',
     cwd: CWD,
@@ -248,7 +252,7 @@ test('a yielded handle reports the eventual exit code', async () => {
   assert.equal((await outcome.handle.wait()).code, 7);
 });
 
-test('a yielded handle keeps accumulating output', async () => {
+test('a yielded handle keeps accumulating output', { skip: isWindows }, async () => {
   const outcome = await runShellCommand({
     command: 'echo first; sleep 0.5; echo second',
     cwd: CWD,
@@ -262,7 +266,7 @@ test('a yielded handle keeps accumulating output', async () => {
   assert.match((await outcome.handle.wait()).stdout, /second/);
 });
 
-test('onOutput streams post-yield chunks and can be unsubscribed', async () => {
+test('onOutput streams post-yield chunks and can be unsubscribed', { skip: isWindows }, async () => {
   const outcome = await runShellCommand({
     command: 'echo one; sleep 0.3; echo two; sleep 0.3; echo three',
     cwd: CWD,
@@ -283,7 +287,7 @@ test('onOutput streams post-yield chunks and can be unsubscribed', async () => {
   assert.equal(seen.length, 1, 'unsubscribe must stop further delivery');
 });
 
-test('a yielded handle releases its subscribers once the process exits', async () => {
+test('a yielded handle releases its subscribers once the process exits', { skip: isWindows }, async () => {
   const outcome = await runShellCommand({
     command: 'sleep 0.4',
     cwd: CWD,
@@ -300,7 +304,7 @@ test('a yielded handle releases its subscribers once the process exits', async (
   assert.equal(delivered, 0, 'no output was produced after the yield');
 });
 
-test('terminating a yielded handle repeatedly is safe', async () => {
+test('terminating a yielded handle repeatedly is safe', { skip: isWindows }, async () => {
   const outcome = await runShellCommand({
     command: 'sleep 5',
     cwd: CWD,
@@ -318,7 +322,7 @@ test('terminating a yielded handle repeatedly is safe', async () => {
   outcome.handle.terminate(200);
 });
 
-test('yieldOnTimeout leaves short commands unchanged', async () => {
+test('yieldOnTimeout leaves short commands unchanged', { skip: isWindows }, async () => {
   const outcome = await runShellCommand({
     command: 'echo quick',
     cwd: CWD,
@@ -330,7 +334,7 @@ test('yieldOnTimeout leaves short commands unchanged', async () => {
   assert.match(outcome.status === 'exited' ? outcome.stdout : '', /quick/);
 });
 
-test('abort still terminates a run that has not yielded', async () => {
+test('abort still terminates a run that has not yielded', { skip: isWindows }, async () => {
   const marker = `pinpawo-yield-preabort-${Date.now().toString()}`;
   const controller = new AbortController();
   setTimeout(() => controller.abort(), 200);

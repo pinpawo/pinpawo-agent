@@ -134,6 +134,18 @@ export class ProcessRegistry {
   }
 
   /**
+   * How commands are run and signalled on this platform.
+   *
+   * Exposed so a tool that starts processes (`run_shell`) goes through the
+   * same executor the registry will later use to terminate them; running
+   * through one implementation and killing through another is exactly the
+   * mismatch the interface exists to prevent.
+   */
+  get processExecutor(): ProcessExecutor {
+    return this.executor;
+  }
+
+  /**
    * Adopt a yielded process.
    *
    * Throws `too_many_processes` when the cap is reached; the caller is

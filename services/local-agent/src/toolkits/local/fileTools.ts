@@ -6,7 +6,11 @@ import { z } from 'zod';
 import { tryStat } from './fileSystemUtils';
 import {
   applyChunksToContent,
-  parsePatch,
+  PatchApplyError,
+  PatchParseError,
+  parsePatchDocument,
+  type ParsedPatch,
+  type PatchFormat,
   type PatchOperation,
 } from './applyPatch';
 import {
@@ -402,6 +406,7 @@ type WriteFileAction = {
 };
 
 type ApplyPatchAction = {
+  format: PatchFormat;
   patch: string;
 };
 
@@ -425,11 +430,15 @@ function normalizeWriteFileAction(input: unknown): WriteFileAction {
 
 function normalizeApplyPatchAction(input: unknown): ApplyPatchAction {
   const record = readRecord(input);
+  const format = readString(record, 'format');
   const patch = readString(record, 'patch');
+  if (format !== 'v4a' && format !== 'unified') {
+    throw new Error('apply_patch requires format to be "v4a" or "unified"');
+  }
   if (!patch || !patch.trim()) {
     throw new Error('apply_patch requires a patch');
   }
-  return { patch };
+  return { format, patch };
 }
 
 interface ResolvedPatchWrite {
@@ -460,31 +469,60 @@ function atomicWriteFile(filePath: string, content: string) {
 }
 
 const APPLY_PATCH_DESCRIPTION = [
-  '编辑本地文件的唯一补丁工具，使用 V4A patch 格式：靠上下文行定位（绝不使用行号），一次调用可以新增、修改、删除、移动多个文件。',
-  '格式：',
-  '*** Begin Patch',
-  '*** Update File: <相对或绝对路径>',
-  '@@ <可选的定位锚点，如函数签名>',
-  ' 上下文行（前缀一个空格，原样保留）',
-  '-要删除的行',
-  '+要新增的行',
-  '*** End Patch',
-  '其他指令：`*** Add File: <path>`（其后每行都以 + 开头）；`*** Delete File: <path>`；`*** Update File:` 之后可跟 `*** Move to: <newpath>` 重命名；补丁触及文件末尾时在该块末尾加 `*** End of File`。',
-  '规则：每个修改块前后各带 2-3 行上下文；同一文件内多个不相邻的修改块用 @@ 分隔；上下文必须与文件现状一致（允许少量空白差异，会自动容错）。',
-  '修改前先用 view_file_chunk 查看现状；若补丁报"context not found"，重新读取文件后基于最新内容重试。',
+  '按补丁新增、修改或删除一个或多个本地文件。format 必须与 patch 内容一致，每次调用只使用一种格式；移动文件使用 v4a。',
+  '修改前先读取文件现状，并提供足以唯一定位修改位置的上下文。所有目标会先完成解析和匹配，任一目标失败均不写入文件。',
+  '失败时根据返回的结构化错误重新读取文件或修正补丁后重试。',
   '如果修改的是 JSON、manifest.json、package.json、tsconfig.json 等结构化文件，完成后应继续调用 validate_structured_file。整文件新建或完全重写可以直接用 write_file。',
 ].join('\n');
 
-export const applyPatchTool = tool(
-  async ({ patch }: { patch: string }) => {
-    try {
-      const operations = parsePatch(patch);
+function patchFailureOutput(
+  error: unknown,
+  parsed: ParsedPatch | null,
+  phase: 'detect' | 'match' | 'write',
+) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (error instanceof PatchParseError || error instanceof PatchApplyError) {
+    return JSON.stringify({
+      ok: false,
+      ...error.details,
+      format: error.details.format ?? parsed?.format,
+      message,
+    });
+  }
+  return JSON.stringify({
+    ok: false,
+    ...(parsed ? { format: parsed.format } : {}),
+    phase,
+    code: phase === 'write' ? 'write_failed' : 'patch_failed',
+    message,
+  });
+}
 
-      const writes: ResolvedPatchWrite[] = operations.map((operation) => {
+function patchTargetError(code: string, message: string, path: string) {
+  return new PatchApplyError(message, {
+    code,
+    phase: 'match',
+    path,
+  });
+}
+
+export const applyPatchTool = tool(
+  async ({ format, patch }: { format: PatchFormat; patch: string }) => {
+    let parsed: ParsedPatch | null = null;
+    let phase: 'detect' | 'match' | 'write' = 'detect';
+    try {
+      parsed = parsePatchDocument(patch, format);
+      phase = 'match';
+
+      const writes: ResolvedPatchWrite[] = parsed.operations.map((operation) => {
         if (operation.type === 'add') {
           const absolutePath = resolveUserPath(operation.path);
           if (tryStat(absolutePath)) {
-            throw new Error(`Add File target already exists: ${absolutePath}`);
+            throw patchTargetError(
+              'target_already_exists',
+              `Add File target already exists: ${absolutePath}`,
+              operation.path,
+            );
           }
           return {
             operation,
@@ -501,7 +539,11 @@ export const applyPatchTool = tool(
           const absolutePath = resolveUserPath(operation.path);
           const stat = tryStat(absolutePath);
           if (!stat?.isFile()) {
-            throw new Error(`Delete File target is not an existing file: ${absolutePath}`);
+            throw patchTargetError(
+              'target_not_found',
+              `Delete File target is not an existing file: ${absolutePath}`,
+              operation.path,
+            );
           }
           return {
             operation,
@@ -517,13 +559,28 @@ export const applyPatchTool = tool(
         const absolutePath = resolveUserPath(operation.path);
         const stat = tryStat(absolutePath);
         if (!stat?.isFile()) {
-          throw new Error(`Update File target is not an existing file: ${absolutePath}`);
+          throw patchTargetError(
+            'target_not_found',
+            `Update File target is not an existing file: ${absolutePath}`,
+            operation.path,
+          );
         }
         const original = readUtf8TextFile(absolutePath);
-        const result = applyChunksToContent(operation.path, original, operation.chunks);
+        const result = applyChunksToContent(
+          operation.path,
+          original,
+          operation.chunks,
+          parsed?.format === 'unified'
+            ? { preserveLeadingWhitespace: true, requireUniqueContext: true }
+            : {},
+        );
         const moveToPath = operation.moveTo ? resolveUserPath(operation.moveTo) : null;
         if (moveToPath && moveToPath !== absolutePath && tryStat(moveToPath)) {
-          throw new Error(`Move to target already exists: ${moveToPath}`);
+          throw patchTargetError(
+            'target_already_exists',
+            `Move to target already exists: ${moveToPath}`,
+            operation.moveTo ?? operation.path,
+          );
         }
         return {
           operation,
@@ -537,6 +594,7 @@ export const applyPatchTool = tool(
       });
 
       // All operations validated; now touch the filesystem.
+      phase = 'write';
       const files = writes.map((write) => {
         if (write.operation.type === 'add') {
           mkdirSync(dirname(write.absolutePath), { recursive: true });
@@ -563,16 +621,17 @@ export const applyPatchTool = tool(
         };
       });
 
-      return JSON.stringify({ ok: true, files });
+      return JSON.stringify({ ok: true, format: parsed.format, files });
     } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
+      return patchFailureOutput(err, parsed, phase);
     }
   },
   {
     name: 'apply_patch',
     description: APPLY_PATCH_DESCRIPTION,
     schema: z.object({
-      patch: z.string().describe('完整的 V4A patch 文本，必须以 *** Begin Patch 开头、*** End Patch 结尾'),
+      format: z.enum(['v4a', 'unified']).describe('补丁格式：V4A 使用 v4a，Unified Diff 使用 unified'),
+      patch: z.string().describe('完整的 V4A 或 Unified Diff 补丁文本；每次调用只使用一种格式'),
     }),
   },
 );
@@ -852,9 +911,14 @@ export const fileOperationMetadata: Record<string, ToolOperationMetadata> = {
       if (!patch) return null;
       let files: Array<{ path: string; type: string }> = [];
       let target: string | undefined;
+      const declaredFormat = readString(record, 'format');
+      let format: PatchFormat | undefined = declaredFormat === 'v4a' || declaredFormat === 'unified'
+        ? declaredFormat
+        : undefined;
       try {
-        const operations = parsePatch(patch);
-        files = operations.map((operation) => ({ path: resolveUserPath(operation.path), type: operation.type }));
+        const parsed = parsePatchDocument(patch, format);
+        format = parsed.format;
+        files = parsed.operations.map((operation) => ({ path: resolveUserPath(operation.path), type: operation.type }));
         target = files[0]?.path;
       } catch {
         // Unparseable patch still gets a raw preview below.
@@ -863,6 +927,7 @@ export const fileOperationMetadata: Record<string, ToolOperationMetadata> = {
         target,
         summary: files.length > 1 ? `${files.length.toString()} files` : files[0]?.type,
         details: {
+          format,
           files: files.length > 0 ? files : undefined,
           patch: truncateForOperationDetails(patch),
         },

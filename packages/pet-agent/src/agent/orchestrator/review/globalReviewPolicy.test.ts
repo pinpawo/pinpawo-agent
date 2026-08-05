@@ -71,7 +71,7 @@ const safeDecision = {
   reason: 'The file write is narrow and scoped to the workdir.',
 } as const;
 
-test('auto review keeps private verifier output off the root stream', async () => {
+test('auto review keeps its private policy decision off the root stream', async () => {
   let capturedConfig: unknown;
   const resolution = await resolveGlobalReviewBatchPolicy({
     policy: { mode: 'auto_authorization' },

@@ -62,12 +62,12 @@ function buildAuthorizationDisplayLines(
   headerWidth: number,
 ): OperationDisplayLine[] | null {
   if (entry.kind !== 'runtime.authorization') return null;
-  const actions = readDetailStrings(entry.details?.actions);
+  const toolLabels = readDetailStrings(entry.details?.toolLabels);
   const reason = readDetailText(entry.details?.reason);
   return [{
     text: buildOperationHeaderText(entry.title, entry, now, headerWidth),
-  }, ...(actions.length > 0 ? [{
-    text: sanitizeLine(`  ${actions.join(' · ')}`, width),
+  }, ...(toolLabels.length > 0 ? [{
+    text: sanitizeLine(`  涉及工具：${toolLabels.join(' · ')}`, width),
     tone: 'muted' as const,
   }] : []), ...(reason ? [{
     text: sanitizeLine(`  原因：${reason}`, width),

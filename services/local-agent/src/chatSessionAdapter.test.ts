@@ -281,7 +281,7 @@ test('runChatSession falls back to checkpoint final message when stream values o
   assert.equal(completed?.text, 'checkpoint answer');
 });
 
-test('runChatSession maps existing authorization events to completed operations', async () => {
+test('runChatSession projects global policy authorization as completed operations', async () => {
   const emittedTools: StreamToolsPayload[] = [];
   const emittedEvents: AgentRuntimeEvent[] = [];
   const setup = {
@@ -381,7 +381,7 @@ test('runChatSession maps existing authorization events to completed operations'
         title: '自动授权',
         summary: 'workspace · write_file',
         details: {
-          actions: ['workspace · write_file'],
+          toolLabels: ['workspace · write_file'],
           reason: 'The write is limited to the workspace.',
         },
         source: {
@@ -399,7 +399,7 @@ test('runChatSession maps existing authorization events to completed operations'
         title: '按策略授权',
         summary: 'custom · custom_tool',
         details: {
-          actions: ['custom · custom_tool'],
+          toolLabels: ['custom · custom_tool'],
           reason: 'The configured policy approved this action.',
         },
         source: {

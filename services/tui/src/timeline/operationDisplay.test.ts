@@ -110,7 +110,7 @@ test('operation display renders structured authorization details without raw fie
     phase: 'completed',
     summary: 'shell · which · shell · version',
     details: {
-      actions: ['shell · which', 'shell · version'],
+      toolLabels: ['shell · which', 'shell · version'],
       reason: 'Both actions are read-only observations.',
     },
     operationSource: {
@@ -122,7 +122,7 @@ test('operation display renders structured authorization details without raw fie
   assert.deepEqual(lines, [{
     text: '自动授权 · 2 项操作（完成）',
   }, {
-    text: '  shell · which · shell · version',
+    text: '  涉及工具：shell · which · shell · version',
     tone: 'muted',
   }, {
     text: '  原因：Both actions are read-only observations.',

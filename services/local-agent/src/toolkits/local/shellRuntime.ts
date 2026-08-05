@@ -49,8 +49,16 @@ export class ShellRuntime {
     // No per-execution state to unwind: the binding is just an owner tag.
   }
 
-  async stop(killGraceMs?: number): Promise<void> {
-    await this.registry.stopAll(killGraceMs);
+  /**
+   * Terminate everything the registry holds.
+   *
+   * Takes no grace period: this implements the Toolkit runtime's `stop`, whose
+   * context carries no such concept, so anything configurable here would be
+   * unreachable from the only path that calls it. Per-process grace stays on
+   * `ProcessRegistry.terminate`, where a caller can actually supply it.
+   */
+  async stop(): Promise<void> {
+    await this.registry.stopAll();
   }
 
   getRegistry(): ProcessRegistry {

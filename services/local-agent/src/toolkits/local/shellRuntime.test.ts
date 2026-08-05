@@ -82,7 +82,7 @@ test('release leaves a running process alone', async () => {
   // that started it.
   assert.notEqual(alive(marker), '', 'release must not terminate a yielded process');
 
-  await runtime.stop(200);
+  await runtime.stop();
   execSync(`pkill -9 -f ${JSON.stringify(marker)} || true`);
 });
 
@@ -105,7 +105,7 @@ test('a process registered by one execution is still reachable after release', a
   const drained = await resumed.registry.drain(record.processId, resumed.owner);
   assert.equal(drained.process.processId, record.processId);
 
-  await runtime.stop(200);
+  await runtime.stop();
 });
 
 test('stop terminates everything the registry holds', async () => {
@@ -122,7 +122,7 @@ test('stop terminates everything the registry holds', async () => {
     cwd: CWD,
   });
 
-  await runtime.stop(200);
+  await runtime.stop();
   await new Promise((r) => setTimeout(r, 300));
 
   const survivors = alive(marker);
@@ -134,6 +134,6 @@ test('stop terminates everything the registry holds', async () => {
 test('stop is safe with nothing registered', async () => {
   const runtime = new ShellRuntime();
   runtime.start();
-  await runtime.stop(200);
+  await runtime.stop();
   assert.equal(runtime.getRegistry().size, 0);
 });

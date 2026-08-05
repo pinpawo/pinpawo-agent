@@ -1983,9 +1983,9 @@ test('general Capability composes its declared Toolkits', async () => {
     recorder.subagentInputs[0].map((message) => String(message.content)).join('\n'),
     /<artifact_discovery_context[\s\S]*current_thread/,
   );
-  assert.match(
+  assert.doesNotMatch(
     JSON.stringify(recorder.subagentInputs[0].map((message) => message.content)),
-    /角色：「小白」[\s\S]*物种：cat[\s\S]*性格：友好/,
+    /小白|物种：cat|性格：友好/,
   );
 });
 
@@ -6167,7 +6167,8 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
     /artifact_discovery_context/,
   );
 
-  // System prompt keeps the stable protocol but never restates the task.
+  // Per-delegation task data stays in the briefing instead of being copied
+  // into system context.
   for (const input of recorder.subagentInputs) {
     const systemMessages = input.filter((message) => message._getType() === 'system');
     assert.ok(systemMessages.length > 0);
@@ -6175,8 +6176,7 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
       const systemText = typeof message.content === 'string'
         ? message.content
         : JSON.stringify(message.content);
-      assert.match(systemText, /委派简报协议/);
-      assert.doesNotMatch(systemText, /当前任务：关闭 GitHub Issue #272/);
+      assert.doesNotMatch(systemText, /关闭 GitHub Issue #272/);
       assert.doesNotMatch(systemText, /上下文摘要/);
     }
   }

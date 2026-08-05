@@ -90,6 +90,34 @@ test('operation display exposes bounded apply_patch lines with tones', () => {
   assert.ok(lines.every((line) => stringWidth(line.text) <= 80));
 });
 
+test('operation display exposes structured apply_patch failures after the diff', () => {
+  const lines = buildOperationDisplayLines(operation({
+    phase: 'failed',
+    kind: 'local.apply_patch',
+    target: 'src/example.ts',
+    raw: {
+      input: {
+        patch: [
+          '--- a/src/example.ts',
+          '+++ b/src/example.ts',
+          '@@ -1 +1 @@',
+          '-const value = 1;',
+          '+const value = 2;',
+        ].join('\n'),
+      },
+      output: JSON.stringify({
+        ok: false,
+        code: 'context_not_found',
+        message: 'Patch context did not match.',
+      }),
+    },
+  }), 3_500, 100);
+
+  assert.ok(lines.some((line) => line.text === '  -const value = 1;' && line.tone === 'removed'));
+  assert.ok(lines.some((line) => line.text === '  +const value = 2;' && line.tone === 'added'));
+  assert.ok(lines.some((line) => line.text.includes('context_not_found') && line.tone === 'removed'));
+});
+
 test('operation display keeps running and terminal phases distinct', () => {
   const running = buildOperationDisplayLines(operation({
     phase: 'updated',

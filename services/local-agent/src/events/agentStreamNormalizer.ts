@@ -84,9 +84,15 @@ function unwrapToolMessageOutput(output: unknown): unknown {
   return output;
 }
 
-function readToolPhase(event: StreamToolsPayload['event']): AgentOperationPhase {
+function readToolPhase(
+  event: StreamToolsPayload['event'],
+  output: unknown,
+): AgentOperationPhase {
   if (event === 'on_tool_start') return 'started';
-  if (event === 'on_tool_end') return 'completed';
+  if (event === 'on_tool_end') {
+    const record = readJsonRecord(output);
+    return record?.ok === false ? 'failed' : 'completed';
+  }
   if (event === 'on_tool_error') return 'failed';
   return 'updated';
 }
@@ -186,7 +192,7 @@ export function normalizeToolStreamEvent(
   return {
     type: 'operation',
     requestId,
-    phase: readToolPhase(payload.event),
+    phase: readToolPhase(payload.event, output),
     operation: {
       id: payload.toolCallId,
       kind: operationKindFromSource(metadata?.source, payload.name),

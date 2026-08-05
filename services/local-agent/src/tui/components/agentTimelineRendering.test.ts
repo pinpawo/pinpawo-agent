@@ -128,6 +128,35 @@ test('buildAgentOperationDisplayLines renders apply_patch raw input on operation
   assert.ok(lines.every((line) => stringWidth(line.text) <= 80));
 });
 
+test('buildAgentOperationDisplayLines renders Unified Diff and its structured failure', () => {
+  const lines = buildAgentOperationDisplayLines(operationEntry({
+    phase: 'failed',
+    kind: 'local.apply_patch',
+    title: '应用补丁',
+    target: 'src/example.ts',
+    raw: {
+      input: {
+        patch: [
+          '--- a/src/example.ts',
+          '+++ b/src/example.ts',
+          '@@ -1 +1 @@',
+          '-const value = 1;',
+          '+const value = 2;',
+        ].join('\n'),
+      },
+      output: JSON.stringify({
+        ok: false,
+        code: 'context_not_found',
+        message: 'Patch context did not match.',
+      }),
+    },
+  }), 3500, 100);
+
+  assert.ok(lines.some((line) => line.text === '  -const value = 1;' && line.tone === 'removed'));
+  assert.ok(lines.some((line) => line.text === '  +const value = 2;' && line.tone === 'added'));
+  assert.ok(lines.some((line) => line.text.includes('context_not_found') && line.tone === 'removed'));
+});
+
 test('buildAgentOperationDisplayLines falls back to apply_patch details without raw input', () => {
   const lines = buildAgentOperationDisplayLines(operationEntry({
     phase: 'started',

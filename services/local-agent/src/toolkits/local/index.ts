@@ -112,7 +112,7 @@ const bashToolkitInstructions = [
   '读取代码、Markdown、JSON、配置等可读文本时优先使用 view_file_chunk；read_file 只用于 PDF、Word、表格、图片等非文本文件的分析。',
   '优先使用语义具体的文件工具：view_file_chunk、read_file、jq_query、list_dir、glob_search、grep_search。',
   '分析 JSON 文件的结构、字段、分组或计数时优先使用 jq_query；不要用 run_shell 或临时 Python 脚本包装 jq。',
-  '编辑已有文件一律使用 apply_patch（V4A 上下文补丁，支持一次修改多个文件）；只有新建文件或完全重写整个文件时才用 write_file。',
+  '编辑已有文件一律使用 apply_patch（支持一次修改多个文件）；只有新建文件或完全重写整个文件时才用 write_file。',
   '查询当前时间优先使用 get_current_time；不要用 run_shell 包装 date 命令。',
   'run_shell 只作为兜底工具；不要用它替代已有的读写、移动、复制、下载或 HTTP 工具。',
   '命令超时不代表失败，它会转入后台并返回进程 id：用 wait_process 跟进进度，terminate_process 终止不再需要的命令，list_processes 查看本次执行启动的后台命令。不要因为超时就重复执行同一命令。',

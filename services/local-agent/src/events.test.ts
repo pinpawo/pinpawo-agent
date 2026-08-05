@@ -71,6 +71,27 @@ test('falls back to a generic operation when no metadata is registered', () => {
   assert.equal(event.operation.source?.provider, 'runtime');
 });
 
+test('marks structured ok=false tool output as a failed operation', () => {
+  const output = JSON.stringify({
+    ok: false,
+    code: 'context_not_found',
+    message: 'Patch context did not match.',
+  });
+  const event = normalizeToolStreamEvent(
+    'req-1',
+    {
+      event: 'on_tool_end',
+      name: 'apply_patch',
+      toolCallId: 'call-1',
+      output,
+    },
+    localToolOperationRegistry,
+  );
+
+  assert.equal(event.phase, 'failed');
+  assert.equal(event.raw?.output, output);
+});
+
 test('normalizes tool stream events with event-provided operation metadata first', () => {
   const event = normalizeToolStreamEvent(
     'req-1',

@@ -59,7 +59,7 @@ function browserReview() {
 }
 
 function autoModel(
-  invoke: (messages: unknown) => unknown | Promise<unknown>,
+  invoke: (messages: unknown, config?: unknown) => unknown | Promise<unknown>,
 ): AgentModels['act'] {
   return {
     withStructuredOutput: () => ({ invoke }),
@@ -70,6 +70,27 @@ const safeDecision = {
   decision: 'authorize',
   reason: 'The file write is narrow and scoped to the workdir.',
 } as const;
+
+test('auto review keeps its private policy decision off the root stream', async () => {
+  let capturedConfig: unknown;
+  const resolution = await resolveGlobalReviewBatchPolicy({
+    policy: { mode: 'auto_authorization' },
+    models: {
+      act: autoModel((_messages, config) => {
+        capturedConfig = config;
+        return safeDecision;
+      }),
+    },
+    actor: testActor,
+    messages: [],
+    task: 'Check whether coscli is installed.',
+    workdir: '/repo',
+    reviews: [review()],
+  });
+
+  assert.equal(resolution.type, GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE);
+  assert.deepEqual(capturedConfig, { callbacks: [] });
+});
 
 test('auto review prompt contains bounded task context, runtime scope, and tool behavior facts', async () => {
   let capturedMessages: unknown;

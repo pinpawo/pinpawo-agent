@@ -149,35 +149,84 @@ function emitHumanReviewRequested(params: {
   });
 }
 
-function readRuntimeEventData(data: unknown): Record<string, unknown> | null {
+function readCustomEventData(data: unknown): Record<string, unknown> | null {
   return data && typeof data === 'object' && !Array.isArray(data)
     ? data as Record<string, unknown>
     : null;
 }
 
-/**
- * Toolkit authorization runtime events arrive as `runtime.custom` chat events
- * from the root protocol stream (#322); map the known names to user notices.
- */
+function readDisplayText(value: unknown, maxLength = 500): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value.replace(/\s+/g, ' ').trim();
+  return text ? text.slice(0, maxLength) : null;
+}
+
+function readAuthorizedToolLabels(data: Record<string, unknown> | null) {
+  const toolCalls = Array.isArray(data?.toolCalls) ? data.toolCalls : [];
+  const toolLabels = toolCalls.flatMap((toolCall) => {
+    const entry = readCustomEventData(toolCall);
+    const toolName = readDisplayText(entry?.toolName, 80);
+    if (!toolName) return [];
+    const toolkitName = readDisplayText(entry?.toolkitName, 80);
+    return [toolkitName ? `${toolkitName} · ${toolName}` : toolName];
+  });
+  if (toolLabels.length > 0) return [...new Set(toolLabels)].slice(0, 6);
+  const toolName = readDisplayText(data?.toolName, 80);
+  return toolName ? [toolName] : [];
+}
+
+function projectGlobalPolicyAuthorization(
+  name: string,
+  rawData: unknown,
+  requestId: string,
+  streamSequence: number,
+): Extract<AgentRuntimeEvent, { type: 'operation' }> | null {
+  const isAuto = name === GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.AUTO_AUTHORIZED;
+  const isCustomPolicy = name === GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.CUSTOM_AUTHORIZED;
+  if (!isAuto && !isCustomPolicy) return null;
+
+  const data = readCustomEventData(rawData);
+  const toolLabels = readAuthorizedToolLabels(data);
+  const reason = readDisplayText(data?.reason);
+  const reportedBatchSize = typeof data?.batchSize === 'number'
+    && Number.isInteger(data.batchSize)
+    && data.batchSize > 0
+    ? data.batchSize
+    : null;
+  const batchSize = reportedBatchSize ?? Math.max(1, toolLabels.length);
+  const label = isAuto ? '自动授权' : '按策略授权';
+
+  return {
+    type: 'operation',
+    requestId,
+    phase: 'completed',
+    operation: {
+      id: `authorization:${name}:${streamSequence}`,
+      kind: 'runtime.authorization',
+      title: batchSize > 1 ? `${label} · ${batchSize} 项操作` : label,
+      ...(toolLabels.length > 0 ? { summary: toolLabels.join(' · ') } : {}),
+      ...((toolLabels.length > 0 || reason)
+        ? {
+            details: {
+              ...(toolLabels.length > 0 ? { toolLabels } : {}),
+              ...(reason ? { reason } : {}),
+            },
+          }
+        : {}),
+      source: {
+        provider: 'runtime',
+        name: 'global_review_policy',
+      },
+    },
+  };
+}
+
+/** Keep human-recorded session authorization as a compact notice. */
 function formatToolAuthorizationNotice(name: string, rawData: unknown): string | null {
-  if (name === GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.AUTO_AUTHORIZED) {
-    const data = readRuntimeEventData(rawData);
-    const toolName = typeof data?.toolName === 'string' ? data.toolName : null;
-    return toolName
-      ? `已自动授权 ${toolName} 操作。`
-      : '已自动授权工具操作。';
-  }
-  if (name === GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.CUSTOM_AUTHORIZED) {
-    const data = readRuntimeEventData(rawData);
-    const toolName = typeof data?.toolName === 'string' ? data.toolName : null;
-    return toolName
-      ? `已根据全局策略授权 ${toolName} 操作。`
-      : '已根据全局策略授权工具操作。';
-  }
   if (name !== 'tool_authorization_recorded') {
     return null;
   }
-  const data = readRuntimeEventData(rawData);
+  const data = readCustomEventData(rawData);
   if (data?.source === 'auto_review') {
     return null;
   }
@@ -407,6 +456,16 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
             if (operations) {
               acceptDelegationOperations?.(operations);
             }
+            break;
+          }
+          const authorization = projectGlobalPolicyAuthorization(
+            chatEvent.name,
+            chatEvent.data,
+            requestId,
+            chatEvent.streamSequence,
+          );
+          if (authorization) {
+            emitEvent(authorization);
             break;
           }
           const notice = formatToolAuthorizationNotice(chatEvent.name, chatEvent.data);

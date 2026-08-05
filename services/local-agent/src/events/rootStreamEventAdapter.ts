@@ -57,8 +57,8 @@ export type RootStreamChatEvent =
   | { type: 'tool'; namespace: string[]; data: Record<string, unknown> }
   /** A guard decision record (orchestrator via stream writer; subagent after Phase 4). */
   | { type: 'guard.decision'; record: GuardDecisionRecord }
-  /** Any other custom runtime event written to the stream writer. */
-  | { type: 'runtime.custom'; name: string; data: unknown }
+  /** Raw custom-channel event; known names are projected downstream and unknown names are ignored. */
+  | { type: 'runtime.custom'; streamSequence: number; name: string; data: unknown }
   /** Root state snapshot (drives final-messages tracking). */
   | { type: 'values'; values: Record<string, unknown> }
   /** The run paused on an interrupt (human review etc.). */
@@ -264,9 +264,19 @@ export function readRootStreamChatEvent(
         return record ? { type: 'guard.decision', record: record as GuardDecisionRecord } : null;
       }
       if (typeof data.name === 'string') {
-        return { type: 'runtime.custom', name: data.name, data: data.data };
+        return {
+          type: 'runtime.custom',
+          streamSequence: event.seq,
+          name: data.name,
+          data: data.data,
+        };
       }
-      return { type: 'runtime.custom', name: 'unknown', data: data.payload ?? data };
+      return {
+        type: 'runtime.custom',
+        streamSequence: event.seq,
+        name: 'unknown',
+        data: data.payload ?? data,
+      };
     }
 
     case 'values': {

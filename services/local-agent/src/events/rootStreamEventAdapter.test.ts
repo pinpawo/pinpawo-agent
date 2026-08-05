@@ -115,7 +115,11 @@ test('adapter drops synthetic assistant messages written by prepare', () => {
           event: 'content-block-delta',
           delta: {
             type: 'text-delta',
-            text: '<delegation_briefing mode="continue">',
+            text: [
+              '<delegation_briefing role="task_boundary" source="orchestrator" mode="continue">',
+              '  <task><![CDATA[continue the delegated task]]></task>',
+              '</delegation_briefing>',
+            ].join('\n'),
           },
         },
       },
@@ -132,6 +136,47 @@ test('adapter drops synthetic assistant messages written by prepare', () => {
   ];
 
   assert.deepEqual(events, [null, null, null]);
+});
+
+test('adapter preserves briefing-shaped subagent output from a user-visible child scope', () => {
+  const state: RootStreamAdapterState = new Map();
+  const namespace = ['general:task-1', 'model:task-2'];
+  const text = [
+    '<delegation_briefing role="task_boundary" source="orchestrator" mode="continue">',
+    '  <task><![CDATA[continue the delegated task]]></task>',
+    '</delegation_briefing>',
+  ].join('\n');
+
+  readRootStreamChatEvent({
+    type: 'event',
+    seq: 1,
+    method: 'messages',
+    params: { namespace, data: { event: 'message-start', id: 'result-1' } },
+  }, state);
+  readRootStreamChatEvent({
+    type: 'event',
+    seq: 2,
+    method: 'messages',
+    params: {
+      namespace,
+      data: {
+        event: 'content-block-delta',
+        delta: { type: 'text-delta', text },
+      },
+    },
+  }, state);
+
+  assert.deepEqual(readRootStreamChatEvent({
+    type: 'event',
+    seq: 3,
+    method: 'messages',
+    params: { namespace, data: { event: 'message-finish' } },
+  }, state), {
+    type: 'subagent.message',
+    namespace,
+    messageId: 'result-1',
+    text,
+  });
 });
 
 test('adapter emits one completed subagent message per child lifecycle across multiple messages', async () => {

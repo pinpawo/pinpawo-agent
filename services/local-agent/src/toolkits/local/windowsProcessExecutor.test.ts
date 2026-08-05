@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import {
   runShellCommandWindows,
   WINDOWS_EXEC_YIELD_FLOOR_MS,
+  windowsPowerShellPath,
   windowsProcessExecutor,
 } from './windowsProcessExecutor';
 
@@ -34,6 +35,59 @@ test('isGroupAlive is conservatively best-effort', () => {
   // With no OpenProcess available without a native module, the probe cannot
   // prove a pid is gone, so it must not claim it is.
   assert.equal(windowsProcessExecutor.isGroupAlive(0x7fff_fffe), true);
+});
+
+test('defaults to the PowerShell that ships with Windows', () => {
+  // pwsh is an optional install, so the built-in one is the only safe default.
+  // Resolved from PATH rather than an absolute path so a non-standard system
+  // root still works.
+  const previous = process.env.PINPAWO_WINDOWS_SHELL;
+  delete process.env.PINPAWO_WINDOWS_SHELL;
+  try {
+    assert.equal(windowsPowerShellPath(), 'powershell.exe');
+  } finally {
+    if (previous !== undefined) process.env.PINPAWO_WINDOWS_SHELL = previous;
+  }
+});
+
+test('an explicit override selects the shell', () => {
+  const previous = process.env.PINPAWO_WINDOWS_SHELL;
+  process.env.PINPAWO_WINDOWS_SHELL = 'pwsh.exe';
+  try {
+    assert.equal(windowsPowerShellPath(), 'pwsh.exe');
+  } finally {
+    if (previous === undefined) delete process.env.PINPAWO_WINDOWS_SHELL;
+    else process.env.PINPAWO_WINDOWS_SHELL = previous;
+  }
+});
+
+test('a blank override falls back rather than spawning nothing', () => {
+  const previous = process.env.PINPAWO_WINDOWS_SHELL;
+  process.env.PINPAWO_WINDOWS_SHELL = '   ';
+  try {
+    assert.equal(windowsPowerShellPath(), 'powershell.exe');
+  } finally {
+    if (previous === undefined) delete process.env.PINPAWO_WINDOWS_SHELL;
+    else process.env.PINPAWO_WINDOWS_SHELL = previous;
+  }
+});
+
+test('ComSpec does not influence the shell choice', () => {
+  // ComSpec names the command interpreter — conventionally cmd.exe — whose
+  // quoting rules these commands are not written for.
+  const previousComSpec = process.env.ComSpec;
+  const previousOverride = process.env.PINPAWO_WINDOWS_SHELL;
+  delete process.env.PINPAWO_WINDOWS_SHELL;
+  process.env.ComSpec = 'C:\\WINDOWS\\system32\\cmd.exe';
+  try {
+    assert.equal(windowsPowerShellPath(), 'powershell.exe');
+  } finally {
+    if (previousComSpec === undefined) delete process.env.ComSpec;
+    else process.env.ComSpec = previousComSpec;
+    if (previousOverride !== undefined) {
+      process.env.PINPAWO_WINDOWS_SHELL = previousOverride;
+    }
+  }
 });
 
 test('terminateGroup tolerates a pid that is already gone', { skip: !isWindows }, () => {

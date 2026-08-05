@@ -38,8 +38,6 @@ import type {
  * timeout/abort semantics; only the OS-level kill is unconditional.
  */
 
-const DEFAULT_KILL_GRACE_MS = 2_000;
-
 /**
  * Floor for how long a Windows command runs before it may yield.
  *
@@ -50,12 +48,23 @@ const DEFAULT_KILL_GRACE_MS = 2_000;
  */
 export const WINDOWS_EXEC_YIELD_FLOOR_MS = 10_000;
 
-function windowsPowerShellPath() {
-  // Prefer powershell.exe (Windows PowerShell, always present) over pwsh
-  // (PowerShell Core, optional install).
-  return process.env.ComSpec?.toLowerCase().includes('powershell')
-    ? process.env.ComSpec
-    : 'powershell.exe';
+/**
+ * Which PowerShell to run commands through.
+ *
+ * `powershell.exe` (Windows PowerShell) ships with the OS, whereas `pwsh`
+ * (PowerShell Core) is an optional install, so the built-in one is the only
+ * safe default. It is resolved from PATH rather than by absolute path, which
+ * keeps this working under a non-standard system root.
+ *
+ * `PINPAWO_WINDOWS_SHELL` overrides it for anyone who does want `pwsh` or a
+ * specific build. Note this is not `ComSpec`: that variable names the *command
+ * interpreter* — conventionally `cmd.exe` — so reading it here would either
+ * never match or hand back a shell whose quoting rules these commands are not
+ * written for.
+ */
+export function windowsPowerShellPath() {
+  const override = process.env.PINPAWO_WINDOWS_SHELL?.trim();
+  return override || 'powershell.exe';
 }
 
 function terminateTree(pid: number) {
@@ -81,7 +90,9 @@ export function runShellCommandWindows(
     cwd,
     maxOutputChars,
     signal,
-    killGraceMs = DEFAULT_KILL_GRACE_MS,
+    // `killGraceMs` is deliberately not read: `taskkill /F` is the only
+    // reliable termination available without native code, so there is no
+    // graceful phase to wait through.
     yieldOnTimeout = false,
   } = options;
 

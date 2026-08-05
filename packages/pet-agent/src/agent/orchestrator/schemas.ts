@@ -19,7 +19,7 @@ export type AcceptedDelegationOutcome = Exclude<DelegationOutcomeDecision['outco
 export function buildEntryDecisionSchema() {
   return z.object({
     action: z.enum(['needs_plan', 'answer']).describe(
-      'run 入口的下一步。answer=主对话已有回复所需结果或需要询问用户；needs_plan=仍需取得新结果，由 Capability Planner 形成一个或多个任务。',
+      'run 入口的下一步。answer=无需工具即可根据主对话已有结果回复，或需要询问用户；needs_plan=需要任何工具调用、新结果或行动，由 Capability Planner 选择执行能力并形成一个或多个任务。',
     ),
   });
 }

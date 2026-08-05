@@ -8,6 +8,7 @@ import type {
 } from '@pinpawo/agent-session';
 import {
   advanceApproval,
+  advanceApprovalSubmissionFrame,
   approvalAcceptsTextInput,
   beginApprovalSubmission,
   buildApprovalViewModel,
@@ -64,6 +65,21 @@ test('approved batch decisions advance locally before transport submission', () 
   state = beginApprovalSubmission(state);
   assert.equal(state.phase, 'resolution-sent');
   assert.equal(resolveApprovalKey(state, key('escape')), null);
+  const submitting = buildApprovalViewModel(state, 80, 13);
+  state = advanceApprovalSubmissionFrame(state);
+  if (state.phase === 'closed') assert.fail('submission unexpectedly closed');
+  const nextSubmittingFrame = buildApprovalViewModel(
+    state,
+    80,
+    13,
+  );
+  assert.equal(submitting.options, '');
+  assert.equal(submitting.optionRows, 0);
+  assert.equal(submitting.inputVisible, false);
+  assert.match(submitting.body, /Submitting review decision/);
+  assert.equal(submitting.loadingFrame, 0);
+  assert.equal(nextSubmittingFrame.loadingFrame, 1);
+  assert.equal(nextSubmittingFrame.body, submitting.body);
   state = updateApprovalResolutionSent(state, {
     interruptSent: true,
     message: 'Interrupt requested',

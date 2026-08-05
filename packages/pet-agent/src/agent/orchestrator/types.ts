@@ -6,10 +6,16 @@ import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent';
 import type { CapabilityArtifactRef, CapabilityArtifactStore } from '../../types/artifact';
 import type { SubagentCompletionReason } from '../../types/subagent';
-import type { AgentToolkit, ToolkitReviewCapabilities } from '../../types/toolkit';
+import type {
+  AgentToolkit,
+  ModelInputModality,
+  ToolkitReviewCapabilities,
+} from '../../types/toolkit';
 import type { CompiledAgentRegistry } from './registry';
-import type { CapabilityPlannerRunner } from './capabilityPlannerRunner';
+import type { CapabilityPlannerRunner } from './capabilityPlanner/runner';
+import type { CapabilityRegistryBackend } from './capabilityPlanner/registryDocuments';
 import type { GlobalReviewPolicy } from './review/globalReviewPolicy';
+import type { ToolkitRuntimeManager } from './toolkitRuntime';
 import type { StructuredOutputAutoRepairConfig, StructuredOutputMethod } from '../../utils/structuredOutput';
 import type { DelegationOutcomeDecision } from './schemas';
 
@@ -35,15 +41,20 @@ export type RunNextDelegation = {
   contextSummary: string | null;
 };
 
-export type RunPendingTask = {
-  task: string;
-  contextSummary: string | null;
-};
-
 export type CapabilityPlanTask = {
   /** Planned capability boundary that has not started yet. */
   capability: string;
   task: string;
+};
+
+/**
+ * Bounded planning facts that Answer turns into the user-facing reply when no
+ * execution plan should start in this run.
+ */
+export type PlannerAnswerDisposition = {
+  reason: string;
+  context: string;
+  question: string | null;
 };
 
 export type TaskActiveDelegation = {
@@ -81,6 +92,12 @@ export type StructuredOrchestrationDecisionModel = {
 
 export type OrchestratorConfig = {
   models: AgentModels;
+  /**
+   * Input modalities accepted by the active model profile. Tools declaring
+   * `requiresInputModalities` bind only when this covers them; omitting it is
+   * read as text-only.
+   */
+  modelInputModalities?: readonly ModelInputModality[];
   actor?: AgentActor;
   checkpoint?: BaseCheckpointSaver;
   /**
@@ -90,11 +107,15 @@ export type OrchestratorConfig = {
   maxRunIterations?: number;
   decisionStructuredOutput?: OrchestrationDecisionStructuredOutputConfig;
   contextWindowTokens?: number;
+  /** Output + reasoning capacity reserved before deriving input maintenance thresholds. */
+  generationReserveTokens?: number;
   /**
    * Context window for subagent model calls. Defaults to `contextWindowTokens`
    * when subagents use the same model/window as the main orchestrator.
    */
   subagentContextWindowTokens?: number;
+  /** Defaults to `generationReserveTokens` when the same model serves subagents. */
+  subagentGenerationReserveTokens?: number;
   /**
    * Artifact store (a port; the host supplies the concrete adapter). Injected
    * into the selected capability's narrow `CapabilityFinalizeContext`.
@@ -108,10 +129,16 @@ export type OrchestratorConfig = {
    */
   capabilityPlannerRunner?: CapabilityPlannerRunner;
   /**
-   * Absolute cache root for immutable Capability Document Workspaces.
-   * Defaults to a process-independent directory under the OS temp root.
+   * Storage/search backend for the immutable Capability registry documents.
+   * Defaults to filesystem. Memory is opt-in and never used as an automatic fallback.
    */
-  capabilityPlannerWorkspaceRoot?: string;
+  capabilityRegistryBackend?: CapabilityRegistryBackend;
+  /**
+   * Host-owned optional Toolkit runtime lifecycle. The orchestrator resolves
+   * per-subagent bindings through it, but the manager itself remains outside
+   * model context and checkpoint state.
+   */
+  toolkitRuntimeManager?: ToolkitRuntimeManager;
 };
 
 export type OrchestratorInvokeOptions = {

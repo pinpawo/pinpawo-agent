@@ -3,6 +3,7 @@ import type { AgentRuntimeEvent } from './events';
 import type {
   AgentMessageEntry,
   AgentOperationEntry,
+  AgentPlan,
   AgentRunView,
   AgentSession,
   AgentSessionMessageInput,
@@ -80,6 +81,7 @@ export function reduceSession(
         kind: 'chat',
         timeline: [],
         activeRun: null,
+        currentPlan: null,
       };
     case 'user.accepted':
       return acceptUserInput(session, input, context);
@@ -130,6 +132,9 @@ export function applySessionSnapshot(
     activeRun: incoming.activeRun
       ? normalizeSnapshotRun(incoming.activeRun, session.activeRun, context)
       : null,
+    ...(incoming.currentPlan !== undefined
+      ? { currentPlan: cloneAgentPlan(incoming.currentPlan) }
+      : {}),
     ...(Object.keys(runtime).length ? { runtime } : {}),
     ...(incoming.tokenUsage
       ? { tokenUsage: incoming.tokenUsage }
@@ -154,6 +159,7 @@ function acceptUserInput(
   return appendMessage({
     ...withoutUsage,
     kind: input.kind,
+    currentPlan: null,
     activeRun: {
       requestId: input.requestId,
       state: 'running',
@@ -182,6 +188,8 @@ function reduceRuntimeEvent(
       return completeAssistantMessage(session, event.requestId, event.text, event.usage, message, context);
     case 'operation':
       return applyOperationEvent(session, event, context);
+    case 'plan.updated':
+      return applyPlanUpdate(session, event);
     case 'subagent.message.completed':
       return appendSubagentMessage(session, event, context);
     case 'human_review.requested':
@@ -198,6 +206,17 @@ function reduceRuntimeEvent(
         text: message?.text ?? event.message ?? 'internal error',
       }], undefined, context);
   }
+}
+
+function applyPlanUpdate(
+  session: AgentSession,
+  event: Extract<AgentRuntimeEvent, { type: 'plan.updated' }>,
+) {
+  if (!ownsRun(session, event.requestId)) return session;
+  return {
+    ...session,
+    currentPlan: cloneAgentPlan(event.plan),
+  };
 }
 
 function appendRuntimeSystemMessage(
@@ -608,6 +627,12 @@ function cloneTimelineEntry(entry: AgentTimelineEntry): AgentTimelineEntry {
     ...(entry.operationSource ? { operationSource: { ...entry.operationSource } } : {}),
     ...(entry.raw ? { raw: { ...entry.raw } } : {}),
   };
+}
+
+function cloneAgentPlan(plan: AgentPlan | null) {
+  return plan
+    ? { items: plan.items.map((item) => ({ ...item })) }
+    : null;
 }
 
 const MAX_RECONCILED_RUN_AGE_MS = 24 * 60 * 60 * 1000;

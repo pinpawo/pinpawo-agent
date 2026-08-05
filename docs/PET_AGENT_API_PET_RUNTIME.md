@@ -14,6 +14,7 @@ createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRuntime
 type PetAgentRuntime = {
   descriptor: () => PetAgentRuntimeDescriptor;
   invoke: (input: PetAgentRuntimeInvokeInput) => Promise<PetAgentRuntimeInvokeResult>;
+  shutdown?: () => Promise<void>;
 };
 
 type PetAgentRuntimeInvokeInput = {
@@ -52,6 +53,7 @@ type PetAgentRuntimeConfig = {
   decisionStructuredOutput?: OrchestratorConfig['decisionStructuredOutput'];
   contextWindowTokens?: OrchestratorConfig['contextWindowTokens'];
   subagentContextWindowTokens?: OrchestratorConfig['subagentContextWindowTokens'];
+  toolkitRuntimeManager?: ToolkitRuntimeManager;
 };
 ```
 
@@ -65,6 +67,10 @@ type PetAgentRuntimeConfig = {
 5. `invoke()` 是最终结果接口，不接收工具事件 callback；需要实时工具/运行时事件的宿主应消费 root `streamEvents(v3)` 并通过 adapter 投影。
 6. Toolkit availability 在每次 invoke 的 registry generation 中解析；Capability
    是否可用由编译后的 registry 及其 diagnostics 决定。
+7. 独立 pet runtime 如未注入 `toolkitRuntimeManager`，在不再使用时应调用
+   `shutdown()` 释放其 Toolkit roots；注入 shared manager 时由 host 负责关闭。
+   若直接传入预构建 `graph`，该 graph 必须在创建时配置同一个 manager；pet runtime
+   不会在 graph 外启动一个不可达的 manager。
 
 ## 4. 返回值与行为
 

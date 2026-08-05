@@ -129,6 +129,38 @@ test('incremental projection and parsed snapshot converge', () => {
   assert.deepEqual(restored.activeRun, projected.activeRun);
 });
 
+test('current plan is a run-owned projection and snapshot field', () => {
+  let projected = reduceSession(createSession(), {
+    type: 'user.accepted',
+    requestId: 'req-1',
+    kind: 'chat',
+    text: 'plan this work',
+  }, { observedAt: 1_000 });
+  const plan = {
+    items: [{
+      id: 'delegation-1',
+      capability: 'explore',
+      task: 'Inspect the repository',
+      status: 'active' as const,
+    }],
+  };
+  projected = reduceSession(projected, {
+    type: 'runtime.event',
+    event: { type: 'plan.updated', requestId: 'req-1', plan },
+  }, { observedAt: 1_100 });
+  projected = reduceSession(projected, {
+    type: 'runtime.event',
+    event: { type: 'plan.updated', requestId: 'other-run', plan: null },
+  }, { observedAt: 1_200 });
+
+  assert.deepEqual(projected.currentPlan, plan);
+  const parsed = parseAgentSessionSnapshot(JSON.parse(JSON.stringify(
+    createAgentSessionSnapshot(projected),
+  )));
+  assert.deepEqual(parsed?.session.currentPlan, plan);
+  assert.deepEqual(applySessionSnapshot(createSession(), parsed!).currentPlan, plan);
+});
+
 test('protocol uses the same snapshot and runtime event contracts', () => {
   const snapshot = createAgentSessionSnapshot(createSession());
   assert.deepEqual(parseAgentServerMessage({
@@ -152,6 +184,34 @@ test('protocol uses the same snapshot and runtime event contracts', () => {
     requestId: 'req-1',
     event,
   });
+});
+
+test('protocol accepts plan replacement and rejects malformed plan items', () => {
+  const event = {
+    type: 'plan.updated' as const,
+    requestId: 'req-1',
+    plan: {
+      items: [{
+        id: 'delegation-1',
+        capability: 'explore',
+        task: 'Inspect code',
+        status: 'active' as const,
+      }],
+    },
+  };
+  assert.deepEqual(parseAgentServerMessage(buildAgentEventEnvelope(event)), {
+    type: 'event',
+    requestId: 'req-1',
+    event,
+  });
+  assert.equal(parseAgentServerMessage({
+    type: 'event',
+    requestId: 'req-1',
+    event: {
+      ...event,
+      plan: { items: [{ ...event.plan.items[0], status: 'running' }] },
+    },
+  }), null);
 });
 
 test('protocol parser does not project removed toolset providers', () => {

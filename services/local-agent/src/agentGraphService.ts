@@ -12,8 +12,10 @@ import {
 } from '@pinpawo/pet-agent';
 import type { BaseMessage } from '@langchain/core/messages';
 import { Command, type GraphRunStream } from '@langchain/langgraph';
+import type { AgentPlan } from '@pinpawo/agent-session';
 import type { AgentChannelSetup } from './agentChannel';
 import { LOCAL_AGENT_INTERFACE_CONFIG_KEY } from './chatInterface';
+import { projectCurrentPlan } from './currentPlanProjection';
 
 const HEADLESS_REVIEW_CAPABILITIES = {
   humanReview: false,
@@ -52,6 +54,7 @@ export type LocalAgentGraphThreadState = {
   messages: BaseMessage[];
   pendingHumanReview: LocalAgentGraphPendingHumanReview | null;
   hasPendingContinuation: boolean;
+  currentPlan: AgentPlan | null;
 };
 
 /**
@@ -61,9 +64,16 @@ export type LocalAgentGraphThreadState = {
 export type LocalAgentGraphEventStream = GraphRunStream<OrchestratorStateType>;
 
 function readSnapshotMessages(snapshot: unknown): BaseMessage[] {
-  const values = (snapshot as { values?: { messages?: unknown } } | null)?.values;
+  const values = readSnapshotValues(snapshot);
   const messages = values?.messages;
   return Array.isArray(messages) ? messages as BaseMessage[] : [];
+}
+
+function readSnapshotValues(snapshot: unknown): Record<string, unknown> | null {
+  const values = (snapshot as { values?: unknown } | null)?.values;
+  return values && typeof values === 'object' && !Array.isArray(values)
+    ? values as Record<string, unknown>
+    : null;
 }
 
 function readPendingInterrupt(snapshot: unknown): { id?: string; value: Record<string, unknown> } | null {
@@ -194,10 +204,12 @@ export class LocalAgentGraphService {
 
   async readThreadState(setup: AgentChannelSetup): Promise<LocalAgentGraphThreadState> {
     const snapshot = await this.getRawState(setup);
+    const values = readSnapshotValues(snapshot);
     return {
       messages: readSnapshotMessages(snapshot),
       pendingHumanReview: readPendingHumanReview(snapshot),
       hasPendingContinuation: hasPendingContinuation(snapshot),
+      currentPlan: projectCurrentPlan(values),
     };
   }
 

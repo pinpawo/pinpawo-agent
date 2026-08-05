@@ -106,6 +106,36 @@ test('LocalAgentCapabilityRegistry loads resources and rescans user capabilities
   assert.deepEqual(registry.getUserCapabilities().map((item) => item.meta.id), ['rescanned-user-cap']);
 });
 
+test('LocalAgentCapabilityRegistry starts Toolkit runtimes before availability is resolved', async () => {
+  const localTool = mockTool('runtime-tool');
+  const events: string[] = [];
+  const registry = new LocalAgentCapabilityRegistry({
+    loadLocalTools: async () => [localTool],
+    loadUserCapabilities: async () => [],
+    createLocalToolkits: () => [{
+      name: 'runtime-toolkit',
+      description: 'runtime toolkit',
+      tools: [{ tool: localTool }],
+    }],
+    createLocalCapabilities: () => [],
+    resolveAvailableToolkits: async (toolkits) => {
+      events.push(`availability:${toolkits.map(({ name }) => name).join(',')}`);
+      return toolkits;
+    },
+  });
+
+  await registry.load({
+    startToolkitRuntimes: async (toolkits) => {
+      events.push(`start:${toolkits.map(({ name }) => name).join(',')}`);
+    },
+  });
+
+  assert.deepEqual(events, [
+    'start:runtime-toolkit',
+    'availability:runtime-toolkit',
+  ]);
+});
+
 test('LocalAgentCapabilityRegistry default toolkits include git toolkit', async () => {
   const localTool = mockTool('local-tool');
   const registry = new LocalAgentCapabilityRegistry({

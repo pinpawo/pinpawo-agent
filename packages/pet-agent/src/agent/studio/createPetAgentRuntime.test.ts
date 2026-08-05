@@ -7,6 +7,7 @@ import { z } from 'zod';
 
 import { createPetAgentRuntime } from './createPetAgentRuntime';
 import type { OrchestratorGraph } from '../createAgentRuntime';
+import { ToolkitRuntimeManager } from '../orchestrator/toolkitRuntime';
 import type { AgentActor, AgentModels } from '../../types/agent';
 import { defineInstructionDocument } from '../../types/capability';
 import type { NamedStructuredTool } from '../../types/toolkit';
@@ -151,6 +152,58 @@ test('invoke evaluates Toolkit availability before compiling its registry genera
     registry?.unavailableCapabilities?.[0]?.issues,
     [{ code: 'unknown_toolkit', toolkitName: 'offline' }],
   );
+});
+
+test('invoke starts Toolkit roots before evaluating runtime-dependent availability', async () => {
+  const events: string[] = [];
+  let started = false;
+  const { graph, calls } = makeStubGraph([
+    { messages: [new AIMessage('done')] },
+  ]);
+  const toolkitRuntimeManager = new ToolkitRuntimeManager();
+  const runtime = createPetAgentRuntime({
+    models: fakeModels(),
+    actor: fakeActor(),
+    capabilities: [{
+      name: 'inspect',
+      description: 'Inspect through a runtime-backed Toolkit.',
+      uses: ['runtime_ready'],
+      instructions: defineInstructionDocument({ content: '# Inspect' }),
+    }],
+    toolkits: [{
+      name: 'runtime_ready',
+      description: 'Available only after its root starts.',
+      tools: [{ tool: mockTool('runtime_ready_tool') }],
+      runtime: {
+        start: () => {
+          events.push('start');
+          started = true;
+          return {};
+        },
+        stop: () => {
+          events.push('stop');
+        },
+      },
+      availability: () => {
+        events.push('availability');
+        return started
+          ? { available: true }
+          : { available: false, reason: 'root not started' };
+      },
+    }],
+    graph,
+    toolkitRuntimeManager,
+  });
+
+  await runtime.invoke({ brief: 'inspect' });
+  const registry = (calls[0]?.options as {
+    configurable?: { registry?: { capabilities?: Array<{ capability: { name: string } }> } };
+  } | undefined)?.configurable?.registry;
+  assert.deepEqual(events, ['start', 'availability']);
+  assert.deepEqual(registry?.capabilities?.map(({ capability }) => capability.name), ['inspect']);
+
+  await toolkitRuntimeManager.stop();
+  assert.deepEqual(events, ['start', 'availability', 'stop']);
 });
 
 test('humanReviewer: single interrupt → approve → reply', async () => {

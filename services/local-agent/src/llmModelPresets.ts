@@ -7,7 +7,8 @@ export type LlmThinkingControl =
   | 'always_enabled'
   | 'none';
 
-export type LlmToolChoiceSupport = 'full' | 'auto_only';
+export type LlmRuntimeRole = 'act' | 'decision' | 'answer' | 'observe' | 'subagent';
+export type LlmReasoningEffort = 'low' | 'medium' | 'xhigh';
 
 export type LlmModelPreset = {
   key: string;
@@ -26,8 +27,6 @@ export type LlmModelPreset = {
    */
   inputModalities: readonly ModelInputModality[];
   thinkingControl?: LlmThinkingControl;
-  /** Tool selection modes accepted while the preset's thinking mode is active. */
-  toolChoiceSupport?: LlmToolChoiceSupport;
   requiresStreaming?: boolean;
   aliases: readonly string[];
   officialDocs: readonly string[];
@@ -98,14 +97,14 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
   },
   {
     key: 'qwen-token-plan',
-    label: 'Qwen 3.8 Max Preview',
+    label: 'Qwen 3.8 Max',
     provider: 'aliyun',
-    model: 'qwen3.8-max-preview',
-    contextWindowTokens: 1_000_000,
+    model: 'qwen3.8-max',
+    contextWindowTokens: 983_616,
+    maxOutputTokens: 131_072,
     structuredOutputMethod: 'jsonMode',
     inputModalities: ['text', 'image'],
     thinkingControl: 'always_enabled',
-    toolChoiceSupport: 'auto_only',
     aliases: [
       'qwen3.8-',
     ],
@@ -334,7 +333,23 @@ export function inferLlmStructuredOutputMethod(
   )?.method;
 }
 
-export function buildLlmModelKwargs(model: string, thinking: boolean): Record<string, unknown> | undefined {
+export function inferLlmRoleReasoningEffort(
+  model: string,
+  role: LlmRuntimeRole,
+): LlmReasoningEffort | undefined {
+  if (inferLlmModelPreset(model)?.key !== 'qwen-token-plan') return undefined;
+  return role === 'decision' || role === 'observe' ? 'low' : 'medium';
+}
+
+export function inferLlmAdditionalThinkingReserveTokens(model: string): number {
+  return inferLlmModelPreset(model)?.key === 'qwen-token-plan' ? 16_384 : 0;
+}
+
+export function buildLlmModelKwargs(
+  model: string,
+  thinking: boolean,
+  reasoningEffort?: LlmReasoningEffort,
+): Record<string, unknown> | undefined {
   const normalized = normalizeModelName(model);
   const control = inferLlmModelPreset(model)?.thinkingControl;
   if (control === 'extra_body_enable_thinking') {
@@ -344,7 +359,9 @@ export function buildLlmModelKwargs(model: string, thinking: boolean): Record<st
     return { thinking: { type: thinking ? 'enabled' : 'disabled' } };
   }
   if (control === 'always_enabled') {
-    return undefined;
+    return reasoningEffort
+      ? { reasoning_effort: reasoningEffort }
+      : undefined;
   }
   if (normalized.includes('qwen') || normalized.includes('minimax')) {
     return { extra_body: { enable_thinking: thinking } };
@@ -353,10 +370,6 @@ export function buildLlmModelKwargs(model: string, thinking: boolean): Record<st
     return { thinking: { type: thinking ? 'enabled' : 'disabled' } };
   }
   return undefined;
-}
-
-export function inferLlmToolChoiceSupport(model: string): LlmToolChoiceSupport {
-  return inferLlmModelPreset(model)?.toolChoiceSupport ?? 'full';
 }
 
 export function requiresLlmStreaming(model: string): boolean {

@@ -10,7 +10,7 @@ import {
   tagNewLaneMessages,
 } from '../../messageLanes';
 import {
-  buildSubagentExecutionInstruction,
+  buildSubagentExecutionContext,
   collectToolkitOperations,
   resolveToolkitExecution,
 } from '../../subagentDispatch';
@@ -38,22 +38,18 @@ import {
   hasArtifactDiscoveryToolkit,
   withArtifactDiscoveryContext,
 } from '../../artifacts/discovery';
-
-function buildCapabilityActorContext(actor: ReturnType<typeof resolveActor>): string {
-  return [
-    '[角色]',
-    `角色：「${actor.name}」`,
-    actor.species ? `物种：${actor.species}` : null,
-    actor.stage ? `阶段：${actor.stage}` : null,
-    actor.personality ? `性格：${actor.personality}` : null,
-  ].filter((line): line is string => Boolean(line)).join('\n');
-}
+import type { ToolkitRuntimeExecution } from '../../toolkitRuntime';
 
 export function createCapabilityNode(params: {
   config: OrchestratorConfig;
   subagentContextWindowTokens: number | undefined;
+  subagentGenerationReserveTokens: number | undefined;
 }) {
-  const { config, subagentContextWindowTokens } = params;
+  const {
+    config,
+    subagentContextWindowTokens,
+    subagentGenerationReserveTokens,
+  } = params;
 
   // Node: capability — reads capabilities, tools, execution from configurable
   return async function capabilityNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
@@ -96,6 +92,7 @@ export function createCapabilityNode(params: {
     const artifactRefs: CapabilityArtifactRef[] = [];
     const toolkitContext = {
       models: config.models,
+      modelInputModalities: config.modelInputModalities,
       actor,
       messages: scopedMessages,
       reviewContext: {
@@ -111,75 +108,94 @@ export function createCapabilityNode(params: {
       // middleware, where the writer is reachable at call time.
       emitRuntimeEvent: emitRuntimeEventToStreamWriter,
     };
-    const usedResolvedToolkitExecution = await resolveToolkitExecution(
-      toolkitList,
-      undefined,
-      toolkitContext,
-    );
-    const selectedTools = usedResolvedToolkitExecution.tools;
-    const canExploreArtifacts = hasArtifactDiscoveryToolkit(
-      usedResolvedToolkitExecution.toolkits,
-    );
-    const executionInstruction = buildSubagentExecutionInstruction({
-      lane,
-      workdir: workdir ?? null,
-    });
-
-    const subagentMessages = withArtifactDiscoveryContext(
-      scopedMessages,
-      canExploreArtifacts,
-    );
-    const subagentInput: SubagentRunInput = {
-      model: config.models.subagent ?? config.models.act,
-      tools: selectedTools,
-      promptSections: [
-        {
-          id: 'delegation-context',
-          owner: 'framework',
-          content: executionInstruction,
+    let runtimeExecution: ToolkitRuntimeExecution | null = null;
+    let usedResolvedToolkitExecution: Awaited<ReturnType<typeof resolveToolkitExecution>>;
+    let subagentInput: SubagentRunInput;
+    let result: Awaited<ReturnType<typeof createSubagent>>;
+    try {
+      runtimeExecution = config.toolkitRuntimeManager
+        ? await config.toolkitRuntimeManager.resolve({
+            toolkits: toolkitList,
+            execution: {
+              threadId,
+              runId: transcriptRunId,
+              delegationId: runNextDelegation.id,
+              workdir: workdir ?? null,
+              signal: runnableConfig?.signal,
+            },
+          })
+        : null;
+      const executionToolkits = runtimeExecution
+        ? [...runtimeExecution.toolkits]
+        : toolkitList;
+      usedResolvedToolkitExecution = await resolveToolkitExecution(
+        executionToolkits,
+        undefined,
+        toolkitContext,
+      );
+      const canExploreArtifacts = hasArtifactDiscoveryToolkit(
+        usedResolvedToolkitExecution.toolkits,
+      );
+      const subagentMessages = withArtifactDiscoveryContext(
+        scopedMessages,
+        canExploreArtifacts,
+      );
+      const executionContext = buildSubagentExecutionContext({
+        workdir: workdir ?? null,
+        artifactDiscovery: canExploreArtifacts,
+      });
+      subagentInput = {
+        model: config.models.subagent ?? config.models.act,
+        tools: usedResolvedToolkitExecution.tools,
+        promptSections: [
+          ...usedResolvedToolkitExecution.toolkits
+            .filter((toolkit) => Boolean(toolkit.instructions?.trim()))
+            .map((toolkit) => ({
+              id: `toolkit:${toolkit.name}`,
+              owner: toolkit.name,
+              content: toolkit.instructions as string,
+            })),
+          {
+            id: `capability:${capability.name}`,
+            owner: capability.name,
+            content: capability.instructions.content,
+          },
+          ...(executionContext
+            ? [{
+                id: 'execution-context',
+                owner: 'framework',
+                content: executionContext,
+              }]
+            : []),
+          ...(runtimeEnvironment
+            ? [{
+                id: 'runtime-environment',
+                owner: 'host',
+                content: runtimeEnvironment,
+              }]
+            : []),
+        ],
+        operations: collectToolkitOperations(usedResolvedToolkitExecution.toolkits),
+        messages: subagentMessages,
+        maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
+        contextWindowTokens: subagentContextWindowTokens,
+        generationReserveTokens: subagentGenerationReserveTokens,
+        middleware: usedResolvedToolkitExecution.middleware,
+        runtimeContext: {
+          executionScope: {
+            threadId,
+            runId: transcriptRunId,
+            delegationId: runNextDelegation.id,
+          },
         },
-        {
-          id: 'actor-context',
-          owner: 'framework',
-          content: buildCapabilityActorContext(actor),
-        },
-        ...usedResolvedToolkitExecution.toolkits
-          .filter((toolkit) => Boolean(toolkit.instructions?.trim()))
-          .map((toolkit) => ({
-            id: `toolkit:${toolkit.name}`,
-            owner: toolkit.name,
-            content: toolkit.instructions as string,
-          })),
-        {
-          id: `capability:${capability.name}`,
-          owner: capability.name,
-          content: capability.instructions.content,
-        },
-        ...(runtimeEnvironment
-          ? [{
-              id: 'runtime-environment',
-              owner: 'host',
-              content: runtimeEnvironment,
-            }]
-          : []),
-      ],
-      operations: collectToolkitOperations(usedResolvedToolkitExecution.toolkits),
-      messages: subagentMessages,
-      maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
-      contextWindowTokens: subagentContextWindowTokens,
-      middleware: usedResolvedToolkitExecution.middleware,
-      runtimeContext: {
-        executionScope: {
-          threadId,
-          runId: transcriptRunId,
-          delegationId: runNextDelegation.id,
-        },
-      },
-      runnableConfig,
-      signal: runnableConfig?.signal,
-      artifacts: artifactRefs,
-    };
-    let result = await createSubagent(subagentInput);
+        runnableConfig,
+        signal: runnableConfig?.signal,
+        artifacts: artifactRefs,
+      };
+      result = await createSubagent(subagentInput);
+    } finally {
+      await runtimeExecution?.release();
+    }
 
     if (
       result.completionReason !== 'interrupted'

@@ -16,7 +16,6 @@ import type {
   AgentSession,
   AgentTimelineEntry,
 } from '@pinpawo/agent-session';
-import { sessionActorLabel } from '../session/sessionDisplay';
 import {
   WELCOME_LOGO_HEIGHT,
   WELCOME_LOGO_WIDTH,
@@ -38,6 +37,10 @@ const WELCOME_COLOR = '#69c0c8';
 const WELCOME_MUTED_COLOR = '#789da3';
 const WELCOME_STATUS_COLOR = '#7fcf9b';
 const WELCOME_TITLE_COLOR = '#efa6ca';
+const USER_MESSAGE_BACKGROUND = '#303842';
+const USER_MESSAGE_LABEL_COLOR = '#9fcbd2';
+const USER_MESSAGE_TEXT_COLOR = '#e7ecee';
+const ASSISTANT_LABEL_COLOR = '#69c0c8';
 
 type ActiveTimelineSurface = {
   surface: ScrollbackSurface;
@@ -96,7 +99,6 @@ export class TimelineScrollback {
   }
 
   render(session: AgentSession) {
-    const actorLabel = sessionActorLabel(session);
     if (session.sessionId !== this.sessionId) {
       const previousSessionId = this.sessionId;
       this.destroyTimelineSurface();
@@ -136,7 +138,6 @@ export class TimelineScrollback {
               [firstEntry],
               true,
               active.mode,
-              actorLabel,
             );
             this.committedFingerprints.push(timelineFingerprint(firstEntry));
             this.destroyTimelineSurface();
@@ -163,7 +164,6 @@ export class TimelineScrollback {
     )) {
       this.commitSettledEntries(
         session.timeline.slice(start, end),
-        actorLabel,
       );
     }
     this.reconciliationCache = timelineReconciliationCache(
@@ -183,7 +183,6 @@ export class TimelineScrollback {
         liveEntries,
         false,
         mode,
-        actorLabel,
       );
     } else if (this.activeTimelineSurface) {
       this.destroyTimelineSurface();
@@ -210,7 +209,6 @@ export class TimelineScrollback {
 
   private commitSettledEntries(
     entries: readonly AgentTimelineEntry[],
-    actorLabel?: string,
   ) {
     if (entries.length === 0) return;
     const surface = this.renderer.createScrollbackSurface({ startOnNewLine: true });
@@ -218,7 +216,6 @@ export class TimelineScrollback {
       id: 'timeline-settled',
       entries,
       width: this.renderer.width,
-      actorLabel,
       assistantMarkdownStyle: this.assistantMarkdownStyle,
     });
     try {
@@ -248,7 +245,6 @@ export class TimelineScrollback {
     entries: readonly AgentTimelineEntry[],
     completed: boolean,
     mode: ActiveTimelineSurface['mode'],
-    actorLabel?: string,
   ) {
     const entry = entries[0];
     if (!entry) return;
@@ -266,7 +262,6 @@ export class TimelineScrollback {
         id: `timeline-live-${entry.id}`,
         entries: [],
         width: this.renderer.width,
-        actorLabel,
         assistantMarkdownStyle: this.assistantMarkdownStyle,
       });
       surface.root.add(root);
@@ -286,7 +281,6 @@ export class TimelineScrollback {
         active.root,
         entries,
         this.renderer.width,
-        actorLabel,
         this.assistantMarkdownStyle,
       );
       active.surface.render();
@@ -533,7 +527,6 @@ function createTimelineRoot(
     id: string;
     entries: readonly AgentTimelineEntry[];
     width: number;
-    actorLabel?: string;
     assistantMarkdownStyle: ReturnType<typeof createAssistantMarkdownStyle>;
   },
 ) {
@@ -548,7 +541,6 @@ function createTimelineRoot(
     root,
     options.entries,
     options.width,
-    options.actorLabel,
     options.assistantMarkdownStyle,
   );
   return root;
@@ -559,7 +551,6 @@ function populateTimelineRoot(
   root: BoxRenderable,
   entries: readonly AgentTimelineEntry[],
   width: number,
-  actorLabel?: string,
   assistantMarkdownStyle?: ReturnType<typeof createAssistantMarkdownStyle>,
 ) {
   for (const child of root.getChildren()) {
@@ -570,8 +561,11 @@ function populateTimelineRoot(
   const now = Date.now();
   let lineIndex = 0;
   let assistantMarkdown: AssistantMarkdownSurface | null = null;
-  const addLine = (line: TimelineDisplayLine) => {
-    root.add(new TextRenderable(context, {
+  const addLine = (
+    line: TimelineDisplayLine,
+    parent: BoxRenderable = root,
+  ) => {
+    parent.add(new TextRenderable(context, {
       id: `${root.id}:line:${lineIndex++}`,
       width: '100%',
       height: 'auto',
@@ -583,19 +577,36 @@ function populateTimelineRoot(
   entries.forEach((entry, entryIndex) => {
     const childCountBeforeEntry = root.getChildrenCount();
     const lines = buildTimelineDisplayLines(entry, {
-      actorLabel,
       now,
       width,
     });
+    if (entry.type === 'message' && entry.role === 'user') {
+      const userMessageSurface = new BoxRenderable(context, {
+        id: `${root.id}:user:${entryIndex}:${entry.id}`,
+        width: '100%',
+        height: 'auto',
+        flexDirection: 'column',
+        paddingTop: 1,
+        paddingBottom: 1,
+        backgroundColor: USER_MESSAGE_BACKGROUND,
+      });
+      root.add(userMessageSurface);
+      lines.forEach((line) => addLine(line, userMessageSurface));
+      if (isSettledTimelineEntry(entry)) {
+        addLine({ text: ' ', tone: 'muted' });
+      }
+      return;
+    }
     if (
       entry.type === 'message'
-      && entry.role === 'assistant'
+      && (entry.role === 'assistant' || entry.role === 'subagent')
+      && entry.text.trim()
       && assistantMarkdownStyle
     ) {
-      const label = lines[0];
+      const label = entry.updatedAt ?? entry.createdAt ? lines[0] : undefined;
       if (label) addLine(label);
       assistantMarkdown = createAssistantMarkdownSurface(context, {
-        id: `${root.id}:assistant:${entryIndex}:${entry.id}`,
+        id: `${root.id}:${entry.role}:${entryIndex}:${entry.id}`,
         content: entry.text,
         syntaxStyle: assistantMarkdownStyle,
       });
@@ -608,7 +619,7 @@ function populateTimelineRoot(
       }
       return;
     }
-    lines.forEach(addLine);
+    lines.forEach((line) => addLine(line));
     if (
       isSettledTimelineEntry(entry)
       && root.getChildrenCount() > childCountBeforeEntry
@@ -622,15 +633,25 @@ function populateTimelineRoot(
 function lineStyle(line: TimelineDisplayLine): {
   attributes?: number;
   fg?: string;
+  bg?: string;
 } {
   switch (line.tone) {
     case 'user-label':
+      return {
+        attributes: TextAttributes.BOLD,
+        fg: USER_MESSAGE_LABEL_COLOR,
+        bg: USER_MESSAGE_BACKGROUND,
+      };
     case 'assistant-label':
       return {
         attributes: TextAttributes.BOLD,
-        fg: '#5fd75f',
+        fg: ASSISTANT_LABEL_COLOR,
       };
     case 'user':
+      return {
+        fg: USER_MESSAGE_TEXT_COLOR,
+        bg: USER_MESSAGE_BACKGROUND,
+      };
     case 'added':
     case 'operation-completed':
       return { fg: '#5fd75f' };

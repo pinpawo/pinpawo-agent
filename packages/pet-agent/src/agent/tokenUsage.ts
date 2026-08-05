@@ -149,6 +149,7 @@ export type ProviderInputWatermark = {
 export function checkProviderInputWatermark(
   latestInputTokens: number | null,
   contextWindowTokens: number | undefined,
+  generationReserveTokens = 0,
 ): ProviderInputWatermark | null {
   if (
     latestInputTokens === null
@@ -159,8 +160,12 @@ export function checkProviderInputWatermark(
   ) {
     return null;
   }
+  const normalizedReserve = Number.isFinite(generationReserveTokens)
+    ? Math.max(0, Math.floor(generationReserveTokens))
+    : 0;
+  const usableInputTokens = Math.max(1, contextWindowTokens - normalizedReserve);
   const watermarkTokens = Math.max(1, Math.floor(
-    contextWindowTokens * PROVIDER_INPUT_WATERMARK_RATIO,
+    usableInputTokens * PROVIDER_INPUT_WATERMARK_RATIO,
   ));
   return latestInputTokens >= watermarkTokens
     ? { latestInputTokens, watermarkTokens }

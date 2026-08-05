@@ -6,6 +6,7 @@ import type {
 import {
   APPROVAL_FOOTER_ROWS,
   advanceApproval,
+  advanceApprovalSubmissionFrame,
   beginApprovalSubmission,
   createApprovalState,
   failApproval,
@@ -32,11 +33,13 @@ export type ApprovalControllerOptions = {
   getHeight?: () => number;
   onChange: (state: ApprovalState) => void;
   submissionTimeoutMs?: number;
+  submissionPulseMs?: number;
   setTimer?: (callback: () => void, delayMs: number) => TimerHandle;
   clearTimer?: (timer: TimerHandle) => void;
 };
 
 const DEFAULT_SUBMISSION_TIMEOUT_MS = 10_000;
+const DEFAULT_SUBMISSION_PULSE_MS = 240;
 
 export class ApprovalController {
   private readonly sessionController: ReviewSessionController;
@@ -44,10 +47,12 @@ export class ApprovalController {
   private readonly getHeight: () => number;
   private readonly onChange: (state: ApprovalState) => void;
   private readonly submissionTimeoutMs: number;
+  private readonly submissionPulseMs: number;
   private readonly setTimer: (callback: () => void, delayMs: number) => TimerHandle;
   private readonly clearTimer: (timer: TimerHandle) => void;
   private state = createApprovalState();
   private submissionTimer: TimerHandle | null = null;
+  private submissionPulseTimer: TimerHandle | null = null;
 
   constructor(options: ApprovalControllerOptions) {
     this.sessionController = options.sessionController;
@@ -56,6 +61,8 @@ export class ApprovalController {
     this.onChange = options.onChange;
     this.submissionTimeoutMs = options.submissionTimeoutMs
       ?? DEFAULT_SUBMISSION_TIMEOUT_MS;
+    this.submissionPulseMs = options.submissionPulseMs
+      ?? DEFAULT_SUBMISSION_PULSE_MS;
     this.setTimer = options.setTimer ?? setTimeout;
     this.clearTimer = options.clearTimer ?? clearTimeout;
   }
@@ -67,7 +74,7 @@ export class ApprovalController {
   sync(run: AgentRunView | null, connection: TuiConnectionStatus) {
     let next = syncApprovalState(this.state, run);
     if (next.phase !== 'resolution-sent') {
-      this.clearSubmissionTimer();
+      this.clearSubmissionTimers();
     } else if (connection !== 'ready') {
       this.clearSubmissionTimer();
       next = updateApprovalResolutionSent(
@@ -142,7 +149,7 @@ export class ApprovalController {
   }
 
   destroy() {
-    this.clearSubmissionTimer();
+    this.clearSubmissionTimers();
     this.state = createApprovalState();
   }
 
@@ -158,7 +165,7 @@ export class ApprovalController {
   }
 
   private beginSubmission(state: ApprovalState) {
-    this.clearSubmissionTimer();
+    this.clearSubmissionTimers();
     const resolutionSent = beginApprovalSubmission(state);
     if (resolutionSent.phase === 'closed') return resolutionSent;
     const actionId = resolutionSent.action.actionId;
@@ -178,13 +185,35 @@ export class ApprovalController {
         },
       ));
     }, this.submissionTimeoutMs);
+    this.scheduleSubmissionPulse(actionId);
     return resolutionSent;
+  }
+
+  private scheduleSubmissionPulse(actionId: string) {
+    this.submissionPulseTimer = this.setTimer(() => {
+      this.submissionPulseTimer = null;
+      if (
+        this.state.phase !== 'resolution-sent'
+        || this.state.action.actionId !== actionId
+      ) {
+        return;
+      }
+      this.update(advanceApprovalSubmissionFrame(this.state));
+      this.scheduleSubmissionPulse(actionId);
+    }, this.submissionPulseMs);
   }
 
   private clearSubmissionTimer() {
     if (this.submissionTimer === null) return;
     this.clearTimer(this.submissionTimer);
     this.submissionTimer = null;
+  }
+
+  private clearSubmissionTimers() {
+    this.clearSubmissionTimer();
+    if (this.submissionPulseTimer === null) return;
+    this.clearTimer(this.submissionPulseTimer);
+    this.submissionPulseTimer = null;
   }
 
   private update(next: ApprovalState) {

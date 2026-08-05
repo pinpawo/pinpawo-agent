@@ -328,8 +328,14 @@ test('legacy capability directories emit one migration warning instead of disapp
   };
   try {
     const { loadUserCapabilities, readUserCapabilityManifests } = await import('./capabilityLoader');
-    assert.deepEqual(await loadUserCapabilities(), []);
-    assert.deepEqual(readUserCapabilityManifests(), []);
+    assert.equal(
+      (await loadUserCapabilities()).some(({ meta }) => meta.id === 'legacy_capability'),
+      false,
+    );
+    assert.equal(
+      readUserCapabilityManifests().some(({ id }) => id === 'legacy_capability'),
+      false,
+    );
   } finally {
     console.warn = previousWarn;
     if (previousDirs === undefined) {

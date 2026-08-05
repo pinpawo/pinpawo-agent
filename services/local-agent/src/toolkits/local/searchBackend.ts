@@ -150,7 +150,10 @@ async function runRipgrep(
     const stop = () => {
       if (stopped) return;
       stopped = true;
-      child.kill('SIGTERM');
+      // No signal name: 'SIGTERM' is the default on POSIX, and on Windows
+      // any non-SIGKILL name maps to TerminateProcess anyway, so naming it
+      // only pretends a portability that is not there.
+      child.kill();
     };
     const abort = () => {
       aborted = true;

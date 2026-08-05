@@ -10,6 +10,7 @@ import {
   filterAvailableToolkits,
   type AgentToolkit,
 } from '../../types/toolkit';
+import { ToolkitRuntimeManager } from '../orchestrator/toolkitRuntime';
 import type {
   PetAgentCapabilitySummary,
   PetAgentStartupMode,
@@ -56,10 +57,15 @@ export type PetAgentRuntimeConfig = {
    */
   humanReviewer?: HumanReviewer;
   graph?: OrchestratorGraph;
+  modelInputModalities?: OrchestratorConfig['modelInputModalities'];
   checkpoint?: OrchestratorConfig['checkpoint'];
   decisionStructuredOutput?: OrchestratorConfig['decisionStructuredOutput'];
   contextWindowTokens?: OrchestratorConfig['contextWindowTokens'];
+  generationReserveTokens?: OrchestratorConfig['generationReserveTokens'];
   subagentContextWindowTokens?: OrchestratorConfig['subagentContextWindowTokens'];
+  subagentGenerationReserveTokens?: OrchestratorConfig['subagentGenerationReserveTokens'];
+  /** Host-owned when a process has a durable Toolkit runtime lifecycle. */
+  toolkitRuntimeManager?: ToolkitRuntimeManager;
 };
 
 function buildCapabilitySummaries(config: PetAgentRuntimeConfig): PetAgentCapabilitySummary[] {
@@ -137,13 +143,22 @@ async function buildInvokeMessages(brief: string, wikiRoot: string | undefined):
 export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRuntime {
   let status = initialStatus(config);
   const startupMode = config.startupMode ?? 'standby';
+  // A caller-supplied graph is already responsible for its graph config. Do
+  // not create and start an unreachable manager beside it.
+  const ownsToolkitRuntimeManager = !config.toolkitRuntimeManager && !config.graph;
+  const toolkitRuntimeManager = config.toolkitRuntimeManager
+    ?? (config.graph ? null : new ToolkitRuntimeManager());
   const graph = config.graph ?? createOrchestratorGraph({
     models: config.models,
+    modelInputModalities: config.modelInputModalities,
     actor: config.actor,
     checkpoint: config.checkpoint,
     decisionStructuredOutput: config.decisionStructuredOutput,
     contextWindowTokens: config.contextWindowTokens,
+    generationReserveTokens: config.generationReserveTokens,
     subagentContextWindowTokens: config.subagentContextWindowTokens,
+    subagentGenerationReserveTokens: config.subagentGenerationReserveTokens,
+    toolkitRuntimeManager: toolkitRuntimeManager ?? undefined,
   });
 
   function descriptor(): PetAgentRuntimeDescriptor {
@@ -168,6 +183,7 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
       ...(input.toolkits ?? []),
       ...(input.wikiRoot ? [createWikiReadToolkit(input.wikiRoot)] : []),
     ];
+    await toolkitRuntimeManager?.start(toolkitDefinitions, { signal: input.signal });
     const toolkits = await filterAvailableToolkits(toolkitDefinitions);
     const configuredCapabilities = [
       ...(config.capabilities ?? []),
@@ -222,6 +238,11 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
   return {
     descriptor,
     invoke,
+    shutdown: async () => {
+      if (ownsToolkitRuntimeManager && toolkitRuntimeManager) {
+        await toolkitRuntimeManager.stop();
+      }
+    },
   };
 }
 

@@ -87,6 +87,40 @@ test('buildLocalChatAgentInput omits empty toolkit configurable arrays', () => {
   assert.ok(setup.input.toolkits);
 });
 
+test('buildLocalChatAgentInput passes the generation reserve to main and subagent contexts', () => {
+  const setup = buildTestLocalChatAgentInput({
+    context: createContext(),
+    userMessage: 'hello',
+    llmConfig: {
+      apiKey: 'test-key',
+      baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      model: 'qwen3.8-max',
+      contextWindowTokens: 983_616,
+      maxOutputTokens: 131_072,
+    },
+  });
+
+  assert.equal(setup.graphConfig.generationReserveTokens, 147_456);
+  assert.equal(setup.graphConfig.subagentGenerationReserveTokens, 147_456);
+});
+
+test('buildLocalChatAgentInput keeps the Capability registry backend explicit', () => {
+  const filesystem = buildTestLocalChatAgentInput({
+    context: createContext(),
+    userMessage: 'hello',
+    capabilityRegistryBackend: 'filesystem',
+  });
+  const memory = buildTestLocalChatAgentInput({
+    context: createContext(),
+    userMessage: 'hello',
+    capabilityRegistryBackend: 'memory',
+  });
+
+  assert.equal(filesystem.graphConfig.capabilityRegistryBackend, 'filesystem');
+  assert.equal(memory.graphConfig.capabilityRegistryBackend, 'memory');
+  assert.notEqual(filesystem.graphKey, memory.graphKey);
+});
+
 test('buildLocalChatAgentInput rejects an empty artifact discovery scope', () => {
   assert.throws(
     () => buildTestLocalChatAgentInput({
@@ -184,113 +218,45 @@ test('buildLocalChatAgentInput rejects a host Capability using the reserved gene
 });
 
 test('buildDecisionStructuredOutput selects structured output strategy by provider model family and version', () => {
-  assert.deepEqual(buildDecisionStructuredOutput({
-    apiKey: 'test-key',
-    baseUrl: 'https://api.deepseek.com',
-    model: 'deepseek-v4-pro',
-  }), { method: 'jsonMode' });
+  const jsonModeCases = [
+    ['https://api.deepseek.com', 'deepseek-v4-pro'],
+    ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen3.5-plus'],
+    ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen3.7-plus'],
+    ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen3.7-max'],
+    ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'glm-5'],
+    ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'kimi-k2.6'],
+    ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'MiniMax-M2.6'],
+    ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'stepfun/step-3.7-flash'],
+    ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen2.5-turbo'],
+    ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen-plus'],
+    ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'glm-4.5'],
+    ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'kimi-k2.5'],
+    ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'MiniMax-M2.5'],
+    ['https://workspace-id.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', 'provider-model-with-json-mode'],
+  ] as const;
+  for (const [baseUrl, model] of jsonModeCases) {
+    assert.deepEqual(buildDecisionStructuredOutput({
+      apiKey: 'test-key',
+      baseUrl,
+      model,
+    }), {
+      method: 'jsonMode',
+      autoRepair: { maxRetries: 1 },
+    });
+  }
 
-  assert.deepEqual(buildDecisionStructuredOutput({
-    apiKey: 'test-key',
-    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    model: 'qwen3.5-plus',
-  }), { method: 'jsonMode' });
-
-  assert.deepEqual(buildDecisionStructuredOutput({
-    apiKey: 'test-key',
-    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    model: 'qwen3.7-plus',
-  }), { method: 'jsonMode' });
-
-  assert.deepEqual(buildDecisionStructuredOutput({
-    apiKey: 'test-key',
-    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    model: 'qwen3.7-max',
-  }), { method: 'jsonMode' });
-
-  assert.deepEqual(buildDecisionStructuredOutput({
-    apiKey: 'test-key',
-    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    model: 'glm-5',
-  }), { method: 'jsonMode' });
-
-  assert.deepEqual(buildDecisionStructuredOutput({
-    apiKey: 'test-key',
-    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    model: 'kimi-k2.6',
-  }), { method: 'jsonMode' });
-
-  assert.deepEqual(buildDecisionStructuredOutput({
-    apiKey: 'test-key',
-    baseUrl: 'https://api.moonshot.ai/v1',
-    model: 'kimi-k2.6',
-  }), { method: 'jsonSchema' });
-
-  assert.deepEqual(buildDecisionStructuredOutput({
-    apiKey: 'test-key',
-    baseUrl: 'https://api.kimi.com/coding/v1',
-    model: 'k3',
-  }), { method: 'jsonSchema' });
-
-  assert.deepEqual(buildDecisionStructuredOutput({
-    apiKey: 'test-key',
-    baseUrl: 'https://api.openai.com/v1',
-    model: 'gpt-5.5',
-  }), { method: 'jsonSchema' });
-
-  assert.deepEqual(buildDecisionStructuredOutput({
-    apiKey: 'test-key',
-    baseUrl: 'https://example-gemini-compatible.test/v1',
-    model: 'gemini-3.5-flash',
-  }), { method: 'jsonSchema' });
-
-  assert.deepEqual(buildDecisionStructuredOutput({
-    apiKey: 'test-key',
-    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    model: 'MiniMax-M2.6',
-  }), { method: 'jsonMode' });
-
-  assert.deepEqual(buildDecisionStructuredOutput({
-    apiKey: 'test-key',
-    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    model: 'stepfun/step-3.7-flash',
-  }), { method: 'jsonMode' });
-
-  assert.deepEqual(buildDecisionStructuredOutput({
-    apiKey: 'test-key',
-    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    model: 'qwen2.5-turbo',
-  }), { method: 'jsonMode' });
-
-  assert.deepEqual(buildDecisionStructuredOutput({
-    apiKey: 'test-key',
-    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    model: 'qwen-plus',
-  }), { method: 'jsonMode' });
-
-  assert.deepEqual(buildDecisionStructuredOutput({
-    apiKey: 'test-key',
-    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    model: 'glm-4.5',
-  }), { method: 'jsonMode' });
-
-  assert.deepEqual(buildDecisionStructuredOutput({
-    apiKey: 'test-key',
-    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    model: 'kimi-k2.5',
-  }), { method: 'jsonMode' });
-
-  assert.deepEqual(buildDecisionStructuredOutput({
-    apiKey: 'test-key',
-    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    model: 'MiniMax-M2.5',
-  }), { method: 'jsonMode' });
-
-  assert.deepEqual(buildDecisionStructuredOutput({
-    apiKey: 'test-key',
-    baseUrl: 'https://workspace-id.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
-    model: 'provider-model-with-json-mode',
-  }), { method: 'jsonMode' });
+  for (const [baseUrl, model] of [
+    ['https://api.moonshot.ai/v1', 'kimi-k2.6'],
+    ['https://api.kimi.com/coding/v1', 'k3'],
+    ['https://api.openai.com/v1', 'gpt-5.5'],
+    ['https://example-gemini-compatible.test/v1', 'gemini-3.5-flash'],
+  ] as const) {
+    assert.deepEqual(buildDecisionStructuredOutput({
+      apiKey: 'test-key',
+      baseUrl,
+      model,
+    }), { method: 'jsonSchema' });
+  }
 
   assert.equal(buildDecisionStructuredOutput({
     apiKey: 'test-key',
@@ -308,6 +274,13 @@ test('buildDecisionStructuredOutput selects structured output strategy by provid
     method: 'jsonMode',
     autoRepair: { maxRetries: 2 },
   });
+
+  assert.deepEqual(buildDecisionStructuredOutput({
+    apiKey: 'test-key',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'qwen3.7-max',
+    structuredOutputAutoRepair: false,
+  }), { method: 'jsonMode' });
 });
 
 test('buildDecisionStructuredOutput honors the resolved profile strategy before inference', () => {
@@ -357,11 +330,11 @@ test('graph identity isolates session-scoped model input adapters', () => {
   };
   const first = buildTestLocalChatAgentInput({
     ...params,
-    modelInputCacheKey: 'session-a',
+    sessionContextCacheKey: 'session-a',
   });
   const second = buildTestLocalChatAgentInput({
     ...params,
-    modelInputCacheKey: 'session-b',
+    sessionContextCacheKey: 'session-b',
   });
 
   assert.notEqual(first.graphKey, second.graphKey);

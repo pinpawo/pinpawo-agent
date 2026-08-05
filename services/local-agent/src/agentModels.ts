@@ -1,18 +1,15 @@
 import type { AgentModels } from '@pinpawo/pet-agent';
 import type { AgentLlmConfig } from './agentConfig';
+import { ChatOpenAI } from '@langchain/openai';
 import {
   buildLlmModelKwargs,
-  inferLlmToolChoiceSupport,
+  inferLlmAdditionalThinkingReserveTokens,
+  inferLlmRoleReasoningEffort,
   requiresLlmStreaming,
 } from './llmModelPresets';
-import {
-  LocalImageChatOpenAI,
-  type LocalImageModelInputOptions,
-} from './localImageModelInput';
 
 export function buildLocalAgentModels(
   llmConfig: AgentLlmConfig,
-  options: Partial<LocalImageModelInputOptions> = {},
 ): AgentModels {
   const subagentThinking = llmConfig.subagentThinking ?? true;
 
@@ -25,9 +22,13 @@ export function buildLocalAgentModels(
 
     const thinking = role === 'answer'
       || (role === 'subagent' && subagentThinking);
-    const modelKwargs = buildLlmModelKwargs(model, thinking);
+    const modelKwargs = buildLlmModelKwargs(
+      model,
+      thinking,
+      inferLlmRoleReasoningEffort(model, role),
+    );
 
-    return new LocalImageChatOpenAI({
+    return new ChatOpenAI({
       model,
       ...(typeof llmConfig.temperature === 'number'
         ? { temperature: llmConfig.temperature }
@@ -35,6 +36,9 @@ export function buildLocalAgentModels(
       timeout: llmConfig.timeoutMs ?? 45000,
       maxRetries: llmConfig.maxRetries ?? 2,
       apiKey: llmConfig.apiKey,
+      ...(llmConfig.maxOutputTokens
+        ? { maxTokens: llmConfig.maxOutputTokens }
+        : {}),
       streaming: requiresLlmStreaming(model),
       streamUsage: true,
       modelKwargs,
@@ -42,13 +46,6 @@ export function buildLocalAgentModels(
         baseURL: llmConfig.baseUrl,
         defaultHeaders: { Authorization: `Bearer ${llmConfig.apiKey}` },
       },
-    }, {
-      supportedInputModalities: llmConfig.inputModalities ?? ['text'],
-      toolChoiceSupport: inferLlmToolChoiceSupport(model),
-      ...(options.imageStore ? { imageStore: options.imageStore } : {}),
-      ...(options.admitInputModalities
-        ? { admitInputModalities: options.admitInputModalities }
-        : {}),
     });
   };
 
@@ -59,4 +56,12 @@ export function buildLocalAgentModels(
     observe: buildModel('observe'),
     subagent: buildModel('subagent'),
   };
+}
+
+export function resolveLlmGenerationReserveTokens(
+  llmConfig: Pick<AgentLlmConfig, 'model' | 'maxOutputTokens'>,
+): number | undefined {
+  const reserve = (llmConfig.maxOutputTokens ?? 0)
+    + inferLlmAdditionalThinkingReserveTokens(llmConfig.model);
+  return reserve > 0 ? reserve : undefined;
 }

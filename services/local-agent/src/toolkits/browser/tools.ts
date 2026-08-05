@@ -1,11 +1,16 @@
 import { tool } from '@langchain/core/tools';
 import type { StructuredTool, ToolRuntime } from '@langchain/core/tools';
-import type { SubagentRuntimeContext } from '@pinpawo/pet-agent';
+import { Command } from '@langchain/langgraph';
 import { z } from 'zod';
-import { browserSession } from './session';
-import type { BrowserExtractOptions, BrowserWaitState } from './session';
+import type {
+  BrowserElementTarget,
+  BrowserExtractOptions,
+  BrowserOpenOptions,
+  BrowserScrollOptions,
+  BrowserWaitState,
+} from './session';
 import { formatBrowserToolError } from './errors';
-import { createBrowserScreenshotArtifact } from './screenshot';
+import { buildBrowserScreenshotMessages } from './screenshot';
 
 type BrowserTargetInput = { selector?: string; ref?: string };
 
@@ -21,11 +26,29 @@ function readBrowserTarget(input: BrowserTargetInput) {
   return { selector: input.selector, ref: input.ref };
 }
 
-type BrowserToolRuntime = ToolRuntime<unknown, SubagentRuntimeContext>;
+type BrowserToolRuntime = ToolRuntime;
 
-function readBrowserExecutionOwner(runtime: BrowserToolRuntime) {
-  return runtime.context?.executionScope ?? null;
-}
+/** Browser Runtime resolves this narrow, execution-bound facade for tools. */
+export type BrowserToolkitSession = {
+  open: (url: string, opts?: BrowserOpenOptions, signal?: AbortSignal) => Promise<string>;
+  openWithProfile: (
+    url: string,
+    userDataDir: string,
+    opts?: Omit<BrowserOpenOptions, 'session' | 'userDataDir'>,
+    signal?: AbortSignal,
+  ) => Promise<string>;
+  snapshot: (signal?: AbortSignal) => Promise<string>;
+  click: (target: string | BrowserElementTarget, signal?: AbortSignal) => Promise<string>;
+  type: (target: string | BrowserElementTarget, text: string, submit?: boolean, signal?: AbortSignal) => Promise<string>;
+  scroll: (options?: BrowserScrollOptions, signal?: AbortSignal) => Promise<string>;
+  wait: (target?: string | BrowserElementTarget, timeoutMs?: number, state?: BrowserWaitState, signal?: AbortSignal) => Promise<string>;
+  extract: (options?: BrowserExtractOptions, signal?: AbortSignal) => Promise<string>;
+  screenshot: (signal?: AbortSignal) => Promise<string>;
+  close: (signal?: AbortSignal) => Promise<string>;
+  listSessions: () => Promise<string[]>;
+};
+
+export function createBrowserTools(session: BrowserToolkitSession): StructuredTool[] {
 
 const browserOpenTool = tool(
   async (
@@ -33,10 +56,10 @@ const browserOpenTool = tool(
     runtime: BrowserToolRuntime,
   ) => {
     try {
-      return await browserSession.open(
+      return await session.open(
         url,
         { headless },
-        readBrowserExecutionOwner(runtime),
+        runtime.signal,
       );
     } catch (err) {
       return formatBrowserToolError(err);
@@ -61,14 +84,14 @@ const browserOpenTool = tool(
 
 const browserOpenWithSessionTool = tool(
   async (
-    { url, session, headless }: { url: string; session: string; headless?: boolean },
+    { url, session: sessionName, headless }: { url: string; session: string; headless?: boolean },
     runtime: BrowserToolRuntime,
   ) => {
     try {
-      return await browserSession.open(
+      return await session.open(
         url,
-        { headless, session: session.trim() },
-        readBrowserExecutionOwner(runtime),
+        { headless, session: sessionName.trim() },
+        runtime.signal,
       );
     } catch (err) {
       return formatBrowserToolError(err);
@@ -102,11 +125,11 @@ const browserOpenWithProfileTool = tool(
     runtime: BrowserToolRuntime,
   ) => {
     try {
-      return await browserSession.openWithProfile(
+      return await session.openWithProfile(
         url,
         userDataDir,
         { headless },
-        readBrowserExecutionOwner(runtime),
+        runtime.signal,
       );
     } catch (err) {
       return formatBrowserToolError(err);
@@ -137,7 +160,7 @@ const browserOpenWithProfileTool = tool(
 const browserSnapshotTool = tool(
   async (_input, runtime: BrowserToolRuntime) => {
     try {
-      return await browserSession.snapshot(readBrowserExecutionOwner(runtime));
+      return await session.snapshot(runtime.signal);
     } catch (err) {
       return formatBrowserToolError(err);
     }
@@ -154,9 +177,9 @@ const browserSnapshotTool = tool(
 const browserClickTool = tool(
   async (input: BrowserTargetInput, runtime: BrowserToolRuntime) => {
     try {
-      return await browserSession.click(
+      return await session.click(
         readBrowserTarget(input),
-        readBrowserExecutionOwner(runtime),
+        runtime.signal,
       );
     } catch (err) {
       return formatBrowserToolError(err);
@@ -179,11 +202,11 @@ const browserTypeTool = tool(
     runtime: BrowserToolRuntime,
   ) => {
     try {
-      return await browserSession.type(
+      return await session.type(
         readBrowserTarget({ selector, ref }),
         text,
         submit ?? false,
-        readBrowserExecutionOwner(runtime),
+        runtime.signal,
       );
     } catch (err) {
       return formatBrowserToolError(err);
@@ -210,11 +233,11 @@ const browserScrollTool = tool(
   ) => {
     try {
       const target = selector || ref ? readBrowserTarget({ selector, ref }) : undefined;
-      return await browserSession.scroll({
+      return await session.scroll({
         deltaX: deltaX ?? 0,
         deltaY: deltaY ?? 600,
         target,
-      }, readBrowserExecutionOwner(runtime));
+      }, runtime.signal);
     } catch (err) {
       return formatBrowserToolError(err);
     }
@@ -240,11 +263,11 @@ const browserWaitTool = tool(
   }, runtime: BrowserToolRuntime) => {
     try {
       const target = selector || ref ? readBrowserTarget({ selector, ref }) : undefined;
-      return await browserSession.wait(
+      return await session.wait(
         target,
         timeoutMs ?? 3_000,
         state ?? 'visible',
-        readBrowserExecutionOwner(runtime),
+        runtime.signal,
       );
     } catch (err) {
       return formatBrowserToolError(err);
@@ -279,9 +302,9 @@ const browserExtractTool = tool(
     runtime: BrowserToolRuntime,
   ) => {
     try {
-      return await browserSession.extract(
+      return await session.extract(
         { selector, offset, limit },
-        readBrowserExecutionOwner(runtime),
+        runtime.signal,
       );
     } catch (err) {
       return formatBrowserToolError(err);
@@ -316,7 +339,7 @@ const browserExtractTool = tool(
 const browserCloseTool = tool(
   async (_input, runtime: BrowserToolRuntime) => {
     try {
-      return await browserSession.close(readBrowserExecutionOwner(runtime));
+      return await session.close(runtime.signal);
     } catch (err) {
       return formatBrowserToolError(err);
     }
@@ -329,19 +352,24 @@ const browserCloseTool = tool(
 );
 
 const browserScreenshotTool = tool(
-  async (_input, runtime: BrowserToolRuntime): Promise<[string, unknown]> => {
+  async (_input, runtime: BrowserToolRuntime) => {
     try {
-      const result = await browserSession.screenshot(readBrowserExecutionOwner(runtime));
-      return [result, createBrowserScreenshotArtifact(result)];
+      const result = await session.screenshot(runtime.signal);
+      // The screenshot needs its own user message to carry the image, so this
+      // tool writes the graph update itself instead of returning tool content.
+      return new Command({
+        update: {
+          messages: await buildBrowserScreenshotMessages(result, runtime.toolCallId),
+        },
+      });
     } catch (err) {
-      return [formatBrowserToolError(err), undefined];
+      return formatBrowserToolError(err);
     }
   },
   {
     name: 'browser_screenshot',
     description: '截取当前可见浏览器视口并保存到当前 workdir 的 .pinpawo/browser/screenshots 目录。',
     schema: z.object({}),
-    responseFormat: 'content_and_artifact',
   },
 );
 
@@ -349,7 +377,7 @@ const browserSessionTool = tool(
   async ({ action }: { action: 'list' }) => {
     try {
       if (action === 'list') {
-        const sessions = await browserSession.listSessions();
+        const sessions = await session.listSessions();
         if (sessions.length === 0) {
           return '暂无已保存的浏览器会话。browser_open 默认使用 default；明确传入 session 时会创建对应会话。';
         }
@@ -377,17 +405,37 @@ const browserSessionTool = tool(
   },
 );
 
-export const browserTools: StructuredTool[] = [
-  browserOpenTool,
-  browserOpenWithSessionTool,
-  browserOpenWithProfileTool,
-  browserSnapshotTool,
-  browserClickTool,
-  browserTypeTool,
-  browserScrollTool,
-  browserWaitTool,
-  browserExtractTool,
-  browserScreenshotTool,
-  browserCloseTool,
-  browserSessionTool,
-];
+  return [
+    browserOpenTool,
+    browserOpenWithSessionTool,
+    browserOpenWithProfileTool,
+    browserSnapshotTool,
+    browserClickTool,
+    browserTypeTool,
+    browserScrollTool,
+    browserWaitTool,
+    browserExtractTool,
+    browserScreenshotTool,
+    browserCloseTool,
+    browserSessionTool,
+  ];
+}
+
+function unboundBrowserRuntime(): never {
+  throw new Error('Browser tools require a resolved Browser Runtime execution binding.');
+}
+
+/** Static schema inventory. Runtime execution replaces only these tool instances. */
+export const browserTools = createBrowserTools({
+  open: unboundBrowserRuntime,
+  openWithProfile: unboundBrowserRuntime,
+  snapshot: unboundBrowserRuntime,
+  click: unboundBrowserRuntime,
+  type: unboundBrowserRuntime,
+  scroll: unboundBrowserRuntime,
+  wait: unboundBrowserRuntime,
+  extract: unboundBrowserRuntime,
+  screenshot: unboundBrowserRuntime,
+  close: unboundBrowserRuntime,
+  listSessions: unboundBrowserRuntime,
+});

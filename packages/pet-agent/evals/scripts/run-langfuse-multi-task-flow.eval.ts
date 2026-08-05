@@ -13,7 +13,7 @@ import {
 } from '../../src/types/capability.ts';
 import { defineToolkit } from '../../src/types/toolkit.ts';
 import type { AgentModels } from '../../src/types/agent.ts';
-import type { CapabilityPlannerRunner } from '../../src/agent/orchestrator/capabilityPlannerRunner.ts';
+import type { CapabilityPlannerRunner } from '../../src/agent/orchestrator/capabilityPlanner/runner.ts';
 import { compileAgentRegistry } from '../../src/agent/orchestrator/registry.ts';
 import { multiTaskFlowBasicsDataset } from '../datasets/multi-task-flow-basics.ts';
 import { readRunDelegationSummaries, routeModeFromResult } from '../orchestratorStateReaders.ts';
@@ -139,7 +139,7 @@ function buildScriptedPlannerRunner() {
         };
       }
       secondTaskSawHandoff = /循环依赖|token validation/.test(
-        input.messages.map((message) => String(message.content)).join('\n'),
+        input.completedTaskResult ?? '',
       );
       const objective = '根据调查结论重构 auth 模块，提取 token validation 并移除循环依赖';
       plannedObjectives.push(objective);

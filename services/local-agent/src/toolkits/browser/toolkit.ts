@@ -9,8 +9,9 @@ import {
   detectBrowserStatus,
   type BrowserStatus,
 } from './session';
-import { browserTools } from './tools';
+import { browserTools, createBrowserTools } from './tools';
 import { browserOperationMetadata } from './operationMetadata';
+import { browserRuntime, type BrowserRuntimeBinding } from './runtime';
 
 export const BROWSER_TOOLKIT_NAME = 'browser';
 
@@ -33,7 +34,7 @@ const browserToolkitInstructions = [
   '需要登录、验证码或用户手动操作时保持可见浏览器窗口；纯读取或抓取时可以使用 headless。',
   '当 PINPAWO_BROWSER_BACKEND=extension 时，使用 snapshot 返回的 ref 进行 click/type/wait 最稳定；ref 在下一次页面变化或 snapshot 后可能失效，遇到 stale reference 时重新 snapshot。命名 session、profile 和 headless 对 extension 后端仍不适用。',
   'browser_open、browser_snapshot、点击、输入和等待返回的是页面预览；如果结果里的 truncated 或 hasMore 为 true，说明模型只看到了片段。',
-  '页面需要视觉判断时使用 browser_screenshot；兼容图片输入的 model profile 会直接看到截图，其他 profile 只能读取保存路径和元数据。',
+  '页面需要视觉判断时使用 browser_screenshot；截图会直接作为图片给到你，看完就基于结论继续操作。',
   '长文章、Gist、文档、GitHub 页面或搜索结果页在总结、引用、判断前，必须用 browser_extract({ offset, limit }) 按 nextOffset 分块读取，直到 hasMore 为 false。',
   'browser_extract 不给 selector 时会读取当前页面正文全文分块；不要为了绕过截断而从不完整 snapshot 里猜 selector。',
   '点击或提交打开 popup/新标签页时，browser capability 会跟随新目标；新目标关闭后会尽量回到上一目标。',
@@ -87,7 +88,7 @@ export async function checkBrowserAvailability() {
   }
 
   try {
-    const status = await detectBrowserStatus();
+    const status = await detectBrowserStatus(browserRuntime.getSnapshot());
     return rememberBrowserAvailability(buildBrowserAvailabilitySnapshot(status));
   } catch (error) {
     return rememberBrowserAvailability({
@@ -121,7 +122,55 @@ export function createBrowserToolkit(): AgentToolkit {
       tool: toolItem,
       operation: browserOperationMetadata[toolItem.name],
       review: reviews[toolItem.name],
+      // The screenshot is only useful to a model that accepts image input, so
+      // text-only profiles never see the tool.
+      ...(toolItem.name === 'browser_screenshot'
+        ? { requiresInputModalities: ['image'] as const }
+        : {}),
     })),
+    runtime: {
+      start: async () => await browserRuntime.start(),
+      resolve: (_root, context) => browserRuntime.resolve(context.execution),
+      bindTools: (binding) => {
+        const browser = binding as BrowserRuntimeBinding;
+        return createBrowserTools({
+          open: (url, options, signal) => browser.session.open(url, options, browser.owner, signal),
+          openWithProfile: (url, userDataDir, options, signal) => browser.session.openWithProfile(
+            url,
+            userDataDir,
+            options,
+            browser.owner,
+            signal,
+          ),
+          snapshot: (signal) => browser.session.snapshot(browser.owner, signal),
+          click: (target, signal) => browser.session.click(target, browser.owner, signal),
+          type: (target, text, submit, signal) => browser.session.type(
+            target,
+            text,
+            submit,
+            browser.owner,
+            signal,
+          ),
+          scroll: (options, signal) => browser.session.scroll(options, browser.owner, signal),
+          wait: (target, timeoutMs, state, signal) => browser.session.wait(
+            target,
+            timeoutMs,
+            state,
+            browser.owner,
+            signal,
+          ),
+          extract: (options, signal) => browser.session.extract(options, browser.owner, signal),
+          screenshot: (signal) => browser.session.screenshot(browser.owner, signal),
+          close: (signal) => browser.session.close(browser.owner, signal),
+          listSessions: () => browser.session.listSessions(),
+        });
+      },
+      release: async (binding) => {
+        const browser = binding as BrowserRuntimeBinding;
+        await browser.session.release(browser.owner);
+      },
+      stop: async () => await browserRuntime.stop(),
+    },
     instructions: browserToolkitInstructions.join('\n'),
   });
 }

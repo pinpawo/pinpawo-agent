@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
-  addTuiSessionRequiredInputModalities,
   createTuiSession,
   ensureActiveTuiSession,
   listTuiSessions,
@@ -45,12 +44,6 @@ test('tui session registry creates, lists, and resumes sessions without deleting
     [first.id, true],
   ]);
   assert.deepEqual(first.requiredInputModalities, ['text']);
-  addTuiSessionRequiredInputModalities(state, first.id, ['text', 'image']);
-  addTuiSessionRequiredInputModalities(state, first.id, ['text']);
-  assert.deepEqual(
-    state.sessions[first.id]?.requiredInputModalities,
-    ['text', 'image'],
-  );
 });
 
 test('tui session registry rejects unversioned and unsupported persisted state', async () => {
@@ -127,11 +120,9 @@ test('tui session registry persists versioned state', async () => {
     new Date('2026-06-01T01:00:00.000Z'),
   );
   updateTuiSessionSummary(state, session.id, { title: 'persisted', messageCount: 3 });
-  addTuiSessionRequiredInputModalities(
-    state,
-    session.id,
-    ['text', 'image'],
-  );
+  // The field is still round-tripped so existing session files stay readable,
+  // even though modalities are now derived from the transcript.
+  state.sessions[session.id]!.requiredInputModalities = ['text', 'image'];
 
   saveTuiSessionState(state, filePath);
   const raw = JSON.parse(await readFile(filePath, 'utf8')) as { version?: number };

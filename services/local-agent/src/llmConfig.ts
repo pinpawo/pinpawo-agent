@@ -8,6 +8,7 @@ import {
   type ModelProfileSummary,
 } from './modelProfiles';
 import { loadStoredConfig } from './storage';
+import { findLlmModelPresetByKey } from './llmModelPresets';
 
 type ModelIndependentLlmConfig = Omit<
   AgentLlmConfig,
@@ -37,8 +38,12 @@ function readModelIndependentLlmConfig(): ModelIndependentLlmConfig {
     timeoutMs: 120000,
     maxRetries: 2,
     subagentThinking: stored.subagent_thinking ?? true,
-    structuredOutputAutoRepair: config.structuredOutputAutoRepair,
-    structuredOutputRepairMaxRetries: config.structuredOutputRepairMaxRetries,
+    ...(config.structuredOutputAutoRepair !== undefined
+      ? { structuredOutputAutoRepair: config.structuredOutputAutoRepair }
+      : {}),
+    ...(config.structuredOutputRepairMaxRetries !== undefined
+      ? { structuredOutputRepairMaxRetries: config.structuredOutputRepairMaxRetries }
+      : {}),
     globalReviewPolicyMode: config.globalReviewPolicyMode,
   };
 }
@@ -61,6 +66,10 @@ export function createLocalModelProfileRegistry(options: {
     defaultProfileId,
     resolve: (profileId = defaultProfileId) => {
       const profile = resolveModelProfile(options.snapshot, profileId);
+      const preset = profile.sourcePreset
+        ? findLlmModelPresetByKey(profile.sourcePreset)
+        : undefined;
+      const maxOutputTokens = profile.maxOutputTokens ?? preset?.maxOutputTokens;
       const fingerprint = fingerprintModelProfile(profile).fingerprint;
       return Object.freeze({
         ...llmDefaults,
@@ -73,7 +82,9 @@ export function createLocalModelProfileRegistry(options: {
         ...(profile.structuredOutputMethod
           ? { structuredOutputMethod: profile.structuredOutputMethod }
           : {}),
-        ...(profile.maxOutputTokens ? { maxOutputTokens: profile.maxOutputTokens } : {}),
+        ...(maxOutputTokens
+          ? { maxOutputTokens }
+          : {}),
         observeModel: profile.model,
         contextWindowTokens: profile.contextWindowTokens,
       });

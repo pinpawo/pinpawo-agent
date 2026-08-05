@@ -4,24 +4,11 @@ import type {
   AgentTimelineEntry,
 } from '@pinpawo/agent-session';
 import { sessionActorLabel } from '../session/sessionDisplay';
+import { LOADING_CELL_WIDTH } from '../visuals/loadingCells';
 import { buildMessageDisplayLines } from './messageDisplay';
 import { buildOperationDisplayLines } from './operationDisplay';
 
 const OPERATION_LINE_PREFIX_WIDTH = 4;
-const LIVE_ACTIVITY_FRAMES = [
-  '⠋',
-  '⠙',
-  '⠹',
-  '⠸',
-  '⠼',
-  '⠴',
-  '⠦',
-  '⠧',
-  '⠇',
-  '⠏',
-] as const;
-export const LIVE_ACTIVITY_PULSE_FRAMES = LIVE_ACTIVITY_FRAMES.length;
-
 export type TimelineDisplayLine = {
   text: string;
   tone:
@@ -60,7 +47,6 @@ export function countSettledTimelinePrefix(
 export function formatTimelineEntry(
   entry: AgentTimelineEntry,
   options: {
-    actorLabel?: string;
     now?: number;
     width?: number;
   } = {},
@@ -73,7 +59,6 @@ export function formatTimelineEntry(
 export function buildTimelineDisplayLines(
   entry: AgentTimelineEntry,
   options: {
-    actorLabel?: string;
     now?: number;
     width?: number;
   } = {},
@@ -104,10 +89,7 @@ export function buildTimelineDisplayLines(
           }
     ));
   }
-  return buildMessageDisplayLines(
-    entry,
-    options.actorLabel,
-  );
+  return buildMessageDisplayLines(entry);
 }
 
 export function formatLiveSession(
@@ -136,7 +118,7 @@ export function formatLiveSession(
 
 export function formatLiveActivity(
   session: AgentSession,
-  frame = 0,
+  _frame = 0,
   maxCodePoints = 80,
   longWaiting = false,
   now = Date.now(),
@@ -156,30 +138,30 @@ export function formatLiveActivity(
     return appendElapsed('◌ stopping response', suffix, activityWidth);
   }
 
-  const normalizedFrame = Math.max(0, Math.floor(frame));
-  const marker = LIVE_ACTIVITY_FRAMES[
-    normalizedFrame % LIVE_ACTIVITY_FRAMES.length
-  ];
+  const loadingTextWidth = Math.max(
+    1,
+    activityWidth - LOADING_CELL_WIDTH - 1,
+  );
   const detail = formatLiveSession(
     session,
-    Math.max(1, activityWidth - 2),
+    loadingTextWidth,
   );
   const actor = sessionActorLabel(session);
   let activity: string;
   switch (detail) {
     case 'thinking':
-      activity = `${marker} ${actor} is ${longWaiting ? 'still ' : ''}thinking`;
+      activity = `${actor} is ${longWaiting ? 'still ' : ''}thinking`;
       break;
     case 'using tool':
-      activity = `${marker} ${actor} is ${longWaiting ? 'still ' : ''}using a tool`;
+      activity = `${actor} is ${longWaiting ? 'still ' : ''}using a tool`;
       break;
     case 'streaming response':
-      activity = `${marker} ${actor} is ${longWaiting ? 'still ' : ''}responding`;
+      activity = `${actor} is ${longWaiting ? 'still ' : ''}responding`;
       break;
     default:
-      activity = `${marker} ${detail}`;
+      activity = detail;
   }
-  return appendElapsed(activity, suffix, activityWidth);
+  return appendElapsed(activity, suffix, loadingTextWidth);
 }
 
 export function isLiveActivityPulseActive(

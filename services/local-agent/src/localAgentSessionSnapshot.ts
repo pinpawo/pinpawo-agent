@@ -1,5 +1,6 @@
 import type {
   AgentInputModality,
+  AgentPlan,
   AgentRunView,
   AgentRuntimeView,
   AgentSession,
@@ -25,6 +26,7 @@ export function buildLocalAgentSessionSnapshot(params: {
   requiredInputModalities?: readonly AgentInputModality[];
   sessionTokenUsage?: AgentSession['sessionTokenUsage'] | null;
   pendingReview?: ReviewActionSnapshot | null;
+  currentPlan?: AgentPlan | null;
 }): AgentSessionSnapshot {
   const timeline = timelineFromCheckpointMessages(params.messages);
   const pendingReview = params.pendingReview ?? null;
@@ -50,6 +52,7 @@ export function buildLocalAgentSessionSnapshot(params: {
         pendingReview,
       })
       : null,
+    ...(params.currentPlan !== undefined ? { currentPlan: params.currentPlan } : {}),
     runtime,
     ...(sessionTokenUsage ? { sessionTokenUsage } : {}),
   });

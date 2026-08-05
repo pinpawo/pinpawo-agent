@@ -4,6 +4,9 @@ import {
   type BrowserBridgeStatus,
 } from './drivers/chromeExtension/bridge';
 import type { BrowserExtensionCapability } from './drivers/chromeExtension/protocol';
+import { BrowserSession } from './session';
+import type { BrowserExecutionOwner } from './ownership';
+import type { ToolkitRuntimeExecutionScope } from '@pinpawo/pet-agent';
 
 export type BrowserExtensionRuntimeState =
   | 'stopped'
@@ -23,7 +26,7 @@ export type BrowserExtensionRuntimeSnapshot = Readonly<{
   connectionId: string | null;
   extensionId: string | null;
   activeTabId: number | null;
-  activeTabOwnership: 'agent' | 'user' | null;
+  activeTabBinding: 'agent' | 'user' | null;
   stateRevision: number | null;
   capabilities: readonly BrowserExtensionCapability[];
   socketPath: string;
@@ -31,6 +34,11 @@ export type BrowserExtensionRuntimeSnapshot = Readonly<{
 
 export type BrowserRuntimeSnapshot = Readonly<{
   extension: BrowserExtensionRuntimeSnapshot;
+}>;
+
+export type BrowserRuntimeBinding = Readonly<{
+  session: BrowserSession;
+  owner: BrowserExecutionOwner;
 }>;
 
 function resolveBrowserExtensionRuntimeState(
@@ -77,7 +85,7 @@ export function projectBrowserRuntimeSnapshot(
       connectionId: status.connectionId,
       extensionId: status.extensionId,
       activeTabId: status.activeTabId,
-      activeTabOwnership: status.activeTabOwnership,
+      activeTabBinding: status.activeTabBinding,
       stateRevision: status.stateRevision,
       capabilities: Object.freeze([...status.capabilities]),
       socketPath: status.socketPath,
@@ -87,6 +95,14 @@ export function projectBrowserRuntimeSnapshot(
 
 class BrowserRuntime {
   private started = false;
+  private readonly session: BrowserSession;
+
+  constructor() {
+    this.session = new BrowserSession({
+      requireExecutionOwner: true,
+      getRuntimeSnapshot: () => this.getSnapshot(),
+    });
+  }
 
   async start(): Promise<void> {
     if (!shouldStartBrowserExtensionBridge(getConfig().browserBackend)) return;
@@ -95,12 +111,30 @@ class BrowserRuntime {
   }
 
   async stop(): Promise<void> {
-    if (!this.started) return;
     try {
-      await localAgentBrowserBridge.stop();
+      await this.session.shutdown();
     } finally {
-      this.started = false;
+      if (this.started) {
+        try {
+          await localAgentBrowserBridge.stop();
+        } finally {
+          this.started = false;
+        }
+      }
     }
+  }
+
+  async resolve(execution: ToolkitRuntimeExecutionScope): Promise<BrowserRuntimeBinding> {
+    const binding = Object.freeze({
+      session: this.session,
+      owner: {
+        threadId: execution.threadId,
+        runId: execution.runId,
+        delegationId: execution.delegationId,
+      },
+    });
+    await this.session.acquire(binding.owner);
+    return binding;
   }
 
   getSnapshot(): BrowserRuntimeSnapshot {

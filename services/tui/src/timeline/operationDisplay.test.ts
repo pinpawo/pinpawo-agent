@@ -90,6 +90,34 @@ test('operation display exposes bounded apply_patch lines with tones', () => {
   assert.ok(lines.every((line) => stringWidth(line.text) <= 80));
 });
 
+test('operation display exposes structured apply_patch failures after the diff', () => {
+  const lines = buildOperationDisplayLines(operation({
+    phase: 'failed',
+    kind: 'local.apply_patch',
+    target: 'src/example.ts',
+    raw: {
+      input: {
+        patch: [
+          '--- a/src/example.ts',
+          '+++ b/src/example.ts',
+          '@@ -1 +1 @@',
+          '-const value = 1;',
+          '+const value = 2;',
+        ].join('\n'),
+      },
+      output: JSON.stringify({
+        ok: false,
+        code: 'context_not_found',
+        message: 'Patch context did not match.',
+      }),
+    },
+  }), 3_500, 100);
+
+  assert.ok(lines.some((line) => line.text === '  -const value = 1;' && line.tone === 'removed'));
+  assert.ok(lines.some((line) => line.text === '  +const value = 2;' && line.tone === 'added'));
+  assert.ok(lines.some((line) => line.text.includes('context_not_found') && line.tone === 'removed'));
+});
+
 test('operation display keeps running and terminal phases distinct', () => {
   const running = buildOperationDisplayLines(operation({
     phase: 'updated',
@@ -101,6 +129,33 @@ test('operation display keeps running and terminal phases distinct', () => {
 
   assert.match(running, /进行中 2s/);
   assert.match(interrupted, /已中断/);
+});
+
+test('operation display renders structured authorization details without raw field labels', () => {
+  const lines = buildOperationDisplayLines(operation({
+    kind: 'runtime.authorization',
+    title: '自动授权 · 2 项操作',
+    phase: 'completed',
+    summary: 'shell · which · shell · version',
+    details: {
+      toolLabels: ['shell · which', 'shell · version'],
+      reason: 'Both actions are read-only observations.',
+    },
+    operationSource: {
+      provider: 'runtime',
+      name: 'global_review_policy',
+    },
+  }), 3_500, 100);
+
+  assert.deepEqual(lines, [{
+    text: '自动授权 · 2 项操作（完成）',
+  }, {
+    text: '  涉及工具：shell · which · shell · version',
+    tone: 'muted',
+  }, {
+    text: '  原因：Both actions are read-only observations.',
+    tone: 'muted',
+  }]);
 });
 
 function operation(

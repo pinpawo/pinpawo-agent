@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildLocalAgentModels } from './agentModels';
+import {
+  buildLocalAgentModels,
+  resolveLlmGenerationReserveTokens,
+} from './agentModels';
 
 function readTemperature(model: unknown): number | undefined {
   return (model as { temperature?: number }).temperature;
@@ -14,18 +17,12 @@ function readMaxTokens(model: unknown): number | undefined {
   return (model as { maxTokens?: number }).maxTokens;
 }
 
-function readBoundToolChoice(model: unknown, toolChoice: unknown): unknown {
-  const bindTools = (model as {
-    bindTools?: (
-      tools: unknown[],
-      options?: Record<string, unknown>,
-    ) => unknown;
-  }).bindTools;
-  assert.ok(bindTools);
-  const bound = bindTools.call(model, [], { tool_choice: toolChoice });
-  return (bound as {
-    defaultOptions?: Record<string, unknown>;
-  }).defaultOptions?.tool_choice;
+function readInvocationParams(model: unknown): Record<string, unknown> {
+  const invocationParams = (model as {
+    invocationParams?: () => Record<string, unknown>;
+  }).invocationParams;
+  assert.ok(invocationParams);
+  return invocationParams.call(model);
 }
 
 test('models use the provider temperature default when no override is configured', () => {
@@ -108,31 +105,34 @@ test('Qwen 3.8 roles preserve the provider-enforced thinking mode', () => {
   const models = buildLocalAgentModels({
     apiKey: 'test-key',
     baseUrl: 'https://workspace-id.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
-    model: 'qwen3.8-max-preview',
+    model: 'qwen3.8-max',
+    maxOutputTokens: 131_072,
   });
 
-  assert.deepEqual(readModelKwargs(models.act), {});
-  assert.deepEqual(readModelKwargs(models.decision), {});
-  assert.deepEqual(readModelKwargs(models.answer), {});
-  assert.deepEqual(readModelKwargs(models.observe), {});
-  assert.deepEqual(readModelKwargs(models.subagent), {});
-  assert.equal(readBoundToolChoice(models.act, 'any'), 'auto');
-  assert.equal(readBoundToolChoice(models.act, 'required'), 'auto');
-  assert.equal(readBoundToolChoice(models.act, 'submit_plan'), 'auto');
-  assert.equal(readBoundToolChoice(models.act, {
-    type: 'function',
-    function: { name: 'submit_plan' },
-  }), 'auto');
-  assert.equal(readBoundToolChoice(models.act, 'none'), 'none');
-  assert.equal(readBoundToolChoice(models.act, 'auto'), 'auto');
+  assert.equal(readInvocationParams(models.act).reasoning_effort, 'medium');
+  assert.equal(readInvocationParams(models.decision).reasoning_effort, 'low');
+  assert.equal(readInvocationParams(models.answer).reasoning_effort, 'medium');
+  assert.equal(readInvocationParams(models.observe).reasoning_effort, 'low');
+  assert.equal(readInvocationParams(models.subagent).reasoning_effort, 'medium');
+  assert.equal('extra_body' in readInvocationParams(models.act), false);
+  assert.equal(readInvocationParams(models.act).max_tokens, 131_072);
+  assert.equal(readMaxTokens(models.act), 131_072);
+  assert.equal(readMaxTokens(models.decision), 131_072);
+  assert.equal(readMaxTokens(models.answer), 131_072);
+  assert.equal(readMaxTokens(models.observe), 131_072);
+  assert.equal(readMaxTokens(models.subagent), 131_072);
 });
 
-test('models with full tool-choice support preserve forced tool selection', () => {
-  const models = buildLocalAgentModels({
-    apiKey: 'test-key',
-    baseUrl: 'https://api.openai.com/v1',
+test('generation reserve includes Qwen thinking and configured output budgets', () => {
+  assert.equal(resolveLlmGenerationReserveTokens({
+    model: 'qwen3.8-max',
+    maxOutputTokens: 131_072,
+  }), 147_456);
+  assert.equal(resolveLlmGenerationReserveTokens({
     model: 'gpt-5.5',
-  });
-
-  assert.equal(readBoundToolChoice(models.act, 'any'), 'any');
+    maxOutputTokens: 128_000,
+  }), 128_000);
+  assert.equal(resolveLlmGenerationReserveTokens({
+    model: 'custom-model',
+  }), undefined);
 });

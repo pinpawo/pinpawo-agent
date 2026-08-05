@@ -22,6 +22,32 @@ test('same delegation can reuse its browser ownership', async () => {
   assert.equal(await ownership.runOwned({ ...delegation }, async () => 'snapshot'), 'snapshot');
 });
 
+test('release drops active ownership and only the same execution can resume it', async () => {
+  const ownership = new BrowserContextOwnership();
+  const first = owner('delegation-1');
+  const second = owner('delegation-2');
+
+  await ownership.runOpen(first, async () => 'opened');
+  await ownership.release(first);
+  await assert.rejects(
+    ownership.runOwned(first, async () => 'snapshot'),
+    (error: unknown) => error instanceof Error
+      && 'code' in error
+      && error.code === 'browser_not_open',
+  );
+
+  await ownership.acquire(second);
+  await assert.rejects(
+    ownership.runOwned(second, async () => 'foreign snapshot'),
+    (error: unknown) => error instanceof Error
+      && 'code' in error
+      && error.code === 'browser_not_open',
+  );
+
+  await ownership.acquire({ ...first });
+  assert.equal(await ownership.runOwned(first, async () => 'resumed'), 'resumed');
+});
+
 test('another delegation must explicitly open before using the browser', async () => {
   const ownership = new BrowserContextOwnership();
   const first = owner('delegation-1');
@@ -77,6 +103,35 @@ test('ownership transfer waits for an in-flight operation', async () => {
   releaseOperation?.();
   await Promise.all([firstOperation, transfer]);
   assert.deepEqual(events, ['first:start', 'first:end', 'second:open']);
+});
+
+test('an aborted queued operation never reaches the browser driver', async () => {
+  const ownership = new BrowserContextOwnership();
+  const delegation = owner('delegation-1');
+  let releaseOperation: (() => void) | undefined;
+  let cancelledOperationStarted = false;
+
+  await ownership.runOpen(delegation, async () => 'opened');
+  const inFlight = ownership.runOwned(delegation, async () => {
+    await new Promise<void>((resolve) => { releaseOperation = resolve; });
+  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const controller = new AbortController();
+  const cancelled = ownership.runOwned(delegation, async () => {
+    cancelledOperationStarted = true;
+  }, controller.signal);
+  controller.abort();
+  assert.ok(releaseOperation);
+  releaseOperation();
+
+  await inFlight;
+  await assert.rejects(
+    cancelled,
+    (error: unknown) => error instanceof Error
+      && 'code' in error
+      && error.code === 'browser_command_cancelled',
+  );
+  assert.equal(cancelledOperationStarted, false);
 });
 
 test('failed open clears ownership instead of exposing the previous context', async () => {

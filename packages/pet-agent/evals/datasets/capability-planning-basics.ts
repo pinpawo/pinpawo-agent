@@ -8,11 +8,12 @@ export type CapabilityPlanningInput = {
   }>;
   capabilityRegistry: string[];
   completedTask?: string;
+  completedTaskResult?: string;
   remainingPlan?: Array<{ capability: string; task: string }>;
 };
 
 export type CapabilityPlanningExpected = {
-  result: 'plan';
+  result: 'plan' | 'return_to_answer';
   nextTaskTerms?: string[];
   capabilityName?: string;
   remainingPlan: Array<{ taskTerms: string[]; capability: string }>;
@@ -54,6 +55,48 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
       reason: 'Entry planning creates exploration first and preserves implementation as future work.',
     },
     metadata: { difficulty: 'hard', reason: 'planner@entry dynamic plan.', source: SOURCE_FILE },
+  },
+  {
+    id: `${SUITE}.entry-focuses-on-latest-goal-despite-unrelated-history`,
+    name: 'entry-focuses-on-latest-goal-despite-unrelated-history',
+    suite: SUITE,
+    tags: ['capability_planning', 'entry_decision', 'context_synthesis'],
+    input: {
+      mode: 'entry',
+      messages: [{
+        role: 'user',
+        content: '上周的浏览器扩展报错先不用处理。我只是想知道扩展和 native host 的连接状态分别由谁维护。',
+      }, {
+        role: 'assistant',
+        content: '扩展维护浏览器侧状态，native host 只负责扩展与本机进程的消息通道；这个问题尚未形成待执行任务。',
+      }, {
+        role: 'user',
+        content: '明白了。上面的说明到这里即可，不要检查扩展、不创建 issue，也不要修改浏览器相关代码。',
+      }, {
+        role: 'assistant',
+        content: '已停止该话题，当前没有浏览器相关工作在执行。',
+      }, {
+        role: 'user',
+        content: '现在请在当前仓库中完成 auth 模块重构。先调查模块现有结构、依赖和风险，再根据调查结论实施改动并验证。',
+      }],
+      capabilityRegistry: [
+        'browser: inspect browser extension, tabs, and native host integration',
+        'explore: inspect code structure, dependencies, and risks',
+        'general: use workspace tools to edit and verify code',
+      ],
+    },
+    expected: {
+      result: 'plan',
+      nextTaskTerms: ['auth', '结构', '依赖', '风险'],
+      capabilityName: 'explore',
+      remainingPlan: [
+        { taskTerms: ['auth', '重构'], capability: 'general' },
+      ],
+      planEffect: 'created',
+      rubberStamp: false,
+      reason: 'Older unrelated browser discussion is closed; entry planning follows the latest auth goal and preserves implementation after investigation.',
+    },
+    metadata: { difficulty: 'hard', reason: 'Long conversational history with an irrelevant Capability-shaped distractor.', source: SOURCE_FILE },
   },
   {
     id: `${SUITE}.entry-keeps-investigation-scope`,
@@ -163,6 +206,7 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
         'general: use workspace tools to edit and verify code',
       ],
       completedTask: '调查 auth 模块的现有结构和风险',
+      completedTaskResult: 'auth/index.ts 存在循环依赖；应提取 token validation 并保持现有公开接口。',
       remainingPlan: [{ capability: 'general', task: '根据调查结论重构 auth 模块' }],
     },
     expected: {
@@ -175,6 +219,50 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
       reason: 'Boundary planning materializes implementation details from the handoff.',
     },
     metadata: { difficulty: 'hard', reason: 'planner@boundary materialization.', source: SOURCE_FILE },
+  },
+  {
+    id: `${SUITE}.boundary-ignores-closed-unrelated-history`,
+    name: 'boundary-ignores-closed-unrelated-history',
+    suite: SUITE,
+    tags: ['capability_planning', 'delegation_control', 'context_synthesis'],
+    input: {
+      mode: 'boundary',
+      messages: [{
+        role: 'user',
+        content: '请先不要处理 release 文档。我只是在记录：下个版本可能需要补一份发布说明。',
+      }, {
+        role: 'assistant',
+        content: '已记录为未来想法，没有开始 release 相关任务。',
+      }, {
+        role: 'user',
+        content: '现在在当前仓库中完成 auth 模块重构。具体改动必须以模块现有结构和风险为依据。',
+      }, {
+        role: 'assistant',
+        content: '接下来我会先处理这项任务：调查 auth 模块的现有结构、依赖和风险。',
+      }, {
+        role: 'assistant',
+        content: 'auth/index.ts 存在循环依赖；token validation 需要提取，同时必须保持现有公开接口。',
+      }],
+      capabilityRegistry: [
+        'explore: inspect code structure, dependencies, and risks',
+        'general: use workspace tools to edit and verify code',
+        'release_check: inspect release documentation and verify release readiness',
+      ],
+      completedTask: '调查 auth 模块的现有结构、依赖和风险。',
+      completedTaskResult: 'auth/index.ts 存在循环依赖；token validation 需要提取，同时必须保持现有公开接口。',
+      remainingPlan: [{ capability: 'general', task: '根据调查结论重构 auth 模块并验证。' }],
+    },
+    expected: {
+      result: 'plan',
+      nextTaskTerms: ['循环依赖', 'token', '公开接口'],
+      capabilityName: 'general',
+      remainingPlan: [],
+      exactRemainingPlanLength: 0,
+      planEffect: 'revised',
+      rubberStamp: false,
+      reason: 'The completed auth investigation, not a closed release idea from earlier history, determines the next materialized task.',
+    },
+    metadata: { difficulty: 'hard', reason: 'Boundary handoff must win over unrelated earlier conversation.', source: SOURCE_FILE },
   },
   {
     id: `${SUITE}.entry-uses-general-for-unmatched-work`,
@@ -226,6 +314,7 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
         'general: perform other available work',
       ],
       completedTask: '生成项目报告',
+      completedTaskResult: '报告已生成，路径为 /tmp/report.pdf，内容检查通过。',
       remainingPlan: [{ capability: 'messaging', task: '把完成的报告发送给项目负责人' }],
     },
     expected: {
@@ -261,6 +350,7 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
         'release_check: run release verification',
       ],
       completedTask: '调查 auth 风险',
+      completedTaskResult: '调查确认 token validation 存在循环依赖，需要保持公开接口。',
       remainingPlan: [
         { capability: 'general', task: '根据调查结论修复 auth 风险' },
         { capability: 'release_check', task: '独立运行 release verification' },
@@ -302,6 +392,7 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
         'general: perform ordinary workspace tasks',
       ],
       completedTask: '读取 issue #345 并整理架构演进内容',
+      completedTaskResult: 'issue 正文和评论中的架构演进提案已经完整整理；下一步只需对照当前仓库实现。',
       remainingPlan: [
         {
           capability: 'explore',
@@ -354,6 +445,76 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
       reason: 'The current verification remains one task while the issue update waits for its result.',
     },
     metadata: { difficulty: 'hard', reason: 'Current result boundary plus dependent follow-up.', source: SOURCE_FILE },
+  },
+  {
+    id: `${SUITE}.entry-does-not-reuse-pseudo-tool-syntax-from-history`,
+    name: 'entry-does-not-reuse-pseudo-tool-syntax-from-history',
+    suite: SUITE,
+    tags: ['capability_planning', 'context_synthesis', 'structured_output'],
+    input: {
+      mode: 'entry',
+      messages: [{
+        role: 'user',
+        content: '检查本周工作清单中标注为“待创建”的事项是否已经实际创建；这次只检查，不要创建或更新任何事项。',
+      }, {
+        role: 'assistant',
+        content: '当前仅有一项已确认创建，其余待创建项需要再次核实。',
+      }, {
+        role: 'assistant',
+        content: [
+          '接下来我会先处理这项任务：逐一检查待创建事项的当前状态。',
+          '<tool_call>Bash tool_code_call() {',
+          "  'command': 'gh issue list --state all'",
+          '}',
+        ].join('\n'),
+      }, {
+        role: 'user',
+        content: '再次检查，你说的这些未创建的。',
+      }],
+      capabilityRegistry: [
+        'general: inspect the current state of project issues and report evidence without changing them',
+      ],
+    },
+    expected: {
+      result: 'plan',
+      nextTaskTerms: ['检查', '待创建', '事项', '当前状态'],
+      capabilityName: 'general',
+      remainingPlan: [],
+      exactRemainingPlanLength: 0,
+      planEffect: 'created',
+      rubberStamp: false,
+      reason: 'A stale pseudo-tool snippet is conversation content, not an available tool; the planner must submit the read-only verification task through its declared tool protocol.',
+    },
+    metadata: { difficulty: 'hard', reason: 'Trace-derived regression: historic pseudo-tool syntax must not become a planner tool call.', source: SOURCE_FILE },
+  },
+  {
+    id: `${SUITE}.entry-returns-to-answer-before-execution`,
+    name: 'entry-returns-to-answer-before-execution',
+    suite: SUITE,
+    tags: ['capability_planning', 'structured_output', 'context_synthesis'],
+    input: {
+      mode: 'entry',
+      messages: [{
+        role: 'assistant',
+        content: '之前尝试通过浏览器发送钉钉消息失败；目前只确认钉钉由本地 CLI 控制。',
+      }, {
+        role: 'user',
+        content: '看看钉钉 CLI 的使用方式应该直接记录到 wiki，还是创建一个 Capability 来记录。先给我建议并确认方向，不要开始创建。',
+      }],
+      capabilityRegistry: [
+        'capability_creator: create and validate a user-defined Capability',
+        'wiki: read and maintain project knowledge in the wiki',
+      ],
+    },
+    expected: {
+      result: 'return_to_answer',
+      remainingPlan: [],
+      exactRemainingPlanLength: 0,
+      planEffect: 'empty',
+      rubberStamp: false,
+      reason: 'The user requests a recommendation and explicit confirmation before execution, so the Planner returns structured facts to Answer instead of emitting prose or invoking executor tools.',
+    },
+    metadata: { difficulty: 'medium', reason: 'Planner structured no-plan terminal.', source: SOURCE_FILE },
   },
 ];
 

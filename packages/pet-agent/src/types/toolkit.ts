@@ -4,6 +4,7 @@ import {
 } from '@langchain/core/tools';
 import type { ReviewSpec } from '../agent/orchestrator/review/reviewSpec';
 import type { ToolAuthorizationMatcher } from '../agent/orchestrator/review/authorizationMatchers';
+import { wrapToolCancellation } from './toolCancellation';
 
 export type ToolkitReviewCapabilities = {
   humanReview: boolean;
@@ -89,12 +90,21 @@ export type NamedStructuredTool<TName extends string = string> = StructuredTool 
   name: TName;
 };
 
+export type ModelInputModality = 'text' | 'image';
+
 export type ToolDefinition<
   TTool extends NamedStructuredTool = NamedStructuredTool,
 > = {
   readonly tool: TTool;
   readonly operation?: ToolOperationMetadata;
   readonly review?: ToolReviewPolicy;
+  /**
+   * Model input capabilities this tool needs before it may be bound. Tools that
+   * feed content back to the model in a non-text modality declare it here, so
+   * binding is decided from the active model profile instead of being inferred
+   * from a model name at call time.
+   */
+  readonly requiresInputModalities?: readonly ModelInputModality[];
 };
 
 export type ToolkitAvailability =
@@ -104,6 +114,63 @@ export type ToolkitAvailability =
 export type ToolkitAvailabilityCheck = () =>
   | ToolkitAvailability
   | Promise<ToolkitAvailability>;
+
+/**
+ * Generic identity supplied when a Toolkit resolves resources for one
+ * subagent execution. It deliberately contains no provider/session/backend
+ * concepts: those remain private to the Toolkit runtime implementation.
+ */
+export type ToolkitRuntimeExecutionScope = {
+  threadId: string | null;
+  runId: string;
+  delegationId: string;
+  workdir: string | null;
+  signal?: AbortSignal;
+};
+
+export type ToolkitRuntimeStartContext = {
+  signal?: AbortSignal;
+};
+
+export type ToolkitRuntimeResolveContext = {
+  execution: ToolkitRuntimeExecutionScope;
+};
+
+export type ToolkitRuntimeReleaseContext = ToolkitRuntimeResolveContext;
+
+export type ToolkitRuntimeStopContext = {
+  signal?: AbortSignal;
+};
+
+/**
+ * Optional Toolkit-owned execution lifecycle.
+ *
+ * The root may be shared across executions. A resolved binding is opaque to
+ * the framework and is only handed back to the same Toolkit's bindTools and
+ * release hooks. bindTools may replace executable Tool instances, but the
+ * framework verifies that the static tool inventory is unchanged.
+ */
+export type ToolkitRuntimeDefinition<TRoot = unknown, TBinding = TRoot> = {
+  start: (
+    context: ToolkitRuntimeStartContext,
+  ) => TRoot | Promise<TRoot>;
+  resolve?: (
+    root: TRoot,
+    context: ToolkitRuntimeResolveContext,
+  ) => TBinding | Promise<TBinding>;
+  bindTools?: (
+    binding: TBinding,
+    context: ToolkitRuntimeResolveContext,
+  ) => readonly NamedStructuredTool[] | Promise<readonly NamedStructuredTool[]>;
+  release?: (
+    binding: TBinding,
+    context: ToolkitRuntimeReleaseContext,
+  ) => void | Promise<void>;
+  stop?: (
+    root: TRoot,
+    context: ToolkitRuntimeStopContext,
+  ) => void | Promise<void>;
+};
 
 export async function evaluateToolkitAvailability(
   toolkit: AgentToolkit,
@@ -163,6 +230,7 @@ export type AgentToolkit = {
   readonly instructions?: string;
   readonly availability?: ToolkitAvailabilityCheck;
   readonly reviewGuidance?: ToolkitReviewGuidance;
+  readonly runtime?: ToolkitRuntimeDefinition;
 };
 
 function assertToolkitReviewGuidance(
@@ -214,6 +282,20 @@ export function validateToolkitDefinition(toolkit: AgentToolkit) {
   }
   if (toolkit.availability !== undefined && typeof toolkit.availability !== 'function') {
     throw new Error(`Toolkit "${toolkit.name}" availability must be a function`);
+  }
+  if (toolkit.runtime !== undefined) {
+    if (
+      typeof toolkit.runtime !== 'object'
+      || Array.isArray(toolkit.runtime)
+      || typeof toolkit.runtime.start !== 'function'
+    ) {
+      throw new Error(`Toolkit "${toolkit.name}" runtime must define start()`);
+    }
+    for (const hook of ['resolve', 'bindTools', 'release', 'stop'] as const) {
+      if (toolkit.runtime[hook] !== undefined && typeof toolkit.runtime[hook] !== 'function') {
+        throw new Error(`Toolkit "${toolkit.name}" runtime.${hook} must be a function`);
+      }
+    }
   }
 
   assertToolkitReviewGuidance(toolkit.name, toolkit.reviewGuidance);
@@ -285,6 +367,19 @@ export function validateToolkitDefinition(toolkit: AgentToolkit) {
         );
       }
     }
+    if (definition.requiresInputModalities !== undefined) {
+      if (
+        !Array.isArray(definition.requiresInputModalities)
+        || definition.requiresInputModalities.length === 0
+        || definition.requiresInputModalities.some(
+          (modality: unknown) => modality !== 'text' && modality !== 'image',
+        )
+      ) {
+        throw new Error(
+          `Toolkit "${toolkit.name}" tool "${toolName}" requiresInputModalities must contain supported modalities`,
+        );
+      }
+    }
     toolNames.add(toolName);
   }
 }
@@ -295,5 +390,14 @@ export function defineToolkit<
   definition: Omit<AgentToolkit, 'tools'> & { tools: TTools },
 ): Omit<AgentToolkit, 'tools'> & { tools: TTools } {
   validateToolkitDefinition(definition);
-  return definition;
+  return {
+    ...definition,
+    // Cancellation must never reach the graph as a successful result. How a
+    // tool cleans up when cancelled is its own business; that it propagates
+    // at all is the toolkit contract's.
+    tools: definition.tools.map((toolDefinition) => ({
+      ...toolDefinition,
+      tool: wrapToolCancellation(toolDefinition.tool),
+    })) as unknown as TTools,
+  };
 }

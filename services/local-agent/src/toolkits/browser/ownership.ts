@@ -3,6 +3,15 @@ import { BrowserOperationError } from './errors';
 
 export type BrowserExecutionOwner = SubagentExecutionScope;
 
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  throw new BrowserOperationError(
+    'browser_command_cancelled',
+    'Browser command was cancelled before it started.',
+    true,
+  );
+}
+
 function isSameOwner(
   left: BrowserExecutionOwner,
   right: BrowserExecutionOwner,
@@ -14,10 +23,15 @@ function isSameOwner(
 
 export class BrowserContextOwnership {
   private owner: BrowserExecutionOwner | null = null;
+  /** Last cleanly released owner, eligible to resume the retained page. */
+  private resumableOwner: BrowserExecutionOwner | null = null;
   private operationTail: Promise<void> = Promise.resolve();
 
-  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.operationTail.then(operation);
+  private enqueue<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    const result = this.operationTail.then(async () => {
+      throwIfAborted(signal);
+      return await operation();
+    });
     this.operationTail = result.then(
       () => undefined,
       () => undefined,
@@ -53,39 +67,67 @@ export class BrowserContextOwnership {
     }
   }
 
+  acquire(owner: BrowserExecutionOwner | null): Promise<void> {
+    return this.enqueue(async () => {
+      const nextOwner = this.requireOwner(owner);
+      if (
+        !this.owner
+        && this.resumableOwner
+        && isSameOwner(this.resumableOwner, nextOwner)
+      ) {
+        this.owner = nextOwner;
+      }
+    });
+  }
+
+  release(owner: BrowserExecutionOwner | null): Promise<void> {
+    return this.enqueue(async () => {
+      const releasedOwner = this.requireOwner(owner);
+      if (this.owner && isSameOwner(this.owner, releasedOwner)) {
+        this.owner = null;
+        this.resumableOwner = releasedOwner;
+      }
+    });
+  }
+
   runOpen<T>(
     owner: BrowserExecutionOwner | null,
     operation: () => Promise<T>,
+    signal?: AbortSignal,
   ): Promise<T> {
     return this.enqueue(async () => {
       const nextOwner = this.requireOwner(owner);
       // browser_open is the explicit handoff boundary. Serializing the claim
       // with page operations prevents the previous delegation from acting on
       // the newly opened page after ownership changes.
+      this.resumableOwner = null;
       this.owner = nextOwner;
       try {
         return await operation();
       } catch (error) {
         this.owner = null;
+        this.resumableOwner = null;
         throw error;
       }
-    });
+    }, signal);
   }
 
   runOwned<T>(
     owner: BrowserExecutionOwner | null,
     operation: () => Promise<T>,
+    signal?: AbortSignal,
   ): Promise<T> {
     return this.enqueue(async () => {
       const currentOwner = this.requireOwner(owner);
       this.assertCurrentOwner(currentOwner);
       return operation();
-    });
+    }, signal);
   }
 
   closeOwned<T>(
     owner: BrowserExecutionOwner | null,
     operation: () => Promise<T>,
+    signal?: AbortSignal,
   ): Promise<T> {
     return this.enqueue(async () => {
       const currentOwner = this.requireOwner(owner);
@@ -94,8 +136,9 @@ export class BrowserContextOwnership {
         return await operation();
       } finally {
         this.owner = null;
+        this.resumableOwner = null;
       }
-    });
+    }, signal);
   }
 
   shutdown<T>(operation: () => Promise<T>): Promise<T> {
@@ -104,6 +147,7 @@ export class BrowserContextOwnership {
         return await operation();
       } finally {
         this.owner = null;
+        this.resumableOwner = null;
       }
     });
   }

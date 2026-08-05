@@ -17,6 +17,7 @@ import { isJsonValue } from './snapshot';
 import {
   isAgentTokenUsageSnapshot,
   isBuiltinGlobalReviewPolicyMode,
+  parseAgentPlan,
 } from './validation';
 
 export function parseAgentSessionSnapshot(
@@ -89,11 +90,20 @@ function parseAgentSession(value: unknown): AgentSession | null {
     && value.sessionTokenUsage.scope === 'session'
     ? value.sessionTokenUsage as AgentSession['sessionTokenUsage']
     : undefined;
+  const currentPlan = value.currentPlan === undefined
+    ? undefined
+    : value.currentPlan === null
+      ? null
+      : parseAgentPlan(value.currentPlan);
+  if (value.currentPlan !== undefined && currentPlan === null && value.currentPlan !== null) {
+    return null;
+  }
   return {
     sessionId: value.sessionId,
     kind: value.kind,
     timeline,
     activeRun,
+    ...(currentPlan !== undefined ? { currentPlan } : {}),
     ...(actor ? { actor } : {}),
     ...(runtime ? { runtime } : {}),
     ...(isAgentTokenUsageSnapshot(value.tokenUsage) ? { tokenUsage: value.tokenUsage } : {}),

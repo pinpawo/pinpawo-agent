@@ -82,6 +82,11 @@ export type PetAgentRuntimeInvokeResult = {
 export type PetAgentRuntime = {
   descriptor: () => PetAgentRuntimeDescriptor;
   invoke: (input: PetAgentRuntimeInvokeInput) => Promise<PetAgentRuntimeInvokeResult>;
+  /**
+   * Releases Toolkit roots when this runtime created its own manager. A host
+   * that supplied toolkitRuntimeManager owns the shared lifecycle instead.
+   */
+  shutdown?: () => Promise<void>;
 };
 
 /* ─────────────── Studio Orchestrator state machine ─────────────── */

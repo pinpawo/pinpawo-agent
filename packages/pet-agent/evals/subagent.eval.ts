@@ -7,28 +7,29 @@
  * required tools, completes explicit multi-step tasks, and returns a usable
  * final response.
  *
- * Required env vars:
- *   LANGCHAIN_API_KEY     — LangSmith API key
- *   LANGCHAIN_TRACING_V2  — set to "true" to enable tracing
- *   LLM_API_KEY           — model provider API key
- *   LLM_BASE_URL          — model provider base URL
- *   LLM_MODEL             — model name
+ * Optional env vars:
+ *   SUBAGENT_EVAL_PROFILE — model profile id; defaults to the configured profile
  *
  * Run:
  *   npm run eval:subagent -w @pinpawo/pet-agent
  */
 import { tool } from '@langchain/core/tools';
-import { HumanMessage } from '@langchain/core/messages';
-import { ChatOpenAI } from '@langchain/openai';
-import { Client } from 'langsmith';
-import { evaluate } from 'langsmith/evaluation';
+import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import { homedir } from 'node:os';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import { createSubagent } from '../src/subagent/createSubagent';
+import { materializeDelegation } from '../src/agent/orchestrator/delegationBriefing';
+import { createDecisionEvalModel } from './scripts/decision-eval-model';
+import { langfuseFetch, resolveLangfuseConfig } from './scripts/langfuse-api';
+import { writeLangfuseEvalResult } from './scripts/langfuse-eval-writer';
 
 const DATASET_NAME = 'subagent-execution';
+const DATASET_DESCRIPTION = [
+  'Evaluates Capability subagent execution against delegated task boundaries,',
+  'tool evidence, continuation state, and truthful incomplete results.',
+].join(' ');
 
 const examples = [
   {
@@ -108,52 +109,107 @@ const examples = [
       reason: 'Subagent should not claim success when the tool output reports a failing command.',
     },
   },
+  {
+    name: 'delegation-boundary-excludes-future-work',
+    inputs: {
+      main_context: '用户的完整目标是先读取 README.md，然后修改 src/demo.ts 并运行 npm test。',
+      task: '只读取 README.md 并总结其中对 PinPawo 的介绍。',
+      files: {
+        'README.md': '# PinPawo\n\nPinPawo 是一个本地宠物助手项目。',
+        'src/demo.ts': 'var count = 1;\n',
+      },
+    },
+    outputs: {
+      expected_completion_reason: 'natural',
+      expected_tools: ['view_file_chunk'],
+      forbidden_tools: ['write_file', 'shell'],
+      expected_final_terms: ['PinPawo'],
+      reason: 'Subagent should execute only the latest delegated task, not future work from main context.',
+    },
+  },
+  {
+    name: 'continuation-uses-existing-progress',
+    inputs: {
+      mode: 'continue',
+      task: '完成版本和测试状态核验。',
+      prior_task: '读取 package.json 的版本，然后运行 npm test。',
+      prior_progress: '已读取 package.json，版本是 0.2.0；尚未运行测试。',
+      gap_note: '只剩下 npm test 没有执行，请完成后交付版本和测试结果。',
+      shell_outputs: {
+        'npm test': 'tests passed, exit code 0',
+      },
+    },
+    outputs: {
+      expected_completion_reason: 'natural',
+      expected_tools: ['shell'],
+      forbidden_tools: ['view_file_chunk', 'write_file', 'web_search'],
+      expected_final_terms: ['0.2.0'],
+      expected_final_any_terms: ['passed', '通过'],
+      reason: 'Continuation should preserve completed work and address only the stated gap.',
+    },
+  },
+  {
+    name: 'context-is-sufficient-without-tools',
+    inputs: {
+      task: '根据委派背景，直接说明当前发布通道。',
+      essential_context: '已确认当前发布通道是 beta。',
+    },
+    outputs: {
+      expected_completion_reason: 'natural',
+      forbidden_tools: ['view_file_chunk', 'write_file', 'shell', 'web_search'],
+      expected_final_terms: ['beta'],
+      reason: 'Subagent should not call tools when the delegated evidence is already sufficient.',
+    },
+  },
+  {
+    name: 'missing-evidence-is-reported',
+    inputs: {
+      task: '读取 missing.txt 并报告文件内容。',
+      files: {},
+    },
+    outputs: {
+      expected_completion_reason: 'natural',
+      expected_tools: ['view_file_chunk'],
+      expected_final_any_terms: ['不存在', '找不到', '未找到', '失败', 'not found'],
+      reason: 'Subagent should report the evidence gap instead of inventing file contents.',
+    },
+  },
 ];
 
-function loadPinpetConfig(): Record<string, string> {
+const testCases = examples.map((example, index) => ({
+  id: `subagent-execution-${String(index + 1).padStart(2, '0')}-${example.name}`,
+  name: example.name,
+  suite: 'subagent-execution',
+  input: example.inputs,
+  expected: example.outputs,
+  tags: ['delegation_control'],
+  metadata: {
+    difficulty: index < 3 ? 'easy' : 'medium',
+    reason: example.outputs.reason,
+    source: 'subagent.eval.ts',
+  },
+}));
+
+function readConfiguredDefaultProfileId(): string {
   try {
     const raw = readFileSync(resolve(homedir(), '.pinpawo', 'config.json'), 'utf8');
-    return JSON.parse(raw);
-  } catch {
-    return {};
+    const config = JSON.parse(raw) as {
+      models?: { defaultProfileId?: unknown };
+    };
+    const profileId = config.models?.defaultProfileId;
+    if (typeof profileId === 'string' && profileId.trim()) return profileId.trim();
+    throw new Error('models.defaultProfileId is missing');
+  } catch (error) {
+    throw new Error(
+      `Could not resolve the default model profile: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
   }
 }
 
-const pinpawoConfig = loadPinpetConfig();
-const LLM_API_KEY = process.env.LLM_API_KEY || pinpawoConfig.llm_api_key;
-const LLM_BASE_URL = process.env.LLM_BASE_URL || pinpawoConfig.llm_base_url || 'https://api.deepseek.com';
-const LLM_MODEL = process.env.LLM_MODEL || pinpawoConfig.llm_model || 'deepseek-v4-pro';
-
-if (!LLM_API_KEY) {
-  console.error('Missing LLM_API_KEY — set env var or configure ~/.pinpawo/config.json');
-  process.exit(1);
-}
-
-function buildModel() {
-  const normalizedModel = LLM_MODEL.toLowerCase();
-  const modelKwargs = (
-    normalizedModel.includes('qwen')
-    || normalizedModel.includes('glm')
-    || normalizedModel.includes('minimax')
-  )
-    ? { extra_body: { enable_thinking: false } }
-    : normalizedModel.includes('deepseek')
-      ? { thinking: { type: 'disabled' } }
-      : undefined;
-
-  return new ChatOpenAI({
-    model: LLM_MODEL,
-    temperature: 0.2,
-    timeout: 180_000,
-    apiKey: LLM_API_KEY,
-    streaming: normalizedModel.includes('glm-4.5'),
-    modelKwargs,
-    configuration: {
-      baseURL: LLM_BASE_URL,
-      defaultHeaders: { Authorization: `Bearer ${LLM_API_KEY}` },
-    },
-  });
-}
+const profileId = process.env.SUBAGENT_EVAL_PROFILE ?? readConfiguredDefaultProfileId();
+const evalSubject = createDecisionEvalModel({ profileId, role: 'subject' });
 
 function normalizeToolName(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -222,7 +278,24 @@ function buildMockTools(inputs: Record<string, unknown>) {
       ?? Object.entries(shellOutputs).find(([expectedCommand]) => (
         command.includes(expectedCommand) || expectedCommand.includes(command)
       ))?.[1];
-    return String(matchedOutput ?? `command passed: ${command}`);
+    if (matchedOutput !== undefined) return String(matchedOutput);
+
+    const listedFiles = [...files.keys()].sort();
+    const referencedFile = [...files.keys(), 'missing.txt']
+      .find((path) => command.includes(path));
+    if (/\b(?:ls|find|pwd)\b/.test(command)) {
+      return [
+        'cwd: /workspace',
+        `files:\n${listedFiles.length > 0 ? listedFiles.join('\n') : '(empty)'}`,
+        referencedFile && !files.has(referencedFile)
+          ? `not found: ${referencedFile}`
+          : null,
+      ].filter(Boolean).join('\n');
+    }
+    if (/\bcat\b/.test(command) && referencedFile) {
+      return files.get(referencedFile) ?? `Error (exit 1): ${referencedFile} not found`;
+    }
+    return `command passed: ${command}`;
   }, {
     name: 'shell',
     description: '在终端中执行命令并返回输出。',
@@ -247,19 +320,49 @@ function buildMockTools(inputs: Record<string, unknown>) {
 
 async function target(inputs: Record<string, unknown>): Promise<Record<string, unknown>> {
   const runtime = buildMockTools(inputs);
+  const task = String(inputs.task ?? '');
+  const mode = inputs.mode === 'continue' ? 'continue' : 'initial';
+  const briefing = materializeDelegation(mode === 'continue'
+    ? {
+        mode,
+        lane: 'capability:eval',
+        runId: 'eval-run',
+        delegationId: 'eval-delegation',
+        task,
+        gapNote: typeof inputs.gap_note === 'string' ? inputs.gap_note : null,
+      }
+    : {
+        mode,
+        lane: 'capability:eval',
+        runId: 'eval-run',
+        delegationId: 'eval-delegation',
+        task,
+        essentialContext: typeof inputs.essential_context === 'string'
+          ? inputs.essential_context
+          : null,
+      }).laneMessages[0];
+  const mainContext = typeof inputs.main_context === 'string'
+    ? inputs.main_context
+    : `用户请求：${task}`;
+  const messages: BaseMessage[] = [new HumanMessage(mainContext)];
+  if (mode === 'continue' && typeof inputs.prior_progress === 'string') {
+    const priorTask = typeof inputs.prior_task === 'string' ? inputs.prior_task : task;
+    messages.push(materializeDelegation({
+      mode: 'initial',
+      lane: 'capability:eval',
+      runId: 'eval-run',
+      delegationId: 'eval-delegation',
+      task: priorTask,
+      essentialContext: null,
+    }).laneMessages[0]);
+    messages.push(new AIMessage(inputs.prior_progress));
+  }
+  messages.push(briefing);
   const result = await createSubagent({
-    model: buildModel(),
+    model: evalSubject.model,
     tools: runtime.tools,
-    promptSections: [{
-      id: 'eval-task-policy',
-      owner: 'eval',
-      content: [
-        '你可以使用工具完成任务。',
-        '用户明确要求调用工具时，必须实际调用对应工具，不要假装已经执行。',
-        '多步骤任务必须等所有步骤完成并核验后再返回。',
-      ].join('\n'),
-    }],
-    messages: [new HumanMessage(String(inputs.task ?? ''))],
+    promptSections: [],
+    messages,
     maxIterations: 8,
   });
 
@@ -307,6 +410,23 @@ function requiredToolsEvaluator({ outputs, referenceOutputs }) {
     comment: missing.length === 0
       ? `Correct: called ${expected.join(', ')}`
       : `Missing required tools: ${missing.join(', ')}; called ${called.join(', ')}`,
+  };
+}
+
+function forbiddenToolsEvaluator({ outputs, referenceOutputs }) {
+  const forbidden = Array.isArray(referenceOutputs?.forbidden_tools)
+    ? referenceOutputs.forbidden_tools.map(normalizeToolName).filter(Boolean)
+    : [];
+  const called = Array.isArray(outputs?.called_tools)
+    ? outputs.called_tools.map(normalizeToolName).filter(Boolean)
+    : [];
+  const unexpected = forbidden.filter((name) => called.includes(name));
+  return {
+    key: 'forbidden_tools_avoided',
+    score: unexpected.length === 0 ? 1 : 0,
+    comment: unexpected.length === 0
+      ? 'No out-of-scope tools were called'
+      : `Called out-of-scope tools: ${unexpected.join(', ')}`,
   };
 }
 
@@ -399,72 +519,136 @@ function fileContainsEvaluator({ outputs, referenceOutputs }) {
   };
 }
 
-async function ensureDataset() {
-  const client = new Client();
-  try {
-    const existing = await client.readDataset({ datasetName: DATASET_NAME });
-    if (existing) {
-      await client.deleteDataset({ datasetId: existing.id });
-    }
-  } catch {}
+const evaluators = [
+  exactFieldEvaluator('completion_reason', 'expected_completion_reason'),
+  requiredToolsEvaluator,
+  forbiddenToolsEvaluator,
+  toolSequenceEvaluator,
+  finalTextNonEmptyEvaluator,
+  finalTermsEvaluator,
+  finalAnyTermsEvaluator,
+  fileContainsEvaluator,
+];
 
-  const dataset = await client.createDataset(DATASET_NAME, {
-    description: 'Evaluates subagent tool execution behavior with a real model and deterministic mock tools.',
-  });
-  for (const example of examples) {
-    await client.createExample({
-      dataset_id: dataset.id,
-      inputs: example.inputs,
-      outputs: example.outputs,
-      metadata: { name: example.name },
+const scoreKeys = [
+  'completion_reason_correct',
+  'required_tools_called',
+  'forbidden_tools_avoided',
+  'tool_sequence_correct',
+  'final_text_non_empty',
+  'final_terms_present',
+  'final_any_terms_present',
+  'file_contains_correct',
+];
+
+async function syncDataset(config: ReturnType<typeof resolveLangfuseConfig>) {
+  const list = await langfuseFetch<{ data?: Array<{ name: string }> }>(config, '/datasets');
+  if (!(list.data?.some((dataset) => dataset.name === DATASET_NAME) ?? false)) {
+    await langfuseFetch(config, '/datasets', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: DATASET_NAME,
+        description: DATASET_DESCRIPTION,
+        metadata: { owner: 'pet-agent', areas: ['delegation_control'] },
+      }),
+    });
+  }
+
+  for (const testCase of testCases) {
+    await langfuseFetch(config, '/dataset-items', {
+      method: 'POST',
+      body: JSON.stringify({
+        id: testCase.id,
+        datasetName: DATASET_NAME,
+        input: testCase.input,
+        expectedOutput: testCase.expected,
+        metadata: {
+          name: testCase.name,
+          suite: testCase.suite,
+          tags: testCase.tags,
+          ...testCase.metadata,
+        },
+      }),
     });
   }
 }
 
 async function main() {
-  await ensureDataset();
-  console.log(`Running subagent execution evaluation against "${DATASET_NAME}"...`);
-  console.log(`Subagent model: ${LLM_MODEL} @ ${LLM_BASE_URL}`);
-  console.log('');
+  const config = resolveLangfuseConfig();
+  await syncDataset(config);
+  const runName = process.env.LANGFUSE_RUN_NAME
+    ?? `subagent-execution-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+  console.log(`Running Langfuse subagent eval: ${runName}`);
+  console.log(`Dataset: ${DATASET_NAME}`);
+  console.log(`Subagent model: ${evalSubject.label}`);
+  console.log(`Langfuse: ${config.baseUrl}`);
+  console.log(`Cases: ${testCases.length}\n`);
 
-  const results = await evaluate(target, {
-    data: DATASET_NAME,
-    evaluators: [
-      exactFieldEvaluator('completion_reason', 'expected_completion_reason'),
-      requiredToolsEvaluator,
-      toolSequenceEvaluator,
-      finalTextNonEmptyEvaluator,
-      finalTermsEvaluator,
-      finalAnyTermsEvaluator,
-      fileContainsEvaluator,
-    ],
-    experimentPrefix: 'subagent-execution',
-    maxConcurrency: 1,
-  });
-
-  const rows = results.results;
-  const keys = [
-    'completion_reason_correct',
-    'required_tools_called',
-    'tool_sequence_correct',
-    'final_text_non_empty',
-    'final_terms_present',
-    'final_any_terms_present',
-    'file_contains_correct',
-  ];
+  const rows = [];
+  for (const testCase of testCases) {
+    const started = performance.now();
+    try {
+      const output = await target(testCase.input);
+      const scores = evaluators.map((evaluator) => evaluator({
+        outputs: output,
+        referenceOutputs: testCase.expected,
+      }));
+      const ok = scores.every(({ score }) => score === 1);
+      const durationMs = Math.round(performance.now() - started);
+      await writeLangfuseEvalResult({
+        config,
+        datasetName: DATASET_NAME,
+        runName,
+        traceName: 'subagent-execution-eval',
+        testCase,
+        output,
+        scores,
+        durationMs,
+        metadata: {
+          subjectModelProfileId: evalSubject.metadata.profileId,
+          subjectModelProfileFingerprint: evalSubject.metadata.fingerprint,
+        },
+      });
+      rows.push({ testCase, output, scores, ok, durationMs });
+      console.log(`[${ok ? 'PASS' : 'FAIL'}] ${testCase.name} (${durationMs}ms)`);
+    } catch (error) {
+      const durationMs = Math.round(performance.now() - started);
+      const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      const scores = [{ key: 'run_error', score: 0, comment: message.slice(0, 800) }];
+      await writeLangfuseEvalResult({
+        config,
+        datasetName: DATASET_NAME,
+        runName,
+        traceName: 'subagent-execution-eval',
+        testCase,
+        output: {},
+        scores,
+        durationMs,
+        error: message,
+        metadata: {
+          subjectModelProfileId: evalSubject.metadata.profileId,
+          subjectModelProfileFingerprint: evalSubject.metadata.fingerprint,
+        },
+      });
+      rows.push({ testCase, output: {}, scores, ok: false, durationMs, error: message });
+      console.log(`[ERROR] ${testCase.name} (${durationMs}ms): ${message}`);
+    }
+  }
 
   console.log('\n=== Evaluation complete ===');
-  for (const key of keys) {
-    const scores = rows.flatMap((row) => row.evaluationResults.results.filter((item) => item.key === key));
+  console.log(`Cases: ${rows.filter((row) => row.ok).length}/${rows.length} passed`);
+  for (const key of scoreKeys) {
+    const scores = rows.flatMap((row) => row.scores.filter((item) => item.key === key));
     const passed = scores.filter((item) => item.score === 1).length;
     console.log(`${key}: ${passed}/${scores.length} passed, ${scores.length - passed} failed.`);
   }
   for (const row of rows) {
-    const failedScores = row.evaluationResults.results.filter((item) => keys.includes(item.key) && item.score !== 1);
+    const failedScores = row.scores.filter((item) => item.score !== 1);
     if (failedScores.length === 0) continue;
-    console.log(`  - ${row.example.metadata?.name ?? row.example.id}: ${failedScores.map((item) => item.comment).join(' | ')}`);
+    console.log(`  - ${row.testCase.name}: ${failedScores.map((item) => item.comment).join(' | ')}`);
   }
-  console.log('View results in LangSmith dashboard.');
+  console.log('View results in Langfuse.');
+  if (rows.some((row) => !row.ok)) process.exitCode = 1;
 }
 
 main().catch((error) => {

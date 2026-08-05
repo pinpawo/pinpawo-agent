@@ -41,6 +41,10 @@ test('model picker exposes compatible and incompatible profiles without hiding e
   assert.equal(selectedModelProfile(disabled)?.id, 'text');
   assert.equal(beginModelSelection(disabled).phase, 'error');
   assert.equal(beginModelSelection(state).phase, 'selecting');
+  assert.equal(
+    formatModelPicker(beginModelSelection(state), 80),
+    'Switching to Vision…',
+  );
   assert.match(formatModelPicker(state, 80), /incompatible/);
   assert.equal(resolveModelPickerKey(state, { name: 'return', ctrl: false }), 'select');
   assert.equal(

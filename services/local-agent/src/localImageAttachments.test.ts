@@ -6,11 +6,10 @@ import test from 'node:test';
 import type { AgentLocalAttachment } from '@pinpawo/agent-session';
 import {
   detectSupportedImageMimeType,
-  LocalChatImageStore,
   LocalImageAdmissionError,
+  LocalImageAttachmentAdmission,
   MAX_LOCAL_IMAGE_ATTACHMENTS,
   MAX_LOCAL_IMAGE_BYTES,
-  parseLocalImageReferenceUri,
 } from './localImageAttachments';
 
 const PNG_BYTES = Buffer.concat([
@@ -48,16 +47,16 @@ test('supported image MIME is determined by bounded file signatures', () => {
   );
 });
 
-test('image admission stores a content-addressed reference and preserves ordinary files', async () => {
+test('image admission inlines a data URL and preserves ordinary files', async () => {
   const root = await fs.mkdtemp(join(tmpdir(), 'pinpawo-input-images-'));
   const imagePath = join(root, 'renamed.txt');
   const textPath = join(root, 'notes.png');
   await fs.writeFile(imagePath, PNG_BYTES);
   await fs.writeFile(textPath, 'not really an image');
-  const store = new LocalChatImageStore(join(root, 'store'));
+  const admission = new LocalImageAttachmentAdmission();
 
   try {
-    const admitted = await store.admit([
+    const admitted = await admission.admit([
       attachment('image-1', imagePath, 'renamed.txt'),
       attachment('file-1', textPath, 'notes.png'),
     ], { allowImages: true });
@@ -66,26 +65,27 @@ test('image admission stores a content-addressed reference and preserves ordinar
     if (admitted[0]?.source !== 'local-image') return;
     assert.equal(admitted[0].mimeType, 'image/png');
     assert.equal(admitted[0].byteSize, PNG_BYTES.length);
-    assert.ok(parseLocalImageReferenceUri(admitted[0].uri));
+    assert.equal(
+      admitted[0].uri,
+      `data:image/png;base64,${PNG_BYTES.toString('base64')}`,
+    );
+    // The admitted attachment must not leak the host path it came from.
     assert.doesNotMatch(JSON.stringify(admitted[0]), new RegExp(root));
     assert.deepEqual(admitted[1], attachment('file-1', textPath, 'notes.png'));
-    const restored = await store.read(admitted[0].uri);
-    assert.deepEqual(restored.bytes, PNG_BYTES);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
 });
 
-test('text-only admission rejects a real image before persisting it', async () => {
+test('text-only admission rejects a real image', async () => {
   const root = await fs.mkdtemp(join(tmpdir(), 'pinpawo-input-images-text-'));
   const imagePath = join(root, 'image.png');
-  const storePath = join(root, 'store');
   await fs.writeFile(imagePath, PNG_BYTES);
-  const store = new LocalChatImageStore(storePath);
+  const admission = new LocalImageAttachmentAdmission();
 
   try {
     await assert.rejects(
-      () => store.admit(
+      () => admission.admit(
         [attachment('image-1', imagePath)],
         { allowImages: false },
       ),
@@ -94,15 +94,14 @@ test('text-only admission rejects a real image before persisting it', async () =
         && error.code === 'image_model_unsupported'
       ),
     );
-    await assert.rejects(() => fs.readdir(storePath), { code: 'ENOENT' });
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
 });
 
-test('image admission enforces count, byte, and digest integrity limits', async () => {
+test('image admission enforces count and byte limits', async () => {
   const root = await fs.mkdtemp(join(tmpdir(), 'pinpawo-input-images-limit-'));
-  const store = new LocalChatImageStore(join(root, 'store'));
+  const admission = new LocalImageAttachmentAdmission();
   try {
     const attachments: AgentLocalAttachment[] = [];
     for (let index = 0; index < MAX_LOCAL_IMAGE_ATTACHMENTS + 1; index += 1) {
@@ -111,7 +110,7 @@ test('image admission enforces count, byte, and digest integrity limits', async 
       attachments.push(attachment(`image-${index}`, path));
     }
     await assert.rejects(
-      () => store.admit(attachments, { allowImages: true }),
+      () => admission.admit(attachments, { allowImages: true }),
       (error: unknown) => (
         error instanceof LocalImageAdmissionError
         && error.code === 'image_count_limit'
@@ -124,7 +123,7 @@ test('image admission enforces count, byte, and digest integrity limits', async 
     await oversized.truncate(MAX_LOCAL_IMAGE_BYTES + 1);
     await oversized.close();
     await assert.rejects(
-      () => store.admit(
+      () => admission.admit(
         [attachment('oversized', oversizedPath)],
         { allowImages: true },
       ),
@@ -134,23 +133,14 @@ test('image admission enforces count, byte, and digest integrity limits', async 
       ),
     );
 
-    const admitted = await store.admit(
+    const admitted = await admission.admit(
       [attachment('valid', attachments[0]!.path)],
       { allowImages: true },
     );
     const image = admitted[0];
     assert.equal(image?.source, 'local-image');
     if (image?.source !== 'local-image') return;
-    const digest = parseLocalImageReferenceUri(image.uri);
-    assert.ok(digest);
-    await fs.writeFile(join(store.rootPath, digest!), Buffer.from('tampered'));
-    await assert.rejects(
-      () => store.read(image.uri),
-      (error: unknown) => (
-        error instanceof LocalImageAdmissionError
-        && error.code === 'image_reference_corrupt'
-      ),
-    );
+    assert.match(image.uri, /^data:image\/png;base64,/);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

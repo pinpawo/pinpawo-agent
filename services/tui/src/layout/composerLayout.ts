@@ -10,6 +10,7 @@ export function calculateComposerLayout(
   options: {
     commandPalette?: boolean;
     persistentHeader?: boolean;
+    planHeight?: number;
   } = {},
 ) {
   if (options.commandPalette) {
@@ -19,6 +20,7 @@ export function calculateComposerLayout(
       headerHeight: COMMAND_PALETTE_ROWS,
       liveHeight: 0,
       statusHeight: STATUS_ROWS,
+      ...(options.planHeight ? { planHeight: options.planHeight } : {}),
     });
   }
   const logicalLineCount = text.split('\n').length;
@@ -41,6 +43,7 @@ export function calculateComposerLayout(
     headerHeight: options.persistentHeader ? 1 : 0,
     liveHeight: 1,
     statusHeight: STATUS_ROWS,
+    ...(options.planHeight ? { planHeight: options.planHeight } : {}),
   });
 }
 
@@ -49,13 +52,15 @@ function withFooterHeight<T extends {
   headerHeight: number;
   liveHeight: number;
   statusHeight: number;
+  planHeight?: number;
 }>(layout: T) {
   return {
     ...layout,
     footerHeight: layout.frameHeight
       + layout.headerHeight
       + layout.liveHeight
-      + layout.statusHeight,
+      + layout.statusHeight
+      + (layout.planHeight ?? 0),
   };
 }
 

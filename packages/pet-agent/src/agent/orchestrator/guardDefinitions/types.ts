@@ -25,6 +25,7 @@ export type EmptyGuardConfig = Record<string, never>;
 
 export type ContextCompactionWatermarkGuardConfig = {
   contextWindowTokens?: number;
+  generationReserveTokens?: number;
   keepMessages?: number;
 };
 

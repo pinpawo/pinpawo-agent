@@ -1,34 +1,25 @@
-import {
-  indentXmlBlock,
-  promptBlock,
-  xmlTextBlock,
-} from './shared';
-import type { CapabilityPlannerInput } from '../capabilityPlannerRunner';
+import type { CapabilityPlannerInput } from '../capabilityPlanner/runner';
 import {
   CAPABILITY_PLANNER_AGENT_INPUT_PROMPT,
   CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT,
   CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT,
 } from './templates/capabilityPlannerAgent.prompt';
 
-function buildCompletedTaskBlock(
-  task: CapabilityPlannerInput['completedTask'],
-) {
-  return task ? xmlTextBlock('completed_task', task) : null;
-}
-
-function buildRemainingPlanBlock(
-  tasks: CapabilityPlannerInput['remainingPlan'],
-) {
-  if (tasks.length === 0) return null;
-  const lines = ['<remaining_plan>'];
-  for (const task of tasks) {
-    lines.push('  <task>');
-    lines.push(indentXmlBlock(xmlTextBlock('capability', task.capability), 4));
-    lines.push(indentXmlBlock(xmlTextBlock('description', task.task), 4));
-    lines.push('  </task>');
+function buildPlanningState(input: CapabilityPlannerInput) {
+  const lines: string[] = [];
+  if (input.completedTask) {
+    lines.push(`刚完成的任务：${input.completedTask}`);
   }
-  lines.push('</remaining_plan>');
-  return lines.join('\n');
+  if (input.completedTaskResult) {
+    lines.push(`任务结果摘要：${input.completedTaskResult}`);
+  }
+  if (input.remainingPlan.length > 0) {
+    lines.push('此前保留的后续任务：');
+    for (const task of input.remainingPlan) {
+      lines.push(`- [${task.capability}] ${task.task}`);
+    }
+  }
+  return lines.length > 0 ? lines.join('\n') : '无。';
 }
 
 export function buildCapabilityPlannerAgentSystemPrompt(
@@ -41,14 +32,6 @@ export function buildCapabilityPlannerAgentSystemPrompt(
 
 export function buildCapabilityPlannerAgentInput(input: CapabilityPlannerInput) {
   return CAPABILITY_PLANNER_AGENT_INPUT_PROMPT.render({
-    mode: input.mode,
-    completedTaskBlock: promptBlock(
-      buildCompletedTaskBlock(input.completedTask),
-      2,
-    ),
-    remainingPlanBlock: promptBlock(
-      buildRemainingPlanBlock(input.remainingPlan),
-      2,
-    ),
+    planningState: buildPlanningState(input),
   });
 }

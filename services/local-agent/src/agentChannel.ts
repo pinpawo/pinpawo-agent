@@ -9,8 +9,10 @@ import {
   type AgentInvokeInput,
   type AgentToolkit,
   type CapabilityArtifactStore,
+  type CapabilityRegistryBackend,
   type CompiledAgentRegistry,
   type OrchestratorConfig,
+  type ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
 import {
   createCapabilityCreatorCapability,
@@ -26,11 +28,14 @@ import {
   type TrendPromptItem,
 } from './capabilities/dailyPost';
 import { createPetProfileToolkit } from './toolkits/petProfile';
-import { buildLocalAgentModels } from './agentModels';
-import type { LocalImageModelInputOptions } from './localImageModelInput';
+import {
+  buildLocalAgentModels,
+  resolveLlmGenerationReserveTokens,
+} from './agentModels';
 import type { AgentLlmConfig } from './agentConfig';
 import type { AgentContext } from './contextLoader';
 import { buildLocalLlmConfig } from './llmConfig';
+import { getConfig } from './config';
 import { agentStore } from './agentStore';
 import { loadStoredConfig } from './storage';
 import { buildRuntimeEnvironmentSummary } from './runtimeEnvironment';
@@ -190,7 +195,9 @@ export function buildDecisionStructuredOutput(llmConfig: AgentLlmConfig): Orches
     ?? inferLlmStructuredOutputMethod(llmConfig.model, llmConfig.baseUrl);
   if (!method) return undefined;
 
-  const autoRepair = llmConfig.structuredOutputAutoRepair
+  const autoRepairEnabled = llmConfig.structuredOutputAutoRepair
+    ?? (method === 'jsonMode');
+  const autoRepair = autoRepairEnabled
     ? {
         autoRepair: {
           maxRetries: llmConfig.structuredOutputRepairMaxRetries ?? 1,
@@ -205,13 +212,12 @@ export function buildLocalChatAgentInput(params: {
   context: AgentContext;
   userMessage: string;
   llmConfig?: AgentLlmConfig;
-  /** Host-private model input adapter for local image rehydration/admission. */
-  modelInput?: Partial<LocalImageModelInputOptions>;
-  /** Cache identity for adapters that close over one durable session ledger. */
-  modelInputCacheKey?: string;
+  /** Cache identity for hosts that key a graph to one durable session ledger. */
+  sessionContextCacheKey?: string;
   toolkits?: AgentToolkit[];
   /** Complete host Toolkit definitions, including currently unavailable instances. */
   toolkitDefinitions?: readonly AgentToolkit[];
+  toolkitRuntimeManager?: ToolkitRuntimeManager;
   /** Host-owned diagnostic reporter whose dedupe state follows the host lifecycle. */
   reportCapabilityDiagnostics?: CapabilityDiagnosticReporter;
   /** Stable thread scope required by artifact discovery and checkpoint routing. */
@@ -231,6 +237,8 @@ export function buildLocalChatAgentInput(params: {
   sessionStartedAt?: string;
   /** IANA timezone name for interpreting relative dates in this session. */
   timezone?: string;
+  /** Explicit Capability registry backend. Defaults to local-agent configuration. */
+  capabilityRegistryBackend?: CapabilityRegistryBackend;
 }): AgentChannelSetup {
   if (!params.threadId.trim()) {
     throw new Error('Local chat requires a non-empty threadId');
@@ -239,9 +247,12 @@ export function buildLocalChatAgentInput(params: {
     throw new Error('Local chat requires a capability artifact store');
   }
   const llmConfig = params.llmConfig ?? buildLocalLlmConfig();
+  const capabilityRegistryBackend = params.capabilityRegistryBackend
+    ?? getConfig().capabilityRegistryBackend;
   const decisionStructuredOutput = buildDecisionStructuredOutput(llmConfig);
   const actor = buildActor(params.context);
-  const models = buildLocalAgentModels(llmConfig, params.modelInput);
+  const models = buildLocalAgentModels(llmConfig);
+  const generationReserveTokens = resolveLlmGenerationReserveTokens(llmConfig);
   const trendItems = toTrendPromptItems(params.context.context.trendItems);
   const sharedToolkits: AgentToolkit[] = [
     createPetProfileToolkit({
@@ -324,21 +335,28 @@ export function buildLocalChatAgentInput(params: {
       actor.petId,
       llmConfig.modelProfileId,
       llmConfig.modelProfileFingerprint,
-      params.modelInputCacheKey,
+      params.sessionContextCacheKey,
       llmConfig.model,
       llmConfig.observeModel ?? llmConfig.model,
       String(llmConfig.contextWindowTokens ?? 32000),
       String(llmConfig.subagentContextWindowTokens ?? llmConfig.contextWindowTokens ?? 32000),
+      String(generationReserveTokens ?? 0),
       params.checkpoint ? 'checkpoint' : 'memory',
+      capabilityRegistryBackend,
     ]),
     graphConfig: {
       models,
+      modelInputModalities: llmConfig.inputModalities ?? ['text'],
       actor,
       checkpoint: params.checkpoint,
       decisionStructuredOutput,
       contextWindowTokens: llmConfig.contextWindowTokens,
       subagentContextWindowTokens: llmConfig.subagentContextWindowTokens ?? llmConfig.contextWindowTokens,
+      generationReserveTokens,
+      subagentGenerationReserveTokens: generationReserveTokens,
       capabilityArtifactStore: params.capabilityArtifactStore,
+      toolkitRuntimeManager: params.toolkitRuntimeManager,
+      capabilityRegistryBackend,
     },
     registry: preparedRegistry.registry,
     input: {

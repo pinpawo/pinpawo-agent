@@ -56,7 +56,7 @@ test('timeline model commits only the settled ordered prefix', () => {
 });
 
 test('timeline formatting keeps multiline messages and operation state readable', () => {
-  assert.equal(formatTimelineEntry(user), '你\n> hello\n  world');
+  assert.equal(formatTimelineEntry(user), '  hello\n  world');
   assert.equal(
     formatTimelineEntry({ ...operation, phase: 'completed', summary: 'ok' }),
     '  ● Read file(ok)（完成）',
@@ -166,9 +166,9 @@ test('live timeline shows the newest streaming tail within its footer budget', (
     },
   };
   assert.equal(formatLiveSession(session, 20), 'PinPawo  …qrstuvwxyz');
-  assert.equal(formatLiveActivity(session, 0, 20), '⠋ PinPawo  …stuvwxyz');
-  assert.equal(formatLiveActivity(session, 1, 20), '⠙ PinPawo  …stuvwxyz');
-  assert.equal(formatLiveActivity(session, 10, 20), '⠋ PinPawo  …stuvwxyz');
+  assert.equal(formatLiveActivity(session, 0, 20), 'PinPawo  …uvwxyz');
+  assert.equal(formatLiveActivity(session, 1, 20), 'PinPawo  …uvwxyz');
+  assert.equal(formatLiveActivity(session, 10, 20), 'PinPawo  …uvwxyz');
   assert.equal(
     formatLiveActivity({
       ...session,
@@ -177,7 +177,7 @@ test('live timeline shows the newest streaming tail within its footer budget', (
         summary: 'Local helper',
       },
     }, 0, 20),
-    '⠋ 豆包  …nopqrstuvwxyz',
+    '豆包  …pqrstuvwxyz',
   );
 });
 
@@ -194,11 +194,11 @@ test('live activity distinguishes progress from paused and stopping runs', () =>
   };
   assert.equal(
     formatLiveActivity(session, 0),
-    '⠋ PinPawo is thinking',
+    'PinPawo is thinking',
   );
   assert.equal(
     formatLiveActivity(session, 10, 80, true),
-    '⠋ PinPawo is still thinking',
+    'PinPawo is still thinking',
   );
   assert.equal(
     formatLiveActivity({
@@ -208,7 +208,7 @@ test('live activity distinguishes progress from paused and stopping runs', () =>
         startedAt: 1_000,
       },
     }, 0, 80, false, 66_500),
-    '⠋ PinPawo is thinking · 1m 5s',
+    'PinPawo is thinking · 1m 5s',
   );
   assert.equal(
     formatLiveActivity({
@@ -218,7 +218,7 @@ test('live activity distinguishes progress from paused and stopping runs', () =>
         startedAt: 1_000,
       },
     }, 0, 20, false, 66_500),
-    '⠋ PinPawo i… · 1m 5s',
+    'PinPawo… · 1m 5s',
   );
   assert.equal(
     formatLiveActivity({
@@ -228,7 +228,7 @@ test('live activity distinguishes progress from paused and stopping runs', () =>
         summary: 'Local helper',
       },
     }, 1),
-    '⠙ 豆包 is thinking',
+    '豆包 is thinking',
   );
   assert.equal(isLiveActivityPulseActive(session, 9), true);
   assert.equal(isLiveActivityPulseActive(session, 10_000), true);
@@ -366,10 +366,10 @@ test('a pending operation keeps later settled entries in the live ordered tail',
       formatTimelineEntry(entry)
     )),
     [
-      '你\n> hello\n  world',
+      '  hello\n  world',
       '  ◌ Read file（开始）',
-      'subagent\n  progress',
-      'assistant\n| done',
+      'progress',
+      '| done',
     ],
   );
 });

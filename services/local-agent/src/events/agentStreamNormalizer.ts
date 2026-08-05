@@ -84,9 +84,15 @@ function unwrapToolMessageOutput(output: unknown): unknown {
   return output;
 }
 
-function readToolPhase(event: StreamToolsPayload['event']): AgentOperationPhase {
+function readToolPhase(
+  event: StreamToolsPayload['event'],
+  output: unknown,
+): AgentOperationPhase {
   if (event === 'on_tool_start') return 'started';
-  if (event === 'on_tool_end') return 'completed';
+  if (event === 'on_tool_end') {
+    const record = readJsonRecord(output);
+    return record?.ok === false ? 'failed' : 'completed';
+  }
   if (event === 'on_tool_error') return 'failed';
   return 'updated';
 }
@@ -111,13 +117,25 @@ function mergeSummary(
 function summarizeInput(
   summarize: ((input: unknown) => OperationSummary | null) | undefined,
   input: unknown,
+  toolName: string,
 ): OperationSummary | null | undefined {
   if (!summarize) return undefined;
-  const record = typeof input === 'string' ? readJsonRecord(input) : null;
-  if (record) {
-    return summarize(record) ?? summarize(input);
+  try {
+    const record = typeof input === 'string' ? readJsonRecord(input) : null;
+    if (record) {
+      return summarize(record) ?? summarize(input);
+    }
+    return summarize(input);
+  } catch {
+    // Tool lifecycle events may surface before a provider has produced
+    // parseable arguments. Operation metadata is presentation-only and must
+    // never prevent the actual tool validation/error path from reaching the
+    // model or client.
+    console.warn(
+      `[agent-stream] omitted input summary for ${toolName}; input was incomplete or invalid`,
+    );
+    return undefined;
   }
-  return summarize(input);
 }
 
 function summarizeOutput(
@@ -166,7 +184,7 @@ export function normalizeToolStreamEvent(
     payload.output !== undefined ? payload.output : payload.data,
   );
   const summary = [
-    summarizeInput(metadata?.summarizeInput, payload.input),
+    summarizeInput(metadata?.summarizeInput, payload.input, payload.name),
     summarizeOutput(metadata?.summarizeOutput, output),
     metadata?.summarizeError?.(payload.error),
   ].reduce(mergeSummary, {});
@@ -174,7 +192,7 @@ export function normalizeToolStreamEvent(
   return {
     type: 'operation',
     requestId,
-    phase: readToolPhase(payload.event),
+    phase: readToolPhase(payload.event, output),
     operation: {
       id: payload.toolCallId,
       kind: operationKindFromSource(metadata?.source, payload.name),

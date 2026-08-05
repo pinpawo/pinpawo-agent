@@ -5,6 +5,10 @@ export type EntryDecisionMode = 'answer' | 'needs_plan';
 export type EntryDecisionInput = {
   userRequest: string;
   conversationContext?: string[];
+  conversationMessages?: Array<{
+    role: 'user' | 'assistant';
+    content: string;
+  }>;
 };
 
 export type EntryDecisionExpected = {
@@ -206,6 +210,36 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
       reason: 'The demonstrative refers to the latest review, not the older already-published findings.',
     },
     metadata: { difficulty: 'hard', reason: 'Native message recency must resolve the latest review referent.', source: SOURCE_FILE },
+  },
+  {
+    id: `${SUITE}.current-check-ignores-unrelated-pending-request`,
+    name: 'current-check-ignores-unrelated-pending-request',
+    suite: SUITE,
+    tags: ['entry_decision', 'route_control', 'context_synthesis'],
+    input: {
+      userRequest: 'OK，然后检查一下目前本周工作清单中 Issue 发布的情况。注意只是一次检查，不要发新的。',
+      conversationMessages: [{
+        role: 'user',
+        content: '你消化下当前的 wiki 内容，然后帮我看下本周各个仓库的工作完成情况。',
+      }, {
+        role: 'assistant',
+        content: '本周工作完成情况已整理：多个仓库的 Issue 和 PR 状态已核查，后续可按需要继续安排或发布相关工作项。',
+      }, {
+        role: 'user',
+        content: '在 qban-ai-agents 仓库中创建一个 GitHub Issue，标题为「主动感知 MVP：预计算+事件触发方案设计」。',
+      }, {
+        role: 'assistant',
+        content: 'Issue 已创建：https://github.com/aisouls/qban-ai-agents/issues/431。',
+      }, {
+        role: 'user',
+        content: 'OK，你帮我发到钉钉的群里。把这个 issue 的链接。',
+      }],
+    },
+    expected: {
+      mode: 'needs_plan',
+      reason: 'The latest request explicitly scopes work to a current read-only Issue check. The earlier unfulfilled DingTalk send request must not be resumed, and earlier summaries do not provide the new Issue observation.',
+    },
+    metadata: { difficulty: 'hard', reason: 'Regression distilled from a production answer trace: long history must not turn a current status check into a direct answer or revive the earlier DingTalk send request.', source: SOURCE_FILE },
   },
   {
     id: `${SUITE}.explore-before-implementation-needs-plan`,

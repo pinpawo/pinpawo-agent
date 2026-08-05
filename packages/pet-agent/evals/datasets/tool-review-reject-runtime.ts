@@ -47,11 +47,11 @@ const cases: AgentEvalCase<ToolReviewRejectRuntimeInput, ToolReviewRejectRuntime
       expectedInterrupted: true,
       expectedFinalInterrupt: false,
       expectedToolRunCount: 0,
-      expectedRejectedToolResultSeenBySubagent: true,
-      expectedHandoffPresent: true,
+      expectedRejectedToolResultSeenBySubagent: false,
+      expectedHandoffPresent: false,
       expectedAuthorizationCount: 0,
-      expectedFinalAnnounceIncludes: ['按用户决定', '完成无需该工具的结果'],
-      reason: 'Rejecting a reviewed tool call must resume the same subagent with a cancellation ToolMessage, then hand off only the subagent’s real final result.',
+      expectedFinalAnnounceIncludes: [],
+      reason: 'Rejecting a reviewed tool action must roll it back without a ToolMessage, model resume, or handoff, while retaining the delegation for explicit continuation.',
     },
     metadata: {
       difficulty: 'hard',
@@ -66,7 +66,7 @@ export const toolReviewRejectRuntimeDataset: AgentEvalDataset<
   ToolReviewRejectRuntimeExpected
 > = {
   name: SUITE,
-  description: 'Runtime eval for reviewed tool-call rejection: reject must resume the same subagent invocation before normal handoff.',
+  description: 'Runtime eval for reviewed tool-call rejection: reject must roll back the pending action and suspend the delegation.',
   cases,
   metadata: {
     owner: 'pet-agent',

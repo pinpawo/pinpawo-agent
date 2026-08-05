@@ -32,7 +32,10 @@ export function createCompactContextNode(params: {
   return async function compactContext(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
     const outcome = evaluateGuard(contextCompactionWatermarkGuard, {
       state,
-      config: { contextWindowTokens: params.config.contextWindowTokens },
+      config: {
+        contextWindowTokens: params.config.contextWindowTokens,
+        generationReserveTokens: params.config.generationReserveTokens,
+      },
       position: ORCHESTRATOR_GUARD_POSITION.CONTEXT_COMPACTION,
     }, { emit: guardDecisionEmitter(runnableConfig), runId: state.runId });
     if (outcome.kind !== 'maintain') {

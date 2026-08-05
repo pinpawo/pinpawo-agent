@@ -4,26 +4,23 @@ import { tmpdir } from 'node:os';
 import { Command } from '@langchain/langgraph';
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { materializeCapabilityDocumentWorkspace } from '../../capabilityDocumentWorkspace';
-import { createCapabilityPlannerAgent } from '../../capabilityPlannerAgent';
+import { materializeCapabilityDocumentWorkspace } from '../../capabilityPlanner/documentWorkspace';
+import { createCapabilityPlannerAgent } from '../../capabilityPlanner/agent';
 import type {
   CapabilityPlannerInput,
   CapabilityPlannerResult,
   CapabilityPlannerRunner,
-  CapabilityPlannerTask,
-} from '../../capabilityPlannerRunner';
+} from '../../capabilityPlanner/runner';
 import { materializeDelegation } from '../../delegationBriefing';
 import { appendRunDelegationSummary } from '../../delegations';
 import { isContextCompactionMessage } from '../../contextCompaction';
-import {
-  mainConversationMessages,
-  toolProtocolSafeMessages,
-} from '../../messageLanes';
+import { mainConversationMessages } from '../../messageLanes';
 import type { OrchestratorStateType } from '../../state';
 import type {
   CapabilityPlanTask,
   MessageLane,
   OrchestratorConfig,
+  PlannerAnswerDisposition,
   RunNextDelegation,
 } from '../../types';
 import {
@@ -36,44 +33,29 @@ const DEFAULT_CAPABILITY_PLANNER_WORKSPACE_ROOT = join(
   tmpdir(),
   'pinpawo-capability-workspaces',
 );
-
 function buildPlannerMode(state: OrchestratorStateType): CapabilityPlannerInput['mode'] {
   return state.runDelegationSummaries.length === 0
     ? 'entry'
     : 'boundary';
 }
 
-function buildPlannerMessages(messages: BaseMessage[]) {
-  // Planner policy comes only from its own system prompt. Main Human/AI turns
-  // remain verbatim; framework compaction is retained as lower-authority evidence.
-  const projectedMessages = mainConversationMessages(messages).flatMap((message) => {
+function buildPlannerContext(state: OrchestratorStateType) {
+  const messages = mainConversationMessages(state.messages).flatMap((message) => {
     const type = message._getType();
     if (type === 'human' || type === 'ai') return [message];
-    if (isContextCompactionMessage(message)) {
-      return [new AIMessage(message.content)];
-    }
-    return [];
+    return isContextCompactionMessage(message) ? [new AIMessage(message.content)] : [];
   });
-  return toolProtocolSafeMessages(projectedMessages);
-}
-
-function buildPlannerContext(state: OrchestratorStateType) {
   const latestCompletedDelegation = [...state.runDelegationSummaries]
     .reverse()
     .find((item) => item.status === 'completed');
   return {
-    messages: buildPlannerMessages(state.messages),
+    messages,
     completedTask: latestCompletedDelegation?.task ?? null,
+    completedTaskResult: latestCompletedDelegation?.resultPreview ?? null,
   };
 }
 
-function normalizeRemainingPlan(
-  tasks: readonly CapabilityPlannerTask[],
-): CapabilityPlanTask[] {
-  return tasks.map(normalizePlannerTask);
-}
-
-function normalizePlannerTask(task: CapabilityPlannerTask): CapabilityPlanTask {
+function normalizePlannerTask(task: CapabilityPlanTask): CapabilityPlanTask {
   const capability = task.capability.trim();
   const description = task.task.trim();
   if (!capability || !description) {
@@ -85,51 +67,16 @@ function normalizePlannerTask(task: CapabilityPlannerTask): CapabilityPlanTask {
   };
 }
 
-function samePlannerTask(left: CapabilityPlanTask, right: CapabilityPlanTask) {
-  return left.capability === right.capability && left.task === right.task;
-}
-
-function normalizeUnavailableResult(result: Extract<CapabilityPlannerResult, { task: string }>) {
-  const task = result.task.trim();
-  const reason = result.reason.trim();
-  if (!task || !reason) {
-    throw new Error('Capability Planner submitted an unavailable result with empty text.');
+function normalizePlannerAnswer(
+  answer: PlannerAnswerDisposition,
+): PlannerAnswerDisposition {
+  const reason = answer.reason.trim();
+  const context = answer.context.trim();
+  const question = answer.question?.trim() || null;
+  if (!reason || !context) {
+    throw new Error('Capability Planner returned Answer facts with empty text.');
   }
-  return { task, reason };
-}
-
-/**
- * Boundary planning starts from an already accepted future plan. Keep that
- * plan stable unless its Capability disappeared from the current workspace;
- * completed items can be removed by returning a later plan item as the new
- * first task.
- */
-export function assertBoundaryPlanContinuity(
-  input: CapabilityPlannerInput,
-  result: CapabilityPlannerResult,
-) {
-  if (input.mode !== 'boundary' || input.remainingPlan.length === 0 || !('tasks' in result)) {
-    return;
-  }
-  const firstPlannedCapability = input.remainingPlan[0]?.capability;
-  if (!firstPlannedCapability
-    || !input.workspace.capabilityNames.includes(firstPlannedCapability)) {
-    return;
-  }
-
-  const plannedTasks = input.remainingPlan.map(normalizePlannerTask);
-  const returnedTasks = result.tasks.map(normalizePlannerTask);
-  let plannedIndex = 0;
-  for (const task of returnedTasks) {
-    const matchIndex = plannedTasks.findIndex((plannedTask, index) =>
-      index >= plannedIndex && samePlannerTask(plannedTask, task));
-    if (matchIndex < 0) {
-      throw new Error(
-        'Capability Planner changed boundary remaining_plan without an invalidated first task.',
-      );
-    }
-    plannedIndex = matchIndex + 1;
-  }
+  return { reason, context, question };
 }
 
 function materializeNextDelegation(params: {
@@ -175,7 +122,7 @@ function materializeNextDelegation(params: {
       ...materializedDelegation.laneMessages,
     ] as BaseMessage[],
     runNextDelegation,
-    runPendingTask: null,
+    runPlannerReturn: null,
     runCapabilityPlan: remainingPlan,
     taskActiveDelegation,
     runDelegationSummaries: appendRunDelegationSummary(
@@ -192,17 +139,13 @@ function buildPlannerTransition(params: {
   result: CapabilityPlannerResult;
 }) {
   const { state, input, result } = params;
-  assertBoundaryPlanContinuity(input, result);
   if (!('tasks' in result)) {
-    const unavailable = normalizeUnavailableResult(result);
+    const answer = normalizePlannerAnswer(result.answer);
     return {
       goto: 'answer' as const,
       update: {
         runNextDelegation: null,
-        runPendingTask: {
-          task: unavailable.task,
-          contextSummary: unavailable.reason,
-        },
+        runPlannerReturn: answer,
         runCapabilityPlan: [],
       },
     };
@@ -213,7 +156,7 @@ function buildPlannerTransition(params: {
     throw new Error('Capability Planner submitted an empty task list.');
   }
   const nextTask = normalizePlannerTask(rawNextTask);
-  const remainingPlan = normalizeRemainingPlan(remainingTasks);
+  const remainingPlan = remainingTasks.map(normalizePlannerTask);
   return {
     goto: 'capability' as const,
     update: materializeNextDelegation({
@@ -228,14 +171,13 @@ function buildPlannerTransition(params: {
 function createDefaultPlannerRunner(config: OrchestratorConfig): CapabilityPlannerRunner {
   return createCapabilityPlannerAgent({
     model: config.models.act,
+    registryBackend: config.capabilityRegistryBackend ?? 'filesystem',
   });
 }
 
 export function createCapabilityPlannerNode(config: OrchestratorConfig) {
   const runner = config.capabilityPlannerRunner
     ?? createDefaultPlannerRunner(config);
-  const workspaceRoot = config.capabilityPlannerWorkspaceRoot
-    ?? DEFAULT_CAPABILITY_PLANNER_WORKSPACE_ROOT;
 
   return async function capabilityPlannerNode(
     state: OrchestratorStateType,
@@ -246,7 +188,7 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
       getInvokeOptions(runnableConfig).allowedCapabilityNames;
     const workspace = await materializeCapabilityDocumentWorkspace({
       registry,
-      cacheRoot: workspaceRoot,
+      cacheRoot: DEFAULT_CAPABILITY_PLANNER_WORKSPACE_ROOT,
       ...(allowedCapabilityNames ? { allowedCapabilityNames } : {}),
     });
     const mode = buildPlannerMode(state);

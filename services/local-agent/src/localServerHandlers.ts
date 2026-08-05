@@ -144,6 +144,7 @@ export function createLocalServerHandlers(
       requiredInputModalities: checkpoint.requiredInputModalities,
       sessionTokenUsage: checkpoint.sessionTokenUsage,
       pendingReview,
+      currentPlan: checkpoint.currentPlan,
     });
   };
 
@@ -152,7 +153,7 @@ export function createLocalServerHandlers(
     return sessions.map(projectChatSessionSummary);
   };
 
-  const listModelProfiles = (sessionId: string) => {
+  const listModelProfiles = async (sessionId: string) => {
     const requestDeps = runtimeDeps.get();
     const activeSession = tuiSessions.getActiveSession(requestDeps.actorId);
     if (!tuiSessions.getSession(requestDeps.actorId, sessionId)) {
@@ -167,10 +168,16 @@ export function createLocalServerHandlers(
         { code: 'session_not_active' },
       );
     }
+    // Read the modalities off the transcript rather than a stored counter, so a
+    // session that was rolled back or repaired reports what it actually holds.
+    const { requiredInputModalities } = await tuiSessions.readSessionCheckpointPoint(
+      requestDeps,
+      activeSession,
+    );
     const profiles: AgentModelProfileSummary[] = [
       ...requestDeps.modelProfiles.listAvailable().map((profile) => {
         const compatible = supportsInputModalities(
-          activeSession.requiredInputModalities,
+          requiredInputModalities,
           profile.inputModalities,
         );
         return {
@@ -181,9 +188,9 @@ export function createLocalServerHandlers(
           issues: compatible
             ? []
             : [
-                `Session requires ${activeSession.requiredInputModalities.join(', ')} input; model is missing ${
+                `Session requires ${requiredInputModalities.join(', ')} input; model is missing ${
                   missingInputModalities(
-                    activeSession.requiredInputModalities,
+                    requiredInputModalities,
                     profile.inputModalities,
                   ).join(', ')
                 }`,
@@ -217,7 +224,7 @@ export function createLocalServerHandlers(
       sessionId,
       defaultProfileId: requestDeps.modelProfiles.defaultProfileId,
       selectedProfileId: activeSession.modelProfileId,
-      requiredInputModalities: [...activeSession.requiredInputModalities],
+      requiredInputModalities: [...requiredInputModalities],
       profiles,
     };
   };
@@ -310,24 +317,6 @@ export function createLocalServerHandlers(
         );
         return;
       }
-      if (!supportsInputModalities(
-        activeSession.requiredInputModalities,
-        selectedProfile.inputModalities ?? ['text'],
-      )) {
-        sendModelSelectionError(
-          peer,
-          message,
-          'profile_incompatible',
-          `Session requires ${activeSession.requiredInputModalities.join(', ')} input; model is missing ${
-            missingInputModalities(
-              activeSession.requiredInputModalities,
-              selectedProfile.inputModalities ?? ['text'],
-            ).join(', ')
-          }`,
-        );
-        return;
-      }
-
       const candidateSession = {
         ...activeSession,
         modelProfileId: message.modelProfileId,
@@ -336,6 +325,26 @@ export function createLocalServerHandlers(
         requestDeps,
         candidateSession,
       );
+      // The transcript is the authority on which modalities the session holds,
+      // so a profile is rejected only when the history really needs more than
+      // it accepts.
+      if (!supportsInputModalities(
+        checkpoint.requiredInputModalities,
+        selectedProfile.inputModalities ?? ['text'],
+      )) {
+        sendModelSelectionError(
+          peer,
+          message,
+          'profile_incompatible',
+          `Session requires ${checkpoint.requiredInputModalities.join(', ')} input; model is missing ${
+            missingInputModalities(
+              checkpoint.requiredInputModalities,
+              selectedProfile.inputModalities ?? ['text'],
+            ).join(', ')
+          }`,
+        );
+        return;
+      }
       if (checkpoint.pendingReview) {
         sendModelSelectionError(
           peer,
@@ -351,9 +360,10 @@ export function createLocalServerHandlers(
         messages: checkpoint.messages,
         deps: requestDeps,
         modelProfileId: candidateSession.modelProfileId,
-        requiredInputModalities: candidateSession.requiredInputModalities,
+        requiredInputModalities: checkpoint.requiredInputModalities,
         sessionTokenUsage: checkpoint.sessionTokenUsage,
         pendingReview: null,
+        currentPlan: checkpoint.currentPlan,
       });
       const session = tuiSessions.selectModelProfile(
         requestDeps.actorId,
@@ -423,6 +433,7 @@ export function createLocalServerHandlers(
           requiredInputModalities: session.requiredInputModalities,
           sessionTokenUsage: null,
           pendingReview: null,
+          currentPlan: null,
         }),
       };
     } finally {
@@ -469,6 +480,7 @@ export function createLocalServerHandlers(
           requiredInputModalities: result.session.requiredInputModalities,
           sessionTokenUsage: result.sessionTokenUsage,
           pendingReview,
+          currentPlan: result.currentPlan,
         }),
       };
     } finally {
@@ -647,7 +659,7 @@ export function createLocalServerHandlers(
           client.send({
             type: 'model.list.result',
             requestId: message.requestId,
-            ...listModelProfiles(message.sessionId),
+            ...(await listModelProfiles(message.sessionId)),
           });
         } catch (error) {
           sendModelSelectionError(

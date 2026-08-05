@@ -34,11 +34,14 @@ function emptyLocalPlugins(): LoadedLocalPlugins {
   };
 }
 
-export async function loadPlugins(): Promise<LoadedLocalPlugins> {
-  return loadPluginsFromDir(PLUGINS_DIR);
+export async function loadPlugins(options: { resolveAvailability?: boolean } = {}): Promise<LoadedLocalPlugins> {
+  return loadPluginsFromDir(PLUGINS_DIR, options);
 }
 
-export async function loadPluginsFromDir(pluginsDir: string): Promise<LoadedLocalPlugins> {
+export async function loadPluginsFromDir(
+  pluginsDir: string,
+  options: { resolveAvailability?: boolean } = {},
+): Promise<LoadedLocalPlugins> {
   if (!existsSync(pluginsDir)) return emptyLocalPlugins();
 
   const files = readdirSync(pluginsDir).filter((file) => file.endsWith('.mjs') || file.endsWith('.js'));
@@ -73,6 +76,13 @@ export async function loadPluginsFromDir(pluginsDir: string): Promise<LoadedLoca
   }
 
   toolkits.forEach(validateToolkitDefinition);
+  if (options.resolveAvailability === false) {
+    return {
+      toolkitDefinitions: toolkits,
+      toolkits: [...toolkits],
+      plugins,
+    };
+  }
   const availabilityRecords = await Promise.all(
     toolkits.map((toolkit) => resolveToolkitAvailability(toolkit)),
   );

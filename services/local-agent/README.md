@@ -89,6 +89,7 @@ pinpawo tui --legacy
 pinpawo detect
 pinpawo browser extension status
 pinpawo browser extension register --extension-id <id>
+pinpawo browser extension repair --extension-id <id>
 pinpawo browser extension unregister
 pinpawo capability list
 pinpawo capability validate ./my-capability
@@ -119,6 +120,11 @@ For the official Chrome Web Store build, run
 `pinpawo browser extension register` without `--extension-id`. The option
 is only needed for an unpacked development build. Registration preserves the
 official Store ID and any previously registered development IDs.
+
+`pinpawo browser extension status` reports whether the Native Messaging setup is
+healthy, including the wrapper, native-host entry, and manifest consistency. If it
+reports `repairRecommended: true`, run `pinpawo browser extension repair` (with an
+unpacked extension ID when applicable) and restart the local agent.
 
 `pinpawo run --stdio` starts one logical local-agent peer over newline-delimited
 JSON. It reads one `LocalAgentClientMessage` per stdin line and writes one

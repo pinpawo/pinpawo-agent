@@ -1,17 +1,38 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import {
   defineCapability,
+  defineCapabilityDocumentSource,
   defineInstructionDocument,
   type AgentCapability,
 } from '@pinpawo/pet-agent';
-import { capabilityCreatorInstructions } from './instructions';
+import { parseFrontmatterDocument } from '../../capabilityLoader';
+
+function resolveCapabilityCreatorDocumentUrl(): URL {
+  const sourceUrl = new URL('./CAPABILITY.md', import.meta.url);
+  if (existsSync(sourceUrl)) return sourceUrl;
+
+  const bundledUrl = new URL('./capabilities/capabilityCreator/CAPABILITY.md', import.meta.url);
+  if (existsSync(bundledUrl)) return bundledUrl;
+
+  throw new Error('Built-in capability_creator Capability document is missing');
+}
 
 export function createCapabilityCreatorCapability(): AgentCapability {
+  const documentUrl = resolveCapabilityCreatorDocumentUrl();
+  const documentPath = fileURLToPath(documentUrl);
+  const source = readFileSync(documentUrl, 'utf8');
+  const { frontmatter, body } = parseFrontmatterDocument(source, documentPath);
   return defineCapability({
-    name: 'capability_creator',
-    description: '生成、修改并验证用户自定义 CAPABILITY.md 目录。',
-    uses: ['bash', 'capability_creator'],
+    name: frontmatter.name,
+    description: frontmatter.description,
+    uses: frontmatter.uses,
     instructions: defineInstructionDocument({
-      content: capabilityCreatorInstructions,
+      content: body,
+    }),
+    document: defineCapabilityDocumentSource({
+      filePath: documentPath,
+      content: source,
     }),
   });
 }

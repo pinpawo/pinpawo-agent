@@ -5,7 +5,6 @@ export {
   getCachedBrowserAvailability,
 } from './toolkit';
 export {
-  browserSession,
   detectBrowserEnvironment,
   detectBrowserStatus,
 } from './session';

@@ -12,6 +12,7 @@ import { loadStoredConfig } from './storage';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
   type BuiltinGlobalReviewPolicyMode,
+  type CapabilityRegistryBackend,
 } from '@pinpawo/pet-agent';
 
 export { isMissingOrGeneratedApiPlaceholder } from './configDiagnostics';
@@ -121,6 +122,22 @@ function getGlobalReviewPolicyMode(): BuiltinGlobalReviewPolicyMode {
     ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION;
 }
 
+export function resolveCapabilityRegistryBackend(
+  raw: string | undefined,
+): CapabilityRegistryBackend | undefined {
+  const normalized = raw?.trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (normalized === 'filesystem') {
+    return 'filesystem';
+  }
+  if (normalized === 'memory') {
+    return 'memory';
+  }
+  throw new Error(
+    'Capability registry backend must be "filesystem" or "memory".',
+  );
+}
+
 const apiBaseUrl = optional('API_BASE_URL', 'api_base_url').replace(/\/$/, '');
 const hasuraEndpoint = optional('HASURA_ENDPOINT', 'hasura_endpoint').replace(/\/$/, '');
 const agentToken = optional('AGENT_TOKEN', 'agent_token');
@@ -160,11 +177,12 @@ export type Config = Readonly<{
   modelProfileRegistry: ModelProfileRegistrySnapshot;
   modelProfileId: string;
   modelProfileFingerprint: string;
-  structuredOutputAutoRepair: boolean;
+  structuredOutputAutoRepair?: boolean;
   structuredOutputRepairMaxRetries?: number;
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
   workdir: string;
   browserBackend: string;
+  capabilityRegistryBackend: CapabilityRegistryBackend;
   pollIntervalSeconds: number;
   localServerPort: number;
 }>;
@@ -190,7 +208,7 @@ function readConfigDefaults(): Config {
     structuredOutputAutoRepair: getBoolean(
       'LLM_STRUCTURED_OUTPUT_AUTO_REPAIR',
       'structured_output_auto_repair',
-    ) ?? false,
+    ),
     structuredOutputRepairMaxRetries: getNumber(
       'LLM_STRUCTURED_OUTPUT_REPAIR_MAX_RETRIES',
       'structured_output_repair_max_retries',
@@ -198,6 +216,12 @@ function readConfigDefaults(): Config {
     globalReviewPolicyMode: getGlobalReviewPolicyMode(),
     workdir: get('PINPAWO_WORKDIR', 'workdir') || process.cwd() || homedir(),
     browserBackend: get('PINPAWO_BROWSER_BACKEND', 'browser_backend') || 'auto',
+    capabilityRegistryBackend: resolveCapabilityRegistryBackend(
+      get(
+        'PINPAWO_CAPABILITY_REGISTRY_BACKEND',
+        'capability_registry_backend',
+      ),
+    ) ?? 'filesystem',
     pollIntervalSeconds: Number(process.env.POLL_INTERVAL_SECONDS ?? 60),
     localServerPort: Number(process.env.LOCAL_SERVER_PORT ?? 3210),
   });

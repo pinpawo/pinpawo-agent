@@ -131,6 +131,33 @@ test('context compaction watermark guard maintains when main provider usage cros
   });
 });
 
+test('context compaction watermark guard subtracts the generation reserve', () => {
+  const state = baseState({
+    messages: [
+      new HumanMessage('old request'),
+      usageMessage('latest response', 600),
+    ],
+  });
+
+  const outcome = evaluateGuard(contextCompactionWatermarkGuard, {
+    state,
+    config: {
+      contextWindowTokens: 1000,
+      generationReserveTokens: 200,
+      keepMessages: 1,
+    },
+    position: ORCHESTRATOR_GUARD_POSITION.CONTEXT_COMPACTION,
+  });
+
+  assert.equal(outcome.kind, 'maintain');
+  assert.deepEqual(outcome.kind === 'maintain' && outcome.details, {
+    mainMessageCount: 2,
+    keepMessages: 1,
+    latestInputTokens: 600,
+    watermarkTokens: 600,
+  });
+});
+
 test('delegation outcome guard derives handoff refusal for a limit_reached active delegation', async () => {
   const announce = new AIMessage('limit reached');
   setPinpetMeta(announce, {

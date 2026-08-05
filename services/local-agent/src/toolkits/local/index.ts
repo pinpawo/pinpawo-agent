@@ -28,9 +28,17 @@ import {
 } from './fileTools';
 import { createArtifactDiscoveryTools } from './artifactDiscoveryTools';
 import { downloadFileTool, httpFetchTool, networkOperationMetadata } from './networkTools';
+import { jqQueryTool, jsonOperationMetadata } from './jsonTools';
 import { gitTools, gitOperationMetadata } from './gitTools';
 import { globSearchTool, grepSearchTool, searchOperationMetadata } from './searchTools';
+import { shellRuntime, type ShellRuntimeBinding } from './shellRuntime';
 import {
+  createProcessTools,
+  processOperationMetadata,
+  processTools,
+} from './processTools';
+import {
+  createRunShellTool,
   getCurrentTimeTool,
   normalizeShellActionInput,
   runShellTool,
@@ -48,6 +56,7 @@ const localUtilityTools: StructuredTool[] = [
   copyPathTool,
   mkdirPathTool,
   listDirTool,
+  jqQueryTool,
   globSearchTool,
   grepSearchTool,
   httpFetchTool,
@@ -58,6 +67,7 @@ const bashToolkitTools: StructuredTool[] = [
   ...localUtilityTools,
   getCurrentTimeTool,
   runShellTool,
+  ...processTools,
 ];
 
 const coreLocalTools: StructuredTool[] = [
@@ -100,10 +110,12 @@ export function createArtifactDiscoveryToolkit(params: {
 const bashToolkitInstructions = [
   '你可以使用本地文件、搜索、下载和 shell 工具完成任务。',
   '读取代码、Markdown、JSON、配置等可读文本时优先使用 view_file_chunk；read_file 只用于 PDF、Word、表格、图片等非文本文件的分析。',
-  '优先使用语义具体的文件工具：view_file_chunk、read_file、list_dir、glob_search、grep_search。',
-  '编辑已有文件一律使用 apply_patch（V4A 上下文补丁，支持一次修改多个文件）；只有新建文件或完全重写整个文件时才用 write_file。',
+  '优先使用语义具体的文件工具：view_file_chunk、read_file、jq_query、list_dir、glob_search、grep_search。',
+  '分析 JSON 文件的结构、字段、分组或计数时优先使用 jq_query；不要用 run_shell 或临时 Python 脚本包装 jq。',
+  '编辑已有文件一律使用 apply_patch（支持一次修改多个文件）；只有新建文件或完全重写整个文件时才用 write_file。',
   '查询当前时间优先使用 get_current_time；不要用 run_shell 包装 date 命令。',
   'run_shell 只作为兜底工具；不要用它替代已有的读写、移动、复制、下载或 HTTP 工具。',
+  '命令超时不代表失败，它会转入后台并返回进程 id：用 wait_process 跟进进度，terminate_process 终止不再需要的命令，list_processes 查看本次执行启动的后台命令。不要因为超时就重复执行同一命令。',
   '常规 git 操作由 git toolkit 提供；不要用 run_shell 包装这些常规 git 操作。',
   '执行高风险 shell 命令时必须遵守 toolkit 的人类审批流程，不要绕过审批。',
   '修改文件前先读取现状；修改后优先用 validate_structured_file、grep_search 或 run_shell 做必要验证。',
@@ -113,7 +125,9 @@ const bashToolkitOperations = {
   ...fileOperationMetadata,
   ...searchOperationMetadata,
   ...networkOperationMetadata,
+  ...jsonOperationMetadata,
   ...shellOperationMetadata,
+  ...processOperationMetadata,
 };
 
 const gitToolkitInstructions = [
@@ -141,6 +155,11 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
         subject: ({ input }) => normalizeShellActionInput(input),
       }),
     }),
+    // The process tools carry no review policy on purpose. They only address
+    // processes this same execution already started through an approved
+    // run_shell, so waiting on one, listing them, or stopping one grants no
+    // authority the command did not already have — the same reasoning that
+    // leaves browser_close unreviewed.
   };
   return defineToolkit({
     name: 'bash',
@@ -148,8 +167,29 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
     tools: createToolDefinitions(tools, bashToolkitOperations, reviews),
     instructions: bashToolkitInstructions.join('\n'),
     reviewGuidance: {
-      allow: 'A shell invocation is an execution mechanism, so its risk comes from the concrete command and scope. Treat commands confined to the current workspace as eligible for automatic authorization when their effects are clear and limited, such as build, test, typecheck, lint, format, inspection, other reversible development operations, and deletion of explicitly named non-sensitive files inside the current workspace.',
+      allow: 'A shell invocation is an execution mechanism, so its risk comes from the concrete command and scope. Treat commands as eligible for automatic authorization when their effects are clear and limited, including read-only inspection of explicitly named non-sensitive paths outside the current workspace, and scoped build, test, typecheck, lint, format, inspection, other reversible development operations, or deletion of explicitly named non-sensitive files inside the current workspace.',
       ask: 'Require human authorization when a command has broad or unclear effects, deletes recursively, deletes outside the current workspace, deletes user data or sensitive files, elevates privileges, changes permissions or system services, installs or executes untrusted software, exposes credentials or data, publishes or deploys artifacts, or rewrites shared version-control history.',
+    },
+    runtime: {
+      start: () => {
+        shellRuntime.start();
+        return shellRuntime;
+      },
+      resolve: (_root, context) => shellRuntime.resolve(context.execution),
+      bindTools: (binding) => {
+        const shell = binding as ShellRuntimeBinding;
+        // The framework matches bound tools to the static inventory by
+        // position, so this must return the whole list in order. Only the
+        // process-aware tools get a bound implementation; the rest are handed
+        // back as they are.
+        const bound = new Map<string, StructuredTool>(
+          [createRunShellTool(shell), ...createProcessTools(shell)]
+            .map((item) => [item.name, item]),
+        );
+        return tools.map((staticTool) => bound.get(staticTool.name) ?? staticTool);
+      },
+      release: () => shellRuntime.release(),
+      stop: async () => { await shellRuntime.stop(); },
     },
   });
 }

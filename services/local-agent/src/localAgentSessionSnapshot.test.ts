@@ -58,6 +58,14 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
         }],
       },
     },
+    currentPlan: {
+      items: [{
+        id: 'delegation-1',
+        capability: 'explore',
+        task: 'Inspect the repository',
+        status: 'active',
+      }],
+    },
   });
 
   assert.equal(snapshot.version, 3);
@@ -83,6 +91,14 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
   if (snapshot.session.activeRun?.state !== 'waiting_review') assert.fail('expected waiting review');
   assert.equal(snapshot.session.activeRun.reviewAction.reviews[0]?.id, 'review-1');
   assert.equal(snapshot.session.activeRun.reviewAction.petId, 'pet-a');
+  assert.deepEqual(snapshot.session.currentPlan, {
+    items: [{
+      id: 'delegation-1',
+      capability: 'explore',
+      task: 'Inspect the repository',
+      status: 'active',
+    }],
+  });
   assert.equal(snapshot.session.runtime?.model, 'test-model');
   assert.equal(snapshot.session.runtime?.modelProfileId, 'test-profile');
   assert.deepEqual(

@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 export const NATIVE_HOST_NAME = 'com.pinpawo.browser_bridge';
 export const CAPABILITIES = [
   'navigate',
@@ -32,6 +32,21 @@ export function parseBrowserCommand(value) {
   }
   if (Number.isNaN(Date.parse(value.deadlineAt))) {
     throw new Error('browser command deadlineAt must be an ISO timestamp');
+  }
+  return value;
+}
+
+export function parseBrowserCancel(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('browser cancel must be an object');
+  }
+  if (value.type !== 'browser.cancel' || value.protocolVersion !== PROTOCOL_VERSION) {
+    throw new Error('unsupported browser cancel protocol');
+  }
+  for (const key of ['connectionId', 'requestId']) {
+    if (typeof value[key] !== 'string' || !value[key]) {
+      throw new Error(`browser cancel ${key} must be a non-empty string`);
+    }
   }
   return value;
 }

@@ -1156,6 +1156,66 @@ test('LocalAgentAppChatHandler interrupts pending human review without selecting
   ]);
 });
 
+test('LocalAgentAppChatHandler interrupts a rejected review after checkpointing the rollback', async () => {
+  const runRequests: unknown[] = [];
+  const review = {
+    id: 'review-1',
+    schemaVersion: 1,
+    view: { kind: 'plain' as const, body: 'Approve?' },
+    options: [
+      { id: 'approve', label: 'Approve', decision: { type: 'approve' as const } },
+      { id: 'reject', label: 'Reject', decision: { type: 'reject' as const } },
+    ],
+  };
+  const { handler, ws } = createHandler({
+    runChat: async (options) => {
+      runRequests.push(options.request);
+      if (options.request.kind === 'user_message') {
+        options.emitEvent({
+          type: 'human_review.requested',
+          requestId: 'req-1',
+          interruptId: 'interrupt-1',
+          review,
+        });
+        return { status: 'waiting_human' };
+      }
+      assert.equal(options.interruptOnSettledResumeCheckpoint, true);
+      return { status: 'interrupted' };
+    },
+  });
+
+  await handler.handleChatRequest(ws, {
+    type: 'chat_request',
+    requestId: 'req-1',
+    message: 'hello',
+    userId: 'user-1',
+  });
+  await handler.handleHumanReviewResponse(ws, {
+    type: 'human_review_response',
+    requestId: 'req-1',
+    actionId: 'interrupt-1',
+    reviewId: 'review-1',
+    selectedOptionId: 'reject',
+  });
+
+  assert.deepEqual(runRequests, [
+    {
+      kind: 'user_message',
+      requestId: 'req-1',
+      message: 'hello',
+    },
+    {
+      kind: 'resume',
+      requestId: 'req-1',
+      resume: {
+        'interrupt-1': {
+          decisions: [{ reviewId: 'review-1', selectedOptionId: 'reject' }],
+        },
+      },
+    },
+  ]);
+});
+
 test('LocalAgentAppChatHandler rejects cancellation for a stale review action', async () => {
   const runRequests: unknown[] = [];
   const review = {

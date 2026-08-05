@@ -3,7 +3,7 @@ import test from 'node:test';
 import type { AgentRunView } from '@pinpawo/agent-session';
 import {
   LiveActivityController,
-  LIVE_ACTIVITY_PULSE_FRAMES,
+  LOADING_CELL_FRAME_COUNT,
   liveActivityStateKey,
 } from './liveActivityController';
 
@@ -51,15 +51,15 @@ test('live activity pulse resets on a real run phase change and continues until 
   assert.equal(controller.longWaiting, false);
   assert.equal(timers.length, 2);
 
-  for (let index = 0; index < LIVE_ACTIVITY_PULSE_FRAMES; index += 1) {
+  for (let index = 0; index < LOADING_CELL_FRAME_COUNT; index += 1) {
     runTimer(timers, 240);
   }
-  assert.equal(controller.frame, LIVE_ACTIVITY_PULSE_FRAMES);
+  assert.equal(controller.frame, LOADING_CELL_FRAME_COUNT);
   assert.equal(timers.length, 2);
   assert.deepEqual(
-    frames.slice(-LIVE_ACTIVITY_PULSE_FRAMES),
+    frames.slice(-LOADING_CELL_FRAME_COUNT),
     Array.from(
-      { length: LIVE_ACTIVITY_PULSE_FRAMES },
+      { length: LOADING_CELL_FRAME_COUNT },
       (_, index) => index + 1,
     ),
   );
@@ -68,7 +68,7 @@ test('live activity pulse resets on a real run phase change and continues until 
   assert.equal(longWaits, 1);
   assert.equal(timers.length, 1);
   runTimer(timers, 240);
-  assert.equal(controller.frame, LIVE_ACTIVITY_PULSE_FRAMES + 1);
+  assert.equal(controller.frame, LOADING_CELL_FRAME_COUNT + 1);
   assert.equal(timers.length, 1);
   controller.sync(null);
   assert.equal(timers.length, 0);

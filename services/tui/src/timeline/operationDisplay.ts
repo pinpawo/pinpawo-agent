@@ -25,6 +25,8 @@ export function buildOperationDisplayLines(
   width = Number.POSITIVE_INFINITY,
   headerWidth = width,
 ): OperationDisplayLine[] {
+  const authorizationLines = buildAuthorizationDisplayLines(entry, now, width, headerWidth);
+  if (authorizationLines) return authorizationLines;
   return [{
     text: buildOperationHeader(entry, now, headerWidth),
   }, ...buildOperationPayloadLines(entry, width)];
@@ -35,14 +37,54 @@ function buildOperationHeader(
   now: number,
   width: number,
 ) {
+  return buildOperationHeaderText(operationBody(entry), entry, now, width);
+}
+
+function buildOperationHeaderText(
+  body: string,
+  entry: AgentOperationEntry,
+  now: number,
+  width: number,
+) {
   const suffix = `（${operationStatus(entry, now)}）`;
-  const body = operationBody(entry);
   const line = `${body}${suffix}`;
   if (stringWidth(line) <= width) return sanitizeLine(line, width);
 
   const suffixWidth = stringWidth(suffix);
   if (suffixWidth >= width) return sanitizeLine(suffix, width);
   return `${sanitizeLine(body, width - suffixWidth)}${suffix}`;
+}
+
+function buildAuthorizationDisplayLines(
+  entry: AgentOperationEntry,
+  now: number,
+  width: number,
+  headerWidth: number,
+): OperationDisplayLine[] | null {
+  if (entry.kind !== 'runtime.authorization') return null;
+  const toolLabels = readDetailStrings(entry.details?.toolLabels);
+  const reason = readDetailText(entry.details?.reason);
+  return [{
+    text: buildOperationHeaderText(entry.title, entry, now, headerWidth),
+  }, ...(toolLabels.length > 0 ? [{
+    text: sanitizeLine(`  涉及工具：${toolLabels.join(' · ')}`, width),
+    tone: 'muted' as const,
+  }] : []), ...(reason ? [{
+    text: sanitizeLine(`  原因：${reason}`, width),
+    tone: 'muted' as const,
+  }] : [])];
+}
+
+function readDetailStrings(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const text = readDetailText(item);
+    return text ? [text] : [];
+  });
+}
+
+function readDetailText(value: unknown) {
+  return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : null;
 }
 
 function operationStatus(entry: AgentOperationEntry, now: number) {
@@ -105,9 +147,33 @@ function buildOperationPayloadLines(
 ): OperationDisplayLine[] {
   if (isApplyPatchOperation(entry)) {
     const patch = readApplyPatchPayload(entry);
-    return patch ? buildPatchLines(patch, entry.target, width) : [];
+    const failure = readStructuredToolFailure(entry.raw?.error ?? entry.raw?.output);
+    return [
+      ...(patch ? buildPatchLines(patch, entry.target, width) : []),
+      ...(failure ? [{
+        text: sanitizeLine(`  ⎿ ${failure}`, width),
+        tone: 'removed' as const,
+      }] : []),
+    ];
   }
   return buildOperationOutputLines(entry, width);
+}
+
+function readStructuredToolFailure(value: unknown) {
+  let parsed = value;
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value) as unknown;
+    } catch {
+      return null;
+    }
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const record = parsed as Record<string, unknown>;
+  if (record.ok !== false) return null;
+  const code = typeof record.code === 'string' ? record.code : 'patch_failed';
+  const message = typeof record.message === 'string' ? record.message : 'Patch could not be applied';
+  return `${code}: ${message}`;
 }
 
 function buildOperationOutputLines(

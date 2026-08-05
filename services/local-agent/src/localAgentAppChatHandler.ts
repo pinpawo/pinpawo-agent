@@ -5,6 +5,7 @@ import type {
   AgentToolkit,
   CapabilityArtifactStore,
   ReviewSpec,
+  ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
 import { buildLocalChatAgentInput, type AgentChannelSetup } from './agentChannel';
 import { createCapabilityDiagnosticReporter } from './agentRegistryPreparation';
@@ -81,6 +82,7 @@ export type LocalAgentAppChatHandlerOptions = {
   getPluginToolkits: () => AgentToolkit[];
   getLocalToolkitDefinitions?: () => AgentToolkit[];
   getLocalToolkits: () => AgentToolkit[];
+  getToolkitRuntimeManager?: () => ToolkitRuntimeManager;
   getLocalCapabilities: () => AgentCapability[];
   getUserCapabilities: () => LoadedUserCapability[];
   getCapabilityArtifactStore: () => CapabilityArtifactStore;
@@ -108,6 +110,7 @@ export class LocalAgentAppChatHandler {
   private readonly getPluginToolkits: () => AgentToolkit[];
   private readonly getLocalToolkitDefinitions: () => AgentToolkit[];
   private readonly getLocalToolkits: () => AgentToolkit[];
+  private readonly getToolkitRuntimeManager: () => ToolkitRuntimeManager | undefined;
   private readonly getLocalCapabilities: () => AgentCapability[];
   private readonly getUserCapabilities: () => LoadedUserCapability[];
   private readonly getCapabilityArtifactStore: () => CapabilityArtifactStore;
@@ -140,6 +143,7 @@ export class LocalAgentAppChatHandler {
     this.getPluginToolkits = options.getPluginToolkits;
     this.getLocalToolkitDefinitions = options.getLocalToolkitDefinitions ?? (() => []);
     this.getLocalToolkits = options.getLocalToolkits;
+    this.getToolkitRuntimeManager = options.getToolkitRuntimeManager ?? (() => undefined);
     this.getLocalCapabilities = options.getLocalCapabilities;
     this.getUserCapabilities = options.getUserCapabilities;
     this.getCapabilityArtifactStore = options.getCapabilityArtifactStore;
@@ -361,6 +365,7 @@ export class LocalAgentAppChatHandler {
           overlayInflightDelegationOperations(inflight, operations);
         },
         ...(source.type === 'review.cancel'
+          || (source.type === 'human_review_response' && source.interruptRun)
           ? { interruptOnSettledResumeCheckpoint: true }
           : {}),
         ...(source.type !== 'chat_request'
@@ -683,6 +688,7 @@ export class LocalAgentAppChatHandler {
         ...this.getPluginToolkitDefinitions(),
         ...this.getLocalToolkitDefinitions(),
       ],
+      toolkitRuntimeManager: this.getToolkitRuntimeManager(),
       reportCapabilityDiagnostics: this.reportCapabilityDiagnostics,
       extraCapabilities: this.getLocalCapabilities(),
       threadId,

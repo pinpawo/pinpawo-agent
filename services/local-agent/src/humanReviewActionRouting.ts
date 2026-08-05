@@ -184,6 +184,7 @@ export type HumanReviewResolutionSource =
       reviewId: string;
       selectedOptionId: string;
       decisionCount: number;
+      interruptRun?: true;
     }
   | {
       type: 'review.cancel';
@@ -247,6 +248,7 @@ export async function resolveHumanReviewAction<
     }
     let resume: HumanReviewResume;
     let source: HumanReviewResolutionSource;
+    let interruptRun = false;
     if (message.type === 'human_review_response') {
       let decisions: ReviewResponse[];
       try {
@@ -265,6 +267,12 @@ export async function resolveHumanReviewAction<
         });
         return;
       }
+      interruptRun = decisions.some((decision, index) => {
+        const review = route.reviews[index];
+        return review
+          ? resolveHumanReviewDecision({ reviewSpec: review }, decision).decision.type === 'reject'
+          : false;
+      });
       if (options.acceptRoute && !(await options.acceptRoute(route, message))) {
         return;
       }
@@ -274,6 +282,7 @@ export async function resolveHumanReviewAction<
         reviewId: message.reviewId,
         selectedOptionId: message.selectedOptionId,
         decisionCount: decisions.length,
+        ...(interruptRun ? { interruptRun: true } : {}),
       };
     } else {
       if (options.acceptRoute && !(await options.acceptRoute(route, message))) {
@@ -296,7 +305,7 @@ export async function resolveHumanReviewAction<
       return;
     }
     if (
-      message.type === 'review.cancel'
+      (message.type === 'review.cancel' || interruptRun)
       && !lifecycle.queueInterrupt(message.requestId)
     ) {
       throw new Error(

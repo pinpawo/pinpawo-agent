@@ -75,6 +75,7 @@ export {
 
 export type {
   AgentToolkit,
+  ModelInputModality,
   NamedStructuredTool,
   ToolAuthorizationContext,
   ToolAuthorizationPolicy,
@@ -89,6 +90,12 @@ export type {
   ToolkitAvailabilityCheck,
   ToolkitReviewCapabilities,
   ToolkitReviewGuidance,
+  ToolkitRuntimeDefinition,
+  ToolkitRuntimeExecutionScope,
+  ToolkitRuntimeReleaseContext,
+  ToolkitRuntimeResolveContext,
+  ToolkitRuntimeStartContext,
+  ToolkitRuntimeStopContext,
 } from './types/toolkit';
 export {
   defineToolkit,
@@ -97,10 +104,16 @@ export {
   TOOLKIT_REVIEW_GUIDANCE_FIELD_MAX_CHARS,
   validateToolkitDefinition,
 } from './types/toolkit';
+export {
+  createAbortError,
+  isAbortError,
+  wrapToolCancellation,
+} from './types/toolCancellation';
 
 export {
   buildOrchestratorRunInput,
   buildOrchestratorTurnInput,
+  CAPABILITY_REGISTRY_BACKEND,
   createOrchestratorGraph,
   DEFAULT_ORCHESTRATOR_MAX_ITERATIONS,
   isOrchestratorInternalAiStreamNode,
@@ -116,9 +129,9 @@ export type {
   ActiveDelegationTransition,
   CapabilityPlannerInput,
   CapabilityPlannerMode,
-  CapabilityPlannerTask,
   CapabilityPlannerResult,
   CapabilityPlannerRunner,
+  CapabilityRegistryBackend,
   CompiledAgentRegistry,
   ExecutorCompilationIssue,
 } from './agent/createAgentRuntime';
@@ -126,11 +139,17 @@ export {
   CAPABILITY_DOCUMENT_WORKSPACE_SCHEMA_VERSION,
   materializeCapabilityDocumentWorkspace,
   renderCapabilityDocument,
-} from './agent/orchestrator/capabilityDocumentWorkspace';
+} from './agent/orchestrator/capabilityPlanner/documentWorkspace';
+export {
+  ToolkitRuntimeManager,
+} from './agent/orchestrator/toolkitRuntime';
+export type {
+  ToolkitRuntimeExecution,
+} from './agent/orchestrator/toolkitRuntime';
 export type {
   CapabilityDocumentWorkspace,
   CapabilityDocumentWorkspaceEntry,
-} from './agent/orchestrator/capabilityDocumentWorkspace';
+} from './agent/orchestrator/capabilityPlanner/documentWorkspace';
 export {
   assertCapabilityDocumentMatches,
   CAPABILITY_DOCUMENT_FILE_NAME,
@@ -318,6 +337,10 @@ export {
   NamespacedProtocolToolEventReader,
   SubagentProtocolToolEventReader,
 } from './subagent/protocolToolEvents';
+export {
+  isTransientModelMedia,
+  markTransientModelMedia,
+} from './subagent/transientModelMedia';
 export {
   GUARD_DECISION_EVENT,
   isGuardDecisionStreamChunk,

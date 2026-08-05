@@ -281,7 +281,87 @@ test('runChatSession falls back to checkpoint final message when stream values o
   assert.equal(completed?.text, 'checkpoint answer');
 });
 
-test('runChatSession maps authorization runtime events to system notices', async () => {
+test('runChatSession replaces the current plan from root values and clears it at settlement', async () => {
+  const emittedEvents: AgentRuntimeEvent[] = [];
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: { messages: [] },
+  } as unknown as AgentChannelSetup;
+  const finalMessages = [new AIMessage('done')];
+  let threadStateRead = 0;
+  const graphService = {
+    async readThreadState() {
+      threadStateRead += 1;
+      return {
+        messages: threadStateRead === 1 ? [] : finalMessages,
+        pendingHumanReview: null,
+        hasPendingContinuation: false,
+        currentPlan: null,
+      };
+    },
+    streamEvents() {
+      return (async function* () {
+        yield protocolEvent('values', {
+          messages: finalMessages,
+          taskActiveDelegation: {
+            id: 'delegation-1',
+            lane: 'capability:explore',
+            task: 'Inspect code',
+          },
+          runDelegationSummaries: [{
+            id: 'delegation-1',
+            lane: 'capability:explore',
+            task: 'Inspect code',
+            status: 'progress',
+          }],
+          runCapabilityPlan: [{ capability: 'browser', task: 'Verify result' }],
+        });
+      })();
+    },
+  };
+
+  await runChatSession({
+    request: { kind: 'user_message', requestId: 'req-1', message: 'hello' },
+    setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => true,
+    finishInterrupted: () => {
+      throw new Error('should not interrupt');
+    },
+    emitEvent: (event) => emittedEvents.push(event),
+    emitToolEvent: () => {},
+  });
+
+  const plans = emittedEvents.filter((event): event is Extract<AgentRuntimeEvent, { type: 'plan.updated' }> =>
+    event.type === 'plan.updated');
+  assert.deepEqual(plans, [{
+    type: 'plan.updated',
+    requestId: 'req-1',
+    plan: {
+      items: [
+        {
+          id: 'delegation-1',
+          capability: 'explore',
+          task: 'Inspect code',
+          status: 'active',
+        },
+        {
+          id: 'pending:browser:0',
+          capability: 'browser',
+          task: 'Verify result',
+          status: 'pending',
+        },
+      ],
+    },
+  }, {
+    type: 'plan.updated',
+    requestId: 'req-1',
+    plan: null,
+  }]);
+});
+
+test('runChatSession projects global policy authorization as completed operations', async () => {
   const emittedTools: StreamToolsPayload[] = [];
   const emittedEvents: AgentRuntimeEvent[] = [];
   const setup = {
@@ -306,6 +386,9 @@ test('runChatSession maps authorization runtime events to system notices', async
           data: {
             toolName: 'write_file',
             policyMode: GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION,
+            batchSize: 1,
+            reason: 'The write is limited to the workspace.',
+            toolCalls: [{ toolkitName: 'workspace', toolName: 'write_file' }],
           },
         }, ['general:t1']);
         yield protocolEvent('custom', {
@@ -314,6 +397,9 @@ test('runChatSession maps authorization runtime events to system notices', async
           data: {
             toolName: 'custom_tool',
             policyMode: GLOBAL_REVIEW_POLICY_MODE.CUSTOM,
+            batchSize: 1,
+            reason: 'The configured policy approved this action.',
+            toolCalls: [{ toolkitName: 'custom', toolName: 'custom_tool' }],
           },
         }, ['general:t1']);
         yield protocolEvent('custom', {
@@ -364,12 +450,50 @@ test('runChatSession maps authorization runtime events to system notices', async
   assert.deepEqual(result, { status: 'completed', reply: 'done' });
   assert.deepEqual(emittedTools, []);
   assert.deepEqual(
+    emittedEvents.filter((event) => event.type === 'operation'),
+    [{
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'completed',
+      operation: {
+        id: `authorization:${GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.AUTO_AUTHORIZED}:0`,
+        kind: 'runtime.authorization',
+        title: '自动授权',
+        summary: 'workspace · write_file',
+        details: {
+          toolLabels: ['workspace · write_file'],
+          reason: 'The write is limited to the workspace.',
+        },
+        source: {
+          provider: 'runtime',
+          name: 'global_review_policy',
+        },
+      },
+    }, {
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'completed',
+      operation: {
+        id: `authorization:${GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.CUSTOM_AUTHORIZED}:0`,
+        kind: 'runtime.authorization',
+        title: '按策略授权',
+        summary: 'custom · custom_tool',
+        details: {
+          toolLabels: ['custom · custom_tool'],
+          reason: 'The configured policy approved this action.',
+        },
+        source: {
+          provider: 'runtime',
+          name: 'global_review_policy',
+        },
+      },
+    }],
+  );
+  assert.deepEqual(
     emittedEvents
       .filter((event) => event.type === 'system.notice')
       .map((event) => event.message),
     [
-      '已自动授权 write_file 操作。',
-      '已根据全局策略授权 custom_tool 操作。',
       '已授权当前会话中的 run_shell 操作。',
     ],
   );

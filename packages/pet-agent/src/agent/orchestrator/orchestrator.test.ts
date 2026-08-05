@@ -14,8 +14,10 @@ import {
 import type { AgentActor, AgentModels } from '../../types/agent';
 import type {
   AgentToolkit,
+  ModelInputModality,
   ToolDefinition,
   ToolReviewPolicy,
+  ToolkitRuntimeResolveContext,
 } from '../../types/toolkit';
 import { createSubagent } from '../../subagent/createSubagent';
 import { runAgent } from '../runAgent';
@@ -24,6 +26,7 @@ import {
   createOrchestratorGraph as createRuntimeOrchestratorGraph,
 } from '../createAgentRuntime';
 import { compileAgentRegistry } from './registry';
+import { ToolkitRuntimeManager } from './toolkitRuntime';
 import {
   collectToolkitOperations,
   resolveToolkitExecution,
@@ -66,14 +69,12 @@ import {
   type OrchestratorStateType,
 } from './state';
 import { applyActiveDelegationTransition } from './runtime/activeDelegationTransition';
-import { assertBoundaryPlanContinuity } from './runtime/nodes/capabilityPlanner';
 import { afterContextPrep } from './runtime/routes/afterContextPrep';
-import { readSubagentGuardStopReason } from '../../subagent/guardStop';
 import type {
   CapabilityPlannerInput,
   CapabilityPlannerResult,
   CapabilityPlannerRunner,
-} from './capabilityPlannerRunner';
+} from './capabilityPlanner/runner';
 import { readMessageText } from './utils';
 
 function capability(
@@ -452,8 +453,9 @@ test('task_done reroutes through capabilityPlanner before the next task', async 
     /接下来我会先处理这项任务：读取 issue #269 并提炼需求点/,
   );
   assert.equal(plannerInputs[1]?.completedTask, '读取 issue #269 并提炼需求点。');
+  assert.match(plannerInputs[1]?.completedTaskResult ?? '', /issue #269 需求点/);
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
-  assert.equal(state.runPendingTask, null);
+  assert.equal(state.runPlannerReturn, null);
   assert.deepEqual(state.runCapabilityPlan, []);
   assert.equal(state.runNextDelegation, null);
   assert.equal(state.taskActiveDelegation, null);
@@ -554,18 +556,15 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
     capability: 'explore',
     task: '检索本地实现与 git log。',
   }]);
-  assert.match(
-    plannerInputs[1]?.messages.map(readMessageText).join('\n') ?? '',
-    /完整 handoff 末尾约束：必须检查兼容性/,
-  );
   assert.equal(plannerInputs[1]?.completedTask, '读取 issue #269 并提炼需求点。');
+  assert.match(plannerInputs[1]?.completedTaskResult ?? '', /issue #269 需求点：需要检查本地实现/);
   assert.equal(answerModelInvocations, 1);
   assert.equal(
     String(state.messages.at(-1)?.content ?? ''),
     'issue #269 的需求与本地实现检查均已完成，并确认了兼容性要求。',
   );
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
-  assert.equal(state.runPendingTask, null);
+  assert.equal(state.runPlannerReturn, null);
   assert.deepEqual(state.runCapabilityPlan, []);
   assert.equal(state.runNextDelegation, null);
   assert.equal(state.taskActiveDelegation, null);
@@ -638,15 +637,15 @@ test('entry decision autoRepair rejects the removed direct_task action', async (
   // After the retry resolves to answer, the dedicated answer node produces the reply.
   assert.equal(mainConversationMessages(state.messages).at(-1)?.content, 'answered');
   assert.equal(state.runNextDelegation, null);
-  assert.equal(state.runPendingTask, null);
+  assert.equal(state.runPlannerReturn, null);
 });
 
-test('missing executable capability routes through the answer node', async () => {
+test('Planner return routes bounded facts through the answer node', async () => {
   let answerInvocationText = '';
   const model = {
     invoke: async (messages: BaseMessage[]) => {
       answerInvocationText = messages.map((message) => readMessageText(message)).join('\n');
-      return new AIMessage('当前没有可用的执行能力来读取本地文件。');
+      return new AIMessage('请确认是否要扩大当前 Capability 的可用范围。');
     },
     bindTools: () => ({
       invoke: async () => new AIMessage(''),
@@ -667,9 +666,11 @@ test('missing executable capability routes through the answer node', async () =>
       async invoke(input) {
         assert.equal(input.mode, 'entry');
         return {
-          result: 'unavailable',
-          task: '读取本地文件。',
-          reason: 'No Capability documents are available.',
+          answer: {
+            reason: 'No Capability documents are available.',
+            context: 'The compiled Capability registry is empty.',
+            question: 'Should I broaden the Capability scope?',
+          },
         };
       },
     },
@@ -686,10 +687,13 @@ test('missing executable capability routes through the answer node', async () =>
     },
   }) as OrchestratorStateType;
 
-  assert.match(String(mainConversationMessages(state.messages).at(-1)?.content ?? ''), /没有可用的执行能力/);
-  assert.match(answerInvocationText, /No Capability documents are available/);
+  assert.match(String(mainConversationMessages(state.messages).at(-1)?.content ?? ''), /扩大当前 Capability/);
+  assert.match(answerInvocationText, /The compiled Capability registry is empty/);
+  assert.match(answerInvocationText, /<reply_mode>planner_return<\/reply_mode>/);
+  assert.match(answerInvocationText, /Should I broaden the Capability scope/);
   assert.equal(state.runNextDelegation, null);
-  assert.equal(state.runPendingTask, null);
+  assert.equal(state.runPlannerReturn, null);
+  assert.equal(state.taskActiveDelegation, null);
 });
 
 test('capability planner reports an empty compiled registry without inventing General', async () => {
@@ -723,9 +727,11 @@ test('capability planner reports an empty compiled registry without inventing Ge
         plannerMode = input.mode;
         plannerCapabilityNames = input.workspace.capabilityNames;
         return {
-          result: 'unavailable',
-          task: '完成一个需要执行能力的任务',
-          reason: 'The compiled Capability registry is empty.',
+          answer: {
+            reason: 'The compiled Capability registry is empty.',
+            context: 'No Capability document can execute the requested work.',
+            question: null,
+          },
         };
       },
     },
@@ -746,7 +752,7 @@ test('capability planner reports an empty compiled registry without inventing Ge
   assert.deepEqual(plannerCapabilityNames, []);
 });
 
-test('Capability Planner unavailable result is materialized without a second semantic policy check', async () => {
+test('Capability Planner return is materialized without a second semantic policy check', async () => {
   const model = {
     invoke: async () => new AIMessage('done'),
     bindTools: () => ({
@@ -762,8 +768,11 @@ test('Capability Planner unavailable result is materialized without a second sem
     capabilityPlannerRunner: {
       async invoke() {
         return {
-          task: '完成普通工作区任务',
-          reason: 'No specialized Capability matched.',
+          answer: {
+            reason: 'No specialized Capability matched.',
+            context: 'The Planner determined no execution plan should start.',
+            question: null,
+          },
         };
       },
     },
@@ -781,38 +790,6 @@ test('Capability Planner unavailable result is materialized without a second sem
   });
 
   assert.equal(result.messages.at(-1)?.content, 'done');
-});
-
-test('boundary planner preserves the existing remaining plan order', () => {
-  const input: CapabilityPlannerInput = {
-    mode: 'boundary',
-    messages: [],
-    completedTask: '调查现有实现',
-    remainingPlan: [
-      { capability: 'explore', task: '继续检查实现' },
-      { capability: 'general', task: '根据结果修改代码' },
-    ],
-    workspace: {
-      rootPath: '/tmp/planner-workspace',
-      registryDigest: 'digest',
-      capabilityNames: ['explore', 'general'],
-      entries: [],
-      reused: false,
-    },
-  };
-
-  assert.doesNotThrow(() => assertBoundaryPlanContinuity(input, {
-    tasks: [{ capability: 'explore', task: '继续检查实现' }],
-  }));
-  assert.doesNotThrow(() => assertBoundaryPlanContinuity(input, {
-    tasks: [{ capability: 'general', task: '根据结果修改代码' }],
-  }));
-  assert.throws(
-    () => assertBoundaryPlanContinuity(input, {
-      tasks: [{ capability: 'general', task: '插入一个未计划的新任务' }],
-    }),
-    /changed boundary remaining_plan/,
-  );
 });
 
 test('entry decision schema does not advertise capability actions', async () => {
@@ -874,9 +851,11 @@ test('allowedCapabilityNames scopes the immutable Planner workspace', async () =
     async invoke(input) {
       plannerCapabilityNames = input.workspace.capabilityNames;
       return {
-        result: 'unavailable',
-        task: '规划一支讲秋日食材的短视频。',
-        reason: 'scope captured',
+        answer: {
+          reason: 'scope captured',
+          context: 'The scoped workspace was inspected.',
+          question: null,
+        },
       };
     },
   };
@@ -1720,9 +1699,46 @@ test('toolkits compose tools and instructions for capability runtimes', async ()
 
 });
 
+test('tools requiring an input modality bind only to model profiles that accept it', async () => {
+  const readText = mockTool('read_text');
+  const readImage = mockTool('read_image');
+  const toolkits: AgentToolkit[] = [{
+    name: 'inspect',
+    description: 'inspection toolkit',
+    tools: [
+      { tool: readText },
+      { tool: readImage, requiresInputModalities: ['image'] },
+    ],
+  }];
+  const resolve = (modelInputModalities?: readonly ModelInputModality[]) =>
+    resolveToolkitExecution(toolkits, undefined, {
+      models: {} as AgentModels,
+      ...(modelInputModalities ? { modelInputModalities } : {}),
+      actor: testActor,
+      messages: [],
+    });
+
+  assert.deepEqual(
+    (await resolve(['text'])).tools.map((toolItem) => toolItem.name),
+    ['read_text'],
+  );
+  assert.deepEqual(
+    (await resolve(['text', 'image'])).tools.map((toolItem) => toolItem.name),
+    ['read_text', 'read_image'],
+  );
+  // An unstated profile is text-only, so the image tool stays unbound rather
+  // than reaching a model that cannot read its result.
+  assert.deepEqual(
+    (await resolve()).tools.map((toolItem) => toolItem.name),
+    ['read_text'],
+  );
+});
+
 test('capability receives tools only from Toolkits authorized by fixed uses', async () => {
   let routeCallCount = 0;
   let capabilityToolNames: string[] = [];
+  let capabilityTools: Array<{ name: string }> = [];
+  const runtimeEvents: string[] = [];
   const routeModel = {
     invoke: async () => new AIMessage('answered'),
     bindTools: () => ({
@@ -1750,8 +1766,12 @@ test('capability receives tools only from Toolkits authorized by fixed uses', as
     bindTools: (tools: Array<{ name: string }>) => unknown;
   }).bindTools = (tools) => {
     capabilityToolNames = tools.map((toolItem) => toolItem.name);
+    capabilityTools = tools;
     return bindTools(tools as never);
   };
+  const staticReadFile = mockTool('read_file');
+  const boundReadFile = mockTool('read_file');
+  const toolkitRuntimeManager = new ToolkitRuntimeManager();
   const runtimeCapability: AgentCapability = {
     name: 'inspect_repo',
     description: 'Inspect repository with bash tools.',
@@ -1767,6 +1787,7 @@ test('capability receives tools only from Toolkits authorized by fixed uses', as
       subagent: subagentModel,
     },
     actor: testActor,
+    toolkitRuntimeManager,
   });
 
   await graph.invoke(buildOrchestratorRunInput([new HumanMessage('inspect')]), {
@@ -1778,7 +1799,21 @@ test('capability receives tools only from Toolkits authorized by fixed uses', as
         {
           name: 'bash',
           description: 'bash toolkit',
-          tools: toolDefinitions(mockTool('read_file')),
+          tools: toolDefinitions(staticReadFile),
+          runtime: {
+            start: () => {
+              runtimeEvents.push('start');
+              return { host: 'local' };
+            },
+            resolve: (_root: unknown, context: ToolkitRuntimeResolveContext) => {
+              runtimeEvents.push(`resolve:${context.execution.delegationId}`);
+              return { host: 'local' };
+            },
+            bindTools: () => [boundReadFile],
+            release: () => {
+              runtimeEvents.push('release');
+            },
+          },
         },
         {
           name: 'browser',
@@ -1796,6 +1831,16 @@ test('capability receives tools only from Toolkits authorized by fixed uses', as
   });
 
   assert.deepEqual(capabilityToolNames, ['read_file']);
+  assert.notEqual(capabilityTools[0], staticReadFile);
+  assert.notEqual(capabilityTools[0], boundReadFile);
+  assert.equal(
+    (capabilityTools[0] as StructuredTool | undefined)?.schema,
+    staticReadFile.schema,
+  );
+  assert.equal(runtimeEvents[0], 'start');
+  assert.match(runtimeEvents[1] ?? '', /^resolve:/);
+  assert.equal(runtimeEvents[2], 'release');
+  await toolkitRuntimeManager.stop();
 });
 
 test('artifact discovery tools reach a selected capability only when declared in uses', async () => {
@@ -1938,9 +1983,9 @@ test('general Capability composes its declared Toolkits', async () => {
     recorder.subagentInputs[0].map((message) => String(message.content)).join('\n'),
     /<artifact_discovery_context[\s\S]*current_thread/,
   );
-  assert.match(
+  assert.doesNotMatch(
     JSON.stringify(recorder.subagentInputs[0].map((message) => message.content)),
-    /角色：「小白」[\s\S]*物种：cat[\s\S]*性格：友好/,
+    /小白|物种：cat|性格：友好/,
   );
 });
 
@@ -3807,9 +3852,10 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
   assert.equal(readLatestAnnounce(finalState.messages, { runId: finalState.runId }), null);
 });
 
-test('toolkit review rejection resumes the same subagent before parent handoff', async () => {
+test('toolkit review rejection rolls back the full action and retains the delegation', async () => {
   let runCount = 0;
   let reviewCount = 0;
+  let autoReviewCount = 0;
   const rawTool = tool(async ({ command }: { command: string }) => {
     runCount += 1;
     return `ran ${command}`;
@@ -3870,10 +3916,22 @@ test('toolkit review rejection resumes the same subagent before parent handoff',
   } as unknown as AgentModels['act'];
   const subagentModel = new FakeToolCallingModel({
     toolCalls: [
+      [
+        {
+          id: 'call-rejected-first',
+          name: 'run_shell',
+          args: { command: 'git status' },
+        },
+        {
+          id: 'call-rejected-second',
+          name: 'run_shell',
+          args: { command: 'git diff --stat' },
+        },
+      ],
       [{
-        id: 'call-rejected',
+        id: 'call-after-continue',
         name: 'run_shell',
-        args: { command: 'git status' },
+        args: { command: 'git log -1' },
       }],
       [],
     ],
@@ -3895,6 +3953,17 @@ test('toolkit review rejection resumes the same subagent before parent handoff',
       actor: testActor,
       capabilities: [capability('general', 'General-purpose capability.', ['local'])],
       toolkits,
+      reviewCapabilities: {
+        humanReview: true,
+        sessionAuthorization: false,
+      },
+      globalReviewPolicy: {
+        mode: 'custom',
+        resolve: () => {
+          autoReviewCount += 1;
+          return { type: 'require_authorization' as const };
+        },
+      },
     },
   };
 
@@ -3911,12 +3980,13 @@ test('toolkit review rejection resumes the same subagent before parent handoff',
   } | undefined;
   assert.equal(payload?.kind, 'review_batch');
   assert.deepEqual(payload?.reviews?.map((item) => item.review?.id), [
-    'tool-review:run_shell:call-rejected',
+    'tool-review:run_shell:call-rejected-first',
+    'tool-review:run_shell:call-rejected-second',
   ]);
 
   const reviewResume = {
     decisions: [{
-      reviewId: 'tool-review:run_shell:call-rejected',
+      reviewId: 'tool-review:run_shell:call-rejected-first',
       selectedOptionId: 'reject',
     }],
   };
@@ -3934,31 +4004,62 @@ test('toolkit review rejection resumes the same subagent before parent handoff',
 
   assert.equal(finalState.__interrupt__, undefined);
   assert.equal(runCount, 0);
-  // Resume replays the interrupted review policy once, then returns to the
-  // same child agent loop for its next model call.
-  assert.equal(reviewCount, 2);
-  assert.equal(routeCallCount, 4);
-  const resumedSubagentInput = recorder.subagentInputs.at(-1) ?? [];
-  const rejectedToolResult = resumedSubagentInput.find((message) =>
-    message instanceof ToolMessage
-    && message.tool_call_id === 'call-rejected');
-  assert.ok(rejectedToolResult);
-  const rejectedResult = JSON.parse(String(rejectedToolResult.content)) as {
-    guidance?: string;
-    reason?: string;
-    source?: string;
-  };
-  assert.equal(rejectedResult.source, 'human_reject');
-  assert.equal(rejectedResult.reason, '不要发 PR comment，直接给我结果。');
-  assert.match(rejectedResult.guidance ?? '', /updated direction/);
-  assert.equal(
-    resumedSubagentInput.some((message) => message instanceof HumanMessage),
-    true,
-  );
+  assert.equal(reviewCount, 4);
+  assert.equal(autoReviewCount, 1, 'pending review resume must reuse its checkpointed auto-review');
+  assert.equal(routeCallCount, 3);
+  assert.equal(recorder.subagentInputs.length, 1);
   const handoffCopy = mainConversationMessages(finalState.messages)
     .find((message) => Boolean(getMessageHandoffSource(message)));
-  assert.ok(handoffCopy);
-  assert.equal(finalState.taskActiveDelegation, null);
+  assert.equal(handoffCopy, undefined);
+  assert.equal(finalState.taskActiveDelegation?.status, 'pending');
+
+  const activeDelegation = finalState.taskActiveDelegation;
+  assert.ok(activeDelegation);
+  const retainedLane = laneMessages(
+    finalState.messages,
+    activeDelegation.lane,
+    activeDelegation.transcriptRunId,
+    activeDelegation.id,
+  );
+  assert.equal(
+    retainedLane.some((message) => ToolMessage.isInstance(message)),
+    false,
+  );
+  assert.equal(
+    retainedLane.some((message) =>
+      AIMessage.isInstance(message)
+      && (message.tool_calls ?? []).some((toolCall) =>
+        toolCall.id === 'call-rejected-first' || toolCall.id === 'call-rejected-second')),
+    false,
+  );
+
+  const nextReview = await graph.invoke(
+    buildOrchestratorRunInput(
+      [new HumanMessage('continue without the rejected action')],
+      { activeDelegationTransition: 'resume_active' },
+    ),
+    config,
+  ) as {
+    __interrupt__?: Array<{ id?: string; value?: unknown }>;
+  };
+  const nextPayload = nextReview.__interrupt__?.[0]?.value as {
+    reviews?: Array<{ review?: { id?: string } }>;
+  } | undefined;
+  assert.deepEqual(nextPayload?.reviews?.map((item) => item.review?.id), [
+    'tool-review:run_shell:call-after-continue',
+  ]);
+  assert.equal(autoReviewCount, 2, 'a later capability review must run auto-review normally');
+  const continuedSubagentInput = recorder.subagentInputs.at(-1) ?? [];
+  assert.equal(
+    continuedSubagentInput.some((message) => ToolMessage.isInstance(message)),
+    false,
+  );
+  assert.equal(
+    continuedSubagentInput.some((message) =>
+      HumanMessage.isInstance(message)
+      && String(message.content).includes('continue without the rejected action')),
+    true,
+  );
 });
 
 test('toolkit review run interruption retains the delegation without another model call or handoff', async () => {
@@ -4100,15 +4201,12 @@ test('toolkit review run interruption retains the delegation without another mod
   const cancelledToolResult = retainedLane.find((message) =>
     message instanceof ToolMessage
     && message.tool_call_id === 'call-interrupted');
-  assert.ok(cancelledToolResult);
-  assert.equal(
-    (JSON.parse(String(cancelledToolResult.content)) as { source?: string }).source,
-    'human_interrupt',
-  );
+  assert.equal(cancelledToolResult, undefined);
   assert.equal(
     retainedLane.some((message) =>
-      readSubagentGuardStopReason(message) === 'human_review_run_interrupted'),
-    true,
+      AIMessage.isInstance(message)
+      && (message.tool_calls ?? []).some((toolCall) => toolCall.id === 'call-interrupted')),
+    false,
   );
 
   const retainedDelegationId = activeDelegation.id;
@@ -4128,12 +4226,8 @@ test('toolkit review run interruption retains the delegation without another mod
   assert.equal(finalizeCallCount, 1);
   const continuedSubagentInput = recorder.subagentInputs.at(-1) ?? [];
   assert.equal(
-    continuedSubagentInput.some((message) => {
-      if (!(message instanceof ToolMessage)) return false;
-      const content = JSON.parse(String(message.content)) as { source?: string };
-      return content.source === 'human_interrupt';
-    }),
-    true,
+    continuedSubagentInput.some((message) => ToolMessage.isInstance(message)),
+    false,
   );
   const resumedHandoff = mainConversationMessages(continuedState.messages)
     .map((message) => getMessageHandoffSource(message))
@@ -4827,7 +4921,7 @@ test('delegation outcome continuation path rechecks run iteration guard before n
   assert.equal(routeCallCount, 1);
   assert.equal(state.taskActiveDelegation?.id, activeDelegation.id);
   assert.equal(state.runIterationCount, 0);
-  assert.equal(state.runPendingTask, null);
+  assert.equal(state.runPlannerReturn, null);
   const finalText = String(state.messages.at(-1)?.content ?? '');
   assert.match(finalText, /主流程循环已达到上限/);
 });
@@ -5348,7 +5442,7 @@ test('delegation outcome uses a unified run-iteration guard before invoking deci
   assert.match(String(answerMessages.at(-1)?.content ?? ''), /持续执行大规模迁移/);
   assert.equal(state.messages.at(-1)?.content?.toString().includes('主流程循环已达到上限'), true);
   assert.equal(state.runIterationCount, 0);
-  assert.equal(state.runPendingTask, null);
+  assert.equal(state.runPlannerReturn, null);
   assert.equal(state.taskActiveDelegation?.id, activeDelegation.id);
 });
 
@@ -6073,7 +6167,8 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
     /artifact_discovery_context/,
   );
 
-  // System prompt keeps the stable protocol but never restates the task.
+  // Per-delegation task data stays in the briefing instead of being copied
+  // into system context.
   for (const input of recorder.subagentInputs) {
     const systemMessages = input.filter((message) => message._getType() === 'system');
     assert.ok(systemMessages.length > 0);
@@ -6081,8 +6176,7 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
       const systemText = typeof message.content === 'string'
         ? message.content
         : JSON.stringify(message.content);
-      assert.match(systemText, /委派简报协议/);
-      assert.doesNotMatch(systemText, /当前任务：关闭 GitHub Issue #272/);
+      assert.doesNotMatch(systemText, /关闭 GitHub Issue #272/);
       assert.doesNotMatch(systemText, /上下文摘要/);
     }
   }

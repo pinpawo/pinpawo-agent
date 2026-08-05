@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { HumanMessage } from '@langchain/core/messages';
 import test from 'node:test';
 import type { AgentActor, AgentModels } from '../../../types/agent';
-import { buildAutoReviewPrompt } from '../prompts/autoReview';
+import {
+  buildAutoReviewPrompt,
+  buildAutoReviewSystemPrompt,
+} from '../prompts/autoReview';
 import { buildReviewSpec } from './reviewSpec';
 import {
   GLOBAL_REVIEW_POLICY_RESOLUTION,
@@ -56,7 +59,7 @@ function browserReview() {
 }
 
 function autoModel(
-  invoke: (messages: unknown) => unknown | Promise<unknown>,
+  invoke: (messages: unknown, config?: unknown) => unknown | Promise<unknown>,
 ): AgentModels['act'] {
   return {
     withStructuredOutput: () => ({ invoke }),
@@ -67,6 +70,27 @@ const safeDecision = {
   decision: 'authorize',
   reason: 'The file write is narrow and scoped to the workdir.',
 } as const;
+
+test('auto review keeps its private policy decision off the root stream', async () => {
+  let capturedConfig: unknown;
+  const resolution = await resolveGlobalReviewBatchPolicy({
+    policy: { mode: 'auto_authorization' },
+    models: {
+      act: autoModel((_messages, config) => {
+        capturedConfig = config;
+        return safeDecision;
+      }),
+    },
+    actor: testActor,
+    messages: [],
+    task: 'Check whether coscli is installed.',
+    workdir: '/repo',
+    reviews: [review()],
+  });
+
+  assert.equal(resolution.type, GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE);
+  assert.deepEqual(capturedConfig, { callbacks: [] });
+});
 
 test('auto review prompt contains bounded task context, runtime scope, and tool behavior facts', async () => {
   let capturedMessages: unknown;
@@ -119,6 +143,59 @@ test('auto review prompt stays compact and keeps every action identity', () => {
   assert.doesNotMatch(prompt.text, /Review body:|Tool input:/);
 });
 
+test('auto review preserves a shell command that fits the essential evidence budget', () => {
+  const command = `printf '${'x'.repeat(900)}' > output.txt`;
+  const prompt = buildAutoReviewPrompt({
+    workdir: '/repo',
+    reviews: [{
+      ...review({ command }),
+      toolName: 'run_shell',
+      operation: {
+        title: 'Execute command',
+        summarizeInput: () => ({
+          target: '/repo',
+          summary: command,
+        }),
+      },
+    }],
+  });
+
+  assert.equal(prompt.complete, true);
+  assert.ok(prompt.text.includes(`Summary: ${command}`));
+});
+
+test('auto review fails closed when an essential command cannot fit the evidence budget', async () => {
+  let calls = 0;
+  const command = `printf '${'x'.repeat(4_000)}' > output.txt`;
+  const resolution = await resolveGlobalReviewBatchPolicy({
+    policy: { mode: 'auto_authorization' },
+    models: {
+      act: autoModel(async () => {
+        calls += 1;
+        return safeDecision;
+      }),
+    },
+    actor: testActor,
+    messages: [],
+    workdir: '/repo',
+    reviews: [{
+      ...review({ command }),
+      toolName: 'run_shell',
+      operation: {
+        title: 'Execute command',
+        summarizeInput: () => ({
+          target: '/repo',
+          summary: command,
+        }),
+      },
+    }],
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(resolution.type, GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION);
+  assert.match(resolution.reason ?? '', /safe evidence budget/);
+});
+
 test('auto review can authorize observational browser access without conversation context', async () => {
   const resolution = await resolveGlobalReviewBatchPolicy({
     policy: { mode: 'auto_authorization' },
@@ -134,6 +211,24 @@ test('auto review can authorize observational browser access without conversatio
   });
 
   assert.equal(resolution.type, GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE);
+});
+
+test('auto review prompt treats explicit outside-workdir reads as eligible', () => {
+  const prompt = buildAutoReviewSystemPrompt([{
+    ...review({ command: 'jq .runs /Users/example/Downloads/trace.json' }),
+    toolkitName: 'bash',
+    toolName: 'run_shell',
+    autoReviewContext: {
+      allow: 'Allow read-only inspection of explicitly named non-sensitive paths outside the current workspace.',
+      ask: 'Require human authorization for writes outside the current workspace or sensitive-data access.',
+    },
+  }]);
+
+  assert.match(prompt, /only reads, lists, stats, searches, or summarizes/);
+  assert.match(prompt, /outside the effective workdir/);
+  assert.match(prompt, /output redirection, heredocs, and pipes is not risky by itself/);
+  assert.match(prompt, /mutations outside the workdir/);
+  assert.doesNotMatch(prompt, /writes outside the workdir/);
 });
 
 test('auto review receives the current task when rejecting an unrelated low-risk action', async () => {

@@ -1,7 +1,7 @@
 import type { AgentRunView } from '@pinpawo/agent-session';
 import {
-  LIVE_ACTIVITY_PULSE_FRAMES,
-} from './timelineModel';
+  LOADING_CELL_FRAME_COUNT,
+} from '../visuals/loadingCells';
 
 const DEFAULT_TICK_MS = 240;
 const DEFAULT_LONG_WAIT_MS = 10_000;
@@ -134,4 +134,4 @@ export function liveActivityStateKey(run: AgentRunView | null) {
     : `${run.requestId}:${run.state}`;
 }
 
-export { LIVE_ACTIVITY_PULSE_FRAMES };
+export { LOADING_CELL_FRAME_COUNT };

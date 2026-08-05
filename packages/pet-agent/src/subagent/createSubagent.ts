@@ -1,4 +1,4 @@
-import { type BaseMessage } from '@langchain/core/messages';
+import { HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { createHash, randomUUID } from 'node:crypto';
 import type {
@@ -26,6 +26,7 @@ import {
   buildSubagentIterationLimitStopNotice,
   readSubagentGuardStopReason,
 } from './guardStop';
+import { readToolkitReviewRunControl } from '../agent/orchestrator/review/reviewRunControl';
 import { Command, END } from '@langchain/langgraph';
 import { emitRuntimeEventToStreamWriter } from '../utils/streamWriterEvents';
 import {
@@ -38,6 +39,7 @@ import { messageHasToolCalls } from '../utils/messages';
 import {
   subagentRuntimeContextSchema,
 } from './runtimeContext';
+import { isTransientModelMedia } from './transientModelMedia';
 
 // Fallback model-call budget when the caller does not pass maxIterations. The
 // subagent iteration guard should stop gracefully first; LangGraph recursionLimit
@@ -149,6 +151,46 @@ function assertValidContextSummaryUpdate(update: unknown) {
   }
 }
 
+/**
+ * Stand-in used while summarization inspects history. Keeps the message id so
+ * the original can be restored if summarization preserves rather than folds it.
+ */
+function redactTransientModelMedia(message: BaseMessage): BaseMessage {
+  const redacted = new HumanMessage({
+    content: '[screenshot image omitted from summary]',
+    additional_kwargs: message.additional_kwargs,
+  });
+  redacted.id = message.id;
+  return redacted;
+}
+
+/**
+ * Summarization returns the full replacement message list. Any transient media
+ * it preserved comes back redacted, so swap the originals back in; anything it
+ * folded into the summary is intentionally gone.
+ */
+function restoreTransientModelMedia<TUpdate>(
+  update: TUpdate,
+  originalMessages: readonly BaseMessage[],
+): TUpdate {
+  if (!update || typeof update !== 'object' || !('messages' in update)) return update;
+  const messages = (update as { messages?: unknown }).messages;
+  if (!Array.isArray(messages)) return update;
+  const originalById = new Map<string, BaseMessage>();
+  for (const message of originalMessages) {
+    if (isTransientModelMedia(message) && message.id) {
+      originalById.set(message.id, message);
+    }
+  }
+  if (originalById.size === 0) return update;
+  return {
+    ...update,
+    messages: (messages as BaseMessage[]).map(
+      (message) => (message?.id ? originalById.get(message.id) ?? message : message),
+    ),
+  };
+}
+
 function failFastOnInvalidContextSummary(
   middleware: AnyAgentMiddleware,
 ): AnyAgentMiddleware {
@@ -158,12 +200,26 @@ function failFastOnInvalidContextSummary(
   }
   const hook = typeof beforeModel === 'function' ? beforeModel : beforeModel.hook;
   const wrappedHook: typeof hook = async (state, runtime) => {
-    const update = await hook(state, runtime);
+    // Summarization renders the summarized span with `getBufferString`, which
+    // would inline a base64 image as plain text. Replace transient media with a
+    // text stand-in so the summarizer sees that a screenshot happened without
+    // the payload. Messages the summarizer preserves keep their real content,
+    // because summarization replaces graph state with exactly what it returns.
+    const originalMessages: BaseMessage[] = state.messages;
+    const redactedMessages = originalMessages.map((message) => (
+      isTransientModelMedia(message) ? redactTransientModelMedia(message) : message
+    ));
+    const update = await hook(
+      redactedMessages.some((message, index) => message !== originalMessages[index])
+        ? { ...state, messages: redactedMessages }
+        : state,
+      runtime,
+    );
     // LangChain currently represents summarization failures as summary text
     // inside a destructive RemoveMessage update. Reject that update before the
     // graph can commit it, preserving the existing transcript on failure.
     assertValidContextSummaryUpdate(update);
-    return update;
+    return restoreTransientModelMedia(update, originalMessages);
   };
   middleware.beforeModel = typeof beforeModel === 'function'
     ? wrappedHook
@@ -180,11 +236,17 @@ function createSubagentSummarizationMiddleware(
     return null;
   }
 
+  const rawGenerationReserveTokens = inputState.generationReserveTokens;
+  const generationReserveTokens = typeof rawGenerationReserveTokens === 'number'
+    && Number.isFinite(rawGenerationReserveTokens)
+    ? Math.max(0, Math.floor(rawGenerationReserveTokens))
+    : 0;
+  const usableInputTokens = Math.max(1, contextWindowTokens - generationReserveTokens);
   const triggerTokens = Math.max(1, Math.floor(
-    contextWindowTokens * SUBAGENT_CONTEXT_SUMMARY_TRIGGER_RATIO,
+    usableInputTokens * SUBAGENT_CONTEXT_SUMMARY_TRIGGER_RATIO,
   ));
   const keepTokens = Math.max(1, Math.floor(
-    contextWindowTokens * SUBAGENT_CONTEXT_SUMMARY_KEEP_RATIO,
+    usableInputTokens * SUBAGENT_CONTEXT_SUMMARY_KEEP_RATIO,
   ));
 
   return failFastOnInvalidContextSummary(summarizationMiddleware({
@@ -194,7 +256,7 @@ function createSubagentSummarizationMiddleware(
     // LangChain defaults this to 4k tokens, which would inspect only a small
     // slice when our model window is large. The derived budget covers the
     // expected summarized prefix while leaving room for the summary prompt.
-    trimTokensToSummarize: Math.max(1, Math.floor(contextWindowTokens * 0.5)),
+    trimTokensToSummarize: Math.max(1, Math.floor(usableInputTokens * 0.5)),
     summaryPrompt: SUBAGENT_CONTEXT_SUMMARY_PROMPT,
     summaryPrefix: SUBAGENT_CONTEXT_SUMMARY_PREFIX,
   }));
@@ -244,6 +306,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     messages: input.messages,
     maxIterations: input.maxIterations,
     contextWindowTokens: input.contextWindowTokens,
+    generationReserveTokens: input.generationReserveTokens,
     artifacts: input.artifacts,
   };
   const inputMessageIds = new Set(inputState.messages.map((message) => message.id as string));
@@ -342,6 +405,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     );
     latestMessages = readResultMessages(result) ?? latestMessages;
     ensureSubagentMessageIds(latestMessages);
+    const reviewRunControl = readToolkitReviewRunControl(result);
 
     // A guard may have gracefully ended the agent by appending its stop
     // notice as the FINAL message (via Command goto END). That is a clean "limit
@@ -350,7 +414,9 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     // Summarization may rewrite the list so an index-based slice is unreliable.
     const lastMessage = latestMessages.at(-1);
     const stopReason = lastMessage ? readSubagentGuardStopReason(lastMessage) : null;
-    const announceMessageId = stopReason
+    const announceMessageId = reviewRunControl
+      ? null
+      : stopReason
       ? findLatestDeliverableMessageId(latestMessages, inputMessageIds)
       : lastMessage?._getType() === 'ai'
         && !messageHasToolCalls(lastMessage)
@@ -359,14 +425,12 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     return {
       messages: latestMessages,
       artifacts: inputState.artifacts ?? [],
-      completionReason: stopReason === 'human_review_run_interrupted'
+      completionReason: reviewRunControl
         ? 'interrupted'
         : stopReason === 'subagent_iteration_limit_reached'
           ? 'limit_reached'
           : 'natural',
-      announceMessageId: stopReason === 'human_review_run_interrupted'
-        ? null
-        : announceMessageId,
+      announceMessageId,
     };
   } catch (err) {
     // The agent's hard recursion breaker (recursionLimit) fired. The iteration

@@ -1,74 +1,13 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { tool } from '@langchain/core/tools';
+import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { z } from 'zod';
-import type { ToolOperationMetadata } from '@pinpawo/pet-agent';
+import { createAbortError, type ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { readRecord, readString } from '../operationMetadata';
 import { getLocalToolsWorkdir, resolveUserPath } from './pathUtils';
+import type { ShellRunHandle } from './processExecutor';
+import { runShellCommand } from './processTree';
+import type { ShellProcessBinding } from './processRegistry';
+import { windowsProcessExecutor } from './windowsProcessExecutor';
 
-export function getBlockedShellReason(command: string) {
-  const normalized = command.trim();
-
-  const blockedPatterns: Array<[RegExp, string]> = [
-    [/(^|[\s;&|])mv(\s|$)/, '禁止直接使用 mv；请改用 move_path。'],
-    [/\bgit\s+reset\s+--hard\b/, '禁止使用 git reset --hard 这类破坏性命令。'],
-    [/(^|[\s;&|])sudo(\s|$)/, '禁止通过 sudo 提权执行命令。'],
-    [/(^|[\s;&|])(mkfs|fdisk|shutdown|reboot|dd)(\s|$)/, '禁止执行高风险系统命令。'],
-    [/\bcat\s*>\s*/, 'run_shell 不支持依赖 stdin 的 cat > 写文件；请改用 write_file。'],
-    [/<<[-\w'"]*/, 'run_shell 不支持 heredoc；请改用 write_file。'],
-  ];
-
-  for (const [pattern, reason] of blockedPatterns) {
-    if (pattern.test(normalized)) {
-      return reason;
-    }
-  }
-
-  if (hasBlockedOutputRedirection(normalized)) {
-    return 'run_shell 不支持输出重定向写文件；请改用 write_file。';
-  }
-
-  return null;
-}
-
-export function hasBlockedOutputRedirection(command: string) {
-  const withoutFdDuplication = command.replace(/(^|[\s;&|])\d*>\s*&\d+\b/g, '$1');
-  const withoutDevNull = withoutFdDuplication.replace(/[&\d]*>>?\s*\/dev\/null\b/g, '');
-  return /(^|[^=>])\d*>>?/.test(withoutDevNull);
-}
-
-function processOutputToString(output: unknown) {
-  if (typeof output === 'string') {
-    return output.trimEnd();
-  }
-  if (Buffer.isBuffer(output)) {
-    return output.toString('utf-8').trimEnd();
-  }
-  return '';
-}
-
-export function getShellConfirmationRisk(command: string) {
-  const normalized = command.trim();
-
-  const confirmPatterns: Array<[RegExp, string]> = [
-    [/(^|[\s;&|])rm(\s|$)/, '删除文件或目录'],
-    [/\bgit\s+(push|tag|rebase|merge|cherry-pick|commit)\b/, 'git 写操作或远端变更'],
-    [/\b(npm|pnpm|yarn)\s+publish\b/, '包发布'],
-    [/\b(kubectl|helm)\s+(apply|delete|rollout|upgrade|uninstall)\b/, '集群部署变更'],
-    [/\bdocker\s+(push|buildx\s+build|compose\s+(up|down)|run)\b/, '容器构建或运行变更'],
-    [/\b(chmod|chown)\b/, '权限或属主变更'],
-    [/\bfind\b[\s\S]*\s-delete\b/, '批量删除'],
-    [/\bcurl\b[\s\S]*\|\s*(sh|bash|zsh)\b/, '远程脚本直接执行'],
-  ];
-
-  for (const [pattern, risk] of confirmPatterns) {
-    if (pattern.test(normalized)) {
-      return risk;
-    }
-  }
-
-  return null;
-}
 
 export function normalizeShellActionInput(input: unknown) {
   if (!input || typeof input !== 'object') {
@@ -87,11 +26,9 @@ export function normalizeShellActionInput(input: unknown) {
   return { command, cwd };
 }
 
-const execFileAsync = promisify(execFile);
-
 const DEFAULT_SHELL_TIMEOUT_SECONDS = 60;
 const MAX_SHELL_TIMEOUT_SECONDS = 600;
-const SHELL_MAX_BUFFER_BYTES = 4 * 1024 * 1024;
+const SHELL_MAX_CAPTURE_CHARS = 4 * 1024 * 1024;
 const SHELL_OUTPUT_LIMIT_CHARS = 20_000;
 
 function resolveCurrentTimezone(timezone?: string) {
@@ -156,62 +93,162 @@ export const getCurrentTimeTool = tool(
   },
 );
 
-export const runShellTool = tool(
-  async (input: { command: string; cwd?: string; timeoutSeconds?: number }) => {
-    let shellAction: { command: string; cwd: string };
+export function createRunShellTool(binding: ShellProcessBinding | null) {
+  // Run through the same executor the registry will terminate through.
+  // Without a binding there is no registry, so pick by platform the same
+  // way ShellRuntime does.
+  const run = binding
+    ? binding.registry.processExecutor.run
+    : (process.platform === 'win32' ? windowsProcessExecutor.run : runShellCommand);
 
-    try {
-      shellAction = normalizeShellActionInput(input);
-    } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
-    }
+  return tool(
+    async (
+      input: { command: string; cwd?: string; timeoutSeconds?: number },
+      runtime: ToolRuntime,
+    ) => {
+      let shellAction: { command: string; cwd: string };
 
-    const blockedReason = getBlockedShellReason(shellAction.command);
-    if (blockedReason) {
-      return `Error: ${blockedReason}`;
-    }
+      try {
+        shellAction = normalizeShellActionInput(input);
+      } catch (err) {
+        return `Error: ${err instanceof Error ? err.message : err}`;
+      }
 
-    const timeoutMs = resolveShellTimeoutMs(input.timeoutSeconds);
-
-    try {
-      const { stdout, stderr } = await execFileAsync('/bin/sh', ['-c', shellAction.command], {
-        encoding: 'utf-8',
-        timeout: timeoutMs,
-        maxBuffer: SHELL_MAX_BUFFER_BYTES,
+      const timeoutMs = resolveShellTimeoutMs(input.timeoutSeconds);
+      const outcome = await run({
+        command: shellAction.command,
         cwd: shellAction.cwd,
+        timeoutMs,
+        maxOutputChars: SHELL_MAX_CAPTURE_CHARS,
+        ...(runtime.signal ? { signal: runtime.signal } : {}),
+        // Only hand a slow command back if there is a registry to hold it.
+        // Without a binding the old behaviour stands: terminate on timeout.
+        yieldOnTimeout: binding !== null,
       });
-      const out = truncateShellOutput(processOutputToString(stdout));
-      const err = truncateShellOutput(processOutputToString(stderr));
+
+      if (outcome.status === 'spawn_failed') {
+        return `Error: ${outcome.error.message}`;
+      }
+
+      // Cancellation is not a result. Let it propagate so the graph unwinds
+      // instead of feeding the model a string that reads like a failure.
+      if (outcome.status === 'aborted') {
+        throw createAbortError();
+      }
+
+      if (outcome.status === 'yielded') {
+        return adoptYieldedProcess({
+          binding,
+          handle: outcome.handle,
+          command: shellAction.command,
+          cwd: shellAction.cwd,
+          timeoutMs,
+        });
+      }
+
+      const out = truncateShellOutput(outcome.stdout.trimEnd());
+      const err = truncateShellOutput(outcome.stderr.trimEnd());
+
+      if (outcome.status === 'timeout') {
+        const output = [err, out].filter(Boolean).join('\n');
+        return [
+          `Error: command timed out after ${(timeoutMs / 1000).toString()}s`,
+          'and was terminated along with its child processes.',
+          'If it needs longer and is not waiting for interactive input,'
+          + ' retry with a larger timeoutSeconds.',
+          output,
+        ].filter(Boolean).join('\n').trimEnd();
+      }
+
+      if (outcome.status === 'exited' && outcome.pid !== undefined && binding) {
+        // A command can exit cleanly having left work behind (`npm run dev &`).
+        // Those children stay in the original process group, so registering it
+        // keeps shutdown able to reach them.
+        binding.registry.trackOrphanGroup(outcome.pid);
+      }
+
+      if (outcome.code !== 0) {
+        const output = [err, out].filter(Boolean).join('\n');
+        const exitCode = outcome.code === null ? '?' : outcome.code.toString();
+        return `Error (exit ${exitCode}):\n${output || '(no output)'}`;
+      }
+
       return [out || '(no output)', err ? `--- stderr ---\n${err}` : '']
         .filter(Boolean)
         .join('\n');
-    } catch (err) {
-      if (err instanceof Error && ('stdout' in err || 'stderr' in err)) {
-        const stdout = truncateShellOutput(processOutputToString((err as { stdout?: unknown }).stdout));
-        const stderr = truncateShellOutput(processOutputToString((err as { stderr?: unknown }).stderr));
-        const output = [stderr, stdout].filter(Boolean).join('\n');
-        const killed = Boolean((err as { killed?: boolean }).killed);
-        const signal = (err as { signal?: string | null }).signal;
-        if (killed || signal === 'SIGTERM') {
-          return `Error: command timed out after ${(timeoutMs / 1000).toString()}s\n${output}`.trimEnd();
-        }
-        const status = (err as NodeJS.ErrnoException & { code?: unknown }).code;
-        const exitCode = typeof status === 'number' ? status : '?';
-        return `Error (exit ${exitCode.toString()}):\n${output || err.message}`;
-      }
-      return `Error: ${err instanceof Error ? err.message : err}`;
-    }
-  },
-  {
-    name: 'run_shell',
-    description: '兜底工具：异步执行非交互 shell 命令并返回输出。只有没有更具体的专用工具覆盖时才使用；不要用它替代 view_file_chunk/read_file/write_file/apply_patch/move_path/copy_path/mkdir_path/list_dir/glob_search/grep_search/http_fetch/download_file。默认在当前 workdir 执行，相对路径也默认相对于该目录；如有需要可显式传 cwd 覆盖。默认超时 60s，可通过 timeoutSeconds 调整（上限 600s）；输出过长时保留开头和结尾并标注截断。不要用于需要输入、全屏 TTY、持续运行，或依赖 stdin 的命令（例如 cat > file）。高风险命令会先进入 toolkit 审批，可批准、拒绝或给出新的处理方向。',
-    schema: z.object({
-      command: z.string().describe('要执行的 shell 命令'),
-      cwd: z.string().optional().describe('命令执行目录；默认当前 workdir'),
-      timeoutSeconds: z.number().int().positive().optional().describe('超时秒数；默认 60，上限 600。运行测试或构建等较慢命令时记得调大'),
-    }),
-  },
-);
+    },
+    {
+      name: 'run_shell',
+      description: '兜底工具：异步执行非交互 shell 命令并返回输出。只有没有更具体的专用工具覆盖时才使用；不要用它替代 view_file_chunk/read_file/jq_query/write_file/apply_patch/move_path/copy_path/mkdir_path/list_dir/glob_search/grep_search/http_fetch/download_file。默认在当前 workdir 执行，相对路径也默认相对于该目录；如有需要可显式传 cwd 覆盖。支持命令自身携带内容的 heredoc 和输出重定向，写入效果仍受 toolkit 审批约束。默认超时 60s，可通过 timeoutSeconds 调整（上限 600s）；输出过长时保留开头和结尾并标注截断。命令在超时后不会被中止，而是转入后台并返回一个进程 id，用 wait_process 继续跟进、terminate_process 终止；因此无需为构建、安装、测试等慢命令预先调大超时，也不要因为超时就重复执行同一命令。不要用于需要交互输入或全屏 TTY 的命令。命令会先进入 toolkit 审批，可批准、拒绝或给出新的处理方向。',
+      schema: z.object({
+        command: z.string().describe('要执行的 shell 命令'),
+        cwd: z.string().optional().describe('命令执行目录；默认当前 workdir'),
+        timeoutSeconds: z.number().int().positive().optional().describe('等待多少秒后转入后台；默认 60，上限 600'),
+      }),
+    },
+  );
+}
+
+/**
+ * Put a still-running command under registry ownership and tell the model how
+ * to follow it.
+ *
+ * A timed-out command is slow, not failed. Reporting failure is what led a
+ * model to rerun `pnpm install` while the first one was still writing to the
+ * same node_modules, so the wording here deliberately frames the process as
+ * ongoing work with a handle rather than an error.
+ */
+function adoptYieldedProcess(params: {
+  binding: ShellProcessBinding | null;
+  handle: ShellRunHandle;
+  command: string;
+  cwd: string;
+  timeoutMs: number;
+}) {
+  const { binding, handle, command, cwd, timeoutMs } = params;
+  const seconds = (timeoutMs / 1000).toString();
+
+  if (!binding) {
+    // yieldOnTimeout is only requested when a binding exists, so this is
+    // unreachable; terminate rather than leak a handle nothing holds.
+    handle.terminate();
+    return `Error: command timed out after ${seconds}s and was terminated.`;
+  }
+
+  let record;
+  try {
+    record = binding.registry.register({
+      handle,
+      owner: binding.owner,
+      command,
+      cwd,
+      // The output so far is included in this result, so wait_process should
+      // start from what comes next.
+      outputAlreadyDelivered: true,
+    });
+  } catch (err) {
+    handle.terminate();
+    return `Error: ${err instanceof Error ? err.message : String(err)}`;
+  }
+
+  const out = truncateShellOutput(handle.stdout.trimEnd());
+  const err = truncateShellOutput(handle.stderr.trimEnd());
+  const output = [
+    out || '(no output yet)',
+    err ? `--- stderr ---\n${err}` : '',
+  ].filter(Boolean).join('\n');
+
+  return [
+    `Command is still running after ${seconds}s and moved to the background.`,
+    `Process id: ${record.processId}`,
+    `Use wait_process to follow it, or terminate_process to stop it.`,
+    'Do not rerun the same command; it is still in progress.',
+    output,
+  ].join('\n');
+}
+
+/** Static schema inventory; a runtime binding replaces only the implementation. */
+export const runShellTool = createRunShellTool(null);
 
 export const shellOperationMetadata: Record<string, ToolOperationMetadata> = {
   get_current_time: {
@@ -226,14 +263,10 @@ export const shellOperationMetadata: Record<string, ToolOperationMetadata> = {
   run_shell: {
     title: '执行命令',
     summarizeInput: (input) => {
-      const record = readRecord(input);
-      const command = readString(record, 'command');
+      const shellAction = normalizeShellActionInput(input);
       return {
-        target: readString(record, 'cwd'),
-        summary: command,
-        details: {
-          risk: command ? getShellConfirmationRisk(command) : undefined,
-        },
+        target: shellAction.cwd,
+        summary: shellAction.command,
       };
     },
   },

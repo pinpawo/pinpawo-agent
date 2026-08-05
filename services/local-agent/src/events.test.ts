@@ -71,6 +71,27 @@ test('falls back to a generic operation when no metadata is registered', () => {
   assert.equal(event.operation.source?.provider, 'runtime');
 });
 
+test('marks structured ok=false tool output as a failed operation', () => {
+  const output = JSON.stringify({
+    ok: false,
+    code: 'context_not_found',
+    message: 'Patch context did not match.',
+  });
+  const event = normalizeToolStreamEvent(
+    'req-1',
+    {
+      event: 'on_tool_end',
+      name: 'apply_patch',
+      toolCallId: 'call-1',
+      output,
+    },
+    localToolOperationRegistry,
+  );
+
+  assert.equal(event.phase, 'failed');
+  assert.equal(event.raw?.output, output);
+});
+
 test('normalizes tool stream events with event-provided operation metadata first', () => {
   const event = normalizeToolStreamEvent(
     'req-1',
@@ -147,6 +168,36 @@ test('buildToolOperationEvent uses explicit toolkit metadata', () => {
     toolName: 'run_shell',
     callId: 'call-1',
   });
+});
+
+test('normalizes an incomplete run_shell start without interrupting the run', () => {
+  const warnings: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (message: unknown) => warnings.push(String(message));
+  let event;
+  try {
+    event = normalizeToolStreamEvent(
+      'req-1',
+      {
+        event: 'on_tool_start',
+        name: 'run_shell',
+        toolCallId: 'call-1',
+        input: {},
+      },
+      localToolOperationRegistry,
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.equal(event?.phase, 'started');
+  assert.equal(event?.operation.title, '执行命令');
+  assert.equal(event?.operation.target, undefined);
+  assert.equal(event?.operation.summary, undefined);
+  assert.deepEqual(event?.raw?.input, {});
+  assert.deepEqual(warnings, [
+    '[agent-stream] omitted input summary for run_shell; input was incomplete or invalid',
+  ]);
 });
 
 test('buildToolOperationEvent uses git toolkit metadata', () => {

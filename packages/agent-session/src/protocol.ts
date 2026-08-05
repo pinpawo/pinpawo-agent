@@ -27,6 +27,7 @@ import {
 import {
   isAgentReviewSpecValue,
   isBuiltinGlobalReviewPolicyMode,
+  parseAgentPlan,
   parseAgentTokenUsageSnapshot,
 } from './validation';
 import {
@@ -622,6 +623,13 @@ function readAgentEvent(record: Record<string, unknown>): AgentRuntimeEvent | nu
       },
       ...(raw ? { raw } : {}),
     };
+  }
+  if (type === 'plan.updated') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'plan'])) return null;
+    const plan = record.plan === null ? null : parseAgentPlan(record.plan);
+    return plan === null && record.plan !== null
+      ? null
+      : { type, requestId, plan };
   }
   if (type === 'human_review.requested') {
     if (!hasOnlyKeys(record, ['type', 'requestId', 'interruptId', 'review', 'reviews', 'actor'])) return null;

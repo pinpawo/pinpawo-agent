@@ -334,9 +334,9 @@ function findSequence(
   fileLines: string[],
   needle: string[],
   fromIndex: number,
-  options: { preserveLeadingWhitespace?: boolean } = {},
+  options: { strictLeadingWhitespace?: boolean } = {},
 ): { index: number; fuzz: AppliedChunk['fuzz']; matches: number[] } | null {
-  const fuzzLevels: AppliedChunk['fuzz'][] = options.preserveLeadingWhitespace
+  const fuzzLevels: AppliedChunk['fuzz'][] = options.strictLeadingWhitespace
     ? ['exact', 'ignore-trailing-whitespace']
     : ['exact', 'ignore-trailing-whitespace', 'ignore-whitespace'];
   for (const fuzz of fuzzLevels) {
@@ -403,7 +403,7 @@ export interface UpdateResult {
 }
 
 export interface ApplyChunksOptions {
-  preserveLeadingWhitespace?: boolean;
+  strictLeadingWhitespace?: boolean;
   requireUniqueContext?: boolean;
 }
 

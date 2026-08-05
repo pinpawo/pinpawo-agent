@@ -571,7 +571,7 @@ export const applyPatchTool = tool(
           original,
           operation.chunks,
           parsed?.format === 'unified'
-            ? { preserveLeadingWhitespace: true, requireUniqueContext: true }
+            ? { strictLeadingWhitespace: true, requireUniqueContext: true }
             : {},
         );
         const moveToPath = operation.moveTo ? resolveUserPath(operation.moveTo) : null;

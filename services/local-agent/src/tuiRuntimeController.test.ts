@@ -212,7 +212,7 @@ test('TuiRuntimeController submits canonical review responses without legacy res
     id: 'respond',
     label: 'Respond',
     input: { kind: 'text', key: 'message', required: true, multiline: true },
-    continuesReviewBatch: false,
+    batchSubmission: 'immediate',
   }, '请先解释风险');
 
   assert.equal(submitted, true);
@@ -240,7 +240,7 @@ test('TuiRuntimeController queues review action decisions until the final approv
   const firstSubmitted = first.controller.submitReviewResponse({
     id: 'approve',
     label: 'Approve',
-    continuesReviewBatch: true,
+    batchSubmission: 'defer',
   });
 
   assert.equal(firstSubmitted, true);
@@ -256,7 +256,7 @@ test('TuiRuntimeController queues review action decisions until the final approv
   const finalSubmitted = final.controller.submitReviewResponse({
     id: 'approve',
     label: 'Approve',
-    continuesReviewBatch: true,
+    batchSubmission: 'defer',
   });
 
   assert.equal(finalSubmitted, true);
@@ -280,7 +280,7 @@ test('TuiRuntimeController sends a review action response when the first review 
   const submitted = controller.submitReviewResponse({
     id: 'reject',
     label: 'Reject',
-    continuesReviewBatch: false,
+    batchSubmission: 'immediate',
   });
 
   assert.equal(submitted, true);
@@ -305,7 +305,7 @@ test('TuiRuntimeController blocks empty required review input', () => {
     id: 'respond',
     label: 'Respond',
     input: { kind: 'text', key: 'message', required: true },
-    continuesReviewBatch: false,
+    batchSubmission: 'immediate',
   });
 
   assert.equal(submitted, false);
@@ -323,7 +323,7 @@ test('TuiRuntimeController keeps review open when the resolution cannot be sent'
   const submitted = controller.submitReviewResponse({
     id: 'approve',
     label: 'Approve',
-    continuesReviewBatch: true,
+    batchSubmission: 'defer',
   });
 
   assert.equal(submitted, false);

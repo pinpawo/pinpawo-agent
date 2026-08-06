@@ -22,12 +22,12 @@ test('review responses advance approved batches and send the final canonical dec
     reviewSpec('review-1', [{
       id: 'approve-1',
       label: 'Approve first',
-      continuesReviewBatch: true,
+      batchSubmission: 'defer',
     }]),
     reviewSpec('review-2', [{
       id: 'approve-2',
       label: 'Approve second',
-      continuesReviewBatch: true,
+      batchSubmission: 'defer',
     }]),
   ]));
 
@@ -87,7 +87,7 @@ test('review responses validate free text and reject stale local drafts', () => 
         required: true,
         multiline: true,
       },
-      continuesReviewBatch: false,
+      batchSubmission: 'immediate',
     }]),
   ]));
 
@@ -154,7 +154,7 @@ test('review cancellation targets only the current canonical action', () => {
     reviewSpec('review-1', [{
       id: 'approve',
       label: 'Approve',
-      continuesReviewBatch: false,
+      batchSubmission: 'immediate',
     }]),
   ]));
 
@@ -194,7 +194,7 @@ test('a sent review resolution can be followed by an ordered run interrupt', () 
     reviewSpec('review-1', [{
       id: 'approve',
       label: 'Approve',
-      continuesReviewBatch: false,
+      batchSubmission: 'immediate',
     }]),
   ]));
 

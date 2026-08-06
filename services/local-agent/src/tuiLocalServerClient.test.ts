@@ -335,7 +335,7 @@ function sessionSnapshot(sessionId: string) {
             options: [{
               id: 'approve',
               label: 'Approve',
-              continuesReviewBatch: false,
+              batchSubmission: 'immediate',
             }],
           }],
         },

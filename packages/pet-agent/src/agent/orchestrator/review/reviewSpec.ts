@@ -206,7 +206,7 @@ export function projectHumanReviewRequest(review: ReviewSpec): HumanReviewReques
       ...(option.description !== undefined ? { description: option.description } : {}),
       ...(option.variant !== undefined ? { variant: option.variant } : {}),
       ...(option.input ? { input: option.input } : {}),
-      continuesReviewBatch: option.decision.type === 'approve',
+      batchSubmission: option.decision.type === 'approve' ? 'defer' : 'immediate',
     })),
   };
 }

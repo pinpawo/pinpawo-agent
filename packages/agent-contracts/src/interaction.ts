@@ -30,8 +30,8 @@ export type HumanReviewOption = {
   description?: string;
   variant?: 'primary' | 'normal' | 'danger';
   input?: HumanReviewOptionInput;
-  /** True when the UI may collect the next review before submitting this batch. */
-  continuesReviewBatch?: boolean;
+  /** Controls when the client submits decisions collected for this review batch. */
+  batchSubmission: 'defer' | 'immediate';
 };
 
 /** A transport-neutral request for a human decision. */
@@ -84,7 +84,7 @@ function isHumanReviewOptionInput(value: unknown): value is HumanReviewOptionInp
 
 function isHumanReviewOption(value: unknown): value is HumanReviewOption {
   return isJsonObject(value)
-    && hasOnlyKeys(value, ['id', 'label', 'description', 'variant', 'input', 'continuesReviewBatch'])
+    && hasOnlyKeys(value, ['id', 'label', 'description', 'variant', 'input', 'batchSubmission'])
     && readNonEmptyString(value.id) !== null
     && typeof value.label === 'string'
     && (value.description === undefined || typeof value.description === 'string')
@@ -95,7 +95,7 @@ function isHumanReviewOption(value: unknown): value is HumanReviewOption {
       || value.variant === 'danger'
     )
     && (value.input === undefined || isHumanReviewOptionInput(value.input))
-    && (value.continuesReviewBatch === undefined || typeof value.continuesReviewBatch === 'boolean');
+    && (value.batchSubmission === 'defer' || value.batchSubmission === 'immediate');
 }
 
 export function parseHumanReviewRequest(value: unknown): HumanReviewRequest | null {

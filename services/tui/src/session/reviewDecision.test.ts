@@ -60,11 +60,11 @@ function reviewAction(): AgentReviewAction {
       options: [{
         id: 'approve',
         label: 'Approve',
-        continuesReviewBatch: true,
+        batchSubmission: 'defer',
       }, {
         id: 'comment',
         label: 'Comment',
-        continuesReviewBatch: false,
+        batchSubmission: 'immediate',
         input: {
           kind: 'text',
           key: 'message',

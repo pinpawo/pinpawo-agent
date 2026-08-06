@@ -112,11 +112,11 @@ test('snapshot parser migrates legacy V3 reviews to the V4 public boundary', () 
       options: [{
         id: 'approve',
         label: 'Approve',
-        continuesReviewBatch: true,
+        batchSubmission: 'defer',
       }, {
         id: 'reject',
         label: 'Reject',
-        continuesReviewBatch: false,
+        batchSubmission: 'immediate',
       }],
     }],
   );

@@ -1239,7 +1239,7 @@ test('tuiStateReducer restores checkpoint-owned pending approval from a snapshot
             interactionId: 'review-1',
             schemaVersion: 2,
             view: { kind: 'plain', body: 'Approve?' },
-            options: [{ id: 'approve', label: 'Approve', continuesReviewBatch: true }],
+            options: [{ id: 'approve', label: 'Approve', batchSubmission: 'defer' }],
           }],
         },
       },
@@ -1603,7 +1603,7 @@ test('tuiStateReducer keeps batch draft local and out of the conversation timeli
     interactionId: id,
     schemaVersion: 2 as const,
     view: { kind: 'plain' as const, body: id },
-    options: [{ id: 'approve', label: 'Approve', continuesReviewBatch: true }],
+    options: [{ id: 'approve', label: 'Approve', batchSubmission: 'defer' as const }],
   }));
   state = tuiStateReducer(state, {
     type: 'event.received',
@@ -1775,7 +1775,7 @@ test('tuiStateReducer accepts canonical human review specs without legacy payloa
         options: [{
           id: 'approve',
           label: 'Approve',
-          continuesReviewBatch: true,
+          batchSubmission: 'defer',
         }],
       },
     },
@@ -1796,7 +1796,7 @@ test('tuiStateReducer accepts canonical human review specs without legacy payloa
       options: [{
         id: 'approve',
         label: 'Approve',
-        continuesReviewBatch: true,
+        batchSubmission: 'defer',
       }],
     },
     reviews: [{
@@ -1810,7 +1810,7 @@ test('tuiStateReducer accepts canonical human review specs without legacy payloa
       options: [{
         id: 'approve',
         label: 'Approve',
-        continuesReviewBatch: true,
+        batchSubmission: 'defer',
       }],
     }],
     decisions: [],

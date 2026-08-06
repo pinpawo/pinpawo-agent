@@ -26,7 +26,7 @@ test('human review boundary excludes runtime decisions and effects', () => {
       id: 'approve',
       label: 'Allow',
       variant: 'primary',
-      continuesReviewBatch: true,
+      batchSubmission: 'defer',
     }],
   } as const;
   assert.deepEqual(parseHumanReviewRequest(request), request);
@@ -39,6 +39,26 @@ test('human review boundary excludes runtime decisions and effects', () => {
     options: [{
       ...request.options[0],
       decision: { type: 'approve' },
+    }],
+  }), null);
+  assert.equal(parseHumanReviewRequest({
+    ...request,
+    options: [{ id: 'approve', label: 'Allow' }],
+  }), null);
+  assert.equal(parseHumanReviewRequest({
+    ...request,
+    options: [{
+      id: 'approve',
+      label: 'Allow',
+      batchSubmission: 'later',
+    }],
+  }), null);
+  assert.equal(parseHumanReviewRequest({
+    ...request,
+    options: [{
+      id: 'approve',
+      label: 'Allow',
+      continuesReviewBatch: true,
     }],
   }), null);
   assert.deepEqual(parseHumanReviewResponse({

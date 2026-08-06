@@ -110,9 +110,9 @@ test('review spec projects a presentation-only human interaction boundary', () =
     schemaVersion: HUMAN_REVIEW_REQUEST_SCHEMA_VERSION,
     view: internal.view,
     options: [
-      { id: 'approve', label: 'Approve', continuesReviewBatch: true },
-      { id: 'approve-with-auth', label: 'Approve and authorize', continuesReviewBatch: true },
-      { id: 'reject', label: 'Reject', continuesReviewBatch: false },
+      { id: 'approve', label: 'Approve', batchSubmission: 'defer' },
+      { id: 'approve-with-auth', label: 'Approve and authorize', batchSubmission: 'defer' },
+      { id: 'reject', label: 'Reject', batchSubmission: 'immediate' },
       {
         id: 'respond',
         label: 'Respond',
@@ -122,7 +122,7 @@ test('review spec projects a presentation-only human interaction boundary', () =
           required: true,
           multiline: true,
         },
-        continuesReviewBatch: false,
+        batchSubmission: 'immediate',
       },
     ],
   });

@@ -238,7 +238,7 @@ test('reduceSession keeps review and terminal control scoped to the owning run',
         interactionId: 'review-1',
         schemaVersion: 2,
         view: { kind: 'plain', body: 'Approve?' },
-        options: [{ id: 'approve', label: 'Approve' }],
+        options: [{ id: 'approve', label: 'Approve', batchSubmission: 'defer' }],
       },
     },
   }, { observedAt: 1_100 });

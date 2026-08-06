@@ -57,7 +57,7 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
           options: [{
             id: 'approve',
             label: 'Approve',
-            continuesReviewBatch: false,
+            batchSubmission: 'immediate',
           }],
         }],
       },

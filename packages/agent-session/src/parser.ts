@@ -474,7 +474,7 @@ function projectLegacyReviewOption(value: unknown) {
     ...(value.description !== undefined ? { description: value.description } : {}),
     ...(value.variant !== undefined ? { variant: value.variant } : {}),
     ...(value.input !== undefined ? { input: value.input } : {}),
-    continuesReviewBatch: value.decision.type === 'approve',
+    batchSubmission: value.decision.type === 'approve' ? 'defer' : 'immediate',
   };
 }
 

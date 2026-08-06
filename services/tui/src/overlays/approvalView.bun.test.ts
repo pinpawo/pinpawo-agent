@@ -105,7 +105,7 @@ function review(): ReviewSpec {
     options: [{
       id: 'approve',
       label: '批准',
-      continuesReviewBatch: true,
+      batchSubmission: 'defer',
     }, {
       id: 'respond',
       label: '回复',
@@ -114,7 +114,7 @@ function review(): ReviewSpec {
         key: 'message',
         multiline: true,
       },
-      continuesReviewBatch: false,
+      batchSubmission: 'immediate',
     }],
   };
 }

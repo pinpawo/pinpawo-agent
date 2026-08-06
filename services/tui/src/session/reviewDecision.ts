@@ -50,7 +50,7 @@ export function prepareReviewDecision(params: {
     ok: true,
     decision,
     decisions,
-    shouldSend: option.continuesReviewBatch !== true
+    shouldSend: option.batchSubmission === 'immediate'
       || decisions.length >= params.action.reviews.length,
   };
 }
@@ -66,6 +66,6 @@ export function reviewDecisionsRemainValid(
       candidate.id === decision.selectedOptionId
     ));
     return review?.interactionId === decision.interactionId
-      && option?.continuesReviewBatch === true;
+      && option?.batchSubmission === 'defer';
   });
 }

@@ -192,7 +192,7 @@ function review(id: string): ReviewSpec {
       id: 'approve',
       label: 'Approve',
       variant: 'primary',
-      continuesReviewBatch: true,
+      batchSubmission: 'defer',
     }],
   };
 }

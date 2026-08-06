@@ -111,12 +111,12 @@ test('approval diff details page within a bounded CJK footer view', () => {
     options: [{
       id: 'approve',
       label: '批准',
-      continuesReviewBatch: true,
+      batchSubmission: 'defer',
     }, {
       id: 'reject',
       label: '拒绝',
       variant: 'danger',
-      continuesReviewBatch: false,
+      batchSubmission: 'immediate',
     }],
   };
   let state = syncApprovalState(createApprovalState(), waitingReview([diffReview]));
@@ -143,7 +143,7 @@ test('approval shares fixed footer rows dynamically between content and options'
     {
       id: 'authorize',
       label: '批准并授权',
-      continuesReviewBatch: true,
+      batchSubmission: 'defer',
     },
     ...base.options.slice(1),
   ];
@@ -244,7 +244,7 @@ function review(id: string): ReviewSpec {
       id: 'approve',
       label: '批准',
       variant: 'primary',
-      continuesReviewBatch: true,
+      batchSubmission: 'defer',
     }, {
       id: 'respond',
       label: '回复',
@@ -253,12 +253,12 @@ function review(id: string): ReviewSpec {
         key: 'message',
         multiline: true,
       },
-      continuesReviewBatch: false,
+      batchSubmission: 'immediate',
     }, {
       id: 'reject',
       label: '拒绝',
       variant: 'danger',
-      continuesReviewBatch: false,
+      batchSubmission: 'immediate',
     }],
   };
 }

@@ -672,7 +672,7 @@ test('parseLocalAgentServerMessage accepts public human_review.requested interac
           options: [{
             id: 'approve',
             label: 'Approve',
-            continuesReviewBatch: false,
+            batchSubmission: 'immediate',
           }],
         },
       },
@@ -694,7 +694,7 @@ test('parseLocalAgentServerMessage accepts public human_review.requested interac
           options: [{
             id: 'approve',
             label: 'Approve',
-            continuesReviewBatch: false,
+            batchSubmission: 'immediate',
           }],
         },
       },
@@ -716,7 +716,7 @@ test('parseLocalAgentServerMessage rejects legacy human_review.requested fields'
       options: [{
         id: 'approve',
         label: 'Approve',
-        continuesReviewBatch: false,
+        batchSubmission: 'immediate',
       }],
     },
   };

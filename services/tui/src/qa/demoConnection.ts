@@ -369,7 +369,7 @@ function createDemoSession(
                 id: 'approve',
                 label: 'Approve',
                 variant: 'primary',
-                continuesReviewBatch: false,
+                batchSubmission: 'immediate',
               }, {
                 id: 'respond',
                 label: 'Respond',
@@ -378,12 +378,12 @@ function createDemoSession(
                   key: 'message',
                   multiline: true,
                 },
-                continuesReviewBatch: false,
+                batchSubmission: 'immediate',
               }, {
                 id: 'reject',
                 label: 'Reject',
                 variant: 'danger',
-                continuesReviewBatch: false,
+                batchSubmission: 'immediate',
               }],
             }],
           },

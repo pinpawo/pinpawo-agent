@@ -57,11 +57,53 @@ export type ApprovalViewModel = {
 
 const MAX_REVIEW_CONTENT_CHARACTERS = 100_000;
 const MAX_REVIEW_CONTENT_LINES = 500;
-export const APPROVAL_FOOTER_ROWS = 13;
-const APPROVAL_CONTENT_ROWS = 10;
+export const APPROVAL_FOOTER_ROWS = 18;
+const APPROVAL_DIALOG_MAX_WIDTH = 112;
+const APPROVAL_DIALOG_MAX_ROWS = 16;
+const APPROVAL_CONTENT_ROWS = 13;
 const APPROVAL_TEXT_INPUT_BODY_ROWS = 4;
 const APPROVAL_TEXT_INPUT_OPTION_ROWS = 2;
 const APPROVAL_LONG_CONTENT_OPTION_ROWS = 2;
+
+export type ApprovalDialogLayout = {
+  width: number;
+  height: number;
+  left: number;
+  top: number;
+};
+
+/**
+ * Keep the review interaction visibly separate from the composer while
+ * retaining split-footer scrollback above it. The dialog is centered within
+ * the temporarily expanded footer rather than pretending to be a transcript
+ * entry.
+ */
+export function calculateApprovalDialogLayout(
+  availableWidth: number,
+  availableHeight: number,
+): ApprovalDialogLayout {
+  const width = Math.max(1, Math.floor(availableWidth));
+  const height = Math.max(1, Math.floor(availableHeight));
+  const horizontalInset = width >= 72 ? 6 : width >= 48 ? 4 : 1;
+  const dialogWidth = Math.max(
+    1,
+    Math.min(APPROVAL_DIALOG_MAX_WIDTH, width - horizontalInset * 2),
+  );
+  const dialogHeight = Math.max(
+    1,
+    Math.min(
+      APPROVAL_DIALOG_MAX_ROWS,
+      height > 4 ? height - 2 : height,
+    ),
+  );
+  return {
+    width: dialogWidth,
+    height: dialogHeight,
+    left: Math.max(0, Math.floor((width - dialogWidth) / 2)),
+    top: Math.max(0, Math.floor((height - dialogHeight) / 2)),
+  };
+}
+
 export function createApprovalState(): ApprovalState {
   return { phase: 'closed' };
 }
@@ -300,8 +342,8 @@ export function buildApprovalViewModel(
   if (state.phase === 'resolution-sent') {
     const message = state.message ?? 'Submitting review decision…';
     const rawTitle = width >= 50
-      ? `Approval ${state.reviewIndex + 1}/${reviewCount}${pet}`
-      : `Approval ${state.reviewIndex + 1}/${reviewCount}`;
+      ? `Review ${state.reviewIndex + 1}/${reviewCount}${pet}`
+      : `Review ${state.reviewIndex + 1}/${reviewCount}`;
     return {
       title: ` ${truncateTerminalLine(rawTitle, innerWidth)} `,
       bottomTitle: state.interruptSent
@@ -338,8 +380,8 @@ export function buildApprovalViewModel(
     ? ` · ${offset + 1}-${Math.min(offset + bodyRows, allBodyLines.length)}/${allBodyLines.length}`
     : '';
   const rawTitle = width >= 50
-    ? `Approval ${state.reviewIndex + 1}/${reviewCount}${pet}${contentProgress}`
-    : `Approval ${state.reviewIndex + 1}/${reviewCount}${compactContentProgress}`;
+    ? `Review ${state.reviewIndex + 1}/${reviewCount}${pet}${contentProgress}`
+    : `Review ${state.reviewIndex + 1}/${reviewCount}${compactContentProgress}`;
   const title = truncateTerminalLine(
     rawTitle,
     Math.max(1, width - 4),
@@ -402,13 +444,7 @@ function approvalLayoutRows(
 }
 
 function approvalContentRows(footerRows: number) {
-  return Math.max(
-    6,
-    Math.min(
-      APPROVAL_CONTENT_ROWS,
-      Math.floor(footerRows) - 3,
-    ),
-  );
+  return Math.max(1, Math.min(APPROVAL_CONTENT_ROWS, Math.floor(footerRows) - 3));
 }
 
 function formatApprovalOptions(

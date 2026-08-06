@@ -31,6 +31,7 @@ test('initial delegation materializes a concise main plan and scoped XML briefin
   assert.match(String(plan.content), /接下来我会先处理这项任务：关闭 GitHub Issue #272。/);
   assert.doesNotMatch(String(plan.content), /delegation_briefing|执行边界|capability:/);
   assert.equal(getPinpetMeta(plan).source, 'delegation_plan');
+  assert.notEqual(getPinpetMeta(plan).synthetic, true);
 
   assert.match(text, /^<delegation_briefing role="task_boundary" source="orchestrator" mode="initial">/);
   assert.match(text, /<task>[\s\S]*关闭 GitHub Issue #272。[\s\S]*<\/task>/);

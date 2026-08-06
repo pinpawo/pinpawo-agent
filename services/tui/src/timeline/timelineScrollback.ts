@@ -32,6 +32,7 @@ import {
   stableAssistantMarkdownRows,
   type AssistantMarkdownSurface,
 } from './assistantMarkdown';
+import { subagentDisplayText } from './messageDisplay';
 
 const WELCOME_COLOR = '#69c0c8';
 const WELCOME_MUTED_COLOR = '#789da3';
@@ -607,7 +608,9 @@ function populateTimelineRoot(
       if (label) addLine(label);
       assistantMarkdown = createAssistantMarkdownSurface(context, {
         id: `${root.id}:${entry.role}:${entryIndex}:${entry.id}`,
-        content: entry.text,
+        content: entry.role === 'subagent'
+          ? subagentDisplayText(entry.text)
+          : entry.text,
         syntaxStyle: assistantMarkdownStyle,
       });
       root.add(assistantMarkdown.container);

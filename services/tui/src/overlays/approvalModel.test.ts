@@ -12,6 +12,7 @@ import {
   approvalAcceptsTextInput,
   beginApprovalSubmission,
   buildApprovalViewModel,
+  calculateApprovalDialogLayout,
   createApprovalState,
   currentApprovalReview,
   moveApprovalSelection,
@@ -123,7 +124,7 @@ test('approval diff details page within a bounded CJK footer view', () => {
     ? null
     : buildApprovalViewModel(state, 32);
   assert.ok(first);
-  assert.match(first?.title ?? '', /1-8\//);
+  assert.match(first?.title ?? '', /1-11\//);
 
   state = scrollApprovalContent(state, 1, 32);
   const second = state.phase === 'closed'
@@ -185,9 +186,9 @@ test('approval shares fixed footer rows dynamically between content and options'
   const long = longState.phase === 'closed'
     ? null
     : buildApprovalViewModel(longState, 80);
-  assert.equal(long?.bodyRows, 8);
-  assert.equal(long?.optionRows, 2);
-  assert.match(long?.title ?? '', /details 1-8\/9/);
+  assert.equal(long?.bodyRows, 9);
+  assert.equal(long?.optionRows, 4);
+  assert.doesNotMatch(long?.title ?? '', /details/);
 
   const compact = longState.phase === 'closed'
     ? null
@@ -201,6 +202,21 @@ test('approval shares fixed footer rows dynamically between content and options'
     ? null
     : buildApprovalViewModel(compactNextState, 80, 9);
   assert.match(compactNext?.title ?? '', /details 5-8\/9/);
+});
+
+test('approval dialog is centered within its temporary footer surface', () => {
+  assert.deepEqual(calculateApprovalDialogLayout(128, 18), {
+    width: 112,
+    height: 16,
+    left: 8,
+    top: 1,
+  });
+  assert.deepEqual(calculateApprovalDialogLayout(34, 9), {
+    width: 32,
+    height: 7,
+    left: 1,
+    top: 1,
+  });
 });
 
 function waitingReview(reviews: ReviewSpec[]): AgentRunView {

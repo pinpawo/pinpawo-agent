@@ -8,12 +8,14 @@ import {
 import { buildLoadingCellLine } from '../visuals/loadingCells';
 import {
   buildApprovalViewModel,
+  calculateApprovalDialogLayout,
   type ApprovalState,
 } from './approvalModel';
 
 export class ApprovalView {
   readonly frame: BoxRenderable;
   readonly input: TextareaRenderable;
+  private readonly dialog: BoxRenderable;
   private readonly body: TextRenderable;
   private readonly options: TextRenderable;
   private readonly inputFrame: BoxRenderable;
@@ -33,10 +35,19 @@ export class ApprovalView {
       height: '100%',
       zIndex: 20,
       visible: false,
+      backgroundColor: RGBA.defaultBackground(),
+    });
+    this.dialog = new BoxRenderable(renderer, {
+      id: 'approval-dialog',
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      width: '100%',
+      height: '100%',
       flexDirection: 'column',
       border: true,
       borderColor: '#d6a84b',
-      title: ' Approval ',
+      title: ' Review ',
       titleColor: '#d6a84b',
       bottomTitle: ' ↑↓ option · Enter · Esc cancel ',
       paddingLeft: 1,
@@ -76,9 +87,10 @@ export class ApprovalView {
       onContentChange: () => options.onDraftChange(this.input.plainText),
     });
     this.inputFrame.add(this.input);
-    this.frame.add(this.body);
-    this.frame.add(this.options);
-    this.frame.add(this.inputFrame);
+    this.dialog.add(this.body);
+    this.dialog.add(this.options);
+    this.dialog.add(this.inputFrame);
+    this.frame.add(this.dialog);
   }
 
   render(state: ApprovalState, width: number, height: number) {
@@ -87,10 +99,15 @@ export class ApprovalView {
       this.input.blur();
       return;
     }
-    const model = buildApprovalViewModel(state, width, height);
+    const layout = calculateApprovalDialogLayout(width, height);
+    const model = buildApprovalViewModel(state, layout.width, layout.height);
     this.frame.visible = true;
-    this.frame.title = model.title;
-    this.frame.bottomTitle = model.bottomTitle;
+    this.dialog.left = layout.left;
+    this.dialog.top = layout.top;
+    this.dialog.width = layout.width;
+    this.dialog.height = layout.height;
+    this.dialog.title = model.title;
+    this.dialog.bottomTitle = model.bottomTitle;
     this.body.height = model.bodyRows;
     this.body.content = model.loadingFrame === null
       ? model.body

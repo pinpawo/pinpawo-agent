@@ -142,6 +142,35 @@ test('completed subagent messages render rich Markdown without an actor label', 
   }
 });
 
+test('subagent protocol briefings render as a readable delegation', async () => {
+  const setup = await createTimelineRenderer(64);
+  const timeline = new TimelineScrollback(setup.renderer);
+  try {
+    timeline.render(session([{
+      id: 'subagent-briefing',
+      type: 'message',
+      role: 'subagent',
+      text: [
+        '<delegation_briefing role="task_boundary" source="orchestrator" mode="initial">',
+        '  <task><![CDATA[Review the current pull request.]]></task>',
+        '  <essential_context><![CDATA[Preserve main behavior.]]></essential_context>',
+        '</delegation_briefing>',
+      ].join('\n'),
+      status: 'completed',
+    }]));
+
+    const text = setup.cellOutput.takeText();
+    assert.match(text, /Delegating/);
+    assert.match(text, /Review the current pull request\./);
+    assert.match(text, /Context/);
+    assert.match(text, /Preserve main behavior\./);
+    assert.doesNotMatch(text, /delegation_briefing|CDATA|essential_context/);
+  } finally {
+    timeline.destroy();
+    setup.renderer.destroy();
+  }
+});
+
 test('user messages render as a neutral full-width surface', async () => {
   const setup = await createTimelineRenderer(40);
   const timeline = new TimelineScrollback(setup.renderer);

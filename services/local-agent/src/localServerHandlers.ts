@@ -6,6 +6,7 @@ import { InflightRequestController } from './inflightRequestController';
 import { buildLocalAgentSessionSnapshot } from './localAgentSessionSnapshot';
 import type {
   AgentModelProfileSummary,
+  AgentRunView,
   AgentSessionSummary,
 } from '@pinpawo/agent-session';
 import type {
@@ -61,6 +62,11 @@ type SessionSummarySource = Pick<
   AgentSessionSummary,
   'id' | 'title' | 'messageCount' | 'createdAt' | 'updatedAt' | 'active'
 >;
+
+type ActiveChatRun = {
+  requestId: string;
+  startedAt: number;
+};
 
 function projectChatSessionSummary(session: SessionSummarySource): AgentSessionSummary {
   return {
@@ -127,14 +133,26 @@ export function createLocalServerHandlers(
   // Actor-wide admission: session transitions and chat operations never overlap.
   let activeChatOperations = 0;
   let sessionTransition: Promise<void> | null = null;
+  const activeChatRuns = new WeakMap<LocalServerPeer, ActiveChatRun>();
 
-  const loadSnapshot = async () => {
+  const loadSnapshot = async (peer?: LocalServerPeer) => {
     const requestDeps = runtimeDeps.get();
     const checkpoint = await tuiSessions.readActiveCheckpointPoint(requestDeps);
     const pendingReview = chatHandler.buildReviewActionSnapshot(
       requestDeps,
       checkpoint.pendingReview,
     );
+    const active = peer ? activeChatRuns.get(peer) : null;
+    const inflight = peer ? inflightRequests.get(peer) : null;
+    const activeRun: Extract<AgentRunView, { state: 'running' }> | null = active
+      && inflight?.requestId === active.requestId
+      ? {
+        requestId: active.requestId,
+        state: 'running',
+        activity: 'thinking',
+        startedAt: active.startedAt,
+      }
+      : null;
     return buildLocalAgentSessionSnapshot({
       sessionId: checkpoint.sessionId,
       kind: 'chat',
@@ -144,6 +162,7 @@ export function createLocalServerHandlers(
       requiredInputModalities: checkpoint.requiredInputModalities,
       sessionTokenUsage: checkpoint.sessionTokenUsage,
       pendingReview,
+      activeRun,
       currentPlan: checkpoint.currentPlan,
     });
   };
@@ -509,6 +528,7 @@ export function createLocalServerHandlers(
 
   const afterSessionCommands = async (
     peer: LocalServerPeer,
+    requestId: string,
     admit: () => Promise<void>,
   ) => {
     await sessionCommands.waitForIdle(peer);
@@ -518,17 +538,26 @@ export function createLocalServerHandlers(
     if (!peer.isConnected()) {
       return;
     }
+    const activeRun: ActiveChatRun = {
+      requestId,
+      startedAt: Date.now(),
+    };
+    activeChatRuns.set(peer, activeRun);
     activeChatOperations += 1;
     try {
       await admit();
     } finally {
       activeChatOperations -= 1;
+      if (activeChatRuns.get(peer) === activeRun) {
+        activeChatRuns.delete(peer);
+      }
     }
   };
 
   const peerHandlers: LocalServerPeerHandlers = {
     onChatRequest: (client, message) => afterSessionCommands(
       client,
+      message.requestId,
       () => chatHandler.handleChatRequest(
         client,
         message,
@@ -546,11 +575,13 @@ export function createLocalServerHandlers(
       }
       return afterSessionCommands(
         client,
+        message.requestId,
         () => chatHandler.handleHumanReviewResponse(client, message, runtimeDeps.get()),
       );
     },
     onReviewCancel: (client, message) => afterSessionCommands(
       client,
+      message.requestId,
       () => chatHandler.handleReviewCancel(
         client,
         message,
@@ -607,7 +638,7 @@ export function createLocalServerHandlers(
         async () => ({
           type: 'session.snapshot.result',
           requestId: message.requestId,
-          snapshot: await loadSnapshot(),
+          snapshot: await loadSnapshot(client),
         }),
       ),
     ),
@@ -679,6 +710,7 @@ export function createLocalServerHandlers(
     ),
     onClose: (client) => {
       sessionCommands.clear(client);
+      activeChatRuns.delete(client);
       inflightRequests.abortAll(client);
       studioHandler.rejectDisconnected(client);
     },

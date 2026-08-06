@@ -158,6 +158,42 @@ test('reduceSession deterministically replays canonical run inputs', () => {
   });
 });
 
+test('a completed final operation returns a running session to thinking', () => {
+  let session = reduceSession(createDomainSession(), {
+    type: 'user.accepted',
+    requestId: 'req-1',
+    kind: 'chat',
+    text: 'inspect',
+  }, { observedAt: 1_000 });
+  session = reduceSession(session, {
+    type: 'runtime.event',
+    event: {
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'started',
+      operation: { id: 'tool-1', kind: 'shell' },
+    },
+  }, { observedAt: 1_100 });
+  assert.equal(
+    session.activeRun?.state === 'running' ? session.activeRun.activity : null,
+    'using_tool',
+  );
+
+  session = reduceSession(session, {
+    type: 'runtime.event',
+    event: {
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'completed',
+      operation: { id: 'tool-1', kind: 'shell' },
+    },
+  }, { observedAt: 1_200 });
+  assert.equal(
+    session.activeRun?.state === 'running' ? session.activeRun.activity : null,
+    'thinking',
+  );
+});
+
 test('reduceSession accumulates usage across runs and clears only run usage on submit', () => {
   let session = reduceSession(createDomainSession(), {
     type: 'user.accepted',

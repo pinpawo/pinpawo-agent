@@ -26,6 +26,8 @@ export function buildLocalAgentSessionSnapshot(params: {
   requiredInputModalities?: readonly AgentInputModality[];
   sessionTokenUsage?: AgentSession['sessionTokenUsage'] | null;
   pendingReview?: ReviewActionSnapshot | null;
+  /** Live local transport state; never inferred from checkpoint plan data. */
+  activeRun?: Extract<AgentRunView, { state: 'running' }> | null;
   currentPlan?: AgentPlan | null;
 }): AgentSessionSnapshot {
   const timeline = timelineFromCheckpointMessages(params.messages);
@@ -51,7 +53,7 @@ export function buildLocalAgentSessionSnapshot(params: {
       ? runFromPendingReview({
         pendingReview,
       })
-      : null,
+      : params.activeRun ?? null,
     ...(params.currentPlan !== undefined ? { currentPlan: params.currentPlan } : {}),
     runtime,
     ...(sessionTokenUsage ? { sessionTokenUsage } : {}),

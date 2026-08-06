@@ -470,6 +470,19 @@ test('model selection is rejected while the active session is running', async ()
     });
     await started.promise;
 
+    await handlers.peerHandlers.onSessionSnapshotGet(peer, {
+      type: 'session.snapshot.get',
+      requestId: 'snapshot-running',
+    });
+    const runningSnapshot = sent.find((message) => (
+      message.type === 'session.snapshot.result'
+      && message.requestId === 'snapshot-running'
+    ));
+    assert.equal(runningSnapshot?.type, 'session.snapshot.result');
+    if (runningSnapshot?.type !== 'session.snapshot.result') return;
+    assert.equal(runningSnapshot.snapshot.session.activeRun?.requestId, 'chat-running');
+    assert.equal(runningSnapshot.snapshot.session.activeRun?.state, 'running');
+
     await handlers.peerHandlers.onModelSelect(peer, {
       type: 'model.select',
       requestId: 'select-running',
@@ -487,6 +500,72 @@ test('model selection is rejected while the active session is running', async ()
     await running;
   } finally {
     release.resolve();
+    handlers.close();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test('completion snapshot does not reintroduce a settled active run', async () => {
+  const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-snapshot-settled-'));
+  const sent: LocalAgentServerMessage[] = [];
+  const peer = createPeer(sent);
+  const refreshStarted = deferred<void>();
+  const releaseRefresh = deferred<void>();
+  let checkpointReads = 0;
+  const graphService = {
+    readThreadState: async () => {
+      checkpointReads += 1;
+      if (checkpointReads === 1) {
+        refreshStarted.resolve();
+        await releaseRefresh.promise;
+      }
+      return {
+        messages: [],
+        pendingHumanReview: null,
+        hasPendingContinuation: false,
+      };
+    },
+  } as unknown as LocalAgentGraphService;
+  const handlers = createLocalServerHandlers({
+    actorId: 'pet-a',
+    workdir,
+    runtimeConfig: buildLocalAgentRuntimeConfig(workdir),
+    ...createTestModelServerDeps(),
+    capabilityArtifactStore: testArtifactStore,
+  }, {
+    chatGraphService: graphService,
+    loadContext: loadTestContext,
+    runChat: async () => ({ status: 'completed', reply: 'done' }),
+  });
+
+  try {
+    await handlers.peerHandlers.onSessionNew(peer, {
+      type: 'session.new',
+      requestId: 'new-settled',
+    });
+    const running = handlers.peerHandlers.onChatRequest(peer, {
+      type: 'chat_request',
+      requestId: 'chat-settled',
+      message: 'finish',
+    });
+    await refreshStarted.promise;
+
+    await handlers.peerHandlers.onSessionSnapshotGet(peer, {
+      type: 'session.snapshot.get',
+      requestId: 'snapshot-settled',
+    });
+    const snapshot = sent.find((message) => (
+      message.type === 'session.snapshot.result'
+      && message.requestId === 'snapshot-settled'
+    ));
+    assert.equal(snapshot?.type, 'session.snapshot.result');
+    if (snapshot?.type !== 'session.snapshot.result') return;
+    assert.equal(snapshot.snapshot.session.activeRun, null);
+
+    releaseRefresh.resolve();
+    await running;
+  } finally {
+    releaseRefresh.resolve();
     handlers.close();
     rmSync(workdir, { recursive: true, force: true });
   }

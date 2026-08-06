@@ -391,3 +391,22 @@ lint passes, and documentation migrations.
   from the proposed target; no production implementation is claimed.
 - Kept issue progress, incident evidence, trace identifiers, and delivery stages
   outside the Wiki; those remain in the raw design and external tracker.
+
+## [2026-08-07] ingest | Agent boundary contracts
+
+- Registered accepted issue #570 and merged PR #572 with the current
+  `agent-contracts`, pet-agent projection, agent-session, and local-agent
+  implementations as the authoritative contract-layer evidence.
+- Added a validated system page for the four transport-neutral boundary ports:
+  Configuration, Invocation, Interaction, and State. Recorded the leaf-package
+  dependency direction and the distinction between the shared port surface and
+  Chat/Studio envelopes, graph construction, session reduction, and transport.
+- Documented the public Human Review V2 boundary: presentation/input and
+  `batchSubmission` leave the runtime; decisions/effects stay in the
+  checkpointed internal `ReviewSpec`; client responses cannot supply them.
+- Documented snapshot V4's valid V3 review migration, explicit public schema
+  versioning, and the server-local `registerHumanReviewResolutionRoute` index as
+  recoverable control state rather than a second durable review store.
+- Updated the session projection, ownership, review-resolution, open-question,
+  and documentation index pages. Raw historical review design documents were
+  retained as sources rather than rewritten during ingest.

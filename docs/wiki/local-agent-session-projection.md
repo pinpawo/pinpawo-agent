@@ -2,13 +2,15 @@
 title: Local-Agent Session Projection
 page_type: system
 status: validated
-updated: 2026-07-28
+updated: 2026-08-07
 sources:
   - ../LOCAL_AGENT_SESSION_PROJECTION.md
   - ../../packages/agent-session/src/domain.ts
   - ../../packages/agent-session/src/project.ts
   - ../../packages/agent-session/src/parser.ts
   - ../../packages/agent-session/src/snapshot.ts
+  - ../../packages/agent-contracts/src/interaction.ts
+  - ../../packages/pet-agent/src/agent/orchestrator/review/reviewSpec.ts
   - ../../services/local-agent/src/localAgentSessionSnapshot.ts
   - ../../services/local-agent/src/localAgentAppChatHandler.ts
   - ../../services/local-agent/src/reviewResolutionLifecycle.ts
@@ -25,7 +27,10 @@ sources:
   - https://github.com/pinpawo/pinpawo-agent/pull/475
   - https://github.com/pinpawo/pinpawo-agent/pull/481
   - https://github.com/pinpawo/pinpawo-agent/pull/485
+  - https://github.com/pinpawo/pinpawo-agent/issues/570
+  - https://github.com/pinpawo/pinpawo-agent/pull/572
 related:
+  - agent-boundary-contracts.md
   - interruption-and-delegation-continuation.md
   - concepts/checkpoint-snapshot-timeline.md
   - concepts/session-projection-ownership.md
@@ -59,7 +64,7 @@ no Ink, React, WebSocket, filesystem, singleton, or wall-clock dependency
 LangGraph checkpoint  (durable authority)
    │  materialize one checkpoint point + current runtime facts
    ▼
-AgentSessionSnapshot  (versioned point value; v3)
+AgentSessionSnapshot  (versioned point value; v4)
    │  applySessionSnapshot()
    ▼
 AgentSession  (timeline + zero/one activeRun)
@@ -95,7 +100,7 @@ history.
 
 ## Active-run shape
 
-Snapshot version 3 represents the active run as a discriminated union of exactly
+Snapshot version 4 represents the active run as a discriminated union of exactly
 three facts — `running(activity)`, `waiting_review(reviewAction)`, `interrupting`
 — so illegal combinations are unrepresentable. See
 [Run view as a discriminated union](decisions/run-view-discriminated-union.md).
@@ -106,6 +111,15 @@ What is shared/server-observed versus TUI-local versus server transport-control
 is deliberately partitioned. See
 [Session projection ownership boundaries](concepts/session-projection-ownership.md)
 and [Review resolution is client-local](decisions/review-resolution-is-client-local.md).
+
+## Agent boundary contracts
+
+**Fact (issue #570 / PR #572).** `ReviewAction.reviews` now contains public
+`HumanReviewRequest` values from `@pinpawo/agent-contracts`, not the internal
+pet-agent `ReviewSpec`. Public requests expose presentation, input, and required
+`batchSubmission`; runtime decisions and effects remain checkpoint-owned. The
+V4 snapshot parser migrates valid V3 checkpointed review specs to this public V2
+interaction shape. See [Agent boundary contracts](agent-boundary-contracts.md).
 
 ## Interruption and continuation
 

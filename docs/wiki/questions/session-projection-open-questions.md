@@ -2,14 +2,19 @@
 title: Session Projection Open Questions
 page_type: question
 status: draft
-updated: 2026-07-28
+updated: 2026-08-07
 sources:
   - ../../LOCAL_AGENT_SESSION_PROJECTION.md
   - ../../../services/local-agent/src/tui/TuiRuntimeController.ts
+  - ../../../packages/agent-contracts/src/interaction.ts
+  - ../../../packages/agent-session/src/parser.ts
   - https://github.com/pinpawo/pinpawo-agent/issues/386
   - https://github.com/pinpawo/pinpawo-agent/issues/408
   - https://github.com/pinpawo/pinpawo-agent/pull/485
+  - https://github.com/pinpawo/pinpawo-agent/issues/570
+  - https://github.com/pinpawo/pinpawo-agent/pull/572
 related:
+  - ../agent-boundary-contracts.md
   - ../local-agent-session-projection.md
   - ../interruption-and-delegation-continuation.md
   - ../concepts/local-agent-transport-boundary.md
@@ -42,10 +47,14 @@ guardrails from this refactor should be pinned:
   define the local-agent domain model — the adapter maps local identifiers to
   canonical ones and trims fields (for example strips operation `raw`), without
   redefining session/timeline/review semantics.
-- **Decision.** Do not introduce protocol/version negotiation before a real
-  multi-version consumer exists. Today snapshot `version` bumps (v1→v2→v3) are
-  free because there is one binary and no third-party consumer; that changes once
-  an external consumer exists.
+- **Fact.** The current snapshot emits V4 and migrates valid V3 review payloads
+  to public Human Review V2. The public interaction parser rejects undeclared
+  shapes rather than treating an internal review schema version as a public
+  protocol version.
+- **Decision.** Do not introduce general negotiation before a real multi-version
+  consumer exists. Once one does, every public schema change needs an explicit
+  version, migration/compatibility window, and coordinated client rollout; see
+  [Agent boundary contracts](../agent-boundary-contracts.md).
 - **Fact.** `session.error` currently passes `error.message` through. At a remote
   API boundary this must be sanitized, like the `raw` stripping already done for
   operation events.

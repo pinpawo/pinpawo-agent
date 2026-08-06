@@ -2,7 +2,7 @@
 title: Review Resolution Progress Is Client-Local
 page_type: decision
 status: validated
-updated: 2026-07-28
+updated: 2026-08-07
 sources:
   - ../../LOCAL_AGENT_SESSION_PROJECTION.md
   - ../../../services/local-agent/src/reviewResolutionLifecycle.ts
@@ -10,6 +10,8 @@ sources:
   - ../../../packages/agent-session/src/review.ts
   - ../../../services/local-agent/src/localServerChatHandler.ts
   - ../../../services/local-agent/src/tui/TuiRuntimeController.ts
+  - ../../../packages/agent-contracts/src/interaction.ts
+  - ../../../packages/pet-agent/src/agent/orchestrator/review/reviewSpec.ts
   - https://github.com/pinpawo/pinpawo-agent/issues/385
   - https://github.com/pinpawo/pinpawo-agent/issues/390
   - https://github.com/pinpawo/pinpawo-agent/pull/411
@@ -17,7 +19,10 @@ sources:
   - https://github.com/pinpawo/pinpawo-agent/issues/478
   - https://github.com/pinpawo/pinpawo-agent/pull/475
   - https://github.com/pinpawo/pinpawo-agent/pull/485
+  - https://github.com/pinpawo/pinpawo-agent/issues/570
+  - https://github.com/pinpawo/pinpawo-agent/pull/572
 related:
+  - ../agent-boundary-contracts.md
   - ../local-agent-session-projection.md
   - ../interruption-and-delegation-continuation.md
   - ../concepts/session-projection-ownership.md
@@ -36,6 +41,13 @@ client-side progress is the TUI-local `ReviewDraft.resolutionSent` marker.
 `ReviewAction` therefore carries only checkpoint-derived batch identity
 (`actionId`) and ordered `reviews[]` — no `waiting | submitting | canceling`
 status (removed in PR #388).
+
+**Fact (PR #572).** Those shared `reviews[]` are public `HumanReviewRequest`
+values. They have presentation/input data and `batchSubmission`, but never the
+runtime decision or effect. The server's route registration retains the internal
+`ReviewSpec[]` only long enough to validate the response and build the graph
+resume; it is recoverable from checkpoint authority. See
+[Agent boundary contracts](../agent-boundary-contracts.md).
 
 ## Rationale
 

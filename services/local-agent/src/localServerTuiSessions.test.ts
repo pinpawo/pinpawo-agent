@@ -38,7 +38,7 @@ const testArtifactStore: CapabilityArtifactStore = {
   getDownloadUri: async (uri) => uri,
 };
 
-test('readTuiCheckpointMessages keeps visible conversation and handoff messages', () => {
+test('readTuiCheckpointMessages keeps visible conversation, plan, and handoff messages', () => {
   const userMessage = stampMessageCreatedAtUtc(
     new HumanMessage(' hello '),
     '2026-06-01T01:00:00.000Z',
@@ -55,11 +55,12 @@ test('readTuiCheckpointMessages keeps visible conversation and handoff messages'
       additional_kwargs: { pinpawo: { lane: 'subagent' } },
     }),
     new AIMessage({
-      content: 'synthetic plan hidden',
+      content: '接下来我会先处理这项任务：关闭 Issue #272。',
       additional_kwargs: {
         pinpawo: {
           source: 'delegation_plan',
-          synthetic: true,
+          runId: 'run-1',
+          delegationId: 'delegation-1',
         },
       },
     }),
@@ -86,6 +87,7 @@ test('readTuiCheckpointMessages keeps visible conversation and handoff messages'
 
   assert.deepEqual(messages, [
     { role: 'user', text: 'hello', createdAt: '2026-06-01T01:00:00.000Z' },
+    { role: 'assistant', text: '接下来我会先处理这项任务：关闭 Issue #272。' },
     { role: 'subagent', requestId: 'run-1', text: 'handoff result visible' },
     { role: 'assistant', text: 'assistant reply', createdAt: '2026-06-01T01:00:01.000Z' },
   ]);

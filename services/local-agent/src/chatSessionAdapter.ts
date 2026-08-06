@@ -30,9 +30,7 @@ import {
 } from './agentStreamEvents';
 import {
   adaptRootStream,
-  readNamespaceNode,
   type RootProtocolEvent,
-  type RootStreamChatEvent,
 } from './events/rootStreamEventAdapter';
 import { clearAgentRunActivity, recordAgentRunActivity } from './operationActivityState';
 import { createLocalChatHumanMessage } from './localChatAttachments';
@@ -223,38 +221,6 @@ function projectGlobalPolicyAuthorization(
       source: {
         provider: 'runtime',
         name: 'global_review_policy',
-      },
-    },
-  };
-}
-
-function projectDelegationBriefing(
-  event: Extract<RootStreamChatEvent, { type: 'delegation.briefing' }>,
-  requestId: string,
-): Extract<AgentRuntimeEvent, { type: 'operation' }> {
-  const { briefing } = event;
-  const capability = readNamespaceNode(event.namespace);
-  return {
-    type: 'operation',
-    requestId,
-    // Dispatch is complete once the briefing is materialized; the live plan
-    // remains the authority for whether its delegated work is still active.
-    phase: 'completed',
-    operation: {
-      id: `delegation:${event.messageId}`,
-      kind: 'runtime.delegation',
-      title: briefing.mode === 'continue' ? '委派 · 继续' : '委派任务',
-      summary: briefing.task,
-      details: {
-        ...(capability ? { capability } : {}),
-        ...(briefing.essentialContext
-          ? { essentialContext: briefing.essentialContext }
-          : {}),
-        ...(briefing.gapNote ? { gapNote: briefing.gapNote } : {}),
-      },
-      source: {
-        provider: 'runtime',
-        name: 'delegation_briefing',
       },
     },
   };
@@ -491,10 +457,6 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
             namespace: chatEvent.namespace,
             text: chatEvent.text,
           });
-          break;
-        }
-        case 'delegation.briefing': {
-          emitEvent(projectDelegationBriefing(chatEvent, requestId));
           break;
         }
         case 'tool': {

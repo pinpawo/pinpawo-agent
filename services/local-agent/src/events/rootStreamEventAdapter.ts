@@ -53,13 +53,6 @@ export type RootStreamChatEvent =
   | { type: 'assistant.delta'; messageId: string; node: string | null; text: string }
   /** One completed subagent model message (ambient progress, block-level). */
   | { type: 'subagent.message'; namespace: string[]; messageId: string; text: string }
-  /** A system-authored delegation briefing, projected from its protocol message. */
-  | {
-      type: 'delegation.briefing';
-      namespace: string[];
-      messageId: string;
-      briefing: DelegationBriefing;
-    }
   /** Tool lifecycle from any scope; Phase 3 joins operation metadata. */
   | { type: 'tool'; namespace: string[]; data: Record<string, unknown> }
   /** A guard decision record (orchestrator via stream writer; subagent after Phase 4). */
@@ -102,88 +95,6 @@ function readTextDelta(data: Record<string, unknown>): string | null {
   return typeof delta.text === 'string' && delta.text.length > 0 ? delta.text : null;
 }
 
-export type DelegationBriefing = {
-  mode: 'initial' | 'continue';
-  task: string;
-  essentialContext: string | null;
-  gapNote: string | null;
-};
-
-/**
- * Read the fixed, system-authored delegation protocol at the stream boundary.
- * This is deliberately not a general XML parser: only the exact protocol
- * shape emitted by `materializeDelegation` is recognized. Any model-authored
- * XML-like text remains a normal subagent message.
- */
-export function parseDelegationBriefing(text: string): DelegationBriefing | null {
-  const header = /^<delegation_briefing role="task_boundary" source="orchestrator" mode="(initial|continue)">\s*/.exec(text);
-  if (!header) return null;
-
-  let offset = header[0].length;
-  const task = readBriefingCdataElement(text, offset, 'task');
-  if (!task) return null;
-  offset = task.offset;
-
-  const contextTag = header[1] === 'initial' ? 'essential_context' : 'gap_note';
-  const context = readBriefingCdataElement(text, offset, contextTag);
-  if (context) {
-    offset = context.offset;
-  }
-
-  if (text.slice(offset).trim() !== '</delegation_briefing>') {
-    return null;
-  }
-
-  const taskText = task.text.trim();
-  if (!taskText) return null;
-  return {
-    mode: header[1] as DelegationBriefing['mode'],
-    task: taskText,
-    essentialContext: header[1] === 'initial' ? normalizeBriefingText(context?.text) : null,
-    gapNote: header[1] === 'continue' ? normalizeBriefingText(context?.text) : null,
-  };
-}
-
-function readBriefingCdataElement(
-  source: string,
-  initialOffset: number,
-  tag: 'task' | 'essential_context' | 'gap_note',
-): { text: string; offset: number } | null {
-  let offset = skipWhitespace(source, initialOffset);
-  const openTag = `<${tag}>`;
-  if (!source.startsWith(openTag, offset)) return null;
-  offset = skipWhitespace(source, offset + openTag.length);
-  if (!source.startsWith('<![CDATA[', offset)) return null;
-  offset += '<![CDATA['.length;
-
-  let text = '';
-  while (true) {
-    const cdataEnd = source.indexOf(']]>', offset);
-    if (cdataEnd < 0) return null;
-    text += source.slice(offset, cdataEnd);
-    offset = cdataEnd + 3;
-    if (!source.startsWith('<![CDATA[', offset)) break;
-    offset += '<![CDATA['.length;
-  }
-
-  offset = skipWhitespace(source, offset);
-  const closeTag = `</${tag}>`;
-  if (!source.startsWith(closeTag, offset)) return null;
-  return { text, offset: offset + closeTag.length };
-}
-
-function skipWhitespace(source: string, offset: number) {
-  while (offset < source.length && /\s/.test(source[offset] ?? '')) {
-    offset += 1;
-  }
-  return offset;
-}
-
-function normalizeBriefingText(value: string | undefined) {
-  const text = value?.trim();
-  return text ? text : null;
-}
-
 function isGuardDecisionCustomData(data: Record<string, unknown>): boolean {
   return data.name === GUARD_DECISION_EVENT || data.name === SUBAGENT_GUARD_DECISION_EVENT;
 }
@@ -216,14 +127,12 @@ function isInternalOrchestratorNamespace(namespace: string[]) {
  * most recent `message-start` there. Subagent lifecycles additionally buffer
  * their text so the message can be emitted whole on `message-finish`.
  */
-type MessageLifecycle = {
+export type RootStreamAdapterState = Map<string, {
   messageId: string;
   role: string;
   buffer: string;
   lastEmitted: string;
-};
-
-export type RootStreamAdapterState = Map<string, MessageLifecycle>;
+}>;
 
 export function namespaceKey(namespace: string[]): string {
   return namespace.join('|');
@@ -310,15 +219,6 @@ export function readRootStreamChatEvent(
             return null;
           }
           current.lastEmitted = message;
-          const briefing = parseDelegationBriefing(message);
-          if (briefing) {
-            return {
-              type: 'delegation.briefing',
-              namespace,
-              messageId: current.messageId || `${key}:${event.seq}`,
-              briefing,
-            };
-          }
           return {
             type: 'subagent.message',
             namespace,

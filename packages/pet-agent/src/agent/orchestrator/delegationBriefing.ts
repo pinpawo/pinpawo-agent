@@ -84,7 +84,6 @@ function buildDelegationPlanMessage(params: {
   stampMessageCreatedAtUtc(message);
   setPinpetMeta(message, {
     source: DELEGATION_PLAN_SOURCE,
-    synthetic: true,
     runId: params.runId,
     delegationId: params.delegationId,
   });

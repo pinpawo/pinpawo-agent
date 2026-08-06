@@ -21,6 +21,22 @@ export function selectNavigationTarget(currentTarget) {
     : 'create_agent_tab';
 }
 
+/**
+ * Navigation settlement is independent from origin approval. The caller must
+ * let its existing origin guard report a completed cross-origin redirect.
+ */
+export function isNavigableWebTab(tab) {
+  if (tab?.status !== 'complete') return false;
+  const url = typeof tab.url === 'string' ? tab.url : tab?.pendingUrl;
+  if (typeof url !== 'string') return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 /** A popup is relevant only while its initiating interaction is executing. */
 export function shouldTrackPopup(activePopupParentTabId, currentTarget, openerTabId) {
   return Number.isInteger(activePopupParentTabId)

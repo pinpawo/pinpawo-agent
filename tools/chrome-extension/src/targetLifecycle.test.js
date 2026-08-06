@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   createTargetStack,
+  isNavigableWebTab,
   selectNavigationTarget,
   shouldTrackPopup,
 } from './targetLifecycle.js';
@@ -67,6 +68,31 @@ test('navigation preserves an explicitly user-bound tab', () => {
     selectNavigationTarget({ tabId: 11, binding: 'agent' }),
     'reuse_agent_tab',
   );
+});
+
+test('navigation settles on a completed web page without approving its origin', () => {
+  assert.equal(isNavigableWebTab({
+    status: 'complete',
+    url: 'https://www.example.com/',
+  }), true);
+  assert.equal(isNavigableWebTab({
+    status: 'complete',
+    url: 'about:blank#blocked',
+  }), false);
+  assert.equal(isNavigableWebTab({
+    status: 'loading',
+    pendingUrl: 'https://example.com/',
+  }), false);
+});
+
+test('a new navigation clears obsolete popup fallback history', () => {
+  const targets = createTargetStack({ tabId: 10, binding: 'agent' });
+  targets.bind({ tabId: 11, binding: 'agent' }, { rememberCurrent: true });
+
+  targets.bind({ tabId: 11, binding: 'agent' }, { resetHistory: true });
+
+  assert.deepEqual(targets.history(), []);
+  assert.deepEqual(targets.remove(11), { closedCurrent: true, current: null });
 });
 
 test('only a live command tracks its own popup', () => {

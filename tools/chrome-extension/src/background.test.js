@@ -111,10 +111,11 @@ test('popup tabs are followed inside the extension target lifecycle', async () =
     'utf8',
   );
 
-  assert.match(source, /followPopupAfterAction\(activeTarget, command\.deadlineAt\)/);
+  assert.match(source, /followPopupAfterAction\(activeTarget, tracking, command\.deadlineAt\)/);
   assert.match(source, /switchToPopup[\s\S]*?rememberCurrent: true[\s\S]*?waitForTab/);
   assert.match(source, /switchToPopup[\s\S]*?rollbackPopupSwitch/);
-  assert.match(source, /tabs\.onCreated\.addListener[\s\S]*?POPUP_NAVIGATION_TIMEOUT_MS[\s\S]*?switchToPopup/);
+  assert.match(source, /tabs\.onCreated\.addListener[\s\S]*?shouldTrackPopup/);
+  assert.doesNotMatch(source, /tabs\.onCreated\.addListener[\s\S]*?switchToPopup/);
   assert.match(source, /targets\.remove\(tabId\)[\s\S]*?saveTarget\(removed\.current\)/);
   assert.match(source, /originChangedError[\s\S]*?manualActionRequired: true[\s\S]*?complete_popup_manually/);
   assert.match(source, /readInteractionResult[\s\S]*?interactionDispatched: true/);
@@ -172,4 +173,32 @@ test('trusted pointer input activates the bound target inside the extension', as
 
   assert.match(dispatchClick, /await activateTarget\(tabId\)/);
   assert.match(dispatchScroll, /await activateTarget\(tabId\)/);
+});
+
+test('navigation commits a normal tab before attaching the debugger', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    'utf8',
+  );
+  const navigate = source.match(
+    /if \(command\.command === 'navigate'\) \{([\s\S]*?)\n  \}/,
+  )?.[1] ?? '';
+
+  assert.match(navigate, /prepareNavigationTarget/);
+  assert.match(navigate, /await activateTarget\(activeTarget\.tabId\)/);
+  assert.match(navigate, /await attach\(activeTarget\.tabId\)/);
+  assert.doesNotMatch(source, /'Page\.navigate'/);
+});
+
+test('target activation does not focus the user\'s Chrome window', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    'utf8',
+  );
+  const activateTarget = source.match(
+    /async function activateTarget\(tabId\) \{([\s\S]*?)\n\}/,
+  )?.[1] ?? '';
+
+  assert.match(activateTarget, /chrome\.tabs\.update\(tabId, \{ active: true \}\)/);
+  assert.doesNotMatch(activateTarget, /chrome\.windows\.update/);
 });

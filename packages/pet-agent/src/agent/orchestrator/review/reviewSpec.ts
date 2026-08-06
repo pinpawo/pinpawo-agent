@@ -3,6 +3,7 @@ import type {
   HumanReviewRequest,
   HumanReviewResponse,
 } from '@pinpawo/agent-contracts';
+import { HUMAN_REVIEW_REQUEST_SCHEMA_VERSION } from '@pinpawo/agent-contracts';
 import { isReviewSpecValue } from './reviewSpecValidation';
 
 export { isReviewSpecValue };
@@ -197,7 +198,7 @@ export type ReviewResponse = {
 export function projectHumanReviewRequest(review: ReviewSpec): HumanReviewRequest {
   return {
     interactionId: review.id,
-    schemaVersion: review.schemaVersion,
+    schemaVersion: HUMAN_REVIEW_REQUEST_SCHEMA_VERSION,
     view: review.view,
     options: review.options.map((option) => ({
       id: option.id,
@@ -205,7 +206,7 @@ export function projectHumanReviewRequest(review: ReviewSpec): HumanReviewReques
       ...(option.description !== undefined ? { description: option.description } : {}),
       ...(option.variant !== undefined ? { variant: option.variant } : {}),
       ...(option.input ? { input: option.input } : {}),
-      continuesInteraction: option.decision.type === 'approve',
+      continuesReviewBatch: option.decision.type === 'approve',
     })),
   };
 }

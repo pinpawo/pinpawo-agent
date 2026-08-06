@@ -49,7 +49,7 @@ function sessionSnapshot(input: {
   sessionTokenUsage?: AgentSessionSnapshot['session']['sessionTokenUsage'];
 }): AgentSessionSnapshot {
   return {
-    version: 3,
+    version: 4,
     session: {
       sessionId: input.sessionId,
       kind: input.kind,
@@ -380,7 +380,7 @@ test('tuiStateReducer keeps the current review draft when an older request compl
       requestId: 'req-new',
       review: {
         interactionId: 'review-new',
-        schemaVersion: 1,
+        schemaVersion: 2,
         view: { kind: 'plain', body: 'Approve the new run?' },
         options: [],
       },
@@ -1237,9 +1237,9 @@ test('tuiStateReducer restores checkpoint-owned pending approval from a snapshot
           petId: 'pet-a',
           reviews: [{
             interactionId: 'review-1',
-            schemaVersion: 1,
+            schemaVersion: 2,
             view: { kind: 'plain', body: 'Approve?' },
-            options: [{ id: 'approve', label: 'Approve', continuesInteraction: true }],
+            options: [{ id: 'approve', label: 'Approve', continuesReviewBatch: true }],
           }],
         },
       },
@@ -1537,7 +1537,7 @@ test('tuiStateReducer handles human review and interrupt state', () => {
       requestId: 'req-1',
       review: {
         interactionId: 'review-1',
-        schemaVersion: 1,
+        schemaVersion: 2,
         view: { kind: 'plain', body: 'Approve?' },
         options: [],
       },
@@ -1553,13 +1553,13 @@ test('tuiStateReducer handles human review and interrupt state', () => {
     actionId: 'request:req-1:reviews:review-1',
     review: {
       interactionId: 'review-1',
-      schemaVersion: 1,
+      schemaVersion: 2,
       view: { kind: 'plain', body: 'Approve?' },
       options: [],
     },
     reviews: [{
       interactionId: 'review-1',
-      schemaVersion: 1,
+      schemaVersion: 2,
       view: { kind: 'plain', body: 'Approve?' },
       options: [],
     }],
@@ -1601,9 +1601,9 @@ test('tuiStateReducer keeps batch draft local and out of the conversation timeli
   let state = startRun(initialState(), 'req-1');
   const reviews = ['review-1', 'review-2'].map((id) => ({
     interactionId: id,
-    schemaVersion: 1,
+    schemaVersion: 2 as const,
     view: { kind: 'plain' as const, body: id },
-    options: [{ id: 'approve', label: 'Approve', continuesInteraction: true }],
+    options: [{ id: 'approve', label: 'Approve', continuesReviewBatch: true }],
   }));
   state = tuiStateReducer(state, {
     type: 'event.received',
@@ -1671,7 +1671,7 @@ test('tuiStateReducer keeps a sent review resolution local until the server resp
       requestId: 'req-1',
       review: {
         interactionId: 'review-1',
-        schemaVersion: 1,
+        schemaVersion: 2,
         view: { kind: 'plain', body: 'Approve?' },
         options: [],
       },
@@ -1697,7 +1697,7 @@ test('tuiStateReducer keeps a sent review resolution local until the server resp
       requestId: 'req-1',
       review: {
         interactionId: 'review-1',
-        schemaVersion: 1,
+        schemaVersion: 2,
         view: { kind: 'plain', body: 'Approve?' },
         options: [],
       },
@@ -1719,7 +1719,7 @@ test('tuiStateReducer sent review resolution preserves the owning run', () => {
       requestId: 'req-1',
       review: {
         interactionId: 'review-1',
-        schemaVersion: 1,
+        schemaVersion: 2,
         view: { kind: 'plain', body: 'Approve?' },
         options: [],
       },
@@ -1766,7 +1766,7 @@ test('tuiStateReducer accepts canonical human review specs without legacy payloa
       requestId: 'req-1',
       review: {
         interactionId: 'review-1',
-        schemaVersion: 1,
+        schemaVersion: 2,
         view: {
           kind: 'plain',
           title: 'Needs approval',
@@ -1775,7 +1775,7 @@ test('tuiStateReducer accepts canonical human review specs without legacy payloa
         options: [{
           id: 'approve',
           label: 'Approve',
-          continuesInteraction: true,
+          continuesReviewBatch: true,
         }],
       },
     },
@@ -1787,7 +1787,7 @@ test('tuiStateReducer accepts canonical human review specs without legacy payloa
     actionId: 'request:req-1:reviews:review-1',
     review: {
       interactionId: 'review-1',
-      schemaVersion: 1,
+      schemaVersion: 2,
       view: {
         kind: 'plain',
         title: 'Needs approval',
@@ -1796,12 +1796,12 @@ test('tuiStateReducer accepts canonical human review specs without legacy payloa
       options: [{
         id: 'approve',
         label: 'Approve',
-        continuesInteraction: true,
+        continuesReviewBatch: true,
       }],
     },
     reviews: [{
       interactionId: 'review-1',
-      schemaVersion: 1,
+      schemaVersion: 2,
       view: {
         kind: 'plain',
         title: 'Needs approval',
@@ -1810,7 +1810,7 @@ test('tuiStateReducer accepts canonical human review specs without legacy payloa
       options: [{
         id: 'approve',
         label: 'Approve',
-        continuesInteraction: true,
+        continuesReviewBatch: true,
       }],
     }],
     decisions: [],

@@ -142,7 +142,7 @@ test('buildTuiScreenModel keeps approval status visible while composer accepts r
   state.connection = { status: 'ready' };
   const review = {
     interactionId: 'review-1',
-    schemaVersion: 1,
+    schemaVersion: 2 as const,
     view: { kind: 'plain' as const, body: 'Need review' },
     options: [],
   };

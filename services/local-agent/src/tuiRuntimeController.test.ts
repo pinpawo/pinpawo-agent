@@ -12,7 +12,7 @@ import type { TuiAction, TuiState } from './tui/state/tuiState';
 function pendingReviewState(): TuiState {
   const review = {
     interactionId: 'review-1',
-    schemaVersion: 1,
+    schemaVersion: 2 as const,
     view: { kind: 'plain' as const, body: 'Need review' },
     options: [],
   };
@@ -55,13 +55,13 @@ function pendingReviewActionState(reviewIndex = 0): TuiState {
   const reviews = [
     {
       interactionId: 'review-1',
-      schemaVersion: 1,
+      schemaVersion: 2 as const,
       view: { kind: 'plain' as const, body: 'First review' },
       options: [],
     },
     {
       interactionId: 'review-2',
-      schemaVersion: 1,
+      schemaVersion: 2 as const,
       view: { kind: 'plain' as const, body: 'Second review' },
       options: [],
     },
@@ -212,7 +212,7 @@ test('TuiRuntimeController submits canonical review responses without legacy res
     id: 'respond',
     label: 'Respond',
     input: { kind: 'text', key: 'message', required: true, multiline: true },
-    continuesInteraction: false,
+    continuesReviewBatch: false,
   }, '请先解释风险');
 
   assert.equal(submitted, true);
@@ -240,7 +240,7 @@ test('TuiRuntimeController queues review action decisions until the final approv
   const firstSubmitted = first.controller.submitReviewResponse({
     id: 'approve',
     label: 'Approve',
-    continuesInteraction: true,
+    continuesReviewBatch: true,
   });
 
   assert.equal(firstSubmitted, true);
@@ -256,7 +256,7 @@ test('TuiRuntimeController queues review action decisions until the final approv
   const finalSubmitted = final.controller.submitReviewResponse({
     id: 'approve',
     label: 'Approve',
-    continuesInteraction: true,
+    continuesReviewBatch: true,
   });
 
   assert.equal(finalSubmitted, true);
@@ -280,7 +280,7 @@ test('TuiRuntimeController sends a review action response when the first review 
   const submitted = controller.submitReviewResponse({
     id: 'reject',
     label: 'Reject',
-    continuesInteraction: false,
+    continuesReviewBatch: false,
   });
 
   assert.equal(submitted, true);
@@ -305,7 +305,7 @@ test('TuiRuntimeController blocks empty required review input', () => {
     id: 'respond',
     label: 'Respond',
     input: { kind: 'text', key: 'message', required: true },
-    continuesInteraction: false,
+    continuesReviewBatch: false,
   });
 
   assert.equal(submitted, false);
@@ -323,7 +323,7 @@ test('TuiRuntimeController keeps review open when the resolution cannot be sent'
   const submitted = controller.submitReviewResponse({
     id: 'approve',
     label: 'Approve',
-    continuesInteraction: true,
+    continuesReviewBatch: true,
   });
 
   assert.equal(submitted, false);
@@ -478,7 +478,7 @@ test('TuiRuntimeController cancels the delayed interrupt notice on an authoritat
         requestId: 'req-1',
         review: {
           interactionId: 'review-2',
-          schemaVersion: 1,
+          schemaVersion: 2,
           view: { kind: 'plain', body: 'A new review' },
           options: [],
         },
@@ -553,7 +553,7 @@ test('TuiRuntimeController correlates model list and selection responses', async
     assert.fail('expected model select request');
   }
   const snapshot = {
-    version: 3 as const,
+    version: 4 as const,
     session: {
       sessionId: 'sess-1',
       kind: 'chat' as const,
@@ -623,7 +623,7 @@ test('TuiRuntimeController applies the latest snapshot without resetting inline 
     readSessionSnapshot: async () => {
       events.push('snapshot');
       return {
-        version: 3,
+        version: 4,
         session: {
           sessionId: 'sess-1',
           kind: 'chat',
@@ -661,7 +661,7 @@ test('TuiRuntimeController refreshes stale reviews without resetting inline outp
     readSessionSnapshot: async () => {
       events.push('snapshot');
       return {
-        version: 3,
+        version: 4,
         session: {
           sessionId: 'sess-1',
           kind: 'chat',
@@ -714,7 +714,7 @@ test('TuiRuntimeController applies completed-message snapshots without resetting
     readSessionSnapshot: async () => {
       events.push('snapshot');
       return {
-        version: 3,
+        version: 4,
         session: {
           sessionId: 'sess-1',
           kind: 'chat',
@@ -770,7 +770,7 @@ test('TuiRuntimeController refreshes the session after interruption', async () =
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (harness.controller as any).localServerClient = {
     readSessionSnapshot: async () => ({
-      version: 3,
+      version: 4,
       session: {
         sessionId: 'sess-1',
         kind: 'chat',
@@ -797,7 +797,7 @@ test('TuiRuntimeController refreshes the session after a run error', async () =>
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (harness.controller as any).localServerClient = {
     readSessionSnapshot: async () => ({
-      version: 3,
+      version: 4,
       session: {
         sessionId: 'sess-1',
         kind: 'chat',

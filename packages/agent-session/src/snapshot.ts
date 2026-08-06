@@ -7,12 +7,12 @@ export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
 export type JsonObject = { [key: string]: JsonValue };
 
-export type AgentSessionSnapshotV3 = {
+export type AgentSessionSnapshotV4 = {
   version: typeof AGENT_SESSION_SNAPSHOT_VERSION;
   session: AgentSession;
 };
 
-export type AgentSessionSnapshot = AgentSessionSnapshotV3;
+export type AgentSessionSnapshot = AgentSessionSnapshotV4;
 
 export function createAgentSessionSnapshot(
   session: AgentSession,

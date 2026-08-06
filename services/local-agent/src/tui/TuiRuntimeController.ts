@@ -311,7 +311,7 @@ export class TuiRuntimeController {
       ...currentApproval.decisions,
       response,
     ];
-    const shouldResume = option.continuesInteraction !== true || decisions.length >= reviews.length;
+    const shouldResume = option.continuesReviewBatch !== true || decisions.length >= reviews.length;
     const now = Date.now();
     this.options.setNow(now);
     if (!shouldResume) {

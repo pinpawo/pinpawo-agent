@@ -6,6 +6,9 @@ import {
   readNonEmptyString,
 } from './json';
 
+/** Current schema emitted for the public human-review boundary. */
+export const HUMAN_REVIEW_REQUEST_SCHEMA_VERSION = 2 as const;
+
 export type HumanReviewView =
   | { kind: 'plain'; title?: string; body: string }
   | { kind: 'markdown'; title?: string; body: string }
@@ -27,14 +30,14 @@ export type HumanReviewOption = {
   description?: string;
   variant?: 'primary' | 'normal' | 'danger';
   input?: HumanReviewOptionInput;
-  /** True when the UI may collect another response in the same interaction batch. */
-  continuesInteraction?: boolean;
+  /** True when the UI may collect the next review before submitting this batch. */
+  continuesReviewBatch?: boolean;
 };
 
 /** A transport-neutral request for a human decision. */
 export type HumanReviewRequest = {
   interactionId: string;
-  schemaVersion: number;
+  schemaVersion: typeof HUMAN_REVIEW_REQUEST_SCHEMA_VERSION;
   view: HumanReviewView;
   options: HumanReviewOption[];
 };
@@ -81,7 +84,7 @@ function isHumanReviewOptionInput(value: unknown): value is HumanReviewOptionInp
 
 function isHumanReviewOption(value: unknown): value is HumanReviewOption {
   return isJsonObject(value)
-    && hasOnlyKeys(value, ['id', 'label', 'description', 'variant', 'input', 'continuesInteraction'])
+    && hasOnlyKeys(value, ['id', 'label', 'description', 'variant', 'input', 'continuesReviewBatch'])
     && readNonEmptyString(value.id) !== null
     && typeof value.label === 'string'
     && (value.description === undefined || typeof value.description === 'string')
@@ -92,7 +95,7 @@ function isHumanReviewOption(value: unknown): value is HumanReviewOption {
       || value.variant === 'danger'
     )
     && (value.input === undefined || isHumanReviewOptionInput(value.input))
-    && (value.continuesInteraction === undefined || typeof value.continuesInteraction === 'boolean');
+    && (value.continuesReviewBatch === undefined || typeof value.continuesReviewBatch === 'boolean');
 }
 
 export function parseHumanReviewRequest(value: unknown): HumanReviewRequest | null {
@@ -102,8 +105,7 @@ export function parseHumanReviewRequest(value: unknown): HumanReviewRequest | nu
   const interactionId = readNonEmptyString(value.interactionId);
   if (
     interactionId === null
-    || typeof value.schemaVersion !== 'number'
-    || !Number.isFinite(value.schemaVersion)
+    || value.schemaVersion !== HUMAN_REVIEW_REQUEST_SCHEMA_VERSION
     || !isHumanReviewView(value.view)
     || !Array.isArray(value.options)
     || value.options.length === 0

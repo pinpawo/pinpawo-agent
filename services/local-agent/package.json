@@ -31,7 +31,7 @@
     "test:live": "node --import tsx --test tests/live-agent.test.ts",
     "test:browser-smoke": "node --import tsx scripts/browser-target-lifecycle-smoke.ts",
     "test:browser-extension-smoke": "PINPAWO_BROWSER_BACKEND=extension node --import tsx scripts/browser-extension-target-lifecycle-smoke.ts",
-    "test:tui-install": "npm run build -w @pinpawo/pet-agent && npm run build && node --import tsx/esm scripts/tui-v2-install-smoke.ts",
+    "test:tui-install": "npm run build -w @pinpawo/agent-contracts && npm run build -w @pinpawo/pet-agent && npm run build && node --import tsx/esm scripts/tui-v2-install-smoke.ts",
     "test:unit": "node --import tsx --test $(find src -name '*.test.ts' | sort)",
     "eval:hitl": "node --env-file=.env --import tsx/esm evals/hitl-resume.eval.ts",
     "eval:apply-patch": "LANGCHAIN_TRACING_V2=false node --import tsx/esm evals/apply-patch-protocol.eval.ts",

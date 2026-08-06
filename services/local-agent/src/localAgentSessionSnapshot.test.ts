@@ -52,12 +52,12 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
         actionId: 'interrupt-1',
         reviews: [{
           interactionId: 'review-1',
-          schemaVersion: 1,
+          schemaVersion: 2,
           view: { kind: 'plain', body: 'Approve?' },
           options: [{
             id: 'approve',
             label: 'Approve',
-            continuesInteraction: false,
+            continuesReviewBatch: false,
           }],
         }],
       },
@@ -72,7 +72,7 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
     },
   });
 
-  assert.equal(snapshot.version, 3);
+  assert.equal(snapshot.version, 4);
   assert.equal(snapshot.session.sessionId, 'chat:pet-a');
   assert.deepEqual(snapshot.session.timeline.map((entry) => [entry.id, entry.type, entry.type === 'message' ? entry.role : '']), [
     ['message:0:user', 'message', 'user'],

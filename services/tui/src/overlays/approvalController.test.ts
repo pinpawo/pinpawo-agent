@@ -183,7 +183,7 @@ function waitingReview(
 function review(id: string): ReviewSpec {
   return {
     interactionId: id,
-    schemaVersion: 1,
+    schemaVersion: 2,
     view: {
       kind: 'plain',
       body: `Review ${id}`,
@@ -192,7 +192,7 @@ function review(id: string): ReviewSpec {
       id: 'approve',
       label: 'Approve',
       variant: 'primary',
-      continuesInteraction: true,
+      continuesReviewBatch: true,
     }],
   };
 }

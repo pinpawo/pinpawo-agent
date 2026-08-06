@@ -122,7 +122,7 @@ test('TuiLocalServerClient rejects malformed current snapshots', async () => {
     port: 3210,
     fetchImpl: (async (url: RequestInfo | URL) => {
       return jsonResponse({
-        version: 3,
+        version: 4,
         session: {
           sessionId: 'chat:pet',
           kind: 'chat',
@@ -299,7 +299,7 @@ test('TuiLocalServerClient treats health errors as unhealthy', async () => {
 
 function sessionSnapshot(sessionId: string) {
   return {
-    version: 3,
+    version: 4,
     session: {
       sessionId,
       kind: 'chat',
@@ -330,12 +330,12 @@ function sessionSnapshot(sessionId: string) {
           status: 'waiting',
           reviews: [{
             interactionId: 'review-1',
-            schemaVersion: 1,
+            schemaVersion: 2,
             view: { kind: 'plain', body: 'Approve?' },
             options: [{
               id: 'approve',
               label: 'Approve',
-              continuesInteraction: false,
+              continuesReviewBatch: false,
             }],
           }],
         },

@@ -13,6 +13,7 @@ import {
   reviewViewToText,
   toInternalReviewResponse,
 } from './review/reviewSpec';
+import { HUMAN_REVIEW_REQUEST_SCHEMA_VERSION } from '@pinpawo/agent-contracts';
 import type { ReviewResolutionContext } from './review/reviewSpec';
 
 function samplePendingReview(): ReviewResolutionContext {
@@ -106,12 +107,12 @@ test('review spec projects a presentation-only human interaction boundary', () =
 
   assert.deepEqual(request, {
     interactionId: 'review-1',
-    schemaVersion: 1,
+    schemaVersion: HUMAN_REVIEW_REQUEST_SCHEMA_VERSION,
     view: internal.view,
     options: [
-      { id: 'approve', label: 'Approve', continuesInteraction: true },
-      { id: 'approve-with-auth', label: 'Approve and authorize', continuesInteraction: true },
-      { id: 'reject', label: 'Reject', continuesInteraction: false },
+      { id: 'approve', label: 'Approve', continuesReviewBatch: true },
+      { id: 'approve-with-auth', label: 'Approve and authorize', continuesReviewBatch: true },
+      { id: 'reject', label: 'Reject', continuesReviewBatch: false },
       {
         id: 'respond',
         label: 'Respond',
@@ -121,7 +122,7 @@ test('review spec projects a presentation-only human interaction boundary', () =
           required: true,
           multiline: true,
         },
-        continuesInteraction: false,
+        continuesReviewBatch: false,
       },
     ],
   });

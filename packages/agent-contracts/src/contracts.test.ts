@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  HUMAN_REVIEW_REQUEST_SCHEMA_VERSION,
   isAgentConfig,
   parseAgentInvocationRequest,
   parseAgentStateSnapshot,
@@ -19,16 +20,20 @@ test('configuration accepts only the externally configurable authorization mode'
 test('human review boundary excludes runtime decisions and effects', () => {
   const request = {
     interactionId: 'review-1',
-    schemaVersion: 1,
+    schemaVersion: HUMAN_REVIEW_REQUEST_SCHEMA_VERSION,
     view: { kind: 'plain', body: 'Allow this change?' },
     options: [{
       id: 'approve',
       label: 'Allow',
       variant: 'primary',
-      continuesInteraction: true,
+      continuesReviewBatch: true,
     }],
   } as const;
   assert.deepEqual(parseHumanReviewRequest(request), request);
+  assert.equal(parseHumanReviewRequest({
+    ...request,
+    schemaVersion: HUMAN_REVIEW_REQUEST_SCHEMA_VERSION - 1,
+  }), null);
   assert.equal(parseHumanReviewRequest({
     ...request,
     options: [{

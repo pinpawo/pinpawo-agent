@@ -8,7 +8,7 @@ import type {
 } from './events';
 import type { ReviewAction } from './review';
 
-export const AGENT_SESSION_SNAPSHOT_VERSION = 3 as const;
+export const AGENT_SESSION_SNAPSHOT_VERSION = 4 as const;
 
 export type AgentMessageEntry = {
   id: string;

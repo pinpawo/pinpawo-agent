@@ -50,7 +50,7 @@ export function prepareReviewDecision(params: {
     ok: true,
     decision,
     decisions,
-    shouldSend: option.continuesInteraction !== true
+    shouldSend: option.continuesReviewBatch !== true
       || decisions.length >= params.action.reviews.length,
   };
 }
@@ -66,6 +66,6 @@ export function reviewDecisionsRemainValid(
       candidate.id === decision.selectedOptionId
     ));
     return review?.interactionId === decision.interactionId
-      && option?.continuesInteraction === true;
+      && option?.continuesReviewBatch === true;
   });
 }

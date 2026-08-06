@@ -97,7 +97,7 @@ test('approved batch decisions advance locally before transport submission', () 
 test('approval diff details page within a bounded CJK footer view', () => {
   const diffReview: ReviewSpec = {
     interactionId: 'review-diff',
-    schemaVersion: 1,
+    schemaVersion: 2,
     view: {
       kind: 'diff',
       title: '修改配置',
@@ -111,12 +111,12 @@ test('approval diff details page within a bounded CJK footer view', () => {
     options: [{
       id: 'approve',
       label: '批准',
-      continuesInteraction: true,
+      continuesReviewBatch: true,
     }, {
       id: 'reject',
       label: '拒绝',
       variant: 'danger',
-      continuesInteraction: false,
+      continuesReviewBatch: false,
     }],
   };
   let state = syncApprovalState(createApprovalState(), waitingReview([diffReview]));
@@ -143,7 +143,7 @@ test('approval shares fixed footer rows dynamically between content and options'
     {
       id: 'authorize',
       label: '批准并授权',
-      continuesInteraction: true,
+      continuesReviewBatch: true,
     },
     ...base.options.slice(1),
   ];
@@ -234,7 +234,7 @@ function waitingReview(reviews: ReviewSpec[]): AgentRunView {
 function review(id: string): ReviewSpec {
   return {
     interactionId: id,
-    schemaVersion: 1,
+    schemaVersion: 2,
     view: {
       kind: 'plain',
       title: '需要确认',
@@ -244,7 +244,7 @@ function review(id: string): ReviewSpec {
       id: 'approve',
       label: '批准',
       variant: 'primary',
-      continuesInteraction: true,
+      continuesReviewBatch: true,
     }, {
       id: 'respond',
       label: '回复',
@@ -253,12 +253,12 @@ function review(id: string): ReviewSpec {
         key: 'message',
         multiline: true,
       },
-      continuesInteraction: false,
+      continuesReviewBatch: false,
     }, {
       id: 'reject',
       label: '拒绝',
       variant: 'danger',
-      continuesInteraction: false,
+      continuesReviewBatch: false,
     }],
   };
 }

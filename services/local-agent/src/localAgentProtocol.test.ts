@@ -306,7 +306,7 @@ test('parseLocalAgentServerMessage rejects legacy server messages by default', (
 
 test('parseLocalAgentServerMessage accepts session results and validates resumed identity', () => {
   const snapshot = {
-    version: 3,
+    version: 4,
     session: {
       sessionId: 'chat:one',
       kind: 'chat',
@@ -663,7 +663,7 @@ test('parseLocalAgentServerMessage accepts public human_review.requested interac
         requestId: 'req-1',
         review: {
           interactionId: 'review-1',
-          schemaVersion: 1,
+          schemaVersion: 2,
           view: {
             kind: 'plain',
             title: 'Needs approval',
@@ -672,7 +672,7 @@ test('parseLocalAgentServerMessage accepts public human_review.requested interac
           options: [{
             id: 'approve',
             label: 'Approve',
-            continuesInteraction: false,
+            continuesReviewBatch: false,
           }],
         },
       },
@@ -685,7 +685,7 @@ test('parseLocalAgentServerMessage accepts public human_review.requested interac
         requestId: 'req-1',
         review: {
           interactionId: 'review-1',
-          schemaVersion: 1,
+          schemaVersion: 2,
           view: {
             kind: 'plain',
             title: 'Needs approval',
@@ -694,7 +694,7 @@ test('parseLocalAgentServerMessage accepts public human_review.requested interac
           options: [{
             id: 'approve',
             label: 'Approve',
-            continuesInteraction: false,
+            continuesReviewBatch: false,
           }],
         },
       },
@@ -708,7 +708,7 @@ test('parseLocalAgentServerMessage rejects legacy human_review.requested fields'
     requestId: 'req-1',
     review: {
       interactionId: 'review-1',
-      schemaVersion: 1,
+      schemaVersion: 2,
       view: {
         kind: 'plain',
         body: 'Run command?',
@@ -716,7 +716,7 @@ test('parseLocalAgentServerMessage rejects legacy human_review.requested fields'
       options: [{
         id: 'approve',
         label: 'Approve',
-        continuesInteraction: false,
+        continuesReviewBatch: false,
       }],
     },
   };
@@ -739,6 +739,20 @@ test('parseLocalAgentServerMessage rejects legacy human_review.requested fields'
       event: {
         ...canonicalEvent,
         payload: { kind: 'review' },
+      },
+    })),
+    null,
+  );
+  assert.equal(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        ...canonicalEvent,
+        review: {
+          ...canonicalEvent.review,
+          schemaVersion: 1,
+        },
       },
     })),
     null,

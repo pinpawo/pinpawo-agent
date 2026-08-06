@@ -52,7 +52,7 @@ function reviewAction(): AgentReviewAction {
     actionId: 'review-action',
     reviews: ['review-1', 'review-2'].map((id) => ({
       interactionId: id,
-      schemaVersion: 1,
+      schemaVersion: 2 as const,
       view: {
         kind: 'plain',
         body: `Review ${id}`,
@@ -60,11 +60,11 @@ function reviewAction(): AgentReviewAction {
       options: [{
         id: 'approve',
         label: 'Approve',
-        continuesInteraction: true,
+        continuesReviewBatch: true,
       }, {
         id: 'comment',
         label: 'Comment',
-        continuesInteraction: false,
+        continuesReviewBatch: false,
         input: {
           kind: 'text',
           key: 'message',

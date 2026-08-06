@@ -23,7 +23,11 @@ import {
   normalizeHumanization,
   randomDelayMs,
 } from './interaction.js';
-import { createTargetStack } from './targetLifecycle.js';
+import {
+  createTargetStack,
+  selectNavigationTarget,
+  shouldTrackPopup,
+} from './targetLifecycle.js';
 import { createBrowserStateTracker } from './browserState.js';
 import { calculateReconnectDelay } from './reconnect.js';
 
@@ -33,7 +37,6 @@ const ALLOWED_CDP_COMMANDS = new Set([
   'DOM.getBoxModel',
   'DOM.scrollIntoViewIfNeeded',
   'Page.getNavigationHistory',
-  'Page.navigate',
   'Page.captureScreenshot',
   'Input.insertText',
   'Input.dispatchKeyEvent',
@@ -44,7 +47,6 @@ const SESSION_KEY = 'pinpawoBrowserTarget';
 const RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
 const STABLE_CONNECTION_RESET_MS = 10_000;
-const POPUP_NAVIGATION_TIMEOUT_MS = 15_000;
 const connectionId = crypto.randomUUID();
 let port = null;
 let reconnectTimer = null;
@@ -59,6 +61,7 @@ const recentPopupByOpener = new Map();
 const queuedCommandRequestIds = new Set();
 const cancelledCommandRequestIds = new Set();
 let activeCommandRequestId = null;
+let popupTrackingParentTabId = null;
 
 class ExtensionError extends Error {
   constructor(code, message, retryable = false, details) {
@@ -202,6 +205,9 @@ async function attach(tabId) {
 async function activateTarget(tabId) {
   try {
     const tab = await chrome.tabs.get(tabId);
+    if (Number.isInteger(tab.windowId)) {
+      await chrome.windows.update(tab.windowId, { focused: true });
+    }
     if (!tab.active) await chrome.tabs.update(tabId, { active: true });
   } catch (error) {
     throw new ExtensionError(
@@ -246,6 +252,46 @@ async function ensureTarget() {
   return targets.current();
 }
 
+async function waitForNavigableTab(tabId, expectedOrigin, deadlineAt) {
+  while (Date.now() < Date.parse(deadlineAt)) {
+    ensureCommandAlive(deadlineAt);
+    const tab = await chrome.tabs.get(tabId);
+    const url = typeof tab.url === 'string' ? tab.url : tab.pendingUrl;
+    if (tab.status === 'complete' && typeof url === 'string') {
+      try {
+        if (originOf(url) === expectedOrigin) return tab;
+      } catch {
+        // The navigation has not committed to a normal web origin yet.
+      }
+    }
+    await delay(100, deadlineAt);
+  }
+  throw new ExtensionError(
+    'navigation_timeout',
+    'Navigation did not finish at the approved origin before the command deadline',
+    true,
+  );
+}
+
+async function prepareNavigationTarget(url, approvedOrigin, deadlineAt) {
+  const existing = targets.current();
+  if (selectNavigationTarget(existing) === 'reuse_agent_tab') {
+    await chrome.tabs.update(existing.tabId, { url, active: true });
+    await waitForNavigableTab(existing.tabId, approvedOrigin, deadlineAt);
+    return existing;
+  }
+
+  // A tab explicitly bound by the user remains their page. browser_open gets a
+  // separate agent-owned tab instead of navigating the user's bound tab away.
+  const tab = await chrome.tabs.create({ url, active: true });
+  if (!Number.isInteger(tab.id)) {
+    throw new ExtensionError('target_create_failed', 'Chrome did not return a tab id');
+  }
+  await waitForNavigableTab(tab.id, approvedOrigin, deadlineAt);
+  await saveTarget({ tabId: tab.id, binding: 'agent' }, { resetHistory: true });
+  return targets.current();
+}
+
 async function rollbackPopupSwitch(tabId) {
   await detach();
   const removed = targets.remove(tabId);
@@ -268,8 +314,9 @@ async function switchToPopup(tabId, parentTarget, deadlineAt) {
       { tabId, binding: parentTarget.binding },
       { rememberCurrent: true },
     );
-    await attach(tabId);
     await waitForTab(tabId, deadlineAt);
+    await activateTarget(tabId);
+    await attach(tabId);
     return targets.current();
   } catch (error) {
     try {
@@ -290,6 +337,7 @@ async function handleRemovedTarget(tabId) {
   if (attachedTabId === tabId) attachedTabId = null;
   await saveTarget(removed.current);
   if (removed.current) {
+    await activateTarget(removed.current.tabId);
     await attach(removed.current.tabId);
     return removed.current;
   }
@@ -329,6 +377,18 @@ async function followPopupAfterAction(parentTarget, deadlineAt) {
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   return targets.current();
+}
+
+function startPopupTracking(parentTabId) {
+  recentPopupByOpener.delete(parentTabId);
+  popupTrackingParentTabId = parentTabId;
+}
+
+function stopPopupTracking(parentTabId) {
+  if (popupTrackingParentTabId === parentTabId) {
+    popupTrackingParentTabId = null;
+  }
+  recentPopupByOpener.delete(parentTabId);
 }
 
 async function currentUrl(tabId) {
@@ -779,9 +839,31 @@ async function executeCommandBody(command) {
   ensureCommandAlive(command.deadlineAt);
   if (command.command === 'detach') return await detach();
 
+  const approvedOrigin = command.params.approvedOrigin;
+  if (command.command === 'navigate') {
+    const url = command.params.url;
+    if (typeof url !== 'string' || originOf(url) !== approvedOrigin) {
+      throw new ExtensionError('origin_approval_mismatch', 'Navigation URL does not match its approved origin');
+    }
+    const activeTarget = await prepareNavigationTarget(url, approvedOrigin, command.deadlineAt);
+    if (!activeTarget) {
+      throw new ExtensionError('target_create_failed', 'Chrome did not provide a navigation target');
+    }
+    await activateTarget(activeTarget.tabId);
+    await attach(activeTarget.tabId);
+    port?.postMessage({
+      type: 'browser.event',
+      protocolVersion: PROTOCOL_VERSION,
+      connectionId,
+      event: 'tab.navigated',
+      tabId: activeTarget.tabId,
+      url,
+    });
+    return await readSnapshot(activeTarget.tabId, approvedOrigin);
+  }
+
   const activeTarget = await ensureTarget();
   await attach(activeTarget.tabId);
-  const approvedOrigin = command.params.approvedOrigin;
   if (command.command === 'snapshot') {
     return await readSnapshot(activeTarget.tabId, approvedOrigin);
   }
@@ -793,25 +875,35 @@ async function executeCommandBody(command) {
   }
   if (command.command === 'click') {
     await assertApprovedOrigin(activeTarget.tabId, approvedOrigin);
-    await dispatchClick(
-      activeTarget.tabId,
-      command.params.target,
-      normalizeHumanization(command.params.humanization),
-      command.deadlineAt,
-      approvedOrigin,
-    );
-    await delay(150, command.deadlineAt);
-    const followedTarget = await followPopupAfterAction(activeTarget, command.deadlineAt);
-    const resultTarget = await requireLiveResultTarget(followedTarget ?? activeTarget);
-    return await readInteractionResult(resultTarget.tabId, approvedOrigin);
+    startPopupTracking(activeTarget.tabId);
+    try {
+      await dispatchClick(
+        activeTarget.tabId,
+        command.params.target,
+        normalizeHumanization(command.params.humanization),
+        command.deadlineAt,
+        approvedOrigin,
+      );
+      await delay(150, command.deadlineAt);
+      const followedTarget = await followPopupAfterAction(activeTarget, command.deadlineAt);
+      const resultTarget = await requireLiveResultTarget(followedTarget ?? activeTarget);
+      return await readInteractionResult(resultTarget.tabId, approvedOrigin);
+    } finally {
+      stopPopupTracking(activeTarget.tabId);
+    }
   }
   if (command.command === 'type') {
     await assertApprovedOrigin(activeTarget.tabId, approvedOrigin);
-    await dispatchType(activeTarget.tabId, command.params, command.deadlineAt, approvedOrigin);
-    await delay(100, command.deadlineAt);
-    const followedTarget = await followPopupAfterAction(activeTarget, command.deadlineAt);
-    const resultTarget = await requireLiveResultTarget(followedTarget ?? activeTarget);
-    return await readInteractionResult(resultTarget.tabId, approvedOrigin);
+    startPopupTracking(activeTarget.tabId);
+    try {
+      await dispatchType(activeTarget.tabId, command.params, command.deadlineAt, approvedOrigin);
+      await delay(100, command.deadlineAt);
+      const followedTarget = await followPopupAfterAction(activeTarget, command.deadlineAt);
+      const resultTarget = await requireLiveResultTarget(followedTarget ?? activeTarget);
+      return await readInteractionResult(resultTarget.tabId, approvedOrigin);
+    } finally {
+      stopPopupTracking(activeTarget.tabId);
+    }
   }
   if (command.command === 'scroll') {
     await assertApprovedOrigin(activeTarget.tabId, approvedOrigin);
@@ -834,24 +926,7 @@ async function executeCommandBody(command) {
     return await readSnapshot(activeTarget.tabId, approvedOrigin);
   }
 
-  const url = command.params.url;
-  if (typeof url !== 'string' || originOf(url) !== approvedOrigin) {
-    throw new ExtensionError('origin_approval_mismatch', 'Navigation URL does not match its approved origin');
-  }
-  const navigation = await cdp(activeTarget.tabId, 'Page.navigate', { url });
-  if (navigation.errorText) {
-    throw new ExtensionError('navigation_failed', navigation.errorText, true);
-  }
-  await waitForTab(activeTarget.tabId, command.deadlineAt);
-  port?.postMessage({
-    type: 'browser.event',
-    protocolVersion: PROTOCOL_VERSION,
-    connectionId,
-    event: 'tab.navigated',
-    tabId: activeTarget.tabId,
-    url,
-  });
-  return await readSnapshot(activeTarget.tabId, approvedOrigin);
+  throw new ExtensionError('unsupported_command', `Unsupported browser command: ${command.command}`);
 }
 
 function handleCancel(value) {
@@ -908,24 +983,12 @@ chrome.action.onClicked.addListener(async (tab) => {
 });
 
 chrome.tabs.onCreated.addListener((tab) => {
-  if (!Number.isInteger(tab.id) || !Number.isInteger(tab.openerTabId)) return;
-  if (targets.current()?.tabId !== tab.openerTabId) return;
+  if (!Number.isInteger(tab.id) || !shouldTrackPopup(
+    popupTrackingParentTabId,
+    targets.current(),
+    tab.openerTabId,
+  )) return;
   recentPopupByOpener.set(tab.openerTabId, { tabId: tab.id });
-  void enqueueExtensionWork(async () => {
-    const pendingPopup = recentPopupByOpener.get(tab.openerTabId);
-    if (pendingPopup?.tabId === tab.id) {
-      recentPopupByOpener.delete(tab.openerTabId);
-    }
-    const target = targets.current();
-    if (target?.tabId !== tab.openerTabId) return;
-    const deadlineAt = new Date(Date.now() + POPUP_NAVIGATION_TIMEOUT_MS).toISOString();
-    await switchToPopup(tab.id, target, deadlineAt);
-  }).catch((error) => {
-    console.warn(
-      '[pinpawo-extension] failed to follow popup:',
-      error instanceof Error ? error.message : String(error),
-    );
-  });
 });
 
 chrome.tabs.onRemoved.addListener(async (tabId) => {

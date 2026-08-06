@@ -4,6 +4,7 @@ import {
   type BrowserBridgeStatus,
 } from './drivers/chromeExtension/bridge';
 import type { BrowserExtensionCapability } from './drivers/chromeExtension/protocol';
+import { ChromeExtensionBrowserSession } from './drivers/chromeExtension/session';
 import { BrowserSession } from './session';
 import type { BrowserExecutionOwner } from './ownership';
 import type { ToolkitRuntimeExecutionScope } from '@pinpawo/pet-agent';
@@ -95,12 +96,16 @@ export function projectBrowserRuntimeSnapshot(
 
 class BrowserRuntime {
   private started = false;
+  // The runtime owns the adapter instance so toolkit calls share the same
+  // approval and recovery boundary rather than constructing a driver per call.
+  private readonly extensionSession = new ChromeExtensionBrowserSession();
   private readonly session: BrowserSession;
 
   constructor() {
     this.session = new BrowserSession({
       requireExecutionOwner: true,
       getRuntimeSnapshot: () => this.getSnapshot(),
+      createChromeExtensionSession: () => this.extensionSession,
     });
   }
 

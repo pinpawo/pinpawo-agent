@@ -661,20 +661,26 @@ class PlaywrightBrowserSession {
 
 type BrowserImpl = PlaywrightBrowserSession | ChromeExtensionBrowserSession;
 
+type ChromeExtensionSessionFactory = () => ChromeExtensionBrowserSession;
+
 export class BrowserSession {
   private impl: BrowserImpl | null = null;
   private initPromise: Promise<BrowserImpl> | null = null;
   private readonly ownership: BrowserContextOwnership | null;
   private readonly getRuntimeSnapshot: (() => BrowserRuntimeSnapshot) | null;
+  private readonly createChromeExtensionSession: ChromeExtensionSessionFactory;
 
   constructor(options: {
     requireExecutionOwner?: boolean;
     getRuntimeSnapshot?: () => BrowserRuntimeSnapshot;
+    createChromeExtensionSession?: ChromeExtensionSessionFactory;
   } = {}) {
     this.ownership = options.requireExecutionOwner
       ? new BrowserContextOwnership()
       : null;
     this.getRuntimeSnapshot = options.getRuntimeSnapshot ?? null;
+    this.createChromeExtensionSession = options.createChromeExtensionSession
+      ?? (() => new ChromeExtensionBrowserSession());
   }
 
   private ensureImpl(requiresPlaywright = false): Promise<BrowserImpl> {
@@ -685,7 +691,7 @@ export class BrowserSession {
       }
       this.initPromise = detectBackend(this.getRuntimeSnapshot(), requiresPlaywright).then((backend) => {
         this.impl = backend === 'extension'
-          ? new ChromeExtensionBrowserSession()
+          ? this.createChromeExtensionSession()
           : new PlaywrightBrowserSession();
         return this.impl;
       }).catch((error) => {

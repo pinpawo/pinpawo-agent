@@ -144,6 +144,51 @@ test('TuiSessionController synchronizes one session and projects a chat run', ()
   controller.stop();
 });
 
+test('startup snapshot restores active run ownership for following activity events', () => {
+  let connection!: FakeConnection;
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => 'snapshot-running',
+    now: () => 1_000,
+  });
+
+  controller.start();
+  connection.open();
+  connection.receive({
+    type: 'session.snapshot.result',
+    requestId: 'snapshot-running',
+    snapshot: createAgentSessionSnapshot({
+      sessionId: 'chat:one',
+      kind: 'chat',
+      timeline: [],
+      activeRun: {
+        requestId: 'chat-running',
+        state: 'running',
+        activity: 'thinking',
+        startedAt: 500,
+      },
+    }),
+  });
+
+  connection.receive(eventMessage({
+    type: 'operation',
+    requestId: 'chat-running',
+    phase: 'started',
+    operation: { id: 'tool-1', kind: 'shell', title: 'Run checks' },
+  }));
+
+  const session = controller.getState().session;
+  assert.equal(session.timeline[0]?.type, 'operation');
+  assert.equal(session.activeRun?.state, 'running');
+  if (session.activeRun?.state === 'running') {
+    assert.equal(session.activeRun.activity, 'using_tool');
+  }
+  controller.stop();
+});
+
 test('TuiSessionController submits local attachments and keeps paths out of optimistic text', () => {
   const requestIds = ['snapshot-1', 'chat-1'];
   let connection!: FakeConnection;

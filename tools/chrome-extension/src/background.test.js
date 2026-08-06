@@ -190,6 +190,20 @@ test('navigation commits a normal tab before attaching the debugger', async () =
   assert.doesNotMatch(source, /'Page\.navigate'/);
 });
 
+test('missing targets fail without fabricating an about:blank tab', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    'utf8',
+  );
+  const ensureTarget = source.match(
+    /async function ensureTarget\(\) \{([\s\S]*?)\n\}/,
+  )?.[1] ?? '';
+
+  assert.match(ensureTarget, /'browser_not_open'/);
+  assert.doesNotMatch(ensureTarget, /chrome\.tabs\.create/);
+  assert.doesNotMatch(source, /url: 'about:blank'/);
+});
+
 test('target activation does not focus the user\'s Chrome window', async () => {
   const source = await readFile(
     resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),

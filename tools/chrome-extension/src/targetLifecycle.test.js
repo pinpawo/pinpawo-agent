@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   createTargetStack,
   isNavigableWebTab,
+  isWebTab,
   selectNavigationTarget,
   shouldTrackPopup,
 } from './targetLifecycle.js';
@@ -83,6 +84,20 @@ test('navigation settles on a completed web page without approving its origin', 
     status: 'loading',
     pendingUrl: 'https://example.com/',
   }), false);
+});
+
+test('web target detection rejects internal and blocked blank pages', () => {
+  assert.equal(isWebTab({
+    status: 'loading',
+    url: 'https://example.com/path',
+  }), true);
+  assert.equal(isWebTab({
+    status: 'loading',
+    pendingUrl: 'http://example.com/',
+  }), true);
+  assert.equal(isWebTab({ url: 'about:blank', status: 'complete' }), false);
+  assert.equal(isWebTab({ url: 'about:blank#blocked', status: 'complete' }), false);
+  assert.equal(isWebTab({ url: 'chrome://extensions/', status: 'complete' }), false);
 });
 
 test('a new navigation clears obsolete popup fallback history', () => {

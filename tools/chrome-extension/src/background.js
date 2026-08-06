@@ -26,6 +26,7 @@ import {
 import {
   createTargetStack,
   isNavigableWebTab,
+  isWebTab,
   selectNavigationTarget,
   shouldTrackPopup,
 } from './targetLifecycle.js';
@@ -81,7 +82,11 @@ async function restoreTarget() {
   const candidate = stored[SESSION_KEY];
   if (!candidate || !Number.isInteger(candidate.tabId)) return;
   try {
-    await chrome.tabs.get(candidate.tabId);
+    const tab = await chrome.tabs.get(candidate.tabId);
+    if (!isWebTab(tab)) {
+      await chrome.storage.local.remove(SESSION_KEY);
+      return;
+    }
     targets.bind(candidate, { resetHistory: true });
   } catch {
     await chrome.storage.local.remove(SESSION_KEY);
@@ -239,18 +244,18 @@ async function ensureTarget() {
   const target = targets.current();
   if (target) {
     try {
-      await chrome.tabs.get(target.tabId);
-      return target;
+      const tab = await chrome.tabs.get(target.tabId);
+      if (isWebTab(tab)) return target;
     } catch {
-      await saveTarget(null);
+      // The target was closed. Clear it below.
     }
+    await saveTarget(null, { resetHistory: true });
   }
-  const tab = await chrome.tabs.create({ url: 'about:blank', active: true });
-  if (!Number.isInteger(tab.id)) {
-    throw new ExtensionError('target_create_failed', 'Chrome did not return a tab id');
-  }
-  await saveTarget({ tabId: tab.id, binding: 'agent' });
-  return targets.current();
+  throw new ExtensionError(
+    'browser_not_open',
+    'No readable browser target is available. Use browser_open first.',
+    true,
+  );
 }
 
 async function waitForNavigableTab(tabId, deadlineAt) {
@@ -271,13 +276,30 @@ async function waitForNavigableTab(tabId, deadlineAt) {
 
 async function prepareNavigationTarget(url, deadlineAt) {
   const existing = targets.current();
-  if (selectNavigationTarget(existing) === 'reuse_agent_tab') {
+  let existingTab = null;
+  if (existing) {
+    try {
+      existingTab = await chrome.tabs.get(existing.tabId);
+    } catch {
+      await saveTarget(null, { resetHistory: true });
+    }
+  }
+  if (
+    selectNavigationTarget(existing) === 'reuse_agent_tab'
+    && isWebTab(existingTab)
+  ) {
     await chrome.tabs.update(existing.tabId, { url, active: true });
     await waitForNavigableTab(existing.tabId, deadlineAt);
-    return await saveTarget(
+    await saveTarget(
       { tabId: existing.tabId, binding: 'agent' },
       { resetHistory: true },
     );
+    return targets.current();
+  }
+
+  if (existing?.binding === 'agent' && existingTab) {
+    await saveTarget(null, { resetHistory: true });
+    await chrome.tabs.remove(existing.tabId).catch(() => {});
   }
 
   // A tab explicitly bound by the user remains their page. browser_open gets a

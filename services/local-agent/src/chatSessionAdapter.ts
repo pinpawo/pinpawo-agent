@@ -67,8 +67,8 @@ export type ChatSessionAdapterOptions = {
   isCurrent: () => boolean;
   finishInterrupted: () => void;
   emitEvent: (event: AgentRuntimeEvent) => void;
-  /** Keeps the authoritative internal specs at the host boundary for resume validation. */
-  onInternalHumanReviewRequested?: (params: {
+  /** Registers an ephemeral route to the authoritative specs used for resume validation. */
+  registerHumanReviewResolutionRoute?: (params: {
     requestId: string;
     interruptId?: string;
     reviews: ReviewSpec[];
@@ -145,7 +145,7 @@ function emitHumanReviewRequested(params: {
   reviews: ReviewSpec[];
   requestId: string;
   emitEvent: (event: AgentRuntimeEvent) => void;
-  onInternalHumanReviewRequested?: ChatSessionAdapterOptions['onInternalHumanReviewRequested'];
+  registerHumanReviewResolutionRoute?: ChatSessionAdapterOptions['registerHumanReviewResolutionRoute'];
 }) {
   const review = params.reviews[0];
   if (!review) {
@@ -153,7 +153,7 @@ function emitHumanReviewRequested(params: {
   }
   const reviews = params.reviews;
   recordAgentRunActivity('waiting_human', params.requestId);
-  params.onInternalHumanReviewRequested?.({
+  params.registerHumanReviewResolutionRoute?.({
     requestId: params.requestId,
     ...(params.interruptId ? { interruptId: params.interruptId } : {}),
     reviews,
@@ -375,7 +375,7 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
       ),
       requestId,
       emitEvent,
-      onInternalHumanReviewRequested: options.onInternalHumanReviewRequested,
+      registerHumanReviewResolutionRoute: options.registerHumanReviewResolutionRoute,
     });
     return { status: 'waiting_human' };
   }
@@ -588,7 +588,7 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
       ),
       requestId,
       emitEvent,
-      onInternalHumanReviewRequested: options.onInternalHumanReviewRequested,
+      registerHumanReviewResolutionRoute: options.registerHumanReviewResolutionRoute,
     });
     return { status: 'waiting_human' };
   }

@@ -368,7 +368,7 @@ export class LocalAgentAppChatHandler {
           if (!isCurrent()) return;
           this.emitRemoteEvent(ws, userId, event);
         },
-        onInternalHumanReviewRequested: (pending) => {
+        registerHumanReviewResolutionRoute: (pending) => {
           if (!isCurrent()) return;
           this.recordInternalReviewActionRoute(pending, userId);
         },

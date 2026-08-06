@@ -347,7 +347,7 @@ export class LocalServerChatHandler {
           if (!isCurrent()) return;
           sendLocalServerPeerEvent(peer, event);
         },
-        onInternalHumanReviewRequested: (pending) => {
+        registerHumanReviewResolutionRoute: (pending) => {
           if (!isCurrent()) return;
           this.recordInternalReviewActionRoute(pending, deps);
         },

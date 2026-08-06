@@ -41,10 +41,10 @@ function createInflightController() {
 }
 
 function emitPendingReview(
-  options: Pick<ChatSessionAdapterOptions, 'emitEvent' | 'onInternalHumanReviewRequested'>,
+  options: Pick<ChatSessionAdapterOptions, 'emitEvent' | 'registerHumanReviewResolutionRoute'>,
   params: { requestId: string; interruptId: string; review: ReviewSpec },
 ) {
-  options.onInternalHumanReviewRequested?.({
+  options.registerHumanReviewResolutionRoute?.({
     requestId: params.requestId,
     interruptId: params.interruptId,
     reviews: [params.review],

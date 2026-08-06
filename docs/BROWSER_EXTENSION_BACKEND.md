@@ -104,7 +104,7 @@ or URLs.
 Then:
 
 1. Open `chrome://extensions` and enable Developer mode.
-2. Load `tools/chrome-extension/dist` as an unpacked extension. For an installed npm package, use the `bundledExtensionPath` printed by `pinpawo browser extension status`.
+2. Load `toolkits/browser/dist/hosts/chrome-extension/extension` as an unpacked extension. For an installed npm package, use the `bundledExtensionPath` printed by `pinpawo browser extension status`.
 3. Copy the extension ID shown by Chrome.
 4. Register the exact allowed extension origin:
 
@@ -133,4 +133,4 @@ The running local-agent HTTP health response keeps the cached Toolkit selection 
 
 ## Attribution
 
-The Native Messaging/extension architecture and selected registration patterns were adapted with reference to [`hangwin/mcp-chrome`](https://github.com/hangwin/mcp-chrome). The upstream project is MIT licensed; its notice is retained in `tools/chrome-extension/THIRD_PARTY_NOTICES.md`.
+The Native Messaging/extension architecture and selected registration patterns were adapted with reference to [`hangwin/mcp-chrome`](https://github.com/hangwin/mcp-chrome). The upstream project is MIT licensed; its notice is retained in `toolkits/browser/src/hosts/chromeExtension/extension/THIRD_PARTY_NOTICES.md`.

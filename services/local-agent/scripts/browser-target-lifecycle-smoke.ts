@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
-import { BrowserSession } from '../src/toolkits/browser/session';
+import { BrowserSession } from '@pinpawo-toolkit/browser';
 import { startBrowserScenarioFixture } from './browser-scenario-fixture';
 import { BrowserScenarioReporter } from './browser-scenario-report';
 

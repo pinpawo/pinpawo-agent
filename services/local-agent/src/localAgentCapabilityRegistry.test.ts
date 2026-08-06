@@ -10,7 +10,7 @@ import { z } from 'zod';
 import type { LoadedUserCapability } from './capabilityLoader';
 import { LocalAgentCapabilityRegistry } from './localAgentCapabilityRegistry';
 import { createBashToolkit, createGitToolkit } from './toolkits/local';
-import { createBrowserToolkit } from './toolkits/browser';
+import { createBrowserToolkit } from '@pinpawo-toolkit/browser';
 
 function mockTool(name: string): StructuredTool {
   return tool(

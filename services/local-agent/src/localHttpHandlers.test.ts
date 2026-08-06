@@ -20,10 +20,7 @@ import {
 import type { LoadedUserCapability } from './capabilityLoader';
 import { clearAgentRunActivity, recordOperationActivity } from './operationActivityState';
 import { readLocalAgentPackageVersion } from './packageVersion';
-import {
-  browserRuntime,
-  checkBrowserAvailability,
-} from './toolkits/browser';
+import { browserIntegration } from './browserIntegration';
 import { resolveToolkitAvailability } from './toolkits/toolkitAvailability';
 import { createTestModelServerDeps } from './testing/modelProfiles';
 
@@ -261,8 +258,8 @@ test('handleLocalHttpRequest exposes active operation health fields', async () =
 });
 
 test('handleLocalHttpRequest preserves browser availability diagnostics', async () => {
-  const availability = await checkBrowserAvailability();
-  const extension = browserRuntime.getSnapshot().extension;
+  const availability = await browserIntegration.checkAvailability();
+  const extension = browserIntegration.runtime.getSnapshot().extension;
   const res = makeRes();
 
   handleLocalHttpRequest(

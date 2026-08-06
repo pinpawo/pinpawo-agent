@@ -19,10 +19,7 @@ import {
   type LocalServerDeps,
 } from './localServerTypes';
 import { buildLocalHttpRuntimeProjection } from './localConfigProjection';
-import {
-  browserRuntime,
-  getCachedBrowserAvailability,
-} from './toolkits/browser';
+import { browserIntegration } from './browserIntegration';
 import {
   prepareAgentRegistry,
   projectExecutorCompilationIssues,
@@ -456,11 +453,11 @@ function buildCapabilitiesPayload(
 }
 
 function readBrowserHealthFields() {
-  const availability = getCachedBrowserAvailability();
+  const availability = browserIntegration.getCachedAvailability();
   if (!availability) return {};
 
   const mode = availability.metadata?.mode;
-  const extension = browserRuntime.getSnapshot().extension;
+  const extension = browserIntegration.runtime.getSnapshot().extension;
   const cachedCommandReady = availability.metadata?.commandReady;
   const commandReady = mode === 'extension'
     ? extension.commandReady

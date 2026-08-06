@@ -21,7 +21,6 @@ const CJS_EXTERNALS = [
 export default defineConfig({
   entry: {
     index: 'src/index.ts',
-    'toolkits/browser/native-host': 'src/toolkits/browser/drivers/chromeExtension/nativeHost/main.ts',
   },
   format: ['esm'],
   platform: 'node',

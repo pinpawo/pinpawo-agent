@@ -1,8 +1,17 @@
 import assert from 'node:assert/strict';
-import { ChromeExtensionBrowserSession } from '../src/toolkits/browser/drivers/chromeExtension/session';
-import { browserRuntime } from '../src/toolkits/browser/runtime';
+import {
+  BrowserRuntime,
+  ChromeExtensionBrowserSession,
+  BrowserExtensionBridge,
+} from '@pinpawo-toolkit/browser';
 import { startBrowserScenarioFixture } from './browser-scenario-fixture';
 import { BrowserScenarioReporter } from './browser-scenario-report';
+
+const bridge = new BrowserExtensionBridge();
+const browserRuntime = new BrowserRuntime(
+  { backend: () => 'extension' },
+  { bridge },
+);
 
 type Snapshot = {
   title: string;
@@ -31,7 +40,7 @@ async function waitForExtension(timeoutMs = 15_000): Promise<void> {
   );
 }
 
-const browser = new ChromeExtensionBrowserSession();
+const browser = new ChromeExtensionBrowserSession(bridge);
 const fixture = await startBrowserScenarioFixture();
 const reporter = new BrowserScenarioReporter('extension', 'browser-smoke-fixture');
 let extensionConnected = false;

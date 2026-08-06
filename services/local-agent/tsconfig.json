@@ -18,6 +18,9 @@
       ],
       "@pinpawo/pet-agent/protocol-validation": [
         "../../packages/pet-agent/src/protocolValidation.ts"
+      ],
+      "@pinpawo-toolkit/browser": [
+        "../../toolkits/browser/src/index.ts"
       ]
     },
     "strict": true,

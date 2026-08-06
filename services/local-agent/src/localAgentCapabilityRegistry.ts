@@ -6,9 +6,8 @@ import {
 } from '@pinpawo/pet-agent';
 import { loadUserCapabilities, type LoadedUserCapability } from './capabilityLoader';
 import { resolveAvailableToolkits } from './toolkits/toolkitAvailability';
-import { createBrowserCapability } from './capabilities/browserCapability';
 import { createExploreCapability } from './capabilities/explore';
-import { createBrowserToolkit } from './toolkits/browser';
+import { browserIntegration } from './browserIntegration';
 import { FileCapabilityArtifactStore } from './capabilityArtifactStore';
 import { createBashToolkit, createGitToolkit, loadCoreLocalTools } from './toolkits/local';
 
@@ -37,11 +36,11 @@ const defaultDeps: LocalAgentCapabilityRegistryDeps = {
   createLocalToolkits: () => [
     createBashToolkit(),
     createGitToolkit(),
-    createBrowserToolkit(),
+    browserIntegration.toolkit,
   ],
   createLocalCapabilities: () => [
     createExploreCapability(),
-    createBrowserCapability(),
+    browserIntegration.capability,
   ],
   resolveAvailableToolkits,
 };

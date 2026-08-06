@@ -1,14 +1,12 @@
 import {
+  DEFAULT_BROWSER_BRIDGE_SOCKET_PATH,
+  DEFAULT_BROWSER_BRIDGE_TOKEN_PATH,
   getBrowserExtensionHostStatus,
   PINPAWO_CHROME_WEB_STORE_EXTENSION_ID,
   registerBrowserExtensionHost,
   unregisterBrowserExtensionHost,
-} from '../toolkits/browser/drivers/chromeExtension/nativeHost/install';
+} from '@pinpawo-toolkit/browser';
 import { existsSync } from 'node:fs';
-import {
-  DEFAULT_BROWSER_BRIDGE_SOCKET_PATH,
-  DEFAULT_BROWSER_BRIDGE_TOKEN_PATH,
-} from '../toolkits/browser/drivers/chromeExtension/bridge';
 
 export type BrowserCommandOptions = {
   extensionId?: string;

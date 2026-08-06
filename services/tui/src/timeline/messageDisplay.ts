@@ -1,5 +1,6 @@
 import type { AgentMessageEntry } from '@pinpawo/agent-session';
 import { normalizeAssistantMessageMarkdown } from '../text/messageMarkdown';
+import { formatSubagentProtocolMessage } from './subagentProtocolDisplay';
 
 export type MessageDisplayTone =
   | 'assistant'
@@ -52,10 +53,11 @@ export function buildMessageDisplayLines(
       ];
     case 'subagent': {
       if (!entry.text.trim()) return [];
+      const text = subagentDisplayText(entry.text);
       return [
         ...timestampLine(timestampLabel, 'subagent'),
         ...logicalLines(
-          normalizeAssistantMessageMarkdown(entry.text),
+          normalizeAssistantMessageMarkdown(text),
         ).map((line) => ({
           text: line,
           tone: 'subagent' as const,
@@ -63,6 +65,10 @@ export function buildMessageDisplayLines(
       ];
     }
   }
+}
+
+export function subagentDisplayText(text: string) {
+  return formatSubagentProtocolMessage(text) ?? text;
 }
 
 export function formatMessageTimestamp(timestamp: string) {

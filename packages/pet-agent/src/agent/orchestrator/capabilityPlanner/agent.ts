@@ -162,7 +162,7 @@ function buildSubmittedPlanSystemPrompt(tasks: readonly SubmittedPlannerTask[]) 
   return [
     '【计划已完成】submit_plan 已成功提交以下计划：',
     ...tasks.map((task, index) => `${String(index + 1)}. [${task.capability}] ${task.task}`),
-    '现在直接用普通 assistant 回复以上计划已提交，然后结束本轮。不要调用任何工具，不要修改、补充或继续规划。',
+    '现在直接回复用户，确认以上计划已提交，然后结束本轮。不要调用任何工具，不要修改、补充或继续规划。',
   ].join('\n');
 }
 

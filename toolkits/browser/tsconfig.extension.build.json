@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.extension.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "./dist/hosts/chrome-extension/extension",
+    "rootDir": "./src/hosts/chromeExtension/extension",
+    "declaration": false
+  },
+  "include": ["src/hosts/chromeExtension/extension/**/*.ts"],
+  "exclude": ["src/hosts/chromeExtension/extension/**/*.test.ts"]
+}

@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noImplicitAny": false,
+    "strictNullChecks": false,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "lib": ["ES2022", "DOM"],
+    "types": ["chrome", "node"],
+    "noEmit": true
+  },
+  "include": [
+    "src/hosts/chromeExtension/extension/**/*.ts",
+    "scripts/**/*.ts"
+  ]
+}

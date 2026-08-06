@@ -19,7 +19,6 @@ import {
   createCapabilityCreatorToolkit,
 } from './capabilities/capabilityCreator';
 import { createExploreCapability } from './capabilities/explore';
-import { loadGeneralCapability } from './capabilities/general';
 import {
   createDailyPostCapability,
   createDailyPostToolkit,
@@ -225,7 +224,7 @@ export function buildLocalChatAgentInput(params: {
   interfaceKind?: LocalAgentInterfaceKind | null;
   dryRun?: boolean;
   checkpoint?: BaseCheckpointSaver;
-  /** Host-provided capabilities implemented by local-agent services */
+  /** Host-provided baseline and optional default Capabilities. */
   extraCapabilities?: AgentCapability[];
   /** User-defined capability plugins loaded by capabilityLoader */
   userCapabilities?: LoadedUserCapability[];
@@ -263,11 +262,6 @@ export function buildLocalChatAgentInput(params: {
 
   const capabilities: AgentCapability[] = [];
 
-  const generalCapability = loadGeneralCapability();
-  if (generalCapability) {
-    appendCapability(capabilities, generalCapability);
-  }
-
   if (isCapabilityEnabled('explore')) {
     appendCapability(capabilities, createExploreCapability());
   }
@@ -295,11 +289,6 @@ export function buildLocalChatAgentInput(params: {
   }
 
   for (const capability of params.extraCapabilities ?? []) {
-    if (capability.name === GENERAL_CAPABILITY_NAME) {
-      throw new Error(
-        `Capability name "${GENERAL_CAPABILITY_NAME}" is reserved by the local-agent host`,
-      );
-    }
     appendCapability(capabilities, capability);
   }
 

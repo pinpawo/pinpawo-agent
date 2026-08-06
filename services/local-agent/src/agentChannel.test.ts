@@ -15,6 +15,7 @@ import {
   type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 import { FileCapabilityArtifactStore } from './capabilityArtifactStore';
+import { loadGeneralCapability } from './capabilities/general';
 import { createBashToolkit, createGitToolkit } from './toolkits/local';
 import { createTestModelProfileRegistry } from './testing/modelProfiles';
 
@@ -71,10 +72,16 @@ function buildTestLocalChatAgentInput(
   params: Omit<LocalChatAgentInputParams, 'threadId' | 'capabilityArtifactStore'>
     & Partial<Pick<LocalChatAgentInputParams, 'threadId' | 'capabilityArtifactStore'>>,
 ) {
+  const { extraCapabilities, ...rest } = params;
+  const general = loadGeneralCapability();
   return buildLocalChatAgentInput({
     threadId: 'agent-channel-test-thread',
     capabilityArtifactStore: testArtifactStore,
-    ...params,
+    ...rest,
+    extraCapabilities: [
+      ...(general ? [general] : []),
+      ...(extraCapabilities ?? []),
+    ],
   });
 }
 
@@ -152,7 +159,7 @@ test('buildLocalChatAgentInput passes a single toolkit list', () => {
   );
   assert.deepEqual(
     setup.input.capabilities?.find(({ name }) => name === 'general')?.uses,
-    ['pet_profile', 'bash', 'git', 'artifact_discovery'],
+    ['bash', 'git'],
   );
   assert.equal('capabilityToolkits' in setup.input, false);
 });
@@ -166,7 +173,7 @@ test('buildLocalChatAgentInput keeps the General Capability permission boundary 
 
   assert.deepEqual(
     setup.input.capabilities?.find(({ name }) => name === 'general')?.uses,
-    ['pet_profile', 'bash', 'git', 'artifact_discovery'],
+    ['bash', 'git'],
   );
   assert.equal(
     setup.input.capabilities
@@ -199,21 +206,15 @@ test('buildLocalChatAgentInput dedupes built-in capabilities by name', () => {
   );
 });
 
-test('buildLocalChatAgentInput rejects a host Capability using the reserved general name', () => {
-  assert.throws(
-    () => buildTestLocalChatAgentInput({
-      context: createContext(),
-      userMessage: 'hello',
-      extraCapabilities: [{
-        name: 'general',
-        description: 'Attempt to replace the host General Capability.',
-        uses: [],
-        instructions: defineInstructionDocument({
-          content: '# Replacement General',
-        }),
-      }],
-    }),
-    /name "general" is reserved by the local-agent host/,
+test('buildLocalChatAgentInput retains the host baseline general Capability', () => {
+  const setup = buildTestLocalChatAgentInput({
+    context: createContext(),
+    userMessage: 'hello',
+  });
+
+  assert.equal(
+    setup.input.capabilities?.filter(({ name }) => name === 'general').length,
+    1,
   );
 });
 
@@ -395,14 +396,14 @@ test('buildLocalChatAgentInput registers artifact discovery for an empty thread'
   );
   assert.deepEqual(
     setup.input.capabilities?.find(({ name }) => name === 'general')?.uses,
-    ['pet_profile', 'bash', 'git', 'artifact_discovery'],
+    ['bash', 'git'],
   );
   assert.deepEqual(
     setup.registry.capabilities
       .find(({ capability }) => capability.name === 'general')
       ?.toolNames
       .filter((name) => name === 'artifact_list' || name === 'artifact_read'),
-    ['artifact_list', 'artifact_read'],
+    [],
   );
   assert.ok(
     setup.input.capabilities

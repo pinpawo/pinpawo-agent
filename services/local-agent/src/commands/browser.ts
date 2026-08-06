@@ -1,14 +1,12 @@
 import {
+  DEFAULT_BROWSER_BRIDGE_SOCKET_PATH,
+  DEFAULT_BROWSER_BRIDGE_TOKEN_PATH,
   getBrowserExtensionHostStatus,
   PINPAWO_CHROME_WEB_STORE_EXTENSION_ID,
   registerBrowserExtensionHost,
   unregisterBrowserExtensionHost,
-} from '../toolkits/browser/drivers/chromeExtension/nativeHost/install';
+} from '@pinpawo-toolkit/browser';
 import { existsSync } from 'node:fs';
-import {
-  DEFAULT_BROWSER_BRIDGE_SOCKET_PATH,
-  DEFAULT_BROWSER_BRIDGE_TOKEN_PATH,
-} from '../toolkits/browser/drivers/chromeExtension/bridge';
 
 export type BrowserCommandOptions = {
   extensionId?: string;
@@ -34,7 +32,7 @@ export async function runBrowserCommand(
       extensionId,
       extensionIds: status.extensionIds,
       nativeHostEntryPath: paths.nativeHostEntryPath,
-      extensionPath: status.extensionPath,
+      bundledExtensionPath: status.bundledExtensionPath,
       manifests: paths.manifestPaths,
     }, null, 2) + '\n');
     return;
@@ -53,7 +51,7 @@ export async function runBrowserCommand(
       runtimeFiles: {
         socketPresent: existsSync(DEFAULT_BROWSER_BRIDGE_SOCKET_PATH),
         tokenPresent: existsSync(DEFAULT_BROWSER_BRIDGE_TOKEN_PATH),
-        note: 'Use the running local-agent /health endpoint for live host, extension, debugger and target state.',
+        note: 'These files only show whether a running local-agent has created its bridge runtime; they do not prove that an extension is connected.',
       },
     }, null, 2) + '\n');
     return;

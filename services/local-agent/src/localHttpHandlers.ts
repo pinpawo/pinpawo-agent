@@ -20,10 +20,6 @@ import {
 } from './localServerTypes';
 import { buildLocalHttpRuntimeProjection } from './localConfigProjection';
 import {
-  browserRuntime,
-  getCachedBrowserAvailability,
-} from './toolkits/browser';
-import {
   prepareAgentRegistry,
   projectExecutorCompilationIssues,
 } from './agentRegistryPreparation';
@@ -63,7 +59,6 @@ export function handleLocalHttpRequest(
         status: 'ok',
         actor_id: deps.actorId,
         actor_name: deps.actorName,
-        ...readBrowserHealthFields(),
         ...readAgentActivityHealthFields(),
       });
     };
@@ -452,41 +447,5 @@ function buildCapabilitiesPayload(
   return {
     builtIns,
     userCapabilities: userManifests,
-  };
-}
-
-function readBrowserHealthFields() {
-  const availability = getCachedBrowserAvailability();
-  if (!availability) return {};
-
-  const mode = availability.metadata?.mode;
-  const extension = browserRuntime.getSnapshot().extension;
-  const cachedCommandReady = availability.metadata?.commandReady;
-  const commandReady = mode === 'extension'
-    ? extension.commandReady
-    : typeof cachedCommandReady === 'boolean'
-      ? cachedCommandReady
-      : false;
-  return {
-    browser_mode: typeof mode === 'string'
-      ? mode
-      : availability.available
-        ? 'available'
-        : 'none',
-    browser_detail: mode === 'extension'
-      ? extension.detail
-      : availability.detail ?? availability.reason,
-    browser_runtime_state: extension.state,
-    browser_extension_detail: extension.detail,
-    browser_bridge_listening: extension.bridgeListening,
-    browser_host_connected: extension.nativeHostConnected,
-    browser_extension_connected: extension.extensionRegistered,
-    browser_command_ready: commandReady,
-    browser_extension_command_ready: extension.commandReady,
-    browser_debugger_attached: extension.debuggerAttached,
-    browser_target_alive: extension.targetAlive,
-    browser_active_tab_binding: extension.activeTabBinding,
-    browser_extension_id: extension.extensionId,
-    browser_state_revision: extension.stateRevision,
   };
 }

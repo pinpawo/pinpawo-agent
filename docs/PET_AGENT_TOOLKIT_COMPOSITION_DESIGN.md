@@ -136,9 +136,9 @@ Toolkit 注册不等于授权。只有 Capability 的 `uses` 才建立工具权�
 Toolkit `availability` 在编译前由调用入口或 host 解析；
 `compileAgentRegistry()` 本身只编译传入的有效 inventory。单个 Capability 的依赖
 解析失败进入 `unavailableCapabilities`，host 必须报告这份诊断。
-因此 local-agent chat 的内部组装契约要求同时提供稳定 `threadId` 和
-`CapabilityArtifactStore`；host 不能通过省略 thread scope 静默移除 General
-或其他声明了 `artifact_discovery` 的 Capability。
+因此 local-agent chat 为声明了 `artifact_discovery` 的 Capability 提供稳定
+`threadId` 和 `CapabilityArtifactStore`；host 不能通过省略 thread scope 静默
+移除 Explore 等依赖该 Toolkit 的 Capability。General 不依赖这项运行期 scope。
 
 Capability Planner 探索的是 compiled registry 物化出的只读 Capability Document
 Workspace。Capability 的 `CAPABILITY.md` 是发现与选择依据；Toolkit scope 仍然是

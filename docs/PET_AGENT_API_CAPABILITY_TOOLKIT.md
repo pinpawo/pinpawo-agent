@@ -335,8 +335,9 @@ services/local-agent/src/capabilities/general/
 - 需要读取历史 artifact 的 Capability 必须在自己的 `uses` 中静态声明
   `artifact_discovery`。
 
-本地 chat host 要求稳定的 `threadId` 和 `CapabilityArtifactStore`，以免通过
-缺失 scope 静默移除 General、Explore 等依赖 artifact discovery 的 Capability。
+本地 chat host 为需要历史产物的 Capability 提供稳定的 `threadId` 和
+`CapabilityArtifactStore`，以免通过缺失 scope 静默移除 Explore 等声明
+`artifact_discovery` 的 Capability。General 不依赖这项运行期 scope。
 
 ## 8. Host 组装顺序
 

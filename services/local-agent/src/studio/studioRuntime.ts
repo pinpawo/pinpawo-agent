@@ -24,7 +24,6 @@ import {
 import type { LocalModelProfileRegistry } from '../llmConfig';
 import { buildDecisionStructuredOutput } from '../agentChannel';
 import { createExploreCapability } from '../capabilities/explore';
-import { loadGeneralCapability } from '../capabilities/general';
 import { buildLocalAgentRuntimeConfig } from '../runtimeConfig';
 import { loadPetLocalConfigs } from './petConfig';
 import {
@@ -146,7 +145,10 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
   // 不支持 json_schema response_format 时 orchestrator decision 调用 400。
   const globalDecisionStructuredOutput = buildDecisionStructuredOutput(globalLlmConfig);
   const capabilitiesByName = new Map(input.capabilities.map((c) => [c.name, c]));
-  const generalCapability = loadGeneralCapability();
+  const generalCapability = capabilitiesByName.get(GENERAL_CAPABILITY_NAME);
+  if (!generalCapability) {
+    throw new Error(`Studio requires the host baseline Capability "${GENERAL_CAPABILITY_NAME}".`);
+  }
 
   const petAgents: PetAgentRuntime[] = resolved.agents.map((petConfig) => {
     // 每个 pet 按稳定 profile id 解析完整 endpoint/key/model 组合。
@@ -179,7 +181,7 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
       role: petConfig.role ?? null,
       serviceSummary: petConfig.serviceSummary ?? null,
       capabilities: [
-        ...(generalCapability ? [generalCapability] : []),
+        generalCapability,
         ...capsForThisPet.filter(({ name }) => name !== GENERAL_CAPABILITY_NAME),
       ],
       toolkits: input.toolkits,

@@ -83,10 +83,12 @@ subagent 在需要时动态创建，执行完成后销毁。
 
 capability 通过 `uses` 声明要装配的 toolkit。orchestrator 仍然是唯一编排者，capability/subagent 不直接调用其他 capability/subagent。
 
-general subagent 可以使用 host 注册的通用 tools 和所有 toolkit tools。capability subagent 只使用：
+所有 capability subagent 都只使用：
 
-- 自己 `uses` 的 toolkit tools
+- 自己 `uses` 声明的 toolkit tools
 - capability runtime 提供的 tools
+
+General 也是普通 Capability；它不因名称获得额外 Toolkit 或 host 工具。
 
 toolkit tools 在装配时可以被 toolkit policy 包装，用于对单个工具调用执行 allow/deny/HITL review；原始工具仍只负责执行。
 

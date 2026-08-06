@@ -7,6 +7,7 @@ import path from 'node:path';
 import { buildStudioForTurn, StudioNotConfiguredError } from './studioRuntime';
 import { createPendingReviewSlot } from './studioBridge';
 import { createTestModelProfiles } from '../testing/modelProfiles';
+import { loadGeneralCapability } from '../capabilities/general';
 async function mkTempDir(prefix: string): Promise<string> {
   return await fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
@@ -16,6 +17,12 @@ const modelProfiles = createTestModelProfiles({
   baseUrl: 'http://127.0.0.1:1/v1',
   model: 'gpt-test',
 });
+
+const baselineCapabilities = () => {
+  const general = loadGeneralCapability();
+  assert.ok(general);
+  return [general];
+};
 
 test('buildStudioForTurn requires the workdir-scoped Studio config', async () => {
   const workdir = await mkTempDir('pinpawo-studio-runtime-missing-');
@@ -66,7 +73,7 @@ test('buildStudioForTurn defaults Studio paths from effective runtime workdir', 
   try {
     const result = await buildStudioForTurn({
       modelProfiles,
-      capabilities: [],
+      capabilities: baselineCapabilities(),
       ownerUserId: null,
       bridge: {
         send: () => {},
@@ -138,7 +145,7 @@ test('buildStudioForTurn prefers explicit workdir over env default', async () =>
   try {
     const result = await buildStudioForTurn({
       modelProfiles,
-      capabilities: [],
+      capabilities: baselineCapabilities(),
       ownerUserId: null,
       workdir: explicitWorkdir,
       bridge: {

@@ -549,5 +549,3 @@ export async function readBrowserBridgeToken(
 ): Promise<string> {
   return (await readFile(tokenPath, 'utf8')).trim();
 }
-
-export const defaultBrowserExtensionBridge = new BrowserExtensionBridge();

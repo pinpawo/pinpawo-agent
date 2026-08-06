@@ -677,7 +677,7 @@ export class BrowserSession {
   private initPromise: Promise<BrowserImpl> | null = null;
   private readonly ownership: BrowserContextOwnership | null;
   private readonly getRuntimeSnapshot: (() => BrowserRuntimeSnapshot) | null;
-  private readonly createChromeExtensionSession: ChromeExtensionSessionFactory;
+  private readonly createChromeExtensionSession: ChromeExtensionSessionFactory | null;
   private readonly options: ResolvedBrowserToolkitOptions;
 
   constructor(options: {
@@ -691,8 +691,7 @@ export class BrowserSession {
       : null;
     this.getRuntimeSnapshot = options.getRuntimeSnapshot ?? null;
     this.options = resolveBrowserToolkitOptions(options.environment);
-    this.createChromeExtensionSession = options.createChromeExtensionSession
-      ?? (() => new ChromeExtensionBrowserSession(undefined, this.options.workdir));
+    this.createChromeExtensionSession = options.createChromeExtensionSession ?? null;
   }
 
   private ensureImpl(requiresPlaywright = false): Promise<BrowserImpl> {
@@ -706,9 +705,14 @@ export class BrowserSession {
         this.options,
         requiresPlaywright,
       ).then((backend) => {
-        this.impl = backend === 'extension'
-          ? this.createChromeExtensionSession()
-          : new PlaywrightBrowserSession(this.options.workdir);
+        if (backend === 'extension') {
+          if (!this.createChromeExtensionSession) {
+            throw new Error('Chrome extension browser sessions must be created by BrowserRuntime.');
+          }
+          this.impl = this.createChromeExtensionSession();
+        } else {
+          this.impl = new PlaywrightBrowserSession(this.options.workdir);
+        }
         return this.impl;
       }).catch((error) => {
         this.initPromise = null;

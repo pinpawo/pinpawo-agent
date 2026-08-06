@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  BrowserSession,
   detectBrowserStatus,
   selectAutoBrowserBackend,
 } from './session';
@@ -132,6 +133,24 @@ test('browser runtime snapshot distinguishes native host connectivity from regis
   assert.equal(snapshot.extension.nativeHostConnected, true);
   assert.equal(snapshot.extension.extensionRegistered, false);
   assert.equal(snapshot.extension.commandReady, false);
+});
+
+test('extension BrowserSession requires the BrowserRuntime-provided driver', async () => {
+  const session = new BrowserSession({
+    getRuntimeSnapshot: () => projectBrowserRuntimeSnapshot(bridgeStatus({
+      listening: true,
+      hostConnected: true,
+      extensionConnected: true,
+    })),
+    environment: {
+      backend: () => 'extension',
+    },
+  });
+
+  await assert.rejects(
+    () => session.snapshot(),
+    /must be created by BrowserRuntime/,
+  );
 });
 
 test('browser status consumes the provided runtime snapshot without a second bridge projection', async (t) => {

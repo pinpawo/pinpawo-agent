@@ -14,7 +14,6 @@ import {
 } from '../../snapshotPayload';
 import {
   BrowserBridgeError,
-  defaultBrowserExtensionBridge,
   type BrowserExtensionBridge,
   type BrowserBridgeStatus,
 } from './bridge';
@@ -62,7 +61,7 @@ export class ChromeExtensionBrowserSession {
 
   constructor(
     private readonly bridge: Pick<BrowserExtensionBridge, 'sendCommand'>
-      & Partial<Pick<BrowserExtensionBridge, 'getStatus'>> = defaultBrowserExtensionBridge,
+      & Partial<Pick<BrowserExtensionBridge, 'getStatus'>>,
     private readonly workdir: () => string = () => process.cwd(),
   ) {}
 

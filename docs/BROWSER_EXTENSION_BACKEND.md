@@ -10,7 +10,7 @@ Set `PINPAWO_BROWSER_BACKEND=extension` (or save `browser_backend: "extension"`)
 
 In `auto`, local-agent listens for the installed extension and chooses it first for compatible default-session, visible-browser operations. If no extension is connected, or the initial open explicitly requires headless, a named session or a custom profile, selection uses Playwright. Selection is still one-time for that active `BrowserSession`.
 
-Toolkit availability is structural and cached when the runtime registry is built; transient extension connectivity does not remove the Browser Toolkit. Browser Runtime owns one live extension snapshot that distinguishes bridge listening, Native Host connectivity, extension registration and command readiness. Session selection, Toolkit diagnostics and HTTP health consume that projection instead of independently combining Bridge booleans. A listening bridge without a registered extension remains routable but is not command-ready, so a later reconnect can recover without rebuilding the agent registry.
+Toolkit availability is structural and cached when the runtime registry is built; transient extension connectivity does not remove the Browser Toolkit. Browser Runtime owns one live extension snapshot that distinguishes bridge listening, Native Host connectivity, extension registration and command readiness. Session selection and Browser diagnostics consume that projection instead of independently combining Bridge booleans. A listening bridge without a registered extension remains routable but is not command-ready, so a later reconnect can recover without rebuilding the agent registry.
 
 ## Process boundary
 
@@ -60,7 +60,7 @@ These builders are a reusable normalization boundary, not a frozen cross-backend
 
 - The extension requests `debugger`, `nativeMessaging`, `storage` and `tabs`; it has no broad host permission.
 - `browser_open` creates an agent-owned tab if none is bound.
-- Clicking the extension action explicitly binds the current user tab and approves only its current http(s) origin for the local-agent Browser session. The approval is held only in the live extension state, is not persisted by the extension, and is never updated by subsequent user navigation; after an extension/service-worker restart the user must click the action again. The health response exposes an `agent` or `user` tab binding; it is unrelated to delegation execution ownership.
+- Clicking the extension action explicitly binds the current user tab and approves only its current http(s) origin for the local-agent Browser session. The approval is held only in the live extension state, is not persisted by the extension, and is never updated by subsequent user navigation; after an extension/service-worker restart the user must click the action again. This Browser-only binding is unrelated to delegation execution ownership.
 - Browser commands and target-binding changes run through one extension-owned serial queue. The local-agent tool layer remains backend-neutral and does not impose extension scheduling semantics.
 - Tool cancellation propagates through the Browser session and local bridge as a connection-scoped `browser.cancel` message. The extension observes cancellation before a queued command begins and at bounded wait/type/action safe points; it does not undo an input event that Chrome has already dispatched, and cancelled commands are never retried or replayed. Take a fresh snapshot before deciding what, if anything, needs to happen next.
 - A popup/new tab whose `openerTabId` is the current target becomes the active browser target. The extension keeps a bounded in-memory target history so closing a popup can return to its live parent; Playwright applies the same active-target behavior inside its own driver.
@@ -129,7 +129,7 @@ and restart the local agent:
 pinpawo browser extension repair
 ```
 
-The running local-agent HTTP health response keeps the cached Toolkit selection in `browser_mode`, while always exposing the live extension runtime state plus separate bridge, host, extension command-readiness, debugger and target fields. This keeps Extension diagnostics visible even when `auto` initially selected Playwright for Toolkit availability. Remove registration with `pinpawo browser extension unregister`.
+`/health` only reports local-agent service health; it does not expose Browser-specific fields. Use `pinpawo browser extension status` for installed-host diagnostics. A future generic Toolkit health projection may report all Toolkit runtimes through one common contract rather than adding Browser fields back to `/health`. Remove registration with `pinpawo browser extension unregister`.
 
 ## Attribution
 

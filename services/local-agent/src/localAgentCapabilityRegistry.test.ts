@@ -59,7 +59,7 @@ test('LocalAgentCapabilityRegistry loads resources and rescans user capabilities
   const registry = new LocalAgentCapabilityRegistry({
     loadLocalTools: async () => [localTool],
     loadUserCapabilities: async () => userCapabilityBatches.shift() ?? [],
-    createLocalToolkits: (localTools) => [
+    createDefaultToolkits: (localTools) => [
       {
         name: 'available-toolkit',
         description: 'available toolkit',
@@ -71,7 +71,7 @@ test('LocalAgentCapabilityRegistry loads resources and rescans user capabilities
         tools: [{ tool: localTool }],
       },
     ],
-    createLocalCapabilities: () => [
+    createDefaultCapabilities: () => [
       capability('available-local-cap', ['available-toolkit']),
       capability('unavailable-local-cap'),
       capability('missing-toolkit-local-cap', ['unavailable-toolkit']),
@@ -112,12 +112,12 @@ test('LocalAgentCapabilityRegistry starts Toolkit runtimes before availability i
   const registry = new LocalAgentCapabilityRegistry({
     loadLocalTools: async () => [localTool],
     loadUserCapabilities: async () => [],
-    createLocalToolkits: () => [{
+    createDefaultToolkits: () => [{
       name: 'runtime-toolkit',
       description: 'runtime toolkit',
       tools: [{ tool: localTool }],
     }],
-    createLocalCapabilities: () => [],
+    createDefaultCapabilities: () => [],
     resolveAvailableToolkits: async (toolkits) => {
       events.push(`availability:${toolkits.map(({ name }) => name).join(',')}`);
       return toolkits;
@@ -141,7 +141,7 @@ test('LocalAgentCapabilityRegistry default toolkits include git toolkit', async 
   const registry = new LocalAgentCapabilityRegistry({
     loadLocalTools: async () => [localTool],
     loadUserCapabilities: async () => [],
-    createLocalToolkits: (localTools) => [
+    createDefaultToolkits: (localTools) => [
       createBashToolkit(localTools),
       createGitToolkit(),
       createBrowserToolkit(),
@@ -158,5 +158,9 @@ test('LocalAgentCapabilityRegistry default toolkits include git toolkit', async 
   assert.ok(
     registry.getLocalCapabilities().some((item) => item.name === 'explore'),
     'default local capabilities should include explore',
+  );
+  assert.deepEqual(
+    registry.getLocalCapabilities().find((item) => item.name === 'general')?.uses,
+    ['bash', 'git'],
   );
 });

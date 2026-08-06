@@ -93,11 +93,17 @@ services/local-agent/
 作为默认宿主：
 
 - 读取用户配置，并通过显式 options 创建 Browser Toolkit；
-- 将 Browser Toolkit 加入 PinPawo 默认发行组合；
+- 将 Browser Toolkit 加入 PinPawo 默认发行组合；它与 bash、git 等默认 Toolkit 一样只是一个预设，不是 local-agent 的特权能力；
 - 启动通用 `ToolkitRuntimeManager`，不直接管理 Browser session；
-- CLI 和 `/health` 只调用 Browser 包公开的安装、诊断和状态接口。
+- Browser CLI 只调用 Browser 包公开的安装和诊断接口。
 
 “默认内置”是发行策略，不代表源码归 local-agent 所有。
+
+用户扩展遵循同一组合模型：外部插件提供 Toolkit，用户 Capability 在 `CAPABILITY.md` 的 `uses` 中声明所需 Toolkit。local-agent 负责加载并校验这两类配置；它不会把 Browser 或任何默认 Toolkit 当成用户 Capability 的隐式依赖。
+
+`general` 是默认集合中的 host baseline，始终由 local-agent 加载且缺失时启动失败，但不作为可关闭的设置项展示。它只声明稳定的本地 `bash` 和 `git` Toolkit；每次 run 才产生的 profile、artifact 等上下文能力不再成为它的隐式依赖。
+
+`/health` 只回答 local-agent 是否可用，不投影 Browser 的 bridge、tab 或 extension 状态。后续若需要运行时观测，应为所有 Toolkit 定义统一的存活状态契约和单独投影，而不是继续向 `/health` 追加单个 Toolkit 的字段。
 
 ## 配置与依赖
 
@@ -125,7 +131,6 @@ Browser 包返回同一实例关联的 `toolkit`、`capability` 和宿主操作�
 - `createBrowserIntegration(options)`：创建 Toolkit、Capability 与 runtime；
 - `registerBrowserExtensionHost()`、`unregisterBrowserExtensionHost()`、`getBrowserExtensionHostStatus()`：供 CLI 适配；
 - `detectBrowserEnvironment()`：供诊断命令调用；
-- `getBrowserRuntimeSnapshot()`：供 `/health` 投影。
 
 local-agent 保留 Commander 参数、stdout 格式和 HTTP response 格式。这些是宿主 UI；实现与状态来自 Browser 包。
 
@@ -144,7 +149,7 @@ local-agent 保留 Commander 参数、stdout 格式和 HTTP response 格式。�
 
 1. 创建 `toolkits/browser` workspace，将 Browser Toolkit、runtime、drivers、Extension 和 Native Host 源码归拢到该包。
 2. 以 options 注入替代 Browser 对 local-agent config/storage 的直接依赖。
-3. local-agent 默认 registry 改为组装 Browser integration；CLI、detect 和 health 改用包公开接口。
+3. local-agent 默认 registry 改为组装 Browser integration；CLI 和 detect 改用包公开接口。
 4. Browser 包统一生成 Extension、Native Host 与 npm 入口产物；local-agent 发行构建消费这些产物。
 5. 删除 `services/local-agent/src/toolkits/browser` 与顶层 `tools/chrome-extension` 的旧所有权路径。
 
@@ -156,5 +161,5 @@ local-agent 保留 Commander 参数、stdout 格式和 HTTP response 格式。�
 - Browser 包不导入 local-agent 内部模块。
 - 仓库中的 Browser 与 Extension 源文件均为 TypeScript；生成目录除外。
 - Browser Toolkit 可通过注入配置被 local-agent 组装和启动。
-- `browser extension register/status/repair`、`detect`、`/health` 和 Browser tools 继续工作。
+- `browser extension register/status/repair`、`detect` 和 Browser tools 继续工作。
 - Browser 包单测、local-agent 单测、根类型检查和发行构建通过。

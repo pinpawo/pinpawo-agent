@@ -7,6 +7,7 @@ import {
 import { loadUserCapabilities, type LoadedUserCapability } from './capabilityLoader';
 import { resolveAvailableToolkits } from './toolkits/toolkitAvailability';
 import { createExploreCapability } from './capabilities/explore';
+import { loadGeneralCapability } from './capabilities/general';
 import { browserIntegration } from './browserIntegration';
 import { FileCapabilityArtifactStore } from './capabilityArtifactStore';
 import { createBashToolkit, createGitToolkit, loadCoreLocalTools } from './toolkits/local';
@@ -14,10 +15,10 @@ import { createBashToolkit, createGitToolkit, loadCoreLocalTools } from './toolk
 type LocalAgentCapabilityRegistryDeps = {
   loadLocalTools: () => Promise<StructuredTool[]>;
   loadUserCapabilities: () => Promise<LoadedUserCapability[]>;
-  createLocalToolkits: (
+  createDefaultToolkits: (
     localTools: StructuredTool[],
   ) => AgentToolkit[];
-  createLocalCapabilities: () => AgentCapability[];
+  createDefaultCapabilities: () => AgentCapability[];
   resolveAvailableToolkits: typeof resolveAvailableToolkits;
 };
 
@@ -30,18 +31,27 @@ export type LoadLocalAgentCapabilityRegistryOptions = {
   startToolkitRuntimes?: (toolkits: readonly AgentToolkit[]) => Promise<void>;
 };
 
+function createDefaultLocalCapabilities(): AgentCapability[] {
+  const general = loadGeneralCapability();
+  if (!general) {
+    throw new Error('local-agent requires the built-in "general" Capability.');
+  }
+  return [
+    general,
+    createExploreCapability(),
+    browserIntegration.capability,
+  ];
+}
+
 const defaultDeps: LocalAgentCapabilityRegistryDeps = {
   loadLocalTools: loadCoreLocalTools,
   loadUserCapabilities,
-  createLocalToolkits: () => [
+  createDefaultToolkits: () => [
     createBashToolkit(),
     createGitToolkit(),
     browserIntegration.toolkit,
   ],
-  createLocalCapabilities: () => [
-    createExploreCapability(),
-    browserIntegration.capability,
-  ],
+  createDefaultCapabilities: createDefaultLocalCapabilities,
   resolveAvailableToolkits,
 };
 
@@ -65,11 +75,11 @@ export class LocalAgentCapabilityRegistry {
 
   async load(options: LoadLocalAgentCapabilityRegistryOptions = {}) {
     this.localTools = await this.deps.loadLocalTools();
-    this.localToolkitDefinitions = this.deps.createLocalToolkits(this.localTools);
+    this.localToolkitDefinitions = this.deps.createDefaultToolkits(this.localTools);
     this.localToolkitDefinitions.forEach(validateToolkitDefinition);
     await options.startToolkitRuntimes?.(this.localToolkitDefinitions);
     this.localToolkits = await this.deps.resolveAvailableToolkits(this.localToolkitDefinitions);
-    this.localCapabilities = this.deps.createLocalCapabilities();
+    this.localCapabilities = this.deps.createDefaultCapabilities();
     this.userCapabilities = await this.deps.loadUserCapabilities();
   }
 

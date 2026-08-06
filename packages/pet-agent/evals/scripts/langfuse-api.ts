@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { LangfuseClient } from '@langfuse/client';
 
 type EnvMap = Record<string, string>;
 
@@ -80,26 +81,10 @@ export function resolveLangfuseConfig(): LangfuseConfig {
   };
 }
 
-function authHeader(config: LangfuseConfig): string {
-  return `Basic ${Buffer.from(`${config.publicKey}:${config.secretKey}`).toString('base64')}`;
-}
-
-export async function langfuseFetch<T>(
-  config: LangfuseConfig,
-  path: string,
-  init?: RequestInit,
-): Promise<T> {
-  const response = await fetch(`${config.baseUrl}/api/public${path}`, {
-    ...init,
-    headers: {
-      authorization: authHeader(config),
-      'content-type': 'application/json',
-      ...init?.headers,
-    },
+export function createLangfuseClient(config: LangfuseConfig): LangfuseClient {
+  return new LangfuseClient({
+    publicKey: config.publicKey,
+    secretKey: config.secretKey,
+    baseUrl: config.baseUrl,
   });
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(`Langfuse ${init?.method ?? 'GET'} ${path} failed (${response.status}): ${text}`);
-  }
-  return text ? JSON.parse(text) as T : undefined as T;
 }

@@ -19,6 +19,7 @@ import { outcomeDecisionBasicsDataset } from '../datasets/outcome-decision-basic
 import { createDecisionEvalModel } from './decision-eval-model.ts';
 import { resolveLangfuseConfig } from './langfuse-api.ts';
 import { writeLangfuseEvalResult } from './langfuse-eval-writer.ts';
+import { createLangfuseV4Runtime } from './langfuse-v4-runtime.ts';
 
 const actor = { petId: 'eval-pet', userId: 'eval-user', name: 'outcome-eval', personality: null, stage: null, species: null };
 
@@ -91,6 +92,7 @@ async function runCase(
 
 async function main() {
   const config = resolveLangfuseConfig();
+  const runtime = createLangfuseV4Runtime(config);
   const useLlm = process.env.EVAL_OUTCOME_MODEL !== 'deterministic';
   const profileId = process.env.PROMPT_EVAL_MODEL_PROFILE_ID?.trim();
   if (useLlm && !profileId) {
@@ -113,7 +115,7 @@ async function main() {
       const ok = scores.every(({ score }) => score === 1);
       if (ok) passed += 1;
       await writeLangfuseEvalResult({
-        config,
+        runtime,
         datasetName: outcomeDecisionBasicsDataset.name,
         runName,
         traceName: 'outcome-decision-eval',
@@ -135,6 +137,7 @@ async function main() {
       console.log(`[ERROR] ${testCase.name}: ${String(error)}`);
     }
   }
+  await runtime.shutdown();
   console.log(`Cases: ${passed}/${outcomeDecisionBasicsDataset.cases.length} passed`);
   if (passed !== outcomeDecisionBasicsDataset.cases.length) process.exitCode = 1;
 }

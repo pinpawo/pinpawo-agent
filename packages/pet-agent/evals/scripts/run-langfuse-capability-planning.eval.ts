@@ -22,6 +22,7 @@ import { capabilityPlanningBasicsDataset } from '../datasets/capability-planning
 import { createDecisionEvalModel } from './decision-eval-model.ts';
 import { resolveLangfuseConfig } from './langfuse-api.ts';
 import { writeLangfuseEvalResult } from './langfuse-eval-writer.ts';
+import { createLangfuseV4Runtime } from './langfuse-v4-runtime.ts';
 
 const evalExecutionToolkit = defineToolkit({
   name: 'eval_execution',
@@ -95,6 +96,7 @@ async function main() {
   const showFailureDetails = process.env.CAPABILITY_PLANNING_EVAL_SHOW_FAILURE_DETAILS
     === '1';
   const config = writeLangfuseResults ? resolveLangfuseConfig() : null;
+  const runtime = config ? createLangfuseV4Runtime(config) : null;
   const cases = selectedCases();
   if (cases.length === 0) {
     throw new Error(`No eval cases selected. EVAL_CASES=${process.env.EVAL_CASES ?? '(unset)'}`);
@@ -179,9 +181,9 @@ async function main() {
         });
         const ok = evaluation.scores.every(({ score }) => score === 1);
         if (ok) passed += 1;
-        if (config) {
+        if (runtime) {
           await writeLangfuseEvalResult({
-            config,
+            runtime,
             datasetName: capabilityPlanningBasicsDataset.name,
             runName,
             traceName: 'capability-planning-eval',
@@ -211,9 +213,9 @@ async function main() {
           }, null, 2));
         }
       } catch (error) {
-        if (config) {
+        if (runtime) {
           await writeLangfuseEvalResult({
-            config,
+            runtime,
             datasetName: capabilityPlanningBasicsDataset.name,
             runName,
             traceName: 'capability-planning-eval',
@@ -235,6 +237,7 @@ async function main() {
     }
   } finally {
     await rm(cacheRoot, { recursive: true, force: true });
+    await runtime?.shutdown();
   }
   console.log(`Cases: ${passed}/${cases.length} passed`);
   if (passed !== cases.length) process.exitCode = 1;

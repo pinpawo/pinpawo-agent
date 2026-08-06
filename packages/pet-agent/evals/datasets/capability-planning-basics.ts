@@ -488,6 +488,40 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
     metadata: { difficulty: 'hard', reason: 'Trace-derived regression: historic pseudo-tool syntax must not become a planner tool call.', source: SOURCE_FILE },
   },
   {
+    id: `${SUITE}.entry-submits-pr-review-fix-plan-once`,
+    name: 'entry-submits-pr-review-fix-plan-once',
+    suite: SUITE,
+    tags: ['capability_planning', 'structured_output', 'delegation_control'],
+    input: {
+      mode: 'entry',
+      messages: [{
+        role: 'user',
+        content: [
+          '在仓库 /workspace/qban-ai-agents 的 feature/doubao-realtime-v3-json-head 分支修复 PR #433 的 review：',
+          'P1-1：response.output_audio.done 不再发送空 AUDIO_DELTA；改为明确的 audio-done 控制事件，正确收尾音频会话。',
+          'P1-2：DOUBAO_REALTIME_V3_TTS_SAMPLE_RATE 默认值从 16000 改为 24000；输入仍为 16kHz，并移除相关硬编码。',
+          'P1-3：移除 V3 Function Calling 已完整闭环的声明；保留方法但标注 TODO/未实现。',
+          'P2：create_asr_task_config() 只接受 DOUBAO_REALTIME_PROTOCOL 的 v2/v3，其他值抛出清晰的 ValueError。',
+          '完成后提交并推送该分支。',
+        ].join('\n'),
+      }],
+      capabilityRegistry: [
+        'general: modify repository code, run verification, commit, and push the requested branch',
+      ],
+    },
+    expected: {
+      result: 'plan',
+      nextTaskTerms: ['P1-1', 'P1-2', 'P1-3', 'P2'],
+      capabilityName: 'general',
+      remainingPlan: [],
+      exactRemainingPlanLength: 0,
+      planEffect: 'created',
+      rubberStamp: false,
+      reason: 'Regression distilled from run-019fd602-745c-778f-a68a-4fd73fc8c0bc: one general Capability owns the complete review-fix task, and the Planner must submit that plan once then finish instead of re-planning after submit_plan succeeds.',
+    },
+    metadata: { difficulty: 'hard', reason: 'Trace-derived regression for submit_plan completion after a schema-repaired multi-task plan.', source: SOURCE_FILE },
+  },
+  {
     id: `${SUITE}.entry-returns-to-answer-before-execution`,
     name: 'entry-returns-to-answer-before-execution',
     suite: SUITE,

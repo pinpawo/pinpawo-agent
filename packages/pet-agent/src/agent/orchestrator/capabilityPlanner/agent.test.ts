@@ -53,6 +53,19 @@ function collectJsonSchemaReferences(value: unknown): string[] {
   });
 }
 
+function readMessageText(message: BaseMessage): string {
+  if (typeof message.content === 'string') {
+    return message.content;
+  }
+  return message.content.map((item) => {
+    if (typeof item === 'string') return item;
+    return typeof item === 'object' && item !== null && 'text' in item
+      && typeof item.text === 'string'
+      ? item.text
+      : '';
+  }).join('');
+}
+
 class ScriptedPlannerModel extends BaseChatModel {
   readonly invocations: BaseMessage[][] = [];
   readonly boundToolNames: string[] = [];
@@ -394,6 +407,48 @@ test('entry mode forms one executable task after Capability exploration', async 
     'Inspect issue #473 and report the Planner Agent constraints.',
   );
   assert.equal('tasks' in result ? result.tasks.length : 0, 1);
+});
+
+test('a submitted plan becomes private Planner state for the final reply', async (t) => {
+  const workspace = await createWorkspace(t, {
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary tasks.',
+      instructions: 'Complete the requested work.',
+    }),
+  });
+  const submittedTasks = [{
+    capability: 'general',
+    task: 'Apply the requested repository change.',
+  }, {
+    capability: 'general',
+    task: 'Verify the change and report the result.',
+  }];
+  const model = new ScriptedPlannerModel([{
+    structuredOutput: {
+      kind: 'plan',
+      args: { tasks: submittedTasks },
+    },
+  }, {
+    content: 'The plan has been submitted.',
+  }]);
+
+  const result = await createCapabilityPlannerAgent({ model }).invoke(
+    plannerInput(workspace),
+  );
+
+  assert.deepEqual(result, { tasks: submittedTasks });
+  assert.equal(model.invocations.length, 2);
+  const finalSystemPrompt = model.invocations[1]
+    ?.filter((message) => message._getType() === 'system')
+    .map(readMessageText)
+    .join('\n') ?? '';
+  for (const task of submittedTasks) {
+    assert.ok(
+      finalSystemPrompt.includes(task.task),
+      `missing submitted task from final system prompt: ${task.task}\n${finalSystemPrompt}`,
+    );
+  }
 });
 
 test('Planner can return bounded facts to Answer without submitting a plan', async (t) => {

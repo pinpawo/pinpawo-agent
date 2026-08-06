@@ -6,7 +6,8 @@ import {
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { tool, type StructuredTool } from '@langchain/core/tools';
-import { createAgent } from 'langchain';
+import { Command } from '@langchain/langgraph';
+import { createAgent, createMiddleware } from 'langchain';
 import { z } from 'zod';
 import { createCapabilityPlannerFileExplorer } from './fileExplorer';
 import type { CapabilityRegistryBackend } from './registryDocuments';
@@ -30,6 +31,18 @@ const MAX_QUESTION_CHARS = 1_000;
 const SUBMIT_PLAN_TOOL_NAME = 'submit_plan';
 const RETURN_TO_ANSWER_TOOL_NAME = 'return_to_answer';
 const DIRECT_TEXT_REASON = 'plan direct text';
+
+const plannerAgentStateSchema = z.object({
+  submittedPlan: z.array(z.object({
+    capability: z.string(),
+    task: z.string(),
+  })).nullable().default(null),
+});
+
+type SubmittedPlannerTask = {
+  capability: string;
+  task: string;
+};
 
 export type CapabilityPlannerAgentErrorCode =
   | 'planning_limit_reached'
@@ -116,6 +129,111 @@ function createPlannerSubmissionTools(
   );
 
   return [submitPlanTool, returnToAnswerTool];
+}
+
+function readSubmittedPlanTasks(message: ToolMessage): SubmittedPlannerTask[] | null {
+  if (message.status === 'error' || typeof message.content !== 'string') {
+    return null;
+  }
+  try {
+    const value = JSON.parse(message.content) as { tasks?: unknown };
+    if (!Array.isArray(value.tasks) || value.tasks.length === 0) {
+      return null;
+    }
+    const tasks = value.tasks.map((task) => {
+      if (!task || typeof task !== 'object') return null;
+      const { capability, task: description } = task as {
+        capability?: unknown;
+        task?: unknown;
+      };
+      return typeof capability === 'string' && typeof description === 'string'
+        ? { capability, task: description }
+        : null;
+    });
+    return tasks.every((task): task is SubmittedPlannerTask => task !== null)
+      ? tasks
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function buildSubmittedPlanSystemPrompt(tasks: readonly SubmittedPlannerTask[]) {
+  return [
+    '【计划已完成】submit_plan 已成功提交以下计划：',
+    ...tasks.map((task, index) => `${String(index + 1)}. [${task.capability}] ${task.task}`),
+    '现在直接用普通 assistant 回复以上计划已提交，然后结束本轮。不要调用任何工具，不要修改、补充或继续规划。',
+  ].join('\n');
+}
+
+function plannerToolErrorResult(params: {
+  name: string;
+  args: unknown;
+  id?: string;
+  error: unknown;
+}) {
+  const message = params.error instanceof Error
+    ? params.error.message
+    : String(params.error);
+  return new ToolMessage({
+    content: `Error invoking tool '${params.name}' with kwargs ${JSON.stringify(params.args)} with error: ${message}\nPlease fix the error and try again.`,
+    tool_call_id: params.id ?? '',
+    name: params.name,
+    status: 'error',
+  });
+}
+
+/**
+ * Private state for one Capability Planner invocation. A successful
+ * `submit_plan` records the exact submitted plan; the following model call
+ * receives it as a system-prompt addition so it can only provide the final
+ * textual acknowledgement instead of starting another planning loop.
+ */
+function createPlannerSubmissionStateMiddleware() {
+  return createMiddleware({
+    name: 'CapabilityPlannerSubmissionState',
+    stateSchema: plannerAgentStateSchema,
+    wrapToolCall: async (request, handler) => {
+      let result: ToolMessage | Command;
+      try {
+        result = await handler(request);
+      } catch (error) {
+        return plannerToolErrorResult({
+          name: request.toolCall.name,
+          args: request.toolCall.args,
+          id: request.toolCall.id,
+          error,
+        });
+      }
+      if (
+        request.toolCall.name !== SUBMIT_PLAN_TOOL_NAME
+        || !ToolMessage.isInstance(result)
+      ) {
+        return result;
+      }
+      const submittedPlan = readSubmittedPlanTasks(result);
+      if (!submittedPlan) {
+        return result;
+      }
+      return new Command({
+        update: {
+          messages: [result],
+          submittedPlan,
+        },
+      });
+    },
+    wrapModelCall: (request, handler) => {
+      const submittedPlan = request.state.submittedPlan;
+      if (!submittedPlan) {
+        return handler(request);
+      }
+      const submittedPlanPrompt = buildSubmittedPlanSystemPrompt(submittedPlan);
+      return handler({
+        ...request,
+        systemMessage: request.systemMessage.concat(submittedPlanPrompt),
+      });
+    },
+  });
 }
 
 function readPlannerSubmission(
@@ -265,6 +383,7 @@ async function invokePlannerAgent(params: {
     model: params.model,
     tools: [...explorer.tools, ...createPlannerSubmissionTools(params.input)],
     systemPrompt: buildCapabilityPlannerAgentSystemPrompt(params.input.mode),
+    middleware: [createPlannerSubmissionStateMiddleware()],
   });
   const timeout = mergePlannerSignal(
     params.runnableConfig?.signal,

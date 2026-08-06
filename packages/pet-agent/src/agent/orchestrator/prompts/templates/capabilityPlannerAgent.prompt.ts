@@ -20,7 +20,8 @@ export const CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT = definePromptTemplate<Recor
 - 只有必须由多个 Capability 组合完成时，才拆分为多个任务。
 - 编号、URL、路径等标识原样保留，不改写或猜测。
 
-每次 Planner invocation 必须以一次 submit_plan 或 return_to_answer 结束；普通 assistant text 不能结束规划，所有规划结论都放入终态工具参数。`, []);
+【终态工具协议】完成规划后，调用 submit_plan 或 return_to_answer。
+一旦 submit_plan 成功，计划已提交：直接用普通 assistant 回复提交结果，然后结束本轮；不要再调用任何工具或继续规划。`, []);
 
 export const CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT = definePromptTemplate<Record<string, never>>(`你是 framework 内部的 Capability Planner，只负责以下三件事：
 1. 使用 grep_search 探索与待执行任务潜在相关的 Capability。
@@ -44,7 +45,8 @@ export const CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT = definePromptTemplate<Re
 - 执行过一次探索且没有结果时即可停止探索，并判断应使用通用能力执行任务，还是停止任务执行。
 - Capability 文档只用于选择 Capability。只调用当前声明的工具；不要执行、探测或验证后续 Capability 的工具。
 
-每次 Planner invocation 必须以一次 submit_plan 或 return_to_answer 结束；普通 assistant text 不能结束规划，所有规划结论都放入终态工具参数。`, []);
+【终态工具协议】完成规划后，调用 submit_plan 或 return_to_answer。
+一旦 submit_plan 成功，计划已提交：直接用普通 assistant 回复提交结果，然后结束本轮；不要再调用任何工具或继续规划。`, []);
 
 export const CAPABILITY_PLANNER_AGENT_INPUT_PROMPT = definePromptTemplate<{
   planningState: string;

@@ -6,7 +6,7 @@ import test from 'node:test';
 
 test('MV3 service worker has no top-level await startup statement', async () => {
   const source = await readFile(
-    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
     'utf8',
   );
 
@@ -16,7 +16,7 @@ test('MV3 service worker has no top-level await startup statement', async () => 
 
 test('snapshot reads enforce snapshot URL and post-read committed origin checks', async () => {
   const source = await readFile(
-    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
     'utf8',
   );
   const readSnapshot = source.match(
@@ -32,7 +32,7 @@ test('snapshot reads enforce snapshot URL and post-read committed origin checks'
 
 test('P1 interactions stay on the CDP allowlist and re-snapshot through the origin guard', async () => {
   const source = await readFile(
-    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
     'utf8',
   );
 
@@ -54,7 +54,7 @@ test('P1 interactions stay on the CDP allowlist and re-snapshot through the orig
 
 test('commands and target changes share the extension-owned serial queue', async () => {
   const source = await readFile(
-    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
     'utf8',
   );
 
@@ -66,7 +66,7 @@ test('commands and target changes share the extension-owned serial queue', async
 
 test('cancellation bypasses the command queue and is observed at command safe points', async () => {
   const source = await readFile(
-    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
     'utf8',
   );
 
@@ -81,7 +81,7 @@ test('cancellation bypasses the command queue and is observed at command safe po
 
 test('native host reconnect uses bounded backoff and reports Chrome disconnect errors', async () => {
   const source = await readFile(
-    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
     'utf8',
   );
 
@@ -93,7 +93,7 @@ test('native host reconnect uses bounded backoff and reports Chrome disconnect e
 
 test('explicit user tab binding reports only the origin approved by the action click', async () => {
   const source = await readFile(
-    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
     'utf8',
   );
   const actionHandler = source.match(
@@ -107,7 +107,7 @@ test('explicit user tab binding reports only the origin approved by the action c
 
 test('popup tabs are followed inside the extension target lifecycle', async () => {
   const source = await readFile(
-    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
     'utf8',
   );
 
@@ -124,7 +124,7 @@ test('popup tabs are followed inside the extension target lifecycle', async () =
 
 test('selector actions use a bounded extension-side retry without retrying stale refs', async () => {
   const source = await readFile(
-    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
     'utf8',
   );
   const resolveTargetForAction = source.match(
@@ -139,7 +139,7 @@ test('selector actions use a bounded extension-side retry without retrying stale
 
 test('trusted input checks the approved origin before each browser event', async () => {
   const source = await readFile(
-    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
     'utf8',
   );
   const dispatchClick = source.match(
@@ -161,7 +161,7 @@ test('trusted input checks the approved origin before each browser event', async
 
 test('trusted pointer input activates the bound target inside the extension', async () => {
   const source = await readFile(
-    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
     'utf8',
   );
   const dispatchClick = source.match(
@@ -177,7 +177,7 @@ test('trusted pointer input activates the bound target inside the extension', as
 
 test('navigation commits a normal tab before attaching the debugger', async () => {
   const source = await readFile(
-    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
     'utf8',
   );
   const navigate = source.match(
@@ -192,7 +192,7 @@ test('navigation commits a normal tab before attaching the debugger', async () =
 
 test('missing targets fail without fabricating an about:blank tab', async () => {
   const source = await readFile(
-    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
     'utf8',
   );
   const ensureTarget = source.match(
@@ -206,11 +206,11 @@ test('missing targets fail without fabricating an about:blank tab', async () => 
 
 test('target activation does not focus the user\'s Chrome window', async () => {
   const source = await readFile(
-    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
     'utf8',
   );
   const activateTarget = source.match(
-    /async function activateTarget\(tabId\) \{([\s\S]*?)\n\}/,
+    /async function activateTarget\(tabId(?:: number)?\) \{([\s\S]*?)\n\}/,
   )?.[1] ?? '';
 
   assert.match(activateTarget, /chrome\.tabs\.update\(tabId, \{ active: true \}\)/);

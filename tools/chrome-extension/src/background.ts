@@ -7,6 +7,7 @@ import {
   parseBrowserCommand,
   successResult,
 } from './protocol.js';
+import type { BrowserTarget, JsonRecord, TargetBindOptions } from './types.js';
 import {
   assertSnapshotApprovedOrigin,
   buildAccessibilitySnapshot,
@@ -50,26 +51,40 @@ const RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
 const STABLE_CONNECTION_RESET_MS = 10_000;
 const connectionId = crypto.randomUUID();
-let port = null;
-let reconnectTimer = null;
-let stableConnectionTimer = null;
+let port: chrome.runtime.Port | null = null;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let stableConnectionTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempt = 0;
-let attachedTabId = null;
-let userBoundOrigin = null;
+let attachedTabId: number | null = null;
+let userBoundOrigin: string | null = null;
 const enqueueExtensionWork = createSerialExecutor();
 const targets = createTargetStack();
 const browserState = createBrowserStateTracker();
-const recentPopupByOpener = new Map();
+const recentPopupByOpener = new Map<number, PopupRecord>();
 const queuedCommandRequestIds = new Set();
 const cancelledCommandRequestIds = new Set();
-let activeCommandRequestId = null;
+let activeCommandRequestId: string | null = null;
 // Commands run through enqueueExtensionWork. Retain the command identity as
 // well, so a future change to command concurrency cannot let one cleanup erase
 // a newer interaction's popup record.
-let popupTracking = null;
+interface PopupTracking {
+  requestId: string | null;
+  parentTabId: number;
+}
+
+interface PopupRecord {
+  tabId: number;
+  tracking: PopupTracking;
+}
+
+let popupTracking: PopupTracking | null = null;
 
 class ExtensionError extends Error {
-  constructor(code, message, retryable = false, details) {
+  readonly code: string;
+  readonly retryable: boolean;
+  readonly details?: JsonRecord;
+
+  constructor(code: string, message: string, retryable = false, details?: JsonRecord) {
     super(message);
     this.code = code;
     this.retryable = retryable;
@@ -79,7 +94,7 @@ class ExtensionError extends Error {
 
 async function restoreTarget() {
   const stored = await chrome.storage.local.get(SESSION_KEY);
-  const candidate = stored[SESSION_KEY];
+  const candidate = stored[SESSION_KEY] as BrowserTarget | undefined;
   if (!candidate || !Number.isInteger(candidate.tabId)) return;
   try {
     const tab = await chrome.tabs.get(candidate.tabId);
@@ -93,7 +108,7 @@ async function restoreTarget() {
   }
 }
 
-async function saveTarget(nextTarget, options = {}) {
+async function saveTarget(nextTarget: BrowserTarget | null, options: TargetBindOptions = {}) {
   const target = targets.bind(nextTarget, options);
   if (Object.hasOwn(options, 'userBoundOrigin')) {
     userBoundOrigin = options.userBoundOrigin;
@@ -142,7 +157,7 @@ function scheduleReconnect() {
   }, delay);
 }
 
-function scheduleStableConnectionReset(nextPort) {
+function scheduleStableConnectionReset(nextPort: chrome.runtime.Port) {
   if (stableConnectionTimer) clearTimeout(stableConnectionTimer);
   stableConnectionTimer = setTimeout(() => {
     stableConnectionTimer = null;
@@ -182,14 +197,18 @@ function connectNativeHost() {
   }
 }
 
-async function cdp(tabId, method, params = {}) {
+async function cdp(
+  tabId: number,
+  method: string,
+  params: Record<string, unknown> = {},
+): Promise<Record<string, any>> {
   if (!ALLOWED_CDP_COMMANDS.has(method)) {
     throw new ExtensionError('cdp_command_blocked', `CDP command is not allowlisted: ${method}`);
   }
-  return await chrome.debugger.sendCommand({ tabId }, method, params);
+  return await chrome.debugger.sendCommand({ tabId }, method, params) as Record<string, any>;
 }
 
-async function attach(tabId) {
+async function attach(tabId: number) {
   if (attachedTabId === tabId) return;
   if (attachedTabId !== null) await detach();
   try {
@@ -211,7 +230,7 @@ async function attach(tabId) {
   }
 }
 
-async function activateTarget(tabId) {
+async function activateTarget(tabId: number) {
   try {
     const tab = await chrome.tabs.get(tabId);
     if (!tab.active) await chrome.tabs.update(tabId, { active: true });
@@ -573,7 +592,7 @@ async function delay(ms, deadlineAt) {
 
 async function resolveTarget(tabId, target) {
   const normalized = normalizeElementTarget(target);
-  const accessibilityRef = normalized.ref
+  const accessibilityRef = 'ref' in normalized && normalized.ref
     ? /^ax:(\d+):([a-z]+)$/.exec(normalized.ref)
     : null;
   if (accessibilityRef) {
@@ -604,7 +623,7 @@ async function resolveTargetForAction(tabId, target, deadlineAt, approvedOrigin)
     try {
       return await resolveTarget(tabId, normalized);
     } catch (error) {
-      const retryableSelectorState = normalized.selector
+      const retryableSelectorState = 'selector' in normalized && normalized.selector
         && error instanceof ExtensionError
         && ['element_not_found', 'element_not_visible'].includes(error.code);
       if (!retryableSelectorState || Date.now() >= retryDeadline) throw error;
@@ -652,7 +671,7 @@ async function dispatchClick(tabId, target, humanization, deadlineAt, approvedOr
   return point;
 }
 
-async function dispatchKey(tabId, key, params = {}, approvedOrigin) {
+async function dispatchKey(tabId, key, params: Record<string, any> = {}, approvedOrigin) {
   const { text, ...keyParams } = params;
   await assertApprovedOrigin(tabId, approvedOrigin);
   await cdp(tabId, 'Input.dispatchKeyEvent', {

@@ -42,6 +42,8 @@ test('native host registration writes exact-origin manifests and an executable w
   assert.equal(status.healthy, true);
   assert.equal(status.repairRecommended, false);
   assert.deepEqual(status.extensionIds, [EXTENSION_ID]);
+  assert.equal(status.bundledExtensionPath, resolve(homeDir, 'package', 'dist', 'chrome-extension'));
+  assert.equal(status.bundledExtensionBuilt, false);
 
   await unregisterBrowserExtensionHost(options);
   assert.equal((await getBrowserExtensionHostStatus(options)).registered, false);

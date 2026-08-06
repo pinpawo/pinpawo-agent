@@ -4,7 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node scripts/build.js",
-    "test": "node --test src/*.test.js"
+    "build": "node --import tsx/esm scripts/build.ts",
+    "test": "node --import tsx/esm --test src/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.2.5",
+    "tsx": "^4.22.3",
+    "typescript": "^5.9.3"
   }
 }

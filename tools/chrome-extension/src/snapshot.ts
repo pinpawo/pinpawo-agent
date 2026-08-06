@@ -1,9 +1,10 @@
 import { ELEMENT_REGISTRY_KEY } from './interaction.js';
+import type { JsonRecord } from './types.js';
 
 export const MAX_RAW_INTERACTIVE_ELEMENTS = 200;
 export const MAX_RAW_TEXT_BYTES = 1_000_000;
 
-export function originOf(url) {
+export function originOf(url: string): string {
   const parsed = new URL(url);
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error(`unsupported page protocol: ${parsed.protocol}`);
@@ -11,7 +12,7 @@ export function originOf(url) {
   return parsed.origin;
 }
 
-export function assertSnapshotApprovedOrigin(snapshot, approvedOrigin) {
+export function assertSnapshotApprovedOrigin(snapshot: JsonRecord, approvedOrigin: string): JsonRecord {
   if (!snapshot || typeof snapshot !== 'object' || typeof snapshot.url !== 'string') {
     throw new Error('snapshot URL is unavailable');
   }
@@ -120,12 +121,15 @@ export function buildSnapshotExpression(maxInteractive = MAX_RAW_INTERACTIVE_ELE
   })()`;
 }
 
-function axValue(node, key) {
-  const value = node?.[key]?.value;
+function axValue(node: JsonRecord | undefined, key: string): string {
+  const property = node?.[key];
+  const value = property && typeof property === 'object'
+    ? (property as JsonRecord).value
+    : undefined;
   return typeof value === 'string' ? value.trim() : '';
 }
 
-export function buildAccessibilitySnapshot(nodes, url) {
+export function buildAccessibilitySnapshot(nodes: JsonRecord[], url: string) {
   const visibleNodes = nodes.filter((node) => !node.ignored);
   const root = visibleNodes.find((node) => axValue(node, 'role') === 'RootWebArea');
   const text = visibleNodes
@@ -155,7 +159,7 @@ export function buildAccessibilitySnapshot(nodes, url) {
     const name = axValue(node, 'name');
     return {
       index,
-      ...(Number.isInteger(node.backendDOMNodeId) && node.backendDOMNodeId > 0
+      ...(typeof node.backendDOMNodeId === 'number' && Number.isInteger(node.backendDOMNodeId) && node.backendDOMNodeId > 0
         ? { ref: `ax:${node.backendDOMNodeId}:${role}` }
         : {}),
       tag: role,
@@ -163,7 +167,7 @@ export function buildAccessibilitySnapshot(nodes, url) {
       type: null,
       placeholder: null,
       hint: `[${index}] ${role}${name ? ` "${name}"` : ''}`,
-      ...(Number.isInteger(node.backendDOMNodeId) && node.backendDOMNodeId > 0
+      ...(typeof node.backendDOMNodeId === 'number' && Number.isInteger(node.backendDOMNodeId) && node.backendDOMNodeId > 0
         ? { backendNodeId: node.backendDOMNodeId }
         : {}),
     };

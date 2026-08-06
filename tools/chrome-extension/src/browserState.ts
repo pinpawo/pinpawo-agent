@@ -1,3 +1,5 @@
+import type { BrowserTarget } from './types.js';
+
 export function createBrowserStateTracker() {
   let revision = 0;
 
@@ -6,7 +8,11 @@ export function createBrowserStateTracker() {
       revision += 1;
       return revision;
     },
-    snapshot(activeTab, attachedTabId, userBoundOrigin = null) {
+    snapshot(
+      activeTab: BrowserTarget | null,
+      attachedTabId: number | null,
+      userBoundOrigin: string | null = null,
+    ) {
       return {
         revision,
         debuggerAttached: activeTab?.tabId === attachedTabId,

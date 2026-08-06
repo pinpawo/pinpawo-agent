@@ -55,14 +55,17 @@ export type BrowserExtensionStatus = {
     exists: boolean;
   };
   nativeHostEntryPath: string;
-  extensionPath: string;
-  extensionBuilt: boolean;
+  bundledExtensionPath: string;
+  bundledExtensionBuilt: boolean;
 };
 
 function defaultNativeHostEntryPath(): string {
   const moduleDirectory = dirname(fileURLToPath(import.meta.url));
   const candidates = [
     resolve(moduleDirectory, 'native-host.js'),
+    resolve(process.cwd(), 'dist', 'toolkits', 'browser', 'native-host.js'),
+    resolve(process.cwd(), 'services', 'local-agent', 'dist', 'toolkits', 'browser', 'native-host.js'),
+    // Packages built before Browser Toolkit assets were grouped together.
     resolve(process.cwd(), 'dist', 'native-host.js'),
     resolve(process.cwd(), 'services', 'local-agent', 'dist', 'native-host.js'),
   ];
@@ -267,7 +270,7 @@ export async function getBrowserExtensionHostStatus(
       exists: nativeHostEntry.exists,
     },
     nativeHostEntryPath: paths.nativeHostEntryPath,
-    extensionPath: resolve(dirname(paths.nativeHostEntryPath), 'chrome-extension'),
-    extensionBuilt: existsSync(resolve(dirname(paths.nativeHostEntryPath), 'chrome-extension', 'manifest.json')),
+    bundledExtensionPath: resolve(dirname(paths.nativeHostEntryPath), 'chrome-extension'),
+    bundledExtensionBuilt: existsSync(resolve(dirname(paths.nativeHostEntryPath), 'chrome-extension', 'manifest.json')),
   };
 }

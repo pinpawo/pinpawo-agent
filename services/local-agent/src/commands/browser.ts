@@ -34,7 +34,7 @@ export async function runBrowserCommand(
       extensionId,
       extensionIds: status.extensionIds,
       nativeHostEntryPath: paths.nativeHostEntryPath,
-      extensionPath: status.extensionPath,
+      bundledExtensionPath: status.bundledExtensionPath,
       manifests: paths.manifestPaths,
     }, null, 2) + '\n');
     return;

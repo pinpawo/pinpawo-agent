@@ -111,7 +111,7 @@ test('a new navigation clears obsolete popup fallback history', () => {
 });
 
 test('only a live command tracks its own popup', () => {
-  const target = { tabId: 10, binding: 'agent' };
+  const target = { tabId: 10, binding: 'agent' } as const;
   assert.equal(shouldTrackPopup(null, target, 10), false);
   assert.equal(shouldTrackPopup(10, target, 11), false);
   assert.equal(shouldTrackPopup(10, target, 10), true);

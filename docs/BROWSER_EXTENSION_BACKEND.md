@@ -104,7 +104,7 @@ or URLs.
 Then:
 
 1. Open `chrome://extensions` and enable Developer mode.
-2. Load `tools/chrome-extension/dist` as an unpacked extension. For an installed npm package, use the bundled `extensionPath` printed by `pinpawo browser extension status`.
+2. Load `tools/chrome-extension/dist` as an unpacked extension. For an installed npm package, use the `bundledExtensionPath` printed by `pinpawo browser extension status`.
 3. Copy the extension ID shown by Chrome.
 4. Register the exact allowed extension origin:
 

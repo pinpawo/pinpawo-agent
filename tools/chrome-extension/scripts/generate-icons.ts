@@ -6,7 +6,7 @@ const PNG_SIGNATURE = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
 ]);
 
-function crc32(buffer) {
+function crc32(buffer: Buffer): number {
   let crc = 0xffffffff;
   for (const byte of buffer) {
     crc ^= byte;
@@ -17,7 +17,7 @@ function crc32(buffer) {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-function chunk(type, data) {
+function chunk(type: string, data: Buffer): Buffer {
   const name = Buffer.from(type);
   const body = Buffer.concat([name, data]);
   const length = Buffer.alloc(4);
@@ -27,7 +27,7 @@ function chunk(type, data) {
   return Buffer.concat([length, body, checksum]);
 }
 
-function insideRoundedRect(x, y, left, top, right, bottom, radius) {
+function insideRoundedRect(x: number, y: number, left: number, top: number, right: number, bottom: number, radius: number): boolean {
   const nearestX = Math.max(left + radius, Math.min(x, right - radius));
   const nearestY = Math.max(top + radius, Math.min(y, bottom - radius));
   const dx = x - nearestX;
@@ -35,7 +35,7 @@ function insideRoundedRect(x, y, left, top, right, bottom, radius) {
   return dx * dx + dy * dy <= radius * radius;
 }
 
-function colorAt(x, y) {
+function colorAt(x: number, y: number): number[] {
   if (!insideRoundedRect(x, y, 3, 3, 125, 125, 24)) {
     return [0, 0, 0, 0];
   }
@@ -73,7 +73,7 @@ function colorAt(x, y) {
   return background;
 }
 
-function createPng(size) {
+function createPng(size: number): Buffer {
   const raw = Buffer.alloc((size * 4 + 1) * size);
   for (let y = 0; y < size; y += 1) {
     const rowOffset = y * (size * 4 + 1);
@@ -100,7 +100,7 @@ function createPng(size) {
   ]);
 }
 
-export async function generateIcons(outputDirectory) {
+export async function generateIcons(outputDirectory: string): Promise<void> {
   await mkdir(outputDirectory, { recursive: true });
   await Promise.all([16, 32, 48, 128].map((size) => writeFile(
     resolve(outputDirectory, `icon${size}.png`),

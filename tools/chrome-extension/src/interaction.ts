@@ -1,3 +1,5 @@
+import type { JsonRecord } from './types.js';
+
 export const ELEMENT_REGISTRY_KEY = '__pinpawoBrowserElementsV1';
 export const HUMANIZED_TYPE_CHARACTER_LIMIT = 500;
 export const TRUSTED_INSERT_CHUNK_CHARACTERS = 2_000;
@@ -11,15 +13,26 @@ const DEFAULT_HUMANIZATION = Object.freeze({
   keyDelayMaxMs: 70,
 });
 
-function boundedInteger(value, fallback, minimum, maximum) {
-  return Number.isInteger(value) && value >= minimum && value <= maximum
+interface Humanization {
+  preDelayMinMs: number;
+  preDelayMaxMs: number;
+  hoverMinMs: number;
+  hoverMaxMs: number;
+  keyDelayMinMs: number;
+  keyDelayMaxMs: number;
+}
+
+function boundedInteger(value: unknown, fallback: number, minimum: number, maximum: number) {
+  return typeof value === 'number' && Number.isInteger(value) && value >= minimum && value <= maximum
     ? value
     : fallback;
 }
 
-export function normalizeHumanization(value = {}) {
-  const input = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-  const result = {
+export function normalizeHumanization(value: unknown = {}): Humanization {
+  const input: JsonRecord = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as JsonRecord
+    : {};
+  const result: Humanization = {
     preDelayMinMs: boundedInteger(input.preDelayMinMs, DEFAULT_HUMANIZATION.preDelayMinMs, 0, 2_000),
     preDelayMaxMs: boundedInteger(input.preDelayMaxMs, DEFAULT_HUMANIZATION.preDelayMaxMs, 0, 2_000),
     hoverMinMs: boundedInteger(input.hoverMinMs, DEFAULT_HUMANIZATION.hoverMinMs, 0, 2_000),
@@ -31,7 +44,7 @@ export function normalizeHumanization(value = {}) {
     ['preDelayMinMs', 'preDelayMaxMs'],
     ['hoverMinMs', 'hoverMaxMs'],
     ['keyDelayMinMs', 'keyDelayMaxMs'],
-  ]) {
+  ] as const) {
     if (result[minimumKey] > result[maximumKey]) {
       [result[minimumKey], result[maximumKey]] = [result[maximumKey], result[minimumKey]];
     }
@@ -39,14 +52,14 @@ export function normalizeHumanization(value = {}) {
   return result;
 }
 
-export function randomDelayMs(minimum, maximum, random = Math.random) {
+export function randomDelayMs(minimum: number, maximum: number, random: () => number = Math.random) {
   if (maximum <= minimum) return minimum;
   return minimum + Math.floor(random() * (maximum - minimum + 1));
 }
 
 export function createSerialExecutor() {
   let tail = Promise.resolve();
-  return function enqueue(work) {
+  return function enqueue<T>(work: () => Promise<T> | T): Promise<T> {
     const result = tail.then(work, work);
     tail = result.then(() => undefined, () => undefined);
     return result;
@@ -54,8 +67,8 @@ export function createSerialExecutor() {
 }
 
 export function chunkTrustedInsertText(
-  text,
-  chunkCharacters = TRUSTED_INSERT_CHUNK_CHARACTERS,
+  text: string,
+  chunkCharacters: number = TRUSTED_INSERT_CHUNK_CHARACTERS,
 ) {
   if (typeof text !== 'string') throw new Error('browser type text must be a string');
   if (!Number.isInteger(chunkCharacters) || chunkCharacters <= 0) {
@@ -69,12 +82,13 @@ export function chunkTrustedInsertText(
   return chunks;
 }
 
-export function normalizeElementTarget(value) {
+export function normalizeElementTarget(value: unknown): { ref: string } | { selector: string } {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('browser element target must be an object');
   }
-  const ref = typeof value.ref === 'string' ? value.ref.trim() : '';
-  const selector = typeof value.selector === 'string' ? value.selector.trim() : '';
+  const input = value as JsonRecord;
+  const ref = typeof input.ref === 'string' ? input.ref.trim() : '';
+  const selector = typeof input.selector === 'string' ? input.selector.trim() : '';
   if ((ref ? 1 : 0) + (selector ? 1 : 0) !== 1) {
     throw new Error('browser element target requires exactly one of ref or selector');
   }
@@ -84,7 +98,7 @@ export function normalizeElementTarget(value) {
   return ref ? { ref } : { selector };
 }
 
-export function buildResolveTargetExpression(value) {
+export function buildResolveTargetExpression(value: unknown): string {
   const target = normalizeElementTarget(value);
   return `(() => {
     const target = ${JSON.stringify(target)};
@@ -132,7 +146,7 @@ export function buildResolveTargetExpression(value) {
   })()`;
 }
 
-export function buildExtractExpression(selector, offset, limit) {
+export function buildExtractExpression(selector: unknown, offset: number, limit: number): string {
   if (selector !== undefined && (typeof selector !== 'string' || selector.length > 2_000)) {
     throw new Error('browser extract selector must be a bounded string');
   }

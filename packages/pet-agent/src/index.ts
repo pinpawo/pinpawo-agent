@@ -284,7 +284,9 @@ export {
   isHumanReviewInterrupt,
   isHumanReviewInterruptPayload,
   isReviewSpecValue,
+  projectHumanReviewRequest,
   reviewViewToText,
+  toInternalReviewResponse,
 } from './agent/orchestrator/review/reviewSpec';
 export type {
   BuildReviewSpecParams,

@@ -2,13 +2,13 @@ import { randomUUID } from 'node:crypto';
 import type {
   ActiveDelegationTransition,
   BuiltinGlobalReviewPolicyMode,
-  ReviewOption,
-  ReviewResponse,
 } from '@pinpawo/pet-agent';
 import type {
   AgentInputModality,
   AgentModelProfileSummary,
   AgentSessionSnapshot,
+  ReviewOption,
+  ReviewResponse,
 } from '@pinpawo/agent-session';
 import { loadAgentContext } from '../contextLoader';
 import type { LocalAgentServerMessage } from '../localAgentProtocol';
@@ -294,7 +294,7 @@ export class TuiRuntimeController {
       return false;
     }
     const requestId = currentApproval.requestId;
-    const reviewId = currentApproval.review.id;
+    const interactionId = currentApproval.review.interactionId;
     const reviews = currentApproval.reviews;
 
     if (option.input?.kind === 'text' && !inputText) {
@@ -303,7 +303,7 @@ export class TuiRuntimeController {
     }
 
     const response: ReviewResponse = {
-      reviewId,
+      interactionId,
       selectedOptionId: option.id,
       ...(option.input?.kind === 'text' ? { input: { [option.input.key]: inputText } } : {}),
     };
@@ -311,7 +311,7 @@ export class TuiRuntimeController {
       ...currentApproval.decisions,
       response,
     ];
-    const shouldResume = option.decision.type !== 'approve' || decisions.length >= reviews.length;
+    const shouldResume = option.batchSubmission === 'immediate' || decisions.length >= reviews.length;
     const now = Date.now();
     this.options.setNow(now);
     if (!shouldResume) {
@@ -328,7 +328,7 @@ export class TuiRuntimeController {
       type: 'human_review_response',
       requestId,
       actionId: currentApproval.actionId,
-      reviewId,
+      interactionId,
       selectedOptionId: option.id,
       ...(option.input?.kind === 'text' ? { input: { [option.input.key]: inputText } } : {}),
       decisions,

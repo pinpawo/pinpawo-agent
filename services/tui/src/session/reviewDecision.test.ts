@@ -37,7 +37,7 @@ test('review decision preparation validates required input and stale drafts', ()
   assert.deepEqual(prepareReviewDecision({
     action,
     decisions: [{
-      reviewId: 'wrong-review',
+      interactionId: 'wrong-review',
       selectedOptionId: 'approve',
     }],
     optionId: 'approve',
@@ -51,8 +51,8 @@ function reviewAction(): AgentReviewAction {
   return {
     actionId: 'review-action',
     reviews: ['review-1', 'review-2'].map((id) => ({
-      id,
-      schemaVersion: 1,
+      interactionId: id,
+      schemaVersion: 2 as const,
       view: {
         kind: 'plain',
         body: `Review ${id}`,
@@ -60,11 +60,11 @@ function reviewAction(): AgentReviewAction {
       options: [{
         id: 'approve',
         label: 'Approve',
-        decision: { type: 'approve' },
+        batchSubmission: 'defer',
       }, {
         id: 'comment',
         label: 'Comment',
-        decision: { type: 'reject' },
+        batchSubmission: 'immediate',
         input: {
           kind: 'text',
           key: 'message',

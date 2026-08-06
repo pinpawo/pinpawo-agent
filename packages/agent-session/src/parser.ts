@@ -1,4 +1,8 @@
-import type { ReviewSpec } from '@pinpawo/pet-agent';
+import {
+  HUMAN_REVIEW_REQUEST_SCHEMA_VERSION,
+  parseHumanReviewRequest,
+  type HumanReviewRequest,
+} from '@pinpawo/agent-contracts';
 import {
   AGENT_SESSION_SNAPSHOT_VERSION,
   type AgentOperationEntry,
@@ -24,8 +28,11 @@ export function parseAgentSessionSnapshot(
   value: unknown,
 ): AgentSessionSnapshot | null {
   if (!isRecord(value)) return null;
-  if (value.version !== AGENT_SESSION_SNAPSHOT_VERSION) return null;
-  const session = parseAgentSession(value.session);
+  if (value.version !== 3 && value.version !== AGENT_SESSION_SNAPSHOT_VERSION) return null;
+  const readReviews = value.version === 3
+    ? readLegacyReviewSpecs
+    : readReviewSpecs;
+  const session = parseAgentSession(value.session, readReviews);
   return session
     ? { version: AGENT_SESSION_SNAPSHOT_VERSION, session }
     : null;
@@ -59,7 +66,12 @@ export function parseAgentSessionSummary(
   };
 }
 
-function parseAgentSession(value: unknown): AgentSession | null {
+type ReviewSpecsReader = (value: unknown) => HumanReviewRequest[] | null;
+
+function parseAgentSession(
+  value: unknown,
+  readReviews: ReviewSpecsReader,
+): AgentSession | null {
   if (!isRecord(value)) return null;
   if (
     typeof value.sessionId !== 'string'
@@ -74,7 +86,9 @@ function parseAgentSession(value: unknown): AgentSession | null {
     return parsed ? [parsed] : [];
   });
   if (timeline.length !== value.timeline.length) return null;
-  const activeRun = value.activeRun === null ? null : parseAgentRun(value.activeRun);
+  const activeRun = value.activeRun === null
+    ? null
+    : parseAgentRun(value.activeRun, readReviews);
   if (value.activeRun !== null && !activeRun) return null;
   const actor = isRecord(value.actor)
     && typeof value.actor.label === 'string'
@@ -357,7 +371,10 @@ function parseOperationSource(
   };
 }
 
-function parseAgentRun(value: unknown): AgentRunView | null {
+function parseAgentRun(
+  value: unknown,
+  readReviews: ReviewSpecsReader,
+): AgentRunView | null {
   if (
     !isRecord(value)
     || typeof value.requestId !== 'string'
@@ -376,7 +393,7 @@ function parseAgentRun(value: unknown): AgentRunView | null {
     return { ...base, state: 'running', activity: value.activity };
   }
   if (value.state === 'waiting_review') {
-    const reviewAction = parseNativeReviewAction(value.reviewAction);
+    const reviewAction = parseNativeReviewAction(value.reviewAction, readReviews);
     if (!reviewAction || value.activity !== undefined) return null;
     return { ...base, state: 'waiting_review', reviewAction };
   }
@@ -387,9 +404,12 @@ function parseAgentRun(value: unknown): AgentRunView | null {
   return null;
 }
 
-function parseNativeReviewAction(value: unknown): AgentReviewAction | null {
+function parseNativeReviewAction(
+  value: unknown,
+  readReviews: ReviewSpecsReader,
+): AgentReviewAction | null {
   if (!isRecord(value)) return null;
-  const reviews = readReviewSpecs(value.reviews);
+  const reviews = readReviews(value.reviews);
   if (typeof value.actionId !== 'string' || !reviews) {
     return null;
   }
@@ -400,13 +420,62 @@ function parseNativeReviewAction(value: unknown): AgentReviewAction | null {
   };
 }
 
-function readReviewSpecs(value: unknown): ReviewSpec[] | null {
+function readReviewSpecs(value: unknown): HumanReviewRequest[] | null {
   if (!Array.isArray(value)) return null;
-  const reviews = value.filter((item): item is ReviewSpec =>
-    Boolean(item && typeof item === 'object' && !Array.isArray(item)
-      && typeof (item as Record<string, unknown>).id === 'string'
-      && isJsonValue(item)));
+  const reviews = value.flatMap((item) => {
+    const review = parseHumanReviewRequest(item);
+    return review ? [review] : [];
+  });
   return reviews.length === value.length && reviews.length > 0 ? reviews : null;
+}
+
+function readLegacyReviewSpecs(value: unknown): HumanReviewRequest[] | null {
+  if (!Array.isArray(value)) return null;
+  const reviews = value.flatMap((item) => {
+    const review = parseHumanReviewRequest(item) ?? projectLegacyReviewSpec(item);
+    return review ? [review] : [];
+  });
+  return reviews.length === value.length && reviews.length > 0 ? reviews : null;
+}
+
+function projectLegacyReviewSpec(value: unknown): HumanReviewRequest | null {
+  if (
+    !isRecord(value)
+    || typeof value.id !== 'string'
+    || typeof value.schemaVersion !== 'number'
+    || !Number.isFinite(value.schemaVersion)
+    || !Array.isArray(value.options)
+    || !isJsonValue(value)
+  ) {
+    return null;
+  }
+  const options = value.options.map(projectLegacyReviewOption);
+  if (options.some((option) => option === null)) return null;
+  return parseHumanReviewRequest({
+    interactionId: value.id,
+    schemaVersion: HUMAN_REVIEW_REQUEST_SCHEMA_VERSION,
+    view: value.view,
+    options,
+  });
+}
+
+function projectLegacyReviewOption(value: unknown) {
+  if (!isRecord(value) || !isRecord(value.decision)) return null;
+  if (
+    value.decision.type !== 'approve'
+    && value.decision.type !== 'reject'
+    && value.decision.type !== 'respond'
+  ) {
+    return null;
+  }
+  return {
+    id: value.id,
+    label: value.label,
+    ...(value.description !== undefined ? { description: value.description } : {}),
+    ...(value.variant !== undefined ? { variant: value.variant } : {}),
+    ...(value.input !== undefined ? { input: value.input } : {}),
+    batchSubmission: value.decision.type === 'approve' ? 'defer' : 'immediate',
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -1,7 +1,7 @@
 export {
   isTokenUsageSnapshot,
   parseTokenUsageSnapshot,
-} from './agent/tokenUsage';
+} from '@pinpawo/agent-contracts';
 export {
   isReviewSpecValue,
 } from './agent/orchestrator/review/reviewSpecValidation';

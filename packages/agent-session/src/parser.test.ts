@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { AGENT_SESSION_SNAPSHOT_VERSION } from './domain';
 import { parseAgentSessionSnapshot } from './parser';
 
 test('parseAgentSessionSnapshot retains explicit session token usage', () => {
   const snapshot = parseAgentSessionSnapshot({
-    version: 3,
+    version: AGENT_SESSION_SNAPSHOT_VERSION,
     session: {
       sessionId: 'chat:pet',
       kind: 'chat',
@@ -29,7 +30,7 @@ test('parseAgentSessionSnapshot retains explicit session token usage', () => {
 
 test('parseAgentSessionSnapshot rejects a run-scoped session aggregate', () => {
   const snapshot = parseAgentSessionSnapshot({
-    version: 3,
+    version: AGENT_SESSION_SNAPSHOT_VERSION,
     session: {
       sessionId: 'chat:pet',
       kind: 'chat',
@@ -49,7 +50,7 @@ test('parseAgentSessionSnapshot rejects a run-scoped session aggregate', () => {
 
 test('parseAgentSessionSnapshot retains and validates global review policy runtime state', () => {
   const base = {
-    version: 3,
+    version: AGENT_SESSION_SNAPSHOT_VERSION,
     session: {
       sessionId: 'chat:pet',
       kind: 'chat',

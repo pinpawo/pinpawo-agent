@@ -1,9 +1,11 @@
-import {
-  type BuiltinGlobalReviewPolicyMode,
-  type ReviewResponse,
-  type ReviewSpec,
-  type ActiveDelegationTransition,
-} from '@pinpawo/pet-agent';
+import type {
+  JsonObject as ContractJsonObject,
+  ToolAuthorizationMode,
+} from '@pinpawo/agent-contracts';
+import type {
+  ReviewResponse,
+  ReviewSpec,
+} from './review';
 import type {
   AgentErrorCode,
   AgentOperationRaw,
@@ -35,6 +37,12 @@ import {
   type AgentLocalAttachment,
 } from './localAttachments';
 
+/**
+ * Deprecated wire compatibility only. Runtime delegation transitions are not
+ * part of agent-contracts and new callers must not emit this field.
+ */
+type LegacyActiveDelegationTransition = 'supersede_active' | 'resume_active';
+
 export type ChatRequestMessage = {
   type: 'chat_request';
   requestId: string;
@@ -42,7 +50,7 @@ export type ChatRequestMessage = {
   attachments?: AgentLocalAttachment[];
   petId?: string;
   userId?: string;
-  activeDelegationTransition?: ActiveDelegationTransition;
+  activeDelegationTransition?: LegacyActiveDelegationTransition;
 };
 
 export type RunInterruptMessage = {
@@ -66,7 +74,7 @@ export type RuntimeConfigUpdateMessage = {
   type: 'runtime_config.update';
   /** Optional for compatibility with pre-acknowledgement local clients. */
   requestId?: string;
-  globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
+  globalReviewPolicyMode: ToolAuthorizationMode;
 };
 
 export type StudioRequestMessage = {
@@ -79,14 +87,29 @@ export type StudioRequestMessage = {
   conversationId?: string;
 };
 
-export type HumanReviewResponseMessage = {
+type HumanReviewResponseMessageBase = {
   type: 'human_review_response';
   requestId: string;
   actionId?: string;
+  selectedOptionId: string;
+  input?: Record<string, unknown>;
+  decisions?: (ReviewResponse | LegacyHumanReviewResponse)[];
+};
+
+/**
+ * A public interaction response. `reviewId` is accepted only as a legacy wire
+ * alias and never appears in agent-contracts.
+ */
+export type HumanReviewResponseMessage = HumanReviewResponseMessageBase & (
+  | { interactionId: string; reviewId?: string }
+  | { /** @deprecated Pre-contract wire compatibility only. */ interactionId?: undefined; reviewId: string }
+);
+
+/** @deprecated Accepted only to preserve pre-contract wire compatibility. */
+export type LegacyHumanReviewResponse = {
   reviewId: string;
   selectedOptionId: string;
   input?: Record<string, unknown>;
-  decisions?: ReviewResponse[];
 };
 
 export type SessionSnapshotGetMessage = {
@@ -150,7 +173,7 @@ export type AgentControlServerMessage =
   | {
       type: 'runtime_config.result';
       requestId: string;
-      globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
+      globalReviewPolicyMode: ToolAuthorizationMode;
     }
   | {
       type: 'runtime_config.error';
@@ -272,7 +295,7 @@ function readOptionalString(record: Record<string, unknown>, key: string) {
 
 function readActiveDelegationTransition(
   record: Record<string, unknown>,
-): ActiveDelegationTransition | null | undefined {
+): LegacyActiveDelegationTransition | null | undefined {
   const value = record.activeDelegationTransition;
   if (value === undefined) return undefined;
   return value === 'supersede_active' || value === 'resume_active'
@@ -476,16 +499,16 @@ function readReviewResponse(value: unknown): ReviewResponse | null {
   const record = value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
-  if (!record || !hasOnlyKeys(record, ['reviewId', 'selectedOptionId', 'input'])) return null;
-  const reviewId = readString(record, 'reviewId');
+  if (!record || !hasOnlyKeys(record, ['interactionId', 'reviewId', 'selectedOptionId', 'input'])) return null;
+  const interactionId = readOptionalString(record, 'interactionId') ?? readString(record, 'reviewId');
   const selectedOptionId = readString(record, 'selectedOptionId');
   const input = readRecord(record, 'input');
-  if (record.input !== undefined && !input) return null;
-  return reviewId && selectedOptionId
+  if (record.input !== undefined && (!input || !isJsonValue(input))) return null;
+  return interactionId && selectedOptionId
     ? {
-        reviewId,
+        interactionId,
         selectedOptionId,
-        ...(input ? { input } : {}),
+        ...(input ? { input: input as ContractJsonObject } : {}),
       }
     : null;
 }
@@ -502,7 +525,7 @@ function readReviewResponses(record: Record<string, unknown>, key: string): Revi
 function readBuiltinGlobalReviewPolicyMode(
   record: Record<string, unknown>,
   key: string,
-): BuiltinGlobalReviewPolicyMode | null {
+): ToolAuthorizationMode | null {
   const value = readString(record, key);
   return isBuiltinGlobalReviewPolicyMode(value) ? value : null;
 }
@@ -771,9 +794,10 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
     };
   }
   if (type === 'human_review_response') {
-    if (!hasOnlyKeys(record, ['type', 'requestId', 'actionId', 'reviewId', 'selectedOptionId', 'input', 'decisions'])) return null;
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'actionId', 'interactionId', 'reviewId', 'selectedOptionId', 'input', 'decisions'])) return null;
     const requestId = readString(record, 'requestId');
     const actionId = readOptionalString(record, 'actionId');
+    const interactionId = readOptionalString(record, 'interactionId');
     const reviewId = readOptionalString(record, 'reviewId');
     const selectedOptionId = readOptionalString(record, 'selectedOptionId');
     const input = readRecord(record, 'input');
@@ -781,12 +805,15 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
     if (record.input !== undefined && !input) return null;
     if (record.decisions !== undefined && !decisions) return null;
     if (record.actionId !== undefined && !actionId) return null;
-    if (!requestId || !reviewId || !selectedOptionId) return null;
+    if (!requestId || (!interactionId && !reviewId) || !selectedOptionId) return null;
+    if (interactionId !== undefined && reviewId !== undefined && interactionId !== reviewId) return null;
+    const canonicalInteractionId = interactionId ?? reviewId!;
     return {
       type,
       requestId,
       ...(actionId ? { actionId } : {}),
-      reviewId,
+      interactionId: canonicalInteractionId,
+      ...(reviewId ? { reviewId } : {}),
       selectedOptionId,
       ...(input ? { input } : {}),
       ...(decisions ? { decisions } : {}),

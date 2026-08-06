@@ -1,4 +1,7 @@
-import type { ReviewSpec, TokenUsageSnapshot } from '@pinpawo/pet-agent';
+import type {
+  HumanReviewRequest,
+  TokenUsageSnapshot,
+} from '@pinpawo/agent-contracts';
 import type { AgentPlan } from './domain';
 
 export type AgentRuntimeEvent =
@@ -90,8 +93,8 @@ export type AgentHumanReviewRequestedEvent = {
   type: 'human_review.requested';
   requestId: string;
   interruptId?: string;
-  review: ReviewSpec;
-  reviews?: ReviewSpec[];
+  review: HumanReviewRequest;
+  reviews?: HumanReviewRequest[];
   actor?: {
     petId?: string;
   };

@@ -1,4 +1,9 @@
 import { randomUUID } from 'node:crypto';
+import type {
+  HumanReviewRequest,
+  HumanReviewResponse,
+} from '@pinpawo/agent-contracts';
+import { HUMAN_REVIEW_REQUEST_SCHEMA_VERSION } from '@pinpawo/agent-contracts';
 import { isReviewSpecValue } from './reviewSpecValidation';
 
 export { isReviewSpecValue };
@@ -184,6 +189,36 @@ export type ReviewResponse = {
   selectedOptionId: string;
   input?: Record<string, unknown>;
 };
+
+/**
+ * Projects an internal review definition to the transport-neutral interaction
+ * boundary. Decisions and effects remain in the runtime's checkpointed review
+ * spec and are never delegated to the client for interpretation.
+ */
+export function projectHumanReviewRequest(review: ReviewSpec): HumanReviewRequest {
+  return {
+    interactionId: review.id,
+    schemaVersion: HUMAN_REVIEW_REQUEST_SCHEMA_VERSION,
+    view: review.view,
+    options: review.options.map((option) => ({
+      id: option.id,
+      label: option.label,
+      ...(option.description !== undefined ? { description: option.description } : {}),
+      ...(option.variant !== undefined ? { variant: option.variant } : {}),
+      ...(option.input ? { input: option.input } : {}),
+      batchSubmission: option.decision.type === 'approve' ? 'defer' : 'immediate',
+    })),
+  };
+}
+
+/** Converts the public interaction response back to the runtime-local form. */
+export function toInternalReviewResponse(response: HumanReviewResponse): ReviewResponse {
+  return {
+    reviewId: response.interactionId,
+    selectedOptionId: response.selectedOptionId,
+    ...(response.input ? { input: response.input } : {}),
+  };
+}
 
 export type ReviewBatchResponse = {
   decisions: ReviewResponse[];

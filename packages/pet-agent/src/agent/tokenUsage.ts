@@ -1,17 +1,18 @@
-export type TokenUsageSource = 'provider';
-export type TokenUsageScope = 'run' | 'session';
+import {
+  isTokenUsageSnapshot,
+  parseTokenUsageSnapshot,
+  type TokenUsageSnapshot,
+} from '@pinpawo/agent-contracts';
 
-export type TokenUsageSnapshot = {
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-  /** Latest provider prompt footprint, used for context-compaction headroom. */
-  latestInputTokens?: number;
-  contextWindow?: number;
-  updatedAt?: string;
-  source?: TokenUsageSource;
-  scope?: TokenUsageScope;
+export {
+  isTokenUsageSnapshot,
+  parseTokenUsageSnapshot,
 };
+export type {
+  TokenUsageScope,
+  TokenUsageSnapshot,
+  TokenUsageSource,
+} from '@pinpawo/agent-contracts';
 
 export type ProviderTokenUsage = {
   inputTokens: number;
@@ -28,11 +29,6 @@ function readNumber(record: Record<string, unknown>, key: string): number | unde
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
-function readString(record: Record<string, unknown>, key: string): string | undefined {
-  const value = record[key];
-  return typeof value === 'string' ? value : undefined;
-}
-
 function readRecord(record: Record<string, unknown>, key: string): Record<string, unknown> | null {
   const value = record[key];
   return isRecord(value) ? value : null;
@@ -40,39 +36,6 @@ function readRecord(record: Record<string, unknown>, key: string): Record<string
 
 function positiveOrZero(value: number) {
   return Math.max(0, Math.round(value));
-}
-
-export function parseTokenUsageSnapshot(value: unknown): TokenUsageSnapshot | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-
-  const inputTokens = readNumber(value, 'inputTokens');
-  const outputTokens = readNumber(value, 'outputTokens');
-  const totalTokens = readNumber(value, 'totalTokens');
-  if (inputTokens === undefined || outputTokens === undefined || totalTokens === undefined) {
-    return null;
-  }
-
-  const latestInputTokens = readNumber(value, 'latestInputTokens');
-  const contextWindow = readNumber(value, 'contextWindow');
-  const updatedAt = readString(value, 'updatedAt');
-  const rawSource = readString(value, 'source');
-  const rawScope = readString(value, 'scope');
-  return {
-    inputTokens,
-    outputTokens,
-    totalTokens,
-    ...(latestInputTokens !== undefined ? { latestInputTokens } : {}),
-    ...(contextWindow !== undefined ? { contextWindow } : {}),
-    ...(updatedAt !== undefined ? { updatedAt } : {}),
-    ...(rawSource === 'provider' ? { source: rawSource } : {}),
-    ...(rawScope === 'run' || rawScope === 'session' ? { scope: rawScope } : {}),
-  };
-}
-
-export function isTokenUsageSnapshot(value: unknown): value is TokenUsageSnapshot {
-  return parseTokenUsageSnapshot(value) !== null;
 }
 
 function normalizeProviderUsage(value: unknown): ProviderTokenUsage | null {

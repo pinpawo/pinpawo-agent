@@ -117,8 +117,8 @@ export function reviewSpec(
   >['reviewAction']['reviews'][number]['options'],
 ) {
   return {
-    id,
-    schemaVersion: 1,
+    interactionId: id,
+    schemaVersion: 2 as const,
     view: {
       kind: 'plain' as const,
       body: `Review ${id}`,

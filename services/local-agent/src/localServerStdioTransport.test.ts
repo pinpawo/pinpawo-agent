@@ -177,7 +177,7 @@ test('stdio carries correlated session results without routing them as live even
           active: true,
         },
         snapshot: {
-          version: 3,
+          version: 4,
           session: {
             sessionId: 'chat:new',
             kind: 'chat',
@@ -242,7 +242,7 @@ test('stdio carries correlated session results without routing them as live even
         active: true,
       },
       snapshot: {
-        version: 3,
+        version: 4,
         session: {
           sessionId: 'chat:new',
           kind: 'chat',

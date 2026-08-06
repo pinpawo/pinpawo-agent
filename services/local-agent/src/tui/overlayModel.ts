@@ -1,5 +1,7 @@
-import type { BuiltinGlobalReviewPolicyMode } from '@pinpawo/pet-agent';
-import type { AgentModelProfileSummary } from '@pinpawo/agent-session';
+import type {
+  AgentModelProfileSummary,
+  BuiltinGlobalReviewPolicyMode,
+} from '@pinpawo/agent-session';
 import type { CommandPaletteModel } from './input/commandPalette';
 import type { FileMentionModel } from './input/fileMention';
 import type { TuiInteractionOwner } from './interactionOwner';

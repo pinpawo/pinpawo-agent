@@ -1,6 +1,7 @@
 import {
   resolveHumanReviewResponse as resolveHumanReviewDecision,
   ReviewResponseResolutionError,
+  toInternalReviewResponse,
   type ReviewResponse,
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
@@ -9,13 +10,15 @@ import type {
   HumanReviewResponseMessage,
   ReviewCancelMessage,
 } from './localAgentProtocol';
-import type { ReviewAction } from '@pinpawo/agent-session';
 import {
   ReviewResolutionLifecycle,
   type ReviewResolutionRoute,
 } from './reviewResolutionLifecycle';
 
-export type HumanReviewActionRoute = ReviewAction & {
+/** Internal route: it retains the authoritative pet-agent specs for response resolution. */
+export type HumanReviewActionRoute = {
+  actionId: string;
+  reviews: ReviewSpec[];
   interruptId?: string;
 };
 
@@ -27,8 +30,10 @@ export function matchesHumanReviewAction(
 }
 
 export function readHumanReviewDecisions(msg: HumanReviewResponseMessage): ReviewResponse[] {
-  return msg.decisions ?? [{
-    reviewId: msg.reviewId,
+  return msg.decisions?.map((decision) => (
+    'interactionId' in decision ? toInternalReviewResponse(decision) : decision
+  )) ?? [{
+    reviewId: msg.interactionId ?? msg.reviewId,
     selectedOptionId: msg.selectedOptionId,
     ...(msg.input ? { input: msg.input } : {}),
   }];
@@ -39,10 +44,11 @@ export function validateHumanReviewDecisions(
   msg: HumanReviewResponseMessage,
 ): ReviewResponse[] {
   const decisions = readHumanReviewDecisions(msg);
+  const interactionId = msg.interactionId ?? msg.reviewId;
   const finalDecision = decisions.at(-1);
   if (
     !finalDecision
-    || finalDecision.reviewId !== msg.reviewId
+    || finalDecision.reviewId !== interactionId
     || finalDecision.selectedOptionId !== msg.selectedOptionId
   ) {
     throw new ReviewResponseResolutionError(
@@ -255,7 +261,7 @@ export async function resolveHumanReviewAction<
         decisions = validateHumanReviewDecisions(route, message);
       } catch (err) {
         console.warn(
-          `[human-review] response rejected: reviewId=${message.reviewId} `
+          `[human-review] response rejected: reviewId=${message.interactionId ?? message.reviewId} `
           + `does not match pending review action=${route.reviews.map((review) => review.id).join(',')} `
           + (err instanceof Error ? err.message : String(err)),
         );
@@ -279,7 +285,7 @@ export async function resolveHumanReviewAction<
       resume = buildHumanReviewResume(route, decisions);
       source = {
         type: 'human_review_response',
-        reviewId: message.reviewId,
+        reviewId: message.interactionId ?? message.reviewId,
         selectedOptionId: message.selectedOptionId,
         decisionCount: decisions.length,
         ...(interruptRun ? { interruptRun: true } : {}),

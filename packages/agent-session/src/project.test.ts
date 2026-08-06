@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  AGENT_SESSION_SNAPSHOT_VERSION,
   applySessionSnapshot,
   reduceSession,
   type AgentSession,
@@ -234,10 +235,10 @@ test('reduceSession keeps review and terminal control scoped to the owning run',
       type: 'human_review.requested',
       requestId: 'req-1',
       review: {
-        id: 'review-1',
-        schemaVersion: 1,
+        interactionId: 'review-1',
+        schemaVersion: 2,
         view: { kind: 'plain', body: 'Approve?' },
-        options: [],
+        options: [{ id: 'approve', label: 'Approve', batchSubmission: 'defer' }],
       },
     },
   }, { observedAt: 1_100 });
@@ -367,7 +368,7 @@ test('applySessionSnapshot rematerializes timeline state from a checkpoint point
     },
   };
   const snapshot = {
-    version: 3 as const,
+    version: AGENT_SESSION_SNAPSHOT_VERSION,
     session: {
       sessionId: 'chat:pet',
       kind: 'chat' as const,

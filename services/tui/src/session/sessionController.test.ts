@@ -1099,7 +1099,7 @@ test('delegation continuation sends resume_active without client-owned availabil
     reviewSpec('review-1', [{
       id: 'approve',
       label: 'Approve',
-      decision: { type: 'approve' },
+      batchSubmission: 'immediate',
     }]),
   ]));
 

@@ -6,6 +6,7 @@ import {
   isHumanReviewBatchInterruptPayload,
   isHumanReviewInterruptPayload,
   NamespacedProtocolToolEventReader,
+  projectHumanReviewRequest,
   readLatestProviderInputTokens,
   readMessagesTokenUsage,
   SUBAGENT_OPERATIONS_EVENT,
@@ -66,6 +67,12 @@ export type ChatSessionAdapterOptions = {
   isCurrent: () => boolean;
   finishInterrupted: () => void;
   emitEvent: (event: AgentRuntimeEvent) => void;
+  /** Registers an ephemeral route to the authoritative specs used for resume validation. */
+  registerHumanReviewResolutionRoute?: (params: {
+    requestId: string;
+    interruptId?: string;
+    reviews: ReviewSpec[];
+  }) => void;
   emitToolEvent: (payload: StreamToolsPayload) => void;
   /**
    * A review.cancel run stops itself at a safe graph checkpoint. If the active
@@ -138,6 +145,7 @@ function emitHumanReviewRequested(params: {
   reviews: ReviewSpec[];
   requestId: string;
   emitEvent: (event: AgentRuntimeEvent) => void;
+  registerHumanReviewResolutionRoute?: ChatSessionAdapterOptions['registerHumanReviewResolutionRoute'];
 }) {
   const review = params.reviews[0];
   if (!review) {
@@ -145,12 +153,17 @@ function emitHumanReviewRequested(params: {
   }
   const reviews = params.reviews;
   recordAgentRunActivity('waiting_human', params.requestId);
+  params.registerHumanReviewResolutionRoute?.({
+    requestId: params.requestId,
+    ...(params.interruptId ? { interruptId: params.interruptId } : {}),
+    reviews,
+  });
   params.emitEvent({
     type: 'human_review.requested',
     requestId: params.requestId,
     ...(params.interruptId ? { interruptId: params.interruptId } : {}),
-    review,
-    ...(reviews.length > 1 ? { reviews } : {}),
+    review: projectHumanReviewRequest(review),
+    ...(reviews.length > 1 ? { reviews: reviews.map(projectHumanReviewRequest) } : {}),
   });
 }
 
@@ -362,6 +375,7 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
       ),
       requestId,
       emitEvent,
+      registerHumanReviewResolutionRoute: options.registerHumanReviewResolutionRoute,
     });
     return { status: 'waiting_human' };
   }
@@ -574,6 +588,7 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
       ),
       requestId,
       emitEvent,
+      registerHumanReviewResolutionRoute: options.registerHumanReviewResolutionRoute,
     });
     return { status: 'waiting_human' };
   }

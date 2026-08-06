@@ -1,4 +1,7 @@
-import type { ReviewSpec } from '@pinpawo/pet-agent';
+import {
+  projectHumanReviewRequest,
+  type ReviewSpec,
+} from '@pinpawo/pet-agent';
 import { loadAgentContext } from './contextLoader';
 import {
   type ChatRequestMessage,
@@ -32,11 +35,7 @@ import {
   type HumanReviewResolutionOutcome,
   type HumanReviewResolutionSource,
 } from './humanReviewActionRouting';
-import {
-  reviewActionId,
-  reviewActionReviews,
-  type ReviewAction,
-} from '@pinpawo/agent-session';
+import type { ReviewAction } from '@pinpawo/agent-session';
 import { ReviewResolutionLifecycle } from './reviewResolutionLifecycle';
 import { sendLocalServerPeerEvent, type LocalServerPeer } from './localServerPeer';
 import { ThreadInvocationCoordinator } from './threadInvocationCoordinator';
@@ -63,6 +62,16 @@ export type ReviewActionSnapshot = {
   reviewAction: ReviewAction;
   actor?: Extract<AgentRuntimeEvent, { type: 'human_review.requested' }>['actor'];
 };
+
+function internalReviewActionId(params: {
+  requestId: string;
+  interruptId?: string;
+  reviews: ReviewSpec[];
+}) {
+  if (params.interruptId) return params.interruptId;
+  const reviewKey = params.reviews.map((review) => encodeURIComponent(review.id)).join(',') || 'unknown';
+  return `request:${params.requestId}:reviews:${reviewKey}`;
+}
 
 export function isToolProtocolHistoryError(value: unknown): boolean {
   const text = value instanceof Error
@@ -104,12 +113,12 @@ export class LocalServerChatHandler {
     sessionId?: string;
     actor?: ReviewActionRoute['actor'];
   }): ReviewActionRoute {
-    const reviews = reviewActionReviews(params.review, params.reviews);
+    const reviews = params.reviews?.length ? params.reviews : [params.review];
     const rejectOption = reviews[0]?.options.find((option) => option.decision.type === 'reject');
     return {
       requestId: params.requestId,
       ...(params.interruptId ? { interruptId: params.interruptId } : {}),
-      actionId: reviewActionId({
+      actionId: internalReviewActionId({
         requestId: params.requestId,
         ...(params.interruptId ? { interruptId: params.interruptId } : {}),
         reviews,
@@ -121,22 +130,51 @@ export class LocalServerChatHandler {
     };
   }
 
-  private recordReviewActionRoute(
-    event: AgentRuntimeEvent,
+  private recordInternalReviewActionRoute(
+    params: {
+      requestId: string;
+      interruptId?: string;
+      reviews: ReviewSpec[];
+      actor?: ReviewActionRoute['actor'];
+    },
     deps: LocalServerDeps,
   ) {
-    if (event.type !== 'human_review.requested' || !event.review?.id) {
+    const review = params.reviews[0];
+    if (!review) {
       return;
     }
     const sessionId = this.tuiSessions.getActiveSessionId(deps.actorId);
     this.reviewResolutions.register(this.buildReviewActionRoute({
+      requestId: params.requestId,
+      ...(params.interruptId ? { interruptId: params.interruptId } : {}),
+      review,
+      ...(params.reviews.length > 1 ? { reviews: params.reviews } : {}),
+      ...(sessionId ? { sessionId } : {}),
+      ...(params.actor ? { actor: params.actor } : {}),
+    }), { observedPending: true });
+  }
+
+  /**
+   * Internal compatibility seam for checkpoint/recovery callers that already
+   * hold authoritative pet-agent review specs. Public runtime events use the
+   * presentation-only contract and are registered through the invocation hook.
+   */
+  private recordReviewActionRoute(
+    event: {
+      requestId: string;
+      interruptId?: string;
+      review: ReviewSpec;
+      reviews?: ReviewSpec[];
+      actor?: ReviewActionRoute['actor'];
+    },
+    deps: LocalServerDeps,
+  ) {
+    this.recordInternalReviewActionRoute({
       requestId: event.requestId,
       ...(event.interruptId ? { interruptId: event.interruptId } : {}),
-      review: event.review,
-      ...(event.reviews ? { reviews: event.reviews } : {}),
-      ...(sessionId ? { sessionId } : {}),
+      reviews: event.reviews?.length ? event.reviews : [event.review],
       ...(event.actor ? { actor: event.actor } : {}),
-    }), { observedPending: true });
+    }, deps);
   }
 
   private async recoverReviewActionRoute(
@@ -179,7 +217,7 @@ export class LocalServerChatHandler {
         ...(route.sessionId ? { sessionId: route.sessionId } : {}),
         reviewAction: {
           actionId: route.actionId,
-          reviews: route.reviews,
+          reviews: route.reviews.map(projectHumanReviewRequest),
         },
         ...(route.actor ? { actor: route.actor } : {}),
       };
@@ -204,7 +242,7 @@ export class LocalServerChatHandler {
       sessionId: pending.sessionId,
       reviewAction: {
         actionId: route.actionId,
-        reviews: route.reviews,
+        reviews: route.reviews.map(projectHumanReviewRequest),
       },
     };
   }
@@ -307,8 +345,11 @@ export class LocalServerChatHandler {
         finishInterrupted,
         emitEvent: (event) => {
           if (!isCurrent()) return;
-          this.recordReviewActionRoute(event, deps);
           sendLocalServerPeerEvent(peer, event);
+        },
+        registerHumanReviewResolutionRoute: (pending) => {
+          if (!isCurrent()) return;
+          this.recordInternalReviewActionRoute(pending, deps);
         },
         emitToolEvent: (event) => {
           if (!isCurrent()) return;

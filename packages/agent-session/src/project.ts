@@ -1,4 +1,4 @@
-import type { TokenUsageSnapshot } from '@pinpawo/pet-agent';
+import type { TokenUsageSnapshot } from '@pinpawo/agent-contracts';
 import type { AgentRuntimeEvent } from './events';
 import type {
   AgentMessageEntry,

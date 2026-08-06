@@ -358,8 +358,8 @@ function createDemoSession(
             actionId: 'smoke-review-action',
             petId: 'paws',
             reviews: [{
-              id: 'smoke-review',
-              schemaVersion: 1,
+              interactionId: 'smoke-review',
+              schemaVersion: 2,
               view: {
                 kind: 'plain',
                 title: 'Allow local operation?',
@@ -369,7 +369,7 @@ function createDemoSession(
                 id: 'approve',
                 label: 'Approve',
                 variant: 'primary',
-                decision: { type: 'approve' },
+                batchSubmission: 'immediate',
               }, {
                 id: 'respond',
                 label: 'Respond',
@@ -378,15 +378,12 @@ function createDemoSession(
                   key: 'message',
                   multiline: true,
                 },
-                decision: {
-                  type: 'respond',
-                  messageInputKey: 'message',
-                },
+                batchSubmission: 'immediate',
               }, {
                 id: 'reject',
                 label: 'Reject',
                 variant: 'danger',
-                decision: { type: 'reject' },
+                batchSubmission: 'immediate',
               }],
             }],
           },

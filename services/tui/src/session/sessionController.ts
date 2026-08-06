@@ -437,7 +437,7 @@ export class TuiSessionController {
       type: 'human_review_response',
       requestId: run.requestId,
       actionId: run.reviewAction.actionId,
-      reviewId: prepared.decision.reviewId,
+      interactionId: prepared.decision.interactionId,
       selectedOptionId: prepared.decision.selectedOptionId,
       ...(prepared.decision.input
         ? { input: prepared.decision.input }

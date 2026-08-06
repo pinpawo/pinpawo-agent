@@ -1,14 +1,14 @@
 import type {
-  BuiltinGlobalReviewPolicyMode,
+  ToolAuthorizationMode,
   TokenUsageSnapshot,
-} from '@pinpawo/pet-agent';
+} from '@pinpawo/agent-contracts';
 import type {
   AgentOperationPhase,
   AgentOperationRaw,
 } from './events';
 import type { ReviewAction } from './review';
 
-export const AGENT_SESSION_SNAPSHOT_VERSION = 3 as const;
+export const AGENT_SESSION_SNAPSHOT_VERSION = 4 as const;
 
 export type AgentMessageEntry = {
   id: string;
@@ -126,7 +126,9 @@ export type AgentRuntimeView = {
   model?: string;
   inputModalities?: AgentInputModality[];
   requiredInputModalities?: AgentInputModality[];
-  globalReviewPolicyMode?: BuiltinGlobalReviewPolicyMode;
+  /** @deprecated Use toolAuthorizationMode for new consumers. */
+  globalReviewPolicyMode?: ToolAuthorizationMode;
+  toolAuthorizationMode?: ToolAuthorizationMode;
   cwd?: string;
   workspaceId?: string;
   workspaceName?: string;

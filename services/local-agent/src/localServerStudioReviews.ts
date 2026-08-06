@@ -21,7 +21,7 @@ function resolveStudioReviewResponse(
   msg: HumanReviewResponseMessage,
 ): ReviewResponse {
   const response = {
-    reviewId: msg.reviewId,
+    reviewId: msg.interactionId ?? msg.reviewId,
     selectedOptionId: msg.selectedOptionId,
     ...(msg.input ? { input: msg.input } : {}),
   };

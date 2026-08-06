@@ -35,7 +35,7 @@ test('AgentSession snapshot owns one active run and one ordered timeline', () =>
     },
   };
 
-  assert.equal(snapshot.version, 3);
+  assert.equal(snapshot.version, AGENT_SESSION_SNAPSHOT_VERSION);
   assert.equal(snapshot.session.timeline[0]?.type, 'message');
   assert.equal(snapshot.session.activeRun, null);
   assert.equal(snapshot.session.sessionTokenUsage?.totalTokens, 70);

@@ -5,6 +5,9 @@
     "moduleResolution": "bundler",
     "baseUrl": ".",
     "paths": {
+      "@pinpawo/agent-contracts": [
+        "../../packages/agent-contracts/src/index.ts"
+      ],
       "@pinpawo/agent-session": [
         "../../packages/agent-session/src/index.ts"
       ],

@@ -7,6 +7,7 @@ import type {
   ReviewSpec,
   ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
+import { projectHumanReviewRequest } from '@pinpawo/pet-agent';
 import { buildLocalChatAgentInput, type AgentChannelSetup } from './agentChannel';
 import { createCapabilityDiagnosticReporter } from './agentRegistryPreparation';
 import { loadAgentContext, type AgentContext } from './contextLoader';
@@ -42,7 +43,6 @@ import {
   type HumanReviewResolutionOutcome,
   type HumanReviewResolutionSource,
 } from './humanReviewActionRouting';
-import { reviewActionId, reviewActionReviews } from '@pinpawo/agent-session';
 import { ReviewResolutionLifecycle } from './reviewResolutionLifecycle';
 import type { AgentSession } from '@pinpawo/agent-session';
 import {
@@ -69,6 +69,16 @@ type ReviewActionRoute = HumanReviewActionRoute & {
   rejectOptionId?: string;
 };
 const MAX_HOSTED_SESSION_PROJECTIONS = 100;
+
+function internalReviewActionId(params: {
+  requestId: string;
+  interruptId?: string;
+  reviews: ReviewSpec[];
+}) {
+  if (params.interruptId) return params.interruptId;
+  const reviewKey = params.reviews.map((review) => encodeURIComponent(review.id)).join(',') || 'unknown';
+  return `request:${params.requestId}:reviews:${reviewKey}`;
+}
 
 export type LocalAgentAppChatHandlerOptions = {
   graphService: LocalAgentGraphService;
@@ -215,7 +225,9 @@ export class LocalAgentAppChatHandler {
       recover: () => this.recoverReviewActionRoute({
         requestId: msg.requestId,
         actionId: msg.actionId,
-        ...(msg.type === 'human_review_response' ? { reviewId: msg.reviewId } : {}),
+        ...(msg.type === 'human_review_response'
+          ? { reviewId: msg.interactionId ?? msg.reviewId }
+          : {}),
       }),
       emitClosed: () => this.sendClosedReviewError(ws, msg.requestId),
       emitEvent: (event) => sendLocalAgentEvent(ws, event),
@@ -356,6 +368,10 @@ export class LocalAgentAppChatHandler {
           if (!isCurrent()) return;
           this.emitRemoteEvent(ws, userId, event);
         },
+        registerHumanReviewResolutionRoute: (pending) => {
+          if (!isCurrent()) return;
+          this.recordInternalReviewActionRoute(pending, userId);
+        },
         emitToolEvent: (event) => {
           if (!isCurrent()) return;
           this.sendStreamToolOperationEvent(ws, inflight, event, userId);
@@ -452,13 +468,13 @@ export class LocalAgentAppChatHandler {
     reviews?: ReviewSpec[],
     interruptId?: string,
   ): ReviewActionRoute {
-    const actionReviews = reviewActionReviews(review, reviews);
+    const actionReviews = reviews?.length ? reviews : [review];
     const rejectOption = actionReviews[0]?.options.find((option) => option.decision.type === 'reject');
     return {
       requestId,
       userId,
       ...(interruptId ? { interruptId } : {}),
-      actionId: reviewActionId({
+      actionId: internalReviewActionId({
         requestId,
         ...(interruptId ? { interruptId } : {}),
         reviews: actionReviews,
@@ -468,17 +484,22 @@ export class LocalAgentAppChatHandler {
     };
   }
 
-  private recordReviewActionRoute(event: AgentRuntimeEvent, userId: string) {
-    if (event.type !== 'human_review.requested' || !event.review?.id) {
+  private recordInternalReviewActionRoute(params: {
+    requestId: string;
+    interruptId?: string;
+    reviews: ReviewSpec[];
+  }, userId: string) {
+    const review = params.reviews[0];
+    if (!review) {
       return;
     }
     this.reviewResolutions.register(
       this.buildReviewActionRoute(
-        event.requestId,
-        event.review,
+        params.requestId,
+        review,
         userId,
-        event.reviews,
-        event.interruptId,
+        params.reviews.length > 1 ? params.reviews : undefined,
+        params.interruptId,
       ),
       { observedPending: true },
     );
@@ -633,7 +654,6 @@ export class LocalAgentAppChatHandler {
     if (!this.projectRemoteEvent(userId, remoteEvent)) {
       return false;
     }
-    this.recordReviewActionRoute(remoteEvent, userId);
     return sendLocalAgentEvent(ws, remoteEvent);
   }
 
@@ -651,7 +671,7 @@ export class LocalAgentAppChatHandler {
         state: 'waiting_review' as const,
         reviewAction: {
           actionId: route.actionId,
-          reviews: route.reviews,
+          reviews: route.reviews.map(projectHumanReviewRequest),
         },
       },
     });

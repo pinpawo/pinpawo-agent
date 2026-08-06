@@ -68,6 +68,81 @@ test('snapshot parser accepts JSON session data and rejects invalid boundaries',
   }), null);
 });
 
+test('snapshot parser migrates legacy V3 reviews to the V4 public boundary', () => {
+  const parsed = parseAgentSessionSnapshot({
+    version: 3,
+    session: {
+      sessionId: 'chat:legacy',
+      kind: 'chat',
+      timeline: [],
+      activeRun: {
+        requestId: 'req-review',
+        state: 'waiting_review',
+        reviewAction: {
+          actionId: 'action-review',
+          reviews: [{
+            id: 'review-1',
+            schemaVersion: 1,
+            view: { kind: 'plain', body: 'Allow this operation?' },
+            options: [{
+              id: 'approve',
+              label: 'Approve',
+              decision: { type: 'approve' },
+              effects: [{ type: 'graph.authorize_tool_action', scope: 'thread' }],
+            }, {
+              id: 'reject',
+              label: 'Reject',
+              decision: { type: 'reject', message: 'Rejected' },
+            }],
+          }],
+        },
+      },
+    },
+  });
+
+  assert.equal(parsed?.version, AGENT_SESSION_SNAPSHOT_VERSION);
+  assert.deepEqual(
+    parsed?.session.activeRun?.state === 'waiting_review'
+      ? parsed.session.activeRun.reviewAction.reviews
+      : null,
+    [{
+      interactionId: 'review-1',
+      schemaVersion: 2,
+      view: { kind: 'plain', body: 'Allow this operation?' },
+      options: [{
+        id: 'approve',
+        label: 'Approve',
+        batchSubmission: 'defer',
+      }, {
+        id: 'reject',
+        label: 'Reject',
+        batchSubmission: 'immediate',
+      }],
+    }],
+  );
+  assert.equal(parseAgentSessionSnapshot({
+    version: 3,
+    session: {
+      sessionId: 'chat:legacy',
+      kind: 'chat',
+      timeline: [],
+      activeRun: {
+        requestId: 'req-review',
+        state: 'waiting_review',
+        reviewAction: {
+          actionId: 'action-review',
+          reviews: [{
+            id: 'review-empty',
+            schemaVersion: 1,
+            view: { kind: 'plain', body: 'No choices' },
+            options: [],
+          }],
+        },
+      },
+    },
+  }), null);
+});
+
 test('snapshot parser rejects removed operation owner providers', () => {
   const snapshot = createAgentSessionSnapshot({
     ...createSession(),

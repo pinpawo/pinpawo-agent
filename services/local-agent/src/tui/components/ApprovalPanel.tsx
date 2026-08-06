@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { ReviewSpec, ReviewView } from '@pinpawo/pet-agent';
+import type { ReviewSpec, ReviewView } from '@pinpawo/agent-session';
 import { TUI_TEXT } from '../render/text';
 import { wrapLine } from '../render/terminalText';
 import {

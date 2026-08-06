@@ -194,7 +194,7 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
 
   useEffect(() => {
     setApprovalIndex(0);
-  }, [pendingApproval?.requestId, pendingApproval?.review.id]);
+  }, [pendingApproval?.requestId, pendingApproval?.review.interactionId]);
 
   useEffect(() => {
     if (activeRequestId && activeRequestId !== lastTimelineRequestIdRef.current) {

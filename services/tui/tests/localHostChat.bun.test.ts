@@ -448,7 +448,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     const approvalRun = controller.getState().session.activeRun;
     assert.ok(approvalRun?.state === 'waiting_review');
     assert.equal(approvalRun.reviewAction.actionId, 'review-interrupt-approve');
-    assert.equal(approvalRun.reviewAction.reviews[0]?.id, REVIEW_SPEC.id);
+    assert.equal(approvalRun.reviewAction.reviews[0]?.interactionId, REVIEW_SPEC.id);
     const approvalResult = controller.submitReviewResponse({
       requestId: 'chat-review-approve',
       actionId: approvalRun.reviewAction.actionId,

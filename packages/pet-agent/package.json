@@ -57,6 +57,7 @@
     "eval:structured-output": "LANGCHAIN_TRACING_V2=false node --env-file=.env --import tsx/esm evals/structured-output-compat.eval.ts"
   },
   "dependencies": {
+    "@pinpawo/agent-contracts": "*",
     "@langchain/core": "^1.2.1",
     "@langchain/langgraph": "^1.4.7",
     "@langchain/langgraph-checkpoint": "^1.1.3",

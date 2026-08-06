@@ -190,8 +190,8 @@ test('buildTuiOverlayModel does not infer an overlay from open state', () => {
 
 function approvalRequest(): ApprovalRequestModel {
   const review = {
-    id: 'review-1',
-    schemaVersion: 1,
+    interactionId: 'review-1',
+    schemaVersion: 2 as const,
     view: { kind: 'plain' as const, body: 'Need review' },
     options: [],
   };

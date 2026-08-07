@@ -100,9 +100,28 @@ export function createNavigation(
   return {
     generation,
     requestedUrl,
-    approvedOrigin,
+    // Normalize the approved origin the same way commits are evaluated so the
+    // comparison is symmetric: a caller passing `https://x.com/` or
+    // `HTTPS://X.COM` (the natural thing, since it doubles as the requested URL)
+    // lands on the same canonical form as an origin observed from a commit URL.
+    approvedOrigin: canonicalOrigin(approvedOrigin),
     phase: 'requested',
   };
+}
+
+/**
+ * Canonicalizes an http(s) origin string for storage/display: lowercase host,
+ * default port collapsed, no trailing slash (`new URL(...).origin` semantics).
+ * Non-http(s) input is returned verbatim; the browser backend only approves
+ * http/https URLs anyway, and keeping the raw value lets us surface it in
+ * error messages rather than silently dropping it.
+ */
+function canonicalOrigin(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return url;
+  }
 }
 
 /** An immutable-ish reducer that transitions the navigation state by event. */
@@ -120,17 +139,24 @@ export function applyNavigationEvent(
 
   switch (event.kind) {
     case 'commit': {
-      // A cross-origin redirect is a real security boundary: refuse to accept a
-      // committed URL whose origin differs from the approved one. This is what
-      // makes the reducer itself emit `origin_changed` for 跨源重定向.
-      const approvedOrigin = state.approvedOrigin;
-      if (originOf(event.url) !== approvedOrigin) {
+      const verdict = evaluateCommitOrigin(state.approvedOrigin, event.url);
+      if (verdict.kind === 'intermediate') {
+        // `about:blank`, `data:`, `chrome:` etc. are committed by Chrome as
+        // intermediate steps while a real navigation is still in flight — or
+        // as a transient blank. These are not a user-visible origin change and
+        // must not fail the navigation; ignore them and keep waiting for the
+        // real (http/s) commit.
+        return state;
+      }
+      if (verdict.kind === 'rejected') {
+        // A genuine cross-origin redirect is a real security boundary. Refuse
+        // to accept it and emit `origin_changed`, which is how 跨源重定向 fails.
         return {
           ...state,
           phase: 'failed',
           error: {
             code: 'origin_changed',
-            message: `navigation origin changed from ${approvedOrigin} to ${originOf(event.url)}`,
+            message: `navigation origin changed from ${verdict.approved} to ${verdict.actual}`,
             retryable: false,
             details: { requestedUrl: state.requestedUrl, committedUrl: event.url },
           },
@@ -203,13 +229,94 @@ function advanceSettling(state: NavigationState, now: number): NavigationState {
   return state;
 }
 
-/** Extracts the `origin` (scheme + host + port) of a URL, or '' when invalid. */
-export function originOf(url: string): string {
+/** http(s) origin structure used for same-origin evaluation. */
+type WebOrigin = {
+  scheme: 'http' | 'https';
+  /** Lowercased hostname with a leading `www.` stripped for host-family matching. */
+  host: string;
+  /** Effective port (explicit, or the scheme default). */
+  port: number;
+};
+
+const DEFAULT_PORTS: Record<'http' | 'https', number> = { http: 80, https: 443 };
+
+/**
+ * Parses a URL into an http(s) origin structure, or `undefined` when the URL is
+ * not http(s) — e.g. `about:blank`, `data:`, `chrome:` — which Chrome commits as
+ * intermediate steps on many navigations and which must not fail a navigation.
+ */
+function parseWebOrigin(url: string): WebOrigin | undefined {
+  let parsed: URL;
   try {
-    return new URL(url).origin;
+    parsed = new URL(url);
   } catch {
-    return '';
+    return undefined;
   }
+  const scheme = parsed.protocol.toLowerCase();
+  if (scheme !== 'http:' && scheme !== 'https:') return undefined;
+  let host = parsed.hostname.toLowerCase();
+  if (host.startsWith('www.')) host = host.slice(4);
+  const normalizedScheme = scheme === 'https:' ? 'https' : 'http';
+  return {
+    scheme: normalizedScheme,
+    host,
+    port: parsed.port ? Number(parsed.port) : DEFAULT_PORTS[normalizedScheme],
+  };
+}
+
+function originLabel(origin: WebOrigin): string {
+  const port = origin.port !== DEFAULT_PORTS[origin.scheme] ? `:${origin.port}` : '';
+  return `${origin.scheme}://${origin.host}${port}`;
+}
+
+type CommitOriginVerdict =
+  | { kind: 'accepted' }
+  | { kind: 'intermediate'; url: string }
+  | { kind: 'rejected'; approved: string; actual: string };
+
+/**
+ * Decides how a navigation `commit` event relates to the approved origin.
+ *
+ * - `accepted`: same host family (www↔apex), same effective port, and no
+ *   security downgrade. A scheme *upgrade* from http to https on the same host
+ *   is the web's most common redirect and is treated as same-origin; the
+ *   volcengine target in the issue sits behind exactly such an upgrade.
+ * - `intermediate`: non-http(s) URL (`about:blank`/`data:`/etc.) committed as a
+ *   transient step; the navigation is still in flight and must be ignored.
+ * - `rejected`: a genuine cross-origin redirect (different host, different
+ *   effective port, or an https→http downgrade) — a security boundary.
+ */
+export function evaluateCommitOrigin(
+  approvedOrigin: string,
+  committedUrl: string,
+): CommitOriginVerdict {
+  const committed = parseWebOrigin(committedUrl);
+  if (!committed) return { kind: 'intermediate', url: committedUrl };
+
+  const approved = parseWebOrigin(approvedOrigin);
+  // The approved origin is normalized by createNavigation to an http(s) origin;
+  // if it somehow isn't parseable, conservatively treat any commit as a real
+  // change rather than silently accepting a cross-origin page.
+  if (!approved) {
+    return { kind: 'rejected', approved: approvedOrigin, actual: originLabel(committed) };
+  }
+
+  const sameHostFamily = approved.host === committed.host;
+  // Allow http→https upgrade; block the https→http security downgrade.
+  const noDowngrade = !(approved.scheme === 'https' && committed.scheme === 'http');
+  // Ports match when the explicit/normalized port is identical, or when both
+  // sides rely on their *scheme default* port — an http→https upgrade on the
+  // same host necessarily moves the default port 80→443, so a default-default
+  // pairing under an upgrade is the same origin, not a port change.
+  const approvedUsesDefaultPort = approved.port === DEFAULT_PORTS[approved.scheme];
+  const committedUsesDefaultPort = committed.port === DEFAULT_PORTS[committed.scheme];
+  const samePort =
+    approved.port === committed.port ||
+    (approvedUsesDefaultPort && committedUsesDefaultPort);
+
+  return sameHostFamily && samePort && noDowngrade
+    ? { kind: 'accepted' }
+    : { kind: 'rejected', approved: originLabel(approved), actual: originLabel(committed) };
 }
 
 /**

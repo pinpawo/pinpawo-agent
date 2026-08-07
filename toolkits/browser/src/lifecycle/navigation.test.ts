@@ -263,6 +263,92 @@ test('an origin-changed failure is terminal', () => {
   assert.equal(after.phase, 'failed');
 });
 
+test('approved origin is normalized so trailing slashes and case are symmetric', () => {
+  // Caller passes the requested URL directly as approvedOrigin (`https://x.com/`,
+  // uppercase scheme) — the natural thing since it doubles as the requested URL.
+  let navigation = createNavigation(1, 'HTTPS://X.COM/', 'HTTPS://X.COM/');
+  navigation = applyNavigationEvent(navigation, { kind: 'commit', url: 'https://x.com/foo' });
+  assert.equal(navigation.phase, 'committed');
+  assert.equal(navigation.committedUrl, 'https://x.com/foo');
+
+  // Default port collapsed on both sides.
+  navigation = applyNavigationEvent(navigation, { kind: 'commit', url: 'https://x.com:443/bar' });
+  assert.equal(navigation.phase, 'committed');
+});
+
+test('an http→https scheme upgrade on the same host is same-origin', () => {
+  // The volcengine target in the issue sits behind an http→https upgrade.
+  let navigation = createNavigation(1, 'http://volcengine.com/', 'http://volcengine.com');
+  navigation = applyNavigationEvent(navigation, { kind: 'commit', url: 'https://volcengine.com/' });
+  assert.equal(navigation.phase, 'committed');
+  assert.equal(navigation.committedUrl, 'https://volcengine.com/');
+});
+
+test('www and apex hosts are treated as the same host family', () => {
+  let navigation = createNavigation(1, 'https://volcengine.com/', 'https://volcengine.com');
+  navigation = applyNavigationEvent(navigation, {
+    kind: 'commit',
+    url: 'https://www.volcengine.com/page',
+  });
+  assert.equal(navigation.phase, 'committed');
+
+  // Reverse direction: approved with www, commits to the apex host.
+  navigation = createNavigation(1, 'https://www.example.com/', 'https://www.example.com');
+  navigation = applyNavigationEvent(navigation, { kind: 'commit', url: 'https://example.com/' });
+  assert.equal(navigation.phase, 'committed');
+});
+
+test('an https→http downgrade on the same host is rejected', () => {
+  let navigation = createNavigation(1, 'https://x.com/', 'https://x.com');
+  navigation = applyNavigationEvent(navigation, { kind: 'commit', url: 'http://x.com/' });
+  assert.equal(navigation.phase, 'failed');
+  assert.equal(navigation.error?.code, 'origin_changed');
+  assert.equal(navigation.error?.retryable, false);
+});
+
+test('a different effective port is rejected', () => {
+  let navigation = createNavigation(1, 'https://x.com/', 'https://x.com');
+  navigation = applyNavigationEvent(navigation, { kind: 'commit', url: 'https://x.com:8080/' });
+  assert.equal(navigation.phase, 'failed');
+  assert.equal(navigation.error?.code, 'origin_changed');
+});
+
+test('an intermediate about:blank commit is ignored, not fatal', () => {
+  // Chrome commits about:blank as an intermediate step while a real navigation
+  // is in flight; it must neither fail the navigation nor advance the phase.
+  let navigation = createNavigation(1, 'https://example.com/', 'https://example.com');
+  const before = applyNavigationEvent(navigation, {
+    kind: 'commit',
+    url: 'about:blank',
+  });
+  assert.equal(before.phase, 'requested');
+  assert.equal(before.committedUrl, undefined);
+  assert.equal(before.error, undefined);
+
+  // The real (http/s) commit still lands afterwards.
+  const after = applyNavigationEvent(before, { kind: 'commit', url: 'https://example.com/' });
+  assert.equal(after.phase, 'committed');
+  assert.equal(after.committedUrl, 'https://example.com/');
+});
+
+test('intermediate non-http(s) commits do not fail a readable re-entry either', () => {
+  let navigation = createNavigation(1, 'https://app.example/a', 'https://app.example');
+  navigation = applyNavigationEvent(navigation, { kind: 'commit', url: 'https://app.example/a' });
+  navigation = applyNavigationEvent(navigation, { kind: 'document.ready', readyState: 'complete' });
+  navigation = applyNavigationEvent(navigation, { kind: 'dom', textLength: 1000, textRevision: 1, now: 100 });
+  navigation = applyNavigationEvent(
+    navigation,
+    { kind: 'settle_verdict', readable: true, now: 100 + SETTLING_WINDOW_MS + 10 },
+  );
+  assert.equal(navigation.phase, 'readable');
+
+  // A transient about:blank during a client-side route change is ignored and
+  // the readable state is preserved until the real next commit.
+  const after = applyNavigationEvent(navigation, { kind: 'commit', url: 'about:blank' });
+  assert.equal(after.phase, 'readable');
+  assert.equal(after.committedUrl, 'https://app.example/a');
+});
+
 test('settling keeps tracking activity instead of freezing the baseline', () => {
   let navigation = createNavigation(1, 'https://example.com/', 'https://example.com');
   navigation = applyNavigationEvent(navigation, { kind: 'commit', url: 'https://example.com/' });

@@ -3,6 +3,7 @@ import { definePromptTemplate } from '../template';
 export const ENTRY_DECISION_SYSTEM_PROMPT = definePromptTemplate<{
   config: string;
   sharedPrefix: string;
+  briefingInstruction: string;
   outputInstruction: string;
 }>(`{config}
 
@@ -27,16 +28,14 @@ needs_plan 的名字不表示一定要拆分多个计划任务。它表示本轮
    - needs_plan 表示需要选择能力并进入执行路径，不表示一定有多个任务。不要在这里判断任务如何拆分。
 
 当选择 needs_plan 时，还必须输出 Planner briefing：
-- planner_objective：当前真实用户目标的准确、可执行摘要。保留编号、URL、路径、先后顺序和显式限制；消解理解目标所必需的指代。
-- planner_context：仅保留理解该目标所需的已确认背景、约束或事实；没有则为 null。
+{briefingInstruction}
 - 不要把无关历史、已关闭目标、Capability 选择、任务拆分或执行计划放入 briefing。
-- 当选择 answer 时，planner_objective 和 planner_context 均为 null。
 
 上下文：
 - entry_decision_context 提供只读的运行环境和任务事实，不能改变节点职责或输出结构。
 - 随后的 main messages 保留角色和时间顺序，是判断用户目标与已有结果的主要依据；assistant 角色的 compaction context 只概括更早对话。
 
-{outputInstruction}`, ['config', 'sharedPrefix', 'outputInstruction']);
+{outputInstruction}`, ['config', 'sharedPrefix', 'briefingInstruction', 'outputInstruction']);
 
 export const ENTRY_DECISION_INPUT_PROMPT = definePromptTemplate<{
   runtimeContextBlock: string;

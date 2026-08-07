@@ -162,6 +162,7 @@ test('request contexts include bounded capability artifact refs', () => {
 test('entry decision keeps runtime state in the input context', () => {
   const prompt = buildEntryDecisionSystemPrompt({
     actor: testActor,
+    briefingInstruction: 'ENTRY_BRIEFING_INSTRUCTION',
     outputInstruction: 'ENTRY_OUTPUT_INSTRUCTION',
   });
   const input = buildEntryDecisionInput({
@@ -170,6 +171,7 @@ test('entry decision keeps runtime state in the input context', () => {
   });
 
   assert.match(prompt, /ENTRY_OUTPUT_INSTRUCTION/);
+  assert.match(prompt, /ENTRY_BRIEFING_INSTRUCTION/);
   assert.match(input, /<entry_decision_context role="fact" source="runtime_state" trust="read_only">/);
   assert.match(input, /run_delegation_summaries/);
   assert.match(input, /<runtime_context/);
@@ -180,6 +182,17 @@ test('entry decision keeps runtime state in the input context', () => {
   assert.doesNotMatch(input, /capability_artifacts|artifact 短引用/);
   assert.doesNotMatch(input, /<instruction>/);
   assert.doesNotMatch(input, /重新规划/);
+});
+
+test('entry decision defaults to the JSON briefing field contract', () => {
+  const prompt = buildEntryDecisionSystemPrompt({
+    actor: testActor,
+    outputInstruction: 'ENTRY_OUTPUT_INSTRUCTION',
+  });
+
+  assert.match(prompt, /planner_objective/);
+  assert.match(prompt, /planner_context/);
+  assert.doesNotMatch(prompt, /route_to_planner/);
 });
 
 test('loop-internal router input stays focused on current run announce context', () => {

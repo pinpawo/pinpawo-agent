@@ -283,6 +283,218 @@ function continueDecision(gapNote: string | null = '当前 delegated task 还未
   return { outcome: 'continue', gap_note: gapNote };
 }
 
+type EntryRouteCall = {
+  name: string;
+  args: Record<string, unknown>;
+};
+
+function createScriptedEntryRouteDecisionModel(
+  responses: ReadonlyArray<ReadonlyArray<EntryRouteCall>>,
+) {
+  const invocations: BaseMessage[][] = [];
+  const boundToolNames: string[][] = [];
+  const boundToolOptions: Array<Record<string, unknown> | undefined> = [];
+  let responseIndex = 0;
+  const model = {
+    bindTools: (tools: StructuredTool[], options?: Record<string, unknown>) => {
+      boundToolNames.push(tools.map((item) => item.name));
+      boundToolOptions.push(options);
+      return {
+        invoke: async (messages: BaseMessage[]) => {
+          invocations.push([...messages]);
+          const calls = responses[responseIndex] ?? [];
+          responseIndex += 1;
+          return new AIMessage({
+            content: '',
+            tool_calls: calls.map((call, index) => ({
+              id: `entry-route-${String(responseIndex)}-${String(index)}`,
+              name: call.name,
+              args: call.args,
+              type: 'tool_call' as const,
+            })),
+          });
+        },
+      };
+    },
+  } as unknown as AgentModels['act'];
+  return { model, invocations, boundToolNames, boundToolOptions };
+}
+
+const routeFunctionEntryDecisionConfig = {
+  method: 'functionCalling' as const,
+  entryDecisionProtocol: 'routeFunctions' as const,
+};
+
+test('entry route-functions protocol requires one route call and sends planner args as the private briefing', async () => {
+  const route = createScriptedEntryRouteDecisionModel([[
+    {
+      name: 'route_to_planner',
+      args: {
+        objective: '检查 issue #587 的 Entry 路由设计并实现测试。',
+        context: '不要新增持久 state。',
+      },
+    },
+  ]]);
+  let plannerInput: CapabilityPlannerInput | null = null;
+  const graph = createOrchestratorGraph({
+    models: {
+      act: route.model,
+      decision: route.model,
+      answer: new FakeListChatModel({ responses: ['unused'], sleep: 0 }),
+      observe: route.model,
+      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
+    },
+    actor: testActor,
+    decisionStructuredOutput: routeFunctionEntryDecisionConfig,
+    capabilityPlannerRunner: {
+      async invoke(input) {
+        plannerInput = input;
+        return {
+          answer: {
+            reason: 'Planner received the route briefing.',
+            context: 'No execution was required.',
+            question: null,
+          },
+        };
+      },
+    },
+  });
+
+  await graph.invoke(buildOrchestratorRunInput([
+    new HumanMessage('请检查并实现 Entry 路由设计。'),
+  ]), {
+    configurable: {
+      thread_id: 'entry-route-function-plan',
+      actor: testActor,
+      capabilities: [capability('general', '处理通用任务。')],
+      allowedCapabilityNames: ['general'],
+    },
+  });
+
+  assert.deepEqual(route.boundToolNames, [[
+    'route_to_answer',
+    'route_to_planner',
+  ]]);
+  assert.deepEqual(route.boundToolOptions, [{ tool_choice: 'required' }]);
+  const capturedPlannerInput = plannerInput as CapabilityPlannerInput | null;
+  assert.ok(capturedPlannerInput);
+  assert.deepEqual(capturedPlannerInput.briefing, {
+    objective: '检查 issue #587 的 Entry 路由设计并实现测试。',
+    context: '不要新增持久 state。',
+  });
+  assert.match(String(route.invocations[0]?.[0]?.content ?? ''), /必须且只能调用一个路由 function/);
+});
+
+test('entry route-functions protocol rejects zero, repeated, unknown, and malformed route calls', async () => {
+  const cases: ReadonlyArray<{
+    label: string;
+    calls: ReadonlyArray<EntryRouteCall>;
+    error: RegExp;
+  }> = [
+    { label: 'zero', calls: [], error: /exactly one route call; received 0/ },
+    {
+      label: 'two different calls',
+      calls: [
+        { name: 'route_to_answer', args: {} },
+        { name: 'route_to_planner', args: { objective: 'inspect' } },
+      ],
+      error: /exactly one route call; received 2/,
+    },
+    {
+      label: 'duplicate calls',
+      calls: [
+        { name: 'route_to_answer', args: {} },
+        { name: 'route_to_answer', args: {} },
+      ],
+      error: /exactly one route call; received 2/,
+    },
+    {
+      label: 'unknown call',
+      calls: [{ name: 'route_somewhere_else', args: {} }],
+      error: /Unknown entry route function/,
+    },
+    {
+      label: 'invalid planner args',
+      calls: [{ name: 'route_to_planner', args: { objective: '   ' } }],
+      error: /Invalid route_to_planner arguments/,
+    },
+    {
+      label: 'unexpected answer args',
+      calls: [{ name: 'route_to_answer', args: { unexpected: true } }],
+      error: /Invalid route_to_answer arguments/,
+    },
+  ];
+
+  for (const item of cases) {
+    const route = createScriptedEntryRouteDecisionModel([item.calls]);
+    const graph = createOrchestratorGraph({
+      models: {
+        act: route.model,
+        decision: route.model,
+        answer: {
+          invoke: async () => {
+            throw new Error('invalid entry route must not reach answer');
+          },
+        } as unknown as AgentModels['act'],
+        observe: route.model,
+        subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
+      },
+      actor: testActor,
+      decisionStructuredOutput: routeFunctionEntryDecisionConfig,
+      capabilityPlannerRunner: {
+        async invoke() {
+          throw new Error('invalid entry route must not reach capabilityPlanner');
+        },
+      },
+    });
+
+    await assert.rejects(graph.invoke(buildOrchestratorRunInput([
+      new HumanMessage(`test invalid ${item.label}`),
+    ]), {
+      configurable: {
+        thread_id: `entry-route-function-invalid-${item.label}`,
+        actor: testActor,
+        capabilities: [],
+      },
+    }), item.error);
+  }
+});
+
+test('entry route-functions protocol repairs an invalid route output without falling through to end', async () => {
+  const route = createScriptedEntryRouteDecisionModel([
+    [],
+    [{ name: 'route_to_answer', args: {} }],
+  ]);
+  const graph = createOrchestratorGraph({
+    models: {
+      act: route.model,
+      decision: route.model,
+      answer: new FakeListChatModel({ responses: ['repaired answer'], sleep: 0 }),
+      observe: route.model,
+      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
+    },
+    actor: testActor,
+    decisionStructuredOutput: {
+      ...routeFunctionEntryDecisionConfig,
+      autoRepair: { maxRetries: 1 },
+    },
+  });
+
+  const state = await graph.invoke(buildOrchestratorRunInput([
+    new HumanMessage('不需要工具，直接回答。'),
+  ]), {
+    configurable: {
+      thread_id: 'entry-route-function-repair',
+      actor: testActor,
+      capabilities: [],
+    },
+  }) as OrchestratorStateType;
+
+  assert.equal(route.invocations.length, 2);
+  assert.match(String(route.invocations[1]?.at(-1)?.content ?? ''), /上一次路由输出无效/);
+  assert.equal(mainConversationMessages(state.messages).at(-1)?.content, 'repaired answer');
+});
+
 test('entry decision reads full canonical main messages and excludes lane announces', async () => {
   let entryDecisionMessages: Array<{ _getType?: () => string; content?: unknown }> = [];
   const model = {

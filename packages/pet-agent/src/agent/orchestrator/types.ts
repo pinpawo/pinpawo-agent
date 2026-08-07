@@ -80,6 +80,13 @@ export type SubagentAnnounce = {
 
 export type DecisionMode = 'answer' | 'capability';
 
+/**
+ * Provider protocol used only for the Entry routing decision. The graph always
+ * consumes the same normalized outcome; this selects the provider-facing
+ * adapter before the model is invoked.
+ */
+export type EntryDecisionProtocol = 'json' | 'routeFunctions';
+
 export type ToolBindableChatModel = AgentModels['act'] & {
   bindTools?: (tools: StructuredTool[], options?: Record<string, unknown>) => {
     invoke: (messages: BaseMessage[], options?: RunnableConfig) => Promise<AIMessage>;
@@ -164,6 +171,7 @@ export type OrchestrationDecisionStructuredOutputOptions = {
   method?: StructuredOutputMethod;
   strict?: boolean;
   autoRepair?: StructuredOutputAutoRepairConfig;
+  entryDecisionProtocol?: EntryDecisionProtocol;
 };
 
 export type OrchestrationDecisionStructuredOutputConfig = Omit<OrchestrationDecisionStructuredOutputOptions, 'name'>;

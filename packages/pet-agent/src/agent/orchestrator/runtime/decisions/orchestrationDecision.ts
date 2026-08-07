@@ -13,15 +13,12 @@ import {
   buildDelegationOutcomeDecisionOutputInstruction,
   buildDelegationOutcomeDecisionSchema,
   buildEntryDecisionOutputInstruction,
-  buildEntryDecisionSchema,
   buildOrchestrationDecisionStructuredOutputOptions,
   readDecisionText,
   type AcceptedDelegationOutcome,
   type DelegationOutcomeDecision,
-  type EntryDecision,
 } from '../../schemas';
 import type {
-  CapabilityPlannerBriefing,
   CapabilityPlannerDispatch,
 } from '../../capabilityPlanner/runner';
 import { readContextCompactionSummaries } from '../../contextCompaction';
@@ -37,6 +34,7 @@ import {
   buildRuntimeContext,
   buildSubagentAnnounceContext,
   buildEntryDecisionInput,
+  buildJsonEntryDecisionBriefingInstruction,
   buildEntryDecisionSystemPrompt,
 } from '../../prompts';
 import {
@@ -63,6 +61,13 @@ import {
 } from '../../messageLanes';
 import { readMessageText } from '../../utils';
 import { invokeStructuredOutput } from '../../../../utils/structuredOutput';
+import {
+  buildRouteFunctionEntryDecisionBriefingInstruction,
+  buildRouteFunctionEntryDecisionInstruction,
+  invokeEntryDecisionOutcome,
+  usesRouteFunctionEntryDecision,
+  type EntryOutcome,
+} from './entryDecisionProtocol';
 import {
   mainMessagesWithoutCompaction,
 } from './conversationContext';
@@ -122,9 +127,12 @@ function buildEntryDecisionContext(params: {
   ];
   const systemPrompt = buildEntryDecisionSystemPrompt({
     actor,
-    outputInstruction: buildEntryDecisionOutputInstruction(
-      config.decisionStructuredOutput?.method,
-    ),
+    briefingInstruction: usesRouteFunctionEntryDecision(config)
+      ? buildRouteFunctionEntryDecisionBriefingInstruction()
+      : buildJsonEntryDecisionBriefingInstruction(),
+    outputInstruction: usesRouteFunctionEntryDecision(config)
+      ? buildRouteFunctionEntryDecisionInstruction()
+      : buildEntryDecisionOutputInstruction(config.decisionStructuredOutput?.method),
   });
   const decisionContextMessage = new HumanMessage(buildEntryDecisionInput({
     runDelegationContext: buildRunDelegationSummaryContext(state.runDelegationSummaries),
@@ -273,19 +281,15 @@ async function invokeEntryDecision(params: {
 }) {
   const { config, context, runnableConfig } = params;
   try {
-    return await invokeStructuredOutput({
-      model: config.models.decision ?? config.models.act,
-      schema: buildEntryDecisionSchema(),
-      options: buildOrchestrationDecisionStructuredOutputOptions(
-        config.decisionStructuredOutput,
-      ),
+    return await invokeEntryDecisionOutcome({
+      config,
       messages: [
         new SystemMessage(context.systemPrompt),
         context.decisionContextMessage,
         ...context.conversationMessages,
       ],
       runnableConfig,
-    }) as EntryDecision;
+    });
   } catch (error) {
     console.warn('[pet-agent] invalid entry decision structured output:', {
       error: error instanceof Error ? error.message : String(error),
@@ -325,10 +329,10 @@ async function invokeDelegationOutcomeDecision(params: {
 
 function buildEntryDecisionResult(params: {
   state: OrchestratorStateType;
-  decision: EntryDecision;
+  decision: EntryOutcome;
 }) {
   const { state, decision } = params;
-  if (decision.action === 'answer') {
+  if (decision.kind === 'answer') {
     return {
       goto: 'answer' as const,
       update: {
@@ -338,14 +342,13 @@ function buildEntryDecisionResult(params: {
       },
     };
   }
-  const briefing = readEntryPlannerBriefing(decision);
   const dispatch: CapabilityPlannerDispatch = {
     plannerState: {
       runId: state.runId,
       runDelegationSummaries: state.runDelegationSummaries,
       runCapabilityPlan: [],
     },
-    briefing,
+    briefing: decision.briefing,
   };
   return {
     goto: new Send('capabilityPlanner', dispatch),
@@ -354,17 +357,6 @@ function buildEntryDecisionResult(params: {
       runPlannerReturn: null,
       runCapabilityPlan: [],
     },
-  };
-}
-
-function readEntryPlannerBriefing(decision: EntryDecision): CapabilityPlannerBriefing {
-  const objective = readDecisionText(decision.planner_objective);
-  if (!objective) {
-    throw new Error('needs_plan entry decision requires planner_objective.');
-  }
-  return {
-    objective,
-    context: readDecisionText(decision.planner_context),
   };
 }
 

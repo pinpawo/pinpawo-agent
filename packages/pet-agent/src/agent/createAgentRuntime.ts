@@ -6,6 +6,7 @@ export {
 } from './orchestrator/capabilityPlanner/registryDocuments';
 export type {
   ActiveDelegationTransition,
+  EntryDecisionProtocol,
   OrchestratorConfig,
   OrchestratorInvokeOptions,
   OrchestrationDecisionStructuredOutputConfig,

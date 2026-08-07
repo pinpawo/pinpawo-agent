@@ -173,7 +173,6 @@ export class LocalAgentGraphService {
       sessionId: setup.input.threadId ?? setup.graphKey,
       ...(setup.input.actor?.userId ? { userId: setup.input.actor.userId } : {}),
       metadata: {
-        graphKey: setup.graphKey,
         interface: setup.interfaceContext?.kind ?? 'headless',
       },
     });

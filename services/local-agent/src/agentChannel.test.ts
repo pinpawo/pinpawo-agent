@@ -250,7 +250,10 @@ test('buildDecisionStructuredOutput selects structured output strategy by provid
       apiKey: 'test-key',
       baseUrl: 'https://api.deepseek.com',
       model,
-    }), { method: 'functionCalling' });
+    }), {
+      method: 'functionCalling',
+      autoRepair: { maxRetries: 1 },
+    });
   }
 
   for (const [baseUrl, model] of [
@@ -263,7 +266,10 @@ test('buildDecisionStructuredOutput selects structured output strategy by provid
       apiKey: 'test-key',
       baseUrl,
       model,
-    }), { method: 'jsonSchema' });
+    }), {
+      method: 'jsonSchema',
+      autoRepair: { maxRetries: 1 },
+    });
   }
 
   assert.equal(buildDecisionStructuredOutput({
@@ -299,6 +305,7 @@ test('buildDecisionStructuredOutput honors the resolved profile strategy before 
     structuredOutputMethod: 'jsonSchema',
   }), {
     method: 'jsonSchema',
+    autoRepair: { maxRetries: 1 },
   });
 });
 

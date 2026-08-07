@@ -281,7 +281,10 @@ function plannerInput(
 ): CapabilityPlannerInput {
   return {
     mode: 'entry',
-    messages: [new HumanMessage('Research the repository and then prepare a review.')],
+    briefing: {
+      objective: 'Research the repository and then prepare a review.',
+      context: null,
+    },
     completedTask: null,
     completedTaskResult: null,
     remainingPlan: [],
@@ -602,11 +605,10 @@ test('boundary mode rejects answer and materializes remaining work with general'
   const result = await createCapabilityPlannerAgent({ model }).invoke(
     plannerInput(workspace, {
       mode: 'boundary',
-      messages: [
-        new HumanMessage('Research the repository and then prepare a review.'),
-        new AIMessage('Next I will research the repository.'),
-        new AIMessage(fullHandoff),
-      ],
+      briefing: {
+        objective: 'Prepare the review from the completed research.',
+        context: 'Final constraint: preserve the public API.',
+      },
       completedTask: 'Research the repository.',
       completedTaskResult: fullHandoff,
       remainingPlan: [{
@@ -619,8 +621,6 @@ test('boundary mode rejects answer and materializes remaining work with general'
   assert.ok('tasks' in result);
   assert.equal('tasks' in result ? result.tasks[0]?.capability : null, 'general');
   assert.deepEqual(model.structuredOutputCapabilityEnums, [['general', 'explore']]);
-  assert.ok(model.invocations[0]?.some((message) =>
-    message instanceof AIMessage && message.content === fullHandoff));
   assert.ok(model.invocations[0]?.some((message) =>
     message instanceof HumanMessage
     && String(message.content).includes('Planner Context：继续执行状态')));
@@ -685,11 +685,10 @@ test('missing structured output and direct text is rejected', async (t) => {
 
   await assert.rejects(
     createCapabilityPlannerAgent({ model }).invoke(plannerInput(workspace, {
-      messages: [
-        new HumanMessage('Earlier question.'),
-        new AIMessage('Historical answer must not become a Planner return.'),
-        new HumanMessage('Current request.'),
-      ],
+      briefing: {
+        objective: 'Current request.',
+        context: null,
+      },
     })),
     (error: unknown) =>
       error instanceof CapabilityPlannerAgentError

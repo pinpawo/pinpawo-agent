@@ -4,6 +4,7 @@ import {
   CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT,
   CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT,
 } from './templates/capabilityPlannerAgent.prompt';
+import { indentXmlBlock, xmlTextBlock } from './shared';
 
 function buildPlanningState(input: CapabilityPlannerInput) {
   const lines: string[] = [];
@@ -32,6 +33,19 @@ export function buildCapabilityPlannerAgentSystemPrompt(
 
 export function buildCapabilityPlannerAgentInput(input: CapabilityPlannerInput) {
   return CAPABILITY_PLANNER_AGENT_INPUT_PROMPT.render({
+    briefing: buildPlannerBriefing(input),
     planningState: buildPlanningState(input),
   });
+}
+
+function buildPlannerBriefing(input: CapabilityPlannerInput): string {
+  const lines = [
+    '<planner_request_briefing role="task_boundary" source="orchestrator" trust="read_only">',
+    indentXmlBlock(xmlTextBlock('objective', input.briefing.objective), 2),
+  ];
+  if (input.briefing.context) {
+    lines.push(indentXmlBlock(xmlTextBlock('relevant_context', input.briefing.context), 2));
+  }
+  lines.push('</planner_request_briefing>');
+  return lines.join('\n');
 }

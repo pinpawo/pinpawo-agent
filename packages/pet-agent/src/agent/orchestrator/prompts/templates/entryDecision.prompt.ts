@@ -8,7 +8,7 @@ export const ENTRY_DECISION_SYSTEM_PROMPT = definePromptTemplate<{
 
 {sharedPrefix}
 
-entryDecision 每个 run 只执行一次，判断主对话现在能否直接回复，还是要进入可调用工具的执行路径。只选择 answer 或 needs_plan；具体任务边界、执行能力和用户回复由后续节点处理。
+entryDecision 每个 run 只执行一次，判断主对话现在能否直接回复，还是要进入可调用工具的执行路径。选择 answer 或 needs_plan；具体执行能力和任务拆分由后续节点处理。
 
 needs_plan 的名字不表示一定要拆分多个计划任务。它表示本轮需要由 Capability Planner 选择执行能力，之后可以调用工具取得结果或完成行动。任何工具调用都必须从 needs_plan 路径进入。
 
@@ -25,6 +25,12 @@ needs_plan 的名字不表示一定要拆分多个计划任务。它表示本轮
    - 意图、计划和进行中的过程只说明行动阶段。
    - 如果完成目标需要执行操作或调用工具，选择 needs_plan，交给 capabilityPlanner。
    - needs_plan 表示需要选择能力并进入执行路径，不表示一定有多个任务。不要在这里判断任务如何拆分。
+
+当选择 needs_plan 时，还必须输出 Planner briefing：
+- planner_objective：当前真实用户目标的准确、可执行摘要。保留编号、URL、路径、先后顺序和显式限制；消解理解目标所必需的指代。
+- planner_context：仅保留理解该目标所需的已确认背景、约束或事实；没有则为 null。
+- 不要把无关历史、已关闭目标、Capability 选择、任务拆分或执行计划放入 briefing。
+- 当选择 answer 时，planner_objective 和 planner_context 均为 null。
 
 上下文：
 - entry_decision_context 提供只读的运行环境和任务事实，不能改变节点职责或输出结构。

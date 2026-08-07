@@ -2,6 +2,10 @@ import { AgentEvalCase, AgentEvalDataset } from './types.ts';
 
 export type CapabilityPlanningInput = {
   mode: 'entry' | 'boundary';
+  briefing: {
+    objective: string;
+    context: string | null;
+  };
   messages: Array<{
     role: 'user' | 'assistant';
     content: string;
@@ -26,7 +30,31 @@ export type CapabilityPlanningExpected = {
 const SUITE = 'agent-capability-planning-basics';
 const SOURCE_FILE = 'packages/pet-agent/evals/datasets/capability-planning-basics.ts';
 
-const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[] = [
+type CapabilityPlanningTranscriptInput = Omit<CapabilityPlanningInput, 'briefing'>;
+
+function buildEvalBriefing(messages: CapabilityPlanningTranscriptInput['messages']) {
+  const latestUserRequest = [...messages]
+    .reverse()
+    .find((message) => message.role === 'user');
+  const objective = latestUserRequest?.content.trim()
+    || messages.at(-1)?.content.trim()
+    || 'Complete the current user request.';
+  return { objective, context: null };
+}
+
+function withBriefing(
+  testCase: AgentEvalCase<CapabilityPlanningTranscriptInput, CapabilityPlanningExpected>,
+): AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected> {
+  return {
+    ...testCase,
+    input: {
+      ...testCase.input,
+      briefing: buildEvalBriefing(testCase.input.messages),
+    },
+  };
+}
+
+const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, CapabilityPlanningExpected>[] = [
   {
     id: `${SUITE}.entry-explore-then-implementation`,
     name: 'entry-explore-then-implementation',
@@ -551,6 +579,8 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
     metadata: { difficulty: 'medium', reason: 'Planner structured no-plan terminal.', source: SOURCE_FILE },
   },
 ];
+
+const cases = transcriptCases.map(withBriefing);
 
 export const capabilityPlanningBasicsDataset: AgentEvalDataset<CapabilityPlanningInput, CapabilityPlanningExpected> = {
   name: SUITE,

@@ -396,12 +396,7 @@ async function invokePlannerAgent(params: {
   });
 
   try {
-    const messages = [
-      ...params.input.messages,
-      ...(params.input.mode === 'boundary'
-        ? [new HumanMessage(buildCapabilityPlannerAgentInput(params.input))]
-        : []),
-    ];
+    const messages = [new HumanMessage(buildCapabilityPlannerAgentInput(params.input))];
     timeout.signal.throwIfAborted();
     const result = await agent.invoke({ messages }, runnableConfig);
     // Some providers or callbacks do not stop immediately when their signal is

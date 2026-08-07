@@ -7,7 +7,7 @@ export const CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT = definePromptTemplate<Recor
 
 你不执行任务，也不生成用户最终回复。
 
-主对话最后一条用户消息定义本次要执行的目标。此前所有消息只用于理解背景、指代和事实，不自动恢复其中未完成的动作。
+Planner request briefing 定义本次要执行的目标和必要背景。它已由 Entry 收敛为当前 request 边界；不要试图恢复或推断不在 briefing 中的旧目标。
 
 发现 Capability：
 - grep_search 的每个匹配项已经包含完整的 Capability 文档。
@@ -32,7 +32,7 @@ export const CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT = definePromptTemplate<Re
 
 根据当前用户目标和刚完成任务的结果，确认仍需完成的内容，并只在实际完成情况需要时调整后续任务。
 
-主对话最后一条用户消息和 Planner Context 中的“继续执行状态”共同定义本次继续规划的工作。此前所有消息只用于理解背景、指代和事实，不自动恢复其中未完成的动作。
+Planner request briefing 和 Planner Context 中的“继续执行状态”共同定义本次继续规划的工作。briefing 为这次 fresh invocation 单独构造；不要恢复或推断不在其中的旧目标。
 
 根据用户目标和最新结果校准 remaining_plan：
 - 保留仍然必要且执行边界合适的任务。
@@ -49,8 +49,12 @@ export const CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT = definePromptTemplate<Re
 一旦 submit_plan 成功，计划已提交：直接用普通 assistant 回复提交结果，然后结束本轮；不要再调用任何工具或继续规划。`, []);
 
 export const CAPABILITY_PLANNER_AGENT_INPUT_PROMPT = definePromptTemplate<{
+  briefing: string;
   planningState: string;
-}>(`Planner Context：继续执行状态
+}>(`{briefing}
+
+Planner Context：继续执行状态
 {planningState}`, [
+  'briefing',
   'planningState',
 ]);

@@ -1,6 +1,6 @@
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { Command } from '@langchain/langgraph';
+import { Command, Send } from '@langchain/langgraph';
 import { evaluateGuard } from '../../../../guards';
 import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorStatePatch } from '../../controlPrimitives';
@@ -20,6 +20,10 @@ import {
   type DelegationOutcomeDecision,
   type EntryDecision,
 } from '../../schemas';
+import type {
+  CapabilityPlannerBriefing,
+  CapabilityPlannerDispatch,
+} from '../../capabilityPlanner/runner';
 import { readContextCompactionSummaries } from '../../contextCompaction';
 import {
   buildDelegationOutcomeCurrentTaskContext,
@@ -77,7 +81,7 @@ export function createEntryDecisionRunner(config: OrchestratorConfig) {
   ) {
     const context = buildEntryDecisionContext({ config, state, runnableConfig });
     const decision = await invokeEntryDecision({ config, context, runnableConfig });
-    const transition = buildEntryDecisionResult({ decision });
+    const transition = buildEntryDecisionResult({ state, decision });
     return new Command({ update: transition.update, goto: transition.goto });
   };
 }
@@ -320,9 +324,10 @@ async function invokeDelegationOutcomeDecision(params: {
 }
 
 function buildEntryDecisionResult(params: {
+  state: OrchestratorStateType;
   decision: EntryDecision;
 }) {
-  const { decision } = params;
+  const { state, decision } = params;
   if (decision.action === 'answer') {
     return {
       goto: 'answer' as const,
@@ -333,13 +338,33 @@ function buildEntryDecisionResult(params: {
       },
     };
   }
+  const briefing = readEntryPlannerBriefing(decision);
+  const dispatch: CapabilityPlannerDispatch = {
+    plannerState: {
+      runId: state.runId,
+      runDelegationSummaries: state.runDelegationSummaries,
+      runCapabilityPlan: [],
+    },
+    briefing,
+  };
   return {
-    goto: 'capabilityPlanner' as const,
+    goto: new Send('capabilityPlanner', dispatch),
     update: {
       runNextDelegation: null,
       runPlannerReturn: null,
       runCapabilityPlan: [],
     },
+  };
+}
+
+function readEntryPlannerBriefing(decision: EntryDecision): CapabilityPlannerBriefing {
+  const objective = readDecisionText(decision.planner_objective);
+  if (!objective) {
+    throw new Error('needs_plan entry decision requires planner_objective.');
+  }
+  return {
+    objective,
+    context: readDecisionText(decision.planner_context),
   };
 }
 

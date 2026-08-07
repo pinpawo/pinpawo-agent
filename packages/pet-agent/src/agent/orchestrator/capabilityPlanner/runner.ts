@@ -1,16 +1,44 @@
 import type { RunnableConfig } from '@langchain/core/runnables';
-import type { BaseMessage } from '@langchain/core/messages';
 import type { CapabilityDocumentWorkspace } from './documentWorkspace';
 import type {
   CapabilityPlanTask,
   PlannerAnswerDisposition,
+  RunDelegationSummary,
 } from '../types';
 
 export type CapabilityPlannerMode = 'entry' | 'boundary';
 
+/**
+ * The task boundary prepared for one fresh Planner invocation. This is
+ * deliberately not orchestrator state: graph dispatch owns its lifetime.
+ */
+export type CapabilityPlannerBriefing = {
+  readonly objective: string;
+  readonly context: string | null;
+};
+
+/**
+ * The minimal run state a Planner node needs to materialize its result.
+ * Keeping this separate from the full orchestrator state prevents an entry
+ * dispatch from carrying the main-conversation transcript into the Planner.
+ */
+export type CapabilityPlannerRuntimeState = Pick<
+  {
+    runId: string;
+    runDelegationSummaries: RunDelegationSummary[];
+    runCapabilityPlan: CapabilityPlanTask[];
+  },
+  'runId' | 'runDelegationSummaries' | 'runCapabilityPlan'
+>;
+
+export type CapabilityPlannerDispatch = {
+  readonly plannerState: CapabilityPlannerRuntimeState;
+  readonly briefing: CapabilityPlannerBriefing;
+};
+
 type CapabilityPlannerInputBase = {
-  /** Main-conversation transcript only; delegation lanes never enter this view. */
-  readonly messages: readonly BaseMessage[];
+  /** Bounded request facts for this fresh Planner invocation. */
+  readonly briefing: CapabilityPlannerBriefing;
   readonly completedTask: string | null;
   /** Structured result preview for the latest completed delegation, if any. */
   readonly completedTaskResult: string | null;

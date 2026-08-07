@@ -1,4 +1,3 @@
-import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { tool } from '@langchain/core/tools';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -145,10 +144,7 @@ async function main() {
         }).invoke(
           {
             mode: testCase.input.mode,
-            messages: testCase.input.messages.map((message) =>
-              message.role === 'user'
-                ? new HumanMessage(message.content)
-                : new AIMessage(message.content)),
+            briefing: testCase.input.briefing,
             completedTask: testCase.input.completedTask ?? null,
             completedTaskResult: testCase.input.completedTaskResult ?? null,
             remainingPlan: testCase.input.remainingPlan ?? [],

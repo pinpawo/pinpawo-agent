@@ -98,7 +98,11 @@ function buildScriptedDecisionModel() {
         structuredDecisionCount += 1;
         if (structuredDecisionCount === 1) {
           entryDecisionCount += 1;
-          return { action: 'needs_plan' };
+          return {
+            action: 'needs_plan',
+            planner_objective: '完成当前 auth 模块重构：先调查现有结构、依赖和风险，再实施改动并验证。',
+            planner_context: null,
+          };
         }
         outcomeDecisionCount += 1;
         return outcomeDecisionCount === 1

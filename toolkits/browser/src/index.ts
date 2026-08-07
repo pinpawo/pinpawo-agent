@@ -15,7 +15,7 @@ export {
   type BrowserEnvironment,
   type BrowserStatus,
 } from './session';
-export * from './runtime';
+export * from './lifecycle';
 export { ChromeExtensionBrowserSession } from './drivers/chromeExtension/session';
 export { browserTools } from './tools';
 export { browserOperationMetadata } from './operationMetadata';

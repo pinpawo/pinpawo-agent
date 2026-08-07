@@ -105,8 +105,27 @@ test('default readiness policy requires a non-loading document', () => {
     false,
   );
   assert.equal(
-    defaultPageReadinessPolicy({ readyState: 'interactive', now: 0 }),
+    defaultPageReadinessPolicy({ readyState: 'interactive', textLength: 200, textRevision: 1, now: 0 }),
     true,
+  );
+});
+
+test('default readiness policy blocks until a body text sample exists', () => {
+  // The volcengine scenario: document complete but body text has never been
+  // sampled. Declaring readiness here would return only the page shell.
+  assert.equal(
+    defaultPageReadinessPolicy({ readyState: 'complete', now: 0 }),
+    false,
+  );
+  // Even with network quiesced, no text sample => not readable.
+  assert.equal(
+    defaultPageReadinessPolicy({
+      readyState: 'complete',
+      inflightRequests: 0,
+      lastNetworkActivityAt: 1_000,
+      now: 1_000 + SETTLING_WINDOW_MS + 100,
+    }),
+    false,
   );
 });
 
@@ -177,4 +196,44 @@ test('a full SPA-like lifecycle settles through settling to readable', () => {
     }), now: 400 + SETTLING_WINDOW_MS + 10 },
   );
   assert.equal(quiet.phase, 'readable');
+});
+
+test('a dom event tracks DOM activity separately from network activity', () => {
+  let navigation = createNavigation(1, 'https://app.example/', 'https://app.example');
+  navigation = applyNavigationEvent(navigation, { kind: 'commit', url: 'https://app.example/' });
+  navigation = applyNavigationEvent(navigation, { kind: 'document.ready', readyState: 'complete' });
+  // Network activity baselines at t=1000 (inflight > 0 sets lastNetworkActivityAt).
+  navigation = applyNavigationEvent(navigation, { kind: 'network', inflightRequests: 1, now: 800 });
+  navigation = applyNavigationEvent(navigation, { kind: 'network', inflightRequests: 0, now: 1_000 });
+
+  // DOM churn (ticking clock / carousel) keeps revising text but must not
+  // re-arm the network settle window.
+  navigation = applyNavigationEvent(navigation, { kind: 'dom', textLength: 300, textRevision: 2, now: 1_100 });
+  navigation = applyNavigationEvent(navigation, { kind: 'dom', textLength: 320, textRevision: 3, now: 1_200 });
+
+  // lastNetworkActivityAt is the last *network* activity (inflight went to 0 at
+  // t=1000, so lastNetworkActivityAt holds the 800 from the inflight>0 sample);
+  // the DOM events at 1_100/1_200 must not have moved it.
+  assert.equal(navigation.lastDomActivityAt, 1_200);
+  assert.equal(navigation.lastNetworkActivityAt, 800);
+
+  // Readiness only needs the *network* quiet window; recent DOM churn does not
+  // block settle. Network was quiet since 800 and we poll later.
+  const ready = defaultPageReadinessPolicy({
+    readyState: navigation.readyState,
+    inflightRequests: navigation.inflightRequests,
+    textLength: navigation.textLength,
+    textRevision: navigation.textRevision,
+    lastNetworkActivityAt: navigation.lastNetworkActivityAt,
+    lastDomActivityAt: navigation.lastDomActivityAt,
+    now: 800 + SETTLING_WINDOW_MS + 10,
+  });
+  assert.equal(ready, true);
+
+  // Provide the DOM field in a settle verdict: the resulting phase is readable.
+  navigation = applyNavigationEvent(
+    navigation,
+    { kind: 'settle_verdict', readable: ready, now: 800 + SETTLING_WINDOW_MS + 10 },
+  );
+  assert.equal(navigation.phase, 'readable');
 });

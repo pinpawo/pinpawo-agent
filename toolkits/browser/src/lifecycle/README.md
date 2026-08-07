@@ -7,7 +7,7 @@ This directory contains the pure, unit-testable page-lifecycle primitives that
 the Browser Runtime uses to manage each browser operation as a complete
 lifecycle rather than a single "done or not" boolean.
 
-Why a separate `runtime/` module? The issue's goal is to move navigation
+Why a separate `lifecycle/` module? The issue's goal is to move navigation
 readiness and lifecycle ownership out of tools, the extension background, and
 model prompts and into the Runtime. Keeping this code free of CDP/extension I/O
 lets us build and verify the state transitions in isolation (see the `*.test.ts`
@@ -18,7 +18,6 @@ files) before wiring them to the live extension event stream.
 | File                | Purpose                                                              |
 | ------------------- | -------------------------------------------------------------------- |
 | `navigation.ts`     | Navigation generation manager, phase state machine, settlement/readiness reducer |
-| `readiness/*`        | (inline) combined page-readiness policy in `navigation.ts`            |
 | `targets.ts`        | Managed Target Registry (event-driven; active / opener / popup)       |
 | `events.ts`         | Unified `BrowserRuntimeEvent` envelope + stale-event rejection        |
 | `waiter.ts`         | `PendingWait<T>` — deadline, AbortSignal, and settle-once semantics    |
@@ -49,7 +48,8 @@ never pollute current Runtime state (`events.ts::isEventCurrent`).
 - a readable body actually exists (textLength > 0 once sampled)
 - inflight requests quiesced (long-lived WebSocket/SSE that never report
   inflight requests do **not** block forever)
-- a settling window passed since the last network/dom activity
+- a settling window passed since the last *network* activity (DOM churn is
+  tracked separately and does not re-arm the network settle window)
 
 Thresholds are Runtime-internal policy, constrained by a unified deadline, and
 are not encoded as fixed sleeps.

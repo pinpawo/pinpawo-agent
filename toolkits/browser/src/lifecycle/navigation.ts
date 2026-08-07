@@ -41,6 +41,8 @@ export type NavigationState = {
   inflightRequests?: number;
   /** Wall-clock ms (relative to a reference epoch) of the last network activity. */
   lastNetworkActivityAt?: number;
+  /** Wall-clock ms (relative to a reference epoch) of the last DOM activity. */
+  lastDomActivityAt?: number;
   textLength?: number;
   textRevision?: number;
   error?: BrowserRuntimeError;
@@ -52,6 +54,7 @@ export type ReadinessInput = {
   textLength?: number;
   textRevision?: number;
   lastNetworkActivityAt?: number;
+  lastDomActivityAt?: number;
   now: number;
 };
 
@@ -140,7 +143,10 @@ export function applyNavigationEvent(
         ...state,
         textLength: event.textLength,
         textRevision: event.textRevision,
-        lastNetworkActivityAt: event.now,
+        // DOM churn (a ticking clock, carousel, polling widget) must not re-arm
+        // the *network* settle window, or a page with recurring DOM revisions
+        // could never quiet down. Track DOM activity on its own field.
+        lastDomActivityAt: event.now,
       };
     case 'settle_verdict':
       return event.readable
@@ -173,12 +179,15 @@ export function defaultPageReadinessPolicy(input: ReadinessInput): boolean {
     // document reached interactive/complete but still has zero body text — keep waiting.
     if (typeof textLength === 'number' && textLength <= 0) return false;
   }
-  // No text sampling has been reported yet; require at least a document ready.
-  if (typeof textLength !== 'number') return true;
   if (typeof textRevision === 'number' && textRevision <= 0) return false;
 
   const inflight = inflightRequests ?? 0;
   if (inflight > 0) return false;
+
+  // No text sample has been reported yet. A page whose shell is `complete` but
+  // whose body text has not been sampled (volcengine scenario) is not readable —
+  // wait for the body before declaring readiness.
+  if (typeof textLength !== 'number') return false;
 
   // Network quietness only applies once we have a baseline activity sample.
   if (typeof lastNetworkActivityAt === 'number' && typeof textRevision === 'number') {

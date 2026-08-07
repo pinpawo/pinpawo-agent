@@ -220,7 +220,6 @@ test('buildLocalChatAgentInput retains the host baseline general Capability', ()
 
 test('buildDecisionStructuredOutput selects structured output strategy by provider model family and version', () => {
   const jsonModeCases = [
-    ['https://api.deepseek.com', 'deepseek-v4-pro'],
     ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen3.5-plus'],
     ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen3.7-plus'],
     ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen3.7-max'],
@@ -246,6 +245,17 @@ test('buildDecisionStructuredOutput selects structured output strategy by provid
     });
   }
 
+  for (const model of ['deepseek-v4-pro', 'deepseek-v4-flash']) {
+    assert.deepEqual(buildDecisionStructuredOutput({
+      apiKey: 'test-key',
+      baseUrl: 'https://api.deepseek.com',
+      model,
+    }), {
+      method: 'functionCalling',
+      autoRepair: { maxRetries: 1 },
+    });
+  }
+
   for (const [baseUrl, model] of [
     ['https://api.moonshot.ai/v1', 'kimi-k2.6'],
     ['https://api.kimi.com/coding/v1', 'k3'],
@@ -256,7 +266,10 @@ test('buildDecisionStructuredOutput selects structured output strategy by provid
       apiKey: 'test-key',
       baseUrl,
       model,
-    }), { method: 'jsonSchema' });
+    }), {
+      method: 'jsonSchema',
+      autoRepair: { maxRetries: 1 },
+    });
   }
 
   assert.equal(buildDecisionStructuredOutput({
@@ -292,6 +305,7 @@ test('buildDecisionStructuredOutput honors the resolved profile strategy before 
     structuredOutputMethod: 'jsonSchema',
   }), {
     method: 'jsonSchema',
+    autoRepair: { maxRetries: 1 },
   });
 });
 
@@ -358,7 +372,7 @@ test('buildLocalChatAgentInput passes global review policy mode to graph input',
   assert.deepEqual(setup.input.globalReviewPolicy, {
     mode: 'auto_authorization',
     structuredOutput: {
-      method: 'jsonMode',
+      method: 'functionCalling',
       autoRepair: { maxRetries: 2 },
     },
   });

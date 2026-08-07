@@ -24,7 +24,7 @@ export type AgentLlmConfig = {
   subagentThinking?: boolean;
   /**
    * Override structured-output retry behavior after parse/schema failure.
-   * When unset, jsonMode retries once and other methods do not retry.
+   * When unset, every structured-output method retries once.
    */
   structuredOutputAutoRepair?: boolean;
   /** Additional repair retries after the initial structured-output call. Default: 1 when enabled. */

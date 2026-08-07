@@ -195,7 +195,7 @@ export function buildDecisionStructuredOutput(llmConfig: AgentLlmConfig): Orches
   if (!method) return undefined;
 
   const autoRepairEnabled = llmConfig.structuredOutputAutoRepair
-    ?? (method === 'jsonMode');
+    ?? true;
   const autoRepair = autoRepairEnabled
     ? {
         autoRepair: {

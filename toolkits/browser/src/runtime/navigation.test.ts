@@ -1,0 +1,180 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  applyNavigationEvent,
+  createNavigation,
+  createNavigationRegistry,
+  defaultPageReadinessPolicy,
+  SETTLING_WINDOW_MS,
+} from './navigation';
+
+test('navigation generations increase monotonically', () => {
+  const registry = createNavigationRegistry();
+  const g1 = registry.nextGeneration();
+  const g2 = registry.nextGeneration();
+  assert.equal(g2, g1 + 1);
+});
+
+test('a fresh navigation starts in the requested phase', () => {
+  const navigation = createNavigation(1, 'https://example.com/', 'https://example.com');
+  assert.deepEqual(
+    { generation: navigation.generation, phase: navigation.phase, requestedUrl: navigation.requestedUrl, approvedOrigin: navigation.approvedOrigin },
+    { generation: 1, phase: 'requested', requestedUrl: 'https://example.com/', approvedOrigin: 'https://example.com' },
+  );
+});
+
+test('navigation moves requested → committed → dom_ready on events', () => {
+  let navigation = createNavigation(1, 'https://example.com/', 'https://example.com');
+  navigation = applyNavigationEvent(navigation, { kind: 'commit', url: 'https://example.com/' });
+  assert.equal(navigation.phase, 'committed');
+  assert.equal(navigation.committedUrl, 'https://example.com/');
+
+  navigation = applyNavigationEvent(navigation, { kind: 'document.ready', readyState: 'interactive' });
+  assert.equal(navigation.phase, 'dom_ready');
+  assert.equal(navigation.readyState, 'interactive');
+});
+
+test('a settle verdict flips the page to readable when the readiness policy passes', () => {
+  let navigation = createNavigation(1, 'https://example.com/', 'https://example.com');
+  navigation = applyNavigationEvent(navigation, { kind: 'commit', url: 'https://example.com/' });
+  navigation = applyNavigationEvent(navigation, { kind: 'document.ready', readyState: 'complete' });
+
+  const readyInput = {
+    readyState: navigation.readyState,
+    inflightRequests: 0,
+    textLength: 1200,
+    textRevision: 2,
+    lastNetworkActivityAt: 1_000,
+    now: 1_000 + SETTLING_WINDOW_MS + 1,
+  };
+  navigation = applyNavigationEvent(
+    navigation,
+    { kind: 'settle_verdict', readable: defaultPageReadinessPolicy(readyInput), now: readyInput.now },
+  );
+  assert.equal(navigation.phase, 'readable');
+});
+
+test('a settle verdict does not prematurely flip while activity is recent', () => {
+  let navigation = createNavigation(1, 'https://example.com/', 'https://example.com');
+  navigation = applyNavigationEvent(navigation, { kind: 'commit', url: 'https://example.com/' });
+  navigation = applyNavigationEvent(navigation, { kind: 'document.ready', readyState: 'complete' });
+  navigation = applyNavigationEvent(navigation, { kind: 'dom', textLength: 200, textRevision: 1, now: 5_000 });
+
+  const stillActive = {
+    readyState: navigation.readyState,
+    inflightRequests: 2,
+    textLength: 200,
+    textRevision: 1,
+    lastNetworkActivityAt: 4_900,
+    now: 5_000,
+  };
+  navigation = applyNavigationEvent(
+    navigation,
+    { kind: 'settle_verdict', readable: defaultPageReadinessPolicy(stillActive), now: stillActive.now },
+  );
+  assert.equal(navigation.phase, 'settling');
+  assert.notEqual(navigation.phase, 'readable');
+});
+
+test('a failed navigation moves to the failed terminal phase', () => {
+  let navigation = createNavigation(1, 'https://example.com/', 'https://example.com');
+  navigation = applyNavigationEvent(navigation, {
+    kind: 'fail',
+    error: { code: 'navigation_failed', message: 'boom', retryable: false },
+  });
+  assert.equal(navigation.phase, 'failed');
+  assert.equal(navigation.error?.code, 'navigation_failed');
+  assert.equal(navigation.error?.message, 'boom');
+});
+
+test('terminal phases ignore further events', () => {
+  let navigation = createNavigation(1, 'https://example.com/', 'https://example.com');
+  navigation = applyNavigationEvent(navigation, {
+    kind: 'fail',
+    error: { code: 'navigation_failed', message: 'boom', retryable: false },
+  });
+  const afterFail = applyNavigationEvent(navigation, { kind: 'document.ready', readyState: 'complete' });
+  // failed stays failed
+  assert.equal(afterFail.phase, 'failed');
+  assert.equal(afterFail.readyState, undefined);
+});
+
+test('default readiness policy requires a non-loading document', () => {
+  assert.equal(
+    defaultPageReadinessPolicy({ readyState: 'loading', now: 0 }),
+    false,
+  );
+  assert.equal(
+    defaultPageReadinessPolicy({ readyState: 'interactive', now: 0 }),
+    true,
+  );
+});
+
+test('default readiness policy does not block on empty body while a shell renders', () => {
+  // shell first, body later
+  assert.equal(
+    defaultPageReadinessPolicy({ readyState: 'complete', textLength: 0, now: 0 }),
+    false,
+  );
+  assert.equal(
+    defaultPageReadinessPolicy({ readyState: 'complete', textLength: 400, textRevision: 3, now: 0 }),
+    true,
+  );
+});
+
+test('default readiness policy treats long websocket connections as non-blocking', () => {
+  // inflight is 0 (websocket not counted) → readiness not blocked by network
+  assert.equal(
+    defaultPageReadinessPolicy({
+      readyState: 'complete',
+      textLength: 900,
+      textRevision: 4,
+      inflightRequests: 0,
+      lastNetworkActivityAt: 1_000,
+      now: 1_000 + SETTLING_WINDOW_MS + 100,
+    }),
+    true,
+  );
+});
+
+test('default readiness policy blocks while inflight requests are pending', () => {
+  assert.equal(
+    defaultPageReadinessPolicy({
+      readyState: 'complete',
+      textLength: 500,
+      textRevision: 2,
+      inflightRequests: 3,
+      lastNetworkActivityAt: 0,
+      now: 10_000,
+    }),
+    false,
+  );
+});
+
+test('a full SPA-like lifecycle settles through settling to readable', () => {
+  // Simulate: shell renders first, body hydrates after load, network quiets.
+  let navigation = createNavigation(1, 'https://app.example/', 'https://app.example');
+
+  navigation = applyNavigationEvent(navigation, { kind: 'commit', url: 'https://app.example/' });
+  navigation = applyNavigationEvent(navigation, { kind: 'document.ready', readyState: 'complete' });
+
+  // Shell only, no body text yet → policy says not readable.
+  navigation = applyNavigationEvent(navigation, { kind: 'dom', textLength: 0, textRevision: 1, now: 100 });
+  navigation = applyNavigationEvent(
+    navigation,
+    { kind: 'settle_verdict', readable: defaultPageReadinessPolicy({
+      readyState: navigation.readyState, inflightRequests: 2, textLength: 0, textRevision: 1, lastNetworkActivityAt: 100, now: 110,
+    }), now: 110 },
+  );
+  assert.notEqual(navigation.phase, 'readable');
+
+  // Body hydrates, network quiet for the settling window → readable.
+  navigation = applyNavigationEvent(navigation, { kind: 'dom', textLength: 5000, textRevision: 5, now: 400 });
+  const quiet = applyNavigationEvent(
+    navigation,
+    { kind: 'settle_verdict', readable: defaultPageReadinessPolicy({
+      readyState: navigation.readyState, inflightRequests: 0, textLength: 5000, textRevision: 5, lastNetworkActivityAt: 400, now: 400 + SETTLING_WINDOW_MS + 10,
+    }), now: 400 + SETTLING_WINDOW_MS + 10 },
+  );
+  assert.equal(quiet.phase, 'readable');
+});

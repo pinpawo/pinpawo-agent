@@ -2,11 +2,12 @@
 title: Documentation Wiki Index
 page_type: overview
 status: draft
-updated: 2026-07-31
+updated: 2026-08-07
 sources:
   - ../AGENTS.md
 related:
   - overview.md
+  - agent-boundary-contracts.md
   - capability-toolkit-architecture.md
   - concepts/dynamic-context-governance.md
   - concepts/orchestrator-practical-reasoning.md
@@ -70,6 +71,10 @@ explicitly migrated.
 
 ## Local-agent session projection
 
+- [Agent boundary contracts](agent-boundary-contracts.md) — validated system
+  synthesis for the transport-neutral Configuration, Invocation, Interaction,
+  and State ports; public review projection; V2/V4 compatibility; and the
+  recoverable server-local review-resolution route.
 - [Local-agent session projection](local-agent-session-projection.md) — system
   synthesis: how checkpoint, snapshot, shared reducer, review lifecycle, and
   transports fit together.

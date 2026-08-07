@@ -2,12 +2,14 @@
 title: Session Projection Ownership Boundaries
 page_type: concept
 status: validated
-updated: 2026-07-28
+updated: 2026-08-07
 sources:
   - ../../LOCAL_AGENT_SESSION_PROJECTION.md
   - ../../../packages/agent-session/src/domain.ts
   - ../../../packages/agent-session/src/project.ts
   - ../../../packages/agent-session/src/snapshot.ts
+  - ../../../packages/agent-contracts/src/interaction.ts
+  - ../../../packages/pet-agent/src/agent/orchestrator/review/reviewSpec.ts
   - ../../../services/local-agent/src/tui/state/tuiState.ts
   - ../../../services/local-agent/src/tui/TuiRuntimeController.ts
   - ../../../services/local-agent/src/reviewResolutionLifecycle.ts
@@ -16,7 +18,10 @@ sources:
   - https://github.com/pinpawo/pinpawo-agent/pull/468
   - https://github.com/pinpawo/pinpawo-agent/pull/475
   - https://github.com/pinpawo/pinpawo-agent/pull/485
+  - https://github.com/pinpawo/pinpawo-agent/issues/570
+  - https://github.com/pinpawo/pinpawo-agent/pull/572
 related:
+  - ../agent-boundary-contracts.md
   - ../local-agent-session-projection.md
   - ../interruption-and-delegation-continuation.md
   - checkpoint-snapshot-timeline.md
@@ -37,15 +42,21 @@ different owners and lifecycles — do not collapse them:
 
 | Fact | Owner | Lifetime |
 | --- | --- | --- |
-| `ReviewAction` (`actionId` + ordered `reviews[]`) | shared / checkpoint-derived | while the checkpoint interrupt exists |
+| `ReviewAction` (`actionId` + ordered public `HumanReviewRequest[]`) | shared / checkpoint-derived projection | while the checkpoint interrupt exists |
 | Partial decisions + `resolutionSent` marker (`ReviewDraft`) | TUI-local interaction state | until server-observed state diverges |
-| Route + claim + consumption + interrupt ordering | server-local `ReviewResolutionLifecycle` | per resolution attempt |
+| Route to internal `ReviewSpec[]` + claim + consumption + interrupt ordering | server-local `ReviewResolutionLifecycle` | per resolution attempt |
 | Run activity / waiting / interrupting | shared, server-observed | reduced from server events |
 
 `ReviewAction` contains only checkpoint-derived batch identity and ordered review
 specs — never client command progress. Sending a review resolution does **not**
 optimistically advance the shared projection; the next server event or snapshot
 provides the next shared fact.
+
+**Fact (PR #572).** The shared specs are presentation-only boundary contracts.
+The server's ephemeral route retains the authoritative internal `ReviewSpec[]`
+needed to validate a response and resume the graph. It is recoverable from the
+checkpoint and must never become a second durable review authority; see
+[Agent boundary contracts](../agent-boundary-contracts.md).
 
 ## What is TUI-local, not shared
 

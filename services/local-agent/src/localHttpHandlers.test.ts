@@ -20,10 +20,6 @@ import {
 import type { LoadedUserCapability } from './capabilityLoader';
 import { clearAgentRunActivity, recordOperationActivity } from './operationActivityState';
 import { readLocalAgentPackageVersion } from './packageVersion';
-import {
-  browserRuntime,
-  checkBrowserAvailability,
-} from './toolkits/browser';
 import { resolveToolkitAvailability } from './toolkits/toolkitAvailability';
 import { createTestModelServerDeps } from './testing/modelProfiles';
 
@@ -258,59 +254,6 @@ test('handleLocalHttpRequest exposes active operation health fields', async () =
   assert.equal(payload.agent_run_phase, 'using_tool');
 
   clearAgentRunActivity('req-1');
-});
-
-test('handleLocalHttpRequest preserves browser availability diagnostics', async () => {
-  const availability = await checkBrowserAvailability();
-  const extension = browserRuntime.getSnapshot().extension;
-  const res = makeRes();
-
-  handleLocalHttpRequest(
-    makeReq('/health', 'Bearer secret'),
-    res,
-    {
-      actorId: 'pet-a',
-      ...createTestModelServerDeps(),
-      workdir: '/tmp/pinpawo-browser-health',
-    } as LocalServerDeps,
-    {
-      authToken: 'secret',
-      loadSnapshot: async () => ({}),
-      listSessions: async () => [],
-      resumeSession: async () => {
-        throw new Error('not called');
-      },
-    },
-  );
-
-  const payload = JSON.parse(res.body);
-  const mode = availability.metadata?.mode;
-  assert.equal(
-    payload.browser_mode,
-    typeof mode === 'string'
-      ? mode
-      : availability.available
-        ? 'available'
-        : 'none',
-  );
-  assert.equal(
-    payload.browser_detail,
-    mode === 'extension'
-      ? extension.detail
-      : availability.detail ?? availability.reason,
-  );
-  assert.equal(payload.browser_runtime_state, extension.state);
-  assert.equal(payload.browser_extension_detail, extension.detail);
-  assert.equal(payload.browser_bridge_listening, extension.bridgeListening);
-  assert.equal(payload.browser_host_connected, extension.nativeHostConnected);
-  assert.equal(payload.browser_extension_connected, extension.extensionRegistered);
-  assert.equal(
-    payload.browser_command_ready,
-    mode === 'extension'
-      ? extension.commandReady
-      : availability.metadata?.commandReady ?? false,
-  );
-  assert.equal(payload.browser_extension_command_ready, extension.commandReady);
 });
 
 test('capability rescan replaces frozen runtime capability snapshots', async () => {

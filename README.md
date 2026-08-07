@@ -45,7 +45,10 @@ packages/agent-session/   Runtime-neutral session domain, event projection,
                           versioned snapshot contract, parsers, and protocol types.
 
 services/local-agent/     Local CLI/TUI, local server, local config, plugin loading,
-                          browser/local toolkits, and transport adapters.
+                          default Toolkit composition, and transport adapters.
+
+toolkits/browser/         Browser Toolkit runtime, drivers, Chrome Extension, and
+                          Native Messaging Host.
 
 tools/agent-macos/        macOS desktop companion for running and configuring
                           the local agent.

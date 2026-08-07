@@ -15,6 +15,7 @@ import {
   type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 import { FileCapabilityArtifactStore } from './capabilityArtifactStore';
+import { loadGeneralCapability } from './capabilities/general';
 import { createBashToolkit, createGitToolkit } from './toolkits/local';
 import { createTestModelProfileRegistry } from './testing/modelProfiles';
 
@@ -71,10 +72,16 @@ function buildTestLocalChatAgentInput(
   params: Omit<LocalChatAgentInputParams, 'threadId' | 'capabilityArtifactStore'>
     & Partial<Pick<LocalChatAgentInputParams, 'threadId' | 'capabilityArtifactStore'>>,
 ) {
+  const { extraCapabilities, ...rest } = params;
+  const general = loadGeneralCapability();
   return buildLocalChatAgentInput({
     threadId: 'agent-channel-test-thread',
     capabilityArtifactStore: testArtifactStore,
-    ...params,
+    ...rest,
+    extraCapabilities: [
+      ...(general ? [general] : []),
+      ...(extraCapabilities ?? []),
+    ],
   });
 }
 
@@ -152,7 +159,7 @@ test('buildLocalChatAgentInput passes a single toolkit list', () => {
   );
   assert.deepEqual(
     setup.input.capabilities?.find(({ name }) => name === 'general')?.uses,
-    ['pet_profile', 'bash', 'git', 'artifact_discovery'],
+    ['bash', 'git'],
   );
   assert.equal('capabilityToolkits' in setup.input, false);
 });
@@ -166,7 +173,7 @@ test('buildLocalChatAgentInput keeps the General Capability permission boundary 
 
   assert.deepEqual(
     setup.input.capabilities?.find(({ name }) => name === 'general')?.uses,
-    ['pet_profile', 'bash', 'git', 'artifact_discovery'],
+    ['bash', 'git'],
   );
   assert.equal(
     setup.input.capabilities
@@ -199,27 +206,20 @@ test('buildLocalChatAgentInput dedupes built-in capabilities by name', () => {
   );
 });
 
-test('buildLocalChatAgentInput rejects a host Capability using the reserved general name', () => {
-  assert.throws(
-    () => buildTestLocalChatAgentInput({
-      context: createContext(),
-      userMessage: 'hello',
-      extraCapabilities: [{
-        name: 'general',
-        description: 'Attempt to replace the host General Capability.',
-        uses: [],
-        instructions: defineInstructionDocument({
-          content: '# Replacement General',
-        }),
-      }],
-    }),
-    /name "general" is reserved by the local-agent host/,
+test('buildLocalChatAgentInput retains the host baseline general Capability', () => {
+  const setup = buildTestLocalChatAgentInput({
+    context: createContext(),
+    userMessage: 'hello',
+  });
+
+  assert.equal(
+    setup.input.capabilities?.filter(({ name }) => name === 'general').length,
+    1,
   );
 });
 
 test('buildDecisionStructuredOutput selects structured output strategy by provider model family and version', () => {
   const jsonModeCases = [
-    ['https://api.deepseek.com', 'deepseek-v4-pro'],
     ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen3.5-plus'],
     ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen3.7-plus'],
     ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen3.7-max'],
@@ -245,6 +245,17 @@ test('buildDecisionStructuredOutput selects structured output strategy by provid
     });
   }
 
+  for (const model of ['deepseek-v4-pro', 'deepseek-v4-flash']) {
+    assert.deepEqual(buildDecisionStructuredOutput({
+      apiKey: 'test-key',
+      baseUrl: 'https://api.deepseek.com',
+      model,
+    }), {
+      method: 'functionCalling',
+      autoRepair: { maxRetries: 1 },
+    });
+  }
+
   for (const [baseUrl, model] of [
     ['https://api.moonshot.ai/v1', 'kimi-k2.6'],
     ['https://api.kimi.com/coding/v1', 'k3'],
@@ -255,7 +266,10 @@ test('buildDecisionStructuredOutput selects structured output strategy by provid
       apiKey: 'test-key',
       baseUrl,
       model,
-    }), { method: 'jsonSchema' });
+    }), {
+      method: 'jsonSchema',
+      autoRepair: { maxRetries: 1 },
+    });
   }
 
   assert.equal(buildDecisionStructuredOutput({
@@ -291,6 +305,7 @@ test('buildDecisionStructuredOutput honors the resolved profile strategy before 
     structuredOutputMethod: 'jsonSchema',
   }), {
     method: 'jsonSchema',
+    autoRepair: { maxRetries: 1 },
   });
 });
 
@@ -357,7 +372,7 @@ test('buildLocalChatAgentInput passes global review policy mode to graph input',
   assert.deepEqual(setup.input.globalReviewPolicy, {
     mode: 'auto_authorization',
     structuredOutput: {
-      method: 'jsonMode',
+      method: 'functionCalling',
       autoRepair: { maxRetries: 2 },
     },
   });
@@ -395,14 +410,14 @@ test('buildLocalChatAgentInput registers artifact discovery for an empty thread'
   );
   assert.deepEqual(
     setup.input.capabilities?.find(({ name }) => name === 'general')?.uses,
-    ['pet_profile', 'bash', 'git', 'artifact_discovery'],
+    ['bash', 'git'],
   );
   assert.deepEqual(
     setup.registry.capabilities
       .find(({ capability }) => capability.name === 'general')
       ?.toolNames
       .filter((name) => name === 'artifact_list' || name === 'artifact_read'),
-    ['artifact_list', 'artifact_read'],
+    [],
   );
   assert.ok(
     setup.input.capabilities

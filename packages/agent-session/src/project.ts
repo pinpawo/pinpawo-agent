@@ -327,11 +327,32 @@ function applyOperationEvent(
         ...observedAtUpdate(context),
       };
     }
+    if (run.state === 'running') {
+      return {
+        ...runViewBase(run),
+        state: 'running',
+        activity: hasOpenOperation(withOperation.timeline, event.requestId)
+          ? 'using_tool'
+          : 'thinking',
+        ...observedAtUpdate(context),
+      };
+    }
     return {
       ...run,
       ...observedAtUpdate(context),
     };
   });
+}
+
+function hasOpenOperation(
+  timeline: readonly AgentTimelineEntry[],
+  requestId: string,
+) {
+  return timeline.some((entry) => (
+    entry.type === 'operation'
+    && entry.requestId === requestId
+    && (entry.phase === 'started' || entry.phase === 'updated')
+  ));
 }
 
 function appendSubagentMessage(

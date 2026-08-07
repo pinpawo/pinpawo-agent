@@ -124,3 +124,47 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
     scope: 'session',
   });
 });
+
+test('buildLocalAgentSessionSnapshot preserves an in-flight running request', () => {
+  const snapshot = buildLocalAgentSessionSnapshot({
+    sessionId: 'chat:pet-a',
+    kind: 'chat',
+    messages: [],
+    deps: {
+      actorId: 'pet-a',
+      workdir: '/tmp/work',
+      ...createTestModelServerDeps(),
+      runtimeConfig: {
+        workdir: '/tmp/work',
+        workspace: {
+          id: 'workspace-test',
+          name: 'Workspace Test',
+          rootPath: '/tmp/work',
+        },
+        stateRoot: '/tmp/work/.pinpawo',
+        studioConfigPath: '/tmp/work/.pinpawo/studio.json',
+        studioDueRunsPath: '/tmp/work/.pinpawo/studio-due-runs.json',
+        petsDir: '/tmp/work/.pinpawo/pets',
+        studioWikiBaseDir: '/tmp/work/.pinpawo/studio-wiki',
+        checkpointPath: '/tmp/work/.pinpawo/checkpoints.json',
+        tuiCheckpointPath: '/tmp/work/.pinpawo/checkpoints-tui.json',
+        tuiSessionPath: '/tmp/work/.pinpawo/tui-sessions.json',
+        capabilityArtifactRoot: '/tmp/work/.pinpawo/capability-artifacts',
+      },
+    } as LocalServerDeps,
+    activeRun: {
+      requestId: 'req-live',
+      state: 'running',
+      activity: 'thinking',
+      startedAt: 1_700_000_000_000,
+    },
+  });
+
+  assert.deepEqual(snapshot.session.activeRun, {
+    requestId: 'req-live',
+    state: 'running',
+    activity: 'thinking',
+    startedAt: 1_700_000_000_000,
+  });
+  assert.ok(parseAgentSessionSnapshot(JSON.parse(JSON.stringify(snapshot))));
+});

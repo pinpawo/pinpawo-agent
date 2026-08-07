@@ -9,6 +9,8 @@ the original design and reference documents. Maintenance rules live in
 ## Synthesized wiki
 
 - [Documentation wiki](wiki/index.md)
+- [Agent boundary contracts](wiki/agent-boundary-contracts.md) — validated
+  transport-neutral Configuration, Invocation, Interaction, and State ports
 - [Capability / Toolkit V2 architecture](wiki/capability-toolkit-architecture.md)
 - [Interruption and delegation continuation](wiki/interruption-and-delegation-continuation.md)
 - [System prompt design knowledge map](wiki/overview.md)

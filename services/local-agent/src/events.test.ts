@@ -8,7 +8,7 @@ import type { AgentToolkit } from '@pinpawo/pet-agent';
 import { buildToolOperationEvent } from './agentStreamEvents';
 import { normalizeToolStreamEvent } from './events/agentStreamNormalizer';
 import { createOperationRegistry } from './events/operationRegistry';
-import { createBrowserToolkit } from './toolkits/browser';
+import { createBrowserToolkit } from '@pinpawo-toolkit/browser';
 import { createBashToolkit, createGitToolkit, localToolOperationRegistry } from './toolkits/local';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
 

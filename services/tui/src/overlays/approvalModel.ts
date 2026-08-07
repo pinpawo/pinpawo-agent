@@ -5,10 +5,11 @@ import type {
   ReviewSpec,
 } from '@pinpawo/agent-session';
 import { reviewDecisionsRemainValid } from '../session/reviewDecision';
+import { truncateTerminalLine } from '../text/terminalText';
 import {
-  truncateTerminalLine,
-  wrapTerminalText,
-} from '../text/terminalText';
+  buildReviewContentLines as renderReviewContentLines,
+  type ReviewContentLine,
+} from './reviewContentLines';
 
 export type ApprovalPhase = 'ready' | 'resolution-sent' | 'error';
 
@@ -47,6 +48,8 @@ export type ApprovalViewModel = {
   title: string;
   bottomTitle: string;
   body: string;
+  /** Tone-tagged form of `body`, one entry per rendered row. */
+  bodyLines: ReviewContentLine[];
   options: string;
   inputVisible: boolean;
   inputPlaceholder: string;
@@ -61,7 +64,6 @@ export const APPROVAL_FOOTER_ROWS = 18;
 const APPROVAL_DIALOG_MAX_WIDTH = 112;
 const APPROVAL_DIALOG_MAX_ROWS = 16;
 const APPROVAL_CONTENT_ROWS = 13;
-const APPROVAL_TEXT_INPUT_BODY_ROWS = 4;
 const APPROVAL_TEXT_INPUT_OPTION_ROWS = 2;
 const APPROVAL_LONG_CONTENT_OPTION_ROWS = 2;
 
@@ -206,7 +208,7 @@ export function scrollApprovalContent(
   state: ApprovalState,
   direction: -1 | 1,
   width: number,
-  footerRows = APPROVAL_FOOTER_ROWS,
+  dialogRows = APPROVAL_DIALOG_MAX_ROWS,
 ): ApprovalState {
   if (state.phase === 'closed' || state.phase === 'resolution-sent') return state;
   const review = currentApprovalReview(state);
@@ -219,7 +221,7 @@ export function scrollApprovalContent(
     state,
     lineCount,
     review.options.length,
-    approvalContentRows(footerRows),
+    approvalContentRows(dialogRows),
   ).bodyRows;
   const maximum = Math.max(0, lineCount - bodyRows);
   return {
@@ -333,7 +335,7 @@ export function resolveApprovalKey(
 export function buildApprovalViewModel(
   state: Exclude<ApprovalState, { phase: 'closed' }>,
   width: number,
-  footerRows = APPROVAL_FOOTER_ROWS,
+  dialogRows = APPROVAL_DIALOG_MAX_ROWS,
 ): ApprovalViewModel {
   const innerWidth = Math.max(1, width - 4);
   const review = currentApprovalReview(state);
@@ -350,28 +352,35 @@ export function buildApprovalViewModel(
         ? ' Interrupt requested '
         : ' Esc interrupt · Ctrl+C interrupt ',
       body: truncateTerminalLine(message, Math.max(1, innerWidth - 4)),
+      bodyLines: [{
+        text: truncateTerminalLine(message, Math.max(1, innerWidth - 4)),
+        tone: 'default',
+      }],
       options: '',
       inputVisible: false,
       inputPlaceholder: '',
-      bodyRows: approvalContentRows(footerRows),
+      bodyRows: approvalContentRows(dialogRows),
       optionRows: 0,
       loadingFrame: state.submissionFrame,
     };
   }
-  const allBodyLines = review
+  const allBodyLines: ReviewContentLine[] = review
     ? buildReviewContentLines(review, innerWidth)
-    : ['Review is no longer available.'];
+    : [{ text: 'Review is no longer available.', tone: 'muted' }];
   const { bodyRows, optionRows } = approvalLayoutRows(
     state,
     allBodyLines.length,
     review?.options.length ?? 0,
-    approvalContentRows(footerRows),
+    approvalContentRows(dialogRows),
   );
   const maxOffset = Math.max(0, allBodyLines.length - bodyRows);
   const offset = Math.min(state.contentOffset, maxOffset);
   const bodyLines = allBodyLines.slice(offset, offset + bodyRows);
   if (state.phase === 'error' && state.message) {
-    bodyLines[0] = truncateTerminalLine(`Error: ${state.message}`, innerWidth);
+    bodyLines[0] = {
+      text: truncateTerminalLine(`Error: ${state.message}`, innerWidth),
+      tone: 'removed',
+    };
   }
   const contentProgress = allBodyLines.length > bodyRows
     ? ` · details ${offset + 1}-${Math.min(offset + bodyRows, allBodyLines.length)}/${allBodyLines.length}`
@@ -389,7 +398,8 @@ export function buildApprovalViewModel(
   return {
     title: ` ${title} `,
     bottomTitle: approvalHelp(width),
-    body: bodyLines.join('\n'),
+    body: bodyLines.map((line) => line.text).join('\n'),
+    bodyLines,
     options: formatApprovalOptions(state, innerWidth, optionRows),
     inputVisible: approvalAcceptsTextInput(state),
     inputPlaceholder: selectedApprovalOption(state)?.input?.placeholder
@@ -413,11 +423,14 @@ function approvalLayoutRows(
     const optionRows = contentRows >= 8
       ? APPROVAL_TEXT_INPUT_OPTION_ROWS
       : 1;
+    // The response textarea takes fixed rows, but the reviewed content must not
+    // collapse below what is left: a multi-line shell command stays readable
+    // while the operator types a reply.
     return {
       bodyRows: Math.max(
         1,
         Math.min(
-          APPROVAL_TEXT_INPUT_BODY_ROWS,
+          Math.max(bodyLineCount, 1),
           contentRows - 4 - optionRows,
         ),
       ),
@@ -443,8 +456,8 @@ function approvalLayoutRows(
   return { bodyRows, optionRows };
 }
 
-function approvalContentRows(footerRows: number) {
-  return Math.max(1, Math.min(APPROVAL_CONTENT_ROWS, Math.floor(footerRows) - 3));
+function approvalContentRows(dialogRows: number) {
+  return Math.max(1, Math.min(APPROVAL_CONTENT_ROWS, Math.floor(dialogRows) - 3));
 }
 
 function formatApprovalOptions(
@@ -483,36 +496,10 @@ function approvalHelp(width: number) {
 }
 
 function buildReviewContentLines(review: ReviewSpec, width: number) {
-  const fullContent = reviewContent(review);
-  const content = fullContent.slice(0, MAX_REVIEW_CONTENT_CHARACTERS);
-  const wrapped = wrapTerminalText(content, width, MAX_REVIEW_CONTENT_LINES + 1);
-  const truncated = content.length < fullContent.length
-    || wrapped.length > MAX_REVIEW_CONTENT_LINES;
-  const lines = wrapped.slice(0, MAX_REVIEW_CONTENT_LINES);
-  if (truncated) {
-    lines[Math.max(0, lines.length - 1)] = truncateTerminalLine(
-      '… review preview truncated',
-      width,
-    );
-  }
-  return lines.length ? lines : ['Review details unavailable.'];
-}
-
-function reviewContent(review: ReviewSpec) {
-  const view = review.view;
-  if (view.kind === 'diff') {
-    return [
-      view.title,
-      view.summary,
-      view.target ? `Target: ${view.target}` : undefined,
-      view.patch,
-    ].filter(nonEmpty).join('\n');
-  }
-  return [view.title, view.body].filter(nonEmpty).join('\n');
-}
-
-function nonEmpty(value: string | undefined): value is string {
-  return Boolean(value?.trim());
+  return renderReviewContentLines(review.view, width, {
+    maxCharacters: MAX_REVIEW_CONTENT_CHARACTERS,
+    maxLines: MAX_REVIEW_CONTENT_LINES,
+  });
 }
 
 function defaultOptionIndex(review: ReviewSpec | undefined) {

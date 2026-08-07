@@ -25,6 +25,8 @@ export function buildCurrentPlanPanel(
     || options.terminalHeight < EXPANDED_MIN_TERMINAL_ROWS
     || options.width < EXPANDED_MIN_WIDTH;
   const completed = plan.items.filter((item) => item.status === 'completed').length;
+  // Between delegations no item is active; the next pending step still tells
+  // the operator where the plan stands.
   const active = plan.items.find((item) => item.status === 'active')
     ?? plan.items.find((item) => item.status === 'pending')
     ?? plan.items.at(-1);
@@ -41,7 +43,13 @@ export function buildCurrentPlanPanel(
     };
   }
 
-  const visibleItems = selectVisibleItems(plan.items);
+  // A taller terminal can show more of the plan; the cap only exists to keep
+  // the panel from crowding out the transcript.
+  const maxVisible = Math.max(
+    MAX_VISIBLE_ITEMS,
+    Math.min(plan.items.length, Math.floor(options.terminalHeight / 4)),
+  );
+  const visibleItems = selectVisibleItems(plan.items, maxVisible);
   const omitted = plan.items.length - visibleItems.length;
   const lines = [
     `当前计划 · ${completed}/${plan.items.length}`,
@@ -55,11 +63,11 @@ export function buildCurrentPlanPanel(
   };
 }
 
-function selectVisibleItems(items: AgentPlanItem[]) {
-  if (items.length <= MAX_VISIBLE_ITEMS) return items;
+function selectVisibleItems(items: AgentPlanItem[], maxVisible: number) {
+  if (items.length <= maxVisible) return items;
   const activeIndex = Math.max(0, items.findIndex((item) => item.status === 'active'));
-  const start = Math.max(0, Math.min(activeIndex - 1, items.length - MAX_VISIBLE_ITEMS));
-  return items.slice(start, start + MAX_VISIBLE_ITEMS);
+  const start = Math.max(0, Math.min(activeIndex - 1, items.length - maxVisible));
+  return items.slice(start, start + maxVisible);
 }
 
 function formatItem(item: AgentPlanItem) {

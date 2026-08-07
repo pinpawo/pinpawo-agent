@@ -360,10 +360,23 @@ function createDemoSession(
             reviews: [{
               interactionId: 'smoke-review',
               schemaVersion: 2,
+              // A realistic multi-line command: the reviewed content must stay
+              // readable even while the response input is focused.
               view: {
                 kind: 'plain',
-                title: 'Allow local operation?',
-                body: 'Review details remain pageable inside the fixed footer.',
+                title: '执行命令',
+                body: [
+                  'Summary: deploy the release bundle',
+                  '',
+                  '$ npm run build -- --target production \\',
+                  '    --sourcemap false \\',
+                  '    --out-dir ./dist/release \\',
+                  '    --manifest ./dist/release/manifest.json',
+                  '',
+                  'Target: /srv/pinpawo/app',
+                  '',
+                  'Review details remain pageable inside the fixed footer.',
+                ].join('\n'),
               },
               options: [{
                 id: 'approve',

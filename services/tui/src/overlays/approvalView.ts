@@ -11,12 +11,23 @@ import {
   calculateApprovalDialogLayout,
   type ApprovalState,
 } from './approvalModel';
+import type { ReviewContentLine, ReviewLineTone } from './reviewContentLines';
+
+const REVIEW_TONE_COLORS: Record<ReviewLineTone, string | undefined> = {
+  default: undefined,
+  muted: '#8a8a8a',
+  heading: '#d6a84b',
+  added: '#4fb04f',
+  removed: '#d05a5a',
+};
 
 export class ApprovalView {
   readonly frame: BoxRenderable;
   readonly input: TextareaRenderable;
+  private readonly renderer: CliRenderer;
   private readonly dialog: BoxRenderable;
-  private readonly body: TextRenderable;
+  private readonly body: BoxRenderable;
+  private readonly bodyLines: TextRenderable[] = [];
   private readonly options: TextRenderable;
   private readonly inputFrame: BoxRenderable;
 
@@ -26,6 +37,7 @@ export class ApprovalView {
       onDraftChange: (draft: string) => void;
     },
   ) {
+    this.renderer = renderer;
     this.frame = new BoxRenderable(renderer, {
       id: 'approval-overlay',
       position: 'absolute',
@@ -55,11 +67,11 @@ export class ApprovalView {
       backgroundColor: RGBA.defaultBackground(),
       overflow: 'hidden',
     });
-    this.body = new TextRenderable(renderer, {
+    this.body = new BoxRenderable(renderer, {
       id: 'approval-body',
-      content: '',
       width: '100%',
       height: 3,
+      flexDirection: 'column',
       overflow: 'hidden',
     });
     this.options = new TextRenderable(renderer, {
@@ -109,9 +121,9 @@ export class ApprovalView {
     this.dialog.title = model.title;
     this.dialog.bottomTitle = model.bottomTitle;
     this.body.height = model.bodyRows;
-    this.body.content = model.loadingFrame === null
-      ? model.body
-      : buildLoadingCellLine(model.body, model.loadingFrame);
+    // The submitting state is a single animated status line; every other phase
+    // renders the reviewed content with its per-line tones.
+    this.renderBodyLines(model.bodyLines, model.loadingFrame);
     this.options.height = model.optionRows;
     this.options.content = model.options;
     this.inputFrame.visible = model.inputVisible;
@@ -122,6 +134,40 @@ export class ApprovalView {
       this.input.gotoBufferEnd();
     }
     if (!model.inputVisible) this.input.blur();
+  }
+
+  /**
+   * Renders one TextRenderable per review line so each carries its own tone
+   * color. Renderables are pooled and hidden rather than destroyed, keeping
+   * paging through a long diff free of per-frame allocation.
+   */
+  private renderBodyLines(
+    lines: readonly ReviewContentLine[],
+    loadingFrame: number | null,
+  ) {
+    while (this.bodyLines.length < lines.length) {
+      const text = new TextRenderable(this.renderer, {
+        id: `approval-body-line-${this.bodyLines.length}`,
+        content: '',
+        width: '100%',
+        height: 1,
+        overflow: 'hidden',
+      });
+      this.bodyLines.push(text);
+      this.body.add(text);
+    }
+    this.bodyLines.forEach((renderable, index) => {
+      const line = lines[index];
+      renderable.visible = line !== undefined;
+      if (!line) return;
+      if (loadingFrame !== null && index === 0) {
+        renderable.content = buildLoadingCellLine(line.text, loadingFrame);
+        return;
+      }
+      // A blank content string collapses the row, so keep a space placeholder.
+      renderable.content = line.text || ' ';
+      renderable.fg = REVIEW_TONE_COLORS[line.tone] ?? RGBA.defaultForeground();
+    });
   }
 
   focusInput() {

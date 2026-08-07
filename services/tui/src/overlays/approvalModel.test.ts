@@ -219,6 +219,110 @@ test('approval dialog is centered within its temporary footer surface', () => {
   });
 });
 
+test('a multi-line shell command stays visible while a response is drafted', () => {
+  const command = Array.from(
+    { length: 9 },
+    (_, index) => `  --flag-${index + 1} value-${index + 1} \\`,
+  ).join('\n');
+  const shellReview: ReviewSpec = {
+    ...review('review-shell'),
+    view: {
+      kind: 'plain',
+      title: '执行命令',
+      body: `Summary: deploy \\\n${command}\n\nTarget: /srv/app`,
+    },
+  };
+  let state = syncApprovalState(
+    createApprovalState(),
+    waitingReview([shellReview]),
+  );
+  if (state.phase === 'closed') assert.fail('review unexpectedly closed');
+  const browsing = buildApprovalViewModel(state, 80, 16);
+
+  // Selecting the free-text option must not starve the reviewed content.
+  state = moveApprovalSelection(state, 1);
+  assert.equal(approvalAcceptsTextInput(state), true);
+  if (state.phase === 'closed') assert.fail('review unexpectedly closed');
+  const responding = buildApprovalViewModel(state, 80, 16);
+
+  assert.equal(responding.inputVisible, true);
+  assert.ok(
+    responding.bodyRows > 4,
+    `expected more than the legacy 4 rows, got ${responding.bodyRows}`,
+  );
+  assert.ok(responding.bodyRows <= browsing.bodyRows);
+  assert.match(responding.body, /--flag-1 value-1/);
+});
+
+test('paging steps match the rows the dialog actually renders', () => {
+  const longReview: ReviewSpec = {
+    ...review('review-long'),
+    view: {
+      kind: 'plain',
+      title: '执行命令',
+      body: Array.from({ length: 40 }, (_, index) => `line ${index + 1}`).join('\n'),
+    },
+  };
+  const state = syncApprovalState(
+    createApprovalState(),
+    waitingReview([longReview]),
+  );
+  if (state.phase === 'closed') assert.fail('review unexpectedly closed');
+
+  // scroll and render must agree on the dialog height, otherwise a page turn
+  // skips lines that were never displayed.
+  const dialogRows = 16;
+  const first = buildApprovalViewModel(state, 80, dialogRows);
+  const scrolled = scrollApprovalContent(state, 1, 80, dialogRows);
+  if (scrolled.phase === 'closed') assert.fail('review unexpectedly closed');
+  const second = buildApprovalViewModel(scrolled, 80, dialogRows);
+
+  // A page turn must resume exactly where the previous page stopped: no line
+  // is skipped over and none is shown twice.
+  const lastVisible = first.body.split('\n').at(-1) ?? '';
+  const firstAfterPaging = second.body.split('\n')[0] ?? '';
+  const lineNumber = (value: string) => Number(/^line (\d+)$/.exec(value)?.[1]);
+  assert.ok(Number.isInteger(lineNumber(lastVisible)), lastVisible);
+  assert.equal(lineNumber(firstAfterPaging), lineNumber(lastVisible) + 1);
+  assert.equal(second.body.split('\n').length, first.bodyRows);
+});
+
+test('every review view variant renders through its own path', () => {
+  const markdownState = syncApprovalState(createApprovalState(), waitingReview([{
+    ...review('review-markdown'),
+    view: {
+      kind: 'markdown',
+      title: '变更说明',
+      body: '## 标题\n\n- 第一项\n- 第二项\n\n```sh\nnpm test\n```',
+    },
+  }]));
+  if (markdownState.phase === 'closed') assert.fail('review unexpectedly closed');
+  const markdown = buildApprovalViewModel(markdownState, 80, 16);
+  // Headings lose their ATX markers and bullets are normalized.
+  assert.doesNotMatch(markdown.body, /##/);
+  assert.doesNotMatch(markdown.body, /```/);
+  assert.match(markdown.body, /• 第一项/);
+  assert.match(markdown.body, /npm test/);
+
+  const diffState = syncApprovalState(createApprovalState(), waitingReview([{
+    ...review('review-diff-tone'),
+    view: {
+      kind: 'diff',
+      title: '应用补丁',
+      target: '/srv/app/index.ts',
+      patch: '@@ -1,2 +1,2 @@\n-const a = 1;\n+const a = 2;\n const b = 3;',
+    },
+  }]));
+  if (diffState.phase === 'closed') assert.fail('review unexpectedly closed');
+  const diff = buildApprovalViewModel(diffState, 80, 16);
+  const toneOf = (needle: string) => diff.bodyLines
+    .find((line) => line.text.includes(needle))?.tone;
+  assert.equal(toneOf('const a = 2;'), 'added');
+  assert.equal(toneOf('const a = 1;'), 'removed');
+  assert.equal(toneOf('@@'), 'heading');
+  assert.equal(toneOf('const b = 3;'), 'muted');
+});
+
 function waitingReview(reviews: ReviewSpec[]): AgentRunView {
   return {
     requestId: 'request-1',

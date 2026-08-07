@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { currentPlansEqual, projectCurrentPlan } from './currentPlanProjection';
 
-test('projects a current plan only while taskActiveDelegation exists', () => {
+test('projects the active delegation, its history, and the remaining plan', () => {
   const plan = projectCurrentPlan({
     taskActiveDelegation: {
       id: 'delegation-2',
@@ -51,6 +51,44 @@ test('projects a current plan only while taskActiveDelegation exists', () => {
     ],
   });
   assert.equal(projectCurrentPlan({ runCapabilityPlan: [] }), null);
+});
+
+test('a plan survives the gap between delegations', () => {
+  // No delegation is running, but completed work and remaining steps stay
+  // meaningful — clearing here is what made the panel look frozen.
+  const plan = projectCurrentPlan({
+    runDelegationSummaries: [
+      {
+        id: 'delegation-1',
+        lane: 'capability:general',
+        task: 'Understand the request',
+        status: 'completed',
+      },
+    ],
+    runCapabilityPlan: [{ capability: 'explore', task: 'Inspect the repository' }],
+  });
+
+  assert.deepEqual(plan?.items.map((item) => [item.capability, item.status]), [
+    ['general', 'completed'],
+    ['explore', 'pending'],
+  ]);
+});
+
+test('a remaining capability plan alone still renders', () => {
+  const plan = projectCurrentPlan({
+    runCapabilityPlan: [{ capability: 'general', task: 'Draft the reply' }],
+  });
+  assert.equal(plan?.items.length, 1);
+  assert.equal(plan?.items[0]?.status, 'pending');
+});
+
+test('an empty orchestration state clears the plan', () => {
+  assert.equal(projectCurrentPlan({}), null);
+  assert.equal(projectCurrentPlan(null), null);
+  assert.equal(
+    projectCurrentPlan({ runDelegationSummaries: [], runCapabilityPlan: [] }),
+    null,
+  );
 });
 
 test('compares plans structurally to avoid duplicate transport events', () => {

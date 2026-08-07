@@ -26,23 +26,29 @@ type RemainingPlanTask = {
 export function projectCurrentPlan(state: unknown): AgentPlan | null {
   const record = asRecord(state);
   const active = readActiveDelegation(record?.taskActiveDelegation);
-  if (!active) return null;
-
   const summaries = readDelegationSummaries(record?.runDelegationSummaries);
   const remaining = readRemainingPlan(record?.runCapabilityPlan);
-  const activeInSummaries = summaries.some((summary) => summary.id === active.id);
+
+  // A missing active delegation only means no step is running right now — the
+  // plan itself survives between delegations, so it must not be cleared.
+  if (!active && summaries.length === 0 && remaining.length === 0) {
+    return null;
+  }
+
+  const activeInSummaries = active !== null
+    && summaries.some((summary) => summary.id === active.id);
   const completedOrPending = summaries.map((summary) => ({
     id: summary.id,
     capability: capabilityFromLane(summary.lane),
     task: summary.task,
-    status: summary.id === active.id
+    status: summary.id === active?.id
       ? 'active' as const
       : summary.status === 'completed'
         ? 'completed' as const
         : 'pending' as const,
   }));
 
-  if (!activeInSummaries) {
+  if (active && !activeInSummaries) {
     completedOrPending.push({
       id: active.id,
       capability: capabilityFromLane(active.lane),

@@ -237,3 +237,92 @@ test('a dom event tracks DOM activity separately from network activity', () => {
   );
   assert.equal(navigation.phase, 'readable');
 });
+
+test('a cross-origin commit is rejected with an origin_changed failure', () => {
+  let navigation = createNavigation(1, 'https://example.com/', 'https://example.com');
+  navigation = applyNavigationEvent(navigation, {
+    kind: 'commit',
+    url: 'https://attacker.test/steal',
+  });
+  assert.equal(navigation.phase, 'failed');
+  assert.equal(navigation.error?.code, 'origin_changed');
+  assert.equal(navigation.error?.retryable, false);
+  assert.equal(navigation.committedUrl, undefined);
+});
+
+test('an origin-changed failure is terminal', () => {
+  let navigation = createNavigation(1, 'https://example.com/', 'https://example.com');
+  navigation = applyNavigationEvent(navigation, {
+    kind: 'commit',
+    url: 'https://attacker.test/',
+  });
+  const after = applyNavigationEvent(navigation, {
+    kind: 'commit',
+    url: 'https://example.com/',
+  });
+  assert.equal(after.phase, 'failed');
+});
+
+test('settling keeps tracking activity instead of freezing the baseline', () => {
+  let navigation = createNavigation(1, 'https://example.com/', 'https://example.com');
+  navigation = applyNavigationEvent(navigation, { kind: 'commit', url: 'https://example.com/' });
+  navigation = applyNavigationEvent(navigation, { kind: 'document.ready', readyState: 'complete' });
+  navigation = applyNavigationEvent(navigation, { kind: 'dom', textLength: 200, textRevision: 1, now: 100 });
+
+  // First false verdict moves dom_ready → settling, baselining activity at t=100.
+  navigation = applyNavigationEvent(
+    navigation,
+    { kind: 'settle_verdict', readable: false, now: 100 },
+  );
+  assert.equal(navigation.phase, 'settling');
+  assert.equal(navigation.lastNetworkActivityAt, 100);
+
+  // A later false verdict (activity still observed at t=400) must track the new
+  // observation rather than freeze lastNetworkActivityAt at 100.
+  navigation = applyNavigationEvent(
+    navigation,
+    { kind: 'settle_verdict', readable: false, now: 400 },
+  );
+  assert.equal(navigation.phase, 'settling');
+  assert.equal(navigation.lastNetworkActivityAt, 400);
+});
+
+test('a readable navigation re-enters on a new commit (SPA route change)', () => {
+  let navigation = createNavigation(1, 'https://app.example/a', 'https://app.example');
+  navigation = applyNavigationEvent(navigation, { kind: 'commit', url: 'https://app.example/a' });
+  navigation = applyNavigationEvent(navigation, { kind: 'document.ready', readyState: 'complete' });
+  navigation = applyNavigationEvent(navigation, { kind: 'dom', textLength: 1000, textRevision: 1, now: 100 });
+  navigation = applyNavigationEvent(
+    navigation,
+    { kind: 'settle_verdict', readable: true, now: 100 + SETTLING_WINDOW_MS + 10 },
+  );
+  assert.equal(navigation.phase, 'readable');
+
+  // Client-side route change to a same-origin URL re-enters the lifecycle and
+  // re-arms readiness tracking for the new document.
+  navigation = applyNavigationEvent(navigation, {
+    kind: 'commit',
+    url: 'https://app.example/b',
+  });
+  assert.equal(navigation.phase, 'committed');
+  assert.equal(navigation.committedUrl, 'https://app.example/b');
+  // Readiness fields were reset for the new page.
+  assert.equal(navigation.readyState, undefined);
+  assert.equal(navigation.textLength, undefined);
+});
+
+test('a readable navigation ignores non-commit events until a new commit', () => {
+  let navigation = createNavigation(1, 'https://app.example/a', 'https://app.example');
+  navigation = applyNavigationEvent(navigation, { kind: 'commit', url: 'https://app.example/a' });
+  navigation = applyNavigationEvent(navigation, { kind: 'document.ready', readyState: 'complete' });
+  navigation = applyNavigationEvent(navigation, { kind: 'dom', textLength: 1000, textRevision: 1, now: 100 });
+  navigation = applyNavigationEvent(
+    navigation,
+    { kind: 'settle_verdict', readable: true, now: 100 + SETTLING_WINDOW_MS + 10 },
+  );
+  assert.equal(navigation.phase, 'readable');
+
+  const after = applyNavigationEvent(navigation, { kind: 'network', inflightRequests: 5, now: 500 });
+  assert.equal(after.phase, 'readable');
+  assert.equal(after.inflightRequests, undefined);
+});

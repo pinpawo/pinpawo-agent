@@ -57,6 +57,11 @@ export function isEventCurrent(
 ): boolean {
   if (event.connectionGeneration !== current.connectionGeneration) return false;
   if (event.targetGeneration !== current.targetGeneration) return false;
+  // A navigation generation is only meaningful when both sides carry one.
+  // Target-lifecycle events (`target.created`, `target.closed`, …) have no
+  // navigation context, so they must not be rejected just because the current
+  // navigation generation is set. This is safe: per-target staleness is already
+  // guarded by the connection + target checks above.
   if (event.navigationGeneration !== undefined && current.navigationGeneration !== undefined) {
     if (event.navigationGeneration !== current.navigationGeneration) return false;
   }

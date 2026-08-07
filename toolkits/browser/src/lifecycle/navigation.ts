@@ -111,13 +111,46 @@ export function applyNavigationEvent(
   event: NavigationApplyEvent,
   options: { readiness: PageReadinessPolicy } = { readiness: defaultPageReadinessPolicy },
 ): NavigationState {
-  // Terminal states ignore all further events; read freshness only from the
-  // current generation.
-  if (state.phase === 'readable' || state.phase === 'failed') return state;
+  // `failed` is truly terminal: later events against a failed navigation are
+  // ignored. `readable` is re-enterable — a new generation (e.g. an SPA
+  // client-side route change) starts with a `commit`, which returns to the
+  // committed phase and re-arms readiness tracking below.
+  if (state.phase === 'failed') return state;
+  if (state.phase === 'readable' && event.kind !== 'commit') return state;
 
   switch (event.kind) {
-    case 'commit':
-      return { ...state, phase: 'committed', committedUrl: event.url };
+    case 'commit': {
+      // A cross-origin redirect is a real security boundary: refuse to accept a
+      // committed URL whose origin differs from the approved one. This is what
+      // makes the reducer itself emit `origin_changed` for 跨源重定向.
+      const approvedOrigin = state.approvedOrigin;
+      if (originOf(event.url) !== approvedOrigin) {
+        return {
+          ...state,
+          phase: 'failed',
+          error: {
+            code: 'origin_changed',
+            message: `navigation origin changed from ${approvedOrigin} to ${originOf(event.url)}`,
+            retryable: false,
+            details: { requestedUrl: state.requestedUrl, committedUrl: event.url },
+          },
+        };
+      }
+      return {
+        ...state,
+        phase: 'committed',
+        committedUrl: event.url,
+        // Re-entering from `readable` (SPA route change) re-arms readiness
+        // tracking for the newly committed document.
+        readyState: undefined,
+        inflightRequests: undefined,
+        lastNetworkActivityAt: undefined,
+        lastDomActivityAt: undefined,
+        textLength: undefined,
+        textRevision: undefined,
+        error: undefined,
+      };
+    }
     case 'document.ready': {
       // The document reaching interactive/complete moves an in-flight
       // (requested/committed) navigation into the dom_ready phase. Later ready
@@ -161,7 +194,22 @@ function advanceSettling(state: NavigationState, now: number): NavigationState {
   if (state.phase === 'dom_ready') {
     return { ...state, phase: 'settling', lastNetworkActivityAt: now };
   }
+  if (state.phase === 'settling') {
+    // Keep the settle baseline live: a false verdict means activity was still
+    // being observed at `now`, so track it rather than freezing the window at
+    // the first failed poll.
+    return { ...state, lastNetworkActivityAt: now };
+  }
   return state;
+}
+
+/** Extracts the `origin` (scheme + host + port) of a URL, or '' when invalid. */
+export function originOf(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return '';
+  }
 }
 
 /**

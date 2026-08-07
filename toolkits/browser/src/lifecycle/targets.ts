@@ -42,6 +42,8 @@ export class ManagedTargetRegistry {
 
   /** Monotonic target generation counter, incremented on each mutation. */
   private generation = 0;
+  /** Monotonic sequence backing auto-generated target ids (deterministic). */
+  private nextTargetSequence = 0;
 
   list(): ManagedBrowserTarget[] {
     return [...this.byId.values()]
@@ -89,7 +91,15 @@ export class ManagedTargetRegistry {
     return { ...target };
   }
 
-  applyEvent(targetId: string, event: TargetApplyEvent): ManagedBrowserTarget {
+  /**
+   * Applies a lifecycle event to a target. Returns the resulting target, or
+   * `null` when the event is rejected because the target is unknown or already
+   * closed. Late events are expected under this design (an out-of-order update
+   * after a close), so rejection is a returned result rather than a throw.
+   */
+  applyEvent(targetId: string, event: TargetApplyEvent): ManagedBrowserTarget | null {
+    const existing = this.byId.get(targetId);
+    if (!existing || existing.state === 'closed') return null;
     return this.mutate(targetId, event);
   }
 
@@ -167,10 +177,10 @@ export class ManagedTargetRegistry {
   }
 
   private nextTargetId(): number {
-    let candidate = Math.floor(Math.random() * 1_000_000);
-    while (this.byId.has(`target-${candidate}`)) {
-      candidate += 1;
-    }
-    return candidate;
+    // Each auto-generated id uses a fresh, monotonic sequence value so the
+    // `target-<tabId>-<seq>` key is always unique — no random collision probing
+    // against a key format that never actually matches.
+    this.nextTargetSequence += 1;
+    return this.nextTargetSequence;
   }
 }

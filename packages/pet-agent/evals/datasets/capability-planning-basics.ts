@@ -610,6 +610,87 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     },
     metadata: { difficulty: 'medium', reason: 'Planner structured no-plan terminal.', source: SOURCE_FILE },
   },
+  {
+    id: `${SUITE}.boundary-returns-to-answer-when-plan-is-exhausted`,
+    name: 'boundary-returns-to-answer-when-plan-is-exhausted',
+    suite: SUITE,
+    tags: ['capability_planning', 'delegation_control', 'structured_output'],
+    input: {
+      mode: 'boundary',
+      messages: [{
+        role: 'user',
+        content: '看下 issue #587 现在是什么状态。',
+      }, {
+        role: 'assistant',
+        content: '接下来我会先处理这项任务：读取 issue #587 的当前状态',
+      }, {
+        role: 'assistant',
+        content: 'issue #587 当前为 open，最后更新于昨天。',
+      }],
+      capabilityRegistry: [
+        'explore: investigate repositories and report evidence',
+        'general: perform other available work',
+      ],
+      completedTask: '读取 issue #587 的当前状态',
+      completedTaskResult: 'issue #587 当前为 open，最后更新于昨天。',
+      remainingPlan: [],
+    },
+    expected: {
+      result: 'return_to_answer',
+      remainingPlan: [],
+      exactRemainingPlanLength: 0,
+      planEffect: 'empty',
+      rubberStamp: false,
+      reason: 'The completed task already satisfies the continuation state and no follow-up work remains, so the Planner returns to Answer instead of inventing a new task.',
+    },
+    metadata: {
+      difficulty: 'hard',
+      reason: 'A boundary with an exhausted plan carries the least context; it must stop rather than fabricate work.',
+      source: SOURCE_FILE,
+    },
+  },
+  {
+    id: `${SUITE}.boundary-adds-followup-required-by-latest-result`,
+    name: 'boundary-adds-followup-required-by-latest-result',
+    suite: SUITE,
+    tags: ['capability_planning', 'delegation_control'],
+    input: {
+      mode: 'boundary',
+      messages: [{
+        role: 'user',
+        content: '检查 issue #587 状态，并把 README 里对应的章节同步成最新状态。',
+      }, {
+        role: 'assistant',
+        content: '接下来我会先处理这项任务：读取 issue #587 的当前状态',
+      }, {
+        role: 'assistant',
+        content: 'issue #587 当前为 open；README 的“已知问题”章节仍写着它已关闭，与实际状态不符。',
+      }],
+      capabilityRegistry: [
+        'explore: investigate repositories and report evidence',
+        'document_writer: create and update project documents',
+        'general: perform other available work',
+      ],
+      completedTask: '读取 issue #587 的当前状态',
+      completedTaskResult: 'issue #587 当前为 open；README 的“已知问题”章节仍写着它已关闭，与实际状态不符。',
+      remainingPlan: [],
+    },
+    expected: {
+      result: 'plan',
+      nextTaskTerms: ['README', '#587'],
+      capabilityName: 'document_writer',
+      remainingPlan: [],
+      exactRemainingPlanLength: 0,
+      planEffect: 'created',
+      rubberStamp: false,
+      reason: 'An exhausted plan is not by itself a terminal state: the latest result names concrete follow-up work, so the Planner materializes it.',
+    },
+    metadata: {
+      difficulty: 'hard',
+      reason: 'Guards the opposite failure of the exhausted-plan case: stopping too early when the result still requires work.',
+      source: SOURCE_FILE,
+    },
+  },
 ];
 
 const cases = transcriptCases.map(withBriefing);

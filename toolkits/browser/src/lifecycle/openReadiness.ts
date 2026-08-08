@@ -20,6 +20,15 @@
  * It is deliberately decoupled from any transport: callers feed events via
  * `feed` and advance the clock via `poll`, so it can be unit-tested in isolation
  * before any extension/CDP wiring lands. It never sleeps and owns no timers.
+ *
+ * Clock contract (issue #583 review): the driver enforces the readiness
+ * deadline against the event timeline (`now`, which advances with each event's
+ * `timestamp`), or against an injected clock (`options.now`) when one is
+ * supplied. `startTime` and each event's `timestamp` share one clock domain
+ * (the bridge stamps events with `Date.now`, so callers pass a corresponding
+ * `startTime`). An event array ending early does
+ * not by itself mean the deadline elapsed — the driver reports `timed_out` only
+ * once the clock has actually passed the deadline, otherwise `pending`.
  */
 
 import { BrowserLifecycleController, NAV_NAVIGATION_TIMEOUT_MS } from './controller';
@@ -38,11 +47,27 @@ export type OpenReadinessOutcome =
   | {
       status: 'timed_out';
       snapshot: ReturnType<BrowserLifecycleController['getSnapshot']>;
+    }
+  | {
+      /** The injected event sequence ended before a verdict and before the real
+       *  deadline. The caller should keep polling past this point. */
+      status: 'pending';
+      snapshot: ReturnType<BrowserLifecycleController['getSnapshot']>;
     };
 
 export type OpenReadinessOptions = {
   /** Wall-clock deadline (ms) by which the navigation must become readable. */
   deadlineMs?: number;
+  /**
+   * Injectable clock returning the current time in the same epoch/domain as
+   * `startTime` and the events' `timestamp`. When omitted the driver is a
+   * deterministic replay and the deadline is evaluated against the event
+   * timeline. Supply one to reflect real elapsed time: a page that goes quiet
+   * mid-navigation (no further events) is then reported as `timed_out` only
+   * once the injected clock passes the deadline — never merely because the
+   * input event array ended.
+   */
+  now?: () => number;
   /**
    * Optional decider for when to run a readiness poll. When omitted, every
    * `feed` call triggers an implicit poll at the event timestamp. Supplying one
@@ -57,8 +82,9 @@ export type OpenReadinessOptions = {
  *
  * `events` are expected in chronological order. Each is fed into the controller;
  * when the navigation becomes `failed` or `readable` the walk stops. The clock
- * starts at `startTime` and advances with each event's `timestamp` unless a
- * poll cadence is supplied via `options.shouldPoll`.
+ * starts at `startTime` and advances with each event's `timestamp`; the
+ * deadline is checked against the event timeline, or against `options.now()`
+ * when an injected clock is supplied.
  */
 export function driveOpenReadiness(
   controller: BrowserLifecycleController,
@@ -95,8 +121,12 @@ export function driveOpenReadiness(
       }
     }
 
-    // Deadline sanity check — refuse to keep walking past the deadline.
-    if (now >= deadline) {
+    // Deadline check. Without an injected clock this is a deterministic replay,
+    // so the deadline is evaluated against the event timeline `now`; with an
+    // injected clock it reflects real elapsed time. In both cases the driver
+    // refuses to keep walking past the deadline.
+    const currentTime = options.now ? options.now() : now;
+    if (currentTime >= deadline) {
       const late = controller.getSnapshot();
       if (late.navigation?.phase !== 'readable') {
         return { status: 'timed_out', snapshot: late };
@@ -104,7 +134,9 @@ export function driveOpenReadiness(
     }
   }
 
-  // Ran out of events before reaching readable or failed.
+  // Ran out of events before reaching readable or failed. Only report
+  // `timed_out` once the deadline has actually elapsed; ending the event array
+  // early does not itself mean time expired.
   const final = controller.getSnapshot();
   if (final.navigation?.phase === 'readable') {
     return { status: 'readable', snapshot: final };
@@ -116,7 +148,10 @@ export function driveOpenReadiness(
       snapshot: final,
     };
   }
-  return { status: 'timed_out', snapshot: final };
+  if ((options.now ? options.now() : now) >= deadline) {
+    return { status: 'timed_out', snapshot: final };
+  }
+  return { status: 'pending', snapshot: final };
 }
 
 /**

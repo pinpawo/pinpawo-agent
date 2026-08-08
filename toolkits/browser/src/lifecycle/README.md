@@ -69,13 +69,25 @@ The extension already reports navigation and lifecycle transitions as
 `browser.event` messages. `BrowserExtensionBridge` now exposes
 `onRuntimeEvent(listener)` and forwards every incoming event (including the
 legacy `tab.navigated`, mapped onto `navigation.committed`) as a unified
-`BrowserRuntimeEvent` stamped with connection + target generation. The
-`BrowserLifecycleController` consumes this stream, applies it through
-`applyNavigationEvent`/`defaultPageReadinessPolicy`, rejects stale events via
-`isEventCurrent`, and exposes a read-only snapshot (`hasActiveNavigation`,
-`phase`, `readable`, `error`, `generation`, `context`).
+`BrowserRuntimeEvent`. Navigation-scoped events (`navigation.*`, `document.ready`,
+`network.activity`, `dom.changed`, popup/download) are additionally stamped with
+the active `navigationGeneration` (bumped via `beginNavigation()`, or
+automatically when a `navigate` command is dispatched), so `isEventCurrent` can
+drop late events that belong to a superseded navigation.
 
-Next steps (per the issue's suggested order) are to wire the controller into
-`browser_open`/interaction tools around the resulting readiness and to have the
-extension emit the finer-grained `network.activity` / `dom.changed` /
-`document.ready` events that the reducer already supports.
+`BrowserLifecycleController` and `openReadiness.ts` provide the pure consumer of
+this stream: they merge events via `applyNavigationEvent`/
+`defaultPageReadinessPolicy`, reject stale events via `isEventCurrent`, and
+expose a read-only snapshot (`hasActiveNavigation`, `phase`, `readable`, `error`,
+`generation`, `context`). The controller also fails a navigation deterministically
+when the connection/target generation is superseded under it (`runtime_disconnected`
+/ `target_closed`) and ignores malformed url-less commits rather than treating
+them as benign intermediate steps.
+
+**Note:** the event stream is forwarded but **not yet consumed in production** —
+nothing in the runtime/session currently subscribes to `onRuntimeEvent` and drives
+`BrowserLifecycleController` end-to-end. Next steps (per the issue's suggested
+order) are to wire the controller into `browser_open`/interaction tools around
+the resulting readiness and to have the extension emit the finer-grained
+`network.activity` / `dom.changed` / `document.ready` events the reducer already
+supports.

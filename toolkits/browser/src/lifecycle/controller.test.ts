@@ -63,11 +63,35 @@ test('a stale (superseded-generation) commit is dropped', () => {
   assert.equal(controller.getSnapshot().navigation?.committedUrl, undefined);
 });
 
-test('an event from a different connection generation is dropped', () => {
+// -- Stale vs. superseded generations (issue #583 review) --
+// A *lower/older* generation is stale and is silently dropped. A *higher*
+// generation means the bridge moved on (target closed, reconnected): our
+// navigation's context is obsolete, so waiters must get a determinate result
+// instead of hanging until the deadline.
+test('a stale event from an older connection generation is dropped', () => {
+  const controller = new BrowserLifecycleController();
+  controller.beginNavigation('https://example.com/', 'https://example.com', 1, 1);
+  // Event from generation 0 (< the bound 1) — stale, silently dropped.
+  controller.handleEvent(committedEvent(0, 1, 1, 'https://example.com/'));
+  assert.equal(controller.getSnapshot().navigation?.phase, 'requested');
+});
+
+test('an event from a superseded (newer) connection generation fails with runtime_disconnected', () => {
   const controller = new BrowserLifecycleController();
   controller.beginNavigation('https://example.com/', 'https://example.com', 1, 1);
   controller.handleEvent(committedEvent(2, 1, 1, 'https://example.com/'));
-  assert.equal(controller.getSnapshot().navigation?.phase, 'requested');
+  const snapshot = controller.getSnapshot();
+  assert.equal(snapshot.navigation?.phase, 'failed');
+  assert.equal(snapshot.navigation?.error?.code, 'runtime_disconnected');
+});
+
+test('an event from a superseded (newer) target generation fails with target_closed', () => {
+  const controller = new BrowserLifecycleController();
+  controller.beginNavigation('https://example.com/', 'https://example.com', 1, 1);
+  controller.handleEvent(committedEvent(1, 2, 1, 'https://example.com/'));
+  const snapshot = controller.getSnapshot();
+  assert.equal(snapshot.navigation?.phase, 'failed');
+  assert.equal(snapshot.navigation?.error?.code, 'target_closed');
 });
 
 test('a cross-origin commit fails the navigation with origin_changed', () => {
@@ -160,4 +184,66 @@ test('beginNavigation advances the generation on each call', () => {
   const g2 = controller.getSnapshot().context?.navigationGeneration;
   assert.equal(typeof g1, 'number');
   assert.equal(g2, (g1 as number) + 1);
+});
+
+// -- A url-less commit is malformed, not a benign intermediate (review #3) --
+test('a url-less navigation.committed is explicitly ignored, not treated as intermediate', () => {
+  const controller = new BrowserLifecycleController();
+  controller.beginNavigation('https://example.com/', 'https://example.com', 1, 1);
+  controller.handleEvent({
+    connectionGeneration: 1,
+    targetGeneration: 1,
+    navigationGeneration: 1,
+    tabId: 1,
+    timestamp: 0,
+    type: 'navigation.committed',
+    // no `url` — malformed (the legacy `tab.navigated` can arrive without a URL)
+  });
+  const snapshot = controller.getSnapshot();
+  // Nav stays in `requested`, and crucially it must NOT be silently accepted as
+  // if it committed into the current navigation.
+  assert.equal(snapshot.navigation?.phase, 'requested');
+  assert.equal(snapshot.navigation?.committedUrl, undefined);
+});
+
+// -- Bridge-shaped events (review #1) --
+// The bridge stamps connection + target generation but (before fixing the
+// emission) never `navigationGeneration`. Such an event must still be accepted
+// as belonging to the current navigation, not mis-rejected as stale purely
+// because it lacks a navigation generation.
+test('a bridge-shaped event without navigationGeneration is accepted as current', () => {
+  const controller = new BrowserLifecycleController();
+  controller.beginNavigation('https://example.com/', 'https://example.com', 1, 1);
+  controller.handleEvent({
+    connectionGeneration: 1,
+    targetGeneration: 1,
+    // note: no `navigationGeneration`
+    tabId: 1,
+    timestamp: 0,
+    type: 'navigation.committed',
+    url: 'https://example.com/',
+  });
+  const snapshot = controller.getSnapshot();
+  assert.equal(snapshot.navigation?.phase, 'committed');
+  assert.equal(snapshot.navigation?.committedUrl, 'https://example.com/');
+});
+
+// -- A superseded navigation generation is a stale event (SPA route) and is
+//    dropped — it must not fail the current navigation (that would be wrong,
+//    since the older navigation's late events simply no longer apply). --
+test('a stale navigation-generation commit is dropped, not failing the current nav', () => {
+  const controller = new BrowserLifecycleController();
+  controller.beginNavigation('https://example.com/', 'https://example.com', 1, 1);
+  controller.handleEvent({
+    connectionGeneration: 1,
+    targetGeneration: 1,
+    navigationGeneration: 5,
+    tabId: 5,
+    timestamp: 0,
+    type: 'document.ready',
+    payload: { readyState: 'complete' },
+  });
+  // The pending navigation is generation 1, so a navGeneration-5 event is stale
+  // and dropped — current state (requested) is untouched.
+  assert.equal(controller.getSnapshot().navigation?.phase, 'requested');
 });

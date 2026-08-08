@@ -73,7 +73,9 @@ test('fails fast on a cross-origin redirect (origin_changed)', () => {
 test('timed out if the page never becomes readable by the deadline', () => {
   const controller = new BrowserLifecycleController();
   controller.beginNavigation('https://example.com/', 'https://example.com', 1, 1);
-  // Shell complete but body text never sampled → never readable.
+  // Shell complete but body text never sampled → never readable. Report
+  // `timed_out` once the real deadline (injected clock) has passed, not merely
+  // because the recorded event array ended.
   const outcome = driveOpenReadiness(
     controller,
     [
@@ -82,10 +84,28 @@ test('timed out if the page never becomes readable by the deadline', () => {
       network(0, T0 + 10),
     ],
     T0,
-    { deadlineMs: 1000 },
+    { deadlineMs: 1000, now: () => T0 + 1001 },
   );
   assert.equal(outcome.status, 'timed_out');
-  assert.equal(outcome.snapshot.navigation?.phase, 'settling');
+});
+
+test('a page that goes quiet before the deadline is pending, not timed_out', () => {
+  const controller = new BrowserLifecycleController();
+  controller.beginNavigation('https://example.com/', 'https://example.com', 1, 1);
+  // Events stop mid-navigation; the injected clock has NOT yet passed the
+  // deadline. This must NOT be reported as `timed_out` merely because the
+  // array ended — the driver leaves it `pending` for the caller to keep polling.
+  const outcome = driveOpenReadiness(
+    controller,
+    [
+      committed('https://example.com/', T0),
+      ready('complete', T0 + 5),
+      network(0, T0 + 10),
+    ],
+    T0,
+    { deadlineMs: 1000, now: () => T0 + 500 },
+  );
+  assert.equal(outcome.status, 'pending');
 });
 
 test('default deadline equals the controller navigation timeout', () => {

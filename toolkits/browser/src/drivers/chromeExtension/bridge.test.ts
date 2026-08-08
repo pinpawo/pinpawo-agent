@@ -470,6 +470,73 @@ test('local browser bridge forwards browser events to runtime subscribers', asyn
   assert.equal(typeof nav.timestamp, 'number');
 });
 
+test('local browser bridge stamps navigationGeneration on navigation-scoped events after beginNavigation', async (t) => {
+  const root = await mkdtemp(resolve(tmpdir(), 'pinpawo-browser-bridge-navgen-'));
+  const bridge = new BrowserExtensionBridge({
+    socketPath: resolve(root, 'bridge.sock'),
+    tokenPath: resolve(root, 'bridge.token'),
+    tokenFactory: () => 'test-token',
+    logger: { info() {}, warn() {}, error() {} },
+  });
+  await bridge.start();
+  t.after(async () => bridge.stop());
+
+  const received: Array<Record<string, unknown>> = [];
+  const unsubscribe = bridge.onRuntimeEvent((event) => {
+    received.push(event as unknown as Record<string, unknown>);
+  });
+  t.after(unsubscribe);
+
+  const peer = await connectLinePeer(bridge.getStatus().socketPath);
+  t.after(() => peer.socket.destroy());
+  peer.send({
+    type: 'bridge.hello',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    token: 'test-token',
+    hostPid: process.pid,
+  });
+  await peer.nextLine();
+  peer.send({
+    type: 'browser.register',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    extensionId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    capabilities: ['navigate', 'snapshot'],
+    activeTab: { tabId: 42, binding: 'user' },
+    state: { revision: 1, debuggerAttached: true, activeTab: { tabId: 42, binding: 'user' } },
+  });
+  await waitUntil(() => bridge.getStatus().connectionId === 'connection-1');
+
+  // A navigation starts: the explicit boundary stamps subsequent nav-scoped
+  // events with a navigation generation.
+  const g1 = bridge.beginNavigation();
+  peer.send({
+    type: 'browser.event',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    event: 'document.ready',
+    tabId: 42,
+    payload: { readyState: 'complete' },
+  });
+  await waitUntil(() => received.length === 1);
+  assert.equal(received[0].type, 'document.ready');
+  assert.equal(received[0].navigationGeneration, g1);
+
+  // A second beginNavigation bumps the generation.
+  const g2 = bridge.beginNavigation();
+  assert.equal(g2, g1 + 1);
+  peer.send({
+    type: 'browser.event',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    event: 'navigation.committed',
+    tabId: 42,
+    url: 'https://example.com/route-a',
+  });
+  await waitUntil(() => received.length === 2);
+  assert.equal(received[1].navigationGeneration, g2);
+});
+
 test('local browser bridge maps legacy tab.navigated onto navigation.committed and bumps target generation on close', async (t) => {
   const root = await mkdtemp(resolve(tmpdir(), 'pinpawo-browser-bridge-legacy-'));
   const bridge = new BrowserExtensionBridge({

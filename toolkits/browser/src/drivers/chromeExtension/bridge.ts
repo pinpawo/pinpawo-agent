@@ -26,6 +26,25 @@ import {
   type BrowserRuntimeEventType,
 } from '../../lifecycle/events';
 
+/**
+ * Event types that are scoped to a navigation generation. These are stamped
+ * with the active navigation generation so a late event from a superseded
+ * navigation (e.g. an SPA route change) cannot mutate the current one.
+ * Target/connection-lifecycle events (`target.*`, `debugger.*`,
+ * `runtime.disconnected`) carry only connection + target generation and are
+ * intentionally not navigation-scoped.
+ */
+const NAVIGATION_SCOPED_EVENT_TYPES = new Set<BrowserRuntimeEventType>([
+  'navigation.requested',
+  'navigation.committed',
+  'document.ready',
+  'network.activity',
+  'dom.changed',
+  'popup.created',
+  'download.started',
+  'download.finished',
+]);
+
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
 const MAX_BRIDGE_LINE_BYTES = 4 * 1024 * 1024;
 
@@ -136,6 +155,8 @@ export class BrowserExtensionBridge {
   private targetAlive = false;
   private connectionGeneration = 1;
   private targetGeneration = 1;
+  /** Tracks the active navigation generation for event stamping. */
+  private navigationGeneration = 0;
   private readonly pending = new Map<string, PendingCommand>();
   private readonly runtimeEventListeners = new Set<(event: BrowserRuntimeEvent) => void>();
 
@@ -184,6 +205,23 @@ export class BrowserExtensionBridge {
   }
 
   /**
+   * Starts a new navigation generation. The bridge stamps every subsequent
+   * navigation-scoped event (navigation.*, document.ready, network.activity,
+   * dom.changed, popup, download) with this generation so the consumer's
+   * `isEventCurrent` can drop late events that belong to a superseded
+   * navigation. Returns the new generation.
+   *
+   * The bridge itself does not decide when a navigation begins (that is the
+   * Runtime's job per issue #583) — it only learns the boundary from whoever
+   * drives the navigation (typically the caller of `sendCommand('navigate', …)`
+   * or the Runtime wiring) and fans the generation stamp out to the stream.
+   */
+  beginNavigation(): number {
+    this.navigationGeneration += 1;
+    return this.navigationGeneration;
+  }
+
+  /**
    * Normalize an extension-reported `browser.event` into the unified Runtime
    * event envelope and fan it out to subscribers. Events are stamped with the
    * current connection + target generation so the consumer's `isEventCurrent`
@@ -202,6 +240,9 @@ export class BrowserExtensionBridge {
       targetGeneration: this.targetGeneration,
       tabId: message.tabId ?? this.getStatus().activeTabId ?? 0,
       timestamp: Date.now(),
+      ...(NAVIGATION_SCOPED_EVENT_TYPES.has(message.event)
+        ? { navigationGeneration: this.navigationGeneration }
+        : {}),
       type: message.event,
       ...(message.url !== undefined ? { url: message.url } : {}),
       ...(message.payload !== undefined ? { payload: message.payload } : {}),
@@ -326,6 +367,10 @@ export class BrowserExtensionBridge {
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
       throw new Error('browser extension command timeout must be positive');
     }
+
+    // A `navigate` command starts a new navigation: bump the generation so
+    // subsequent events (document.ready, network, dom, …) are stamped with it.
+    if (command === 'navigate') this.beginNavigation();
 
     const requestId = randomUUID();
     const deadlineAt = new Date(Date.now() + timeoutMs).toISOString();

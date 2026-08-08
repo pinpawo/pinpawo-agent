@@ -96,6 +96,25 @@ export class BrowserLifecycleController {
     if (!this.pending) return this.getSnapshot();
     const { state, context } = this.pending;
 
+    // Detect a superseded connection/target generation. When the bridge moves
+    // to a newer generation (target closed, extension reconnected), subsequent
+    // events carry a *higher* generation than this navigation was bound to.
+    // Staying silent would hang the navigation until its deadline with no
+    // distinguishing error — instead fail deterministically so waiters get a
+    // definitive result (per issue #583: on detach/reconnect, "等待者得到确定结果").
+    const connectionSuperseded = event.connectionGeneration > context.connectionGeneration;
+    const targetSuperseded = event.targetGeneration > context.targetGeneration;
+    if ((connectionSuperseded || targetSuperseded) && state.phase !== 'failed') {
+      return this.fail({
+        code: connectionSuperseded ? 'runtime_disconnected' : 'target_closed',
+        message: connectionSuperseded
+          ? 'browser connection was superseded while navigation was in flight'
+          : 'managed target was closed while navigation was in flight',
+        retryable: true,
+        details: { connectionGeneration: context.connectionGeneration, targetGeneration: context.targetGeneration },
+      });
+    }
+
     // Reject late events before touching state.
     if (!isEventCurrent(event, context)) return this.getSnapshot();
 
@@ -170,7 +189,11 @@ export class BrowserLifecycleController {
   ): NavigationApplyEvent | null {
     switch (event.type) {
       case 'navigation.committed':
-        if (typeof event.url !== 'string') return { kind: 'commit', url: '' };
+        // A commit URL is required to evaluate the origin. A url-less commit is
+        // malformed (the legacy `tab.navigated` can arrive without a URL): it is
+        // not a benign intermediate nor a genuine origin change, so explicitly
+        // ignore it rather than route `''` through the origin comparison.
+        if (typeof event.url !== 'string') return null;
         return { kind: 'commit', url: event.url };
       case 'document.ready': {
         const readyState = event.payload?.readyState as
@@ -204,5 +227,3 @@ export class BrowserLifecycleController {
     }
   }
 }
-
-export type BrowserLifecycleControllerType = BrowserLifecycleController;

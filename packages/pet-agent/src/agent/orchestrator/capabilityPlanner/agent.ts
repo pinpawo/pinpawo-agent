@@ -37,7 +37,6 @@ const RETURN_TO_ANSWER_TOOL_NAME = 'return_to_answer';
 const DIRECT_TEXT_REASON = 'plan direct text';
 
 const plannerAgentStateSchema = z.object({
-  grepSearchCount: z.number().int().nonnegative().default(0),
   submittedPlan: z.array(z.object({
     capability: z.string(),
     task: z.string(),
@@ -190,6 +189,26 @@ function buildGrepSearchLimitSystemPrompt(input: CapabilityPlannerInput) {
   ].join('\n');
 }
 
+function countGrepSearchToolMessages(messages: readonly BaseMessage[]) {
+  const seenToolCallIds = new Set<string>();
+  let count = 0;
+  for (const message of messages) {
+    if (!(message instanceof ToolMessage)
+      || message.name !== CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME) {
+      continue;
+    }
+    const identifier = message.tool_call_id || message.id;
+    if (identifier && seenToolCallIds.has(identifier)) {
+      continue;
+    }
+    if (identifier) {
+      seenToolCallIds.add(identifier);
+    }
+    count += 1;
+  }
+  return count;
+}
+
 function plannerToolErrorResult(params: {
   name: string;
   args: unknown;
@@ -208,18 +227,15 @@ function plannerToolErrorResult(params: {
 }
 
 /**
- * Private state for one Capability Planner invocation. A successful
- * `grep_search` attempts and a successful `submit_plan` stay private to one
- * invocation. Their following model call receives the relevant closing
- * instruction, without adding transient Planner state to the orchestrator.
+ * A successful `submit_plan` stays private to one Capability Planner
+ * invocation. `grep_search` is counted from the immutable tool trace, so
+ * parallel search calls do not introduce concurrent custom-state updates.
  */
 function createPlannerSubmissionStateMiddleware(input: CapabilityPlannerInput) {
   return createMiddleware({
     name: 'CapabilityPlannerSubmissionState',
     stateSchema: plannerAgentStateSchema,
     wrapToolCall: async (request, handler) => {
-      const isGrepSearch = request.toolCall.name === CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME;
-      const nextGrepSearchCount = request.state.grepSearchCount + 1;
       let result: ToolMessage | Command;
       try {
         result = await handler(request);
@@ -230,22 +246,7 @@ function createPlannerSubmissionStateMiddleware(input: CapabilityPlannerInput) {
           id: request.toolCall.id,
           error,
         });
-        return isGrepSearch
-          ? new Command({
-              update: {
-                messages: [errorResult],
-                grepSearchCount: nextGrepSearchCount,
-              },
-            })
-          : errorResult;
-      }
-      if (isGrepSearch && ToolMessage.isInstance(result)) {
-        return new Command({
-          update: {
-            messages: [result],
-            grepSearchCount: nextGrepSearchCount,
-          },
-        });
+        return errorResult;
       }
       if (
         request.toolCall.name !== SUBMIT_PLAN_TOOL_NAME
@@ -266,8 +267,9 @@ function createPlannerSubmissionStateMiddleware(input: CapabilityPlannerInput) {
     },
     wrapModelCall: (request, handler) => {
       const submittedPlan = request.state.submittedPlan;
+      const grepSearchCount = countGrepSearchToolMessages(request.state.messages);
       const systemPrompts = [
-        ...(request.state.grepSearchCount >= MAX_GREP_SEARCH_CALLS
+        ...(grepSearchCount >= MAX_GREP_SEARCH_CALLS
           ? [buildGrepSearchLimitSystemPrompt(input)]
           : []),
         ...(submittedPlan ? [buildSubmittedPlanSystemPrompt(submittedPlan)] : []),

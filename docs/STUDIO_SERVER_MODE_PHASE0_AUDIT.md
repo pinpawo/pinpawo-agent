@@ -41,17 +41,44 @@ TUI  /studio <task>          services/tui/src/commands/composerIntent.ts
                                  createPetAgentRuntime.ts:219-232
 ```
 
-### 1.1 每请求重建的具体证据
+### 1.1 目标 vs 现状：Studio 没有"启动"这一步
 
-`buildStudioForTurn()` 的 doc comment 明确写着这是设计意图：
+先把两者摆在一起，因为它们是**相反**的：
+
+| | 启动时 | 请求到来时 |
+| --- | --- | --- |
+| **#561 要求的目标** | 把配置读完，所有启用的 pet agent 建好并常驻 | 查到已建好的实例，`invoke()` 一下 |
+| **当前代码实际做的** | 什么都不做（Studio 没有启动环节） | 从读配置文件开始，把全部 pet 现建一遍，用完丢掉 |
+
+也就是说：**Studio 现在没有"已启动完成的实例"可供调用**。下一个请求进来，
+再从头建一遍。这正是 #561 存在的理由，Phase 3 的 `StudioRuntimeHost` 就是要
+把上表左列变成现实。
+
+#### 证据
+
+`buildStudioForTurn()` 的函数名里 `ForTurn` 就是"每一轮一次"。它的 doc comment
+明确写着这是设计意图：
 
 > 每次 /studio turn 调用一次，fresh build，不 cache。Pet runtime 构造很轻，且
 > 不 cache 让配置改动即生效。
 > — [studioRuntime.ts:110-112](services/local-agent/src/studio/studioRuntime.ts#L110)
 
-这条前提在 #561 下不再成立：`createPetAgentRuntime()` 会走
-`createOrchestratorGraph()`（[createPetAgentRuntime.ts:151](packages/pet-agent/src/agent/studio/createPetAgentRuntime.ts#L151)），
-每个 pet 每次请求都重新 compile 一次 graph；"构造很轻"只对 pet 数量很少时成立。
+这个函数体每次请求跑完整四步：
+
+```text
+loadStudioLocalConfig()      读 studio.json
+loadPetLocalConfigs()        读 pets/*.json
+createPetAgentRuntime() × N  建 N 个 pet，每个编译一次 graph
+createStudioOrchestrator()   建 orchestrator
+```
+
+注释给的两条理由都不再成立：
+
+- **"构造很轻"** — `createPetAgentRuntime()` 内部会调
+  `createOrchestratorGraph()`（[createPetAgentRuntime.ts:151](packages/pet-agent/src/agent/studio/createPetAgentRuntime.ts#L151)），
+  也就是**编译 LangGraph 图**。5 个 pet 就是每个请求编译 5 次。
+- **"不 cache 让配置改动即生效"** — #561 已明确否掉：V1 不做 config hot reload，
+  配置变化通过**重启 host** 生效。
 
 唯一已经做了跨请求缓存的是 run queue store：
 `runQueueStoresByPath` + `restoredRunQueuePaths` 两个 module-level Map
@@ -168,9 +195,13 @@ Phase 1 只解决**启动语义**，不动执行路径：
 - **C13 已解决** — `preflightStudioMode()` 在 server 启动、任何长期资源创建
   之前校验 studio.json / pets 与 planner 归属，失败即终止启动，不降级到 chat。
 - **C1–C11 仍开放** — 这些属于执行期契约，由 Phase 2–4 处理。Phase 1 新增的
-  `studioApiContract.ts` 只是把目标形状**固定下来**（invocation identity、
-  scoped cancel、计数式 capacity、cursor 事件、结构化错误码），尚未接线到
-  运行时。
+  `studioApiContract.ts` 只把目标形状**固定下来**（invocation identity、
+  scoped cancel、wiki 变更事件、错误码），尚未接线到运行时。
+
+另外，Studio 的改动**不背兼容包袱**：Phase 1 已经删掉 `run` 命令（只留
+`server`）、把 `serverMode` 定为必填而非可选兜底。后续 Phase 同样直接删除
+旧的 Studio 路径，而不是收缩或保留别名。Chat 保护区不受此影响——那是 issue
+明确的保护面，与"Studio 不需要兼容"不冲突。
 
 `threadId` 是一个已经正确的点：现有格式已含足够 namespace
 `studio:{studioId}:thread:{conversationId}:pet:{petId}:dispatch:{dispatchId}`
@@ -179,7 +210,17 @@ Phase 4 只需把 `dispatch` 段正名为 `invocation` 并补 `runId`/`taskIndex
 
 ---
 
-## 5. Studio API 现状与 Web-first 差距
+## 5. Studio 的对外 HTTP 协议层
+
+**这一层是薄的。** 它不是一个交互式 Web 应用的后端，只是 Studio 的协议出口：
+
+- 一个 `POST` 提交 user request；
+- 一条 SSE 推送 **wiki 知识库变更**。
+
+SSE 只推 wiki —— 对外暴露的是 Studio 的**产出**，不是执行过程。task 调度、
+pet invocation、工具执行这些编排细节都不出协议边界。事件形状沿用 orchestrator
+既有的 `wiki_changed`（`changedPaths`），只说哪些路径变了，不带内容或摘要；
+需要内容的消费者自己去读 wiki。
 
 当前 HTTP 路由（[localHttpHandlers.ts](services/local-agent/src/localHttpHandlers.ts)）：
 
@@ -189,18 +230,10 @@ Phase 4 只需把 `dispatch` 段正名为 `invocation` 并补 `runId`/`taskIndex
 ```
 
 Studio 的 submit / event / review / cancel **全部只走 WebSocket 的
-`studio_request` + `human_review_response`**，没有独立的 Studio HTTP 命令面。
-Web-first 所需但当前缺失的能力：
+`studio_request` + `human_review_response`**，没有独立的 Studio HTTP 面。
 
-- submit run（仅 ws）
-- 查询 run/queue/capacity 状态（`/studio_due_runs` 只覆盖 due run）
-- 事件订阅带 cursor 的 resume/reconnect（当前事件绑死在发起请求的那条 ws）
-- 按 invocation identity 提交 review（当前按 peer 单槽）
-- scoped cancel（当前只有整 turn abort）
-
-**结论**：Phase 1 需要固定的不只是"加一个 `--mode` flag"，而是把上述 5 项写成
-显式的命令/查询/事件/错误四类 schema，并从第一版就允许多个同时存在的
-run/task/invocation。
+**实现时机**：HTTP 层在后续 Phase 实现。Phase 1 只定协议形状
+（`studio/studioApiContract.ts`），不接线运行时。
 
 ---
 

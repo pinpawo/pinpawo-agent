@@ -9,7 +9,7 @@ import { parseServerMode, type ServerMode } from './serverMode';
 type LocalAgentCliHandlers = {
   runLogin?: () => Promise<void> | void;
   runActorSelect?: () => Promise<void> | void;
-  runAgent?: (opts: { workdir?: string; stdio: boolean; mode?: ServerMode }) => Promise<void> | void;
+  runAgent?: (opts: { workdir?: string; stdio: boolean; mode: ServerMode }) => Promise<void> | void;
   runTui?: (opts: { dryRun: boolean; workdir?: string }) => Promise<void> | void;
   runTuiV2?: (opts: {
     workdir?: string;
@@ -91,21 +91,6 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
     .action(async () => {
       const runActorSelect = handlers.runActorSelect ?? (await import('./actorSelection')).runActorSelect;
       await runActorSelect();
-    });
-
-  program
-    .command('run')
-    .description('Start the local agent service')
-    .option('--workdir <directory>', 'agent working directory for runtime state and relative tool paths')
-    .option('--stdio', 'use one-peer JSONL stdio instead of the local HTTP/WebSocket server')
-    .option('--mode <mode>', 'server mode: chat (default) or studio', 'chat')
-    .action(async (options: { workdir?: string; stdio?: boolean; mode?: string }) => {
-      const runAgent = handlers.runAgent ?? (await import('./commands/run')).runAgent;
-      await runAgent({
-        workdir: options.workdir?.trim() ? resolveWorkdirOption(options.workdir) : undefined,
-        stdio: options.stdio ?? false,
-        mode: parseServerMode(options.mode),
-      });
     });
 
   program
@@ -204,7 +189,7 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
 
 export async function runLocalAgentCli(argv = process.argv): Promise<void> {
   const program = createLocalAgentCli();
-  const effectiveArgv = argv.length <= 2 ? [...argv, 'run'] : argv;
+  const effectiveArgv = argv.length <= 2 ? [...argv, 'server'] : argv;
 
   try {
     await program.parseAsync(effectiveArgv);

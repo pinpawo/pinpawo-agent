@@ -81,8 +81,9 @@ pinpawo init
 pinpawo login
 pinpawo setup
 pinpawo actor
-pinpawo run
-pinpawo run --stdio
+pinpawo server
+pinpawo server --mode studio
+pinpawo server --stdio
 pinpawo tui
 pinpawo tui --v2
 pinpawo tui --legacy

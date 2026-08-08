@@ -5,10 +5,10 @@ import {
   STUDIO_ERROR_CODES,
   buildStudioThreadId,
   isStudioErrorCode,
-  parseStudioCancelCommand,
+  parseStudioCancelScope,
   parseStudioInvocationIdentity,
   type StudioInvocationIdentity,
-  type StudioStatusSnapshot,
+  type StudioWikiChangedEvent,
 } from './studioApiContract';
 
 const identity: StudioInvocationIdentity = {
@@ -21,61 +21,40 @@ const identity: StudioInvocationIdentity = {
   invocationId: 'inv-1',
 };
 
-describe('parseStudioCancelCommand', () => {
+describe('parseStudioCancelScope', () => {
   it('parses each cancel scope distinctly', () => {
     assert.deepEqual(
-      parseStudioCancelCommand({
-        command: 'studio.cancel', requestId: 'r1', scope: 'run', runId: 'run-1',
-      }),
-      { command: 'studio.cancel', requestId: 'r1', scope: 'run', runId: 'run-1' },
+      parseStudioCancelScope({ scope: 'run', runId: 'run-1' }),
+      { scope: 'run', runId: 'run-1' },
     );
     assert.deepEqual(
-      parseStudioCancelCommand({
-        command: 'studio.cancel', requestId: 'r1', scope: 'task', runId: 'run-1', taskId: 'task-a',
-      }),
-      { command: 'studio.cancel', requestId: 'r1', scope: 'task', runId: 'run-1', taskId: 'task-a' },
+      parseStudioCancelScope({ scope: 'task', runId: 'run-1', taskId: 'task-a' }),
+      { scope: 'task', runId: 'run-1', taskId: 'task-a' },
     );
     assert.deepEqual(
-      parseStudioCancelCommand({
-        command: 'studio.cancel', requestId: 'r1', scope: 'invocation', runId: 'run-1', invocationId: 'inv-1',
-      }),
-      {
-        command: 'studio.cancel', requestId: 'r1', scope: 'invocation', runId: 'run-1', invocationId: 'inv-1',
-      },
+      parseStudioCancelScope({ scope: 'invocation', runId: 'run-1', invocationId: 'inv-1' }),
+      { scope: 'invocation', runId: 'run-1', invocationId: 'inv-1' },
     );
   });
 
   it('rejects a scope-less cancel instead of defaulting to run scope', () => {
     // Guessing a scope here would stop sibling invocations that were never
-    // meant to be cancelled (#561: cancel must distinguish scopes).
-    assert.equal(
-      parseStudioCancelCommand({ command: 'studio.cancel', requestId: 'r1', runId: 'run-1' }),
-      null,
-    );
+    // meant to be cancelled.
+    assert.equal(parseStudioCancelScope({ runId: 'run-1' }), null);
   });
 
   it('rejects a task cancel that omits taskId', () => {
-    assert.equal(
-      parseStudioCancelCommand({
-        command: 'studio.cancel', requestId: 'r1', scope: 'task', runId: 'run-1',
-      }),
-      null,
-    );
+    assert.equal(parseStudioCancelScope({ scope: 'task', runId: 'run-1' }), null);
   });
 
   it('rejects an invocation cancel that omits invocationId', () => {
-    assert.equal(
-      parseStudioCancelCommand({
-        command: 'studio.cancel', requestId: 'r1', scope: 'invocation', runId: 'run-1',
-      }),
-      null,
-    );
+    assert.equal(parseStudioCancelScope({ scope: 'invocation', runId: 'run-1' }), null);
   });
 
-  it('rejects foreign commands', () => {
-    assert.equal(parseStudioCancelCommand({ command: 'chat_request' }), null);
-    assert.equal(parseStudioCancelCommand(null), null);
-    assert.equal(parseStudioCancelCommand([]), null);
+  it('rejects malformed input', () => {
+    assert.equal(parseStudioCancelScope(null), null);
+    assert.equal(parseStudioCancelScope([]), null);
+    assert.equal(parseStudioCancelScope({ scope: 'run' }), null);
   });
 });
 
@@ -105,12 +84,13 @@ describe('parseStudioInvocationIdentity', () => {
 
 describe('buildStudioThreadId', () => {
   it('separates concurrent invocations of the same pet in the same run', () => {
-    const a = buildStudioThreadId(identity);
-    const b = buildStudioThreadId({ ...identity, invocationId: 'inv-2' });
-    assert.notEqual(a, b);
+    assert.notEqual(
+      buildStudioThreadId(identity),
+      buildStudioThreadId({ ...identity, invocationId: 'inv-2' }),
+    );
   });
 
-  it('separates the same pet across different tasks and runs', () => {
+  it('separates the same pet across different tasks, runs and conversations', () => {
     assert.notEqual(
       buildStudioThreadId(identity),
       buildStudioThreadId({ ...identity, taskId: 'task-b' }),
@@ -130,39 +110,21 @@ describe('buildStudioThreadId', () => {
   });
 });
 
-describe('studio status snapshot shape', () => {
-  it('models capacity as counts so parallelism is not blocked by a boolean', () => {
-    // V1 may run with maxConcurrent 1, but the contract must express "how many"
-    // rather than a global busy flag (#561 design principle 4).
-    const snapshot: StudioStatusSnapshot = {
-      studioId: 'demo',
-      plannerPetId: 'lead',
-      workerPetIds: ['coder', 'writer'],
-      host: { maxConcurrent: 1, inUse: 1 },
-      pets: [
-        { petId: 'coder', maxConcurrent: 1, inUse: 1 },
-        { petId: 'writer', maxConcurrent: 2, inUse: 0 },
-      ],
-      leases: [{ identity, status: 'running', acquiredAt: '2026-08-09T00:00:00.000Z' }],
+describe('wiki change event', () => {
+  it('carries changed paths only, leaving content to be read from the wiki', () => {
+    // SSE exposes Studio's output, not its execution detail: no task, pet or
+    // tool information crosses this boundary.
+    const event: StudioWikiChangedEvent = {
+      type: 'wiki_changed',
+      runId: 'run-1',
+      conversationId: 'conv-1',
+      changedPaths: ['index.md', 'topics/auth.md'],
+      occurredAt: '2026-08-09T00:00:00.000Z',
     };
 
-    assert.equal(typeof snapshot.host.maxConcurrent, 'number');
-    // A busy pet must not imply the whole host is unavailable.
-    const writer = snapshot.pets.find((pet) => pet.petId === 'writer');
-    assert.ok(writer && writer.inUse < writer.maxConcurrent);
-  });
-
-  it('allows multiple simultaneous leases', () => {
-    const leases: StudioStatusSnapshot['leases'] = [
-      { identity, status: 'waiting_review', acquiredAt: '2026-08-09T00:00:00.000Z' },
-      {
-        identity: { ...identity, petId: 'writer', invocationId: 'inv-2', taskId: 'task-b', taskIndex: 1 },
-        status: 'running',
-        acquiredAt: '2026-08-09T00:00:01.000Z',
-      },
-    ];
-    assert.equal(leases.length, 2);
-    assert.notEqual(leases[0]!.identity.invocationId, leases[1]!.identity.invocationId);
+    assert.deepEqual(Object.keys(event).sort(), [
+      'changedPaths', 'conversationId', 'occurredAt', 'runId', 'type',
+    ]);
   });
 });
 

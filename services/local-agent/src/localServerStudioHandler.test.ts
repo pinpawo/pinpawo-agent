@@ -54,6 +54,7 @@ function createDeps(): LocalServerDeps {
     },
   );
   return {
+    serverMode: 'chat',
     actorId: 'pet-a',
     actorName: 'Pet A',
     workdir: '/tmp/pinpawo-test',

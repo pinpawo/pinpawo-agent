@@ -10,6 +10,7 @@ import { createTestModelServerDeps } from './testing/modelProfiles';
 
 function createDeps(): LocalServerDeps {
   return {
+    serverMode: 'chat',
     actorId: 'pet-a',
     ...createTestModelServerDeps(),
     workdir: '/tmp/legacy-workdir',

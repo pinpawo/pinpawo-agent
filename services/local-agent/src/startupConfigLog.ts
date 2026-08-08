@@ -6,7 +6,7 @@ import {
 } from './modelProfiles';
 
 export type StartupConfigSnapshot = {
-  mode: 'run' | 'tui';
+  mode: 'server' | 'tui';
   /** #561 server primary mode; absent for launch surfaces that have no mode. */
   serverMode?: ServerMode;
   workdir: string;
@@ -43,7 +43,7 @@ function readLangSmithTracingEnabled() {
 }
 
 export function buildStartupConfigSnapshot(params: {
-  mode: 'run' | 'tui';
+  mode: 'server' | 'tui';
   serverMode?: ServerMode;
   workdir: string;
   actorId?: string;
@@ -105,7 +105,7 @@ export function formatStartupConfigSnapshot(snapshot: StartupConfigSnapshot) {
 }
 
 export function logStartupConfig(params: {
-  mode: 'run' | 'tui';
+  mode: 'server' | 'tui';
   serverMode?: ServerMode;
   workdir: string;
   actorId?: string;

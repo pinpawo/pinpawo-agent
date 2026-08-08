@@ -229,7 +229,7 @@ test('local agent CLI runs setup guide handler', async () => {
   });
 });
 
-test('local agent CLI applies run workdir option before handler', async () => {
+test('local agent CLI applies server workdir option before handler', async () => {
   let received: { workdir?: string; stdio: boolean; mode?: string } | null = null;
   const program = createLocalAgentCli({
     runAgent: (options) => {
@@ -237,7 +237,7 @@ test('local agent CLI applies run workdir option before handler', async () => {
     },
   });
 
-  await program.parseAsync(['node', 'pinpawo', 'run', '--workdir', '/tmp/pinpawo-workdir']);
+  await program.parseAsync(['node', 'pinpawo', 'server', '--workdir', '/tmp/pinpawo-workdir']);
   assert.deepEqual(received, {
     workdir: '/tmp/pinpawo-workdir',
     stdio: false,
@@ -253,7 +253,7 @@ test('local agent CLI enables the single-peer JSONL stdio transport', async () =
     },
   });
 
-  await program.parseAsync(['node', 'pinpawo', 'run', '--stdio']);
+  await program.parseAsync(['node', 'pinpawo', 'server', '--stdio']);
   assert.deepEqual(received, {
     workdir: undefined,
     stdio: true,
@@ -285,18 +285,13 @@ test('local agent CLI passes studio mode through to the handler', async () => {
   assert.equal(received!.mode, 'studio');
 });
 
-test('local agent CLI keeps run as an alias that accepts the same mode', async () => {
-  // `run` stays for compatibility but must not grow a second runtime path:
-  // it dispatches to the identical handler with the identical options (#561).
-  let received: { mode?: string } | null = null;
-  const program = createLocalAgentCli({
-    runAgent: (options) => {
-      received = options;
-    },
-  });
+test('local agent CLI no longer exposes the legacy run command', async () => {
+  // Studio's rework carries no compatibility surface: `server` is the only
+  // entry point, so `run` must not resolve to a second runtime path (#561).
+  const program = createLocalAgentCli({ runAgent: () => undefined });
+  program.exitOverride();
 
-  await program.parseAsync(['node', 'pinpawo', 'run', '--mode', 'studio']);
-  assert.equal(received!.mode, 'studio');
+  await assert.rejects(() => program.parseAsync(['node', 'pinpawo', 'run']));
 });
 
 test('local agent CLI rejects an unknown server mode instead of falling back', async () => {

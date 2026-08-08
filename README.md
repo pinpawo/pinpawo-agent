@@ -226,14 +226,15 @@ The published package installs a `pinpawo` binary.
 
 | Command | Purpose |
 |---|---|
-| `pinpawo` | Starts the local agent service. Equivalent to `pinpawo run`. |
+| `pinpawo` | Starts the local agent server. Equivalent to `pinpawo server`. |
 | `pinpawo init` | Scaffolds local config and a sample capability. |
 | `pinpawo init --dir <dir>` | Scaffolds config into a custom directory. |
 | `pinpawo init --force` | Overwrites generated scaffold files. |
 | `pinpawo login` | Interactive setup for credentials and LLM settings. |
 | `pinpawo actor` | Chooses the pet actor used by the local agent. |
-| `pinpawo run` | Starts the local agent service. |
-| `pinpawo run --stdio` | Starts one local-agent peer over JSONL stdio. |
+| `pinpawo server` | Starts the local agent server in chat mode. |
+| `pinpawo server --mode studio` | Starts the server in Studio mode; fails fast on invalid Studio config. |
+| `pinpawo server --stdio` | Starts one local-agent peer over JSONL stdio. |
 | `pinpawo browser extension register --extension-id <id>` | Registers the Chrome Native Messaging host for the Browser extension driver. |
 | `pinpawo browser extension repair --extension-id <id>` | Rewrites the Native Messaging wrapper and manifests while retaining registered extension IDs. |
 | `pinpawo browser extension status` | Shows the Browser extension driver's host health and runtime-file diagnostics. |

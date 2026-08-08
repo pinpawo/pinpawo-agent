@@ -25,6 +25,7 @@ function createRuntimeConfig(workdir: string) {
 
 function createDeps(workdir: string): LocalServerDeps {
   return {
+    serverMode: 'chat',
     actorId: 'pet-a',
     ...createTestModelServerDeps(),
     workdir,

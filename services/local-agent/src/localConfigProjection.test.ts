@@ -18,6 +18,7 @@ import { createTestModelServerDeps } from './testing/modelProfiles';
 
 function createDeps(workdir: string): LocalServerDeps {
   return {
+    serverMode: 'chat',
     actorId: 'pet-test',
     ...createTestModelServerDeps({ contextWindowTokens: 32000 }),
     workdir,
@@ -74,8 +75,8 @@ test('session projection surfaces an unavailable selected profile without fallba
   assert.match(runtime.modelProfileIssues[0] ?? '', /Unknown model profile/);
 });
 
-test('runtime projection defaults to chat mode when deps carry no explicit mode', () => {
-  const deps = createDeps('/tmp/pinpawo-mode-default');
+test('runtime projection surfaces the startup-decided chat mode', () => {
+  const deps = createDeps('/tmp/pinpawo-mode-chat-projection');
 
   assert.equal(buildLocalRuntimeProjection(deps).serverMode, 'chat');
   assert.equal(buildLocalHttpRuntimeProjection(deps).server_mode, 'chat');

@@ -82,6 +82,7 @@ test('session.new returns an authoritative empty snapshot for a unique session',
     },
   };
   const handlers = createLocalServerHandlers({
+    serverMode: 'chat',
     actorId: 'pet-a',
     workdir,
     runtimeConfig: buildLocalAgentRuntimeConfig(workdir),
@@ -146,6 +147,7 @@ test('model protocol lists sanitized profiles and persists an acknowledged sessi
     },
   ], 'primary');
   const handlers = createLocalServerHandlers({
+    serverMode: 'chat',
     actorId: 'pet-a',
     workdir,
     runtimeConfig,
@@ -261,6 +263,7 @@ test('model selection keeps the previous profile when checkpoint preparation fai
     },
   } as unknown as LocalAgentGraphService;
   const handlers = createLocalServerHandlers({
+    serverMode: 'chat',
     actorId: 'pet-a',
     workdir,
     runtimeConfig,
@@ -324,6 +327,7 @@ test('removed session profile stays visible and blocks runs until explicitly rep
   const initialSent: LocalAgentServerMessage[] = [];
   const initialPeer = createPeer(initialSent);
   const initialHandlers = createLocalServerHandlers({
+    serverMode: 'chat',
     actorId: 'pet-a',
     workdir,
     runtimeConfig,
@@ -358,6 +362,7 @@ test('removed session profile stays visible and blocks runs until explicitly rep
   const sent: LocalAgentServerMessage[] = [];
   const peer = createPeer(sent);
   const handlers = createLocalServerHandlers({
+    serverMode: 'chat',
     actorId: 'pet-a',
     workdir,
     runtimeConfig,
@@ -441,6 +446,7 @@ test('model selection is rejected while the active session is running', async ()
   const started = deferred<void>();
   const release = deferred<void>();
   const handlers = createLocalServerHandlers({
+    serverMode: 'chat',
     actorId: 'pet-a',
     workdir,
     runtimeConfig: buildLocalAgentRuntimeConfig(workdir),
@@ -532,6 +538,7 @@ test('completion snapshot does not reintroduce a settled active run', async () =
     },
   } as unknown as LocalAgentGraphService;
   const handlers = createLocalServerHandlers({
+    serverMode: 'chat',
     actorId: 'pet-a',
     workdir,
     runtimeConfig: buildLocalAgentRuntimeConfig(workdir),
@@ -599,6 +606,7 @@ test('model selection blocks a chat admitted by another peer until the selection
     },
   } as unknown as LocalAgentGraphService;
   const handlers = createLocalServerHandlers({
+    serverMode: 'chat',
     actorId: 'pet-a',
     workdir,
     runtimeConfig: buildLocalAgentRuntimeConfig(workdir),
@@ -688,6 +696,7 @@ test('model selection is rejected while checkpoint state has pending review', as
     }),
   } as unknown as LocalAgentGraphService;
   const handlers = createLocalServerHandlers({
+    serverMode: 'chat',
     actorId: 'pet-a',
     workdir,
     runtimeConfig: buildLocalAgentRuntimeConfig(workdir),
@@ -753,6 +762,7 @@ test('admitted images gate model selection through the transcript', async () => 
     }),
   } as unknown as LocalAgentGraphService;
   const handlers = createLocalServerHandlers({
+    serverMode: 'chat',
     actorId: 'pet-a',
     workdir,
     runtimeConfig,
@@ -895,6 +905,7 @@ test('text-only selected profile rejects image admission before graph invocation
   const peer = createPeer(sent);
   let graphInvocations = 0;
   const handlers = createLocalServerHandlers({
+    serverMode: 'chat',
     actorId: 'pet-a',
     workdir,
     runtimeConfig,
@@ -972,6 +983,7 @@ test('runtime config update persists the safety level, acknowledges, and reaches
     },
   };
   const handlers = createLocalServerHandlers({
+    serverMode: 'chat',
     actorId: 'pet-a',
     workdir,
     runtimeConfig: buildLocalAgentRuntimeConfig(workdir),
@@ -1099,6 +1111,7 @@ test('runtime config update reports persistence failures without changing runtim
     },
   };
   const handlers = createLocalServerHandlers({
+    serverMode: 'chat',
     actorId: 'pet-a',
     workdir,
     runtimeConfig: buildLocalAgentRuntimeConfig(workdir),

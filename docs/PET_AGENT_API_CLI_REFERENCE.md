@@ -4,7 +4,7 @@
 
 主命令：`pinpawo`（来自 `services/local-agent/src/cli.ts`）
 
-默认行为：无子命令时等价执行 `pinpawo run`。
+默认行为：无子命令时等价执行 `pinpawo server`。
 
 ## 2. 命令列表
 
@@ -14,7 +14,11 @@
    - `--no-example-capability`：不生成示例能力
 2. `pinpawo login`
 3. `pinpawo actor`
-4. `pinpawo run`
+4. `pinpawo server`
+   - `--mode <chat|studio>`：server 主模式，默认 `chat`；studio 模式在启动时校验
+     Studio 配置，失败即终止启动
+   - `--workdir <directory>`：运行时状态与相对路径的工作目录
+   - `--stdio`：改用单 peer JSONL stdio 传输
 5. `pinpawo tui`
    - `--dry-run`：不落盘
 6. `pinpawo detect`

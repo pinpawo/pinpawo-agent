@@ -10,7 +10,6 @@ import {
 } from '../localServerStdioTransport';
 import type { LocalServerDeps } from '../localServerTypes';
 import {
-  DEFAULT_SERVER_MODE,
   preflightStudioMode,
   type ServerMode,
   type StudioModePreflight,
@@ -19,15 +18,15 @@ import {
 export type RunAgentOptions = {
   workdir?: string;
   stdio?: boolean;
-  /** #561: one server process has exactly one primary mode. Defaults to chat. */
-  mode?: ServerMode;
+  /** #561: one server process has exactly one primary mode. */
+  mode: ServerMode;
 };
 
-export function buildRunAgentRuntimeConfig(options: RunAgentOptions = {}) {
+export function buildRunAgentRuntimeConfig(options: Pick<RunAgentOptions, 'workdir'>) {
   return applyRuntimeWorkdir(options.workdir);
 }
 
-export async function runAgent(options: RunAgentOptions = {}) {
+export async function runAgent(options: RunAgentOptions) {
   const restoreConsole = options.stdio
     ? redirectConsoleToStdioDiagnostics()
     : () => undefined;
@@ -59,7 +58,7 @@ export async function runAgent(options: RunAgentOptions = {}) {
   try {
     await ensureActorSelected({ interactive: !options.stdio });
     const runtimeConfig = buildRunAgentRuntimeConfig(options);
-    const mode: ServerMode = options.mode ?? DEFAULT_SERVER_MODE;
+    const mode = options.mode;
 
     // Studio mode validates its config before any long-lived resource is
     // created, so an invalid Studio setup fails startup instead of silently
@@ -79,13 +78,13 @@ export async function runAgent(options: RunAgentOptions = {}) {
       );
     }
 
-    runtime = new LocalAgentRuntime(runtimeConfig);
+    runtime = new LocalAgentRuntime(runtimeConfig, mode);
 
     // Init loads Toolkit definitions and starts their optional runtimes before
     // any local transport begins accepting execution requests.
     await runtime.init();
     logStartupConfig({
-      mode: 'run',
+      mode: 'server',
       serverMode: mode,
       workdir: runtimeConfig.workdir,
       actorId: runtime.getActorId(),

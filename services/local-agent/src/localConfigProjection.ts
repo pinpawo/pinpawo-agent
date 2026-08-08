@@ -7,10 +7,9 @@ import {
   type ToolAuthorizationSafetyLevel,
 } from '@pinpawo/agent-contracts';
 import { readLocalAgentPackageVersion } from './packageVersion';
-import {
-  getLocalServerMode,
-  type LocalServerDeps,
-  type LocalServerStudioModeInfo,
+import type {
+  LocalServerDeps,
+  LocalServerStudioModeInfo,
 } from './localServerTypes';
 import type { ServerMode } from './serverMode';
 import type { ModelInputModality } from './modelProfiles';
@@ -48,7 +47,7 @@ export function buildLocalRuntimeProjection(
   const profile = deps.modelProfiles.snapshot.profiles[modelProfileId];
   if (!profile) {
     return {
-      serverMode: getLocalServerMode(deps),
+      serverMode: deps.serverMode,
       ...(deps.studioMode ? { studioMode: deps.studioMode } : {}),
       modelProfileId,
       modelProfileLabel: modelProfileId,
@@ -79,7 +78,7 @@ export function buildLocalRuntimeProjection(
   const llmConfig = deps.modelProfiles.resolve(modelProfileId);
 
   return {
-    serverMode: getLocalServerMode(deps),
+    serverMode: deps.serverMode,
     ...(deps.studioMode ? { studioMode: deps.studioMode } : {}),
     modelProfileId,
     modelProfileLabel: profile.label,

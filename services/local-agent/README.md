@@ -82,6 +82,7 @@ pinpawo login
 pinpawo setup
 pinpawo actor
 pinpawo server
+pinpawo run
 pinpawo server --mode studio
 pinpawo server --stdio
 pinpawo tui

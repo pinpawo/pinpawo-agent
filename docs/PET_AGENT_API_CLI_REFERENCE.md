@@ -14,7 +14,7 @@
    - `--no-example-capability`：不生成示例能力
 2. `pinpawo login`
 3. `pinpawo actor`
-4. `pinpawo server`
+4. `pinpawo server`（`pinpawo run` 为等价别名）
    - `--mode <chat|studio>`：server 主模式，默认 `chat`；studio 模式在启动时校验
      Studio 配置，失败即终止启动
    - `--workdir <directory>`：运行时状态与相对路径的工作目录

@@ -93,20 +93,26 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
       await runActorSelect();
     });
 
-  program
-    .command('server')
-    .description('Start the local agent server in an explicit mode')
-    .option('--workdir <directory>', 'agent working directory for runtime state and relative tool paths')
-    .option('--stdio', 'use one-peer JSONL stdio instead of the local HTTP/WebSocket server')
-    .option('--mode <mode>', 'server mode: chat (default) or studio', 'chat')
-    .action(async (options: { workdir?: string; stdio?: boolean; mode?: string }) => {
-      const runAgent = handlers.runAgent ?? (await import('./commands/run')).runAgent;
-      await runAgent({
-        workdir: options.workdir?.trim() ? resolveWorkdirOption(options.workdir) : undefined,
-        stdio: options.stdio ?? false,
-        mode: parseServerMode(options.mode),
+  // `run` predates server mode and starts chat, so it stays as an alias.
+  // Both names share one definition to keep a single runtime path.
+  for (const name of ['server', 'run']) {
+    program
+      .command(name)
+      .description(name === 'server'
+        ? 'Start the local agent server in an explicit mode'
+        : 'Alias for `pinpawo server`')
+      .option('--workdir <directory>', 'agent working directory for runtime state and relative tool paths')
+      .option('--stdio', 'use one-peer JSONL stdio instead of the local HTTP/WebSocket server')
+      .option('--mode <mode>', 'server mode: chat (default) or studio', 'chat')
+      .action(async (options: { workdir?: string; stdio?: boolean; mode?: string }) => {
+        const runAgent = handlers.runAgent ?? (await import('./commands/run')).runAgent;
+        await runAgent({
+          workdir: options.workdir?.trim() ? resolveWorkdirOption(options.workdir) : undefined,
+          stdio: options.stdio ?? false,
+          mode: parseServerMode(options.mode),
+        });
       });
-    });
+  }
 
   program
     .command('tui')

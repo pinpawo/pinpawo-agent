@@ -285,13 +285,39 @@ test('local agent CLI passes studio mode through to the handler', async () => {
   assert.equal(received!.mode, 'studio');
 });
 
-test('local agent CLI no longer exposes the legacy run command', async () => {
-  // Studio's rework carries no compatibility surface: `server` is the only
-  // entry point, so `run` must not resolve to a second runtime path (#561).
-  const program = createLocalAgentCli({ runAgent: () => undefined });
-  program.exitOverride();
+test('local agent CLI keeps run as a chat-mode alias of server', async () => {
+  // `run` predates server mode and starts chat, so existing scripts and
+  // service units must keep working unchanged (#561).
+  let received: { workdir?: string; stdio: boolean; mode?: string } | null = null;
+  const program = createLocalAgentCli({
+    runAgent: (options) => {
+      received = options;
+    },
+  });
 
-  await assert.rejects(() => program.parseAsync(['node', 'pinpawo', 'run']));
+  await program.parseAsync(['node', 'pinpawo', 'run']);
+  assert.deepEqual(received, {
+    workdir: undefined,
+    stdio: false,
+    mode: 'chat',
+  });
+});
+
+test('local agent CLI routes run and server through the same handler options', async () => {
+  // One shared definition, so the two names cannot drift into separate
+  // runtime paths.
+  const seen: unknown[] = [];
+  const program = createLocalAgentCli({
+    runAgent: (options) => {
+      seen.push(options);
+    },
+  });
+
+  await program.parseAsync(['node', 'pinpawo', 'run', '--mode', 'studio', '--stdio']);
+  await program.parseAsync(['node', 'pinpawo', 'server', '--mode', 'studio', '--stdio']);
+
+  assert.equal(seen.length, 2);
+  assert.deepEqual(seen[0], seen[1]);
 });
 
 test('local agent CLI rejects an unknown server mode instead of falling back', async () => {

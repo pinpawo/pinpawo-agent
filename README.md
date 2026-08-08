@@ -233,6 +233,7 @@ The published package installs a `pinpawo` binary.
 | `pinpawo login` | Interactive setup for credentials and LLM settings. |
 | `pinpawo actor` | Chooses the pet actor used by the local agent. |
 | `pinpawo server` | Starts the local agent server in chat mode. |
+| `pinpawo run` | Alias for `pinpawo server`. |
 | `pinpawo server --mode studio` | Starts the server in Studio mode; fails fast on invalid Studio config. |
 | `pinpawo server --stdio` | Starts one local-agent peer over JSONL stdio. |
 | `pinpawo browser extension register --extension-id <id>` | Registers the Chrome Native Messaging host for the Browser extension driver. |

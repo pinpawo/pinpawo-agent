@@ -198,10 +198,14 @@ Phase 1 只解决**启动语义**，不动执行路径：
   `studioApiContract.ts` 只把目标形状**固定下来**（invocation identity、
   scoped cancel、wiki 变更事件、错误码），尚未接线到运行时。
 
-另外，Studio 的改动**不背兼容包袱**：Phase 1 已经删掉 `run` 命令（只留
-`server`）、把 `serverMode` 定为必填而非可选兜底。后续 Phase 同样直接删除
-旧的 Studio 路径，而不是收缩或保留别名。Chat 保护区不受此影响——那是 issue
-明确的保护面，与"Studio 不需要兼容"不冲突。
+另外，**Studio 的改动不背兼容包袱**：Phase 1 已经把 `serverMode` 定为必填而非
+可选兜底，后续 Phase 同样直接删除旧的 Studio 路径，而不是收缩或保留别名。
+
+但这条原则只覆盖 Studio 自己的东西（studio.json 读法、pet runtime 装配、
+Studio 协议路径）。**不覆盖 chat 也在用的共享入口**：`run` 命令早于 server mode
+存在且启动的是 chat，因此保留为 `server` 的别名（两者共用同一份定义，不会分叉出
+第二套 runtime 路径）。Chat 保护区同理——那是 issue 明确的保护面，与"Studio 不
+需要兼容"不冲突。
 
 `threadId` 是一个已经正确的点：现有格式已含足够 namespace
 `studio:{studioId}:thread:{conversationId}:pet:{petId}:dispatch:{dispatchId}`

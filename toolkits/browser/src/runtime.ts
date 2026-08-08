@@ -44,11 +44,14 @@ export type BrowserRuntimeSnapshot = Readonly<{
   extension: BrowserExtensionRuntimeSnapshot;
   /** Current navigation readiness as driven by the Runtime lifecycle state
    *  machine (issue #583). `null` when no navigation is in flight. */
-  readiness: Readonly<{
-    phase: string | null;
-    ready: boolean;
-    error?: { code: string; message: string; retryable: boolean };
-  }> | null;
+  readiness: BrowserReadinessSnapshot | null;
+}>;
+
+/** Readiness projection of an in-flight (or just-completed) navigation. */
+export type BrowserReadinessSnapshot = Readonly<{
+  phase: string | null;
+  ready: boolean;
+  error?: { code: string; message: string; retryable: boolean };
 }>;
 
 export type BrowserRuntimeBinding = Readonly<{
@@ -89,6 +92,7 @@ function describeBrowserExtensionStatus(
 
 export function projectBrowserRuntimeSnapshot(
   status: BrowserBridgeStatus,
+  readiness: BrowserReadinessSnapshot | null = null,
 ): BrowserRuntimeSnapshot {
   const commandReady = status.hostConnected && status.extensionConnected;
   const state = resolveBrowserExtensionRuntimeState(status, commandReady);
@@ -110,10 +114,7 @@ export function projectBrowserRuntimeSnapshot(
       capabilities: Object.freeze([...status.capabilities]),
       socketPath: status.socketPath,
     }),
-    // A standalone extension projection carries no lifecycle state; the
-    // `BrowserRuntime` instance layers its controller-derived readiness over
-    // this projection in `getSnapshot()`.
-    readiness: null,
+    readiness,
   });
 }
 
@@ -191,18 +192,16 @@ export class BrowserRuntime {
   getSnapshot(): BrowserRuntimeSnapshot {
     const lifecycleSnapshot = this.lifecycle.getSnapshot();
     const nav = lifecycleSnapshot.navigation;
-    return {
-      extension: projectBrowserRuntimeSnapshot(this.bridge.getStatus()).extension,
-      readiness: nav
-        ? Object.freeze({
-            phase: nav.phase,
-            ready: nav.phase === 'readable',
-            ...(nav.phase === 'failed' && nav.error
-              ? { error: { code: nav.error.code, message: nav.error.message, retryable: nav.error.retryable } }
-              : {}),
-          })
-        : null,
-    };
+    const readiness: BrowserReadinessSnapshot | null = nav
+      ? Object.freeze({
+          phase: nav.phase,
+          ready: nav.phase === 'readable',
+          ...(nav.phase === 'failed' && nav.error
+            ? { error: { code: nav.error.code, message: nav.error.message, retryable: nav.error.retryable } }
+            : {}),
+        })
+      : null;
+    return projectBrowserRuntimeSnapshot(this.bridge.getStatus(), readiness);
   }
 }
 

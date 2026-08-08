@@ -108,16 +108,22 @@ it has ever bound, so mixing an external binding with a later standalone call
 cannot re-mint a lower generation that would let a stale higher-numbered event
 be misread as current.
 
-**Note (browser_open readiness):** `ChromeExtensionBrowserSession.open()` now
-drives the navigation through `BrowserLifecycleController` +
-`driveOpenReadiness` (bounded by `OPEN_READINESS_DEADLINE_MS`), buffering the
-events the extension emits during the navigate round-trip and replaying them
-through the controller bound to the bridge's own navigation generation. The
-extension emits `document.ready` / `dom.changed` (with the sampled body text)
-in the navigate handler so the reducer can reach `readable`; `BrowserRuntime`
-binds the bridge to the controller via `bindBridgeToController` and exposes the
-current `readiness` on its snapshot. `browser_open` now confirms readability and
-surfaces `origin_changed` / `navigation_timeout` deterministically instead of
-only trusting the extension's `tab.status` polling. Live re-poll during
-hydration (finer `network.activity` / repeated `dom.changed` while a page is
-still settling) is the remaining follow-up.
+**Note (browser_open readiness, current scope):** `ChromeExtensionBrowserSession.open()`
+drives the navigation through `BrowserLifecycleController` + `driveOpenReadiness`
+(bounded by `OPEN_READINESS_DEADLINE_MS`), replaying the events the extension
+emits during the navigate round-trip through the controller bound to the
+bridge's own navigation generation. The extension emits `document.ready` /
+`dom.changed` (with the sampled body text) in the navigate handler so the
+reducer can reach `readable`; `BrowserRuntime` binds the bridge to the
+controller via `bindBridgeToController` and exposes the current `readiness` on
+its snapshot. This lets the Runtime **confirm the readiness verdict
+post-hoc** and surface `origin_changed` / `navigation_timeout` deterministically.
+
+**Scope caveat:** the *actual wait* for the page to stop loading is still the
+extension's `waitForNavigableTab`, polling `tab.status === 'complete'` before
+it captures the snapshot; the readiness events are derived *after* that capture
+(back-filled from the snapshot), so the Runtime is currently reviewing facts the
+extension already awaited, not driving a live event subscription. A live
+readiness event stream (extension subscribing to `Page/Network` events and
+reporting `network.activity` / repeated `dom.changed` while a page settles) is
+the remaining follow-up that lets the Runtime *own* the wait.

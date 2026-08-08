@@ -25,6 +25,7 @@ import {
   driveOpenReadiness,
 } from '../../lifecycle/openReadiness';
 import type { BrowserRuntimeEvent } from '../../lifecycle/events';
+import type { NavigationPhase } from '../../lifecycle/navigation';
 
 const DEFAULT_SESSION = 'default';
 const DEFAULT_EXTENSION_COMMAND_TIMEOUT_MS = 30_000;
@@ -64,6 +65,15 @@ function normalizeTarget(target: string | BrowserElementTarget): BrowserElementT
 
 export class ChromeExtensionBrowserSession {
   private approvedOrigin: string | null = null;
+
+  private readinessPhase: NavigationPhase | null = null;
+
+  /** Readiness phase reached by the most recent `open()` (null before any open
+   *  or when the last open did not reach a terminated navigation). Exposed for
+   *  tests and instrumentation (issue #583 review M2). */
+  get lastReadinessPhase(): NavigationPhase | null {
+    return this.readinessPhase;
+  }
 
   constructor(
     private readonly bridge: Pick<BrowserExtensionBridge, 'sendCommand'>
@@ -194,10 +204,22 @@ export class ChromeExtensionBrowserSession {
         status?.navigationGeneration,
       );
 
+      // The navigate round-trip usually emits a tightly grouped burst of events
+      // (navigation.committed, document.ready, dom.changed) stamped ~same time.
+      // Polling after *every* buffered event would re-run `advanceSettling` and
+      // reset the network-settle baseline on each poll, so the final poll's
+      // `now` equals the baseline it just wrote (delta 0 < settling window) and
+      // the navigation never reaches `readable` (issue #583 review M1).
+      // Poll once, after the last buffered event, so the readiness verdict is
+      // evaluated against the fully-assembled state rather than mid-burst.
+      const last = buffered[buffered.length - 1];
       const outcome = driveOpenReadiness(controller, buffered, startTime, {
         now: () => Date.now(),
         deadlineMs: OPEN_READINESS_DEADLINE_MS,
+        shouldPoll: (event) => event === last,
       });
+
+      this.readinessPhase = outcome.snapshot.navigation?.phase ?? null;
 
       if (outcome.status === 'failed') {
         throw this.readinessFailure(outcome.error, approvedOrigin);
@@ -208,6 +230,14 @@ export class ChromeExtensionBrowserSession {
           `Page did not become readable within ${OPEN_READINESS_DEADLINE_MS}ms of navigation to ${url}.`,
           true,
         );
+      }
+      if (outcome.status === 'pending') {
+        // The events emitted during the navigate round-trip did not conclude the
+        // page (still hydrating, body text not sampled yet). This is the
+        // backward-compatible path: honor the already-returned snapshot instead
+        // of regressing a working open into a timeout. The caller can re-poll.
+        this.approvedOrigin = approvedOrigin;
+        return snapshot;
       }
 
       this.approvedOrigin = approvedOrigin;
@@ -231,7 +261,7 @@ export class ChromeExtensionBrowserSession {
       });
     }
     return new BrowserBridgeError(
-      error.code as 'navigation_failed',
+      error.code,
       error.message,
       error.retryable ?? false,
       error.details ? { approvedOrigin, ...(error.details as Record<string, unknown>) } : { approvedOrigin },

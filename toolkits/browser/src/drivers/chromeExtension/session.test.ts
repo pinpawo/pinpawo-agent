@@ -300,6 +300,11 @@ test('extension session drives browser_open through the readiness state machine 
 
   const opened = await session.open('https://example.com/page');
   assert.ok(/Readable page/.test(opened));
+  // issue #583 review M2: the state machine must actually reach `readable`
+  // (phase assertion), not merely any snapshot-returning outcome — the old
+  // `/Readable page/` assertion held even when the navigation was stuck in
+  // `settling` and `open()` fell through to `pending`.
+  assert.equal(session.lastReadinessPhase, 'readable');
 });
 
 test('extension session surfaces a cross-origin readiness failure as origin_changed', async () => {
@@ -345,4 +350,64 @@ test('extension session surfaces a cross-origin readiness failure as origin_chan
       && error.code === 'origin_changed'
       && error.details?.committedUrl === 'https://attacker.example/steal',
   );
+});
+
+test('extension session does NOT mark a text-less (SPA shell) navigation readable', async () => {
+  const listeners: Array<(event: BrowserRuntimeEvent) => void> = [];
+  const status = {
+    activeTabId: 11,
+    connectionGeneration: 1,
+    targetGeneration: 1,
+    navigationGeneration: 1,
+  } as BrowserBridgeStatus;
+
+  const session = new ChromeExtensionBrowserSession({
+    getStatus() {
+      return status;
+    },
+    onRuntimeEvent(listener) {
+      listeners.push(listener);
+      return () => {};
+    },
+    onGenerationChanged() {
+      return () => {};
+    },
+    async sendCommand(command, params) {
+      if (command !== 'navigate') return rawSnapshot;
+      const base = { tabId: 11, timestamp: Date.now() };
+      listeners.forEach((l) => l({
+        ...base,
+        connectionGeneration: 1,
+        targetGeneration: 1,
+        navigationGeneration: 1,
+        type: 'navigation.committed',
+        url: String(params.url),
+      }));
+      listeners.forEach((l) => l({
+        ...base,
+        connectionGeneration: 1,
+        targetGeneration: 1,
+        navigationGeneration: 1,
+        type: 'document.ready',
+        payload: { readyState: 'complete' },
+      }));
+      // Shell complete but body text is empty → must stay unreadable.
+      listeners.forEach((l) => l({
+        ...base,
+        connectionGeneration: 1,
+        targetGeneration: 1,
+        navigationGeneration: 1,
+        type: 'dom.changed',
+        payload: { textLength: 0, textRevision: 1 },
+      }));
+      return rawSnapshot;
+    },
+  });
+
+  // Do not throw: the backward-compatible path honors the returned snapshot
+  // while the page is still hydrating. But the readiness verdict must NOT be
+  // `readable` for an empty-body shell (the volcengine scenario).
+  const opened = await session.open('https://example.com/page');
+  assert.ok(/Readable page/.test(opened));
+  assert.notEqual(session.lastReadinessPhase, 'readable');
 });

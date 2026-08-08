@@ -79,6 +79,11 @@ interface PopupRecord {
 }
 
 let popupTracking: PopupTracking | null = null;
+// Monotonic revision for DOM-readiness events emitted after each navigation.
+// Lets the Runtime key a stable (never re-issued) text sample across the live
+// lifecycle, and gives a handle for a future live re-poll during hydration
+// (issue #583 S1).
+let pageReadinessRevision = 0;
 
 class ExtensionError extends Error {
   readonly code: string;
@@ -542,7 +547,8 @@ async function readSnapshot(tabId, approvedOrigin) {
  */
 function emitPageReadiness(tabId, url, snapshot) {
   if (!port) return;
-  for (const event of pageReadinessEvents(snapshot, tabId, url)) {
+  pageReadinessRevision += 1;
+  for (const event of pageReadinessEvents(snapshot, tabId, url, pageReadinessRevision)) {
     port.postMessage({
       type: 'browser.event',
       protocolVersion: PROTOCOL_VERSION,

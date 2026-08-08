@@ -80,9 +80,17 @@ this stream: they merge events via `applyNavigationEvent`/
 `defaultPageReadinessPolicy`, reject stale events via `isEventCurrent`, and
 expose a read-only snapshot (`hasActiveNavigation`, `phase`, `readable`, `error`,
 `generation`, `context`). The controller also fails a navigation deterministically
-when the connection/target generation is superseded under it (`runtime_disconnected`
-/ `target_closed`) and ignores malformed url-less commits rather than treating
-them as benign intermediate steps.
+via `notifyGenerationAdvance(connectionGeneration, targetGeneration)` — the
+authoritative signal the driver sends when the bridge bumps its connection/target
+generation (`runtime_disconnected` / `target_closed`) — and ignores malformed
+url-less commits rather than treating them as benign intermediate steps.
+
+The controller binds the bridge's navigation generation: `beginNavigation(
+requestedUrl, approvedOrigin, connection, target, navigationGeneration)` accepts
+the bridge-owned counter so event stamps and controller context always agree
+(no independent second counter). A stale generation bump is never inferred from
+a single late event (which would also kill old-navigation SPA events); only the
+explicit `notifyGenerationAdvance` produces a deterministic failure.
 
 **Note:** the event stream is forwarded but **not yet consumed in production** —
 nothing in the runtime/session currently subscribes to `onRuntimeEvent` and drives

@@ -71,14 +71,25 @@ export class BrowserLifecycleController {
     this.readinessPolicy = options.readinessPolicy ?? defaultPageReadinessPolicy;
   }
 
-  /** Begin a new navigation generation for `requestedUrl`. */
+  /**
+   * Begin a new navigation generation for `requestedUrl`.
+   *
+   * The navigation generation is owned by the bridge (the single source of
+   * truth whose `beginNavigation()`/`sendCommand('navigate', …)` advance it).
+   * When a caller supplies `navigationGeneration`, this controller binds to
+   * that external value instead of minting its own, so the event stamps and the
+   * controller context always agree. If omitted (unit tests, embedding without
+   * a bridge), it falls back to a local registry so the controller stays
+   * usable standalone.
+   */
   beginNavigation(
     requestedUrl: string,
     approvedOrigin: string,
     connectionGeneration = 1,
     targetGeneration = 1,
+    navigationGeneration?: number,
   ): BrowserLifecycleSnapshot {
-    const generation = this.registry.nextGeneration();
+    const generation = navigationGeneration ?? this.registry.nextGeneration();
     const state = createNavigation(generation, requestedUrl, approvedOrigin);
     this.pending = {
       state,
@@ -96,26 +107,15 @@ export class BrowserLifecycleController {
     if (!this.pending) return this.getSnapshot();
     const { state, context } = this.pending;
 
-    // Detect a superseded connection/target generation. When the bridge moves
-    // to a newer generation (target closed, extension reconnected), subsequent
-    // events carry a *higher* generation than this navigation was bound to.
-    // Staying silent would hang the navigation until its deadline with no
-    // distinguishing error — instead fail deterministically so waiters get a
-    // definitive result (per issue #583: on detach/reconnect, "等待者得到确定结果").
-    const connectionSuperseded = event.connectionGeneration > context.connectionGeneration;
-    const targetSuperseded = event.targetGeneration > context.targetGeneration;
-    if ((connectionSuperseded || targetSuperseded) && state.phase !== 'failed') {
-      return this.fail({
-        code: connectionSuperseded ? 'runtime_disconnected' : 'target_closed',
-        message: connectionSuperseded
-          ? 'browser connection was superseded while navigation was in flight'
-          : 'managed target was closed while navigation was in flight',
-        retryable: true,
-        details: { connectionGeneration: context.connectionGeneration, targetGeneration: context.targetGeneration },
-      });
-    }
-
     // Reject late events before touching state.
+    // NOTE: a superseded connection/target/navigation is detected here, not by
+    // inspecting raw generation deltas. `isEventCurrent` compares strictly, so
+    // an event stamped with a *higher* generation than this navigation was
+    // bound to is treated as stale and dropped — it never reaches the state
+    // machine. This is intentional: inferring "superseded" from a single late
+    // event would also catch old-navigation SPA events that carry a newer
+    // target generation and wrongly kill a healthy navigation. Authoritative
+    // "the bridge moved on" signals arrive via `notifyGenerationAdvance`.
     if (!isEventCurrent(event, context)) return this.getSnapshot();
 
     const applyEvent = this.toApplyEvent(event);
@@ -127,6 +127,39 @@ export class BrowserLifecycleController {
     if (next === state) return this.getSnapshot();
     this.pending = { state: next, context };
     return this.getSnapshot();
+  }
+
+  /**
+   * Authoritative signal that the bridge has advanced its connection/target
+   * generation beyond the one this navigation was bound to (extension
+   * reconnected, managed target closed). This is the correct way to detect
+   * "the world moved on" — unlike inferring it from a late event, which cannot
+   * distinguish a genuine generation bump from a stale SPA event. The driver
+   * calls this when it learns (via the bridge's `getStatus()`/generation
+   * bookkeeping) that a bump happened. Fails deterministically so waiters get
+   * a definitive result (issue #583: on detach/reconnect, "等待者得到确定结果").
+   */
+  notifyGenerationAdvance(
+    connectionGeneration: number,
+    targetGeneration: number,
+  ): BrowserLifecycleSnapshot {
+    if (!this.pending) return this.getSnapshot();
+    const { state, context } = this.pending;
+    if (state.phase === 'failed') return this.getSnapshot();
+    const connectionSuperseded = connectionGeneration > context.connectionGeneration;
+    const targetSuperseded = targetGeneration > context.targetGeneration;
+    if (!connectionSuperseded && !targetSuperseded) return this.getSnapshot();
+    return this.fail({
+      code: connectionSuperseded ? 'runtime_disconnected' : 'target_closed',
+      message: connectionSuperseded
+        ? 'browser connection was superseded while navigation was in flight'
+        : 'managed target was closed while navigation was in flight',
+      retryable: connectionSuperseded,
+      details: {
+        connectionGeneration: context.connectionGeneration,
+        targetGeneration: context.targetGeneration,
+      },
+    });
   }
 
   /** Feed a `settle_verdict` derived from the current state + `now`. */

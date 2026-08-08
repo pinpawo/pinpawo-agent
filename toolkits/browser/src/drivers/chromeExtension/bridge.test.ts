@@ -6,6 +6,7 @@ import { connect, type Socket } from 'node:net';
 import test from 'node:test';
 import { BROWSER_EXTENSION_PROTOCOL_VERSION } from './protocol';
 import { BrowserBridgeError, BrowserExtensionBridge } from './bridge';
+import { BrowserLifecycleController } from '../../lifecycle/controller';
 
 type LinePeer = {
   socket: Socket;
@@ -596,4 +597,108 @@ test('local browser bridge maps legacy tab.navigated onto navigation.committed a
   await waitUntil(() => received.length === 2);
   assert.equal(received[1].type, 'target.closed');
   assert.equal(bridge.getStatus().targetGeneration ?? 0, before + 1);
+});
+
+// -- End-to-end pairing: a bridge-produced event and a controller-produced
+//    context must agree on the navigation generation (review: one owner). --
+test('bridge events drive a controller that binds the bridge navigation generation', async (t) => {
+  const root = await mkdtemp(resolve(tmpdir(), 'pinpawo-browser-bridge-controller-'));
+  const bridge = new BrowserExtensionBridge({
+    socketPath: resolve(root, 'bridge.sock'),
+    tokenPath: resolve(root, 'bridge.token'),
+    tokenFactory: () => 'test-token',
+    logger: { info() {}, warn() {}, error() {} },
+  });
+  await bridge.start();
+  t.after(async () => bridge.stop());
+
+  const controller = new BrowserLifecycleController();
+  // The driver subscribes the controller to the bridge's event stream.
+  bridge.onRuntimeEvent((event) => {
+    controller.handleEvent(event);
+  });
+
+  const peer = await connectLinePeer(bridge.getStatus().socketPath);
+  t.after(() => peer.socket.destroy());
+  peer.send({
+    type: 'bridge.hello',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    token: 'test-token',
+    hostPid: process.pid,
+  });
+  await peer.nextLine();
+  peer.send({
+    type: 'browser.register',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    extensionId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    capabilities: ['navigate', 'snapshot'],
+    activeTab: { tabId: 42, binding: 'user' },
+    state: { revision: 1, debuggerAttached: true, activeTab: { tabId: 42, binding: 'user' } },
+  });
+  await waitUntil(() => bridge.getStatus().connectionId === 'connection-1');
+
+  // Navigate 1: the bridge is the single owner of the navigation generation.
+  // The caller binds the bridge's live connection/target generation (which may
+  // differ from 1 — the native host connection increments it on registration).
+  const { connectionGeneration, targetGeneration } = bridge.getStatus();
+  const g1 = bridge.beginNavigation();
+  controller.beginNavigation(
+    'https://example.com/a',
+    'https://example.com',
+    connectionGeneration as number,
+    targetGeneration as number,
+    g1,
+  );
+
+  peer.send({
+    type: 'browser.event',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    event: 'navigation.committed',
+    tabId: 42,
+    url: 'https://example.com/a',
+  });
+  await waitUntil(() => controller.getSnapshot().navigation?.phase === 'committed');
+  assert.equal(controller.getSnapshot().navigation?.committedUrl, 'https://example.com/a');
+
+  // SPA route change (no `navigate` command): driver calls beginNavigation to
+  // demarcate the boundary, then rebinds the controller.
+  const g2 = bridge.beginNavigation();
+  assert.notEqual(g2, g1);
+  controller.beginNavigation(
+    'https://example.com/b',
+    'https://example.com',
+    connectionGeneration as number,
+    targetGeneration as number,
+    g2,
+  );
+  peer.send({
+    type: 'browser.event',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    event: 'navigation.committed',
+    tabId: 42,
+    url: 'https://example.com/b',
+  });
+  await waitUntil(() => controller.getSnapshot().navigation?.phase === 'committed');
+  assert.equal(controller.getSnapshot().navigation?.committedUrl, 'https://example.com/b');
+
+  // The controller context and the bridge generation agree: without the single
+  // owner, an SPA route change (which produces no `navigate` command) would
+  // desync the two counters and every live event would be mis-rejected as stale.
+  assert.equal(controller.getSnapshot().context?.navigationGeneration, g2);
+  assert.equal(bridge.getStatus().navigationGeneration, g2);
+
+  // A navigation-scoped event dispatched after the SPA boundary is stamped with
+  // g2 by the bridge and accepted against the controller's g2 binding.
+  peer.send({
+    type: 'browser.event',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    event: 'document.ready',
+    tabId: 42,
+    payload: { readyState: 'complete' },
+  });
+  await waitUntil(() => controller.getSnapshot().navigation?.readyState === 'complete');
 });

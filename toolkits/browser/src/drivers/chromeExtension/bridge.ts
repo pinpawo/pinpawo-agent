@@ -76,6 +76,7 @@ export type BrowserBridgeStatus = {
   capabilities: BrowserExtensionCapability[];
   connectionGeneration?: number;
   targetGeneration?: number;
+  navigationGeneration?: number;
   socketPath: string;
 };
 
@@ -188,6 +189,7 @@ export class BrowserExtensionBridge {
       capabilities: [...(this.registration?.capabilities ?? [])],
       connectionGeneration: this.connectionGeneration,
       targetGeneration: this.targetGeneration,
+      navigationGeneration: this.navigationGeneration,
       socketPath: this.socketPath,
     };
   }
@@ -211,10 +213,18 @@ export class BrowserExtensionBridge {
    * `isEventCurrent` can drop late events that belong to a superseded
    * navigation. Returns the new generation.
    *
-   * The bridge itself does not decide when a navigation begins (that is the
-   * Runtime's job per issue #583) — it only learns the boundary from whoever
-   * drives the navigation (typically the caller of `sendCommand('navigate', …)`
-   * or the Runtime wiring) and fans the generation stamp out to the stream.
+   * The bridge is the single owner of the navigation generation counter. It is
+   * advanced automatically when a `navigate` command is dispatched
+   * (`sendCommand('navigate', …)`), and can also be advanced explicitly by
+   * caller/embedding code. Consumers should bind the returned value into the
+   * controller's `beginNavigation` so both sides agree on the current
+   * navigation generation.
+   *
+   * Known limitation: the counter only advances on `navigate` or an explicit
+   * `beginNavigation()` call. Redirects and SPA client-side route changes do
+   * not dispatch a `navigate` command, so the driver must call `beginNavigation()`
+   * explicitly to demarcate such a boundary — otherwise a late event could be
+   * mis-scoped to the previous generation.
    */
   beginNavigation(): number {
     this.navigationGeneration += 1;
@@ -225,8 +235,11 @@ export class BrowserExtensionBridge {
    * Normalize an extension-reported `browser.event` into the unified Runtime
    * event envelope and fan it out to subscribers. Events are stamped with the
    * current connection + target generation so the consumer's `isEventCurrent`
-   * can drop late/out-of-order events. The navigation generation is owned by
-   * the controller (via `beginNavigation`) and left unset here.
+   * can drop late/out-of-order events. Navigation-scoped events additionally
+   * carry the active navigation generation (the bridge owns the counter, and
+   * it advances on `beginNavigation()` / `sendCommand('navigate', …)`). The
+   * controller binds to that same generation on `beginNavigation`, so the two
+   * always agree.
    */
   private emitRuntimeEvent(message: {
     event: BrowserRuntimeEventType;

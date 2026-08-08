@@ -76,22 +76,74 @@ test('a stale event from an older connection generation is dropped', () => {
   assert.equal(controller.getSnapshot().navigation?.phase, 'requested');
 });
 
-test('an event from a superseded (newer) connection generation fails with runtime_disconnected', () => {
+test('notifyGenerationAdvance with a newer connection generation fails with runtime_disconnected', () => {
   const controller = new BrowserLifecycleController();
   controller.beginNavigation('https://example.com/', 'https://example.com', 1, 1);
-  controller.handleEvent(committedEvent(2, 1, 1, 'https://example.com/'));
-  const snapshot = controller.getSnapshot();
+  const snapshot = controller.notifyGenerationAdvance(2, 1);
   assert.equal(snapshot.navigation?.phase, 'failed');
   assert.equal(snapshot.navigation?.error?.code, 'runtime_disconnected');
+  // A dropped connection is recoverable by rebinding → retryable.
+  assert.equal(snapshot.navigation?.error?.retryable, true);
 });
 
-test('an event from a superseded (newer) target generation fails with target_closed', () => {
+test('notifyGenerationAdvance with a newer target generation fails with target_closed', () => {
   const controller = new BrowserLifecycleController();
   controller.beginNavigation('https://example.com/', 'https://example.com', 1, 1);
-  controller.handleEvent(committedEvent(1, 2, 1, 'https://example.com/'));
-  const snapshot = controller.getSnapshot();
+  const snapshot = controller.notifyGenerationAdvance(1, 2);
   assert.equal(snapshot.navigation?.phase, 'failed');
   assert.equal(snapshot.navigation?.error?.code, 'target_closed');
+  // The tab is gone; retrying the same target cannot succeed → not retryable.
+  assert.equal(snapshot.navigation?.error?.retryable, false);
+});
+
+test('notifyGenerationAdvance is a no-op when the bridge generation did not advance', () => {
+  const controller = new BrowserLifecycleController();
+  controller.beginNavigation('https://example.com/', 'https://example.com', 1, 1);
+  controller.handleEvent(committedEvent(1, 1, 1, 'https://example.com/'));
+  const snapshot = controller.notifyGenerationAdvance(1, 1);
+  assert.equal(snapshot.navigation?.phase, 'committed');
+  assert.equal(snapshot.navigation?.error, undefined);
+});
+
+// -- Coordinate the two counters (review #4: one owner, no desync) --
+test('beginNavigation binds an external navigationGeneration from the bridge', () => {
+  const controller = new BrowserLifecycleController();
+  // The bridge owns the counter; here it reports generation 7. The controller
+  // must bind to that value, not mint its own.
+  controller.beginNavigation('https://example.com/', 'https://example.com', 1, 1, 7);
+  assert.equal(controller.getSnapshot().context?.navigationGeneration, 7);
+  // An event stamped with the bridge's generation is accepted as current.
+  const snapshot = controller.handleEvent(committedEvent(1, 1, 7, 'https://example.com/'));
+  assert.equal(snapshot.navigation?.phase, 'committed');
+  // A stale event from a different generation is still rejected.
+  controller.handleEvent(committedEvent(1, 1, 8, 'https://example.com/other'));
+  assert.equal(controller.getSnapshot().navigation?.committedUrl, 'https://example.com/');
+});
+
+// -- A stale navigation event must not kill the current nav (review :superseded)
+//    A late event from an old navigation can carry a *newer* target generation.
+//    Before this fix that was misread as "the current target superseded our nav"
+//    and terminally failed a healthy navigation. Now the strict `isEventCurrent`
+//    check drops it, and authoritative bumps go through `notifyGenerationAdvance`.
+test('a stale old-navigation event with a newer target generation is dropped, not fatal', () => {
+  const controller = new BrowserLifecycleController();
+  controller.beginNavigation('https://example.com/', 'https://example.com', 1, 1);
+  controller.handleEvent(committedEvent(1, 1, 1, 'https://example.com/'));
+  // Old-navigation (gen 0) late `document.ready` carrying targetGeneration 2:
+  // stamped for a *different* target than our navigation — stale, must drop,
+  // and must NOT fail the current navigation.
+  controller.handleEvent({
+    connectionGeneration: 1,
+    targetGeneration: 2,
+    navigationGeneration: 0,
+    tabId: 5,
+    timestamp: 0,
+    type: 'document.ready',
+    payload: { readyState: 'complete' },
+  });
+  const snapshot = controller.getSnapshot();
+  assert.equal(snapshot.navigation?.phase, 'committed');
+  assert.equal(snapshot.navigation?.error, undefined);
 });
 
 test('a cross-origin commit fails the navigation with origin_changed', () => {

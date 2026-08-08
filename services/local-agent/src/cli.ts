@@ -4,11 +4,12 @@ import { Command } from 'commander';
 import { registerCapabilityCommand } from './commands/capability';
 import type { InitCommandOptions } from './commands/init';
 import { readLocalAgentPackageVersion } from './packageVersion';
+import { parseServerMode, type ServerMode } from './serverMode';
 
 type LocalAgentCliHandlers = {
   runLogin?: () => Promise<void> | void;
   runActorSelect?: () => Promise<void> | void;
-  runAgent?: (opts: { workdir?: string; stdio: boolean }) => Promise<void> | void;
+  runAgent?: (opts: { workdir?: string; stdio: boolean; mode?: ServerMode }) => Promise<void> | void;
   runTui?: (opts: { dryRun: boolean; workdir?: string }) => Promise<void> | void;
   runTuiV2?: (opts: {
     workdir?: string;
@@ -97,11 +98,28 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
     .description('Start the local agent service')
     .option('--workdir <directory>', 'agent working directory for runtime state and relative tool paths')
     .option('--stdio', 'use one-peer JSONL stdio instead of the local HTTP/WebSocket server')
-    .action(async (options: { workdir?: string; stdio?: boolean }) => {
+    .option('--mode <mode>', 'server mode: chat (default) or studio', 'chat')
+    .action(async (options: { workdir?: string; stdio?: boolean; mode?: string }) => {
       const runAgent = handlers.runAgent ?? (await import('./commands/run')).runAgent;
       await runAgent({
         workdir: options.workdir?.trim() ? resolveWorkdirOption(options.workdir) : undefined,
         stdio: options.stdio ?? false,
+        mode: parseServerMode(options.mode),
+      });
+    });
+
+  program
+    .command('server')
+    .description('Start the local agent server in an explicit mode')
+    .option('--workdir <directory>', 'agent working directory for runtime state and relative tool paths')
+    .option('--stdio', 'use one-peer JSONL stdio instead of the local HTTP/WebSocket server')
+    .option('--mode <mode>', 'server mode: chat (default) or studio', 'chat')
+    .action(async (options: { workdir?: string; stdio?: boolean; mode?: string }) => {
+      const runAgent = handlers.runAgent ?? (await import('./commands/run')).runAgent;
+      await runAgent({
+        workdir: options.workdir?.trim() ? resolveWorkdirOption(options.workdir) : undefined,
+        stdio: options.stdio ?? false,
+        mode: parseServerMode(options.mode),
       });
     });
 

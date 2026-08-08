@@ -7,10 +7,19 @@ import {
   type ToolAuthorizationSafetyLevel,
 } from '@pinpawo/agent-contracts';
 import { readLocalAgentPackageVersion } from './packageVersion';
-import type { LocalServerDeps } from './localServerTypes';
+import {
+  getLocalServerMode,
+  type LocalServerDeps,
+  type LocalServerStudioModeInfo,
+} from './localServerTypes';
+import type { ServerMode } from './serverMode';
 import type { ModelInputModality } from './modelProfiles';
 
 export type LocalRuntimeProjection = {
+  /** #561 primary server mode, decided at startup. */
+  serverMode: ServerMode;
+  /** Startup-validated Studio facts; present only in studio mode. */
+  studioMode?: LocalServerStudioModeInfo;
   modelProfileId: string;
   modelProfileLabel: string;
   modelProfileAvailable: boolean;
@@ -39,6 +48,8 @@ export function buildLocalRuntimeProjection(
   const profile = deps.modelProfiles.snapshot.profiles[modelProfileId];
   if (!profile) {
     return {
+      serverMode: getLocalServerMode(deps),
+      ...(deps.studioMode ? { studioMode: deps.studioMode } : {}),
       modelProfileId,
       modelProfileLabel: modelProfileId,
       modelProfileAvailable: false,
@@ -68,6 +79,8 @@ export function buildLocalRuntimeProjection(
   const llmConfig = deps.modelProfiles.resolve(modelProfileId);
 
   return {
+    serverMode: getLocalServerMode(deps),
+    ...(deps.studioMode ? { studioMode: deps.studioMode } : {}),
     modelProfileId,
     modelProfileLabel: profile.label,
     modelProfileAvailable: true,
@@ -101,6 +114,14 @@ export function buildLocalHttpRuntimeProjection(deps: LocalServerDeps) {
   const runtime = buildLocalRuntimeProjection(deps);
   return {
     local_agent_version: readLocalAgentPackageVersion(),
+    server_mode: runtime.serverMode,
+    ...(runtime.studioMode ? {
+      studio_mode: {
+        studio_id: runtime.studioMode.studioId,
+        planner_pet_id: runtime.studioMode.plannerPetId,
+        worker_pet_ids: [...runtime.studioMode.workerPetIds],
+      },
+    } : {}),
     model_profile_id: runtime.modelProfileId,
     model_profile_label: runtime.modelProfileLabel,
     model_profile_available: runtime.modelProfileAvailable,

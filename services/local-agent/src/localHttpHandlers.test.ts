@@ -611,6 +611,9 @@ test('handleLocalHttpRequest exposes canonical workdir Studio paths on runtime e
   assert.equal(res.statusCode, 200);
   assert.deepEqual(JSON.parse(res.body), {
     local_agent_version: readLocalAgentPackageVersion(),
+    // Deps assembled without an explicit mode project as chat, keeping
+    // pre-#561 callers unchanged.
+    server_mode: 'chat',
     model_profile_id: 'test-profile',
     model_profile_label: 'Test profile',
     model_profile_available: true,

@@ -158,6 +158,20 @@ npm run typecheck && npm test
 | C12 | server 单一主模式 | 无 mode 概念；`run` 命令无 `--mode`，Studio 是 chat session 内的 `/studio` toggle | [cli.ts:96](services/local-agent/src/cli.ts#L96)、[composerIntent.ts:78-84](services/tui/src/commands/composerIntent.ts#L78) |
 | C13 | studio 配置非法时 fail fast | 抛 `StudioNotConfiguredError`，但在**第一次请求时**才抛，不是启动时 | [studioRuntime.ts:44](services/local-agent/src/studio/studioRuntime.ts#L44) |
 
+### 4.1 Phase 1 的处置状态
+
+Phase 1 只解决**启动语义**，不动执行路径：
+
+- **C12 已解决** — `pinpawo server --mode chat|studio`（`run` 保留为同一 handler
+  的兼容别名，不形成第二套 runtime 行为），mode 投影进 `/runtime` 的
+  `server_mode`。
+- **C13 已解决** — `preflightStudioMode()` 在 server 启动、任何长期资源创建
+  之前校验 studio.json / pets 与 planner 归属，失败即终止启动，不降级到 chat。
+- **C1–C11 仍开放** — 这些属于执行期契约，由 Phase 2–4 处理。Phase 1 新增的
+  `studioApiContract.ts` 只是把目标形状**固定下来**（invocation identity、
+  scoped cancel、计数式 capacity、cursor 事件、结构化错误码），尚未接线到
+  运行时。
+
 `threadId` 是一个已经正确的点：现有格式已含足够 namespace
 `studio:{studioId}:thread:{conversationId}:pet:{petId}:dispatch:{dispatchId}`
 （[createStudioOrchestrator.ts:453](packages/pet-agent/src/agent/studio/createStudioOrchestrator.ts#L453)），
@@ -196,7 +210,7 @@ run/task/invocation。
 
 | Phase | 触及区域 | 可与其他 Phase 并行？ |
 | --- | --- | --- |
-| 1 server mode + API contract | local-agent only（cli.ts、localHttpHandlers、协议类型） | 是，不依赖 #570 之外任何东西 |
+| 1 server mode + API contract ✅ 已完成 | local-agent only（cli.ts、localHttpHandlers、协议类型） | 是，不依赖 #570 之外任何东西 |
 | 2 复用 Chat runtime | pet-agent Studio-only + local-agent adapter | 依赖 #570 契约；解决 C4/C5/C6 |
 | 3 `StudioRuntimeHost` | local-agent 新增 host 模块 | 依赖 Phase 1 的 mode；解决 C9/C13 |
 | 4 capacity/lease | pet-agent orchestrator + host | 依赖 2、3；解决 C1/C2/C3/C7/C10/C11 |

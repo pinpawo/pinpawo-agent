@@ -73,3 +73,40 @@ test('session projection surfaces an unavailable selected profile without fallba
   assert.equal(runtime.model, undefined);
   assert.match(runtime.modelProfileIssues[0] ?? '', /Unknown model profile/);
 });
+
+test('runtime projection defaults to chat mode when deps carry no explicit mode', () => {
+  const deps = createDeps('/tmp/pinpawo-mode-default');
+
+  assert.equal(buildLocalRuntimeProjection(deps).serverMode, 'chat');
+  assert.equal(buildLocalHttpRuntimeProjection(deps).server_mode, 'chat');
+});
+
+test('runtime projection surfaces studio mode with its planner and worker set', () => {
+  const deps: LocalServerDeps = {
+    ...createDeps('/tmp/pinpawo-mode-studio'),
+    serverMode: 'studio',
+    studioMode: {
+      studioId: 'demo',
+      plannerPetId: 'lead',
+      workerPetIds: ['coder', 'writer'],
+    },
+  };
+
+  const runtime = buildLocalRuntimeProjection(deps);
+  assert.equal(runtime.serverMode, 'studio');
+  assert.equal(runtime.studioMode?.plannerPetId, 'lead');
+
+  const http = buildLocalHttpRuntimeProjection(deps);
+  assert.equal(http.server_mode, 'studio');
+  assert.deepEqual(http.studio_mode, {
+    studio_id: 'demo',
+    planner_pet_id: 'lead',
+    worker_pet_ids: ['coder', 'writer'],
+  });
+});
+
+test('chat mode projection omits the studio block entirely', () => {
+  const http = buildLocalHttpRuntimeProjection(createDeps('/tmp/pinpawo-mode-chat'));
+
+  assert.equal('studio_mode' in http, false);
+});

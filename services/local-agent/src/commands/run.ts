@@ -9,10 +9,18 @@ import {
   startLocalStdioServer,
 } from '../localServerStdioTransport';
 import type { LocalServerDeps } from '../localServerTypes';
+import {
+  DEFAULT_SERVER_MODE,
+  preflightStudioMode,
+  type ServerMode,
+  type StudioModePreflight,
+} from '../serverMode';
 
 export type RunAgentOptions = {
   workdir?: string;
   stdio?: boolean;
+  /** #561: one server process has exactly one primary mode. Defaults to chat. */
+  mode?: ServerMode;
 };
 
 export function buildRunAgentRuntimeConfig(options: RunAgentOptions = {}) {
@@ -51,6 +59,26 @@ export async function runAgent(options: RunAgentOptions = {}) {
   try {
     await ensureActorSelected({ interactive: !options.stdio });
     const runtimeConfig = buildRunAgentRuntimeConfig(options);
+    const mode: ServerMode = options.mode ?? DEFAULT_SERVER_MODE;
+
+    // Studio mode validates its config before any long-lived resource is
+    // created, so an invalid Studio setup fails startup instead of silently
+    // degrading to chat (#561 design principle 1).
+    let studioPreflight: StudioModePreflight | undefined;
+    if (mode === 'studio') {
+      studioPreflight = await preflightStudioMode(runtimeConfig.workdir, {
+        ...(runtimeConfig.studioConfigPath
+          ? { studioConfigPath: runtimeConfig.studioConfigPath }
+          : {}),
+        ...(runtimeConfig.petsDir ? { petsDir: runtimeConfig.petsDir } : {}),
+      });
+      console.log(
+        `[local-agent] studio mode preflight ok studioId=${studioPreflight.studioId} `
+        + `planner=${studioPreflight.plannerPetId} `
+        + `workers=[${studioPreflight.workerPetIds.join(', ')}]`,
+      );
+    }
+
     runtime = new LocalAgentRuntime(runtimeConfig);
 
     // Init loads Toolkit definitions and starts their optional runtimes before
@@ -58,11 +86,20 @@ export async function runAgent(options: RunAgentOptions = {}) {
     await runtime.init();
     logStartupConfig({
       mode: 'run',
+      serverMode: mode,
       workdir: runtimeConfig.workdir,
       actorId: runtime.getActorId(),
       actorName: runtime.getActorName(),
     });
     const deps: LocalServerDeps = {
+      serverMode: mode,
+      ...(studioPreflight ? {
+        studioMode: {
+          studioId: studioPreflight.studioId,
+          plannerPetId: studioPreflight.plannerPetId,
+          workerPetIds: studioPreflight.workerPetIds,
+        },
+      } : {}),
       actorId: runtime.getActorId(),
       actorName: runtime.getActorName() ?? undefined,
       modelProfiles: runtime.getModelProfiles(),

@@ -230,7 +230,7 @@ test('local agent CLI runs setup guide handler', async () => {
 });
 
 test('local agent CLI applies run workdir option before handler', async () => {
-  let received: { workdir?: string; stdio: boolean } | null = null;
+  let received: { workdir?: string; stdio: boolean; mode?: string } | null = null;
   const program = createLocalAgentCli({
     runAgent: (options) => {
       received = options;
@@ -241,11 +241,12 @@ test('local agent CLI applies run workdir option before handler', async () => {
   assert.deepEqual(received, {
     workdir: '/tmp/pinpawo-workdir',
     stdio: false,
+    mode: 'chat',
   });
 });
 
 test('local agent CLI enables the single-peer JSONL stdio transport', async () => {
-  let received: { workdir?: string; stdio: boolean } | null = null;
+  let received: { workdir?: string; stdio: boolean; mode?: string } | null = null;
   const program = createLocalAgentCli({
     runAgent: (options) => {
       received = options;
@@ -256,7 +257,61 @@ test('local agent CLI enables the single-peer JSONL stdio transport', async () =
   assert.deepEqual(received, {
     workdir: undefined,
     stdio: true,
+    mode: 'chat',
   });
+});
+
+test('local agent CLI defaults the server command to chat mode', async () => {
+  let received: { mode?: string } | null = null;
+  const program = createLocalAgentCli({
+    runAgent: (options) => {
+      received = options;
+    },
+  });
+
+  await program.parseAsync(['node', 'pinpawo', 'server']);
+  assert.equal(received!.mode, 'chat');
+});
+
+test('local agent CLI passes studio mode through to the handler', async () => {
+  let received: { mode?: string } | null = null;
+  const program = createLocalAgentCli({
+    runAgent: (options) => {
+      received = options;
+    },
+  });
+
+  await program.parseAsync(['node', 'pinpawo', 'server', '--mode', 'studio']);
+  assert.equal(received!.mode, 'studio');
+});
+
+test('local agent CLI keeps run as an alias that accepts the same mode', async () => {
+  // `run` stays for compatibility but must not grow a second runtime path:
+  // it dispatches to the identical handler with the identical options (#561).
+  let received: { mode?: string } | null = null;
+  const program = createLocalAgentCli({
+    runAgent: (options) => {
+      received = options;
+    },
+  });
+
+  await program.parseAsync(['node', 'pinpawo', 'run', '--mode', 'studio']);
+  assert.equal(received!.mode, 'studio');
+});
+
+test('local agent CLI rejects an unknown server mode instead of falling back', async () => {
+  let called = false;
+  const program = createLocalAgentCli({
+    runAgent: () => {
+      called = true;
+    },
+  });
+
+  await assert.rejects(
+    () => program.parseAsync(['node', 'pinpawo', 'server', '--mode', 'kitchen-sink']),
+    /Expected one of: chat, studio/,
+  );
+  assert.equal(called, false);
 });
 
 test('local agent CLI passes Chrome extension registration options to the handler', async () => {

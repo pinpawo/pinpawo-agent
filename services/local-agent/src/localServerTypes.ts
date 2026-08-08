@@ -10,8 +10,22 @@ import type { LocalStudioDueRunScheduler } from './localStudioDueRunScheduler';
 import type { LoadedUserCapability } from './capabilityLoader';
 import type { LocalModelProfileRegistry } from './llmConfig';
 import { buildWorkspaceRuntimeConfig, type LocalAgentRuntimeConfig } from './runtimeConfig';
+import { DEFAULT_SERVER_MODE, type ServerMode } from './serverMode';
+
+/**
+ * #561: startup-determined Studio facts. Present only in studio mode, where
+ * they are validated during startup preflight rather than per request.
+ */
+export type LocalServerStudioModeInfo = {
+  studioId: string;
+  plannerPetId: string;
+  workerPetIds: readonly string[];
+};
 
 export type LocalServerDeps = {
+  /** #561 primary server mode; absent is treated as chat for compatibility. */
+  serverMode?: ServerMode;
+  studioMode?: LocalServerStudioModeInfo;
   actorId: string;
   actorName?: string;
   modelProfiles: LocalModelProfileRegistry;
@@ -74,6 +88,14 @@ function freezeCapabilityLists<T extends LocalServerDeps>(deps: T): T {
 
 export function getLocalServerRuntimeConfig(deps: LocalServerDeps): LocalAgentRuntimeConfig {
   return deps.runtimeConfig ?? buildWorkspaceRuntimeConfig({ workdir: deps.workdir });
+}
+
+/**
+ * Deps assembled before #561 carry no explicit mode. Those are all chat-mode
+ * callers, so an absent value reads as chat and keeps existing behavior.
+ */
+export function getLocalServerMode(deps: LocalServerDeps): ServerMode {
+  return deps.serverMode ?? DEFAULT_SERVER_MODE;
 }
 
 export function getLocalServerWorkdir(deps: LocalServerDeps): string {

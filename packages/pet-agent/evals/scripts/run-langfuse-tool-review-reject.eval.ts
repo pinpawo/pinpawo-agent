@@ -106,7 +106,11 @@ function createRouteModel(): AgentModels['act'] {
       invoke: async () => {
         decisionCount += 1;
         if (decisionCount === 1) {
-          return { action: 'needs_plan' };
+          return {
+            action: 'needs_plan',
+            planner_objective: '完成当前需要工具执行的用户请求。',
+            planner_context: null,
+          };
         }
         return { outcome: 'goal_done', gap_note: null };
       },

@@ -40,6 +40,8 @@ test('entryDecision dataset covers the result-availability matrix', () => {
   assert.ok(names.has('stale-evidence-needs-refresh'));
   assert.ok(names.has('clarification-before-execution'));
   assert.ok(names.has('calculation-needs-execution'));
+  assert.ok(names.has('tool-shaped-history-still-answers'));
+  assert.ok(names.has('tool-shaped-history-needs-new-observation'));
 });
 
 test('outcome scorer gates only the model-owned verdict', () => {
@@ -72,6 +74,20 @@ test('planning datasets cover entry and boundary distributions', () => {
   assert.ok(capabilityPlanningBasicsDataset.cases.some(
     (testCase) => testCase.expected.result === 'return_to_answer',
   ));
+});
+
+test('planning dataset covers both outcomes of an exhausted boundary plan', () => {
+  const exhaustedBoundaryCases = capabilityPlanningBasicsDataset.cases.filter(
+    (testCase) => testCase.input.mode === 'boundary'
+      && (testCase.input.remainingPlan ?? []).length === 0,
+  );
+  // This is the input shape carrying the least context once the briefing is
+  // entry-only, so both outcomes stay covered: stopping when nothing remains,
+  // and continuing when the latest result names new work.
+  assert.deepEqual(
+    exhaustedBoundaryCases.map((testCase) => testCase.expected.result).sort(),
+    ['plan', 'return_to_answer'],
+  );
 });
 
 test('planner scorer enforces the mandatory General fallback', () => {

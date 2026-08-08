@@ -14,7 +14,7 @@ test('decision eval scenarios cover every canonical prompt distribution', () => 
   assert.deepEqual({
     entry: getDecisionEvalScenarios('entry').length,
     outcome: getDecisionEvalScenarios('outcome').length,
-  }, { entry: 15, outcome: 8 });
+  }, { entry: 17, outcome: 8 });
 });
 
 test('decision eval scenarios render complete production messages', () => {

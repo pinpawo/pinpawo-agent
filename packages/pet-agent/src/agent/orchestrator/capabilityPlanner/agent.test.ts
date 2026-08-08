@@ -279,13 +279,29 @@ function plannerInput(
   workspace: CapabilityDocumentWorkspace,
   overrides: Partial<CapabilityPlannerInput> = {},
 ): CapabilityPlannerInput {
-  return {
-    mode: 'entry',
-    messages: [new HumanMessage('Research the repository and then prepare a review.')],
+  const base = {
     completedTask: null,
     completedTaskResult: null,
     remainingPlan: [],
     workspace,
+  };
+  // A boundary input carries no briefing, so the entry default must not leak
+  // in through the spread.
+  if (overrides.mode === 'boundary') {
+    const { briefing: _briefing, ...boundaryOverrides } = overrides;
+    return {
+      ...base,
+      ...boundaryOverrides,
+      mode: 'boundary',
+    } as CapabilityPlannerInput;
+  }
+  return {
+    ...base,
+    mode: 'entry',
+    briefing: {
+      objective: 'Research the repository and then prepare a review.',
+      context: null,
+    },
     ...overrides,
   } as CapabilityPlannerInput;
 }
@@ -409,6 +425,62 @@ test('entry mode forms one executable task after Capability exploration', async 
   assert.equal('tasks' in result ? result.tasks.length : 0, 1);
 });
 
+test('Planner requires continuous work from one Capability in one task boundary', async (t) => {
+  const workspace = await createWorkspace(t, {
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary workspace tasks.',
+      instructions: 'Complete the requested work.',
+    }),
+  });
+  const model = new ScriptedPlannerModel([
+    {
+      structuredOutput: {
+        kind: 'plan',
+        args: {
+          tasks: [{
+            capability: 'general',
+            task: 'Fix P1-1 and P1-2 from the review.',
+          }, {
+            capability: 'general',
+            task: 'Fix P1-3 and P2, verify, commit, and push.',
+          }],
+        },
+      },
+    },
+    {
+      structuredOutput: {
+        kind: 'plan',
+        args: {
+          tasks: [{
+            capability: 'general',
+            task: 'Fix P1-1, P1-2, P1-3, and P2 from the review; verify, commit, and push.',
+          }],
+        },
+      },
+    },
+  ]);
+
+  const result = await createCapabilityPlannerAgent({ model }).invoke(
+    plannerInput(workspace),
+  );
+
+  assert.deepEqual(result, {
+    tasks: [{
+      capability: 'general',
+      task: 'Fix P1-1, P1-2, P1-3, and P2 from the review; verify, commit, and push.',
+    }],
+  });
+  const feedback = model.invocations[1]?.find((message) =>
+    message instanceof ToolMessage
+    && message.tool_call_id === 'structured-1');
+  assert.ok(feedback instanceof ToolMessage);
+  assert.match(
+    String(feedback.content),
+    /Consecutive tasks use the same Capability\. Combine them into one complete task\./,
+  );
+});
+
 test('a submitted plan becomes private Planner state for the final reply', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
@@ -419,10 +491,7 @@ test('a submitted plan becomes private Planner state for the final reply', async
   });
   const submittedTasks = [{
     capability: 'general',
-    task: 'Apply the requested repository change.',
-  }, {
-    capability: 'general',
-    task: 'Verify the change and report the result.',
+    task: 'Apply the requested repository change, verify it, and report the result.',
   }];
   const model = new ScriptedPlannerModel([{
     structuredOutput: {
@@ -508,7 +577,12 @@ test('an unknown Capability returns tool feedback and can be repaired in-loop', 
     {
       structuredOutput: {
         kind: 'plan',
-        args: submitArgs('general'),
+        args: {
+          tasks: [{
+            capability: 'general',
+            task: 'Research the repository and prepare the review.',
+          }],
+        },
       },
     },
   ]);
@@ -602,11 +676,6 @@ test('boundary mode rejects answer and materializes remaining work with general'
   const result = await createCapabilityPlannerAgent({ model }).invoke(
     plannerInput(workspace, {
       mode: 'boundary',
-      messages: [
-        new HumanMessage('Research the repository and then prepare a review.'),
-        new AIMessage('Next I will research the repository.'),
-        new AIMessage(fullHandoff),
-      ],
       completedTask: 'Research the repository.',
       completedTaskResult: fullHandoff,
       remainingPlan: [{
@@ -620,8 +689,6 @@ test('boundary mode rejects answer and materializes remaining work with general'
   assert.equal('tasks' in result ? result.tasks[0]?.capability : null, 'general');
   assert.deepEqual(model.structuredOutputCapabilityEnums, [['general', 'explore']]);
   assert.ok(model.invocations[0]?.some((message) =>
-    message instanceof AIMessage && message.content === fullHandoff));
-  assert.ok(model.invocations[0]?.some((message) =>
     message instanceof HumanMessage
     && String(message.content).includes('Planner Context：继续执行状态')));
   assert.match(
@@ -631,6 +698,90 @@ test('boundary mode rejects answer and materializes remaining work with general'
   assert.ok(model.invocations[1]?.some((message) =>
     message instanceof ToolMessage
     && message.tool_call_id === 'structured-1'));
+});
+
+test('a boundary with an exhausted plan carries only the completed task facts', async (t) => {
+  const workspace = await createWorkspace(t, {
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary tasks.',
+      instructions: 'Complete the requested work.',
+    }),
+  });
+  const model = new ScriptedPlannerModel([{
+    structuredOutput: {
+      kind: 'return_to_answer',
+      args: {
+        reason: 'The planned work is complete.',
+        context: 'issue #587 is open and no further task remains.',
+      },
+    },
+  }]);
+
+  const result = await createCapabilityPlannerAgent({ model }).invoke(
+    plannerInput(workspace, {
+      mode: 'boundary',
+      completedTask: 'Read the issue #587 status.',
+      completedTaskResult: 'issue #587 is open.',
+      remainingPlan: [],
+    }),
+  );
+
+  assert.deepEqual(result, {
+    answer: {
+      reason: 'The planned work is complete.',
+      context: 'issue #587 is open and no further task remains.',
+      question: null,
+    },
+  });
+  const boundaryInput = model.invocations[0]
+    ?.map((message) => String(message.content))
+    .join('\n') ?? '';
+  assert.match(boundaryInput, /刚完成的任务：Read the issue #587 status\./);
+  assert.match(boundaryInput, /任务结果摘要：issue #587 is open\./);
+  // An exhausted plan renders no follow-up section, and a boundary never
+  // restates the request under task-boundary authority.
+  assert.doesNotMatch(boundaryInput, /此前保留的后续任务/);
+  assert.doesNotMatch(boundaryInput, /planner_request_briefing/);
+});
+
+test('a boundary with an exhausted plan can still submit newly required work', async (t) => {
+  const workspace = await createWorkspace(t, {
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary tasks.',
+      instructions: 'Complete the requested work.',
+    }),
+  });
+  const model = new ScriptedPlannerModel([{
+    structuredOutput: {
+      kind: 'plan',
+      args: {
+        tasks: [{
+          capability: 'general',
+          task: 'Update the README section for issue #587.',
+        }],
+      },
+    },
+  }]);
+
+  const result = await createCapabilityPlannerAgent({ model }).invoke(
+    plannerInput(workspace, {
+      mode: 'boundary',
+      completedTask: 'Read the issue #587 status.',
+      completedTaskResult: 'issue #587 is open; the README section is stale.',
+      remainingPlan: [],
+    }),
+  );
+
+  // An empty remaining plan is not by itself a terminal state: the latest
+  // result may still require follow-up work.
+  assert.deepEqual(result, {
+    tasks: [{
+      capability: 'general',
+      task: 'Update the README section for issue #587.',
+    }],
+  });
 });
 
 test('oversized discovery is reported as planning_limit_reached', async (t) => {
@@ -685,11 +836,10 @@ test('missing structured output and direct text is rejected', async (t) => {
 
   await assert.rejects(
     createCapabilityPlannerAgent({ model }).invoke(plannerInput(workspace, {
-      messages: [
-        new HumanMessage('Earlier question.'),
-        new AIMessage('Historical answer must not become a Planner return.'),
-        new HumanMessage('Current request.'),
-      ],
+      briefing: {
+        objective: 'Current request.',
+        context: null,
+      },
     })),
     (error: unknown) =>
       error instanceof CapabilityPlannerAgentError

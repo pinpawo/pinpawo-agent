@@ -10,7 +10,11 @@ import {
 test('entry decision schema owns only the result-availability gate', () => {
   const schema = buildEntryDecisionSchema();
   assert.equal(schema.safeParse({ action: 'answer' }).success, true);
-  assert.equal(schema.safeParse({ action: 'needs_plan' }).success, true);
+  assert.equal(schema.safeParse({
+    action: 'needs_plan',
+    planner_objective: '检查 issue #269 并总结。',
+  }).success, true);
+  assert.equal(schema.safeParse({ action: 'needs_plan' }).success, false);
   assert.equal(schema.safeParse({
     action: 'direct_task',
     task: '读取 issue #269 并提炼需求点。',

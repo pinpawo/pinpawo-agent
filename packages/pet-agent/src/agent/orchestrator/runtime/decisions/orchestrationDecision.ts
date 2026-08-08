@@ -1,6 +1,6 @@
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { Command } from '@langchain/langgraph';
+import { Command, Send } from '@langchain/langgraph';
 import { evaluateGuard } from '../../../../guards';
 import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorStatePatch } from '../../controlPrimitives';
@@ -13,13 +13,14 @@ import {
   buildDelegationOutcomeDecisionOutputInstruction,
   buildDelegationOutcomeDecisionSchema,
   buildEntryDecisionOutputInstruction,
-  buildEntryDecisionSchema,
   buildOrchestrationDecisionStructuredOutputOptions,
   readDecisionText,
   type AcceptedDelegationOutcome,
   type DelegationOutcomeDecision,
-  type EntryDecision,
 } from '../../schemas';
+import type {
+  CapabilityPlannerDispatch,
+} from '../../capabilityPlanner/runner';
 import { readContextCompactionSummaries } from '../../contextCompaction';
 import {
   buildDelegationOutcomeCurrentTaskContext,
@@ -33,6 +34,7 @@ import {
   buildRuntimeContext,
   buildSubagentAnnounceContext,
   buildEntryDecisionInput,
+  buildJsonEntryDecisionBriefingInstruction,
   buildEntryDecisionSystemPrompt,
 } from '../../prompts';
 import {
@@ -60,6 +62,13 @@ import {
 import { readMessageText } from '../../utils';
 import { invokeStructuredOutput } from '../../../../utils/structuredOutput';
 import {
+  buildRouteFunctionEntryDecisionBriefingInstruction,
+  buildRouteFunctionEntryDecisionInstruction,
+  invokeEntryDecisionOutcome,
+  usesRouteFunctionEntryDecision,
+  type EntryOutcome,
+} from './entryDecisionProtocol';
+import {
   mainMessagesWithoutCompaction,
 } from './conversationContext';
 import {
@@ -77,7 +86,7 @@ export function createEntryDecisionRunner(config: OrchestratorConfig) {
   ) {
     const context = buildEntryDecisionContext({ config, state, runnableConfig });
     const decision = await invokeEntryDecision({ config, context, runnableConfig });
-    const transition = buildEntryDecisionResult({ decision });
+    const transition = buildEntryDecisionResult({ state, decision });
     return new Command({ update: transition.update, goto: transition.goto });
   };
 }
@@ -118,9 +127,12 @@ function buildEntryDecisionContext(params: {
   ];
   const systemPrompt = buildEntryDecisionSystemPrompt({
     actor,
-    outputInstruction: buildEntryDecisionOutputInstruction(
-      config.decisionStructuredOutput?.method,
-    ),
+    briefingInstruction: usesRouteFunctionEntryDecision(config)
+      ? buildRouteFunctionEntryDecisionBriefingInstruction()
+      : buildJsonEntryDecisionBriefingInstruction(),
+    outputInstruction: usesRouteFunctionEntryDecision(config)
+      ? buildRouteFunctionEntryDecisionInstruction()
+      : buildEntryDecisionOutputInstruction(config.decisionStructuredOutput?.method),
   });
   const decisionContextMessage = new HumanMessage(buildEntryDecisionInput({
     runDelegationContext: buildRunDelegationSummaryContext(state.runDelegationSummaries),
@@ -269,19 +281,15 @@ async function invokeEntryDecision(params: {
 }) {
   const { config, context, runnableConfig } = params;
   try {
-    return await invokeStructuredOutput({
-      model: config.models.decision ?? config.models.act,
-      schema: buildEntryDecisionSchema(),
-      options: buildOrchestrationDecisionStructuredOutputOptions(
-        config.decisionStructuredOutput,
-      ),
+    return await invokeEntryDecisionOutcome({
+      config,
       messages: [
         new SystemMessage(context.systemPrompt),
         context.decisionContextMessage,
         ...context.conversationMessages,
       ],
       runnableConfig,
-    }) as EntryDecision;
+    });
   } catch (error) {
     console.warn('[pet-agent] invalid entry decision structured output:', {
       error: error instanceof Error ? error.message : String(error),
@@ -320,10 +328,11 @@ async function invokeDelegationOutcomeDecision(params: {
 }
 
 function buildEntryDecisionResult(params: {
-  decision: EntryDecision;
+  state: OrchestratorStateType;
+  decision: EntryOutcome;
 }) {
-  const { decision } = params;
-  if (decision.action === 'answer') {
+  const { state, decision } = params;
+  if (decision.kind === 'answer') {
     return {
       goto: 'answer' as const,
       update: {
@@ -333,8 +342,16 @@ function buildEntryDecisionResult(params: {
       },
     };
   }
+  const dispatch: CapabilityPlannerDispatch = {
+    plannerState: {
+      runId: state.runId,
+      runDelegationSummaries: state.runDelegationSummaries,
+      runCapabilityPlan: [],
+    },
+    briefing: decision.briefing,
+  };
   return {
-    goto: 'capabilityPlanner' as const,
+    goto: new Send('capabilityPlanner', dispatch),
     update: {
       runNextDelegation: null,
       runPlannerReturn: null,

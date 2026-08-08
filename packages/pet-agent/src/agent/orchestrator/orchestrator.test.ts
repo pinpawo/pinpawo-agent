@@ -247,7 +247,11 @@ const testActor: AgentActor = {
 };
 
 function needsPlanDecision() {
-  return { action: 'needs_plan' };
+  return {
+    action: 'needs_plan',
+    planner_objective: '完成当前需要工具执行的用户请求。',
+    planner_context: null,
+  };
 }
 
 function scriptedPlannerTask(
@@ -278,6 +282,218 @@ function taskDoneDecision(gapNote: string | null = '当前任务已完成，但�
 function continueDecision(gapNote: string | null = '当前 delegated task 还未达标，继续执行。') {
   return { outcome: 'continue', gap_note: gapNote };
 }
+
+type EntryRouteCall = {
+  name: string;
+  args: Record<string, unknown>;
+};
+
+function createScriptedEntryRouteDecisionModel(
+  responses: ReadonlyArray<ReadonlyArray<EntryRouteCall>>,
+) {
+  const invocations: BaseMessage[][] = [];
+  const boundToolNames: string[][] = [];
+  const boundToolOptions: Array<Record<string, unknown> | undefined> = [];
+  let responseIndex = 0;
+  const model = {
+    bindTools: (tools: StructuredTool[], options?: Record<string, unknown>) => {
+      boundToolNames.push(tools.map((item) => item.name));
+      boundToolOptions.push(options);
+      return {
+        invoke: async (messages: BaseMessage[]) => {
+          invocations.push([...messages]);
+          const calls = responses[responseIndex] ?? [];
+          responseIndex += 1;
+          return new AIMessage({
+            content: '',
+            tool_calls: calls.map((call, index) => ({
+              id: `entry-route-${String(responseIndex)}-${String(index)}`,
+              name: call.name,
+              args: call.args,
+              type: 'tool_call' as const,
+            })),
+          });
+        },
+      };
+    },
+  } as unknown as AgentModels['act'];
+  return { model, invocations, boundToolNames, boundToolOptions };
+}
+
+const routeFunctionEntryDecisionConfig = {
+  method: 'functionCalling' as const,
+  entryDecisionProtocol: 'routeFunctions' as const,
+};
+
+test('entry route-functions protocol requires one route call and sends planner args as the private briefing', async () => {
+  const route = createScriptedEntryRouteDecisionModel([[
+    {
+      name: 'route_to_planner',
+      args: {
+        objective: '检查 issue #587 的 Entry 路由设计并实现测试。',
+        context: '不要新增持久 state。',
+      },
+    },
+  ]]);
+  let plannerInput: CapabilityPlannerInput | null = null;
+  const graph = createOrchestratorGraph({
+    models: {
+      act: route.model,
+      decision: route.model,
+      answer: new FakeListChatModel({ responses: ['unused'], sleep: 0 }),
+      observe: route.model,
+      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
+    },
+    actor: testActor,
+    decisionStructuredOutput: routeFunctionEntryDecisionConfig,
+    capabilityPlannerRunner: {
+      async invoke(input) {
+        plannerInput = input;
+        return {
+          answer: {
+            reason: 'Planner received the route briefing.',
+            context: 'No execution was required.',
+            question: null,
+          },
+        };
+      },
+    },
+  });
+
+  await graph.invoke(buildOrchestratorRunInput([
+    new HumanMessage('请检查并实现 Entry 路由设计。'),
+  ]), {
+    configurable: {
+      thread_id: 'entry-route-function-plan',
+      actor: testActor,
+      capabilities: [capability('general', '处理通用任务。')],
+      allowedCapabilityNames: ['general'],
+    },
+  });
+
+  assert.deepEqual(route.boundToolNames, [[
+    'route_to_answer',
+    'route_to_planner',
+  ]]);
+  assert.deepEqual(route.boundToolOptions, [{ tool_choice: 'required' }]);
+  const capturedPlannerInput = plannerInput as CapabilityPlannerInput | null;
+  assert.ok(capturedPlannerInput);
+  assert.deepEqual(capturedPlannerInput.briefing, {
+    objective: '检查 issue #587 的 Entry 路由设计并实现测试。',
+    context: '不要新增持久 state。',
+  });
+  assert.match(String(route.invocations[0]?.[0]?.content ?? ''), /必须且只能调用一个路由 function/);
+});
+
+test('entry route-functions protocol rejects zero, repeated, unknown, and malformed route calls', async () => {
+  const cases: ReadonlyArray<{
+    label: string;
+    calls: ReadonlyArray<EntryRouteCall>;
+    error: RegExp;
+  }> = [
+    { label: 'zero', calls: [], error: /exactly one route call; received 0/ },
+    {
+      label: 'two different calls',
+      calls: [
+        { name: 'route_to_answer', args: {} },
+        { name: 'route_to_planner', args: { objective: 'inspect' } },
+      ],
+      error: /exactly one route call; received 2/,
+    },
+    {
+      label: 'duplicate calls',
+      calls: [
+        { name: 'route_to_answer', args: {} },
+        { name: 'route_to_answer', args: {} },
+      ],
+      error: /exactly one route call; received 2/,
+    },
+    {
+      label: 'unknown call',
+      calls: [{ name: 'route_somewhere_else', args: {} }],
+      error: /Unknown entry route function/,
+    },
+    {
+      label: 'invalid planner args',
+      calls: [{ name: 'route_to_planner', args: { objective: '   ' } }],
+      error: /Invalid route_to_planner arguments/,
+    },
+    {
+      label: 'unexpected answer args',
+      calls: [{ name: 'route_to_answer', args: { unexpected: true } }],
+      error: /Invalid route_to_answer arguments/,
+    },
+  ];
+
+  for (const item of cases) {
+    const route = createScriptedEntryRouteDecisionModel([item.calls]);
+    const graph = createOrchestratorGraph({
+      models: {
+        act: route.model,
+        decision: route.model,
+        answer: {
+          invoke: async () => {
+            throw new Error('invalid entry route must not reach answer');
+          },
+        } as unknown as AgentModels['act'],
+        observe: route.model,
+        subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
+      },
+      actor: testActor,
+      decisionStructuredOutput: routeFunctionEntryDecisionConfig,
+      capabilityPlannerRunner: {
+        async invoke() {
+          throw new Error('invalid entry route must not reach capabilityPlanner');
+        },
+      },
+    });
+
+    await assert.rejects(graph.invoke(buildOrchestratorRunInput([
+      new HumanMessage(`test invalid ${item.label}`),
+    ]), {
+      configurable: {
+        thread_id: `entry-route-function-invalid-${item.label}`,
+        actor: testActor,
+        capabilities: [],
+      },
+    }), item.error);
+  }
+});
+
+test('entry route-functions protocol repairs an invalid route output without falling through to end', async () => {
+  const route = createScriptedEntryRouteDecisionModel([
+    [],
+    [{ name: 'route_to_answer', args: {} }],
+  ]);
+  const graph = createOrchestratorGraph({
+    models: {
+      act: route.model,
+      decision: route.model,
+      answer: new FakeListChatModel({ responses: ['repaired answer'], sleep: 0 }),
+      observe: route.model,
+      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
+    },
+    actor: testActor,
+    decisionStructuredOutput: {
+      ...routeFunctionEntryDecisionConfig,
+      autoRepair: { maxRetries: 1 },
+    },
+  });
+
+  const state = await graph.invoke(buildOrchestratorRunInput([
+    new HumanMessage('不需要工具，直接回答。'),
+  ]), {
+    configurable: {
+      thread_id: 'entry-route-function-repair',
+      actor: testActor,
+      capabilities: [],
+    },
+  }) as OrchestratorStateType;
+
+  assert.equal(route.invocations.length, 2);
+  assert.match(String(route.invocations[1]?.at(-1)?.content ?? ''), /上一次路由输出无效/);
+  assert.equal(mainConversationMessages(state.messages).at(-1)?.content, 'repaired answer');
+});
 
 test('entry decision reads full canonical main messages and excludes lane announces', async () => {
   let entryDecisionMessages: Array<{ _getType?: () => string; content?: unknown }> = [];
@@ -358,6 +574,71 @@ test('entry decision reads full canonical main messages and excludes lane announ
   );
 });
 
+test('entry sends a bounded Planner briefing without persisting it in shared state', async () => {
+  let plannerInput: CapabilityPlannerInput | null = null;
+  const entryOnlyBriefingText = 'ENTRY_ONLY_BRIEFING_DO_NOT_PERSIST';
+  const model = {
+    invoke: async () => new AIMessage('planner returned facts'),
+    withStructuredOutput: () => ({
+      invoke: async () => ({
+        action: 'needs_plan',
+        planner_objective: '处理 issue #587，并且不要修改 /tmp/legacy-path。',
+        planner_context: entryOnlyBriefingText,
+      }),
+    }),
+  } as unknown as AgentModels['act'];
+  const graph = createOrchestratorGraph({
+    models: {
+      act: model,
+      observe: model,
+      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
+    },
+    actor: testActor,
+    capabilityPlannerRunner: {
+      async invoke(input) {
+        plannerInput = input;
+        return {
+          answer: {
+            reason: 'No execution is needed.',
+            context: 'Planner returned facts.',
+            question: null,
+          },
+        };
+      },
+    },
+  });
+
+  const state = await graph.invoke(buildOrchestratorRunInput([
+    new HumanMessage('已经关闭的旧请求：修改 OLD_IRRELEVANT_GOAL。'),
+    new AIMessage('旧请求已经结束。'),
+    new HumanMessage('请处理当前请求。'),
+  ]), {
+    configurable: {
+      thread_id: 'entry-private-planner-briefing',
+      actor: testActor,
+      capabilities: [capability('general', '处理通用任务。')],
+      allowedCapabilityNames: ['general'],
+    },
+  }) as OrchestratorStateType;
+
+  const capturedPlannerInput = plannerInput as CapabilityPlannerInput | null;
+  assert.ok(capturedPlannerInput);
+  assert.deepEqual(capturedPlannerInput.briefing, {
+    objective: '处理 issue #587，并且不要修改 /tmp/legacy-path。',
+    context: entryOnlyBriefingText,
+  });
+  assert.equal('messages' in capturedPlannerInput, false);
+  assert.doesNotMatch(JSON.stringify(capturedPlannerInput), /OLD_IRRELEVANT_GOAL/);
+  assert.doesNotMatch(
+    state.messages.map(readMessageText).join('\n'),
+    new RegExp(entryOnlyBriefingText),
+  );
+  assert.equal(
+    ORCHESTRATOR_STATE_CHANNEL_NAMES.some((channel) => channel.includes('briefing')),
+    false,
+  );
+});
+
 test('task_done reroutes through capabilityPlanner before the next task', async () => {
   let structuredCallCount = 0;
   const entryDecisionInputs: string[] = [];
@@ -433,25 +714,21 @@ test('task_done reroutes through capabilityPlanner before the next task', async 
   assert.equal(entryDecisionInputs.length, 1);
   assert.equal(plannerInputs.length, 2);
   assert.doesNotMatch(entryDecisionInputs[0], /plan_draft|task_plan_draft/);
-  assert.equal(plannerInputs[0]?.mode, 'entry');
-  assert.equal(plannerInputs[1]?.mode, 'boundary');
-  assert.doesNotMatch(
-    plannerInputs[0]?.messages.map(readMessageText).join('\n') ?? '',
-    /DYNAMIC_WIKI_SYSTEM_CONTEXT/,
+  const entryPlannerInput = plannerInputs[0];
+  const boundaryPlannerInput = plannerInputs[1];
+  assert.equal(entryPlannerInput?.mode, 'entry');
+  assert.equal(boundaryPlannerInput?.mode, 'boundary');
+  assert.equal(
+    entryPlannerInput?.mode === 'entry' ? entryPlannerInput.briefing.objective : null,
+    '完成当前需要工具执行的用户请求。',
   );
-  assert.match(
-    plannerInputs[0]?.messages.map(readMessageText).join('\n') ?? '',
-    /FRAMEWORK_COMPACTION_CONTEXT/,
+  assert.equal(
+    entryPlannerInput?.mode === 'entry' ? entryPlannerInput.briefing.context : 'unset',
+    null,
   );
-  assert.equal(plannerInputs[0]?.messages[0]?._getType(), 'ai');
-  assert.match(
-    plannerInputs[1]?.messages.map(readMessageText).join('\n') ?? '',
-    /issue #269 需求点/,
-  );
-  assert.match(
-    plannerInputs[1]?.messages.map(readMessageText).join('\n') ?? '',
-    /接下来我会先处理这项任务：读取 issue #269 并提炼需求点/,
-  );
+  // A boundary re-plans from run facts alone; it never reconstructs a briefing
+  // from the transcript.
+  assert.equal(boundaryPlannerInput?.briefing, undefined);
   assert.equal(plannerInputs[1]?.completedTask, '读取 issue #269 并提炼需求点。');
   assert.match(plannerInputs[1]?.completedTaskResult ?? '', /issue #269 需求点/);
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
@@ -459,6 +736,79 @@ test('task_done reroutes through capabilityPlanner before the next task', async 
   assert.deepEqual(state.runCapabilityPlan, []);
   assert.equal(state.runNextDelegation, null);
   assert.equal(state.taskActiveDelegation, null);
+});
+
+test('a single-task plan reaches the boundary with no remaining plan and no briefing', async () => {
+  let structuredCallCount = 0;
+  const plannerInputs: CapabilityPlannerInput[] = [];
+  const routeModel = {
+    invoke: async () => new AIMessage('final summary'),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        structuredCallCount += 1;
+        if (structuredCallCount === 1) return needsPlanDecision();
+        // The task is done while the overall goal is not, so the run routes
+        // back to the Planner with its plan already exhausted.
+        if (structuredCallCount === 2) {
+          return taskDoneDecision('已读取 issue 状态，仍需更新 README。');
+        }
+        return goalDoneDecision();
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const capabilityPlannerRunner: CapabilityPlannerRunner = {
+    async invoke(input) {
+      plannerInputs.push(input);
+      if (plannerInputs.length === 1) {
+        return { tasks: [{ capability: 'explore', task: '读取 issue #587 状态。' }] };
+      }
+      return {
+        answer: {
+          reason: '计划中的工作已经完成。',
+          context: 'issue #587 当前为 open。',
+          question: null,
+        },
+      };
+    },
+  };
+  const graph = createOrchestratorGraph({
+    models: {
+      act: routeModel,
+      observe: routeModel,
+      subagent: new FakeListChatModel({
+        responses: ['issue #587 当前为 open。'],
+        sleep: 0,
+      }),
+    },
+    actor: testActor,
+    capabilityPlannerRunner,
+  });
+
+  const state = await graph.invoke(buildOrchestratorRunInput([
+    new HumanMessage('看下 issue #587 现在什么状态。'),
+  ]), {
+    configurable: {
+      thread_id: 'boundary-exhausted-plan',
+      actor: testActor,
+      capabilities: [capability('explore', '通用探索、调查、代码库理解 capability。')],
+      allowedCapabilityNames: ['explore'],
+    },
+  }) as OrchestratorStateType;
+
+  assert.equal(plannerInputs.length, 2);
+  const boundaryPlannerInput = plannerInputs[1];
+  assert.equal(boundaryPlannerInput?.mode, 'boundary');
+  // The decisive combination: a boundary whose plan is already exhausted has
+  // neither a remaining task nor a briefing to restate the goal.
+  assert.deepEqual(boundaryPlannerInput?.remainingPlan, []);
+  assert.equal(boundaryPlannerInput?.briefing, undefined);
+  assert.equal(boundaryPlannerInput?.completedTask, '读取 issue #587 状态。');
+  assert.match(boundaryPlannerInput?.completedTaskResult ?? '', /issue #587 当前为 open/);
+  // The Planner return is consumed by the answer node, which clears it and
+  // starts no further delegation.
+  assert.equal(state.runPlannerReturn, null);
+  assert.equal(state.runNextDelegation, null);
+  assert.deepEqual(state.runCapabilityPlan, []);
 });
 
 test('task_done returns to capabilityPlanner until the remaining goal is complete', async () => {
@@ -478,7 +828,7 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
         const inputText = String((messages.at(-1) as { content?: unknown })?.content ?? '');
         if (structuredCallCount === 1) {
           entryDecisionInputs.push(inputText);
-          return { action: 'needs_plan' };
+          return needsPlanDecision();
         }
         if (structuredCallCount === 2) {
           outcomeDecisionInputs.push(inputText);
@@ -709,7 +1059,7 @@ test('capability planner reports an empty compiled registry without inventing Ge
       invoke: async (messages: unknown[]) => {
         structuredCallCount += 1;
         if (structuredCallCount === 1) {
-          return { action: 'needs_plan' };
+          return needsPlanDecision();
         }
         throw new Error('Capability Planner must use the typed runner seam.');
       },

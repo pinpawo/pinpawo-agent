@@ -59,22 +59,42 @@ test('prepared request context does not repeat the current user request in recen
   assert.match(requestContext, /更早的请求/);
 });
 
-test('Capability Planner planning state excludes main-conversation content', () => {
+const plannerPromptWorkspace = {
+  rootPath: '/tmp/capabilities',
+  registryDigest: 'a'.repeat(64),
+  capabilityNames: ['browser'],
+  entries: [{
+    capabilityName: 'browser',
+    relativePath: 'browser/CAPABILITY.md',
+    documentDigest: 'b'.repeat(64),
+    provenance: 'authored' as const,
+  }],
+  reused: false,
+};
+
+test('Capability Planner entry input leads with the Entry request briefing', () => {
+  const input = buildCapabilityPlannerAgentInput({
+    mode: 'entry',
+    workspace: plannerPromptWorkspace,
+    briefing: {
+      objective: '打开小红书并浏览相关内容。',
+      context: '浏览器已经连接。',
+    },
+    completedTask: null,
+    completedTaskResult: null,
+    remainingPlan: [],
+  } satisfies CapabilityPlannerInput);
+
+  assert.match(input, /^<planner_request_briefing[^>]*>/);
+  assert.match(input, /打开小红书并浏览相关内容。/);
+  assert.match(input, /浏览器已经连接。/);
+  assert.doesNotMatch(input, /workspace|registry_digest|document_count|<planning_state>/);
+});
+
+test('Capability Planner boundary input carries run facts without a request briefing', () => {
   const input = buildCapabilityPlannerAgentInput({
     mode: 'boundary',
-    workspace: {
-      rootPath: '/tmp/capabilities',
-      registryDigest: 'a'.repeat(64),
-      capabilityNames: ['browser'],
-      entries: [{
-        capabilityName: 'browser',
-        relativePath: 'browser/CAPABILITY.md',
-        documentDigest: 'b'.repeat(64),
-        provenance: 'authored',
-      }],
-      reused: false,
-    },
-    messages: [new HumanMessage('打开小红书')],
+    workspace: plannerPromptWorkspace,
     completedTask: '确认浏览器可用',
     completedTaskResult: '浏览器已经连接，目标页面可访问。',
     remainingPlan: [{
@@ -83,10 +103,41 @@ test('Capability Planner planning state excludes main-conversation content', () 
     }],
   } satisfies CapabilityPlannerInput);
 
+  // The remaining plan already states the work in resolved form, so the raw
+  // request is never restated under task-boundary authority.
+  assert.doesNotMatch(input, /planner_request_briefing/);
   assert.match(input, /^Planner Context：继续执行状态\n刚完成的任务：确认浏览器可用/);
   assert.match(input, /任务结果摘要：浏览器已经连接，目标页面可访问。/);
   assert.match(input, /- \[browser\] 浏览相关内容/);
-  assert.doesNotMatch(input, /打开小红书|workspace|registry_digest|document_count|<planning_state>/);
+  assert.doesNotMatch(input, /workspace|registry_digest|document_count|<planning_state>/);
+});
+
+test('Capability Planner boundary input omits the follow-up section once the plan is exhausted', () => {
+  const input = buildCapabilityPlannerAgentInput({
+    mode: 'boundary',
+    workspace: plannerPromptWorkspace,
+    completedTask: '确认浏览器可用',
+    completedTaskResult: '浏览器已经连接，目标页面可访问。',
+    remainingPlan: [],
+  } satisfies CapabilityPlannerInput);
+
+  assert.match(input, /^Planner Context：继续执行状态\n刚完成的任务：确认浏览器可用/);
+  assert.match(input, /任务结果摘要：浏览器已经连接，目标页面可访问。/);
+  assert.doesNotMatch(input, /此前保留的后续任务/);
+  assert.doesNotMatch(input, /planner_request_briefing/);
+});
+
+test('Capability Planner boundary input degrades to an explicit empty state', () => {
+  const input = buildCapabilityPlannerAgentInput({
+    mode: 'boundary',
+    workspace: plannerPromptWorkspace,
+    completedTask: null,
+    completedTaskResult: null,
+    remainingPlan: [],
+  } satisfies CapabilityPlannerInput);
+
+  // Nothing is silently dropped: the continuation state says so explicitly.
+  assert.equal(input, 'Planner Context：继续执行状态\n无。');
 });
 
 test('decision recent messages label delegation briefings as scheduling context', () => {
@@ -156,6 +207,7 @@ test('request contexts include bounded capability artifact refs', () => {
 test('entry decision keeps runtime state in the input context', () => {
   const prompt = buildEntryDecisionSystemPrompt({
     actor: testActor,
+    briefingInstruction: 'ENTRY_BRIEFING_INSTRUCTION',
     outputInstruction: 'ENTRY_OUTPUT_INSTRUCTION',
   });
   const input = buildEntryDecisionInput({
@@ -164,6 +216,7 @@ test('entry decision keeps runtime state in the input context', () => {
   });
 
   assert.match(prompt, /ENTRY_OUTPUT_INSTRUCTION/);
+  assert.match(prompt, /ENTRY_BRIEFING_INSTRUCTION/);
   assert.match(input, /<entry_decision_context role="fact" source="runtime_state" trust="read_only">/);
   assert.match(input, /run_delegation_summaries/);
   assert.match(input, /<runtime_context/);
@@ -174,6 +227,17 @@ test('entry decision keeps runtime state in the input context', () => {
   assert.doesNotMatch(input, /capability_artifacts|artifact 短引用/);
   assert.doesNotMatch(input, /<instruction>/);
   assert.doesNotMatch(input, /重新规划/);
+});
+
+test('entry decision defaults to the JSON briefing field contract', () => {
+  const prompt = buildEntryDecisionSystemPrompt({
+    actor: testActor,
+    outputInstruction: 'ENTRY_OUTPUT_INSTRUCTION',
+  });
+
+  assert.match(prompt, /planner_objective/);
+  assert.match(prompt, /planner_context/);
+  assert.doesNotMatch(prompt, /route_to_planner/);
 });
 
 test('loop-internal router input stays focused on current run announce context', () => {

@@ -112,7 +112,16 @@ function createPlannerSubmissionTools(
   const submitPlanTool = tool(
     async ({ tasks }: {
       tasks: Array<{ capability: string; task: string }>;
-    }) => JSON.stringify({ tasks }),
+    }) => {
+      if (tasks.some((task, index) =>
+        index > 0 && task.capability === tasks[index - 1]?.capability,
+      )) {
+        throw new Error(
+          'Consecutive tasks use the same Capability. Combine them into one complete task.',
+        );
+      }
+      return JSON.stringify({ tasks });
+    },
     {
       name: SUBMIT_PLAN_TOOL_NAME,
       description: 'Terminal Planner action. Submit the shortest executable task sequence that completes the user goal.',
@@ -121,9 +130,9 @@ function createPlannerSubmissionTools(
           capability: z.enum(capabilityNames)
             .describe('Capability that executes this task.'),
           task: z.string().min(1).max(MAX_TASK_TEXT_CHARS)
-            .describe('Short, executable task description.'),
+            .describe('A complete, executable task for that Capability.'),
         })).min(1).max(MAX_PLAN_TASKS)
-          .describe('Ordered tasks. The first task runs now; the rest remain planned.'),
+          .describe('Ordered execution boundaries. The first task runs now; the rest remain planned. Keep continuous work owned by one Capability together in one task.'),
       }),
     },
   );
@@ -162,7 +171,7 @@ function buildSubmittedPlanSystemPrompt(tasks: readonly SubmittedPlannerTask[]) 
   return [
     '【计划已完成】submit_plan 已成功提交以下计划：',
     ...tasks.map((task, index) => `${String(index + 1)}. [${task.capability}] ${task.task}`),
-    '现在直接回复用户，确认以上计划已提交，然后结束本轮。不要调用任何工具，不要修改、补充或继续规划。',
+    '现在用普通 assistant text 确认以上计划已提交，并结束本轮规划。',
   ].join('\n');
 }
 
@@ -396,12 +405,7 @@ async function invokePlannerAgent(params: {
   });
 
   try {
-    const messages = [
-      ...params.input.messages,
-      ...(params.input.mode === 'boundary'
-        ? [new HumanMessage(buildCapabilityPlannerAgentInput(params.input))]
-        : []),
-    ];
+    const messages = [new HumanMessage(buildCapabilityPlannerAgentInput(params.input))];
     timeout.signal.throwIfAborted();
     const result = await agent.invoke({ messages }, runnableConfig);
     // Some providers or callbacks do not stop immediately when their signal is

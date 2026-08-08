@@ -44,7 +44,10 @@ import {
   type LocalAgentInterfaceContext,
   type LocalAgentInterfaceKind,
 } from './chatInterface';
-import { inferLlmStructuredOutputMethod } from './llmModelPresets';
+import {
+  inferLlmEntryDecisionProtocol,
+  inferLlmStructuredOutputMethod,
+} from './llmModelPresets';
 import {
   prepareAgentRegistry,
   type CapabilityDiagnosticReporter,
@@ -204,7 +207,15 @@ export function buildDecisionStructuredOutput(llmConfig: AgentLlmConfig): Orches
       }
     : {};
 
-  return { method, ...autoRepair };
+  const entryDecisionProtocol = method === 'functionCalling'
+    ? inferLlmEntryDecisionProtocol(llmConfig.model)
+    : 'json';
+
+  return {
+    method,
+    ...(entryDecisionProtocol === 'routeFunctions' ? { entryDecisionProtocol } : {}),
+    ...autoRepair,
+  };
 }
 
 export function buildLocalChatAgentInput(params: {

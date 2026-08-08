@@ -2,11 +2,12 @@
 title: Model Prompting and Harness References
 page_type: source
 status: draft
-updated: 2026-07-20
+updated: 2026-08-08
 sources:
   - https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.6#prompting-best-practices
   - https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-4-8
   - https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices
+  - https://www.anthropic.com/engineering/april-23-postmortem
   - https://ai.google.dev/gemini-api/docs/prompting-strategies
   - https://www.anthropic.com/engineering/building-effective-agents
   - https://arxiv.org/abs/2405.15793
@@ -67,6 +68,24 @@ Relevant claims:
 Anthropic also publishes useful negative constraints for narrow boundaries, such
 as when not to spawn a subagent. The evidence favors a positive-first contract,
 not an absolute language-style ban.
+
+## Anthropic Claude Code quality postmortem
+
+Source: [An update on recent Claude Code quality reports](https://www.anthropic.com/engineering/april-23-postmortem).
+
+**Observation:** a global instruction to constrain text between tool calls and
+final-response length, combined with other prompt changes, reduced coding
+quality. The regression was found through a broader evaluation and line-level
+ablation, then reverted. The same report describes separate quality failures
+from lowering default reasoning effort and repeatedly dropping earlier thinking
+after an idle session.
+
+**Repository inference:** a system prompt should give the model a concise,
+positive direction and preserve room for task-relevant reasoning. Prompt text
+is not a substitute for model invocation settings, context continuity, or
+deterministic protocol enforcement. This observation does not establish that
+all negative wording is harmful; genuine safety and authority boundaries remain
+valid.
 
 ## Google Gemini prompting strategies
 

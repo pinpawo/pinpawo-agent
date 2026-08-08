@@ -1,4 +1,3 @@
-import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { tool } from '@langchain/core/tools';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -18,7 +17,10 @@ import {
   evaluateCapabilityPlanningOutput,
   type CapabilityPlanningEvalOutput,
 } from '../capability-planning-evaluation.ts';
-import { capabilityPlanningBasicsDataset } from '../datasets/capability-planning-basics.ts';
+import {
+  capabilityPlanningBasicsDataset,
+  type CapabilityPlanningInput,
+} from '../datasets/capability-planning-basics.ts';
 import { createDecisionEvalModel } from './decision-eval-model.ts';
 import { resolveLangfuseConfig } from './langfuse-api.ts';
 import { writeLangfuseEvalResult } from './langfuse-eval-writer.ts';
@@ -35,6 +37,19 @@ const evalExecutionToolkit = defineToolkit({
     }),
   }],
 });
+
+/**
+ * The dataset attaches a briefing to every entry case. A missing one is a
+ * dataset bug, so fail loudly instead of substituting a placeholder objective
+ * that would silently score a different input than production uses.
+ */
+function entryBriefing(testCase: { id: string; input: CapabilityPlanningInput }) {
+  const { briefing } = testCase.input;
+  if (!briefing) {
+    throw new Error(`Entry capability-planning case "${testCase.id}" is missing its briefing.`);
+  }
+  return briefing;
+}
 
 function capabilityFromRegistryEntry(entry: string): AgentCapability {
   const separator = entry.indexOf(':');
@@ -144,11 +159,9 @@ async function main() {
           model: modelConfig.model,
         }).invoke(
           {
-            mode: testCase.input.mode,
-            messages: testCase.input.messages.map((message) =>
-              message.role === 'user'
-                ? new HumanMessage(message.content)
-                : new AIMessage(message.content)),
+            ...(testCase.input.mode === 'entry'
+              ? { mode: 'entry' as const, briefing: entryBriefing(testCase) }
+              : { mode: 'boundary' as const }),
             completedTask: testCase.input.completedTask ?? null,
             completedTaskResult: testCase.input.completedTaskResult ?? null,
             remainingPlan: testCase.input.remainingPlan ?? [],

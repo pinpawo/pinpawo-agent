@@ -410,3 +410,17 @@ lint passes, and documentation migrations.
 - Updated the session projection, ownership, review-resolution, open-question,
   and documentation index pages. Raw historical review design documents were
   retained as sources rather than rewritten during ingest.
+
+## [2026-08-08] ingest | Minimal generative prompt contracts
+
+- Registered Anthropic's Claude Code quality postmortem as external prompting
+  evidence. It records a bounded quality regression from global output-length
+  constraints and separate failures involving reasoning effort and context
+  continuity.
+- Refined the system-prompt authoring principles around the minimum generative
+  contract: purpose, relevant evidence, and successful outcome; positive
+  judgment cues; and narrow negative boundaries only where safety, authority,
+  or semantics require them.
+- Rewrote the current Entry and Capability Planner prompt templates to express
+  their existing contracts with concise, positive direction while preserving
+  their structured-output and runtime ownership.

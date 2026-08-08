@@ -10,6 +10,8 @@
  *   LLM_MODEL                      Model name. Falls back to ~/.pinpawo/config.json llm_model.
  *   DECISION_STRUCTURED_OUTPUT_METHOD Optional method override: functionCalling,jsonMode,jsonSchema.
  *   DECISION_STRUCTURED_OUTPUT_STRICT Optional true/false. Not used for jsonMode.
+ *   ENTRY_DECISION_PROTOCOL         json (default) or routeFunctions. routeFunctions exercises
+ *                                   the production required route-function adapter.
  *   ENTRY_DECISION_CASES            Comma-separated case ids. Defaults to all.
  *   ENTRY_DECISION_REPEATS          Repetitions per case. Default 3.
  *   ENTRY_DECISION_TIMEOUT_MS       Per-call timeout. Default 120000.
@@ -30,11 +32,14 @@ import {
   buildEntryDecisionSystemPrompt,
 } from '../src/agent/orchestrator/prompts';
 import {
-  buildOrchestrationDecisionStructuredOutputOptions,
   buildEntryDecisionOutputInstruction,
-  buildEntryDecisionSchema,
   type EntryDecision,
 } from '../src/agent/orchestrator/schemas';
+import {
+  buildRouteFunctionEntryDecisionBriefingInstruction,
+  buildRouteFunctionEntryDecisionInstruction,
+  invokeEntryDecisionOutcome,
+} from '../src/agent/orchestrator/runtime/decisions/entryDecisionProtocol.ts';
 import type { AgentActor } from '../src/types/agent';
 import { entryDecisionBasicsDataset } from './datasets/entry-decision-basics.ts';
 import {
@@ -61,6 +66,8 @@ type EvalResult = {
   errorType: string | null;
   errorMessage: string | null;
 };
+
+type EntryDecisionProtocol = 'json' | 'routeFunctions';
 
 const DEFAULT_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 const DEFAULT_MODEL = 'qwen3.5-plus';
@@ -146,6 +153,14 @@ function normalizeStructuredOutputMethod(value: string | undefined): StructuredO
   throw new Error(
     `Invalid DECISION_STRUCTURED_OUTPUT_METHOD: ${value}. ` +
     'Use functionCalling, jsonMode, or jsonSchema.',
+  );
+}
+
+function normalizeEntryDecisionProtocol(value: string | undefined): EntryDecisionProtocol {
+  if (!value || value === 'json') return 'json';
+  if (value === 'routeFunctions') return value;
+  throw new Error(
+    `Invalid ENTRY_DECISION_PROTOCOL: ${value}. Use json or routeFunctions.`,
   );
 }
 
@@ -255,6 +270,7 @@ async function runOne(params: {
   chatModel: ChatOpenAI;
   method: StructuredOutputMethod | undefined;
   strict: boolean | undefined;
+  protocol: EntryDecisionProtocol;
   testCase: EvalCase;
   repeat: number;
 }): Promise<EvalResult> {
@@ -262,47 +278,54 @@ async function runOne(params: {
   try {
     const systemPrompt = buildEntryDecisionSystemPrompt({
       actor: evalActor,
-      outputInstruction: buildEntryDecisionOutputInstruction(params.method),
+      ...(params.protocol === 'routeFunctions'
+        ? {
+            briefingInstruction: buildRouteFunctionEntryDecisionBriefingInstruction(),
+            outputInstruction: buildRouteFunctionEntryDecisionInstruction(),
+          }
+        : {
+            outputInstruction: buildEntryDecisionOutputInstruction(params.method),
+          }),
     });
     const input = buildEntryDecisionInput({
       runDelegationContext: buildRunDelegationSummaryContext([]),
       runtimeContext: buildRuntimeContext(process.cwd(), process.version),
     });
-    const structuredModel = params.chatModel.withStructuredOutput(
-      buildEntryDecisionSchema(),
-      buildOrchestrationDecisionStructuredOutputOptions({
-        method: params.method,
-        strict: params.method !== 'jsonMode' ? params.strict : undefined,
-      }),
-    );
-    const raw = await structuredModel.invoke([
-      new SystemMessage(systemPrompt),
-      new HumanMessage(input),
-      ...(params.testCase.recentMessages ?? []),
-      new HumanMessage(params.testCase.latestUserRequest),
-    ]);
-    const parsed = buildEntryDecisionSchema().safeParse(raw);
-    if (!parsed.success) {
-      return {
-        caseId: params.testCase.id,
-        repeat: params.repeat,
-        ok: false,
-        schemaOk: false,
-        durationMs: Math.round(performance.now() - started),
-        action: null,
-        issues: ['schema validation failed'],
-        errorType: 'ZodError',
-        errorMessage: parsed.error.message.slice(0, 500),
-      };
-    }
-    const issues = evaluateDecision(params.testCase, parsed.data);
+    const outcome = await invokeEntryDecisionOutcome({
+      config: {
+        models: { act: params.chatModel },
+        decisionStructuredOutput: {
+          ...(params.method ? { method: params.method } : {}),
+          ...(params.method !== 'jsonMode' && typeof params.strict === 'boolean'
+            ? { strict: params.strict }
+            : {}),
+          ...(params.protocol === 'routeFunctions'
+            ? { entryDecisionProtocol: params.protocol }
+            : {}),
+        },
+      },
+      messages: [
+        new SystemMessage(systemPrompt),
+        new HumanMessage(input),
+        ...(params.testCase.recentMessages ?? []),
+        new HumanMessage(params.testCase.latestUserRequest),
+      ],
+    });
+    const decision: EntryDecision = outcome.kind === 'answer'
+      ? { action: 'answer', planner_objective: null, planner_context: null }
+      : {
+          action: 'needs_plan',
+          planner_objective: outcome.briefing.objective,
+          planner_context: outcome.briefing.context,
+        };
+    const issues = evaluateDecision(params.testCase, decision);
     return {
       caseId: params.testCase.id,
       repeat: params.repeat,
       ok: issues.length === 0,
       schemaOk: true,
       durationMs: Math.round(performance.now() - started),
-      action: parsed.data.action,
+      action: decision.action,
       issues,
       errorType: null,
       errorMessage: null,
@@ -372,6 +395,7 @@ async function main() {
     || DEFAULT_MODEL;
   const method = normalizeStructuredOutputMethod(process.env.DECISION_STRUCTURED_OUTPUT_METHOD)
     ?? inferStructuredOutputMethod(model, baseUrl);
+  const protocol = normalizeEntryDecisionProtocol(process.env.ENTRY_DECISION_PROTOCOL);
   const strict = parseOptionalBoolean('DECISION_STRUCTURED_OUTPUT_STRICT');
   const timeoutMs = Number(process.env.ENTRY_DECISION_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS);
   const repeats = Number(process.env.ENTRY_DECISION_REPEATS ?? DEFAULT_REPEATS);
@@ -386,12 +410,16 @@ async function main() {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new Error(`Invalid ENTRY_DECISION_TIMEOUT_MS: ${process.env.ENTRY_DECISION_TIMEOUT_MS}`);
   }
+  if (protocol === 'routeFunctions' && method !== 'functionCalling') {
+    throw new Error('ENTRY_DECISION_PROTOCOL=routeFunctions requires DECISION_STRUCTURED_OUTPUT_METHOD=functionCalling.');
+  }
 
   console.log('Entry decision stability eval');
   console.log(`Base URL: ${baseUrl}`);
   console.log(`API key: ${redactSecret(apiKey)} (${apiKeySource})`);
   console.log(`Model: ${model}`);
   console.log(`Structured output method: ${method ?? 'default'}`);
+  console.log(`Entry decision protocol: ${protocol}`);
   if (typeof strict === 'boolean') console.log(`Strict: ${strict}`);
   console.log(`Repeats: ${repeats}`);
   console.log(`Cases: ${cases.map((item) => item.id).join(', ')}`);
@@ -411,6 +439,7 @@ async function main() {
         chatModel,
         method,
         strict,
+        protocol,
         testCase,
         repeat,
       });

@@ -2,6 +2,11 @@ import { AgentEvalCase, AgentEvalDataset } from './types.ts';
 
 export type CapabilityPlanningInput = {
   mode: 'entry' | 'boundary';
+  /** Entry-only: a boundary re-plans from run facts and receives no briefing. */
+  briefing?: {
+    objective: string;
+    context: string | null;
+  };
   messages: Array<{
     role: 'user' | 'assistant';
     content: string;
@@ -17,6 +22,12 @@ export type CapabilityPlanningExpected = {
   nextTaskTerms?: string[];
   capabilityName?: string;
   remainingPlan: Array<{ taskTerms: string[]; capability: string }>;
+  /**
+   * Whether future work must be materialized in this Planner invocation.
+   * `optional` accepts a self-contained current handoff task that leaves the
+   * Boundary Planner to materialize the next task from its result.
+   */
+  remainingPlanPolicy?: 'required' | 'optional';
   exactRemainingPlanLength?: number;
   planEffect: 'created' | 'revised' | 'unchanged' | 'empty';
   rubberStamp: boolean;
@@ -26,7 +37,46 @@ export type CapabilityPlanningExpected = {
 const SUITE = 'agent-capability-planning-basics';
 const SOURCE_FILE = 'packages/pet-agent/evals/datasets/capability-planning-basics.ts';
 
-const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[] = [
+type CapabilityPlanningTranscriptInput = Omit<CapabilityPlanningInput, 'briefing'> & {
+  /**
+   * Bounded briefing that production Entry would hand to a fresh Planner.
+   * Cases with contextual references provide this explicitly instead of
+   * pretending that Planner receives the full main-conversation transcript.
+   */
+  briefing?: CapabilityPlanningInput['briefing'];
+};
+
+function buildEvalBriefing(messages: CapabilityPlanningTranscriptInput['messages']) {
+  const latestUserRequest = [...messages]
+    .reverse()
+    .find((message) => message.role === 'user');
+  const objective = latestUserRequest?.content.trim()
+    || messages.at(-1)?.content.trim()
+    || 'Complete the current user request.';
+  return { objective, context: null };
+}
+
+/**
+ * Only an entry case carries a briefing. A boundary case is evaluated on the
+ * same facts production gives it: the completed task, its result, and the
+ * remaining plan.
+ */
+function withBriefing(
+  testCase: AgentEvalCase<CapabilityPlanningTranscriptInput, CapabilityPlanningExpected>,
+): AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected> {
+  if (testCase.input.mode === 'boundary') {
+    return testCase as AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>;
+  }
+  return {
+    ...testCase,
+    input: {
+      ...testCase.input,
+      briefing: testCase.input.briefing ?? buildEvalBriefing(testCase.input.messages),
+    },
+  };
+}
+
+const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, CapabilityPlanningExpected>[] = [
   {
     id: `${SUITE}.entry-explore-then-implementation`,
     name: 'entry-explore-then-implementation',
@@ -50,9 +100,10 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
       remainingPlan: [
         { taskTerms: ['auth', '重构'], capability: 'general' },
       ],
+      remainingPlanPolicy: 'optional',
       planEffect: 'created',
       rubberStamp: false,
-      reason: 'Entry planning creates exploration first and preserves implementation as future work.',
+      reason: 'Entry planning creates an auth investigation boundary and either preserves refactoring as future work or gives Boundary enough direction to materialize it from the investigation result.',
     },
     metadata: { difficulty: 'hard', reason: 'planner@entry dynamic plan.', source: SOURCE_FILE },
   },
@@ -92,9 +143,10 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
       remainingPlan: [
         { taskTerms: ['auth', '重构'], capability: 'general' },
       ],
+      remainingPlanPolicy: 'optional',
       planEffect: 'created',
       rubberStamp: false,
-      reason: 'Older unrelated browser discussion is closed; entry planning follows the latest auth goal and preserves implementation after investigation.',
+      reason: 'Older unrelated browser discussion is closed; entry planning follows the latest auth goal and either preserves implementation after investigation or defers materializing it to Boundary.',
     },
     metadata: { difficulty: 'hard', reason: 'Long conversational history with an irrelevant Capability-shaped distractor.', source: SOURCE_FILE },
   },
@@ -271,9 +323,13 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
     tags: ['capability_planning', 'delegation_control'],
     input: {
       mode: 'entry',
+      briefing: {
+        objective: '读取当前仓库根目录 package.json 中的 name 和 version，并报告这两个值。',
+        context: null,
+      },
       messages: [{
         role: 'user',
-        content: '处理这个没有专用 Capability 覆盖的普通工作区任务，并返回执行结果。',
+        content: '读取当前仓库根目录 package.json 中的 name 和 version，并报告这两个值。',
       }],
       capabilityRegistry: [
         'general: execute ordinary workspace tasks when no specialized Capability matches',
@@ -281,13 +337,13 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
     },
     expected: {
       result: 'plan',
-      nextTaskTerms: ['普通', '工作区', '执行结果'],
+      nextTaskTerms: ['package.json', 'name', 'version'],
       capabilityName: 'general',
       remainingPlan: [],
       exactRemainingPlanLength: 0,
       planEffect: 'created',
       rubberStamp: false,
-      reason: 'When no specialized Capability matches, the Planner must materialize the task with general instead of answering or reporting unavailable.',
+      reason: 'When no specialized Capability matches, the Planner materializes a concrete workspace task with general.',
     },
     metadata: { difficulty: 'medium', reason: 'Mandatory General fallback.', source: SOURCE_FILE },
   },
@@ -453,6 +509,10 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
     tags: ['capability_planning', 'context_synthesis', 'structured_output'],
     input: {
       mode: 'entry',
+      briefing: {
+        objective: '重新只读检查本周工作清单中此前尚未确认创建的事项是否已经实际创建，并报告当前状态。',
+        context: '此前仅确认一项事项已创建，其余待创建事项需要再次核验。历史中的 Bash 片段只是对话内容，不能作为本次检查的结果。',
+      },
       messages: [{
         role: 'user',
         content: '检查本周工作清单中标注为“待创建”的事项是否已经实际创建；这次只检查，不要创建或更新任何事项。',
@@ -550,7 +610,90 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
     },
     metadata: { difficulty: 'medium', reason: 'Planner structured no-plan terminal.', source: SOURCE_FILE },
   },
+  {
+    id: `${SUITE}.boundary-returns-to-answer-when-plan-is-exhausted`,
+    name: 'boundary-returns-to-answer-when-plan-is-exhausted',
+    suite: SUITE,
+    tags: ['capability_planning', 'delegation_control', 'structured_output'],
+    input: {
+      mode: 'boundary',
+      messages: [{
+        role: 'user',
+        content: '看下 issue #587 现在是什么状态。',
+      }, {
+        role: 'assistant',
+        content: '接下来我会先处理这项任务：读取 issue #587 的当前状态',
+      }, {
+        role: 'assistant',
+        content: 'issue #587 当前为 open，最后更新于昨天。',
+      }],
+      capabilityRegistry: [
+        'explore: investigate repositories and report evidence',
+        'general: perform other available work',
+      ],
+      completedTask: '读取 issue #587 的当前状态',
+      completedTaskResult: 'issue #587 当前为 open，最后更新于昨天。',
+      remainingPlan: [],
+    },
+    expected: {
+      result: 'return_to_answer',
+      remainingPlan: [],
+      exactRemainingPlanLength: 0,
+      planEffect: 'empty',
+      rubberStamp: false,
+      reason: 'The completed task already satisfies the continuation state and no follow-up work remains, so the Planner returns to Answer instead of inventing a new task.',
+    },
+    metadata: {
+      difficulty: 'hard',
+      reason: 'A boundary with an exhausted plan carries the least context; it must stop rather than fabricate work.',
+      source: SOURCE_FILE,
+    },
+  },
+  {
+    id: `${SUITE}.boundary-adds-followup-required-by-latest-result`,
+    name: 'boundary-adds-followup-required-by-latest-result',
+    suite: SUITE,
+    tags: ['capability_planning', 'delegation_control'],
+    input: {
+      mode: 'boundary',
+      messages: [{
+        role: 'user',
+        content: '检查 issue #587 状态，并把 README 里对应的章节同步成最新状态。',
+      }, {
+        role: 'assistant',
+        content: '接下来我会先处理这项任务：读取 issue #587 的当前状态',
+      }, {
+        role: 'assistant',
+        content: 'issue #587 当前为 open；README 的“已知问题”章节仍写着它已关闭，与实际状态不符。',
+      }],
+      capabilityRegistry: [
+        'explore: investigate repositories and report evidence',
+        'document_writer: create and update project documents',
+        'general: perform other available work',
+      ],
+      completedTask: '读取 issue #587 的当前状态',
+      completedTaskResult: 'issue #587 当前为 open；README 的“已知问题”章节仍写着它已关闭，与实际状态不符。',
+      remainingPlan: [],
+    },
+    expected: {
+      result: 'plan',
+      nextTaskTerms: ['README', '#587'],
+      capabilityName: 'document_writer',
+      remainingPlan: [],
+      exactRemainingPlanLength: 0,
+      planEffect: 'created',
+      rubberStamp: false,
+      reason: 'An exhausted plan is not by itself a terminal state: the latest result names concrete follow-up work, so the Planner materializes it.',
+    },
+    metadata: {
+      difficulty: 'hard',
+      reason: 'Guards the opposite failure of the exhausted-plan case: stopping too early when the result still requires work.',
+      source: SOURCE_FILE,
+    },
+  },
 ];
+
+const cases = transcriptCases.map(withBriefing);
 
 export const capabilityPlanningBasicsDataset: AgentEvalDataset<CapabilityPlanningInput, CapabilityPlanningExpected> = {
   name: SUITE,

@@ -221,16 +221,22 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
             gap_note: null,
           };
         }
-        return { action: 'needs_plan' };
+        const readsAttachment = messagesContain(messages, ATTACHMENT_TOOL_INPUT);
+        return {
+          action: 'needs_plan',
+          planner_objective: readsAttachment
+            ? 'Read the selected attachment.'
+            : 'Write the guarded fixture.',
+          planner_context: readsAttachment ? ATTACHMENT_TOOL_INPUT : null,
+        };
       },
     }),
   } as unknown as AgentModels['act'];
   const capabilityPlannerRunner: CapabilityPlannerRunner = {
     async invoke(input) {
-      const readsAttachment = messagesContain(
-        input.messages,
-        ATTACHMENT_TOOL_INPUT,
-      );
+      // Only an entry input carries a briefing; a boundary re-plans from run facts.
+      const readsAttachment = input.mode === 'entry'
+        && (input.briefing.context?.includes(ATTACHMENT_TOOL_INPUT) ?? false);
       return {
         tasks: [
           {

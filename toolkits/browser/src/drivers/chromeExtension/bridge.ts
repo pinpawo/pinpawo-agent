@@ -21,6 +21,29 @@ import {
   parseBridgeHelloMessage,
   parseExtensionToAgentMessage,
 } from './protocol';
+import {
+  type BrowserRuntimeEvent,
+  type BrowserRuntimeEventType,
+} from '../../lifecycle/events';
+
+/**
+ * Event types that are scoped to a navigation generation. These are stamped
+ * with the active navigation generation so a late event from a superseded
+ * navigation (e.g. an SPA route change) cannot mutate the current one.
+ * Target/connection-lifecycle events (`target.*`, `debugger.*`,
+ * `runtime.disconnected`) carry only connection + target generation and are
+ * intentionally not navigation-scoped.
+ */
+const NAVIGATION_SCOPED_EVENT_TYPES = new Set<BrowserRuntimeEventType>([
+  'navigation.requested',
+  'navigation.committed',
+  'document.ready',
+  'network.activity',
+  'dom.changed',
+  'popup.created',
+  'download.started',
+  'download.finished',
+]);
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
 const MAX_BRIDGE_LINE_BYTES = 4 * 1024 * 1024;
@@ -51,6 +74,9 @@ export type BrowserBridgeStatus = {
   userBoundOrigin: string | null;
   stateRevision: number | null;
   capabilities: BrowserExtensionCapability[];
+  connectionGeneration?: number;
+  targetGeneration?: number;
+  navigationGeneration?: number;
   socketPath: string;
 };
 
@@ -128,7 +154,22 @@ export class BrowserExtensionBridge {
   private registration: BrowserRegisterMessage | null = null;
   private debuggerAttached = false;
   private targetAlive = false;
+  private connectionGeneration = 1;
+  private targetGeneration = 1;
+  /** Tracks the active navigation generation for event stamping. */
+  private navigationGeneration = 0;
   private readonly pending = new Map<string, PendingCommand>();
+  private readonly runtimeEventListeners = new Set<(event: BrowserRuntimeEvent) => void>();
+  /**
+   * Listener set for authoritative generation bumps. Fired when the bridge
+   * advances its connection or target generation (extension reconnected, or a
+   * managed target closed) so consumers (the controller binding) can fail any
+   * in-flight navigation deterministically instead of waiting out its deadline.
+   */
+  private readonly generationListeners = new Set<(change: {
+    connectionGeneration: number;
+    targetGeneration: number;
+  }) => void>();
 
   constructor(options: BrowserExtensionBridgeOptions = {}) {
     this.socketPath = options.socketPath ?? DEFAULT_BROWSER_BRIDGE_SOCKET_PATH;
@@ -156,8 +197,115 @@ export class BrowserExtensionBridge {
       userBoundOrigin: this.registration?.state?.userBoundOrigin ?? null,
       stateRevision: this.registration?.state?.revision ?? null,
       capabilities: [...(this.registration?.capabilities ?? [])],
+      connectionGeneration: this.connectionGeneration,
+      targetGeneration: this.targetGeneration,
+      navigationGeneration: this.navigationGeneration,
       socketPath: this.socketPath,
     };
+  }
+
+  /**
+   * Subscribe to the normalized page-lifecycle event stream. The Runtime
+   * consumes these to drive its navigation state machine. Returns an
+   * unsubscribe function.
+   */
+  onRuntimeEvent(listener: (event: BrowserRuntimeEvent) => void): () => void {
+    this.runtimeEventListeners.add(listener);
+    return () => {
+      this.runtimeEventListeners.delete(listener);
+    };
+  }
+
+  /**
+   * Subscribe to authoritative connection/target generation advances. The
+   * bridge is the single owner of these counters and knows exactly when they
+   * bump: a new active native host replaces the connection
+   * (`replaceActiveSocket` / `browser_connection_replaced`) and a managed target
+   * closes (`target.closed`). Consumers — primarily the controller binding that
+   * also drives `BrowserLifecycleController` — use this to fail an in-flight
+   * navigation deterministically (`notifyGenerationAdvance`) so waiters get a
+   * definitive `runtime_disconnected` / `target_closed` instead of silence until
+   * the deadline (issue #583: on detach/reconnect, "等待者得到确定结果").
+   * Returns an unsubscribe function.
+   */
+  onGenerationChanged(listener: (change: {
+    connectionGeneration: number;
+    targetGeneration: number;
+  }) => void): () => void {
+    this.generationListeners.add(listener);
+    return () => {
+      this.generationListeners.delete(listener);
+    };
+  }
+
+  /** Fan the latest connection/target generation out to subscribers. */
+  private notifyGenerationChanged() {
+    const change = {
+      connectionGeneration: this.connectionGeneration,
+      targetGeneration: this.targetGeneration,
+    };
+    for (const listener of this.generationListeners) {
+      listener(change);
+    }
+  }
+
+  /**
+   * Starts a new navigation generation. The bridge stamps every subsequent
+   * navigation-scoped event (navigation.*, document.ready, network.activity,
+   * dom.changed, popup, download) with this generation so the consumer's
+   * `isEventCurrent` can drop late events that belong to a superseded
+   * navigation. Returns the new generation.
+   *
+   * The bridge is the single owner of the navigation generation counter. It is
+   * advanced automatically when a `navigate` command is dispatched
+   * (`sendCommand('navigate', …)`), and can also be advanced explicitly by
+   * caller/embedding code. Consumers should bind the returned value into the
+   * controller's `beginNavigation` so both sides agree on the current
+   * navigation generation.
+   *
+   * Known limitation: the counter only advances on `navigate` or an explicit
+   * `beginNavigation()` call. Redirects and SPA client-side route changes do
+   * not dispatch a `navigate` command, so the driver must call `beginNavigation()`
+   * explicitly to demarcate such a boundary — otherwise a late event could be
+   * mis-scoped to the previous generation.
+   */
+  beginNavigation(): number {
+    this.navigationGeneration += 1;
+    return this.navigationGeneration;
+  }
+
+  /**
+   * Normalize an extension-reported `browser.event` into the unified Runtime
+   * event envelope and fan it out to subscribers. Events are stamped with the
+   * current connection + target generation so the consumer's `isEventCurrent`
+   * can drop late/out-of-order events. Navigation-scoped events additionally
+   * carry the active navigation generation (the bridge owns the counter, and
+   * it advances on `beginNavigation()` / `sendCommand('navigate', …)`). The
+   * controller binds to that same generation on `beginNavigation`, so the two
+   * always agree.
+   */
+  private emitRuntimeEvent(message: {
+    event: BrowserRuntimeEventType;
+    tabId?: number;
+    url?: string;
+    payload?: Record<string, unknown>;
+  }) {
+    if (this.runtimeEventListeners.size === 0) return;
+    const event: BrowserRuntimeEvent = {
+      connectionGeneration: this.connectionGeneration,
+      targetGeneration: this.targetGeneration,
+      tabId: message.tabId ?? this.getStatus().activeTabId ?? 0,
+      timestamp: Date.now(),
+      ...(NAVIGATION_SCOPED_EVENT_TYPES.has(message.event)
+        ? { navigationGeneration: this.navigationGeneration }
+        : {}),
+      type: message.event,
+      ...(message.url !== undefined ? { url: message.url } : {}),
+      ...(message.payload !== undefined ? { payload: message.payload } : {}),
+    };
+    for (const listener of this.runtimeEventListeners) {
+      listener(event);
+    }
   }
 
   async start(): Promise<void> {
@@ -275,6 +423,10 @@ export class BrowserExtensionBridge {
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
       throw new Error('browser extension command timeout must be positive');
     }
+
+    // A `navigate` command starts a new navigation: bump the generation so
+    // subsequent events (document.ready, network, dom, …) are stamped with it.
+    if (command === 'navigate') this.beginNavigation();
 
     const requestId = randomUUID();
     const deadlineAt = new Date(Date.now() + timeoutMs).toISOString();
@@ -425,6 +577,8 @@ export class BrowserExtensionBridge {
     this.registration = null;
     this.debuggerAttached = false;
     this.targetAlive = false;
+    this.connectionGeneration += 1;
+    this.notifyGenerationChanged();
     this.rejectPending(new BrowserBridgeError(
       'browser_connection_replaced',
       'Chrome extension connection was replaced',
@@ -492,10 +646,9 @@ export class BrowserExtensionBridge {
       return;
     }
 
-    if (this.registration.state) {
-      return;
-    }
-
+    // Keep the legacy boolean bookkeeping so `getStatus()` remains correct,
+    // and forward every event to runtime subscribers regardless of whether a
+    // state snapshot is present (the modern path used to drop these silently).
     if (message.event === 'debugger.attached') {
       this.debuggerAttached = true;
       this.targetAlive = true;
@@ -504,9 +657,24 @@ export class BrowserExtensionBridge {
     } else if (message.event === 'target.closed') {
       this.debuggerAttached = false;
       this.targetAlive = false;
+      this.targetGeneration += 1;
+      this.notifyGenerationChanged();
     } else if (message.event === 'tab.navigated') {
       this.targetAlive = true;
     }
+
+    this.emitRuntimeEvent({
+      // The extension still reports navigation via the legacy `tab.navigated`
+      // event; map it onto the unified `navigation.committed` so the current
+      // controller already reacts to the existing emission path.
+      event:
+        message.event === 'tab.navigated'
+          ? 'navigation.committed'
+          : message.event,
+      tabId: message.tabId,
+      url: message.url,
+      payload: message.payload,
+    });
   }
 
   private resolveResult(message: BrowserResultMessage) {

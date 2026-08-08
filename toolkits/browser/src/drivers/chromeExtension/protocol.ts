@@ -74,14 +74,36 @@ export type BrowserResultMessage = {
   error?: BrowserExtensionError;
 };
 
+export const BROWSER_EXTENSION_EVENT_TYPES = [
+  'target.created',
+  'target.updated',
+  'target.closed',
+  'tab.navigated',
+  'navigation.requested',
+  'navigation.committed',
+  'document.ready',
+  'network.activity',
+  'dom.changed',
+  'popup.created',
+  'download.started',
+  'download.finished',
+  'debugger.attached',
+  'debugger.detached',
+  'runtime.disconnected',
+] as const;
+
+export type BrowserExtensionEventType = (typeof BROWSER_EXTENSION_EVENT_TYPES)[number];
+
 export type BrowserEventMessage = {
   type: 'browser.event';
   protocolVersion: typeof BROWSER_EXTENSION_PROTOCOL_VERSION;
   connectionId: string;
-  event: 'debugger.attached' | 'debugger.detached' | 'target.closed' | 'tab.navigated';
+  event: BrowserExtensionEventType;
   tabId?: number;
   url?: string;
   reason?: string;
+  /** Typed event payload (e.g. `readyState`, `inflightRequests`, `textLength`). */
+  payload?: Record<string, unknown>;
 };
 
 export type ExtensionToAgentMessage =
@@ -282,12 +304,7 @@ export function parseExtensionToAgentMessage(value: unknown): ExtensionToAgentMe
   }
 
   if (type === 'browser.event') {
-    const allowedEvents = new Set([
-      'debugger.attached',
-      'debugger.detached',
-      'target.closed',
-      'tab.navigated',
-    ]);
+    const allowedEvents = new Set<string>(BROWSER_EXTENSION_EVENT_TYPES);
     if (typeof record.event !== 'string' || !allowedEvents.has(record.event)) {
       throw new Error(`unsupported browser event: ${String(record.event)}`);
     }
@@ -300,6 +317,9 @@ export function parseExtensionToAgentMessage(value: unknown): ExtensionToAgentMe
     if (record.reason !== undefined && typeof record.reason !== 'string') {
       throw new Error('browser.event reason must be a string');
     }
+    if (record.payload !== undefined && !isRecord(record.payload)) {
+      throw new Error('browser.event payload must be an object');
+    }
     return {
       type,
       protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
@@ -308,6 +328,7 @@ export function parseExtensionToAgentMessage(value: unknown): ExtensionToAgentMe
       tabId: record.tabId as number | undefined,
       url: record.url as string | undefined,
       reason: record.reason as string | undefined,
+      payload: record.payload as Record<string, unknown> | undefined,
     };
   }
 

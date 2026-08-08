@@ -1,5 +1,6 @@
 import type {
   ToolAuthorizationMode,
+  ToolAuthorizationSafetyLevel,
   TokenUsageSnapshot,
 } from '@pinpawo/agent-contracts';
 import type {
@@ -128,6 +129,7 @@ export type AgentRuntimeView = {
   requiredInputModalities?: AgentInputModality[];
   /** @deprecated Use toolAuthorizationMode for new consumers. */
   globalReviewPolicyMode?: ToolAuthorizationMode;
+  autoAuthorizationSafetyLevel?: ToolAuthorizationSafetyLevel;
   toolAuthorizationMode?: ToolAuthorizationMode;
   cwd?: string;
   workspaceId?: string;

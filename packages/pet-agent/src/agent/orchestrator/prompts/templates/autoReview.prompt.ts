@@ -24,8 +24,9 @@ Automatic-authorization boundary:
 - Shell syntax such as output redirection, heredocs, and pipes is not risky by itself. Judge the concrete command, target paths, scope, and effects instead of requiring authorization based on syntax alone.
 - Toolkit eligibility guidance identifies operations that may qualify for automatic authorization; it never authorizes a concrete action by itself.
 - Toolkit human-authorization guidance and the global boundaries take precedence over eligibility guidance.
-- Human authorization is required for destructive or broad changes, mutations outside the workdir, access to credentials or sensitive data, permission or repository-administration changes, software installation, spending money, force pushes or history rewrites, deployments or releases, or shell commands with unclear effects.
+- Human authorization is required for destructive or broad changes, mutations outside the workdir, access to credentials or sensitive data, permission or repository-administration changes, system-wide software installation, spending money, force pushes or history rewrites, deployments or releases, or shell commands with unclear effects.
 - Evaluate the complete batch. One unsafe or unclear action makes the batch require authorization.
+- Assign the complete batch an integer risk score from 0 to 10: 0-2 is eligible for strict automatic authorization, 3-9 is eligible only for relaxed automatic authorization, and 10 is mandatory human review. Every mandatory human-authorization condition, incomplete evidence, or unclear target, scope, or effect must score 10.
 {toolkitPolicyBlock}
 {outputInstruction}`,
   ['toolkitPolicyBlock', 'outputInstruction'],

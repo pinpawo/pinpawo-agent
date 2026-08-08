@@ -1,4 +1,5 @@
 import type { RunnableConfig } from '@langchain/core/runnables';
+import { isToolAuthorizationSafetyLevel } from '@pinpawo/agent-contracts';
 import type { AgentActor, AgentExecution } from '../../../types/agent';
 import type { ToolkitReviewCapabilities } from '../../../types/toolkit';
 import type { CompiledAgentRegistry } from '../registry';
@@ -106,8 +107,12 @@ function readGlobalReviewPolicy(value: unknown): GlobalReviewPolicy | undefined 
     && !Array.isArray(record.structuredOutput)
     ? record.structuredOutput as GlobalReviewPolicyStructuredOutputConfig
     : undefined;
+  const safetyLevel = isToolAuthorizationSafetyLevel(record.safetyLevel)
+    ? record.safetyLevel
+    : undefined;
   return {
     mode,
+    ...(safetyLevel ? { safetyLevel } : {}),
     ...(structuredOutput ? { structuredOutput } : {}),
   };
 }

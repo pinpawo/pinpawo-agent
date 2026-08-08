@@ -65,10 +65,24 @@ test('parseAgentSessionSnapshot retains and validates global review policy runti
         ...base.session,
         runtime: {
           globalReviewPolicyMode: 'auto_authorization',
+          autoAuthorizationSafetyLevel: 'relaxed',
         },
       },
     })?.session.runtime?.globalReviewPolicyMode,
     'auto_authorization',
+  );
+  assert.equal(
+    parseAgentSessionSnapshot({
+      ...base,
+      session: {
+        ...base.session,
+        runtime: {
+          globalReviewPolicyMode: 'auto_authorization',
+          autoAuthorizationSafetyLevel: 'relaxed',
+        },
+      },
+    })?.session.runtime?.autoAuthorizationSafetyLevel,
+    'relaxed',
   );
   assert.equal(parseAgentSessionSnapshot({
     ...base,
@@ -76,6 +90,16 @@ test('parseAgentSessionSnapshot retains and validates global review policy runti
       ...base.session,
       runtime: {
         globalReviewPolicyMode: 'custom',
+      },
+    },
+  }), null);
+  assert.equal(parseAgentSessionSnapshot({
+    ...base,
+    session: {
+      ...base.session,
+      runtime: {
+        globalReviewPolicyMode: 'auto_authorization',
+        autoAuthorizationSafetyLevel: 'balanced',
       },
     },
   }), null);

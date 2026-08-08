@@ -45,6 +45,26 @@ function readGlobalReviewPolicyMode(
   });
 }
 
+function readAutoAuthorizationSafetyLevel(home: string) {
+  return execFileSync(process.execPath, [
+    '--import',
+    'tsx',
+    '-e',
+    [
+      `const { getConfig } = await import(${JSON.stringify(CONFIG_IMPORT_PATH)});`,
+      'process.stdout.write(getConfig().autoAuthorizationSafetyLevel);',
+    ].join('\n'),
+  ], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      ...REQUIRED_ENV,
+      HOME: home,
+    },
+    encoding: 'utf8',
+  });
+}
+
 function writeStoredConfig(home: string, config: Record<string, unknown>) {
   const configDir = resolve(home, '.pinpawo');
   mkdirSync(configDir, { recursive: true });
@@ -181,6 +201,17 @@ test('config still accepts the canonical global_review_policy stored key', () =>
   });
 
   assert.equal(readGlobalReviewPolicyMode(home), 'full_access');
+});
+
+test('auto authorization safety level defaults to strict and reads the stored relaxed value', () => {
+  const defaultHome = mkdtempSync(resolve(tmpdir(), 'pinpawo-config-home-'));
+  assert.equal(readAutoAuthorizationSafetyLevel(defaultHome), 'strict');
+
+  const configuredHome = mkdtempSync(resolve(tmpdir(), 'pinpawo-config-home-'));
+  writeStoredConfig(configuredHome, {
+    auto_authorization_safety_level: 'relaxed',
+  });
+  assert.equal(readAutoAuthorizationSafetyLevel(configuredHome), 'relaxed');
 });
 
 test('setConfig replaces the current frozen snapshot without mutating previous snapshots', async () => {

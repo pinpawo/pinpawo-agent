@@ -951,10 +951,10 @@ test('text-only selected profile rejects image admission before graph invocation
   }
 });
 
-test('runtime config update persists, acknowledges, and reaches authoritative snapshots', async () => {
+test('runtime config update persists the safety level, acknowledges, and reaches authoritative snapshots', async () => {
   const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-policy-update-'));
   const sent: LocalAgentServerMessage[] = [];
-  const persisted: string[] = [];
+  const persisted: Array<{ mode: string; safetyLevel: string }> = [];
   const peer: LocalServerPeer = {
     isConnected: () => true,
     send: (message) => {
@@ -970,8 +970,8 @@ test('runtime config update persists, acknowledges, and reaches authoritative sn
       globalReviewPolicyMode: 'require_authorization',
     }),
   }, {
-    persistGlobalReviewPolicyMode: (mode) => {
-      persisted.push(mode);
+    persistGlobalReviewPolicyMode: (mode, safetyLevel) => {
+      persisted.push({ mode, safetyLevel });
     },
   });
 
@@ -980,17 +980,22 @@ test('runtime config update persists, acknowledges, and reaches authoritative sn
       type: 'runtime_config.update',
       requestId: 'policy-1',
       globalReviewPolicyMode: 'auto_authorization',
+      autoAuthorizationSafetyLevel: 'relaxed',
     });
     await handlers.peerHandlers.onSessionNew(peer, {
       type: 'session.new',
       requestId: 'new-1',
     });
 
-    assert.deepEqual(persisted, ['auto_authorization']);
+    assert.deepEqual(persisted, [{
+      mode: 'auto_authorization',
+      safetyLevel: 'relaxed',
+    }]);
     assert.deepEqual(sent[0], {
       type: 'runtime_config.result',
       requestId: 'policy-1',
       globalReviewPolicyMode: 'auto_authorization',
+      autoAuthorizationSafetyLevel: 'relaxed',
     });
     const snapshot = sent.find((message) => (
       message.type === 'session.new.result'
@@ -1000,6 +1005,12 @@ test('runtime config update persists, acknowledges, and reaches authoritative sn
         ? snapshot.snapshot.session.runtime?.globalReviewPolicyMode
         : null,
       'auto_authorization',
+    );
+    assert.equal(
+      snapshot?.type === 'session.new.result'
+        ? snapshot.snapshot.session.runtime?.autoAuthorizationSafetyLevel
+        : null,
+      'relaxed',
     );
   } finally {
     handlers.close();

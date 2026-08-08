@@ -101,6 +101,7 @@ export function buildLocalAgentRuntimeView(
     } : {}),
     requiredInputModalities: [...requiredInputModalities],
     globalReviewPolicyMode: runtime.globalReviewPolicyMode,
+    autoAuthorizationSafetyLevel: runtime.autoAuthorizationSafetyLevel,
     ...(runtime.contextWindow !== undefined ? { contextWindow: runtime.contextWindow } : {}),
     cwd: runtime.workdir,
     ...(runtime.workspaceId ? { workspaceId: runtime.workspaceId } : {}),

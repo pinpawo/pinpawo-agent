@@ -66,19 +66,19 @@ function autoModel(
   } as unknown as AgentModels['act'];
 }
 
-const safeDecision = {
-  decision: 'authorize',
+const safeAssessment = {
+  riskScore: 1,
   reason: 'The file write is narrow and scoped to the workdir.',
 } as const;
 
-test('auto review keeps its private policy decision off the root stream', async () => {
+test('auto review keeps its private risk assessment off the root stream', async () => {
   let capturedConfig: unknown;
   const resolution = await resolveGlobalReviewBatchPolicy({
     policy: { mode: 'auto_authorization' },
     models: {
       act: autoModel((_messages, config) => {
         capturedConfig = config;
-        return safeDecision;
+        return safeAssessment;
       }),
     },
     actor: testActor,
@@ -92,6 +92,50 @@ test('auto review keeps its private policy decision off the root stream', async 
   assert.deepEqual(capturedConfig, { callbacks: [] });
 });
 
+test('auto review applies strict and relaxed risk thresholds after one shared assessment', async () => {
+  const moderateAssessment = {
+    riskScore: 5,
+    reason: 'Routine project work with bounded local effects.',
+  };
+  const baseOptions = {
+    models: { act: autoModel(async () => moderateAssessment) },
+    actor: testActor,
+    messages: [],
+    workdir: '/repo',
+    reviews: [review()],
+  };
+
+  const strict = await resolveGlobalReviewBatchPolicy({
+    ...baseOptions,
+    policy: { mode: 'auto_authorization', safetyLevel: 'strict' },
+  });
+  const relaxed = await resolveGlobalReviewBatchPolicy({
+    ...baseOptions,
+    policy: { mode: 'auto_authorization', safetyLevel: 'relaxed' },
+  });
+
+  assert.equal(strict.type, GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION);
+  assert.equal(relaxed.type, GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE);
+});
+
+test('relaxed auto review still rejects score 10', async () => {
+  const resolution = await resolveGlobalReviewBatchPolicy({
+    policy: { mode: 'auto_authorization', safetyLevel: 'relaxed' },
+    models: {
+      act: autoModel(async () => ({
+        riskScore: 10,
+        reason: 'The score 10 boundary always requires human review.',
+      })),
+    },
+    actor: testActor,
+    messages: [],
+    workdir: '/repo',
+    reviews: [review()],
+  });
+
+  assert.equal(resolution.type, GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION);
+});
+
 test('auto review prompt contains bounded task context, runtime scope, and tool behavior facts', async () => {
   let capturedMessages: unknown;
   const resolution = await resolveGlobalReviewBatchPolicy({
@@ -99,7 +143,7 @@ test('auto review prompt contains bounded task context, runtime scope, and tool 
     models: {
       act: autoModel(async (messages) => {
         capturedMessages = messages;
-        return safeDecision;
+        return safeAssessment;
       }),
     },
     actor: testActor,
@@ -172,7 +216,7 @@ test('auto review fails closed when an essential command cannot fit the evidence
     models: {
       act: autoModel(async () => {
         calls += 1;
-        return safeDecision;
+        return safeAssessment;
       }),
     },
     actor: testActor,
@@ -201,7 +245,7 @@ test('auto review can authorize observational browser access without conversatio
     policy: { mode: 'auto_authorization' },
     models: {
       act: autoModel(async () => ({
-        ...safeDecision,
+        ...safeAssessment,
         reason: 'Public browser navigation is observational and has no external side effect.',
       })),
     },
@@ -239,7 +283,7 @@ test('auto review receives the current task when rejecting an unrelated low-risk
       act: autoModel(async (messages) => {
         capturedMessages = messages;
         return {
-          decision: 'require_authorization',
+          riskScore: 10,
           reason: 'Writing a file is unrelated to the current explanatory task.',
         };
       }),
@@ -265,7 +309,7 @@ test('auto review requires human authorization when a batch cannot fit the safe 
     models: {
       act: autoModel(async () => {
         modelCalls += 1;
-        return safeDecision;
+        return safeAssessment;
       }),
     },
     actor: testActor,
@@ -287,7 +331,7 @@ test('auto review requires authorization when the model identifies material risk
     policy: { mode: 'auto_authorization' },
     models: {
       act: autoModel(async () => ({
-        decision: 'require_authorization',
+        riskScore: 10,
         reason: 'The proposed change is destructive.',
       })),
     },
@@ -301,7 +345,7 @@ test('auto review requires authorization when the model identifies material risk
   assert.match(resolution.reason ?? '', /destructive/);
 });
 
-test('auto review rejects a non-canonical ask decision and fails closed', async () => {
+test('auto review rejects an invalid risk score and fails closed', async () => {
   let calls = 0;
   const originalWarn = console.warn;
   console.warn = () => {};
@@ -312,7 +356,7 @@ test('auto review rejects a non-canonical ask decision and fails closed', async 
         act: autoModel(async () => {
           calls += 1;
           return {
-            decision: 'ask',
+            riskScore: 'high',
             reason: 'Changing the current git worktree requires the user to confirm.',
           };
         }),
@@ -336,7 +380,7 @@ test('auto review preserves the model reason for an outside-workdir rejection', 
     policy: { mode: 'auto_authorization' },
     models: {
       act: autoModel(async () => ({
-        decision: 'require_authorization',
+        riskScore: 10,
         reason: 'The write targets a path outside the workdir.',
       })),
     },
@@ -357,7 +401,7 @@ test('auto review repairs malformed structured output once by default', async ()
     models: {
       act: autoModel(async () => {
         calls += 1;
-        return calls === 1 ? { decision: 'invalid' } : safeDecision;
+        return calls === 1 ? { riskScore: 'invalid' } : safeAssessment;
       }),
     },
     actor: testActor,
@@ -378,7 +422,7 @@ test('auto review puts registered toolkit policy in the trusted system prompt', 
       act: autoModel(async (messages) => {
         capturedMessages = messages;
         return {
-          decision: GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE,
+          riskScore: 1,
           reason: 'The collaboration action is scoped and auditable.',
         };
       }),
@@ -424,7 +468,7 @@ test('auto review gives jsonMode providers the canonical output protocol', async
     models: {
       act: autoModel(async (messages) => {
         capturedMessages = messages;
-        return safeDecision;
+        return safeAssessment;
       }),
     },
     actor: testActor,
@@ -434,7 +478,7 @@ test('auto review gives jsonMode providers the canonical output protocol', async
 
   const systemPrompt = String((capturedMessages as Array<{ content?: unknown }>)[0]?.content);
   assert.match(systemPrompt, /Output protocol:/);
-  assert.match(systemPrompt, /"decision": exactly "authorize" or "require_authorization"/);
+  assert.match(systemPrompt, /"riskScore": an integer from 0 to 10/);
   assert.match(systemPrompt, /"reason": a concise explanation/);
   assert.doesNotMatch(systemPrompt, /Example:/);
   assert.doesNotMatch(systemPrompt, /"ask"/);
@@ -448,7 +492,7 @@ test('auto review has no toolkit policy block when none is registered', async ()
       act: autoModel(async (messages) => {
         capturedMessages = messages;
         return {
-          decision: GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION,
+          riskScore: 10,
           reason: 'Force push can rewrite shared history.',
         };
       }),
@@ -478,7 +522,7 @@ test('auto review deduplicates toolkit policy across a batch', async () => {
     models: {
       act: autoModel(async (messages) => {
         capturedMessages = messages;
-        return safeDecision;
+        return safeAssessment;
       }),
     },
     actor: testActor,

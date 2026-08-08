@@ -1,6 +1,10 @@
 import { HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import { z } from 'zod';
-import type { ToolAuthorizationMode } from '@pinpawo/agent-contracts';
+import {
+  DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL,
+  type ToolAuthorizationMode,
+  type ToolAuthorizationSafetyLevel,
+} from '@pinpawo/agent-contracts';
 import type { AgentActor, AgentModels } from '../../../types/agent';
 import type { StructuredOutputOptions } from '../../../utils/structuredOutput';
 import { invokeStructuredOutput } from '../../../utils/structuredOutput';
@@ -97,6 +101,8 @@ export type GlobalReviewPolicyBatchResolver = (
 export type GlobalReviewPolicy =
   | {
       mode: BuiltinGlobalReviewPolicyMode;
+      /** Controls the automatic-review threshold; ignored by non-auto modes. */
+      safetyLevel?: ToolAuthorizationSafetyLevel;
       structuredOutput?: GlobalReviewPolicyStructuredOutputConfig;
     }
   | {
@@ -115,17 +121,18 @@ export type ResolveGlobalReviewBatchPolicyOptions = GlobalReviewPolicyBatchConte
   policy?: GlobalReviewPolicy;
 };
 
-const AUTO_REVIEW_DECISION_SCHEMA = z.object({
-  decision: z.enum([
-    GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE,
-    GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION,
-  ]).describe('Whether the complete batch may run automatically or requires human authorization.'),
+const AUTO_REVIEW_RESULT_SCHEMA = z.object({
+  riskScore: z.number().int().min(0).max(10).describe(
+    'Risk from 0 to 10. Scores 0-2 pass strict review, 3-9 require relaxed review, and 10 always requires human review.',
+  ),
   reason: z.string().optional().default('').describe(
     'A concise explanation grounded in the concrete action facts and authorization policy.',
   ),
 });
 
 const DEFAULT_AUTO_REVIEW_REASON = 'Auto authorization did not approve this tool-call batch.';
+const STRICT_AUTO_REVIEW_MAX_RISK_SCORE = 2;
+const RELAXED_AUTO_REVIEW_MAX_RISK_SCORE = 9;
 
 function normalizeReason(reason: string | undefined, fallback: string) {
   const trimmed = reason?.trim();
@@ -158,32 +165,44 @@ async function resolveAutoAuthorization(
     const structuredOutput = options.policy?.mode === GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION
       ? options.policy.structuredOutput
       : undefined;
-    const decision = await invokeStructuredOutput({
+    const safetyLevel = options.policy?.mode === GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION
+      ? options.policy.safetyLevel ?? DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL
+      : DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL;
+    const assessment = await invokeStructuredOutput({
       model,
-      schema: AUTO_REVIEW_DECISION_SCHEMA,
+      schema: AUTO_REVIEW_RESULT_SCHEMA,
       options: {
-        name: 'global_review_policy_auto_decision',
+        name: 'global_review_policy_auto_assessment',
         autoRepair: true,
         ...structuredOutput,
       },
       messages: [
-        new SystemMessage(buildAutoReviewSystemPrompt(options.reviews, structuredOutput?.method)),
+        new SystemMessage(buildAutoReviewSystemPrompt(
+          options.reviews,
+          structuredOutput?.method,
+        )),
         new HumanMessage(prompt.text),
       ],
-      // The auto-review policy decision is private, not delegated-agent progress.
+      // The auto-review risk assessment is private, not delegated-agent progress.
       // Do not inherit the root stream callbacks that project model messages.
       runnableConfig: { callbacks: [] },
     });
 
-    if (decision.decision === GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE) {
+    const maxRiskScore = safetyLevel === 'relaxed'
+      ? RELAXED_AUTO_REVIEW_MAX_RISK_SCORE
+      : STRICT_AUTO_REVIEW_MAX_RISK_SCORE;
+    if (assessment.riskScore <= maxRiskScore) {
       return {
         type: GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE,
-        reason: normalizeReason(decision.reason, 'Auto authorization approved this tool-call batch.'),
+        reason: normalizeReason(
+          assessment.reason,
+          `Auto authorization approved this tool-call batch at risk score ${assessment.riskScore}.`,
+        ),
       };
     }
     return {
       type: GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION,
-      reason: normalizeReason(decision.reason, DEFAULT_AUTO_REVIEW_REASON),
+      reason: normalizeReason(assessment.reason, DEFAULT_AUTO_REVIEW_REASON),
     };
   } catch (error) {
     console.warn('[pet-agent] auto global review authorization failed:', {

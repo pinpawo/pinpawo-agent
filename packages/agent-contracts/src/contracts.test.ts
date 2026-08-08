@@ -13,6 +13,12 @@ import {
 
 test('configuration accepts only the externally configurable authorization mode', () => {
   assert.equal(isAgentConfig({ toolAuthorization: { mode: 'auto_authorization' } }), true);
+  assert.equal(isAgentConfig({
+    toolAuthorization: { mode: 'auto_authorization', safetyLevel: 'relaxed' },
+  }), true);
+  assert.equal(isAgentConfig({
+    toolAuthorization: { mode: 'auto_authorization', safetyLevel: 'balanced' },
+  }), false);
   assert.equal(isAgentConfig({ toolAuthorization: { mode: 'custom' } }), false);
   assert.equal(isAgentConfig({ toolAuthorization: { mode: 'full_access', resolve: 'internal' } }), false);
 });

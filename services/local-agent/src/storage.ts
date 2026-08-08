@@ -41,6 +41,8 @@ export type StoredConfig = {
   structured_output_repair_max_retries?: number;
   /** Built-in global review policy mode: require_authorization, auto_authorization, or full_access. */
   global_review_policy?: string;
+  /** Automatic-review threshold: strict or relaxed. */
+  auto_authorization_safety_level?: string;
   capabilities?: Record<string, boolean>;
   /**
    * Additional directories to scan for user-defined capability plugins,

@@ -139,7 +139,7 @@ function buildAutoReviewOutputInstruction(method?: StructuredOutputMethod) {
     '',
     'Output protocol:',
     'Return only one JSON object with:',
-    '- "decision": exactly "authorize" or "require_authorization".',
+    '- "riskScore": an integer from 0 to 10 using the risk scale above.',
     '- "reason": a concise explanation grounded in the action facts and policy.',
   ].join('\n');
 }

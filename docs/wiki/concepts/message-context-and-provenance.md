@@ -2,7 +2,7 @@
 title: Message Context And Provenance
 page_type: concept
 status: validated
-updated: 2026-07-31
+updated: 2026-08-09
 sources:
   - ../../PET_AGENT_ANNOUNCE_JUDGMENT_REFACTOR.md
   - ../../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md
@@ -49,6 +49,11 @@ delegation lanes. Consumers construct different views from metadata:
   deliverable.
 - **Return-control close** communicates accepted progress and missing user input
   when the outcome is `user_input_required`; it is not a completion claim.
+- **Planner entry briefing** is Entry's bounded, ephemeral projection of the
+  current request. It is neither a canonical message nor durable run state.
+- **Planner boundary facts** carry the completed task, accepted handoff, and
+  remaining unstarted plan after `task_done`. They do not reuse the entry
+  briefing or expose the private execution transcript.
 
 ## Identity is metadata, not prose
 
@@ -73,6 +78,12 @@ outcomeDecision.
 
 This boundary prevents old executor output from outranking a newer user request
 and keeps private execution transcripts out of run-entry intent resolution.
+
+When Entry chooses `needs_plan`, it sends the Planner a bounded objective and
+optional context rather than forwarding those canonical messages. At later task
+boundaries, Outcome sends typed run facts instead. Accepted handoff provenance
+therefore remains the source of the result, while graph dispatch determines the
+facts visible to that Planner invocation.
 
 ## Interruption preserves evidence without accepting it
 

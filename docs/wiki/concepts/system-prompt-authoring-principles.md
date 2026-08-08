@@ -98,8 +98,8 @@ Use [Prompt Knowledge Layers](prompt-knowledge-layers.md):
 |---|---|
 | Static contract | The Planner must form a current task and select its Capability |
 | Conditional protocol | JSON-mode schema rendering |
-| Injected facts | User intent, workspace digest, completed tasks, latest handoff |
-| Deterministic enforcement | Schema validation, workspace containment, budgets, routing |
+| Injected facts | Entry briefing, completed task, accepted handoff, remaining plan |
+| Deterministic enforcement | Schema validation, workspace containment, bounds, selected-name validation, routing |
 
 Invocation facts must not become an untrusted second instruction channel.
 Mechanical invariants should not depend on model obedience.
@@ -142,8 +142,7 @@ Critical behavior needs enforcement or detection outside prose when feasible:
 - filesystem code owns containment, symlink safety, digest verification, and
   read budgets;
 - registry compilation owns executable availability;
-- response-format construction and runtime validation own selected-name
-  membership and the General fallback invariant;
+- terminal-tool schemas and runtime validation own selected-name membership;
 - semantic evals own judgments that code cannot prove.
 
 ### 6. Treat tools and observations as the agent-computer interface
@@ -157,9 +156,11 @@ how to act. Before adding prompt text, check for:
 4. a graph or provenance error;
 5. only then, an underspecified semantic contract.
 
-For the Capability Planner, `glob_search`, `grep_search`, and
-`view_file_chunk` are part of this interface. An in-memory relevance query would
-change the decision architecture, not merely optimize tool usage.
+For the Capability Planner, `grep_search` is part of this interface. It searches
+the configured immutable registry and returns complete matching Capability
+documents. Changing its backend is an implementation choice behind the same
+registry interface; introducing a coded executor ranking would change the
+decision architecture.
 
 ### 7. Keep examples selective and eval-backed
 
@@ -217,11 +218,12 @@ Review Planner changes against these questions:
 2. Are task boundary and concrete Capability selection still one semantic
    judgment?
 3. Does future work remain intent-only until it becomes current?
-4. Does specialized mismatch select Workspace `general` rather than
-   `unavailable`?
-5. Is `unavailable` truthful only when no executable Capability exists?
-6. Does goal completion remain with `outcomeDecision` rather than reappearing as
-   a Planner `answer` path?
+4. Does specialized mismatch select Workspace `general` when it can execute the
+   task?
+5. Does `return_to_answer` carry only planning-blocked or user-input facts rather
+   than a fabricated task or goal-completion judgment?
+6. Does goal completion remain with `outcomeDecision` rather than reappearing in
+   Planner terminal output?
 7. Are size, timeout, and containment risks handled through bounded tools and
    runtime controls rather than by injecting every document into the prompt?
 

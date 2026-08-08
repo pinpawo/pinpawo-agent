@@ -2,7 +2,7 @@
 title: Capability / Toolkit V2 Architecture
 page_type: system
 status: validated
-updated: 2026-07-29
+updated: 2026-08-09
 sources:
   - ../PET_AGENT_API_CAPABILITY_TOOLKIT.md
   - ../PET_AGENT_TOOLKIT_COMPOSITION_DESIGN.md
@@ -10,8 +10,8 @@ sources:
   - ../../packages/pet-agent/src/types/capability.ts
   - ../../packages/pet-agent/src/types/toolkit.ts
   - ../../packages/pet-agent/src/agent/orchestrator/registry.ts
-  - ../../packages/pet-agent/src/agent/orchestrator/capabilityPlannerAgent.ts
-  - ../../packages/pet-agent/src/agent/orchestrator/capabilityDocumentWorkspace.ts
+  - ../../packages/pet-agent/src/agent/orchestrator/capabilityPlanner/agent.ts
+  - ../../packages/pet-agent/src/agent/orchestrator/capabilityPlanner/documentWorkspace.ts
   - ../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/capability.ts
   - ../../services/local-agent/src/agentRegistryPreparation.ts
   - ../../services/local-agent/src/capabilities/general/CAPABILITY.md
@@ -41,7 +41,7 @@ flowchart LR
   C --> R["CompiledAgentRegistry"]
   R --> W["Capability Document Workspace"]
   W --> P["Capability Planner Agent"]
-  P -->|next_task + capability_name| E["Unified capability executor"]
+  P -->|submit_plan| E["Unified capability executor"]
   E --> L["capability:name private lane"]
   L --> H["accepted announce handoff"]
   E --> A["CapabilityArtifactRef"]
@@ -237,15 +237,15 @@ private lane. Tools come only from the compiled `uses` binding.
 through the same Markdown contract and registers it with other Capabilities.
 Its Toolkit permission is static in that document.
 
-General has one Planner policy distinction: when no specialized Capability
-completely matches the current task and compiled `general` is present in the
-Workspace, the Planner reads `general/CAPABILITY.md` and selects
-`capability_name: "general"`.
-`unavailable` is valid only when no executable Capability, including General,
-exists.
+When no specialized Capability completely matches the current task and compiled
+`general` is present in the Workspace, the Planner may inspect its complete
+document through `grep_search` and select it in `submit_plan` when it can perform
+the task. When no executable plan can proceed, the Planner instead uses
+`return_to_answer` to pass bounded planning facts to Answer.
 
-The Planner still owns this choice. Submission and graph validators reject a
-false `unavailable`; code does not silently select General behind the model.
+The Planner still owns this choice. Submission and graph validators require
+exact Workspace membership; code does not silently select General behind the
+model.
 
 Consequently there is no:
 

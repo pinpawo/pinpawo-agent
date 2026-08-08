@@ -2,7 +2,7 @@
 title: Dynamic Context Governance
 page_type: concept
 status: draft
-updated: 2026-07-31
+updated: 2026-08-09
 sources:
   - ../../DYNAMIC_CONTEXT_GOVERNANCE_DESIGN.md
   - ../../../packages/pet-agent/src/agent/orchestrator/prompts/context.ts
@@ -11,6 +11,9 @@ sources:
   - ../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/answer.ts
   - ../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/answer.test.ts
   - ../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/capability.ts
+  - ../../../packages/pet-agent/src/agent/orchestrator/capabilityPlanner/runner.ts
+  - ../../../packages/pet-agent/src/agent/orchestrator/runtime/decisions/orchestrationDecision.ts
+  - ../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/capabilityPlanner.ts
   - ../../../packages/pet-agent/src/agent/orchestrator/contextCompaction.ts
 related:
   - ../overview.md
@@ -37,6 +40,11 @@ different authority:
   leading system message;
 - Capability execution concatenates stable instructions and runtime-dependent
   `promptSections` into one agent system prompt;
+- Entry projects canonical main-conversation evidence into a bounded ephemeral
+  Planner briefing carried only by graph dispatch;
+- an accepted `task_done` result is projected into a typed boundary dispatch
+  containing the completed task, a bounded complete-result representation, and
+  the remaining plan;
 - main-conversation compaction restores a generated summary as a
   `SystemMessage`.
 
@@ -112,7 +120,8 @@ invocation facts reach those semantic owners.
 | Context | Semantic owner | Target role and placement | Authority | Principal exclusions |
 |---|---|---|---|---|
 | Entry facts | `entryDecision` | synthetic facts for the current decision | read-only facts | registry, task drafts, private lanes |
-| Planner input | Capability Planner | Human input after the stable agent contract | facts plus advisory plan | graph-private state, execution tools |
+| Planner entry briefing | Entry / Capability Planner boundary | Human input after the stable agent contract | objective (≤2,000 chars) and optional context (≤4,000 chars) | canonical transcript, private lanes, durable graph state |
+| Planner boundary facts | Outcome / Capability Planner boundary | Human input after the stable agent contract | completed task, accepted announce result (≤16,000 chars), advisory remaining plan | Entry briefing, canonical transcript, private lanes |
 | Outcome input | `outcomeDecision` | Human input after the stable decision contract | evidence plus advisory future plan | Capability documents, mutation policy |
 | Answer context | `answer` | bounded context after canonical main history | typed reply-mode facts | copied request, full handoff, URL, arbitrary instruction |
 | Delegation briefing | selected Capability | latest task-boundary message in its private lane | current task boundary | future plan, framework policy |
@@ -122,6 +131,20 @@ invocation facts reach those semantic owners.
 
 Each maintained row also needs source state, typed fields, bounds, persistence,
 provenance, prohibited content, and deterministic/model verification.
+
+## Planner dispatch lifecycle
+
+Planner input has two discriminated modes rather than one accumulating context:
+
+- `entry` carries the current run's bounded request briefing. It exists only for
+  the graph dispatch and is not reconstructed from a transcript later;
+- `boundary` carries the task Outcome just accepted, its bounded result, and
+  unstarted future work. It does not reuse the Entry briefing.
+
+This keeps request interpretation close to Entry while preserving enough of the
+actual execution result for boundary replanning. The runtime preserves the head
+and tail when an unusually large result must be clipped so late constraints are
+not silently discarded.
 
 ## Verification contract
 

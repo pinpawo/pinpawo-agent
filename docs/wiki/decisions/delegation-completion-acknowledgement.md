@@ -2,7 +2,7 @@
 title: Delegation Completion Acknowledgement
 page_type: decision
 status: contested
-updated: 2026-07-31
+updated: 2026-08-09
 sources:
   - ../../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
@@ -42,9 +42,16 @@ The fixed acknowledgement remains a distinct final main message for
 `goal_done`. It gives main messages a stable completed lifecycle shape without
 repeating the full deliverable that already entered main through handoff.
 
-The boundary Planner has no `answer` result. If the current result makes a
-conditional follow-up unnecessary and therefore completes the user goal,
-`outcomeDecision` must choose `goal_done`, not `task_done`.
+The boundary Planner can return planning facts to Answer only when autonomous
+execution cannot proceed or user input is required. That result is not a
+goal-completion judgment. If the current result makes a conditional follow-up
+unnecessary and therefore completes the user goal, `outcomeDecision` must choose
+`goal_done`, not `task_done`.
+
+For `task_done`, runtime dispatches the completed task, the accepted announce
+result bounded as one complete-result representation, and the unstarted future plan to
+the boundary Planner. It does not route a clipped display preview or the full
+main conversation as a substitute for those typed facts.
 
 For `user_input_required`, answer instead states the accepted progress and
 unfinished effect, then asks for the missing information. Returning control is

@@ -12,3 +12,4 @@ export * from './waiter';
 export * from './errorCodes';
 export * from './controller';
 export * from './openReadiness';
+export * from './bridgeBinding';

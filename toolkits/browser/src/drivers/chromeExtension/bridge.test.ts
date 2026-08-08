@@ -599,6 +599,83 @@ test('local browser bridge maps legacy tab.navigated onto navigation.committed a
   assert.equal(bridge.getStatus().targetGeneration ?? 0, before + 1);
 });
 
+// -- Generation-bump notification (review #5: the seam must have a producer) --
+test('local browser bridge notifies generation subscribers on reconnect and target close', async (t) => {
+  const root = await mkdtemp(resolve(tmpdir(), 'pinpawo-browser-bridge-gennotify-'));
+  const bridge = new BrowserExtensionBridge({
+    socketPath: resolve(root, 'bridge.sock'),
+    tokenPath: resolve(root, 'bridge.token'),
+    tokenFactory: () => 'test-token',
+    logger: { info() {}, warn() {}, error() {} },
+  });
+  await bridge.start();
+  t.after(async () => bridge.stop());
+
+  const bumps: Array<{ connectionGeneration: number; targetGeneration: number }> = [];
+  const unsubscribe = bridge.onGenerationChanged((change) => {
+    bumps.push({ ...change });
+  });
+  t.after(unsubscribe);
+
+  const first = await connectLinePeer(bridge.getStatus().socketPath);
+  t.after(() => first.socket.destroy());
+  first.send({
+    type: 'bridge.hello',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    token: 'test-token',
+    hostPid: process.pid,
+  });
+  await first.nextLine();
+  first.send({
+    type: 'browser.register',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    extensionId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    capabilities: ['navigate', 'snapshot'],
+    activeTab: { tabId: 42, binding: 'user' },
+    state: { revision: 1, debuggerAttached: true, activeTab: { tabId: 42, binding: 'user' } },
+  });
+  await waitUntil(() => bridge.getStatus().connectionId === 'connection-1');
+  // The initial socket goes through `replaceActiveSocket`, so a connection
+  // bump is already notified; capture the caller-visible generation baseline.
+  const targetBeforeClose = bridge.getStatus().targetGeneration ?? 0;
+
+  // Target close bumps targetGeneration.
+  first.send({
+    type: 'browser.event',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    event: 'target.closed',
+    tabId: 42,
+  });
+  await waitUntil(() => (bridge.getStatus().targetGeneration ?? 0) === targetBeforeClose + 1);
+  assert.ok(bumps.some((b) => b.targetGeneration === targetBeforeClose + 1));
+
+  // A reconnect (new native host replaces the active socket) bumps
+  // connectionGeneration and notifies subscribers.
+  const connectionBeforeReconnect = bridge.getStatus().connectionGeneration ?? 0;
+  const reconnect = await connectLinePeer(bridge.getStatus().socketPath);
+  t.after(() => reconnect.socket.destroy());
+  reconnect.send({
+    type: 'bridge.hello',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    token: 'test-token',
+    hostPid: process.pid + 1,
+  });
+  await reconnect.nextLine();
+  reconnect.send({
+    type: 'browser.register',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-2',
+    extensionId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    capabilities: ['navigate', 'snapshot'],
+    activeTab: { tabId: 42, binding: 'user' },
+    state: { revision: 1, debuggerAttached: true, activeTab: { tabId: 42, binding: 'user' } },
+  });
+  await waitUntil(() => bridge.getStatus().connectionId === 'connection-2');
+  assert.ok(bumps.some((b) => b.connectionGeneration >= connectionBeforeReconnect + 1));
+});
+
 // -- End-to-end pairing: a bridge-produced event and a controller-produced
 //    context must agree on the navigation generation (review: one owner). --
 test('bridge events drive a controller that binds the bridge navigation generation', async (t) => {

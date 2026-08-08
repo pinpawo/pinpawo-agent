@@ -92,10 +92,26 @@ the bridge-owned counter so event stamps and controller context always agree
 a single late event (which would also kill old-navigation SPA events); only the
 explicit `notifyGenerationAdvance` produces a deterministic failure.
 
-**Note:** the event stream is forwarded but **not yet consumed in production** —
-nothing in the runtime/session currently subscribes to `onRuntimeEvent` and drives
-`BrowserLifecycleController` end-to-end. Next steps (per the issue's suggested
-order) are to wire the controller into `browser_open`/interaction tools around
-the resulting readiness and to have the extension emit the finer-grained
-`network.activity` / `dom.changed` / `document.ready` events the reducer already
-supports.
+`bindBridgeToController` (see `bridgeBinding.ts`) is the production seam that
+closes the loop between the transport layer and the controller: it subscribes
+`bridge.onRuntimeEvent` → `controller.handleEvent` and
+`bridge.onGenerationChanged` → `controller.notifyGenerationAdvance`. The bridge
+notifies that callback whenever it bumps its connection (`replaceActiveSocket`
+on an extension reconnect) or target (`target.closed`) generation, so an
+in-flight navigation fails deterministically with `runtime_disconnected` /
+`target_closed` instead of hanging until its deadline — the #583 requirement
+that "等待者得到确定结果" on detach/reconnect.
+
+The controller's `beginNavigation` accepts the bridge-owned navigation
+generation and its standalone fallback never regresses below the highest value
+it has ever bound, so mixing an external binding with a later standalone call
+cannot re-mint a lower generation that would let a stale higher-numbered event
+be misread as current.
+
+**Note:** the event stream is forwarded and consumed via
+`bindBridgeToController`, but nothing in the runtime/session yet drives
+`BrowserLifecycleController` end-to-end as the owner of `browser_open` /
+interaction tools. Next steps (per the issue's suggested order) are to wire the
+controller + `openReadiness` into `browser_open` and to have the extension emit
+the finer-grained `network.activity` / `dom.changed` / `document.ready` events
+the reducer already supports.

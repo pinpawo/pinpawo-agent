@@ -238,6 +238,27 @@ test('beginNavigation advances the generation on each call', () => {
   assert.equal(g2, (g1 as number) + 1);
 });
 
+test('local fallback after an external binding never regresses the generation', () => {
+  const controller = new BrowserLifecycleController();
+  // Bind to an external (bridge-owned) generation.
+  controller.beginNavigation('https://a.com/', 'https://a.com', 1, 1, 7);
+  assert.equal(controller.getSnapshot().context?.navigationGeneration, 7);
+  // Omit the external generation: the local fallback must not mint a lower
+  // generation (1) that would let a stale higher-numbered event be misread as
+  // current. It keeps advancing from the highest value ever bound.
+  controller.beginNavigation('https://b.com/', 'https://b.com', 1, 1);
+  assert.equal(
+    controller.getSnapshot().context?.navigationGeneration ?? 0,
+    8,
+  );
+  // And it keeps advancing on subsequent local fallbacks too.
+  controller.beginNavigation('https://c.com/', 'https://c.com', 1, 1);
+  assert.equal(
+    controller.getSnapshot().context?.navigationGeneration ?? 0,
+    9,
+  );
+});
+
 // -- A url-less commit is malformed, not a benign intermediate (review #3) --
 test('a url-less navigation.committed is explicitly ignored, not treated as intermediate', () => {
   const controller = new BrowserLifecycleController();

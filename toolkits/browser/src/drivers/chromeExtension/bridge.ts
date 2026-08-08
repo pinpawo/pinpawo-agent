@@ -160,6 +160,16 @@ export class BrowserExtensionBridge {
   private navigationGeneration = 0;
   private readonly pending = new Map<string, PendingCommand>();
   private readonly runtimeEventListeners = new Set<(event: BrowserRuntimeEvent) => void>();
+  /**
+   * Listener set for authoritative generation bumps. Fired when the bridge
+   * advances its connection or target generation (extension reconnected, or a
+   * managed target closed) so consumers (the controller binding) can fail any
+   * in-flight navigation deterministically instead of waiting out its deadline.
+   */
+  private readonly generationListeners = new Set<(change: {
+    connectionGeneration: number;
+    targetGeneration: number;
+  }) => void>();
 
   constructor(options: BrowserExtensionBridgeOptions = {}) {
     this.socketPath = options.socketPath ?? DEFAULT_BROWSER_BRIDGE_SOCKET_PATH;
@@ -204,6 +214,39 @@ export class BrowserExtensionBridge {
     return () => {
       this.runtimeEventListeners.delete(listener);
     };
+  }
+
+  /**
+   * Subscribe to authoritative connection/target generation advances. The
+   * bridge is the single owner of these counters and knows exactly when they
+   * bump: a new active native host replaces the connection
+   * (`replaceActiveSocket` / `browser_connection_replaced`) and a managed target
+   * closes (`target.closed`). Consumers — primarily the controller binding that
+   * also drives `BrowserLifecycleController` — use this to fail an in-flight
+   * navigation deterministically (`notifyGenerationAdvance`) so waiters get a
+   * definitive `runtime_disconnected` / `target_closed` instead of silence until
+   * the deadline (issue #583: on detach/reconnect, "等待者得到确定结果").
+   * Returns an unsubscribe function.
+   */
+  onGenerationChanged(listener: (change: {
+    connectionGeneration: number;
+    targetGeneration: number;
+  }) => void): () => void {
+    this.generationListeners.add(listener);
+    return () => {
+      this.generationListeners.delete(listener);
+    };
+  }
+
+  /** Fan the latest connection/target generation out to subscribers. */
+  private notifyGenerationChanged() {
+    const change = {
+      connectionGeneration: this.connectionGeneration,
+      targetGeneration: this.targetGeneration,
+    };
+    for (const listener of this.generationListeners) {
+      listener(change);
+    }
   }
 
   /**
@@ -535,6 +578,7 @@ export class BrowserExtensionBridge {
     this.debuggerAttached = false;
     this.targetAlive = false;
     this.connectionGeneration += 1;
+    this.notifyGenerationChanged();
     this.rejectPending(new BrowserBridgeError(
       'browser_connection_replaced',
       'Chrome extension connection was replaced',
@@ -614,6 +658,7 @@ export class BrowserExtensionBridge {
       this.debuggerAttached = false;
       this.targetAlive = false;
       this.targetGeneration += 1;
+      this.notifyGenerationChanged();
     } else if (message.event === 'tab.navigated') {
       this.targetAlive = true;
     }

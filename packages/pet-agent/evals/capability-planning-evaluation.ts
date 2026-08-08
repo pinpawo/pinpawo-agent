@@ -50,8 +50,19 @@ export function buildCapabilityPlanningGoalContract(
               'Stages one ability can perform continuously toward the same result should remain together.',
             ].join(' '),
           }, {
-            id: 'remaining_plan_objectives_correct',
-            statement: expected.remainingPlan.length > 0
+            id: expected.remainingPlanPolicy === 'optional'
+              ? 'future_work_strategy_valid'
+              : 'remaining_plan_objectives_correct',
+            statement: expected.remainingPlanPolicy === 'optional'
+              ? [
+                  'The future work may be preserved eagerly as the expected remaining plan, or deferred to Boundary.',
+                  'A deferred plan is valid only when the current task is a self-contained evidence or decision boundary that explicitly carries the eventual delivery direction needed to materialize the expected future work from its result.',
+                  'It fails when neither a valid remaining task nor that handoff direction preserves the user goal.',
+                  `Expected eventual work: ${expected.remainingPlan
+                    .map(({ taskTerms, capability }) => `[${capability}] ${taskTerms.join(', ')}`)
+                    .join(' | ')}.`,
+                ].join(' ')
+              : expected.remainingPlan.length > 0
               ? [
                   'The remaining plan collectively preserves all future work needed to realize the user goal, in execution order.',
                   'An intermediate objective is valid when it requires its own execution boundary and the plan still preserves the ultimate outcome it supports.',
@@ -63,6 +74,7 @@ export function buildCapabilityPlanningGoalContract(
           }]
         : []),
       ...(expected.remainingPlan.length > 0
+        && expected.remainingPlanPolicy !== 'optional'
         ? [{
             id: 'remaining_capability_selections_correct',
             statement: [

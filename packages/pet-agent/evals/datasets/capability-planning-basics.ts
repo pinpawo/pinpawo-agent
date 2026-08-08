@@ -22,6 +22,12 @@ export type CapabilityPlanningExpected = {
   nextTaskTerms?: string[];
   capabilityName?: string;
   remainingPlan: Array<{ taskTerms: string[]; capability: string }>;
+  /**
+   * Whether future work must be materialized in this Planner invocation.
+   * `optional` accepts a self-contained current handoff task that leaves the
+   * Boundary Planner to materialize the next task from its result.
+   */
+  remainingPlanPolicy?: 'required' | 'optional';
   exactRemainingPlanLength?: number;
   planEffect: 'created' | 'revised' | 'unchanged' | 'empty';
   rubberStamp: boolean;
@@ -94,9 +100,10 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       remainingPlan: [
         { taskTerms: ['auth', '重构'], capability: 'general' },
       ],
+      remainingPlanPolicy: 'optional',
       planEffect: 'created',
       rubberStamp: false,
-      reason: 'Entry planning creates exploration first and preserves implementation as future work.',
+      reason: 'Entry planning creates an auth investigation boundary and either preserves refactoring as future work or gives Boundary enough direction to materialize it from the investigation result.',
     },
     metadata: { difficulty: 'hard', reason: 'planner@entry dynamic plan.', source: SOURCE_FILE },
   },
@@ -136,9 +143,10 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       remainingPlan: [
         { taskTerms: ['auth', '重构'], capability: 'general' },
       ],
+      remainingPlanPolicy: 'optional',
       planEffect: 'created',
       rubberStamp: false,
-      reason: 'Older unrelated browser discussion is closed; entry planning follows the latest auth goal and preserves implementation after investigation.',
+      reason: 'Older unrelated browser discussion is closed; entry planning follows the latest auth goal and either preserves implementation after investigation or defers materializing it to Boundary.',
     },
     metadata: { difficulty: 'hard', reason: 'Long conversational history with an irrelevant Capability-shaped distractor.', source: SOURCE_FILE },
   },

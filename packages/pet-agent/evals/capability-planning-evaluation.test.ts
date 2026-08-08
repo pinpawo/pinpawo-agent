@@ -38,8 +38,7 @@ test('planner goal contract keeps semantic plan checks outside the deterministic
       'materialized_task_correct',
       'current_capability_selection_correct',
       'task_boundaries_justified',
-      'remaining_plan_objectives_correct',
-      'remaining_capability_selections_correct',
+      'future_work_strategy_valid',
     ],
   );
 });
@@ -84,7 +83,7 @@ test('planner goal evaluation rejects a semantically wrong plan with the correct
         task: '撰写一篇与 auth 重构无关的博客',
       }],
     },
-    judge: goalJudgeWithFailure('remaining_plan_objectives_correct'),
+    judge: goalJudgeWithFailure('future_work_strategy_valid'),
   });
 
   assert.equal(
@@ -92,7 +91,7 @@ test('planner goal evaluation rejects a semantically wrong plan with the correct
     1,
   );
   assert.equal(
-    evaluation.scores.find(({ key }) => key === 'remaining_plan_objectives_correct')?.score,
+    evaluation.scores.find(({ key }) => key === 'future_work_strategy_valid')?.score,
     0,
   );
   assert.equal(evaluation.scores.every(({ score }) => score === 1), false);

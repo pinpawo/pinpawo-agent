@@ -20,6 +20,7 @@ files) before wiring them to the live extension event stream.
 | `navigation.ts`     | Navigation generation manager, phase state machine, settlement/readiness reducer |
 | `targets.ts`        | Managed Target Registry (event-driven; active / opener / popup)       |
 | `events.ts`         | Unified `BrowserRuntimeEvent` envelope + stale-event rejection        |
+| `controller.ts`     | Runtime page-lifecycle controller: merges the event stream into the navigation reducer and exposes read-only phase/readiness/error/generation |
 | `waiter.ts`         | `PendingWait<T>` — deadline, AbortSignal, and settle-once semantics    |
 | `errorCodes.ts`     | Structured Runtime error codes                                         |
 
@@ -63,7 +64,17 @@ closed target are rejected — a closed target cannot be resurrected.
 
 ## Wiring status
 
-These primitives are the first tracked step of issue #583. Next steps (per the
-issue's suggested order) are to have the extension/CDP driver emit the unified
-events (`events.ts`) and then drive these reducers from the live stream, before
-re-automating `browser_open`/interaction tools around the resulting readiness.
+The extension already reports navigation and lifecycle transitions as
+`browser.event` messages. `BrowserExtensionBridge` now exposes
+`onRuntimeEvent(listener)` and forwards every incoming event (including the
+legacy `tab.navigated`, mapped onto `navigation.committed`) as a unified
+`BrowserRuntimeEvent` stamped with connection + target generation. The
+`BrowserLifecycleController` consumes this stream, applies it through
+`applyNavigationEvent`/`defaultPageReadinessPolicy`, rejects stale events via
+`isEventCurrent`, and exposes a read-only snapshot (`hasActiveNavigation`,
+`phase`, `readable`, `error`, `generation`, `context`).
+
+Next steps (per the issue's suggested order) are to wire the controller into
+`browser_open`/interaction tools around the resulting readiness and to have the
+extension emit the finer-grained `network.activity` / `dom.changed` /
+`document.ready` events that the reducer already supports.

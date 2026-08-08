@@ -21,6 +21,10 @@ import {
   parseBridgeHelloMessage,
   parseExtensionToAgentMessage,
 } from './protocol';
+import {
+  type BrowserRuntimeEvent,
+  type BrowserRuntimeEventType,
+} from '../../lifecycle/events';
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
 const MAX_BRIDGE_LINE_BYTES = 4 * 1024 * 1024;
@@ -51,6 +55,8 @@ export type BrowserBridgeStatus = {
   userBoundOrigin: string | null;
   stateRevision: number | null;
   capabilities: BrowserExtensionCapability[];
+  connectionGeneration?: number;
+  targetGeneration?: number;
   socketPath: string;
 };
 
@@ -128,7 +134,10 @@ export class BrowserExtensionBridge {
   private registration: BrowserRegisterMessage | null = null;
   private debuggerAttached = false;
   private targetAlive = false;
+  private connectionGeneration = 1;
+  private targetGeneration = 1;
   private readonly pending = new Map<string, PendingCommand>();
+  private readonly runtimeEventListeners = new Set<(event: BrowserRuntimeEvent) => void>();
 
   constructor(options: BrowserExtensionBridgeOptions = {}) {
     this.socketPath = options.socketPath ?? DEFAULT_BROWSER_BRIDGE_SOCKET_PATH;
@@ -156,8 +165,50 @@ export class BrowserExtensionBridge {
       userBoundOrigin: this.registration?.state?.userBoundOrigin ?? null,
       stateRevision: this.registration?.state?.revision ?? null,
       capabilities: [...(this.registration?.capabilities ?? [])],
+      connectionGeneration: this.connectionGeneration,
+      targetGeneration: this.targetGeneration,
       socketPath: this.socketPath,
     };
+  }
+
+  /**
+   * Subscribe to the normalized page-lifecycle event stream. The Runtime
+   * consumes these to drive its navigation state machine. Returns an
+   * unsubscribe function.
+   */
+  onRuntimeEvent(listener: (event: BrowserRuntimeEvent) => void): () => void {
+    this.runtimeEventListeners.add(listener);
+    return () => {
+      this.runtimeEventListeners.delete(listener);
+    };
+  }
+
+  /**
+   * Normalize an extension-reported `browser.event` into the unified Runtime
+   * event envelope and fan it out to subscribers. Events are stamped with the
+   * current connection + target generation so the consumer's `isEventCurrent`
+   * can drop late/out-of-order events. The navigation generation is owned by
+   * the controller (via `beginNavigation`) and left unset here.
+   */
+  private emitRuntimeEvent(message: {
+    event: BrowserRuntimeEventType;
+    tabId?: number;
+    url?: string;
+    payload?: Record<string, unknown>;
+  }) {
+    if (this.runtimeEventListeners.size === 0) return;
+    const event: BrowserRuntimeEvent = {
+      connectionGeneration: this.connectionGeneration,
+      targetGeneration: this.targetGeneration,
+      tabId: message.tabId ?? this.getStatus().activeTabId ?? 0,
+      timestamp: Date.now(),
+      type: message.event,
+      ...(message.url !== undefined ? { url: message.url } : {}),
+      ...(message.payload !== undefined ? { payload: message.payload } : {}),
+    };
+    for (const listener of this.runtimeEventListeners) {
+      listener(event);
+    }
   }
 
   async start(): Promise<void> {
@@ -425,6 +476,7 @@ export class BrowserExtensionBridge {
     this.registration = null;
     this.debuggerAttached = false;
     this.targetAlive = false;
+    this.connectionGeneration += 1;
     this.rejectPending(new BrowserBridgeError(
       'browser_connection_replaced',
       'Chrome extension connection was replaced',
@@ -492,10 +544,9 @@ export class BrowserExtensionBridge {
       return;
     }
 
-    if (this.registration.state) {
-      return;
-    }
-
+    // Keep the legacy boolean bookkeeping so `getStatus()` remains correct,
+    // and forward every event to runtime subscribers regardless of whether a
+    // state snapshot is present (the modern path used to drop these silently).
     if (message.event === 'debugger.attached') {
       this.debuggerAttached = true;
       this.targetAlive = true;
@@ -504,9 +555,23 @@ export class BrowserExtensionBridge {
     } else if (message.event === 'target.closed') {
       this.debuggerAttached = false;
       this.targetAlive = false;
+      this.targetGeneration += 1;
     } else if (message.event === 'tab.navigated') {
       this.targetAlive = true;
     }
+
+    this.emitRuntimeEvent({
+      // The extension still reports navigation via the legacy `tab.navigated`
+      // event; map it onto the unified `navigation.committed` so the current
+      // controller already reacts to the existing emission path.
+      event:
+        message.event === 'tab.navigated'
+          ? 'navigation.committed'
+          : message.event,
+      tabId: message.tabId,
+      url: message.url,
+      payload: message.payload,
+    });
   }
 
   private resolveResult(message: BrowserResultMessage) {

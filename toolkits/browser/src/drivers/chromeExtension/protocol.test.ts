@@ -208,3 +208,54 @@ test('browser extension protocol validates commands and bridge authentication me
   });
   assert.equal(hello.token, 'secret');
 });
+
+test('browser extension protocol parses new page-lifecycle events and payloads', () => {
+  const committed = parseExtensionToAgentMessage({
+    type: 'browser.event',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    event: 'navigation.committed',
+    tabId: 42,
+    url: 'https://example.com/',
+  });
+  assert.equal(committed.type, 'browser.event');
+  if (committed.type !== 'browser.event') assert.fail('expected browser event');
+  assert.equal(committed.event, 'navigation.committed');
+  assert.equal(committed.tabId, 42);
+  assert.equal(committed.url, 'https://example.com/');
+
+  const dom = parseExtensionToAgentMessage({
+    type: 'browser.event',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    event: 'dom.changed',
+    tabId: 42,
+    payload: { textLength: 1200, textRevision: 2 },
+  });
+  if (dom.type !== 'browser.event') assert.fail('expected browser event');
+  assert.deepEqual(dom.payload, { textLength: 1200, textRevision: 2 });
+});
+
+test('browser extension protocol still parses the legacy tab.navigated event', () => {
+  const legacy = parseExtensionToAgentMessage({
+    type: 'browser.event',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    event: 'tab.navigated',
+    tabId: 7,
+    url: 'https://example.com/',
+  });
+  assert.equal(legacy.type, 'browser.event');
+  if (legacy.type !== 'browser.event') assert.fail('expected browser event');
+  assert.equal(legacy.event, 'tab.navigated');
+});
+
+test('browser extension protocol rejects a malformed event payload', () => {
+  assert.throws(() => parseExtensionToAgentMessage({
+    type: 'browser.event',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    event: 'document.ready',
+    payload: 'not-an-object',
+  }), /payload must be an object/);
+});

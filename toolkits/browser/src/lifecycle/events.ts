@@ -38,6 +38,8 @@ export type BrowserRuntimeEvent<TType extends BrowserRuntimeEventType = BrowserR
   timestamp: number;
   type: TType;
   payload?: Record<string, unknown>;
+  /** URL associated with navigation/target events (`navigation.committed`, …). */
+  url?: string;
 };
 
 export type EventGenerationContext = {

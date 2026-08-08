@@ -10,3 +10,4 @@ export * from './events';
 export * from './targets';
 export * from './waiter';
 export * from './errorCodes';
+export * from './controller';

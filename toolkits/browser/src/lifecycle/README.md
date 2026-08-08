@@ -24,6 +24,7 @@ files) before wiring them to the live extension event stream.
 | `waiter.ts`         | `PendingWait<T>` — deadline, AbortSignal, and settle-once semantics    |
 | `errorCodes.ts`     | Structured Runtime error codes                                         |
 | `openReadiness.ts`  | Standalone `browser_open` readiness driver: walks an injected event sequence through the controller to `readable`, handling redirect/timeout/SPA-shell/long-lived/SPA-route-change scenarios |
+| `interactionSettle.ts` | Post-interaction settle driver for click/type/scroll (issue step 4): folds the action's buffered events into the controller, distinguishes `nav_generation` (a new navigation started → hand off to full readiness) from `settled`/`failed`/`pending`, so the Runtime decides how the page settled after an action |
 
 ## Navigation phase model
 

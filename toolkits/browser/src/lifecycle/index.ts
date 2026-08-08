@@ -13,3 +13,4 @@ export * from './errorCodes';
 export * from './controller';
 export * from './openReadiness';
 export * from './bridgeBinding';
+export * from './interactionSettle';

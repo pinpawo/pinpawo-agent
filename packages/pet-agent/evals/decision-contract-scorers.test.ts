@@ -40,6 +40,8 @@ test('entryDecision dataset covers the result-availability matrix', () => {
   assert.ok(names.has('stale-evidence-needs-refresh'));
   assert.ok(names.has('clarification-before-execution'));
   assert.ok(names.has('calculation-needs-execution'));
+  assert.ok(names.has('tool-shaped-history-still-answers'));
+  assert.ok(names.has('tool-shaped-history-needs-new-observation'));
 });
 
 test('outcome scorer gates only the model-owned verdict', () => {

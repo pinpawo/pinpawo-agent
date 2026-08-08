@@ -23,6 +23,7 @@ files) before wiring them to the live extension event stream.
 | `controller.ts`     | Runtime page-lifecycle controller: merges the event stream into the navigation reducer and exposes read-only phase/readiness/error/generation |
 | `waiter.ts`         | `PendingWait<T>` — deadline, AbortSignal, and settle-once semantics    |
 | `errorCodes.ts`     | Structured Runtime error codes                                         |
+| `openReadiness.ts`  | Standalone `browser_open` readiness driver: walks an injected event sequence through the controller to `readable`, handling redirect/timeout/SPA-shell/long-lived/SPA-route-change scenarios |
 
 ## Navigation phase model
 

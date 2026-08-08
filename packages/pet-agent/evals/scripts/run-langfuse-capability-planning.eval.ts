@@ -17,7 +17,10 @@ import {
   evaluateCapabilityPlanningOutput,
   type CapabilityPlanningEvalOutput,
 } from '../capability-planning-evaluation.ts';
-import { capabilityPlanningBasicsDataset } from '../datasets/capability-planning-basics.ts';
+import {
+  capabilityPlanningBasicsDataset,
+  type CapabilityPlanningInput,
+} from '../datasets/capability-planning-basics.ts';
 import { createDecisionEvalModel } from './decision-eval-model.ts';
 import { resolveLangfuseConfig } from './langfuse-api.ts';
 import { writeLangfuseEvalResult } from './langfuse-eval-writer.ts';
@@ -34,6 +37,19 @@ const evalExecutionToolkit = defineToolkit({
     }),
   }],
 });
+
+/**
+ * The dataset attaches a briefing to every entry case. A missing one is a
+ * dataset bug, so fail loudly instead of substituting a placeholder objective
+ * that would silently score a different input than production uses.
+ */
+function entryBriefing(testCase: { id: string; input: CapabilityPlanningInput }) {
+  const { briefing } = testCase.input;
+  if (!briefing) {
+    throw new Error(`Entry capability-planning case "${testCase.id}" is missing its briefing.`);
+  }
+  return briefing;
+}
 
 function capabilityFromRegistryEntry(entry: string): AgentCapability {
   const separator = entry.indexOf(':');
@@ -144,13 +160,7 @@ async function main() {
         }).invoke(
           {
             ...(testCase.input.mode === 'entry'
-              ? {
-                  mode: 'entry' as const,
-                  briefing: testCase.input.briefing ?? {
-                    objective: 'Complete the current user request.',
-                    context: null,
-                  },
-                }
+              ? { mode: 'entry' as const, briefing: entryBriefing(testCase) }
               : { mode: 'boundary' as const }),
             completedTask: testCase.input.completedTask ?? null,
             completedTaskResult: testCase.input.completedTaskResult ?? null,

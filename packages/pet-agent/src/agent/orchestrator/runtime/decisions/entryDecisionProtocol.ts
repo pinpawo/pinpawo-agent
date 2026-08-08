@@ -141,12 +141,12 @@ function createEntryRouteTools(): StructuredTool[] {
   return [
     tool(async () => 'route accepted', {
       name: ROUTE_TO_ANSWER,
-      description: 'Reply directly using facts already available in the main conversation.',
+      description: 'Reply when the current user request needs no tool call, or ask the user directly when a required target, scope, or choice is still missing or the request is not understood; do not start task execution until the user provides it.',
       schema: routeToAnswerArgsSchema,
     }),
     tool(async () => 'route accepted', {
       name: ROUTE_TO_PLANNER,
-      description: 'Start capability planning for a request that needs an action or a new result.',
+      description: 'Start capability planning when the request is understood, required information is present, and completing it requires any tool call.',
       schema: routeToPlannerArgsSchema,
     }),
   ];

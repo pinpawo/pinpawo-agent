@@ -88,6 +88,7 @@ test('Capability Planner entry input leads with the Entry request briefing', () 
   assert.match(input, /^<planner_request_briefing[^>]*>/);
   assert.match(input, /打开小红书并浏览相关内容。/);
   assert.match(input, /浏览器已经连接。/);
+  assert.equal(input.trimEnd().endsWith('</planner_request_briefing>'), true);
   assert.doesNotMatch(input, /workspace|registry_digest|document_count|<planning_state>/);
 });
 
@@ -107,7 +108,7 @@ test('Capability Planner boundary input carries run facts without a request brie
   // request is never restated under task-boundary authority.
   assert.doesNotMatch(input, /planner_request_briefing/);
   assert.match(input, /^Planner Context：继续执行状态\n刚完成的任务：确认浏览器可用/);
-  assert.match(input, /任务结果摘要：浏览器已经连接，目标页面可访问。/);
+  assert.match(input, /浏览器已经连接，目标页面可访问。/);
   assert.match(input, /- \[browser\] 浏览相关内容/);
   assert.doesNotMatch(input, /workspace|registry_digest|document_count|<planning_state>/);
 });
@@ -122,7 +123,7 @@ test('Capability Planner boundary input omits the follow-up section once the pla
   } satisfies CapabilityPlannerInput);
 
   assert.match(input, /^Planner Context：继续执行状态\n刚完成的任务：确认浏览器可用/);
-  assert.match(input, /任务结果摘要：浏览器已经连接，目标页面可访问。/);
+  assert.match(input, /浏览器已经连接，目标页面可访问。/);
   assert.doesNotMatch(input, /此前保留的后续任务/);
   assert.doesNotMatch(input, /planner_request_briefing/);
 });

@@ -29,19 +29,14 @@ Planner Context 的继续执行状态给出本次继续规划的背景。grep_se
 - 结果依赖或确实需要组合能力时，按依赖形成必要的后续 tasks；
 - 准确传达用户提供的编号、URL、路径和显式约束；
 
-当前任务是否已经完成用户目标由上游 Outcome 判断。进入本轮表示仍有待规划工作；根据最新完整结果形成必要任务，不把“剩余计划为空”本身解释为目标已经完成。
+当前任务是否已经完成用户目标由上游 Outcome 判断。进入本轮表示仍有待规划工作；根据最新结果形成必要任务，不把“剩余计划为空”本身解释为目标已经完成。
 
 规划结果通过 submit_plan 或 return_to_answer 表达。`, []);
 
 export const CAPABILITY_PLANNER_ENTRY_INPUT_PROMPT = definePromptTemplate<{
   briefing: string;
-  planningState: string;
-}>(`{briefing}
-
-Planner Context：继续执行状态
-{planningState}`, [
+}>(`{briefing}`, [
   'briefing',
-  'planningState',
 ]);
 
 /**

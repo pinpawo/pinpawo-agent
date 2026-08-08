@@ -16,7 +16,7 @@ function buildPlanningState(input: CapabilityPlannerInput) {
     lines.push(`刚完成的任务：${input.completedTask}`);
   }
   if (input.completedTaskResult) {
-    lines.push(`任务结果摘要：${input.completedTaskResult}`);
+    lines.push(`已接受的任务结果：${input.completedTaskResult}`);
   }
   if (input.remainingPlan.length > 0) {
     lines.push('此前保留的后续任务：');
@@ -39,7 +39,6 @@ export function buildCapabilityPlannerAgentInput(input: CapabilityPlannerInput) 
   return input.mode === 'entry'
     ? CAPABILITY_PLANNER_ENTRY_INPUT_PROMPT.render({
       briefing: buildPlannerBriefing(input.briefing),
-      planningState: buildPlanningState(input),
     })
     : CAPABILITY_PLANNER_BOUNDARY_INPUT_PROMPT.render({
       planningState: buildPlanningState(input),

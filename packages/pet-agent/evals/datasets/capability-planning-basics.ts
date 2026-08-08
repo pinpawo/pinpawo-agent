@@ -611,6 +611,41 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     metadata: { difficulty: 'medium', reason: 'Planner structured no-plan terminal.', source: SOURCE_FILE },
   },
   {
+    id: `${SUITE}.boundary-returns-to-answer-when-no-capability-can-proceed`,
+    name: 'boundary-returns-to-answer-when-no-capability-can-proceed',
+    suite: SUITE,
+    tags: ['capability_planning', 'delegation_control', 'structured_output'],
+    input: {
+      mode: 'boundary',
+      messages: [{
+        role: 'user',
+        content: '检查发布条件，满足后发布 npm 包。',
+      }, {
+        role: 'assistant',
+        content: '版本、测试和工作区状态均满足发布条件；下一步需要发布 npm 包。',
+      }],
+      capabilityRegistry: [
+        'explore: inspect repository and release readiness without publishing packages',
+      ],
+      completedTask: '检查 npm 包的发布条件',
+      completedTaskResult: '版本、测试和工作区状态均满足发布条件；下一步需要发布 npm 包。',
+      remainingPlan: [],
+    },
+    expected: {
+      result: 'return_to_answer',
+      remainingPlan: [],
+      exactRemainingPlanLength: 0,
+      planEffect: 'empty',
+      rubberStamp: false,
+      reason: 'Outcome established that follow-up work remains, but the Planner finds no executable Capability for that work and returns the blocking facts to Answer.',
+    },
+    metadata: {
+      difficulty: 'hard',
+      reason: 'Covers the valid boundary return path without letting Planner reinterpret an exhausted plan as goal completion.',
+      source: SOURCE_FILE,
+    },
+  },
+  {
     id: `${SUITE}.boundary-adds-followup-required-by-latest-result`,
     name: 'boundary-adds-followup-required-by-latest-result',
     suite: SUITE,

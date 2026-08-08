@@ -30,9 +30,9 @@ export const CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT = definePromptTemplate<Re
 
 你不执行任务，也不生成用户最终回复。
 
-根据当前用户目标和刚完成任务的结果，确认仍需完成的内容，并只在实际完成情况需要时调整后续任务。
+根据刚完成任务的结果，确认仍需完成的内容，并只在实际完成情况需要时调整后续任务。
 
-Planner request briefing 和 Planner Context 中的“继续执行状态”共同定义本次继续规划的工作。briefing 为这次 fresh invocation 单独构造；不要恢复或推断不在其中的旧目标。
+Planner Context 中的“继续执行状态”单独定义本次继续规划的工作：已完成的任务、它的结果和此前保留的后续任务就是全部依据。本模式不提供 request briefing；不要恢复或推断不在“继续执行状态”中的旧目标。若其中已没有仍需执行的工作，调用 return_to_answer，不要臆造新任务。
 
 根据用户目标和最新结果校准 remaining_plan：
 - 保留仍然必要且执行边界合适的任务。
@@ -48,7 +48,7 @@ Planner request briefing 和 Planner Context 中的“继续执行状态”共�
 【终态工具协议】完成规划后，调用 submit_plan 或 return_to_answer。
 一旦 submit_plan 成功，计划已提交：直接用普通 assistant 回复提交结果，然后结束本轮；不要再调用任何工具或继续规划。`, []);
 
-export const CAPABILITY_PLANNER_AGENT_INPUT_PROMPT = definePromptTemplate<{
+export const CAPABILITY_PLANNER_ENTRY_INPUT_PROMPT = definePromptTemplate<{
   briefing: string;
   planningState: string;
 }>(`{briefing}
@@ -56,5 +56,15 @@ export const CAPABILITY_PLANNER_AGENT_INPUT_PROMPT = definePromptTemplate<{
 Planner Context：继续执行状态
 {planningState}`, [
   'briefing',
+  'planningState',
+]);
+
+/**
+ * A boundary carries no request briefing: the run's own facts are the input.
+ */
+export const CAPABILITY_PLANNER_BOUNDARY_INPUT_PROMPT = definePromptTemplate<{
+  planningState: string;
+}>(`Planner Context：继续执行状态
+{planningState}`, [
   'planningState',
 ]);

@@ -59,25 +59,42 @@ test('prepared request context does not repeat the current user request in recen
   assert.match(requestContext, /更早的请求/);
 });
 
-test('Capability Planner planning state excludes main-conversation content', () => {
+const plannerPromptWorkspace = {
+  rootPath: '/tmp/capabilities',
+  registryDigest: 'a'.repeat(64),
+  capabilityNames: ['browser'],
+  entries: [{
+    capabilityName: 'browser',
+    relativePath: 'browser/CAPABILITY.md',
+    documentDigest: 'b'.repeat(64),
+    provenance: 'authored' as const,
+  }],
+  reused: false,
+};
+
+test('Capability Planner entry input leads with the Entry request briefing', () => {
   const input = buildCapabilityPlannerAgentInput({
-    mode: 'boundary',
-    workspace: {
-      rootPath: '/tmp/capabilities',
-      registryDigest: 'a'.repeat(64),
-      capabilityNames: ['browser'],
-      entries: [{
-        capabilityName: 'browser',
-        relativePath: 'browser/CAPABILITY.md',
-        documentDigest: 'b'.repeat(64),
-        provenance: 'authored',
-      }],
-      reused: false,
-    },
+    mode: 'entry',
+    workspace: plannerPromptWorkspace,
     briefing: {
       objective: '打开小红书并浏览相关内容。',
       context: '浏览器已经连接。',
     },
+    completedTask: null,
+    completedTaskResult: null,
+    remainingPlan: [],
+  } satisfies CapabilityPlannerInput);
+
+  assert.match(input, /^<planner_request_briefing[^>]*>/);
+  assert.match(input, /打开小红书并浏览相关内容。/);
+  assert.match(input, /浏览器已经连接。/);
+  assert.doesNotMatch(input, /workspace|registry_digest|document_count|<planning_state>/);
+});
+
+test('Capability Planner boundary input carries run facts without a request briefing', () => {
+  const input = buildCapabilityPlannerAgentInput({
+    mode: 'boundary',
+    workspace: plannerPromptWorkspace,
     completedTask: '确认浏览器可用',
     completedTaskResult: '浏览器已经连接，目标页面可访问。',
     remainingPlan: [{
@@ -86,10 +103,10 @@ test('Capability Planner planning state excludes main-conversation content', () 
     }],
   } satisfies CapabilityPlannerInput);
 
-  assert.match(input, /^<planner_request_briefing[^>]*>/);
-  assert.match(input, /打开小红书并浏览相关内容。/);
-  assert.match(input, /浏览器已经连接。/);
-  assert.match(input, /Planner Context：继续执行状态\n刚完成的任务：确认浏览器可用/);
+  // The remaining plan already states the work in resolved form, so the raw
+  // request is never restated under task-boundary authority.
+  assert.doesNotMatch(input, /planner_request_briefing/);
+  assert.match(input, /^Planner Context：继续执行状态\n刚完成的任务：确认浏览器可用/);
   assert.match(input, /任务结果摘要：浏览器已经连接，目标页面可访问。/);
   assert.match(input, /- \[browser\] 浏览相关内容/);
   assert.doesNotMatch(input, /workspace|registry_digest|document_count|<planning_state>/);

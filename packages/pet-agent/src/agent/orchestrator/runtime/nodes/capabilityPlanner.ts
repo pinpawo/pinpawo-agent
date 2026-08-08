@@ -7,7 +7,6 @@ import type { RunnableConfig } from '@langchain/core/runnables';
 import { materializeCapabilityDocumentWorkspace } from '../../capabilityPlanner/documentWorkspace';
 import { createCapabilityPlannerAgent } from '../../capabilityPlanner/agent';
 import type {
-  CapabilityPlannerBriefing,
   CapabilityPlannerDispatch,
   CapabilityPlannerInput,
   CapabilityPlannerResult,
@@ -16,7 +15,6 @@ import type {
 } from '../../capabilityPlanner/runner';
 import { materializeDelegation } from '../../delegationBriefing';
 import { appendRunDelegationSummary } from '../../delegations';
-import { readMessageText } from '../../utils';
 import type { OrchestratorStateType } from '../../state';
 import type {
   CapabilityPlanTask,
@@ -35,22 +33,16 @@ const DEFAULT_CAPABILITY_PLANNER_WORKSPACE_ROOT = join(
   tmpdir(),
   'pinpawo-capability-workspaces',
 );
+/**
+ * A boundary re-plans from the run's own facts. The Entry briefing is not
+ * carried forward and is never rebuilt from the transcript: the completed task,
+ * its result, and the remaining plan already state the work in resolved form.
+ */
 function buildBoundaryPlannerContext(state: OrchestratorStateType) {
   const latestCompletedDelegation = [...state.runDelegationSummaries]
     .reverse()
     .find((item) => item.status === 'completed');
-  const latestUserRequest = [...state.messages]
-    .reverse()
-    .find((message) => message._getType() === 'human');
-  const objective = latestUserRequest ? readMessageText(latestUserRequest).trim() : '';
-  if (!objective) {
-    throw new Error('Boundary Capability Planner requires a current user request.');
-  }
   return {
-    briefing: {
-      objective: objective.trim(),
-      context: null,
-    } satisfies CapabilityPlannerBriefing,
     completedTask: latestCompletedDelegation?.task ?? null,
     completedTaskResult: latestCompletedDelegation?.resultPreview ?? null,
   };
@@ -200,19 +192,21 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
     });
     const isEntryDispatch = isPlannerDispatch(nodeInput);
     const state = isEntryDispatch ? nodeInput.plannerState : nodeInput;
-    const context = isEntryDispatch
+    const input: CapabilityPlannerInput = isEntryDispatch
       ? {
+          mode: 'entry',
           briefing: nodeInput.briefing,
           completedTask: null,
           completedTaskResult: null,
+          remainingPlan: state.runCapabilityPlan,
+          workspace,
         }
-      : buildBoundaryPlannerContext(nodeInput);
-    const input: CapabilityPlannerInput = {
-      mode: isEntryDispatch ? 'entry' : 'boundary',
-      remainingPlan: state.runCapabilityPlan,
-      workspace,
-      ...context,
-    };
+      : {
+          mode: 'boundary',
+          ...buildBoundaryPlannerContext(nodeInput),
+          remainingPlan: state.runCapabilityPlan,
+          workspace,
+        };
     const result = await runner.invoke(input, runnableConfig);
     const transition = buildPlannerTransition({ state, input, result });
     return new Command({

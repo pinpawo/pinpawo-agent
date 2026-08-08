@@ -9,8 +9,11 @@ import type {
 export type CapabilityPlannerMode = 'entry' | 'boundary';
 
 /**
- * The task boundary prepared for one fresh Planner invocation. This is
- * deliberately not orchestrator state: graph dispatch owns its lifetime.
+ * The task boundary Entry prepares for one fresh Planner invocation. This is
+ * deliberately not orchestrator state: graph dispatch owns its lifetime, and
+ * it is an entry-only concept. At a task boundary the run's own facts
+ * (completed task, its result, and the remaining plan) define the work, so a
+ * briefing is neither carried forward nor reconstructed from the transcript.
  */
 export type CapabilityPlannerBriefing = {
   readonly objective: string;
@@ -37,8 +40,6 @@ export type CapabilityPlannerDispatch = {
 };
 
 type CapabilityPlannerInputBase = {
-  /** Bounded request facts for this fresh Planner invocation. */
-  readonly briefing: CapabilityPlannerBriefing;
   readonly completedTask: string | null;
   /** Structured result preview for the latest completed delegation, if any. */
   readonly completedTaskResult: string | null;
@@ -46,9 +47,21 @@ type CapabilityPlannerInputBase = {
   readonly workspace: CapabilityDocumentWorkspace;
 };
 
-export type CapabilityPlannerInput = CapabilityPlannerInputBase & {
-  readonly mode: CapabilityPlannerMode;
-};
+/**
+ * Planner input is discriminated by mode so the briefing cannot be faked at a
+ * boundary: only an entry dispatch carries one.
+ */
+export type CapabilityPlannerInput = CapabilityPlannerInputBase & (
+  | {
+      readonly mode: 'entry';
+      /** Bounded request facts Entry resolved for this fresh invocation. */
+      readonly briefing: CapabilityPlannerBriefing;
+    }
+  | {
+      readonly mode: 'boundary';
+      readonly briefing?: undefined;
+    }
+);
 
 export type CapabilityPlannerResult =
   | {

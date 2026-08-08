@@ -143,8 +143,15 @@ async function main() {
           model: modelConfig.model,
         }).invoke(
           {
-            mode: testCase.input.mode,
-            briefing: testCase.input.briefing,
+            ...(testCase.input.mode === 'entry'
+              ? {
+                  mode: 'entry' as const,
+                  briefing: testCase.input.briefing ?? {
+                    objective: 'Complete the current user request.',
+                    context: null,
+                  },
+                }
+              : { mode: 'boundary' as const }),
             completedTask: testCase.input.completedTask ?? null,
             completedTaskResult: testCase.input.completedTaskResult ?? null,
             remainingPlan: testCase.input.remainingPlan ?? [],

@@ -2,7 +2,8 @@ import { AgentEvalCase, AgentEvalDataset } from './types.ts';
 
 export type CapabilityPlanningInput = {
   mode: 'entry' | 'boundary';
-  briefing: {
+  /** Entry-only: a boundary re-plans from run facts and receives no briefing. */
+  briefing?: {
     objective: string;
     context: string | null;
   };
@@ -42,9 +43,17 @@ function buildEvalBriefing(messages: CapabilityPlanningTranscriptInput['messages
   return { objective, context: null };
 }
 
+/**
+ * Only an entry case carries a briefing. A boundary case is evaluated on the
+ * same facts production gives it: the completed task, its result, and the
+ * remaining plan.
+ */
 function withBriefing(
   testCase: AgentEvalCase<CapabilityPlanningTranscriptInput, CapabilityPlanningExpected>,
 ): AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected> {
+  if (testCase.input.mode === 'boundary') {
+    return testCase as AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>;
+  }
   return {
     ...testCase,
     input: {

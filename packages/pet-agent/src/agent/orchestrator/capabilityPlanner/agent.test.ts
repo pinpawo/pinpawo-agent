@@ -279,16 +279,29 @@ function plannerInput(
   workspace: CapabilityDocumentWorkspace,
   overrides: Partial<CapabilityPlannerInput> = {},
 ): CapabilityPlannerInput {
+  const base = {
+    completedTask: null,
+    completedTaskResult: null,
+    remainingPlan: [],
+    workspace,
+  };
+  // A boundary input carries no briefing, so the entry default must not leak
+  // in through the spread.
+  if (overrides.mode === 'boundary') {
+    const { briefing: _briefing, ...boundaryOverrides } = overrides;
+    return {
+      ...base,
+      ...boundaryOverrides,
+      mode: 'boundary',
+    } as CapabilityPlannerInput;
+  }
   return {
+    ...base,
     mode: 'entry',
     briefing: {
       objective: 'Research the repository and then prepare a review.',
       context: null,
     },
-    completedTask: null,
-    completedTaskResult: null,
-    remainingPlan: [],
-    workspace,
     ...overrides,
   } as CapabilityPlannerInput;
 }
@@ -605,10 +618,6 @@ test('boundary mode rejects answer and materializes remaining work with general'
   const result = await createCapabilityPlannerAgent({ model }).invoke(
     plannerInput(workspace, {
       mode: 'boundary',
-      briefing: {
-        objective: 'Prepare the review from the completed research.',
-        context: 'Final constraint: preserve the public API.',
-      },
       completedTask: 'Research the repository.',
       completedTaskResult: fullHandoff,
       remainingPlan: [{

@@ -714,15 +714,21 @@ test('task_done reroutes through capabilityPlanner before the next task', async 
   assert.equal(entryDecisionInputs.length, 1);
   assert.equal(plannerInputs.length, 2);
   assert.doesNotMatch(entryDecisionInputs[0], /plan_draft|task_plan_draft/);
-  assert.equal(plannerInputs[0]?.mode, 'entry');
-  assert.equal(plannerInputs[1]?.mode, 'boundary');
-  assert.equal(plannerInputs[0]?.briefing.objective, '完成当前需要工具执行的用户请求。');
-  assert.equal(plannerInputs[0]?.briefing.context, null);
+  const entryPlannerInput = plannerInputs[0];
+  const boundaryPlannerInput = plannerInputs[1];
+  assert.equal(entryPlannerInput?.mode, 'entry');
+  assert.equal(boundaryPlannerInput?.mode, 'boundary');
   assert.equal(
-    plannerInputs[1]?.briefing.objective,
-    '看 issue #269，再查本地实现，最后总结。',
+    entryPlannerInput?.mode === 'entry' ? entryPlannerInput.briefing.objective : null,
+    '完成当前需要工具执行的用户请求。',
   );
-  assert.equal(plannerInputs[1]?.briefing.context, null);
+  assert.equal(
+    entryPlannerInput?.mode === 'entry' ? entryPlannerInput.briefing.context : 'unset',
+    null,
+  );
+  // A boundary re-plans from run facts alone; it never reconstructs a briefing
+  // from the transcript.
+  assert.equal(boundaryPlannerInput?.briefing, undefined);
   assert.equal(plannerInputs[1]?.completedTask, '读取 issue #269 并提炼需求点。');
   assert.match(plannerInputs[1]?.completedTaskResult ?? '', /issue #269 需求点/);
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);

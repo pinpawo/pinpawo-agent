@@ -481,6 +481,160 @@ test('Planner requires continuous work from one Capability in one task boundary'
   );
 });
 
+test('Planner closes discovery through general after three grep_search calls', async (t) => {
+  const workspace = await createWorkspace(t, {
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary workspace tasks.',
+      instructions: 'Complete the requested work.',
+    }),
+  });
+  const model = new ScriptedPlannerModel([
+    ...[1, 2, 3].map((attempt) => ({
+      toolCalls: [{
+        id: `grep-${String(attempt)}`,
+        name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+        args: { query: 'general' },
+      }],
+    })),
+    {
+      structuredOutput: {
+        kind: 'plan',
+        args: {
+          tasks: [{
+            capability: 'general',
+            task: 'Complete the requested workspace task using the discovered Capability.',
+          }],
+        },
+      },
+    },
+  ]);
+
+  const result = await createCapabilityPlannerAgent({ model }).invoke(
+    plannerInput(workspace),
+  );
+
+  assert.deepEqual(result, {
+    tasks: [{
+      capability: 'general',
+      task: 'Complete the requested workspace task using the discovered Capability.',
+    }],
+  });
+  const grepResults = [...new Map(
+    model.invocations.flat().filter(
+      (message): message is ToolMessage => message instanceof ToolMessage
+        && message.name === CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+    ).map((message) => [message.tool_call_id, message]),
+  ).values()];
+  assert.equal(grepResults.length, 3);
+  assert.equal(grepResults.some((message) => message.status === 'error'), false);
+});
+
+test('Planner handles parallel grep_search calls without concurrent state updates', async (t) => {
+  const workspace = await createWorkspace(t, {
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary workspace tasks.',
+      instructions: 'Complete the requested work.',
+    }),
+  });
+  const model = new ScriptedPlannerModel([
+    {
+      toolCalls: [{
+        id: 'parallel-grep-1',
+        name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+        args: { query: 'general' },
+      }, {
+        id: 'parallel-grep-2',
+        name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+        args: { query: 'general' },
+      }],
+    },
+    {
+      toolCalls: [{
+        id: 'parallel-grep-3',
+        name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+        args: { query: 'general' },
+      }],
+    },
+    {
+      structuredOutput: {
+        kind: 'plan',
+        args: {
+          tasks: [{
+            capability: 'general',
+            task: 'Complete the requested workspace task using the discovered Capability.',
+          }],
+        },
+      },
+    },
+  ]);
+
+  const result = await createCapabilityPlannerAgent({ model }).invoke(
+    plannerInput(workspace),
+  );
+
+  assert.deepEqual(result, {
+    tasks: [{
+      capability: 'general',
+      task: 'Complete the requested workspace task using the discovered Capability.',
+    }],
+  });
+  const grepToolCallIds = new Set(
+    model.invocations.flat().flatMap((message) =>
+      message instanceof ToolMessage
+      && message.name === CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME
+      ? [message.tool_call_id]
+      : [],
+    ),
+  );
+  assert.deepEqual(grepToolCallIds, new Set([
+    'parallel-grep-1',
+    'parallel-grep-2',
+    'parallel-grep-3',
+  ]));
+});
+
+test('Planner returns to Answer after three grep_search calls without general', async (t) => {
+  const workspace = await createWorkspace(t, {
+    explore: capabilityDocument({
+      name: 'explore',
+      description: 'Investigate repository evidence.',
+      instructions: 'Inspect available evidence and report findings.',
+    }),
+  });
+  const model = new ScriptedPlannerModel([
+    ...[1, 2, 3].map((attempt) => ({
+      toolCalls: [{
+        id: `grep-answer-${String(attempt)}`,
+        name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+        args: { query: 'explore' },
+      }],
+    })),
+    {
+      structuredOutput: {
+        kind: 'return_to_answer',
+        args: {
+          reason: 'The available Capability evidence does not define an executable task.',
+          context: 'The Planner completed its bounded Capability search and needs a user decision.',
+        },
+      },
+    },
+  ]);
+
+  const result = await createCapabilityPlannerAgent({ model }).invoke(
+    plannerInput(workspace),
+  );
+
+  assert.deepEqual(result, {
+    answer: {
+      reason: 'The available Capability evidence does not define an executable task.',
+      context: 'The Planner completed its bounded Capability search and needs a user decision.',
+      question: null,
+    },
+  });
+});
+
 test('a submitted plan becomes private Planner state for the final reply', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({

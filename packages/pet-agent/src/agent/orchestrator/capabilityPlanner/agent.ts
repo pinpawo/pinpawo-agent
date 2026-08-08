@@ -9,7 +9,10 @@ import { tool, type StructuredTool } from '@langchain/core/tools';
 import { Command } from '@langchain/langgraph';
 import { createAgent, createMiddleware } from 'langchain';
 import { z } from 'zod';
-import { createCapabilityPlannerFileExplorer } from './fileExplorer';
+import {
+  CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+  createCapabilityPlannerFileExplorer,
+} from './fileExplorer';
 import type { CapabilityRegistryBackend } from './registryDocuments';
 import {
   buildCapabilityPlannerAgentInput,
@@ -28,6 +31,7 @@ const MAX_TASK_TEXT_CHARS = 500;
 const MAX_REASON_CHARS = 1_000;
 const MAX_ANSWER_CONTEXT_CHARS = 2_000;
 const MAX_QUESTION_CHARS = 1_000;
+const MAX_GREP_SEARCH_CALLS = 3;
 const SUBMIT_PLAN_TOOL_NAME = 'submit_plan';
 const RETURN_TO_ANSWER_TOOL_NAME = 'return_to_answer';
 const DIRECT_TEXT_REASON = 'plan direct text';
@@ -175,6 +179,36 @@ function buildSubmittedPlanSystemPrompt(tasks: readonly SubmittedPlannerTask[]) 
   ].join('\n');
 }
 
+function buildGrepSearchLimitSystemPrompt(input: CapabilityPlannerInput) {
+  const hasGeneralCapability = plannerCapabilityNames(input).includes('general');
+  return [
+    '【探索已收束】已完成三次 grep_search。',
+    hasGeneralCapability
+      ? '现在基于已有的 Capability 信息完成规划：存在可执行的剩余工作时，调用 submit_plan 并使用 general；否则调用 return_to_answer 交回已确认的事实。'
+      : '现在调用 return_to_answer，交回已有探索中确认的事实和需要用户决定的部分。',
+  ].join('\n');
+}
+
+function countGrepSearchToolMessages(messages: readonly BaseMessage[]) {
+  const seenToolCallIds = new Set<string>();
+  let count = 0;
+  for (const message of messages) {
+    if (!(message instanceof ToolMessage)
+      || message.name !== CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME) {
+      continue;
+    }
+    const identifier = message.tool_call_id || message.id;
+    if (identifier && seenToolCallIds.has(identifier)) {
+      continue;
+    }
+    if (identifier) {
+      seenToolCallIds.add(identifier);
+    }
+    count += 1;
+  }
+  return count;
+}
+
 function plannerToolErrorResult(params: {
   name: string;
   args: unknown;
@@ -193,12 +227,11 @@ function plannerToolErrorResult(params: {
 }
 
 /**
- * Private state for one Capability Planner invocation. A successful
- * `submit_plan` records the exact submitted plan; the following model call
- * receives it as a system-prompt addition so it can only provide the final
- * textual acknowledgement instead of starting another planning loop.
+ * A successful `submit_plan` stays private to one Capability Planner
+ * invocation. `grep_search` is counted from the immutable tool trace, so
+ * parallel search calls do not introduce concurrent custom-state updates.
  */
-function createPlannerSubmissionStateMiddleware() {
+function createPlannerSubmissionStateMiddleware(input: CapabilityPlannerInput) {
   return createMiddleware({
     name: 'CapabilityPlannerSubmissionState',
     stateSchema: plannerAgentStateSchema,
@@ -207,12 +240,13 @@ function createPlannerSubmissionStateMiddleware() {
       try {
         result = await handler(request);
       } catch (error) {
-        return plannerToolErrorResult({
+        const errorResult = plannerToolErrorResult({
           name: request.toolCall.name,
           args: request.toolCall.args,
           id: request.toolCall.id,
           error,
         });
+        return errorResult;
       }
       if (
         request.toolCall.name !== SUBMIT_PLAN_TOOL_NAME
@@ -233,13 +267,22 @@ function createPlannerSubmissionStateMiddleware() {
     },
     wrapModelCall: (request, handler) => {
       const submittedPlan = request.state.submittedPlan;
-      if (!submittedPlan) {
+      const grepSearchCount = countGrepSearchToolMessages(request.state.messages);
+      const systemPrompts = [
+        ...(grepSearchCount >= MAX_GREP_SEARCH_CALLS
+          ? [buildGrepSearchLimitSystemPrompt(input)]
+          : []),
+        ...(submittedPlan ? [buildSubmittedPlanSystemPrompt(submittedPlan)] : []),
+      ];
+      if (systemPrompts.length === 0) {
         return handler(request);
       }
-      const submittedPlanPrompt = buildSubmittedPlanSystemPrompt(submittedPlan);
       return handler({
         ...request,
-        systemMessage: request.systemMessage.concat(submittedPlanPrompt),
+        systemMessage: systemPrompts.reduce(
+          (systemMessage, prompt) => systemMessage.concat(prompt),
+          request.systemMessage,
+        ),
       });
     },
   });
@@ -392,7 +435,7 @@ async function invokePlannerAgent(params: {
     model: params.model,
     tools: [...explorer.tools, ...createPlannerSubmissionTools(params.input)],
     systemPrompt: buildCapabilityPlannerAgentSystemPrompt(params.input.mode),
-    middleware: [createPlannerSubmissionStateMiddleware()],
+    middleware: [createPlannerSubmissionStateMiddleware(params.input)],
   });
   const timeout = mergePlannerSignal(
     params.runnableConfig?.signal,

@@ -5,6 +5,8 @@ import {
 import type { BrowserExtensionCapability } from './drivers/chromeExtension/protocol';
 import { ChromeExtensionBrowserSession } from './drivers/chromeExtension/session';
 import { BrowserSession } from './session';
+import { BrowserLifecycleController } from './lifecycle/controller';
+import { bindBridgeToController } from './lifecycle/bridgeBinding';
 import type { BrowserExecutionOwner } from './ownership';
 import type { ToolkitRuntimeExecutionScope } from '@pinpawo/pet-agent';
 import {
@@ -40,6 +42,13 @@ export type BrowserExtensionRuntimeSnapshot = Readonly<{
 
 export type BrowserRuntimeSnapshot = Readonly<{
   extension: BrowserExtensionRuntimeSnapshot;
+  /** Current navigation readiness as driven by the Runtime lifecycle state
+   *  machine (issue #583). `null` when no navigation is in flight. */
+  readiness: Readonly<{
+    phase: string | null;
+    ready: boolean;
+    error?: { code: string; message: string; retryable: boolean };
+  }> | null;
 }>;
 
 export type BrowserRuntimeBinding = Readonly<{
@@ -101,6 +110,10 @@ export function projectBrowserRuntimeSnapshot(
       capabilities: Object.freeze([...status.capabilities]),
       socketPath: status.socketPath,
     }),
+    // A standalone extension projection carries no lifecycle state; the
+    // `BrowserRuntime` instance layers its controller-derived readiness over
+    // this projection in `getSnapshot()`.
+    readiness: null,
   });
 }
 
@@ -112,6 +125,8 @@ export class BrowserRuntime {
   private readonly session: BrowserSession;
   private readonly options: ResolvedBrowserToolkitOptions;
   private readonly bridge: BrowserExtensionBridge;
+  private readonly lifecycle: BrowserLifecycleController;
+  private unbindLifecycle: (() => void) | null = null;
 
   constructor(
     options: BrowserToolkitOptions = {},
@@ -119,6 +134,7 @@ export class BrowserRuntime {
   ) {
     this.options = resolveBrowserToolkitOptions(options);
     this.bridge = dependencies.bridge ?? new BrowserExtensionBridge();
+    this.lifecycle = new BrowserLifecycleController();
     this.extensionSession = new ChromeExtensionBrowserSession(
       this.bridge,
       this.options.workdir,
@@ -134,6 +150,11 @@ export class BrowserRuntime {
   async start(): Promise<void> {
     if (!shouldStartBrowserExtensionBridge(configuredBrowserBackend(this.options))) return;
     await this.bridge.start();
+    // Wire the bridge's normalized event + generation streams into the Runtime
+    // lifecycle controller so `browser_open`/readiness is driven from the
+    // authoritative event stream (issue #583), not only the extension's
+    // `tab.status` polling.
+    this.unbindLifecycle = bindBridgeToController(this.bridge, this.lifecycle);
     this.started = true;
   }
 
@@ -143,6 +164,8 @@ export class BrowserRuntime {
     } finally {
       if (this.started) {
         try {
+          this.unbindLifecycle?.();
+          this.unbindLifecycle = null;
           await this.bridge.stop();
         } finally {
           this.started = false;
@@ -166,7 +189,20 @@ export class BrowserRuntime {
   }
 
   getSnapshot(): BrowserRuntimeSnapshot {
-    return projectBrowserRuntimeSnapshot(this.bridge.getStatus());
+    const lifecycleSnapshot = this.lifecycle.getSnapshot();
+    const nav = lifecycleSnapshot.navigation;
+    return {
+      extension: projectBrowserRuntimeSnapshot(this.bridge.getStatus()).extension,
+      readiness: nav
+        ? Object.freeze({
+            phase: nav.phase,
+            ready: nav.phase === 'readable',
+            ...(nav.phase === 'failed' && nav.error
+              ? { error: { code: nav.error.code, message: nav.error.message, retryable: nav.error.retryable } }
+              : {}),
+          })
+        : null,
+    };
   }
 }
 

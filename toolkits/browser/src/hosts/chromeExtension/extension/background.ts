@@ -33,6 +33,7 @@ import {
 } from './targetLifecycle.js';
 import { createBrowserStateTracker } from './browserState.js';
 import { calculateReconnectDelay } from './reconnect.js';
+import { pageReadinessEvents } from './pageReadiness.js';
 
 const CDP_VERSION = '1.3';
 const ALLOWED_CDP_COMMANDS = new Set([
@@ -532,6 +533,28 @@ async function readSnapshot(tabId, approvedOrigin) {
   return snapshot;
 }
 
+/**
+ * Report the page-readiness lifecycle events derived from a freshly captured
+ * snapshot. These let the Runtime drive a navigation to `readable` (issue
+ * #583): the extension states the observable page facts (`document.ready`,
+ * `dom.changed` with the sampled body text) and the Runtime decides whether the
+ * page is ready. Anything posted here is additive and backward-compatible.
+ */
+function emitPageReadiness(tabId, url, snapshot) {
+  if (!port) return;
+  for (const event of pageReadinessEvents(snapshot, tabId, url)) {
+    port.postMessage({
+      type: 'browser.event',
+      protocolVersion: PROTOCOL_VERSION,
+      connectionId,
+      event: event.event,
+      tabId: event.tabId,
+      url: event.url,
+      payload: event.payload,
+    });
+  }
+}
+
 async function readInteractionResult(tabId, approvedOrigin) {
   try {
     return await readSnapshot(tabId, approvedOrigin);
@@ -906,7 +929,9 @@ async function executeCommandBody(command) {
       tabId: activeTarget.tabId,
       url,
     });
-    return await readSnapshot(activeTarget.tabId, approvedOrigin);
+    const snapshot = await readSnapshot(activeTarget.tabId, approvedOrigin);
+    emitPageReadiness(activeTarget.tabId, url, snapshot);
+    return snapshot;
   }
 
   const activeTarget = await ensureTarget();

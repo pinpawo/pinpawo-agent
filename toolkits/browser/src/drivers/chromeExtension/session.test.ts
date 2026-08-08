@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import test from 'node:test';
 import { ChromeExtensionBrowserSession } from './session';
 import { BrowserBridgeError, type BrowserBridgeStatus } from './bridge';
+import type { BrowserRuntimeEvent } from '../../lifecycle/events';
 
 const rawSnapshot = {
   title: 'Example',
@@ -228,4 +229,120 @@ test('extension session preserves long browser_type input and budgets enough dri
 
   assert.equal(calls[1]?.params.text, text);
   assert.ok((calls[1]?.timeoutMs ?? 0) > 30_000);
+});
+
+test('extension session drives browser_open through the readiness state machine to readable', async () => {
+  const listeners: Array<(event: BrowserRuntimeEvent) => void> = [];
+  const status = {
+    listening: true,
+    hostConnected: true,
+    extensionConnected: true,
+    debuggerAttached: true,
+    targetAlive: true,
+    connectionId: 'conn-1',
+    extensionId: 'ext-1',
+    activeTabId: 7,
+    activeTabBinding: 'agent',
+    userBoundOrigin: null,
+    stateRevision: 1,
+    capabilities: [],
+    socketPath: '/tmp/browser.sock',
+    connectionGeneration: 1,
+    targetGeneration: 1,
+    navigationGeneration: 1,
+  } as BrowserBridgeStatus;
+  const gen = { connectionGeneration: 1, targetGeneration: 1 };
+
+  const session = new ChromeExtensionBrowserSession({
+    getStatus() {
+      return status;
+    },
+    onRuntimeEvent(listener) {
+      listeners.push(listener);
+      return () => {};
+    },
+    onGenerationChanged(listener) {
+      listener(gen);
+      return () => {};
+    },
+    async sendCommand(command, params) {
+      if (command !== 'navigate') return rawSnapshot;
+      // The extension reports navigation + readiness events on the same stream
+      // the session subscribes to, in the shape the bridge emits.
+      const base = { tabId: 7, timestamp: Date.now() };
+      listeners.forEach((l) => l({
+        ...base,
+        connectionGeneration: 1,
+        targetGeneration: 1,
+        navigationGeneration: 1,
+        type: 'navigation.committed',
+        url: String(params.url),
+      }));
+      listeners.forEach((l) => l({
+        ...base,
+        connectionGeneration: 1,
+        targetGeneration: 1,
+        navigationGeneration: 1,
+        type: 'document.ready',
+        payload: { readyState: 'complete' },
+      }));
+      listeners.forEach((l) => l({
+        ...base,
+        connectionGeneration: 1,
+        targetGeneration: 1,
+        navigationGeneration: 1,
+        type: 'dom.changed',
+        payload: { textLength: 42, textRevision: 1 },
+      }));
+      return rawSnapshot;
+    },
+  });
+
+  const opened = await session.open('https://example.com/page');
+  assert.ok(/Readable page/.test(opened));
+});
+
+test('extension session surfaces a cross-origin readiness failure as origin_changed', async () => {
+  const listeners: Array<(event: BrowserRuntimeEvent) => void> = [];
+  const status = {
+    activeTabId: 9,
+    connectionGeneration: 1,
+    targetGeneration: 1,
+    navigationGeneration: 1,
+  } as BrowserBridgeStatus;
+
+  const session = new ChromeExtensionBrowserSession({
+    getStatus() {
+      return status;
+    },
+    onRuntimeEvent(listener) {
+      listeners.push(listener);
+      return () => {};
+    },
+    onGenerationChanged() {
+      return () => {};
+    },
+    async sendCommand(command, params) {
+      if (command !== 'navigate') return rawSnapshot;
+      // Navigation commits to an attacker origin: the readiness state machine
+      // must refuse it deterministically, not trust the returned snapshot.
+      listeners.forEach((l) => l({
+        tabId: 9,
+        timestamp: Date.now(),
+        connectionGeneration: 1,
+        targetGeneration: 1,
+        navigationGeneration: 1,
+        type: 'navigation.committed',
+        url: 'https://attacker.example/steal',
+      }));
+      return rawSnapshot;
+    },
+  });
+
+  await assert.rejects(
+    session.open('https://example.com/page'),
+    (error: unknown) => error instanceof BrowserBridgeError
+      && error.code === 'origin_changed'
+      && error.details?.committedUrl === 'https://attacker.example/steal',
+  );
 });

@@ -108,10 +108,16 @@ it has ever bound, so mixing an external binding with a later standalone call
 cannot re-mint a lower generation that would let a stale higher-numbered event
 be misread as current.
 
-**Note:** the event stream is forwarded and consumed via
-`bindBridgeToController`, but nothing in the runtime/session yet drives
-`BrowserLifecycleController` end-to-end as the owner of `browser_open` /
-interaction tools. Next steps (per the issue's suggested order) are to wire the
-controller + `openReadiness` into `browser_open` and to have the extension emit
-the finer-grained `network.activity` / `dom.changed` / `document.ready` events
-the reducer already supports.
+**Note (browser_open readiness):** `ChromeExtensionBrowserSession.open()` now
+drives the navigation through `BrowserLifecycleController` +
+`driveOpenReadiness` (bounded by `OPEN_READINESS_DEADLINE_MS`), buffering the
+events the extension emits during the navigate round-trip and replaying them
+through the controller bound to the bridge's own navigation generation. The
+extension emits `document.ready` / `dom.changed` (with the sampled body text)
+in the navigate handler so the reducer can reach `readable`; `BrowserRuntime`
+binds the bridge to the controller via `bindBridgeToController` and exposes the
+current `readiness` on its snapshot. `browser_open` now confirms readability and
+surfaces `origin_changed` / `navigation_timeout` deterministically instead of
+only trusting the extension's `tab.status` polling. Live re-poll during
+hydration (finer `network.activity` / repeated `dom.changed` while a page is
+still settling) is the remaining follow-up.

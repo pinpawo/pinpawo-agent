@@ -2,7 +2,7 @@
 title: System Prompt Design Open Questions
 page_type: question
 status: draft
-updated: 2026-07-31
+updated: 2026-08-09
 sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../../PET_AGENT_API_CAPABILITY_TOOLKIT.md
@@ -53,15 +53,15 @@ Local tests prove tool protocol, containment, budgets, structured-output
 validation, and runtime mapping. They do not prove that every supported model
 explores enough documents or chooses the best Capability.
 
-The standard `createAgent` structured-output path now has deterministic coverage
-for Workspace-derived result availability and Moonshot-compatible JSON Schema
-references. This closes those protocol conditions, not cross-model exploration
-or planning quality.
+The standard `createAgent` tool loop now has deterministic coverage for terminal
+tool schemas, exact Workspace membership, and fallback handling for an
+unstructured final model message. This closes those protocol conditions, not
+cross-model exploration or planning quality.
 
 Closure evidence:
 
 - the same task/selection goal contract across supported models;
-- specific-Capability, General fallback, and truthful-unavailable cases;
+- specific-Capability, General selection, and truthful planning-blocked cases;
 - tasks whose relevant Capability is not obvious from its directory name;
 - result-dependent boundary replanning;
 - separation of subject-model failures from tool, schema, timeout, and evaluator
@@ -90,7 +90,9 @@ or ranks Capabilities on the model's behalf would reverse the accepted design.
 
 ### Does the strict `task_done` boundary avoid redundant work?
 
-The Planner has no `answer` result. Therefore outcome must use:
+The Planner's `return_to_answer` result means planning cannot proceed or needs
+user input; it does not mean the user goal is complete. Therefore outcome must
+use:
 
 - `goal_done` when the user goal is complete;
 - `task_done` only when later autonomous work remains.

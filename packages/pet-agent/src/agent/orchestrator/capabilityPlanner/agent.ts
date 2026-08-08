@@ -94,7 +94,7 @@ function createPlannerSubmissionTools(
     }),
     {
       name: RETURN_TO_ANSWER_TOOL_NAME,
-      description: 'Terminal Planner action. Use this instead of assistant text whenever planning stops, needs user input, or should return facts without starting execution. This does not send a user-facing reply.',
+      description: 'Terminal Planner action. Return planning facts when no executable plan can proceed or user input is required. This does not decide that the user goal is complete and does not send a user-facing reply.',
       schema: z.object({
         reason: z.string().min(1).max(MAX_REASON_CHARS)
           .describe('Why no execution plan should be submitted.'),

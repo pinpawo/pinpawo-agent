@@ -424,3 +424,16 @@ lint passes, and documentation migrations.
 - Rewrote the current Entry and Capability Planner prompt templates to express
   their existing contracts with concise, positive direction while preserving
   their structured-output and runtime ownership.
+
+## [2026-08-09] ingest | Entry and Planner dispatch contracts
+
+- Aligned the Wiki with the current Planner tool loop: `grep_search` returns
+  complete Capability documents, while `submit_plan` and `return_to_answer`
+  provide the two terminal planning outcomes.
+- Recorded Entry's bounded, ephemeral Planner briefing and the typed boundary
+  dispatch containing the completed task, accepted result, and remaining plan.
+- Kept goal completion solely with Outcome: Planner may return planning-blocked
+  or user-input facts to Answer, but cannot reinterpret `task_done` as an
+  already-complete user goal.
+- Replaced stale source paths and removed current guidance for the superseded
+  `next_task` / `unavailable` result contract and multi-file exploration flow.

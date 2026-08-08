@@ -3,7 +3,11 @@ import { HumanMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { tool, type StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
-import type { CapabilityPlannerBriefing } from '../../capabilityPlanner/runner';
+import {
+  CAPABILITY_PLANNER_BRIEFING_CONTEXT_MAX_CHARS,
+  CAPABILITY_PLANNER_BRIEFING_OBJECTIVE_MAX_CHARS,
+  type CapabilityPlannerBriefing,
+} from '../../capabilityPlanner/runner';
 import {
   buildEntryDecisionSchema,
   buildOrchestrationDecisionStructuredOutputOptions,
@@ -25,8 +29,11 @@ const ROUTE_TO_PLANNER = 'route_to_planner';
 
 const routeToAnswerArgsSchema = z.object({}).strict();
 const routeToPlannerArgsSchema = z.object({
-  objective: z.string().trim().min(1),
-  context: z.string().trim().min(1).optional(),
+  objective: z.string().trim().min(1)
+    .max(CAPABILITY_PLANNER_BRIEFING_OBJECTIVE_MAX_CHARS),
+  context: z.string().trim().min(1)
+    .max(CAPABILITY_PLANNER_BRIEFING_CONTEXT_MAX_CHARS)
+    .optional(),
 }).strict();
 
 export type EntryOutcome =

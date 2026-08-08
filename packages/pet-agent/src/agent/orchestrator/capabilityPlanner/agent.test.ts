@@ -854,51 +854,6 @@ test('boundary mode rejects answer and materializes remaining work with general'
     && message.tool_call_id === 'structured-1'));
 });
 
-test('a boundary with an exhausted plan carries only the completed task facts', async (t) => {
-  const workspace = await createWorkspace(t, {
-    general: capabilityDocument({
-      name: 'general',
-      description: 'Handle ordinary tasks.',
-      instructions: 'Complete the requested work.',
-    }),
-  });
-  const model = new ScriptedPlannerModel([{
-    structuredOutput: {
-      kind: 'return_to_answer',
-      args: {
-        reason: 'The planned work is complete.',
-        context: 'issue #587 is open and no further task remains.',
-      },
-    },
-  }]);
-
-  const result = await createCapabilityPlannerAgent({ model }).invoke(
-    plannerInput(workspace, {
-      mode: 'boundary',
-      completedTask: 'Read the issue #587 status.',
-      completedTaskResult: 'issue #587 is open.',
-      remainingPlan: [],
-    }),
-  );
-
-  assert.deepEqual(result, {
-    answer: {
-      reason: 'The planned work is complete.',
-      context: 'issue #587 is open and no further task remains.',
-      question: null,
-    },
-  });
-  const boundaryInput = model.invocations[0]
-    ?.map((message) => String(message.content))
-    .join('\n') ?? '';
-  assert.match(boundaryInput, /刚完成的任务：Read the issue #587 status\./);
-  assert.match(boundaryInput, /任务结果摘要：issue #587 is open\./);
-  // An exhausted plan renders no follow-up section, and a boundary never
-  // restates the request under task-boundary authority.
-  assert.doesNotMatch(boundaryInput, /此前保留的后续任务/);
-  assert.doesNotMatch(boundaryInput, /planner_request_briefing/);
-});
-
 test('a boundary with an exhausted plan can still submit newly required work', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({

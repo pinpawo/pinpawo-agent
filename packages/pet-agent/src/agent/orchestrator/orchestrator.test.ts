@@ -70,10 +70,11 @@ import {
 } from './state';
 import { applyActiveDelegationTransition } from './runtime/activeDelegationTransition';
 import { afterContextPrep } from './runtime/routes/afterContextPrep';
-import type {
-  CapabilityPlannerInput,
-  CapabilityPlannerResult,
-  CapabilityPlannerRunner,
+import {
+  CAPABILITY_PLANNER_BOUNDARY_RESULT_MAX_CHARS,
+  type CapabilityPlannerInput,
+  type CapabilityPlannerResult,
+  type CapabilityPlannerRunner,
 } from './capabilityPlanner/runner';
 import { readMessageText } from './utils';
 
@@ -419,6 +420,11 @@ test('entry route-functions protocol rejects zero, repeated, unknown, and malfor
       error: /Invalid route_to_planner arguments/,
     },
     {
+      label: 'oversized planner args',
+      calls: [{ name: 'route_to_planner', args: { objective: 'x'.repeat(2_001) } }],
+      error: /Invalid route_to_planner arguments/,
+    },
+    {
       label: 'unexpected answer args',
       calls: [{ name: 'route_to_answer', args: { unexpected: true } }],
       error: /Invalid route_to_answer arguments/,
@@ -738,7 +744,7 @@ test('task_done reroutes through capabilityPlanner before the next task', async 
   assert.equal(state.taskActiveDelegation, null);
 });
 
-test('a single-task plan reaches the boundary with no remaining plan and no briefing', async () => {
+test('a completed single-task goal reaches Answer without a boundary Planner call', async () => {
   let structuredCallCount = 0;
   const plannerInputs: CapabilityPlannerInput[] = [];
   const routeModel = {
@@ -747,11 +753,6 @@ test('a single-task plan reaches the boundary with no remaining plan and no brie
       invoke: async () => {
         structuredCallCount += 1;
         if (structuredCallCount === 1) return needsPlanDecision();
-        // The task is done while the overall goal is not, so the run routes
-        // back to the Planner with its plan already exhausted.
-        if (structuredCallCount === 2) {
-          return taskDoneDecision('已读取 issue 状态，仍需更新 README。');
-        }
         return goalDoneDecision();
       },
     }),
@@ -759,16 +760,7 @@ test('a single-task plan reaches the boundary with no remaining plan and no brie
   const capabilityPlannerRunner: CapabilityPlannerRunner = {
     async invoke(input) {
       plannerInputs.push(input);
-      if (plannerInputs.length === 1) {
-        return { tasks: [{ capability: 'explore', task: '读取 issue #587 状态。' }] };
-      }
-      return {
-        answer: {
-          reason: '计划中的工作已经完成。',
-          context: 'issue #587 当前为 open。',
-          question: null,
-        },
-      };
+      return { tasks: [{ capability: 'explore', task: '读取 issue #587 状态。' }] };
     },
   };
   const graph = createOrchestratorGraph({
@@ -795,17 +787,8 @@ test('a single-task plan reaches the boundary with no remaining plan and no brie
     },
   }) as OrchestratorStateType;
 
-  assert.equal(plannerInputs.length, 2);
-  const boundaryPlannerInput = plannerInputs[1];
-  assert.equal(boundaryPlannerInput?.mode, 'boundary');
-  // The decisive combination: a boundary whose plan is already exhausted has
-  // neither a remaining task nor a briefing to restate the goal.
-  assert.deepEqual(boundaryPlannerInput?.remainingPlan, []);
-  assert.equal(boundaryPlannerInput?.briefing, undefined);
-  assert.equal(boundaryPlannerInput?.completedTask, '读取 issue #587 状态。');
-  assert.match(boundaryPlannerInput?.completedTaskResult ?? '', /issue #587 当前为 open/);
-  // The Planner return is consumed by the answer node, which clears it and
-  // starts no further delegation.
+  assert.equal(plannerInputs.length, 1);
+  assert.equal(plannerInputs[0]?.mode, 'entry');
   assert.equal(state.runPlannerReturn, null);
   assert.equal(state.runNextDelegation, null);
   assert.deepEqual(state.runCapabilityPlan, []);
@@ -870,7 +853,7 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
       observe: routeModel,
       subagent: new FakeListChatModel({
         responses: [
-          `issue #269 需求点：需要检查本地实现。${'背景信息。'.repeat(100)}完整 handoff 末尾约束：必须检查兼容性。`,
+          `issue #269 需求点：需要检查本地实现。${'背景信息。'.repeat(4_000)}完整 handoff 末尾约束：必须检查兼容性。`,
           '本地实现与 git log 已检查。',
         ],
         sleep: 0,
@@ -907,7 +890,13 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
     task: '检索本地实现与 git log。',
   }]);
   assert.equal(plannerInputs[1]?.completedTask, '读取 issue #269 并提炼需求点。');
+  assert.equal(
+    plannerInputs[1]?.completedTaskResult?.length,
+    CAPABILITY_PLANNER_BOUNDARY_RESULT_MAX_CHARS,
+  );
   assert.match(plannerInputs[1]?.completedTaskResult ?? '', /issue #269 需求点：需要检查本地实现/);
+  assert.match(plannerInputs[1]?.completedTaskResult ?? '', /handoff truncated for Planner context/);
+  assert.match(plannerInputs[1]?.completedTaskResult ?? '', /完整 handoff 末尾约束：必须检查兼容性/);
   assert.equal(answerModelInvocations, 1);
   assert.equal(
     String(state.messages.at(-1)?.content ?? ''),

@@ -8,6 +8,10 @@ import type {
 
 export type CapabilityPlannerMode = 'entry' | 'boundary';
 
+export const CAPABILITY_PLANNER_BRIEFING_OBJECTIVE_MAX_CHARS = 2_000;
+export const CAPABILITY_PLANNER_BRIEFING_CONTEXT_MAX_CHARS = 4_000;
+export const CAPABILITY_PLANNER_BOUNDARY_RESULT_MAX_CHARS = 16_000;
+
 /**
  * The task boundary Entry prepares for one fresh Planner invocation. This is
  * deliberately not orchestrator state: graph dispatch owns its lifetime, and
@@ -34,14 +38,23 @@ export type CapabilityPlannerRuntimeState = Pick<
   'runId' | 'runDelegationSummaries' | 'runCapabilityPlan'
 >;
 
-export type CapabilityPlannerDispatch = {
-  readonly plannerState: CapabilityPlannerRuntimeState;
-  readonly briefing: CapabilityPlannerBriefing;
-};
+export type CapabilityPlannerDispatch =
+  | {
+      readonly mode: 'entry';
+      readonly plannerState: CapabilityPlannerRuntimeState;
+      readonly briefing: CapabilityPlannerBriefing;
+    }
+  | {
+      readonly mode: 'boundary';
+      readonly plannerState: CapabilityPlannerRuntimeState;
+      readonly completedTask: string;
+      /** Bounded accepted announce result for the task that just completed. */
+      readonly completedTaskResult: string;
+    };
 
 type CapabilityPlannerInputBase = {
   readonly completedTask: string | null;
-  /** Structured result preview for the latest completed delegation, if any. */
+  /** Bounded accepted announce result for the latest completed delegation. */
   readonly completedTaskResult: string | null;
   readonly remainingPlan: readonly CapabilityPlanTask[];
   readonly workspace: CapabilityDocumentWorkspace;

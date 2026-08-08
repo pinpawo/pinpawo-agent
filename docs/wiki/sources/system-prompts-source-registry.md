@@ -2,13 +2,13 @@
 title: System Prompt Source Registry
 page_type: source
 status: validated
-updated: 2026-07-31
+updated: 2026-08-09
 sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md
   - ../../PET_AGENT_API_CAPABILITY_TOOLKIT.md
   - ../../DYNAMIC_CONTEXT_GOVERNANCE_DESIGN.md
-  - ../../../packages/pet-agent/src/agent/orchestrator/capabilityPlannerAgent.ts
+  - ../../../packages/pet-agent/src/agent/orchestrator/capabilityPlanner/agent.ts
   - https://github.com/pinpawo/pinpawo-agent/issues/490
   - https://github.com/pinpawo/pinpawo-agent/pull/492
   - https://github.com/pinpawo/pinpawo-agent/pull/515
@@ -48,11 +48,11 @@ detail.
 
 ### Planner harness and workspace
 
-- [`capabilityPlannerAgent.ts`](../../../packages/pet-agent/src/agent/orchestrator/capabilityPlannerAgent.ts)
-- [`capabilityPlannerRunner.ts`](../../../packages/pet-agent/src/agent/orchestrator/capabilityPlannerRunner.ts)
-- [`capabilityPlannerFileExplorer.ts`](../../../packages/pet-agent/src/agent/orchestrator/capabilityPlannerFileExplorer.ts)
-- [`capabilityPlannerWorkspaceReader.ts`](../../../packages/pet-agent/src/agent/orchestrator/capabilityPlannerWorkspaceReader.ts)
-- [`capabilityDocumentWorkspace.ts`](../../../packages/pet-agent/src/agent/orchestrator/capabilityDocumentWorkspace.ts)
+- [`agent.ts`](../../../packages/pet-agent/src/agent/orchestrator/capabilityPlanner/agent.ts)
+- [`runner.ts`](../../../packages/pet-agent/src/agent/orchestrator/capabilityPlanner/runner.ts)
+- [`fileExplorer.ts`](../../../packages/pet-agent/src/agent/orchestrator/capabilityPlanner/fileExplorer.ts)
+- [`workspaceReader.ts`](../../../packages/pet-agent/src/agent/orchestrator/capabilityPlanner/workspaceReader.ts)
+- [`documentWorkspace.ts`](../../../packages/pet-agent/src/agent/orchestrator/capabilityPlanner/documentWorkspace.ts)
 - [`runtime/nodes/capabilityPlanner.ts`](../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/capabilityPlanner.ts)
 
 ### Graph, state, and execution
@@ -67,8 +67,8 @@ detail.
 
 ### Verification
 
-- [`capabilityPlannerAgent.test.ts`](../../../packages/pet-agent/src/agent/orchestrator/capabilityPlannerAgent.test.ts)
-- [`capabilityPlannerFileExplorer.test.ts`](../../../packages/pet-agent/src/agent/orchestrator/capabilityPlannerFileExplorer.test.ts)
+- [`agent.test.ts`](../../../packages/pet-agent/src/agent/orchestrator/capabilityPlanner/agent.test.ts)
+- [`fileExplorer.test.ts`](../../../packages/pet-agent/src/agent/orchestrator/capabilityPlanner/fileExplorer.test.ts)
 - [`orchestrator.test.ts`](../../../packages/pet-agent/src/agent/orchestrator/orchestrator.test.ts)
 - [`entry-decision-basics.ts`](../../../packages/pet-agent/evals/datasets/entry-decision-basics.ts)
 - [`capability-planning-basics.ts`](../../../packages/pet-agent/evals/datasets/capability-planning-basics.ts)

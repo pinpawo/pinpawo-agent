@@ -18,8 +18,9 @@ import {
   type AcceptedDelegationOutcome,
   type DelegationOutcomeDecision,
 } from '../../schemas';
-import type {
-  CapabilityPlannerDispatch,
+import {
+  CAPABILITY_PLANNER_BOUNDARY_RESULT_MAX_CHARS,
+  type CapabilityPlannerDispatch,
 } from '../../capabilityPlanner/runner';
 import { readContextCompactionSummaries } from '../../contextCompaction';
 import {
@@ -265,6 +266,7 @@ function buildDecisionContext(params: {
 
   return {
     activeDelegation,
+    activeDelegationResult: activeDelegationAnnounceForDecision?.text ?? null,
     canHandoffActiveDelegation,
     decisionInputMessage,
     preDecisionHandoffMessages,
@@ -343,6 +345,7 @@ function buildEntryDecisionResult(params: {
     };
   }
   const dispatch: CapabilityPlannerDispatch = {
+    mode: 'entry',
     plannerState: {
       runId: state.runId,
       runDelegationSummaries: state.runDelegationSummaries,
@@ -418,10 +421,42 @@ function buildDelegationOutcomeDecisionResult(params: {
     };
   }
 
+  if (decision.outcome === 'task_done') {
+    if (!context.activeDelegationResult) {
+      throw new Error('task_done requires a complete accepted delegation result.');
+    }
+    const dispatch: CapabilityPlannerDispatch = {
+      mode: 'boundary',
+      plannerState: {
+        runId: state.runId,
+        runDelegationSummaries: acceptedDelegationUpdate.runDelegationSummaries,
+        runCapabilityPlan: state.runCapabilityPlan,
+      },
+      completedTask: activeDelegation.task,
+      completedTaskResult: boundCapabilityPlannerBoundaryResult(
+        context.activeDelegationResult,
+      ),
+    };
+    return {
+      goto: new Send('capabilityPlanner', dispatch),
+      update: acceptedDelegationUpdate,
+    };
+  }
+
   return {
-    goto: decision.outcome === 'task_done' ? 'capabilityPlanner' : 'answer',
+    goto: 'answer',
     update: acceptedDelegationUpdate,
   };
+}
+
+function boundCapabilityPlannerBoundaryResult(value: string): string {
+  const text = value.trim();
+  if (text.length <= CAPABILITY_PLANNER_BOUNDARY_RESULT_MAX_CHARS) return text;
+  const marker = '\n\n[handoff truncated for Planner context]\n\n';
+  const available = CAPABILITY_PLANNER_BOUNDARY_RESULT_MAX_CHARS - marker.length;
+  const tailLength = Math.floor(available / 4);
+  const headLength = available - tailLength;
+  return `${text.slice(0, headLength)}${marker}${text.slice(-tailLength)}`;
 }
 
 function buildUserInputRequiredDelegationResult(params: {
@@ -545,7 +580,7 @@ function buildAcceptedDelegationResult(params: {
   };
 }
 
-type DelegationOutcomeDestination = 'capability' | 'capabilityPlanner' | 'answer';
+type DelegationOutcomeDestination = 'capability' | 'answer' | Send;
 
 type DelegationOutcomeTransition = {
   goto: DelegationOutcomeDestination;

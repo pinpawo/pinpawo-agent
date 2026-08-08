@@ -76,17 +76,14 @@ test('planning datasets cover entry and boundary distributions', () => {
   ));
 });
 
-test('planning dataset covers both outcomes of an exhausted boundary plan', () => {
+test('an exhausted boundary plan only covers newly required autonomous work', () => {
   const exhaustedBoundaryCases = capabilityPlanningBasicsDataset.cases.filter(
     (testCase) => testCase.input.mode === 'boundary'
       && (testCase.input.remainingPlan ?? []).length === 0,
   );
-  // This is the input shape carrying the least context once the briefing is
-  // entry-only, so both outcomes stay covered: stopping when nothing remains,
-  // and continuing when the latest result names new work.
   assert.deepEqual(
     exhaustedBoundaryCases.map((testCase) => testCase.expected.result).sort(),
-    ['plan', 'return_to_answer'],
+    ['plan'],
   );
 });
 

@@ -2,12 +2,13 @@
 title: Orchestrator Decision Node Ownership
 page_type: concept
 status: validated
-updated: 2026-07-31
+updated: 2026-08-09
 sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../../ORCHESTRATOR_TERMINAL_SEMANTICS_DRAFT.md
   - ../../PET_AGENT_API_CAPABILITY_TOOLKIT.md
-  - ../../../packages/pet-agent/src/agent/orchestrator/capabilityPlannerAgent.ts
+  - ../../../packages/pet-agent/src/agent/orchestrator/capabilityPlanner/agent.ts
+  - ../../../packages/pet-agent/src/agent/orchestrator/capabilityPlanner/runner.ts
   - ../../../packages/pet-agent/src/agent/orchestrator/runtime/decisions/orchestrationDecision.ts
   - ../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/capabilityPlanner.ts
   - https://github.com/pinpawo/pinpawo-agent/issues/490
@@ -33,7 +34,7 @@ Each semantic owner receives the evidence needed for one coherent question:
 | Node | Owns | Does not own |
 |---|---|---|
 | `entryDecision` | Whether canonical main context can support a reply now or the goal still requires a new result | Task formation, Capability discovery or selection, execution, user reply |
-| Capability Planner Agent | Capability-document exploration, current task boundary, concrete Capability selection, and the unstarted future plan | Tool execution for the user task, announce acceptance, user reply |
+| Capability Planner Agent | Capability-document exploration, executable task boundaries, concrete Capability selection, and planning facts when execution cannot proceed | Tool execution for the user task, announce acceptance, goal-completion judgment, user reply |
 | `outcomeDecision` | Whether the current announce means continue, current-task completion with later autonomous work, user-goal completion, or required user input | Next-task generation, Capability selection, user reply |
 | `answer` | The user-visible reply selected from canonical conversation and typed terminal context | Tool execution and graph-state decisions |
 
@@ -69,17 +70,17 @@ This ownership is intentionally unified. Splitting task formation and executor
 selection allowed one model to describe an abstract ability while another model
 or code path reinterpreted it against a truncated candidate set.
 
-The Planner returns:
+The Planner terminates one invocation through exactly one structured action:
 
-- `next_task` with the objective, capability intent, concrete
-  `capability_name`, context summary, and unstarted future tail; or
-- `unavailable` only when the workspace contains no executable Capability able
-  to proceed and no `general`.
+- `submit_plan` provides an ordered non-empty task sequence. The first task is
+  materialized now and the remaining tasks stay advisory until a later boundary;
+- `return_to_answer` provides bounded planning facts when no executable plan can
+  proceed or user input is required. Answer owns the user-visible wording.
 
-When specialized Capabilities do not match but `general` exists, selecting
-`general` is Planner policy expressed through the same document-reading and
-structured-result contract. Response-format construction omits `unavailable`
-when `general` exists; code does not silently rewrite the selected Capability.
+When specialized Capabilities do not match but `general` exists and can perform
+the task, the Planner selects `general` through the same document exploration
+and `submit_plan` contract. Code validates the selected names against the
+immutable Workspace; it does not silently rewrite the selection.
 
 ## Task and future-plan boundary
 
@@ -105,8 +106,10 @@ revise, reorder, concretize, or remove only unstarted future work.
 - `user_input_required`: the user goal is incomplete and the next progress
   requires user input.
 
-The Planner has no `answer` result. Consequently `task_done` cannot mean “the
-task is complete and perhaps nothing remains”; that case is `goal_done`.
+`return_to_answer` is not a goal-completion result. Consequently `task_done`
+cannot mean “the task is complete and perhaps nothing remains”; that case is
+`goal_done`. A boundary Planner is invoked only after Outcome has established
+that autonomous work remains.
 
 Handoff provenance records where accepted evidence came from. Typed outcome
 state records what the evidence establishes. `answer` communicates that state
@@ -120,8 +123,7 @@ Code remains responsible for:
 - filesystem containment, digest verification, read budgets, and iteration
   limits;
 - structured-output validation and selected-name membership;
-- workspace-derived result availability, including the `general` fallback
-  invariant;
+- terminal-tool availability and exact Workspace membership for submitted tasks;
 - lane creation, state updates, routing, and cleanup.
 
 These invariants may be described to the Planner when needed for correction,

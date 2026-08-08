@@ -2,13 +2,13 @@
 title: Capability Planner Owns Task Boundaries And Capability Selection
 page_type: decision
 status: validated
-updated: 2026-07-31
+updated: 2026-08-09
 sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
-  - ../../../packages/pet-agent/src/agent/orchestrator/capabilityPlannerAgent.ts
-  - ../../../packages/pet-agent/src/agent/orchestrator/capabilityPlannerRunner.ts
-  - ../../../packages/pet-agent/src/agent/orchestrator/capabilityPlannerFileExplorer.ts
-  - ../../../packages/pet-agent/src/agent/orchestrator/capabilityDocumentWorkspace.ts
+  - ../../../packages/pet-agent/src/agent/orchestrator/capabilityPlanner/agent.ts
+  - ../../../packages/pet-agent/src/agent/orchestrator/capabilityPlanner/runner.ts
+  - ../../../packages/pet-agent/src/agent/orchestrator/capabilityPlanner/fileExplorer.ts
+  - ../../../packages/pet-agent/src/agent/orchestrator/capabilityPlanner/documentWorkspace.ts
   - ../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/capabilityPlanner.ts
   - ../../../packages/pet-agent/evals/datasets/capability-planning-basics.ts
   - ../../../packages/pet-agent/evals/capability-planning-evaluation.ts
@@ -78,19 +78,17 @@ exposes it to the Planner only through read tools. Typed workspace metadata
 carries the registry digest, allowed names, document paths, digests, and
 provenance.
 
-The Planner receives:
-
-- the workspace root contract and registry digest;
-- `glob_search` for bounded discovery;
-- `grep_search` for literal text exploration;
-- `view_file_chunk` for bounded document reading.
+The Planner receives the Workspace contract and one private exploration action:
+`grep_search`. A query contains one to three short literal alternatives. Each
+match includes the complete `CAPABILITY.md` document, so discovery and document
+observation do not require a second file-reading action.
 
 These tools are private Planner infrastructure. They are not Toolkits, are not
 available to Capability subagents, and do not become a third extension concept.
 
-Filesystem containment, symlink rejection, digest verification, observation
-budgets, iteration limits, and timeouts are code-owned invariants. The model owns
-what to explore and how the observed documents change the plan.
+Filesystem containment, symlink rejection, digest verification, document-read
+limits, iteration limits, and timeouts are code-owned invariants.
+The model owns what to explore and how the observed documents change the plan.
 
 ## Task boundary
 
@@ -109,18 +107,19 @@ determine task count.
 
 ## Entry and boundary modes
 
-At `entry`, the Planner starts from the complete user purpose and canonical
-conversation. It forms the first executable task and preserves only necessary
-future purposes.
+At `entry`, Entry resolves the canonical main conversation into an ephemeral,
+bounded Planner briefing. The briefing carries an objective of at most 2,000
+characters and optional context of at most 4,000 characters. It is a graph
+dispatch value, not durable orchestrator state, and the Planner does not receive
+the canonical transcript.
 
 At `boundary`, the Planner receives:
 
 | Input | Role |
 |---|---|
-| User intent context | Purpose and interpretation |
-| `completed_tasks` | Immutable facts about accepted work |
-| `latest_handoff` | The newest complete result |
-| `remaining_plan` | Mutable, unstarted future work |
+| `completedTask` | The task Outcome just accepted as complete |
+| `completedTaskResult` | The accepted announce result, bounded to 16,000 characters while preserving its head and tail |
+| `remainingPlan` | Mutable, unstarted future work |
 | Capability Document Workspace | Current executable actor map |
 
 It may concretize, revise, reorder, or remove the future tail as returned facts
@@ -128,77 +127,64 @@ change what remains useful. Completed work cannot re-enter the future plan.
 
 There is no `direct` mode and no externally staged immutable pending task.
 
-## Structured result contract
+## Structured terminal contract
 
-The Planner returns one of two result shapes:
+Each Planner invocation finishes through one of two terminal tools. The runtime
+normalizes those calls into one of two result shapes:
 
 ```ts
 type CapabilityPlannerResult =
   | {
-      result: 'next_task';
-      next_task: {
-        objective: string;
-        capability_intent: string;
-        capability_name: string;
-        context_summary: string | null;
-      };
-      remaining_plan: Array<{
-        objective: string;
-        capability_intent: string;
+      tasks: Array<{
+        capability: string;
+        task: string;
       }>;
     }
   | {
-      result: 'unavailable';
-      task: string;
-      reason: string;
+      answer: {
+        reason: string;
+        context: string;
+        question: string | null;
+      };
     };
 ```
 
-`capability_name` is concrete only for the current task. Future work retains a
-semantic `capability_intent` because its details may depend on results that do
-not yet exist.
-
-The Planner has no `answer` result. Entering it means the run still needs a new
-result. If a completed Capability also completes the user goal,
-`outcomeDecision` must return `goal_done` before another Planner call.
+`submit_plan` requires at least one task. The first task runs now; later tasks
+remain unstarted and may be revised after execution returns new facts.
+`return_to_answer` provides planning facts when execution cannot proceed or a
+question must be put to the user. It does not send a reply and does not decide
+that the goal is complete. If a completed Capability also completes the user
+goal, `outcomeDecision` must return `goal_done` before another Planner call.
 
 ## General fallback
 
-`general` is an ordinary Capability and an explicit Planner policy when it is
-present in the current Workspace:
+`general` is an ordinary Capability when it is present in the current Workspace:
 
 - if a specialized Capability completely fits the current task, select it;
-- otherwise, if `general` exists, read its document and select
-  `capability_name: "general"`;
-- return `unavailable` only when no executable Capability, including `general`,
-  can proceed.
+- otherwise, if `general` can perform the task, select it in `submit_plan`;
+- if no executable plan can proceed, use `return_to_answer` with the relevant
+  planning facts.
 
-The Planner uses the standard `createAgent` `responseFormat` and
-`structuredResponse` path. The available result schemas are derived from the
-Workspace:
-
-- an empty Workspace exposes only `unavailable`;
-- a Workspace containing `general` exposes only `next_task`;
-- another non-empty Workspace exposes both result shapes.
-
-Schema errors return correctable tool feedback inside the standard agent loop.
-This makes a false `unavailable` invalid when `general` is present without
-silently selecting an executor in code.
+The Planner uses standard `createAgent` tools. `submit_plan` is available only
+when the Workspace contains a Capability and its `capability` field is an enum
+of exact Workspace names. `return_to_answer` remains available for a genuinely
+blocked plan or required user input. Schema and tool errors return correctable
+feedback inside the standard agent loop.
 
 This is not a code-selected fallback: the Planner still owns the task,
 Capability selection, and evidence trail.
 
 ## Runtime mapping
 
-For `next_task`, runtime code:
+For `submit_plan`, runtime code:
 
 1. verifies that the selected name belongs to the immutable workspace;
-2. materializes one `RunNextDelegation`;
-3. replaces the future tail with `remaining_plan`;
+2. materializes the first task as one `RunNextDelegation`;
+3. stores the later tasks as the future tail;
 4. routes to the unified Capability executor.
 
-For truthful `unavailable`, runtime preserves the unexecuted task and reason as
-answer context and creates no delegation.
+For `return_to_answer`, runtime stores bounded planning facts for Answer and
+creates no delegation.
 
 ## Evaluation contract
 
@@ -209,12 +195,13 @@ Planner evaluation owns:
 - concrete current Capability selection;
 - preservation of user purpose;
 - justified task boundaries;
-- correct use of completed facts and latest handoff;
+- correct use of the latest completed task and accepted result;
 - semantic validity of the future tail;
-- mandatory General fallback.
+- appropriate General selection when it can execute the task;
+- truthful `return_to_answer` when execution cannot proceed or needs user input.
 
-Schema validity, filesystem containment, observation budgets, exact workspace
-membership, iteration limits, and the General invariant also have deterministic
+Schema validity, filesystem containment, document-read limits, exact workspace
+membership, iteration limits, and terminal tool protocol also have deterministic
 tests. Task count, plan-effect labels, tokens, latency, and cost remain
 diagnostics unless a case explicitly makes them part of success.
 

@@ -33,25 +33,11 @@ const DEFAULT_CAPABILITY_PLANNER_WORKSPACE_ROOT = join(
   tmpdir(),
   'pinpawo-capability-workspaces',
 );
-/**
- * A boundary re-plans from the run's own facts. The Entry briefing is not
- * carried forward and is never rebuilt from the transcript: the completed task,
- * its result, and the remaining plan already state the work in resolved form.
- */
-function buildBoundaryPlannerContext(state: OrchestratorStateType) {
-  const latestCompletedDelegation = [...state.runDelegationSummaries]
-    .reverse()
-    .find((item) => item.status === 'completed');
-  return {
-    completedTask: latestCompletedDelegation?.task ?? null,
-    completedTaskResult: latestCompletedDelegation?.resultPreview ?? null,
-  };
-}
-
 function isPlannerDispatch(
   input: OrchestratorStateType | CapabilityPlannerDispatch,
 ): input is CapabilityPlannerDispatch {
-  return 'plannerState' in input && 'briefing' in input;
+  return 'plannerState' in input
+    && (input.mode === 'entry' || input.mode === 'boundary');
 }
 
 function normalizePlannerTask(task: CapabilityPlanTask): CapabilityPlanTask {
@@ -190,9 +176,11 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
       cacheRoot: DEFAULT_CAPABILITY_PLANNER_WORKSPACE_ROOT,
       ...(allowedCapabilityNames ? { allowedCapabilityNames } : {}),
     });
-    const isEntryDispatch = isPlannerDispatch(nodeInput);
-    const state = isEntryDispatch ? nodeInput.plannerState : nodeInput;
-    const input: CapabilityPlannerInput = isEntryDispatch
+    if (!isPlannerDispatch(nodeInput)) {
+      throw new Error('Capability Planner requires an explicit entry or boundary dispatch.');
+    }
+    const state = nodeInput.plannerState;
+    const input: CapabilityPlannerInput = nodeInput.mode === 'entry'
       ? {
           mode: 'entry',
           briefing: nodeInput.briefing,
@@ -203,7 +191,8 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
         }
       : {
           mode: 'boundary',
-          ...buildBoundaryPlannerContext(nodeInput),
+          completedTask: nodeInput.completedTask,
+          completedTaskResult: nodeInput.completedTaskResult,
           remainingPlan: state.runCapabilityPlan,
           workspace,
         };

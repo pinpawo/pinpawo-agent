@@ -26,9 +26,9 @@ export function buildEntryDecisionSystemPrompt(params: {
 
 export function buildJsonEntryDecisionBriefingInstruction(): string {
   return [
-    '- planner_objective：当前真实用户目标的准确、可执行摘要。保留编号、URL、路径、先后顺序和显式限制；消解理解目标所必需的指代。',
-    '- planner_context：仅保留理解该目标所需的已确认背景、约束或事实；没有则为 null。',
-    '- 当选择 answer 时，planner_objective 和 planner_context 均为 null。',
+    '- planner_objective：当前用户目标的准确、可执行摘要，保留编号、URL、路径、先后顺序和显式限制。',
+    '- planner_context：帮助理解目标的已确认背景、约束或事实；没有时为 null。',
+    '- action 为 answer 时，planner_objective 和 planner_context 均为 null。',
   ].join('\n');
 }
 

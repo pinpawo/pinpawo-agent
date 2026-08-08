@@ -425,6 +425,62 @@ test('entry mode forms one executable task after Capability exploration', async 
   assert.equal('tasks' in result ? result.tasks.length : 0, 1);
 });
 
+test('Planner requires continuous work from one Capability in one task boundary', async (t) => {
+  const workspace = await createWorkspace(t, {
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary workspace tasks.',
+      instructions: 'Complete the requested work.',
+    }),
+  });
+  const model = new ScriptedPlannerModel([
+    {
+      structuredOutput: {
+        kind: 'plan',
+        args: {
+          tasks: [{
+            capability: 'general',
+            task: 'Fix P1-1 and P1-2 from the review.',
+          }, {
+            capability: 'general',
+            task: 'Fix P1-3 and P2, verify, commit, and push.',
+          }],
+        },
+      },
+    },
+    {
+      structuredOutput: {
+        kind: 'plan',
+        args: {
+          tasks: [{
+            capability: 'general',
+            task: 'Fix P1-1, P1-2, P1-3, and P2 from the review; verify, commit, and push.',
+          }],
+        },
+      },
+    },
+  ]);
+
+  const result = await createCapabilityPlannerAgent({ model }).invoke(
+    plannerInput(workspace),
+  );
+
+  assert.deepEqual(result, {
+    tasks: [{
+      capability: 'general',
+      task: 'Fix P1-1, P1-2, P1-3, and P2 from the review; verify, commit, and push.',
+    }],
+  });
+  const feedback = model.invocations[1]?.find((message) =>
+    message instanceof ToolMessage
+    && message.tool_call_id === 'structured-1');
+  assert.ok(feedback instanceof ToolMessage);
+  assert.match(
+    String(feedback.content),
+    /Consecutive tasks use the same Capability\. Combine them into one complete task\./,
+  );
+});
+
 test('a submitted plan becomes private Planner state for the final reply', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
@@ -435,10 +491,7 @@ test('a submitted plan becomes private Planner state for the final reply', async
   });
   const submittedTasks = [{
     capability: 'general',
-    task: 'Apply the requested repository change.',
-  }, {
-    capability: 'general',
-    task: 'Verify the change and report the result.',
+    task: 'Apply the requested repository change, verify it, and report the result.',
   }];
   const model = new ScriptedPlannerModel([{
     structuredOutput: {
@@ -524,7 +577,12 @@ test('an unknown Capability returns tool feedback and can be repaired in-loop', 
     {
       structuredOutput: {
         kind: 'plan',
-        args: submitArgs('general'),
+        args: {
+          tasks: [{
+            capability: 'general',
+            task: 'Research the repository and prepare the review.',
+          }],
+        },
       },
     },
   ]);

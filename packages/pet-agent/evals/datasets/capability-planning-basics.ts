@@ -31,7 +31,14 @@ export type CapabilityPlanningExpected = {
 const SUITE = 'agent-capability-planning-basics';
 const SOURCE_FILE = 'packages/pet-agent/evals/datasets/capability-planning-basics.ts';
 
-type CapabilityPlanningTranscriptInput = Omit<CapabilityPlanningInput, 'briefing'>;
+type CapabilityPlanningTranscriptInput = Omit<CapabilityPlanningInput, 'briefing'> & {
+  /**
+   * Bounded briefing that production Entry would hand to a fresh Planner.
+   * Cases with contextual references provide this explicitly instead of
+   * pretending that Planner receives the full main-conversation transcript.
+   */
+  briefing?: CapabilityPlanningInput['briefing'];
+};
 
 function buildEvalBriefing(messages: CapabilityPlanningTranscriptInput['messages']) {
   const latestUserRequest = [...messages]
@@ -58,7 +65,7 @@ function withBriefing(
     ...testCase,
     input: {
       ...testCase.input,
-      briefing: buildEvalBriefing(testCase.input.messages),
+      briefing: testCase.input.briefing ?? buildEvalBriefing(testCase.input.messages),
     },
   };
 }
@@ -308,9 +315,13 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     tags: ['capability_planning', 'delegation_control'],
     input: {
       mode: 'entry',
+      briefing: {
+        objective: '读取当前仓库根目录 package.json 中的 name 和 version，并报告这两个值。',
+        context: null,
+      },
       messages: [{
         role: 'user',
-        content: '处理这个没有专用 Capability 覆盖的普通工作区任务，并返回执行结果。',
+        content: '读取当前仓库根目录 package.json 中的 name 和 version，并报告这两个值。',
       }],
       capabilityRegistry: [
         'general: execute ordinary workspace tasks when no specialized Capability matches',
@@ -318,13 +329,13 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     },
     expected: {
       result: 'plan',
-      nextTaskTerms: ['普通', '工作区', '执行结果'],
+      nextTaskTerms: ['package.json', 'name', 'version'],
       capabilityName: 'general',
       remainingPlan: [],
       exactRemainingPlanLength: 0,
       planEffect: 'created',
       rubberStamp: false,
-      reason: 'When no specialized Capability matches, the Planner must materialize the task with general instead of answering or reporting unavailable.',
+      reason: 'When no specialized Capability matches, the Planner materializes a concrete workspace task with general.',
     },
     metadata: { difficulty: 'medium', reason: 'Mandatory General fallback.', source: SOURCE_FILE },
   },
@@ -490,6 +501,10 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     tags: ['capability_planning', 'context_synthesis', 'structured_output'],
     input: {
       mode: 'entry',
+      briefing: {
+        objective: '重新只读检查本周工作清单中此前尚未确认创建的事项是否已经实际创建，并报告当前状态。',
+        context: '此前仅确认一项事项已创建，其余待创建事项需要再次核验。历史中的 Bash 片段只是对话内容，不能作为本次检查的结果。',
+      },
       messages: [{
         role: 'user',
         content: '检查本周工作清单中标注为“待创建”的事项是否已经实际创建；这次只检查，不要创建或更新任何事项。',

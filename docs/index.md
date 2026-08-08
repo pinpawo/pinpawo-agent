@@ -15,7 +15,8 @@ the original design and reference documents. Maintenance rules live in
 - [Interruption and delegation continuation](wiki/interruption-and-delegation-continuation.md)
 - [System prompt design knowledge map](wiki/overview.md)
 - [Orchestrator as practical reasoning](wiki/concepts/orchestrator-practical-reasoning.md)
-- [System prompt authoring and evaluation principles](wiki/concepts/system-prompt-authoring-principles.md)
+- [System prompt authoring and evaluation principles](wiki/concepts/system-prompt-authoring-principles.md) —
+  minimum generative contracts, positive judgment cues, and eval-backed changes
 - [Dynamic context governance](wiki/concepts/dynamic-context-governance.md) —
   proposed ownership and placement contract
 - [Orchestrator decision node ownership](wiki/concepts/decision-node-ownership.md)

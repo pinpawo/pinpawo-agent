@@ -2,7 +2,7 @@
 title: System Prompt Authoring Principles
 page_type: concept
 status: validated
-updated: 2026-07-31
+updated: 2026-08-08
 sources:
   - ../sources/model-prompting-and-harness-references.md
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
@@ -10,6 +10,7 @@ sources:
   - ../../PET_AGENT_API_CAPABILITY_TOOLKIT.md
   - ../../DYNAMIC_CONTEXT_GOVERNANCE_DESIGN.md
   - ../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityPlannerAgent.prompt.ts
+  - https://www.anthropic.com/engineering/april-23-postmortem
   - https://github.com/pinpawo/pinpawo-agent/issues/417
   - https://github.com/pinpawo/pinpawo-agent/issues/490
   - https://github.com/pinpawo/pinpawo-agent/pull/492
@@ -34,9 +35,9 @@ Production prompts are one part of an agent harness. A prompt change is correct
 only when its semantic owner, evidence boundary, structured result, runtime
 transition, and evaluation objective remain coherent.
 
-The target is the smallest model-visible contract that makes the desired
-behavior understandable. Code deterministically owns what it can derive or
-enforce.
+The target is the smallest model-visible contract that gives the model a clear
+direction: its purpose, relevant evidence, and a successful result. Code
+deterministically owns what it can derive or enforce.
 
 ## Evidence-backed position
 
@@ -54,14 +55,27 @@ The external evidence and its authority are summarized in
 
 ## Authoring contract
 
-### 1. Start with the owned positive behavior
+### 1. Start with a minimum generative contract
 
-Describe what the actor should judge or produce, which evidence it may use, and
-what success means. Add a prohibition only to close a real semantic, safety, or
-authority boundary.
+Describe what the actor is here to judge or produce, which evidence matters,
+and what a successful result looks like. The prompt gives direction rather than
+an implementation of the model's reasoning.
 
-For example, entry owns whether a new result is still required. It does not need
-an inventory of every tool operation or a warning for every unsupported guess.
+A useful contract usually has three parts:
+
+- the current purpose or question;
+- the relevant evidence to consider;
+- the result or structured outcome to produce.
+
+Use short, generative cues when they help the model form its own judgment. For
+example, Entry can focus on the user's current goal, the results already in the
+conversation, and what remains to be obtained. This is more useful than an
+inventory of node responsibilities or a list of operations the model must not
+attempt.
+
+Negative wording remains appropriate for a real safety, authority, or semantic
+boundary. It is an exception: first make the desired behavior understandable,
+then use code or a narrow boundary where it is genuinely required.
 
 ### 2. Keep one semantic owner
 
@@ -103,15 +117,21 @@ They do not decide context ownership. The proposed repository-wide contract is
 described in [Dynamic Context Governance](dynamic-context-governance.md); target
 placement must remain distinct from current implementation facts.
 
-### 4. Express outcomes, not a hand-written reasoning trace
+### 4. Use judgment cues, not a hand-written reasoning trace
 
-Specify the mission, evidence, allowed results, stopping conditions, and
-authority boundaries. Avoid prescribing an internal thought sequence unless
-order itself is a product or safety requirement.
+Specify the mission, evidence, and outcome. Questions that orient the judgment
+are useful; a fixed internal thought sequence is not, unless order itself is a
+product or safety requirement.
 
 The Planner is intentionally a tool-loop agent. The prompt tells it what a valid
 plan and selection accomplish; the model decides which files to discover and
 read.
+
+Keep room for the model to solve the task. Global word limits, forced
+progress messages, exhaustive anti-pattern lists, and similarly broad behavior
+controls can accidentally constrain useful reasoning. Product-level brevity or
+format requirements belong in the relevant output contract or presentation
+layer, with deterministic bounds where possible.
 
 ### 5. Make hard constraints operational
 

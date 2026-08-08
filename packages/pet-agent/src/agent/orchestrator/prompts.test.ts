@@ -112,6 +112,34 @@ test('Capability Planner boundary input carries run facts without a request brie
   assert.doesNotMatch(input, /workspace|registry_digest|document_count|<planning_state>/);
 });
 
+test('Capability Planner boundary input omits the follow-up section once the plan is exhausted', () => {
+  const input = buildCapabilityPlannerAgentInput({
+    mode: 'boundary',
+    workspace: plannerPromptWorkspace,
+    completedTask: '确认浏览器可用',
+    completedTaskResult: '浏览器已经连接，目标页面可访问。',
+    remainingPlan: [],
+  } satisfies CapabilityPlannerInput);
+
+  assert.match(input, /^Planner Context：继续执行状态\n刚完成的任务：确认浏览器可用/);
+  assert.match(input, /任务结果摘要：浏览器已经连接，目标页面可访问。/);
+  assert.doesNotMatch(input, /此前保留的后续任务/);
+  assert.doesNotMatch(input, /planner_request_briefing/);
+});
+
+test('Capability Planner boundary input degrades to an explicit empty state', () => {
+  const input = buildCapabilityPlannerAgentInput({
+    mode: 'boundary',
+    workspace: plannerPromptWorkspace,
+    completedTask: null,
+    completedTaskResult: null,
+    remainingPlan: [],
+  } satisfies CapabilityPlannerInput);
+
+  // Nothing is silently dropped: the continuation state says so explicitly.
+  assert.equal(input, 'Planner Context：继续执行状态\n无。');
+});
+
 test('decision recent messages label delegation briefings as scheduling context', () => {
   const [briefing] = materializeDelegation({
     mode: 'initial',

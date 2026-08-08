@@ -738,6 +738,79 @@ test('task_done reroutes through capabilityPlanner before the next task', async 
   assert.equal(state.taskActiveDelegation, null);
 });
 
+test('a single-task plan reaches the boundary with no remaining plan and no briefing', async () => {
+  let structuredCallCount = 0;
+  const plannerInputs: CapabilityPlannerInput[] = [];
+  const routeModel = {
+    invoke: async () => new AIMessage('final summary'),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        structuredCallCount += 1;
+        if (structuredCallCount === 1) return needsPlanDecision();
+        // The task is done while the overall goal is not, so the run routes
+        // back to the Planner with its plan already exhausted.
+        if (structuredCallCount === 2) {
+          return taskDoneDecision('已读取 issue 状态，仍需更新 README。');
+        }
+        return goalDoneDecision();
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const capabilityPlannerRunner: CapabilityPlannerRunner = {
+    async invoke(input) {
+      plannerInputs.push(input);
+      if (plannerInputs.length === 1) {
+        return { tasks: [{ capability: 'explore', task: '读取 issue #587 状态。' }] };
+      }
+      return {
+        answer: {
+          reason: '计划中的工作已经完成。',
+          context: 'issue #587 当前为 open。',
+          question: null,
+        },
+      };
+    },
+  };
+  const graph = createOrchestratorGraph({
+    models: {
+      act: routeModel,
+      observe: routeModel,
+      subagent: new FakeListChatModel({
+        responses: ['issue #587 当前为 open。'],
+        sleep: 0,
+      }),
+    },
+    actor: testActor,
+    capabilityPlannerRunner,
+  });
+
+  const state = await graph.invoke(buildOrchestratorRunInput([
+    new HumanMessage('看下 issue #587 现在什么状态。'),
+  ]), {
+    configurable: {
+      thread_id: 'boundary-exhausted-plan',
+      actor: testActor,
+      capabilities: [capability('explore', '通用探索、调查、代码库理解 capability。')],
+      allowedCapabilityNames: ['explore'],
+    },
+  }) as OrchestratorStateType;
+
+  assert.equal(plannerInputs.length, 2);
+  const boundaryPlannerInput = plannerInputs[1];
+  assert.equal(boundaryPlannerInput?.mode, 'boundary');
+  // The decisive combination: a boundary whose plan is already exhausted has
+  // neither a remaining task nor a briefing to restate the goal.
+  assert.deepEqual(boundaryPlannerInput?.remainingPlan, []);
+  assert.equal(boundaryPlannerInput?.briefing, undefined);
+  assert.equal(boundaryPlannerInput?.completedTask, '读取 issue #587 状态。');
+  assert.match(boundaryPlannerInput?.completedTaskResult ?? '', /issue #587 当前为 open/);
+  // The Planner return is consumed by the answer node, which clears it and
+  // starts no further delegation.
+  assert.equal(state.runPlannerReturn, null);
+  assert.equal(state.runNextDelegation, null);
+  assert.deepEqual(state.runCapabilityPlan, []);
+});
+
 test('task_done returns to capabilityPlanner until the remaining goal is complete', async () => {
   let structuredCallCount = 0;
   let answerModelInvocations = 0;

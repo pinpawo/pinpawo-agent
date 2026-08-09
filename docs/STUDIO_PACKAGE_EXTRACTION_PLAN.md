@@ -11,6 +11,10 @@ Tracking issue: #561
 **非目标**:本次不修 C1–C11 那些执行期契约问题(单槽 review、私有 HITL 循环、
 capacity/lease)。**先抽包再改行为** —— 否则改完还要再搬一次。
 
+**兼容口径**:Studio 与旧 Ink TUI **都不做兼容**。该删的直接删,不保留别名、
+不设过渡期。Chat 保护区不受此影响 —— 那是 issue 明确的保护面。唯一的例外是
+chat 也在用的共享入口(如 `run` 命令),见 Phase 1。
+
 ---
 
 ## 1. 包结构
@@ -207,9 +211,28 @@ export function parseConfigDocument<T>(input: {
 - `studioConfig.ts` / `petConfig.ts` 的 **loadXxx(path) 部分** — 文件入口
 - `studioRuntime.ts` / `studioRunService.ts` — 装配,最终被 host 取代
 
-### 5.3 TUI(`tui/**` 9 个文件)
+### 5.3 TUI:旧 TUI 不做兼容
 
-归 #232,与抽包正交,本次不动。
+仓库里有**两套 TUI**:
+
+| 位置 | 是什么 | 规模 | Studio 引用 |
+| --- | --- | --- | --- |
+| `services/local-agent/src/tui/` | 旧 Ink 客户端(`pinpawo tui --legacy`) | 110 文件,23 个 import `ink` | 11 个文件 |
+| `services/tui/` (`@pinpawo/tui`) | OpenTUI v2(`pinpawo tui --v2`) | — | 10 个文件 |
+
+**口径:旧 TUI 不做兼容。** 与"Studio 不做兼容"同一条原则 —— 旧 TUI 里的
+Studio 引用**直接删,不迁移、不保留别名、不做过渡期**。
+
+具体到抽包:
+
+- 旧 Ink TUI(`services/local-agent/src/tui/**`)中的 Studio 相关代码
+  (`commandSubmit` 的 `/studio`、`render/text` 的 Studio 文案、
+  `tuiState` 的 studio 分支等)**直接移除**,不随抽包迁往新包。
+- v2 TUI(`services/tui/**`)按 #232 的节奏走;它消费的是公开 API,
+  抽包后改 import 来源即可。
+
+这条同时简化了 #561 Phase 5 —— 原计划"Studio TUI 收缩为状态与诊断",
+在旧 TUI 上不再需要,因为它整体不做兼容。
 
 ---
 
@@ -225,6 +248,7 @@ export function parseConfigDocument<T>(input: {
 | 4 | pet-agent 删 studio 子树与 barrel re-export | 验收:pet-agent 无 `studio` 字样 |
 | 5 | pet-agent 新增通用 config loader,studio schema 迁移 | §4.2 |
 | 6 | local-agent 改为消费两个新包,宿主接线保留 | §5 |
+| 7 | 删除旧 Ink TUI 中的 Studio 引用 | §5.3,不做兼容 |
 
 步 2–4 是一次完整的搬迁,中途 pet-agent 会同时存在新旧两份;步 4 收尾。
 
@@ -247,5 +271,6 @@ export function parseConfigDocument<T>(input: {
 - [ ] `@pinpawo/studio` 不 import `@pinpawo-toolkit/studio-kanban`
 - [ ] pet-agent 未为抽包新增任何 export
 - [ ] chat 模式的配置复杂度未因 studio 增加
+- [ ] 旧 Ink TUI(`services/local-agent/src/tui/**`)中不再有 Studio 引用
 - [ ] `npm run typecheck && npm test` 全绿
 - [ ] Chat 回归基线(见 Phase 0 审计 §3)未受影响

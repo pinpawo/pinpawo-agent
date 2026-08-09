@@ -6,6 +6,7 @@ import {
   buildHumanReviewRejectResume,
   buildHumanReviewResume,
   resolveHumanReviewAction,
+  routeRunInterruptThroughHumanReview,
   validateHumanReviewDecisions,
 } from './humanReviewActionRouting';
 import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
@@ -38,6 +39,45 @@ function reviewRoute(ids: string[], interruptId?: string) {
     reviews: ids.map(reviewSpec),
   };
 }
+
+test('run interrupt routing normalizes pending and resolving review states', async () => {
+  const lifecycle = new ReviewResolutionLifecycle<ReturnType<typeof reviewRoute> & {
+    requestId: string;
+  }>();
+  const route = { ...reviewRoute(['review-1'], 'interrupt-1'), requestId: 'req-1' };
+  const cancelled: typeof route[] = [];
+  lifecycle.register(route);
+
+  assert.equal(await routeRunInterruptThroughHumanReview({
+    lifecycle,
+    requestId: 'req-1',
+    cancelPending: async (pendingRoute) => {
+      cancelled.push(pendingRoute);
+    },
+  }), 'cancelled_pending');
+  assert.deepEqual(cancelled, [route]);
+
+  const resolution = await lifecycle.begin(route, async () => null);
+  assert.ok(resolution);
+  assert.equal(await routeRunInterruptThroughHumanReview({
+    lifecycle,
+    requestId: 'req-1',
+    cancelPending: async (pendingRoute) => {
+      cancelled.push(pendingRoute);
+    },
+  }), 'queued_for_resolution');
+  assert.deepEqual(cancelled, [route]);
+  assert.equal(lifecycle.checkpoint('req-1'), true);
+
+  assert.equal(await routeRunInterruptThroughHumanReview({
+    lifecycle,
+    requestId: 'req-unknown',
+    cancelPending: async (pendingRoute) => {
+      cancelled.push(pendingRoute);
+    },
+  }), 'unhandled');
+  assert.deepEqual(cancelled, [route]);
+});
 
 test('human review action routing resumes once for a rejected first decision', () => {
   const route = reviewRoute(['review-1', 'review-2'], 'interrupt-1');

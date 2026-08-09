@@ -22,6 +22,27 @@ test('review resolution releases a queued interrupt only after checkpointing', a
   assert.equal(lifecycle.checkpoint('req-1'), false);
 });
 
+test('run interrupt is routed from the authoritative review lifecycle state', async () => {
+  const lifecycle = new ReviewResolutionLifecycle<Route>();
+  const route = { actionId: 'action-1', requestId: 'req-1' };
+  lifecycle.register(route);
+
+  assert.deepEqual(lifecycle.routeRunInterrupt('req-1'), {
+    type: 'cancel_pending',
+    route,
+  });
+  const resolution = await lifecycle.begin(route, async () => null);
+  assert.ok(resolution);
+  assert.deepEqual(lifecycle.routeRunInterrupt('req-1'), { type: 'queued' });
+  assert.equal(lifecycle.checkpoint('req-1'), true);
+  lifecycle.abandon(resolution.actionId);
+  assert.deepEqual(lifecycle.routeRunInterrupt('req-1'), {
+    type: 'cancel_pending',
+    route,
+  });
+  assert.deepEqual(lifecycle.routeRunInterrupt('req-unknown'), { type: 'unhandled' });
+});
+
 test('consumed review actions stay unavailable across request envelopes', async () => {
   const lifecycle = new ReviewResolutionLifecycle<Route>();
   const route = { actionId: 'action-1', requestId: 'req-1' };

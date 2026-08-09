@@ -217,10 +217,10 @@ test('run interrupt waits until the review resolution is checkpointed', async ()
     reviewId: 'review-current',
     selectedOptionId: 'approve',
   }, { actorId: 'pet-1' } as never);
-  assert.equal(handler.handleRunInterrupt(fakePeer, {
+  assert.equal(await handler.handleRunInterrupt(fakePeer, {
     type: 'run.interrupt',
     requestId: 'req-1',
-  }), null);
+  }, { actorId: 'pet-1' } as never), null);
 
   await resolution;
 
@@ -294,6 +294,69 @@ test('review cancellation automatically interrupts at the first resolved checkpo
   assert.deepEqual(controls, [
     { type: 'interrupting', requestId: 'req-1', message: 'interrupting' },
     { type: 'interrupted', requestId: 'req-1', message: 'interrupted' },
+  ]);
+});
+
+test('run interrupt cancels a review that became pending before the client observed it', async () => {
+  const controls: unknown[] = [];
+  const requests: unknown[] = [];
+  const fakePeer = createFakePeer();
+  const handler = new LocalServerChatHandler({
+    graphService: {} as never,
+    tuiSessions: {
+      getActiveSessionId: () => 'sess-active',
+      getChatThreadId: () => 'thread-x',
+      readActivePendingReview: async () => null,
+      buildChatSetup: () => ({
+        graphKey: 'test',
+        graphConfig: {},
+        input: { messages: [] },
+      }),
+    } as never,
+    inflightRequests: new InflightRequestController<LocalServerPeer>({
+      emitOperation: () => undefined,
+      sendControl: (_peer, message) => controls.push(message),
+    }),
+    loadContext: async () => ({} as never),
+    runChat: async (options) => {
+      requests.push(options.request);
+      assert.equal(options.interruptOnSettledResumeCheckpoint, true);
+      options.onResumeCheckpointed?.({ canInterrupt: true });
+      options.finishInterrupted();
+      return { status: 'interrupted' };
+    },
+  });
+  // Simulate the server registering waiting_review immediately before the TUI
+  // sends the ordinary run.interrupt it chose from its stale thinking state.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (handler as any).recordReviewActionRoute({
+    type: 'human_review.requested',
+    interruptId: 'interrupt-race',
+    requestId: 'req-race',
+    review: {
+      id: 'review-race',
+      schemaVersion: 1,
+      view: { kind: 'plain', body: 'Approve?' },
+      options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+    },
+  }, { actorId: 'pet-1' });
+
+  const result = await handler.handleRunInterrupt(fakePeer, {
+    type: 'run.interrupt',
+    requestId: 'req-race',
+  }, { actorId: 'pet-1' } as never);
+
+  assert.equal(result, null);
+  assert.deepEqual(requests, [{
+    kind: 'resume',
+    requestId: 'req-race',
+    resume: {
+      'interrupt-race': { action: 'interrupt_run' },
+    },
+  }]);
+  assert.deepEqual(controls, [
+    { type: 'interrupting', requestId: 'req-race', message: 'interrupting' },
+    { type: 'interrupted', requestId: 'req-race', message: 'interrupted' },
   ]);
 });
 

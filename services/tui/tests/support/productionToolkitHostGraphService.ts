@@ -30,6 +30,8 @@ export const GUARDED_HOST_REPLY =
   'Guarded production tool completed.';
 export const GUARDED_HOST_CONTINUATION_GUIDANCE =
   'Apply the reviewed change after suspension.';
+export const GUARDED_HOST_SECOND_CONTINUATION_GUIDANCE =
+  'Retry the reviewed change after another suspension.';
 export const GUARDED_HOST_TOOL_NAME =
   'write_guarded_fixture';
 export const GUARDED_HOST_REVIEW_TITLE =

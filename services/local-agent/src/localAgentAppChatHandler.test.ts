@@ -1221,6 +1221,57 @@ test('LocalAgentAppChatHandler interrupts a rejected review after checkpointing 
   ]);
 });
 
+test('LocalAgentAppChatHandler treats a stale-state run interrupt as pending review cancellation', async () => {
+  const runRequests: unknown[] = [];
+  const review = {
+    id: 'review-race',
+    schemaVersion: 1,
+    view: { kind: 'plain' as const, body: 'Approve?' },
+    options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' as const } }],
+  };
+  const { handler, ws } = createHandler({
+    runChat: async (options) => {
+      runRequests.push(options.request);
+      if (options.request.kind === 'user_message') {
+        emitPendingReview(options, {
+          requestId: 'req-race',
+          interruptId: 'interrupt-race',
+          review,
+        });
+        return { status: 'waiting_human' };
+      }
+      assert.equal(options.interruptOnSettledResumeCheckpoint, true);
+      return { status: 'interrupted' };
+    },
+  });
+
+  await handler.handleChatRequest(ws, {
+    type: 'chat_request',
+    requestId: 'req-race',
+    message: 'hello',
+    userId: 'user-1',
+  });
+  await handler.handleRunInterrupt(ws, {
+    type: 'run.interrupt',
+    requestId: 'req-race',
+  });
+
+  assert.deepEqual(runRequests, [
+    {
+      kind: 'user_message',
+      requestId: 'req-race',
+      message: 'hello',
+    },
+    {
+      kind: 'resume',
+      requestId: 'req-race',
+      resume: {
+        'interrupt-race': { action: 'interrupt_run' },
+      },
+    },
+  ]);
+});
+
 test('LocalAgentAppChatHandler rejects cancellation for a stale review action', async () => {
   const runRequests: unknown[] = [];
   const review = {

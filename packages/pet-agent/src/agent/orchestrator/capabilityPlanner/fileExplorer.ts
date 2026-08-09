@@ -78,6 +78,16 @@ function formatError(error: unknown) {
   });
 }
 
+function formatGrepSearchLimitReached() {
+  return JSON.stringify({
+    ok: false,
+    error: {
+      code: 'planning_limit_reached',
+      message: `grep_search call limit reached after ${String(MAX_GREP_SEARCH_CALLS)} calls. Call submit_plan now, or return_to_answer if no executable plan is possible.`,
+    },
+  });
+}
+
 function grepQueryTerms(query: string) {
   const terms = query
     .split('|')
@@ -184,10 +194,7 @@ export function createCapabilityPlannerFileExplorer(params: {
       const withinLimit = grepSearchCallCount < MAX_GREP_SEARCH_CALLS;
       const content = withinLimit
         ? await executeGrepSearch(query, runtime.signal)
-        : formatError(new PlannerFileToolError(
-          'planning_limit_reached',
-          `Capability exploration limit reached: grep_search may be called at most ${String(MAX_GREP_SEARCH_CALLS)} times. Do not call grep_search again; now call submit_plan, or return_to_answer if no executable plan is possible.`,
-        ));
+        : formatGrepSearchLimitReached();
       return new Command({
         update: {
           ...(withinLimit ? { grepSearchCallCount: 1 } : {}),

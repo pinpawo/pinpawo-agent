@@ -161,17 +161,19 @@ export class ChromeExtensionBrowserSession {
    * Issue a navigation and drive it to `readable` through the Runtime lifecycle
    * state machine (issue #583). The extension reports the raw page lifecycle
    * events (`navigation.committed`, `document.ready`, `dom.changed`); this
-   * session buffers them while the navigate command is in flight, then replays
-   * them through a `BrowserLifecycleController` bound to the bridge's own
-   * generation so a late or cross-origin result is surfaced deterministically
-   * instead of only trusting the extension's `tab.status` polling.
+   * session subscribes to the live event stream and waits on a `PendingWait`
+   * (issue #601) for the Runtime state machine to reach a terminal verdict —
+   * `readable`, a deterministic `failed` (cross-origin / target closed /
+   * connection lost), or the wall-clock `timed_out` — instead of only trusting
+   * the extension's `tab.status` polling.
    *
    * Backward compatible: when the page has not yet produced readable events
    * (still hydrating), the navigate command that already returned a snapshot is
    * still honored and the snapshot is returned — we do not regress a working
-   * open into a timeout. When the events do show the page ready, cross-origin,
-   * or the readiness deadline ultimately elapses, we surface the corresponding
-   * structured error.
+   * open into a timeout. When the events show the page ready, cross-origin, or
+   * the readiness deadline ultimately elapses, we surface the corresponding
+   * structured error (with phase / committed URL / readyState diagnostics that
+   * guide the caller toward `browser_wait`).
    */
   private async openAndAwaitReadiness(
     url: string,
@@ -212,36 +214,34 @@ export class ChromeExtensionBrowserSession {
 
       // The navigate round-trip usually emits a tightly grouped burst of events
       // (navigation.committed, document.ready, dom.changed) stamped ~same time.
-      // Polling after *every* buffered event would re-run `advanceSettling` and
-      // reset the network-settle baseline on each poll, so the final poll's
-      // `now` equals the baseline it just wrote (delta 0 < settling window) and
-      // the navigation never reaches `readable` (issue #583 review M1).
-      // Poll once, after the last buffered event, so the readiness verdict is
-      // evaluated against the fully-assembled state rather than mid-burst.
+      // Replaying them through the controller and polling after *every* event
+      // would re-run `advanceSettling` and reset the network-settle baseline on
+      // each poll, so the final poll's `now` equals the baseline it just wrote
+      // (delta 0 < settling window) and the navigation never reaches `readable`
+      // (issue #583 review M1). Poll once, after the last buffered event, so
+      // the readiness verdict is evaluated against the fully-assembled state.
       const last = buffered[buffered.length - 1];
-      const outcome = driveOpenReadiness(controller, buffered, startTime, {
+      const replayed = driveOpenReadiness(controller, buffered, startTime, {
         now: () => Date.now(),
         deadlineMs: OPEN_READINESS_DEADLINE_MS,
         shouldPoll: (event) => event === last,
       });
 
-      this.readinessPhase = outcome.snapshot.navigation?.phase ?? null;
+      // Expose the phase the open reached (issue #583 review M2): the state
+      // machine must actually reach `readable`, not merely return a snapshot
+      // after a `pending` verdict.
+      this.readinessPhase = replayed.snapshot.navigation?.phase ?? null;
 
-      if (outcome.status === 'failed') {
-        throw this.readinessFailure(outcome.error, approvedOrigin);
+      if (replayed.status === 'failed') {
+        throw this.readinessFailure(replayed.error, approvedOrigin);
       }
-      if (outcome.status === 'timed_out') {
-        throw new BrowserOperationError(
-          'navigation_timeout',
-          `Page did not become readable within ${OPEN_READINESS_DEADLINE_MS}ms of navigation to ${url}.`,
-          true,
-        );
+      if (replayed.status === 'timed_out') {
+        const nav = replayed.snapshot.navigation;
+        throw this.readinessTimeoutError(url, nav?.phase ?? null, nav?.committedUrl, nav?.readyState);
       }
-      if (outcome.status === 'pending') {
-        // The events emitted during the navigate round-trip did not conclude the
-        // page (still hydrating, body text not sampled yet). This is the
-        // backward-compatible path: honor the already-returned snapshot instead
-        // of regressing a working open into a timeout. The caller can re-poll.
+      if (replayed.status === 'pending') {
+        // Backward-compatible: the page is still hydrating; honor the
+        // already-returned snapshot instead of regressing a working open.
         this.approvedOrigin = approvedOrigin;
         return snapshot;
       }
@@ -370,6 +370,27 @@ export class ChromeExtensionBrowserSession {
       error.message,
       error.retryable ?? false,
       error.details ? { approvedOrigin, ...(error.details as Record<string, unknown>) } : { approvedOrigin },
+    );
+  }
+
+  /** Build a structured `navigation_timeout` (issue #601) that carries the page
+   *  state seen at timeout (phase / committed URL / readyState) and guides the
+   *  caller toward `browser_wait` instead of a blind retry of a page that is
+   *  still loading. */
+  private readinessTimeoutError(
+    url: string,
+    phase: string | null,
+    committedUrl: string | undefined,
+    readyState: string | undefined,
+  ): Error {
+    return new BrowserOperationError(
+      'navigation_timeout',
+      `Page did not become readable within ${OPEN_READINESS_DEADLINE_MS}ms of navigation to ${url}. ` +
+        `Page state: phase=${phase}${committedUrl ? `, committedUrl=${committedUrl}` : ''}` +
+        `${readyState ? `, readyState=${readyState}` : ''}. ` +
+        `Use browser_wait to poll for the page to finish loading.`,
+      true,
+      { phase, committedUrl, readyState, url },
     );
   }
 

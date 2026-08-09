@@ -179,6 +179,16 @@ export type {
   TokenUsageSource,
 } from './agent/tokenUsage';
 export {
+  ConfigDocumentError,
+  defineConfigSchema,
+  parseConfigDocument,
+  parseConfigValue,
+} from './utils/configDocument';
+export type {
+  ConfigReader,
+  ConfigSchema,
+} from './utils/configDocument';
+export {
   inferStructuredOutputMethod,
   invokeStructuredOutput,
 } from './utils/structuredOutput';

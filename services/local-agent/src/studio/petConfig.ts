@@ -1,120 +1,17 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
+import { parseConfigDocument } from '@pinpawo/pet-agent';
+import { petLocalConfigSchema, type PetLocalConfig } from '@pinpawo/studio';
+
+export type { PetLocalConfig };
+
 /**
- * Pet 本地配置——用户在 `<workdir>/.pinpawo/pets/<petId>.json` 自行维护。
+ * 文件入口:pet 配置住在 `<workdir>/.pinpawo/pets/<petId>.json`。
  *
- * 设计立场:
- * - 本地配置是 source of truth(pet 行为完全由此决定)。
- * - `serverBinding` 仅作为绑定到服务端的 channel key,不放业务字段。
- * - 同一台主机可以有多个 pet 配置共存(Studio 拼装多 pet 时用)。
- * - capability 可用性检查由 PetAgentRuntime 在 invoke 时自行处理,
- *   loader 不负责。
+ * schema 与校验归 `@pinpawo/studio`,解析机制与报错格式归 `@pinpawo/pet-agent`;
+ * 本模块只负责"去哪读、读哪些文件",以及目录级的一致性(petId 不重复)。
  */
-export type PetLocalConfig = {
-  petId: string;
-  name: string;
-  personality?: string;
-  species?: string;
-  stage?: string;
-  /** 一句话角色描述,planner 用来挑 pet */
-  role?: string;
-  /** 简短服务能力概述,planner 在路由 task → pet 时参考 */
-  serviceSummary?: string;
-  /** 该 pet 使用的 model profile id；留空则继承 host default profile。 */
-  modelProfileId?: string;
-  /** 该 pet 允许使用的 capability 名列表 */
-  capabilities: string[];
-  /** 可选:绑定到服务端 pet,仅用于 app 同步通道,不存业务数据 */
-  serverBinding?: {
-    petId: string;
-  };
-};
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0;
-}
-
-function isOptionalNonEmptyString(value: unknown): value is string | undefined {
-  return value === undefined || isNonEmptyString(value);
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === 'string');
-}
-
-/**
- * 严格校验一份 pet config。出错时抛出带具体字段说明的 Error。
- */
-export function parsePetLocalConfig(raw: unknown, source: string): PetLocalConfig {
-  if (!raw || typeof raw !== 'object') {
-    throw new Error(`pet config at ${source} is not a JSON object`);
-  }
-  const r = raw as Record<string, unknown>;
-
-  if (!isNonEmptyString(r.petId)) {
-    throw new Error(`pet config ${source}: missing required string "petId"`);
-  }
-  if (!isNonEmptyString(r.name)) {
-    throw new Error(`pet config ${source}: missing required string "name"`);
-  }
-  if (!isOptionalNonEmptyString(r.personality)) {
-    throw new Error(`pet config ${source}: "personality" must be a non-empty string when present`);
-  }
-  if (!isOptionalNonEmptyString(r.species)) {
-    throw new Error(`pet config ${source}: "species" must be a non-empty string when present`);
-  }
-  if (!isOptionalNonEmptyString(r.stage)) {
-    throw new Error(`pet config ${source}: "stage" must be a non-empty string when present`);
-  }
-  if (!isOptionalNonEmptyString(r.role)) {
-    throw new Error(`pet config ${source}: "role" must be a non-empty string when present`);
-  }
-  if (!isOptionalNonEmptyString(r.serviceSummary)) {
-    throw new Error(`pet config ${source}: "serviceSummary" must be a non-empty string when present`);
-  }
-  if (!isOptionalNonEmptyString(r.modelProfileId)) {
-    throw new Error(`pet config ${source}: "modelProfileId" must be a non-empty string when present`);
-  }
-  if (r.model !== undefined) {
-    throw new Error(
-      `pet config ${source}: "model" was replaced by stable "modelProfileId"`,
-    );
-  }
-
-  const capabilitiesRaw = r.capabilities ?? [];
-  if (!isStringArray(capabilitiesRaw)) {
-    throw new Error(`pet config ${source}: "capabilities" must be a string[]`);
-  }
-
-  let serverBinding: PetLocalConfig['serverBinding'];
-  if (r.serverBinding !== undefined) {
-    const sb = r.serverBinding;
-    if (!sb || typeof sb !== 'object' || Array.isArray(sb)) {
-      throw new Error(`pet config ${source}: "serverBinding" must be an object`);
-    }
-    const sbRecord = sb as Record<string, unknown>;
-    if (!isNonEmptyString(sbRecord.petId)) {
-      throw new Error(`pet config ${source}: "serverBinding.petId" must be a non-empty string`);
-    }
-    serverBinding = { petId: sbRecord.petId };
-  }
-
-  return {
-    petId: r.petId,
-    name: r.name,
-    ...(r.personality !== undefined ? { personality: r.personality as string } : {}),
-    ...(r.species !== undefined ? { species: r.species as string } : {}),
-    ...(r.stage !== undefined ? { stage: r.stage as string } : {}),
-    ...(r.role !== undefined ? { role: r.role as string } : {}),
-    ...(r.serviceSummary !== undefined ? { serviceSummary: r.serviceSummary as string } : {}),
-    ...(r.modelProfileId !== undefined
-      ? { modelProfileId: r.modelProfileId as string }
-      : {}),
-    capabilities: capabilitiesRaw,
-    ...(serverBinding ? { serverBinding } : {}),
-  };
-}
 
 /**
  * 加载目录里所有 *.json,逐个解析。
@@ -143,13 +40,11 @@ export async function loadPetLocalConfigs(dir: string): Promise<PetLocalConfig[]
     } catch (err) {
       throw new Error(`failed to read pet config ${filePath}: ${(err as Error).message}`);
     }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(content);
-    } catch (err) {
-      throw new Error(`pet config ${filePath} is not valid JSON: ${(err as Error).message}`);
-    }
-    const config = parsePetLocalConfig(parsed, filePath);
+    const config = parseConfigDocument({
+      content,
+      source: filePath,
+      schema: petLocalConfigSchema,
+    });
     if (seenPetIds.has(config.petId)) {
       throw new Error(`duplicate pet config petId "${config.petId}" (re-defined in ${filePath})`);
     }

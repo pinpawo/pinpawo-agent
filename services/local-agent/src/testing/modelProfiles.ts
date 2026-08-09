@@ -1,4 +1,8 @@
 import {
+  DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL,
+  type ToolAuthorizationSafetyLevel,
+} from '@pinpawo/agent-contracts';
+import {
   GLOBAL_REVIEW_POLICY_MODE,
   type BuiltinGlobalReviewPolicyMode,
 } from '@pinpawo/pet-agent';
@@ -126,10 +130,13 @@ export function createTestModelServerDeps(
 ): {
   modelProfiles: ReturnType<typeof createTestModelProfiles>;
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
+  autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
 } {
   return {
     modelProfiles: createTestModelProfiles(input),
     globalReviewPolicyMode: input.globalReviewPolicyMode
       ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
+    autoAuthorizationSafetyLevel: input.autoAuthorizationSafetyLevel
+      ?? DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL,
   };
 }

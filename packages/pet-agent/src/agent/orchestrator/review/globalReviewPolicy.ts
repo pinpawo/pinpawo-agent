@@ -134,12 +134,56 @@ const DEFAULT_AUTO_REVIEW_REASON = 'Auto authorization did not approve this tool
 const STRICT_AUTO_REVIEW_MAX_RISK_SCORE = 2;
 const RELAXED_AUTO_REVIEW_MAX_RISK_SCORE = 9;
 
+export type AutoReviewRiskAssessment = z.infer<typeof AUTO_REVIEW_RESULT_SCHEMA>;
+
+export type AutoReviewRiskAssessmentResult =
+  | { complete: false }
+  | { complete: true; assessment: AutoReviewRiskAssessment };
+
 function normalizeReason(reason: string | undefined, fallback: string) {
   const trimmed = reason?.trim();
   if (!trimmed) return fallback;
   return trimmed.length <= 500
     ? trimmed
     : `${trimmed.slice(0, 500)}\n[truncated ${trimmed.length - 500} chars]`;
+}
+
+/** Runs the production auto-review prompt and returns its raw risk assessment. */
+export async function assessAutoReviewRisk(options: {
+  model: AgentModels['act'];
+  reviews: GlobalReviewPolicyBatchItem[];
+  task?: string | null;
+  workdir?: string | null;
+  structuredOutput?: GlobalReviewPolicyStructuredOutputConfig;
+}): Promise<AutoReviewRiskAssessmentResult> {
+  const prompt = buildAutoReviewPrompt({
+    task: options.task,
+    workdir: options.workdir,
+    reviews: options.reviews,
+  });
+  if (!prompt.complete) return { complete: false };
+
+  const assessment = await invokeStructuredOutput({
+    model: options.model,
+    schema: AUTO_REVIEW_RESULT_SCHEMA,
+    options: {
+      name: 'global_review_policy_auto_assessment',
+      autoRepair: true,
+      ...options.structuredOutput,
+    },
+    messages: [
+      new SystemMessage(buildAutoReviewSystemPrompt(
+        options.reviews,
+        options.structuredOutput?.method,
+      )),
+      new HumanMessage(prompt.text),
+    ],
+    // The auto-review risk assessment is private, not delegated-agent progress.
+    // Do not inherit the root stream callbacks that project model messages.
+    runnableConfig: { callbacks: [] },
+  });
+
+  return { complete: true, assessment };
 }
 
 async function resolveAutoAuthorization(
@@ -149,18 +193,6 @@ async function resolveAutoAuthorization(
   >,
 ): Promise<GlobalReviewPolicyResolution> {
   const model = options.models.decision ?? options.models.observe ?? options.models.act;
-  const prompt = buildAutoReviewPrompt({
-    task: options.task,
-    workdir: options.workdir,
-    reviews: options.reviews,
-  });
-  if (!prompt.complete) {
-    return {
-      type: GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION,
-      reason: 'Auto review context exceeds the safe evidence budget; human authorization is required.',
-    };
-  }
-
   try {
     const structuredOutput = options.policy?.mode === GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION
       ? options.policy.structuredOutput
@@ -168,25 +200,20 @@ async function resolveAutoAuthorization(
     const safetyLevel = options.policy?.mode === GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION
       ? options.policy.safetyLevel ?? DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL
       : DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL;
-    const assessment = await invokeStructuredOutput({
+    const result = await assessAutoReviewRisk({
       model,
-      schema: AUTO_REVIEW_RESULT_SCHEMA,
-      options: {
-        name: 'global_review_policy_auto_assessment',
-        autoRepair: true,
-        ...structuredOutput,
-      },
-      messages: [
-        new SystemMessage(buildAutoReviewSystemPrompt(
-          options.reviews,
-          structuredOutput?.method,
-        )),
-        new HumanMessage(prompt.text),
-      ],
-      // The auto-review risk assessment is private, not delegated-agent progress.
-      // Do not inherit the root stream callbacks that project model messages.
-      runnableConfig: { callbacks: [] },
+      reviews: options.reviews,
+      task: options.task,
+      workdir: options.workdir,
+      structuredOutput,
     });
+    if (!result.complete) {
+      return {
+        type: GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION,
+        reason: 'Auto review context exceeds the safe evidence budget; human authorization is required.',
+      };
+    }
+    const { assessment } = result;
 
     const maxRiskScore = safetyLevel === 'relaxed'
       ? RELAXED_AUTO_REVIEW_MAX_RISK_SCORE

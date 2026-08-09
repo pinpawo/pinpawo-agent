@@ -343,6 +343,7 @@ test('runtime config updates reach the next chat setup through the normalized de
       globalReviewPolicyMode: 'require_authorization',
     }),
     globalReviewPolicyMode: 'require_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
     workdir: '/tmp/pinpawo-policy-update',
     capabilityArtifactStore: testArtifactStore,
   });

@@ -16,7 +16,7 @@ export type LocalServerDeps = {
   actorName?: string;
   modelProfiles: LocalModelProfileRegistry;
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
-  autoAuthorizationSafetyLevel?: ToolAuthorizationSafetyLevel;
+  autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
   workdir: string;
   runtimeConfig?: LocalAgentRuntimeConfig;
   studioDueRunScheduler?: LocalStudioDueRunScheduler;

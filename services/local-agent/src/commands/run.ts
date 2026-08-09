@@ -67,6 +67,7 @@ export async function runAgent(options: RunAgentOptions = {}) {
       actorName: runtime.getActorName() ?? undefined,
       modelProfiles: runtime.getModelProfiles(),
       globalReviewPolicyMode: getConfig().globalReviewPolicyMode,
+      autoAuthorizationSafetyLevel: getConfig().autoAuthorizationSafetyLevel,
       workdir: runtimeConfig.workdir,
       runtimeConfig,
       localToolkitDefinitions: runtime.getLocalToolkitDefinitions(),

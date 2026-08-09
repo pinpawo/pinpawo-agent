@@ -128,7 +128,7 @@ test('buildAgentOperationDisplayLines renders apply_patch raw input on operation
   assert.ok(lines.every((line) => stringWidth(line.text) <= 80));
 });
 
-test('buildAgentOperationDisplayLines renders V4A diff and raw tool failure output', () => {
+test('buildAgentOperationDisplayLines renders V4A diff and its structured failure', () => {
   const lines = buildAgentOperationDisplayLines(operationEntry({
     phase: 'failed',
     kind: 'local.apply_patch',

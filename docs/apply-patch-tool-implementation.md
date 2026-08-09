@@ -47,6 +47,7 @@ type ApplyPatchInput = {
 - 每个 hunk 必须显式以 `@@` 开始；`@@` 后面的 anchor 可省略。
 - 每个 hunk 至少包含一条 `+` 或 `-` 变更行。只有 context 的 hunk 是语法错误。
 - context、删除和新增行分别以空格、`-` 和 `+` 开头。
+- 为容忍模型或序列化过程剥离空格，hunk 中的裸空行也按空 context 处理；hunk/结束标记前的裸空行按分隔行处理。需要明确表示 hunk 末尾的空 context 时使用单个空格前缀。
 - `*** End of File` 可选，且只修饰它所属的 hunk。
 - `*** Add File:`、`*** Delete File:` 和 `*** Move to:` 均不受支持。
 - `*** End Patch` 后只允许空行。
@@ -70,7 +71,7 @@ type ApplyPatchInput = {
 
 ## 5. 匹配规则
 
-匹配位置必须唯一。重复上下文不会选择第一个位置，而是返回 `ambiguous_context`；重复 anchor 返回 `ambiguous_anchor`。
+匹配从上一个成功 hunk 之后的 cursor 向文件尾部单向进行，不会回退到 cursor 之前。候选范围内的匹配位置必须唯一；重复上下文不会选择第一个位置，而是返回 `ambiguous_context`，重复 anchor 返回 `ambiguous_anchor`。遇到重复文本时，应增加唯一 anchor 或更多上下文，必要时拆成单独调用。
 
 匹配顺序为：
 
@@ -90,7 +91,7 @@ V4A 先完整解析，再按 hunk 顺序在同一份内存内容上匹配：
 - 至少一个 hunk 成功：把所有成功结果通过一次原子替换写入。
 - 所有 hunk 失败：不执行写入。
 
-同一次调用中的 hunk 应彼此独立。工具不会生成修复补丁、给出 next action，或自动重试失败块；它只披露实际成功和失败的部分，由模型自行决定后续处理。
+同一次调用中的 hunk 应按文件顺序排列；为降低部分失败风险，可将存在强依赖的修改拆成更小的调用。工具不会生成修复补丁、给出 next action，或自动重试失败块；它只披露实际成功和失败的部分，由模型自行决定后续处理。
 
 ## 7. 返回结构与 token 控制
 
@@ -142,16 +143,15 @@ V4A 先完整解析，再按 hunk 顺序在同一份内存内容上匹配：
 - `services/local-agent/src/toolkits/local/applyPatch.ts`：V4A 解析、匹配和部分应用。
 - `services/local-agent/src/toolkits/local/fileTools.ts`：工具 schema、目标校验、原子写入和结构化输出。
 - `services/local-agent/src/toolkits/local/index.ts`：工具包级模型使用说明。
-- `services/local-agent/src/tui/components/applyPatchDisplay.ts`：输入 patch 预览。
-- `services/local-agent/src/tui/components/agentTimelineRendering.ts`：通用工具输出渲染。
+- `services/tui/src/timeline/operationDisplay.ts`：生产 TUI 的输入 patch 预览和通用工具输出渲染。
 - `services/local-agent/src/localToolsFile.test.ts`：协议、匹配、部分应用、错误结构和工具注册测试。
-- `services/local-agent/src/tui/components/agentTimelineRendering.test.ts`：输入 diff 与原始结果输出测试。
+- `services/tui/src/timeline/operationDisplay.test.ts`：当前 TUI 的输入 diff 与原始结果输出测试。
 - `services/local-agent/evals/apply-patch-protocol.eval.ts`：真实模型的 V4A 生成和完成率评估。
 
 实现变更至少应运行：
 
 ```bash
 node --import tsx --test services/local-agent/src/localToolsFile.test.ts
-node --import tsx --test services/local-agent/src/tui/components/agentTimelineRendering.test.ts
+npm run test -w @pinpawo/tui
 npm run typecheck -w pinpawo
 ```

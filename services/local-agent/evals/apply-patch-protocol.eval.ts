@@ -18,7 +18,7 @@ import { resolve } from 'node:path';
 import { createSubagent } from '@pinpawo/pet-agent';
 import { buildLocalAgentModels } from '../src/agentModels';
 import { buildLocalModelProfileRegistry } from '../src/llmConfig';
-import { parsePatchDocument } from '../src/toolkits/local/applyPatch';
+import { parsePatch } from '../src/toolkits/local/applyPatch';
 import { applyPatchTool, viewFileChunkTool } from '../src/toolkits/local/fileTools';
 import { getLocalToolsWorkdir, setLocalToolsWorkdir } from '../src/toolkits/local/pathUtils';
 
@@ -115,7 +115,7 @@ function recordPatchCalls(messages: BaseMessage[]): RecordedPatchCall[] {
       let validV4A = false;
       if (typeof patch === 'string') {
         try {
-          parsePatchDocument(patch);
+          parsePatch(patch);
           validV4A = true;
         } catch {
           validV4A = false;

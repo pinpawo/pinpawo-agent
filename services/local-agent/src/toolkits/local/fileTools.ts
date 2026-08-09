@@ -8,7 +8,7 @@ import {
   applyChunksToContentPartially,
   PatchApplyError,
   PatchParseError,
-  parsePatchDocument,
+  parsePatch,
   type FailedChunk,
   type PatchChunk,
 } from './applyPatch';
@@ -447,11 +447,11 @@ function atomicWriteFile(filePath: string, content: string) {
 }
 
 const APPLY_PATCH_DESCRIPTION = [
-  '使用补丁修改一个已存在的本地文件。每次调用只允许一个文件 update；建议每次只提交少量、彼此独立的修改块。新增或完全重写用 write_file，移动用 move_path；删除文件不属于本工具。',
+  '使用补丁修改一个已存在的本地文件。每次调用只允许一个文件 update；建议每次只提交少量修改块，并按文件中的先后顺序排列。新增或完全重写用 write_file，移动用 move_path；删除文件不属于本工具。',
   'patch 只接受 V4A，不接受或转换 Unified Diff。必须使用 *** Begin Patch / *** End Patch 包裹。',
   'V4A 最小结构为：*** Begin Patch、*** Update File: <path>、@@ <可选唯一 anchor>、以空格/-/+开头的 diff 行、*** End Patch；每个 hunk 都必须显式写 @@ 并至少包含一条变更行。',
-  'V4A 中每个 @@ hunk 是独立替换块：完整补丁先通过语法解析，再逐块定位和应用；某块匹配失败时，其他成功块仍会写入。语法错误不会写入任何块。',
-  '修改前先读取文件现状，并提供足以唯一定位修改位置的上下文。不要在同一次调用中放入彼此依赖的 hunk；工具不会自动重新生成补丁或循环重试失败块。',
+  '完整补丁先通过语法解析，再按书写顺序逐块定位和应用；前面成功块对文件的修改会成为后续块看到的内容。某块匹配失败时，其他成功块仍会写入；语法错误不会写入任何块。',
+  '修改前先读取文件现状，并提供足以唯一定位修改位置的上下文。重复文本应增加唯一 anchor 或更多上下文，必要时拆成单独调用；工具不会自动重新生成补丁或循环重试失败块。',
   'V4A 用 appliedHunks 返回成功块编号以节省 token；failedHunks 返回失败块的原始 diff、错误和相近上下文。',
   '如果修改的是 JSON、manifest.json、package.json、tsconfig.json 等结构化文件，完成后应继续调用 validate_structured_file。整文件新建或完全重写可以直接用 write_file。',
 ].join('\n');
@@ -511,7 +511,7 @@ export const applyPatchTool = tool(
   async ({ patch }: { patch: string }) => {
     let phase: 'parse' | 'match' | 'write' = 'parse';
     try {
-      const update = parsePatchDocument(patch);
+      const update = parsePatch(patch);
       phase = 'match';
 
       const absolutePath = resolveUserPath(update.path);
@@ -596,7 +596,7 @@ export const applyPatchTool = tool(
     name: 'apply_patch',
     description: APPLY_PATCH_DESCRIPTION,
     schema: z.object({
-      patch: z.string().describe('只更新一个已存在文件的 V4A 补丁；使用完整 envelope，并以独立 @@ hunk 分块'),
+      patch: z.string().describe('只更新一个已存在文件的 V4A 补丁；使用完整 envelope，并以 @@ hunk 明确分块'),
     }),
   },
 );
@@ -877,7 +877,7 @@ export const fileOperationMetadata: Record<string, ToolOperationMetadata> = {
       let file: { path: string } | undefined;
       let target: string | undefined;
       try {
-        const update = parsePatchDocument(patch);
+        const update = parsePatch(patch);
         file = { path: resolveUserPath(update.path) };
         target = file.path;
       } catch {

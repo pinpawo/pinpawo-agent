@@ -20,7 +20,6 @@ import {
 } from './toolkits/local/fileTools';
 import {
   parsePatch,
-  parsePatchDocument,
   PatchParseError,
 } from './toolkits/local/applyPatch';
 
@@ -351,7 +350,97 @@ test('apply_patch applies multiple chunks with @@ anchors in one file', async (t
   ].join('\n'));
 });
 
-test('V4A applies independent hunks, discloses both outcomes, and accepts a later correction', async (t) => {
+test('V4A treats bare blank lines as context inside a hunk and separators at boundaries', async (t) => {
+  const root = createFileFixture(t);
+  const filePath = resolve(root, 'blank-lines.txt');
+  writeFileSync(filePath, 'alpha\n\nbeta\nomega\n', 'utf-8');
+
+  const result = readJsonOutput(await applyPatchTool.invoke({
+    patch: [
+      '*** Begin Patch',
+      `*** Update File: ${filePath}`,
+      '@@',
+      ' alpha',
+      '',
+      '-beta',
+      '+BETA',
+      '',
+      '@@',
+      '-omega',
+      '+OMEGA',
+      '',
+      '*** End Patch',
+    ].join('\n'),
+  }));
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.appliedHunks, [1, 2]);
+  assert.equal(readFileSync(filePath, 'utf-8'), 'alpha\n\nBETA\nOMEGA\n');
+});
+
+test('V4A end-of-file insertion and replacement preserve the final newline', async (t) => {
+  const root = createFileFixture(t);
+  const insertPath = resolve(root, 'insert-at-eof.txt');
+  const replacePath = resolve(root, 'replace-at-eof.txt');
+  writeFileSync(insertPath, 'head\n', 'utf-8');
+  writeFileSync(replacePath, 'head\n', 'utf-8');
+
+  const insertion = readJsonOutput(await applyPatchTool.invoke({
+    patch: [
+      '*** Begin Patch',
+      `*** Update File: ${insertPath}`,
+      '@@',
+      '+tail',
+      '*** End of File',
+      '*** End Patch',
+    ].join('\n'),
+  }));
+  const replacement = readJsonOutput(await applyPatchTool.invoke({
+    patch: [
+      '*** Begin Patch',
+      `*** Update File: ${replacePath}`,
+      '@@',
+      '-head',
+      '+HEAD',
+      '*** End of File',
+      '*** End Patch',
+    ].join('\n'),
+  }));
+
+  assert.equal(insertion.ok, true);
+  assert.equal(replacement.ok, true);
+  assert.equal(readFileSync(insertPath, 'utf-8'), 'head\ntail\n');
+  assert.equal(readFileSync(replacePath, 'utf-8'), 'HEAD\n');
+});
+
+test('V4A applies hunks monotonically and discloses a later backward match', async (t) => {
+  const root = createFileFixture(t);
+  const filePath = resolve(root, 'ordered.txt');
+  writeFileSync(filePath, 'top\nmid\nbottom\n', 'utf-8');
+
+  const result = readJsonOutput(await applyPatchTool.invoke({
+    patch: [
+      '*** Begin Patch',
+      `*** Update File: ${filePath}`,
+      '@@ mid',
+      '-bottom',
+      '+BOTTOM',
+      '@@',
+      '-top',
+      '+TOP',
+      '*** End Patch',
+    ].join('\n'),
+  }));
+
+  assert.equal(result.ok, false);
+  assert.equal(result.partial, true);
+  assert.deepEqual(result.appliedHunks, [1]);
+  assert.equal((result.failedHunks as Array<Record<string, unknown>>)[0]?.hunk, 2);
+  assert.equal((result.failedHunks as Array<Record<string, unknown>>)[0]?.diff, '@@\n-top\n+TOP');
+  assert.equal(readFileSync(filePath, 'utf-8'), 'top\nmid\nBOTTOM\n');
+});
+
+test('V4A discloses each hunk outcome and accepts a later correction', async (t) => {
   const root = createFileFixture(t);
   const filePath = resolve(root, 'partial.txt');
   writeFileSync(filePath, [
@@ -672,9 +761,9 @@ test('apply_patch rejects malformed and non-V4A patches', async () => {
   );
 });
 
-test('parsePatchDocument rejects Unified Diff', () => {
+test('parsePatch rejects Unified Diff', () => {
   assert.throws(
-    () => parsePatchDocument([
+    () => parsePatch([
       '--- a/old.txt',
       '+++ b/new.txt',
       '@@ -1 +1 @@',
@@ -727,7 +816,7 @@ test('V4A requires explicit changing hunks and strict envelope boundaries', () =
 
   for (const lines of invalidPatches) {
     assert.throws(
-      () => parsePatchDocument(lines.join('\n')),
+      () => parsePatch(lines.join('\n')),
       (error: unknown) => {
         assert.ok(error instanceof PatchParseError);
         assert.equal(error.details.phase, 'parse');
@@ -760,6 +849,21 @@ test('parsePatch parses anchors and end-of-file markers', () => {
     { kind: 'added', text: 'new' },
   ]);
   assert.equal(update.chunks[0]?.isEndOfFile, true);
+});
+
+test('parsePatch keeps an explicitly prefixed empty context line', () => {
+  const update = parsePatch([
+    '*** Begin Patch',
+    '*** Update File: src/app.ts',
+    '@@',
+    '-old',
+    '+new',
+    ' ',
+    '*** End Patch',
+  ].join('\n'));
+
+  assert.deepEqual(update.chunks[0]?.oldLines, ['old', '']);
+  assert.deepEqual(update.chunks[0]?.newLines, ['new', '']);
 });
 
 test('createBashToolkit registers review policies for file mutation tools', () => {

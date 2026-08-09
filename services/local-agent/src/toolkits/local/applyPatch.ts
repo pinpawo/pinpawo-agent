@@ -13,8 +13,8 @@
  *   *** End Patch
  *
  * Each update chunk starts with an explicit `@@` header and locates itself by
- * context, never by line numbers. V4A chunks are matched independently after
- * the complete document passes syntax validation.
+ * context, never by line numbers. After the complete document passes syntax
+ * validation, chunks are matched and applied sequentially.
  */
 
 export const PATCH_BEGIN = '*** Begin Patch';
@@ -103,8 +103,8 @@ function parseContractError(lineIndex: number, code: string, message: string): n
   });
 }
 
-export function parseV4APatch(patchText: string): PatchUpdate {
-  const lines = patchText.replace(/\r\n/g, '\n').split('\n');
+function parseV4APatch(patchText: string): PatchUpdate {
+  const lines = patchText.split('\n');
 
   let index = lines.findIndex((line) => line.trim().length > 0);
   if (index === -1 || lines[index]?.trim() !== PATCH_BEGIN) {
@@ -187,6 +187,26 @@ export function parseV4APatch(patchText: string): PatchUpdate {
         const bodyLine = lines[index] ?? '';
         const bodyTrimmed = bodyLine.trim();
 
+        if (bodyLine === '' && sawChunkHeader) {
+          let nextContentIndex = index + 1;
+          while (lines[nextContentIndex] === '') nextContentIndex += 1;
+          const nextContentLine = lines[nextContentIndex];
+          if (
+            nextContentLine?.startsWith('@@')
+            || nextContentLine?.trim() === END_OF_FILE_MARKER
+            || nextContentLine?.startsWith('***')
+          ) {
+            index += 1;
+            continue;
+          }
+          oldLines.push('');
+          newLines.push('');
+          chunkLines.push({ kind: 'context', text: '' });
+          sawChunkLines = true;
+          index += 1;
+          continue;
+        }
+
         if (bodyTrimmed === END_OF_FILE_MARKER) {
           if (!sawChunkHeader) {
             parseError(index, '*** End of File must belong to an @@ hunk');
@@ -254,13 +274,9 @@ export function parseV4APatch(patchText: string): PatchUpdate {
   throw new PatchParseError(`patch must end with "${PATCH_END}"`);
 }
 
-export function parsePatchDocument(patchText: string): PatchUpdate {
+export function parsePatch(patchText: string): PatchUpdate {
   const normalized = patchText.replace(/\r\n?/g, '\n');
   return parseV4APatch(normalized);
-}
-
-export function parsePatch(patchText: string): PatchUpdate {
-  return parsePatchDocument(patchText);
 }
 
 function linesEqual(a: string, b: string, fuzz: AppliedChunk['fuzz']) {
@@ -404,7 +420,10 @@ function applyChunks(
   options: ApplyChunksOptions,
 ): PartialUpdateResult {
   const lineEnding = original.includes('\r\n') ? '\r\n' : '\n';
-  const fileLines = original.replace(/\r\n/g, '\n').split('\n');
+  const normalizedOriginal = original.replace(/\r\n/g, '\n');
+  const endsWithNewline = normalizedOriginal.endsWith('\n');
+  const fileLines = normalizedOriginal === '' ? [] : normalizedOriginal.split('\n');
+  if (endsWithNewline) fileLines.pop();
   let cursor = 0;
   const applied: AppliedChunk[] = [];
   const failures: FailedChunk[] = [];
@@ -430,7 +449,11 @@ function applyChunks(
     }
   }
 
-  return { content: fileLines.join(lineEnding), chunks: applied, failures };
+  return {
+    content: fileLines.join(lineEnding) + (endsWithNewline ? lineEnding : ''),
+    chunks: applied,
+    failures,
+  };
 }
 
 function applyChunk(
@@ -508,8 +531,7 @@ function applyChunk(
     };
   }
 
-  const match = findSequence(fileLines, chunk.oldLines, searchFrom, options)
-    ?? (searchFrom > 0 ? findSequence(fileLines, chunk.oldLines, 0, options) : null);
+  const match = findSequence(fileLines, chunk.oldLines, searchFrom, options);
   if (!match) {
     const closest = closestSnippet(fileLines, chunk.oldLines);
     throw new PatchApplyError(

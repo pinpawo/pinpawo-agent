@@ -138,9 +138,14 @@ function buildOperationPayloadLines(entry: AgentOperationEntry, width: number): 
 
 /**
  * Renders the tool's raw output (or error) as `⎿`-led, indented muted lines,
- * collapsing long output to a "+N lines" footer.
+ * collapsing long output to a "+N lines" footer. apply_patch keeps its diff
+ * rendering instead of dumping raw output.
  */
 function buildOperationOutputLines(entry: AgentOperationEntry, width: number): TimelineTextLineDraft[] {
+  if (isApplyPatchOperation(entry)) {
+    const failure = readStructuredToolFailure(entry.raw?.error ?? entry.raw?.output);
+    return failure ? buildOutputDisplayLines([failure], width, true) : [];
+  }
   const isError = entry.phase === 'failed';
   const raw = isError ? (entry.raw?.error ?? entry.raw?.output) : entry.raw?.output;
   const text = stringifyOutput(raw);
@@ -149,6 +154,23 @@ function buildOperationOutputLines(entry: AgentOperationEntry, width: number): T
   const rawLines = text.replace(/\r\n/g, '\n').split('\n');
   const lines = rawLines[rawLines.length - 1] === '' ? rawLines.slice(0, -1) : rawLines;
   return buildOutputDisplayLines(lines, width, isError);
+}
+
+function readStructuredToolFailure(value: unknown) {
+  let parsed = value;
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value) as unknown;
+    } catch {
+      return null;
+    }
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const record = parsed as Record<string, unknown>;
+  if (record.ok !== false) return null;
+  const code = typeof record.code === 'string' ? record.code : 'patch_failed';
+  const message = typeof record.message === 'string' ? record.message : 'Patch could not be applied';
+  return `${code}: ${message}`;
 }
 
 function buildOutputDisplayLines(

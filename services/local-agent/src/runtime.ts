@@ -8,7 +8,9 @@ import {
   type AgentToolkit,
   ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
-import { FileStudioDueRunStore } from '@pinpawo/pet-agent';
+import {
+  FileStudioDueRunStore,
+} from '@pinpawo-toolkit/studio-kanban';
 import { collectPluginHooks, loadPlugins } from './pluginLoader';
 import type { LoadedUserCapability } from './capabilityLoader';
 import {

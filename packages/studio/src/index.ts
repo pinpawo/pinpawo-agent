@@ -14,6 +14,10 @@ export {
   createPlanToolkit,
   createPlanCapability,
 } from './planCapability';
+export type {
+  CreatePlanToolkitOptions,
+  StudioPlanPetListItem,
+} from './planCapability';
 
 export * from './types';
 export * from './petAgentTypes';

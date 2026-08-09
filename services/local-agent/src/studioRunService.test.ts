@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildStudioRunIdentity, type StudioTurnResult } from '@pinpawo/pet-agent';
+import {
+  buildStudioRunIdentity,
+  type StudioTurnResult,
+} from '@pinpawo/studio';
 import type { BuildStudioInput, BuildStudioResult } from './studio/studioRuntime';
 import type { LocalServerDeps } from './localServerTypes';
 import {

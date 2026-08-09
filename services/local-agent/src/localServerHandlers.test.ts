@@ -1051,6 +1051,7 @@ test('runtime config update preserves the configured safety level when the messa
     },
   };
   const handlers = createLocalServerHandlers({
+    serverMode: 'chat',
     actorId: 'pet-a',
     workdir,
     runtimeConfig: buildLocalAgentRuntimeConfig(workdir),

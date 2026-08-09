@@ -1,15 +1,15 @@
 import { setTimeout as sleep } from 'node:timers/promises';
-import type {
+import {
   StudioTurnEvent,
   StudioTurnResult,
-} from '@pinpawo/pet-agent';
+} from '@pinpawo/studio';
 import {
   isTerminalStudioDueRunStatus,
   type StudioDueRunRecord,
   type StudioDueRunStore,
   type StudioDueRunStoreTrace,
   type StudioDueRunClaim,
-} from '@pinpawo/pet-agent';
+} from '@pinpawo/studio';
 import type { PendingReviewSlot } from './studio/studioBridge';
 import { getLocalServerWorkdir, type LocalServerDeps } from './localServerTypes';
 import { StudioRunService } from './studioRunService';

@@ -1,9 +1,11 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   ARTIFACT_DISCOVERY_TOOLKIT_NAME,
+} from '@pinpawo/pet-agent';
+import {
   type StudioDueRunStatus,
   type StudioDueRunStoreTrace,
-} from '@pinpawo/pet-agent';
+} from '@pinpawo/studio';
 import { BUILT_IN_CAPABILITY_REGISTRY } from './capabilityRegistry';
 import {
   refreshToolkit,

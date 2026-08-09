@@ -1,11 +1,13 @@
 import {
   type AgentActor,
-  type HumanReviewer,
-  type HumanReviewerRequest,
   projectHumanReviewRequest,
   type ReviewResponse,
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
+import {
+  type HumanReviewer,
+  type HumanReviewerRequest,
+} from '@pinpawo/studio';
 
 import type { PetLocalConfig } from './petConfig';
 

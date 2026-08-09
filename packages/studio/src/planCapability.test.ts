@@ -6,7 +6,7 @@ import {
   createPlanCapability as createPlanCapabilityFromPublicApi,
   createPlanToolkit as createPlanToolkitFromPublicApi,
   type CreatePlanToolkitOptions,
-} from '@pinpawo/pet-agent';
+} from './index';
 import type { StudioPlannerTaskInput } from './types';
 
 test('public API exposes the Studio plan Capability and its required Toolkit factory', () => {

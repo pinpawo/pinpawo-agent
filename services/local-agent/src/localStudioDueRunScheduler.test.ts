@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { InMemoryStudioDueRunStore } from '@pinpawo/pet-agent';
-import type { StudioTurnResult } from '@pinpawo/pet-agent';
+import {
+  InMemoryStudioDueRunStore,
+} from '@pinpawo/studio';
+import {
+  StudioTurnResult,
+} from '@pinpawo/studio';
 import type { LocalServerDeps } from './localServerTypes';
 import { LocalStudioDueRunScheduler } from './localStudioDueRunScheduler';
 import type { BuildStudioInput, BuildStudioResult } from './studio/studioRuntime';

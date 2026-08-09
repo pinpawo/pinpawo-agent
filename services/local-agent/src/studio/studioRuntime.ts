@@ -1,21 +1,27 @@
 import path from 'node:path';
 import {
-  createLLMWikiCurator,
-  FileStudioRunQueueStore,
   GENERAL_CAPABILITY_NAME,
-  createPetAgentRuntime,
-  createStudioOrchestrator,
-  defaultPromptProvider,
-  fileReadPromptProvider,
   type AgentCapability,
   type AgentToolkit,
   type AgentModels,
-  type CuratorPromptProvider,
+  type ToolkitRuntimeManager,
+} from '@pinpawo/pet-agent';
+import {
+  createPetAgentRuntime,
+  createStudioOrchestrator,
   type PetAgentRuntime,
   type StudioOrchestrator,
   type StudioRunQueueStore,
-  type ToolkitRuntimeManager,
-} from '@pinpawo/pet-agent';
+} from '@pinpawo/studio';
+import {
+  createLLMWikiCurator,
+  FileStudioRunQueueStore,
+  defaultPromptProvider,
+  fileReadPromptProvider,
+  createFileWikiAccess,
+  ensureWikiSkeleton,
+  type CuratorPromptProvider,
+} from '@pinpawo-toolkit/studio-kanban';
 
 import {
   buildLocalAgentModels,
@@ -150,6 +156,9 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
     throw new Error(`Studio requires the host baseline Capability "${GENERAL_CAPABILITY_NAME}".`);
   }
 
+  // Studio 的 wiki 是落盘的:把文件实现注入 studio 声明的 port。
+  const fileWikiAccess = createFileWikiAccess();
+
   const petAgents: PetAgentRuntime[] = resolved.agents.map((petConfig) => {
     // 每个 pet 按稳定 profile id 解析完整 endpoint/key/model 组合。
     const petLlmConfig = petConfig.modelProfileId
@@ -176,6 +185,7 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
     });
     return createPetAgentRuntime({
       models: petModels,
+      wikiAccess: fileWikiAccess,
       modelInputModalities: petLlmConfig.inputModalities ?? ['text'],
       actor: buildPetActorFromLocalConfig(petConfig, input.ownerUserId),
       role: petConfig.role ?? null,
@@ -225,6 +235,7 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
     runQueueStore: runQueue.store,
     restoreOpenRuns: runQueue.shouldRestore,
     curator,
+    ensureWikiSkeleton,
     ...(studio.maxIterationCount !== undefined ? { maxIterationCount: studio.maxIterationCount } : {}),
     ...(studio.maxRetryPerTask !== undefined ? { maxRetryPerTask: studio.maxRetryPerTask } : {}),
   });

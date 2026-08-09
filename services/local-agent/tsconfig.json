@@ -21,6 +21,12 @@
       ],
       "@pinpawo-toolkit/browser": [
         "../../toolkits/browser/src/index.ts"
+      ],
+      "@pinpawo/studio": [
+        "../../packages/studio/src/index.ts"
+      ],
+      "@pinpawo-toolkit/studio-kanban": [
+        "../../toolkits/studio-kanban/src/index.ts"
       ]
     },
     "strict": true,

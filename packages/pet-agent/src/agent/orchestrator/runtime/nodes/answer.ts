@@ -73,21 +73,19 @@ export function createAnswerNode(config: OrchestratorConfig) {
       userInputRequiredAnnounce?.text ?? '',
       userInputRequiredArtifactContext,
     ].join('').trim();
-    const answerHistory = userInputRequiredContext
-      ? [...history, new AIMessage(userInputRequiredContext)]
-      : history;
     const answerContextFacts = selectAnswerContextFacts({
       state,
-      history: answerHistory,
+      history,
       acceptedHandoffOutcome,
       awaitingUserInput,
+      userInputRequiredContext,
       runIterationLimit: maxRunIterations
         ?? readRunIterationLimit(config.maxRunIterations)
         ?? DEFAULT_ORCHESTRATOR_MAX_ITERATIONS,
     });
     const answerMessages = buildAnswerInvocationMessages({
       actor,
-      history: answerHistory,
+      history,
       userGoal: state.runUserGoal,
       contextFacts: answerContextFacts,
     });
@@ -114,6 +112,7 @@ export function selectAnswerContextFacts(params: {
   history: BaseMessage[];
   acceptedHandoffOutcome: Exclude<AcceptedDelegationOutcome, 'user_input_required'> | null;
   awaitingUserInput: boolean;
+  userInputRequiredContext?: string | null;
   runIterationLimit: number;
 }): AnswerContextFacts {
   const hasUserGoal = Boolean(
@@ -121,7 +120,11 @@ export function selectAnswerContextFacts(params: {
     ?? readLatestHumanRequest(params.history),
   );
   if (params.awaitingUserInput) {
-    return { mode: 'user_input_required', hasUserGoal };
+    return {
+      mode: 'user_input_required',
+      hasUserGoal,
+      context: params.userInputRequiredContext?.trim() || null,
+    };
   }
   if (params.state.runPlannerReturn) {
     return {

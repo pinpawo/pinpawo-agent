@@ -115,7 +115,13 @@ function render(testCase: AnswerBehaviorCase): BaseMessage[] {
     contextFacts: delegationOutcome?.outcome === 'goal_done'
       ? { mode: 'goal_done', hasUserGoal }
       : delegationOutcome?.outcome === 'user_input_required'
-        ? { mode: 'user_input_required', hasUserGoal }
+        ? {
+            mode: 'user_input_required',
+            hasUserGoal,
+            context: delegationOutcome.context
+              ?? [...testCase.input.messages].reverse().find(({ role }) => role === 'assistant')?.text
+              ?? null,
+          }
         : { mode: 'direct', hasUserGoal },
   });
 }

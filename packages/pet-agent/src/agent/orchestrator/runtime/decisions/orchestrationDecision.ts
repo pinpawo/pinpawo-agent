@@ -80,6 +80,13 @@ import {
 import { guardDecisionEmitter } from '../guards/decisionEvents';
 
 type DecisionKind = 'delegation_outcome';
+const MAX_CAPABILITY_PLANNER_MAIN_MESSAGES = 10;
+
+function buildCapabilityPlannerMainMessages(messages: BaseMessage[]) {
+  return mainMessagesWithoutCompaction(messages)
+    .filter((message) => message._getType() === 'human' || message._getType() === 'ai')
+    .slice(-MAX_CAPABILITY_PLANNER_MAIN_MESSAGES);
+}
 
 export function createEntryDecisionRunner(config: OrchestratorConfig) {
   return async function runEntryDecision(
@@ -355,6 +362,7 @@ function buildEntryDecisionResult(params: {
       runUserGoal: decision.userGoal,
       runDelegationSummaries: state.runDelegationSummaries,
       runCapabilityPlan: [],
+      recentMainMessages: buildCapabilityPlannerMainMessages(state.messages),
     },
   };
   return {
@@ -451,6 +459,7 @@ function buildDelegationOutcomeDecisionResult(params: {
         runUserGoal,
         runDelegationSummaries: acceptedDelegationUpdate.runDelegationSummaries,
         runCapabilityPlan: state.runCapabilityPlan,
+        recentMainMessages: buildCapabilityPlannerMainMessages(state.messages),
       },
       completedTask: activeDelegation.task,
       completedTaskResult: boundCapabilityPlannerBoundaryResult(

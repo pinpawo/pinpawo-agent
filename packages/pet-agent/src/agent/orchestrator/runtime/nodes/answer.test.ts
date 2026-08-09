@@ -45,6 +45,7 @@ test('Answer runtime projects accepted terminal meaning into closed facts', () =
   }), {
     mode: 'user_input_required',
     hasUserGoal: true,
+    context: null,
   });
 });
 

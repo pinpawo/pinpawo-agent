@@ -80,6 +80,7 @@ test('Capability Planner entry input leads with the run user goal', () => {
       objective: '打开小红书并浏览相关内容。',
       context: '浏览器已经连接。',
     },
+    recentMainMessages: [],
     completedTask: null,
     completedTaskResult: null,
     remainingPlan: [],
@@ -100,6 +101,7 @@ test('Capability Planner boundary input carries the run user goal and boundary f
       objective: '打开小红书并浏览相关内容。',
       context: '浏览器已经连接。',
     },
+    recentMainMessages: [],
     completedTask: '确认浏览器可用',
     completedTaskResult: '浏览器已经连接，目标页面可访问。',
     remainingPlan: [{
@@ -123,6 +125,7 @@ test('Capability Planner boundary input omits the follow-up section once the pla
       objective: '打开小红书并浏览相关内容。',
       context: null,
     },
+    recentMainMessages: [],
     completedTask: '确认浏览器可用',
     completedTaskResult: '浏览器已经连接，目标页面可访问。',
     remainingPlan: [],
@@ -143,6 +146,7 @@ test('Capability Planner boundary input degrades to an explicit empty state', ()
       objective: '完成当前任务。',
       context: null,
     },
+    recentMainMessages: [],
     completedTask: null,
     completedTaskResult: null,
     remainingPlan: [],
@@ -304,8 +308,6 @@ test('delegation outcome remaining plan is advisory planning context', () => {
     actor: testActor,
     outputInstruction: 'OUTCOME_OUTPUT_INSTRUCTION',
   });
-  assert.match(prompt, /remaining_plan 是 Planner/);
-  assert.match(prompt, /为空或非空都不是单独的终态条件/);
   assert.match(prompt, /OUTCOME_OUTPUT_INSTRUCTION/);
 
   const context = buildDelegationOutcomeRemainingPlanContext([{

@@ -124,6 +124,20 @@ test('answer eval covers a resumable result that requires a user choice', () => 
   assert.match(contextText, /^<answer_input[^>]*>/);
   assert.match(contextText, /<run_user_goal[^>]*>/);
   assert.match(contextText, /<reply_mode>user_input_required<\/reply_mode>/);
+  assert.match(contextText, /<awaiting_user_input_context>/);
+});
+
+test('answer eval covers a long imperative goal stopped for user input', () => {
+  const scenario = getAnswerEvalScenarios().find(
+    ({ caseName }) => caseName === 'user-input-required-does-not-restart-work',
+  );
+  assert.ok(scenario);
+  const messages = scenario.render();
+  const answerInput = String(messages.at(-1)?.content);
+
+  assert.match(answerInput, /<reply_mode>user_input_required<\/reply_mode>/);
+  assert.match(answerInput, /需要用户确认是否允许更新已有远端分支/);
+  assert.equal(messages.filter((message) => message.name === 'answer_input').length, 1);
 });
 
 test('answer eval uses the normalized run goal to scope a contextual request', () => {

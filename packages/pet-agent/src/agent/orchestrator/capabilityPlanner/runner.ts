@@ -1,3 +1,4 @@
+import type { BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { CapabilityDocumentWorkspace } from './documentWorkspace';
 import type {
@@ -14,9 +15,8 @@ export const USER_GOAL_CONTEXT_MAX_CHARS = 4_000;
 export const CAPABILITY_PLANNER_BOUNDARY_RESULT_MAX_CHARS = 16_000;
 
 /**
- * The minimal run state a Planner node needs to materialize its result.
- * Keeping this separate from the full orchestrator state prevents an entry
- * dispatch from carrying the main-conversation transcript into the Planner.
+ * The bounded run state a Planner node needs to understand recent context and
+ * materialize its result. Delegation-lane transcripts stay outside this seam.
  */
 export type CapabilityPlannerRuntimeState = Pick<
   {
@@ -24,8 +24,13 @@ export type CapabilityPlannerRuntimeState = Pick<
     runUserGoal: UserGoal;
     runDelegationSummaries: RunDelegationSummary[];
     runCapabilityPlan: CapabilityPlanTask[];
+    recentMainMessages: BaseMessage[];
   },
-  'runId' | 'runUserGoal' | 'runDelegationSummaries' | 'runCapabilityPlan'
+  | 'runId'
+  | 'runUserGoal'
+  | 'runDelegationSummaries'
+  | 'runCapabilityPlan'
+  | 'recentMainMessages'
 >;
 
 export type CapabilityPlannerDispatch =
@@ -43,6 +48,7 @@ export type CapabilityPlannerDispatch =
 
 type CapabilityPlannerInputBase = {
   readonly userGoal: UserGoal;
+  readonly recentMainMessages: readonly BaseMessage[];
   readonly completedTask: string | null;
   /** Bounded accepted announce result for the latest completed delegation. */
   readonly completedTaskResult: string | null;

@@ -185,6 +185,7 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
       ? {
           mode: 'entry',
           userGoal: state.runUserGoal,
+          recentMainMessages: state.recentMainMessages,
           completedTask: null,
           completedTaskResult: null,
           remainingPlan: state.runCapabilityPlan,
@@ -193,6 +194,7 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
       : {
           mode: 'boundary',
           userGoal: state.runUserGoal,
+          recentMainMessages: state.recentMainMessages,
           completedTask: nodeInput.completedTask,
           completedTaskResult: nodeInput.completedTaskResult,
           remainingPlan: state.runCapabilityPlan,

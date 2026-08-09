@@ -151,6 +151,7 @@ async function main() {
             completedTask: testCase.input.completedTask ?? null,
             completedTaskResult: testCase.input.completedTaskResult ?? null,
             remainingPlan: testCase.input.remainingPlan ?? [],
+            recentMainMessages: [],
             workspace,
           },
           {

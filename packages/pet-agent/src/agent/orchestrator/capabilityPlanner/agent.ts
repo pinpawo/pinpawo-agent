@@ -1,5 +1,6 @@
 import {
   HumanMessage,
+  SystemMessage,
   ToolMessage,
   type BaseMessage,
 } from '@langchain/core/messages';
@@ -182,10 +183,17 @@ function buildSubmittedPlanSystemPrompt(tasks: readonly SubmittedPlannerTask[]) 
 function buildGrepSearchLimitSystemPrompt(input: CapabilityPlannerInput) {
   const hasGeneralCapability = plannerCapabilityNames(input).includes('general');
   return [
-    '【Capability 探索已收束】已完成三次 grep_search，当前探索阶段已经结束。不要再次调用 grep_search，也不要继续寻找或验证 Capability。',
+    '你是 framework 内部的 Capability Planner。Capability 探索已经结束；本轮必须基于已有的用户目标、Planner Context 和 Capability 文档立即形成一个规划终态。',
+    '',
+    '必须且只能选择一个终态工具：',
+    '- submit_plan：仍有可执行工作时，提交能够完成用户目标的最短 task 序列。每个 task 由一个已了解的 Capability 完整承担；同一 Capability 能连续完成的工作合并为一个 task；保留用户给出的编号、URL、路径、顺序和明确约束。',
+    '- return_to_answer：没有可执行计划，或继续前必须取得用户输入时，返回不能提交计划的原因、规划中已经确认的事实，以及必要时需要询问用户的问题。',
+    '',
     hasGeneralCapability
-      ? '现在必须基于已有信息完成规划：存在可执行的剩余工作时，立即调用 submit_plan，并使用 general 承担该工作；否则立即调用 return_to_answer，交回已确认的事实和需要用户决定的部分。'
-      : '现在必须调用 return_to_answer，交回已有探索中确认的事实和需要用户决定的部分。',
+      ? '没有更专用的匹配项但仍有可执行工作时，由 general 承担该工作。'
+      : '只使用已有文档支持的 Capability；无法形成可执行计划时选择 return_to_answer。',
+    '',
+    '不要继续探索或验证 Capability，也不要输出普通 assistant text。',
   ].join('\n');
 }
 
@@ -268,20 +276,19 @@ function createPlannerSubmissionStateMiddleware(input: CapabilityPlannerInput) {
     wrapModelCall: (request, handler) => {
       const submittedPlan = request.state.submittedPlan;
       const grepSearchCount = countGrepSearchToolMessages(request.state.messages);
-      const systemPrompts = [
-        ...(grepSearchCount >= MAX_GREP_SEARCH_CALLS && !submittedPlan
-          ? [buildGrepSearchLimitSystemPrompt(input)]
-          : []),
-        ...(submittedPlan ? [buildSubmittedPlanSystemPrompt(submittedPlan)] : []),
-      ];
-      if (systemPrompts.length === 0) {
+      if (grepSearchCount >= MAX_GREP_SEARCH_CALLS && !submittedPlan) {
+        return handler({
+          ...request,
+          systemMessage: new SystemMessage(buildGrepSearchLimitSystemPrompt(input)),
+        });
+      }
+      if (!submittedPlan) {
         return handler(request);
       }
       return handler({
         ...request,
-        systemMessage: systemPrompts.reduce(
-          (systemMessage, prompt) => systemMessage.concat(prompt),
-          request.systemMessage,
+        systemMessage: request.systemMessage.concat(
+          buildSubmittedPlanSystemPrompt(submittedPlan),
         ),
       });
     },
@@ -448,7 +455,10 @@ async function invokePlannerAgent(params: {
   });
 
   try {
-    const messages = [new HumanMessage(buildCapabilityPlannerAgentInput(params.input))];
+    const messages = [
+      ...params.input.recentMainMessages,
+      new HumanMessage(buildCapabilityPlannerAgentInput(params.input)),
+    ];
     timeout.signal.throwIfAborted();
     const result = await agent.invoke({ messages }, runnableConfig);
     // Some providers or callbacks do not stop immediately when their signal is

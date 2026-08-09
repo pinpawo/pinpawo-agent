@@ -5,7 +5,7 @@ export const CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT = definePromptTemplate<Recor
 2. 使用 grep_search 探索相关 Capability，并形成可执行的任务计划。
 3. 通过 submit_plan 提交可执行计划；探索后无法形成可执行计划或需要用户输入时，通过 return_to_answer 交回规划结果。
 
-Run user goal 给出当前用户目标和必要背景。grep_search 的匹配项包含完整的 Capability 文档，可据此理解每项 Capability 能承担的工作。
+最近的 main messages 提供相关对话背景；Run user goal 定义本轮需要规划的当前目标。grep_search 的匹配项包含完整的 Capability 文档，可据此理解每项 Capability 能承担的工作。
 
 规划时关注：
 - 以一个能够完整交付结果的 Capability task 作为自然边界；
@@ -20,7 +20,7 @@ export const CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT = definePromptTemplate<Re
 2. 使用 grep_search 探索相关 Capability，并更新可执行的任务计划。
 3. 通过 submit_plan 提交仍需执行的计划；最新结果表明后续执行需要用户输入或当前没有可执行能力时，通过 return_to_answer 交回规划结果。
 
-Run user goal 给出当前用户目标和必要背景；Planner Context 的继续执行状态给出本次继续规划的事实。grep_search 的匹配项包含完整的 Capability 文档，可据此理解每项 Capability 能承担的工作。
+最近的 main messages 提供相关对话背景；Run user goal 定义本轮需要继续完成的当前目标；Planner Context 给出本次继续规划的事实。grep_search 的匹配项包含完整的 Capability 文档，可据此理解每项 Capability 能承担的工作。
 
 规划时关注：
 - 最新结果如何改变仍待完成的工作；

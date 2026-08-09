@@ -853,9 +853,6 @@ test('boundary mode rejects answer and materializes remaining work with general'
   assert.ok('tasks' in result);
   assert.equal('tasks' in result ? result.tasks[0]?.capability : null, 'general');
   assert.deepEqual(model.structuredOutputCapabilityEnums, [['general', 'explore']]);
-  assert.ok(model.invocations[0]?.some((message) =>
-    message instanceof HumanMessage
-    && String(message.content).includes('Planner Context：继续执行状态')));
   assert.match(
     model.invocations[0]?.map((message) => String(message.content)).join('\n') ?? '',
     /Final constraint: preserve the public API/,

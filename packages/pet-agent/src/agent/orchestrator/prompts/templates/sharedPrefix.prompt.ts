@@ -1,3 +1,2 @@
-export const ORCHESTRATOR_DECISION_SHARED_PREFIX = `pet-agent orchestrator 围绕用户目标运行 task loop。
-orchestrator 的判断组件根据当前调用提供的上下文和获准取得的观察，形成自己负责的结构化判断。
-graph 负责推进执行和状态转换；answer 基于主对话生成用户可见回复。`;
+export const ORCHESTRATOR_DECISION_SHARED_PREFIX = `当前系统围绕用户目标分阶段处理任务。
+你只根据本次调用提供的上下文和已经取得的观察，形成当前步骤所需的结构化判断。`;

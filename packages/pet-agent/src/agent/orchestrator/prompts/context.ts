@@ -42,15 +42,15 @@ export function buildCapabilityArtifactContext(artifacts: CapabilityArtifactRef[
 
 export function buildRunDelegationSummaryContext(runDelegationSummaries: RunDelegationSummary[]): string {
   if (runDelegationSummaries.length === 0) {
-    return '当前 run 任务跟踪：\n- 暂无 delegated task。';
+    return '当前目标的任务记录：\n- 暂无执行任务。';
   }
 
   const visibleDelegations = runDelegationSummaries.slice(-MAX_DECISION_RUN_DELEGATIONS);
   const lines = [
-    '当前 run 任务跟踪（仅保留本 run 近期任务）',
+    '当前目标的近期任务记录',
     visibleDelegations.some((delegation) => delegation.status !== 'completed')
-      ? '- 存在尚未 completed 的 delegated task。'
-      : '- 所有 delegated task 均为 completed。',
+      ? '- 存在尚未完成的任务。'
+      : '- 所有任务均已完成。',
   ];
 
   for (const delegation of visibleDelegations) {

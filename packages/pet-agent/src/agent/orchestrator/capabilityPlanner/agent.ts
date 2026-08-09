@@ -176,14 +176,14 @@ function buildSubmittedPlanSystemPrompt(tasks: readonly SubmittedPlannerTask[]) 
   return [
     '【计划已完成】submit_plan 已成功提交以下计划：',
     ...tasks.map((task, index) => `${String(index + 1)}. [${task.capability}] ${task.task}`),
-    '现在用普通 assistant text 确认以上计划已提交，并结束本轮规划。',
+    '现在用普通文本确认以上计划已提交，并结束本轮规划。',
   ].join('\n');
 }
 
 function buildGrepSearchLimitSystemPrompt(input: CapabilityPlannerInput) {
   const hasGeneralCapability = plannerCapabilityNames(input).includes('general');
   return [
-    '你是 framework 内部的 Capability Planner。Capability 探索已经结束；本轮必须基于已有的用户目标、Planner Context 和 Capability 文档立即形成一个规划终态。',
+    'Capability 探索已经结束。现在必须基于已有的用户目标、任务结果和 Capability 文档形成规划结果。',
     '',
     '必须且只能选择一个终态工具：',
     '- submit_plan：仍有可执行工作时，提交能够完成用户目标的最短 task 序列。每个 task 由一个已了解的 Capability 完整承担；同一 Capability 能连续完成的工作合并为一个 task；保留用户给出的编号、URL、路径、顺序和明确约束。',
@@ -193,7 +193,7 @@ function buildGrepSearchLimitSystemPrompt(input: CapabilityPlannerInput) {
       ? '没有更专用的匹配项但仍有可执行工作时，由 general 承担该工作。'
       : '只使用已有文档支持的 Capability；无法形成可执行计划时选择 return_to_answer。',
     '',
-    '不要继续探索或验证 Capability，也不要输出普通 assistant text。',
+    '不要继续探索或验证 Capability，也不要输出普通文本。',
   ].join('\n');
 }
 

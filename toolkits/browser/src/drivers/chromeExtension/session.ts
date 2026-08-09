@@ -17,6 +17,7 @@ import {
   type BrowserExtensionBridge,
   type BrowserBridgeStatus,
 } from './bridge';
+import type { BrowserExtensionCommandName } from './protocol';
 import { persistBrowserScreenshot } from '../../screenshot';
 import { BrowserOperationError } from '../../errors';
 import { BrowserLifecycleController } from '../../lifecycle/controller';
@@ -24,6 +25,10 @@ import {
   OPEN_READINESS_DEADLINE_MS,
   driveOpenReadiness,
 } from '../../lifecycle/openReadiness';
+import {
+  INTERACTION_SETTLE_DEADLINE_MS,
+  driveInteractionSettle,
+} from '../../lifecycle/interactionSettle';
 import type { BrowserRuntimeEvent } from '../../lifecycle/events';
 import type { NavigationPhase } from '../../lifecycle/navigation';
 
@@ -248,6 +253,90 @@ export class ChromeExtensionBrowserSession {
     }
   }
 
+  /**
+   * Issue an interaction command (`click` / `type` / `scroll`) and drive the
+   * resulting page through the Runtime settle state machine (issue #583, step
+   * 4). Mirrors `openAndAwaitReadiness`: the session buffers the page-lifecycle
+   * events the extension emits around the interaction, then replays them
+   * through a `BrowserLifecycleController` bound to the bridge's *current*
+   * navigation generation and classifies how the page settled.
+   *
+   * Backward compatible: when the interaction did not produce a terminal
+   * verdict (`pending`) or started a new navigation (`nav_generation`), the
+   * already-returned snapshot is still honored — we do not regress a working
+   * interaction into a timeout. A deterministic failure (`failed`) or settle
+   * timeout (`timed_out`) surfaces the corresponding structured error.
+   */
+  private async interactAndAwaitSettle(
+    command: BrowserExtensionCommandName,
+    params: Record<string, unknown>,
+    approvedOrigin: string,
+    timeoutMs: number | undefined,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const controller = new BrowserLifecycleController();
+    const buffered: BrowserRuntimeEvent[] = [];
+    const offEvents =
+      this.bridge.onRuntimeEvent?.((event) => buffered.push(event)) ?? (() => {});
+    const offGenerations =
+      this.bridge.onGenerationChanged?.((change) => {
+        controller.notifyGenerationAdvance(
+          change.connectionGeneration,
+          change.targetGeneration,
+        );
+      }) ?? (() => {});
+    const startTime = Date.now();
+    try {
+      const raw = await this.bridge.sendCommand(command, params, timeoutMs, signal);
+      const snapshot = this.buildSnapshot(raw, approvedOrigin);
+
+      // Bind the controller to the bridge's *current* navigation generation. An
+      // interaction does not dispatch `navigate`, so the counter is unchanged;
+      // the settle driver folds the interaction's events into that same
+      // generation and flags `nav_generation` when the action starts a new one.
+      const status = this.bridge.getStatus?.() as BrowserBridgeStatus | undefined;
+      controller.beginNavigation(
+        approvedOrigin,
+        approvedOrigin,
+        status?.connectionGeneration ?? 1,
+        status?.targetGeneration ?? 1,
+        status?.navigationGeneration,
+      );
+
+      // Poll once, after the last buffered event, so the settle verdict is
+      // evaluated against the fully-assembled post-action state rather than
+      // re-arming the settle window mid-burst (issue #583 review M1).
+      const last = buffered[buffered.length - 1];
+      const outcome = driveInteractionSettle(controller, buffered, startTime, {
+        now: () => Date.now(),
+        deadlineMs: INTERACTION_SETTLE_DEADLINE_MS,
+        shouldPoll: (event) => event === last,
+      });
+
+      if (outcome.status === 'failed') {
+        throw this.readinessFailure(outcome.error, approvedOrigin);
+      }
+      if (outcome.status === 'timed_out') {
+        throw new BrowserOperationError(
+          'navigation_timeout',
+          `Page did not settle within ${INTERACTION_SETTLE_DEADLINE_MS}ms after ${command}.`,
+          true,
+        );
+      }
+
+      // settled / pending / nav_generation: honor the freshly captured snapshot.
+      // `nav_generation` means the action started a new navigation; the
+      // extension already returned a snapshot of the produced page, so we return
+      // it rather than regressing a working interaction into a timeout. Full
+      // Runtime-owned readiness for post-action navigation is the follow-up once
+      // the extension emits a live navigation event stream.
+      return snapshot;
+    } finally {
+      offEvents();
+      offGenerations();
+    }
+  }
+
   private readinessFailure(
     error: { code: string; message: string; retryable?: boolean; details?: unknown },
     approvedOrigin: string,
@@ -277,10 +366,10 @@ export class ChromeExtensionBrowserSession {
 
   async click(target: string | BrowserElementTarget, signal?: AbortSignal): Promise<string> {
     const approvedOrigin = this.requireApprovedOrigin();
-    return this.buildSnapshot(await this.bridge.sendCommand('click', {
+    return this.interactAndAwaitSettle('click', {
       approvedOrigin,
       target: normalizeTarget(target),
-    }, undefined, signal), approvedOrigin);
+    }, approvedOrigin, undefined, signal);
   }
 
   async type(
@@ -290,22 +379,22 @@ export class ChromeExtensionBrowserSession {
     signal?: AbortSignal,
   ): Promise<string> {
     const approvedOrigin = this.requireApprovedOrigin();
-    return this.buildSnapshot(await this.bridge.sendCommand('type', {
+    return this.interactAndAwaitSettle('type', {
       approvedOrigin,
       target: normalizeTarget(target),
       text,
       submit,
-    }, extensionTypeCommandTimeoutMs(text), signal), approvedOrigin);
+    }, approvedOrigin, extensionTypeCommandTimeoutMs(text), signal);
   }
 
   async scroll(options: BrowserScrollOptions = {}, signal?: AbortSignal): Promise<string> {
     const approvedOrigin = this.requireApprovedOrigin();
-    return this.buildSnapshot(await this.bridge.sendCommand('scroll', {
+    return this.interactAndAwaitSettle('scroll', {
       approvedOrigin,
       deltaX: options.deltaX ?? 0,
       deltaY: options.deltaY ?? 600,
       ...(options.target ? { target: normalizeTarget(options.target) } : {}),
-    }, undefined, signal), approvedOrigin);
+    }, approvedOrigin, undefined, signal);
   }
 
   async wait(

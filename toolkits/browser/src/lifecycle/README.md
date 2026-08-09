@@ -24,6 +24,7 @@ files) before wiring them to the live extension event stream.
 | `waiter.ts`         | `PendingWait<T>` — deadline, AbortSignal, and settle-once semantics    |
 | `errorCodes.ts`     | Structured Runtime error codes                                         |
 | `openReadiness.ts`  | Standalone `browser_open` readiness driver: walks an injected event sequence through the controller to `readable`, handling redirect/timeout/SPA-shell/long-lived/SPA-route-change scenarios |
+| `interactionSettle.ts` | Standalone post-interaction settle driver for `browser_click`/`type`/`scroll`: walks an interaction's buffered events through the controller and decides `nav_generation` / `settled` / `failed` / `pending` / `timed_out`, mirroring `openReadiness` |
 
 ## Navigation phase model
 
@@ -127,3 +128,17 @@ extension already awaited, not driving a live event subscription. A live
 readiness event stream (extension subscribing to `Page/Network` events and
 reporting `network.activity` / repeated `dom.changed` while a page settles) is
 the remaining follow-up that lets the Runtime *own* the wait.
+
+**Interaction settle (issue step 4, current scope):** `interactionSettle.ts` is
+the pure post-interaction settle driver (mirroring `openReadiness`), and
+`ChromeExtensionBrowserSession` now routes `click`/`type`/`scroll` through it.
+The session buffers the page-lifecycle events the extension emits around the
+interaction, replays them via `driveInteractionSettle` against a controller bound
+to the bridge's current navigation generation, and classifies how the action
+settled: a newer-generation event is `nav_generation` (action started a new
+navigation), a readable same-generation page is `settled`, a cross-origin/target
+failure is `failed`, `pending`/`nav_generation` fall back to the already-returned
+snapshot (backward compatible), and only a genuine settle deadline elapse
+surfaces `navigation_timeout`. The same scope caveat applies: the extension
+captures the snapshot before deriving readiness events, so the Runtime reviews
+the post-action page rather than owning the wait via a live event subscription.

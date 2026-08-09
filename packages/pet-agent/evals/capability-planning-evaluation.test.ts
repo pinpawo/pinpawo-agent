@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import {
+  buildCapabilityPlanningRecentMessages,
   buildCapabilityPlanningGoalContract,
   evaluateCapabilityPlanningOutput,
 } from './capability-planning-evaluation.ts';
@@ -26,6 +28,20 @@ function goalJudgeWithFailure(failedCriterion: string) {
     } as never,
   };
 }
+
+test('planner eval preserves the latest ten conversation messages with their roles', () => {
+  const messages = Array.from({ length: 12 }, (_, index) => ({
+    role: index % 2 === 0 ? 'user' as const : 'assistant' as const,
+    content: `message-${index.toString()}`,
+  }));
+  const projected = buildCapabilityPlanningRecentMessages(messages);
+
+  assert.equal(projected.length, 10);
+  assert.equal(String(projected[0]?.content), 'message-2');
+  assert.equal(String(projected.at(-1)?.content), 'message-11');
+  assert.ok(projected[0] instanceof HumanMessage);
+  assert.ok(projected[1] instanceof AIMessage);
+});
 
 test('planner goal contract keeps semantic plan checks outside the deterministic result score', () => {
   const testCase = capabilityPlanningBasicsDataset.cases.find(

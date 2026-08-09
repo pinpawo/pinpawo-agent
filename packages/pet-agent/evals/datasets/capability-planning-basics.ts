@@ -40,8 +40,9 @@ const SOURCE_FILE = 'packages/pet-agent/evals/datasets/capability-planning-basic
 type CapabilityPlanningTranscriptInput = Omit<CapabilityPlanningInput, 'userGoal'> & {
   /**
    * Bounded goal that production Entry stores for every Planner invocation.
-   * Cases with contextual references provide this explicitly instead of
-   * pretending that Planner receives the full main-conversation transcript.
+   * The transcript messages are also projected into Planner as the latest ten
+   * user and assistant messages; contextual cases may provide a more precise
+   * normalized goal explicitly.
    */
   userGoal?: CapabilityPlanningInput['userGoal'];
 };

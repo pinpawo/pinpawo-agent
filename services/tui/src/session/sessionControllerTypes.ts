@@ -83,6 +83,8 @@ export type TuiSessionControllerOptions = {
   reconnectDelaysMs?: readonly number[];
   snapshotTimeoutMs?: number;
   sessionCommandTimeoutMs?: number;
+  /** Manual compaction includes a model call and therefore needs a longer timeout. */
+  sessionCompactTimeoutMs?: number;
   setTimer?: (callback: () => void, delayMs: number) => TimerHandle;
   clearTimer?: (timer: TimerHandle) => void;
 };

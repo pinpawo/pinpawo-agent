@@ -26,6 +26,7 @@ export type EmptyGuardConfig = Record<string, never>;
 export type ContextCompactionWatermarkGuardConfig = {
   contextWindowTokens?: number;
   generationReserveTokens?: number;
+  /** Recent suffix retained after compaction; this is not a trigger threshold. */
   keepMessages?: number;
 };
 

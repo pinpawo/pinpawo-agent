@@ -38,10 +38,7 @@ function usageMessage(content: string, inputTokens: number) {
 }
 
 test('orchestrator context compaction is a no-op when there is nothing outside the kept suffix', async () => {
-  const messages = [
-    new HumanMessage('hello'),
-    usageMessage('hi', 400),
-  ];
+  const messages = [new HumanMessage('hello'), usageMessage('hi', 400)];
 
   const result = await compactOrchestratorMessages({
     messages,

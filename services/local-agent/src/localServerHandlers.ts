@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { FileStudioDueRunStore } from '@pinpawo-toolkit/studio-kanban';
 import { DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL } from '@pinpawo/agent-contracts';
+import { compactOrchestratorMessages } from '@pinpawo/pet-agent';
 import type { AgentLlmConfig } from './agentConfig';
 import { LocalAgentGraphService } from './agentGraphService';
 import { InflightRequestController } from './inflightRequestController';
@@ -509,10 +510,59 @@ export function createLocalServerHandlers(
     }
   };
 
+  const compactSession = async (sessionId: string) => {
+    while (sessionTransition) {
+      await sessionTransition;
+    }
+    if (activeChatOperations > 0 || inflightRequests.hasActiveRequest()) {
+      throw new Error('cannot compact context while a session run is active');
+    }
+
+    let releaseSessionTransition!: () => void;
+    const currentTransition = new Promise<void>((resolve) => {
+      releaseSessionTransition = resolve;
+    });
+    sessionTransition = currentTransition;
+    try {
+      const requestDeps = runtimeDeps.get();
+      const session = tuiSessions.getSession(requestDeps.actorId, sessionId);
+      if (!session) {
+        throw new Error('session not found');
+      }
+      const activeSession = tuiSessions.getActiveSession(requestDeps.actorId);
+      if (activeSession.id !== session.id) {
+        throw new Error('context compaction requires the active session');
+      }
+      const ctx = await (options.loadContext ?? loadAgentContext)(requestDeps.actorId);
+      const setup = tuiSessions.buildChatSetup(requestDeps, ctx, session.threadId);
+      const state = await chatGraphService.readThreadState(setup);
+      if (state.pendingHumanReview) {
+        throw new Error('cannot compact context while human review is pending');
+      }
+      const result = await compactOrchestratorMessages({
+        messages: state.messages,
+        model: setup.graphConfig.models.observe ?? setup.graphConfig.models.act,
+      });
+      if (result.compacted) {
+        await chatGraphService.updateState(setup, { messages: result.messages });
+        await tuiSessions.refreshActiveSessionSummary(requestDeps);
+      }
+      return {
+        compacted: result.compacted,
+        snapshot: await loadSnapshot(),
+      };
+    } finally {
+      if (sessionTransition === currentTransition) {
+        sessionTransition = null;
+      }
+      releaseSessionTransition();
+    }
+  };
+
   const respondToSessionRequest = async (
     peer: LocalServerPeer,
     requestId: string,
-    operation: 'snapshot' | 'list' | 'new' | 'resume',
+    operation: 'snapshot' | 'list' | 'new' | 'resume' | 'compact',
     load: () => Promise<LocalAgentSessionServerMessage>,
   ) => {
     try {
@@ -689,6 +739,19 @@ export function createLocalServerHandlers(
             ...await resumeSession(message.sessionId),
           };
         },
+      ),
+    ),
+    onSessionCompact: (client, message) => sessionCommands.enqueue(
+      client,
+      () => respondToSessionRequest(
+        client,
+        message.requestId,
+        'compact',
+        async () => ({
+          type: 'session.compact.result',
+          requestId: message.requestId,
+          ...await compactSession(message.sessionId),
+        }),
       ),
     ),
     onModelList: (client, message) => sessionCommands.enqueue(

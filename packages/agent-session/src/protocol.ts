@@ -137,6 +137,13 @@ export type SessionResumeMessage = {
   sessionId: string;
 };
 
+/** TUI v2-only explicit request to summarize older checkpointed context. */
+export type SessionCompactMessage = {
+  type: 'session.compact';
+  requestId: string;
+  sessionId: string;
+};
+
 export type ModelListMessage = {
   type: 'model.list';
   requestId: string;
@@ -162,6 +169,7 @@ export type AgentClientMessage =
   | SessionListMessage
   | SessionNewMessage
   | SessionResumeMessage
+  | SessionCompactMessage
   | ModelListMessage
   | ModelSelectMessage
   | { type: 'ping' };
@@ -225,9 +233,15 @@ export type AgentSessionServerMessage =
       snapshot: AgentSessionSnapshot;
     }
   | {
+      type: 'session.compact.result';
+      requestId: string;
+      compacted: boolean;
+      snapshot: AgentSessionSnapshot;
+    }
+  | {
       type: 'session.error';
       requestId: string;
-      operation: 'snapshot' | 'list' | 'new' | 'resume';
+      operation: 'snapshot' | 'list' | 'new' | 'resume' | 'compact';
       message: string;
     };
 
@@ -770,6 +784,12 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
       ? { type, requestId, sessionId, modelProfileId }
       : null;
   }
+  if (type === 'session.compact') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'sessionId'])) return null;
+    const requestId = readString(record, 'requestId');
+    const sessionId = readString(record, 'sessionId');
+    return requestId && sessionId ? { type, requestId, sessionId } : null;
+  }
   if (type === 'chat_request') {
     if (!hasOnlyKeys(record, [
       'type',
@@ -936,6 +956,13 @@ function parseAgentServerRecord(record: Record<string, unknown>): AgentServerMes
     }
     return { type, requestId, session, snapshot };
   }
+  if (type === 'session.compact.result') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'compacted', 'snapshot'])) return null;
+    const snapshot = parseAgentSessionSnapshot(record.snapshot);
+    return typeof record.compacted === 'boolean' && snapshot
+      ? { type, requestId, compacted: record.compacted, snapshot }
+      : null;
+  }
   if (type === 'session.error') {
     if (!hasOnlyKeys(record, ['type', 'requestId', 'operation', 'message'])) return null;
     const operation = readString(record, 'operation');
@@ -946,6 +973,7 @@ function parseAgentServerRecord(record: Record<string, unknown>): AgentServerMes
         && operation !== 'list'
         && operation !== 'new'
         && operation !== 'resume'
+        && operation !== 'compact'
       )
       || message === null
     ) {

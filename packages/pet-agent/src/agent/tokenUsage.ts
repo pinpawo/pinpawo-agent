@@ -77,8 +77,21 @@ function readUsageFromMessage(message: unknown): ProviderTokenUsage | null {
     return null;
   }
 
+  const responseMetadata = readRecord(message, 'response_metadata')
+    ?? readRecord(message, 'responseMetadata');
+
+  // `usage_metadata` is LangChain's normalized location. Some provider
+  // adapters, however, expose usage only in response metadata (notably as
+  // `tokenUsage` or `usage`). Accept those provider-reported values too: the
+  // compaction watermark must not silently become undecidable just because an
+  // adapter chose the older response-metadata shape.
   return normalizeProviderUsage(readRecord(message, 'usage_metadata'))
-    ?? normalizeProviderUsage(readRecord(message, 'usageMetadata'));
+    ?? normalizeProviderUsage(readRecord(message, 'usageMetadata'))
+    ?? normalizeProviderUsage(responseMetadata && readRecord(responseMetadata, 'usage_metadata'))
+    ?? normalizeProviderUsage(responseMetadata && readRecord(responseMetadata, 'usageMetadata'))
+    ?? normalizeProviderUsage(responseMetadata && readRecord(responseMetadata, 'tokenUsage'))
+    ?? normalizeProviderUsage(responseMetadata && readRecord(responseMetadata, 'usage'))
+    ?? normalizeProviderUsage(responseMetadata);
 }
 
 export function readMessageTokenUsage(message: unknown): ProviderTokenUsage | null {

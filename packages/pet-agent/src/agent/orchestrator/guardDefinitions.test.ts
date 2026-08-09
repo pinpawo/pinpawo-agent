@@ -95,7 +95,6 @@ test('context compaction watermark guard uses main conversation provider usage o
     state,
     config: {
       contextWindowTokens: 1000,
-      keepMessages: 1,
     },
     position: ORCHESTRATOR_GUARD_POSITION.CONTEXT_COMPACTION,
   });
@@ -117,7 +116,6 @@ test('context compaction watermark guard maintains when main provider usage cros
     state,
     config: {
       contextWindowTokens: 1000,
-      keepMessages: 1,
     },
     position: ORCHESTRATOR_GUARD_POSITION.CONTEXT_COMPACTION,
   });
@@ -125,7 +123,30 @@ test('context compaction watermark guard maintains when main provider usage cros
   assert.equal(outcome.kind, 'maintain');
   assert.deepEqual(outcome.kind === 'maintain' && outcome.details, {
     mainMessageCount: 4,
-    keepMessages: 1,
+    keepMessages: 10,
+    latestInputTokens: 900,
+    watermarkTokens: 750,
+  });
+});
+
+test('context compaction watermark guard has no message-count trigger threshold', () => {
+  const state = baseState({
+    messages: [
+      new HumanMessage('one very large request'),
+      usageMessage('latest response', 900),
+    ],
+  });
+
+  const outcome = evaluateGuard(contextCompactionWatermarkGuard, {
+    state,
+    config: { contextWindowTokens: 1000 },
+    position: ORCHESTRATOR_GUARD_POSITION.CONTEXT_COMPACTION,
+  });
+
+  assert.equal(outcome.kind, 'maintain');
+  assert.deepEqual(outcome.kind === 'maintain' && outcome.details, {
+    mainMessageCount: 2,
+    keepMessages: 10,
     latestInputTokens: 900,
     watermarkTokens: 750,
   });
@@ -144,7 +165,6 @@ test('context compaction watermark guard subtracts the generation reserve', () =
     config: {
       contextWindowTokens: 1000,
       generationReserveTokens: 200,
-      keepMessages: 1,
     },
     position: ORCHESTRATOR_GUARD_POSITION.CONTEXT_COMPACTION,
   });
@@ -152,7 +172,7 @@ test('context compaction watermark guard subtracts the generation reserve', () =
   assert.equal(outcome.kind, 'maintain');
   assert.deepEqual(outcome.kind === 'maintain' && outcome.details, {
     mainMessageCount: 2,
-    keepMessages: 1,
+    keepMessages: 10,
     latestInputTokens: 600,
     watermarkTokens: 600,
   });

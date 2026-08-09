@@ -32,9 +32,6 @@ export const contextCompactionWatermarkGuard = defineGuard<
   check: ({ config, state }) => {
     const keepMessages = config.keepMessages ?? DEFAULT_KEEP_MESSAGES;
     const triggerMessages = mainConversationMessages(state.messages);
-    if (triggerMessages.length <= keepMessages) {
-      return guardProceed();
-    }
     const watermark = checkProviderInputWatermark(
       readLatestProviderInputTokens(triggerMessages),
       config.contextWindowTokens,

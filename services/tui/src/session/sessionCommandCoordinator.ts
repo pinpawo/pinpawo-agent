@@ -14,6 +14,11 @@ export type ResumeSessionResult = {
 
 export type StartNewSessionResult = ResumeSessionResult;
 
+export type CompactSessionResult = {
+  compacted: boolean;
+  snapshot: AgentSessionSnapshot;
+};
+
 type PendingSessionCommand =
   | {
       operation: 'list';
@@ -36,6 +41,14 @@ type PendingSessionCommand =
       timer: TimerHandle | null;
       resolve: (result: ResumeSessionResult) => void;
       reject: (error: Error) => void;
+    }
+  | {
+      operation: 'compact';
+      requestId: string;
+      sessionId: string;
+      timer: TimerHandle | null;
+      resolve: (result: CompactSessionResult) => void;
+      reject: (error: Error) => void;
     };
 
 type SessionCommandServerMessage = Extract<
@@ -45,6 +58,7 @@ type SessionCommandServerMessage = Extract<
       | 'session.list.result'
       | 'session.new.result'
       | 'session.resume.result'
+      | 'session.compact.result'
       | 'session.error';
   }
 >;
@@ -53,8 +67,10 @@ export type SessionCommandCoordinatorOptions = {
   requestIdFactory: () => string;
   send: (message: AgentClientMessage) => boolean;
   getUnavailableReason: () => string | null;
+  getSessionId: () => string;
   onSnapshot: (snapshot: AgentSessionSnapshot) => void;
   timeoutMs: number;
+  compactTimeoutMs: number;
   setTimer: (callback: () => void, delayMs: number) => TimerHandle;
   clearTimer: (timer: TimerHandle) => void;
 };
@@ -128,6 +144,32 @@ export class SessionCommandCoordinator {
     });
   }
 
+  compactSession(): Promise<CompactSessionResult> {
+    const unavailable = this.unavailableReason();
+    if (unavailable) return Promise.reject(new Error(unavailable));
+
+    const sessionId = this.options.getSessionId().trim();
+    if (!sessionId) {
+      return Promise.reject(new Error('session id is required'));
+    }
+    const requestId = this.options.requestIdFactory();
+    return new Promise((resolve, reject) => {
+      const pending: PendingSessionCommand = {
+        operation: 'compact',
+        requestId,
+        sessionId,
+        timer: null,
+        resolve,
+        reject,
+      };
+      this.start(
+        pending,
+        { type: 'session.compact', requestId, sessionId },
+        this.options.compactTimeoutMs,
+      );
+    });
+  }
+
   handleMessage(message: SessionCommandServerMessage) {
     if (message.type === 'session.list.result') {
       const pending = this.commands.get(message.requestId);
@@ -171,6 +213,25 @@ export class SessionCommandCoordinator {
       return;
     }
 
+    if (message.type === 'session.compact.result') {
+      const pending = this.commands.get(message.requestId);
+      if (pending?.operation !== 'compact') return;
+      if (message.snapshot.session.sessionId !== pending.sessionId) {
+        this.clear(pending);
+        pending.reject(new Error(
+          'session compact response did not match the requested session',
+        ));
+        return;
+      }
+      this.clear(pending);
+      this.options.onSnapshot(message.snapshot);
+      pending.resolve({
+        compacted: message.compacted,
+        snapshot: message.snapshot,
+      });
+      return;
+    }
+
     const pending = this.commands.get(message.requestId);
     if (!pending || pending.operation !== message.operation) return;
     this.clear(pending);
@@ -196,6 +257,7 @@ export class SessionCommandCoordinator {
   private start(
     command: PendingSessionCommand,
     message: AgentClientMessage,
+    timeoutMs = this.options.timeoutMs,
   ) {
     this.commands.set(command.requestId, command);
     command.timer = this.options.setTimer(() => {
@@ -205,7 +267,7 @@ export class SessionCommandCoordinator {
       command.reject(new Error(
         `session ${command.operation} request timed out`,
       ));
-    }, this.options.timeoutMs);
+    }, timeoutMs);
     if (!this.options.send(message)) {
       this.clear(command);
       command.reject(new Error(

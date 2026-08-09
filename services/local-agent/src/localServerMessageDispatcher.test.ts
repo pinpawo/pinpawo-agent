@@ -50,6 +50,9 @@ test('local server dispatcher routes typed client messages and pong', async () =
     onSessionList: (_peer, message) => {
       seen.push(`sessions:${message.requestId}`);
     },
+    onSessionCompact: (_peer, message) => {
+      seen.push(`compact:${message.requestId}:${message.sessionId}`);
+    },
     onSessionNew: (_peer, message) => {
       seen.push(`session-new:${message.requestId}`);
     },
@@ -124,6 +127,11 @@ test('local server dispatcher routes typed client messages and pong', async () =
     requestId: 'new-1',
   }), handlers);
   dispatchLocalServerMessage(peer, JSON.stringify({
+    type: 'session.compact',
+    requestId: 'compact-1',
+    sessionId: 'chat:one',
+  }), handlers);
+  dispatchLocalServerMessage(peer, JSON.stringify({
     type: 'session.resume',
     requestId: 'resume-1',
     sessionId: 'chat:one',
@@ -181,6 +189,7 @@ test('local server dispatcher routes typed client messages and pong', async () =
       'snapshot:snapshot-1',
       'sessions:sessions-1',
       'session-new:new-1',
+      'compact:compact-1:chat:one',
       'resume:resume-1:chat:one',
     ]);
     assert.deepEqual(warnings, [

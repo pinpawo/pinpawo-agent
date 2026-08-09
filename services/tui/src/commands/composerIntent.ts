@@ -8,6 +8,7 @@ export type ComposerIntent =
   | { type: 'quit' }
   | { type: 'open-help' }
   | { type: 'continue-delegation'; guidance: string }
+  | { type: 'compact-session' }
   | { type: 'open-resume' }
   | { type: 'open-model' }
   | { type: 'open-policy' }
@@ -58,6 +59,8 @@ export function resolveComposerIntent(input: {
         type: 'continue-delegation',
         guidance: parsed.args,
       };
+    case 'compact':
+      return { type: 'compact-session' };
     case 'resume':
       return { type: 'open-resume' };
     case 'model':

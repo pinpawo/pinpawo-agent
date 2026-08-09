@@ -156,6 +156,38 @@ test('readLatestProviderInputTokens reads the latest provider prompt footprint',
   assert.equal(readLatestProviderInputTokens([new AIMessage('no usage')]), null);
 });
 
+test('readLatestProviderInputTokens accepts provider usage stored in response metadata', () => {
+  const messages = [
+    new AIMessage({
+      content: 'older reply',
+      response_metadata: {
+        tokenUsage: {
+          promptTokens: 25,
+          completionTokens: 5,
+          totalTokens: 30,
+        },
+      },
+    }),
+    new AIMessage({
+      content: 'latest reply',
+      response_metadata: {
+        usage: {
+          prompt_tokens: 900,
+          completion_tokens: 30,
+          total_tokens: 930,
+        },
+      },
+    }),
+  ];
+
+  assert.equal(readLatestProviderInputTokens(messages), 900);
+  assert.deepEqual(readMessageTokenUsage(messages[0]), {
+    inputTokens: 25,
+    outputTokens: 5,
+    totalTokens: 30,
+  });
+});
+
 test('checkProviderInputWatermark reports the crossed watermark with its evidence', () => {
   assert.deepEqual(checkProviderInputWatermark(900, 1000), {
     latestInputTokens: 900,

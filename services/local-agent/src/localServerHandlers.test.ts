@@ -122,6 +122,77 @@ test('session.new returns an authoritative empty snapshot for a unique session',
   }
 });
 
+test('session.compact is a v2 session command and returns the authoritative snapshot', async () => {
+  const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-session-compact-'));
+  const sent: LocalAgentServerMessage[] = [];
+  const graphService = {
+    readThreadState: async () => ({
+      messages: [],
+      pendingHumanReview: null,
+      hasPendingContinuation: false,
+      currentPlan: null,
+    }),
+    updateState: async () => {
+      throw new Error('empty context must not be written');
+    },
+  } as unknown as LocalAgentGraphService;
+  const handlers = createLocalServerHandlers({
+    serverMode: 'chat',
+    actorId: 'pet-a',
+    workdir,
+    runtimeConfig: buildLocalAgentRuntimeConfig(workdir),
+    ...createTestModelServerDeps(),
+    capabilityArtifactStore: testArtifactStore,
+  }, {
+    chatGraphService: graphService,
+    loadContext: loadTestContext,
+  });
+
+  try {
+    const peer = createPeer(sent);
+    await handlers.peerHandlers.onSessionNew(peer, {
+      type: 'session.new',
+      requestId: 'new-before-compact',
+    });
+    const created = sent.find((message) => message.type === 'session.new.result');
+    assert.equal(created?.type, 'session.new.result');
+    if (created?.type !== 'session.new.result') return;
+
+    await handlers.peerHandlers.onSessionCompact!(peer, {
+      type: 'session.compact',
+      requestId: 'compact-1',
+      sessionId: created.session.id,
+    });
+    const result = sent.find((message) => message.type === 'session.compact.result');
+    assert.equal(result?.type, 'session.compact.result');
+    if (result?.type !== 'session.compact.result') return;
+    assert.equal(result.compacted, false);
+    assert.equal(result.snapshot.session.timeline.length, 0);
+
+    await handlers.peerHandlers.onSessionNew(peer, {
+      type: 'session.new',
+      requestId: 'new-after-compact',
+    });
+    await handlers.peerHandlers.onSessionCompact!(peer, {
+      type: 'session.compact',
+      requestId: 'compact-stale-session',
+      sessionId: created.session.id,
+    });
+    const stale = sent.find((message) => (
+      message.type === 'session.error'
+      && message.requestId === 'compact-stale-session'
+    ));
+    assert.equal(stale?.type, 'session.error');
+    if (stale?.type === 'session.error') {
+      assert.equal(stale.operation, 'compact');
+      assert.match(stale.message, /active session/);
+    }
+  } finally {
+    handlers.close();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
 test('model protocol lists sanitized profiles and persists an acknowledged session selection', async () => {
   const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-model-select-'));
   const runtimeConfig = buildLocalAgentRuntimeConfig(workdir);

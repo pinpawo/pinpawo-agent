@@ -27,6 +27,11 @@ type ReviewResolution<TRoute> =
   | ResolvingReviewResolution<TRoute>
   | ConsumedReviewResolution;
 
+export type ReviewRunInterruptDisposition<TRoute> =
+  | { type: 'cancel_pending'; route: TRoute }
+  | { type: 'queued' }
+  | { type: 'unhandled' };
+
 /**
  * Owns the complete server-local lifecycle for a review action. Entries are
  * keyed only by actionId; requestId is retained only while ordering transport
@@ -86,6 +91,28 @@ export class ReviewResolutionLifecycle<TRoute extends ReviewResolutionRoute> {
         ? [resolution.route]
         : []
     ));
+  }
+
+  /**
+   * Interprets a run-level interrupt against the authoritative review state.
+   * A client may still believe a run is active while the server has already
+   * moved it into review, so transport handlers should use this transition
+   * instead of inferring review state from their last emitted event.
+  */
+  routeRunInterrupt(requestId: string): ReviewRunInterruptDisposition<TRoute> {
+    if (this.queueInterrupt(requestId)) {
+      return { type: 'queued' };
+    }
+
+    for (const resolution of this.resolutions.values()) {
+      if (
+        resolution.state === 'available'
+        && resolution.route.requestId === requestId
+      ) {
+        return { type: 'cancel_pending', route: resolution.route };
+      }
+    }
+    return { type: 'unhandled' };
   }
 
   queueInterrupt(requestId: string) {

@@ -202,6 +202,37 @@ type HumanReviewResolutionMessage = HumanReviewResponseMessage | ReviewCancelMes
 
 type ResolvableHumanReviewRoute = HumanReviewActionRoute & ReviewResolutionRoute;
 
+type HumanReviewRunInterruptOptions<TRoute extends ResolvableHumanReviewRoute> = {
+  lifecycle: ReviewResolutionLifecycle<TRoute>;
+  requestId: string;
+  cancelPending: (route: TRoute) => Promise<void>;
+};
+
+export type HumanReviewRunInterruptOutcome =
+  | 'cancelled_pending'
+  | 'queued_for_resolution'
+  | 'unhandled';
+
+/**
+ * Normalizes a run-level stop intent against server-owned review state. This
+ * keeps clients transport-agnostic: a stale `run.interrupt` and an explicit
+ * `review.cancel` follow the same canonical cancellation path once the server
+ * knows that the run is waiting for review.
+ */
+export async function routeRunInterruptThroughHumanReview<
+  TRoute extends ResolvableHumanReviewRoute,
+>(options: HumanReviewRunInterruptOptions<TRoute>): Promise<HumanReviewRunInterruptOutcome> {
+  const disposition = options.lifecycle.routeRunInterrupt(options.requestId);
+  if (disposition.type === 'cancel_pending') {
+    await options.cancelPending(disposition.route);
+    return 'cancelled_pending';
+  }
+  if (disposition.type === 'queued') {
+    return 'queued_for_resolution';
+  }
+  return 'unhandled';
+}
+
 type HumanReviewResolutionOptions<TRoute extends ResolvableHumanReviewRoute> = {
   lifecycle: ReviewResolutionLifecycle<TRoute>;
   message: HumanReviewResolutionMessage;

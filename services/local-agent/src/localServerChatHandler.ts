@@ -31,6 +31,7 @@ import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry
 import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 import {
   resolveHumanReviewAction,
+  routeRunInterruptThroughHumanReview,
   type HumanReviewActionRoute,
   type HumanReviewResolutionOutcome,
   type HumanReviewResolutionSource,
@@ -272,12 +273,24 @@ export class LocalServerChatHandler {
     }, deps, { type: 'chat_request' });
   }
 
-  handleRunInterrupt(peer: LocalServerPeer, msg: RunInterruptMessage) {
+  async handleRunInterrupt(
+    peer: LocalServerPeer,
+    msg: RunInterruptMessage,
+    deps: LocalServerDeps,
+  ) {
     const inflight = this.inflightRequests.interrupt(peer, { requestId: msg.requestId });
     if (inflight) {
       return inflight;
     }
-    this.reviewResolutions.queueInterrupt(msg.requestId);
+    await routeRunInterruptThroughHumanReview({
+      lifecycle: this.reviewResolutions,
+      requestId: msg.requestId,
+      cancelPending: (route) => this.handleReviewCancel(peer, {
+        type: 'review.cancel',
+        requestId: msg.requestId,
+        actionId: route.actionId,
+      }, deps),
+    });
     return null;
   }
 

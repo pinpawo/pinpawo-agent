@@ -44,6 +44,7 @@ import {
   GUARDED_HOST_OUTPUT_NAME,
   GUARDED_HOST_REPLY,
   GUARDED_HOST_REVIEW_TITLE,
+  GUARDED_HOST_SECOND_CONTINUATION_GUIDANCE,
   GUARDED_HOST_TOOL_NAME,
   GUARDED_HOST_TOOL_OUTPUT,
 } from './support/productionToolkitHostGraphService';
@@ -1021,11 +1022,26 @@ test('production v2 executes reviewed and attachment toolkit calls through a rea
       `send -- [binary format H* ${utf8Hex(GUARDED_HOST_CONTINUATION_GUIDANCE)}]`,
       'send -- "\\r"',
       'expect {',
-      '  -exact "Approval 1/1" {}',
+      '  -exact "Review 1/1" {}',
       '  timeout { exit 172 }',
       '  eof { exit 173 }',
       '}',
       'if {[file exists $guarded_output]} { exit 174 }',
+      'send -- "\\033"',
+      'expect {',
+      '  -exact "interrupted" {}',
+      '  timeout { exit 177 }',
+      '  eof { exit 178 }',
+      '}',
+      'if {[file exists $guarded_output]} { exit 179 }',
+      `send -- [binary format H* ${utf8Hex('/continue ' + GUARDED_HOST_SECOND_CONTINUATION_GUIDANCE)}]`,
+      'send -- "\\r"',
+      'expect {',
+      '  -exact "Review 1/1" {}',
+      '  timeout { exit 180 }',
+      '  eof { exit 181 }',
+      '}',
+      'if {[file exists $guarded_output]} { exit 182 }',
       'send -- "\\033\\[13u"',
       'expect {',
       `  -exact ${JSON.stringify(GUARDED_HOST_REPLY)} {}`,
@@ -1098,6 +1114,9 @@ test('production v2 executes reviewed and attachment toolkit calls through a rea
       compactTerminalObservation(GUARDED_HOST_CONTINUATION_GUIDANCE),
     ));
     assert.ok(searchableOutput.includes(
+      compactTerminalObservation(GUARDED_HOST_SECOND_CONTINUATION_GUIDANCE),
+    ));
+    assert.ok(searchableOutput.includes(
       compactTerminalObservation(ATTACHMENT_FILE_NAME),
     ));
     assert.ok(searchableOutput.includes(
@@ -1114,8 +1133,9 @@ test('production v2 executes reviewed and attachment toolkit calls through a rea
     );
     assertLastOrderedSubstrings(searchableOutput, [
       compactTerminalObservation(GUARDED_HOST_INPUT),
-      compactTerminalObservation('interrupted'),
       compactTerminalObservation(GUARDED_HOST_CONTINUATION_GUIDANCE),
+      compactTerminalObservation('interrupted'),
+      compactTerminalObservation(GUARDED_HOST_SECOND_CONTINUATION_GUIDANCE),
       compactTerminalObservation(GUARDED_HOST_TOOL_NAME),
       compactTerminalObservation(GUARDED_HOST_TOOL_OUTPUT),
       compactTerminalObservation(GUARDED_HOST_REPLY),
@@ -1153,10 +1173,13 @@ test('production v2 executes reviewed and attachment toolkit calls through a rea
       )),
       [
         `user:${GUARDED_HOST_INPUT}`,
+        'assistant:接下来我会先处理这项任务：write the guarded fixture',
         `user:${GUARDED_HOST_CONTINUATION_GUIDANCE}`,
+        `user:${GUARDED_HOST_SECOND_CONTINUATION_GUIDANCE}`,
         `subagent:${GUARDED_HOST_TOOL_OUTPUT}`,
         `assistant:${GUARDED_HOST_REPLY}`,
         `user:${checkpointAttachmentText}`,
+        'assistant:接下来我会先处理这项任务：read the selected attachment',
         `subagent:${ATTACHMENT_TOOL_OUTPUT}`,
         `assistant:${ATTACHMENT_TOOL_REPLY}`,
       ],

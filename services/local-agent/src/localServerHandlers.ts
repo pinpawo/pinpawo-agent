@@ -639,8 +639,12 @@ export function createLocalServerHandlers(
         runtimeDeps.get(),
       ),
     ),
-    onRunInterrupt: (client, message) => {
-      const inflight = chatHandler.handleRunInterrupt(client, message);
+    onRunInterrupt: async (client, message) => {
+      const inflight = await chatHandler.handleRunInterrupt(
+        client,
+        message,
+        runtimeDeps.get(),
+      );
       if (inflight) {
         console.log(`[local-server] interrupt requestId=${inflight.requestId}`);
       }

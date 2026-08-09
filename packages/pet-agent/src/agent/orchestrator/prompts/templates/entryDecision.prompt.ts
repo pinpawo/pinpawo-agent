@@ -15,6 +15,8 @@ export const ENTRY_DECISION_SYSTEM_PROMPT = definePromptTemplate<{
 1. 当前仍缺少完成请求必需的目标、范围或选择，或当前表述无法理解时，选择 answer 向用户询问；在用户补充前，本次任务暂不开始执行。
 2. 信息足够后，如完成当前用户请求需要调用任何工具，选择 needs_plan；否则选择 answer。
 
+相关背景不等于请求所需结果。用户要求确认当前、实际或最新状态，而已有消息没有对应的观察结果时，选择 needs_plan。
+
 选择 needs_plan 时生成本次执行目标，概括当前目标和相关背景。
 
 本次执行目标：

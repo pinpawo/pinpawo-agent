@@ -195,7 +195,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     suite: SUITE,
     tags: ['entry_decision', 'interruption_recovery', 'route_control'],
     input: {
-      userRequest: '地址和只读凭证已经补充好了，请继续。',
+      userRequest: '环境地址是 https://staging.example.com，只读凭证已经配置到当前运行环境的 DEPLOY_READ_TOKEN。请继续确认实际部署状态。',
       conversationContext: [
         '检查环境的公开配置已经完成；要确认实际部署状态，还需要用户补充环境地址和只读凭证。',
       ],

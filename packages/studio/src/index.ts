@@ -19,6 +19,17 @@ export type {
   StudioPlanPetListItem,
 } from './planCapability';
 
+export {
+  petLocalConfigSchema,
+  resolveStudio,
+  studioLocalConfigSchema,
+} from './configSchema';
+export type {
+  PetLocalConfig,
+  ResolvedStudio,
+  StudioLocalConfig,
+} from './configSchema';
+
 export * from './types';
 export * from './petAgentTypes';
 

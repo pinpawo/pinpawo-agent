@@ -246,12 +246,15 @@ Studio 引用**直接删,不迁移、不保留别名、不做过渡期**。
 | 2 | 搬编排核心(orchestrator/types/scheduler/planCapability) | ✅ 已完成;顺带抽出 wiki/runQueue port |
 | 3 | 建 `toolkits/studio-kanban`,搬 wiki + store 实现 | ✅ 已完成 |
 | 4 | pet-agent 删 studio 子树与 barrel re-export | ✅ 已完成 |
-| 5 | pet-agent 新增通用 config loader,studio schema 迁移 | ⬜ **待做** |
+| 5 | pet-agent 新增通用 config loader,studio schema 迁移 | ✅ 已完成 |
 | 6 | local-agent 改为消费两个新包,宿主接线保留 | ✅ 已完成(与第 4 步同 PR) |
 | 7 | 删除旧 Ink TUI 中的 Studio 引用 | ✅ 已完成 |
 
-第 5 步单独留下:config loader 是机制性改动,与搬包正交,且它决定
-chat 是否会被 studio 的配置复杂度污染,值得单独一个 PR 评审。
+**抽包 7 步全部完成。**
+
+第 5 步的落地形态与 §4.2 的设计一致:机制在 pet-agent 且不碰 FS
+(`utils/configDocument`),schema 在 `@pinpawo/studio`(`configSchema.ts`),
+文件入口留 local-agent。local-agent 侧两份 loader 从 355 行降到 94 行。
 
 步 2–4 是一次完整的搬迁,中途 pet-agent 会同时存在新旧两份;步 4 收尾。
 

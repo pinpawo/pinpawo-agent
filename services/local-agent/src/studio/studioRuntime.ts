@@ -7,12 +7,12 @@ import {
   type ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
 import {
-  createPetAgentRuntime,
   createStudioOrchestrator,
   type PetAgentRuntime,
   type StudioOrchestrator,
   type StudioRunQueueStore,
 } from '@pinpawo/studio';
+import { createPetAgentRuntime } from './createPetAgentRuntime';
 import {
   createLLMWikiCurator,
   FileStudioRunQueueStore,

@@ -1,3 +1,17 @@
+/**
+ * `PetAgentRuntime` port 的 local host 适配器。
+ *
+ * 它住在 local-agent 而不是 `@pinpawo/studio`,因为它把 port 接到具体的
+ * LangGraph 执行路径上 —— 直接 `createOrchestratorGraph()`、组装消息、
+ * 消化 HITL。编排核心不该背这些:那会让 `@pinpawo/studio` 依赖
+ * `@langchain/langgraph`,而它本身根本不跑 graph。
+ *
+ * 未来若出现第二个 host,再单独抽 `studio-pet-agent-adapter`。
+ *
+ * 待退役(#561 Phase 2):下面的 `while (true) { graph.invoke(); Command({resume}) }`
+ * 是一套 Studio 专用的 HITL 循环。目标是让 pet invocation 复用稳定的 Chat
+ * request/runtime 路径,而不是维护第二套执行器。
+ */
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import { Command } from '@langchain/langgraph';
@@ -13,7 +27,7 @@ import type {
   PetAgentCapabilitySummary,
   PetAgentStartupMode,
   PetAgentStatus,
-} from './petAgentTypes';
+} from '@pinpawo/studio';
 import {
   buildOrchestratorRunInput,
   createOrchestratorGraph,
@@ -30,8 +44,8 @@ import type {
   PetAgentRuntimeDescriptor,
   PetAgentRuntimeInvokeInput,
   PetAgentRuntimeInvokeResult,
-} from './types';
-import type { StudioWikiAccess } from './wikiPort';
+} from '@pinpawo/studio';
+import type { StudioWikiAccess } from '@pinpawo/studio';
 
 export type PetAgentRuntimeConfig = {
   models: AgentModels;

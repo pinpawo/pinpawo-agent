@@ -11,7 +11,7 @@ import { ToolkitRuntimeManager } from '@pinpawo/pet-agent';
 import type { AgentActor, AgentModels } from '@pinpawo/pet-agent';
 import { defineInstructionDocument } from '@pinpawo/pet-agent';
 import type { NamedStructuredTool } from '@pinpawo/pet-agent';
-import type { HumanReviewerRequest } from './types';
+import type { HumanReviewerRequest } from '@pinpawo/studio';
 
 function fakeModels(): AgentModels {
   // graph 已被 stub,实际不会用到 models。

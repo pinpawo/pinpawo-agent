@@ -318,6 +318,9 @@ const approvalView = new ApprovalView(renderer, {
 });
 const overlayLoadingController = new LoadingCellController({
   onTick: () => {
+    if (controller.getState().pendingSessionCommand === 'compact') {
+      refreshLive();
+    }
     if (noticeOverlay.phase === 'interrupting') refreshNoticeOverlay();
     if (sessionPicker.phase === 'loading' || sessionPicker.phase === 'resuming') {
       refreshSessionPicker();
@@ -402,6 +405,7 @@ const qaLifecycle = new QaLifecycleDriver(launchOptions, {
 
 const unsubscribe = controller.subscribe((state) => {
   liveActivityController.sync(state.session.activeRun);
+  syncOverlayLoading();
   if (state.session.sessionId !== focusedSessionId) {
     focusedSessionId = state.session.sessionId;
     composerMode = state.session.kind;
@@ -718,7 +722,16 @@ function syncComposerModeUi() {
 }
 
 function refreshLive() {
-  const session = controller.getState().session;
+  const state = controller.getState();
+  if (state.pendingSessionCommand === 'compact') {
+    live.content = buildLoadingCellLine(
+      'compacting older context · request sent',
+      overlayLoadingController.frame,
+      { prefix: 'live · ' },
+    );
+    return;
+  }
+  const session = state.session;
   const activity = formatLiveActivity(
     session,
     liveActivityController.frame,
@@ -1466,7 +1479,8 @@ function refreshModelPicker() {
 
 function syncOverlayLoading() {
   overlayLoadingController.sync(
-    noticeOverlay.phase === 'interrupting'
+    controller.getState().pendingSessionCommand === 'compact'
+      || noticeOverlay.phase === 'interrupting'
       || sessionPicker.phase === 'loading'
       || sessionPicker.phase === 'resuming'
       || policyPicker.phase === 'saving'
@@ -1577,7 +1591,7 @@ function submitComposerInput(input = composer.plainText) {
     }
     case 'compact-session':
       clearComposerPreservingNotice();
-      localNotice = 'compacting older context…';
+      localNotice = 'compaction request sent · summarizing older context…';
       refreshStatus();
       void controller.compactSession().then(({ compacted }) => {
         localNotice = compacted

@@ -186,14 +186,6 @@ export function waitForReadiness(
     const nav = controller.getSnapshot().navigation;
     if (nav?.phase === 'readable') onResolved();
     else if (nav?.phase === 'failed') onFailed();
-    else {
-      // Poll so `advanceSettling` can move focus toward `readable` over time;
-      // a quiet-but-not-failed navigation is left to the wall-clock timeout.
-      controller.pollReadiness(clock());
-      const after = controller.getSnapshot().navigation;
-      if (after?.phase === 'readable') onResolved();
-      else if (after?.phase === 'failed') onFailed();
-    }
   };
 
   const generationChanged = (connectionGeneration: number, targetGeneration: number): void => {
@@ -226,6 +218,18 @@ export function waitForReadiness(
     }
   });
 
+  // Poll periodically so the settling window can elapse without new events.
+  // Each poll calls `advanceSettling` which re-arms the baseline, but the
+  // interval lets the clock advance between polls so the NETWORK/DOM quiet
+  // window is satisfied.
+  const pollInterval = setInterval(() => {
+    if (settledResult) return;
+    controller.pollReadiness(clock());
+    const nav = controller.getSnapshot().navigation;
+    if (nav?.phase === 'readable') finish('resolved');
+    else if (nav?.phase === 'failed') finish('failed');
+  }, 100);
+
   const finished = waiter.done.then((outcome): WaitForReadinessResult => {
     if (settledResult) return settledResult;
     return materialize(outcome.status === 'resolved' ? 'resolved' : 'timed_out');
@@ -235,6 +239,7 @@ export function waitForReadiness(
   const dispose = (): void => {
     if (disposed.value) return;
     disposed.value = true;
+    clearInterval(pollInterval);
     offEvents();
     offGenerations();
   };

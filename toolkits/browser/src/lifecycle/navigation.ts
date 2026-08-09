@@ -221,10 +221,11 @@ function advanceSettling(state: NavigationState, now: number): NavigationState {
     return { ...state, phase: 'settling', lastNetworkActivityAt: now };
   }
   if (state.phase === 'settling') {
-    // Keep the settle baseline live: a false verdict means activity was still
-    // being observed at `now`, so track it rather than freezing the window at
-    // the first failed poll.
-    return { ...state, lastNetworkActivityAt: now };
+    // Do not re-arm the settle baseline on every poll — the baseline is set
+    // once when the navigation enters `settling`, and network events update it
+    // independently. Re-arming prevents synchronous event bursts and periodic
+    // polls from ever reaching the `readable` phase (issue #601).
+    return state;
   }
   return state;
 }

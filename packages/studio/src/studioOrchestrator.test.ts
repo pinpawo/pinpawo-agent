@@ -7,6 +7,7 @@ import path from 'node:path';
 import { createStudioOrchestrator } from './createStudioOrchestrator';
 import { InMemoryStudioRunQueueStore } from './runQueuePort';
 import type { WikiCurator } from './wikiPort';
+import { failedAttemptCount, latestInvocation } from './types';
 import type {
   PetAgentRuntime,
   PetAgentRuntimeDescriptor,
@@ -106,7 +107,7 @@ function plannerRuntime(petId = 'planner'): PetAgentRuntime {
 function recordingCurator(): WikiCurator {
   return {
     curate: async ({ task }) => ({
-      changedPaths: [`sources/${task.petRunId}-${task.petId}.md`, 'index.md'],
+      changedPaths: [`sources/${latestInvocation(task)?.invocationId}-${task.petId}.md`, 'index.md'],
     }),
   };
 }
@@ -217,7 +218,7 @@ test('studio orchestrator dispatches planned tasks sequentially and finishes wit
   if (result.outcome.outcome === 'done') {
     assert.equal(result.outcome.reply, 'audio done');
     assert.equal(result.outcome.finalTaskIndex, 1);
-    assert.equal(result.outcome.finalPetRunId, result.snapshot.finalPetRunId);
+    assert.equal(result.outcome.finalInvocationId, result.snapshot.finalInvocationId);
   }
   assert.equal(result.snapshot.tasks.length, 2);
   assert.deepEqual(
@@ -225,7 +226,7 @@ test('studio orchestrator dispatches planned tasks sequentially and finishes wit
     ['done', 'done'],
   );
   assert.equal(result.snapshot.finalTaskIndex, 1);
-  assert.equal(result.snapshot.finalPetRunId, result.snapshot.tasks[1].petRunId);
+  assert.equal(result.snapshot.finalInvocationId, latestInvocation(result.snapshot.tasks[1]!)?.invocationId);
   assert.deepEqual(briefs, ['写视频脚本结构', '评估尾音频需求,整合输出']);
   assert.deepEqual(workdirs, ['/tmp/pinpawo-studio-workdir', '/tmp/pinpawo-studio-workdir']);
   // 所有 dispatch 都拿到 wikiRoot
@@ -236,7 +237,7 @@ test('studio orchestrator dispatches planned tasks sequentially and finishes wit
   }
   // 最终标定的是末位完成 task 对应的 pet run.
   if (result.outcome.outcome === 'done') {
-    assert.equal(result.outcome.finalPetRunId, result.snapshot.tasks[1].petRunId);
+    assert.equal(result.outcome.finalInvocationId, latestInvocation(result.snapshot.tasks[1]!)?.invocationId);
   }
 });
 
@@ -293,12 +294,12 @@ test('studio orchestrator emits onTurnEvent lifecycle for happy path', async () 
 
   const finished = events.at(-1) as Extract<StudioTurnEvent, { type: 'turn_finished' }>;
   assert.equal(finished.outcome, 'done');
-  assert.ok(finished.finalPetRunId);
+  assert.ok(finished.finalInvocationId);
 
   const taskFinished = events.find((e) => e.type === 'task_finished') as Extract<StudioTurnEvent, { type: 'task_finished' }>;
   assert.equal(taskFinished.status, 'finished');
   assert.equal(taskFinished.resultText, 'script done');
-  assert.ok(taskFinished.petRunId);
+  assert.ok(taskFinished.invocationId);
 });
 
 test('studio orchestrator emits turn_started then turn_finished(stopped) when planner has no plan', async () => {
@@ -590,8 +591,8 @@ test('studio uses injected curator instead of skeleton default', async () => {
     plannerPetId: 'worker',
     curator: {
       curate: async ({ task }) => {
-        curatedPetRunIds.push(task.petRunId ?? '');
-        return { changedPaths: [`custom/${task.petRunId}.md`] };
+        curatedPetRunIds.push(latestInvocation(task)?.invocationId ?? '');
+        return { changedPaths: [`custom/${latestInvocation(task)?.invocationId}.md`] };
       },
     },
     agents: [
@@ -616,7 +617,7 @@ test('studio uses injected curator instead of skeleton default', async () => {
 
   assert.equal(result.outcome.outcome, 'done');
   assert.equal(curatedPetRunIds.length, 1);
-  assert.equal(curatedPetRunIds[0], result.snapshot.tasks[0].petRunId);
+  assert.equal(curatedPetRunIds[0], latestInvocation(result.snapshot.tasks[0]!)?.invocationId);
 });
 
 test('studio stops when planner did not enqueue tasks', async () => {
@@ -1049,9 +1050,13 @@ test('studio run snapshot exposes task queue items and final pet run identity', 
   assert.equal(running?.tasks[0].status, 'running');
   assert.equal(running?.tasks[0].brief, 'snapshot work');
   assert.deepEqual(running?.tasks[0].deps, []);
-  assert.match(running?.tasks[0].petRunId ?? '', /^[a-f0-9]{8}$/);
+  // invocationId 是完整 UUID —— 身份字段不做截断，避免碰撞。
+  assert.match(
+    latestInvocation(running?.tasks[0]!)?.invocationId ?? '',
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+  );
   assert.equal(running?.finalTaskIndex, undefined);
-  assert.equal(running?.finalPetRunId, undefined);
+  assert.equal(running?.finalInvocationId, undefined);
 
   releaseWorker();
   const result = await orchestrator.waitForRun('run-task-snapshot');
@@ -1061,11 +1066,11 @@ test('studio run snapshot exposes task queue items and final pet run identity', 
   assert.equal(done?.status, 'done');
   assert.equal(done?.tasks[0].status, 'done');
   assert.equal(done?.finalTaskIndex, 0);
-  assert.equal(done?.finalPetRunId, done?.tasks[0].petRunId);
-  assert.equal(result.snapshot.finalPetRunId, done?.finalPetRunId);
+  assert.equal(done?.finalInvocationId, latestInvocation(done?.tasks[0]!)?.invocationId);
+  assert.equal(result.snapshot.finalInvocationId, done?.finalInvocationId);
   if (result.outcome.outcome === 'done') {
     assert.equal(result.outcome.finalTaskIndex, 0);
-    assert.equal(result.outcome.finalPetRunId, done?.finalPetRunId);
+    assert.equal(result.outcome.finalInvocationId, done?.finalInvocationId);
   }
 });
 
@@ -1169,7 +1174,7 @@ test('studio submitRequest accepts immediately and exposes run state through get
   assert.equal(run?.tasks[0].petId, 'worker');
   assert.equal(run?.tasks[0].brief, 'queued work');
   assert.equal(run?.tasks[0].status, 'done');
-  assert.equal(run?.finalPetRunId, run?.tasks[0].petRunId);
+  assert.equal(run?.finalInvocationId, latestInvocation(run?.tasks[0]!)?.invocationId);
   assert.deepEqual(workerBriefs, ['queued work']);
   const runEventTypes = runEvents
     .filter((event) => event.runId === 'run-submit')
@@ -1194,7 +1199,7 @@ test('studio submitRequest accepts immediately and exposes run state through get
     .at(-1);
   assert.equal(finalRunEvent?.status, 'done');
   assert.equal(finalRunEvent?.snapshot.tasks.length, 1);
-  assert.equal(finalRunEvent?.snapshot.finalPetRunId, run?.finalPetRunId);
+  assert.equal(finalRunEvent?.snapshot.finalInvocationId, run?.finalInvocationId);
   assert.deepEqual(
     runEvents
       .filter((event): event is Extract<StudioRunEvent, { type: 'wiki_changed' }> => (
@@ -1203,7 +1208,7 @@ test('studio submitRequest accepts immediately and exposes run state through get
       ))
       .flatMap((event) => event.changedPaths)
       .sort(),
-    ['index.md', `sources/${run?.finalPetRunId}-worker.md`].sort(),
+    ['index.md', `sources/${run?.finalInvocationId}-worker.md`].sort(),
   );
 });
 
@@ -1279,7 +1284,10 @@ test('studio orchestrator persists run snapshots to the configured run queue sto
 
   const saved = runQueueStore.get('run-store-save');
   assert.equal(saved?.status, 'done');
-  assert.equal(saved?.finalPetRunId, saved?.tasks[0]?.petRunId);
+  assert.equal(
+    saved?.finalInvocationId,
+    saved?.tasks[0] ? latestInvocation(saved.tasks[0])?.invocationId : undefined,
+  );
   assert.equal(saved?.tasks[0]?.status, 'done');
 });
 
@@ -1297,12 +1305,14 @@ test('studio orchestrator restores queued tasks from run queue store without rer
       {
         runId: 'run-store-restore',
         conversationId: 'conv-store-restore',
+        taskId: 'task-fixture-1',
         taskIndex: 0,
         petId: 'worker',
         brief: 'restored task',
         acceptanceCriteria: [],
         deps: [],
         status: 'queued',
+        invocations: [],
         enqueuedAt: '2026-06-20T00:00:01.000Z',
       },
     ],
@@ -1350,12 +1360,14 @@ test('studio orchestrator can skip store recovery for per-turn fresh hosts', asy
       {
         runId: 'run-store-no-restore',
         conversationId: 'conv-store-no-restore',
+        taskId: 'task-fixture-2',
         taskIndex: 0,
         petId: 'worker',
         brief: 'do not dispatch',
         acceptanceCriteria: [],
         deps: [],
         status: 'queued',
+        invocations: [],
         enqueuedAt: '2026-06-20T00:00:01.000Z',
       },
     ],
@@ -1400,13 +1412,21 @@ test('studio orchestrator finalizes recovered open run when all tasks are alread
       {
         runId: 'run-store-terminal',
         conversationId: 'conv-store-terminal',
+        taskId: 'task-fixture-3',
         taskIndex: 0,
         petId: 'worker',
         brief: 'already done',
         acceptanceCriteria: [],
         deps: [],
         status: 'done',
-        petRunId: 'pet-run-restored',
+        invocations: [{
+          invocationId: 'inv-restored',
+          petId: 'worker',
+          attempt: 0,
+          status: 'succeeded',
+          startedAt: '2026-06-20T00:00:02.000Z',
+          finishedAt: '2026-06-20T00:00:03.000Z',
+        }],
         enqueuedAt: '2026-06-20T00:00:01.000Z',
         startedAt: '2026-06-20T00:00:02.000Z',
         finishedAt: '2026-06-20T00:00:03.000Z',
@@ -1429,7 +1449,7 @@ test('studio orchestrator finalizes recovered open run when all tasks are alread
   const result = await orchestrator.waitForRun('run-store-terminal');
 
   assert.equal(result.outcome.outcome, 'done');
-  assert.equal(result.outcome.finalPetRunId, 'pet-run-restored');
+  assert.equal(result.outcome.finalInvocationId, 'inv-restored');
   assert.equal(result.outcome.reply, '');
   assert.equal(runQueueStore.get('run-store-terminal')?.status, 'done');
 });
@@ -1565,4 +1585,82 @@ test('studio cancelRun marks running task cancelled in the immediate snapshot', 
   const result = await orchestrator.waitForRun('run-cancel-running');
   assert.equal(result.outcome.outcome, 'stopped');
   assert.equal(orchestrator.getRun('run-cancel-running')?.tasks[0]?.status, 'cancelled');
+});
+
+test('recovered tasks keep their spent retry budget instead of starting over', async () => {
+  // 这是身份模型改造要修的真实故障:重试次数原本只存在内存,崩溃恢复后归零,
+  // 一个反复失败的 task 可以无限重试。现在它由持久化的 invocation 列表导出。
+  const wikiBaseDir = await makeWikiTempDir('studio-retry-recovery-');
+  const runQueueStore = new InMemoryStudioRunQueueStore();
+  const alreadyFailed = (attempt: number) => ({
+    invocationId: `inv-failed-${attempt}`,
+    petId: 'worker',
+    attempt,
+    status: 'failed' as const,
+    startedAt: '2026-06-20T00:00:02.000Z',
+    finishedAt: '2026-06-20T00:00:03.000Z',
+    errorMessage: 'boom',
+  });
+
+  runQueueStore.save({
+    runId: 'run-retry-recovery',
+    conversationId: 'conv-retry-recovery',
+    userRequest: 'exhaust retries',
+    status: 'running',
+    createdAt: '2026-06-20T00:00:00.000Z',
+    updatedAt: '2026-06-20T00:00:01.000Z',
+    tasks: [
+      {
+        runId: 'run-retry-recovery',
+        conversationId: 'conv-retry-recovery',
+        taskId: 'task-retry-recovery',
+        taskIndex: 0,
+        petId: 'worker',
+        brief: 'keeps failing',
+        acceptanceCriteria: [],
+        deps: [],
+        status: 'queued',
+        // 崩溃前已经烧掉 1 次预算(maxRetryPerTask 设为 2)。
+        invocations: [alreadyFailed(0)],
+        enqueuedAt: '2026-06-20T00:00:01.000Z',
+      },
+    ],
+  });
+
+  let workerInvocations = 0;
+  const orchestrator = createStudioOrchestrator({
+    studioId: 'studio-1',
+    ownerUserId: 'user-1',
+    plannerPetId: 'planner',
+    agents: [
+      plannerRuntime(),
+      runtime({
+        petId: 'worker',
+        name: 'Worker',
+        reply: '',
+        onInvoke: () => {
+          workerInvocations += 1;
+          throw new Error('still failing');
+        },
+      }),
+    ],
+    wikiBaseDir,
+    runQueueStore,
+    maxRetryPerTask: 2,
+  });
+
+  await orchestrator.waitForRun('run-retry-recovery');
+
+  // 预算是 2,恢复出来的那次已经用掉 1 次,所以本进程只该再跑 1 次。
+  // 若重试计数被重置,这里会是 2。
+  assert.equal(workerInvocations, 1);
+
+  const saved = runQueueStore.get('run-retry-recovery');
+  assert.equal(saved?.tasks[0]?.status, 'failed');
+  // 历史尝试没有被覆盖:恢复的那次仍在,新的那次追加在后面。
+  assert.deepEqual(
+    saved?.tasks[0]?.invocations.map((invocation) => invocation.attempt),
+    [0, 1],
+  );
+  assert.equal(failedAttemptCount(saved!.tasks[0]!), 2);
 });

@@ -267,8 +267,9 @@ export class LocalStudioDueRunScheduler {
         onProgress,
       });
       const completed = this.studioDueRuns.succeed(claim, {
+        // due-run 记录是已落盘的独立格式,字段名不动。
         finalPetRunId: result.turn.outcome.outcome === 'done'
-          ? result.turn.outcome.finalPetRunId
+          ? result.turn.outcome.finalInvocationId
           : this.defaultFinalPetRunId,
         reply: result.turn.outcome.reply,
       });
@@ -489,7 +490,7 @@ export class LocalStudioDueRunScheduler {
         outcome: 'done',
         reply: turnOutcome.reply,
         // Legacy rows used finalDispatchId before Studio standardized on finalPetRunId.
-        finalPetRunId: turnOutcome.finalPetRunId ?? row.finalPetRunId ?? row.finalDispatchId,
+        finalPetRunId: turnOutcome.finalInvocationId ?? row.finalPetRunId ?? row.finalDispatchId,
       };
     }
 

@@ -28,7 +28,8 @@ function sampleTask(overrides: Partial<StudioWikiTaskSource> = {}): StudioWikiTa
     acceptanceCriteria: [],
     deps: [],
     status: 'done',
-    petRunId: 'd1',
+    taskId: 'd1',
+    invocations: [],
     brief: '写视频脚本结构',
     resultText: '已完成脚本结构,3 段式,每段 30 秒。',
     enqueuedAt: new Date().toISOString(),
@@ -54,7 +55,7 @@ test('skeleton curator writes source file and appends index', async () => {
     'utf8',
   );
   assert.match(source, /已完成脚本结构/);
-  assert.match(source, /petRunId: d1/);
+  assert.match(source, /taskId: d1/);
   const index = await fs.readFile(path.join(wikiRoot, 'index.md'), 'utf8');
   assert.match(index, /d1/);
 });
@@ -203,7 +204,7 @@ test('LLM curator calls promptProvider on each curate invocation', async () => {
   });
 
   await curator.curate({ wikiRoot, task: sampleTask() });
-  await curator.curate({ wikiRoot, task: sampleTask({ petRunId: 'd2' }) });
+  await curator.curate({ wikiRoot, task: sampleTask({ taskId: 'd2' }) });
   assert.equal(providerCalls, 2, 'provider should be invoked each curate call');
 });
 

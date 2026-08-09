@@ -46,7 +46,7 @@ export function cloneSnapshot(snapshot: StudioRunSnapshot): StudioRunSnapshot {
     userRequest: snapshot.userRequest,
     status: snapshot.status,
     finalTaskIndex: snapshot.finalTaskIndex,
-    finalPetRunId: snapshot.finalPetRunId,
+    finalInvocationId: snapshot.finalInvocationId,
     createdAt: snapshot.createdAt,
     updatedAt: snapshot.updatedAt,
     tasks: snapshot.tasks

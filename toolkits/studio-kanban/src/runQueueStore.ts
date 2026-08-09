@@ -13,6 +13,7 @@ import {
   type StudioRunQueueStoreRecoveryOptions,
   type StudioRunQueueStoreState,
   type StudioRun,
+  type StudioInvocation,
   type StudioRunSnapshot,
   type StudioRunStatus,
   type StudioTaskQueueItem,
@@ -129,7 +130,9 @@ export class FileStudioRunQueueStore implements StudioRunQueueStore {
       userRequest: run.userRequest,
       status: run.status,
       finalTaskIndex: typeof run.finalTaskIndex === 'number' ? run.finalTaskIndex : undefined,
-      finalPetRunId: typeof run.finalPetRunId === 'string' ? run.finalPetRunId : undefined,
+      finalInvocationId: typeof run.finalInvocationId === 'string'
+        ? run.finalInvocationId
+        : undefined,
       createdAt: run.createdAt,
       updatedAt: run.updatedAt,
     };
@@ -155,9 +158,18 @@ export class FileStudioRunQueueStore implements StudioRunQueueStore {
     if (!this.isTaskStatus(task.status)) {
       throw new Error(`studio run queue store task has invalid status: ${this.filePath}`);
     }
+    // Studio 不背兼容包袱:旧格式(无 taskId / invocations)直接拒绝,
+    // 而不是补默认值 —— 那会造出没有身份、重试预算为 0 的 task。
+    if (typeof task.taskId !== 'string' || task.taskId.length === 0) {
+      throw new Error(`studio run queue store task is missing taskId: ${this.filePath}`);
+    }
+    if (!Array.isArray(task.invocations)) {
+      throw new Error(`studio run queue store task is missing invocations: ${this.filePath}`);
+    }
     return {
       runId: task.runId,
       conversationId: task.conversationId,
+      taskId: task.taskId,
       taskIndex: task.taskIndex,
       petId: task.petId,
       brief: task.brief,
@@ -168,12 +180,48 @@ export class FileStudioRunQueueStore implements StudioRunQueueStore {
         ? task.deps.filter((item): item is number => typeof item === 'number')
         : [],
       status: task.status,
-      petRunId: typeof task.petRunId === 'string' ? task.petRunId : undefined,
+      invocations: task.invocations.map((raw) => this.readInvocation(raw)),
       errorMessage: typeof task.errorMessage === 'string' ? task.errorMessage : undefined,
       enqueuedAt: typeof task.enqueuedAt === 'string' ? task.enqueuedAt : '',
       startedAt: typeof task.startedAt === 'string' ? task.startedAt : undefined,
       finishedAt: typeof task.finishedAt === 'string' ? task.finishedAt : undefined,
     };
+  }
+
+  private readInvocation(raw: unknown): StudioInvocation {
+    if (!raw || typeof raw !== 'object') {
+      throw new Error(`studio run queue store invocation is invalid: ${this.filePath}`);
+    }
+    const invocation = raw as Partial<Record<keyof StudioInvocation, unknown>>;
+    if (typeof invocation.invocationId !== 'string' || invocation.invocationId.length === 0) {
+      throw new Error(`studio run queue store invocation is missing invocationId: ${this.filePath}`);
+    }
+    if (typeof invocation.petId !== 'string' || typeof invocation.attempt !== 'number') {
+      throw new Error(`studio run queue store invocation is missing pet/attempt: ${this.filePath}`);
+    }
+    if (!this.isInvocationStatus(invocation.status)) {
+      throw new Error(`studio run queue store invocation has invalid status: ${this.filePath}`);
+    }
+    return {
+      invocationId: invocation.invocationId,
+      petId: invocation.petId,
+      attempt: invocation.attempt,
+      status: invocation.status,
+      startedAt: typeof invocation.startedAt === 'string' ? invocation.startedAt : '',
+      ...(typeof invocation.finishedAt === 'string'
+        ? { finishedAt: invocation.finishedAt }
+        : {}),
+      ...(typeof invocation.errorMessage === 'string'
+        ? { errorMessage: invocation.errorMessage }
+        : {}),
+    };
+  }
+
+  private isInvocationStatus(value: unknown): value is StudioInvocation['status'] {
+    return value === 'running'
+      || value === 'succeeded'
+      || value === 'failed'
+      || value === 'cancelled';
   }
 
   private saveState(state: StudioRunQueueStoreState): void {

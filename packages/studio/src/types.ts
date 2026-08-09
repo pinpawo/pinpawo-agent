@@ -118,7 +118,8 @@ export type StudioRun = {
   userRequest: string;
   status: StudioRunStatus;
   finalTaskIndex?: number;
-  finalPetRunId?: string;
+  /** 产出最终结果的那次调度。 */
+  finalInvocationId?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -127,21 +128,64 @@ export type StudioRunSnapshot = StudioRun & {
   tasks: StudioTaskQueueItem[];
 };
 
+/**
+ * 一次 pet 调度尝试。
+ *
+ * task 与 invocation 分开是因为它们的生命周期不同:task 是"要做的事",
+ * 重试后仍是同一个 task;invocation 是"做这件事的某一次尝试",每次重试
+ * 都是新的一次。取消、事件路由和 lease 都作用在 invocation 上,这样取消
+ * 一次尝试不会误伤同 task 的其他尝试。
+ */
+export type StudioInvocation = {
+  invocationId: string;
+  petId: string;
+  /** 同一 task 内从 0 递增。**持久化**,否则崩溃恢复后重试次数归零。 */
+  attempt: number;
+  status: 'running' | 'succeeded' | 'failed' | 'cancelled';
+  startedAt: string;
+  finishedAt?: string;
+  errorMessage?: string;
+};
+
 export type StudioTaskQueueItem = {
   runId: string;
   conversationId: string;
+  /**
+   * 稳定标识。`taskIndex` 是展示序号,re-plan 后会变;需要寻址某个 task
+   * (取消、事件关联)时用 `taskId`。
+   */
+  taskId: string;
   taskIndex: number;
   petId: string;
   brief: string;
   acceptanceCriteria: string[];
   deps: number[];
   status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
-  petRunId?: string;
+  /**
+   * 该 task 的历次调度尝试,按 attempt 升序。空数组表示尚未派发过。
+   * 重试计数由 `invocations.length` 导出,不再单独存一个易漂移的字段。
+   */
+  invocations: StudioInvocation[];
   errorMessage?: string;
   enqueuedAt: string;
   startedAt?: string;
   finishedAt?: string;
 };
+
+/** 最近一次调度尝试;未派发过时为 undefined。 */
+export function latestInvocation(task: StudioTaskQueueItem): StudioInvocation | undefined {
+  return task.invocations.at(-1);
+}
+
+/**
+ * 已消耗的重试次数 = 已失败的尝试数。
+ *
+ * 从持久化的 invocation 列表导出,因此崩溃恢复后仍然准确 —— 这正是
+ * 独立 `retryCount` 字段做不到的。
+ */
+export function failedAttemptCount(task: StudioTaskQueueItem): number {
+  return task.invocations.filter((invocation) => invocation.status === 'failed').length;
+}
 
 export type StudioQueueItem = StudioTaskQueueItem;
 
@@ -151,7 +195,7 @@ export type StudioTurnOutcome =
   | {
       outcome: 'done';
       finalTaskIndex?: number;
-      finalPetRunId?: string;
+      finalInvocationId?: string;
       reply: string;
     }
   | { outcome: 'stopped'; reason: string; reply: string };
@@ -273,12 +317,12 @@ export type StudioTurnEvent =
   | { type: 'turn_started'; turnId: string; userRequest: string }
   | { type: 'tasks_queued'; taskCount: number }
   | { type: 'task_status_changed'; taskIndex: number; status: StudioTaskStatus }
-  | { type: 'task_started'; taskIndex: number; petId: string; petRunId: string }
+  | { type: 'task_started'; taskIndex: number; petId: string; invocationId: string }
   | {
       type: 'task_finished';
       taskIndex: number;
       petId: string;
-      petRunId: string;
+      invocationId: string;
       status: 'finished' | 'cancelled';
       resultText?: string;
       errorMessage?: string;
@@ -287,7 +331,7 @@ export type StudioTurnEvent =
   | {
       type: 'turn_finished';
       outcome: 'done' | 'stopped';
-      finalPetRunId?: string;
+      finalInvocationId?: string;
     };
 
 export type StudioRunIdentity = {

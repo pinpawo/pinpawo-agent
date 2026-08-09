@@ -34,6 +34,10 @@ import {
 import { createBrowserStateTracker } from './browserState.js';
 import { calculateReconnectDelay } from './reconnect.js';
 import { pageReadinessEvents } from './pageReadiness.js';
+import {
+  documentReadyEvent,
+  navigationCommittedEvent,
+} from './liveReadiness.js';
 
 const CDP_VERSION = '1.3';
 const ALLOWED_CDP_COMMANDS = new Set([
@@ -42,6 +46,8 @@ const ALLOWED_CDP_COMMANDS = new Set([
   'DOM.scrollIntoViewIfNeeded',
   'Page.getNavigationHistory',
   'Page.captureScreenshot',
+  'Page.enable',
+  'Network.enable',
   'Input.insertText',
   'Input.dispatchKeyEvent',
   'Input.dispatchMouseEvent',
@@ -559,6 +565,45 @@ function emitPageReadiness(tabId, url, snapshot) {
       payload: event.payload,
     });
   }
+}
+
+/** Post a unified `browser.event` to the native host (no-op when disconnected). */
+function postBrowserEvent(message) {
+  if (!port) return;
+  port.postMessage({
+    type: 'browser.event',
+    protocolVersion: PROTOCOL_VERSION,
+    connectionId,
+    tabId: message.tabId,
+    url: message.url,
+    event: message.event,
+    payload: message.payload,
+  });
+}
+
+/**
+ * Live readiness event emission (block 1 of issue #601). Translates reliable,
+ * stateless CDP `Page`/`tabs` facts into the unified live readiness stream the
+ * Runtime consumes — additive and backward-compatible, alongside the existing
+ * snapshot-derived `emitPageReadiness` (so `browser_open` still returns its
+ * snapshot). The pure translation lives in `liveReadiness.ts`; these helpers
+ * own the `port.postMessage`.
+ *
+ * Stateful live facts (network inflight deltas via `Network.*`, repeated DOM
+ * text samples during hydration) are intentionally **not** wired here yet: they
+ * need per-tab counters that must be validated against a real Chrome session
+ * before being enabled. The pure translators for those live in `liveReadiness.ts`
+ * and are unit-tested; the stateless helpers below are what the extension emits
+ * today.
+ */
+function emitLiveCommitted(tabId, url) {
+  const event = navigationCommittedEvent({ url, timestamp: Date.now() }, tabId);
+  postBrowserEvent({ ...event, tabId, url });
+}
+
+function emitLiveDocumentReady(tabId, url, readyState) {
+  const event = documentReadyEvent({ readyState, timestamp: Date.now() }, tabId, url);
+  postBrowserEvent({ ...event, tabId, url });
 }
 
 async function readInteractionResult(tabId, approvedOrigin) {
@@ -1088,6 +1133,29 @@ chrome.debugger.onDetach.addListener((source, reason) => {
     tabId: source.tabId,
     reason,
   });
+});
+
+// Live CDP event to unified readiness stream (issue #583 / #601 block 1).
+// Additive: posts live `navigation.committed` (Page.frameNavigated) and
+// `document.ready` (tab reaches complete) alongside the snapshot-derived events,
+// so the Runtime gets a genuine live stream to own the wait once wired.
+chrome.debugger.onEvent.addListener((source, method, params) => {
+  if (source.tabId !== attachedTabId || !port) return;
+  if (method === 'Page.frameNavigated') {
+    const frame = (params as Record<string, any> | undefined)?.frame as { url?: string } | undefined;
+    const raw = frame?.url;
+    const liveUrl = typeof raw === 'string' && raw ? raw : undefined;
+    if (liveUrl) emitLiveCommitted(source.tabId, liveUrl);
+  }
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (tabId !== attachedTabId || !port || attachedTabId === null) return;
+  if (changeInfo.status === 'complete') {
+    const target = targets.current();
+    const raw = target?.tabId === tabId ? (target as { url?: string }).url : undefined;
+    emitLiveDocumentReady(tabId, typeof raw === 'string' && raw ? raw : '', 'complete');
+  }
 });
 
 async function initialize() {

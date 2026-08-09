@@ -142,6 +142,23 @@ the synchronous replayers (`openReadiness` / `interactionSettle`) remain the
 current production path until block 1 (extension fire-and-forget navigate +
 live CDP event reporting) lands.
 
+**Live readiness emission (block 1, in progress):** the extension now emits a
+genuine live readiness stream **in addition to** the snapshot-derived events:
+`liveReadiness.ts` is the pure CDP → `BrowserRuntimeEvent` translator (tested in
+isolation, mirroring `pageReadiness.ts`), and `background.ts` allowlists
+`Page.enable`/`Network.enable` and registers `chrome.debugger.onEvent` (maps
+`Page.frameNavigated` → live `navigation.committed`) + `chrome.tabs.onUpdated`
+(maps status `complete` → live `document.ready`). These posts are additive — the
+`browser_open` snapshot-return contract is preserved. Stateful live facts
+(`Network.*` inflight deltas, repeated hydration DOM samples) are intentionally
+**not** wired yet: they need per-tab counters validated against real Chrome; the
+pure translators (`networkActivityEvent`, `domChangedEvent`, `liveReadinessBurst`)
+are unit-tested and ready. Wiring `waitForReadiness` into `ChromeExtensionBrowserSession.open()`
+(so the Runtime owns the wait) is the final flip — it requires navigate to become
+fire-and-forget so the live stream can conclude readiness before the round-trip
+returns, which is the remaining block-1 slice and will be done once the live
+event path is validated in a real Chrome session.
+
 **Interaction settle (issue step 4, current scope):** `interactionSettle.ts` is
 the pure post-interaction settle driver (mirroring `openReadiness`), and
 `ChromeExtensionBrowserSession` now routes `click`/`type`/`scroll` through it.

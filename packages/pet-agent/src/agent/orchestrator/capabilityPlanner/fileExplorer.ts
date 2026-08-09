@@ -18,6 +18,7 @@ const MAX_GREP_RESULTS = 50;
 const MAX_GREP_QUERY_TERMS = 3;
 const MAX_GREP_QUERY_CHARS = 160;
 const MAX_GREP_RESULT_BYTES = 64 * 1024;
+const MAX_GREP_SEARCH_CALLS = 3;
 
 export type CapabilityPlannerFileExplorer = {
   /**
@@ -103,6 +104,15 @@ export function createCapabilityPlannerFileExplorer(params: {
       query: string;
     }, runtime: ToolRuntime) => {
       try {
+        const grepSearchCallCount = (
+          runtime as ToolRuntime<{ grepSearchCallCount?: number }>
+        ).state?.grepSearchCallCount ?? 0;
+        if (grepSearchCallCount > MAX_GREP_SEARCH_CALLS) {
+          throw new PlannerFileToolError(
+            'planning_limit_reached',
+            `Capability exploration limit reached: grep_search may be called at most ${String(MAX_GREP_SEARCH_CALLS)} times. Do not call grep_search again; now call submit_plan, or return_to_answer if no executable plan is possible.`,
+          );
+        }
         const normalizedTerms = grepQueryTerms(query);
         const remainingDocumentReadBytes = Math.max(
           0,

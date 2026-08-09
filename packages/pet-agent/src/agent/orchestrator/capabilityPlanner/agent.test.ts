@@ -767,6 +767,55 @@ test('an unknown Capability returns tool feedback and can be repaired in-loop', 
   );
 });
 
+test('grep_search over its limit returns terminal planning guidance to the model', async (t) => {
+  const workspace = await createWorkspace(t, {
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary tasks.',
+      instructions: 'Complete the requested work.',
+    }),
+  });
+  const grep = (id: string) => ({
+    id,
+    name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+    args: { query: 'ordinary' },
+  });
+  const model = new ScriptedPlannerModel([
+    { toolCalls: [grep('grep-1')] },
+    { toolCalls: [grep('grep-2')] },
+    { toolCalls: [grep('grep-3')] },
+    { toolCalls: [grep('grep-4')] },
+    {
+      structuredOutput: {
+        kind: 'plan',
+        args: {
+          tasks: [{
+            capability: 'general',
+            task: 'Complete the requested repository update.',
+          }],
+        },
+      },
+    },
+  ]);
+
+  const result = await createCapabilityPlannerAgent({ model }).invoke(
+    plannerInput(workspace),
+  );
+
+  assert.deepEqual(result, {
+    tasks: [{
+      capability: 'general',
+      task: 'Complete the requested repository update.',
+    }],
+  });
+  const limitFeedback = model.invocations[4]?.find((message) =>
+    message instanceof ToolMessage && message.tool_call_id === 'grep-4');
+  assert.ok(limitFeedback instanceof ToolMessage);
+  assert.match(String(limitFeedback.content), /planning_limit_reached/i);
+  assert.match(String(limitFeedback.content), /limit reached/i);
+  assert.match(String(limitFeedback.content), /call submit_plan/i);
+});
+
 test('an empty workspace can return truthful facts to Answer', async (t) => {
   const workspace = await createWorkspace(t, {});
   const model = new ScriptedPlannerModel([{

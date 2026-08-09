@@ -204,6 +204,7 @@ test('bash toolkit reviews apply_patch with resolved file paths', async (t) => {
     patch: [
       '*** Begin Patch',
       `*** Update File: ${filePath}`,
+      '@@',
       ' alpha',
       '-beta',
       '+BETA',
@@ -282,6 +283,7 @@ test('apply_patch updates a file with context-anchored chunks', async (t) => {
     patch: [
       '*** Begin Patch',
       `*** Update File: ${filePath}`,
+      '@@',
       ' alpha',
       '-beta',
       '+BETA',
@@ -292,7 +294,9 @@ test('apply_patch updates a file with context-anchored chunks', async (t) => {
 
   assert.equal(result.ok, true);
   assert.equal(result.format, 'v4a');
-  assert.deepEqual(result.files, [{ path: filePath, type: 'update', chunks: 1 }]);
+  assert.deepEqual(result.file, { path: filePath, chunks: 1 });
+  assert.deepEqual(result.appliedHunks, [1]);
+  assert.equal('failedHunks' in result, false);
   assert.equal(readFileSync(filePath, 'utf-8'), 'alpha\nBETA\ngamma\ndelta\n');
 });
 
@@ -315,7 +319,7 @@ test('apply_patch accepts Unified Diff and locates hunks by context instead of l
 
   assert.equal(result.ok, true);
   assert.equal(result.format, 'unified');
-  assert.deepEqual(result.files, [{ path: filePath, type: 'update', chunks: 1 }]);
+  assert.deepEqual(result.file, { path: filePath, chunks: 1 });
   assert.equal(readFileSync(filePath, 'utf-8'), 'alpha\nBETA\ngamma\ndelta\n');
 });
 
@@ -362,13 +366,13 @@ test('apply_patch does not ignore leading indentation in Unified Diff context', 
   assert.equal(readFileSync(filePath, 'utf-8'), original);
 });
 
-test('apply_patch accepts Unified Diff add and delete operations', async (t) => {
+test('apply_patch rejects Unified Diff file additions and deletions', async (t) => {
   const root = createFileFixture(t);
   const addedPath = resolve(root, 'added.txt');
   const deletedPath = resolve(root, 'deleted.txt');
   writeFileSync(deletedPath, 'obsolete\n', 'utf-8');
 
-  const result = readJsonOutput(await applyPatchTool.invoke({
+  const addResult = readJsonOutput(await applyPatchTool.invoke({
     patch: [
       'diff --git a/added.txt b/added.txt',
       'new file mode 100644',
@@ -377,6 +381,10 @@ test('apply_patch accepts Unified Diff add and delete operations', async (t) => 
       '@@ -0,0 +1,2 @@',
       '+hello',
       '+world',
+    ].join('\n'),
+  }));
+  const deleteResult = readJsonOutput(await applyPatchTool.invoke({
+    patch: [
       'diff --git a/deleted.txt b/deleted.txt',
       'deleted file mode 100644',
       `--- ${deletedPath}`,
@@ -386,10 +394,14 @@ test('apply_patch accepts Unified Diff add and delete operations', async (t) => 
     ].join('\n'),
   }));
 
-  assert.equal(result.ok, true);
-  assert.equal(result.format, 'unified');
-  assert.equal(readFileSync(addedPath, 'utf-8'), 'hello\nworld\n');
-  assert.equal(existsSync(deletedPath), false);
+  assert.equal(addResult.ok, false);
+  assert.equal(deleteResult.ok, false);
+  assert.equal(addResult.format, 'unified');
+  assert.equal(deleteResult.format, 'unified');
+  assert.equal(addResult.code, 'unsupported_file_operation');
+  assert.equal(deleteResult.code, 'unsupported_file_operation');
+  assert.equal(existsSync(addedPath), false);
+  assert.equal(readFileSync(deletedPath, 'utf-8'), 'obsolete\n');
 });
 
 test('apply_patch treats --- and +++ hunk lines as content instead of file headers', async (t) => {
@@ -434,6 +446,62 @@ test('apply_patch does not mistake a V4A marker inside Unified Diff content for 
   assert.equal(result.ok, true);
   assert.equal(result.format, 'unified');
   assert.equal(readFileSync(filePath, 'utf-8'), 'before\nordinary content\nafter\n');
+});
+
+test('apply_patch rejects a V4A end marker appended to a Unified Diff', async (t) => {
+  const root = createFileFixture(t);
+  const filePath = resolve(root, 'note.txt');
+  const original = 'alpha\nbeta\ngamma\n';
+  writeFileSync(filePath, original, 'utf-8');
+
+  const result = readJsonOutput(await applyPatchTool.invoke({
+    format: 'unified',
+    patch: [
+      `--- ${filePath}`,
+      `+++ ${filePath}`,
+      '@@ -1,3 +1,3 @@',
+      ' alpha',
+      '-beta',
+      '+BETA',
+      ' gamma',
+      '*** End Patch',
+    ].join('\n'),
+  }));
+
+  assert.equal(result.ok, false);
+  assert.equal(result.format, 'unified');
+  assert.equal(result.phase, 'parse');
+  assert.equal(result.code, 'mixed_patch_formats');
+  assert.equal(result.line, 8);
+  assert.equal(readFileSync(filePath, 'utf-8'), original);
+});
+
+test('apply_patch rejects a non-terminal V4A marker in a Unified Diff', async (t) => {
+  const root = createFileFixture(t);
+  const filePath = resolve(root, 'note.txt');
+  const original = 'alpha\nbeta\ngamma\n';
+  writeFileSync(filePath, original, 'utf-8');
+
+  const result = readJsonOutput(await applyPatchTool.invoke({
+    format: 'unified',
+    patch: [
+      `--- ${filePath}`,
+      `+++ ${filePath}`,
+      '@@ -1,3 +1,3 @@',
+      ' alpha',
+      '*** End Patch',
+      '-beta',
+      '+BETA',
+      ' gamma',
+    ].join('\n'),
+  }));
+
+  assert.equal(result.ok, false);
+  assert.equal(result.format, 'unified');
+  assert.equal(result.phase, 'parse');
+  assert.equal(result.code, 'mixed_patch_formats');
+  assert.equal(result.line, 5);
+  assert.equal(readFileSync(filePath, 'utf-8'), original);
 });
 
 test('apply_patch rejects ambiguous Unified Diff context without modifying the file', async (t) => {
@@ -498,6 +566,82 @@ test('apply_patch applies multiple chunks with @@ anchors in one file', async (t
   ].join('\n'));
 });
 
+test('V4A applies independent hunks, discloses both outcomes, and accepts a later correction', async (t) => {
+  const root = createFileFixture(t);
+  const filePath = resolve(root, 'partial.txt');
+  writeFileSync(filePath, [
+    'alpha',
+    'old one',
+    'middle',
+    'actual two',
+    'omega',
+    '',
+  ].join('\n'), 'utf-8');
+
+  const partial = readJsonOutput(await applyPatchTool.invoke({
+    format: 'v4a',
+    patch: [
+      '*** Begin Patch',
+      `*** Update File: ${filePath}`,
+      '@@ alpha',
+      '-old one',
+      '+new one',
+      '@@ middle',
+      '-actual two stale',
+      '+new two',
+      '@@ actual two',
+      '-omega',
+      '+OMEGA',
+      '*** End Patch',
+    ].join('\n'),
+  }));
+
+  assert.equal(partial.ok, false);
+  assert.equal(partial.partial, true);
+  assert.equal(partial.code, 'partial_patch_applied');
+  assert.deepEqual(partial.file, { path: filePath, chunks: 2 });
+  assert.deepEqual(partial.appliedHunks, [1, 3]);
+  assert.equal('chunks' in partial, false);
+  const failed = (partial.failedHunks as Array<Record<string, unknown>>)[0];
+  assert.equal(failed?.hunk, 2);
+  assert.equal(failed?.code, 'context_not_found');
+  assert.equal(failed?.diff, '@@ middle\n-actual two stale\n+new two');
+  assert.equal('expected' in (failed ?? {}), false);
+  assert.match(JSON.stringify(failed?.closest), /actual two/);
+  assert.equal('nextAction' in partial, false);
+  assert.equal(readFileSync(filePath, 'utf-8'), [
+    'alpha',
+    'new one',
+    'middle',
+    'actual two',
+    'OMEGA',
+    '',
+  ].join('\n'));
+
+  const retry = readJsonOutput(await applyPatchTool.invoke({
+    format: 'v4a',
+    patch: [
+      '*** Begin Patch',
+      `*** Update File: ${filePath}`,
+      '@@ middle',
+      '-actual two',
+      '+new two',
+      '*** End Patch',
+    ].join('\n'),
+  }));
+
+  assert.equal(retry.ok, true);
+  assert.deepEqual(retry.file, { path: filePath, chunks: 1 });
+  assert.equal(readFileSync(filePath, 'utf-8'), [
+    'alpha',
+    'new one',
+    'middle',
+    'new two',
+    'OMEGA',
+    '',
+  ].join('\n'));
+});
+
 test('apply_patch tolerates whitespace drift in context lines', async (t) => {
   const root = createFileFixture(t);
   const filePath = resolve(root, 'drift.txt');
@@ -507,6 +651,7 @@ test('apply_patch tolerates whitespace drift in context lines', async (t) => {
     patch: [
       '*** Begin Patch',
       `*** Update File: ${filePath}`,
+      '@@',
       ' alpha',
       '-beta',
       '+BETA',
@@ -515,8 +660,8 @@ test('apply_patch tolerates whitespace drift in context lines', async (t) => {
   }));
 
   assert.equal(result.ok, true);
-  const files = result.files as Array<Record<string, unknown>>;
-  assert.equal(files[0]?.fuzz, 'ignore-whitespace');
+  const file = result.file as Record<string, unknown>;
+  assert.equal(file.fuzz, 'ignore-whitespace');
   assert.equal(readFileSync(filePath, 'utf-8'), 'alpha   \nBETA\ngamma\n');
 });
 
@@ -536,6 +681,7 @@ test('apply_patch preserves original indentation on fuzzy-matched context lines'
     patch: [
       '*** Begin Patch',
       `*** Update File: ${filePath}`,
+      '@@',
       ' @dataclass(frozen=True)',
       ' class AppConfig:',
       '-   profile: str',
@@ -547,8 +693,8 @@ test('apply_patch preserves original indentation on fuzzy-matched context lines'
   }));
 
   assert.equal(result.ok, true);
-  const files = result.files as Array<Record<string, unknown>>;
-  assert.equal(files[0]?.fuzz, 'ignore-whitespace');
+  const file = result.file as Record<string, unknown>;
+  assert.equal(file.fuzz, 'ignore-whitespace');
   assert.equal(readFileSync(filePath, 'utf-8'), [
     '@dataclass(frozen=True)',
     'class AppConfig:',
@@ -559,7 +705,7 @@ test('apply_patch preserves original indentation on fuzzy-matched context lines'
   ].join('\n'));
 });
 
-test('apply_patch handles add, delete, and move in one patch', async (t) => {
+test('apply_patch rejects V4A file additions, deletions, and moves', async (t) => {
   const root = createFileFixture(t);
   const keepPath = resolve(root, 'keep.txt');
   const dropPath = resolve(root, 'drop.txt');
@@ -568,13 +714,25 @@ test('apply_patch handles add, delete, and move in one patch', async (t) => {
   writeFileSync(keepPath, 'old name\n', 'utf-8');
   writeFileSync(dropPath, 'bye\n', 'utf-8');
 
-  const result = readJsonOutput(await applyPatchTool.invoke({
+  const addResult = readJsonOutput(await applyPatchTool.invoke({
     patch: [
       '*** Begin Patch',
       `*** Add File: ${addedPath}`,
       '+hello',
       '+world',
+      '*** End Patch',
+    ].join('\n'),
+  }));
+  const deleteResult = readJsonOutput(await applyPatchTool.invoke({
+    patch: [
+      '*** Begin Patch',
       `*** Delete File: ${dropPath}`,
+      '*** End Patch',
+    ].join('\n'),
+  }));
+  const moveResult = readJsonOutput(await applyPatchTool.invoke({
+    patch: [
+      '*** Begin Patch',
       `*** Update File: ${keepPath}`,
       `*** Move to: ${renamedPath}`,
       '-old name',
@@ -583,11 +741,16 @@ test('apply_patch handles add, delete, and move in one patch', async (t) => {
     ].join('\n'),
   }));
 
-  assert.equal(result.ok, true);
-  assert.equal(readFileSync(addedPath, 'utf-8'), 'hello\nworld');
-  assert.equal(existsSync(dropPath), false);
-  assert.equal(existsSync(keepPath), false);
-  assert.equal(readFileSync(renamedPath, 'utf-8'), 'new name\n');
+  assert.equal(addResult.ok, false);
+  assert.equal(deleteResult.ok, false);
+  assert.equal(moveResult.ok, false);
+  assert.equal(addResult.code, 'unsupported_file_operation');
+  assert.equal(deleteResult.code, 'unsupported_file_operation');
+  assert.equal(moveResult.code, 'unsupported_file_operation');
+  assert.equal(existsSync(addedPath), false);
+  assert.equal(readFileSync(dropPath, 'utf-8'), 'bye\n');
+  assert.equal(readFileSync(keepPath, 'utf-8'), 'old name\n');
+  assert.equal(existsSync(renamedPath), false);
 });
 
 test('apply_patch reports structured missing context with closest-match hint', async (t) => {
@@ -599,6 +762,7 @@ test('apply_patch reports structured missing context with closest-match hint', a
     patch: [
       '*** Begin Patch',
       `*** Update File: ${filePath}`,
+      '@@',
       '-beta original',
       '+BETA',
       '*** End Patch',
@@ -609,12 +773,50 @@ test('apply_patch reports structured missing context with closest-match hint', a
   assert.equal(output.format, 'v4a');
   assert.equal(output.phase, 'match');
   assert.equal(output.code, 'context_not_found');
-  assert.equal(output.hunk, 1);
-  assert.match(JSON.stringify(output.closest), /beta variant/);
+  assert.deepEqual(output.appliedHunks, []);
+  const failed = (output.failedHunks as Array<Record<string, unknown>>)[0];
+  assert.equal(failed?.hunk, 1);
+  assert.equal(failed?.diff, '@@\n-beta original\n+BETA');
+  assert.match(JSON.stringify(failed?.closest), /beta variant/);
+  assert.equal('nextAction' in output, false);
   assert.equal(readFileSync(filePath, 'utf-8'), 'alpha\nbeta variant\ngamma\n');
 });
 
-test('apply_patch validates every file before touching any', async (t) => {
+test('V4A rejects ambiguous hunk context and discloses its diff', async (t) => {
+  const root = createFileFixture(t);
+  const filePath = resolve(root, 'repeated-v4a.txt');
+  const original = 'alpha\nbeta\ngamma\nalpha\nbeta\ngamma\n';
+  writeFileSync(filePath, original, 'utf-8');
+
+  const output = readJsonOutput(await applyPatchTool.invoke({
+    format: 'v4a',
+    patch: [
+      '*** Begin Patch',
+      `*** Update File: ${filePath}`,
+      '@@',
+      ' alpha',
+      '-beta',
+      '+BETA',
+      ' gamma',
+      '*** End Patch',
+    ].join('\n'),
+  }));
+
+  assert.equal(output.ok, false);
+  assert.equal(output.partial, false);
+  assert.equal(output.code, 'ambiguous_context');
+  assert.equal(
+    (output.failedHunks as Array<Record<string, unknown>>)[0]?.diff,
+    '@@\n alpha\n-beta\n+BETA\n gamma',
+  );
+  assert.deepEqual(
+    (output.failedHunks as Array<Record<string, unknown>>)[0]?.matches,
+    [1, 4],
+  );
+  assert.equal(readFileSync(filePath, 'utf-8'), original);
+});
+
+test('apply_patch rejects multiple V4A file updates without touching any file', async (t) => {
   const root = createFileFixture(t);
   const okPath = resolve(root, 'ok.txt');
   writeFileSync(okPath, 'fine\n', 'utf-8');
@@ -623,9 +825,11 @@ test('apply_patch validates every file before touching any', async (t) => {
     patch: [
       '*** Begin Patch',
       `*** Update File: ${okPath}`,
+      '@@',
       '-fine',
       '+changed',
       `*** Update File: ${resolve(root, 'missing.txt')}`,
+      '@@',
       '-nope',
       '+never',
       '*** End Patch',
@@ -634,12 +838,12 @@ test('apply_patch validates every file before touching any', async (t) => {
 
   assert.equal(output.ok, false);
   assert.equal(output.format, 'v4a');
-  assert.equal(output.phase, 'match');
-  assert.equal(output.code, 'target_not_found');
+  assert.equal(output.phase, 'parse');
+  assert.equal(output.code, 'multiple_file_patches');
   assert.equal(readFileSync(okPath, 'utf-8'), 'fine\n');
 });
 
-test('apply_patch preflights every Unified Diff file before writing', async (t) => {
+test('apply_patch rejects multiple Unified Diff file updates without touching any file', async (t) => {
   const root = createFileFixture(t);
   const okPath = resolve(root, 'ok.txt');
   const missingPath = resolve(root, 'missing.txt');
@@ -664,7 +868,8 @@ test('apply_patch preflights every Unified Diff file before writing', async (t) 
 
   assert.equal(output.ok, false);
   assert.equal(output.format, 'unified');
-  assert.equal(output.code, 'target_not_found');
+  assert.equal(output.phase, 'parse');
+  assert.equal(output.code, 'multiple_file_patches');
   assert.equal(readFileSync(okPath, 'utf-8'), 'fine\n');
 });
 
@@ -715,6 +920,7 @@ test('apply_patch rejects malformed patches and declared format mismatches', asy
     patch: [
       '*** Begin Patch',
       '*** Update File: file.txt',
+      '@@',
       '-old',
       '+new',
       '*** End Patch',
@@ -725,6 +931,22 @@ test('apply_patch rejects malformed patches and declared format mismatches', asy
   assert.equal(mismatch.code, 'patch_format_mismatch');
   assert.equal(mismatch.declaredFormat, 'unified');
   assert.equal(mismatch.detectedFormat, 'v4a');
+
+  const reverseMismatch = readJsonOutput(await applyPatchTool.invoke({
+    format: 'v4a',
+    patch: [
+      '--- a/file.txt',
+      '+++ b/file.txt',
+      '@@ -1 +1 @@',
+      '-old',
+      '+new',
+    ].join('\n'),
+  }));
+  assert.equal(reverseMismatch.ok, false);
+  assert.equal(reverseMismatch.phase, 'detect');
+  assert.equal(reverseMismatch.code, 'patch_format_mismatch');
+  assert.equal(reverseMismatch.declaredFormat, 'v4a');
+  assert.equal(reverseMismatch.detectedFormat, 'unified');
   assert.throws(
     () => parsePatch('*** Begin Patch\n*** Update File: a.txt\n-old\n+new'),
     PatchParseError,
@@ -767,10 +989,60 @@ test('parsePatchDocument rejects a Unified Diff hunk that contains only context'
   );
 });
 
-test('V4A and Unified Diff normalize equivalent updates to the same operations', () => {
+test('V4A requires explicit changing hunks and strict envelope boundaries', () => {
+  const invalidPatches = [
+    [
+      '*** Begin Patch',
+      '*** Update File: src/app.ts',
+      '-old',
+      '+new',
+      '*** End Patch',
+    ],
+    [
+      '*** Begin Patch',
+      '*** Update File: src/app.ts',
+      '@@',
+      ' unchanged',
+      '*** End Patch',
+    ],
+    [
+      'model preamble',
+      '*** Begin Patch',
+      '*** Update File: src/app.ts',
+      '@@',
+      '-old',
+      '+new',
+      '*** End Patch',
+    ],
+    [
+      '*** Begin Patch',
+      '*** Update File: src/app.ts',
+      '@@',
+      '-old',
+      '+new',
+      '*** End Patch',
+      'model epilogue',
+    ],
+  ];
+
+  for (const lines of invalidPatches) {
+    assert.throws(
+      () => parsePatchDocument(lines.join('\n'), 'v4a'),
+      (error: unknown) => {
+        assert.ok(error instanceof PatchParseError);
+        assert.equal(error.details.format, 'v4a');
+        assert.equal(error.details.phase, 'parse');
+        return true;
+      },
+    );
+  }
+});
+
+test('V4A and Unified Diff normalize equivalent content to the same update', () => {
   const v4a = parsePatchDocument([
     '*** Begin Patch',
     '*** Update File: src/app.ts',
+    '@@',
     ' before',
     '-old',
     '+new',
@@ -787,14 +1059,13 @@ test('V4A and Unified Diff normalize equivalent updates to the same operations',
     ' after',
   ].join('\n'));
 
-  assert.deepEqual(unified.operations, v4a.operations);
+  assert.deepEqual(unified.update, v4a.update);
 });
 
-test('parsePatch parses anchors, moves, and end-of-file markers', () => {
-  const operations = parsePatch([
+test('parsePatch parses anchors and end-of-file markers', () => {
+  const update = parsePatch([
     '*** Begin Patch',
     '*** Update File: src/app.ts',
-    '*** Move to: src/main.ts',
     '@@ function main()',
     ' context',
     '-old',
@@ -803,11 +1074,7 @@ test('parsePatch parses anchors, moves, and end-of-file markers', () => {
     '*** End Patch',
   ].join('\n'));
 
-  assert.equal(operations.length, 1);
-  const update = operations[0];
-  assert.equal(update?.type, 'update');
-  if (update?.type !== 'update') return;
-  assert.equal(update.moveTo, 'src/main.ts');
+  assert.equal(update.path, 'src/app.ts');
   assert.equal(update.chunks.length, 1);
   assert.equal(update.chunks[0]?.anchor, 'function main()');
   assert.deepEqual(update.chunks[0]?.oldLines, ['context', 'old']);

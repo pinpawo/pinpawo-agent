@@ -6,12 +6,15 @@ import { z } from 'zod';
 import { tryStat } from './fileSystemUtils';
 import {
   applyChunksToContent,
+  applyChunksToContentPartially,
   PatchApplyError,
   PatchParseError,
   parsePatchDocument,
+  type FailedChunk,
+  type PartialUpdateResult,
+  type PatchChunk,
   type ParsedPatch,
   type PatchFormat,
-  type PatchOperation,
 } from './applyPatch';
 import {
   okOutputPathSummary,
@@ -442,11 +445,8 @@ function normalizeApplyPatchAction(input: unknown): ApplyPatchAction {
 }
 
 interface ResolvedPatchWrite {
-  operation: PatchOperation;
   absolutePath: string;
-  moveToPath: string | null;
-  nextContent: string | null;
-  before: string | undefined;
+  nextContent: string;
   chunksApplied: number;
   fuzz: 'exact' | 'ignore-trailing-whitespace' | 'ignore-whitespace';
 }
@@ -469,11 +469,37 @@ function atomicWriteFile(filePath: string, content: string) {
 }
 
 const APPLY_PATCH_DESCRIPTION = [
-  '按补丁新增、修改或删除一个或多个本地文件。format 必须与 patch 内容一致，每次调用只使用一种格式；移动文件使用 v4a。',
-  '修改前先读取文件现状，并提供足以唯一定位修改位置的上下文。所有目标会先完成解析和匹配，任一目标失败均不写入文件。',
-  '失败时根据返回的结构化错误重新读取文件或修正补丁后重试。',
+  '使用补丁修改一个已存在的本地文件。每次调用只允许一个文件 update；建议每次只提交少量、彼此独立的修改块。新增或完全重写用 write_file，移动用 move_path；删除文件不属于本工具。',
+  'format 与 patch 内容必须严格一致：v4a 必须使用 *** Begin Patch / *** End Patch 包裹；unified 必须使用 --- / +++ / @@，且不得出现原始 V4A 标记。不得混用或自动转换协议。',
+  'V4A 最小结构为：*** Begin Patch、*** Update File: <path>、@@ <可选唯一 anchor>、以空格/-/+开头的 diff 行、*** End Patch；每个 hunk 都必须显式写 @@ 并至少包含一条变更行。',
+  'V4A 中每个 @@ hunk 是独立替换块：完整补丁先通过语法解析，再逐块定位和应用；某块匹配失败时，其他成功块仍会写入。语法错误不会写入任何块，Unified Diff 保持整次原子应用。',
+  '修改前先读取文件现状，并提供足以唯一定位修改位置的上下文。不要在同一次调用中放入彼此依赖的 hunk；工具不会自动重新生成补丁或循环重试失败块。',
+  'V4A 用 appliedHunks 返回成功块编号以节省 token；failedHunks 返回失败块的原始 diff、错误和相近上下文。',
   '如果修改的是 JSON、manifest.json、package.json、tsconfig.json 等结构化文件，完成后应继续调用 validate_structured_file。整文件新建或完全重写可以直接用 write_file。',
 ].join('\n');
+
+function chunkDiffText(chunk: PatchChunk) {
+  return [
+    chunk.anchor ? `@@ ${chunk.anchor}` : '@@',
+    ...chunk.lines.map((line) => {
+      if (line.kind === 'added') return `+${line.text}`;
+      if (line.kind === 'removed') return `-${line.text}`;
+      return ` ${line.text}`;
+    }),
+    ...(chunk.isEndOfFile ? ['*** End of File'] : []),
+  ].join('\n');
+}
+
+function failedChunkOutput(chunk: FailedChunk, source: PatchChunk) {
+  return {
+    hunk: chunk.hunk,
+    diff: chunkDiffText(source),
+    code: chunk.code,
+    message: chunk.message.split('\n')[0] ?? chunk.message,
+    ...(chunk.closest ? { closest: chunk.closest } : {}),
+    ...(chunk.matches ? { matches: chunk.matches } : {}),
+  };
+}
 
 function patchFailureOutput(
   error: unknown,
@@ -514,114 +540,93 @@ export const applyPatchTool = tool(
       parsed = parsePatchDocument(patch, format);
       phase = 'match';
 
-      const writes: ResolvedPatchWrite[] = parsed.operations.map((operation) => {
-        if (operation.type === 'add') {
-          const absolutePath = resolveUserPath(operation.path);
-          if (tryStat(absolutePath)) {
-            throw patchTargetError(
-              'target_already_exists',
-              `Add File target already exists: ${absolutePath}`,
-              operation.path,
-            );
-          }
-          return {
-            operation,
-            absolutePath,
-            moveToPath: null,
-            nextContent: operation.content,
-            before: undefined,
-            chunksApplied: 0,
-            fuzz: 'exact',
-          };
-        }
-
-        if (operation.type === 'delete') {
-          const absolutePath = resolveUserPath(operation.path);
-          const stat = tryStat(absolutePath);
-          if (!stat?.isFile()) {
-            throw patchTargetError(
-              'target_not_found',
-              `Delete File target is not an existing file: ${absolutePath}`,
-              operation.path,
-            );
-          }
-          return {
-            operation,
-            absolutePath,
-            moveToPath: null,
-            nextContent: null,
-            before: readFileContentPreview(absolutePath),
-            chunksApplied: 0,
-            fuzz: 'exact',
-          };
-        }
-
-        const absolutePath = resolveUserPath(operation.path);
-        const stat = tryStat(absolutePath);
-        if (!stat?.isFile()) {
-          throw patchTargetError(
-            'target_not_found',
-            `Update File target is not an existing file: ${absolutePath}`,
-            operation.path,
-          );
-        }
-        const original = readUtf8TextFile(absolutePath);
-        const result = applyChunksToContent(
-          operation.path,
-          original,
-          operation.chunks,
-          parsed?.format === 'unified'
-            ? { strictLeadingWhitespace: true, requireUniqueContext: true }
-            : {},
+      const update = parsed.update;
+      const absolutePath = resolveUserPath(update.path);
+      const stat = tryStat(absolutePath);
+      if (!stat?.isFile()) {
+        throw patchTargetError(
+          'target_not_found',
+          `Update File target is not an existing file: ${absolutePath}`,
+          update.path,
         );
-        const moveToPath = operation.moveTo ? resolveUserPath(operation.moveTo) : null;
-        if (moveToPath && moveToPath !== absolutePath && tryStat(moveToPath)) {
-          throw patchTargetError(
-            'target_already_exists',
-            `Move to target already exists: ${moveToPath}`,
-            operation.moveTo ?? operation.path,
+      }
+      const original = readUtf8TextFile(absolutePath);
+      const result = parsed.format === 'v4a'
+        ? applyChunksToContentPartially(
+            update.path,
+            original,
+            update.chunks,
+            { requireUniqueContext: true },
+          )
+        : applyChunksToContent(
+            update.path,
+            original,
+            update.chunks,
+            { strictLeadingWhitespace: true, requireUniqueContext: true },
           );
-        }
-        return {
-          operation,
-          absolutePath,
-          moveToPath,
-          nextContent: result.content,
-          before: truncateForOperationDetails(original),
-          chunksApplied: result.chunks.length,
-          fuzz: worstFuzz(result.chunks),
-        };
-      });
+      const write: ResolvedPatchWrite = {
+        absolutePath,
+        nextContent: result.content,
+        chunksApplied: result.chunks.length,
+        fuzz: worstFuzz(result.chunks),
+      };
 
-      // All operations validated; now touch the filesystem.
+      const failures: FailedChunk[] = 'failures' in result
+        ? (result as PartialUpdateResult).failures
+        : [];
+      const appliedHunks = result.chunks.map((chunk) => chunk.hunk);
+      const failedHunks = failures.map((failure) =>
+        failedChunkOutput(failure, update.chunks[failure.hunk - 1]!));
+
+      if (failures.length > 0 && result.chunks.length === 0) {
+        const primaryFailure = failures[0];
+        return JSON.stringify({
+          ok: false,
+          partial: false,
+          format: parsed.format,
+          phase: 'match',
+          code: failures.length === 1
+            ? primaryFailure?.code
+            : 'all_patch_chunks_failed',
+          message: `Applied 0 of ${update.chunks.length.toString()} V4A hunks; ${failures.length.toString()} failed.`,
+          file: {
+            path: write.absolutePath,
+            chunks: 0,
+          },
+          appliedHunks,
+          failedHunks,
+        });
+      }
+
+      // All successful chunks are committed with one atomic file replacement.
       phase = 'write';
-      const files = writes.map((write) => {
-        if (write.operation.type === 'add') {
-          mkdirSync(dirname(write.absolutePath), { recursive: true });
-          atomicWriteFile(write.absolutePath, write.nextContent ?? '');
-          return { path: write.absolutePath, type: 'add' as const };
-        }
-        if (write.operation.type === 'delete') {
-          rmSync(write.absolutePath);
-          return { path: write.absolutePath, type: 'delete' as const };
-        }
-        const targetPath = write.moveToPath ?? write.absolutePath;
-        if (write.moveToPath && write.moveToPath !== write.absolutePath) {
-          mkdirSync(dirname(write.moveToPath), { recursive: true });
-          rmSync(write.absolutePath);
-        }
-        atomicWriteFile(targetPath, write.nextContent ?? '');
-        return {
-          path: targetPath,
-          type: write.moveToPath && write.moveToPath !== write.absolutePath
-            ? 'move' as const
-            : 'update' as const,
-          chunks: write.chunksApplied,
-          ...(write.fuzz !== 'exact' ? { fuzz: write.fuzz } : {}),
-        };
-      });
+      atomicWriteFile(write.absolutePath, write.nextContent);
+      const file = {
+        path: write.absolutePath,
+        chunks: write.chunksApplied,
+        ...(write.fuzz !== 'exact' ? { fuzz: write.fuzz } : {}),
+      };
 
-      return JSON.stringify({ ok: true, format: parsed.format, files });
+      if (failures.length > 0) {
+        return JSON.stringify({
+          ok: false,
+          partial: true,
+          format: parsed.format,
+          phase: 'match',
+          code: 'partial_patch_applied',
+          message: `Applied ${result.chunks.length.toString()} of ${update.chunks.length.toString()} V4A hunks; ${failures.length.toString()} failed.`,
+          file,
+          appliedHunks,
+          failedHunks,
+        });
+      }
+
+      return JSON.stringify({
+        ok: true,
+        format: parsed.format,
+        file,
+        appliedHunks,
+      });
     } catch (err) {
       return patchFailureOutput(err, parsed, phase);
     }
@@ -630,8 +635,8 @@ export const applyPatchTool = tool(
     name: 'apply_patch',
     description: APPLY_PATCH_DESCRIPTION,
     schema: z.object({
-      format: z.enum(['v4a', 'unified']).describe('补丁格式：V4A 使用 v4a，Unified Diff 使用 unified'),
-      patch: z.string().describe('完整的 V4A 或 Unified Diff 补丁文本；每次调用只使用一种格式'),
+      format: z.enum(['v4a', 'unified']).describe('补丁协议；必须与 patch 内容严格一致'),
+      patch: z.string().describe('只更新一个已存在文件的补丁；V4A 用独立 @@ hunk 分块，且不得混合 v4a 与 unified 语法'),
     }),
   },
 );
@@ -909,7 +914,7 @@ export const fileOperationMetadata: Record<string, ToolOperationMetadata> = {
       const record = readRecord(input);
       const patch = readString(record, 'patch');
       if (!patch) return null;
-      let files: Array<{ path: string; type: string }> = [];
+      let file: { path: string } | undefined;
       let target: string | undefined;
       const declaredFormat = readString(record, 'format');
       let format: PatchFormat | undefined = declaredFormat === 'v4a' || declaredFormat === 'unified'
@@ -918,33 +923,32 @@ export const fileOperationMetadata: Record<string, ToolOperationMetadata> = {
       try {
         const parsed = parsePatchDocument(patch, format);
         format = parsed.format;
-        files = parsed.operations.map((operation) => ({ path: resolveUserPath(operation.path), type: operation.type }));
-        target = files[0]?.path;
+        file = { path: resolveUserPath(parsed.update.path) };
+        target = file.path;
       } catch {
         // Unparseable patch still gets a raw preview below.
       }
       return {
         target,
-        summary: files.length > 1 ? `${files.length.toString()} files` : files[0]?.type,
+        summary: file ? 'update' : undefined,
         details: {
           format,
-          files: files.length > 0 ? files : undefined,
+          file,
           patch: truncateForOperationDetails(patch),
         },
       };
     },
     summarizeOutput: (output) => {
       const record = readJsonRecord(output);
-      const rawFiles = record?.files;
-      if (!Array.isArray(rawFiles)) return null;
-      const files = rawFiles.filter((file): file is Record<string, unknown> => Boolean(file) && typeof file === 'object');
-      const target = files.map((file) => file.path).find((path): path is string => typeof path === 'string');
+      const file = record?.file;
+      if (!file || typeof file !== 'object' || Array.isArray(file)) return null;
+      const target = 'path' in file && typeof file.path === 'string' ? file.path : undefined;
       if (!target) return null;
       return {
         target,
         details: {
-          files,
-          after: files.length === 1 ? readFileContentPreview(target) : undefined,
+          file,
+          after: readFileContentPreview(target),
         },
       };
     },

@@ -7,8 +7,6 @@
  */
 
 export { createStudioOrchestrator } from './createStudioOrchestrator';
-export { createPetAgentRuntime } from './createPetAgentRuntime';
-export type { PetAgentRuntimeConfig } from './createPetAgentRuntime';
 
 export {
   createPlanToolkit,

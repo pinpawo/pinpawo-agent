@@ -867,37 +867,57 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
     }
     scheduling = true;
     try {
-      while (true) {
-        const item = queue.find((candidate) => candidate.status === 'queued');
-        if (!item) {
-          return;
-        }
-        const record = runs.get(item.runId);
-        if (!record || record.outcome) {
-          item.status = 'cancelled';
-          item.finishedAt = new Date().toISOString();
-          if (record) {
+      // 每一轮都完整扫一遍队列:被依赖或 capacity 挡住的 task 只标记自己
+      // 所属 run 为 blocked,不再中断整趟调度。否则队首一个卡住的 task
+      // 会连带阻塞其他 run 里本来可以跑的任务。
+      let dispatchedThisPass: boolean;
+      do {
+        dispatchedThisPass = false;
+        const blockedRunIds = new Set<string>();
+
+        for (const item of [...queue]) {
+          if (item.status !== 'queued') continue;
+
+          const record = runs.get(item.runId);
+          if (!record || record.outcome) {
+            item.status = 'cancelled';
+            item.finishedAt = new Date().toISOString();
+            if (record) {
+              saveRunSnapshot(record);
+            }
+            continue;
+          }
+          if (!dependenciesDone(item)) {
+            blockedRunIds.add(item.runId);
+            continue;
+          }
+          if (!petRegistry.isDispatchable(item.petId) || activePets.has(item.petId)) {
+            // 该 pet 正忙或不可派发 —— 只跳过这个 task,继续看下一个。
+            blockedRunIds.add(item.runId);
+            continue;
+          }
+          if (record.status === 'blocked') {
+            setRunStatus(record, 'running');
             saveRunSnapshot(record);
           }
-          continue;
+          dispatchQueuedTask(item, record);
+          dispatchedThisPass = true;
         }
-        if (!dependenciesDone(item)) {
-          return;
+
+        // 一个 run 只有在本轮完全没派出任何 task 时才算 blocked。
+        for (const runId of blockedRunIds) {
+          const record = runs.get(runId);
+          if (!record || record.outcome) continue;
+          const hasRunningTask = queue.some(
+            (candidate) => candidate.runId === runId && candidate.status === 'running',
+          );
+          if (!hasRunningTask && record.status !== 'blocked') {
+            setRunStatus(record, 'blocked');
+            saveRunSnapshot(record);
+          }
         }
-        if (!petRegistry.isDispatchable(item.petId) || activePets.has(item.petId)) {
-          // Current iteration keeps strict global FIFO: a blocked head item stops this
-          // scheduling pass even if later runs have ready work. Task completion or a new
-          // enqueue triggers another pass; cross-run fairness is a later scheduler concern.
-          setRunStatus(record, 'blocked');
-          saveRunSnapshot(record);
-          return;
-        }
-        if (record.status === 'blocked') {
-          setRunStatus(record, 'running');
-          saveRunSnapshot(record);
-        }
-        dispatchQueuedTask(item, record);
-      }
+        // 派发会释放依赖,可能让先前跳过的 task 变为可执行,因此再扫一轮。
+      } while (dispatchedThisPass);
     } finally {
       scheduling = false;
     }

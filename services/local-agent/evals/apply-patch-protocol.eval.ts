@@ -1,8 +1,8 @@
 /**
- * Live model evaluation for apply_patch protocol selection.
+ * Live model evaluation for V4A apply_patch generation.
  *
- * The subject model sees the real tool schema and description. The task does
- * not name a patch protocol, so format selection belongs to the model.
+ * The subject model sees the real tool schema and description. Scenarios check
+ * whether it produces valid V4A and completes the requested file update.
  *
  * Run:
  *   npm run eval:apply-patch -w pinpawo
@@ -18,7 +18,7 @@ import { resolve } from 'node:path';
 import { createSubagent } from '@pinpawo/pet-agent';
 import { buildLocalAgentModels } from '../src/agentModels';
 import { buildLocalModelProfileRegistry } from '../src/llmConfig';
-import { parsePatchDocument, type PatchFormat } from '../src/toolkits/local/applyPatch';
+import { parsePatch } from '../src/toolkits/local/applyPatch';
 import { applyPatchTool, viewFileChunkTool } from '../src/toolkits/local/fileTools';
 import { getLocalToolsWorkdir, setLocalToolsWorkdir } from '../src/toolkits/local/pathUtils';
 
@@ -30,9 +30,7 @@ type Scenario = {
 };
 
 type RecordedPatchCall = {
-  declaredFormat: unknown;
-  detectedFormat: PatchFormat | null;
-  formatMatches: boolean | null;
+  validV4A: boolean;
   ok: boolean;
   errorCode: unknown;
 };
@@ -113,21 +111,19 @@ function recordPatchCalls(messages: BaseMessage[]): RecordedPatchCall[] {
     }).tool_calls ?? [];
     for (const call of toolCalls) {
       if (call.name !== 'apply_patch') continue;
-      const declaredFormat = call.args?.format;
       const patch = call.args?.patch;
-      let detectedFormat: PatchFormat | null = null;
+      let validV4A = false;
       if (typeof patch === 'string') {
         try {
-          detectedFormat = parsePatchDocument(patch).format;
+          parsePatch(patch);
+          validV4A = true;
         } catch {
-          detectedFormat = null;
+          validV4A = false;
         }
       }
       const output = call.id ? outputs.get(call.id) : undefined;
       calls.push({
-        declaredFormat,
-        detectedFormat,
-        formatMatches: detectedFormat === null ? null : declaredFormat === detectedFormat,
+        validV4A,
         ok: output?.ok === true,
         errorCode: output?.code,
       });
@@ -173,8 +169,7 @@ for (let repeat = 1; repeat <= repeats; repeat += 1) {
         attempts: calls.length,
         retries: Math.max(0, calls.length - 1),
         firstAttemptSucceeded: calls[0]?.ok === true,
-        formats: calls.map((call) => call.declaredFormat),
-        formatMatches: calls.every((call) => call.formatMatches !== false),
+        validV4A: calls.every((call) => call.validV4A),
         calls,
         completionReason: result.completionReason,
       });
@@ -199,6 +194,6 @@ const report = {
 };
 
 console.log(JSON.stringify(report, null, 2));
-if (successful !== results.length || results.some((result) => !result.formatMatches)) {
+if (successful !== results.length || results.some((result) => !result.validV4A)) {
   process.exitCode = 1;
 }

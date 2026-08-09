@@ -62,6 +62,8 @@ the original design and reference documents. Maintenance rules live in
 
 ## Capabilities, toolkits, and artifacts
 
+- [Apply Patch tool implementation](apply-patch-tool-implementation.md) — current
+  V4A-only single-file update contract, partial-hunk behavior, and compact result schema
 - [Toolkit composition design](PET_AGENT_TOOLKIT_COMPOSITION_DESIGN.md)
 - [Toolkit optional runtime lifecycle](TOOLKIT_RUNTIME_LIFECYCLE.md)
 - [Daily post capability](PET_AGENT_DAILY_POST_CAPABILITY.md)

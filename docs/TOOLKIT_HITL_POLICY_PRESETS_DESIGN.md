@@ -45,7 +45,7 @@ tool 负责执行动作和硬性校验。
 例子：
 
 - `run_shell` 继续硬性拒绝 `sudo`、破坏性系统命令和会等待交互式 stdin 的命令。命令自身携带内容的 heredoc 与输出重定向可以执行，其具体写入范围交给 toolkit review 判断。
-- `apply_patch` 继续解析 patch、校验上下文、保证原子写入。
+- `apply_patch` 继续解析 patch、校验上下文，并用一次原子文件替换提交结果；V4A hunk 的部分应用由工具自身负责。
 - `write_file` 继续处理 `createDirs`、`append` 等执行细节。
 
 这些是工具执行语义，不是 HITL policy。

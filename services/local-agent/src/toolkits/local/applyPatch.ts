@@ -1,34 +1,25 @@
-import { parseUnifiedDiff, UnifiedDiffParseError } from './unifiedDiff';
-
 /**
- * Patch parser and applier shared by the V4A and Unified Diff protocols.
+ * V4A patch parser and applier.
  *
  * Envelope grammar:
  *
  *   *** Begin Patch
- *   *** Add File: <path>
- *   +<content line>
  *   *** Update File: <path>
- *   [*** Move to: <new path>]
  *   @@ <optional context anchor>
  *    <context line>
  *   -<removed line>
  *   +<added line>
  *   [*** End of File]
- *   *** Delete File: <path>
  *   *** End Patch
  *
- * Update chunks locate themselves by context lines, never by line numbers.
- * Matching falls back through a whitespace-tolerance cascade:
- * exact -> ignore trailing whitespace -> ignore surrounding whitespace.
+ * Each update chunk starts with an explicit `@@` header and locates itself by
+ * context, never by line numbers. After the complete document passes syntax
+ * validation, chunks are matched and applied sequentially.
  */
 
 export const PATCH_BEGIN = '*** Begin Patch';
 export const PATCH_END = '*** End Patch';
-const ADD_FILE_PREFIX = '*** Add File: ';
 const UPDATE_FILE_PREFIX = '*** Update File: ';
-const DELETE_FILE_PREFIX = '*** Delete File: ';
-const MOVE_TO_PREFIX = '*** Move to: ';
 const END_OF_FILE_MARKER = '*** End of File';
 
 export interface PatchChunk {
@@ -44,37 +35,39 @@ export type PatchChunkLine =
   | { kind: 'removed'; text: string }
   | { kind: 'added'; text: string };
 
-export type PatchOperation =
-  | { type: 'add'; path: string; content: string }
-  | { type: 'delete'; path: string }
-  | { type: 'update'; path: string; moveTo: string | null; chunks: PatchChunk[] };
+export interface PatchUpdate {
+  path: string;
+  chunks: PatchChunk[];
+}
 
 export interface AppliedChunk {
+  hunk: number;
   startLine: number;
   removed: string[];
   added: string[];
   fuzz: 'exact' | 'ignore-trailing-whitespace' | 'ignore-whitespace';
 }
 
-export type PatchFormat = 'v4a' | 'unified';
-
-export interface ParsedPatch {
-  format: PatchFormat;
-  operations: PatchOperation[];
+export interface FailedChunk {
+  hunk: number;
+  code: string;
+  message: string;
+  anchor?: string;
+  expected?: string[];
+  closest?: string[];
+  matches?: number[];
 }
 
 export interface PatchErrorDetails {
   code: string;
-  phase: 'detect' | 'parse' | 'match' | 'write';
-  format?: PatchFormat;
-  declaredFormat?: PatchFormat;
-  detectedFormat?: PatchFormat;
+  phase: 'parse' | 'match' | 'write';
   line?: number;
   path?: string;
   hunk?: number;
   expected?: string[];
   closest?: string[];
   matches?: number[];
+  anchor?: string;
 }
 
 export class PatchParseError extends Error {
@@ -102,28 +95,30 @@ function parseError(lineIndex: number, message: string): never {
   });
 }
 
-export function parseV4APatch(patchText: string): PatchOperation[] {
-  const lines = patchText.replace(/\r\n/g, '\n').split('\n');
+function parseContractError(lineIndex: number, code: string, message: string): never {
+  throw new PatchParseError(`patch line ${lineIndex + 1}: ${message}`, {
+    code,
+    phase: 'parse',
+    line: lineIndex + 1,
+  });
+}
 
-  let index = lines.findIndex((line) => line.trim() === PATCH_BEGIN);
-  if (index === -1) {
+function parseV4APatch(patchText: string): PatchUpdate {
+  const lines = patchText.split('\n');
+
+  let index = lines.findIndex((line) => line.trim().length > 0);
+  if (index === -1 || lines[index]?.trim() !== PATCH_BEGIN) {
     throw new PatchParseError(`patch must start with "${PATCH_BEGIN}"`);
   }
   index += 1;
 
-  const operations: PatchOperation[] = [];
-  const seenPaths = new Set<string>();
+  let update: PatchUpdate | null = null;
 
-  const claimPath = (path: string, lineIndex: number) => {
+  const readPath = (path: string, lineIndex: number) => {
     if (!path.trim()) {
       parseError(lineIndex, 'file path must not be empty');
     }
-    const normalized = path.trim();
-    if (seenPaths.has(normalized)) {
-      parseError(lineIndex, `duplicate operation for ${normalized}`);
-    }
-    seenPaths.add(normalized);
-    return normalized;
+    return path.trim();
   };
 
   while (index < lines.length) {
@@ -131,10 +126,16 @@ export function parseV4APatch(patchText: string): PatchOperation[] {
     const trimmed = line.trim();
 
     if (trimmed === PATCH_END) {
-      if (operations.length === 0) {
-        parseError(index, 'patch contains no file operations');
+      if (!update) {
+        parseError(index, 'patch contains no file update');
       }
-      return operations;
+      const trailingLineIndex = lines.findIndex(
+        (trailingLine, trailingIndex) => trailingIndex > index && trailingLine.trim().length > 0,
+      );
+      if (trailingLineIndex >= 0) {
+        parseError(trailingLineIndex, 'unexpected content after *** End Patch');
+      }
+      return update;
     }
 
     if (trimmed === '') {
@@ -142,40 +143,15 @@ export function parseV4APatch(patchText: string): PatchOperation[] {
       continue;
     }
 
-    if (line.startsWith(ADD_FILE_PREFIX)) {
-      const path = claimPath(line.slice(ADD_FILE_PREFIX.length), index);
-      index += 1;
-      const contentLines: string[] = [];
-      while (index < lines.length) {
-        const contentLine = lines[index] ?? '';
-        if (contentLine.startsWith('***')) break;
-        if (!contentLine.startsWith('+')) {
-          parseError(index, `Add File lines must start with "+", got: ${contentLine.slice(0, 40)}`);
-        }
-        contentLines.push(contentLine.slice(1));
-        index += 1;
-      }
-      operations.push({ type: 'add', path, content: contentLines.join('\n') });
-      continue;
-    }
-
-    if (line.startsWith(DELETE_FILE_PREFIX)) {
-      operations.push({ type: 'delete', path: claimPath(line.slice(DELETE_FILE_PREFIX.length), index) });
-      index += 1;
-      continue;
-    }
-
     if (line.startsWith(UPDATE_FILE_PREFIX)) {
-      const path = claimPath(line.slice(UPDATE_FILE_PREFIX.length), index);
+      if (update) {
+        parseContractError(index, 'multiple_file_patches', 'apply_patch accepts exactly one file update');
+      }
+      const path = readPath(line.slice(UPDATE_FILE_PREFIX.length), index);
       index += 1;
 
-      let moveTo: string | null = null;
-      if (lines[index]?.startsWith(MOVE_TO_PREFIX)) {
-        moveTo = (lines[index] ?? '').slice(MOVE_TO_PREFIX.length).trim();
-        if (!moveTo) {
-          parseError(index, 'Move to path must not be empty');
-        }
-        index += 1;
+      if (lines[index]?.startsWith('*** Move to: ')) {
+        parseContractError(index, 'unsupported_file_operation', 'apply_patch only updates an existing file; use move_path to move it');
       }
 
       const chunks: PatchChunk[] = [];
@@ -183,22 +159,27 @@ export function parseV4APatch(patchText: string): PatchOperation[] {
       let oldLines: string[] = [];
       let newLines: string[] = [];
       let chunkLines: PatchChunkLine[] = [];
-      let sawDiffLines = false;
+      let sawChunkHeader = false;
+      let sawChunkLines = false;
+      let sawChangeLine = false;
       let isEndOfFile = false;
 
       const flushChunk = (lineIndex: number) => {
-        if (!sawDiffLines) {
-          if (anchor !== null) {
-            parseError(lineIndex, `@@ anchor "${anchor}" has no diff lines`);
-          }
-          return;
+        if (!sawChunkHeader) return;
+        if (!sawChunkLines) {
+          parseError(lineIndex, `@@${anchor ? ` ${anchor}` : ''} has no diff lines`);
+        }
+        if (!sawChangeLine) {
+          parseError(lineIndex, `@@${anchor ? ` ${anchor}` : ''} contains no changes`);
         }
         chunks.push({ anchor, oldLines, newLines, lines: chunkLines, isEndOfFile });
         anchor = null;
         oldLines = [];
         newLines = [];
         chunkLines = [];
-        sawDiffLines = false;
+        sawChunkHeader = false;
+        sawChunkLines = false;
+        sawChangeLine = false;
         isEndOfFile = false;
       };
 
@@ -206,7 +187,30 @@ export function parseV4APatch(patchText: string): PatchOperation[] {
         const bodyLine = lines[index] ?? '';
         const bodyTrimmed = bodyLine.trim();
 
+        if (bodyLine === '' && sawChunkHeader) {
+          let nextContentIndex = index + 1;
+          while (lines[nextContentIndex] === '') nextContentIndex += 1;
+          const nextContentLine = lines[nextContentIndex];
+          if (
+            nextContentLine?.startsWith('@@')
+            || nextContentLine?.trim() === END_OF_FILE_MARKER
+            || nextContentLine?.startsWith('***')
+          ) {
+            index += 1;
+            continue;
+          }
+          oldLines.push('');
+          newLines.push('');
+          chunkLines.push({ kind: 'context', text: '' });
+          sawChunkLines = true;
+          index += 1;
+          continue;
+        }
+
         if (bodyTrimmed === END_OF_FILE_MARKER) {
+          if (!sawChunkHeader) {
+            parseError(index, '*** End of File must belong to an @@ hunk');
+          }
           isEndOfFile = true;
           index += 1;
           continue;
@@ -216,26 +220,36 @@ export function parseV4APatch(patchText: string): PatchOperation[] {
         }
         if (bodyLine.startsWith('@@')) {
           flushChunk(index);
+          sawChunkHeader = true;
           anchor = bodyLine.slice(2).trim() || null;
           index += 1;
           continue;
+        }
+        if (!sawChunkHeader) {
+          if (bodyTrimmed === '') {
+            index += 1;
+            continue;
+          }
+          parseError(index, 'V4A diff lines must follow an @@ hunk header');
         }
         if (bodyLine.startsWith('+')) {
           const text = bodyLine.slice(1);
           newLines.push(text);
           chunkLines.push({ kind: 'added', text });
-          sawDiffLines = true;
+          sawChunkLines = true;
+          sawChangeLine = true;
         } else if (bodyLine.startsWith('-')) {
           const text = bodyLine.slice(1);
           oldLines.push(text);
           chunkLines.push({ kind: 'removed', text });
-          sawDiffLines = true;
-        } else if (bodyLine.startsWith(' ') || bodyTrimmed === '') {
-          const context = bodyLine.startsWith(' ') ? bodyLine.slice(1) : '';
+          sawChunkLines = true;
+          sawChangeLine = true;
+        } else if (bodyLine.startsWith(' ')) {
+          const context = bodyLine.slice(1);
           oldLines.push(context);
           newLines.push(context);
           chunkLines.push({ kind: 'context', text: context });
-          sawDiffLines = true;
+          sawChunkLines = true;
         } else {
           parseError(index, `Update File lines must start with " ", "+", "-" or "@@", got: ${bodyLine.slice(0, 40)}`);
         }
@@ -246,8 +260,12 @@ export function parseV4APatch(patchText: string): PatchOperation[] {
       if (chunks.length === 0) {
         parseError(index, `Update File ${path} contains no chunks`);
       }
-      operations.push({ type: 'update', path, moveTo, chunks });
+      update = { path, chunks };
       continue;
+    }
+
+    if (line.startsWith('*** Add File: ') || line.startsWith('*** Delete File: ')) {
+      parseContractError(index, 'unsupported_file_operation', 'apply_patch only updates an existing file');
     }
 
     parseError(index, `unrecognized patch directive: ${trimmed.slice(0, 60)}`);
@@ -256,72 +274,9 @@ export function parseV4APatch(patchText: string): PatchOperation[] {
   throw new PatchParseError(`patch must end with "${PATCH_END}"`);
 }
 
-function detectPatchFormat(lines: string[]): PatchFormat | null {
-  const v4aEnvelopeIndex = lines.findIndex((line) => line.trim() === PATCH_BEGIN);
-  const unifiedEnvelopeIndex = lines.findIndex((line, index) =>
-    line.startsWith('diff --git ')
-      || (line.startsWith('--- ') && lines[index + 1]?.startsWith('+++ ')));
-  if (v4aEnvelopeIndex < 0) return unifiedEnvelopeIndex < 0 ? null : 'unified';
-  if (unifiedEnvelopeIndex < 0) return 'v4a';
-  return v4aEnvelopeIndex < unifiedEnvelopeIndex ? 'v4a' : 'unified';
-}
-
-export function parsePatchDocument(
-  patchText: string,
-  declaredFormat?: PatchFormat,
-): ParsedPatch {
+export function parsePatch(patchText: string): PatchUpdate {
   const normalized = patchText.replace(/\r\n?/g, '\n');
-  const lines = normalized.split('\n');
-  const detectedFormat = detectPatchFormat(lines);
-  if (declaredFormat && detectedFormat && declaredFormat !== detectedFormat) {
-    throw new PatchParseError(
-      `declared patch format "${declaredFormat}" does not match detected format "${detectedFormat}"`,
-      {
-        code: 'patch_format_mismatch',
-        phase: 'detect',
-        format: detectedFormat,
-        declaredFormat,
-        detectedFormat,
-      },
-    );
-  }
-  const format = declaredFormat ?? detectedFormat;
-
-  if (format === 'v4a') {
-    try {
-      return { format: 'v4a', operations: parseV4APatch(normalized) };
-    } catch (error) {
-      if (error instanceof PatchParseError) {
-        throw new PatchParseError(error.message, { ...error.details, format: 'v4a' });
-      }
-      throw error;
-    }
-  }
-
-  if (format === 'unified') {
-    try {
-      return { format: 'unified', operations: parseUnifiedDiff(normalized) };
-    } catch (error) {
-      if (error instanceof UnifiedDiffParseError) {
-        throw new PatchParseError(error.message, {
-          code: 'invalid_patch_syntax',
-          phase: 'parse',
-          format: 'unified',
-          ...(error.line === null ? {} : { line: error.line }),
-        });
-      }
-      throw error;
-    }
-  }
-
-  throw new PatchParseError('unsupported patch format; use V4A or Unified Diff', {
-    code: 'unsupported_patch_format',
-    phase: 'detect',
-  });
-}
-
-export function parsePatch(patchText: string): PatchOperation[] {
-  return parsePatchDocument(patchText).operations;
+  return parseV4APatch(normalized);
 }
 
 function linesEqual(a: string, b: string, fuzz: AppliedChunk['fuzz']) {
@@ -358,9 +313,13 @@ function findSequence(
   return null;
 }
 
-function findAnchor(fileLines: string[], anchor: string, fromIndex: number): number | null {
-  const result = findSequence(fileLines, [anchor], fromIndex);
-  return result ? result.index : null;
+function findAnchor(
+  fileLines: string[],
+  anchor: string,
+  fromIndex: number,
+  options: ApplyChunksOptions,
+) {
+  return findSequence(fileLines, [anchor], fromIndex, options);
 }
 
 function commonPrefixLength(a: string, b: string) {
@@ -372,7 +331,7 @@ function commonPrefixLength(a: string, b: string) {
   return length;
 }
 
-function closestSnippet(fileLines: string[], needle: string[]): string | null {
+function closestSnippet(fileLines: string[], needle: string[]) {
   const probe = needle.find((line) => line.trim().length > 0);
   if (!probe) return null;
   const target = probe.trim();
@@ -394,12 +353,13 @@ function closestSnippet(fileLines: string[], needle: string[]): string | null {
   if (bestIndex === -1) return null;
   const start = Math.max(0, bestIndex - 1);
   const end = Math.min(fileLines.length, bestIndex + 2);
-  return fileLines.slice(start, end).map((text, offset) => `${start + offset + 1}: ${text}`).join('\n');
+  return fileLines.slice(start, end).map((text, offset) => `${start + offset + 1}: ${text}`);
 }
 
-export interface UpdateResult {
+export interface PartialUpdateResult {
   content: string;
   chunks: AppliedChunk[];
+  failures: FailedChunk[];
 }
 
 export interface ApplyChunksOptions {
@@ -428,119 +388,206 @@ function buildReplacementLines(chunk: PatchChunk, matchedLines: string[]) {
   return replacement;
 }
 
-export function applyChunksToContent(
+export function applyChunksToContentPartially(
   path: string,
   original: string,
   chunks: PatchChunk[],
   options: ApplyChunksOptions = {},
-): UpdateResult {
+): PartialUpdateResult {
+  return applyChunks(path, original, chunks, options);
+}
+
+function failedChunk(
+  error: PatchApplyError,
+  chunk: PatchChunk,
+  hunk: number,
+): FailedChunk {
+  return {
+    hunk,
+    code: error.details.code,
+    message: error.message,
+    ...(chunk.anchor ? { anchor: chunk.anchor } : {}),
+    ...(error.details.expected ? { expected: error.details.expected } : {}),
+    ...(error.details.closest ? { closest: error.details.closest } : {}),
+    ...(error.details.matches ? { matches: error.details.matches } : {}),
+  };
+}
+
+function applyChunks(
+  path: string,
+  original: string,
+  chunks: PatchChunk[],
+  options: ApplyChunksOptions,
+): PartialUpdateResult {
   const lineEnding = original.includes('\r\n') ? '\r\n' : '\n';
-  const fileLines = original.replace(/\r\n/g, '\n').split('\n');
+  const normalizedOriginal = original.replace(/\r\n/g, '\n');
+  const endsWithNewline = normalizedOriginal.endsWith('\n');
+  const fileLines = normalizedOriginal === '' ? [] : normalizedOriginal.split('\n');
+  if (endsWithNewline) fileLines.pop();
   let cursor = 0;
   const applied: AppliedChunk[] = [];
+  const failures: FailedChunk[] = [];
 
   for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
     const chunk = chunks[chunkIndex];
     if (!chunk) continue;
 
-    let searchFrom = cursor;
-    if (chunk.anchor) {
-      const anchorIndex = findAnchor(fileLines, chunk.anchor, cursor);
-      if (anchorIndex === null) {
-        throw new PatchApplyError(
-          `chunk ${chunkIndex + 1}: @@ anchor not found in ${path}: ${chunk.anchor}`,
-          {
-            code: 'anchor_not_found',
-            phase: 'match',
-            path,
-            hunk: chunkIndex + 1,
-            expected: [chunk.anchor],
-          },
-        );
-      }
-      searchFrom = anchorIndex + 1;
+    try {
+      const result = applyChunk(
+        path,
+        fileLines,
+        chunk,
+        chunkIndex,
+        cursor,
+        options,
+      );
+      applied.push(result.applied);
+      cursor = result.cursor;
+    } catch (error) {
+      if (!(error instanceof PatchApplyError)) throw error;
+      failures.push(failedChunk(error, chunk, chunkIndex + 1));
     }
+  }
 
-    if (chunk.oldLines.length === 0) {
-      let insertAt: number;
-      if (chunk.isEndOfFile) {
-        insertAt = fileLines.length;
-      } else if (chunk.anchor) {
-        insertAt = searchFrom;
-      } else {
-        throw new PatchApplyError(
-          `chunk ${chunkIndex + 1}: pure insertion needs an @@ anchor, context lines, or *** End of File marker`,
-          {
-            code: 'insertion_location_required',
-            phase: 'match',
-            path,
-            hunk: chunkIndex + 1,
-          },
-        );
-      }
-      fileLines.splice(insertAt, 0, ...chunk.newLines);
-      applied.push({ startLine: insertAt + 1, removed: [], added: chunk.newLines, fuzz: 'exact' });
-      cursor = insertAt + chunk.newLines.length;
-      continue;
-    }
+  return {
+    content: fileLines.join(lineEnding) + (endsWithNewline ? lineEnding : ''),
+    chunks: applied,
+    failures,
+  };
+}
 
-    const match = findSequence(fileLines, chunk.oldLines, searchFrom, options)
-      ?? (searchFrom > 0 ? findSequence(fileLines, chunk.oldLines, 0, options) : null);
-    if (!match) {
-      const hint = closestSnippet(fileLines, chunk.oldLines);
+function applyChunk(
+  path: string,
+  fileLines: string[],
+  chunk: PatchChunk,
+  chunkIndex: number,
+  cursor: number,
+  options: ApplyChunksOptions,
+): { applied: AppliedChunk; cursor: number } {
+  const hunk = chunkIndex + 1;
+
+  let searchFrom = cursor;
+  if (chunk.anchor) {
+    const anchorMatch = findAnchor(fileLines, chunk.anchor, cursor, options);
+    if (!anchorMatch) {
+      const closest = closestSnippet(fileLines, [chunk.anchor]);
       throw new PatchApplyError(
-        `chunk ${chunkIndex + 1}: context not found in ${path}.\n`
-        + `Expected to find:\n${chunk.oldLines.join('\n')}`
-        + (hint ? `\nClosest match in file:\n${hint}` : ''),
+        `chunk ${hunk}: @@ anchor not found in ${path}: ${chunk.anchor}`,
         {
-          code: 'context_not_found',
+          code: 'anchor_not_found',
           phase: 'match',
           path,
-          hunk: chunkIndex + 1,
-          expected: chunk.oldLines,
-          ...(hint ? { closest: hint.split('\n') } : {}),
+          hunk,
+          anchor: chunk.anchor,
+          expected: [chunk.anchor],
+          ...(closest ? { closest } : {}),
         },
       );
     }
-
-    if (options.requireUniqueContext && match.matches.length > 1) {
+    if (options.requireUniqueContext && anchorMatch.matches.length > 1) {
       throw new PatchApplyError(
-        `chunk ${chunkIndex + 1}: context is ambiguous in ${path}`,
+        `chunk ${hunk}: @@ anchor is ambiguous in ${path}`,
         {
-          code: 'ambiguous_context',
+          code: 'ambiguous_anchor',
           phase: 'match',
           path,
-          hunk: chunkIndex + 1,
-          expected: chunk.oldLines,
-          matches: match.matches.map((lineIndex) => lineIndex + 1),
+          hunk,
+          anchor: chunk.anchor,
+          expected: [chunk.anchor],
+          matches: anchorMatch.matches.map((lineIndex) => lineIndex + 1),
         },
       );
     }
+    searchFrom = anchorMatch.index + 1;
+  }
 
-    if (chunk.isEndOfFile && match.index + chunk.oldLines.length !== fileLines.length) {
+  if (chunk.oldLines.length === 0) {
+    let insertAt: number;
+    if (chunk.isEndOfFile) {
+      insertAt = fileLines.length;
+    } else if (chunk.anchor) {
+      insertAt = searchFrom;
+    } else {
       throw new PatchApplyError(
-        `chunk ${chunkIndex + 1}: marked *** End of File but matched context is not at end of ${path}`,
+        `chunk ${hunk}: pure insertion needs an @@ anchor, context lines, or *** End of File marker`,
         {
-          code: 'end_of_file_mismatch',
+          code: 'insertion_location_required',
           phase: 'match',
           path,
-          hunk: chunkIndex + 1,
-          expected: chunk.oldLines,
+          hunk,
         },
       );
     }
+    fileLines.splice(insertAt, 0, ...chunk.newLines);
+    return {
+      applied: {
+        hunk,
+        startLine: insertAt + 1,
+        removed: [],
+        added: chunk.newLines,
+        fuzz: 'exact',
+      },
+      cursor: insertAt + chunk.newLines.length,
+    };
+  }
 
-    const matchedLines = fileLines.slice(match.index, match.index + chunk.oldLines.length);
-    const replacementLines = buildReplacementLines(chunk, matchedLines);
-    fileLines.splice(match.index, chunk.oldLines.length, ...replacementLines);
-    applied.push({
+  const match = findSequence(fileLines, chunk.oldLines, searchFrom, options);
+  if (!match) {
+    const closest = closestSnippet(fileLines, chunk.oldLines);
+    throw new PatchApplyError(
+      `chunk ${hunk}: context not found in ${path}.\n`
+      + `Expected to find:\n${chunk.oldLines.join('\n')}`
+      + (closest ? `\nClosest match in file:\n${closest.join('\n')}` : ''),
+      {
+        code: 'context_not_found',
+        phase: 'match',
+        path,
+        hunk,
+        expected: chunk.oldLines,
+        ...(closest ? { closest } : {}),
+      },
+    );
+  }
+
+  if (options.requireUniqueContext && match.matches.length > 1) {
+    throw new PatchApplyError(
+      `chunk ${hunk}: context is ambiguous in ${path}`,
+      {
+        code: 'ambiguous_context',
+        phase: 'match',
+        path,
+        hunk,
+        expected: chunk.oldLines,
+        matches: match.matches.map((lineIndex) => lineIndex + 1),
+      },
+    );
+  }
+
+  if (chunk.isEndOfFile && match.index + chunk.oldLines.length !== fileLines.length) {
+    throw new PatchApplyError(
+      `chunk ${hunk}: marked *** End of File but matched context is not at end of ${path}`,
+      {
+        code: 'end_of_file_mismatch',
+        phase: 'match',
+        path,
+        hunk,
+        expected: chunk.oldLines,
+        matches: [match.index + 1],
+      },
+    );
+  }
+
+  const matchedLines = fileLines.slice(match.index, match.index + chunk.oldLines.length);
+  const replacementLines = buildReplacementLines(chunk, matchedLines);
+  fileLines.splice(match.index, chunk.oldLines.length, ...replacementLines);
+  return {
+    applied: {
+      hunk,
       startLine: match.index + 1,
       removed: matchedLines,
       added: replacementLines,
       fuzz: match.fuzz,
-    });
-    cursor = match.index + replacementLines.length;
-  }
-
-  return { content: fileLines.join(lineEnding), chunks: applied };
+    },
+    cursor: match.index + replacementLines.length,
+  };
 }

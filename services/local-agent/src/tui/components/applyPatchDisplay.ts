@@ -2,7 +2,7 @@ import {
   parsePatch,
   type PatchChunk,
   type PatchChunkLine,
-  type PatchOperation,
+  type PatchUpdate,
 } from '../../toolkits/local/applyPatch';
 import { truncateLine } from '../render/terminalText';
 
@@ -66,28 +66,17 @@ export function buildApplyPatchDisplayLines(params: {
 
 function buildParsedPatchLines(patch: string, width: number): PatchDisplayLine[] | null {
   try {
-    return parsePatch(patch).flatMap((operation) => patchOperationLines(operation, width));
+    return patchUpdateLines(parsePatch(patch), width);
   } catch {
     return null;
   }
 }
 
-function patchOperationLines(operation: PatchOperation, width: number): PatchDisplayLine[] {
-  switch (operation.type) {
-    case 'add':
-      return [
-        diffMetaLine(`*** Add File: ${operation.path}`, width),
-        ...splitPatchContentLines(operation.content).map((line) => diffLine('+', line, 'added', width)),
-      ];
-    case 'delete':
-      return [diffMetaLine(`*** Delete File: ${operation.path}`, width)];
-    case 'update':
-      return [
-        diffMetaLine(`*** Update File: ${operation.path}`, width),
-        ...(operation.moveTo ? [diffMetaLine(`*** Move to: ${operation.moveTo}`, width)] : []),
-        ...operation.chunks.flatMap((chunk) => patchChunkLines(chunk, width)),
-      ];
-  }
+function patchUpdateLines(update: PatchUpdate, width: number): PatchDisplayLine[] {
+  return [
+    diffMetaLine(`*** Update File: ${update.path}`, width),
+    ...update.chunks.flatMap((chunk) => patchChunkLines(chunk, width)),
+  ];
 }
 
 function patchChunkLines(chunk: PatchChunk, width: number): PatchDisplayLine[] {
@@ -120,13 +109,6 @@ function patchLineTone(line: string): PatchDisplayLine['tone'] {
   if (line.startsWith('+')) return 'added';
   if (line.startsWith('-')) return 'removed';
   return 'muted';
-}
-
-function splitPatchContentLines(content: string) {
-  if (!content) return [''];
-  const lines = content.replace(/\r\n/g, '\n').split('\n');
-  if (lines.at(-1) === '') lines.pop();
-  return lines;
 }
 
 function patchChunkLine(line: PatchChunkLine, width: number): PatchDisplayLine {

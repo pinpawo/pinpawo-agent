@@ -76,6 +76,7 @@ test('operation display exposes bounded apply_patch lines with tones', () => {
           '*** End Patch',
         ].join('\n'),
       },
+      output: JSON.stringify({ ok: true, appliedHunks: [1] }),
     },
   }), 3_500, 80);
 
@@ -87,10 +88,14 @@ test('operation display exposes bounded apply_patch lines with tones', () => {
     line.text === '  +const value = 2;'
     && line.tone === 'added'
   )));
+  assert.ok(lines.some((line) => (
+    line.text.includes('{"ok":true,"appliedHunks":[1]}')
+    && line.tone === 'muted'
+  )));
   assert.ok(lines.every((line) => stringWidth(line.text) <= 80));
 });
 
-test('operation display exposes structured apply_patch failures after the diff', () => {
+test('operation display exposes raw apply_patch failures after the diff', () => {
   const lines = buildOperationDisplayLines(operation({
     phase: 'failed',
     kind: 'local.apply_patch',
@@ -98,11 +103,12 @@ test('operation display exposes structured apply_patch failures after the diff',
     raw: {
       input: {
         patch: [
-          '--- a/src/example.ts',
-          '+++ b/src/example.ts',
-          '@@ -1 +1 @@',
+          '*** Begin Patch',
+          '*** Update File: src/example.ts',
+          '@@',
           '-const value = 1;',
           '+const value = 2;',
+          '*** End Patch',
         ].join('\n'),
       },
       output: JSON.stringify({
@@ -115,7 +121,10 @@ test('operation display exposes structured apply_patch failures after the diff',
 
   assert.ok(lines.some((line) => line.text === '  -const value = 1;' && line.tone === 'removed'));
   assert.ok(lines.some((line) => line.text === '  +const value = 2;' && line.tone === 'added'));
-  assert.ok(lines.some((line) => line.text.includes('context_not_found') && line.tone === 'removed'));
+  assert.ok(lines.some((line) => (
+    line.text.includes('{"ok":false,"code":"context_not_found","message":"Patch context did not match."}')
+    && line.tone === 'removed'
+  )));
 });
 
 test('operation display keeps running and terminal phases distinct', () => {

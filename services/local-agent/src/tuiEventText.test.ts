@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildBusyStatusLine,
-  formatStudioProgressEvent,
   formatSubagentMessage,
   formatSystemNoticeEvent,
 } from './tui/render/eventText';
@@ -15,22 +14,6 @@ test('formats subagent text into readable paragraphs', () => {
   assert.match(
     formatted,
     /.+\n.+/,
-  );
-});
-
-test('formats studio progress events from typed local-agent events', () => {
-  assert.equal(
-    formatStudioProgressEvent({
-      type: 'studio.progress',
-      requestId: 'req-1',
-      event: {
-        type: 'task_started',
-        petId: 'planner',
-        taskIndex: 2,
-        petRunId: 'pet-run-1',
-      },
-    }),
-    '[studio] task[#2] → pet:planner',
   );
 });
 

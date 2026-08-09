@@ -6,40 +6,20 @@ import type { TuiAction } from '../state/tuiState';
 function createSubmitHarness(overrides: {
   inputValue?: string;
   openExternalEditor?: (initialText: string) => void;
-  composerTarget?: 'chat' | 'studio';
-  studioConversationId?: string | null;
 } = {}) {
   const messages: string[] = [];
   const actions: TuiAction[] = [];
   const sent: string[] = [];
-  let composerTarget = overrides.composerTarget ?? 'chat';
-  let studioConversationId = overrides.studioConversationId ?? null;
   return {
     messages,
     actions,
     sent,
-    get composerTarget() {
-      return composerTarget;
-    },
-    get studioConversationId() {
-      return studioConversationId;
-    },
     policyOpened: () => sent.includes('policy'),
     modelOpened: () => sent.includes('model'),
     transcriptOpened: () => sent.includes('transcript'),
     submit: () => submitCurrentInputFromController({
       inputValue: overrides.inputValue ?? '',
       focusedSession: null,
-      composerTarget,
-      studioConversationId,
-      selectStudioComposerTarget: (conversationId) => {
-        composerTarget = 'studio';
-        studioConversationId = conversationId;
-      },
-      selectChatComposerTarget: () => {
-        composerTarget = 'chat';
-        studioConversationId = null;
-      },
       openResumePicker: () => sent.push('resume'),
       openModelProfilePicker: () => sent.push('model'),
       openGlobalReviewPolicyPicker: () => sent.push('policy'),
@@ -54,10 +34,6 @@ function createSubmitHarness(overrides: {
         isBusy: () => false,
         continueActiveDelegation: (message) => {
           sent.push(`continue:${message}`);
-          return true;
-        },
-        sendStudioRequest: (_text, conversationId) => {
-          sent.push(`studio:${conversationId ?? 'none'}`);
           return true;
         },
         sendChatRequest: () => {
@@ -92,43 +68,13 @@ test('submitCurrentInputFromController opens external editor for /edit', () => {
   assert.deepEqual(harness.messages, []);
 });
 
-test('submitCurrentInputFromController selects the studio composer target with one conversation id', () => {
-  const harness = createSubmitHarness({ inputValue: '/studio plan' });
-
-  harness.submit();
-
-  assert.equal(harness.composerTarget, 'studio');
-  assert.equal(typeof harness.studioConversationId, 'string');
-  assert.deepEqual(harness.actions.map((action) => action.type), ['session.configured']);
-  assert.deepEqual(harness.sent, [`studio:${harness.studioConversationId}`]);
-});
-
-test('submitCurrentInputFromController selects the chat composer target for /chat', () => {
-  const harness = createSubmitHarness({
-    inputValue: '/chat',
-    composerTarget: 'studio',
-    studioConversationId: 'conversation-1',
-  });
-
-  harness.submit();
-
-  assert.equal(harness.composerTarget, 'chat');
-  assert.equal(harness.studioConversationId, null);
-  assert.deepEqual(harness.actions.map((action) => action.type), ['session.configured']);
-  assert.deepEqual(harness.sent, ['clear']);
-});
-
 test('submitCurrentInputFromController sends explicit delegation continuation', () => {
   const harness = createSubmitHarness({
     inputValue: '/continue apply the new constraints',
-    composerTarget: 'studio',
-    studioConversationId: 'conversation-1',
   });
 
   harness.submit();
 
-  assert.equal(harness.composerTarget, 'chat');
-  assert.equal(harness.studioConversationId, null);
   assert.deepEqual(harness.actions.map((action) => action.type), ['session.configured']);
   assert.deepEqual(harness.sent, ['continue:apply the new constraints']);
 });
@@ -146,42 +92,13 @@ test('submitCurrentInputFromController rejects empty continuation guidance', () 
   ]);
 });
 
-test('submitCurrentInputFromController resets the composer target before /resume and /new', () => {
-  const resumeHarness = createSubmitHarness({
-    inputValue: '/resume',
-    composerTarget: 'studio',
-    studioConversationId: 'conversation-1',
-  });
-  resumeHarness.submit();
-
-  assert.equal(resumeHarness.composerTarget, 'chat');
-  assert.equal(resumeHarness.studioConversationId, null);
-  assert.deepEqual(resumeHarness.actions.map((action) => action.type), ['session.configured']);
-  assert.deepEqual(resumeHarness.sent, ['resume', 'clear']);
-
-  const newHarness = createSubmitHarness({
-    inputValue: '/new',
-    composerTarget: 'studio',
-    studioConversationId: 'conversation-1',
-  });
-  newHarness.submit();
-
-  assert.equal(newHarness.composerTarget, 'chat');
-  assert.equal(newHarness.studioConversationId, null);
-  assert.deepEqual(newHarness.sent, ['new']);
-});
-
 test('submitCurrentInputFromController opens the session model picker', () => {
   const harness = createSubmitHarness({
     inputValue: '/model',
-    composerTarget: 'studio',
-    studioConversationId: 'conversation-1',
   });
 
   harness.submit();
 
-  assert.equal(harness.composerTarget, 'chat');
-  assert.equal(harness.studioConversationId, null);
   assert.equal(harness.modelOpened(), true);
   assert.deepEqual(
     harness.actions.map((action) => action.type),

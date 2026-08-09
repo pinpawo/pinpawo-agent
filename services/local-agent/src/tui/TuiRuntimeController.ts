@@ -123,11 +123,7 @@ function getSnapshotRefreshReason(
 }
 
 function concludesInterruptWait(message: LocalAgentServerMessage) {
-  if (
-    message.type === 'interrupted'
-    || message.type === 'studio_response'
-    || message.type === 'studio_error'
-  ) {
+  if (message.type === 'interrupted') {
     return true;
   }
   return message.type === 'event' && (
@@ -236,42 +232,6 @@ export class TuiRuntimeController {
       now,
     });
 
-    return true;
-  }
-
-  sendStudioRequest(userRequest: string, conversationId: string | null) {
-    if (!this.connection.isConnected()) {
-      this.appendSystemMessage(TUI_TEXT.disconnectedCannotSend);
-      return false;
-    }
-    if (this.isCurrentBusy()) {
-      this.appendSystemMessage(TUI_TEXT.busyCannotSend);
-      return false;
-    }
-
-    const requestId = randomUUID();
-    const now = Date.now();
-    if (!this.connection.send({
-      type: 'studio_request',
-      requestId,
-      userRequest,
-      ...(conversationId ? { conversationId } : {}),
-    })) {
-      this.appendSystemMessage(TUI_TEXT.disconnectedCannotSend);
-      return false;
-    }
-    this.options.setNow(now);
-    this.options.dispatch({
-      type: 'run.start',
-      requestId,
-      kind: 'studio',
-      message: createTuiMessage({
-        role: 'user',
-        text: TUI_TEXT.studioUserMessage(userRequest),
-        requestId,
-      }, now),
-      now,
-    });
     return true;
   }
 

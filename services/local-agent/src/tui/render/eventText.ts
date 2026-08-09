@@ -1,6 +1,5 @@
 import type {
   AgentSystemNoticeEvent,
-  AgentStudioProgressEvent,
 } from '@pinpawo/agent-session';
 import { TUI_TEXT } from './text';
 import { elapsedMsSince, formatElapsed } from './terminalText';
@@ -16,42 +15,6 @@ export function formatSystemNoticeEvent(event: AgentSystemNoticeEvent): string |
 export function formatSubagentMessage(text: string): string | null {
   const content = formatSubagentTextBody(text);
   return content || null;
-}
-
-export function formatStudioProgressEvent(event: AgentStudioProgressEvent): string | null {
-  const payload = event.event;
-  const type = typeof payload.type === 'string' ? payload.type : null;
-  if (!type) return null;
-  switch (type) {
-    case 'turn_started':
-    case 'turn_finished':
-      return null;
-    case 'tasks_queued': {
-      const taskCount = typeof payload.taskCount === 'number' ? payload.taskCount : 0;
-      return TUI_TEXT.studioProgressTasksQueued(taskCount);
-    }
-    case 'task_started': {
-      const petId = typeof payload.petId === 'string' ? payload.petId : '?';
-      const taskIndex = typeof payload.taskIndex === 'number' ? payload.taskIndex : '?';
-      return TUI_TEXT.studioProgressTaskStarted(taskIndex, petId);
-    }
-    case 'task_status_changed': {
-      const taskIndex = typeof payload.taskIndex === 'number' ? payload.taskIndex : '?';
-      const status = typeof payload.status === 'string' ? payload.status : '?';
-      return TUI_TEXT.studioProgressTaskStatusChanged(taskIndex, status);
-    }
-    case 'wiki_updated': {
-      const changed = Array.isArray(payload.changedPaths) ? payload.changedPaths : [];
-      return TUI_TEXT.studioProgressWikiUpdated(changed.length);
-    }
-    case 'task_finished': {
-      const petRunId = typeof payload.petRunId === 'string' ? payload.petRunId : '?';
-      const status = typeof payload.status === 'string' ? payload.status : '?';
-      return TUI_TEXT.studioProgressTaskFinished(petRunId, status);
-    }
-    default:
-      return TUI_TEXT.studioProgressUnknown(type);
-  }
 }
 
 export function buildBusyStatusLine(

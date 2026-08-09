@@ -189,7 +189,6 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
   const contentWidth = screenModel.regions.timeline.width;
   const textAreaWidth = screenModel.regions.composer.textAreaWidth;
   const reviewOptions = pendingApproval?.review.options ?? [];
-  const composerTarget = tuiState.ui.composerTarget;
   const externalEditorOpen = tuiState.ui.externalEditorOpen;
 
   useEffect(() => {
@@ -250,22 +249,6 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     dispatch({ type: 'input.set', value: '', cursorOffset: 0 });
   };
 
-  const resetComposerTarget = () => {
-    dispatch({ type: 'ui.composer_target.reset' });
-  };
-
-  const selectStudioComposerTarget = (conversationId: string) => {
-    dispatch({
-      type: 'ui.composer_target.set',
-      composerTarget: 'studio',
-      studioConversationId: conversationId,
-    });
-  };
-
-  const selectChatComposerTarget = () => {
-    dispatch({ type: 'ui.composer_target.reset' });
-  };
-
   const {
     resumePicker,
     resumePickerOpen,
@@ -279,7 +262,6 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     appendSystemMessage: (text) => appendMessage('system', text),
     clearInputValue,
     dispatch,
-    resetComposerTarget,
     resetTimelineView,
     runtimeController,
   });
@@ -533,10 +515,6 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     submitCurrentInputFromController({
       inputValue: value,
       focusedSession,
-      composerTarget,
-      studioConversationId: tuiState.ui.studioConversationId,
-      selectStudioComposerTarget,
-      selectChatComposerTarget,
       openResumePicker,
       openModelProfilePicker,
       openGlobalReviewPolicyPicker,
@@ -851,7 +829,6 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     activityStatus: screenModel.regions.statusBar.activityStatus,
     statusNotice: screenModel.regions.statusBar.statusNotice,
     connectionStatus: screenModel.regions.statusBar.connectionStatus,
-    composerTarget,
     session: focusedSession,
     globalReviewPolicyMode,
     overlayOwner: overlayModel.current?.label ?? null,
@@ -862,7 +839,6 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     screenModel.regions.statusBar.activityStatus,
     screenModel.regions.statusBar.connectionStatus,
     screenModel.regions.statusBar.statusNotice,
-    composerTarget,
   ]);
   const inlineTimelineKey = `${focusedSession?.sessionId ?? defaultSessionId}:${screenModel.regions.timeline.renderKey}`;
   if (inlineTimelineLedgerRef.current.key !== inlineTimelineKey) {

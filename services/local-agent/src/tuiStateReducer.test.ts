@@ -103,34 +103,24 @@ test('tuiStateReducer initializes reducer-owned UI owner state', () => {
   const state = initialState();
 
   assert.deepEqual(state.ui, {
-    composerTarget: 'chat',
-    studioConversationId: null,
     externalEditorOpen: false,
   });
 });
 
-test('tuiStateReducer updates composer target and external editor owner state', () => {
+test('tuiStateReducer tracks external editor owner state', () => {
   let state = initialState();
 
-  state = tuiStateReducer(state, {
-    type: 'ui.composer_target.set',
-    composerTarget: 'studio',
-    studioConversationId: 'conversation-1',
-  });
   state = tuiStateReducer(state, {
     type: 'ui.external_editor.set_open',
     open: true,
   });
-
-  assert.equal(state.ui.composerTarget, 'studio');
-  assert.equal(state.ui.studioConversationId, 'conversation-1');
   assert.equal(state.ui.externalEditorOpen, true);
 
-  state = tuiStateReducer(state, { type: 'ui.composer_target.reset' });
-
-  assert.equal(state.ui.composerTarget, 'chat');
-  assert.equal(state.ui.studioConversationId, null);
-  assert.equal(state.ui.externalEditorOpen, true);
+  state = tuiStateReducer(state, {
+    type: 'ui.external_editor.set_open',
+    open: false,
+  });
+  assert.equal(state.ui.externalEditorOpen, false);
 });
 
 test('tuiStateReducer keeps transport connection detail separate from run status', () => {
@@ -813,8 +803,6 @@ test('tuiStateReducer clears session token usage when clearing session state', (
   state = {
     ...state,
     ui: {
-      composerTarget: 'studio',
-      studioConversationId: 'conversation-1',
       externalEditorOpen: true,
     },
     sessions: {
@@ -845,8 +833,6 @@ test('tuiStateReducer clears session token usage when clearing session state', (
   assert.equal(state.sessions['chat:pet']?.sessionTokenUsage, undefined);
   assert.equal(state.sessions['chat:pet']?.kind, 'chat');
   assert.deepEqual(state.ui, {
-    composerTarget: 'chat',
-    studioConversationId: null,
     externalEditorOpen: false,
   });
 });
@@ -1025,8 +1011,6 @@ test('tuiStateReducer resumes a session from snapshot while clearing previous ru
   state = {
     ...state,
     ui: {
-      composerTarget: 'studio',
-      studioConversationId: 'conversation-1',
       externalEditorOpen: true,
     },
   };
@@ -1054,8 +1038,6 @@ test('tuiStateReducer resumes a session from snapshot while clearing previous ru
   assert.equal(activeRun(state, 'old-req'), undefined);
   assert.equal((state.sessions['chat:old']?.activeRun?.requestId ?? null), null);
   assert.deepEqual(state.ui, {
-    composerTarget: 'chat',
-    studioConversationId: null,
     externalEditorOpen: false,
   });
   assert.equal(state.sessions['chat:new']?.kind, 'studio');

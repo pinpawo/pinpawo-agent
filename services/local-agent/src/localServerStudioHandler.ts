@@ -239,7 +239,8 @@ export class LocalServerStudioHandler<Peer extends object> {
         reply: result.turn.outcome.reply,
         ...(result.turn.outcome.outcome === 'done'
           ? {
-              finalPetRunId: result.turn.outcome.finalPetRunId,
+              // ws 协议字段名保持不变;Studio 侧现在叫 finalInvocationId。
+              finalPetRunId: result.turn.outcome.finalInvocationId,
             }
           : { reason: result.turn.outcome.reason }),
       };

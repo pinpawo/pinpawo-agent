@@ -4,6 +4,11 @@ import path from 'node:path';
 import type { StudioAgent, StudioContext } from './petAgentTypes';
 import { createPlanCapability, createPlanToolkit } from './planCapability';
 import type { StudioPlanPetListItem } from './planCapability';
+import {
+  failedAttemptCount,
+  latestInvocation,
+  type StudioInvocation,
+} from './types';
 import type {
   PetAgentRuntime,
   PetAgentRuntimeDescriptor,
@@ -40,9 +45,12 @@ type StudioQueuedTaskBatch = {
   tasks: StudioQueuedTaskInput[];
 };
 
+/**
+ * 调度期的瞬态状态。重试预算**不在这里** —— 它由持久化的 invocation 列表
+ * 导出,否则崩溃恢复后会归零,失败的 task 可以无限重试。
+ */
 type QueuedTaskRuntimeState = {
   status: StudioTaskStatus;
-  retryCount: number;
 };
 
 function toStudioAgent(descriptor: PetAgentRuntimeDescriptor): StudioAgent {
@@ -133,10 +141,7 @@ function normalizeQueuedTaskBatch(batch: StudioQueuedTaskBatch): StudioQueuedTas
 }
 
 function buildInitialTaskStates(batch: StudioQueuedTaskBatch): QueuedTaskRuntimeState[] {
-  return batch.tasks.map(() => ({
-    status: 'pending',
-    retryCount: 0,
-  }));
+  return batch.tasks.map(() => ({ status: 'pending' }));
 }
 
 function buildTaskStatesFromSnapshot(tasks: StudioQueueItem[]): QueuedTaskRuntimeState[] {
@@ -150,7 +155,6 @@ function buildTaskStatesFromSnapshot(tasks: StudioQueueItem[]): QueuedTaskRuntim
         : task.status === 'queued'
           ? 'pending'
           : 'failed',
-      retryCount: task.status === 'failed' ? DEFAULT_MAX_RETRY_PER_TASK : 0,
     }));
 }
 
@@ -223,7 +227,7 @@ type StudioWorkerHandoffInput = {
 };
 
 type StudioWorkerRunResult = {
-  petRunId: string;
+  invocationId: string;
   status: 'finished' | 'cancelled';
   resultText?: string;
   errorMessage?: string;
@@ -272,7 +276,7 @@ function runStatusForOutcome(outcome: StudioTurnOutcome): StudioRunStatus {
 }
 
 function toStudioRun(record: StudioRunRecord, tasks: StudioQueueItem[]): StudioRunSnapshot {
-  const doneTasks = tasks.filter((task) => task.status === 'done' && task.petRunId);
+  const doneTasks = tasks.filter((task) => task.status === 'done' && latestInvocation(task));
   const finalTask = doneTasks[doneTasks.length - 1];
   return {
     runId: record.turnId,
@@ -280,7 +284,7 @@ function toStudioRun(record: StudioRunRecord, tasks: StudioQueueItem[]): StudioR
     userRequest: record.userRequest,
     status: record.status,
     finalTaskIndex: finalTask?.taskIndex,
-    finalPetRunId: finalTask?.petRunId,
+    finalInvocationId: finalTask ? latestInvocation(finalTask)?.invocationId : undefined,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     tasks,
@@ -296,13 +300,14 @@ function buildTerminalOutcomeIfReady(record: StudioRunRecord, tasks: StudioQueue
     return null;
   }
   const finalTask = tasks
-    .filter((task) => task.status === 'done' && task.petRunId)
+    .filter((task) => task.status === 'done' && latestInvocation(task))
     .at(-1);
-  if (finalTask?.petRunId) {
+  const finalInvocationId = finalTask ? latestInvocation(finalTask)?.invocationId : undefined;
+  if (finalTask && finalInvocationId) {
     return {
       outcome: 'done',
       finalTaskIndex: finalTask.taskIndex,
-      finalPetRunId: finalTask.petRunId,
+      finalInvocationId,
       reply: record.taskResults.get(finalTask.taskIndex) ?? '',
     };
   }
@@ -388,6 +393,11 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
     dispatchId: string,
     signal: AbortSignal | undefined,
     emit: (event: StudioTurnEvent) => void,
+    /**
+     * 本次尝试**之前**已失败的次数,由持久化的 invocation 列表导出。
+     * 传进来而不是读内存计数器 —— 后者崩溃恢复后会归零。
+     */
+    priorFailedAttempts: number,
   ): Promise<StudioWorkerRunResult> {
     if (!state.taskBatch) {
       throw new Error('worker handoff called without queued task batch');
@@ -409,10 +419,10 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
 
     const agent = petRegistry.getRuntime(task.petId);
     const workerRun: StudioWorkerRunResult = {
-      petRunId: dispatchId,
+      invocationId: dispatchId,
       status: 'finished',
     };
-    emit({ type: 'task_started', taskIndex, petId: task.petId, petRunId: dispatchId });
+    emit({ type: 'task_started', taskIndex, petId: task.petId, invocationId: dispatchId });
 
     if (!agent) {
       workerRun.status = 'cancelled';
@@ -423,7 +433,7 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
         type: 'task_finished',
         taskIndex,
         petId: task.petId,
-        petRunId: dispatchId,
+        invocationId: dispatchId,
         status: 'cancelled',
         errorMessage: workerRun.errorMessage,
       });
@@ -440,7 +450,7 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
         type: 'task_finished',
         taskIndex,
         petId: task.petId,
-        petRunId: dispatchId,
+        invocationId: dispatchId,
         status: 'cancelled',
         errorMessage: workerRun.errorMessage,
       });
@@ -463,8 +473,7 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
       workerRun.status = 'finished';
       workerRun.errorMessage = error instanceof Error ? error.message : String(error);
       workerRun.finishedAt = new Date().toISOString();
-      taskState.retryCount += 1;
-      if (taskState.retryCount >= maxRetryPerTask) {
+      if (priorFailedAttempts + 1 >= maxRetryPerTask) {
         changeTaskStatus('failed');
       }
     }
@@ -473,7 +482,7 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
       type: 'task_finished',
       taskIndex,
       petId: task.petId,
-      petRunId: dispatchId,
+      invocationId: dispatchId,
       status: workerRun.status,
       resultText: workerRun.resultText,
       errorMessage: workerRun.errorMessage,
@@ -585,7 +594,7 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
     emitRunEvent(record, {
       type: 'turn_finished',
       outcome: outcome.outcome,
-      ...(outcome.outcome === 'done' ? { finalPetRunId: outcome.finalPetRunId } : {}),
+      ...(outcome.outcome === 'done' ? { finalInvocationId: outcome.finalInvocationId } : {}),
     });
     const snapshot = readRunSnapshot(record);
     record.resolve({
@@ -654,12 +663,14 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
       queue.push({
         runId: record.turnId,
         conversationId: record.conversationId,
+        taskId: randomUUID(),
         taskIndex,
         petId: task.petId,
         brief: task.goal,
         acceptanceCriteria: task.acceptanceCriteria,
         deps: normalizeDepsForTask(batch, taskIndex),
         status: 'queued',
+        invocations: [],
         enqueuedAt: new Date().toISOString(),
       });
     }
@@ -762,9 +773,17 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
       return;
     }
 
+    const startedAt = new Date().toISOString();
+    const invocation: StudioInvocation = {
+      invocationId: randomUUID(),
+      petId: item.petId,
+      attempt: item.invocations.length,
+      status: 'running',
+      startedAt,
+    };
     item.status = 'running';
-    item.startedAt = new Date().toISOString();
-    item.petRunId = randomUUID().slice(0, 8);
+    item.startedAt = item.startedAt ?? startedAt;
+    item.invocations.push(invocation);
     activePets.add(item.petId);
     record.state.iterationCount += 1;
     saveRunSnapshot(record);
@@ -772,14 +791,20 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
     void runDispatch(
       record.state,
       { taskIndex: item.taskIndex, brief: item.brief },
-      item.petRunId,
+      invocation.invocationId,
       record.signal,
       (event) => emitRunEvent(record, event),
+      failedAttemptCount(item),
     ).then(async (workerRun) => {
       item.errorMessage = workerRun.errorMessage;
       item.finishedAt = workerRun.finishedAt ?? new Date().toISOString();
       const resultText = workerRun.resultText;
+      invocation.finishedAt = item.finishedAt;
+      if (workerRun.errorMessage) {
+        invocation.errorMessage = workerRun.errorMessage;
+      }
       if (record.signal?.aborted) {
+        invocation.status = 'cancelled';
         item.status = 'cancelled';
         completeRun(record, {
           outcome: 'stopped',
@@ -787,14 +812,18 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
           reply: workerRun.resultText ?? '',
         });
       } else if (taskState.status === 'pending') {
+        // 这次尝试失败但仍有重试预算:task 回到队列,本次 invocation 定格为
+        // failed —— 重试计数正是由这些 failed invocation 导出的。
+        invocation.status = 'failed';
         item.status = 'queued';
-        item.startedAt = undefined;
       } else if (taskState.status === 'satisfied') {
+        invocation.status = 'succeeded';
         item.status = 'done';
         if (typeof resultText === 'string') {
           record.taskResults.set(item.taskIndex, resultText);
         }
       } else {
+        invocation.status = 'failed';
         item.status = 'failed';
       }
       saveRunSnapshot(record);

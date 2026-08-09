@@ -71,7 +71,7 @@ test('StudioRunService runs Studio with runtimeConfig-scoped paths', async () =>
               outcome: {
                 outcome: 'done',
                 reply: 'done reply',
-                finalPetRunId: 'pet-run-1',
+                finalInvocationId: 'pet-run-1',
               },
               studio: {},
             } as StudioTurnResult;
@@ -146,7 +146,7 @@ test('StudioRunService falls back to deps.workdir when runtimeConfig is absent',
               outcome: {
                 outcome: 'done',
                 reply: 'legacy reply',
-                finalPetRunId: 'pet-run-legacy',
+                finalInvocationId: 'pet-run-legacy',
               },
               studio: {},
             } as StudioTurnResult;

@@ -24,24 +24,34 @@ function snapshot(overrides: Partial<StudioRunSnapshot> = {}): StudioRunSnapshot
       {
         runId: 'run-1',
         conversationId: 'conv-1',
+        taskId: 'task-b',
         taskIndex: 1,
         petId: 'pet-b',
         brief: 'second',
         acceptanceCriteria: [],
         deps: [],
         status: 'queued',
+        invocations: [],
         enqueuedAt: '2026-06-20T00:00:01.000Z',
       },
       {
         runId: 'run-1',
         conversationId: 'conv-1',
+        taskId: 'task-a',
         taskIndex: 0,
         petId: 'pet-a',
         brief: 'first',
         acceptanceCriteria: ['done'],
         deps: [],
         status: 'done',
-        petRunId: 'pet-run-1',
+        invocations: [{
+          invocationId: 'inv-a-0',
+          petId: 'pet-a',
+          attempt: 0,
+          status: 'succeeded',
+          startedAt: '2026-06-20T00:00:01.000Z',
+          finishedAt: '2026-06-20T00:00:02.000Z',
+        }],
         enqueuedAt: '2026-06-20T00:00:00.000Z',
         startedAt: '2026-06-20T00:00:01.000Z',
         finishedAt: '2026-06-20T00:00:02.000Z',
@@ -74,7 +84,12 @@ test('file Studio run queue store restores persisted run and task snapshots', as
   assert.equal(restored?.runId, 'run-1');
   assert.equal(restored?.status, 'running');
   assert.deepEqual(restored?.tasks.map((task) => task.taskIndex), [0, 1]);
-  assert.equal(restored?.tasks[0]?.petRunId, 'pet-run-1');
+  assert.equal(restored?.tasks[0]?.taskId, 'task-a');
+  // invocation 历史必须原样还原 —— 重试预算正是由它导出的。
+  assert.deepEqual(
+    restored?.tasks[0]?.invocations.map((invocation) => invocation.invocationId),
+    ['inv-a-0'],
+  );
 });
 
 test('Studio run queue recovery blocks open runs with previously running tasks', () => {
@@ -91,19 +106,28 @@ test('Studio run queue recovery blocks open runs with previously running tasks',
         acceptanceCriteria: [],
         deps: [],
         status: 'running',
-        petRunId: 'pet-run-in-flight',
+        taskId: 'task-in-flight',
+        invocations: [{
+          invocationId: 'inv-in-flight',
+          petId: 'pet-a',
+          attempt: 0,
+          status: 'running',
+          startedAt: '2026-06-20T00:00:01.000Z',
+        }],
         enqueuedAt: '2026-06-20T00:00:00.000Z',
         startedAt: '2026-06-20T00:00:01.000Z',
       },
       {
         runId: 'run-1',
         conversationId: 'conv-1',
+        taskId: 'task-ovr-1',
         taskIndex: 1,
         petId: 'pet-b',
         brief: 'still queued',
         acceptanceCriteria: [],
         deps: [],
         status: 'queued',
+        invocations: [],
         enqueuedAt: '2026-06-20T00:00:02.000Z',
       },
     ],
@@ -127,12 +151,14 @@ test('Studio run queue recovery keeps blocked queued tasks without forcing termi
       {
         runId: 'run-1',
         conversationId: 'conv-1',
+        taskId: 'task-ovr-2',
         taskIndex: 0,
         petId: 'pet-a',
         brief: 'waiting',
         acceptanceCriteria: [],
         deps: [],
         status: 'queued',
+        invocations: [],
         enqueuedAt: '2026-06-20T00:00:00.000Z',
       },
     ],

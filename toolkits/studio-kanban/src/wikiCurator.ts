@@ -53,11 +53,10 @@ export async function ensureWikiSkeleton(wikiRoot: string): Promise<void> {
 }
 
 async function writeSourceFile(wikiRoot: string, task: StudioWikiTaskSource): Promise<string> {
-  const petRunId = task.petRunId ?? `task-${task.taskIndex}`;
-  const sourceFile = path.join(wikiRoot, 'sources', `${petRunId}-${task.petId}.md`);
+  const sourceFile = path.join(wikiRoot, 'sources', `${task.taskId}-${task.petId}.md`);
   const sourceBody = [
     '---',
-    `petRunId: ${petRunId}`,
+    `taskId: ${task.taskId}`,
     `petId: ${task.petId}`,
     `taskIndex: ${task.taskIndex}`,
     `status: ${task.status}`,
@@ -97,14 +96,13 @@ export function createSkeletonWikiCurator(): WikiCurator {
       const sourceRel = await writeSourceFile(wikiRoot, task);
       changed.push(sourceRel);
 
-      const petRunId = task.petRunId ?? `task-${task.taskIndex}`;
       const indexFile = path.join(wikiRoot, 'index.md');
       const indexAppend = [
         '',
-        `### ${petRunId} — ${task.petId}`,
+        `### ${task.taskId} — ${task.petId}`,
         `- taskIndex: ${task.taskIndex}`,
         `- status: ${task.status}`,
-        `- source: sources/${petRunId}-${task.petId}.md`,
+        `- source: sources/${task.taskId}-${task.petId}.md`,
         '',
       ].join('\n');
       await fs.appendFile(indexFile, indexAppend, 'utf8');
@@ -133,7 +131,7 @@ export const DEFAULT_CURATOR_PROMPT = [
   '写作风格参考 Karpathy 个人笔记的 wiki 风格:简洁、按主题组织、重点突出、',
   '便于后续读者(下一棒 pet)快速定位需要的内容。',
   '',
-  '原始 task 素材会由系统单独写入 sources/{petRunId}-{petId}.md(你不需要管),',
+  '原始 task 素材会由系统单独写入 sources/{taskId}-{petId}.md(你不需要管),',
   '你只负责输出 topics 与 index 的整理结果。',
 ].join('\n');
 
@@ -244,7 +242,7 @@ function buildCuratorUserMessage(params: {
   return [
     '## 本次 task',
     '',
-    `- petRunId: ${task.petRunId ?? `task-${task.taskIndex}`}`,
+    `- taskId: ${task.taskId}`,
     `- petId: ${task.petId}`,
     `- taskIndex: ${task.taskIndex}`,
     `- status: ${task.status}`,

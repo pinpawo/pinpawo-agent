@@ -120,7 +120,7 @@ test('LocalServerStudioHandler emits progress and done response', async () => {
               outcome: {
                 outcome: 'done',
                 reply: 'done reply',
-                finalPetRunId: 'pet-run-1',
+                finalInvocationId: 'pet-run-1',
               },
             };
           },
@@ -194,7 +194,7 @@ test('LocalServerStudioHandler serializes studio requests per peer', async () =>
               outcome: {
                 outcome: 'done',
                 reply: 'first done',
-                finalPetRunId: 'pet-run-first',
+                finalInvocationId: 'pet-run-first',
               },
             };
           }
@@ -202,7 +202,7 @@ test('LocalServerStudioHandler serializes studio requests per peer', async () =>
               outcome: {
                 outcome: 'done',
                 reply: 'second done',
-                finalPetRunId: 'pet-run-second',
+                finalInvocationId: 'pet-run-second',
               },
           };
         },
@@ -278,7 +278,7 @@ test('LocalServerStudioHandler discards queued studio requests after peer discon
               outcome: {
                 outcome: 'done',
                 reply: 'first done',
-                finalPetRunId: 'pet-run-first',
+                finalInvocationId: 'pet-run-first',
               },
             };
           }
@@ -286,7 +286,7 @@ test('LocalServerStudioHandler discards queued studio requests after peer discon
               outcome: {
                 outcome: 'done',
                 reply: 'second done',
-                finalPetRunId: 'pet-run-second',
+                finalInvocationId: 'pet-run-second',
               },
           };
         },
@@ -364,7 +364,7 @@ test('LocalServerStudioHandler fills runId and conversationId defaults', async (
             outcome: {
               outcome: 'done',
               reply: 'done reply',
-              finalPetRunId: 'pet-run-default',
+              finalInvocationId: 'pet-run-default',
             },
           }),
         } as unknown as BuildStudioResult['orchestrator'],

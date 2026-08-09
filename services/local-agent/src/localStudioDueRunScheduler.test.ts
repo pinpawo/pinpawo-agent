@@ -57,7 +57,7 @@ function createStudioRunService(onRunStart?: () => void): StudioRunService {
             outcome: {
               outcome: 'done',
               reply: 'done',
-              finalPetRunId: 'pet-run-1',
+              finalInvocationId: 'pet-run-1',
             },
             studio: {} as StudioTurnResult['studio'],
           } as StudioTurnResult;

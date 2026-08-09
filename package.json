@@ -13,8 +13,8 @@
   ],
   "scripts": {
     "build": "npm run build -w @pinpawo/agent-contracts && npm run build -w @pinpawo/pet-agent && npm run build -w pinpawo",
-    "test": "npm run test -w @pinpawo/agent-contracts && npm run test -w @pinpawo/pet-agent && npm run test -w @pinpawo/agent-session && npm run test -w @pinpawo/tui && npm run test -w @pinpawo-toolkit/browser && npm run test:unit -w pinpawo",
-    "typecheck": "npm run typecheck -w @pinpawo/agent-contracts && npm run typecheck -w @pinpawo/pet-agent && npm run typecheck -w @pinpawo/agent-session && npm run typecheck -w @pinpawo/tui && npm run typecheck -w @pinpawo-toolkit/browser && npm run typecheck -w pinpawo",
+    "test": "npm run test -w @pinpawo/agent-contracts && npm run test -w @pinpawo/pet-agent && npm run test -w @pinpawo/studio && npm run test -w @pinpawo/agent-session && npm run test -w @pinpawo/tui && npm run test -w @pinpawo-toolkit/browser && npm run test:unit -w pinpawo",
+    "typecheck": "npm run typecheck -w @pinpawo/agent-contracts && npm run typecheck -w @pinpawo/pet-agent && npm run typecheck -w @pinpawo/studio && npm run typecheck -w @pinpawo/agent-session && npm run typecheck -w @pinpawo/tui && npm run typecheck -w @pinpawo-toolkit/browser && npm run typecheck -w pinpawo",
     "langfuse:env": "bash infra/langfuse/bootstrap-env.sh",
     "langfuse:up": "npm run langfuse:env && docker compose --env-file infra/langfuse/.env -f infra/langfuse/docker-compose.yml up -d",
     "langfuse:down": "npm run langfuse:env && docker compose --env-file infra/langfuse/.env -f infra/langfuse/docker-compose.yml down",

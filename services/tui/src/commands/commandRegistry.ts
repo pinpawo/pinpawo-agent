@@ -9,6 +9,7 @@ export type TuiCommandName =
   | 'export'
   | 'edit'
   | 'continue'
+  | 'compact'
   | 'resume'
   | 'quit';
 
@@ -78,6 +79,10 @@ const COMMANDS: readonly TuiCommandDefinition[] = [{
   name: 'continue',
   usage: '/continue <guidance>',
   description: 'Continue the unfinished delegation in this session',
+}, {
+  name: 'compact',
+  usage: '/compact',
+  description: 'Summarize older context in the current chat session',
 }, {
   name: 'resume',
   usage: '/resume',

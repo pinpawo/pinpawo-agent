@@ -1127,6 +1127,61 @@ test('session commands reject protocol errors, busy runs, and timeouts', async (
   controller.stop();
 });
 
+test('manual compaction binds the active session and uses its model-call timeout', async () => {
+  const timers: Array<{
+    callback: () => void;
+    delay: number;
+    handle: ReturnType<typeof setTimeout>;
+  }> = [];
+  const requestIds = ['startup', 'compact'];
+  let connection!: FakeConnection;
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => requestIds.shift() ?? 'unexpected',
+    sessionCommandTimeoutMs: 25,
+    sessionCompactTimeoutMs: 120_000,
+    setTimer: (callback, delay) => {
+      const handle = {} as ReturnType<typeof setTimeout>;
+      timers.push({ callback, delay, handle });
+      return handle;
+    },
+    clearTimer: (handle) => {
+      const index = timers.findIndex((timer) => timer.handle === handle);
+      if (index >= 0) timers.splice(index, 1);
+    },
+  });
+  controller.start();
+  connection.open();
+  connection.receive(snapshotResult('startup', 'chat:one'));
+
+  const compacted = controller.compactSession();
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'session.compact',
+    requestId: 'compact',
+    sessionId: 'chat:one',
+  });
+  assert.equal(timers.length, 1);
+  assert.equal(timers[0]?.delay, 120_000);
+
+  connection.receive({
+    type: 'session.compact.result',
+    requestId: 'compact',
+    compacted: true,
+    snapshot: createAgentSessionSnapshot({
+      sessionId: 'chat:one',
+      kind: 'chat',
+      timeline: [],
+      activeRun: null,
+    }),
+  });
+  assert.equal((await compacted).compacted, true);
+  assert.equal(controller.getState().session.sessionId, 'chat:one');
+  controller.stop();
+});
+
 test('delegation continuation sends resume_active without client-owned availability', async () => {
   const requestIds = [
     'startup',

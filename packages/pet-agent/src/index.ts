@@ -168,6 +168,9 @@ export {
   readMessageTokenUsage,
   readMessagesTokenUsage,
 } from './agent/tokenUsage';
+export {
+  compactOrchestratorMessages,
+} from './agent/orchestrator/contextCompaction';
 export type {
   OrchestratorGraphStream,
   OrchestratorTokenUsageStream,

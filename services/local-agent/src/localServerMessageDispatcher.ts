@@ -10,6 +10,7 @@ import {
   type RunInterruptMessage,
   type RuntimeConfigUpdateMessage,
   type SessionListMessage,
+  type SessionCompactMessage,
   type SessionNewMessage,
   type SessionResumeMessage,
   type SessionSnapshotGetMessage,
@@ -40,6 +41,8 @@ export type LocalServerPeerHandlers = {
     message: SessionSnapshotGetMessage,
   ) => MaybePromise<void>;
   onSessionList: (peer: LocalServerPeer, message: SessionListMessage) => MaybePromise<void>;
+  /** Optional so pre-v2 host embeddings can retain their existing handlers. */
+  onSessionCompact?: (peer: LocalServerPeer, message: SessionCompactMessage) => MaybePromise<void>;
   onSessionNew: (peer: LocalServerPeer, message: SessionNewMessage) => MaybePromise<void>;
   onSessionResume: (peer: LocalServerPeer, message: SessionResumeMessage) => MaybePromise<void>;
   onModelList: (peer: LocalServerPeer, message: ModelListMessage) => MaybePromise<void>;
@@ -77,7 +80,9 @@ function sendMalformedClientMessageError(peer: LocalServerPeer, data: Buffer | s
         ? 'new'
         : envelope.type === 'session.resume'
           ? 'resume'
-        : null;
+          : envelope.type === 'session.compact'
+            ? 'compact'
+          : null;
   if (sessionOperation) {
     peer.send({
       type: 'session.error',
@@ -193,6 +198,21 @@ export function dispatchLocalServerMessage(
       return runLocalServerPeerHandler(
         'handleSessionResume',
         () => handlers.onSessionResume(peer, msg),
+        logError,
+      );
+    } else if (msg.type === 'session.compact') {
+      if (!handlers.onSessionCompact) {
+        peer.send({
+          type: 'session.error',
+          requestId: msg.requestId,
+          operation: 'compact',
+          message: '当前 local-agent 不支持手动压缩，请升级 local-agent 后重试。',
+        });
+        return Promise.resolve();
+      }
+      return runLocalServerPeerHandler(
+        'handleSessionCompact',
+        () => handlers.onSessionCompact!(peer, msg),
         logError,
       );
     } else if (msg.type === 'model.list') {

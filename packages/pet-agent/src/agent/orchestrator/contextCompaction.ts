@@ -155,9 +155,9 @@ export async function compactOrchestratorMessages(params: {
   runnableConfig?: RunnableConfig;
 }): Promise<ContextCompactionResult> {
   const { messages, model } = params;
-  const keepMessages = params.options?.keepMessages ?? DEFAULT_KEEP_MESSAGES;
   const triggerMessages = mainConversationMessages(messages);
   const mainMessageCount = triggerMessages.length;
+  const keepMessages = params.options?.keepMessages ?? DEFAULT_KEEP_MESSAGES;
 
   const keptMessages = selectMessagesToKeep(messages, keepMessages);
   const keptMessageRefs = new Set(keptMessages);

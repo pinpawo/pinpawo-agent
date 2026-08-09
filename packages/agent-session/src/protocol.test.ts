@@ -127,6 +127,46 @@ test('runtime config protocol supports legacy updates and correlated acknowledge
   });
 });
 
+test('session compaction protocol is correlated and snapshot-backed', () => {
+  assert.deepEqual(parseAgentClientMessage({
+    type: 'session.compact',
+    requestId: 'compact-1',
+    sessionId: 'session-1',
+  }), {
+    type: 'session.compact',
+    requestId: 'compact-1',
+    sessionId: 'session-1',
+  });
+  assert.equal(parseAgentClientMessage({
+    type: 'session.compact',
+    requestId: 'compact-1',
+    sessionId: 'session-1',
+    extra: true,
+  }), null);
+  assert.equal(parseAgentClientMessage({
+    type: 'session.compact',
+    requestId: 'compact-1',
+  }), null);
+
+  const snapshot = createAgentSessionSnapshot({
+    sessionId: 'session-1',
+    kind: 'chat',
+    timeline: [],
+    activeRun: null,
+  });
+  assert.deepEqual(parseAgentServerMessage({
+    type: 'session.compact.result',
+    requestId: 'compact-1',
+    compacted: true,
+    snapshot,
+  }), {
+    type: 'session.compact.result',
+    requestId: 'compact-1',
+    compacted: true,
+    snapshot,
+  });
+});
+
 test('model protocol accepts correlated selection messages and sanitized profile lists', () => {
   assert.deepEqual(parseAgentClientMessage({
     type: 'model.list',

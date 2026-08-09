@@ -56,6 +56,14 @@ test('composer intent keeps slash text literal when attachments are selected', (
   });
 });
 
+test('composer intent routes manual context compaction', () => {
+  assert.deepEqual(resolveComposerIntent({
+    text: '/compact',
+    attachmentCount: 0,
+    mode: 'chat',
+  }), { type: 'compact-session' });
+});
+
 test('composer intent requires continuation guidance before execution', () => {
   assert.deepEqual(resolveComposerIntent({
     text: '/continue',

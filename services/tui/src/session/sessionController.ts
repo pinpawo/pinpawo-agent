@@ -23,6 +23,7 @@ import {
 } from './runtimeConfigCoordinator';
 import {
   SessionCommandCoordinator,
+  type CompactSessionResult,
   type ResumeSessionResult,
   type StartNewSessionResult,
 } from './sessionCommandCoordinator';
@@ -49,6 +50,7 @@ import type {
 } from './sessionControllerTypes';
 
 export type {
+  CompactSessionResult,
   ResumeSessionResult,
   StartNewSessionResult,
 } from './sessionCommandCoordinator';
@@ -79,6 +81,7 @@ type ActiveDelegationTransition = NonNullable<
 const DEFAULT_RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000] as const;
 const DEFAULT_SNAPSHOT_TIMEOUT_MS = 5_000;
 const DEFAULT_SESSION_COMMAND_TIMEOUT_MS = 5_000;
+const DEFAULT_SESSION_COMPACT_TIMEOUT_MS = 120_000;
 
 export class TuiSessionController {
   private readonly now: () => number;
@@ -141,6 +144,7 @@ export class TuiSessionController {
       requestIdFactory: this.requestIdFactory,
       send: (message) => this.transport.send(message),
       getUnavailableReason: () => this.sessionCommandUnavailable(),
+      getSessionId: () => this.state.session.sessionId,
       onSnapshot: (snapshot) => {
         this.transport.clearSnapshotRequests();
         this.updateSession(applySessionSnapshot(
@@ -150,6 +154,8 @@ export class TuiSessionController {
         ));
       },
       timeoutMs: sessionCommandTimeoutMs,
+      compactTimeoutMs: options.sessionCompactTimeoutMs
+        ?? DEFAULT_SESSION_COMPACT_TIMEOUT_MS,
       setTimer,
       clearTimer,
     });
@@ -377,6 +383,10 @@ export class TuiSessionController {
     return this.sessionCommands.resumeSession(sessionId);
   }
 
+  compactSession(): Promise<CompactSessionResult> {
+    return this.sessionCommands.compactSession();
+  }
+
   updateGlobalReviewPolicy(
     globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode,
     autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel,
@@ -509,6 +519,7 @@ export class TuiSessionController {
       message.type === 'session.list.result'
       || message.type === 'session.new.result'
       || message.type === 'session.resume.result'
+      || message.type === 'session.compact.result'
       || message.type === 'session.error'
     ) {
       this.sessionCommands.handleMessage(message);

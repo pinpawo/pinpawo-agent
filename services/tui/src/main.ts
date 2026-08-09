@@ -1575,6 +1575,20 @@ function submitComposerInput(input = composer.plainText) {
       }
       return;
     }
+    case 'compact-session':
+      clearComposerPreservingNotice();
+      localNotice = 'compacting older context…';
+      refreshStatus();
+      void controller.compactSession().then(({ compacted }) => {
+        localNotice = compacted
+          ? 'older context compacted'
+          : 'nothing older to compact';
+        refreshHeader();
+        refreshStatus();
+      }).catch((error) => {
+        showErrorNotice(errorMessage(error));
+      });
+      return;
     case 'open-resume':
       composer.clear();
       localNotice = null;

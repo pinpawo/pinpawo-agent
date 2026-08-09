@@ -220,6 +220,14 @@ export function createDemoConnectionFactory(
             snapshot: createAgentSessionSnapshot(session),
           });
         }
+        if (message.type === 'session.compact') {
+          handlers.onMessage({
+            type: 'session.compact.result',
+            requestId: message.requestId,
+            compacted: false,
+            snapshot: createAgentSessionSnapshot(session),
+          });
+        }
         if (
           options.review
           && (

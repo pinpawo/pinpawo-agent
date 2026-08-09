@@ -108,10 +108,22 @@ it has ever bound, so mixing an external binding with a later standalone call
 cannot re-mint a lower generation that would let a stale higher-numbered event
 be misread as current.
 
-**Note:** the event stream is forwarded and consumed via
-`bindBridgeToController`, but nothing in the runtime/session yet drives
-`BrowserLifecycleController` end-to-end as the owner of `browser_open` /
-interaction tools. Next steps (per the issue's suggested order) are to wire the
-controller + `openReadiness` into `browser_open` and to have the extension emit
-the finer-grained `network.activity` / `dom.changed` / `document.ready` events
-the reducer already supports.
+**Note (browser_open readiness, current scope):** `ChromeExtensionBrowserSession.open()`
+drives the navigation through `BrowserLifecycleController` + `driveOpenReadiness`
+(bounded by `OPEN_READINESS_DEADLINE_MS`), replaying the events the extension
+emits during the navigate round-trip through the controller bound to the
+bridge's own navigation generation. The extension emits `document.ready` /
+`dom.changed` (with the sampled body text) in the navigate handler so the
+reducer can reach `readable`; `BrowserRuntime` binds the bridge to the
+controller via `bindBridgeToController` and exposes the current `readiness` on
+its snapshot. This lets the Runtime **confirm the readiness verdict
+post-hoc** and surface `origin_changed` / `navigation_timeout` deterministically.
+
+**Scope caveat:** the *actual wait* for the page to stop loading is still the
+extension's `waitForNavigableTab`, polling `tab.status === 'complete'` before
+it captures the snapshot; the readiness events are derived *after* that capture
+(back-filled from the snapshot), so the Runtime is currently reviewing facts the
+extension already awaited, not driving a live event subscription. A live
+readiness event stream (extension subscribing to `Page/Network` events and
+reporting `network.activity` / repeated `dom.changed` while a page settles) is
+the remaining follow-up that lets the Runtime *own* the wait.

@@ -384,7 +384,24 @@ export class TuiSessionController {
   }
 
   compactSession(): Promise<CompactSessionResult> {
-    return this.sessionCommands.compactSession();
+    const request = this.sessionCommands.compactSession();
+    if (!this.sessionCommands.hasPending()) {
+      return request;
+    }
+
+    this.state = {
+      ...this.state,
+      pendingSessionCommand: 'compact',
+    };
+    this.notify();
+    return request.finally(() => {
+      if (this.state.pendingSessionCommand !== 'compact') return;
+      this.state = {
+        ...this.state,
+        pendingSessionCommand: undefined,
+      };
+      this.notify();
+    });
   }
 
   updateGlobalReviewPolicy(

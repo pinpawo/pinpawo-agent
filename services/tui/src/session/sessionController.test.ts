@@ -1133,7 +1133,7 @@ test('manual compaction binds the active session and uses its model-call timeout
     delay: number;
     handle: ReturnType<typeof setTimeout>;
   }> = [];
-  const requestIds = ['startup', 'compact'];
+  const requestIds = ['startup', 'compact', 'compact-error'];
   let connection!: FakeConnection;
   const controller = new TuiSessionController({
     connectionFactory: (handlers) => {
@@ -1158,6 +1158,7 @@ test('manual compaction binds the active session and uses its model-call timeout
   connection.receive(snapshotResult('startup', 'chat:one'));
 
   const compacted = controller.compactSession();
+  assert.equal(controller.getState().pendingSessionCommand, 'compact');
   assert.deepEqual(connection.sent.at(-1), {
     type: 'session.compact',
     requestId: 'compact',
@@ -1178,7 +1179,19 @@ test('manual compaction binds the active session and uses its model-call timeout
     }),
   });
   assert.equal((await compacted).compacted, true);
+  assert.equal(controller.getState().pendingSessionCommand, undefined);
   assert.equal(controller.getState().session.sessionId, 'chat:one');
+
+  const failedCompaction = controller.compactSession();
+  assert.equal(controller.getState().pendingSessionCommand, 'compact');
+  connection.receive({
+    type: 'session.error',
+    requestId: 'compact-error',
+    operation: 'compact',
+    message: 'summary model unavailable',
+  });
+  await assert.rejects(failedCompaction, /summary model unavailable/);
+  assert.equal(controller.getState().pendingSessionCommand, undefined);
   controller.stop();
 });
 

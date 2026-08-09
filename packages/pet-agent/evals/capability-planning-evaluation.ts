@@ -1,4 +1,9 @@
 import {
+  AIMessage,
+  HumanMessage,
+  type BaseMessage,
+} from '@langchain/core/messages';
+import {
   scoreCapabilityPlanning,
   type DecisionContractScore,
 } from './decision-contract-scorers.ts';
@@ -18,6 +23,18 @@ export type CapabilityPlanningEvalOutput = {
   capabilityName: string | null;
   remainingPlan: Array<{ capability: string; task: string }>;
 };
+
+const MAX_CAPABILITY_PLANNER_RECENT_MESSAGES = 10;
+
+export function buildCapabilityPlanningRecentMessages(
+  messages: CapabilityPlanningInput['messages'],
+): BaseMessage[] {
+  return messages.slice(-MAX_CAPABILITY_PLANNER_RECENT_MESSAGES).map((message) => (
+    message.role === 'user'
+      ? new HumanMessage(message.content)
+      : new AIMessage(message.content)
+  ));
+}
 
 export function buildCapabilityPlanningGoalContract(
   expected: CapabilityPlanningExpected,

@@ -284,6 +284,7 @@ function plannerInput(
       objective: 'Research the repository and then prepare a review.',
       context: null,
     },
+    recentMainMessages: [],
     completedTask: null,
     completedTaskResult: null,
     remainingPlan: [],
@@ -345,9 +346,13 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
       },
     },
   ]);
+  const recentMainMessages = [
+    new HumanMessage('Earlier, inspect the auth module before planning changes.'),
+    new AIMessage('The auth module context remains relevant to the current goal.'),
+  ];
 
   const result = await createCapabilityPlannerAgent({ model })
-    .invoke(plannerInput(workspace));
+    .invoke(plannerInput(workspace, { recentMainMessages }));
 
   assert.deepEqual(model.boundToolNames.slice(0, 1), [
     CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
@@ -367,6 +372,15 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
   assert.ok(model.invocations[0]?.some((message) =>
     message instanceof HumanMessage
     && String(message.content).includes('Research the repository and then prepare a review.')));
+  const firstInvocationTexts = model.invocations[0]?.map((message) => String(message.content)) ?? [];
+  const recentUserIndex = firstInvocationTexts.indexOf(String(recentMainMessages[0]?.content));
+  const recentAssistantIndex = firstInvocationTexts.indexOf(String(recentMainMessages[1]?.content));
+  const plannerInputIndex = firstInvocationTexts.findIndex(
+    (text) => text.includes('Research the repository and then prepare a review.'),
+  );
+  assert.ok(recentUserIndex >= 0);
+  assert.ok(recentUserIndex < recentAssistantIndex);
+  assert.ok(recentAssistantIndex < plannerInputIndex);
   assert.deepEqual(result, {
     tasks: [{
       capability: 'explore',
@@ -839,9 +853,6 @@ test('boundary mode rejects answer and materializes remaining work with general'
   assert.ok('tasks' in result);
   assert.equal('tasks' in result ? result.tasks[0]?.capability : null, 'general');
   assert.deepEqual(model.structuredOutputCapabilityEnums, [['general', 'explore']]);
-  assert.ok(model.invocations[0]?.some((message) =>
-    message instanceof HumanMessage
-    && String(message.content).includes('Planner Context：继续执行状态')));
   assert.match(
     model.invocations[0]?.map((message) => String(message.content)).join('\n') ?? '',
     /Final constraint: preserve the public API/,

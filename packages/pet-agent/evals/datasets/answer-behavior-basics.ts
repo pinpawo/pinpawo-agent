@@ -32,6 +32,7 @@ export type AnswerBehaviorInput = {
     runId: string;
     task: string;
     outcome: 'goal_done' | 'user_input_required';
+    context?: string;
   };
 };
 
@@ -335,6 +336,7 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
           runId: 'answer-eval-user-choice-run',
           task: '确认发送渠道并发送已经完成的报告',
           outcome: 'user_input_required',
+          context: '报告已经完成但尚未发送；继续前需要用户选择发送到邮件或项目群。',
         },
       },
       expected: {
@@ -353,6 +355,46 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
       metadata: {
         difficulty: 'hard',
         reason: 'Cross-node boundary: user input retains a resumable delegation instead of completing handoff.',
+        source: SOURCE_FILE,
+      },
+    },
+    {
+      id: `${ANSWER_BEHAVIOR_BASICS_DATASET}.user-input-required-does-not-restart-work`,
+      name: 'user-input-required-does-not-restart-work',
+      suite: ANSWER_BEHAVIOR_BASICS_DATASET,
+      tags: ['context_synthesis', 'delegation_control'],
+      input: {
+        userGoal: {
+          objective: '在最新 main 上完成 browser_open readiness 的 extension 与协议层改造，并提交 PR。',
+          context: '本轮只做 PR-B1，不修改 services/local-agent，也不开始后续 PR-B2。',
+        },
+        messages: [{
+          role: 'user',
+          text: '按路径 B 推进 PR-B1：完成 extension 与协议层改造，验证后提交 PR。',
+        }],
+        delegationOutcome: {
+          handoffFrom: 'capability:general',
+          runId: 'answer-eval-runtime-wait-user-input-run',
+          task: '完成 extension 与协议层改造并提交 PR-B1',
+          outcome: 'user_input_required',
+          context: '当前执行停在远端分支处理前，需要用户确认是否允许更新已有远端分支。',
+        },
+      },
+      expected: {
+        contract: 'answer.user-visible-close',
+        objective: '说明当前停止点并询问是否允许更新远端分支，不重新启动或模拟执行任务。',
+        acceptanceCriteria: [
+          { id: 'stopping_point_reported', statement: '说明当前停在远端分支处理前，需要用户确认。' },
+          { id: 'asks_for_required_input', statement: '明确询问用户是否允许更新已有远端分支。' },
+          { id: 'does_not_restart_work', statement: '没有声称将检查分支、修改代码、运行测试、提交或推送。' },
+          { id: 'no_tool_call_style_output', statement: '没有输出 DSML、bash、git 命令或其他工具调用风格文本。' },
+        ],
+        expectedBehavior: 'return_control',
+        diagnostics: { referenceMaxCharacters: 260 },
+      },
+      metadata: {
+        difficulty: 'hard',
+        reason: 'Regression fixture for a long imperative run goal overriding the user-input-required terminal mode.',
         source: SOURCE_FILE,
       },
     },

@@ -4,7 +4,7 @@ import {
   type BaseMessage,
 } from '@langchain/core/messages';
 import type { AgentActor } from '../../../types/agent';
-import { setPinpetMeta } from '../messageLanes';
+import { getPinpetMeta, setPinpetMeta } from '../messageLanes';
 import type { UserGoal } from '../types';
 import { clipForPrompt } from '../utils';
 import { buildRunUserGoalContext } from './context';
@@ -19,6 +19,7 @@ export const ANSWER_CONTEXT_LIMITS = {
   plannerReasonChars: 1_000,
   plannerContextChars: 2_000,
   plannerQuestionChars: 1_000,
+  awaitingUserInputChars: 2_000,
 } as const;
 
 export type AnswerBlockedReason =
@@ -37,7 +38,11 @@ export type AnswerContextFacts =
   | { mode: 'direct'; hasUserGoal: boolean }
   | { mode: 'task_result'; hasUserGoal: boolean }
   | { mode: 'goal_done'; hasUserGoal: boolean }
-  | { mode: 'user_input_required'; hasUserGoal: boolean }
+  | {
+      mode: 'user_input_required';
+      hasUserGoal: boolean;
+      context: string | null;
+    }
   | {
       mode: 'planner_return';
       hasUserGoal: boolean;
@@ -92,6 +97,12 @@ function renderAnswerContext(facts: ModelAnswerContextFacts): string {
       ), 2));
     }
   }
+  if (facts.mode === 'user_input_required' && facts.context) {
+    lines.push(indentXmlBlock(xmlTextBlock(
+      'awaiting_user_input_context',
+      clipForPrompt(facts.context, ANSWER_CONTEXT_LIMITS.awaitingUserInputChars),
+    ), 2));
+  }
   lines.push('</answer_context>');
   return lines.join('\n');
 }
@@ -134,7 +145,11 @@ export function appendAnswerInputMessage(
   facts: ModelAnswerContextFacts,
 ): BaseMessage[] {
   const inputMessage = createAnswerInputMessage(userGoal, facts);
-  return [...history, inputMessage];
+  const canonicalHistory = history.filter((message) => !(
+    message.name === ANSWER_INPUT_MESSAGE_NAME
+    || getPinpetMeta(message).source === ANSWER_INPUT_MESSAGE_NAME
+  ));
+  return [...canonicalHistory, inputMessage];
 }
 
 export function buildAnswerSystemPrompt(params: {

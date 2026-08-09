@@ -80,6 +80,7 @@ test('Capability Planner entry input leads with the run user goal', () => {
       objective: '打开小红书并浏览相关内容。',
       context: '浏览器已经连接。',
     },
+    recentMainMessages: [],
     completedTask: null,
     completedTaskResult: null,
     remainingPlan: [],
@@ -100,6 +101,7 @@ test('Capability Planner boundary input carries the run user goal and boundary f
       objective: '打开小红书并浏览相关内容。',
       context: '浏览器已经连接。',
     },
+    recentMainMessages: [],
     completedTask: '确认浏览器可用',
     completedTaskResult: '浏览器已经连接，目标页面可访问。',
     remainingPlan: [{
@@ -109,7 +111,7 @@ test('Capability Planner boundary input carries the run user goal and boundary f
   } satisfies CapabilityPlannerInput);
 
   assert.match(input, /^<run_user_goal[^>]*>/);
-  assert.match(input, /Planner Context：继续执行状态\n刚完成的任务：确认浏览器可用/);
+  assert.match(input, /刚完成的任务：确认浏览器可用/);
   assert.match(input, /浏览器已经连接，目标页面可访问。/);
   assert.match(input, /- \[browser\] 浏览相关内容/);
   assert.doesNotMatch(input, /workspace|registry_digest|document_count|<planning_state>/);
@@ -123,33 +125,17 @@ test('Capability Planner boundary input omits the follow-up section once the pla
       objective: '打开小红书并浏览相关内容。',
       context: null,
     },
+    recentMainMessages: [],
     completedTask: '确认浏览器可用',
     completedTaskResult: '浏览器已经连接，目标页面可访问。',
     remainingPlan: [],
   } satisfies CapabilityPlannerInput);
 
   assert.match(input, /^<run_user_goal[^>]*>/);
-  assert.match(input, /Planner Context：继续执行状态\n刚完成的任务：确认浏览器可用/);
+  assert.match(input, /刚完成的任务：确认浏览器可用/);
   assert.match(input, /浏览器已经连接，目标页面可访问。/);
   assert.doesNotMatch(input, /此前保留的后续任务/);
   assert.doesNotMatch(input, /planner_request_briefing/);
-});
-
-test('Capability Planner boundary input degrades to an explicit empty state', () => {
-  const input = buildCapabilityPlannerAgentInput({
-    mode: 'boundary',
-    workspace: plannerPromptWorkspace,
-    userGoal: {
-      objective: '完成当前任务。',
-      context: null,
-    },
-    completedTask: null,
-    completedTaskResult: null,
-    remainingPlan: [],
-  } satisfies CapabilityPlannerInput);
-
-  // Nothing is silently dropped: the continuation state says so explicitly.
-  assert.equal(input.endsWith('Planner Context：继续执行状态\n无。'), true);
 });
 
 test('decision recent messages label delegation briefings as scheduling context', () => {
@@ -304,8 +290,6 @@ test('delegation outcome remaining plan is advisory planning context', () => {
     actor: testActor,
     outputInstruction: 'OUTCOME_OUTPUT_INSTRUCTION',
   });
-  assert.match(prompt, /remaining_plan 是 Planner/);
-  assert.match(prompt, /为空或非空都不是单独的终态条件/);
   assert.match(prompt, /OUTCOME_OUTPUT_INSTRUCTION/);
 
   const context = buildDelegationOutcomeRemainingPlanContext([{

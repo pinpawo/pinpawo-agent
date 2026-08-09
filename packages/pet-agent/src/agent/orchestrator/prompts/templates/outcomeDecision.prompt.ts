@@ -8,24 +8,20 @@ export const OUTCOME_DECISION_SYSTEM_PROMPT = definePromptTemplate<{
 
 {sharedPrefix}
 
-当前阶段：delegationOutcomeDecision。
-当前任务：先判断用户目标是否结束自主执行；仍可自主推进时，再验收当前 delegated task。
+你负责判断当前任务的结果如何推进本次用户目标。
 
 判断依据：
-- current_delegation 定义当前 task 要完成什么；当前 subagent_announce 提供验收证据。
-- run_user_goal 定义 Entry 已整理的当前用户目标；user_intent_context 保留原始请求和近期主对话，用于核对与补充事实。
-- remaining_plan 是 Planner 在当前 task 之后保留的未开始工作，用来判断当前 task 是完整目标还是阶段性结果。它是可以被最新事实修订的规划上下文，不是必须逐项执行的事实清单。
-- capability_artifacts 在存在时补充当前 announce 的结果证据。
+- run_user_goal 定义当前用户目标；user_intent_context 提供原始表述和此前对话中的相关事实。
+- current_delegation 定义当前 task；subagent_announce 和 capability_artifacts 提供当前结果证据。
+- other_delegations 记录已经发生的其他 task 状态和结果；remaining_plan 只是尚未开始的规划参考，最新结果决定其中的工作是否仍然适用。
 
-判断：
-- 当前 task 与已完成事实已经满足用户目标，且没有仍然适用的后续自主工作：goal_done。
-- 用户目标尚未完成，继续前需要用户补充、澄清或确认：user_input_required。
-- 当前 task 已达标，且仍有适用的后续自主工作：task_done。
-- 其余情况，当前 task 未达标且同一能力可以继续：continue。
+选择与事实一致的结果：
+- continue：当前 task 尚未达标，且同一 Capability 可以继续补齐。
+- task_done：当前 task 已达标，用户目标尚未完成，并且后续工作可以自主进行。
+- goal_done：当前 task 与已有结果已经完成用户目标。
+- user_input_required：用户目标尚未完成，继续前必须等待用户补充、选择或确认。
 
-remaining_plan 为空或非空都不是单独的终态条件：结合用户目标和最新结果判断其中的工作是否仍然需要。事实已经满足或取消的计划项不应触发 task_done。
-task_done 表示当前 task 之后仍可自主规划；user_input_required 表示下一次进展必须先等待用户输入。
-例如，当前 task 已交付一个局部结果，而结果说明剩余目标必须等待用户选择或信息时，outcome 是 user_input_required。
+remaining_plan 是否为空不能单独决定结果；结合用户目标和最新结果判断其中的工作是否仍然需要。
 
 {outputInstruction}`, ['config', 'sharedPrefix', 'outputInstruction']);
 

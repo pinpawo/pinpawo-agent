@@ -580,7 +580,7 @@ test('entry decision reads full canonical main messages and excludes lane announ
   );
 });
 
-test('entry stores a bounded run user goal without copying it into messages', async () => {
+test('entry stores a bounded run user goal and gives Planner the latest ten main messages', async () => {
   let plannerInput: CapabilityPlannerInput | null = null;
   const userGoalContext = 'RUN_USER_GOAL_CONTEXT';
   const model = {
@@ -614,11 +614,12 @@ test('entry stores a bounded run user goal without copying it into messages', as
     },
   });
 
-  const state = await graph.invoke(buildOrchestratorRunInput([
-    new HumanMessage('已经关闭的旧请求：修改 OLD_IRRELEVANT_GOAL。'),
-    new AIMessage('旧请求已经结束。'),
-    new HumanMessage('请处理当前请求。'),
-  ]), {
+  const mainInputMessages = Array.from({ length: 12 }, (_, index) =>
+    index % 2 === 0
+      ? new HumanMessage(`main-user-${String(index)}`)
+      : new AIMessage(`main-assistant-${String(index)}`));
+  mainInputMessages[11] = new HumanMessage('请处理当前请求。');
+  const state = await graph.invoke(buildOrchestratorRunInput(mainInputMessages), {
     configurable: {
       thread_id: 'entry-private-planner-briefing',
       actor: testActor,
@@ -634,8 +635,10 @@ test('entry stores a bounded run user goal without copying it into messages', as
     context: userGoalContext,
   });
   assert.deepEqual(state.runUserGoal, capturedPlannerInput.userGoal);
-  assert.equal('messages' in capturedPlannerInput, false);
-  assert.doesNotMatch(JSON.stringify(capturedPlannerInput), /OLD_IRRELEVANT_GOAL/);
+  assert.deepEqual(
+    capturedPlannerInput.recentMainMessages.map(readMessageText),
+    mainInputMessages.slice(-10).map(readMessageText),
+  );
   assert.doesNotMatch(
     state.messages.map(readMessageText).join('\n'),
     new RegExp(userGoalContext),
@@ -1641,18 +1644,16 @@ test('user_input_required returns control without claiming delegation completion
   );
   assert.deepEqual(
     answerMessages.map((message) => message._getType()),
-    ['system', 'human', 'ai', 'human'],
+    ['system', 'human', 'human'],
   );
   const answerSystem = String(answerMessages[0]?.content ?? '');
   const answerFacts = String(answerMessages.at(-1)?.content ?? '');
   assert.doesNotMatch(answerSystem, /确认发送渠道|报告已经完成|artifact-awaiting-user-choice/);
   assert.match(answerFacts, /<reply_mode>user_input_required<\/reply_mode>/);
-  assert.equal(answerMessages.some((message) => (
-    message._getType() === 'ai'
-    && String(message.content).includes('报告已经完成，但用户尚未选择邮件或项目群')
-    && String(message.content).includes('<artifacts>')
-    && String(message.content).includes('capability-artifact://thread/user-choice/report')
-  )), true);
+  assert.match(answerFacts, /<awaiting_user_input_context>/);
+  assert.match(answerFacts, /报告已经完成，但用户尚未选择邮件或项目群/);
+  assert.match(answerFacts, /<artifacts>/);
+  assert.match(answerFacts, /capability-artifact:\/\/thread\/user-choice\/report/);
   assert.equal(result.runDelegationSummaries[0]?.status, 'progress');
   assert.equal(result.taskActiveDelegation?.id, 'task-user-choice');
   assert.equal(result.taskActiveDelegation?.status, 'awaiting_decision');

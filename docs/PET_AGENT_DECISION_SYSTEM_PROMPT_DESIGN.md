@@ -92,6 +92,10 @@ Planner 自己的可调用动作。每次 Planner invocation 必须且只能以 
 Planner 不使用内存 relevance query 或传统搜索结果替代模型探索。Workspace 是代码给模型画出的能力地图，
 registry 探索工具和私有 transcript 都封装在 Planner 黑盒内部。
 
+每次 Planner invocation 在私有 transcript 起点保留最近 10 条 canonical main `HumanMessage` / `AIMessage`，
+用于指代消解和恢复相关对话约束；未 handoff 的 delegation lane 消息与 compaction 占位消息不进入该窗口。
+`run_user_goal` 仍是当前规划边界，entry / boundary 输入随后分别提供本轮目标和最新执行事实。
+
 标准 Agent runtime 负责模型与工具之间的循环和 tool message。终态也是带 schema 的普通私有工具：
 runtime 执行并校验工具参数，Planner 从终态 ToolMessage 读取规划对象。每个 `capability` 由当前
 registry 动态形成枚举，结构化工具使用无 `$ref` 的 provider-compatible JSON Schema，并明确命名为

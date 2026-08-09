@@ -34,6 +34,7 @@ test('Answer prompt package owns stable system plus canonical history plus facts
     contextFacts: {
       mode: 'user_input_required',
       hasUserGoal: true,
+      context: '还需要用户选择检查范围。',
     },
   });
   const systemMessage = messages[0];
@@ -57,6 +58,7 @@ test('Answer prompt package owns stable system plus canonical history plus facts
   assert.match(String(message.content), /^<answer_input role="fact" source="orchestrator_state" authority="none">/);
   assert.match(String(message.content), /<run_user_goal[^>]*>[\s\S]*<objective>[\s\S]*检查仓库并报告结果。/);
   assert.match(String(message.content), /<reply_mode>user_input_required<\/reply_mode>/);
+  assert.match(String(message.content), /<awaiting_user_input_context>[\s\S]*还需要用户选择检查范围/);
   assert.equal(String(message.content).trimEnd().endsWith('</answer_input>'), true);
 });
 
@@ -83,6 +85,7 @@ test('Answer input append helper does not mutate canonical history', () => {
   const messages = appendAnswerInputMessage(history, null, {
     mode: 'user_input_required',
     hasUserGoal: true,
+    context: null,
   });
 
   assert.equal(history.length, 1);
@@ -95,7 +98,7 @@ test('Answer input uses a closed reply mode without an instruction field', () =>
     { mode: 'direct', hasUserGoal: true },
     { mode: 'task_result', hasUserGoal: true },
     { mode: 'goal_done', hasUserGoal: true },
-    { mode: 'user_input_required', hasUserGoal: false },
+    { mode: 'user_input_required', hasUserGoal: false, context: null },
   ];
 
   for (const facts of variants) {
@@ -105,6 +108,23 @@ test('Answer input uses a closed reply mode without an instruction field', () =>
     assert.match(context, new RegExp(`<reply_mode>${facts.mode}<\\/reply_mode>`));
     assert.doesNotMatch(context, /reply_instruction|system_prompt|policy/);
   }
+});
+
+test('Answer input replaces a stale synthetic Answer input instead of duplicating it', () => {
+  const staleInput = new HumanMessage('<answer_input>stale</answer_input>');
+  staleInput.name = ANSWER_INPUT_MESSAGE_NAME;
+  const messages = appendAnswerInputMessage([
+    new HumanMessage('继续当前任务'),
+    staleInput,
+  ], null, {
+    mode: 'user_input_required',
+    hasUserGoal: true,
+    context: '需要用户确认目标分支。',
+  });
+
+  assert.equal(messages.length, 2);
+  assert.equal(messages.filter((message) => message.name === ANSWER_INPUT_MESSAGE_NAME).length, 1);
+  assert.doesNotMatch(String(messages.at(-1)?.content), /stale/);
 });
 
 test('blocked Answer facts are escaped and bounded as data', () => {

@@ -5,6 +5,7 @@ import {
   type AgentRuntimeEvent,
   type AgentSession,
   type BuiltinGlobalReviewPolicyMode,
+  type ToolAuthorizationSafetyLevel,
 } from '@pinpawo/agent-session';
 import type { AgentHostConnectionFactory } from '../client/localHostConnection';
 import {
@@ -38,7 +39,12 @@ export function createDemoConnectionFactory(
     let observedAt = 1_000;
     let globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode =
       'require_authorization';
-    let session = createDemoSession(options, globalReviewPolicyMode);
+    let autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel = 'strict';
+    let session = createDemoSession(
+      options,
+      globalReviewPolicyMode,
+      autoAuthorizationSafetyLevel,
+    );
     const schedule = options.schedule ?? ((callback, delayMs) => (
       setTimeout(callback, delayMs)
     ));
@@ -160,6 +166,7 @@ export function createDemoConnectionFactory(
             runtime: {
               ...DEMO_RUNTIME,
               globalReviewPolicyMode,
+              autoAuthorizationSafetyLevel,
             },
           };
           handlers.onMessage({
@@ -193,6 +200,7 @@ export function createDemoConnectionFactory(
             runtime: {
               ...DEMO_RUNTIME,
               globalReviewPolicyMode,
+              autoAuthorizationSafetyLevel,
             },
           };
           handlers.onMessage({
@@ -316,11 +324,14 @@ export function createDemoConnectionFactory(
         }
         if (message.type === 'runtime_config.update' && message.requestId) {
           globalReviewPolicyMode = message.globalReviewPolicyMode;
+          autoAuthorizationSafetyLevel = message.autoAuthorizationSafetyLevel
+            ?? autoAuthorizationSafetyLevel;
           session = {
             ...session,
             runtime: {
               ...(session.runtime ?? {}),
               globalReviewPolicyMode,
+              autoAuthorizationSafetyLevel,
             },
           };
           queueMicrotask(() => {
@@ -329,6 +340,7 @@ export function createDemoConnectionFactory(
               type: 'runtime_config.result',
               requestId: message.requestId!,
               globalReviewPolicyMode,
+              autoAuthorizationSafetyLevel,
             });
           });
         }
@@ -341,6 +353,7 @@ export function createDemoConnectionFactory(
 function createDemoSession(
   options: DemoConnectionOptions,
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode,
+  autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel,
 ): AgentSession {
   return {
     sessionId: 'smoke',
@@ -405,6 +418,7 @@ function createDemoSession(
     runtime: {
       ...DEMO_RUNTIME,
       globalReviewPolicyMode,
+      autoAuthorizationSafetyLevel,
     },
   };
 }

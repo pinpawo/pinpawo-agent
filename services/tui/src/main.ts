@@ -1215,7 +1215,11 @@ function openPolicyPickerUi() {
   controller.cancelModelProfileList();
   modelPicker = closeModelPicker(modelPicker);
   policyPickerGeneration += 1;
-  policyPicker = openPolicyPicker(policyPicker, currentMode);
+  policyPicker = openPolicyPicker(
+    policyPicker,
+    currentMode,
+    state.session.runtime?.autoAuthorizationSafetyLevel ?? 'strict',
+  );
   composer.blur();
   refreshCommandOverlay();
   refreshSessionPicker();
@@ -1248,7 +1252,12 @@ function saveSelectedPolicy() {
   policyPickerGeneration = generation;
   policyPicker = beginPolicySave(policyPicker);
   refreshPolicyPicker();
-  void controller.updateGlobalReviewPolicy(option.mode).then((result) => {
+  const autoAuthorizationSafetyLevel = option.autoAuthorizationSafetyLevel
+    ?? policyPicker.currentAutoAuthorizationSafetyLevel;
+  void controller.updateGlobalReviewPolicy(
+    option.mode,
+    autoAuthorizationSafetyLevel,
+  ).then((result) => {
     if (
       policyPickerGeneration !== generation
       || policyPicker.phase !== 'saving'
@@ -1258,6 +1267,7 @@ function saveSelectedPolicy() {
     policyPicker = closePolicyPicker({
       ...policyPicker,
       currentMode: result.globalReviewPolicyMode,
+      currentAutoAuthorizationSafetyLevel: result.autoAuthorizationSafetyLevel,
     });
     localNotice = `review policy: ${option.label}`;
     refreshPolicyPicker();

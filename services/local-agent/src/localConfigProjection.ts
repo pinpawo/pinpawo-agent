@@ -2,6 +2,10 @@ import {
   GLOBAL_REVIEW_POLICY_MODE,
   type BuiltinGlobalReviewPolicyMode,
 } from '@pinpawo/pet-agent';
+import {
+  DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL,
+  type ToolAuthorizationSafetyLevel,
+} from '@pinpawo/agent-contracts';
 import { readLocalAgentPackageVersion } from './packageVersion';
 import type { LocalServerDeps } from './localServerTypes';
 import type { ModelInputModality } from './modelProfiles';
@@ -14,6 +18,7 @@ export type LocalRuntimeProjection = {
   model?: string;
   inputModalities?: readonly ModelInputModality[];
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
+  autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
   contextWindow?: number;
   workdir: string;
   workspaceId?: string;
@@ -43,6 +48,8 @@ export function buildLocalRuntimeProjection(
         ?? [`Unknown model profile "${modelProfileId}"`],
       globalReviewPolicyMode: deps.globalReviewPolicyMode
         ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
+      autoAuthorizationSafetyLevel: deps.autoAuthorizationSafetyLevel
+        ?? DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL,
       workdir: runtimeConfig?.workdir ?? deps.workdir,
       ...(runtimeConfig?.workspace ? {
         workspaceId: runtimeConfig.workspace.id,
@@ -69,6 +76,8 @@ export function buildLocalRuntimeProjection(
     inputModalities: llmConfig.inputModalities ?? ['text'],
     globalReviewPolicyMode: deps.globalReviewPolicyMode
       ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
+    autoAuthorizationSafetyLevel: deps.autoAuthorizationSafetyLevel
+      ?? DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL,
     ...(llmConfig.contextWindowTokens !== undefined
       ? { contextWindow: llmConfig.contextWindowTokens }
       : {}),

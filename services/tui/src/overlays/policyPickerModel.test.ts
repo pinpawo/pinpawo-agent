@@ -17,8 +17,9 @@ test('policy picker opens on the authoritative current mode and navigates', () =
   let state = openPolicyPicker(
     createPolicyPickerState(),
     'auto_authorization',
+    'relaxed',
   );
-  assert.equal(selectedPolicy(state)?.mode, 'auto_authorization');
+  assert.equal(selectedPolicy(state)?.autoAuthorizationSafetyLevel, 'relaxed');
   state = movePolicySelection(state, 1);
   assert.equal(selectedPolicy(state)?.mode, 'full_access');
   assert.equal(resolvePolicyPickerKey(state, key('return')), 'select');
@@ -43,7 +44,8 @@ test('policy picker exposes saving and retryable errors within terminal width', 
 
 test('policy modes have compact security labels', () => {
   assert.equal(formatPolicyMode('require_authorization'), 'ask');
-  assert.equal(formatPolicyMode('auto_authorization'), 'auto');
+  assert.equal(formatPolicyMode('auto_authorization'), 'auto·strict');
+  assert.equal(formatPolicyMode('auto_authorization', 'relaxed'), 'auto·relaxed');
   assert.equal(formatPolicyMode('full_access'), 'full');
 });
 

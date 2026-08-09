@@ -1,4 +1,5 @@
 import type { BuiltinGlobalReviewPolicyMode } from '@pinpawo/pet-agent';
+import type { ToolAuthorizationSafetyLevel } from '@pinpawo/agent-contracts';
 import { setConfig } from './config';
 import {
   loadStoredConfig,
@@ -12,10 +13,15 @@ import {
  */
 export function persistGlobalReviewPolicyMode(
   mode: BuiltinGlobalReviewPolicyMode,
+  safetyLevel: ToolAuthorizationSafetyLevel,
 ) {
   saveStoredConfig({
     ...loadStoredConfig(),
     global_review_policy: mode,
+    auto_authorization_safety_level: safetyLevel,
   });
-  setConfig({ globalReviewPolicyMode: mode });
+  setConfig({
+    globalReviewPolicyMode: mode,
+    autoAuthorizationSafetyLevel: safetyLevel,
+  });
 }

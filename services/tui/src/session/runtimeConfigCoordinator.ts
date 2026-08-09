@@ -2,17 +2,20 @@ import type {
   AgentClientMessage,
   AgentServerMessage,
   BuiltinGlobalReviewPolicyMode,
+  ToolAuthorizationSafetyLevel,
 } from '@pinpawo/agent-session';
 
 type TimerHandle = ReturnType<typeof setTimeout>;
 
 export type UpdateGlobalReviewPolicyResult = {
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
+  autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
 };
 
 type PendingRuntimeConfigUpdate = {
   requestId: string;
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
+  autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
   timer: TimerHandle | null;
   resolve: (result: UpdateGlobalReviewPolicyResult) => void;
   reject: (error: Error) => void;
@@ -27,7 +30,10 @@ export type RuntimeConfigCoordinatorOptions = {
   requestIdFactory: () => string;
   send: (message: AgentClientMessage) => boolean;
   getUnavailableReason: () => string | null;
-  onUpdated: (globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode) => void;
+  onUpdated: (
+    globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode,
+    autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel,
+  ) => void;
   timeoutMs: number;
   setTimer: (callback: () => void, delayMs: number) => TimerHandle;
   clearTimer: (timer: TimerHandle) => void;
@@ -44,6 +50,7 @@ export class RuntimeConfigCoordinator {
 
   updateGlobalReviewPolicy(
     globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode,
+    autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel,
   ): Promise<UpdateGlobalReviewPolicyResult> {
     const unavailable = this.options.getUnavailableReason();
     if (unavailable) return Promise.reject(new Error(unavailable));
@@ -58,6 +65,7 @@ export class RuntimeConfigCoordinator {
       const pending: PendingRuntimeConfigUpdate = {
         requestId,
         globalReviewPolicyMode,
+        autoAuthorizationSafetyLevel,
         timer: null,
         resolve,
         reject,
@@ -73,6 +81,7 @@ export class RuntimeConfigCoordinator {
         type: 'runtime_config.update',
         requestId,
         globalReviewPolicyMode,
+        autoAuthorizationSafetyLevel,
       })) {
         this.clear(pending);
         reject(new Error('runtime config update could not be sent'));
@@ -94,9 +103,21 @@ export class RuntimeConfigCoordinator {
       ));
       return;
     }
-    this.options.onUpdated(message.globalReviewPolicyMode);
+    const autoAuthorizationSafetyLevel = message.autoAuthorizationSafetyLevel
+      ?? pending.autoAuthorizationSafetyLevel;
+    if (
+      message.autoAuthorizationSafetyLevel !== undefined
+      && message.autoAuthorizationSafetyLevel !== pending.autoAuthorizationSafetyLevel
+    ) {
+      pending.reject(new Error(
+        'runtime config response did not match the requested safety level',
+      ));
+      return;
+    }
+    this.options.onUpdated(message.globalReviewPolicyMode, autoAuthorizationSafetyLevel);
     pending.resolve({
       globalReviewPolicyMode: message.globalReviewPolicyMode,
+      autoAuthorizationSafetyLevel,
     });
   }
 

@@ -59,7 +59,12 @@ export function formatStatusLines(
     || [
       formatConnection(state.connection),
       ...(state.session.runtime?.globalReviewPolicyMode
-        ? [`policy: ${formatPolicyMode(state.session.runtime.globalReviewPolicyMode)}`]
+        ? [
+            `policy: ${formatPolicyMode(
+              state.session.runtime.globalReviewPolicyMode,
+              state.session.runtime.autoAuthorizationSafetyLevel ?? 'strict',
+            )}`,
+          ]
         : []),
       ...(runtimeModel ? [runtimeModel] : []),
     ].join(' · ');

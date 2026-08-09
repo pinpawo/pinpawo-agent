@@ -14,6 +14,11 @@ import {
   type BuiltinGlobalReviewPolicyMode,
   type CapabilityRegistryBackend,
 } from '@pinpawo/pet-agent';
+import {
+  DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL,
+  isToolAuthorizationSafetyLevel,
+  type ToolAuthorizationSafetyLevel,
+} from '@pinpawo/agent-contracts';
 
 export { isMissingOrGeneratedApiPlaceholder } from './configDiagnostics';
 
@@ -122,6 +127,18 @@ function getGlobalReviewPolicyMode(): BuiltinGlobalReviewPolicyMode {
     ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION;
 }
 
+export function resolveAutoAuthorizationSafetyLevel(
+  value: unknown,
+): ToolAuthorizationSafetyLevel {
+  return isToolAuthorizationSafetyLevel(value)
+    ? value
+    : DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL;
+}
+
+function getAutoAuthorizationSafetyLevel(): ToolAuthorizationSafetyLevel {
+  return resolveAutoAuthorizationSafetyLevel(stored.auto_authorization_safety_level);
+}
+
 export function resolveCapabilityRegistryBackend(
   raw: string | undefined,
 ): CapabilityRegistryBackend | undefined {
@@ -180,6 +197,7 @@ export type Config = Readonly<{
   structuredOutputAutoRepair?: boolean;
   structuredOutputRepairMaxRetries?: number;
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
+  autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
   workdir: string;
   browserBackend: string;
   capabilityRegistryBackend: CapabilityRegistryBackend;
@@ -214,6 +232,7 @@ function readConfigDefaults(): Config {
       'structured_output_repair_max_retries',
     ),
     globalReviewPolicyMode: getGlobalReviewPolicyMode(),
+    autoAuthorizationSafetyLevel: getAutoAuthorizationSafetyLevel(),
     workdir: get('PINPAWO_WORKDIR', 'workdir') || process.cwd() || homedir(),
     browserBackend: get('PINPAWO_BROWSER_BACKEND', 'browser_backend') || 'auto',
     capabilityRegistryBackend: resolveCapabilityRegistryBackend(

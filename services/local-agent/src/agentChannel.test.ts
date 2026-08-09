@@ -365,6 +365,7 @@ test('buildLocalChatAgentInput passes global review policy mode to graph input',
       baseUrl: 'https://api.deepseek.com',
       model: 'deepseek-v4-pro',
       globalReviewPolicyMode: 'auto_authorization',
+      autoAuthorizationSafetyLevel: 'relaxed',
       structuredOutputAutoRepair: true,
       structuredOutputRepairMaxRetries: 2,
     },
@@ -372,6 +373,7 @@ test('buildLocalChatAgentInput passes global review policy mode to graph input',
 
   assert.deepEqual(setup.input.globalReviewPolicy, {
     mode: 'auto_authorization',
+    safetyLevel: 'relaxed',
     structuredOutput: {
       method: 'functionCalling',
       entryDecisionProtocol: 'routeFunctions',

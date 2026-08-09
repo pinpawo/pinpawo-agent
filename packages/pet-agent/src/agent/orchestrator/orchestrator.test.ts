@@ -3075,7 +3075,7 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
         autoReviewCount += 1;
         autoReviewMessages = messages;
         return {
-          decision: 'authorize',
+          riskScore: 1,
           reason: 'Small scoped file write inside the workdir.',
         };
       },
@@ -3146,7 +3146,7 @@ test('global review policy reuses an exact auto authorization in the same sessio
       invoke: async () => {
         autoReviewCount += 1;
         return {
-          decision: 'authorize',
+          riskScore: 1,
           reason: 'The exact command is a scoped read-only repository inspection.',
         };
       },
@@ -3305,7 +3305,7 @@ test('exact auto authorization survives graph rebuild but expires on registry re
       invoke: async () => {
         autoReviewCount += 1;
         return {
-          decision: 'authorize',
+          riskScore: 1,
           reason: 'The exact command is a scoped repository inspection.',
         };
       },
@@ -3463,7 +3463,7 @@ test('global review policy does not record auto grants for policies without sess
       invoke: async () => {
         autoReviewCount += 1;
         return {
-          decision: 'authorize',
+          riskScore: 1,
           reason: 'The command is safe but the tool policy does not support session authorization.',
         };
       },
@@ -3523,7 +3523,7 @@ test('auto review never persists url_origin grants', async () => {
     withStructuredOutput: () => ({
       invoke: async () => {
         autoReviewCount += 1;
-        return { decision: 'authorize', reason: 'Scoped browser navigation.' };
+        return { riskScore: 1, reason: 'Scoped browser navigation.' };
       },
     }),
   } as unknown as AgentModels['act'];
@@ -3585,7 +3585,7 @@ test('matcher builder failures fail closed into review and never persist a grant
     withStructuredOutput: () => ({
       invoke: async () => {
         autoReviewCount += 1;
-        return { decision: 'authorize', reason: 'Allow this current call only.' };
+        return { riskScore: 1, reason: 'Allow this current call only.' };
       },
     }),
   } as unknown as AgentModels['act'];
@@ -3657,7 +3657,7 @@ test('global review policy auto_authorization evaluates a tool-call batch once',
         autoReviewCount += 1;
         autoReviewMessages = messages;
         return {
-          decision: 'authorize',
+          riskScore: 1,
           reason: 'Both writes are narrow and expected.',
         };
       },
@@ -3745,7 +3745,7 @@ test('global review policy auto_authorization requires human authorization when 
   const autoModel = {
     withStructuredOutput: () => ({
       invoke: async () => ({
-        decision: 'require_authorization',
+        riskScore: 10,
         reason: 'The write looks too broad.',
       }),
     }),

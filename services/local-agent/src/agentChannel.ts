@@ -377,6 +377,9 @@ export function buildLocalChatAgentInput(params: {
       }),
       globalReviewPolicy: {
         mode: llmConfig.globalReviewPolicyMode ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
+        ...(llmConfig.autoAuthorizationSafetyLevel ? {
+          safetyLevel: llmConfig.autoAuthorizationSafetyLevel,
+        } : {}),
         ...(decisionStructuredOutput ? { structuredOutput: decisionStructuredOutput } : {}),
       },
     },

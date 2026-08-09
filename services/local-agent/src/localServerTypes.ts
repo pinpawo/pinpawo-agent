@@ -5,6 +5,7 @@ import type {
   CapabilityArtifactStore,
   ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
+import type { ToolAuthorizationSafetyLevel } from '@pinpawo/agent-contracts';
 import type { LocalStudioDueRunScheduler } from './localStudioDueRunScheduler';
 import type { LoadedUserCapability } from './capabilityLoader';
 import type { LocalModelProfileRegistry } from './llmConfig';
@@ -15,6 +16,7 @@ export type LocalServerDeps = {
   actorName?: string;
   modelProfiles: LocalModelProfileRegistry;
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
+  autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
   workdir: string;
   runtimeConfig?: LocalAgentRuntimeConfig;
   studioDueRunScheduler?: LocalStudioDueRunScheduler;
@@ -47,6 +49,9 @@ export type LocalServerRuntimeDepsStore = Readonly<{
   get: () => NormalizedLocalServerDeps;
   updateGlobalReviewPolicyMode: (
     mode: BuiltinGlobalReviewPolicyMode,
+  ) => NormalizedLocalServerDeps;
+  updateAutoAuthorizationSafetyLevel: (
+    safetyLevel: ToolAuthorizationSafetyLevel,
   ) => NormalizedLocalServerDeps;
   updateCapabilities: (patch: LocalServerCapabilityStatePatch) => NormalizedLocalServerDeps;
 }>;
@@ -94,6 +99,13 @@ export function createLocalServerRuntimeDepsStore(
       current = Object.freeze({
         ...current,
         globalReviewPolicyMode,
+      });
+      return current;
+    },
+    updateAutoAuthorizationSafetyLevel: (autoAuthorizationSafetyLevel) => {
+      current = Object.freeze({
+        ...current,
+        autoAuthorizationSafetyLevel,
       });
       return current;
     },

@@ -1,9 +1,13 @@
-import type { BuiltinGlobalReviewPolicyMode } from '@pinpawo/agent-session';
+import type {
+  BuiltinGlobalReviewPolicyMode,
+  ToolAuthorizationSafetyLevel,
+} from '@pinpawo/agent-session';
 import stringWidth from 'string-width';
 import { truncateTerminalLine } from '../text/terminalText';
 
 export type PolicyPickerOption = {
   mode: BuiltinGlobalReviewPolicyMode;
+  autoAuthorizationSafetyLevel?: ToolAuthorizationSafetyLevel;
   label: string;
   detail: string;
 };
@@ -14,8 +18,14 @@ export const POLICY_PICKER_OPTIONS: readonly PolicyPickerOption[] = [{
   detail: 'Every reviewed tool action waits for your decision.',
 }, {
   mode: 'auto_authorization',
-  label: 'Auto authorize',
-  detail: 'The model may authorize safe actions; uncertain actions still ask.',
+  autoAuthorizationSafetyLevel: 'strict',
+  label: 'Auto authorize · strict',
+  detail: 'Only clearly low-risk, narrow actions run without asking.',
+}, {
+  mode: 'auto_authorization',
+  autoAuthorizationSafetyLevel: 'relaxed',
+  label: 'Auto authorize · relaxed',
+  detail: 'Clear, routine work inside the workspace can run automatically.',
 }, {
   mode: 'full_access',
   label: 'Full access',
@@ -25,6 +35,7 @@ export const POLICY_PICKER_OPTIONS: readonly PolicyPickerOption[] = [{
 export type PolicyPickerState = {
   phase: 'closed' | 'ready' | 'saving' | 'error';
   currentMode: BuiltinGlobalReviewPolicyMode;
+  currentAutoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
   selectedIndex: number;
   message?: string;
 };
@@ -43,23 +54,27 @@ export type PolicyPickerKey = {
 
 export function createPolicyPickerState(
   currentMode: BuiltinGlobalReviewPolicyMode = 'require_authorization',
+  currentAutoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel = 'strict',
 ): PolicyPickerState {
   return {
     phase: 'closed',
     currentMode,
-    selectedIndex: optionIndex(currentMode),
+    currentAutoAuthorizationSafetyLevel,
+    selectedIndex: optionIndex(currentMode, currentAutoAuthorizationSafetyLevel),
   };
 }
 
 export function openPolicyPicker(
   state: PolicyPickerState,
   currentMode: BuiltinGlobalReviewPolicyMode,
+  currentAutoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel = 'strict',
 ): PolicyPickerState {
   return {
     ...state,
     phase: 'ready',
     currentMode,
-    selectedIndex: optionIndex(currentMode),
+    currentAutoAuthorizationSafetyLevel,
+    selectedIndex: optionIndex(currentMode, currentAutoAuthorizationSafetyLevel),
     message: undefined,
   };
 }
@@ -138,7 +153,13 @@ export function formatPolicyPicker(
 
   const lines = POLICY_PICKER_OPTIONS.map((option, index) => {
     const prefix = index === state.selectedIndex ? '› ' : '  ';
-    const current = option.mode === state.currentMode ? ' · current' : '';
+    const current = option.mode === state.currentMode
+      && (
+        option.mode !== 'auto_authorization'
+        || option.autoAuthorizationSafetyLevel === state.currentAutoAuthorizationSafetyLevel
+      )
+      ? ' · current'
+      : '';
     const labelBudget = Math.max(
       1,
       innerWidth - stringWidth(prefix) - stringWidth(current),
@@ -158,18 +179,30 @@ export function formatPolicyPicker(
   return lines.join('\n');
 }
 
-export function formatPolicyMode(mode: BuiltinGlobalReviewPolicyMode) {
+export function formatPolicyMode(
+  mode: BuiltinGlobalReviewPolicyMode,
+  autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel = 'strict',
+) {
   switch (mode) {
     case 'require_authorization':
       return 'ask';
     case 'auto_authorization':
-      return 'auto';
+      return autoAuthorizationSafetyLevel === 'relaxed' ? 'auto·relaxed' : 'auto·strict';
     case 'full_access':
       return 'full';
   }
 }
 
-function optionIndex(mode: BuiltinGlobalReviewPolicyMode) {
-  const index = POLICY_PICKER_OPTIONS.findIndex((option) => option.mode === mode);
+function optionIndex(
+  mode: BuiltinGlobalReviewPolicyMode,
+  autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel,
+) {
+  const index = POLICY_PICKER_OPTIONS.findIndex((option) => (
+    option.mode === mode
+    && (
+      option.mode !== 'auto_authorization'
+      || option.autoAuthorizationSafetyLevel === autoAuthorizationSafetyLevel
+    )
+  ));
   return index >= 0 ? index : 0;
 }

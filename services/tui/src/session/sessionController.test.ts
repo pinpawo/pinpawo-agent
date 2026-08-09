@@ -261,11 +261,12 @@ test('TuiSessionController updates review policy only after a correlated host ac
     }),
   });
 
-  const update = controller.updateGlobalReviewPolicy('auto_authorization');
+  const update = controller.updateGlobalReviewPolicy('auto_authorization', 'relaxed');
   assert.deepEqual(connection.sent.at(-1), {
     type: 'runtime_config.update',
     requestId: 'policy-1',
     globalReviewPolicyMode: 'auto_authorization',
+    autoAuthorizationSafetyLevel: 'relaxed',
   });
   assert.equal(
     controller.getState().session.runtime?.globalReviewPolicyMode,
@@ -280,16 +281,22 @@ test('TuiSessionController updates review policy only after a correlated host ac
     type: 'runtime_config.result',
     requestId: 'policy-1',
     globalReviewPolicyMode: 'auto_authorization',
+    autoAuthorizationSafetyLevel: 'relaxed',
   });
   assert.deepEqual(await update, {
     globalReviewPolicyMode: 'auto_authorization',
+    autoAuthorizationSafetyLevel: 'relaxed',
   });
   assert.equal(
     controller.getState().session.runtime?.globalReviewPolicyMode,
     'auto_authorization',
   );
+  assert.equal(
+    controller.getState().session.runtime?.autoAuthorizationSafetyLevel,
+    'relaxed',
+  );
 
-  const failed = controller.updateGlobalReviewPolicy('full_access');
+  const failed = controller.updateGlobalReviewPolicy('full_access', 'relaxed');
   connection.receive({
     type: 'runtime_config.error',
     requestId: 'policy-2',

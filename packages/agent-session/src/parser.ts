@@ -20,6 +20,7 @@ import type {
 import { isJsonValue } from './snapshot';
 import {
   isAgentTokenUsageSnapshot,
+  isAutoAuthorizationSafetyLevel,
   isBuiltinGlobalReviewPolicyMode,
   parseAgentPlan,
 } from './validation';
@@ -204,6 +205,12 @@ function parseAgentRuntime(value: unknown): AgentRuntimeView | null {
   ) {
     return null;
   }
+  if (
+    value.autoAuthorizationSafetyLevel !== undefined
+    && !isAutoAuthorizationSafetyLevel(value.autoAuthorizationSafetyLevel)
+  ) {
+    return null;
+  }
   return {
     ...(typeof value.modelProfileId === 'string'
       ? { modelProfileId: value.modelProfileId }
@@ -232,6 +239,9 @@ function parseAgentRuntime(value: unknown): AgentRuntimeView | null {
       : {}),
     ...(isBuiltinGlobalReviewPolicyMode(value.globalReviewPolicyMode)
       ? { globalReviewPolicyMode: value.globalReviewPolicyMode }
+      : {}),
+    ...(isAutoAuthorizationSafetyLevel(value.autoAuthorizationSafetyLevel)
+      ? { autoAuthorizationSafetyLevel: value.autoAuthorizationSafetyLevel }
       : {}),
     ...(typeof value.cwd === 'string' ? { cwd: value.cwd } : {}),
     ...(typeof value.workspaceId === 'string' ? { workspaceId: value.workspaceId } : {}),

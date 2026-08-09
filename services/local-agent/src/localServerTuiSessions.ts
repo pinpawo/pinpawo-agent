@@ -276,6 +276,7 @@ export class LocalServerTuiSessionService {
       llmConfig: {
         ...llmConfig,
         globalReviewPolicyMode: deps.globalReviewPolicyMode,
+        autoAuthorizationSafetyLevel: deps.autoAuthorizationSafetyLevel,
       },
       sessionContextCacheKey: session.id,
       toolkits: [...(deps.pluginToolkits ?? []), ...(deps.localToolkits ?? [])],

@@ -127,6 +127,7 @@ export class LocalAgentRuntime {
       actorName: this.actorName ?? undefined,
       modelProfiles: this.getModelProfiles(),
       globalReviewPolicyMode: getConfig().globalReviewPolicyMode,
+      autoAuthorizationSafetyLevel: getConfig().autoAuthorizationSafetyLevel,
       workdir: this.runtimeConfig.workdir,
       runtimeConfig: this.runtimeConfig,
       studioDueRunScheduler: this.studioDueRunScheduler,

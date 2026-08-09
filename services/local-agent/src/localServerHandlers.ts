@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { FileStudioDueRunStore } from '@pinpawo/pet-agent';
+import { DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL } from '@pinpawo/agent-contracts';
 import type { AgentLlmConfig } from './agentConfig';
 import { LocalAgentGraphService } from './agentGraphService';
 import { InflightRequestController } from './inflightRequestController';
@@ -603,19 +604,26 @@ export function createLocalServerHandlers(
       client,
       async () => {
         try {
+          const autoAuthorizationSafetyLevel = message.autoAuthorizationSafetyLevel
+            ?? runtimeDeps.get().autoAuthorizationSafetyLevel
+            ?? DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL;
           (options.persistGlobalReviewPolicyMode ?? persistGlobalReviewPolicyMode)(
             message.globalReviewPolicyMode,
+            autoAuthorizationSafetyLevel,
           );
           runtimeDeps.updateGlobalReviewPolicyMode(message.globalReviewPolicyMode);
+          runtimeDeps.updateAutoAuthorizationSafetyLevel(autoAuthorizationSafetyLevel);
           if (message.requestId) {
             client.send({
               type: 'runtime_config.result',
               requestId: message.requestId,
               globalReviewPolicyMode: message.globalReviewPolicyMode,
+              autoAuthorizationSafetyLevel,
             });
           }
           console.log(
-            `[local-server] global review policy set to ${message.globalReviewPolicyMode}`,
+            `[local-server] global review policy set to ${message.globalReviewPolicyMode}`
+              + ` (${autoAuthorizationSafetyLevel})`,
           );
         } catch (error) {
           if (!message.requestId) throw error;

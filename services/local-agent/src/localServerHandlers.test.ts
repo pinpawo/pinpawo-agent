@@ -151,6 +151,7 @@ test('model protocol lists sanitized profiles and persists an acknowledged sessi
     runtimeConfig,
     modelProfiles,
     globalReviewPolicyMode: 'require_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,
@@ -268,6 +269,7 @@ test('model selection keeps the previous profile when checkpoint preparation fai
       { modelProfileId: 'secondary' },
     ], 'primary'),
     globalReviewPolicyMode: 'require_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,
@@ -327,6 +329,7 @@ test('removed session profile stays visible and blocks runs until explicitly rep
     runtimeConfig,
     modelProfiles: initialProfiles,
     globalReviewPolicyMode: 'require_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
   }, { loadContext: loadTestContext });
 
@@ -362,6 +365,7 @@ test('removed session profile stays visible and blocks runs until explicitly rep
       { modelProfileId: 'primary' },
     ], 'primary'),
     globalReviewPolicyMode: 'require_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
   }, { loadContext: loadTestContext });
   try {
@@ -445,6 +449,7 @@ test('model selection is rejected while the active session is running', async ()
       { modelProfileId: 'secondary' },
     ], 'primary'),
     globalReviewPolicyMode: 'require_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,
@@ -602,6 +607,7 @@ test('model selection blocks a chat admitted by another peer until the selection
       { modelProfileId: 'secondary' },
     ], 'primary'),
     globalReviewPolicyMode: 'require_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,
@@ -690,6 +696,7 @@ test('model selection is rejected while checkpoint state has pending review', as
       { modelProfileId: 'secondary' },
     ], 'primary'),
     globalReviewPolicyMode: 'require_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,
@@ -764,6 +771,7 @@ test('admitted images gate model selection through the transcript', async () => 
       },
     ], 'vision-a'),
     globalReviewPolicyMode: 'require_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,
@@ -897,6 +905,7 @@ test('text-only selected profile rejects image admission before graph invocation
       },
     ]),
     globalReviewPolicyMode: 'require_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
     capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,
@@ -951,10 +960,10 @@ test('text-only selected profile rejects image admission before graph invocation
   }
 });
 
-test('runtime config update persists, acknowledges, and reaches authoritative snapshots', async () => {
+test('runtime config update persists the safety level, acknowledges, and reaches authoritative snapshots', async () => {
   const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-policy-update-'));
   const sent: LocalAgentServerMessage[] = [];
-  const persisted: string[] = [];
+  const persisted: Array<{ mode: string; safetyLevel: string }> = [];
   const peer: LocalServerPeer = {
     isConnected: () => true,
     send: (message) => {
@@ -970,8 +979,8 @@ test('runtime config update persists, acknowledges, and reaches authoritative sn
       globalReviewPolicyMode: 'require_authorization',
     }),
   }, {
-    persistGlobalReviewPolicyMode: (mode) => {
-      persisted.push(mode);
+    persistGlobalReviewPolicyMode: (mode, safetyLevel) => {
+      persisted.push({ mode, safetyLevel });
     },
   });
 
@@ -980,17 +989,22 @@ test('runtime config update persists, acknowledges, and reaches authoritative sn
       type: 'runtime_config.update',
       requestId: 'policy-1',
       globalReviewPolicyMode: 'auto_authorization',
+      autoAuthorizationSafetyLevel: 'relaxed',
     });
     await handlers.peerHandlers.onSessionNew(peer, {
       type: 'session.new',
       requestId: 'new-1',
     });
 
-    assert.deepEqual(persisted, ['auto_authorization']);
+    assert.deepEqual(persisted, [{
+      mode: 'auto_authorization',
+      safetyLevel: 'relaxed',
+    }]);
     assert.deepEqual(sent[0], {
       type: 'runtime_config.result',
       requestId: 'policy-1',
       globalReviewPolicyMode: 'auto_authorization',
+      autoAuthorizationSafetyLevel: 'relaxed',
     });
     const snapshot = sent.find((message) => (
       message.type === 'session.new.result'
@@ -1000,6 +1014,73 @@ test('runtime config update persists, acknowledges, and reaches authoritative sn
         ? snapshot.snapshot.session.runtime?.globalReviewPolicyMode
         : null,
       'auto_authorization',
+    );
+    assert.equal(
+      snapshot?.type === 'session.new.result'
+        ? snapshot.snapshot.session.runtime?.autoAuthorizationSafetyLevel
+        : null,
+      'relaxed',
+    );
+  } finally {
+    handlers.close();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test('runtime config update preserves the configured safety level when the message omits it', async () => {
+  const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-policy-preserve-'));
+  const sent: LocalAgentServerMessage[] = [];
+  const persisted: Array<{ mode: string; safetyLevel: string }> = [];
+  const peer: LocalServerPeer = {
+    isConnected: () => true,
+    send: (message) => {
+      sent.push(message);
+      return true;
+    },
+  };
+  const handlers = createLocalServerHandlers({
+    actorId: 'pet-a',
+    workdir,
+    runtimeConfig: buildLocalAgentRuntimeConfig(workdir),
+    ...createTestModelServerDeps({
+      globalReviewPolicyMode: 'auto_authorization',
+      autoAuthorizationSafetyLevel: 'relaxed',
+    }),
+  }, {
+    persistGlobalReviewPolicyMode: (mode, safetyLevel) => {
+      persisted.push({ mode, safetyLevel });
+    },
+  });
+
+  try {
+    await handlers.peerHandlers.onRuntimeConfigUpdate(peer, {
+      type: 'runtime_config.update',
+      requestId: 'policy-preserve-1',
+      globalReviewPolicyMode: 'full_access',
+    });
+    await handlers.peerHandlers.onSessionNew(peer, {
+      type: 'session.new',
+      requestId: 'new-preserve-1',
+    });
+
+    assert.deepEqual(persisted, [{
+      mode: 'full_access',
+      safetyLevel: 'relaxed',
+    }]);
+    assert.deepEqual(sent[0], {
+      type: 'runtime_config.result',
+      requestId: 'policy-preserve-1',
+      globalReviewPolicyMode: 'full_access',
+      autoAuthorizationSafetyLevel: 'relaxed',
+    });
+    const snapshot = sent.find((message) => (
+      message.type === 'session.new.result'
+    ));
+    assert.equal(
+      snapshot?.type === 'session.new.result'
+        ? snapshot.snapshot.session.runtime?.autoAuthorizationSafetyLevel
+        : null,
+      'relaxed',
     );
   } finally {
     handlers.close();

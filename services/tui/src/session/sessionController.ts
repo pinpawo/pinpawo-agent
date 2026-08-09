@@ -7,6 +7,7 @@ import {
   type AgentSessionSnapshot,
   type BuiltinGlobalReviewPolicyMode,
   type ReviewResponse,
+  type ToolAuthorizationSafetyLevel,
 } from '@pinpawo/agent-session';
 import { formatAttachmentDisplayText } from '../attachments/attachmentModel';
 import {
@@ -176,12 +177,13 @@ export class TuiSessionController {
       requestIdFactory: this.requestIdFactory,
       send: (message) => this.transport.send(message),
       getUnavailableReason: () => this.runtimeConfigUpdateUnavailable(),
-      onUpdated: (globalReviewPolicyMode) => {
+      onUpdated: (globalReviewPolicyMode, autoAuthorizationSafetyLevel) => {
         this.updateSession({
           ...this.state.session,
           runtime: {
             ...this.state.session.runtime,
             globalReviewPolicyMode,
+            autoAuthorizationSafetyLevel,
           },
         });
       },
@@ -377,8 +379,12 @@ export class TuiSessionController {
 
   updateGlobalReviewPolicy(
     globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode,
+    autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel,
   ): Promise<UpdateGlobalReviewPolicyResult> {
-    return this.runtimeConfig.updateGlobalReviewPolicy(globalReviewPolicyMode);
+    return this.runtimeConfig.updateGlobalReviewPolicy(
+      globalReviewPolicyMode,
+      autoAuthorizationSafetyLevel,
+    );
   }
 
   listModelProfiles(): Promise<ListModelProfilesResult> {

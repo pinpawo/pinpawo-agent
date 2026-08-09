@@ -16,6 +16,7 @@ struct AgentConfig: Codable {
   var browserBackend: String?  // nil/"auto" | "playwright" | "extension"
   var workdir: String?         // agent working directory for relative paths; nil = homedir
   var globalReviewPolicy: String? // nil/"require_authorization" | "auto_authorization" | "full_access"
+  var autoAuthorizationSafetyLevel: String? // preserved for the local TUI; no macOS settings UI yet
   /// Per-capability enabled/disabled overrides.  Absent key = defaultEnabled from manifest.
   var capabilities: [String: Bool]?
   /// Enable thinking/reasoning for subagent calls. Default: false.
@@ -39,6 +40,7 @@ struct AgentConfig: Codable {
     case browserBackend = "browser_backend"
     case workdir
     case globalReviewPolicy = "global_review_policy"
+    case autoAuthorizationSafetyLevel = "auto_authorization_safety_level"
     case subagentThinking = "subagent_thinking"
     case capabilities
     case capabilityDirs = "capability_dirs"
@@ -51,6 +53,7 @@ struct AgentConfig: Codable {
     llmApiKey: String?, llmBaseUrl: String, llmModel: String,
     agentDistPath: String? = nil, browserBackend: String? = nil, workdir: String? = nil,
     globalReviewPolicy: String? = nil,
+    autoAuthorizationSafetyLevel: String? = nil,
     subagentThinking: Bool? = nil,
     capabilities: [String: Bool]? = nil,
     capabilityDirs: [String]? = nil,
@@ -70,6 +73,7 @@ struct AgentConfig: Codable {
     self.browserBackend = browserBackend
     self.workdir = workdir
     self.globalReviewPolicy = globalReviewPolicy
+    self.autoAuthorizationSafetyLevel = autoAuthorizationSafetyLevel
     self.subagentThinking = subagentThinking
     self.capabilities = capabilities
     self.capabilityDirs = capabilityDirs
@@ -94,6 +98,10 @@ struct AgentConfig: Codable {
     browserBackend  = try c.decodeIfPresent(String.self, forKey: .browserBackend)
     workdir         = try c.decodeIfPresent(String.self, forKey: .workdir)
     globalReviewPolicy = try c.decodeIfPresent(String.self, forKey: .globalReviewPolicy)
+    autoAuthorizationSafetyLevel = try c.decodeIfPresent(
+      String.self,
+      forKey: .autoAuthorizationSafetyLevel
+    )
     subagentThinking = try c.decodeIfPresent(Bool.self, forKey: .subagentThinking)
     capabilities    = try c.decodeIfPresent([String: Bool].self, forKey: .capabilities)
     capabilityDirs  = try c.decodeIfPresent([String].self, forKey: .capabilityDirs)

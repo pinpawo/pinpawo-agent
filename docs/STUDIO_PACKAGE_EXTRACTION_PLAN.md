@@ -242,13 +242,16 @@ Studio 引用**直接删,不迁移、不保留别名、不做过渡期**。
 
 | 步 | 内容 | 说明 |
 | --- | --- | --- |
-| 1 | 建 `packages/studio` 骨架 + workspace 注册 | 空包,先让构建链认它 |
-| 2 | 搬编排核心(orchestrator/types/scheduler/planCapability) | 原样搬,只改 import 路径 |
-| 3 | 建 `toolkits/studio-kanban`,搬 wiki + store 实现 | 同时抽出 §2.4 的 wiki port |
-| 4 | pet-agent 删 studio 子树与 barrel re-export | 验收:pet-agent 无 `studio` 字样 |
-| 5 | pet-agent 新增通用 config loader,studio schema 迁移 | §4.2 |
-| 6 | local-agent 改为消费两个新包,宿主接线保留 | §5 |
-| 7 | 删除旧 Ink TUI 中的 Studio 引用 | §5.3,不做兼容 |
+| 1 | 建 `packages/studio` 骨架 + workspace 注册 | ✅ 已完成 |
+| 2 | 搬编排核心(orchestrator/types/scheduler/planCapability) | ✅ 已完成;顺带抽出 wiki/runQueue port |
+| 3 | 建 `toolkits/studio-kanban`,搬 wiki + store 实现 | ✅ 已完成 |
+| 4 | pet-agent 删 studio 子树与 barrel re-export | ✅ 已完成 |
+| 5 | pet-agent 新增通用 config loader,studio schema 迁移 | ⬜ **待做** |
+| 6 | local-agent 改为消费两个新包,宿主接线保留 | ✅ 已完成(与第 4 步同 PR) |
+| 7 | 删除旧 Ink TUI 中的 Studio 引用 | ✅ 已完成 |
+
+第 5 步单独留下:config loader 是机制性改动,与搬包正交,且它决定
+chat 是否会被 studio 的配置复杂度污染,值得单独一个 PR 评审。
 
 步 2–4 是一次完整的搬迁,中途 pet-agent 会同时存在新旧两份;步 4 收尾。
 

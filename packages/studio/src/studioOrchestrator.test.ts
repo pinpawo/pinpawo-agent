@@ -880,8 +880,10 @@ test('studio runner dispatches no-deps tasks after previous tasks are sent, with
   assert.deepEqual(result.snapshot.tasks.map((task) => task.status), ['done', 'done']);
 });
 
-test('studio runner does not skip a queued head task even when later no-deps task is dispatchable', async () => {
-  const wikiBaseDir = await makeWikiTempDir('studio-fifo-head-blocked-');
+test('a blocked head task does not stop later ready work from dispatching', async () => {
+  // #561 明令禁止把 strict global FIFO 固化进契约:队首被挡住时,
+  // 其他已满足依赖且 pet 空闲的 task 仍应派发。
+  const wikiBaseDir = await makeWikiTempDir('studio-head-blocked-');
   const events: string[] = [];
 
   const orchestrator = createStudioOrchestrator({
@@ -895,6 +897,7 @@ test('studio runner does not skip a queued head task even when later no-deps tas
         petId: 'worker-a',
         name: 'Worker A',
         reply: 'a done',
+        // 不可派发:队首会一直卡在这里。
         status: 'active',
         onInvoke: () => {
           events.push('worker-a');
@@ -912,9 +915,9 @@ test('studio runner does not skip a queued head task even when later no-deps tas
   });
 
   await submitWithPlannerStub(orchestrator, {
-    userRequest: 'fifo head blocked',
-    turnId: 'run-fifo-head-blocked',
-    conversationId: 'conv-fifo-head-blocked',
+    userRequest: 'head blocked',
+    turnId: 'run-head-blocked',
+    conversationId: 'conv-head-blocked',
     plan: {
       tasks: [
         { petId: 'worker-a', goal: 'first work', acceptanceCriteria: [] },
@@ -924,12 +927,13 @@ test('studio runner does not skip a queued head task even when later no-deps tas
   });
 
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.deepEqual(events, []);
 
-  const run = orchestrator.getRun('run-fifo-head-blocked');
-  assert.equal(run?.status, 'blocked');
+  // worker-b 不该被队首的 worker-a 连累。
+  assert.deepEqual(events, ['worker-b']);
+
+  const run = orchestrator.getRun('run-head-blocked');
   assert.equal(run?.tasks[0].status, 'queued');
-  assert.equal(run?.tasks[1].status, 'queued');
+  assert.notEqual(run?.tasks[1].status, 'queued');
 });
 
 test('studio runner waits for previous dependency before dispatching dependent task', async () => {

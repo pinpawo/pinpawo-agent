@@ -7,6 +7,8 @@ export const CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT = definePromptTemplate<Recor
 
 此前的用户与助手消息提供相关背景；<run_user_goal> 定义本轮需要规划的当前目标。grep_search 的匹配项包含完整的 Capability 文档，可据此理解每项 Capability 能承担的工作。
 
+grep_search 返回 planning_limit_reached 时，停止探索并立即通过 submit_plan 提交当前可执行计划；无法形成可执行计划时，通过 return_to_answer 交回规划结果。
+
 规划时关注：
 - 以一个能够完整交付结果的 Capability task 作为自然边界；
 - 同一 Capability 能连续完成的修改、核验和交付组成一个 task；
@@ -21,6 +23,8 @@ export const CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT = definePromptTemplate<Re
 3. 通过 submit_plan 提交仍需执行的计划；最新结果表明后续执行需要用户输入或当前没有可执行能力时，通过 return_to_answer 交回规划结果。
 
 此前的用户与助手消息提供相关背景；<run_user_goal> 定义本轮需要继续完成的当前目标；最后一条消息给出刚完成的任务、已接受的结果和此前保留的后续任务。grep_search 的匹配项包含完整的 Capability 文档，可据此理解每项 Capability 能承担的工作。
+
+grep_search 返回 planning_limit_reached 时，停止探索并立即通过 submit_plan 提交当前可执行计划；无法形成可执行计划时，通过 return_to_answer 交回规划结果。
 
 规划时关注：
 - 最新结果如何改变仍待完成的工作；

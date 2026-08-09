@@ -11,6 +11,8 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { type TestContext } from 'node:test';
+import { ToolMessage } from '@langchain/core/messages';
+import { isCommand } from '@langchain/langgraph';
 import {
   defineCapability,
   defineInstructionDocument,
@@ -112,8 +114,17 @@ async function invoke(
   input: Record<string, unknown>,
 ) {
   const raw = await plannerTool(explorer, name).invoke(input);
-  assert.equal(typeof raw, 'string');
-  return JSON.parse(raw) as {
+  const content = typeof raw === 'string'
+    ? raw
+    : (() => {
+        assert.ok(isCommand(raw));
+        const update = raw.update as { messages?: unknown[] } | undefined;
+        const message = update?.messages?.[0];
+        assert.ok(message instanceof ToolMessage);
+        assert.equal(typeof message.content, 'string');
+        return message.content as string;
+      })();
+  return JSON.parse(content) as {
     ok: boolean;
     data?: Record<string, unknown>;
     error?: { code: string; message: string };
@@ -200,7 +211,7 @@ test('memory backend is explicit and preserves complete registry search results'
   assert.deepEqual(memorySearch.data?.matches, filesystemSearch.data?.matches);
 });
 
-test('grep_search enforces compact queries without owning Planner workflow state', async (t) => {
+test('grep_search enforces compact queries without an active Planner graph', async (t) => {
   const { workspace } = await workspaceFixture(t);
   const invalidExplorer = createCapabilityPlannerFileExplorer({ workspace });
   const invalid = await invoke(

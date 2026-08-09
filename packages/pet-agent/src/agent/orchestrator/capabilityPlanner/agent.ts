@@ -11,7 +11,7 @@ import { Command } from '@langchain/langgraph';
 import { createAgent, createMiddleware } from 'langchain';
 import { z } from 'zod';
 import {
-  CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+  CAPABILITY_PLANNER_GREP_STATE_SCHEMA,
   createCapabilityPlannerFileExplorer,
 } from './fileExplorer';
 import type { CapabilityRegistryBackend } from './registryDocuments';
@@ -32,22 +32,21 @@ const MAX_TASK_TEXT_CHARS = 500;
 const MAX_REASON_CHARS = 1_000;
 const MAX_ANSWER_CONTEXT_CHARS = 2_000;
 const MAX_QUESTION_CHARS = 1_000;
-const MAX_GREP_SEARCH_CALLS = 3;
 const SUBMIT_PLAN_TOOL_NAME = 'submit_plan';
 const RETURN_TO_ANSWER_TOOL_NAME = 'return_to_answer';
 const DIRECT_TEXT_REASON = 'plan direct text';
-
-const plannerAgentStateSchema = z.object({
-  submittedPlan: z.array(z.object({
-    capability: z.string(),
-    task: z.string(),
-  })).nullable().default(null),
-});
 
 type SubmittedPlannerTask = {
   capability: string;
   task: string;
 };
+
+const plannerSubmissionStateSchema = z.object({
+  submittedPlan: z.array(z.object({
+    capability: z.string(),
+    task: z.string(),
+  })).nullable().default(null),
+});
 
 export type CapabilityPlannerAgentErrorCode =
   | 'planning_limit_reached'
@@ -180,43 +179,6 @@ function buildSubmittedPlanSystemPrompt(tasks: readonly SubmittedPlannerTask[]) 
   ].join('\n');
 }
 
-function buildGrepSearchLimitSystemPrompt(input: CapabilityPlannerInput) {
-  const hasGeneralCapability = plannerCapabilityNames(input).includes('general');
-  return [
-    'Capability 探索已经结束。现在必须基于已有的用户目标、任务结果和 Capability 文档形成规划结果。',
-    '',
-    '必须且只能选择一个终态工具：',
-    '- submit_plan：仍有可执行工作时，提交能够完成用户目标的最短 task 序列。每个 task 由一个已了解的 Capability 完整承担；同一 Capability 能连续完成的工作合并为一个 task；保留用户给出的编号、URL、路径、顺序和明确约束。',
-    '- return_to_answer：没有可执行计划，或继续前必须取得用户输入时，返回不能提交计划的原因、规划中已经确认的事实，以及必要时需要询问用户的问题。',
-    '',
-    hasGeneralCapability
-      ? '没有更专用的匹配项但仍有可执行工作时，由 general 承担该工作。'
-      : '只使用已有文档支持的 Capability；无法形成可执行计划时选择 return_to_answer。',
-    '',
-    '不要继续探索或验证 Capability，也不要输出普通文本。',
-  ].join('\n');
-}
-
-function countGrepSearchToolMessages(messages: readonly BaseMessage[]) {
-  const seenToolCallIds = new Set<string>();
-  let count = 0;
-  for (const message of messages) {
-    if (!(message instanceof ToolMessage)
-      || message.name !== CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME) {
-      continue;
-    }
-    const identifier = message.tool_call_id || message.id;
-    if (identifier && seenToolCallIds.has(identifier)) {
-      continue;
-    }
-    if (identifier) {
-      seenToolCallIds.add(identifier);
-    }
-    count += 1;
-  }
-  return count;
-}
-
 function plannerToolErrorResult(params: {
   name: string;
   args: unknown;
@@ -235,14 +197,12 @@ function plannerToolErrorResult(params: {
 }
 
 /**
- * A successful `submit_plan` stays private to one Capability Planner
- * invocation. `grep_search` is counted from the immutable tool trace, so
- * parallel search calls do not introduce concurrent custom-state updates.
+ * A successful `submit_plan` stays private to one Capability Planner invocation.
  */
-function createPlannerSubmissionStateMiddleware(input: CapabilityPlannerInput) {
+function createPlannerSubmissionStateMiddleware() {
   return createMiddleware({
     name: 'CapabilityPlannerSubmissionState',
-    stateSchema: plannerAgentStateSchema,
+    stateSchema: plannerSubmissionStateSchema,
     wrapToolCall: async (request, handler) => {
       let result: ToolMessage | Command;
       try {
@@ -275,13 +235,6 @@ function createPlannerSubmissionStateMiddleware(input: CapabilityPlannerInput) {
     },
     wrapModelCall: (request, handler) => {
       const submittedPlan = request.state.submittedPlan;
-      const grepSearchCount = countGrepSearchToolMessages(request.state.messages);
-      if (grepSearchCount >= MAX_GREP_SEARCH_CALLS && !submittedPlan) {
-        return handler({
-          ...request,
-          systemMessage: new SystemMessage(buildGrepSearchLimitSystemPrompt(input)),
-        });
-      }
       if (!submittedPlan) {
         return handler(request);
       }
@@ -441,8 +394,9 @@ async function invokePlannerAgent(params: {
   const agent = createAgent({
     model: params.model,
     tools: [...explorer.tools, ...createPlannerSubmissionTools(params.input)],
+    stateSchema: CAPABILITY_PLANNER_GREP_STATE_SCHEMA,
     systemPrompt: buildCapabilityPlannerAgentSystemPrompt(params.input.mode),
-    middleware: [createPlannerSubmissionStateMiddleware(params.input)],
+    middleware: [createPlannerSubmissionStateMiddleware()],
   });
   const timeout = mergePlannerSignal(
     params.runnableConfig?.signal,

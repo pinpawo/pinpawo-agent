@@ -116,7 +116,10 @@ export function selectAnswerContextFacts(params: {
   awaitingUserInput: boolean;
   runIterationLimit: number;
 }): AnswerContextFacts {
-  const hasUserGoal = Boolean(readLatestHumanRequest(params.history));
+  const hasUserGoal = Boolean(
+    params.state.runUserGoal
+    ?? readLatestHumanRequest(params.history),
+  );
   if (params.awaitingUserInput) {
     return { mode: 'user_input_required', hasUserGoal };
   }

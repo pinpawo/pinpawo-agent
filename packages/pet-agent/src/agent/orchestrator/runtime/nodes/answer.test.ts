@@ -48,6 +48,24 @@ test('Answer runtime projects accepted terminal meaning into closed facts', () =
   });
 });
 
+test('Answer runtime recognizes the run user goal when canonical history has no current request', () => {
+  assert.deepEqual(selectAnswerContextFacts({
+    state: state({
+      runUserGoal: {
+        objective: '总结已经完成的仓库检查。',
+        context: '只报告当前工作区结果。',
+      },
+    }),
+    history: [new AIMessage('仓库检查已经完成。')],
+    acceptedHandoffOutcome: 'goal_done',
+    awaitingUserInput: false,
+    runIterationLimit: 4,
+  }), {
+    mode: 'goal_done',
+    hasUserGoal: true,
+  });
+});
+
 test('goal_done asks Answer to summarize the completed task from canonical history', async () => {
   let modelInvocations = 0;
   let invocationMessages: BaseMessage[] = [];

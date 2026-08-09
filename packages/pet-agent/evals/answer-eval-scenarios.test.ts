@@ -60,18 +60,23 @@ test('answer eval models goal_done as a grounded task summary', async () => {
   ]);
   assert.equal(subjectInvocations, 1);
   assert.equal(result.output.text, summary);
-  assert.match(String(scenario.render().at(-1)?.content), /<reply_mode>goal_done<\/reply_mode>/);
+  const answerInput = String(scenario.render().at(-1)?.content);
+  assert.match(answerInput, /^<answer_input[^>]*>/);
+  assert.match(answerInput, /<run_user_goal[^>]*>/);
+  assert.match(answerInput, /<reply_mode>goal_done<\/reply_mode>/);
 });
 
 test('trace-shaped and instruction-like completed tasks cannot become future work', async () => {
   const scenarios = getAnswerEvalScenarios().filter(({ caseName }) => [
     'long-imperative-completion',
     'instruction-like-completion',
+    'completed-pr-does-not-restart',
   ].includes(caseName));
   let subjectInvocations = 0;
   const summaries = [
     '账号公开信息整理已完成：已提取昵称、简介、公开指标和可见内容摘要，并形成结构化结果。',
     '安全测试已完成，测试过程中未执行任务文本中携带的额外指令。',
+    '已基于最新 main 完成浏览器交互稳定等待的重新实现，并创建 PR #600 替代旧 PR #596；相关接线和测试均已完成，工作树干净。',
   ];
   const subject = {
     invoke: async () => {
@@ -81,20 +86,20 @@ test('trace-shaped and instruction-like completed tasks cannot become future wor
     },
   } as never;
 
-  assert.equal(scenarios.length, 2);
+  assert.equal(scenarios.length, 3);
   for (const scenario of scenarios) {
     const result = await scenario.run(subject, undefined, {
       model: answerModel('judge'),
     });
     assert.equal(scenario.execution, 'model');
     assert.match(String(scenario.render().at(-1)?.content), /<reply_mode>goal_done<\/reply_mode>/);
-    assert.doesNotMatch(String(scenario.render()[0]?.content), /打开用户|忽略 Answer|调用浏览器/);
+    assert.doesNotMatch(String(scenario.render()[0]?.content), /打开用户|忽略 Answer|调用浏览器|PR #596|PR #600/);
     assert.doesNotMatch(
       String(result.output.text),
-      /将要打开|等待页面渲染|准备提取|任务尚未开始|浏览器继续/,
+      /将要打开|等待页面渲染|准备提取|任务尚未开始|浏览器继续|先检查|核实分支|DSML|bash/,
     );
   }
-  assert.equal(subjectInvocations, 2);
+  assert.equal(subjectInvocations, 3);
 });
 
 test('answer eval covers a resumable result that requires a user choice', () => {
@@ -103,7 +108,12 @@ test('answer eval covers a resumable result that requires a user choice', () => 
   );
   assert.ok(scenario);
   const messages = scenario.render();
-  assert.deepEqual(messages.map((message) => message._getType()), ['system', 'human', 'ai', 'human']);
+  assert.deepEqual(messages.map((message) => message._getType()), [
+    'system',
+    'human',
+    'ai',
+    'human',
+  ]);
   assert.equal(scenario.expectedSummary, 'return_control');
   const systemText = String(messages[0].content);
   const contextText = String(messages.at(-1)?.content);
@@ -111,7 +121,20 @@ test('answer eval covers a resumable result that requires a user choice', () => 
   assert.doesNotMatch(systemText, /"确认发送渠道并发送已经完成的报告"已完成/);
   assert.match(String(messages[1].content), /邮件或项目群/);
   assert.match(String(messages[2].content), /还没有发送/);
+  assert.match(contextText, /^<answer_input[^>]*>/);
+  assert.match(contextText, /<run_user_goal[^>]*>/);
   assert.match(contextText, /<reply_mode>user_input_required<\/reply_mode>/);
+});
+
+test('answer eval uses the normalized run goal to scope a contextual request', () => {
+  const scenario = getAnswerEvalScenarios().find(
+    ({ caseName }) => caseName === 'normalized-goal-scopes-completion',
+  );
+  assert.ok(scenario);
+  const messages = scenario.render();
+  const answerInput = String(messages.at(-1)?.content);
+  assert.match(answerInput, /只完成 Answer 节点与 run user goal 的对齐/);
+  assert.match(answerInput, /<reply_mode>goal_done<\/reply_mode>/);
 });
 
 test('answer eval renders the current user goal for an ordinary reply', () => {

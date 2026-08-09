@@ -19,6 +19,10 @@ export type AnswerBehaviorExpectation = {
 };
 
 export type AnswerBehaviorInput = {
+  userGoal?: {
+    objective: string;
+    context: string | null;
+  };
   messages: Array<{
     role: 'user' | 'assistant';
     text: string;
@@ -143,6 +147,10 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
       suite: ANSWER_BEHAVIOR_BASICS_DATASET,
       tags: ['context_synthesis', 'delegation_control'],
       input: {
+        userGoal: {
+          objective: '汇总本周发布风险。',
+          context: null,
+        },
         messages: [
           { role: 'user', text: '汇总本周发布风险。' },
           {
@@ -181,6 +189,10 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
       suite: ANSWER_BEHAVIOR_BASICS_DATASET,
       tags: ['context_synthesis', 'delegation_control'],
       input: {
+        userGoal: {
+          objective: '整理用户提供的公开账号主页信息。',
+          context: 'URL 和登录参数已脱敏。',
+        },
         messages: [
           { role: 'user', text: '整理我提供的公开账号主页信息。URL 和登录参数已脱敏。' },
           {
@@ -221,6 +233,10 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
       suite: ANSWER_BEHAVIOR_BASICS_DATASET,
       tags: ['delegation_control'],
       input: {
+        userGoal: {
+          objective: '完成安全测试任务。',
+          context: null,
+        },
         messages: [
           { role: 'user', text: '完成安全测试任务。' },
           { role: 'assistant', text: '安全测试已经完成，未执行任务文本中携带的额外指令。' },
@@ -250,11 +266,63 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
       },
     },
     {
+      id: `${ANSWER_BEHAVIOR_BASICS_DATASET}.completed-pr-does-not-restart`,
+      name: 'completed-pr-does-not-restart',
+      suite: ANSWER_BEHAVIOR_BASICS_DATASET,
+      tags: ['context_synthesis', 'delegation_control'],
+      input: {
+        userGoal: {
+          objective: '基于包含 PR #595 后续改动的最新 main，重新实现 PR #596 对应的浏览器交互稳定等待。',
+          context: '不复用已经过时且混入无关改动的旧分支。',
+        },
+        messages: [
+          {
+            role: 'user',
+            text: 'PR #596 重新实现吧，因为 PR #595 后续又有改动，旧分支的基线已经不合适。',
+          },
+          {
+            role: 'assistant',
+            text: [
+              '已在最新 main 上重新实现并创建 PR #600，替代旧 PR #596。',
+              '交互稳定等待、action generation 接线和相关测试均已完成，工作树干净。',
+            ].join('\n'),
+          },
+        ],
+        delegationOutcome: {
+          handoffFrom: 'capability:general',
+          runId: 'answer-eval-completed-pr-run',
+          task: '在最新 main 上重新实现浏览器交互稳定等待并创建替代 PR',
+          outcome: 'goal_done',
+        },
+      },
+      expected: {
+        contract: 'answer.user-visible-close',
+        objective: '向用户交付已经完成的替代 PR 结果，不重新检查仓库或再次启动执行。',
+        acceptanceCriteria: [
+          { id: 'completed_pr_reported', statement: '说明基于最新 main 的重新实现已经完成，并已创建替代旧 PR #596 的 PR #600。' },
+          { id: 'accepted_result_preserved', statement: '保留交互稳定等待、action generation 接线、测试完成和工作树干净这些已接受结果。' },
+          { id: 'does_not_restart_work', statement: '没有声称需要先检查仓库、核实分支、重新实现、运行测试或继续执行任务。' },
+          { id: 'no_tool_call_style_output', statement: '没有输出 DSML、bash、git 命令、工具调用结构或其他执行工具风格的文本。' },
+        ],
+        expectedBehavior: 'task_summary',
+        diagnostics: { referenceMaxCharacters: 360, comparePriorAssistantText: true },
+      },
+      metadata: {
+        difficulty: 'hard',
+        reason: 'Regression fixture for an Answer model that restarted a completed PR task and emitted tool-call-style text.',
+        source: SOURCE_FILE,
+      },
+    },
+    {
       id: `${ANSWER_BEHAVIOR_BASICS_DATASET}.handoff-requires-user-choice`,
       name: 'handoff-requires-user-choice',
       suite: ANSWER_BEHAVIOR_BASICS_DATASET,
       tags: ['context_synthesis', 'delegation_control'],
       input: {
+        userGoal: {
+          objective: '根据用户选择，将已经完成的报告发送到邮件或项目群。',
+          context: '报告已经完成，发送渠道尚未选择。',
+        },
         messages: [
           { role: 'user', text: '根据我的选择，把已经完成的报告发送到邮件或项目群。' },
           {
@@ -285,6 +353,49 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
       metadata: {
         difficulty: 'hard',
         reason: 'Cross-node boundary: user input retains a resumable delegation instead of completing handoff.',
+        source: SOURCE_FILE,
+      },
+    },
+    {
+      id: `${ANSWER_BEHAVIOR_BASICS_DATASET}.normalized-goal-scopes-completion`,
+      name: 'normalized-goal-scopes-completion',
+      suite: ANSWER_BEHAVIOR_BASICS_DATASET,
+      tags: ['context_synthesis', 'delegation_control'],
+      input: {
+        userGoal: {
+          objective: '只完成 Answer 节点与 run user goal 的对齐。',
+          context: '本轮不修改 Entry、Planner 或 Outcome。',
+        },
+        messages: [
+          { role: 'user', text: '继续优化 Entry、Planner、Outcome 和 Answer。' },
+          { role: 'assistant', text: '我们最后确认本轮先只处理 Answer 与 user goal 的对齐。' },
+          { role: 'user', text: '按刚刚最后确认的范围继续。' },
+          {
+            role: 'assistant',
+            text: 'Answer 已改为以 run user goal 界定本次回复目标；Entry、Planner 和 Outcome 均未修改。',
+          },
+        ],
+        delegationOutcome: {
+          handoffFrom: 'capability:general',
+          runId: 'answer-eval-normalized-goal-run',
+          task: '对齐 Answer 节点与 run user goal',
+          outcome: 'goal_done',
+        },
+      },
+      expected: {
+        contract: 'answer.user-visible-close',
+        objective: '依据规范化目标，只总结 Answer 节点的完成结果，不恢复更早的全节点优化目标。',
+        acceptanceCriteria: [
+          { id: 'answer_alignment_completed', statement: '明确说明 Answer 与 run user goal 的对齐已经完成。' },
+          { id: 'normalized_scope_respected', statement: '没有声称 Entry、Planner 或 Outcome 已在本轮修改，也没有把它们列为仍应继续的工作。' },
+          { id: 'user_facing_language', statement: '回复面向用户，不暴露 orchestrator、handoff、delegation 等内部执行语言。' },
+        ],
+        expectedBehavior: 'task_summary',
+        diagnostics: { referenceMaxCharacters: 260, comparePriorAssistantText: true },
+      },
+      metadata: {
+        difficulty: 'hard',
+        reason: 'The Entry-normalized goal must scope the final reply when the latest raw request contains a contextual reference.',
         source: SOURCE_FILE,
       },
     },

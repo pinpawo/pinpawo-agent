@@ -20,10 +20,21 @@ export * from './petAgentTypes';
 
 /* ─────────────── Ports:宿主注入实现 ─────────────── */
 
-export { InMemoryStudioRunQueueStore } from './runQueuePort';
+export {
+  InMemoryStudioRunQueueStore,
+  // 快照归一化 helper —— 供 toolkit 层的持久化实现复用,避免各实现
+  // 各写一套恢复语义。
+  OPEN_RUN_STATUSES,
+  cloneSnapshot,
+  recoverSnapshot,
+  runFromSnapshot,
+  snapshotFromRun,
+  sortSnapshots,
+} from './runQueuePort';
 export type {
   StudioRunQueueStore,
   StudioRunQueueStoreRecoveryOptions,
+  StudioRunQueueStoreState,
 } from './runQueuePort';
 
 export {

@@ -781,8 +781,7 @@ test('grep_search over its limit returns terminal planning guidance to the model
     args: { query: 'ordinary' },
   });
   const model = new ScriptedPlannerModel([
-    { toolCalls: [grep('grep-1')] },
-    { toolCalls: [grep('grep-2')] },
+    { toolCalls: [grep('grep-1'), grep('grep-2')] },
     { toolCalls: [grep('grep-3')] },
     { toolCalls: [grep('grep-4')] },
     {
@@ -808,7 +807,7 @@ test('grep_search over its limit returns terminal planning guidance to the model
       task: 'Complete the requested repository update.',
     }],
   });
-  const limitFeedback = model.invocations[4]?.find((message) =>
+  const limitFeedback = model.invocations[3]?.find((message) =>
     message instanceof ToolMessage && message.tool_call_id === 'grep-4');
   assert.ok(limitFeedback instanceof ToolMessage);
   assert.match(String(limitFeedback.content), /planning_limit_reached/i);

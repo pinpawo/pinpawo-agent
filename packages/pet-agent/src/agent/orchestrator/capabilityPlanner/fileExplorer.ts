@@ -1,5 +1,10 @@
+import { ToolMessage } from '@langchain/core/messages';
 import { tool, type StructuredTool, type ToolRuntime } from '@langchain/core/tools';
+import type { InteropZodType } from '@langchain/core/utils/types';
+import { Command } from '@langchain/langgraph';
+import { withLangGraph } from '@langchain/langgraph/zod';
 import { z } from 'zod';
+import { z as z4 } from 'zod/v4';
 import type { CapabilityDocumentWorkspace } from './documentWorkspace';
 import {
   CAPABILITY_REGISTRY_BACKEND,
@@ -20,6 +25,22 @@ const MAX_GREP_QUERY_CHARS = 160;
 const MAX_GREP_RESULT_BYTES = 64 * 1024;
 const MAX_GREP_SEARCH_CALLS = 3;
 
+const grepSearchCallCountSchema = z4.number().int().nonnegative().default(0);
+withLangGraph(
+  grepSearchCallCountSchema as unknown as InteropZodType<number>,
+  {
+    reducer: {
+      schema: z4.number().int().positive() as unknown as InteropZodType<number>,
+      fn: (current: number, increment: number) => current + increment,
+    },
+    default: () => 0,
+  },
+);
+
+export const CAPABILITY_PLANNER_GREP_STATE_SCHEMA = z4.object({
+  grepSearchCallCount: grepSearchCallCountSchema,
+});
+
 export type CapabilityPlannerFileExplorer = {
   /**
    * Framework-private tools for a Capability Planner Agent. They are not an
@@ -28,6 +49,10 @@ export type CapabilityPlannerFileExplorer = {
   readonly tools: readonly StructuredTool[];
   readonly didReachDocumentReadLimit: () => boolean;
 };
+
+type CapabilityPlannerGrepState = z4.infer<
+  typeof CAPABILITY_PLANNER_GREP_STATE_SCHEMA
+>;
 
 function utf8Bytes(content: string) {
   return Buffer.byteLength(content, 'utf8');
@@ -99,65 +124,80 @@ export function createCapabilityPlannerFileExplorer(params: {
   let consumedDocumentReadBytes = 0;
   let documentReadLimitReached = false;
 
+  const executeGrepSearch = async (
+    query: string,
+    signal: AbortSignal | undefined,
+  ) => {
+    try {
+      const normalizedTerms = grepQueryTerms(query);
+      const remainingDocumentReadBytes = Math.max(
+        0,
+        maxDocumentReadBytes - consumedDocumentReadBytes,
+      );
+      if (remainingDocumentReadBytes === 0) {
+        documentReadLimitReached = true;
+        throw new PlannerFileToolError(
+          'planning_limit_reached',
+          'Capability Planner document read limit is reached.',
+        );
+      }
+      const result = await registryDocuments.search({
+        terms: normalizedTerms,
+        maxResults: MAX_GREP_RESULTS,
+        maxResultBytes: Math.min(
+          remainingDocumentReadBytes,
+          MAX_GREP_RESULT_BYTES,
+        ),
+        signal,
+      });
+      if (result.matches.length === 0 && result.stoppedBy === 'result_size') {
+        documentReadLimitReached = true;
+        throw new PlannerFileToolError(
+          'planning_limit_reached',
+          'Capability Planner search result cannot fit the first matching document.',
+        );
+      }
+      consumedDocumentReadBytes += result.matches.reduce(
+        (total, match) => total + utf8Bytes(match.content),
+        0,
+      );
+      if (consumedDocumentReadBytes >= maxDocumentReadBytes) {
+        documentReadLimitReached = true;
+      }
+      return formatSuccess(
+        {
+          matches: result.matches,
+          complete: result.complete,
+          stoppedBy: result.stoppedBy,
+        },
+      );
+    } catch (error) {
+      return formatError(error);
+    }
+  };
+
   const grepSearch = tool(
     async ({ query }: {
       query: string;
-    }, runtime: ToolRuntime) => {
-      try {
-        const grepSearchCallCount = (
-          runtime as ToolRuntime<{ grepSearchCallCount?: number }>
-        ).state?.grepSearchCallCount ?? 0;
-        if (grepSearchCallCount > MAX_GREP_SEARCH_CALLS) {
-          throw new PlannerFileToolError(
-            'planning_limit_reached',
-            `Capability exploration limit reached: grep_search may be called at most ${String(MAX_GREP_SEARCH_CALLS)} times. Do not call grep_search again; now call submit_plan, or return_to_answer if no executable plan is possible.`,
-          );
-        }
-        const normalizedTerms = grepQueryTerms(query);
-        const remainingDocumentReadBytes = Math.max(
-          0,
-          maxDocumentReadBytes - consumedDocumentReadBytes,
-        );
-        if (remainingDocumentReadBytes === 0) {
-          documentReadLimitReached = true;
-          throw new PlannerFileToolError(
-            'planning_limit_reached',
-            'Capability Planner document read limit is reached.',
-          );
-        }
-        const result = await registryDocuments.search({
-          terms: normalizedTerms,
-          maxResults: MAX_GREP_RESULTS,
-          maxResultBytes: Math.min(
-            remainingDocumentReadBytes,
-            MAX_GREP_RESULT_BYTES,
-          ),
-          signal: runtime.signal,
-        });
-        if (result.matches.length === 0 && result.stoppedBy === 'result_size') {
-          documentReadLimitReached = true;
-          throw new PlannerFileToolError(
-            'planning_limit_reached',
-            'Capability Planner search result cannot fit the first matching document.',
-          );
-        }
-        consumedDocumentReadBytes += result.matches.reduce(
-          (total, match) => total + utf8Bytes(match.content),
-          0,
-        );
-        if (consumedDocumentReadBytes >= maxDocumentReadBytes) {
-          documentReadLimitReached = true;
-        }
-        return formatSuccess(
-          {
-            matches: result.matches,
-            complete: result.complete,
-            stoppedBy: result.stoppedBy,
-          },
-        );
-      } catch (error) {
-        return formatError(error);
-      }
+    }, runtime: ToolRuntime<CapabilityPlannerGrepState>) => {
+      const grepSearchCallCount = runtime.state?.grepSearchCallCount ?? 0;
+      const withinLimit = grepSearchCallCount < MAX_GREP_SEARCH_CALLS;
+      const content = withinLimit
+        ? await executeGrepSearch(query, runtime.signal)
+        : formatError(new PlannerFileToolError(
+          'planning_limit_reached',
+          `Capability exploration limit reached: grep_search may be called at most ${String(MAX_GREP_SEARCH_CALLS)} times. Do not call grep_search again; now call submit_plan, or return_to_answer if no executable plan is possible.`,
+        ));
+      return new Command({
+        update: {
+          ...(withinLimit ? { grepSearchCallCount: 1 } : {}),
+          messages: [new ToolMessage({
+            content,
+            tool_call_id: runtime.toolCallId ?? '',
+            name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+          })],
+        },
+      });
     },
     {
       name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,

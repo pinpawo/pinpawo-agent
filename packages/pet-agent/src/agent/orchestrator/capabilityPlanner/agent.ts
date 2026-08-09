@@ -1,5 +1,4 @@
 import {
-  AIMessage,
   HumanMessage,
   SystemMessage,
   ToolMessage,
@@ -12,7 +11,7 @@ import { Command } from '@langchain/langgraph';
 import { createAgent, createMiddleware } from 'langchain';
 import { z } from 'zod';
 import {
-  CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+  CAPABILITY_PLANNER_GREP_STATE_SCHEMA,
   createCapabilityPlannerFileExplorer,
 } from './fileExplorer';
 import type { CapabilityRegistryBackend } from './registryDocuments';
@@ -37,18 +36,17 @@ const SUBMIT_PLAN_TOOL_NAME = 'submit_plan';
 const RETURN_TO_ANSWER_TOOL_NAME = 'return_to_answer';
 const DIRECT_TEXT_REASON = 'plan direct text';
 
-const plannerAgentStateSchema = z.object({
-  submittedPlan: z.array(z.object({
-    capability: z.string(),
-    task: z.string(),
-  })).nullable().default(null),
-  grepSearchCallCount: z.number().int().nonnegative().default(0),
-});
-
 type SubmittedPlannerTask = {
   capability: string;
   task: string;
 };
+
+const plannerSubmissionStateSchema = z.object({
+  submittedPlan: z.array(z.object({
+    capability: z.string(),
+    task: z.string(),
+  })).nullable().default(null),
+});
 
 export type CapabilityPlannerAgentErrorCode =
   | 'planning_limit_reached'
@@ -204,20 +202,7 @@ function plannerToolErrorResult(params: {
 function createPlannerSubmissionStateMiddleware() {
   return createMiddleware({
     name: 'CapabilityPlannerSubmissionState',
-    stateSchema: plannerAgentStateSchema,
-    afterModel: (state) => {
-      const message = state.messages.at(-1);
-      if (!(message instanceof AIMessage)) return;
-      // Count the whole emitted batch once so parallel grep calls cannot lose
-      // increments through concurrent state updates in individual tools.
-      const grepSearchCalls = (message.tool_calls ?? []).filter(
-        ({ name }) => name === CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-      ).length;
-      if (grepSearchCalls === 0) return;
-      return {
-        grepSearchCallCount: state.grepSearchCallCount + grepSearchCalls,
-      };
-    },
+    stateSchema: plannerSubmissionStateSchema,
     wrapToolCall: async (request, handler) => {
       let result: ToolMessage | Command;
       try {
@@ -409,6 +394,7 @@ async function invokePlannerAgent(params: {
   const agent = createAgent({
     model: params.model,
     tools: [...explorer.tools, ...createPlannerSubmissionTools(params.input)],
+    stateSchema: CAPABILITY_PLANNER_GREP_STATE_SCHEMA,
     systemPrompt: buildCapabilityPlannerAgentSystemPrompt(params.input.mode),
     middleware: [createPlannerSubmissionStateMiddleware()],
   });

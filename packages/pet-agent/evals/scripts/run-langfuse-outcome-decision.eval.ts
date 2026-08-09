@@ -6,6 +6,7 @@ import {
   buildDelegationOutcomeOtherTasksContext,
   buildDelegationOutcomeRemainingPlanContext,
   buildPreparedRequestContext,
+  buildRunUserGoalContext,
   buildSubagentAnnounceContext,
 } from '../../src/agent/orchestrator/prompts.ts';
 import {
@@ -45,6 +46,10 @@ async function runCase(
   });
   const delegationId = 'eval-delegation';
   const input = buildDelegationOutcomeDecisionInput({
+    runUserGoalContext: buildRunUserGoalContext({
+      objective: testCase.input.userGoal,
+      context: null,
+    }),
     userIntentContext: buildPreparedRequestContext({
       latestUserRequest: testCase.input.userGoal,
       recentMessages: [new HumanMessage(testCase.input.userGoal)],

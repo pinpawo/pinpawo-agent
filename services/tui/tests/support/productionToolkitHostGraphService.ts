@@ -234,9 +234,7 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
   } as unknown as AgentModels['act'];
   const capabilityPlannerRunner: CapabilityPlannerRunner = {
     async invoke(input) {
-      // Only an entry input carries a briefing; a boundary re-plans from run facts.
-      const readsAttachment = input.mode === 'entry'
-        && (input.briefing.context?.includes(ATTACHMENT_TOOL_INPUT) ?? false);
+      const readsAttachment = input.userGoal.context?.includes(ATTACHMENT_TOOL_INPUT) ?? false;
       return {
         tasks: [
           {

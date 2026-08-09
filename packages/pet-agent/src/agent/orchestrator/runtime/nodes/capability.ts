@@ -266,7 +266,11 @@ export function createCapabilityNode(params: {
       runDelegationSummaries: updatedRunDelegationSummaries,
       runNextDelegation: null,
       taskActiveDelegation: {
-        ...(state.taskActiveDelegation ?? createTaskActiveDelegation(runNextDelegation, transcriptRunId)),
+        ...(state.taskActiveDelegation ?? createTaskActiveDelegation(
+          runNextDelegation,
+          transcriptRunId,
+          state.runUserGoal,
+        )),
         status: interrupted ? 'pending' as const : 'awaiting_decision' as const,
         resultPreview,
       },

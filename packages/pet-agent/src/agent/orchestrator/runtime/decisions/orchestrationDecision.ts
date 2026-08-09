@@ -33,9 +33,10 @@ import {
   buildPreparedRequestContext,
   buildRunDelegationSummaryContext,
   buildRuntimeContext,
+  buildRunUserGoalContext,
   buildSubagentAnnounceContext,
   buildEntryDecisionInput,
-  buildJsonEntryDecisionBriefingInstruction,
+  buildJsonEntryDecisionUserGoalInstruction,
   buildEntryDecisionSystemPrompt,
 } from '../../prompts';
 import {
@@ -63,7 +64,7 @@ import {
 import { readMessageText } from '../../utils';
 import { invokeStructuredOutput } from '../../../../utils/structuredOutput';
 import {
-  buildRouteFunctionEntryDecisionBriefingInstruction,
+  buildRouteFunctionEntryDecisionUserGoalInstruction,
   buildRouteFunctionEntryDecisionInstruction,
   invokeEntryDecisionOutcome,
   usesRouteFunctionEntryDecision,
@@ -128,9 +129,9 @@ function buildEntryDecisionContext(params: {
   ];
   const systemPrompt = buildEntryDecisionSystemPrompt({
     actor,
-    briefingInstruction: usesRouteFunctionEntryDecision(config)
-      ? buildRouteFunctionEntryDecisionBriefingInstruction()
-      : buildJsonEntryDecisionBriefingInstruction(),
+    userGoalInstruction: usesRouteFunctionEntryDecision(config)
+      ? buildRouteFunctionEntryDecisionUserGoalInstruction()
+      : buildJsonEntryDecisionUserGoalInstruction(),
     outputInstruction: usesRouteFunctionEntryDecision(config)
       ? buildRouteFunctionEntryDecisionInstruction()
       : buildEntryDecisionOutputInstruction(config.decisionStructuredOutput?.method),
@@ -168,6 +169,7 @@ function buildDecisionContext(params: {
     contextSummaries: readContextCompactionSummaries(state.messages),
   });
   const activeDelegation = state.taskActiveDelegation;
+  const runUserGoal = state.runUserGoal ?? activeDelegation?.userGoal ?? null;
   const activeDelegationCapabilityId = activeDelegation
     && activeDelegation.lane.startsWith('capability:')
     ? activeDelegation.lane.slice('capability:'.length)
@@ -248,6 +250,7 @@ function buildDecisionContext(params: {
     ),
   });
   const decisionInputMessage = new HumanMessage(buildDelegationOutcomeDecisionInput({
+    runUserGoalContext: buildRunUserGoalContext(runUserGoal),
     userIntentContext,
     currentTaskContext: buildDelegationOutcomeCurrentTaskContext(activeDelegation),
     subagentAnnounceContext: buildSubagentAnnounceContext(
@@ -341,6 +344,7 @@ function buildEntryDecisionResult(params: {
         runNextDelegation: null,
         runPlannerReturn: null,
         runCapabilityPlan: [],
+        runUserGoal: null,
       },
     };
   }
@@ -348,10 +352,10 @@ function buildEntryDecisionResult(params: {
     mode: 'entry',
     plannerState: {
       runId: state.runId,
+      runUserGoal: decision.userGoal,
       runDelegationSummaries: state.runDelegationSummaries,
       runCapabilityPlan: [],
     },
-    briefing: decision.briefing,
   };
   return {
     goto: new Send('capabilityPlanner', dispatch),
@@ -359,6 +363,7 @@ function buildEntryDecisionResult(params: {
       runNextDelegation: null,
       runPlannerReturn: null,
       runCapabilityPlan: [],
+      runUserGoal: decision.userGoal,
     },
   };
 }
@@ -425,10 +430,25 @@ function buildDelegationOutcomeDecisionResult(params: {
     if (!context.activeDelegationResult) {
       throw new Error('task_done requires a complete accepted delegation result.');
     }
+    const runUserGoal = state.runUserGoal ?? activeDelegation.userGoal;
+    if (!runUserGoal) {
+      return {
+        goto: 'answer',
+        update: {
+          ...acceptedDelegationUpdate,
+          runPlannerReturn: {
+            reason: 'resumed checkpoint has no run user goal',
+            context: 'The resumed delegated task completed, but this checkpoint predates runUserGoal, so remaining work cannot be planned safely.',
+            question: 'Please restate the remaining goal to continue.',
+          },
+        },
+      };
+    }
     const dispatch: CapabilityPlannerDispatch = {
       mode: 'boundary',
       plannerState: {
         runId: state.runId,
+        runUserGoal,
         runDelegationSummaries: acceptedDelegationUpdate.runDelegationSummaries,
         runCapabilityPlan: state.runCapabilityPlan,
       },

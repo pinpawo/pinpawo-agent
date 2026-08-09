@@ -6,8 +6,8 @@ import type {
   OrchestrationDecisionStructuredOutputOptions,
 } from './types';
 import {
-  CAPABILITY_PLANNER_BRIEFING_CONTEXT_MAX_CHARS,
-  CAPABILITY_PLANNER_BRIEFING_OBJECTIVE_MAX_CHARS,
+  USER_GOAL_CONTEXT_MAX_CHARS,
+  USER_GOAL_OBJECTIVE_MAX_CHARS,
 } from './capabilityPlanner/runner';
 
 export type EntryDecision = {
@@ -28,12 +28,12 @@ export function buildEntryDecisionSchema() {
       'run 入口的下一步。answer=当前仍缺少完成请求必需的目标、范围或选择，或当前表述无法理解时，直接询问用户并暂不开始任务执行；也用于完成当前请求不需要调用工具的情况。needs_plan=信息足够且完成当前用户请求需要调用任何工具。',
     ),
     planner_objective: z.string().trim().min(1)
-      .max(CAPABILITY_PLANNER_BRIEFING_OBJECTIVE_MAX_CHARS)
+      .max(USER_GOAL_OBJECTIVE_MAX_CHARS)
       .nullable().optional().describe(
       '仅 action=needs_plan 时必填：对当前真实用户目标的准确、可执行摘要。保留编号、URL、路径、顺序和明确约束；消解必要指代。不要选择 Capability、拆分任务或写执行计划。',
     ),
     planner_context: z.string().trim().min(1)
-      .max(CAPABILITY_PLANNER_BRIEFING_CONTEXT_MAX_CHARS)
+      .max(USER_GOAL_CONTEXT_MAX_CHARS)
       .nullable().optional().describe(
       '仅 action=needs_plan 时可选：理解当前目标必需的已确认背景、约束或指代事实。排除无关历史、已关闭目标、Capability 选择和执行计划。',
     ),

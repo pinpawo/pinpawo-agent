@@ -36,7 +36,7 @@ import {
   type EntryDecision,
 } from '../src/agent/orchestrator/schemas';
 import {
-  buildRouteFunctionEntryDecisionBriefingInstruction,
+  buildRouteFunctionEntryDecisionUserGoalInstruction,
   buildRouteFunctionEntryDecisionInstruction,
   invokeEntryDecisionOutcome,
 } from '../src/agent/orchestrator/runtime/decisions/entryDecisionProtocol.ts';
@@ -280,7 +280,7 @@ async function runOne(params: {
       actor: evalActor,
       ...(params.protocol === 'routeFunctions'
         ? {
-            briefingInstruction: buildRouteFunctionEntryDecisionBriefingInstruction(),
+            userGoalInstruction: buildRouteFunctionEntryDecisionUserGoalInstruction(),
             outputInstruction: buildRouteFunctionEntryDecisionInstruction(),
           }
         : {
@@ -315,8 +315,8 @@ async function runOne(params: {
       ? { action: 'answer', planner_objective: null, planner_context: null }
       : {
           action: 'needs_plan',
-          planner_objective: outcome.briefing.objective,
-          planner_context: outcome.briefing.context,
+          planner_objective: outcome.userGoal.objective,
+          planner_context: outcome.userGoal.context,
         };
     const issues = evaluateDecision(params.testCase, decision);
     return {

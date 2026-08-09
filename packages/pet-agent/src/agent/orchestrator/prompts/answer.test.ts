@@ -5,6 +5,7 @@ import { getPinpetMeta } from '../messageLanes';
 import {
   ANSWER_CONTEXT_LIMITS,
   ANSWER_CONTEXT_MESSAGE_NAME,
+  RUN_USER_GOAL_MESSAGE_NAME,
   appendAnswerContextMessage,
   buildAnswerInvocationMessages,
   type ModelAnswerContextFacts,
@@ -27,6 +28,10 @@ test('Answer prompt package owns stable system plus canonical history plus facts
   const messages = buildAnswerInvocationMessages({
     actor,
     history,
+    userGoal: {
+      objective: '检查仓库并报告结果。',
+      context: '只检查当前工作区。',
+    },
     contextFacts: {
       mode: 'user_input_required',
       hasUserGoal: true,
@@ -38,9 +43,11 @@ test('Answer prompt package owns stable system plus canonical history plus facts
   assert.ok(systemMessage);
   assert.equal(systemMessage._getType(), 'system');
   assert.equal(history.length, 2);
-  assert.deepEqual(messages.map((item) => item._getType()), ['system', 'human', 'ai', 'human']);
+  assert.deepEqual(messages.map((item) => item._getType()), ['system', 'human', 'ai', 'human', 'human']);
   assert.strictEqual(messages[1], history[0]);
   assert.strictEqual(messages[2], history[1]);
+  assert.equal(messages[3]?.name, RUN_USER_GOAL_MESSAGE_NAME);
+  assert.match(String(messages[3]?.content), /<objective>[\s\S]*检查仓库并报告结果。/);
   assert.doesNotMatch(String(systemMessage.content), /检查仓库|我会先读取相关文件/);
   assert.ok(message);
   assert.equal(message._getType(), 'human');

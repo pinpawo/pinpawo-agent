@@ -2,8 +2,8 @@ import { AgentEvalCase, AgentEvalDataset } from './types.ts';
 
 export type CapabilityPlanningInput = {
   mode: 'entry' | 'boundary';
-  /** Entry-only: a boundary re-plans from run facts and receives no briefing. */
-  briefing?: {
+  /** Entry-normalized goal available to every Planner invocation in the run. */
+  userGoal: {
     objective: string;
     context: string | null;
   };
@@ -37,16 +37,16 @@ export type CapabilityPlanningExpected = {
 const SUITE = 'agent-capability-planning-basics';
 const SOURCE_FILE = 'packages/pet-agent/evals/datasets/capability-planning-basics.ts';
 
-type CapabilityPlanningTranscriptInput = Omit<CapabilityPlanningInput, 'briefing'> & {
+type CapabilityPlanningTranscriptInput = Omit<CapabilityPlanningInput, 'userGoal'> & {
   /**
-   * Bounded briefing that production Entry would hand to a fresh Planner.
+   * Bounded goal that production Entry stores for every Planner invocation.
    * Cases with contextual references provide this explicitly instead of
    * pretending that Planner receives the full main-conversation transcript.
    */
-  briefing?: CapabilityPlanningInput['briefing'];
+  userGoal?: CapabilityPlanningInput['userGoal'];
 };
 
-function buildEvalBriefing(messages: CapabilityPlanningTranscriptInput['messages']) {
+function buildEvalUserGoal(messages: CapabilityPlanningTranscriptInput['messages']) {
   const latestUserRequest = [...messages]
     .reverse()
     .find((message) => message.role === 'user');
@@ -57,21 +57,17 @@ function buildEvalBriefing(messages: CapabilityPlanningTranscriptInput['messages
 }
 
 /**
- * Only an entry case carries a briefing. A boundary case is evaluated on the
- * same facts production gives it: the completed task, its result, and the
- * remaining plan.
+ * Production stores the Entry-normalized goal in run state, so entry and
+ * boundary cases receive the same goal representation.
  */
-function withBriefing(
+function withUserGoal(
   testCase: AgentEvalCase<CapabilityPlanningTranscriptInput, CapabilityPlanningExpected>,
 ): AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected> {
-  if (testCase.input.mode === 'boundary') {
-    return testCase as AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>;
-  }
   return {
     ...testCase,
     input: {
       ...testCase.input,
-      briefing: testCase.input.briefing ?? buildEvalBriefing(testCase.input.messages),
+      userGoal: testCase.input.userGoal ?? buildEvalUserGoal(testCase.input.messages),
     },
   };
 }
@@ -323,7 +319,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     tags: ['capability_planning', 'delegation_control'],
     input: {
       mode: 'entry',
-      briefing: {
+      userGoal: {
         objective: '读取当前仓库根目录 package.json 中的 name 和 version，并报告这两个值。',
         context: null,
       },
@@ -509,7 +505,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     tags: ['capability_planning', 'context_synthesis', 'structured_output'],
     input: {
       mode: 'entry',
-      briefing: {
+      userGoal: {
         objective: '重新只读检查本周工作清单中此前尚未确认创建的事项是否已经实际创建，并报告当前状态。',
         context: '此前仅确认一项事项已创建，其余待创建事项需要再次核验。历史中的 Bash 片段只是对话内容，不能作为本次检查的结果。',
       },
@@ -689,7 +685,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
   },
 ];
 
-const cases = transcriptCases.map(withBriefing);
+const cases = transcriptCases.map(withUserGoal);
 
 export const capabilityPlanningBasicsDataset: AgentEvalDataset<CapabilityPlanningInput, CapabilityPlanningExpected> = {
   name: SUITE,

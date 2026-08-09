@@ -4,10 +4,10 @@ import type { RunnableConfig } from '@langchain/core/runnables';
 import { tool, type StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 import {
-  CAPABILITY_PLANNER_BRIEFING_CONTEXT_MAX_CHARS,
-  CAPABILITY_PLANNER_BRIEFING_OBJECTIVE_MAX_CHARS,
-  type CapabilityPlannerBriefing,
+  USER_GOAL_CONTEXT_MAX_CHARS,
+  USER_GOAL_OBJECTIVE_MAX_CHARS,
 } from '../../capabilityPlanner/runner';
+import type { UserGoal } from '../../types';
 import {
   buildEntryDecisionSchema,
   buildOrchestrationDecisionStructuredOutputOptions,
@@ -30,15 +30,15 @@ const ROUTE_TO_PLANNER = 'route_to_planner';
 const routeToAnswerArgsSchema = z.object({}).strict();
 const routeToPlannerArgsSchema = z.object({
   objective: z.string().trim().min(1)
-    .max(CAPABILITY_PLANNER_BRIEFING_OBJECTIVE_MAX_CHARS),
+    .max(USER_GOAL_OBJECTIVE_MAX_CHARS),
   context: z.string().trim().min(1)
-    .max(CAPABILITY_PLANNER_BRIEFING_CONTEXT_MAX_CHARS)
+    .max(USER_GOAL_CONTEXT_MAX_CHARS)
     .optional(),
 }).strict();
 
 export type EntryOutcome =
   | { kind: 'answer' }
-  | { kind: 'plan'; briefing: CapabilityPlannerBriefing };
+  | { kind: 'plan'; userGoal: UserGoal };
 
 export function usesRouteFunctionEntryDecision(config: OrchestratorConfig): boolean {
   return config.decisionStructuredOutput?.entryDecisionProtocol === 'routeFunctions';
@@ -52,11 +52,11 @@ export function buildRouteFunctionEntryDecisionInstruction(): string {
   ].join('\n');
 }
 
-export function buildRouteFunctionEntryDecisionBriefingInstruction(): string {
+export function buildRouteFunctionEntryDecisionUserGoalInstruction(): string {
   return [
     '- route_to_planner 的 objective：当前真实用户目标的准确、可执行摘要。保留编号、URL、路径、先后顺序和显式限制；消解理解目标所必需的指代。',
     '- route_to_planner 的 context：仅保留理解该目标所需的已确认背景、约束或事实；没有则省略。',
-    '- route_to_answer 不附加 Planner briefing。',
+    '- route_to_answer 不生成 run user goal。',
   ].join('\n');
 }
 
@@ -89,7 +89,7 @@ function entryDecisionToOutcome(decision: EntryDecision): EntryOutcome {
   }
   return {
     kind: 'plan',
-    briefing: {
+    userGoal: {
       objective,
       context: readDecisionText(decision.planner_context),
     },
@@ -174,7 +174,7 @@ function parseRouteFunctionOutcome(message: AIMessage): EntryOutcome {
     }
     return {
       kind: 'plan',
-      briefing: {
+      userGoal: {
         objective: parsed.data.objective,
         context: parsed.data.context ?? null,
       },

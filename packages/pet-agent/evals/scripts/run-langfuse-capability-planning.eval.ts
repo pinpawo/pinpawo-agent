@@ -38,19 +38,6 @@ const evalExecutionToolkit = defineToolkit({
   }],
 });
 
-/**
- * The dataset attaches a briefing to every entry case. A missing one is a
- * dataset bug, so fail loudly instead of substituting a placeholder objective
- * that would silently score a different input than production uses.
- */
-function entryBriefing(testCase: { id: string; input: CapabilityPlanningInput }) {
-  const { briefing } = testCase.input;
-  if (!briefing) {
-    throw new Error(`Entry capability-planning case "${testCase.id}" is missing its briefing.`);
-  }
-  return briefing;
-}
-
 function capabilityFromRegistryEntry(entry: string): AgentCapability {
   const separator = entry.indexOf(':');
   const name = (separator >= 0 ? entry.slice(0, separator) : entry).trim();
@@ -159,9 +146,8 @@ async function main() {
           model: modelConfig.model,
         }).invoke(
           {
-            ...(testCase.input.mode === 'entry'
-              ? { mode: 'entry' as const, briefing: entryBriefing(testCase) }
-              : { mode: 'boundary' as const }),
+            mode: testCase.input.mode,
+            userGoal: testCase.input.userGoal,
             completedTask: testCase.input.completedTask ?? null,
             completedTaskResult: testCase.input.completedTaskResult ?? null,
             remainingPlan: testCase.input.remainingPlan ?? [],

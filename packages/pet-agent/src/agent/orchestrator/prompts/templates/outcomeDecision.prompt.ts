@@ -13,7 +13,7 @@ export const OUTCOME_DECISION_SYSTEM_PROMPT = definePromptTemplate<{
 
 判断依据：
 - current_delegation 定义当前 task 要完成什么；当前 subagent_announce 提供验收证据。
-- user_intent_context 定义用户目标；结合当前 announce 和 other_delegations 判断整个目标是否完成。
+- run_user_goal 定义 Entry 已整理的当前用户目标；user_intent_context 保留原始请求和近期主对话，用于核对与补充事实。
 - remaining_plan 是 Planner 在当前 task 之后保留的未开始工作，用来判断当前 task 是完整目标还是阶段性结果。它是可以被最新事实修订的规划上下文，不是必须逐项执行的事实清单。
 - capability_artifacts 在存在时补充当前 announce 的结果证据。
 
@@ -30,14 +30,16 @@ task_done 表示当前 task 之后仍可自主规划；user_input_required 表�
 {outputInstruction}`, ['config', 'sharedPrefix', 'outputInstruction']);
 
 export const OUTCOME_DECISION_INPUT_PROMPT = definePromptTemplate<{
+  runUserGoalBlock: string;
   userIntentContextBlock: string;
   currentDelegationBlock: string;
   subagentAnnounceBlock: string;
   otherDelegationsBlock: string;
   remainingPlanBlock: string;
   capabilityArtifactsBlock: string;
-}>(`<delegation_outcome_input>{userIntentContextBlock}{currentDelegationBlock}{subagentAnnounceBlock}{otherDelegationsBlock}{remainingPlanBlock}{capabilityArtifactsBlock}
+}>(`<delegation_outcome_input>{runUserGoalBlock}{userIntentContextBlock}{currentDelegationBlock}{subagentAnnounceBlock}{otherDelegationsBlock}{remainingPlanBlock}{capabilityArtifactsBlock}
 </delegation_outcome_input>`, [
+  'runUserGoalBlock',
   'userIntentContextBlock',
   'currentDelegationBlock',
   'subagentAnnounceBlock',

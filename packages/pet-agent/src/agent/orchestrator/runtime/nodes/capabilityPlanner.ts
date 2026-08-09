@@ -91,6 +91,7 @@ function materializeNextDelegation(params: {
   const taskActiveDelegation = createTaskActiveDelegation(
     runNextDelegation,
     state.runId,
+    state.runUserGoal,
   );
   const materializedDelegation = materializeDelegation({
     mode: 'initial',
@@ -183,7 +184,7 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
     const input: CapabilityPlannerInput = nodeInput.mode === 'entry'
       ? {
           mode: 'entry',
-          briefing: nodeInput.briefing,
+          userGoal: state.runUserGoal,
           completedTask: null,
           completedTaskResult: null,
           remainingPlan: state.runCapabilityPlan,
@@ -191,6 +192,7 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
         }
       : {
           mode: 'boundary',
+          userGoal: state.runUserGoal,
           completedTask: nodeInput.completedTask,
           completedTaskResult: nodeInput.completedTaskResult,
           remainingPlan: state.runCapabilityPlan,

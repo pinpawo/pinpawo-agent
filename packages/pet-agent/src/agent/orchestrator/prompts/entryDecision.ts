@@ -12,19 +12,19 @@ import {
 
 export function buildEntryDecisionSystemPrompt(params: {
   actor: AgentActor;
-  briefingInstruction?: string;
+  userGoalInstruction?: string;
   outputInstruction: string;
 }): string {
   return ENTRY_DECISION_SYSTEM_PROMPT.render({
     config: buildDecisionConfig(params.actor),
     sharedPrefix: buildOrchestratorDecisionPromptPrefix(),
-    briefingInstruction: params.briefingInstruction
-      ?? buildJsonEntryDecisionBriefingInstruction(),
+    userGoalInstruction: params.userGoalInstruction
+      ?? buildJsonEntryDecisionUserGoalInstruction(),
     outputInstruction: params.outputInstruction,
   });
 }
 
-export function buildJsonEntryDecisionBriefingInstruction(): string {
+export function buildJsonEntryDecisionUserGoalInstruction(): string {
   return [
     '- planner_objective：当前用户目标的准确、可执行摘要，保留编号、URL、路径、先后顺序和显式限制。',
     '- planner_context：帮助理解目标的已确认背景、约束或事实；没有时为 null。',

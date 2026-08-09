@@ -7,8 +7,8 @@ import {
   buildEntryDecisionSchema,
 } from './schemas';
 import {
-  CAPABILITY_PLANNER_BRIEFING_CONTEXT_MAX_CHARS,
-  CAPABILITY_PLANNER_BRIEFING_OBJECTIVE_MAX_CHARS,
+  USER_GOAL_CONTEXT_MAX_CHARS,
+  USER_GOAL_OBJECTIVE_MAX_CHARS,
 } from './capabilityPlanner/runner';
 
 test('entry decision schema owns only the result-availability gate', () => {
@@ -21,12 +21,12 @@ test('entry decision schema owns only the result-availability gate', () => {
   assert.equal(schema.safeParse({ action: 'needs_plan' }).success, false);
   assert.equal(schema.safeParse({
     action: 'needs_plan',
-    planner_objective: 'x'.repeat(CAPABILITY_PLANNER_BRIEFING_OBJECTIVE_MAX_CHARS + 1),
+    planner_objective: 'x'.repeat(USER_GOAL_OBJECTIVE_MAX_CHARS + 1),
   }).success, false);
   assert.equal(schema.safeParse({
     action: 'needs_plan',
     planner_objective: '执行当前任务。',
-    planner_context: 'x'.repeat(CAPABILITY_PLANNER_BRIEFING_CONTEXT_MAX_CHARS + 1),
+    planner_context: 'x'.repeat(USER_GOAL_CONTEXT_MAX_CHARS + 1),
   }).success, false);
   assert.equal(schema.safeParse({
     action: 'direct_task',

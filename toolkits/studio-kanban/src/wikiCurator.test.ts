@@ -13,7 +13,7 @@ import {
   ensureWikiSkeleton,
   fileReadPromptProvider,
 } from './wikiCurator';
-import type { StudioWikiTaskSource } from './wikiCurator';
+import type { StudioWikiTaskSource } from '@pinpawo/studio';
 
 async function makeWikiTempDir(prefix: string): Promise<string> {
   return await fs.mkdtemp(path.join(os.tmpdir(), prefix));

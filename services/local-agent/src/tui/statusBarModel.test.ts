@@ -10,7 +10,7 @@ import {
 import { createSession } from './state/tuiState';
 
 test('buildStatusBarModel separates current state from session resource facts', () => {
-  const session = createSession({ id: 'chat:pet', kind: 'studio' });
+  const session = createSession({ id: 'chat:pet', kind: 'chat' });
   session.runtime = {
     model: 'gpt-test',
     cwd: '/Users/mac/project',
@@ -26,7 +26,6 @@ test('buildStatusBarModel separates current state from session resource facts', 
 
   const model = buildStatusBarModel({
     connectionStatus: '就绪',
-    composerTarget: 'studio',
     session,
     globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
   });
@@ -37,7 +36,6 @@ test('buildStatusBarModel separates current state from session resource facts', 
   ]);
   assert.deepEqual(segmentFacts(model, 'primary'), [
     ['connection', undefined, '就绪', 100],
-    ['composer-target', undefined, 'Studio', 90],
     ['policy', '授权', '需要授权', 80],
   ]);
   assert.deepEqual(segmentFacts(model, 'session'), [
@@ -64,7 +62,6 @@ test('two-line status keeps token usage visible independently from primary activ
   const model = buildStatusBarModel({
     activityStatus: '正在调用能力或工具 · 12s',
     connectionStatus: '连接断开，10s 后重连 1/5',
-    composerTarget: 'studio',
     session,
     globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
   });
@@ -99,7 +96,6 @@ test('status consumes session cumulative usage instead of the latest run snapsho
 
   const model = buildStatusBarModel({
     connectionStatus: '就绪',
-    composerTarget: 'chat',
     session,
     globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION,
   });
@@ -114,7 +110,6 @@ test('status shows an explicit empty token state before the first completed turn
   session.runtime = { contextWindow: 64000 };
   const model = buildStatusBarModel({
     connectionStatus: '初始化中',
-    composerTarget: 'chat',
     session,
     globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
   });
@@ -128,8 +123,7 @@ test('status shows an explicit empty token state before the first completed turn
 test('status follows reducer-owned composer target and includes the active overlay', () => {
   const model = buildStatusBarModel({
     connectionStatus: '就绪',
-    composerTarget: 'chat',
-    session: createSession({ id: 'chat:pet', kind: 'studio' }),
+    session: createSession({ id: 'chat:pet', kind: 'chat' }),
     globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION,
     overlayOwner: 'Approval',
   });
@@ -138,7 +132,6 @@ test('status follows reducer-owned composer target and includes the active overl
     line(model, 'primary').segments.map((segment) => [segment.id, segment.value]),
     [
       ['connection', '就绪'],
-      ['composer-target', 'Chat'],
       ['overlay', 'Approval'],
       ['policy', '自动授权'],
     ],
@@ -149,7 +142,6 @@ test('status notices and connection remain separate on the primary line', () => 
   const model = buildStatusBarModel({
     statusNotice: '出错，已恢复输入',
     connectionStatus: '就绪',
-    composerTarget: 'chat',
     session: createSession({ id: 'chat:pet' }),
     globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
   });
@@ -168,7 +160,6 @@ test('formatted lines preserve semantic tones and mute the session line', () => 
   const model = buildStatusBarModel({
     activityStatus: '正在思考 · 2s',
     connectionStatus: '未连接',
-    composerTarget: 'chat',
     session: createSession({ id: 'chat:pet' }),
     globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
   });
@@ -184,7 +175,7 @@ test('formatted lines preserve semantic tones and mute the session line', () => 
     [
       ['activity', 'warning'],
       ['connection', 'danger'],
-      ['composer-target', 'muted'],
+      ['policy', 'muted'],
     ],
   );
 });
@@ -201,7 +192,6 @@ test('retrying and failed connection states keep distinct tones', () => {
   for (const [connectionStatus, expectedTone] of cases) {
     const model = buildStatusBarModel({
       connectionStatus,
-      composerTarget: 'chat',
       session: createSession({ id: 'chat:pet' }),
       globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
     });
@@ -228,7 +218,6 @@ test('both status lines stay within narrow and wide CJK terminal widths', () => 
   const model = buildStatusBarModel({
     activityStatus: '正在调用能力或工具 · 12s',
     connectionStatus: '连接断开，10s 后重连 1/5',
-    composerTarget: 'studio',
     session,
     globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
     overlayOwner: 'Approval',

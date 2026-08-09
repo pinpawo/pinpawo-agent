@@ -9,9 +9,9 @@ import {
   type StudioDueRunStoreInput,
   type StudioDueRunStoreOptions,
   type StudioDueRunStoreTrace,
-} from './dueRunScheduler';
-import type { StudioDueRunRecord, StudioDueRunStatus } from './dueRunContract';
-import { buildStudioRunIdentity } from './types';
+} from '@pinpawo/studio';
+import type { StudioDueRunRecord, StudioDueRunStatus } from '@pinpawo/studio';
+import { buildStudioRunIdentity } from '@pinpawo/studio';
 
 type DueRunStoreRow = Omit<StudioDueRunRecord, 'identity'> & {
   identity?: {

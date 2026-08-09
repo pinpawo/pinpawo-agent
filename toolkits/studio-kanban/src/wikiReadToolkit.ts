@@ -9,7 +9,7 @@ import {
   type AgentToolkit,
   type NamedStructuredTool,
   type ToolOperationMetadata,
-} from '../../types/toolkit';
+} from '@pinpawo/pet-agent';
 
 const execFileAsync = promisify(execFile);
 

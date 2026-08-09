@@ -5,14 +5,15 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { createStudioOrchestrator } from './createStudioOrchestrator';
-import { InMemoryStudioRunQueueStore } from './runQueueStore';
+import { InMemoryStudioRunQueueStore } from './runQueuePort';
+import type { WikiCurator } from './wikiPort';
 import type {
   PetAgentRuntime,
   PetAgentRuntimeDescriptor,
   PetAgentRuntimeInvokeInput,
   PetAgentRuntimeInvokeResult,
 } from './types';
-import type { AgentCapability } from '../../types/capability';
+import type { AgentCapability } from '@pinpawo/pet-agent';
 import type {
   StudioOrchestrator,
   StudioRunEvent,
@@ -96,6 +97,18 @@ function runtime(params: {
 
 function plannerRuntime(petId = 'planner'): PetAgentRuntime {
   return runtime({ petId, name: 'Planner', reply: 'planned' });
+}
+
+/**
+ * 记录型 curator:报告一次变更但不落盘。
+ * 编排核心只依赖 WikiCurator 接口,真正的文件实现住在 toolkit 层。
+ */
+function recordingCurator(): WikiCurator {
+  return {
+    curate: async ({ task }) => ({
+      changedPaths: [`sources/${task.petRunId}-${task.petId}.md`, 'index.md'],
+    }),
+  };
 }
 
 async function makeWikiTempDir(prefix: string): Promise<string> {
@@ -232,6 +245,7 @@ test('studio orchestrator emits onTurnEvent lifecycle for happy path', async () 
   const events: StudioTurnEvent[] = [];
 
   const orchestrator = createStudioOrchestrator({
+    curator: recordingCurator(),
     studioId: 'studio-1',
     ownerUserId: 'user-1',
     wikiBaseDir,
@@ -314,44 +328,6 @@ test('studio orchestrator emits turn_started then turn_finished(stopped) when pl
   assert.deepEqual(types, ['turn_started', 'turn_finished']);
   const finished = events[1] as Extract<StudioTurnEvent, { type: 'turn_finished' }>;
   assert.equal(finished.outcome, 'stopped');
-});
-
-test('wiki curator writes per-task source file and updates index', async () => {
-  const wikiBaseDir = await makeWikiTempDir('studio-wiki-');
-  const orchestrator = createStudioOrchestrator({
-    studioId: 'studio-1',
-    ownerUserId: 'user-1',
-    wikiBaseDir,
-    plannerPetId: 'planner',
-    agents: [
-      plannerRuntime(),
-      runtime({ petId: 'script', name: 'Script Pet', reply: 'script outline content' }),
-    ],
-  });
-
-  const result = await runStudio(orchestrator, {
-    userRequest: '写脚本',
-    conversationId: 'conv-wiki-1',
-    plan: {
-      tasks: [
-        {
-          petId: 'script',
-          goal: '写视频脚本结构',
-          acceptanceCriteria: [],
-        },
-      ],
-    },
-  });
-
-  assert.equal(result.outcome.outcome, 'done');
-  const wikiRoot = path.join(wikiBaseDir, 'conv', 'conv-wiki-1', 'wiki');
-  const petRunId = result.snapshot.tasks[0].petRunId;
-  assert.ok(petRunId);
-  const sourcePath = path.join(wikiRoot, 'sources', `${petRunId}-script.md`);
-  const sourceContent = await fs.readFile(sourcePath, 'utf8');
-  assert.match(sourceContent, /script outline content/);
-  const indexContent = await fs.readFile(path.join(wikiRoot, 'index.md'), 'utf8');
-  assert.match(indexContent, new RegExp(petRunId));
 });
 
 test('studio orchestrator surfaces failed pet as task failed and stops when no result available', async () => {
@@ -1138,6 +1114,7 @@ test('studio submitRequest accepts immediately and exposes run state through get
   };
 
   const orchestrator = createStudioOrchestrator({
+    curator: recordingCurator(),
     studioId: 'studio-1',
     ownerUserId: 'user-1',
     wikiBaseDir,
@@ -1235,6 +1212,7 @@ test('studio submitRequest and subscribe expose the canonical async run API', as
   const events: StudioRunEvent[] = [];
 
   const orchestrator = createStudioOrchestrator({
+    curator: recordingCurator(),
     studioId: 'studio-1',
     ownerUserId: 'user-1',
     wikiBaseDir,

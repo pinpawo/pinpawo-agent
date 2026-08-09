@@ -17,7 +17,7 @@ test('startup config snapshot prints non-sensitive runtime configuration', () =>
     process.env.LANGSMITH_API_KEY = 'secret-key-value';
 
     const text = formatStartupConfigSnapshot(buildStartupConfigSnapshot({
-      mode: 'run',
+      mode: 'server',
       workdir: '/tmp/workdir',
       actorId: 'pet-1',
       actorName: '小白',

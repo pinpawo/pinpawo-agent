@@ -39,15 +39,9 @@ export const TUI_TEXT = {
   approvalApproveExecution: '批准执行',
   approvalContinue: '继续',
   approvalStopHere: '停在这里',
-  studioExited: '已退出 Studio 模式',
-  studioExitedToChat: '已退出 Studio 模式，回到单 pet chat',
-  studioNotActive: '当前不在 Studio 模式',
-  studioModeEntered: (conversationId: string) =>
-    `已进入 Studio 模式 (conversation=${conversationId.slice(0, 8)})。后续输入都属于此会话，输入 /chat 或 /studio 退出。`,
   disconnectedCannotSend: '未连接，无法发送',
   busyCannotSend: '当前任务仍在进行中，按 Ctrl+C 或 Esc 打断',
   interruptStillPending: '仍在停止，agent 尚未确认；输入会保持锁定。',
-  studioUserMessage: (userRequest: string) => `[studio] ${userRequest}`,
   reviewDisconnectedCannotSubmit: '未连接，无法提交确认。',
   interruptedStatus: '已打断',
   newSessionCreated: '已创建新会话',
@@ -138,22 +132,9 @@ export const TUI_TEXT = {
   },
   interrupted: '[interrupted]',
   errorLine: (message: string) => `出错：${message}`,
-  studioEmptyTurn: (outcome: 'done' | 'stopped') => `[studio] turn ${outcome} (无最终输出)`,
-  studioStoppedReason: (reason: string) => `[studio] stopped: ${reason}`,
-  studioErrorLine: (message: string) => `[studio 出错] ${message}`,
-  studioErrorRecovered: 'Studio 出错，已恢复输入',
   operationStarted: '开始',
   operationRunning: '进行中',
   operationFailed: '失败',
   operationInterrupted: '中断',
   operationCompleted: '完成',
-  studioProgressTasksQueued: (taskCount: number) => `[studio] tasks queued：${taskCount} 项`,
-  studioProgressTaskStarted: (taskIndex: string | number, petId: string) =>
-    `[studio] task[#${taskIndex}] → pet:${petId}`,
-  studioProgressTaskStatusChanged: (taskIndex: string | number, status: string) =>
-    `[studio] task[#${taskIndex}] → ${status}`,
-  studioProgressWikiUpdated: (changedCount: number) => `[studio] wiki 更新 ${changedCount} 项`,
-  studioProgressTaskFinished: (petRunId: string, status: string) =>
-    `[studio] pet run ${petRunId} → ${status}`,
-  studioProgressUnknown: (type: string) => `[studio] event: ${type}`,
 } as const;

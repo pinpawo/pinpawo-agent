@@ -1,21 +1,19 @@
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import { Command } from '@langchain/langgraph';
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
 
-import type { AgentCapability } from '../../types/capability';
-import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent';
+import type { AgentCapability } from '@pinpawo/pet-agent';
+import type { AgentActor, AgentExecution, AgentModels } from '@pinpawo/pet-agent';
 import {
   filterAvailableToolkits,
   type AgentToolkit,
-} from '../../types/toolkit';
-import { ToolkitRuntimeManager } from '../orchestrator/toolkitRuntime';
+} from '@pinpawo/pet-agent';
+import { ToolkitRuntimeManager } from '@pinpawo/pet-agent';
 import type {
   PetAgentCapabilitySummary,
   PetAgentStartupMode,
   PetAgentStatus,
-} from '../../types/studio';
+} from './petAgentTypes';
 import {
   buildOrchestratorRunInput,
   createOrchestratorGraph,
@@ -23,8 +21,8 @@ import {
   formatExecutorCompilationIssues,
   type OrchestratorConfig,
   type OrchestratorGraph,
-} from '../createAgentRuntime';
-import { isHumanReviewInterruptPayload } from '../orchestrator/review/reviewSpec';
+} from '@pinpawo/pet-agent';
+import { isHumanReviewInterruptPayload } from '@pinpawo/pet-agent';
 import type {
   HumanReviewer,
   HumanReviewerRequest,
@@ -33,11 +31,7 @@ import type {
   PetAgentRuntimeInvokeInput,
   PetAgentRuntimeInvokeResult,
 } from './types';
-import {
-  createWikiReadCapability,
-  WIKI_READ_CAPABILITY_NAME,
-} from './wikiReadCapability';
-import { createWikiReadToolkit } from './wikiReadToolkit';
+import type { StudioWikiAccess } from './wikiPort';
 
 export type PetAgentRuntimeConfig = {
   models: AgentModels;
@@ -66,6 +60,11 @@ export type PetAgentRuntimeConfig = {
   subagentGenerationReserveTokens?: OrchestratorConfig['subagentGenerationReserveTokens'];
   /** Host-owned when a process has a durable Toolkit runtime lifecycle. */
   toolkitRuntimeManager?: ToolkitRuntimeManager;
+  /**
+   * 注入的 wiki 访问实现。不提供时 pet 不装备 wiki 检索工具,
+   * 也不注入知识库 system prompt。
+   */
+  wikiAccess?: StudioWikiAccess;
 };
 
 function buildCapabilitySummaries(config: PetAgentRuntimeConfig): PetAgentCapabilitySummary[] {
@@ -107,17 +106,15 @@ function canInvokeStatus(status: PetAgentStatus): boolean {
 }
 
 /**
- * Wiki middleware:读取 {wikiRoot}/index.md 并构造 system prompt 片段。
- * 缺失或读不到则降级为只列目录路径,不抛错。
+ * Wiki middleware:通过注入的 wiki access 读取索引并构造 system prompt 片段。
+ * 读不到则降级为只列检索工具,不抛错。
  */
-async function buildWikiSystemPrompt(wikiRoot: string): Promise<string> {
-  const indexPath = path.join(wikiRoot, 'index.md');
-  let indexContent: string;
-  try {
-    indexContent = await fs.readFile(indexPath, 'utf8');
-  } catch {
-    indexContent = '(知识库为空,尚未生成 index.md)';
-  }
+async function buildWikiSystemPrompt(
+  wikiRoot: string,
+  wikiAccess: StudioWikiAccess,
+): Promise<string> {
+  const indexContent = (await wikiAccess.readIndex(wikiRoot))
+    ?? '(知识库为空,尚未生成 index.md)';
   return [
     '你可以访问一个共享知识库,根目录已通过 wiki_read 工具配置好。',
     '下面是知识库的当前索引:',
@@ -130,10 +127,14 @@ async function buildWikiSystemPrompt(wikiRoot: string): Promise<string> {
   ].join('\n');
 }
 
-async function buildInvokeMessages(brief: string, wikiRoot: string | undefined): Promise<BaseMessage[]> {
+async function buildInvokeMessages(
+  brief: string,
+  wikiRoot: string | undefined,
+  wikiAccess: StudioWikiAccess | undefined,
+): Promise<BaseMessage[]> {
   const messages: BaseMessage[] = [];
-  if (wikiRoot) {
-    const wikiPrompt = await buildWikiSystemPrompt(wikiRoot);
+  if (wikiRoot && wikiAccess) {
+    const wikiPrompt = await buildWikiSystemPrompt(wikiRoot, wikiAccess);
     messages.push(new SystemMessage(wikiPrompt));
   }
   messages.push(new HumanMessage(brief));
@@ -177,11 +178,13 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
       throw new Error(`Pet agent "${config.actor.petId}" is not dispatchable: ${status}`);
     }
 
-    const messages = await buildInvokeMessages(input.brief, input.wikiRoot);
+    const messages = await buildInvokeMessages(input.brief, input.wikiRoot, config.wikiAccess);
     const toolkitDefinitions = [
       ...(config.toolkits ?? []),
       ...(input.toolkits ?? []),
-      ...(input.wikiRoot ? [createWikiReadToolkit(input.wikiRoot)] : []),
+      ...(input.wikiRoot && config.wikiAccess
+        ? [config.wikiAccess.createReadToolkit(input.wikiRoot)]
+        : []),
     ];
     await toolkitRuntimeManager?.start(toolkitDefinitions, { signal: input.signal });
     const toolkits = await filterAvailableToolkits(toolkitDefinitions);
@@ -189,11 +192,14 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
       ...(config.capabilities ?? []),
       ...(input.extraCapabilities ?? []),
     ];
-    const capabilities = input.wikiRoot
+    const wikiCapability = input.wikiRoot && config.wikiAccess
       && !configuredCapabilities.some((capability) =>
-        capability.name === WIKI_READ_CAPABILITY_NAME
+        capability.name === config.wikiAccess!.readCapabilityName
           || capability.uses.includes('wiki_read'))
-      ? [...configuredCapabilities, createWikiReadCapability()]
+      ? config.wikiAccess.createReadCapability()
+      : null;
+    const capabilities = wikiCapability
+      ? [...configuredCapabilities, wikiCapability]
       : configuredCapabilities;
     const registry = compileAgentRegistry({
       toolkits,

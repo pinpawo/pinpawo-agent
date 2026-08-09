@@ -1,141 +1,24 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-import type {
-  StudioRun,
-  StudioRunSnapshot,
-  StudioRunStatus,
-  StudioTaskQueueItem,
-} from './types';
-
-export type StudioRunQueueStoreRecoveryOptions = {
-  now?: string;
-};
-
-export type StudioRunQueueStore = {
-  clear(): void;
-  save(snapshot: StudioRunSnapshot): StudioRunSnapshot;
-  get(runId: string): StudioRunSnapshot | null;
-  list(): StudioRunSnapshot[];
-  recoverOpenRuns(options?: StudioRunQueueStoreRecoveryOptions): StudioRunSnapshot[];
-};
+import {
+  InMemoryStudioRunQueueStore,
+  OPEN_RUN_STATUSES,
+  cloneSnapshot,
+  recoverSnapshot,
+  runFromSnapshot,
+  snapshotFromRun,
+  sortSnapshots,
+  type StudioRunQueueStore,
+  type StudioRunQueueStoreRecoveryOptions,
+  type StudioRunQueueStoreState,
+  type StudioRun,
+  type StudioRunSnapshot,
+  type StudioRunStatus,
+  type StudioTaskQueueItem,
+} from '@pinpawo/studio';
 
 type StoredStudioRun = StudioRun;
-
-type StudioRunQueueStoreState = {
-  runs: StoredStudioRun[];
-  tasks: StudioTaskQueueItem[];
-};
-
-const OPEN_RUN_STATUSES = new Set<StudioRunStatus>(['planning', 'running', 'blocked']);
-
-function cloneSnapshot(snapshot: StudioRunSnapshot): StudioRunSnapshot {
-  return {
-    runId: snapshot.runId,
-    conversationId: snapshot.conversationId,
-    userRequest: snapshot.userRequest,
-    status: snapshot.status,
-    finalTaskIndex: snapshot.finalTaskIndex,
-    finalPetRunId: snapshot.finalPetRunId,
-    createdAt: snapshot.createdAt,
-    updatedAt: snapshot.updatedAt,
-    tasks: snapshot.tasks
-      .map((task) => ({ ...task }))
-      .sort((a, b) => a.taskIndex - b.taskIndex),
-  };
-}
-
-function runFromSnapshot(snapshot: StudioRunSnapshot): StoredStudioRun {
-  const { tasks: _tasks, ...run } = snapshot;
-  return run;
-}
-
-function snapshotFromRun(run: StoredStudioRun, tasks: StudioTaskQueueItem[]): StudioRunSnapshot {
-  return cloneSnapshot({
-    ...run,
-    tasks: tasks.filter((task) => task.runId === run.runId),
-  });
-}
-
-function sortSnapshots(snapshots: StudioRunSnapshot[]): StudioRunSnapshot[] {
-  return snapshots.sort((a, b) => {
-    const byCreatedAt = a.createdAt.localeCompare(b.createdAt);
-    if (byCreatedAt !== 0) return byCreatedAt;
-    return a.runId.localeCompare(b.runId);
-  });
-}
-
-function recoverSnapshot(snapshot: StudioRunSnapshot, now: string): StudioRunSnapshot {
-  if (!OPEN_RUN_STATUSES.has(snapshot.status)) {
-    return cloneSnapshot(snapshot);
-  }
-
-  let hasRecoveredRunningTask = false;
-  const tasks = snapshot.tasks.map((task) => {
-    if (task.status !== 'running') {
-      return { ...task };
-    }
-    hasRecoveredRunningTask = true;
-    return {
-      ...task,
-      status: 'failed' as const,
-      finishedAt: task.finishedAt ?? now,
-      errorMessage: task.errorMessage ?? 'recovered_running_task_requires_reconcile',
-    };
-  });
-
-  return {
-    ...snapshot,
-    status: hasRecoveredRunningTask ? 'blocked' : snapshot.status,
-    updatedAt: hasRecoveredRunningTask ? now : snapshot.updatedAt,
-    tasks,
-  };
-}
-
-export class InMemoryStudioRunQueueStore implements StudioRunQueueStore {
-  private readonly runs = new Map<string, StoredStudioRun>();
-  private readonly tasksByRunId = new Map<string, StudioTaskQueueItem[]>();
-
-  clear(): void {
-    this.runs.clear();
-    this.tasksByRunId.clear();
-  }
-
-  save(snapshot: StudioRunSnapshot): StudioRunSnapshot {
-    const next = cloneSnapshot(snapshot);
-    this.runs.set(next.runId, runFromSnapshot(next));
-    this.tasksByRunId.set(next.runId, next.tasks.map((task) => ({ ...task })));
-    return this.get(next.runId) ?? next;
-  }
-
-  get(runId: string): StudioRunSnapshot | null {
-    const run = this.runs.get(runId);
-    if (!run) {
-      return null;
-    }
-    return snapshotFromRun(run, this.tasksByRunId.get(runId) ?? []);
-  }
-
-  list(): StudioRunSnapshot[] {
-    return sortSnapshots(Array.from(this.runs.keys())
-      .map((runId) => this.get(runId))
-      .filter((snapshot): snapshot is StudioRunSnapshot => Boolean(snapshot)));
-  }
-
-  recoverOpenRuns(options: StudioRunQueueStoreRecoveryOptions = {}): StudioRunSnapshot[] {
-    const now = options.now ?? new Date().toISOString();
-    const recovered: StudioRunSnapshot[] = [];
-    for (const snapshot of this.list()) {
-      if (!OPEN_RUN_STATUSES.has(snapshot.status)) {
-        continue;
-      }
-      const next = recoverSnapshot(snapshot, now);
-      this.save(next);
-      recovered.push(next);
-    }
-    return recovered;
-  }
-}
 
 export class FileStudioRunQueueStore implements StudioRunQueueStore {
   private readonly runtimeStore = new InMemoryStudioRunQueueStore();

@@ -8,7 +8,9 @@ import {
   type AgentToolkit,
   ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
-import { FileStudioDueRunStore } from '@pinpawo/pet-agent';
+import {
+  FileStudioDueRunStore,
+} from '@pinpawo-toolkit/studio-kanban';
 import { collectPluginHooks, loadPlugins } from './pluginLoader';
 import type { LoadedUserCapability } from './capabilityLoader';
 import {
@@ -37,12 +39,14 @@ import { LocalServerStudioHandler } from './localServerStudioHandler';
 import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
 import { LocalStudioDueRunScheduler } from './localStudioDueRunScheduler';
 import type { LocalServerDeps } from './localServerTypes';
+import { DEFAULT_SERVER_MODE, type ServerMode } from './serverMode';
 
 const WS_RECONNECT_DELAY_MS = 10000;
 const WS_PING_INTERVAL_MS = 30000;
 
 export class LocalAgentRuntime {
   private readonly runtimeConfig: LocalAgentRuntimeConfig;
+  private readonly serverMode: ServerMode;
   private stopRequested = false;
   private readonly stopController = new AbortController();
   private actorId: string | null = null;
@@ -69,8 +73,12 @@ export class LocalAgentRuntime {
   private readonly appChatHandler: LocalAgentAppChatHandler;
   private legacyStateNoticeReported = false;
 
-  constructor(runtimeConfig: LocalAgentRuntimeConfig = buildLocalAgentRuntimeConfig()) {
+  constructor(
+    runtimeConfig: LocalAgentRuntimeConfig = buildLocalAgentRuntimeConfig(),
+    serverMode: ServerMode = DEFAULT_SERVER_MODE,
+  ) {
     this.runtimeConfig = runtimeConfig;
+    this.serverMode = serverMode;
     setLocalToolsWorkdir(runtimeConfig.workdir);
     this.capabilityRegistry = new LocalAgentCapabilityRegistry({
       capabilityArtifactRoot: runtimeConfig.capabilityArtifactRoot,
@@ -123,6 +131,7 @@ export class LocalAgentRuntime {
 
   private buildLocalServerDeps(): LocalServerDeps {
     return {
+      serverMode: this.serverMode,
       actorId: this.getActorId(),
       actorName: this.actorName ?? undefined,
       modelProfiles: this.getModelProfiles(),

@@ -6,11 +6,11 @@ import { isCommand } from '@langchain/langgraph';
 import { z } from 'zod';
 
 import { createPetAgentRuntime } from './createPetAgentRuntime';
-import type { OrchestratorGraph } from '../createAgentRuntime';
-import { ToolkitRuntimeManager } from '../orchestrator/toolkitRuntime';
-import type { AgentActor, AgentModels } from '../../types/agent';
-import { defineInstructionDocument } from '../../types/capability';
-import type { NamedStructuredTool } from '../../types/toolkit';
+import type { OrchestratorGraph } from '@pinpawo/pet-agent';
+import { ToolkitRuntimeManager } from '@pinpawo/pet-agent';
+import type { AgentActor, AgentModels } from '@pinpawo/pet-agent';
+import { defineInstructionDocument } from '@pinpawo/pet-agent';
+import type { NamedStructuredTool } from '@pinpawo/pet-agent';
 import type { HumanReviewerRequest } from './types';
 
 function fakeModels(): AgentModels {
@@ -380,84 +380,6 @@ test('humanReviewer: malformed review interrupt is not treated as HITL', async (
   const result = await runtime.invoke({ brief: 'go' });
   assert.equal(reviewerCalled, false);
   assert.equal(result.reply, '');
-});
-
-test('pet runtime passes wiki read tools and operation metadata when wikiRoot is provided', async () => {
-  const { graph, calls } = makeStubGraph([
-    { messages: [new AIMessage('done')] },
-  ]);
-
-  const pluginTool = mockTool('plugin_tool');
-  const invokeTool = mockTool('invoke_tool');
-  const runtime = createPetAgentRuntime({
-    models: fakeModels(),
-    actor: fakeActor(),
-    graph,
-    toolkits: [{
-      name: 'plugin_toolkit',
-      description: 'plugin toolkit',
-      tools: [{
-        tool: pluginTool,
-        operation: {
-          title: 'Plugin Tool',
-        },
-      }],
-    }],
-  });
-
-  const result = await runtime.invoke({
-    brief: 'read wiki',
-    wikiRoot: '/tmp/pinpawo-test-wiki',
-    toolkits: [{
-      name: 'invoke_toolkit',
-      description: 'invoke toolkit',
-      tools: [{
-        tool: invokeTool,
-        operation: {
-          title: 'Invoke Tool',
-        },
-      }],
-    }],
-  });
-
-  assert.equal(result.reply, 'done');
-  const configurable = (calls[0]?.options as {
-    configurable?: {
-      registry?: {
-        toolkits?: Array<{
-          name?: string;
-          tools?: Array<{ tool?: { name?: string }; operation?: { title?: string } }>;
-        }>;
-        capabilities?: Array<{
-          capability?: { name?: string };
-          toolkits?: Array<{ name?: string }>;
-        }>;
-      };
-    };
-  } | undefined)?.configurable;
-  assert.ok(configurable, 'graph should receive configurable');
-  const wikiToolkit = configurable.registry?.toolkits?.find((toolkit) => toolkit.name === 'wiki_read');
-  const pluginToolkit = configurable.registry?.toolkits?.find((toolkit) => toolkit.name === 'plugin_toolkit');
-  const invokeToolkit = configurable.registry?.toolkits?.find((toolkit) => toolkit.name === 'invoke_toolkit');
-  assert.ok(pluginToolkit, 'config toolkits should be forwarded to runtime invoke');
-  assert.equal(pluginToolkit.tools?.[0]?.operation?.title, 'Plugin Tool');
-  assert.ok(invokeToolkit, 'invoke toolkits should be forwarded to runtime invoke');
-  assert.equal(invokeToolkit.tools?.[0]?.operation?.title, 'Invoke Tool');
-  assert.ok(wikiToolkit, 'wikiRoot should install wiki_read as a toolkit');
-  assert.deepEqual(
-    configurable.registry?.capabilities
-      ?.find(({ capability }) => capability?.name === 'wiki')
-      ?.toolkits?.map((toolkit) => toolkit.name),
-    ['wiki_read'],
-  );
-  assert.equal(
-    wikiToolkit.tools?.find((item) => item.tool?.name === 'wiki_read_cat')?.operation?.title,
-    '读取知识库文件',
-  );
-  assert.equal(
-    wikiToolkit.tools?.find((item) => item.tool?.name === 'wiki_read_grep')?.operation?.title,
-    '搜索知识库内容',
-  );
 });
 
 test('pet runtime does not replace an explicitly configured wiki Capability', async () => {

@@ -1,0 +1,26 @@
+{
+  "name": "@pinpawo-toolkit/studio-kanban",
+  "version": "0.1.0",
+  "private": true,
+  "description": "File-backed kanban for Studio: run queue persistence and the shared wiki",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx/esm --test $(find src -name '*.test.ts' | sort)"
+  },
+  "dependencies": {
+    "@langchain/core": "^1.2.1",
+    "@pinpawo/pet-agent": "*",
+    "@pinpawo/studio": "*",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

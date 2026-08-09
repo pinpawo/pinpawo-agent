@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
-import type { StudioAgent, StudioContext } from '../../types/studio';
+import type { StudioAgent, StudioContext } from './petAgentTypes';
 import { createPlanCapability, createPlanToolkit } from './planCapability';
 import type { StudioPlanPetListItem } from './planCapability';
 import type {
@@ -23,8 +23,8 @@ import type {
   StudioTurnOutcome,
   StudioTurnResult,
 } from './types';
-import { createSkeletonWikiCurator, ensureWikiSkeleton } from './wikiCurator';
-import type { WikiCurator } from './wikiCurator';
+import { createNoopWikiCurator, noopWikiSkeletonInitializer } from './wikiPort';
+import type { WikiCurator } from './wikiPort';
 
 const DEFAULT_MAX_ITERATION_COUNT = 32;
 const DEFAULT_MAX_RETRY_PER_TASK = 2;
@@ -319,7 +319,8 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
 
   const maxIterationCount = config.maxIterationCount ?? DEFAULT_MAX_ITERATION_COUNT;
   const maxRetryPerTask = config.maxRetryPerTask ?? DEFAULT_MAX_RETRY_PER_TASK;
-  const curator: WikiCurator = config.curator ?? createSkeletonWikiCurator();
+  const curator: WikiCurator = config.curator ?? createNoopWikiCurator();
+  const ensureWikiSkeleton = config.ensureWikiSkeleton ?? noopWikiSkeletonInitializer;
   const runQueueStore = config.runQueueStore;
   const queue: StudioQueueItem[] = [];
   const runs = new Map<string, StudioRunRecord>();

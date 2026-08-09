@@ -1,8 +1,6 @@
 export type TuiCommandName =
   | 'help'
   | 'quit'
-  | 'chat'
-  | 'studio'
   | 'new'
   | 'model'
   | 'policy'
@@ -54,18 +52,6 @@ const COMMANDS: TuiCommandDefinition[] = [
     usage: '/model',
     description: '查看并切换当前会话的模型',
     helpText: '/model 选择模型',
-  },
-  {
-    name: 'studio',
-    usage: '/studio [任务]',
-    description: '进入 Studio 模式或提交 Studio 任务',
-    helpText: '/studio [任务] 进入 Studio 模式',
-  },
-  {
-    name: 'chat',
-    usage: '/chat',
-    description: '退出 Studio 模式',
-    helpText: '/chat 退出 Studio',
   },
   {
     name: 'policy',

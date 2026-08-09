@@ -4,11 +4,9 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import {
-  FileStudioRunQueueStore,
-  InMemoryStudioRunQueueStore,
-} from './runQueueStore';
-import type { StudioRunSnapshot } from './types';
+import { InMemoryStudioRunQueueStore } from '@pinpawo/studio';
+import { FileStudioRunQueueStore } from './runQueueStore';
+import type { StudioRunSnapshot } from '@pinpawo/studio';
 
 async function mkTempDir(prefix: string): Promise<string> {
   return await fs.mkdtemp(path.join(os.tmpdir(), prefix));

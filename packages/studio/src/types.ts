@@ -1,17 +1,17 @@
-import type { AgentActor, AgentExecution } from '../../types/agent';
-import type { AgentCapability } from '../../types/capability';
-import type { AgentToolkit } from '../../types/toolkit';
+import type { AgentActor, AgentExecution } from '@pinpawo/pet-agent';
+import type { AgentCapability } from '@pinpawo/pet-agent';
+import type { AgentToolkit } from '@pinpawo/pet-agent';
 import type {
   PetAgentCapabilitySummary,
   PetAgentStartupMode,
   PetAgentStatus,
   StudioContext,
-} from '../../types/studio';
+} from './petAgentTypes';
 import type {
   HumanReviewInterruptPayload,
   ReviewResponse,
-} from '../orchestrator/review/reviewSpec';
-import type { ActiveDelegationTransition } from '../orchestrator/types';
+} from '@pinpawo/pet-agent';
+import type { ActiveDelegationTransition } from '@pinpawo/pet-agent';
 
 export type HumanReviewerRequest = HumanReviewInterruptPayload;
 
@@ -236,17 +236,21 @@ export type StudioOrchestratorConfig = {
    */
   workdir?: string;
   /**
-   * 可选注入 curator。默认使用 skeleton curator(仅落档原文 + index 追加)。
+   * 可选注入 curator。默认 no-op(不落盘);宿主注入真正的实现。
    * production 建议传入 `createLLMWikiCurator({ models, promptProvider })`,
    * promptProvider 可用 `defaultPromptProvider()` / `fileReadPromptProvider(absPath)`
    * 预设,或传任意 `() => string | Promise<string>` 自定义来源。
    */
-  curator?: import('./wikiCurator').WikiCurator;
+  curator?: import('./wikiPort').WikiCurator;
+  /**
+   * 可选注入:开 run 前初始化 wiki 存储骨架。默认 no-op,由宿主注入实现。
+   */
+  ensureWikiSkeleton?: import('./wikiPort').WikiSkeletonInitializer;
   /**
    * 可选注入 Studio run/queue store。提供后 orchestrator 会保存 run snapshot,
    * 并在创建时恢复开放 run。due-run scheduler store 不应复用为这个 store。
    */
-  runQueueStore?: import('./runQueueStore').StudioRunQueueStore;
+  runQueueStore?: import('./runQueuePort').StudioRunQueueStore;
   /**
    * 是否在 orchestrator 创建时从 runQueueStore 恢复 open runs。
    * 默认 true。local-agent 这类 per-turn fresh orchestrator 的宿主应在同一

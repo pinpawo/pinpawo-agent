@@ -5,14 +5,14 @@ import {
   defineCapability,
   defineInstructionDocument,
   type AgentCapability,
-} from '../../types/capability';
-import type { PetAgentStatus } from '../../types/studio';
-import { defineToolkit } from '../../types/toolkit';
+} from '@pinpawo/pet-agent';
+import type { PetAgentStatus } from './petAgentTypes';
+import { defineToolkit } from '@pinpawo/pet-agent';
 import type {
   AgentToolkit,
   NamedStructuredTool,
   ToolOperationMetadata,
-} from '../../types/toolkit';
+} from '@pinpawo/pet-agent';
 import type { StudioPlannerTaskInput } from './types';
 
 /**

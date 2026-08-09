@@ -17,7 +17,9 @@ import {
   type BuildStudioForTurn,
   type StudioRunServiceResult,
 } from './studioRunService';
-import type { StudioTurnEvent } from '@pinpawo/pet-agent';
+import {
+  StudioTurnEvent,
+} from '@pinpawo/studio';
 import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 
 type InflightRequest = InflightOperationRun;

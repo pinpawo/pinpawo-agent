@@ -3,39 +3,18 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 
-import type { AgentModels } from '../../types/agent';
+import type { AgentModels } from '@pinpawo/pet-agent';
 import {
   invokeStructuredOutput,
   type StructuredOutputAutoRepairConfig,
   type StructuredOutputMethod,
-} from '../../utils/structuredOutput';
-import type { StudioTaskQueueItem } from './types';
-
-export type StudioWikiTaskSource = StudioTaskQueueItem & {
-  resultText?: string;
-};
-
-export type WikiCurateInput = {
-  wikiRoot: string;
-  task: StudioWikiTaskSource;
-};
-
-export type WikiCurateResult = {
-  changedPaths: string[];
-};
-
-/**
- * Curator 接口:接收一次 worker task completion 输入,产出 wiki 更新。
- *
- * - skeleton 实现:仅做原始素材落档 + index 追加。
- * - LLM 实现:用 LLM 整理 raw source → topic markdown + 重写 index。
- *
- * StudioOrchestrator 默认使用 skeleton;production / 集成环境通过 config
- * 注入 LLM curator。
- */
-export type WikiCurator = {
-  curate: (input: WikiCurateInput) => Promise<WikiCurateResult>;
-};
+} from '@pinpawo/pet-agent';
+import type {
+  StudioWikiTaskSource,
+  WikiCurateInput,
+  WikiCurateResult,
+  WikiCurator,
+} from '@pinpawo/studio';
 
 /* ─────────────── filesystem helpers ─────────────── */
 

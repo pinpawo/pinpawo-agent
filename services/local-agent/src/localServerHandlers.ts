@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { FileStudioDueRunStore } from '@pinpawo/pet-agent';
+import { FileStudioDueRunStore } from '@pinpawo-toolkit/studio-kanban';
 import { DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL } from '@pinpawo/agent-contracts';
 import type { AgentLlmConfig } from './agentConfig';
 import { LocalAgentGraphService } from './agentGraphService';

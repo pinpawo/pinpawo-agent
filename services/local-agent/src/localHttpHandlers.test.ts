@@ -277,6 +277,7 @@ test('capability rescan replaces frozen runtime capability snapshots', async () 
     },
   } as LoadedUserCapability;
   const runtimeDeps = createLocalServerRuntimeDepsStore({
+    serverMode: 'chat',
     actorId: 'pet-a',
     ...createTestModelServerDeps(),
     workdir: '/tmp/pinpawo-capability-rescan',
@@ -456,6 +457,7 @@ test('/capabilities attaches the cached reason for a known unavailable Toolkit',
     makeReq('/capabilities', 'Bearer secret'),
     res,
     {
+      serverMode: 'chat',
       actorId: 'pet-a',
       ...createTestModelServerDeps(),
       workdir: '/tmp/pinpawo-capability-unavailable-toolkit',
@@ -499,6 +501,7 @@ test('Toolkit refresh updates frozen runtime lists with copy-on-write', async ()
     availability: () => ({ available: true as const }),
   } as NonNullable<LocalServerDeps['localToolkits']>[number];
   const runtimeDeps = createLocalServerRuntimeDepsStore({
+    serverMode: 'chat',
     actorId: 'pet-a',
     ...createTestModelServerDeps(),
     workdir: '/tmp/pinpawo-capability-refresh',
@@ -537,6 +540,7 @@ test('Toolkit refresh can restore an unavailable plugin Toolkit', async () => {
     availability: () => ({ available: true as const }),
   } as NonNullable<LocalServerDeps['pluginToolkitDefinitions']>[number];
   const runtimeDeps = createLocalServerRuntimeDepsStore({
+    serverMode: 'chat',
     actorId: 'pet-a',
     ...createTestModelServerDeps(),
     workdir: '/tmp/pinpawo-plugin-toolkit-refresh',
@@ -579,6 +583,7 @@ test('handleLocalHttpRequest exposes canonical workdir Studio paths on runtime e
 
   const res = makeRes();
   assert.equal(handleLocalHttpRequest(makeReq('/runtime', 'Bearer secret'), res, {
+    serverMode: 'chat',
     actorId: 'pet-a',
     ...createTestModelServerDeps({ contextWindowTokens: 32000 }),
     workdir: `${workdir}-legacy`,
@@ -611,6 +616,7 @@ test('handleLocalHttpRequest exposes canonical workdir Studio paths on runtime e
   assert.equal(res.statusCode, 200);
   assert.deepEqual(JSON.parse(res.body), {
     local_agent_version: readLocalAgentPackageVersion(),
+    server_mode: 'chat',
     model_profile_id: 'test-profile',
     model_profile_label: 'Test profile',
     model_profile_available: true,

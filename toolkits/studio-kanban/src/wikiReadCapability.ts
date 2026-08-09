@@ -2,7 +2,7 @@ import {
   defineCapability,
   defineInstructionDocument,
   type AgentCapability,
-} from '../../types/capability';
+} from '@pinpawo/pet-agent';
 
 export const WIKI_READ_CAPABILITY_NAME = 'wiki';
 

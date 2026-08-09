@@ -1,11 +1,11 @@
 import {
   buildStudioRunIdentity,
   type StudioRunIdentity,
-} from '@pinpawo/pet-agent';
-import type {
+} from '@pinpawo/studio';
+import {
   StudioTurnEvent,
   StudioTurnResult,
-} from '@pinpawo/pet-agent';
+} from '@pinpawo/studio';
 import { getLocalServerWorkdir, type LocalServerDeps } from './localServerTypes';
 import {
   buildStudioForTurn,

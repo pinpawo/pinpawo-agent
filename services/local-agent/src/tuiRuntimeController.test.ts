@@ -24,8 +24,6 @@ function pendingReviewState(): TuiState {
       'interrupt-1': { actionId: 'interrupt-1', decisions: [] },
     },
     ui: {
-      composerTarget: 'chat',
-      studioConversationId: null,
       externalEditorOpen: false,
     },
     input: { text: '', cursorOffset: 0, focused: true, history: createComposerHistoryState() },
@@ -411,22 +409,13 @@ test('TuiRuntimeController keeps new runs gated after a review resolution was se
   assert.equal(actions.some((action) => action.type === 'run.start'), false);
 });
 
-test('TuiRuntimeController projects chat and studio runs only after transport accepts them', () => {
+test('TuiRuntimeController projects a chat run only after transport accepts it', () => {
   const chat = createController(idleState(), { sendResult: false });
   assert.equal(chat.controller.sendChatRequest('hello'), false);
   assert.equal(chat.actions.some((action) => action.type === 'run.start'), false);
 
-  const studio = createController(idleState(), { sendResult: false });
-  assert.equal(studio.controller.sendStudioRequest('investigate', 'studio-1'), false);
-  assert.equal(studio.actions.some((action) => action.type === 'run.start'), false);
-
   assert.equal(
     chat.actions.some((action) =>
-      action.type === 'message.appended' && action.message.text === '未连接，无法发送'),
-    true,
-  );
-  assert.equal(
-    studio.actions.some((action) =>
       action.type === 'message.appended' && action.message.text === '未连接，无法发送'),
     true,
   );

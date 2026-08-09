@@ -82,17 +82,6 @@ test('buildTuiActionsFromServerMessage normalizes displayable runtime events', (
     },
     {
       event: {
-        type: 'studio.progress' as const,
-        requestId: 'req-1',
-        event: {
-          type: 'tasks_queued',
-          taskCount: 2,
-        },
-      },
-      text: '[studio] tasks queued：2 项',
-    },
-    {
-      event: {
         type: 'error' as const,
         requestId: 'req-1',
         message: 'planner failed',
@@ -215,61 +204,26 @@ test('buildTuiActionsFromServerMessage maps control messages to TUI actions', ()
   );
 });
 
-test('buildTuiActionsFromServerMessage maps studio control messages', () => {
-  assert.deepEqual(
-    buildTuiActionsFromServerMessage({
-      type: 'studio_response',
+test('buildTuiActionsFromServerMessage ignores studio control messages', () => {
+  // 旧 Ink TUI 不再发起 Studio run(#561),这些回包不可达,不该进时间线。
+  for (const message of [
+    {
+      type: 'studio_response' as const,
       requestId: 'studio-1',
-      outcome: 'stopped',
+      outcome: 'stopped' as const,
       reply: '',
       reason: 'done enough',
-    }, {
-      now: 1000,
-      createMessage: messages(),
-    }),
-    {
-      actions: [{
-        type: 'run.finish',
-        requestId: 'studio-1',
-        messages: [{
-          id: 'message:cell-1',
-          createdAt: '2026-07-15T02:00:01.000Z',
-          role: 'system',
-          text: '[studio] turn stopped (无最终输出)',
-          requestId: 'studio-1',
-        }, {
-          id: 'message:cell-2',
-          createdAt: '2026-07-15T02:00:02.000Z',
-          role: 'system',
-          text: '[studio] stopped: done enough',
-          requestId: 'studio-1',
-        }],
-      }],
     },
-  );
-
-  assert.deepEqual(
-    buildTuiActionsFromServerMessage({
-      type: 'studio_error',
+    {
+      type: 'studio_error' as const,
       requestId: 'studio-2',
       message: 'planner failed',
-    }, {
-      now: 1000,
-      createMessage: messages(),
-    }),
-    {
-      actions: [{
-        type: 'run.finish',
-        requestId: 'studio-2',
-        messages: [{
-          id: 'message:cell-1',
-          createdAt: '2026-07-15T02:00:01.000Z',
-          role: 'system',
-          text: '[studio 出错] planner failed',
-          requestId: 'studio-2',
-        }],
-        statusNotice: 'Studio 出错，已恢复输入',
-      }],
     },
-  );
+  ]) {
+    assert.deepEqual(
+      buildTuiActionsFromServerMessage(message, { now: 1000, createMessage: messages() }),
+      { actions: [] },
+    );
+  }
 });
+

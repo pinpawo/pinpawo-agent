@@ -79,6 +79,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
   const runtimeConfig = buildLocalAgentRuntimeConfig(workdir);
   const graphFixture = createHostGraphFixture();
   const localServerHandlers = createLocalServerHandlers({
+    serverMode: 'chat',
     actorId: 'pet-host-integration',
     actorName: 'PinPawo',
     workdir,

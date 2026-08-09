@@ -2,7 +2,6 @@ import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 import type { AgentSessionMessageInput } from '@pinpawo/agent-session';
 import type { LocalAgentServerMessage } from '../localAgentProtocol';
 import {
-  formatStudioProgressEvent,
   formatSystemNoticeEvent,
 } from './render/eventText';
 import { TUI_TEXT } from './render/text';
@@ -80,41 +79,9 @@ export function buildTuiActionsFromServerMessage(
     };
   }
 
-  if (message.type === 'studio_response') {
-    const reply = message.reply.trim();
-    const messages = [options.createMessage({
-      role: reply ? 'assistant' : 'system',
-      text: reply || TUI_TEXT.studioEmptyTurn(message.outcome),
-      requestId: message.requestId,
-    })];
-    if (message.outcome === 'stopped' && message.reason) {
-      messages.push(options.createMessage({
-        role: 'system',
-        text: TUI_TEXT.studioStoppedReason(message.reason),
-        requestId: message.requestId,
-      }));
-    }
-    return {
-      actions: [{
-        type: 'run.finish',
-        requestId: message.requestId,
-        messages,
-      }],
-    };
-  }
-
-  return {
-    actions: [{
-      type: 'run.finish',
-      requestId: message.requestId,
-      messages: [options.createMessage({
-        role: 'system',
-        text: TUI_TEXT.studioErrorLine(message.message || 'studio error'),
-        requestId: message.requestId,
-      })],
-      statusNotice: TUI_TEXT.studioErrorRecovered,
-    }],
-  };
+  // 旧 Ink TUI 不再发起 Studio run(#561),因此这些回包不可达;
+  // 保留分支只为让类型收敛,不进时间线。
+  return { actions: [] };
 }
 
 function runtimeEventMessage(
@@ -124,16 +91,6 @@ function runtimeEventMessage(
   switch (event.type) {
     case 'system.notice': {
       const text = formatSystemNoticeEvent(event);
-      return text
-        ? createMessage({
-            role: 'system',
-            requestId: event.requestId,
-            text,
-          })
-        : undefined;
-    }
-    case 'studio.progress': {
-      const text = formatStudioProgressEvent(event);
       return text
         ? createMessage({
             role: 'system',

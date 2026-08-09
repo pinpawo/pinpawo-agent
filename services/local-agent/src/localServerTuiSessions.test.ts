@@ -306,6 +306,7 @@ test('LocalServerTuiSessionService rejects chat setup without a thread-scoped ar
 
   assert.throws(
     () => service.buildChatSetup({
+      serverMode: 'chat',
       actorId: 'pet-a',
       ...createTestModelServerDeps(),
       workdir: '/tmp/pinpawo-missing-artifact-store',
@@ -338,6 +339,7 @@ test('runtime config updates reach the next chat setup through the normalized de
     defaultModelProfileId: TEST_MODEL_PROFILE_ID,
   });
   const runtimeDeps = createLocalServerRuntimeDepsStore({
+    serverMode: 'chat',
     actorId: 'pet-a',
     modelProfiles: createTestModelProfiles({
       globalReviewPolicyMode: 'require_authorization',

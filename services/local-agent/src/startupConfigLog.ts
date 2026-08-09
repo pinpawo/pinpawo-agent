@@ -1,11 +1,14 @@
 import { getConfig } from './config';
+import type { ServerMode } from './serverMode';
 import {
   resolveModelProfile,
   summarizeModelProfile,
 } from './modelProfiles';
 
 export type StartupConfigSnapshot = {
-  mode: 'run' | 'tui';
+  mode: 'server' | 'tui';
+  /** #561 server primary mode; absent for launch surfaces that have no mode. */
+  serverMode?: ServerMode;
   workdir: string;
   actorId?: string;
   actorName?: string;
@@ -40,7 +43,8 @@ function readLangSmithTracingEnabled() {
 }
 
 export function buildStartupConfigSnapshot(params: {
-  mode: 'run' | 'tui';
+  mode: 'server' | 'tui';
+  serverMode?: ServerMode;
   workdir: string;
   actorId?: string;
   actorName?: string | null;
@@ -52,6 +56,7 @@ export function buildStartupConfigSnapshot(params: {
   );
   return {
     mode: params.mode,
+    ...(params.serverMode ? { serverMode: params.serverMode } : {}),
     workdir: params.workdir,
     ...(params.actorId ? { actorId: params.actorId } : {}),
     ...(params.actorName ? { actorName: params.actorName } : {}),
@@ -77,6 +82,7 @@ export function formatStartupConfigSnapshot(snapshot: StartupConfigSnapshot) {
   return [
     '[local-agent] startup config',
     `  mode=${snapshot.mode}`,
+    snapshot.serverMode ? `  serverMode=${snapshot.serverMode}` : null,
     `  workdir=${snapshot.workdir}`,
     snapshot.actorId ? `  actorId=${snapshot.actorId}` : null,
     snapshot.actorName ? `  actorName=${snapshot.actorName}` : null,
@@ -99,7 +105,8 @@ export function formatStartupConfigSnapshot(snapshot: StartupConfigSnapshot) {
 }
 
 export function logStartupConfig(params: {
-  mode: 'run' | 'tui';
+  mode: 'server' | 'tui';
+  serverMode?: ServerMode;
   workdir: string;
   actorId?: string;
   actorName?: string | null;

@@ -53,10 +53,10 @@ test('parseTuiCommand parses text, aliases, args, and unknown commands', () => {
     args: '',
   });
 
-  const studio = parseTuiCommand('/studio build a poster');
-  assert.equal(studio.type, 'command');
-  assert.equal(studio.type === 'command' ? studio.name : null, 'studio');
-  assert.equal(studio.type === 'command' ? studio.args : null, 'build a poster');
+  const exportWithArgs = parseTuiCommand('/export build a poster');
+  assert.equal(exportWithArgs.type, 'command');
+  assert.equal(exportWithArgs.type === 'command' ? exportWithArgs.name : null, 'export');
+  assert.equal(exportWithArgs.type === 'command' ? exportWithArgs.args : null, 'build a poster');
 
   const exit = parseTuiCommand('/exit');
   assert.equal(exit.type, 'command');
@@ -84,10 +84,10 @@ test('parseTuiCommand parses text, aliases, args, and unknown commands', () => {
   assert.equal(editCommand.type === 'command' ? editCommand.name : null, 'edit');
   assert.equal(editCommand.type === 'command' ? editCommand.args : null, 'draft text');
 
-  assert.deepEqual(parseTuiCommand('/studiox'), {
+  assert.deepEqual(parseTuiCommand('/exportx'), {
     type: 'unknown',
-    raw: '/studiox',
-    name: 'studiox',
+    raw: '/exportx',
+    name: 'exportx',
     args: '',
   });
 });
@@ -125,7 +125,7 @@ test('parseTuiCommand treats slash-prefixed non-command shapes as plain text', (
 test('formatTuiCommandHelp is generated from visible command metadata', () => {
   assert.equal(
     formatTuiCommandHelp(),
-    '/new 新会话 · /model 选择模型 · /studio [任务] 进入 Studio 模式 · /chat 退出 Studio · /policy 选择授权策略 · /help · /transcript 浏览历史 · /export [path] 导出 transcript(默认当前目录) · /edit [文本] 外部编辑 · /continue <指导> 继续当前会话中未完成的委派 · /resume 恢复会话 · /quit',
+    '/new 新会话 · /model 选择模型 · /policy 选择授权策略 · /help · /transcript 浏览历史 · /export [path] 导出 transcript(默认当前目录) · /edit [文本] 外部编辑 · /continue <指导> 继续当前会话中未完成的委派 · /resume 恢复会话 · /quit',
   );
 });
 

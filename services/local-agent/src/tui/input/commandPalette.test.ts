@@ -14,14 +14,14 @@ test('buildCommandPaletteModel opens for slash command prefixes', () => {
   assert.equal(model.query, '');
   assert.deepEqual(
     model.items.map((command) => command.name),
-    ['new', 'model', 'studio', 'chat', 'policy', 'help', 'transcript', 'export', 'edit', 'continue', 'resume', 'quit'],
+    ['new', 'model', 'policy', 'help', 'transcript', 'export', 'edit', 'continue', 'resume', 'quit'],
   );
 });
 
 test('buildCommandPaletteModel filters command names and aliases', () => {
-  const studio = buildCommandPaletteModel({ text: '/st', cursorOffset: 3 });
-  assert.equal(studio.open, true);
-  assert.deepEqual(studio.items.map((command) => command.name), ['studio']);
+  const policy = buildCommandPaletteModel({ text: '/po', cursorOffset: 3 });
+  assert.equal(policy.open, true);
+  assert.deepEqual(policy.items.map((command) => command.name), ['policy']);
 
   const quitAlias = buildCommandPaletteModel({ text: '/exi', cursorOffset: 4 });
   assert.equal(quitAlias.open, true);
@@ -43,8 +43,8 @@ test('buildCommandPaletteModel always offers explicit continuation', () => {
 
 test('buildCommandPaletteModel stays closed outside the active slash prefix', () => {
   assert.equal(buildCommandPaletteModel({ text: 'hello', cursorOffset: 5 }).open, false);
-  assert.equal(buildCommandPaletteModel({ text: '/studio task', cursorOffset: 12 }).open, false);
-  assert.equal(buildCommandPaletteModel({ text: '/st', cursorOffset: 1 }).open, false);
+  assert.equal(buildCommandPaletteModel({ text: '/export path', cursorOffset: 12 }).open, false);
+  assert.equal(buildCommandPaletteModel({ text: '/ex', cursorOffset: 1 }).open, false);
   assert.equal(buildCommandPaletteModel({ text: '/Users/me', cursorOffset: 9 }).open, false);
 });
 
@@ -54,16 +54,17 @@ test('command palette selection clamps and completes selected commands', () => {
   assert.equal(model.selectedIndex, model.items.length - 1);
   assert.equal(moveCommandPaletteSelection(model, -1), model.items.length - 2);
 
-  const studio = buildCommandPaletteModel({ text: '/st', cursorOffset: 3 });
-  assert.deepEqual(completeCommandPaletteInput(studio), {
-    text: '/studio ',
-    cursorOffset: '/studio '.length,
+  const exportCommand = buildCommandPaletteModel({ text: '/ex', cursorOffset: 3 });
+  assert.deepEqual(completeCommandPaletteInput(exportCommand), {
+    text: '/export ',
+    cursorOffset: '/export '.length,
   });
 
-  const chat = buildCommandPaletteModel({ text: '/ch', cursorOffset: 3 });
-  assert.deepEqual(completeCommandPaletteInput(chat), {
-    text: '/chat',
-    cursorOffset: '/chat'.length,
+  // 无参命令补全后不追加空格。
+  const transcript = buildCommandPaletteModel({ text: '/tr', cursorOffset: 3 });
+  assert.deepEqual(completeCommandPaletteInput(transcript), {
+    text: '/transcript',
+    cursorOffset: '/transcript'.length,
   });
 
   const edit = buildCommandPaletteModel({ text: '/ed', cursorOffset: 3 });
@@ -80,9 +81,9 @@ test('command palette submit runs the selected command without requiring tab com
     cursorOffset: '/policy'.length,
   });
 
-  const studio = buildCommandPaletteModel({ text: '/st', cursorOffset: 3 });
-  assert.deepEqual(submitCommandPaletteInput(studio), {
-    text: '/studio',
-    cursorOffset: '/studio'.length,
+  const transcript = buildCommandPaletteModel({ text: '/tr', cursorOffset: 3 });
+  assert.deepEqual(submitCommandPaletteInput(transcript), {
+    text: '/transcript',
+    cursorOffset: '/transcript'.length,
   });
 });

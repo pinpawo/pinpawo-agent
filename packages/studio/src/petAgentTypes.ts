@@ -1,4 +1,4 @@
-import type { AgentActor } from './agent';
+import type { AgentActor } from '@pinpawo/pet-agent';
 
 export type PetAgentStartupMode = 'standby' | 'lazy' | 'disabled';
 

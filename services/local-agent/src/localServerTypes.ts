@@ -10,8 +10,23 @@ import type { LocalStudioDueRunScheduler } from './localStudioDueRunScheduler';
 import type { LoadedUserCapability } from './capabilityLoader';
 import type { LocalModelProfileRegistry } from './llmConfig';
 import { buildWorkspaceRuntimeConfig, type LocalAgentRuntimeConfig } from './runtimeConfig';
+import type { ServerMode } from './serverMode';
+
+/**
+ * #561: startup-determined Studio facts. Present only in studio mode, where
+ * they are validated during startup preflight rather than per request.
+ */
+export type LocalServerStudioModeInfo = {
+  studioId: string;
+  plannerPetId: string;
+  workerPetIds: readonly string[];
+};
 
 export type LocalServerDeps = {
+  /** #561 primary server mode, decided at startup. */
+  serverMode: ServerMode;
+  /** Present only in studio mode. */
+  studioMode?: LocalServerStudioModeInfo;
   actorId: string;
   actorName?: string;
   modelProfiles: LocalModelProfileRegistry;

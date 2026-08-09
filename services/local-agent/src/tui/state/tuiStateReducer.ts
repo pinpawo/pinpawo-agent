@@ -240,7 +240,7 @@ function applyLoadedSessionSnapshot(
     focusedSessionId: incoming.sessionId,
     statusNotice: action.reason === 'resume' ? null : state.statusNotice,
     ui: action.reason === 'resume'
-      ? { composerTarget: 'chat' as const, studioConversationId: null, externalEditorOpen: false }
+      ? { externalEditorOpen: false }
       : state.ui,
   };
 }
@@ -335,29 +335,13 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         : undefined;
       const nextState = applySessionInput({
         ...state,
-        ui: { composerTarget: 'chat', studioConversationId: null, externalEditorOpen: false },
+        ui: { externalEditorOpen: false },
         statusNotice: sessionId === state.focusedSessionId
           ? action.statusNotice ?? null
           : state.statusNotice,
       }, sessionId, { type: 'session.cleared' }, 0);
       return removeReviewDraft(nextState, actionId);
     }
-    case 'ui.composer_target.set':
-      return {
-        ...state,
-        ui: {
-          ...state.ui,
-          composerTarget: action.composerTarget,
-          studioConversationId: action.composerTarget === 'studio'
-            ? action.studioConversationId ?? state.ui.studioConversationId
-            : null,
-        },
-      };
-    case 'ui.composer_target.reset':
-      return {
-        ...state,
-        ui: { ...state.ui, composerTarget: 'chat', studioConversationId: null },
-      };
     case 'ui.external_editor.set_open':
       return {
         ...state,

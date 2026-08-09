@@ -19,6 +19,8 @@ export type TuiConnectionStatus =
 export type TuiSessionState = {
   connection: TuiConnectionStatus;
   connectionDetail?: string;
+  /** TUI-owned request state for session commands that do not create an agent run. */
+  pendingSessionCommand?: 'compact';
   session: AgentSession;
 };
 

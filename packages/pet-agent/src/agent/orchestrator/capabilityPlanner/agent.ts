@@ -182,10 +182,10 @@ function buildSubmittedPlanSystemPrompt(tasks: readonly SubmittedPlannerTask[]) 
 function buildGrepSearchLimitSystemPrompt(input: CapabilityPlannerInput) {
   const hasGeneralCapability = plannerCapabilityNames(input).includes('general');
   return [
-    '【探索已收束】已完成三次 grep_search。',
+    '【Capability 探索已收束】已完成三次 grep_search，当前探索阶段已经结束。不要再次调用 grep_search，也不要继续寻找或验证 Capability。',
     hasGeneralCapability
-      ? '现在基于已有的 Capability 信息完成规划：存在可执行的剩余工作时，调用 submit_plan 并使用 general；否则调用 return_to_answer 交回已确认的事实。'
-      : '现在调用 return_to_answer，交回已有探索中确认的事实和需要用户决定的部分。',
+      ? '现在必须基于已有信息完成规划：存在可执行的剩余工作时，立即调用 submit_plan，并使用 general 承担该工作；否则立即调用 return_to_answer，交回已确认的事实和需要用户决定的部分。'
+      : '现在必须调用 return_to_answer，交回已有探索中确认的事实和需要用户决定的部分。',
   ].join('\n');
 }
 
@@ -269,7 +269,7 @@ function createPlannerSubmissionStateMiddleware(input: CapabilityPlannerInput) {
       const submittedPlan = request.state.submittedPlan;
       const grepSearchCount = countGrepSearchToolMessages(request.state.messages);
       const systemPrompts = [
-        ...(grepSearchCount >= MAX_GREP_SEARCH_CALLS
+        ...(grepSearchCount >= MAX_GREP_SEARCH_CALLS && !submittedPlan
           ? [buildGrepSearchLimitSystemPrompt(input)]
           : []),
         ...(submittedPlan ? [buildSubmittedPlanSystemPrompt(submittedPlan)] : []),

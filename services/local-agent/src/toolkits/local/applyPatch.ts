@@ -1,7 +1,5 @@
-import { parseUnifiedDiff, UnifiedDiffParseError } from './unifiedDiff';
-
 /**
- * Patch parser and applier shared by the V4A and Unified Diff protocols.
+ * V4A patch parser and applier.
  *
  * Envelope grammar:
  *
@@ -60,19 +58,9 @@ export interface FailedChunk {
   matches?: number[];
 }
 
-export type PatchFormat = 'v4a' | 'unified';
-
-export interface ParsedPatch {
-  format: PatchFormat;
-  update: PatchUpdate;
-}
-
 export interface PatchErrorDetails {
   code: string;
-  phase: 'detect' | 'parse' | 'match' | 'write';
-  format?: PatchFormat;
-  declaredFormat?: PatchFormat;
-  detectedFormat?: PatchFormat;
+  phase: 'parse' | 'match' | 'write';
   line?: number;
   path?: string;
   hunk?: number;
@@ -266,98 +254,13 @@ export function parseV4APatch(patchText: string): PatchUpdate {
   throw new PatchParseError(`patch must end with "${PATCH_END}"`);
 }
 
-function detectPatchFormat(lines: string[]): PatchFormat | null {
-  const v4aEnvelopeIndex = lines.findIndex((line) => line.trim() === PATCH_BEGIN);
-  const unifiedEnvelopeIndex = lines.findIndex((line, index) =>
-    line.startsWith('diff --git ')
-      || (line.startsWith('--- ') && lines[index + 1]?.startsWith('+++ ')));
-  if (v4aEnvelopeIndex < 0) return unifiedEnvelopeIndex < 0 ? null : 'unified';
-  if (unifiedEnvelopeIndex < 0) return 'v4a';
-  return v4aEnvelopeIndex < unifiedEnvelopeIndex ? 'v4a' : 'unified';
-}
-
-export function parsePatchDocument(
-  patchText: string,
-  declaredFormat?: PatchFormat,
-): ParsedPatch {
+export function parsePatchDocument(patchText: string): PatchUpdate {
   const normalized = patchText.replace(/\r\n?/g, '\n');
-  const lines = normalized.split('\n');
-  const detectedFormat = detectPatchFormat(lines);
-  const format = declaredFormat ?? detectedFormat;
-
-  if (declaredFormat && detectedFormat && declaredFormat !== detectedFormat) {
-    throw new PatchParseError(
-      `declared patch format "${declaredFormat}" does not match detected format "${detectedFormat}"`,
-      {
-        code: 'patch_format_mismatch',
-        phase: 'detect',
-        format: detectedFormat,
-        declaredFormat,
-        detectedFormat,
-      },
-    );
-  }
-
-  // Raw V4A envelope markers cannot be Unified Diff hunk lines. Prefixes are
-  // significant: `+*** End Patch` and ` *** End Patch` remain valid changed
-  // or context content in a Unified Diff.
-  if (format === 'unified') {
-    const markerIndex = lines.findIndex((line) => line === PATCH_BEGIN || line === PATCH_END);
-    const marker = lines[markerIndex] ?? '';
-    if (markerIndex >= 0) {
-      throw new PatchParseError(
-        `patch line ${markerIndex + 1}: V4A marker "${marker}" is not valid in a Unified Diff`,
-        {
-          code: 'mixed_patch_formats',
-          phase: 'parse',
-          format: 'unified',
-          line: markerIndex + 1,
-        },
-      );
-    }
-  }
-
-  if (format === 'v4a') {
-    try {
-      return {
-        format: 'v4a',
-        update: parseV4APatch(normalized),
-      };
-    } catch (error) {
-      if (error instanceof PatchParseError) {
-        throw new PatchParseError(error.message, { ...error.details, format: 'v4a' });
-      }
-      throw error;
-    }
-  }
-
-  if (format === 'unified') {
-    try {
-      return {
-        format: 'unified',
-        update: parseUnifiedDiff(normalized),
-      };
-    } catch (error) {
-      if (error instanceof UnifiedDiffParseError) {
-        throw new PatchParseError(error.message, {
-          code: error.code,
-          phase: 'parse',
-          format: 'unified',
-          ...(error.line === null ? {} : { line: error.line }),
-        });
-      }
-      throw error;
-    }
-  }
-
-  throw new PatchParseError('unsupported patch format; use V4A or Unified Diff', {
-    code: 'unsupported_patch_format',
-    phase: 'detect',
-  });
+  return parseV4APatch(normalized);
 }
 
 export function parsePatch(patchText: string): PatchUpdate {
-  return parsePatchDocument(patchText).update;
+  return parsePatchDocument(patchText);
 }
 
 function linesEqual(a: string, b: string, fuzz: AppliedChunk['fuzz']) {
@@ -437,12 +340,9 @@ function closestSnippet(fileLines: string[], needle: string[]) {
   return fileLines.slice(start, end).map((text, offset) => `${start + offset + 1}: ${text}`);
 }
 
-export interface UpdateResult {
+export interface PartialUpdateResult {
   content: string;
   chunks: AppliedChunk[];
-}
-
-export interface PartialUpdateResult extends UpdateResult {
   failures: FailedChunk[];
 }
 
@@ -472,23 +372,13 @@ function buildReplacementLines(chunk: PatchChunk, matchedLines: string[]) {
   return replacement;
 }
 
-export function applyChunksToContent(
-  path: string,
-  original: string,
-  chunks: PatchChunk[],
-  options: ApplyChunksOptions = {},
-): UpdateResult {
-  const result = applyChunks(path, original, chunks, options, false);
-  return { content: result.content, chunks: result.chunks };
-}
-
 export function applyChunksToContentPartially(
   path: string,
   original: string,
   chunks: PatchChunk[],
   options: ApplyChunksOptions = {},
 ): PartialUpdateResult {
-  return applyChunks(path, original, chunks, options, true);
+  return applyChunks(path, original, chunks, options);
 }
 
 function failedChunk(
@@ -512,7 +402,6 @@ function applyChunks(
   original: string,
   chunks: PatchChunk[],
   options: ApplyChunksOptions,
-  continueOnError: boolean,
 ): PartialUpdateResult {
   const lineEnding = original.includes('\r\n') ? '\r\n' : '\n';
   const fileLines = original.replace(/\r\n/g, '\n').split('\n');
@@ -536,7 +425,7 @@ function applyChunks(
       applied.push(result.applied);
       cursor = result.cursor;
     } catch (error) {
-      if (!(error instanceof PatchApplyError) || !continueOnError) throw error;
+      if (!(error instanceof PatchApplyError)) throw error;
       failures.push(failedChunk(error, chunk, chunkIndex + 1));
     }
   }

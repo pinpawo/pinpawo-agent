@@ -128,7 +128,7 @@ test('buildAgentOperationDisplayLines renders apply_patch raw input on operation
   assert.ok(lines.every((line) => stringWidth(line.text) <= 80));
 });
 
-test('buildAgentOperationDisplayLines renders Unified Diff and raw tool failure output', () => {
+test('buildAgentOperationDisplayLines renders V4A diff and raw tool failure output', () => {
   const lines = buildAgentOperationDisplayLines(operationEntry({
     phase: 'failed',
     kind: 'local.apply_patch',
@@ -137,11 +137,12 @@ test('buildAgentOperationDisplayLines renders Unified Diff and raw tool failure 
     raw: {
       input: {
         patch: [
-          '--- a/src/example.ts',
-          '+++ b/src/example.ts',
-          '@@ -1 +1 @@',
+          '*** Begin Patch',
+          '*** Update File: src/example.ts',
+          '@@',
           '-const value = 1;',
           '+const value = 2;',
+          '*** End Patch',
         ].join('\n'),
       },
       output: JSON.stringify({

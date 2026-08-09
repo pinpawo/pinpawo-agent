@@ -5,16 +5,12 @@ import { type ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import { tryStat } from './fileSystemUtils';
 import {
-  applyChunksToContent,
   applyChunksToContentPartially,
   PatchApplyError,
   PatchParseError,
   parsePatchDocument,
   type FailedChunk,
-  type PartialUpdateResult,
   type PatchChunk,
-  type ParsedPatch,
-  type PatchFormat,
 } from './applyPatch';
 import {
   okOutputPathSummary,
@@ -408,11 +404,6 @@ type WriteFileAction = {
   createDirs: boolean;
 };
 
-type ApplyPatchAction = {
-  format: PatchFormat;
-  patch: string;
-};
-
 function normalizeWriteFileAction(input: unknown): WriteFileAction {
   const record = readRecord(input);
   const path = readString(record, 'path');
@@ -429,19 +420,6 @@ function normalizeWriteFileAction(input: unknown): WriteFileAction {
     append: readBoolean(record, 'append') ?? false,
     createDirs: readBoolean(record, 'createDirs') ?? true,
   };
-}
-
-function normalizeApplyPatchAction(input: unknown): ApplyPatchAction {
-  const record = readRecord(input);
-  const format = readString(record, 'format');
-  const patch = readString(record, 'patch');
-  if (format !== 'v4a' && format !== 'unified') {
-    throw new Error('apply_patch requires format to be "v4a" or "unified"');
-  }
-  if (!patch || !patch.trim()) {
-    throw new Error('apply_patch requires a patch');
-  }
-  return { format, patch };
 }
 
 interface ResolvedPatchWrite {
@@ -470,9 +448,9 @@ function atomicWriteFile(filePath: string, content: string) {
 
 const APPLY_PATCH_DESCRIPTION = [
   '使用补丁修改一个已存在的本地文件。每次调用只允许一个文件 update；建议每次只提交少量、彼此独立的修改块。新增或完全重写用 write_file，移动用 move_path；删除文件不属于本工具。',
-  'format 与 patch 内容必须严格一致：v4a 必须使用 *** Begin Patch / *** End Patch 包裹；unified 必须使用 --- / +++ / @@，且不得出现原始 V4A 标记。不得混用或自动转换协议。',
+  'patch 只接受 V4A，不接受或转换 Unified Diff。必须使用 *** Begin Patch / *** End Patch 包裹。',
   'V4A 最小结构为：*** Begin Patch、*** Update File: <path>、@@ <可选唯一 anchor>、以空格/-/+开头的 diff 行、*** End Patch；每个 hunk 都必须显式写 @@ 并至少包含一条变更行。',
-  'V4A 中每个 @@ hunk 是独立替换块：完整补丁先通过语法解析，再逐块定位和应用；某块匹配失败时，其他成功块仍会写入。语法错误不会写入任何块，Unified Diff 保持整次原子应用。',
+  'V4A 中每个 @@ hunk 是独立替换块：完整补丁先通过语法解析，再逐块定位和应用；某块匹配失败时，其他成功块仍会写入。语法错误不会写入任何块。',
   '修改前先读取文件现状，并提供足以唯一定位修改位置的上下文。不要在同一次调用中放入彼此依赖的 hunk；工具不会自动重新生成补丁或循环重试失败块。',
   'V4A 用 appliedHunks 返回成功块编号以节省 token；failedHunks 返回失败块的原始 diff、错误和相近上下文。',
   '如果修改的是 JSON、manifest.json、package.json、tsconfig.json 等结构化文件，完成后应继续调用 validate_structured_file。整文件新建或完全重写可以直接用 write_file。',
@@ -503,21 +481,18 @@ function failedChunkOutput(chunk: FailedChunk, source: PatchChunk) {
 
 function patchFailureOutput(
   error: unknown,
-  parsed: ParsedPatch | null,
-  phase: 'detect' | 'match' | 'write',
+  phase: 'parse' | 'match' | 'write',
 ) {
   const message = error instanceof Error ? error.message : String(error);
   if (error instanceof PatchParseError || error instanceof PatchApplyError) {
     return JSON.stringify({
       ok: false,
       ...error.details,
-      format: error.details.format ?? parsed?.format,
       message,
     });
   }
   return JSON.stringify({
     ok: false,
-    ...(parsed ? { format: parsed.format } : {}),
     phase,
     code: phase === 'write' ? 'write_failed' : 'patch_failed',
     message,
@@ -533,14 +508,12 @@ function patchTargetError(code: string, message: string, path: string) {
 }
 
 export const applyPatchTool = tool(
-  async ({ format, patch }: { format: PatchFormat; patch: string }) => {
-    let parsed: ParsedPatch | null = null;
-    let phase: 'detect' | 'match' | 'write' = 'detect';
+  async ({ patch }: { patch: string }) => {
+    let phase: 'parse' | 'match' | 'write' = 'parse';
     try {
-      parsed = parsePatchDocument(patch, format);
+      const update = parsePatchDocument(patch);
       phase = 'match';
 
-      const update = parsed.update;
       const absolutePath = resolveUserPath(update.path);
       const stat = tryStat(absolutePath);
       if (!stat?.isFile()) {
@@ -551,19 +524,12 @@ export const applyPatchTool = tool(
         );
       }
       const original = readUtf8TextFile(absolutePath);
-      const result = parsed.format === 'v4a'
-        ? applyChunksToContentPartially(
-            update.path,
-            original,
-            update.chunks,
-            { requireUniqueContext: true },
-          )
-        : applyChunksToContent(
-            update.path,
-            original,
-            update.chunks,
-            { strictLeadingWhitespace: true, requireUniqueContext: true },
-          );
+      const result = applyChunksToContentPartially(
+        update.path,
+        original,
+        update.chunks,
+        { requireUniqueContext: true },
+      );
       const write: ResolvedPatchWrite = {
         absolutePath,
         nextContent: result.content,
@@ -571,9 +537,7 @@ export const applyPatchTool = tool(
         fuzz: worstFuzz(result.chunks),
       };
 
-      const failures: FailedChunk[] = 'failures' in result
-        ? (result as PartialUpdateResult).failures
-        : [];
+      const failures: FailedChunk[] = result.failures;
       const appliedHunks = result.chunks.map((chunk) => chunk.hunk);
       const failedHunks = failures.map((failure) =>
         failedChunkOutput(failure, update.chunks[failure.hunk - 1]!));
@@ -583,7 +547,6 @@ export const applyPatchTool = tool(
         return JSON.stringify({
           ok: false,
           partial: false,
-          format: parsed.format,
           phase: 'match',
           code: failures.length === 1
             ? primaryFailure?.code
@@ -611,7 +574,6 @@ export const applyPatchTool = tool(
         return JSON.stringify({
           ok: false,
           partial: true,
-          format: parsed.format,
           phase: 'match',
           code: 'partial_patch_applied',
           message: `Applied ${result.chunks.length.toString()} of ${update.chunks.length.toString()} V4A hunks; ${failures.length.toString()} failed.`,
@@ -623,20 +585,18 @@ export const applyPatchTool = tool(
 
       return JSON.stringify({
         ok: true,
-        format: parsed.format,
         file,
         appliedHunks,
       });
     } catch (err) {
-      return patchFailureOutput(err, parsed, phase);
+      return patchFailureOutput(err, phase);
     }
   },
   {
     name: 'apply_patch',
     description: APPLY_PATCH_DESCRIPTION,
     schema: z.object({
-      format: z.enum(['v4a', 'unified']).describe('补丁协议；必须与 patch 内容严格一致'),
-      patch: z.string().describe('只更新一个已存在文件的补丁；V4A 用独立 @@ hunk 分块，且不得混合 v4a 与 unified 语法'),
+      patch: z.string().describe('只更新一个已存在文件的 V4A 补丁；使用完整 envelope，并以独立 @@ hunk 分块'),
     }),
   },
 );
@@ -916,14 +876,9 @@ export const fileOperationMetadata: Record<string, ToolOperationMetadata> = {
       if (!patch) return null;
       let file: { path: string } | undefined;
       let target: string | undefined;
-      const declaredFormat = readString(record, 'format');
-      let format: PatchFormat | undefined = declaredFormat === 'v4a' || declaredFormat === 'unified'
-        ? declaredFormat
-        : undefined;
       try {
-        const parsed = parsePatchDocument(patch, format);
-        format = parsed.format;
-        file = { path: resolveUserPath(parsed.update.path) };
+        const update = parsePatchDocument(patch);
+        file = { path: resolveUserPath(update.path) };
         target = file.path;
       } catch {
         // Unparseable patch still gets a raw preview below.
@@ -932,7 +887,6 @@ export const fileOperationMetadata: Record<string, ToolOperationMetadata> = {
         target,
         summary: file ? 'update' : undefined,
         details: {
-          format,
           file,
           patch: truncateForOperationDetails(patch),
         },

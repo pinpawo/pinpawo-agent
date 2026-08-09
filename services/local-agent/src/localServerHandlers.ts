@@ -605,21 +605,56 @@ export function createLocalServerHandlers(
     }
   };
 
+  /**
+   * #561:一个 server 进程只有一个主模式。mode 不只是启动预检与投影,
+   * 它是**执行边界** —— 与当前模式不符的请求直接拒绝,而不是照常执行。
+   *
+   * 拒绝而非静默忽略:客户端连错模式时应该立刻知道,否则会一直等一个
+   * 永远不来的回包。
+   */
+  function rejectWrongMode(
+    client: LocalServerPeer,
+    requestId: string,
+    kind: 'chat' | 'studio',
+  ): void {
+    const mode = runtimeDeps.get().serverMode;
+    const message = `This server runs in ${mode} mode; ${kind} requests are not accepted.`;
+    if (kind === 'studio') {
+      client.send({ type: 'studio_error', requestId, message });
+      return;
+    }
+    // 不设 code:AgentErrorCode 是 #570 拥有的共享契约,为一个本地
+    // 模式检查去扩它不划算;message 已经自解释。
+    sendLocalServerPeerEvent(client, { type: 'error', requestId, message });
+  }
+
   const peerHandlers: LocalServerPeerHandlers = {
-    onChatRequest: (client, message) => afterSessionCommands(
-      client,
-      message.requestId,
-      () => chatHandler.handleChatRequest(
+    onChatRequest: (client, message) => {
+      if (runtimeDeps.get().serverMode !== 'chat') {
+        rejectWrongMode(client, message.requestId, 'chat');
+        return Promise.resolve();
+      }
+      return afterSessionCommands(
+        client,
+        message.requestId,
+        () => chatHandler.handleChatRequest(
+          client,
+          message,
+          runtimeDeps.get(),
+        ),
+      );
+    },
+    onStudioRequest: (client, message) => {
+      if (runtimeDeps.get().serverMode !== 'studio') {
+        rejectWrongMode(client, message.requestId, 'studio');
+        return Promise.resolve();
+      }
+      return studioHandler.handleStudioRequest(
         client,
         message,
         runtimeDeps.get(),
-      ),
-    ),
-    onStudioRequest: (client, message) => studioHandler.handleStudioRequest(
-      client,
-      message,
-      runtimeDeps.get(),
-    ),
+      );
+    },
     onHumanReviewResponse: async (client, message) => {
       if (studioHandler.routeHumanReviewResponse(client, message)) {
         return;

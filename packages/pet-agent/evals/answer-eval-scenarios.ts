@@ -75,7 +75,10 @@ async function evaluateGoal(
     acceptanceCriteria: testCase.expected.acceptanceCriteria,
     evidence: {
       conversation: testCase.input.messages,
-      runtimeContext: testCase.input.delegationOutcome ?? null,
+      runtimeContext: {
+        userGoal: testCase.input.userGoal ?? null,
+        delegationOutcome: testCase.input.delegationOutcome ?? null,
+      },
     },
     candidateOutput: { text: candidateAnswer },
   });
@@ -99,12 +102,16 @@ function collectDiagnostics(
 
 function render(testCase: AnswerBehaviorCase): BaseMessage[] {
   const delegationOutcome = testCase.input.delegationOutcome;
-  const hasUserGoal = testCase.input.messages.some(({ role }) => role === 'user');
+  const hasUserGoal = Boolean(
+    testCase.input.userGoal
+    ?? testCase.input.messages.find(({ role }) => role === 'user'),
+  );
   return buildAnswerInvocationMessages({
     actor,
     history: testCase.input.messages.map((message) => message.role === 'user'
       ? new HumanMessage(message.text)
       : new AIMessage(message.text)),
+    userGoal: testCase.input.userGoal,
     contextFacts: delegationOutcome?.outcome === 'goal_done'
       ? { mode: 'goal_done', hasUserGoal }
       : delegationOutcome?.outcome === 'user_input_required'

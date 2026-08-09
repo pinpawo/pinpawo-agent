@@ -11,8 +11,7 @@ import { buildRunUserGoalContext } from './context';
 import { buildDecisionConfig, indentXmlBlock, xmlTextBlock } from './shared';
 import { ANSWER_SYSTEM_PROMPT } from './templates/answer.prompt';
 
-export const ANSWER_CONTEXT_MESSAGE_NAME = 'answer_context';
-export const RUN_USER_GOAL_MESSAGE_NAME = 'run_user_goal';
+export const ANSWER_INPUT_MESSAGE_NAME = 'answer_input';
 
 export const ANSWER_CONTEXT_LIMITS = {
   unfinishedTaskChars: 320,
@@ -97,23 +96,27 @@ function renderAnswerContext(facts: ModelAnswerContextFacts): string {
   return lines.join('\n');
 }
 
-function createAnswerContextMessage(facts: ModelAnswerContextFacts): HumanMessage {
-  const content = renderAnswerContext(facts);
-  const message = new HumanMessage(content);
-  message.name = ANSWER_CONTEXT_MESSAGE_NAME;
-  setPinpetMeta(message, {
-    source: ANSWER_CONTEXT_MESSAGE_NAME,
-    synthetic: true,
-    authority: 'none',
-  });
-  return message;
+function renderAnswerInput(
+  userGoal: UserGoal | null | undefined,
+  facts: ModelAnswerContextFacts,
+): string {
+  return [
+    '<answer_input role="fact" source="orchestrator_state" authority="none">',
+    indentXmlBlock(buildRunUserGoalContext(userGoal ?? null), 2),
+    indentXmlBlock(renderAnswerContext(facts), 2),
+    '</answer_input>',
+  ].join('\n');
 }
 
-function createRunUserGoalMessage(userGoal: UserGoal): HumanMessage {
-  const message = new HumanMessage(buildRunUserGoalContext(userGoal));
-  message.name = RUN_USER_GOAL_MESSAGE_NAME;
+function createAnswerInputMessage(
+  userGoal: UserGoal | null | undefined,
+  facts: ModelAnswerContextFacts,
+): HumanMessage {
+  const content = renderAnswerInput(userGoal, facts);
+  const message = new HumanMessage(content);
+  message.name = ANSWER_INPUT_MESSAGE_NAME;
   setPinpetMeta(message, {
-    source: RUN_USER_GOAL_MESSAGE_NAME,
+    source: ANSWER_INPUT_MESSAGE_NAME,
     synthetic: true,
     authority: 'none',
   });
@@ -121,15 +124,17 @@ function createRunUserGoalMessage(userGoal: UserGoal): HumanMessage {
 }
 
 /**
- * Returns a new invocation history with non-authoritative Answer facts placed
- * after every canonical message. Dynamic facts never enter the system prompt.
+ * Returns a new invocation history with one non-authoritative Answer input
+ * placed after every canonical message. Dynamic facts never enter the system
+ * prompt or masquerade as separate user turns.
  */
-export function appendAnswerContextMessage(
+export function appendAnswerInputMessage(
   history: readonly BaseMessage[],
+  userGoal: UserGoal | null | undefined,
   facts: ModelAnswerContextFacts,
 ): BaseMessage[] {
-  const contextMessage = createAnswerContextMessage(facts);
-  return [...history, contextMessage];
+  const inputMessage = createAnswerInputMessage(userGoal, facts);
+  return [...history, inputMessage];
 }
 
 export function buildAnswerSystemPrompt(params: {
@@ -146,11 +151,8 @@ export function buildAnswerInvocationMessages(params: {
   userGoal?: UserGoal | null;
   contextFacts: ModelAnswerContextFacts;
 }): BaseMessage[] {
-  const historyWithGoal = params.userGoal
-    ? [...params.history, createRunUserGoalMessage(params.userGoal)]
-    : params.history;
   return [
     new SystemMessage(buildAnswerSystemPrompt({ actor: params.actor })),
-    ...appendAnswerContextMessage(historyWithGoal, params.contextFacts),
+    ...appendAnswerInputMessage(params.history, params.userGoal, params.contextFacts),
   ];
 }

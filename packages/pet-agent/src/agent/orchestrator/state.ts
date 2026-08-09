@@ -9,6 +9,7 @@ import type {
   PlannerAnswerDisposition,
   TaskActiveDelegation,
   ActiveDelegationTransition,
+  UserGoal,
 } from './types';
 import type { CapabilityArtifactRef } from '../../types/artifact';
 import { mergeCapabilityArtifactRefs } from './capabilityArtifacts';
@@ -39,6 +40,10 @@ const orchestratorStateChannels = {
   runCapabilityPlan: Annotation<CapabilityPlanTask[]>({
     reducer: (_prev, next) => next,
     default: () => [],
+  }),
+  runUserGoal: Annotation<UserGoal | null>({
+    reducer: (_prev, next) => next,
+    default: () => null,
   }),
   sessionCapabilityArtifacts: Annotation<CapabilityArtifactRef[]>({
     reducer: (prev, next) => mergeCapabilityArtifactRefs(prev, next),
@@ -90,6 +95,7 @@ export type OrchestratorRunState = Pick<
   | 'runNextDelegation'
   | 'runPlannerReturn'
   | 'runCapabilityPlan'
+  | 'runUserGoal'
   | 'runDelegationSummaries'
   | 'runIterationCount'
   | 'runLatestDelegationOutcome'
@@ -108,6 +114,7 @@ export function buildRunStateReset(
     runNextDelegation: null,
     runPlannerReturn: null,
     runCapabilityPlan: [],
+    runUserGoal: null,
     runDelegationSummaries: [],
     runIterationCount: 0,
     runLatestDelegationOutcome: null,

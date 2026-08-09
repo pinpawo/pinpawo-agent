@@ -61,6 +61,7 @@ export function applyActiveDelegationTransition(
 
   if (activeDelegation.status === 'awaiting_decision') {
     return {
+      runUserGoal: activeDelegation.userGoal ?? null,
       runDelegationSummaries: updateRunDelegationSummaryResult(
         resumedSummaries,
         activeDelegation.id,
@@ -83,6 +84,7 @@ export function applyActiveDelegationTransition(
 
   return {
     messages: materializedDelegation.laneMessages,
+    runUserGoal: activeDelegation.userGoal ?? null,
     runNextDelegation,
     runPlannerReturn: null,
     taskActiveDelegation: {

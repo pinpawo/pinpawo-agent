@@ -112,6 +112,7 @@ export function buildDelegationOutcomeDecisionSystemPrompt(params: {
 }
 
 export function buildDelegationOutcomeDecisionInput(params: {
+  runUserGoalContext: string;
   userIntentContext: string;
   currentTaskContext: string | null;
   subagentAnnounceContext: string | null;
@@ -121,6 +122,7 @@ export function buildDelegationOutcomeDecisionInput(params: {
 }): string {
   const artifactContext = buildCapabilityArtifactContext(params.capabilityArtifacts);
   return OUTCOME_DECISION_INPUT_PROMPT.render({
+    runUserGoalBlock: promptBlock(params.runUserGoalContext, 2),
     userIntentContextBlock: promptBlock(params.userIntentContext, 2),
     currentDelegationBlock: promptBlock(
       params.currentTaskContext ?? '<current_delegation missing="true" />',

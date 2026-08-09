@@ -76,14 +76,14 @@ test('planning datasets cover entry and boundary distributions', () => {
   ));
 });
 
-test('an exhausted boundary plan only covers newly required autonomous work', () => {
+test('an exhausted boundary plan can continue autonomous work or report a real capability block', () => {
   const exhaustedBoundaryCases = capabilityPlanningBasicsDataset.cases.filter(
     (testCase) => testCase.input.mode === 'boundary'
       && (testCase.input.remainingPlan ?? []).length === 0,
   );
   assert.deepEqual(
     exhaustedBoundaryCases.map((testCase) => testCase.expected.result).sort(),
-    ['plan'],
+    ['plan', 'return_to_answer'],
   );
 });
 

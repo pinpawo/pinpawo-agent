@@ -48,6 +48,15 @@ export type CapabilityPlanTask = {
 };
 
 /**
+ * Entry-normalized user goal shared by the orchestration nodes in one run.
+ * A resumable delegation keeps a snapshot so a later run can restore it.
+ */
+export type UserGoal = {
+  objective: string;
+  context: string | null;
+};
+
+/**
  * Bounded planning facts that Answer turns into the user-facing reply when no
  * execution plan should start in this run.
  */
@@ -65,6 +74,8 @@ export type TaskActiveDelegation = {
   transcriptRunId: string;
   status: 'pending' | 'awaiting_decision';
   resultPreview: string | null;
+  /** Snapshot used to restore runUserGoal when this delegation is resumed. */
+  userGoal?: UserGoal | null;
 };
 
 export type SubagentAnnounce = {

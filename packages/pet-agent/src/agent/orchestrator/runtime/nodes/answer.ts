@@ -88,6 +88,7 @@ export function createAnswerNode(config: OrchestratorConfig) {
     const answerMessages = buildAnswerInvocationMessages({
       actor,
       history: answerHistory,
+      userGoal: state.runUserGoal,
       contextFacts: answerContextFacts,
     });
     const response = await (config.models.answer ?? config.models.act).invoke(

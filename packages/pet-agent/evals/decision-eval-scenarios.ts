@@ -9,6 +9,7 @@ import {
   buildPreparedRequestContext,
   buildRunDelegationSummaryContext,
   buildRuntimeContext,
+  buildRunUserGoalContext,
   buildSubagentAnnounceContext,
   buildEntryDecisionInput,
   buildEntryDecisionSystemPrompt,
@@ -148,6 +149,10 @@ function outcomeScenarios(): DecisionEvalScenario[] {
         outputInstruction: buildDelegationOutcomeDecisionOutputInstruction(method),
       }),
       input: buildDelegationOutcomeDecisionInput({
+        runUserGoalContext: buildRunUserGoalContext({
+          objective: testCase.input.userGoal,
+          context: null,
+        }),
         userIntentContext: buildPreparedRequestContext({
           latestUserRequest: testCase.input.userGoal,
           recentMessages: [new HumanMessage(testCase.input.userGoal)],

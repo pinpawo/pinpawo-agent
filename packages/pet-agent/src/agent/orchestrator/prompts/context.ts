@@ -4,6 +4,7 @@ import type {
   RunDelegationSummary,
   SubagentAnnounce,
   SubagentCompletionReason,
+  UserGoal,
 } from '../types';
 import { clipForPrompt, formatDelegationStatus, readMessageText } from '../utils';
 import { indentXmlBlock, MAX_DECISION_RUN_DELEGATIONS, xmlTextBlock } from './shared';
@@ -12,6 +13,19 @@ import { isDelegationBriefingMessage } from '../delegationBriefing';
 const MAX_RECENT_MAIN_MESSAGES = 6;
 const MAX_CONTEXT_SUMMARIES = 2;
 const MAX_RECENT_CAPABILITY_ARTIFACTS = 6;
+
+export function buildRunUserGoalContext(userGoal: UserGoal | null): string {
+  if (!userGoal) return '<run_user_goal missing="true" />';
+  const lines = [
+    '<run_user_goal role="task_boundary" source="orchestrator_state" trust="read_only">',
+    indentXmlBlock(xmlTextBlock('objective', userGoal.objective), 2),
+  ];
+  if (userGoal.context) {
+    lines.push(indentXmlBlock(xmlTextBlock('relevant_context', userGoal.context), 2));
+  }
+  lines.push('</run_user_goal>');
+  return lines.join('\n');
+}
 
 export function buildCapabilityArtifactContext(artifacts: CapabilityArtifactRef[] | undefined): string {
   if (!artifacts || artifacts.length === 0) return '';

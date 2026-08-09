@@ -326,13 +326,13 @@ const routeFunctionEntryDecisionConfig = {
   entryDecisionProtocol: 'routeFunctions' as const,
 };
 
-test('entry route-functions protocol requires one route call and sends planner args as the private briefing', async () => {
+test('entry route-functions protocol requires one route call and stores its normalized user goal', async () => {
   const route = createScriptedEntryRouteDecisionModel([[
     {
       name: 'route_to_planner',
       args: {
         objective: '检查 issue #587 的 Entry 路由设计并实现测试。',
-        context: '不要新增持久 state。',
+        context: '仅检查与当前设计相关的实现。',
       },
     },
   ]]);
@@ -379,9 +379,9 @@ test('entry route-functions protocol requires one route call and sends planner a
   assert.deepEqual(route.boundToolOptions, [{ tool_choice: 'required' }]);
   const capturedPlannerInput = plannerInput as CapabilityPlannerInput | null;
   assert.ok(capturedPlannerInput);
-  assert.deepEqual(capturedPlannerInput.briefing, {
+  assert.deepEqual(capturedPlannerInput.userGoal, {
     objective: '检查 issue #587 的 Entry 路由设计并实现测试。',
-    context: '不要新增持久 state。',
+    context: '仅检查与当前设计相关的实现。',
   });
   assert.match(String(route.invocations[0]?.[0]?.content ?? ''), /必须且只能调用一个路由 function/);
 });
@@ -580,16 +580,16 @@ test('entry decision reads full canonical main messages and excludes lane announ
   );
 });
 
-test('entry sends a bounded Planner briefing without persisting it in shared state', async () => {
+test('entry stores a bounded run user goal without copying it into messages', async () => {
   let plannerInput: CapabilityPlannerInput | null = null;
-  const entryOnlyBriefingText = 'ENTRY_ONLY_BRIEFING_DO_NOT_PERSIST';
+  const userGoalContext = 'RUN_USER_GOAL_CONTEXT';
   const model = {
     invoke: async () => new AIMessage('planner returned facts'),
     withStructuredOutput: () => ({
       invoke: async () => ({
         action: 'needs_plan',
         planner_objective: '处理 issue #587，并且不要修改 /tmp/legacy-path。',
-        planner_context: entryOnlyBriefingText,
+        planner_context: userGoalContext,
       }),
     }),
   } as unknown as AgentModels['act'];
@@ -629,15 +629,16 @@ test('entry sends a bounded Planner briefing without persisting it in shared sta
 
   const capturedPlannerInput = plannerInput as CapabilityPlannerInput | null;
   assert.ok(capturedPlannerInput);
-  assert.deepEqual(capturedPlannerInput.briefing, {
+  assert.deepEqual(capturedPlannerInput.userGoal, {
     objective: '处理 issue #587，并且不要修改 /tmp/legacy-path。',
-    context: entryOnlyBriefingText,
+    context: userGoalContext,
   });
+  assert.deepEqual(state.runUserGoal, capturedPlannerInput.userGoal);
   assert.equal('messages' in capturedPlannerInput, false);
   assert.doesNotMatch(JSON.stringify(capturedPlannerInput), /OLD_IRRELEVANT_GOAL/);
   assert.doesNotMatch(
     state.messages.map(readMessageText).join('\n'),
-    new RegExp(entryOnlyBriefingText),
+    new RegExp(userGoalContext),
   );
   assert.equal(
     ORCHESTRATOR_STATE_CHANNEL_NAMES.some((channel) => channel.includes('briefing')),
@@ -724,17 +725,11 @@ test('task_done reroutes through capabilityPlanner before the next task', async 
   const boundaryPlannerInput = plannerInputs[1];
   assert.equal(entryPlannerInput?.mode, 'entry');
   assert.equal(boundaryPlannerInput?.mode, 'boundary');
-  assert.equal(
-    entryPlannerInput?.mode === 'entry' ? entryPlannerInput.briefing.objective : null,
-    '完成当前需要工具执行的用户请求。',
-  );
-  assert.equal(
-    entryPlannerInput?.mode === 'entry' ? entryPlannerInput.briefing.context : 'unset',
-    null,
-  );
-  // A boundary re-plans from run facts alone; it never reconstructs a briefing
-  // from the transcript.
-  assert.equal(boundaryPlannerInput?.briefing, undefined);
+  assert.deepEqual(entryPlannerInput?.userGoal, {
+    objective: '完成当前需要工具执行的用户请求。',
+    context: null,
+  });
+  assert.deepEqual(boundaryPlannerInput?.userGoal, entryPlannerInput?.userGoal);
   assert.equal(plannerInputs[1]?.completedTask, '读取 issue #269 并提炼需求点。');
   assert.match(plannerInputs[1]?.completedTaskResult ?? '', /issue #269 需求点/);
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
@@ -6137,6 +6132,10 @@ test('fresh-turn active delegation transitions are explicit for pending and awai
       transcriptRunId: `old-run-${status}`,
       status,
       resultPreview: status === 'awaiting_decision' ? '旧进度。' : null,
+      userGoal: {
+        objective: '完成旧的仓库检查。',
+        context: '保留原任务目标。',
+      },
     };
     const oldLaneMessages = interruptedLaneMessages({
       delegationId: activeDelegation.id,
@@ -6163,6 +6162,7 @@ test('fresh-turn active delegation transitions are explicit for pending and awai
       taskActiveDelegation: activeDelegation,
     } as OrchestratorStateType;
     const resumeUpdate = applyActiveDelegationTransition(resumeState);
+    assert.deepEqual(resumeUpdate.runUserGoal, activeDelegation.userGoal);
     const resumedState = {
       ...resumeState,
       ...resumeUpdate,
@@ -6315,6 +6315,10 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
     transcriptRunId: 'resume-pending-run',
     status: 'awaiting_decision',
     resultPreview: '第一步完成后，需要用户确认检查方向。',
+    userGoal: {
+      objective: '完成原来的仓库检查并报告结果。',
+      context: '用户要求重点检查最新修改。',
+    },
   };
   const oldMessages = interruptedLaneMessages({
     delegationId: activeDelegation.id,
@@ -6331,13 +6335,15 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
   });
   oldMessages.push(priorAnnounce);
   let structuredCallCount = 0;
+  const outcomeInputs: string[] = [];
   let executedDelegation: { delegationId: string; runId: string } | null = null;
   const actModel = {
     invoke: async () => new AIMessage('原任务继续完成。'),
     bindTools: () => ({ invoke: async () => new AIMessage('') }),
     withStructuredOutput: () => ({
-      invoke: async () => {
+      invoke: async (messages: BaseMessage[]) => {
         structuredCallCount += 1;
+        outcomeInputs.push(String(messages.at(-1)?.content ?? ''));
         return structuredCallCount === 1
           ? continueDecision('用户已确认优先检查最新修改。')
           : goalDoneDecision();
@@ -6383,19 +6389,22 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
     runId: activeDelegation.transcriptRunId,
   });
 
-  await graph.invoke(
+  const state = await graph.invoke(
     buildOrchestratorRunInput(
       [new HumanMessage('继续，并优先检查最新修改')],
       { activeDelegationTransition: 'resume_active' },
     ),
     config,
-  );
+  ) as OrchestratorStateType;
 
   assert.equal(structuredCallCount, 2);
   assert.deepEqual(executedDelegation, {
     delegationId: activeDelegation.id,
     runId: activeDelegation.transcriptRunId,
   });
+  assert.deepEqual(state.runUserGoal, activeDelegation.userGoal);
+  assert.match(outcomeInputs[0] ?? '', /<run_user_goal[^>]*>/);
+  assert.match(outcomeInputs[0] ?? '', /完成原来的仓库检查并报告结果。/);
   const resumedInput = recorder.subagentInputs.at(-1) ?? [];
   assert.equal(
     resumedInput.some((message) =>
@@ -6406,6 +6415,86 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
   assert.match(
     resumedInput.map((message) => String(message.content)).join('\n'),
     /继续，并优先检查最新修改/,
+  );
+});
+
+test('legacy resumed delegation without a user goal returns safely after task completion', async () => {
+  const activeDelegation: TaskActiveDelegation = {
+    id: 'legacy-resume-delegation',
+    lane: 'capability:general',
+    task: '完成旧 checkpoint 中的仓库检查',
+    contextSummary: '旧 checkpoint 没有 runUserGoal。',
+    transcriptRunId: 'legacy-resume-run',
+    status: 'awaiting_decision',
+    resultPreview: '仓库检查已经完成。',
+  };
+  const priorAnnounce = new AIMessage(activeDelegation.resultPreview ?? '');
+  setPinpetMeta(priorAnnounce, {
+    lane: activeDelegation.lane,
+    runId: activeDelegation.transcriptRunId,
+    isAnnounce: true,
+    completionReason: 'natural',
+    delegationId: activeDelegation.id,
+    task: activeDelegation.task,
+  });
+  const answerInputs: BaseMessage[][] = [];
+  const actModel = {
+    invoke: async (messages: BaseMessage[]) => {
+      answerInputs.push(messages);
+      return new AIMessage('当前任务已完成；请重新说明仍需继续的目标。');
+    },
+    withStructuredOutput: () => ({
+      invoke: async () => taskDoneDecision('旧 checkpoint 中的任务已完成。'),
+    }),
+  } as unknown as AgentModels['act'];
+  let plannerCalls = 0;
+  const graph = createOrchestratorGraph({
+    models: {
+      act: actModel,
+      observe: actModel,
+      subagent: new FakeListChatModel({ responses: [], sleep: 0 }),
+    },
+    actor: testActor,
+    checkpoint: new MemorySaver(),
+    capabilityPlannerRunner: {
+      async invoke() {
+        plannerCalls += 1;
+        return { tasks: [{ capability: 'general', task: '不应执行' }] };
+      },
+    },
+  });
+  const config = {
+    configurable: {
+      thread_id: 'legacy-resume-without-user-goal',
+      actor: testActor,
+      capabilities: [capability('general', 'General-purpose capability.')],
+      toolkits: [],
+    },
+  };
+  await graph.updateState(config, {
+    messages: [priorAnnounce],
+    taskActiveDelegation: activeDelegation,
+    runId: activeDelegation.transcriptRunId,
+  });
+
+  const state = await graph.invoke(
+    buildOrchestratorRunInput(
+      [new HumanMessage('继续完成剩余工作')],
+      { activeDelegationTransition: 'resume_active' },
+    ),
+    config,
+  ) as OrchestratorStateType;
+
+  assert.equal(plannerCalls, 0);
+  assert.equal(state.taskActiveDelegation, null);
+  assert.equal(state.runPlannerReturn, null);
+  assert.equal(
+    String(state.messages.at(-1)?.content ?? ''),
+    '当前任务已完成；请重新说明仍需继续的目标。',
+  );
+  assert.match(
+    answerInputs.at(-1)?.map((message) => String(message.content)).join('\n') ?? '',
+    /resumed checkpoint has no run user goal/,
   );
 });
 

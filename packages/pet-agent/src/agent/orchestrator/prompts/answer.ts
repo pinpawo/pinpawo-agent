@@ -5,11 +5,14 @@ import {
 } from '@langchain/core/messages';
 import type { AgentActor } from '../../../types/agent';
 import { setPinpetMeta } from '../messageLanes';
+import type { UserGoal } from '../types';
 import { clipForPrompt } from '../utils';
+import { buildRunUserGoalContext } from './context';
 import { buildDecisionConfig, indentXmlBlock, xmlTextBlock } from './shared';
 import { ANSWER_SYSTEM_PROMPT } from './templates/answer.prompt';
 
 export const ANSWER_CONTEXT_MESSAGE_NAME = 'answer_context';
+export const RUN_USER_GOAL_MESSAGE_NAME = 'run_user_goal';
 
 export const ANSWER_CONTEXT_LIMITS = {
   unfinishedTaskChars: 320,
@@ -106,6 +109,17 @@ function createAnswerContextMessage(facts: ModelAnswerContextFacts): HumanMessag
   return message;
 }
 
+function createRunUserGoalMessage(userGoal: UserGoal): HumanMessage {
+  const message = new HumanMessage(buildRunUserGoalContext(userGoal));
+  message.name = RUN_USER_GOAL_MESSAGE_NAME;
+  setPinpetMeta(message, {
+    source: RUN_USER_GOAL_MESSAGE_NAME,
+    synthetic: true,
+    authority: 'none',
+  });
+  return message;
+}
+
 /**
  * Returns a new invocation history with non-authoritative Answer facts placed
  * after every canonical message. Dynamic facts never enter the system prompt.
@@ -129,10 +143,14 @@ export function buildAnswerSystemPrompt(params: {
 export function buildAnswerInvocationMessages(params: {
   actor: AgentActor;
   history: readonly BaseMessage[];
+  userGoal?: UserGoal | null;
   contextFacts: ModelAnswerContextFacts;
 }): BaseMessage[] {
+  const historyWithGoal = params.userGoal
+    ? [...params.history, createRunUserGoalMessage(params.userGoal)]
+    : params.history;
   return [
     new SystemMessage(buildAnswerSystemPrompt({ actor: params.actor })),
-    ...appendAnswerContextMessage(params.history, params.contextFacts),
+    ...appendAnswerContextMessage(historyWithGoal, params.contextFacts),
   ];
 }

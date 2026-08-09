@@ -280,28 +280,25 @@ function plannerInput(
   overrides: Partial<CapabilityPlannerInput> = {},
 ): CapabilityPlannerInput {
   const base = {
+    userGoal: {
+      objective: 'Research the repository and then prepare a review.',
+      context: null,
+    },
     completedTask: null,
     completedTaskResult: null,
     remainingPlan: [],
     workspace,
   };
-  // A boundary input carries no briefing, so the entry default must not leak
-  // in through the spread.
   if (overrides.mode === 'boundary') {
-    const { briefing: _briefing, ...boundaryOverrides } = overrides;
     return {
       ...base,
-      ...boundaryOverrides,
+      ...overrides,
       mode: 'boundary',
     } as CapabilityPlannerInput;
   }
   return {
     ...base,
     mode: 'entry',
-    briefing: {
-      objective: 'Research the repository and then prepare a review.',
-      context: null,
-    },
     ...overrides,
   } as CapabilityPlannerInput;
 }
@@ -945,7 +942,7 @@ test('missing structured output and direct text is rejected', async (t) => {
 
   await assert.rejects(
     createCapabilityPlannerAgent({ model }).invoke(plannerInput(workspace, {
-      briefing: {
+      userGoal: {
         objective: 'Current request.',
         context: null,
       },

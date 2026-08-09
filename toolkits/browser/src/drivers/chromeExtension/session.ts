@@ -73,9 +73,10 @@ export class ChromeExtensionBrowserSession {
 
   private readinessPhase: NavigationPhase | null = null;
 
-  /** Readiness phase reached by the most recent `open()` (null before any open
-   *  or when the last open did not reach a terminated navigation). Exposed for
-   *  tests and instrumentation (issue #583 review M2). */
+  /** Readiness phase reached by the most recent `open()` or interaction
+   *  (`click`/`type`/`scroll`) (null before any, or when the last operation did
+   *  not reach a terminated navigation). Exposed for tests and instrumentation
+   *  (issue #583 review M2/S1). */
   get lastReadinessPhase(): NavigationPhase | null {
     return this.readinessPhase;
   }
@@ -266,6 +267,11 @@ export class ChromeExtensionBrowserSession {
    * already-returned snapshot is still honored — we do not regress a working
    * interaction into a timeout. A deterministic failure (`failed`) or settle
    * timeout (`timed_out`) surfaces the corresponding structured error.
+   *
+   * The `nav_generation` outcome's full readiness hand-off is intentionally
+   * deferred: the extension has already returned a snapshot of the produced
+   * page, and driving that navigation to `readable` is the follow-up once a
+   * live navigation event stream lets the Runtime own the wait (see README).
    */
   private async interactAndAwaitSettle(
     command: BrowserExtensionCommandName,
@@ -294,6 +300,10 @@ export class ChromeExtensionBrowserSession {
       // interaction does not dispatch `navigate`, so the counter is unchanged;
       // the settle driver folds the interaction's events into that same
       // generation and flags `nav_generation` when the action starts a new one.
+      // The first argument is `approvedOrigin` (not a real requested URL): an
+      // interaction has no URL of its own, so we seed `requestedUrl` with the
+      // approved origin; `createNavigation` normalizes it and any commit during
+      // the interaction is same-origin, so it never mis-classifies.
       const status = this.bridge.getStatus?.() as BrowserBridgeStatus | undefined;
       controller.beginNavigation(
         approvedOrigin,
@@ -312,6 +322,12 @@ export class ChromeExtensionBrowserSession {
         deadlineMs: INTERACTION_SETTLE_DEADLINE_MS,
         shouldPoll: (event) => event === last,
       });
+
+      // Expose the phase the post-action page reached, mirroring the `open()`
+      // path (#583 review S1). Without this, `lastReadinessPhase` would keep the
+      // previous `open()` value after an interaction, which is misleading for
+      // debuggers and instrumentation.
+      this.readinessPhase = outcome.snapshot.navigation?.phase ?? null;
 
       if (outcome.status === 'failed') {
         throw this.readinessFailure(outcome.error, approvedOrigin);

@@ -469,6 +469,10 @@ test('extension session drives a click through the interaction settle state mach
   await session.open('https://example.com/page');
   const afterClick = await session.click({ ref: 'snapshot-1:1' });
   assert.ok(/Readable page/.test(afterClick));
+  // S1: the interaction path must also record the phase it reached, so a later
+  // debugger/instrumentation sees the post-action settle verdict rather than the
+  // previous `open()` value.
+  assert.equal(session.lastReadinessPhase, 'readable');
 });
 
 test('extension session surfaces a cross-origin interaction as origin_changed', async () => {
@@ -516,4 +520,66 @@ test('extension session surfaces a cross-origin interaction as origin_changed', 
       && error.code === 'origin_changed'
       && error.details?.committedUrl === 'https://attacker.example/steal',
   );
+});
+
+test('extension session does NOT mark a text-less (SPA shell) click resolved readable', async () => {
+  const listeners: Array<(event: BrowserRuntimeEvent) => void> = [];
+  const status = {
+    activeTabId: 15,
+    connectionGeneration: 1,
+    targetGeneration: 1,
+    navigationGeneration: 1,
+  } as BrowserBridgeStatus;
+
+  const session = new ChromeExtensionBrowserSession({
+    getStatus() {
+      return status;
+    },
+    onRuntimeEvent(listener) {
+      listeners.push(listener);
+      return () => {};
+    },
+    onGenerationChanged() {
+      return () => {};
+    },
+    async sendCommand(command) {
+      if (command === 'navigate') return rawSnapshot; // open() returns via pending
+      if (command !== 'click') throw new Error(`unexpected command: ${String(command)}`);
+      // Click commits same-origin and the document is complete, but the body
+      // text is empty → the settle driver must NOT reach `readable`.
+      const base = { tabId: 15, timestamp: Date.now() };
+      listeners.forEach((l) => l({
+        ...base,
+        connectionGeneration: 1,
+        targetGeneration: 1,
+        navigationGeneration: 1,
+        type: 'navigation.committed',
+        url: 'https://example.com/',
+      }));
+      listeners.forEach((l) => l({
+        ...base,
+        connectionGeneration: 1,
+        targetGeneration: 1,
+        navigationGeneration: 1,
+        type: 'document.ready',
+        payload: { readyState: 'complete' },
+      }));
+      listeners.forEach((l) => l({
+        ...base,
+        connectionGeneration: 1,
+        targetGeneration: 1,
+        navigationGeneration: 1,
+        type: 'dom.changed',
+        payload: { textLength: 0, textRevision: 1 },
+      }));
+      return rawSnapshot;
+    },
+  });
+
+  await session.open('https://example.com/page');
+  // Backward compatible: honor the returned snapshot (pending), but the post-action
+  // phase must reflect that the page never reached `readable` (S1 weak-assertion guard).
+  const afterClick = await session.click({ ref: 'snapshot-1:1' });
+  assert.ok(/Readable page/.test(afterClick));
+  assert.notEqual(session.lastReadinessPhase, 'readable');
 });

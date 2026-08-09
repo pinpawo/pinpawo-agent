@@ -142,3 +142,7 @@ snapshot (backward compatible), and only a genuine settle deadline elapse
 surfaces `navigation_timeout`. The same scope caveat applies: the extension
 captures the snapshot before deriving readiness events, so the Runtime reviews
 the post-action page rather than owning the wait via a live event subscription.
+The `nav_generation` outcome is currently observed but its full readiness
+hand-off is **intentionally deferred** — the extension has already returned a
+snapshot of the produced page, and driving that navigation to `readable` is the
+follow-up once a live navigation event stream lets the Runtime own the wait.

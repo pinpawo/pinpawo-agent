@@ -627,3 +627,53 @@ test('extension session does NOT mark a text-less (SPA shell) click resolved rea
   assert.ok(/Readable page/.test(afterClick));
   assert.notEqual(session.lastReadinessPhase, 'readable');
 });
+
+test('a readiness timeout still leaves the session owning the page for browser_wait', async () => {
+  const status = {
+    activeTabId: 11,
+    connectionGeneration: 1,
+    targetGeneration: 1,
+    navigationGeneration: 1,
+  } as BrowserBridgeStatus;
+
+  const session = new ChromeExtensionBrowserSession({
+    getStatus() {
+      return status;
+    },
+    onRuntimeEvent() {
+      return () => {};
+    },
+    onGenerationChanged() {
+      return () => {};
+    },
+    async sendCommand(command) {
+      // navigate is fire-and-forget; no readiness events ever arrive, so the
+      // wait runs out its deadline.
+      if (command === 'navigate') {
+        (status as { navigationGeneration?: number }).navigationGeneration = 2;
+        return { ok: true, tabId: 11, url: 'https://example.com/slow' };
+      }
+      return rawSnapshot;
+    },
+  }, () => '/tmp');
+
+  await assert.rejects(
+    () => (session as unknown as {
+      openAndAwaitReadiness(
+        url: string,
+        approvedOrigin: string,
+        signal?: AbortSignal,
+        deadlineMs?: number,
+      ): Promise<string>;
+    }).openAndAwaitReadiness('https://example.com/slow', 'https://example.com', undefined, 30),
+    (error: unknown) => (error as { code?: string }).code === 'navigation_timeout',
+  );
+
+  // The page is loading, so the session owns it: a follow-up `browser_wait`
+  // must not fail with `browser_not_open`, which is exactly what the timeout
+  // message tells the caller to do next.
+  assert.equal(
+    (session as unknown as { approvedOrigin: string | null }).approvedOrigin,
+    'https://example.com',
+  );
+});

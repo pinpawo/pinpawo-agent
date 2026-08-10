@@ -216,3 +216,72 @@ test('target activation does not focus the user\'s Chrome window', async () => {
   assert.match(activateTarget, /chrome\.tabs\.update\(tabId, \{ active: true \}\)/);
   assert.doesNotMatch(activateTarget, /chrome\.windows\.update/);
 });
+
+test('live DOM sampling does not read a frame URL from Page.loadEventFired', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
+    'utf8',
+  );
+  const handler = source.match(
+    /chrome\.debugger\.onEvent\.addListener\(\(source, method, params\) => \{([\s\S]*?)\n\}\);/,
+  )?.[1] ?? '';
+  const loadEventBranch = handler.match(
+    /if \(method === 'Page\.loadEventFired'\) \{([\s\S]*?)\n  \}/,
+  )?.[1] ?? '';
+
+  assert.notEqual(loadEventBranch, '');
+  // `Page.loadEventFired` carries only a `timestamp`; reading `params.frame.url`
+  // always yields undefined, so the DOM sample never fires and the Runtime never
+  // receives a textLength (navigation then hangs in `settling` until timeout).
+  assert.doesNotMatch(loadEventBranch, /params[\s\S]*?frame/);
+  assert.match(loadEventBranch, /liveTabUrl\(source\.tabId\)/);
+  assert.match(loadEventBranch, /emitLiveDomSample/);
+});
+
+test('tab-complete readiness resolves a real URL instead of posting an empty one', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
+    'utf8',
+  );
+  const handler = source.match(
+    /chrome\.tabs\.onUpdated\.addListener\(\(tabId, changeInfo\) => \{([\s\S]*?)\n\}\);/,
+  )?.[1] ?? '';
+
+  assert.match(handler, /liveTabUrl\(tabId\)/);
+  assert.match(handler, /if \(!liveUrl\) return;/);
+  // An empty URL makes the readiness events unusable downstream.
+  assert.doesNotMatch(handler, /emitLiveDocumentReady\([^)]*''/);
+  assert.doesNotMatch(handler, /emitLiveDomSample\([^)]*''/);
+});
+
+test('liveTabUrl falls back to the tab itself when the target has no URL', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
+    'utf8',
+  );
+  const helper = source.match(
+    /async function liveTabUrl\(tabId(?:: number)?\)(?:: Promise<string>)? \{([\s\S]*?)\n\}/,
+  )?.[1] ?? '';
+
+  assert.match(helper, /targets\.current\(\)/);
+  assert.match(helper, /chrome\.tabs\.get\(tabId\)/);
+});
+
+test('network activity reports the inflight count before the reported fact', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
+    'utf8',
+  );
+  const emitter = source.match(
+    /function emitLiveNetworkActivity\(tabId(?:: number)?, kind[^)]*\) \{([\s\S]*?)\n\}/,
+  )?.[1] ?? '';
+
+  // networkActivityEvent applies its own +1/-1 delta, so the base must be the
+  // count *before* the fact — otherwise the tally never returns to zero and the
+  // page can never settle.
+  assert.match(emitter, /kind === 'request'/);
+  assert.match(emitter, /Math\.max\(0, inflightRequests - 1\)/);
+  assert.match(emitter, /inflightRequests \+ 1/);
+  // finish and fail must stay distinguishable for the delta translator.
+  assert.match(source, /'Network\.loadingFinished' \? 'finish' : 'fail'/);
+});

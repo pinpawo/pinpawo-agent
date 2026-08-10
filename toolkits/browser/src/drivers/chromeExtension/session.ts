@@ -178,6 +178,7 @@ export class ChromeExtensionBrowserSession {
     url: string,
     approvedOrigin: string,
     signal?: AbortSignal,
+    deadlineMs: number = WAIT_FOR_READINESS_DEADLINE_MS,
   ): Promise<string> {
     // Issue #601: navigate is fire-and-forget — the extension returns
     // { ok: true } immediately and the Runtime owns the readiness wait.
@@ -194,7 +195,7 @@ export class ChromeExtensionBrowserSession {
 
     const wait = source
       ? waitForReadiness(controller, {
-          deadlineMs: WAIT_FOR_READINESS_DEADLINE_MS,
+          deadlineMs,
           source,
         })
       : null;
@@ -256,12 +257,19 @@ export class ChromeExtensionBrowserSession {
         throw this.readinessFailure(result.failure.error, approvedOrigin);
       }
       if (result.status === 'timed_out') {
+        // The navigation was dispatched and the tab is still loading, so the
+        // session owns this page even though it is not readable yet. Claim the
+        // approved origin before throwing: the timeout tells the caller to
+        // continue with `browser_wait`, and that guidance is unusable if the
+        // failed open leaves the session with no owned browser.
+        this.approvedOrigin = approvedOrigin;
         const nav = result.snapshot.navigation;
         throw this.readinessTimeoutError(
           url,
           nav?.phase ?? null,
           nav?.committedUrl,
           nav?.readyState,
+          deadlineMs,
         );
       }
 
@@ -405,10 +413,11 @@ export class ChromeExtensionBrowserSession {
     phase: string | null,
     committedUrl: string | undefined,
     readyState: string | undefined,
+    deadlineMs: number = OPEN_READINESS_DEADLINE_MS,
   ): Error {
     return new BrowserOperationError(
       'navigation_timeout',
-      `Page did not become readable within ${OPEN_READINESS_DEADLINE_MS}ms of navigation to ${url}. ` +
+      `Page did not become readable within ${deadlineMs}ms of navigation to ${url}. ` +
         `Page state: phase=${phase}${committedUrl ? `, committedUrl=${committedUrl}` : ''}` +
         `${readyState ? `, readyState=${readyState}` : ''}. ` +
         `Use browser_wait to poll for the page to finish loading.`,

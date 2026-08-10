@@ -53,6 +53,7 @@ test('StudioRunService runs Studio with runtimeConfig-scoped paths', async () =>
       let result: StudioTurnResult | null = null;
       return {
         resolved: {} as BuildStudioResult['resolved'],
+        petCheckpointers: new Map(),
         orchestrator: {
           submitRequest: async (turn: {
             userRequest: string;
@@ -133,6 +134,7 @@ test('StudioRunService falls back to deps.workdir when runtimeConfig is absent',
       let result: StudioTurnResult | null = null;
       return {
         resolved: {} as BuildStudioResult['resolved'],
+        petCheckpointers: new Map(),
         orchestrator: {
           submitRequest: async (turn: {
             userRequest: string;

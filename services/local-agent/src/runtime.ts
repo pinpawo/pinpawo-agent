@@ -134,6 +134,7 @@ export class LocalAgentRuntime {
       serverMode: this.serverMode,
       actorId: this.getActorId(),
       actorName: this.actorName ?? undefined,
+      chatCheckpointer: this.chatCheckpointer,
       modelProfiles: this.getModelProfiles(),
       globalReviewPolicyMode: getConfig().globalReviewPolicyMode,
       autoAuthorizationSafetyLevel: getConfig().autoAuthorizationSafetyLevel,
@@ -150,6 +151,11 @@ export class LocalAgentRuntime {
       capabilityArtifactStore: this.capabilityRegistry.getCapabilityArtifactStore(),
       rescanUserCapabilities: () => this.rescanUserCapabilities(),
     };
+  }
+
+  /** Host 持有的 chat checkpointer;Studio 的 pet 复用同一实例(#613)。 */
+  getChatCheckpointer(): FileSaver {
+    return this.chatCheckpointer;
   }
 
   getRuntimeConfig(): LocalAgentRuntimeConfig {

@@ -79,6 +79,7 @@ function buildStudioInputFromDeps(request: StudioRunServiceRequest): BuildStudio
     ],
     toolkits: [...(deps.pluginToolkits ?? []), ...(deps.localToolkits ?? [])],
     toolkitRuntimeManager: deps.toolkitRuntimeManager,
+    checkpoint: deps.chatCheckpointer,
     ownerUserId: request.ownerUserId ?? null,
     bridge: request.bridge,
     workdir: getLocalServerWorkdir(deps),

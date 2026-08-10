@@ -77,6 +77,7 @@ export type {
   AgentToolkit,
   ModelInputModality,
   NamedStructuredTool,
+  ToolAutoAuthorizationContext,
   ToolAuthorizationContext,
   ToolAuthorizationPolicy,
   ToolDefinition,

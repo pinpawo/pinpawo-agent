@@ -3120,6 +3120,89 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
   assert.equal((runtimeEvents[0] as { name?: unknown } | undefined)?.name, 'global_review_policy_auto_authorized');
 });
 
+test('global auto policy bypasses the model only for a deterministic complete batch', async () => {
+  let callCount = 0;
+  let autoReviewCount = 0;
+  const runtimeEvents: unknown[] = [];
+  const rawTool = tool(async ({ path }: { path: string }) => {
+    callCount += 1;
+    return `patched ${path}`;
+  }, {
+    name: 'apply_patch',
+    description: 'patch file',
+    schema: z.object({ path: z.string(), patch: z.string() }),
+  });
+  const otherTool = tool(async () => 'other action ran', {
+    name: 'other_mutation',
+    description: 'another mutation',
+    schema: z.object({}),
+  });
+  const toolkits: AgentToolkit[] = [{
+    name: 'local',
+    description: 'local tools',
+    tools: [
+      reviewedTool(rawTool, ReviewPolicies.localMutation({
+        autoAuthorize: ({ input, workdir }) => (
+          workdir === '/repo'
+          && (input as { path?: unknown }).path === 'notes.md'
+        ),
+      })),
+      reviewedTool(otherTool, ReviewPolicies.localMutation()),
+    ],
+  }];
+  const autoModel = {
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        autoReviewCount += 1;
+        return {
+          decision: 'require_authorization',
+          reason: 'The model should not be called for this deterministic batch.',
+        };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+
+  const resources = await resolveToolkitExecution(toolkits, ['local'], {
+    models: { act: autoModel },
+    actor: testActor,
+    messages: [],
+    reviewContext: {
+      task: 'Patch notes',
+      workdir: '/repo',
+    },
+    reviewCapabilities: {
+      humanReview: false,
+      sessionAuthorization: false,
+    },
+    globalReviewPolicy: { mode: 'auto_authorization' },
+    emitRuntimeEvent: (event) => {
+      runtimeEvents.push(event);
+    },
+  });
+
+  const result = await runToolkitToolCall(resources, {
+    id: 'call-auto-patch',
+    name: 'apply_patch',
+    args: { path: 'notes.md', patch: 'change' },
+  });
+  assert.equal(readToolMessageContent(result.messages, 'call-auto-patch'), 'patched notes.md');
+  assert.equal(callCount, 1);
+  assert.equal(autoReviewCount, 0);
+  assert.equal((runtimeEvents[0] as { name?: unknown } | undefined)?.name, 'global_review_policy_auto_authorized');
+
+  await runToolkitToolCall(resources, [{
+    id: 'call-mixed-patch',
+    name: 'apply_patch',
+    args: { path: 'notes.md', patch: 'another change' },
+  }, {
+    id: 'call-other-mutation',
+    name: 'other_mutation',
+    args: {},
+  }]);
+  assert.equal(callCount, 1);
+  assert.equal(autoReviewCount, 1);
+});
+
 test('global review policy reuses an exact auto authorization in the same session', async () => {
   let callCount = 0;
   let autoReviewCount = 0;

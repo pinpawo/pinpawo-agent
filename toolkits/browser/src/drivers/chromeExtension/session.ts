@@ -23,8 +23,12 @@ import { BrowserOperationError } from '../../errors';
 import { BrowserLifecycleController } from '../../lifecycle/controller';
 import {
   OPEN_READINESS_DEADLINE_MS,
-  driveOpenReadiness,
 } from '../../lifecycle/openReadiness';
+import {
+  waitForReadiness,
+  WAIT_FOR_READINESS_DEADLINE_MS,
+  type ReadinessEventSource,
+} from '../../lifecycle/waitForReadiness';
 import {
   INTERACTION_SETTLE_DEADLINE_MS,
   driveInteractionSettle,
@@ -159,48 +163,69 @@ export class ChromeExtensionBrowserSession {
 
   /**
    * Issue a navigation and drive it to `readable` through the Runtime lifecycle
-   * state machine (issue #583). The extension reports the raw page lifecycle
-   * events (`navigation.committed`, `document.ready`, `dom.changed`); this
-   * session buffers them while the navigate command is in flight, then replays
-   * them through a `BrowserLifecycleController` bound to the bridge's own
-   * generation so a late or cross-origin result is surfaced deterministically
-   * instead of only trusting the extension's `tab.status` polling.
+   * state machine (issue #583 / #601). The extension now fires-and-forgets
+   * navigate (returns immediately without a snapshot), and live CDP events
+   * (Page.frameNavigated, Network.*, Page.loadEventFired, tabs.onUpdated)
+   * drive the `BrowserLifecycleController` through the bridge. This session
+   * uses `waitForReadiness` backed by a `PendingWait` to reach a terminal
+   * verdict — `readable`, `failed` (cross-origin / target closed / connection
+   * lost), or `timed_out` — instead of trusting `tab.status` polling.
    *
-   * Backward compatible: when the page has not yet produced readable events
-   * (still hydrating), the navigate command that already returned a snapshot is
-   * still honored and the snapshot is returned — we do not regress a working
-   * open into a timeout. When the events do show the page ready, cross-origin,
-   * or the readiness deadline ultimately elapses, we surface the corresponding
-   * structured error.
+   * Backward compatible: when the bridge is not wired for live events, a
+   * blocking snapshot is taken after the navigate returns.
    */
   private async openAndAwaitReadiness(
     url: string,
     approvedOrigin: string,
     signal?: AbortSignal,
   ): Promise<string> {
+    // Issue #601: navigate is fire-and-forget — the extension returns
+    // { ok: true } immediately and the Runtime owns the readiness wait.
+    // Subscribe to the live event stream before dispatching so the
+    // controller captures every event from navigation start.
     const controller = new BrowserLifecycleController();
-    const buffered: BrowserRuntimeEvent[] = [];
-    const offEvents =
-      this.bridge.onRuntimeEvent?.((event) => buffered.push(event)) ?? (() => {});
-    const offGenerations =
-      this.bridge.onGenerationChanged?.((change) => {
-        controller.notifyGenerationAdvance(
-          change.connectionGeneration,
-          change.targetGeneration,
-        );
-      }) ?? (() => {});
-    const startTime = Date.now();
+    const source: ReadinessEventSource | undefined =
+      this.bridge.onRuntimeEvent && this.bridge.onGenerationChanged
+        ? {
+            onRuntimeEvent: (listener) => this.bridge.onRuntimeEvent!(listener),
+            onGenerationChanged: (listener) => this.bridge.onGenerationChanged!(listener),
+          }
+        : undefined;
+
+    const wait = source
+      ? waitForReadiness(controller, {
+          deadlineMs: WAIT_FOR_READINESS_DEADLINE_MS,
+          source,
+        })
+      : null;
+
     try {
+      // Fire-and-forget navigate: the extension returns immediately and
+      // live CDP events drive the controller through the bridge.
       const raw = await this.bridge.sendCommand('navigate', {
         url,
         approvedOrigin,
       }, undefined, signal);
-      const snapshot = this.buildSnapshot(raw, approvedOrigin);
 
-      // Bind the controller to the bridge's authoritative generations (the
-      // navigate dispatch already advanced the navigation generation). The
-      // bridge stamps navigation-scoped events with the same generation, so
-      // `isEventCurrent` drops any late/superseded event during replay.
+      const navigateResult = raw as { ok?: boolean; tabId?: number; url?: string } | undefined;
+      if (!navigateResult?.ok) {
+        throw new BrowserBridgeError(
+          'navigation_failed',
+          'extension navigate did not return ok',
+          false,
+          { approvedOrigin },
+        );
+      }
+
+      // Bind the controller to the bridge's *post-navigate* generation. The
+      // bridge bumps its navigation generation when the `navigate` command is
+      // dispatched (`sendCommand('navigate', …)` calls `beginNavigation()`), so
+      // events emitted after the navigation are stamped with the bumped value.
+      // Binding before the dispatch would tie the controller to the pre-navigate
+      // generation and `isEventCurrent` would drop *every* live event as stale,
+      // wedging `browser_open` in a 30s timeout (#603 review M1). Reading the
+      // status *after* navigate returns the exact generation the live events
+      // carry, so the two always agree.
       const status = this.bridge.getStatus?.() as BrowserBridgeStatus | undefined;
       controller.beginNavigation(
         url,
@@ -210,47 +235,45 @@ export class ChromeExtensionBrowserSession {
         status?.navigationGeneration,
       );
 
-      // The navigate round-trip usually emits a tightly grouped burst of events
-      // (navigation.committed, document.ready, dom.changed) stamped ~same time.
-      // Polling after *every* buffered event would re-run `advanceSettling` and
-      // reset the network-settle baseline on each poll, so the final poll's
-      // `now` equals the baseline it just wrote (delta 0 < settling window) and
-      // the navigation never reaches `readable` (issue #583 review M1).
-      // Poll once, after the last buffered event, so the readiness verdict is
-      // evaluated against the fully-assembled state rather than mid-burst.
-      const last = buffered[buffered.length - 1];
-      const outcome = driveOpenReadiness(controller, buffered, startTime, {
-        now: () => Date.now(),
-        deadlineMs: OPEN_READINESS_DEADLINE_MS,
-        shouldPoll: (event) => event === last,
-      });
-
-      this.readinessPhase = outcome.snapshot.navigation?.phase ?? null;
-
-      if (outcome.status === 'failed') {
-        throw this.readinessFailure(outcome.error, approvedOrigin);
+      // Wait for the live event stream to drive the controller to a terminal
+      // state. Without a live source (e.g. bridge not wired), fall back to a
+      // blocking snapshot.
+      if (!wait) {
+        // Backward-compatible: bridge not wired for live events.
+        // Take a snapshot and return it.
+        const snapshot = await this.bridge.sendCommand('snapshot', {
+          approvedOrigin,
+        }, undefined, signal);
+        const built = this.buildSnapshot(snapshot, approvedOrigin);
+        this.approvedOrigin = approvedOrigin;
+        return built;
       }
-      if (outcome.status === 'timed_out') {
-        throw new BrowserOperationError(
-          'navigation_timeout',
-          `Page did not become readable within ${OPEN_READINESS_DEADLINE_MS}ms of navigation to ${url}.`,
-          true,
+
+      const result = await wait.finished;
+      this.readinessPhase = result.snapshot.navigation?.phase ?? null;
+
+      if (result.status === 'failed') {
+        throw this.readinessFailure(result.failure.error, approvedOrigin);
+      }
+      if (result.status === 'timed_out') {
+        const nav = result.snapshot.navigation;
+        throw this.readinessTimeoutError(
+          url,
+          nav?.phase ?? null,
+          nav?.committedUrl,
+          nav?.readyState,
         );
       }
-      if (outcome.status === 'pending') {
-        // The events emitted during the navigate round-trip did not conclude the
-        // page (still hydrating, body text not sampled yet). This is the
-        // backward-compatible path: honor the already-returned snapshot instead
-        // of regressing a working open into a timeout. The caller can re-poll.
-        this.approvedOrigin = approvedOrigin;
-        return snapshot;
-      }
 
+      // Page is readable: take a fresh snapshot from the live page.
+      const snapshot = await this.bridge.sendCommand('snapshot', {
+        approvedOrigin,
+      }, undefined, signal);
+      const built = this.buildSnapshot(snapshot, approvedOrigin);
       this.approvedOrigin = approvedOrigin;
-      return snapshot;
+      return built;
     } finally {
-      offEvents();
-      offGenerations();
+      wait?.dispose();
     }
   }
 
@@ -370,6 +393,27 @@ export class ChromeExtensionBrowserSession {
       error.message,
       error.retryable ?? false,
       error.details ? { approvedOrigin, ...(error.details as Record<string, unknown>) } : { approvedOrigin },
+    );
+  }
+
+  /** Build a structured `navigation_timeout` (issue #601) that carries the page
+   *  state seen at timeout (phase / committed URL / readyState) and guides the
+   *  caller toward `browser_wait` instead of a blind retry of a page that is
+   *  still loading. */
+  private readinessTimeoutError(
+    url: string,
+    phase: string | null,
+    committedUrl: string | undefined,
+    readyState: string | undefined,
+  ): Error {
+    return new BrowserOperationError(
+      'navigation_timeout',
+      `Page did not become readable within ${OPEN_READINESS_DEADLINE_MS}ms of navigation to ${url}. ` +
+        `Page state: phase=${phase}${committedUrl ? `, committedUrl=${committedUrl}` : ''}` +
+        `${readyState ? `, readyState=${readyState}` : ''}. ` +
+        `Use browser_wait to poll for the page to finish loading.`,
+      true,
+      { phase, committedUrl, readyState, url },
     );
   }
 

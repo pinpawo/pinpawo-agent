@@ -212,7 +212,7 @@ test('bash toolkit reviews apply_patch with resolved file paths', async (t) => {
   assert.match(view.target ?? '', new RegExp(filePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });
 
-test('auto review deterministically authorizes apply_patch only for an existing file inside workdir', async (t) => {
+test('auto review deterministically authorizes safe apply_patch execution', async (t) => {
   const root = createFileFixture(t);
   const outsideRoot = createFileFixture(t);
   const insidePath = resolve(root, 'inside.txt');
@@ -251,6 +251,10 @@ test('auto review deterministically authorizes apply_patch only for an existing 
   }
   assert.equal(await policy.autoAuthorize({
     ...reviewContext('apply_patch', { patch: 'not V4A' }),
+    workdir: root,
+  }), true);
+  assert.equal(await policy.autoAuthorize({
+    ...reviewContext('apply_patch', {}),
     workdir: root,
   }), false);
 });

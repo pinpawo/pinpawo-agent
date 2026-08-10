@@ -33,6 +33,8 @@ import { createArtifactDiscoveryTools } from './artifactDiscoveryTools';
 import { downloadFileTool, httpFetchTool, networkOperationMetadata } from './networkTools';
 import { jqQueryTool, jsonOperationMetadata } from './jsonTools';
 import { gitTools, gitOperationMetadata } from './gitTools';
+import { parsePatch, PatchParseError } from './applyPatch';
+import { resolveUserPath } from './pathUtils';
 import { globSearchTool, grepSearchTool, searchOperationMetadata } from './searchTools';
 import { shellRuntime, type ShellRuntimeBinding } from './shellRuntime';
 import {
@@ -153,13 +155,21 @@ function isWithinPath(root: string, target: string) {
 
 function autoAuthorizeApplyPatch(ctx: ToolAutoAuthorizationContext) {
   if (!ctx.workdir) return false;
-  let target: string | undefined;
+  const input = ctx.input;
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return false;
+  const patch = 'patch' in input ? input.patch : undefined;
+  if (typeof patch !== 'string') return false;
+
+  let target: string;
   try {
-    target = ctx.operation?.summarizeInput?.(ctx.input)?.target;
-  } catch {
+    target = resolveUserPath(parsePatch(patch).path);
+  } catch (error) {
+    // The executor uses the same parser before performing any filesystem
+    // mutation. Invalid V4A is therefore safe to run: execution will disclose
+    // the parse failure to the model without changing a file.
+    if (error instanceof PatchParseError) return true;
     return false;
   }
-  if (!target) return false;
 
   try {
     const realWorkdir = realpathSync(ctx.workdir);

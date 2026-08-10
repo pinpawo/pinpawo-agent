@@ -268,27 +268,30 @@ test('authorization generation is scoped to authorization policy, not tool imple
 
 test('compiled registry snapshots authorization policy functions for its generation', () => {
   const authorize = () => true;
-  const review = ReviewPolicies.commandExecution({
-    authorization: {
-      ...AuthorizationPolicies.exact(),
-      authorize,
-    },
+  const matcherReview = ReviewPolicies.commandExecution({ authorization: 'exact' });
+  const authorizeReview = ReviewPolicies.localMutation({
+    authorization: { authorize },
   });
-  const originalBuilder = review.authorization?.buildMatcher;
+  const originalBuilder = matcherReview.authorization?.buildMatcher;
   const registry = compileAgentRegistry({
     toolkits: [defineToolkit({
       name: 'local',
       description: 'Local tools.',
-      tools: [{ tool: mockTool('run_shell'), review }],
+      tools: [
+        { tool: mockTool('run_shell'), review: matcherReview },
+        { tool: mockTool('apply_patch'), review: authorizeReview },
+      ],
     })],
     capabilities: [capability('general', ['local'])],
   });
 
-  review.authorization!.buildMatcher = () => null;
-  review.authorization!.authorize = () => false;
+  matcherReview.authorization!.buildMatcher = () => null;
+  authorizeReview.authorization!.authorize = () => false;
 
-  const compiledReview = registry.toolkits[0]?.tools[0]?.review;
-  assert.equal(compiledReview?.authorization?.buildMatcher, originalBuilder);
-  assert.equal(compiledReview?.authorization?.authorize, authorize);
-  assert.ok(Object.isFrozen(compiledReview?.authorization));
+  const compiledMatcherReview = registry.toolkits[0]?.tools[0]?.review;
+  const compiledAuthorizeReview = registry.toolkits[0]?.tools[1]?.review;
+  assert.equal(compiledMatcherReview?.authorization?.buildMatcher, originalBuilder);
+  assert.equal(compiledAuthorizeReview?.authorization?.authorize, authorize);
+  assert.ok(Object.isFrozen(compiledMatcherReview?.authorization));
+  assert.ok(Object.isFrozen(compiledAuthorizeReview?.authorization));
 });

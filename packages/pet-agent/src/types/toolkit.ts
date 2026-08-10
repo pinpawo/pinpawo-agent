@@ -46,20 +46,31 @@ export type ToolAutoAuthorizationContext = ToolAuthorizationContext & {
   workdir: string | null;
 };
 
-export type ToolAuthorizationPolicy = {
-  /**
-   * Deterministically authorize the current call from trusted runtime facts.
-   * `true` grants this call; `false` defers to the remaining review flow and
-   * does not reject the call.
-   */
-  authorize?: (
-    ctx: ToolAutoAuthorizationContext,
-  ) => boolean | Promise<boolean>;
-  /** Build the identity used to reuse a prior authorization in this session. */
-  buildMatcher?: (
-    ctx: ToolAuthorizationContext,
-  ) => ToolAuthorizationMatcher | null | Promise<ToolAuthorizationMatcher | null>;
-};
+/**
+ * One tool chooses exactly one authorization strategy:
+ * deterministic authorization of each current call, or reusable session
+ * authorization through a matcher. The strategies are intentionally
+ * mutually exclusive so a session hit can never bypass a current-call check.
+ */
+export type ToolAuthorizationPolicy =
+  | {
+      /**
+       * Deterministically authorize the current call from trusted runtime facts.
+       * `true` grants this call; `false` defers to the remaining review flow and
+       * does not reject the call.
+       */
+      authorize: (
+        ctx: ToolAutoAuthorizationContext,
+      ) => boolean | Promise<boolean>;
+      buildMatcher?: never;
+    }
+  | {
+      authorize?: never;
+      /** Build the identity used to reuse a prior authorization in this session. */
+      buildMatcher: (
+        ctx: ToolAuthorizationContext,
+      ) => ToolAuthorizationMatcher | null | Promise<ToolAuthorizationMatcher | null>;
+    };
 
 export type ToolReviewBlock = {
   type: 'block';
@@ -375,8 +386,8 @@ export function validateToolkitDefinition(toolkit: AgentToolkit) {
         }
         assertOptionalFunction(`${owner}.authorize`, authorization.authorize);
         assertOptionalFunction(`${owner}.buildMatcher`, authorization.buildMatcher);
-        if (!authorization.authorize && !authorization.buildMatcher) {
-          throw new Error(`${owner} must define authorize() or buildMatcher()`);
+        if (Boolean(authorization.authorize) === Boolean(authorization.buildMatcher)) {
+          throw new Error(`${owner} must define exactly one of authorize() or buildMatcher()`);
         }
       }
     }

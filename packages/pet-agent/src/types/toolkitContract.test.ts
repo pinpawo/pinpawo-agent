@@ -136,6 +136,39 @@ test('toolkit registration rejects malformed static contract fields', () => {
     } as never),
     /review\.authorization\.buildMatcher must be a function/,
   );
+
+  assert.throws(
+    () => validateToolkitDefinition({
+      name: 'ambiguous_authorization',
+      description: 'Authorization strategies must be mutually exclusive.',
+      tools: [{
+        tool: alphaTool,
+        review: {
+          request: () => null,
+          authorization: {
+            authorize: () => true,
+            buildMatcher: () => null,
+          },
+        },
+      }],
+    } as never),
+    /must define exactly one of authorize\(\) or buildMatcher\(\)/,
+  );
+
+  assert.throws(
+    () => validateToolkitDefinition({
+      name: 'empty_authorization',
+      description: 'Authorization must select one strategy.',
+      tools: [{
+        tool: alphaTool,
+        review: {
+          request: () => null,
+          authorization: {},
+        },
+      }],
+    } as never),
+    /must define exactly one of authorize\(\) or buildMatcher\(\)/,
+  );
 });
 
 test('defineToolkit keeps implementation, operation, and review in one ToolDefinition', () => {

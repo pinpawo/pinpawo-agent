@@ -43,7 +43,7 @@ type ToolAuthorizationMatcher =
 
 authorization generation 只标识注册的可授权工具和 authorization policy，包括 `authorize()` 与 `buildMatcher()`。函数源码 fallback 不捕获 closure state；如果闭包数据改变了授权或 subject 投影语义，policy 定义也必须同步升级。generation 不是工具实现或完整运行时代码的完整性证明。
 
-`authorize()` 和 `buildMatcher()` 是同一 authorization policy 的两个可选能力。只提供 `authorize()` 的工具会在每次调用时重新判断当前环境，不建立或复用 session grant；只提供 `buildMatcher()` 的工具沿用 session matcher 流程。`apply_patch` 只使用前者。
+`authorize()` 和 `buildMatcher()` 是同一 authorization policy 下互斥的两种策略，每个工具必须且只能选择一种。选择 `authorize()` 的工具会在每次调用时重新判断当前环境，不建立或复用 session grant；选择 `buildMatcher()` 的工具沿用 session matcher 流程，不同时运行 current-call callback。类型和 toolkit 注册校验都会拒绝同时提供或同时缺少这两个函数。`apply_patch` 选择前者。
 
 `require_authorization` 不使用 auto grant，但不会删除它；human grant 在 require 和 auto 模式下均可使用。custom policy 默认也不使用 auto grant，只有显式设置 `reuseAutoAuthorizations: true` 才会复用。新 thread 使用独立 checkpoint state，不复用旧 grant。
 

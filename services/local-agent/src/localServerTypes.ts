@@ -5,6 +5,7 @@ import type {
   CapabilityArtifactStore,
   ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
+import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { ToolAuthorizationSafetyLevel } from '@pinpawo/agent-contracts';
 import type { LocalStudioDueRunScheduler } from './localStudioDueRunScheduler';
 import type { LoadedUserCapability } from './capabilityLoader';
@@ -35,6 +36,15 @@ export type LocalServerDeps = {
   workdir: string;
   runtimeConfig?: LocalAgentRuntimeConfig;
   studioDueRunScheduler?: LocalStudioDueRunScheduler;
+  /**
+   * Host 持有的 chat checkpointer。Studio 的 pet 复用同一实例:threadId
+   * 已含 studio/run/task/pet/invocation 层级,与 chat 线程天然隔离,
+   * 而 FileSaver 自带 per-checkpoint 写锁,并发写不会互相覆盖。
+   *
+   * 缺少它时 pet 的 graph 跑在无 checkpoint 状态 —— 执行进度只存在于内存,
+   * 中断后无法 resume。见 #613。
+   */
+  chatCheckpointer?: BaseCheckpointSaver;
   localToolkitDefinitions?: AgentToolkit[];
   localToolkits?: AgentToolkit[];
   pluginToolkitDefinitions?: AgentToolkit[];

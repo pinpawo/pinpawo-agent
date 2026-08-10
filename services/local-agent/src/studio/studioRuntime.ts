@@ -1,4 +1,5 @@
 import path from 'node:path';
+import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import {
   GENERAL_CAPABILITY_NAME,
   type AgentCapability,
@@ -73,6 +74,11 @@ export type BuildStudioInput = {
   toolkits?: AgentToolkit[];
   /** local-agent process-owned Toolkit runtime lifecycle. */
   toolkitRuntimeManager?: ToolkitRuntimeManager;
+  /**
+   * Host 持有的 checkpointer,由所有 pet 共用。缺失时 pet 的 graph 跑在
+   * 无 checkpoint 状态,执行进度只存在于内存、中断后无法 resume(#613)。
+   */
+  checkpoint?: BaseCheckpointSaver;
   /** 当前 local-agent 进程的 owner user id;无服务端绑定时为 null */
   ownerUserId: string | null;
   /** ws 桥三件套:供 humanReviewer 绑定到本次 turn 的 ws 连接 */
@@ -90,6 +96,12 @@ export type BuildStudioInput = {
 export type BuildStudioResult = {
   orchestrator: StudioOrchestrator;
   resolved: ResolvedStudio;
+  /**
+   * 每个已装配 pet 实际拿到的 checkpointer,按 petId 索引。值为 undefined
+   * 表示该 pet 跑在无 checkpoint 状态 —— 执行进度只存在于内存,中断后无法
+   * resume(#613)。常驻 host 落地后由 host 持有,这里暴露出来便于确认接线。
+   */
+  petCheckpointers: ReadonlyMap<string, BaseCheckpointSaver | undefined>;
 };
 
 const runQueueStoresByPath = new Map<string, StudioRunQueueStore>();
@@ -159,6 +171,8 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
   // Studio 的 wiki 是落盘的:把文件实现注入 studio 声明的 port。
   const fileWikiAccess = createFileWikiAccess();
 
+  const petCheckpointers = new Map<string, BaseCheckpointSaver | undefined>();
+
   const petAgents: PetAgentRuntime[] = resolved.agents.map((petConfig) => {
     // 每个 pet 按稳定 profile id 解析完整 endpoint/key/model 组合。
     const petLlmConfig = petConfig.modelProfileId
@@ -183,6 +197,8 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
       }
       return cap;
     });
+    const petCheckpoint = input.checkpoint;
+    petCheckpointers.set(petConfig.petId, petCheckpoint);
     return createPetAgentRuntime({
       models: petModels,
       wikiAccess: fileWikiAccess,
@@ -196,6 +212,7 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
       ],
       toolkits: input.toolkits,
       toolkitRuntimeManager: input.toolkitRuntimeManager,
+      checkpoint: petCheckpoint,
       contextWindowTokens: petLlmConfig.contextWindowTokens,
       subagentContextWindowTokens: petLlmConfig.subagentContextWindowTokens
         ?? petLlmConfig.contextWindowTokens,
@@ -240,5 +257,5 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
     ...(studio.maxRetryPerTask !== undefined ? { maxRetryPerTask: studio.maxRetryPerTask } : {}),
   });
 
-  return { orchestrator, resolved };
+  return { orchestrator, resolved, petCheckpointers };
 }

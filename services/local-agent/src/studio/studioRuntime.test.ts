@@ -7,6 +7,7 @@ import path from 'node:path';
 import { buildStudioForTurn, StudioNotConfiguredError } from './studioRuntime';
 import { createPendingReviewSlot } from './studioBridge';
 import { createTestModelProfiles } from '../testing/modelProfiles';
+import { FileSaver } from '../fileSaver';
 import { loadGeneralCapability } from '../capabilities/general';
 async function mkTempDir(prefix: string): Promise<string> {
   return await fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -164,4 +165,91 @@ test('buildStudioForTurn prefers explicit workdir over env default', async () =>
       process.env.PINPAWO_WORKDIR = previousWorkdir;
     }
   }
+});
+
+test('buildStudioForTurn hands the host checkpointer to the assembled pets', async () => {
+  // #613:此前从不传 checkpoint,pet 的 graph 跑在无 checkpoint 状态。
+  const workdir = await mkTempDir('pinpawo-studio-checkpointer-');
+  const stateRoot = path.join(workdir, '.pinpawo');
+  await fs.mkdir(path.join(stateRoot, 'pets'), { recursive: true });
+  await fs.writeFile(
+    path.join(stateRoot, 'studio.json'),
+    JSON.stringify({
+      studioId: 'studio-cp',
+      plannerPetId: 'planner',
+      agents: ['planner', 'worker'],
+    }),
+    'utf8',
+  );
+  for (const petId of ['planner', 'worker']) {
+    await fs.writeFile(
+      path.join(stateRoot, 'pets', `${petId}.json`),
+      JSON.stringify({ petId, name: petId, capabilities: [] }),
+      'utf8',
+    );
+  }
+
+  const checkpoint = new FileSaver(path.join(stateRoot, 'studio-cp.json'));
+  const result = await buildStudioForTurn({
+    modelProfiles,
+    capabilities: baselineCapabilities(),
+    ownerUserId: null,
+    workdir,
+    checkpoint,
+    bridge: {
+      send: () => {},
+      requestId: 'req-cp',
+      slot: createPendingReviewSlot(),
+    },
+  });
+
+  // 断言的是"每个 pet 实际拿到什么",而不是回显入参。
+  assert.deepEqual(
+    [...result.petCheckpointers.keys()].sort(),
+    ['planner', 'worker'],
+  );
+  for (const [petId, saver] of result.petCheckpointers) {
+    assert.equal(saver, checkpoint, `pet ${petId} must receive the host checkpointer`);
+  }
+  assert.deepEqual(
+    result.resolved.agents.map((agent) => agent.petId),
+    ['planner', 'worker'],
+  );
+});
+
+test('concurrent pets write isolated checkpoint threads', async () => {
+  // V1 的并发目标形态是"不同 pet 并行",共用一个 checkpointer 的前提是
+  // 各自 thread 互不覆盖。
+  const dir = await mkTempDir('pinpawo-studio-cp-threads-');
+  const checkpoint = new FileSaver(path.join(dir, 'cp.json'));
+  const write = (threadId: string, n: number) => checkpoint.put(
+    { configurable: { thread_id: threadId } } as never,
+    {
+      v: 4,
+      id: `${threadId}-${n}`,
+      ts: new Date().toISOString(),
+      channel_values: { n },
+      channel_versions: {},
+      versions_seen: {},
+    } as never,
+    { source: 'update', step: n, parents: {} } as never,
+  );
+
+  await Promise.all([
+    ...Array.from({ length: 5 }, (_, i) => write('studio:s1:pet:planner:invocation:i1', i)),
+    ...Array.from({ length: 5 }, (_, i) => write('studio:s1:pet:worker:invocation:i1', i)),
+  ]);
+
+  const planner = await checkpoint.getTuple(
+    { configurable: { thread_id: 'studio:s1:pet:planner:invocation:i1' } } as never,
+  );
+  const worker = await checkpoint.getTuple(
+    { configurable: { thread_id: 'studio:s1:pet:worker:invocation:i1' } } as never,
+  );
+  assert.ok(planner);
+  assert.ok(worker);
+  assert.notEqual(
+    planner.config.configurable?.thread_id,
+    worker.config.configurable?.thread_id,
+  );
 });

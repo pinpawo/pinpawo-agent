@@ -3,12 +3,13 @@ import type { AgentActor } from '@pinpawo/pet-agent';
 import type { PetLocalConfig } from './petConfig';
 
 /**
- * Studio 的 pet 身份装配。
+ * 从本地 pet 配置合成 AgentActor。
  *
- * HITL 相关的桥接曾经也住在这里(#561 前);现已随 Studio 私有 HITL 循环
- * 一并退役 —— review 不经 Studio,客户端与 pet-agent 直接往来。
+ * Studio 模式下 pet 身份是**本地 source of truth** —— 名称 / personality
+ * 等都来自 `<workdir>/.pinpawo/pets/<petId>.json`,不依赖服务端 pet 记录。
+ * `ownerUserId` 通常为 null(纯离线);若已登录服务端,可传入对应 user id
+ * 用于 trace / attribution。
  */
-
 export function buildPetActorFromLocalConfig(
   petConfig: PetLocalConfig,
   ownerUserId: string | null,

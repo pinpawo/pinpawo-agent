@@ -266,8 +266,13 @@ function readReply(result: unknown): string {
 }
 
 /**
- * 只判断"是否撞到了 HITL 中断" —— payload 不再需要,因为 Studio 不路由
- * review;客户端从 pet-agent 的既有事件流拿到它。
+ * 只判断"是否撞到了 HITL 中断",不消费 payload 内容 —— Studio 不路由
+ * review,客户端从 pet-agent 的既有事件流拿到它。
+ *
+ * 这里仍然认识 payload 形状(`isHumanReviewInterruptPayload`)是有意的:
+ * 用于**分类**而非消费。若不加区分地把任何 `__interrupt__` 都当成
+ * waiting_review,将来出现别的中断类型时会被误判成"在等人",而它永远
+ * 等不到答复。
  */
 function hasPendingInterrupt(result: unknown): boolean {
   const raw = (result as { __interrupt__?: unknown } | undefined)?.__interrupt__;

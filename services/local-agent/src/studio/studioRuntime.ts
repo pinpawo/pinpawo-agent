@@ -38,7 +38,7 @@ import {
   resolveStudio,
   type ResolvedStudio,
 } from './studioConfig';
-import { buildPetActorFromLocalConfig } from './studioBridge';
+import { buildPetActorFromLocalConfig } from './petActor';
 
 /**
  * 当前 workdir 下没有 .pinpawo/studio.json 时抛此错。

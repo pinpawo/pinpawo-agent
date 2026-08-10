@@ -614,7 +614,7 @@ async function prepareToolkitToolReview(params: {
     });
     return { type: 'allow' };
   }
-  if (binding.reviewPolicy.authorization) {
+  if (binding.reviewPolicy.authorization?.buildMatcher) {
     await ctx.emitRuntimeEvent?.({
       event: 'on_runtime_event',
       name: 'tool_authorization_miss',
@@ -1025,10 +1025,10 @@ async function canAutoAuthorizeCompleteBatch(params: {
   }
 
   for (const review of params.reviews) {
-    const autoAuthorize = review.reviewPolicy.autoAuthorize;
-    if (!autoAuthorize) return false;
+    const authorize = review.reviewPolicy.authorization?.authorize;
+    if (!authorize) return false;
     try {
-      const authorized = await autoAuthorize({
+      const authorized = await authorize({
         toolkitName: review.toolkitName,
         toolName: review.toolName,
         input: review.input,

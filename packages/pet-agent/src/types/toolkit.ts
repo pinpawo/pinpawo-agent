@@ -47,7 +47,16 @@ export type ToolAutoAuthorizationContext = ToolAuthorizationContext & {
 };
 
 export type ToolAuthorizationPolicy = {
-  buildMatcher: (
+  /**
+   * Deterministically authorize the current call from trusted runtime facts.
+   * `true` grants this call; `false` defers to the remaining review flow and
+   * does not reject the call.
+   */
+  authorize?: (
+    ctx: ToolAutoAuthorizationContext,
+  ) => boolean | Promise<boolean>;
+  /** Build the identity used to reuse a prior authorization in this session. */
+  buildMatcher?: (
     ctx: ToolAuthorizationContext,
   ) => ToolAuthorizationMatcher | null | Promise<ToolAuthorizationMatcher | null>;
 };
@@ -70,14 +79,6 @@ export type ToolReviewPolicy = {
     ctx: ToolReviewContext,
   ) => ToolReviewResult | Promise<ToolReviewResult>;
   authorization?: ToolAuthorizationPolicy;
-  /**
-   * Optional deterministic fast path used only by the built-in
-   * `auto_authorization` policy. The complete reviewed batch bypasses the
-   * model classifier only when every action returns true.
-   */
-  autoAuthorize?: (
-    ctx: ToolAutoAuthorizationContext,
-  ) => boolean | Promise<boolean>;
 };
 
 export type ToolkitReviewGuidance = {
@@ -367,17 +368,16 @@ export function validateToolkitDefinition(toolkit: AgentToolkit) {
     }
     if (definition.review) {
       const authorization = definition.review.authorization;
-      if (
-        authorization !== undefined
-        && (
-          typeof authorization !== 'object'
-          || Array.isArray(authorization)
-          || typeof authorization.buildMatcher !== 'function'
-        )
-      ) {
-        throw new Error(
-          `Toolkit "${toolkit.name}" tool "${toolName}" review.authorization must define buildMatcher()`,
-        );
+      if (authorization !== undefined) {
+        const owner = `Toolkit "${toolkit.name}" tool "${toolName}" review.authorization`;
+        if (typeof authorization !== 'object' || Array.isArray(authorization)) {
+          throw new Error(`${owner} must define authorize() or buildMatcher()`);
+        }
+        assertOptionalFunction(`${owner}.authorize`, authorization.authorize);
+        assertOptionalFunction(`${owner}.buildMatcher`, authorization.buildMatcher);
+        if (!authorization.authorize && !authorization.buildMatcher) {
+          throw new Error(`${owner} must define authorize() or buildMatcher()`);
+        }
       }
     }
     if (definition.requiresInputModalities !== undefined) {

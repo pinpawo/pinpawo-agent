@@ -153,7 +153,7 @@ function isWithinPath(root: string, target: string) {
       && !isAbsolute(relativePath));
 }
 
-function autoAuthorizeApplyPatch(ctx: ToolAutoAuthorizationContext) {
+function authorizeApplyPatch(ctx: ToolAutoAuthorizationContext) {
   if (!ctx.workdir) return false;
   const input = ctx.input;
   if (!input || typeof input !== 'object' || Array.isArray(input)) return false;
@@ -184,8 +184,9 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
   const reviews = {
     write_file: ReviewPolicies.localMutation({ authorization: 'exact' }),
     apply_patch: ReviewPolicies.localMutation({
-      authorization: 'exact',
-      autoAuthorize: autoAuthorizeApplyPatch,
+      authorization: {
+        authorize: authorizeApplyPatch,
+      },
     }),
     move_path: ReviewPolicies.localMutation({ authorization: 'exact' }),
     copy_path: ReviewPolicies.localMutation({ authorization: 'exact' }),

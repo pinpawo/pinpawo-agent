@@ -134,7 +134,7 @@ test('toolkit registration rejects malformed static contract fields', () => {
         },
       }],
     } as never),
-    /review\.authorization must define buildMatcher\(\)/,
+    /review\.authorization\.buildMatcher must be a function/,
   );
 });
 

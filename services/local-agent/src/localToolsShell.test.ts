@@ -73,9 +73,11 @@ test('shell review policy reviews configured command execution', async () => {
       sessionAuthorization: true,
     },
   };
+  const buildMatcher = policy.authorization?.buildMatcher;
+  assert.ok(buildMatcher);
   const review = await policy.request({
     ...context,
-    authorizationMatcher: await policy.authorization?.buildMatcher(context),
+    authorizationMatcher: await buildMatcher(context),
   });
   assert.equal(review && 'schemaVersion' in review ? review.view.title : null, '执行命令');
   assert.deepEqual(

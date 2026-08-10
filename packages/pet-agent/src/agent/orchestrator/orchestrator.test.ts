@@ -3119,6 +3119,7 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
 test('global auto policy bypasses the model only for a deterministic complete batch', async () => {
   let callCount = 0;
   let autoReviewCount = 0;
+  const sessionAuthorizations: ToolAuthorizationRecord[] = [];
   const runtimeEvents: unknown[] = [];
   const rawTool = tool(async ({ path }: { path: string }) => {
     callCount += 1;
@@ -3138,10 +3139,12 @@ test('global auto policy bypasses the model only for a deterministic complete ba
     description: 'local tools',
     tools: [
       reviewedTool(rawTool, ReviewPolicies.localMutation({
-        autoAuthorize: ({ input, workdir }) => (
-          workdir === '/repo'
-          && (input as { path?: unknown }).path === 'notes.md'
-        ),
+        authorization: {
+          authorize: ({ input, workdir }) => (
+            workdir === '/repo'
+            && (input as { path?: unknown }).path === 'notes.md'
+          ),
+        },
       })),
       reviewedTool(otherTool, ReviewPolicies.localMutation()),
     ],
@@ -3168,9 +3171,13 @@ test('global auto policy bypasses the model only for a deterministic complete ba
     },
     reviewCapabilities: {
       humanReview: false,
-      sessionAuthorization: false,
+      sessionAuthorization: true,
     },
     globalReviewPolicy: { mode: 'auto_authorization' },
+    toolAuthorizations: sessionAuthorizations,
+    recordToolAuthorizations: (authorizations) => {
+      sessionAuthorizations.push(...authorizations);
+    },
     emitRuntimeEvent: (event) => {
       runtimeEvents.push(event);
     },
@@ -3184,6 +3191,7 @@ test('global auto policy bypasses the model only for a deterministic complete ba
   assert.equal(readToolMessageContent(result.messages, 'call-auto-patch'), 'patched notes.md');
   assert.equal(callCount, 1);
   assert.equal(autoReviewCount, 0);
+  assert.deepEqual(sessionAuthorizations, []);
   assert.equal((runtimeEvents[0] as { name?: unknown } | undefined)?.name, 'global_review_policy_auto_authorized');
 
   await runToolkitToolCall(resources, [{

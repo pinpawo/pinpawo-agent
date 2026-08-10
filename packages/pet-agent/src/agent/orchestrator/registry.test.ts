@@ -209,6 +209,33 @@ test('authorization generation ignores display metadata', () => {
   );
 });
 
+test('authorization generation includes deterministic authorization policy', () => {
+  const buildRegistry = (allow: boolean) => compileAgentRegistry({
+    toolkits: [defineToolkit({
+      name: 'local',
+      description: 'Local tools',
+      tools: [{
+        tool: mockTool('apply_patch'),
+        review: ReviewPolicies.localMutation({
+          authorization: {
+            authorize: allow ? (() => true) : (() => false),
+          },
+        }),
+      }],
+    })],
+    capabilities: [capability('general', ['local'])],
+  });
+
+  assert.equal(
+    buildRegistry(true).authorizationGeneration,
+    buildRegistry(true).authorizationGeneration,
+  );
+  assert.notEqual(
+    buildRegistry(true).authorizationGeneration,
+    buildRegistry(false).authorizationGeneration,
+  );
+});
+
 test('authorization generation is scoped to authorization policy, not tool implementation', () => {
   const executable = (result: 'first' | 'second') => result === 'first'
     ? tool(async () => 'first', {
@@ -240,7 +267,13 @@ test('authorization generation is scoped to authorization policy, not tool imple
 });
 
 test('compiled registry snapshots authorization policy functions for its generation', () => {
-  const review = ReviewPolicies.commandExecution({ authorization: 'exact' });
+  const authorize = () => true;
+  const review = ReviewPolicies.commandExecution({
+    authorization: {
+      ...AuthorizationPolicies.exact(),
+      authorize,
+    },
+  });
   const originalBuilder = review.authorization?.buildMatcher;
   const registry = compileAgentRegistry({
     toolkits: [defineToolkit({
@@ -252,8 +285,10 @@ test('compiled registry snapshots authorization policy functions for its generat
   });
 
   review.authorization!.buildMatcher = () => null;
+  review.authorization!.authorize = () => false;
 
   const compiledReview = registry.toolkits[0]?.tools[0]?.review;
   assert.equal(compiledReview?.authorization?.buildMatcher, originalBuilder);
+  assert.equal(compiledReview?.authorization?.authorize, authorize);
   assert.ok(Object.isFrozen(compiledReview?.authorization));
 });

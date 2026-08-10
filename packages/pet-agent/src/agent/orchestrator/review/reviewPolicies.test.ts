@@ -60,7 +60,9 @@ test('localMutation builds ReviewSpec from operation metadata', async () => {
 
 test('presets can opt into exact authorization without retaining raw input', async () => {
   const policy = ReviewPolicies.localMutation({ authorization: 'exact' });
-  const matcher = await policy.authorization?.buildMatcher(authorizationContext());
+  const buildMatcher = policy.authorization?.buildMatcher;
+  assert.ok(buildMatcher);
+  const matcher = await buildMatcher(authorizationContext());
   assert.equal(matcher?.type, 'exact');
   assert.match(
     matcher?.type === 'exact' ? matcher.key : '',
@@ -93,15 +95,17 @@ test('exact authorization supports a tool-owned minimal subject', async () => {
       },
     }),
   });
-  const first = await policy.authorization?.buildMatcher(authorizationContext({
+  const buildMatcher = policy.authorization?.buildMatcher;
+  assert.ok(buildMatcher);
+  const first = await buildMatcher(authorizationContext({
     toolName: 'run_shell',
     input: { command: 'npm test', cwd: '/repo', timeoutSeconds: 60 },
   }));
-  const changedTimeout = await policy.authorization?.buildMatcher(authorizationContext({
+  const changedTimeout = await buildMatcher(authorizationContext({
     toolName: 'run_shell',
     input: { command: 'npm test', cwd: '/repo', timeoutSeconds: 300 },
   }));
-  const changedCwd = await policy.authorization?.buildMatcher(authorizationContext({
+  const changedCwd = await buildMatcher(authorizationContext({
     toolName: 'run_shell',
     input: { command: 'npm test', cwd: '/other', timeoutSeconds: 60 },
   }));
@@ -112,7 +116,9 @@ test('exact authorization supports a tool-owned minimal subject', async () => {
 
 test('externalAccess can opt into URL origin authorization', async () => {
   const policy = ReviewPolicies.externalAccess({ authorization: 'url_origin' });
-  const matcher = await policy.authorization?.buildMatcher(authorizationContext({
+  const buildMatcher = policy.authorization?.buildMatcher;
+  assert.ok(buildMatcher);
+  const matcher = await buildMatcher(authorizationContext({
     toolName: 'browser_open',
     input: { url: 'https://Example.test/a', headless: true },
   }));
@@ -141,7 +147,9 @@ test('a null matcher does not expose approve-and-authorize', async () => {
       subject: () => null,
     }),
   });
-  const matcher = await policy.authorization?.buildMatcher(authorizationContext());
+  const buildMatcher = policy.authorization?.buildMatcher;
+  assert.ok(buildMatcher);
+  const matcher = await buildMatcher(authorizationContext());
   const review = await policy.request(reviewContext({
     authorizationMatcher: matcher,
   }));

@@ -63,7 +63,6 @@ type AppChatRunSource =
   | { type: 'chat_request' }
   | HumanReviewResolutionSource;
 type RunStudioRequest = (ws: WebSocket, message: StudioRequestMessage) => Promise<void>;
-type RouteStudioReviewResponse = (ws: WebSocket, message: HumanReviewResponseMessage) => boolean;
 type ReviewActionRoute = HumanReviewActionRoute & {
   requestId: string;
   userId: string;
@@ -100,8 +99,6 @@ export type LocalAgentAppChatHandlerOptions = {
   getWorkdir: () => string;
   getActorName: () => string | null;
   runStudioRequest: RunStudioRequest;
-  routeStudioHumanReviewResponse: RouteStudioReviewResponse;
-  rejectStudioPendingReview: (ws: WebSocket) => void;
   loadContext?: LoadContext;
   runChat?: RunChatSession;
   buildChatSetup?: BuildChatSetup;
@@ -128,8 +125,6 @@ export class LocalAgentAppChatHandler {
   private readonly getWorkdir: () => string;
   private readonly getActorName: () => string | null;
   private readonly runStudioRequest: RunStudioRequest;
-  private readonly routeStudioHumanReviewResponse: RouteStudioReviewResponse;
-  private readonly rejectStudioPendingReview: (ws: WebSocket) => void;
   private readonly loadContext: LoadContext;
   private readonly runChat: RunChatSession;
   private readonly buildChatSetup: BuildChatSetup;
@@ -161,8 +156,6 @@ export class LocalAgentAppChatHandler {
     this.getWorkdir = options.getWorkdir;
     this.getActorName = options.getActorName;
     this.runStudioRequest = options.runStudioRequest;
-    this.routeStudioHumanReviewResponse = options.routeStudioHumanReviewResponse;
-    this.rejectStudioPendingReview = options.rejectStudioPendingReview;
     this.loadContext = options.loadContext ?? loadAgentContext;
     this.runChat = options.runChat ?? runChatSession;
     this.buildChatSetup = options.buildChatSetup ?? buildLocalChatAgentInput;
@@ -215,9 +208,8 @@ export class LocalAgentAppChatHandler {
   }
 
   async handleHumanReviewResponse(ws: WebSocket, msg: HumanReviewResponseMessage) {
-    if (this.routeStudioHumanReviewResponse(ws, msg)) {
-      return;
-    }
+    // HITL 不再经 Studio(#561):pet 的 review 走 pet-agent 自己的
+    // 中断/resume 路径,与 chat 同路,这里无需先试探 Studio。
     if (!this.canUseSocket(ws)) {
       return;
     }
@@ -250,7 +242,6 @@ export class LocalAgentAppChatHandler {
   }
 
   handleClose(ws: WebSocket) {
-    this.rejectStudioPendingReview(ws);
     this.inflightRequests.abortAll(ws);
   }
 

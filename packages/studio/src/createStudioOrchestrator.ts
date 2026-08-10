@@ -228,7 +228,12 @@ type StudioWorkerHandoffInput = {
 
 type StudioWorkerRunResult = {
   invocationId: string;
-  status: 'finished' | 'cancelled';
+  /**
+   * `waiting_review` 是"这次调用把进度落盘后返回了,正在等客户端答复",
+   * 既不是完成也不是失败:不消耗重试预算,也不释放 task —— 但**释放
+   * pet slot**,以免一个等人的 invocation 占住整条 pet。
+   */
+  status: 'finished' | 'cancelled' | 'waiting_review';
   resultText?: string;
   errorMessage?: string;
   finishedAt?: string;
@@ -465,6 +470,12 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
         threadId: `studio:${config.studioId}:thread:${state.conversationId}:pet:${task.petId}:dispatch:${dispatchId}`,
         workdir: config.workdir,
       });
+      if (result.status === 'waiting_review') {
+        // HITL 对 Studio 透明:只记一笔状态,不参与后续交互。客户端答复后
+        // 走 pet-agent 自己的 resume 路径,完成时再回来推进这个 task。
+        workerRun.status = 'waiting_review';
+        return workerRun;
+      }
       workerRun.status = 'finished';
       workerRun.resultText = result.reply;
       workerRun.finishedAt = new Date().toISOString();
@@ -531,6 +542,11 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
       allowedCapabilityNames: [planCapability.name],
     });
 
+    if (result.status === 'waiting_review') {
+      // planner 本身就是一个 pet-agent,不因身份特殊而例外;它等人时同样
+      // 只是暂停,不产出 task batch。
+      return { taskBatch: null, plannerReply: null };
+    }
     return { taskBatch: capturedTaskBatch, plannerReply: result.reply };
   }
 
@@ -796,6 +812,15 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
       (event) => emitRunEvent(record, event),
       failedAttemptCount(item),
     ).then(async (workerRun) => {
+      if (workerRun.status === 'waiting_review') {
+        // 等人期间不推进 task、不结束 invocation、不消耗重试预算,
+        // 但要释放 pet slot,否则一条等人的 invocation 会占住整条 pet。
+        invocation.status = 'waiting_review';
+        saveRunSnapshot(record);
+        activePets.delete(item.petId);
+        scheduleQueue();
+        return;
+      }
       item.errorMessage = workerRun.errorMessage;
       item.finishedAt = workerRun.finishedAt ?? new Date().toISOString();
       const resultText = workerRun.resultText;

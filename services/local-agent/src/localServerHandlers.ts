@@ -24,7 +24,6 @@ import type {
   ChatSessionResult,
 } from './chatSessionAdapter';
 import { LocalServerStudioHandler } from './localServerStudioHandler';
-import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
 import { LocalServerTuiSessionService } from './localServerTuiSessions';
 import { LocalStudioDueRunScheduler } from './localStudioDueRunScheduler';
 import { persistGlobalReviewPolicyMode } from './globalReviewPolicyConfig';
@@ -101,7 +100,6 @@ export function createLocalServerHandlers(
     runtimeConfig: effectiveRuntimeConfig,
     defaultModelProfileId: initialDeps.modelProfiles.defaultProfileId,
   });
-  const studioReviewRouter = new LocalServerStudioReviewRouter<LocalServerPeer>();
   const ownsStudioDueRunScheduler = !initialDeps.studioDueRunScheduler;
   const studioDueRunScheduler = initialDeps.studioDueRunScheduler
     ?? new LocalStudioDueRunScheduler({
@@ -123,7 +121,6 @@ export function createLocalServerHandlers(
     ...(options.runChat ? { runChat: options.runChat } : {}),
   });
   const studioHandler = new LocalServerStudioHandler({
-    reviewRouter: studioReviewRouter,
     inflightRequests,
     outbound: {
       sendMessage: (peer, message) => peer.send(message),
@@ -656,9 +653,8 @@ export function createLocalServerHandlers(
       );
     },
     onHumanReviewResponse: async (client, message) => {
-      if (studioHandler.routeHumanReviewResponse(client, message)) {
-        return;
-      }
+      // HITL 不再经 Studio(#561):review 只由 chat 路径处理,pet 的 review
+      // 走 pet-agent 自己的中断/resume,与 chat 同路。
       return afterSessionCommands(
         client,
         message.requestId,

@@ -8,7 +8,6 @@ import {
   LocalServerStudioHandler,
   type LocalServerStudioOutbound,
 } from './localServerStudioHandler';
-import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
 import { StudioNotConfiguredError, type BuildStudioInput, type BuildStudioResult } from './studio/studioRuntime';
 import type { LocalServerDeps } from './localServerTypes';
 import { sendLocalServerPeerEvent, type LocalServerPeer } from './localServerPeer';
@@ -101,7 +100,6 @@ test('LocalServerStudioHandler emits progress and done response', async () => {
   const peer = createFakePeer(sent);
   const buildInputs: BuildStudioInput[] = [];
   const handler = new LocalServerStudioHandler({
-    reviewRouter: new LocalServerStudioReviewRouter<LocalServerPeer>(),
     inflightRequests: createInflightController(),
     outbound: PEER_OUTBOUND,
     buildStudio: async (input) => {
@@ -141,7 +139,6 @@ test('LocalServerStudioHandler emits progress and done response', async () => {
   assert.equal(buildInputs.length, 1);
   assert.deepEqual(buildInputs[0]?.capabilities.map((item) => item.name), ['browser', 'user-capability']);
   assert.deepEqual(buildInputs[0]?.toolkits?.map((item) => item.name), ['plugin-toolkit', 'local-toolkit']);
-  assert.equal(buildInputs[0]?.bridge.requestId, 'studio-1');
   assert.equal(buildInputs[0]?.workdir, '/tmp/pinpawo-test');
   assert.equal(buildInputs[0]?.studioConfigPath, '/tmp/pinpawo-test/.pinpawo/studio.json');
   assert.equal(buildInputs[0]?.petsDir, '/tmp/pinpawo-test/.pinpawo/pets');
@@ -173,7 +170,6 @@ test('LocalServerStudioHandler serializes studio requests per peer', async () =>
   const firstContinue = deferred<void>();
   const invocationEvents: string[] = [];
   const handler = new LocalServerStudioHandler({
-    reviewRouter: new LocalServerStudioReviewRouter<LocalServerPeer>(),
     inflightRequests: createInflightController(),
     outbound: PEER_OUTBOUND,
     buildStudio: async () => ({
@@ -258,7 +254,6 @@ test('LocalServerStudioHandler discards queued studio requests after peer discon
   const firstContinue = deferred<void>();
   const invocationEvents: string[] = [];
   const handler = new LocalServerStudioHandler({
-    reviewRouter: new LocalServerStudioReviewRouter<LocalServerPeer>(),
     inflightRequests: createInflightController(),
     outbound: PEER_OUTBOUND,
     buildStudio: async () => ({
@@ -328,7 +323,6 @@ test('LocalServerStudioHandler maps missing studio config to studio_error', asyn
   const sent: unknown[] = [];
   const peer = createFakePeer(sent);
   const handler = new LocalServerStudioHandler({
-    reviewRouter: new LocalServerStudioReviewRouter<LocalServerPeer>(),
     inflightRequests: createInflightController(),
     outbound: PEER_OUTBOUND,
     buildStudio: async () => {
@@ -354,7 +348,6 @@ test('LocalServerStudioHandler fills runId and conversationId defaults', async (
   const peer = createFakePeer(sent);
   const buildInputs: BuildStudioInput[] = [];
   const handler = new LocalServerStudioHandler({
-    reviewRouter: new LocalServerStudioReviewRouter<LocalServerPeer>(),
     inflightRequests: createInflightController(),
     outbound: PEER_OUTBOUND,
     buildStudio: async (input) => {

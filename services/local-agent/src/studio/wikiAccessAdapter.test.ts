@@ -100,7 +100,7 @@ test('file wiki access installs wiki_read tooling into a pet invoke', async () =
     }],
   });
 
-  assert.equal(result.reply, 'done');
+  assert.equal((result as { reply: string }).reply, 'done');
   const configurable = (calls[0]?.options as StubConfigurable | undefined)?.configurable;
   assert.ok(configurable, 'graph should receive configurable');
 

@@ -38,11 +38,7 @@ import {
   resolveStudio,
   type ResolvedStudio,
 } from './studioConfig';
-import {
-  buildPetActorFromLocalConfig,
-  createWsHumanReviewer,
-  type PendingReviewSlot,
-} from './studioBridge';
+import { buildPetActorFromLocalConfig } from './studioBridge';
 
 /**
  * 当前 workdir 下没有 .pinpawo/studio.json 时抛此错。
@@ -54,16 +50,6 @@ export class StudioNotConfiguredError extends Error {
     this.name = 'StudioNotConfiguredError';
   }
 }
-
-/**
- * 装配时绑定到本次 ws 的 humanReviewer 桥所需的所有上下文。
- * 三件套总是一起出现,所以打包成一个子对象。
- */
-export type StudioBridgeContext = {
-  send: (msg: unknown) => void;
-  requestId: string;
-  slot: PendingReviewSlot;
-};
 
 export type BuildStudioInput = {
   /** Host-owned model profiles; one profile is resolved per Studio turn/pet. */
@@ -81,8 +67,6 @@ export type BuildStudioInput = {
   checkpoint?: BaseCheckpointSaver;
   /** 当前 local-agent 进程的 owner user id;无服务端绑定时为 null */
   ownerUserId: string | null;
-  /** ws 桥三件套:供 humanReviewer 绑定到本次 turn 的 ws 连接 */
-  bridge: StudioBridgeContext;
   /** 可选覆盖:studio.json 路径 */
   studioConfigPath?: string;
   /** 可选覆盖:pets 配置目录 */
@@ -122,11 +106,12 @@ function getWorkdirRunQueueStore(filePath: string): {
 }
 
 /**
- * 加载本地 Studio 配置 + Pet 配置,逐 pet 构造 PetAgentRuntime(humanReviewer 桥到
- * 当前 ws),最终装出 StudioOrchestrator(curator 注入 promptProvider)。
+ * 加载本地 Studio 配置 + Pet 配置,逐 pet 构造 PetAgentRuntime,最终装出
+ * StudioOrchestrator(curator 注入 promptProvider)。
  *
- * 每次 /studio turn 调用一次,fresh build,不 cache。Pet runtime 构造很轻,且
- * 不 cache 让配置改动即生效。
+ * 现已无任何 request-scoped 依赖 —— HITL 不再经 Studio,装配时不需要拿到 ws。
+ * 这解除了常驻 StudioRuntimeHost 的最后一个障碍;在 host 落地前仍是每次
+ * Studio turn 调用一次(#561)。
  *
  * - studio.json 不存在 → 抛 StudioNotConfiguredError(handler 自己决定如何提示)
  * - pet config 引用的 capability 不在全局池中 → 抛错(配置错误,启动失败)
@@ -220,12 +205,6 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
       subagentGenerationReserveTokens: generationReserveTokens,
       decisionStructuredOutput: petDecisionStructuredOutput,
       workdir: effectiveWorkdir,
-      humanReviewer: createWsHumanReviewer({
-        send: input.bridge.send,
-        requestId: input.bridge.requestId,
-        petId: petConfig.petId,
-        slot: input.bridge.slot,
-      }),
     });
   });
 

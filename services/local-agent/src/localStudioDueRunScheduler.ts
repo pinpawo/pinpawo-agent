@@ -10,7 +10,6 @@ import {
   type StudioDueRunStoreTrace,
   type StudioDueRunClaim,
 } from '@pinpawo/studio';
-import type { PendingReviewSlot } from './studio/studioBridge';
 import { getLocalServerWorkdir, type LocalServerDeps } from './localServerTypes';
 import { StudioRunService } from './studioRunService';
 
@@ -33,7 +32,6 @@ export type LocalStudioDueRunSubmitOptions = {
   conversationId?: string;
   send: (envelope: unknown) => void;
   onProgress: (event: StudioTurnEvent) => void;
-  slot: PendingReviewSlot;
   ownerUserId?: string | null;
   signal?: AbortSignal;
 };
@@ -259,11 +257,6 @@ export class LocalStudioDueRunScheduler {
         conversationId: running.conversationId,
         ownerUserId: owner.ownerUserId ?? running.ownerUserId,
         signal: executionSignal,
-        bridge: {
-          send: onSend,
-          requestId: owner.requestId,
-          slot: owner.slot,
-        },
         onProgress,
       });
       const completed = this.studioDueRuns.succeed(claim, {

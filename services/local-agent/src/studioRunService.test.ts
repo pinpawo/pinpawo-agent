@@ -93,11 +93,6 @@ test('StudioRunService runs Studio with runtimeConfig-scoped paths', async () =>
     userRequest: 'plan this',
     conversationId: 'conversation-1',
     ownerUserId: 'user-1',
-    bridge: {
-      send: () => undefined,
-      requestId: 'run-1',
-      slot: { current: null },
-    },
     onProgress: (event) => progressEvents.push(event),
   });
 
@@ -172,11 +167,6 @@ test('StudioRunService falls back to deps.workdir when runtimeConfig is absent',
     runId: 'run-2',
     userRequest: 'legacy plan this',
     ownerUserId: 'user-legacy',
-    bridge: {
-      send: () => undefined,
-      requestId: 'run-2',
-      slot: { current: null },
-    },
   });
 
   assert.equal(buildInputs.length, 1);

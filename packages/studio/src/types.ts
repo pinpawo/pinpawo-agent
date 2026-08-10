@@ -7,25 +7,7 @@ import type {
   PetAgentStatus,
   StudioContext,
 } from './petAgentTypes';
-import type {
-  HumanReviewInterruptPayload,
-  ReviewResponse,
-} from '@pinpawo/pet-agent';
 import type { ActiveDelegationTransition } from '@pinpawo/pet-agent';
-
-export type HumanReviewerRequest = HumanReviewInterruptPayload;
-
-/**
- * HumanReviewer:pet runtime 在 invoke 期间撞到 HITL interrupt 时回调的桥。
- *
- * pet runtime 不关心上层是 ws / SSE / TUI / 进程内 mock,只承诺:
- * - 给出 canonical `HumanReviewInterruptPayload`
- * - 拿回 canonical `ReviewResponse` 后续跑 graph
- *
- * 上层(chat 层 / 测试)在构造 pet runtime 时注入这个函数,内部自行把
- * request 路由到对应 UI session、等用户答复后 resolve。
- */
-export type HumanReviewer = (request: HumanReviewerRequest) => Promise<ReviewResponse>;
 
 /**
  * Pet runtime descriptor — pet agent registry 中暴露的元数据。
@@ -71,13 +53,30 @@ export type PetAgentRuntimeInvokeInput = {
 };
 
 /**
- * pet runtime 的 invoke 返回。一段文本,可包含对文件路径的引用,
- * curator 解析并整理进 wiki。HITL 由 humanReviewer 内部消化,对调用方
- * 不可见——`invoke()` 是原子的,要么 reply,要么抛错。
+ * pet runtime 的 invoke 返回。
+ *
+ * **HITL 对 Studio 透明**:pet 撞到 review 时,invoke 立即以
+ * `waiting_review` 返回,不在内部等待。review 的请求与答复完全在
+ * pet ↔ 客户端之间(走 pet-agent 既有的中断/resume 路径,与 chat 一致),
+ * Studio 只据此记录状态、释放 pet slot,不参与后续交互。
+ *
+ * 这要求 pet runtime 配有 checkpointer —— 执行进度落在 checkpoint 上,
+ * 之后由 resume 接回(#613)。
  */
-export type PetAgentRuntimeInvokeResult = {
-  reply: string;
-};
+export type PetAgentRuntimeInvokeResult =
+  | {
+      status: 'completed';
+      /** 一段文本,可含文件路径引用;curator 解析后整理进 wiki。 */
+      reply: string;
+    }
+  | {
+      status: 'waiting_review';
+      /**
+       * 该次调用落在哪个 thread 上。客户端答复后由宿主用它 resume,
+       * 因此 Studio 必须原样保留。
+       */
+      threadId: string;
+    };
 
 export type PetAgentRuntime = {
   descriptor: () => PetAgentRuntimeDescriptor;
@@ -141,7 +140,11 @@ export type StudioInvocation = {
   petId: string;
   /** 同一 task 内从 0 递增。**持久化**,否则崩溃恢复后重试次数归零。 */
   attempt: number;
-  status: 'running' | 'succeeded' | 'failed' | 'cancelled';
+  /**
+   * `waiting_review` 表示该次调用已把进度落在 checkpoint 上、正在等待
+   * 客户端答复 —— 它**不占用** pet slot,后续由 resume 接回。
+   */
+  status: 'running' | 'waiting_review' | 'succeeded' | 'failed' | 'cancelled';
   startedAt: string;
   finishedAt?: string;
   errorMessage?: string;

@@ -8,9 +8,9 @@
  *
  * 未来若出现第二个 host,再单独抽 `studio-pet-agent-adapter`。
  *
- * 待退役(#561 Phase 2):下面的 `while (true) { graph.invoke(); Command({resume}) }`
- * 是一套 Studio 专用的 HITL 循环。目标是让 pet invocation 复用稳定的 Chat
- * request/runtime 路径,而不是维护第二套执行器。
+ * HITL 对 Studio 透明(#561 Phase 2):撞到 review 时 invoke 立即返回
+ * `waiting_review`,不在内部等待。答复由客户端经 pet-agent 既有的 resume
+ * 路径送回,与 chat 一致 —— Studio 既不路由 review,也不持有它。
  */
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
@@ -38,8 +38,6 @@ import {
 } from '@pinpawo/pet-agent';
 import { isHumanReviewInterruptPayload } from '@pinpawo/pet-agent';
 import type {
-  HumanReviewer,
-  HumanReviewerRequest,
   PetAgentRuntime,
   PetAgentRuntimeDescriptor,
   PetAgentRuntimeInvokeInput,
@@ -58,12 +56,6 @@ export type PetAgentRuntimeConfig = {
   toolkits?: AgentToolkit[];
   execution?: AgentExecution;
   workdir?: string;
-  /**
-   * HITL 应答桥。pet runtime 在 invoke 期间撞到 interrupt 时调用,
-   * 拿到 canonical ReviewResponse 后续跑 graph。不提供时 pet 不应触发 HITL tool;
-   * 若仍触发 interrupt,invoke 将抛错。
-   */
-  humanReviewer?: HumanReviewer;
   graph?: OrchestratorGraph;
   modelInputModalities?: OrchestratorConfig['modelInputModalities'];
   checkpoint?: OrchestratorConfig['checkpoint'];
@@ -232,24 +224,25 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
     const previousStatus = status;
     status = 'active';
     try {
-      let graphInput: Parameters<OrchestratorGraph['invoke']>[0] = buildOrchestratorRunInput(
+      const graphInput: Parameters<OrchestratorGraph['invoke']>[0] = buildOrchestratorRunInput(
         messages,
         { activeDelegationTransition: input.activeDelegationTransition },
       );
-      while (true) {
-        const result = await graph.invoke(graphInput, { signal: input.signal, configurable });
-        const pending = readPendingInterrupt(result);
-        if (!pending) {
-          return { reply: readReply(result) };
-        }
-        if (!config.humanReviewer) {
+      const result = await graph.invoke(graphInput, { signal: input.signal, configurable });
+      if (hasPendingInterrupt(result)) {
+        if (!input.threadId) {
+          // 没有 threadId 就无从 resume —— 与其返回一个接不回来的
+          // waiting_review，不如让调用方立刻发现漏传。
           throw new Error(
-            `Pet agent "${config.actor.petId}" hit HITL interrupt but no humanReviewer configured`,
+            `Pet agent "${config.actor.petId}" hit a review interrupt without a threadId to resume from`,
           );
         }
-        const response = await config.humanReviewer(pending);
-        graphInput = new Command({ resume: response });
+        // HITL 对 Studio 透明:撞到 review 就把进度留在 checkpoint 上返回,
+        // 不在这里等人。答复由客户端经 pet-agent 既有的 resume 路径送回,
+        // 与 chat 完全一致。
+        return { status: 'waiting_review', threadId: input.threadId };
       }
+      return { status: 'completed', reply: readReply(result) };
     } finally {
       status = previousStatus === 'active' ? 'standby' : previousStatus;
     }
@@ -272,12 +265,16 @@ function readReply(result: unknown): string {
   return typeof last?.content === 'string' ? last.content.trim() : '';
 }
 
-function readPendingInterrupt(result: unknown): HumanReviewerRequest | undefined {
+/**
+ * 只判断"是否撞到了 HITL 中断" —— payload 不再需要,因为 Studio 不路由
+ * review;客户端从 pet-agent 的既有事件流拿到它。
+ */
+function hasPendingInterrupt(result: unknown): boolean {
   const raw = (result as { __interrupt__?: unknown } | undefined)?.__interrupt__;
-  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  if (!Array.isArray(raw) || raw.length === 0) return false;
   const first = raw[0];
   const value = first && typeof first === 'object' && 'value' in first
     ? (first as { value?: unknown }).value
     : null;
-  return isHumanReviewInterruptPayload(value) ? value : undefined;
+  return isHumanReviewInterruptPayload(value);
 }

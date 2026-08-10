@@ -5,7 +5,6 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { buildStudioForTurn, StudioNotConfiguredError } from './studioRuntime';
-import { createPendingReviewSlot } from './studioBridge';
 import { createTestModelProfiles } from '../testing/modelProfiles';
 import { FileSaver } from '../fileSaver';
 import { loadGeneralCapability } from '../capabilities/general';
@@ -35,11 +34,6 @@ test('buildStudioForTurn requires the workdir-scoped Studio config', async () =>
       capabilities: [],
       ownerUserId: null,
       workdir,
-      bridge: {
-        send: () => {},
-        requestId: 'req-missing',
-        slot: createPendingReviewSlot(),
-      },
     }),
     (error: unknown) => error instanceof StudioNotConfiguredError
       && error.configPath === expectedConfigPath,
@@ -76,11 +70,6 @@ test('buildStudioForTurn defaults Studio paths from effective runtime workdir', 
       modelProfiles,
       capabilities: baselineCapabilities(),
       ownerUserId: null,
-      bridge: {
-        send: () => {},
-        requestId: 'req-1',
-        slot: createPendingReviewSlot(),
-      },
     });
 
     assert.equal(result.resolved.studio.studioId, 'studio-runtime-default');
@@ -149,11 +138,6 @@ test('buildStudioForTurn prefers explicit workdir over env default', async () =>
       capabilities: baselineCapabilities(),
       ownerUserId: null,
       workdir: explicitWorkdir,
-      bridge: {
-        send: () => {},
-        requestId: 'req-2',
-        slot: createPendingReviewSlot(),
-      },
     });
 
     assert.equal(result.resolved.studio.studioId, 'studio-runtime-explicit');
@@ -196,11 +180,6 @@ test('buildStudioForTurn hands the host checkpointer to the assembled pets', asy
     ownerUserId: null,
     workdir,
     checkpoint,
-    bridge: {
-      send: () => {},
-      requestId: 'req-cp',
-      slot: createPendingReviewSlot(),
-    },
   });
 
   // 断言的是"每个 pet 实际拿到什么",而不是回显入参。

@@ -141,8 +141,6 @@ function createHandler(overrides: Partial<ConstructorParameters<typeof LocalAgen
     getWorkdir: () => '/tmp/pinpawo-app-workdir',
     getActorName: () => 'Test Actor',
     runStudioRequest: async () => undefined,
-    routeStudioHumanReviewResponse: () => false,
-    rejectStudioPendingReview: () => undefined,
     loadContext: async () => ({} as AgentContext),
     buildChatSetup: (params) => {
       buildInputs.push(params as unknown as Record<string, unknown>);
@@ -1310,19 +1308,14 @@ test('LocalAgentAppChatHandler rejects cancellation for a stale review action', 
   assert.equal(errorEvent.event?.code, 'review_stale');
 });
 
-test('LocalAgentAppChatHandler routes human review responses to studio router first', async () => {
-  let studioRouted = false;
-  const runRequests: unknown[] = [];
-  const { handler, ws } = createHandler({
+test('human review responses are handled by the chat path alone', async () => {
+  // HITL 不再经 Studio(#561):pet 的 review 走 pet-agent 自己的中断/resume,
+  // 与 chat 同路,因此不再有"先试探 Studio"的分支。
+  //
+  // 这里没有已注册的 review route,chat 路径的正确反应是回一个 closed 错误
+  // —— 关键在于它**确实由 chat 路径处理**,而不是被 Studio 悄悄吞掉。
+  const { handler, ws, sent } = createHandler({
     runStudioRequest: async () => undefined,
-    routeStudioHumanReviewResponse: () => {
-      studioRouted = true;
-      return true;
-    },
-    runChat: async (options) => {
-      runRequests.push(options.request);
-      return { status: 'completed', reply: 'chat continued' };
-    },
   });
 
   await handler.handleHumanReviewResponse(ws, {
@@ -1332,8 +1325,9 @@ test('LocalAgentAppChatHandler routes human review responses to studio router fi
     selectedOptionId: 'approve',
   });
 
-  assert.equal(studioRouted, true);
-  assert.deepEqual(runRequests, []);
+  const errorEvent = sent.at(-1) as { event?: { type?: string; message?: string } };
+  assert.equal(errorEvent?.event?.type, 'error');
+  assert.match(errorEvent?.event?.message ?? '', /review 已关闭或不存在/);
 });
 
 test('LocalAgentAppChatHandler forwards studio requests to runtime handler', async () => {

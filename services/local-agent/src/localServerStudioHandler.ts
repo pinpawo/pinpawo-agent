@@ -1,6 +1,5 @@
 import {
   type LocalAgentServerMessage,
-  type HumanReviewResponseMessage,
   type StudioRequestMessage,
 } from './localAgentProtocol';
 import { type InflightOperationRun } from './inflightOperationRun';
@@ -10,7 +9,6 @@ import {
   LocalStudioDueRunScheduler,
 } from './localStudioDueRunScheduler';
 import { StudioNotConfiguredError } from './studio/studioRuntime';
-import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
 import type { LocalServerDeps } from './localServerTypes';
 import {
   StudioRunService,
@@ -42,7 +40,6 @@ export type LocalServerStudioOutbound<Peer extends object> = {
 };
 
 export class LocalServerStudioHandler<Peer extends object> {
-  private readonly reviewRouter: LocalServerStudioReviewRouter<Peer>;
   private readonly inflightRequests: InflightRequestController<Peer>;
   private readonly outbound: LocalServerStudioOutbound<Peer>;
   private readonly studioRunService: StudioRunService;
@@ -51,14 +48,12 @@ export class LocalServerStudioHandler<Peer extends object> {
   private readonly studioConnectionState = new WeakMap<Peer, { closed: boolean }>();
 
   constructor(options: {
-    reviewRouter: LocalServerStudioReviewRouter<Peer>;
     inflightRequests: InflightRequestController<Peer>;
     outbound: LocalServerStudioOutbound<Peer>;
     studioRunService?: StudioRunService;
     buildStudio?: BuildStudioForTurn;
     studioDueRunScheduler?: LocalStudioDueRunScheduler;
   }) {
-    this.reviewRouter = options.reviewRouter;
     this.inflightRequests = options.inflightRequests;
     this.outbound = options.outbound;
     this.studioRunService = options.studioRunService ?? new StudioRunService({
@@ -67,12 +62,7 @@ export class LocalServerStudioHandler<Peer extends object> {
     this.studioDueRunScheduler = options.studioDueRunScheduler;
   }
 
-  routeHumanReviewResponse(peer: Peer, msg: HumanReviewResponseMessage) {
-    return this.reviewRouter.routeResponse(peer, msg);
-  }
-
   rejectDisconnected(peer: Peer) {
-    this.reviewRouter.rejectAndDelete(peer, new Error('peer disconnected'));
     this.markStudioConnectionClosed(peer);
   }
 
@@ -108,12 +98,6 @@ export class LocalServerStudioHandler<Peer extends object> {
     const inflight = this.inflightRequests.start(peer, requestId);
     const { controller } = inflight;
 
-    // 重置 review slot(防止上一 turn 残留)
-    const slot = this.reviewRouter.getOrCreateSlot(peer);
-    if (slot.current) {
-      this.reviewRouter.rejectPending(peer, new Error('superseded by new studio_request'));
-    }
-
     const send = (envelope: unknown) => {
       if (!envelope || typeof envelope !== 'object') return;
       this.outbound.sendMessage(peer, envelope as LocalAgentServerMessage);
@@ -137,7 +121,6 @@ export class LocalServerStudioHandler<Peer extends object> {
           userRequest,
           send,
           onProgress,
-          slot,
           signal: controller.signal,
         })
         : this.studioRunService.run({
@@ -145,7 +128,6 @@ export class LocalServerStudioHandler<Peer extends object> {
           runId,
           userRequest,
           conversationId,
-          bridge: { send, requestId, slot },
           signal: controller.signal,
           onProgress,
         }));
@@ -204,9 +186,6 @@ export class LocalServerStudioHandler<Peer extends object> {
         });
       }
     } finally {
-      if (slot.current) {
-        this.reviewRouter.rejectPending(peer, new Error('studio turn ended with unresolved review'));
-      }
       this.inflightRequests.clear(peer, inflight);
     }
   }

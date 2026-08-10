@@ -87,7 +87,6 @@ test('LocalStudioDueRunScheduler deduplicates concurrent submissions for same id
     userRequest: 'build page',
     onProgress: () => undefined,
     send: () => undefined,
-    slot,
   };
 
   const [first, second, third] = await Promise.all([
@@ -139,7 +138,6 @@ test('LocalStudioDueRunScheduler applies workdir claim filter and does not execu
     userRequest: 'run in a',
     onProgress: () => undefined,
     send: () => undefined,
-    slot: slotA,
     signal: abortA.signal,
   });
   const second = scheduler.submit({
@@ -150,7 +148,6 @@ test('LocalStudioDueRunScheduler applies workdir claim filter and does not execu
     userRequest: 'run in b',
     onProgress: () => undefined,
     send: () => undefined,
-    slot: slotB,
     signal: abortB.signal,
   });
 
@@ -180,7 +177,6 @@ test('LocalStudioDueRunScheduler.submit rejects requests with non-matching workd
     userRequest: 'bad scope',
     onProgress: () => undefined,
     send: () => undefined,
-    slot,
   }), /outside scheduler scope|NotAllowedError/i);
 });
 
@@ -200,7 +196,6 @@ test('LocalStudioDueRunScheduler.stop rejects pending waiters', async () => {
     userRequest: 'stop me',
     onProgress: () => undefined,
     send: () => undefined,
-    slot,
   });
 
   scheduler.stop();
@@ -223,7 +218,6 @@ test('LocalStudioDueRunScheduler.submit rejects immediately after stop', async (
     userRequest: 'stopped',
     onProgress: () => undefined,
     send: () => undefined,
-    slot,
   }), /aborted|AbortError/i);
 });
 

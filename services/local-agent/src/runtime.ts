@@ -36,7 +36,6 @@ import {
 } from './runtimeConfig';
 import { setLocalToolsWorkdir } from './toolkits/local/pathUtils';
 import { LocalServerStudioHandler } from './localServerStudioHandler';
-import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
 import { LocalStudioDueRunScheduler } from './localStudioDueRunScheduler';
 import type { LocalServerDeps } from './localServerTypes';
 import { DEFAULT_SERVER_MODE, type ServerMode } from './serverMode';
@@ -67,7 +66,6 @@ export class LocalAgentRuntime {
     emitOperation: (ws, event) => sendLocalAgentEvent(ws, event),
     sendControl: (ws, message) => sendLocalAgentMessage(ws, message),
   });
-  private readonly studioReviewRouter = new LocalServerStudioReviewRouter<WebSocket>();
   private readonly studioHandler: LocalServerStudioHandler<WebSocket>;
   private appWsClient: LocalAgentAppWsClient | null = null;
   private readonly appChatHandler: LocalAgentAppChatHandler;
@@ -91,7 +89,6 @@ export class LocalAgentRuntime {
       filterWorkdir: runtimeConfig.workdir,
     });
     this.studioHandler = new LocalServerStudioHandler({
-      reviewRouter: this.studioReviewRouter,
       inflightRequests: this.inflightRequests,
       outbound: {
         sendMessage: (ws, message) => sendLocalAgentMessage(ws, message),
@@ -124,8 +121,6 @@ export class LocalAgentRuntime {
       runStudioRequest: async (ws, message) => {
         await this.studioHandler.handleStudioRequest(ws, message, this.buildLocalServerDeps());
       },
-      routeStudioHumanReviewResponse: (ws, msg) => this.studioHandler.routeHumanReviewResponse(ws, msg),
-      rejectStudioPendingReview: (ws) => this.studioHandler.rejectDisconnected(ws),
     });
   }
 

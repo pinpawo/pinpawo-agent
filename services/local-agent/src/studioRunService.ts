@@ -11,7 +11,6 @@ import {
   buildStudioForTurn,
   type BuildStudioInput,
   type BuildStudioResult,
-  type StudioBridgeContext,
 } from './studio/studioRuntime';
 
 export type BuildStudioForTurn = (input: BuildStudioInput) => Promise<BuildStudioResult>;
@@ -23,7 +22,6 @@ export type StudioRunServiceRequest = {
   conversationId?: string;
   signal?: AbortSignal;
   ownerUserId?: string | null;
-  bridge: StudioBridgeContext;
   onProgress?: (event: StudioTurnEvent) => void;
 };
 
@@ -81,7 +79,6 @@ function buildStudioInputFromDeps(request: StudioRunServiceRequest): BuildStudio
     toolkitRuntimeManager: deps.toolkitRuntimeManager,
     checkpoint: deps.chatCheckpointer,
     ownerUserId: request.ownerUserId ?? null,
-    bridge: request.bridge,
     workdir: getLocalServerWorkdir(deps),
     ...(deps.runtimeConfig ? {
       studioConfigPath: deps.runtimeConfig.studioConfigPath,

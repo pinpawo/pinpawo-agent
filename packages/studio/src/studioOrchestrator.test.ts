@@ -88,10 +88,10 @@ function runtime(params: {
             deps: task.deps ?? [],
           })),
         });
-        return { reply: 'planned debug tasks' };
+        return { status: 'completed' as const, reply: 'planned debug tasks' };
       }
       await params.onInvoke?.(input);
-      return { reply: params.reply };
+      return { status: 'completed' as const, reply: params.reply };
     },
   };
 }
@@ -412,7 +412,7 @@ test('studio runner requeues failed task until retry limit is reached', async ()
           if (attempts === 1) {
             throw new Error('temporary failure');
           }
-          return { reply: 'retried done' };
+          return { status: 'completed' as const, reply: 'retried done' };
         },
       },
     ],
@@ -538,7 +538,7 @@ test('studio invokes planner agent when no explicit plan, captures submitted pla
           { petId: 'worker', brief: 'do the work', acceptanceCriteria: ['done'] },
         ],
       });
-      return { reply: '已规划 1 棒' };
+      return { status: 'completed' as const, reply: '已规划 1 棒' };
     },
   };
 
@@ -636,7 +636,7 @@ test('studio stops when planner did not enqueue tasks', async () => {
       status: 'standby',
       capabilities: [],
     }),
-    invoke: async () => ({ reply: '信息不足,需要用户补充目标受众' }),
+    invoke: async () => ({ status: 'completed' as const, reply: '信息不足,需要用户补充目标受众' }),
   };
   const orchestrator = createStudioOrchestrator({
     studioId: 'studio-1',
@@ -754,7 +754,7 @@ test('studio request planning is not serialized through the worker task queue', 
           },
         ],
       });
-      return { reply: `planned:${input.brief}` };
+      return { status: 'completed' as const, reply: `planned:${input.brief}` };
     },
   };
 
@@ -1118,7 +1118,7 @@ test('studio submitRequest accepts immediately and exposes run state through get
           { petId: 'worker', brief: 'queued work', acceptanceCriteria: [] },
         ],
       });
-      return { reply: 'planned queued work' };
+      return { status: 'completed' as const, reply: 'planned queued work' };
     },
   };
 
@@ -1498,7 +1498,7 @@ test('studio cancelRun aborts planning and prevents tasks from being queued afte
           { petId: 'worker', brief: 'work after cancel', acceptanceCriteria: [] },
         ],
       });
-      return { reply: 'planned after cancel' };
+      return { status: 'completed' as const, reply: 'planned after cancel' };
     },
   };
 
@@ -1667,4 +1667,67 @@ test('recovered tasks keep their spent retry budget instead of starting over', a
     [0, 1],
   );
   assert.equal(failedAttemptCount(saved!.tasks[0]!), 2);
+});
+
+test('a pet waiting on review pauses its task and frees the pet slot', async () => {
+  // HITL 对 Studio 透明(#561):pet 撞到 review 时 invoke 立即返回,
+  // Studio 只记一笔状态 —— 不推进 task、不消耗重试预算,但**释放 pet slot**,
+  // 否则一条等人的 invocation 会占住整条 pet。
+  const wikiBaseDir = await makeWikiTempDir('studio-waiting-review-');
+  const runQueueStore = new InMemoryStudioRunQueueStore();
+  const askerCalls: string[] = [];
+
+  const orchestrator = createStudioOrchestrator({
+    studioId: 'studio-1',
+    ownerUserId: 'user-1',
+    wikiBaseDir,
+    plannerPetId: 'planner',
+    runQueueStore,
+    agents: [
+      plannerRuntime(),
+      {
+        descriptor: () => ({
+          petId: 'asker', userId: null, name: 'Asker', personality: null,
+          stage: null, species: null, role: null, serviceSummary: null,
+          startupMode: 'standby' as const, status: 'standby' as const, capabilities: [],
+        }),
+        invoke: async (input: PetAgentRuntimeInvokeInput) => {
+          askerCalls.push(input.brief);
+          // 第一次等人;若 slot 被正确释放,第二个 task 才能派到同一个 pet。
+          return askerCalls.length === 1
+            ? { status: 'waiting_review' as const, threadId: input.threadId ?? 'missing' }
+            : { status: 'completed' as const, reply: 'second done' };
+        },
+      },
+    ],
+  });
+
+  await submitWithPlannerStub(orchestrator, {
+    userRequest: 'ask then continue',
+    turnId: 'run-waiting-review',
+    conversationId: 'conv-waiting-review',
+    plan: {
+      tasks: [
+        { petId: 'asker', goal: 'needs a human', acceptanceCriteria: [] },
+        { petId: 'asker', goal: 'independent work', acceptanceCriteria: [] },
+      ],
+    },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const snapshot = orchestrator.getRun('run-waiting-review');
+  const askerTask = snapshot?.tasks.find((task) => task.petId === 'asker');
+  assert.ok(askerTask);
+
+  // task 仍未完结,invocation 记为 waiting_review。
+  assert.equal(askerTask.status, 'running');
+  assert.equal(latestInvocation(askerTask)?.status, 'waiting_review');
+
+  // 等人不算失败:重试预算未被消耗。
+  assert.equal(failedAttemptCount(askerTask), 0);
+
+  // pet slot 已释放:同一个 pet 的第二个 task 才能被派发。
+  // 若等人时不释放 slot,这里只会看到第一次调用。
+  assert.deepEqual(askerCalls, ['needs a human', 'independent work']);
 });

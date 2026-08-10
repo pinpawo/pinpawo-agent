@@ -635,13 +635,22 @@ async function emitLiveDomSample(tabId: number, url: string) {
   }
 }
 
-function emitLiveNetworkActivity(tabId: number) {
+/**
+ * Report the current inflight count. `networkActivityEvent` applies its own
+ * +1/-1 delta for the reported fact, so the base must be the count *before*
+ * that fact is applied — otherwise a finished request would be double-counted
+ * and the tally could never return to zero, keeping the page from settling.
+ */
+function emitLiveNetworkActivity(tabId: number, kind: 'request' | 'finish' | 'fail') {
   if (!port || attachedTabId !== tabId) return;
+  const baseInflight = kind === 'request'
+    ? Math.max(0, inflightRequests - 1)
+    : inflightRequests + 1;
   postBrowserEvent({
     ...networkActivityEvent(
-      { kind: 'request', timestamp: Date.now() },
+      { kind, timestamp: Date.now() },
       tabId,
-      Math.max(0, inflightRequests - 1),
+      baseInflight,
     ),
     tabId,
   });
@@ -650,6 +659,28 @@ function emitLiveNetworkActivity(tabId: number) {
 function resetLiveCounters() {
   inflightRequests = 0;
   lastDomTextLength = 0;
+}
+
+/**
+ * Best-effort URL for the tab the live readiness events are reported against.
+ *
+ * Several CDP events the Runtime cares about carry no URL of their own
+ * (`Page.loadEventFired` only has a `timestamp`), and the managed target may not
+ * have recorded one yet. Falling back to `chrome.tabs.get` keeps the live
+ * `dom.changed` / `document.ready` stream flowing: those events are dropped
+ * downstream when their URL is empty, which would leave the Runtime waiting for
+ * a body sample that never arrives.
+ */
+async function liveTabUrl(tabId: number): Promise<string> {
+  const target = targets.current();
+  const known = target?.tabId === tabId ? (target as { url?: string }).url : undefined;
+  if (typeof known === 'string' && known) return known;
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    return typeof tab?.url === 'string' ? tab.url : '';
+  } catch {
+    return '';
+  }
 }
 
 async function readInteractionResult(tabId, approvedOrigin) {
@@ -1202,29 +1233,38 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
   }
   if (method === 'Network.requestWillBeSent') {
     inflightRequests += 1;
-    emitLiveNetworkActivity(source.tabId);
+    emitLiveNetworkActivity(source.tabId, 'request');
   }
   if (method === 'Network.loadingFinished' || method === 'Network.loadingFailed') {
     inflightRequests = Math.max(0, inflightRequests - 1);
-    emitLiveNetworkActivity(source.tabId);
+    emitLiveNetworkActivity(
+      source.tabId,
+      method === 'Network.loadingFinished' ? 'finish' : 'fail',
+    );
   }
   if (method === 'Page.loadEventFired') {
-    const frame = (params as Record<string, any> | undefined)?.frame as { url?: string } | undefined;
-    const raw = frame?.url;
-    const liveUrl = typeof raw === 'string' && raw ? raw : undefined;
-    if (liveUrl) {
-      void emitLiveDomSample(source.tabId, liveUrl);
-    }
+    // `Page.loadEventFired` carries only a `timestamp` — it has no `frame.url`.
+    // Reading one from `params` always yielded `undefined`, so the DOM sample
+    // was never emitted and the Runtime never received a `textLength`, leaving
+    // every navigation stuck in `settling` until the deadline.
+    void (async () => {
+      const liveUrl = await liveTabUrl(source.tabId);
+      if (liveUrl) void emitLiveDomSample(source.tabId, liveUrl);
+    })();
   }
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (tabId !== attachedTabId || !port || attachedTabId === null) return;
   if (changeInfo.status === 'complete') {
-    const target = targets.current();
-    const raw = target?.tabId === tabId ? (target as { url?: string }).url : undefined;
-    emitLiveDocumentReady(tabId, typeof raw === 'string' && raw ? raw : '', 'complete');
-    void emitLiveDomSample(tabId, typeof raw === 'string' && raw ? raw : '');
+    // The managed target may not carry a URL yet; an empty one makes the
+    // readiness events unusable downstream, so resolve the tab's own URL.
+    void (async () => {
+      const liveUrl = await liveTabUrl(tabId);
+      if (!liveUrl) return;
+      emitLiveDocumentReady(tabId, liveUrl, 'complete');
+      void emitLiveDomSample(tabId, liveUrl);
+    })();
   }
 });
 

@@ -140,6 +140,7 @@ export function waitForReadiness(
   const waiter = new PendingWait<WaitForReadinessResult>({ timeoutMs: deadlineMs });
 
   let settledResult: WaitForReadinessResult | null = null;
+  let pollInterval: ReturnType<typeof setInterval> | null = null;
 
   const materialize = (
     status: WaitForReadinessResult['status'],
@@ -167,6 +168,14 @@ export function waitForReadiness(
   const finish = (status: WaitForReadinessResult['status']): void => {
     if (settledResult) return;
     settledResult = materialize(status);
+    // Stop the settling poll as soon as we have a terminal result so a public
+    // `waitForReadiness` caller that forgets to `dispose()` does not leave a
+    // permanent 100ms timer running (#603 review M2). The interval is only
+    // meaningful while we still await a verdict.
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      pollInterval = null;
+    }
     if (status === 'resolved') {
       waiter.settle(settledResult);
     } else {
@@ -219,10 +228,12 @@ export function waitForReadiness(
   });
 
   // Poll periodically so the settling window can elapse without new events.
-  // Each poll calls `advanceSettling` which re-arms the baseline, but the
-  // interval lets the clock advance between polls so the NETWORK/DOM quiet
-  // window is satisfied.
-  const pollInterval = setInterval(() => {
+  // The interval lets the wall clock advance between polls so the NETWORK/DOM
+  // quiet window can elapse even when no new events arrive. Each poll calls
+  // `pollReadiness`, which does NOT re-arm the settle baseline — the baseline
+  // is derived only from real network/DOM activity, so polling never pushes
+  // the quiet window forward on its own (#603 review S2).
+  pollInterval = setInterval(() => {
     if (settledResult) return;
     controller.pollReadiness(clock());
     const nav = controller.getSnapshot().navigation;
@@ -239,7 +250,10 @@ export function waitForReadiness(
   const dispose = (): void => {
     if (disposed.value) return;
     disposed.value = true;
-    clearInterval(pollInterval);
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      pollInterval = null;
+    }
     offEvents();
     offGenerations();
   };

@@ -282,36 +282,43 @@ test('extension session drives browser_open through the readiness state machine 
     },
     async sendCommand(command, params) {
       if (command === 'navigate') {
-        // Issue #601: navigate is fire-and-forget. Emit the live events
-        // synchronously (they arrive before the await resolves in the session)
-        // so the waitForReadiness already subscribed to them.
-        const past = Date.now() - 500;
-        const base = { tabId: 7, timestamp: past };
-        listeners.forEach((l) => l({
-          ...base,
-          connectionGeneration: 1,
-          targetGeneration: 1,
-          navigationGeneration: 1,
-          type: 'navigation.committed',
-          url: String(params.url),
-        }));
-        listeners.forEach((l) => l({
-          ...base,
-          connectionGeneration: 1,
-          targetGeneration: 1,
-          navigationGeneration: 1,
-          type: 'document.ready',
-          payload: { readyState: 'complete' },
-        }));
-        listeners.forEach((l) => l({
-          tabId: 7,
-          timestamp: Date.now(),
-          connectionGeneration: 1,
-          targetGeneration: 1,
-          navigationGeneration: 1,
-          type: 'dom.changed',
-          payload: { textLength: 42, textRevision: 1 },
-        }));
+        // Simulate the real bridge (#603 M1): dispatching `navigate` bumps the
+        // navigation generation, and live events arrive *after* the command
+        // returns (async, via the bridge), i.e. after the session binds the
+        // post-navigate generation. If the session bind the pre-navigate
+        // generation (the bug), every event would be dropped as stale and
+        // `browser_open` would time out.
+        const gen = (status.navigationGeneration ?? 0) + 1;
+        status.navigationGeneration = gen;
+        setImmediate(() => {
+          const past = Date.now() - 500;
+          const base = {
+            tabId: 7,
+            timestamp: past,
+            connectionGeneration: 1,
+            targetGeneration: 1,
+            navigationGeneration: gen,
+          };
+          listeners.forEach((l) => l({
+            ...base,
+            type: 'navigation.committed',
+            url: String(params.url),
+          }));
+          listeners.forEach((l) => l({
+            ...base,
+            type: 'document.ready',
+            payload: { readyState: 'complete' },
+          }));
+          listeners.forEach((l) => l({
+            tabId: 7,
+            timestamp: Date.now(),
+            connectionGeneration: 1,
+            targetGeneration: 1,
+            navigationGeneration: gen,
+            type: 'dom.changed',
+            payload: { textLength: 42, textRevision: 1 },
+          }));
+        });
         return { ok: true };
       }
       return rawSnapshot;
@@ -349,17 +356,24 @@ test('extension session surfaces a cross-origin readiness failure as origin_chan
     },
     async sendCommand(command, params) {
       if (command === 'navigate') {
-        // Navigation commits to an attacker origin: the readiness state machine
-        // must refuse it deterministically, not trust the returned snapshot.
-        listeners.forEach((l) => l({
-          tabId: 9,
-          timestamp: Date.now(),
-          connectionGeneration: 1,
-          targetGeneration: 1,
-          navigationGeneration: 1,
-          type: 'navigation.committed',
-          url: 'https://attacker.example/steal',
-        }));
+        // Simulate real bridge: navigation generation bumps on dispatch and
+        // live events arrive after the navigate command returns (#603 M1).
+        const gen = (status.navigationGeneration ?? 0) + 1;
+        status.navigationGeneration = gen;
+        setImmediate(() => {
+          // Navigation commits to an attacker origin: the readiness state
+          // machine must refuse it deterministically, not trust the returned
+          // snapshot.
+          listeners.forEach((l) => l({
+            tabId: 9,
+            timestamp: Date.now(),
+            connectionGeneration: 1,
+            targetGeneration: 1,
+            navigationGeneration: gen,
+            type: 'navigation.committed',
+            url: 'https://attacker.example/steal',
+          }));
+        });
         return { ok: true };
       }
       return rawSnapshot;
@@ -422,33 +436,17 @@ test('extension session drives a click through the interaction settle state mach
     },
     async sendCommand(command) {
       if (command === 'navigate') {
-        const past = Date.now() - 500;
-        const base = { tabId: 13, timestamp: past };
-        listeners.forEach((l) => l({
-          ...base,
-          connectionGeneration: 1,
-          targetGeneration: 1,
-          navigationGeneration: 1,
-          type: 'navigation.committed',
-          url: 'https://example.com/page',
-        }));
-        listeners.forEach((l) => l({
-          ...base,
-          connectionGeneration: 1,
-          targetGeneration: 1,
-          navigationGeneration: 1,
-          type: 'document.ready',
-          payload: { readyState: 'complete' },
-        }));
-        listeners.forEach((l) => l({
-          tabId: 13,
-          timestamp: Date.now(),
-          connectionGeneration: 1,
-          targetGeneration: 1,
-          navigationGeneration: 1,
-          type: 'dom.changed',
-          payload: { textLength: 42, textRevision: 1 },
-        }));
+        // Simulate real bridge: navigation generation bumps on dispatch and
+        // live events arrive after the navigate command returns (#603 M1).
+        const gen = (status.navigationGeneration ?? 0) + 1;
+        status.navigationGeneration = gen;
+        setImmediate(() => {
+          const past = Date.now() - 500;
+          const base = { tabId: 13, timestamp: past, connectionGeneration: 1, targetGeneration: 1, navigationGeneration: gen };
+          listeners.forEach((l) => l({ ...base, type: 'navigation.committed', url: 'https://example.com/page' }));
+          listeners.forEach((l) => l({ ...base, type: 'document.ready', payload: { readyState: 'complete' } }));
+          listeners.forEach((l) => l({ tabId: 13, timestamp: Date.now(), connectionGeneration: 1, targetGeneration: 1, navigationGeneration: gen, type: 'dom.changed', payload: { textLength: 42, textRevision: 1 } }));
+        });
         return { ok: true };
       }
       if (command === 'snapshot') return rawSnapshot;
@@ -460,7 +458,7 @@ test('extension session drives a click through the interaction settle state mach
         ...base,
         connectionGeneration: 1,
         targetGeneration: 1,
-        navigationGeneration: 1,
+        navigationGeneration: status.navigationGeneration,
         type: 'navigation.committed',
         url: 'https://example.com/',
       }));
@@ -468,7 +466,7 @@ test('extension session drives a click through the interaction settle state mach
         ...base,
         connectionGeneration: 1,
         targetGeneration: 1,
-        navigationGeneration: 1,
+        navigationGeneration: status.navigationGeneration,
         type: 'document.ready',
         payload: { readyState: 'complete' },
       }));
@@ -476,7 +474,7 @@ test('extension session drives a click through the interaction settle state mach
         ...base,
         connectionGeneration: 1,
         targetGeneration: 1,
-        navigationGeneration: 1,
+        navigationGeneration: status.navigationGeneration,
         type: 'dom.changed',
         payload: { textLength: 42, textRevision: 1 },
       }));
@@ -515,33 +513,17 @@ test('extension session surfaces a cross-origin interaction as origin_changed', 
     },
     async sendCommand(command) {
       if (command === 'navigate') {
-        const past = Date.now() - 500;
-        const base = { tabId: 14, timestamp: past };
-        listeners.forEach((l) => l({
-          ...base,
-          connectionGeneration: 1,
-          targetGeneration: 1,
-          navigationGeneration: 1,
-          type: 'navigation.committed',
-          url: 'https://example.com/page',
-        }));
-        listeners.forEach((l) => l({
-          ...base,
-          connectionGeneration: 1,
-          targetGeneration: 1,
-          navigationGeneration: 1,
-          type: 'document.ready',
-          payload: { readyState: 'complete' },
-        }));
-        listeners.forEach((l) => l({
-          tabId: 14,
-          timestamp: Date.now(),
-          connectionGeneration: 1,
-          targetGeneration: 1,
-          navigationGeneration: 1,
-          type: 'dom.changed',
-          payload: { textLength: 42, textRevision: 1 },
-        }));
+        // Simulate real bridge: navigation generation bumps on dispatch and
+        // live events arrive after the navigate command returns (#603 M1).
+        const gen = (status.navigationGeneration ?? 0) + 1;
+        status.navigationGeneration = gen;
+        setImmediate(() => {
+          const past = Date.now() - 500;
+          const base = { tabId: 14, timestamp: past, connectionGeneration: 1, targetGeneration: 1, navigationGeneration: gen };
+          listeners.forEach((l) => l({ ...base, type: 'navigation.committed', url: 'https://example.com/page' }));
+          listeners.forEach((l) => l({ ...base, type: 'document.ready', payload: { readyState: 'complete' } }));
+          listeners.forEach((l) => l({ tabId: 14, timestamp: Date.now(), connectionGeneration: 1, targetGeneration: 1, navigationGeneration: gen, type: 'dom.changed', payload: { textLength: 42, textRevision: 1 } }));
+        });
         return { ok: true };
       }
       if (command === 'snapshot') return rawSnapshot;
@@ -553,7 +535,7 @@ test('extension session surfaces a cross-origin interaction as origin_changed', 
         timestamp: Date.now(),
         connectionGeneration: 1,
         targetGeneration: 1,
-        navigationGeneration: 1,
+        navigationGeneration: status.navigationGeneration,
         type: 'navigation.committed',
         url: 'https://attacker.example/steal',
       }));
@@ -592,33 +574,17 @@ test('extension session does NOT mark a text-less (SPA shell) click resolved rea
     },
     async sendCommand(command) {
       if (command === 'navigate') {
-        const past = Date.now() - 500;
-        const base = { tabId: 15, timestamp: past };
-        listeners.forEach((l) => l({
-          ...base,
-          connectionGeneration: 1,
-          targetGeneration: 1,
-          navigationGeneration: 1,
-          type: 'navigation.committed',
-          url: 'https://example.com/page',
-        }));
-        listeners.forEach((l) => l({
-          ...base,
-          connectionGeneration: 1,
-          targetGeneration: 1,
-          navigationGeneration: 1,
-          type: 'document.ready',
-          payload: { readyState: 'complete' },
-        }));
-        listeners.forEach((l) => l({
-          tabId: 15,
-          timestamp: Date.now(),
-          connectionGeneration: 1,
-          targetGeneration: 1,
-          navigationGeneration: 1,
-          type: 'dom.changed',
-          payload: { textLength: 42, textRevision: 1 },
-        }));
+        // Simulate real bridge: navigation generation bumps on dispatch and
+        // live events arrive after the navigate command returns (#603 M1).
+        const gen = (status.navigationGeneration ?? 0) + 1;
+        status.navigationGeneration = gen;
+        setImmediate(() => {
+          const past = Date.now() - 500;
+          const base = { tabId: 15, timestamp: past, connectionGeneration: 1, targetGeneration: 1, navigationGeneration: gen };
+          listeners.forEach((l) => l({ ...base, type: 'navigation.committed', url: 'https://example.com/page' }));
+          listeners.forEach((l) => l({ ...base, type: 'document.ready', payload: { readyState: 'complete' } }));
+          listeners.forEach((l) => l({ tabId: 15, timestamp: Date.now(), connectionGeneration: 1, targetGeneration: 1, navigationGeneration: gen, type: 'dom.changed', payload: { textLength: 42, textRevision: 1 } }));
+        });
         return { ok: true };
       }
       if (command === 'snapshot') return rawSnapshot;
@@ -630,7 +596,7 @@ test('extension session does NOT mark a text-less (SPA shell) click resolved rea
         ...base,
         connectionGeneration: 1,
         targetGeneration: 1,
-        navigationGeneration: 1,
+        navigationGeneration: status.navigationGeneration,
         type: 'navigation.committed',
         url: 'https://example.com/',
       }));
@@ -638,7 +604,7 @@ test('extension session does NOT mark a text-less (SPA shell) click resolved rea
         ...base,
         connectionGeneration: 1,
         targetGeneration: 1,
-        navigationGeneration: 1,
+        navigationGeneration: status.navigationGeneration,
         type: 'document.ready',
         payload: { readyState: 'complete' },
       }));
@@ -646,7 +612,7 @@ test('extension session does NOT mark a text-less (SPA shell) click resolved rea
         ...base,
         connectionGeneration: 1,
         targetGeneration: 1,
-        navigationGeneration: 1,
+        navigationGeneration: status.navigationGeneration,
         type: 'dom.changed',
         payload: { textLength: 0, textRevision: 1 },
       }));

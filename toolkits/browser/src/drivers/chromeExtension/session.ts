@@ -200,17 +200,6 @@ export class ChromeExtensionBrowserSession {
       : null;
 
     try {
-      // Bind the controller to the bridge's current generations before
-      // dispatching so the event stamps and the controller context agree.
-      const status = this.bridge.getStatus?.() as BrowserBridgeStatus | undefined;
-      controller.beginNavigation(
-        url,
-        approvedOrigin,
-        status?.connectionGeneration ?? 1,
-        status?.targetGeneration ?? 1,
-        status?.navigationGeneration,
-      );
-
       // Fire-and-forget navigate: the extension returns immediately and
       // live CDP events drive the controller through the bridge.
       const raw = await this.bridge.sendCommand('navigate', {
@@ -227,6 +216,24 @@ export class ChromeExtensionBrowserSession {
           { approvedOrigin },
         );
       }
+
+      // Bind the controller to the bridge's *post-navigate* generation. The
+      // bridge bumps its navigation generation when the `navigate` command is
+      // dispatched (`sendCommand('navigate', …)` calls `beginNavigation()`), so
+      // events emitted after the navigation are stamped with the bumped value.
+      // Binding before the dispatch would tie the controller to the pre-navigate
+      // generation and `isEventCurrent` would drop *every* live event as stale,
+      // wedging `browser_open` in a 30s timeout (#603 review M1). Reading the
+      // status *after* navigate returns the exact generation the live events
+      // carry, so the two always agree.
+      const status = this.bridge.getStatus?.() as BrowserBridgeStatus | undefined;
+      controller.beginNavigation(
+        url,
+        approvedOrigin,
+        status?.connectionGeneration ?? 1,
+        status?.targetGeneration ?? 1,
+        status?.navigationGeneration,
+      );
 
       // Wait for the live event stream to drive the controller to a terminal
       // state. Without a live source (e.g. bridge not wired), fall back to a

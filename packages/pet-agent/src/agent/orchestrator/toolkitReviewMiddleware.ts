@@ -953,17 +953,28 @@ async function resolvePreparedToolkitReviews(params: {
   // action necessarily passed global policy into human review before pausing,
   // so consume that review directly without running auto-review again. A later
   // capability has a fresh graph task/scratchpad and evaluates new reviews.
-  const policyResolution = hasPendingReviewInterruptResume()
+  const hasPendingResume = hasPendingReviewInterruptResume();
+  const deterministicallyAutoAuthorized = !hasPendingResume
+    && await canAutoAuthorizeCompleteBatch({
+      ctx: params.ctx,
+      reviews: params.prepared.reviews,
+    });
+  const policyResolution = hasPendingResume
     ? { type: GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION } as const
-    : await resolveGlobalReviewBatchPolicy({
-        policy: params.ctx.globalReviewPolicy,
-        models: params.ctx.models,
-        actor: params.ctx.actor,
-        messages: params.ctx.messages,
-        task: params.ctx.reviewContext?.task,
-        workdir: params.ctx.reviewContext?.workdir,
-        reviews: params.prepared.reviews,
-      });
+    : deterministicallyAutoAuthorized
+      ? {
+          type: GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE,
+          reason: 'Every action passed its deterministic toolkit auto-authorization policy.',
+        } as const
+      : await resolveGlobalReviewBatchPolicy({
+          policy: params.ctx.globalReviewPolicy,
+          models: params.ctx.models,
+          actor: params.ctx.actor,
+          messages: params.ctx.messages,
+          task: params.ctx.reviewContext?.task,
+          workdir: params.ctx.reviewContext?.workdir,
+          reviews: params.prepared.reviews,
+        });
 
   if (policyResolution.type === GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE) {
     const sessionAuthorizations = await buildAutoReviewSessionAuthorizations({
@@ -1000,6 +1011,36 @@ async function resolvePreparedToolkitReviews(params: {
   return resolveHumanToolkitReviews({
     reviews: params.prepared.reviews,
   });
+}
+
+async function canAutoAuthorizeCompleteBatch(params: {
+  ctx: ToolkitReviewRuntimeContext;
+  reviews: PreparedToolkitReview[];
+}) {
+  if (
+    params.ctx.globalReviewPolicy?.mode !== GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION
+    || params.reviews.length === 0
+  ) {
+    return false;
+  }
+
+  for (const review of params.reviews) {
+    const autoAuthorize = review.reviewPolicy.autoAuthorize;
+    if (!autoAuthorize) return false;
+    try {
+      const authorized = await autoAuthorize({
+        toolkitName: review.toolkitName,
+        toolName: review.toolName,
+        input: review.input,
+        operation: review.operation,
+        workdir: params.ctx.reviewContext?.workdir ?? null,
+      });
+      if (!authorized) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
 }
 
 function buildCancelledToolCallResults(

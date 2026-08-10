@@ -41,6 +41,11 @@ export type ToolAuthorizationContext = {
   operation?: ToolOperationMetadata;
 };
 
+export type ToolAutoAuthorizationContext = ToolAuthorizationContext & {
+  /** Effective runtime workdir used to evaluate mutation scope. */
+  workdir: string | null;
+};
+
 export type ToolAuthorizationPolicy = {
   buildMatcher: (
     ctx: ToolAuthorizationContext,
@@ -65,6 +70,14 @@ export type ToolReviewPolicy = {
     ctx: ToolReviewContext,
   ) => ToolReviewResult | Promise<ToolReviewResult>;
   authorization?: ToolAuthorizationPolicy;
+  /**
+   * Optional deterministic fast path used only by the built-in
+   * `auto_authorization` policy. The complete reviewed batch bypasses the
+   * model classifier only when every action returns true.
+   */
+  autoAuthorize?: (
+    ctx: ToolAutoAuthorizationContext,
+  ) => boolean | Promise<boolean>;
 };
 
 export type ToolkitReviewGuidance = {

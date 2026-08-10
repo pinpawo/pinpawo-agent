@@ -1,6 +1,7 @@
 import type {
   ToolAuthorizationContext,
   ToolAuthorizationPolicy,
+  ToolAutoAuthorizationContext,
   ToolOperationSummary,
   ToolReviewBlock,
   ToolReviewContext,
@@ -31,6 +32,7 @@ export type ExactAuthorizationPolicyOptions = {
 
 export type HitlPresetOptions = {
   authorization?: AuthorizationMode | ToolAuthorizationPolicy;
+  autoAuthorize?: (ctx: ToolAutoAuthorizationContext) => boolean | Promise<boolean>;
   unavailable?: ReviewUnavailableBehavior;
 };
 
@@ -251,6 +253,7 @@ function createPresetPolicy(options: PresetOptions): ToolReviewPolicy {
       });
     },
     ...(authorization ? { authorization } : {}),
+    ...(options.autoAuthorize ? { autoAuthorize: options.autoAuthorize } : {}),
   };
 }
 

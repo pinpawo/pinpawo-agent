@@ -359,6 +359,7 @@ function buildEntryDecisionResult(params: {
     mode: 'entry',
     plannerState: {
       runId: state.runId,
+      traceId: state.traceId,
       runUserGoal: decision.userGoal,
       runDelegationSummaries: state.runDelegationSummaries,
       runCapabilityPlan: [],
@@ -452,10 +453,11 @@ function buildDelegationOutcomeDecisionResult(params: {
         },
       };
     }
-    const dispatch: CapabilityPlannerDispatch = {
+    const dispatch = {
       mode: 'boundary',
       plannerState: {
         runId: state.runId,
+        traceId: state.traceId,
         runUserGoal,
         runDelegationSummaries: acceptedDelegationUpdate.runDelegationSummaries,
         runCapabilityPlan: state.runCapabilityPlan,
@@ -465,7 +467,7 @@ function buildDelegationOutcomeDecisionResult(params: {
       completedTaskResult: boundCapabilityPlannerBoundaryResult(
         context.activeDelegationResult,
       ),
-    };
+    } as unknown as CapabilityPlannerDispatch;
     return {
       goto: new Send('capabilityPlanner', dispatch),
       update: acceptedDelegationUpdate,

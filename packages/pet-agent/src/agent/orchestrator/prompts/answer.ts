@@ -16,9 +16,6 @@ export const ANSWER_INPUT_MESSAGE_NAME = 'answer_input';
 export const ANSWER_CONTEXT_LIMITS = {
   unfinishedTaskChars: 320,
   detailChars: 320,
-  plannerReasonChars: 1_000,
-  plannerContextChars: 2_000,
-  plannerQuestionChars: 1_000,
   awaitingUserInputChars: 2_000,
 } as const;
 
@@ -42,13 +39,6 @@ export type AnswerContextFacts =
       mode: 'user_input_required';
       hasUserGoal: boolean;
       context: string | null;
-    }
-  | {
-      mode: 'planner_return';
-      hasUserGoal: boolean;
-      reason: string;
-      context: string;
-      question: string | null;
     }
   | {
       mode: 'blocked';
@@ -78,22 +68,6 @@ function renderAnswerContext(facts: ModelAnswerContextFacts): string {
       lines.push(indentXmlBlock(xmlTextBlock(
         'detail',
         clipForPrompt(facts.detail, ANSWER_CONTEXT_LIMITS.detailChars),
-      ), 2));
-    }
-  }
-  if (facts.mode === 'planner_return') {
-    lines.push(indentXmlBlock(xmlTextBlock(
-      'planner_reason',
-      clipForPrompt(facts.reason, ANSWER_CONTEXT_LIMITS.plannerReasonChars),
-    ), 2));
-    lines.push(indentXmlBlock(xmlTextBlock(
-      'planner_context',
-      clipForPrompt(facts.context, ANSWER_CONTEXT_LIMITS.plannerContextChars),
-    ), 2));
-    if (facts.question) {
-      lines.push(indentXmlBlock(xmlTextBlock(
-        'planner_question',
-        clipForPrompt(facts.question, ANSWER_CONTEXT_LIMITS.plannerQuestionChars),
       ), 2));
     }
   }

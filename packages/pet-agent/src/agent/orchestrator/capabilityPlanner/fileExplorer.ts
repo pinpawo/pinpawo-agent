@@ -30,7 +30,9 @@ withLangGraph(
   grepSearchCallCountSchema as unknown as InteropZodType<number>,
   {
     reducer: {
-      schema: z4.number().int().positive() as unknown as InteropZodType<number>,
+      // Negative increments are used only by the private Planner's beforeAgent
+      // hook to reset this per-turn budget while retaining additive parallel calls.
+      schema: z4.number().int() as unknown as InteropZodType<number>,
       fn: (current: number, increment: number) => current + increment,
     },
     default: () => 0,
@@ -83,7 +85,7 @@ function formatGrepSearchLimitReached() {
     ok: false,
     error: {
       code: 'planning_limit_reached',
-      message: `grep_search call limit reached after ${String(MAX_GREP_SEARCH_CALLS)} calls. Call submit_plan now, or return_to_answer if no executable plan is possible.`,
+      message: `grep_search call limit reached after ${String(MAX_GREP_SEARCH_CALLS)} calls. Call submit_plan now, or report_unavailable if no executable plan is possible.`,
     },
   });
 }

@@ -87,27 +87,18 @@ function buildRecordingSubagent(responses: string[]) {
 
 function buildScriptedDecisionModel() {
   let entryDecisionCount = 0;
-  let outcomeDecisionCount = 0;
-  let structuredDecisionCount = 0;
   const model = {
     invoke: async () => new AIMessage(
       'auth 重构已经完成：token validation 已提取，循环依赖已移除，公开接口保持不变，测试通过。',
     ),
     withStructuredOutput: () => ({
       invoke: async () => {
-        structuredDecisionCount += 1;
-        if (structuredDecisionCount === 1) {
-          entryDecisionCount += 1;
-          return {
-            action: 'needs_plan',
-            planner_objective: '完成当前 auth 模块重构：先调查现有结构、依赖和风险，再实施改动并验证。',
-            planner_context: null,
-          };
-        }
-        outcomeDecisionCount += 1;
-        return outcomeDecisionCount === 1
-          ? { outcome: 'task_done', gap_note: '调查完成，后续重构任务应根据 handoff 具体化。' }
-          : { outcome: 'goal_done', gap_note: null };
+        entryDecisionCount += 1;
+        return {
+          action: 'needs_plan',
+          planner_objective: '完成当前 auth 模块重构：先调查现有结构、依赖和风险，再实施改动并验证。',
+          planner_context: null,
+        };
       },
     }),
   } as unknown as AgentModels['act'];
@@ -115,7 +106,6 @@ function buildScriptedDecisionModel() {
     model,
     stats: () => ({
       entryDecisionCount,
-      outcomeDecisionCount,
     }),
   };
 }
@@ -133,6 +123,7 @@ function buildScriptedPlannerRunner() {
         plannedObjectives.push(objective);
         selectedCapabilityNames.push('explore');
         return {
+          action: 'execute_plan',
           tasks: [{
             capability: 'explore',
             task: objective,
@@ -142,13 +133,17 @@ function buildScriptedPlannerRunner() {
           }],
         };
       }
+      if (plannerDecisionCount > 2) {
+        return { action: 'goal_done', tasks: [] };
+      }
       secondTaskSawHandoff = /循环依赖|token validation/.test(
-        input.completedTaskResult ?? '',
+        input.latestAnnounce?.text ?? '',
       );
       const objective = '根据调查结论重构 auth 模块，提取 token validation 并移除循环依赖';
       plannedObjectives.push(objective);
       selectedCapabilityNames.push('code_modify');
       return {
+        action: 'execute_plan',
         tasks: [{
           capability: 'code_modify',
           task: objective,
@@ -227,7 +222,7 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
       score: stats.plannedObjectives.length === expected.expectedPlannedObjectiveTerms.length
         && stats.plannedObjectives.every((objective, index) =>
           (expected.expectedPlannedObjectiveTerms[index] ?? []).every((term) => objective.includes(term)))
-        && stats.plannerDecisionCount === expected.expectedDelegationCount
+        && stats.plannerDecisionCount === expected.expectedDelegationCount + 1
         && JSON.stringify(stats.selectedCapabilityNames) === JSON.stringify(expected.expectedCapabilityNames)
         && summaries.length === expected.expectedTaskTerms.length ? 1 : 0,
       comment: `plannedObjectives=${JSON.stringify(stats.plannedObjectives)}, plannerDecisions=${stats.plannerDecisionCount}, selected=${JSON.stringify(stats.selectedCapabilityNames)}`,

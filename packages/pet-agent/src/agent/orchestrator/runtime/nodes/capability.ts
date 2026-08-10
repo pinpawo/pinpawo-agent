@@ -248,7 +248,7 @@ export function createCapabilityNode(params: {
       ? currentResultPreview
       : delegationAnnounce?.text ?? null;
     // The subagent node only records that the delegation ran (status 'progress');
-    // whether it is complete is the orchestrator's call at delegationOutcomeDecision,
+    // whether it is complete is the private Planner's call at the execution boundary,
     // which upgrades the status to 'completed' when it hands off. The raw lane
     // messages are kept in place — handoff (or a later continuation) cleans them up.
     const updatedRunDelegationSummaries = updateRunDelegationSummaryResult(
@@ -270,6 +270,7 @@ export function createCapabilityNode(params: {
           runNextDelegation,
           transcriptRunId,
           state.runUserGoal,
+          state.traceId,
         )),
         status: interrupted ? 'pending' as const : 'awaiting_decision' as const,
         resultPreview,

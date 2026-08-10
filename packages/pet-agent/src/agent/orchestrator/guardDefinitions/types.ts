@@ -1,8 +1,11 @@
 export const ORCHESTRATOR_GUARD_POSITION = {
   PREPARE: 'orchestrator.prepare',
   CONTEXT_COMPACTION: 'orchestrator.context_compaction',
+  /** @deprecated Compatibility position for the removed Outcome runner. */
   DELEGATION_OUTCOME_DECISION: 'orchestrator.delegation_outcome_decision',
+  /** @deprecated Compatibility position for the removed Outcome route. */
   DELEGATION_OUTCOME_ITERATION: 'orchestrator.delegation_outcome_iteration',
+  PLANNER_BOUNDARY_ITERATION: 'orchestrator.planner_boundary_iteration',
 } as const;
 
 export type OrchestratorGuardPosition =
@@ -11,6 +14,7 @@ export type OrchestratorGuardPosition =
 export const ORCHESTRATOR_GUARD_NAME = {
   RUN_STATE_RESET: 'run_state_reset',
   CONTEXT_COMPACTION_WATERMARK: 'context_compaction_watermark',
+  /** @deprecated Compatibility name for the removed Outcome runner. */
   DELEGATION_OUTCOME_DECISION: 'delegation_outcome_decision',
   RUN_ITERATION_LIMIT: 'run_iteration_limit',
 } as const;

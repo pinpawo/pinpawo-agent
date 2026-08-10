@@ -16,7 +16,17 @@ import {
   type BaseMessage,
 } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import type { StructuredTool } from '@langchain/core/tools';
+import { tool, type StructuredTool } from '@langchain/core/tools';
+import {
+  Annotation,
+  Command,
+  END,
+  interrupt,
+  MemorySaver,
+  START,
+  StateGraph,
+} from '@langchain/langgraph';
+import { z } from 'zod';
 import {
   CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
 } from './fileExplorer';
@@ -34,7 +44,7 @@ type ScriptedToolCall = {
 };
 
 type ScriptedStructuredOutput = {
-  kind: 'plan' | 'return_to_answer';
+  kind: 'plan' | 'unavailable';
   args: Record<string, unknown>;
 };
 
@@ -128,7 +138,7 @@ class ScriptedPlannerModel extends BaseChatModel {
       const parameters = entry.function?.parameters;
       const kind = name === 'submit_plan'
         ? 'plan'
-        : name === 'return_to_answer' ? 'return_to_answer' : null;
+        : name === 'report_unavailable' ? 'unavailable' : null;
       if (name && kind) {
         this.structuredOutputToolNames.set(kind, name);
         this.structuredOutputSchemaReferences.push(
@@ -170,7 +180,9 @@ class ScriptedPlannerModel extends BaseChatModel {
           name: this.structuredOutputToolNames.get(
             response.structuredOutput.kind,
           ) ?? `missing-${response.structuredOutput.kind}-output-tool`,
-          args: response.structuredOutput.args,
+          args: response.structuredOutput.kind === 'unavailable'
+            ? {}
+            : response.structuredOutput.args,
         }]
       : undefined;
     const message = new AIMessage({
@@ -280,13 +292,17 @@ function plannerInput(
   overrides: Partial<CapabilityPlannerInput> = {},
 ): CapabilityPlannerInput {
   const base = {
+    inputId: 'trace_started:trace-test',
+    traceId: 'trace-test',
+    runId: 'run-test',
     userGoal: {
       objective: 'Research the repository and then prepare a review.',
       context: null,
     },
     recentMainMessages: [],
-    completedTask: null,
-    completedTaskResult: null,
+    latestUserMessage: null,
+    activeDelegation: null,
+    latestAnnounce: null,
     remainingPlan: [],
     workspace,
   };
@@ -317,6 +333,348 @@ function submitArgs(
     }],
   };
 }
+
+test('nested Planner checkpoint persists one trace privately and deduplicates boundary inputs', async (t) => {
+  const workspace = await createWorkspace(t, {
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary workspace tasks.',
+      instructions: 'Complete the requested work.',
+    }),
+  });
+  const changedWorkspace = await createWorkspace(t, {
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle updated workspace tasks.',
+      instructions: 'Use the updated Capability contract.',
+    }),
+  });
+  const model = new ScriptedPlannerModel([{
+    structuredOutput: {
+      kind: 'plan',
+      args: {
+        tasks: [{ capability: 'general', task: 'Complete trace A.' }],
+      },
+    },
+  }, {
+    toolCalls: [{ id: 'done-a', name: 'complete_goal', args: {} }],
+  }, {
+    toolCalls: [{ id: 'unavailable-b', name: 'report_unavailable', args: {} }],
+  }, {
+    toolCalls: [{ id: 'unavailable-c', name: 'report_unavailable', args: {} }],
+  }]);
+  const planner = createCapabilityPlannerAgent({ model });
+  const HarnessState = Annotation.Root({
+    input: Annotation<CapabilityPlannerInput>({
+      reducer: (_previous, next) => next,
+    }),
+    commit: Annotation<unknown>({
+      reducer: (_previous, next) => next,
+      default: () => null,
+    }),
+  });
+  const checkpointer = new MemorySaver();
+  const graph = new StateGraph(HarnessState)
+    .addNode('planner', async (state, config) => ({
+      commit: await planner.invoke(state.input, config),
+    }))
+    .addEdge(START, 'planner')
+    .addEdge('planner', END)
+    .compile({ checkpointer });
+  const config = { configurable: { thread_id: 'private-planner-checkpoint' } };
+  const entryA = plannerInput(workspace, {
+    inputId: 'trace_started:trace-a',
+    traceId: 'trace-a',
+    runId: 'run-a1',
+    userGoal: { objective: 'PRIVATE_TRACE_A_GOAL', context: null },
+  });
+  const boundaryA = plannerInput(workspace, {
+    mode: 'boundary',
+    inputId: 'announce:delegation-a:1',
+    traceId: 'trace-a',
+    runId: 'run-a2',
+    userGoal: entryA.userGoal,
+    activeDelegation: {
+      delegationId: 'delegation-a',
+      capability: 'general',
+      task: 'Complete trace A.',
+    },
+    latestAnnounce: {
+      messageId: 'announce-a',
+      text: 'Trace A execution is complete.',
+      completionReason: 'natural',
+    },
+  });
+
+  const entryState = await graph.invoke({ input: entryA }, config);
+  assert.deepEqual(entryState.commit, {
+    action: 'execute_plan',
+    tasks: [{ capability: 'general', task: 'Complete trace A.' }],
+  });
+  const boundaryState = await graph.invoke({ input: boundaryA }, config);
+  assert.deepEqual(boundaryState.commit, { action: 'goal_done', tasks: [] });
+  assert.equal(model.invocations.length, 2);
+  const checkpointNamespaces = Object.keys(
+    checkpointer.storage['private-planner-checkpoint'] ?? {},
+  );
+  assert.ok(
+    checkpointNamespaces.includes('privateCapabilityPlanner_trace-a'),
+    `expected stable Planner namespace; found ${JSON.stringify(checkpointNamespaces)}`,
+  );
+  const plannerCheckpoint = await checkpointer.getTuple({
+    configurable: {
+      thread_id: 'private-planner-checkpoint',
+      checkpoint_ns: 'privateCapabilityPlanner_trace-a',
+    },
+  });
+  assert.equal(
+    plannerCheckpoint?.checkpoint.channel_values.committedInputId,
+    boundaryA.inputId,
+  );
+  assert.match(
+    model.invocations[1]?.map(readMessageText).join('\n') ?? '',
+    /PRIVATE_TRACE_A_GOAL/,
+  );
+
+  const duplicateState = await graph.invoke({ input: boundaryA }, config);
+  assert.deepEqual(duplicateState.commit, { action: 'goal_done', tasks: [] });
+  assert.equal(model.invocations.length, 2, 'duplicate inputId must use the private cached commit');
+
+  const restartedModel = new ScriptedPlannerModel([{
+    toolCalls: [{ id: 'must-not-run', name: 'report_unavailable', args: {} }],
+  }]);
+  const restartedPlanner = createCapabilityPlannerAgent({ model: restartedModel });
+  const restartedGraph = new StateGraph(HarnessState)
+    .addNode('planner', async (state, runnableConfig) => ({
+      commit: await restartedPlanner.invoke(state.input, runnableConfig),
+    }))
+    .addEdge(START, 'planner')
+    .addEdge('planner', END)
+    .compile({ checkpointer });
+  const restartedState = await restartedGraph.invoke({ input: boundaryA }, config);
+  assert.deepEqual(restartedState.commit, { action: 'goal_done', tasks: [] });
+  assert.equal(restartedModel.invocations.length, 0, 'a rebuilt Planner must replay the persisted commit');
+
+  const changedRegistryState = await graph.invoke({
+    input: { ...boundaryA, workspace: changedWorkspace },
+  }, config);
+  assert.deepEqual(changedRegistryState.commit, { action: 'unavailable', tasks: [] });
+  assert.equal(model.invocations.length, 3, 'registry changes must invalidate a cached commit');
+
+  const entryB = plannerInput(workspace, {
+    inputId: 'trace_started:trace-b',
+    traceId: 'trace-b',
+    runId: 'run-b1',
+    userGoal: { objective: 'PRIVATE_TRACE_B_GOAL', context: null },
+  });
+  const traceBState = await graph.invoke({ input: entryB }, config);
+  assert.deepEqual(traceBState.commit, { action: 'unavailable', tasks: [] });
+  assert.equal(model.invocations.length, 4);
+  const traceBMessages = model.invocations[3]?.map(readMessageText).join('\n') ?? '';
+  assert.match(traceBMessages, /PRIVATE_TRACE_B_GOAL/);
+  assert.doesNotMatch(traceBMessages, /PRIVATE_TRACE_A_GOAL/);
+  assert.equal('messages' in traceBState, false, 'private Planner messages must not enter root state');
+
+  await assert.rejects(
+    graph.invoke({
+      input: plannerInput(workspace, {
+        mode: 'boundary',
+        inputId: 'announce:missing:1',
+        traceId: 'trace-missing',
+        runId: 'run-missing',
+        activeDelegation: {
+          delegationId: 'missing',
+          capability: 'general',
+          task: 'Cannot resume without a Planner checkpoint.',
+        },
+      }),
+    }, config),
+    (error: unknown) => error instanceof CapabilityPlannerAgentError
+      && error.code === 'planner_checkpoint_missing',
+  );
+  assert.equal(model.invocations.length, 4);
+
+  await assert.rejects(
+    restartedGraph.invoke({ input: boundaryA }, {
+      configurable: { thread_id: 'private-planner-other-thread' },
+    }),
+    (error: unknown) => error instanceof CapabilityPlannerAgentError
+      && error.code === 'planner_checkpoint_missing',
+    'the same traceId in another conversation thread must not see private state',
+  );
+  assert.equal(restartedModel.invocations.length, 0);
+});
+
+test('Planner compacts only its private checkpoint and preserves trace context', async (t) => {
+  const workspace = await createWorkspace(t, {
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary workspace tasks.',
+      instructions: 'Complete the requested work.',
+    }),
+  });
+  const model = new ScriptedPlannerModel([{
+    structuredOutput: {
+      kind: 'plan',
+      args: { tasks: [{ capability: 'general', task: 'Complete the long task.' }] },
+    },
+  }, ...Array.from({ length: 4 }, (_, index) => ({
+    toolCalls: [{ id: `done-${String(index)}`, name: 'complete_goal', args: {} }],
+  }))]);
+  const planner = createCapabilityPlannerAgent({
+    model,
+    privateContextMaxChars: 500,
+    privateContextKeepInputs: 2,
+  });
+  const HarnessState = Annotation.Root({
+    input: Annotation<CapabilityPlannerInput>({
+      reducer: (_previous, next) => next,
+    }),
+    commit: Annotation<unknown>({
+      reducer: (_previous, next) => next,
+      default: () => null,
+    }),
+  });
+  const checkpointer = new MemorySaver();
+  const graph = new StateGraph(HarnessState)
+    .addNode('planner', async (state, config) => ({
+      commit: await planner.invoke(state.input, config),
+    }))
+    .addEdge(START, 'planner')
+    .addEdge('planner', END)
+    .compile({ checkpointer });
+  const config = { configurable: { thread_id: 'private-planner-compaction' } };
+  const userGoal = {
+    objective: `PRIVATE_COMPACTION_GOAL ${'context '.repeat(80)}`,
+    context: null,
+  };
+  await graph.invoke({
+    input: plannerInput(workspace, {
+      inputId: 'trace_started:trace-compaction',
+      traceId: 'trace-compaction',
+      runId: 'run-0',
+      userGoal,
+    }),
+  }, config);
+  for (let index = 1; index <= 4; index += 1) {
+    await graph.invoke({
+      input: plannerInput(workspace, {
+        mode: 'boundary',
+        inputId: `announce:delegation:${String(index)}`,
+        traceId: 'trace-compaction',
+        runId: `run-${String(index)}`,
+        userGoal,
+        activeDelegation: {
+          delegationId: 'delegation',
+          capability: 'general',
+          task: 'Complete the long task.',
+        },
+        latestAnnounce: {
+          messageId: `announce-${String(index)}`,
+          text: `Execution result ${String(index)} ${'evidence '.repeat(40)}`,
+          completionReason: 'natural',
+        },
+      }),
+    }, config);
+  }
+
+  const plannerCheckpoint = await checkpointer.getTuple({
+    configurable: {
+      thread_id: 'private-planner-compaction',
+      checkpoint_ns: 'privateCapabilityPlanner_trace-compaction',
+    },
+  });
+  const values = plannerCheckpoint?.checkpoint.channel_values as {
+    messages?: BaseMessage[];
+    compactionCount?: number;
+  } | undefined;
+  assert.ok((values?.compactionCount ?? 0) > 0);
+  assert.ok(values?.messages?.some((message) => {
+    const text = readMessageText(message);
+    return text.includes('<private_planner_compaction>')
+      && text.includes('PRIVATE_COMPACTION_GOAL');
+  }));
+  assert.ok(model.invocations.at(-1)?.some((message) =>
+    readMessageText(message).includes('<private_planner_compaction>')));
+  const rootState = await graph.getState(config);
+  assert.equal('messages' in rootState.values, false);
+});
+
+test('parent bare Command resume continues an in-flight private Planner interrupt', async (t) => {
+  const workspace = await createWorkspace(t, {
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary workspace tasks.',
+      instructions: 'Complete the requested work.',
+    }),
+  });
+  const pausePlanner = tool(async () => interrupt({
+    kind: 'private_planner_test_pause',
+  }), {
+    name: 'pause_planner',
+    description: 'Pause the private Planner for a host decision.',
+    schema: z.object({}).strict(),
+  });
+  const model = new ScriptedPlannerModel([{
+    toolCalls: [{ id: 'pause', name: 'pause_planner', args: {} }],
+  }, {
+    structuredOutput: {
+      kind: 'plan',
+      args: {
+        tasks: [{ capability: 'general', task: 'Continue after approval.' }],
+      },
+    },
+  }]);
+  const planner = createCapabilityPlannerAgent({
+    model,
+    additionalPrivateTools: [pausePlanner],
+  });
+  const HarnessState = Annotation.Root({
+    input: Annotation<CapabilityPlannerInput>({
+      reducer: (_previous, next) => next,
+    }),
+    commit: Annotation<unknown>({
+      reducer: (_previous, next) => next,
+      default: () => null,
+    }),
+  });
+  const graph = new StateGraph(HarnessState)
+    .addNode('planner', async (state, config) => ({
+      commit: await planner.invoke(state.input, config),
+    }))
+    .addEdge(START, 'planner')
+    .addEdge('planner', END)
+    .compile({ checkpointer: new MemorySaver() });
+  const config = { configurable: { thread_id: 'private-planner-interrupt' } };
+  const input = plannerInput(workspace, {
+    inputId: 'trace_started:trace-interrupt',
+    traceId: 'trace-interrupt',
+    runId: 'run-interrupt',
+    userGoal: { objective: 'Continue after private approval.', context: null },
+  });
+
+  const interrupted = await graph.invoke({ input }, config) as {
+    __interrupt__?: unknown[];
+  };
+  assert.equal(interrupted.__interrupt__?.length, 1);
+  assert.equal(model.invocations.length, 1);
+
+  const resumed = await graph.invoke(
+    new Command({ resume: 'approved' }),
+    config,
+  );
+  assert.deepEqual(resumed.commit, {
+    action: 'execute_plan',
+    tasks: [{ capability: 'general', task: 'Continue after approval.' }],
+  });
+  assert.equal(resumed.input.runId, 'run-interrupt');
+  assert.equal(resumed.input.traceId, 'trace-interrupt');
+  assert.equal(model.invocations.length, 2);
+  assert.match(
+    model.invocations[1]?.map(readMessageText).join('\n') ?? '',
+    /approved/,
+  );
+});
 
 test('Planner Agent explores CAPABILITY.md files and returns a compact ordered task plan', async (t) => {
   const workspace = await createWorkspace(t, {
@@ -359,13 +717,13 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
   ]);
   assert.equal(model.structuredOutputToolNames.size, 2);
   assert.ok(model.structuredOutputToolNames.has('plan'));
-  assert.ok(model.structuredOutputToolNames.has('return_to_answer'));
+  assert.ok(model.structuredOutputToolNames.has('unavailable'));
   assert.deepEqual(model.structuredOutputSchemaReferences, []);
   assert.deepEqual(model.structuredOutputPlanLimits, [24]);
-  assert.deepEqual(model.structuredOutputCapabilityEnums, [['explore', 'general']]);
+  assert.deepEqual(model.structuredOutputCapabilityEnums, []);
   assert.ok(model.boundToolOptions.every((options) =>
     options?.tool_choice === undefined));
-  assert.equal(model.invocations.length, 3);
+  assert.equal(model.invocations.length, 2);
   assert.equal(model.invocations.flat().some((message) =>
     message._getType() === 'system'
     && String(message.content).includes(workspace.rootPath)), false);
@@ -378,10 +736,11 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
   const plannerInputIndex = firstInvocationTexts.findIndex(
     (text) => text.includes('Research the repository and then prepare a review.'),
   );
-  assert.ok(recentUserIndex >= 0);
-  assert.ok(recentUserIndex < recentAssistantIndex);
-  assert.ok(recentAssistantIndex < plannerInputIndex);
+  assert.equal(recentUserIndex, -1);
+  assert.equal(recentAssistantIndex, -1);
+  assert.ok(plannerInputIndex >= 0);
   assert.deepEqual(result, {
+    action: 'execute_plan',
     tasks: [{
       capability: 'explore',
       task: 'Research the repository.',
@@ -424,10 +783,10 @@ test('entry mode forms one executable task after Capability exploration', async 
   const result = await createCapabilityPlannerAgent({ model })
     .invoke(plannerInput(workspace));
 
-  assert.equal(model.invocations.length, 3);
+  assert.equal(model.invocations.length, 2);
   assert.equal(model.structuredOutputToolNames.size, 2);
   assert.ok(model.structuredOutputToolNames.has('plan'));
-  assert.ok(model.structuredOutputToolNames.has('return_to_answer'));
+  assert.ok(model.structuredOutputToolNames.has('unavailable'));
   assert.ok('tasks' in result);
   assert.equal(
     'tasks' in result ? result.tasks[0]?.task : null,
@@ -472,23 +831,9 @@ test('Planner requires continuous work from one Capability in one task boundary'
     },
   ]);
 
-  const result = await createCapabilityPlannerAgent({ model }).invoke(
-    plannerInput(workspace),
-  );
-
-  assert.deepEqual(result, {
-    tasks: [{
-      capability: 'general',
-      task: 'Fix P1-1, P1-2, P1-3, and P2 from the review; verify, commit, and push.',
-    }],
-  });
-  const feedback = model.invocations[1]?.find((message) =>
-    message instanceof ToolMessage
-    && message.tool_call_id === 'structured-1');
-  assert.ok(feedback instanceof ToolMessage);
-  assert.match(
-    String(feedback.content),
-    /Consecutive tasks use the same Capability\. Combine them into one complete task\./,
+  await assert.rejects(
+    createCapabilityPlannerAgent({ model }).invoke(plannerInput(workspace)),
+    /Consecutive tasks use the same Capability/,
   );
 });
 
@@ -526,6 +871,7 @@ test('Planner closes discovery through general after three grep_search calls', a
   );
 
   assert.deepEqual(result, {
+    action: 'execute_plan',
     tasks: [{
       capability: 'general',
       task: 'Complete the requested workspace task using the discovered Capability.',
@@ -586,6 +932,7 @@ test('Planner handles parallel grep_search calls without concurrent state update
   );
 
   assert.deepEqual(result, {
+    action: 'execute_plan',
     tasks: [{
       capability: 'general',
       task: 'Complete the requested workspace task using the discovered Capability.',
@@ -624,7 +971,7 @@ test('Planner returns to Answer after three grep_search calls without general', 
     })),
     {
       structuredOutput: {
-        kind: 'return_to_answer',
+        kind: 'unavailable',
         args: {
           reason: 'The available Capability evidence does not define an executable task.',
           context: 'The Planner completed its bounded Capability search and needs a user decision.',
@@ -638,11 +985,8 @@ test('Planner returns to Answer after three grep_search calls without general', 
   );
 
   assert.deepEqual(result, {
-    answer: {
-      reason: 'The available Capability evidence does not define an executable task.',
-      context: 'The Planner completed its bounded Capability search and needs a user decision.',
-      question: null,
-    },
+    action: 'unavailable',
+    tasks: [],
   });
 });
 
@@ -671,18 +1015,8 @@ test('a submitted plan becomes private Planner state for the final reply', async
     plannerInput(workspace),
   );
 
-  assert.deepEqual(result, { tasks: submittedTasks });
-  assert.equal(model.invocations.length, 2);
-  const finalSystemPrompt = model.invocations[1]
-    ?.filter((message) => message._getType() === 'system')
-    .map(readMessageText)
-    .join('\n') ?? '';
-  for (const task of submittedTasks) {
-    assert.ok(
-      finalSystemPrompt.includes(task.task),
-      `missing submitted task from final system prompt: ${task.task}\n${finalSystemPrompt}`,
-    );
-  }
+  assert.deepEqual(result, { action: 'execute_plan', tasks: submittedTasks });
+  assert.equal(model.invocations.length, 1);
 });
 
 test('Planner can return bounded facts to Answer without submitting a plan', async (t) => {
@@ -701,7 +1035,7 @@ test('Planner can return bounded facts to Answer without submitting a plan', asy
     }],
   }, {
     structuredOutput: {
-      kind: 'return_to_answer',
+      kind: 'unavailable',
       args: {
         reason: 'No matching Capability is available in this scoped workspace.',
         context: 'The scoped workspace contains only the explore Capability.',
@@ -714,14 +1048,11 @@ test('Planner can return bounded facts to Answer without submitting a plan', asy
     .invoke(plannerInput(workspace));
 
   assert.deepEqual(result, {
-    answer: {
-      reason: 'No matching Capability is available in this scoped workspace.',
-      context: 'The scoped workspace contains only the explore Capability.',
-      question: 'Should I broaden the Capability scope?',
-    },
+    action: 'unavailable',
+    tasks: [],
   });
-  assert.ok(model.structuredOutputToolNames.has('return_to_answer'));
-  assert.deepEqual(model.structuredOutputCapabilityEnums, [['explore']]);
+  assert.ok(model.structuredOutputToolNames.has('unavailable'));
+  assert.deepEqual(model.structuredOutputCapabilityEnums, []);
 });
 
 test('an unknown Capability returns tool feedback and can be repaired in-loop', async (t) => {
@@ -752,18 +1083,9 @@ test('an unknown Capability returns tool feedback and can be repaired in-loop', 
     },
   ]);
 
-  const result = await createCapabilityPlannerAgent({ model })
-    .invoke(plannerInput(workspace));
-
-  assert.ok('tasks' in result);
-  assert.equal('tasks' in result ? result.tasks[0]?.capability : null, 'general');
-  const feedback = model.invocations[1]?.find((message) =>
-    message instanceof ToolMessage
-    && message.tool_call_id === 'structured-1');
-  assert.ok(feedback instanceof ToolMessage);
-  assert.match(
-    String(feedback.content),
-    /invalid enum value.*received 'missing'/is,
+  await assert.rejects(
+    createCapabilityPlannerAgent({ model }).invoke(plannerInput(workspace)),
+    /outside the immutable workspace/,
   );
 });
 
@@ -802,6 +1124,7 @@ test('grep_search over its limit returns terminal planning guidance to the model
   );
 
   assert.deepEqual(result, {
+    action: 'execute_plan',
     tasks: [{
       capability: 'general',
       task: 'Complete the requested repository update.',
@@ -819,7 +1142,7 @@ test('an empty workspace can return truthful facts to Answer', async (t) => {
   const workspace = await createWorkspace(t, {});
   const model = new ScriptedPlannerModel([{
     structuredOutput: {
-      kind: 'return_to_answer',
+      kind: 'unavailable',
       args: {
         reason: 'The current workspace contains no Capability documents.',
         context: 'There are no registered Capability documents to execute browser automation.',
@@ -831,19 +1154,16 @@ test('an empty workspace can return truthful facts to Answer', async (t) => {
     plannerInput(workspace),
   );
 
-  assert.equal(model.structuredOutputToolNames.size, 1);
-  assert.equal(model.structuredOutputToolNames.has('plan'), false);
-  assert.ok(model.structuredOutputToolNames.has('return_to_answer'));
+  assert.equal(model.structuredOutputToolNames.size, 2);
+  assert.equal(model.structuredOutputToolNames.has('plan'), true);
+  assert.ok(model.structuredOutputToolNames.has('unavailable'));
   assert.deepEqual(result, {
-    answer: {
-      reason: 'The current workspace contains no Capability documents.',
-      context: 'There are no registered Capability documents to execute browser automation.',
-      question: null,
-    },
+    action: 'unavailable',
+    tasks: [],
   });
 });
 
-test('boundary mode rejects answer and materializes remaining work with general', async (t) => {
+test('boundary mode rejects an empty executable plan', async (t) => {
   const workspace = await createWorkspace(t, {
     explore: capabilityDocument({
       name: 'explore',
@@ -886,28 +1206,26 @@ test('boundary mode rejects answer and materializes remaining work with general'
   ]);
   const fullHandoff = `Research completed. ${'Evidence detail. '.repeat(40)}Final constraint: preserve the public API.`;
 
-  const result = await createCapabilityPlannerAgent({ model }).invoke(
-    plannerInput(workspace, {
+  await assert.rejects(
+    createCapabilityPlannerAgent({ model }).invoke(plannerInput(workspace, {
       mode: 'boundary',
-      completedTask: 'Research the repository.',
-      completedTaskResult: fullHandoff,
+      activeDelegation: {
+        delegationId: 'delegation-1',
+        capability: 'explore',
+        task: 'Research the repository.',
+      },
+      latestAnnounce: {
+        messageId: 'announce-1',
+        text: fullHandoff,
+        completionReason: 'natural',
+      },
       remainingPlan: [{
         capability: 'general',
         task: 'Prepare the review from the findings.',
       }],
-    }),
+    })),
+    /Array must contain at least 1 element/,
   );
-
-  assert.ok('tasks' in result);
-  assert.equal('tasks' in result ? result.tasks[0]?.capability : null, 'general');
-  assert.deepEqual(model.structuredOutputCapabilityEnums, [['general', 'explore']]);
-  assert.match(
-    model.invocations[0]?.map((message) => String(message.content)).join('\n') ?? '',
-    /Final constraint: preserve the public API/,
-  );
-  assert.ok(model.invocations[1]?.some((message) =>
-    message instanceof ToolMessage
-    && message.tool_call_id === 'structured-1'));
 });
 
 test('a boundary with an exhausted plan can still submit newly required work', async (t) => {
@@ -933,8 +1251,16 @@ test('a boundary with an exhausted plan can still submit newly required work', a
   const result = await createCapabilityPlannerAgent({ model }).invoke(
     plannerInput(workspace, {
       mode: 'boundary',
-      completedTask: 'Read the issue #587 status.',
-      completedTaskResult: 'issue #587 is open; the README section is stale.',
+      activeDelegation: {
+        delegationId: 'delegation-1',
+        capability: 'explore',
+        task: 'Read the issue #587 status.',
+      },
+      latestAnnounce: {
+        messageId: 'announce-1',
+        text: 'issue #587 is open; the README section is stale.',
+        completionReason: 'natural',
+      },
       remainingPlan: [],
     }),
   );
@@ -942,6 +1268,7 @@ test('a boundary with an exhausted plan can still submit newly required work', a
   // An empty remaining plan is not by itself a terminal state: the latest
   // result may still require follow-up work.
   assert.deepEqual(result, {
+    action: 'execute_plan',
     tasks: [{
       capability: 'general',
       task: 'Update the README section for issue #587.',
@@ -976,23 +1303,18 @@ test('oversized discovery is reported as planning_limit_reached', async (t) => {
   );
 });
 
-test('natural language completion falls back to a Planner return', async (t) => {
+test('natural language completion cannot escape the commit protocol', async (t) => {
   const workspace = await createWorkspace(t, {});
   const model = new ScriptedPlannerModel([{
     content: 'The user needs to choose a target first.',
   }]);
 
-  const result = await createCapabilityPlannerAgent({ model })
-    .invoke(plannerInput(workspace));
-
+  await assert.rejects(
+    createCapabilityPlannerAgent({ model }).invoke(plannerInput(workspace)),
+    (error: unknown) => error instanceof CapabilityPlannerAgentError
+      && error.code === 'submission_required',
+  );
   assert.equal(model.invocations.length, 1);
-  assert.deepEqual(result, {
-    answer: {
-      reason: 'plan direct text',
-      context: 'The user needs to choose a target first.',
-      question: null,
-    },
-  });
 });
 
 test('missing structured output and direct text is rejected', async (t) => {
@@ -1031,7 +1353,7 @@ test('Planner Agent rejects a structured result produced after timeout', async (
   const workspace = await createWorkspace(t, {});
   const model = new DelayedStructuredPlannerModel([{
     structuredOutput: {
-      kind: 'return_to_answer',
+      kind: 'unavailable',
       args: {
         reason: 'The workspace is empty.',
         context: 'No Capability documents are available.',

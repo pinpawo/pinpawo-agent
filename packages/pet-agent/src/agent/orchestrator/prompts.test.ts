@@ -4,11 +4,6 @@ import { HumanMessage } from '@langchain/core/messages';
 import { materializeDelegation } from './delegationBriefing';
 import {
   buildCapabilityArtifactContext,
-  buildDelegationOutcomeCurrentTaskContext,
-  buildDelegationOutcomeDecisionInput,
-  buildDelegationOutcomeDecisionSystemPrompt,
-  buildDelegationOutcomeOtherTasksContext,
-  buildDelegationOutcomeRemainingPlanContext,
   buildPreparedRequestContext,
   buildRuntimeContext,
   buildSubagentAnnounceContext,
@@ -75,14 +70,18 @@ const plannerPromptWorkspace = {
 test('Capability Planner entry input leads with the run user goal', () => {
   const input = buildCapabilityPlannerAgentInput({
     mode: 'entry',
+    inputId: 'trace_started:trace-1',
+    traceId: 'trace-1',
+    runId: 'run-1',
     workspace: plannerPromptWorkspace,
     userGoal: {
       objective: '打开小红书并浏览相关内容。',
       context: '浏览器已经连接。',
     },
     recentMainMessages: [],
-    completedTask: null,
-    completedTaskResult: null,
+    latestUserMessage: null,
+    activeDelegation: null,
+    latestAnnounce: null,
     remainingPlan: [],
   } satisfies CapabilityPlannerInput);
 
@@ -96,14 +95,26 @@ test('Capability Planner entry input leads with the run user goal', () => {
 test('Capability Planner boundary input carries the run user goal and boundary facts', () => {
   const input = buildCapabilityPlannerAgentInput({
     mode: 'boundary',
+    inputId: 'announce:delegation-1:1',
+    traceId: 'trace-1',
+    runId: 'run-1',
     workspace: plannerPromptWorkspace,
     userGoal: {
       objective: '打开小红书并浏览相关内容。',
       context: '浏览器已经连接。',
     },
     recentMainMessages: [],
-    completedTask: '确认浏览器可用',
-    completedTaskResult: '浏览器已经连接，目标页面可访问。',
+    latestUserMessage: null,
+    activeDelegation: {
+      delegationId: 'delegation-1',
+      capability: 'browser',
+      task: '确认浏览器可用',
+    },
+    latestAnnounce: {
+      messageId: 'announce-1',
+      text: '浏览器已经连接，目标页面可访问。',
+      completionReason: 'natural',
+    },
     remainingPlan: [{
       capability: 'browser',
       task: '浏览相关内容',
@@ -111,7 +122,7 @@ test('Capability Planner boundary input carries the run user goal and boundary f
   } satisfies CapabilityPlannerInput);
 
   assert.match(input, /^<run_user_goal[^>]*>/);
-  assert.match(input, /刚完成的任务：确认浏览器可用/);
+  assert.match(input, /当前任务：确认浏览器可用/);
   assert.match(input, /浏览器已经连接，目标页面可访问。/);
   assert.match(input, /- \[browser\] 浏览相关内容/);
   assert.doesNotMatch(input, /workspace|registry_digest|document_count|<planning_state>/);
@@ -120,19 +131,31 @@ test('Capability Planner boundary input carries the run user goal and boundary f
 test('Capability Planner boundary input omits the follow-up section once the plan is exhausted', () => {
   const input = buildCapabilityPlannerAgentInput({
     mode: 'boundary',
+    inputId: 'announce:delegation-1:1',
+    traceId: 'trace-1',
+    runId: 'run-1',
     workspace: plannerPromptWorkspace,
     userGoal: {
       objective: '打开小红书并浏览相关内容。',
       context: null,
     },
     recentMainMessages: [],
-    completedTask: '确认浏览器可用',
-    completedTaskResult: '浏览器已经连接，目标页面可访问。',
+    latestUserMessage: null,
+    activeDelegation: {
+      delegationId: 'delegation-1',
+      capability: 'browser',
+      task: '确认浏览器可用',
+    },
+    latestAnnounce: {
+      messageId: 'announce-1',
+      text: '浏览器已经连接，目标页面可访问。',
+      completionReason: 'natural',
+    },
     remainingPlan: [],
   } satisfies CapabilityPlannerInput);
 
   assert.match(input, /^<run_user_goal[^>]*>/);
-  assert.match(input, /刚完成的任务：确认浏览器可用/);
+  assert.match(input, /当前任务：确认浏览器可用/);
   assert.match(input, /浏览器已经连接，目标页面可访问。/);
   assert.doesNotMatch(input, /此前保留的后续任务/);
   assert.doesNotMatch(input, /planner_request_briefing/);
@@ -238,86 +261,6 @@ test('entry decision defaults to the JSON briefing field contract', () => {
   assert.doesNotMatch(prompt, /route_to_planner/);
 });
 
-test('loop-internal router input stays focused on current run announce context', () => {
-  const input = buildDelegationOutcomeDecisionInput({
-    runUserGoalContext: '<run_user_goal><objective>先完成调查，再修复。</objective></run_user_goal>',
-    userIntentContext: '<user_intent_context><recent_messages>先完成调查，再修复。</recent_messages></user_intent_context>',
-    currentTaskContext: '<current_delegation>\n  <delegation_id>task-1</delegation_id>\n</current_delegation>',
-    subagentAnnounceContext: '<subagent_announce>\n  <result>completed</result>\n</subagent_announce>',
-    otherTasksContext: '<other_delegations>\n  <none>true</none>\n</other_delegations>',
-    remainingPlanContext: buildDelegationOutcomeRemainingPlanContext([]),
-    capabilityArtifacts: [],
-  });
-
-  assert.doesNotMatch(input, /压缩任务上下文/);
-  assert.match(input, /先完成调查，再修复/);
-  assert.match(input, /<subagent_announce>/);
-});
-
-test('delegation outcome input carries current task context separately', () => {
-  const currentTaskContext = buildDelegationOutcomeCurrentTaskContext({
-    id: 'task-1',
-    lane: 'capability:general',
-    task: '修复 lint',
-    contextSummary: '用户要求处理代码质量。',
-  });
-  const otherTasksContext = buildDelegationOutcomeOtherTasksContext([
-    {
-      id: 'task-1',
-      lane: 'capability:general',
-      task: '修复 lint',
-      status: 'progress',
-      resultPreview: null,
-    },
-    {
-      id: 'task-0',
-      lane: 'capability:explore',
-      task: '调查失败原因',
-      status: 'completed',
-      resultPreview: '已定位到 lint 配置。',
-    },
-  ], 'task-1');
-
-  assert.match(currentTaskContext ?? '', /<current_delegation>/);
-  assert.match(currentTaskContext ?? '', /<task>\n\s+<!\[CDATA\[\n修复 lint\n\s+\]\]>\n\s+<\/task>/);
-  assert.doesNotMatch(currentTaskContext ?? '', /continuation_action/);
-  assert.match(otherTasksContext, /<delegation_id>task-0<\/delegation_id>/);
-  assert.doesNotMatch(otherTasksContext, /<!\[CDATA\[\n修复 lint\n\s+\]\]>/);
-});
-
-test('delegation outcome remaining plan is advisory planning context', () => {
-  const prompt = buildDelegationOutcomeDecisionSystemPrompt({
-    actor: testActor,
-    outputInstruction: 'OUTCOME_OUTPUT_INSTRUCTION',
-  });
-  assert.match(prompt, /OUTCOME_OUTPUT_INSTRUCTION/);
-
-  const context = buildDelegationOutcomeRemainingPlanContext([{
-    capability: 'general',
-    task: '根据检查结果处理对应问题',
-  }]);
-
-  assert.match(
-    context,
-    /<remaining_plan role="planning_context" authority="advisory">/,
-  );
-  assert.match(context, /根据检查结果处理对应问题/);
-  assert.match(context, /<capability>[\s\S]*general/);
-  assert.doesNotMatch(context, /role="fact"/);
-
-  const empty = buildDelegationOutcomeRemainingPlanContext([]);
-  assert.match(empty, /<none>true<\/none>/);
-
-  const bounded = buildDelegationOutcomeRemainingPlanContext(
-    Array.from({ length: 25 }, (_, index) => ({
-      capability: 'general',
-      task: `future-${index.toString()}`,
-    })),
-  );
-  assert.match(bounded, /<truncated omitted="1" \/>/);
-  assert.doesNotMatch(bounded, /future-24/);
-});
-
 test('completed subagent announce context includes the full current result text', () => {
   const longResult = [
     '# Vibe Coding 模型排行榜',
@@ -404,29 +347,4 @@ test('subagent announce context clips artifact summaries', () => {
   assert.match(context, /<artifacts>/);
   assert.equal(context.includes(long), false);
   assert.match(context, /…/);
-});
-
-test('delegation outcome input does not duplicate the active task in announce context', () => {
-  const currentTaskContext = buildDelegationOutcomeCurrentTaskContext({
-    id: 'task-1',
-    lane: 'capability:general',
-    task: '修复 lint',
-    contextSummary: null,
-  });
-  const input = buildDelegationOutcomeDecisionInput({
-    runUserGoalContext: '<run_user_goal><objective>请处理代码质量</objective></run_user_goal>',
-    userIntentContext: '<user_intent_context><user_request>请处理代码质量</user_request></user_intent_context>',
-    currentTaskContext,
-    subagentAnnounceContext: buildSubagentAnnounceContext({
-      lane: 'capability:general',
-      delegationId: 'task-1',
-      task: '修复 lint',
-      text: '已完成验证。',
-    }, 'natural'),
-    otherTasksContext: buildDelegationOutcomeOtherTasksContext([], 'task-1'),
-    remainingPlanContext: buildDelegationOutcomeRemainingPlanContext([]),
-    capabilityArtifacts: [],
-  });
-
-  assert.equal((input.match(/修复 lint/g) ?? []).length, 1);
 });

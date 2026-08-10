@@ -6,62 +6,70 @@ import { type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { materializeCapabilityDocumentWorkspace } from '../../capabilityPlanner/documentWorkspace';
 import { createCapabilityPlannerAgent } from '../../capabilityPlanner/agent';
-import type {
-  CapabilityPlannerDispatch,
-  CapabilityPlannerInput,
-  CapabilityPlannerResult,
-  CapabilityPlannerRuntimeState,
-  CapabilityPlannerRunner,
+import {
+  CAPABILITY_PLANNER_BOUNDARY_RESULT_MAX_CHARS,
+  type CapabilityPlannerDispatch,
+  type CapabilityPlannerInput,
+  type CapabilityPlannerRuntimeState,
+  type CapabilityPlannerRunner,
 } from '../../capabilityPlanner/runner';
+import {
+  parsePlannerCommit,
+  type PlannerCommit,
+  type PlannerReplyOutcome,
+} from '../../capabilityPlanner/protocol';
 import { materializeDelegation } from '../../delegationBriefing';
-import { appendRunDelegationSummary } from '../../delegations';
+import {
+  appendRunDelegationSummary,
+  resumeRunDelegationSummary,
+} from '../../delegations';
 import type { OrchestratorStateType } from '../../state';
 import type {
   CapabilityPlanTask,
   MessageLane,
   OrchestratorConfig,
-  PlannerAnswerDisposition,
   RunNextDelegation,
+  TaskActiveDelegation,
 } from '../../types';
+import {
+  buildHandoffArtifactRefs,
+  findLatestHandoffCopyForDelegation,
+} from '../../artifacts/handoff';
+import {
+  buildSubagentHandoff,
+  getMessageHandoffSource,
+  readLatestAnnounce,
+  readLatestAnnounceCompletionReason,
+  readLatestHumanRequest,
+} from '../../messageLanes';
 import {
   getInvokeOptions,
   getInvokeRegistry,
 } from '../config';
-import { createTaskActiveDelegation } from '../decisions/delegationLifecycle';
+import {
+  createTaskActiveDelegation,
+  readCapabilityNameFromLane,
+} from '../decisions/delegationLifecycle';
 
 const DEFAULT_CAPABILITY_PLANNER_WORKSPACE_ROOT = join(
   tmpdir(),
   'pinpawo-capability-workspaces',
 );
+
 function isPlannerDispatch(
   input: OrchestratorStateType | CapabilityPlannerDispatch,
 ): input is CapabilityPlannerDispatch {
-  return 'plannerState' in input
-    && (input.mode === 'entry' || input.mode === 'boundary');
+  return 'plannerState' in input && input.mode === 'entry';
 }
 
-function normalizePlannerTask(task: CapabilityPlanTask): CapabilityPlanTask {
-  const capability = task.capability.trim();
-  const description = task.task.trim();
-  if (!capability || !description) {
-    throw new Error('Capability Planner submitted a task with an empty capability or description.');
-  }
-  return {
-    capability,
-    task: description,
-  };
-}
-
-function normalizePlannerAnswer(
-  answer: PlannerAnswerDisposition,
-): PlannerAnswerDisposition {
-  const reason = answer.reason.trim();
-  const context = answer.context.trim();
-  const question = answer.question?.trim() || null;
-  if (!reason || !context) {
-    throw new Error('Capability Planner returned Answer facts with empty text.');
-  }
-  return { reason, context, question };
+function boundPlannerAnnounce(value: string | null): string | null {
+  const text = value?.trim() ?? '';
+  if (!text) return null;
+  if (text.length <= CAPABILITY_PLANNER_BOUNDARY_RESULT_MAX_CHARS) return text;
+  const marker = '\n\n[announce truncated for Planner context]\n\n';
+  const available = CAPABILITY_PLANNER_BOUNDARY_RESULT_MAX_CHARS - marker.length;
+  const tailLength = Math.floor(available / 4);
+  return `${text.slice(0, available - tailLength)}${marker}${text.slice(-tailLength)}`;
 }
 
 function materializeNextDelegation(params: {
@@ -70,12 +78,7 @@ function materializeNextDelegation(params: {
   remainingPlan: CapabilityPlanTask[];
   allowedCapabilityNames: readonly string[];
 }) {
-  const {
-    state,
-    nextTask,
-    remainingPlan,
-    allowedCapabilityNames,
-  } = params;
+  const { state, nextTask, remainingPlan, allowedCapabilityNames } = params;
   if (!allowedCapabilityNames.includes(nextTask.capability)) {
     throw new Error(
       `Capability Planner selected "${nextTask.capability}" outside the immutable workspace.`,
@@ -92,6 +95,7 @@ function materializeNextDelegation(params: {
     runNextDelegation,
     state.runId,
     state.runUserGoal,
+    state.traceId,
   );
   const materializedDelegation = materializeDelegation({
     mode: 'initial',
@@ -108,7 +112,6 @@ function materializeNextDelegation(params: {
       ...materializedDelegation.laneMessages,
     ] as BaseMessage[],
     runNextDelegation,
-    runPlannerReturn: null,
     runCapabilityPlan: remainingPlan,
     taskActiveDelegation,
     runDelegationSummaries: appendRunDelegationSummary(
@@ -119,38 +122,117 @@ function materializeNextDelegation(params: {
   };
 }
 
-function buildPlannerTransition(params: {
-  state: CapabilityPlannerRuntimeState;
-  input: CapabilityPlannerInput;
-  result: CapabilityPlannerResult;
-}) {
-  const { state, input, result } = params;
-  if (!('tasks' in result)) {
-    const answer = normalizePlannerAnswer(result.answer);
-    return {
-      goto: 'answer' as const,
-      update: {
-        runNextDelegation: null,
-        runPlannerReturn: answer,
-        runCapabilityPlan: [],
-      },
-    };
+function buildAcceptedDelegationUpdate(
+  state: OrchestratorStateType,
+  activeDelegation: TaskActiveDelegation,
+  outcome: PlannerReplyOutcome | null,
+) {
+  const completionReason = readLatestAnnounceCompletionReason(state.messages, {
+    runId: activeDelegation.transcriptRunId,
+    delegationId: activeDelegation.id,
+  });
+  if (completionReason === 'limit_reached') {
+    return null;
   }
-
-  const [rawNextTask, ...remainingTasks] = result.tasks;
-  if (!rawNextTask) {
-    throw new Error('Capability Planner submitted an empty task list.');
+  const capabilityId = readCapabilityNameFromLane(activeDelegation.lane);
+  const artifactRefs = buildHandoffArtifactRefs(
+    state.sessionCapabilityArtifacts,
+    {
+      delegationId: activeDelegation.id,
+      runId: activeDelegation.transcriptRunId,
+      capabilityId,
+    },
+  );
+  const existingCopy = findLatestHandoffCopyForDelegation(
+    state.messages,
+    activeDelegation.id,
+    activeDelegation.lane,
+    activeDelegation.transcriptRunId,
+    getMessageHandoffSource,
+  );
+  const messages = buildSubagentHandoff({
+    messages: state.messages,
+    lane: activeDelegation.lane,
+    runId: activeDelegation.transcriptRunId,
+    delegationId: activeDelegation.id,
+    artifactRefs,
+    clearLane: true,
+    includeCopy: !existingCopy,
+  });
+  if (!messages) {
+    return null;
   }
-  const nextTask = normalizePlannerTask(rawNextTask);
-  const remainingPlan = remainingTasks.map(normalizePlannerTask);
   return {
-    goto: 'capability' as const,
-    update: materializeNextDelegation({
-      state,
-      nextTask,
-      remainingPlan,
-      allowedCapabilityNames: input.workspace.capabilityNames,
-    }),
+    messages,
+    runNextDelegation: null,
+    taskActiveDelegation: null,
+    runDelegationSummaries: state.runDelegationSummaries.map((delegation) =>
+      delegation.id === activeDelegation.id
+        ? { ...delegation, status: 'completed' as const }
+        : delegation),
+    runLatestDelegationOutcome: outcome,
+  };
+}
+
+function buildContinueCurrentUpdate(params: {
+  state: OrchestratorStateType;
+  activeDelegation: TaskActiveDelegation;
+  commit: PlannerCommit;
+}) {
+  const { state, activeDelegation, commit } = params;
+  const [nextTask, ...remainingPlan] = commit.tasks;
+  if (!nextTask) {
+    throw new Error('Planner continue_current requires a continuation task.');
+  }
+  const runNextDelegation: RunNextDelegation = {
+    id: activeDelegation.id,
+    lane: activeDelegation.lane,
+    task: nextTask.task,
+    contextSummary: null,
+  };
+  const materialized = materializeDelegation({
+    mode: 'continue',
+    lane: activeDelegation.lane,
+    runId: activeDelegation.transcriptRunId,
+    delegationId: activeDelegation.id,
+    task: nextTask.task,
+    gapNote: null,
+  });
+  return {
+    messages: materialized.laneMessages,
+    runNextDelegation,
+    runCapabilityPlan: remainingPlan,
+    taskActiveDelegation: {
+      ...activeDelegation,
+      task: nextTask.task,
+      contextSummary: null,
+      status: 'pending' as const,
+      resultPreview: null,
+    },
+    runDelegationSummaries: resumeRunDelegationSummary(
+      state.runDelegationSummaries,
+      runNextDelegation,
+    ),
+    runLatestDelegationOutcome: null,
+  };
+}
+
+function buildWaitingUpdate(
+  state: OrchestratorStateType,
+  outcome: Extract<PlannerReplyOutcome, 'user_input_required' | 'unavailable'>,
+) {
+  const activeDelegation = state.taskActiveDelegation;
+  return {
+    runNextDelegation: null,
+    runCapabilityPlan: [],
+    taskActiveDelegation: activeDelegation,
+    runDelegationSummaries: activeDelegation
+      ? state.runDelegationSummaries.map((delegation) =>
+          delegation.id === activeDelegation.id
+            ? { ...delegation, status: 'progress' as const }
+            : delegation)
+      : state.runDelegationSummaries,
+    runLatestDelegationOutcome: outcome,
   };
 }
 
@@ -161,50 +243,211 @@ function createDefaultPlannerRunner(config: OrchestratorConfig): CapabilityPlann
   });
 }
 
+function runtimeStateFromRoot(
+  state: OrchestratorStateType,
+  runUserGoal = state.runUserGoal,
+): CapabilityPlannerRuntimeState {
+  if (!runUserGoal) {
+    throw new Error('Capability Planner requires runUserGoal.');
+  }
+  return {
+    runId: state.runId,
+    traceId: state.traceId,
+    runUserGoal,
+    runDelegationSummaries: state.runDelegationSummaries,
+    runCapabilityPlan: state.runCapabilityPlan,
+    recentMainMessages: [],
+  };
+}
+
+function buildPlannerInput(params: {
+  nodeInput: OrchestratorStateType | CapabilityPlannerDispatch;
+  rootState?: OrchestratorStateType;
+  workspace: CapabilityPlannerInput['workspace'];
+}): { input: CapabilityPlannerInput; state: CapabilityPlannerRuntimeState } {
+  const { nodeInput, workspace } = params;
+  if (isPlannerDispatch(nodeInput)) {
+    const state = nodeInput.plannerState;
+    return {
+      state,
+      input: {
+        mode: 'entry',
+        inputId: `trace_started:${state.traceId}`,
+        traceId: state.traceId,
+        runId: state.runId,
+        userGoal: state.runUserGoal,
+        latestUserMessage: null,
+        recentMainMessages: [],
+        activeDelegation: null,
+        latestAnnounce: null,
+        remainingPlan: state.runCapabilityPlan,
+        workspace,
+      },
+    };
+  }
+
+  const state = nodeInput;
+  const activeDelegation = state.taskActiveDelegation;
+  if (!activeDelegation) {
+    throw new Error('Boundary Planner requires taskActiveDelegation.');
+  }
+  const capability = readCapabilityNameFromLane(activeDelegation.lane);
+  if (!capability) {
+    throw new Error('Boundary Planner active delegation has an invalid lane.');
+  }
+  const announce = readLatestAnnounce(state.messages, {
+    runId: activeDelegation.transcriptRunId,
+    delegationId: activeDelegation.id,
+  });
+  const completionReason = readLatestAnnounceCompletionReason(state.messages, {
+    runId: activeDelegation.transcriptRunId,
+    delegationId: activeDelegation.id,
+  });
+  const freshTurn = state.runActiveDelegationTransition === 'resume_active';
+  const plannerState = runtimeStateFromRoot(state, state.runUserGoal ?? activeDelegation.userGoal);
+  return {
+    state: plannerState,
+    input: {
+      mode: 'boundary',
+      inputId: freshTurn
+        ? `human:${state.runId}`
+        : `announce:${activeDelegation.id}:${String(state.runIterationCount)}`,
+      traceId: state.traceId,
+      runId: state.runId,
+      userGoal: plannerState.runUserGoal,
+      latestUserMessage: freshTurn ? readLatestHumanRequest(state.messages) : null,
+      recentMainMessages: [],
+      activeDelegation: {
+        delegationId: activeDelegation.id,
+        capability,
+        task: activeDelegation.task,
+      },
+      latestAnnounce: announce
+        ? {
+            messageId: null,
+            text: boundPlannerAnnounce(announce.text),
+            completionReason,
+          }
+        : null,
+      remainingPlan: state.runCapabilityPlan,
+      workspace,
+    },
+  };
+}
+
 export function createCapabilityPlannerNode(config: OrchestratorConfig) {
-  const runner = config.capabilityPlannerRunner
-    ?? createDefaultPlannerRunner(config);
+  const runner = config.capabilityPlannerRunner ?? createDefaultPlannerRunner(config);
 
   return async function capabilityPlannerNode(
     nodeInput: OrchestratorStateType | CapabilityPlannerDispatch,
     runnableConfig?: RunnableConfig,
   ) {
     const registry = getInvokeRegistry(runnableConfig);
-    const allowedCapabilityNames =
-      getInvokeOptions(runnableConfig).allowedCapabilityNames;
+    const allowedCapabilityNames = getInvokeOptions(runnableConfig).allowedCapabilityNames;
     const workspace = await materializeCapabilityDocumentWorkspace({
       registry,
       cacheRoot: DEFAULT_CAPABILITY_PLANNER_WORKSPACE_ROOT,
       ...(allowedCapabilityNames ? { allowedCapabilityNames } : {}),
     });
-    if (!isPlannerDispatch(nodeInput)) {
-      throw new Error('Capability Planner requires an explicit entry or boundary dispatch.');
+    if (!isPlannerDispatch(nodeInput)
+      && !nodeInput.runUserGoal
+      && !nodeInput.taskActiveDelegation?.userGoal) {
+      return new Command({
+        update: buildWaitingUpdate(nodeInput, 'unavailable'),
+        goto: 'answer',
+      });
     }
-    const state = nodeInput.plannerState;
-    const input: CapabilityPlannerInput = nodeInput.mode === 'entry'
-      ? {
-          mode: 'entry',
-          userGoal: state.runUserGoal,
-          recentMainMessages: state.recentMainMessages,
-          completedTask: null,
-          completedTaskResult: null,
-          remainingPlan: state.runCapabilityPlan,
-          workspace,
-        }
-      : {
-          mode: 'boundary',
-          userGoal: state.runUserGoal,
-          recentMainMessages: state.recentMainMessages,
-          completedTask: nodeInput.completedTask,
-          completedTaskResult: nodeInput.completedTaskResult,
-          remainingPlan: state.runCapabilityPlan,
-          workspace,
-        };
-    const result = await runner.invoke(input, runnableConfig);
-    const transition = buildPlannerTransition({ state, input, result });
+    const { input, state } = buildPlannerInput({ nodeInput, workspace });
+    const commit = parsePlannerCommit(
+      await runner.invoke(input, runnableConfig),
+      {
+        mode: input.mode,
+        activeDelegation: input.activeDelegation,
+        allowedCapabilityNames: workspace.capabilityNames,
+      },
+    );
+
+    if (input.mode === 'entry') {
+      if (commit.action === 'execute_plan') {
+        const [nextTask, ...remainingPlan] = commit.tasks;
+        if (!nextTask) throw new Error('Planner execute_plan requires a task.');
+        return new Command({
+          update: materializeNextDelegation({
+            state,
+            nextTask,
+            remainingPlan: [...remainingPlan],
+            allowedCapabilityNames: workspace.capabilityNames,
+          }),
+          goto: 'capability',
+        });
+      }
+      return new Command({
+        update: {
+          runNextDelegation: null,
+          runCapabilityPlan: [],
+          runLatestDelegationOutcome: commit.action,
+        },
+        goto: 'answer',
+      });
+    }
+
+    const rootState = nodeInput as OrchestratorStateType;
+    const activeDelegation = rootState.taskActiveDelegation;
+    if (!activeDelegation) throw new Error('Boundary Planner lost active delegation.');
+
+    if (commit.action === 'continue_current') {
+      return new Command({
+        update: buildContinueCurrentUpdate({
+          state: rootState,
+          activeDelegation,
+          commit,
+        }),
+        goto: 'capability',
+      });
+    }
+    if (commit.action === 'user_input_required' || commit.action === 'unavailable') {
+      return new Command({
+        update: buildWaitingUpdate(rootState, commit.action),
+        goto: 'answer',
+      });
+    }
+
+    const accepted = buildAcceptedDelegationUpdate(
+      rootState,
+      activeDelegation,
+      commit.action === 'goal_done' ? 'goal_done' : null,
+    );
+    if (!accepted) {
+      return new Command({
+        update: {
+          runNextDelegation: null,
+          runCapabilityPlan: [],
+        },
+        goto: 'answer',
+      });
+    }
+    if (commit.action === 'goal_done') {
+      return new Command({ update: accepted, goto: 'answer' });
+    }
+
+    const [nextTask, ...remainingPlan] = commit.tasks;
+    if (!nextTask) throw new Error('Planner execute_plan requires a task.');
+    const next = materializeNextDelegation({
+      state: {
+        ...state,
+        runDelegationSummaries: accepted.runDelegationSummaries,
+      },
+      nextTask,
+      remainingPlan: [...remainingPlan],
+      allowedCapabilityNames: workspace.capabilityNames,
+    });
     return new Command({
-      update: transition.update,
-      goto: transition.goto,
+      update: {
+        ...accepted,
+        ...next,
+        messages: [...accepted.messages, ...next.messages],
+      },
+      goto: 'capability',
     });
   };
 }

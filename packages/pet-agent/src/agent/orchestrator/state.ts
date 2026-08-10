@@ -18,6 +18,7 @@ import {
   type ToolAuthorizationRecord,
 } from './review/reviewAuthorizations';
 import type { AcceptedDelegationOutcome } from './schemas';
+import type { PlannerReplyOutcome } from './capabilityPlanner/protocol';
 
 export type SessionToolAuthorizationState = {
   generation: string;
@@ -61,7 +62,9 @@ const orchestratorStateChannels = {
     reducer: (_prev, next) => next,
     default: () => 0,
   }),
-  runLatestDelegationOutcome: Annotation<AcceptedDelegationOutcome | null>({
+  runLatestDelegationOutcome: Annotation<
+    AcceptedDelegationOutcome | PlannerReplyOutcome | null
+  >({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
@@ -70,6 +73,10 @@ const orchestratorStateChannels = {
     default: () => 'supersede_active',
   }),
   runId: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => '',
+  }),
+  traceId: Annotation<string>({
     reducer: (_prev, next) => next,
     default: () => '',
   }),
@@ -101,10 +108,13 @@ export type OrchestratorRunState = Pick<
   | 'runLatestDelegationOutcome'
   | 'runActiveDelegationTransition'
   | 'runId'
+  | 'traceId'
 >;
 
 export type BuildOrchestratorRunOptions = {
   activeDelegationTransition?: ActiveDelegationTransition;
+  /** Stable user-task identity. A fresh task receives a new value by default. */
+  traceId?: string;
 };
 
 export function buildRunStateReset(
@@ -121,6 +131,7 @@ export function buildRunStateReset(
     runActiveDelegationTransition:
       options.activeDelegationTransition ?? 'supersede_active',
     runId: randomUUID().slice(0, 8),
+    traceId: options.traceId ?? randomUUID(),
   };
 }
 

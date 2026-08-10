@@ -273,7 +273,9 @@ test('browser open review policy offers session authorization', async () => {
   const toolkit = createBrowserToolkit();
   const policy = definition(toolkit, 'browser_open')?.review;
   assert.ok(policy);
-  const matcher = await policy.authorization?.buildMatcher({
+  const buildMatcher = policy.authorization?.buildMatcher;
+  assert.ok(buildMatcher);
+  const matcher = await buildMatcher({
     toolkitName: 'browser',
     toolName: 'browser_open',
     input: { url: 'https://Example.test/path', headless: true },

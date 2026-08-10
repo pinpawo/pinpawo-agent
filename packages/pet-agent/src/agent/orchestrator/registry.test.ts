@@ -209,6 +209,33 @@ test('authorization generation ignores display metadata', () => {
   );
 });
 
+test('authorization generation includes deterministic authorization policy', () => {
+  const buildRegistry = (allow: boolean) => compileAgentRegistry({
+    toolkits: [defineToolkit({
+      name: 'local',
+      description: 'Local tools',
+      tools: [{
+        tool: mockTool('apply_patch'),
+        review: ReviewPolicies.localMutation({
+          authorization: {
+            authorize: allow ? (() => true) : (() => false),
+          },
+        }),
+      }],
+    })],
+    capabilities: [capability('general', ['local'])],
+  });
+
+  assert.equal(
+    buildRegistry(true).authorizationGeneration,
+    buildRegistry(true).authorizationGeneration,
+  );
+  assert.notEqual(
+    buildRegistry(true).authorizationGeneration,
+    buildRegistry(false).authorizationGeneration,
+  );
+});
+
 test('authorization generation is scoped to authorization policy, not tool implementation', () => {
   const executable = (result: 'first' | 'second') => result === 'first'
     ? tool(async () => 'first', {
@@ -240,20 +267,31 @@ test('authorization generation is scoped to authorization policy, not tool imple
 });
 
 test('compiled registry snapshots authorization policy functions for its generation', () => {
-  const review = ReviewPolicies.commandExecution({ authorization: 'exact' });
-  const originalBuilder = review.authorization?.buildMatcher;
+  const authorize = () => true;
+  const matcherReview = ReviewPolicies.commandExecution({ authorization: 'exact' });
+  const authorizeReview = ReviewPolicies.localMutation({
+    authorization: { authorize },
+  });
+  const originalBuilder = matcherReview.authorization?.buildMatcher;
   const registry = compileAgentRegistry({
     toolkits: [defineToolkit({
       name: 'local',
       description: 'Local tools.',
-      tools: [{ tool: mockTool('run_shell'), review }],
+      tools: [
+        { tool: mockTool('run_shell'), review: matcherReview },
+        { tool: mockTool('apply_patch'), review: authorizeReview },
+      ],
     })],
     capabilities: [capability('general', ['local'])],
   });
 
-  review.authorization!.buildMatcher = () => null;
+  matcherReview.authorization!.buildMatcher = () => null;
+  authorizeReview.authorization!.authorize = () => false;
 
-  const compiledReview = registry.toolkits[0]?.tools[0]?.review;
-  assert.equal(compiledReview?.authorization?.buildMatcher, originalBuilder);
-  assert.ok(Object.isFrozen(compiledReview?.authorization));
+  const compiledMatcherReview = registry.toolkits[0]?.tools[0]?.review;
+  const compiledAuthorizeReview = registry.toolkits[0]?.tools[1]?.review;
+  assert.equal(compiledMatcherReview?.authorization?.buildMatcher, originalBuilder);
+  assert.equal(compiledAuthorizeReview?.authorization?.authorize, authorize);
+  assert.ok(Object.isFrozen(compiledMatcherReview?.authorization));
+  assert.ok(Object.isFrozen(compiledAuthorizeReview?.authorization));
 });

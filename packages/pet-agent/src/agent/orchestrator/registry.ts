@@ -70,8 +70,11 @@ function computeAuthorizationGeneration(toolkits: readonly AgentToolkit[]) {
       return authorization
         ? [{
             name: definition.tool.name,
-            authorization: readAuthorizationPolicyGeneration(authorization)
-              ?? functionSource(authorization.buildMatcher),
+            authorization: {
+              matcher: readAuthorizationPolicyGeneration(authorization)
+                ?? functionSource(authorization.buildMatcher),
+              authorize: functionSource(authorization.authorize),
+            },
           }]
         : [];
     });

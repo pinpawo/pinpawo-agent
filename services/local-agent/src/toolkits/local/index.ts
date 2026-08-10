@@ -1,3 +1,5 @@
+import { realpathSync, statSync } from 'node:fs';
+import { isAbsolute, relative, sep } from 'node:path';
 import type { StructuredTool } from '@langchain/core/tools';
 import {
   ARTIFACT_DISCOVERY_LIST_TOOL_NAME,
@@ -9,6 +11,7 @@ import {
   type AgentToolkit,
   type CapabilityArtifactStore,
   type ToolOperationMetadata,
+  type ToolAutoAuthorizationContext,
   type ToolReviewPolicy,
 } from '@pinpawo/pet-agent';
 import { createOperationRegistryFromToolkits } from '../../events/operationRegistry';
@@ -30,6 +33,8 @@ import { createArtifactDiscoveryTools } from './artifactDiscoveryTools';
 import { downloadFileTool, httpFetchTool, networkOperationMetadata } from './networkTools';
 import { jqQueryTool, jsonOperationMetadata } from './jsonTools';
 import { gitTools, gitOperationMetadata } from './gitTools';
+import { parsePatch, PatchParseError } from './applyPatch';
+import { resolveUserPath } from './pathUtils';
 import { globSearchTool, grepSearchTool, searchOperationMetadata } from './searchTools';
 import { shellRuntime, type ShellRuntimeBinding } from './shellRuntime';
 import {
@@ -141,10 +146,48 @@ const gitToolkitInstructions = [
   'git_commit 只创建本地提交；需要推送时继续使用 git_push。git_push 不支持 force push 或删除远端引用。',
 ];
 
+function isWithinPath(root: string, target: string) {
+  const relativePath = relative(root, target);
+  return relativePath === ''
+    || (relativePath !== '..' && !relativePath.startsWith(`..${sep}`)
+      && !isAbsolute(relativePath));
+}
+
+function authorizeApplyPatch(ctx: ToolAutoAuthorizationContext) {
+  if (!ctx.workdir) return false;
+  const input = ctx.input;
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return false;
+  const patch = 'patch' in input ? input.patch : undefined;
+  if (typeof patch !== 'string') return false;
+
+  let target: string;
+  try {
+    target = resolveUserPath(parsePatch(patch).path);
+  } catch (error) {
+    // The executor uses the same parser before performing any filesystem
+    // mutation. Invalid V4A is therefore safe to run: execution will disclose
+    // the parse failure to the model without changing a file.
+    if (error instanceof PatchParseError) return true;
+    return false;
+  }
+
+  try {
+    const realWorkdir = realpathSync(ctx.workdir);
+    const realTarget = realpathSync(target);
+    return statSync(realTarget).isFile() && isWithinPath(realWorkdir, realTarget);
+  } catch {
+    return false;
+  }
+}
+
 export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): AgentToolkit {
   const reviews = {
     write_file: ReviewPolicies.localMutation({ authorization: 'exact' }),
-    apply_patch: ReviewPolicies.localMutation({ authorization: 'exact' }),
+    apply_patch: ReviewPolicies.localMutation({
+      authorization: {
+        authorize: authorizeApplyPatch,
+      },
+    }),
     move_path: ReviewPolicies.localMutation({ authorization: 'exact' }),
     copy_path: ReviewPolicies.localMutation({ authorization: 'exact' }),
     mkdir_path: ReviewPolicies.localMutation({ authorization: 'exact' }),

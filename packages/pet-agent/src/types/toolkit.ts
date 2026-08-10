@@ -41,11 +41,36 @@ export type ToolAuthorizationContext = {
   operation?: ToolOperationMetadata;
 };
 
-export type ToolAuthorizationPolicy = {
-  buildMatcher: (
-    ctx: ToolAuthorizationContext,
-  ) => ToolAuthorizationMatcher | null | Promise<ToolAuthorizationMatcher | null>;
+export type ToolAutoAuthorizationContext = ToolAuthorizationContext & {
+  /** Effective runtime workdir used to evaluate mutation scope. */
+  workdir: string | null;
 };
+
+/**
+ * One tool chooses exactly one authorization strategy:
+ * deterministic authorization of each current call, or reusable session
+ * authorization through a matcher. The strategies are intentionally
+ * mutually exclusive so a session hit can never bypass a current-call check.
+ */
+export type ToolAuthorizationPolicy =
+  | {
+      /**
+       * Deterministically authorize the current call from trusted runtime facts.
+       * `true` grants this call; `false` defers to the remaining review flow and
+       * does not reject the call.
+       */
+      authorize: (
+        ctx: ToolAutoAuthorizationContext,
+      ) => boolean | Promise<boolean>;
+      buildMatcher?: never;
+    }
+  | {
+      authorize?: never;
+      /** Build the identity used to reuse a prior authorization in this session. */
+      buildMatcher: (
+        ctx: ToolAuthorizationContext,
+      ) => ToolAuthorizationMatcher | null | Promise<ToolAuthorizationMatcher | null>;
+    };
 
 export type ToolReviewBlock = {
   type: 'block';
@@ -354,17 +379,16 @@ export function validateToolkitDefinition(toolkit: AgentToolkit) {
     }
     if (definition.review) {
       const authorization = definition.review.authorization;
-      if (
-        authorization !== undefined
-        && (
-          typeof authorization !== 'object'
-          || Array.isArray(authorization)
-          || typeof authorization.buildMatcher !== 'function'
-        )
-      ) {
-        throw new Error(
-          `Toolkit "${toolkit.name}" tool "${toolName}" review.authorization must define buildMatcher()`,
-        );
+      if (authorization !== undefined) {
+        const owner = `Toolkit "${toolkit.name}" tool "${toolName}" review.authorization`;
+        if (typeof authorization !== 'object' || Array.isArray(authorization)) {
+          throw new Error(`${owner} must define authorize() or buildMatcher()`);
+        }
+        assertOptionalFunction(`${owner}.authorize`, authorization.authorize);
+        assertOptionalFunction(`${owner}.buildMatcher`, authorization.buildMatcher);
+        if (Boolean(authorization.authorize) === Boolean(authorization.buildMatcher)) {
+          throw new Error(`${owner} must define exactly one of authorize() or buildMatcher()`);
+        }
       }
     }
     if (definition.requiresInputModalities !== undefined) {

@@ -37,6 +37,12 @@ export type StudioRunQueueStoreState = {
   tasks: StudioTaskQueueItem[];
 };
 
+/**
+ * 崩溃恢复的统一原因码。task 与 invocation 用同一个,便于运维一眼看出
+ * "这条不是业务失败,是进程没了"。
+ */
+export const RECOVERED_RUNNING_REASON = 'recovered_running_task_requires_reconcile';
+
 export const OPEN_RUN_STATUSES = new Set<StudioRunStatus>(['planning', 'running', 'blocked']);
 
 export function cloneSnapshot(snapshot: StudioRunSnapshot): StudioRunSnapshot {
@@ -50,7 +56,12 @@ export function cloneSnapshot(snapshot: StudioRunSnapshot): StudioRunSnapshot {
     createdAt: snapshot.createdAt,
     updatedAt: snapshot.updatedAt,
     tasks: snapshot.tasks
-      .map((task) => ({ ...task }))
+      // invocations 必须深拷一层:浅拷会让 store 内部数组被调用方 push,
+      // 从而在外部改动一份取回的快照时污染已持久化的状态。
+      .map((task) => ({
+        ...task,
+        invocations: task.invocations.map((invocation) => ({ ...invocation })),
+      }))
       .sort((a, b) => a.taskIndex - b.taskIndex),
   };
 }
@@ -82,15 +93,31 @@ export function recoverSnapshot(snapshot: StudioRunSnapshot, now: string): Studi
 
   let hasRecoveredRunningTask = false;
   const tasks = snapshot.tasks.map((task) => {
+    // 进程已经不在了,任何仍标记为 running 的 invocation 都不可能还在跑 ——
+    // 无论它所属的 task 当时处于什么状态,都要一并收尾。只改 task 不改
+    // invocation 会留下 task=failed / invocation=running 的矛盾快照,
+    // 并且让 failedAttemptCount 少算一次,把重试预算又退回去。
+    const invocations = task.invocations.map((invocation) => (
+      invocation.status === 'running'
+        ? {
+            ...invocation,
+            status: 'failed' as const,
+            finishedAt: invocation.finishedAt ?? now,
+            errorMessage: invocation.errorMessage ?? RECOVERED_RUNNING_REASON,
+          }
+        : { ...invocation }
+    ));
+
     if (task.status !== 'running') {
-      return { ...task };
+      return { ...task, invocations };
     }
     hasRecoveredRunningTask = true;
     return {
       ...task,
       status: 'failed' as const,
       finishedAt: task.finishedAt ?? now,
-      errorMessage: task.errorMessage ?? 'recovered_running_task_requires_reconcile',
+      errorMessage: task.errorMessage ?? RECOVERED_RUNNING_REASON,
+      invocations,
     };
   });
 

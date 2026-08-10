@@ -7,7 +7,6 @@ import { multiTaskFlowBasicsDataset } from './multi-task-flow-basics.ts';
 import { orchestratorLifecycleCompositionDataset } from './orchestrator-lifecycle-composition.ts';
 import { orchestratorFlowMockSubagentDataset } from './orchestrator-flow-mock-subagent.ts';
 import { orchestratorRouteDataset } from './orchestrator-route.ts';
-import { outcomeDecisionBasicsDataset } from './outcome-decision-basics.ts';
 import { permissionControlBasicsDataset } from './permission-control-basics.ts';
 import { toolReviewRejectRuntimeDataset } from './tool-review-reject-runtime.ts';
 
@@ -16,7 +15,6 @@ export const agentEvalDatasets = [
   orchestratorRouteDataset,
   orchestratorFlowMockSubagentDataset,
   entryDecisionBasicsDataset,
-  outcomeDecisionBasicsDataset,
   capabilityPlanningBasicsDataset,
   delegationControlBasicsDataset,
   interruptionRecoveryBasicsDataset,
@@ -38,7 +36,6 @@ export {
   orchestratorLifecycleCompositionDataset,
   orchestratorFlowMockSubagentDataset,
   orchestratorRouteDataset,
-  outcomeDecisionBasicsDataset,
   permissionControlBasicsDataset,
   toolReviewRejectRuntimeDataset,
 };

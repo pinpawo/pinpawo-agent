@@ -80,7 +80,7 @@ const actor = {
   species: null,
 };
 
-type DecisionKind = 'entry' | 'planner' | 'outcome' | 'unknown';
+type DecisionKind = 'entry' | 'planner' | 'unknown';
 
 type DecisionRecord = {
   kind: DecisionKind;
@@ -287,7 +287,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function classifyDecision(output: Record<string, unknown>): DecisionKind {
   if (typeof output.action === 'string') return 'entry';
   if (Array.isArray(output.tasks)) return 'planner';
-  if (typeof output.outcome === 'string') return 'outcome';
   return 'unknown';
 }
 
@@ -326,7 +325,13 @@ function createRecordingActModel(model: AgentModels['act']) {
             const output = isRecord(toolCall.args)
               ? toolCall.args
               : { value: toolCall.args };
-            if (toolCall.name !== 'submit_plan' && toolCall.name !== 'return_to_answer') {
+            if (![
+              'continue_current',
+              'submit_plan',
+              'complete_goal',
+              'request_user_input',
+              'report_unavailable',
+            ].includes(toolCall.name)) {
               continue;
             }
             decisions.push({ kind: 'planner', output });
@@ -441,7 +446,6 @@ function countDecisions(
   const counts: Record<DecisionKind | 'answer', number> = {
     entry: 0,
     planner: 0,
-    outcome: 0,
     unknown: 0,
     answer: 0,
   };

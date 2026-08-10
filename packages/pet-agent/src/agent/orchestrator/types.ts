@@ -17,7 +17,6 @@ import type { CapabilityRegistryBackend } from './capabilityPlanner/registryDocu
 import type { GlobalReviewPolicy } from './review/globalReviewPolicy';
 import type { ToolkitRuntimeManager } from './toolkitRuntime';
 import type { StructuredOutputAutoRepairConfig, StructuredOutputMethod } from '../../utils/structuredOutput';
-import type { DelegationOutcomeDecision } from './schemas';
 
 export type MessageLane = `capability:${string}`;
 export type PinpetMessageLane = MessageLane | 'orchestrator';
@@ -54,16 +53,6 @@ export type CapabilityPlanTask = {
 export type UserGoal = {
   objective: string;
   context: string | null;
-};
-
-/**
- * Bounded planning facts that Answer turns into the user-facing reply when no
- * execution plan should start in this run.
- */
-export type PlannerAnswerDisposition = {
-  reason: string;
-  context: string;
-  question: string | null;
 };
 
 export type TaskActiveDelegation = {
@@ -105,10 +94,6 @@ export type ToolBindableChatModel = AgentModels['act'] & {
   bindTools?: (tools: StructuredTool[], options?: Record<string, unknown>) => {
     invoke: (messages: BaseMessage[], options?: RunnableConfig) => Promise<AIMessage>;
   };
-};
-
-export type StructuredOrchestrationDecisionModel = {
-  invoke: (messages: BaseMessage[], options?: RunnableConfig) => Promise<DelegationOutcomeDecision>;
 };
 
 export type OrchestratorConfig = {

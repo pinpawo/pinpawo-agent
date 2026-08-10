@@ -17,7 +17,8 @@ capability each case covers:
 - `context_synthesis`: answer from completed subagent context.
 - `structured_output`: produce schema-compatible orchestration outputs.
 - `entry_decision`: choose answer, direct task, or planning at run entry.
-- `outcome_decision`: accept the announce and select the next transition.
+- `planner_boundary`: accept execution evidence and select the next private
+  Planner action.
 - `capability_discovery`: let the Planner explore Capability documents and select an executor.
 - `capability_planning`: define execution boundaries and materialize tasks.
 - `multi_task_flow`: complete goals across isolated task executions and handoffs.
@@ -56,9 +57,9 @@ recreate datasets.
   clarification, task completion summary, and required-user-input return control.
 - `agent-entry-decision-basics`: binary result-availability gate for
   `answer | needs_plan`.
-- `agent-outcome-decision-basics`: `continue | task_done | goal_done | user_input_required`
-  verdict boundaries.
-- `agent-capability-planning-basics`: production `planner@entry` and `planner@boundary` contracts.
+- `agent-capability-planning-basics`: production private Planner entry and
+  execution-boundary actions, including acceptance, continuation, completion,
+  user-input, and unavailable-capability boundaries.
 - `agent-multi-task-flow-basics`: real graph baseline across meaningful task boundaries.
 - `agent-orchestrator-lifecycle-composition`: production graph and production
   prompt composition with a real decision model and controlled executor evidence.
@@ -76,7 +77,7 @@ up to the execution boundary against `orchestrator-route-decision`:
 npm run eval:langfuse:route
 ```
 
-The runner uses the configured model for entry/outcome decisions and the real
+The runner uses the configured model for entry decisions and the real
 Capability Planner agent for document exploration and selection. It writes
 traces, scores, and dataset run items to Langfuse. The runner is broad routing
 coverage; the lifecycle eval remains the stronger signal for multi-task
@@ -97,7 +98,7 @@ Model configuration is read from `LLM_*`, `~/.pinpawo/.env`, or
 
 ## Decision Eval Boundaries
 
-These evals exercise the remaining public decision boundaries and the Planner
+These evals exercise the remaining public decision boundary and the Planner
 through complete graph runs:
 
 1. `entryDecision` decides whether the requested result is already available:
@@ -111,20 +112,8 @@ through complete graph runs:
    boundaries; all work that still needs execution is delegated to the
    Capability Planner.
 
-2. `outcomeDecision` has a standalone canonical dataset for current-task
-   acceptance. `task_done` deliberately leaves next-task planning to
-   `planner@boundary`:
-
-   ```sh
-   npm run eval:langfuse:outcome-decision
-   EVAL_OUTCOME_MODEL=deterministic npm run eval:langfuse:outcome-decision
-   ```
-
-   The production model is the default because this suite evaluates prompt
-   semantics. The deterministic mode only smoke-tests dataset and writer
-   plumbing.
-
-3. The Capability Planner is a private tool-loop agent. Its transcript and
+2. The Capability Planner is a private, trace-scoped tool-loop agent. It owns
+   current-result acceptance and next-step planning together. Its transcript and
    document observations are not a public graph decision contract, so its eval
    invokes the complete production Planner loop against a materialized
    Capability Document Workspace rather than simulating a single Decision call:
@@ -137,7 +126,7 @@ through complete graph runs:
    future-tail preservation, document-backed Capability selection, and General
    fallback.
 
-4. Multi-task loop executes the current real graph across meaningful task
+3. Multi-task loop executes the current real graph across meaningful task
    boundaries with deterministic decision/subagent models:
 
    ```sh
@@ -149,8 +138,8 @@ The package test-script lookup plus test run is intentionally an entryDecision
 single-task case because preparation, execution, and reporting belong to one
 workspace task.
 
-5. Lifecycle composition executes the production graph with the configured real
-   model for entry, planner, capability, outcome, and answer. Executor results
+4. Lifecycle composition executes the production graph with the configured real
+   model for entry, private Planner, capability, and answer. Executor results
    are controlled so the final goal verdict measures orchestrator composition
    without tool or environment variance:
 

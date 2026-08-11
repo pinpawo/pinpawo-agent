@@ -96,7 +96,6 @@ function compactError(error: unknown): string {
 }
 
 function createRouteModel(): AgentModels['act'] {
-  let decisionCount = 0;
   return {
     invoke: async () => new AIMessage('任务已完成。'),
     bindTools: () => ({
@@ -104,15 +103,11 @@ function createRouteModel(): AgentModels['act'] {
     }),
     withStructuredOutput: () => ({
       invoke: async () => {
-        decisionCount += 1;
-        if (decisionCount === 1) {
-          return {
-            action: 'needs_plan',
-            planner_objective: '完成当前需要工具执行的用户请求。',
-            planner_context: null,
-          };
-        }
-        return { outcome: 'goal_done', gap_note: null };
+        return {
+          action: 'needs_plan',
+          planner_objective: '完成当前需要工具执行的用户请求。',
+          planner_context: null,
+        };
       },
     }),
   } as unknown as AgentModels['act'];
@@ -242,8 +237,11 @@ async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> 
     actor: testActor,
     checkpoint: new MemorySaver(),
     capabilityPlannerRunner: {
-      async invoke(_plannerInput) {
-        return {
+      async invoke(plannerInput) {
+        return plannerInput.mode === 'boundary'
+          ? { action: 'goal_done', tasks: [] }
+          : {
+          action: 'execute_plan',
           tasks: [{
             capability: 'general',
             task: input.delegatedTask,

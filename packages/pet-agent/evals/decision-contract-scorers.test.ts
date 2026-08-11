@@ -2,11 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { capabilityPlanningBasicsDataset } from './datasets/capability-planning-basics.ts';
 import { entryDecisionBasicsDataset } from './datasets/entry-decision-basics.ts';
-import { outcomeDecisionBasicsDataset } from './datasets/outcome-decision-basics.ts';
 import {
   scoreCapabilityPlanning,
   scoreEntryDecision,
-  scoreOutcomeDecision,
 } from './decision-contract-scorers.ts';
 
 function allPass(scores: Array<{ score: number }>) {
@@ -44,26 +42,6 @@ test('entryDecision dataset covers the result-availability matrix', () => {
   assert.ok(names.has('tool-shaped-history-needs-new-observation'));
 });
 
-test('outcome scorer gates only the model-owned verdict', () => {
-  const testCase = outcomeDecisionBasicsDataset.cases[1];
-  assert.ok(testCase);
-  const scores = scoreOutcomeDecision({ outcome: 'task_done' }, testCase.expected);
-  assert.deepEqual(scores.map(({ key }) => key), ['outcome_correct']);
-  assert.ok(allPass(scores));
-});
-
-test('outcome dataset covers advisory future-plan terminal distinctions', () => {
-  assert.ok(outcomeDecisionBasicsDataset.cases.some((testCase) =>
-    testCase.expected.outcome === 'task_done'
-    && (testCase.input.remainingPlan?.length ?? 0) > 0));
-  assert.ok(outcomeDecisionBasicsDataset.cases.some((testCase) =>
-    testCase.expected.outcome === 'goal_done'
-    && (testCase.input.remainingPlan?.length ?? 0) === 0));
-  assert.ok(outcomeDecisionBasicsDataset.cases.some((testCase) =>
-    testCase.expected.outcome === 'goal_done'
-    && (testCase.input.remainingPlan?.length ?? 0) > 0));
-});
-
 test('planning datasets cover entry and boundary distributions', () => {
   const modes = new Set(capabilityPlanningBasicsDataset.cases.map((testCase) => testCase.input.mode));
   assert.deepEqual([...modes].sort(), ['boundary', 'entry']);
@@ -72,7 +50,7 @@ test('planning datasets cover entry and boundary distributions', () => {
     (testCase) => testCase.expected.capabilityName === 'general',
   ));
   assert.ok(capabilityPlanningBasicsDataset.cases.some(
-    (testCase) => testCase.expected.result === 'return_to_answer',
+    (testCase) => testCase.expected.result === 'unavailable',
   ));
 });
 
@@ -81,10 +59,12 @@ test('an exhausted boundary plan can continue autonomous work or report a real c
     (testCase) => testCase.input.mode === 'boundary'
       && (testCase.input.remainingPlan ?? []).length === 0,
   );
-  assert.deepEqual(
-    exhaustedBoundaryCases.map((testCase) => testCase.expected.result).sort(),
-    ['plan', 'return_to_answer'],
-  );
+  const results = new Set(exhaustedBoundaryCases.map((testCase) => testCase.expected.result));
+  assert.ok(results.has('execute_plan'));
+  assert.ok(results.has('continue_current'));
+  assert.ok(results.has('goal_done'));
+  assert.ok(results.has('user_input_required'));
+  assert.ok(results.has('unavailable'));
 });
 
 test('planner scorer enforces the mandatory General fallback', () => {
@@ -93,7 +73,7 @@ test('planner scorer enforces the mandatory General fallback', () => {
   );
   assert.ok(testCase);
   const scores = scoreCapabilityPlanning({
-    result: 'plan',
+    result: 'execute_plan',
     nextTask: '处理普通工作区任务并返回执行结果',
     capabilityName: 'general',
     remainingPlan: [],
@@ -110,7 +90,7 @@ test('planner scorer reconstructs an unchanged plan from next task plus future t
   const materialized = testCase.input.remainingPlan?.[0];
   assert.ok(materialized);
   const scores = scoreCapabilityPlanning({
-    result: 'plan',
+    result: 'execute_plan',
     nextTask: materialized.task,
     capabilityName: materialized.capability,
     remainingPlan: [],
@@ -126,7 +106,7 @@ test('planner deterministic scorer treats Capability as executor identity', () =
   const materialized = testCase.input.remainingPlan?.[0];
   assert.ok(materialized);
   const scores = scoreCapabilityPlanning({
-    result: 'plan',
+    result: 'execute_plan',
     nextTask: materialized.task,
     capabilityName: 'general',
     remainingPlan: [],
@@ -143,7 +123,7 @@ test('planner deterministic scorer can enforce a case-specific future task count
   );
   assert.ok(testCase);
   const scores = scoreCapabilityPlanning({
-    result: 'plan',
+    result: 'execute_plan',
     nextTask: '调查失败测试并形成完整结论',
     capabilityName: 'workspace_analysis',
     remainingPlan: [{

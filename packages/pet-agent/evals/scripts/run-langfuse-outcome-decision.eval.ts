@@ -61,6 +61,7 @@ async function runCase(
       contextSummary: null,
     }),
     subagentAnnounceContext: buildSubagentAnnounceContext({
+      messageId: null,
       lane: 'capability:general',
       delegationId,
       task: testCase.input.currentTask,

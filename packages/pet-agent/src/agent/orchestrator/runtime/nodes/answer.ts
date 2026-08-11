@@ -16,7 +16,6 @@ import {
   buildAnswerInvocationMessages,
   type AnswerContextFacts,
 } from '../../prompts';
-import type { AcceptedDelegationOutcome } from '../../schemas';
 import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
 import { readMessageText } from '../../utils';
@@ -46,8 +45,7 @@ export function createAnswerNode(config: OrchestratorConfig) {
       : null;
     const acceptedOutcome = state.runLatestDelegationOutcome;
     const acceptedHandoffOutcome = handoffSource
-      && acceptedOutcome
-      && acceptedOutcome !== 'user_input_required'
+      && acceptedOutcome === 'goal_done'
       ? acceptedOutcome
       : null;
     const userInputRequiredDelegation = acceptedOutcome === 'user_input_required'
@@ -110,7 +108,7 @@ export function createAnswerNode(config: OrchestratorConfig) {
 export function selectAnswerContextFacts(params: {
   state: OrchestratorStateType;
   history: BaseMessage[];
-  acceptedHandoffOutcome: Exclude<AcceptedDelegationOutcome, 'user_input_required'> | null;
+  acceptedHandoffOutcome: 'goal_done' | null;
   awaitingUserInput: boolean;
   userInputRequiredContext?: string | null;
   runIterationLimit: number;
@@ -126,18 +124,30 @@ export function selectAnswerContextFacts(params: {
       context: params.userInputRequiredContext?.trim() || null,
     };
   }
-  if (params.state.runPlannerReturn) {
-    return {
-      mode: 'planner_return',
-      hasUserGoal,
-      ...params.state.runPlannerReturn,
-    };
-  }
   if (params.acceptedHandoffOutcome === 'goal_done') {
     return { mode: 'goal_done', hasUserGoal };
   }
-  if (params.acceptedHandoffOutcome === 'task_done') {
-    return { mode: 'task_result', hasUserGoal };
+  if (params.state.runPlannerFailure === 'checkpoint_missing') {
+    return {
+      mode: 'blocked',
+      hasUserGoal,
+      reason: 'planner_checkpoint_missing',
+      unfinishedTask: params.state.taskActiveDelegation?.task
+        ?? params.state.runUserGoal?.objective
+        ?? null,
+      detail: null,
+    };
+  }
+  if (params.state.runLatestDelegationOutcome === 'unavailable') {
+    return {
+      mode: 'blocked',
+      hasUserGoal,
+      reason: 'capability_unavailable',
+      unfinishedTask: params.state.taskActiveDelegation?.task
+        ?? params.state.runUserGoal?.objective
+        ?? null,
+      detail: null,
+    };
   }
 
   const activeDelegation = params.state.taskActiveDelegation;
@@ -171,9 +181,9 @@ export function selectAnswerContextFacts(params: {
 function buildAnswerCleanup() {
   return {
     runNextDelegation: null,
-    runPlannerReturn: null,
     runCapabilityPlan: [],
     runIterationCount: 0,
     runLatestDelegationOutcome: null,
+    runPlannerFailure: null,
   };
 }

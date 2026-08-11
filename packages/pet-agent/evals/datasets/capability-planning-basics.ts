@@ -12,13 +12,17 @@ export type CapabilityPlanningInput = {
     content: string;
   }>;
   capabilityRegistry: string[];
-  completedTask?: string;
-  completedTaskResult?: string;
+  activeTask?: string;
+  latestAnnounce?: string;
   remainingPlan?: Array<{ capability: string; task: string }>;
 };
 
 export type CapabilityPlanningExpected = {
-  result: 'plan' | 'return_to_answer';
+  result: 'continue_current'
+    | 'execute_plan'
+    | 'goal_done'
+    | 'user_input_required'
+    | 'unavailable';
   nextTaskTerms?: string[];
   capabilityName?: string;
   remainingPlan: Array<{ taskTerms: string[]; capability: string }>;
@@ -91,7 +95,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       ],
     },
     expected: {
-      result: 'plan',
+      result: 'execute_plan',
       nextTaskTerms: ['auth', '结构', '风险'],
       capabilityName: 'explore',
       remainingPlan: [
@@ -134,7 +138,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       ],
     },
     expected: {
-      result: 'plan',
+      result: 'execute_plan',
       nextTaskTerms: ['auth', '结构', '依赖', '风险'],
       capabilityName: 'explore',
       remainingPlan: [
@@ -164,7 +168,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       ],
     },
     expected: {
-      result: 'plan',
+      result: 'execute_plan',
       nextTaskTerms: ['支付', '失败测试', '根因', '代码', '触发条件', '完整'],
       capabilityName: 'workspace_analysis',
       remainingPlan: [],
@@ -191,7 +195,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       ],
     },
     expected: {
-      result: 'plan',
+      result: 'execute_plan',
       nextTaskTerms: ['仓库', '未提交', '状态'],
       capabilityName: 'general',
       remainingPlan: [],
@@ -219,7 +223,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       ],
     },
     expected: {
-      result: 'plan',
+      result: 'execute_plan',
       nextTaskTerms: ['PR', '450', '风险'],
       capabilityName: 'explore',
       remainingPlan: [{
@@ -254,12 +258,12 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
         'explore: inspect code structure and risks',
         'general: use workspace tools to edit and verify code',
       ],
-      completedTask: '调查 auth 模块的现有结构和风险',
-      completedTaskResult: 'auth/index.ts 存在循环依赖；应提取 token validation 并保持现有公开接口。',
+      activeTask: '调查 auth 模块的现有结构和风险',
+      latestAnnounce: 'auth/index.ts 存在循环依赖；应提取 token validation 并保持现有公开接口。',
       remainingPlan: [{ capability: 'general', task: '根据调查结论重构 auth 模块' }],
     },
     expected: {
-      result: 'plan',
+      result: 'execute_plan',
       nextTaskTerms: ['循环依赖', 'token', '接口'],
       capabilityName: 'general',
       remainingPlan: [],
@@ -297,12 +301,12 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
         'general: use workspace tools to edit and verify code',
         'release_check: inspect release documentation and verify release readiness',
       ],
-      completedTask: '调查 auth 模块的现有结构、依赖和风险。',
-      completedTaskResult: 'auth/index.ts 存在循环依赖；token validation 需要提取，同时必须保持现有公开接口。',
+      activeTask: '调查 auth 模块的现有结构、依赖和风险。',
+      latestAnnounce: 'auth/index.ts 存在循环依赖；token validation 需要提取，同时必须保持现有公开接口。',
       remainingPlan: [{ capability: 'general', task: '根据调查结论重构 auth 模块并验证。' }],
     },
     expected: {
-      result: 'plan',
+      result: 'execute_plan',
       nextTaskTerms: ['循环依赖', 'token', '公开接口'],
       capabilityName: 'general',
       remainingPlan: [],
@@ -333,7 +337,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       ],
     },
     expected: {
-      result: 'plan',
+      result: 'execute_plan',
       nextTaskTerms: ['package.json', 'name', 'version'],
       capabilityName: 'general',
       remainingPlan: [],
@@ -366,12 +370,12 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
         'messaging: deliver messages and attachments',
         'general: perform other available work',
       ],
-      completedTask: '生成项目报告',
-      completedTaskResult: '报告已生成，路径为 /tmp/report.pdf，内容检查通过。',
+      activeTask: '生成项目报告',
+      latestAnnounce: '报告已生成，路径为 /tmp/report.pdf，内容检查通过。',
       remainingPlan: [{ capability: 'messaging', task: '把完成的报告发送给项目负责人' }],
     },
     expected: {
-      result: 'plan',
+      result: 'execute_plan',
       nextTaskTerms: ['报告', '发送', '负责人'],
       capabilityName: 'messaging',
       remainingPlan: [],
@@ -402,15 +406,15 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
         'general: modify source code',
         'release_check: run release verification',
       ],
-      completedTask: '调查 auth 风险',
-      completedTaskResult: '调查确认 token validation 存在循环依赖，需要保持公开接口。',
+      activeTask: '调查 auth 风险',
+      latestAnnounce: '调查确认 token validation 存在循环依赖，需要保持公开接口。',
       remainingPlan: [
         { capability: 'general', task: '根据调查结论修复 auth 风险' },
         { capability: 'release_check', task: '独立运行 release verification' },
       ],
     },
     expected: {
-      result: 'plan',
+      result: 'execute_plan',
       nextTaskTerms: ['token', '循环依赖', '公开接口'],
       capabilityName: 'general',
       remainingPlan: [{
@@ -444,8 +448,8 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
         'explore: inspect issues, repositories, and implementation history',
         'general: perform ordinary workspace tasks',
       ],
-      completedTask: '读取 issue #345 并整理架构演进内容',
-      completedTaskResult: 'issue 正文和评论中的架构演进提案已经完整整理；下一步只需对照当前仓库实现。',
+      activeTask: '读取 issue #345 并整理架构演进内容',
+      latestAnnounce: 'issue 正文和评论中的架构演进提案已经完整整理；下一步只需对照当前仓库实现。',
       remainingPlan: [
         {
           capability: 'explore',
@@ -458,7 +462,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       ],
     },
     expected: {
-      result: 'plan',
+      result: 'execute_plan',
       nextTaskTerms: ['当前仓库', '实现', 'issue', '架构演进'],
       capabilityName: 'explore',
       remainingPlan: [],
@@ -486,7 +490,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       ],
     },
     expected: {
-      result: 'plan',
+      result: 'execute_plan',
       nextTaskTerms: ['仓库', '测试', '结果'],
       capabilityName: 'general',
       remainingPlan: [{
@@ -533,7 +537,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       ],
     },
     expected: {
-      result: 'plan',
+      result: 'execute_plan',
       nextTaskTerms: ['检查', '待创建', '事项', '当前状态'],
       capabilityName: 'general',
       remainingPlan: [],
@@ -567,7 +571,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       ],
     },
     expected: {
-      result: 'plan',
+      result: 'execute_plan',
       nextTaskTerms: ['P1-1', 'P1-2', 'P1-3', 'P2'],
       capabilityName: 'general',
       remainingPlan: [],
@@ -598,7 +602,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       ],
     },
     expected: {
-      result: 'return_to_answer',
+      result: 'unavailable',
       remainingPlan: [],
       exactRemainingPlanLength: 0,
       planEffect: 'empty',
@@ -624,12 +628,12 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       capabilityRegistry: [
         'explore: inspect repository and release readiness without publishing packages',
       ],
-      completedTask: '检查 npm 包的发布条件',
-      completedTaskResult: '版本、测试和工作区状态均满足发布条件；下一步需要发布 npm 包。',
+      activeTask: '检查 npm 包的发布条件',
+      latestAnnounce: '版本、测试和工作区状态均满足发布条件；下一步需要发布 npm 包。',
       remainingPlan: [],
     },
     expected: {
-      result: 'return_to_answer',
+      result: 'unavailable',
       remainingPlan: [],
       exactRemainingPlanLength: 0,
       planEffect: 'empty',
@@ -664,12 +668,12 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
         'document_writer: create and update project documents',
         'general: perform other available work',
       ],
-      completedTask: '读取 issue #587 的当前状态',
-      completedTaskResult: 'issue #587 当前为 open；README 的“已知问题”章节仍写着它已关闭，与实际状态不符。',
+      activeTask: '读取 issue #587 的当前状态',
+      latestAnnounce: 'issue #587 当前为 open；README 的“已知问题”章节仍写着它已关闭，与实际状态不符。',
       remainingPlan: [],
     },
     expected: {
-      result: 'plan',
+      result: 'execute_plan',
       nextTaskTerms: ['README', '#587'],
       capabilityName: 'document_writer',
       remainingPlan: [],
@@ -683,6 +687,74 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       reason: 'A task_done boundary may have no pre-existing future tail when the completed result reveals the concrete next task.',
       source: SOURCE_FILE,
     },
+  },
+  {
+    id: `${SUITE}.boundary-continues-incomplete-current-task`,
+    name: 'boundary-continues-incomplete-current-task',
+    suite: SUITE,
+    tags: ['capability_planning', 'delegation_control', 'planner_boundary'],
+    input: {
+      mode: 'boundary',
+      messages: [{ role: 'user', content: '检查仓库并完成测试验证。' }],
+      capabilityRegistry: [
+        'general: inspect, modify, and verify the workspace',
+      ],
+      activeTask: '检查仓库并完成测试验证',
+      latestAnnounce: '已完成仓库检查，但测试尚未运行。',
+      remainingPlan: [],
+    },
+    expected: {
+      result: 'continue_current',
+      remainingPlan: [],
+      planEffect: 'revised',
+      rubberStamp: false,
+      reason: 'The current task is incomplete and the same Capability can finish it.',
+    },
+    metadata: { difficulty: 'medium', reason: 'Unified acceptance and continuation action.', source: SOURCE_FILE },
+  },
+  {
+    id: `${SUITE}.boundary-completes-user-goal`,
+    name: 'boundary-completes-user-goal',
+    suite: SUITE,
+    tags: ['capability_planning', 'delegation_control', 'planner_boundary'],
+    input: {
+      mode: 'boundary',
+      messages: [{ role: 'user', content: '运行测试并报告结果。' }],
+      capabilityRegistry: ['general: run and verify workspace tests'],
+      activeTask: '运行测试并报告结果',
+      latestAnnounce: '测试全部通过，结果已经整理完成。',
+      remainingPlan: [],
+    },
+    expected: {
+      result: 'goal_done',
+      remainingPlan: [],
+      planEffect: 'empty',
+      rubberStamp: false,
+      reason: 'The accepted execution evidence completes the full user goal.',
+    },
+    metadata: { difficulty: 'easy', reason: 'Unified goal completion action.', source: SOURCE_FILE },
+  },
+  {
+    id: `${SUITE}.boundary-waits-for-user-input`,
+    name: 'boundary-waits-for-user-input',
+    suite: SUITE,
+    tags: ['capability_planning', 'delegation_control', 'planner_boundary'],
+    input: {
+      mode: 'boundary',
+      messages: [{ role: 'user', content: '发布包；如果需要凭据就先停下来。' }],
+      capabilityRegistry: ['general: prepare and publish packages when credentials are available'],
+      activeTask: '发布 npm 包',
+      latestAnnounce: '发布前检查已通过，但 registry token 尚未提供。',
+      remainingPlan: [],
+    },
+    expected: {
+      result: 'user_input_required',
+      remainingPlan: [],
+      planEffect: 'empty',
+      rubberStamp: false,
+      reason: 'Autonomous progress must stop until the user supplies the required credential.',
+    },
+    metadata: { difficulty: 'medium', reason: 'Unified user-input boundary.', source: SOURCE_FILE },
   },
 ];
 

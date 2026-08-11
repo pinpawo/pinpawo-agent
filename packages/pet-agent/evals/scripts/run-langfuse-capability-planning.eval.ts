@@ -14,7 +14,6 @@ import {
 } from '../../src/types/capability.ts';
 import { defineToolkit } from '../../src/types/toolkit.ts';
 import {
-  buildCapabilityPlanningRecentMessages,
   evaluateCapabilityPlanningOutput,
   type CapabilityPlanningEvalOutput,
 } from '../capability-planning-evaluation.ts';
@@ -62,9 +61,9 @@ function capabilityFromRegistryEntry(entry: string): AgentCapability {
 function plannerOutput(
   result: CapabilityPlannerResult,
 ): CapabilityPlanningEvalOutput {
-  if (!('tasks' in result)) {
+  if (result.action !== 'execute_plan' && result.action !== 'continue_current') {
     return {
-      result: 'return_to_answer',
+      result: result.action,
       nextTask: null,
       capabilityName: null,
       remainingPlan: [],
@@ -72,7 +71,7 @@ function plannerOutput(
   }
   const [nextTask, ...remainingPlan] = result.tasks;
   return {
-    result: 'plan',
+    result: result.action,
     nextTask: nextTask?.task ?? null,
     capabilityName: nextTask?.capability ?? null,
     remainingPlan: remainingPlan.map((task) => ({ ...task })),
@@ -148,16 +147,34 @@ async function main() {
         }).invoke(
           {
             mode: testCase.input.mode,
+            inputId: `${testCase.input.mode}:${testCase.id}`,
+            traceId: `eval:${testCase.id}`,
+            runId: `eval:${testCase.id}`,
             userGoal: testCase.input.userGoal,
-            completedTask: testCase.input.completedTask ?? null,
-            completedTaskResult: testCase.input.completedTaskResult ?? null,
+            latestUserMessage: null,
+            activeDelegation: testCase.input.mode === 'boundary'
+              ? {
+                  delegationId: 'eval-delegation',
+                  capability: testCase.input.remainingPlan?.[0]?.capability
+                    ?? workspace.capabilityNames[0]
+                    ?? 'unavailable',
+                  task: testCase.input.activeTask ?? 'Evaluate the current task.',
+                }
+              : null,
+            latestAnnounce: testCase.input.mode === 'boundary'
+              ? {
+                  messageId: 'eval-announce',
+                  text: testCase.input.latestAnnounce ?? null,
+                  completionReason: 'natural',
+                }
+              : null,
             remainingPlan: testCase.input.remainingPlan ?? [],
-            recentMainMessages: buildCapabilityPlanningRecentMessages(
-              testCase.input.messages,
-            ),
             workspace,
           },
           {
+            configurable: {
+              thread_id: `capability-planning-eval:${testCase.id}`,
+            },
             metadata: {
               promptEvalModelRole: 'subject',
               modelProfileId: modelConfig.metadata.profileId,

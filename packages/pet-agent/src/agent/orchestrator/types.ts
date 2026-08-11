@@ -72,6 +72,8 @@ export type TaskActiveDelegation = {
   task: string;
   contextSummary: string | null;
   transcriptRunId: string;
+  /** Stable user-task identity across fresh runs that resume this delegation. */
+  traceId?: string;
   status: 'pending' | 'awaiting_decision';
   resultPreview: string | null;
   /** Snapshot used to restore runUserGoal when this delegation is resumed. */
@@ -79,6 +81,7 @@ export type TaskActiveDelegation = {
 };
 
 export type SubagentAnnounce = {
+  messageId: string | null;
   lane: MessageLane;
   delegationId: string | null;
   task: string | null;

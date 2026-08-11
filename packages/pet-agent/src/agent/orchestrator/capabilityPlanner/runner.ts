@@ -1,12 +1,15 @@
-import type { BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { CapabilityDocumentWorkspace } from './documentWorkspace';
 import type {
   CapabilityPlanTask,
-  PlannerAnswerDisposition,
   RunDelegationSummary,
   UserGoal,
 } from '../types';
+import type {
+  PlannerAnnounceInput,
+  PlannerCommit,
+  PlannerDelegationInput,
+} from './protocol';
 
 export type CapabilityPlannerMode = 'entry' | 'boundary';
 
@@ -21,37 +24,33 @@ export const CAPABILITY_PLANNER_BOUNDARY_RESULT_MAX_CHARS = 16_000;
 export type CapabilityPlannerRuntimeState = Pick<
   {
     runId: string;
+    traceId: string;
     runUserGoal: UserGoal;
     runDelegationSummaries: RunDelegationSummary[];
     runCapabilityPlan: CapabilityPlanTask[];
-    recentMainMessages: BaseMessage[];
   },
   | 'runId'
+  | 'traceId'
   | 'runUserGoal'
   | 'runDelegationSummaries'
   | 'runCapabilityPlan'
-  | 'recentMainMessages'
 >;
 
 export type CapabilityPlannerDispatch =
-  | {
-      readonly mode: 'entry';
-      readonly plannerState: CapabilityPlannerRuntimeState;
-    }
-  | {
-      readonly mode: 'boundary';
-      readonly plannerState: CapabilityPlannerRuntimeState;
-      readonly completedTask: string;
-      /** Bounded accepted announce result for the task that just completed. */
-      readonly completedTaskResult: string;
-    };
+  {
+    readonly mode: 'entry';
+    readonly plannerState: CapabilityPlannerRuntimeState;
+  };
 
 type CapabilityPlannerInputBase = {
+  readonly inputId: string;
+  readonly traceId: string;
+  readonly runId: string;
   readonly userGoal: UserGoal;
-  readonly recentMainMessages: readonly BaseMessage[];
-  readonly completedTask: string | null;
-  /** Bounded accepted announce result for the latest completed delegation. */
-  readonly completedTaskResult: string | null;
+  readonly latestUserMessage: string | null;
+  readonly activeDelegation: PlannerDelegationInput | null;
+  /** Candidate execution evidence. Root has not accepted it as a handoff yet. */
+  readonly latestAnnounce: PlannerAnnounceInput | null;
   readonly remainingPlan: readonly CapabilityPlanTask[];
   readonly workspace: CapabilityDocumentWorkspace;
 };
@@ -60,13 +59,7 @@ export type CapabilityPlannerInput = CapabilityPlannerInputBase & {
   readonly mode: CapabilityPlannerMode;
 };
 
-export type CapabilityPlannerResult =
-  | {
-      readonly tasks: readonly CapabilityPlanTask[];
-    }
-  | {
-      readonly answer: PlannerAnswerDisposition;
-    };
+export type CapabilityPlannerResult = PlannerCommit;
 
 /**
  * Typed graph seam for the framework-internal Capability Planner.

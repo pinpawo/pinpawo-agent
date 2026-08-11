@@ -33,7 +33,8 @@ function buildRunNextDelegation(
  *
  * Resuming reuses the exact delegation and transcript identities. A pending
  * delegation can return directly to its capability; an awaiting delegation
- * returns to outcome review with the new human message available as guidance.
+ * returns to the private Planner boundary with the new human message available
+ * as guidance.
  */
 export function applyActiveDelegationTransition(
   state: OrchestratorStateType,
@@ -53,6 +54,9 @@ export function applyActiveDelegationTransition(
   const guidance = latestHumanRequest
     ? clipForPrompt(latestHumanRequest, RESUME_GUIDANCE_MAX_CHARS)
     : null;
+  const resumedUserGoal = activeDelegation.userGoal
+    ?? state.runUserGoal
+    ?? (guidance ? { objective: guidance, context: null } : null);
   const runNextDelegation = buildRunNextDelegation(activeDelegation, guidance);
   const resumedSummaries = resumeRunDelegationSummary(
     state.runDelegationSummaries,
@@ -61,7 +65,8 @@ export function applyActiveDelegationTransition(
 
   if (activeDelegation.status === 'awaiting_decision') {
     return {
-      runUserGoal: activeDelegation.userGoal ?? null,
+      traceId: activeDelegation.traceId ?? activeDelegation.transcriptRunId,
+      runUserGoal: resumedUserGoal,
       runDelegationSummaries: updateRunDelegationSummaryResult(
         resumedSummaries,
         activeDelegation.id,
@@ -84,9 +89,9 @@ export function applyActiveDelegationTransition(
 
   return {
     messages: materializedDelegation.laneMessages,
-    runUserGoal: activeDelegation.userGoal ?? null,
+    traceId: activeDelegation.traceId ?? activeDelegation.transcriptRunId,
+    runUserGoal: resumedUserGoal,
     runNextDelegation,
-    runPlannerReturn: null,
     taskActiveDelegation: {
       ...activeDelegation,
       contextSummary: runNextDelegation.contextSummary,

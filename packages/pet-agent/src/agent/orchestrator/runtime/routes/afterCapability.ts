@@ -8,5 +8,5 @@ import type { OrchestratorStateType } from '../../state';
 export function afterCapability(state: OrchestratorStateType) {
   return state.taskActiveDelegation?.status === 'pending'
     ? 'end'
-    : 'delegationOutcomeIterationGuard';
+    : 'plannerBoundaryIterationGuard';
 }

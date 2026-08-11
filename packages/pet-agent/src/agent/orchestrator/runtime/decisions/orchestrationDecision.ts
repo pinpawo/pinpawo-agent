@@ -1,4 +1,9 @@
-import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
+import {
+  AIMessage,
+  HumanMessage,
+  SystemMessage,
+  type BaseMessage,
+} from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { Command, Send } from '@langchain/langgraph';
 import { evaluateGuard } from '../../../../guards';
@@ -80,14 +85,6 @@ import {
 import { guardDecisionEmitter } from '../guards/decisionEvents';
 
 type DecisionKind = 'delegation_outcome';
-const MAX_CAPABILITY_PLANNER_MAIN_MESSAGES = 10;
-
-function buildCapabilityPlannerMainMessages(messages: BaseMessage[]) {
-  return mainMessagesWithoutCompaction(messages)
-    .filter((message) => message._getType() === 'human' || message._getType() === 'ai')
-    .slice(-MAX_CAPABILITY_PLANNER_MAIN_MESSAGES);
-}
-
 export function createEntryDecisionRunner(config: OrchestratorConfig) {
   return async function runEntryDecision(
     state: OrchestratorStateType,
@@ -359,10 +356,10 @@ function buildEntryDecisionResult(params: {
     mode: 'entry',
     plannerState: {
       runId: state.runId,
+      traceId: state.traceId,
       runUserGoal: decision.userGoal,
       runDelegationSummaries: state.runDelegationSummaries,
       runCapabilityPlan: [],
-      recentMainMessages: buildCapabilityPlannerMainMessages(state.messages),
     },
   };
   return {
@@ -452,20 +449,20 @@ function buildDelegationOutcomeDecisionResult(params: {
         },
       };
     }
-    const dispatch: CapabilityPlannerDispatch = {
+    const dispatch = {
       mode: 'boundary',
       plannerState: {
         runId: state.runId,
+        traceId: state.traceId,
         runUserGoal,
         runDelegationSummaries: acceptedDelegationUpdate.runDelegationSummaries,
         runCapabilityPlan: state.runCapabilityPlan,
-        recentMainMessages: buildCapabilityPlannerMainMessages(state.messages),
       },
       completedTask: activeDelegation.task,
       completedTaskResult: boundCapabilityPlannerBoundaryResult(
         context.activeDelegationResult,
       ),
-    };
+    } as unknown as CapabilityPlannerDispatch;
     return {
       goto: new Send('capabilityPlanner', dispatch),
       update: acceptedDelegationUpdate,

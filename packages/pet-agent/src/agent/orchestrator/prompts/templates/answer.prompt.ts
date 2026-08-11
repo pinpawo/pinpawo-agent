@@ -12,7 +12,6 @@ export const ANSWER_SYSTEM_PROMPT = definePromptTemplate<{
 
 <reply_mode> 是系统已经确定的回复方式，不是执行请求：
 - direct：回答当前目标；更早的请求只有被当前目标引用时才相关。
-- task_result：呈现已接受的当前任务结果。
 - goal_done：当前目标已经完成；总结已接受的完成内容、关键结论和交付物，不重新检查、验证或执行该目标。
 - user_input_required：把控制权交还用户。根据 awaiting_user_input_context 说明当前进展，并提出继续所需的具体问题；本次回复在等待用户输入处结束。
 - blocked：说明当前限制、未完成部分和可继续方向。

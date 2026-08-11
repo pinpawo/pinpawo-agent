@@ -96,7 +96,6 @@ test('Answer input append helper does not mutate canonical history', () => {
 test('Answer input uses a closed reply mode without an instruction field', () => {
   const variants: ModelAnswerContextFacts[] = [
     { mode: 'direct', hasUserGoal: true },
-    { mode: 'task_result', hasUserGoal: true },
     { mode: 'goal_done', hasUserGoal: true },
     { mode: 'user_input_required', hasUserGoal: false, context: null },
   ];

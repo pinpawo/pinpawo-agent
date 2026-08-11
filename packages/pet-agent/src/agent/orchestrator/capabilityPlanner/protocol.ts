@@ -16,6 +16,9 @@ export type PlannerReplyOutcome = Extract<
   'goal_done' | 'user_input_required' | 'unavailable'
 >;
 
+/** Deterministic root-visible failure metadata; never produced by the model. */
+export type PlannerRuntimeFailure = 'checkpoint_missing';
+
 export type PlannerCommit = {
   readonly action: PlannerAction;
   readonly tasks: readonly CapabilityPlanTask[];

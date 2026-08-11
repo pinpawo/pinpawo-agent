@@ -81,6 +81,7 @@ export type TaskActiveDelegation = {
 };
 
 export type SubagentAnnounce = {
+  messageId: string | null;
   lane: MessageLane;
   delegationId: string | null;
   task: string | null;

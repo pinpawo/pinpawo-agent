@@ -299,7 +299,6 @@ function plannerInput(
       objective: 'Research the repository and then prepare a review.',
       context: null,
     },
-    recentMainMessages: [],
     latestUserMessage: null,
     activeDelegation: null,
     latestAnnounce: null,
@@ -704,13 +703,8 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
       },
     },
   ]);
-  const recentMainMessages = [
-    new HumanMessage('Earlier, inspect the auth module before planning changes.'),
-    new AIMessage('The auth module context remains relevant to the current goal.'),
-  ];
-
   const result = await createCapabilityPlannerAgent({ model })
-    .invoke(plannerInput(workspace, { recentMainMessages }));
+    .invoke(plannerInput(workspace));
 
   assert.deepEqual(model.boundToolNames.slice(0, 1), [
     CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
@@ -731,13 +725,9 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
     message instanceof HumanMessage
     && String(message.content).includes('Research the repository and then prepare a review.')));
   const firstInvocationTexts = model.invocations[0]?.map((message) => String(message.content)) ?? [];
-  const recentUserIndex = firstInvocationTexts.indexOf(String(recentMainMessages[0]?.content));
-  const recentAssistantIndex = firstInvocationTexts.indexOf(String(recentMainMessages[1]?.content));
   const plannerInputIndex = firstInvocationTexts.findIndex(
     (text) => text.includes('Research the repository and then prepare a review.'),
   );
-  assert.equal(recentUserIndex, -1);
-  assert.equal(recentAssistantIndex, -1);
   assert.ok(plannerInputIndex >= 0);
   assert.deepEqual(result, {
     action: 'execute_plan',

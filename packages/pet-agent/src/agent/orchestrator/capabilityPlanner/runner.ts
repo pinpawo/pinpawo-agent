@@ -1,4 +1,3 @@
-import type { BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { CapabilityDocumentWorkspace } from './documentWorkspace';
 import type {
@@ -29,14 +28,12 @@ export type CapabilityPlannerRuntimeState = Pick<
     runUserGoal: UserGoal;
     runDelegationSummaries: RunDelegationSummary[];
     runCapabilityPlan: CapabilityPlanTask[];
-    recentMainMessages: BaseMessage[];
   },
   | 'runId'
   | 'traceId'
   | 'runUserGoal'
   | 'runDelegationSummaries'
   | 'runCapabilityPlan'
-  | 'recentMainMessages'
 >;
 
 export type CapabilityPlannerDispatch =
@@ -51,7 +48,6 @@ type CapabilityPlannerInputBase = {
   readonly runId: string;
   readonly userGoal: UserGoal;
   readonly latestUserMessage: string | null;
-  readonly recentMainMessages: readonly BaseMessage[];
   readonly activeDelegation: PlannerDelegationInput | null;
   /** Candidate execution evidence. Root has not accepted it as a handoff yet. */
   readonly latestAnnounce: PlannerAnnounceInput | null;

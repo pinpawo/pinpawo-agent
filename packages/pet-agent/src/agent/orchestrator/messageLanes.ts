@@ -381,6 +381,7 @@ function readTaggedAnnounce(message: BaseMessage): SubagentAnnounce | null {
   const lane = getMessageLane(message);
   if (!isDelegationLane(lane)) return null;
   return {
+    messageId: message.id ?? null,
     lane,
     delegationId: getMessageDelegationId(message),
     task: getMessageDelegatedTask(message),

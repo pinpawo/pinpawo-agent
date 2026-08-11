@@ -74,7 +74,6 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       plannerBoundaryIterationGuard: 'plannerBoundaryIterationGuard',
       entryDecision: 'entryDecision',
       capability: 'capability',
-      capabilityPlanner: 'capabilityPlanner',
     })
     .addConditionalEdges('plannerBoundaryIterationGuard', afterPlannerBoundaryIterationGuard, {
       answer: 'answer',

@@ -78,7 +78,6 @@ test('Capability Planner entry input leads with the run user goal', () => {
       objective: '打开小红书并浏览相关内容。',
       context: '浏览器已经连接。',
     },
-    recentMainMessages: [],
     latestUserMessage: null,
     activeDelegation: null,
     latestAnnounce: null,
@@ -103,7 +102,6 @@ test('Capability Planner boundary input carries the run user goal and boundary f
       objective: '打开小红书并浏览相关内容。',
       context: '浏览器已经连接。',
     },
-    recentMainMessages: [],
     latestUserMessage: null,
     activeDelegation: {
       delegationId: 'delegation-1',
@@ -139,7 +137,6 @@ test('Capability Planner boundary input omits the follow-up section once the pla
       objective: '打开小红书并浏览相关内容。',
       context: null,
     },
-    recentMainMessages: [],
     latestUserMessage: null,
     activeDelegation: {
       delegationId: 'delegation-1',
@@ -268,6 +265,7 @@ test('completed subagent announce context includes the full current result text'
     'END_OF_FULL_RANKING_MARKER',
   ].join('\n\n');
   const context = buildSubagentAnnounceContext({
+    messageId: null,
     lane: 'capability:general',
     delegationId: 'task-1',
     task: '整理排行榜',
@@ -281,6 +279,7 @@ test('completed subagent announce context includes the full current result text'
 
 test('subagent announce wraps markdown result as an xml-ish data block', () => {
   const context = buildSubagentAnnounceContext({
+    messageId: null,
     lane: 'capability:general',
     delegationId: 'task-1',
     task: '修复 lint',
@@ -297,6 +296,7 @@ test('subagent announce wraps markdown result as an xml-ish data block', () => {
 
 test('subagent announce context includes artifact refs for task ownership', () => {
   const context = buildSubagentAnnounceContext({
+    messageId: null,
     lane: 'capability:explore',
     delegationId: 'task-1',
     task: '修复 lint',
@@ -325,6 +325,7 @@ test('subagent announce context includes artifact refs for task ownership', () =
 test('subagent announce context clips artifact summaries', () => {
   const long = 'title-payload-'.repeat(80);
   const context = buildSubagentAnnounceContext({
+    messageId: null,
     lane: 'capability:explore',
     delegationId: 'task-1',
     task: '整理 ranking',

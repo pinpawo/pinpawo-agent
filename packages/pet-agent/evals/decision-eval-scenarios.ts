@@ -163,8 +163,9 @@ function outcomeScenarios(): DecisionEvalScenario[] {
           task: testCase.input.currentTask,
           contextSummary: null,
         }),
-        subagentAnnounceContext: buildSubagentAnnounceContext({
-          lane: 'capability:general',
+    subagentAnnounceContext: buildSubagentAnnounceContext({
+      messageId: null,
+      lane: 'capability:general',
           delegationId,
           task: testCase.input.currentTask,
           text: testCase.input.announce,

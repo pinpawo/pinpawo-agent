@@ -14,7 +14,6 @@ import {
 } from '../../src/types/capability.ts';
 import { defineToolkit } from '../../src/types/toolkit.ts';
 import {
-  buildCapabilityPlanningRecentMessages,
   evaluateCapabilityPlanningOutput,
   type CapabilityPlanningEvalOutput,
 } from '../capability-planning-evaluation.ts';
@@ -170,9 +169,6 @@ async function main() {
                 }
               : null,
             remainingPlan: testCase.input.remainingPlan ?? [],
-            recentMainMessages: buildCapabilityPlanningRecentMessages(
-              testCase.input.messages,
-            ),
             workspace,
           },
           {

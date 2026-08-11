@@ -127,6 +127,17 @@ export function selectAnswerContextFacts(params: {
   if (params.acceptedHandoffOutcome === 'goal_done') {
     return { mode: 'goal_done', hasUserGoal };
   }
+  if (params.state.runPlannerFailure === 'checkpoint_missing') {
+    return {
+      mode: 'blocked',
+      hasUserGoal,
+      reason: 'planner_checkpoint_missing',
+      unfinishedTask: params.state.taskActiveDelegation?.task
+        ?? params.state.runUserGoal?.objective
+        ?? null,
+      detail: null,
+    };
+  }
   if (params.state.runLatestDelegationOutcome === 'unavailable') {
     return {
       mode: 'blocked',
@@ -173,5 +184,6 @@ function buildAnswerCleanup() {
     runCapabilityPlan: [],
     runIterationCount: 0,
     runLatestDelegationOutcome: null,
+    runPlannerFailure: null,
   };
 }

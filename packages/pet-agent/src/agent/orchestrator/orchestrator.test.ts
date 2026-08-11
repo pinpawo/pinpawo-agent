@@ -621,7 +621,7 @@ test('entry decision reads full canonical main messages and excludes lane announ
   );
 });
 
-test('entry stores a bounded run user goal and gives Planner the latest ten main messages', async () => {
+test('entry stores a bounded run user goal without copying main messages into Planner', async () => {
   let plannerInput: CapabilityPlannerInput | null = null;
   const userGoalContext = 'RUN_USER_GOAL_CONTEXT';
   const model = {
@@ -673,10 +673,6 @@ test('entry stores a bounded run user goal and gives Planner the latest ten main
     context: userGoalContext,
   });
   assert.deepEqual(state.runUserGoal, capturedPlannerInput.userGoal);
-  assert.deepEqual(
-    capturedPlannerInput.recentMainMessages.map(readMessageText),
-    [],
-  );
   assert.doesNotMatch(
     state.messages.map(readMessageText).join('\n'),
     new RegExp(userGoalContext),
@@ -778,6 +774,11 @@ test('execution boundary routes through capabilityPlanner before the next task',
   assert.deepEqual(boundaryPlannerInput?.userGoal, entryPlannerInput?.userGoal);
   assert.equal(plannerInputs[1]?.activeDelegation?.task, '读取 issue #269 并提炼需求点。');
   assert.match(plannerInputs[1]?.latestAnnounce?.text ?? '', /issue #269 需求点/);
+  assert.ok(plannerInputs[1]?.latestAnnounce?.messageId);
+  assert.equal(
+    plannerInputs[1]?.inputId,
+    `announce:${plannerInputs[1]?.activeDelegation?.delegationId}:${plannerInputs[1]?.latestAnnounce?.messageId}`,
+  );
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
   assert.deepEqual(state.runCapabilityPlan, []);
   assert.equal(state.runNextDelegation, null);
@@ -5494,6 +5495,7 @@ test('lane tagging hides subagent messages from route and records completed anno
     '已查到热门动态。',
   ]);
   assert.deepEqual(readLatestAnnounce(messages, { delegationId: 'task-1' }), {
+    messageId: 'task-1-announce',
     lane: 'capability:general',
     delegationId: 'task-1',
     task: '查小红书动态',
@@ -5626,6 +5628,7 @@ test('lane tagging marks the deliverable as the announce regardless of stop reas
 
   assert.equal(getMessageIsAnnounce(messages[1]), true);
   assert.deepEqual(readLatestAnnounce(messages, { delegationId: 'task-2' }), {
+    messageId: 'task-2-progress',
     lane: 'capability:general',
     delegationId: 'task-2',
     task: '读取文件并运行 lint',
@@ -6452,7 +6455,10 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
     delegationId: activeDelegation.id,
     runId: activeDelegation.transcriptRunId,
   });
-  const priorAnnounce = new AIMessage(activeDelegation.resultPreview ?? '');
+  const priorAnnounce = new AIMessage({
+    id: 'prior-resume-announce',
+    content: activeDelegation.resultPreview ?? '',
+  });
   setPinpetMeta(priorAnnounce, {
     lane: activeDelegation.lane,
     runId: activeDelegation.transcriptRunId,
@@ -6542,6 +6548,13 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
   assert.equal(plannerInputs[0]?.activeDelegation?.delegationId, activeDelegation.id);
   assert.match(plannerInputs[0]?.latestUserMessage ?? '', /优先检查最新修改/);
   assert.match(plannerInputs[0]?.latestAnnounce?.text ?? '', /需要用户确认检查方向/);
+  assert.equal(plannerInputs[0]?.latestAnnounce?.messageId, 'prior-resume-announce');
+  assert.ok(plannerInputs[1]?.latestAnnounce?.messageId);
+  assert.notEqual(plannerInputs[1]?.latestAnnounce?.messageId, 'prior-resume-announce');
+  assert.equal(
+    plannerInputs[1]?.inputId,
+    `announce:${activeDelegation.id}:${plannerInputs[1]?.latestAnnounce?.messageId}`,
+  );
   const resumedInput = recorder.subagentInputs.at(-1) ?? [];
   assert.equal(
     resumedInput.some((message) =>
@@ -6555,7 +6568,7 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
   );
 });
 
-test('legacy resumed delegation without a user goal returns safely after task completion', async () => {
+test('legacy resumed delegation without a Planner checkpoint fails closed through Answer', async () => {
   const activeDelegation: TaskActiveDelegation = {
     id: 'legacy-resume-delegation',
     lane: 'capability:general',
@@ -6578,14 +6591,18 @@ test('legacy resumed delegation without a user goal returns safely after task co
   const actModel = {
     invoke: async (messages: BaseMessage[]) => {
       answerInputs.push(messages);
-      return new AIMessage('当前任务已完成；请重新说明仍需继续的目标。');
+      return new AIMessage('当前任务的规划状态无法恢复，请重新发起或重述任务。');
     },
+    bindTools: () => ({
+      invoke: async () => {
+        throw new Error('legacy checkpoint recovery must not invoke the Planner model');
+      },
+    }),
     withStructuredOutput: () => ({
       invoke: async () => taskDoneDecision('旧 checkpoint 中的任务已完成。'),
     }),
   } as unknown as AgentModels['act'];
-  let plannerCalls = 0;
-  const graph = createOrchestratorGraph({
+  const graph = createRuntimeOrchestratorGraph({
     models: {
       act: actModel,
       observe: actModel,
@@ -6593,12 +6610,6 @@ test('legacy resumed delegation without a user goal returns safely after task co
     },
     actor: testActor,
     checkpoint: new MemorySaver(),
-    capabilityPlannerRunner: {
-      async invoke() {
-        plannerCalls += 1;
-        return { action: 'goal_done', tasks: [] };
-      },
-    },
   });
   const config = {
     configurable: {
@@ -6606,6 +6617,10 @@ test('legacy resumed delegation without a user goal returns safely after task co
       actor: testActor,
       capabilities: [capability('general', 'General-purpose capability.')],
       toolkits: [],
+      registry: compileAgentRegistry({
+        capabilities: [capability('general', 'General-purpose capability.')],
+        toolkits: [],
+      }),
     },
   };
   await graph.updateState(config, {
@@ -6622,20 +6637,24 @@ test('legacy resumed delegation without a user goal returns safely after task co
     config,
   ) as OrchestratorStateType;
 
-  assert.equal(plannerCalls, 1);
-  assert.equal(state.taskActiveDelegation, null);
+  assert.equal(state.taskActiveDelegation?.id, activeDelegation.id);
   assert.equal(state.runLatestDelegationOutcome, null);
+  assert.equal(state.runPlannerFailure, null);
   assert.deepEqual(state.runUserGoal, {
     objective: '继续完成剩余工作',
     context: null,
   });
   assert.equal(
     String(state.messages.at(-1)?.content ?? ''),
-    '当前任务已完成；请重新说明仍需继续的目标。',
+    '当前任务的规划状态无法恢复，请重新发起或重述任务。',
   );
   assert.match(
     answerInputs.at(-1)?.map((message) => String(message.content)).join('\n') ?? '',
-    /<reply_mode>goal_done<\/reply_mode>/,
+    /<reply_mode>blocked<\/reply_mode>/,
+  );
+  assert.match(
+    answerInputs.at(-1)?.map((message) => String(message.content)).join('\n') ?? '',
+    /<blocked_reason>planner_checkpoint_missing<\/blocked_reason>/,
   );
 });
 

@@ -23,7 +23,8 @@ export type AnswerBlockedReason =
   | 'iteration_limit'
   | 'execution_limit'
   | 'incomplete'
-  | 'capability_unavailable';
+  | 'capability_unavailable'
+  | 'planner_checkpoint_missing';
 
 /**
  * Closed invocation facts owned by Answer.

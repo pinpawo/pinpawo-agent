@@ -5,7 +5,7 @@ import {
 } from '../decision-eval-scenarios.ts';
 import { measureDecisionPrompt } from '../prompt-preview.ts';
 
-const TARGETS: DecisionEvalTarget[] = ['entry', 'outcome'];
+const TARGETS: DecisionEvalTarget[] = ['entry'];
 
 function readOption(name: string): string | undefined {
   const index = process.argv.indexOf(name);

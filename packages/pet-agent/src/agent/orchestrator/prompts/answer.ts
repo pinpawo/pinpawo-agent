@@ -34,7 +34,6 @@ export type AnswerBlockedReason =
  */
 export type AnswerContextFacts =
   | { mode: 'direct'; hasUserGoal: boolean }
-  | { mode: 'task_result'; hasUserGoal: boolean }
   | { mode: 'goal_done'; hasUserGoal: boolean }
   | {
       mode: 'user_input_required';

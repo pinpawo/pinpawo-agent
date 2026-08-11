@@ -1,6 +1,9 @@
 # Orchestrator Terminal Semantics Draft
 
-Status: validated implementation draft; ready for later wiki ingest.
+Status: historical implementation draft. The independent Outcome model described
+below was replaced by the #619 trace-scoped persistent private Planner. See
+[`PERSISTENT_PRIVATE_PLANNER_REFACTOR_ISSUE.md`](./PERSISTENT_PRIVATE_PLANNER_REFACTOR_ISSUE.md)
+for the current control contract. Keep this document as migration context only.
 
 ## Problem
 

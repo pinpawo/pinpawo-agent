@@ -40,7 +40,9 @@ const ALLOWED_CDP_COMMANDS = new Set([
   'Accessibility.getFullAXTree',
   'DOM.getBoxModel',
   'DOM.scrollIntoViewIfNeeded',
+  'Network.enable',
   'Page.getNavigationHistory',
+  'Page.enable',
   'Page.captureScreenshot',
   'Input.insertText',
   'Input.dispatchKeyEvent',
@@ -48,6 +50,7 @@ const ALLOWED_CDP_COMMANDS = new Set([
   'Runtime.evaluate',
 ]);
 const SESSION_KEY = 'pinpawoBrowserTarget';
+const CONTEXT_TARGETS_KEY = 'pinpawoBrowserTargetsByContext';
 const RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
 const STABLE_CONNECTION_RESET_MS = 10_000;
@@ -57,11 +60,10 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let stableConnectionTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempt = 0;
 let attachedTabId: number | null = null;
-let userBoundOrigin: string | null = null;
 const enqueueExtensionWork = createSerialExecutor();
-const targets = createTargetStack();
 const browserState = createBrowserStateTracker();
 const recentPopupByOpener = new Map<number, PopupRecord>();
+const networkRequestsByTab = new Map<number, Set<string>>();
 const queuedCommandRequestIds = new Set();
 const cancelledCommandRequestIds = new Set();
 let activeCommandRequestId: string | null = null;
@@ -85,6 +87,107 @@ let popupTracking: PopupTracking | null = null;
 // (issue #583 S1).
 let pageReadinessRevision = 0;
 
+const LEGACY_BROWSER_CONTEXT_ID = 'legacy';
+const MAX_BROWSER_CONTEXT_ID_LENGTH = 128;
+
+type BrowserTargetContext = {
+  targets: ReturnType<typeof createTargetStack>;
+  userBoundOrigin: string | null;
+};
+
+const targetContexts = new Map<string, BrowserTargetContext>();
+let activeBrowserContextId = LEGACY_BROWSER_CONTEXT_ID;
+let targets = createTargetStack();
+let userBoundOrigin: string | null = null;
+targetContexts.set(LEGACY_BROWSER_CONTEXT_ID, {
+  targets,
+  userBoundOrigin,
+});
+
+function readBrowserContextId(value: unknown): string {
+  if (value === undefined) return LEGACY_BROWSER_CONTEXT_ID;
+  if (
+    typeof value !== 'string'
+    || !value
+    || value.length > MAX_BROWSER_CONTEXT_ID_LENGTH
+  ) {
+    throw new ExtensionError(
+      'invalid_browser_context',
+      'Browser context id must be a non-empty string up to 128 characters.',
+    );
+  }
+  return value;
+}
+
+function browserTargetContext(contextId: string): BrowserTargetContext {
+  let context = targetContexts.get(contextId);
+  if (!context) {
+    context = {
+      targets: createTargetStack(),
+      userBoundOrigin: null,
+    };
+    targetContexts.set(contextId, context);
+  }
+  return context;
+}
+
+function activateBrowserContext(contextId: string): void {
+  const context = browserTargetContext(contextId);
+  activeBrowserContextId = contextId;
+  targets = context.targets;
+  userBoundOrigin = context.userBoundOrigin;
+}
+
+function persistActiveBrowserContext(): void {
+  const context = browserTargetContext(activeBrowserContextId);
+  context.userBoundOrigin = userBoundOrigin;
+}
+
+function browserContextForTab(tabId: number): string | null {
+  for (const [contextId, context] of targetContexts) {
+    const current = context.targets.current();
+    if (current?.tabId === tabId) return contextId;
+    if (context.targets.history().some((target) => target.tabId === tabId)) {
+      return contextId;
+    }
+  }
+  return null;
+}
+
+function emitLifecycleEvent(
+  event: string,
+  tabId: number,
+  options: { url?: string; payload?: Record<string, unknown> } = {},
+): void {
+  const contextId = browserContextForTab(tabId);
+  if (!contextId || !port) return;
+  port.postMessage({
+    type: 'browser.event',
+    protocolVersion: PROTOCOL_VERSION,
+    connectionId,
+    event,
+    contextId,
+    tabId,
+    ...(options.url !== undefined ? { url: options.url } : {}),
+    ...(options.payload !== undefined ? { payload: options.payload } : {}),
+  });
+}
+
+function networkRequestSet(tabId: number): Set<string> {
+  let requests = networkRequestsByTab.get(tabId);
+  if (!requests) {
+    requests = new Set<string>();
+    networkRequestsByTab.set(tabId, requests);
+  }
+  return requests;
+}
+
+function emitNetworkActivity(tabId: number): void {
+  emitLifecycleEvent('network.activity', tabId, {
+    payload: { inflightRequests: networkRequestSet(tabId).size },
+  });
+}
+
 class ExtensionError extends Error {
   readonly code: string;
   readonly retryable: boolean;
@@ -99,18 +202,36 @@ class ExtensionError extends Error {
 }
 
 async function restoreTarget() {
-  const stored = await chrome.storage.local.get(SESSION_KEY);
-  const candidate = stored[SESSION_KEY] as BrowserTarget | undefined;
-  if (!candidate || !Number.isInteger(candidate.tabId)) return;
-  try {
-    const tab = await chrome.tabs.get(candidate.tabId);
-    if (!isWebTab(tab)) {
-      await chrome.storage.local.remove(SESSION_KEY);
-      return;
+  activateBrowserContext(LEGACY_BROWSER_CONTEXT_ID);
+  const stored = await chrome.storage.local.get([SESSION_KEY, CONTEXT_TARGETS_KEY]);
+  const persisted = stored[CONTEXT_TARGETS_KEY];
+  const candidates = persisted && typeof persisted === 'object' && !Array.isArray(persisted)
+    ? Object.entries(persisted as Record<string, unknown>)
+    : [[LEGACY_BROWSER_CONTEXT_ID, stored[SESSION_KEY]]];
+  const restored: Record<string, BrowserTarget> = {};
+  for (const [contextId, candidate] of candidates) {
+    if (
+      typeof contextId !== 'string'
+      || !contextId
+      || contextId.length > MAX_BROWSER_CONTEXT_ID_LENGTH
+      || !candidate
+      || typeof candidate !== 'object'
+      || !Number.isInteger((candidate as BrowserTarget).tabId)
+    ) continue;
+    try {
+      const tab = await chrome.tabs.get((candidate as BrowserTarget).tabId);
+      if (!isWebTab(tab)) continue;
+      const context = browserTargetContext(contextId);
+      context.targets.bind(candidate, { resetHistory: true });
+      restored[contextId] = candidate as BrowserTarget;
+    } catch {
+      // Closed tabs are discarded from the persisted target map.
     }
-    targets.bind(candidate, { resetHistory: true });
-  } catch {
-    await chrome.storage.local.remove(SESSION_KEY);
+  }
+  if (Object.keys(restored).length > 0) {
+    await chrome.storage.local.set({ [CONTEXT_TARGETS_KEY]: restored });
+  } else {
+    await chrome.storage.local.remove(CONTEXT_TARGETS_KEY);
   }
 }
 
@@ -121,8 +242,23 @@ async function saveTarget(nextTarget: BrowserTarget | null, options: TargetBindO
   } else if (target?.binding !== 'user') {
     userBoundOrigin = null;
   }
-  if (target) await chrome.storage.local.set({ [SESSION_KEY]: target });
-  else await chrome.storage.local.remove(SESSION_KEY);
+  persistActiveBrowserContext();
+  const stored = await chrome.storage.local.get(CONTEXT_TARGETS_KEY);
+  const persisted = stored[CONTEXT_TARGETS_KEY];
+  const nextTargets = persisted && typeof persisted === 'object' && !Array.isArray(persisted)
+    ? { ...(persisted as Record<string, BrowserTarget>) }
+    : {};
+  if (target) nextTargets[activeBrowserContextId] = target;
+  else delete nextTargets[activeBrowserContextId];
+  if (Object.keys(nextTargets).length > 0) {
+    await chrome.storage.local.set({ [CONTEXT_TARGETS_KEY]: nextTargets });
+  } else {
+    await chrome.storage.local.remove(CONTEXT_TARGETS_KEY);
+  }
+  if (activeBrowserContextId === LEGACY_BROWSER_CONTEXT_ID) {
+    if (target) await chrome.storage.local.set({ [SESSION_KEY]: target });
+    else await chrome.storage.local.remove(SESSION_KEY);
+  }
   publishBrowserStateChange();
 }
 
@@ -216,19 +352,32 @@ async function cdp(
 
 async function attach(tabId: number) {
   if (attachedTabId === tabId) return;
+  const nextContextId = browserContextForTab(tabId) ?? activeBrowserContextId;
   if (attachedTabId !== null) await detach();
+  activateBrowserContext(nextContextId);
   try {
     await chrome.debugger.attach({ tabId }, CDP_VERSION);
     attachedTabId = tabId;
+    // Enable lifecycle sources before the URL is dispatched. Attaching only
+    // after tabs.update/create misses the exact navigation events the Runtime
+    // needs to decide whether browser_open can return readable content.
+    await cdp(tabId, 'Page.enable');
+    await cdp(tabId, 'Network.enable');
     publishBrowserStateChange();
     port?.postMessage({
       type: 'browser.event',
       protocolVersion: PROTOCOL_VERSION,
       connectionId,
       event: 'debugger.attached',
+      contextId: activeBrowserContextId,
       tabId,
     });
   } catch (error) {
+    if (attachedTabId === tabId) {
+      attachedTabId = null;
+      await chrome.debugger.detach({ tabId }).catch(() => {});
+      publishBrowserStateChange();
+    }
     throw new ExtensionError(
       'debugger_attach_failed',
       `Chrome debugger permission was not granted: ${error instanceof Error ? error.message : String(error)}`,
@@ -249,9 +398,14 @@ async function activateTarget(tabId: number) {
   }
 }
 
-async function detach() {
+async function detach(expectedContextId?: string) {
   if (attachedTabId === null) return { detached: false };
   const tabId = attachedTabId;
+  const contextId = browserContextForTab(tabId);
+  if (expectedContextId && contextId && contextId !== expectedContextId) {
+    return { detached: false };
+  }
+  if (contextId) activateBrowserContext(contextId);
   attachedTabId = null;
   await chrome.debugger.detach({ tabId }).catch(() => {});
   publishBrowserStateChange();
@@ -260,6 +414,7 @@ async function detach() {
     protocolVersion: PROTOCOL_VERSION,
     connectionId,
     event: 'debugger.detached',
+    contextId: activeBrowserContextId,
     tabId,
   });
   return { detached: true, tabId };
@@ -299,7 +454,21 @@ async function waitForNavigableTab(tabId, deadlineAt) {
   );
 }
 
-async function prepareNavigationTarget(url, deadlineAt) {
+function navigationReadinessDeadline(params, commandDeadlineAt) {
+  const timeoutMs = params.readinessTimeoutMs ?? 5_000;
+  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 30_000) {
+    throw new ExtensionError(
+      'invalid_navigation_timeout',
+      'readinessTimeoutMs must be between 1 and 30000',
+    );
+  }
+  return new Date(Math.min(
+    Date.parse(commandDeadlineAt),
+    Date.now() + timeoutMs,
+  )).toISOString();
+}
+
+async function prepareNavigationTarget() {
   const existing = targets.current();
   let existingTab = null;
   if (existing) {
@@ -313,8 +482,6 @@ async function prepareNavigationTarget(url, deadlineAt) {
     selectNavigationTarget(existing) === 'reuse_agent_tab'
     && isWebTab(existingTab)
   ) {
-    await chrome.tabs.update(existing.tabId, { url, active: true });
-    await waitForNavigableTab(existing.tabId, deadlineAt);
     await saveTarget(
       { tabId: existing.tabId, binding: 'agent' },
       { resetHistory: true },
@@ -329,11 +496,10 @@ async function prepareNavigationTarget(url, deadlineAt) {
 
   // A tab explicitly bound by the user remains their page. browser_open gets a
   // separate agent-owned tab instead of navigating the user's bound tab away.
-  const tab = await chrome.tabs.create({ url, active: true });
+  const tab = await chrome.tabs.create({ active: true });
   if (!Number.isInteger(tab.id)) {
     throw new ExtensionError('target_create_failed', 'Chrome did not return a tab id');
   }
-  await waitForNavigableTab(tab.id, deadlineAt);
   await saveTarget({ tabId: tab.id, binding: 'agent' }, { resetHistory: true });
   return targets.current();
 }
@@ -392,6 +558,7 @@ async function handleRemovedTarget(tabId) {
     protocolVersion: PROTOCOL_VERSION,
     connectionId,
     event: 'target.closed',
+    contextId: activeBrowserContextId,
     tabId,
   });
   return null;
@@ -538,6 +705,23 @@ async function readSnapshot(tabId, approvedOrigin) {
   return snapshot;
 }
 
+async function waitForReadableSnapshot(tabId, approvedOrigin, deadlineAt) {
+  while (Date.now() < Date.parse(deadlineAt)) {
+    ensureCommandAlive(deadlineAt);
+    const snapshot = await readSnapshot(tabId, approvedOrigin);
+    emitPageReadiness(tabId, snapshot.url, snapshot);
+    if (typeof snapshot.textLength === 'number' && snapshot.textLength > 0) {
+      return snapshot;
+    }
+    await delay(100, deadlineAt);
+  }
+  throw new ExtensionError(
+    'navigation_timeout',
+    'Navigation completed but the page did not produce readable content before the readiness deadline.',
+    true,
+  );
+}
+
 /**
  * Report the page-readiness lifecycle events derived from a freshly captured
  * snapshot. These let the Runtime drive a navigation to `readable` (issue
@@ -554,6 +738,7 @@ function emitPageReadiness(tabId, url, snapshot) {
       protocolVersion: PROTOCOL_VERSION,
       connectionId,
       event: event.event,
+      contextId: activeBrowserContextId,
       tabId: event.tabId,
       url: event.url,
       payload: event.payload,
@@ -903,6 +1088,7 @@ async function captureScreenshot(tabId, approvedOrigin) {
 }
 
 async function executeCommand(command) {
+  activateBrowserContext(readBrowserContextId(command.params.browserContextId));
   activeCommandRequestId = command.requestId;
   try {
     return await executeCommandBody(command);
@@ -913,7 +1099,7 @@ async function executeCommand(command) {
 
 async function executeCommandBody(command) {
   ensureCommandAlive(command.deadlineAt);
-  if (command.command === 'detach') return await detach();
+  if (command.command === 'detach') return await detach(activeBrowserContextId);
 
   const approvedOrigin = command.params.approvedOrigin;
   if (command.command === 'navigate') {
@@ -921,23 +1107,21 @@ async function executeCommandBody(command) {
     if (typeof url !== 'string' || originOf(url) !== approvedOrigin) {
       throw new ExtensionError('origin_approval_mismatch', 'Navigation URL does not match its approved origin');
     }
-    const activeTarget = await prepareNavigationTarget(url, command.deadlineAt);
+    const activeTarget = await prepareNavigationTarget();
     if (!activeTarget) {
       throw new ExtensionError('target_create_failed', 'Chrome did not provide a navigation target');
     }
     await activateTarget(activeTarget.tabId);
     await attach(activeTarget.tabId);
-    port?.postMessage({
-      type: 'browser.event',
-      protocolVersion: PROTOCOL_VERSION,
-      connectionId,
-      event: 'tab.navigated',
-      tabId: activeTarget.tabId,
-      url,
-    });
-    const snapshot = await readSnapshot(activeTarget.tabId, approvedOrigin);
-    emitPageReadiness(activeTarget.tabId, url, snapshot);
-    return snapshot;
+    emitLifecycleEvent('navigation.requested', activeTarget.tabId, { url });
+    await chrome.tabs.update(activeTarget.tabId, { url, active: true });
+    const readinessDeadline = navigationReadinessDeadline(command.params, command.deadlineAt);
+    await waitForNavigableTab(activeTarget.tabId, readinessDeadline);
+    return await waitForReadableSnapshot(
+      activeTarget.tabId,
+      approvedOrigin,
+      readinessDeadline,
+    );
   }
 
   const activeTarget = await ensureTarget();
@@ -1052,6 +1236,7 @@ chrome.action.onClicked.addListener(async (tab) => {
     // authorize browser reads or interactions.
   }
   await enqueueExtensionWork(async () => {
+    activateBrowserContext(LEGACY_BROWSER_CONTEXT_ID);
     await detach();
     await saveTarget(
       { tabId: tab.id, binding: 'user' },
@@ -1071,6 +1256,10 @@ chrome.tabs.onCreated.addListener((tab) => {
 
 chrome.tabs.onRemoved.addListener(async (tabId) => {
   await enqueueExtensionWork(async () => {
+    const contextId = browserContextForTab(tabId);
+    if (!contextId) return;
+    activateBrowserContext(contextId);
+    networkRequestsByTab.delete(tabId);
     recentPopupByOpener.delete(tabId);
     await handleRemovedTarget(tabId);
   });
@@ -1078,6 +1267,8 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
 
 chrome.debugger.onDetach.addListener((source, reason) => {
   if (source.tabId !== attachedTabId) return;
+  const contextId = browserContextForTab(source.tabId);
+  if (contextId) activateBrowserContext(contextId);
   attachedTabId = null;
   publishBrowserStateChange();
   port?.postMessage({
@@ -1085,9 +1276,50 @@ chrome.debugger.onDetach.addListener((source, reason) => {
     protocolVersion: PROTOCOL_VERSION,
     connectionId,
     event: 'debugger.detached',
+    contextId: activeBrowserContextId,
     tabId: source.tabId,
     reason,
   });
+});
+
+chrome.debugger.onEvent.addListener((source, method, params) => {
+  if (!Number.isInteger(source.tabId)) return;
+  const tabId = source.tabId;
+  if (!browserContextForTab(tabId)) return;
+  const eventParams = params as Record<string, unknown>;
+
+  if (method === 'Page.frameNavigated') {
+    const frame = eventParams.frame as Record<string, unknown> | undefined;
+    // Iframe commits must not replace the main page's origin/readiness state.
+    if (!frame || typeof frame.url !== 'string' || frame.parentId !== undefined) return;
+    networkRequestsByTab.delete(tabId);
+    emitLifecycleEvent('navigation.committed', tabId, { url: frame.url });
+    return;
+  }
+  if (method === 'Page.domContentEventFired') {
+    emitLifecycleEvent('document.ready', tabId, {
+      payload: { readyState: 'interactive' },
+    });
+    return;
+  }
+  if (method === 'Page.loadEventFired') {
+    emitLifecycleEvent('document.ready', tabId, {
+      payload: { readyState: 'complete' },
+    });
+    return;
+  }
+  if (method === 'Network.requestWillBeSent' && typeof eventParams.requestId === 'string') {
+    networkRequestSet(tabId).add(eventParams.requestId);
+    emitNetworkActivity(tabId);
+    return;
+  }
+  if (
+    (method === 'Network.loadingFinished' || method === 'Network.loadingFailed')
+    && typeof eventParams.requestId === 'string'
+  ) {
+    networkRequestSet(tabId).delete(eventParams.requestId);
+    emitNetworkActivity(tabId);
+  }
 });
 
 async function initialize() {

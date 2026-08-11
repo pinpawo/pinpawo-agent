@@ -175,7 +175,7 @@ test('trusted pointer input activates the bound target inside the extension', as
   assert.match(dispatchScroll, /await activateTarget\(tabId\)/);
 });
 
-test('navigation commits a normal tab before attaching the debugger', async () => {
+test('navigation attaches and enables lifecycle domains before dispatching the URL', async () => {
   const source = await readFile(
     resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
     'utf8',
@@ -184,9 +184,19 @@ test('navigation commits a normal tab before attaching the debugger', async () =
     /if \(command\.command === 'navigate'\) \{([\s\S]*?)\n  \}/,
   )?.[1] ?? '';
 
-  assert.match(navigate, /prepareNavigationTarget/);
+  const attachOffset = navigate.indexOf('await attach(activeTarget.tabId)');
+  const updateOffset = navigate.indexOf('await chrome.tabs.update(activeTarget.tabId, { url, active: true })');
+
+  assert.match(navigate, /prepareNavigationTarget\(\)/);
   assert.match(navigate, /await activateTarget\(activeTarget\.tabId\)/);
-  assert.match(navigate, /await attach\(activeTarget\.tabId\)/);
+  assert.ok(attachOffset >= 0 && updateOffset > attachOffset, 'attach must happen before tabs.update(url)');
+  assert.match(navigate, /waitForNavigableTab\(activeTarget\.tabId, readinessDeadline\)/);
+  assert.match(source, /await cdp\(tabId, 'Page\.enable'\)/);
+  assert.match(source, /await cdp\(tabId, 'Network\.enable'\)/);
+  const prepareTarget = source.match(
+    /async function prepareNavigationTarget\(\) \{([\s\S]*?)\n\}/,
+  )?.[1] ?? '';
+  assert.doesNotMatch(prepareTarget, /chrome\.tabs\.update/);
   assert.doesNotMatch(source, /'Page\.navigate'/);
 });
 

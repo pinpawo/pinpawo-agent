@@ -34,6 +34,7 @@ import type { NavigationPhase } from '../../lifecycle/navigation';
 
 const DEFAULT_SESSION = 'default';
 const DEFAULT_EXTENSION_COMMAND_TIMEOUT_MS = 30_000;
+const OPEN_READINESS_BUDGET_MS = 5_000;
 const MAX_EXTENSION_TYPE_TIMEOUT_MS = 300_000;
 const HUMANIZED_TYPE_CHARACTER_LIMIT = 500;
 const TRUSTED_INSERT_CHUNK_CHARACTERS = 2_000;
@@ -83,7 +84,7 @@ export class ChromeExtensionBrowserSession {
 
   constructor(
     private readonly bridge: Pick<BrowserExtensionBridge, 'sendCommand'>
-      & Partial<Pick<BrowserExtensionBridge, 'getStatus' | 'onRuntimeEvent' | 'onGenerationChanged'>>,
+      & Partial<Pick<BrowserExtensionBridge, 'getStatus' | 'onRuntimeEvent' | 'onGenerationChanged' | 'beginNavigation'>>,
     private readonly workdir: () => string = () => process.cwd(),
   ) {}
 
@@ -147,6 +148,13 @@ export class ChromeExtensionBrowserSession {
     return this.approvedOrigin;
   }
 
+  private isNavigationTimeout(error: unknown): boolean {
+    return typeof error === 'object'
+      && error !== null
+      && 'code' in error
+      && error.code === 'navigation_timeout';
+  }
+
   async open(
     url: string,
     opts: BrowserOpenOptions = {},
@@ -190,25 +198,26 @@ export class ChromeExtensionBrowserSession {
         );
       }) ?? (() => {});
     const startTime = Date.now();
+    // Reserve and bind the generation before dispatch. A fast redirect can
+    // emit Page/Network events while the navigate command is still in flight;
+    // binding afterwards makes those events indistinguishable from stale data.
+    const beforeDispatch = this.bridge.getStatus?.() as BrowserBridgeStatus | undefined;
+    const navigationGeneration = this.bridge.beginNavigation?.()
+      ?? beforeDispatch?.navigationGeneration;
+    controller.beginNavigation(
+      url,
+      approvedOrigin,
+      beforeDispatch?.connectionGeneration ?? 1,
+      beforeDispatch?.targetGeneration ?? 1,
+      navigationGeneration,
+    );
     try {
       const raw = await this.bridge.sendCommand('navigate', {
         url,
         approvedOrigin,
-      }, undefined, signal);
+        readinessTimeoutMs: OPEN_READINESS_BUDGET_MS,
+      }, undefined, signal, { beginNavigation: false });
       const snapshot = this.buildSnapshot(raw, approvedOrigin);
-
-      // Bind the controller to the bridge's authoritative generations (the
-      // navigate dispatch already advanced the navigation generation). The
-      // bridge stamps navigation-scoped events with the same generation, so
-      // `isEventCurrent` drops any late/superseded event during replay.
-      const status = this.bridge.getStatus?.() as BrowserBridgeStatus | undefined;
-      controller.beginNavigation(
-        url,
-        approvedOrigin,
-        status?.connectionGeneration ?? 1,
-        status?.targetGeneration ?? 1,
-        status?.navigationGeneration,
-      );
 
       // The navigate round-trip usually emits a tightly grouped burst of events
       // (navigation.committed, document.ready, dom.changed) stamped ~same time.
@@ -231,6 +240,7 @@ export class ChromeExtensionBrowserSession {
         throw this.readinessFailure(outcome.error, approvedOrigin);
       }
       if (outcome.status === 'timed_out') {
+        this.approvedOrigin = approvedOrigin;
         throw new BrowserOperationError(
           'navigation_timeout',
           `Page did not become readable within ${OPEN_READINESS_DEADLINE_MS}ms of navigation to ${url}.`,
@@ -248,6 +258,12 @@ export class ChromeExtensionBrowserSession {
 
       this.approvedOrigin = approvedOrigin;
       return snapshot;
+    } catch (error) {
+      // The extension created/bound the target before dispatching navigation.
+      // A short readiness timeout therefore leaves a valid target for
+      // browser_wait; do not turn that recoverable state into browser_not_open.
+      if (this.isNavigationTimeout(error)) this.approvedOrigin = approvedOrigin;
+      throw error;
     } finally {
       offEvents();
       offGenerations();

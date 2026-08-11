@@ -99,6 +99,8 @@ export type BrowserEventMessage = {
   protocolVersion: typeof BROWSER_EXTENSION_PROTOCOL_VERSION;
   connectionId: string;
   event: BrowserExtensionEventType;
+  /** Opaque host-generated browser context identifier. */
+  contextId?: string;
   tabId?: number;
   url?: string;
   reason?: string;
@@ -311,6 +313,9 @@ export function parseExtensionToAgentMessage(value: unknown): ExtensionToAgentMe
     if (record.tabId !== undefined && !Number.isInteger(record.tabId)) {
       throw new Error('browser.event tabId must be an integer');
     }
+    if (record.contextId !== undefined && (typeof record.contextId !== 'string' || !record.contextId)) {
+      throw new Error('browser.event contextId must be a non-empty string');
+    }
     if (record.url !== undefined && typeof record.url !== 'string') {
       throw new Error('browser.event url must be a string');
     }
@@ -325,6 +330,7 @@ export function parseExtensionToAgentMessage(value: unknown): ExtensionToAgentMe
       protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
       connectionId,
       event: record.event as BrowserEventMessage['event'],
+      contextId: record.contextId as string | undefined,
       tabId: record.tabId as number | undefined,
       url: record.url as string | undefined,
       reason: record.reason as string | undefined,

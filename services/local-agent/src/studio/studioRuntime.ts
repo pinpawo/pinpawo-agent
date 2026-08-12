@@ -173,7 +173,7 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
 
   const petCheckpointers = new Map<string, BaseCheckpointSaver | undefined>();
 
-  const petAgents: PetAgentRuntime[] = resolved.agents.map((petConfig) => {
+  const petAgents: PetAgentRuntime[] = resolved.pets.map((petConfig) => {
     // 每个 pet 按稳定 profile id 解析完整 endpoint/key/model 组合。
     const petLlmConfig = petConfig.modelProfileId
       ? input.modelProfiles.resolve(petConfig.modelProfileId)
@@ -225,9 +225,10 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
     });
   });
 
-  const promptProvider: CuratorPromptProvider = studio.curator?.promptPath
-    ? fileReadPromptProvider(path.resolve(studioConfigDir, studio.curator.promptPath))
-    : defaultPromptProvider();
+  // curator prompt 与迭代/重试上限已从 studio.json 移入插件 options
+  // (设计 §1.1)。旧 orchestrator 尚未迁移,这里先用默认值维持编译;
+  // 它会随 orchestrator 一并退役。
+  const promptProvider: CuratorPromptProvider = defaultPromptProvider();
 
   const curator = createLLMWikiCurator({
     models: globalModels,
@@ -240,7 +241,7 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
   const orchestrator = createStudioOrchestrator({
     studioId: studio.studioId,
     ownerUserId: input.ownerUserId,
-    plannerPetId: studio.plannerPetId,
+    plannerPetId: studio.entryPetId,
     agents: petAgents,
     wikiBaseDir: input.wikiBaseDir
       ?? path.join(workdirStateRoot, 'studio-wiki'),
@@ -249,8 +250,6 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
     restoreOpenRuns: runQueue.shouldRestore,
     curator,
     ensureWikiSkeleton,
-    ...(studio.maxIterationCount !== undefined ? { maxIterationCount: studio.maxIterationCount } : {}),
-    ...(studio.maxRetryPerTask !== undefined ? { maxRetryPerTask: studio.maxRetryPerTask } : {}),
   });
 
   return { orchestrator, resolved, petCheckpointers };

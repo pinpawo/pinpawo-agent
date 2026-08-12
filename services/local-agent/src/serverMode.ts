@@ -65,9 +65,10 @@ export type StudioModePreflight = {
   studioConfigPath: string;
   petsDir: string;
   studioId: string;
-  plannerPetId: string;
-  /** 不含 planner 的可调度 worker pet 集合,按配置顺序 */
-  workerPetIds: string[];
+  /** 外部入口 submitRequest 派给谁。 */
+  entryPetId: string;
+  /** 本 studio 可派活的全部 pet,按配置顺序。 */
+  petIds: string[];
   resolved: ResolvedStudio;
 };
 
@@ -133,7 +134,7 @@ export async function preflightStudioMode(
   } catch (error) {
     throw new StudioModeStartupError(
       `Studio mode config is inconsistent: ${error instanceof Error ? error.message : String(error)}`,
-      { configPath: studioConfigPath, petId: studio.plannerPetId },
+      { configPath: studioConfigPath, petId: studio.entryPetId },
     );
   }
 
@@ -141,10 +142,8 @@ export async function preflightStudioMode(
     studioConfigPath,
     petsDir,
     studioId: resolved.studio.studioId,
-    plannerPetId: resolved.studio.plannerPetId,
-    workerPetIds: resolved.agents
-      .map((pet) => pet.petId)
-      .filter((petId) => petId !== resolved.studio.plannerPetId),
+    entryPetId: resolved.studio.entryPetId,
+    petIds: resolved.pets.map((pet) => pet.petId),
     resolved,
   };
 }

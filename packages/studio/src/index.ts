@@ -6,6 +6,20 @@
  * 因此本包不碰文件系统。
  */
 
+export { createStudio } from './createStudio';
+export type { CreateStudioInput } from './createStudio';
+export type {
+  Studio,
+  StudioDispatchInput,
+  StudioDispatchResult,
+  StudioEvent,
+  StudioEventHandler,
+  StudioEventInput,
+  StudioPlugin,
+  StudioPluginContext,
+} from './studioContract';
+export type { StudioPluginConfig } from './configSchema';
+
 export { createStudioOrchestrator } from './createStudioOrchestrator';
 
 export {

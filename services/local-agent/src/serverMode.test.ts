@@ -78,11 +78,11 @@ describe('resolveStudioModePaths', () => {
 });
 
 describe('preflightStudioMode', () => {
-  it('resolves planner and worker sets from a valid config', async () => {
+  it('resolves the entry pet and the full pet set from a valid config', async () => {
     await writeStudioConfig({
       studioId: 'demo',
-      plannerPetId: 'lead',
-      agents: ['lead', 'coder', 'writer'],
+      entryPetId: 'lead',
+      pets: ['lead', 'coder', 'writer'],
     });
     await writePetConfig({ petId: 'lead', name: 'Lead' });
     await writePetConfig({ petId: 'coder', name: 'Coder' });
@@ -91,11 +91,12 @@ describe('preflightStudioMode', () => {
     const preflight = await preflightStudioMode(workdir);
 
     assert.equal(preflight.studioId, 'demo');
-    assert.equal(preflight.plannerPetId, 'lead');
-    // planner is excluded from the worker set but stays in resolved.agents
-    assert.deepEqual(preflight.workerPetIds, ['coder', 'writer']);
-    assert.equal(preflight.resolved.agents.length, 3);
-    assert.equal(preflight.resolved.planner.petId, 'lead');
+    assert.equal(preflight.entryPetId, 'lead');
+    // petIds 是本 studio 可派活的全部 pet —— entry pet 也在其中,
+    // 它只是入口 dispatch 的目标,不是被排除的特殊角色。
+    assert.deepEqual(preflight.petIds, ['lead', 'coder', 'writer']);
+    assert.equal(preflight.resolved.pets.length, 3);
+    assert.equal(preflight.resolved.entryPet.petId, 'lead');
   });
 
   it('fails fast when the studio config is missing rather than degrading to chat', async () => {
@@ -125,11 +126,11 @@ describe('preflightStudioMode', () => {
     );
   });
 
-  it('fails fast when plannerPetId is absent from agents', async () => {
+  it('fails fast when entryPetId is absent from pets', async () => {
     await writeStudioConfig({
       studioId: 'demo',
-      plannerPetId: 'ghost',
-      agents: ['coder'],
+      entryPetId: 'ghost',
+      pets: ['coder'],
     });
     await writePetConfig({ petId: 'coder', name: 'Coder' });
 
@@ -137,17 +138,17 @@ describe('preflightStudioMode', () => {
       () => preflightStudioMode(workdir),
       (error: unknown) => {
         assert.ok(error instanceof StudioModeStartupError);
-        assert.match(error.message, /plannerPetId "ghost" is not in agents/);
+        assert.match(error.message, /entryPetId "ghost" is not in pets/);
         return true;
       },
     );
   });
 
-  it('fails fast when an agent has no pet config on disk', async () => {
+  it('fails fast when a pet has no config on disk', async () => {
     await writeStudioConfig({
       studioId: 'demo',
-      plannerPetId: 'lead',
-      agents: ['lead', 'missing'],
+      entryPetId: 'lead',
+      pets: ['lead', 'missing'],
     });
     await writePetConfig({ petId: 'lead', name: 'Lead' });
 
@@ -155,7 +156,7 @@ describe('preflightStudioMode', () => {
       () => preflightStudioMode(workdir),
       (error: unknown) => {
         assert.ok(error instanceof StudioModeStartupError);
-        assert.match(error.message, /agent "missing" has no matching pet config/);
+        assert.match(error.message, /pet "missing" has no matching pet config/);
         return true;
       },
     );
@@ -164,8 +165,8 @@ describe('preflightStudioMode', () => {
   it('fails fast when the pets directory is entirely absent', async () => {
     await writeStudioConfig({
       studioId: 'demo',
-      plannerPetId: 'lead',
-      agents: ['lead'],
+      entryPetId: 'lead',
+      pets: ['lead'],
     });
 
     await assert.rejects(

@@ -55,8 +55,8 @@ test('buildStudioForTurn defaults Studio paths from effective runtime workdir', 
     path.join(stateRoot, 'studio.json'),
     JSON.stringify({
       studioId: 'studio-runtime-default',
-      plannerPetId: 'planner',
-      agents: ['planner'],
+      entryPetId: 'planner',
+      pets: ['planner'],
     }),
     'utf8',
   );
@@ -84,9 +84,9 @@ test('buildStudioForTurn defaults Studio paths from effective runtime workdir', 
     });
 
     assert.equal(result.resolved.studio.studioId, 'studio-runtime-default');
-    assert.deepEqual(result.resolved.agents.map((agent) => agent.petId), ['planner']);
+    assert.deepEqual(result.resolved.pets.map((agent) => agent.petId), ['planner']);
 
-    assert.equal(result.resolved.planner.petId, 'planner');
+    assert.equal(result.resolved.entryPet.petId, 'planner');
   } finally {
     if (previousWorkdir === undefined) {
       delete process.env.PINPAWO_WORKDIR;
@@ -108,8 +108,8 @@ test('buildStudioForTurn prefers explicit workdir over env default', async () =>
     path.join(envWorkdir, '.pinpawo', 'studio.json'),
     JSON.stringify({
       studioId: 'studio-runtime-env',
-      plannerPetId: 'planner-env',
-      agents: ['planner-env'],
+      entryPetId: 'planner-env',
+      pets: ['planner-env'],
     }),
     'utf8',
   );
@@ -127,8 +127,8 @@ test('buildStudioForTurn prefers explicit workdir over env default', async () =>
     path.join(explicitStateRoot, 'studio.json'),
     JSON.stringify({
       studioId: 'studio-runtime-explicit',
-      plannerPetId: 'planner-explicit',
-      agents: ['planner-explicit'],
+      entryPetId: 'planner-explicit',
+      pets: ['planner-explicit'],
     }),
     'utf8',
   );
@@ -157,7 +157,7 @@ test('buildStudioForTurn prefers explicit workdir over env default', async () =>
     });
 
     assert.equal(result.resolved.studio.studioId, 'studio-runtime-explicit');
-    assert.deepEqual(result.resolved.agents.map((agent) => agent.petId), ['planner-explicit']);
+    assert.deepEqual(result.resolved.pets.map((agent) => agent.petId), ['planner-explicit']);
   } finally {
     if (previousWorkdir === undefined) {
       delete process.env.PINPAWO_WORKDIR;
@@ -176,8 +176,8 @@ test('buildStudioForTurn hands the host checkpointer to the assembled pets', asy
     path.join(stateRoot, 'studio.json'),
     JSON.stringify({
       studioId: 'studio-cp',
-      plannerPetId: 'planner',
-      agents: ['planner', 'worker'],
+      entryPetId: 'planner',
+      pets: ['planner', 'worker'],
     }),
     'utf8',
   );
@@ -212,7 +212,7 @@ test('buildStudioForTurn hands the host checkpointer to the assembled pets', asy
     assert.equal(saver, checkpoint, `pet ${petId} must receive the host checkpointer`);
   }
   assert.deepEqual(
-    result.resolved.agents.map((agent) => agent.petId),
+    result.resolved.pets.map((agent) => agent.petId),
     ['planner', 'worker'],
   );
 });

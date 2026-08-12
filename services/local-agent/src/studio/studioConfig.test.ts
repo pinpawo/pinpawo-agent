@@ -23,13 +23,13 @@ test('loadStudioLocalConfig reads and parses a valid file', async () => {
   const filePath = path.join(dir, 'studio.json');
   await fs.writeFile(filePath, JSON.stringify({
     studioId: 's1',
-    plannerPetId: 'p1',
-    agents: ['p1', 'p2'],
+    entryPetId: 'p1',
+    pets: ['p1', 'p2'],
   }), 'utf8');
 
   const cfg = await loadStudioLocalConfig(filePath);
   assert.equal(cfg?.studioId, 's1');
-  assert.deepEqual(cfg?.agents, ['p1', 'p2']);
+  assert.deepEqual(cfg?.pets, ['p1', 'p2']);
 });
 
 test('loadStudioLocalConfig surfaces invalid JSON', async () => {

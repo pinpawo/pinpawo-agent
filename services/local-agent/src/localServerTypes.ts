@@ -19,8 +19,8 @@ import type { ServerMode } from './serverMode';
  */
 export type LocalServerStudioModeInfo = {
   studioId: string;
-  plannerPetId: string;
-  workerPetIds: readonly string[];
+  entryPetId: string;
+  petIds: readonly string[];
 };
 
 export type LocalServerDeps = {

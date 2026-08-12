@@ -88,21 +88,21 @@ test('runtime projection surfaces studio mode with its planner and worker set', 
     serverMode: 'studio',
     studioMode: {
       studioId: 'demo',
-      plannerPetId: 'lead',
-      workerPetIds: ['coder', 'writer'],
+      entryPetId: 'lead',
+      petIds: ['coder', 'writer'],
     },
   };
 
   const runtime = buildLocalRuntimeProjection(deps);
   assert.equal(runtime.serverMode, 'studio');
-  assert.equal(runtime.studioMode?.plannerPetId, 'lead');
+  assert.equal(runtime.studioMode?.entryPetId, 'lead');
 
   const http = buildLocalHttpRuntimeProjection(deps);
   assert.equal(http.server_mode, 'studio');
   assert.deepEqual(http.studio_mode, {
     studio_id: 'demo',
-    planner_pet_id: 'lead',
-    worker_pet_ids: ['coder', 'writer'],
+    entry_pet_id: 'lead',
+    pet_ids: ['coder', 'writer'],
   });
 });
 

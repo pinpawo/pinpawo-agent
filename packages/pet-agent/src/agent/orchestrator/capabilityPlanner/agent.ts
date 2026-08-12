@@ -45,7 +45,7 @@ const PRIVATE_COMPACTION_ITEM_MAX_CHARS = 2_000;
 const PRIVATE_COMPACTION_SUMMARY_MAX_CHARS = 24_000;
 const PRIVATE_COMPACTION_MESSAGE_NAME = 'private_planner_compaction';
 const MAX_PLAN_TASKS = 24;
-const MAX_TASK_TEXT_CHARS = 500;
+const MAX_TASK_TEXT_CHARS = 2_000;
 const CONTINUE_CURRENT_TOOL_NAME = 'continue_current';
 const SUBMIT_PLAN_TOOL_NAME = 'submit_plan';
 const COMPLETE_GOAL_TOOL_NAME = 'complete_goal';
@@ -90,7 +90,7 @@ function plannerTaskSchema() {
     capability: z.string().trim().min(1).max(200)
       .describe('Capability that executes this task.'),
     task: z.string().trim().min(1).max(MAX_TASK_TEXT_CHARS)
-      .describe('A complete executable instruction for that Capability.'),
+      .describe('A concise execution objective for that Capability. Keep it within 500 characters and do not repeat details already present in the current user goal or conversation.'),
   });
 }
 

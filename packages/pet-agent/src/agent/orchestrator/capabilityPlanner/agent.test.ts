@@ -28,7 +28,7 @@ import {
 } from '@langchain/langgraph';
 import { z } from 'zod';
 import {
-  CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+  CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
 } from './fileExplorer';
 import type { CapabilityDocumentWorkspace } from './documentWorkspace';
 import {
@@ -692,8 +692,8 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
     {
       toolCalls: [{
         id: 'grep',
-        name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-        args: { query: 'research' },
+        name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+        args: { terms: ['research'] },
       }],
     },
     {
@@ -707,7 +707,7 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
     .invoke(plannerInput(workspace));
 
   assert.deepEqual(model.boundToolNames.slice(0, 1), [
-    CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+    CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
   ]);
   assert.equal(model.structuredOutputToolNames.size, 2);
   assert.ok(model.structuredOutputToolNames.has('plan'));
@@ -753,8 +753,8 @@ test('entry mode forms one executable task after Capability exploration', async 
     {
       toolCalls: [{
         id: 'grep',
-        name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-        args: { query: 'investigate|repository' },
+        name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+        args: { terms: ['investigate', 'repository'] },
       }],
     },
     {
@@ -823,7 +823,7 @@ test('Planner accepts consecutive tasks from one Capability when the model keeps
   }]);
 });
 
-test('Planner closes discovery through general after three grep_search calls', async (t) => {
+test('Planner closes discovery through general after three capability_search calls', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -835,8 +835,8 @@ test('Planner closes discovery through general after three grep_search calls', a
     ...[1, 2, 3].map((attempt) => ({
       toolCalls: [{
         id: `grep-${String(attempt)}`,
-        name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-        args: { query: 'general' },
+        name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+        args: { terms: ['general'] },
       }],
     })),
     {
@@ -863,14 +863,14 @@ test('Planner closes discovery through general after three grep_search calls', a
       task: 'Complete the requested workspace task using the discovered Capability.',
     }],
   });
-  const grepResults = [...new Map(
+  const searchResults = [...new Map(
     model.invocations.flat().filter(
       (message): message is ToolMessage => message instanceof ToolMessage
-        && message.name === CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+        && message.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
     ).map((message) => [message.tool_call_id, message]),
   ).values()];
-  assert.equal(grepResults.length, 3);
-  assert.equal(grepResults.some((message) => message.status === 'error'), false);
+  assert.equal(searchResults.length, 3);
+  assert.equal(searchResults.some((message) => message.status === 'error'), false);
 });
 
 test('Planner receives verified General before discovery starts', async (t) => {
@@ -918,11 +918,11 @@ test('Planner receives verified General before discovery starts', async (t) => {
   assert.match(readMessageText(privateInput), /通用工具读取和修改工作区/);
   assert.equal(model.invocations.flat().some(
     (message) => message instanceof ToolMessage
-      && message.name === CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+      && message.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
   ), false);
 });
 
-test('Planner handles parallel grep_search calls without concurrent state updates', async (t) => {
+test('Planner handles parallel capability_search calls without concurrent state updates', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -934,19 +934,19 @@ test('Planner handles parallel grep_search calls without concurrent state update
     {
       toolCalls: [{
         id: 'parallel-grep-1',
-        name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-        args: { query: 'general' },
+        name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+        args: { terms: ['general'] },
       }, {
         id: 'parallel-grep-2',
-        name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-        args: { query: 'general' },
+        name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+        args: { terms: ['general'] },
       }],
     },
     {
       toolCalls: [{
         id: 'parallel-grep-3',
-        name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-        args: { query: 'general' },
+        name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+        args: { terms: ['general'] },
       }],
     },
     {
@@ -973,22 +973,22 @@ test('Planner handles parallel grep_search calls without concurrent state update
       task: 'Complete the requested workspace task using the discovered Capability.',
     }],
   });
-  const grepToolCallIds = new Set(
+  const searchToolCallIds = new Set(
     model.invocations.flat().flatMap((message) =>
       message instanceof ToolMessage
-      && message.name === CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME
+      && message.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME
       ? [message.tool_call_id]
       : [],
     ),
   );
-  assert.deepEqual(grepToolCallIds, new Set([
+  assert.deepEqual(searchToolCallIds, new Set([
     'parallel-grep-1',
     'parallel-grep-2',
     'parallel-grep-3',
   ]));
 });
 
-test('Planner returns to Answer after three grep_search calls without general', async (t) => {
+test('Planner returns to Answer after three capability_search calls without general', async (t) => {
   const workspace = await createWorkspace(t, {
     explore: capabilityDocument({
       name: 'explore',
@@ -1000,8 +1000,8 @@ test('Planner returns to Answer after three grep_search calls without general', 
     ...[1, 2, 3].map((attempt) => ({
       toolCalls: [{
         id: `grep-answer-${String(attempt)}`,
-        name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-        args: { query: 'explore' },
+        name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+        args: { terms: ['explore'] },
       }],
     })),
     {
@@ -1065,8 +1065,8 @@ test('Planner can return bounded facts to Answer without submitting a plan', asy
   const model = new ScriptedPlannerModel([{
     toolCalls: [{
       id: 'grep',
-      name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-      args: { query: 'unrelated task' },
+      name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+      args: { terms: ['unrelated task'] },
     }],
   }, {
     structuredOutput: {
@@ -1124,7 +1124,7 @@ test('an unknown Capability returns tool feedback and can be repaired in-loop', 
   );
 });
 
-test('Planner caps a parallel grep_search batch with standard middleware', async (t) => {
+test('Planner caps a parallel capability_search batch with standard middleware', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -1132,18 +1132,18 @@ test('Planner caps a parallel grep_search batch with standard middleware', async
       instructions: 'Complete the requested work.',
     }),
   });
-  const grep = (id: string) => ({
+  const search = (id: string) => ({
     id,
-    name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-    args: { query: 'ordinary' },
+    name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+    args: { terms: ['ordinary'] },
   });
   const model = new ScriptedPlannerModel([
     {
       toolCalls: [
-        grep('grep-1'),
-        grep('grep-2'),
-        grep('grep-3'),
-        grep('grep-4'),
+        search('grep-1'),
+        search('grep-2'),
+        search('grep-3'),
+        search('grep-4'),
       ],
     },
     {
@@ -1177,7 +1177,7 @@ test('Planner caps a parallel grep_search batch with standard middleware', async
   assert.match(String(limitFeedback.content), /tool call limit exceeded/i);
   const successfulSearches = model.invocations[1]?.filter((message) =>
     message instanceof ToolMessage
-    && message.name === CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME
+    && message.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME
     && message.status !== 'error') ?? [];
   assert.equal(successfulSearches.length, 3);
 });
@@ -1232,8 +1232,8 @@ test('boundary mode rejects an empty executable plan', async (t) => {
     {
       toolCalls: [{
         id: 'grep-general',
-        name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-        args: { query: 'ordinary|task' },
+        name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+        args: { terms: ['ordinary', 'task'] },
       }],
     },
     {
@@ -1331,8 +1331,8 @@ test('oversized discovery is reported as planning_limit_reached', async (t) => {
   const model = new ScriptedPlannerModel([{
     toolCalls: [{
       id: 'grep',
-      name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-      args: { query: 'investigate' },
+      name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+      args: { terms: ['investigate'] },
     }],
   }, { content: '' }]);
 

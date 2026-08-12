@@ -271,7 +271,7 @@ Planner 看不见的隐形 Capability。
 Planner 是一个框架内部的 tool-loop agent。若 effective workspace 包含
 `general`，runtime 会先读取经过 workspace digest 校验的完整文档，并只在
 Planner 私有输入中将它作为默认 Capability 提供。Planner 随后使用
-`grep_search` 按需发现更具体的 `CAPABILITY.md`，再统一完成：
+`capability_search` 按需发现更具体的 `CAPABILITY.md`，再统一完成：
 
 1. 划分当前与后续执行任务；
 2. 为当前任务选择一个 workspace 内的 Capability；

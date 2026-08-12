@@ -17,10 +17,10 @@ import {
 import { z } from 'zod';
 import { z as z4 } from 'zod/v4';
 import {
-  CAPABILITY_PLANNER_MAX_GREP_SEARCH_CALLS,
-  CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+  CAPABILITY_PLANNER_MAX_CAPABILITY_SEARCH_CALLS,
+  CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
   createCapabilityPlannerFileExplorer,
-  createCapabilityPlannerGrepSearchTool,
+  createCapabilityPlannerSearchTool,
   type CapabilityPlannerFileExplorer,
 } from './fileExplorer';
 import type { CapabilityRegistryBackend } from './registryDocuments';
@@ -464,14 +464,14 @@ export function createCapabilityPlannerAgent(params: {
   };
   const terminalTools = createPlannerTerminalTools();
   const additionalPrivateTools = params.additionalPrivateTools ?? [];
-  const grepSearchTool = createCapabilityPlannerGrepSearchTool<PlannerPrivateState>(
-    (query, runtime) => explorerForInput(
+  const capabilitySearchTool = createCapabilityPlannerSearchTool<PlannerPrivateState>(
+    (terms, runtime) => explorerForInput(
       currentPlannerInput(runtime.state),
-    ).search(query, runtime.signal),
+    ).search(terms, runtime.signal),
   );
-  const grepSearchLimitMiddleware = toolCallLimitMiddleware({
-    toolName: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-    runLimit: CAPABILITY_PLANNER_MAX_GREP_SEARCH_CALLS,
+  const capabilitySearchLimitMiddleware = toolCallLimitMiddleware({
+    toolName: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+    runLimit: CAPABILITY_PLANNER_MAX_CAPABILITY_SEARCH_CALLS,
     exitBehavior: 'continue',
   });
   const middleware = createPrivatePlannerMiddleware({
@@ -481,9 +481,9 @@ export function createCapabilityPlannerAgent(params: {
   const buildAgent = (checkpointer: boolean) => createAgent({
     name: 'privateCapabilityPlanner',
     model: params.model,
-    tools: [grepSearchTool, ...terminalTools, ...additionalPrivateTools],
+    tools: [capabilitySearchTool, ...terminalTools, ...additionalPrivateTools],
     systemPrompt: '',
-    middleware: [grepSearchLimitMiddleware, middleware],
+    middleware: [capabilitySearchLimitMiddleware, middleware],
     checkpointer,
   });
   // These are the two standard LangGraph subgraph persistence modes used by

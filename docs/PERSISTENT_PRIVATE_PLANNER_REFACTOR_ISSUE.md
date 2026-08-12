@@ -134,7 +134,7 @@ threadId
 以下内容只能存在于 Planner checkpoint namespace：
 
 - Planner human/AI/tool messages；
-- `grep_search` 结果和 Capability 文档观察；
+- `capability_search` 结果和 Capability 文档观察；
 - 规划过程、被拒绝的候选计划和内部推理；
 - Planner 自己的 context compaction summary；
 - 已处理 input IDs、内部 current plan 和 last commit；
@@ -377,7 +377,7 @@ Capability discovery 的调用预算使用标准 `toolCallLimitMiddleware` 按�
 限制，不再定义自有的并行 reducer/counter，计数和并行批次裁剪交给 middleware 的内置
 run state。若 effective workspace 包含 `general`，runtime 必须在模型首次决策前读取经过
 workspace 校验的完整 General 文档，并只把它注入 Planner 私有输入，作为不依赖字面搜索的
-默认候选。`grep_search` 只负责发现更具体的 Capability，不返回 `fallback` 字段。Planner 在提交
+默认候选。`capability_search` 只负责发现更具体的 Capability，不返回 `fallback` 字段。Planner 在提交
 `report_unavailable` 前必须先评估默认 General；它能执行当前工作时应选择它。显式受限 workspace
 可以没有 General，此时只有全部可见 Capability 都不能执行时才能提交 `unavailable`。
 
@@ -635,7 +635,7 @@ report_unavailable()
 ### 私有状态隔离测试
 
 - Planner AI/tool messages 不进入 `OrchestratorState.messages`；
-- `grep_search` 文本不进入 handoff、Answer input 或 delegation summary；
+- `capability_search` 文本不进入 handoff、Answer input 或 delegation summary；
 - Planner compaction summary 不进入 root compaction；
 - root snapshot 只包含 action、tasks 和 opaque checkpoint metadata；
 - 新 trace 无法读取旧 trace 私有 state；

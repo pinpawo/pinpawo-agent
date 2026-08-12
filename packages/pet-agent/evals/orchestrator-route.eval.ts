@@ -11,8 +11,6 @@
  *   LLM_API_KEY           — model provider API key
  *   LLM_BASE_URL          — model provider base URL (default: dashscope)
  *   LLM_MODEL             — model name (default: qwen3.5-plus)
- *   DECISION_STRUCTURED_OUTPUT_METHOD — optional override (functionCalling, jsonMode, jsonSchema)
- *
  * Run: npx tsx evals/orchestrator-route.eval.ts
  */
 import { evaluate } from 'langsmith/evaluation';
@@ -22,7 +20,6 @@ import { HumanMessage, SystemMessage, AIMessage } from '@langchain/core/messages
 import {
   createOrchestratorGraph,
   buildOrchestratorTurnInput,
-  type OrchestrationDecisionStructuredOutputConfig,
 } from '../src/agent/createAgentRuntime';
 import type { AgentActor, AgentModels } from '../src/types/agent';
 import {
@@ -30,7 +27,6 @@ import {
   type AgentCapability,
 } from '../src/types/capability';
 import { defineToolkit } from '../src/types/toolkit';
-import { inferStructuredOutputMethod } from '../src/utils/structuredOutput';
 import { readLatestAnnounce } from '../src/agent/orchestrator/messageLanes';
 import {
   activeCapabilityFromResult,
@@ -88,39 +84,6 @@ const pinpawoEnv = loadPinpawoEnv();
 const LLM_API_KEY = process.env.LLM_API_KEY || pinpawoEnv.LLM_API_KEY || pinpawoConfig.llm_api_key;
 export const LLM_BASE_URL = process.env.LLM_BASE_URL || pinpawoEnv.LLM_BASE_URL || pinpawoConfig.llm_base_url || 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 export const LLM_MODEL = process.env.LLM_MODEL || pinpawoEnv.LLM_MODEL || pinpawoConfig.llm_model || 'qwen3.5-plus';
-
-function normalizeStructuredOutputMethod(value: string | undefined): OrchestrationDecisionStructuredOutputConfig['method'] {
-  if (!value) return undefined;
-  if (['functionCalling', 'jsonMode', 'jsonSchema'].includes(value)) {
-    return value as OrchestrationDecisionStructuredOutputConfig['method'];
-  }
-  throw new Error(
-    `Invalid DECISION_STRUCTURED_OUTPUT_METHOD: ${value}. ` +
-    'Use functionCalling, jsonMode, or jsonSchema.',
-  );
-}
-
-const DECISION_STRUCTURED_OUTPUT_METHOD = normalizeStructuredOutputMethod(
-  process.env.DECISION_STRUCTURED_OUTPUT_METHOD,
-)
-  ?? inferStructuredOutputMethod(LLM_MODEL, LLM_BASE_URL);
-const DECISION_STRUCTURED_OUTPUT_STRICT = (() => {
-  const raw = process.env.DECISION_STRUCTURED_OUTPUT_STRICT;
-  const normalized = raw?.trim().toLowerCase();
-  if (!normalized) return undefined;
-  if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return true;
-  if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) return false;
-  throw new Error(`Invalid DECISION_STRUCTURED_OUTPUT_STRICT: ${raw}`);
-})();
-const DECISION_STRUCTURED_OUTPUT = (
-  DECISION_STRUCTURED_OUTPUT_METHOD
-    || typeof DECISION_STRUCTURED_OUTPUT_STRICT === 'boolean'
-)
-  ? {
-      method: DECISION_STRUCTURED_OUTPUT_METHOD,
-      strict: DECISION_STRUCTURED_OUTPUT_STRICT,
-    } satisfies OrchestrationDecisionStructuredOutputConfig
-  : undefined;
 
 function buildEvalModels(): AgentModels {
   if (!LLM_API_KEY) {
@@ -276,7 +239,6 @@ export async function target(
     models,
     actor: testActor,
     checkpoint: checkpointer,
-    decisionStructuredOutput: DECISION_STRUCTURED_OUTPUT,
   });
   const compiled = await graph;
   const threadId = `eval-${Date.now()}-${++evalCounter}`;
@@ -586,9 +548,6 @@ async function main() {
 
   console.log(`Running orchestrator route evaluation against "${DATASET_NAME}"...`);
   console.log(`Model: ${LLM_MODEL} @ ${LLM_BASE_URL}\n`);
-  if (DECISION_STRUCTURED_OUTPUT) {
-    console.log('Route structured output:', JSON.stringify(DECISION_STRUCTURED_OUTPUT), '\n');
-  }
 
   const results = await evaluate(target, {
     data: DATASET_NAME,

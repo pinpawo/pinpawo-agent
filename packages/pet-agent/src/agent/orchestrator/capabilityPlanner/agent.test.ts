@@ -296,10 +296,7 @@ function plannerInput(
     inputId: 'trace_started:trace-test',
     traceId: 'trace-test',
     runId: 'run-test',
-    userGoal: {
-      objective: 'Research the repository and then prepare a review.',
-      context: null,
-    },
+    userGoal: 'Research the repository and then prepare a review.',
     latestUserMessage: null,
     activeDelegation: null,
     latestAnnounce: null,
@@ -386,7 +383,7 @@ test('nested Planner checkpoint persists one trace privately and deduplicates bo
     inputId: 'trace_started:trace-a',
     traceId: 'trace-a',
     runId: 'run-a1',
-    userGoal: { objective: 'PRIVATE_TRACE_A_GOAL', context: null },
+    userGoal: 'PRIVATE_TRACE_A_GOAL',
   });
   const boundaryA = plannerInput(workspace, {
     mode: 'boundary',
@@ -465,7 +462,7 @@ test('nested Planner checkpoint persists one trace privately and deduplicates bo
     inputId: 'trace_started:trace-b',
     traceId: 'trace-b',
     runId: 'run-b1',
-    userGoal: { objective: 'PRIVATE_TRACE_B_GOAL', context: null },
+    userGoal: 'PRIVATE_TRACE_B_GOAL',
   });
   const traceBState = await graph.invoke({ input: entryB }, config);
   assert.deepEqual(traceBState.commit, { action: 'unavailable', tasks: [] });
@@ -544,10 +541,7 @@ test('Planner compacts only its private checkpoint and preserves trace context',
     .addEdge('planner', END)
     .compile({ checkpointer });
   const config = { configurable: { thread_id: 'private-planner-compaction' } };
-  const userGoal = {
-    objective: `PRIVATE_COMPACTION_GOAL ${'context '.repeat(80)}`,
-    context: null,
-  };
+  const userGoal = `PRIVATE_COMPACTION_GOAL ${'context '.repeat(80)}`;
   await graph.invoke({
     input: plannerInput(workspace, {
       inputId: 'trace_started:trace-compaction',
@@ -650,7 +644,7 @@ test('parent bare Command resume continues an in-flight private Planner interrup
     inputId: 'trace_started:trace-interrupt',
     traceId: 'trace-interrupt',
     runId: 'run-interrupt',
-    userGoal: { objective: 'Continue after private approval.', context: null },
+    userGoal: 'Continue after private approval.',
   });
 
   const interrupted = await graph.invoke({ input }, config) as {
@@ -741,6 +735,26 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
       task: 'Prepare the review from the findings.',
     }],
   });
+});
+
+test('entry mode can commit answer_directly without Capability discovery', async (t) => {
+  const workspace = await createWorkspace(t, {
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary tasks.',
+      instructions: 'Complete a general task.',
+    }),
+  });
+  const model = new ScriptedPlannerModel([{
+    toolCalls: [{ id: 'answer', name: 'answer_directly', args: {} }],
+  }]);
+
+  const result = await createCapabilityPlannerAgent({ model }).invoke(
+    plannerInput(workspace, { userGoal: '解释已经在主对话中确认的结果。' }),
+  );
+
+  assert.deepEqual(result, { action: 'answer_directly', tasks: [] });
+  assert.equal(model.invocations.length, 1);
 });
 
 test('entry mode forms one executable task after Capability exploration', async (t) => {
@@ -931,10 +945,7 @@ test('Planner receives verified General before discovery starts', async (t) => {
 
   const result = await createCapabilityPlannerAgent({ model }).invoke(
     plannerInput(workspace, {
-      userGoal: {
-        objective: '查看并整理 /Users/mac/Downloads 目录。',
-        context: '用户明确允许使用通用工具。',
-      },
+      userGoal: '查看并整理 /Users/mac/Downloads 目录。\n\n用户明确允许使用通用工具。',
     }),
   );
 
@@ -1536,10 +1547,7 @@ test('missing structured output and direct text is rejected', async (t) => {
 
   await assert.rejects(
     createCapabilityPlannerAgent({ model }).invoke(plannerInput(workspace, {
-      userGoal: {
-        objective: 'Current request.',
-        context: null,
-      },
+      userGoal: 'Current request.',
     })),
     (error: unknown) =>
       error instanceof CapabilityPlannerAgentError

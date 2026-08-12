@@ -15,8 +15,9 @@ capability each case covers:
 - `interruption_recovery`: resume interrupted or limit-reached work on the right lane.
 - `permission_control`: preserve and apply user approvals safely.
 - `context_synthesis`: answer from completed subagent context.
-- `structured_output`: produce schema-compatible orchestration outputs.
-- `entry_decision`: choose answer, direct task, or planning at run entry.
+- `structured_output`: produce schema-compatible orchestration outputs where a
+  structured contract still exists.
+- `goal_creation`: preserve the current task and required context as stable text.
 - `planner_boundary`: accept execution evidence and select the next private
   Planner action.
 - `capability_discovery`: let the Planner explore Capability documents and select an executor.
@@ -55,8 +56,8 @@ recreate datasets.
 - `agent-context-synthesis-basics`: answer-from-context and missing-information cases.
 - `agent-answer-behavior-basics`: direct reply, handoff synthesis, historical replay,
   clarification, task completion summary, and required-user-input return control.
-- `agent-entry-decision-basics`: binary result-availability gate for
-  `answer | needs_plan`.
+- `agent-goal-creation-basics`: plain-text goal creation, including path,
+  constraint, and cross-message reference preservation.
 - `agent-capability-planning-basics`: production private Planner entry and
   execution-boundary actions, including acceptance, continuation, completion,
   user-input, and unavailable-capability boundaries.
@@ -101,16 +102,15 @@ Model configuration is read from `LLM_*`, `~/.pinpawo/.env`, or
 These evals exercise the remaining public decision boundary and the Planner
 through complete graph runs:
 
-1. `entryDecision` decides whether the requested result is already available:
+1. Goal Creation converts the current canonical request into stable plain text:
 
    ```sh
-   npm run eval:entry-decision
+   npm run eval:goal-creation
    ```
 
-   The runner imports the canonical entry dataset and uses the production
-   entry-decision prompt and schema. It deliberately does not evaluate task
-   boundaries; all work that still needs execution is delegated to the
-   Capability Planner.
+   The runner invokes the production Goal Creation prompt without structured
+   output. It evaluates context preservation only; routing and task boundaries
+   belong to the Capability Planner.
 
 2. The Capability Planner is a private, trace-scoped tool-loop agent. It owns
    current-result acceptance and next-step planning together. Its transcript and
@@ -134,9 +134,8 @@ through complete graph runs:
    ```
 
 The canonical two-task baseline is `explore auth -> implement from handoff`.
-The package test-script lookup plus test run is intentionally an entryDecision
-single-task case because preparation, execution, and reporting belong to one
-workspace task.
+The package test-script lookup plus test run is intentionally one Planner task
+because preparation, execution, and reporting belong to one workspace boundary.
 
 4. Lifecycle composition executes the production graph with the configured real
    model for entry, private Planner, capability, and answer. Executor results
@@ -402,27 +401,23 @@ human review, the reject resume must finish without executing the rejected
 tool, and the same subagent invocation must receive the cancellation ToolMessage
 before producing its real final result for normal handoff.
 
-## Entry Decision Stability Runner
+## Goal Creation Stability Runner
 
-The entry-decision runner calls the production `entryDecision` prompt and schema
-directly with the configured real LLM. It repeats each case so drift in the
-binary result-availability gate is visible without Capability Planner or graph
-noise:
+The Goal Creation runner calls the production plain-text prompt directly with
+the configured real LLM. It repeats each case so path, constraint, and reference
+preservation drift is visible without Capability Planner or graph noise:
 
 ```sh
-npm run eval:entry-decision
+npm run eval:goal-creation
 ```
 
-It covers answers already present in context, requests requiring observation or
-execution, multi-step work, continuation after a completed task, and completed
-goals. The summary shows per-case pass counts and action distribution. Task
-formation and task splitting belong to the Capability Planner datasets and
-graph-level evals.
+It covers direct-answer goals, path and scope preservation, cross-message
+references, and latest confirmed constraints. Task formation, routing, and task
+splitting belong to the Capability Planner datasets and graph-level evals.
 
 Useful knobs:
 
 ```sh
-ENTRY_DECISION_REPEATS=5 npm run eval:entry-decision
-ENTRY_DECISION_CASES=agent-entry-decision-basics.explore-before-implementation-needs-plan,agent-entry-decision-basics.current-local-state-needs-observation npm run eval:entry-decision
-DECISION_STRUCTURED_OUTPUT_METHOD=jsonMode npm run eval:entry-decision
+PROMPT_EVAL_REPEATS=5 npm run eval:goal-creation
+PROMPT_EVAL_CASES=agent-goal-creation-basics.preserves-path-and-scope npm run eval:goal-creation
 ```

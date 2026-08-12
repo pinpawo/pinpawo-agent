@@ -8,7 +8,7 @@ import type {
   OrchestratorConfig,
 } from '../types';
 import {
-  createEntryDecisionRunner,
+  createGoalCreationRunner,
 } from './decisions/orchestrationDecision';
 import {
   DEFAULT_ORCHESTRATOR_MAX_ITERATIONS,
@@ -26,6 +26,7 @@ import {
   createPrepareNode,
 } from './nodes/prepare';
 import { afterContextPrep } from './routes/afterContextPrep';
+import { afterPrepare } from './routes/afterPrepare';
 import { afterCapability } from './routes/afterCapability';
 import { createAfterPlannerBoundaryIterationGuard } from './routes/afterPlannerBoundaryIterationGuard';
 
@@ -40,7 +41,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const compactContext = createCompactContextNode({ config });
   const afterPlannerBoundaryIterationGuard =
     createAfterPlannerBoundaryIterationGuard({ orchestratorMaxIterations });
-  const runEntryDecision = createEntryDecisionRunner(config);
+  const runGoalCreation = createGoalCreationRunner(config);
   const runCapabilityPlanner = createCapabilityPlannerNode(config);
 
   const answerNode = createAnswerNode(config);
@@ -57,8 +58,8 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const graph = new StateGraph(OrchestratorState)
     .addNode('prepare', prepare)
     .addNode('compactContext', compactContext)
-    .addNode('entryDecision', runEntryDecision, {
-      ends: ['answer', 'capabilityPlanner'],
+    .addNode('goalCreation', runGoalCreation, {
+      ends: ['capabilityPlanner'],
     })
     .addNode('capabilityPlanner', runCapabilityPlanner, {
       ends: ['answer', 'capability'],
@@ -67,12 +68,15 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     .addNode('answer', answerNode)
     .addNode('capability', capabilityNode)
     .addEdge(START, 'prepare')
-    .addEdge('prepare', 'compactContext')
+    .addConditionalEdges('prepare', afterPrepare, {
+      answer: 'answer',
+      compactContext: 'compactContext',
+    })
     // Run entry uses explicit task lifecycle state. Lane announces remain
     // transcript/context storage and are not the normal control-flow signal.
     .addConditionalEdges('compactContext', afterContextPrep, {
       plannerBoundaryIterationGuard: 'plannerBoundaryIterationGuard',
-      entryDecision: 'entryDecision',
+      goalCreation: 'goalCreation',
       capability: 'capability',
     })
     .addConditionalEdges('plannerBoundaryIterationGuard', afterPlannerBoundaryIterationGuard, {

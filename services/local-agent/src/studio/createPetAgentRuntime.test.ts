@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { AIMessage } from '@langchain/core/messages';
 import { tool } from '@langchain/core/tools';
+import { FakeListChatModel } from '@langchain/core/utils/testing';
 import { isCommand } from '@langchain/langgraph';
 import { z } from 'zod';
 
@@ -20,8 +21,12 @@ import type { NamedStructuredTool } from '@pinpawo/pet-agent';
 import type { HumanReviewerRequest } from '@pinpawo/studio';
 
 function fakeModels(): AgentModels {
-  // graph 已被 stub,实际不会用到 models。
-  return {} as AgentModels;
+  // Most tests stub the graph and never invoke this model. The one real-graph
+  // construction test still needs a valid model because createAgent validates
+  // its required model dependency when the Planner subgraph is created.
+  return {
+    act: new FakeListChatModel({ responses: ['unused'], sleep: 0 }),
+  };
 }
 
 function fakeActor(): AgentActor {

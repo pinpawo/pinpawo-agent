@@ -7,6 +7,7 @@ import { readLatestHumanRequest } from '../messageLanes';
 import type { OrchestratorStateType } from '../state';
 import type { RunNextDelegation, TaskActiveDelegation } from '../types';
 import { clipForPrompt } from '../utils';
+import { USER_GOAL_MAX_CHARS } from '../capabilityPlanner/runner';
 
 const RESUME_GUIDANCE_MAX_CHARS = 2_000;
 
@@ -50,13 +51,20 @@ export function applyActiveDelegationTransition(
     };
   }
 
+  if (!isCurrentUserGoal(activeDelegation.userGoal)) {
+    return {
+      runNextDelegation: null,
+      runCapabilityPlan: [],
+      runLatestDelegationOutcome: null,
+      runRuntimeFailure: 'checkpoint_incompatible',
+    };
+  }
+
   const latestHumanRequest = readLatestHumanRequest(state.messages)?.trim() ?? '';
   const guidance = latestHumanRequest
     ? clipForPrompt(latestHumanRequest, RESUME_GUIDANCE_MAX_CHARS)
     : null;
-  const resumedUserGoal = activeDelegation.userGoal
-    ?? state.runUserGoal
-    ?? (guidance ? { objective: guidance, context: null } : null);
+  const resumedUserGoal = activeDelegation.userGoal;
   const runNextDelegation = buildRunNextDelegation(activeDelegation, guidance);
   const resumedSummaries = resumeRunDelegationSummary(
     state.runDelegationSummaries,
@@ -101,4 +109,10 @@ export function applyActiveDelegationTransition(
     runDelegationSummaries: resumedSummaries,
     runLatestDelegationOutcome: null,
   };
+}
+
+function isCurrentUserGoal(value: unknown): value is string {
+  return typeof value === 'string'
+    && value.trim().length > 0
+    && value.length <= USER_GOAL_MAX_CHARS;
 }

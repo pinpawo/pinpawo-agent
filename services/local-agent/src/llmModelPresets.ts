@@ -1,8 +1,6 @@
 import type { StructuredOutputMethod } from '@pinpawo/pet-agent';
 import type { ModelInputModality } from './modelProfiles';
 
-type EntryDecisionProtocol = 'json' | 'routeFunctions';
-
 export type LlmThinkingControl =
   | 'extra_body_enable_thinking'
   | 'thinking_type'
@@ -21,8 +19,6 @@ export type LlmModelPreset = {
   contextWindowTokens?: number;
   maxOutputTokens?: number;
   structuredOutputMethod?: StructuredOutputMethod;
-  /** Explicitly verified Entry routing protocol for this provider preset. */
-  entryDecisionProtocol?: EntryDecisionProtocol;
   /**
    * Inputs accepted by the model API represented by this preset.
    *
@@ -204,7 +200,6 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     contextWindowTokens: 1_000_000,
     maxOutputTokens: 384_000,
     structuredOutputMethod: 'functionCalling',
-    entryDecisionProtocol: 'routeFunctions',
     inputModalities: ['text'],
     thinkingControl: 'thinking_type',
     aliases: [
@@ -227,7 +222,6 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     contextWindowTokens: 1_000_000,
     maxOutputTokens: 384_000,
     structuredOutputMethod: 'functionCalling',
-    entryDecisionProtocol: 'routeFunctions',
     inputModalities: ['text'],
     thinkingControl: 'thinking_type',
     aliases: [
@@ -337,14 +331,6 @@ export function inferLlmStructuredOutputMethod(
   return STRUCTURED_OUTPUT_FALLBACK_MODEL_RULES.find((rule) =>
     rule.contains.some((fragment) => normalizedModel.includes(fragment)),
   )?.method;
-}
-
-/**
- * Do not infer this from a general structured-output method: a provider may
- * support function calling without guaranteeing `tool_choice: required`.
- */
-export function inferLlmEntryDecisionProtocol(model: string): EntryDecisionProtocol {
-  return inferLlmModelPreset(model)?.entryDecisionProtocol ?? 'json';
 }
 
 export function inferLlmRoleReasoningEffort(

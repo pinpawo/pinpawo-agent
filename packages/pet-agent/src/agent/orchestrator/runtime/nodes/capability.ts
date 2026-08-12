@@ -259,6 +259,11 @@ export function createCapabilityNode(params: {
         resultPreview,
       },
     );
+    const activeDelegation = state.taskActiveDelegation;
+    const delegationUserGoal = activeDelegation?.userGoal ?? state.runUserGoal;
+    if (!delegationUserGoal) {
+      throw new Error('Capability execution requires runUserGoal before creating a delegation.');
+    }
 
     return {
       messages: laneOutputMessages,
@@ -266,10 +271,10 @@ export function createCapabilityNode(params: {
       runDelegationSummaries: updatedRunDelegationSummaries,
       runNextDelegation: null,
       taskActiveDelegation: {
-        ...(state.taskActiveDelegation ?? createTaskActiveDelegation(
+        ...(activeDelegation ?? createTaskActiveDelegation(
           runNextDelegation,
           transcriptRunId,
-          state.runUserGoal,
+          delegationUserGoal,
           state.traceId,
         )),
         status: interrupted ? 'pending' as const : 'awaiting_decision' as const,

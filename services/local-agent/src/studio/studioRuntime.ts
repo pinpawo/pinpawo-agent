@@ -159,8 +159,8 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
   const globalLlmConfig = input.modelProfiles.resolve();
   // curator 用 host default profile(不参与 pet 的 profile 覆盖)
   const globalModels: AgentModels = buildLocalAgentModels(globalLlmConfig);
-  // 复用 chat 路径的 decisionStructuredOutput 策略,避免某些 LLM
-  // 不支持 json_schema response_format 时 orchestrator decision 调用 400。
+  // Curator remains a structured-output consumer even though Goal Creation and
+  // the private Planner no longer use the old orchestrator decision adapter.
   const globalDecisionStructuredOutput = buildDecisionStructuredOutput(globalLlmConfig);
   const capabilitiesByName = new Map(input.capabilities.map((c) => [c.name, c]));
   const generalCapability = capabilitiesByName.get(GENERAL_CAPABILITY_NAME);
@@ -181,9 +181,6 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
     const petModels: AgentModels = petConfig.modelProfileId
       ? buildLocalAgentModels(petLlmConfig)
       : globalModels;
-    const petDecisionStructuredOutput = petConfig.modelProfileId
-      ? buildDecisionStructuredOutput(petLlmConfig)
-      : globalDecisionStructuredOutput;
     const generationReserveTokens = resolveLlmGenerationReserveTokens(petLlmConfig);
     const capsForThisPet: AgentCapability[] = petConfig.capabilities.map((name) => {
       if (name === 'explore') {
@@ -218,7 +215,6 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
         ?? petLlmConfig.contextWindowTokens,
       generationReserveTokens,
       subagentGenerationReserveTokens: generationReserveTokens,
-      decisionStructuredOutput: petDecisionStructuredOutput,
       workdir: effectiveWorkdir,
       humanReviewer: createWsHumanReviewer({
         send: input.bridge.send,

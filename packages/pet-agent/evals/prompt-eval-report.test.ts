@@ -8,9 +8,9 @@ import {
 
 function report(input: { commit: string; passed: boolean; meanDurationMs: number }): PromptEvalReport {
   const result = {
-    target: 'entry' as const,
+    target: 'goal_creation' as const,
     caseId: 'case-1',
-    contract: 'entry.result-availability',
+    contract: 'goal_creation.text',
     objective: 'Select answer from sufficient evidence.',
     repeat: 1,
     goalAchieved: input.passed,
@@ -65,10 +65,10 @@ function report(input: { commit: string; passed: boolean; meanDurationMs: number
       structuredOutputMethod: 'not-applicable',
     },
     pricing: { inputUsdPerMillionTokens: 1, outputUsdPerMillionTokens: 2 },
-    selection: { targets: ['entry'], caseIds: ['case-1'], datasets: ['dataset'], repeats: 1 },
+    selection: { targets: ['goal_creation'], caseIds: ['case-1'], datasets: ['dataset'], repeats: 1 },
     results: [result],
     summaries: [{
-      target: 'entry',
+      target: 'goal_creation',
       caseId: 'case-1',
       runs: 1,
       goalsAchieved: input.passed ? 1 : 0,

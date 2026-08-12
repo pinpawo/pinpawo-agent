@@ -56,11 +56,12 @@ The fixed profile uses seven lifecycle cases, each repeated three times:
 6. a later user turn resuming the unfinished goal;
 7. truthful close when no execution capability is available.
 
-The production graph uses the configured model for `entryDecision`, the private
-Capability Planner agent, `outcomeDecision`, and `answer`. The Planner explores
-the real Capability Document Workspace and submits its final plan through its
-private tool contract. Executor outputs are scripted facts. The same configured
-model performs the existing `prompt-goal-v1` evaluation after the graph finishes.
+The production graph uses the configured model for plain-text Goal Creation,
+the private Capability Planner agent, Capability execution, and `answer`. The
+Planner explores the real Capability Document Workspace and commits its action
+through private terminal tools. Executor outputs are scripted facts. The same
+configured model performs the existing `prompt-goal-v1` evaluation after the
+graph finishes.
 
 ## Failure ownership and candidate repair
 

@@ -52,6 +52,7 @@ const activeDelegation: TaskActiveDelegation = {
   transcriptRunId: 'run-1',
   status: 'awaiting_decision',
   resultPreview: null,
+  userGoal: '做点事',
 };
 
 test('run state reset guard derives a reset only when the run id is missing', () => {

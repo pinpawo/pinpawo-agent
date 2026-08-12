@@ -26,12 +26,24 @@ import {
 } from '../config';
 import { DEFAULT_ORCHESTRATOR_MAX_ITERATIONS } from '../constants';
 
+export const CHECKPOINT_INCOMPATIBLE_MESSAGE =
+  '这个任务由旧版本创建，当前版本无法继续。请重新发起或重述任务。';
+
 export function createAnswerNode(config: OrchestratorConfig) {
   // Node: answer — the dedicated final-reply node. The decision nodes only route
   // here; this node synthesizes the user-facing reply from the FULL conversation
   // (not the clipped decision digest), so prior subagent results are reproduced
   // faithfully instead of being re-fabricated.
   return async function answerNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
+    if (state.runRuntimeFailure === 'checkpoint_incompatible') {
+      return {
+        messages: [stampMessageCreatedAtUtc(
+          new AIMessage(CHECKPOINT_INCOMPATIBLE_MESSAGE),
+        )],
+        taskActiveDelegation: null,
+        ...buildAnswerCleanup(),
+      };
+    }
     const { maxRunIterations } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
     // The full main conversation queue. Completed subagent results live here as
@@ -127,13 +139,13 @@ export function selectAnswerContextFacts(params: {
   if (params.acceptedHandoffOutcome === 'goal_done') {
     return { mode: 'goal_done', hasUserGoal };
   }
-  if (params.state.runPlannerFailure === 'checkpoint_missing') {
+  if (params.state.runRuntimeFailure === 'planner_checkpoint_missing') {
     return {
       mode: 'blocked',
       hasUserGoal,
       reason: 'planner_checkpoint_missing',
       unfinishedTask: params.state.taskActiveDelegation?.task
-        ?? params.state.runUserGoal?.objective
+        ?? params.state.runUserGoal
         ?? null,
       detail: null,
     };
@@ -144,7 +156,7 @@ export function selectAnswerContextFacts(params: {
       hasUserGoal,
       reason: 'capability_unavailable',
       unfinishedTask: params.state.taskActiveDelegation?.task
-        ?? params.state.runUserGoal?.objective
+        ?? params.state.runUserGoal
         ?? null,
       detail: null,
     };
@@ -184,6 +196,6 @@ function buildAnswerCleanup() {
     runCapabilityPlan: [],
     runIterationCount: 0,
     runLatestDelegationOutcome: null,
-    runPlannerFailure: null,
+    runRuntimeFailure: null,
   };
 }

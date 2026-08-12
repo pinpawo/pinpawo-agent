@@ -29,7 +29,7 @@ import type { AgentModels } from '../../src/types/agent.ts';
 import type { StructuredOutputMethod } from '../../src/utils/structuredOutput.ts';
 import { createDecisionEvalModel } from './decision-eval-model.ts';
 
-const TARGETS: PromptEvalTarget[] = ['entry', 'answer'];
+const TARGETS: PromptEvalTarget[] = ['goal_creation', 'answer'];
 const DEFAULT_REPEATS = 5;
 
 type PromptEvalScenario = {

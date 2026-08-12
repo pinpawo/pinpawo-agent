@@ -82,6 +82,9 @@ function materializeNextDelegation(params: {
   allowedCapabilityNames: readonly string[];
 }) {
   const { state, nextTask, remainingPlan, allowedCapabilityNames } = params;
+  if (!state.runUserGoal) {
+    throw new Error('Capability Planner requires runUserGoal before materializing a delegation.');
+  }
   if (!allowedCapabilityNames.includes(nextTask.capability)) {
     throw new Error(
       `Capability Planner selected "${nextTask.capability}" outside the immutable workspace.`,
@@ -122,7 +125,7 @@ function materializeNextDelegation(params: {
       runNextDelegation,
     ),
     runLatestDelegationOutcome: null,
-    runPlannerFailure: null,
+    runRuntimeFailure: null,
   };
 }
 
@@ -175,7 +178,7 @@ function buildAcceptedDelegationUpdate(
         ? { ...delegation, status: 'completed' as const }
         : delegation),
     runLatestDelegationOutcome: outcome,
-    runPlannerFailure: null,
+    runRuntimeFailure: null,
   };
 }
 
@@ -219,7 +222,7 @@ function buildContinueCurrentUpdate(params: {
       runNextDelegation,
     ),
     runLatestDelegationOutcome: null,
-    runPlannerFailure: null,
+    runRuntimeFailure: null,
   };
 }
 
@@ -239,7 +242,7 @@ function buildWaitingUpdate(
             : delegation)
       : state.runDelegationSummaries,
     runLatestDelegationOutcome: outcome,
-    runPlannerFailure: null,
+    runRuntimeFailure: null,
   };
 }
 
@@ -256,7 +259,7 @@ function buildPlannerCheckpointMissingUpdate(state: OrchestratorStateType) {
             : delegation)
       : state.runDelegationSummaries,
     runLatestDelegationOutcome: null,
-    runPlannerFailure: 'checkpoint_missing' as const,
+    runRuntimeFailure: 'planner_checkpoint_missing' as const,
   };
 }
 
@@ -420,12 +423,23 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
           goto: 'capability',
         });
       }
+      if (commit.action === 'answer_directly') {
+        return new Command({
+          update: {
+            runNextDelegation: null,
+            runCapabilityPlan: [],
+            runLatestDelegationOutcome: null,
+            runRuntimeFailure: null,
+          },
+          goto: 'answer',
+        });
+      }
       return new Command({
         update: {
           runNextDelegation: null,
           runCapabilityPlan: [],
           runLatestDelegationOutcome: commit.action,
-          runPlannerFailure: null,
+          runRuntimeFailure: null,
         },
         goto: 'answer',
       });

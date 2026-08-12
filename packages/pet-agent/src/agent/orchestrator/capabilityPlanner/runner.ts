@@ -13,8 +13,7 @@ import type {
 
 export type CapabilityPlannerMode = 'entry' | 'boundary';
 
-export const USER_GOAL_OBJECTIVE_MAX_CHARS = 2_000;
-export const USER_GOAL_CONTEXT_MAX_CHARS = 4_000;
+export const USER_GOAL_MAX_CHARS = 6_000;
 export const CAPABILITY_PLANNER_BOUNDARY_RESULT_MAX_CHARS = 16_000;
 
 /**

@@ -7,7 +7,7 @@
  * deterministic fake chat model that returns the example's subagent_response.
  *
  * Run:
- *   LLM_BASE_URL=... LLM_MODEL=... DECISION_STRUCTURED_OUTPUT_METHOD=jsonMode \
+ *   LLM_BASE_URL=... LLM_MODEL=... \
  *     npx tsx evals/orchestrator-flow.mock-subagent.eval.ts
  */
 import { evaluate } from 'langsmith/evaluation';
@@ -24,7 +24,6 @@ import { homedir } from 'node:os';
 import {
   buildOrchestratorTurnInput,
   createOrchestratorGraph,
-  type OrchestrationDecisionStructuredOutputConfig,
 } from '../src/agent/createAgentRuntime';
 import type { AgentActor, AgentModels } from '../src/types/agent';
 import {
@@ -32,7 +31,6 @@ import {
   type AgentCapability,
 } from '../src/types/capability';
 import { defineToolkit } from '../src/types/toolkit';
-import { inferStructuredOutputMethod } from '../src/utils/structuredOutput';
 import { readLatestAnnounce } from '../src/agent/orchestrator/messageLanes';
 import {
   readRunDelegationSummaries,
@@ -198,22 +196,6 @@ const pinpawoConfig = loadPinpetConfig();
 const LLM_API_KEY = process.env.LLM_API_KEY || pinpawoConfig.llm_api_key;
 const LLM_BASE_URL = process.env.LLM_BASE_URL || pinpawoConfig.llm_base_url || 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 const LLM_MODEL = process.env.LLM_MODEL || pinpawoConfig.llm_model || 'qwen3.5-plus';
-
-function normalizeStructuredOutputMethod(value: string | undefined): OrchestrationDecisionStructuredOutputConfig['method'] {
-  if (!value) return undefined;
-  if (['functionCalling', 'jsonMode', 'jsonSchema'].includes(value)) {
-    return value as OrchestrationDecisionStructuredOutputConfig['method'];
-  }
-  throw new Error(`Invalid DECISION_STRUCTURED_OUTPUT_METHOD: ${value}`);
-}
-
-const DECISION_STRUCTURED_OUTPUT_METHOD = normalizeStructuredOutputMethod(
-  process.env.DECISION_STRUCTURED_OUTPUT_METHOD,
-)
-  ?? inferStructuredOutputMethod(LLM_MODEL, LLM_BASE_URL);
-const DECISION_STRUCTURED_OUTPUT = DECISION_STRUCTURED_OUTPUT_METHOD
-  ? { method: DECISION_STRUCTURED_OUTPUT_METHOD } satisfies OrchestrationDecisionStructuredOutputConfig
-  : undefined;
 
 if (!LLM_API_KEY) {
   console.error('Missing LLM_API_KEY — set env var or configure ~/.pinpawo/config.json');
@@ -489,7 +471,6 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
     models,
     actor: testActor,
     checkpoint: checkpointer,
-    decisionStructuredOutput: DECISION_STRUCTURED_OUTPUT,
   });
   const compiled = await graph;
   const turnInput = buildOrchestratorTurnInput([new HumanMessage(userMessage)]);
@@ -656,9 +637,6 @@ async function main() {
   await ensureDataset();
   console.log(`Running orchestrator flow mock-subagent evaluation against "${DATASET_NAME}"...`);
   console.log(`Route model: ${LLM_MODEL} @ ${LLM_BASE_URL}`);
-  if (DECISION_STRUCTURED_OUTPUT) {
-    console.log('Route structured output:', JSON.stringify(DECISION_STRUCTURED_OUTPUT));
-  }
   console.log('');
 
   const results = await evaluate(target, {

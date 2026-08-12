@@ -59,7 +59,6 @@ test('all built-in presets declare authoritative input modalities', () => {
 
 test('DeepSeek V4 Flash has its own preset and does not resolve as V4 Pro', () => {
   assert.equal(findLlmModelPresetByKey('deepseek-flash')?.model, 'deepseek-v4-flash');
-  assert.equal(findLlmModelPresetByKey('deepseek-flash')?.entryDecisionProtocol, 'routeFunctions');
   assert.equal(inferLlmModelPreset('deepseek-v4-pro')?.key, 'deepseek');
   assert.equal(inferLlmModelPreset('deepseek-v4-flash')?.key, 'deepseek-flash');
 });

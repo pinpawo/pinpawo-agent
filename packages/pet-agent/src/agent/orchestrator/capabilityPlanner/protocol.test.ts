@@ -37,6 +37,21 @@ test('Planner commit exposes only action and plan tasks', () => {
 });
 
 test('Planner commit enforces entry and continuation invariants', () => {
+  assert.deepEqual(parsePlannerCommit({
+    action: 'answer_directly',
+    tasks: [],
+  }, {
+    ...boundaryContext,
+    mode: 'entry',
+    activeDelegation: null,
+  }), {
+    action: 'answer_directly',
+    tasks: [],
+  });
+  assert.throws(() => parsePlannerCommit({
+    action: 'answer_directly',
+    tasks: [],
+  }, boundaryContext), /invalid at a boundary/);
   assert.throws(() => parsePlannerCommit({
     action: 'goal_done',
     tasks: [],

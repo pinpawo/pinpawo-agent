@@ -86,26 +86,23 @@ function buildRecordingSubagent(responses: string[]) {
 }
 
 function buildScriptedDecisionModel() {
-  let entryDecisionCount = 0;
+  let goalCreationCount = 0;
   const model = {
     invoke: async () => new AIMessage(
       'auth 重构已经完成：token validation 已提取，循环依赖已移除，公开接口保持不变，测试通过。',
     ),
-    withStructuredOutput: () => ({
-      invoke: async () => {
-        entryDecisionCount += 1;
-        return {
-          action: 'needs_plan',
-          planner_objective: '完成当前 auth 模块重构：先调查现有结构、依赖和风险，再实施改动并验证。',
-          planner_context: null,
-        };
-      },
-    }),
+  } as unknown as AgentModels['act'];
+  const goalCreationModel = {
+    invoke: async () => {
+      goalCreationCount += 1;
+      return new AIMessage('完成当前 auth 模块重构：先调查现有结构、依赖和风险，再实施改动并验证。');
+    },
   } as unknown as AgentModels['act'];
   return {
     model,
+    goalCreationModel,
     stats: () => ({
-      entryDecisionCount,
+      goalCreationCount,
     }),
   };
 }
@@ -173,6 +170,7 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
   const graph = createOrchestratorGraph({
     models: {
       act: decisions.model,
+      decision: decisions.goalCreationModel,
       observe: decisions.model,
       subagent: subagent.model,
     },

@@ -1,6 +1,3 @@
-import type { BaseMessage, AIMessage } from '@langchain/core/messages';
-import type { RunnableConfig } from '@langchain/core/runnables';
-import type { StructuredTool } from '@langchain/core/tools';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent';
@@ -46,14 +43,8 @@ export type CapabilityPlanTask = {
   task: string;
 };
 
-/**
- * Entry-normalized user goal shared by the orchestration nodes in one run.
- * A resumable delegation keeps a snapshot so a later run can restore it.
- */
-export type UserGoal = {
-  objective: string;
-  context: string | null;
-};
+/** Goal Creation output shared by the orchestration nodes in one run. */
+export type UserGoal = string;
 
 export type TaskActiveDelegation = {
   id: string;
@@ -66,7 +57,7 @@ export type TaskActiveDelegation = {
   status: 'pending' | 'awaiting_decision';
   resultPreview: string | null;
   /** Snapshot used to restore runUserGoal when this delegation is resumed. */
-  userGoal?: UserGoal | null;
+  userGoal: UserGoal;
 };
 
 export type SubagentAnnounce = {
@@ -83,19 +74,6 @@ export type SubagentAnnounce = {
 
 export type DecisionMode = 'answer' | 'capability';
 
-/**
- * Provider protocol used only for the Entry routing decision. The graph always
- * consumes the same normalized outcome; this selects the provider-facing
- * adapter before the model is invoked.
- */
-export type EntryDecisionProtocol = 'json' | 'routeFunctions';
-
-export type ToolBindableChatModel = AgentModels['act'] & {
-  bindTools?: (tools: StructuredTool[], options?: Record<string, unknown>) => {
-    invoke: (messages: BaseMessage[], options?: RunnableConfig) => Promise<AIMessage>;
-  };
-};
-
 export type OrchestratorConfig = {
   models: AgentModels;
   /**
@@ -111,7 +89,6 @@ export type OrchestratorConfig = {
    * run. This is runtime guardrail only; it does not replace LLM decision logic.
    */
   maxRunIterations?: number;
-  decisionStructuredOutput?: OrchestrationDecisionStructuredOutputConfig;
   contextWindowTokens?: number;
   /** Output + reasoning capacity reserved before deriving input maintenance thresholds. */
   generationReserveTokens?: number;
@@ -170,7 +147,9 @@ export type OrchestrationDecisionStructuredOutputOptions = {
   method?: StructuredOutputMethod;
   strict?: boolean;
   autoRepair?: StructuredOutputAutoRepairConfig;
-  entryDecisionProtocol?: EntryDecisionProtocol;
 };
 
-export type OrchestrationDecisionStructuredOutputConfig = Omit<OrchestrationDecisionStructuredOutputOptions, 'name'>;
+export type OrchestrationDecisionStructuredOutputConfig = Omit<
+  OrchestrationDecisionStructuredOutputOptions,
+  'name'
+>;

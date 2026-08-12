@@ -7,8 +7,8 @@ import {
   buildPreparedRequestContext,
   buildRuntimeContext,
   buildSubagentAnnounceContext,
-  buildEntryDecisionInput,
-  buildEntryDecisionSystemPrompt,
+  buildGoalCreationInput,
+  buildGoalCreationSystemPrompt,
 } from './prompts';
 import { buildCapabilityPlannerAgentInput } from './prompts/capabilityPlannerAgent';
 import type { CapabilityPlannerInput } from './capabilityPlanner/runner';
@@ -74,10 +74,7 @@ test('Capability Planner entry input leads with the run user goal', () => {
     traceId: 'trace-1',
     runId: 'run-1',
     workspace: plannerPromptWorkspace,
-    userGoal: {
-      objective: '打开小红书并浏览相关内容。',
-      context: '浏览器已经连接。',
-    },
+    userGoal: '打开小红书并浏览相关内容。\n\n浏览器已经连接。',
     latestUserMessage: null,
     activeDelegation: null,
     latestAnnounce: null,
@@ -98,10 +95,7 @@ test('Capability Planner input keeps the verified default Capability private con
     traceId: 'trace-1',
     runId: 'run-1',
     workspace: plannerPromptWorkspace,
-    userGoal: {
-      objective: '整理下载目录。',
-      context: null,
-    },
+    userGoal: '整理下载目录。',
     latestUserMessage: null,
     activeDelegation: null,
     latestAnnounce: null,
@@ -126,10 +120,7 @@ test('Capability Planner boundary input carries the run user goal and boundary f
     traceId: 'trace-1',
     runId: 'run-1',
     workspace: plannerPromptWorkspace,
-    userGoal: {
-      objective: '打开小红书并浏览相关内容。',
-      context: '浏览器已经连接。',
-    },
+    userGoal: '打开小红书并浏览相关内容。\n\n浏览器已经连接。',
     latestUserMessage: null,
     activeDelegation: {
       delegationId: 'delegation-1',
@@ -161,10 +152,7 @@ test('Capability Planner boundary input omits the follow-up section once the pla
     traceId: 'trace-1',
     runId: 'run-1',
     workspace: plannerPromptWorkspace,
-    userGoal: {
-      objective: '打开小红书并浏览相关内容。',
-      context: null,
-    },
+    userGoal: '打开小红书并浏览相关内容。',
     latestUserMessage: null,
     activeDelegation: {
       delegationId: 'delegation-1',
@@ -250,20 +238,16 @@ test('request contexts include bounded capability artifact refs', () => {
   assert.match(requestContext, /继续刚才的探索/);
 });
 
-test('entry decision keeps runtime state in the input context', () => {
-  const prompt = buildEntryDecisionSystemPrompt({
-    actor: testActor,
-    userGoalInstruction: 'ENTRY_USER_GOAL_INSTRUCTION',
-    outputInstruction: 'ENTRY_OUTPUT_INSTRUCTION',
-  });
-  const input = buildEntryDecisionInput({
+test('goal creation keeps runtime state in the input context', () => {
+  const prompt = buildGoalCreationSystemPrompt(testActor);
+  const input = buildGoalCreationInput({
     runDelegationContext: '<run_delegations><none>true</none></run_delegations>',
     runtimeContext: buildRuntimeContext('/repo', 'Node 20'),
   });
 
-  assert.match(prompt, /ENTRY_OUTPUT_INSTRUCTION/);
-  assert.match(prompt, /ENTRY_USER_GOAL_INSTRUCTION/);
-  assert.match(input, /<entry_decision_context role="fact" source="runtime_state" trust="read_only">/);
+  assert.match(prompt, /User Goal/);
+  assert.match(prompt, /不要输出 JSON/);
+  assert.match(input, /<goal_creation_context role="fact" source="runtime_state" trust="read_only">/);
   assert.match(input, /run_delegation_summaries/);
   assert.match(input, /<runtime_context/);
   assert.doesNotMatch(input, /context_summaries/);
@@ -273,17 +257,7 @@ test('entry decision keeps runtime state in the input context', () => {
   assert.doesNotMatch(input, /capability_artifacts|artifact 短引用/);
   assert.doesNotMatch(input, /<instruction>/);
   assert.doesNotMatch(input, /重新规划/);
-});
-
-test('entry decision defaults to the JSON briefing field contract', () => {
-  const prompt = buildEntryDecisionSystemPrompt({
-    actor: testActor,
-    outputInstruction: 'ENTRY_OUTPUT_INSTRUCTION',
-  });
-
-  assert.match(prompt, /planner_objective/);
-  assert.match(prompt, /planner_context/);
-  assert.doesNotMatch(prompt, /route_to_planner/);
+  assert.doesNotMatch(prompt, /planner_objective|planner_context|route_to_planner/);
 });
 
 test('completed subagent announce context includes the full current result text', () => {

@@ -1,5 +1,8 @@
 # refactor(orchestrator): merge outcome decisions into a trace-scoped persistent private Planner
 
+> 后续提案：在本重构基线上进一步将 Entry 收缩为纯目标创建，并把 fresh-run 路由统一交给
+> Planner，见 [`ENTRY_GOAL_CREATION_REFACTOR_DESIGN.md`](./ENTRY_GOAL_CREATION_REFACTOR_DESIGN.md)。
+
 建议 labels：`architecture`、`orchestrator`、`planner`、`breaking-change`
 
 ## 背景

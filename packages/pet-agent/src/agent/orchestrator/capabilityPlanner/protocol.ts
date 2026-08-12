@@ -6,6 +6,7 @@ export const PLANNER_ACTIONS = [
   'continue_current',
   'execute_plan',
   'advance_plan',
+  'answer_directly',
   'goal_done',
   'user_input_required',
   'unavailable',
@@ -17,8 +18,10 @@ export type PlannerReplyOutcome = Extract<
   'goal_done' | 'user_input_required' | 'unavailable'
 >;
 
-/** Deterministic root-visible failure metadata; never produced by the model. */
-export type PlannerRuntimeFailure = 'checkpoint_missing';
+/** Deterministic root-visible failure metadata; never produced by a model. */
+export type OrchestratorRuntimeFailure =
+  | 'planner_checkpoint_missing'
+  | 'checkpoint_incompatible';
 
 export type PlannerCommit = {
   readonly action: PlannerAction;
@@ -80,6 +83,9 @@ export function parsePlannerCommit(
   }
   if (context.mode === 'boundary' && commit.action === 'execute_plan') {
     throw new Error('Planner action "execute_plan" is invalid at a boundary.');
+  }
+  if (context.mode === 'boundary' && commit.action === 'answer_directly') {
+    throw new Error('Planner action "answer_directly" is invalid at a boundary.');
   }
   if (commit.action === 'continue_current') {
     const activeDelegation = context.activeDelegation;

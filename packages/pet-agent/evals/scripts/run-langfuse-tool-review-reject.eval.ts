@@ -98,18 +98,12 @@ function compactError(error: unknown): string {
 function createRouteModel(): AgentModels['act'] {
   return {
     invoke: async () => new AIMessage('任务已完成。'),
-    bindTools: () => ({
-      invoke: async () => new AIMessage(''),
-    }),
-    withStructuredOutput: () => ({
-      invoke: async () => {
-        return {
-          action: 'needs_plan',
-          planner_objective: '完成当前需要工具执行的用户请求。',
-          planner_context: null,
-        };
-      },
-    }),
+  } as unknown as AgentModels['act'];
+}
+
+function createGoalCreationModel(): AgentModels['act'] {
+  return {
+    invoke: async () => new AIMessage('完成当前需要工具执行的用户请求。'),
   } as unknown as AgentModels['act'];
 }
 
@@ -231,6 +225,7 @@ async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> 
   const graph = createOrchestratorGraph({
     models: {
       act: routeModel,
+      decision: createGoalCreationModel(),
       observe: routeModel,
       subagent: subagentModel,
     },

@@ -12,6 +12,7 @@ import {
   type CapabilityRegistryBackend,
   type CompiledAgentRegistry,
   type OrchestratorConfig,
+  type OrchestrationDecisionStructuredOutputConfig,
   type ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
 import {
@@ -45,7 +46,6 @@ import {
   type LocalAgentInterfaceKind,
 } from './chatInterface';
 import {
-  inferLlmEntryDecisionProtocol,
   inferLlmStructuredOutputMethod,
 } from './llmModelPresets';
 import {
@@ -192,7 +192,9 @@ function appendCapability(
   capabilities.push(capability);
 }
 
-export function buildDecisionStructuredOutput(llmConfig: AgentLlmConfig): OrchestratorConfig['decisionStructuredOutput'] {
+export function buildDecisionStructuredOutput(
+  llmConfig: AgentLlmConfig,
+): OrchestrationDecisionStructuredOutputConfig | undefined {
   const method = llmConfig.structuredOutputMethod
     ?? inferLlmStructuredOutputMethod(llmConfig.model, llmConfig.baseUrl);
   if (!method) return undefined;
@@ -207,13 +209,8 @@ export function buildDecisionStructuredOutput(llmConfig: AgentLlmConfig): Orches
       }
     : {};
 
-  const entryDecisionProtocol = method === 'functionCalling'
-    ? inferLlmEntryDecisionProtocol(llmConfig.model)
-    : 'json';
-
   return {
     method,
-    ...(entryDecisionProtocol === 'routeFunctions' ? { entryDecisionProtocol } : {}),
     ...autoRepair,
   };
 }
@@ -349,7 +346,6 @@ export function buildLocalChatAgentInput(params: {
       modelInputModalities: llmConfig.inputModalities ?? ['text'],
       actor,
       checkpoint: params.checkpoint,
-      decisionStructuredOutput,
       contextWindowTokens: llmConfig.contextWindowTokens,
       subagentContextWindowTokens: llmConfig.subagentContextWindowTokens ?? llmConfig.contextWindowTokens,
       generationReserveTokens,

@@ -24,18 +24,18 @@ export function buildCurrentPlanPanel(
   const compact = options.overlayOpen
     || options.terminalHeight < EXPANDED_MIN_TERMINAL_ROWS
     || options.width < EXPANDED_MIN_WIDTH;
-  const completed = plan.items.filter((item) => item.status === 'completed').length;
   // Between delegations no item is active; the next pending step still tells
   // the operator where the plan stands.
   const active = plan.items.find((item) => item.status === 'active')
     ?? plan.items.find((item) => item.status === 'pending')
     ?? plan.items.at(-1);
   if (!active) return { content: '', height: 0, mode: 'hidden' };
+  const currentStep = plan.items.indexOf(active) + 1;
 
   if (compact) {
     return {
       content: truncateTerminalLine(
-        `计划 ${completed}/${plan.items.length} · ${formatItem(active)}`,
+        `计划 ${currentStep}/${plan.items.length} · ${formatItem(active)}`,
         options.width,
       ),
       height: 1,
@@ -52,7 +52,7 @@ export function buildCurrentPlanPanel(
   const visibleItems = selectVisibleItems(plan.items, maxVisible);
   const omitted = plan.items.length - visibleItems.length;
   const lines = [
-    `当前计划 · ${completed}/${plan.items.length}`,
+    `当前计划 · ${currentStep}/${plan.items.length}`,
     ...visibleItems.map((item) => `  ${formatItem(item)}`),
     ...(omitted > 0 ? [`  … 还有 ${omitted} 项`] : []),
   ].map((line) => truncateTerminalLine(line, options.width));

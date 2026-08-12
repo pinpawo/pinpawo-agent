@@ -13,7 +13,7 @@ const plan = {
 test('builds an expanded current plan when terminal space allows', () => {
   assert.deepEqual(buildCurrentPlanPanel(plan, { width: 100, terminalHeight: 40 }), {
     content: [
-      '当前计划 · 1/3',
+      '当前计划 · 2/3',
       '  ✓ general · Understand request',
       '  → explore · Inspect code',
       '  · browser · Verify result',
@@ -31,7 +31,7 @@ test('compacts the plan for overlays and short terminals', () => {
   });
   assert.equal(panel.mode, 'compact');
   assert.equal(panel.height, 1);
-  assert.match(panel.content, /^计划 1\/3 · → explore/);
+  assert.match(panel.content, /^计划 2\/3 · → explore/);
 });
 
 test('keeps the plan visible between delegations when no item is active', () => {
@@ -43,8 +43,29 @@ test('keeps the plan visible between delegations when no item is active', () => 
   };
   const panel = buildCurrentPlanPanel(betweenSteps, { width: 100, terminalHeight: 40 });
   assert.equal(panel.mode, 'expanded');
-  assert.match(panel.content, /当前计划 · 1\/2/);
+  assert.match(panel.content, /当前计划 · 2\/2/);
   assert.match(panel.content, /Inspect code/);
+});
+
+test('shows the first active task as step one instead of zero completed', () => {
+  const startingPlan = {
+    items: [
+      { id: '1', capability: 'general', task: 'Start work', status: 'active' as const },
+      { id: '2', capability: 'browser', task: 'Verify work', status: 'pending' as const },
+    ],
+  };
+
+  const expanded = buildCurrentPlanPanel(startingPlan, {
+    width: 100,
+    terminalHeight: 40,
+  });
+  const compact = buildCurrentPlanPanel(startingPlan, {
+    width: 100,
+    terminalHeight: 20,
+  });
+
+  assert.match(expanded.content, /^当前计划 · 1\/2/);
+  assert.match(compact.content, /^计划 1\/2/);
 });
 
 test('a taller terminal reveals more of a long plan', () => {

@@ -36,6 +36,8 @@ export type AgentInvokeInput = {
    * requests supersede it; callers must opt in to continuation.
    */
   activeDelegationTransition?: ActiveDelegationTransition;
+  /** Optional stable task identity supplied by a host that owns task lifecycle. */
+  traceId?: string;
 };
 
 export type AgentRunResult = {
@@ -77,6 +79,7 @@ export async function runAgent(
   const result = await graph.invoke(
     buildOrchestratorRunInput(input.messages, {
       activeDelegationTransition: input.activeDelegationTransition,
+      traceId: input.traceId,
     }),
     {
       signal: input.signal,

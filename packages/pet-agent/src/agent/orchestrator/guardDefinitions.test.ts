@@ -4,17 +4,15 @@ import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { ToolMessage } from '@langchain/core/messages/tool';
 import { evaluateGuard } from '../../guards';
 import {
-  ACTIVE_DELEGATION_LIMIT_REACHED,
   contextCompactionWatermarkGuard,
-  delegationOutcomeDecisionGuard,
   ORCHESTRATOR_GUARD_POSITION,
   RUN_STATE_RESET_REQUIRED,
   runIterationLimitGuard,
   runStateResetGuard,
 } from './guardDefinitions';
 import {
-  createAfterDelegationOutcomeIterationGuard,
-} from './runtime/routes/afterDelegationOutcomeIterationGuard';
+  createAfterPlannerBoundaryIterationGuard,
+} from './runtime/routes/afterPlannerBoundaryIterationGuard';
 import {
   GUARD_DECISION_EVENT,
   guardDecisionEmitter,
@@ -178,38 +176,15 @@ test('context compaction watermark guard subtracts the generation reserve', () =
   });
 });
 
-test('delegation outcome guard derives handoff refusal for a limit_reached active delegation', async () => {
-  const announce = new AIMessage('limit reached');
-  setPinpetMeta(announce, {
-    lane: 'capability:general',
-    isAnnounce: true,
-    completionReason: 'limit_reached',
-    runId: 'run-1',
-    delegationId: 'd1',
-  });
-  const state = baseState({
-    taskActiveDelegation: activeDelegation,
-    messages: [announce],
-  });
-
-  const outcome = evaluateGuard(delegationOutcomeDecisionGuard, {
-    state,
-    config: {},
-    position: ORCHESTRATOR_GUARD_POSITION.DELEGATION_OUTCOME_DECISION,
-  });
-  assert.equal(outcome.kind, 'derive');
-  assert.equal(outcome.kind === 'derive' && outcome.reason, ACTIVE_DELEGATION_LIMIT_REACHED);
-});
-
 test('guard routes push decision records onto the LangGraph custom stream writer', () => {
   const chunks: unknown[] = [];
   const runnableConfig = {
     writer: (chunk: unknown) => chunks.push(chunk),
-  } as Parameters<ReturnType<typeof createAfterDelegationOutcomeIterationGuard>>[1] & {
+  } as Parameters<ReturnType<typeof createAfterPlannerBoundaryIterationGuard>>[1] & {
     writer: (chunk: unknown) => void;
   };
 
-  const route = createAfterDelegationOutcomeIterationGuard({ orchestratorMaxIterations: 5 });
+  const route = createAfterPlannerBoundaryIterationGuard({ orchestratorMaxIterations: 5 });
   route(baseState({
     taskActiveDelegation: activeDelegation,
     runIterationCount: 5,
@@ -220,7 +195,7 @@ test('guard routes push decision records onto the LangGraph custom stream writer
   assert.equal(records[0]?.name, GUARD_DECISION_EVENT);
   assert.deepEqual(records[0]?.data, {
     guard: 'run_iteration_limit',
-    position: 'orchestrator.delegation_outcome_iteration',
+    position: 'orchestrator.planner_boundary_iteration',
     outcome: {
       kind: 'stop',
       reason: 'run_iteration_limit_reached',
@@ -250,7 +225,7 @@ test('run iteration limit guard routes through answer at the resolved limit', ()
   const outcome = evaluateGuard(runIterationLimitGuard, {
     state,
     config: { runIterationLimit: 5 },
-    position: ORCHESTRATOR_GUARD_POSITION.DELEGATION_OUTCOME_ITERATION,
+    position: ORCHESTRATOR_GUARD_POSITION.PLANNER_BOUNDARY_ITERATION,
   });
   assert.equal(outcome.kind, 'stop');
   assert.deepEqual(outcome.kind === 'stop' && outcome.details, {
@@ -258,9 +233,9 @@ test('run iteration limit guard routes through answer at the resolved limit', ()
     runIterationLimit: 5,
   });
 
-  const atLimitRoute = createAfterDelegationOutcomeIterationGuard({ orchestratorMaxIterations: 5 });
+  const atLimitRoute = createAfterPlannerBoundaryIterationGuard({ orchestratorMaxIterations: 5 });
   assert.equal(atLimitRoute(state), 'answer');
 
-  const belowLimitRoute = createAfterDelegationOutcomeIterationGuard({ orchestratorMaxIterations: 25 });
-  assert.equal(belowLimitRoute(state), 'delegationOutcomeDecision');
+  const belowLimitRoute = createAfterPlannerBoundaryIterationGuard({ orchestratorMaxIterations: 25 });
+  assert.equal(belowLimitRoute(state), 'capabilityPlanner');
 });

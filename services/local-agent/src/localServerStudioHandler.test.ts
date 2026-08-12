@@ -108,6 +108,7 @@ test('LocalServerStudioHandler emits progress and done response', async () => {
       buildInputs.push(input);
       return {
         resolved: {} as BuildStudioResult['resolved'],
+        petCheckpointers: new Map(),
         orchestrator: {
           submitRequest: async (turn: {
             onTurnEvent: (event: Record<string, unknown>) => void;
@@ -177,6 +178,7 @@ test('LocalServerStudioHandler serializes studio requests per peer', async () =>
     outbound: PEER_OUTBOUND,
     buildStudio: async () => ({
       resolved: {} as BuildStudioResult['resolved'],
+      petCheckpointers: new Map(),
       orchestrator: {
         submitRequest: async () => {
           if (invocationEvents.length === 0) {
@@ -261,6 +263,7 @@ test('LocalServerStudioHandler discards queued studio requests after peer discon
     outbound: PEER_OUTBOUND,
     buildStudio: async () => ({
       resolved: {} as BuildStudioResult['resolved'],
+      petCheckpointers: new Map(),
       orchestrator: {
         submitRequest: async () => {
           if (invocationEvents.length === 0) {
@@ -358,6 +361,7 @@ test('LocalServerStudioHandler fills runId and conversationId defaults', async (
       buildInputs.push(input);
       return {
         resolved: {} as BuildStudioResult['resolved'],
+        petCheckpointers: new Map(),
         orchestrator: {
           submitRequest: async () => ({ runId: 'studio-default', status: 'accepted' }),
           waitForRun: async () => ({

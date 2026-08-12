@@ -7,6 +7,7 @@ import type { BrowserExtensionCapability } from './drivers/chromeExtension/proto
 import { ChromeExtensionBrowserSession } from './drivers/chromeExtension/session';
 import { BrowserSession } from './session';
 import type { BrowserExecutionOwner } from './ownership';
+import type { BrowserRuntimeEvent } from './lifecycle/events';
 import type { ToolkitRuntimeExecutionScope } from '@pinpawo/pet-agent';
 import {
   configuredBrowserBackend,
@@ -61,6 +62,12 @@ export type BrowserRuntimeBinding = Readonly<{
 
 export type BrowserRuntimeDependencies = {
   bridge?: BrowserExtensionBridge;
+};
+
+type BrowserGenerationChange = {
+  connectionGeneration: number;
+  targetGeneration: number;
+  contextId?: string;
 };
 
 function resolveBrowserExtensionRuntimeState(
@@ -152,15 +159,19 @@ export class BrowserRuntime {
       ...(typeof this.bridge.beginNavigation === 'function'
         ? { beginNavigation: () => this.bridge.beginNavigation(browserContextId) }
         : {}),
-      onRuntimeEvent: (listener) => this.bridge.onRuntimeEvent((event) => {
-        if (event.contextId === browserContextId) listener(event);
-      }),
-      onGenerationChanged: (listener) => this.bridge.onGenerationChanged((change) => {
-        // A target change belongs to one context, whereas a connection change
-        // (extension/native-host reconnect) invalidates every in-flight
-        // context. The latter has no contextId and must reach all sessions.
-        if (!change.contextId || change.contextId === browserContextId) listener(change);
-      }),
+      ...(typeof this.bridge.onRuntimeEvent === 'function'
+        ? { onRuntimeEvent: (listener: (event: BrowserRuntimeEvent) => void) => this.bridge.onRuntimeEvent((event) => {
+            if (event.contextId === browserContextId) listener(event);
+          }) }
+        : {}),
+      ...(typeof this.bridge.onGenerationChanged === 'function'
+        ? { onGenerationChanged: (listener: (change: BrowserGenerationChange) => void) => this.bridge.onGenerationChanged((change) => {
+            // A target change belongs to one context, whereas a connection change
+            // (extension/native-host reconnect) invalidates every in-flight
+            // context. The latter has no contextId and must reach all sessions.
+            if (!change.contextId || change.contextId === browserContextId) listener(change);
+          }) }
+        : {}),
     }, this.options.workdir);
     const session = new BrowserSession({
       requireExecutionOwner: true,

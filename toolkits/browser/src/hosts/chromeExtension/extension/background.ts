@@ -26,14 +26,18 @@ import {
 } from './interaction.js';
 import {
   createTargetStack,
-  isNavigableWebTab,
   isWebTab,
   selectNavigationTarget,
   shouldTrackPopup,
 } from './targetLifecycle.js';
 import { createBrowserStateTracker } from './browserState.js';
 import { calculateReconnectDelay } from './reconnect.js';
-import { pageReadinessEvents } from './pageReadiness.js';
+import {
+  documentReadyEvent,
+  navigationCommittedEvent,
+  domChangedEvent,
+  networkActivityEvent,
+} from './liveReadiness.js';
 
 const CDP_VERSION = '1.3';
 const ALLOWED_CDP_COMMANDS = new Set([
@@ -81,11 +85,6 @@ interface PopupRecord {
 }
 
 let popupTracking: PopupTracking | null = null;
-// Monotonic revision for DOM-readiness events emitted after each navigation.
-// Lets the Runtime key a stable (never re-issued) text sample across the live
-// lifecycle, and gives a handle for a future live re-poll during hydration
-// (issue #583 S1).
-let pageReadinessRevision = 0;
 
 const LEGACY_BROWSER_CONTEXT_ID = 'legacy';
 const MAX_BROWSER_CONTEXT_ID_LENGTH = 128;
@@ -182,10 +181,20 @@ function networkRequestSet(tabId: number): Set<string> {
   return requests;
 }
 
-function emitNetworkActivity(tabId: number): void {
-  emitLifecycleEvent('network.activity', tabId, {
-    payload: { inflightRequests: networkRequestSet(tabId).size },
-  });
+type LiveReadinessState = {
+  lastDomTextLength: number;
+  lastDomTextRevision: number;
+};
+
+const liveReadinessByTab = new Map<number, LiveReadinessState>();
+
+function liveReadinessState(tabId: number): LiveReadinessState {
+  let state = liveReadinessByTab.get(tabId);
+  if (!state) {
+    state = { lastDomTextLength: 0, lastDomTextRevision: 0 };
+    liveReadinessByTab.set(tabId, state);
+  }
+  return state;
 }
 
 class ExtensionError extends Error {
@@ -438,36 +447,6 @@ async function ensureTarget() {
   );
 }
 
-async function waitForNavigableTab(tabId, deadlineAt) {
-  while (Date.now() < Date.parse(deadlineAt)) {
-    ensureCommandAlive(deadlineAt);
-    const tab = await chrome.tabs.get(tabId);
-    if (isNavigableWebTab(tab)) {
-      return tab;
-    }
-    await delay(100, deadlineAt);
-  }
-  throw new ExtensionError(
-    'navigation_timeout',
-    'Navigation did not finish at a readable web page before the command deadline',
-    true,
-  );
-}
-
-function navigationReadinessDeadline(params, commandDeadlineAt) {
-  const timeoutMs = params.readinessTimeoutMs ?? 5_000;
-  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 30_000) {
-    throw new ExtensionError(
-      'invalid_navigation_timeout',
-      'readinessTimeoutMs must be between 1 and 30000',
-    );
-  }
-  return new Date(Math.min(
-    Date.parse(commandDeadlineAt),
-    Date.now() + timeoutMs,
-  )).toISOString();
-}
-
 async function prepareNavigationTarget() {
   const existing = targets.current();
   let existingTab = null;
@@ -705,44 +684,116 @@ async function readSnapshot(tabId, approvedOrigin) {
   return snapshot;
 }
 
-async function waitForReadableSnapshot(tabId, approvedOrigin, deadlineAt) {
-  while (Date.now() < Date.parse(deadlineAt)) {
-    ensureCommandAlive(deadlineAt);
-    const snapshot = await readSnapshot(tabId, approvedOrigin);
-    emitPageReadiness(tabId, snapshot.url, snapshot);
-    if (typeof snapshot.textLength === 'number' && snapshot.textLength > 0) {
-      return snapshot;
-    }
-    await delay(100, deadlineAt);
-  }
-  throw new ExtensionError(
-    'navigation_timeout',
-    'Navigation completed but the page did not produce readable content before the readiness deadline.',
-    true,
-  );
+/** Post a unified `browser.event` to the native host (no-op when disconnected). */
+function postBrowserEvent(message) {
+  const contextId = browserContextForTab(message.tabId);
+  if (!port || !contextId) return;
+  port.postMessage({
+    type: 'browser.event',
+    protocolVersion: PROTOCOL_VERSION,
+    connectionId,
+    contextId,
+    tabId: message.tabId,
+    url: message.url,
+    event: message.event,
+    payload: message.payload,
+  });
 }
 
 /**
- * Report the page-readiness lifecycle events derived from a freshly captured
- * snapshot. These let the Runtime drive a navigation to `readable` (issue
- * #583): the extension states the observable page facts (`document.ready`,
- * `dom.changed` with the sampled body text) and the Runtime decides whether the
- * page is ready. Anything posted here is additive and backward-compatible.
+ * Live readiness event emission (block 1 of issue #601). Translates reliable,
+ * stateless CDP `Page`/`tabs` facts into the unified live readiness stream the
+ * Runtime consumes. The pure translation lives in `liveReadiness.ts`; these
+ * helpers own the `port.postMessage`.
+ *
+ * Stateful live facts (network inflight deltas via `Network.*`, repeated DOM
+ * text samples during hydration) are wired via CDP `Network.*` / `Page.loadEventFired`
+ * events and per-tab counters. The pure translators live in `liveReadiness.ts`.
  */
-function emitPageReadiness(tabId, url, snapshot) {
-  if (!port) return;
-  pageReadinessRevision += 1;
-  for (const event of pageReadinessEvents(snapshot, tabId, url, pageReadinessRevision)) {
-    port.postMessage({
-      type: 'browser.event',
-      protocolVersion: PROTOCOL_VERSION,
-      connectionId,
-      event: event.event,
-      contextId: activeBrowserContextId,
-      tabId: event.tabId,
-      url: event.url,
-      payload: event.payload,
+function emitLiveCommitted(tabId, url) {
+  const event = navigationCommittedEvent({ url, timestamp: Date.now() }, tabId);
+  postBrowserEvent({ ...event, tabId, url });
+}
+
+function emitLiveDocumentReady(tabId, url, readyState) {
+  const event = documentReadyEvent({ readyState, timestamp: Date.now() }, tabId, url);
+  postBrowserEvent({ ...event, tabId, url });
+}
+
+
+async function emitLiveDomSample(tabId: number, url: string) {
+  if (!port || attachedTabId !== tabId || !browserContextForTab(tabId)) return;
+  try {
+    const result = await cdp(tabId, 'Runtime.evaluate', {
+      expression: '(document.body?.innerText || "").length',
+      returnByValue: true,
     });
+    const textLength = typeof result?.result?.value === 'number'
+      ? Math.max(0, result.result.value)
+      : 0;
+    const state = liveReadinessState(tabId);
+    if (textLength > state.lastDomTextLength || state.lastDomTextRevision === 0) {
+      state.lastDomTextRevision += 1;
+      state.lastDomTextLength = textLength;
+      const event = domChangedEvent(
+        { textLength, textRevision: state.lastDomTextRevision, timestamp: Date.now() },
+        tabId,
+        url,
+      );
+      postBrowserEvent({ ...event, tabId, url });
+    }
+  } catch {
+    // DOM sampling is best-effort.
+  }
+}
+
+/**
+ * Report the current inflight count. `networkActivityEvent` applies its own
+ * +1/-1 delta for the reported fact, so the base must be the count *before*
+ * that fact is applied — otherwise a finished request would be double-counted
+ * and the tally could never return to zero, keeping the page from settling.
+ */
+function emitLiveNetworkActivity(tabId: number, kind: 'request' | 'finish' | 'fail') {
+  if (!port || attachedTabId !== tabId || !browserContextForTab(tabId)) return;
+  const inflightRequests = networkRequestSet(tabId).size;
+  const baseInflight = kind === 'request'
+    ? Math.max(0, inflightRequests - 1)
+    : inflightRequests + 1;
+  postBrowserEvent({
+    ...networkActivityEvent(
+      { kind, timestamp: Date.now() },
+      tabId,
+      baseInflight,
+    ),
+    tabId,
+  });
+}
+
+function resetLiveCounters(tabId: number) {
+  networkRequestsByTab.delete(tabId);
+  liveReadinessByTab.delete(tabId);
+}
+
+/**
+ * Best-effort URL for the tab the live readiness events are reported against.
+ *
+ * Several CDP events the Runtime cares about carry no URL of their own
+ * (`Page.loadEventFired` only has a `timestamp`), and the managed target may not
+ * have recorded one yet. Falling back to `chrome.tabs.get` keeps the live
+ * `dom.changed` / `document.ready` stream flowing: those events are dropped
+ * downstream when their URL is empty, which would leave the Runtime waiting for
+ * a body sample that never arrives.
+ */
+async function liveTabUrl(tabId: number): Promise<string> {
+  const contextId = browserContextForTab(tabId);
+  const target = contextId ? browserTargetContext(contextId).targets.current() : null;
+  const known = target?.tabId === tabId ? (target as { url?: string }).url : undefined;
+  if (typeof known === 'string' && known) return known;
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    return typeof tab?.url === 'string' ? tab.url : '';
+  } catch {
+    return '';
   }
 }
 
@@ -1115,13 +1166,12 @@ async function executeCommandBody(command) {
     await attach(activeTarget.tabId);
     emitLifecycleEvent('navigation.requested', activeTarget.tabId, { url });
     await chrome.tabs.update(activeTarget.tabId, { url, active: true });
-    const readinessDeadline = navigationReadinessDeadline(command.params, command.deadlineAt);
-    await waitForNavigableTab(activeTarget.tabId, readinessDeadline);
-    return await waitForReadableSnapshot(
-      activeTarget.tabId,
-      approvedOrigin,
-      readinessDeadline,
-    );
+    // Issue #601: fire-and-forget — the Runtime owns the readiness wait.
+    // Live events (Page.frameNavigated → navigation.committed,
+    // tabs.onUpdated complete → document.ready, periodic DOM samples)
+    // drive the BrowserLifecycleController via the bridge. The Runtime's
+    // waitForReadiness will resolve when the page reaches readable.
+    return { ok: true, tabId: activeTarget.tabId, url };
   }
 
   const activeTarget = await ensureTarget();
@@ -1259,7 +1309,7 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
     const contextId = browserContextForTab(tabId);
     if (!contextId) return;
     activateBrowserContext(contextId);
-    networkRequestsByTab.delete(tabId);
+    resetLiveCounters(tabId);
     recentPopupByOpener.delete(tabId);
     await handleRemovedTarget(tabId);
   });
@@ -1270,6 +1320,7 @@ chrome.debugger.onDetach.addListener((source, reason) => {
   const contextId = browserContextForTab(source.tabId);
   if (contextId) activateBrowserContext(contextId);
   attachedTabId = null;
+  resetLiveCounters(source.tabId);
   publishBrowserStateChange();
   port?.postMessage({
     type: 'browser.event',
@@ -1285,41 +1336,65 @@ chrome.debugger.onDetach.addListener((source, reason) => {
 chrome.debugger.onEvent.addListener((source, method, params) => {
   if (!Number.isInteger(source.tabId)) return;
   const tabId = source.tabId;
-  if (!browserContextForTab(tabId)) return;
+  if (tabId !== attachedTabId || !browserContextForTab(tabId)) return;
   const eventParams = params as Record<string, unknown>;
 
   if (method === 'Page.frameNavigated') {
     const frame = eventParams.frame as Record<string, unknown> | undefined;
     // Iframe commits must not replace the main page's origin/readiness state.
     if (!frame || typeof frame.url !== 'string' || frame.parentId !== undefined) return;
-    networkRequestsByTab.delete(tabId);
-    emitLifecycleEvent('navigation.committed', tabId, { url: frame.url });
+    resetLiveCounters(tabId);
+    emitLiveCommitted(tabId, frame.url);
     return;
   }
   if (method === 'Page.domContentEventFired') {
-    emitLifecycleEvent('document.ready', tabId, {
-      payload: { readyState: 'interactive' },
+    void liveTabUrl(tabId).then((url) => {
+      if (url) emitLiveDocumentReady(tabId, url, 'interactive');
     });
     return;
   }
   if (method === 'Page.loadEventFired') {
-    emitLifecycleEvent('document.ready', tabId, {
-      payload: { readyState: 'complete' },
-    });
+    void (async () => {
+      const url = await liveTabUrl(tabId);
+      if (!url) return;
+      emitLiveDocumentReady(tabId, url, 'complete');
+      await emitLiveDomSample(tabId, url);
+    })();
     return;
   }
   if (method === 'Network.requestWillBeSent' && typeof eventParams.requestId === 'string') {
-    networkRequestSet(tabId).add(eventParams.requestId);
-    emitNetworkActivity(tabId);
+    const requests = networkRequestSet(tabId);
+    if (!requests.has(eventParams.requestId)) {
+      requests.add(eventParams.requestId);
+      emitLiveNetworkActivity(tabId, 'request');
+    }
     return;
   }
   if (
     (method === 'Network.loadingFinished' || method === 'Network.loadingFailed')
     && typeof eventParams.requestId === 'string'
   ) {
-    networkRequestSet(tabId).delete(eventParams.requestId);
-    emitNetworkActivity(tabId);
+    const requests = networkRequestSet(tabId);
+    if (requests.delete(eventParams.requestId)) {
+      emitLiveNetworkActivity(
+        tabId,
+        method === 'Network.loadingFinished' ? 'finish' : 'fail',
+      );
+    }
   }
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (tabId !== attachedTabId || !browserContextForTab(tabId)) return;
+  if (changeInfo.status !== 'complete') return;
+  // `Page.loadEventFired` has no URL; Chrome tab state provides a reliable
+  // fallback for the final ready/body sample when it arrives first.
+  void (async () => {
+    const url = await liveTabUrl(tabId);
+    if (!url) return;
+    emitLiveDocumentReady(tabId, url, 'complete');
+    await emitLiveDomSample(tabId, url);
+  })();
 });
 
 async function initialize() {

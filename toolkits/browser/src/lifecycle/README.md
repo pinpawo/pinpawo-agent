@@ -25,6 +25,7 @@ files) before wiring them to the live extension event stream.
 | `errorCodes.ts`     | Structured Runtime error codes                                         |
 | `openReadiness.ts`  | Standalone `browser_open` readiness driver: walks an injected event sequence through the controller to `readable`, handling redirect/timeout/SPA-shell/long-lived/SPA-route-change scenarios |
 | `interactionSettle.ts` | Standalone post-interaction settle driver for `browser_click`/`type`/`scroll`: walks an interaction's buffered events through the controller and decides `nav_generation` / `settled` / `failed` / `pending` / `timed_out`, mirroring `openReadiness` |
+| `waitForReadiness.ts` | **Live** PendingWait-based readiness wait (issue #601): subscribes to a live event/generation stream, feeds it into a controller, and resolves deterministically via `PendingWait` on `readable` / `failed` / wall-clock `timed_out` (with phase / committed URL / readyState diagnostics guiding `browser_wait`) |
 
 ## Navigation phase model
 
@@ -128,6 +129,35 @@ extension already awaited, not driving a live event subscription. A live
 readiness event stream (extension subscribing to `Page/Network` events and
 reporting `network.activity` / repeated `dom.changed` while a page settles) is
 the remaining follow-up that lets the Runtime *own* the wait.
+
+`waitForReadiness.ts` (issue #601) provides the live-wait primitive for that
+follow-up: `waitForReadiness(controller, { source, deadlineMs })` subscribes to a
+`bridge.onRuntimeEvent` / `onGenerationChanged` source, feeds events into the
+controller, and resolves via a `PendingWait` when the Runtime state machine
+reaches `readable` / `failed` or the wall-clock deadline elapses — producing
+phase / committed URL / readyState diagnostics on timeout to guide the caller
+toward `browser_wait`. This is the mechanism that will replace the runtime's
+post-hoc review once the extension emits a live (CDP `Page`/`Network`) stream;
+the synchronous replayers (`openReadiness` / `interactionSettle`) remain the
+current production path until block 1 (extension fire-and-forget navigate +
+live CDP event reporting) lands.
+
+**Live readiness emission (block 1, in progress):** the extension now emits a
+genuine live readiness stream **in addition to** the snapshot-derived events:
+`liveReadiness.ts` is the pure CDP → `BrowserRuntimeEvent` translator (tested in
+isolation, mirroring `pageReadiness.ts`), and `background.ts` allowlists
+`Page.enable`/`Network.enable` and registers `chrome.debugger.onEvent` (maps
+`Page.frameNavigated` → live `navigation.committed`) + `chrome.tabs.onUpdated`
+(maps status `complete` → live `document.ready`). These posts are additive — the
+`browser_open` snapshot-return contract is preserved. Stateful live facts
+(`Network.*` inflight deltas, repeated hydration DOM samples) are intentionally
+**not** wired yet: they need per-tab counters validated against real Chrome; the
+pure translators (`networkActivityEvent`, `domChangedEvent`, `liveReadinessBurst`)
+are unit-tested and ready. Wiring `waitForReadiness` into `ChromeExtensionBrowserSession.open()`
+(so the Runtime owns the wait) is the final flip — it requires navigate to become
+fire-and-forget so the live stream can conclude readiness before the round-trip
+returns, which is the remaining block-1 slice and will be done once the live
+event path is validated in a real Chrome session.
 
 **Interaction settle (issue step 4, current scope):** `interactionSettle.ts` is
 the pure post-interaction settle driver (mirroring `openReadiness`), and

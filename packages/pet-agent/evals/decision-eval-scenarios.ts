@@ -1,22 +1,12 @@
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import {
-  buildDelegationOutcomeCurrentTaskContext,
-  buildDelegationOutcomeDecisionInput,
-  buildDelegationOutcomeDecisionSystemPrompt,
-  buildDelegationOutcomeOtherTasksContext,
-  buildDelegationOutcomeRemainingPlanContext,
-  buildPreparedRequestContext,
   buildRunDelegationSummaryContext,
   buildRuntimeContext,
-  buildRunUserGoalContext,
-  buildSubagentAnnounceContext,
   buildEntryDecisionInput,
   buildEntryDecisionSystemPrompt,
 } from '../src/agent/orchestrator/prompts.ts';
 import {
-  buildDelegationOutcomeDecisionOutputInstruction,
-  buildDelegationOutcomeDecisionSchema,
   buildOrchestrationDecisionStructuredOutputOptions,
   buildEntryDecisionOutputInstruction,
   buildEntryDecisionSchema,
@@ -25,16 +15,14 @@ import type { AgentModels } from '../src/types/agent.ts';
 import type { StructuredOutputMethod } from '../src/utils/structuredOutput.ts';
 import {
   scoreEntryDecision,
-  scoreOutcomeDecision,
   type DecisionContractScore,
 } from './decision-contract-scorers.ts';
 import {
   entryDecisionBasicsDataset,
-  outcomeDecisionBasicsDataset,
 } from './datasets/index.ts';
 import type { PromptEvalJudge } from './prompt-goal-evaluator.ts';
 
-export type DecisionEvalTarget = 'entry' | 'outcome';
+export type DecisionEvalTarget = 'entry';
 
 export type RenderedDecisionPrompt = {
   system: string;
@@ -52,8 +40,7 @@ export type DecisionEvalRunResult = {
 
 export type DecisionEvalScenario = {
   target: DecisionEvalTarget;
-  contract: 'entry.result-availability'
-    | 'outcome.announce-verdict';
+  contract: 'entry.result-availability';
   objective: string;
   datasetName: string;
   caseId: string;
@@ -140,85 +127,7 @@ function entryScenarios(): DecisionEvalScenario[] {
   });
 }
 
-function outcomeScenarios(): DecisionEvalScenario[] {
-  return outcomeDecisionBasicsDataset.cases.map((testCase) => {
-    const delegationId = 'eval-delegation';
-    const render = (method?: StructuredOutputMethod): RenderedDecisionPrompt => ({
-      system: buildDelegationOutcomeDecisionSystemPrompt({
-        actor,
-        outputInstruction: buildDelegationOutcomeDecisionOutputInstruction(method),
-      }),
-      input: buildDelegationOutcomeDecisionInput({
-        runUserGoalContext: buildRunUserGoalContext({
-          objective: testCase.input.userGoal,
-          context: null,
-        }),
-        userIntentContext: buildPreparedRequestContext({
-          latestUserRequest: testCase.input.userGoal,
-          recentMessages: [new HumanMessage(testCase.input.userGoal)],
-        }),
-        currentTaskContext: buildDelegationOutcomeCurrentTaskContext({
-          id: delegationId,
-          lane: 'capability:general',
-          task: testCase.input.currentTask,
-          contextSummary: null,
-        }),
-        subagentAnnounceContext: buildSubagentAnnounceContext({
-          lane: 'capability:general',
-          delegationId,
-          task: testCase.input.currentTask,
-          text: testCase.input.announce,
-        }, 'natural'),
-        otherTasksContext: buildDelegationOutcomeOtherTasksContext(
-          (testCase.input.completedHandoffs ?? []).map((resultPreview, index) => ({
-            id: `completed-${index.toString()}`,
-            lane: 'capability:general',
-            task: `Completed task ${(index + 1).toString()}`,
-            status: 'completed',
-            resultPreview,
-          })),
-          delegationId,
-        ),
-        remainingPlanContext: buildDelegationOutcomeRemainingPlanContext(
-          testCase.input.remainingPlan ?? [],
-        ),
-      }),
-    });
-    return {
-      target: 'outcome',
-      contract: 'outcome.announce-verdict',
-      objective: `Judge the current announce as ${testCase.expected.outcome}. ${testCase.expected.reason}`,
-      datasetName: outcomeDecisionBasicsDataset.name,
-      caseId: testCase.id,
-      caseName: testCase.name,
-      expectedSummary: testCase.expected.outcome,
-      render,
-      async run(model, method, config) {
-        const schema = buildDelegationOutcomeDecisionSchema();
-        const raw = await model.withStructuredOutput(
-          schema,
-          buildOrchestrationDecisionStructuredOutputOptions({ method }),
-        ).invoke(messages(render(method)), config);
-        const decision = schema.parse(raw);
-        const output = { outcome: decision.outcome, gapNote: decision.gap_note ?? null };
-        return {
-          output,
-          scores: scoreOutcomeDecision({ outcome: decision.outcome }, testCase.expected),
-          verdict: decision.outcome,
-          shape: decision.gap_note ? 'gapNote=1' : 'gapNote=0',
-          diagnostics: {
-            gapNotePresent: Boolean(decision.gap_note),
-          },
-        };
-      },
-    };
-  });
-}
-
 export function getDecisionEvalScenarios(target?: DecisionEvalTarget): DecisionEvalScenario[] {
-  const scenarios = [
-    ...entryScenarios(),
-    ...outcomeScenarios(),
-  ];
+  const scenarios = entryScenarios();
   return target ? scenarios.filter((scenario) => scenario.target === target) : scenarios;
 }

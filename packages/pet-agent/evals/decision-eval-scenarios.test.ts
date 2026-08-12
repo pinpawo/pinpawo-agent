@@ -13,14 +13,12 @@ function structuredModel(output: Record<string, unknown>) {
 test('decision eval scenarios cover every canonical prompt distribution', () => {
   assert.deepEqual({
     entry: getDecisionEvalScenarios('entry').length,
-    outcome: getDecisionEvalScenarios('outcome').length,
-  }, { entry: 17, outcome: 8 });
+  }, { entry: 17 });
 });
 
 test('decision eval scenarios render complete production messages', () => {
   const inputRoots = {
     entry: 'entry_decision_context',
-    outcome: 'delegation_outcome_input',
   } as const;
   for (const scenario of getDecisionEvalScenarios()) {
     const prompt = scenario.render();
@@ -32,15 +30,8 @@ test('decision eval scenarios render complete production messages', () => {
     );
     const metrics = measureDecisionPrompt(prompt);
     assert.ok(metrics.totalChars >= prompt.system.length + prompt.input.length + 1);
-    if (scenario.target === 'entry') {
-      assert.ok(prompt.conversationMessages?.length);
-      assert.equal(prompt.conversationMessages?.at(-1)?._getType(), 'human');
-    } else {
-      assert.match(
-        prompt.input,
-        /<remaining_plan role="planning_context" authority="advisory">/,
-      );
-    }
+    assert.ok(prompt.conversationMessages?.length);
+    assert.equal(prompt.conversationMessages?.at(-1)?._getType(), 'human');
     assert.ok(metrics.approximateTokens > 0);
     assert.ok(metrics.sharedPrefixPercent > 0);
   }
@@ -49,19 +40,19 @@ test('decision eval scenarios render complete production messages', () => {
 test('decision stability summary separates schema and invocation failures', () => {
   const summary = summarizeDecisionStability([
     {
-      target: 'outcome', caseId: 'case-1', contract: 'outcome.announce-verdict', objective: 'Complete the goal.', repeat: 1, goalAchieved: true, durationMs: 10,
+      target: 'entry', caseId: 'case-1', contract: 'entry.result-availability', objective: 'Complete the goal.', repeat: 1, goalAchieved: true, durationMs: 10,
       verdict: 'goal_done', outputShape: 'gapNote=0', outputFingerprint: 'a', criteria: [], failedCriteria: [], diagnostics: {}, failureKind: null, error: null,
       usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 }, estimatedCostUsd: 0.001,
       evaluationUsage: null, evaluationEstimatedCostUsd: null,
     },
     {
-      target: 'outcome', caseId: 'case-1', contract: 'outcome.announce-verdict', objective: 'Complete the goal.', repeat: 2, goalAchieved: false, durationMs: 20,
+      target: 'entry', caseId: 'case-1', contract: 'entry.result-availability', objective: 'Complete the goal.', repeat: 2, goalAchieved: false, durationMs: 20,
       verdict: 'task_done', outputShape: 'gapNote=1', outputFingerprint: 'b', criteria: [], failedCriteria: ['outcome_correct'], diagnostics: {}, failureKind: null, error: null,
       usage: { inputTokens: 12, outputTokens: 3, totalTokens: 15 }, estimatedCostUsd: 0.002,
       evaluationUsage: null, evaluationEstimatedCostUsd: null,
     },
     {
-      target: 'outcome', caseId: 'case-1', contract: 'outcome.announce-verdict', objective: 'Complete the goal.', repeat: 3, goalAchieved: null, durationMs: 30,
+      target: 'entry', caseId: 'case-1', contract: 'entry.result-availability', objective: 'Complete the goal.', repeat: 3, goalAchieved: null, durationMs: 30,
       verdict: null, outputShape: null, outputFingerprint: null, criteria: [], failedCriteria: [], diagnostics: {}, failureKind: 'schema', error: 'invalid output',
       usage: null, estimatedCostUsd: null,
       evaluationUsage: null, evaluationEstimatedCostUsd: null,
@@ -85,11 +76,6 @@ test('decision eval scenarios invoke, parse, normalize, and score each target', 
       target: 'entry' as const,
       name: 'answer-from-existing-context',
       output: { action: 'answer', task: null, context_summary: null },
-    },
-    {
-      target: 'outcome' as const,
-      name: 'goal-clearly-complete',
-      output: { outcome: 'goal_done', gap_note: null },
     },
   ];
   for (const item of cases) {

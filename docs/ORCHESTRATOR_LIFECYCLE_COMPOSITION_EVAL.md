@@ -141,3 +141,6 @@ the unchanged lifecycle profile.
 After the single-model profile is stable, it can become an input to the
 multi-model contract validation tracked separately. Cross-model comparison
 must not change the cases, criteria, executor evidence, or evaluator ownership.
+> Architecture update: the standalone `outcomeDecision` model boundary was
+> removed. Lifecycle evaluation should record the private Planner's typed
+> boundary action instead. See `PERSISTENT_PRIVATE_PLANNER_REFACTOR_ISSUE.md`.

@@ -190,6 +190,32 @@ test('grep_search searches complete Capability documents', async (t) => {
   );
 });
 
+test('Planner reads verified General as its default Capability context', async (t) => {
+  const { workspace } = await workspaceFixture(t);
+  const explorer = createCapabilityPlannerFileExplorer({ workspace });
+
+  const defaultCapability = await explorer.readDefaultCapability();
+
+  assert.equal(defaultCapability?.capabilityName, 'general');
+  assert.equal(defaultCapability?.path, 'general/CAPABILITY.md');
+  assert.match(defaultCapability?.content ?? '', /Handle ordinary local work/);
+});
+
+test('grep_search remains pure discovery after a literal miss', async (t) => {
+  const { workspace } = await workspaceFixture(t);
+  const explorer = createCapabilityPlannerFileExplorer({ workspace });
+
+  const result = await invoke(
+    explorer,
+    CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+    { query: 'list files directory' },
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.data?.matches, []);
+  assert.equal('fallback' in (result.data ?? {}), false);
+});
+
 test('memory backend is explicit and preserves complete registry search results', async (t) => {
   const { workspace } = await workspaceFixture(t);
   const filesystem = createCapabilityPlannerFileExplorer({ workspace });
@@ -237,12 +263,17 @@ test('grep_search enforces compact queries without an active Planner graph', asy
   assert.equal(second.ok, true);
 });
 
-test('grep_search rejects tampered documents when they are returned', async (t) => {
+test('Planner document reads reject tampered workspace content', async (t) => {
   const { workspace } = await workspaceFixture(t);
   const documentPath = join(workspace.rootPath, 'general', 'CAPABILITY.md');
   await chmod(documentPath, 0o644);
   await writeFile(documentPath, 'tampered', 'utf8');
   const explorer = createCapabilityPlannerFileExplorer({ workspace });
+
+  await assert.rejects(
+    explorer.readDefaultCapability(),
+    { code: 'document_tampered' },
+  );
 
   const unaffectedSearch = await invoke(
     explorer,
@@ -322,4 +353,5 @@ test('grep_search returns no candidates for an empty Capability workspace', asyn
   assert.equal(result.ok, true);
   assert.deepEqual(result.data?.matches, []);
   assert.equal(result.data?.complete, true);
+  assert.equal(await explorer.readDefaultCapability(), null);
 });

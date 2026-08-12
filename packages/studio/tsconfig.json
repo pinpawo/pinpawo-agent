@@ -5,7 +5,6 @@
     "moduleResolution": "bundler",
     "baseUrl": ".",
     "paths": {
-      "@pinpawo/agent-contracts": ["../agent-contracts/src/index.ts"],
       "@pinpawo/pet-agent": ["../pet-agent/src/index.ts"]
     },
     "strict": true,

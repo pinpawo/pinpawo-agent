@@ -64,6 +64,9 @@ test('BrowserRuntime routes separate thread workspaces with distinct opaque exte
   const bridge = {
     async sendCommand(command: string, params: Record<string, unknown>) {
       calls.push({ command, params });
+      if (command === 'navigate') {
+        return { ok: true };
+      }
       return {
         title: 'Example',
         url: String(params.url ?? 'https://example.com/page'),
@@ -74,12 +77,6 @@ test('BrowserRuntime routes separate thread workspaces with distinct opaque exte
     },
     getStatus() {
       return status;
-    },
-    onRuntimeEvent() {
-      return () => {};
-    },
-    onGenerationChanged() {
-      return () => {};
     },
   } as unknown as BrowserExtensionBridge;
   const runtime = new BrowserRuntime(
@@ -93,10 +90,10 @@ test('BrowserRuntime routes separate thread workspaces with distinct opaque exte
   await first.session.open('https://example.com/first', {}, first.owner);
   await second.session.open('https://example.com/second', {}, second.owner);
 
-  const firstContextId = calls[0]?.params.browserContextId;
-  const secondContextId = calls[1]?.params.browserContextId;
-  assert.equal(calls[0]?.command, 'navigate');
-  assert.equal(calls[1]?.command, 'navigate');
+  const navigations = calls.filter((call) => call.command === 'navigate');
+  const firstContextId = navigations[0]?.params.browserContextId;
+  const secondContextId = navigations[1]?.params.browserContextId;
+  assert.equal(navigations.length, 2);
   assert.equal(typeof firstContextId, 'string');
   assert.equal(typeof secondContextId, 'string');
   assert.notEqual(firstContextId, secondContextId);
@@ -128,10 +125,14 @@ test('BrowserRuntime broadcasts an unscoped reconnect to every thread workspace'
     targetGeneration: 1,
   };
   const bridge = {
-    async sendCommand() {
+    beginNavigation() {
+      return 1;
+    },
+    async sendCommand(command: string) {
       for (const listener of generationListeners) {
         listener({ connectionGeneration: 2, targetGeneration: 1 });
       }
+      if (command === 'navigate') return { ok: true };
       return {
         title: 'Example',
         url: 'https://example.com/page',

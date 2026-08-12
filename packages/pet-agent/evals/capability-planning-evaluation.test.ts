@@ -91,7 +91,7 @@ test('planner goal evaluation rejects a semantically wrong plan with the correct
     input: testCase.input,
     expected: testCase.expected,
     output: {
-      result: 'plan',
+      result: 'execute_plan',
       nextTask: '探索 auth 模块现有结构和风险',
       capabilityName: 'explore',
       remainingPlan: [{

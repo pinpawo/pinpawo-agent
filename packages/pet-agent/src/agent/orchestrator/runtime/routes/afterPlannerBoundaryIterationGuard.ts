@@ -8,10 +8,10 @@ import type { OrchestratorStateType } from '../../state';
 import { getInvokeOptions } from '../config';
 import { guardDecisionEmitter } from '../guards/decisionEvents';
 
-export function createAfterDelegationOutcomeIterationGuard(params: {
+export function createAfterPlannerBoundaryIterationGuard(params: {
   orchestratorMaxIterations: number;
 }) {
-  return function afterDelegationOutcomeIterationGuard(
+  return function afterPlannerBoundaryIterationGuard(
     state: OrchestratorStateType,
     runnableConfig?: RunnableConfig,
   ) {
@@ -20,12 +20,12 @@ export function createAfterDelegationOutcomeIterationGuard(params: {
     const outcome = evaluateGuard(runIterationLimitGuard, {
       state,
       config: { runIterationLimit },
-      position: ORCHESTRATOR_GUARD_POSITION.DELEGATION_OUTCOME_ITERATION,
+      position: ORCHESTRATOR_GUARD_POSITION.PLANNER_BOUNDARY_ITERATION,
     }, {
       emit: guardDecisionEmitter(runnableConfig),
       runId: state.runId,
       iteration: state.runIterationCount,
     });
-    return outcome.kind === 'stop' ? 'answer' : 'delegationOutcomeDecision';
+    return outcome.kind === 'stop' ? 'answer' : 'capabilityPlanner';
   };
 }

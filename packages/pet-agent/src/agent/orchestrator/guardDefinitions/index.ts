@@ -13,12 +13,6 @@ export {
   type ContextCompactionWatermarkGuardState,
 } from './contextCompactionWatermarkGuard';
 export {
-  ACTIVE_DELEGATION_LIMIT_REACHED,
-  DELEGATION_HANDOFF_ALLOWED,
-  delegationOutcomeDecisionGuard,
-  type DelegationOutcomeDecisionGuardState,
-} from './delegationOutcomeDecisionGuard';
-export {
   RUN_ITERATION_LIMIT_REACHED,
   runIterationLimitGuard,
   type RunIterationLimitGuardState,

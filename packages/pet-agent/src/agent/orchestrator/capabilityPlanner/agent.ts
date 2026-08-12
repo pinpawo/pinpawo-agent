@@ -1,5 +1,6 @@
 import {
   HumanMessage,
+  RemoveMessage,
   SystemMessage,
   ToolMessage,
   type BaseMessage,
@@ -7,50 +8,71 @@ import {
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { tool, type StructuredTool } from '@langchain/core/tools';
-import { Command } from '@langchain/langgraph';
-import { createAgent, createMiddleware } from 'langchain';
-import { z } from 'zod';
+import { Command, END, REMOVE_ALL_MESSAGES } from '@langchain/langgraph';
 import {
-  CAPABILITY_PLANNER_GREP_STATE_SCHEMA,
+  createAgent,
+  createMiddleware,
+  toolCallLimitMiddleware,
+} from 'langchain';
+import { z } from 'zod';
+import { z as z4 } from 'zod/v4';
+import {
+  CAPABILITY_PLANNER_MAX_GREP_SEARCH_CALLS,
+  CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
   createCapabilityPlannerFileExplorer,
+  createCapabilityPlannerGrepSearchTool,
+  type CapabilityPlannerFileExplorer,
 } from './fileExplorer';
 import type { CapabilityRegistryBackend } from './registryDocuments';
 import {
   buildCapabilityPlannerAgentInput,
   buildCapabilityPlannerAgentSystemPrompt,
 } from '../prompts/capabilityPlannerAgent';
-import { readMessageText } from '../utils';
 import type {
   CapabilityPlannerInput,
   CapabilityPlannerResult,
   CapabilityPlannerRunner,
 } from './runner';
+import {
+  parsePlannerCommit,
+  type PlannerCommit,
+} from './protocol';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
+const DEFAULT_PRIVATE_CONTEXT_MAX_CHARS = 96_000;
+const DEFAULT_PRIVATE_CONTEXT_KEEP_INPUTS = 6;
+const PRIVATE_COMPACTION_ITEM_MAX_CHARS = 2_000;
+const PRIVATE_COMPACTION_SUMMARY_MAX_CHARS = 24_000;
+const PRIVATE_COMPACTION_MESSAGE_NAME = 'private_planner_compaction';
 const MAX_PLAN_TASKS = 24;
 const MAX_TASK_TEXT_CHARS = 500;
-const MAX_REASON_CHARS = 1_000;
-const MAX_ANSWER_CONTEXT_CHARS = 2_000;
-const MAX_QUESTION_CHARS = 1_000;
+const CONTINUE_CURRENT_TOOL_NAME = 'continue_current';
 const SUBMIT_PLAN_TOOL_NAME = 'submit_plan';
-const RETURN_TO_ANSWER_TOOL_NAME = 'return_to_answer';
-const DIRECT_TEXT_REASON = 'plan direct text';
+const COMPLETE_GOAL_TOOL_NAME = 'complete_goal';
+const REQUEST_USER_INPUT_TOOL_NAME = 'request_user_input';
+const REPORT_UNAVAILABLE_TOOL_NAME = 'report_unavailable';
 
-type SubmittedPlannerTask = {
-  capability: string;
-  task: string;
-};
-
-const plannerSubmissionStateSchema = z.object({
-  submittedPlan: z.array(z.object({
-    capability: z.string(),
-    task: z.string(),
-  })).nullable().default(null),
+const plannerPrivateStateSchema = z4.object({
+  requestedTraceId: z4.string().default(''),
+  traceId: z4.string().default(''),
+  currentInputId: z4.string().default(''),
+  currentInput: z4.custom<CapabilityPlannerInput>(),
+  registryDigest: z4.string().default(''),
+  plannerCommit: z4.custom<PlannerCommit>().nullable().default(null),
+  committedInputId: z4.string().default(''),
+  processedInputs: z4.record(
+    z4.string(),
+    z4.custom<PlannerCommit>(),
+  ).default({}),
+  compactionCount: z4.number().int().nonnegative().default(0),
 });
+
+type PlannerPrivateState = z4.infer<typeof plannerPrivateStateSchema>;
 
 export type CapabilityPlannerAgentErrorCode =
   | 'planning_limit_reached'
   | 'planning_timeout'
+  | 'planner_checkpoint_missing'
   | 'submission_required';
 
 export class CapabilityPlannerAgentError extends Error {
@@ -63,270 +85,95 @@ export class CapabilityPlannerAgentError extends Error {
   }
 }
 
-function plannerCapabilityNames(input: CapabilityPlannerInput) {
-  const availableCapabilityNames = new Set(input.workspace.capabilityNames);
-  return [...new Set([
-    ...(input.mode === 'boundary'
-      ? input.remainingPlan.map((task) => task.capability)
-      : []),
-    ...input.workspace.capabilityNames,
-  ])].filter((name) => availableCapabilityNames.has(name));
+function plannerTaskSchema() {
+  return z.object({
+    capability: z.string().trim().min(1).max(200)
+      .describe('Capability that executes this task.'),
+    task: z.string().trim().min(1).max(MAX_TASK_TEXT_CHARS)
+      .describe('A complete executable instruction for that Capability.'),
+  });
 }
 
-function createPlannerSubmissionTools(
-  input: CapabilityPlannerInput,
-): StructuredTool[] {
-  const orderedCapabilityNames = plannerCapabilityNames(input);
-  const [firstCapabilityName, ...otherCapabilityNames] = orderedCapabilityNames;
-  const returnToAnswerTool = tool(
-    async ({
-      reason,
-      context,
-      question,
-    }: {
-      reason: string;
-      context: string;
-      question?: string;
-    }) => JSON.stringify({
-      reason,
-      context,
-      question: question ?? null,
-    }),
+function plannerTasksSchema() {
+  return z.array(plannerTaskSchema()).min(1).max(MAX_PLAN_TASKS)
+    .describe('Ordered execution boundaries. Keep continuous work by one Capability in one task.');
+}
+
+function assertNoConsecutiveCapability(tasks: Array<{ capability: string; task: string }>) {
+  if (tasks.some((task, index) =>
+    index > 0 && task.capability === tasks[index - 1]?.capability,
+  )) {
+    throw new Error(
+      'Consecutive tasks use the same Capability. Combine them into one complete task.',
+    );
+  }
+}
+
+function createPlannerTerminalTools(): StructuredTool[] {
+  const continueCurrent = tool(
+    async ({ tasks }: { tasks: Array<{ capability: string; task: string }> }) => {
+      assertNoConsecutiveCapability(tasks);
+      return JSON.stringify({ action: 'continue_current', tasks });
+    },
     {
-      name: RETURN_TO_ANSWER_TOOL_NAME,
-      description: 'Terminal Planner action. Return planning facts when no executable plan can proceed or user input is required. This does not decide that the user goal is complete and does not send a user-facing reply.',
-      schema: z.object({
-        reason: z.string().min(1).max(MAX_REASON_CHARS)
-          .describe('Why no execution plan should be submitted.'),
-        context: z.string().min(1).max(MAX_ANSWER_CONTEXT_CHARS)
-          .describe('Facts discovered during planning that Answer may use.'),
-        question: z.string().min(1).max(MAX_QUESTION_CHARS).optional()
-          .describe('Question Answer should ask the user when more input is needed.'),
-      }),
+      name: CONTINUE_CURRENT_TOOL_NAME,
+      description: 'Terminal Planner action. The current task is incomplete; continue the same active delegation, with optional future tasks after the first item.',
+      schema: z.object({ tasks: plannerTasksSchema() }),
     },
   );
-  if (!firstCapabilityName) {
-    return [returnToAnswerTool];
-  }
-
-  const capabilityNames = [
-    firstCapabilityName,
-    ...otherCapabilityNames,
-  ] as [string, ...string[]];
-  const submitPlanTool = tool(
-    async ({ tasks }: {
-      tasks: Array<{ capability: string; task: string }>;
-    }) => {
-      if (tasks.some((task, index) =>
-        index > 0 && task.capability === tasks[index - 1]?.capability,
-      )) {
-        throw new Error(
-          'Consecutive tasks use the same Capability. Combine them into one complete task.',
-        );
-      }
-      return JSON.stringify({ tasks });
+  const submitPlan = tool(
+    async ({ tasks }: { tasks: Array<{ capability: string; task: string }> }) => {
+      assertNoConsecutiveCapability(tasks);
+      return JSON.stringify({ action: 'execute_plan', tasks });
     },
     {
       name: SUBMIT_PLAN_TOOL_NAME,
-      description: 'Terminal Planner action. Submit the shortest executable task sequence that completes the user goal.',
-      schema: z.object({
-        tasks: z.array(z.object({
-          capability: z.enum(capabilityNames)
-            .describe('Capability that executes this task.'),
-          task: z.string().min(1).max(MAX_TASK_TEXT_CHARS)
-            .describe('A complete, executable task for that Capability.'),
-        })).min(1).max(MAX_PLAN_TASKS)
-          .describe('Ordered execution boundaries. The first task runs now; the rest remain planned. Keep continuous work owned by one Capability together in one task.'),
-      }),
+      description: 'Terminal Planner action. Submit the shortest executable task sequence. At a boundary this means the current task is accepted.',
+      schema: z.object({ tasks: plannerTasksSchema() }),
     },
   );
-
-  return [submitPlanTool, returnToAnswerTool];
+  const completeGoal = tool(
+    async () => JSON.stringify({ action: 'goal_done', tasks: [] }),
+    {
+      name: COMPLETE_GOAL_TOOL_NAME,
+      description: 'Terminal Planner action. The accepted execution evidence completes the user goal.',
+      schema: z.object({}).strict(),
+    },
+  );
+  const requestUserInput = tool(
+    async () => JSON.stringify({ action: 'user_input_required', tasks: [] }),
+    {
+      name: REQUEST_USER_INPUT_TOOL_NAME,
+      description: 'Terminal Planner action. Further progress must wait for user input. Do not provide a question or explanation.',
+      schema: z.object({}).strict(),
+    },
+  );
+  const reportUnavailable = tool(
+    async () => JSON.stringify({ action: 'unavailable', tasks: [] }),
+    {
+      name: REPORT_UNAVAILABLE_TOOL_NAME,
+      description: 'Terminal Planner action. No available Capability can form an executable plan. Do not provide a reason or explanation.',
+      schema: z.object({}).strict(),
+    },
+  );
+  return [
+    continueCurrent,
+    submitPlan,
+    completeGoal,
+    requestUserInput,
+    reportUnavailable,
+  ];
 }
 
-function readSubmittedPlanTasks(message: ToolMessage): SubmittedPlannerTask[] | null {
+function readTerminalCommit(message: ToolMessage): unknown {
   if (message.status === 'error' || typeof message.content !== 'string') {
     return null;
   }
   try {
-    const value = JSON.parse(message.content) as { tasks?: unknown };
-    if (!Array.isArray(value.tasks) || value.tasks.length === 0) {
-      return null;
-    }
-    const tasks = value.tasks.map((task) => {
-      if (!task || typeof task !== 'object') return null;
-      const { capability, task: description } = task as {
-        capability?: unknown;
-        task?: unknown;
-      };
-      return typeof capability === 'string' && typeof description === 'string'
-        ? { capability, task: description }
-        : null;
-    });
-    return tasks.every((task): task is SubmittedPlannerTask => task !== null)
-      ? tasks
-      : null;
+    return JSON.parse(message.content);
   } catch {
     return null;
   }
-}
-
-function buildSubmittedPlanSystemPrompt(tasks: readonly SubmittedPlannerTask[]) {
-  return [
-    '【计划已完成】submit_plan 已成功提交以下计划：',
-    ...tasks.map((task, index) => `${String(index + 1)}. [${task.capability}] ${task.task}`),
-    '现在用普通文本确认以上计划已提交，并结束本轮规划。',
-  ].join('\n');
-}
-
-function plannerToolErrorResult(params: {
-  name: string;
-  args: unknown;
-  id?: string;
-  error: unknown;
-}) {
-  const message = params.error instanceof Error
-    ? params.error.message
-    : String(params.error);
-  return new ToolMessage({
-    content: `Error invoking tool '${params.name}' with kwargs ${JSON.stringify(params.args)} with error: ${message}\nPlease fix the error and try again.`,
-    tool_call_id: params.id ?? '',
-    name: params.name,
-    status: 'error',
-  });
-}
-
-/**
- * A successful `submit_plan` stays private to one Capability Planner invocation.
- */
-function createPlannerSubmissionStateMiddleware() {
-  return createMiddleware({
-    name: 'CapabilityPlannerSubmissionState',
-    stateSchema: plannerSubmissionStateSchema,
-    wrapToolCall: async (request, handler) => {
-      let result: ToolMessage | Command;
-      try {
-        result = await handler(request);
-      } catch (error) {
-        const errorResult = plannerToolErrorResult({
-          name: request.toolCall.name,
-          args: request.toolCall.args,
-          id: request.toolCall.id,
-          error,
-        });
-        return errorResult;
-      }
-      if (
-        request.toolCall.name !== SUBMIT_PLAN_TOOL_NAME
-        || !ToolMessage.isInstance(result)
-      ) {
-        return result;
-      }
-      const submittedPlan = readSubmittedPlanTasks(result);
-      if (!submittedPlan) {
-        return result;
-      }
-      return new Command({
-        update: {
-          messages: [result],
-          submittedPlan,
-        },
-      });
-    },
-    wrapModelCall: (request, handler) => {
-      const submittedPlan = request.state.submittedPlan;
-      if (!submittedPlan) {
-        return handler(request);
-      }
-      return handler({
-        ...request,
-        systemMessage: request.systemMessage.concat(
-          buildSubmittedPlanSystemPrompt(submittedPlan),
-        ),
-      });
-    },
-  });
-}
-
-function readPlannerSubmission(
-  messages: readonly BaseMessage[],
-  plannerMessageStart: number,
-): CapabilityPlannerResult | null {
-  for (const message of [...messages].reverse()) {
-    if (!(message instanceof ToolMessage)
-      || (message.name !== SUBMIT_PLAN_TOOL_NAME
-        && message.name !== RETURN_TO_ANSWER_TOOL_NAME)
-      || typeof message.content !== 'string') {
-      continue;
-    }
-
-    let value: unknown;
-    try {
-      value = JSON.parse(message.content);
-    } catch {
-      // Tool validation errors are also ToolMessages. They are feedback for the
-      // model, not a completed planner submission.
-      continue;
-    }
-    if (!value || typeof value !== 'object') continue;
-
-    if (message.name === SUBMIT_PLAN_TOOL_NAME) {
-      const tasks = (value as { tasks?: unknown }).tasks;
-      if (!Array.isArray(tasks) || tasks.some((task) =>
-        !task || typeof task !== 'object'
-        || typeof (task as { capability?: unknown }).capability !== 'string'
-        || typeof (task as { task?: unknown }).task !== 'string',
-      )) {
-        continue;
-      }
-      return {
-        tasks: tasks as Array<{ capability: string; task: string }>,
-      };
-    }
-
-    const {
-      reason,
-      context,
-      question,
-    } = value as {
-      reason?: unknown;
-      context?: unknown;
-      question?: unknown;
-    };
-    if (
-      typeof reason === 'string'
-      && typeof context === 'string'
-      && (typeof question === 'string' || question === null || question === undefined)
-    ) {
-      return {
-        answer: {
-          reason,
-          context,
-          question: typeof question === 'string' ? question : null,
-        },
-      };
-    }
-  }
-
-  for (
-    let index = messages.length - 1;
-    index >= plannerMessageStart;
-    index -= 1
-  ) {
-    const message = messages[index];
-    if (!message || message._getType() !== 'ai') continue;
-    const text = readMessageText(message);
-    if (!text) continue;
-    return {
-      answer: {
-        reason: DIRECT_TEXT_REASON,
-        context: text.slice(0, MAX_ANSWER_CONTEXT_CHARS),
-        question: null,
-      },
-    };
-  }
-
-  return null;
 }
 
 function mergePlannerSignal(
@@ -354,100 +201,236 @@ function assertPositiveInteger(value: number, label: string) {
   }
 }
 
+function readPrivateMessageText(message: BaseMessage) {
+  if (typeof message.content === 'string') return message.content;
+  try {
+    return JSON.stringify(message.content);
+  } catch {
+    return String(message.content);
+  }
+}
+
+function clipPrivateText(value: string, maxChars: number) {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, maxChars)}\n[private Planner context truncated]`;
+}
+
+function buildPrivateCompactionSummary(messages: readonly BaseMessage[]) {
+  const facts: string[] = [];
+  for (const message of messages) {
+    const text = readPrivateMessageText(message).trim();
+    if (!text) continue;
+    if (message._getType() === 'system'
+      && message.name === PRIVATE_COMPACTION_MESSAGE_NAME) {
+      facts.push(text);
+      continue;
+    }
+    if (message._getType() === 'human'
+      && message.id?.startsWith('planner:')) {
+      facts.push(`Planner input:\n${clipPrivateText(text, PRIVATE_COMPACTION_ITEM_MAX_CHARS)}`);
+      continue;
+    }
+    if (ToolMessage.isInstance(message)) {
+      const label = [
+        CONTINUE_CURRENT_TOOL_NAME,
+        SUBMIT_PLAN_TOOL_NAME,
+        COMPLETE_GOAL_TOOL_NAME,
+        REQUEST_USER_INPUT_TOOL_NAME,
+        REPORT_UNAVAILABLE_TOOL_NAME,
+      ].includes(message.name ?? '')
+        ? 'Planner commit'
+        : `Private tool observation (${message.name ?? 'unknown'})`;
+      facts.push(`${label}:\n${clipPrivateText(text, PRIVATE_COMPACTION_ITEM_MAX_CHARS)}`);
+    }
+  }
+  return clipPrivateText([
+    '<private_planner_compaction>',
+    'Private task history retained for later planning. This content must never leave the Planner checkpoint.',
+    ...facts,
+    '</private_planner_compaction>',
+  ].join('\n\n'), PRIVATE_COMPACTION_SUMMARY_MAX_CHARS);
+}
+
+function compactPrivatePlannerMessages(params: {
+  messages: readonly BaseMessage[];
+  maxChars: number;
+  keepInputs: number;
+}) {
+  const totalChars = params.messages.reduce(
+    (sum, message) => sum + readPrivateMessageText(message).length,
+    0,
+  );
+  if (totalChars <= params.maxChars) return null;
+  const inputIndexes = params.messages.flatMap((message, index) =>
+    message._getType() === 'human' && message.id?.startsWith('planner:')
+      ? [index]
+      : [],
+  );
+  if (inputIndexes.length <= params.keepInputs) return null;
+  const keepFrom = inputIndexes.at(-params.keepInputs);
+  if (keepFrom === undefined || keepFrom <= 0) return null;
+  const summary = new SystemMessage(
+    buildPrivateCompactionSummary(params.messages.slice(0, keepFrom)),
+  );
+  summary.name = PRIVATE_COMPACTION_MESSAGE_NAME;
+  return [
+    new RemoveMessage({ id: REMOVE_ALL_MESSAGES }),
+    summary,
+    ...params.messages.slice(keepFrom),
+  ];
+}
+
 function buildPlannerRunnableConfig(params: {
   input: CapabilityPlannerInput;
   runnableConfig?: RunnableConfig;
   signal: AbortSignal;
 }): RunnableConfig {
+  const {
+    checkpoint_id: _parentCheckpointId,
+    checkpoint_map: _parentCheckpointMap,
+    checkpoint_ns: _parentCheckpointNamespace,
+    ...configurable
+  } = params.runnableConfig?.configurable ?? {};
   return {
     ...params.runnableConfig,
+    configurable: {
+      ...configurable,
+      // The Planner is invoked manually from the root node, so LangGraph does
+      // not assign it a stable subgraph task namespace. Derive that namespace
+      // from the task identity itself; no independent Planner session id is
+      // introduced, and a new root run can reopen the latest trace checkpoint.
+      checkpoint_ns: `privateCapabilityPlanner_${params.input.traceId}`,
+    },
     signal: params.signal,
-    runName: 'framework.capability_planner',
+    runName: 'framework.private_capability_planner',
     tags: [
       ...(params.runnableConfig?.tags ?? []),
-      'framework.capability_planner',
+      'framework.private_capability_planner',
     ],
     metadata: {
       ...(params.runnableConfig?.metadata ?? {}),
-      frameworkComponent: 'capability_planner',
+      frameworkComponent: 'private_capability_planner',
+      traceId: params.input.traceId,
+      runId: params.input.runId,
+      plannerInputId: params.input.inputId,
       registryDigest: params.input.workspace.registryDigest,
       plannerMode: params.input.mode,
     },
   };
 }
 
-async function invokePlannerAgent(params: {
-  input: CapabilityPlannerInput;
-  model: BaseChatModel;
-  timeoutMs: number;
-  registryBackend: CapabilityRegistryBackend;
-  maxDocumentReadBytes?: number;
-  runnableConfig?: RunnableConfig;
-}): Promise<CapabilityPlannerResult> {
-  const explorer = createCapabilityPlannerFileExplorer({
-    workspace: params.input.workspace,
-    registryBackend: params.registryBackend,
-    ...(params.maxDocumentReadBytes
-      ? { maxDocumentReadBytes: params.maxDocumentReadBytes }
-      : {}),
-  });
-  const agent = createAgent({
-    model: params.model,
-    tools: [...explorer.tools, ...createPlannerSubmissionTools(params.input)],
-    stateSchema: CAPABILITY_PLANNER_GREP_STATE_SCHEMA,
-    systemPrompt: buildCapabilityPlannerAgentSystemPrompt(params.input.mode),
-    middleware: [createPlannerSubmissionStateMiddleware()],
-  });
-  const timeout = mergePlannerSignal(
-    params.runnableConfig?.signal,
-    params.timeoutMs,
-  );
-  const runnableConfig = buildPlannerRunnableConfig({
-    input: params.input,
-    runnableConfig: params.runnableConfig,
-    signal: timeout.signal,
-  });
-
-  try {
-    const messages = [
-      ...params.input.recentMainMessages,
-      new HumanMessage(buildCapabilityPlannerAgentInput(params.input)),
-    ];
-    timeout.signal.throwIfAborted();
-    const result = await agent.invoke({ messages }, runnableConfig);
-    // Some providers or callbacks do not stop immediately when their signal is
-    // aborted. Never accept a result produced after the deadline.
-    timeout.signal.throwIfAborted();
-
-    const submission = readPlannerSubmission(
-      result.messages,
-      messages.length,
-    );
-    if (submission) {
-      return submission;
-    }
-    if (explorer.didReachDocumentReadLimit()) {
-      throw new CapabilityPlannerAgentError(
-        'planning_limit_reached',
-        'Capability Planner document read limit was reached before a valid submission.',
-      );
-    }
-
-    throw new CapabilityPlannerAgentError(
-      'submission_required',
-      'Capability Planner must finish with a structured planning result.',
-    );
-  } catch (error) {
-    const plannerError = timeout.didTimeOut()
-      ? new CapabilityPlannerAgentError(
-          'planning_timeout',
-          `Capability Planner exceeded its ${String(params.timeoutMs)}ms timeout.`,
-        )
-      : error;
-    throw plannerError;
-  } finally {
-    timeout.dispose();
+function currentPlannerInput(state: Partial<PlannerPrivateState>) {
+  if (!state.currentInput) {
+    throw new Error('Private Planner state has no current input.');
   }
+  return state.currentInput;
+}
+
+function createPrivatePlannerMiddleware(params: {
+  privateContextMaxChars: number;
+  privateContextKeepInputs: number;
+}) {
+  return createMiddleware({
+    name: 'PrivateCapabilityPlanner',
+    stateSchema: plannerPrivateStateSchema,
+    beforeAgent: {
+      canJumpTo: ['end'],
+      hook: (state) => {
+        const input = currentPlannerInput(state);
+        const traceChanged = state.traceId !== state.requestedTraceId;
+        const registryChanged = Boolean(
+          state.registryDigest
+          && state.registryDigest !== input.workspace.registryDigest,
+        );
+        const cachedCommit = traceChanged || registryChanged
+          ? null
+          : state.committedInputId === state.currentInputId
+            ? state.plannerCommit
+            : state.processedInputs?.[state.currentInputId] ?? null;
+        const message = state.messages.find((item) =>
+          item.id === `planner:${state.currentInputId}`,
+        );
+        const resetMessages: BaseMessage[] = traceChanged || registryChanged
+          ? [
+              new RemoveMessage({ id: REMOVE_ALL_MESSAGES }),
+              ...(message ? [message] : []),
+            ]
+          : [];
+        const compactedMessages = resetMessages.length === 0
+          ? compactPrivatePlannerMessages({
+              messages: state.messages,
+              maxChars: params.privateContextMaxChars,
+              keepInputs: params.privateContextKeepInputs,
+            })
+          : null;
+        return {
+          ...(resetMessages.length > 0
+            ? { messages: resetMessages }
+            : compactedMessages
+              ? { messages: compactedMessages }
+              : {}),
+          traceId: state.requestedTraceId,
+          registryDigest: input.workspace.registryDigest,
+          plannerCommit: cachedCommit,
+          committedInputId: traceChanged || registryChanged ? '' : state.committedInputId,
+          processedInputs: traceChanged || registryChanged ? {} : state.processedInputs,
+          compactionCount: traceChanged || registryChanged
+            ? 0
+            : state.compactionCount + (compactedMessages ? 1 : 0),
+          ...(cachedCommit ? { jumpTo: 'end' as const } : {}),
+        };
+      },
+    },
+    wrapModelCall: (request, handler) => {
+      const input = currentPlannerInput(request.state);
+      if (request.state.plannerCommit) {
+        return new Command({
+          update: { jumpTo: 'end' },
+          goto: END,
+        });
+      }
+      return handler({
+        ...request,
+        systemMessage: new SystemMessage(
+          buildCapabilityPlannerAgentSystemPrompt(input.mode),
+        ),
+      });
+    },
+    wrapToolCall: async (request, handler) => {
+      const input = currentPlannerInput(request.state);
+      const result = await handler(request);
+      if (!ToolMessage.isInstance(result)
+        || ![
+          CONTINUE_CURRENT_TOOL_NAME,
+          SUBMIT_PLAN_TOOL_NAME,
+          COMPLETE_GOAL_TOOL_NAME,
+          REQUEST_USER_INPUT_TOOL_NAME,
+          REPORT_UNAVAILABLE_TOOL_NAME,
+        ].includes(request.toolCall.name)) {
+        return result;
+      }
+      const rawCommit = readTerminalCommit(result);
+      if (!rawCommit) return result;
+      const commit = parsePlannerCommit(rawCommit, {
+        mode: input.mode,
+        activeDelegation: input.activeDelegation,
+        allowedCapabilityNames: input.workspace.capabilityNames,
+      });
+      return new Command({
+        update: {
+          messages: [result],
+          plannerCommit: commit,
+          committedInputId: input.inputId,
+          processedInputs: {
+            ...(request.state.processedInputs ?? {}),
+            [input.inputId]: commit,
+          },
+          jumpTo: 'end',
+        },
+        goto: END,
+      });
+    },
+  });
 }
 
 export function createCapabilityPlannerAgent(params: {
@@ -455,6 +438,12 @@ export function createCapabilityPlannerAgent(params: {
   timeoutMs?: number;
   registryBackend?: CapabilityRegistryBackend;
   maxDocumentReadBytes?: number;
+  /** Private checkpoint transcript budget before deterministic compaction. */
+  privateContextMaxChars?: number;
+  /** Recent Planner inputs retained verbatim after private compaction. */
+  privateContextKeepInputs?: number;
+  /** Private Planner-only tools, primarily for host middleware and HITL. */
+  additionalPrivateTools?: StructuredTool[];
 }): CapabilityPlannerRunner {
   const timeoutMs = params.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   assertPositiveInteger(timeoutMs, 'Capability Planner timeoutMs');
@@ -464,20 +453,164 @@ export function createCapabilityPlannerAgent(params: {
       'Capability Planner maxDocumentReadBytes',
     );
   }
+  const privateContextMaxChars = params.privateContextMaxChars
+    ?? DEFAULT_PRIVATE_CONTEXT_MAX_CHARS;
+  const privateContextKeepInputs = params.privateContextKeepInputs
+    ?? DEFAULT_PRIVATE_CONTEXT_KEEP_INPUTS;
+  assertPositiveInteger(privateContextMaxChars, 'Capability Planner privateContextMaxChars');
+  assertPositiveInteger(privateContextKeepInputs, 'Capability Planner privateContextKeepInputs');
 
-  return Object.freeze({
-    invoke: (
-      input: CapabilityPlannerInput,
-      runnableConfig?: RunnableConfig,
-    ) => invokePlannerAgent({
-      input,
-      model: params.model,
-      timeoutMs,
+  const explorers = new Map<string, CapabilityPlannerFileExplorer>();
+  const explorerForInput = (input: CapabilityPlannerInput) => {
+    const existing = explorers.get(input.inputId);
+    if (existing) return existing;
+    const explorer = createCapabilityPlannerFileExplorer({
+      workspace: input.workspace,
       registryBackend: params.registryBackend ?? 'filesystem',
       ...(params.maxDocumentReadBytes
         ? { maxDocumentReadBytes: params.maxDocumentReadBytes }
         : {}),
-      runnableConfig,
-    }),
+    });
+    explorers.set(input.inputId, explorer);
+    return explorer;
+  };
+  const terminalTools = createPlannerTerminalTools();
+  const additionalPrivateTools = params.additionalPrivateTools ?? [];
+  const grepSearchTool = createCapabilityPlannerGrepSearchTool<PlannerPrivateState>(
+    (query, runtime) => explorerForInput(
+      currentPlannerInput(runtime.state),
+    ).search(query, runtime.signal),
+  );
+  const grepSearchLimitMiddleware = toolCallLimitMiddleware({
+    toolName: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+    runLimit: CAPABILITY_PLANNER_MAX_GREP_SEARCH_CALLS,
+    exitBehavior: 'continue',
+  });
+  const middleware = createPrivatePlannerMiddleware({
+    privateContextMaxChars,
+    privateContextKeepInputs,
+  });
+  const buildAgent = (checkpointer: boolean) => createAgent({
+    name: 'privateCapabilityPlanner',
+    model: params.model,
+    tools: [grepSearchTool, ...terminalTools, ...additionalPrivateTools],
+    systemPrompt: '',
+    middleware: [grepSearchLimitMiddleware, middleware],
+    checkpointer,
+  });
+  // These are the two standard LangGraph subgraph persistence modes used by
+  // this runner. Production uses per-thread persistence (`true`) inherited
+  // from the parent; direct tests/evals use the precompiled stateless adapter
+  // (`false`). Neither graph is rebuilt per Planner invocation.
+  const persistentAgent = buildAgent(true);
+  const statelessDirectAgent = buildAgent(false);
+
+  return Object.freeze({
+    async invoke(
+      input: CapabilityPlannerInput,
+      runnableConfig?: RunnableConfig,
+    ): Promise<CapabilityPlannerResult> {
+      const timeout = mergePlannerSignal(runnableConfig?.signal, timeoutMs);
+      const config = buildPlannerRunnableConfig({
+        input,
+        runnableConfig,
+        signal: timeout.signal,
+      });
+      try {
+        timeout.signal.throwIfAborted();
+        const hasParentCheckpointer = Boolean(
+          runnableConfig?.configurable?.__pregel_checkpointer,
+        );
+        const selectedAgent = hasParentCheckpointer
+          ? persistentAgent
+          : statelessDirectAgent;
+        if (hasParentCheckpointer) {
+          const snapshot = await persistentAgent.graph.getState(config);
+          const saved = snapshot.values as Partial<PlannerPrivateState>;
+          if (input.mode === 'boundary' && saved.traceId !== input.traceId) {
+            throw new CapabilityPlannerAgentError(
+              'planner_checkpoint_missing',
+              `Capability Planner checkpoint is missing for trace ${input.traceId}.`,
+            );
+          }
+          if (saved.traceId === input.traceId
+            && saved.registryDigest
+            && saved.registryDigest !== input.workspace.registryDigest) {
+            await persistentAgent.graph.updateState(config, {
+              messages: [new RemoveMessage({ id: REMOVE_ALL_MESSAGES })],
+              requestedTraceId: input.traceId,
+              traceId: input.traceId,
+              currentInputId: input.inputId,
+              currentInput: input,
+              registryDigest: input.workspace.registryDigest,
+              plannerCommit: null,
+              committedInputId: '',
+              processedInputs: {},
+              compactionCount: 0,
+            });
+          }
+          const cachedCommit = saved.traceId === input.traceId
+            && saved.registryDigest === input.workspace.registryDigest
+            ? saved.processedInputs?.[input.inputId]
+              ?? (saved.committedInputId === input.inputId
+                ? saved.plannerCommit
+                : null)
+            : null;
+          if (cachedCommit) {
+            return parsePlannerCommit(cachedCommit, {
+              mode: input.mode,
+              activeDelegation: input.activeDelegation,
+              allowedCapabilityNames: input.workspace.capabilityNames,
+            });
+          }
+        }
+        const explorer = explorerForInput(input);
+        const defaultCapability = await explorer.readDefaultCapability(
+          timeout.signal,
+        );
+        const result = await selectedAgent.invoke({
+          messages: [new HumanMessage({
+            id: `planner:${input.inputId}`,
+            content: buildCapabilityPlannerAgentInput(
+              input,
+              defaultCapability,
+            ),
+          })],
+          requestedTraceId: input.traceId,
+          currentInputId: input.inputId,
+          currentInput: input,
+          registryDigest: input.workspace.registryDigest,
+        }, config);
+        timeout.signal.throwIfAborted();
+        if (result.plannerCommit) {
+          return parsePlannerCommit(result.plannerCommit, {
+            mode: input.mode,
+            activeDelegation: input.activeDelegation,
+            allowedCapabilityNames: input.workspace.capabilityNames,
+          });
+        }
+        if (explorer.didReachDocumentReadLimit()) {
+          throw new CapabilityPlannerAgentError(
+            'planning_limit_reached',
+            'Capability Planner document read limit was reached before a valid commit.',
+          );
+        }
+        throw new CapabilityPlannerAgentError(
+          'submission_required',
+          'Capability Planner must finish with a structured commit tool.',
+        );
+      } catch (error) {
+        if (timeout.didTimeOut()) {
+          throw new CapabilityPlannerAgentError(
+            'planning_timeout',
+            `Capability Planner exceeded its ${String(timeoutMs)}ms timeout.`,
+          );
+        }
+        throw error;
+      } finally {
+        timeout.dispose();
+        explorers.delete(input.inputId);
+      }
+    },
   });
 }

@@ -14,3 +14,4 @@ export * from './controller';
 export * from './openReadiness';
 export * from './interactionSettle';
 export * from './bridgeBinding';
+export * from './waitForReadiness';

@@ -49,7 +49,7 @@ export function buildDecisionConfig(
   ].filter((line) => line !== null).join('\n');
 }
 
-// Core decision prompt prefix shared by entryDecision and outcomeDecision.
+// Core decision prompt prefix shared by root decision prompts.
 // Capability Planner owns short mode-specific prompts. Keep this synchronized with
 // docs/PET_AGENT_ORCHESTRATOR_DECISION_PROMPT_PREFIX.md.
 export function buildOrchestratorDecisionPromptPrefix(): string {

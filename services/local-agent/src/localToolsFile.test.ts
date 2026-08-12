@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test, { type TestContext } from 'node:test';
@@ -171,7 +171,9 @@ test('bash toolkit reviews write_file with preset policy', async (t) => {
   const input = { path: filePath, content: 'after\n' };
   const policy = reviewPolicyFor('write_file');
   const context = reviewContext('write_file', input);
-  const authorizationMatcher = await policy.authorization?.buildMatcher(context);
+  const buildMatcher = policy.authorization?.buildMatcher;
+  assert.ok(buildMatcher);
+  const authorizationMatcher = await buildMatcher(context);
 
   const review = await policy.request({
     ...context,
@@ -210,6 +212,55 @@ test('bash toolkit reviews apply_patch with resolved file paths', async (t) => {
   assert.equal(view.title, '应用补丁');
   assert.match(view.patch, /\*\*\* Update File/);
   assert.match(view.target ?? '', new RegExp(filePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
+
+test('auto review deterministically authorizes safe apply_patch execution', async (t) => {
+  const root = createFileFixture(t);
+  const outsideRoot = createFileFixture(t);
+  const insidePath = resolve(root, 'inside.txt');
+  const outsidePath = resolve(outsideRoot, 'outside.txt');
+  writeFileSync(insidePath, 'before\n', 'utf-8');
+  writeFileSync(outsidePath, 'before\n', 'utf-8');
+
+  const policy = reviewPolicyFor('apply_patch');
+  const authorize = policy.authorization?.authorize;
+  assert.ok(authorize);
+  assert.equal(policy.authorization?.buildMatcher, undefined);
+  const patchInput = (path: string) => ({
+    patch: [
+      '*** Begin Patch',
+      `*** Update File: ${path}`,
+      '@@',
+      '-before',
+      '+after',
+      '*** End Patch',
+    ].join('\n'),
+  });
+
+  assert.equal(await authorize({
+    ...reviewContext('apply_patch', patchInput(insidePath)),
+    workdir: root,
+  }), true);
+  assert.equal(await authorize({
+    ...reviewContext('apply_patch', patchInput(outsidePath)),
+    workdir: root,
+  }), false);
+  if (process.platform !== 'win32') {
+    const linkedOutside = resolve(root, 'linked-outside');
+    symlinkSync(outsideRoot, linkedOutside, 'dir');
+    assert.equal(await authorize({
+      ...reviewContext('apply_patch', patchInput(resolve(linkedOutside, 'outside.txt'))),
+      workdir: root,
+    }), false);
+  }
+  assert.equal(await authorize({
+    ...reviewContext('apply_patch', { patch: 'not V4A' }),
+    workdir: root,
+  }), true);
+  assert.equal(await authorize({
+    ...reviewContext('apply_patch', {}),
+    workdir: root,
+  }), false);
 });
 
 test('bash toolkit reviews local path mutations with presets', () => {

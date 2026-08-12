@@ -17,7 +17,6 @@ import type { CapabilityRegistryBackend } from './capabilityPlanner/registryDocu
 import type { GlobalReviewPolicy } from './review/globalReviewPolicy';
 import type { ToolkitRuntimeManager } from './toolkitRuntime';
 import type { StructuredOutputAutoRepairConfig, StructuredOutputMethod } from '../../utils/structuredOutput';
-import type { DelegationOutcomeDecision } from './schemas';
 
 export type MessageLane = `capability:${string}`;
 export type PinpetMessageLane = MessageLane | 'orchestrator';
@@ -56,22 +55,14 @@ export type UserGoal = {
   context: string | null;
 };
 
-/**
- * Bounded planning facts that Answer turns into the user-facing reply when no
- * execution plan should start in this run.
- */
-export type PlannerAnswerDisposition = {
-  reason: string;
-  context: string;
-  question: string | null;
-};
-
 export type TaskActiveDelegation = {
   id: string;
   lane: MessageLane;
   task: string;
   contextSummary: string | null;
   transcriptRunId: string;
+  /** Stable user-task identity across fresh runs that resume this delegation. */
+  traceId?: string;
   status: 'pending' | 'awaiting_decision';
   resultPreview: string | null;
   /** Snapshot used to restore runUserGoal when this delegation is resumed. */
@@ -79,6 +70,7 @@ export type TaskActiveDelegation = {
 };
 
 export type SubagentAnnounce = {
+  messageId: string | null;
   lane: MessageLane;
   delegationId: string | null;
   task: string | null;
@@ -102,10 +94,6 @@ export type ToolBindableChatModel = AgentModels['act'] & {
   bindTools?: (tools: StructuredTool[], options?: Record<string, unknown>) => {
     invoke: (messages: BaseMessage[], options?: RunnableConfig) => Promise<AIMessage>;
   };
-};
-
-export type StructuredOrchestrationDecisionModel = {
-  invoke: (messages: BaseMessage[], options?: RunnableConfig) => Promise<DelegationOutcomeDecision>;
 };
 
 export type OrchestratorConfig = {

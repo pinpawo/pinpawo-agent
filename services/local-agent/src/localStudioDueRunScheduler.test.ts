@@ -42,6 +42,7 @@ function createStudioRunService(onRunStart?: () => void): StudioRunService {
     onRunStart?.();
     return {
       resolved: {} as BuildStudioResult['resolved'],
+      petCheckpointers: new Map(),
       orchestrator: {
         submitRequest: async (turn: {
           onTurnEvent?: (event: { type: string }) => void;

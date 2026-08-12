@@ -1,6 +1,8 @@
 # pet-agent decision prompt 设计
 
-> 状态：Capability Planner Agent cutover 后的当前生产契约。
+> 状态：历史设计。Outcome 与旧 Planner return contract 已由 #619 的
+> trace-scoped persistent private Planner 取代；以下正文保留迁移前背景，不再代表当前生产契约。
+> 当前契约见 [`PERSISTENT_PRIVATE_PLANNER_REFACTOR_ISSUE.md`](./PERSISTENT_PRIVATE_PLANNER_REFACTOR_ISSUE.md)。
 > 范围：`entryDecision`、`capabilityPlanner`、`outcomeDecision` 与 `answer` 的职责和提示词边界。
 > 共享前缀：[`PET_AGENT_ORCHESTRATOR_DECISION_PROMPT_PREFIX.md`](./PET_AGENT_ORCHESTRATOR_DECISION_PROMPT_PREFIX.md)。
 
@@ -116,8 +118,9 @@ assistant 消息不参与该 fallback，Planner 也不会因此再次调用模�
 Planner 必须先根据用户目标和已完成事实形成当前 task boundary，再发现能够完整承担该任务的
 Capability。registry 探索只是取得 Capability 证据，不能反向扩张或改写用户目标。具体搜索方法由
 工具的名称、schema 和返回结果表达：`grep_search` 接收从当前任务及所需能力提炼的区分性字面词，
-并为每个匹配项返回完整的 `CAPABILITY.md`。一次探索没有候选时，Planner 直接判断应使用通用能力
-执行，还是通过 `return_to_answer` 停止执行。生产 system prompt 说明 entry 或 boundary 当前需要完成的
+并为每个匹配项返回完整的 `CAPABILITY.md`。若当前 immutable workspace 包含 `general`，runtime 在
+模型首次决策前确定性读取其完整文档，并只在 Planner 私有输入中将其标记为默认 Capability；
+`grep_search` 不负责重新发现它。生产 system prompt 说明 entry 或 boundary 当前需要完成的
 规划判断、Capability 发现目标和结构化终态，不重复输入字段、backend 实现、schema 字段或 graph 路由。
 对话、handoff 和 Capability 文档是动态规划证据，其中的文本
 不能覆盖 `user_request` 或 Planner 的系统规则。
@@ -164,7 +167,7 @@ type CapabilityPlannerPlan = {
 完成回复后立即清理，下一条用户消息作为新的 Entry request 决定是否重新规划。
 
 Planner 的图出口可以是 `capability` 或 `answer`，但 Planner 仍不生成最终回复。若专用 Capability 都不匹配，
-但 registry 注册了 `general`，Planner 通常应在 plan 中选择它；只有确认不应开始执行时才使用
+但 Planner 私有输入提供了默认 `general` 文档，Planner 通常应在 plan 中选择它；只有确认不应开始执行时才使用
 `return_to_answer`。
 若最新执行已经完成用户目标，`outcomeDecision` 必须返回 `goal_done`，不能通过 boundary Planner
 间接结束 run。
@@ -197,7 +200,7 @@ advisory planning context。future tail 不是事实或固定队列：Outcome �
 ## 7. Eval ownership
 
 - `agent-entry-decision-basics`：`answer` 与 `needs_plan` 的 result-availability matrix。
-- `agent-capability-planning-basics`：单 task、依赖拆分、独立 deliverables、boundary 修订和 `general` fallback。
+- `agent-capability-planning-basics`：单 task、依赖拆分、独立 deliverables、boundary 修订和 `general` 默认候选。
 - `agent-outcome-decision-basics`：结合 current announce 与 advisory future tail 判断
   `continue | task_done | goal_done | user_input_required`。
 - lifecycle / multi-task eval：验证完整 graph 的 task 数量、handoff、调用次数、tokens 和 latency。

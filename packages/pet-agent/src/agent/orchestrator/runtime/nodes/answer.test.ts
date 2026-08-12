@@ -15,7 +15,6 @@ function state(
   return {
     messages: [],
     taskActiveDelegation: null,
-    runPlannerReturn: null,
     runNextDelegation: null,
     runIterationCount: 0,
     ...patch,

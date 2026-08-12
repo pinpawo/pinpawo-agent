@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import test from 'node:test';
 import { ChromeExtensionBrowserSession } from './session';
 import { BrowserBridgeError, type BrowserBridgeStatus } from './bridge';
+import { BrowserOperationError } from '../../errors';
 import type { BrowserRuntimeEvent } from '../../lifecycle/events';
 
 const rawSnapshot = {
@@ -33,6 +34,7 @@ test('extension session uses one approved origin and the shared payload builder'
     async sendCommand(command, params, _timeoutMs, signal) {
       calls.push({ command, params, signal });
       if (command === 'detach') return { detached: true };
+      if (command === 'navigate') return { ok: true };
       return rawSnapshot;
     },
   });
@@ -48,20 +50,22 @@ test('extension session uses one approved origin and the shared payload builder'
     params: {
       url: 'https://example.com/page',
       approvedOrigin: 'https://example.com',
-      readinessTimeoutMs: 5_000,
     },
     signal: undefined,
   });
+  // Issue #601: navigate is fire-and-forget; the backward-compatible path
+  // takes a snapshot after navigate, so calls[1] is the snapshot from open().
+  assert.equal(calls[1]?.command, 'snapshot');
 
   const controller = new AbortController();
   await session.snapshot(controller.signal);
-  assert.deepEqual(calls[1], {
+  assert.deepEqual(calls[2], {
     command: 'snapshot',
     params: { approvedOrigin: 'https://example.com' },
     signal: controller.signal,
   });
   await session.close();
-  assert.equal(calls[2]?.command, 'detach');
+  assert.equal(calls[3]?.command, 'detach');
 });
 
 test('extension session reserves navigation generation before dispatching navigate', async () => {
@@ -93,12 +97,16 @@ test('extension session reserves navigation generation before dispatching naviga
     },
     async sendCommand(command, _params, _timeoutMs, _signal, options) {
       sequence.push(`send:${command}:${String(options?.beginNavigation)}`);
-      return rawSnapshot;
+      return command === 'navigate' ? { ok: true } : rawSnapshot;
     },
   });
 
   await session.open('https://example.com/page');
-  assert.deepEqual(sequence, ['generation', 'send:navigate:false']);
+  assert.deepEqual(sequence, [
+    'generation',
+    'send:navigate:false',
+    'send:snapshot:undefined',
+  ]);
 });
 
 test('extension navigation timeout keeps the approved origin for browser_wait', async () => {
@@ -151,6 +159,7 @@ test('extension session adopts an origin only from an explicit user tab binding'
     },
     async sendCommand(command, params) {
       calls.push({ command, params });
+      if (command === 'navigate') return { ok: true };
       return rawSnapshot;
     },
   });
@@ -185,6 +194,7 @@ test('extension session does not persist a live user-bound origin as agent appro
     },
     async sendCommand(command, params) {
       calls.push({ command, params });
+      if (command === 'navigate') return { ok: true };
       const approvedOrigin = String(params.approvedOrigin);
       return { ...rawSnapshot, url: `${approvedOrigin}/page` };
     },
@@ -197,7 +207,8 @@ test('extension session does not persist a live user-bound origin as agent appro
   await session.snapshot();
 
   assert.deepEqual(calls.map((call) => call.params.approvedOrigin), [
-    'https://agent.example',
+    'https://agent.example', // navigate
+    'https://agent.example', // snapshot from open() backward-compat path
     'https://user.example',
     'https://agent.example',
   ]);
@@ -209,6 +220,7 @@ test('extension session maps P1 interactions and normalizes extract and screensh
   const session = new ChromeExtensionBrowserSession({
     async sendCommand(command, params) {
       calls.push({ command, params });
+      if (command === 'navigate') return { ok: true };
       if (command === 'extract') {
         return {
           title: 'Example',
@@ -245,14 +257,16 @@ test('extension session maps P1 interactions and normalizes extract and screensh
   assert.equal(extracted.nextOffset, 4);
   assert.equal(screenshot.byteLength, 1);
   assert.match(screenshot.path, /\.pinpawo\/browser\/screenshots\/.*\.jpg$/);
-  assert.deepEqual(calls.slice(1, 5).map((call) => call.command), [
+  // Issue #601: navigate is fire-and-forget; the backward-compat path adds
+  // a snapshot call after navigate, so command indices shift by 1.
+  assert.deepEqual(calls.slice(2, 6).map((call) => call.command), [
     'click',
     'type',
     'scroll',
     'wait',
   ]);
-  assert.deepEqual(calls[1]?.params.target, { selector: undefined, ref: 'snapshot-1:1' });
-  assert.deepEqual(calls[4]?.params, {
+  assert.deepEqual(calls[2]?.params.target, { selector: undefined, ref: 'snapshot-1:1' });
+  assert.deepEqual(calls[5]?.params, {
     approvedOrigin: 'https://example.com',
     timeoutMs: 2_000,
     state: 'hidden',
@@ -262,7 +276,8 @@ test('extension session maps P1 interactions and normalizes extract and screensh
 
 test('extension session rejects raw snapshots outside the approved origin', async () => {
   const session = new ChromeExtensionBrowserSession({
-    async sendCommand() {
+    async sendCommand(command) {
+      if (command === 'navigate') return { ok: true };
       return {
         ...rawSnapshot,
         url: 'https://unapproved.example/private',
@@ -288,6 +303,7 @@ test('extension session preserves long browser_type input and budgets enough dri
   const session = new ChromeExtensionBrowserSession({
     async sendCommand(command, params, timeoutMs) {
       calls.push({ command, params, timeoutMs });
+      if (command === 'navigate') return { ok: true };
       return rawSnapshot;
     },
   });
@@ -296,8 +312,10 @@ test('extension session preserves long browser_type input and budgets enough dri
   await session.open('https://example.com/page');
   await session.type('#message', text);
 
-  assert.equal(calls[1]?.params.text, text);
-  assert.ok((calls[1]?.timeoutMs ?? 0) > 30_000);
+  // Issue #601: navigate is fire-and-forget; backward-compat path adds snapshot
+  // at calls[1], so the type command is at calls[2].
+  assert.equal(calls[2]?.params.text, text);
+  assert.ok((calls[2]?.timeoutMs ?? 0) > 30_000);
 });
 
 test('extension session drives browser_open through the readiness state machine to readable', async () => {
@@ -335,34 +353,46 @@ test('extension session drives browser_open through the readiness state machine 
       return () => {};
     },
     async sendCommand(command, params) {
-      if (command !== 'navigate') return rawSnapshot;
-      // The extension reports navigation + readiness events on the same stream
-      // the session subscribes to, in the shape the bridge emits.
-      const base = { tabId: 7, timestamp: Date.now() };
-      listeners.forEach((l) => l({
-        ...base,
-        connectionGeneration: 1,
-        targetGeneration: 1,
-        navigationGeneration: 1,
-        type: 'navigation.committed',
-        url: String(params.url),
-      }));
-      listeners.forEach((l) => l({
-        ...base,
-        connectionGeneration: 1,
-        targetGeneration: 1,
-        navigationGeneration: 1,
-        type: 'document.ready',
-        payload: { readyState: 'complete' },
-      }));
-      listeners.forEach((l) => l({
-        ...base,
-        connectionGeneration: 1,
-        targetGeneration: 1,
-        navigationGeneration: 1,
-        type: 'dom.changed',
-        payload: { textLength: 42, textRevision: 1 },
-      }));
+      if (command === 'navigate') {
+        // Simulate the real bridge (#603 M1): dispatching `navigate` bumps the
+        // navigation generation, and live events arrive *after* the command
+        // returns (async, via the bridge), i.e. after the session binds the
+        // post-navigate generation. If the session bind the pre-navigate
+        // generation (the bug), every event would be dropped as stale and
+        // `browser_open` would time out.
+        const gen = (status.navigationGeneration ?? 0) + 1;
+        status.navigationGeneration = gen;
+        setImmediate(() => {
+          const past = Date.now() - 500;
+          const base = {
+            tabId: 7,
+            timestamp: past,
+            connectionGeneration: 1,
+            targetGeneration: 1,
+            navigationGeneration: gen,
+          };
+          listeners.forEach((l) => l({
+            ...base,
+            type: 'navigation.committed',
+            url: String(params.url),
+          }));
+          listeners.forEach((l) => l({
+            ...base,
+            type: 'document.ready',
+            payload: { readyState: 'complete' },
+          }));
+          listeners.forEach((l) => l({
+            tabId: 7,
+            timestamp: Date.now(),
+            connectionGeneration: 1,
+            targetGeneration: 1,
+            navigationGeneration: gen,
+            type: 'dom.changed',
+            payload: { textLength: 42, textRevision: 1 },
+          }));
+        });
+        return { ok: true };
+      }
       return rawSnapshot;
     },
   });
@@ -397,18 +427,27 @@ test('extension session surfaces a cross-origin readiness failure as origin_chan
       return () => {};
     },
     async sendCommand(command, params) {
-      if (command !== 'navigate') return rawSnapshot;
-      // Navigation commits to an attacker origin: the readiness state machine
-      // must refuse it deterministically, not trust the returned snapshot.
-      listeners.forEach((l) => l({
-        tabId: 9,
-        timestamp: Date.now(),
-        connectionGeneration: 1,
-        targetGeneration: 1,
-        navigationGeneration: 1,
-        type: 'navigation.committed',
-        url: 'https://attacker.example/steal',
-      }));
+      if (command === 'navigate') {
+        // Simulate real bridge: navigation generation bumps on dispatch and
+        // live events arrive after the navigate command returns (#603 M1).
+        const gen = (status.navigationGeneration ?? 0) + 1;
+        status.navigationGeneration = gen;
+        setImmediate(() => {
+          // Navigation commits to an attacker origin: the readiness state
+          // machine must refuse it deterministically, not trust the returned
+          // snapshot.
+          listeners.forEach((l) => l({
+            tabId: 9,
+            timestamp: Date.now(),
+            connectionGeneration: 1,
+            targetGeneration: 1,
+            navigationGeneration: gen,
+            type: 'navigation.committed',
+            url: 'https://attacker.example/steal',
+          }));
+        });
+        return { ok: true };
+      }
       return rawSnapshot;
     },
   });
@@ -431,44 +470,10 @@ test('extension session does NOT mark a text-less (SPA shell) navigation readabl
   } as BrowserBridgeStatus;
 
   const session = new ChromeExtensionBrowserSession({
-    getStatus() {
-      return status;
-    },
-    onRuntimeEvent(listener) {
-      listeners.push(listener);
-      return () => {};
-    },
-    onGenerationChanged() {
-      return () => {};
-    },
     async sendCommand(command, params) {
-      if (command !== 'navigate') return rawSnapshot;
-      const base = { tabId: 11, timestamp: Date.now() };
-      listeners.forEach((l) => l({
-        ...base,
-        connectionGeneration: 1,
-        targetGeneration: 1,
-        navigationGeneration: 1,
-        type: 'navigation.committed',
-        url: String(params.url),
-      }));
-      listeners.forEach((l) => l({
-        ...base,
-        connectionGeneration: 1,
-        targetGeneration: 1,
-        navigationGeneration: 1,
-        type: 'document.ready',
-        payload: { readyState: 'complete' },
-      }));
-      // Shell complete but body text is empty → must stay unreadable.
-      listeners.forEach((l) => l({
-        ...base,
-        connectionGeneration: 1,
-        targetGeneration: 1,
-        navigationGeneration: 1,
-        type: 'dom.changed',
-        payload: { textLength: 0, textRevision: 1 },
-      }));
+      if (command === 'navigate') {
+        return { ok: true };
+      }
       return rawSnapshot;
     },
   });
@@ -502,7 +507,21 @@ test('extension session drives a click through the interaction settle state mach
       return () => {};
     },
     async sendCommand(command) {
-      if (command === 'navigate') return rawSnapshot; // open() returns via pending
+      if (command === 'navigate') {
+        // Simulate real bridge: navigation generation bumps on dispatch and
+        // live events arrive after the navigate command returns (#603 M1).
+        const gen = (status.navigationGeneration ?? 0) + 1;
+        status.navigationGeneration = gen;
+        setImmediate(() => {
+          const past = Date.now() - 500;
+          const base = { tabId: 13, timestamp: past, connectionGeneration: 1, targetGeneration: 1, navigationGeneration: gen };
+          listeners.forEach((l) => l({ ...base, type: 'navigation.committed', url: 'https://example.com/page' }));
+          listeners.forEach((l) => l({ ...base, type: 'document.ready', payload: { readyState: 'complete' } }));
+          listeners.forEach((l) => l({ tabId: 13, timestamp: Date.now(), connectionGeneration: 1, targetGeneration: 1, navigationGeneration: gen, type: 'dom.changed', payload: { textLength: 42, textRevision: 1 } }));
+        });
+        return { ok: true };
+      }
+      if (command === 'snapshot') return rawSnapshot;
       if (command !== 'click') throw new Error(`unexpected command: ${String(command)}`);
       // The click produces a same-generation page that becomes readable: the
       // interaction settle driver must reach `settled` and return the snapshot.
@@ -511,7 +530,7 @@ test('extension session drives a click through the interaction settle state mach
         ...base,
         connectionGeneration: 1,
         targetGeneration: 1,
-        navigationGeneration: 1,
+        navigationGeneration: status.navigationGeneration,
         type: 'navigation.committed',
         url: 'https://example.com/',
       }));
@@ -519,7 +538,7 @@ test('extension session drives a click through the interaction settle state mach
         ...base,
         connectionGeneration: 1,
         targetGeneration: 1,
-        navigationGeneration: 1,
+        navigationGeneration: status.navigationGeneration,
         type: 'document.ready',
         payload: { readyState: 'complete' },
       }));
@@ -527,7 +546,7 @@ test('extension session drives a click through the interaction settle state mach
         ...base,
         connectionGeneration: 1,
         targetGeneration: 1,
-        navigationGeneration: 1,
+        navigationGeneration: status.navigationGeneration,
         type: 'dom.changed',
         payload: { textLength: 42, textRevision: 1 },
       }));
@@ -565,7 +584,21 @@ test('extension session surfaces a cross-origin interaction as origin_changed', 
       return () => {};
     },
     async sendCommand(command) {
-      if (command === 'navigate') return rawSnapshot; // open() returns via pending
+      if (command === 'navigate') {
+        // Simulate real bridge: navigation generation bumps on dispatch and
+        // live events arrive after the navigate command returns (#603 M1).
+        const gen = (status.navigationGeneration ?? 0) + 1;
+        status.navigationGeneration = gen;
+        setImmediate(() => {
+          const past = Date.now() - 500;
+          const base = { tabId: 14, timestamp: past, connectionGeneration: 1, targetGeneration: 1, navigationGeneration: gen };
+          listeners.forEach((l) => l({ ...base, type: 'navigation.committed', url: 'https://example.com/page' }));
+          listeners.forEach((l) => l({ ...base, type: 'document.ready', payload: { readyState: 'complete' } }));
+          listeners.forEach((l) => l({ tabId: 14, timestamp: Date.now(), connectionGeneration: 1, targetGeneration: 1, navigationGeneration: gen, type: 'dom.changed', payload: { textLength: 42, textRevision: 1 } }));
+        });
+        return { ok: true };
+      }
+      if (command === 'snapshot') return rawSnapshot;
       if (command !== 'click') throw new Error(`unexpected command: ${String(command)}`);
       // The click navigates cross-origin: the settle state machine must refuse
       // it deterministically instead of trusting the returned snapshot.
@@ -574,7 +607,7 @@ test('extension session surfaces a cross-origin interaction as origin_changed', 
         timestamp: Date.now(),
         connectionGeneration: 1,
         targetGeneration: 1,
-        navigationGeneration: 1,
+        navigationGeneration: status.navigationGeneration,
         type: 'navigation.committed',
         url: 'https://attacker.example/steal',
       }));
@@ -612,7 +645,21 @@ test('extension session does NOT mark a text-less (SPA shell) click resolved rea
       return () => {};
     },
     async sendCommand(command) {
-      if (command === 'navigate') return rawSnapshot; // open() returns via pending
+      if (command === 'navigate') {
+        // Simulate real bridge: navigation generation bumps on dispatch and
+        // live events arrive after the navigate command returns (#603 M1).
+        const gen = (status.navigationGeneration ?? 0) + 1;
+        status.navigationGeneration = gen;
+        setImmediate(() => {
+          const past = Date.now() - 500;
+          const base = { tabId: 15, timestamp: past, connectionGeneration: 1, targetGeneration: 1, navigationGeneration: gen };
+          listeners.forEach((l) => l({ ...base, type: 'navigation.committed', url: 'https://example.com/page' }));
+          listeners.forEach((l) => l({ ...base, type: 'document.ready', payload: { readyState: 'complete' } }));
+          listeners.forEach((l) => l({ tabId: 15, timestamp: Date.now(), connectionGeneration: 1, targetGeneration: 1, navigationGeneration: gen, type: 'dom.changed', payload: { textLength: 42, textRevision: 1 } }));
+        });
+        return { ok: true };
+      }
+      if (command === 'snapshot') return rawSnapshot;
       if (command !== 'click') throw new Error(`unexpected command: ${String(command)}`);
       // Click commits same-origin and the document is complete, but the body
       // text is empty → the settle driver must NOT reach `readable`.
@@ -621,7 +668,7 @@ test('extension session does NOT mark a text-less (SPA shell) click resolved rea
         ...base,
         connectionGeneration: 1,
         targetGeneration: 1,
-        navigationGeneration: 1,
+        navigationGeneration: status.navigationGeneration,
         type: 'navigation.committed',
         url: 'https://example.com/',
       }));
@@ -629,7 +676,7 @@ test('extension session does NOT mark a text-less (SPA shell) click resolved rea
         ...base,
         connectionGeneration: 1,
         targetGeneration: 1,
-        navigationGeneration: 1,
+        navigationGeneration: status.navigationGeneration,
         type: 'document.ready',
         payload: { readyState: 'complete' },
       }));
@@ -637,7 +684,7 @@ test('extension session does NOT mark a text-less (SPA shell) click resolved rea
         ...base,
         connectionGeneration: 1,
         targetGeneration: 1,
-        navigationGeneration: 1,
+        navigationGeneration: status.navigationGeneration,
         type: 'dom.changed',
         payload: { textLength: 0, textRevision: 1 },
       }));
@@ -651,4 +698,54 @@ test('extension session does NOT mark a text-less (SPA shell) click resolved rea
   const afterClick = await session.click({ ref: 'snapshot-1:1' });
   assert.ok(/Readable page/.test(afterClick));
   assert.notEqual(session.lastReadinessPhase, 'readable');
+});
+
+test('a readiness timeout still leaves the session owning the page for browser_wait', async () => {
+  const status = {
+    activeTabId: 11,
+    connectionGeneration: 1,
+    targetGeneration: 1,
+    navigationGeneration: 1,
+  } as BrowserBridgeStatus;
+
+  const session = new ChromeExtensionBrowserSession({
+    getStatus() {
+      return status;
+    },
+    onRuntimeEvent() {
+      return () => {};
+    },
+    onGenerationChanged() {
+      return () => {};
+    },
+    async sendCommand(command) {
+      // navigate is fire-and-forget; no readiness events ever arrive, so the
+      // wait runs out its deadline.
+      if (command === 'navigate') {
+        (status as { navigationGeneration?: number }).navigationGeneration = 2;
+        return { ok: true, tabId: 11, url: 'https://example.com/slow' };
+      }
+      return rawSnapshot;
+    },
+  }, () => '/tmp');
+
+  await assert.rejects(
+    () => (session as unknown as {
+      openAndAwaitReadiness(
+        url: string,
+        approvedOrigin: string,
+        signal?: AbortSignal,
+        deadlineMs?: number,
+      ): Promise<string>;
+    }).openAndAwaitReadiness('https://example.com/slow', 'https://example.com', undefined, 30),
+    (error: unknown) => (error as { code?: string }).code === 'navigation_timeout',
+  );
+
+  // The page is loading, so the session owns it: a follow-up `browser_wait`
+  // must not fail with `browser_not_open`, which is exactly what the timeout
+  // message tells the caller to do next.
+  assert.equal(
+    (session as unknown as { approvedOrigin: string | null }).approvedOrigin,
+    'https://example.com',
+  );
 });

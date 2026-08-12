@@ -6,7 +6,6 @@ import type {
   RunNextDelegation,
   RunDelegationSummary,
   CapabilityPlanTask,
-  PlannerAnswerDisposition,
   TaskActiveDelegation,
   ActiveDelegationTransition,
   UserGoal,
@@ -17,7 +16,10 @@ import {
   mergeToolAuthorizations,
   type ToolAuthorizationRecord,
 } from './review/reviewAuthorizations';
-import type { AcceptedDelegationOutcome } from './schemas';
+import type {
+  PlannerReplyOutcome,
+  PlannerRuntimeFailure,
+} from './capabilityPlanner/protocol';
 
 export type SessionToolAuthorizationState = {
   generation: string;
@@ -30,10 +32,6 @@ const orchestratorStateChannels = {
     default: () => [],
   }),
   runNextDelegation: Annotation<RunNextDelegation | null>({
-    reducer: (_prev, next) => next,
-    default: () => null,
-  }),
-  runPlannerReturn: Annotation<PlannerAnswerDisposition | null>({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
@@ -61,7 +59,11 @@ const orchestratorStateChannels = {
     reducer: (_prev, next) => next,
     default: () => 0,
   }),
-  runLatestDelegationOutcome: Annotation<AcceptedDelegationOutcome | null>({
+  runLatestDelegationOutcome: Annotation<PlannerReplyOutcome | null>({
+    reducer: (_prev, next) => next,
+    default: () => null,
+  }),
+  runPlannerFailure: Annotation<PlannerRuntimeFailure | null>({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
@@ -70,6 +72,10 @@ const orchestratorStateChannels = {
     default: () => 'supersede_active',
   }),
   runId: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => '',
+  }),
+  traceId: Annotation<string>({
     reducer: (_prev, next) => next,
     default: () => '',
   }),
@@ -93,18 +99,21 @@ export type OrchestratorStateType = typeof OrchestratorState.State;
 export type OrchestratorRunState = Pick<
   OrchestratorStateType,
   | 'runNextDelegation'
-  | 'runPlannerReturn'
   | 'runCapabilityPlan'
   | 'runUserGoal'
   | 'runDelegationSummaries'
   | 'runIterationCount'
   | 'runLatestDelegationOutcome'
+  | 'runPlannerFailure'
   | 'runActiveDelegationTransition'
   | 'runId'
+  | 'traceId'
 >;
 
 export type BuildOrchestratorRunOptions = {
   activeDelegationTransition?: ActiveDelegationTransition;
+  /** Stable user-task identity. A fresh task receives a new value by default. */
+  traceId?: string;
 };
 
 export function buildRunStateReset(
@@ -112,15 +121,16 @@ export function buildRunStateReset(
 ): OrchestratorRunState {
   return {
     runNextDelegation: null,
-    runPlannerReturn: null,
     runCapabilityPlan: [],
     runUserGoal: null,
     runDelegationSummaries: [],
     runIterationCount: 0,
     runLatestDelegationOutcome: null,
+    runPlannerFailure: null,
     runActiveDelegationTransition:
       options.activeDelegationTransition ?? 'supersede_active',
     runId: randomUUID().slice(0, 8),
+    traceId: options.traceId ?? randomUUID(),
   };
 }
 

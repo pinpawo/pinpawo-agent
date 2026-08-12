@@ -365,12 +365,14 @@ test('settling keeps tracking activity instead of freezing the baseline', () => 
 
   // A later false verdict (activity still observed at t=400) must track the new
   // observation rather than freeze lastNetworkActivityAt at 100.
+  // Issue #601: polls no longer re-arm the settle baseline. The baseline is set
+  // once on entering `settling` and updated only by network events.
   navigation = applyNavigationEvent(
     navigation,
     { kind: 'settle_verdict', readable: false, now: 400 },
   );
   assert.equal(navigation.phase, 'settling');
-  assert.equal(navigation.lastNetworkActivityAt, 400);
+  assert.equal(navigation.lastNetworkActivityAt, 100);
 });
 
 test('a readable navigation re-enters on a new commit (SPA route change)', () => {

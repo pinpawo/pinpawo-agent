@@ -22,7 +22,7 @@ export const runIterationLimitGuard = defineGuard<
   OrchestratorGuardPosition
 >({
   name: ORCHESTRATOR_GUARD_NAME.RUN_ITERATION_LIMIT,
-  positions: [ORCHESTRATOR_GUARD_POSITION.DELEGATION_OUTCOME_ITERATION],
+  positions: [ORCHESTRATOR_GUARD_POSITION.PLANNER_BOUNDARY_ITERATION],
   check: ({ config, state }) => {
     if (!state.taskActiveDelegation) {
       return guardProceed();

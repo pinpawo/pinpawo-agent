@@ -101,6 +101,7 @@ export async function runAgent(options: RunAgentOptions) {
       } : {}),
       actorId: runtime.getActorId(),
       actorName: runtime.getActorName() ?? undefined,
+      chatCheckpointer: runtime.getChatCheckpointer(),
       modelProfiles: runtime.getModelProfiles(),
       globalReviewPolicyMode: getConfig().globalReviewPolicyMode,
       autoAuthorizationSafetyLevel: getConfig().autoAuthorizationSafetyLevel,

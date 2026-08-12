@@ -502,7 +502,9 @@ test('createGitToolkit exposes a dedicated git capability surface', async () => 
       sessionAuthorization: true,
     },
   };
-  const authorizationMatcher = await gitCommitPolicy.authorization?.buildMatcher(reviewContext);
+  const buildMatcher = gitCommitPolicy.authorization?.buildMatcher;
+  assert.ok(buildMatcher);
+  const authorizationMatcher = await buildMatcher(reviewContext);
   const review = await gitCommitPolicy.request({
     ...reviewContext,
     authorizationMatcher,

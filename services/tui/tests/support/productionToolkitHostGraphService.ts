@@ -236,8 +236,12 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
   } as unknown as AgentModels['act'];
   const capabilityPlannerRunner: CapabilityPlannerRunner = {
     async invoke(input) {
+      if (input.mode === 'boundary') {
+        return { action: 'goal_done', tasks: [] };
+      }
       const readsAttachment = input.userGoal.context?.includes(ATTACHMENT_TOOL_INPUT) ?? false;
       return {
+        action: 'execute_plan',
         tasks: [
           {
             capability: 'general',

@@ -2,6 +2,7 @@
 
 Tracking issue: #561
 契约代码: [`packages/studio/src/studioContract.ts`](../packages/studio/src/studioContract.ts)
+配置目标形态: [`STUDIO_CONFIG_TARGET_EXAMPLE.md`](STUDIO_CONFIG_TARGET_EXAMPLE.md)
 
 **总原则:一切的目标是简单。** 下面每一条取舍,判据都是"哪个更简单",
 而不是"哪个更完备"。

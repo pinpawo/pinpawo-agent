@@ -1,163 +1,211 @@
-# Studio 推模型:orchestrator 缩减与看板驱动
+# Studio 契约:插板与推模型
 
 Tracking issue: #561
-
-本文记录一次方向性转变。它推翻了此前若干设计,后续实现以本文为准。
+契约代码: [`packages/studio/src/studioContract.ts`](../packages/studio/src/studioContract.ts)
 
 **总原则:一切的目标是简单。** 下面每一条取舍,判据都是"哪个更简单",
 而不是"哪个更完备"。
 
 ---
 
-## 1. 核心转变:从拉模型到推模型
+## 1. Studio 是一块插板
 
-此前的隐含假设是**拉模型** —— Studio 派活,然后盯着等结果:
+Studio 是**抽象的多 pet 管理器**:它提供两个方向的通道,不提供任何管理策略。
 
 ```text
-orchestrator ──派活──> pet
-      ↑                  │
-      └──── 等结果 ───────┘        ← orchestrator 必须知道 pet 在干什么
+plugin ──event────> studio ──dispatch──> pet
+```
+
+三层关系:**插件是管理的上层,studio 是中间的契约层,pet 是下层。**
+
+Studio **不包含职责,但需要形成契约**。它不决定什么时候派、派给谁、任务
+怎么排 —— 那些是插件的职责;它只定义这些交互长什么样。
+
+---
+
+## 2. 两个方向
+
+### 2.1 出:`dispatch`
+
+**所有派活必经 studio。** 插件不能绕过它直接碰 pet —— 否则 pet registry、
+身份与可派发性判断会在每个插件里重复一遍,而且多个插件同时派活时没有任何
+地方能协调(将来的 capacity / lease 正依赖"所有 dispatch 都看得见")。
+
+```ts
+dispatch({ petId, request, correlationId? }) => { threadId }
+```
+
+`request` 是自然语言 —— studio 不定义任务结构。
+
+**返回值只表示"已经发出去了",不表示任务完成。** 没有 reply、没有成功失败
+判定。pet 干完之后自己经由 toolkit → 插件 → event 汇报。
+
+### 2.2 入:`event`
+
+插件发给 studio 的通知,studio 广播给其他插件。它是**插件之间的共享总线**
+—— 让互不认识的插件能交换信息。
+
+```ts
+type StudioEvent = {
+  type: string;          // 插件自行命名，studio 不认识任何具体类型
+  source: string;        // 哪个插件发的
+  correlationId?: string;
+  payload?: unknown;     // 不解释、不校验
+  occurredAt: string;
+};
+```
+
+**studio 不解释 event 内容,也不持有由 event 推导出的状态。**
+
+事件是"发生了什么"(一次性、单向),不是"当前是什么样"(可查询、有生命
+周期)。这个区别决定了 studio 不需要存储、不需要一致性、不需要处理并发写。
+
+### 2.3 `submitRequest` 就是一次 dispatch
+
+```text
+submitRequest(goal) ≡ dispatch(plannerPetId, goal)
+```
+
+goal 直接派给 planner pet。它**不需要**"路由给哪个插件"这一步 —— 外部入口
+与插件委托走同一条通道、同一个契约,只是发起方不同。
+
+---
+
+## 3. 插件就是 toolkit 加一个切面
+
+```ts
+type StudioPlugin = AgentToolkit & {
+  studio?: {
+    start: (context: StudioPluginContext) => Promise<void> | void;
+    stop?: () => Promise<void> | void;
+  };
+};
+```
+
+现有 toolkit 变成插件只需补一个字段,不必重写:
+
+```ts
+const plugin: StudioPlugin = {
+  ...existingToolkit,                  // 原样复用
+  studio: { start: (ctx) => { ... } },  // 只补这一段
+};
+```
+
+> 一度设计成独立的 `{ name, start, stop, toolkit? }`。**那是错的** ——
+> `AgentToolkit` 已经有 `runtime.start` / `runtime.stop`,并排放第二套
+> 生命周期只会让两者不同步。
+
+### 3.1 两副面孔
+
+| 身份 | 插在哪 | 做什么 |
+| --- | --- | --- |
+| toolkit | pet | 让 pet 读写它的领域数据 |
+| 插件 | studio | 委托 dispatch、发 event |
+
+两者都可选:`studio` 省略时它是普通 toolkit;`tools` 为空时它是纯驱动方。
+
+**闭环由这两副面孔自然形成:**
+
+```text
+pet ──调用──> toolkit ──> 插件内部状态 ──event──> studio ──> 其他插件
+```
+
+pet 只跟 toolkit 打交道,**从不直接与 studio 通信**。整条链没有一处需要
+studio 理解内容。
+
+---
+
+## 4. 推模型:Studio 派完就不管
+
+此前的隐含假设是**拉模型** —— studio 派活后盯着等结果:
+
+```text
+studio ──派活──> pet
+   ↑              │
+   └─── 等结果 ────┘        ← studio 必须知道 pet 在干什么
 ```
 
 这带来一连串问题:pet 等人时算不算"在执行"、谁判定超时、结果怎么送回来。
 
-**推模型**把方向反过来:
+**推模型把方向反过来。** 由此:
 
-```text
-orchestrator ──派活──> pet
-                        │
-                        └──汇报──> 看板
-```
+- studio **不需要知道** pet 在跑模型、在等工具、还是在等人;
+- "谁把结果送回 studio"这个问题**不存在** —— 没有人在等。
 
-Studio 派完就不管了。pet 干完自己往看板上贴进展。
-
-由此:
-
-- Studio **不需要知道** pet 在跑模型、在等工具、还是在等人;
-- `invoke()` 何时返回不再是核心问题;
-- "谁把结果送回 orchestrator"这个问题**不存在** —— 没有人在等。
-
----
-
-## 2. HITL 不再是一个需要处理的状态
+### 4.1 HITL 对 Studio 透明
 
 Studio 不需要知道 review 概念。等人只是**执行的一种形态**,与"在跑模型"
-没有区别 —— 两者对 Studio 都只是"这张卡还没动完"。
+没有区别。
 
-因此:
+一度担心:pet 被框架打断去做 review 时没机会主动汇报,是否需要框架兜底?
 
-- `PetAgentRuntimeInvokeResult` **不应**有 `waiting_review` 分支;
-- `StudioInvocation.status` **不应**有 `waiting_review`;
-- orchestrator **不应**因为 review 而释放或保留 pet slot。
+**这个顾虑本身是错的。** review 是 pet 与人之间的事 —— 人已经在跟 pet 打
+交道了,再让 studio 知道一遍是多余的一层。
 
-> #618 当前版本引入了 `waiting_review`。按本文它应当退役 —— 那是把
-> review 概念塞进了 Studio,与透明原则相反。
+> 类比:企业管理中,如果每个细节都要闭环上报,管理成本会压垮组织。
+> 不是所有闭环都需要汇总 —— 需要汇总时 pet 主动报,或者从插件的领域数据里
+> 去发现。
 
----
+### 4.2 卡住不需要检测
 
-## 3. 卡住不需要检测,看板上是自明的
+推模型下没人在等,pet 崩了怎么办?
 
-此前担心:推模型下没人在等,pet 崩了怎么办?于是想引入超时判定。
+**不需要超时判定。** 进度停滞在插件的领域视图里是**自明的** —— 不需要系统
+去"检测"再盖一个 FAILED 的章。这与执行拓扑无关:并行是多条进度线,串行是
+一条,哪条不动都同样一眼可见。
 
-**不需要。** 看板本来就是呈现进度的东西 —— 一张卡长时间不动,这件事在
-看板上一眼就能看到,不需要系统去"检测"再盖一个 FAILED 的章。
+**推论:自动重试退役。** 失败就留着,由人决定要不要重来 —— 自动重试是在替
+人做判断,而失败原因往往需要看一眼才知道该不该重试。
 
-这与执行拓扑无关:五个 pet 并行是五条进度线,串行是一条,哪条不动都同样
-一眼可见。
+### 4.3 `waitForRun` 退役,提交即返回
 
-**推论:自动重试退役。** 失败就留在看板上,由人决定要不要重来 ——
-自动重试是在替人做判断,而失败原因往往需要看一眼才知道该不该重试。
-
-> 这意味着此前为"重试预算持久化"所做的 `failedAttemptCount` /
-> invocation 计数逻辑一并退役。不是白做:它被更简单的模型取代了。
-
----
-
-## 4. 看板 runtime 就是驱动器
-
-orchestrator 需要"能给 pet 发 request"这个**能力**,但**不需要**自己决定
-什么时候发。
-
-一度设想给 orchestrator 加一个"驱动器插槽",再往里插不同策略(依赖驱动、
-cron 驱动、事件驱动)。**这层是多余的** —— 看板 runtime 本身就是驱动器。
-
-看板已经持有:哪些卡在等依赖、哪些卡完成了、什么时候该推下一张。让
-orchestrator 再维护一套依赖判定与 ready 扫描,是把看板已有的信息又抄一遍。
+`waitForRun()` 让 studio 必须知道 run 何时结束 —— 而 run 是插件的概念。
 
 ```text
-orchestrator
-  ├── 接收用户目标
-  ├── 叫 planner 拆解 → task 上看板
-  └── 提供 dispatch(petId, brief)      ← 一个出口
-
-kanban runtime
-  ├── 持有任务队列与进度
-  ├── 决定什么时候该推谁                ← 驱动
-  └── 调 orchestrator 的 dispatch
+之前:提交 → 阻塞等待 → 返回最终结果
+现在:提交 → 立即返回 → 客户端之后自己看插件的视图
 ```
 
-驱动策略(依赖满足即发 / cron / 事件)属于看板 runtime 的实现细节,
-**现在不定**;它是 framework 层面的事,不该由本次改动锁死。
-
-### 4.1 `StudioRunQueueStore` 的性质要变
-
-它现在是纯存储(`save` / `get` / `list` / `recoverOpenRuns`),由
-orchestrator 拿着读写。作为驱动器,它需要能**主动调 dispatch** ——
-从"被动的 store"变成"有生命周期的 runtime",与 browser toolkit 那种
-`start()` + 持有状态的形态更接近。
+这是本次唯一的**对外协议行为变化**,需在 PR 中显著标注。
 
 ---
 
-## 5. pet 如何汇报:三个候选
+## 5. Studio 的边界
 
-pet 主动汇报到看板。实现方式有三种,**尚未定案**:
+**属于 studio**
 
-| | 谁决定汇报 | 评价 |
-| --- | --- | --- |
-| 1. middleware:studio 模式下让模型输出特殊内容 | 框架强制 | **不倾向** |
-| 2. 独立 capability:pet 显式声明"我会汇报" | 模型自主 | 多一层配置 |
-| 3. kanban toolkit 自带汇报工具 | 模型自主 | **倾向** |
+- pet registry、pet 身份与可派发性
+- `dispatch` 契约(唯一出口)
+- `event` 总线(唯一入口 + 广播)
+- 插件配置:这个 studio 装哪些插件
 
-**倾向 3**:kanban 已经是 pet 的工具(`wiki_read` 就在里面)。"读看板"与
-"往看板贴进展"是同一件事的两面,拆成两个概念反而更复杂。
+**不属于 studio**
 
-**不倾向 1**:强制每次输出特殊内容,等于框架替模型决定"什么算 done"。
-而 task done / goal done 恰恰需要判断 —— pet 可能认为还没做完,硬性截断
-会失真。
-
-**2 与 3 的取舍**取决于:是否存在"装了 kanban 但不该汇报"的 pet。若没有,
-3 就够了,2 是多余的配置层。
+- 任务怎么拆(planner 是 pet,不是 studio 的一部分)
+- 任务队列、依赖、进度呈现
+- 什么时候派谁
+- run 何时结束 —— studio 甚至不需要知道 "run" 这个词
 
 ---
 
-## 6. orchestrator 缩减范围
+## 6. 缩减范围
 
 当前 `createStudioOrchestrator.ts` 为 1070 行。
 
 ### 随推模型消失
 
-| 职责 | 位置 | 为什么消失 |
+| 职责 | 规模 | 为什么 |
 | --- | --- | --- |
-| `runDispatch` 等结果、判定 satisfied/failed | 108 行 | pet 自己汇报,不需要判定 |
-| `dispatchQueuedTask` 的完成回调链 | 123 行 | 同上 |
-| `scheduleQueue` 依赖扫描 | 60 行 | 归看板 runtime |
-| `activePets` 单槽 | 6 处 | 并发由看板决定 |
-| `buildTerminalOutcomeIfReady` 结果聚合 | ~40 行 | 结果在看板上 |
-| `waiting_review` 分支 | — | §2 |
-| 重试计数 | — | §3 |
+| `runDispatch` 等结果、判定 satisfied/failed | 108 行 | pet 自己汇报 |
+| `dispatchQueuedTask` 完成回调链 | 123 行 | 同上 |
+| `scheduleQueue` 依赖扫描 | 60 行 | 归插件 |
+| `activePets` 单槽 | 6 处 | 并发由插件决定 |
+| `buildTerminalOutcomeIfReady` 结果聚合 | ~40 行 | 结果不在 studio |
+| 重试计数 | — | §4.2 |
 
-### 保留
+### 迁出(归插件)
 
-- pet registry 与可派发性判断
-- `dispatch(petId, request)` —— 唯一出口
-- `notify` / `subscribe` —— event 总线
-- 插件配置
-
-### 迁出(归看板插件)
-
-`StudioRun` / `StudioTask` / `StudioRunQueueStore` / 依赖模型 / 进度状态机
-—— 按 §10,它们都是**看板的概念**,不属于 studio。studio 甚至不需要知道
-"run" 这个词。
+`StudioRun` / `StudioTask` / `StudioRunQueueStore` / 依赖模型 / 进度状态机。
 
 预期缩减后约 100–150 行。
 
@@ -171,143 +219,32 @@ pet 主动汇报到看板。实现方式有三种,**尚未定案**:
 | --- | --- |
 | HITL bridge 应迁到 invocation scope(#229) | ❌ 应删除,不是迁移 |
 | `invoke()` 返回 `waiting_review`(#618) | ❌ Studio 不该认识 review |
-| 需要"第 4 步:resume 完成后回调 orchestrator" | ❌ 伪需求;推模型下无人在等 |
-| 需要超时机制判定卡住 | ❌ 看板上自明 |
+| 需要"resume 完成后回调 studio" | ❌ 伪需求;推模型下无人在等 |
+| 需要超时机制判定卡住 | ❌ 插件视图上自明 |
 | 重试预算需持久化(#606) | ❌ 自动重试整体退役 |
-| orchestrator 需要可插拔驱动器插槽 | ❌ 看板 runtime 即驱动器 |
+| studio 需要可插拔的"驱动器插槽" | ❌ 插件本身就是驱动器 |
+| 插件是独立于 toolkit 的新概念 | ❌ 就是 toolkit 加一个切面 |
+| `submitRequest` 需要路由给某个插件 | ❌ 它就是一次 dispatch |
 
-`checkpointer`(#613)**不受影响** —— pet 的执行进度仍需落盘,与谁驱动无关。
-
----
-
-## 8. review 不产生任何面向 Studio 的汇报
-
-一度担心:pet 被框架打断去做 review 时,它没机会主动调工具汇报,是否需要
-框架兜底?
-
-**这个顾虑本身是错的。** review 是 pet 与人之间的事 —— 人已经在跟 pet 打
-交道了,再让 Studio 也知道一遍是多余的一层。看板上那张卡就停在原地,
-与"pet 正在跑一个很慢的工具"没有区别。
-
-> 类比:企业管理中,如果每个细节都要闭环上报,管理成本会压垮组织。
-> 不是所有闭环都需要汇总 —— 需要汇总时 pet 主动报,或者通过看板去发现。
-
-因此 `invoke()` 的语义变了:它不再是"把这个 task 干完",而是
-**"给这个 pet 发一个 request"**。发完即返回,Studio 对返回值**不做任何判定**
-—— 不判 satisfied / failed,不记重试。
-
-- pet 干完 → 自己往看板贴
-- pet 在等人 → 卡停着,无事发生
-- pet 崩了 → 同上
+`checkpointer`(#613)**不受影响** —— pet 执行进度仍需落盘,与谁驱动无关。
 
 ---
 
-## 9. `waitForRun` 退役,提交即返回
+## 8. 第一批插件
 
-`waitForRun()` 让 orchestrator 必须知道 run 何时结束 —— 而那是看板的事。
+契约与具体插件无关。以下只是**将要实现的第一批**,不构成对 studio 的约束:
 
-因此该接口去掉,`studio_request` 的语义随之改变:
+| 插件 | 依据 |
+| --- | --- |
+| kanban | 任务依赖 + 进度 |
+| scheduler | 时间(cron) |
+| trigger | 外部事件 |
 
-```text
-之前:提交 → 阻塞等待 → 返回最终结果
-现在:提交 → 立即返回 accepted → 客户端之后自己看看板
-```
-
-这是本次改动中唯一的**对外协议行为变化**,需要在 PR 中显著标注。
-
----
-
-## 10. Studio 的边界:插板,不是管理者
-
-Studio 是一块**插板**,各种 layout 插件插在上面。kanban 只是其中之一,
-同级的还有 scheduler、trigger。
-
-```text
-kanban      依据:任务依赖 + 进度
-scheduler   依据:时间(cron)
-trigger     依据:外部事件
-      ↓ 都插在同一块插板上
-    studio
-      ↓
-     pet
-```
-
-三层关系:**kanban 是管理的上层,studio 是抽象的多 pet 管理器,pet 是下层。**
-
-### 10.1 两个方向的通道
-
-```text
-studio ──dispatch──> pet        出:主动派活,唯一通道
-plugin ──event────> studio      入:被通知发生了什么
-```
-
-- **`dispatch`** 是 studio 对外的**动作**。所有派活必经它 —— 插件不能绕过
-  studio 直接碰 pet。否则 pet registry、身份、可派发性判断会在每个插件里
-  重复一遍,而且多个插件同时派活时没有任何地方能协调(将来的 capacity /
-  lease 正依赖"所有 dispatch 都看得见")。
-- **`event`** 是 studio **接收**的通知。插件放入,其他插件可订阅 ——
-  它是**插件之间的共享总线**,让互不认识的插件能交换信息。
-
-**studio 不解释 event 的内容,也不持有状态。** 事件是"发生了什么"
-(一次性、单向),不是"当前是什么样"(可查询、有生命周期)。这个区别
-决定了 studio 不需要存储、不需要一致性、不需要处理并发写。
-
-### 10.2 event 的源头是插件,不是 pet
-
-```text
-pet ──调用──> kanban toolkit ──> 看板 runtime ──event──> studio
-```
-
-pet 只跟 toolkit 打交道。toolkit 触发看板 runtime,runtime 作为**插件**
-才向 studio 发 event。pet 从不直接与 studio 通信。
-
-### 10.3 插件同时是 toolkit
-
-**同一个东西的两副面孔:**
-
-| 身份 | 插在哪 | 做什么 |
-| --- | --- | --- |
-| 插件 | studio | 委托 dispatch、发 event |
-| toolkit | pet | 让 pet 读看板、往看板贴进展 |
-
-这回答了 §5 的三个候选 —— **不是三选一,方案 3 是这个双重身份的必然结果。**
-pet 贴进看板 → 看板作为插件发 event → 其他插件看得到。整条链没有一处
-需要 studio 理解内容。
-
-### 10.4 `submitRequest` 就是一次 dispatch
-
-它不需要"路由给哪个插件"这一步:
-
-```text
-submitRequest(goal) ≡ dispatch(plannerPetId, goal)
-```
-
-goal 直接派给 planner pet;planner 干完自己往看板贴,后面是插件的事。
-外部入口与插件委托**走同一条通道、同一个契约**,只是发起方不同。
-
-### 10.5 Studio 的接口
-
-```ts
-createStudio({ pets, plugins })
-
-  submitRequest(goal)          // 本质是 dispatch(planner, goal)
-  dispatch(petId, request)     // 唯一出口
-  notify(event)                // 唯一入口，插件放入
-  subscribe(handler)           // 插件订阅
-  listPets()
-```
-
-**属于 studio**:pet registry、pet 身份与可派发性、dispatch 契约、
-event 总线、插件配置。
-
-**不属于 studio**:任务怎么拆(planner 是 pet)、任务队列与依赖、
-什么时候派谁、进度呈现、run 何时结束 —— 全是插件各自的概念。
-studio 甚至不需要知道 "run" 这个词。
+`localStudioDueRunScheduler` 是 scheduler 的雏形,现在长在 local-agent 里。
 
 ---
 
-## 11. 待定项
+## 9. 待定项
 
-1. 看板 runtime 的驱动策略与生命周期形态。
-2. `StudioRun` / `StudioTask` / `StudioRunQueueStore` 的归属:按 §10 它们
-   都是看板概念,应随缩减迁出 studio。
+1. 各插件的领域模型与生命周期形态(属于插件自身,不进本契约)。
+2. `StudioRun` / `StudioTask` / `StudioRunQueueStore` 迁往哪个插件。

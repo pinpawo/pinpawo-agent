@@ -148,11 +148,18 @@ pet 主动汇报到看板。实现方式有三种,**尚未定案**:
 
 ### 保留
 
-- 接收用户目标、调 planner、把 task 放上看板
-- `dispatch(petId, brief)` —— 核心出口
-- run/task 身份(`runId` / `taskId` / `invocationId`)—— 看板需要它们寻址
+- pet registry 与可派发性判断
+- `dispatch(petId, request)` —— 唯一出口
+- `notify` / `subscribe` —— event 总线
+- 插件配置
 
-预期缩减后约 150–250 行。
+### 迁出(归看板插件)
+
+`StudioRun` / `StudioTask` / `StudioRunQueueStore` / 依赖模型 / 进度状态机
+—— 按 §10,它们都是**看板的概念**,不属于 studio。studio 甚至不需要知道
+"run" 这个词。
+
+预期缩减后约 100–150 行。
 
 ---
 
@@ -210,7 +217,97 @@ pet 主动汇报到看板。实现方式有三种,**尚未定案**:
 
 ---
 
-## 10. 待定项
+## 10. Studio 的边界:插板,不是管理者
 
-1. §5 的三个汇报方案定案(倾向 3)。
-2. 看板 runtime 的驱动策略与生命周期形态。
+Studio 是一块**插板**,各种 layout 插件插在上面。kanban 只是其中之一,
+同级的还有 scheduler、trigger。
+
+```text
+kanban      依据:任务依赖 + 进度
+scheduler   依据:时间(cron)
+trigger     依据:外部事件
+      ↓ 都插在同一块插板上
+    studio
+      ↓
+     pet
+```
+
+三层关系:**kanban 是管理的上层,studio 是抽象的多 pet 管理器,pet 是下层。**
+
+### 10.1 两个方向的通道
+
+```text
+studio ──dispatch──> pet        出:主动派活,唯一通道
+plugin ──event────> studio      入:被通知发生了什么
+```
+
+- **`dispatch`** 是 studio 对外的**动作**。所有派活必经它 —— 插件不能绕过
+  studio 直接碰 pet。否则 pet registry、身份、可派发性判断会在每个插件里
+  重复一遍,而且多个插件同时派活时没有任何地方能协调(将来的 capacity /
+  lease 正依赖"所有 dispatch 都看得见")。
+- **`event`** 是 studio **接收**的通知。插件放入,其他插件可订阅 ——
+  它是**插件之间的共享总线**,让互不认识的插件能交换信息。
+
+**studio 不解释 event 的内容,也不持有状态。** 事件是"发生了什么"
+(一次性、单向),不是"当前是什么样"(可查询、有生命周期)。这个区别
+决定了 studio 不需要存储、不需要一致性、不需要处理并发写。
+
+### 10.2 event 的源头是插件,不是 pet
+
+```text
+pet ──调用──> kanban toolkit ──> 看板 runtime ──event──> studio
+```
+
+pet 只跟 toolkit 打交道。toolkit 触发看板 runtime,runtime 作为**插件**
+才向 studio 发 event。pet 从不直接与 studio 通信。
+
+### 10.3 插件同时是 toolkit
+
+**同一个东西的两副面孔:**
+
+| 身份 | 插在哪 | 做什么 |
+| --- | --- | --- |
+| 插件 | studio | 委托 dispatch、发 event |
+| toolkit | pet | 让 pet 读看板、往看板贴进展 |
+
+这回答了 §5 的三个候选 —— **不是三选一,方案 3 是这个双重身份的必然结果。**
+pet 贴进看板 → 看板作为插件发 event → 其他插件看得到。整条链没有一处
+需要 studio 理解内容。
+
+### 10.4 `submitRequest` 就是一次 dispatch
+
+它不需要"路由给哪个插件"这一步:
+
+```text
+submitRequest(goal) ≡ dispatch(plannerPetId, goal)
+```
+
+goal 直接派给 planner pet;planner 干完自己往看板贴,后面是插件的事。
+外部入口与插件委托**走同一条通道、同一个契约**,只是发起方不同。
+
+### 10.5 Studio 的接口
+
+```ts
+createStudio({ pets, plugins })
+
+  submitRequest(goal)          // 本质是 dispatch(planner, goal)
+  dispatch(petId, request)     // 唯一出口
+  notify(event)                // 唯一入口，插件放入
+  subscribe(handler)           // 插件订阅
+  listPets()
+```
+
+**属于 studio**:pet registry、pet 身份与可派发性、dispatch 契约、
+event 总线、插件配置。
+
+**不属于 studio**:任务怎么拆(planner 是 pet)、任务队列与依赖、
+什么时候派谁、进度呈现、run 何时结束 —— 全是插件各自的概念。
+studio 甚至不需要知道 "run" 这个词。
+
+---
+
+## 11. 待定项
+
+1. 看板 runtime 的驱动策略与生命周期形态。
+2. `StudioRun` / `StudioTask` / `StudioRunQueueStore` 的归属:按 §10 它们
+   都是看板概念,应随缩减迁出 studio。

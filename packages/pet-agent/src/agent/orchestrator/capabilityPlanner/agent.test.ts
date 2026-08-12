@@ -785,6 +785,39 @@ test('entry mode forms one executable task after Capability exploration', async 
   assert.equal('tasks' in result ? result.tasks.length : 0, 1);
 });
 
+test('Planner accepts a detailed task beyond the legacy 500-character limit', async (t) => {
+  const workspace = await createWorkspace(t, {
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary tasks.',
+      instructions: 'Complete the requested work.',
+    }),
+  });
+  const detailedTask = 'x'.repeat(501);
+  const model = new ScriptedPlannerModel([{
+    structuredOutput: {
+      kind: 'plan',
+      args: {
+        tasks: [{
+          capability: 'general',
+          task: detailedTask,
+        }],
+      },
+    },
+  }]);
+
+  const result = await createCapabilityPlannerAgent({ model })
+    .invoke(plannerInput(workspace));
+
+  assert.deepEqual(result, {
+    action: 'execute_plan',
+    tasks: [{
+      capability: 'general',
+      task: detailedTask,
+    }],
+  });
+});
+
 test('Planner accepts consecutive tasks from one Capability when the model keeps distinct boundaries', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({

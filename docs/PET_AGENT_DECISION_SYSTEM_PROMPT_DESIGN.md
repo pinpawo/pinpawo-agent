@@ -154,7 +154,7 @@ type CapabilityPlannerPlan = {
 };
 ```
 
-`task` 是短执行描述，最长 500 字符；一个 plan 最多 24 项。Planner 不输出 `capability_intent` 或 `context_summary`，
+`task` 是短执行描述，最长 2,000 字符；一个 plan 最多 24 项。Planner 不输出 `capability_intent` 或 `context_summary`，
 也不摘抄、压缩或解释 handoff。已验收 handoff 已经是 canonical main message，Capability runtime
 会直接把它作为未分 lane 的对话历史交给后续 subagent。
 

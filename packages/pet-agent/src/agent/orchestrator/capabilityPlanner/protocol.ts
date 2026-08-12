@@ -38,7 +38,7 @@ export type PlannerAnnounceInput = {
 
 const plannerTaskSchema = z.object({
   capability: z.string().trim().min(1).max(200),
-  task: z.string().trim().min(1).max(500),
+  task: z.string().trim().min(1).max(2_000),
 }).strict();
 
 export const plannerCommitSchema = z.object({

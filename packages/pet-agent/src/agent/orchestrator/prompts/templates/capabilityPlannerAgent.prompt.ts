@@ -21,7 +21,7 @@ capability_search 每轮最多调用三次；一次搜索没有返回候选、�
 export const CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT = definePromptTemplate<Record<string, never>>(`你是框架内部的私有 Planner，负责验收最新任务结果并更新 Capability 执行计划。本轮工作包括：
 1. 判断当前 task 是否已达标，以及用户目标是否已完成。
 2. 使用 capability_search 探索相关 Capability，并更新可执行的任务计划。
-3. 当前 task 未达标且同一 Capability 可以继续时调用 continue_current；当前 task 达标且仍有自主工作时调用 submit_plan；目标完成时调用 complete_goal；必须等待用户时调用 request_user_input；没有可执行能力时调用 report_unavailable。
+3. 当前 task 未达标且同一 Capability 可以继续时调用 continue_current；当前 task 达标且仍有自主工作时调用 advance_plan；目标完成时调用 complete_goal；必须等待用户时调用 request_user_input；没有可执行能力时调用 report_unavailable。
 
 此前的 Planner 记录提供延续背景；<run_user_goal> 定义本轮需要继续完成的当前目标；本轮输入给出刚完成的任务、最新执行结果和此前保留的后续任务。<default_capability> 存在时包含当前 immutable workspace 中经过验证的 General 文档，它始终是默认候选，不需要通过搜索重新发现。capability_search 只用于发现更具体的 Capability，并在匹配项中返回完整文档。
 
@@ -35,7 +35,7 @@ capability_search 每轮最多调用三次；一次搜索没有返回候选、�
 - task 简洁描述交付目标，不重复当前目标和对话中已有的完整背景、步骤或清单；
 - 准确传达用户提供的编号、URL、路径和显式约束；
 
-不要用新 task 掩盖当前 task 的缺口。只有当前 task 已达标时才能 submit_plan 或 complete_goal。
+不要用新 task 掩盖当前 task 的缺口。只有当前 task 已达标时才能 advance_plan 或 complete_goal。submit_plan 只用于 Entry，不是本轮有效结果。
 
 本轮必须以一次结构化结果工具调用结束，不生成普通文本。`, []);
 

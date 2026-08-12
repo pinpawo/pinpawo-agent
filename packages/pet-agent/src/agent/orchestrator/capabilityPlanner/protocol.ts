@@ -5,6 +5,7 @@ import type { CapabilityPlanTask } from '../types';
 export const PLANNER_ACTIONS = [
   'continue_current',
   'execute_plan',
+  'advance_plan',
   'goal_done',
   'user_input_required',
   'unavailable',
@@ -56,7 +57,8 @@ export function parsePlannerCommit(
 ): PlannerCommit {
   const commit = plannerCommitSchema.parse(value);
   const requiresTasks = commit.action === 'continue_current'
-    || commit.action === 'execute_plan';
+    || commit.action === 'execute_plan'
+    || commit.action === 'advance_plan';
   if (requiresTasks !== (commit.tasks.length > 0)) {
     throw new Error(
       `Planner action "${commit.action}" ${requiresTasks ? 'requires' : 'forbids'} tasks.`,
@@ -71,9 +73,13 @@ export function parsePlannerCommit(
   }
   if (context.mode === 'entry' && (
     commit.action === 'continue_current'
+    || commit.action === 'advance_plan'
     || commit.action === 'goal_done'
   )) {
     throw new Error(`Planner action "${commit.action}" is invalid at entry.`);
+  }
+  if (context.mode === 'boundary' && commit.action === 'execute_plan') {
+    throw new Error('Planner action "execute_plan" is invalid at a boundary.');
   }
   if (commit.action === 'continue_current') {
     const activeDelegation = context.activeDelegation;
@@ -82,7 +88,7 @@ export function parsePlannerCommit(
     }
     if (commit.tasks[0]?.capability !== activeDelegation.capability) {
       throw new Error(
-        'Planner continue_current must keep the active delegation capability.',
+        `Planner continue_current must keep the active delegation capability "${activeDelegation.capability}".`,
       );
     }
   }

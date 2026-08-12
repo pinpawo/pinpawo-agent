@@ -181,7 +181,7 @@ function createQueuedPlannerRunner(
         (await nextStructuredValue()).capabilityName ?? '',
       );
       return {
-        action: 'execute_plan',
+        action: input.mode === 'boundary' ? 'advance_plan' : 'execute_plan',
         tasks: [
           {
             capability: capabilityName,
@@ -720,7 +720,7 @@ test('execution boundary routes through capabilityPlanner before the next task',
         return { action: 'goal_done', tasks: [] };
       }
       return {
-        action: 'execute_plan',
+        action: 'advance_plan',
         tasks: [{
           capability: 'explore',
           task: '检索本地实现与 git log，判断需求点是否已覆盖。',
@@ -881,7 +881,7 @@ test('Planner boundary returns to capabilityPlanner until the remaining goal is 
         return { action: 'goal_done', tasks: [] };
       }
       return {
-        action: 'execute_plan',
+        action: 'advance_plan',
         tasks: [{
           capability: 'explore',
           task: '检索本地实现与 git log。',

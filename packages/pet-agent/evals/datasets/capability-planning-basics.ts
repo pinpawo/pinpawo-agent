@@ -20,6 +20,7 @@ export type CapabilityPlanningInput = {
 export type CapabilityPlanningExpected = {
   result: 'continue_current'
     | 'execute_plan'
+    | 'advance_plan'
     | 'goal_done'
     | 'user_input_required'
     | 'unavailable';
@@ -263,7 +264,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       remainingPlan: [{ capability: 'general', task: '根据调查结论重构 auth 模块' }],
     },
     expected: {
-      result: 'execute_plan',
+      result: 'advance_plan',
       nextTaskTerms: ['循环依赖', 'token', '接口'],
       capabilityName: 'general',
       remainingPlan: [],
@@ -306,7 +307,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       remainingPlan: [{ capability: 'general', task: '根据调查结论重构 auth 模块并验证。' }],
     },
     expected: {
-      result: 'execute_plan',
+      result: 'advance_plan',
       nextTaskTerms: ['循环依赖', 'token', '公开接口'],
       capabilityName: 'general',
       remainingPlan: [],
@@ -375,7 +376,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       remainingPlan: [{ capability: 'messaging', task: '把完成的报告发送给项目负责人' }],
     },
     expected: {
-      result: 'execute_plan',
+      result: 'advance_plan',
       nextTaskTerms: ['报告', '发送', '负责人'],
       capabilityName: 'messaging',
       remainingPlan: [],
@@ -414,7 +415,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       ],
     },
     expected: {
-      result: 'execute_plan',
+      result: 'advance_plan',
       nextTaskTerms: ['token', '循环依赖', '公开接口'],
       capabilityName: 'general',
       remainingPlan: [{
@@ -462,7 +463,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       ],
     },
     expected: {
-      result: 'execute_plan',
+      result: 'advance_plan',
       nextTaskTerms: ['当前仓库', '实现', 'issue', '架构演进'],
       capabilityName: 'explore',
       remainingPlan: [],
@@ -673,7 +674,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       remainingPlan: [],
     },
     expected: {
-      result: 'execute_plan',
+      result: 'advance_plan',
       nextTaskTerms: ['README', '#587'],
       capabilityName: 'document_writer',
       remainingPlan: [],

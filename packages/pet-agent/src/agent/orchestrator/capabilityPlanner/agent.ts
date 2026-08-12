@@ -48,6 +48,7 @@ const MAX_PLAN_TASKS = 24;
 const MAX_TASK_TEXT_CHARS = 2_000;
 const CONTINUE_CURRENT_TOOL_NAME = 'continue_current';
 const SUBMIT_PLAN_TOOL_NAME = 'submit_plan';
+const ADVANCE_PLAN_TOOL_NAME = 'advance_plan';
 const COMPLETE_GOAL_TOOL_NAME = 'complete_goal';
 const REQUEST_USER_INPUT_TOOL_NAME = 'request_user_input';
 const REPORT_UNAVAILABLE_TOOL_NAME = 'report_unavailable';
@@ -106,7 +107,7 @@ function createPlannerTerminalTools(): StructuredTool[] {
     },
     {
       name: CONTINUE_CURRENT_TOOL_NAME,
-      description: 'Terminal Planner action. The current task is incomplete; continue the same active delegation, with optional future tasks after the first item.',
+      description: 'Boundary-only terminal action. The current task is incomplete. Continue the same active delegation; the first task must use the Current Capability shown in the Planner input. Optional future tasks may follow.',
       schema: z.object({ tasks: plannerTasksSchema() }),
     },
   );
@@ -116,7 +117,17 @@ function createPlannerTerminalTools(): StructuredTool[] {
     },
     {
       name: SUBMIT_PLAN_TOOL_NAME,
-      description: 'Terminal Planner action. Submit the shortest executable task sequence. At a boundary this means the current task is accepted.',
+      description: 'Entry-only terminal action. Submit the initial shortest executable task sequence.',
+      schema: z.object({ tasks: plannerTasksSchema() }),
+    },
+  );
+  const advancePlan = tool(
+    async ({ tasks }: { tasks: Array<{ capability: string; task: string }> }) => {
+      return JSON.stringify({ action: 'advance_plan', tasks });
+    },
+    {
+      name: ADVANCE_PLAN_TOOL_NAME,
+      description: 'Boundary-only terminal action. Accept the completed current task and submit the shortest updated sequence of remaining work. The next task may use a different Capability.',
       schema: z.object({ tasks: plannerTasksSchema() }),
     },
   );
@@ -147,6 +158,7 @@ function createPlannerTerminalTools(): StructuredTool[] {
   return [
     continueCurrent,
     submitPlan,
+    advancePlan,
     completeGoal,
     requestUserInput,
     reportUnavailable,
@@ -222,6 +234,7 @@ function buildPrivateCompactionSummary(messages: readonly BaseMessage[]) {
       const label = [
         CONTINUE_CURRENT_TOOL_NAME,
         SUBMIT_PLAN_TOOL_NAME,
+        ADVANCE_PLAN_TOOL_NAME,
         COMPLETE_GOAL_TOOL_NAME,
         REQUEST_USER_INPUT_TOOL_NAME,
         REPORT_UNAVAILABLE_TOOL_NAME,
@@ -391,6 +404,7 @@ function createPrivatePlannerMiddleware(params: {
         || ![
           CONTINUE_CURRENT_TOOL_NAME,
           SUBMIT_PLAN_TOOL_NAME,
+          ADVANCE_PLAN_TOOL_NAME,
           COMPLETE_GOAL_TOOL_NAME,
           REQUEST_USER_INPUT_TOOL_NAME,
           REPORT_UNAVAILABLE_TOOL_NAME,
@@ -399,11 +413,21 @@ function createPrivatePlannerMiddleware(params: {
       }
       const rawCommit = readTerminalCommit(result);
       if (!rawCommit) return result;
-      const commit = parsePlannerCommit(rawCommit, {
-        mode: input.mode,
-        activeDelegation: input.activeDelegation,
-        allowedCapabilityNames: input.workspace.capabilityNames,
-      });
+      let commit: PlannerCommit;
+      try {
+        commit = parsePlannerCommit(rawCommit, {
+          mode: input.mode,
+          activeDelegation: input.activeDelegation,
+          allowedCapabilityNames: input.workspace.capabilityNames,
+        });
+      } catch (error) {
+        return new ToolMessage({
+          content: error instanceof Error ? error.message : String(error),
+          name: result.name,
+          status: 'error',
+          tool_call_id: result.tool_call_id,
+        });
+      }
       return new Command({
         update: {
           messages: [result],

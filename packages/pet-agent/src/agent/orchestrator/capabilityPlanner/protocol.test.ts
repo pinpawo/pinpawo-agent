@@ -16,7 +16,11 @@ test('Planner commit exposes only action and plan tasks', () => {
   assert.deepEqual(parsePlannerCommit({
     action: 'execute_plan',
     tasks: [{ capability: 'explore', task: 'Inspect the repository.' }],
-  }, boundaryContext), {
+  }, {
+    ...boundaryContext,
+    mode: 'entry',
+    activeDelegation: null,
+  }), {
     action: 'execute_plan',
     tasks: [{ capability: 'explore', task: 'Inspect the repository.' }],
   });
@@ -45,6 +49,25 @@ test('Planner commit enforces entry and continuation invariants', () => {
     action: 'continue_current',
     tasks: [{ capability: 'explore', task: 'Switch executor.' }],
   }, boundaryContext), /must keep the active delegation capability/);
+  assert.throws(() => parsePlannerCommit({
+    action: 'execute_plan',
+    tasks: [{ capability: 'explore', task: 'Start a replacement plan.' }],
+  }, boundaryContext), /invalid at a boundary/);
+  assert.throws(() => parsePlannerCommit({
+    action: 'advance_plan',
+    tasks: [{ capability: 'explore', task: 'Continue with the next executor.' }],
+  }, {
+    ...boundaryContext,
+    mode: 'entry',
+    activeDelegation: null,
+  }), /invalid at entry/);
+  assert.deepEqual(parsePlannerCommit({
+    action: 'advance_plan',
+    tasks: [{ capability: 'explore', task: 'Continue with the next executor.' }],
+  }, boundaryContext), {
+    action: 'advance_plan',
+    tasks: [{ capability: 'explore', task: 'Continue with the next executor.' }],
+  });
   assert.throws(() => parsePlannerCommit({
     action: 'goal_done',
     tasks: [{ capability: 'general', task: 'Unexpected work.' }],

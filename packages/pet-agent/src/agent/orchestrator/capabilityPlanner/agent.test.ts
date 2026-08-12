@@ -44,7 +44,7 @@ type ScriptedToolCall = {
 };
 
 type ScriptedStructuredOutput = {
-  kind: 'plan' | 'unavailable';
+  kind: 'plan' | 'advance' | 'unavailable';
   args: Record<string, unknown>;
 };
 
@@ -138,6 +138,7 @@ class ScriptedPlannerModel extends BaseChatModel {
       const parameters = entry.function?.parameters;
       const kind = name === 'submit_plan'
         ? 'plan'
+        : name === 'advance_plan' ? 'advance'
         : name === 'report_unavailable' ? 'unavailable' : null;
       if (name && kind) {
         this.structuredOutputToolNames.set(kind, name);
@@ -709,8 +710,9 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
   assert.deepEqual(model.boundToolNames.slice(0, 1), [
     CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
   ]);
-  assert.equal(model.structuredOutputToolNames.size, 2);
+  assert.equal(model.structuredOutputToolNames.size, 3);
   assert.ok(model.structuredOutputToolNames.has('plan'));
+  assert.ok(model.structuredOutputToolNames.has('advance'));
   assert.ok(model.structuredOutputToolNames.has('unavailable'));
   assert.deepEqual(model.structuredOutputSchemaReferences, []);
   assert.deepEqual(model.structuredOutputPlanLimits, [24]);
@@ -774,8 +776,9 @@ test('entry mode forms one executable task after Capability exploration', async 
     .invoke(plannerInput(workspace));
 
   assert.equal(model.invocations.length, 2);
-  assert.equal(model.structuredOutputToolNames.size, 2);
+  assert.equal(model.structuredOutputToolNames.size, 3);
   assert.ok(model.structuredOutputToolNames.has('plan'));
+  assert.ok(model.structuredOutputToolNames.has('advance'));
   assert.ok(model.structuredOutputToolNames.has('unavailable'));
   assert.ok('tasks' in result);
   assert.equal(
@@ -1151,10 +1154,22 @@ test('an unknown Capability returns tool feedback and can be repaired in-loop', 
     },
   ]);
 
-  await assert.rejects(
-    createCapabilityPlannerAgent({ model }).invoke(plannerInput(workspace)),
-    /outside the immutable workspace/,
+  const result = await createCapabilityPlannerAgent({ model }).invoke(
+    plannerInput(workspace),
   );
+
+  assert.deepEqual(result, {
+    action: 'execute_plan',
+    tasks: [{
+      capability: 'general',
+      task: 'Research the repository and prepare the review.',
+    }],
+  });
+  assert.equal(model.invocations.length, 2);
+  assert.ok(model.invocations[1]?.some((message) =>
+    ToolMessage.isInstance(message)
+    && message.status === 'error'
+    && readMessageText(message).includes('outside the immutable workspace')));
 });
 
 test('Planner caps a parallel capability_search batch with standard middleware', async (t) => {
@@ -1231,8 +1246,9 @@ test('an empty workspace can return truthful facts to Answer', async (t) => {
     plannerInput(workspace),
   );
 
-  assert.equal(model.structuredOutputToolNames.size, 2);
+  assert.equal(model.structuredOutputToolNames.size, 3);
   assert.equal(model.structuredOutputToolNames.has('plan'), true);
+  assert.equal(model.structuredOutputToolNames.has('advance'), true);
   assert.ok(model.structuredOutputToolNames.has('unavailable'));
   assert.deepEqual(result, {
     action: 'unavailable',
@@ -1256,7 +1272,7 @@ test('boundary mode rejects an empty executable plan', async (t) => {
   const model = new ScriptedPlannerModel([
     {
       structuredOutput: {
-        kind: 'plan',
+        kind: 'advance',
         args: {
           tasks: [],
         },
@@ -1271,7 +1287,7 @@ test('boundary mode rejects an empty executable plan', async (t) => {
     },
     {
       structuredOutput: {
-        kind: 'plan',
+        kind: 'advance',
         args: {
           tasks: [{
             capability: 'general',
@@ -1315,7 +1331,7 @@ test('a boundary with an exhausted plan can still submit newly required work', a
   });
   const model = new ScriptedPlannerModel([{
     structuredOutput: {
-      kind: 'plan',
+      kind: 'advance',
       args: {
         tasks: [{
           capability: 'general',
@@ -1345,12 +1361,132 @@ test('a boundary with an exhausted plan can still submit newly required work', a
   // An empty remaining plan is not by itself a terminal state: the latest
   // result may still require follow-up work.
   assert.deepEqual(result, {
-    action: 'execute_plan',
+    action: 'advance_plan',
     tasks: [{
       capability: 'general',
       task: 'Update the README section for issue #587.',
     }],
   });
+});
+
+test('boundary Planner can correct an invalid continuation capability', async (t) => {
+  const workspace = await createWorkspace(t, {
+    explore: capabilityDocument({
+      name: 'explore',
+      description: 'Investigate repositories.',
+      instructions: 'Inspect repository evidence.',
+    }),
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary tasks.',
+      instructions: 'Complete the requested work.',
+    }),
+  });
+  const model = new ScriptedPlannerModel([{
+    toolCalls: [{
+      id: 'wrong-continuation',
+      name: 'continue_current',
+      args: {
+        tasks: [{
+          capability: 'general',
+          task: 'Finish collecting the missing repository evidence.',
+        }],
+      },
+    }],
+  }, {
+    toolCalls: [{
+      id: 'corrected-continuation',
+      name: 'continue_current',
+      args: {
+        tasks: [{
+          capability: 'explore',
+          task: 'Finish collecting the missing repository evidence.',
+        }],
+      },
+    }],
+  }]);
+
+  const result = await createCapabilityPlannerAgent({ model }).invoke(
+    plannerInput(workspace, {
+      mode: 'boundary',
+      activeDelegation: {
+        delegationId: 'delegation-1',
+        capability: 'explore',
+        task: 'Inspect the repository.',
+      },
+      latestAnnounce: {
+        messageId: 'announce-1',
+        text: 'The dependency evidence is still incomplete.',
+        completionReason: 'natural',
+      },
+    }),
+  );
+
+  assert.deepEqual(result, {
+    action: 'continue_current',
+    tasks: [{
+      capability: 'explore',
+      task: 'Finish collecting the missing repository evidence.',
+    }],
+  });
+  assert.equal(model.invocations.length, 2);
+  assert.ok(model.invocations[1]?.some((message) =>
+    ToolMessage.isInstance(message)
+    && message.status === 'error'
+    && readMessageText(message).includes('active delegation capability "explore"')));
+});
+
+test('boundary Planner repairs submit_plan to advance_plan', async (t) => {
+  const workspace = await createWorkspace(t, {
+    explore: capabilityDocument({
+      name: 'explore',
+      description: 'Investigate repositories.',
+      instructions: 'Inspect repository evidence.',
+    }),
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary tasks.',
+      instructions: 'Complete the requested work.',
+    }),
+  });
+  const tasks = [{
+    capability: 'general',
+    task: 'Implement the change supported by the accepted investigation.',
+  }];
+  const model = new ScriptedPlannerModel([{
+    structuredOutput: {
+      kind: 'plan',
+      args: { tasks },
+    },
+  }, {
+    structuredOutput: {
+      kind: 'advance',
+      args: { tasks },
+    },
+  }]);
+
+  const result = await createCapabilityPlannerAgent({ model }).invoke(
+    plannerInput(workspace, {
+      mode: 'boundary',
+      activeDelegation: {
+        delegationId: 'delegation-1',
+        capability: 'explore',
+        task: 'Inspect the repository.',
+      },
+      latestAnnounce: {
+        messageId: 'announce-1',
+        text: 'The investigation is complete and identifies the required change.',
+        completionReason: 'natural',
+      },
+    }),
+  );
+
+  assert.deepEqual(result, { action: 'advance_plan', tasks });
+  assert.equal(model.invocations.length, 2);
+  assert.ok(model.invocations[1]?.some((message) =>
+    ToolMessage.isInstance(message)
+    && message.status === 'error'
+    && readMessageText(message).includes('invalid at a boundary')));
 });
 
 test('oversized discovery is reported as planning_limit_reached', async (t) => {

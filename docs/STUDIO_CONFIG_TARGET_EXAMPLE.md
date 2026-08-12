@@ -1,4 +1,4 @@
-# Studio 配置目标形态(初稿)
+# Studio 配置目标形态
 
 Tracking issue: #561
 契约: [`STUDIO_PUSH_MODEL_DESIGN.md`](STUDIO_PUSH_MODEL_DESIGN.md) ·
@@ -7,7 +7,8 @@ Tracking issue: #561
 本文用**配置示例**表达目标形态。它是设计的一部分 —— 抽象类型不足以暴露
 契约在真实使用中是否顺手,配置能。
 
-> 状态:初稿,尚未实现。与现状的差异见 §4。
+> 状态:待实现。Studio 目前**完全没有在用**,因此下列变更直接改,
+> 不做兼容迁移(与 #561 "Studio 不背兼容包袱"一致)。
 
 ---
 
@@ -25,12 +26,15 @@ Tracking issue: #561
   // 这个 studio 有哪些 pet 可供派活
   "pets": ["planner", "writer", "reviewer"],
 
-  // 这个 studio 装哪些插件。顺序即 start 顺序。
+  // 这个 studio 装哪些插件 —— **必须显式列出**，studio 不做任何隐式装配。
+  // 顺序即 start 顺序。
   "plugins": [
     { "id": "kanban" },
     {
       "id": "scheduler",
-      // 插件自己的配置，studio 原样透传不解释
+      // 插件自己的配置。studio 原样透传，校验归插件自己的 schema
+      // （与 #613 确立的分层一致：机制在 pet-agent / schema 在各自的包 /
+      //   文件入口在宿主）。
       "options": { "timezone": "Asia/Shanghai" }
     }
   ]
@@ -136,12 +140,15 @@ const studio = createStudio({
 
 ---
 
-## 5. 待定项
+## 5. 已确认的三条
 
-1. `plugins[].id` 如何解析到具体实现:内置注册表?还是像 capability 那样
-   从 `~/.pinpawo/` 加载?
-2. 插件 options 的校验归谁:studio 原样透传的话,校验就在插件自己的
-   schema 里 —— 与 #613 确立的 "机制在 pet-agent / schema 在各自的包 /
-   文件入口在宿主" 分层一致。
-3. 现有 `studio.json` 的迁移:Studio 不背兼容包袱,直接改;需确认是否有
-   已在使用的真实配置。
+1. **插件必须显式配置。** studio 不做隐式装配 —— 装了哪些插件是配置文件
+   说了算,读一眼 `studio.json` 就知道这个 studio 由什么驱动。
+2. **插件 options 的校验归插件自己。** studio 原样透传不解释,与 #613
+   确立的分层一致。
+3. **不做兼容迁移。** Studio 目前完全没有在用,§1.1 的字段变更直接改。
+
+## 6. 待定项
+
+`plugins[].id` 如何解析到具体实现:内置注册表?还是像 capability 那样从
+`~/.pinpawo/` 加载?——这属于宿主的装配职责,不影响契约本身。

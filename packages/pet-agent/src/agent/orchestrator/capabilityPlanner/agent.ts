@@ -96,23 +96,12 @@ function plannerTaskSchema() {
 
 function plannerTasksSchema() {
   return z.array(plannerTaskSchema()).min(1).max(MAX_PLAN_TASKS)
-    .describe('Ordered execution boundaries. Keep continuous work by one Capability in one task.');
-}
-
-function assertNoConsecutiveCapability(tasks: Array<{ capability: string; task: string }>) {
-  if (tasks.some((task, index) =>
-    index > 0 && task.capability === tasks[index - 1]?.capability,
-  )) {
-    throw new Error(
-      'Consecutive tasks use the same Capability. Combine them into one complete task.',
-    );
-  }
+    .describe('Ordered execution boundaries. Keep continuous work by one Capability in one task; preserve a separate boundary when later work depends on the accepted result of the current task.');
 }
 
 function createPlannerTerminalTools(): StructuredTool[] {
   const continueCurrent = tool(
     async ({ tasks }: { tasks: Array<{ capability: string; task: string }> }) => {
-      assertNoConsecutiveCapability(tasks);
       return JSON.stringify({ action: 'continue_current', tasks });
     },
     {
@@ -123,7 +112,6 @@ function createPlannerTerminalTools(): StructuredTool[] {
   );
   const submitPlan = tool(
     async ({ tasks }: { tasks: Array<{ capability: string; task: string }> }) => {
-      assertNoConsecutiveCapability(tasks);
       return JSON.stringify({ action: 'execute_plan', tasks });
     },
     {

@@ -351,6 +351,14 @@ checkpoint namespace 隔离 child state。`traceId` 是 Planner state 的生命�
 Planner graph/agent 必须在 orchestrator 构建时创建一次，不得在每次 invocation 内重新
 `createAgent`。
 
+Root 与 Planner 使用不同 state schema，因此生产组合采用 LangGraph 的标准 wrapper
+模式：在 Root node function 内调用预编译的 Planner subgraph。生产 Planner 使用
+`checkpointer: true` 继承 parent checkpointer 并跨同一 trace 的 invocation 保留状态；
+无 parent checkpointer 的直接单测/eval 使用单独预编译的 `checkpointer: false` adapter。
+这两个 graph 都只在 runner 构建时创建，不得在 `invoke()` 内动态编译。
+Planner 私有 state 由拥有这些字段的 middleware 声明一次，再由 `createAgent` 自动合并；不要
+在 agent 与 middleware 上重复注册同一份 state schema。
+
 优先把 Planner 作为 parent graph 的原生持久 subgraph，使其继承 parent checkpointer 和
 runnable config。不能为了 trace 持久化而把 Planner 变成一个 detached checkpoint workflow，
 否则会破坏 bare `Command({ resume })` 从 root 重入 pending child interrupt 的能力。
@@ -364,6 +372,14 @@ runnable config。不能为了 trace 持久化而把 Planner 变成一个 detach
 如果 LangGraph 自动 child namespace 不能同时提供第 2、3 点，可以在原生 subgraph 模型
 内增加 trace-keyed private state/reset，或使用 framework 支持的 checkpoint namespace
 配置；不要另外定义 Planner thread、session 或专属 resume protocol。
+
+Capability discovery 的调用预算使用标准 `toolCallLimitMiddleware` 按单次 Planner input
+限制，不再定义自有的并行 reducer/counter，计数和并行批次裁剪交给 middleware 的内置
+run state。若 effective workspace 包含 `general`，runtime 必须在模型首次决策前读取经过
+workspace 校验的完整 General 文档，并只把它注入 Planner 私有输入，作为不依赖字面搜索的
+默认候选。`grep_search` 只负责发现更具体的 Capability，不返回 `fallback` 字段。Planner 在提交
+`report_unavailable` 前必须先评估默认 General；它能执行当前工作时应选择它。显式受限 workspace
+可以没有 General，此时只有全部可见 Capability 都不能执行时才能提交 `unavailable`。
 
 ### 幂等输入消费
 

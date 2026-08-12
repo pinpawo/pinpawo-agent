@@ -67,7 +67,7 @@ test('an exhausted boundary plan can continue autonomous work or report a real c
   assert.ok(results.has('unavailable'));
 });
 
-test('planner scorer enforces the mandatory General fallback', () => {
+test('planner scorer enforces the mandatory General default candidate', () => {
   const testCase = capabilityPlanningBasicsDataset.cases.find(
     (item) => item.name === 'entry-uses-general-for-unmatched-work',
   );

@@ -1,4 +1,5 @@
 import type { CapabilityPlannerInput } from '../capabilityPlanner/runner';
+import type { CapabilityPlannerDefaultCapability } from '../capabilityPlanner/fileExplorer';
 import {
   CAPABILITY_PLANNER_BOUNDARY_INPUT_PROMPT,
   CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT,
@@ -6,6 +7,20 @@ import {
   CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT,
 } from './templates/capabilityPlannerAgent.prompt';
 import { buildRunUserGoalContext } from './context';
+import { indentXmlBlock, promptBlock, xmlTextBlock } from './shared';
+
+function buildDefaultCapabilityContext(
+  defaultCapability: CapabilityPlannerDefaultCapability | null,
+) {
+  if (!defaultCapability) return '';
+  return [
+    '<default_capability role="default_executor" source="immutable_workspace" trust="read_only">',
+    indentXmlBlock(xmlTextBlock('name', defaultCapability.capabilityName), 2),
+    indentXmlBlock(xmlTextBlock('path', defaultCapability.path), 2),
+    indentXmlBlock(xmlTextBlock('document', defaultCapability.content), 2),
+    '</default_capability>',
+  ].join('\n');
+}
 
 function buildPlanningState(input: CapabilityPlannerInput) {
   const lines: string[] = [];
@@ -42,11 +57,22 @@ export function buildCapabilityPlannerAgentSystemPrompt(
     : CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT.render({});
 }
 
-export function buildCapabilityPlannerAgentInput(input: CapabilityPlannerInput) {
+export function buildCapabilityPlannerAgentInput(
+  input: CapabilityPlannerInput,
+  defaultCapability: CapabilityPlannerDefaultCapability | null = null,
+) {
   const userGoal = buildRunUserGoalContext(input.userGoal);
+  const defaultCapabilityContext = promptBlock(
+    buildDefaultCapabilityContext(defaultCapability),
+    0,
+  );
   return input.mode === 'entry' && !input.latestUserMessage
-    ? CAPABILITY_PLANNER_ENTRY_INPUT_PROMPT.render({ userGoal })
+    ? CAPABILITY_PLANNER_ENTRY_INPUT_PROMPT.render({
+      defaultCapabilityContext,
+      userGoal,
+    })
     : CAPABILITY_PLANNER_BOUNDARY_INPUT_PROMPT.render({
+      defaultCapabilityContext,
       userGoal,
       planningState: buildPlanningState(input),
     });

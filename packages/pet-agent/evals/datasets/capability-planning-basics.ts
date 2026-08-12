@@ -346,7 +346,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       rubberStamp: false,
       reason: 'When no specialized Capability matches, the Planner materializes a concrete workspace task with general.',
     },
-    metadata: { difficulty: 'medium', reason: 'Mandatory General fallback.', source: SOURCE_FILE },
+    metadata: { difficulty: 'medium', reason: 'Mandatory General default candidate.', source: SOURCE_FILE },
   },
   {
     id: `${SUITE}.boundary-keeps-valid-next-task`,

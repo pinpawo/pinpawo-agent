@@ -877,6 +877,55 @@ test('Planner closes discovery through general after three grep_search calls', a
   assert.equal(grepResults.some((message) => message.status === 'error'), false);
 });
 
+test('Planner receives verified General before discovery starts', async (t) => {
+  const workspace = await createWorkspace(t, {
+    general: capabilityDocument({
+      name: 'general',
+      description: '处理不需要更具体 Capability 的通用任务。',
+      instructions: '使用通用工具读取和修改工作区。',
+    }),
+  });
+  const model = new ScriptedPlannerModel([{
+    structuredOutput: {
+      kind: 'plan',
+      args: {
+        tasks: [{
+          capability: 'general',
+          task: 'Inspect and organize the requested Downloads directory.',
+        }],
+      },
+    },
+  }]);
+
+  const result = await createCapabilityPlannerAgent({ model }).invoke(
+    plannerInput(workspace, {
+      userGoal: {
+        objective: '查看并整理 /Users/mac/Downloads 目录。',
+        context: '用户明确允许使用通用工具。',
+      },
+    }),
+  );
+
+  assert.deepEqual(result, {
+    action: 'execute_plan',
+    tasks: [{
+      capability: 'general',
+      task: 'Inspect and organize the requested Downloads directory.',
+    }],
+  });
+  const privateInput = model.invocations[0]?.find(
+    (message) => message instanceof HumanMessage,
+  );
+  assert.ok(privateInput instanceof HumanMessage);
+  assert.match(readMessageText(privateInput), /<default_capability/);
+  assert.match(readMessageText(privateInput), /general\/CAPABILITY\.md/);
+  assert.match(readMessageText(privateInput), /通用工具读取和修改工作区/);
+  assert.equal(model.invocations.flat().some(
+    (message) => message instanceof ToolMessage
+      && message.name === CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+  ), false);
+});
+
 test('Planner handles parallel grep_search calls without concurrent state updates', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
@@ -1079,7 +1128,7 @@ test('an unknown Capability returns tool feedback and can be repaired in-loop', 
   );
 });
 
-test('grep_search over its limit returns terminal planning guidance to the model', async (t) => {
+test('Planner caps a parallel grep_search batch with standard middleware', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -1093,9 +1142,14 @@ test('grep_search over its limit returns terminal planning guidance to the model
     args: { query: 'ordinary' },
   });
   const model = new ScriptedPlannerModel([
-    { toolCalls: [grep('grep-1'), grep('grep-2')] },
-    { toolCalls: [grep('grep-3')] },
-    { toolCalls: [grep('grep-4')] },
+    {
+      toolCalls: [
+        grep('grep-1'),
+        grep('grep-2'),
+        grep('grep-3'),
+        grep('grep-4'),
+      ],
+    },
     {
       structuredOutput: {
         kind: 'plan',
@@ -1120,12 +1174,16 @@ test('grep_search over its limit returns terminal planning guidance to the model
       task: 'Complete the requested repository update.',
     }],
   });
-  const limitFeedback = model.invocations[3]?.find((message) =>
+  const limitFeedback = model.invocations[1]?.find((message) =>
     message instanceof ToolMessage && message.tool_call_id === 'grep-4');
   assert.ok(limitFeedback instanceof ToolMessage);
-  assert.match(String(limitFeedback.content), /planning_limit_reached/i);
-  assert.match(String(limitFeedback.content), /limit reached/i);
-  assert.match(String(limitFeedback.content), /call submit_plan/i);
+  assert.equal(limitFeedback.status, 'error');
+  assert.match(String(limitFeedback.content), /tool call limit exceeded/i);
+  const successfulSearches = model.invocations[1]?.filter((message) =>
+    message instanceof ToolMessage
+    && message.name === CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME
+    && message.status !== 'error') ?? [];
+  assert.equal(successfulSearches.length, 3);
 });
 
 test('an empty workspace can return truthful facts to Answer', async (t) => {

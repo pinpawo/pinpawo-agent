@@ -22,7 +22,7 @@ import {
   type CapabilityDocumentWorkspace,
 } from './documentWorkspace';
 import {
-  CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+  CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
   createCapabilityPlannerFileExplorer,
   type CapabilityPlannerFileExplorer,
 } from './fileExplorer';
@@ -137,19 +137,19 @@ test('Planner file explorer exposes one registry discovery tool', async (t) => {
 
   assert.deepEqual(
     explorer.tools.map(({ name }) => name),
-    [CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME],
+    [CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME],
   );
   assert.equal('uses' in explorer, false);
 });
 
-test('grep_search finds candidates from immutable Workspace documents', async (t) => {
+test('capability_search finds candidates from immutable Workspace documents', async (t) => {
   const { workspace } = await workspaceFixture(t);
   const explorer = createCapabilityPlannerFileExplorer({ workspace });
 
   const first = await invoke(
     explorer,
-    CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-    { query: 'BROWSER|research' },
+    CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+    { terms: ['BROWSER', 'research'] },
   );
   assert.equal(first.ok, true);
   assert.deepEqual(
@@ -173,14 +173,14 @@ test('grep_search finds candidates from immutable Workspace documents', async (t
   assert.equal(first.data?.complete, true);
 });
 
-test('grep_search searches complete Capability documents', async (t) => {
+test('capability_search searches complete Capability documents', async (t) => {
   const { workspace } = await workspaceFixture(t);
   const explorer = createCapabilityPlannerFileExplorer({ workspace });
 
   const result = await invoke(
     explorer,
-    CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-    { query: 'browser' },
+    CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+    { terms: ['browser'] },
   );
   assert.deepEqual(
     (result.data?.matches as Array<Record<string, unknown>>).map(
@@ -201,14 +201,14 @@ test('Planner reads verified General as its default Capability context', async (
   assert.match(defaultCapability?.content ?? '', /Handle ordinary local work/);
 });
 
-test('grep_search remains pure discovery after a literal miss', async (t) => {
+test('capability_search remains pure discovery after a literal miss', async (t) => {
   const { workspace } = await workspaceFixture(t);
   const explorer = createCapabilityPlannerFileExplorer({ workspace });
 
   const result = await invoke(
     explorer,
-    CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-    { query: 'list files directory' },
+    CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+    { terms: ['list files directory'] },
   );
 
   assert.equal(result.ok, true);
@@ -226,39 +226,52 @@ test('memory backend is explicit and preserves complete registry search results'
 
   const filesystemSearch = await invoke(
     filesystem,
-    CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-    { query: 'browser|research' },
+    CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+    { terms: ['browser', 'research'] },
   );
   const memorySearch = await invoke(
     memory,
-    CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-    { query: 'browser|research' },
+    CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+    { terms: ['browser', 'research'] },
   );
   assert.deepEqual(memorySearch.data?.matches, filesystemSearch.data?.matches);
 });
 
-test('grep_search enforces compact queries without an active Planner graph', async (t) => {
+test('capability_search enforces compact literal terms without an active Planner graph', async (t) => {
   const { workspace } = await workspaceFixture(t);
   const invalidExplorer = createCapabilityPlannerFileExplorer({ workspace });
-  const invalid = await invoke(
+  const searchTool = plannerTool(
     invalidExplorer,
-    CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-    { query: 'one|two|three|four' },
+    CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
   );
-  assert.equal(invalid.ok, false);
-  assert.equal(invalid.error?.code, 'invalid_query');
+  await assert.rejects(
+    searchTool.invoke({ terms: ['one', 'two', 'three', 'four'] }),
+    /Array must contain at most 3 element/,
+  );
+  await assert.rejects(
+    searchTool.invoke({
+      terms: ['scan project files find AI model names'],
+    }),
+    /literal word or short phrase, not a search instruction/,
+  );
+  await assert.rejects(
+    searchTool.invoke({
+      terms: ['web fetch URL scrape pricing'],
+    }),
+    /literal word or short phrase, not a search instruction/,
+  );
 
   const explorer = createCapabilityPlannerFileExplorer({ workspace });
   const first = await invoke(
     explorer,
-    CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-    { query: 'browser' },
+    CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+    { terms: ['browser'] },
   );
   assert.equal(first.ok, true);
   const second = await invoke(
     explorer,
-    CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-    { query: 'browser' },
+    CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+    { terms: ['browser'] },
   );
   assert.equal(second.ok, true);
 });
@@ -277,8 +290,8 @@ test('Planner document reads reject tampered workspace content', async (t) => {
 
   const unaffectedSearch = await invoke(
     explorer,
-    CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-    { query: 'browser' },
+    CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+    { terms: ['browser'] },
   );
   assert.equal(unaffectedSearch.ok, true);
   assert.deepEqual(
@@ -290,14 +303,14 @@ test('Planner document reads reject tampered workspace content', async (t) => {
 
   const searchResult = await invoke(
     explorer,
-    CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-    { query: 'tampered' },
+    CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+    { terms: ['tampered'] },
   );
   assert.equal(searchResult.ok, false);
   assert.equal(searchResult.error?.code, 'document_tampered');
 });
 
-test('grep_search rejects a symlink introduced after workspace publication', async (t) => {
+test('capability_search rejects a symlink introduced after workspace publication', async (t) => {
   const { root, workspace } = await workspaceFixture(t);
   const capabilityDir = join(workspace.rootPath, 'general');
   const documentPath = join(capabilityDir, 'CAPABILITY.md');
@@ -310,15 +323,15 @@ test('grep_search rejects a symlink introduced after workspace publication', asy
 
   const result = await invoke(
     explorer,
-    CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-    { query: 'outside secret' },
+    CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+    { terms: ['outside secret'] },
   );
   assert.equal(result.ok, false);
   assert.equal(result.error?.code, 'workspace_invalid');
   assert.doesNotMatch(JSON.stringify(result), /outside secret/);
 });
 
-test('grep_search never returns a partial Capability document', async (t) => {
+test('capability_search never returns a partial Capability document', async (t) => {
   const { workspace } = await workspaceFixture(t, [
     capability({
       name: 'budget',
@@ -332,8 +345,8 @@ test('grep_search never returns a partial Capability document', async (t) => {
 
   const result = await invoke(
     explorer,
-    CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-    { query: 'budget' },
+    CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+    { terms: ['budget'] },
   );
   assert.equal(result.ok, false);
   assert.equal(result.error?.code, 'planning_limit_reached');
@@ -341,14 +354,14 @@ test('grep_search never returns a partial Capability document', async (t) => {
   assert.doesNotMatch(JSON.stringify(result), /x{40}/);
 });
 
-test('grep_search returns no candidates for an empty Capability workspace', async (t) => {
+test('capability_search returns no candidates for an empty Capability workspace', async (t) => {
   const { workspace } = await workspaceFixture(t, []);
   const explorer = createCapabilityPlannerFileExplorer({ workspace });
 
   const result = await invoke(
     explorer,
-    CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-    { query: 'general' },
+    CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+    { terms: ['general'] },
   );
   assert.equal(result.ok, true);
   assert.deepEqual(result.data?.matches, []);

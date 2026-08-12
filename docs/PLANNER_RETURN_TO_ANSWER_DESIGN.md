@@ -28,7 +28,7 @@ so the parent graph surfaced `submission_required` rather than a useful reply.
 
 The Planner has exactly three responsibilities:
 
-1. discover potentially relevant Capabilities through `grep_search`;
+1. discover potentially relevant Capabilities through `capability_search`;
 2. plan executable tasks and finish with `submit_plan`;
 3. stop planning or request user interaction by finishing with
    `return_to_answer`.
@@ -72,7 +72,7 @@ validation is limited to type and size bounds; it does not classify the reason.
 
 ## Runtime flow
 
-1. The Planner uses its private `grep_search` tool to discover potentially
+1. The Planner uses its private `capability_search` tool to discover potentially
    relevant Capabilities. Each match contains the complete immutable
    `CAPABILITY.md`, so discovery and reading are one operation.
 2. If one exploration returns no candidates, the Planner has enough evidence
@@ -122,7 +122,7 @@ Answer system prompt. It cannot change Answer policy or authorize work.
   unavailable result. `runPlannerReturn` owns every deliberate no-plan return.
 - Planner prompts describe the two terminal actions and never ask the Planner
   to write a final user reply itself.
-- `grep_search` returns complete matched Capability documents. The Planner has
+- `capability_search` returns complete matched Capability documents. The Planner has
   no separate file-view tool or second discovery phase.
 - Tests cover plan submission, generic return-to-Answer, and the distinction
   between a Planner return and a resumable delegated `user_input_required`

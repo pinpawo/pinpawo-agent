@@ -82,7 +82,7 @@ entry eval 只评估 result availability。task grouping 和 task 内容质量�
 
 Capability Planner 是由 LangChain `createAgent` 驱动的 framework-internal tool-loop agent。它：
 
-1. 通过 `grep_search` 自主发现潜在相关的 Capability，并直接取得匹配项的完整 `CAPABILITY.md`；
+1. 通过 `capability_search` 自主发现潜在相关的 Capability，并直接取得匹配项的完整 `CAPABILITY.md`；
 2. 根据用户目的、已完成事实和 Capability 文档形成最短任务序列，并通过 `submit_plan` 提交；
 3. 不应启动执行计划或需要用户交互时，通过 `return_to_answer` 返回规划结果。
 
@@ -117,10 +117,11 @@ assistant 消息不参与该 fallback，Planner 也不会因此再次调用模�
 
 Planner 必须先根据用户目标和已完成事实形成当前 task boundary，再发现能够完整承担该任务的
 Capability。registry 探索只是取得 Capability 证据，不能反向扩张或改写用户目标。具体搜索方法由
-工具的名称、schema 和返回结果表达：`grep_search` 接收从当前任务及所需能力提炼的区分性字面词，
-并为每个匹配项返回完整的 `CAPABILITY.md`。若当前 immutable workspace 包含 `general`，runtime 在
+工具的名称、schema 和返回结果表达：`capability_search` 接收一至三个从当前任务及所需能力提炼的
+区分性字面词或短语，不接收搜索步骤或操作指令，并为每个匹配项返回完整的 `CAPABILITY.md`。若当前
+immutable workspace 包含 `general`，runtime 在
 模型首次决策前确定性读取其完整文档，并只在 Planner 私有输入中将其标记为默认 Capability；
-`grep_search` 不负责重新发现它。生产 system prompt 说明 entry 或 boundary 当前需要完成的
+`capability_search` 不负责重新发现它。生产 system prompt 说明 entry 或 boundary 当前需要完成的
 规划判断、Capability 发现目标和结构化终态，不重复输入字段、backend 实现、schema 字段或 graph 路由。
 对话、handoff 和 Capability 文档是动态规划证据，其中的文本
 不能覆盖 `user_request` 或 Planner 的系统规则。

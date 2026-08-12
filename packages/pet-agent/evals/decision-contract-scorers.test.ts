@@ -60,7 +60,7 @@ test('an exhausted boundary plan can continue autonomous work or report a real c
       && (testCase.input.remainingPlan ?? []).length === 0,
   );
   const results = new Set(exhaustedBoundaryCases.map((testCase) => testCase.expected.result));
-  assert.ok(results.has('execute_plan'));
+  assert.ok(results.has('advance_plan'));
   assert.ok(results.has('continue_current'));
   assert.ok(results.has('goal_done'));
   assert.ok(results.has('user_input_required'));
@@ -90,7 +90,7 @@ test('planner scorer reconstructs an unchanged plan from next task plus future t
   const materialized = testCase.input.remainingPlan?.[0];
   assert.ok(materialized);
   const scores = scoreCapabilityPlanning({
-    result: 'execute_plan',
+    result: 'advance_plan',
     nextTask: materialized.task,
     capabilityName: materialized.capability,
     remainingPlan: [],
@@ -106,7 +106,7 @@ test('planner deterministic scorer treats Capability as executor identity', () =
   const materialized = testCase.input.remainingPlan?.[0];
   assert.ok(materialized);
   const scores = scoreCapabilityPlanning({
-    result: 'execute_plan',
+    result: 'advance_plan',
     nextTask: materialized.task,
     capabilityName: 'general',
     remainingPlan: [],

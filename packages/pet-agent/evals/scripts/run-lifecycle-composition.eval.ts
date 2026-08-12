@@ -328,6 +328,7 @@ function createRecordingActModel(model: AgentModels['act']) {
             if (![
               'continue_current',
               'submit_plan',
+              'advance_plan',
               'complete_goal',
               'request_user_input',
               'report_unavailable',

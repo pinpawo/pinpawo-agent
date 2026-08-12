@@ -45,7 +45,7 @@ export function buildCapabilityPlanningGoalContract(
   return {
     objective: `Produce ${expected.result} at this planning boundary. ${expected.reason}`,
     acceptanceCriteria: [
-      ...(expected.result === 'execute_plan'
+      ...(expected.result === 'execute_plan' || expected.result === 'advance_plan'
         ? [{
             id: 'materialized_task_correct',
             statement: [

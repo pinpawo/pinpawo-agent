@@ -471,7 +471,7 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
     }
 
     const [nextTask, ...remainingPlan] = commit.tasks;
-    if (!nextTask) throw new Error('Planner execute_plan requires a task.');
+    if (!nextTask) throw new Error('Planner advance_plan requires a task.');
     const next = materializeNextDelegation({
       state: {
         ...state,

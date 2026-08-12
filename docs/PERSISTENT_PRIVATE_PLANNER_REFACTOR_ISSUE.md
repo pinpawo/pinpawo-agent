@@ -57,7 +57,7 @@ entryDecision
   -> capability
   -> private Planner
        |-- continue_current  -> same capability delegation
-       |-- execute_plan      -> accept handoff -> next delegation
+       |-- advance_plan      -> accept handoff -> next delegation
        |-- goal_done         -> accept handoff -> answer
        |-- user_input_required -> preserve active delegation -> answer
        `-- unavailable       -> preserve truthful blocked state -> answer
@@ -158,6 +158,7 @@ Planner 只提交 `PlannerCommit`。除 plan task 文本外，不允许输出任
 type PlannerAction =
   | 'continue_current'
   | 'execute_plan'
+  | 'advance_plan'
   | 'goal_done'
   | 'user_input_required'
   | 'unavailable';
@@ -212,17 +213,25 @@ Planner 只做语义判断并提交 commit。graph 必须确定性地负责：
 
 ### `execute_plan`
 
-适用条件：
-
-- entry 阶段已有可执行计划；或
-- 当前 task 已被最新结果满足，用户目标仍有可以自主执行的工作。
+适用条件：entry 阶段已有可执行的初始计划。
 
 约束：
 
 - `tasks.length >= 1`；
-- post-execution 阶段必须先接受当前 announce、构造 handoff 并完成当前 delegation；
 - graph materialize `tasks[0]`，其余 tasks 写入公开 committed plan；
 - Planner 不得直接创建 delegation 或写 root messages。
+
+### `advance_plan`
+
+适用条件：Boundary 阶段当前 task 已被最新结果满足，用户目标仍有可以自主执行的工作。
+
+约束：
+
+- `tasks.length >= 1`；
+- graph 必须先接受当前 announce、构造 handoff 并完成当前 delegation；
+- graph materialize `tasks[0]`，其余 tasks 写入公开 committed plan；
+- 下一项 task 可以选择不同的 Capability；
+- Planner 不得用它掩盖当前 task 的缺口。
 
 ### `goal_done`
 
@@ -266,7 +275,8 @@ schema 和 runtime 必须同时验证：
 
 ```text
 continue_current     -> active delegation + non-empty tasks + same capability
-execute_plan         -> non-empty tasks
+execute_plan         -> entry + non-empty tasks
+advance_plan         -> boundary + non-empty tasks
 goal_done            -> empty tasks + accepted-result preconditions
 user_input_required  -> empty tasks
 unavailable          -> empty tasks
@@ -496,7 +506,7 @@ capability
   -> Planner(post-execution boundary input)
        |-- continue_current
        |     `-- preserve delegation -> capability
-       |-- execute_plan
+       |-- advance_plan
        |     `-- accept handoff -> complete delegation -> next capability
        |-- goal_done
        |     `-- accept handoff -> answer
@@ -555,6 +565,7 @@ Planner terminal tools 建议改为：
 ```text
 continue_current(tasks)
 submit_plan(tasks)
+advance_plan(tasks)
 complete_goal()
 request_user_input()
 report_unavailable()
@@ -597,9 +608,9 @@ report_unavailable()
 
 - Planner terminal tools 改为 `PlannerCommit` actions；
 - post-capability route 从 Outcome 改到 private Planner；
-- 实现五种 action 的确定性 root transition；
+- 实现六种 action 的确定性 root transition；
 - `continue_current` 复用 delegation；
-- `execute_plan/goal_done` 执行 accepted handoff；
+- `advance_plan/goal_done` 执行 accepted handoff；
 - `user_input_required/unavailable` 保留 truthful unfinished state；
 - 通过 feature flag 或双 runner 保留可回退旧路径。
 
@@ -629,6 +640,7 @@ report_unavailable()
 - `continue_current` capability 不一致时拒绝；
 - terminal action 携带 tasks 时拒绝；
 - `execute_plan` 空 tasks 时拒绝；
+- Entry 的 `advance_plan` 与 Boundary 的 `execute_plan` 均拒绝；
 - graph 对每个 commit 产生正确 state update 和 route；
 - 不通过 prompt literal/regex 测试契约，只测试 schema 和可观察行为。
 
@@ -662,7 +674,7 @@ report_unavailable()
 
 1. 单 task 完成整个目标 -> `goal_done`；
 2. 当前 task 未完成 -> 同 delegation `continue_current`；
-3. 调查结果驱动后续实现 -> `execute_plan`；
+3. 调查结果驱动后续实现 -> `advance_plan`；
 4. 最新结果使条件性后续 task 不再需要 -> `goal_done`；
 5. sibling handoff 不替代当前 task evidence -> `continue_current`；
 6. 当前 task 局部完成但必须等待用户输入 -> `user_input_required`；
@@ -713,7 +725,7 @@ report_unavailable()
 
 - post-execution boundary input 到达后先判断当前 task acceptance；
 - `continue_current` 成为显式 terminal action；
-- 只有 `execute_plan` 才接受当前 announce 并 materialize 新 delegation；
+- 只有 `advance_plan` 才接受当前 announce 并 materialize 新 delegation；
 - eval 覆盖 incomplete announce、sibling evidence 和 repeated investigation。
 
 ### 私有长期上下文变陈旧
@@ -747,7 +759,8 @@ lineage、故障注入测试。
 - [ ] Planner 不再输出 `reason/context/question/gap_note` 或 direct text；
 - [ ] Planner transcript/tool observations/summary 不进入 root state 或 Answer；
 - [ ] `continue_current` 保持 delegation ID、lane 和 transcript；
-- [ ] `execute_plan` 与 `goal_done` 只在 graph 接受 handoff 后推进；
+- [ ] `execute_plan` 只用于 Entry 初始计划；
+- [ ] `advance_plan` 与 `goal_done` 只在 graph 接受 handoff 后推进；
 - [ ] `user_input_required` 不把未完成 delegation 标记为 completed；
 - [ ] `unavailable` 不被表述为目标完成；
 - [ ] Planner in-flight interrupt 使用 parent bare `Command({ resume })` 原地恢复；

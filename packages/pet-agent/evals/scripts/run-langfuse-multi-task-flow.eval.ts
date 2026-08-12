@@ -143,7 +143,7 @@ function buildScriptedPlannerRunner() {
       plannedObjectives.push(objective);
       selectedCapabilityNames.push('code_modify');
       return {
-        action: 'execute_plan',
+        action: 'advance_plan',
         tasks: [{
           capability: 'code_modify',
           task: objective,

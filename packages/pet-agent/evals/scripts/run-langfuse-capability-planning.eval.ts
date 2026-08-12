@@ -61,7 +61,9 @@ function capabilityFromRegistryEntry(entry: string): AgentCapability {
 function plannerOutput(
   result: CapabilityPlannerResult,
 ): CapabilityPlanningEvalOutput {
-  if (result.action !== 'execute_plan' && result.action !== 'continue_current') {
+  if (result.action !== 'execute_plan'
+    && result.action !== 'advance_plan'
+    && result.action !== 'continue_current') {
     return {
       result: result.action,
       nextTask: null,

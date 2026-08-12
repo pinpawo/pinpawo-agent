@@ -9,13 +9,18 @@ import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { tool, type StructuredTool } from '@langchain/core/tools';
 import { Command, END, REMOVE_ALL_MESSAGES } from '@langchain/langgraph';
-import { createAgent, createMiddleware } from 'langchain';
+import {
+  createAgent,
+  createMiddleware,
+  toolCallLimitMiddleware,
+} from 'langchain';
 import { z } from 'zod';
 import { z as z4 } from 'zod/v4';
 import {
+  CAPABILITY_PLANNER_MAX_GREP_SEARCH_CALLS,
   CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-  CAPABILITY_PLANNER_GREP_STATE_SCHEMA,
   createCapabilityPlannerFileExplorer,
+  createCapabilityPlannerGrepSearchTool,
   type CapabilityPlannerFileExplorer,
 } from './fileExplorer';
 import type { CapabilityRegistryBackend } from './registryDocuments';
@@ -47,7 +52,7 @@ const COMPLETE_GOAL_TOOL_NAME = 'complete_goal';
 const REQUEST_USER_INPUT_TOOL_NAME = 'request_user_input';
 const REPORT_UNAVAILABLE_TOOL_NAME = 'report_unavailable';
 
-const plannerPrivateStateSchema = CAPABILITY_PLANNER_GREP_STATE_SCHEMA.extend({
+const plannerPrivateStateSchema = z4.object({
   requestedTraceId: z4.string().default(''),
   traceId: z4.string().default(''),
   currentInputId: z4.string().default(''),
@@ -158,19 +163,6 @@ function createPlannerTerminalTools(): StructuredTool[] {
     requestUserInput,
     reportUnavailable,
   ];
-}
-
-function createPlaceholderGrepTool() {
-  return tool(
-    async () => {
-      throw new Error('Planner grep_search requires an active private planning input.');
-    },
-    {
-      name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-      description: 'Planner registry discovery action.',
-      schema: z.object({ query: z.string().min(1).max(160) }),
-    },
-  );
 }
 
 function readTerminalCommit(message: ToolMessage): unknown {
@@ -335,9 +327,6 @@ function currentPlannerInput(state: Partial<PlannerPrivateState>) {
 }
 
 function createPrivatePlannerMiddleware(params: {
-  explorerForInput: (input: CapabilityPlannerInput) => CapabilityPlannerFileExplorer;
-  terminalTools: readonly StructuredTool[];
-  additionalPrivateTools: readonly StructuredTool[];
   privateContextMaxChars: number;
   privateContextKeepInputs: number;
 }) {
@@ -388,9 +377,6 @@ function createPrivatePlannerMiddleware(params: {
           compactionCount: traceChanged || registryChanged
             ? 0
             : state.compactionCount + (compactedMessages ? 1 : 0),
-          ...(state.grepSearchCallCount > 0
-            ? { grepSearchCallCount: -state.grepSearchCallCount }
-            : {}),
           ...(cachedCommit ? { jumpTo: 'end' as const } : {}),
         };
       },
@@ -412,19 +398,7 @@ function createPrivatePlannerMiddleware(params: {
     },
     wrapToolCall: async (request, handler) => {
       const input = currentPlannerInput(request.state);
-      const explorer = params.explorerForInput(input);
-      const tools = [
-        ...explorer.tools,
-        ...params.terminalTools,
-        ...params.additionalPrivateTools,
-      ];
-      const selectedTool = tools.find((candidate) =>
-        candidate.name === request.toolCall.name,
-      );
-      const result = await handler({
-        ...request,
-        ...(selectedTool ? { tool: selectedTool } : {}),
-      });
+      const result = await handler(request);
       if (!ToolMessage.isInstance(result)
         || ![
           CONTINUE_CURRENT_TOOL_NAME,
@@ -502,28 +476,34 @@ export function createCapabilityPlannerAgent(params: {
   };
   const terminalTools = createPlannerTerminalTools();
   const additionalPrivateTools = params.additionalPrivateTools ?? [];
-  const placeholderGrepTool = createPlaceholderGrepTool();
+  const grepSearchTool = createCapabilityPlannerGrepSearchTool<PlannerPrivateState>(
+    (query, runtime) => explorerForInput(
+      currentPlannerInput(runtime.state),
+    ).search(query, runtime.signal),
+  );
+  const grepSearchLimitMiddleware = toolCallLimitMiddleware({
+    toolName: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+    runLimit: CAPABILITY_PLANNER_MAX_GREP_SEARCH_CALLS,
+    exitBehavior: 'continue',
+  });
   const middleware = createPrivatePlannerMiddleware({
-    explorerForInput,
-    terminalTools,
-    additionalPrivateTools,
     privateContextMaxChars,
     privateContextKeepInputs,
   });
   const buildAgent = (checkpointer: boolean) => createAgent({
     name: 'privateCapabilityPlanner',
     model: params.model,
-    tools: [placeholderGrepTool, ...terminalTools, ...additionalPrivateTools],
-    stateSchema: plannerPrivateStateSchema,
+    tools: [grepSearchTool, ...terminalTools, ...additionalPrivateTools],
     systemPrompt: '',
-    middleware: [middleware],
+    middleware: [grepSearchLimitMiddleware, middleware],
     checkpointer,
   });
-  // A child with `true` inherits the parent checkpoint lineage. Direct runner
-  // invocations (unit tests/evals and hosts without persistence) use the
-  // separately precompiled ephemeral variant; neither graph is rebuilt per turn.
+  // These are the two standard LangGraph subgraph persistence modes used by
+  // this runner. Production uses per-thread persistence (`true`) inherited
+  // from the parent; direct tests/evals use the precompiled stateless adapter
+  // (`false`). Neither graph is rebuilt per Planner invocation.
   const persistentAgent = buildAgent(true);
-  const ephemeralAgent = buildAgent(false);
+  const statelessDirectAgent = buildAgent(false);
 
   return Object.freeze({
     async invoke(
@@ -543,11 +523,9 @@ export function createCapabilityPlannerAgent(params: {
         );
         const selectedAgent = hasParentCheckpointer
           ? persistentAgent
-          : ephemeralAgent;
+          : statelessDirectAgent;
         if (hasParentCheckpointer) {
-          const snapshot = await (persistentAgent as unknown as {
-            getState(value: RunnableConfig): Promise<{ values: unknown }>;
-          }).getState(config);
+          const snapshot = await persistentAgent.graph.getState(config);
           const saved = snapshot.values as Partial<PlannerPrivateState>;
           if (input.mode === 'boundary' && saved.traceId !== input.traceId) {
             throw new CapabilityPlannerAgentError(
@@ -558,12 +536,7 @@ export function createCapabilityPlannerAgent(params: {
           if (saved.traceId === input.traceId
             && saved.registryDigest
             && saved.registryDigest !== input.workspace.registryDigest) {
-            await (persistentAgent as unknown as {
-              updateState(
-                value: RunnableConfig,
-                update: Partial<PlannerPrivateState> & { messages: BaseMessage[] },
-              ): Promise<unknown>;
-            }).updateState(config, {
+            await persistentAgent.graph.updateState(config, {
               messages: [new RemoveMessage({ id: REMOVE_ALL_MESSAGES })],
               requestedTraceId: input.traceId,
               traceId: input.traceId,

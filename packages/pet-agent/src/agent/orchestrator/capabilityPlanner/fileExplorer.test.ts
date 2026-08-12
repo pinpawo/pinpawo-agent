@@ -190,6 +190,26 @@ test('grep_search searches complete Capability documents', async (t) => {
   );
 });
 
+test('grep_search returns verified General fallback after a literal miss', async (t) => {
+  const { workspace } = await workspaceFixture(t);
+  const explorer = createCapabilityPlannerFileExplorer({ workspace });
+
+  const result = await invoke(
+    explorer,
+    CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+    { query: 'list files directory' },
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.data?.matches, []);
+  const fallback = result.data?.fallback as Record<string, unknown>;
+  assert.equal(fallback.capabilityName, 'general');
+  assert.equal(fallback.path, 'general/CAPABILITY.md');
+  assert.equal(fallback.reason, 'general_fallback');
+  assert.match(String(fallback.content), /Handle ordinary local work/);
+  assert.deepEqual(fallback.matchedTerms, []);
+});
+
 test('memory backend is explicit and preserves complete registry search results', async (t) => {
   const { workspace } = await workspaceFixture(t);
   const filesystem = createCapabilityPlannerFileExplorer({ workspace });

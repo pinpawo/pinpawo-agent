@@ -1,0 +1,197 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+
+import { createStudio } from '@pinpawo/studio';
+import type {
+  PetAgentRuntime,
+  PetAgentRuntimeInvokeInput,
+  StudioEvent,
+} from '@pinpawo/studio';
+import type { NamedStructuredTool } from '@pinpawo/pet-agent';
+
+import { createKanbanPlugin } from './kanbanPlugin';
+import { KanbanBoard } from './kanbanBoard';
+
+/**
+ * 一个只会"收到任务 → 调工具"的假 pet。
+ *
+ * 它模拟真实链路的关键一环:pet 通过 **toolkit** 与看板交互,
+ * 从不直接与 studio 通信。
+ */
+function pet(options: {
+  petId: string;
+  onInvoke?: (input: PetAgentRuntimeInvokeInput, tools: KanbanTools) => Promise<void> | void;
+  tools: () => KanbanTools;
+}): PetAgentRuntime {
+  return {
+    descriptor: () => ({
+      petId: options.petId,
+      userId: null,
+      name: options.petId,
+      personality: null,
+      stage: null,
+      species: null,
+      role: null,
+      serviceSummary: null,
+      startupMode: 'standby',
+      status: 'standby',
+      capabilities: [],
+    }),
+    invoke: async (input) => {
+      await options.onInvoke?.(input, options.tools());
+      return { reply: 'ok' };
+    },
+  };
+}
+
+type KanbanTools = Record<string, NamedStructuredTool>;
+
+/** 取得绑定到某个 thread 的工具 —— 与 pet 执行时拿到的是同一批。 */
+function toolsForThread(plugin: ReturnType<typeof createKanbanPlugin>, threadId: string | null) {
+  const bound = plugin.runtime!.bindTools!({}, {
+    execution: { threadId, runId: 'r', delegationId: 'd', workdir: null },
+  }) as NamedStructuredTool[];
+  return Object.fromEntries(bound.map((item) => [item.name, item])) as KanbanTools;
+}
+
+const flush = async () => {
+  for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+};
+
+test('a full round: entry pet plans, kanban dispatches, worker completes', async () => {
+  // 这是契约的端到端验证:studio 不理解任何看板概念,pet 不知道自己在
+  // 驱动一块看板,两者只通过 dispatch / toolkit 相连。
+  const plugin = createKanbanPlugin();
+  const events: StudioEvent[] = [];
+  let writerBrief = '';
+
+  const studio = await createStudio({
+    studioId: 's1',
+    entryPetId: 'planner',
+    pets: [
+      pet({
+        petId: 'planner',
+        tools: () => toolsForThread(plugin, null),
+        onInvoke: async (_input, tools) => {
+          // planner 拆解出一个任务 —— 它只知道"新增任务"，不知道看板。
+          await tools.kanban_task_add!.invoke({ petId: 'writer', brief: '写稿' });
+        },
+      }),
+      pet({
+        petId: 'writer',
+        tools: () => ({}),
+        onInvoke: async (input) => {
+          writerBrief = input.brief;
+          // worker 用自己 thread 的工具标记完成 —— 无需转述任何 id。
+          const scoped = toolsForThread(plugin, input.threadId ?? null);
+          await scoped.kanban_task_complete!.invoke({ result: '稿子写完了' });
+        },
+      }),
+    ],
+    plugins: [plugin],
+  });
+
+  studio.subscribe((event) => { events.push(event); });
+
+  await studio.submitRequest('写一篇关于 X 的稿子');
+  await flush();
+
+  // planner 的任务被派给了 writer,brief 原样传达。
+  assert.equal(writerBrief, '写稿');
+
+  const tasks = plugin.board.list();
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0]?.status, 'done');
+  assert.equal(tasks[0]?.note, '稿子写完了');
+
+  // 状态变化经插件转成 event 广播出去,studio 只转发不解释。
+  assert.ok(events.some((event) => event.type === 'task.done'));
+  assert.ok(events.every((event) => event.source === 'kanban'));
+});
+
+test('a dependent task waits until its dependency is done', async () => {
+  const board = new KanbanBoard();
+  const plugin = createKanbanPlugin({ board });
+  const dispatched: string[] = [];
+
+  const first = board.add({ petId: 'worker', brief: 'first' });
+  board.add({ petId: 'worker', brief: 'second', deps: [first.taskId] });
+
+  const studio = await createStudio({
+    studioId: 's1',
+    entryPetId: 'worker',
+    pets: [pet({
+      petId: 'worker',
+      tools: () => ({}),
+      onInvoke: async (input) => { dispatched.push(input.brief); },
+    })],
+    plugins: [plugin],
+  });
+
+  // 插件启动时还没有状态变化,主动触发一次即可开始。
+  board.add({ petId: 'worker', brief: 'kick' });
+  await flush();
+
+  // 依赖未满足的 second 不该被派发。
+  assert.ok(dispatched.includes('first'));
+  assert.ok(!dispatched.includes('second'));
+
+  board.complete(first.taskId, 'done');
+  await flush();
+
+  assert.ok(dispatched.includes('second'));
+  await studio.shutdown();
+});
+
+test('a blocked task neither retries nor blocks other ready work', async () => {
+  // 自动重试已退役:卡住就留在看板上等人。而它不该连累别的任务。
+  const board = new KanbanBoard();
+  const plugin = createKanbanPlugin({ board });
+  const dispatched: string[] = [];
+
+  const stuck = board.add({ petId: 'worker', brief: 'stuck' });
+  board.block(stuck.taskId, 'needs a decision');
+  board.add({ petId: 'worker', brief: 'independent' });
+
+  await createStudio({
+    studioId: 's1',
+    entryPetId: 'worker',
+    pets: [pet({
+      petId: 'worker',
+      tools: () => ({}),
+      onInvoke: async (input) => { dispatched.push(input.brief); },
+    })],
+    plugins: [plugin],
+  });
+
+  board.add({ petId: 'worker', brief: 'kick' });
+  await flush();
+
+  assert.ok(dispatched.includes('independent'), 'a blocked task must not stall ready work');
+  assert.equal(dispatched.filter((brief) => brief === 'stuck').length, 0);
+  assert.equal(board.get(stuck.taskId)?.status, 'blocked');
+});
+
+test('restart marks in-flight tasks blocked rather than silently requeuing them', async () => {
+  // 进程已经不在了,doing 不可能还在跑。恢复成 blocked 而不是 todo ——
+  // 重来与否是人的判断。
+  const source = new KanbanBoard();
+  const task = source.add({ petId: 'worker', brief: 'interrupted' });
+  source.markDispatched(task.taskId, 'thread-1');
+
+  const restored = new KanbanBoard();
+  restored.restore(source.snapshot());
+
+  assert.equal(restored.get(task.taskId)?.status, 'blocked');
+  assert.match(restored.get(task.taskId)?.note ?? '', /interrupted by restart/);
+});
+
+test('tools report plainly when the caller has no assigned task', async () => {
+  const plugin = createKanbanPlugin();
+  const tools = toolsForThread(plugin, 'unknown-thread');
+
+  assert.match(
+    await tools.kanban_task_complete!.invoke({ result: 'x' }) as string,
+    /no task is currently assigned/,
+  );
+});

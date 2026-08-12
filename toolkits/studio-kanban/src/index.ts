@@ -7,6 +7,13 @@
  * 换成 S3 / DB 实现时,编排核心不需要任何改动。
  */
 
+/* ─────────────── Studio 插件 ─────────────── */
+
+export { createKanbanPlugin, KANBAN_TOOLKIT_NAME } from './kanbanPlugin';
+export type { CreateKanbanPluginOptions, KanbanPlugin } from './kanbanPlugin';
+export { KanbanBoard } from './kanbanBoard';
+export type { KanbanTask, KanbanTaskStatus, KanbanBoardSnapshot } from './kanbanBoard';
+
 /* ─────────────── 任务队列 ─────────────── */
 
 export { FileStudioRunQueueStore } from './runQueueStore';

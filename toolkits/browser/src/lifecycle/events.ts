@@ -27,6 +27,8 @@ export const BROWSER_RUNTIME_EVENT_TYPES = [
 export type BrowserRuntimeEventType = typeof BROWSER_RUNTIME_EVENT_TYPES[number];
 
 export type BrowserRuntimeEvent<TType extends BrowserRuntimeEventType = BrowserRuntimeEventType> = {
+  /** Opaque host-generated browser context identifier, when the backend supports multiple tabs. */
+  contextId?: string;
   /** Which native-host / extension connection produced this event. */
   connectionGeneration: number;
   /** Which managed target produced this event. */

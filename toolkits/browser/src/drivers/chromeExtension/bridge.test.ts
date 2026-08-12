@@ -14,6 +14,15 @@ type LinePeer = {
   send: (message: unknown) => void;
 };
 
+test('browser bridge tracks navigation generations independently per browser context', () => {
+  const bridge = new BrowserExtensionBridge();
+
+  assert.equal(bridge.beginNavigation('context-a'), 1);
+  assert.equal(bridge.beginNavigation('context-b'), 1);
+  assert.equal(bridge.beginNavigation('context-a'), 2);
+  assert.equal(bridge.beginNavigation(), 1);
+});
+
 async function waitUntil(predicate: () => boolean, timeoutMs = 1_000) {
   const deadline = Date.now() + timeoutMs;
   while (!predicate()) {

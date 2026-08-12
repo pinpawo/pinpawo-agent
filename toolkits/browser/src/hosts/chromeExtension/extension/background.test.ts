@@ -175,7 +175,7 @@ test('trusted pointer input activates the bound target inside the extension', as
   assert.match(dispatchScroll, /await activateTarget\(tabId\)/);
 });
 
-test('navigation commits a normal tab before attaching the debugger', async () => {
+test('navigation attaches and enables lifecycle domains before dispatching the URL', async () => {
   const source = await readFile(
     resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
     'utf8',
@@ -184,9 +184,19 @@ test('navigation commits a normal tab before attaching the debugger', async () =
     /if \(command\.command === 'navigate'\) \{([\s\S]*?)\n  \}/,
   )?.[1] ?? '';
 
-  assert.match(navigate, /prepareNavigationTarget/);
+  const attachOffset = navigate.indexOf('await attach(activeTarget.tabId)');
+  const updateOffset = navigate.indexOf('await chrome.tabs.update(activeTarget.tabId, { url, active: true })');
+
+  assert.match(navigate, /prepareNavigationTarget\(\)/);
   assert.match(navigate, /await activateTarget\(activeTarget\.tabId\)/);
-  assert.match(navigate, /await attach\(activeTarget\.tabId\)/);
+  assert.ok(attachOffset >= 0 && updateOffset > attachOffset, 'attach must happen before tabs.update(url)');
+  assert.match(navigate, /return \{ ok: true, tabId: activeTarget\.tabId, url \}/);
+  assert.match(source, /await cdp\(tabId, 'Page\.enable'\)/);
+  assert.match(source, /await cdp\(tabId, 'Network\.enable'\)/);
+  const prepareTarget = source.match(
+    /async function prepareNavigationTarget\(\) \{([\s\S]*?)\n\}/,
+  )?.[1] ?? '';
+  assert.doesNotMatch(prepareTarget, /chrome\.tabs\.update/);
   assert.doesNotMatch(source, /'Page\.navigate'/);
 });
 
@@ -234,7 +244,7 @@ test('live DOM sampling does not read a frame URL from Page.loadEventFired', asy
   // always yields undefined, so the DOM sample never fires and the Runtime never
   // receives a textLength (navigation then hangs in `settling` until timeout).
   assert.doesNotMatch(loadEventBranch, /params[\s\S]*?frame/);
-  assert.match(loadEventBranch, /liveTabUrl\(source\.tabId\)/);
+  assert.match(loadEventBranch, /liveTabUrl\(tabId\)/);
   assert.match(loadEventBranch, /emitLiveDomSample/);
 });
 
@@ -248,7 +258,7 @@ test('tab-complete readiness resolves a real URL instead of posting an empty one
   )?.[1] ?? '';
 
   assert.match(handler, /liveTabUrl\(tabId\)/);
-  assert.match(handler, /if \(!liveUrl\) return;/);
+  assert.match(handler, /if \(!url\) return;/);
   // An empty URL makes the readiness events unusable downstream.
   assert.doesNotMatch(handler, /emitLiveDocumentReady\([^)]*''/);
   assert.doesNotMatch(handler, /emitLiveDomSample\([^)]*''/);

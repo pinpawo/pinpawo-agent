@@ -1,7 +1,13 @@
 import type { SubagentExecutionScope } from '@pinpawo/pet-agent';
 import { BrowserOperationError } from './errors';
 
-export type BrowserExecutionOwner = SubagentExecutionScope;
+/**
+ * Browser state belongs to the conversation, not to one transient capability
+ * execution. `runId` and `delegationId` remain useful tracing data in the
+ * generic runtime scope, but must not decide whether the next browser tool in
+ * the same thread can resume its tab.
+ */
+export type BrowserExecutionOwner = Pick<SubagentExecutionScope, 'threadId'>;
 
 function throwIfAborted(signal?: AbortSignal): void {
   if (!signal?.aborted) return;
@@ -16,14 +22,28 @@ function isSameOwner(
   left: BrowserExecutionOwner,
   right: BrowserExecutionOwner,
 ): boolean {
-  return left.threadId === right.threadId
-    && left.runId === right.runId
-    && left.delegationId === right.delegationId;
+  return left.threadId === right.threadId;
+}
+
+/**
+ * A navigation timeout is not an ownership failure: the navigation was
+ * dispatched and its tab can still be used by the same thread. Retaining
+ * ownership makes the recovery named in the error (`browser_wait`) possible.
+ *
+ * Keep this deliberately narrow. A generic retryable transport error does not
+ * prove that a usable target remains, while target-close and origin-change
+ * errors must never expose the old context to a later operation.
+ */
+function retainsOwnerAfterOpenFailure(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && error.code === 'navigation_timeout';
 }
 
 export class BrowserContextOwnership {
   private owner: BrowserExecutionOwner | null = null;
-  /** Last cleanly released owner, eligible to resume the retained page. */
+  /** Last cleanly released thread, eligible to resume the retained page. */
   private resumableOwner: BrowserExecutionOwner | null = null;
   private operationTail: Promise<void> = Promise.resolve();
 
@@ -43,7 +63,7 @@ export class BrowserContextOwnership {
     if (!owner) {
       throw new BrowserOperationError(
         'browser_context_missing',
-        'Browser operation is missing its delegation context.',
+        'Browser operation is missing its thread context.',
         false,
       );
     }
@@ -54,14 +74,14 @@ export class BrowserContextOwnership {
     if (!this.owner) {
       throw new BrowserOperationError(
         'browser_not_open',
-        'No browser is owned by this delegation. Use browser_open first.',
+        'No browser is owned by this thread. Use browser_open first.',
         true,
       );
     }
     if (!isSameOwner(this.owner, owner)) {
       throw new BrowserOperationError(
         'browser_context_conflict',
-        'The active browser belongs to another delegation. Use browser_open to start from an explicit URL.',
+        'The active browser belongs to another thread. Use browser_open to start from an explicit URL.',
         true,
       );
     }
@@ -98,13 +118,20 @@ export class BrowserContextOwnership {
     return this.enqueue(async () => {
       const nextOwner = this.requireOwner(owner);
       // browser_open is the explicit handoff boundary. Serializing the claim
-      // with page operations prevents the previous delegation from acting on
+      // with page operations prevents a previous thread from acting on
       // the newly opened page after ownership changes.
       this.resumableOwner = null;
       this.owner = nextOwner;
       try {
         return await operation();
       } catch (error) {
+        if (retainsOwnerAfterOpenFailure(error)) {
+          // `browser_open` already established this thread as the explicit
+          // handoff target. Keep it active so a same-thread browser_wait
+          // can continue the in-flight navigation rather than failing with
+          // browser_not_open.
+          throw error;
+        }
         this.owner = null;
         this.resumableOwner = null;
         throw error;

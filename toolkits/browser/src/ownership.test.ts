@@ -1,57 +1,51 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { BrowserOperationError } from './errors';
 import type { BrowserExecutionOwner } from './ownership';
 import { BrowserContextOwnership } from './ownership';
 
-function owner(
-  delegationId: string,
-  runId = `run-${delegationId}`,
-): BrowserExecutionOwner {
-  return {
-    threadId: 'thread-1',
-    runId,
-    delegationId,
-  };
+function owner(threadId = 'thread-1'): BrowserExecutionOwner {
+  return { threadId };
 }
 
-test('same delegation can reuse its browser ownership', async () => {
+test('same thread can reuse browser ownership across executions', async () => {
   const ownership = new BrowserContextOwnership();
-  const delegation = owner('delegation-1');
 
-  assert.equal(await ownership.runOpen(delegation, async () => 'opened'), 'opened');
-  assert.equal(await ownership.runOwned({ ...delegation }, async () => 'snapshot'), 'snapshot');
+  assert.equal(await ownership.runOpen(owner(), async () => 'opened'), 'opened');
+  assert.equal(await ownership.runOwned(owner(), async () => 'snapshot'), 'snapshot');
 });
 
-test('release drops active ownership and only the same execution can resume it', async () => {
+test('release lets a later execution in the same thread resume the retained page', async () => {
   const ownership = new BrowserContextOwnership();
-  const first = owner('delegation-1');
-  const second = owner('delegation-2');
+  const firstExecution = owner();
+  const laterExecution = owner();
+  const otherThread = owner('thread-2');
 
-  await ownership.runOpen(first, async () => 'opened');
-  await ownership.release(first);
+  await ownership.runOpen(firstExecution, async () => 'opened');
+  await ownership.release(firstExecution);
   await assert.rejects(
-    ownership.runOwned(first, async () => 'snapshot'),
+    ownership.runOwned(firstExecution, async () => 'snapshot'),
     (error: unknown) => error instanceof Error
       && 'code' in error
       && error.code === 'browser_not_open',
   );
 
-  await ownership.acquire(second);
+  await ownership.acquire(otherThread);
   await assert.rejects(
-    ownership.runOwned(second, async () => 'foreign snapshot'),
+    ownership.runOwned(otherThread, async () => 'foreign snapshot'),
     (error: unknown) => error instanceof Error
       && 'code' in error
       && error.code === 'browser_not_open',
   );
 
-  await ownership.acquire({ ...first });
-  assert.equal(await ownership.runOwned(first, async () => 'resumed'), 'resumed');
+  await ownership.acquire(laterExecution);
+  assert.equal(await ownership.runOwned(laterExecution, async () => 'resumed'), 'resumed');
 });
 
-test('another delegation must explicitly open before using the browser', async () => {
+test('another thread must explicitly open before using the browser', async () => {
   const ownership = new BrowserContextOwnership();
-  const first = owner('delegation-1');
-  const second = owner('delegation-2');
+  const first = owner('thread-1');
+  const second = owner('thread-2');
   let operationCalled = false;
 
   await ownership.runOpen(first, async () => 'opened');
@@ -60,29 +54,25 @@ test('another delegation must explicitly open before using the browser', async (
       operationCalled = true;
       return 'snapshot';
     }),
-    (error: unknown) => (
-      error instanceof Error
+    (error: unknown) => error instanceof Error
       && 'code' in error
-      && error.code === 'browser_context_conflict'
-    ),
+      && error.code === 'browser_context_conflict',
   );
   assert.equal(operationCalled, false);
 
   assert.equal(await ownership.runOpen(second, async () => 'reopened'), 'reopened');
   await assert.rejects(
     ownership.runOwned(first, async () => 'stale operation'),
-    (error: unknown) => (
-      error instanceof Error
+    (error: unknown) => error instanceof Error
       && 'code' in error
-      && error.code === 'browser_context_conflict'
-    ),
+      && error.code === 'browser_context_conflict',
   );
 });
 
-test('ownership transfer waits for an in-flight operation', async () => {
+test('thread handoff waits for an in-flight operation', async () => {
   const ownership = new BrowserContextOwnership();
-  const first = owner('delegation-1');
-  const second = owner('delegation-2');
+  const first = owner('thread-1');
+  const second = owner('thread-2');
   const events: string[] = [];
   let releaseOperation: (() => void) | undefined;
 
@@ -107,17 +97,17 @@ test('ownership transfer waits for an in-flight operation', async () => {
 
 test('an aborted queued operation never reaches the browser driver', async () => {
   const ownership = new BrowserContextOwnership();
-  const delegation = owner('delegation-1');
+  const thread = owner();
   let releaseOperation: (() => void) | undefined;
   let cancelledOperationStarted = false;
 
-  await ownership.runOpen(delegation, async () => 'opened');
-  const inFlight = ownership.runOwned(delegation, async () => {
+  await ownership.runOpen(thread, async () => 'opened');
+  const inFlight = ownership.runOwned(thread, async () => {
     await new Promise<void>((resolve) => { releaseOperation = resolve; });
   });
   await new Promise<void>((resolve) => setImmediate(resolve));
   const controller = new AbortController();
-  const cancelled = ownership.runOwned(delegation, async () => {
+  const cancelled = ownership.runOwned(thread, async () => {
     cancelledOperationStarted = true;
   }, controller.signal);
   controller.abort();
@@ -136,8 +126,8 @@ test('an aborted queued operation never reaches the browser driver', async () =>
 
 test('failed open clears ownership instead of exposing the previous context', async () => {
   const ownership = new BrowserContextOwnership();
-  const first = owner('delegation-1');
-  const second = owner('delegation-2');
+  const first = owner('thread-1');
+  const second = owner('thread-2');
 
   await ownership.runOpen(first, async () => 'opened');
   await assert.rejects(
@@ -148,18 +138,78 @@ test('failed open clears ownership instead of exposing the previous context', as
   );
   await assert.rejects(
     ownership.runOwned(second, async () => 'snapshot'),
-    (error: unknown) => (
-      error instanceof Error
+    (error: unknown) => error instanceof Error
       && 'code' in error
-      && error.code === 'browser_not_open'
-    ),
+      && error.code === 'browser_not_open',
   );
 });
 
-test('only the current delegation can close the browser', async () => {
+test('navigation timeout retains ownership so a later execution in the same thread can wait', async () => {
   const ownership = new BrowserContextOwnership();
-  const first = owner('delegation-1');
-  const second = owner('delegation-2');
+
+  await assert.rejects(
+    ownership.runOpen(owner(), async () => {
+      throw new BrowserOperationError(
+        'navigation_timeout',
+        'Page did not become readable. Use browser_wait to continue.',
+        true,
+      );
+    }),
+    (error: unknown) => error instanceof BrowserOperationError
+      && error.code === 'navigation_timeout',
+  );
+
+  assert.equal(
+    await ownership.runOwned(owner(), async () => 'wait resumed'),
+    'wait resumed',
+  );
+});
+
+test('bridge navigation timeout also retains the thread ownership', async () => {
+  const ownership = new BrowserContextOwnership();
+
+  await assert.rejects(
+    ownership.runOpen(owner(), async () => {
+      throw Object.assign(new Error('extension still loading'), {
+        code: 'navigation_timeout',
+      });
+    }),
+    /extension still loading/,
+  );
+
+  assert.equal(
+    await ownership.runOwned(owner(), async () => 'wait resumed'),
+    'wait resumed',
+  );
+});
+
+test('navigation timeout transfers ownership to a new explicit opener thread', async () => {
+  const ownership = new BrowserContextOwnership();
+  const first = owner('thread-1');
+  const second = owner('thread-2');
+
+  await ownership.runOpen(first, async () => 'opened');
+  await assert.rejects(
+    ownership.runOpen(second, async () => {
+      throw new BrowserOperationError('navigation_timeout', 'still loading', true);
+    }),
+    (error: unknown) => error instanceof BrowserOperationError
+      && error.code === 'navigation_timeout',
+  );
+
+  assert.equal(await ownership.runOwned(second, async () => 'wait resumed'), 'wait resumed');
+  await assert.rejects(
+    ownership.runOwned(first, async () => 'stale operation'),
+    (error: unknown) => error instanceof Error
+      && 'code' in error
+      && error.code === 'browser_context_conflict',
+  );
+});
+
+test('only the current thread can close the browser', async () => {
+  const ownership = new BrowserContextOwnership();
+  const first = owner('thread-1');
+  const second = owner('thread-2');
   let closeCalled = false;
 
   await ownership.runOpen(first, async () => 'opened');
@@ -168,11 +218,9 @@ test('only the current delegation can close the browser', async () => {
       closeCalled = true;
       return 'closed';
     }),
-    (error: unknown) => (
-      error instanceof Error
+    (error: unknown) => error instanceof Error
       && 'code' in error
-      && error.code === 'browser_context_conflict'
-    ),
+      && error.code === 'browser_context_conflict',
   );
   assert.equal(closeCalled, false);
   assert.equal(await ownership.runOwned(first, async () => 'snapshot'), 'snapshot');
@@ -187,10 +235,8 @@ test('only the current delegation can close the browser', async () => {
   assert.equal(closeCalled, true);
   await assert.rejects(
     ownership.runOwned(first, async () => 'snapshot'),
-    (error: unknown) => (
-      error instanceof Error
+    (error: unknown) => error instanceof Error
       && 'code' in error
-      && error.code === 'browser_not_open'
-    ),
+      && error.code === 'browser_not_open',
   );
 });

@@ -26,14 +26,12 @@ import {
 } from './interaction.js';
 import {
   createTargetStack,
-  isNavigableWebTab,
   isWebTab,
   selectNavigationTarget,
   shouldTrackPopup,
 } from './targetLifecycle.js';
 import { createBrowserStateTracker } from './browserState.js';
 import { calculateReconnectDelay } from './reconnect.js';
-import { pageReadinessEvents } from './pageReadiness.js';
 import {
   documentReadyEvent,
   navigationCommittedEvent,
@@ -46,16 +44,17 @@ const ALLOWED_CDP_COMMANDS = new Set([
   'Accessibility.getFullAXTree',
   'DOM.getBoxModel',
   'DOM.scrollIntoViewIfNeeded',
-  'Page.getNavigationHistory',
-  'Page.captureScreenshot',
-  'Page.enable',
   'Network.enable',
+  'Page.getNavigationHistory',
+  'Page.enable',
+  'Page.captureScreenshot',
   'Input.insertText',
   'Input.dispatchKeyEvent',
   'Input.dispatchMouseEvent',
   'Runtime.evaluate',
 ]);
 const SESSION_KEY = 'pinpawoBrowserTarget';
+const CONTEXT_TARGETS_KEY = 'pinpawoBrowserTargetsByContext';
 const RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
 const STABLE_CONNECTION_RESET_MS = 10_000;
@@ -65,11 +64,10 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let stableConnectionTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempt = 0;
 let attachedTabId: number | null = null;
-let userBoundOrigin: string | null = null;
 const enqueueExtensionWork = createSerialExecutor();
-const targets = createTargetStack();
 const browserState = createBrowserStateTracker();
 const recentPopupByOpener = new Map<number, PopupRecord>();
+const networkRequestsByTab = new Map<number, Set<string>>();
 const queuedCommandRequestIds = new Set();
 const cancelledCommandRequestIds = new Set();
 let activeCommandRequestId: string | null = null;
@@ -87,15 +85,117 @@ interface PopupRecord {
 }
 
 let popupTracking: PopupTracking | null = null;
-// Monotonic revision for DOM-readiness events emitted after each navigation.
-// Lets the Runtime key a stable (never re-issued) text sample across the live
-// lifecycle, and gives a handle for a future live re-poll during hydration
-// (issue #583 S1).
-let pageReadinessRevision = 0;
 
-let inflightRequests = 0;
-let lastDomTextLength = 0;
-let lastDomTextRevision = 0;
+const LEGACY_BROWSER_CONTEXT_ID = 'legacy';
+const MAX_BROWSER_CONTEXT_ID_LENGTH = 128;
+
+type BrowserTargetContext = {
+  targets: ReturnType<typeof createTargetStack>;
+  userBoundOrigin: string | null;
+};
+
+const targetContexts = new Map<string, BrowserTargetContext>();
+let activeBrowserContextId = LEGACY_BROWSER_CONTEXT_ID;
+let targets = createTargetStack();
+let userBoundOrigin: string | null = null;
+targetContexts.set(LEGACY_BROWSER_CONTEXT_ID, {
+  targets,
+  userBoundOrigin,
+});
+
+function readBrowserContextId(value: unknown): string {
+  if (value === undefined) return LEGACY_BROWSER_CONTEXT_ID;
+  if (
+    typeof value !== 'string'
+    || !value
+    || value.length > MAX_BROWSER_CONTEXT_ID_LENGTH
+  ) {
+    throw new ExtensionError(
+      'invalid_browser_context',
+      'Browser context id must be a non-empty string up to 128 characters.',
+    );
+  }
+  return value;
+}
+
+function browserTargetContext(contextId: string): BrowserTargetContext {
+  let context = targetContexts.get(contextId);
+  if (!context) {
+    context = {
+      targets: createTargetStack(),
+      userBoundOrigin: null,
+    };
+    targetContexts.set(contextId, context);
+  }
+  return context;
+}
+
+function activateBrowserContext(contextId: string): void {
+  const context = browserTargetContext(contextId);
+  activeBrowserContextId = contextId;
+  targets = context.targets;
+  userBoundOrigin = context.userBoundOrigin;
+}
+
+function persistActiveBrowserContext(): void {
+  const context = browserTargetContext(activeBrowserContextId);
+  context.userBoundOrigin = userBoundOrigin;
+}
+
+function browserContextForTab(tabId: number): string | null {
+  for (const [contextId, context] of targetContexts) {
+    const current = context.targets.current();
+    if (current?.tabId === tabId) return contextId;
+    if (context.targets.history().some((target) => target.tabId === tabId)) {
+      return contextId;
+    }
+  }
+  return null;
+}
+
+function emitLifecycleEvent(
+  event: string,
+  tabId: number,
+  options: { url?: string; payload?: Record<string, unknown> } = {},
+): void {
+  const contextId = browserContextForTab(tabId);
+  if (!contextId || !port) return;
+  port.postMessage({
+    type: 'browser.event',
+    protocolVersion: PROTOCOL_VERSION,
+    connectionId,
+    event,
+    contextId,
+    tabId,
+    ...(options.url !== undefined ? { url: options.url } : {}),
+    ...(options.payload !== undefined ? { payload: options.payload } : {}),
+  });
+}
+
+function networkRequestSet(tabId: number): Set<string> {
+  let requests = networkRequestsByTab.get(tabId);
+  if (!requests) {
+    requests = new Set<string>();
+    networkRequestsByTab.set(tabId, requests);
+  }
+  return requests;
+}
+
+type LiveReadinessState = {
+  lastDomTextLength: number;
+  lastDomTextRevision: number;
+};
+
+const liveReadinessByTab = new Map<number, LiveReadinessState>();
+
+function liveReadinessState(tabId: number): LiveReadinessState {
+  let state = liveReadinessByTab.get(tabId);
+  if (!state) {
+    state = { lastDomTextLength: 0, lastDomTextRevision: 0 };
+    liveReadinessByTab.set(tabId, state);
+  }
+  return state;
+}
 
 class ExtensionError extends Error {
   readonly code: string;
@@ -111,18 +211,36 @@ class ExtensionError extends Error {
 }
 
 async function restoreTarget() {
-  const stored = await chrome.storage.local.get(SESSION_KEY);
-  const candidate = stored[SESSION_KEY] as BrowserTarget | undefined;
-  if (!candidate || !Number.isInteger(candidate.tabId)) return;
-  try {
-    const tab = await chrome.tabs.get(candidate.tabId);
-    if (!isWebTab(tab)) {
-      await chrome.storage.local.remove(SESSION_KEY);
-      return;
+  activateBrowserContext(LEGACY_BROWSER_CONTEXT_ID);
+  const stored = await chrome.storage.local.get([SESSION_KEY, CONTEXT_TARGETS_KEY]);
+  const persisted = stored[CONTEXT_TARGETS_KEY];
+  const candidates = persisted && typeof persisted === 'object' && !Array.isArray(persisted)
+    ? Object.entries(persisted as Record<string, unknown>)
+    : [[LEGACY_BROWSER_CONTEXT_ID, stored[SESSION_KEY]]];
+  const restored: Record<string, BrowserTarget> = {};
+  for (const [contextId, candidate] of candidates) {
+    if (
+      typeof contextId !== 'string'
+      || !contextId
+      || contextId.length > MAX_BROWSER_CONTEXT_ID_LENGTH
+      || !candidate
+      || typeof candidate !== 'object'
+      || !Number.isInteger((candidate as BrowserTarget).tabId)
+    ) continue;
+    try {
+      const tab = await chrome.tabs.get((candidate as BrowserTarget).tabId);
+      if (!isWebTab(tab)) continue;
+      const context = browserTargetContext(contextId);
+      context.targets.bind(candidate, { resetHistory: true });
+      restored[contextId] = candidate as BrowserTarget;
+    } catch {
+      // Closed tabs are discarded from the persisted target map.
     }
-    targets.bind(candidate, { resetHistory: true });
-  } catch {
-    await chrome.storage.local.remove(SESSION_KEY);
+  }
+  if (Object.keys(restored).length > 0) {
+    await chrome.storage.local.set({ [CONTEXT_TARGETS_KEY]: restored });
+  } else {
+    await chrome.storage.local.remove(CONTEXT_TARGETS_KEY);
   }
 }
 
@@ -133,8 +251,23 @@ async function saveTarget(nextTarget: BrowserTarget | null, options: TargetBindO
   } else if (target?.binding !== 'user') {
     userBoundOrigin = null;
   }
-  if (target) await chrome.storage.local.set({ [SESSION_KEY]: target });
-  else await chrome.storage.local.remove(SESSION_KEY);
+  persistActiveBrowserContext();
+  const stored = await chrome.storage.local.get(CONTEXT_TARGETS_KEY);
+  const persisted = stored[CONTEXT_TARGETS_KEY];
+  const nextTargets = persisted && typeof persisted === 'object' && !Array.isArray(persisted)
+    ? { ...(persisted as Record<string, BrowserTarget>) }
+    : {};
+  if (target) nextTargets[activeBrowserContextId] = target;
+  else delete nextTargets[activeBrowserContextId];
+  if (Object.keys(nextTargets).length > 0) {
+    await chrome.storage.local.set({ [CONTEXT_TARGETS_KEY]: nextTargets });
+  } else {
+    await chrome.storage.local.remove(CONTEXT_TARGETS_KEY);
+  }
+  if (activeBrowserContextId === LEGACY_BROWSER_CONTEXT_ID) {
+    if (target) await chrome.storage.local.set({ [SESSION_KEY]: target });
+    else await chrome.storage.local.remove(SESSION_KEY);
+  }
   publishBrowserStateChange();
 }
 
@@ -228,19 +361,32 @@ async function cdp(
 
 async function attach(tabId: number) {
   if (attachedTabId === tabId) return;
+  const nextContextId = browserContextForTab(tabId) ?? activeBrowserContextId;
   if (attachedTabId !== null) await detach();
+  activateBrowserContext(nextContextId);
   try {
     await chrome.debugger.attach({ tabId }, CDP_VERSION);
     attachedTabId = tabId;
+    // Enable lifecycle sources before the URL is dispatched. Attaching only
+    // after tabs.update/create misses the exact navigation events the Runtime
+    // needs to decide whether browser_open can return readable content.
+    await cdp(tabId, 'Page.enable');
+    await cdp(tabId, 'Network.enable');
     publishBrowserStateChange();
     port?.postMessage({
       type: 'browser.event',
       protocolVersion: PROTOCOL_VERSION,
       connectionId,
       event: 'debugger.attached',
+      contextId: activeBrowserContextId,
       tabId,
     });
   } catch (error) {
+    if (attachedTabId === tabId) {
+      attachedTabId = null;
+      await chrome.debugger.detach({ tabId }).catch(() => {});
+      publishBrowserStateChange();
+    }
     throw new ExtensionError(
       'debugger_attach_failed',
       `Chrome debugger permission was not granted: ${error instanceof Error ? error.message : String(error)}`,
@@ -261,9 +407,14 @@ async function activateTarget(tabId: number) {
   }
 }
 
-async function detach() {
+async function detach(expectedContextId?: string) {
   if (attachedTabId === null) return { detached: false };
   const tabId = attachedTabId;
+  const contextId = browserContextForTab(tabId);
+  if (expectedContextId && contextId && contextId !== expectedContextId) {
+    return { detached: false };
+  }
+  if (contextId) activateBrowserContext(contextId);
   attachedTabId = null;
   await chrome.debugger.detach({ tabId }).catch(() => {});
   publishBrowserStateChange();
@@ -272,6 +423,7 @@ async function detach() {
     protocolVersion: PROTOCOL_VERSION,
     connectionId,
     event: 'debugger.detached',
+    contextId: activeBrowserContextId,
     tabId,
   });
   return { detached: true, tabId };
@@ -295,23 +447,7 @@ async function ensureTarget() {
   );
 }
 
-async function waitForNavigableTab(tabId, deadlineAt) {
-  while (Date.now() < Date.parse(deadlineAt)) {
-    ensureCommandAlive(deadlineAt);
-    const tab = await chrome.tabs.get(tabId);
-    if (isNavigableWebTab(tab)) {
-      return tab;
-    }
-    await delay(100, deadlineAt);
-  }
-  throw new ExtensionError(
-    'navigation_timeout',
-    'Navigation did not finish at a readable web page before the command deadline',
-    true,
-  );
-}
-
-async function prepareNavigationTarget(url, deadlineAt) {
+async function prepareNavigationTarget() {
   const existing = targets.current();
   let existingTab = null;
   if (existing) {
@@ -325,8 +461,6 @@ async function prepareNavigationTarget(url, deadlineAt) {
     selectNavigationTarget(existing) === 'reuse_agent_tab'
     && isWebTab(existingTab)
   ) {
-    await chrome.tabs.update(existing.tabId, { url, active: true });
-    await waitForNavigableTab(existing.tabId, deadlineAt);
     await saveTarget(
       { tabId: existing.tabId, binding: 'agent' },
       { resetHistory: true },
@@ -341,11 +475,10 @@ async function prepareNavigationTarget(url, deadlineAt) {
 
   // A tab explicitly bound by the user remains their page. browser_open gets a
   // separate agent-owned tab instead of navigating the user's bound tab away.
-  const tab = await chrome.tabs.create({ url, active: true });
+  const tab = await chrome.tabs.create({ active: true });
   if (!Number.isInteger(tab.id)) {
     throw new ExtensionError('target_create_failed', 'Chrome did not return a tab id');
   }
-  await waitForNavigableTab(tab.id, deadlineAt);
   await saveTarget({ tabId: tab.id, binding: 'agent' }, { resetHistory: true });
   return targets.current();
 }
@@ -404,6 +537,7 @@ async function handleRemovedTarget(tabId) {
     protocolVersion: PROTOCOL_VERSION,
     connectionId,
     event: 'target.closed',
+    contextId: activeBrowserContextId,
     tabId,
   });
   return null;
@@ -550,36 +684,15 @@ async function readSnapshot(tabId, approvedOrigin) {
   return snapshot;
 }
 
-/**
- * Report the page-readiness lifecycle events derived from a freshly captured
- * snapshot. These let the Runtime drive a navigation to `readable` (issue
- * #583): the extension states the observable page facts (`document.ready`,
- * `dom.changed` with the sampled body text) and the Runtime decides whether the
- * page is ready. Anything posted here is additive and backward-compatible.
- */
-function emitPageReadiness(tabId, url, snapshot) {
-  if (!port) return;
-  pageReadinessRevision += 1;
-  for (const event of pageReadinessEvents(snapshot, tabId, url, pageReadinessRevision)) {
-    port.postMessage({
-      type: 'browser.event',
-      protocolVersion: PROTOCOL_VERSION,
-      connectionId,
-      event: event.event,
-      tabId: event.tabId,
-      url: event.url,
-      payload: event.payload,
-    });
-  }
-}
-
 /** Post a unified `browser.event` to the native host (no-op when disconnected). */
 function postBrowserEvent(message) {
-  if (!port) return;
+  const contextId = browserContextForTab(message.tabId);
+  if (!port || !contextId) return;
   port.postMessage({
     type: 'browser.event',
     protocolVersion: PROTOCOL_VERSION,
     connectionId,
+    contextId,
     tabId: message.tabId,
     url: message.url,
     event: message.event,
@@ -590,10 +703,8 @@ function postBrowserEvent(message) {
 /**
  * Live readiness event emission (block 1 of issue #601). Translates reliable,
  * stateless CDP `Page`/`tabs` facts into the unified live readiness stream the
- * Runtime consumes — additive and backward-compatible, alongside the existing
- * snapshot-derived `emitPageReadiness` (so `browser_open` still returns its
- * snapshot). The pure translation lives in `liveReadiness.ts`; these helpers
- * own the `port.postMessage`.
+ * Runtime consumes. The pure translation lives in `liveReadiness.ts`; these
+ * helpers own the `port.postMessage`.
  *
  * Stateful live facts (network inflight deltas via `Network.*`, repeated DOM
  * text samples during hydration) are wired via CDP `Network.*` / `Page.loadEventFired`
@@ -611,7 +722,7 @@ function emitLiveDocumentReady(tabId, url, readyState) {
 
 
 async function emitLiveDomSample(tabId: number, url: string) {
-  if (!port || attachedTabId !== tabId) return;
+  if (!port || attachedTabId !== tabId || !browserContextForTab(tabId)) return;
   try {
     const result = await cdp(tabId, 'Runtime.evaluate', {
       expression: '(document.body?.innerText || "").length',
@@ -620,11 +731,12 @@ async function emitLiveDomSample(tabId: number, url: string) {
     const textLength = typeof result?.result?.value === 'number'
       ? Math.max(0, result.result.value)
       : 0;
-    if (textLength > lastDomTextLength || lastDomTextRevision === 0) {
-      lastDomTextRevision += 1;
-      lastDomTextLength = textLength;
+    const state = liveReadinessState(tabId);
+    if (textLength > state.lastDomTextLength || state.lastDomTextRevision === 0) {
+      state.lastDomTextRevision += 1;
+      state.lastDomTextLength = textLength;
       const event = domChangedEvent(
-        { textLength, textRevision: lastDomTextRevision, timestamp: Date.now() },
+        { textLength, textRevision: state.lastDomTextRevision, timestamp: Date.now() },
         tabId,
         url,
       );
@@ -642,7 +754,8 @@ async function emitLiveDomSample(tabId: number, url: string) {
  * and the tally could never return to zero, keeping the page from settling.
  */
 function emitLiveNetworkActivity(tabId: number, kind: 'request' | 'finish' | 'fail') {
-  if (!port || attachedTabId !== tabId) return;
+  if (!port || attachedTabId !== tabId || !browserContextForTab(tabId)) return;
+  const inflightRequests = networkRequestSet(tabId).size;
   const baseInflight = kind === 'request'
     ? Math.max(0, inflightRequests - 1)
     : inflightRequests + 1;
@@ -656,9 +769,9 @@ function emitLiveNetworkActivity(tabId: number, kind: 'request' | 'finish' | 'fa
   });
 }
 
-function resetLiveCounters() {
-  inflightRequests = 0;
-  lastDomTextLength = 0;
+function resetLiveCounters(tabId: number) {
+  networkRequestsByTab.delete(tabId);
+  liveReadinessByTab.delete(tabId);
 }
 
 /**
@@ -672,7 +785,8 @@ function resetLiveCounters() {
  * a body sample that never arrives.
  */
 async function liveTabUrl(tabId: number): Promise<string> {
-  const target = targets.current();
+  const contextId = browserContextForTab(tabId);
+  const target = contextId ? browserTargetContext(contextId).targets.current() : null;
   const known = target?.tabId === tabId ? (target as { url?: string }).url : undefined;
   if (typeof known === 'string' && known) return known;
   try {
@@ -1025,6 +1139,7 @@ async function captureScreenshot(tabId, approvedOrigin) {
 }
 
 async function executeCommand(command) {
+  activateBrowserContext(readBrowserContextId(command.params.browserContextId));
   activeCommandRequestId = command.requestId;
   try {
     return await executeCommandBody(command);
@@ -1035,7 +1150,7 @@ async function executeCommand(command) {
 
 async function executeCommandBody(command) {
   ensureCommandAlive(command.deadlineAt);
-  if (command.command === 'detach') return await detach();
+  if (command.command === 'detach') return await detach(activeBrowserContextId);
 
   const approvedOrigin = command.params.approvedOrigin;
   if (command.command === 'navigate') {
@@ -1043,20 +1158,14 @@ async function executeCommandBody(command) {
     if (typeof url !== 'string' || originOf(url) !== approvedOrigin) {
       throw new ExtensionError('origin_approval_mismatch', 'Navigation URL does not match its approved origin');
     }
-    const activeTarget = await prepareNavigationTarget(url, command.deadlineAt);
+    const activeTarget = await prepareNavigationTarget();
     if (!activeTarget) {
       throw new ExtensionError('target_create_failed', 'Chrome did not provide a navigation target');
     }
     await activateTarget(activeTarget.tabId);
     await attach(activeTarget.tabId);
-    port?.postMessage({
-      type: 'browser.event',
-      protocolVersion: PROTOCOL_VERSION,
-      connectionId,
-      event: 'tab.navigated',
-      tabId: activeTarget.tabId,
-      url,
-    });
+    emitLifecycleEvent('navigation.requested', activeTarget.tabId, { url });
+    await chrome.tabs.update(activeTarget.tabId, { url, active: true });
     // Issue #601: fire-and-forget — the Runtime owns the readiness wait.
     // Live events (Page.frameNavigated → navigation.committed,
     // tabs.onUpdated complete → document.ready, periodic DOM samples)
@@ -1177,6 +1286,7 @@ chrome.action.onClicked.addListener(async (tab) => {
     // authorize browser reads or interactions.
   }
   await enqueueExtensionWork(async () => {
+    activateBrowserContext(LEGACY_BROWSER_CONTEXT_ID);
     await detach();
     await saveTarget(
       { tabId: tab.id, binding: 'user' },
@@ -1196,6 +1306,10 @@ chrome.tabs.onCreated.addListener((tab) => {
 
 chrome.tabs.onRemoved.addListener(async (tabId) => {
   await enqueueExtensionWork(async () => {
+    const contextId = browserContextForTab(tabId);
+    if (!contextId) return;
+    activateBrowserContext(contextId);
+    resetLiveCounters(tabId);
     recentPopupByOpener.delete(tabId);
     await handleRemovedTarget(tabId);
   });
@@ -1203,69 +1317,84 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
 
 chrome.debugger.onDetach.addListener((source, reason) => {
   if (source.tabId !== attachedTabId) return;
+  const contextId = browserContextForTab(source.tabId);
+  if (contextId) activateBrowserContext(contextId);
   attachedTabId = null;
-  resetLiveCounters();
+  resetLiveCounters(source.tabId);
   publishBrowserStateChange();
   port?.postMessage({
     type: 'browser.event',
     protocolVersion: PROTOCOL_VERSION,
     connectionId,
     event: 'debugger.detached',
+    contextId: activeBrowserContextId,
     tabId: source.tabId,
     reason,
   });
 });
 
-// Live CDP event to unified readiness stream (issue #583 / #601 block 1).
-// Additive: posts live `navigation.committed` (Page.frameNavigated) and
-// `document.ready` (tab reaches complete) alongside the snapshot-derived events,
-// so the Runtime gets a genuine live stream to own the wait once wired.
 chrome.debugger.onEvent.addListener((source, method, params) => {
-  if (source.tabId !== attachedTabId || !port) return;
+  if (!Number.isInteger(source.tabId)) return;
+  const tabId = source.tabId;
+  if (tabId !== attachedTabId || !browserContextForTab(tabId)) return;
+  const eventParams = params as Record<string, unknown>;
+
   if (method === 'Page.frameNavigated') {
-    const frame = (params as Record<string, any> | undefined)?.frame as { url?: string } | undefined;
-    const raw = frame?.url;
-    const liveUrl = typeof raw === 'string' && raw ? raw : undefined;
-    if (liveUrl) {
-      resetLiveCounters();
-      emitLiveCommitted(source.tabId, liveUrl);
-    }
+    const frame = eventParams.frame as Record<string, unknown> | undefined;
+    // Iframe commits must not replace the main page's origin/readiness state.
+    if (!frame || typeof frame.url !== 'string' || frame.parentId !== undefined) return;
+    resetLiveCounters(tabId);
+    emitLiveCommitted(tabId, frame.url);
+    return;
   }
-  if (method === 'Network.requestWillBeSent') {
-    inflightRequests += 1;
-    emitLiveNetworkActivity(source.tabId, 'request');
-  }
-  if (method === 'Network.loadingFinished' || method === 'Network.loadingFailed') {
-    inflightRequests = Math.max(0, inflightRequests - 1);
-    emitLiveNetworkActivity(
-      source.tabId,
-      method === 'Network.loadingFinished' ? 'finish' : 'fail',
-    );
+  if (method === 'Page.domContentEventFired') {
+    void liveTabUrl(tabId).then((url) => {
+      if (url) emitLiveDocumentReady(tabId, url, 'interactive');
+    });
+    return;
   }
   if (method === 'Page.loadEventFired') {
-    // `Page.loadEventFired` carries only a `timestamp` — it has no `frame.url`.
-    // Reading one from `params` always yielded `undefined`, so the DOM sample
-    // was never emitted and the Runtime never received a `textLength`, leaving
-    // every navigation stuck in `settling` until the deadline.
     void (async () => {
-      const liveUrl = await liveTabUrl(source.tabId);
-      if (liveUrl) void emitLiveDomSample(source.tabId, liveUrl);
+      const url = await liveTabUrl(tabId);
+      if (!url) return;
+      emitLiveDocumentReady(tabId, url, 'complete');
+      await emitLiveDomSample(tabId, url);
     })();
+    return;
+  }
+  if (method === 'Network.requestWillBeSent' && typeof eventParams.requestId === 'string') {
+    const requests = networkRequestSet(tabId);
+    if (!requests.has(eventParams.requestId)) {
+      requests.add(eventParams.requestId);
+      emitLiveNetworkActivity(tabId, 'request');
+    }
+    return;
+  }
+  if (
+    (method === 'Network.loadingFinished' || method === 'Network.loadingFailed')
+    && typeof eventParams.requestId === 'string'
+  ) {
+    const requests = networkRequestSet(tabId);
+    if (requests.delete(eventParams.requestId)) {
+      emitLiveNetworkActivity(
+        tabId,
+        method === 'Network.loadingFinished' ? 'finish' : 'fail',
+      );
+    }
   }
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (tabId !== attachedTabId || !port || attachedTabId === null) return;
-  if (changeInfo.status === 'complete') {
-    // The managed target may not carry a URL yet; an empty one makes the
-    // readiness events unusable downstream, so resolve the tab's own URL.
-    void (async () => {
-      const liveUrl = await liveTabUrl(tabId);
-      if (!liveUrl) return;
-      emitLiveDocumentReady(tabId, liveUrl, 'complete');
-      void emitLiveDomSample(tabId, liveUrl);
-    })();
-  }
+  if (tabId !== attachedTabId || !browserContextForTab(tabId)) return;
+  if (changeInfo.status !== 'complete') return;
+  // `Page.loadEventFired` has no URL; Chrome tab state provides a reliable
+  // fallback for the final ready/body sample when it arrives first.
+  void (async () => {
+    const url = await liveTabUrl(tabId);
+    if (!url) return;
+    emitLiveDocumentReady(tabId, url, 'complete');
+    await emitLiveDomSample(tabId, url);
+  })();
 });
 
 async function initialize() {

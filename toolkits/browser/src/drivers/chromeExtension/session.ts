@@ -26,7 +26,6 @@ import {
 } from '../../lifecycle/openReadiness';
 import {
   waitForReadiness,
-  WAIT_FOR_READINESS_DEADLINE_MS,
   type ReadinessEventSource,
 } from '../../lifecycle/waitForReadiness';
 import {
@@ -38,6 +37,7 @@ import type { NavigationPhase } from '../../lifecycle/navigation';
 
 const DEFAULT_SESSION = 'default';
 const DEFAULT_EXTENSION_COMMAND_TIMEOUT_MS = 30_000;
+const OPEN_READINESS_BUDGET_MS = 5_000;
 const MAX_EXTENSION_TYPE_TIMEOUT_MS = 300_000;
 const HUMANIZED_TYPE_CHARACTER_LIMIT = 500;
 const TRUSTED_INSERT_CHUNK_CHARACTERS = 2_000;
@@ -87,7 +87,7 @@ export class ChromeExtensionBrowserSession {
 
   constructor(
     private readonly bridge: Pick<BrowserExtensionBridge, 'sendCommand'>
-      & Partial<Pick<BrowserExtensionBridge, 'getStatus' | 'onRuntimeEvent' | 'onGenerationChanged'>>,
+      & Partial<Pick<BrowserExtensionBridge, 'getStatus' | 'onRuntimeEvent' | 'onGenerationChanged' | 'beginNavigation'>>,
     private readonly workdir: () => string = () => process.cwd(),
   ) {}
 
@@ -151,6 +151,13 @@ export class ChromeExtensionBrowserSession {
     return this.approvedOrigin;
   }
 
+  private isNavigationTimeout(error: unknown): boolean {
+    return typeof error === 'object'
+      && error !== null
+      && 'code' in error
+      && error.code === 'navigation_timeout';
+  }
+
   async open(
     url: string,
     opts: BrowserOpenOptions = {},
@@ -178,13 +185,31 @@ export class ChromeExtensionBrowserSession {
     url: string,
     approvedOrigin: string,
     signal?: AbortSignal,
-    deadlineMs: number = WAIT_FOR_READINESS_DEADLINE_MS,
+    deadlineMs: number = OPEN_READINESS_BUDGET_MS,
   ): Promise<string> {
     // Issue #601: navigate is fire-and-forget — the extension returns
     // { ok: true } immediately and the Runtime owns the readiness wait.
     // Subscribe to the live event stream before dispatching so the
     // controller captures every event from navigation start.
     const controller = new BrowserLifecycleController();
+    // Reserve and bind the generation before dispatch. A fast redirect can
+    // emit Page/Network events while the navigate command is still in flight;
+    // binding afterwards makes those events indistinguishable from stale data.
+    const beforeDispatch = this.bridge.getStatus?.() as BrowserBridgeStatus | undefined;
+    const navigationGeneration = this.bridge.beginNavigation?.();
+    // Current bridges support an explicit reservation: bind before dispatch so
+    // a fast navigation cannot outrun the lifecycle listener. The legacy
+    // fallback has no reservation API, so preserve its post-dispatch binding
+    // rather than treating all of its events as stale.
+    if (navigationGeneration !== undefined) {
+      controller.beginNavigation(
+        url,
+        approvedOrigin,
+        beforeDispatch?.connectionGeneration ?? 1,
+        beforeDispatch?.targetGeneration ?? 1,
+        navigationGeneration,
+      );
+    }
     const source: ReadinessEventSource | undefined =
       this.bridge.onRuntimeEvent && this.bridge.onGenerationChanged
         ? {
@@ -199,14 +224,13 @@ export class ChromeExtensionBrowserSession {
           source,
         })
       : null;
-
     try {
       // Fire-and-forget navigate: the extension returns immediately and
       // live CDP events drive the controller through the bridge.
       const raw = await this.bridge.sendCommand('navigate', {
         url,
         approvedOrigin,
-      }, undefined, signal);
+      }, undefined, signal, { beginNavigation: false });
 
       const navigateResult = raw as { ok?: boolean; tabId?: number; url?: string } | undefined;
       if (!navigateResult?.ok) {
@@ -218,23 +242,16 @@ export class ChromeExtensionBrowserSession {
         );
       }
 
-      // Bind the controller to the bridge's *post-navigate* generation. The
-      // bridge bumps its navigation generation when the `navigate` command is
-      // dispatched (`sendCommand('navigate', …)` calls `beginNavigation()`), so
-      // events emitted after the navigation are stamped with the bumped value.
-      // Binding before the dispatch would tie the controller to the pre-navigate
-      // generation and `isEventCurrent` would drop *every* live event as stale,
-      // wedging `browser_open` in a 30s timeout (#603 review M1). Reading the
-      // status *after* navigate returns the exact generation the live events
-      // carry, so the two always agree.
-      const status = this.bridge.getStatus?.() as BrowserBridgeStatus | undefined;
-      controller.beginNavigation(
-        url,
-        approvedOrigin,
-        status?.connectionGeneration ?? 1,
-        status?.targetGeneration ?? 1,
-        status?.navigationGeneration,
-      );
+      if (navigationGeneration === undefined) {
+        const status = this.bridge.getStatus?.() as BrowserBridgeStatus | undefined;
+        controller.beginNavigation(
+          url,
+          approvedOrigin,
+          status?.connectionGeneration ?? 1,
+          status?.targetGeneration ?? 1,
+          status?.navigationGeneration,
+        );
+      }
 
       // Wait for the live event stream to drive the controller to a terminal
       // state. Without a live source (e.g. bridge not wired), fall back to a
@@ -280,6 +297,12 @@ export class ChromeExtensionBrowserSession {
       const built = this.buildSnapshot(snapshot, approvedOrigin);
       this.approvedOrigin = approvedOrigin;
       return built;
+    } catch (error) {
+      // The extension created/bound the target before dispatching navigation.
+      // A short Runtime readiness timeout therefore leaves a valid target for
+      // browser_wait; do not turn that recoverable state into browser_not_open.
+      if (this.isNavigationTimeout(error)) this.approvedOrigin = approvedOrigin;
+      throw error;
     } finally {
       wait?.dispose();
     }

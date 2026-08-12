@@ -250,6 +250,27 @@ test('browser extension protocol still parses the legacy tab.navigated event', (
   assert.equal(legacy.event, 'tab.navigated');
 });
 
+test('browser extension protocol preserves opaque browser context ids on events', () => {
+  const message = parseExtensionToAgentMessage({
+    type: 'browser.event',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    event: 'document.ready',
+    contextId: 'context-opaque-1',
+    tabId: 42,
+  });
+
+  assert.equal(message.type, 'browser.event');
+  assert.equal(message.contextId, 'context-opaque-1');
+  assert.throws(() => parseExtensionToAgentMessage({
+    type: 'browser.event',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    event: 'document.ready',
+    contextId: '',
+  }), /contextId must be a non-empty string/);
+});
+
 test('browser extension protocol rejects a malformed event payload', () => {
   assert.throws(() => parseExtensionToAgentMessage({
     type: 'browser.event',

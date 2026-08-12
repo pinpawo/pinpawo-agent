@@ -47,7 +47,10 @@ test('extension session uses one approved origin and the shared payload builder'
   assert.equal(opened.interactive[0]?.hint, '[1] button');
   assert.deepEqual(calls[0], {
     command: 'navigate',
-    params: { url: 'https://example.com/page', approvedOrigin: 'https://example.com' },
+    params: {
+      url: 'https://example.com/page',
+      approvedOrigin: 'https://example.com',
+    },
     signal: undefined,
   });
   // Issue #601: navigate is fire-and-forget; the backward-compatible path
@@ -63,6 +66,75 @@ test('extension session uses one approved origin and the shared payload builder'
   });
   await session.close();
   assert.equal(calls[3]?.command, 'detach');
+});
+
+test('extension session reserves navigation generation before dispatching navigate', async () => {
+  const sequence: string[] = [];
+  const session = new ChromeExtensionBrowserSession({
+    getStatus() {
+      return {
+        listening: true,
+        hostConnected: true,
+        extensionConnected: true,
+        debuggerAttached: true,
+        targetAlive: true,
+        connectionId: 'connection-1',
+        extensionId: 'extension-1',
+        activeTabId: 7,
+        activeTabBinding: 'agent',
+        userBoundOrigin: null,
+        stateRevision: 1,
+        capabilities: [],
+        socketPath: '/tmp/browser.sock',
+        connectionGeneration: 1,
+        targetGeneration: 1,
+        navigationGeneration: 3,
+      } as BrowserBridgeStatus;
+    },
+    beginNavigation() {
+      sequence.push('generation');
+      return 4;
+    },
+    async sendCommand(command, _params, _timeoutMs, _signal, options) {
+      sequence.push(`send:${command}:${String(options?.beginNavigation)}`);
+      return command === 'navigate' ? { ok: true } : rawSnapshot;
+    },
+  });
+
+  await session.open('https://example.com/page');
+  assert.deepEqual(sequence, [
+    'generation',
+    'send:navigate:false',
+    'send:snapshot:undefined',
+  ]);
+});
+
+test('extension navigation timeout keeps the approved origin for browser_wait', async () => {
+  const calls: Array<{ command: string; params: Record<string, unknown> }> = [];
+  const session = new ChromeExtensionBrowserSession({
+    async sendCommand(command, params) {
+      calls.push({ command, params });
+      if (command === 'navigate') {
+        throw new BrowserBridgeError('navigation_timeout', 'page still loading', true);
+      }
+      return rawSnapshot;
+    },
+  });
+
+  await assert.rejects(
+    session.open('https://example.com/page'),
+    (error: unknown) => error instanceof BrowserBridgeError
+      && error.code === 'navigation_timeout',
+  );
+  await session.wait();
+  assert.deepEqual(calls[1], {
+    command: 'wait',
+    params: {
+      approvedOrigin: 'https://example.com',
+      timeoutMs: 3_000,
+      state: 'visible',
+    },
+  });
 });
 
 test('extension session rejects unsupported modes and requires an approved page for actions', async () => {

@@ -2,12 +2,12 @@ import {
   BrowserExtensionBridge,
   type BrowserBridgeStatus,
 } from './drivers/chromeExtension/bridge';
+import { randomUUID } from 'node:crypto';
 import type { BrowserExtensionCapability } from './drivers/chromeExtension/protocol';
 import { ChromeExtensionBrowserSession } from './drivers/chromeExtension/session';
 import { BrowserSession } from './session';
-import { BrowserLifecycleController } from './lifecycle/controller';
-import { bindBridgeToController } from './lifecycle/bridgeBinding';
 import type { BrowserExecutionOwner } from './ownership';
+import type { BrowserRuntimeEvent } from './lifecycle/events';
 import type { ToolkitRuntimeExecutionScope } from '@pinpawo/pet-agent';
 import {
   configuredBrowserBackend,
@@ -62,6 +62,12 @@ export type BrowserRuntimeBinding = Readonly<{
 
 export type BrowserRuntimeDependencies = {
   bridge?: BrowserExtensionBridge;
+};
+
+type BrowserGenerationChange = {
+  connectionGeneration: number;
+  targetGeneration: number;
+  contextId?: string;
 };
 
 function resolveBrowserExtensionRuntimeState(
@@ -120,14 +126,10 @@ export function projectBrowserRuntimeSnapshot(
 
 export class BrowserRuntime {
   private started = false;
-  // The runtime owns the adapter instance so toolkit calls share the same
-  // approval and recovery boundary rather than constructing a driver per call.
-  private readonly extensionSession: ChromeExtensionBrowserSession;
-  private readonly session: BrowserSession;
+  /** One browser workspace per conversation thread. */
+  private readonly sessionsByThread = new Map<string, BrowserSession>();
   private readonly options: ResolvedBrowserToolkitOptions;
   private readonly bridge: BrowserExtensionBridge;
-  private readonly lifecycle: BrowserLifecycleController;
-  private unbindLifecycle: (() => void) | null = null;
 
   constructor(
     options: BrowserToolkitOptions = {},
@@ -135,38 +137,67 @@ export class BrowserRuntime {
   ) {
     this.options = resolveBrowserToolkitOptions(options);
     this.bridge = dependencies.bridge ?? new BrowserExtensionBridge();
-    this.lifecycle = new BrowserLifecycleController();
-    this.extensionSession = new ChromeExtensionBrowserSession(
-      this.bridge,
-      this.options.workdir,
-    );
-    this.session = new BrowserSession({
+  }
+
+  private sessionForThread(threadId: string): BrowserSession {
+    const existing = this.sessionsByThread.get(threadId);
+    if (existing) return existing;
+
+    // The extension receives only this opaque id; raw run/delegation tracing
+    // metadata never crosses the native host boundary. Its lifetime is the
+    // local runtime, which is also the lifetime of the managed browser tabs.
+    const browserContextId = randomUUID();
+    const extensionSession = new ChromeExtensionBrowserSession({
+      sendCommand: async (command, params, timeoutMs, signal, commandOptions) => await this.bridge.sendCommand(
+        command,
+        { ...params, browserContextId },
+        timeoutMs,
+        signal,
+        commandOptions,
+      ),
+      getStatus: () => this.bridge.getStatus(),
+      ...(typeof this.bridge.beginNavigation === 'function'
+        ? { beginNavigation: () => this.bridge.beginNavigation(browserContextId) }
+        : {}),
+      ...(typeof this.bridge.onRuntimeEvent === 'function'
+        ? { onRuntimeEvent: (listener: (event: BrowserRuntimeEvent) => void) => this.bridge.onRuntimeEvent((event) => {
+            if (event.contextId === browserContextId) listener(event);
+          }) }
+        : {}),
+      ...(typeof this.bridge.onGenerationChanged === 'function'
+        ? { onGenerationChanged: (listener: (change: BrowserGenerationChange) => void) => this.bridge.onGenerationChanged((change) => {
+            // A target change belongs to one context, whereas a connection change
+            // (extension/native-host reconnect) invalidates every in-flight
+            // context. The latter has no contextId and must reach all sessions.
+            if (!change.contextId || change.contextId === browserContextId) listener(change);
+          }) }
+        : {}),
+    }, this.options.workdir);
+    const session = new BrowserSession({
       requireExecutionOwner: true,
       getRuntimeSnapshot: () => this.getSnapshot(),
-      createChromeExtensionSession: () => this.extensionSession,
+      createChromeExtensionSession: () => extensionSession,
       environment: this.options,
     });
+    this.sessionsByThread.set(threadId, session);
+    return session;
   }
 
   async start(): Promise<void> {
     if (!shouldStartBrowserExtensionBridge(configuredBrowserBackend(this.options))) return;
     await this.bridge.start();
-    // Wire the bridge's normalized event + generation streams into the Runtime
-    // lifecycle controller so `browser_open`/readiness is driven from the
-    // authoritative event stream (issue #583), not only the extension's
-    // `tab.status` polling.
-    this.unbindLifecycle = bindBridgeToController(this.bridge, this.lifecycle);
     this.started = true;
   }
 
   async stop(): Promise<void> {
     try {
-      await this.session.shutdown();
+      await Promise.all([...this.sessionsByThread.values()].map(async (session) => {
+        await session.shutdown();
+      }));
+      this.sessionsByThread.clear();
     } finally {
       if (this.started) {
         try {
-          this.unbindLifecycle?.();
-          this.unbindLifecycle = null;
           await this.bridge.stop();
         } finally {
           this.started = false;
@@ -176,32 +207,28 @@ export class BrowserRuntime {
   }
 
   async resolve(execution: ToolkitRuntimeExecutionScope): Promise<BrowserRuntimeBinding> {
+    if (!execution.threadId) {
+      throw new Error('Browser runtime requires a threadId.');
+    }
+    const threadId = execution.threadId;
     const binding = Object.freeze({
-      session: this.session,
+      session: this.sessionForThread(threadId),
       owner: {
-        threadId: execution.threadId,
-        runId: execution.runId,
-        delegationId: execution.delegationId,
+        threadId,
       },
       workdir: this.options.workdir,
     });
-    await this.session.acquire(binding.owner);
+    await binding.session.acquire(binding.owner);
     return binding;
   }
 
   getSnapshot(): BrowserRuntimeSnapshot {
-    const lifecycleSnapshot = this.lifecycle.getSnapshot();
-    const nav = lifecycleSnapshot.navigation;
-    const readiness: BrowserReadinessSnapshot | null = nav
-      ? Object.freeze({
-          phase: nav.phase,
-          ready: nav.phase === 'readable',
-          ...(nav.phase === 'failed' && nav.error
-            ? { error: { code: nav.error.code, message: nav.error.message, retryable: nav.error.retryable } }
-            : {}),
-        })
-      : null;
-    return projectBrowserRuntimeSnapshot(this.bridge.getStatus(), readiness);
+    // Runtime state is intentionally not a navigation-state projection. A
+    // BrowserRuntime serves several thread-owned tabs, so one unscoped
+    // controller here would report the most recently observed thread's
+    // readiness as if it described every caller. Per-operation readiness is
+    // instead evaluated by the context-filtered ChromeExtensionBrowserSession.
+    return projectBrowserRuntimeSnapshot(this.bridge.getStatus());
   }
 }
 

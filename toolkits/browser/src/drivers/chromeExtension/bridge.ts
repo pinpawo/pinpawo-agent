@@ -48,6 +48,11 @@ const NAVIGATION_SCOPED_EVENT_TYPES = new Set<BrowserRuntimeEventType>([
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
 const MAX_BRIDGE_LINE_BYTES = 4 * 1024 * 1024;
 
+export type BrowserExtensionCommandOptions = {
+  /** The caller has already reserved the navigation generation before dispatch. */
+  beginNavigation?: boolean;
+};
+
 export const DEFAULT_BROWSER_BRIDGE_SOCKET_PATH = resolve(
   homedir(),
   '.pinpawo',
@@ -158,6 +163,8 @@ export class BrowserExtensionBridge {
   private targetGeneration = 1;
   /** Tracks the active navigation generation for event stamping. */
   private navigationGeneration = 0;
+  /** Navigation generations are isolated per managed browser context. */
+  private readonly navigationGenerationsByContext = new Map<string, number>();
   private readonly pending = new Map<string, PendingCommand>();
   private readonly runtimeEventListeners = new Set<(event: BrowserRuntimeEvent) => void>();
   /**
@@ -169,6 +176,7 @@ export class BrowserExtensionBridge {
   private readonly generationListeners = new Set<(change: {
     connectionGeneration: number;
     targetGeneration: number;
+    contextId?: string;
   }) => void>();
 
   constructor(options: BrowserExtensionBridgeOptions = {}) {
@@ -231,6 +239,7 @@ export class BrowserExtensionBridge {
   onGenerationChanged(listener: (change: {
     connectionGeneration: number;
     targetGeneration: number;
+    contextId?: string;
   }) => void): () => void {
     this.generationListeners.add(listener);
     return () => {
@@ -239,10 +248,11 @@ export class BrowserExtensionBridge {
   }
 
   /** Fan the latest connection/target generation out to subscribers. */
-  private notifyGenerationChanged() {
+  private notifyGenerationChanged(contextId?: string) {
     const change = {
       connectionGeneration: this.connectionGeneration,
       targetGeneration: this.targetGeneration,
+      ...(contextId ? { contextId } : {}),
     };
     for (const listener of this.generationListeners) {
       listener(change);
@@ -269,9 +279,19 @@ export class BrowserExtensionBridge {
    * explicitly to demarcate such a boundary — otherwise a late event could be
    * mis-scoped to the previous generation.
    */
-  beginNavigation(): number {
-    this.navigationGeneration += 1;
-    return this.navigationGeneration;
+  beginNavigation(contextId?: string): number {
+    if (!contextId) {
+      this.navigationGeneration += 1;
+      return this.navigationGeneration;
+    }
+    const next = (this.navigationGenerationsByContext.get(contextId) ?? 0) + 1;
+    this.navigationGenerationsByContext.set(contextId, next);
+    return next;
+  }
+
+  private navigationGenerationFor(contextId?: string): number {
+    if (!contextId) return this.navigationGeneration;
+    return this.navigationGenerationsByContext.get(contextId) ?? 0;
   }
 
   /**
@@ -286,18 +306,20 @@ export class BrowserExtensionBridge {
    */
   private emitRuntimeEvent(message: {
     event: BrowserRuntimeEventType;
+    contextId?: string;
     tabId?: number;
     url?: string;
     payload?: Record<string, unknown>;
   }) {
     if (this.runtimeEventListeners.size === 0) return;
     const event: BrowserRuntimeEvent = {
+      ...(message.contextId ? { contextId: message.contextId } : {}),
       connectionGeneration: this.connectionGeneration,
       targetGeneration: this.targetGeneration,
       tabId: message.tabId ?? this.getStatus().activeTabId ?? 0,
       timestamp: Date.now(),
       ...(NAVIGATION_SCOPED_EVENT_TYPES.has(message.event)
-        ? { navigationGeneration: this.navigationGeneration }
+        ? { navigationGeneration: this.navigationGenerationFor(message.contextId) }
         : {}),
       type: message.event,
       ...(message.url !== undefined ? { url: message.url } : {}),
@@ -397,6 +419,7 @@ export class BrowserExtensionBridge {
     params: Record<string, unknown>,
     timeoutMs = this.commandTimeoutMs,
     signal?: AbortSignal,
+    options: BrowserExtensionCommandOptions = {},
   ): Promise<unknown> {
     if (signal?.aborted) {
       throw new BrowserBridgeError(
@@ -426,7 +449,12 @@ export class BrowserExtensionBridge {
 
     // A `navigate` command starts a new navigation: bump the generation so
     // subsequent events (document.ready, network, dom, …) are stamped with it.
-    if (command === 'navigate') this.beginNavigation();
+    if (command === 'navigate' && options.beginNavigation !== false) {
+      const contextId = typeof params.browserContextId === 'string'
+        ? params.browserContextId
+        : undefined;
+      this.beginNavigation(contextId);
+    }
 
     const requestId = randomUUID();
     const deadlineAt = new Date(Date.now() + timeoutMs).toISOString();
@@ -658,7 +686,7 @@ export class BrowserExtensionBridge {
       this.debuggerAttached = false;
       this.targetAlive = false;
       this.targetGeneration += 1;
-      this.notifyGenerationChanged();
+      this.notifyGenerationChanged(message.contextId);
     } else if (message.event === 'tab.navigated') {
       this.targetAlive = true;
     }
@@ -671,6 +699,7 @@ export class BrowserExtensionBridge {
         message.event === 'tab.navigated'
           ? 'navigation.committed'
           : message.event,
+      contextId: message.contextId,
       tabId: message.tabId,
       url: message.url,
       payload: message.payload,

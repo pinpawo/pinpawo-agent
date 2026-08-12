@@ -52,7 +52,7 @@ stop(root, ctx)         -> 终止全部 managed process  // host 关闭
 
 外部资源的存活周期由 runtime 自己管，框架不该替它操心；工具在下一次调用时有办法知道当前状态即可。
 
-Browser 已经是这个模式的范例（`ownership.ts`）：`release()` 只把 owner 置空并记为 `resumableOwner`，浏览器和页面继续存活。同 scope 下次 `resolve` 可以续用，其他 execution 则必须显式 `browser_open`。
+Browser 已经是这个模式的范例（`ownership.ts`）：`release()` 只把 owner 置空并记为 `resumableOwner`，浏览器和页面继续存活。同一 `threadId` 下次 `resolve` 可以续用；其他 thread 必须显式 `browser_open`。
 
 Bash 照搬：
 

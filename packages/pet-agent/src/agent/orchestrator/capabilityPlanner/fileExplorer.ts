@@ -14,7 +14,7 @@ import {
 } from './workspaceReader';
 
 export const CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME = 'grep_search';
-const CAPABILITY_PLANNER_GREP_SEARCH_TOOL_DESCRIPTION = 'Planner exploration action. Discover potentially relevant Capabilities in the configured immutable registry. The query accepts 1-3 short literal alternatives separated with | for OR matching; spaces remain part of one literal phrase. Each match contains the complete CAPABILITY.md document. If no literal match exists and General is registered, fallback contains its complete verified document. This is not a terminal action.';
+const CAPABILITY_PLANNER_GREP_SEARCH_TOOL_DESCRIPTION = 'Planner exploration action. Discover potentially relevant Capabilities in the configured immutable registry. The query accepts 1-3 short literal alternatives separated with | for OR matching; spaces remain part of one literal phrase. Each match contains the complete CAPABILITY.md document. This is not a terminal action.';
 
 const DEFAULT_MAX_DOCUMENT_READ_BYTES = 64 * 1024;
 const MAX_GREP_RESULTS = 50;
@@ -34,6 +34,19 @@ export type CapabilityPlannerFileExplorer = {
     query: string,
     signal?: AbortSignal,
   ) => Promise<string>;
+  /**
+   * Read the well-known default Capability into the Planner's private input
+   * context. It is not a search result and never enters parent graph state.
+   */
+  readonly readDefaultCapability: (
+    signal?: AbortSignal,
+  ) => Promise<CapabilityPlannerDefaultCapability | null>;
+};
+
+export type CapabilityPlannerDefaultCapability = {
+  readonly capabilityName: typeof GENERAL_CAPABILITY_NAME;
+  readonly path: string;
+  readonly content: string;
 };
 
 export function createCapabilityPlannerGrepSearchTool<TState>(
@@ -127,41 +140,39 @@ export function createCapabilityPlannerFileExplorer(params: {
   let consumedDocumentReadBytes = 0;
   let documentReadLimitReached = false;
 
-  const readGeneralFallback = async (
+  const readDefaultCapability = async (
     signal?: AbortSignal,
-  ) => {
+  ): Promise<CapabilityPlannerDefaultCapability | null> => {
     const entry = workspace.entries.find(
       ({ capabilityName }) => capabilityName === GENERAL_CAPABILITY_NAME,
     );
     if (!entry) return null;
     const content = await workspaceReader.readDocument(entry.relativePath, signal);
-    const fallback = {
+    const defaultCapability = {
       capabilityName: GENERAL_CAPABILITY_NAME,
       path: entry.relativePath,
       content,
-      matchedTerms: [],
-      reason: 'general_fallback',
     } as const;
-    const fallbackBytes = utf8Bytes(content);
+    const defaultCapabilityBytes = utf8Bytes(content);
     const remainingDocumentReadBytes = Math.max(
       0,
       maxDocumentReadBytes - consumedDocumentReadBytes,
     );
     if (
-      fallbackBytes > remainingDocumentReadBytes
-      || fallbackBytes > MAX_GREP_RESULT_BYTES
+      defaultCapabilityBytes > remainingDocumentReadBytes
+      || defaultCapabilityBytes > MAX_GREP_RESULT_BYTES
     ) {
       documentReadLimitReached = true;
       throw new PlannerFileToolError(
         'planning_limit_reached',
-        'Capability Planner General fallback document exceeds the remaining read limit.',
+        'Capability Planner default Capability document exceeds the remaining read limit.',
       );
     }
-    consumedDocumentReadBytes += fallbackBytes;
+    consumedDocumentReadBytes += defaultCapabilityBytes;
     if (consumedDocumentReadBytes >= maxDocumentReadBytes) {
       documentReadLimitReached = true;
     }
-    return fallback;
+    return defaultCapability;
   };
 
   const search = async (
@@ -204,13 +215,9 @@ export function createCapabilityPlannerFileExplorer(params: {
       if (consumedDocumentReadBytes >= maxDocumentReadBytes) {
         documentReadLimitReached = true;
       }
-      const fallback = result.matches.length === 0
-        ? await readGeneralFallback(signal)
-        : null;
       return formatSuccess(
         {
           matches: result.matches,
-          ...(fallback ? { fallback } : {}),
           complete: result.complete,
           stoppedBy: result.stoppedBy,
         },
@@ -228,5 +235,6 @@ export function createCapabilityPlannerFileExplorer(params: {
     tools: Object.freeze([grepSearch]),
     didReachDocumentReadLimit: () => documentReadLimitReached,
     search,
+    readDefaultCapability,
   });
 }

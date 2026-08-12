@@ -564,10 +564,17 @@ export function createCapabilityPlannerAgent(params: {
             });
           }
         }
+        const explorer = explorerForInput(input);
+        const defaultCapability = await explorer.readDefaultCapability(
+          timeout.signal,
+        );
         const result = await selectedAgent.invoke({
           messages: [new HumanMessage({
             id: `planner:${input.inputId}`,
-            content: buildCapabilityPlannerAgentInput(input),
+            content: buildCapabilityPlannerAgentInput(
+              input,
+              defaultCapability,
+            ),
           })],
           requestedTraceId: input.traceId,
           currentInputId: input.inputId,
@@ -582,7 +589,7 @@ export function createCapabilityPlannerAgent(params: {
             allowedCapabilityNames: input.workspace.capabilityNames,
           });
         }
-        if (explorerForInput(input).didReachDocumentReadLimit()) {
+        if (explorer.didReachDocumentReadLimit()) {
           throw new CapabilityPlannerAgentError(
             'planning_limit_reached',
             'Capability Planner document read limit was reached before a valid commit.',

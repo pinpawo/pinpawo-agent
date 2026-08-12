@@ -877,7 +877,7 @@ test('Planner closes discovery through general after three grep_search calls', a
   assert.equal(grepResults.some((message) => message.status === 'error'), false);
 });
 
-test('Planner receives General after English literal search misses a Chinese document', async (t) => {
+test('Planner receives verified General before discovery starts', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -886,12 +886,6 @@ test('Planner receives General after English literal search misses a Chinese doc
     }),
   });
   const model = new ScriptedPlannerModel([{
-    toolCalls: [{
-      id: 'grep-directory',
-      name: CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
-      args: { query: 'list files directory' },
-    }],
-  }, {
     structuredOutput: {
       kind: 'plan',
       args: {
@@ -919,15 +913,17 @@ test('Planner receives General after English literal search misses a Chinese doc
       task: 'Inspect and organize the requested Downloads directory.',
     }],
   });
-  const searchFeedback = model.invocations[1]?.find((message) =>
-    message instanceof ToolMessage && message.tool_call_id === 'grep-directory');
-  assert.ok(searchFeedback instanceof ToolMessage);
-  const payload = JSON.parse(String(searchFeedback.content)) as {
-    data?: { matches?: unknown[]; fallback?: { capabilityName?: string; content?: string } };
-  };
-  assert.deepEqual(payload.data?.matches, []);
-  assert.equal(payload.data?.fallback?.capabilityName, 'general');
-  assert.match(payload.data?.fallback?.content ?? '', /通用工具读取和修改工作区/);
+  const privateInput = model.invocations[0]?.find(
+    (message) => message instanceof HumanMessage,
+  );
+  assert.ok(privateInput instanceof HumanMessage);
+  assert.match(readMessageText(privateInput), /<default_capability/);
+  assert.match(readMessageText(privateInput), /general\/CAPABILITY\.md/);
+  assert.match(readMessageText(privateInput), /通用工具读取和修改工作区/);
+  assert.equal(model.invocations.flat().some(
+    (message) => message instanceof ToolMessage
+      && message.name === CAPABILITY_PLANNER_GREP_SEARCH_TOOL_NAME,
+  ), false);
 });
 
 test('Planner handles parallel grep_search calls without concurrent state updates', async (t) => {

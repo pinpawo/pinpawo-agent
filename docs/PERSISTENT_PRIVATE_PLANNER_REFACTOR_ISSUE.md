@@ -375,10 +375,11 @@ runnable config。不能为了 trace 持久化而把 Planner 变成一个 detach
 
 Capability discovery 的调用预算使用标准 `toolCallLimitMiddleware` 按单次 Planner input
 限制，不再定义自有的并行 reducer/counter，计数和并行批次裁剪交给 middleware 的内置
-run state。字面搜索零匹配时，如果 registry 存在 `general`，`grep_search` 必须返回经过
-workspace 校验的完整 General 文档作为确定性 fallback。Planner 在提交
-`report_unavailable` 前必须先取得并评估该文档；General 能执行当前工作时应选择它，只有
-包括 General 在内确实没有可执行 Capability 时才能提交 `unavailable`。
+run state。若 effective workspace 包含 `general`，runtime 必须在模型首次决策前读取经过
+workspace 校验的完整 General 文档，并只把它注入 Planner 私有输入，作为不依赖字面搜索的
+默认候选。`grep_search` 只负责发现更具体的 Capability，不返回 `fallback` 字段。Planner 在提交
+`report_unavailable` 前必须先评估默认 General；它能执行当前工作时应选择它。显式受限 workspace
+可以没有 General，此时只有全部可见 Capability 都不能执行时才能提交 `unavailable`。
 
 ### 幂等输入消费
 

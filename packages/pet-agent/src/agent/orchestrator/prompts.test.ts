@@ -91,6 +91,34 @@ test('Capability Planner entry input leads with the run user goal', () => {
   assert.doesNotMatch(input, /workspace|registry_digest|document_count|<planning_state>/);
 });
 
+test('Capability Planner input keeps the verified default Capability private context after the goal', () => {
+  const input = buildCapabilityPlannerAgentInput({
+    mode: 'entry',
+    inputId: 'trace_started:trace-1',
+    traceId: 'trace-1',
+    runId: 'run-1',
+    workspace: plannerPromptWorkspace,
+    userGoal: {
+      objective: '整理下载目录。',
+      context: null,
+    },
+    latestUserMessage: null,
+    activeDelegation: null,
+    latestAnnounce: null,
+    remainingPlan: [],
+  } satisfies CapabilityPlannerInput, {
+    capabilityName: 'general',
+    path: 'general/CAPABILITY.md',
+    content: '# General\n\n使用本地工具；保留 ]]> 作为文档数据。',
+  });
+
+  assert.match(input, /^<run_user_goal[^>]*>/);
+  assert.match(input, /<default_capability[^>]*source="immutable_workspace"/);
+  assert.match(input, /general\/CAPABILITY\.md/);
+  assert.match(input, /使用本地工具；保留 \]\]\]\]>\<!\[CDATA\[> 作为文档数据。/);
+  assert.ok(input.indexOf('</run_user_goal>') < input.indexOf('<default_capability'));
+});
+
 test('Capability Planner boundary input carries the run user goal and boundary facts', () => {
   const input = buildCapabilityPlannerAgentInput({
     mode: 'boundary',

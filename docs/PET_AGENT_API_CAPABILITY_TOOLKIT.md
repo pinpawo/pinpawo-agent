@@ -268,8 +268,10 @@ Capability Document Workspace。文件定义的 Capability 保留原始
 `CAPABILITY.md`；inline Capability 会生成等价文档，因此 registry 中不存在
 Planner 看不见的隐形 Capability。
 
-Planner 是一个框架内部的 tool-loop agent。它先用专用的文件探索工具查看
-workspace 目录、按需搜索并分块读取 `CAPABILITY.md`，再统一完成：
+Planner 是一个框架内部的 tool-loop agent。若 effective workspace 包含
+`general`，runtime 会先读取经过 workspace digest 校验的完整文档，并只在
+Planner 私有输入中将它作为默认 Capability 提供。Planner 随后使用
+`grep_search` 按需发现更具体的 `CAPABILITY.md`，再统一完成：
 
 1. 划分当前与后续执行任务；
 2. 为当前任务选择一个 workspace 内的 Capability；
@@ -309,8 +311,10 @@ system prompt。subagent 只获得编译到该 Capability 的 tools。
 - 运行在 `capability:general` lane；
 - 使用统一 Capability executor。
 
-Planner 通过与其他 Capability 相同的文档探索与选择流程决定是否使用它；代码
-没有 general fallback executor，也没有单独的 General 选择分支。
+General 使用与其他 Capability 相同的文档与选择证据，但无需依赖字面搜索命中：
+只要它存在于 effective workspace，其经过校验的文档就会作为默认候选进入
+Planner 私有上下文。代码没有 general fallback executor、独立 lane 或单独的
+General terminal action。
 
 local-agent 的内建 General 位于：
 
@@ -320,7 +324,9 @@ services/local-agent/src/capabilities/general/
 └── index.ts
 ```
 
-`general` 是 local-agent host 的保留名，用户 Capability 不能覆盖。
+`general` 是 local-agent host 的保留名，用户 Capability 不能覆盖。local-agent
+把它作为 host baseline；内建文档缺失或无效时 registry 初始化失败。pet-agent
+core 仍允许显式受限 workspace 不包含 General，且不会凭空构造一个实现。
 
 ## 7. Artifact
 

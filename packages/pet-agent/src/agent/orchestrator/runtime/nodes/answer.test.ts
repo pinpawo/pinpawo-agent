@@ -123,6 +123,7 @@ test('Answer runtime projects unfinished work as facts rather than prose', () =>
         task: '检查剩余文件',
         contextSummary: null,
         transcriptRunId: 'run-1',
+        traceId: 'trace-1',
         status: 'awaiting_decision',
         resultPreview: null,
         userGoal: '检查仓库',

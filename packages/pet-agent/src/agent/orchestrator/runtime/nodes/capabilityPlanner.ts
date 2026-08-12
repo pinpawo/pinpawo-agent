@@ -270,17 +270,14 @@ function createDefaultPlannerRunner(config: OrchestratorConfig): CapabilityPlann
   });
 }
 
-function runtimeStateFromRoot(
-  state: OrchestratorStateType,
-  runUserGoal = state.runUserGoal,
-): CapabilityPlannerRuntimeState {
-  if (!runUserGoal) {
+function runtimeStateFromRoot(state: OrchestratorStateType): CapabilityPlannerRuntimeState {
+  if (!state.runUserGoal) {
     throw new Error('Capability Planner requires runUserGoal.');
   }
   return {
     runId: state.runId,
     traceId: state.traceId,
-    runUserGoal,
+    runUserGoal: state.runUserGoal,
     runDelegationSummaries: state.runDelegationSummaries,
     runCapabilityPlan: state.runCapabilityPlan,
   };
@@ -333,7 +330,7 @@ function buildPlannerInput(params: {
   // announce must receive its own collision-free boundary input identity.
   const freshTurn = state.runActiveDelegationTransition === 'resume_active'
     && state.runIterationCount === 0;
-  const plannerState = runtimeStateFromRoot(state, state.runUserGoal ?? activeDelegation.userGoal);
+  const plannerState = runtimeStateFromRoot(state);
   return {
     state: plannerState,
     input: {
@@ -378,14 +375,6 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
       cacheRoot: DEFAULT_CAPABILITY_PLANNER_WORKSPACE_ROOT,
       ...(allowedCapabilityNames ? { allowedCapabilityNames } : {}),
     });
-    if (!isPlannerDispatch(nodeInput)
-      && !nodeInput.runUserGoal
-      && !nodeInput.taskActiveDelegation?.userGoal) {
-      return new Command({
-        update: buildWaitingUpdate(nodeInput, 'unavailable'),
-        goto: 'answer',
-      });
-    }
     const { input, state } = buildPlannerInput({ nodeInput, workspace });
     let commit: PlannerCommit;
     try {

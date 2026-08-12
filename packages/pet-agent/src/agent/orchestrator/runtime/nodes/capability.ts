@@ -30,7 +30,6 @@ import {
   resolveActor,
 } from '../config';
 import {
-  createTaskActiveDelegation,
   readCapabilityNameFromLane,
   resolveDelegationTranscriptRunId,
 } from '../decisions/delegationLifecycle';
@@ -65,6 +64,13 @@ export function createCapabilityNode(params: {
     const runNextDelegation = state.runNextDelegation;
     if (!runNextDelegation) {
       throw new Error('Capability node cannot run without a pending capability delegation.');
+    }
+    if (!state.runUserGoal) {
+      throw new Error('Capability execution requires runUserGoal.');
+    }
+    const activeDelegation = state.taskActiveDelegation;
+    if (!activeDelegation || activeDelegation.id !== runNextDelegation.id) {
+      throw new Error('Capability execution requires its matching taskActiveDelegation.');
     }
     const capabilityName = readCapabilityNameFromLane(runNextDelegation.lane);
     if (!capabilityName) {
@@ -259,24 +265,13 @@ export function createCapabilityNode(params: {
         resultPreview,
       },
     );
-    const activeDelegation = state.taskActiveDelegation;
-    const delegationUserGoal = activeDelegation?.userGoal ?? state.runUserGoal;
-    if (!delegationUserGoal) {
-      throw new Error('Capability execution requires runUserGoal before creating a delegation.');
-    }
-
     return {
       messages: laneOutputMessages,
       sessionCapabilityArtifacts: result.artifacts,
       runDelegationSummaries: updatedRunDelegationSummaries,
       runNextDelegation: null,
       taskActiveDelegation: {
-        ...(activeDelegation ?? createTaskActiveDelegation(
-          runNextDelegation,
-          transcriptRunId,
-          delegationUserGoal,
-          state.traceId,
-        )),
+        ...activeDelegation,
         status: interrupted ? 'pending' as const : 'awaiting_decision' as const,
         resultPreview,
       },

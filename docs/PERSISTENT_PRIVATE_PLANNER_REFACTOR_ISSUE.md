@@ -483,8 +483,8 @@ checkpoint API 能直接可靠判断初始化状态，可以不增加此字段�
 - `delegationOutcomeDecision` graph node；
 - Outcome 专用 prompt、schema builder 和 model runner。
 
-`TaskActiveDelegation` 应携带或可确定其所属 `traceId`。不要使用
-`taskActiveDelegation.id` 作为 trace identity。
+`TaskActiveDelegation` 必须直接携带其所属 `traceId`。不要从 `transcriptRunId` 推断，
+也不要使用 `taskActiveDelegation.id` 作为 trace identity。
 
 ## 目标 graph 路由
 

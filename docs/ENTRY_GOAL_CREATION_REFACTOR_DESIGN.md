@@ -434,7 +434,7 @@ Planner、Answer model 或 Capability。它不是可恢复的 `resume_active` �
 这是内部 graph contract 的一次 hard cut。新状态只读写字符串；运行时代码不把 `UserGoal` 定义为
 `string | legacy object`，也不提供旧格式 adapter、自动迁移或兼容模式参数。
 
-部署后若恢复到包含旧目标对象的 active-delegation checkpoint：
+部署后若恢复到包含旧目标对象，或缺少新版 `traceId` 的 active-delegation checkpoint：
 
 ```ts
 type LegacyUserGoal = {
@@ -443,9 +443,10 @@ type LegacyUserGoal = {
 };
 ```
 
-运行时必须在进入任何模型或 Capability 节点前识别为 `checkpoint_incompatible`，并返回稳定提示：该任务由
+运行时必须在 resume 入口、进入任何模型或 Capability 节点前识别为 `checkpoint_incompatible`，并返回稳定提示：该任务由
 旧版本创建，当前版本无法继续，请重新发起或重述任务。这个结果不得伪装成
-`planner_checkpoint_missing`，也不得从 `objective` / `context` 猜测、拼接或重建字符串目标。
+`planner_checkpoint_missing`，也不得从 `objective` / `context` 猜测、拼接或重建字符串目标，或从
+`transcriptRunId` 推断缺失的 `traceId`。
 
 不兼容处理必须满足：
 
@@ -507,7 +508,7 @@ type LegacyUserGoal = {
 - boundary 不回到 Goal Creation；
 - `resume_active` 不重新创建目标；
 - resume 保持 trace 与 private Planner checkpoint；
-- 旧 `{objective, context}` delegation checkpoint 返回 `checkpoint_incompatible`，且 Goal Creation、Planner、
+- 旧 `{objective, context}` 或缺少 `traceId` 的 delegation checkpoint 返回 `checkpoint_incompatible`，且 Goal Creation、Planner、
   Answer model 与 Capability 的 invocation count 都为零；
 - 不兼容路径给出重新发起任务的固定用户提示，不尝试转换旧目标；
 - Planner 私有文档和搜索结果不进入 Root state / Answer prompt / root stream。

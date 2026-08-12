@@ -1106,6 +1106,7 @@ test('a completed subagent announce reaches the decision, then Answer summarizes
     task: '读取文件并运行 lint',
     contextSummary: null,
     transcriptRunId: input.runId,
+    traceId: input.traceId,
     status: 'awaiting_decision',
     resultPreview: currentAnnounceText,
     userGoal: '读取文件并运行 lint。',
@@ -1226,6 +1227,7 @@ test('delegation goal_done summarizes and preserves the handed-off result', asyn
     task: '搜索并整理 vibecoding 模型排行榜。',
     contextSummary: null,
     transcriptRunId: input.runId,
+    traceId: input.traceId,
     status: 'awaiting_decision',
     resultPreview: announceText,
     userGoal: '列出目前 Vibe Coding 的模型排行榜。',
@@ -1309,6 +1311,7 @@ test('user_input_required returns control without claiming delegation completion
     task,
     contextSummary: null,
     transcriptRunId: input.runId,
+    traceId: input.traceId,
     status: 'awaiting_decision',
     resultPreview: announceText,
     userGoal: '根据用户选择发送已经完成的报告。',
@@ -1384,6 +1387,7 @@ test('capability errors retain the active delegation and lane without a handoff'
     task: '继续处理会失败的 delegated task',
     contextSummary: null,
     transcriptRunId: 'run-capability-error',
+    traceId: 'trace-capability-error',
     status: 'pending',
     resultPreview: null,
     userGoal: '继续处理当前 delegated task，并保留失败状态。',
@@ -1687,6 +1691,7 @@ test('limit-reached progress announce lets model choose the same capability dele
     task: '调查仓库 capability 注册链路。',
     contextSummary: null,
     transcriptRunId: input.runId,
+    traceId: input.traceId,
     status: 'awaiting_decision',
     resultPreview: '(no matches)',
     userGoal: '先调查仓库，再修复注册链路。',
@@ -4817,6 +4822,7 @@ test('terminal Planner action keeps active delegation when handoff cannot be bui
     task: '当前 explore 任务',
     contextSummary: '已有任务仍待判断。',
     transcriptRunId: 'run-active',
+    traceId: 'trace-active',
     status: 'awaiting_decision',
     resultPreview: null,
     userGoal: '继续判断当前 explore 任务。',
@@ -4898,6 +4904,7 @@ test('Planner continue_current action can re-enter main and finalize handoff', a
     task: '批量梳理仓库问题',
     contextSummary: '已完成部分。',
     transcriptRunId: 'run-continue',
+    traceId: 'trace-continue',
     status: 'awaiting_decision',
     resultPreview: '已完成第一批抓取，剩余待查。',
     userGoal: '继续批量梳理仓库问题。',
@@ -4990,6 +4997,7 @@ test('Planner continuation path rechecks run iteration guard before next decisio
     task: '执行长流程任务',
     contextSummary: '持续进行。',
     transcriptRunId: 'run-continue-limit',
+    traceId: 'trace-continue-limit',
     status: 'awaiting_decision',
     resultPreview: '进度已完成前段。',
     userGoal: '继续执行长流程任务。',
@@ -5079,6 +5087,7 @@ test('Planner boundary does not append duplicate handoff copies for unchanged an
     task: '处理大型清单',
     contextSummary: '尚未完成。',
     transcriptRunId: 'run-dup-copy',
+    traceId: 'trace-dup-copy',
     status: 'awaiting_decision',
     resultPreview: '进度更新：已完成一部分，继续保留。',
     userGoal: '继续处理大型清单。',
@@ -5376,6 +5385,7 @@ test('limit-reached subagent announce reaches the Planner boundary input', async
     task: '继续探查 repo',
     contextSummary: null,
     transcriptRunId: baseInput.runId,
+    traceId: baseInput.traceId,
     status: 'awaiting_decision',
     resultPreview: String(progress.content),
     userGoal: '继续探查 repo。',
@@ -5438,6 +5448,7 @@ test('Planner boundary does not handoff a limit_reached announce', async () => {
     task: '继续探查 repo',
     contextSummary: null,
     transcriptRunId: baseInput.runId,
+    traceId: baseInput.traceId,
     status: 'awaiting_decision',
     resultPreview: '上一轮还没结束。',
     userGoal: '继续探查 repo。',
@@ -5529,6 +5540,7 @@ test('Planner boundary uses a unified run-iteration guard before invoking decisi
     task: '持续执行大规模迁移',
     contextSummary: '最近卡住',
     transcriptRunId: baseInput.runId,
+    traceId: baseInput.traceId,
     status: 'awaiting_decision',
     resultPreview: '处理到一半。',
     userGoal: '完成大规模迁移。',
@@ -5925,6 +5937,7 @@ test('fresh-turn active delegation transitions are explicit for pending and awai
       task: `旧的 ${status} 任务`,
       contextSummary: '旧任务上下文。',
       transcriptRunId: `old-run-${status}`,
+      traceId: `old-trace-${status}`,
       status,
       resultPreview: status === 'awaiting_decision' ? '旧进度。' : null,
       userGoal: '完成旧的仓库检查。\n\n保留原任务目标。',
@@ -5994,6 +6007,33 @@ test('fresh-turn active delegation transitions are explicit for pending and awai
   }
 });
 
+test('resume rejects a delegation without the current trace identity', () => {
+  const legacyDelegation = {
+    id: 'legacy-without-trace',
+    lane: 'capability:general',
+    task: '继续旧任务',
+    contextSummary: null,
+    transcriptRunId: 'legacy-transcript-run',
+    status: 'pending',
+    resultPreview: null,
+    userGoal: '继续旧任务。',
+  } as unknown as TaskActiveDelegation;
+  const state = {
+    ...buildOrchestratorRunInput(
+      [new HumanMessage('继续')],
+      { activeDelegationTransition: 'resume_active' },
+    ),
+    taskActiveDelegation: legacyDelegation,
+  } as OrchestratorStateType;
+
+  assert.deepEqual(applyActiveDelegationTransition(state), {
+    runNextDelegation: null,
+    runCapabilityPlan: [],
+    runLatestDelegationOutcome: null,
+    runRuntimeFailure: 'checkpoint_incompatible',
+  });
+});
+
 test('fresh delegated request supersedes checkpointed work without deleting its lane', async () => {
   const oldDelegation: TaskActiveDelegation = {
     id: 'old-awaiting-delegation',
@@ -6001,6 +6041,7 @@ test('fresh delegated request supersedes checkpointed work without deleting its 
     task: '旧任务：检查历史 review 状态',
     contextSummary: '这段上下文不得进入新任务。',
     transcriptRunId: 'old-awaiting-run',
+    traceId: 'old-awaiting-trace',
     status: 'awaiting_decision',
     resultPreview: '旧任务执行了一部分。',
     userGoal: '检查历史 review 状态。',
@@ -6103,6 +6144,7 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
     task: '继续原来的仓库检查',
     contextSummary: '已经完成第一步。',
     transcriptRunId: 'resume-pending-run',
+    traceId: 'resume-pending-trace',
     status: 'awaiting_decision',
     resultPreview: '第一步完成后，需要用户确认检查方向。',
     userGoal: '完成原来的仓库检查并报告结果。\n\n用户要求重点检查最新修改。',
@@ -6199,8 +6241,8 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
   });
   assert.deepEqual(state.runUserGoal, activeDelegation.userGoal);
   assert.notEqual(state.runId, activeDelegation.transcriptRunId);
-  assert.equal(state.traceId, activeDelegation.transcriptRunId);
-  assert.equal(plannerInputs[0]?.traceId, activeDelegation.transcriptRunId);
+  assert.equal(state.traceId, activeDelegation.traceId);
+  assert.equal(plannerInputs[0]?.traceId, activeDelegation.traceId);
   assert.equal(plannerInputs[0]?.activeDelegation?.delegationId, activeDelegation.id);
   assert.match(plannerInputs[0]?.latestUserMessage ?? '', /优先检查最新修改/);
   assert.match(plannerInputs[0]?.latestAnnounce?.text ?? '', /需要用户确认检查方向/);
@@ -6231,6 +6273,7 @@ test('legacy object UserGoal checkpoint returns a fixed incompatibility reply wi
     task: '完成旧 checkpoint 中的仓库检查',
     contextSummary: '旧 checkpoint 没有 runUserGoal。',
     transcriptRunId: 'legacy-resume-run',
+    traceId: 'legacy-resume-trace',
     status: 'awaiting_decision',
     resultPreview: '仓库检查已经完成。',
     userGoal: {

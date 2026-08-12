@@ -51,7 +51,7 @@ export function applyActiveDelegationTransition(
     };
   }
 
-  if (!isCurrentUserGoal(activeDelegation.userGoal)) {
+  if (!isResumableDelegation(activeDelegation)) {
     return {
       runNextDelegation: null,
       runCapabilityPlan: [],
@@ -73,7 +73,7 @@ export function applyActiveDelegationTransition(
 
   if (activeDelegation.status === 'awaiting_decision') {
     return {
-      traceId: activeDelegation.traceId ?? activeDelegation.transcriptRunId,
+      traceId: activeDelegation.traceId,
       runUserGoal: resumedUserGoal,
       runDelegationSummaries: updateRunDelegationSummaryResult(
         resumedSummaries,
@@ -97,7 +97,7 @@ export function applyActiveDelegationTransition(
 
   return {
     messages: materializedDelegation.laneMessages,
-    traceId: activeDelegation.traceId ?? activeDelegation.transcriptRunId,
+    traceId: activeDelegation.traceId,
     runUserGoal: resumedUserGoal,
     runNextDelegation,
     taskActiveDelegation: {
@@ -111,8 +111,12 @@ export function applyActiveDelegationTransition(
   };
 }
 
-function isCurrentUserGoal(value: unknown): value is string {
-  return typeof value === 'string'
-    && value.trim().length > 0
-    && value.length <= USER_GOAL_MAX_CHARS;
+function isResumableDelegation(
+  value: TaskActiveDelegation,
+): value is TaskActiveDelegation & { traceId: string; userGoal: string } {
+  return typeof value.traceId === 'string'
+    && value.traceId.trim().length > 0
+    && typeof value.userGoal === 'string'
+    && value.userGoal.trim().length > 0
+    && value.userGoal.length <= USER_GOAL_MAX_CHARS;
 }

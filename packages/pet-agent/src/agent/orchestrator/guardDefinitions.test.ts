@@ -50,6 +50,7 @@ const activeDelegation: TaskActiveDelegation = {
   task: '做点事',
   contextSummary: null,
   transcriptRunId: 'run-1',
+  traceId: 'trace-1',
   status: 'awaiting_decision',
   resultPreview: null,
   userGoal: '做点事',

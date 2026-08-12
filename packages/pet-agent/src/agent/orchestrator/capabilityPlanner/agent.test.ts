@@ -785,7 +785,7 @@ test('entry mode forms one executable task after Capability exploration', async 
   assert.equal('tasks' in result ? result.tasks.length : 0, 1);
 });
 
-test('Planner requires continuous work from one Capability in one task boundary', async (t) => {
+test('Planner accepts consecutive tasks from one Capability when the model keeps distinct boundaries', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -800,31 +800,27 @@ test('Planner requires continuous work from one Capability in one task boundary'
         args: {
           tasks: [{
             capability: 'general',
-            task: 'Fix P1-1 and P1-2 from the review.',
+            task: 'Inspect the failing release and identify the exact package boundary.',
           }, {
             capability: 'general',
-            task: 'Fix P1-3 and P2, verify, commit, and push.',
-          }],
-        },
-      },
-    },
-    {
-      structuredOutput: {
-        kind: 'plan',
-        args: {
-          tasks: [{
-            capability: 'general',
-            task: 'Fix P1-1, P1-2, P1-3, and P2 from the review; verify, commit, and push.',
+            task: 'Apply the accepted findings, verify the package, and publish it.',
           }],
         },
       },
     },
   ]);
 
-  await assert.rejects(
-    createCapabilityPlannerAgent({ model }).invoke(plannerInput(workspace)),
-    /Consecutive tasks use the same Capability/,
-  );
+  const result = await createCapabilityPlannerAgent({ model })
+    .invoke(plannerInput(workspace));
+
+  assert.ok('tasks' in result);
+  assert.deepEqual('tasks' in result ? result.tasks : [], [{
+    capability: 'general',
+    task: 'Inspect the failing release and identify the exact package boundary.',
+  }, {
+    capability: 'general',
+    task: 'Apply the accepted findings, verify the package, and publish it.',
+  }]);
 });
 
 test('Planner closes discovery through general after three grep_search calls', async (t) => {

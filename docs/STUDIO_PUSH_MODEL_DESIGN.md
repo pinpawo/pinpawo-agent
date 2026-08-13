@@ -61,7 +61,21 @@ type StudioEvent = {
 事件是"发生了什么"(一次性、单向),不是"当前是什么样"(可查询、有生命
 周期)。这个区别决定了 studio 不需要存储、不需要一致性、不需要处理并发写。
 
-### 2.3 `submitRequest` 就是一次 dispatch
+### 2.3 两个方向互不配对
+
+**这是最容易丢失的一条不变量,写在这里防止反复重新推导。**
+
+`dispatch` 和 `event` 是**两条独立的单向通道**,不是一次请求的两半:
+
+- studio **不**记录"这次 dispatch 对应哪个 event";
+- studio **不**等待、不超时、不判定某次 dispatch 是否"有回应";
+- 一次 dispatch 可能引发零个、一个或很多个 event,也可能永远没有;
+- 一个 event 可能与任何一次 dispatch 都无关(定时触发、外部 webhook)。
+
+`correlationId` 是**插件自己的关联凭据**,studio 原样透传、从不解释,
+也从不用它做匹配。kanban 往里放 `taskId`,别的插件放什么是它自己的事。
+
+### 2.4 `submitRequest` 就是一次 dispatch
 
 ```text
 submitRequest(goal) ≡ dispatch(plannerPetId, goal)
@@ -113,6 +127,20 @@ pet ──调用──> toolkit ──> 插件内部状态 ──event──> st
 
 pet 只跟 toolkit 打交道,**从不直接与 studio 通信**。整条链没有一处需要
 studio 理解内容。
+
+**产出的归宿是插件,不是 studio。** pet 干完活调的是插件给它的 toolkit
+(kanban 给的是 `kanban_task_*`),数据落在插件自己的状态里;要不要再发
+event、发什么形状,由插件决定。所以:
+
+- **怎么往回写,是插件的事。** studio 不提供"汇报"接口,只提供 `notify`
+  这一个入口;插件不发,studio 就什么都不知道 —— 这是设计,不是缺陷。
+- **存不存、存在哪,是插件的事。** studio 不持久化任何东西(它本来就不持
+  有由 event 推导出的状态),插件的领域状态由插件自己落盘。
+- **pet 卡住了怎么表达,是插件的事。** studio 不认识 review、不认识"等待",
+  要让"在等人"可见,得由插件把它变成一个 event。
+
+判断归属的口诀:**问题若涉及具体领域(任务、进度、排期、评审、落盘),
+答案一定在插件侧;studio 只负责通道的形状。**
 
 ---
 
@@ -186,6 +214,41 @@ Studio 不需要知道 review 概念。等人只是**执行的一种形态**,与
 - 任务队列、依赖、进度呈现
 - 什么时候派谁
 - run 何时结束 —— studio 甚至不需要知道 "run" 这个词
+- **传输与界面** —— 见下
+
+### 5.1 `subscribe` 是插件间的总线,不是对外的出口
+
+契约里只有两个方向,`subscribe` 不是第三个:
+
+```text
+plugin ──notify──> studio ──broadcast──> 其他 plugin
+                                   ↑
+                            插件间共享总线
+```
+
+**studio 自己从不 subscribe 任何东西。** 它经 `notify` 接收、向订阅者广播,
+仅此而已。`subscribe` 是 `StudioPluginContext` 给**插件**用的 —— 让互不认识
+的插件交换信息(kanban 发 `task.done`,scheduler 听见了决定要不要排下一次)。
+
+### 5.2 与 local-agent 只有一个接触点
+
+**dispatch 需要一个能真正跑起来的 pet —— 仅此而已。**
+
+```ts
+createStudio({ studioId, pets: PetAgentRuntime[], entryPetId, plugins })
+```
+
+`pets` 是接口。谁实现它、跑在哪台机器上、怎么连模型,studio 一概不知。
+local-agent 把实现注进来,方向是**单向**的:studio 从不反过来向 local-agent
+要任何东西。
+
+所以 studio 不认识 ws、peer、TUI、requestId、session —— 不是"暂时没用到",
+而是**没有任何理由用到**。`@pinpawo/studio` 的 dependencies 里只有
+`@pinpawo/pet-agent`,包内搜不到 tui / ws / peer / requestId 任何一个词。
+这是这条边界的检验方式。
+
+推论:**凡是需要在 studio 里增加一个概念来配合宿主的想法,都是错的。**
+先回到这一节确认接触点是不是真的多了一个 —— 通常没有。
 
 ---
 

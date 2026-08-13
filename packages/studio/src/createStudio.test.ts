@@ -272,3 +272,39 @@ test('a plugin without a studio aspect is just a toolkit', async () => {
   assert.deepEqual(studio.listPets().map((descriptor) => descriptor.petId), ['p1']);
   await studio.shutdown();
 });
+
+test('a dispatch records who sent it, using the plugin name studio supplies', async () => {
+  // source 目前只做记录。关键是它由 studio 从 context 补 —— 插件自报的
+  // 来源迟早会撒谎。dispatch 是点对点的:不上总线,也不进 pet.invoke。
+  const lines: string[] = [];
+  const original = console.log;
+  console.log = (...args: unknown[]) => { lines.push(args.join(' ')); };
+
+  try {
+    let ctx!: StudioPluginContext;
+    const kanban: StudioPlugin = {
+      name: 'kanban',
+      description: 'test plugin',
+      tools: [],
+      studio: { start: (context) => { ctx = context; } },
+    };
+
+    const studio = await createStudio({
+      studioId: 's1',
+      entryPetId: 'p1',
+      pets: [pet({ petId: 'p1' })],
+      plugins: [kanban],
+    });
+
+    await ctx.dispatch({ petId: 'p1', request: 'from plugin' });
+    await studio.submitRequest('from user');
+    await flush();
+
+    const sources = lines
+      .filter((line) => line.includes('[studio] dispatch petId='))
+      .map((line) => line.match(/source=(\S+)/)?.[1]);
+    assert.deepEqual(sources, ['kanban', 'studio']);
+  } finally {
+    console.log = original;
+  }
+});

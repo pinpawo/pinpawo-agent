@@ -80,7 +80,10 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
     }
   }
 
-  async function dispatch(request: StudioDispatchInput): Promise<StudioDispatchResult> {
+  async function dispatch(
+    request: StudioDispatchInput,
+    source?: string,
+  ): Promise<StudioDispatchResult> {
     const pet = petsById.get(request.petId);
     if (!pet) {
       throw new Error(`studio "${input.studioId}": unknown petId "${request.petId}"`);
@@ -92,6 +95,15 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
     }
 
     const threadId = `studio:${input.studioId}:pet:${request.petId}:dispatch:${randomUUID()}`;
+
+    // 谁派的。插件派活时由 studio 从它的 context 补齐(插件填不了也不用填 ——
+    // 自报的来源迟早会撒谎),缺省表示不来自任何插件,如 submitRequest。
+    //
+    // **目前只做记录。** dispatch 是点对点的 —— 它不上 event 总线(那会让
+    // 每个插件都看见谁给谁派了活),也不进 pet.invoke(pet 不需要知道谁派的)。
+    console.log(
+      `[studio] dispatch petId=${request.petId} source=${source ?? 'studio'} thread=${threadId}`,
+    );
 
     // 发出即返回 —— studio 不等 pet 干完,也不解释它的返回值。pet 的产出
     // 经由 toolkit → 插件 → event 汇报,不走这条路。
@@ -114,7 +126,8 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
 
   function buildPluginContext(plugin: StudioPlugin): StudioPluginContext {
     return {
-      dispatch,
+      // source 由 studio 从 context 补,与 notify 同理。
+      dispatch: (request: StudioDispatchInput) => dispatch(request, plugin.name),
       notify: (event: StudioEventInput) => notify({
         ...event,
         source: plugin.name,

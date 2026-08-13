@@ -29,14 +29,21 @@ Studio **不包含职责,但需要形成契约**。它不决定什么时候派�
 ### 2.1 出:`dispatch`
 
 **所有派活必经 studio。** 插件不能绕过它直接碰 pet —— 否则 pet registry、
-身份与可派发性判断会在每个插件里重复一遍,而且多个插件同时派活时没有任何
-地方能协调(将来的 capacity / lease 正依赖"所有 dispatch 都看得见")。
+身份与可派发性判断会在每个插件里重复一遍。
 
 ```ts
 dispatch({ petId, request, correlationId? }) => { threadId }
 ```
 
 `request` 是自然语言 —— studio 不定义任务结构。
+
+**dispatch 是点对点的。** 它只到达目标 pet:不上 event 总线(那会让每个
+插件都看见谁给谁派了活,凭空制造插件间的耦合),也不进 `pet.invoke` ——
+pet 不需要知道是谁派的。
+
+studio 记录**谁派的**:插件派活时是插件名(由 studio 从它的 context 补,
+插件填不了也不用填 —— 自报的来源迟早会撒谎),外部输入则是 `studio`。
+目前**只做记录**,不限流、不去重、不据此路由。
 
 **返回值只表示"已经发出去了",不表示任务完成。** 没有 reply、没有成功失败
 判定。pet 干完之后自己经由 toolkit → 插件 → event 汇报。

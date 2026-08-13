@@ -24,7 +24,7 @@ export const DELEGATION_PLAN_SOURCE = 'delegation_plan';
 
 type DelegationSpecBase = {
   lane: MessageLane;
-  runId: string;
+  transcriptRunId: string;
   delegationId: string;
   task: string;
 };
@@ -52,7 +52,9 @@ function stampBriefingMeta(message: AIMessage, spec: DelegationSpec) {
     source: DELEGATION_BRIEFING_SOURCE,
     synthetic: true,
     lane: spec.lane,
-    runId: spec.runId,
+    // Message metadata keeps the existing storage key, but its value scopes
+    // the stable delegation transcript and must not follow a resumed root run.
+    runId: spec.transcriptRunId,
     delegationId: spec.delegationId,
   });
   return message;
@@ -82,7 +84,7 @@ export function insertBeforeLatestDelegationBriefing(
 }
 
 function buildDelegationPlanMessage(params: {
-  runId: string;
+  transcriptRunId: string;
   delegationId: string;
   task: string;
 }): AIMessage {
@@ -91,7 +93,7 @@ function buildDelegationPlanMessage(params: {
   stampMessageCreatedAtUtc(message);
   setPinpetMeta(message, {
     source: DELEGATION_PLAN_SOURCE,
-    runId: params.runId,
+    runId: params.transcriptRunId,
     delegationId: params.delegationId,
   });
   return message;

@@ -27,7 +27,7 @@ test('artifact discovery context stays before the latest briefing without displa
   const [briefing] = materializeDelegation({
     mode: 'initial',
     lane: 'capability:general',
-    runId: 'run-1',
+    transcriptRunId: 'run-1',
     delegationId: 'delegation-1',
     task: '检查当前任务',
     essentialContext: null,

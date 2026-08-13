@@ -65,7 +65,7 @@ export function createAnswerNode(config: OrchestratorConfig) {
       : null;
     const userInputRequiredAnnounce = userInputRequiredDelegation
       ? readLatestAnnounce(state.messages, {
-          runId: userInputRequiredDelegation.transcriptRunId,
+          transcriptRunId: userInputRequiredDelegation.transcriptRunId,
           delegationId: userInputRequiredDelegation.id,
         })
       : null;
@@ -175,7 +175,7 @@ export function selectAnswerContextFacts(params: {
 
   if (activeDelegation) {
     const completionReason = readLatestAnnounceCompletionReason(params.state.messages, {
-      runId: activeDelegation.transcriptRunId,
+      transcriptRunId: activeDelegation.transcriptRunId,
       delegationId: activeDelegation.id,
     });
     return {

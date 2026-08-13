@@ -76,7 +76,7 @@ export function getMessageDelegatedTask(message: BaseMessage): string | null {
   return typeof task === 'string' && task.trim() ? task.trim() : null;
 }
 
-export function getMessageTurnId(message: BaseMessage): string | null {
+export function getMessageTranscriptRunId(message: BaseMessage): string | null {
   const meta = getPinpetMeta(message);
   const runId = meta.runId;
   if (typeof runId === 'string') return runId;
@@ -136,7 +136,7 @@ export function toolProtocolSafeMessages(messages: BaseMessage[]) {
 export function laneMessages(
   messages: BaseMessage[],
   lane: MessageLane,
-  runId: string,
+  transcriptRunId: string,
   delegationId: string,
 ) {
   return toolProtocolSafeMessages(messages.filter((message) => {
@@ -147,7 +147,7 @@ export function laneMessages(
       throw new Error(`Lane message ${message.id ?? '(missing id)'} is missing delegationId.`);
     }
     return messageLane === lane
-      && getMessageTurnId(message) === runId
+      && getMessageTranscriptRunId(message) === transcriptRunId
       && getMessageDelegationId(message) === delegationId;
   }));
 }
@@ -188,7 +188,7 @@ export function tagNewLaneMessages(
   messages: BaseMessage[],
   existingMessages: BaseMessage[],
   lane: MessageLane,
-  runId: string,
+  transcriptRunId: string,
   completionReason: SubagentCompletionReason,
   reportMeta?: {
     delegationId?: string | null;
@@ -210,7 +210,7 @@ export function tagNewLaneMessages(
   const removedLaneMessages = existingMessages.flatMap((message) => {
     if (!message.id || resultIds.has(message.id)) return [];
     if (getMessageLane(message) !== lane) return [];
-    if (getMessageTurnId(message) !== runId) return [];
+    if (getMessageTranscriptRunId(message) !== transcriptRunId) return [];
     if (getMessageDelegationId(message) !== (reportMeta?.delegationId ?? null)) return [];
     return [new RemoveMessage({ id: message.id }) as BaseMessage];
   });
@@ -220,7 +220,11 @@ export function tagNewLaneMessages(
   });
   for (const message of nextMessages) {
     ensureMessageId(message);
-    setPinpetMeta(message, { lane, runId, delegationId: reportMeta?.delegationId ?? null });
+    setPinpetMeta(message, {
+      lane,
+      runId: transcriptRunId,
+      delegationId: reportMeta?.delegationId ?? null,
+    });
   }
 
   // announceMessageId must identify a message produced by this invocation;
@@ -247,6 +251,7 @@ export function tagNewLaneMessages(
 export type HandoffSource = {
   handoffFrom: MessageLane;
   delegationId: string;
+  /** Persisted protocol key whose value is the stable delegation transcript run id. */
   runId: string;
   task: string | null;
   announceMessageId: string;
@@ -290,14 +295,14 @@ export function getMessageHandoffSource(message: BaseMessage): HandoffSource | n
  * transcript). See docs/PET_AGENT_ANNOUNCE_JUDGMENT_REFACTOR.md.
  *
  * Returns the messages array update: optionally removes lane messages for this
- * lane+runId+delegationId, followed by the main-queue copy.
+ * lane+transcriptRunId+delegationId, followed by the main-queue copy.
  * Returns null (no update) when no announce text can be located for the
  * delegation — caller should fall back to leaving state untouched.
  */
 export function buildSubagentHandoff(params: {
   messages: BaseMessage[];
   lane: MessageLane;
-  runId: string;
+  transcriptRunId: string;
   delegationId: string;
   clearLane?: boolean;
   includeCopy?: boolean;
@@ -307,7 +312,7 @@ export function buildSubagentHandoff(params: {
   >[];
 }): BaseMessage[] | null {
   const announceMessage = readLatestAnnounceMessage(params.messages, {
-    runId: params.runId,
+    transcriptRunId: params.transcriptRunId,
     delegationId: params.delegationId,
   });
   const announceText = announceMessage ? readMessageText(announceMessage) : '';
@@ -322,7 +327,7 @@ export function buildSubagentHandoff(params: {
     ? formatHandoffArtifactRefsForMessage(params.artifactRefs.map((ref) => ({
       ...ref,
       delegationId: params.delegationId,
-      runId: params.runId,
+      runId: params.transcriptRunId,
     })))
     : '';
 
@@ -331,7 +336,7 @@ export function buildSubagentHandoff(params: {
   const removeMessages = clearLane
     ? params.messages.flatMap((message) => {
       if (getMessageLane(message) !== params.lane) return [];
-      if (getMessageTurnId(message) !== params.runId) return [];
+      if (getMessageTranscriptRunId(message) !== params.transcriptRunId) return [];
       if (getMessageDelegationId(message) !== params.delegationId) return [];
       if (!message.id) {
         throw new Error('Delegation lane message is missing the required message id.');
@@ -351,7 +356,7 @@ export function buildSubagentHandoff(params: {
   setPinpetMeta(handoffCopy, {
     handoffFrom: params.lane,
     delegationId: params.delegationId,
-    runId: params.runId,
+    runId: params.transcriptRunId,
     task,
     announceMessageId,
   });
@@ -391,12 +396,13 @@ function readTaggedAnnounce(message: BaseMessage): SubagentAnnounce | null {
 
 function readLatestAnnounceMessage(
   messages: BaseMessage[],
-  options: { runId?: string | null; delegationId?: string | null } = {},
+  options: { transcriptRunId?: string | null; delegationId?: string | null } = {},
 ): BaseMessage | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
-    const runId = options.runId;
-    if (runId && getMessageTurnId(message) !== runId) continue;
+    const transcriptRunId = options.transcriptRunId;
+    if (transcriptRunId
+      && getMessageTranscriptRunId(message) !== transcriptRunId) continue;
     if (options.delegationId && getMessageDelegationId(message) !== options.delegationId) continue;
     if (readTaggedAnnounce(message)) return message;
   }
@@ -405,7 +411,7 @@ function readLatestAnnounceMessage(
 
 export function readLatestAnnounce(
   messages: BaseMessage[],
-  options: { runId?: string | null; delegationId?: string | null } = {},
+  options: { transcriptRunId?: string | null; delegationId?: string | null } = {},
 ): SubagentAnnounce | null {
   const message = readLatestAnnounceMessage(messages, options);
   return message ? readTaggedAnnounce(message) : null;
@@ -413,7 +419,7 @@ export function readLatestAnnounce(
 
 export function readLatestAnnounceCompletionReason(
   messages: BaseMessage[],
-  options: { runId?: string | null; delegationId?: string | null } = {},
+  options: { transcriptRunId?: string | null; delegationId?: string | null } = {},
 ): SubagentCompletionReason | null {
   const message = readLatestAnnounceMessage(messages, options);
   return message ? getMessageCompletionReason(message) : null;

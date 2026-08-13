@@ -9,7 +9,7 @@ import {
   getMessageIsAnnounce,
   getMessageHandoffSource,
   getMessageLane,
-  getMessageTurnId,
+  getMessageTranscriptRunId,
   getPinpetMeta,
 } from './messageLanes';
 
@@ -17,7 +17,7 @@ test('initial delegation materializes a concise main plan and scoped XML briefin
   const materialized = materializeDelegation({
     mode: 'initial',
     lane: 'capability:github',
-    runId: 'run-1',
+    transcriptRunId: 'run-1',
     delegationId: 'task-b',
     task: '关闭 GitHub Issue #272。',
     essentialContext: 'Capability intent: GitHub issue 操作',
@@ -45,7 +45,7 @@ test('initial delegation omits empty essential context', () => {
   const [briefing] = materializeDelegation({
     mode: 'initial',
     lane: 'capability:general',
-    runId: 'run-1',
+    transcriptRunId: 'run-1',
     delegationId: 'task-a',
     task: '检查仓库状态。',
     essentialContext: null,
@@ -58,7 +58,7 @@ test('continuation delegation carries task and optional gap note without a new m
   const withGap = materializeDelegation({
     mode: 'continue',
     lane: 'capability:github',
-    runId: 'run-1',
+    transcriptRunId: 'run-1',
     delegationId: 'task-a',
     task: '关闭 GitHub Issue #272。',
     gapNote: '未验证 issue 状态，请确认已关闭。',
@@ -75,7 +75,7 @@ test('continuation delegation carries task and optional gap note without a new m
   const [withoutGap] = materializeDelegation({
     mode: 'continue',
     lane: 'capability:github',
-    runId: 'run-1',
+    transcriptRunId: 'run-1',
     delegationId: 'task-a',
     task: '关闭 GitHub Issue #272。',
     gapNote: null,
@@ -87,7 +87,7 @@ test('delegation XML safely preserves a CDATA terminator in task text', () => {
   const [briefing] = materializeDelegation({
     mode: 'initial',
     lane: 'capability:general',
-    runId: 'run-1',
+    transcriptRunId: 'run-1',
     delegationId: 'task-a',
     task: '检查 ]]> 边界。',
     essentialContext: null,
@@ -100,7 +100,7 @@ test('briefing metadata is routing truth and never reads as announce or handoff'
   const [briefing] = materializeDelegation({
     mode: 'initial',
     lane: 'capability:general',
-    runId: 'run-9',
+    transcriptRunId: 'run-9',
     delegationId: 'task-9',
     task: '任务。',
     essentialContext: null,
@@ -108,7 +108,7 @@ test('briefing metadata is routing truth and never reads as announce or handoff'
 
   assert.equal(isDelegationBriefingMessage(briefing), true);
   assert.equal(getPinpetMeta(briefing).synthetic, true);
-  assert.equal(getMessageTurnId(briefing), 'run-9');
+  assert.equal(getMessageTranscriptRunId(briefing), 'run-9');
   assert.equal(getMessageDelegationId(briefing), 'task-9');
   assert.equal(getMessageLane(briefing), 'capability:general');
   assert.equal(getMessageIsAnnounce(briefing), false);

@@ -28,7 +28,7 @@ test('Capability context preserves full evidence and inserts one goal before the
   const [initialBriefing] = materializeDelegation({
     mode: 'initial',
     lane: 'capability:general',
-    runId: 'run-1',
+    transcriptRunId: 'run-1',
     delegationId: 'task-1',
     task: '检查修改后的类型错误。',
     essentialContext: null,
@@ -37,7 +37,7 @@ test('Capability context preserves full evidence and inserts one goal before the
   const [continuationBriefing] = materializeDelegation({
     mode: 'continue',
     lane: 'capability:general',
-    runId: 'run-1',
+    transcriptRunId: 'run-1',
     delegationId: 'task-1',
     task: '继续检查 packages/b.ts。',
     gapNote: null,

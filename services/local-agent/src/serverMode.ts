@@ -65,7 +65,7 @@ export type StudioModePreflight = {
   studioConfigPath: string;
   petsDir: string;
   studioId: string;
-  /** 外部入口 submitRequest 派给谁。 */
+  /** 外部输入默认派给谁。 */
   entryPetId: string;
   /** 本 studio 可派活的全部 pet,按配置顺序。 */
   petIds: string[];

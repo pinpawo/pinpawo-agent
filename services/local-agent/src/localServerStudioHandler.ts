@@ -118,7 +118,7 @@ export class LocalServerStudioHandler<Peer extends object> {
         this.eventBridges.set(peer, { unsubscribe, latestRequestId });
       }
 
-      const { threadId } = await studio.submitRequest(userRequest);
+      const { threadId } = await studio.dispatch({ petId: studio.entryPetId, request: userRequest });
       console.log(
         `[local-server] studio_request accepted requestId=${requestId} thread=${threadId}`,
       );

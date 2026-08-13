@@ -27,7 +27,7 @@ function createDeps(): LocalServerDeps {
 function fakeStudio(overrides: Partial<Studio> = {}): Studio {
   const handlers = new Set<StudioEventHandler>();
   return {
-    submitRequest: async () => ({ threadId: 'thread-1' }),
+    entryPetId: 'pet-a',
     dispatch: async () => ({ threadId: 'thread-1' }),
     notify: (event) => { for (const handler of handlers) void handler(event); },
     subscribe: (handler) => { handlers.add(handler); return () => handlers.delete(handler); },
@@ -59,8 +59,8 @@ test('a studio request returns as soon as it is submitted', async () => {
   let released!: () => void;
   const gate = new Promise<void>((resolve) => { released = resolve; });
   const studio = fakeStudio({
-    submitRequest: async () => {
-      void gate; // 模拟 pet 长时间执行:submitRequest 本身不应等它
+    dispatch: async () => {
+      void gate; // 模拟 pet 长时间执行:dispatch 本身不应等它
       return { threadId: 'thread-slow' };
     },
   });

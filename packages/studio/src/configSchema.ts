@@ -103,7 +103,7 @@ export type StudioLocalConfig = {
   description?: string;
 
   /**
-   * 外部入口 `submitRequest(goal)` 派给哪个 pet。
+   * 外部输入默认派给哪个 pet。宿主经 `dispatch({ petId: entryPetId, ... })` 使用。
    *
    * 它就是一次普通 dispatch —— 该 pet 只是恰好扮演拆解角色,studio 不认识
    * "planner"这个概念,因此字段名不叫 plannerPetId。必须在 `pets` 中。

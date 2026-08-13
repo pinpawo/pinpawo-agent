@@ -93,7 +93,7 @@ test('a full round: entry pet plans, kanban dispatches, worker completes', async
 
   studio.subscribe((event) => { events.push(event); });
 
-  await studio.submitRequest('写一篇关于 X 的稿子');
+  await studio.dispatch({ petId: studio.entryPetId, request: '写一篇关于 X 的稿子' });
   await flush();
 
   // planner 的任务被派给了 writer,brief 原样传达。

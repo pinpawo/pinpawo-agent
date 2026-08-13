@@ -45,6 +45,25 @@ studio 记录**谁派的**:插件派活时是插件名(由 studio 从它的 cont
 插件填不了也不用填 —— 自报的来源迟早会撒谎),外部输入则是 `studio`。
 目前**只做记录**,不限流、不去重、不据此路由。
 
+`request` 之外不带装配细节。曾经有 `extraCapabilities` / `toolkits` 两个字段
+让调用方临时给 pet 塞能力 —— 那是越界:pet 该有什么能力是 pet 配置的事
+(`pets/*.json`),插件不该参与 pet 的构造。两个字段都无人使用,已删。
+
+#### 每个 pet 一条队列
+
+**studio 收下所有 dispatch,pet 空了就发 —— 插件完全不用关心 pet 忙不忙。**
+
+这才是"所有派活必经 studio"真正解决的问题:多个插件(kanban、scheduler、
+http…)会并发给同一个 pet 派活。此前第二个会撞上 `status === 'active'` 被
+拒,派活凭空丢掉 —— 而 §4.2「失败留着等人」说的是**任务失败**,不是"插板忙,
+请稍后",两者不该混成同一个错误。
+
+排队**不是业务**:它不决定派给谁(那是插件的事),只保证已经收下的派活不会
+因为撞车而丢。与 `notify` 保证每个订阅者都收到是同一类事 —— 通道自身的完整性。
+
+dispatch 依然立即返回 `{ threadId }`。只有 `disabled` 的 pet 会被拒,"正忙"
+不是错误。
+
 **返回值只表示"已经发出去了",不表示任务完成。** 没有 reply、没有成功失败
 判定。pet 干完之后自己经由 toolkit → 插件 → event 汇报。
 
@@ -82,14 +101,14 @@ type StudioEvent = {
 `correlationId` 是**插件自己的关联凭据**,studio 原样透传、从不解释,
 也从不用它做匹配。kanban 往里放 `taskId`,别的插件放什么是它自己的事。
 
-### 2.4 `submitRequest` 就是一次 dispatch
+### 2.4 外部输入没有专属入口
 
-```text
-submitRequest(goal) ≡ dispatch(plannerPetId, goal)
-```
+曾经有个 `submitRequest(goal)`,等价于 `dispatch(entryPetId, goal)`。**它是
+多余的** —— 两个方法做同一件事,却让 entry pet 在 API 上有了专属地位。按插板
+的逻辑,entry pet 只是配置里的一个 pet。
 
-goal 直接派给 planner pet。它**不需要**"路由给哪个插件"这一步 —— 外部入口
-与插件委托走同一条通道、同一个契约,只是发起方不同。
+现在 studio 暴露 `entryPetId`,宿主自己 `dispatch({ petId: entryPetId, ... })`。
+外部输入与插件委托走同一条通道、同一个契约,只是 `source` 不同。
 
 ---
 
@@ -211,7 +230,7 @@ Studio 不需要知道 review 概念。等人只是**执行的一种形态**,与
 **属于 studio**
 
 - pet registry、pet 身份与可派发性
-- `dispatch` 契约(唯一出口)
+- `dispatch` 契约(唯一出口)+ 每 pet 的派活队列
 - `event` 总线(唯一入口 + 广播)
 - 插件配置:这个 studio 装哪些插件
 
@@ -291,7 +310,7 @@ local-agent 把实现注进来,方向是**单向**的:studio 从不反过来向 
 | 重试预算需持久化(#606) | ❌ 自动重试整体退役 |
 | studio 需要可插拔的"驱动器插槽" | ❌ 插件本身就是驱动器 |
 | 插件是独立于 toolkit 的新概念 | ❌ 就是 toolkit 加一个切面 |
-| `submitRequest` 需要路由给某个插件 | ❌ 它就是一次 dispatch |
+| `submitRequest` 需要路由给某个插件 | ❌ 它就是一次 dispatch,方法本身已删 |
 
 `checkpointer`(#613)**不受影响** —— pet 执行进度仍需落盘,与谁驱动无关。
 
@@ -339,4 +358,10 @@ local-agent 把实现注进来,方向是**单向**的:studio 从不反过来向 
    但这属于宿主约定,不进契约。
 2. 各插件的领域模型与生命周期形态(属于插件自身,不进本契约)。
 3. event 是否需要"至少一次"投递保证。目前是纯内存同步扇出,进程重启即丢。
-   在插件自己持久化状态的前提下,这可能一直够用。
+   在插件自己持久化状态的前提下,这可能一直够用。**但插件之间若靠 event
+   推进状态(如 scheduler 听 `task.done` 决定下次排期),丢一条就是丢一次
+   排期** —— 需要明确"event 只做通知,不承载状态推进",还是补投递保证。
+4. 插件的 `start` 顺序即配置顺序,`stop` 逆序。若先启动的插件在 `start` 里
+   立刻 dispatch,后启动的插件还没 subscribe,会漏掉那批 event。插件之间
+   确实可能有依赖,所以顺序需要保留 —— 但"start 里不要立刻干活"这条纪律
+   目前只是约定,没有写进契约。

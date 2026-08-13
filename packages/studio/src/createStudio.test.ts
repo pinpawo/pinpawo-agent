@@ -15,6 +15,8 @@ function pet(options: {
   onInvoke?: (input: PetAgentRuntimeInvokeInput) => void;
   reply?: string;
   fail?: boolean;
+  /** 让某次 invoke 挂住,用于观察队列。 */
+  hold?: (brief: string) => Promise<void>;
 }): PetAgentRuntime {
   return {
     descriptor: () => ({
@@ -32,6 +34,7 @@ function pet(options: {
     }),
     invoke: async (input): Promise<PetAgentRuntimeInvokeResult> => {
       options.onInvoke?.(input);
+      await options.hold?.(input.brief);
       if (options.fail) throw new Error('pet exploded');
       return { reply: options.reply ?? 'done' };
     },
@@ -98,7 +101,7 @@ test('a failing pet does not reject the dispatch call', async () => {
   await flush();
 });
 
-test('submitRequest is just a dispatch to the entry pet', async () => {
+test('the entry pet is just a pet — dispatching to it needs no special API', async () => {
   const seen: string[] = [];
   const studio = await createStudio({
     studioId: 's1',
@@ -109,17 +112,17 @@ test('submitRequest is just a dispatch to the entry pet', async () => {
     ],
   });
 
-  await studio.submitRequest('write something');
+  await studio.dispatch({ petId: studio.entryPetId, request: 'write something' });
   await flush();
 
   assert.deepEqual(seen, ['entry:write something']);
 });
 
-test('dispatch rejects unknown and non-dispatchable pets', async () => {
+test('dispatch rejects unknown and disabled pets', async () => {
   const studio = await createStudio({
     studioId: 's1',
     entryPetId: 'ok',
-    pets: [pet({ petId: 'ok' }), pet({ petId: 'busy', status: 'active' })],
+    pets: [pet({ petId: 'ok' }), pet({ petId: 'off', status: 'disabled' })],
   });
 
   await assert.rejects(
@@ -127,8 +130,52 @@ test('dispatch rejects unknown and non-dispatchable pets', async () => {
     /unknown petId "ghost"/,
   );
   await assert.rejects(
-    () => studio.dispatch({ petId: 'busy', request: 'go' }),
-    /not dispatchable/,
+    () => studio.dispatch({ petId: 'off', request: 'go' }),
+    /is disabled/,
+  );
+});
+
+test('concurrent dispatches to one pet queue instead of being rejected', async () => {
+  // 多个插件并发给同一个 pet 派活是常态(kanban + scheduler + http…)。
+  // 从前第二个会撞上 status === 'active' 被拒,派活凭空丢掉。
+  const started: string[] = [];
+  let releaseFirst!: () => void;
+  const firstRunning = new Promise<void>((resolve) => { releaseFirst = resolve; });
+
+  const studio = await createStudio({
+    studioId: 's1',
+    entryPetId: 'p1',
+    pets: [pet({
+      petId: 'p1',
+      onInvoke: (input) => { started.push(input.brief); },
+      hold: async (brief) => { if (brief === 'first') await firstRunning; },
+    })],
+  });
+
+  await studio.dispatch({ petId: 'p1', request: 'first' });
+  await studio.dispatch({ petId: 'p1', request: 'second' });
+  await flush();
+
+  // 第一个在跑,第二个还排着 —— 但它没有被拒绝。
+  assert.deepEqual(started, ['first']);
+
+  releaseFirst();
+  await flush();
+  assert.deepEqual(started, ['first', 'second']);
+});
+
+test('dispatch is refused after shutdown', async () => {
+  // 关掉之后再派活,没有任何插件在听它的产出 —— 那是一扇没关紧的门。
+  const studio = await createStudio({
+    studioId: 's1',
+    entryPetId: 'p1',
+    pets: [pet({ petId: 'p1' })],
+  });
+  await studio.shutdown();
+
+  await assert.rejects(
+    () => studio.dispatch({ petId: 'p1', request: 'go' }),
+    /already shut down/,
   );
 });
 
@@ -297,7 +344,7 @@ test('a dispatch records who sent it, using the plugin name studio supplies', as
     });
 
     await ctx.dispatch({ petId: 'p1', request: 'from plugin' });
-    await studio.submitRequest('from user');
+    await studio.dispatch({ petId: studio.entryPetId, request: 'from user' });
     await flush();
 
     const sources = lines

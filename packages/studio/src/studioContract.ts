@@ -18,7 +18,7 @@
  * 任务队列、依赖、进度、调度时机、重试 —— 全部属于插件,不属于 studio。
  */
 
-import type { AgentCapability, AgentToolkit } from '@pinpawo/pet-agent';
+import type { AgentToolkit } from '@pinpawo/pet-agent';
 
 import type { PetAgentRuntimeDescriptor } from './types';
 
@@ -37,9 +37,6 @@ export type StudioDispatchInput = {
    * event 与这次 dispatch 对上;不同插件可以有完全不同的编码方式。
    */
   correlationId?: string;
-  /** 本次调用临时注入的能力,与 pet 自身配置合并。 */
-  extraCapabilities?: AgentCapability[];
-  toolkits?: AgentToolkit[];
   signal?: AbortSignal;
 };
 
@@ -132,12 +129,11 @@ export type StudioPlugin = AgentToolkit & {
 
 export type Studio = {
   /**
-   * 外部入口。本质就是一次 dispatch —— goal 直接派给 planner pet,
-   * planner 干完自己经由 toolkit 汇报,后续由插件接手。
-   *
-   * 因此这里不需要"路由给哪个插件"这一步。
+   * 外部输入默认派给谁。曾经有个 `submitRequest(goal)` 包着它 —— 那是多余的:
+   * 它完全等价于 `dispatch({ petId: entryPetId, request: goal })`,却让 entry pet
+   * 在 API 上有了专属地位。按插板的逻辑,entry pet 只是配置里的一个 pet。
    */
-  submitRequest: (goal: string) => Promise<StudioDispatchResult>;
+  entryPetId: string;
   dispatch: (input: StudioDispatchInput) => Promise<StudioDispatchResult>;
   notify: (event: StudioEvent) => void;
   subscribe: (handler: StudioEventHandler) => () => void;

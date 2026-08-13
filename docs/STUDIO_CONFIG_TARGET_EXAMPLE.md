@@ -19,7 +19,7 @@ Tracking issue: #561
   "studioId": "content-studio",
   "name": "内容工作室",
 
-  // 外部入口 submitRequest(goal) 派给谁。
+  // 外部输入默认派给谁。
   // 它就是一次 dispatch —— planner 只是恰好扮演拆解角色的普通 pet。
   "entryPetId": "planner",
 
@@ -110,7 +110,7 @@ const studio = createStudio({
 用配置串一遍,验证契约是否自洽:
 
 ```text
-1. 客户端 submitRequest("写一篇关于 X 的稿子")
+1. 客户端 dispatch({ petId: entryPetId, request: "写一篇关于 X 的稿子" })
        ↓
 2. studio.dispatch({ petId: "planner", request: "写一篇..." })
        ↓  返回 { threadId }，立即结束 —— 不等结果

@@ -3,8 +3,6 @@ import {
   ARTIFACT_DISCOVERY_TOOLKIT_NAME,
 } from '@pinpawo/pet-agent';
 import {
-  type StudioDueRunStatus,
-  type StudioDueRunStoreTrace,
 } from '@pinpawo/studio';
 import { BUILT_IN_CAPABILITY_REGISTRY } from './capabilityRegistry';
 import {
@@ -86,60 +84,6 @@ export function handleLocalHttpRequest(
     return true;
   }
 
-  if (pathname === '/studio_due_runs') {
-    const scheduler = deps.studioDueRunScheduler;
-    if (!scheduler) {
-      writeJson(res, 404, { error: 'studio_due_runs unavailable' });
-      return true;
-    }
-
-    const status = parseStudioDueRunStatus(url.searchParams.get('status'));
-    const limit = parsePositiveInteger(url.searchParams.get('limit'));
-    const includeMetrics = shouldIncludeStudioDueRunMetrics(url.searchParams);
-
-    if (url.searchParams.get('limit') !== null && limit === undefined) {
-      writeJson(res, 400, { error: 'invalid limit' });
-      return true;
-    }
-
-    const respondWithTrace = (trace: StudioDueRunStoreTrace[]) => {
-      const next = (status ? trace.filter((row) => row.status === status) : trace)
-        .slice(0, limit ?? trace.length);
-      const payload = {
-        workdir: getLocalServerWorkdir(deps),
-        studio_due_runs_path: deps.runtimeConfig?.studioDueRunsPath,
-        studio_due_runs: next,
-      };
-      return payload;
-    };
-
-    if (includeMetrics) {
-      Promise.all([scheduler.trace(), scheduler.metrics()])
-        .then(([trace, metrics]) => {
-          writeJson(res, 200, {
-            ...respondWithTrace(trace),
-            studio_due_run_metrics: metrics,
-          });
-        })
-        .catch((err) => {
-          writeJson(res, 500, {
-            error: err instanceof Error ? err.message : 'studio_due_runs trace failed',
-          });
-        });
-      return true;
-    }
-
-    scheduler.trace()
-      .then((trace) => {
-        writeJson(res, 200, respondWithTrace(trace));
-      })
-      .catch((err) => {
-        writeJson(res, 500, {
-          error: err instanceof Error ? err.message : 'studio_due_runs trace failed',
-        });
-      });
-    return true;
-  }
 
   if (pathname === '/capabilities') {
     writeJson(
@@ -220,33 +164,6 @@ export function handleLocalHttpRequest(
 function writeJson(res: ServerResponse, statusCode: number, payload: unknown) {
   res.writeHead(statusCode, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(payload));
-}
-
-function parseStudioDueRunStatus(value: string | null): StudioDueRunStatus | null {
-  if (!value) {
-    return null;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (normalized === 'pending'
-    || normalized === 'claimed'
-    || normalized === 'running'
-    || normalized === 'success'
-    || normalized === 'failed'
-    || normalized === 'canceled'
-  ) {
-    return normalized;
-  }
-  return null;
-}
-
-function shouldIncludeStudioDueRunMetrics(searchParams: URLSearchParams): boolean {
-  const include = searchParams.get('include')?.toLowerCase()?.trim();
-  if (include === 'metrics' || include === 'all') {
-    return true;
-  }
-
-  const metrics = searchParams.get('metrics');
-  return metrics === '1' || metrics === 'true';
 }
 
 function parsePositiveInteger(value: string | null): number | undefined {

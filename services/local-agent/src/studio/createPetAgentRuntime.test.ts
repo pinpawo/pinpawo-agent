@@ -18,7 +18,6 @@ import { ToolkitRuntimeManager } from '@pinpawo/pet-agent';
 import type { AgentActor, AgentModels } from '@pinpawo/pet-agent';
 import { defineInstructionDocument } from '@pinpawo/pet-agent';
 import type { NamedStructuredTool } from '@pinpawo/pet-agent';
-import type { HumanReviewerRequest } from '@pinpawo/studio';
 
 function fakeModels(): AgentModels {
   // Most tests stub the graph and never invoke this model. The one real-graph
@@ -217,181 +216,12 @@ test('invoke starts Toolkit roots before evaluating runtime-dependent availabili
   assert.deepEqual(events, ['start', 'availability', 'stop']);
 });
 
-test('humanReviewer: single interrupt → approve → reply', async () => {
-  const requests: HumanReviewerRequest[] = [];
-  const { graph } = makeStubGraph([
-    { __interrupt__: [{ value: sampleReviewInterrupt }], messages: [] },
-    { messages: [new AIMessage('all done')] },
-  ]);
 
-  const runtime = createPetAgentRuntime({
-    models: fakeModels(),
-    actor: fakeActor(),
-    graph,
-    humanReviewer: async (req) => {
-      requests.push(req);
-      return {
-        reviewId: req.review.id,
-        selectedOptionId: 'approve',
-      };
-    },
-  });
 
-  const result = await runtime.invoke({ brief: 'go' });
-  assert.equal(result.reply, 'all done');
-  assert.equal(requests.length, 1);
-  assert.equal(requests[0]?.kind, 'review');
-  assert.equal(requests[0]?.review.id, 'review-direct');
-});
 
-test('humanReviewer: multi-round interrupt loops until resolved', async () => {
-  const requests: HumanReviewerRequest[] = [];
-  const { graph } = makeStubGraph([
-    { __interrupt__: [{ value: sampleReviewInterrupt }], messages: [] },
-    { __interrupt__: [{ value: sampleReviewInterrupt }], messages: [] },
-    { messages: [new AIMessage('done after two reviews')] },
-  ]);
 
-  const runtime = createPetAgentRuntime({
-    models: fakeModels(),
-    actor: fakeActor(),
-    graph,
-    humanReviewer: async (req) => {
-      requests.push(req);
-      return {
-        reviewId: req.review.id,
-        selectedOptionId: 'approve',
-      };
-    },
-  });
 
-  const result = await runtime.invoke({ brief: 'go' });
-  assert.equal(result.reply, 'done after two reviews');
-  assert.equal(requests.length, 2);
-});
 
-test('humanReviewer: canonical review interrupt → approve → reply', async () => {
-  const requests: HumanReviewerRequest[] = [];
-  const { graph } = makeStubGraph([
-    { __interrupt__: [{ value: sampleReviewInterrupt }], messages: [] },
-    { messages: [new AIMessage('direct done')] },
-  ]);
-
-  const runtime = createPetAgentRuntime({
-    models: fakeModels(),
-    actor: fakeActor(),
-    graph,
-    humanReviewer: async (req) => {
-      requests.push(req);
-      return {
-        reviewId: req.review.id,
-        selectedOptionId: 'approve',
-      };
-    },
-  });
-
-  const result = await runtime.invoke({ brief: 'go' });
-  assert.equal(result.reply, 'direct done');
-  assert.equal(requests.length, 1);
-  const request = requests[0];
-  assert.equal(request?.kind, 'review');
-  assert.equal(request?.kind === 'review' ? request.review.id : null, 'review-direct');
-});
-
-test('humanReviewer: missing reviewer + interrupt → invoke throws', async () => {
-  const { graph } = makeStubGraph([
-    { __interrupt__: [{ value: sampleReviewInterrupt }], messages: [] },
-  ]);
-
-  const runtime = createPetAgentRuntime({
-    models: fakeModels(),
-    actor: fakeActor(),
-    graph,
-  });
-
-  await assert.rejects(
-    () => runtime.invoke({ brief: 'go' }),
-    /no humanReviewer configured/,
-  );
-});
-
-test('humanReviewer: resume call passes canonical response Command', async () => {
-  const { graph, calls } = makeStubGraph([
-    { __interrupt__: [{ value: sampleReviewInterrupt }], messages: [] },
-    { messages: [new AIMessage('approved')] },
-  ]);
-
-  const runtime = createPetAgentRuntime({
-    models: fakeModels(),
-    actor: fakeActor(),
-    graph,
-    humanReviewer: async () => ({
-      reviewId: 'review-direct',
-      selectedOptionId: 'approve',
-    }),
-  });
-
-  await runtime.invoke({ brief: 'go' });
-
-  assert.equal(calls.length, 2);
-  // 第一次调用应为初始 turn input(普通 object,带 messages);Command 实例的是第二次。
-  assert.equal(isCommand(calls[0].input), false);
-  assert.equal(isCommand(calls[1].input), true);
-  assert.deepEqual((calls[1].input as { resume: unknown }).resume, {
-    reviewId: 'review-direct',
-    selectedOptionId: 'approve',
-  });
-});
-
-test('humanReviewer: unknown interrupt is not treated as HITL', async () => {
-  // 假设 graph 抛出某种未知类型的 interrupt;pet runtime 应直接返回(reply 空),
-  // 不调用 humanReviewer。
-  let reviewerCalled = false;
-  const { graph } = makeStubGraph([
-    { __interrupt__: [{ value: { kind: 'other_kind' } }], messages: [] },
-  ]);
-
-  const runtime = createPetAgentRuntime({
-    models: fakeModels(),
-    actor: fakeActor(),
-    graph,
-    humanReviewer: async (req) => {
-      reviewerCalled = true;
-      return {
-        reviewId: req.review.id,
-        selectedOptionId: 'approve',
-      };
-    },
-  });
-
-  const result = await runtime.invoke({ brief: 'go' });
-  assert.equal(reviewerCalled, false);
-  assert.equal(result.reply, '');
-});
-
-test('humanReviewer: malformed review interrupt is not treated as HITL', async () => {
-  let reviewerCalled = false;
-  const { graph } = makeStubGraph([
-    { __interrupt__: [{ value: { kind: 'review' } }], messages: [] },
-  ]);
-
-  const runtime = createPetAgentRuntime({
-    models: fakeModels(),
-    actor: fakeActor(),
-    graph,
-    humanReviewer: async (req) => {
-      reviewerCalled = true;
-      return {
-        reviewId: req.review.id,
-        selectedOptionId: 'approve',
-      };
-    },
-  });
-
-  const result = await runtime.invoke({ brief: 'go' });
-  assert.equal(reviewerCalled, false);
-  assert.equal(result.reply, '');
-});
 
 test('pet runtime does not replace an explicitly configured wiki Capability', async () => {
   const { graph, calls } = makeStubGraph([

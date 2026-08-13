@@ -8,13 +8,12 @@
  *
  * 未来若出现第二个 host,再单独抽 `studio-pet-agent-adapter`。
  *
- * 待退役(#561 Phase 2):下面的 `while (true) { graph.invoke(); Command({resume}) }`
- * 是一套 Studio 专用的 HITL 循环。目标是让 pet invocation 复用稳定的 Chat
- * request/runtime 路径,而不是维护第二套执行器。
+ * HITL 对 Studio 透明:pet 撞到 review 时 invoke 直接返回,不在内部等待。
+ * review 是 pet 与人之间的事 —— 人已经在跟 pet 打交道了,再让 Studio 知道
+ * 一遍是多余的一层。答复走 pet-agent 既有的 resume 路径,与 chat 一致。
  */
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
-import { Command } from '@langchain/langgraph';
 
 import type { AgentCapability } from '@pinpawo/pet-agent';
 import type { AgentActor, AgentExecution, AgentModels } from '@pinpawo/pet-agent';
@@ -36,10 +35,7 @@ import {
   type OrchestratorConfig,
   type OrchestratorGraph,
 } from '@pinpawo/pet-agent';
-import { isHumanReviewInterruptPayload } from '@pinpawo/pet-agent';
 import type {
-  HumanReviewer,
-  HumanReviewerRequest,
   PetAgentRuntime,
   PetAgentRuntimeDescriptor,
   PetAgentRuntimeInvokeInput,
@@ -58,12 +54,6 @@ export type PetAgentRuntimeConfig = {
   toolkits?: AgentToolkit[];
   execution?: AgentExecution;
   workdir?: string;
-  /**
-   * HITL 应答桥。pet runtime 在 invoke 期间撞到 interrupt 时调用,
-   * 拿到 canonical ReviewResponse 后续跑 graph。不提供时 pet 不应触发 HITL tool;
-   * 若仍触发 interrupt,invoke 将抛错。
-   */
-  humanReviewer?: HumanReviewer;
   graph?: OrchestratorGraph;
   modelInputModalities?: OrchestratorConfig['modelInputModalities'];
   checkpoint?: OrchestratorConfig['checkpoint'];
@@ -230,24 +220,14 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
     const previousStatus = status;
     status = 'active';
     try {
-      let graphInput: Parameters<OrchestratorGraph['invoke']>[0] = buildOrchestratorRunInput(
+      const graphInput: Parameters<OrchestratorGraph['invoke']>[0] = buildOrchestratorRunInput(
         messages,
         { activeDelegationTransition: input.activeDelegationTransition },
       );
-      while (true) {
-        const result = await graph.invoke(graphInput, { signal: input.signal, configurable });
-        const pending = readPendingInterrupt(result);
-        if (!pending) {
-          return { reply: readReply(result) };
-        }
-        if (!config.humanReviewer) {
-          throw new Error(
-            `Pet agent "${config.actor.petId}" hit HITL interrupt but no humanReviewer configured`,
-          );
-        }
-        const response = await config.humanReviewer(pending);
-        graphInput = new Command({ resume: response });
-      }
+      // 撞到 review 就返回 —— 进度已落在 checkpoint 上(#613),答复由客户端
+      // 经 pet-agent 的 resume 路径送回。Studio 不参与,也不需要知道。
+      const result = await graph.invoke(graphInput, { signal: input.signal, configurable });
+      return { reply: readReply(result) };
     } finally {
       status = previousStatus === 'active' ? 'standby' : previousStatus;
     }
@@ -270,12 +250,3 @@ function readReply(result: unknown): string {
   return typeof last?.content === 'string' ? last.content.trim() : '';
 }
 
-function readPendingInterrupt(result: unknown): HumanReviewerRequest | undefined {
-  const raw = (result as { __interrupt__?: unknown } | undefined)?.__interrupt__;
-  if (!Array.isArray(raw) || raw.length === 0) return undefined;
-  const first = raw[0];
-  const value = first && typeof first === 'object' && 'value' in first
-    ? (first as { value?: unknown }).value
-    : null;
-  return isHumanReviewInterruptPayload(value) ? value : undefined;
-}

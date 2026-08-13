@@ -189,26 +189,22 @@ Studio 不需要知道 review 概念。等人只是**执行的一种形态**,与
 
 ---
 
-## 6. 缩减范围
+## 6. 缩减结果
 
-当前 `createStudioOrchestrator.ts` 为 1070 行。
+已落地。旧的 `createStudioOrchestrator.ts`(1070 行)整体删除,取而代之的是
+`createStudio.ts`(157 行)—— 它只做转发,没有任何管理策略。
 
-### 随推模型消失
+| 随推模型消失 | 去向 |
+| --- | --- |
+| `runDispatch` 等结果、判定 satisfied/failed | 删除:pet 自己汇报 |
+| `dispatchQueuedTask` 完成回调链 | 删除:同上 |
+| `activePets` 单槽、重试计数、结果聚合 | 删除:并发与重试由插件决定 |
+| `StudioRun` / `StudioTask` / 依赖模型 / 进度状态机 | 迁往 `@pinpawo-toolkit/studio-kanban` 的 `KanbanBoard` |
+| `dueRun*` / `runQueuePort` / `localStudioDueRunScheduler` | 删除,见 §8.1 |
+| 私有 HITL `while(true)` 循环 | 删除:§4.1 |
+| wiki curator / skeleton 钩子 | 删除:写知识库是插件的事,studio 不在回路上 |
 
-| 职责 | 规模 | 为什么 |
-| --- | --- | --- |
-| `runDispatch` 等结果、判定 satisfied/failed | 108 行 | pet 自己汇报 |
-| `dispatchQueuedTask` 完成回调链 | 123 行 | 同上 |
-| `scheduleQueue` 依赖扫描 | 60 行 | 归插件 |
-| `activePets` 单槽 | 6 处 | 并发由插件决定 |
-| `buildTerminalOutcomeIfReady` 结果聚合 | ~40 行 | 结果不在 studio |
-| 重试计数 | — | §4.2 |
-
-### 迁出(归插件)
-
-`StudioRun` / `StudioTask` / `StudioRunQueueStore` / 依赖模型 / 进度状态机。
-
-预期缩减后约 100–150 行。
+`@pinpawo/studio` 现约 800 行(含契约、配置解析、wiki 只读 port),不碰文件系统。
 
 ---
 
@@ -231,21 +227,46 @@ Studio 不需要知道 review 概念。等人只是**执行的一种形态**,与
 
 ---
 
-## 8. 第一批插件
+## 8. 插件路线图
 
-契约与具体插件无关。以下只是**将要实现的第一批**,不构成对 studio 的约束:
+契约与具体插件无关。以下只是**将要实现的第一批**,不构成对 studio 的约束。
 
-| 插件 | 依据 |
-| --- | --- |
-| kanban | 任务依赖 + 进度 |
-| scheduler | 时间(cron) |
-| trigger | 外部事件 |
+| 插件 | 依据 | 状态 |
+| --- | --- | --- |
+| kanban | 任务依赖 + 进度 | ✅ 本次落地 |
+| scheduler | 时间(cron) | ⏸ 见 §8.1 |
+| trigger | 外部事件(webhook / 文件变化) | 未开始 |
 
-`localStudioDueRunScheduler` 是 scheduler 的雏形,现在长在 local-agent 里。
+### 8.1 scheduler:为什么先删掉,以及怎么回来
+
+原 `localStudioDueRunScheduler` 是 scheduler 的雏形,但它是**按拉模型写的**:
+轮询 `dueRun` 存储、构造 `StudioRun`、调用 orchestrator 并等结果。这三件事在
+推模型下全部不成立,没有一行可以直接复用。留着它只会让人以为 scheduler 还在工作。
+所以本次连同 `dueRunContract` / `runQueuePort` / `fileDueRunStore` 一并删除,
+而不是改造。
+
+回来的时候,它应该是一个**和 kanban 平级的普通插件**,形态由契约直接决定:
+
+1. **`AgentToolkit` 面** —— 给 pet 一组工具排期,例如
+   `schedule_add({ cron, request, petId })` / `schedule_list` / `schedule_cancel`。
+   与 kanban 同理,`bindTools` 已带 `execution.threadId`,pet 不需要转抄任何 ID。
+2. **`studio.start(context)` 面** —— 起自己的定时器。到点直接
+   `context.dispatch({ petId, request })`,派完即忘;不等结果,不判定成败。
+3. **自己的存储** —— 排期表是插件私有状态,和 `KanbanBoard` 一样由插件持有并落盘。
+   studio 不知道"排期"这个词。
+4. **经 `notify` 汇报** —— 触发、跳过、取消都作为 event 发回 studio,由订阅方
+   (UI、kanban)自行解释。
+
+前置条件只有一个:插件持久化的落盘位置需要与 kanban 统一(§9.1)。
+其余部分不依赖 studio 再做任何改动 —— 这正是插板契约要达到的效果。
 
 ---
 
 ## 9. 待定项
 
-1. 各插件的领域模型与生命周期形态(属于插件自身,不进本契约)。
-2. `StudioRun` / `StudioTask` / `StudioRunQueueStore` 迁往哪个插件。
+1. **插件状态的落盘约定**。`KanbanBoard` 目前自己管持久化,scheduler 回来时会
+   面对同一个问题。需要一个统一位置(大概是 `.pinpawo/studio/<plugin-id>/`),
+   但这属于宿主约定,不进契约。
+2. 各插件的领域模型与生命周期形态(属于插件自身,不进本契约)。
+3. event 是否需要"至少一次"投递保证。目前是纯内存同步扇出,进程重启即丢。
+   在插件自己持久化状态的前提下,这可能一直够用。

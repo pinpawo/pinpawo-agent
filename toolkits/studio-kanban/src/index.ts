@@ -14,11 +14,6 @@ export type { CreateKanbanPluginOptions, KanbanPlugin } from './kanbanPlugin';
 export { KanbanBoard } from './kanbanBoard';
 export type { KanbanTask, KanbanTaskStatus, KanbanBoardSnapshot } from './kanbanBoard';
 
-/* ─────────────── 任务队列 ─────────────── */
-
-export { FileStudioRunQueueStore } from './runQueueStore';
-export { FileStudioDueRunStore } from './fileDueRunStore';
-
 /* ─────────────── 知识库 ─────────────── */
 
 export { createFileWikiAccess } from './wikiAccess';
@@ -28,16 +23,3 @@ export {
   WIKI_READ_CAPABILITY_NAME,
 } from './wikiReadCapability';
 
-export {
-  createLLMWikiCurator,
-  createSkeletonWikiCurator,
-  ensureWikiSkeleton,
-  defaultPromptProvider,
-  fileReadPromptProvider,
-  DEFAULT_CURATOR_PROMPT,
-} from './wikiCurator';
-export type {
-  CuratorPromptProvider,
-  LLMWikiCuratorConfig,
-  LLMWikiCuratorStructuredOutputConfig,
-} from './wikiCurator';

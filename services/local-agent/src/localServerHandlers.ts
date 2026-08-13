@@ -1,5 +1,4 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { FileStudioDueRunStore } from '@pinpawo-toolkit/studio-kanban';
 import { DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL } from '@pinpawo/agent-contracts';
 import { compactOrchestratorMessages } from '@pinpawo/pet-agent';
 import type { AgentLlmConfig } from './agentConfig';
@@ -24,9 +23,7 @@ import type {
   ChatSessionResult,
 } from './chatSessionAdapter';
 import { LocalServerStudioHandler } from './localServerStudioHandler';
-import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
 import { LocalServerTuiSessionService } from './localServerTuiSessions';
-import { LocalStudioDueRunScheduler } from './localStudioDueRunScheduler';
 import { persistGlobalReviewPolicyMode } from './globalReviewPolicyConfig';
 import { loadAgentContext } from './contextLoader';
 import {
@@ -101,15 +98,6 @@ export function createLocalServerHandlers(
     runtimeConfig: effectiveRuntimeConfig,
     defaultModelProfileId: initialDeps.modelProfiles.defaultProfileId,
   });
-  const studioReviewRouter = new LocalServerStudioReviewRouter<LocalServerPeer>();
-  const ownsStudioDueRunScheduler = !initialDeps.studioDueRunScheduler;
-  const studioDueRunScheduler = initialDeps.studioDueRunScheduler
-    ?? new LocalStudioDueRunScheduler({
-      store: new FileStudioDueRunStore({
-        filePath: effectiveRuntimeConfig.studioDueRunsPath,
-      }),
-      filterWorkdir: effectiveRuntimeConfig.workdir,
-    });
   const inflightRequests = new InflightRequestController<LocalServerPeer>({
     // Local TUI / companion / spawned stdio peer: trusted local transports.
     emitOperation: (peer, event) => sendLocalServerPeerEvent(peer, event),
@@ -122,14 +110,11 @@ export function createLocalServerHandlers(
     ...(options.loadContext ? { loadContext: options.loadContext } : {}),
     ...(options.runChat ? { runChat: options.runChat } : {}),
   });
-  const studioHandler = new LocalServerStudioHandler({
-    reviewRouter: studioReviewRouter,
-    inflightRequests,
+  const studioHandler = new LocalServerStudioHandler<LocalServerPeer>({
     outbound: {
       sendMessage: (peer, message) => peer.send(message),
       sendEvent: (peer, event) => sendLocalServerPeerEvent(peer, event),
     },
-    studioDueRunScheduler,
   });
   const sessionCommands = new LocalServerSessionCommandQueue();
   // Actor-wide admission: session transitions and chat operations never overlap.
@@ -656,9 +641,8 @@ export function createLocalServerHandlers(
       );
     },
     onHumanReviewResponse: async (client, message) => {
-      if (studioHandler.routeHumanReviewResponse(client, message)) {
-        return;
-      }
+      // HITL 不经 Studio:pet 的 review 走 pet-agent 自己的中断/resume,
+      // 与 chat 同路。
       return afterSessionCommands(
         client,
         message.requestId,
@@ -829,9 +813,7 @@ export function createLocalServerHandlers(
   return {
     peerHandlers,
     close: () => {
-      if (ownsStudioDueRunScheduler) {
-        studioDueRunScheduler.stop();
-      }
+      void studioHandler.shutdown();
     },
     handleHttpRequest: (req, res, authToken) => {
       const requestDeps = runtimeDeps.get();

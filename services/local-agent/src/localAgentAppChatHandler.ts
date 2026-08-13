@@ -63,7 +63,6 @@ type AppChatRunSource =
   | { type: 'chat_request' }
   | HumanReviewResolutionSource;
 type RunStudioRequest = (ws: WebSocket, message: StudioRequestMessage) => Promise<void>;
-type RouteStudioReviewResponse = (ws: WebSocket, message: HumanReviewResponseMessage) => boolean;
 type ReviewActionRoute = HumanReviewActionRoute & {
   requestId: string;
   userId: string;
@@ -100,7 +99,6 @@ export type LocalAgentAppChatHandlerOptions = {
   getWorkdir: () => string;
   getActorName: () => string | null;
   runStudioRequest: RunStudioRequest;
-  routeStudioHumanReviewResponse: RouteStudioReviewResponse;
   rejectStudioPendingReview: (ws: WebSocket) => void;
   loadContext?: LoadContext;
   runChat?: RunChatSession;
@@ -128,7 +126,6 @@ export class LocalAgentAppChatHandler {
   private readonly getWorkdir: () => string;
   private readonly getActorName: () => string | null;
   private readonly runStudioRequest: RunStudioRequest;
-  private readonly routeStudioHumanReviewResponse: RouteStudioReviewResponse;
   private readonly rejectStudioPendingReview: (ws: WebSocket) => void;
   private readonly loadContext: LoadContext;
   private readonly runChat: RunChatSession;
@@ -161,7 +158,6 @@ export class LocalAgentAppChatHandler {
     this.getWorkdir = options.getWorkdir;
     this.getActorName = options.getActorName;
     this.runStudioRequest = options.runStudioRequest;
-    this.routeStudioHumanReviewResponse = options.routeStudioHumanReviewResponse;
     this.rejectStudioPendingReview = options.rejectStudioPendingReview;
     this.loadContext = options.loadContext ?? loadAgentContext;
     this.runChat = options.runChat ?? runChatSession;
@@ -215,9 +211,8 @@ export class LocalAgentAppChatHandler {
   }
 
   async handleHumanReviewResponse(ws: WebSocket, msg: HumanReviewResponseMessage) {
-    if (this.routeStudioHumanReviewResponse(ws, msg)) {
-      return;
-    }
+    // HITL 不经 Studio:pet 的 review 走 pet-agent 自己的中断/resume,
+    // 与 chat 同路。
     if (!this.canUseSocket(ws)) {
       return;
     }

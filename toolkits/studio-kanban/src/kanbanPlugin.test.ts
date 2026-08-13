@@ -106,12 +106,7 @@ test('a full round: entry pet plans, kanban dispatches, worker completes', async
 
   // 状态变化经插件转成 event 广播出去,studio 只转发不解释。
   assert.ok(events.some((event) => event.type === 'task.done'));
-  // 看板自己发的都归到 kanban 名下。总线上还有 studio 补的 dispatch event
-  // (source 是派活方),那不是看板发的,故按 type 筛掉。
-  assert.ok(
-    events.filter((event) => event.type.startsWith('task.'))
-      .every((event) => event.source === 'kanban'),
-  );
+  assert.ok(events.every((event) => event.source === 'kanban'));
 });
 
 test('a dependent task waits until its dependency is done', async () => {

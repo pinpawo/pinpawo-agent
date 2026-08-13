@@ -38,14 +38,6 @@ dispatch({ petId, request, correlationId? }) => { threadId }
 
 `request` 是自然语言 —— studio 不定义任务结构。
 
-**每次 dispatch 都会在总线上发一条 `dispatch` event**,`source` 是派活方:
-插件派活时是插件名(由 studio 从它的 context 补,插件填不了也不用填 ——
-自报的来源迟早会撒谎),外部输入则是 `studio`。
-
-这是上面那句"所有 dispatch 都看得见"唯一的兑现方式 —— 让它成为别的插件
-**听得见**的事实,而不是只写进日志。studio 自己到此为止:不限流、不去重、
-不据此路由。
-
 **返回值只表示"已经发出去了",不表示任务完成。** 没有 reply、没有成功失败
 判定。pet 干完之后自己经由 toolkit → 插件 → event 汇报。
 

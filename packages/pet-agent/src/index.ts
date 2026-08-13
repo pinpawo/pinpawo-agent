@@ -217,7 +217,6 @@ export type {
   CapabilityArtifactSelector,
 } from './agent/orchestrator/capabilityArtifacts';
 export type {
-  EntryDecisionProtocol,
   OrchestratorConfig,
   OrchestratorInvokeOptions,
   OrchestratorGraph,

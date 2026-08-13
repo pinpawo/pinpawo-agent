@@ -2,7 +2,7 @@
 title: Documentation Wiki Index
 page_type: overview
 status: draft
-updated: 2026-08-09
+updated: 2026-08-13
 sources:
   - ../AGENTS.md
 related:
@@ -33,7 +33,8 @@ explicitly migrated.
 - [Decision node ownership](concepts/decision-node-ownership.md) — the
   four semantic owners and the Planner-owned task/Capability boundary.
 - [Message context and provenance](concepts/message-context-and-provenance.md) —
-  private Capability lanes, announce, and accepted handoff.
+  completeness-first flow across canonical main evidence, User Goal, delegation
+  briefing, private Capability lanes, announce, and accepted handoff.
 
 ## System prompt design
 
@@ -58,7 +59,8 @@ explicitly migrated.
   Capability selection, terminal planning tools, and result-driven future-plan
   revision.
 - [Message context and provenance](concepts/message-context-and-provenance.md) —
-  canonical main messages, private lanes, announce, handoff, and trusted identity.
+  canonical main messages as shared evidence, User Goal as the objective index,
+  delegation briefing as the execution boundary, plus private lanes and handoff.
 - [Delegation completion acknowledgement](decisions/delegation-completion-acknowledgement.md)
   — why the fixed completion close exists, why handoff alone cannot trigger it,
   and how answer returns control when user input is required.

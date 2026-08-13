@@ -437,3 +437,23 @@ lint passes, and documentation migrations.
   already-complete user goal.
 - Replaced stale source paths and removed current guidance for the superseded
   `next_task` / `unavailable` result contract and multi-file exploration flow.
+
+## [2026-08-13] ingest | Goal-to-delegation context completeness
+
+- Registered draft PR #632, its Goal Creation design, and current working-tree
+  implementation as implementation-candidate evidence rather than merged
+  architecture.
+- Recorded canonical main messages as the cross-delegation shared evidence
+  ledger: accepted handoffs remain visible to later Capability subagents while
+  raw transcripts from other private lanes remain excluded.
+- Distinguished User Goal as a stable objective and attention index, delegation
+  briefing as the current execution boundary, and the selected lane as private
+  continuation memory.
+- Adopted completeness before token deduplication at the Capability boundary.
+  The target context is canonical main evidence plus User Goal, delegation
+  briefing, and the current lane; Goal Creation must not replace source evidence.
+- Recorded the current implementation gap: PR #632 requires `runUserGoal` to
+  exist for Capability execution but does not yet project it into the subagent
+  message context.
+- Kept the ingest scoped to message context and provenance; the broader PR #632
+  ownership and Prompt Contract Map migration remains a separate Wiki ingest.

@@ -1,7 +1,6 @@
 import { capabilityPlanningBasicsDataset } from './capability-planning-basics.ts';
 import { contextSynthesisBasicsDataset } from './context-synthesis-basics.ts';
 import { delegationControlBasicsDataset } from './delegation-control-basics.ts';
-import { entryDecisionBasicsDataset } from './entry-decision-basics.ts';
 import { interruptionRecoveryBasicsDataset } from './interruption-recovery-basics.ts';
 import { multiTaskFlowBasicsDataset } from './multi-task-flow-basics.ts';
 import { orchestratorLifecycleCompositionDataset } from './orchestrator-lifecycle-composition.ts';
@@ -14,7 +13,6 @@ export const agentEvalDatasets = [
   answerBehaviorBasicsDataset,
   orchestratorRouteDataset,
   orchestratorFlowMockSubagentDataset,
-  entryDecisionBasicsDataset,
   capabilityPlanningBasicsDataset,
   delegationControlBasicsDataset,
   interruptionRecoveryBasicsDataset,
@@ -30,7 +28,6 @@ export {
   capabilityPlanningBasicsDataset,
   contextSynthesisBasicsDataset,
   delegationControlBasicsDataset,
-  entryDecisionBasicsDataset,
   interruptionRecoveryBasicsDataset,
   multiTaskFlowBasicsDataset,
   orchestratorLifecycleCompositionDataset,

@@ -42,7 +42,7 @@ test('lifecycle report V2 records independent subject and judge profiles', () =>
   const report = createLifecycleCompositionReport({
     revision,
     model: metadata('subject', 'subject'),
-    structuredOutputMethod: 'jsonSchema',
+    structuredOutputMethod: 'not-applicable',
     evaluator: {
       version: 'prompt-goal-v1',
       model: metadata('judge', 'judge'),

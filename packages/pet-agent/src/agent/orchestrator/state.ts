@@ -17,8 +17,8 @@ import {
   type ToolAuthorizationRecord,
 } from './review/reviewAuthorizations';
 import type {
+  OrchestratorRuntimeFailure,
   PlannerReplyOutcome,
-  PlannerRuntimeFailure,
 } from './capabilityPlanner/protocol';
 
 export type SessionToolAuthorizationState = {
@@ -63,7 +63,7 @@ const orchestratorStateChannels = {
     reducer: (_prev, next) => next,
     default: () => null,
   }),
-  runPlannerFailure: Annotation<PlannerRuntimeFailure | null>({
+  runRuntimeFailure: Annotation<OrchestratorRuntimeFailure | null>({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
@@ -104,7 +104,7 @@ export type OrchestratorRunState = Pick<
   | 'runDelegationSummaries'
   | 'runIterationCount'
   | 'runLatestDelegationOutcome'
-  | 'runPlannerFailure'
+  | 'runRuntimeFailure'
   | 'runActiveDelegationTransition'
   | 'runId'
   | 'traceId'
@@ -126,7 +126,7 @@ export function buildRunStateReset(
     runDelegationSummaries: [],
     runIterationCount: 0,
     runLatestDelegationOutcome: null,
-    runPlannerFailure: null,
+    runRuntimeFailure: null,
     runActiveDelegationTransition:
       options.activeDelegationTransition ?? 'supersede_active',
     runId: randomUUID().slice(0, 8),

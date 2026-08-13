@@ -123,6 +123,10 @@ function createOrchestratorGraph(
           configurable?: Record<string, unknown>;
         } = {}) => target[property](input as never, withRegistry(options) as never);
       }
+      if (property === 'updateState') {
+        return (options: { configurable?: Record<string, unknown> }, values: unknown) =>
+          target.updateState(withRegistry(options) as never, values as never);
+      }
       const value = Reflect.get(target, property, receiver);
       return typeof value === 'function' ? value.bind(target) : value;
     },
@@ -143,6 +147,9 @@ function createQueuedPlannerRunner(
   return {
     async invoke(input: CapabilityPlannerInput): Promise<CapabilityPlannerResult> {
       const planning = await nextStructuredValue();
+      if (planning.action === 'answer_directly') {
+        return { action: 'answer_directly', tasks: [] };
+      }
       if (input.mode === 'boundary' && typeof planning.outcome === 'string') {
         if (planning.outcome === 'goal_done') {
           return { action: 'goal_done', tasks: [] };
@@ -291,14 +298,6 @@ const testActor: AgentActor = {
   species: 'cat',
 };
 
-function needsPlanDecision() {
-  return {
-    action: 'needs_plan',
-    planner_objective: '完成当前需要工具执行的用户请求。',
-    planner_context: null,
-  };
-}
-
 function scriptedPlannerTask(
   task: string,
   remainingPlan: Array<{ capability: string; task: string }> = [],
@@ -328,244 +327,30 @@ function continueDecision(gapNote: string | null = '当前 delegated task 还未
   return { outcome: 'continue', gap_note: gapNote };
 }
 
-type EntryRouteCall = {
-  name: string;
-  args: Record<string, unknown>;
-};
-
-function createScriptedEntryRouteDecisionModel(
-  responses: ReadonlyArray<ReadonlyArray<EntryRouteCall>>,
-) {
-  const invocations: BaseMessage[][] = [];
-  const boundToolNames: string[][] = [];
-  const boundToolOptions: Array<Record<string, unknown> | undefined> = [];
-  let responseIndex = 0;
+test('Goal Creation reads full canonical main messages and excludes lane announces', async () => {
+  let goalCreationMessages: Array<{ _getType?: () => string; content?: unknown }> = [];
   const model = {
-    bindTools: (tools: StructuredTool[], options?: Record<string, unknown>) => {
-      boundToolNames.push(tools.map((item) => item.name));
-      boundToolOptions.push(options);
-      return {
-        invoke: async (messages: BaseMessage[]) => {
-          invocations.push([...messages]);
-          const calls = responses[responseIndex] ?? [];
-          responseIndex += 1;
-          return new AIMessage({
-            content: '',
-            tool_calls: calls.map((call, index) => ({
-              id: `entry-route-${String(responseIndex)}-${String(index)}`,
-              name: call.name,
-              args: call.args,
-              type: 'tool_call' as const,
-            })),
-          });
-        },
-      };
+    invoke: async (messages: unknown[]) => {
+      goalCreationMessages = messages as Array<{ _getType?: () => string; content?: unknown }>;
+      return new AIMessage('把 #619 和 #621 的审查问题发布为 GitHub issue。');
     },
-  } as unknown as AgentModels['act'];
-  return { model, invocations, boundToolNames, boundToolOptions };
-}
-
-const routeFunctionEntryDecisionConfig = {
-  method: 'functionCalling' as const,
-  entryDecisionProtocol: 'routeFunctions' as const,
-};
-
-test('entry route-functions protocol requires one route call and stores its normalized user goal', async () => {
-  const route = createScriptedEntryRouteDecisionModel([[
-    {
-      name: 'route_to_planner',
-      args: {
-        objective: '检查 issue #587 的 Entry 路由设计并实现测试。',
-        context: '仅检查与当前设计相关的实现。',
-      },
-    },
-  ]]);
-  let plannerInput: CapabilityPlannerInput | null = null;
-  const graph = createOrchestratorGraph({
-    models: {
-      act: route.model,
-      decision: route.model,
-      answer: new FakeListChatModel({ responses: ['unused'], sleep: 0 }),
-      observe: route.model,
-      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
-    },
-    actor: testActor,
-    decisionStructuredOutput: routeFunctionEntryDecisionConfig,
-    capabilityPlannerRunner: {
-      async invoke(input) {
-        plannerInput = input;
-        return {
-          action: 'unavailable',
-          tasks: [],
-        };
-      },
-    },
-  });
-
-  await graph.invoke(buildOrchestratorRunInput([
-    new HumanMessage('请检查并实现 Entry 路由设计。'),
-  ]), {
-    configurable: {
-      thread_id: 'entry-route-function-plan',
-      actor: testActor,
-      capabilities: [capability('general', '处理通用任务。')],
-      allowedCapabilityNames: ['general'],
-    },
-  });
-
-  assert.deepEqual(route.boundToolNames, [[
-    'route_to_answer',
-    'route_to_planner',
-  ]]);
-  assert.deepEqual(route.boundToolOptions, [{ tool_choice: 'required' }]);
-  const capturedPlannerInput = plannerInput as CapabilityPlannerInput | null;
-  assert.ok(capturedPlannerInput);
-  assert.deepEqual(capturedPlannerInput.userGoal, {
-    objective: '检查 issue #587 的 Entry 路由设计并实现测试。',
-    context: '仅检查与当前设计相关的实现。',
-  });
-  assert.match(String(route.invocations[0]?.[0]?.content ?? ''), /必须且只能调用一个路由 function/);
-});
-
-test('entry route-functions protocol rejects zero, repeated, unknown, and malformed route calls', async () => {
-  const cases: ReadonlyArray<{
-    label: string;
-    calls: ReadonlyArray<EntryRouteCall>;
-    error: RegExp;
-  }> = [
-    { label: 'zero', calls: [], error: /exactly one route call; received 0/ },
-    {
-      label: 'two different calls',
-      calls: [
-        { name: 'route_to_answer', args: {} },
-        { name: 'route_to_planner', args: { objective: 'inspect' } },
-      ],
-      error: /exactly one route call; received 2/,
-    },
-    {
-      label: 'duplicate calls',
-      calls: [
-        { name: 'route_to_answer', args: {} },
-        { name: 'route_to_answer', args: {} },
-      ],
-      error: /exactly one route call; received 2/,
-    },
-    {
-      label: 'unknown call',
-      calls: [{ name: 'route_somewhere_else', args: {} }],
-      error: /Unknown entry route function/,
-    },
-    {
-      label: 'invalid planner args',
-      calls: [{ name: 'route_to_planner', args: { objective: '   ' } }],
-      error: /Invalid route_to_planner arguments/,
-    },
-    {
-      label: 'oversized planner args',
-      calls: [{ name: 'route_to_planner', args: { objective: 'x'.repeat(2_001) } }],
-      error: /Invalid route_to_planner arguments/,
-    },
-    {
-      label: 'unexpected answer args',
-      calls: [{ name: 'route_to_answer', args: { unexpected: true } }],
-      error: /Invalid route_to_answer arguments/,
-    },
-  ];
-
-  for (const item of cases) {
-    const route = createScriptedEntryRouteDecisionModel([item.calls]);
-    const graph = createOrchestratorGraph({
-      models: {
-        act: route.model,
-        decision: route.model,
-        answer: {
-          invoke: async () => {
-            throw new Error('invalid entry route must not reach answer');
-          },
-        } as unknown as AgentModels['act'],
-        observe: route.model,
-        subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
-      },
-      actor: testActor,
-      decisionStructuredOutput: routeFunctionEntryDecisionConfig,
-      capabilityPlannerRunner: {
-        async invoke() {
-          throw new Error('invalid entry route must not reach capabilityPlanner');
-        },
-      },
-    });
-
-    await assert.rejects(graph.invoke(buildOrchestratorRunInput([
-      new HumanMessage(`test invalid ${item.label}`),
-    ]), {
-      configurable: {
-        thread_id: `entry-route-function-invalid-${item.label}`,
-        actor: testActor,
-        capabilities: [],
-      },
-    }), item.error);
-  }
-});
-
-test('entry route-functions protocol repairs an invalid route output without falling through to end', async () => {
-  const route = createScriptedEntryRouteDecisionModel([
-    [],
-    [{ name: 'route_to_answer', args: {} }],
-  ]);
-  const graph = createOrchestratorGraph({
-    models: {
-      act: route.model,
-      decision: route.model,
-      answer: new FakeListChatModel({ responses: ['repaired answer'], sleep: 0 }),
-      observe: route.model,
-      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
-    },
-    actor: testActor,
-    decisionStructuredOutput: {
-      ...routeFunctionEntryDecisionConfig,
-      autoRepair: { maxRetries: 1 },
-    },
-  });
-
-  const state = await graph.invoke(buildOrchestratorRunInput([
-    new HumanMessage('不需要工具，直接回答。'),
-  ]), {
-    configurable: {
-      thread_id: 'entry-route-function-repair',
-      actor: testActor,
-      capabilities: [],
-    },
-  }) as OrchestratorStateType;
-
-  assert.equal(route.invocations.length, 2);
-  assert.match(String(route.invocations[1]?.at(-1)?.content ?? ''), /上一次路由输出无效/);
-  assert.equal(mainConversationMessages(state.messages).at(-1)?.content, 'repaired answer');
-});
-
-test('entry decision reads full canonical main messages and excludes lane announces', async () => {
-  let entryDecisionMessages: Array<{ _getType?: () => string; content?: unknown }> = [];
-  const model = {
-    invoke: async () => new AIMessage('answered'),
-    bindTools: () => ({
-      invoke: async () => new AIMessage(''),
-    }),
-    withStructuredOutput: () => ({
-      invoke: async (messages: unknown[]) => {
-        entryDecisionMessages = messages as Array<{ _getType?: () => string; content?: unknown }>;
-        return { action: 'answer' };
-      },
-    }),
   } as unknown as AgentModels['act'];
 
   const graph = createOrchestratorGraph({
     models: {
       act: model,
+      answer: new FakeListChatModel({ responses: ['answered'], sleep: 0 }),
       observe: model,
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
     actor: testActor,
+    capabilityPlannerRunner: {
+      async invoke() {
+        return { action: 'answer_directly', tasks: [] };
+      },
+    },
   });
-  const previousAnnounce = new AIMessage('这是未 handoff 的 lane announce，不应进入 entryDecision。');
+  const previousAnnounce = new AIMessage('这是未 handoff 的 lane announce，不应进入 Goal Creation。');
   setPinpetMeta(previousAnnounce, {
     lane: 'capability:general',
     runId: 'prev-turn',
@@ -603,40 +388,36 @@ test('entry decision reads full canonical main messages and excludes lane announ
   });
 
   assert.deepEqual(
-    entryDecisionMessages.map((message) => message._getType?.()),
+    goalCreationMessages.map((message) => message._getType?.()),
     ['system', 'human', 'ai', 'human', 'ai', 'ai', 'human'],
   );
-  const contextText = String(entryDecisionMessages[1]?.content ?? '');
-  assert.match(contextText, /<entry_decision_context[^>]*>/);
+  const contextText = String(goalCreationMessages[1]?.content ?? '');
+  assert.match(contextText, /<goal_creation_context[^>]*>/);
   assert.match(contextText, /trust="read_only"/);
   assert.doesNotMatch(contextText, /<user_request>|<recent_messages>|<recent_subagent_announces>|context_summaries/);
-  assert.match(String(entryDecisionMessages[2]?.content ?? ''), /COMPACTED_MAIN_CONTEXT/);
-  assert.equal(String(entryDecisionMessages.at(-1)?.content ?? ''), 'OK，把这些问题也发 issue 帮我。');
-  assert.equal(String(entryDecisionMessages[4]?.content ?? ''), '上一轮 10 个全仓库架构问题已经发布为 issue。');
-  assert.match(String(entryDecisionMessages[5]?.content ?? ''), /NEW_DISTRIBUTION_FINDING_A/);
-  assert.match(String(entryDecisionMessages[5]?.content ?? ''), /NEW_DISTRIBUTION_FINDING_B/);
+  assert.match(String(goalCreationMessages[2]?.content ?? ''), /COMPACTED_MAIN_CONTEXT/);
+  assert.equal(String(goalCreationMessages.at(-1)?.content ?? ''), 'OK，把这些问题也发 issue 帮我。');
+  assert.equal(String(goalCreationMessages[4]?.content ?? ''), '上一轮 10 个全仓库架构问题已经发布为 issue。');
+  assert.match(String(goalCreationMessages[5]?.content ?? ''), /NEW_DISTRIBUTION_FINDING_A/);
+  assert.match(String(goalCreationMessages[5]?.content ?? ''), /NEW_DISTRIBUTION_FINDING_B/);
   assert.doesNotMatch(
-    entryDecisionMessages.map((message) => String(message.content ?? '')).join('\n'),
+    goalCreationMessages.map((message) => String(message.content ?? '')).join('\n'),
     /未 handoff 的 lane announce|这条消息的正文不参与分类/,
   );
 });
 
-test('entry stores a bounded run user goal without copying main messages into Planner', async () => {
+test('Goal Creation stores bounded text without appending it to canonical messages', async () => {
   let plannerInput: CapabilityPlannerInput | null = null;
   const userGoalContext = 'RUN_USER_GOAL_CONTEXT';
   const model = {
-    invoke: async () => new AIMessage('planner returned facts'),
-    withStructuredOutput: () => ({
-      invoke: async () => ({
-        action: 'needs_plan',
-        planner_objective: '处理 issue #587，并且不要修改 /tmp/legacy-path。',
-        planner_context: userGoalContext,
-      }),
-    }),
+    invoke: async () => new AIMessage(
+      `处理 issue #587，并且不要修改 /tmp/legacy-path。\n\n${userGoalContext}`,
+    ),
   } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
     models: {
       act: model,
+      answer: new FakeListChatModel({ responses: ['当前能力不可用。'], sleep: 0 }),
       observe: model,
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
@@ -668,13 +449,13 @@ test('entry stores a bounded run user goal without copying main messages into Pl
 
   const capturedPlannerInput = plannerInput as CapabilityPlannerInput | null;
   assert.ok(capturedPlannerInput);
-  assert.deepEqual(capturedPlannerInput.userGoal, {
-    objective: '处理 issue #587，并且不要修改 /tmp/legacy-path。',
-    context: userGoalContext,
-  });
+  assert.equal(
+    capturedPlannerInput.userGoal,
+    '处理 issue #587，并且不要修改 /tmp/legacy-path。\n\nRUN_USER_GOAL_CONTEXT',
+  );
   assert.deepEqual(state.runUserGoal, capturedPlannerInput.userGoal);
   assert.doesNotMatch(
-    state.messages.map(readMessageText).join('\n'),
+    mainConversationMessages(state.messages).slice(0, -1).map(readMessageText).join('\n'),
     new RegExp(userGoalContext),
   );
   assert.equal(
@@ -684,25 +465,16 @@ test('entry stores a bounded run user goal without copying main messages into Pl
 });
 
 test('execution boundary routes through capabilityPlanner before the next task', async () => {
-  let structuredCallCount = 0;
-  const entryDecisionInputs: string[] = [];
+  const goalCreationInputs: string[] = [];
   const plannerInputs: CapabilityPlannerInput[] = [];
+  const decisionModel = {
+    invoke: async (messages: BaseMessage[]) => {
+      goalCreationInputs.push(messages.map(readMessageText).join('\n'));
+      return new AIMessage('看 issue #269，再查本地实现，最后总结。');
+    },
+  } as unknown as AgentModels['act'];
   const routeModel = {
     invoke: async () => new AIMessage('final summary'),
-    withStructuredOutput: () => ({
-      invoke: async (messages: unknown[]) => {
-        structuredCallCount += 1;
-        const inputText = String((messages.at(-1) as { content?: unknown })?.content ?? '');
-        if (structuredCallCount === 1) {
-          entryDecisionInputs.push(inputText);
-          return needsPlanDecision();
-        }
-        if (structuredCallCount === 2) {
-          return taskDoneDecision('已提炼 issue 需求点，还需要检索本地实现。');
-        }
-        return goalDoneDecision();
-      },
-    }),
   } as unknown as AgentModels['act'];
   const capabilityPlannerRunner: CapabilityPlannerRunner = {
     async invoke(input) {
@@ -731,6 +503,7 @@ test('execution boundary routes through capabilityPlanner before the next task',
   const graph = createOrchestratorGraph({
     models: {
       act: routeModel,
+      decision: decisionModel,
       observe: routeModel,
       subagent: new FakeListChatModel({
         responses: [
@@ -760,17 +533,14 @@ test('execution boundary routes through capabilityPlanner before the next task',
     },
   }) as OrchestratorStateType;
 
-  assert.equal(entryDecisionInputs.length, 1);
+  assert.equal(goalCreationInputs.length, 1);
   assert.equal(plannerInputs.length, 3);
-  assert.doesNotMatch(entryDecisionInputs[0], /plan_draft|task_plan_draft/);
+  assert.doesNotMatch(goalCreationInputs[0], /plan_draft|task_plan_draft/);
   const entryPlannerInput = plannerInputs[0];
   const boundaryPlannerInput = plannerInputs[1];
   assert.equal(entryPlannerInput?.mode, 'entry');
   assert.equal(boundaryPlannerInput?.mode, 'boundary');
-  assert.deepEqual(entryPlannerInput?.userGoal, {
-    objective: '完成当前需要工具执行的用户请求。',
-    context: null,
-  });
+  assert.equal(entryPlannerInput?.userGoal, '看 issue #269，再查本地实现，最后总结。');
   assert.deepEqual(boundaryPlannerInput?.userGoal, entryPlannerInput?.userGoal);
   assert.equal(plannerInputs[1]?.activeDelegation?.task, '读取 issue #269 并提炼需求点。');
   assert.match(plannerInputs[1]?.latestAnnounce?.text ?? '', /issue #269 需求点/);
@@ -786,17 +556,9 @@ test('execution boundary routes through capabilityPlanner before the next task',
 });
 
 test('a completed single-task goal is accepted by the boundary Planner', async () => {
-  let structuredCallCount = 0;
   const plannerInputs: CapabilityPlannerInput[] = [];
   const routeModel = {
     invoke: async () => new AIMessage('final summary'),
-    withStructuredOutput: () => ({
-      invoke: async () => {
-        structuredCallCount += 1;
-        if (structuredCallCount === 1) return needsPlanDecision();
-        return goalDoneDecision();
-      },
-    }),
   } as unknown as AgentModels['act'];
   const capabilityPlannerRunner: CapabilityPlannerRunner = {
     async invoke(input) {
@@ -841,26 +603,20 @@ test('a completed single-task goal is accepted by the boundary Planner', async (
 });
 
 test('Planner boundary returns to capabilityPlanner until the remaining goal is complete', async () => {
-  let structuredCallCount = 0;
   let answerModelInvocations = 0;
-  const entryDecisionInputs: string[] = [];
+  const goalCreationInputs: string[] = [];
   const plannerInputs: CapabilityPlannerInput[] = [];
+  const decisionModel = {
+    invoke: async (messages: BaseMessage[]) => {
+      goalCreationInputs.push(messages.map(readMessageText).join('\n'));
+      return new AIMessage('看 issue #269，再查本地实现。');
+    },
+  } as unknown as AgentModels['act'];
   const routeModel = {
     invoke: async () => {
       answerModelInvocations += 1;
       return new AIMessage('issue #269 的需求与本地实现检查均已完成，并确认了兼容性要求。');
     },
-    withStructuredOutput: () => ({
-      invoke: async (messages: unknown[]) => {
-        structuredCallCount += 1;
-        const inputText = String((messages.at(-1) as { content?: unknown })?.content ?? '');
-        if (structuredCallCount === 1) {
-          entryDecisionInputs.push(inputText);
-          return needsPlanDecision();
-        }
-        throw new Error(`unexpected structured call ${structuredCallCount.toString()}`);
-      },
-    }),
   } as unknown as AgentModels['act'];
   const capabilityPlannerRunner: CapabilityPlannerRunner = {
     async invoke(input) {
@@ -892,6 +648,7 @@ test('Planner boundary returns to capabilityPlanner until the remaining goal is 
   const graph = createOrchestratorGraph({
     models: {
       act: routeModel,
+      decision: decisionModel,
       observe: routeModel,
       subagent: new FakeListChatModel({
         responses: [
@@ -916,8 +673,7 @@ test('Planner boundary returns to capabilityPlanner until the remaining goal is 
     },
   }) as OrchestratorStateType;
 
-  assert.equal(structuredCallCount, 1);
-  assert.equal(entryDecisionInputs.length, 1);
+  assert.equal(goalCreationInputs.length, 1);
   assert.equal(plannerInputs.length, 3);
   assert.deepEqual(plannerInputs.map(({ mode }) => mode), ['entry', 'boundary', 'boundary']);
   assert.deepEqual(plannerInputs[1]?.remainingPlan, [{
@@ -943,75 +699,6 @@ test('Planner boundary returns to capabilityPlanner until the remaining goal is 
   assert.equal(state.taskActiveDelegation, null);
 });
 
-test('entry decision autoRepair rejects the removed direct_task action', async () => {
-  const invokedMessages: unknown[] = [];
-  let invokeCount = 0;
-  let capturedOptions: unknown;
-  const decisionModel = {
-    withStructuredOutput: (_schema: unknown, options: unknown) => {
-      capturedOptions = options;
-      return {
-        invoke: async (messages: unknown[]) => {
-          invokeCount += 1;
-          invokedMessages.push(messages);
-          return invokeCount === 1
-            ? { action: 'direct_task', task: 'legacy task' }
-            : { action: 'answer' };
-        },
-      };
-    },
-  } as unknown as AgentModels['act'];
-  const answerModel = {
-    invoke: async () => new AIMessage('answered'),
-  } as unknown as AgentModels['act'];
-  const unusedActModel = {
-    invoke: async () => {
-      throw new Error('legacy act fallback should not be used');
-    },
-  } as unknown as AgentModels['act'];
-
-  const graph = createOrchestratorGraph({
-    models: {
-      act: unusedActModel,
-      decision: decisionModel,
-      answer: answerModel,
-      observe: decisionModel,
-    },
-    actor: testActor,
-    decisionStructuredOutput: {
-      method: 'jsonMode',
-      autoRepair: true,
-    },
-  });
-  const input = buildOrchestratorRunInput([new HumanMessage('hello')]);
-
-  const state = await graph.invoke(input, {
-    configurable: {
-      thread_id: 'decision-auto-repair',
-      actor: testActor,
-      capabilities: [],
-      tools: [],
-    },
-  });
-
-  assert.equal(invokeCount, 2);
-  assert.equal(invokedMessages[0], invokedMessages[1]);
-  assert.deepEqual(capturedOptions, {
-    name: 'orchestration_decision',
-    method: 'jsonMode',
-  });
-  const jsonModeSystemPrompt = String(
-    ((invokedMessages[0] as Array<{ content?: unknown }>)[0]?.content ?? ''),
-  );
-  assert.match(jsonModeSystemPrompt, /当前 provider 使用 jsonMode/);
-  assert.match(jsonModeSystemPrompt, /JSON Schema/);
-  assert.match(jsonModeSystemPrompt, /"action"/);
-  assert.doesNotMatch(jsonModeSystemPrompt, /"plan_draft"/);
-  // After the retry resolves to answer, the dedicated answer node produces the reply.
-  assert.equal(mainConversationMessages(state.messages).at(-1)?.content, 'answered');
-  assert.equal(state.runNextDelegation, null);
-});
-
 test('Planner return routes bounded facts through the answer node', async () => {
   let answerInvocationText = '';
   const model = {
@@ -1021,9 +708,6 @@ test('Planner return routes bounded facts through the answer node', async () => 
     },
     bindTools: () => ({
       invoke: async () => new AIMessage(''),
-    }),
-    withStructuredOutput: () => ({
-      invoke: async () => needsPlanDecision(),
     }),
   } as unknown as AgentModels['act'];
 
@@ -1067,22 +751,12 @@ test('Planner return routes bounded facts through the answer node', async () => 
 });
 
 test('capability planner reports an empty compiled registry without inventing General', async () => {
-  let structuredCallCount = 0;
   let plannerMode: CapabilityPlannerInput['mode'] | null = null;
   let plannerCapabilityNames: readonly string[] = [];
   const model = {
     invoke: async () => new AIMessage('当前没有可用 Capability。'),
     bindTools: () => ({
       invoke: async () => new AIMessage(''),
-    }),
-    withStructuredOutput: () => ({
-      invoke: async (messages: unknown[]) => {
-        structuredCallCount += 1;
-        if (structuredCallCount === 1) {
-          return needsPlanDecision();
-        }
-        throw new Error('Capability Planner must use the typed runner seam.');
-      },
     }),
   } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
@@ -1125,9 +799,6 @@ test('Capability Planner return is materialized without a second semantic policy
     bindTools: () => ({
       invoke: async () => new AIMessage(''),
     }),
-    withStructuredOutput: () => ({
-      invoke: async () => needsPlanDecision(),
-    }),
   } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
     models: { act: model },
@@ -1156,25 +827,25 @@ test('Capability Planner return is materialized without a second semantic policy
   assert.equal(result.messages.at(-1)?.content, 'done');
 });
 
-test('entry decision schema does not advertise capability actions', async () => {
-  let decisionSystemPrompt = '';
-  let schemaAllowsBrowser = false;
+test('Goal Creation uses plain text without structured output or route tools', async () => {
+  let goalSystemPrompt = '';
+  let structuredCalls = 0;
+  let bindToolCalls = 0;
   const model = {
-    invoke: async () => new AIMessage('done'),
+    invoke: async (messages: BaseMessage[]) => {
+      goalSystemPrompt = String(messages[0]?.content ?? '');
+      return new AIMessage('继续当前请求。');
+    },
     bindTools: () => ({
-      invoke: async () => new AIMessage(''),
+      invoke: async () => {
+        bindToolCalls += 1;
+        return new AIMessage('');
+      },
     }),
-    withStructuredOutput: (schema: unknown) => ({
-      invoke: async (messages: unknown[]) => {
-        schemaAllowsBrowser = Boolean(
-          (schema as { safeParse?: (value: unknown) => { success: boolean } }).safeParse?.({
-            action: 'delegate_capability.browser',
-            task: '打开网页',
-            context_summary: '用户需要浏览器。',
-          }).success,
-        );
-        decisionSystemPrompt = String((messages.at(0) as { content?: unknown })?.content ?? '');
-        return { action: 'answer' };
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        structuredCalls += 1;
+        return {};
       },
     }),
   } as unknown as AgentModels['act'];
@@ -1186,6 +857,11 @@ test('entry decision schema does not advertise capability actions', async () => 
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
     actor: testActor,
+    capabilityPlannerRunner: {
+      async invoke() {
+        return { action: 'answer_directly', tasks: [] };
+      },
+    },
   });
 
   await graph.invoke(buildOrchestratorRunInput([
@@ -1199,17 +875,15 @@ test('entry decision schema does not advertise capability actions', async () => 
     },
   });
 
-  assert.equal(schemaAllowsBrowser, false);
-  assert.doesNotMatch(decisionSystemPrompt, /delegate_capability\.browser/);
+  assert.equal(structuredCalls, 0);
+  assert.equal(bindToolCalls, 0);
+  assert.doesNotMatch(goalSystemPrompt, /delegate_capability\.browser|route_to_planner/);
 });
 
 test('allowedCapabilityNames scopes the immutable Planner workspace', async () => {
   let plannerCapabilityNames: readonly string[] = [];
   const model = {
     invoke: async () => new AIMessage('answered'),
-    withStructuredOutput: () => ({
-      invoke: async () => needsPlanDecision(),
-    }),
   } as unknown as AgentModels['act'];
   const capabilityPlannerRunner: CapabilityPlannerRunner = {
     async invoke(input) {
@@ -1251,9 +925,6 @@ test('allowedCapabilityNames scopes the immutable Planner workspace', async () =
 test('Capability Planner materializer rejects selections outside the workspace', async () => {
   const model = {
     invoke: async () => new AIMessage('answered'),
-    withStructuredOutput: () => ({
-      invoke: async () => needsPlanDecision(),
-    }),
   } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
     models: {
@@ -1293,17 +964,8 @@ test('Capability Planner materializer rejects selections outside the workspace',
 });
 
 test('Capability Planner owns the executable task boundary at entry', async () => {
-  let structuredCallCount = 0;
   const model = {
     invoke: async () => new AIMessage('answered'),
-    withStructuredOutput: () => ({
-      invoke: async () => {
-        structuredCallCount += 1;
-        return structuredCallCount === 1
-          ? needsPlanDecision()
-          : goalDoneDecision();
-      },
-    }),
   } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
     models: {
@@ -1346,25 +1008,25 @@ test('Capability Planner owns the executable task boundary at entry', async () =
   );
 });
 
-test('entry answer bypasses the Capability Planner', async () => {
-  let legacyToolPathCalled = false;
+test('Planner answer_directly reaches Answer without Capability execution', async () => {
+  let plannerCalls = 0;
   const model = {
     invoke: async () => new AIMessage('answered'),
-    bindTools: () => ({
-      invoke: async () => {
-        legacyToolPathCalled = true;
-        // Stage A 只判断是否需要执行；Capability 发现由 Planner 自己完成。
-        return new AIMessage('');
-      },
-    }),
-    withStructuredOutput: () => ({
-      invoke: async () => ({ action: 'answer' }),
-    }),
   } as unknown as AgentModels['act'];
 
   const graph = createOrchestratorGraph({
-    models: { act: model, observe: model },
+    models: {
+      act: model,
+      decision: new FakeListChatModel({ responses: ['回答当前版本问题。'], sleep: 0 }),
+      observe: model,
+    },
     actor: testActor,
+    capabilityPlannerRunner: {
+      async invoke() {
+        plannerCalls += 1;
+        return { action: 'answer_directly', tasks: [] };
+      },
+    },
   });
   const input = buildOrchestratorRunInput([new HumanMessage('做一支讲秋日食材的短视频')]);
 
@@ -1377,7 +1039,7 @@ test('entry answer bypasses the Capability Planner', async () => {
     },
   });
 
-  assert.equal(legacyToolPathCalled, false, 'Stage A removed the LLM tool-call search path');
+  assert.equal(plannerCalls, 1);
 });
 
 test('a completed subagent announce reaches the decision, then Answer summarizes the result', async () => {
@@ -1397,7 +1059,11 @@ test('a completed subagent announce reaches the decision, then Answer summarizes
   } as unknown as AgentModels['act'];
 
   const graph = createOrchestratorGraph({
-    models: { act: model, observe: model },
+    models: {
+      act: model,
+      decision: new FakeListChatModel({ responses: ['直接回答当前请求。'], sleep: 0 }),
+      observe: model,
+    },
     actor: testActor,
     capabilityPlannerRunner: {
       async invoke(input) {
@@ -1440,8 +1106,10 @@ test('a completed subagent announce reaches the decision, then Answer summarizes
     task: '读取文件并运行 lint',
     contextSummary: null,
     transcriptRunId: input.runId,
+    traceId: input.traceId,
     status: 'awaiting_decision',
     resultPreview: currentAnnounceText,
+    userGoal: '读取文件并运行 lint。',
   };
 
   const result = await graph.invoke(input, {
@@ -1477,7 +1145,9 @@ test('answer node still sees compacted older results when the user asks to re-sh
       return new AIMessage('answered');
     },
     bindTools: () => ({ invoke: async () => new AIMessage('') }),
-    withStructuredOutput: () => ({ invoke: async () => ({ action: 'answer' }) }),
+    withStructuredOutput: () => ({
+      invoke: async () => ({ action: 'answer_directly', tasks: [] }),
+    }),
   } as unknown as AgentModels['act'];
 
   const graph = createOrchestratorGraph({
@@ -1557,8 +1227,10 @@ test('delegation goal_done summarizes and preserves the handed-off result', asyn
     task: '搜索并整理 vibecoding 模型排行榜。',
     contextSummary: null,
     transcriptRunId: input.runId,
+    traceId: input.traceId,
     status: 'awaiting_decision',
     resultPreview: announceText,
+    userGoal: '列出目前 Vibe Coding 的模型排行榜。',
   };
 
   const result = await graph.invoke(input, {
@@ -1639,8 +1311,10 @@ test('user_input_required returns control without claiming delegation completion
     task,
     contextSummary: null,
     transcriptRunId: input.runId,
+    traceId: input.traceId,
     status: 'awaiting_decision',
     resultPreview: announceText,
+    userGoal: '根据用户选择发送已经完成的报告。',
   };
   input.sessionCapabilityArtifacts = [{
     id: 'artifact-awaiting-user-choice',
@@ -1713,8 +1387,10 @@ test('capability errors retain the active delegation and lane without a handoff'
     task: '继续处理会失败的 delegated task',
     contextSummary: null,
     transcriptRunId: 'run-capability-error',
+    traceId: 'trace-capability-error',
     status: 'pending',
     resultPreview: null,
+    userGoal: '继续处理当前 delegated task，并保留失败状态。',
   };
   const messages = interruptedLaneMessages({
     delegationId: activeDelegation.id,
@@ -1793,25 +1469,27 @@ test('capability errors retain the active delegation and lane without a handoff'
   );
 });
 
-test('answer decision emits no reply itself and routes to the dedicated answer node', async () => {
+test('Planner answer_directly carries no reply text and routes to the dedicated Answer node', async () => {
   let answerCalled = false;
   const model = {
     invoke: async () => {
       answerCalled = true;
       return new AIMessage('final reply from answer node');
     },
-    bindTools: () => ({
-      invoke: async () => new AIMessage(''),
-    }),
-    withStructuredOutput: () => ({
-      // Decision returns only the action; no answer text is carried here.
-      invoke: async () => ({ action: 'answer' }),
-    }),
   } as unknown as AgentModels['act'];
 
   const graph = createOrchestratorGraph({
-    models: { act: model, observe: model },
+    models: {
+      act: model,
+      decision: new FakeListChatModel({ responses: ['向用户问好。'], sleep: 0 }),
+      observe: model,
+    },
     actor: testActor,
+    capabilityPlannerRunner: {
+      async invoke() {
+        return { action: 'answer_directly', tasks: [] };
+      },
+    },
   });
   const input = buildOrchestratorRunInput([new HumanMessage('你好')]);
   const state = await graph.invoke(input, {
@@ -1823,7 +1501,7 @@ test('answer decision emits no reply itself and routes to the dedicated answer n
     },
   });
 
-  assert.equal(answerCalled, true, 'an answer decision must route to the answer node');
+  assert.equal(answerCalled, true, 'answer_directly must route to the Answer node');
   const finalMessage = mainConversationMessages(state.messages).at(-1);
   assert.equal(finalMessage?.content, 'final reply from answer node');
   assert.match(readMessageCreatedAtUtc(finalMessage!) ?? '', /^\d{4}-\d{2}-\d{2}T.*Z$/);
@@ -1839,7 +1517,9 @@ test('answer filters internal briefings by lane without parsing message text', a
       return new AIMessage('正常回复');
     },
     bindTools: () => ({ invoke: async () => new AIMessage('') }),
-    withStructuredOutput: () => ({ invoke: async () => ({ action: 'answer' }) }),
+    withStructuredOutput: () => ({
+      invoke: async () => ({ action: 'answer_directly', tasks: [] }),
+    }),
   } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
     models: { act: model, observe: model },
@@ -1877,10 +1557,16 @@ test('answer returns model output unchanged without classifying its text shape',
       return new AIMessage(modelOutput);
     },
     bindTools: () => ({ invoke: async () => new AIMessage('') }),
-    withStructuredOutput: () => ({ invoke: async () => ({ action: 'answer' }) }),
+    withStructuredOutput: () => ({
+      invoke: async () => ({ action: 'answer_directly', tasks: [] }),
+    }),
   } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
-    models: { act: model, observe: model },
+    models: {
+      act: model,
+      decision: new FakeListChatModel({ responses: ['回答当前版本问题。'], sleep: 0 }),
+      observe: model,
+    },
     actor: testActor,
   });
 
@@ -1903,10 +1589,16 @@ test('answer does not special-case briefing-shaped output', async () => {
       return new AIMessage(modelOutput);
     },
     bindTools: () => ({ invoke: async () => new AIMessage('') }),
-    withStructuredOutput: () => ({ invoke: async () => ({ action: 'answer' }) }),
+    withStructuredOutput: () => ({
+      invoke: async () => ({ action: 'answer_directly', tasks: [] }),
+    }),
   } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
-    models: { act: model, observe: model },
+    models: {
+      act: model,
+      decision: new FakeListChatModel({ responses: ['直接回答当前请求。'], sleep: 0 }),
+      observe: model,
+    },
     actor: testActor,
   });
 
@@ -1999,8 +1691,10 @@ test('limit-reached progress announce lets model choose the same capability dele
     task: '调查仓库 capability 注册链路。',
     contextSummary: null,
     transcriptRunId: input.runId,
+    traceId: input.traceId,
     status: 'awaiting_decision',
     resultPreview: '(no matches)',
+    userGoal: '先调查仓库，再修复注册链路。',
   };
 
   await graph.invoke(input, {
@@ -2104,12 +1798,9 @@ test('capability receives tools only from Toolkits authorized by fixed uses', as
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return needsPlanDecision();
-        }
-        if (routeCallCount === 2) {
           return scriptedPlannerTask('inspect repository');
         }
-        if (routeCallCount === 3) {
+        if (routeCallCount === 2) {
           return scriptedPlannerCapability('inspect_repo');
         }
         return goalDoneDecision();
@@ -2208,9 +1899,8 @@ test('artifact discovery tools reach a selected capability only when declared in
     withStructuredOutput: () => ({
       invoke: async () => {
         decisionCallCount += 1;
-        if (decisionCallCount === 1) return needsPlanDecision();
-        if (decisionCallCount === 2) return scriptedPlannerTask('inspect browser state');
-        if (decisionCallCount === 3) return scriptedPlannerCapability('browser_like');
+        if (decisionCallCount === 1) return scriptedPlannerTask('inspect browser state');
+        if (decisionCallCount === 2) return scriptedPlannerCapability('browser_like');
         return goalDoneDecision();
       },
     }),
@@ -2276,12 +1966,9 @@ test('general Capability composes its declared Toolkits', async () => {
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return needsPlanDecision();
-        }
-        if (routeCallCount === 2) {
           return scriptedPlannerTask('inspect workspace and prior artifacts');
         }
-        if (routeCallCount === 3) {
+        if (routeCallCount === 2) {
           return scriptedPlannerCapability('general');
         }
         return goalDoneDecision();
@@ -2357,12 +2044,9 @@ test('toolkit registration does not rely on lane authorization flags', async () 
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return needsPlanDecision();
-        }
-        if (routeCallCount === 2) {
           return scriptedPlannerTask('inspect with tools');
         }
-        if (routeCallCount === 3) {
+        if (routeCallCount === 2) {
           return scriptedPlannerCapability('general');
         }
         return goalDoneDecision();
@@ -2472,12 +2156,9 @@ test('capability finalize artifact refs are merged into state', async () => {
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return needsPlanDecision();
-        }
-        if (routeCallCount === 2) {
           return scriptedPlannerTask('inspect issue context');
         }
-        if (routeCallCount === 3) {
+        if (routeCallCount === 2) {
           return scriptedPlannerCapability('explore');
         }
         return goalDoneDecision();
@@ -2562,12 +2243,9 @@ test('capability finalize stores only artifact refs in state', async () => {
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return needsPlanDecision();
-        }
-        if (routeCallCount === 2) {
           return scriptedPlannerTask('create post');
         }
-        if (routeCallCount === 3) {
+        if (routeCallCount === 2) {
           return scriptedPlannerCapability('daily_post');
         }
         return goalDoneDecision();
@@ -3409,10 +3087,9 @@ test('exact auto authorization survives graph rebuild but expires on registry re
     withStructuredOutput: () => ({
       invoke: async () => {
         routeCallCount += 1;
-        const step = (routeCallCount - 1) % 4;
-        if (step === 0) return needsPlanDecision();
-        if (step === 1) return scriptedPlannerTask('inspect repository');
-        if (step === 2) return scriptedPlannerCapability('general');
+        const step = (routeCallCount - 1) % 3;
+        if (step === 0) return scriptedPlannerTask('inspect repository');
+        if (step === 1) return scriptedPlannerCapability('general');
         return goalDoneDecision();
       },
     }),
@@ -4051,12 +3728,9 @@ test('toolkit review policy records authorization through orchestrator runtime t
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return needsPlanDecision();
-        }
-        if (routeCallCount === 2) {
           return scriptedPlannerTask('run shell');
         }
-        if (routeCallCount === 3) {
+        if (routeCallCount === 2) {
           return scriptedPlannerCapability('general');
         }
         return goalDoneDecision();
@@ -4209,12 +3883,9 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return needsPlanDecision();
-        }
-        if (routeCallCount === 2) {
           return scriptedPlannerTask('run shell');
         }
-        if (routeCallCount === 3) {
+        if (routeCallCount === 2) {
           return scriptedPlannerCapability('general');
         }
         return goalDoneDecision();
@@ -4358,12 +4029,9 @@ test('toolkit review rejection rolls back the full action and retains the delega
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return needsPlanDecision();
-        }
-        if (routeCallCount === 2) {
           return scriptedPlannerTask('run shell');
         }
-        if (routeCallCount === 3) {
+        if (routeCallCount === 2) {
           return scriptedPlannerCapability('general');
         }
         return goalDoneDecision();
@@ -4462,7 +4130,7 @@ test('toolkit review rejection rolls back the full action and retains the delega
   assert.equal(runCount, 0);
   assert.equal(reviewCount, 4);
   assert.equal(autoReviewCount, 1, 'pending review resume must reuse its checkpointed auto-review');
-  assert.equal(routeCallCount, 3);
+  assert.equal(routeCallCount, 2);
   assert.equal(recorder.subagentInputs.length, 1);
   const handoffCopy = mainConversationMessages(finalState.messages)
     .find((message) => Boolean(getMessageHandoffSource(message)));
@@ -4557,12 +4225,9 @@ test('toolkit review run interruption retains the delegation without another mod
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return needsPlanDecision();
-        }
-        if (routeCallCount === 2) {
           return scriptedPlannerTask('run shell');
         }
-        if (routeCallCount === 3) {
+        if (routeCallCount === 2) {
           return scriptedPlannerCapability('general');
         }
         return goalDoneDecision();
@@ -4635,7 +4300,7 @@ test('toolkit review run interruption retains the delegation without another mod
   assert.equal(finalState.__interrupt__, undefined);
   assert.equal(runCount, 0);
   assert.equal(reviewCount, 2);
-  assert.equal(routeCallCount, 3);
+  assert.equal(routeCallCount, 2);
   assert.equal(recorder.subagentInputs.length, 1);
   assert.equal(finalizeCallCount, 0);
   assert.equal(finalState.runNextDelegation, null);
@@ -4677,7 +4342,7 @@ test('toolkit review run interruption retains the delegation without another mod
     taskActiveDelegation: TaskActiveDelegation | null;
   };
 
-  assert.equal(routeCallCount, 4);
+  assert.equal(routeCallCount, 3);
   assert.equal(recorder.subagentInputs.length, 2);
   assert.equal(finalizeCallCount, 1);
   const continuedSubagentInput = recorder.subagentInputs.at(-1) ?? [];
@@ -4731,12 +4396,9 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return needsPlanDecision();
-        }
-        if (routeCallCount === 2) {
           return scriptedPlannerTask('run shell twice');
         }
-        if (routeCallCount === 3) {
+        if (routeCallCount === 2) {
           return scriptedPlannerCapability('general');
         }
         return goalDoneDecision();
@@ -5160,8 +4822,10 @@ test('terminal Planner action keeps active delegation when handoff cannot be bui
     task: '当前 explore 任务',
     contextSummary: '已有任务仍待判断。',
     transcriptRunId: 'run-active',
+    traceId: 'trace-active',
     status: 'awaiting_decision',
     resultPreview: null,
+    userGoal: '继续判断当前 explore 任务。',
   };
   const input = {
     ...buildOrchestratorRunInput([
@@ -5240,8 +4904,10 @@ test('Planner continue_current action can re-enter main and finalize handoff', a
     task: '批量梳理仓库问题',
     contextSummary: '已完成部分。',
     transcriptRunId: 'run-continue',
+    traceId: 'trace-continue',
     status: 'awaiting_decision',
     resultPreview: '已完成第一批抓取，剩余待查。',
+    userGoal: '继续批量梳理仓库问题。',
   };
   const inputBase = buildOrchestratorRunInput(
     [new HumanMessage('继续处理仓库')],
@@ -5331,8 +4997,10 @@ test('Planner continuation path rechecks run iteration guard before next decisio
     task: '执行长流程任务',
     contextSummary: '持续进行。',
     transcriptRunId: 'run-continue-limit',
+    traceId: 'trace-continue-limit',
     status: 'awaiting_decision',
     resultPreview: '进度已完成前段。',
+    userGoal: '继续执行长流程任务。',
   };
   const inputBase = buildOrchestratorRunInput(
     [new HumanMessage('继续执行任务')],
@@ -5419,8 +5087,10 @@ test('Planner boundary does not append duplicate handoff copies for unchanged an
     task: '处理大型清单',
     contextSummary: '尚未完成。',
     transcriptRunId: 'run-dup-copy',
+    traceId: 'trace-dup-copy',
     status: 'awaiting_decision',
     resultPreview: '进度更新：已完成一部分，继续保留。',
+    userGoal: '继续处理大型清单。',
   };
   const inputBase = buildOrchestratorRunInput(
     [new HumanMessage('继续清单处理')],
@@ -5715,8 +5385,10 @@ test('limit-reached subagent announce reaches the Planner boundary input', async
     task: '继续探查 repo',
     contextSummary: null,
     transcriptRunId: baseInput.runId,
+    traceId: baseInput.traceId,
     status: 'awaiting_decision',
     resultPreview: String(progress.content),
+    userGoal: '继续探查 repo。',
   };
 
   await graph.invoke({
@@ -5776,8 +5448,10 @@ test('Planner boundary does not handoff a limit_reached announce', async () => {
     task: '继续探查 repo',
     contextSummary: null,
     transcriptRunId: baseInput.runId,
+    traceId: baseInput.traceId,
     status: 'awaiting_decision',
     resultPreview: '上一轮还没结束。',
+    userGoal: '继续探查 repo。',
   };
   const input = {
     ...baseInput,
@@ -5866,8 +5540,10 @@ test('Planner boundary uses a unified run-iteration guard before invoking decisi
     task: '持续执行大规模迁移',
     contextSummary: '最近卡住',
     transcriptRunId: baseInput.runId,
+    traceId: baseInput.traceId,
     status: 'awaiting_decision',
     resultPreview: '处理到一半。',
+    userGoal: '完成大规模迁移。',
   };
   const partialAnnounce = new AIMessage('继续迁移，已完成 50%。');
   setPinpetMeta(partialAnnounce, {
@@ -6261,12 +5937,10 @@ test('fresh-turn active delegation transitions are explicit for pending and awai
       task: `旧的 ${status} 任务`,
       contextSummary: '旧任务上下文。',
       transcriptRunId: `old-run-${status}`,
+      traceId: `old-trace-${status}`,
       status,
       resultPreview: status === 'awaiting_decision' ? '旧进度。' : null,
-      userGoal: {
-        objective: '完成旧的仓库检查。',
-        context: '保留原任务目标。',
-      },
+      userGoal: '完成旧的仓库检查。\n\n保留原任务目标。',
     };
     const oldLaneMessages = interruptedLaneMessages({
       delegationId: activeDelegation.id,
@@ -6333,6 +6007,33 @@ test('fresh-turn active delegation transitions are explicit for pending and awai
   }
 });
 
+test('resume rejects a delegation without the current trace identity', () => {
+  const legacyDelegation = {
+    id: 'legacy-without-trace',
+    lane: 'capability:general',
+    task: '继续旧任务',
+    contextSummary: null,
+    transcriptRunId: 'legacy-transcript-run',
+    status: 'pending',
+    resultPreview: null,
+    userGoal: '继续旧任务。',
+  } as unknown as TaskActiveDelegation;
+  const state = {
+    ...buildOrchestratorRunInput(
+      [new HumanMessage('继续')],
+      { activeDelegationTransition: 'resume_active' },
+    ),
+    taskActiveDelegation: legacyDelegation,
+  } as OrchestratorStateType;
+
+  assert.deepEqual(applyActiveDelegationTransition(state), {
+    runNextDelegation: null,
+    runCapabilityPlan: [],
+    runLatestDelegationOutcome: null,
+    runRuntimeFailure: 'checkpoint_incompatible',
+  });
+});
+
 test('fresh delegated request supersedes checkpointed work without deleting its lane', async () => {
   const oldDelegation: TaskActiveDelegation = {
     id: 'old-awaiting-delegation',
@@ -6340,8 +6041,10 @@ test('fresh delegated request supersedes checkpointed work without deleting its 
     task: '旧任务：检查历史 review 状态',
     contextSummary: '这段上下文不得进入新任务。',
     transcriptRunId: 'old-awaiting-run',
+    traceId: 'old-awaiting-trace',
     status: 'awaiting_decision',
     resultPreview: '旧任务执行了一部分。',
+    userGoal: '检查历史 review 状态。',
   };
   const oldMessages = interruptedLaneMessages({
     delegationId: oldDelegation.id,
@@ -6356,12 +6059,9 @@ test('fresh delegated request supersedes checkpointed work without deleting its 
       invoke: async () => {
         structuredCallCount += 1;
         if (structuredCallCount === 1) {
-          return needsPlanDecision();
-        }
-        if (structuredCallCount === 2) {
           return scriptedPlannerTask('执行全新的请求。');
         }
-        if (structuredCallCount === 3) {
+        if (structuredCallCount === 2) {
           return scriptedPlannerCapability('general');
         }
         return goalDoneDecision();
@@ -6412,7 +6112,7 @@ test('fresh delegated request supersedes checkpointed work without deleting its 
     config,
   ) as OrchestratorStateType;
 
-  assert.equal(structuredCallCount, 4);
+  assert.equal(structuredCallCount, 3);
   const observedFreshDelegation = executedDelegation as {
     delegationId: string;
     runId: string;
@@ -6444,12 +6144,10 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
     task: '继续原来的仓库检查',
     contextSummary: '已经完成第一步。',
     transcriptRunId: 'resume-pending-run',
+    traceId: 'resume-pending-trace',
     status: 'awaiting_decision',
     resultPreview: '第一步完成后，需要用户确认检查方向。',
-    userGoal: {
-      objective: '完成原来的仓库检查并报告结果。',
-      context: '用户要求重点检查最新修改。',
-    },
+    userGoal: '完成原来的仓库检查并报告结果。\n\n用户要求重点检查最新修改。',
   };
   const oldMessages = interruptedLaneMessages({
     delegationId: activeDelegation.id,
@@ -6543,8 +6241,8 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
   });
   assert.deepEqual(state.runUserGoal, activeDelegation.userGoal);
   assert.notEqual(state.runId, activeDelegation.transcriptRunId);
-  assert.equal(state.traceId, activeDelegation.transcriptRunId);
-  assert.equal(plannerInputs[0]?.traceId, activeDelegation.transcriptRunId);
+  assert.equal(state.traceId, activeDelegation.traceId);
+  assert.equal(plannerInputs[0]?.traceId, activeDelegation.traceId);
   assert.equal(plannerInputs[0]?.activeDelegation?.delegationId, activeDelegation.id);
   assert.match(plannerInputs[0]?.latestUserMessage ?? '', /优先检查最新修改/);
   assert.match(plannerInputs[0]?.latestAnnounce?.text ?? '', /需要用户确认检查方向/);
@@ -6568,16 +6266,21 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
   );
 });
 
-test('legacy resumed delegation without a Planner checkpoint fails closed through Answer', async () => {
-  const activeDelegation: TaskActiveDelegation = {
+test('legacy object UserGoal checkpoint returns a fixed incompatibility reply without models', async () => {
+  const activeDelegation = {
     id: 'legacy-resume-delegation',
     lane: 'capability:general',
     task: '完成旧 checkpoint 中的仓库检查',
     contextSummary: '旧 checkpoint 没有 runUserGoal。',
     transcriptRunId: 'legacy-resume-run',
+    traceId: 'legacy-resume-trace',
     status: 'awaiting_decision',
     resultPreview: '仓库检查已经完成。',
-  };
+    userGoal: {
+      objective: '完成旧 checkpoint 中的仓库检查。',
+      context: '旧版结构化目标。',
+    },
+  } as unknown as TaskActiveDelegation;
   const priorAnnounce = new AIMessage(activeDelegation.resultPreview ?? '');
   setPinpetMeta(priorAnnounce, {
     lane: activeDelegation.lane,
@@ -6587,11 +6290,11 @@ test('legacy resumed delegation without a Planner checkpoint fails closed throug
     delegationId: activeDelegation.id,
     task: activeDelegation.task,
   });
-  const answerInputs: BaseMessage[][] = [];
+  let modelInvocations = 0;
   const actModel = {
-    invoke: async (messages: BaseMessage[]) => {
-      answerInputs.push(messages);
-      return new AIMessage('当前任务的规划状态无法恢复，请重新发起或重述任务。');
+    invoke: async () => {
+      modelInvocations += 1;
+      throw new Error('incompatible checkpoint must not invoke a model');
     },
     bindTools: () => ({
       invoke: async () => {
@@ -6637,25 +6340,15 @@ test('legacy resumed delegation without a Planner checkpoint fails closed throug
     config,
   ) as OrchestratorStateType;
 
-  assert.equal(state.taskActiveDelegation?.id, activeDelegation.id);
+  assert.equal(state.taskActiveDelegation, null);
   assert.equal(state.runLatestDelegationOutcome, null);
-  assert.equal(state.runPlannerFailure, null);
-  assert.deepEqual(state.runUserGoal, {
-    objective: '继续完成剩余工作',
-    context: null,
-  });
+  assert.equal(state.runRuntimeFailure, null);
+  assert.equal(state.runUserGoal, null);
   assert.equal(
     String(state.messages.at(-1)?.content ?? ''),
-    '当前任务的规划状态无法恢复，请重新发起或重述任务。',
+    '这个任务由旧版本创建，当前版本无法继续。请重新发起或重述任务。',
   );
-  assert.match(
-    answerInputs.at(-1)?.map((message) => String(message.content)).join('\n') ?? '',
-    /<reply_mode>blocked<\/reply_mode>/,
-  );
-  assert.match(
-    answerInputs.at(-1)?.map((message) => String(message.content)).join('\n') ?? '',
-    /<blocked_reason>planner_checkpoint_missing<\/blocked_reason>/,
-  );
+  assert.equal(modelInvocations, 0);
 });
 
 test('delegation briefing is lane-scoped while concise plans remain in main', async () => {
@@ -6667,20 +6360,17 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
       invoke: async () => {
         structuredCallCount += 1;
         if (structuredCallCount === 1) {
-          return needsPlanDecision();
-        }
-        if (structuredCallCount === 2) {
           return scriptedPlannerTask(
             '关闭 GitHub Issue #272。',
             [{ capability: 'ops', task: '删除 packages/goat 目录。' }],
           );
         }
-        if (structuredCallCount === 3) return scriptedPlannerCapability('ops');
-        if (structuredCallCount === 4) return taskDoneDecision('issue 已关闭，还需删除目录。');
-        if (structuredCallCount === 5) {
+        if (structuredCallCount === 2) return scriptedPlannerCapability('ops');
+        if (structuredCallCount === 3) return taskDoneDecision('issue 已关闭，还需删除目录。');
+        if (structuredCallCount === 4) {
           return scriptedPlannerTask('删除 packages/goat 目录。');
         }
-        if (structuredCallCount === 6) return scriptedPlannerCapability('ops');
+        if (structuredCallCount === 5) return scriptedPlannerCapability('ops');
         return goalDoneDecision();
       },
     }),
@@ -6779,13 +6469,10 @@ test('continue_current appends a continuation briefing carrying the gap note', a
       invoke: async () => {
         structuredCallCount += 1;
         if (structuredCallCount === 1) {
-          return needsPlanDecision();
-        }
-        if (structuredCallCount === 2) {
           return scriptedPlannerTask('关闭 GitHub Issue #272。');
         }
-        if (structuredCallCount === 3) return scriptedPlannerCapability('ops');
-        if (structuredCallCount === 4) return continueDecision('未验证 issue 状态，请确认已关闭。');
+        if (structuredCallCount === 2) return scriptedPlannerCapability('ops');
+        if (structuredCallCount === 3) return continueDecision('未验证 issue 状态，请确认已关闭。');
         return goalDoneDecision();
       },
     }),

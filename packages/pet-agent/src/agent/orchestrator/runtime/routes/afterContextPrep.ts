@@ -14,5 +14,5 @@ export function afterContextPrep(state: OrchestratorStateType) {
   ) {
     return 'capability';
   }
-  return 'entryDecision';
+  return 'goalCreation';
 }

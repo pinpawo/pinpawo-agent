@@ -1,6 +1,5 @@
 import type { CapabilityPlanningExpected } from './datasets/capability-planning-basics.ts';
 import type { CapabilityPlanningInput } from './datasets/capability-planning-basics.ts';
-import type { EntryDecisionExpected } from './datasets/entry-decision-basics.ts';
 
 export type DecisionContractScore = {
   key: string;
@@ -23,20 +22,6 @@ function exact(
     score: actual === expected ? 1 : 0,
     comment: `expected=${String(expected)}, actual=${String(actual)}`,
   };
-}
-
-export function scoreEntryDecision(
-  output: { mode: string },
-  expected: EntryDecisionExpected,
-): DecisionContractScore[] {
-  return [
-    exact(
-      'entry_mode_correct',
-      `Select ${expected.mode} for the current user goal and available results.`,
-      output.mode,
-      expected.mode,
-    ),
-  ];
 }
 
 export function scoreCapabilityPlanning(

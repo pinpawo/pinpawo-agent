@@ -53,13 +53,13 @@ function report(
     },
     pricing: null,
     selection: {
-      targets: ['entry'],
+      targets: ['goal_creation'],
       caseIds: ['case'],
       datasets: ['dataset'],
       repeats: 1,
     },
     results: [{
-      target: 'entry',
+      target: 'goal_creation',
       caseId: 'case',
       contract: 'entry',
       objective: 'choose',

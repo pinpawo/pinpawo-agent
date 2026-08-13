@@ -14,8 +14,8 @@ export function decisionModeFromRunNextDelegation(pending: RunNextDelegation | n
 export function createTaskActiveDelegation(
   delegation: RunNextDelegation,
   runId: string,
-  userGoal: UserGoal | null,
-  traceId?: string,
+  userGoal: UserGoal,
+  traceId: string,
 ): TaskActiveDelegation {
   return {
     id: delegation.id,
@@ -23,7 +23,7 @@ export function createTaskActiveDelegation(
     task: delegation.task,
     contextSummary: delegation.contextSummary,
     transcriptRunId: runId,
-    ...(traceId ? { traceId } : {}),
+    traceId,
     status: 'pending',
     resultPreview: null,
     userGoal,

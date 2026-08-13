@@ -1,24 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { AIMessage } from '@langchain/core/messages';
 import { getDecisionEvalScenarios } from './decision-eval-scenarios.ts';
 import { summarizeDecisionStability } from './decision-stability.ts';
 import { measureDecisionPrompt } from './prompt-preview.ts';
 
-function structuredModel(output: Record<string, unknown>) {
+function textModel(output: string) {
   return {
-    withStructuredOutput: () => ({ invoke: async () => output }),
+    invoke: async () => new AIMessage(output),
   } as never;
 }
 
 test('decision eval scenarios cover every canonical prompt distribution', () => {
   assert.deepEqual({
-    entry: getDecisionEvalScenarios('entry').length,
-  }, { entry: 17 });
+    goalCreation: getDecisionEvalScenarios('goal_creation').length,
+  }, { goalCreation: 4 });
 });
 
 test('decision eval scenarios render complete production messages', () => {
   const inputRoots = {
-    entry: 'entry_decision_context',
+    goal_creation: 'goal_creation_context',
   } as const;
   for (const scenario of getDecisionEvalScenarios()) {
     const prompt = scenario.render();
@@ -40,19 +41,19 @@ test('decision eval scenarios render complete production messages', () => {
 test('decision stability summary separates schema and invocation failures', () => {
   const summary = summarizeDecisionStability([
     {
-      target: 'entry', caseId: 'case-1', contract: 'entry.result-availability', objective: 'Complete the goal.', repeat: 1, goalAchieved: true, durationMs: 10,
+      target: 'goal_creation', caseId: 'case-1', contract: 'goal_creation.text', objective: 'Complete the goal.', repeat: 1, goalAchieved: true, durationMs: 10,
       verdict: 'goal_done', outputShape: 'gapNote=0', outputFingerprint: 'a', criteria: [], failedCriteria: [], diagnostics: {}, failureKind: null, error: null,
       usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 }, estimatedCostUsd: 0.001,
       evaluationUsage: null, evaluationEstimatedCostUsd: null,
     },
     {
-      target: 'entry', caseId: 'case-1', contract: 'entry.result-availability', objective: 'Complete the goal.', repeat: 2, goalAchieved: false, durationMs: 20,
+      target: 'goal_creation', caseId: 'case-1', contract: 'goal_creation.text', objective: 'Complete the goal.', repeat: 2, goalAchieved: false, durationMs: 20,
       verdict: 'task_done', outputShape: 'gapNote=1', outputFingerprint: 'b', criteria: [], failedCriteria: ['outcome_correct'], diagnostics: {}, failureKind: null, error: null,
       usage: { inputTokens: 12, outputTokens: 3, totalTokens: 15 }, estimatedCostUsd: 0.002,
       evaluationUsage: null, evaluationEstimatedCostUsd: null,
     },
     {
-      target: 'entry', caseId: 'case-1', contract: 'entry.result-availability', objective: 'Complete the goal.', repeat: 3, goalAchieved: null, durationMs: 30,
+      target: 'goal_creation', caseId: 'case-1', contract: 'goal_creation.text', objective: 'Complete the goal.', repeat: 3, goalAchieved: null, durationMs: 30,
       verdict: null, outputShape: null, outputFingerprint: null, criteria: [], failedCriteria: [], diagnostics: {}, failureKind: 'schema', error: 'invalid output',
       usage: null, estimatedCostUsd: null,
       evaluationUsage: null, evaluationEstimatedCostUsd: null,
@@ -73,15 +74,15 @@ test('decision stability summary separates schema and invocation failures', () =
 test('decision eval scenarios invoke, parse, normalize, and score each target', async () => {
   const cases = [
     {
-      target: 'entry' as const,
-      name: 'answer-from-existing-context',
-      output: { action: 'answer', task: null, context_summary: null },
+      target: 'goal_creation' as const,
+      name: 'preserves-path-and-scope',
+      output: '只检查 /tmp/project 的 README，不要修改文件。',
     },
   ];
   for (const item of cases) {
     const scenario = getDecisionEvalScenarios(item.target).find(({ caseName }) => caseName === item.name);
     assert.ok(scenario);
-    const result = await scenario.run(structuredModel(item.output));
+    const result = await scenario.run(textModel(item.output));
     assert.ok(result.scores.every(({ score }) => score === 1));
     assert.ok(result.scores.every(({ statement }) => statement.trim()));
     assert.ok(result.scores.every(({ evaluator }) => evaluator === 'deterministic'));

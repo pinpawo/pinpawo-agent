@@ -252,7 +252,6 @@ test('buildDecisionStructuredOutput selects structured output strategy by provid
       model,
     }), {
       method: 'functionCalling',
-      entryDecisionProtocol: 'routeFunctions',
       autoRepair: { maxRetries: 1 },
     });
   }
@@ -376,7 +375,6 @@ test('buildLocalChatAgentInput passes global review policy mode to graph input',
     safetyLevel: 'relaxed',
     structuredOutput: {
       method: 'functionCalling',
-      entryDecisionProtocol: 'routeFunctions',
       autoRepair: { maxRetries: 2 },
     },
   });

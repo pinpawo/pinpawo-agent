@@ -7,6 +7,7 @@ import { readLatestHumanRequest } from '../messageLanes';
 import type { OrchestratorStateType } from '../state';
 import type { RunNextDelegation, TaskActiveDelegation } from '../types';
 import { clipForPrompt } from '../utils';
+import { USER_GOAL_MAX_CHARS } from '../capabilityPlanner/runner';
 
 const RESUME_GUIDANCE_MAX_CHARS = 2_000;
 
@@ -50,13 +51,20 @@ export function applyActiveDelegationTransition(
     };
   }
 
+  if (!isResumableDelegation(activeDelegation)) {
+    return {
+      runNextDelegation: null,
+      runCapabilityPlan: [],
+      runLatestDelegationOutcome: null,
+      runRuntimeFailure: 'checkpoint_incompatible',
+    };
+  }
+
   const latestHumanRequest = readLatestHumanRequest(state.messages)?.trim() ?? '';
   const guidance = latestHumanRequest
     ? clipForPrompt(latestHumanRequest, RESUME_GUIDANCE_MAX_CHARS)
     : null;
-  const resumedUserGoal = activeDelegation.userGoal
-    ?? state.runUserGoal
-    ?? (guidance ? { objective: guidance, context: null } : null);
+  const resumedUserGoal = activeDelegation.userGoal;
   const runNextDelegation = buildRunNextDelegation(activeDelegation, guidance);
   const resumedSummaries = resumeRunDelegationSummary(
     state.runDelegationSummaries,
@@ -65,7 +73,7 @@ export function applyActiveDelegationTransition(
 
   if (activeDelegation.status === 'awaiting_decision') {
     return {
-      traceId: activeDelegation.traceId ?? activeDelegation.transcriptRunId,
+      traceId: activeDelegation.traceId,
       runUserGoal: resumedUserGoal,
       runDelegationSummaries: updateRunDelegationSummaryResult(
         resumedSummaries,
@@ -89,7 +97,7 @@ export function applyActiveDelegationTransition(
 
   return {
     messages: materializedDelegation.laneMessages,
-    traceId: activeDelegation.traceId ?? activeDelegation.transcriptRunId,
+    traceId: activeDelegation.traceId,
     runUserGoal: resumedUserGoal,
     runNextDelegation,
     taskActiveDelegation: {
@@ -101,4 +109,14 @@ export function applyActiveDelegationTransition(
     runDelegationSummaries: resumedSummaries,
     runLatestDelegationOutcome: null,
   };
+}
+
+function isResumableDelegation(
+  value: TaskActiveDelegation,
+): value is TaskActiveDelegation & { traceId: string; userGoal: string } {
+  return typeof value.traceId === 'string'
+    && value.traceId.trim().length > 0
+    && typeof value.userGoal === 'string'
+    && value.userGoal.trim().length > 0
+    && value.userGoal.length <= USER_GOAL_MAX_CHARS;
 }

@@ -1,46 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { capabilityPlanningBasicsDataset } from './datasets/capability-planning-basics.ts';
-import { entryDecisionBasicsDataset } from './datasets/entry-decision-basics.ts';
 import {
   scoreCapabilityPlanning,
-  scoreEntryDecision,
 } from './decision-contract-scorers.ts';
 
 function allPass(scores: Array<{ score: number }>) {
   return scores.every((score) => score.score === 1);
 }
-
-test('entry scorer gates only result availability', () => {
-  const testCase = entryDecisionBasicsDataset.cases.find(
-    (item) => item.name === 'current-local-state-needs-observation',
-  );
-  assert.ok(testCase);
-  const scores = scoreEntryDecision({
-    mode: 'needs_plan',
-  }, testCase.expected);
-  assert.deepEqual(scores.map(({ key }) => key), ['entry_mode_correct']);
-  assert.ok(allPass(scores));
-});
-
-test('entryDecision dataset covers the result-availability matrix', () => {
-  const ids = entryDecisionBasicsDataset.cases.map((testCase) => testCase.id);
-  const names = new Set(entryDecisionBasicsDataset.cases.map((testCase) => testCase.name));
-  const modes = new Set(entryDecisionBasicsDataset.cases.map((testCase) => testCase.expected.mode));
-
-  assert.equal(new Set(ids).size, ids.length);
-  assert.deepEqual([...modes].sort(), ['answer', 'needs_plan']);
-  assert.ok(names.has('answer-from-explicit-completion-evidence'));
-  assert.ok(names.has('answer-from-stable-model-knowledge'));
-  assert.ok(names.has('intention-is-not-completion-evidence'));
-  assert.ok(names.has('current-local-state-needs-observation'));
-  assert.ok(names.has('current-remote-state-needs-lookup'));
-  assert.ok(names.has('stale-evidence-needs-refresh'));
-  assert.ok(names.has('clarification-before-execution'));
-  assert.ok(names.has('calculation-needs-execution'));
-  assert.ok(names.has('tool-shaped-history-still-answers'));
-  assert.ok(names.has('tool-shaped-history-needs-new-observation'));
-});
 
 test('planning datasets cover entry and boundary distributions', () => {
   const modes = new Set(capabilityPlanningBasicsDataset.cases.map((testCase) => testCase.input.mode));

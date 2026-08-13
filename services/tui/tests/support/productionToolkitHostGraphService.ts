@@ -209,37 +209,20 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
         total_tokens: 7,
       },
     }),
-    bindTools: () => ({
-      invoke: async () => new AIMessage(''),
-    }),
-    withStructuredOutput: (schema: unknown) => ({
-      invoke: async (messages: BaseMessage[]) => {
-        if (schemaAccepts(schema, {
-          outcome: 'goal_done',
-          gap_note: null,
-        })) {
-          return {
-            outcome: 'goal_done',
-            gap_note: null,
-          };
-        }
-        const readsAttachment = messagesContain(messages, ATTACHMENT_TOOL_INPUT);
-        return {
-          action: 'needs_plan',
-          planner_objective: readsAttachment
-            ? 'Read the selected attachment.'
-            : 'Write the guarded fixture.',
-          planner_context: readsAttachment ? ATTACHMENT_TOOL_INPUT : null,
-        };
-      },
-    }),
+  } as unknown as AgentModels['act'];
+  const goalCreationModel = {
+    invoke: async (messages: BaseMessage[]) => new AIMessage(
+      messagesContain(messages, ATTACHMENT_TOOL_INPUT)
+        ? `Read the selected attachment.\n\n${ATTACHMENT_TOOL_INPUT}`
+        : 'Write the guarded fixture.',
+    ),
   } as unknown as AgentModels['act'];
   const capabilityPlannerRunner: CapabilityPlannerRunner = {
     async invoke(input) {
       if (input.mode === 'boundary') {
         return { action: 'goal_done', tasks: [] };
       }
-      const readsAttachment = input.userGoal.context?.includes(ATTACHMENT_TOOL_INPUT) ?? false;
+      const readsAttachment = input.userGoal.includes(ATTACHMENT_TOOL_INPUT);
       return {
         action: 'execute_plan',
         tasks: [
@@ -263,6 +246,7 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
         ...setup.graphConfig,
         models: {
           act: routeModel,
+          decision: goalCreationModel,
           observe: routeModel,
           subagent: subagentModel,
         },
@@ -339,16 +323,6 @@ function readInputRecord(input: unknown) {
   return input && typeof input === 'object' && !Array.isArray(input)
     ? input as Record<string, unknown>
     : null;
-}
-
-function schemaAccepts(schema: unknown, value: unknown) {
-  if (!schema || typeof schema !== 'object' || !('safeParse' in schema)) {
-    return false;
-  }
-  const safeParse = (schema as {
-    safeParse?: (input: unknown) => { success: boolean };
-  }).safeParse;
-  return typeof safeParse === 'function' && safeParse.call(schema, value).success;
 }
 
 function messageText(message: BaseMessage) {

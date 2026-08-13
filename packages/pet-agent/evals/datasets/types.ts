@@ -6,7 +6,7 @@ export type AgentEvalArea =
   | 'permission_control'
   | 'context_synthesis'
   | 'structured_output'
-  | 'entry_decision'
+  | 'goal_creation'
   | 'planner_boundary'
   | 'capability_planning'
   | 'multi_task_flow';
@@ -46,7 +46,7 @@ export const AGENT_EVAL_AREAS: Record<AgentEvalArea, string> = {
   permission_control: 'Ask for, preserve, and apply user approvals safely.',
   context_synthesis: 'Use completed subagent context to answer instead of doing more work.',
   structured_output: 'Produce schema-compatible model outputs for orchestration internals.',
-  entry_decision: 'Decide whether existing conversation evidence is sufficient to answer or new results require Capability planning.',
+  goal_creation: 'Create the stable text goal that scopes one orchestrator task.',
   planner_boundary: 'Let the private Planner accept execution evidence and choose the next typed action.',
   capability_planning: 'Plan capability execution boundaries and materialize the next task.',
   multi_task_flow: 'Complete goals across isolated task executions and handoffs.',

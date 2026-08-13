@@ -3,6 +3,8 @@
 > 状态：历史设计。Outcome 与旧 Planner return contract 已由 #619 的
 > trace-scoped persistent private Planner 取代；以下正文保留迁移前背景，不再代表当前生产契约。
 > 当前契约见 [`PERSISTENT_PRIVATE_PLANNER_REFACTOR_ISSUE.md`](./PERSISTENT_PRIVATE_PLANNER_REFACTOR_ISSUE.md)。
+> Entry 的后续收缩提案见
+> [`ENTRY_GOAL_CREATION_REFACTOR_DESIGN.md`](./ENTRY_GOAL_CREATION_REFACTOR_DESIGN.md)。
 > 范围：`entryDecision`、`capabilityPlanner`、`outcomeDecision` 与 `answer` 的职责和提示词边界。
 > 共享前缀：[`PET_AGENT_ORCHESTRATOR_DECISION_PROMPT_PREFIX.md`](./PET_AGENT_ORCHESTRATOR_DECISION_PROMPT_PREFIX.md)。
 

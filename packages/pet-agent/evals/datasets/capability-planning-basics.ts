@@ -2,11 +2,8 @@ import { AgentEvalCase, AgentEvalDataset } from './types.ts';
 
 export type CapabilityPlanningInput = {
   mode: 'entry' | 'boundary';
-  /** Entry-normalized goal available to every Planner invocation in the run. */
-  userGoal: {
-    objective: string;
-    context: string | null;
-  };
+  /** Goal Creation text available to every Planner invocation in the run. */
+  userGoal: string;
   messages: Array<{
     role: 'user' | 'assistant';
     content: string;
@@ -44,7 +41,7 @@ const SOURCE_FILE = 'packages/pet-agent/evals/datasets/capability-planning-basic
 
 type CapabilityPlanningTranscriptInput = Omit<CapabilityPlanningInput, 'userGoal'> & {
   /**
-   * Bounded goal that production Entry stores for every Planner invocation.
+   * Bounded goal that production Goal Creation stores for every Planner invocation.
    * The transcript messages are also projected into Planner as the latest ten
    * user and assistant messages; contextual cases may provide a more precise
    * normalized goal explicitly.
@@ -59,11 +56,11 @@ function buildEvalUserGoal(messages: CapabilityPlanningTranscriptInput['messages
   const objective = latestUserRequest?.content.trim()
     || messages.at(-1)?.content.trim()
     || 'Complete the current user request.';
-  return { objective, context: null };
+  return objective;
 }
 
 /**
- * Production stores the Entry-normalized goal in run state, so entry and
+ * Production stores the Goal Creation text in run state, so entry and
  * boundary cases receive the same goal representation.
  */
 function withUserGoal(
@@ -83,7 +80,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     id: `${SUITE}.entry-explore-then-implementation`,
     name: 'entry-explore-then-implementation',
     suite: SUITE,
-    tags: ['capability_planning', 'entry_decision'],
+    tags: ['capability_planning', 'goal_creation'],
     input: {
       mode: 'entry',
       messages: [{
@@ -113,7 +110,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     id: `${SUITE}.entry-focuses-on-latest-goal-despite-unrelated-history`,
     name: 'entry-focuses-on-latest-goal-despite-unrelated-history',
     suite: SUITE,
-    tags: ['capability_planning', 'entry_decision', 'context_synthesis'],
+    tags: ['capability_planning', 'goal_creation', 'context_synthesis'],
     input: {
       mode: 'entry',
       messages: [{
@@ -156,7 +153,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     id: `${SUITE}.entry-keeps-investigation-scope`,
     name: 'entry-keeps-investigation-scope',
     suite: SUITE,
-    tags: ['capability_planning', 'entry_decision'],
+    tags: ['capability_planning', 'goal_creation'],
     input: {
       mode: 'entry',
       messages: [{
@@ -325,10 +322,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     tags: ['capability_planning', 'delegation_control'],
     input: {
       mode: 'entry',
-      userGoal: {
-        objective: '读取当前仓库根目录 package.json 中的 name 和 version，并报告这两个值。',
-        context: null,
-      },
+      userGoal: '读取当前仓库根目录 package.json 中的 name 和 version，并报告这两个值。',
       messages: [{
         role: 'user',
         content: '读取当前仓库根目录 package.json 中的 name 和 version，并报告这两个值。',
@@ -478,7 +472,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     id: `${SUITE}.entry-preserves-result-dependent-followup`,
     name: 'entry-preserves-result-dependent-followup',
     suite: SUITE,
-    tags: ['capability_planning', 'entry_decision'],
+    tags: ['capability_planning', 'goal_creation'],
     input: {
       mode: 'entry',
       messages: [{
@@ -511,10 +505,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     tags: ['capability_planning', 'context_synthesis', 'structured_output'],
     input: {
       mode: 'entry',
-      userGoal: {
-        objective: '重新只读检查本周工作清单中此前尚未确认创建的事项是否已经实际创建，并报告当前状态。',
-        context: '此前仅确认一项事项已创建，其余待创建事项需要再次核验。历史中的 Bash 片段只是对话内容，不能作为本次检查的结果。',
-      },
+      userGoal: '重新只读检查本周工作清单中此前尚未确认创建的事项是否已经实际创建，并报告当前状态。\n\n此前仅确认一项事项已创建，其余待创建事项需要再次核验。历史中的 Bash 片段只是对话内容，不能作为本次检查的结果。',
       messages: [{
         role: 'user',
         content: '检查本周工作清单中标注为“待创建”的事项是否已经实际创建；这次只检查，不要创建或更新任何事项。',
@@ -765,5 +756,5 @@ export const capabilityPlanningBasicsDataset: AgentEvalDataset<CapabilityPlannin
   name: SUITE,
   description: 'Production contracts for capabilityPlanner at entry and task boundaries.',
   cases,
-  metadata: { owner: 'pet-agent', areas: ['capability_planning', 'entry_decision', 'delegation_control'] },
+  metadata: { owner: 'pet-agent', areas: ['capability_planning', 'goal_creation', 'delegation_control'] },
 };

@@ -80,7 +80,7 @@ const actor = {
   species: null,
 };
 
-type DecisionKind = 'entry' | 'planner' | 'unknown';
+type DecisionKind = 'goal_creation' | 'planner' | 'unknown';
 
 type DecisionRecord = {
   kind: DecisionKind;
@@ -150,7 +150,7 @@ export type LifecycleCompositionReport = {
   createdAt: string;
   revision: PromptEvalRevision;
   model: PromptEvalModelMetadata;
-  structuredOutputMethod: StructuredOutputMethod | 'provider-default';
+  structuredOutputMethod: 'not-applicable';
   evaluator: {
     version: typeof EVALUATOR_VERSION;
     model: PromptEvalModelMetadata;
@@ -284,21 +284,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function classifyDecision(output: Record<string, unknown>): DecisionKind {
-  if (typeof output.action === 'string') return 'entry';
-  if (Array.isArray(output.tasks)) return 'planner';
-  return 'unknown';
-}
-
-function createRecordingActModel(model: AgentModels['act']) {
+function createRecordingModels(model: AgentModels['act']) {
   const decisions: DecisionRecord[] = [];
   const answers: AnswerRecord[] = [];
-  const recording = {
+  const decision = {
     invoke: async (input: unknown, config?: RunnableConfig) => {
       const response = await model.invoke(input as never, config);
-      answers.push({ text: readMessageText(response).trim() });
+      decisions.push({
+        kind: 'goal_creation',
+        output: { goal: readMessageText(response).trim() },
+      });
       return response;
     },
+  } as unknown as AgentModels['act'];
+  const act = {
+    invoke: (input: unknown, config?: RunnableConfig) =>
+      model.invoke(input as never, config),
     withStructuredOutput: (schema: unknown, options?: unknown) => {
       const runnable = model.withStructuredOutput(schema as never, options as never);
       return {
@@ -306,7 +307,7 @@ function createRecordingActModel(model: AgentModels['act']) {
           const raw = await runnable.invoke(input as never, config);
           const output = isRecord(raw) ? raw : { value: raw };
           decisions.push({
-            kind: classifyDecision(output),
+            kind: Array.isArray(output.tasks) ? 'planner' : 'unknown',
             output,
           });
           return raw;
@@ -332,18 +333,31 @@ function createRecordingActModel(model: AgentModels['act']) {
               'complete_goal',
               'request_user_input',
               'report_unavailable',
+              'answer_directly',
             ].includes(toolCall.name)) {
               continue;
             }
-            decisions.push({ kind: 'planner', output });
+            decisions.push({
+              kind: 'planner',
+              output: { ...output, action: toolCall.name },
+            });
           }
           return response;
         },
       };
     },
   } as unknown as AgentModels['act'];
+  const answer = {
+    invoke: async (input: unknown, config?: RunnableConfig) => {
+      const response = await model.invoke(input as never, config);
+      answers.push({ text: readMessageText(response).trim() });
+      return response;
+    },
+  } as unknown as AgentModels['act'];
   return {
-    model: recording,
+    act,
+    decision,
+    answer,
     decisions,
     answers,
   };
@@ -445,7 +459,7 @@ function countDecisions(
   turns: LifecycleTurnOutput[],
 ): Record<DecisionKind | 'answer', number> {
   const counts: Record<DecisionKind | 'answer', number> = {
-    entry: 0,
+    goal_creation: 0,
     planner: 0,
     unknown: 0,
     answer: 0,
@@ -462,7 +476,6 @@ async function runCase(params: {
   repeat: number;
   subjectModel: AgentModels['act'];
   judgeModel: AgentModels['act'];
-  structuredOutputMethod?: StructuredOutputMethod;
   judgeStructuredOutputMethod?: StructuredOutputMethod;
   subjectProfileId: string;
   subjectProfileFingerprint: string;
@@ -474,27 +487,25 @@ async function runCase(params: {
     repeat,
     subjectModel,
     judgeModel,
-    structuredOutputMethod,
     judgeStructuredOutputMethod,
   } = params;
   const started = performance.now();
   const subjectUsage = createPromptEvalUsageCollector();
   const evaluatorUsage = createPromptEvalUsageCollector();
-  const recorder = createRecordingActModel(subjectModel);
+  const recorder = createRecordingModels(subjectModel);
   const controlledResults = testCase.input.turns.flatMap(({ executorResults }) => executorResults);
   const executor = createControlledExecutor(testCase.input.turns);
   const checkpoint = new MemorySaver();
   const graph = createOrchestratorGraph({
     models: {
-      act: recorder.model,
-      observe: recorder.model,
+      act: recorder.act,
+      decision: recorder.decision,
+      answer: recorder.answer,
+      observe: recorder.act,
       subagent: executor.model,
     },
     actor,
     checkpoint,
-    decisionStructuredOutput: structuredOutputMethod
-      ? { method: structuredOutputMethod }
-      : undefined,
   });
   const runtime = capabilityRuntime(testCase.input.capabilityProfile);
   const registry = compileAgentRegistry({
@@ -757,13 +768,13 @@ async function main() {
       + 'from the subject model.',
     );
   }
-  const structuredOutputMethod = modelConfig.method ?? 'provider-default';
+  const structuredOutputMethod = 'not-applicable' as const;
   console.log('Orchestrator lifecycle composition eval');
   console.log(`Revision: ${revision.commit}`);
   console.log(`Harness revision: ${revision.harnessCommit}`);
   console.log(`Model: ${modelConfig.label}`);
   console.log(`Judge: ${judgeConfig.label}`);
-  console.log(`Structured output method: ${structuredOutputMethod}`);
+  console.log(`Subject structured output method: ${structuredOutputMethod}`);
   console.log(`Cases: ${selectedCases.length.toString()}`);
   console.log(`Repeats: ${repeats.toString()}`);
 
@@ -775,7 +786,6 @@ async function main() {
         repeat,
         subjectModel: modelConfig.model,
         judgeModel: judgeConfig.model,
-        structuredOutputMethod: modelConfig.method,
         judgeStructuredOutputMethod: judgeConfig.method,
         subjectProfileId: modelConfig.metadata.profileId,
         subjectProfileFingerprint: modelConfig.metadata.fingerprint,

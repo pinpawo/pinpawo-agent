@@ -19,6 +19,9 @@ the original design and reference documents. Maintenance rules live in
   minimum generative contracts, positive judgment cues, and eval-backed changes
 - [Dynamic context governance](wiki/concepts/dynamic-context-governance.md) —
   proposed ownership and placement contract
+- [Message context and provenance](wiki/concepts/message-context-and-provenance.md) —
+  completeness-first flow from canonical main evidence through User Goal,
+  delegation briefing, private lane context, and accepted handoff
 - [Orchestrator decision node ownership](wiki/concepts/decision-node-ownership.md)
 - [Capability Planner task boundaries, structured results, and Capability selection](wiki/decisions/capability-planner-task-boundaries.md)
 - [Delegation completion acknowledgement and terminal close](wiki/decisions/delegation-completion-acknowledgement.md)

@@ -16,15 +16,11 @@ const MAX_RECENT_CAPABILITY_ARTIFACTS = 6;
 
 export function buildRunUserGoalContext(userGoal: UserGoal | null): string {
   if (!userGoal) return '<run_user_goal missing="true" />';
-  const lines = [
+  return [
     '<run_user_goal role="task_boundary" source="orchestrator_state" trust="read_only">',
-    indentXmlBlock(xmlTextBlock('objective', userGoal.objective), 2),
-  ];
-  if (userGoal.context) {
-    lines.push(indentXmlBlock(xmlTextBlock('relevant_context', userGoal.context), 2));
-  }
-  lines.push('</run_user_goal>');
-  return lines.join('\n');
+    indentXmlBlock(xmlTextBlock('goal', userGoal), 2),
+    '</run_user_goal>',
+  ].join('\n');
 }
 
 export function buildCapabilityArtifactContext(artifacts: CapabilityArtifactRef[] | undefined): string {

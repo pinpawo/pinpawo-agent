@@ -51,10 +51,7 @@ test('Answer runtime projects accepted terminal meaning into closed facts', () =
 test('Answer runtime recognizes the run user goal when canonical history has no current request', () => {
   assert.deepEqual(selectAnswerContextFacts({
     state: state({
-      runUserGoal: {
-        objective: '总结已经完成的仓库检查。',
-        context: '只报告当前工作区结果。',
-      },
+      runUserGoal: '总结已经完成的仓库检查。\n\n只报告当前工作区结果。',
     }),
     history: [new AIMessage('仓库检查已经完成。')],
     acceptedHandoffOutcome: 'goal_done',
@@ -126,8 +123,10 @@ test('Answer runtime projects unfinished work as facts rather than prose', () =>
         task: '检查剩余文件',
         contextSummary: null,
         transcriptRunId: 'run-1',
+        traceId: 'trace-1',
         status: 'awaiting_decision',
         resultPreview: null,
+        userGoal: '检查仓库',
       },
     }),
     history: [new HumanMessage('检查仓库')],

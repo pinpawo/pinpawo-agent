@@ -3,4 +3,4 @@
 export * from './prompts/answer';
 export * from './prompts/autoReview';
 export * from './prompts/context';
-export * from './prompts/entryDecision';
+export * from './prompts/goalCreation';

@@ -31,7 +31,15 @@ export class LocalServerStudioHandler<Peer extends object> {
   private readonly outbound: LocalServerStudioOutbound<Peer>;
   private readonly buildStudio: BuildStudio;
   private readonly studios = new Map<string, Promise<BuildStudioResult>>();
-  private readonly eventBridges = new WeakMap<Peer, () => void>();
+  /**
+   * 每个 peer 一座事件桥。`requestId` 存在可变盒子里而**不是闭包捕获** ——
+   * 桥只建一次,若把首次的 requestId 封进闭包,第二次提交产生的事件会
+   * 全部错误归到第一次请求上。
+   */
+  private readonly eventBridges = new WeakMap<Peer, {
+    unsubscribe: () => void;
+    latestRequestId: { current: string };
+  }>();
 
   constructor(options: {
     outbound: LocalServerStudioOutbound<Peer>;
@@ -43,7 +51,7 @@ export class LocalServerStudioHandler<Peer extends object> {
 
   /** 断开时只解绑事件桥;studio 本身常驻,不随连接生灭。 */
   rejectDisconnected(peer: Peer) {
-    this.eventBridges.get(peer)?.();
+    this.eventBridges.get(peer)?.unsubscribe();
     this.eventBridges.delete(peer);
   }
 
@@ -94,14 +102,20 @@ export class LocalServerStudioHandler<Peer extends object> {
     try {
       const { studio } = await this.getStudio(deps);
 
-      if (!this.eventBridges.has(peer)) {
-        this.eventBridges.set(peer, studio.subscribe((event) => {
+      const bridge = this.eventBridges.get(peer);
+      if (bridge) {
+        // 桥已在,只把归属指向本次提交。
+        bridge.latestRequestId.current = requestId;
+      } else {
+        const latestRequestId = { current: requestId };
+        const unsubscribe = studio.subscribe((event) => {
           this.outbound.sendEvent(peer, {
             type: 'studio.progress',
-            requestId,
+            requestId: latestRequestId.current,
             event: { ...event } as unknown as Record<string, unknown>,
           });
-        }));
+        });
+        this.eventBridges.set(peer, { unsubscribe, latestRequestId });
       }
 
       const { threadId } = await studio.submitRequest(userRequest);

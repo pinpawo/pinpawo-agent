@@ -123,6 +123,31 @@ test('plugin events reach the peer as studio progress', async () => {
   assert.equal(progress.event.type, 'task.done');
 });
 
+test('events are attributed to the latest request, not the first one', async () => {
+  // 事件桥每个 peer 只建一次。若把首次的 requestId 封进闭包,第二次提交
+  // 之后的事件会全部错误归到 studio-1 上,客户端据此过滤就会丢弃它们。
+  const studio = fakeStudio();
+  const { handler, sent, events } = handlerWith(studio);
+  const peer = createPeer(sent);
+  const deps = createDeps();
+
+  await handler.handleStudioRequest(peer, {
+    type: 'studio_request', requestId: 'studio-1', userRequest: 'first',
+  }, deps);
+  await handler.handleStudioRequest(peer, {
+    type: 'studio_request', requestId: 'studio-2', userRequest: 'second',
+  }, deps);
+
+  studio.notify({
+    type: 'task.done',
+    source: 'kanban',
+    occurredAt: new Date().toISOString(),
+  });
+
+  const progress = events.at(-1) as { requestId: string };
+  assert.equal(progress.requestId, 'studio-2');
+});
+
 test('a missing studio config is reported as studio_error', async () => {
   const build: BuildStudio = async () => {
     throw new StudioNotConfiguredError('/tmp/nope/studio.json');

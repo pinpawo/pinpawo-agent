@@ -47,6 +47,8 @@ export type BuildStudioInput = {
   studioConfigPath?: string;
   petsDir?: string;
   workdir?: string;
+  /** 覆盖内置插件表;仅供测试注入假插件。 */
+  pluginFactories?: Record<string, StudioPluginFactory>;
 };
 
 export type BuildStudioResult = {
@@ -57,12 +59,18 @@ export type BuildStudioResult = {
 };
 
 /**
+ * 插件工厂。`options` 原样来自 `studio.json`,**由插件自己解释与校验** ——
+ * 宿主不认识任何插件的领域概念,只负责把它递过去。
+ */
+export type StudioPluginFactory = (options?: Record<string, unknown>) => StudioPlugin;
+
+/**
  * 已内置的插件实现。
  *
  * `studio.json` 里显式列出要装哪些 —— studio 不做隐式装配,读一眼配置就
  * 知道这块 studio 由什么驱动。
  */
-const PLUGIN_FACTORIES: Record<string, () => StudioPlugin> = {
+const PLUGIN_FACTORIES: Record<string, StudioPluginFactory> = {
   kanban: () => createKanbanPlugin(),
 };
 
@@ -86,15 +94,16 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
   const petsDir = input.petsDir ?? path.join(path.dirname(studioConfigPath), 'pets');
   const resolved = resolveStudio(studioConfig, await loadPetLocalConfigs(petsDir));
 
-  const plugins = (studioConfig.plugins ?? []).map(({ id }) => {
-    const factory = PLUGIN_FACTORIES[id];
+  const pluginFactories = input.pluginFactories ?? PLUGIN_FACTORIES;
+  const plugins = (studioConfig.plugins ?? []).map(({ id, options }) => {
+    const factory = pluginFactories[id];
     if (!factory) {
       throw new Error(
         `studio "${studioConfig.studioId}": unknown plugin "${id}". `
-        + `Known plugins: ${Object.keys(PLUGIN_FACTORIES).join(', ')}.`,
+        + `Known plugins: ${Object.keys(pluginFactories).join(', ')}.`,
       );
     }
-    return factory();
+    return factory(options);
   });
 
   const globalLlmConfig = input.modelProfiles.resolve();

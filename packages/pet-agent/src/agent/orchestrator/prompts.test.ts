@@ -178,7 +178,7 @@ test('decision recent messages label delegation briefings as scheduling context'
   const [briefing] = materializeDelegation({
     mode: 'initial',
     lane: 'capability:general',
-    runId: 'run-1',
+    transcriptRunId: 'run-1',
     delegationId: 'delegation-1',
     task: '只完成任务 A',
     essentialContext: null,

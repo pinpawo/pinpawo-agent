@@ -46,6 +46,7 @@ import {
   getMessageHandoffSource,
   getMessageIsAnnounce,
   getMessageLane,
+  getMessageTranscriptRunId,
   getPinpetMeta,
   laneMessages,
   mainConversationMessages,
@@ -56,6 +57,7 @@ import {
 } from './messageLanes';
 import { RemoveMessage } from '@langchain/core/messages';
 import { isDelegationBriefingMessage } from './delegationBriefing';
+import { RUN_USER_GOAL_CONTEXT_SOURCE } from './capabilityContext';
 import {
   appendRunDelegationSummary,
   resumeRunDelegationSummary,
@@ -3976,7 +3978,9 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
   assert.equal(handoffSource?.task, 'run shell');
   assert.ok(handoffSource?.announceMessageId);
   assert.match(String(handoffCopy.content), /ran git status/);
-  assert.equal(readLatestAnnounce(finalState.messages, { runId: finalState.runId }), null);
+  assert.equal(readLatestAnnounce(finalState.messages, {
+    transcriptRunId: finalState.runId,
+  }), null);
 });
 
 test('toolkit review rejection rolls back the full action and retains the delegation', async () => {
@@ -4500,7 +4504,12 @@ test('buildSubagentHandoff copies the announce into main and wipes the whole del
   setPinpetMeta(otherDelegation, { lane: 'capability:explore', runId: 't1', delegationId: 'd2' });
 
   const messages = [userAsk, intermediate, announce, otherDelegation];
-  const update = buildSubagentHandoff({ messages, lane: 'capability:explore', runId: 't1', delegationId: 'd1' });
+  const update = buildSubagentHandoff({
+    messages,
+    lane: 'capability:explore',
+    transcriptRunId: 't1',
+    delegationId: 'd1',
+  });
   assert.ok(update, 'handoff update should be produced for a completed delegation');
 
   const removed = update.filter((m) => m instanceof RemoveMessage).map((m) => m.id);
@@ -4524,7 +4533,7 @@ test('buildSubagentHandoff copies the announce into main and wipes the whole del
   });
 });
 
-test('handoff idempotency is scoped by delegation lane and run id', () => {
+test('handoff idempotency is scoped by delegation lane and transcript run id', () => {
   const oldCopy = new AIMessage('old run result');
   setPinpetMeta(oldCopy, {
     handoffFrom: 'capability:general',
@@ -4578,7 +4587,7 @@ test('buildSubagentHandoff carries announcement artifact refs', () => {
   const update = buildSubagentHandoff({
     messages: [userAsk, announce],
     lane: 'capability:explore',
-    runId: 'run-1',
+    transcriptRunId: 'run-1',
     delegationId: 'd-announce',
     artifactRefs: [
       {
@@ -4639,7 +4648,7 @@ test('buildSubagentHandoff keeps lane messages when clearLane is disabled', () =
   const update = buildSubagentHandoff({
     messages: [humanAsk, intermediate, announce],
     lane: 'capability:general',
-    runId: 'run-5',
+    transcriptRunId: 'run-5',
     delegationId: 'd-keep',
     clearLane: false,
   });
@@ -4674,7 +4683,7 @@ test('buildSubagentHandoff appends handoff artifact footer to the main-queue cop
   const update = buildSubagentHandoff({
     messages: [userAsk, announce],
     lane: 'capability:explore',
-    runId: 'run-2',
+    transcriptRunId: 'run-2',
     delegationId: 'd-announce-2',
     artifactRefs: [
       {
@@ -4737,7 +4746,7 @@ test('buildSubagentHandoff clips and bounds handoff artifact footer refs', () =>
   const update = buildSubagentHandoff({
     messages: [userAsk, announce],
     lane: 'capability:explore',
-    runId: 'run-3',
+    transcriptRunId: 'run-3',
     delegationId: 'd-announce-3',
     artifactRefs,
   });
@@ -4762,7 +4771,7 @@ test('buildSubagentHandoff returns null when the delegation has no announce text
   const update = buildSubagentHandoff({
     messages: [new HumanMessage('做点事'), intermediate],
     lane: 'capability:general',
-    runId: 't1',
+    transcriptRunId: 't1',
     delegationId: 'd1',
   });
   assert.equal(update, null);
@@ -4780,7 +4789,7 @@ test('buildSubagentHandoff rejects an announce without a message id', () => {
   assert.throws(() => buildSubagentHandoff({
     messages: [announce],
     lane: 'capability:general',
-    runId: 't1',
+    transcriptRunId: 't1',
     delegationId: 'd1',
   }), /missing the required message id/);
 });
@@ -5620,7 +5629,7 @@ test('handoff copies the announce into main and wipes the lane transcript', () =
   const handoff = buildSubagentHandoff({
     messages: stateWithLane,
     lane: 'capability:general',
-    runId: 'turn-1',
+    transcriptRunId: 'turn-1',
     delegationId: 'task-complete',
   });
   assert.ok(handoff);
@@ -5711,7 +5720,7 @@ test('handoff after a resumed delegation wipes the whole delegation lane includi
   const handoff = buildSubagentHandoff({
     messages: stateBeforeHandoff,
     lane: 'capability:general',
-    runId: 'turn-1',
+    transcriptRunId: 'turn-1',
     delegationId: 'task-resume',
   });
   assert.ok(handoff);
@@ -5968,6 +5977,7 @@ test('fresh-turn active delegation transitions are explicit for pending and awai
     } as OrchestratorStateType;
     const resumeUpdate = applyActiveDelegationTransition(resumeState);
     assert.deepEqual(resumeUpdate.runUserGoal, activeDelegation.userGoal);
+    assert.notEqual(resumeState.runId, activeDelegation.transcriptRunId);
     const resumedState = {
       ...resumeState,
       ...resumeUpdate,
@@ -5991,6 +6001,15 @@ test('fresh-turn active delegation transitions are explicit for pending and awai
       ).some((message) => message instanceof ToolMessage),
       true,
     );
+    assert.equal(
+      laneMessages(
+        resumedState.messages,
+        activeDelegation.lane,
+        resumeState.runId,
+        activeDelegation.id,
+      ).some((message) => message instanceof ToolMessage),
+      false,
+    );
     if (status === 'pending') {
       assert.equal(resumedState.runNextDelegation?.id, activeDelegation.id);
       assert.equal(afterContextPrep(resumedState), 'capability');
@@ -5999,6 +6018,12 @@ test('fresh-turn active delegation transitions are explicit for pending and awai
         .at(-1);
       assert.match(String(continuationBriefing?.content ?? ''), /mode="continue"/);
       assert.match(String(continuationBriefing?.content ?? ''), /按我刚补充的方向继续/);
+      assert.equal(
+        continuationBriefing
+          ? getMessageTranscriptRunId(continuationBriefing)
+          : null,
+        activeDelegation.transcriptRunId,
+      );
     } else {
       assert.equal(resumedState.runNextDelegation, null);
       assert.equal(afterContextPrep(resumedState), 'plannerBoundaryIterationGuard');
@@ -6254,10 +6279,30 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
     `announce:${activeDelegation.id}:${plannerInputs[1]?.latestAnnounce?.messageId}`,
   );
   const resumedInput = recorder.subagentInputs.at(-1) ?? [];
+  const resumedGoalContexts = resumedInput.filter((message) =>
+    getPinpetMeta(message).source === RUN_USER_GOAL_CONTEXT_SOURCE);
+  assert.equal(resumedGoalContexts.length, 1);
+  assert.match(
+    String(resumedGoalContexts[0]?.content ?? ''),
+    /完成原来的仓库检查并报告结果。[\s\S]*用户要求重点检查最新修改。/,
+  );
   assert.equal(
     resumedInput.some((message) =>
       message instanceof ToolMessage
       && message.content === 'OLD_DELEGATION_TOOL_RESULT'),
+    true,
+  );
+  const resumedBriefing = resumedInput.filter(isDelegationBriefingMessage).at(-1);
+  assert.ok(resumedBriefing);
+  assert.equal(
+    getMessageTranscriptRunId(resumedBriefing),
+    activeDelegation.transcriptRunId,
+  );
+  assert.equal(
+    resumedInput
+      .filter((message) => getMessageLane(message) === activeDelegation.lane)
+      .every((message) =>
+        getMessageTranscriptRunId(message) === activeDelegation.transcriptRunId),
     true,
   );
   assert.match(
@@ -6420,6 +6465,18 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
   // Each selected subagent still receives its complete lane-scoped briefing.
   assert.equal(recorder.subagentInputs.length, 2);
   const [firstInput, secondInput] = recorder.subagentInputs;
+  for (const input of recorder.subagentInputs) {
+    const goalContexts = input.filter((message) =>
+      getPinpetMeta(message).source === RUN_USER_GOAL_CONTEXT_SOURCE);
+    assert.equal(goalContexts.length, 1);
+    assert.equal(
+      String(goalContexts[0]?.content ?? '').includes(String(state.runUserGoal)),
+      true,
+    );
+    const latestBriefing = input.filter(isDelegationBriefingMessage).at(-1);
+    assert.ok(latestBriefing);
+    assert.ok(input.indexOf(goalContexts[0]) < input.indexOf(latestBriefing));
+  }
   const briefingA = String(firstInput.find(isDelegationBriefingMessage)?.content ?? '');
   const briefingB = String(secondInput.filter(isDelegationBriefingMessage).at(-1)?.content ?? '');
   assert.match(briefingA, /^<delegation_briefing[^>]*mode="initial">/);
@@ -6440,6 +6497,11 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
   const secondInputText = secondInput.map((message) => String(message.content)).join('\n');
   assert.match(secondInputText, /Issue #272 已关闭。/);
   assert.match(secondInputText, /<artifact_discovery_context[\s\S]*current_thread/);
+  assert.equal(
+    state.messages.some((message) =>
+      getPinpetMeta(message).source === RUN_USER_GOAL_CONTEXT_SOURCE),
+    false,
+  );
   assert.doesNotMatch(
     state.messages.map((message) => String(message.content)).join('\n'),
     /artifact_discovery_context/,
@@ -6505,6 +6567,13 @@ test('continue_current appends a continuation briefing carrying the gap note', a
     1,
   );
   assert.equal(recorder.subagentInputs.length, 2);
+  for (const input of recorder.subagentInputs) {
+    assert.equal(
+      input.filter((message) =>
+        getPinpetMeta(message).source === RUN_USER_GOAL_CONTEXT_SOURCE).length,
+      1,
+    );
+  }
   const continuation = String(
     recorder.subagentInputs[1].filter(isDelegationBriefingMessage).at(-1)?.content ?? '',
   );

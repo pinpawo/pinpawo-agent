@@ -76,7 +76,7 @@ test('orchestrator context compaction excludes delegation briefings from summary
   const [briefing] = materializeDelegation({
     mode: 'initial',
     lane: 'capability:general',
-    runId: 'run-1',
+    transcriptRunId: 'run-1',
     delegationId: 'delegation-1',
     task: '不要把这段调度文本写入摘要',
     essentialContext: null,

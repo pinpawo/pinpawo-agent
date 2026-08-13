@@ -326,7 +326,7 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
     ? {
         mode,
         lane: 'capability:eval',
-        runId: 'eval-run',
+        transcriptRunId: 'eval-run',
         delegationId: 'eval-delegation',
         task,
         gapNote: typeof inputs.gap_note === 'string' ? inputs.gap_note : null,
@@ -334,7 +334,7 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
     : {
         mode,
         lane: 'capability:eval',
-        runId: 'eval-run',
+        transcriptRunId: 'eval-run',
         delegationId: 'eval-delegation',
         task,
         essentialContext: typeof inputs.essential_context === 'string'
@@ -350,7 +350,7 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
     messages.push(materializeDelegation({
       mode: 'initial',
       lane: 'capability:eval',
-      runId: 'eval-run',
+      transcriptRunId: 'eval-run',
       delegationId: 'eval-delegation',
       task: priorTask,
       essentialContext: null,

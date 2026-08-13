@@ -106,7 +106,7 @@ function materializeNextDelegation(params: {
   const materializedDelegation = materializeDelegation({
     mode: 'initial',
     lane,
-    runId: taskActiveDelegation.transcriptRunId,
+    transcriptRunId: taskActiveDelegation.transcriptRunId,
     delegationId: runNextDelegation.id,
     task: runNextDelegation.task,
     essentialContext: null,
@@ -135,7 +135,7 @@ function buildAcceptedDelegationUpdate(
   outcome: PlannerReplyOutcome | null,
 ) {
   const completionReason = readLatestAnnounceCompletionReason(state.messages, {
-    runId: activeDelegation.transcriptRunId,
+    transcriptRunId: activeDelegation.transcriptRunId,
     delegationId: activeDelegation.id,
   });
   if (completionReason === 'limit_reached') {
@@ -160,7 +160,7 @@ function buildAcceptedDelegationUpdate(
   const messages = buildSubagentHandoff({
     messages: state.messages,
     lane: activeDelegation.lane,
-    runId: activeDelegation.transcriptRunId,
+    transcriptRunId: activeDelegation.transcriptRunId,
     delegationId: activeDelegation.id,
     artifactRefs,
     clearLane: true,
@@ -201,7 +201,7 @@ function buildContinueCurrentUpdate(params: {
   const materialized = materializeDelegation({
     mode: 'continue',
     lane: activeDelegation.lane,
-    runId: activeDelegation.transcriptRunId,
+    transcriptRunId: activeDelegation.transcriptRunId,
     delegationId: activeDelegation.id,
     task: nextTask.task,
     gapNote: null,
@@ -318,11 +318,11 @@ function buildPlannerInput(params: {
     throw new Error('Boundary Planner active delegation has an invalid lane.');
   }
   const announce = readLatestAnnounce(state.messages, {
-    runId: activeDelegation.transcriptRunId,
+    transcriptRunId: activeDelegation.transcriptRunId,
     delegationId: activeDelegation.id,
   });
   const completionReason = readLatestAnnounceCompletionReason(state.messages, {
-    runId: activeDelegation.transcriptRunId,
+    transcriptRunId: activeDelegation.transcriptRunId,
     delegationId: activeDelegation.id,
   });
   // resume_active is a fresh Planner input only before this run executes a

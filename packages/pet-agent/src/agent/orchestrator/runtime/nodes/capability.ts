@@ -38,6 +38,7 @@ import {
   withArtifactDiscoveryContext,
 } from '../../artifacts/discovery';
 import type { ToolkitRuntimeExecution } from '../../toolkitRuntime';
+import { withRunUserGoalContext } from '../../capabilityContext';
 
 export function createCapabilityNode(params: {
   config: OrchestratorConfig;
@@ -87,7 +88,10 @@ export function createCapabilityNode(params: {
     const toolkitList = [...compiledCapability.toolkits];
     const lane: MessageLane = runNextDelegation.lane;
     const transcriptRunId = resolveDelegationTranscriptRunId(state, runNextDelegation);
-    const scopedMessages = laneMessages(state.messages, lane, transcriptRunId, runNextDelegation.id);
+    const scopedMessages = withRunUserGoalContext(
+      laneMessages(state.messages, lane, transcriptRunId, runNextDelegation.id),
+      state.runUserGoal,
+    );
     const threadId = readThreadId(runnableConfig);
 
     const authorizationRecorder = createToolAuthorizationRecorder(

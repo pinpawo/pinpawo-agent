@@ -14,7 +14,7 @@ import {
   HumanMessage,
   type BaseMessage,
 } from '@langchain/core/messages';
-import type { RunnableConfig } from '@langchain/core/runnables';
+import { RunnableLambda } from '@langchain/core/runnables';
 import { tool } from '@langchain/core/tools';
 import { FakeListChatModel } from '@langchain/core/utils/testing';
 import { MemorySaver } from '@langchain/langgraph';
@@ -204,6 +204,14 @@ const generalToolkit = defineToolkit({
 
 const standardCapabilities: AgentCapability[] = [
   {
+    name: 'general',
+    description: 'Default executor for ordinary tasks that do not require a more specialized Capability.',
+    uses: [generalToolkit.name],
+    instructions: defineInstructionDocument({
+      content: 'Complete the requested task using the available tools and conversation evidence.',
+    }),
+  },
+  {
     name: 'workspace_analysis',
     description: [
       'Inspect and analyze repositories, workspace files, configuration, dependencies, risks, and deployment state.',
@@ -287,73 +295,46 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function createRecordingModels(model: AgentModels['act']) {
   const decisions: DecisionRecord[] = [];
   const answers: AnswerRecord[] = [];
-  const decision = {
-    invoke: async (input: unknown, config?: RunnableConfig) => {
-      const response = await model.invoke(input as never, config);
+  const decision = model.pipe(new RunnableLambda<BaseMessage, BaseMessage>({
+    func: async (response: BaseMessage) => {
       decisions.push({
         kind: 'goal_creation',
         output: { goal: readMessageText(response).trim() },
       });
       return response;
     },
-  } as unknown as AgentModels['act'];
-  const act = {
-    invoke: (input: unknown, config?: RunnableConfig) =>
-      model.invoke(input as never, config),
-    withStructuredOutput: (schema: unknown, options?: unknown) => {
-      const runnable = model.withStructuredOutput(schema as never, options as never);
-      return {
-        invoke: async (input: unknown, config?: RunnableConfig) => {
-          const raw = await runnable.invoke(input as never, config);
-          const output = isRecord(raw) ? raw : { value: raw };
-          decisions.push({
-            kind: Array.isArray(output.tasks) ? 'planner' : 'unknown',
-            output,
-          });
-          return raw;
-        },
-      };
-    },
-    bindTools: (tools: Parameters<NonNullable<AgentModels['act']['bindTools']>>[0], options?: Record<string, unknown>) => {
-      if (!model.bindTools) {
-        throw new Error('Lifecycle composition subject model must support Planner tool calls.');
+  })) as unknown as AgentModels['act'];
+  const act = model.pipe(new RunnableLambda<BaseMessage, BaseMessage>({
+    func: async (response: BaseMessage) => {
+      for (const toolCall of readMessageToolCalls(response)) {
+        const output = isRecord(toolCall.args)
+          ? toolCall.args
+          : { value: toolCall.args };
+        if (![
+          'continue_current',
+          'submit_plan',
+          'advance_plan',
+          'complete_goal',
+          'request_user_input',
+          'report_unavailable',
+          'answer_directly',
+        ].includes(toolCall.name)) {
+          continue;
+        }
+        decisions.push({
+          kind: 'planner',
+          output: { ...output, action: toolCall.name },
+        });
       }
-      const runnable = model.bindTools(tools, options);
-      return {
-        invoke: async (input: unknown, config?: RunnableConfig) => {
-          const response = await runnable.invoke(input as never, config);
-          for (const toolCall of readMessageToolCalls(response)) {
-            const output = isRecord(toolCall.args)
-              ? toolCall.args
-              : { value: toolCall.args };
-            if (![
-              'continue_current',
-              'submit_plan',
-              'advance_plan',
-              'complete_goal',
-              'request_user_input',
-              'report_unavailable',
-              'answer_directly',
-            ].includes(toolCall.name)) {
-              continue;
-            }
-            decisions.push({
-              kind: 'planner',
-              output: { ...output, action: toolCall.name },
-            });
-          }
-          return response;
-        },
-      };
+      return response;
     },
-  } as unknown as AgentModels['act'];
-  const answer = {
-    invoke: async (input: unknown, config?: RunnableConfig) => {
-      const response = await model.invoke(input as never, config);
+  })) as unknown as AgentModels['act'];
+  const answer = model.pipe(new RunnableLambda<BaseMessage, BaseMessage>({
+    func: async (response: BaseMessage) => {
       answers.push({ text: readMessageText(response).trim() });
       return response;
     },
-  } as unknown as AgentModels['act'];
+  })) as unknown as AgentModels['act'];
   return {
     act,
     decision,

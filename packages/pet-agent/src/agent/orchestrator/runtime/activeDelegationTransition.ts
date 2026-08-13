@@ -89,7 +89,7 @@ export function applyActiveDelegationTransition(
   const materializedDelegation = materializeDelegation({
     mode: 'continue',
     lane: activeDelegation.lane,
-    runId: activeDelegation.transcriptRunId,
+    transcriptRunId: activeDelegation.transcriptRunId,
     delegationId: activeDelegation.id,
     task: activeDelegation.task,
     gapNote: guidance,

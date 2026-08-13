@@ -16,7 +16,6 @@ import { createKanbanPlugin } from '@pinpawo-toolkit/studio-kanban';
 
 import { buildLocalAgentModels, resolveLlmGenerationReserveTokens } from '../agentModels';
 import type { LocalModelProfileRegistry } from '../llmConfig';
-import { buildDecisionStructuredOutput } from '../agentChannel';
 import { createExploreCapability } from '../capabilities/explore';
 import { buildLocalAgentRuntimeConfig } from '../runtimeConfig';
 import { loadPetLocalConfigs } from './petConfig';
@@ -108,7 +107,6 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
 
   const globalLlmConfig = input.modelProfiles.resolve();
   const globalModels = buildLocalAgentModels(globalLlmConfig);
-  const globalDecisionStructuredOutput = buildDecisionStructuredOutput(globalLlmConfig);
   const capabilitiesByName = new Map(input.capabilities.map((item) => [item.name, item]));
   const generalCapability = capabilitiesByName.get(GENERAL_CAPABILITY_NAME);
   if (!generalCapability) {
@@ -157,9 +155,6 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
         ?? petLlmConfig.contextWindowTokens,
       generationReserveTokens,
       subagentGenerationReserveTokens: generationReserveTokens,
-      decisionStructuredOutput: petConfig.modelProfileId
-        ? buildDecisionStructuredOutput(petLlmConfig)
-        : globalDecisionStructuredOutput,
       workdir: effectiveWorkdir,
     });
   });

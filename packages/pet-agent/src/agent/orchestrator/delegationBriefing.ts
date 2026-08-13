@@ -62,6 +62,25 @@ export function isDelegationBriefingMessage(message: BaseMessage): boolean {
   return getPinpetMeta(message).source === DELEGATION_BRIEFING_SOURCE;
 }
 
+export function insertBeforeLatestDelegationBriefing(
+  messages: BaseMessage[],
+  contextMessage: BaseMessage,
+): BaseMessage[] {
+  let briefingIndex = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (isDelegationBriefingMessage(messages[index])) {
+      briefingIndex = index;
+      break;
+    }
+  }
+  const insertionIndex = briefingIndex >= 0 ? briefingIndex : messages.length;
+  return [
+    ...messages.slice(0, insertionIndex),
+    contextMessage,
+    ...messages.slice(insertionIndex),
+  ];
+}
+
 function buildDelegationPlanMessage(params: {
   runId: string;
   delegationId: string;

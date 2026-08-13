@@ -56,6 +56,7 @@ import {
 } from './messageLanes';
 import { RemoveMessage } from '@langchain/core/messages';
 import { isDelegationBriefingMessage } from './delegationBriefing';
+import { RUN_USER_GOAL_CONTEXT_SOURCE } from './capabilityContext';
 import {
   appendRunDelegationSummary,
   resumeRunDelegationSummary,
@@ -6254,6 +6255,13 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
     `announce:${activeDelegation.id}:${plannerInputs[1]?.latestAnnounce?.messageId}`,
   );
   const resumedInput = recorder.subagentInputs.at(-1) ?? [];
+  const resumedGoalContexts = resumedInput.filter((message) =>
+    getPinpetMeta(message).source === RUN_USER_GOAL_CONTEXT_SOURCE);
+  assert.equal(resumedGoalContexts.length, 1);
+  assert.match(
+    String(resumedGoalContexts[0]?.content ?? ''),
+    /完成原来的仓库检查并报告结果。[\s\S]*用户要求重点检查最新修改。/,
+  );
   assert.equal(
     resumedInput.some((message) =>
       message instanceof ToolMessage
@@ -6420,6 +6428,18 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
   // Each selected subagent still receives its complete lane-scoped briefing.
   assert.equal(recorder.subagentInputs.length, 2);
   const [firstInput, secondInput] = recorder.subagentInputs;
+  for (const input of recorder.subagentInputs) {
+    const goalContexts = input.filter((message) =>
+      getPinpetMeta(message).source === RUN_USER_GOAL_CONTEXT_SOURCE);
+    assert.equal(goalContexts.length, 1);
+    assert.equal(
+      String(goalContexts[0]?.content ?? '').includes(String(state.runUserGoal)),
+      true,
+    );
+    const latestBriefing = input.filter(isDelegationBriefingMessage).at(-1);
+    assert.ok(latestBriefing);
+    assert.ok(input.indexOf(goalContexts[0]) < input.indexOf(latestBriefing));
+  }
   const briefingA = String(firstInput.find(isDelegationBriefingMessage)?.content ?? '');
   const briefingB = String(secondInput.filter(isDelegationBriefingMessage).at(-1)?.content ?? '');
   assert.match(briefingA, /^<delegation_briefing[^>]*mode="initial">/);
@@ -6440,6 +6460,11 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
   const secondInputText = secondInput.map((message) => String(message.content)).join('\n');
   assert.match(secondInputText, /Issue #272 已关闭。/);
   assert.match(secondInputText, /<artifact_discovery_context[\s\S]*current_thread/);
+  assert.equal(
+    state.messages.some((message) =>
+      getPinpetMeta(message).source === RUN_USER_GOAL_CONTEXT_SOURCE),
+    false,
+  );
   assert.doesNotMatch(
     state.messages.map((message) => String(message.content)).join('\n'),
     /artifact_discovery_context/,
@@ -6505,6 +6530,13 @@ test('continue_current appends a continuation briefing carrying the gap note', a
     1,
   );
   assert.equal(recorder.subagentInputs.length, 2);
+  for (const input of recorder.subagentInputs) {
+    assert.equal(
+      input.filter((message) =>
+        getPinpetMeta(message).source === RUN_USER_GOAL_CONTEXT_SOURCE).length,
+      1,
+    );
+  }
   const continuation = String(
     recorder.subagentInputs[1].filter(isDelegationBriefingMessage).at(-1)?.content ?? '',
   );

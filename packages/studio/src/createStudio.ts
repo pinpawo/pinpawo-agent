@@ -55,17 +55,20 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
    * 插件停了还留着它的闭包,studio 就成了泄漏源。
    */
   const gateHandlers = new Map<string, Set<StudioDispatchGateHandler>>();
-  /** threadId → 这次派活是谁发起的,用于把闸门变化只送回发起方。 */
+  /**
+   * threadId → 这次派活是谁发起的,用于把闸门变化只送回发起方。
+   * `source` 为 undefined 表示宿主派的 —— 没有插件在听。
+   */
   const dispatchOrigins = new Map<string, {
-    source: string;
+    source?: string;
     petId: string;
     correlationId?: string;
   }>();
 
   function emitGateChange(threadId: string, state: PetGateState): void {
     const origin = dispatchOrigins.get(threadId);
-    // 宿主派的活(source 为 undefined)没有插件在听 —— 宿主要听就写个插件。
-    if (!origin) return;
+    // 宿主派的活没有插件在听 —— 宿主要听就写个插件(计划中的 http plugin)。
+    if (!origin?.source) return;
     const listeners = gateHandlers.get(origin.source);
     if (!listeners?.size) return;
 
@@ -130,25 +133,44 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
   const queues = new Map<string, Promise<void>>();
 
   /**
-   * 挂起,直到这个 pet 的闸门重新打开。
+   * 挂起,直到这个 pet 的闸门重新打开,并把过程中的每一次变化报给发起方。
    *
    * 门从 `waiting` / `blocked` 回到 `open`,只可能由**人**推动 —— 用户走
    * chat 路径直接跟 pet 对话把它解开(两条路共用 checkpointer)。studio
    * 这边没有控制面,只是等着被唤醒,卡多久都合理(§4.2)。
+   *
+   * 注意闸门是 **pet 级**的,而队列是 **dispatch 级**的:同一时刻这个 pet
+   * 上只有队列头那一条在跑,所以"门开了"就等价于"队列头这条走完了"。
+   * 这个等价关系依赖串行 —— 它正是队列存在的另一半理由。
    */
-  function waitForGateOpen(pet: PetAgentRuntime): Promise<void> {
+  /** shutdown 时用来叫醒所有卡在闸门上的等待,让队列干净地收尾。 */
+  const gateWaiters = new Set<() => void>();
+  function abortGateWaits(): void {
+    for (const abort of [...gateWaiters]) abort();
+    gateWaiters.clear();
+  }
+
+  function waitForGateOpen(pet: PetAgentRuntime, threadId: string): Promise<boolean> {
     return new Promise((resolve) => {
-      const unsubscribe = pet.onGateChange((state) => {
-        if (state === 'open') {
-          unsubscribe();
-          resolve();
-        }
-      });
-      // 订阅与检查之间可能已经开了,补一次。
-      if (pet.gate() === 'open') {
+      let settled = false;
+      const finish = (unsubscribe: () => void, opened: boolean) => {
+        if (settled) return;
+        settled = true;
         unsubscribe();
-        resolve();
-      }
+        gateWaiters.delete(abort);
+        resolve(opened);
+      };
+      const unsubscribe = pet.onGateChange((state) => {
+        // 卡住期间的每一次转折(waiting → blocked 之类)都要报给发起方,
+        // 否则它只看到最初那一下,之后的变化全丢。
+        if (!settled && state !== 'open') emitGateChange(threadId, state);
+        if (state === 'open') finish(unsubscribe, true);
+      });
+      const abort = () => finish(unsubscribe, false);
+      gateWaiters.add(abort);
+      // 订阅与检查之间可能已经开了,补一次。
+      if (pet.gate() === 'open') finish(unsubscribe, true);
+      else if (stopped) abort();
     });
   }
 
@@ -192,7 +214,7 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
     );
 
     dispatchOrigins.set(threadId, {
-      source: source ?? '',
+      ...(source ? { source } : {}),
       petId: request.petId,
       ...(request.correlationId ? { correlationId: request.correlationId } : {}),
     });
@@ -220,10 +242,10 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
       const state = pet.gate();
       emitGateChange(threadId, state);
       if (state !== 'open') {
-        await waitForGateOpen(pet);
+        const opened = await waitForGateOpen(pet, threadId);
         // 人把门解开了 —— 发起方要知道自己这条终于走完了,否则它只看到
-        // 「卡住」而永远等不到收尾。
-        emitGateChange(threadId, 'open');
+        // 「卡住」而永远等不到收尾。shutdown 打断时不报:那条活并没有走完。
+        if (opened) emitGateChange(threadId, 'open');
       }
       dispatchOrigins.delete(threadId);
     });
@@ -254,6 +276,10 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
   async function shutdown(): Promise<void> {
     // 关上门:此后不再收 dispatch。否则派出去的活没有任何插件在听它的产出。
     stopped = true;
+    // 唤醒所有卡在闸门上的队列。**不能等它们跑完** —— `waiting` / `blocked`
+    // 按设计可能永远等不到人(§4.2),等下去 shutdown 就永远返回不了。
+    // 队列因此在这里放弃等待:已排队未开始的活不会再派出去。
+    abortGateWaits();
     // 逆序停止:后启动的插件可能依赖先启动的。
     for (const plugin of [...plugins].reverse()) {
       try {

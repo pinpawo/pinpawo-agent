@@ -35,6 +35,8 @@ function pet(options: {
     },
     /** 测试用:模拟人把卡住的 pet 解开(现实里走 chat 路径)。 */
     openGate: () => setGate('open'),
+    /** 测试用:模拟卡住期间的状态转折。 */
+    setGate,
     descriptor: () => ({
       petId: options.petId,
       userId: null,
@@ -497,4 +499,59 @@ test('a stopped plugin stops hearing gate changes', async () => {
   stuck.openGate();
   await flush();
   assert.equal(calls, 0);
+});
+
+test('gate changes while stuck keep reaching the originator', async () => {
+  // 卡住不是一个静止状态:waiting 之后可能转成 blocked。只报最初那一下,
+  // 发起方就永远停在旧信息上。
+  const stuck = pet({
+    petId: 'p1',
+    gateAfterInvoke: 'waiting',
+  }) as PetAgentRuntime & { setGate: (s: PetGateState) => void };
+
+  const seen: string[] = [];
+  let ctx!: StudioPluginContext;
+  const plugin: StudioPlugin = {
+    name: 'kanban',
+    description: 'p',
+    tools: [],
+    studio: {
+      start: (context) => {
+        ctx = context;
+        context.onDispatchGate((change) => { seen.push(change.state); });
+      },
+    },
+  };
+
+  await createStudio({
+    studioId: 's1', entryPetId: 'p1', pets: [stuck], plugins: [plugin],
+  });
+
+  await ctx.dispatch({ petId: 'p1', request: 'go' });
+  await flush();
+  assert.deepEqual(seen, ['busy', 'waiting']);
+
+  stuck.setGate('blocked');
+  await flush();
+  assert.deepEqual(seen, ['busy', 'waiting', 'blocked']);
+});
+
+test('shutdown does not hang on a dispatch that is waiting for a human', async () => {
+  // waiting / blocked 按设计可能永远等不到人(§4.2)。若 shutdown 等着它跑完,
+  // 就永远返回不了。
+  const stuck = pet({ petId: 'p1', gateAfterInvoke: 'waiting' });
+  const studio = await createStudio({
+    studioId: 's1', entryPetId: 'p1', pets: [stuck],
+  });
+
+  await studio.dispatch({ petId: 'p1', request: 'first' });
+  await studio.dispatch({ petId: 'p1', request: 'queued-behind-it' });
+  await flush();
+
+  await Promise.race([
+    studio.shutdown(),
+    new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('shutdown hung on a waiting dispatch')), 300);
+    }),
+  ]);
 });

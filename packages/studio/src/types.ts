@@ -61,9 +61,58 @@ export type PetAgentRuntimeInvokeResult = {
   reply: string;
 };
 
+/**
+ * Pet 的闸门状态 —— runtime 对 studio 唯一需要暴露的执行事实。
+ *
+ * **studio 只关心门开不开**,不关心 pet 在跑模型、在等工具还是在等人。
+ * 但门关着的原因分两类,而这个区别对**看的人**是必要的:
+ *
+ * - `busy` 的队列**在动**,等就行;
+ * - `waiting` / `blocked` 的队列**永远不会自己动**,只有人能推动它。
+ *
+ * 这正是让 §4.2「进度停滞是自明的」成立的东西 —— 一个 pet 卡了两小时,
+ * 是在跑大任务、在等人回话,还是砸了没人管,得能一眼看出来。
+ *
+ * **失败必须停下,不能放行下一条。** 队列里排着的活往往彼此依赖 ——
+ * 前一条写文件失败了,后一条接着去改那个文件,那不是"下一个任务失败",
+ * 是在一个坏掉的状态上继续操作,破坏性正是这么来的。所以 `blocked`
+ * 与 `waiting` 同类:都得人看一眼才继续。
+ *
+ * 这里没有 `disabled`:那是配置属性,在 `descriptor().startupMode` 里,
+ * dispatch 直接拒,不进队列。
+ *
+ * gate 只服务于**队列放不放行**这一个判断。它是通道自己的机制,不是一份
+ * 要广播出去的通知 —— 别把它变成 event。
+ */
+export type PetGateState =
+  /** 空闲,能收下一条派活。 */
+  | 'open'
+  /** 正在跑(模型 / 工具 / subagent)。它自己会好。 */
+  | 'busy'
+  /** 停下来等外部输入。只有外部能推动它 —— 卡多久都合理。 */
+  | 'waiting'
+  /**
+   * 上一条派活失败或 pet 声明干不了。**门关着等人**,不自动放行 ——
+   * 后面排着的活可能正建立在这条的产出之上。
+   */
+  | 'blocked';
+
 export type PetAgentRuntime = {
   descriptor: () => PetAgentRuntimeDescriptor;
   invoke: (input: PetAgentRuntimeInvokeInput) => Promise<PetAgentRuntimeInvokeResult>;
+  /**
+   * 当前闸门状态。studio 的队列据此决定要不要投递下一条。
+   *
+   * 它**不是** `invoke` 的返回值:pet 撞到人工确认时 `invoke` 会提前返回,
+   * 但活并没有干完 —— 门此时是 `waiting` 而非 `open`。把"invoke 返回"当成
+   * "派活结束"正是队列失效的根源。
+   */
+  gate: () => PetGateState;
+  /**
+   * 订阅闸门变化。studio 在门关着时挂起队列,由这里唤醒 —— 不轮询。
+   * 返回退订函数。
+   */
+  onGateChange: (listener: (state: PetGateState) => void) => () => void;
   /**
    * Releases Toolkit roots when this runtime created its own manager. A host
    * that supplied toolkitRuntimeManager owns the shared lifecycle instead.

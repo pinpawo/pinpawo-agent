@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 
 import type {
   Studio,
+  StudioDispatchGateChange,
+  StudioDispatchGateHandler,
   StudioDispatchInput,
   StudioDispatchResult,
   StudioEvent,
@@ -10,7 +12,7 @@ import type {
   StudioPlugin,
   StudioPluginContext,
 } from './studioContract';
-import type { PetAgentRuntime, PetAgentRuntimeDescriptor } from './types';
+import type { PetAgentRuntime, PetAgentRuntimeDescriptor, PetGateState } from './types';
 
 export type CreateStudioInput = {
   studioId: string;
@@ -47,6 +49,45 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
   const plugins = input.plugins ?? [];
   const handlers = new Set<StudioEventHandler>();
   let stopped = false;
+
+  /**
+   * 每个插件订阅的 dispatch 闸门回调。按插件分组存放,`stop` 时整组清掉 ——
+   * 插件停了还留着它的闭包,studio 就成了泄漏源。
+   */
+  const gateHandlers = new Map<string, Set<StudioDispatchGateHandler>>();
+  /** threadId → 这次派活是谁发起的,用于把闸门变化只送回发起方。 */
+  const dispatchOrigins = new Map<string, {
+    source: string;
+    petId: string;
+    correlationId?: string;
+  }>();
+
+  function emitGateChange(threadId: string, state: PetGateState): void {
+    const origin = dispatchOrigins.get(threadId);
+    // 宿主派的活(source 为 undefined)没有插件在听 —— 宿主要听就写个插件。
+    if (!origin) return;
+    const listeners = gateHandlers.get(origin.source);
+    if (!listeners?.size) return;
+
+    const change: StudioDispatchGateChange = {
+      threadId,
+      petId: origin.petId,
+      ...(origin.correlationId ? { correlationId: origin.correlationId } : {}),
+      state,
+    };
+    for (const handler of listeners) {
+      void (async () => {
+        try {
+          await handler(change);
+        } catch (error) {
+          console.error(
+            `[studio] dispatch gate handler failed (plugin=${origin.source}, thread=${threadId}):`,
+            error instanceof Error ? error.message : error,
+          );
+        }
+      })();
+    }
+  }
 
   function listPets(): PetAgentRuntimeDescriptor[] {
     return [...petsById.values()].map((pet) => pet.descriptor());
@@ -88,6 +129,29 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
    */
   const queues = new Map<string, Promise<void>>();
 
+  /**
+   * 挂起,直到这个 pet 的闸门重新打开。
+   *
+   * 门从 `waiting` / `blocked` 回到 `open`,只可能由**人**推动 —— 用户走
+   * chat 路径直接跟 pet 对话把它解开(两条路共用 checkpointer)。studio
+   * 这边没有控制面,只是等着被唤醒,卡多久都合理(§4.2)。
+   */
+  function waitForGateOpen(pet: PetAgentRuntime): Promise<void> {
+    return new Promise((resolve) => {
+      const unsubscribe = pet.onGateChange((state) => {
+        if (state === 'open') {
+          unsubscribe();
+          resolve();
+        }
+      });
+      // 订阅与检查之间可能已经开了,补一次。
+      if (pet.gate() === 'open') {
+        unsubscribe();
+        resolve();
+      }
+    });
+  }
+
   function enqueue(petId: string, run: () => Promise<void>): void {
     const tail = queues.get(petId) ?? Promise.resolve();
     const next = tail.then(run, run);
@@ -127,9 +191,16 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
       `[studio] dispatch petId=${request.petId} source=${source ?? 'studio'} thread=${threadId}`,
     );
 
+    dispatchOrigins.set(threadId, {
+      source: source ?? '',
+      petId: request.petId,
+      ...(request.correlationId ? { correlationId: request.correlationId } : {}),
+    });
+
     // 排到该 pet 的队尾。dispatch 本身立即返回 —— studio 不等 pet 干完,
     // 也不解释它的返回值。pet 的产出经由 toolkit → 插件 → event 汇报。
     enqueue(request.petId, async () => {
+      emitGateChange(threadId, 'busy');
       try {
         await pet.invoke({
           brief: request.request,
@@ -143,6 +214,18 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
           error instanceof Error ? error.message : error,
         );
       }
+
+      // invoke 返回不等于活干完了 —— pet 撞到人工确认时会提前返回。真相在
+      // 闸门上:`waiting` / `blocked` 都还占着这个 pet,队列不放行下一条。
+      const state = pet.gate();
+      emitGateChange(threadId, state);
+      if (state !== 'open') {
+        await waitForGateOpen(pet);
+        // 人把门解开了 —— 发起方要知道自己这条终于走完了,否则它只看到
+        // 「卡住」而永远等不到收尾。
+        emitGateChange(threadId, 'open');
+      }
+      dispatchOrigins.delete(threadId);
     });
 
     return { threadId };
@@ -152,6 +235,12 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
     return {
       // source 由 studio 从 context 补,与 notify 同理。
       dispatch: (request: StudioDispatchInput) => dispatch(request, plugin.name),
+      onDispatchGate: (handler: StudioDispatchGateHandler) => {
+        const listeners = gateHandlers.get(plugin.name) ?? new Set();
+        listeners.add(handler);
+        gateHandlers.set(plugin.name, listeners);
+        return () => listeners.delete(handler);
+      },
       notify: (event: StudioEventInput) => notify({
         ...event,
         source: plugin.name,
@@ -169,6 +258,8 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
     for (const plugin of [...plugins].reverse()) {
       try {
         await plugin.studio?.stop?.();
+        // 插件停了就清掉它的订阅 —— 留着闭包 studio 就成了泄漏源。
+        gateHandlers.delete(plugin.name);
       } catch (error) {
         console.error(
           `[studio] plugin "${plugin.name}" failed to stop:`,
@@ -177,6 +268,8 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
       }
     }
     handlers.clear();
+    gateHandlers.clear();
+    dispatchOrigins.clear();
   }
 
   // 插件启动失败必须让调用方看见 —— 一个没起来的驱动器意味着这块 studio

@@ -7,6 +7,7 @@ import type {
   PetAgentRuntime,
   PetAgentRuntimeInvokeInput,
   PetAgentRuntimeInvokeResult,
+  PetGateState,
 } from './types';
 
 function pet(options: {
@@ -17,8 +18,23 @@ function pet(options: {
   fail?: boolean;
   /** 让某次 invoke 挂住,用于观察队列。 */
   hold?: (brief: string) => Promise<void>;
+  /** invoke 返回后闸门停在哪 —— 默认 open(活干完了)。 */
+  gateAfterInvoke?: PetGateState;
 }): PetAgentRuntime {
+  let gate: PetGateState = 'open';
+  const gateListeners = new Set<(state: PetGateState) => void>();
+  const setGate = (next: PetGateState) => {
+    gate = next;
+    for (const listener of gateListeners) listener(next);
+  };
   return {
+    gate: () => gate,
+    onGateChange: (listener) => {
+      gateListeners.add(listener);
+      return () => gateListeners.delete(listener);
+    },
+    /** 测试用:模拟人把卡住的 pet 解开(现实里走 chat 路径)。 */
+    openGate: () => setGate('open'),
     descriptor: () => ({
       petId: options.petId,
       userId: null,
@@ -33,12 +49,17 @@ function pet(options: {
       capabilities: [],
     }),
     invoke: async (input): Promise<PetAgentRuntimeInvokeResult> => {
+      setGate('busy');
       options.onInvoke?.(input);
       await options.hold?.(input.brief);
-      if (options.fail) throw new Error('pet exploded');
+      if (options.fail) {
+        setGate('blocked');
+        throw new Error('pet exploded');
+      }
+      setGate(options.gateAfterInvoke ?? 'open');
       return { reply: options.reply ?? 'done' };
     },
-  };
+  } as PetAgentRuntime & { openGate: () => void };
 }
 
 /** 让 fire-and-forget 的 dispatch 有机会跑到 pet.invoke。 */
@@ -354,4 +375,126 @@ test('a dispatch records who sent it, using the plugin name studio supplies', as
   } finally {
     console.log = original;
   }
+});
+
+test('the queue holds while a pet is waiting, and resumes when a human opens the gate', async () => {
+  // invoke 返回 ≠ 活干完了。pet 撞到人工确认会提前返回,但门是 waiting ——
+  // 若队列信 invoke 的返回,同一个 pet 会同时有两条活:一条悬着等人,一条在跑。
+  const started: string[] = [];
+  const stuck = pet({
+    petId: 'p1',
+    onInvoke: (input) => { started.push(input.brief); },
+    gateAfterInvoke: 'waiting',
+  }) as PetAgentRuntime & { openGate: () => void };
+
+  const studio = await createStudio({
+    studioId: 's1',
+    entryPetId: 'p1',
+    pets: [stuck],
+  });
+
+  await studio.dispatch({ petId: 'p1', request: 'first' });
+  await studio.dispatch({ petId: 'p1', request: 'second' });
+  await flush();
+
+  // 第一条停在等人上,第二条必须还排着。
+  assert.deepEqual(started, ['first']);
+
+  // 人走 chat 路径把它解开(现实里不经过 studio)。
+  stuck.openGate();
+  await flush();
+  assert.deepEqual(started, ['first', 'second']);
+});
+
+test('a plugin hears the gate of its own dispatches, and only its own', async () => {
+  const seen: { threadId: string; state: string; correlationId?: string }[] = [];
+  let mine!: StudioPluginContext;
+  let theirs!: StudioPluginContext;
+
+  const a: StudioPlugin = {
+    name: 'kanban',
+    description: 'p',
+    tools: [],
+    studio: {
+      start: (ctx) => {
+        mine = ctx;
+        ctx.onDispatchGate((change) => {
+          seen.push({
+            threadId: change.threadId,
+            state: change.state,
+            ...(change.correlationId ? { correlationId: change.correlationId } : {}),
+          });
+        });
+      },
+    },
+  };
+  const b: StudioPlugin = {
+    name: 'scheduler',
+    description: 'p',
+    tools: [],
+    studio: { start: (ctx) => { theirs = ctx; } },
+  };
+
+  const studio = await createStudio({
+    studioId: 's1',
+    entryPetId: 'p1',
+    pets: [pet({ petId: 'p1' })],
+    plugins: [a, b],
+  });
+
+  const own = await mine.dispatch({ petId: 'p1', request: 'mine', correlationId: 'task-7' });
+  await theirs.dispatch({ petId: 'p1', request: 'theirs' });
+  await studio.dispatch({ petId: 'p1', request: 'host' });
+  await flush();
+
+  // 只听得见自己派的那条 —— 别的插件和宿主派的都不送过来。
+  assert.ok(seen.length > 0);
+  assert.ok(seen.every((item) => item.threadId === own.threadId));
+  assert.ok(seen.every((item) => item.correlationId === 'task-7'));
+  assert.deepEqual(seen.map((item) => item.state), ['busy', 'open']);
+});
+
+test('a stopped plugin stops hearing gate changes', async () => {
+  // shutdown 之后闸门再变化,已停的插件不该被叫醒。
+  //
+  // 注:这条只覆盖「对外表现」。`gateHandlers` 是否真被清空无法从外部区分 ——
+  // shutdown 同时清了 dispatchOrigins,emitGateChange 会先在那里返回。清理
+  // handler 是防内存泄漏的,不是防这条用例。
+  let calls = 0;
+  let ctx!: StudioPluginContext;
+  const kanban: StudioPlugin = {
+    name: 'kanban',
+    description: 'p',
+    tools: [],
+    studio: {
+      start: (context) => {
+        ctx = context;
+        context.onDispatchGate(() => { calls += 1; });
+      },
+    },
+  };
+
+  const stuck = pet({
+    petId: 'p1',
+    gateAfterInvoke: 'waiting',
+  }) as PetAgentRuntime & { openGate: () => void };
+
+  const studio = await createStudio({
+    studioId: 's1',
+    entryPetId: 'p1',
+    pets: [stuck],
+    plugins: [kanban],
+  });
+
+  await ctx.dispatch({ petId: 'p1', request: 'go' });
+  await flush();
+  assert.ok(calls > 0, 'handler should fire while the plugin is running');
+
+  await studio.shutdown();
+  calls = 0;
+
+  // 人把卡住的 pet 解开 —— 闸门确实变了,但没有插件该听见了。
+  stuck.openGate();
+  await flush();
+  assert.equal(calls, 0);
 });

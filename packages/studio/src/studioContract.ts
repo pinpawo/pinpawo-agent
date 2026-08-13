@@ -20,7 +20,7 @@
 
 import type { AgentToolkit } from '@pinpawo/pet-agent';
 
-import type { PetAgentRuntimeDescriptor } from './types';
+import type { PetAgentRuntimeDescriptor, PetGateState } from './types';
 
 /* ─────────────── 出:dispatch ─────────────── */
 
@@ -56,6 +56,28 @@ export type StudioDispatchResult = {
   threadId: string;
 };
 
+/**
+ * 一次派活的闸门变化。
+ *
+ * **它沿 dispatch 那条线回到发起方,不走 event 总线。** 派活是点对点的,
+ * 它的进展也是 —— "你派的那条活现在怎么样"是发起方与 studio 之间的事,
+ * 与别的插件无关。
+ *
+ * 这条边界要守住:`event` 只承载"某个插件宣布发生了什么"。把通道自己的
+ * 机制反馈也塞进去,event 会慢慢变成万能管道,定义随之失效。
+ */
+export type StudioDispatchGateChange = {
+  /** 哪次 dispatch —— 与 `StudioDispatchResult.threadId` 同一个值。 */
+  threadId: string;
+  petId: string;
+  /** 发起方自己的关联标识,原样带回。 */
+  correlationId?: string;
+  state: PetGateState;
+};
+
+export type StudioDispatchGateHandler =
+  (change: StudioDispatchGateChange) => void | Promise<void>;
+
 /* ─────────────── 入:event ─────────────── */
 
 /**
@@ -90,6 +112,13 @@ export type StudioEventHandler = (event: StudioEvent) => void | Promise<void>;
 export type StudioPluginContext = {
   /** 派活。来源由 studio 补成本插件名,插件不需要(也无法)自报。 */
   dispatch: (input: StudioDispatchInput) => Promise<StudioDispatchResult>;
+  /**
+   * 订阅**本插件派出去的**那些 dispatch 的闸门变化。别的插件派的活不会
+   * 送到这里 —— 这是 dispatch 那条点对点的线,不是共享总线。
+   *
+   * 想听就订,不想听就不订。返回退订函数。
+   */
+  onDispatchGate: (handler: StudioDispatchGateHandler) => () => void;
   notify: (event: StudioEventInput) => void;
   subscribe: (handler: StudioEventHandler) => () => void;
   listPets: () => PetAgentRuntimeDescriptor[];

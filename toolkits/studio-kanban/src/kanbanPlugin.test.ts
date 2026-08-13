@@ -24,6 +24,9 @@ function pet(options: {
   tools: () => KanbanTools;
 }): PetAgentRuntime {
   return {
+    // 假 pet 一跑完门就开 —— 看板用例不涉及卡住的场景。
+    gate: () => 'open',
+    onGateChange: () => () => {},
     descriptor: () => ({
       petId: options.petId,
       userId: null,

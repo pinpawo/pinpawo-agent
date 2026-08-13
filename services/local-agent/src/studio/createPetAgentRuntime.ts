@@ -40,6 +40,7 @@ import type {
   PetAgentRuntimeDescriptor,
   PetAgentRuntimeInvokeInput,
   PetAgentRuntimeInvokeResult,
+  PetGateState,
 } from '@pinpawo/studio';
 import type { StudioWikiAccess } from '@pinpawo/studio';
 
@@ -144,8 +145,41 @@ async function buildInvokeMessages(
   return messages;
 }
 
+/**
+ * checkpoint 上还有没有没跑完的活。
+ *
+ * pet 撞到人工确认时 `graph.invoke` 会**提前返回**,但 graph 停在中断点上,
+ * `next` / `tasks` 非空。这正是"invoke 返回 ≠ 活干完了"的判据。
+ */
+function hasPendingContinuation(snapshot: unknown): boolean {
+  const record = snapshot && typeof snapshot === 'object'
+    ? snapshot as { next?: unknown; tasks?: unknown }
+    : null;
+  const next = Array.isArray(record?.next) ? record.next : [];
+  if (next.length > 0) return true;
+  const tasks = Array.isArray(record?.tasks) ? record.tasks : [];
+  return tasks.length > 0;
+}
+
 export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRuntime {
   let status = initialStatus(config);
+  let gateState: PetGateState = 'open';
+  const gateListeners = new Set<(state: PetGateState) => void>();
+
+  function setGate(next: PetGateState): void {
+    if (gateState === next) return;
+    gateState = next;
+    for (const listener of gateListeners) {
+      try {
+        listener(next);
+      } catch (error) {
+        console.error(
+          '[pet-runtime] gate listener failed:',
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
+  }
   const startupMode = config.startupMode ?? 'standby';
   // A caller-supplied graph is already responsible for its graph config. Do
   // not create and start an unreachable manager beside it.
@@ -219,6 +253,7 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
 
     const previousStatus = status;
     status = 'active';
+    setGate('busy');
     try {
       const graphInput: Parameters<OrchestratorGraph['invoke']>[0] = buildOrchestratorRunInput(
         messages,
@@ -227,15 +262,56 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
       // 撞到 review 就返回 —— 进度已落在 checkpoint 上(#613),答复由客户端
       // 经 pet-agent 的 resume 路径送回。Studio 不参与,也不需要知道。
       const result = await graph.invoke(graphInput, { signal: input.signal, configurable });
+      // 返回不等于干完了。checkpoint 上还有待跑节点 = 停在中断点等人 ——
+      // 门此时是 `waiting`,不是 `open`,队列不该放行下一条。
+      await refreshGate(input.threadId, configurable, 'waiting');
       return { reply: readReply(result) };
+    } catch (error) {
+      // 失败必须停下:后面排着的活可能正建立在这条的产出之上,在坏掉的状态
+      // 上继续操作才是破坏性的来源。留给人去 chat 里看一眼。
+      setGate('blocked');
+      throw error;
     } finally {
       status = previousStatus === 'active' ? 'standby' : previousStatus;
+    }
+  }
+
+  /**
+   * 读一次 checkpoint,决定门开还是关。
+   *
+   * `closedState` 是"还有活没跑完"时的落点 —— 正常返回后是 `waiting`
+   * (停在中断点等人)。读不到快照时保守放行,否则一次读取失败就会把这个
+   * pet 永久锁死。
+   */
+  async function refreshGate(
+    threadId: string | undefined,
+    configurable: Record<string, unknown>,
+    closedState: PetGateState,
+  ): Promise<void> {
+    if (!threadId || !config.checkpoint) {
+      setGate('open');
+      return;
+    }
+    try {
+      const snapshot = await graph.getState({ configurable });
+      setGate(hasPendingContinuation(snapshot) ? closedState : 'open');
+    } catch (error) {
+      console.error(
+        `[pet-runtime] gate check failed (thread=${threadId}); opening to avoid a permanent stall:`,
+        error instanceof Error ? error.message : error,
+      );
+      setGate('open');
     }
   }
 
   return {
     descriptor,
     invoke,
+    gate: () => gateState,
+    onGateChange: (listener) => {
+      gateListeners.add(listener);
+      return () => gateListeners.delete(listener);
+    },
     shutdown: async () => {
       if (ownsToolkitRuntimeManager && toolkitRuntimeManager) {
         await toolkitRuntimeManager.stop();

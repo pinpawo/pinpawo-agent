@@ -80,7 +80,10 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
     }
   }
 
-  async function dispatch(request: StudioDispatchInput): Promise<StudioDispatchResult> {
+  async function dispatch(
+    request: StudioDispatchInput,
+    source?: string,
+  ): Promise<StudioDispatchResult> {
     const pet = petsById.get(request.petId);
     if (!pet) {
       throw new Error(`studio "${input.studioId}": unknown petId "${request.petId}"`);
@@ -92,6 +95,20 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
     }
 
     const threadId = `studio:${input.studioId}:pet:${request.petId}:dispatch:${randomUUID()}`;
+
+    // 派活这件事本身也上总线。source 由 studio 补:插件派活时是插件名,
+    // 缺省的 'studio' 表示不来自任何插件(如 submitRequest 那种外部输入)。
+    //
+    // 这是 §2.1「所有 dispatch 都看得见」唯一的兑现方式 —— 让它成为一条
+    // 别的插件听得见的 event,而不是只写进日志。studio 自己到此为止:
+    // 不限流、不去重、不据此路由。
+    notify({
+      type: 'dispatch',
+      source: source ?? 'studio',
+      ...(request.correlationId ? { correlationId: request.correlationId } : {}),
+      payload: { petId: request.petId, threadId },
+      occurredAt: new Date().toISOString(),
+    });
 
     // 发出即返回 —— studio 不等 pet 干完,也不解释它的返回值。pet 的产出
     // 经由 toolkit → 插件 → event 汇报,不走这条路。
@@ -114,7 +131,9 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
 
   function buildPluginContext(plugin: StudioPlugin): StudioPluginContext {
     return {
-      dispatch,
+      // source 由 studio 从 context 补,与 notify 同理 —— 自报的来源迟早
+      // 会撒谎,插件也不该为此操心。
+      dispatch: (request: StudioDispatchInput) => dispatch(request, plugin.name),
       notify: (event: StudioEventInput) => notify({
         ...event,
         source: plugin.name,

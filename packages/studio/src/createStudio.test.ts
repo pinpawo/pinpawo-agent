@@ -272,3 +272,47 @@ test('a plugin without a studio aspect is just a toolkit', async () => {
   assert.deepEqual(studio.listPets().map((descriptor) => descriptor.petId), ['p1']);
   await studio.shutdown();
 });
+
+test('a dispatch is announced on the bus with a studio-supplied source', async () => {
+  // 「所有 dispatch 都看得见」的兑现:派活本身是一条 event,别的插件听得见。
+  // source 由 studio 补 —— 插件自报的来源迟早会撒谎。
+  const seen: { type: string; source: string; payload?: unknown }[] = [];
+
+  let ctx!: StudioPluginContext;
+  const kanban: StudioPlugin = {
+    name: 'kanban',
+    description: 'test plugin',
+    tools: [],
+    studio: { start: (context) => { ctx = context; } },
+  };
+  const watcher: StudioPlugin = {
+    name: 'watcher',
+    description: 'test plugin',
+    tools: [],
+    studio: {
+      start: (context) => {
+        context.subscribe((event) => {
+          if (event.type === 'dispatch') {
+            seen.push({ type: event.type, source: event.source, payload: event.payload });
+          }
+        });
+      },
+    },
+  };
+
+  const studio = await createStudio({
+    studioId: 's1',
+    entryPetId: 'p1',
+    pets: [pet({ petId: 'p1' })],
+    plugins: [kanban, watcher],
+  });
+
+  // 插件派活 —— source 应是插件名,即便它没(也无法)自报。
+  await ctx.dispatch({ petId: 'p1', request: 'from plugin' });
+  // 外部输入 —— 不来自任何插件。
+  await studio.submitRequest('from user');
+  await flush();
+
+  assert.deepEqual(seen.map((e) => e.source), ['kanban', 'studio']);
+  assert.equal((seen[0]?.payload as { petId: string }).petId, 'p1');
+});

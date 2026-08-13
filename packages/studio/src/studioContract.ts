@@ -91,6 +91,7 @@ export type StudioEventHandler = (event: StudioEvent) => void | Promise<void>;
  * 插件拿到的 studio 能力。它只能做两件事:派活、发通知。
  */
 export type StudioPluginContext = {
+  /** 派活。来源由 studio 补成本插件名,插件不需要(也无法)自报。 */
   dispatch: (input: StudioDispatchInput) => Promise<StudioDispatchResult>;
   notify: (event: StudioEventInput) => void;
   subscribe: (handler: StudioEventHandler) => () => void;

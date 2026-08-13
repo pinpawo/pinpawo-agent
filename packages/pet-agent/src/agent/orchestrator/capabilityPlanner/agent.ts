@@ -1,4 +1,5 @@
 import {
+  AIMessage,
   HumanMessage,
   RemoveMessage,
   SystemMessage,
@@ -66,6 +67,7 @@ const plannerPrivateStateSchema = z4.object({
     z4.string(),
     z4.custom<PlannerCommit>(),
   ).default({}),
+  terminalRepairInputId: z4.string().default(''),
   compactionCount: z4.number().int().nonnegative().default(0),
 });
 
@@ -338,6 +340,13 @@ function currentPlannerInput(state: Partial<PlannerPrivateState>) {
   return state.currentInput;
 }
 
+function terminalRepairMessage(input: CapabilityPlannerInput) {
+  const actions = input.mode === 'entry'
+    ? 'submit_plan, request_user_input, or report_unavailable'
+    : 'continue_current, advance_plan, complete_goal, request_user_input, or report_unavailable';
+  return `Your previous response did not finish this Planner turn. Invoke exactly one valid terminal tool now: ${actions}. Do not respond with ordinary text.`;
+}
+
 function createPrivatePlannerMiddleware(params: {
   privateContextMaxChars: number;
   privateContextKeepInputs: number;
@@ -386,6 +395,9 @@ function createPrivatePlannerMiddleware(params: {
           plannerCommit: cachedCommit,
           committedInputId: traceChanged || registryChanged ? '' : state.committedInputId,
           processedInputs: traceChanged || registryChanged ? {} : state.processedInputs,
+          terminalRepairInputId: traceChanged || registryChanged
+            ? ''
+            : state.terminalRepairInputId,
           compactionCount: traceChanged || registryChanged
             ? 0
             : state.compactionCount + (compactedMessages ? 1 : 0),
@@ -407,6 +419,27 @@ function createPrivatePlannerMiddleware(params: {
           buildCapabilityPlannerAgentSystemPrompt(input.mode),
         ),
       });
+    },
+    afterAgent: {
+      hook: (state) => {
+        const input = currentPlannerInput(state);
+        const latestMessage = state.messages.at(-1);
+        if (!AIMessage.isInstance(latestMessage)
+          || latestMessage.tool_calls?.length
+          || state.plannerCommit
+          || state.terminalRepairInputId === input.inputId) {
+          return undefined;
+        }
+        return {
+          messages: [new HumanMessage({
+            id: `planner-repair:${input.inputId}`,
+            content: terminalRepairMessage(input),
+          })],
+          terminalRepairInputId: input.inputId,
+          jumpTo: 'model' as const,
+        };
+      },
+      canJumpTo: ['model'],
     },
     wrapToolCall: async (request, handler) => {
       const input = currentPlannerInput(request.state);
@@ -570,6 +603,7 @@ export function createCapabilityPlannerAgent(params: {
               plannerCommit: null,
               committedInputId: '',
               processedInputs: {},
+              terminalRepairInputId: '',
               compactionCount: 0,
             });
           }

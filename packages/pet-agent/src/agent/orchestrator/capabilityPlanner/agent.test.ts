@@ -1072,6 +1072,51 @@ test('Planner returns to Answer after three capability_search calls without gene
   });
 });
 
+test('Planner repairs an ordinary text response after capability_search', async (t) => {
+  const workspace = await createWorkspace(t, {
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary workspace tasks.',
+      instructions: 'Complete the requested work.',
+    }),
+  });
+  const model = new ScriptedPlannerModel([{
+    toolCalls: [{
+      id: 'search-telecom',
+      name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+      args: { terms: ['telecom license', '增值电信', '审查'] },
+    }],
+  }, {
+    content: 'The general Capability can handle this request.',
+  }, {
+    structuredOutput: {
+      kind: 'plan',
+      args: {
+        tasks: [{
+          capability: 'general',
+          task: 'Review the telecom licensing requirements and report the findings.',
+        }],
+      },
+    },
+  }]);
+
+  const result = await createCapabilityPlannerAgent({ model }).invoke(
+    plannerInput(workspace),
+  );
+
+  assert.deepEqual(result, {
+    action: 'execute_plan',
+    tasks: [{
+      capability: 'general',
+      task: 'Review the telecom licensing requirements and report the findings.',
+    }],
+  });
+  assert.equal(model.invocations.length, 3);
+  assert.ok(model.invocations[2]?.some((message) =>
+    message instanceof HumanMessage
+    && message.id === 'planner-repair:trace_started:trace-test'));
+});
+
 test('a submitted plan becomes private Planner state for the final reply', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
@@ -1538,7 +1583,7 @@ test('natural language completion cannot escape the commit protocol', async (t) 
     (error: unknown) => error instanceof CapabilityPlannerAgentError
       && error.code === 'submission_required',
   );
-  assert.equal(model.invocations.length, 1);
+  assert.equal(model.invocations.length, 2);
 });
 
 test('missing structured output and direct text is rejected', async (t) => {
@@ -1553,7 +1598,7 @@ test('missing structured output and direct text is rejected', async (t) => {
       error instanceof CapabilityPlannerAgentError
       && error.code === 'submission_required',
   );
-  assert.equal(model.invocations.length, 1);
+  assert.equal(model.invocations.length, 2);
 });
 
 test('Planner Agent enforces a total timeout', async (t) => {

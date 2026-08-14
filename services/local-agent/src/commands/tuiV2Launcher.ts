@@ -213,8 +213,8 @@ export function resolveTuiV2LaunchPlan(
   }
 
   throw new Error([
-    'OpenTUI v2 is not bundled with this PinPawo installation.',
-    'Use `pinpawo tui --legacy`, or provide PINPAWO_TUI_V2_BIN.',
+    'The terminal client is not bundled with this PinPawo installation.',
+    'Reinstall the package, or provide PINPAWO_TUI_V2_BIN.',
   ].join(' '));
 }
 
@@ -347,9 +347,8 @@ async function spawnTuiV2(
         && (error as NodeJS.ErrnoException).code === 'ENOENT';
       reject(new Error(missingBun
         ? [
-            'Bun is required to run OpenTUI v2.',
-            'Install optional dependencies, set PINPAWO_BUN_BIN,',
-            'or use `pinpawo tui --legacy`.',
+            'Bun is required to run the terminal client.',
+            'Install optional dependencies, or set PINPAWO_BUN_BIN.',
           ].join(' ')
         : `Could not start OpenTUI v2: ${error.message}`));
     });

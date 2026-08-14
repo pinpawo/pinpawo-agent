@@ -1,5 +1,9 @@
 # TUI v2 OpenTUI Phase 1 capability matrix
 
+> **Status: historical record.** 这里描述的 legacy Ink 客户端
+> (`services/local-agent/src/tui`) 已删除,`pinpawo tui` 现在是唯一的终端
+> 客户端。本页保留当时的迁移对照,不代表当前行为。
+
 Issue: #454
 Package: `services/tui`
 Framework: `@opentui/core` 0.4.5

@@ -29,9 +29,8 @@
 - `pinpawo run` is an alias for `pinpawo server`.
 - `--stdio` selects one-peer JSONL stdio instead of the local HTTP/WebSocket
   server; reserve standard output for protocol messages in that mode.
-- `pinpawo tui --v2` selects the OpenTUI client. `--legacy` and `--v2` are
-  mutually exclusive. `--check` and `--qa` require `--v2` and cannot be used
-  together.
+- `pinpawo tui` starts the terminal client — the only one. `--check` and
+  `--qa` cannot be used together.
 - `--workdir` is resolved to an absolute path before the host starts. It scopes
   runtime state and relative tool paths; see [Workdir configuration](../runtime/workdir.md).
 

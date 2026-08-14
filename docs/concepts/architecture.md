@@ -93,7 +93,7 @@ state from a transient tool-event stream.
 
 | Mode | Use when | Entry point |
 |---|---|---|
-| Interactive local agent | A person works directly in the terminal. | `pinpawo tui` or `pinpawo tui --v2` |
+| Interactive local agent | A person works directly in the terminal. | `pinpawo tui` |
 | Local server | Another local UI or app needs an HTTP/WebSocket host. | `pinpawo server` |
 | JSONL stdio | A process integration needs one transport-safe peer. | `pinpawo server --stdio` |
 | Studio | A request needs planner-led work across multiple pets. | `pinpawo server --mode studio` |

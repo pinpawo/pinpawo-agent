@@ -10,7 +10,6 @@ type LocalAgentCliHandlers = {
   runLogin?: () => Promise<void> | void;
   runActorSelect?: () => Promise<void> | void;
   runAgent?: (opts: { workdir?: string; stdio: boolean; mode: ServerMode }) => Promise<void> | void;
-  runTui?: (opts: { workdir?: string }) => Promise<void> | void;
   runTuiV2?: (opts: {
     workdir?: string;
     check: boolean;
@@ -117,45 +116,27 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
   program
     .command('tui')
     .description('Start the interactive terminal UI')
-    .option('--v2', 'use the OpenTUI v2 client')
-    .option('--legacy', 'force the legacy Ink client')
-    .option('--check', 'verify the OpenTUI v2 runtime without entering terminal mode')
-    .option('--qa', 'run the deterministic OpenTUI v2 terminal QA scenario')
+    .option('--check', 'verify the terminal runtime without entering terminal mode')
+    .option('--qa', 'run the deterministic terminal QA scenario')
     .option('--workdir <directory>', 'agent working directory for runtime state and relative tool paths')
     .action(async (options: {
       check?: boolean;
-      legacy?: boolean;
       qa?: boolean;
-      v2?: boolean;
       workdir?: string;
     }) => {
-      if (options.v2 && options.legacy) {
-        throw new Error('Choose either --v2 or --legacy, not both.');
-      }
-      if (options.check && !options.v2) {
-        throw new Error('--check requires the OpenTUI v2 client (`--v2`).');
-      }
-      if (options.qa && !options.v2) {
-        throw new Error('--qa requires the OpenTUI v2 client (`--v2`).');
-      }
       if (options.check && options.qa) {
         throw new Error('Choose either --check or --qa, not both.');
       }
       const workdir = options.workdir?.trim()
         ? resolveWorkdirOption(options.workdir)
         : undefined;
-      if (options.v2) {
-        const runTuiV2 = handlers.runTuiV2
-          ?? (await import('./commands/tuiV2Launcher')).runTuiV2;
-        await runTuiV2({
-          workdir,
-          check: options.check ?? false,
-          qa: options.qa ?? false,
-        });
-        return;
-      }
-      const runTui = handlers.runTui ?? (await import('./commands/tui')).runTui;
-      await runTui({ workdir });
+      const runTuiV2 = handlers.runTuiV2
+        ?? (await import('./commands/tuiV2Launcher')).runTuiV2;
+      await runTuiV2({
+        workdir,
+        check: options.check ?? false,
+        qa: options.qa ?? false,
+      });
     });
 
   program

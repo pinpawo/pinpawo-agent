@@ -22,6 +22,41 @@ plugin ──event────> studio ──dispatch──> pet
 Studio **不包含职责,但需要形成契约**。它不决定什么时候派、派给谁、任务
 怎么排 —— 那些是插件的职责;它只定义这些交互长什么样。
 
+### 1.1 契约全貌
+
+一屏看完 studio 暴露的全部东西:
+
+```ts
+type Studio = {
+  entryPetId: string;                    // 外部输入的默认目标,无特权
+  dispatch: (input) => Promise<{ threadId }>;
+  notify: (event) => void;
+  subscribe: (handler) => () => void;
+  listPets: () => PetAgentRuntimeDescriptor[];
+  shutdown: () => Promise<void>;
+};
+
+// 插件拿到的那一份 —— 多一个回路,少一个 shutdown
+type StudioPluginContext = {
+  dispatch: (input) => Promise<{ threadId }>;   // source 由 studio 补
+  onDispatchGate: (handler) => () => void;      // 只听自己派出去的
+  notify: (event) => void;                      // source 由 studio 补
+  subscribe: (handler) => () => void;
+  listPets: () => PetAgentRuntimeDescriptor[];
+};
+
+// studio 对 runtime 的全部要求 —— 与 local-agent 唯一的接触点
+type PetAgentRuntime = {
+  descriptor: () => PetAgentRuntimeDescriptor;
+  invoke: (input) => Promise<{ reply }>;
+  gate: () => PetGateState;                     // open / busy / waiting / blocked
+  onGateChange: (listener) => () => void;
+  shutdown?: () => Promise<void>;
+};
+```
+
+没有别的了。凡是想往这里加东西的念头,先回 §5 确认它是不是通道的形状。
+
 ---
 
 ## 2. 两个方向
@@ -106,45 +141,6 @@ dispatch 依然立即返回 `{ threadId }`。只有 `disabled` 的 pet 会被拒
 
 宿主派的活没有回路,这是刻意的:**宿主要听,就写一个插件**(计划中的 http
 plugin 正是如此),而不是给宿主开专属通道。
-
-> 设计意图:loop 跑起来一定有人参与。参与若集中在一处反而不好 —— 让用户看见
-> 每个 pet 的状态、各自去处理去优化,稳定之后需要人介入的部分会越来越少。
-> 但异常情况必须有人参与,所以 `waiting` / `blocked` 不自动放行。
-
-#### gate:队列凭什么放行
-
-队列不能靠"上一次 `invoke` 返回了"来放行 —— pet 撞到人工确认时 `invoke`
-会**提前返回**,活并没有干完。照此放行,同一个 pet 会同时有两条活:一条
-悬着等人,一条在跑。这正是队列本要防的事。
-
-所以 runtime 暴露一扇闸门,四种状态:
-
-| 状态 | 含义 | 门 | 谁能推动 |
-| --- | --- | --- | --- |
-| `open` | 空闲 | 开 | — |
-| `busy` | 正在跑(模型 / 工具 / subagent) | 关 | **它自己会好** |
-| `waiting` | 等外部输入 | 关 | 只有人 |
-| `blocked` | 失败 / pet 声明干不了 | 关 | 只有人 |
-
-**失败必须停下。** 队列里排着的活往往彼此依赖 —— 前一条写文件失败了,后一条
-接着去改那个文件,那不是"下一个任务也失败",是在一个坏掉的状态上继续操作。
-破坏性正是这么来的。
-
-**门只由"活干完了没有"决定,不由 review 决定。** 人回答完了任务还得继续跑,
-门当然还关着。§4.1 因此仍然成立:studio 不认识 review,只认识门开不开。
-
-**gate 没有控制面。** 它是一面镜子,不是开关 —— studio 只读,不能操作 pet。
-人要解开卡住的 pet,走 chat 路径直接跟它对话(两条路共用 checkpointer,
-chat 起会话就能接上),与 studio 无关。
-
-#### 通知到人:不需要新机制
-
-gate 是 studio 唯一"看得见 pet"的地方。因此 gate 变化时 studio 发一条 event,
-插件自己解释 —— kanban 收到某个 pet `blocked` 就在看板上标出来,将来要报警、
-要统计的插件各自订阅。**studio 只报告事实,不决定谁该被通知。**
-
-与 dispatch 的差别是自洽的:dispatch 点对点(谁给谁派活不该让所有插件看见),
-gate 状态是**关于 pet 的事实**,任何插件都可能关心,本来就该广播。
 
 > 设计意图:loop 跑起来一定有人参与。参与若集中在一处反而不好 —— 让用户看见
 > 每个 pet 的状态、各自去处理去优化,稳定之后需要人介入的部分会越来越少。
@@ -367,8 +363,9 @@ local-agent 把实现注进来,方向是**单向**的:studio 从不反过来向 
 
 ## 6. 缩减结果
 
-已落地。旧的 `createStudioOrchestrator.ts`(1070 行)整体删除,取而代之的是
-`createStudio.ts`(157 行)—— 它只做转发,没有任何管理策略。
+已落地(#629)。旧的 `createStudioOrchestrator.ts`(1070 行)整体删除,
+取而代之的是 `createStudio.ts`(315 行)—— 它只做三件事:持有 pet registry、
+按 pet 排队转发 dispatch、维护 event 总线。没有任何管理策略。
 
 | 随推模型消失 | 去向 |
 | --- | --- |
@@ -380,7 +377,10 @@ local-agent 把实现注进来,方向是**单向**的:studio 从不反过来向 
 | 私有 HITL `while(true)` 循环 | 删除:§4.1 |
 | wiki curator / skeleton 钩子 | 删除:写知识库是插件的事,studio 不在回路上 |
 
-`@pinpawo/studio` 现约 800 行(含契约、配置解析、wiki 只读 port),不碰文件系统。
+`@pinpawo/studio` 现 1746 行(含契约、队列与闸门、配置解析、wiki 只读 port),
+不碰文件系统,不依赖 local-agent。
+
+净删约 6400 行。
 
 ---
 
@@ -398,6 +398,11 @@ local-agent 把实现注进来,方向是**单向**的:studio 从不反过来向 
 | studio 需要可插拔的"驱动器插槽" | ❌ 插件本身就是驱动器 |
 | 插件是独立于 toolkit 的新概念 | ❌ 就是 toolkit 加一个切面 |
 | `submitRequest` 需要路由给某个插件 | ❌ 它就是一次 dispatch,方法本身已删 |
+| dispatch 应作为 event 广播,让所有插件看见 | ❌ 点对点;广播会凭空制造插件间耦合 |
+| gate 变化应作为 event 广播 | ❌ 同上,沿 dispatch 回发起方(§2.1) |
+| 队列可以靠"`invoke` 返回了"放行 | ❌ 撞人工确认时它会提前返回(§2.1 gate) |
+| 失败可以放行下一条,失败留看板等人 | ❌ 排队的活彼此依赖,得停下(`blocked`) |
+| `shutdown` 应排干队列 | ❌ `waiting` 可能永远等不到人,会挂死 |
 
 `checkpointer`(#613)**不受影响** —— pet 执行进度仍需落盘,与谁驱动无关。
 
@@ -440,9 +445,10 @@ local-agent 把实现注进来,方向是**单向**的:studio 从不反过来向 
 
 ## 9. 待定项
 
-1. **插件状态的落盘约定**。`KanbanBoard` 目前自己管持久化,scheduler 回来时会
-   面对同一个问题。需要一个统一位置(大概是 `.pinpawo/studio/<plugin-id>/`),
-   但这属于宿主约定,不进契约。
+1. **插件状态的落盘约定**。`KanbanBoard` 有 `snapshot()` / `restore()`,但
+   **没有任何调用方** —— 它现在只活在内存里,进程重启看板归零。scheduler
+   回来时会面对同一个问题。需要一个统一位置(大概是
+   `<workdir>/.pinpawo/studio/<plugin-id>/`),但这属于宿主约定,不进契约。
 2. 各插件的领域模型与生命周期形态(属于插件自身,不进本契约)。
 3. event 是否需要"至少一次"投递保证。目前是纯内存同步扇出,进程重启即丢。
 

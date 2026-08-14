@@ -94,6 +94,7 @@ test('planner goal evaluation rejects a semantically wrong plan with the correct
       result: 'execute_plan',
       nextTask: '探索 auth 模块现有结构和风险',
       capabilityName: 'explore',
+      gapNote: null,
       remainingPlan: [{
         capability: 'general',
         task: '撰写一篇与 auth 重构无关的博客',

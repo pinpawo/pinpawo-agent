@@ -47,6 +47,7 @@ const PRIVATE_COMPACTION_SUMMARY_MAX_CHARS = 24_000;
 const PRIVATE_COMPACTION_MESSAGE_NAME = 'private_planner_compaction';
 const MAX_PLAN_TASKS = 24;
 const MAX_TASK_TEXT_CHARS = 2_000;
+const MAX_GAP_NOTE_CHARS = 2_000;
 const CONTINUE_CURRENT_TOOL_NAME = 'continue_current';
 const SUBMIT_PLAN_TOOL_NAME = 'submit_plan';
 const ADVANCE_PLAN_TOOL_NAME = 'advance_plan';
@@ -105,13 +106,20 @@ function plannerTasksSchema() {
 
 function createPlannerTerminalTools(): StructuredTool[] {
   const continueCurrent = tool(
-    async ({ tasks }: { tasks: Array<{ capability: string; task: string }> }) => {
-      return JSON.stringify({ action: 'continue_current', tasks });
+    async ({ tasks, gap_note }: {
+      tasks: Array<{ capability: string; task: string }>;
+      gap_note?: string;
+    }) => {
+      return JSON.stringify({ action: 'continue_current', tasks, gapNote: gap_note });
     },
     {
       name: CONTINUE_CURRENT_TOOL_NAME,
-      description: 'Boundary-only terminal action. The current task is incomplete. Continue the same active delegation; the first task must use the Current Capability shown in the Planner input. Optional future tasks may follow.',
-      schema: z.object({ tasks: plannerTasksSchema() }),
+      description: 'Boundary-only terminal action. The current task is incomplete. Continue the same active delegation; the first task must use the Current Capability shown in the Planner input. Explain the observed gap and give concise, forward-looking correction or verification guidance for the next attempt. Optional future tasks may follow.',
+      schema: z.object({
+        tasks: plannerTasksSchema(),
+        gap_note: z.string().trim().min(1).max(MAX_GAP_NOTE_CHARS).optional()
+          .describe('Continuation guidance for the same delegation. State the observed gap, the concrete next action, and the evidence needed for acceptance. Do not copy the previous result verbatim.'),
+      }),
     },
   );
   const submitPlan = tool(

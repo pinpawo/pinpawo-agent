@@ -185,7 +185,7 @@ function buildAcceptedDelegationUpdate(
 function buildContinueCurrentUpdate(params: {
   state: OrchestratorStateType;
   activeDelegation: TaskActiveDelegation;
-  commit: PlannerCommit;
+  commit: Extract<PlannerCommit, { action: 'continue_current' }>;
 }) {
   const { state, activeDelegation, commit } = params;
   const [nextTask, ...remainingPlan] = commit.tasks;
@@ -204,7 +204,7 @@ function buildContinueCurrentUpdate(params: {
     transcriptRunId: activeDelegation.transcriptRunId,
     delegationId: activeDelegation.id,
     task: nextTask.task,
-    gapNote: null,
+    gapNote: commit.gapNote,
   });
   return {
     messages: materialized.laneMessages,

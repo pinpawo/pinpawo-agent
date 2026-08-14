@@ -12,7 +12,7 @@ const boundaryContext = {
   allowedCapabilityNames: ['general', 'explore'],
 };
 
-test('Planner commit exposes only action and plan tasks', () => {
+test('Planner commit exposes only action, plan tasks, and continuation guidance', () => {
   assert.deepEqual(parsePlannerCommit({
     action: 'execute_plan',
     tasks: [{ capability: 'explore', task: 'Inspect the repository.' }],
@@ -63,7 +63,25 @@ test('Planner commit enforces entry and continuation invariants', () => {
   assert.throws(() => parsePlannerCommit({
     action: 'continue_current',
     tasks: [{ capability: 'explore', task: 'Switch executor.' }],
+    gapNote: 'The current Capability still needs to finish the investigation.',
   }, boundaryContext), /must keep the active delegation capability/);
+  assert.deepEqual(parsePlannerCommit({
+    action: 'continue_current',
+    tasks: [{ capability: 'general', task: 'Finish the current investigation.' }],
+  }, boundaryContext), {
+    action: 'continue_current',
+    tasks: [{ capability: 'general', task: 'Finish the current investigation.' }],
+    gapNote: '上一次结果尚未完全满足当前任务；按本轮 task 继续执行，并返回可核验的完成证据。',
+  });
+  assert.deepEqual(parsePlannerCommit({
+    action: 'continue_current',
+    tasks: [{ capability: 'general', task: 'Finish the current investigation.' }],
+    gapNote: 'The previous result omitted verification; run it and return the evidence.',
+  }, boundaryContext), {
+    action: 'continue_current',
+    tasks: [{ capability: 'general', task: 'Finish the current investigation.' }],
+    gapNote: 'The previous result omitted verification; run it and return the evidence.',
+  });
   assert.throws(() => parsePlannerCommit({
     action: 'execute_plan',
     tasks: [{ capability: 'explore', task: 'Start a replacement plan.' }],
@@ -87,4 +105,9 @@ test('Planner commit enforces entry and continuation invariants', () => {
     action: 'goal_done',
     tasks: [{ capability: 'general', task: 'Unexpected work.' }],
   }, boundaryContext), /forbids tasks/);
+  assert.throws(() => parsePlannerCommit({
+    action: 'goal_done',
+    tasks: [],
+    gapNote: 'Unexpected continuation guidance.',
+  }, boundaryContext), /forbids a gap note/);
 });

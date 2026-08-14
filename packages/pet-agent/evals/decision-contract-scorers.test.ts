@@ -103,3 +103,32 @@ test('planner deterministic scorer can enforce a case-specific future task count
     0,
   );
 });
+
+test('planner regression case requires continuation guidance', () => {
+  const testCase = capabilityPlanningBasicsDataset.cases.find(
+    (item) => item.name === 'boundary-corrects-context-summary-output',
+  );
+  assert.ok(testCase);
+  const missing = scoreCapabilityPlanning({
+    result: 'continue_current',
+    nextTask: testCase.input.activeTask,
+    capabilityName: 'general',
+    gapNote: null,
+    remainingPlan: [],
+  }, testCase.expected);
+  assert.equal(
+    missing.find(({ key }) => key === 'planner_gap_note_present')?.score,
+    0,
+  );
+  const guided = scoreCapabilityPlanning({
+    result: 'continue_current',
+    nextTask: testCase.input.activeTask,
+    capabilityName: 'general',
+    gapNote: '上次只返回内部上下文且尚未执行；实际修改文件、运行生成脚本，并返回验证证据。',
+    remainingPlan: [],
+  }, testCase.expected);
+  assert.equal(
+    guided.find(({ key }) => key === 'planner_gap_note_present')?.score,
+    1,
+  );
+});

@@ -1447,6 +1447,7 @@ test('boundary Planner can correct an invalid continuation capability', async (t
           capability: 'general',
           task: 'Finish collecting the missing repository evidence.',
         }],
+        gap_note: 'The repository evidence is incomplete; collect and verify the missing facts.',
       },
     }],
   }, {
@@ -1458,6 +1459,7 @@ test('boundary Planner can correct an invalid continuation capability', async (t
           capability: 'explore',
           task: 'Finish collecting the missing repository evidence.',
         }],
+        gap_note: 'The repository evidence is incomplete; collect and verify the missing facts.',
       },
     }],
   }]);
@@ -1484,12 +1486,52 @@ test('boundary Planner can correct an invalid continuation capability', async (t
       capability: 'explore',
       task: 'Finish collecting the missing repository evidence.',
     }],
+    gapNote: 'The repository evidence is incomplete; collect and verify the missing facts.',
   });
   assert.equal(model.invocations.length, 2);
   assert.ok(model.invocations[1]?.some((message) =>
     ToolMessage.isInstance(message)
     && message.status === 'error'
     && readMessageText(message).includes('active delegation capability "explore"')));
+});
+
+test('boundary Planner supplies default guidance when gap_note is omitted', async (t) => {
+  const workspace = await createWorkspace(t, {
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary tasks.',
+      instructions: 'Complete and verify the requested work.',
+    }),
+  });
+  const tasks = [{
+    capability: 'general',
+    task: 'Run the missing verification and return its result.',
+  }];
+  const model = new ScriptedPlannerModel([{
+    toolCalls: [{
+      id: 'continue-with-default-guidance',
+      name: 'continue_current',
+      args: { tasks },
+    }],
+  }]);
+
+  const result = await createCapabilityPlannerAgent({ model }).invoke(
+    plannerInput(workspace, {
+      mode: 'boundary',
+      activeDelegation: {
+        delegationId: 'delegation-1',
+        capability: 'general',
+        task: 'Complete and verify the change.',
+      },
+    }),
+  );
+
+  assert.deepEqual(result, {
+    action: 'continue_current',
+    tasks,
+    gapNote: '上一次结果尚未完全满足当前任务；按本轮 task 继续执行，并返回可核验的完成证据。',
+  });
+  assert.equal(model.invocations.length, 1);
 });
 
 test('boundary Planner repairs submit_plan to advance_plan', async (t) => {

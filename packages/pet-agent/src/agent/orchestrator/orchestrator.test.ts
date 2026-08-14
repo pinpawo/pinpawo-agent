@@ -166,14 +166,16 @@ function createQueuedPlannerRunner(
         if (planning.outcome === 'continue') {
           const active = input.activeDelegation;
           if (!active) throw new Error('scripted continue requires active delegation');
+          const gapNote = typeof planning.gap_note === 'string'
+            ? planning.gap_note
+            : '当前 delegated task 还未达标，继续执行。';
           return {
             action: 'continue_current',
             tasks: [{
               capability: active.capability,
-              task: typeof planning.gap_note === 'string'
-                ? `${active.task}\n\n继续要求：${planning.gap_note}`
-                : active.task,
+              task: active.task,
             }],
+            gapNote,
           };
         }
         if (planning.outcome !== 'task_done') {
@@ -1662,6 +1664,7 @@ test('limit-reached progress announce lets model choose the same capability dele
             capability: 'inspect_repo',
             task: '继续调查仓库 capability 注册链路。',
           }],
+          gapNote: '上次调查结果不足；继续收集并验证 capability 注册链路证据。',
         };
       },
     },
@@ -4970,10 +4973,7 @@ test('Planner continue_current action can re-enter main and finalize handoff', a
   assert.ok(handoffSource);
   assert.equal(handoffSource.handoffFrom, 'capability:general');
   assert.equal(handoffSource.runId, input.runId);
-  assert.equal(
-    handoffSource.task,
-    '批量梳理仓库问题\n\n继续要求：保留当前发现并往下推进。',
-  );
+  assert.equal(handoffSource.task, '批量梳理仓库问题');
   // Final handoff on answer should clear lane transcript for finished continuation.
   assert.equal(laneMessages(state.messages, 'capability:general', input.runId, activeDelegation.id)
     .filter((message) => getMessageIsAnnounce(message)).length === 0, true);
@@ -6241,6 +6241,7 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
               capability: 'general',
               task: '继续原来的仓库检查，并优先检查最新修改。',
             }],
+            gapNote: '上次结果尚未覆盖最新修改；检查并返回对应证据。',
           }
           : { action: 'goal_done', tasks: [] };
       },
@@ -6594,9 +6595,12 @@ test('continue_current appends a continuation briefing carrying the gap note', a
   assert.match(continuation, /^<delegation_briefing[^>]*mode="continue">/);
   assert.match(
     continuation,
-    /<task>[\s\S]*关闭 GitHub Issue #272。[\s\S]*继续要求：未验证 issue 状态，请确认已关闭。[\s\S]*<\/task>/,
+    /<task>[\s\S]*关闭 GitHub Issue #272。[\s\S]*<\/task>/,
   );
-  assert.doesNotMatch(continuation, /<gap_note>/);
+  assert.match(
+    continuation,
+    /<gap_note>[\s\S]*未验证 issue 状态，请确认已关闭。[\s\S]*<\/gap_note>/,
+  );
 
   // The continuation run keeps the same delegation transcript and reads the
   // continuation briefing as the latest message.

@@ -23,10 +23,16 @@ export type OrchestratorRuntimeFailure =
   | 'planner_checkpoint_missing'
   | 'checkpoint_incompatible';
 
-export type PlannerCommit = {
-  readonly action: PlannerAction;
-  readonly tasks: readonly CapabilityPlanTask[];
-};
+export type PlannerCommit =
+  | {
+      readonly action: 'continue_current';
+      readonly tasks: readonly CapabilityPlanTask[];
+      readonly gapNote: string;
+    }
+  | {
+      readonly action: Exclude<PlannerAction, 'continue_current'>;
+      readonly tasks: readonly CapabilityPlanTask[];
+    };
 
 export type PlannerDelegationInput = {
   readonly delegationId: string;
@@ -45,9 +51,12 @@ const plannerTaskSchema = z.object({
   task: z.string().trim().min(1).max(2_000),
 }).strict();
 
+const DEFAULT_CONTINUATION_GAP_NOTE = '上一次结果尚未完全满足当前任务；按本轮 task 继续执行，并返回可核验的完成证据。';
+
 export const plannerCommitSchema = z.object({
   action: z.enum(PLANNER_ACTIONS),
   tasks: z.array(plannerTaskSchema).max(24),
+  gapNote: z.string().trim().min(1).max(2_000).optional(),
 }).strict();
 
 export function parsePlannerCommit(
@@ -97,6 +106,17 @@ export function parsePlannerCommit(
         `Planner continue_current must keep the active delegation capability "${activeDelegation.capability}".`,
       );
     }
+    return {
+      action: commit.action,
+      tasks: commit.tasks,
+      gapNote: commit.gapNote ?? DEFAULT_CONTINUATION_GAP_NOTE,
+    };
   }
-  return commit;
+  if (commit.gapNote !== undefined) {
+    throw new Error(`Planner action "${commit.action}" forbids a gap note.`);
+  }
+  return {
+    action: commit.action,
+    tasks: commit.tasks,
+  };
 }

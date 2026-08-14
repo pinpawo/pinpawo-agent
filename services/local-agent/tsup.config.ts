@@ -29,7 +29,7 @@ export default defineConfig({
   clean: true,
   splitting: false,
   onSuccess: async () => {
-    await Promise.all(['general', 'capabilityCreator'].map(async (capability) => {
+    await Promise.all(['general', 'capabilityCreator', 'studioPlanning'].map(async (capability) => {
       const targetDir = `dist/capabilities/${capability}`;
       await mkdir(targetDir, { recursive: true });
       await copyFile(

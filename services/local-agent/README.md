@@ -86,8 +86,6 @@ pinpawo run
 pinpawo server --mode studio
 pinpawo server --stdio
 pinpawo tui
-pinpawo tui --v2
-pinpawo tui --legacy
 pinpawo detect
 pinpawo browser extension status
 pinpawo browser extension register --extension-id <id>
@@ -98,16 +96,14 @@ pinpawo capability validate ./my-capability
 pinpawo capability install ./my-capability
 ```
 
-`pinpawo tui` remains the legacy Ink client during OpenTUI dogfood.
-`pinpawo tui --v2` launches the OpenTUI client. Installed packages use the
+`pinpawo tui` launches the OpenTUI client. Installed packages use the
 Bun-targeted bundle in `dist/tui` together with npm-selected Bun and OpenTUI
 platform packages. Source checkouts prefer their workspace Bun dependency and
 current TUI source, with a compiled workspace binary, packaged bundle, or global
 Bun as fallbacks. `PINPAWO_TUI_V2_BIN` selects an explicit standalone build and
-`PINPAWO_BUN_BIN` selects a Bun runtime. `pinpawo tui --legacy` is the rollback
-path and will remain available when v2 becomes the default.
+`PINPAWO_BUN_BIN` selects a Bun runtime.
 
-`pinpawo tui --v2 --check` walks the same launch-plan, integrity, and
+`pinpawo tui --check` walks the same launch-plan, integrity, and
 package-local runtime path without entering terminal mode. It prints the v2
 version only after the selected bundle and external OpenTUI runtime load
 successfully.
@@ -182,7 +178,7 @@ version probe, proving that the bundle can load the package's external OpenTUI
 runtime without entering terminal mode.
 The separate `test:tui-install` release smoke packs the local runtime and CLI,
 installs both tarballs with normal dependency lifecycle scripts in an empty
-project, then runs the installed CLI's `tui --v2 --check` path. It uses a bounded
+project, then runs the installed CLI's `tui --check` path. It uses a bounded
 workspace cache and per-stage timeouts so registry or install failures remain
 diagnosable; unlike the prepublish gate, it requires registry access.
 Launcher tests cover the package-local Bun runtime on darwin, Linux, and

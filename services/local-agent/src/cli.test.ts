@@ -2,180 +2,43 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createLocalAgentCli } from './cli';
 
-test('local agent CLI passes tui options to the handler', async () => {
-  let received: { workdir?: string } | null = null;
+test('tui launches the v2 client by default', async () => {
+  // legacy Ink TUI 已删除,`pinpawo tui` 不再需要 --v2 opt-in。
+  let received: { workdir?: string; check: boolean; qa: boolean } | null = null;
   const program = createLocalAgentCli({
-    runTui: (options) => {
-      received = options;
-    },
-  });
-
-  await program.parseAsync(['node', 'pinpawo', 'tui', '--workdir', '/tmp/pinpawo-tui-workdir']);
-
-  assert.deepEqual(received, { workdir: '/tmp/pinpawo-tui-workdir' });
-});
-
-test('local agent CLI launches OpenTUI v2 without invoking the legacy handler', async () => {
-  let legacyCalls = 0;
-  let received: {
-    workdir?: string;
-    check: boolean;
-    qa: boolean;
-  } | null = null;
-  const program = createLocalAgentCli({
-    runTui: () => {
-      legacyCalls += 1;
-    },
-    runTuiV2: (options) => {
-      received = options;
-    },
+    runTuiV2: (options) => { received = options; },
   });
 
   await program.parseAsync([
-    'node',
-    'pinpawo',
-    'tui',
-    '--v2',
-    '--workdir',
-    '/tmp/pinpawo-tui-v2-workdir',
+    'node', 'pinpawo', 'tui', '--workdir', '/tmp/pinpawo-tui-workdir',
   ]);
 
-  assert.equal(legacyCalls, 0);
   assert.deepEqual(received, {
-    workdir: '/tmp/pinpawo-tui-v2-workdir',
+    workdir: '/tmp/pinpawo-tui-workdir',
     check: false,
     qa: false,
   });
 });
 
-test('local agent CLI exposes a non-interactive OpenTUI v2 installation check', async () => {
-  let received: {
-    workdir?: string;
-    check: boolean;
-    qa: boolean;
-  } | null = null;
-  const handlers = {
-    runTui: () => undefined,
-    runTuiV2: (options: {
-      workdir?: string;
-      check: boolean;
-      qa: boolean;
-    }) => {
-      received = options;
-    },
-  };
+test('the removed legacy flags are no longer declared', () => {
+  // --v2 / --legacy / --dry-run 随 legacy 客户端一起退役。留着会让用户以为
+  // 还有第二个客户端可选。
+  //
+  // 这里断言"选项没被声明"而不是"解析会失败":Commander 未配 exitOverride,
+  // 未知选项会直接 process.exit,断言捕获不到。
+  const tui = createLocalAgentCli({ runTuiV2: () => undefined })
+    .commands.find((command) => command.name() === 'tui');
+  assert.ok(tui, 'the tui command must exist');
 
-  await createLocalAgentCli(handlers).parseAsync([
-    'node',
-    'pinpawo',
-    'tui',
-    '--v2',
-    '--check',
-  ]);
-  assert.deepEqual(received, {
-    workdir: undefined,
-    check: true,
-    qa: false,
-  });
-
-  await assert.rejects(
-    createLocalAgentCli(handlers).parseAsync([
-      'node',
-      'pinpawo',
-      'tui',
-      '--check',
-    ]),
-    /--check requires.*--v2/,
-  );
+  const flags = tui.options.map((option) => option.long);
+  assert.deepEqual(flags.sort(), ['--check', '--qa', '--workdir']);
 });
 
-test('local agent CLI exposes the packaged v2 terminal QA scenario', async () => {
-  let received: {
-    workdir?: string;
-    check: boolean;
-    qa: boolean;
-  } | null = null;
-  const handlers = {
-    runTui: () => undefined,
-    runTuiV2: (options: {
-      workdir?: string;
-      check: boolean;
-      qa: boolean;
-    }) => {
-      received = options;
-    },
-  };
-
-  await createLocalAgentCli(handlers).parseAsync([
-    'node',
-    'pinpawo',
-    'tui',
-    '--v2',
-    '--qa',
-    '--workdir',
-    '/tmp/pinpawo-tui-qa',
-  ]);
-  assert.deepEqual(received, {
-    workdir: '/tmp/pinpawo-tui-qa',
-    check: false,
-    qa: true,
-  });
-
+test('tui still rejects --check together with --qa', async () => {
   await assert.rejects(
-    createLocalAgentCli(handlers).parseAsync([
-      'node',
-      'pinpawo',
-      'tui',
-      '--qa',
-    ]),
-    /--qa requires.*--v2/,
-  );
-  await assert.rejects(
-    createLocalAgentCli(handlers).parseAsync([
-      'node',
-      'pinpawo',
-      'tui',
-      '--v2',
-      '--qa',
-      '--check',
-    ]),
-    /either --check or --qa/,
-  );
-});
-
-test('local agent CLI keeps an explicit legacy fallback during v2 dogfood', async () => {
-  let legacyCalls = 0;
-  let v2Calls = 0;
-  const program = createLocalAgentCli({
-    runTui: () => {
-      legacyCalls += 1;
-    },
-    runTuiV2: () => {
-      v2Calls += 1;
-    },
-  });
-
-  await program.parseAsync(['node', 'pinpawo', 'tui', '--legacy']);
-
-  assert.equal(legacyCalls, 1);
-  assert.equal(v2Calls, 0);
-});
-
-test('local agent CLI rejects conflicting TUI flags', async () => {
-  const handlers = {
-    runTui: () => undefined,
-    runTuiV2: () => undefined,
-  };
-
-  await assert.rejects(
-    createLocalAgentCli(handlers).parseAsync([
-      'node',
-      'pinpawo',
-      'tui',
-      '--v2',
-      '--legacy',
-    ]),
-    /Choose either --v2 or --legacy/,
+    createLocalAgentCli({ runTuiV2: () => undefined })
+      .parseAsync(['node', 'pinpawo', 'tui', '--check', '--qa']),
+    /Choose either --check or --qa/,
   );
 });
 

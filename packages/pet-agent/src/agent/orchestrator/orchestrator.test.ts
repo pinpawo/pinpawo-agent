@@ -56,7 +56,11 @@ import {
   tagNewLaneMessages,
 } from './messageLanes';
 import { RemoveMessage } from '@langchain/core/messages';
-import { isDelegationBriefingMessage } from './delegationBriefing';
+import {
+  isDelegationBriefingMessage,
+  isDelegationStartedMessage,
+  materializeDelegationStarted,
+} from './delegationBriefing';
 import { RUN_USER_GOAL_CONTEXT_SOURCE } from './capabilityContext';
 import {
   appendRunDelegationSummary,
@@ -6178,6 +6182,12 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
     delegationId: activeDelegation.id,
     runId: activeDelegation.transcriptRunId,
   });
+  oldMessages.unshift(materializeDelegationStarted({
+    lane: activeDelegation.lane,
+    transcriptRunId: activeDelegation.transcriptRunId,
+    delegationId: activeDelegation.id,
+    task: activeDelegation.task,
+  }));
   const priorAnnounce = new AIMessage({
     id: 'prior-resume-announce',
     content: activeDelegation.resultPreview ?? '',
@@ -6267,6 +6277,7 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
   assert.deepEqual(state.runUserGoal, activeDelegation.userGoal);
   assert.notEqual(state.runId, activeDelegation.transcriptRunId);
   assert.equal(state.traceId, activeDelegation.traceId);
+  assert.equal(state.messages.filter(isDelegationStartedMessage).length, 1);
   assert.equal(plannerInputs[0]?.traceId, activeDelegation.traceId);
   assert.equal(plannerInputs[0]?.activeDelegation?.delegationId, activeDelegation.id);
   assert.match(plannerInputs[0]?.latestUserMessage ?? '', /优先检查最新修改/);
@@ -6396,7 +6407,7 @@ test('legacy object UserGoal checkpoint returns a fixed incompatibility reply wi
   assert.equal(modelInvocations, 0);
 });
 
-test('delegation briefing is lane-scoped while concise plans remain in main', async () => {
+test('delegation briefing stays lane-scoped across sequential tasks', async () => {
   let structuredCallCount = 0;
   const actModel = {
     invoke: async () => new AIMessage('两项任务都已完成。'),
@@ -6454,13 +6465,19 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
     callbacks: recorder.callbacks,
   }) as OrchestratorStateType;
 
-  // Completed delegation lanes are cleared; only concise plan messages remain
-  // in the main conversation.
+  // Completed delegation lanes are cleared without copying per-task plans into
+  // the private lane. Canonical starts remain paired with accepted handoffs.
   assert.equal(state.messages.filter(isDelegationBriefingMessage).length, 0);
-  const plans = state.messages.filter((message) => getPinpetMeta(message).source === 'delegation_plan');
-  assert.equal(plans.length, 2);
-  assert.match(String(plans[0].content), /关闭 GitHub Issue #272/);
-  assert.match(String(plans[1].content), /删除 packages\/goat 目录/);
+  const starts = state.messages.filter(isDelegationStartedMessage);
+  assert.equal(starts.length, 2);
+  assert.equal(new Set(starts.map((message) => message.id)).size, 2);
+  for (const started of starts) {
+    assert.ok(state.messages.some((message) => (
+      getMessageHandoffSource(message) !== null
+      && getMessageTranscriptRunId(message) === getMessageTranscriptRunId(started)
+      && getMessageDelegationId(message) === getMessageDelegationId(started)
+    )));
+  }
 
   // Each selected subagent still receives its complete lane-scoped briefing.
   assert.equal(recorder.subagentInputs.length, 2);
@@ -6562,10 +6579,7 @@ test('continue_current appends a continuation briefing carrying the gap note', a
   }) as OrchestratorStateType;
 
   assert.equal(state.messages.filter(isDelegationBriefingMessage).length, 0);
-  assert.equal(
-    state.messages.filter((message) => getPinpetMeta(message).source === 'delegation_plan').length,
-    1,
-  );
+  assert.equal(state.messages.filter(isDelegationStartedMessage).length, 1);
   assert.equal(recorder.subagentInputs.length, 2);
   for (const input of recorder.subagentInputs) {
     assert.equal(

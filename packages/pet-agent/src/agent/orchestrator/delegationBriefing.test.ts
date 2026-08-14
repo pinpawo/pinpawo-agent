@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   isDelegationBriefingMessage,
+  isDelegationStartedMessage,
   materializeDelegation,
+  materializeDelegationStarted,
 } from './delegationBriefing';
 import {
   getMessageDelegationId,
@@ -13,7 +15,7 @@ import {
   getPinpetMeta,
 } from './messageLanes';
 
-test('initial delegation materializes a concise main plan and scoped XML briefing', () => {
+test('initial delegation materializes one canonical start and one scoped briefing', () => {
   const materialized = materializeDelegation({
     mode: 'initial',
     lane: 'capability:github',
@@ -23,22 +25,36 @@ test('initial delegation materializes a concise main plan and scoped XML briefin
     essentialContext: 'Capability intent: GitHub issue 操作',
   });
   const [briefing] = materialized.laneMessages;
-  const [plan] = materialized.mainMessages;
   const text = String(briefing.content);
 
   assert.equal(materialized.mainMessages.length, 1);
-  assert.equal(getMessageLane(plan), null);
-  assert.match(String(plan.content), /接下来我会先处理这项任务：关闭 GitHub Issue #272。/);
-  assert.doesNotMatch(String(plan.content), /delegation_briefing|执行边界|capability:/);
-  assert.equal(getPinpetMeta(plan).source, 'delegation_plan');
-  assert.notEqual(getPinpetMeta(plan).synthetic, true);
-
+  assert.equal(isDelegationStartedMessage(materialized.mainMessages[0]), true);
   assert.match(text, /^<delegation_briefing role="task_boundary" source="orchestrator" mode="initial">/);
   assert.match(text, /<task>[\s\S]*关闭 GitHub Issue #272。[\s\S]*<\/task>/);
   assert.match(text, /<essential_context>[\s\S]*Capability intent: GitHub issue 操作[\s\S]*<\/essential_context>/);
   assert.doesNotMatch(text, /run-1|task-b|capability:github/);
   assert.equal(getMessageLane(briefing), 'capability:github');
   assert.ok(briefing.id);
+});
+
+test('delegation start is a stable canonical lifecycle record', () => {
+  const spec = {
+    lane: 'capability:github' as const,
+    transcriptRunId: 'run-1',
+    delegationId: 'task-b',
+    task: '关闭 GitHub Issue #272。',
+  };
+  const first = materializeDelegationStarted(spec);
+  const replayed = materializeDelegationStarted(spec);
+
+  assert.equal(first.id, replayed.id);
+  assert.equal(isDelegationStartedMessage(first), true);
+  assert.equal(getMessageLane(first), null);
+  assert.equal(getMessageTranscriptRunId(first), 'run-1');
+  assert.equal(getMessageDelegationId(first), 'task-b');
+  assert.match(String(first.content), /关闭 GitHub Issue #272。/);
+  assert.equal(getPinpetMeta(first).task, spec.task);
+  assert.notEqual(getPinpetMeta(first).synthetic, true);
 });
 
 test('initial delegation omits empty essential context', () => {
@@ -54,7 +70,7 @@ test('initial delegation omits empty essential context', () => {
   assert.doesNotMatch(String(briefing.content), /<essential_context>/);
 });
 
-test('continuation delegation carries task and optional gap note without a new main plan', () => {
+test('continuation delegation carries task and optional gap note', () => {
   const withGap = materializeDelegation({
     mode: 'continue',
     lane: 'capability:github',

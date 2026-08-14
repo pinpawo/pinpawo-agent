@@ -9,8 +9,7 @@ schema: [`configSchema.ts`](../packages/studio/src/configSchema.ts) ·
 本文用**配置**表达契约的实际形状 —— 抽象类型不足以暴露契约在真实使用中
 是否顺手,配置能。
 
-> 状态:**已落地**(#629)。下面的字段与装配流程都对应现有代码。
-> 文件名里的 `TARGET_EXAMPLE` 是它作为目标形态起草时留下的,内容已是现状。
+下面的字段与装配流程都对应现有代码。
 
 ---
 
@@ -61,20 +60,18 @@ schema: [`configSchema.ts`](../packages/studio/src/configSchema.ts) ·
 | `pets` 里的名字没有对应的 `pets/<petId>.json` | `pet "…" has no matching pet config…` |
 | `plugins[].id` 不认识 | `unknown plugin "…". Known plugins: …` |
 
-### 1.1 已删除的字段
+### 1.1 这里不该出现什么
 
-以下字段**曾经存在,现已删除**。留在这里是为了让旧配置的报错可被理解:
+`studio.json` 只描述**这块 studio 由谁组成、由什么驱动**。任务、依赖、进度、
+迭代上限、重试策略都是插件的领域,不在这里配 —— 它们属于对应插件的
+`options`,或者根本不存在(如自动重试,见契约 §2.2)。
 
-| 旧字段 | 去向 | 为什么 |
-| --- | --- | --- |
-| `plannerPetId` | → `entryPetId` | planner 不是特殊角色,只是入口 dispatch 的目标 |
-| `agents` | → `pets` | 与 `pet` 术语统一 |
-| `curator.promptPath` | 删除 | curator 随拉模型退役;写知识库是插件的事 |
-| `maxIterationCount` | → 插件 `options` | 迭代上限由驱动方决定 |
-| `maxRetryPerTask` | 删除 | 自动重试退役(契约 §2.2) |
+同理,`entryPetId` 只是外部输入的默认目标,不代表 planner 有任何特殊地位。
 
-`studio.json` 里**不该再出现**任务、依赖、进度、重试相关的字段 —— 那些
-全是插件的领域。
+> 注意 `studio.json` **不校验多余字段**:`plannerPetId` / `agents` /
+> `curator` / `maxIterationCount` / `maxRetryPerTask` 这些旧字段留在文件里
+> 不会报错,只是被忽略 —— 照着它们配会得到一块"配了却不生效"的 studio。
+> (`pets` 是必填的,所以只写 `agents` 的旧配置会因为缺 `pets` 而失败。)
 
 ---
 
@@ -238,18 +235,17 @@ studio 全程不知道"review"是什么,只知道门关着。
 
 ---
 
-## 5. 已确认的约定
+## 5. 三条约定
 
 1. **插件必须显式配置。** studio 不做隐式装配 —— 读一眼 `studio.json` 就知道
    这块 studio 由什么驱动。
 2. **插件 options 的校验归插件自己。** studio 与宿主都原样透传不解释。
-3. **不做兼容迁移。** §1.1 的字段变更直接改,不留兼容层。
-4. **entry pet 没有特权。** 它只是 `dispatch` 的一个默认目标;契约里没有
-   `submitRequest` 这种专属入口。
+3. **entry pet 没有特权。** 它只是 `dispatch` 的一个默认目标,契约里不存在
+   专属的提交入口。
 
-## 6. 待定项
+## 6. 开放问题
 
-1. **第三方插件从哪加载。** 目前只有内置注册表。
-2. **插件状态的落盘位置。** `KanbanBoard` 现在只在内存里,进程重启即空;
-   scheduler 回来时会面对同一个问题。大概是
+1. **第三方插件从哪加载。** 目前只有宿主的内置注册表。
+2. **插件状态的落盘位置。** `KanbanBoard` 只活在内存里,进程重启看板归零;
+   scheduler 会面对同一个问题。大概是
    `<workdir>/.pinpawo/studio/<plugin-id>/`,但这属于宿主约定,不进契约。

@@ -305,7 +305,8 @@ test('v2 launcher explains when an installed package has no v2 payload', () => {
       env: {},
       pathExists: () => false,
     }),
-    /not bundled.*--legacy.*PINPAWO_TUI_V2_BIN/,
+    // 不再指向已删除的 --legacy;只留可执行的补救路径。
+    /not bundled.*Reinstall.*PINPAWO_TUI_V2_BIN/,
   );
 });
 

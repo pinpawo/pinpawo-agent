@@ -7,8 +7,7 @@ dogfood entrypoint from issue #454:
 
 - it imports the canonical projection from `@pinpawo/agent-session`;
 - it does not import `services/local-agent/src/*`;
-- it is available through `pinpawo tui --v2`, while the default `pinpawo tui`
-  and explicit `--legacy` rollback still use Ink;
+- it is launched by `pinpawo tui` — the only terminal client;
 - it connects to the authenticated loopback local-agent WebSocket;
 - it decodes asynchronous WebSocket payloads on one per-socket queue, so a
   slower Blob/binary frame cannot be overtaken by a later event and change
@@ -98,8 +97,8 @@ The empty-project distribution check is verified on local darwin-arm64 and
 Linux arm64/x64 with Node 24, plus GitHub-hosted macOS, Ubuntu, and Windows
 runners. It rebuilds and packs the local packages, installs them with lifecycle
 scripts in a clean consumer project, verifies npm-selected Bun and OpenTUI
-assets, and runs the installed `pinpawo tui --v2 --check` path. On macOS the
-same clean install also enters `pinpawo tui --v2 --qa` through a real PTY,
+assets, and runs the installed `pinpawo tui --check` path. On macOS the
+same clean install also enters `pinpawo tui --qa` through a real PTY,
 submits with Enter, waits for deterministic completion and usage,
 verifies the composer returns, and exits through `/quit`.
 
@@ -107,8 +106,8 @@ verifies the composer returns, and exits through `/quit`.
 tarball carries one runtime-neutral Bun bundle and a versioned manifest rather
 than publishing a TUI API package or six PinPawo platform binary packages.
 `bun`, `@opentui/core`, and `web-tree-sitter` are optional runtime dependencies,
-so legacy CLI installation and `pinpawo tui --legacy` remain available if a
-platform cannot install the v2 runtime.
+a platform that cannot install them needs `PINPAWO_BUN_BIN` or a repaired
+release package.
 
 Windows drive and UNC attachment paths, plus quoted `VISUAL`/`EDITOR`/`PAGER`
 commands under `Program Files`, use Windows tokenization so separator
@@ -277,7 +276,7 @@ npm run tui:v2 -w pinpawo -- --qa
 ```
 
 An installed CLI can run the same scenario with
-`pinpawo tui --v2 --qa`. The public launcher translates this explicit QA mode
+`pinpawo tui --qa`. The public launcher translates this explicit QA mode
 to the TUI's internal deterministic transport while still resolving the normal
 workspace, binary, or packaged-bundle launch plan. The entry uses the normal
 `main.ts`, composer, fixed footer, native scrollback, timeline renderer, and
@@ -382,7 +381,7 @@ npm run test:tui-install -w pinpawo
 
 It packs the local agent packages, installs them into an empty project with
 normal dependency lifecycle scripts, and exercises the installed
-`pinpawo tui --v2 --check` launcher path.
+`pinpawo tui --check` launcher path.
 
 Probe controls:
 

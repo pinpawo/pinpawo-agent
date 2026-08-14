@@ -10,6 +10,7 @@ schema: [`configSchema.ts`](../packages/studio/src/configSchema.ts) ·
 是否顺手,配置能。
 
 > 状态:**已落地**(#629)。下面的字段与装配流程都对应现有代码。
+> 文件名里的 `TARGET_EXAMPLE` 是它作为目标形态起草时留下的,内容已是现状。
 
 ---
 
@@ -56,7 +57,7 @@ schema: [`configSchema.ts`](../packages/studio/src/configSchema.ts) ·
 | `agents` | → `pets` | 与 `pet` 术语统一 |
 | `curator.promptPath` | 删除 | curator 随拉模型退役;写知识库是插件的事 |
 | `maxIterationCount` | → 插件 `options` | 迭代上限由驱动方决定 |
-| `maxRetryPerTask` | 删除 | 自动重试退役(契约 §4.2) |
+| `maxRetryPerTask` | 删除 | 自动重试退役(契约 §2.2) |
 
 `studio.json` 里**不该再出现**任务、依赖、进度、重试相关的字段 —— 那些
 全是插件的领域。

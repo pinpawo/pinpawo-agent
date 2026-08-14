@@ -66,6 +66,41 @@ test('answer eval models goal_done as a grounded task summary', async () => {
   assert.match(answerInput, /<reply_mode>goal_done<\/reply_mode>/);
 });
 
+test('answer eval keeps full handoff evidence while measuring compressed summaries', async () => {
+  const scenarios = getAnswerEvalScenarios().filter(({ caseName }) => [
+    'verbose-handoff-compression',
+    'multi-handoff-compression',
+  ].includes(caseName));
+  assert.equal(scenarios.length, 2);
+
+  const summaries = [
+    'Answer 优化已完成，主消息与 handoff 流转保持不变；PR #642 已创建，测试和 typecheck 均通过。',
+    '发布准备已完成：cache-key-17 已通过统一 transcriptRunId 修复，resume 测试通过；PR #643 已创建，当前没有剩余阻塞项。',
+  ];
+  let invocation = 0;
+  const subject = {
+    invoke: async () => {
+      const summary = summaries[invocation] ?? '任务总结缺失';
+      invocation += 1;
+      return new AIMessage(summary);
+    },
+  } as never;
+
+  for (const scenario of scenarios) {
+    const messages = scenario.render();
+    const priorAssistantMessages = messages.filter((message) => message._getType() === 'ai');
+    assert.ok(priorAssistantMessages.length >= 1);
+    assert.match(String(messages.at(-1)?.content), /<reply_mode>goal_done<\/reply_mode>/);
+
+    const result = await scenario.run(subject, undefined, {
+      model: answerModel('judge'),
+    });
+    assert.equal(result.verdict, 'compressed_task_summary');
+    assert.equal(result.diagnostics.withinReferencePriorAssistantRatio, true);
+  }
+  assert.equal(invocation, 2);
+});
+
 test('trace-shaped and instruction-like completed tasks cannot become future work', async () => {
   const scenarios = getAnswerEvalScenarios().filter(({ caseName }) => [
     'long-imperative-completion',

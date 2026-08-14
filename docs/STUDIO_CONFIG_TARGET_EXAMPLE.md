@@ -76,17 +76,41 @@ schema: [`configSchema.ts`](../packages/studio/src/configSchema.ts) ·
   "serviceSummary": "长文写作、结构化改写",
   "modelProfileId": "qwen-max",  // 省略则用宿主默认 profile
 
-  // 能力清单。插件的 toolkit 与普通 toolkit 在这里没有区别 ——
-  // pet 不需要知道某个 toolkit 背后还插在 studio 上。
-  "capabilities": ["general", "kanban"]
+  // 能力清单 —— 这里写的是 **capability 名**,不是 toolkit 名。
+  // 未在 local-agent 注册的名字会在装配时直接报错。
+  "capabilities": ["general", "explore"]
 }
 ```
 
 `model` 字段已被 `modelProfileId` 取代,**继续使用会显式报错**而不是静默
 忽略 —— 否则 pet 会悄悄跑在默认 profile 上。
 
-**关键:pet 侧看不出"插件"这个概念。** 它只知道自己有 `kanban` 这个能力,
-可以读写看板。至于看板同时也在驱动 studio 派活,与 pet 无关。
+### 2.1 toolkit 不在 pet 配置里
+
+**插件的 toolkit 不需要(也不能)写进 `capabilities`。** 装配时所有 toolkit
+统一注入给每个 pet:
+
+```ts
+const availableToolkits = [...(input.toolkits ?? []), ...plugins];
+```
+
+pet 能不能真的用到 `kanban_task_*`,由**它的 capability 怎么声明 `uses`**
+决定 —— capability 说自己要哪些 toolkit,不是 pet 配置说的:
+
+```text
+capability.uses: ['kanban']   ← 能力声明它需要这个 toolkit
+        ↓
+pet.capabilities: ['general', 'explore']  ← pet 只声明它有哪些能力
+        ↓
+toolkits 全量注入,由 uses 筛出这个 pet 实际拿到的工具
+```
+
+往 `capabilities` 里写 `"kanban"` 会抛
+`references capability "kanban" which is not registered` —— 因为 `kanban` 是
+toolkit 名,注册表里没有同名 capability。
+
+**关键:pet 侧看不出"插件"这个概念。** 它只知道自己有某个能力,而那个能力
+恰好用到了看板工具。至于看板同时也在驱动 studio 派活,与 pet 无关。
 
 这正是两副面孔的价值:同一个东西,在 pet 那里是工具,在 studio 那里是驱动方。
 
@@ -137,7 +161,8 @@ const PLUGIN_FACTORIES: Record<string, StudioPluginFactory> = {
 const availableToolkits = [...(input.toolkits ?? []), ...plugins];
 ```
 
-pet 能不能用,仍由它自己 `capabilities` 里的声明决定。
+pet 实际拿到哪些工具,由它的 capability 声明的 `uses` 筛出来 —— 见 §2.1。
+`capabilities` 里**只写 capability 名**。
 
 > 第三方插件(从 `~/.pinpawo/` 加载,像 capability 那样)尚未实现。这属于
 > 宿主的装配职责,不影响契约本身。

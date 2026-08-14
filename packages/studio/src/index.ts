@@ -13,6 +13,8 @@ export { createStudio } from './createStudio';
 export type { CreateStudioInput } from './createStudio';
 export type {
   Studio,
+  StudioDispatchGateChange,
+  StudioDispatchGateHandler,
   StudioDispatchInput,
   StudioDispatchResult,
   StudioEvent,

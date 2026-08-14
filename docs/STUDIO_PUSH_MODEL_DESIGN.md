@@ -165,8 +165,16 @@ http…)会并发给同一个 pet 派活。此前第二个会撞上 `status === 
 (注意"完整性"的边界:队列不丢**已收下**的派活,但队列只在内存里 ——
 见 §9 待定项 2。)
 
-dispatch 依然立即返回 `{ threadId }`。只有 `disabled` 的 pet 会被拒,"正忙"
-不是错误。
+dispatch 依然立即返回 `{ threadId }`。它只在三种情况下抛错:
+
+| 情况 | 报错 |
+| --- | --- |
+| studio 已 `shutdown` | `already shut down` |
+| petId 不在这块 studio 上 | `unknown petId "…"` |
+| pet 的 `startupMode` 是 `disabled` | `pet "…" is disabled` |
+
+**"正忙"不在其中** —— 那正是队列存在的理由。三者都是"这条派活压根发不
+出去",与"发出去了但没干成"是不同性质的事;后者不抛错,由闸门表达。
 
 **返回值只表示"已经发出去了",不表示任务完成。** 没有 reply、没有成功失败
 判定。pet 干完之后自己经由 toolkit → 插件 → event 汇报。

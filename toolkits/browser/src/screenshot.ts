@@ -2,7 +2,6 @@ import { createHash, randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
-import { markTransientModelMedia } from '@pinpawo/pet-agent';
 
 const MAX_BROWSER_SCREENSHOT_BYTES = 4 * 1024 * 1024;
 
@@ -108,9 +107,9 @@ export async function readBrowserScreenshotDataUrl(
  * Completions converter drops every non-text block from a tool result. A user
  * message is accepted everywhere, so this needs no per-provider branch.
  *
- * The image message is marked transient: it stays in graph state so later turns
- * can still see the screenshot, but context summarization strips it instead of
- * stringifying base64 into a summary prompt.
+ * LangChain keeps recent messages intact and renders older image blocks as
+ * `[image]` when it summarizes them, so no provider-specific media marker is
+ * needed here.
  */
 export async function buildBrowserScreenshotMessages(
   serialized: string,
@@ -129,14 +128,14 @@ export async function buildBrowserScreenshotMessages(
   } catch {
     return [
       toolMessage,
-      markTransientModelMedia(new HumanMessage({
+      new HumanMessage({
         content: 'The browser screenshot could not be loaded. Do not claim to have inspected it; call browser_screenshot again before making a visual judgment.',
-      })),
+      }),
     ];
   }
   return [
     toolMessage,
-    markTransientModelMedia(new HumanMessage({
+    new HumanMessage({
       content: [
         {
           type: 'text',
@@ -144,7 +143,7 @@ export async function buildBrowserScreenshotMessages(
         },
         { type: 'image_url', image_url: { url: imageUrl } },
       ],
-    })),
+    }),
   ];
 }
 

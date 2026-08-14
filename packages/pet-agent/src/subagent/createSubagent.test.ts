@@ -21,7 +21,6 @@ import {
   SUBAGENT_PROMPT_SECTIONS_EVENT,
 } from './createSubagent';
 import { NamespacedProtocolToolEventReader } from './protocolToolEvents';
-import { markTransientModelMedia } from './transientModelMedia';
 import type {
   SubagentRuntimeContext,
   SubagentToolLifecycleEvent,
@@ -298,7 +297,7 @@ test('createSubagent summarizes persisted history from contextWindowTokens', asy
   assert.equal(result.messages.some((message) => message.content === oldContext), false);
 });
 
-test('context summarization never sees transient image payloads', async () => {
+test('context summarization renders image payloads through LangChain text projection', async () => {
   const imageUrl = `data:image/png;base64,${'A'.repeat(4000)}`;
   const summarizerInputs: string[] = [];
   class RecordingSummaryModel extends FakeListChatModel {
@@ -307,12 +306,12 @@ test('context summarization never sees transient image payloads', async () => {
       return super._generate(messages, options, runManager);
     }
   }
-  const screenshot = markTransientModelMedia(new HumanMessage({
+  const screenshot = new HumanMessage({
     content: [
       { type: 'text', text: 'Browser screenshot from the preceding tool result.' },
       { type: 'image_url', image_url: { url: imageUrl } },
     ],
-  }));
+  });
 
   const result = await createSubagent({
     model: new RecordingSummaryModel({
@@ -339,26 +338,31 @@ test('context summarization never sees transient image payloads', async () => {
     ),
     'expected summarization to run',
   );
-  // The summary prompt renders history as text, so a base64 payload reaching it
-  // would be inlined verbatim and blow up the summarization request.
+  // LangChain's built-in summarizer renders image blocks as `[image]` without
+  // changing messages that survive its keep cutoff.
   assert.ok(summarizerInputs.length > 0);
   for (const input of summarizerInputs) {
     assert.doesNotMatch(input, /base64,A{100}/);
   }
   assert.ok(
-    summarizerInputs.some((input) => input.includes('omitted from summary')),
-    'expected the image to be replaced by a text stand-in',
+    summarizerInputs.some((input) => input.includes('[image]')),
+    'expected LangChain to represent the image as a text placeholder',
+  );
+  assert.doesNotMatch(
+    JSON.stringify(result.messages),
+    /base64,A{100}/,
+    'expected the summarized image message to be folded into the summary',
   );
 });
 
 test('summarization preserves the real image when it keeps the message', async () => {
   const imageUrl = `data:image/png;base64,${'B'.repeat(4000)}`;
-  const screenshot = markTransientModelMedia(new HumanMessage({
+  const screenshot = new HumanMessage({
     content: [
       { type: 'text', text: 'Browser screenshot from the preceding tool result.' },
       { type: 'image_url', image_url: { url: imageUrl } },
     ],
-  }));
+  });
 
   const result = await createSubagent({
     model: new FakeListChatModel({
@@ -384,8 +388,8 @@ test('summarization preserves the real image when it keeps the message', async (
     ),
     'expected summarization to run',
   );
-  // A screenshot recent enough to survive the cutoff must come back with its
-  // image intact, not as the summary-only stand-in.
+  // A screenshot recent enough to survive the cutoff comes back unchanged from
+  // LangChain's built-in summarization middleware.
   assert.match(JSON.stringify(result.messages), /base64,B{100}/);
 });
 

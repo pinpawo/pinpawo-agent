@@ -3,7 +3,6 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
-import { isTransientModelMedia } from '@pinpawo/pet-agent';
 import {
   buildBrowserScreenshotMessages,
   parseBrowserScreenshot,
@@ -41,7 +40,7 @@ test('browser screenshots are persisted inside the workdir with private permissi
   );
 });
 
-test('screenshot messages pair a text tool result with a transient image message', async () => {
+test('screenshot messages pair a text tool result with a standard image message', async () => {
   const workdir = await mkdtemp(resolve(tmpdir(), 'pinpawo-screenshot-messages-'));
 
   const serialized = await persistBrowserScreenshot({
@@ -60,7 +59,6 @@ test('screenshot messages pair a text tool result with a transient image message
   // stays text-only and the image rides a user message every provider accepts.
   assert.doesNotMatch(JSON.stringify(toolMessage?.content), /base64/);
   assert.match(JSON.stringify(imageMessage?.content), /data:image\/png;base64,/);
-  assert.ok(imageMessage && isTransientModelMedia(imageMessage));
 });
 
 test('an unreadable screenshot yields guidance instead of a broken image', async () => {

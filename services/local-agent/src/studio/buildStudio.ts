@@ -17,6 +17,7 @@ import { createKanbanPlugin } from '@pinpawo-toolkit/studio-kanban';
 import { buildLocalAgentModels, resolveLlmGenerationReserveTokens } from '../agentModels';
 import type { LocalModelProfileRegistry } from '../llmConfig';
 import { createExploreCapability } from '../capabilities/explore';
+import { loadStudioPlanningCapability } from '../capabilities/studioPlanning';
 import { buildLocalAgentRuntimeConfig } from '../runtimeConfig';
 import { loadPetLocalConfigs } from './petConfig';
 import { loadStudioLocalConfig, resolveStudio, type ResolvedStudio } from './studioConfig';
@@ -107,7 +108,16 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
 
   const globalLlmConfig = input.modelProfiles.resolve();
   const globalModels = buildLocalAgentModels(globalLlmConfig);
-  const capabilitiesByName = new Map(input.capabilities.map((item) => [item.name, item]));
+  // studio 专用的内置 Capability 只在这里加入,**不进默认 registry** ——
+  // 它声明 uses: ['kanban'],而 kanban 只在 studio 装配时作为插件注入。放进
+  // 全局 registry 会让每个普通 chat 会话都打一条 "unavailable" 警告。
+  //
+  // 仍由 pet 配置决定谁用得上:这里只是让 studio 侧能解析到这个名字。
+  const studioPlanning = loadStudioPlanningCapability();
+  const capabilitiesByName = new Map([
+    ...(studioPlanning ? [[studioPlanning.name, studioPlanning] as const] : []),
+    ...input.capabilities.map((item) => [item.name, item] as const),
+  ]);
   const generalCapability = capabilitiesByName.get(GENERAL_CAPABILITY_NAME);
   if (!generalCapability) {
     throw new Error(`Studio requires the host baseline Capability "${GENERAL_CAPABILITY_NAME}".`);

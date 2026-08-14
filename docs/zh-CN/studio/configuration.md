@@ -89,9 +89,16 @@
 
   // 能力清单 —— 这里写的是 **capability 名**,不是 toolkit 名。
   // 未在 local-agent 注册的名字会在装配时直接报错。
-  "capabilities": ["general", "explore"]
+  "capabilities": ["general", "studio_planning"]
 }
 ```
+
+`studio_planning` 是内置的看板拆解能力(声明 `uses: ['kanban']`)。**它只在
+studio 装配时可用**,不在默认 Capability 注册表里 —— 否则每个普通 chat 会话
+都会因为找不到 kanban toolkit 打一条 "unavailable" 警告。
+
+要不要给某个 pet 装,仍由这份配置决定:planner 需要它来拆任务,worker 需要它
+来认领与完成任务;不碰看板的 pet 不必声明。
 
 `model` 字段已被 `modelProfileId` 取代,**继续使用会显式报错**而不是静默
 忽略 —— 否则 pet 会悄悄跑在默认 profile 上。

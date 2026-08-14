@@ -65,10 +65,14 @@ test('Planner commit enforces entry and continuation invariants', () => {
     tasks: [{ capability: 'explore', task: 'Switch executor.' }],
     gapNote: 'The current Capability still needs to finish the investigation.',
   }, boundaryContext), /must keep the active delegation capability/);
-  assert.throws(() => parsePlannerCommit({
+  assert.deepEqual(parsePlannerCommit({
     action: 'continue_current',
     tasks: [{ capability: 'general', task: 'Finish the current investigation.' }],
-  }, boundaryContext), /requires a non-empty gap note/);
+  }, boundaryContext), {
+    action: 'continue_current',
+    tasks: [{ capability: 'general', task: 'Finish the current investigation.' }],
+    gapNote: '上一次结果尚未完全满足当前任务；按本轮 task 继续执行，并返回可核验的完成证据。',
+  });
   assert.deepEqual(parsePlannerCommit({
     action: 'continue_current',
     tasks: [{ capability: 'general', task: 'Finish the current investigation.' }],

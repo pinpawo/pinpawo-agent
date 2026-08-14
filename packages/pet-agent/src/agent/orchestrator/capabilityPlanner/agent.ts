@@ -108,7 +108,7 @@ function createPlannerTerminalTools(): StructuredTool[] {
   const continueCurrent = tool(
     async ({ tasks, gap_note }: {
       tasks: Array<{ capability: string; task: string }>;
-      gap_note: string;
+      gap_note?: string;
     }) => {
       return JSON.stringify({ action: 'continue_current', tasks, gapNote: gap_note });
     },
@@ -117,7 +117,7 @@ function createPlannerTerminalTools(): StructuredTool[] {
       description: 'Boundary-only terminal action. The current task is incomplete. Continue the same active delegation; the first task must use the Current Capability shown in the Planner input. Explain the observed gap and give concise, forward-looking correction or verification guidance for the next attempt. Optional future tasks may follow.',
       schema: z.object({
         tasks: plannerTasksSchema(),
-        gap_note: z.string().trim().min(1).max(MAX_GAP_NOTE_CHARS)
+        gap_note: z.string().trim().min(1).max(MAX_GAP_NOTE_CHARS).optional()
           .describe('Continuation guidance for the same delegation. State the observed gap, the concrete next action, and the evidence needed for acceptance. Do not copy the previous result verbatim.'),
       }),
     },

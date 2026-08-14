@@ -20,8 +20,9 @@ schema: [`configSchema.ts`](../packages/studio/src/configSchema.ts) ·
 
 ```jsonc
 {
-  "studioId": "content-studio",
-  "name": "内容工作室",
+  "studioId": "content-studio",   // 必填
+  "name": "内容工作室",            // 可选
+  "description": "写稿 / 校对流水线",  // 可选
 
   // 外部输入默认派给谁。它就是一次普通 dispatch ——
   // planner 只是恰好扮演拆解角色的 pet,在契约里没有特殊地位。
@@ -32,20 +33,33 @@ schema: [`configSchema.ts`](../packages/studio/src/configSchema.ts) ·
 
   // 装哪些插件 —— **必须显式列出**,studio 不做任何隐式装配。
   // 顺序即 start 顺序(插件之间可能有依赖);stop 时逆序。
+  //
+  // 目前只有 kanban 一个内置插件。配了别的 id 会直接报错。
   "plugins": [
-    { "id": "kanban" },
-    {
-      "id": "scheduler",
-      // 插件自己的配置。studio 与宿主都原样透传、不解释,
-      // 校验归插件自己(与 #613 的分层一致)。
-      "options": { "timezone": "Asia/Shanghai" }
-    }
+    { "id": "kanban" }
   ]
 }
 ```
 
+`plugins[].options` 是给插件自己的配置,studio 与宿主都原样透传、不解释,
+校验归插件自己(与 #613 的分层一致)。等 scheduler 落地后会长这样:
+
+```jsonc
+{ "id": "scheduler", "options": { "timezone": "Asia/Shanghai" } }
+```
+
 `plugins` 可省略 —— 那样这块 studio 没有任何驱动方,只能由宿主手动
 `dispatch`。这是合法的,但通常意味着配漏了。
+
+装配时会校验(全部直接抛错,不静默跳过):
+
+| 情况 | 报错 |
+| --- | --- |
+| `pets` 为空 | `"pets" must not be empty` |
+| `pets` 里有重名 | `pets array has duplicate petId "…"` |
+| `entryPetId` 不在 `pets` 里 | `entryPetId "…" is not in pets` |
+| `pets` 里的名字没有对应的 `pets/<petId>.json` | `pet "…" has no matching pet config…` |
+| `plugins[].id` 不认识 | `unknown plugin "…". Known plugins: …` |
 
 ### 1.1 已删除的字段
 
@@ -184,9 +198,9 @@ pet 实际拿到哪些工具,由它的 capability 声明的 `uses` 筛出来 —
                                 correlationId: "task-1" })
        ↓  studio 记录 source=kanban;排进 writer 的队列
 5. writer 干完,调 kanban toolkit 把 task-1 标记完成
+       ↓  看板状态变了 —— 这是 kanban 得知完成的**唯一**途径
+6. writer 的闸门回到 open → studio 放行这个 pet 的下一条
        ↓
-6. writer 的闸门回到 open → 队列放行下一条
-       ↓  kanban 经 onDispatchGate 收到 task-1 的 open
 7. kanban 调 context.notify({ type: "task.done", correlationId: "task-1" })
        ↓
 8. studio 广播 → 别的插件若订阅了就能看到
@@ -198,7 +212,8 @@ pet 实际拿到哪些工具,由它的 capability 声明的 `uses` 筛出来 —
 
 - 第 1 步之后 studio 就不管了 —— 没有任何地方在等 pet
 - 第 3 步的"感知"是插件内部的事,契约不规定它怎么实现
-- 第 6 步走的是 **dispatch 那条点对点的线**,不是 event 总线
+- 第 5 步是闭环的关键:pet 调 toolkit,数据落在插件自己的状态里
+- 第 6 步的放行由**闸门**决定,不是"上一次 invoke 返回了"(契约 §3.1)
 - 第 7 步 studio 只广播,不解释 `task.done` 是什么意思
 - 全程 pet 从未直接与 studio 通信
 
@@ -207,15 +222,19 @@ pet 实际拿到哪些工具,由它的 capability 声明的 `uses` 筛出来 —
 第 5 步若 writer 撞上人工确认:
 
 ```text
-5'. writer 的闸门变成 waiting —— 队列不放行下一条
-       ↓  kanban 经 onDispatchGate 收到 waiting
+5'. writer 的闸门变成 waiting —— studio 不放行这个 pet 的下一条
+       ↓
 6'. 人走 chat 路径跟 writer 对话,把它解开
        ↓  闸门回到 open
-7'. 队列继续,kanban 收到 open
+7'. 队列继续
 ```
 
-studio 全程不知道"review"是什么,只知道门关着。人怎么被通知到、要不要在
-看板上标出来,是 kanban 的判断。
+studio 全程不知道"review"是什么,只知道门关着。
+
+> **看板上目前看不出来。** 插件可以经 `context.onDispatchGate` 订阅自己派出去
+> 那些 dispatch 的闸门变化,把 `waiting` / `blocked` 标到任务上 —— 但 kanban
+> **尚未接上这条**,它现在只从 pet 调 `kanban_task_*` 得知进展。要不要标、
+> 怎么标,是 kanban 的领域判断。
 
 ---
 

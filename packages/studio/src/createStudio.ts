@@ -124,7 +124,7 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
    *
    * 这是"所有派活必经 studio"要解决的实际问题:多个插件(kanban、scheduler、
    * http…)会并发给同一个 pet 派活。若不排队,第二个撞上 `status === 'active'`
-   * 就被拒,派活凭空丢掉 —— 而"失败留着等人"(§4.2)说的是任务失败,不是
+   * 就被拒,派活凭空丢掉 —— 而"失败留着等人"(§2.2)说的是任务失败,不是
    * "插板忙,请稍后"。这两件事不该被混成同一个错误。
    *
    * 排队不是业务:它不决定派给谁(那是插件的事),只保证已经收下的派活不会
@@ -132,17 +132,6 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
    */
   const queues = new Map<string, Promise<void>>();
 
-  /**
-   * 挂起,直到这个 pet 的闸门重新打开,并把过程中的每一次变化报给发起方。
-   *
-   * 门从 `waiting` / `blocked` 回到 `open`,只可能由**人**推动 —— 用户走
-   * chat 路径直接跟 pet 对话把它解开(两条路共用 checkpointer)。studio
-   * 这边没有控制面,只是等着被唤醒,卡多久都合理(§4.2)。
-   *
-   * 注意闸门是 **pet 级**的,而队列是 **dispatch 级**的:同一时刻这个 pet
-   * 上只有队列头那一条在跑,所以"门开了"就等价于"队列头这条走完了"。
-   * 这个等价关系依赖串行 —— 它正是队列存在的另一半理由。
-   */
   /** shutdown 时用来叫醒所有卡在闸门上的等待,让队列干净地收尾。 */
   const gateWaiters = new Set<() => void>();
   function abortGateWaits(): void {
@@ -150,6 +139,19 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
     gateWaiters.clear();
   }
 
+  /**
+   * 挂起,直到这个 pet 的闸门重新打开,并把过程中的每一次变化报给发起方。
+   *
+   * 门从 `waiting` / `blocked` 回到 `open`,只可能由**人**推动 —— 用户走
+   * chat 路径直接跟 pet 对话把它解开(两条路共用 checkpointer)。studio
+   * 这边没有控制面,只是等着被唤醒,卡多久都合理(§2.2)。
+   *
+   * 注意闸门是 **pet 级**的,而队列是 **dispatch 级**的:同一时刻这个 pet
+   * 上只有队列头那一条在跑,所以"门开了"就等价于"队列头这条走完了"。
+   * 这个等价关系依赖串行 —— 它正是队列存在的另一半理由。
+   *
+   * 返回 `true` 表示门真的开了;`false` 表示被 shutdown 打断。
+   */
   function waitForGateOpen(pet: PetAgentRuntime, threadId: string): Promise<boolean> {
     return new Promise((resolve) => {
       let settled = false;
@@ -277,20 +279,23 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
     // 关上门:此后不再收 dispatch。否则派出去的活没有任何插件在听它的产出。
     stopped = true;
     // 唤醒所有卡在闸门上的队列。**不能等它们跑完** —— `waiting` / `blocked`
-    // 按设计可能永远等不到人(§4.2),等下去 shutdown 就永远返回不了。
+    // 按设计可能永远等不到人(§2.2),等下去 shutdown 就永远返回不了。
     // 队列因此在这里放弃等待:已排队未开始的活不会再派出去。
     abortGateWaits();
     // 逆序停止:后启动的插件可能依赖先启动的。
     for (const plugin of [...plugins].reverse()) {
       try {
         await plugin.studio?.stop?.();
-        // 插件停了就清掉它的订阅 —— 留着闭包 studio 就成了泄漏源。
-        gateHandlers.delete(plugin.name);
       } catch (error) {
         console.error(
           `[studio] plugin "${plugin.name}" failed to stop:`,
           error instanceof Error ? error.message : error,
         );
+      } finally {
+        // 停干净与否都要清掉它的订阅。当前结尾的 gateHandlers.clear() 已经
+        // 兜住了这一条,所以这里是**防御性**的:一旦将来 shutdown 变成部分
+        // 停止(只停某个插件),清理就不能依赖 stop 有没有抛错。
+        gateHandlers.delete(plugin.name);
       }
     }
     handlers.clear();

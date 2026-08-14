@@ -555,3 +555,42 @@ test('shutdown does not hang on a dispatch that is waiting for a human', async (
     }),
   ]);
 });
+
+test('a plugin whose stop() throws still gets its gate handlers dropped', async () => {
+  // 覆盖对外表现:stop 抛错不该让 shutdown 失败,也不该再收到闸门回调。
+  // 注:handler 表是被逐个 delete 还是被结尾的 clear() 兜住,从外部不可区分。
+  let calls = 0;
+  let ctx!: StudioPluginContext;
+  const plugin: StudioPlugin = {
+    name: 'kanban',
+    description: 'p',
+    tools: [],
+    studio: {
+      start: (context) => {
+        ctx = context;
+        context.onDispatchGate(() => { calls += 1; });
+      },
+      stop: () => { throw new Error('stop exploded'); },
+    },
+  };
+
+  const stuck = pet({
+    petId: 'p1',
+    gateAfterInvoke: 'waiting',
+  }) as PetAgentRuntime & { openGate: () => void };
+
+  const studio = await createStudio({
+    studioId: 's1', entryPetId: 'p1', pets: [stuck], plugins: [plugin],
+  });
+
+  await ctx.dispatch({ petId: 'p1', request: 'go' });
+  await flush();
+  assert.ok(calls > 0, 'handler fires while the plugin is running');
+
+  // stop 抛错不应让 shutdown 失败,也不该留下 handler。
+  await assert.doesNotReject(() => studio.shutdown());
+  calls = 0;
+  stuck.openGate();
+  await flush();
+  assert.equal(calls, 0);
+});

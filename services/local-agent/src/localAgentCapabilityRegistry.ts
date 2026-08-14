@@ -8,7 +8,6 @@ import { loadUserCapabilities, type LoadedUserCapability } from './capabilityLoa
 import { resolveAvailableToolkits } from './toolkits/toolkitAvailability';
 import { createExploreCapability } from './capabilities/explore';
 import { loadGeneralCapability } from './capabilities/general';
-import { loadStudioPlanningCapability } from './capabilities/studioPlanning';
 import { browserIntegration } from './browserIntegration';
 import { FileCapabilityArtifactStore } from './capabilityArtifactStore';
 import { createBashToolkit, createGitToolkit, loadCoreLocalTools } from './toolkits/local';
@@ -37,15 +36,10 @@ function createDefaultLocalCapabilities(): AgentCapability[] {
   if (!general) {
     throw new Error('local-agent requires the built-in "general" Capability.');
   }
-  // studio_planning 声明 uses: ['kanban'],而 kanban toolkit 只在 studio 装配时
-  // 注入。chat 模式下它会落进 unavailableCapabilities —— 那是预期行为,注册表
-  // 缺 toolkit 时只标记不可用,不抛错。
-  const studioPlanning = loadStudioPlanningCapability();
   return [
     general,
     createExploreCapability(),
     browserIntegration.capability,
-    ...(studioPlanning ? [studioPlanning] : []),
   ];
 }
 

@@ -15,6 +15,7 @@ export type AnswerBehaviorExpectation = {
   diagnostics?: {
     referenceMaxCharacters?: number;
     comparePriorAssistantText?: boolean;
+    referenceMaxPriorAssistantRatio?: number;
   };
 };
 
@@ -170,6 +171,7 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
         acceptanceCriteria: [
           { id: 'task_summary_present', statement: '明确说明“汇总本周发布风险”已经完成，并形成面向用户的任务总结。' },
           { id: 'key_results_preserved', statement: '总结保留 database-freeze-42、queue-drain-88 和分三阶段切流的关键结果。' },
+          { id: 'result_body_not_replayed', statement: '没有复制 RESULT_BODY_START、RESULT_BODY_END 或把已有结果当作正文逐段重发，而是形成压缩后的闭合摘要。' },
           { id: 'no_future_or_missing_context_claim', statement: '没有把任务说成尚未执行，也没有声称缺少已经存在的结果上下文。' },
           { id: 'user_facing_language', statement: '任务总结面向用户，不暴露 orchestrator、handoff、delegation 等内部执行语言。' },
         ],
@@ -177,6 +179,106 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
         diagnostics: { referenceMaxCharacters: 320, comparePriorAssistantText: true },
       },
       metadata: { difficulty: 'hard', reason: 'Close the lifecycle with a concise, grounded task summary.', source: SOURCE_FILE },
+    },
+    {
+      id: `${ANSWER_BEHAVIOR_BASICS_DATASET}.verbose-handoff-compression`,
+      name: 'verbose-handoff-compression',
+      suite: ANSWER_BEHAVIOR_BASICS_DATASET,
+      tags: ['context_synthesis', 'delegation_control'],
+      input: {
+        userGoal: '优化 Answer 的成果回复，减少 handoff 重复并强化总结。',
+        messages: [
+          { role: 'user', text: '优化 Answer 的成果回复，减少 handoff 重复并强化总结。' },
+          {
+            role: 'assistant',
+            text: [
+              'Answer 优化已经完成，主消息与 handoff 流转保持不变。',
+              '执行过程：先检查 answer.ts、answer.prompt.ts 和 answer eval 数据集；随后逐项核对 goal_done、user_input_required 与 blocked 模式；再修改提示词并补充测试。',
+              '改动文件完整清单：packages/pet-agent/src/agent/orchestrator/prompts/templates/answer.prompt.ts、packages/pet-agent/evals/datasets/answer-behavior-basics.ts、packages/pet-agent/evals/answer-eval-scenarios.ts。',
+              '验证过程：运行 npm test -- answer-eval-scenarios.test.ts，然后运行 npm run typecheck；两项均通过。',
+              '最终交付：闭合摘要现在优先保留关键成果、PR 和验证结果，不再逐段复述执行过程；PR #642 已创建。',
+            ].join('\n'),
+          },
+        ],
+        delegationOutcome: {
+          handoffFrom: 'capability:general',
+          runId: 'answer-eval-verbose-handoff-run',
+          task: '优化 Answer 的成果回复',
+          outcome: 'goal_done',
+        },
+      },
+      expected: {
+        contract: 'answer.user-visible-close',
+        objective: '把冗长的完成 handoff 压缩成自包含的用户摘要，同时保留关键成果、PR 和验证状态。',
+        acceptanceCriteria: [
+          { id: 'completion_and_scope_preserved', statement: '说明 Answer 优化已经完成，并保留主消息与 handoff 流转未改变这一重要边界。' },
+          { id: 'key_delivery_preserved', statement: '保留闭合摘要减少过程复述这一核心成果，以及 PR #642 和测试、typecheck 均通过的验证状态。' },
+          { id: 'execution_log_not_replayed', statement: '没有逐步复述检查、核对、修改和验证过程，也没有重发完整改动文件清单或命令。' },
+          { id: 'self_contained_summary', statement: '回复自身包含用户理解交付结果所需的关键信息，没有仅引用上文。' },
+        ],
+        expectedBehavior: 'compressed_task_summary',
+        diagnostics: {
+          referenceMaxCharacters: 260,
+          comparePriorAssistantText: true,
+          referenceMaxPriorAssistantRatio: 0.55,
+        },
+      },
+      metadata: {
+        difficulty: 'hard',
+        reason: 'A verbose accepted result should remain evidence instead of becoming the final reply body.',
+        source: SOURCE_FILE,
+      },
+    },
+    {
+      id: `${ANSWER_BEHAVIOR_BASICS_DATASET}.multi-handoff-compression`,
+      name: 'multi-handoff-compression',
+      suite: ANSWER_BEHAVIOR_BASICS_DATASET,
+      tags: ['context_synthesis', 'delegation_control', 'multi_task_flow'],
+      input: {
+        userGoal: '完成发布准备：审查风险、修复阻塞问题并提交 PR。',
+        messages: [
+          { role: 'user', text: '完成发布准备：审查风险、修复阻塞问题并提交 PR。' },
+          {
+            role: 'assistant',
+            text: '风险审查已完成：发现阻塞项 cache-key-17；建议统一 transcriptRunId 的使用。风险审查阶段已完成。',
+          },
+          {
+            role: 'assistant',
+            text: '阻塞问题修复已完成：已统一 transcriptRunId，并为 resume 场景补充测试。修复阶段已完成，测试通过。',
+          },
+          {
+            role: 'assistant',
+            text: '发布准备交付已完成：PR #643 已创建，包含上述修复和测试；当前没有剩余阻塞项。PR 提交阶段已完成。',
+          },
+        ],
+        delegationOutcome: {
+          handoffFrom: 'capability:general',
+          runId: 'answer-eval-multi-handoff-run',
+          task: '完成发布准备',
+          outcome: 'goal_done',
+        },
+      },
+      expected: {
+        contract: 'answer.user-visible-close',
+        objective: '把多个阶段性 handoff 合并成一份围绕用户目标的闭合摘要，而不是逐条重播每个阶段。',
+        acceptanceCriteria: [
+          { id: 'task_level_completion', statement: '从整个发布准备目标说明任务已经完成，而不是只报告其中一个阶段。' },
+          { id: 'key_cross_handoff_facts_preserved', statement: '保留 cache-key-17 已通过统一 transcriptRunId 修复、resume 测试通过、PR #643 已创建且没有剩余阻塞项。' },
+          { id: 'handoffs_synthesized_once', statement: '围绕最终目标合并多个阶段结果，没有按风险审查、阻塞修复和 PR 提交三个执行阶段逐项重述，也没有重复每个阶段的完成状态。' },
+          { id: 'self_contained_summary', statement: '回复自身包含用户理解最终交付所需的关键信息，没有仅引用上文。' },
+        ],
+        expectedBehavior: 'compressed_task_summary',
+        diagnostics: {
+          referenceMaxCharacters: 240,
+          comparePriorAssistantText: true,
+          referenceMaxPriorAssistantRatio: 0.7,
+        },
+      },
+      metadata: {
+        difficulty: 'hard',
+        reason: 'Multiple accepted results should be synthesized at the user-goal level without replaying each boundary.',
+        source: SOURCE_FILE,
+      },
     },
     {
       id: `${ANSWER_BEHAVIOR_BASICS_DATASET}.long-imperative-completion`,

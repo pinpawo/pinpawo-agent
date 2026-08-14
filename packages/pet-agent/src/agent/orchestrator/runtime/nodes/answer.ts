@@ -32,8 +32,8 @@ export const CHECKPOINT_INCOMPATIBLE_MESSAGE =
 export function createAnswerNode(config: OrchestratorConfig) {
   // Node: answer — the dedicated final-reply node. The decision nodes only route
   // here; this node synthesizes the user-facing reply from the FULL conversation
-  // (not the clipped decision digest), so prior subagent results are reproduced
-  // faithfully instead of being re-fabricated.
+  // (not the clipped decision digest), so prior subagent results remain available
+  // as faithful evidence instead of being re-fabricated.
   return async function answerNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
     if (state.runRuntimeFailure === 'checkpoint_incompatible') {
       return {

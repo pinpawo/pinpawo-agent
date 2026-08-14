@@ -97,6 +97,17 @@ function collectDiagnostics(
   if (expected.diagnostics?.comparePriorAssistantText) {
     diagnostics.longestPriorAssistantVerbatimSpan = longestSharedSpan(text, priorAssistantText);
   }
+  if (
+    expected.diagnostics?.referenceMaxPriorAssistantRatio !== undefined
+    && priorAssistantText.length > 0
+  ) {
+    const ratio = text.length / priorAssistantText.length;
+    diagnostics.priorAssistantCharacterRatio = ratio;
+    diagnostics.referenceMaxPriorAssistantRatio =
+      expected.diagnostics.referenceMaxPriorAssistantRatio;
+    diagnostics.withinReferencePriorAssistantRatio =
+      ratio <= expected.diagnostics.referenceMaxPriorAssistantRatio;
+  }
   return diagnostics;
 }
 

@@ -285,8 +285,6 @@ test('LocalServerTuiSessionService injects active session createdAt into runtime
     context: {
       petMemoryText: '',
       recentChatTurns: [],
-      recentDaily: [],
-      trendItems: [],
       today: '2026-06-11',
     },
   });
@@ -323,8 +321,6 @@ test('LocalServerTuiSessionService rejects chat setup without a thread-scoped ar
       context: {
         petMemoryText: '',
         recentChatTurns: [],
-        recentDaily: [],
-        trendItems: [],
         today: '2026-06-11',
       },
     }),
@@ -362,8 +358,6 @@ test('runtime config updates reach the next chat setup through the normalized de
     context: {
       petMemoryText: '',
       recentChatTurns: [],
-      recentDaily: [],
-      trendItems: [],
       today: '2026-06-11',
     },
   };
@@ -422,8 +416,6 @@ test('LocalServerTuiSessionService reads one checkpoint point for messages and p
       context: {
         petMemoryText: '',
         recentChatTurns: [],
-        recentDaily: [],
-        trendItems: [],
         today: '2026-06-11',
       },
     }),

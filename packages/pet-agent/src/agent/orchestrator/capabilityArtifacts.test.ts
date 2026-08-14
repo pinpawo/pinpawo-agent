@@ -11,7 +11,7 @@ function ref(overrides: Partial<CapabilityArtifactRef> & { id: string }): Capabi
   return {
     id,
     threadId: 'thread-1',
-    capabilityId: 'daily_post',
+    capabilityId: 'content_writer',
     delegationId: 'delegation-1',
     runId: 'turn-1',
     kind: 'result',
@@ -33,10 +33,10 @@ test('selectCapabilityResultArtifact requires explicit scope', () => {
 test('selectCapabilityResultArtifact selects latest result only within the requested scope', () => {
   const artifacts = [
     ref({
-      id: 'daily-old',
-      capabilityId: 'daily_post',
+      id: 'report-old',
+      capabilityId: 'content_writer',
       delegationId: 'delegation-old',
-      schema: { name: 'DailyPostResult', version: 1 },
+      schema: { name: 'ContentWriterResult', version: 1 },
       createdAt: '2026-06-19T00:00:00.000Z',
     }),
     ref({
@@ -47,24 +47,24 @@ test('selectCapabilityResultArtifact selects latest result only within the reque
       createdAt: '2026-06-19T00:10:00.000Z',
     }),
     ref({
-      id: 'daily-new',
-      capabilityId: 'daily_post',
+      id: 'report-new',
+      capabilityId: 'content_writer',
       delegationId: 'delegation-new',
-      schema: { name: 'DailyPostResult', version: 1 },
+      schema: { name: 'ContentWriterResult', version: 1 },
       createdAt: '2026-06-19T00:05:00.000Z',
     }),
   ];
 
   assert.equal(
     selectCapabilityResultArtifact(artifacts, {
-      capabilityId: 'daily_post',
-      schemaName: 'DailyPostResult',
+      capabilityId: 'content_writer',
+      schemaName: 'ContentWriterResult',
     })?.id,
-    'daily-new',
+    'report-new',
   );
   assert.equal(
     selectCapabilityResultArtifact(artifacts, { delegationId: 'delegation-old' })?.id,
-    'daily-old',
+    'report-old',
   );
 });
 
@@ -77,7 +77,7 @@ test('artifact selectors can distinguish multiple result roles from one capabili
 
   assert.deepEqual(
     filterCapabilityArtifacts(artifacts, {
-      capabilityId: 'daily_post',
+      capabilityId: 'content_writer',
       kind: 'result',
       metadata: { role: 'audit' },
     }).map((artifact) => artifact.id),

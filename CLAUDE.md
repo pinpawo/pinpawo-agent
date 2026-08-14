@@ -31,7 +31,7 @@ Per-workspace (use `-w <pkg>` or `cd`):
 - Pet-agent single test file: `cd packages/pet-agent && node --import tsx/esm --test src/agent/orchestrator/route.test.ts`
 - Local-agent single test file: `cd services/local-agent && node --import tsx --test src/cli.test.ts`
 - Local-agent live test (hits real services): `cd services/local-agent && npm run test:live`
-- TUI dev: `cd services/local-agent && npm run tui` (or `npm run tui:dry` for dry-run). `npm run login` first to set credentials.
+- TUI dev: `cd services/local-agent && npm run tui`. Run `npm run login` first to set credentials.
 - One-shot post: `npm run once` / `npm run once:dry`.
 - Evals (pet-agent, needs `.env`): `npm run eval:route`, `eval:flow:mock-subagent`, `eval:hitl`, `eval:subagent`, `eval:dataset`.
 - Eval (local-agent, needs `.env`): `npm run eval:hitl -w pinpawo` — drives `runChatSession` through a fake graph to verify structured-resume + shell authorization extras.

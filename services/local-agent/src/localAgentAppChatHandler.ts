@@ -717,7 +717,6 @@ export class LocalAgentAppChatHandler {
       extraCapabilities: this.getLocalCapabilities(),
       threadId,
       interfaceKind: 'app-chat',
-      dryRun: false,
       checkpoint: this.checkpoint,
       userCapabilities: this.getUserCapabilities(),
       capabilityArtifactStore: this.getCapabilityArtifactStore(),

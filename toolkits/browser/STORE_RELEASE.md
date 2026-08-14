@@ -4,7 +4,7 @@
 - Distribution: Private
 - Category: Developer Tools
 - Primary language: English (United States)
-- Privacy notice: `docs/browser-extension-privacy.md`
+- [Privacy notice](../../docs/guides/browser-extension-privacy.md)
 
 ## Package
 

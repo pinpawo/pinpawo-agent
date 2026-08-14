@@ -10,7 +10,7 @@ import {
 } from '@pinpawo/pet-agent';
 import {
 } from '@pinpawo-toolkit/studio-kanban';
-import { collectPluginHooks, loadPlugins } from './pluginLoader';
+import { loadPlugins } from './pluginLoader';
 import type { LoadedUserCapability } from './capabilityLoader';
 import {
   buildLocalModelProfileRegistry,
@@ -49,7 +49,6 @@ export class LocalAgentRuntime {
   private actorId: string | null = null;
   private actorName: string | null = null;
   private modelProfiles: LocalModelProfileRegistry | null = null;
-  private hooks: ReturnType<typeof collectPluginHooks> | null = null;
   private pluginToolkitDefinitions: AgentToolkit[] = [];
   private pluginToolkits: AgentToolkit[] = [];
   private readonly toolkitRuntimeManager = new ToolkitRuntimeManager();
@@ -155,7 +154,7 @@ export class LocalAgentRuntime {
         );
       }
     }
-    const { plugins, toolkitDefinitions } = await loadPlugins({ resolveAvailability: false });
+    const { toolkitDefinitions } = await loadPlugins({ resolveAvailability: false });
     this.modelProfiles = buildLocalModelProfileRegistry();
     this.pluginToolkitDefinitions = toolkitDefinitions;
     await this.capabilityRegistry.load({
@@ -167,7 +166,6 @@ export class LocalAgentRuntime {
       },
     });
     this.pluginToolkits = await resolveAvailableToolkits(this.pluginToolkitDefinitions);
-    this.hooks = collectPluginHooks(plugins);
     this.actorId = await ensureActorSelected({ interactive: false });
     this.actorName = getConfig().apiConnected ? loadSelectedActorName() : LOCAL_ONLY_ACTOR_NAME;
     const ctx = await loadAgentContext(this.actorId);
@@ -177,7 +175,6 @@ export class LocalAgentRuntime {
       saveStoredConfig({ ...loadStoredConfig(), actor_name: ctx.pet.name });
     }
 
-    return this.hooks;
   }
 
   requestStop() {

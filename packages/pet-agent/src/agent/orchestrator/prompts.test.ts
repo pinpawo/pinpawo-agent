@@ -43,14 +43,14 @@ test('start-loop router request context includes compaction summaries outside re
 
 test('prepared request context does not repeat the current user request in recent messages', () => {
   const requestContext = buildPreparedRequestContext({
-    latestUserRequest: '打开小红书',
+    latestUserRequest: '打开示例站点',
     recentMessages: [
       new HumanMessage('更早的请求'),
-      new HumanMessage('打开小红书'),
+      new HumanMessage('打开示例站点'),
     ],
   });
 
-  assert.equal((requestContext.match(/打开小红书/g) ?? []).length, 1);
+  assert.equal((requestContext.match(/打开示例站点/g) ?? []).length, 1);
   assert.match(requestContext, /更早的请求/);
 });
 
@@ -74,7 +74,7 @@ test('Capability Planner entry input leads with the run user goal', () => {
     traceId: 'trace-1',
     runId: 'run-1',
     workspace: plannerPromptWorkspace,
-    userGoal: '打开小红书并浏览相关内容。\n\n浏览器已经连接。',
+    userGoal: '打开示例站点并浏览相关内容。\n\n浏览器已经连接。',
     latestUserMessage: null,
     activeDelegation: null,
     latestAnnounce: null,
@@ -82,7 +82,7 @@ test('Capability Planner entry input leads with the run user goal', () => {
   } satisfies CapabilityPlannerInput);
 
   assert.match(input, /^<run_user_goal[^>]*>/);
-  assert.match(input, /打开小红书并浏览相关内容。/);
+  assert.match(input, /打开示例站点并浏览相关内容。/);
   assert.match(input, /浏览器已经连接。/);
   assert.equal(input.trimEnd().endsWith('</run_user_goal>'), true);
   assert.doesNotMatch(input, /workspace|registry_digest|document_count|<planning_state>/);
@@ -120,7 +120,7 @@ test('Capability Planner boundary input carries the run user goal and boundary f
     traceId: 'trace-1',
     runId: 'run-1',
     workspace: plannerPromptWorkspace,
-    userGoal: '打开小红书并浏览相关内容。\n\n浏览器已经连接。',
+    userGoal: '打开示例站点并浏览相关内容。\n\n浏览器已经连接。',
     latestUserMessage: null,
     activeDelegation: {
       delegationId: 'delegation-1',
@@ -152,7 +152,7 @@ test('Capability Planner boundary input omits the follow-up section once the pla
     traceId: 'trace-1',
     runId: 'run-1',
     workspace: plannerPromptWorkspace,
-    userGoal: '打开小红书并浏览相关内容。',
+    userGoal: '打开示例站点并浏览相关内容。',
     latestUserMessage: null,
     activeDelegation: {
       delegationId: 'delegation-1',

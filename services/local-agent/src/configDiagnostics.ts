@@ -115,7 +115,7 @@ export function buildSetupGuide(options: {
           id: 'hosted-api',
           label: 'Hosted app/API',
           status: 'warning',
-          detail: 'PINPAWO_LOCAL_ONLY is enabled. Hosted app relay, scheduled posts, and Hasura context are disabled even if API credentials are configured.',
+          detail: 'PINPAWO_LOCAL_ONLY is enabled. Hosted app relay and Hasura context are disabled even if API credentials are configured.',
           nextStep: 'Unset PINPAWO_LOCAL_ONLY or set local_only=false in config.json to re-enable hosted API connections.',
         }
       : hostedApiConfigured
@@ -129,7 +129,7 @@ export function buildSetupGuide(options: {
           id: 'hosted-api',
           label: 'Hosted app/API',
           status: 'warning',
-          detail: `Missing or placeholder values: ${missingApiKeys.join(', ')}. Local-only mode can still run, but hosted app relay, heartbeat, scheduled posts, and Hasura context are disabled.`,
+          detail: `Missing or placeholder values: ${missingApiKeys.join(', ')}. Local-only mode can still run, but hosted app relay, heartbeat, and Hasura context are disabled.`,
           nextStep: 'Run "pinpawo login" to configure hosted API credentials.',
         },
     actorId

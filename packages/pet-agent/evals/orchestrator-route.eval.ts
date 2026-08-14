@@ -178,14 +178,14 @@ const mockCapabilities: AgentCapability[] = [
     '负责只读探索、代码库理解、资料检索和证据汇总。',
   ),
   evalCapability(
-    'daily_post',
-    '生成、保存或跳过宠物 daily post、小红书日常动态、宠物发帖草稿，并产出本轮动态处理结果。',
-    '负责宠物日常内容生成、草稿保存和发布前确认。',
+    'content_writer',
+    '编写、审校和保存通用内容草稿，并产出本轮处理结果。',
+    '负责通用文案生成、草稿保存和交付前确认。',
   ),
   evalCapability(
-    'trend_observe',
-    '浏览或搜索最新的小红书热点/内容趋势，并选出适合宠物账号继续处理的一条。',
-    '负责观察内容趋势并给出适合宠物账号的候选主题。',
+    'web_research',
+    '浏览或搜索最新的公开资料，并选出与当前任务最相关的证据。',
+    '负责收集公开资料并整理可引用的证据。',
   ),
   evalCapability(
     'browser',

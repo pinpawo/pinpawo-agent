@@ -23,5 +23,4 @@ export type AgentModels = {
 
 export type AgentExecution = {
   threadId?: string;
-  dryRun?: boolean;
 };

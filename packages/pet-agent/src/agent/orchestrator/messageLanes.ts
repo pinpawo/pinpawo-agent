@@ -44,7 +44,7 @@ export function readMessageCreatedAtUtc(message: BaseMessage): string | null {
  * Neutral marker for "this lane message carries the subagent's deliverable text".
  * Replaces the completed/progress announce tag: it says WHICH message is the
  * announce, without judging whether the task is complete (that judgment now lives
- * with the orchestrator / handoff). See docs/PET_AGENT_ANNOUNCE_JUDGMENT_REFACTOR.md.
+ * with the orchestrator / handoff). See docs/reference/runtime/subagent-handoffs.md.
  */
 export function setMessageIsAnnounce(message: BaseMessage) {
   setPinpetMeta(message, { isAnnounce: true });
@@ -292,7 +292,7 @@ export function getMessageHandoffSource(message: BaseMessage): HandoffSource | n
  * of leaving the lane-tagged announce mixed into main, we COPY the announce text
  * into a fresh main-queue message (a first-class main message, not lane-tagged)
  * and WIPE the entire delegation's lane (original announce + intermediate
- * transcript). See docs/PET_AGENT_ANNOUNCE_JUDGMENT_REFACTOR.md.
+ * transcript). See docs/reference/runtime/subagent-handoffs.md.
  *
  * Returns the messages array update: optionally removes lane messages for this
  * lane+transcriptRunId+delegationId, followed by the main-queue copy.

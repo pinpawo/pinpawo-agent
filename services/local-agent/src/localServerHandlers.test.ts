@@ -56,8 +56,6 @@ function loadTestContext() {
     context: {
       petMemoryText: '',
       recentChatTurns: [],
-      recentDaily: [],
-      trendItems: [],
       today: '2026-07-30',
     },
   });

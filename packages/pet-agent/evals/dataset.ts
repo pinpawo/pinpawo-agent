@@ -133,12 +133,12 @@ export const examples: Example[] = [
   {
     name: 'browser-result-already-sufficient',
     inputs: {
-      user_message: '打开小红书探索页看看今天有什么热门内容',
+      user_message: '打开示例站点资料页查看最新更新',
       completed_tasks: [
-        '在浏览器中打开小红书探索页面（https://www.xiaohongshu.com/explore），查看今天有什么热门新闻或热门内容。',
+        '在浏览器中打开示例站点资料页面（https://example.com/updates），查看今天有什么热门新闻或热门内容。',
       ],
       completed_results: [
-        '已打开小红书探索页并提取到热门内容：宠物日常、春季出游、家居收纳、穿搭分享。可以基于这些方向继续选题。',
+        '已打开示例站点资料页并提取到热门内容：技术资讯、产品更新、开发指南、案例分享。可以基于这些方向继续选题。',
       ],
     },
     outputs: {
@@ -151,21 +151,21 @@ export const examples: Example[] = [
   {
     name: 'browser-result-with-capability-candidate-still-finishes',
     inputs: {
-      user_message: '你好，再来帮我查一下小红书上今天有什么动态',
+      user_message: '你好，再来帮我查一下公开站点今天有什么更新',
       completed_tasks: [
-        '打开浏览器，搜索小红书上今天的热门动态/新闻，返回找到的热门动态内容。',
+        '打开浏览器，搜索公开站点今天的重要更新，返回找到的热门动态内容。',
       ],
       completed_results: [
-        '已打开小红书发现页并提取到今日热门动态：科技 AI 内容、穿搭分享、春季出游和家居收纳等方向。',
+        '已打开示例站点资料页并提取到今日热门动态：AI 工程、产品发布、开发工具和实践案例。',
       ],
       capability_pack: 'pet_content',
-      allowed_capability_names: ['daily_post'],
+      allowed_capability_names: ['content_writer'],
     },
     outputs: {
       expected_route: 'answer',
       expected_mode: 'answer',
       expected_phase: 'after_subagent',
-      reason: 'A completed lookup should answer even when the Planner workspace is narrowly scoped to daily_post.',
+      reason: 'A completed lookup should answer even when the Planner workspace is narrowly scoped to content_writer.',
     },
   },
 
@@ -318,44 +318,44 @@ export const examples: Example[] = [
   {
     name: 'capability-search-needed',
     inputs: {
-      user_message: '用宠物发帖能力给小白生成今天的小红书日常草稿',
+      user_message: '用内容写作能力生成这个版本的发布说明草稿',
       capability_pack: 'pet_content',
     },
     outputs: {
       expected_route: 'delegate',
       expected_mode: 'capability',
       expected_phase: 'initial_request',
-      expected_active_capability: 'daily_post',
-      reason: 'The Planner should explore the available Capability documents and select daily_post.',
+      expected_active_capability: 'content_writer',
+      reason: 'The Planner should explore the available Capability documents and select content_writer.',
     },
   },
   {
     name: 'capability-search-loop-delegates-candidate',
     inputs: {
-      user_message: '用宠物发帖能力给小白生成今天的小红书日常草稿',
+      user_message: '用内容写作能力生成这个版本的发布说明草稿',
       capability_pack: 'pet_content',
     },
     outputs: {
       expected_route: 'delegate',
       expected_mode: 'capability',
       expected_phase: 'initial_request',
-      expected_active_capability: 'daily_post',
-      reason: 'The full graph should let the Planner discover and delegate to daily_post.',
+      expected_active_capability: 'content_writer',
+      reason: 'The full graph should let the Planner discover and delegate to content_writer.',
     },
   },
   {
     name: 'capability-candidate-delegate',
     inputs: {
-      user_message: '用宠物发帖能力给小白生成今天的小红书日常草稿',
+      user_message: '用内容写作能力生成这个版本的发布说明草稿',
       capability_pack: 'pet_content',
-      allowed_capability_names: ['daily_post'],
+      allowed_capability_names: ['content_writer'],
     },
     outputs: {
       expected_route: 'delegate',
       expected_mode: 'capability',
       expected_phase: 'initial_request',
-      expected_active_capability: 'daily_post',
-      reason: 'The Planner workspace is scoped to daily_post, so delegation should use it.',
+      expected_active_capability: 'content_writer',
+      reason: 'The Planner workspace is scoped to content_writer, so delegation should use it.',
     },
   },
   {

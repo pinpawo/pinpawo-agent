@@ -1,139 +1,89 @@
 # PinPawo Agent
 
-Open-source agent runtime, local CLI/TUI, and desktop companion for PinPawo.
+Open-source agent runtime, local CLI/TUI, browser toolkit, and macOS companion for PinPawo.
 
-PinPawo Agent provides the public agent-side building blocks used by PinPawo:
+The repository contains the public, local-first agent stack: orchestration, Capability and Toolkit contracts, session projection, Studio coordination, local transports, and developer tooling. It does not contain the private PinPawo app, hosted backend, Hasura metadata, production credentials, or other internal product code.
 
-- A reusable pet-agent runtime with orchestration, capability routing, subagent execution, human review, and toolkit contracts.
-- A local agent service and terminal UI for running agents on a user's machine.
-- A macOS desktop companion for configuring and supervising the local agent.
-- Architecture notes for Studio, multi-pet collaboration, capability artifacts, context governance, and local runtime integration.
+## Highlights
 
-This repository intentionally does not include the private PinPawo mobile app, hosted API service, Hasura metadata, production secrets, or internal product/backend code.
+- Reusable TypeScript runtime for agent orchestration and isolated Capability delegation.
+- Local HTTP/WebSocket or JSONL stdio host with checkpoint-backed sessions.
+- Ink and OpenTUI terminal clients with tool activity and human-review flows.
+- Browser automation through Playwright or a Chrome Extension plus Native Messaging host.
+- Studio runtime for multi-Pet dispatch, per-Pet queueing, runtime gates, and plugin-driven workflows.
+- Extensible local Capabilities and Toolkit-based plugins.
 
-## Table of Contents
+## Architecture
 
-- [Repository Layout](#repository-layout)
-- [Packages](#packages)
-- [What You Can Build](#what-you-can-build)
-- [Core Concepts](#core-concepts)
-- [Requirements](#requirements)
-- [Quick Start](#quick-start)
-- [Local Development](#local-development)
-- [Configuration](#configuration)
-- [CLI Reference](#cli-reference)
-- [Capabilities and Plugins](#capabilities-and-plugins)
-- [Studio Architecture](#studio-architecture)
-- [Runtime Data and State](#runtime-data-and-state)
-- [Documentation Map](#documentation-map)
-- [Testing and Quality](#testing-and-quality)
-- [Troubleshooting](#troubleshooting)
-- [Security](#security)
-- [Contributing](#contributing)
-- [Maintainer Checklist](#maintainer-checklist)
-- [Publishing](#publishing)
-- [License](#license)
+```text
+User / TUI / desktop app
+        |
+        v
+local-agent host ---- browser and local Toolkits
+        |
+        v
+pet-agent orchestrator
+        |
+        +-- direct answer
+        +-- isolated Capability lane
+        +-- Studio dispatch through plugin-driven multi-Pet coordination
+        |
+        v
+checkpoint state + capability artifacts + plugin-owned workflow state
+```
+
+The main boundaries are:
+
+| Boundary | Responsibility |
+|---|---|
+| Pet agent | Actor identity, orchestration, delegation, review policy, and model execution. |
+| Capability | A focused business ability executed in an isolated subagent lane. |
+| Toolkit | A typed family of tools, operation metadata, availability, and review guidance. |
+| Session | Runtime-neutral event projection, snapshots, resume state, and transport contracts. |
+| Studio | Multi-Pet dispatch, per-Pet queues, runtime gates, and plugin event fan-out. |
 
 ## Repository Layout
 
-```text
-packages/pet-agent/       Shared agent runtime, orchestrator, capability contracts,
-                          subagent execution, review policy, Studio primitives,
-                          and examples.
-
-packages/agent-session/   Runtime-neutral session domain, event projection,
-                          versioned snapshot contract, parsers, and protocol types.
-
-services/local-agent/     Local CLI/TUI, local server, local config, plugin loading,
-                          default Toolkit composition, and transport adapters.
-
-toolkits/browser/         Browser Toolkit runtime, drivers, Chrome Extension, and
-                          Native Messaging Host.
-
-tools/agent-macos/        macOS desktop companion for running and configuring
-                          the local agent.
-
-docs/                     Public architecture, capability, Studio, artifact store,
-                          HITL, context, and runtime design notes.
-```
-
-## Packages
-
-| Package | Location | Purpose |
-|---|---|---|
-| `@pinpawo/pet-agent` | `packages/pet-agent/` | Core runtime, orchestrator, capability and toolkit contracts. |
-| `@pinpawo/agent-session` | `packages/agent-session/` | Canonical session projection, versioned snapshot contract, and boundary parsers. |
-| `pinpawo` | `services/local-agent/` | CLI/TUI and local server package published with the `pinpawo` binary. |
-
-The repository root is an npm workspace. The root package is private; publishable packages live under workspace directories.
-
-## What You Can Build
-
-PinPawo Agent is useful when you need:
-
-- A local agent process that can talk to OpenAI-compatible LLM endpoints.
-- A terminal UI for agent runs, tool activity, and human review.
-- A reusable TypeScript runtime for agent orchestration and capability delegation.
-- A capability system where local users can install and validate custom agent skills.
-- Toolkits that bundle tools, operation metadata, and review policy under one owner.
-- A Studio-style multi-agent architecture where multiple pet agents collaborate through a shared wiki and durable artifact refs.
-- A macOS companion app that can supervise and configure the local agent.
-
-## Core Concepts
-
-| Concept | Meaning |
+| Path | Purpose |
 |---|---|
-| Pet agent | A single agent persona with an actor identity, capabilities, tools, and runtime state. |
-| Capability | A business ability exposed to the agent, executed through an isolated subagent lane. |
-| Toolkit | A reusable tool family used by capabilities or the general lane. |
-| Subagent lane | Short-lived execution history for a delegated capability or general tool task. |
-| Operation | Normalized tool activity shown to users and UI clients. |
-| Human review | Runtime interrupt flow for approving, editing, rejecting, or responding to tool actions. |
-| Studio | Multi-pet orchestration layer where one show-runner dispatches work to pet runtimes. |
-| Studio Whiteboard | Per-conversation filesystem-backed wiki maintained by the curator. |
-| Capability Artifact Store | Durable storage for capability outputs; runtime traces only keep refs. |
+| `packages/agent-contracts/` | Shared wire and event contracts. |
+| `packages/agent-session/` | Session domain, projection, snapshots, parsers, and protocol types. |
+| `packages/pet-agent/` | Core agent runtime, orchestrator, Capability contracts, and evaluations. |
+| `packages/studio/` | Runtime-independent Studio coordination. |
+| `services/local-agent/` | Published `pinpawo` CLI, local host, configuration, and integrations. |
+| `services/tui/` | OpenTUI client and distribution bundle. |
+| `toolkits/browser/` | Browser Toolkit, drivers, extension, and Native Messaging host. |
+| `toolkits/studio-kanban/` | Studio Kanban Toolkit and plugin. |
+| `tools/agent-macos/` | macOS desktop companion. |
+| `docs/concepts/` | Project vocabulary and architecture for new contributors. |
+| `docs/guides/` | Installation, configuration, and browser-operation guides. |
+| `docs/reference/` | Current API, extension, runtime, artifact, and tool contracts. |
+| `docs/studio/` | Current multi-agent push model, configuration, host integration, and API links. |
+| `docs/design/` / `docs/history/` | Proposals and rationale / superseded records that do not define current behavior. |
 
-High-level runtime flow:
-
-```text
-User request
-  -> pet-agent orchestrator
-  -> direct reply or capability delegation
-  -> subagent lane with selected tools/toolkits
-  -> capability result + optional artifact refs
-  -> final reply / Studio dispatch result / UI events
-```
+The repository root is a private npm workspace. Publishable packages live in their respective workspace directories.
 
 ## Requirements
 
 - Node.js `>=24` (Node 24 LTS and Node 26 are validated)
 - npm
-- macOS is required only for `tools/agent-macos/`
-- Optional browser automation dependencies are installed through `pinpawo` optional dependencies when available.
+- macOS only when building `tools/agent-macos/`
 
-The macOS companion currently retains its separate bundled Node 20 toolchain and
-is outside the Node 24/26 npm package compatibility target for this release.
+The macOS companion currently keeps its separate bundled Node 20 toolchain and is outside the npm package compatibility target.
 
 ## Quick Start
 
-Install the local agent globally:
+Install the CLI globally:
 
 ```bash
 npm install -g pinpawo
 pinpawo init
 pinpawo login
 pinpawo setup
-pinpawo capability validate ~/.pinpawo/capabilities/hello-pinpawo
 pinpawo tui
 ```
 
-Use `pinpawo init` first even if you plan to log in interactively. It creates:
-
-- `~/.pinpawo/.env`
-- `~/.pinpawo/capabilities/`
-- `~/.pinpawo/capabilities/hello-pinpawo/`
-
-For one-off usage without a global install:
+Or run it without a global install:
 
 ```bash
 npx pinpawo init
@@ -141,62 +91,52 @@ npx pinpawo login
 npx pinpawo tui
 ```
 
-## Local Development
+`pinpawo init` creates:
 
-Install workspace dependencies:
+- `~/.pinpawo/.env`
+- `~/.pinpawo/capabilities/`
+- `~/.pinpawo/capabilities/hello-pinpawo/`
+
+Validate the generated example with:
+
+```bash
+pinpawo capability validate ~/.pinpawo/capabilities/hello-pinpawo
+```
+
+See [services/local-agent/README.md](services/local-agent/README.md) for TUI v2, stdio, extension setup, and package-level release details.
+
+## Local Development
 
 ```bash
 npm install
-```
-
-Run the standard checks:
-
-```bash
 npm run typecheck
 npm test
 npm run build
 ```
 
-Run the local TUI from source:
+Start the local TUI from source:
 
 ```bash
 cd services/local-agent
 npm run tui
 ```
 
-Run a local package smoke test after building:
+Smoke-test the built CLI:
 
 ```bash
-npm run build
 node services/local-agent/dist/index.js init --dir /tmp/pinpawo-demo
 node services/local-agent/dist/index.js capability validate /tmp/pinpawo-demo/capabilities/hello-pinpawo
 ```
 
 ## Configuration
 
-The local agent reads configuration from:
+Configuration is resolved from:
 
-- `~/.pinpawo/config.json`
-- `~/.pinpawo/.env`
-- Environment variables
+1. `~/.pinpawo/config.json`
+2. `~/.pinpawo/.env`
+3. process environment variables
 
-Start with interactive setup:
-
-```bash
-pinpawo login
-```
-
-For repository development, you can copy the example file:
-
-```bash
-cd services/local-agent
-cp .env.example .env
-npm run login
-```
-
-Do not commit local credentials, tokens, session state, or generated build output.
-
-Common configuration keys:
+Use `pinpawo login` for interactive setup and `pinpawo setup` for diagnostics. Never commit local credentials or generated runtime state.
 
 | Key | Purpose |
 |---|---|
@@ -204,94 +144,50 @@ Common configuration keys:
 | `HASURA_ENDPOINT` | Hasura GraphQL endpoint. |
 | `AGENT_TOKEN` | Agent API token. |
 | `HASURA_JWT` | Hasura JWT. |
-| `LLM_API_KEY` | API key for the OpenAI-compatible LLM provider. |
-| `LLM_BASE_URL` | OpenAI-compatible LLM base URL. |
-| `LLM_MODEL` | Default model used by the local agent. |
-| `LLM_CONTEXT_WINDOW_TOKENS` | Optional explicit context-window override for custom models. |
-| `PINPAWO_MODEL_PROFILE` | Selects a stored model profile by stable ID. |
-| `PINPAWO_WORKDIR` | Default local working directory for tools that need one. |
-| `PINPAWO_BROWSER_BACKEND` | Browser backend mode: `auto` (connected extension first for compatible operations, otherwise Playwright), `playwright`, or `extension`. |
-| `LOCAL_SERVER_PORT` | Local HTTP/WebSocket server port. |
-| `MEDIACRAWLER_DIR` | Optional MediaCrawler checkout path. |
-| `XHS_COOKIE` | Optional Xiaohongshu cookie for crawler-backed workflows. |
+| `LLM_API_KEY` | OpenAI-compatible provider API key. |
+| `LLM_BASE_URL` | OpenAI-compatible provider base URL. |
+| `LLM_MODEL` | Default model. |
+| `LLM_CONTEXT_WINDOW_TOKENS` | Optional context-window override for custom models. |
+| `PINPAWO_MODEL_PROFILE` | Stored model profile ID. |
+| `PINPAWO_LOCAL_ONLY` | Disable hosted API, relay, and Hasura access when set to `1`. |
+| `PINPAWO_WORKDIR` | Default runtime working directory. |
+| `PINPAWO_BROWSER_BACKEND` | `auto`, `playwright`, or `extension`. |
+| `LOCAL_SERVER_PORT` | Local HTTP/WebSocket port. |
 
-Versioned multi-model configuration lives under `config.json#models`. A complete
-`LLM_API_KEY` + `LLM_BASE_URL` + `LLM_MODEL` tuple creates an ephemeral `env`
-profile; partial environment tuples are never mixed with stored profiles. See
-[Model Profile Configuration](docs/MODEL_PROFILE_CONFIGURATION.md).
+A complete `LLM_API_KEY` + `LLM_BASE_URL` + `LLM_MODEL` tuple creates an ephemeral environment profile. Partial tuples are not mixed with stored profiles. See [Model Profile Configuration](docs/guides/model-profiles.md).
 
-## CLI Reference
-
-The published package installs a `pinpawo` binary.
+## CLI
 
 | Command | Purpose |
 |---|---|
-| `pinpawo` | Starts the local agent server. Equivalent to `pinpawo server`. |
-| `pinpawo init` | Scaffolds local config and a sample capability. |
-| `pinpawo init --dir <dir>` | Scaffolds config into a custom directory. |
-| `pinpawo init --force` | Overwrites generated scaffold files. |
-| `pinpawo login` | Interactive setup for credentials and LLM settings. |
-| `pinpawo actor` | Chooses the pet actor used by the local agent. |
-| `pinpawo server` | Starts the local agent server in chat mode. |
+| `pinpawo` / `pinpawo server` | Start the local host in chat mode. |
 | `pinpawo run` | Alias for `pinpawo server`. |
-| `pinpawo server --mode studio` | Starts the server in Studio mode; fails fast on invalid Studio config. |
-| `pinpawo server --stdio` | Starts one local-agent peer over JSONL stdio. |
-| `pinpawo browser extension register --extension-id <id>` | Registers the Chrome Native Messaging host for the Browser extension driver. |
-| `pinpawo browser extension repair --extension-id <id>` | Rewrites the Native Messaging wrapper and manifests while retaining registered extension IDs. |
-| `pinpawo browser extension status` | Shows the Browser extension driver's host health and runtime-file diagnostics. |
-| `pinpawo browser extension unregister` | Removes the Browser extension driver's Native Messaging host registration. |
-| `pinpawo tui` | Starts the interactive terminal UI. |
-| `pinpawo tui --dry-run` | Runs the TUI without writing generated post changes. |
-| `pinpawo detect` | Prints local browser/backend detection as JSON. |
-| `pinpawo capability list` | Lists installed user capabilities. |
-| `pinpawo capability validate <dir>` | Validates a capability directory. |
-| `pinpawo capability install <dir>` | Installs a capability into `~/.pinpawo/capabilities/`. |
-| `pinpawo capability install <dir> --link` | Links a capability in place instead of copying it. |
-
-See [Chrome extension browser backend](docs/BROWSER_EXTENSION_BACKEND.md) for setup, P1 interaction scope, security model and snapshot contract.
-
-Local development equivalents:
-
-```bash
-npm run start -w pinpawo -- tui
-npm run login -w pinpawo
-npm run tui -w pinpawo
-```
+| `pinpawo server --mode studio` | Start in Studio mode. |
+| `pinpawo server --stdio` | Use a single JSONL stdio peer instead of HTTP/WebSocket. |
+| `pinpawo init` | Create local config and the example Capability. |
+| `pinpawo login` | Configure credentials and model settings. |
+| `pinpawo setup` | Diagnose configuration and show next steps. |
+| `pinpawo actor` | Select the local pet actor. |
+| `pinpawo tui` | Start the legacy Ink terminal client. |
+| `pinpawo tui --v2` | Start the OpenTUI client. |
+| `pinpawo detect` | Print browser and backend detection as JSON. |
+| `pinpawo capability list` | List installed user Capabilities. |
+| `pinpawo capability validate <dir>` | Validate a Capability directory. |
+| `pinpawo capability install <dir>` | Install a Capability. |
+| `pinpawo capability install <dir> --link` | Link a Capability in place. |
 
 ## Capabilities and Plugins
 
-Capabilities are self-contained agent skills. User capabilities live in:
+User Capabilities live under `~/.pinpawo/capabilities/<id>/`. Each directory contains a code-free `CAPABILITY.md`; an optional entry module may expose the narrow lifecycle finalizer contract. The old `manifest.json` plus `index.js` format is no longer loaded.
 
-```text
-~/.pinpawo/capabilities/<id>/
-```
-
-Each capability directory must contain:
-
-- `manifest.json`
-- `index.js`
-
-Useful commands:
-
-```bash
-pinpawo capability list
-pinpawo capability validate ./my-capability
-pinpawo capability install ./my-capability
-pinpawo capability install ./my-capability --link
-```
-
-Use `--link` for capabilities that live in a source repository or have their own package dependencies, so their dependency tree stays in one place.
-
-Local external plugins are loaded from:
+Local plugins are loaded from:
 
 ```text
 ~/.pinpawo/plugins/*.mjs
 ~/.pinpawo/plugins/*.js
 ```
 
-Plugins should export `toolkits`; legacy top-level raw `tools` exports are ignored. Toolkits keep tools, operation metadata, and review policy under one typed owner.
-
-Minimal external plugin shape:
+Plugins export Toolkits rather than loose tools so availability, operation metadata, and review policy stay under one typed owner:
 
 ```js
 import { defineToolkit } from '@pinpawo/pet-agent';
@@ -299,114 +195,63 @@ import { defineToolkit } from '@pinpawo/pet-agent';
 export const toolkits = [
   defineToolkit({
     name: 'sample_plugin',
-    description: 'Sample local plugin toolkit',
+    description: 'Sample local plugin Toolkit',
     tools: [
-      // LangChain StructuredTool instances go here.
+      // LangChain StructuredTool instances
     ],
-    operations: {
-      // tool_name: { kind: 'sample.tool', title: 'Sample tool' }
-    },
   }),
 ];
 
-export default {
-  name: 'sample-plugin',
-};
+export default { name: 'sample-plugin' };
 ```
 
-Capability directories are intentionally small. A minimal generated capability looks like:
+Legacy top-level `tools` exports are ignored.
 
-```js
-export function createCapability() {
-  return {
-    name: 'hello-pinpawo',
-    description: 'Minimal example capability generated by pinpawo init.',
-    createRuntime() {
-      return {
-        instructions: [
-          'You can use this example capability as a starting point.',
-        ],
-      };
-    },
-  };
-}
+## Browser Integration
+
+Browser `auto` mode prefers a connected Chrome Extension for supported default-session operations and falls back to Playwright. Force a backend with `PINPAWO_BROWSER_BACKEND=extension` or `playwright`.
+
+For extension setup:
+
+```bash
+pinpawo browser extension status
+pinpawo browser extension register --extension-id <id>
+pinpawo browser extension repair --extension-id <id>
+pinpawo browser extension unregister
 ```
 
-## Studio Architecture
+See [Chrome Extension Browser Backend](docs/guides/browser-bridge.md) for the protocol, security model, and supported interaction scope.
 
-Studio is the multi-pet orchestration layer. The current design uses:
+## Runtime State
 
-- `StudioOrchestrator` as the show-runner.
-- `PetAgentRuntime` as the data-processing agent.
-- `Studio Whiteboard` as a per-conversation filesystem-backed wiki.
-- `Capability Artifact Store` as durable storage for capability outputs.
-- Capability/subagent lanes as short-lived execution history that can be folded after completion.
-
-The key rule is that runtime messages are not durable product artifacts. Capability outputs that must survive lane cleanup are written to the artifact store and passed across boundaries as artifact references.
-
-Studio dispatch flow:
-
-```text
-planner pet
-  -> submit_plan
-  -> Studio execute state machine
-  -> dispatch pet A with brief + wikiRoot
-  -> pet A returns reply + artifact refs
-  -> curator writes wiki summary
-  -> dispatch pet B with brief + wikiRoot + artifact refs
-  -> finalDispatchId marks the user-facing reply
-```
-
-## Runtime Data and State
-
-Important local paths:
-
-| Path | Purpose |
+| Path | Owner |
 |---|---|
-| `~/.pinpawo/config.json` | Saved interactive configuration. |
-| `~/.pinpawo/.env` | Environment-style local config scaffold. |
-| `~/.pinpawo/capabilities/` | Installed user capabilities. |
-| `~/.pinpawo/plugins/` | Local external plugin modules. |
-| `<workdir>/.pinpawo/studio.json` | Local Studio configuration. |
-| `<workdir>/.pinpawo/pets/` | Local per-pet Studio config files. |
-| `<workdir>/.pinpawo/studio-wiki/conv/<conversationId>/wiki/` | Current local Studio Whiteboard wiki default. |
-| `{artifactStore}/studio/<studioId>/conv/<conversationId>/artifacts/` | Design target for the capability artifact store. |
+| `~/.pinpawo/config.json` | Saved local configuration. |
+| `~/.pinpawo/.env` | Environment-style configuration. |
+| `~/.pinpawo/capabilities/` | Installed user Capabilities. |
+| `~/.pinpawo/plugins/` | Local plugin modules. |
+| `<workdir>/.pinpawo/studio.json` | Studio configuration. |
+| `<workdir>/.pinpawo/pets/` | Per-pet Studio configuration. |
 
-State ownership:
+LangGraph checkpoints are authoritative for resumable runtime state. Capability outputs that must survive lane cleanup belong in the artifact store; runtime messages and tool events are traces, not durable product records.
 
-| State | Owner | Notes |
-|---|---|---|
-| Graph checkpoint | LangGraph runtime | Used for resume, HITL, and thread state. |
-| Lane messages | pet-agent orchestrator | Short-lived delegation history; can be folded after completion. |
-| Capability result | pet-agent graph state | Structured latest capability output read by the host. |
-| Artifact refs | capability/pet runtime and Studio dispatch state | Durable output references. |
-| Wiki files | Studio curator | Shared knowledge for future dispatches. |
-| Business data | PinPawo backend/app store | Posts, points, interactions, and production records. |
+## Documentation
 
-Local graph checkpoints use the current content-addressed FileSaver layout.
-Legacy monolith, shard, pre-v4, and older CAS manifest formats are not migrated
-or restored by the runtime.
+Start with the [Documentation Index](docs/index.md). The primary public path is:
 
-Current implementation note: Studio wiki support is present in the local runtime. The capability artifact store is documented as the intended durable-output boundary and should be wired before relying on artifact refs as product state.
+- [Getting Started](docs/guides/getting-started.md)
+- [Core Concepts](docs/concepts/core-concepts.md)
+- [Architecture](docs/concepts/architecture.md)
+- [Capability / Toolkit Contract](docs/reference/extensions/capability-toolkit.md)
+- [API Reference](docs/reference/api/index.md)
+- [Studio](docs/studio/index.md)
 
-## Documentation Map
+简体中文入口：[PinPawo Agent 文档](docs/zh-CN/index.md)。
 
-Start with these documents:
+The documentation index also separates current contracts from detailed design
+records and historical context.
 
-- [Pet Agent Studio Architecture Overview](docs/PET_AGENT_STUDIO_ARCHITECTURE_OVERVIEW.md)
-- [Pet Agent Studio Interfaces](docs/PET_AGENT_STUDIO_INTERFACES.md)
-- [Pet Agent Studio Orchestrator Design](docs/PET_AGENT_STUDIO_ORCHESTRATOR_DESIGN.md)
-- [Capability Artifact Store Design](docs/PET_AGENT_CAPABILITY_ARTIFACT_STORE_DESIGN.md)
-- [Capability Artifact Pipeline (API 风格)](docs/capability-artifact-pipeline/index.md)
-- [Capability / Toolkit V2 Contract](docs/PET_AGENT_API_CAPABILITY_TOOLKIT.md)
-- [Toolkit Composition Design](docs/PET_AGENT_TOOLKIT_COMPOSITION_DESIGN.md)
-- [Context Governance Refactor](docs/CONTEXT_GOVERNANCE_REFACTOR.md)
-- [Human Review Approval Refactor](docs/HUMAN_REVIEW_APPROVAL_REFACTOR.md)
-- [Local Agent Architecture Refactor Plan](docs/LOCAL_AGENT_ARCHITECTURE_REFACTOR_PLAN.md)
-
-## Testing and Quality
-
-Root scripts:
+## Quality Gates
 
 ```bash
 npm run typecheck
@@ -414,102 +259,40 @@ npm test
 npm run build
 ```
 
-Package-level scripts:
+Package-level examples:
 
 ```bash
 npm run typecheck -w @pinpawo/pet-agent
 npm run test -w @pinpawo/pet-agent
-
 npm run typecheck -w pinpawo
 npm run test:unit -w pinpawo
-npm run build -w pinpawo
 ```
-
-The pet-agent package also contains evaluation scripts under `packages/pet-agent/evals/`.
-
-## Troubleshooting
-
-| Problem | Check |
-|---|---|
-| `pinpawo` command not found | Use `npx pinpawo ...` or reinstall with `npm install -g pinpawo`. |
-| TUI starts but model calls fail | Check `LLM_API_KEY`, `LLM_BASE_URL`, and `LLM_MODEL`. |
-| Context window errors | Set `LLM_CONTEXT_WINDOW_TOKENS` for custom or unknown models. |
-| Capability does not appear | Run `pinpawo capability validate <dir>` and confirm it is installed under `~/.pinpawo/capabilities/`. |
-| Linked capability dependency issues | Use `--link` so the capability keeps its own dependency tree. |
-| Browser tools unavailable | Run `pinpawo detect` and check optional browser backend installation. |
-| Local server port conflict | Set `LOCAL_SERVER_PORT` or stop the process using the port. |
-| Studio pet cannot find prior output | Confirm the curator wrote wiki entries and that durable outputs are represented as artifact refs. |
-| HITL appears stuck | Confirm the UI or local server is connected and able to answer `human_review.requested` events. |
 
 ## Security
 
-- Do not commit `.env`, tokens, JWTs, API keys, local session state, or generated build output.
-- Keep private app/backend/Hasura code in the internal PinPawo repository.
-- Treat external messages, plugin code, capability code, browser content, and artifact contents as untrusted input.
-- Human review and tool review policy are part of the runtime boundary; do not bypass them for tools that perform real side effects.
-- Capability artifacts are durable product outputs; lane messages and tool events are runtime traces and should not be treated as the source of truth for persisted outputs.
+- Never commit `.env`, tokens, JWTs, API keys, checkpoints, local session state, or generated build output.
+- Treat plugin code, Capability code, browser content, external messages, and artifact contents as untrusted input.
+- Keep review policy and human approval in the execution boundary for side-effecting tools.
+- Keep private app, backend, and Hasura code in the internal PinPawo repository.
 
 ## Contributing
 
-Before opening a pull request:
+Keep runtime-independent agent logic in `packages/`. Put local machine, CLI, browser, transport, and desktop integrations in `services/`, `toolkits/`, or `tools/` as appropriate. TypeScript uses two-space indentation, semicolons, and single quotes.
 
-1. Keep changes scoped to the relevant package or design document.
-2. Follow existing TypeScript style: 2-space indentation, semicolons, and single quotes.
-3. Keep runtime-independent agent logic in `packages/pet-agent/` and shared
-   session projection/protocol logic in `packages/agent-session/`.
-4. Keep local machine, CLI, browser, and desktop integration in `services/local-agent/` or `tools/agent-macos/`.
-5. Run the relevant checks:
-
-```bash
-npm run typecheck
-npm test
-npm run build
-```
-
-For design changes, update the relevant file under `docs/` and link it from this README when it becomes a primary entry point.
-
-Recommended pull request shape:
-
-- Problem statement and scope.
-- Implementation summary.
-- Tests or validation commands run.
-- Notes about migrations, compatibility, or security impact.
-- Screenshots or terminal output for UI/TUI changes when relevant.
-
-## Maintainer Checklist
-
-Before publishing or cutting a public release:
-
-1. Confirm the repository has an explicit `LICENSE`.
-2. Confirm package versions are correct.
-3. Run:
-
-```bash
-npm run typecheck
-npm test
-npm run build
-npm pack --dry-run -w @pinpawo/pet-agent
-npm run pack:dry -w pinpawo
-```
-
-4. Review package contents from `npm pack --dry-run`.
-5. Confirm no private endpoints, tokens, internal docs, generated build output, or local session state are included.
-6. Confirm README quick-start commands match the published package name and binary.
+Before opening a pull request, run the relevant quality gates and include the problem, implementation summary, validation performed, and any compatibility or security impact.
 
 ## Publishing
 
-From the repository root:
-
 ```bash
 npm run typecheck
 npm test
 npm run build
 npm pack --dry-run -w @pinpawo/pet-agent
 npm run pack:dry -w pinpawo
-npm publish -w @pinpawo/pet-agent --access public
-npm publish -w pinpawo --access public
 ```
+
+Review package contents before publishing. Confirm versions, the quick-start commands, and the absence of private endpoints, credentials, local state, or generated artifacts.
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+Licensed under the [MIT License](LICENSE).

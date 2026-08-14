@@ -32,10 +32,6 @@ test('local host metadata reads version and enabled loaded capabilities', async 
           enabled: true,
           loaded: true,
           routability: { status: 'unavailable' },
-        }, {
-          id: 'daily_post',
-          enabled: false,
-          loaded: true,
         }],
         userCapabilities: [{
           id: 'custom_writer',

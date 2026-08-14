@@ -73,8 +73,8 @@ export async function runAgent(options: RunAgentOptions) {
       });
       console.log(
         `[local-agent] studio mode preflight ok studioId=${studioPreflight.studioId} `
-        + `planner=${studioPreflight.plannerPetId} `
-        + `workers=[${studioPreflight.workerPetIds.join(', ')}]`,
+        + `entry=${studioPreflight.entryPetId} `
+        + `pets=[${studioPreflight.petIds.join(', ')}]`,
       );
     }
 
@@ -95,8 +95,8 @@ export async function runAgent(options: RunAgentOptions) {
       ...(studioPreflight ? {
         studioMode: {
           studioId: studioPreflight.studioId,
-          plannerPetId: studioPreflight.plannerPetId,
-          workerPetIds: studioPreflight.workerPetIds,
+          entryPetId: studioPreflight.entryPetId,
+          petIds: studioPreflight.petIds,
         },
       } : {}),
       actorId: runtime.getActorId(),

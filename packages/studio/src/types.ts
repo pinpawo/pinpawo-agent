@@ -7,25 +7,7 @@ import type {
   PetAgentStatus,
   StudioContext,
 } from './petAgentTypes';
-import type {
-  HumanReviewInterruptPayload,
-  ReviewResponse,
-} from '@pinpawo/pet-agent';
 import type { ActiveDelegationTransition } from '@pinpawo/pet-agent';
-
-export type HumanReviewerRequest = HumanReviewInterruptPayload;
-
-/**
- * HumanReviewer:pet runtime 在 invoke 期间撞到 HITL interrupt 时回调的桥。
- *
- * pet runtime 不关心上层是 ws / SSE / TUI / 进程内 mock,只承诺:
- * - 给出 canonical `HumanReviewInterruptPayload`
- * - 拿回 canonical `ReviewResponse` 后续跑 graph
- *
- * 上层(chat 层 / 测试)在构造 pet runtime 时注入这个函数,内部自行把
- * request 路由到对应 UI session、等用户答复后 resolve。
- */
-export type HumanReviewer = (request: HumanReviewerRequest) => Promise<ReviewResponse>;
 
 /**
  * Pet runtime descriptor — pet agent registry 中暴露的元数据。
@@ -79,9 +61,58 @@ export type PetAgentRuntimeInvokeResult = {
   reply: string;
 };
 
+/**
+ * Pet 的闸门状态 —— runtime 对 studio 唯一需要暴露的执行事实。
+ *
+ * **studio 只关心门开不开**,不关心 pet 在跑模型、在等工具还是在等人。
+ * 但门关着的原因分两类,而这个区别对**看的人**是必要的:
+ *
+ * - `busy` 的队列**在动**,等就行;
+ * - `waiting` / `blocked` 的队列**永远不会自己动**,只有人能推动它。
+ *
+ * 这正是让 §4.2「进度停滞是自明的」成立的东西 —— 一个 pet 卡了两小时,
+ * 是在跑大任务、在等人回话,还是砸了没人管,得能一眼看出来。
+ *
+ * **失败必须停下,不能放行下一条。** 队列里排着的活往往彼此依赖 ——
+ * 前一条写文件失败了,后一条接着去改那个文件,那不是"下一个任务失败",
+ * 是在一个坏掉的状态上继续操作,破坏性正是这么来的。所以 `blocked`
+ * 与 `waiting` 同类:都得人看一眼才继续。
+ *
+ * 这里没有 `disabled`:那是配置属性,在 `descriptor().startupMode` 里,
+ * dispatch 直接拒,不进队列。
+ *
+ * gate 只服务于**队列放不放行**这一个判断。它是通道自己的机制,不是一份
+ * 要广播出去的通知 —— 别把它变成 event。
+ */
+export type PetGateState =
+  /** 空闲,能收下一条派活。 */
+  | 'open'
+  /** 正在跑(模型 / 工具 / subagent)。它自己会好。 */
+  | 'busy'
+  /** 停下来等外部输入。只有外部能推动它 —— 卡多久都合理。 */
+  | 'waiting'
+  /**
+   * 上一条派活失败或 pet 声明干不了。**门关着等人**,不自动放行 ——
+   * 后面排着的活可能正建立在这条的产出之上。
+   */
+  | 'blocked';
+
 export type PetAgentRuntime = {
   descriptor: () => PetAgentRuntimeDescriptor;
   invoke: (input: PetAgentRuntimeInvokeInput) => Promise<PetAgentRuntimeInvokeResult>;
+  /**
+   * 当前闸门状态。studio 的队列据此决定要不要投递下一条。
+   *
+   * 它**不是** `invoke` 的返回值:pet 撞到人工确认时 `invoke` 会提前返回,
+   * 但活并没有干完 —— 门此时是 `waiting` 而非 `open`。把"invoke 返回"当成
+   * "派活结束"正是队列失效的根源。
+   */
+  gate: () => PetGateState;
+  /**
+   * 订阅闸门变化。studio 在门关着时挂起队列,由这里唤醒 —— 不轮询。
+   * 返回退订函数。
+   */
+  onGateChange: (listener: (state: PetGateState) => void) => () => void;
   /**
    * Releases Toolkit roots when this runtime created its own manager. A host
    * that supplied toolkitRuntimeManager owns the shared lifecycle instead.
@@ -89,268 +120,8 @@ export type PetAgentRuntime = {
   shutdown?: () => Promise<void>;
 };
 
-/* ─────────────── Studio Orchestrator state machine ─────────────── */
-
-export type StudioTaskStatus = 'pending' | 'satisfied' | 'failed';
-
-export type StudioTaskDependencyInput = 'previous' | { taskIndex: number };
-
-export type StudioPlannerTaskInput = {
-  petId: string;
-  brief: string;
-  acceptanceCriteria?: string[];
-  deps?: StudioTaskDependencyInput[];
-};
-
-/* ─────────────── Studio run queue model ─────────────── */
-
-export type StudioRunStatus =
-  | 'planning'
-  | 'running'
-  | 'blocked'
-  | 'done'
-  | 'failed'
-  | 'cancelled';
-
-export type StudioRun = {
-  runId: string;
-  conversationId: string;
-  userRequest: string;
-  status: StudioRunStatus;
-  finalTaskIndex?: number;
-  /** 产出最终结果的那次调度。 */
-  finalInvocationId?: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type StudioRunSnapshot = StudioRun & {
-  tasks: StudioTaskQueueItem[];
-};
-
-/**
- * 一次 pet 调度尝试。
- *
- * task 与 invocation 分开是因为它们的生命周期不同:task 是"要做的事",
- * 重试后仍是同一个 task;invocation 是"做这件事的某一次尝试",每次重试
- * 都是新的一次。取消、事件路由和 lease 都作用在 invocation 上,这样取消
- * 一次尝试不会误伤同 task 的其他尝试。
+/*
+ * run / task / 依赖 / 进度 / 重试 的类型曾经住在这里。它们**全部属于插件**
+ * (设计 §5)—— studio 甚至不需要知道 "run" 这个词,已随旧 orchestrator
+ * 一并迁出。看板的领域模型见 `@pinpawo-toolkit/studio-kanban`。
  */
-export type StudioInvocation = {
-  invocationId: string;
-  petId: string;
-  /** 同一 task 内从 0 递增。**持久化**,否则崩溃恢复后重试次数归零。 */
-  attempt: number;
-  status: 'running' | 'succeeded' | 'failed' | 'cancelled';
-  startedAt: string;
-  finishedAt?: string;
-  errorMessage?: string;
-};
-
-export type StudioTaskQueueItem = {
-  runId: string;
-  conversationId: string;
-  /**
-   * 稳定标识。`taskIndex` 是展示序号,re-plan 后会变;需要寻址某个 task
-   * (取消、事件关联)时用 `taskId`。
-   */
-  taskId: string;
-  taskIndex: number;
-  petId: string;
-  brief: string;
-  acceptanceCriteria: string[];
-  deps: number[];
-  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
-  /**
-   * 该 task 的历次调度尝试,按 attempt 升序。空数组表示尚未派发过。
-   * 重试计数由 `invocations.length` 导出,不再单独存一个易漂移的字段。
-   */
-  invocations: StudioInvocation[];
-  errorMessage?: string;
-  enqueuedAt: string;
-  startedAt?: string;
-  finishedAt?: string;
-};
-
-/** 最近一次调度尝试;未派发过时为 undefined。 */
-export function latestInvocation(task: StudioTaskQueueItem): StudioInvocation | undefined {
-  return task.invocations.at(-1);
-}
-
-/**
- * 已消耗的重试次数 = 已失败的尝试数。
- *
- * 从持久化的 invocation 列表导出,因此崩溃恢复后仍然准确 —— 这正是
- * 独立 `retryCount` 字段做不到的。
- */
-export function failedAttemptCount(task: StudioTaskQueueItem): number {
-  return task.invocations.filter((invocation) => invocation.status === 'failed').length;
-}
-
-export type StudioQueueItem = StudioTaskQueueItem;
-
-/* ─────────────── Turn outcome (return shape) ─────────────── */
-
-export type StudioTurnOutcome =
-  | {
-      outcome: 'done';
-      finalTaskIndex?: number;
-      finalInvocationId?: string;
-      reply: string;
-    }
-  | { outcome: 'stopped'; reason: string; reply: string };
-
-export type StudioTurnResult = {
-  turnId: string;
-  snapshot: StudioRunSnapshot;
-  outcome: StudioTurnOutcome;
-  studio: StudioContext;
-};
-
-/* ─────────────── Orchestrator entrypoints ─────────────── */
-
-export type StudioSubmitRequestInput = {
-  userRequest: string;
-  turnId?: string;
-  conversationId?: string;
-  signal?: AbortSignal;
-  /**
-   * Studio 编排级事件回调,供控制面状态显示(状态栏 / 徽章 / 进度环)订阅。
-   * 来自 Studio 自己(低频、跨 pet 全局编排);pet 内部的工具执行细节不再经
-   * 回调透出 — 需要时消费 root `streamEvents(v3)`(#322)。
-   */
-  onTurnEvent?: StudioTurnEventHandler;
-};
-
-export type StudioTurnEventHandler = (event: StudioTurnEvent) => void | Promise<void>;
-
-export type StudioRunEvent =
-  | {
-      type: 'run_changed';
-      runId: string;
-      conversationId: string;
-      status: StudioRunStatus;
-      snapshot: StudioRunSnapshot;
-      reason?: string;
-      occurredAt: string;
-    }
-  | {
-      type: 'wiki_changed';
-      runId: string;
-      conversationId: string;
-      changedPaths: string[];
-      occurredAt: string;
-    };
-
-export type StudioRunEventHandler = (event: StudioRunEvent) => void | Promise<void>;
-
-export type StudioSubmitRequestResult = {
-  runId: string;
-  status: 'accepted';
-};
-
-export type StudioOrchestrator = {
-  context: () => StudioContext;
-  listAgents: () => PetAgentRuntimeDescriptor[];
-  submitRequest: (input: StudioSubmitRequestInput) => Promise<StudioSubmitRequestResult>;
-  subscribe: (handler: StudioRunEventHandler) => () => void;
-  cancelRun: (runId: string) => Promise<void>;
-  getRun: (runId: string) => StudioRunSnapshot | null;
-  waitForRun: (runId: string) => Promise<StudioTurnResult>;
-};
-
-export type StudioOrchestratorConfig = {
-  studioId: string;
-  ownerUserId: string | null;
-  defaultPetId?: string | null;
-  agents: PetAgentRuntime[];
-  /**
-   * 必填:指定哪个 agent 担任 planner。
-   * Studio 在 turn 起始用 userRequest invoke 该 agent,并向它注入 `studio_plan`
-   * capability。planner agent 通过这个 capability 提交有序 task items。
-   */
-  plannerPetId: string;
-  /**
-   * Wiki 根目录的基础路径。runtime 会按 conversationId 拼出
-   * `{wikiBaseDir}/conv/{conversationId}/wiki/`。
-   */
-  wikiBaseDir: string;
-  /**
-   * Effective host workdir for Studio-dispatched pet invokes.
-   */
-  workdir?: string;
-  /**
-   * 可选注入 curator。默认 no-op(不落盘);宿主注入真正的实现。
-   * production 建议传入 `createLLMWikiCurator({ models, promptProvider })`,
-   * promptProvider 可用 `defaultPromptProvider()` / `fileReadPromptProvider(absPath)`
-   * 预设,或传任意 `() => string | Promise<string>` 自定义来源。
-   */
-  curator?: import('./wikiPort').WikiCurator;
-  /**
-   * 可选注入:开 run 前初始化 wiki 存储骨架。默认 no-op,由宿主注入实现。
-   */
-  ensureWikiSkeleton?: import('./wikiPort').WikiSkeletonInitializer;
-  /**
-   * 可选注入 Studio run/queue store。提供后 orchestrator 会保存 run snapshot,
-   * 并在创建时恢复开放 run。due-run scheduler store 不应复用为这个 store。
-   */
-  runQueueStore?: import('./runQueuePort').StudioRunQueueStore;
-  /**
-   * 是否在 orchestrator 创建时从 runQueueStore 恢复 open runs。
-   * 默认 true。local-agent 这类 per-turn fresh orchestrator 的宿主应在同一
-   * process/workdir 内只允许一次恢复,避免多个 live orchestrator 双重驱动同一 run。
-   */
-  restoreOpenRuns?: boolean;
-  /**
-   * 单 turn 内 dispatch 累计上限(兜底)。
-   */
-  maxIterationCount?: number;
-  /**
-   * 单个 task 的 retry 次数上限。
-   */
-  maxRetryPerTask?: number;
-};
-
-/* ─────────────── Turn state stream events (UI / trace) ─────────────── */
-
-export type StudioTurnEvent =
-  | { type: 'turn_started'; turnId: string; userRequest: string }
-  | { type: 'tasks_queued'; taskCount: number }
-  | { type: 'task_status_changed'; taskIndex: number; status: StudioTaskStatus }
-  | { type: 'task_started'; taskIndex: number; petId: string; invocationId: string }
-  | {
-      type: 'task_finished';
-      taskIndex: number;
-      petId: string;
-      invocationId: string;
-      status: 'finished' | 'cancelled';
-      resultText?: string;
-      errorMessage?: string;
-    }
-  | { type: 'wiki_updated'; changedPaths: string[] }
-  | {
-      type: 'turn_finished';
-      outcome: 'done' | 'stopped';
-      finalInvocationId?: string;
-    };
-
-export type StudioRunIdentity = {
-  /** 本次 Studio run 的请求 id，通常与 caller 侧 requestId/runId 对齐。 */
-  runId: string;
-  /** 会话级聚合 id。默认 fallback 到 runId。 */
-  conversationId: string;
-  /** 用于调度去重。格式: `studio:{conversationId}:run:{runId}`。 */
-  idempotencyKey: string;
-};
-
-export function buildStudioRunIdentity(input: {
-  runId: string;
-  conversationId?: string;
-}): StudioRunIdentity {
-  const conversationId = input.conversationId ?? input.runId;
-  return {
-    runId: input.runId,
-    conversationId,
-    idempotencyKey: `studio:${conversationId}:run:${input.runId}`,
-  };
-}

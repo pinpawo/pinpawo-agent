@@ -141,7 +141,6 @@ function createHandler(overrides: Partial<ConstructorParameters<typeof LocalAgen
     getWorkdir: () => '/tmp/pinpawo-app-workdir',
     getActorName: () => 'Test Actor',
     runStudioRequest: async () => undefined,
-    routeStudioHumanReviewResponse: () => false,
     rejectStudioPendingReview: () => undefined,
     loadContext: async () => ({} as AgentContext),
     buildChatSetup: (params) => {
@@ -1308,32 +1307,6 @@ test('LocalAgentAppChatHandler rejects cancellation for a stale review action', 
   assert.equal(errorEvent.type, 'event');
   assert.equal(errorEvent.event?.type, 'error');
   assert.equal(errorEvent.event?.code, 'review_stale');
-});
-
-test('LocalAgentAppChatHandler routes human review responses to studio router first', async () => {
-  let studioRouted = false;
-  const runRequests: unknown[] = [];
-  const { handler, ws } = createHandler({
-    runStudioRequest: async () => undefined,
-    routeStudioHumanReviewResponse: () => {
-      studioRouted = true;
-      return true;
-    },
-    runChat: async (options) => {
-      runRequests.push(options.request);
-      return { status: 'completed', reply: 'chat continued' };
-    },
-  });
-
-  await handler.handleHumanReviewResponse(ws, {
-    type: 'human_review_response',
-    requestId: 'req-studio',
-    reviewId: 'review-1',
-    selectedOptionId: 'approve',
-  });
-
-  assert.equal(studioRouted, true);
-  assert.deepEqual(runRequests, []);
 });
 
 test('LocalAgentAppChatHandler forwards studio requests to runtime handler', async () => {

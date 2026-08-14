@@ -1,46 +1,47 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  studioCompletionMessages,
+  studioAcceptedMessage,
   studioErrorMessage,
-  studioProgressMessage,
   studioUserMessage,
 } from './studioProjection';
 
-test('Studio projection formats user, progress, completion, and error rows', () => {
+test('Studio projection renders the user row and the submission receipt', () => {
   assert.equal(studioUserMessage('ship it'), '[studio] ship it');
-  assert.deepEqual(studioProgressMessage({
-    type: 'studio.progress',
+
+  // 提交即返回:回执不渲染 pet 的答复 —— 那时还没有产出。
+  assert.deepEqual(studioAcceptedMessage({
     requestId: 'studio-1',
-    event: {
-      type: 'task_started',
-      taskIndex: 2,
-      petId: 'planner',
-    },
-  }), {
+    outcome: 'done',
+  }), [{
     role: 'system',
     requestId: 'studio-1',
-    text: '[studio] task 2 started · planner',
-  });
-  assert.equal(studioProgressMessage({
-    type: 'studio.progress',
-    requestId: 'studio-1',
-    event: { type: 'turn_started' },
-  }), null);
-  assert.deepEqual(studioCompletionMessages({
+    text: '[studio] 已提交',
+  }]);
+});
+
+test('a stopped submission reports its reason', () => {
+  assert.deepEqual(studioAcceptedMessage({
     requestId: 'studio-1',
     outcome: 'stopped',
-    reply: 'Partial result',
     reason: 'budget reached',
   }), [{
-    role: 'assistant',
-    requestId: 'studio-1',
-    text: 'Partial result',
-  }, {
     role: 'system',
     requestId: 'studio-1',
     text: '[studio] stopped: budget reached',
   }]);
+
+  assert.deepEqual(studioAcceptedMessage({
+    requestId: 'studio-1',
+    outcome: 'stopped',
+  }), [{
+    role: 'system',
+    requestId: 'studio-1',
+    text: '[studio] stopped',
+  }]);
+});
+
+test('Studio errors keep a readable fallback', () => {
   assert.deepEqual(studioErrorMessage('studio-2', ''), {
     role: 'system',
     requestId: 'studio-2',

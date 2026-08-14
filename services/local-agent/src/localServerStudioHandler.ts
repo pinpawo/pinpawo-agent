@@ -1,251 +1,144 @@
-import {
-  type LocalAgentServerMessage,
-  type HumanReviewResponseMessage,
-  type StudioRequestMessage,
+import type {
+  LocalAgentServerMessage,
+  StudioRequestMessage,
 } from './localAgentProtocol';
-import { type InflightOperationRun } from './inflightOperationRun';
-import { InflightRequestController } from './inflightRequestController';
 import {
-  LocalStudioDueRunCompletion,
-  LocalStudioDueRunScheduler,
-} from './localStudioDueRunScheduler';
-import { StudioNotConfiguredError } from './studio/studioRuntime';
-import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
-import type { LocalServerDeps } from './localServerTypes';
-import {
-  StudioRunService,
-  type BuildStudioForTurn,
-  type StudioRunServiceResult,
-} from './studioRunService';
-import {
-  StudioTurnEvent,
-} from '@pinpawo/studio';
+  StudioNotConfiguredError,
+  buildStudio,
+  type BuildStudioInput,
+  type BuildStudioResult,
+} from './studio/buildStudio';
+import { getLocalServerWorkdir, type LocalServerDeps } from './localServerTypes';
 import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 
-type InflightRequest = InflightOperationRun;
-type StudioHandleResult = StudioRunServiceResult | LocalStudioDueRunCompletion;
-
-type StudioHandleCompletion = {
-  runId: string;
-  conversationId: string;
-  idempotencyKey: string;
-  workdir: string;
-  outcome: 'done' | 'stopped';
-  reply: string;
-  finalPetRunId?: string;
-  reason?: string;
-};
+export type BuildStudio = (input: BuildStudioInput) => Promise<BuildStudioResult>;
 
 export type LocalServerStudioOutbound<Peer extends object> = {
   sendMessage: (peer: Peer, message: LocalAgentServerMessage) => boolean;
   sendEvent: (peer: Peer, event: AgentRuntimeEvent) => boolean;
 };
 
+/**
+ * Studio 的 ws 入口。
+ *
+ * **提交即返回**:把目标派给 entry pet 之后立即回应,不等结果 —— 推模型下
+ * 没有人在等 pet(设计 §4.3)。进度与产出经插件的 event 流出,客户端订阅
+ * `studio.progress` 即可。
+ *
+ * studio 按 workdir **常驻**:不再每请求重新装配 pet runtime 与 graph。
+ */
 export class LocalServerStudioHandler<Peer extends object> {
-  private readonly reviewRouter: LocalServerStudioReviewRouter<Peer>;
-  private readonly inflightRequests: InflightRequestController<Peer>;
   private readonly outbound: LocalServerStudioOutbound<Peer>;
-  private readonly studioRunService: StudioRunService;
-  private readonly studioDueRunScheduler?: LocalStudioDueRunScheduler;
-  private readonly studioRequestQueue = new WeakMap<Peer, Promise<unknown>>();
-  private readonly studioConnectionState = new WeakMap<Peer, { closed: boolean }>();
+  private readonly buildStudio: BuildStudio;
+  private readonly studios = new Map<string, Promise<BuildStudioResult>>();
+  /**
+   * 每个 peer 一座事件桥。`requestId` 存在可变盒子里而**不是闭包捕获** ——
+   * 桥只建一次,若把首次的 requestId 封进闭包,第二次提交产生的事件会
+   * 全部错误归到第一次请求上。
+   */
+  private readonly eventBridges = new WeakMap<Peer, {
+    unsubscribe: () => void;
+    latestRequestId: { current: string };
+  }>();
 
   constructor(options: {
-    reviewRouter: LocalServerStudioReviewRouter<Peer>;
-    inflightRequests: InflightRequestController<Peer>;
     outbound: LocalServerStudioOutbound<Peer>;
-    studioRunService?: StudioRunService;
-    buildStudio?: BuildStudioForTurn;
-    studioDueRunScheduler?: LocalStudioDueRunScheduler;
+    buildStudio?: BuildStudio;
   }) {
-    this.reviewRouter = options.reviewRouter;
-    this.inflightRequests = options.inflightRequests;
     this.outbound = options.outbound;
-    this.studioRunService = options.studioRunService ?? new StudioRunService({
-      buildStudio: options.buildStudio,
-    });
-    this.studioDueRunScheduler = options.studioDueRunScheduler;
+    this.buildStudio = options.buildStudio ?? buildStudio;
   }
 
-  routeHumanReviewResponse(peer: Peer, msg: HumanReviewResponseMessage) {
-    return this.reviewRouter.routeResponse(peer, msg);
-  }
-
+  /** 断开时只解绑事件桥;studio 本身常驻,不随连接生灭。 */
   rejectDisconnected(peer: Peer) {
-    this.reviewRouter.rejectAndDelete(peer, new Error('peer disconnected'));
-    this.markStudioConnectionClosed(peer);
+    this.eventBridges.get(peer)?.unsubscribe();
+    this.eventBridges.delete(peer);
   }
 
-  private markStudioConnectionClosed(peer: Peer) {
-    const state = this.studioConnectionState.get(peer);
-    if (state) {
-      state.closed = true;
-      return;
+  async shutdown(): Promise<void> {
+    const pending = [...this.studios.values()];
+    this.studios.clear();
+    for (const entry of pending) {
+      await entry.then(({ studio }) => studio.shutdown()).catch(() => undefined);
     }
-    this.studioConnectionState.set(peer, { closed: true });
   }
 
-  async handleStudioRequest(
-    peer: Peer,
-    msg: StudioRequestMessage,
-    deps: LocalServerDeps,
-  ) {
-    return this.withQueuedStudioRequest(peer, () => this.handleStudioRequestInternal(peer, msg, deps));
+  private getStudio(deps: LocalServerDeps): Promise<BuildStudioResult> {
+    const workdir = getLocalServerWorkdir(deps);
+    const existing = this.studios.get(workdir);
+    if (existing) return existing;
+
+    const pending = this.buildStudio({
+      modelProfiles: deps.modelProfiles,
+      capabilities: [
+        ...(deps.localCapabilities ?? []),
+        ...(deps.userCapabilities ?? []).map((item) => item.capability),
+      ],
+      toolkits: [...(deps.pluginToolkits ?? []), ...(deps.localToolkits ?? [])],
+      ...(deps.toolkitRuntimeManager ? { toolkitRuntimeManager: deps.toolkitRuntimeManager } : {}),
+      ...(deps.chatCheckpointer ? { checkpoint: deps.chatCheckpointer } : {}),
+      ownerUserId: null,
+      workdir,
+      ...(deps.runtimeConfig ? {
+        studioConfigPath: deps.runtimeConfig.studioConfigPath,
+        petsDir: deps.runtimeConfig.petsDir,
+      } : {}),
+    }).catch((error: unknown) => {
+      // 装配失败不缓存,否则一次配置错误会让这个 workdir 永久不可用。
+      this.studios.delete(workdir);
+      throw error;
+    });
+
+    this.studios.set(workdir, pending);
+    return pending;
   }
 
-  private async handleStudioRequestInternal(
-    peer: Peer,
-    msg: StudioRequestMessage,
-    deps: LocalServerDeps,
-  ) {
-    const { requestId, userRequest, runId: explicitRunId } = msg;
-    const runId = explicitRunId?.trim() ? explicitRunId : requestId;
-    const conversationId = msg.conversationId ?? runId;
-
-    console.log(`[local-server] studio_request requestId=${requestId} userRequest="${userRequest.slice(0, 80)}"`);
-
-    // 取消已有 inflight(避免跟 chat 重叠)
-    const inflight = this.inflightRequests.start(peer, requestId);
-    const { controller } = inflight;
-
-    // 重置 review slot(防止上一 turn 残留)
-    const slot = this.reviewRouter.getOrCreateSlot(peer);
-    if (slot.current) {
-      this.reviewRouter.rejectPending(peer, new Error('superseded by new studio_request'));
-    }
-
-    const send = (envelope: unknown) => {
-      if (!envelope || typeof envelope !== 'object') return;
-      this.outbound.sendMessage(peer, envelope as LocalAgentServerMessage);
-    };
-
-    const onProgress = (event: StudioTurnEvent) => {
-      this.outbound.sendEvent(peer, {
-        type: 'studio.progress',
-        requestId,
-        event,
-      });
+  async handleStudioRequest(peer: Peer, msg: StudioRequestMessage, deps: LocalServerDeps) {
+    const { requestId, userRequest } = msg;
+    const send = (message: LocalAgentServerMessage) => {
+      this.outbound.sendMessage(peer, message);
     };
 
     try {
-      const result: StudioHandleResult = await (this.studioDueRunScheduler
-        ? this.studioDueRunScheduler.submit({
-          deps,
-          requestId,
-          runId,
-          conversationId,
-          userRequest,
-          send,
-          onProgress,
-          slot,
-          signal: controller.signal,
-        })
-        : this.studioRunService.run({
-          deps,
-          runId,
-          userRequest,
-          conversationId,
-          bridge: { send, requestId, slot },
-          signal: controller.signal,
-          onProgress,
-        }));
+      const { studio } = await this.getStudio(deps);
 
-      const completion = this.toCompletion(result);
-
-      if (controller.signal.aborted) {
-        this.inflightRequests.finish(peer, inflight, 'interrupted');
-        send({ type: 'studio_error', requestId, message: 'aborted by client' });
-        return;
-      }
-
-      this.inflightRequests.finish(peer, inflight, 'completed');
-      if (completion.outcome === 'done') {
-        send({
-          type: 'studio_response',
-          requestId,
-          outcome: 'done',
-          reply: completion.reply,
-          ...(completion.finalPetRunId ? { finalPetRunId: completion.finalPetRunId } : {}),
-          workdir: completion.workdir,
-          runId: completion.runId,
-          conversationId: completion.conversationId,
-          idempotencyKey: completion.idempotencyKey,
-        });
+      const bridge = this.eventBridges.get(peer);
+      if (bridge) {
+        // 桥已在,只把归属指向本次提交。
+        bridge.latestRequestId.current = requestId;
       } else {
-        send({
-          type: 'studio_response',
-          requestId,
-          outcome: 'stopped',
-          reply: completion.reply,
-          reason: completion.reason,
-          workdir: completion.workdir,
-          runId: completion.runId,
-          conversationId: completion.conversationId,
-          idempotencyKey: completion.idempotencyKey,
+        const latestRequestId = { current: requestId };
+        const unsubscribe = studio.subscribe((event) => {
+          this.outbound.sendEvent(peer, {
+            type: 'studio.progress',
+            requestId: latestRequestId.current,
+            event: { ...event } as unknown as Record<string, unknown>,
+          });
         });
+        this.eventBridges.set(peer, { unsubscribe, latestRequestId });
       }
-    } catch (err) {
-      this.inflightRequests.finish(peer, inflight, 'failed', err);
-      if (err instanceof StudioNotConfiguredError) {
-        send({
-          type: 'studio_error',
-          requestId,
-          message: `Studio 未配置:${err.message}`,
-        });
-      } else {
-        console.error(
-          '[local-server] handleStudioRequest error:',
-          err instanceof Error ? err.message : err,
-        );
-        send({
-          type: 'studio_error',
-          requestId,
-          message: err instanceof Error ? err.message : String(err),
-        });
+
+      const { threadId } = await studio.dispatch({ petId: studio.entryPetId, request: userRequest });
+      console.log(
+        `[local-server] studio_request accepted requestId=${requestId} thread=${threadId}`,
+      );
+
+      // reply 为空是刻意的:提交时还没有结果,产出经 event 流出。
+      send({
+        type: 'studio_response',
+        requestId,
+        outcome: 'done',
+        reply: '',
+        workdir: getLocalServerWorkdir(deps),
+      });
+    } catch (error) {
+      const message = error instanceof StudioNotConfiguredError
+        ? `Studio 未配置:${error.message}`
+        : error instanceof Error ? error.message : String(error);
+      if (!(error instanceof StudioNotConfiguredError)) {
+        console.error('[local-server] handleStudioRequest error:', message);
       }
-    } finally {
-      if (slot.current) {
-        this.reviewRouter.rejectPending(peer, new Error('studio turn ended with unresolved review'));
-      }
-      this.inflightRequests.clear(peer, inflight);
+      send({ type: 'studio_error', requestId, message });
     }
-  }
-
-  private withQueuedStudioRequest<T>(
-    peer: Peer,
-    run: () => Promise<T>,
-  ): Promise<T> {
-    const state = this.studioConnectionState.get(peer) ?? { closed: false };
-    this.studioConnectionState.set(peer, state);
-    const previous = this.studioRequestQueue.get(peer) ?? Promise.resolve();
-    const current = previous.catch(() => undefined).then(async () => {
-      if (state.closed) {
-        return undefined as unknown as T;
-      }
-      return run();
-    });
-    this.studioRequestQueue.set(peer, current.then(() => undefined, () => undefined));
-    return current;
-  }
-
-  private toCompletion(result: StudioHandleResult): StudioHandleCompletion {
-    if ('turn' in result) {
-      return {
-        runId: result.runId,
-        conversationId: result.conversationId,
-        idempotencyKey: result.idempotencyKey,
-        workdir: result.workdir,
-        outcome: result.turn.outcome.outcome,
-        reply: result.turn.outcome.reply,
-        ...(result.turn.outcome.outcome === 'done'
-          ? {
-              // ws 协议字段名保持不变;Studio 侧现在叫 finalInvocationId。
-              finalPetRunId: result.turn.outcome.finalInvocationId,
-            }
-          : { reason: result.turn.outcome.reason }),
-      };
-    }
-
-    return result;
   }
 }

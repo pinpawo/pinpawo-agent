@@ -1,399 +1,204 @@
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { setTimeout as sleep } from 'node:timers/promises';
-import { tool } from '@langchain/core/tools';
-import { z } from 'zod';
-import { InflightRequestController } from './inflightRequestController';
-import {
-  LocalServerStudioHandler,
-  type LocalServerStudioOutbound,
-} from './localServerStudioHandler';
-import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
-import { StudioNotConfiguredError, type BuildStudioInput, type BuildStudioResult } from './studio/studioRuntime';
+
+import { LocalServerStudioHandler } from './localServerStudioHandler';
+import type { BuildStudio } from './localServerStudioHandler';
+import type { BuildStudioResult } from './studio/buildStudio';
+import { StudioNotConfiguredError } from './studio/buildStudio';
 import type { LocalServerDeps } from './localServerTypes';
-import { sendLocalServerPeerEvent, type LocalServerPeer } from './localServerPeer';
+import type { Studio, StudioEventHandler } from '@pinpawo/studio';
 import { createTestModelServerDeps } from './testing/modelProfiles';
 
-const PEER_OUTBOUND: LocalServerStudioOutbound<LocalServerPeer> = {
-  sendMessage: (peer, message) => peer.send(message),
-  sendEvent: (peer, event) => sendLocalServerPeerEvent(peer, event),
-};
+type Peer = { send: (message: unknown) => boolean };
 
-function createFakePeer(sent: unknown[]): LocalServerPeer {
-  return {
-    isConnected: () => true,
-    send(message) {
-      sent.push(message);
-      return true;
-    },
-  };
-}
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolveFn) => {
-    resolve = resolveFn;
-  });
-  return { promise, resolve };
-}
-
-function createInflightController() {
-  return new InflightRequestController<LocalServerPeer>({
-    emitOperation: (peer, event) => sendLocalServerPeerEvent(peer, event),
-    sendControl: (peer, message) => peer.send(message),
-  });
+function createPeer(sent: unknown[]): Peer {
+  return { send: (message) => { sent.push(message); return true; } };
 }
 
 function createDeps(): LocalServerDeps {
-  const readFileTool = tool(
-    async ({ path }: { path?: string }) => path ?? '',
-    {
-      name: 'read_file',
-      description: 'Read a test file.',
-      schema: z.object({ path: z.string().optional() }),
-    },
-  );
   return {
-    serverMode: 'chat',
+    serverMode: 'studio',
     actorId: 'pet-a',
-    actorName: 'Pet A',
-    workdir: '/tmp/pinpawo-test',
+    workdir: '/tmp/pinpawo-studio-test',
     ...createTestModelServerDeps(),
-    runtimeConfig: {
-      workdir: '/tmp/pinpawo-test',
-      stateRoot: '/tmp/pinpawo-test/.pinpawo',
-      studioConfigPath: '/tmp/pinpawo-test/.pinpawo/studio.json',
-      studioDueRunsPath: '/tmp/pinpawo-test/.pinpawo/studio-due-runs.json',
-      petsDir: '/tmp/pinpawo-test/.pinpawo/pets',
-      studioWikiBaseDir: '/tmp/pinpawo-test/.pinpawo/studio-wiki',
-      checkpointPath: '/tmp/pinpawo-test/.pinpawo/checkpoints.json',
-      tuiCheckpointPath: '/tmp/pinpawo-test/.pinpawo/checkpoints-tui.json',
-      tuiSessionPath: '/tmp/pinpawo-test/.pinpawo/tui-sessions.json',
-      capabilityArtifactRoot: '/tmp/pinpawo-test/.pinpawo/capability-artifacts',
-    },
-    localToolkits: [{
-      name: 'local-toolkit',
-      description: 'local toolkit',
-      tools: [{
-        tool: readFileTool,
-        operation: {
-          title: '读文件',
-          summarizeInput: (input: unknown) => {
-            const path = input && typeof input === 'object' && 'path' in input
-              ? (input as { path?: unknown }).path
-              : null;
-            return typeof path === 'string' ? { target: path } : null;
-          },
-        },
-      }],
-    }] as LocalServerDeps['localToolkits'],
-    pluginToolkits: [{ name: 'plugin-toolkit' }] as LocalServerDeps['pluginToolkits'],
-    localCapabilities: [{ name: 'browser' }] as LocalServerDeps['localCapabilities'],
-    userCapabilities: [{
-      meta: { id: 'user-cap' },
-      capability: { name: 'user-capability' },
-    }] as LocalServerDeps['userCapabilities'],
   };
 }
 
-test('LocalServerStudioHandler emits progress and done response', async () => {
+function fakeStudio(overrides: Partial<Studio> = {}): Studio {
+  const handlers = new Set<StudioEventHandler>();
+  return {
+    entryPetId: 'pet-a',
+    dispatch: async () => ({ threadId: 'thread-1' }),
+    notify: (event) => { for (const handler of handlers) void handler(event); },
+    subscribe: (handler) => { handlers.add(handler); return () => handlers.delete(handler); },
+    listPets: () => [],
+    shutdown: async () => {},
+    ...overrides,
+  };
+}
+
+function handlerWith(studio: Studio, onBuild?: () => void) {
+  const build: BuildStudio = async () => {
+    onBuild?.();
+    return { studio, resolved: {}, plugins: [] } as unknown as BuildStudioResult;
+  };
   const sent: unknown[] = [];
-  const peer = createFakePeer(sent);
-  const buildInputs: BuildStudioInput[] = [];
-  const handler = new LocalServerStudioHandler({
-    reviewRouter: new LocalServerStudioReviewRouter<LocalServerPeer>(),
-    inflightRequests: createInflightController(),
-    outbound: PEER_OUTBOUND,
-    buildStudio: async (input) => {
-      buildInputs.push(input);
-      return {
-        resolved: {} as BuildStudioResult['resolved'],
-        petCheckpointers: new Map(),
-        orchestrator: {
-          submitRequest: async (turn: {
-            onTurnEvent: (event: Record<string, unknown>) => void;
-          }) => {
-            turn.onTurnEvent({ type: 'turn_started' });
-            return { runId: 'run-100', status: 'accepted' };
-          },
-          waitForRun: async () => {
-            return {
-              outcome: {
-                outcome: 'done',
-                reply: 'done reply',
-                finalInvocationId: 'pet-run-1',
-              },
-            };
-          },
-        } as unknown as BuildStudioResult['orchestrator'],
-      };
+  const events: unknown[] = [];
+  const handler = new LocalServerStudioHandler<Peer>({
+    buildStudio: build,
+    outbound: {
+      sendMessage: (peer, message) => peer.send(message),
+      sendEvent: (_peer, event) => { events.push(event); return true; },
     },
   });
+  return { handler, sent, events };
+}
+
+test('a studio request returns as soon as it is submitted', async () => {
+  // 提交即返回:推模型下没有人在等 pet。若它退化成等结果,这里会挂住。
+  let released!: () => void;
+  const gate = new Promise<void>((resolve) => { released = resolve; });
+  const studio = fakeStudio({
+    dispatch: async () => {
+      void gate; // 模拟 pet 长时间执行:dispatch 本身不应等它
+      return { threadId: 'thread-slow' };
+    },
+  });
+
+  const { handler, sent } = handlerWith(studio);
+  const peer = createPeer(sent);
 
   await handler.handleStudioRequest(peer, {
     type: 'studio_request',
     requestId: 'studio-1',
-    runId: 'run-100',
-    conversationId: 'conv-100',
     userRequest: 'plan this',
   }, createDeps());
 
-  assert.equal(buildInputs.length, 1);
-  assert.deepEqual(buildInputs[0]?.capabilities.map((item) => item.name), ['browser', 'user-capability']);
-  assert.deepEqual(buildInputs[0]?.toolkits?.map((item) => item.name), ['plugin-toolkit', 'local-toolkit']);
-  assert.equal(buildInputs[0]?.bridge.requestId, 'studio-1');
-  assert.equal(buildInputs[0]?.workdir, '/tmp/pinpawo-test');
-  assert.equal(buildInputs[0]?.studioConfigPath, '/tmp/pinpawo-test/.pinpawo/studio.json');
-  assert.equal(buildInputs[0]?.petsDir, '/tmp/pinpawo-test/.pinpawo/pets');
-  assert.equal(buildInputs[0]?.wikiBaseDir, '/tmp/pinpawo-test/.pinpawo/studio-wiki');
-
-  const eventMessages = sent.filter((item): item is { type: string; event?: { type?: string; phase?: string } } =>
-    Boolean(item && typeof item === 'object' && (item as { type?: unknown }).type === 'event'),
-  );
-  assert.deepEqual(eventMessages.map((item) => item.event?.type), [
-    'studio.progress',
-  ]);
-  assert.deepEqual(sent.at(-1), {
-    type: 'studio_response',
-    requestId: 'studio-1',
-    outcome: 'done',
-    reply: 'done reply',
-    finalPetRunId: 'pet-run-1',
-    workdir: '/tmp/pinpawo-test',
-    runId: 'run-100',
-    conversationId: 'conv-100',
-    idempotencyKey: 'studio:conv-100:run:run-100',
-  });
+  const response = sent.at(-1) as { type: string; outcome: string; reply: string };
+  assert.equal(response.type, 'studio_response');
+  assert.equal(response.outcome, 'done');
+  // reply 为空是刻意的:提交时还没有结果,产出经 event 流出。
+  assert.equal(response.reply, '');
+  released();
 });
 
-test('LocalServerStudioHandler serializes studio requests per peer', async () => {
-  const sent: unknown[] = [];
-  const peer = createFakePeer(sent);
-  const firstStarted = deferred<void>();
-  const firstContinue = deferred<void>();
-  const invocationEvents: string[] = [];
-  const handler = new LocalServerStudioHandler({
-    reviewRouter: new LocalServerStudioReviewRouter<LocalServerPeer>(),
-    inflightRequests: createInflightController(),
-    outbound: PEER_OUTBOUND,
-    buildStudio: async () => ({
-      resolved: {} as BuildStudioResult['resolved'],
-      petCheckpointers: new Map(),
-      orchestrator: {
-        submitRequest: async () => {
-          if (invocationEvents.length === 0) {
-            invocationEvents.push('first');
-            firstStarted.resolve();
-            return { runId: 'first-run', status: 'accepted' };
-          }
-          invocationEvents.push('second');
-          return { runId: 'second-run', status: 'accepted' };
-        },
-        waitForRun: async (runId: string) => {
-          if (runId === 'first-run') {
-            await firstContinue.promise;
-            return {
-              outcome: {
-                outcome: 'done',
-                reply: 'first done',
-                finalInvocationId: 'pet-run-first',
-              },
-            };
-          }
-          return {
-              outcome: {
-                outcome: 'done',
-                reply: 'second done',
-                finalInvocationId: 'pet-run-second',
-              },
-          };
-        },
-      } as unknown as BuildStudioResult['orchestrator'],
-    }),
-  });
+test('the studio is built once per workdir and reused across requests', async () => {
+  // 常驻:不再每请求重新装配 pet runtime 与 graph。
+  let builds = 0;
+  const { handler, sent } = handlerWith(fakeStudio(), () => { builds += 1; });
+  const peer = createPeer(sent);
+  const deps = createDeps();
 
-  const firstRequest = handler.handleStudioRequest(peer, {
-    type: 'studio_request',
-    requestId: 'studio-1',
-    userRequest: 'first',
-  }, createDeps());
-  await firstStarted.promise;
+  for (const requestId of ['studio-1', 'studio-2', 'studio-3']) {
+    await handler.handleStudioRequest(peer, {
+      type: 'studio_request',
+      requestId,
+      userRequest: 'go',
+    }, deps);
+  }
 
-  const secondRequest = handler.handleStudioRequest(peer, {
-    type: 'studio_request',
-    requestId: 'studio-2',
-    userRequest: 'second',
-  }, createDeps());
-
-  await sleep(10);
-  assert.equal(invocationEvents.length, 1);
-  assert.equal(invocationEvents[0], 'first');
-
-  firstContinue.resolve();
-  await Promise.all([firstRequest, secondRequest]);
-
-  assert.equal(invocationEvents.length, 2);
-  assert.deepEqual(invocationEvents, ['first', 'second']);
-
-  const types = sent.map((item) => (item as { type?: string }).type).filter(Boolean);
-  assert.equal(types.includes('interrupted'), false);
-
-  const errors = sent.filter((item): item is { type: 'studio_error'; requestId: string; message: string } => (
-    Boolean(item && typeof item === 'object' && (item as { type: string }).type === 'studio_error')
-  ));
-  assert.deepEqual(errors, []);
-
-  const studioResponses = sent.filter((item): item is { type: 'studio_response'; requestId: string } => (
-    Boolean(item && typeof item === 'object' && (item as { type: string }).type === 'studio_response')
-  ));
-  assert.equal(studioResponses.length, 2);
-  assert.equal(studioResponses[0]?.requestId, 'studio-1');
-  assert.equal(studioResponses[1]?.requestId, 'studio-2');
+  assert.equal(builds, 1);
+  await handler.shutdown();
 });
 
-test('LocalServerStudioHandler discards queued studio requests after peer disconnect', async () => {
-  const sent: unknown[] = [];
-  const peer = createFakePeer(sent);
-  const firstStarted = deferred<void>();
-  const firstContinue = deferred<void>();
-  const invocationEvents: string[] = [];
-  const handler = new LocalServerStudioHandler({
-    reviewRouter: new LocalServerStudioReviewRouter<LocalServerPeer>(),
-    inflightRequests: createInflightController(),
-    outbound: PEER_OUTBOUND,
-    buildStudio: async () => ({
-      resolved: {} as BuildStudioResult['resolved'],
-      petCheckpointers: new Map(),
-      orchestrator: {
-        submitRequest: async () => {
-          if (invocationEvents.length === 0) {
-            invocationEvents.push('first');
-            firstStarted.resolve();
-            return { runId: 'first-run', status: 'accepted' };
-          }
-          invocationEvents.push('second');
-          return { runId: 'second-run', status: 'accepted' };
-        },
-        waitForRun: async (runId: string) => {
-          if (runId === 'first-run') {
-            await firstContinue.promise;
-            return {
-              outcome: {
-                outcome: 'done',
-                reply: 'first done',
-                finalInvocationId: 'pet-run-first',
-              },
-            };
-          }
-          return {
-              outcome: {
-                outcome: 'done',
-                reply: 'second done',
-                finalInvocationId: 'pet-run-second',
-              },
-          };
-        },
-      } as unknown as BuildStudioResult['orchestrator'],
-    }),
-  });
-
-  const firstRequest = handler.handleStudioRequest(peer, {
-    type: 'studio_request',
-    requestId: 'studio-1',
-    userRequest: 'first',
-  }, createDeps());
-  await firstStarted.promise;
-
-  const secondRequest = handler.handleStudioRequest(peer, {
-    type: 'studio_request',
-    requestId: 'studio-2',
-    userRequest: 'second',
-  }, createDeps());
-
-  handler.rejectDisconnected(peer);
-  firstContinue.resolve();
-
-  await Promise.all([firstRequest, secondRequest]);
-
-  assert.deepEqual(invocationEvents, ['first']);
-
-  const studioResponses = sent.filter((item): item is { type: 'studio_response'; requestId: string } => (
-    Boolean(item && typeof item === 'object' && (item as { type: string }).type === 'studio_response')
-  ));
-  assert.equal(studioResponses.length, 1);
-  assert.equal(studioResponses[0]?.requestId, 'studio-1');
-});
-
-test('LocalServerStudioHandler maps missing studio config to studio_error', async () => {
-  const sent: unknown[] = [];
-  const peer = createFakePeer(sent);
-  const handler = new LocalServerStudioHandler({
-    reviewRouter: new LocalServerStudioReviewRouter<LocalServerPeer>(),
-    inflightRequests: createInflightController(),
-    outbound: PEER_OUTBOUND,
-    buildStudio: async () => {
-      throw new StudioNotConfiguredError('/tmp/studio.json');
-    },
-  });
+test('plugin events reach the peer as studio progress', async () => {
+  const studio = fakeStudio();
+  const { handler, sent, events } = handlerWith(studio);
+  const peer = createPeer(sent);
 
   await handler.handleStudioRequest(peer, {
     type: 'studio_request',
-    requestId: 'studio-2',
-    userRequest: 'plan this',
+    requestId: 'studio-1',
+    userRequest: 'go',
   }, createDeps());
 
-  assert.deepEqual(sent, [{
-    type: 'studio_error',
-    requestId: 'studio-2',
-    message: 'Studio 未配置:No Studio config found at /tmp/studio.json. Create one to enable /studio.',
-  }]);
+  studio.notify({
+    type: 'task.done',
+    source: 'kanban',
+    occurredAt: new Date().toISOString(),
+  });
+
+  const progress = events.at(-1) as { type: string; event: { type: string } };
+  assert.equal(progress.type, 'studio.progress');
+  assert.equal(progress.event.type, 'task.done');
 });
 
-test('LocalServerStudioHandler fills runId and conversationId defaults', async () => {
+test('events are attributed to the latest request, not the first one', async () => {
+  // 事件桥每个 peer 只建一次。若把首次的 requestId 封进闭包,第二次提交
+  // 之后的事件会全部错误归到 studio-1 上,客户端据此过滤就会丢弃它们。
+  const studio = fakeStudio();
+  const { handler, sent, events } = handlerWith(studio);
+  const peer = createPeer(sent);
+  const deps = createDeps();
+
+  await handler.handleStudioRequest(peer, {
+    type: 'studio_request', requestId: 'studio-1', userRequest: 'first',
+  }, deps);
+  await handler.handleStudioRequest(peer, {
+    type: 'studio_request', requestId: 'studio-2', userRequest: 'second',
+  }, deps);
+
+  studio.notify({
+    type: 'task.done',
+    source: 'kanban',
+    occurredAt: new Date().toISOString(),
+  });
+
+  const progress = events.at(-1) as { requestId: string };
+  assert.equal(progress.requestId, 'studio-2');
+});
+
+test('a missing studio config is reported as studio_error', async () => {
+  const build: BuildStudio = async () => {
+    throw new StudioNotConfiguredError('/tmp/nope/studio.json');
+  };
   const sent: unknown[] = [];
-  const peer = createFakePeer(sent);
-  const buildInputs: BuildStudioInput[] = [];
-  const handler = new LocalServerStudioHandler({
-    reviewRouter: new LocalServerStudioReviewRouter<LocalServerPeer>(),
-    inflightRequests: createInflightController(),
-    outbound: PEER_OUTBOUND,
-    buildStudio: async (input) => {
-      buildInputs.push(input);
-      return {
-        resolved: {} as BuildStudioResult['resolved'],
-        petCheckpointers: new Map(),
-        orchestrator: {
-          submitRequest: async () => ({ runId: 'studio-default', status: 'accepted' }),
-          waitForRun: async () => ({
-            outcome: {
-              outcome: 'done',
-              reply: 'done reply',
-              finalInvocationId: 'pet-run-default',
-            },
-          }),
-        } as unknown as BuildStudioResult['orchestrator'],
-      };
+  const handler = new LocalServerStudioHandler<Peer>({
+    buildStudio: build,
+    outbound: {
+      sendMessage: (peer, message) => peer.send(message),
+      sendEvent: () => true,
     },
   });
 
-  await handler.handleStudioRequest(peer, {
+  await handler.handleStudioRequest(createPeer(sent), {
     type: 'studio_request',
-    requestId: 'studio-default',
-    userRequest: 'plan default ids',
+    requestId: 'studio-1',
+    userRequest: 'go',
   }, createDeps());
 
-  const response = sent.find((item): item is {
-    type: 'studio_response';
-    requestId: string;
-    runId?: string;
-    conversationId?: string;
-    finalPetRunId: string;
-  } => (
-    Boolean(item && typeof item === 'object' && (item as { type: string }).type === 'studio_response')
-  ));
-  assert.ok(response);
-  assert.equal(response.requestId, 'studio-default');
-  assert.equal(response.runId, 'studio-default');
-  assert.equal(response.conversationId, 'studio-default');
-  assert.equal(response.finalPetRunId, 'pet-run-default');
+  const error = sent.at(-1) as { type: string; message: string };
+  assert.equal(error.type, 'studio_error');
+  assert.match(error.message, /Studio 未配置/);
+});
+
+test('a failed build is not cached, so a later request can succeed', async () => {
+  // 缓存失败会让一次配置错误把这个 workdir 永久锁死。
+  let attempts = 0;
+  const build: BuildStudio = async () => {
+    attempts += 1;
+    if (attempts === 1) throw new Error('transient boom');
+    return { studio: fakeStudio(), resolved: {}, plugins: [] } as unknown as BuildStudioResult;
+  };
+  const sent: unknown[] = [];
+  const handler = new LocalServerStudioHandler<Peer>({
+    buildStudio: build,
+    outbound: {
+      sendMessage: (peer, message) => peer.send(message),
+      sendEvent: () => true,
+    },
+  });
+  const peer = createPeer(sent);
+  const deps = createDeps();
+
+  await handler.handleStudioRequest(peer, {
+    type: 'studio_request', requestId: 's1', userRequest: 'go',
+  }, deps);
+  assert.equal((sent.at(-1) as { type: string }).type, 'studio_error');
+
+  await handler.handleStudioRequest(peer, {
+    type: 'studio_request', requestId: 's2', userRequest: 'go',
+  }, deps);
+  assert.equal((sent.at(-1) as { type: string }).type, 'studio_response');
+  assert.equal(attempts, 2);
 });

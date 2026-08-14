@@ -11,9 +11,8 @@ import {
 } from '@pinpawo/agent-session';
 import { formatAttachmentDisplayText } from '../attachments/attachmentModel';
 import {
-  studioCompletionMessages,
+  studioAcceptedMessage,
   studioErrorMessage,
-  studioProgressMessage,
   studioUserMessage,
 } from './studioProjection';
 import { prepareReviewDecision } from './reviewDecision';
@@ -544,16 +543,12 @@ export class TuiSessionController {
     }
 
     if (message.type === 'event') {
-      const projectedMessage = (
-        message.event.type === 'studio.progress'
-        && this.state.session.activeRun?.requestId === message.event.requestId
-      )
-        ? studioProgressMessage(message.event)
-        : null;
+      // Studio 进度不再往这条会话里投影:推模型下提交即返回,activeRun 早就
+      // 结束了,按 requestId 匹配恒不成立 —— 那是拉模型留下的形状。进度归
+      // 插件自己的视图,studio 不代它呈现。
       this.updateSession(reduceSession(this.state.session, {
         type: 'runtime.event',
         event: message.event,
-        ...(projectedMessage ? { message: projectedMessage } : {}),
       }, { observedAt: this.now() }));
       if (
         message.event.type === 'message.completed'
@@ -568,7 +563,7 @@ export class TuiSessionController {
       this.updateSession(reduceSession(this.state.session, {
         type: 'run.finished',
         requestId: message.requestId,
-        messages: studioCompletionMessages(message),
+        messages: studioAcceptedMessage(message),
       }, { observedAt: this.now() }));
       return;
     }

@@ -425,7 +425,7 @@ test('TuiSessionController lists and switches session model profiles authoritati
   controller.stop();
 });
 
-test('TuiSessionController projects Studio progress and terminal responses', () => {
+test('TuiSessionController records a Studio submission without projecting plugin events', () => {
   const requestIds = ['snapshot-1', 'studio-1', 'studio-2'];
   let connection!: FakeConnection;
   const controller = new TuiSessionController({
@@ -457,26 +457,12 @@ test('TuiSessionController projects Studio progress and terminal responses', () 
     '[studio] ship the release',
   );
 
-  connection.receive(eventMessage({
-    type: 'studio.progress',
-    requestId: 'studio-1',
-    event: {
-      type: 'tasks_queued',
-      taskCount: 3,
-    },
-  }));
-  const progressEntry = controller.getState().session.timeline.at(-1);
-  assert.equal(
-    progressEntry?.type === 'message' ? progressEntry.text : null,
-    '[studio] queued 3 tasks',
-  );
-
+  // 推模型:提交即返回,回执不含 pet 的答复(那时还没有产出)。
   connection.receive({
     type: 'studio_response',
     requestId: 'studio-1',
-    outcome: 'stopped',
-    reply: 'Prepared two tasks.',
-    reason: 'waiting for input',
+    outcome: 'done',
+    reply: '',
   });
   assert.equal(controller.getState().session.activeRun, null);
   assert.deepEqual(
@@ -485,21 +471,17 @@ test('TuiSessionController projects Studio progress and terminal responses', () 
       .map((entry) => entry.text),
     [
       '[studio] ship the release',
-      '[studio] queued 3 tasks',
-      'Prepared two tasks.',
-      '[studio] stopped: waiting for input',
+      '[studio] 已提交',
     ],
   );
+
+  // 插件 event 之后才到,且不再投影进这条会话 —— 进度归插件自己的视图。
   connection.receive(eventMessage({
     type: 'studio.progress',
     requestId: 'studio-1',
-    event: {
-      type: 'task_finished',
-      petRunId: 'late-run',
-      status: 'done',
-    },
+    event: { type: 'task.done', source: 'kanban' },
   }));
-  assert.equal(controller.getState().session.timeline.length, 4);
+  assert.equal(controller.getState().session.timeline.length, 2);
 
   assert.equal(
     controller.submitStudio('retry', 'studio:release').ok,

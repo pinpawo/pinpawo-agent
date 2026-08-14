@@ -105,12 +105,13 @@ test('parsePetLocalConfig requires serverBinding.petId when serverBinding presen
 
 test('parseStudioLocalConfig accepts minimal valid config', () => {
   const cfg = parseStudio(
-    { studioId: 's1', plannerPetId: 'p1', agents: ['p1'] },
+    { studioId: 's1', entryPetId: 'p1', pets: ['p1'] },
     'test-source',
   );
   assert.equal(cfg.studioId, 's1');
-  assert.equal(cfg.plannerPetId, 'p1');
-  assert.deepEqual(cfg.agents, ['p1']);
+  assert.equal(cfg.entryPetId, 'p1');
+  assert.deepEqual(cfg.pets, ['p1']);
+  assert.equal(cfg.plugins, undefined);
 });
 
 test('parseStudioLocalConfig keeps optional fields when provided', () => {
@@ -119,118 +120,122 @@ test('parseStudioLocalConfig keeps optional fields when provided', () => {
       studioId: 's1',
       name: 'My Studio',
       description: 'desc',
-      plannerPetId: 'p1',
-      agents: ['p1', 'p2'],
-      curator: { promptPath: './curator.md' },
-      maxIterationCount: 16,
-      maxRetryPerTask: 3,
+      entryPetId: 'p1',
+      pets: ['p1', 'p2'],
     },
     'test-source',
   );
   assert.equal(cfg.name, 'My Studio');
-  assert.equal(cfg.curator?.promptPath, './curator.md');
-  assert.equal(cfg.maxIterationCount, 16);
-  assert.equal(cfg.maxRetryPerTask, 3);
+  assert.equal(cfg.description, 'desc');
 });
 
 test('parseStudioLocalConfig rejects non-object input', () => {
   assert.throws(() => parseStudio(null, 'src'), /not a JSON object/);
 });
 
-test('parseStudioLocalConfig requires studioId / plannerPetId / agents', () => {
+test('parseStudioLocalConfig requires studioId / entryPetId / pets', () => {
   assert.throws(
-    () => parseStudio({ plannerPetId: 'p1', agents: ['p1'] }, 'src'),
+    () => parseStudio({ entryPetId: 'p1', pets: ['p1'] }, 'src'),
     /missing required string "studioId"/,
   );
   assert.throws(
-    () => parseStudio({ studioId: 's1', agents: ['p1'] }, 'src'),
-    /missing required string "plannerPetId"/,
+    () => parseStudio({ studioId: 's1', pets: ['p1'] }, 'src'),
+    /missing required string "entryPetId"/,
   );
   assert.throws(
-    () => parseStudio({ studioId: 's1', plannerPetId: 'p1' }, 'src'),
-    /"agents" must be a string\[\]/,
+    () => parseStudio({ studioId: 's1', entryPetId: 'p1' }, 'src'),
+    /"pets" must be a string\[\]/,
   );
   assert.throws(
-    () => parseStudio({ studioId: 's1', plannerPetId: 'p1', agents: [] }, 'src'),
-    /"agents" must not be empty/,
+    () => parseStudio({ studioId: 's1', entryPetId: 'p1', pets: [] }, 'src'),
+    /"pets" must not be empty/,
   );
 });
 
-test('parseStudioLocalConfig rejects bad guardrail values', () => {
-  assert.throws(
-    () => parseStudio(
-      { studioId: 's1', plannerPetId: 'p1', agents: ['p1'], maxIterationCount: 0 },
-      'src',
-    ),
-    /maxIterationCount.*positive integer/,
-  );
-  assert.throws(
-    () => parseStudio(
-      { studioId: 's1', plannerPetId: 'p1', agents: ['p1'], maxRetryPerTask: -1 },
-      'src',
-    ),
-    /maxRetryPerTask.*positive integer/,
-  );
-});
-
-test('parseStudioLocalConfig rejects bad curator shape', () => {
-  assert.throws(
-    () => parseStudio(
-      { studioId: 's1', plannerPetId: 'p1', agents: ['p1'], curator: 'not-an-object' },
-      'src',
-    ),
-    /"curator" must be an object/,
-  );
-  assert.throws(
-    () => parseStudio(
-      { studioId: 's1', plannerPetId: 'p1', agents: ['p1'], curator: { promptPath: '' } },
-      'src',
-    ),
-    /\(curator\): "promptPath" must be a non-empty string/,
-  );
-});
-
-test('resolveStudio joins pet configs in agents order', () => {
-  const studio = parseStudio(
-    { studioId: 's1', plannerPetId: 'p2', agents: ['p1', 'p2', 'p3'] },
+test('parseStudioLocalConfig passes plugin options through without interpreting them', () => {
+  // studio 不认识任何插件的领域概念 —— options 原样透传,校验归插件自己。
+  const cfg = parseStudio(
+    {
+      studioId: 's1',
+      entryPetId: 'p1',
+      pets: ['p1'],
+      plugins: [
+        { id: 'kanban' },
+        { id: 'scheduler', options: { timezone: 'Asia/Shanghai', nested: { any: 1 } } },
+      ],
+    },
     'src',
   );
-  const pets = [pet('p3'), pet('p1'), pet('p2'), pet('orphan')];
 
-  const resolved = resolveStudio(studio, pets);
-  assert.deepEqual(resolved.agents.map((p) => p.petId), ['p1', 'p2', 'p3']);
-  assert.equal(resolved.planner.petId, 'p2');
+  assert.deepEqual(cfg.plugins?.map((plugin) => plugin.id), ['kanban', 'scheduler']);
+  assert.equal(cfg.plugins?.[0]?.options, undefined);
+  assert.deepEqual(cfg.plugins?.[1]?.options, {
+    timezone: 'Asia/Shanghai',
+    nested: { any: 1 },
+  });
 });
 
-test('resolveStudio rejects duplicate agents', () => {
+test('parseStudioLocalConfig rejects malformed plugin entries', () => {
+  const base = { studioId: 's1', entryPetId: 'p1', pets: ['p1'] };
+  assert.throws(
+    () => parseStudio({ ...base, plugins: 'kanban' }, 'src'),
+    /"plugins" must be an array when present/,
+  );
+  assert.throws(
+    () => parseStudio({ ...base, plugins: ['kanban'] }, 'src'),
+    /"plugins\[0\]" must be an object/,
+  );
+  assert.throws(
+    () => parseStudio({ ...base, plugins: [{ options: {} }] }, 'src'),
+    /"plugins\[0\]\.id" must be a non-empty string/,
+  );
+  assert.throws(
+    () => parseStudio({ ...base, plugins: [{ id: 'kanban', options: [] }] }, 'src'),
+    /"plugins\[0\]\.options" must be an object when present/,
+  );
+});
+
+test('resolveStudio joins pet configs in pets order', () => {
   const studio = parseStudio(
-    { studioId: 's1', plannerPetId: 'p1', agents: ['p1', 'p1'] },
+    { studioId: 's1', entryPetId: 'p2', pets: ['p1', 'p2', 'p3'] },
+    'src',
+  );
+  const petConfigs = [pet('p3'), pet('p1'), pet('p2'), pet('orphan')];
+
+  const resolved = resolveStudio(studio, petConfigs);
+  assert.deepEqual(resolved.pets.map((p) => p.petId), ['p1', 'p2', 'p3']);
+  assert.equal(resolved.entryPet.petId, 'p2');
+});
+
+test('resolveStudio rejects duplicate pets', () => {
+  const studio = parseStudio(
+    { studioId: 's1', entryPetId: 'p1', pets: ['p1', 'p1'] },
     'src',
   );
   assert.throws(
     () => resolveStudio(studio, [pet('p1')]),
-    /agents array has duplicate petId "p1"/,
+    /pets array has duplicate petId "p1"/,
   );
 });
 
-test('resolveStudio rejects plannerPetId not in agents', () => {
+test('resolveStudio rejects entryPetId not in pets', () => {
   const studio = parseStudio(
-    { studioId: 's1', plannerPetId: 'manager', agents: ['p1', 'p2'] },
+    { studioId: 's1', entryPetId: 'manager', pets: ['p1', 'p2'] },
     'src',
   );
   assert.throws(
     () => resolveStudio(studio, [pet('manager'), pet('p1'), pet('p2')]),
-    /plannerPetId "manager" is not in agents/,
+    /entryPetId "manager" is not in pets/,
   );
 });
 
-test('resolveStudio rejects unknown agent reference', () => {
+test('resolveStudio rejects unknown pet reference', () => {
   const studio = parseStudio(
-    { studioId: 's1', plannerPetId: 'p1', agents: ['p1', 'ghost'] },
+    { studioId: 's1', entryPetId: 'p1', pets: ['p1', 'ghost'] },
     'src',
   );
   assert.throws(
     () => resolveStudio(studio, [pet('p1')]),
-    /agent "ghost" has no matching pet config/,
+    /pet "ghost" has no matching pet config/,
   );
 });

@@ -9,7 +9,6 @@ import {
   ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
 import {
-  FileStudioDueRunStore,
 } from '@pinpawo-toolkit/studio-kanban';
 import { collectPluginHooks, loadPlugins } from './pluginLoader';
 import type { LoadedUserCapability } from './capabilityLoader';
@@ -36,8 +35,6 @@ import {
 } from './runtimeConfig';
 import { setLocalToolsWorkdir } from './toolkits/local/pathUtils';
 import { LocalServerStudioHandler } from './localServerStudioHandler';
-import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
-import { LocalStudioDueRunScheduler } from './localStudioDueRunScheduler';
 import type { LocalServerDeps } from './localServerTypes';
 import { DEFAULT_SERVER_MODE, type ServerMode } from './serverMode';
 
@@ -58,8 +55,6 @@ export class LocalAgentRuntime {
   private readonly toolkitRuntimeManager = new ToolkitRuntimeManager();
   private readonly capabilityRegistry: LocalAgentCapabilityRegistry;
   private readonly chatCheckpointer: FileSaver;
-  private readonly studioDueRunStore: FileStudioDueRunStore;
-  private readonly studioDueRunScheduler: LocalStudioDueRunScheduler;
   private readonly graphService = new LocalAgentGraphService();
   private readonly inflightRequests = new InflightRequestController<WebSocket>({
     // Hosted app WS relay: do NOT include raw — keeps payloads small and
@@ -67,7 +62,6 @@ export class LocalAgentRuntime {
     emitOperation: (ws, event) => sendLocalAgentEvent(ws, event),
     sendControl: (ws, message) => sendLocalAgentMessage(ws, message),
   });
-  private readonly studioReviewRouter = new LocalServerStudioReviewRouter<WebSocket>();
   private readonly studioHandler: LocalServerStudioHandler<WebSocket>;
   private appWsClient: LocalAgentAppWsClient | null = null;
   private readonly appChatHandler: LocalAgentAppChatHandler;
@@ -83,21 +77,11 @@ export class LocalAgentRuntime {
     this.capabilityRegistry = new LocalAgentCapabilityRegistry({
       capabilityArtifactRoot: runtimeConfig.capabilityArtifactRoot,
     });
-    this.studioDueRunStore = new FileStudioDueRunStore({
-      filePath: runtimeConfig.studioDueRunsPath,
-    });
-    this.studioDueRunScheduler = new LocalStudioDueRunScheduler({
-      store: this.studioDueRunStore,
-      filterWorkdir: runtimeConfig.workdir,
-    });
-    this.studioHandler = new LocalServerStudioHandler({
-      reviewRouter: this.studioReviewRouter,
-      inflightRequests: this.inflightRequests,
+    this.studioHandler = new LocalServerStudioHandler<WebSocket>({
       outbound: {
         sendMessage: (ws, message) => sendLocalAgentMessage(ws, message),
         sendEvent: (ws, event) => sendLocalAgentEvent(ws, event),
       },
-      studioDueRunScheduler: this.studioDueRunScheduler,
     });
     this.chatCheckpointer = new FileSaver(runtimeConfig.checkpointPath);
     this.appChatHandler = new LocalAgentAppChatHandler({
@@ -124,7 +108,6 @@ export class LocalAgentRuntime {
       runStudioRequest: async (ws, message) => {
         await this.studioHandler.handleStudioRequest(ws, message, this.buildLocalServerDeps());
       },
-      routeStudioHumanReviewResponse: (ws, msg) => this.studioHandler.routeHumanReviewResponse(ws, msg),
       rejectStudioPendingReview: (ws) => this.studioHandler.rejectDisconnected(ws),
     });
   }
@@ -140,7 +123,6 @@ export class LocalAgentRuntime {
       autoAuthorizationSafetyLevel: getConfig().autoAuthorizationSafetyLevel,
       workdir: this.runtimeConfig.workdir,
       runtimeConfig: this.runtimeConfig,
-      studioDueRunScheduler: this.studioDueRunScheduler,
       localToolkitDefinitions: this.getLocalToolkitDefinitions(),
       localToolkits: this.getLocalToolkits(),
       pluginToolkitDefinitions: this.getPluginToolkitDefinitions(),
@@ -201,7 +183,6 @@ export class LocalAgentRuntime {
   requestStop() {
     this.stopRequested = true;
     this.stopController.abort();
-    this.studioDueRunScheduler.stop();
     this.disconnectWs();
   }
 

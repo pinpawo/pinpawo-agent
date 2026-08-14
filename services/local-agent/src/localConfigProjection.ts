@@ -117,8 +117,8 @@ export function buildLocalHttpRuntimeProjection(deps: LocalServerDeps) {
     ...(runtime.studioMode ? {
       studio_mode: {
         studio_id: runtime.studioMode.studioId,
-        planner_pet_id: runtime.studioMode.plannerPetId,
-        worker_pet_ids: [...runtime.studioMode.workerPetIds],
+        entry_pet_id: runtime.studioMode.entryPetId,
+        pet_ids: [...runtime.studioMode.petIds],
       },
     } : {}),
     model_profile_id: runtime.modelProfileId,

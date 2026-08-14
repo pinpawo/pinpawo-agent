@@ -7,7 +7,6 @@ import type {
 } from '@pinpawo/pet-agent';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { ToolAuthorizationSafetyLevel } from '@pinpawo/agent-contracts';
-import type { LocalStudioDueRunScheduler } from './localStudioDueRunScheduler';
 import type { LoadedUserCapability } from './capabilityLoader';
 import type { LocalModelProfileRegistry } from './llmConfig';
 import { buildWorkspaceRuntimeConfig, type LocalAgentRuntimeConfig } from './runtimeConfig';
@@ -19,8 +18,8 @@ import type { ServerMode } from './serverMode';
  */
 export type LocalServerStudioModeInfo = {
   studioId: string;
-  plannerPetId: string;
-  workerPetIds: readonly string[];
+  entryPetId: string;
+  petIds: readonly string[];
 };
 
 export type LocalServerDeps = {
@@ -35,7 +34,6 @@ export type LocalServerDeps = {
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
   workdir: string;
   runtimeConfig?: LocalAgentRuntimeConfig;
-  studioDueRunScheduler?: LocalStudioDueRunScheduler;
   /**
    * Host 持有的 chat checkpointer。Studio 的 pet 复用同一实例:threadId
    * 已含 studio/run/task/pet/invocation 层级,与 chat 线程天然隔离,

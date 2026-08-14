@@ -7,10 +7,12 @@
  * 换成 S3 / DB 实现时,编排核心不需要任何改动。
  */
 
-/* ─────────────── 任务队列 ─────────────── */
+/* ─────────────── Studio 插件 ─────────────── */
 
-export { FileStudioRunQueueStore } from './runQueueStore';
-export { FileStudioDueRunStore } from './fileDueRunStore';
+export { createKanbanPlugin, KANBAN_TOOLKIT_NAME } from './kanbanPlugin';
+export type { CreateKanbanPluginOptions, KanbanPlugin } from './kanbanPlugin';
+export { KanbanBoard } from './kanbanBoard';
+export type { KanbanTask, KanbanTaskStatus, KanbanBoardSnapshot } from './kanbanBoard';
 
 /* ─────────────── 知识库 ─────────────── */
 
@@ -21,16 +23,3 @@ export {
   WIKI_READ_CAPABILITY_NAME,
 } from './wikiReadCapability';
 
-export {
-  createLLMWikiCurator,
-  createSkeletonWikiCurator,
-  ensureWikiSkeleton,
-  defaultPromptProvider,
-  fileReadPromptProvider,
-  DEFAULT_CURATOR_PROMPT,
-} from './wikiCurator';
-export type {
-  CuratorPromptProvider,
-  LLMWikiCuratorConfig,
-  LLMWikiCuratorStructuredOutputConfig,
-} from './wikiCurator';

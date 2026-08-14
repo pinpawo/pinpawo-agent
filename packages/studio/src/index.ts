@@ -1,21 +1,26 @@
 /**
- * `@pinpawo/studio` —— Studio 编排核心。
+ * `@pinpawo/studio` —— Studio 插板。
  *
- * 本包只做编排:规划、调度、依赖、重试、run/task 状态机。
- * 持久化与知识库由 port 声明,宿主注入实现(见 `runQueuePort` / `wikiPort`),
- * 因此本包不碰文件系统。
+ * 它提供两个方向的通道,不提供任何管理策略:
+ *
+ *     plugin ──event────> studio ──dispatch──> pet
+ *
+ * 任务队列、依赖、进度、调度时机、重试全部属于插件 —— studio 不认识它们,
+ * 也不持有由 event 推导出的任何状态。因此本包不碰文件系统。
  */
 
-export { createStudioOrchestrator } from './createStudioOrchestrator';
-
-export {
-  createPlanToolkit,
-  createPlanCapability,
-} from './planCapability';
+export { createStudio } from './createStudio';
+export type { CreateStudioInput } from './createStudio';
 export type {
-  CreatePlanToolkitOptions,
-  StudioPlanPetListItem,
-} from './planCapability';
+  Studio,
+  StudioDispatchInput,
+  StudioDispatchResult,
+  StudioEvent,
+  StudioEventHandler,
+  StudioEventInput,
+  StudioPlugin,
+  StudioPluginContext,
+} from './studioContract';
 
 export {
   petLocalConfigSchema,
@@ -26,44 +31,12 @@ export type {
   PetLocalConfig,
   ResolvedStudio,
   StudioLocalConfig,
+  StudioPluginConfig,
 } from './configSchema';
 
 export * from './types';
 export * from './petAgentTypes';
 
-/* ─────────────── Ports:宿主注入实现 ─────────────── */
+/* ─────────────── Wiki port:宿主注入实现 ─────────────── */
 
-export {
-  InMemoryStudioRunQueueStore,
-  // 快照归一化 helper —— 供 toolkit 层的持久化实现复用,避免各实现
-  // 各写一套恢复语义。
-  OPEN_RUN_STATUSES,
-  cloneSnapshot,
-  recoverSnapshot,
-  runFromSnapshot,
-  snapshotFromRun,
-  sortSnapshots,
-} from './runQueuePort';
-export type {
-  StudioRunQueueStore,
-  StudioRunQueueStoreRecoveryOptions,
-  StudioRunQueueStoreState,
-} from './runQueuePort';
-
-export {
-  createNoopWikiCurator,
-  noopWikiSkeletonInitializer,
-} from './wikiPort';
-export type {
-  StudioWikiAccess,
-  StudioWikiTaskSource,
-  WikiCurateInput,
-  WikiCurateResult,
-  WikiCurator,
-  WikiSkeletonInitializer,
-} from './wikiPort';
-
-/* ─────────────── Due-run 调度 ─────────────── */
-
-export * from './dueRunContract';
-export * from './dueRunScheduler';
+export type { StudioWikiAccess } from './wikiPort';

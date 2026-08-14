@@ -8,13 +8,12 @@
  *
  * 未来若出现第二个 host,再单独抽 `studio-pet-agent-adapter`。
  *
- * 待退役(#561 Phase 2):下面的 `while (true) { graph.invoke(); Command({resume}) }`
- * 是一套 Studio 专用的 HITL 循环。目标是让 pet invocation 复用稳定的 Chat
- * request/runtime 路径,而不是维护第二套执行器。
+ * HITL 对 Studio 透明:pet 撞到 review 时 invoke 直接返回,不在内部等待。
+ * review 是 pet 与人之间的事 —— 人已经在跟 pet 打交道了,再让 Studio 知道
+ * 一遍是多余的一层。答复走 pet-agent 既有的 resume 路径,与 chat 一致。
  */
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
-import { Command } from '@langchain/langgraph';
 
 import type { AgentCapability } from '@pinpawo/pet-agent';
 import type { AgentActor, AgentExecution, AgentModels } from '@pinpawo/pet-agent';
@@ -36,14 +35,12 @@ import {
   type OrchestratorConfig,
   type OrchestratorGraph,
 } from '@pinpawo/pet-agent';
-import { isHumanReviewInterruptPayload } from '@pinpawo/pet-agent';
 import type {
-  HumanReviewer,
-  HumanReviewerRequest,
   PetAgentRuntime,
   PetAgentRuntimeDescriptor,
   PetAgentRuntimeInvokeInput,
   PetAgentRuntimeInvokeResult,
+  PetGateState,
 } from '@pinpawo/studio';
 import type { StudioWikiAccess } from '@pinpawo/studio';
 
@@ -58,12 +55,6 @@ export type PetAgentRuntimeConfig = {
   toolkits?: AgentToolkit[];
   execution?: AgentExecution;
   workdir?: string;
-  /**
-   * HITL 应答桥。pet runtime 在 invoke 期间撞到 interrupt 时调用,
-   * 拿到 canonical ReviewResponse 后续跑 graph。不提供时 pet 不应触发 HITL tool;
-   * 若仍触发 interrupt,invoke 将抛错。
-   */
-  humanReviewer?: HumanReviewer;
   graph?: OrchestratorGraph;
   modelInputModalities?: OrchestratorConfig['modelInputModalities'];
   checkpoint?: OrchestratorConfig['checkpoint'];
@@ -154,8 +145,41 @@ async function buildInvokeMessages(
   return messages;
 }
 
+/**
+ * checkpoint 上还有没有没跑完的活。
+ *
+ * pet 撞到人工确认时 `graph.invoke` 会**提前返回**,但 graph 停在中断点上,
+ * `next` / `tasks` 非空。这正是"invoke 返回 ≠ 活干完了"的判据。
+ */
+function hasPendingContinuation(snapshot: unknown): boolean {
+  const record = snapshot && typeof snapshot === 'object'
+    ? snapshot as { next?: unknown; tasks?: unknown }
+    : null;
+  const next = Array.isArray(record?.next) ? record.next : [];
+  if (next.length > 0) return true;
+  const tasks = Array.isArray(record?.tasks) ? record.tasks : [];
+  return tasks.length > 0;
+}
+
 export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRuntime {
   let status = initialStatus(config);
+  let gateState: PetGateState = 'open';
+  const gateListeners = new Set<(state: PetGateState) => void>();
+
+  function setGate(next: PetGateState): void {
+    if (gateState === next) return;
+    gateState = next;
+    for (const listener of gateListeners) {
+      try {
+        listener(next);
+      } catch (error) {
+        console.error(
+          '[pet-runtime] gate listener failed:',
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
+  }
   const startupMode = config.startupMode ?? 'standby';
   // A caller-supplied graph is already responsible for its graph config. Do
   // not create and start an unreachable manager beside it.
@@ -229,33 +253,65 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
 
     const previousStatus = status;
     status = 'active';
+    setGate('busy');
     try {
-      let graphInput: Parameters<OrchestratorGraph['invoke']>[0] = buildOrchestratorRunInput(
+      const graphInput: Parameters<OrchestratorGraph['invoke']>[0] = buildOrchestratorRunInput(
         messages,
         { activeDelegationTransition: input.activeDelegationTransition },
       );
-      while (true) {
-        const result = await graph.invoke(graphInput, { signal: input.signal, configurable });
-        const pending = readPendingInterrupt(result);
-        if (!pending) {
-          return { reply: readReply(result) };
-        }
-        if (!config.humanReviewer) {
-          throw new Error(
-            `Pet agent "${config.actor.petId}" hit HITL interrupt but no humanReviewer configured`,
-          );
-        }
-        const response = await config.humanReviewer(pending);
-        graphInput = new Command({ resume: response });
-      }
+      // 撞到 review 就返回 —— 进度已落在 checkpoint 上(#613),答复由客户端
+      // 经 pet-agent 的 resume 路径送回。Studio 不参与,也不需要知道。
+      const result = await graph.invoke(graphInput, { signal: input.signal, configurable });
+      // 返回不等于干完了。checkpoint 上还有待跑节点 = 停在中断点等人 ——
+      // 门此时是 `waiting`,不是 `open`,队列不该放行下一条。
+      await refreshGate(input.threadId, configurable, 'waiting');
+      return { reply: readReply(result) };
+    } catch (error) {
+      // 失败必须停下:后面排着的活可能正建立在这条的产出之上,在坏掉的状态
+      // 上继续操作才是破坏性的来源。留给人去 chat 里看一眼。
+      setGate('blocked');
+      throw error;
     } finally {
       status = previousStatus === 'active' ? 'standby' : previousStatus;
+    }
+  }
+
+  /**
+   * 读一次 checkpoint,决定门开还是关。
+   *
+   * `closedState` 是"还有活没跑完"时的落点 —— 正常返回后是 `waiting`
+   * (停在中断点等人)。读不到快照时保守放行,否则一次读取失败就会把这个
+   * pet 永久锁死。
+   */
+  async function refreshGate(
+    threadId: string | undefined,
+    configurable: Record<string, unknown>,
+    closedState: PetGateState,
+  ): Promise<void> {
+    if (!threadId || !config.checkpoint) {
+      setGate('open');
+      return;
+    }
+    try {
+      const snapshot = await graph.getState({ configurable });
+      setGate(hasPendingContinuation(snapshot) ? closedState : 'open');
+    } catch (error) {
+      console.error(
+        `[pet-runtime] gate check failed (thread=${threadId}); opening to avoid a permanent stall:`,
+        error instanceof Error ? error.message : error,
+      );
+      setGate('open');
     }
   }
 
   return {
     descriptor,
     invoke,
+    gate: () => gateState,
+    onGateChange: (listener) => {
+      gateListeners.add(listener);
+      return () => gateListeners.delete(listener);
+    },
     shutdown: async () => {
       if (ownsToolkitRuntimeManager && toolkitRuntimeManager) {
         await toolkitRuntimeManager.stop();
@@ -270,12 +326,3 @@ function readReply(result: unknown): string {
   return typeof last?.content === 'string' ? last.content.trim() : '';
 }
 
-function readPendingInterrupt(result: unknown): HumanReviewerRequest | undefined {
-  const raw = (result as { __interrupt__?: unknown } | undefined)?.__interrupt__;
-  if (!Array.isArray(raw) || raw.length === 0) return undefined;
-  const first = raw[0];
-  const value = first && typeof first === 'object' && 'value' in first
-    ? (first as { value?: unknown }).value
-    : null;
-  return isHumanReviewInterruptPayload(value) ? value : undefined;
-}

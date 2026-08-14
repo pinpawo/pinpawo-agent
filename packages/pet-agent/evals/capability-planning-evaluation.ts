@@ -21,6 +21,7 @@ export type CapabilityPlanningEvalOutput = {
   result: string;
   nextTask: string | null;
   capabilityName: string | null;
+  gapNote: string | null;
   remainingPlan: Array<{ capability: string; task: string }>;
 };
 
@@ -88,6 +89,16 @@ export function buildCapabilityPlanningGoalContract(
                     .join(' | ')}.`,
                 ].join(' ')
               : 'The remaining plan is empty because the current task covers all work required for the user goal at this boundary.',
+          }]
+        : []),
+      ...(expected.result === 'continue_current'
+        ? [{
+            id: 'continuation_guidance_correct',
+            statement: [
+              'The gap note must diagnose the concrete deficiency in the latest announce without copying it verbatim.',
+              'It must give the same delegation a concise, forward-looking next action and identify the evidence needed for acceptance.',
+              `Expected semantic anchors: ${(expected.gapNoteTerms ?? []).join(', ')}.`,
+            ].join(' '),
           }]
         : []),
       ...(expected.remainingPlan.length > 0

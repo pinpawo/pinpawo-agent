@@ -29,6 +29,7 @@ export function scoreCapabilityPlanning(
     result: string;
     nextTask?: string | null;
     capabilityName?: string | null;
+    gapNote?: string | null;
     remainingPlan: Array<{ capability: string; task: string }>;
   },
   expected: CapabilityPlanningExpected,
@@ -55,6 +56,14 @@ export function scoreCapabilityPlanning(
           `Return exactly ${expected.exactRemainingPlanLength.toString()} future tasks for this case-specific task-boundary contract.`,
           output.remainingPlan.length,
           expected.exactRemainingPlanLength,
+        )]),
+    ...(expected.gapNoteTerms === undefined
+      ? []
+      : [exact(
+          'planner_gap_note_present',
+          'Return non-empty continuation guidance for the same delegation.',
+          Boolean(output.gapNote?.trim()),
+          true,
         )]),
   ];
 }

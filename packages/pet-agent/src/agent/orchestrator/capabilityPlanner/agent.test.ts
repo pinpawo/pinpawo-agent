@@ -1447,6 +1447,7 @@ test('boundary Planner can correct an invalid continuation capability', async (t
           capability: 'general',
           task: 'Finish collecting the missing repository evidence.',
         }],
+        gap_note: 'The repository evidence is incomplete; collect and verify the missing facts.',
       },
     }],
   }, {
@@ -1458,6 +1459,7 @@ test('boundary Planner can correct an invalid continuation capability', async (t
           capability: 'explore',
           task: 'Finish collecting the missing repository evidence.',
         }],
+        gap_note: 'The repository evidence is incomplete; collect and verify the missing facts.',
       },
     }],
   }]);
@@ -1484,6 +1486,7 @@ test('boundary Planner can correct an invalid continuation capability', async (t
       capability: 'explore',
       task: 'Finish collecting the missing repository evidence.',
     }],
+    gapNote: 'The repository evidence is incomplete; collect and verify the missing facts.',
   });
   assert.equal(model.invocations.length, 2);
   assert.ok(model.invocations[1]?.some((message) =>

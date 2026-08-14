@@ -23,10 +23,16 @@ export type OrchestratorRuntimeFailure =
   | 'planner_checkpoint_missing'
   | 'checkpoint_incompatible';
 
-export type PlannerCommit = {
-  readonly action: PlannerAction;
-  readonly tasks: readonly CapabilityPlanTask[];
-};
+export type PlannerCommit =
+  | {
+      readonly action: 'continue_current';
+      readonly tasks: readonly CapabilityPlanTask[];
+      readonly gapNote: string;
+    }
+  | {
+      readonly action: Exclude<PlannerAction, 'continue_current'>;
+      readonly tasks: readonly CapabilityPlanTask[];
+    };
 
 export type PlannerDelegationInput = {
   readonly delegationId: string;
@@ -48,6 +54,7 @@ const plannerTaskSchema = z.object({
 export const plannerCommitSchema = z.object({
   action: z.enum(PLANNER_ACTIONS),
   tasks: z.array(plannerTaskSchema).max(24),
+  gapNote: z.string().trim().min(1).max(2_000).optional(),
 }).strict();
 
 export function parsePlannerCommit(
@@ -97,6 +104,20 @@ export function parsePlannerCommit(
         `Planner continue_current must keep the active delegation capability "${activeDelegation.capability}".`,
       );
     }
+    if (!commit.gapNote) {
+      throw new Error('Planner continue_current requires a non-empty gap note.');
+    }
+    return {
+      action: commit.action,
+      tasks: commit.tasks,
+      gapNote: commit.gapNote,
+    };
   }
-  return commit;
+  if (commit.gapNote !== undefined) {
+    throw new Error(`Planner action "${commit.action}" forbids a gap note.`);
+  }
+  return {
+    action: commit.action,
+    tasks: commit.tasks,
+  };
 }

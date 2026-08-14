@@ -68,6 +68,7 @@ function plannerOutput(
       result: result.action,
       nextTask: null,
       capabilityName: null,
+      gapNote: null,
       remainingPlan: [],
     };
   }
@@ -76,6 +77,7 @@ function plannerOutput(
     result: result.action,
     nextTask: nextTask?.task ?? null,
     capabilityName: nextTask?.capability ?? null,
+    gapNote: result.action === 'continue_current' ? result.gapNote : null,
     remainingPlan: remainingPlan.map((task) => ({ ...task })),
   };
 }

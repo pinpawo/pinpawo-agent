@@ -22,6 +22,7 @@ export type CapabilityPlanningExpected = {
     | 'user_input_required'
     | 'unavailable';
   nextTaskTerms?: string[];
+  gapNoteTerms?: string[];
   capabilityName?: string;
   remainingPlan: Array<{ taskTerms: string[]; capability: string }>;
   /**
@@ -697,12 +698,196 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     },
     expected: {
       result: 'continue_current',
+      gapNoteTerms: ['测试尚未运行', '运行测试', '测试结果'],
       remainingPlan: [],
       planEffect: 'revised',
       rubberStamp: false,
       reason: 'The current task is incomplete and the same Capability can finish it.',
     },
     metadata: { difficulty: 'medium', reason: 'Unified acceptance and continuation action.', source: SOURCE_FILE },
+  },
+  {
+    id: `${SUITE}.boundary-corrects-context-summary-output`,
+    name: 'boundary-corrects-context-summary-output',
+    suite: SUITE,
+    tags: ['capability_planning', 'delegation_control', 'planner_boundary', 'context_synthesis'],
+    input: {
+      mode: 'boundary',
+      userGoal: '用与菜单文本语义对应的白色线性 SVG 图标替换 70 个旧四宫格占位图，刷新预览页并验证生成结果。',
+      messages: [{
+        role: 'user',
+        content: '根据菜单文本生成对应的 SVG 图标，替换现有占位图。',
+      }],
+      capabilityRegistry: [
+        'general: inspect, modify, execute, and verify workspace files',
+      ],
+      activeTask: '重写 quality-safety-icons/generate.js，生成 70 个语义 SVG 图标并验证输出。',
+      latestAnnounce: `<essential_context role="task_boundary" source="prior_summary" trust="read_only">
+  <![CDATA[
+1. 主要目标：用与菜单文本语义对应的白色线性 SVG 图标替换 ~/Downloads/quality-safety-icons/svg/ 下 70 个旧四宫格占位图，保留 6 类配色渐变圆角方底（48×48 viewBox、44×44 圆角底）和文件名序号，刷新 index.html 预览页。
+2. 关键事实：磁盘从未真正改动——generate.js 是旧版 155 行占位脚本（mtime 11:37），svg/ 70 文件仍是四宫格占位图，index.html 旧版。之前多次声称重构实际未执行工具调用。
+3. 已定设计：白色 stroke 图标（stroke-width≈2，圆角线帽），角标规则——查询类右上放大镜、关联类右上链环、配置类右上齿轮、统计类柱状图基底。
+4. 70 项语义映射表已在会话中完整列出（监督工程综合查询→放大镜+文档；在建工程→塔吊/建筑；监督记录→清单/循环/报告；工程统计→柱状图+变体；工程类别→标签；重点工程→星标；创优等级→奖杯；安全生产目标→盾牌+靶心；登记类型→表单；投资类型→钱币；道路等级→道路；结构类型→框架；基础形式→地基；桩基类别→柱桩；管道材料类型→管道；人员岗位→人像团队；工程进度→甘特条；监督类别→眼睛；配置类→齿轮；意见种类→对话泡；级别→层级；整改书→循环+文档；区域→地图；科室→部门；起重机械→吊机；危险源→警告三角；企业注册地→楼宇+定位针 等）。
+5. 执行步骤：write_file 重写 generate.js → run_shell 执行 node generate.js → run_shell ls -l 与 XML 校验 → grep 抽查确认含 stroke 路径而非四宫格 rect。
+  ]]>
+</essential_context>`,
+      remainingPlan: [],
+    },
+    expected: {
+      result: 'continue_current',
+      capabilityName: 'general',
+      gapNoteTerms: ['内部上下文', '尚未执行', '实际修改', '运行生成脚本', '验证证据'],
+      remainingPlan: [],
+      exactRemainingPlanLength: 0,
+      planEffect: 'revised',
+      rubberStamp: false,
+      reason: 'The latest announce is an internal-context-shaped summary that explicitly says no workspace work occurred. Continue the same delegation with concise corrective guidance to perform and verify the requested mutation instead of repeating the summary.',
+    },
+    metadata: {
+      difficulty: 'hard',
+      reason: 'Regression from a production trace where repeated context-summary-shaped announces caused continuation without corrective guidance.',
+      source: SOURCE_FILE,
+    },
+  },
+  {
+    id: `${SUITE}.boundary-corrects-planning-only-output`,
+    name: 'boundary-corrects-planning-only-output',
+    suite: SUITE,
+    tags: ['capability_planning', 'delegation_control', 'planner_boundary'],
+    input: {
+      mode: 'boundary',
+      userGoal: '用与菜单文本语义对应的白色线性 SVG 图标替换 70 个旧四宫格占位图，刷新预览页并验证生成结果。',
+      messages: [{
+        role: 'user',
+        content: '根据菜单文本生成对应的 SVG 图标，替换现有占位图。',
+      }],
+      capabilityRegistry: [
+        'general: inspect, modify, execute, and verify workspace files',
+      ],
+      activeTask: '重写 quality-safety-icons/generate.js，生成 70 个语义 SVG 图标并验证输出。',
+      latestAnnounce: '我现在来写完整的生成脚本并执行。首先建立 SVG 字形库和 70 项语义映射，然后运行 node generate.js，最后检查文件数量和 XML。',
+      remainingPlan: [],
+    },
+    expected: {
+      result: 'continue_current',
+      capabilityName: 'general',
+      gapNoteTerms: ['计划性文字', '尚未执行', '实际修改', '运行命令', '验证结果'],
+      remainingPlan: [],
+      exactRemainingPlanLength: 0,
+      planEffect: 'revised',
+      rubberStamp: false,
+      reason: 'The latest announce only restates a future plan and contains no completed work. Continue the same delegation with guidance to act now and return concrete execution and verification evidence.',
+    },
+    metadata: {
+      difficulty: 'medium',
+      reason: 'Catches a natural subagent stop that announces intended work instead of performing it.',
+      source: SOURCE_FILE,
+    },
+  },
+  {
+    id: `${SUITE}.boundary-corrects-placeholder-output`,
+    name: 'boundary-corrects-placeholder-output',
+    suite: SUITE,
+    tags: ['capability_planning', 'delegation_control', 'planner_boundary'],
+    input: {
+      mode: 'boundary',
+      userGoal: '根据每个菜单文本的含义绘制不同的白色线性 SVG 图标，不得继续使用四宫格占位符。',
+      messages: [{
+        role: 'user',
+        content: '原图标只是占位，请按菜单语义重新设计并生成 70 个 SVG。',
+      }],
+      capabilityRegistry: [
+        'general: inspect, modify, execute, and verify workspace files',
+      ],
+      activeTask: '生成 70 个与菜单语义对应的 SVG 图标并刷新预览页。',
+      latestAnnounce: '已生成全部 70 个 SVG。每个图标使用彩色圆角方形底，内部统一绘制 2×2 四枚白色圆角小方块，并已刷新 index.html。',
+      remainingPlan: [],
+    },
+    expected: {
+      result: 'continue_current',
+      capabilityName: 'general',
+      gapNoteTerms: ['四宫格占位', '不符合语义', '不同语义图标', '重新生成', '抽查内容'],
+      remainingPlan: [],
+      exactRemainingPlanLength: 0,
+      planEffect: 'revised',
+      rubberStamp: false,
+      reason: 'The subagent produced the explicitly rejected placeholder design. Continue the same delegation with corrective guidance to implement distinct semantic glyphs and verify the generated SVG content.',
+    },
+    metadata: {
+      difficulty: 'hard',
+      reason: 'Tests course correction when files were generated but the delivered design contradicts the user goal.',
+      source: SOURCE_FILE,
+    },
+  },
+  {
+    id: `${SUITE}.boundary-continues-after-script-only-progress`,
+    name: 'boundary-continues-after-script-only-progress',
+    suite: SUITE,
+    tags: ['capability_planning', 'delegation_control', 'planner_boundary'],
+    input: {
+      mode: 'boundary',
+      userGoal: '重写图标生成脚本并实际生成、验证全部 70 个语义 SVG 图标。',
+      messages: [{
+        role: 'user',
+        content: '完成脚本修改、图标生成和结果验证。',
+      }],
+      capabilityRegistry: [
+        'general: inspect, modify, execute, and verify workspace files',
+      ],
+      activeTask: '重写 generate.js，执行生成并验证 70 个 SVG 文件。',
+      latestAnnounce: 'generate.js 已经重写并加入语义字形映射，但尚未运行 node generate.js；svg/ 目录仍是旧时间戳，index.html 也尚未刷新。',
+      remainingPlan: [],
+    },
+    expected: {
+      result: 'continue_current',
+      capabilityName: 'general',
+      gapNoteTerms: ['脚本已修改', '尚未执行生成', '运行 node generate.js', '刷新预览', '校验 70 个文件'],
+      remainingPlan: [],
+      exactRemainingPlanLength: 0,
+      planEffect: 'revised',
+      rubberStamp: false,
+      reason: 'Useful progress exists, but the same Capability must execute the generator and verify its outputs before the task can be accepted.',
+    },
+    metadata: {
+      difficulty: 'medium',
+      reason: 'Distinguishes a valid partial implementation from a completed end-to-end task.',
+      source: SOURCE_FILE,
+    },
+  },
+  {
+    id: `${SUITE}.boundary-requests-missing-verification`,
+    name: 'boundary-requests-missing-verification',
+    suite: SUITE,
+    tags: ['capability_planning', 'delegation_control', 'planner_boundary'],
+    input: {
+      mode: 'boundary',
+      userGoal: '生成 70 个语义 SVG 图标，并确认文件数量、XML 有效性和图标内容均符合要求。',
+      messages: [{
+        role: 'user',
+        content: '生成图标后必须校验数量、XML 和实际 SVG 内容。',
+      }],
+      capabilityRegistry: [
+        'general: inspect, modify, execute, and verify workspace files',
+      ],
+      activeTask: '生成并完整验证 70 个语义 SVG 文件。',
+      latestAnnounce: '生成脚本已经运行，并报告写出了 70 个 SVG 文件；但本轮没有执行 XML 校验，也没有抽查 SVG 是否仍包含四宫格占位 rect。',
+      remainingPlan: [],
+    },
+    expected: {
+      result: 'continue_current',
+      capabilityName: 'general',
+      gapNoteTerms: ['已生成文件', '缺少验证', 'XML 校验', '抽查 SVG 内容', '确认无占位图'],
+      remainingPlan: [],
+      exactRemainingPlanLength: 0,
+      planEffect: 'revised',
+      rubberStamp: false,
+      reason: 'Generation may have succeeded, but the explicit verification contract remains incomplete. Continue the same delegation with verification-focused guidance.',
+    },
+    metadata: {
+      difficulty: 'medium',
+      reason: 'Ensures the Planner asks for missing acceptance evidence instead of rerunning or accepting prematurely.',
+      source: SOURCE_FILE,
+    },
   },
   {
     id: `${SUITE}.boundary-completes-user-goal`,

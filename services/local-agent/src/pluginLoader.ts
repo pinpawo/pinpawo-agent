@@ -5,17 +5,10 @@ import {
   type AgentToolkit,
   validateToolkitDefinition,
 } from '@pinpawo/pet-agent';
-import type { DailyPostPayload } from './capabilities/dailyPost';
 import { resolveToolkitAvailability } from './toolkits/toolkitAvailability';
-
-export type LocalAgentPluginHooks = {
-  beforeCrawl?: () => Promise<void>;
-  afterPostSaved?: (postId: string, payload: DailyPostPayload) => Promise<void>;
-};
 
 export type LocalAgentPlugin = {
   name: string;
-  hooks?: LocalAgentPluginHooks;
 };
 
 const PLUGINS_DIR = resolve(homedir(), '.pinpawo', 'plugins');
@@ -100,20 +93,5 @@ export async function loadPluginsFromDir(
       .filter(({ availability }) => availability.available)
       .map(({ toolkit }) => toolkit),
     plugins,
-  };
-}
-
-export function collectPluginHooks(plugins: LocalAgentPlugin[]) {
-  return {
-    beforeCrawl: async () => {
-      for (const plugin of plugins) {
-        if (plugin.hooks?.beforeCrawl) await plugin.hooks.beforeCrawl();
-      }
-    },
-    afterPostSaved: async (postId: string, payload: DailyPostPayload) => {
-      for (const plugin of plugins) {
-        if (plugin.hooks?.afterPostSaved) await plugin.hooks.afterPostSaved(postId, payload);
-      }
-    },
   };
 }

@@ -4,7 +4,7 @@ import type { OrchestratorStateType } from './state';
  * Orchestrator control-flow primitives.
  *
  * Guard rules live in `agent/orchestrator/guardDefinitions` and are evaluated
- * by their owning positions via `evaluateGuard` (see docs/GUARD_DESIGN.md).
+ * by their owning positions via `evaluateGuard` (see docs/reference/runtime/guards.md).
  * This module keeps the remaining graph-local primitives: state patches and
  * recursion limits.
  */

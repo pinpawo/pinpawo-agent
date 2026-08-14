@@ -13,7 +13,7 @@ import {
  * this is the production consumption path (the legacy
  * `graph.stream(['messages','values','custom'])` + `onToolEvent` bridge is
  * gone); the correspondence with the legacy semantics is pinned by tests and
- * documented in docs/SUBAGENT_STREAM_BRIDGE_ANALYSIS.md.
+ * documented in docs/history/agent-runtime/subagent-stream-bridge.md.
  *
  * Attribution model (established by the Phase 1 spike):
  * - namespace depth 0/1 = the root graph / a root node's own activity;

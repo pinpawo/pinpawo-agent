@@ -2,7 +2,7 @@ import { AgentEvalCase, AgentEvalDataset } from './types.ts';
 
 type OrchestratorFlowMockSubagentInput = {
   user_message: string;
-  capability_pack?: 'browser' | 'daily_post_only' | 'explore' | 'pet_content';
+  capability_pack?: 'browser' | 'content_writer_only' | 'explore' | 'pet_content';
   allowed_capability_names?: string[];
   subagent_response?: string;
   subagent_responses?: string[];
@@ -60,9 +60,9 @@ const cases: AgentEvalCase<
     suite: SUITE,
     tags: ['capability_discovery', 'delegation_control', 'context_synthesis', 'route_control'],
     input: {
-      user_message: '打开小红书探索页看看今天有什么热门内容',
+      user_message: '打开示例站点资料页查看最新更新',
       capability_pack: 'browser',
-      subagent_response: '已打开小红书探索页并提取到热门内容：宠物日常、春季出游、家居收纳、穿搭分享。',
+      subagent_response: '已打开示例站点资料页并提取到热门内容：技术资讯、产品更新、开发指南、案例分享。',
     },
     expected: {
       expected_route: 'answer',
@@ -164,10 +164,10 @@ const cases: AgentEvalCase<
     suite: SUITE,
     tags: ['capability_discovery', 'delegation_control', 'context_synthesis', 'route_control'],
     input: {
-      user_message: '用宠物发帖能力给小白生成今天的小红书日常草稿',
+      user_message: '用内容写作能力生成这个版本的发布说明草稿',
       capability_pack: 'pet_content',
-      allowed_capability_names: ['daily_post'],
-      subagent_response: '已生成小白今天的小红书日常草稿，主题是春日晒太阳，并附带标题、正文和标签。',
+      allowed_capability_names: ['content_writer'],
+      subagent_response: '已生成版本发布说明草稿，包含摘要、主要变更和升级提示。',
     },
     expected: {
       expected_route: 'answer',
@@ -175,7 +175,7 @@ const cases: AgentEvalCase<
       expected_phase: 'after_subagent',
       expected_latest_announce_kind: 'completed',
       expected_delegation_count: 1,
-      reason: 'The Planner should delegate to daily_post once, then answer from its completed announce.',
+      reason: 'The Planner should delegate to content_writer once, then answer from its completed announce.',
     },
     metadata: {
       difficulty: 'medium',

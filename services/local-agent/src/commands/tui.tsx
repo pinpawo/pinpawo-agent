@@ -5,7 +5,7 @@ import { applyRuntimeWorkdir } from '../runtimeWorkdir';
 import { logStartupConfig } from '../startupConfigLog';
 import { TuiApp } from '../tui/TuiApp';
 
-export async function runTui(opts: { dryRun: boolean; workdir?: string }) {
+export async function runTui(opts: { workdir?: string }) {
   const runtimeConfig = applyRuntimeWorkdir(opts.workdir);
   const actorId = await ensureActorSelected({ interactive: true });
   logStartupConfig({

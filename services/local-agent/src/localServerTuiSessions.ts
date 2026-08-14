@@ -289,7 +289,6 @@ export class LocalServerTuiSessionService {
       extraCapabilities: deps.localCapabilities,
       threadId,
       interfaceKind: 'tui',
-      dryRun: false,
       checkpoint: this.checkpointer,
       userCapabilities: deps.userCapabilities,
       capabilityArtifactStore: deps.capabilityArtifactStore,

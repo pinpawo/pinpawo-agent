@@ -388,7 +388,7 @@ test('Goal Creation reads full canonical main messages and excludes lane announc
     configurable: {
       thread_id: 'test-discovery-latest',
       actor: testActor,
-      capabilities: [capability('daily_post', '生成宠物日常动态。')],
+      capabilities: [capability('content_writer', '生成通用内容草稿。')],
       tools: [],
     },
   });
@@ -1122,7 +1122,7 @@ test('a completed subagent announce reaches the decision, then Answer summarizes
     configurable: {
       thread_id: 'test-delegation-outcome',
       actor: testActor,
-      capabilities: [capability('daily_post', '生成宠物日常动态。')],
+      capabilities: [capability('content_writer', '生成通用内容草稿。')],
       tools: [],
     },
   });
@@ -2252,7 +2252,7 @@ test('capability finalize stores only artifact refs in state', async () => {
           return scriptedPlannerTask('create post');
         }
         if (routeCallCount === 2) {
-          return scriptedPlannerCapability('daily_post');
+          return scriptedPlannerCapability('content_writer');
         }
         return goalDoneDecision();
       },
@@ -2269,7 +2269,7 @@ test('capability finalize stores only artifact refs in state', async () => {
     tools: toolDefinitions(persistResultTool),
   };
   const fixtureCapability: AgentCapability = {
-    name: 'daily_post',
+    name: 'content_writer',
     description: 'Create post.',
     uses: ['artifact'],
     instructions: defineInstructionDocument({
@@ -2286,11 +2286,11 @@ test('capability finalize stores only artifact refs in state', async () => {
           kind: 'result' as const,
           mimeType: 'application/json',
           uri: `capability-artifact://thread/${encodeURIComponent(ctx.threadId ?? '')}/artifact/result-1`,
-          title: 'Daily post result',
+          title: 'Content writer result',
           preview: 'created post-1',
           sizeBytes: 39,
           createdAt: '2026-06-16T00:00:00.000Z',
-          schema: { name: 'daily_post.result', version: 1 },
+          schema: { name: 'content_writer.result', version: 1 },
         };
         await ctx.recordCapabilityArtifact?.(ref);
         return { artifactRefs: [ref] };
@@ -2314,12 +2314,12 @@ test('capability finalize stores only artifact refs in state', async () => {
       actor: testActor,
       capabilities: [fixtureCapability],
       toolkits: [artifactToolkit],
-      allowedCapabilityNames: ['daily_post'],
+      allowedCapabilityNames: ['content_writer'],
     },
   });
 
   assert.equal(state.sessionCapabilityArtifacts[0]?.kind, 'result');
-  assert.equal(state.sessionCapabilityArtifacts[0]?.schema?.name, 'daily_post.result');
+  assert.equal(state.sessionCapabilityArtifacts[0]?.schema?.name, 'content_writer.result');
 });
 
 test('runAgent reuses a host-precompiled artifact discovery registry', async () => {
@@ -4495,7 +4495,7 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
 });
 
 test('buildSubagentHandoff copies the announce into main and wipes the whole delegation lane', () => {
-  const userAsk = new HumanMessage('帮我查一下小红书动态');
+  const userAsk = new HumanMessage('帮我查一下公开资料');
   const intermediate = new AIMessage('正在抓取页面…');
   intermediate.id = 'm-intermediate';
   setPinpetMeta(intermediate, { lane: 'capability:explore', runId: 't1', delegationId: 'd1' });
@@ -5158,13 +5158,13 @@ test('Planner boundary does not append duplicate handoff copies for unchanged an
 
 test('lane tagging hides subagent messages from route and records completed announce', () => {
   const messages = [
-    new HumanMessage('帮我查一下小红书动态'),
+    new HumanMessage('帮我查一下公开资料'),
     new AIMessage({ id: 'task-1-announce', content: '已查到热门动态。' }),
   ];
 
   const tagged = tagNewLaneMessages(messages, [messages[0]], 'capability:general', 'turn-1', 'natural', {
     delegationId: 'task-1',
-    task: '查小红书动态',
+    task: '查公开资料',
     announceMessageId: 'task-1-announce',
   });
 
@@ -5172,16 +5172,16 @@ test('lane tagging hides subagent messages from route and records completed anno
   // The deliverable message is marked as the announce (neutral, no verdict).
   assert.equal(getMessageIsAnnounce(messages[1]), true);
   assert.equal(getMessageDelegationId(messages[1]), 'task-1');
-  assert.deepEqual(mainConversationMessages(messages).map((message) => message.content), ['帮我查一下小红书动态']);
+  assert.deepEqual(mainConversationMessages(messages).map((message) => message.content), ['帮我查一下公开资料']);
   assert.deepEqual(laneMessages(messages, 'capability:general', 'turn-1', 'task-1').map((message) => message.content), [
-    '帮我查一下小红书动态',
+    '帮我查一下公开资料',
     '已查到热门动态。',
   ]);
   assert.deepEqual(readLatestAnnounce(messages, { delegationId: 'task-1' }), {
     messageId: 'task-1-announce',
     lane: 'capability:general',
     delegationId: 'task-1',
-    task: '查小红书动态',
+    task: '查公开资料',
     text: '已查到热门动态。',
   });
 });

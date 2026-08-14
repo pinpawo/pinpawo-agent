@@ -590,7 +590,7 @@ test('runChatSession merges subagent_operations announcements through acceptDele
           name: SUBAGENT_OPERATIONS_EVENT,
           data: {
             operations: {
-              save_daily_post: { title: '保存日报' },
+              save_content_writer: { title: '保存报告' },
             },
           },
         }, ['capability:t1']);
@@ -620,7 +620,7 @@ test('runChatSession merges subagent_operations announcements through acceptDele
 
   assert.deepEqual(result, { status: 'completed', reply: 'done' });
   assert.deepEqual(accepted, [{
-    save_daily_post: { title: '保存日报' },
+    save_content_writer: { title: '保存报告' },
   }]);
 });
 

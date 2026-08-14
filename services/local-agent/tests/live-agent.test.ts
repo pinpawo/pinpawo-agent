@@ -1,27 +1,17 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdtemp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { HumanMessage } from '@langchain/core/messages';
 import {
   createOrchestratorGraph,
-  selectCapabilityResultArtifact,
   type AgentActor,
   type OrchestratorStateType,
 } from '@pinpawo/pet-agent';
-import {
-  createDailyPostCapability,
-  dailyPostResultSchema,
-  type DailyPostPayload,
-  type TrendPromptItem,
-} from '../src/capabilities/dailyPost';
 import { buildLocalAgentModels } from '../src/agentModels';
 import type { AgentLlmConfig } from '../src/agentConfig';
 import { loadStoredConfig } from '../src/storage';
-import { FileCapabilityArtifactStore } from '../src/capabilityArtifactStore';
 import { createPetProfileTool } from '../src/toolkits/petProfile';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -89,44 +79,6 @@ function buildActor(): AgentActor {
   };
 }
 
-function buildTrendItems(): TrendPromptItem[] {
-  return [
-    {
-      id: '11111111-1111-4111-8111-111111111111',
-      platform: 'xiaohongshu',
-      topic: '宁波周末亲子',
-      title: '宁波周末亲子游 9 个地方一次看完',
-      summary: '覆盖动物园、乐园、博物馆，信息完整，点赞和收藏都高，适合周末出行。',
-      url: 'https://example.com/trend-1',
-      score: 0.94,
-      likedCount: 5600,
-      imageUrls: null,
-    },
-    {
-      id: '22222222-2222-4222-8222-222222222222',
-      platform: 'xiaohongshu',
-      topic: '理财推广',
-      title: '3 天学会稳健理财',
-      summary: '内容偏营销，广告感重，虽然热度高但不太适合宠物账号继续处理。',
-      url: 'https://example.com/trend-2',
-      score: 0.61,
-      likedCount: 1800,
-      imageUrls: null,
-    },
-    {
-      id: '33333333-3333-4333-8333-333333333333',
-      platform: 'xiaohongshu',
-      topic: '春日露营',
-      title: '春日露营装备清单',
-      summary: '偏好物推荐，适合垂类穿搭和露营号，不如第一条通用。',
-      url: 'https://example.com/trend-3',
-      score: 0.73,
-      likedCount: 2200,
-      imageUrls: null,
-    },
-  ];
-}
-
 function createLiveFixture() {
   const llmConfig = loadLiveLlmConfig();
   return {
@@ -157,59 +109,4 @@ test('live chat smoke: use shared pet profile tool', { timeout: 120_000 }, async
     : '';
   assert.ok(reply.length > 0, 'reply should not be empty');
   assert.equal(state.capabilityArtifacts.length, 0, 'no capability should produce artifacts');
-});
-
-test('live chat smoke: route to daily_post and persist a post result', { timeout: 180_000 }, async () => {
-  const { models, actor } = createLiveFixture();
-  const savedPayloads: DailyPostPayload[] = [];
-
-  const capabilities = [
-    createDailyPostCapability({
-      recentDaily: [],
-      trendItems: buildTrendItems(),
-      savePost: async (params) => {
-        savedPayloads.push(params.payload);
-        return { postId: 'live-test-post-1' };
-      },
-    }),
-  ];
-  const artifactStore = new FileCapabilityArtifactStore(await mkdtemp(resolve(tmpdir(), 'pinpawo-live-artifacts-')));
-  const graph = createOrchestratorGraph({ models, capabilityArtifactStore: artifactStore });
-  const state = await graph.invoke(
-    {
-      messages: [
-        new HumanMessage([
-          '请为牛牛写一条简短动态。',
-          '调用 finalize_post 完成保存。',
-          '不要调用 skip_post，也不要输出 JSON。',
-        ].join('\n')),
-      ],
-    },
-    {
-      configurable: {
-        thread_id: 'live-daily-post',
-        actor,
-        capabilities,
-      },
-    },
-  ) as OrchestratorStateType;
-
-  const resultRef = selectCapabilityResultArtifact(state.capabilityArtifacts, {
-    capabilityId: 'daily_post',
-    schemaName: 'DailyPostResult',
-  });
-  const resultContent = resultRef ? (await artifactStore.readArtifact({ uri: resultRef.uri })).content : null;
-  const dailyPostResult = resultContent
-    ? dailyPostResultSchema.safeParse(JSON.parse(resultContent) as unknown)
-    : null;
-  assert.ok(dailyPostResult?.success, 'daily_post result should be parseable');
-  assert.equal(dailyPostResult?.data?.status, 'created');
-  assert.equal(dailyPostResult?.data?.postId, 'live-test-post-1');
-  assert.equal(savedPayloads.length, 1);
-  assert.ok(savedPayloads[0]?.content.trim().length > 0, 'saved payload content should not be empty');
-
-  const reply = typeof state.messages.at(-1)?.content === 'string'
-    ? (state.messages.at(-1)!.content as string).trim()
-    : '';
-  assert.ok(reply.length > 0, 'reply should not be empty');
 });

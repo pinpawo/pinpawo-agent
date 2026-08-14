@@ -58,9 +58,9 @@ const examples = [
   {
     name: 'browser-flow-finishes-after-browser-capability',
     inputs: {
-      user_message: '打开小红书探索页看看今天有什么热门内容',
+      user_message: '打开示例站点资料页查看最新更新',
       capability_pack: 'browser',
-      subagent_response: '已打开小红书探索页并提取到热门内容：宠物日常、春季出游、家居收纳、穿搭分享。可以基于这些方向继续选题。',
+      subagent_response: '已打开示例站点资料页并提取到热门内容：技术资讯、产品更新、开发指南、案例分享。可以基于这些方向继续选题。',
     },
     outputs: {
       expected_route: 'answer',
@@ -72,18 +72,18 @@ const examples = [
     },
   },
   {
-    name: 'browser-flow-finishes-after-general-with-daily-post-candidate',
+    name: 'browser-flow-finishes-after-general-with-content-writer-candidate',
     inputs: {
-      user_message: '你好，再来帮我查一下小红书上今天有什么动态',
-      capability_pack: 'daily_post_only',
-      subagent_response: '已打开小红书发现页并提取到今日热门动态：科技 AI 内容、穿搭分享、春季出游和家居收纳等方向。',
+      user_message: '你好，再来帮我查一下公开站点今天有什么更新',
+      capability_pack: 'content_writer_only',
+      subagent_response: '已打开示例站点资料页并提取到今日热门动态：AI 工程、产品发布、开发工具和实践案例。',
     },
     outputs: {
       expected_route: 'answer',
       expected_mode: 'answer',
       expected_phase: 'after_subagent',
       expected_latest_announce_kind: 'completed',
-      reason: 'A completed lookup should answer without inventing a daily_post task.',
+      reason: 'A completed lookup should answer without inventing a content_writer task.',
     },
   },
   {
@@ -168,17 +168,17 @@ const examples = [
   {
     name: 'capability-flow-finishes-after-capability',
     inputs: {
-      user_message: '用宠物发帖能力给小白生成今天的小红书日常草稿',
+      user_message: '用内容写作能力生成这个版本的发布说明草稿',
       capability_pack: 'pet_content',
-      allowed_capability_names: ['daily_post'],
-      subagent_response: '已生成小白今天的小红书日常草稿，主题是春日晒太阳，并附带标题、正文和标签。',
+      allowed_capability_names: ['content_writer'],
+      subagent_response: '已生成版本发布说明草稿，包含摘要、主要变更和升级提示。',
     },
     outputs: {
       expected_route: 'answer',
       expected_mode: 'answer',
       expected_phase: 'after_subagent',
       expected_latest_announce_kind: 'completed',
-      reason: 'The Planner should delegate to daily_post once, then answer from its completed announce.',
+      reason: 'The Planner should delegate to content_writer once, then answer from its completed announce.',
     },
   },
 ];
@@ -394,14 +394,14 @@ const mockCapabilities: AgentCapability[] = [
     '负责只读探索、代码库理解、资料检索和证据汇总。',
   ),
   evalCapability(
-    'daily_post',
-    '生成、保存或跳过宠物 daily post、小红书日常动态、宠物发帖草稿，并产出本轮动态处理结果。',
-    '负责宠物日常内容生成、草稿保存和发布前确认。',
+    'content_writer',
+    '编写、审校和保存通用内容草稿，并产出本轮处理结果。',
+    '负责通用文案生成、草稿保存和交付前确认。',
   ),
   evalCapability(
-    'trend_observe',
-    '浏览或搜索最新的小红书热点/内容趋势，并选出适合宠物账号继续处理的一条。',
-    '负责观察内容趋势并给出适合宠物账号的候选主题。',
+    'web_research',
+    '浏览或搜索最新的公开资料，并选出与当前任务最相关的证据。',
+    '负责收集公开资料并整理可引用的证据。',
   ),
   evalCapability(
     'browser',
@@ -427,10 +427,10 @@ function resolveCapabilityList(pack: unknown): AgentCapability[] {
       ...mockCapabilities.filter((capability) => capability.name === 'explore'),
     ];
   }
-  if (pack === 'daily_post_only') {
+  if (pack === 'content_writer_only') {
     return [
       ...general,
-      ...mockCapabilities.filter((capability) => capability.name === 'daily_post'),
+      ...mockCapabilities.filter((capability) => capability.name === 'content_writer'),
     ];
   }
   return general;

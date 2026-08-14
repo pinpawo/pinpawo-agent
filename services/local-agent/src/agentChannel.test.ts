@@ -33,8 +33,6 @@ function createContext(): AgentContext {
     context: {
       petMemoryText: 'memory',
       recentChatTurns: [],
-      recentDaily: [],
-      trendItems: [],
       today: '2026-06-02',
     },
   };
@@ -151,7 +149,6 @@ test('buildLocalChatAgentInput passes a single toolkit list', () => {
     setup.input.toolkits?.map((item) => item.name),
     [
       'pet_profile',
-      'daily_post',
       'capability_creator',
       'general-toolkit',
       'artifact_discovery',

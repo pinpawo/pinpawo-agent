@@ -32,7 +32,6 @@ test('welcome includes the raster paw, version, runtime, and shortcuts', () => {
       capabilities: [
         'general',
         'explore',
-        'daily_post',
         'capability_creator',
       ],
     },

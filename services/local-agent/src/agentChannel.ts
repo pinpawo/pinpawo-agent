@@ -5,7 +5,6 @@ import {
   GENERAL_CAPABILITY_NAME,
   stampMessageCreatedAtUtc,
   type AgentCapability,
-  type AgentActor,
   type AgentInvokeInput,
   type AgentToolkit,
   type CapabilityArtifactStore,
@@ -20,13 +19,6 @@ import {
   createCapabilityCreatorToolkit,
 } from './capabilities/capabilityCreator';
 import { createExploreCapability } from './capabilities/explore';
-import {
-  createDailyPostCapability,
-  createDailyPostToolkit,
-  type DailyImagePlan,
-  type DailyPostPayload,
-  type TrendPromptItem,
-} from './capabilities/dailyPost';
 import { createPetProfileToolkit } from './toolkits/petProfile';
 import {
   buildLocalAgentModels,
@@ -36,7 +28,6 @@ import type { AgentLlmConfig } from './agentConfig';
 import type { AgentContext } from './contextLoader';
 import { buildLocalLlmConfig } from './llmConfig';
 import { getConfig } from './config';
-import { agentStore } from './agentStore';
 import { loadStoredConfig } from './storage';
 import { buildRuntimeEnvironmentSummary } from './runtimeEnvironment';
 import type { LoadedUserCapability } from './capabilityLoader';
@@ -82,20 +73,6 @@ function buildHistoryMessages(
     });
 }
 
-function toTrendPromptItems(items: AgentContext['context']['trendItems']): TrendPromptItem[] {
-  return items.map((item) => ({
-    id: item.id,
-    platform: item.platform,
-    topic: item.topic ?? null,
-    title: item.title,
-    summary: item.summary,
-    url: item.url ?? null,
-    score: item.score,
-    likedCount: item.likedCount ?? null,
-    imageUrls: item.imageUrls ?? null,
-  }));
-}
-
 /**
  * Check whether a built-in capability is enabled in config.
  * Returns true if the key is absent (default-on) or explicitly set to true.
@@ -105,67 +82,6 @@ function isCapabilityEnabled(id: string): boolean {
   const caps = config.capabilities;
   if (!caps || !(id in caps)) return true; // default enabled
   return caps[id] === true;
-}
-
-function toRecentDaily(items: AgentContext['context']['recentDaily']) {
-  return items.map((item) => ({
-    content: item.content,
-    topic: item.topic ?? null,
-    tags: item.tags ?? null,
-    createdAt: item.created_at,
-  }));
-}
-
-function saveDailyPost(params: {
-  actor: AgentActor;
-  payload: DailyPostPayload;
-  trendItems: TrendPromptItem[];
-  selectedTrendId: string | null;
-  raw: string;
-  attempts: number;
-  duplicateRetries: number;
-  dryRun?: boolean;
-}) {
-  return agentStore.savePost({
-    candidate: {
-      pet_id: params.actor.petId,
-      owner_user_id: params.actor.userId,
-      name: params.actor.name,
-      personality: params.actor.personality,
-      stage: params.actor.stage,
-      growth_value: null,
-      stage_asset_id: null,
-      species: params.actor.species,
-    },
-    payload: {
-      ...params.payload,
-      image: params.payload.image
-        ? ({
-            prompt: params.payload.image.prompt,
-            negativePrompt: params.payload.image.negativePrompt,
-            style: params.payload.image.style,
-            shot: params.payload.image.shot,
-            seed: params.payload.image.seed,
-          } satisfies DailyImagePlan)
-        : null,
-    },
-    trendItems: params.trendItems.map((item) => ({
-      id: item.id,
-      platform: item.platform,
-      topic: item.topic,
-      title: item.title,
-      summary: item.summary,
-      url: item.url ?? null,
-      score: item.score,
-      liked_count: item.likedCount ?? null,
-      image_urls: null,
-      cached_image_urls: item.imageUrls,
-    })),
-    selectedTrendId: params.selectedTrendId,
-    raw: params.raw,
-    attempts: params.attempts,
-    duplicateRetries: params.duplicateRetries,
-  });
 }
 
 export type AgentChannelSetup = {
@@ -230,7 +146,6 @@ export function buildLocalChatAgentInput(params: {
   /** Stable thread scope required by artifact discovery and checkpoint routing. */
   threadId: string;
   interfaceKind?: LocalAgentInterfaceKind | null;
-  dryRun?: boolean;
   checkpoint?: BaseCheckpointSaver;
   /** Host-provided baseline and optional default Capabilities. */
   extraCapabilities?: AgentCapability[];
@@ -260,7 +175,6 @@ export function buildLocalChatAgentInput(params: {
   const actor = buildActor(params.context);
   const models = buildLocalAgentModels(llmConfig);
   const generationReserveTokens = resolveLlmGenerationReserveTokens(llmConfig);
-  const trendItems = toTrendPromptItems(params.context.context.trendItems);
   const sharedToolkits: AgentToolkit[] = [
     createPetProfileToolkit({
       actor,
@@ -272,23 +186,6 @@ export function buildLocalChatAgentInput(params: {
 
   if (isCapabilityEnabled('explore')) {
     appendCapability(capabilities, createExploreCapability());
-  }
-
-  if (isCapabilityEnabled('daily_post')) {
-    appendCapability(capabilities, createDailyPostCapability());
-    sharedToolkits.push(createDailyPostToolkit({
-      actor,
-      models,
-      dryRun: params.dryRun,
-      recentDaily: toRecentDaily(params.context.context.recentDaily),
-      trendItems,
-      savePost: saveDailyPost,
-      markUsed: (trendItemId: string, extra?: { sourcePostId?: string }) =>
-        agentStore.upsertImpression(actor.petId, trendItemId, 'used', extra),
-      markSkipped: (trendItemId: string, reason: string) =>
-        agentStore.upsertImpression(actor.petId, trendItemId, 'skipped', { reason }),
-      requestImageProcessing: ({ postId }) => agentStore.requestImageProcessing(postId),
-    }));
   }
 
   if (isCapabilityEnabled('capability_creator')) {
@@ -363,9 +260,6 @@ export function buildLocalChatAgentInput(params: {
       threadId: params.threadId,
       capabilities,
       toolkits: [...preparedRegistry.toolkits],
-      execution: {
-        dryRun: params.dryRun,
-      },
       workdir: params.workdir,
       runtimeEnvironment: buildRuntimeEnvironmentSummary(params.workdir, {
         sessionStartedAt: params.sessionStartedAt,

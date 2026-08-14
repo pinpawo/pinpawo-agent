@@ -10,7 +10,7 @@ type LocalAgentCliHandlers = {
   runLogin?: () => Promise<void> | void;
   runActorSelect?: () => Promise<void> | void;
   runAgent?: (opts: { workdir?: string; stdio: boolean; mode: ServerMode }) => Promise<void> | void;
-  runTui?: (opts: { dryRun: boolean; workdir?: string }) => Promise<void> | void;
+  runTui?: (opts: { workdir?: string }) => Promise<void> | void;
   runTuiV2?: (opts: {
     workdir?: string;
     check: boolean;
@@ -117,7 +117,6 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
   program
     .command('tui')
     .description('Start the interactive terminal UI')
-    .option('--dry-run', 'run without writing generated post changes')
     .option('--v2', 'use the OpenTUI v2 client')
     .option('--legacy', 'force the legacy Ink client')
     .option('--check', 'verify the OpenTUI v2 runtime without entering terminal mode')
@@ -125,7 +124,6 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
     .option('--workdir <directory>', 'agent working directory for runtime state and relative tool paths')
     .action(async (options: {
       check?: boolean;
-      dryRun?: boolean;
       legacy?: boolean;
       qa?: boolean;
       v2?: boolean;
@@ -147,9 +145,6 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
         ? resolveWorkdirOption(options.workdir)
         : undefined;
       if (options.v2) {
-        if (options.dryRun) {
-          throw new Error('--dry-run is only supported by the legacy Ink TUI.');
-        }
         const runTuiV2 = handlers.runTuiV2
           ?? (await import('./commands/tuiV2Launcher')).runTuiV2;
         await runTuiV2({
@@ -160,10 +155,7 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
         return;
       }
       const runTui = handlers.runTui ?? (await import('./commands/tui')).runTui;
-      await runTui({
-        dryRun: options.dryRun ?? false,
-        workdir,
-      });
+      await runTui({ workdir });
     });
 
   program

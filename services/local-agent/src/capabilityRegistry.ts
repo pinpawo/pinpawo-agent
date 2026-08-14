@@ -32,15 +32,6 @@ export const BUILT_IN_CAPABILITY_REGISTRY: CapabilityMeta[] = [
     builtIn: true,
   },
   {
-    id: 'daily_post',
-    name: '日常动态',
-    description: '根据当前趋势自动生成宠物日常内容并定时发布',
-    icon: 'doc.text.fill',
-    color: 'blue',
-    defaultEnabled: true,
-    builtIn: true,
-  },
-  {
     id: 'capability_creator',
     name: '能力创建',
     description: '设计、生成、修改和验证用户自定义 Capability',

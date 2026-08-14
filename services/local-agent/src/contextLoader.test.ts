@@ -12,8 +12,6 @@ test('buildLocalOnlyAgentContext returns an API-free fallback context', async ()
   assert.equal(context.pet.id, LOCAL_ONLY_ACTOR_ID);
   assert.equal(context.pet.name, LOCAL_ONLY_ACTOR_NAME);
   assert.deepEqual(context.context.recentChatTurns, []);
-  assert.deepEqual(context.context.recentDaily, []);
-  assert.deepEqual(context.context.trendItems, []);
   assert.match(context.context.today, /^\d{4}-\d{2}-\d{2}$/);
 
 });

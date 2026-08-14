@@ -407,4 +407,4 @@ npm run test:native -w @pinpawo/tui
 ```
 
 Manual results belong in
-[`docs/TUI_V2_OPENTUI_CAPABILITY_MATRIX.md`](../../docs/TUI_V2_OPENTUI_CAPABILITY_MATRIX.md).
+[the OpenTUI capability matrix](../../docs/design/tui/v2-capability-matrix.md).

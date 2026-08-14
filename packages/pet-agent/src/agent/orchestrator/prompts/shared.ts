@@ -51,7 +51,7 @@ export function buildDecisionConfig(
 
 // Core decision prompt prefix shared by root decision prompts.
 // Capability Planner owns short mode-specific prompts. Keep this synchronized with
-// docs/PET_AGENT_ORCHESTRATOR_DECISION_PROMPT_PREFIX.md.
+// docs/design/agent-runtime/decision-prompt-prefix.md.
 export function buildOrchestratorDecisionPromptPrefix(): string {
   return ORCHESTRATOR_DECISION_SHARED_PREFIX;
 }

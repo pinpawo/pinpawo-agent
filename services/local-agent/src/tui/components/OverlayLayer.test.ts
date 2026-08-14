@@ -20,7 +20,7 @@ const OPEN_FILE_MENTION: FileMentionModel = {
   replacementStart: 4,
   replacementEnd: 8,
   selectedIndex: 0,
-  items: [{ path: 'docs/TUI_OVERHAUL_DESIGN.md', type: 'file' }],
+  items: [{ path: 'docs/design/tui/overhaul.md', type: 'file' }],
 };
 
 test('OverlayLayer renders nothing when no overlay owns the slot', () => {

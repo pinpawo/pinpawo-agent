@@ -1,4 +1,4 @@
-// Guard outcome meta-language. See docs/GUARD_DESIGN.md.
+// Guard outcome meta-language. See docs/reference/runtime/guards.md.
 //
 // A guard is a deterministic control decision point evaluated at a named
 // position, producing a structured outcome:

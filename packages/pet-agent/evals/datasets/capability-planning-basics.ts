@@ -247,7 +247,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
         content: '在当前仓库中完成 auth 模块重构。具体改动必须以模块现有结构和风险为依据。',
       }, {
         role: 'assistant',
-        content: '接下来我会先处理这项任务：调查 auth 模块的现有结构和风险',
+        content: '开始执行计划任务：调查 auth 模块的现有结构和风险',
       }, {
         role: 'assistant',
         content: 'auth/index.ts 存在循环依赖；应提取 token validation 并保持现有公开接口。',
@@ -289,7 +289,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
         content: '现在在当前仓库中完成 auth 模块重构。具体改动必须以模块现有结构和风险为依据。',
       }, {
         role: 'assistant',
-        content: '接下来我会先处理这项任务：调查 auth 模块的现有结构、依赖和风险。',
+        content: '开始执行计划任务：调查 auth 模块的现有结构、依赖和风险。',
       }, {
         role: 'assistant',
         content: 'auth/index.ts 存在循环依赖；token validation 需要提取，同时必须保持现有公开接口。',
@@ -355,7 +355,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
         content: '生成报告并发送给项目负责人。',
       }, {
         role: 'assistant',
-        content: '接下来我会先处理这项任务：生成项目报告',
+        content: '开始执行计划任务：生成项目报告',
       }, {
         role: 'assistant',
         content: '报告已生成，路径为 /tmp/report.pdf，内容检查通过。',
@@ -392,7 +392,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
         content: '根据调查修复 auth 风险，然后独立运行 release verification。',
       }, {
         role: 'assistant',
-        content: '接下来我会先处理这项任务：调查 auth 风险',
+        content: '开始执行计划任务：调查 auth 风险',
       }, {
         role: 'assistant',
         content: '调查确认 token validation 存在循环依赖，需要保持公开接口。',
@@ -434,7 +434,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
         content: '读取 issue #345 的架构演进内容，再检查当前仓库实现是否已经覆盖。',
       }, {
         role: 'assistant',
-        content: '接下来我会先处理这项任务：读取 issue #345 并整理架构演进内容',
+        content: '开始执行计划任务：读取 issue #345 并整理架构演进内容',
       }, {
         role: 'assistant',
         content: 'issue 正文和评论中的架构演进提案已经完整整理；下一步只需对照当前仓库实现。',
@@ -515,7 +515,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       }, {
         role: 'assistant',
         content: [
-          '接下来我会先处理这项任务：逐一检查待创建事项的当前状态。',
+          '此前曾提出用命令检查当前状态，但以下只是对话内容：',
           '<tool_call>Bash tool_code_call() {',
           "  'command': 'gh issue list --state all'",
           '}',
@@ -650,7 +650,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
         content: '检查 issue #587 状态，并把 README 里对应的章节同步成最新状态。',
       }, {
         role: 'assistant',
-        content: '接下来我会先处理这项任务：读取 issue #587 的当前状态',
+        content: '开始执行计划任务：读取 issue #587 的当前状态',
       }, {
         role: 'assistant',
         content: 'issue #587 当前为 open；README 的“已知问题”章节仍写着它已关闭，与实际状态不符。',

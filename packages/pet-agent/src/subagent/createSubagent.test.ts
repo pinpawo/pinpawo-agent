@@ -298,7 +298,7 @@ test('createSubagent summarizes persisted history from contextWindowTokens', asy
 });
 
 test('context summarization renders image payloads through LangChain text projection', async () => {
-  const imageUrl = `data:image/png;base64,${'A'.repeat(4000)}`;
+  const imageData = 'A'.repeat(4000);
   const summarizerInputs: string[] = [];
   class RecordingSummaryModel extends FakeListChatModel {
     override async _generate(messages: never, options: never, runManager: never) {
@@ -309,8 +309,9 @@ test('context summarization renders image payloads through LangChain text projec
   const screenshot = new HumanMessage({
     content: [
       { type: 'text', text: 'Browser screenshot from the preceding tool result.' },
-      { type: 'image_url', image_url: { url: imageUrl } },
+      { type: 'image', mimeType: 'image/png', data: imageData },
     ],
+    response_metadata: { output_version: 'v1' },
   });
 
   const result = await createSubagent({
@@ -342,7 +343,7 @@ test('context summarization renders image payloads through LangChain text projec
   // changing messages that survive its keep cutoff.
   assert.ok(summarizerInputs.length > 0);
   for (const input of summarizerInputs) {
-    assert.doesNotMatch(input, /base64,A{100}/);
+    assert.doesNotMatch(input, /A{100}/);
   }
   assert.ok(
     summarizerInputs.some((input) => input.includes('[image]')),
@@ -350,18 +351,19 @@ test('context summarization renders image payloads through LangChain text projec
   );
   assert.doesNotMatch(
     JSON.stringify(result.messages),
-    /base64,A{100}/,
+    /A{100}/,
     'expected the summarized image message to be folded into the summary',
   );
 });
 
 test('summarization preserves the real image when it keeps the message', async () => {
-  const imageUrl = `data:image/png;base64,${'B'.repeat(4000)}`;
+  const imageData = 'B'.repeat(4000);
   const screenshot = new HumanMessage({
     content: [
       { type: 'text', text: 'Browser screenshot from the preceding tool result.' },
-      { type: 'image_url', image_url: { url: imageUrl } },
+      { type: 'image', mimeType: 'image/png', data: imageData },
     ],
+    response_metadata: { output_version: 'v1' },
   });
 
   const result = await createSubagent({
@@ -390,7 +392,7 @@ test('summarization preserves the real image when it keeps the message', async (
   );
   // A screenshot recent enough to survive the cutoff comes back unchanged from
   // LangChain's built-in summarization middleware.
-  assert.match(JSON.stringify(result.messages), /base64,B{100}/);
+  assert.match(JSON.stringify(result.messages), /B{100}/);
 });
 
 test('createSubagent throws instead of committing an error summary', async () => {

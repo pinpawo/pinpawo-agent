@@ -35,9 +35,9 @@ OpenTUI v2 选择或粘贴本地图片路径
        - 检查模型是否支持 image
        - 检查 MIME、数量和大小
        - 读取 bytes，计算 sha256
-       - 生成 data URL
+       - 生成 base64 payload
   -> createAdmittedLocalChatHumanMessage
-       - HumanMessage.content: text + image_url(data URL)
+       - HumanMessage.content: text + image(mimeType, data)
        - additional_kwargs.pinpawo: display metadata + localImageReferences
   -> OrchestratorState.messages
   -> FileSaver checkpoint
@@ -52,8 +52,9 @@ OpenTUI v2 选择或粘贴本地图片路径
 - [`OrchestratorState`](../packages/pet-agent/src/agent/orchestrator/state.ts)
 - [`FileSaver`](../services/local-agent/src/fileSaver.ts)
 
-当前图片的 canonical representation 是 `HumanMessage.content` 中的标准 `image_url` block。会话所需
-的图片能力也直接从 checkpoint messages 中读取，不依赖额外的 session ledger。
+当前图片的 canonical representation 是 `HumanMessage.content` 中的 LangChain 标准 `image` block。
+会话所需的图片能力通过 `message.contentBlocks` 从 checkpoint messages 中读取，不依赖额外的 session
+ledger。provider adapter 负责在模型边界转换成对应的原生图片格式。
 
 ### 2.2 各模型节点获得的图片上下文
 
@@ -91,24 +92,24 @@ child summarization 改写其内部消息列表或本次 subagent 结束。
 
 [`LocalAgentGraphService.streamEvents`](../services/local-agent/src/agentGraphService.ts) 在 root graph
 run 上安装 [`CallbackHandler`](../services/local-agent/src/langfuseTracing.ts)。当前 callback 没有
-PinPawo 侧的 message/media 投影，模型输入中的 data URL 会进入 SDK 的媒体处理路径。
+PinPawo 侧的 message/media 投影，模型输入中的完整图片 payload 会进入 SDK 的媒体处理路径。
 
 Tracing 与模型调用共享相同的 runnable callback tree，因此 Goal Creation、Capability 和 Answer 等实际
 包含图片的模型输入都可能触发 SDK 媒体处理。
 
 ## 3. 已确认的现状与问题
 
-### 3.1 同一 data URL 在一条消息中保存两次
+### 3.1 同一图片 payload 曾在一条消息中保存两次
 
 `createAdmittedLocalChatHumanMessage` 当前同时写入：
 
 ```text
-HumanMessage.content[].image_url.url
-additional_kwargs.pinpawo.localImageReferences[].uri
+HumanMessage.content[].data
+additional_kwargs.pinpawo.localImageReferences[].uri（旧实现）
 ```
 
-仓库内没有 `localImageReferences` 的读取方。模型只需要 content block；checkpoint modality 检测也
-只读取 content block。第二份 data URL 会确定性增加 message/checkpoint 的 JSON 序列化体积，但不提供
+仓库内没有 `localImageReferences[].uri` 的读取方。模型只需要 content block；checkpoint modality 检测也
+只读取标准化后的 content block。第二份图片 payload 会确定性增加 message/checkpoint 的 JSON 序列化体积，但不提供
 当前运行行为。Langfuse 对 HumanMessage 的提取只取 content，因此不能把 metadata 中这份副本算作已确认
 的 tracing 重复。
 
@@ -121,7 +122,7 @@ messages。默认只保留最后十条消息。
 当较旧的图片消息落在被总结区间时：
 
 - summary transcript 只包含其文本；
-- 原始 `image_url` block 被删除；
+- 原始图片 block 被删除；
 - checkpoint 中不再保留该图片上下文。
 
 这是当前有损压缩的预期结果：压缩摘要替代旧消息，而不是永久保存旧消息中的每种模态。本轮不改变
@@ -129,12 +130,8 @@ messages。默认只保留最后十条消息。
 
 ### 3.3 Subagent summarization 不会展开普通用户图片
 
-当前安装的 LangChain 使用 `getBufferString` 把被总结消息转换为文本。对现有
-`image_url(data:)` message 的实际输出是 `[image]`，不会把 data URL 展开进 summarization prompt。
-
-[`createSubagent`](../packages/pet-agent/src/subagent/createSubagent.ts) 现有 wrapper 还会把显式标记的
-transient screenshot 换成更具体的文本占位符，并在 middleware keep 该 message 时按 id 恢复原内容。
-普通用户图片即使不经过该 wrapper，也不会导致 base64 进入 summarizer。
+当前安装的 LangChain 使用 `getBufferString` 把被总结消息转换为文本。对标准 `image` block 和旧
+`image_url(data:)` message 的实际输出都是 `[image]`，不会把 base64 展开进 summarization prompt。
 
 当前 LangChain 的 built-in summarization 会直接保留 keep 区间内的原 message，并通过
 `getBufferString` 把摘要区间中的图片表示为 `[image]`。因此现有 transient media marker、redaction 和
@@ -142,21 +139,21 @@ restore 是旧行为兼容层，可以删除；summary 失败校验是另一项�
 
 ### 3.4 Tracing 会接收完整图片，但未证实导致模型超时
 
-Langfuse callback 直接把真实模型输入写入 span，因此 data URL 会进入 SDK 的异步媒体处理路径。当前日志
-中的 `Error processing media item: fetch failed` 与此一致。
+Langfuse callback 直接把真实模型输入写入 span，因此完整图片 payload 会进入 SDK 的异步媒体处理路径。
+当前日志中的 `Error processing media item: fetch failed` 与此一致。
 
 但 `LangfuseSpanProcessor.onEnd` 异步启动媒体处理并捕获错误，不等待它完成后才返回 model callback。
 现有证据不能说明媒体上传错误造成了模型 `TimeoutError`；`runMap` / `No LLM run to end` 更可能是底层模型
 已超时后出现的 tracing 收尾噪音。
 
-是否屏蔽 trace 中的 data URL 属于独立的 observability payload 与日志质量优化，不是当前模型超时的已确认
+是否屏蔽 trace 中的图片 payload 属于独立的 observability payload 与日志质量优化，不是当前模型超时的已确认
 根因。
 
 ## 4. 保持不变的行为
 
 本轮重构保持以下现有边界：
 
-- 图片继续作为标准 `image_url` content block 进入 `HumanMessage`；
+- 图片继续作为标准 `image` content block 进入 `HumanMessage`；
 - 主消息继续由 `OrchestratorState.messages` 和 FileSaver checkpoint 保存；
 - Goal Creation、Capability 和 Answer 继续获得各自现有的 main message 上下文；
 - Planner 继续消费结构化 User Goal 和 delegation state；
@@ -169,8 +166,8 @@ Langfuse callback 直接把真实模型输入写入 span，因此 data URL 会�
 
 现有框架已经覆盖了大部分结构，不需要为图片另外建立一套 media runtime：
 
-- LangChain message 提供跨 provider 的标准 content blocks，`message.contentBlocks` 可以把当前
-  `image_url` 等 provider-native 内容读取为统一的图片 block；
+- LangChain message 提供跨 provider 的标准 content blocks。入口直接写入 `image` block，读取方使用
+  `message.contentBlocks`；provider adapter 在模型边界转换为各 provider 的原生格式；
 - LangGraph checkpointer 负责持久化 graph state。当前 `OrchestratorState.messages` + `FileSaver` 已经是
   合适的 canonical message 存储；
 - LangChain `wrapModelCall` 可以只修改单次调用的 `request.messages`，不改变 checkpoint state，适合
@@ -192,13 +189,15 @@ Store 面向跨 thread 的长期数据，也不是本轮缺失的媒体存储层
 
 ### 6.1 继续使用 LangChain 标准 content blocks
 
-需要读取模态时使用 `message.contentBlocks`，不自行解析各 provider 的图片结构。当前没有新增共享 helper
-的必要；在出现第二个真实读取方后再提取。
+消息入口使用现代 LangChain 标准块 `{ type: 'image', mimeType, data }`，并把 message output version
+标记为 `v1`。需要读取模态时使用 `message.contentBlocks`，不自行解析 provider-native 图片结构。当前
+没有新增共享 helper 的必要；在出现第二个真实读取方后再提取。
 
-第一版继续写入当前已经验证可用的 `image_url` content，不把消息格式迁移和压缩修复绑在一起。待目标
-provider eval 通过后，再决定是否直接写入 LangChain 标准 `image` block。
+当前安装的 OpenAI-compatible adapter 会对 v1 message 把该标准块转换成 provider 所需的 `image_url`，
+因此 Kimi、Qwen 等 profile 无需在消息创建处维护分支。这个边界由 converter 行为测试覆盖。旧 checkpoint
+中的 `image_url` 也会被 `message.contentBlocks` 归一为 `image`，modality 读取仍向后兼容。
 
-### 6.2 去掉 metadata 中重复的 data URL
+### 6.2 去掉 metadata 中重复的图片 payload
 
 `localImageReferences` 只保留展示与完整性 metadata：
 
@@ -211,12 +210,12 @@ provider eval 通过后，再决定是否直接写入 LangChain 标准 `image` b
 }
 ```
 
-`HumanMessage.content[].image_url.url` 继续是图片内容的唯一 message payload。修改前增加兼容性测试，
-确认当前 checkpoint modality、OpenTUI v2 display 和 model input 都不依赖 metadata URI。
+`HumanMessage.content[].data` 是图片内容的唯一 message payload。兼容性测试确认 checkpoint modality、
+OpenTUI v2 display 和 model input 都不依赖 metadata URI。
 
 ### 6.3 保持现有 compaction policy
 
-Root compaction 已经通过 `readMessageText` 构造纯文本摘要输入，不会把图片 data URL 发送给 summarizer；
+Root compaction 已经通过 `readMessageText` 构造纯文本摘要输入，不会把图片 base64 发送给 summarizer；
 它移除压缩区间中的旧图片是预期行为，本轮无需改动。
 
 Subagent 继续使用 LangChain built-in summarization middleware，不另外实现 cutoff、keep、tool pair 或
@@ -248,7 +247,7 @@ root compaction、Planner 或 Answer。
 - graph/model/tool 的 parent-child 关系。
 
 当前使用的 `LangfuseSpanProcessor` 会先执行 `mask` 再处理媒体。如果决定不在 trace 中保留原图，可以在
-该扩展点把 data URL 投影为 MIME、字节数和 hash；该改动只改善 observability payload 和错误日志，不能
+该扩展点把图片 payload 投影为 MIME、字节数和 hash；该改动只改善 observability payload 和错误日志，不能
 作为模型超时修复。
 
 ## 7. 实施顺序
@@ -260,8 +259,10 @@ root compaction、Planner 或 Answer。
 - 保留 summary 失败保护；
 - 用行为测试覆盖摘要输入不含 base64、keep 后原图片仍存在、fold 后原图片被摘要替代。
 
-### PR 2：删除无效重复
+### PR 2：统一标准 content block 并删除无效重复
 
+- 用户图片与 browser screenshot 都写入 LangChain 标准 `image` block；
+- modality 读取使用 `message.contentBlocks`；
 - 删除 `localImageReferences[].uri`；
 - 验证 message、checkpoint 和 OpenTUI v2 行为不变。
 
@@ -275,13 +276,13 @@ root compaction、Planner 或 Answer。
 
 - 记录连续模型调用的请求字节数、`input_tokens`、`image_tokens`、`cached_tokens`、TTFT 和总耗时；
 - 分别测试 tracing on/off 与 cache hit/miss；
-- 根据数据决定是否需要进一步改变 inline data URL 表示。
+- 根据数据决定是否需要进一步改变 inline 标准图片块表示。
 
 ## 8. 测试场景
 
 ### Message 创建
 
-- 用户图片只在 `HumanMessage.content` 中保存一份 data URL；
+- 用户图片只在 `HumanMessage.content` 中保存一份 base64 payload；
 - metadata 保留名称、MIME、大小和 hash；
 - text-only profile 仍在 admission 阶段拒绝图片；
 - session checkpoint modality 仍返回 `image`。
@@ -289,14 +290,14 @@ root compaction、Planner 或 Answer。
 ### Root compaction
 
 - 图片消息早于默认十条保留窗口时，compaction 后按设计被摘要替代；
-- summary prompt 不包含 data URL；
+- summary prompt 不包含图片 base64；
 - 最近保留窗口中的图片仍保留原 image block。
 
 ### Capability subagent
 
 - 初次模型调用包含用户图片；
 - 工具循环后的下一次模型调用仍包含用户图片；
-- `getBufferString` 对普通用户图片输出 `[image]`，不包含 data URL；
+- `getBufferString` 对普通用户图片输出 `[image]`，不包含图片 base64；
 - lane reconciliation 不删除 parent main image message。
 
 ### Tracing
@@ -309,7 +310,7 @@ root compaction、Planner 或 Answer。
 ## 9. 范围边界
 
 - 只处理 OpenTUI v2 chat 已支持的 PNG、JPEG 和 WebP 用户图片；
-- 保持 inline `image_url` 为本轮 canonical representation；
+- 保持 inline 标准 `image` block 为本轮 canonical representation；
 - 不新增 media store、URI resolver 或跨设备附件协议；
 - 不扩展 audio、video、PDF 和普通文件的模型输入；
 - 不改变 Planner、User Goal、message lane、Artifact 或 Toolkit Runtime contract；
@@ -325,7 +326,7 @@ root compaction、Planner 或 Answer。
 
 本轮重构完成需要同时满足：
 
-- 同一 message 内不再保存两份 data URL；
+- 同一 message 内不再保存两份图片 payload；
 - subagent summarization 不再维护 transient media marker 与 redaction/restore 兼容层；
 - 当前 LangChain 下 summarizer 不处理完整 base64 的行为有测试证据；
 - Capability 在 compaction 前及 keep 区间内持续获得用户图片；
@@ -341,3 +342,4 @@ root compaction、Planner 或 Answer。
 | 2026-08-15 | corrected | 明确旧图片随有损压缩被摘要替代是既有设计；移除 pinned-media compaction 方案，只保留 summarizer 输入投影。 |
 | 2026-08-15 | verified | 实测当前 LangChain `getBufferString` 对 data URL 图片只输出 `[image]`；删除普通图片 summarizer adapter 方案，并把 Langfuse 媒体错误与模型超时因果解耦。 |
 | 2026-08-15 | simplified | 将删除现有 transient media marker 与 redaction/restore 兼容层列为第一优先级，直接依赖 built-in summarization 的标准消息行为；orchestrator 保持不变。 |
+| 2026-08-15 | implemented | 用户图片与 browser screenshot 统一写入 LangChain v1 标准 `image` block；删除 metadata 中重复的 URI，checkpoint modality 改读 `message.contentBlocks` 并保留旧 `image_url` 兼容。 |

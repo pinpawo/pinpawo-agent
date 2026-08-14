@@ -7,7 +7,7 @@ import {
   buildBrowserScreenshotMessages,
   parseBrowserScreenshot,
   persistBrowserScreenshot,
-  readBrowserScreenshotDataUrl,
+  readBrowserScreenshotData,
 } from './screenshot';
 
 test('browser screenshots are persisted inside the workdir with private permissions', async () => {
@@ -34,9 +34,12 @@ test('browser screenshots are persisted inside the workdir with private permissi
     /must be base64/,
   );
 
-  assert.equal(
-    await readBrowserScreenshotDataUrl(parseBrowserScreenshot(serialized), workdir),
-    `data:image/png;base64,${Buffer.from('image-bytes').toString('base64')}`,
+  assert.deepEqual(
+    await readBrowserScreenshotData(parseBrowserScreenshot(serialized), workdir),
+    {
+      mimeType: 'image/png',
+      data: Buffer.from('image-bytes').toString('base64'),
+    },
   );
 });
 
@@ -58,7 +61,13 @@ test('screenshot messages pair a text tool result with a standard image message'
   // Providers disagree about images inside a tool result, so the tool message
   // stays text-only and the image rides a user message every provider accepts.
   assert.doesNotMatch(JSON.stringify(toolMessage?.content), /base64/);
-  assert.match(JSON.stringify(imageMessage?.content), /data:image\/png;base64,/);
+  const imageBlock = imageMessage?.contentBlocks.find((block) => block.type === 'image');
+  assert.equal(
+    (imageMessage?.response_metadata as { output_version?: string }).output_version,
+    'v1',
+  );
+  assert.equal(imageBlock?.mimeType, 'image/png');
+  assert.equal(imageBlock?.data, Buffer.from('image-bytes').toString('base64'));
 });
 
 test('an unreadable screenshot yields guidance instead of a broken image', async () => {

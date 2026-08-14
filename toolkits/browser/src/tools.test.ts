@@ -62,7 +62,9 @@ test('bound browser screenshot writes its own tool result and image message', as
   });
 
   assert.ok(isCommand(result));
-  const messages = (result.update as { messages: { _getType(): string }[] }).messages;
+  const messages = (result.update as {
+    messages: { _getType(): string; contentBlocks: { type: string }[] }[];
+  }).messages;
   assert.deepEqual(messages.map((message) => message._getType()), ['tool', 'human']);
-  assert.match(JSON.stringify(messages[1]), /data:image\/png;base64,/);
+  assert.ok(messages[1]?.contentBlocks.some((block) => block.type === 'image'));
 });

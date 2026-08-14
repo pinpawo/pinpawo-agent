@@ -820,7 +820,7 @@ test('admitted images gate model selection through the transcript', async () => 
   const runtimeConfig = buildLocalAgentRuntimeConfig(workdir);
   const sent: LocalAgentServerMessage[] = [];
   const peer = createPeer(sent);
-  let providerMessage: { content?: unknown } | undefined;
+  let providerMessage: BaseMessage | undefined;
   // The graph is stubbed, so stand in for the checkpoint the real run would
   // have written: the admitted message is what the session's modalities are
   // derived from.
@@ -888,10 +888,14 @@ test('admitted images gate model selection through the transcript', async () => 
         name: 'renamed.bin',
       }],
     });
-    // Images travel as standard data URLs, so nothing has to resolve a custom
-    // reference scheme before the model call.
+    // Images travel as LangChain standard content blocks, so nothing has to
+    // resolve a custom reference scheme before the model call.
+    const imageBlock = providerMessage?.contentBlocks.find(
+      (block) => block.type === 'image',
+    );
+    assert.equal(imageBlock?.mimeType, 'image/png');
+    assert.equal(typeof imageBlock?.data, 'string');
     const serializedMessage = JSON.stringify(providerMessage?.content);
-    assert.match(serializedMessage, /data:image\/png;base64,/);
     assert.doesNotMatch(serializedMessage, /renamed\.bin/);
 
     await handlers.peerHandlers.onModelList(peer, {

@@ -68,10 +68,10 @@ export function parseBrowserScreenshot(
   return screenshot;
 }
 
-export async function readBrowserScreenshotDataUrl(
+export async function readBrowserScreenshotData(
   screenshot: PersistedBrowserScreenshot,
   workdir = process.cwd(),
-) {
+): Promise<BrowserScreenshotData> {
   const root = screenshotDirectory(workdir);
   const target = resolve(screenshot.path);
   const pathFromRoot = relative(root, target);
@@ -95,7 +95,10 @@ export async function readBrowserScreenshotDataUrl(
   ) {
     throw new Error('browser screenshot reference failed integrity validation');
   }
-  return `data:${screenshot.mimeType};base64,${bytes.toString('base64')}`;
+  return {
+    mimeType: screenshot.mimeType,
+    data: bytes.toString('base64'),
+  };
 }
 
 /**
@@ -122,9 +125,9 @@ export async function buildBrowserScreenshotMessages(
     name: 'browser_screenshot',
     tool_call_id: toolCallId,
   });
-  let imageUrl: string;
+  let image: BrowserScreenshotData;
   try {
-    imageUrl = await readBrowserScreenshotDataUrl(screenshot, workdir);
+    image = await readBrowserScreenshotData(screenshot, workdir);
   } catch {
     return [
       toolMessage,
@@ -141,8 +144,9 @@ export async function buildBrowserScreenshotMessages(
           type: 'text',
           text: 'Browser screenshot from the preceding tool result. Inspect the visible page using this image.',
         },
-        { type: 'image_url', image_url: { url: imageUrl } },
+        { type: 'image', mimeType: image.mimeType, data: image.data },
       ],
+      response_metadata: { output_version: 'v1' },
     }),
   ];
 }

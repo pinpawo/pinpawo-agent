@@ -60,20 +60,21 @@ export function createAdmittedLocalChatHumanMessage(
                 imageAttachments.map(({ name }) => name).join(', ')
               }`,
             }]),
-        ...imageAttachments.map(({ uri }) => ({
-          type: 'image_url' as const,
-          image_url: { url: uri },
+        ...imageAttachments.map(({ data, mimeType }) => ({
+          type: 'image' as const,
+          mimeType,
+          data,
         })),
       ]
     : modelText;
   const humanMessage = new HumanMessage({
     content,
+    response_metadata: { output_version: 'v1' },
     additional_kwargs: {
       pinpawo: {
         [DISPLAY_TEXT_METADATA_KEY]: displayText,
         ...(imageAttachments.length ? {
           localImageReferences: imageAttachments.map((image) => ({
-            uri: image.uri,
             name: image.name,
             mimeType: image.mimeType,
             byteSize: image.byteSize,

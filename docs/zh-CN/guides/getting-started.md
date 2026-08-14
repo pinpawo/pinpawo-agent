@@ -41,7 +41,7 @@ pinpawo capability list
 pinpawo tui
 
 # OpenTUI 客户端
-pinpawo tui --v2
+pinpawo tui
 
 # 本地 server 或进程集成
 pinpawo server

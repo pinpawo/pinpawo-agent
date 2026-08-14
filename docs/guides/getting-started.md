@@ -54,7 +54,7 @@ pinpawo tui
 For the OpenTUI client:
 
 ```bash
-pinpawo tui --v2
+pinpawo tui
 ```
 
 For a local server or process integration:

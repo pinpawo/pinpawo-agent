@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { ToolMessage } from '@langchain/core/messages';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
-import { createBashToolkit, createGitToolkit, loadCoreLocalTools } from './toolkits/local';
+import { createBashToolkit, createGitToolkit } from './toolkits/local';
 import {
   gitAddTool,
   gitCommitTool,
@@ -436,17 +436,6 @@ test('createBashToolkit does not own git tools or operation metadata', () => {
   assert.equal(tools.some((item) => item.tool.name === 'git_commit'), false);
   assert.equal(definition(toolkit, 'git_status'), undefined);
   assert.equal(definition(toolkit, 'git_commit'), undefined);
-});
-
-test('loadCoreLocalTools keeps git tools available for toolkit composition', async () => {
-  const tools = await loadCoreLocalTools();
-
-  assert.equal(tools.some((item) => item.name === 'git_status'), true);
-  assert.equal(tools.some((item) => item.name === 'git_commit'), true);
-  assert.equal(tools.some((item) => item.name === 'git_push'), true);
-  assert.equal(tools.some((item) => item.name === 'gh_pr_create'), true);
-  assert.equal(tools.some((item) => item.name === 'gh_pr_comments'), true);
-  assert.equal(tools.some((item) => item.name === 'gh_issue_create'), true);
 });
 
 test('createGitToolkit exposes a dedicated git capability surface', async () => {

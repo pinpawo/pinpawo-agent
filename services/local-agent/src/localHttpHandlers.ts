@@ -5,17 +5,14 @@ import {
 import {
 } from '@pinpawo/studio';
 import { BUILT_IN_CAPABILITY_REGISTRY } from './capabilityRegistry';
-import {
-  refreshToolkit,
-  type ToolkitAvailabilityRecord,
-} from './toolkits/toolkitAvailability';
 import { loadUserCapabilities, readUserCapabilityManifests } from './capabilityLoader';
 import { loadStoredConfig } from './storage';
 import { readAgentActivityHealthFields } from './operationActivityState';
 import { isAuthorizedLocalServerRequest } from './localServerAuth';
 import {
+  getLocalServerToolkitInventory,
   getLocalServerWorkdir,
-  type LocalServerCapabilityStatePatch,
+  type LocalServerExtensionStatePatch,
   type LocalServerDeps,
 } from './localServerTypes';
 import { buildLocalHttpRuntimeProjection } from './localConfigProjection';
@@ -32,7 +29,7 @@ type LocalHttpHandlerOptions = {
     session: unknown;
     snapshot: unknown;
   }>;
-  updateCapabilities?: (patch: LocalServerCapabilityStatePatch) => LocalServerDeps;
+  updateExtensions?: (patch: LocalServerExtensionStatePatch) => LocalServerDeps;
 };
 
 export function handleLocalHttpRequest(
@@ -43,8 +40,8 @@ export function handleLocalHttpRequest(
 ) {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
   const pathname = url.pathname;
-  const applyCapabilityUpdate = (patch: LocalServerCapabilityStatePatch): LocalServerDeps => {
-    if (options.updateCapabilities) return options.updateCapabilities(patch);
+  const applyExtensionUpdate = (patch: LocalServerExtensionStatePatch): LocalServerDeps => {
+    if (options.updateExtensions) return options.updateExtensions(patch);
     return Object.isFrozen(deps) ? { ...deps, ...patch } : Object.assign(deps, patch);
   };
 
@@ -65,11 +62,14 @@ export function handleLocalHttpRequest(
 
     const refreshToolkitName = url.searchParams.get('refresh_toolkit');
     if (refreshToolkitName) {
-      refreshRuntimeToolkit(deps, refreshToolkitName).then((patch) => {
-        if (patch) applyCapabilityUpdate(patch);
+      refreshRuntimeToolkit(deps, refreshToolkitName).then(() => {
         writeHealth();
-      }).catch(() => {
-        applyCapabilityUpdate(removeRuntimeToolkit(deps, refreshToolkitName));
+      }).catch((error: unknown) => {
+        markRuntimeToolkitUnavailable(
+          deps,
+          refreshToolkitName,
+          error instanceof Error ? error.message : 'availability refresh failed',
+        );
         writeHealth();
       });
       return true;
@@ -96,7 +96,7 @@ export function handleLocalHttpRequest(
 
   if (pathname === '/capabilities/rescan') {
     rescanUserCapabilities(deps).then(({ patch, summary }) => {
-      const updatedDeps = applyCapabilityUpdate(patch);
+      const updatedDeps = applyExtensionUpdate(patch);
       writeJson(res, 200, {
         status: 'ok',
         ...summary,
@@ -177,71 +177,19 @@ function parsePositiveInteger(value: string | null): number | undefined {
   return parsed;
 }
 
-function replaceListItem<T>(
-  items: T[] | undefined,
-  matches: (item: T) => boolean,
-  replacement: T | null,
-): T[] | undefined {
-  if (!items) return undefined;
-  const index = items.findIndex(matches);
-  if (!replacement) {
-    return index >= 0 ? items.filter((_, itemIndex) => itemIndex !== index) : [...items];
-  }
-  if (index < 0) return [...items, replacement];
-  return items.map((item, itemIndex) => itemIndex === index ? replacement : item);
-}
-
-function replaceLocalToolkit(
+function markRuntimeToolkitUnavailable(
   deps: LocalServerDeps,
   name: string,
-  record: ToolkitAvailabilityRecord | null,
-): LocalServerCapabilityStatePatch {
-  const localToolkits = replaceListItem(
-    deps.localToolkits,
-    (item) => item.name === name,
-    record?.availability.available ? record.toolkit : null,
-  );
-  return localToolkits ? { localToolkits } : {};
-}
-
-function replacePluginToolkit(
-  deps: LocalServerDeps,
-  name: string,
-  record: ToolkitAvailabilityRecord | null,
-): LocalServerCapabilityStatePatch {
-  const pluginToolkits = replaceListItem(
-    deps.pluginToolkits,
-    (item) => item.name === name,
-    record?.availability.available ? record.toolkit : null,
-  );
-  return pluginToolkits ? { pluginToolkits } : {};
-}
-
-function removeRuntimeToolkit(
-  deps: LocalServerDeps,
-  name: string,
-): LocalServerCapabilityStatePatch {
-  return {
-    ...replaceLocalToolkit(deps, name, null),
-    ...replacePluginToolkit(deps, name, null),
-  };
+  reason: string,
+): void {
+  deps.toolkitInventory.updateAvailability(name, { available: false, reason });
 }
 
 async function refreshRuntimeToolkit(
   deps: LocalServerDeps,
   name: string,
-): Promise<LocalServerCapabilityStatePatch | null> {
-  const localToolkitRecord = await refreshToolkit(deps.localToolkitDefinitions ?? [], name);
-  if (localToolkitRecord) {
-    return replaceLocalToolkit(deps, name, localToolkitRecord);
-  }
-  const pluginToolkitRecord = await refreshToolkit(
-    deps.pluginToolkitDefinitions ?? [],
-    name,
-  );
-  return pluginToolkitRecord
-    ? replacePluginToolkit(deps, name, pluginToolkitRecord)
-    : null;
+): Promise<void> {
+  await deps.toolkitInventory.refresh(name);
 }
 
 function isCapabilityEnabled(id: string) {
@@ -256,7 +204,7 @@ async function rescanUserCapabilities(deps: LocalServerDeps) {
   return {
     patch: {
       userCapabilities,
-    } satisfies LocalServerCapabilityStatePatch,
+    } satisfies LocalServerExtensionStatePatch,
     summary: {
       loaded: userCapabilities.length,
     },
@@ -267,6 +215,7 @@ function buildCapabilitiesPayload(
   deps: LocalServerDeps,
   threadId?: string,
 ) {
+  const toolkitInventory = getLocalServerToolkitInventory(deps);
   const localCapabilityIds = new Set((deps.localCapabilities ?? []).map((item) => item.name));
   const userCapabilities = deps.userCapabilities ?? [];
   const userCapabilityIds = new Set(
@@ -279,10 +228,7 @@ function buildCapabilitiesPayload(
     }
   }
   const prepared = prepareAgentRegistry({
-    toolkits: [
-      ...(deps.pluginToolkits ?? []),
-      ...(deps.localToolkits ?? []),
-    ],
+    toolkits: [...toolkitInventory.effectiveToolkits],
     capabilities,
     threadId,
     capabilityArtifactStore: deps.capabilityArtifactStore,
@@ -326,10 +272,7 @@ function buildCapabilitiesPayload(
         status: 'unavailable' as const,
         issues: projectExecutorCompilationIssues(
           unavailable.issues,
-          [
-            ...(deps.pluginToolkitDefinitions ?? []),
-            ...(deps.localToolkitDefinitions ?? []),
-          ],
+          toolkitInventory.entries,
         ),
       };
     }

@@ -1,6 +1,5 @@
 import type {
   AgentCapability,
-  AgentToolkit,
   BuiltinGlobalReviewPolicyMode,
   CapabilityArtifactStore,
   ToolkitRuntimeManager,
@@ -11,6 +10,10 @@ import type { LoadedUserCapability } from './capabilityLoader';
 import type { LocalModelProfileRegistry } from './llmConfig';
 import { buildWorkspaceRuntimeConfig, type LocalAgentRuntimeConfig } from './runtimeConfig';
 import type { ServerMode } from './serverMode';
+import {
+  type HostToolkitInventorySnapshot,
+  HostToolkitInventoryStore,
+} from './toolkits/toolkitInventory';
 
 /**
  * #561: startup-determined Studio facts. Present only in studio mode, where
@@ -43,10 +46,7 @@ export type LocalServerDeps = {
    * 中断后无法 resume。见 #613。
    */
   chatCheckpointer?: BaseCheckpointSaver;
-  localToolkitDefinitions?: AgentToolkit[];
-  localToolkits?: AgentToolkit[];
-  pluginToolkitDefinitions?: AgentToolkit[];
-  pluginToolkits?: AgentToolkit[];
+  toolkitInventory: HostToolkitInventoryStore;
   toolkitRuntimeManager?: ToolkitRuntimeManager;
   localCapabilities?: AgentCapability[];
   userCapabilities?: LoadedUserCapability[];
@@ -54,16 +54,15 @@ export type LocalServerDeps = {
   rescanUserCapabilities?: () => Promise<LoadedUserCapability[]>;
 };
 
-export type NormalizedLocalServerDeps = Readonly<Omit<LocalServerDeps, 'workdir' | 'runtimeConfig'> & {
+export type NormalizedLocalServerDeps = Readonly<Omit<
+  LocalServerDeps,
+  'workdir' | 'runtimeConfig'
+> & {
   workdir: string;
   runtimeConfig: LocalAgentRuntimeConfig;
 }>;
 
-export type LocalServerCapabilityStatePatch = Partial<Pick<LocalServerDeps,
-  | 'localToolkitDefinitions'
-  | 'localToolkits'
-  | 'pluginToolkitDefinitions'
-  | 'pluginToolkits'
+export type LocalServerExtensionStatePatch = Partial<Pick<LocalServerDeps,
   | 'localCapabilities'
   | 'userCapabilities'
 >>;
@@ -76,7 +75,7 @@ export type LocalServerRuntimeDepsStore = Readonly<{
   updateAutoAuthorizationSafetyLevel: (
     safetyLevel: ToolAuthorizationSafetyLevel,
   ) => NormalizedLocalServerDeps;
-  updateCapabilities: (patch: LocalServerCapabilityStatePatch) => NormalizedLocalServerDeps;
+  updateExtensions: (patch: LocalServerExtensionStatePatch) => NormalizedLocalServerDeps;
 }>;
 
 function freezeList<T>(value: T[] | undefined): T[] | undefined {
@@ -86,10 +85,6 @@ function freezeList<T>(value: T[] | undefined): T[] | undefined {
 function freezeCapabilityLists<T extends LocalServerDeps>(deps: T): T {
   return {
     ...deps,
-    localToolkitDefinitions: freezeList(deps.localToolkitDefinitions),
-    localToolkits: freezeList(deps.localToolkits),
-    pluginToolkitDefinitions: freezeList(deps.pluginToolkitDefinitions),
-    pluginToolkits: freezeList(deps.pluginToolkits),
     localCapabilities: freezeList(deps.localCapabilities),
     userCapabilities: freezeList(deps.userCapabilities),
   };
@@ -101,6 +96,12 @@ export function getLocalServerRuntimeConfig(deps: LocalServerDeps): LocalAgentRu
 
 export function getLocalServerWorkdir(deps: LocalServerDeps): string {
   return deps.runtimeConfig?.workdir ?? deps.workdir;
+}
+
+export function getLocalServerToolkitInventory(
+  deps: Pick<LocalServerDeps, 'toolkitInventory'>,
+): HostToolkitInventorySnapshot {
+  return deps.toolkitInventory.getSnapshot();
 }
 
 export function normalizeLocalServerDeps(deps: LocalServerDeps): NormalizedLocalServerDeps {
@@ -132,7 +133,7 @@ export function createLocalServerRuntimeDepsStore(
       });
       return current;
     },
-    updateCapabilities: (patch: LocalServerCapabilityStatePatch) => {
+    updateExtensions: (patch: LocalServerExtensionStatePatch) => {
       current = Object.freeze(freezeCapabilityLists({
         ...current,
         ...patch,

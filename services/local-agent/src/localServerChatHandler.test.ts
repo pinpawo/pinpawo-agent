@@ -1205,7 +1205,6 @@ test('handleHumanReviewResponse forwards effect-bearing options without local au
     },
     {
       actorId: 'pet-1',
-      localToolkits: [],
     } as never,
   );
 

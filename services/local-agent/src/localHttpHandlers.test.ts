@@ -20,7 +20,10 @@ import {
 import type { LoadedUserCapability } from './capabilityLoader';
 import { clearAgentRunActivity, recordOperationActivity } from './operationActivityState';
 import { readLocalAgentPackageVersion } from './packageVersion';
-import { resolveToolkitAvailability } from './toolkits/toolkitAvailability';
+import type {
+  ToolkitDefinitionSourceKind,
+} from './toolkits/toolkitInventory';
+import { HostToolkitInventoryStore } from './toolkits/toolkitInventory';
 import { createTestModelServerDeps } from './testing/modelProfiles';
 
 function makeReq(url: string, authorization?: string): IncomingMessage {
@@ -31,6 +34,29 @@ function makeReq(url: string, authorization?: string): IncomingMessage {
       ...(authorization ? { authorization } : {}),
     },
   } as IncomingMessage;
+}
+
+function toolkitInventory(
+  definitions: readonly AgentToolkit[],
+  effectiveToolkits: readonly AgentToolkit[] = definitions,
+  sourceKind: ToolkitDefinitionSourceKind = 'host_builtin',
+  unavailableReason = 'test unavailable',
+): HostToolkitInventoryStore {
+  return new HostToolkitInventoryStore({
+    entries: definitions.map((toolkit, definitionIndex) => ({
+      toolkit,
+      provenance: {
+        sourceId: sourceKind === 'plugin' ? 'test-plugin' : 'local-agent-test',
+        sourceKind,
+        sourceIndex: 0,
+        definitionIndex,
+      },
+      availability: effectiveToolkits.includes(toolkit)
+        ? { available: true }
+        : { available: false, reason: unavailableReason },
+    })),
+    effectiveToolkits,
+  });
 }
 
 function makeRes() {
@@ -298,7 +324,7 @@ test('capability rescan replaces frozen runtime capability snapshots', async () 
       resumeSession: async () => {
         throw new Error('not called');
       },
-      updateCapabilities: (patch) => runtimeDeps.updateCapabilities(patch),
+      updateExtensions: (patch) => runtimeDeps.updateExtensions(patch),
     },
   ), true);
 
@@ -416,7 +442,7 @@ test('/capabilities exposes registry compilation issues instead of recomputing m
       ...createTestModelServerDeps(),
       workdir: '/tmp/pinpawo-capability-duplicate-tool',
       localCapabilities: [explore],
-      localToolkits: duplicateToolkits,
+      toolkitInventory: toolkitInventory(duplicateToolkits),
     } as LocalServerDeps,
     {
       authToken: 'secret',
@@ -440,7 +466,7 @@ test('/capabilities exposes registry compilation issues instead of recomputing m
   }]);
 });
 
-test('/capabilities attaches the cached reason for a known unavailable Toolkit', async () => {
+test('/capabilities attaches the inventory reason for a known unavailable Toolkit', () => {
   const offlineToolkit: AgentToolkit = {
     name: 'offline-test',
     description: 'Unavailable test Toolkit',
@@ -450,7 +476,6 @@ test('/capabilities attaches the cached reason for a known unavailable Toolkit',
       reason: 'test dependency is offline',
     }),
   };
-  await resolveToolkitAvailability(offlineToolkit);
   const res = makeRes();
 
   handleLocalHttpRequest(
@@ -469,8 +494,12 @@ test('/capabilities attaches the cached reason for a known unavailable Toolkit',
           content: '# Explore',
         }),
       }],
-      localToolkitDefinitions: [offlineToolkit],
-      localToolkits: [],
+      toolkitInventory: toolkitInventory(
+        [offlineToolkit],
+        [],
+        'host_builtin',
+        'test dependency is offline',
+      ),
     } as LocalServerDeps,
     {
       authToken: 'secret',
@@ -495,20 +524,20 @@ test('/capabilities attaches the cached reason for a known unavailable Toolkit',
   });
 });
 
-test('Toolkit refresh updates frozen runtime lists with copy-on-write', async () => {
+test('Toolkit refresh updates the immutable Host inventory with copy-on-write', async () => {
   const toolkit = {
     name: 'dynamic-test',
     availability: () => ({ available: true as const }),
-  } as NonNullable<LocalServerDeps['localToolkits']>[number];
+  } as AgentToolkit;
   const runtimeDeps = createLocalServerRuntimeDepsStore({
     serverMode: 'chat',
     actorId: 'pet-a',
     ...createTestModelServerDeps(),
     workdir: '/tmp/pinpawo-capability-refresh',
-    localToolkitDefinitions: [toolkit],
-    localToolkits: [],
+    toolkitInventory: toolkitInventory([toolkit], []),
   });
   const before = runtimeDeps.get();
+  const beforeSnapshot = before.toolkitInventory.getSnapshot();
   const res = makeRes();
 
   handleLocalHttpRequest(
@@ -522,32 +551,37 @@ test('Toolkit refresh updates frozen runtime lists with copy-on-write', async ()
       resumeSession: async () => {
         throw new Error('not called');
       },
-      updateCapabilities: (patch) => runtimeDeps.updateCapabilities(patch),
+      updateExtensions: (patch) => runtimeDeps.updateExtensions(patch),
     },
   );
 
   await new Promise((resolve) => setTimeout(resolve, 0));
   const after = runtimeDeps.get();
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(before.localToolkits, []);
-  assert.equal(after.localToolkits?.[0], toolkit);
-  assert.equal(Object.isFrozen(after.localToolkits), true);
+  assert.equal(after.toolkitInventory, before.toolkitInventory);
+  assert.deepEqual(beforeSnapshot.effectiveToolkits, []);
+  assert.notEqual(after.toolkitInventory.getSnapshot(), beforeSnapshot);
+  assert.deepEqual(after.toolkitInventory.getSnapshot().effectiveToolkits, [toolkit]);
+  assert.equal(Object.isFrozen(after.toolkitInventory.getSnapshot()), true);
+  assert.equal(Object.isFrozen(
+    after.toolkitInventory.getSnapshot().effectiveToolkits,
+  ), true);
 });
 
 test('Toolkit refresh can restore an unavailable plugin Toolkit', async () => {
   const toolkit = {
     name: 'dynamic-plugin-test',
     availability: () => ({ available: true as const }),
-  } as NonNullable<LocalServerDeps['pluginToolkitDefinitions']>[number];
+  } as AgentToolkit;
   const runtimeDeps = createLocalServerRuntimeDepsStore({
     serverMode: 'chat',
     actorId: 'pet-a',
     ...createTestModelServerDeps(),
     workdir: '/tmp/pinpawo-plugin-toolkit-refresh',
-    pluginToolkitDefinitions: [toolkit],
-    pluginToolkits: [],
+    toolkitInventory: toolkitInventory([toolkit], [], 'plugin'),
   });
   const before = runtimeDeps.get();
+  const beforeSnapshot = before.toolkitInventory.getSnapshot();
   const res = makeRes();
 
   handleLocalHttpRequest(
@@ -561,17 +595,24 @@ test('Toolkit refresh can restore an unavailable plugin Toolkit', async () => {
       resumeSession: async () => {
         throw new Error('not called');
       },
-      updateCapabilities: (patch) => runtimeDeps.updateCapabilities(patch),
+      updateExtensions: (patch) => runtimeDeps.updateExtensions(patch),
     },
   );
 
   await new Promise((resolve) => setTimeout(resolve, 0));
   const after = runtimeDeps.get();
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(before.pluginToolkits, []);
-  assert.equal(Object.isFrozen(before.pluginToolkitDefinitions), true);
-  assert.equal(after.pluginToolkits?.[0], toolkit);
-  assert.equal(Object.isFrozen(after.pluginToolkits), true);
+  assert.equal(after.toolkitInventory, before.toolkitInventory);
+  assert.deepEqual(beforeSnapshot.effectiveToolkits, []);
+  assert.notEqual(after.toolkitInventory.getSnapshot(), beforeSnapshot);
+  assert.equal(after.toolkitInventory.getSnapshot().effectiveToolkits[0], toolkit);
+  assert.equal(
+    after.toolkitInventory.getSnapshot().entries[0]?.provenance.sourceKind,
+    'plugin',
+  );
+  assert.equal(Object.isFrozen(
+    after.toolkitInventory.getSnapshot().effectiveToolkits,
+  ), true);
 });
 
 test('handleLocalHttpRequest exposes canonical workdir Studio paths on runtime endpoint', async () => {
@@ -633,4 +674,3 @@ test('handleLocalHttpRequest exposes canonical workdir Studio paths on runtime e
     studio_wiki_base_dir: join(stateRoot, 'studio-wiki'),
   });
 });
-

@@ -11,7 +11,7 @@ import {
   prepareAgentRegistry,
   projectExecutorCompilationIssues,
 } from './agentRegistryPreparation';
-import { resolveToolkitAvailability } from './toolkits/toolkitAvailability';
+import type { ToolkitInventoryEntry } from './toolkits/toolkitInventory';
 
 function artifactCapability(name: string): AgentCapability {
   return {
@@ -89,7 +89,19 @@ test('capability diagnostics preserve a known unavailable Toolkit reason', async
       reason: 'test backend is offline',
     }),
   };
-  await resolveToolkitAvailability(toolkit);
+  const inventoryEntry: ToolkitInventoryEntry = {
+    toolkit,
+    provenance: {
+      sourceId: 'test-host',
+      sourceKind: 'host_builtin',
+      sourceIndex: 0,
+      definitionIndex: 0,
+    },
+    availability: {
+      available: false,
+      reason: 'test backend is offline',
+    },
+  };
   const prepared = prepareAgentRegistry({
     toolkits: [],
     capabilities: [{
@@ -100,14 +112,14 @@ test('capability diagnostics preserve a known unavailable Toolkit reason', async
   const warnings: string[] = [];
   createCapabilityDiagnosticReporter((message) => warnings.push(message))(
     prepared.registry,
-    [toolkit],
+    [inventoryEntry],
   );
 
   assert.deepEqual(
     projectExecutorCompilationIssues([{
       code: 'unknown_toolkit',
       toolkitName: toolkit.name,
-    }], [toolkit]),
+    }], [inventoryEntry]),
     [{
       code: 'unavailable_toolkit',
       toolkitName: toolkit.name,

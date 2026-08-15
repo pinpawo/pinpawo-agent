@@ -7,14 +7,22 @@ import { ToolMessage } from '@langchain/core/messages';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
 import { buildToolOperationEvent } from './agentStreamEvents';
 import { normalizeToolStreamEvent } from './events/agentStreamNormalizer';
-import { createOperationRegistry } from './events/operationRegistry';
+import {
+  createOperationRegistry,
+  createOperationRegistryFromToolkits,
+} from './events/operationRegistry';
 import { createBrowserToolkit } from '@pinpawo-toolkit/browser';
-import { createBashToolkit, createGitToolkit, localToolOperationRegistry } from './toolkits/local';
+import { createBashToolkit, createGitToolkit } from './toolkits/local';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
 
 function definition(toolkit: AgentToolkit, toolName: string) {
   return toolkit.tools.find((item) => item.tool.name === toolName);
 }
+
+const localToolOperationRegistry = createOperationRegistryFromToolkits([
+  createBashToolkit(),
+  createGitToolkit(),
+]);
 
 test('normalizes LangGraph tool stream events with toolkit operation metadata', () => {
   const event = normalizeToolStreamEvent(

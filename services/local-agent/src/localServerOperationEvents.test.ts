@@ -11,7 +11,13 @@ import {
   emitLocalServerToolOperationEvent,
   isHumanReviewInterruptError,
 } from './localServerOperationEvents';
-import { localToolOperationRegistry } from './toolkits/local';
+import { createOperationRegistryFromToolkits } from './events/operationRegistry';
+import { createBashToolkit, createGitToolkit } from './toolkits/local';
+
+const localToolOperationRegistry = createOperationRegistryFromToolkits([
+  createBashToolkit(),
+  createGitToolkit(),
+]);
 
 test('emitLocalServerToolOperationEvent emits one operation for a normal tool event', () => {
   const run = createInflightOperationRun('req-1');

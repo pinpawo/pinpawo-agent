@@ -19,7 +19,11 @@ import { LocalAgentGraphService } from './agentGraphService';
 import { readFinalMessageText } from './agentStreamEvents';
 import { loadAgentContext } from './contextLoader';
 import { FileSaver } from './fileSaver';
-import { getLocalServerRuntimeConfig, type LocalServerDeps } from './localServerTypes';
+import {
+  getLocalServerRuntimeConfig,
+  getLocalServerToolkitInventory,
+  type LocalServerDeps,
+} from './localServerTypes';
 import {
   createAdmittedLocalChatHumanMessage,
   createLocalChatHumanMessage,
@@ -264,6 +268,7 @@ export class LocalServerTuiSessionService {
     // selection checks the checkpoint, and image attachments are refused at
     // admission. Building the graph is synchronous, so it does not re-check
     // against a stored copy that could disagree with the transcript.
+    const toolkitInventory = getLocalServerToolkitInventory(deps);
     return buildLocalChatAgentInput({
       context: ctx,
       userMessage: '',
@@ -273,11 +278,8 @@ export class LocalServerTuiSessionService {
         autoAuthorizationSafetyLevel: deps.autoAuthorizationSafetyLevel,
       },
       sessionContextCacheKey: session.id,
-      toolkits: [...(deps.pluginToolkits ?? []), ...(deps.localToolkits ?? [])],
-      toolkitDefinitions: [
-        ...(deps.pluginToolkitDefinitions ?? []),
-        ...(deps.localToolkitDefinitions ?? []),
-      ],
+      toolkits: [...toolkitInventory.effectiveToolkits],
+      toolkitInventoryEntries: toolkitInventory.entries,
       toolkitRuntimeManager: deps.toolkitRuntimeManager,
       reportCapabilityDiagnostics: this.reportCapabilityDiagnostics,
       extraCapabilities: deps.localCapabilities,

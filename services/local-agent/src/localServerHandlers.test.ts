@@ -11,7 +11,7 @@ import test from 'node:test';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { CapabilityArtifactStore } from '@pinpawo/pet-agent';
 import type { LocalAgentGraphService } from './agentGraphService';
-import { createLocalServerHandlers } from './localServerHandlers';
+import { createLocalServerHandlers as createProductionLocalServerHandlers } from './localServerHandlers';
 import type { LocalAgentServerMessage } from './localAgentProtocol';
 import type { LocalServerPeer } from './localServerPeer';
 import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
@@ -19,6 +19,21 @@ import {
   createTestModelProfileRegistry,
   createTestModelServerDeps,
 } from './testing/modelProfiles';
+import type { LocalServerDeps } from './localServerTypes';
+import { HostToolkitInventoryStore } from './toolkits/toolkitInventory';
+
+function createLocalServerHandlers(
+  deps: Omit<LocalServerDeps, 'toolkitInventory'> & Partial<Pick<
+    LocalServerDeps,
+    'toolkitInventory'
+  >>,
+  options?: Parameters<typeof createProductionLocalServerHandlers>[1],
+) {
+  return createProductionLocalServerHandlers({
+    toolkitInventory: new HostToolkitInventoryStore(),
+    ...deps,
+  }, options);
+}
 
 const testArtifactStore: CapabilityArtifactStore = {
   writeArtifact: async () => {

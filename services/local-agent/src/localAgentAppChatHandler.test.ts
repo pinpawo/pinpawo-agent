@@ -21,6 +21,10 @@ import { LocalAgentAppChatHandler } from './localAgentAppChatHandler';
 import type { ChatSessionAdapterOptions } from './chatSessionAdapter';
 import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 import { createTestModelProfiles } from './testing/modelProfiles';
+import {
+  type HostToolkitInventorySnapshot,
+  HostToolkitInventoryStore,
+} from './toolkits/toolkitInventory';
 
 function createFakeWebSocket(sent: unknown[]) {
   return {
@@ -116,6 +120,21 @@ function createHandler(overrides: Partial<ConstructorParameters<typeof LocalAgen
   const deletedThreads: string[] = [];
   const buildInputs: Array<Record<string, unknown>> = [];
   const ws = createFakeWebSocket(sent);
+  const pluginDefinition = { name: 'plugin-definition' };
+  const localDefinition = { name: 'local-definition' };
+  const toolkitInventory = {
+    entries: [pluginDefinition, localDefinition].map((toolkit, definitionIndex) => ({
+      toolkit,
+      provenance: {
+        sourceId: 'test-host',
+        sourceKind: 'host_builtin',
+        sourceIndex: 0,
+        definitionIndex,
+      },
+      availability: { available: true },
+    })),
+    effectiveToolkits: [{ name: 'plugin-toolkit' }, { name: 'local-toolkit' }],
+  } as unknown as HostToolkitInventorySnapshot;
   const handler = new LocalAgentAppChatHandler({
     graphService: {} as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['graphService'],
     checkpoint: createCheckpoint([]),
@@ -126,10 +145,7 @@ function createHandler(overrides: Partial<ConstructorParameters<typeof LocalAgen
     isCurrentSocket: (candidate) => candidate === ws,
     getActorId: () => 'pet-a',
     getModelProfiles: () => createTestModelProfiles(),
-    getPluginToolkitDefinitions: () => [{ name: 'plugin-definition' }] as NonNullable<ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getPluginToolkitDefinitions']> extends () => infer T ? T : never,
-    getPluginToolkits: () => [{ name: 'plugin-toolkit' }] as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getPluginToolkits'] extends () => infer T ? T : never,
-    getLocalToolkitDefinitions: () => [{ name: 'local-definition' }] as NonNullable<ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getLocalToolkitDefinitions']> extends () => infer T ? T : never,
-    getLocalToolkits: () => [{ name: 'local-toolkit' }] as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getLocalToolkits'] extends () => infer T ? T : never,
+    getToolkitInventory: () => toolkitInventory,
     getLocalCapabilities: () => [{ name: 'browser' }] as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getLocalCapabilities'] extends () => infer T ? T : never,
     getUserCapabilities: () => [{
       meta: { id: 'user-cap' },
@@ -284,7 +300,9 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
     'local-toolkit',
   ]);
   assert.deepEqual(
-    (buildInputs[0]?.toolkitDefinitions as Array<{ name?: string }>).map((toolkit) => toolkit.name),
+    (buildInputs[0]?.toolkitInventoryEntries as Array<{
+      toolkit?: { name?: string };
+    }>).map((entry) => entry.toolkit?.name),
     ['plugin-definition', 'local-definition'],
   );
   assert.equal(typeof buildInputs[0]?.reportCapabilityDiagnostics, 'function');
@@ -343,6 +361,39 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
     true,
   );
 
+});
+
+test('LocalAgentAppChatHandler reads the current shared Host inventory per request', async () => {
+  const toolkit = { name: 'dynamic-toolkit' };
+  const inventory = new HostToolkitInventoryStore({
+    entries: [{
+      toolkit,
+      provenance: {
+        sourceId: 'test-host',
+        sourceKind: 'host_builtin',
+        sourceIndex: 0,
+        definitionIndex: 0,
+      },
+      availability: { available: false, reason: 'offline' },
+    }],
+    effectiveToolkits: [],
+  } as unknown as HostToolkitInventorySnapshot);
+  const { handler, ws, buildInputs } = createHandler({
+    getToolkitInventory: () => inventory.getSnapshot(),
+  });
+  inventory.updateAvailability('dynamic-toolkit', { available: true });
+
+  await handler.handleChatRequest(ws, {
+    type: 'chat_request',
+    requestId: 'req-current-inventory',
+    message: 'hello',
+    userId: 'user-1',
+  });
+
+  assert.deepEqual(
+    (buildInputs[0]?.toolkits as Array<{ name?: string }>).map(({ name }) => name),
+    ['dynamic-toolkit'],
+  );
 });
 
 test('LocalAgentAppChatHandler settles projected operations when a run is interrupted', async () => {

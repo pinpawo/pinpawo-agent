@@ -7,7 +7,13 @@ import {
   emitInflightToolEvent,
   finishInflightOperations,
 } from './inflightOperationRun';
-import { localToolOperationRegistry } from './toolkits/local';
+import { createOperationRegistryFromToolkits } from './events/operationRegistry';
+import { createBashToolkit, createGitToolkit } from './toolkits/local';
+
+const localToolOperationRegistry = createOperationRegistryFromToolkits([
+  createBashToolkit(),
+  createGitToolkit(),
+]);
 
 test('inflight operation run emits tool stream events as operations', () => {
   const run = createInflightOperationRun('req-1');

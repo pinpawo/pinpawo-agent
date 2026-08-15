@@ -8,7 +8,11 @@ import {
   type BuildStudioInput,
   type BuildStudioResult,
 } from './studio/buildStudio';
-import { getLocalServerWorkdir, type LocalServerDeps } from './localServerTypes';
+import {
+  getLocalServerToolkitInventory,
+  getLocalServerWorkdir,
+  type LocalServerDeps,
+} from './localServerTypes';
 import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 
 export type BuildStudio = (input: BuildStudioInput) => Promise<BuildStudioResult>;
@@ -65,6 +69,7 @@ export class LocalServerStudioHandler<Peer extends object> {
 
   private getStudio(deps: LocalServerDeps): Promise<BuildStudioResult> {
     const workdir = getLocalServerWorkdir(deps);
+    const toolkitInventory = getLocalServerToolkitInventory(deps);
     const existing = this.studios.get(workdir);
     if (existing) return existing;
 
@@ -74,7 +79,7 @@ export class LocalServerStudioHandler<Peer extends object> {
         ...(deps.localCapabilities ?? []),
         ...(deps.userCapabilities ?? []).map((item) => item.capability),
       ],
-      toolkits: [...(deps.pluginToolkits ?? []), ...(deps.localToolkits ?? [])],
+      toolkits: [...toolkitInventory.effectiveToolkits],
       ...(deps.toolkitRuntimeManager ? { toolkitRuntimeManager: deps.toolkitRuntimeManager } : {}),
       ...(deps.chatCheckpointer ? { checkpoint: deps.chatCheckpointer } : {}),
       ownerUserId: null,

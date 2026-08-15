@@ -44,11 +44,46 @@ export default { name: 'valid-plugin' };
 
   assert.deepEqual(result.plugins.map((plugin) => plugin.name), ['valid-plugin']);
   assert.deepEqual(
-    result.toolkitDefinitions.map((toolkit) => toolkit.name),
+    result.toolkitSources.flatMap(({ definitions }) => definitions.map(({ name }) => name)),
     ['sample_toolkit'],
   );
-  assert.deepEqual(result.toolkits.map((toolkit) => toolkit.name), ['sample_toolkit']);
-  assert.equal(result.toolkits[0]?.tools[0]?.operation?.title, 'Sample Tool');
+  assert.deepEqual(result.toolkitSources.map(({ id, kind }) => ({ id, kind })), [{
+    id: 'valid-plugin',
+    kind: 'plugin',
+  }]);
+  assert.equal(
+    result.toolkitSources[0]?.definitions[0]?.tools[0]?.operation?.title,
+    'Sample Tool',
+  );
+});
+
+test('loadPluginsFromDir emits deterministic Toolkit source order', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-plugins-order-'));
+  const pluginModule = (name: string, toolkitName: string) => `${toolModulePrelude()}
+export const toolkits = [{
+  name: ${JSON.stringify(toolkitName)},
+  description: ${JSON.stringify(`${toolkitName} toolkit`)},
+  tools: [{ tool: defineTestTool(${JSON.stringify(`${toolkitName}_tool`)}) }],
+}];
+export default { name: ${JSON.stringify(name)} };
+`;
+  await fs.writeFile(
+    path.join(root, 'z-plugin.mjs'),
+    pluginModule('z-plugin', 'z_toolkit'),
+    'utf8',
+  );
+  await fs.writeFile(
+    path.join(root, 'a-plugin.mjs'),
+    pluginModule('a-plugin', 'a_toolkit'),
+    'utf8',
+  );
+
+  const result = await loadPluginsFromDir(root);
+
+  assert.deepEqual(result.toolkitSources.map(({ id }) => id), [
+    'a-plugin',
+    'z-plugin',
+  ]);
 });
 
 test('loadPluginsFromDir skips tools and toolkits from invalid plugin modules', async () => {
@@ -62,11 +97,10 @@ export default {};
   const result = await loadPluginsFromDir(root);
 
   assert.deepEqual(result.plugins, []);
-  assert.deepEqual(result.toolkitDefinitions, []);
-  assert.deepEqual(result.toolkits, []);
+  assert.deepEqual(result.toolkitSources, []);
 });
 
-test('loadPluginsFromDir excludes a plugin Toolkit whose availability check fails', async () => {
+test('loadPluginsFromDir leaves Toolkit availability to the Host inventory', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-plugins-offline-'));
   await fs.writeFile(path.join(root, 'offline-plugin.mjs'), `${toolModulePrelude()}
 export const toolkits = [{
@@ -82,10 +116,9 @@ export default { name: 'offline-plugin' };
 
   assert.deepEqual(result.plugins.map((plugin) => plugin.name), ['offline-plugin']);
   assert.deepEqual(
-    result.toolkitDefinitions.map((toolkit) => toolkit.name),
+    result.toolkitSources.flatMap(({ definitions }) => definitions.map(({ name }) => name)),
     ['offline_toolkit'],
   );
-  assert.deepEqual(result.toolkits, []);
 });
 
 test('loadPluginsFromDir fails startup for an oversized toolkit auto-review policy', async () => {

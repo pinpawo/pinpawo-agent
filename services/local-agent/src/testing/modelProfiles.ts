@@ -14,6 +14,7 @@ import {
   MODEL_PROFILES_VERSION,
   type ModelProfileV1,
 } from '../modelProfiles';
+import { HostToolkitInventoryStore } from '../toolkits/toolkitInventory';
 
 export type TestModelProfileInput = Partial<AgentLlmConfig> & {
   modelProfileId: string;
@@ -131,6 +132,7 @@ export function createTestModelServerDeps(
   modelProfiles: ReturnType<typeof createTestModelProfiles>;
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
+  toolkitInventory: HostToolkitInventoryStore;
 } {
   return {
     modelProfiles: createTestModelProfiles(input),
@@ -138,5 +140,6 @@ export function createTestModelServerDeps(
       ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
     autoAuthorizationSafetyLevel: input.autoAuthorizationSafetyLevel
       ?? DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL,
+    toolkitInventory: new HostToolkitInventoryStore(),
   };
 }

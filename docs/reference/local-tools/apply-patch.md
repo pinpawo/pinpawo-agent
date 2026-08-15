@@ -1,5 +1,10 @@
 # Apply Patch Tool Implementation
 
+> The `local-tools/` path is retained for reference compatibility. `apply_patch`
+> is an operation of the local Host's `bash` Toolkit; “local tools” is not a
+> domain layer parallel to Toolkit. See the accepted
+> [domain constraints](../../design/host-agent-capability-toolkit.md).
+
 > 状态：Implemented
 > 日期：2026-08-09
 > 范围：`services/local-agent` 的本地 `apply_patch` 工具

@@ -6,6 +6,8 @@
 本文解释为什么 Capability 通过 Toolkit 组合，而不是互相继承或调用。公共类型、
 编译规则和 host 组装顺序以
 [Capability / Toolkit V2 契约](../../reference/extensions/capability-toolkit.md)为准。
+Host、Agent、Capability、Toolkit 的顶层领域关系以
+[领域关系与装配约束](../host-agent-capability-toolkit.md)为准。
 
 ## 1. 背景
 
@@ -19,28 +21,22 @@ capability 之间会出现复用需求。例如：
 
 因此新增一层 **toolkit**，用于表达“工具族复用”，而不是“capability 互相调用”。
 
-## 2. 分层模型
+## 2. Agent 内部组合模型
 
-系统分为四层：
+Toolkit 内的 ToolDefinition 和 Agent 内的 orchestrator 是下属实现角色，不是与
+Host、Agent、Capability、Toolkit 并列的新领域。Agent 内部执行关系如下：
 
 ```txt
-tool
-  最小可调用动作，例如 browser_open、read_file、run_shell。
-
-toolkit
-  一组相关 ToolDefinition + instructions + availability。
-  例如 browser toolkit、bash toolkit、memory toolkit、web_search toolkit。
-
-capability
-  面向业务目标的可委派能力。
-  通过静态 uses 组合 toolkit，并提供自己的 Markdown instructions 与 lifecycle。
-
-orchestrator
-  唯一编排者，决定委派哪个 capability，以及多个 capability 的先后顺序。
+Agent Runtime
+  └─ orchestrator 选择 Capability
+       └─ Capability.uses 解析 Toolkit
+            └─ Toolkit 持有 ToolDefinition 与可选 Runtime
 ```
 
 核心规则：
 
+- Host 负责 definitions、Agent Runtime 与 Runtime Manager 的装配和所有权；
+- ToolDefinition 属于 Toolkit，不形成平级的 tools inventory；
 - toolkit 不是可委派目标，只是可复用工具包。
 - capability 才是 orchestrator 的委派目标。
 - subagent 不直接调用其他 subagent 或 capability。
@@ -292,6 +288,8 @@ const capabilityCreator = defineCapability({
 - capability instructions 描述业务目标、结果格式和任务约束。
 - orchestrator 仍然是唯一可以决定“下一步委派谁”的组件。
 - 如果多个 capability 高频组合成固定流程，应创建更高阶 workflow capability，而不是让 capability 互调。
+- Capability Planner 的内部文件探索和 terminal control actions 属于 Agent 框架
+  内部协议，不进入 Host 的 Toolkit inventory；这不构成 Capability 私有业务工具。
 
 ## 9. 当前实现
 

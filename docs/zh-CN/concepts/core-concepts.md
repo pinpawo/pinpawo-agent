@@ -18,9 +18,10 @@ PinPawo Agent 是一个本地优先的 Agent 框架。它让模型可以推理�
 
 | 术语 | 含义 | 作用 |
 |---|---|---|
-| **Pet agent** | 具有身份、模型、Capability、Toolkit 与状态的一套 Agent runtime。 | 接收请求并产生面向用户的结果。 |
+| **Host** | 解析配置、选择 Capability/Toolkit definitions、持有 Agent runtime 并管理 Toolkit Runtime 生命周期的产品或进程边界。 | 把机器、transport 与生命周期职责留在 Agent graph 之外。 |
+| **Pet agent** | 具有身份、模型、Capability、编译后 Toolkit binding 与状态的一套 Agent runtime。 | 接收 invocation 并产生面向用户的结果。 |
 | **Capability** | 带有任务说明和固定 Toolkit allowlist 的可委派工作单元。 | 让路由和工具权限可检查。 |
-| **Toolkit** | 一组 typed 工具、操作元数据、可用性检查和审核策略。 | 集中管理可复用实现与安全规则。 |
+| **Toolkit** | 一组 typed 工具、操作元数据、可用性检查、审核策略和可选 Toolkit Runtime。 | 集中管理可复用实现、安全规则与动态资源所有权。 |
 | **Subagent lane** | 一次 Capability 或通用任务使用的短生命周期私有执行上下文。 | 隔离任务推理，避免污染主对话。 |
 | **Human review** | 需要用户授权或补充输入时的暂停与继续边界。 | 审批是运行时契约，而不是提示词约定。 |
 | **Checkpoint** | LangGraph 的持久状态，保存消息与待继续执行。 | resume 与恢复的权威来源。 |
@@ -38,6 +39,8 @@ PinPawo Agent 是一个本地优先的 Agent 框架。它让模型可以推理�
 ```
 
 Capability 描述“完成什么任务”；Toolkit 描述“哪些行为可以执行、如何审核”；Artifact 只承担持久结果。这样 Markdown 保持易审查，而副作用留在 typed code。
+
+Host 与 Agent 是所有权边界，不是新的扩展格式：Host 创建并持有一个或多个 Agent runtime；Agent 执行 Capability；Capability 通过 `uses` 引用 Toolkit；Toolkit Runtime 始终从属于 Toolkit。跨 Host 的 accepted constraints 见[领域关系设计（中文）](../../design/host-agent-capability-toolkit.md)。
 
 ## 概念的唯一详细入口
 

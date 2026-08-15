@@ -13,7 +13,7 @@ boundary you need; use [Design records](../design/index.md) only for rationale.
   guards, [workdirs](runtime/workdir.md), and cross-lane handoffs.
 - [Artifacts](artifacts/index.md) — durable Capability output and store
   contracts.
-- [Local tools](local-tools/apply-patch.md) — implemented local-tool protocol
-  details.
+- [Local-machine Toolkit operations](local-tools/apply-patch.md) — implemented
+  operation protocol details; the path is retained for compatibility.
 
 For project vocabulary, start with [Core concepts](../concepts/core-concepts.md).

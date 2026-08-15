@@ -8,6 +8,8 @@
 > [Architecture](../../concepts/architecture.md)。
 
 本文是 `packages/pet-agent` 对 Capability / Toolkit V2 的公共契约说明。
+Host、Agent、Capability、Toolkit 之间的 accepted ownership 与跨 Host 装配约束见
+[领域关系设计](../../design/host-agent-capability-toolkit.md)。
 设计理由与组合边界见
 [Toolkit Composition Design](../../design/agent-runtime/toolkit-composition.md)，
 目录插件格式见
@@ -210,6 +212,11 @@ format，以及静态 `operation`、`review`、权限与 instructions。runtime 
 释放。若由 host 注入共享 manager，则由该 host 统一 stop，不能由单个 pet
 runtime 终止。
 
+> Accepted target（#645，尚未作为当前公共 API 实现）：Runtime 的实时健康状态
+> 属于 Toolkit Runtime diagnostics，不属于 Toolkit availability。所有声明
+> Runtime 的 Toolkit 将通过同一个 manager 诊断；Host 不按 Toolkit 名称实现
+> 专属诊断或生命周期分支。
+
 ### 3.3 可用性
 
 `compileAgentRegistry()` 只负责编译传入的有效 Toolkit inventory，不执行
@@ -364,6 +371,11 @@ core 仍允许显式受限 workspace 不包含 General，且不会凭空构造�
 
 不要让 UI、HTTP handler 或另一个 registry getter 自己重新计算 Capability
 可用性；可用性必须来自同一次编译结果。
+
+Accepted target（#645）：Host config selection、Toolkit availability 和 Toolkit
+Runtime diagnostics 是三个不同维度。inventory 来源、顺序和 provenance 必须
+确定，重复名称显式失败；Host 只聚合通用 Runtime diagnostics，不解释 Toolkit
+专属 `details`。
 
 ## 9. V2 不包含的概念
 

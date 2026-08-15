@@ -14,6 +14,11 @@ studio_request → dispatch(entryPetId) → studio_response（确认）
                                       ↘ studio.progress（插件事件）
 ```
 
+这是与 Chat 相同的 `Host -> Agent Runtime -> Capability -> Toolkit` 领域模型。
+Studio 只改变一个 Host 如何配置、常驻并 invoke 多个 Pet runtime，不引入另一套
+Toolkit 或 Toolkit Runtime。完整约束见
+[领域关系设计](../../design/host-agent-capability-toolkit.md)。
+
 ## 装配与生命周期
 
 本地宿主根据 workdir 读取 Studio 与 Pet 配置，构造每个 `PetAgentRuntime` 并
@@ -45,4 +50,3 @@ server 关闭时会停止缓存的 Studio。Studio 随后拒绝新 dispatch、�
 宿主负责更大的生命周期。
 
 参阅[配置](configuration.md)和[Studio API（中文）](../reference/api/studio.md)。
-

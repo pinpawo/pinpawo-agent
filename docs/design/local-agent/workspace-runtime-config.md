@@ -6,7 +6,7 @@
 
 ## Context
 
-`workdir` is currently the lowest common denominator for local execution. It is passed into chat prompts, local tools, checkpoints, Studio config, Studio wiki, due-run state, and capability artifacts. That made the local runtime workdir-scoped, but it still leaves two product-level gaps:
+`workdir` is currently the lowest common denominator for local execution. It is passed into chat prompts, local-machine Toolkit execution scopes, checkpoints, Studio config, Studio wiki, due-run state, and capability artifacts. That made the local runtime workdir-scoped, but it still leaves two product-level gaps:
 
 - Chat and Studio do not know which user-facing project they belong to. They only see a path.
 - App-driven flows cannot reliably focus a conversation on a specific project without starting a separate local-agent process with a different `--workdir`.
@@ -145,7 +145,7 @@ request.workspaceId
 > homedir()
 ```
 
-`workdir` is still the path used by local tools. `workspace` is the stable identity used by UI, session binding, scheduler trace, and future project background.
+`workdir` is still the path used by local-machine Toolkit Runtime execution bindings. `workspace` is the stable identity used by UI, session binding, scheduler trace, and future project background.
 
 ## Chat Behavior
 
@@ -196,17 +196,27 @@ type StudioRunIdentity = {
 };
 ```
 
-## Local Tools
+## Local-machine Toolkit Runtime
 
-The current local tools use process-global mutable workdir. That is safe only while one local-agent process owns one workspace.
+The current local-machine Toolkit implementations use process-global mutable workdir. That is an implementation limitation, not a valid Host/Toolkit contract. The canonical target is defined in [Host / Agent / Capability / Toolkit relationships](../host-agent-capability-toolkit.md).
 
 Target:
 
 ```ts
-createLocalToolkits({ workdir: runtimeConfig.workdir });
+toolkitRuntimeManager.resolve({
+  execution: {
+    workdir: runtimeConfig.workdir,
+    threadId,
+    runId,
+    delegationId,
+  },
+});
 ```
 
-Every chat/studio runtime should receive workspace-bound toolkit instances. Relative paths should resolve from that toolkit instance, not from a module-level variable.
+Every Chat/Studio invocation passes its workspace-bound workdir through
+`ToolkitRuntimeExecutionScope`. Relative paths resolve from the execution binding,
+not from a module-level variable or process-wide Toolkit singleton. A Host may keep
+Toolkit roots resident while concurrent bindings use different workdirs.
 
 ## Protocol Additions
 
@@ -253,7 +263,7 @@ Server/runtime responses should expose:
 4. Extend local protocol to accept `workspaceId` for chat and studio requests.
 5. Bind chat sessions/checkpoints to workspace id.
 6. Make Studio legacy config fallback opt-in or migration-only.
-7. Replace global local tool workdir with workspace-bound toolkit factories.
+7. Replace global local-tool workdir with per-execution Toolkit Runtime bindings.
 8. Add App/Desktop UI for selecting, opening, and registering workspaces.
 
 ## Validation
@@ -262,4 +272,4 @@ Server/runtime responses should expose:
 - `/runtime` endpoint tests verify workspace metadata is visible to clients.
 - Chat tests should cover workspace-bound thread ids before protocol fields become active.
 - Studio tests should cover workspace config lookup, missing config errors, and legacy migration hints.
-- Tool tests should cover two toolkit instances resolving the same relative path against different workdirs.
+- Tool tests should cover two concurrent execution bindings resolving the same relative path against different workdirs.

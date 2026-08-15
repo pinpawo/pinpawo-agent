@@ -16,8 +16,9 @@ For the terminology behind this design, start with [Core Concepts](core-concepts
 The architecture is optimized for five practical needs of production agent
 systems:
 
-1. **Keep users in control.** Local tools and browser sessions stay on the
-   machine that runs the agent; review policy can stop risky work for approval.
+1. **Keep users in control.** Local-machine Toolkit operations and browser
+   sessions stay on the machine that runs the agent; review policy can stop
+   risky work for approval.
 2. **Make authority visible.** Capabilities declare their Toolkit dependencies
    statically, so the available tool surface is explicit per task.
 3. **Support real, multi-step work.** Checkpoints, structured events, and
@@ -47,6 +48,13 @@ Toolkit runtimes, exposes HTTP/WebSocket or JSONL stdio transports, and composes
 the Capability registry. Runtime-independent orchestration stays in
 `packages/pet-agent`; host-specific integrations remain in `services/` and
 `toolkits/`.
+
+The ownership chain is `Host -> Agent Runtime -> Capability -> Toolkit`.
+`ToolDefinition` and Toolkit Runtime are subordinate to Toolkit; the
+orchestrator and subagent lanes are internal to Agent. This prevents an
+aggregate factory such as the Browser helper from becoming a parallel architecture
+layer. See the accepted
+[domain and assembly constraints](../design/host-agent-capability-toolkit.md).
 
 ## Main packages
 

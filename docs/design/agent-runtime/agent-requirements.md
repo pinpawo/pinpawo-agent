@@ -5,6 +5,9 @@
 > Capability / Toolkit 对齐：本文保留 package rewrite 的原始需求背景；
 > 当前扩展契约以
 > [Capability / Toolkit V2 契约](../../reference/extensions/capability-toolkit.md)为准。
+> Host、Agent、Capability、Toolkit 的当前领域关系以
+> [领域关系与装配约束](../host-agent-capability-toolkit.md)为准；本文中的
+> channels、global tools 和 capability tools 是历史建模。
 
 ## 1. 文档目标
 
@@ -71,22 +74,18 @@ subagent 负责：
 
 subagent 在需要时动态创建，执行完成后销毁。
 
-### 3.4 toolkits / tools
+### 3.4 toolkits / tools（已由 Capability / Toolkit V2 取代）
 
-`tools` 现在分为三层：
+当前只有 Toolkit 可以向 Capability subagent 暴露业务/外部 tools：
 
 - **tool**：最小可调用动作，例如 `browser_open`、`read_file`、`run_shell`
 - **toolkit**：一组相关 tools + instructions + availability，例如 `browser`、`bash`
-- **capability tools**：在 capability subagent 内部生效的业务工具，orchestrator 和其他 capability 不可见
 
 capability 通过 `uses` 声明要装配的 toolkit。orchestrator 仍然是唯一编排者，capability/subagent 不直接调用其他 capability/subagent。
 
-所有 capability subagent 都只使用：
-
-- 自己 `uses` 声明的 toolkit tools
-- capability runtime 提供的 tools
-
-General 也是普通 Capability；它不因名称获得额外 Toolkit 或 host 工具。
+所有 Capability subagent 都只使用自己 `uses` 声明的 Toolkit tools。不存在
+Capability runtime tools 或与 Toolkit 平级的 host/global tools。General 也是
+普通 Capability；它不因名称获得额外 Toolkit 或 Host tools。
 
 toolkit tools 在装配时可以被 toolkit policy 包装，用于对单个工具调用执行 allow/deny/HITL review；原始工具仍只负责执行。
 
@@ -125,7 +124,7 @@ channel 负责：
 - agent 运行入口（runAgent）
 - capability 定义与注册
 - subagent 运行机制
-- global tools 装配
+- Toolkit definitions 装配
 - capability artifact / result 读取约定
 - checkpoint 接入
 
@@ -377,7 +376,7 @@ sequenceDiagram
   Graph->>Route: messages → orchestrator LLM
   alt activeCapability != null
     Route->>Route: 调用 delegate_capability(capability, task, context_summary)
-    Route->>Subagent: capability node → 创建 subagent（capability tools + global tools）
+    Route->>Subagent: capability node → 创建 subagent（resolved Toolkit tools）
     Subagent->>Subagent: 执行 agent loop
     Subagent-->>Graph: 返回 messages
   else activeCapability == null
@@ -520,7 +519,7 @@ channel 内部应有一个很薄的 graph service，用来：
 local-agent 需要能够：
 
 - 构造 local chat input
-- 注入 local tools（作为 global tools）
+- 注入 local-machine Toolkit definitions；不存在与 Toolkit 平级的 global tools
 - 注入 local checkpoint
 - 在连接 API relay 时显式声明 `actorId`
 - 将消息流映射到 TUI 展示

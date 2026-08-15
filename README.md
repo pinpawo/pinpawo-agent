@@ -206,7 +206,7 @@ export default { name: 'sample-plugin' };
 
 Legacy top-level `tools` exports are ignored.
 
-## Browser Integration
+## Browser Toolkit
 
 Browser `auto` mode prefers a connected Chrome Extension for supported default-session operations and falls back to Playwright. Force a backend with `PINPAWO_BROWSER_BACKEND=extension` or `playwright`.
 

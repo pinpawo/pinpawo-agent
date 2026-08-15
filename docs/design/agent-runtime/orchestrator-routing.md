@@ -2,6 +2,10 @@
 
 > 状态：Draft v1
 > 日期：2026-04-01
+> 本文记录旧 route 设计。当前 Capability / Toolkit 与顶层领域关系分别以
+> [V2 契约](../../reference/extensions/capability-toolkit.md)和
+> [领域关系与装配约束](../host-agent-capability-toolkit.md)为准；`global tools`
+> 不是当前概念。
 
 ## 1. 文档目标
 
@@ -144,14 +148,15 @@ capability subagent 负责真正执行能力逻辑。
 当前实现有一个明确边界：
 
 - direct 路径不创建 subagent
-- 因此 direct 回复阶段不会使用 global tools
+- 因此 direct 回复阶段不执行 Capability Toolkit tools
 
 这意味着当前版本更适合：
 
 - 普通直接聊天
 - capability 委托
 
-如果后续希望 direct 路径也能稳定使用 global tools，需要单独设计 direct execution model。
+如果后续希望 direct 路径也执行 Toolkit tools，需要单独设计 direct execution model，
+不能恢复一份与 Toolkit 平级的 global tools inventory。
 
 ## 9. 与 capability 文档的关系
 

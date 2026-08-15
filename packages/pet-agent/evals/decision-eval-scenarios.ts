@@ -1,9 +1,7 @@
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import {
-  buildGoalCreationCurrentRequestContent,
   buildGoalCreationSystemPrompt,
-  GOAL_CREATION_CURRENT_REQUEST_MESSAGE_NAME,
 } from '../src/agent/orchestrator/prompts.ts';
 import { USER_GOAL_MAX_CHARS } from '../src/agent/orchestrator/capabilityPlanner/runner.ts';
 import { readMessageText } from '../src/agent/orchestrator/utils.ts';
@@ -130,10 +128,6 @@ function goalScenarios(): DecisionEvalScenario[] {
       if (!currentRequest || currentRequest._getType() !== 'human') {
         throw new Error('Goal Creation eval case must end with a user message.');
       }
-      conversationMessages[conversationMessages.length - 1] = new HumanMessage({
-        content: buildGoalCreationCurrentRequestContent(currentRequest.content),
-        name: GOAL_CREATION_CURRENT_REQUEST_MESSAGE_NAME,
-      });
       return {
         system: buildGoalCreationSystemPrompt(),
         input: '',

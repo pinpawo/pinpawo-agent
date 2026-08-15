@@ -1,6 +1,5 @@
 import {
   AIMessage,
-  HumanMessage,
   SystemMessage,
 } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
@@ -8,12 +7,9 @@ import { Command, Send } from '@langchain/langgraph';
 import type { CapabilityPlannerDispatch } from '../../capabilityPlanner/runner';
 import { USER_GOAL_MAX_CHARS } from '../../capabilityPlanner/runner';
 import { readContextCompactionSummaries } from '../../contextCompaction';
-import { setPinpetMeta } from '../../messageLanes';
 import {
   buildCompactionSummaryXmlContext,
-  buildGoalCreationCurrentRequestContent,
   buildGoalCreationSystemPrompt,
-  GOAL_CREATION_CURRENT_REQUEST_MESSAGE_NAME,
 } from '../../prompts';
 import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig, UserGoal } from '../../types';
@@ -75,20 +71,10 @@ function buildGoalCreationMessages(params: {
     ...(compactionContext ? [new AIMessage(compactionContext)] : []),
     ...mainMessages.filter((_, index) => index !== currentRequestIndex),
   ];
-  const currentRequestMessage = new HumanMessage({
-    content: buildGoalCreationCurrentRequestContent(currentRequest.content),
-    additional_kwargs: currentRequest.additional_kwargs,
-    response_metadata: currentRequest.response_metadata,
-    name: GOAL_CREATION_CURRENT_REQUEST_MESSAGE_NAME,
-  });
-  setPinpetMeta(currentRequestMessage, {
-    source: GOAL_CREATION_CURRENT_REQUEST_MESSAGE_NAME,
-    synthetic: true,
-  });
   return [
     new SystemMessage(buildGoalCreationSystemPrompt()),
     ...conversationHistory,
-    currentRequestMessage,
+    currentRequest,
   ];
 }
 

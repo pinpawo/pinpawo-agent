@@ -404,13 +404,9 @@ test('Goal Creation reads full canonical main messages and excludes lane announc
     ['system', 'ai', 'human', 'ai', 'ai', 'human'],
   );
   assert.match(String(goalCreationMessages[1]?.content ?? ''), /COMPACTED_MAIN_CONTEXT/);
-  assert.match(
-    String(goalCreationMessages.at(-1)?.content ?? ''),
-    /<current_request[^>]*>[\s\S]*OK，把这些问题也发 issue 帮我。[\s\S]*<\/current_request>/,
-  );
   assert.equal(
-    goalCreationMessages.at(-1)?.name,
-    'goal_creation_current_request',
+    String(goalCreationMessages.at(-1)?.content ?? ''),
+    'OK，把这些问题也发 issue 帮我。',
   );
   assert.equal(String(goalCreationMessages[3]?.content ?? ''), '上一轮 10 个全仓库架构问题已经发布为 issue。');
   assert.match(String(goalCreationMessages[4]?.content ?? ''), /NEW_DISTRIBUTION_FINDING_A/);

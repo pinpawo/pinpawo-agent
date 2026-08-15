@@ -12,9 +12,9 @@
 | `pinpawo setup` | 诊断模型和运行时配置。 | `--workdir` |
 | `pinpawo login` / `actor` | 配置登录与 Pet identity。 | — |
 | `pinpawo server` / `run` | 启动 local host。 | `--mode chat|studio`、`--workdir`、`--stdio` |
-| `pinpawo tui` | 启动终端 UI。 | `--v2`、`--legacy`、`--check`、`--qa`、`--workdir` |
+| `pinpawo tui` | 启动终端 UI。 | `--check`、`--qa`、`--workdir` |
 | `pinpawo detect` | 输出 browser/backend 检测 JSON。 | — |
 | `pinpawo browser extension <action>` | 管理 Chrome Extension driver。 | `--extension-id` |
 | `pinpawo capability …` | 列举、校验、安装 Capability。 | `validate <dir>`、`install <dir> --link` |
 
-`run` 是 `server` 的别名。`--stdio` 使用单 peer JSONL，标准输出仅用于协议。`--v2` 与 `--legacy` 互斥；`--check`、`--qa` 需要 `--v2`，且不能同时使用。
+`run` 是 `server` 的别名。`--stdio` 使用单 peer JSONL，标准输出仅用于协议。`pinpawo tui` 启动唯一的终端客户端；`--check` 与 `--qa` 不能同时使用。

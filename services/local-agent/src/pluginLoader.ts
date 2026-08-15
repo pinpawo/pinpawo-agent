@@ -5,7 +5,7 @@ import {
   type AgentToolkit,
   validateToolkitDefinition,
 } from '@pinpawo/pet-agent';
-import { resolveToolkitAvailability } from './toolkits/toolkitAvailability';
+import type { ToolkitDefinitionSource } from './toolkits/toolkitInventory';
 
 export type LocalAgentPlugin = {
   name: string;
@@ -14,33 +14,32 @@ export type LocalAgentPlugin = {
 const PLUGINS_DIR = resolve(homedir(), '.pinpawo', 'plugins');
 
 export type LoadedLocalPlugins = {
-  toolkitDefinitions: AgentToolkit[];
-  toolkits: AgentToolkit[];
+  toolkitSources: ToolkitDefinitionSource[];
   plugins: LocalAgentPlugin[];
 };
 
 function emptyLocalPlugins(): LoadedLocalPlugins {
   return {
-    toolkitDefinitions: [],
-    toolkits: [],
+    toolkitSources: [],
     plugins: [],
   };
 }
 
-export async function loadPlugins(options: { resolveAvailability?: boolean } = {}): Promise<LoadedLocalPlugins> {
-  return loadPluginsFromDir(PLUGINS_DIR, options);
+export async function loadPlugins(): Promise<LoadedLocalPlugins> {
+  return loadPluginsFromDir(PLUGINS_DIR);
 }
 
 export async function loadPluginsFromDir(
   pluginsDir: string,
-  options: { resolveAvailability?: boolean } = {},
 ): Promise<LoadedLocalPlugins> {
   if (!existsSync(pluginsDir)) return emptyLocalPlugins();
 
-  const files = readdirSync(pluginsDir).filter((file) => file.endsWith('.mjs') || file.endsWith('.js'));
+  const files = readdirSync(pluginsDir)
+    .filter((file) => file.endsWith('.mjs') || file.endsWith('.js'))
+    .sort();
   if (files.length === 0) return emptyLocalPlugins();
 
-  const toolkits: AgentToolkit[] = [];
+  const toolkitSources: ToolkitDefinitionSource[] = [];
   const plugins: LocalAgentPlugin[] = [];
 
   for (const file of files) {
@@ -54,11 +53,23 @@ export async function loadPluginsFromDir(
         continue;
       }
 
-      if (Array.isArray(mod.toolkits)) {
-        toolkits.push(...(mod.toolkits as AgentToolkit[]));
+      const loadedPlugin = plugin as LocalAgentPlugin;
+      const definitions = Array.isArray(mod.toolkits)
+        ? mod.toolkits as AgentToolkit[]
+        : [];
+      if (definitions.length > 0) {
+        toolkitSources.push(Object.freeze({
+          // The Host source identity describes where definitions came from,
+          // not the plugin's user-facing display name. The file name is
+          // deterministic, unique within the plugin directory, and actionable
+          // when inventory validation reports a collision.
+          id: file,
+          kind: 'plugin',
+          definitions: Object.freeze([...definitions]),
+        }));
       }
 
-      plugins.push(plugin as LocalAgentPlugin);
+      plugins.push(loadedPlugin);
       const toolCount = Array.isArray(mod.tools) ? mod.tools.length : 0;
       const toolkitCount = Array.isArray(mod.toolkits) ? mod.toolkits.length : 0;
       const ignoredTools = toolCount > 0 ? `, ignored ${toolCount} unsupported tools export${toolCount !== 1 ? 's' : ''}` : '';
@@ -68,30 +79,12 @@ export async function loadPluginsFromDir(
     }
   }
 
-  toolkits.forEach(validateToolkitDefinition);
-  if (options.resolveAvailability === false) {
-    return {
-      toolkitDefinitions: toolkits,
-      toolkits: [...toolkits],
-      plugins,
-    };
-  }
-  const availabilityRecords = await Promise.all(
-    toolkits.map((toolkit) => resolveToolkitAvailability(toolkit)),
-  );
-  for (const { toolkit, availability } of availabilityRecords) {
-    if (!availability.available) {
-      console.warn(
-        `[plugins] Toolkit "${toolkit.name}" unavailable: ${availability.reason}`,
-      );
-    }
+  for (const source of toolkitSources) {
+    source.definitions.forEach(validateToolkitDefinition);
   }
 
   return {
-    toolkitDefinitions: toolkits,
-    toolkits: availabilityRecords
-      .filter(({ availability }) => availability.available)
-      .map(({ toolkit }) => toolkit),
+    toolkitSources,
     plugins,
   };
 }

@@ -43,6 +43,7 @@ import {
   prepareAgentRegistry,
   type CapabilityDiagnosticReporter,
 } from './agentRegistryPreparation';
+import type { ToolkitInventoryEntry } from './toolkits/toolkitInventory';
 
 function buildActor(context: AgentContext) {
   return {
@@ -138,8 +139,8 @@ export function buildLocalChatAgentInput(params: {
   /** Cache identity for hosts that key a graph to one durable session ledger. */
   sessionContextCacheKey?: string;
   toolkits?: AgentToolkit[];
-  /** Complete host Toolkit definitions, including currently unavailable instances. */
-  toolkitDefinitions?: readonly AgentToolkit[];
+  /** Complete Host inventory projection, including unavailable Toolkits and reasons. */
+  toolkitInventoryEntries?: readonly ToolkitInventoryEntry[];
   toolkitRuntimeManager?: ToolkitRuntimeManager;
   /** Host-owned diagnostic reporter whose dedupe state follows the host lifecycle. */
   reportCapabilityDiagnostics?: CapabilityDiagnosticReporter;
@@ -175,7 +176,10 @@ export function buildLocalChatAgentInput(params: {
   const actor = buildActor(params.context);
   const models = buildLocalAgentModels(llmConfig);
   const generationReserveTokens = resolveLlmGenerationReserveTokens(llmConfig);
-  const sharedToolkits: AgentToolkit[] = [
+  // These definitions are derived from invocation-local actor or artifact
+  // state. They overlay the Host inventory for this compiled run; they are
+  // not a second Host Toolkit inventory.
+  const invocationToolkits: AgentToolkit[] = [
     createPetProfileToolkit({
       actor,
       profileText: params.context.context.petMemoryText,
@@ -190,7 +194,7 @@ export function buildLocalChatAgentInput(params: {
 
   if (isCapabilityEnabled('capability_creator')) {
     appendCapability(capabilities, createCapabilityCreatorCapability());
-    sharedToolkits.push(createCapabilityCreatorToolkit());
+    invocationToolkits.push(createCapabilityCreatorToolkit());
   }
 
   for (const capability of params.extraCapabilities ?? []) {
@@ -208,7 +212,7 @@ export function buildLocalChatAgentInput(params: {
     appendCapability(capabilities, capability);
   }
   const baseToolkits = [
-    ...sharedToolkits,
+    ...invocationToolkits,
     ...(params.toolkits ?? []),
   ];
   const preparedRegistry = prepareAgentRegistry({
@@ -219,7 +223,7 @@ export function buildLocalChatAgentInput(params: {
   });
   params.reportCapabilityDiagnostics?.(
     preparedRegistry.registry,
-    params.toolkitDefinitions,
+    params.toolkitInventoryEntries,
   );
 
   return {

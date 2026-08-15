@@ -42,6 +42,9 @@ import {
   createTestModelServerDeps,
 } from '../../local-agent/src/testing/modelProfiles';
 import {
+  createTestHostToolkitInventory,
+} from '../../local-agent/src/testing/toolkitInventory';
+import {
   createBashToolkit,
   createGitToolkit,
 } from '../../local-agent/src/toolkits/local/index';
@@ -90,8 +93,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
       model: 'host-integration-model',
       contextWindowTokens: 32_000,
     }),
-    localToolkitDefinitions: REQUIRED_TOOLKITS,
-    localToolkits: REQUIRED_TOOLKITS,
+    toolkitInventory: createTestHostToolkitInventory(REQUIRED_TOOLKITS),
     capabilityArtifactStore: new FileCapabilityArtifactStore(
       runtimeConfig.capabilityArtifactRoot,
     ),

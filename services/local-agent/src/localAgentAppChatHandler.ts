@@ -2,7 +2,6 @@ import { WebSocket } from 'ws';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type {
   AgentCapability,
-  AgentToolkit,
   CapabilityArtifactStore,
   ReviewSpec,
   ToolkitRuntimeManager,
@@ -36,6 +35,7 @@ import {
 } from './inflightOperationRun';
 import { InflightRequestController } from './inflightRequestController';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
+import type { HostToolkitInventorySnapshot } from './toolkits/toolkitInventory';
 import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 import {
   resolveHumanReviewAction,
@@ -88,10 +88,7 @@ export type LocalAgentAppChatHandlerOptions = {
   isCurrentSocket: (ws: WebSocket) => boolean;
   getActorId: () => string;
   getModelProfiles: () => LocalModelProfileRegistry;
-  getPluginToolkitDefinitions?: () => AgentToolkit[];
-  getPluginToolkits: () => AgentToolkit[];
-  getLocalToolkitDefinitions?: () => AgentToolkit[];
-  getLocalToolkits: () => AgentToolkit[];
+  getToolkitInventory: () => HostToolkitInventorySnapshot;
   getToolkitRuntimeManager?: () => ToolkitRuntimeManager;
   getLocalCapabilities: () => AgentCapability[];
   getUserCapabilities: () => LoadedUserCapability[];
@@ -115,10 +112,7 @@ export class LocalAgentAppChatHandler {
   private readonly isCurrentSocket: (ws: WebSocket) => boolean;
   private readonly getActorId: () => string;
   private readonly getModelProfiles: () => LocalModelProfileRegistry;
-  private readonly getPluginToolkitDefinitions: () => AgentToolkit[];
-  private readonly getPluginToolkits: () => AgentToolkit[];
-  private readonly getLocalToolkitDefinitions: () => AgentToolkit[];
-  private readonly getLocalToolkits: () => AgentToolkit[];
+  private readonly getToolkitInventory: () => HostToolkitInventorySnapshot;
   private readonly getToolkitRuntimeManager: () => ToolkitRuntimeManager | undefined;
   private readonly getLocalCapabilities: () => AgentCapability[];
   private readonly getUserCapabilities: () => LoadedUserCapability[];
@@ -147,10 +141,7 @@ export class LocalAgentAppChatHandler {
     this.isCurrentSocket = options.isCurrentSocket;
     this.getActorId = options.getActorId;
     this.getModelProfiles = options.getModelProfiles;
-    this.getPluginToolkitDefinitions = options.getPluginToolkitDefinitions ?? (() => []);
-    this.getPluginToolkits = options.getPluginToolkits;
-    this.getLocalToolkitDefinitions = options.getLocalToolkitDefinitions ?? (() => []);
-    this.getLocalToolkits = options.getLocalToolkits;
+    this.getToolkitInventory = options.getToolkitInventory;
     this.getToolkitRuntimeManager = options.getToolkitRuntimeManager ?? (() => undefined);
     this.getLocalCapabilities = options.getLocalCapabilities;
     this.getUserCapabilities = options.getUserCapabilities;
@@ -703,15 +694,13 @@ export class LocalAgentAppChatHandler {
   private buildSetup(ctx: AgentContext, userMessage: string, userId: string): AgentChannelSetup {
     const threadId = this.getChatThreadId(userId);
     const modelProfiles = this.getModelProfiles();
+    const toolkitInventory = this.getToolkitInventory();
     return this.buildChatSetup({
       context: ctx,
       userMessage,
       llmConfig: modelProfiles.resolve(),
-      toolkits: [...this.getPluginToolkits(), ...this.getLocalToolkits()],
-      toolkitDefinitions: [
-        ...this.getPluginToolkitDefinitions(),
-        ...this.getLocalToolkitDefinitions(),
-      ],
+      toolkits: [...toolkitInventory.effectiveToolkits],
+      toolkitInventoryEntries: toolkitInventory.entries,
       toolkitRuntimeManager: this.getToolkitRuntimeManager(),
       reportCapabilityDiagnostics: this.reportCapabilityDiagnostics,
       extraCapabilities: this.getLocalCapabilities(),

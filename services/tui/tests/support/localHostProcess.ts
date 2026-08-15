@@ -14,6 +14,9 @@ import {
   createTestModelServerDeps,
 } from '../../../local-agent/src/testing/modelProfiles';
 import {
+  createTestHostToolkitInventory,
+} from '../../../local-agent/src/testing/toolkitInventory';
+import {
   createBashToolkit,
   createGitToolkit,
 } from '../../../local-agent/src/toolkits/local/index';
@@ -56,8 +59,7 @@ const transport = await startLocalServer(requestedPort, {
     model: 'process-restart-model',
     contextWindowTokens: 32_000,
   }),
-  localToolkitDefinitions: toolkits,
-  localToolkits: toolkits,
+  toolkitInventory: createTestHostToolkitInventory(toolkits),
   capabilityArtifactStore: new FileCapabilityArtifactStore(
     runtimeConfig.capabilityArtifactRoot,
   ),

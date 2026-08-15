@@ -14,8 +14,6 @@ import {
   type ToolAutoAuthorizationContext,
   type ToolReviewPolicy,
 } from '@pinpawo/pet-agent';
-import { createOperationRegistryFromToolkits } from '../../events/operationRegistry';
-import type { LocalAgentPlugin } from '../../pluginLoader';
 import {
   applyPatchTool,
   copyPathTool,
@@ -73,13 +71,6 @@ const bashToolkitTools: StructuredTool[] = [
   getCurrentTimeTool,
   runShellTool,
   ...processTools,
-];
-
-const coreLocalTools: StructuredTool[] = [
-  ...localUtilityTools,
-  ...gitTools,
-  getCurrentTimeTool,
-  runShellTool,
 ];
 
 function createToolDefinitions(
@@ -256,24 +247,3 @@ export function createGitToolkit(): AgentToolkit {
     },
   });
 }
-
-export const localToolOperationRegistry = createOperationRegistryFromToolkits([
-  createBashToolkit(),
-  createGitToolkit(),
-]);
-
-let cachedCoreLocalTools: StructuredTool[] | null = null;
-
-export async function loadCoreLocalTools(): Promise<StructuredTool[]> {
-  if (cachedCoreLocalTools) {
-    return cachedCoreLocalTools;
-  }
-
-  cachedCoreLocalTools = coreLocalTools;
-
-  return cachedCoreLocalTools;
-}
-
-export const localPlugin: LocalAgentPlugin = {
-  name: 'local-cli',
-};

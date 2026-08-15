@@ -822,7 +822,7 @@ export function createLocalServerHandlers(
         loadSnapshot,
         listSessions,
         resumeSession,
-        updateCapabilities: (patch) => runtimeDeps.updateCapabilities(patch),
+        updateExtensions: (patch) => runtimeDeps.updateExtensions(patch),
       });
     },
   };

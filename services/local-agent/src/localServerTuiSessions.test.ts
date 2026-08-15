@@ -24,6 +24,7 @@ import {
   createTestModelProfiles,
   createTestModelServerDeps,
 } from './testing/modelProfiles';
+import { HostToolkitInventoryStore } from './toolkits/toolkitInventory';
 
 const TEST_MODEL_PROFILE_ID = 'test-profile';
 
@@ -369,6 +370,7 @@ test('runtime config updates reach the next chat setup through the normalized de
     globalReviewPolicyMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     workdir: '/tmp/pinpawo-policy-update',
+    toolkitInventory: new HostToolkitInventoryStore(),
     capabilityArtifactStore: testArtifactStore,
   });
   const context = {

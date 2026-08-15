@@ -7,20 +7,14 @@ import {
   type CapabilityArtifactStore,
   type CompiledAgentRegistry,
   type ExecutorCompilationIssue,
-  type ToolkitAvailability,
 } from '@pinpawo/pet-agent';
 import { createArtifactDiscoveryToolkit } from './toolkits/local';
-import { getCachedToolkitAvailability } from './toolkits/toolkitAvailability';
-
-type UnavailableToolkitAvailability = Extract<
-  ToolkitAvailability,
-  { available: false }
->;
+import type { ToolkitInventoryEntry } from './toolkits/toolkitInventory';
 
 /**
  * Host-facing diagnostic projection. The core compiler intentionally reports
  * only structural `unknown_toolkit`; local-agent can distinguish a definition
- * that was registered but filtered out by its cached availability result.
+ * that was registered but filtered out by the current Host inventory.
  */
 export type ProjectedExecutorCompilationIssue =
   | Exclude<ExecutorCompilationIssue, { code: 'unknown_toolkit' }>
@@ -33,7 +27,7 @@ export type ProjectedExecutorCompilationIssue =
 
 export type CapabilityDiagnosticReporter = (
   registry: CompiledAgentRegistry,
-  toolkitDefinitions?: readonly AgentToolkit[],
+  toolkitInventoryEntries?: readonly ToolkitInventoryEntry[],
 ) => void;
 
 export function prepareAgentRegistry(params: {
@@ -68,12 +62,13 @@ export function prepareAgentRegistry(params: {
 }
 
 function unavailableToolkitAvailabilityByName(
-  toolkitDefinitions: readonly AgentToolkit[],
+  toolkitInventoryEntries: readonly ToolkitInventoryEntry[],
 ) {
-  const result = new Map<string, UnavailableToolkitAvailability>();
-  for (const toolkit of toolkitDefinitions) {
-    const availability = getCachedToolkitAvailability(toolkit);
-    if (availability?.available === false && !result.has(toolkit.name)) {
+  const result = new Map<string, Extract<ToolkitInventoryEntry['availability'], {
+    available: false;
+  }>>();
+  for (const { toolkit, availability } of toolkitInventoryEntries) {
+    if (availability.available === false && !result.has(toolkit.name)) {
       result.set(toolkit.name, availability);
     }
   }
@@ -82,9 +77,9 @@ function unavailableToolkitAvailabilityByName(
 
 export function projectExecutorCompilationIssues(
   issues: readonly ExecutorCompilationIssue[],
-  toolkitDefinitions: readonly AgentToolkit[] = [],
+  toolkitInventoryEntries: readonly ToolkitInventoryEntry[] = [],
 ): ProjectedExecutorCompilationIssue[] {
-  const unavailableByName = unavailableToolkitAvailabilityByName(toolkitDefinitions);
+  const unavailableByName = unavailableToolkitAvailabilityByName(toolkitInventoryEntries);
   return issues.map((issue) => {
     if (issue.code !== 'unknown_toolkit') return issue;
     const availability = unavailableByName.get(issue.toolkitName);
@@ -114,7 +109,7 @@ export function createCapabilityDiagnosticReporter(
 ): CapabilityDiagnosticReporter {
   const reportedByCapability = new Map<string, string>();
 
-  return (registry, toolkitDefinitions = []) => {
+  return (registry, toolkitInventoryEntries = []) => {
     const currentCapabilityNames = new Set([
       ...registry.capabilities.map(({ capability }) => capability.name),
       ...registry.unavailableCapabilities.map(({ capability }) => capability.name),
@@ -132,7 +127,7 @@ export function createCapabilityDiagnosticReporter(
       const formattedIssues = formatProjectedIssues(
         projectExecutorCompilationIssues(
           unavailable.issues,
-          toolkitDefinitions,
+          toolkitInventoryEntries,
         ),
       );
       if (reportedByCapability.get(unavailable.capability.name) === formattedIssues) {

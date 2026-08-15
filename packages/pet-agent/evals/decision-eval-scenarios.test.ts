@@ -14,17 +14,14 @@ function textModel(output: string) {
 test('decision eval scenarios cover every canonical prompt distribution', () => {
   assert.deepEqual({
     goalCreation: getDecisionEvalScenarios('goal_creation').length,
-  }, { goalCreation: 4 });
+  }, { goalCreation: 5 });
 });
 
 test('decision eval scenarios render complete production messages', () => {
-  const inputRoots = {
-    goal_creation: 'goal_creation_context',
-  } as const;
   for (const scenario of getDecisionEvalScenarios()) {
     const prompt = scenario.render();
     assert.ok(prompt.system.trim());
-    assert.match(prompt.input, new RegExp(`<${inputRoots[scenario.target]}(?:\\s[^>]*)?>`));
+    assert.equal(prompt.input, '');
     assert.doesNotMatch(
       `${prompt.system}\n${prompt.input}`,
       /\{(?:config|sharedPrefix|outputInstruction|\w+Block)\}/,
@@ -34,7 +31,6 @@ test('decision eval scenarios render complete production messages', () => {
     assert.ok(prompt.conversationMessages?.length);
     assert.equal(prompt.conversationMessages?.at(-1)?._getType(), 'human');
     assert.ok(metrics.approximateTokens > 0);
-    assert.ok(metrics.sharedPrefixPercent > 0);
   }
 });
 

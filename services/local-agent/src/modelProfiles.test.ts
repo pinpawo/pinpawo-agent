@@ -75,6 +75,50 @@ test('Qwen 3.8 Max has a Token Plan-specific preset', () => {
   assert.equal(inferLlmModelPreset('qwen3.7-max')?.key, 'qwen');
 });
 
+test('Kimi Code K3 preset accepts image input', () => {
+  const preset = findLlmModelPresetByKey('kimi-code');
+
+  assert.equal(preset?.model, 'k3');
+  assert.deepEqual(preset?.inputModalities, ['text', 'image']);
+});
+
+test('Kimi Code K3 preset refreshes image support for an existing stored profile', () => {
+  const snapshot = buildModelProfileRegistry({
+    stored: storedConfig({
+      primary: storedProfile({
+        provider: 'kimi-code',
+        sourcePreset: 'kimi-code',
+        model: 'k3',
+        baseUrl: 'https://api.kimi.com/coding/v1',
+        contextWindowTokens: 1_048_576,
+        inputModalities: ['text'],
+      }),
+    }),
+    env: {},
+  });
+  const registry = createLocalModelProfileRegistry({ snapshot });
+
+  assert.deepEqual(registry.resolve().inputModalities, ['text', 'image']);
+  assert.deepEqual(registry.listAvailable()[0]?.inputModalities, ['text', 'image']);
+});
+
+test('mismatched preset provenance does not refresh input modalities', () => {
+  const snapshot = buildModelProfileRegistry({
+    stored: storedConfig({
+      primary: storedProfile({
+        sourcePreset: 'kimi-code',
+        model: 'custom-text-model',
+        inputModalities: ['text'],
+      }),
+    }),
+    env: {},
+  });
+  const registry = createLocalModelProfileRegistry({ snapshot });
+
+  assert.deepEqual(registry.resolve().inputModalities, ['text']);
+  assert.deepEqual(registry.listAvailable()[0]?.inputModalities, ['text']);
+});
+
 test('Qwen preset output limits backfill older stored profiles at runtime', () => {
   const snapshot = buildModelProfileRegistry({
     stored: storedConfig({

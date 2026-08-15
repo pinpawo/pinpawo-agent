@@ -8,7 +8,11 @@ import {
   type ModelProfileSummary,
 } from './modelProfiles';
 import { loadStoredConfig } from './storage';
-import { findLlmModelPresetByKey } from './llmModelPresets';
+import {
+  findLlmModelPresetByKey,
+  inferLlmModelPreset,
+  type LlmModelPreset,
+} from './llmModelPresets';
 
 type ModelIndependentLlmConfig = Omit<
   AgentLlmConfig,
@@ -30,6 +34,25 @@ export type LocalModelProfileRegistry = Readonly<{
   resolve: (profileId?: string) => Readonly<AgentLlmConfig>;
   listAvailable: () => readonly ModelProfileSummary[];
 }>;
+
+function findMatchingSourcePreset(
+  profile: ReturnType<typeof resolveModelProfile>,
+): LlmModelPreset | undefined {
+  if (!profile.sourcePreset) return undefined;
+  const preset = findLlmModelPresetByKey(profile.sourcePreset);
+  return preset?.key === inferLlmModelPreset(profile.model)?.key
+    ? preset
+    : undefined;
+}
+
+function withPresetInputModalities(
+  profile: ReturnType<typeof resolveModelProfile>,
+) {
+  const preset = findMatchingSourcePreset(profile);
+  return preset
+    ? { ...profile, inputModalities: preset.inputModalities }
+    : profile;
+}
 
 function readModelIndependentLlmConfig(): ModelIndependentLlmConfig {
   const config = getConfig();
@@ -67,11 +90,12 @@ export function createLocalModelProfileRegistry(options: {
     defaultProfileId,
     resolve: (profileId = defaultProfileId) => {
       const profile = resolveModelProfile(options.snapshot, profileId);
+      const effectiveProfile = withPresetInputModalities(profile);
       const preset = profile.sourcePreset
         ? findLlmModelPresetByKey(profile.sourcePreset)
         : undefined;
       const maxOutputTokens = profile.maxOutputTokens ?? preset?.maxOutputTokens;
-      const fingerprint = fingerprintModelProfile(profile).fingerprint;
+      const fingerprint = fingerprintModelProfile(effectiveProfile).fingerprint;
       return Object.freeze({
         ...llmDefaults,
         apiKey: profile.apiKey,
@@ -79,7 +103,7 @@ export function createLocalModelProfileRegistry(options: {
         model: profile.model,
         modelProfileId: profile.id,
         modelProfileFingerprint: fingerprint,
-        inputModalities: profile.inputModalities,
+        inputModalities: effectiveProfile.inputModalities,
         ...(profile.structuredOutputMethod
           ? { structuredOutputMethod: profile.structuredOutputMethod }
           : {}),
@@ -91,7 +115,9 @@ export function createLocalModelProfileRegistry(options: {
       });
     },
     listAvailable: () => Object.freeze(
-      Object.values(options.snapshot.profiles).map(summarizeModelProfile),
+      Object.values(options.snapshot.profiles)
+        .map(withPresetInputModalities)
+        .map(summarizeModelProfile),
     ),
   });
 }

@@ -59,7 +59,11 @@ export async function loadPluginsFromDir(
         : [];
       if (definitions.length > 0) {
         toolkitSources.push(Object.freeze({
-          id: loadedPlugin.name,
+          // The Host source identity describes where definitions came from,
+          // not the plugin's user-facing display name. The file name is
+          // deterministic, unique within the plugin directory, and actionable
+          // when inventory validation reports a collision.
+          id: file,
           kind: 'plugin',
           definitions: Object.freeze([...definitions]),
         }));

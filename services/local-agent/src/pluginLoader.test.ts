@@ -48,7 +48,7 @@ export default { name: 'valid-plugin' };
     ['sample_toolkit'],
   );
   assert.deepEqual(result.toolkitSources.map(({ id, kind }) => ({ id, kind })), [{
-    id: 'valid-plugin',
+    id: 'valid-plugin.mjs',
     kind: 'plugin',
   }]);
   assert.equal(
@@ -57,7 +57,7 @@ export default { name: 'valid-plugin' };
   );
 });
 
-test('loadPluginsFromDir emits deterministic Toolkit source order', async () => {
+test('loadPluginsFromDir uses deterministic plugin files as Toolkit source identities', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-plugins-order-'));
   const pluginModule = (name: string, toolkitName: string) => `${toolModulePrelude()}
 export const toolkits = [{
@@ -69,20 +69,20 @@ export default { name: ${JSON.stringify(name)} };
 `;
   await fs.writeFile(
     path.join(root, 'z-plugin.mjs'),
-    pluginModule('z-plugin', 'z_toolkit'),
+    pluginModule('shared-display-name', 'z_toolkit'),
     'utf8',
   );
   await fs.writeFile(
     path.join(root, 'a-plugin.mjs'),
-    pluginModule('a-plugin', 'a_toolkit'),
+    pluginModule('shared-display-name', 'a_toolkit'),
     'utf8',
   );
 
   const result = await loadPluginsFromDir(root);
 
   assert.deepEqual(result.toolkitSources.map(({ id }) => id), [
-    'a-plugin',
-    'z-plugin',
+    'a-plugin.mjs',
+    'z-plugin.mjs',
   ]);
 });
 

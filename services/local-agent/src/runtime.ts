@@ -39,6 +39,7 @@ import { createBashToolkit, createGitToolkit } from './toolkits/local';
 import {
   buildHostToolkitInventory,
   HostToolkitInventoryStore,
+  reportUnavailableToolkitAvailability,
 } from './toolkits/toolkitInventory';
 import { browserIntegration } from './browserIntegration';
 
@@ -153,7 +154,7 @@ export class LocalAgentRuntime {
     }
     const { toolkitSources } = await loadPlugins();
     this.modelProfiles = buildLocalModelProfileRegistry();
-    this.toolkitInventory.replace(await buildHostToolkitInventory({
+    const toolkitInventory = await buildHostToolkitInventory({
       sources: [
         ...toolkitSources,
         {
@@ -169,7 +170,9 @@ export class LocalAgentRuntime {
       startToolkitRuntimes: async (definitions) => {
         await this.toolkitRuntimeManager.start(definitions);
       },
-    }));
+    });
+    this.toolkitInventory.replace(toolkitInventory);
+    reportUnavailableToolkitAvailability(toolkitInventory);
     await this.capabilityRegistry.load();
     this.actorId = await ensureActorSelected({ interactive: false });
     this.actorName = getConfig().apiConnected ? loadSelectedActorName() : LOCAL_ONLY_ACTOR_NAME;

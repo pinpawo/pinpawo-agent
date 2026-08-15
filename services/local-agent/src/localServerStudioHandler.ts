@@ -69,9 +69,9 @@ export class LocalServerStudioHandler<Peer extends object> {
 
   private getStudio(deps: LocalServerDeps): Promise<BuildStudioResult> {
     const workdir = getLocalServerWorkdir(deps);
-    const toolkitInventory = getLocalServerToolkitInventory(deps);
     const existing = this.studios.get(workdir);
     if (existing) return existing;
+    const toolkitInventory = getLocalServerToolkitInventory(deps);
 
     const pending = this.buildStudio({
       modelProfiles: deps.modelProfiles,

@@ -161,6 +161,23 @@ export async function buildHostToolkitInventory(
   return snapshotEntries(entries);
 }
 
+/**
+ * Report selected Toolkit definitions that are unavailable in the current
+ * Host environment. This is static availability, not live Runtime diagnostics.
+ */
+export function reportUnavailableToolkitAvailability(
+  inventory: HostToolkitInventorySnapshot,
+  warn: (message: string) => void = console.warn,
+): void {
+  for (const { toolkit, provenance, availability } of inventory.entries) {
+    if (availability.available) continue;
+    warn(
+      `[toolkits] Toolkit "${toolkit.name}" unavailable `
+      + `(${describeProvenance(provenance)}): ${availability.reason}`,
+    );
+  }
+}
+
 function updateHostToolkitInventoryAvailability(
   inventory: HostToolkitInventorySnapshot,
   toolkitName: string,

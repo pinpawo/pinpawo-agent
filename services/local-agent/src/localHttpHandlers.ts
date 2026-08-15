@@ -62,10 +62,10 @@ export function handleLocalHttpRequest(
 
     const refreshToolkitName = url.searchParams.get('refresh_toolkit');
     if (refreshToolkitName) {
-      refreshRuntimeToolkit(deps, refreshToolkitName).then(() => {
+      refreshToolkitAvailability(deps, refreshToolkitName).then(() => {
         writeHealth();
       }).catch((error: unknown) => {
-        markRuntimeToolkitUnavailable(
+        markToolkitUnavailable(
           deps,
           refreshToolkitName,
           error instanceof Error ? error.message : 'availability refresh failed',
@@ -177,7 +177,7 @@ function parsePositiveInteger(value: string | null): number | undefined {
   return parsed;
 }
 
-function markRuntimeToolkitUnavailable(
+function markToolkitUnavailable(
   deps: LocalServerDeps,
   name: string,
   reason: string,
@@ -185,7 +185,7 @@ function markRuntimeToolkitUnavailable(
   deps.toolkitInventory.updateAvailability(name, { available: false, reason });
 }
 
-async function refreshRuntimeToolkit(
+async function refreshToolkitAvailability(
   deps: LocalServerDeps,
   name: string,
 ): Promise<void> {

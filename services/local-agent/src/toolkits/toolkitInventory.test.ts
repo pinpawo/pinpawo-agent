@@ -6,6 +6,7 @@ import { z } from 'zod';
 import {
   buildHostToolkitInventory,
   HostToolkitInventoryStore,
+  reportUnavailableToolkitAvailability,
 } from './toolkitInventory';
 import { createBashToolkit, createGitToolkit } from './local';
 import { createOperationRegistryForLocalServerDeps } from '../runtimeOperationRegistry';
@@ -130,6 +131,25 @@ test('buildHostToolkitInventory starts all definitions before availability evalu
     'start:plugin,bash',
     'availability:plugin',
     'availability:bash',
+  ]);
+});
+
+test('reports unavailable Toolkits uniformly with actionable provenance', async () => {
+  const inventory = await buildHostToolkitInventory({
+    sources: [
+      { id: 'offline-plugin.mjs', kind: 'plugin', definitions: [toolkit('plugin', false)] },
+      { id: 'local-agent', kind: 'host_builtin', definitions: [toolkit('bash', false)] },
+    ],
+  });
+  const warnings: string[] = [];
+
+  reportUnavailableToolkitAvailability(inventory, (message) => warnings.push(message));
+
+  assert.deepEqual(warnings, [
+    '[toolkits] Toolkit "plugin" unavailable '
+      + '(plugin source "offline-plugin.mjs" definition 0): plugin offline',
+    '[toolkits] Toolkit "bash" unavailable '
+      + '(host_builtin source "local-agent" definition 0): bash offline',
   ]);
 });
 

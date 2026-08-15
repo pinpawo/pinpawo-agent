@@ -1589,6 +1589,15 @@ function submitComposerInput(input = composer.plainText) {
       }
       return;
     }
+    case 'refresh-session': {
+      clearComposerPreservingNotice();
+      const result = controller.refreshSession();
+      localNotice = result.ok
+        ? 'refreshing session snapshot…'
+        : submitFailureText(result.reason);
+      refreshStatus();
+      return;
+    }
     case 'compact-session':
       clearComposerPreservingNotice();
       localNotice = 'compaction request sent · summarizing older context…';

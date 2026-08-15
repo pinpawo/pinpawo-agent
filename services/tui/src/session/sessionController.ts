@@ -236,6 +236,14 @@ export class TuiSessionController {
     return this.submitChatWithTransition(message, [], 'resume_active');
   }
 
+  refreshSession(): { ok: true } | { ok: false; reason: 'not-ready' } {
+    if (this.state.connection !== 'ready' || !this.transport.isConnected()) {
+      return { ok: false, reason: 'not-ready' };
+    }
+    this.transport.requestCompletionSnapshot();
+    return { ok: true };
+  }
+
   private submitChatWithTransition(
     message: string,
     attachments: readonly AgentLocalAttachment[],

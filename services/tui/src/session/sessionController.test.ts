@@ -144,6 +144,48 @@ test('TuiSessionController synchronizes one session and projects a chat run', ()
   controller.stop();
 });
 
+test('manual refresh requests a snapshot without waiting for the active run', () => {
+  const requestIds = ['startup', 'chat', 'refresh'];
+  let connection!: FakeConnection;
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => requestIds.shift() ?? 'unexpected',
+  });
+
+  controller.start();
+  connection.open();
+  connection.receive(snapshotResult('startup', 'chat:one'));
+  assert.equal(controller.submitChat('still running').ok, true);
+
+  assert.deepEqual(controller.refreshSession(), { ok: true });
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'session.snapshot.get',
+    requestId: 'refresh',
+  });
+  connection.receive({
+    type: 'session.snapshot.result',
+    requestId: 'refresh',
+    snapshot: createAgentSessionSnapshot({
+      sessionId: 'chat:one',
+      kind: 'chat',
+      timeline: [{
+        id: 'final',
+        type: 'message',
+        role: 'assistant',
+        text: 'latest snapshot reply',
+        status: 'completed',
+      }],
+      activeRun: null,
+    }),
+  });
+
+  assert.equal(controller.getState().session.activeRun?.requestId, 'chat');
+  controller.stop();
+});
+
 test('startup snapshot restores active run ownership for following activity events', () => {
   let connection!: FakeConnection;
   const controller = new TuiSessionController({

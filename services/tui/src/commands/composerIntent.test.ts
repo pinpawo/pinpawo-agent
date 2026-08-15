@@ -64,6 +64,14 @@ test('composer intent routes manual context compaction', () => {
   }), { type: 'compact-session' });
 });
 
+test('composer intent routes a session snapshot refresh', () => {
+  assert.deepEqual(resolveComposerIntent({
+    text: '/refresh',
+    attachmentCount: 0,
+    mode: 'chat',
+  }), { type: 'refresh-session' });
+});
+
 test('composer intent requires continuation guidance before execution', () => {
   assert.deepEqual(resolveComposerIntent({
     text: '/continue',

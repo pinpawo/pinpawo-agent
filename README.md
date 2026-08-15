@@ -168,8 +168,7 @@ A complete `LLM_API_KEY` + `LLM_BASE_URL` + `LLM_MODEL` tuple creates an ephemer
 | `pinpawo login` | Configure credentials and model settings. |
 | `pinpawo setup` | Diagnose configuration and show next steps. |
 | `pinpawo actor` | Select the local pet actor. |
-| `pinpawo tui` | Start the legacy Ink terminal client. |
-| `pinpawo tui --v2` | Start the OpenTUI client. |
+| `pinpawo tui` | Start the terminal client. |
 | `pinpawo detect` | Print browser and backend detection as JSON. |
 | `pinpawo capability list` | List installed user Capabilities. |
 | `pinpawo capability validate <dir>` | Validate a Capability directory. |

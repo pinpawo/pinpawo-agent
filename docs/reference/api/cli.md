@@ -17,7 +17,7 @@
 | `pinpawo login` | Save or update local credentials and model configuration. | — |
 | `pinpawo actor` | Select the local Pet actor. | — |
 | `pinpawo server` / `pinpawo run` | Start the local host. | `--mode chat|studio`, `--workdir <directory>`, `--stdio` |
-| `pinpawo tui` | Start the terminal UI. | `--v2`, `--legacy`, `--check`, `--qa`, `--workdir <directory>` |
+| `pinpawo tui` | Start the terminal UI. | `--check`, `--qa`, `--workdir <directory>` |
 | `pinpawo detect` | Print browser/backend detection as JSON. | — |
 | `pinpawo browser extension <action>` | Manage the Chrome Extension driver. | `--extension-id <id>` |
 | `pinpawo capability list` | List installed user Capabilities. | — |
@@ -29,9 +29,8 @@
 - `pinpawo run` is an alias for `pinpawo server`.
 - `--stdio` selects one-peer JSONL stdio instead of the local HTTP/WebSocket
   server; reserve standard output for protocol messages in that mode.
-- `pinpawo tui --v2` selects the OpenTUI client. `--legacy` and `--v2` are
-  mutually exclusive. `--check` and `--qa` require `--v2` and cannot be used
-  together.
+- `pinpawo tui` starts the terminal client — the only one. `--check` and
+  `--qa` cannot be used together.
 - `--workdir` is resolved to an absolute path before the host starts. It scopes
   runtime state and relative tool paths; see [Workdir configuration](../runtime/workdir.md).
 

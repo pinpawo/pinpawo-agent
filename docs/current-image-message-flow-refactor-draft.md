@@ -23,10 +23,10 @@
 ### 2.1 从 OpenTUI v2 到主消息
 
 本文中的 TUI 专指 [`@pinpawo/tui`](../services/tui/README.md)，源码位于 `services/tui/`，通过
-`pinpawo tui --v2` 或 `npm run tui:v2 -w pinpawo` 启动。
+`pinpawo tui` 或 `npm run tui -w pinpawo` 启动。
 
-`services/local-agent` 提供 CLI launcher、认证 WebSocket host 和 agent runtime。未带 `--v2` 的
-`pinpawo tui` 当前仍进入 legacy Ink client，不属于本文分析的 UI 路径。
+`services/local-agent` 提供 CLI launcher、认证 WebSocket host 和 agent runtime；仓库只保留这一套
+终端客户端。
 
 ```text
 OpenTUI v2 选择或粘贴本地图片路径

@@ -32,7 +32,6 @@ test('public v2 QA entry drives the production waiting and timeline UI', {
       JSON.stringify(TSX_BIN),
       JSON.stringify(LOCAL_AGENT_ENTRY),
       'tui',
-      '--v2',
       '--qa',
     ].join(' '),
     'fconfigure $spawn_id -translation binary -encoding binary',

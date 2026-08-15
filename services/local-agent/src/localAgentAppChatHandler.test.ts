@@ -20,8 +20,6 @@ import { InflightRequestController } from './inflightRequestController';
 import { LocalAgentAppChatHandler } from './localAgentAppChatHandler';
 import type { ChatSessionAdapterOptions } from './chatSessionAdapter';
 import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
-import { createInitialTuiState, createSession } from './tui/state/tuiState';
-import { tuiStateReducer } from './tui/state/tuiStateReducer';
 import { createTestModelProfiles } from './testing/modelProfiles';
 
 function createFakeWebSocket(sent: unknown[]) {
@@ -345,31 +343,6 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
     true,
   );
 
-  let tuiState = createInitialTuiState(createSession({ id: hostedSession.sessionId }));
-  tuiState = tuiStateReducer(tuiState, {
-    type: 'run.start',
-    requestId: 'req-1',
-    kind: 'chat',
-    message: {
-      id: 'message:req-1:user',
-      role: 'user',
-      text: 'hello',
-      requestId: 'req-1',
-    },
-    now: 1000,
-  });
-  for (const envelope of eventMessages) {
-    tuiState = tuiStateReducer(tuiState, {
-      type: 'event.received',
-      event: envelope.event,
-      now: 1000,
-    });
-  }
-  assert.deepEqual(
-    JSON.parse(JSON.stringify(tuiState.sessions[hostedSession.sessionId]?.timeline)),
-    JSON.parse(JSON.stringify(hostedSession.timeline)),
-  );
-  assert.deepEqual(tuiState.sessions[hostedSession.sessionId]?.activeRun, hostedSession.activeRun);
 });
 
 test('LocalAgentAppChatHandler settles projected operations when a run is interrupted', async () => {
@@ -424,42 +397,6 @@ test('LocalAgentAppChatHandler settles projected operations when a run is interr
       event.type === 'operation');
   assert.deepEqual(operationEvents.map((event) => event.phase), ['started', 'interrupted']);
 
-  let tuiState = createInitialTuiState(createSession({ id: projection.sessionId }));
-  tuiState = tuiStateReducer(tuiState, {
-    type: 'run.start',
-    requestId: 'req-interrupt',
-    kind: 'chat',
-    message: {
-      id: 'message:req-interrupt:user',
-      role: 'user',
-      text: 'run tests',
-      requestId: 'req-interrupt',
-    },
-    now: 1000,
-  });
-  tuiState = tuiStateReducer(tuiState, {
-    type: 'event.received',
-    event: operationEvents[0]!,
-    now: 1000,
-  });
-  tuiState = tuiStateReducer(tuiState, {
-    type: 'run.interrupting',
-    requestId: 'req-interrupt',
-  });
-  tuiState = tuiStateReducer(tuiState, {
-    type: 'event.received',
-    event: operationEvents[1]!,
-    now: 1000,
-  });
-  tuiState = tuiStateReducer(tuiState, {
-    type: 'run.finish',
-    requestId: 'req-interrupt',
-  });
-  assert.deepEqual(
-    JSON.parse(JSON.stringify(tuiState.sessions[projection.sessionId]?.timeline)),
-    JSON.parse(JSON.stringify(projection.timeline)),
-  );
-  assert.deepEqual(tuiState.sessions[projection.sessionId]?.activeRun, projection.activeRun);
 });
 
 test('LocalAgentAppChatHandler settles the previous run before projecting replacement input', async () => {

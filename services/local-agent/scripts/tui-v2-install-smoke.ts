@@ -98,7 +98,6 @@ try {
   const probe = await runProcess(process.execPath, [
     join(installedRoot, 'dist', 'index.js'),
     'tui',
-    '--v2',
     '--check',
   ], consumerDir, {
     label: 'run the installed v2 launcher check',
@@ -131,7 +130,6 @@ async function runInstalledQaPty(
       JSON.stringify(process.execPath),
       JSON.stringify(installedEntry),
       'tui',
-      '--v2',
       '--qa',
     ].join(' '),
     'fconfigure $spawn_id -translation binary -encoding binary',

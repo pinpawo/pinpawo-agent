@@ -210,8 +210,8 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
     tools: createToolDefinitions(tools, bashToolkitOperations, reviews),
     instructions: bashToolkitInstructions.join('\n'),
     reviewGuidance: {
-      allow: 'A shell invocation is an execution mechanism, so its risk comes from the concrete command and scope. Treat commands as eligible for automatic authorization when their effects are clear and limited, including read-only inspection of explicitly named non-sensitive paths outside the current workspace, and scoped build, test, typecheck, lint, format, inspection, other reversible development operations, or deletion of explicitly named non-sensitive files inside the current workspace.',
-      ask: 'Require human authorization when a command has broad or unclear effects, deletes recursively, deletes outside the current workspace, deletes user data or sensitive files, elevates privileges, changes permissions or system services, installs or executes untrusted software, exposes credentials or data, publishes or deploys artifacts, or rewrites shared version-control history.',
+      allow: 'A shell invocation is an execution mechanism, so its risk comes from the concrete command and scope. Treat commands as eligible for automatic authorization when their effects are clear and limited, including read-only inspection of explicitly named non-sensitive paths outside the current workspace, and scoped build, test, typecheck, lint, format, inspection, other reversible development operations, or deletion of explicitly named non-sensitive files or clearly bounded generated artifacts inside the current workspace.',
+      ask: 'Require human authorization when a command has broad or unclear effects, deletes recursively with broad or unclear target scope, deletes outside the current workspace, deletes user data or sensitive files, elevates privileges, changes permissions or system services, installs or executes untrusted software, exposes credentials or data, publishes or deploys artifacts, or rewrites shared version-control history.',
     },
     runtime: {
       start: () => {

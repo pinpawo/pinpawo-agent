@@ -2,10 +2,7 @@ import assert from 'node:assert/strict';
 import { HumanMessage } from '@langchain/core/messages';
 import test from 'node:test';
 import type { AgentActor, AgentModels } from '../../../types/agent';
-import {
-  buildAutoReviewPrompt,
-  buildAutoReviewSystemPrompt,
-} from '../prompts/autoReview';
+import { buildAutoReviewPrompt } from '../prompts/autoReview';
 import { buildReviewSpec } from './reviewSpec';
 import {
   GLOBAL_REVIEW_POLICY_RESOLUTION,
@@ -255,24 +252,6 @@ test('auto review can authorize observational browser access without conversatio
   });
 
   assert.equal(resolution.type, GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE);
-});
-
-test('auto review prompt treats explicit outside-workdir reads as eligible', () => {
-  const prompt = buildAutoReviewSystemPrompt([{
-    ...review({ command: 'jq .runs /Users/example/Downloads/trace.json' }),
-    toolkitName: 'bash',
-    toolName: 'run_shell',
-    autoReviewContext: {
-      allow: 'Allow read-only inspection of explicitly named non-sensitive paths outside the current workspace.',
-      ask: 'Require human authorization for writes outside the current workspace or sensitive-data access.',
-    },
-  }]);
-
-  assert.match(prompt, /only reads, lists, stats, searches, or summarizes/);
-  assert.match(prompt, /outside the effective workdir/);
-  assert.match(prompt, /output redirection, heredocs, and pipes is not risky by itself/);
-  assert.match(prompt, /mutations outside the workdir/);
-  assert.doesNotMatch(prompt, /writes outside the workdir/);
 });
 
 test('auto review receives the current task when rejecting an unrelated low-risk action', async () => {

@@ -37,6 +37,20 @@ test('plain local chat messages keep their original model and transcript text', 
   assert.equal(readLocalChatDisplayText(message), null);
 });
 
+test('ordinary file attachments keep string content at the provider boundary', () => {
+  const message = createAdmittedLocalChatHumanMessage('review this', attachments);
+  const [providerMessage] = convertMessagesToCompletionsMessageParams({
+    messages: [message],
+  });
+
+  assert.equal(typeof message.content, 'string');
+  assert.equal(
+    (message.response_metadata as { output_version?: string }).output_version,
+    undefined,
+  );
+  assert.equal(typeof providerMessage?.content, 'string');
+});
+
 test('admitted images use durable content blocks and filename-only transcript text', () => {
   const imageData = Buffer.from('image-bytes').toString('base64');
   const message = createAdmittedLocalChatHumanMessage('describe it', [{

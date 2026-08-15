@@ -69,7 +69,9 @@ export function createAdmittedLocalChatHumanMessage(
     : modelText;
   const humanMessage = new HumanMessage({
     content,
-    response_metadata: { output_version: 'v1' },
+    ...(imageAttachments.length
+      ? { response_metadata: { output_version: 'v1' as const } }
+      : {}),
     additional_kwargs: {
       pinpawo: {
         [DISPLAY_TEXT_METADATA_KEY]: displayText,

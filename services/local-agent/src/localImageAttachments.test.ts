@@ -47,7 +47,7 @@ test('supported image MIME is determined by bounded file signatures', () => {
   );
 });
 
-test('image admission inlines a data URL and preserves ordinary files', async () => {
+test('image admission prepares a standard block payload and preserves ordinary files', async () => {
   const root = await fs.mkdtemp(join(tmpdir(), 'pinpawo-input-images-'));
   const imagePath = join(root, 'renamed.txt');
   const textPath = join(root, 'notes.png');
@@ -65,10 +65,7 @@ test('image admission inlines a data URL and preserves ordinary files', async ()
     if (admitted[0]?.source !== 'local-image') return;
     assert.equal(admitted[0].mimeType, 'image/png');
     assert.equal(admitted[0].byteSize, PNG_BYTES.length);
-    assert.equal(
-      admitted[0].uri,
-      `data:image/png;base64,${PNG_BYTES.toString('base64')}`,
-    );
+    assert.equal(admitted[0].data, PNG_BYTES.toString('base64'));
     // The admitted attachment must not leak the host path it came from.
     assert.doesNotMatch(JSON.stringify(admitted[0]), new RegExp(root));
     assert.deepEqual(admitted[1], attachment('file-1', textPath, 'notes.png'));
@@ -140,7 +137,7 @@ test('image admission enforces count and byte limits', async () => {
     const image = admitted[0];
     assert.equal(image?.source, 'local-image');
     if (image?.source !== 'local-image') return;
-    assert.match(image.uri, /^data:image\/png;base64,/);
+    assert.equal(image.data, PNG_BYTES.toString('base64'));
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

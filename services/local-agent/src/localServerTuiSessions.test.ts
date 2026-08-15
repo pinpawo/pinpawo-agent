@@ -11,6 +11,7 @@ import test from 'node:test';
 import { createEmptyTuiSessionState } from './tuiSessionRegistry';
 import {
   LocalServerTuiSessionService,
+  readTuiCheckpointInputModalities,
   readTuiCheckpointMessages,
   readTuiCheckpointTokenUsage,
   summarizeTuiCheckpointMessages,
@@ -110,6 +111,31 @@ test('readTuiCheckpointMessages uses attachment display metadata instead of loca
     'review this\n\nAttachments:\n- file: spec.md',
   );
   assert.doesNotMatch(messages[0]?.text ?? '', /Users\/example/);
+});
+
+test('checkpoint modalities normalize standard and legacy image blocks', () => {
+  const standard = new HumanMessage({
+    content: [{
+      type: 'image',
+      mimeType: 'image/png',
+      data: Buffer.from('standard').toString('base64'),
+    }],
+  });
+  const legacy = new HumanMessage({
+    content: [{
+      type: 'image_url',
+      image_url: {
+        url: `data:image/png;base64,${Buffer.from('legacy').toString('base64')}`,
+      },
+    }],
+  });
+
+  assert.deepEqual(readTuiCheckpointInputModalities([standard]), ['text', 'image']);
+  assert.deepEqual(readTuiCheckpointInputModalities([legacy]), ['text', 'image']);
+  assert.deepEqual(
+    readTuiCheckpointInputModalities([new HumanMessage('text only')]),
+    ['text'],
+  );
 });
 
 test('readTuiCheckpointTokenUsage aggregates every provider call in the session', () => {

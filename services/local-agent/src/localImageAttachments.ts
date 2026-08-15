@@ -15,7 +15,7 @@ export type AdmittedLocalImageAttachment = Readonly<{
   id: string;
   source: 'local-image';
   kind: 'image';
-  uri: string;
+  data: string;
   name: string;
   mimeType: SupportedLocalImageMimeType;
   byteSize: number;
@@ -49,9 +49,10 @@ type ClassifiedImage = {
 };
 
 /**
- * Admits user image attachments as standard data URLs. The bytes travel in the
- * message itself, so there is no separate content store to keep in sync with
- * the transcript and no reference to rehydrate before a model call.
+ * Admits user image attachments as base64 payloads for LangChain standard
+ * content blocks. The bytes travel in the message itself, so there is no
+ * separate content store to keep in sync with the transcript and no reference
+ * to rehydrate before a model call.
  */
 export class LocalImageAttachmentAdmission {
   async admit(
@@ -91,7 +92,7 @@ export class LocalImageAttachmentAdmission {
         id: image.attachment.id,
         source: 'local-image',
         kind: 'image',
-        uri: `data:${image.mimeType};base64,${image.bytes.toString('base64')}`,
+        data: image.bytes.toString('base64'),
         name: image.attachment.name,
         mimeType: image.mimeType,
         byteSize: image.bytes.length,

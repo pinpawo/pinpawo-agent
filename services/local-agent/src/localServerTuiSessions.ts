@@ -103,13 +103,7 @@ export function readTuiCheckpointInputModalities(
   messages: BaseMessage[],
 ): AgentInputModality[] {
   const hasImage = messages.some((message) => (
-    Array.isArray(message.content)
-    && message.content.some((block) => (
-      typeof block === 'object'
-      && block !== null
-      && 'type' in block
-      && (block.type === 'image' || block.type === 'image_url')
-    ))
+    message.contentBlocks.some((block) => block.type === 'image')
   ));
   return hasImage ? ['text', 'image'] : ['text'];
 }

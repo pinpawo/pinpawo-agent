@@ -347,10 +347,6 @@ export {
   SubagentProtocolToolEventReader,
 } from './subagent/protocolToolEvents';
 export {
-  isTransientModelMedia,
-  markTransientModelMedia,
-} from './subagent/transientModelMedia';
-export {
   GUARD_DECISION_EVENT,
   isGuardDecisionStreamChunk,
   type GuardDecisionStreamChunk,

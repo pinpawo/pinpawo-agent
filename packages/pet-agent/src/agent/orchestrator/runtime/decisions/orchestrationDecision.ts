@@ -11,18 +11,13 @@ import { readContextCompactionSummaries } from '../../contextCompaction';
 import { setPinpetMeta } from '../../messageLanes';
 import {
   buildCompactionSummaryXmlContext,
-  buildGoalCreationInput,
+  buildGoalCreationCurrentRequestContent,
   buildGoalCreationSystemPrompt,
-  buildRunDelegationSummaryContext,
-  buildRuntimeContext,
+  GOAL_CREATION_CURRENT_REQUEST_MESSAGE_NAME,
 } from '../../prompts';
 import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig, UserGoal } from '../../types';
 import { readMessageText } from '../../utils';
-import {
-  getInvokeOptions,
-  resolveActor,
-} from '../config';
 import { mainMessagesWithoutCompaction } from './conversationContext';
 
 export function createGoalCreationRunner(config: OrchestratorConfig) {
@@ -30,7 +25,7 @@ export function createGoalCreationRunner(config: OrchestratorConfig) {
     state: OrchestratorStateType,
     runnableConfig?: RunnableConfig,
   ) {
-    const messages = buildGoalCreationMessages({ config, state, runnableConfig });
+    const messages = buildGoalCreationMessages({ state });
     const response = await (config.models.decision ?? config.models.act).invoke(
       messages,
       runnableConfig,
@@ -58,32 +53,42 @@ export function createGoalCreationRunner(config: OrchestratorConfig) {
 }
 
 function buildGoalCreationMessages(params: {
-  config: OrchestratorConfig;
   state: OrchestratorStateType;
-  runnableConfig?: RunnableConfig;
 }) {
-  const { config, state, runnableConfig } = params;
-  const { workdir, runtimeEnvironment } = getInvokeOptions(runnableConfig);
-  const actor = resolveActor(config, runnableConfig);
+  const { state } = params;
   const contextSummaries = readContextCompactionSummaries(state.messages);
   const compactionContext = buildCompactionSummaryXmlContext(contextSummaries);
-  const conversationMessages = [
+  const mainMessages = mainMessagesWithoutCompaction(state.messages)
+    .filter((message) => message._getType() === 'human' || message._getType() === 'ai');
+  let currentRequestIndex = -1;
+  for (let index = mainMessages.length - 1; index >= 0; index -= 1) {
+    if (mainMessages[index]?._getType() === 'human') {
+      currentRequestIndex = index;
+      break;
+    }
+  }
+  const currentRequest = mainMessages[currentRequestIndex];
+  if (!currentRequest) {
+    throw new Error('Goal Creation requires a current HumanMessage.');
+  }
+  const conversationHistory = [
     ...(compactionContext ? [new AIMessage(compactionContext)] : []),
-    ...mainMessagesWithoutCompaction(state.messages)
-      .filter((message) => message._getType() === 'human' || message._getType() === 'ai'),
+    ...mainMessages.filter((_, index) => index !== currentRequestIndex),
   ];
-  const contextMessage = new HumanMessage(buildGoalCreationInput({
-    runDelegationContext: buildRunDelegationSummaryContext(state.runDelegationSummaries),
-    runtimeContext: buildRuntimeContext(workdir, runtimeEnvironment),
-  }));
-  setPinpetMeta(contextMessage, {
-    source: 'goal_creation_context',
+  const currentRequestMessage = new HumanMessage({
+    content: buildGoalCreationCurrentRequestContent(currentRequest.content),
+    additional_kwargs: currentRequest.additional_kwargs,
+    response_metadata: currentRequest.response_metadata,
+    name: GOAL_CREATION_CURRENT_REQUEST_MESSAGE_NAME,
+  });
+  setPinpetMeta(currentRequestMessage, {
+    source: GOAL_CREATION_CURRENT_REQUEST_MESSAGE_NAME,
     synthetic: true,
   });
   return [
-    new SystemMessage(buildGoalCreationSystemPrompt(actor)),
-    contextMessage,
-    ...conversationMessages,
+    new SystemMessage(buildGoalCreationSystemPrompt()),
+    ...conversationHistory,
+    currentRequestMessage,
   ];
 }
 

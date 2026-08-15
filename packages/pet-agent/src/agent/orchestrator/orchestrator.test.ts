@@ -336,7 +336,11 @@ function continueDecision(gapNote: string | null = '当前 delegated task 还未
 }
 
 test('Goal Creation reads full canonical main messages and excludes lane announces', async () => {
-  let goalCreationMessages: Array<{ _getType?: () => string; content?: unknown }> = [];
+  let goalCreationMessages: Array<{
+    _getType?: () => string;
+    content?: unknown;
+    name?: string;
+  }> = [];
   const model = {
     invoke: async (messages: unknown[]) => {
       goalCreationMessages = messages as Array<{ _getType?: () => string; content?: unknown }>;
@@ -397,17 +401,20 @@ test('Goal Creation reads full canonical main messages and excludes lane announc
 
   assert.deepEqual(
     goalCreationMessages.map((message) => message._getType?.()),
-    ['system', 'human', 'ai', 'human', 'ai', 'ai', 'human'],
+    ['system', 'ai', 'human', 'ai', 'ai', 'human'],
   );
-  const contextText = String(goalCreationMessages[1]?.content ?? '');
-  assert.match(contextText, /<goal_creation_context[^>]*>/);
-  assert.match(contextText, /trust="read_only"/);
-  assert.doesNotMatch(contextText, /<user_request>|<recent_messages>|<recent_subagent_announces>|context_summaries/);
-  assert.match(String(goalCreationMessages[2]?.content ?? ''), /COMPACTED_MAIN_CONTEXT/);
-  assert.equal(String(goalCreationMessages.at(-1)?.content ?? ''), 'OK，把这些问题也发 issue 帮我。');
-  assert.equal(String(goalCreationMessages[4]?.content ?? ''), '上一轮 10 个全仓库架构问题已经发布为 issue。');
-  assert.match(String(goalCreationMessages[5]?.content ?? ''), /NEW_DISTRIBUTION_FINDING_A/);
-  assert.match(String(goalCreationMessages[5]?.content ?? ''), /NEW_DISTRIBUTION_FINDING_B/);
+  assert.match(String(goalCreationMessages[1]?.content ?? ''), /COMPACTED_MAIN_CONTEXT/);
+  assert.match(
+    String(goalCreationMessages.at(-1)?.content ?? ''),
+    /<current_request[^>]*>[\s\S]*OK，把这些问题也发 issue 帮我。[\s\S]*<\/current_request>/,
+  );
+  assert.equal(
+    goalCreationMessages.at(-1)?.name,
+    'goal_creation_current_request',
+  );
+  assert.equal(String(goalCreationMessages[3]?.content ?? ''), '上一轮 10 个全仓库架构问题已经发布为 issue。');
+  assert.match(String(goalCreationMessages[4]?.content ?? ''), /NEW_DISTRIBUTION_FINDING_A/);
+  assert.match(String(goalCreationMessages[4]?.content ?? ''), /NEW_DISTRIBUTION_FINDING_B/);
   assert.doesNotMatch(
     goalCreationMessages.map((message) => String(message.content ?? '')).join('\n'),
     /未 handoff 的 lane announce|这条消息的正文不参与分类/,

@@ -7,8 +7,6 @@ import {
   buildPreparedRequestContext,
   buildRuntimeContext,
   buildSubagentAnnounceContext,
-  buildGoalCreationInput,
-  buildGoalCreationSystemPrompt,
 } from './prompts';
 import { buildCapabilityPlannerAgentInput } from './prompts/capabilityPlannerAgent';
 import type { CapabilityPlannerInput } from './capabilityPlanner/runner';
@@ -16,15 +14,6 @@ import type { CapabilityPlannerInput } from './capabilityPlanner/runner';
 function recentMessages(count: number) {
   return Array.from({ length: count }, (_, index) => new HumanMessage(`recent-${index}`));
 }
-
-const testActor = {
-  petId: 'pet-1',
-  userId: 'user-1',
-  name: '小白',
-  personality: '友好',
-  stage: 'adult',
-  species: 'cat',
-};
 
 test('start-loop router request context includes compaction summaries outside recent message window', () => {
   const requestContext = buildPreparedRequestContext({
@@ -236,28 +225,6 @@ test('request contexts include bounded capability artifact refs', () => {
   assert.match(requestContext, /<capability_artifacts>/);
   assert.match(requestContext, /当前会话 capability artifacts/);
   assert.match(requestContext, /继续刚才的探索/);
-});
-
-test('goal creation keeps runtime state in the input context', () => {
-  const prompt = buildGoalCreationSystemPrompt(testActor);
-  const input = buildGoalCreationInput({
-    runDelegationContext: '<run_delegations><none>true</none></run_delegations>',
-    runtimeContext: buildRuntimeContext('/repo', 'Node 20'),
-  });
-
-  assert.match(prompt, /User Goal/);
-  assert.match(prompt, /不要输出 JSON/);
-  assert.match(input, /<goal_creation_context role="fact" source="runtime_state" trust="read_only">/);
-  assert.match(input, /run_delegation_summaries/);
-  assert.match(input, /<runtime_context/);
-  assert.doesNotMatch(input, /context_summaries/);
-  assert.doesNotMatch(input, /<user_request>|<recent_messages>|<recent_subagent_announces>/);
-  assert.doesNotMatch(prompt, /\/repo|run_delegations/);
-  assert.doesNotMatch(input, /<task_plan_draft/);
-  assert.doesNotMatch(input, /capability_artifacts|artifact 短引用/);
-  assert.doesNotMatch(input, /<instruction>/);
-  assert.doesNotMatch(input, /重新规划/);
-  assert.doesNotMatch(prompt, /planner_objective|planner_context|route_to_planner/);
 });
 
 test('completed subagent announce context includes the full current result text', () => {

@@ -1,34 +1,34 @@
-import type { AgentActor } from '../../../types/agent';
+import type { BaseMessage } from '@langchain/core/messages';
+import { xmlTextBlock } from './shared';
 import {
-  buildDecisionConfig,
-  buildOrchestratorDecisionPromptPrefix,
-  promptBlock,
-  xmlTextBlock,
-} from './shared';
-import {
-  GOAL_CREATION_INPUT_PROMPT,
   GOAL_CREATION_SYSTEM_PROMPT,
 } from './templates/goalCreation.prompt';
 
-export function buildGoalCreationSystemPrompt(actor: AgentActor): string {
-  return GOAL_CREATION_SYSTEM_PROMPT.render({
-    config: buildDecisionConfig(actor),
-    sharedPrefix: buildOrchestratorDecisionPromptPrefix(),
-  });
+export const GOAL_CREATION_CURRENT_REQUEST_MESSAGE_NAME =
+  'goal_creation_current_request';
+
+export function buildGoalCreationCurrentRequestContent(
+  content: BaseMessage['content'],
+): BaseMessage['content'] {
+  const attributes = ' role="task_boundary" source="latest_human_message"';
+  if (typeof content === 'string') {
+    return xmlTextBlock('current_request', content, attributes);
+  }
+  return [
+    {
+      type: 'text',
+      text: `<current_request${attributes}>`,
+    },
+    ...content,
+    {
+      type: 'text',
+      text: '</current_request>',
+    },
+  ];
 }
 
-export function buildGoalCreationInput(params: {
-  runDelegationContext?: string | null;
-  runtimeContext?: string | null;
-}): string {
-  return GOAL_CREATION_INPUT_PROMPT.render({
-    runtimeContextBlock: promptBlock(params.runtimeContext, 2),
-    runDelegationContextBlock: promptBlock(params.runDelegationContext
-      ? xmlTextBlock(
-          'run_delegation_summaries',
-          params.runDelegationContext,
-          ' role="fact" source="state"',
-        )
-      : null, 2),
+export function buildGoalCreationSystemPrompt(): string {
+  return GOAL_CREATION_SYSTEM_PROMPT.render({
+    currentRequestMessageName: GOAL_CREATION_CURRENT_REQUEST_MESSAGE_NAME,
   });
 }

@@ -7,7 +7,9 @@ This page introduces the public boundaries of PinPawo Agent. It is a quick map,
 not a replacement for the detailed contracts linked below.
 
 For the project model, read [Core Concepts](../../concepts/core-concepts.md). For package and
-runtime relationships, read [Architecture](../../concepts/architecture.md).
+runtime relationships, read [Architecture](../../concepts/architecture.md). The accepted
+cross-host ownership rules are recorded in
+[Host / Agent / Capability / Toolkit relationships](../../design/host-agent-capability-toolkit.md).
 
 ## Public surfaces
 
@@ -31,9 +33,11 @@ runtime relationships, read [Architecture](../../concepts/architecture.md).
 3. **Capabilities own task intent; Toolkits own executable behavior.** A
    Capability declares a static Toolkit allowlist. A Toolkit provides typed
    tools, availability checks, operation metadata, and policy.
-4. **The local host owns machine integration.** CLI commands, local config,
-   Capability scanning, browser drivers, transport servers, and workdir choice
-   belong outside the runtime-independent packages.
+4. **The local host owns machine integration and assembly.** CLI commands,
+   local config, Capability/Toolkit selection, transport servers, and workdir
+   choice belong outside the runtime-independent packages. A Browser driver or
+   another Toolkit backend remains owned by that Toolkit Runtime; the Host only
+   injects config and coordinates the generic lifecycle.
 5. **Checkpoints are durable authority.** A session projection is a versioned
    materialized client view; it is not a second conversation store.
 

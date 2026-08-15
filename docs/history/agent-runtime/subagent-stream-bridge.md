@@ -176,13 +176,13 @@ What changed, per surface:
 - **Guard decision records** ride the stream writer (`getWriter()`) with the
   shared `{ event: 'on_runtime_event', name, data }` envelope and surface as
   root `custom` protocol events (`SUBAGENT_GUARD_DECISION_EVENT`).
-- **Per-delegation operations** (`SubagentRunInput.operations`, e.g. a
-  capability's private toolset metadata) are announced through the writer as
+- **Per-delegation operations** (`SubagentRunInput.operations`, now collected
+  from the Capability's resolved Toolkit definitions) are announced through the writer as
   `SUBAGENT_OPERATIONS_EVENT`; local-agent overlays them on the request's
   operation registry (`acceptDelegationOperations` →
-  `ToolOperationTracker.overlayOperations`). This closes the switchover
-  checklist item: delegation-scoped tools that are in no static toolkit still
-  join display metadata.
+  `ToolOperationTracker.overlayOperations`). The event is an execution-scoped
+  projection of Toolkit metadata, not evidence for capability-private tools or
+  a second operation inventory.
 - **local-agent chat** (`runChatSession`) consumes
   `graphService.streamEvents(v3)` through `adaptRootStream`; the legacy
   `graph.stream(['messages','values','custom'])` method is deleted. Tool

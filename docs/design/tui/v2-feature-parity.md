@@ -80,7 +80,7 @@ Status meanings:
    cancellation without side effects, explicit delegation continuation,
    re-review, approved execution, operation settlement, and checkpoint recovery;
    sustained manual local-tool dogfood remains.
-4. Dogfood structured attachments with real local tools. The deterministic
+4. Dogfood structured attachments with real local-machine Toolkit operations. The deterministic
    production-host integration already proves full paths reach model context,
    contents are not eagerly read, and terminal/checkpoint text remains
    filename-only. A real PTY now also drives three bracketed-paste paths through

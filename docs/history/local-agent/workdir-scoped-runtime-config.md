@@ -1,5 +1,11 @@
 # Workdir Scoped Runtime Config Design
 
+> 2026-08-16：本文保留单 workdir 迁移背景。Toolkit 的当前目标不是在 factory
+> 固定 workdir，而是由 `ToolkitRuntimeExecutionScope` 为每次 execution 创建隔离
+> binding；领域所有权以
+> [Host / Agent / Capability / Toolkit 约束](../../design/host-agent-capability-toolkit.md)
+> 为准。
+
 > **Status: historical.** This record describes the removed pull-model Studio
 > run, due-run, and shared-wiki configuration. It is not the current workdir
 > contract; see [Workdir configuration](../../reference/runtime/workdir.md).
@@ -157,7 +163,7 @@ type LocalAgentRuntimeConfig = {
 
 1. Prompt 中的工作目录。
 2. Graph configurable 中的 `workdir`。
-3. local tools 解析相对路径时使用的默认目录。
+3. local-machine Toolkit Runtime binding 解析相对路径时使用的目录。
 4. artifact/checkpoint 落盘路径。
 
 目标调用链：
@@ -169,7 +175,7 @@ run --workdir
   -> startLocalServer(deps.runtimeConfig)
   -> buildLocalChatAgentInput({ workdir: runtimeConfig.workdir })
   -> graph configurable.workdir
-  -> local toolkits use runtimeConfig.workdir
+  -> ToolkitRuntimeExecutionScope.workdir
 ```
 
 需要避免的形态：
@@ -179,7 +185,7 @@ import { config } from './config';
 resolve(config.workdir, userPath);
 ```
 
-推荐改成 toolkit factory：
+本文最初建议在 Toolkit factory 固定 workdir：
 
 ```ts
 createBashToolkit({ workdir: runtimeConfig.workdir });
@@ -187,7 +193,9 @@ createGitToolkit({ workdir: runtimeConfig.workdir });
 createBrowserToolkit({ workdir: runtimeConfig.workdir });
 ```
 
-或者在每次 tool invoke 时从 LangGraph configurable 读取 `workdir`。第一阶段优先使用 toolkit factory，因为 local-agent 当前是服务进程级 workdir，改动面更小。
+该做法只能支持单 workdir 进程，已被 per-execution Runtime binding 目标取代。
+当前约束是 Host 把 workdir 放入 `ToolkitRuntimeExecutionScope`，Toolkit Runtime
+为本次 execution 绑定 tools；工具不得读取模块级配置或共享可变 workdir。
 
 ## Studio Runtime 路径
 

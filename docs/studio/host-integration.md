@@ -17,6 +17,12 @@ studio_request → dispatch(entryPetId) → studio_response acknowledgement
                                       ↘ studio.progress plugin events
 ```
 
+This is the Studio form of the same `Host -> Agent Runtime -> Capability ->
+Toolkit` ownership model used by Chat. Studio changes how one Host configures,
+retains, and invokes several Pet runtimes; it does not introduce a separate
+Toolkit or Toolkit Runtime system. See the accepted
+[domain constraints](../design/host-agent-capability-toolkit.md).
+
 ## Assembly and lifetime
 
 `buildStudio()` resolves the active workdir, reads its Studio and pet files,
@@ -58,4 +64,3 @@ Toolkit runtime managers is responsible for their wider lifecycle.
 
 See [Studio configuration](configuration.md) for workdir files and
 [Studio API](../reference/api/studio.md) for the transport-independent contract.
-

@@ -54,7 +54,7 @@ Per-workspace (use `-w <pkg>` or `cd`):
 - `src/localAgentAppWsClient.ts` + `src/localAgentAppChatHandler.ts` — WS client back to the hosted PinPawo app, plus its chat handler.
 - `src/agentChannel.ts` / `src/agentGraphService.ts` / `src/agentStreamEvents.ts` — adapt pet-agent's LangGraph stream into channel events the TUI/server consume.
 - `src/capabilityLoader.ts` + `src/pluginLoader.ts` + `src/localAgentCapabilityRegistry.ts` — load plugins from `~/.pinpawo/capabilities/<id>/` (each has `manifest.json` + `index.js`). `--link` install mode keeps a capability's own `node_modules` in place.
-- `src/localTools*.ts` — local tool implementations (file/git/shell/network/search). Each has a unit test next to it. The shell/file/git tools are where the operation tracker (`toolOperationTracker.ts`, `runtimeOperationRegistry.ts`) sits.
+- `src/toolkits/local/` — local-machine Toolkit implementations (file/git/shell/network/search). Toolkit definitions own tool operation metadata and review policy; `toolOperationTracker.ts` consumes their execution projection.
 - `src/config.ts` + `src/agentConfig.ts` + `src/llmConfig.ts` — config resolution. Reads `~/.pinpawo/config.json`, `~/.pinpawo/.env`, or process env. `.env.example` lives under `services/local-agent/`.
 - `src/studio/` — local-side Studio integration (companion to pet-agent's `agent/studio`).
 

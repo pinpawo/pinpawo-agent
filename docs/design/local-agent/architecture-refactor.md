@@ -7,6 +7,11 @@
 > `createRuntime / AgentToolset / defineToolset / CapabilityRuntime.toolsets`
 > 属于历史方案，不是当前扩展入口。当前定义见
 > [Capability / Toolkit V2 契约](../../reference/extensions/capability-toolkit.md)。
+> 2026-08-16 领域边界对齐：本文早期章节中的 `local tools`、`host tools`、
+> `capability-private tools/toolset`、Capability/Runtime operation provider 等表述
+> 仅保留为迁移背景。所有暴露给 Capability subagent 的业务/外部 Tool 归属
+> Toolkit；当前约束以
+> [领域关系与装配约束](../host-agent-capability-toolkit.md)为准。
 
 ## 1. 文档目标
 
@@ -16,7 +21,7 @@ local-agent 的定位是：
 
 - 运行在用户电脑上的本地 agent host。
 - 连接 app / TUI / macOS companion 等客户端。
-- 装配本地 tools、toolkits、capabilities、LLM config 和用户本地状态。
+- 装配 local-machine Toolkits、Capabilities、LLM config 和用户本地状态。
 - 对外输出稳定的 local-agent 事件，而不是泄漏 agent 框架内部事件。
 
 这份文档重点解决三个问题：
@@ -44,7 +49,7 @@ local-agent 仍然包含多类职责：
 - chat runtime
 - studio bridge
 - capability loading / rescan
-- local tools implementation
+- local-machine Toolkit implementations
 - human review / interrupt
 - protocol parsing
 - presentation formatting
@@ -99,7 +104,7 @@ type LocalAgentOperationKind =
 
 这会把 local-agent 变成“所有 tools/capabilities 语义的中央表”，和当前 formatter 知道内部工具名的问题本质相同。
 
-### 3.2 tool provider 拥有 operation metadata
+### 3.2 Toolkit 拥有 operation metadata
 
 工具展示语义应该由提供工具的一方声明。
 
@@ -126,7 +131,7 @@ const bashToolkit = {
 ```
 
 命名约定约束：
-- 真实工具来源（local toolkit、capability、host tool）各自维护自己的 operation metadata。
+- 所有业务工具都由其 Toolkit 维护 operation metadata；Capability 和 Host 不直接提供 tools。
 - `@pinpawo/pet-agent` 侧 `operationMetadata.ts` 只共享 reader/summarizer 的基础能力，不定义 local-agent 专属 UI 标识。
 - `LocalAgentOperationEvent.operation.kind` 由运行时统一派生：
   `<toolkitName>.<toolName>`；没有 metadata 时使用 `runtime.<toolName>`。
@@ -156,7 +161,7 @@ const input = {
 };
 ```
 
-host tools 必须通过 Toolkit 暴露，工具本体、展示 metadata 与 review policy
+Host 提供的业务工具必须通过 Toolkit 暴露，工具本体、展示 metadata 与 review policy
 不再通过 invoke-level direct-tool fallback 分散传入。
 
 pet-agent 在创建 subagent 时负责收集这些 metadata，并随工具事件透传：
@@ -328,7 +333,7 @@ type LocalAgentOperationEvent = {
     summary?: string;
     details?: Record<string, unknown>;
     source?: {
-      provider: 'toolkit' | 'capability' | 'runtime';
+      provider: 'toolkit' | 'runtime';
       name: string;
       callId?: string;
     };
@@ -343,12 +348,14 @@ type LocalAgentOperationEvent = {
 
 说明：
 
-- `kind` 是开放字符串，由 toolkit/capability metadata 提供。
+- `kind` 是开放字符串，优先由 Toolkit metadata 提供。
 - pet-agent/local-agent root stream adapter 通过 `NamespacedProtocolToolEventReader` 规范 protocol tool event 的 `toolCallId`，并在 run 自然完成、limit reached、异常时由 `ToolOperationTracker` 关闭仍 active 的 operation。
 - local-agent 运行层通过 `ToolOperationTracker` 保证发给客户端的 operation 有稳定 `id`；当上游缺失 `toolCallId` 时按 request 生成 synthetic id。
 - request 正常完成、异常、中断或等待人工时，tracker 会关闭仍 active 的 operation，避免客户端 `activeOperations` 泄漏。
 - `title` / `target` / `summary` 是已经归一化后的展示信息，adapter 可以直接使用。
 - `source` 只用于 debug 和兼容，不应该成为 UI 主要判断依据。
+- `provider: 'runtime'` 是缺少 Toolkit metadata 时的防御性投影，不表示
+  runtime 可以成为新的工具 owner 或平级 inventory。
 - `raw` 默认不面向普通 UI，可用于 debug、日志或诊断。
 
 ### 5.2 Chat message event
@@ -404,7 +411,7 @@ type LocalAgentStudioEvent = {
 
 ## 6. Operation Metadata 草案
 
-operation metadata 由 toolkit / capability / host-provided tools 暴露。
+operation metadata 只由 Toolkit 中的 `ToolDefinition.operation` 暴露。
 
 ```ts
 type ToolOperationMetadata = {
@@ -445,8 +452,8 @@ type OperationRegistry = {
 - local-agent 可以为内置 local toolkit 提供 metadata。
 - local-agent 可以为 host-owned toolkit 提供 metadata，例如 `pet_profile` toolkit 中的 `describe_pet_profile`。
 - memory 机制需要单独设计；当前不把草稿 memory/web_search toolkit 放在 pet-agent core 中当作已落地架构。
-- Studio planner capability 通过 capability-private toolset 暴露 `submit_plan` metadata；Studio worker 的 wiki read tools 由 `wiki_read` toolkit 暴露 metadata。
-- 第三方/user capability 可以提供自己的 metadata。
+- Studio planner capability 使用的业务工具必须归属 Studio Host 注入的 Toolkit；Studio worker 的 wiki read tools 由 `wiki_read` Toolkit 暴露 metadata。Agent 框架内部 terminal actions 不进入 Host inventory。
+- 第三方/user Capability 通过其声明的 Toolkit 获得 tools 与 metadata。
 - 没有 metadata 时，local-agent 生成 runtime operation：`kind: 'runtime.<toolName>'`，`title: toolName`。
 - adapter 不应该回退解析 raw input/output。
 
@@ -481,8 +488,8 @@ type OperationRegistry = {
 - 新增 `events/OperationRegistry.ts`。
 - 新增 `events/AgentStreamNormalizer.ts`。
 - 运行链路改为走 root `streamEvents(v3)` protocol tools/custom events -> `LocalAgentOperationEvent`。
-- 内置 local tools 注册 operation metadata。
-- toolkit/capability metadata 随 root stream protocol events / runtime metadata announcements 透传，local-agent run registry 作为 fallback。
+- 内置 local-machine Toolkits 注册 operation metadata。
+- Toolkit metadata 随 root stream protocol events / runtime metadata announcements 透传，local-agent run registry 作为 fallback。
 
 约束：
 
@@ -558,14 +565,14 @@ Toolkit 提供。runtime 的 local Toolkit/Capability loading 与 rescan state �
 `LocalAgentCapabilityRegistry`，实际可路由性以 compiled registry 及其
 diagnostics 为准。
 
-目标：让 local tools 和 capability 管理可维护。
+目标：让 local-machine Toolkits 和 Capability 管理可维护。
 
 工作项：
 
 - local 内置 tools/toolkits 迁移到 `toolkits/local/`。
 - shell policy 从 tool implementation 中拆出。
 - capability loader/rescan/runtime state 收敛进 registry。
-- toolkit/capability/host tool operation metadata 与工具注册一起装配。
+- Toolkit operation metadata 与工具注册一起装配。
 
 产出：
 
@@ -596,7 +603,7 @@ diagnostics 为准。
 4. `tui: render operation events instead of internal tool logs`
 5. `protocol: expose typed local-agent events for app`
 6. `server: split websocket/http handlers from runtime`
-7. `tools: split local tools and register operation metadata`
+7. `toolkits: split local-machine Toolkit implementations and register operation metadata`
 8. `cleanup: remove legacy tool formatter and old protocol references`
 
 每个 PR 都必须保持：

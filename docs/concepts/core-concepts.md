@@ -33,9 +33,10 @@ PinPawo Agent helps you build agents with clear operational boundaries:
 
 | Concept | Meaning | Why it matters |
 |---|---|---|
-| **Pet agent** | One configured agent runtime with an actor identity, models, capabilities, tools, and state. | It is the unit that receives a request and produces a user-visible result. |
+| **Host** | The product or process boundary that resolves configuration, selects Capability and Toolkit definitions, owns Agent runtimes, and manages Toolkit runtime lifetime. | It keeps machine, transport, and lifecycle concerns outside the Agent graph. |
+| **Pet agent** | One configured Agent runtime with an actor identity, models, Capabilities, compiled Toolkit bindings, and state. | It is the unit that receives an invocation and produces a user-visible result. |
 | **Capability** | A focused, delegable unit of work with instructions and a fixed Toolkit allowlist. | It makes routing and tool authority inspectable instead of implicit in a large prompt. |
-| **Toolkit** | A typed family of executable tools, operation metadata, availability checks, and review policy. | It centralizes implementation and safety rules for a reusable tool family. |
+| **Toolkit** | A typed family of executable tools, operation metadata, availability checks, review policy, and an optional Toolkit Runtime. | It centralizes implementation, safety rules, and dynamic resource ownership for a reusable tool family. |
 | **Subagent lane** | The short-lived private execution context used for one selected Capability or general task. | It keeps task-specific reasoning isolated from the main conversation. |
 | **Human review** | The interrupt-and-resume boundary for actions that require user authorization or input. | Approval is a runtime contract, not a convention hidden in an instruction. |
 | **Checkpoint** | Durable LangGraph state for messages and pending continuation. | It is the authority for resume and recovery. |
@@ -77,6 +78,12 @@ flowchart LR
 
 This separation is intentional: Markdown instructions are easy to review and
 ship, while executable tools and side effects remain in typed code.
+
+Host and Agent are ownership boundaries, not additional extension formats. A
+Host creates and retains one or more Agent runtimes; an Agent executes a
+Capability; the Capability names its Toolkits; and any Toolkit Runtime remains
+subordinate to that Toolkit. The accepted cross-host constraints are recorded
+in [Host / Agent / Capability / Toolkit relationships](../design/host-agent-capability-toolkit.md).
 
 ## The execution model
 

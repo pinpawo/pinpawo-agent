@@ -17,6 +17,10 @@ Toolkit 可以有可选 runtime：例如 Browser Runtime 持有桥接连接和�
 `delegationId`、`workdir`、`AbortSignal`。它不认识 browser、session、profile、
 backend、cookie 或登录协议。
 
+Toolkit Runtime 属于 Toolkit 领域，不是与 Host、Agent、Capability、Toolkit
+平级的第五个概念。完整领域关系见
+[领域关系与装配约束](../../design/host-agent-capability-toolkit.md)。
+
 ## 生命周期
 
 ```text
@@ -71,6 +75,17 @@ thread/run/delegation scope 在下一次 resolve 时恢复，其他 execution �
   `shutdown()`；host 注入 shared manager 后，只有 host 可以关闭它。
 - 若 host 直接传入预构建 orchestrator graph，则该 graph 创建时必须获得同一个
   manager；pet factory 不会在 graph 外额外启动 root。
+
+## 统一诊断（Accepted target，pending #645）
+
+本节是已确认的迁移目标，尚未作为当前 manager 公共 API 实现。
+`ToolkitRuntimeManager` 必须为每个声明 Runtime 的 Toolkit 暴露同一份基础诊断：
+Toolkit name、lifecycle、active binding 数和最近失败。Toolkit 可以通过通用
+`diagnose(root)` hook 提供不透明 `details`；Host 只负责聚合和转发，不按 Toolkit
+名称解释这些字段，也不维护 Browser、shell 或 git 专属状态源。
+
+Runtime diagnostics 只描述 live operational state。它不替代 Host config selection，
+也不改变 Toolkit availability 或 Capability `uses` 的静态语义。
 
 ## 验证
 

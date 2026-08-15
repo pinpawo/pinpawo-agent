@@ -7,7 +7,16 @@ existing Chrome session. For the project-level boundaries, start with
 
 The Chrome extension backend uses an existing Chrome installation and its login state. Protocol v3 supports `browser_open`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_scroll`, `browser_wait`, `browser_extract`, `browser_screenshot` and `browser_close` (debugger detach). Named sessions, custom profiles and headless mode remain Playwright-only semantics.
 
-Architecturally, the extension is a driver of the Browser capability, not a top-level local-agent subsystem. Its Native Messaging host is a private companion process of that driver. Browser Runtime owns the bridge, its live snapshot and the `BrowserSession`; the generic Toolkit runtime lifecycle starts that root with the local-agent host, then resolves an execution-bound Browser tool facade for each capability subagent. No Browser-specific branch belongs in the generic host or orchestrator lifecycle.
+Architecturally, the extension is a driver inside the Browser Toolkit Runtime,
+not a driver of the Browser Capability and not a top-level local-agent
+subsystem. Its Native Messaging host is a private companion process of that
+Runtime. Browser Toolkit Runtime owns the bridge, its live snapshot and the
+`BrowserSession`; the generic Toolkit runtime lifecycle starts that root with
+the local-agent Host, then resolves an execution-bound Browser tool facade for
+each Capability subagent. The Browser Capability only declares
+`uses: ['browser']`. No Browser-specific branch belongs in the generic Host or
+Agent lifecycle. See the accepted
+[domain constraints](../design/host-agent-capability-toolkit.md).
 
 ## Fixed backend selection
 
@@ -15,7 +24,7 @@ Set `PINPAWO_BROWSER_BACKEND=extension` (or save `browser_backend: "extension"`)
 
 In `auto`, local-agent listens for the installed extension and chooses it first for compatible default-session, visible-browser operations. If no extension is connected, or the initial open explicitly requires headless, a named session or a custom profile, selection uses Playwright. Selection is still one-time for that active `BrowserSession`.
 
-Toolkit availability is structural and cached when the runtime registry is built; transient extension connectivity does not remove the Browser Toolkit. Browser Runtime owns one live extension snapshot that distinguishes bridge listening, Native Host connectivity, extension registration and command readiness. Session selection and Browser diagnostics consume that projection instead of independently combining Bridge booleans. A listening bridge without a registered extension remains routable but is not command-ready, so a later reconnect can recover without rebuilding the agent registry.
+Toolkit availability is structural and cached when the runtime registry is built; transient extension connectivity does not remove the Browser Toolkit. Browser Runtime owns one live extension snapshot that distinguishes bridge listening, Native Host connectivity, extension registration and command readiness. Session selection and Browser-specific status views consume that projection instead of independently combining Bridge booleans. Under #645, a generic Toolkit Runtime diagnostics surface will carry the same state as Browser-owned details rather than creating a Browser-only diagnostics lifecycle. A listening bridge without a registered extension remains routable but is not command-ready, so a later reconnect can recover without rebuilding the agent registry.
 
 ## Process boundary
 
@@ -134,7 +143,7 @@ and restart the local agent:
 pinpawo browser extension repair
 ```
 
-`/health` only reports local-agent service health; it does not expose Browser-specific fields. Use `pinpawo browser extension status` for installed-host diagnostics. A future generic Toolkit health projection may report all Toolkit runtimes through one common contract rather than adding Browser fields back to `/health`. Remove registration with `pinpawo browser extension unregister`.
+`/health` only reports local-agent service health; it does not expose Browser-specific fields. Use `pinpawo browser extension status` for installed-host details. The accepted #645 target reports all Toolkit runtimes through one common diagnostics contract rather than adding Browser fields back to `/health`; this command may project Browser-owned details from that source but must not become a second lifecycle. Remove registration with `pinpawo browser extension unregister`.
 
 ## Attribution
 

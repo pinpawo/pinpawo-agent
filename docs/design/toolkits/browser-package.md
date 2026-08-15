@@ -1,5 +1,10 @@
 # Browser Toolkit 独立包设计
 
+> 2026-08-16：package extraction 已完成；本文保留当时的构造接口设计。
+> `BrowserIntegration` 现在只视为兼容装配 helper，不是公共领域层。后续 Host、
+> Agent、Capability、Toolkit 与通用 Runtime diagnostics 以
+> [领域关系与装配约束](../host-agent-capability-toolkit.md)为准。
+
 ## 状态
 
 提案，用于指导 Browser Toolkit 从 `services/local-agent` 拆分为独立包。本文件描述源码所有权、运行时边界和发行组合；不把这些架构细节写入仓库级 `AGENTS.md`。
@@ -122,13 +127,14 @@ const browser = createBrowserIntegration({
 });
 ```
 
-Browser 包返回同一实例关联的 `toolkit`、`capability` 和宿主操作接口。这样 availability、runtime snapshot、CLI status 与实际执行共享同一 runtime，而不是依赖包级全局单例。
+Browser 包当前返回同一实例关联的 `toolkit`、`capability` 和宿主操作接口。这样 availability、runtime snapshot、CLI status 与实际执行共享同一 runtime，而不是依赖包级全局单例。该 aggregate 是构造便利，不定义新的 `BrowserIntegration` 领域；Host 的最终 inventory 仍分别由 Capability 和 Toolkit definitions 构成。
 
 ## 宿主接口
 
-当前不引入通用 contribution 框架。Browser 包先公开窄接口：
+当前不引入通用 CLI contribution 框架。Browser 包保留窄的安装/探测接口；
+Capability、Toolkit 与 Runtime lifecycle/diagnostics 则进入通用 Host 装配：
 
-- `createBrowserIntegration(options)`：创建 Toolkit、Capability 与 runtime；
+- `createBrowserIntegration(options)`：兼容构造 helper，创建彼此关联的 Toolkit、Capability 与 runtime，不作为 Host inventory 类型；
 - `registerBrowserExtensionHost()`、`unregisterBrowserExtensionHost()`、`getBrowserExtensionHostStatus()`：供 CLI 适配；
 - `detectBrowserEnvironment()`：供诊断命令调用；
 
@@ -149,7 +155,7 @@ local-agent 保留 Commander 参数、stdout 格式和 HTTP response 格式。�
 
 1. 创建 `toolkits/browser` workspace，将 Browser Toolkit、runtime、drivers、Extension 和 Native Host 源码归拢到该包。
 2. 以 options 注入替代 Browser 对 local-agent config/storage 的直接依赖。
-3. local-agent 默认 registry 改为组装 Browser integration；CLI 和 detect 改用包公开接口。
+3. local-agent 默认 registry 分别组装 Browser Capability 与 Toolkit definitions；CLI 和 detect 使用包公开的窄操作接口。
 4. Browser 包统一生成 Extension、Native Host 与 npm 入口产物；local-agent 发行构建消费这些产物。
 5. 删除 `services/local-agent/src/toolkits/browser` 与顶层 `tools/chrome-extension` 的旧所有权路径。
 

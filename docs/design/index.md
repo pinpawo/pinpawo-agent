@@ -4,6 +4,11 @@ These documents record active proposals, implementation choices, and rationale.
 They may be draft or implementation-oriented; they do not override the public
 contracts in [reference/](../reference/index.md).
 
+## Cross-cutting architecture
+
+- [Host / Agent / Capability / Toolkit domain relationships](host-agent-capability-toolkit.md) —
+  accepted ownership and assembly constraints tracked by issue #645
+
 ## Agent runtime
 
 - [Agent requirements](agent-runtime/agent-requirements.md)

@@ -19,7 +19,7 @@ import { createSubagent } from '@pinpawo/pet-agent';
 import { buildLocalAgentModels } from '../src/agentModels';
 import { buildLocalModelProfileRegistry } from '../src/llmConfig';
 import { parsePatch } from '../src/toolkits/local/applyPatch';
-import { applyPatchTool, viewFileChunkTool } from '../src/toolkits/local/fileTools';
+import { createFileTools } from '../src/toolkits/local/fileTools';
 
 type Scenario = {
   name: string;
@@ -85,9 +85,7 @@ function messageContentText(message: BaseMessage) {
 function readJsonRecord(value: string): Record<string, unknown> | null {
   try {
     const parsed = JSON.parse(value) as unknown;
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : null;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
   } catch {
     return null;
   }
@@ -105,9 +103,16 @@ function recordPatchCalls(messages: BaseMessage[]): RecordedPatchCall[] {
   const calls: RecordedPatchCall[] = [];
   for (const message of messages) {
     if (message._getType() !== 'ai') continue;
-    const toolCalls = (message as BaseMessage & {
-      tool_calls?: Array<{ id?: string; name?: string; args?: Record<string, unknown> }>;
-    }).tool_calls ?? [];
+    const toolCalls =
+      (
+        message as BaseMessage & {
+          tool_calls?: Array<{
+            id?: string;
+            name?: string;
+            args?: Record<string, unknown>;
+          }>;
+        }
+      ).tool_calls ?? [];
     for (const call of toolCalls) {
       if (call.name !== 'apply_patch') continue;
       const patch = call.args?.patch;
@@ -142,27 +147,22 @@ for (let repeat = 1; repeat <= repeats; repeat += 1) {
   for (const scenario of scenarios) {
     const root = mkdtempSync(resolve(tmpdir(), 'pinpawo-apply-patch-eval-'));
     const path = resolve(root, 'sample.txt');
+    const { applyPatchTool, viewFileChunkTool } = createFileTools(root);
     try {
       writeFileSync(path, scenario.initial, 'utf-8');
       const result = await createSubagent({
         model,
         tools: [viewFileChunkTool, applyPatchTool],
-        promptSections: [{
-          id: 'apply-patch-eval',
-          owner: 'eval',
-          content: '先读取目标文件，再使用 apply_patch 完成修改；工具成功后简短汇报。',
-        }],
+        promptSections: [
+          {
+            id: 'apply-patch-eval',
+            owner: 'eval',
+            content: '先读取目标文件，再使用 apply_patch 完成修改；工具成功后简短汇报。',
+          },
+        ],
         messages: [new HumanMessage(`${scenario.instruction}\n文件路径：sample.txt`)],
         maxIterations: 8,
         contextWindowTokens: llmConfig.contextWindowTokens,
-        runtimeContext: {
-          executionScope: {
-            threadId: `apply-patch-${scenario.name}`,
-            runId: `repeat-${repeat.toString()}`,
-            delegationId: 'eval',
-            workdir: root,
-          },
-        },
       });
       const calls = recordPatchCalls(result.messages);
       results.push({

@@ -1,14 +1,9 @@
-import { tool } from '@langchain/core/tools';
+import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { z } from 'zod';
 import { createAbortError, type ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { readRecord, readString } from '../operationMetadata';
 import { resolveDefaultWorkdir } from '../../runtimeConfig';
-import {
-  type LocalToolRuntime,
-  resolveToolExecutionWorkdir,
-  resolveToolPath,
-  resolveUserPath,
-} from './pathUtils';
+import { resolveUserPath } from './pathUtils';
 import type { ShellRunHandle } from './processExecutor';
 import { runShellCommand } from './processTree';
 import type { ShellProcessBinding } from './processRegistry';
@@ -45,17 +40,6 @@ export function normalizeShellActionInput(
   const cwd = typeof record.cwd === 'string' && record.cwd.trim()
     ? resolveUserPath(record.cwd.trim(), workdir)
     : workdir;
-  return { command, cwd };
-}
-
-function normalizeShellToolActionInput(
-  input: unknown,
-  runtime: LocalToolRuntime,
-) {
-  const { record, command } = readShellActionInput(input);
-  const cwd = typeof record.cwd === 'string' && record.cwd.trim()
-    ? resolveToolPath(record.cwd.trim(), runtime)
-    : resolveToolExecutionWorkdir(runtime);
   return { command, cwd };
 }
 
@@ -126,7 +110,10 @@ export const getCurrentTimeTool = tool(
   },
 );
 
-export function createRunShellTool(binding: ShellProcessBinding | null) {
+export function createRunShellTool(
+  binding: ShellProcessBinding | null,
+  workdir = resolveDefaultWorkdir(),
+) {
   // Run through the same executor the registry will terminate through.
   // Without a binding there is no registry, so pick by platform the same
   // way ShellRuntime does.
@@ -137,12 +124,12 @@ export function createRunShellTool(binding: ShellProcessBinding | null) {
   return tool(
     async (
       input: { command: string; cwd?: string; timeoutSeconds?: number },
-      runtime: LocalToolRuntime,
+      runtime: ToolRuntime,
     ) => {
       let shellAction: { command: string; cwd: string };
 
       try {
-        shellAction = normalizeShellToolActionInput(input, runtime);
+        shellAction = normalizeShellActionInput(input, workdir);
       } catch (err) {
         return `Error: ${err instanceof Error ? err.message : err}`;
       }

@@ -145,10 +145,10 @@ request.workspaceId
 > homedir()
 ```
 
-`workdir` is still the path exposed through the Agent's per-invocation
-`ToolRuntime.context`; local-machine tools use it for relative paths and default
-cwd. `workspace` is the stable identity used by UI, session binding, scheduler
-trace, and future project background.
+`workdir` is still the path captured when a Host creates its local-machine
+Toolkit definitions. The same snapshot is used for relative paths, default cwd,
+Agent prompts, and review. `workspace` is the stable identity used by UI, session
+binding, scheduler trace, and future project background.
 
 ## Chat Behavior
 
@@ -216,12 +216,13 @@ toolkitRuntimeManager.resolve({
 });
 ```
 
-Every Chat/Studio invocation passes its workspace-bound workdir through the Agent
-execution context. Relative paths resolve from `ToolRuntime.context`, not from a
-module-level variable or process-wide Toolkit singleton. The same execution scope
-is also available to Toolkit Runtime resolution when a Toolkit needs to bind its
-own live resources. A Host may keep Toolkit roots resident while concurrent
-invocations use different workdirs.
+Every Chat/Studio invocation uses its Host's workspace-bound workdir for the Agent
+prompt and review context. Local-machine Toolkit definitions capture that same
+workdir when the Host inventory is assembled, without a module-level variable or
+process-wide Toolkit singleton. Toolkit Runtime resolution also receives the
+execution scope when a Toolkit-owned live resource needs it. Supporting another
+workspace means selecting or creating the corresponding Host runtime; concurrent
+Hosts therefore remain isolated without changing Tool inputs.
 
 ## Protocol Additions
 
@@ -268,7 +269,7 @@ Server/runtime responses should expose:
 4. Extend local protocol to accept `workspaceId` for chat and studio requests.
 5. Bind chat sessions/checkpoints to workspace id.
 6. Make Studio legacy config fallback opt-in or migration-only.
-7. Replace global local-tool workdir with the per-invocation Agent ToolRuntime context.
+7. Replace global local-tool workdir with Host-scoped local Toolkit definitions.
 8. Add App/Desktop UI for selecting, opening, and registering workspaces.
 
 ## Validation

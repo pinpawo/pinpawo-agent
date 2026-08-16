@@ -159,8 +159,8 @@ export class LocalAgentRuntime {
           id: 'local-agent',
           kind: 'host_builtin',
           definitions: [
-            createBashToolkit(),
-            createGitToolkit(),
+            createBashToolkit({ workdir: this.runtimeConfig.workdir }),
+            createGitToolkit({ workdir: this.runtimeConfig.workdir }),
             browserIntegration.toolkit,
           ],
         },

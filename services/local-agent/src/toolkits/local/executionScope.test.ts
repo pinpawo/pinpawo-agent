@@ -16,21 +16,25 @@ function executionScope(workdir: string, suffix: string) {
   };
 }
 
-function invocationConfig(workdir: string, suffix: string) {
-  return {
-    context: {
-      executionScope: executionScope(workdir, suffix),
-    },
-  };
-}
-
 function toolFrom(toolkit: AgentToolkit, name: string) {
   const definition = toolkit.tools.find(({ tool }) => tool.name === name);
   assert.ok(definition, `missing ${name} tool`);
   return definition.tool;
 }
 
-test('ToolRuntime workdir scopes relative paths without restricting explicit paths', async (t) => {
+async function authorizationMatcher(toolkit: AgentToolkit, toolName: string, input: unknown) {
+  const definition = toolkit.tools.find(({ tool }) => tool.name === toolName);
+  const buildMatcher = definition?.review?.authorization?.buildMatcher;
+  assert.ok(buildMatcher, `missing authorization matcher for ${toolName}`);
+  return buildMatcher({
+    toolkitName: toolkit.name,
+    toolName,
+    input,
+    operation: definition.operation,
+  });
+}
+
+test('Host-scoped local toolkits resolve relative paths independently', async (t) => {
   const workdirA = mkdtempSync(resolve(tmpdir(), 'pinpawo-tool-context-a-'));
   const workdirB = mkdtempSync(resolve(tmpdir(), 'pinpawo-tool-context-b-'));
   const outside = mkdtempSync(resolve(tmpdir(), 'pinpawo-tool-context-outside-'));
@@ -39,29 +43,29 @@ test('ToolRuntime workdir scopes relative paths without restricting explicit pat
     rmSync(workdirB, { recursive: true, force: true });
     rmSync(outside, { recursive: true, force: true });
   });
-  const toolkit = createBashToolkit();
-  const writeFile = toolFrom(toolkit, 'write_file');
+  const toolkitA = createBashToolkit({ workdir: workdirA });
+  const toolkitB = createBashToolkit({ workdir: workdirB });
 
   await Promise.all([
-    writeFile.invoke(
-      { path: 'shared.txt', content: 'workspace-a' },
-      invocationConfig(workdirA, 'a'),
-    ),
-    writeFile.invoke(
-      { path: 'shared.txt', content: 'workspace-b' },
-      invocationConfig(workdirB, 'b'),
-    ),
-    writeFile.invoke(
-      { path: resolve(outside, 'explicit.txt'), content: 'outside-is-allowed' },
-      invocationConfig(workdirA, 'a'),
-    ),
+    toolFrom(toolkitA, 'write_file').invoke({
+      path: 'shared.txt',
+      content: 'workspace-a',
+    }),
+    toolFrom(toolkitB, 'write_file').invoke({
+      path: 'shared.txt',
+      content: 'workspace-b',
+    }),
+    toolFrom(toolkitA, 'write_file').invoke({
+      path: resolve(outside, 'explicit.txt'),
+      content: 'outside-is-allowed',
+    }),
   ]);
 
   assert.equal(readFileSync(resolve(workdirA, 'shared.txt'), 'utf8'), 'workspace-a');
   assert.equal(readFileSync(resolve(workdirB, 'shared.txt'), 'utf8'), 'workspace-b');
   assert.equal(readFileSync(resolve(outside, 'explicit.txt'), 'utf8'), 'outside-is-allowed');
 
-  await toolFrom(toolkit, 'apply_patch').invoke({
+  await toolFrom(toolkitA, 'apply_patch').invoke({
     patch: [
       '*** Begin Patch',
       '*** Update File: shared.txt',
@@ -70,13 +74,13 @@ test('ToolRuntime workdir scopes relative paths without restricting explicit pat
       '+workspace-a-updated',
       '*** End Patch',
     ].join('\n'),
-  }, invocationConfig(workdirA, 'a'));
+  });
   assert.equal(readFileSync(resolve(workdirA, 'shared.txt'), 'utf8'), 'workspace-a-updated');
   assert.equal(readFileSync(resolve(workdirB, 'shared.txt'), 'utf8'), 'workspace-b');
 
   const [listA, listB] = await Promise.all([
-    toolFrom(toolkit, 'list_dir').invoke({ path: '.' }, invocationConfig(workdirA, 'a')),
-    toolFrom(toolkit, 'list_dir').invoke({ path: '.' }, invocationConfig(workdirB, 'b')),
+    toolFrom(toolkitA, 'list_dir').invoke({ path: '.' }),
+    toolFrom(toolkitB, 'list_dir').invoke({ path: '.' }),
   ]);
   assert.match(String(listA), /shared\.txt/);
   assert.match(String(listB), /shared\.txt/);
@@ -84,7 +88,7 @@ test('ToolRuntime workdir scopes relative paths without restricting explicit pat
   assert.doesNotMatch(String(listB), /explicit\.txt/);
 });
 
-test('git tools use ToolRuntime workdir and honor an explicit cwd', async (t) => {
+test('Host-scoped git toolkits use their workdir and honor an explicit cwd', async (t) => {
   const workdirA = mkdtempSync(resolve(tmpdir(), 'pinpawo-git-context-a-'));
   const workdirB = mkdtempSync(resolve(tmpdir(), 'pinpawo-git-context-b-'));
   t.after(() => {
@@ -97,13 +101,13 @@ test('git tools use ToolRuntime workdir and honor an explicit cwd', async (t) =>
   writeFileSync(resolve(workdirA, 'only-a.txt'), 'a');
   writeFileSync(resolve(workdirB, 'only-b.txt'), 'b');
 
-  const toolkit = createGitToolkit();
-  assert.equal(toolkit.runtime, undefined, 'git has no Toolkit-owned runtime resources');
-  const gitStatus = toolFrom(toolkit, 'git_status');
+  const toolkitA = createGitToolkit({ workdir: workdirA });
+  const toolkitB = createGitToolkit({ workdir: workdirB });
+  assert.equal(toolkitA.runtime, undefined, 'git has no Toolkit-owned runtime resources');
   const [statusA, statusB, explicitBFromA] = await Promise.all([
-    gitStatus.invoke({}, invocationConfig(workdirA, 'a')),
-    gitStatus.invoke({}, invocationConfig(workdirB, 'b')),
-    gitStatus.invoke({ cwd: workdirB }, invocationConfig(workdirA, 'a')),
+    toolFrom(toolkitA, 'git_status').invoke({}),
+    toolFrom(toolkitB, 'git_status').invoke({}),
+    toolFrom(toolkitA, 'git_status').invoke({ cwd: workdirB }),
   ]);
 
   assert.match(String(statusA), /only-a\.txt/);
@@ -114,6 +118,19 @@ test('git tools use ToolRuntime workdir and honor an explicit cwd', async (t) =>
   assert.doesNotMatch(String(explicitBFromA), /only-a\.txt/);
 });
 
+test('Host workdir participates in reusable local authorization identity', async () => {
+  const toolkitA = createBashToolkit({ workdir: '/workspace/a' });
+  const toolkitB = createBashToolkit({ workdir: '/workspace/b' });
+  const input = { command: 'rm output.tmp' };
+
+  const firstA = await authorizationMatcher(toolkitA, 'run_shell', input);
+  const secondA = await authorizationMatcher(toolkitA, 'run_shell', input);
+  const firstB = await authorizationMatcher(toolkitB, 'run_shell', input);
+
+  assert.deepEqual(firstA, secondA);
+  assert.notDeepEqual(firstA, firstB);
+});
+
 test('separate Host managers own independent shell Runtime roots', async (t) => {
   const workdirA = mkdtempSync(resolve(tmpdir(), 'pinpawo-shell-root-a-'));
   const workdirB = mkdtempSync(resolve(tmpdir(), 'pinpawo-shell-root-b-'));
@@ -121,8 +138,8 @@ test('separate Host managers own independent shell Runtime roots', async (t) => 
     rmSync(workdirA, { recursive: true, force: true });
     rmSync(workdirB, { recursive: true, force: true });
   });
-  const toolkitA = createBashToolkit();
-  const toolkitB = createBashToolkit();
+  const toolkitA = createBashToolkit({ workdir: workdirA });
+  const toolkitB = createBashToolkit({ workdir: workdirB });
   const managerA = new ToolkitRuntimeManager();
   const managerB = new ToolkitRuntimeManager();
   let firstA: Awaited<ReturnType<ToolkitRuntimeManager['resolve']>> | null = null;
@@ -139,24 +156,20 @@ test('separate Host managers own independent shell Runtime roots', async (t) => 
     });
     const command = `${JSON.stringify(process.execPath)} -e "process.stdout.write(process.cwd())"`;
     assert.match(
-      String(await toolFrom(firstA.toolkits[0]!, 'run_shell').invoke(
-        { command },
-        invocationConfig(workdirA, 'a'),
-      )),
+      String(await toolFrom(firstA.toolkits[0]!, 'run_shell').invoke({ command })),
       new RegExp(basename(workdirA)),
     );
     assert.match(
-      String(await toolFrom(firstB.toolkits[0]!, 'run_shell').invoke(
-        { command },
-        invocationConfig(workdirB, 'b'),
-      )),
+      String(await toolFrom(firstB.toolkits[0]!, 'run_shell').invoke({ command })),
       new RegExp(basename(workdirB)),
     );
     assert.match(
-      String(await toolFrom(firstA.toolkits[0]!, 'run_shell').invoke(
-        { command, cwd: workdirB },
-        invocationConfig(workdirA, 'a'),
-      )),
+      String(
+        await toolFrom(firstA.toolkits[0]!, 'run_shell').invoke({
+          command,
+          cwd: workdirB,
+        }),
+      ),
       new RegExp(basename(workdirB)),
     );
     await Promise.all([firstA.release(), firstB.release()]);
@@ -167,18 +180,11 @@ test('separate Host managers own independent shell Runtime roots', async (t) => 
       execution: executionScope(workdirB, 'b-later'),
     });
     assert.match(
-      String(await toolFrom(laterB.toolkits[0]!, 'run_shell').invoke(
-        { command },
-        invocationConfig(workdirB, 'b-later'),
-      )),
+      String(await toolFrom(laterB.toolkits[0]!, 'run_shell').invoke({ command })),
       new RegExp(basename(workdirB)),
     );
   } finally {
-    await Promise.all([
-      firstA?.release(),
-      firstB?.release(),
-      laterB?.release(),
-    ]);
+    await Promise.all([firstA?.release(), firstB?.release(), laterB?.release()]);
     await Promise.all([managerA.stop(), managerB.stop()]);
   }
 });

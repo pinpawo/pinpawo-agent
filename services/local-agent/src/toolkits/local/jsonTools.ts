@@ -1,17 +1,12 @@
 import { spawn } from 'node:child_process';
 import { statSync } from 'node:fs';
-import { dirname } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import type { ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { readRecord, readString } from '../operationMetadata';
 import { resolveDefaultWorkdir } from '../../runtimeConfig';
-import {
-  type LocalToolRuntime,
-  resolveToolPath,
-  resolveUserPath,
-} from './pathUtils';
+import { resolveUserPath } from './pathUtils';
 
 const JQ_TIMEOUT_MS = 30_000;
 const JQ_OUTPUT_LIMIT_CHARS = 50_000;
@@ -30,11 +25,7 @@ type JqExecOptions = {
   timeout: number;
 };
 
-type JqExec = (
-  file: string,
-  args: string[],
-  options: JqExecOptions,
-) => Promise<JqExecResult>;
+type JqExec = (file: string, args: string[], options: JqExecOptions) => Promise<JqExecResult>;
 
 function createBoundedTextCollector(limit: number) {
   const decoder = new StringDecoder('utf-8');
@@ -59,52 +50,55 @@ function createBoundedTextCollector(limit: number) {
   };
 }
 
-export const runJqProcess: JqExec = (file, args, options) => new Promise((resolve, reject) => {
-  const child = spawn(file, args, {
-    cwd: options.cwd,
-    env: options.env,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true,
-  });
-  const stdout = createBoundedTextCollector(JQ_OUTPUT_LIMIT_CHARS);
-  const stderr = createBoundedTextCollector(JQ_OUTPUT_LIMIT_CHARS);
-  let timedOut = false;
+export const runJqProcess: JqExec = (file, args, options) =>
+  new Promise((resolve, reject) => {
+    const child = spawn(file, args, {
+      cwd: options.cwd,
+      env: options.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    const stdout = createBoundedTextCollector(JQ_OUTPUT_LIMIT_CHARS);
+    const stderr = createBoundedTextCollector(JQ_OUTPUT_LIMIT_CHARS);
+    let timedOut = false;
 
-  child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
-  child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
+    child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
+    child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
 
-  const timer = setTimeout(() => {
-    timedOut = true;
-    // Default signal: 'SIGTERM' on POSIX, TerminateProcess on Windows.
-    child.kill();
-  }, options.timeout);
+    const timer = setTimeout(() => {
+      timedOut = true;
+      // Default signal: 'SIGTERM' on POSIX, TerminateProcess on Windows.
+      child.kill();
+    }, options.timeout);
 
-  child.once('error', (error) => {
-    clearTimeout(timer);
-    reject(error);
+    child.once('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once('close', (code, signal) => {
+      clearTimeout(timer);
+      const stdoutResult = stdout.finish();
+      const stderrResult = stderr.finish();
+      const result: JqExecResult = {
+        stdout: stdoutResult.text,
+        stderr: stderrResult.text,
+        stdoutTotalChars: stdoutResult.totalChars,
+        stderrTotalChars: stderrResult.totalChars,
+      };
+      if (code === 0 && !timedOut) {
+        resolve(result);
+        return;
+      }
+      reject(
+        Object.assign(new Error(`jq exited with code ${code?.toString() ?? '?'}${signal ? ` (${signal})` : ''}`), {
+          code,
+          killed: timedOut,
+          signal,
+          ...result,
+        }),
+      );
+    });
   });
-  child.once('close', (code, signal) => {
-    clearTimeout(timer);
-    const stdoutResult = stdout.finish();
-    const stderrResult = stderr.finish();
-    const result: JqExecResult = {
-      stdout: stdoutResult.text,
-      stderr: stderrResult.text,
-      stdoutTotalChars: stdoutResult.totalChars,
-      stderrTotalChars: stderrResult.totalChars,
-    };
-    if (code === 0 && !timedOut) {
-      resolve(result);
-      return;
-    }
-    reject(Object.assign(new Error(`jq exited with code ${code?.toString() ?? '?'}${signal ? ` (${signal})` : ''}`), {
-      code,
-      killed: timedOut,
-      signal,
-      ...result,
-    }));
-  });
-});
 
 function outputText(value: string | Buffer) {
   return Buffer.isBuffer(value) ? value.toString('utf-8') : value;
@@ -123,11 +117,7 @@ export type JqQueryInput = {
   compactOutput?: boolean;
 };
 
-export async function runJqQuery(
-  input: JqQueryInput,
-  run: JqExec = runJqProcess,
-  workdir = resolveDefaultWorkdir(),
-) {
+export async function runJqQuery(input: JqQueryInput, run: JqExec = runJqProcess, workdir = resolveDefaultWorkdir()) {
   const filePath = resolveUserPath(input.path, workdir);
   const filter = input.filter.trim();
   if (!filter) return 'Error: jq_query requires a filter';
@@ -151,12 +141,7 @@ export async function runJqQuery(
   ];
 
   try {
-    const {
-      stdout,
-      stderr,
-      stdoutTotalChars,
-      stderrTotalChars,
-    } = await run('jq', args, {
+    const { stdout, stderr, stdoutTotalChars, stderrTotalChars } = await run('jq', args, {
       cwd: workdir,
       encoding: 'utf-8',
       env: {
@@ -168,9 +153,7 @@ export async function runJqQuery(
     });
     const out = truncateJqOutput(outputText(stdout).trimEnd(), stdoutTotalChars);
     const err = truncateJqOutput(outputText(stderr).trimEnd(), stderrTotalChars);
-    return [out || '(no output)', err ? `--- stderr ---\n${err}` : '']
-      .filter(Boolean)
-      .join('\n');
+    return [out || '(no output)', err ? `--- stderr ---\n${err}` : ''].filter(Boolean).join('\n');
   } catch (error) {
     const typed = error as NodeJS.ErrnoException & {
       killed?: boolean;
@@ -186,9 +169,10 @@ export async function runJqQuery(
     const stderr = typed.stderr ? outputText(typed.stderr).trimEnd() : '';
     const stdout = typed.stdout ? outputText(typed.stdout).trimEnd() : '';
     const combined = [stderr, stdout].filter(Boolean).join('\n');
-    const combinedTotalChars = (typed.stderrTotalChars ?? stderr.length)
-      + (typed.stdoutTotalChars ?? stdout.length)
-      + (stderr && stdout ? 1 : 0);
+    const combinedTotalChars =
+      (typed.stderrTotalChars ?? stderr.length) +
+      (typed.stdoutTotalChars ?? stdout.length) +
+      (stderr && stdout ? 1 : 0);
     const detail = truncateJqOutput(combined, combinedTotalChars);
     // `timedOut` (surfaced as `killed`) is the only portable timeout signal:
     // on Windows the close event carries no 'SIGTERM' name to compare
@@ -200,26 +184,21 @@ export async function runJqQuery(
   }
 }
 
-export const jqQueryTool = tool(
-  (input: JqQueryInput, runtime: LocalToolRuntime) => {
-    const filePath = resolveToolPath(input.path, runtime);
-    return runJqQuery(
-      { ...input, path: filePath },
-      runJqProcess,
-      dirname(filePath),
-    );
-  },
-  {
+export function createJqQueryTool(workdir = resolveDefaultWorkdir()) {
+  return tool((input: JqQueryInput) => runJqQuery(input, runJqProcess, workdir), {
     name: 'jq_query',
-    description: '使用本机 jq 对一个 JSON 文件做只读查询。适合先查看 keys、数组长度、筛选字段、分组计数和生成紧凑摘要；可读取当前 workdir 之外由用户提供的显式文件路径。直接传 jq filter，不要再用 run_shell 或临时 Python 脚本包装 jq。输出默认使用 jq compact JSON，并限制为 50000 字符。',
+    description:
+      '使用本机 jq 对一个 JSON 文件做只读查询。适合先查看 keys、数组长度、筛选字段、分组计数和生成紧凑摘要；可读取当前 workdir 之外由用户提供的显式文件路径。直接传 jq filter，不要再用 run_shell 或临时 Python 脚本包装 jq。输出默认使用 jq compact JSON，并限制为 50000 字符。',
     schema: z.object({
       path: z.string().describe('要查询的 JSON 文件路径'),
       filter: z.string().describe('jq filter，例如 .runs | length 或 .runs[] | .langsmith.name'),
       rawOutput: z.boolean().optional().describe('对应 jq --raw-output；默认 false'),
       compactOutput: z.boolean().optional().describe('对应 jq --compact-output；默认 true'),
     }),
-  },
-);
+  });
+}
+
+export const jqQueryTool = createJqQueryTool();
 
 export const jsonOperationMetadata: Record<string, ToolOperationMetadata> = {
   jq_query: {

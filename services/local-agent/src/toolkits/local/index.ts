@@ -14,64 +14,36 @@ import {
   type ToolAutoAuthorizationContext,
   type ToolReviewPolicy,
 } from '@pinpawo/pet-agent';
-import {
-  applyPatchTool,
-  copyPathTool,
-  listDirTool,
-  mkdirPathTool,
-  movePathTool,
-  readFileTool,
-  statPathTool,
-  validateStructuredFileTool,
-  viewFileChunkTool,
-  writeFileTool,
-  fileOperationMetadata,
-} from './fileTools';
+import { createFileTools, fileOperationMetadata } from './fileTools';
 import { createArtifactDiscoveryTools } from './artifactDiscoveryTools';
 import { downloadFileTool, httpFetchTool, networkOperationMetadata } from './networkTools';
-import { jqQueryTool, jsonOperationMetadata } from './jsonTools';
-import { gitTools, gitOperationMetadata } from './gitTools';
+import { createJqQueryTool, jsonOperationMetadata } from './jsonTools';
+import { createGitTools, gitOperationMetadata } from './gitTools';
 import { parsePatch, PatchParseError } from './applyPatch';
 import { resolveUserPath } from './pathUtils';
-import { globSearchTool, grepSearchTool, searchOperationMetadata } from './searchTools';
+import { createSearchTools, searchOperationMetadata } from './searchTools';
 import { ShellRuntime, type ShellRuntimeBinding } from './shellRuntime';
-import {
-  createProcessTools,
-  processOperationMetadata,
-  processTools,
-} from './processTools';
+import { createProcessTools, processOperationMetadata, processTools } from './processTools';
 import {
   createRunShellTool,
   getCurrentTimeTool,
   normalizeShellAuthorizationInput,
-  runShellTool,
   shellOperationMetadata,
 } from './shellTools';
+import { resolveDefaultWorkdir } from '../../runtimeConfig';
 
-const localUtilityTools: StructuredTool[] = [
-  readFileTool,
-  viewFileChunkTool,
-  statPathTool,
-  writeFileTool,
-  applyPatchTool,
-  validateStructuredFileTool,
-  movePathTool,
-  copyPathTool,
-  mkdirPathTool,
-  listDirTool,
-  jqQueryTool,
-  globSearchTool,
-  grepSearchTool,
-  httpFetchTool,
-  downloadFileTool,
-];
-
-const bashToolkitTools: StructuredTool[] = [
-  ...localUtilityTools,
-  getCurrentTimeTool,
-  runShellTool,
-  ...processTools,
-];
+function createBashToolkitTools(workdir: string): StructuredTool[] {
+  return [
+    ...createFileTools(workdir).tools,
+    createJqQueryTool(workdir),
+    ...createSearchTools(workdir).tools,
+    httpFetchTool,
+    downloadFileTool,
+    getCurrentTimeTool,
+    createRunShellTool(null, workdir),
+    ...processTools,
+  ];
+}
 
 function createToolDefinitions(
   tools: readonly StructuredTool[],
@@ -139,9 +111,9 @@ const gitToolkitInstructions = [
 
 function isWithinPath(root: string, target: string) {
   const relativePath = relative(root, target);
-  return relativePath === ''
-    || (relativePath !== '..' && !relativePath.startsWith(`..${sep}`)
-      && !isAbsolute(relativePath));
+  return (
+    relativePath === '' || (relativePath !== '..' && !relativePath.startsWith(`..${sep}`) && !isAbsolute(relativePath))
+  );
 }
 
 function authorizeApplyPatch(ctx: ToolAutoAuthorizationContext) {
@@ -171,22 +143,45 @@ function authorizeApplyPatch(ctx: ToolAutoAuthorizationContext) {
   }
 }
 
-export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): AgentToolkit {
+export type LocalToolkitOptions = Readonly<{
+  workdir?: string;
+  tools?: StructuredTool[];
+}>;
+
+export function createBashToolkit(input: StructuredTool[] | LocalToolkitOptions = {}): AgentToolkit {
+  const options = Array.isArray(input) ? { tools: input } : input;
+  const workdir = options.workdir ?? resolveDefaultWorkdir();
+  const tools = options.tools ?? createBashToolkitTools(workdir);
+  const exactWithinHostWorkdir = () =>
+    AuthorizationPolicies.exact({
+      subject: ({ input: toolInput }) => ({ workdir, input: toolInput }),
+    });
   const reviews = {
-    write_file: ReviewPolicies.localMutation({ authorization: 'exact' }),
+    write_file: ReviewPolicies.localMutation({
+      authorization: exactWithinHostWorkdir(),
+    }),
     apply_patch: ReviewPolicies.localMutation({
       authorization: {
         authorize: authorizeApplyPatch,
       },
     }),
-    move_path: ReviewPolicies.localMutation({ authorization: 'exact' }),
-    copy_path: ReviewPolicies.localMutation({ authorization: 'exact' }),
-    mkdir_path: ReviewPolicies.localMutation({ authorization: 'exact' }),
+    move_path: ReviewPolicies.localMutation({
+      authorization: exactWithinHostWorkdir(),
+    }),
+    copy_path: ReviewPolicies.localMutation({
+      authorization: exactWithinHostWorkdir(),
+    }),
+    mkdir_path: ReviewPolicies.localMutation({
+      authorization: exactWithinHostWorkdir(),
+    }),
     http_fetch: ReviewPolicies.externalAccess({ authorization: 'exact' }),
     download_file: ReviewPolicies.externalAccess({ authorization: 'exact' }),
     run_shell: ReviewPolicies.commandExecution({
       authorization: AuthorizationPolicies.exact({
-        subject: ({ input }) => normalizeShellAuthorizationInput(input),
+        subject: ({ input: toolInput }) => ({
+          workdir,
+          ...normalizeShellAuthorizationInput(toolInput),
+        }),
       }),
     }),
     // The process tools carry no review policy on purpose. They only address
@@ -201,7 +196,8 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
     tools: createToolDefinitions(tools, bashToolkitOperations, reviews),
     instructions: bashToolkitInstructions.join('\n'),
     reviewGuidance: {
-      allow: 'A shell invocation is an execution mechanism, so its risk comes from the concrete command and scope. Treat commands as eligible for automatic authorization when their effects are clear and limited, including read-only inspection of explicitly named non-sensitive paths outside the current workspace, and scoped build, test, typecheck, lint, format, inspection, other reversible development operations, or deletion of explicitly named non-sensitive files or clearly bounded generated artifacts inside the current workspace.',
+      allow:
+        'A shell invocation is an execution mechanism, so its risk comes from the concrete command and scope. Treat commands as eligible for automatic authorization when their effects are clear and limited, including read-only inspection of explicitly named non-sensitive paths outside the current workspace, and scoped build, test, typecheck, lint, format, inspection, other reversible development operations, or deletion of explicitly named non-sensitive files or clearly bounded generated artifacts inside the current workspace.',
       ask: 'Require human authorization when a command has broad or unclear effects, deletes recursively with broad or unclear target scope, deletes outside the current workspace, deletes user data or sensitive files, elevates privileges, changes permissions or system services, installs or executes untrusted software, exposes credentials or data, publishes or deploys artifacts, or rewrites shared version-control history.',
     },
     runtime: {
@@ -218,23 +214,40 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
         // process-aware tools get a bound implementation; the rest are handed
         // back as they are.
         const bound = new Map<string, StructuredTool>(
-          [createRunShellTool(shell), ...createProcessTools(shell)]
-            .map((item) => [item.name, item]),
+          [createRunShellTool(shell, workdir), ...createProcessTools(shell)].map((item) => [item.name, item]),
         );
         return tools.map((staticTool) => bound.get(staticTool.name) ?? staticTool);
       },
-      stop: async (root) => { await (root as ShellRuntime).stop(); },
+      stop: async (root) => {
+        await (root as ShellRuntime).stop();
+      },
     },
   });
 }
 
-export function createGitToolkit(): AgentToolkit {
+export function createGitToolkit(options: Pick<LocalToolkitOptions, 'workdir'> = {}): AgentToolkit {
+  const workdir = options.workdir ?? resolveDefaultWorkdir();
+  const gitTools = createGitTools(workdir).gitTools;
+  const exactWithinHostWorkdir = () =>
+    AuthorizationPolicies.exact({
+      subject: ({ input }) => ({ workdir, input }),
+    });
   const reviews = {
-    git_add: ReviewPolicies.localMutation({ authorization: 'exact' }),
-    git_commit: ReviewPolicies.localMutation({ authorization: 'exact' }),
-    git_push: ReviewPolicies.externalAccess({ authorization: 'exact' }),
-    gh_pr_create: ReviewPolicies.externalAccess({ authorization: 'exact' }),
-    gh_issue_create: ReviewPolicies.externalAccess({ authorization: 'exact' }),
+    git_add: ReviewPolicies.localMutation({
+      authorization: exactWithinHostWorkdir(),
+    }),
+    git_commit: ReviewPolicies.localMutation({
+      authorization: exactWithinHostWorkdir(),
+    }),
+    git_push: ReviewPolicies.externalAccess({
+      authorization: exactWithinHostWorkdir(),
+    }),
+    gh_pr_create: ReviewPolicies.externalAccess({
+      authorization: exactWithinHostWorkdir(),
+    }),
+    gh_issue_create: ReviewPolicies.externalAccess({
+      authorization: exactWithinHostWorkdir(),
+    }),
   };
   return defineToolkit({
     name: 'git',
@@ -242,7 +255,8 @@ export function createGitToolkit(): AgentToolkit {
     tools: createToolDefinitions(gitTools, gitOperationMetadata, reviews),
     instructions: gitToolkitInstructions.join('\n'),
     reviewGuidance: {
-      allow: 'Treat routine, scoped version-control collaboration as eligible for automatic authorization, including staging files, creating a local commit, a normal non-force push, and creating a pull request or issue.',
+      allow:
+        'Treat routine, scoped version-control collaboration as eligible for automatic authorization, including staging files, creating a local commit, a normal non-force push, and creating a pull request or issue.',
       ask: 'Require human authorization for destructive worktree or history changes, force pushes, deleting branches or tags, merging a pull request, changing repository settings or access, managing secrets, deleting or closing remote resources, and publishing packages or releases.',
     },
   });

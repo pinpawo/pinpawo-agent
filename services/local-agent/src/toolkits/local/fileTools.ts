@@ -1,4 +1,16 @@
-import { closeSync, cpSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  cpSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { basename, dirname, extname, isAbsolute, resolve } from 'node:path';
 import { tool } from '@langchain/core/tools';
 import { type ToolOperationMetadata } from '@pinpawo/pet-agent';
@@ -22,11 +34,8 @@ import {
   readString,
   sourceDestinationInputSummary,
 } from '../operationMetadata';
-import {
-  type LocalToolRuntime,
-  resolveToolPath,
-  resolveUserPath,
-} from './pathUtils';
+import { resolveUserPath } from './pathUtils';
+import { resolveDefaultWorkdir } from '../../runtimeConfig';
 
 const capabilityManifestSchema = z.object({
   id: z.string().min(1),
@@ -62,7 +71,6 @@ function truncateForOperationDetails(content: string) {
   }
   return `${content.slice(0, MAX_FILE_DIFF_PREVIEW_CHARS)}\n[truncated ${(content.length - MAX_FILE_DIFF_PREVIEW_CHARS).toString()} chars]`;
 }
-
 
 function readFileContentPreview(filePath: string) {
   try {
@@ -151,12 +159,8 @@ export function formatTextFileChunkFooter(result: TextFileChunkResult) {
     return `[lines ${result.startLine}-${result.endLine} of ${result.totalLines}; incomplete: line ${result.truncatedLine} cannot fit within ${result.maxBytes}-byte result limit; nextStartLine=unavailable because this tool cannot resume within a line; use grep_search to locate an anchor or a byte-range reader]`;
   }
 
-  const continuation = result.hasMore
-    ? `nextStartLine=${result.nextStartLine}`
-    : 'complete';
-  const limit = result.limitReason === 'byte_limit'
-    ? `; stopped at ${result.maxBytes}-byte limit`
-    : '';
+  const continuation = result.hasMore ? `nextStartLine=${result.nextStartLine}` : 'complete';
+  const limit = result.limitReason === 'byte_limit' ? `; stopped at ${result.maxBytes}-byte limit` : '';
   return `[lines ${result.startLine}-${result.endLine} of ${result.totalLines}; ${continuation}${limit}]`;
 }
 
@@ -208,11 +212,7 @@ export function readTextFileChunkResult({
       content: body,
       startLine: start,
       endLine: returnedEndLine,
-      nextStartLine: reason === 'line_too_long'
-        ? null
-        : hasMore
-          ? returnedEndLine + 1
-          : null,
+      nextStartLine: reason === 'line_too_long' ? null : hasMore ? returnedEndLine + 1 : null,
       totalLines,
       hasMore,
       returnedChars: body.length,
@@ -226,13 +226,9 @@ export function readTextFileChunkResult({
   const makeTruncatedLineResult = (lineNumber: number): TextFileChunkResult => {
     const formattedLine = `${lineNumber}: ${lines[lineNumber - 1] ?? ''}`;
     const ellipsis = ' …';
-    const truncated = truncateUtf8(
-      formattedLine,
-      Math.max(0, bodyMaxBytes - utf8Bytes(ellipsis)),
-    );
-    const body = bodyMaxBytes >= utf8Bytes(ellipsis)
-      ? `${truncated}${ellipsis}`
-      : truncateUtf8(formattedLine, bodyMaxBytes);
+    const truncated = truncateUtf8(formattedLine, Math.max(0, bodyMaxBytes - utf8Bytes(ellipsis)));
+    const body =
+      bodyMaxBytes >= utf8Bytes(ellipsis) ? `${truncated}${ellipsis}` : truncateUtf8(formattedLine, bodyMaxBytes);
     return makeResult(lineNumber, body, 'line_too_long', lineNumber);
   };
 
@@ -256,19 +252,11 @@ export function readTextFileChunkResult({
   return makeResult(returnedEndLine, chunkContent, limitReason, null);
 }
 
-export function readTextFileChunk(input: {
-  path: string;
-  startLine?: number;
-  endLine?: number;
-  workdir?: string;
-}) {
+export function readTextFileChunk(input: { path: string; startLine?: number; endLine?: number; workdir?: string }) {
   return formatTextFileChunkResult(readTextFileChunkResult(input));
 }
 
-function mergeOperationOutputSummary(
-  target: string | undefined,
-  details?: Record<string, unknown>,
-) {
+function mergeOperationOutputSummary(target: string | undefined, details?: Record<string, unknown>) {
   if (!target) return null;
   const after = readFileContentPreview(target);
   return {
@@ -279,405 +267,470 @@ function mergeOperationOutputSummary(
 
 function resolveMoveTarget(sourcePath: string, destinationPath: string) {
   const destinationStat = tryStat(destinationPath);
-  return destinationStat?.isDirectory()
-    ? resolve(destinationPath, basename(sourcePath))
-    : destinationPath;
+  return destinationStat?.isDirectory() ? resolve(destinationPath, basename(sourcePath)) : destinationPath;
 }
 
 function resolveCopyTarget(sourcePath: string, destinationPath: string) {
   return resolveMoveTarget(sourcePath, destinationPath);
 }
 
-export const readFileTool = tool(
-  async ({ path }: { path: string }, runtime: LocalToolRuntime) => {
+export function createFileTools(workdir = resolveDefaultWorkdir()) {
+  const resolvePath = (path: string) => resolveUserPath(path, workdir);
+
+  const readFileTool = tool(
+    async ({ path }: { path: string }) => {
+      try {
+        const filePath = resolvePath(path);
+        const stat = statSync(filePath);
+        if (!stat.isFile()) {
+          return `Error: read_file expects a file path, got ${stat.isDirectory() ? 'directory' : 'non-file'}: ${filePath}`;
+        }
+
+        const extension = extname(filePath).toLowerCase();
+        if (looksLikeUtf8Text(readFileSample(filePath))) {
+          return `Error: ${filePath} is a readable UTF-8 text file; use view_file_chunk for line-numbered text reading.`;
+        }
+
+        return JSON.stringify({
+          ok: false,
+          path: filePath,
+          type: 'document_or_binary',
+          extension: extension || null,
+          size: stat.size,
+          readableAsText: false,
+          reason: 'No document reader is registered for this non-text file.',
+          recommendation: 'Install or enable a document/image reader toolkit that can handle this file type.',
+        });
+      } catch (err) {
+        return `Error: ${err instanceof Error ? err.message : err}`;
+      }
+    },
+    {
+      name: 'read_file',
+      description:
+        '分析非 UTF-8 文本的本地文档或二进制文件。普通代码、Markdown、JSON、配置等可读文本请优先使用 view_file_chunk；只有 view_file_chunk 判断不是可读文本，或已知目标是 PDF、Word、表格、图片等非文本文件时才使用。',
+      schema: z.object({ path: z.string().describe('文件路径') }),
+    },
+  );
+
+  const viewFileChunkTool = tool(
+    async ({ path, startLine, endLine }: { path: string; startLine?: number; endLine?: number }) => {
+      try {
+        return readTextFileChunk({
+          path,
+          startLine,
+          endLine,
+          workdir,
+        });
+      } catch (err) {
+        return `Error: ${err instanceof Error ? err.message : err}`;
+      }
+    },
+    {
+      name: 'view_file_chunk',
+      description: `按行读取文件片段，返回带行号正文以及实际范围、总行数和 nextStartLine/complete。默认最多 200 行，单次模型可见结果最多 ${VIEW_FILE_CHUNK_MAX_BYTES} 字节。`,
+      schema: z.object({
+        path: z.string().describe('文件路径'),
+        startLine: z.number().int().positive().optional().describe('起始行号，默认 1'),
+        endLine: z.number().int().positive().optional().describe('结束行号，默认最多返回 200 行'),
+      }),
+    },
+  );
+
+  const statPathTool = tool(
+    async ({ path }: { path: string }) => {
+      try {
+        const resolvedPath = resolvePath(path);
+        return formatStat(resolvedPath);
+      } catch (err) {
+        return `Error: ${err instanceof Error ? err.message : err}`;
+      }
+    },
+    {
+      name: 'stat_path',
+      description: '查看文件或目录元信息。返回类型、大小、修改时间等。',
+      schema: z.object({
+        path: z.string().describe('文件或目录路径'),
+      }),
+    },
+  );
+
+  const writeFileTool = tool(
+    async ({
+      path,
+      content,
+      append,
+      createDirs,
+    }: {
+      path: string;
+      content: string;
+      append?: boolean;
+      createDirs?: boolean;
+    }) => {
+      try {
+        const filePath = resolvePath(path);
+        if (createDirs ?? true) {
+          mkdirSync(dirname(filePath), { recursive: true });
+        }
+        writeFileSync(filePath, content, {
+          encoding: 'utf-8',
+          flag: append ? 'a' : 'w',
+        });
+        return JSON.stringify({
+          ok: true,
+          path: filePath,
+          mode: append ? 'append' : 'write',
+          bytes: Buffer.byteLength(content, 'utf-8'),
+        });
+      } catch (err) {
+        return `Error: ${err instanceof Error ? err.message : err}`;
+      }
+    },
+    {
+      name: 'write_file',
+      description:
+        '写入本地文本文件。适合直接创建或覆盖文件内容；如需追加，传 append=true。默认会自动创建父目录。如果写入的是 JSON、manifest.json、package.json、tsconfig.json 等结构化文件，写完后应继续调用 validate_structured_file 做结构校验。',
+      schema: z.object({
+        path: z.string().describe('目标文件路径；支持绝对路径或相对路径'),
+        content: z.string().describe('要写入的文本内容'),
+        append: z.boolean().optional().describe('是否以追加模式写入；默认 false 表示覆盖'),
+        createDirs: z.boolean().optional().describe('是否自动创建父目录；默认 true'),
+      }),
+    },
+  );
+
+  interface ResolvedPatchWrite {
+    absolutePath: string;
+    nextContent: string;
+    chunksApplied: number;
+    fuzz: 'exact' | 'ignore-trailing-whitespace' | 'ignore-whitespace';
+  }
+
+  function worstFuzz(chunks: Array<{ fuzz: ResolvedPatchWrite['fuzz'] }>): ResolvedPatchWrite['fuzz'] {
+    if (chunks.some((chunk) => chunk.fuzz === 'ignore-whitespace')) return 'ignore-whitespace';
+    if (chunks.some((chunk) => chunk.fuzz === 'ignore-trailing-whitespace')) return 'ignore-trailing-whitespace';
+    return 'exact';
+  }
+
+  function atomicWriteFile(filePath: string, content: string) {
+    const tempPath = `${filePath}.pinpawo-patch-${process.pid}-${Date.now()}.tmp`;
+    writeFileSync(tempPath, content, 'utf-8');
     try {
-      const filePath = resolveToolPath(path, runtime);
-      const stat = statSync(filePath);
-      if (!stat.isFile()) {
-        return `Error: read_file expects a file path, got ${stat.isDirectory() ? 'directory' : 'non-file'}: ${filePath}`;
-      }
+      renameSync(tempPath, filePath);
+    } catch (err) {
+      rmSync(tempPath, { force: true });
+      throw err;
+    }
+  }
 
-      const extension = extname(filePath).toLowerCase();
-      if (looksLikeUtf8Text(readFileSample(filePath))) {
-        return `Error: ${filePath} is a readable UTF-8 text file; use view_file_chunk for line-numbered text reading.`;
-      }
+  const APPLY_PATCH_DESCRIPTION = [
+    '使用补丁修改一个已存在的本地文件。每次调用只允许一个文件 update；建议每次只提交少量修改块，并按文件中的先后顺序排列。新增或完全重写用 write_file，移动用 move_path；删除文件不属于本工具。',
+    'patch 只接受 V4A，不接受或转换 Unified Diff。必须使用 *** Begin Patch / *** End Patch 包裹。',
+    'V4A 最小结构为：*** Begin Patch、*** Update File: <path>、@@ <可选唯一 anchor>、以空格/-/+开头的 diff 行、*** End Patch；每个 hunk 都必须显式写 @@ 并至少包含一条变更行。',
+    '完整补丁先通过语法解析，再按书写顺序逐块定位和应用；前面成功块对文件的修改会成为后续块看到的内容。某块匹配失败时，其他成功块仍会写入；语法错误不会写入任何块。',
+    '修改前先读取文件现状，并提供足以唯一定位修改位置的上下文。重复文本应增加唯一 anchor 或更多上下文，必要时拆成单独调用；工具不会自动重新生成补丁或循环重试失败块。',
+    'V4A 用 appliedHunks 返回成功块编号以节省 token；failedHunks 返回失败块的原始 diff、错误和相近上下文。',
+    '如果修改的是 JSON、manifest.json、package.json、tsconfig.json 等结构化文件，完成后应继续调用 validate_structured_file。整文件新建或完全重写可以直接用 write_file。',
+  ].join('\n');
 
+  function chunkDiffText(chunk: PatchChunk) {
+    return [
+      chunk.anchor ? `@@ ${chunk.anchor}` : '@@',
+      ...chunk.lines.map((line) => {
+        if (line.kind === 'added') return `+${line.text}`;
+        if (line.kind === 'removed') return `-${line.text}`;
+        return ` ${line.text}`;
+      }),
+      ...(chunk.isEndOfFile ? ['*** End of File'] : []),
+    ].join('\n');
+  }
+
+  function failedChunkOutput(chunk: FailedChunk, source: PatchChunk) {
+    return {
+      hunk: chunk.hunk,
+      diff: chunkDiffText(source),
+      code: chunk.code,
+      message: chunk.message.split('\n')[0] ?? chunk.message,
+      ...(chunk.closest ? { closest: chunk.closest } : {}),
+      ...(chunk.matches ? { matches: chunk.matches } : {}),
+    };
+  }
+
+  function patchFailureOutput(error: unknown, phase: 'parse' | 'match' | 'write') {
+    const message = error instanceof Error ? error.message : String(error);
+    if (error instanceof PatchParseError || error instanceof PatchApplyError) {
       return JSON.stringify({
         ok: false,
-        path: filePath,
-        type: 'document_or_binary',
-        extension: extension || null,
-        size: stat.size,
-        readableAsText: false,
-        reason: 'No document reader is registered for this non-text file.',
-        recommendation: 'Install or enable a document/image reader toolkit that can handle this file type.',
+        ...error.details,
+        message,
       });
-    } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
     }
-  },
-  {
-    name: 'read_file',
-    description: '分析非 UTF-8 文本的本地文档或二进制文件。普通代码、Markdown、JSON、配置等可读文本请优先使用 view_file_chunk；只有 view_file_chunk 判断不是可读文本，或已知目标是 PDF、Word、表格、图片等非文本文件时才使用。',
-    schema: z.object({ path: z.string().describe('文件路径') }),
-  },
-);
-
-export const viewFileChunkTool = tool(
-  async ({ path, startLine, endLine }: {
-    path: string;
-    startLine?: number;
-    endLine?: number;
-  }, runtime: LocalToolRuntime) => {
-    try {
-      return readTextFileChunk({
-        path: resolveToolPath(path, runtime),
-        startLine,
-        endLine,
-      });
-    } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
-    }
-  },
-  {
-    name: 'view_file_chunk',
-    description: `按行读取文件片段，返回带行号正文以及实际范围、总行数和 nextStartLine/complete。默认最多 200 行，单次模型可见结果最多 ${VIEW_FILE_CHUNK_MAX_BYTES} 字节。`,
-    schema: z.object({
-      path: z.string().describe('文件路径'),
-      startLine: z.number().int().positive().optional().describe('起始行号，默认 1'),
-      endLine: z.number().int().positive().optional().describe('结束行号，默认最多返回 200 行'),
-    }),
-  },
-);
-
-export const statPathTool = tool(
-  async ({ path }: { path: string }, runtime: LocalToolRuntime) => {
-    try {
-      const resolvedPath = resolveToolPath(path, runtime);
-      return formatStat(resolvedPath);
-    } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
-    }
-  },
-  {
-    name: 'stat_path',
-    description: '查看文件或目录元信息。返回类型、大小、修改时间等。',
-    schema: z.object({
-      path: z.string().describe('文件或目录路径'),
-    }),
-  },
-);
-
-export const writeFileTool = tool(
-  async ({ path, content, append, createDirs }: {
-    path: string;
-    content: string;
-    append?: boolean;
-    createDirs?: boolean;
-  }, runtime: LocalToolRuntime) => {
-    try {
-      const filePath = resolveToolPath(path, runtime);
-      if (createDirs ?? true) {
-        mkdirSync(dirname(filePath), { recursive: true });
-      }
-      writeFileSync(filePath, content, {
-        encoding: 'utf-8',
-        flag: append ? 'a' : 'w',
-      });
-      return JSON.stringify({
-        ok: true,
-        path: filePath,
-        mode: append ? 'append' : 'write',
-        bytes: Buffer.byteLength(content, 'utf-8'),
-      });
-    } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
-    }
-  },
-  {
-    name: 'write_file',
-    description: '写入本地文本文件。适合直接创建或覆盖文件内容；如需追加，传 append=true。默认会自动创建父目录。如果写入的是 JSON、manifest.json、package.json、tsconfig.json 等结构化文件，写完后应继续调用 validate_structured_file 做结构校验。',
-    schema: z.object({
-      path: z.string().describe('目标文件路径；支持绝对路径或相对路径'),
-      content: z.string().describe('要写入的文本内容'),
-      append: z.boolean().optional().describe('是否以追加模式写入；默认 false 表示覆盖'),
-      createDirs: z.boolean().optional().describe('是否自动创建父目录；默认 true'),
-    }),
-  },
-);
-
-interface ResolvedPatchWrite {
-  absolutePath: string;
-  nextContent: string;
-  chunksApplied: number;
-  fuzz: 'exact' | 'ignore-trailing-whitespace' | 'ignore-whitespace';
-}
-
-function worstFuzz(chunks: Array<{ fuzz: ResolvedPatchWrite['fuzz'] }>): ResolvedPatchWrite['fuzz'] {
-  if (chunks.some((chunk) => chunk.fuzz === 'ignore-whitespace')) return 'ignore-whitespace';
-  if (chunks.some((chunk) => chunk.fuzz === 'ignore-trailing-whitespace')) return 'ignore-trailing-whitespace';
-  return 'exact';
-}
-
-function atomicWriteFile(filePath: string, content: string) {
-  const tempPath = `${filePath}.pinpawo-patch-${process.pid}-${Date.now()}.tmp`;
-  writeFileSync(tempPath, content, 'utf-8');
-  try {
-    renameSync(tempPath, filePath);
-  } catch (err) {
-    rmSync(tempPath, { force: true });
-    throw err;
-  }
-}
-
-const APPLY_PATCH_DESCRIPTION = [
-  '使用补丁修改一个已存在的本地文件。每次调用只允许一个文件 update；建议每次只提交少量修改块，并按文件中的先后顺序排列。新增或完全重写用 write_file，移动用 move_path；删除文件不属于本工具。',
-  'patch 只接受 V4A，不接受或转换 Unified Diff。必须使用 *** Begin Patch / *** End Patch 包裹。',
-  'V4A 最小结构为：*** Begin Patch、*** Update File: <path>、@@ <可选唯一 anchor>、以空格/-/+开头的 diff 行、*** End Patch；每个 hunk 都必须显式写 @@ 并至少包含一条变更行。',
-  '完整补丁先通过语法解析，再按书写顺序逐块定位和应用；前面成功块对文件的修改会成为后续块看到的内容。某块匹配失败时，其他成功块仍会写入；语法错误不会写入任何块。',
-  '修改前先读取文件现状，并提供足以唯一定位修改位置的上下文。重复文本应增加唯一 anchor 或更多上下文，必要时拆成单独调用；工具不会自动重新生成补丁或循环重试失败块。',
-  'V4A 用 appliedHunks 返回成功块编号以节省 token；failedHunks 返回失败块的原始 diff、错误和相近上下文。',
-  '如果修改的是 JSON、manifest.json、package.json、tsconfig.json 等结构化文件，完成后应继续调用 validate_structured_file。整文件新建或完全重写可以直接用 write_file。',
-].join('\n');
-
-function chunkDiffText(chunk: PatchChunk) {
-  return [
-    chunk.anchor ? `@@ ${chunk.anchor}` : '@@',
-    ...chunk.lines.map((line) => {
-      if (line.kind === 'added') return `+${line.text}`;
-      if (line.kind === 'removed') return `-${line.text}`;
-      return ` ${line.text}`;
-    }),
-    ...(chunk.isEndOfFile ? ['*** End of File'] : []),
-  ].join('\n');
-}
-
-function failedChunkOutput(chunk: FailedChunk, source: PatchChunk) {
-  return {
-    hunk: chunk.hunk,
-    diff: chunkDiffText(source),
-    code: chunk.code,
-    message: chunk.message.split('\n')[0] ?? chunk.message,
-    ...(chunk.closest ? { closest: chunk.closest } : {}),
-    ...(chunk.matches ? { matches: chunk.matches } : {}),
-  };
-}
-
-function patchFailureOutput(
-  error: unknown,
-  phase: 'parse' | 'match' | 'write',
-) {
-  const message = error instanceof Error ? error.message : String(error);
-  if (error instanceof PatchParseError || error instanceof PatchApplyError) {
     return JSON.stringify({
       ok: false,
-      ...error.details,
+      phase,
+      code: phase === 'write' ? 'write_failed' : 'patch_failed',
       message,
     });
   }
-  return JSON.stringify({
-    ok: false,
-    phase,
-    code: phase === 'write' ? 'write_failed' : 'patch_failed',
-    message,
-  });
-}
 
-function patchTargetError(code: string, message: string, path: string) {
-  return new PatchApplyError(message, {
-    code,
-    phase: 'match',
-    path,
-  });
-}
+  function patchTargetError(code: string, message: string, path: string) {
+    return new PatchApplyError(message, {
+      code,
+      phase: 'match',
+      path,
+    });
+  }
 
-export const applyPatchTool = tool(
-  async ({ patch }: { patch: string }, runtime: LocalToolRuntime) => {
-    let phase: 'parse' | 'match' | 'write' = 'parse';
-    try {
-      const update = parsePatch(patch);
-      phase = 'match';
+  const applyPatchTool = tool(
+    async ({ patch }: { patch: string }) => {
+      let phase: 'parse' | 'match' | 'write' = 'parse';
+      try {
+        const update = parsePatch(patch);
+        phase = 'match';
 
-      const absolutePath = resolveToolPath(update.path, runtime);
-      const stat = tryStat(absolutePath);
-      if (!stat?.isFile()) {
-        throw patchTargetError(
-          'target_not_found',
-          `Update File target is not an existing file: ${absolutePath}`,
-          update.path,
-        );
-      }
-      const original = readUtf8TextFile(absolutePath);
-      const result = applyChunksToContentPartially(
-        update.path,
-        original,
-        update.chunks,
-        { requireUniqueContext: true },
-      );
-      const write: ResolvedPatchWrite = {
-        absolutePath,
-        nextContent: result.content,
-        chunksApplied: result.chunks.length,
-        fuzz: worstFuzz(result.chunks),
-      };
-
-      const failures: FailedChunk[] = result.failures;
-      const appliedHunks = result.chunks.map((chunk) => chunk.hunk);
-      const failedHunks = failures.map((failure) =>
-        failedChunkOutput(failure, update.chunks[failure.hunk - 1]!));
-
-      if (failures.length > 0 && result.chunks.length === 0) {
-        const primaryFailure = failures[0];
-        return JSON.stringify({
-          ok: false,
-          partial: false,
-          phase: 'match',
-          code: failures.length === 1
-            ? primaryFailure?.code
-            : 'all_patch_chunks_failed',
-          message: `Applied 0 of ${update.chunks.length.toString()} V4A hunks; ${failures.length.toString()} failed.`,
-          file: {
-            path: write.absolutePath,
-            chunks: 0,
-          },
-          appliedHunks,
-          failedHunks,
+        const absolutePath = resolvePath(update.path);
+        const stat = tryStat(absolutePath);
+        if (!stat?.isFile()) {
+          throw patchTargetError(
+            'target_not_found',
+            `Update File target is not an existing file: ${absolutePath}`,
+            update.path,
+          );
+        }
+        const original = readUtf8TextFile(absolutePath);
+        const result = applyChunksToContentPartially(update.path, original, update.chunks, {
+          requireUniqueContext: true,
         });
-      }
+        const write: ResolvedPatchWrite = {
+          absolutePath,
+          nextContent: result.content,
+          chunksApplied: result.chunks.length,
+          fuzz: worstFuzz(result.chunks),
+        };
 
-      // All successful chunks are committed with one atomic file replacement.
-      phase = 'write';
-      atomicWriteFile(write.absolutePath, write.nextContent);
-      const file = {
-        path: write.absolutePath,
-        chunks: write.chunksApplied,
-        ...(write.fuzz !== 'exact' ? { fuzz: write.fuzz } : {}),
-      };
+        const failures: FailedChunk[] = result.failures;
+        const appliedHunks = result.chunks.map((chunk) => chunk.hunk);
+        const failedHunks = failures.map((failure) => failedChunkOutput(failure, update.chunks[failure.hunk - 1]!));
 
-      if (failures.length > 0) {
-        return JSON.stringify({
-          ok: false,
-          partial: true,
-          phase: 'match',
-          code: 'partial_patch_applied',
-          message: `Applied ${result.chunks.length.toString()} of ${update.chunks.length.toString()} V4A hunks; ${failures.length.toString()} failed.`,
-          file,
-          appliedHunks,
-          failedHunks,
-        });
-      }
-
-      return JSON.stringify({
-        ok: true,
-        file,
-        appliedHunks,
-      });
-    } catch (err) {
-      return patchFailureOutput(err, phase);
-    }
-  },
-  {
-    name: 'apply_patch',
-    description: APPLY_PATCH_DESCRIPTION,
-    schema: z.object({
-      patch: z.string().describe('只更新一个已存在文件的 V4A 补丁；使用完整 envelope，并以 @@ hunk 明确分块'),
-    }),
-  },
-);
-
-export const validateStructuredFileTool = tool(
-  async ({ path, format, schema }: {
-    path: string;
-    format?: 'auto' | 'json';
-    schema?: 'none' | 'capability_manifest';
-  }, runtime: LocalToolRuntime) => {
-    try {
-      const filePath = resolveToolPath(path, runtime);
-      const content = readFileSync(filePath, 'utf-8');
-      const detectedFormat = format && format !== 'auto'
-        ? format
-        : extname(filePath).toLowerCase() === '.json'
-          ? 'json'
-          : 'json';
-
-      if (detectedFormat !== 'json') {
-        return `Error: unsupported structured format: ${detectedFormat}`;
-      }
-
-      const parsed = JSON.parse(content) as unknown;
-      let schemaWarnings: string[] = [];
-      if (schema === 'capability_manifest') {
-        const result = capabilityManifestSchema.safeParse(parsed);
-        if (!result.success) {
+        if (failures.length > 0 && result.chunks.length === 0) {
+          const primaryFailure = failures[0];
           return JSON.stringify({
             ok: false,
-            path: filePath,
-            format: detectedFormat,
-            schema: schema ?? 'none',
-            error: result.error.issues.map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`).join('; '),
+            partial: false,
+            phase: 'match',
+            code: failures.length === 1 ? primaryFailure?.code : 'all_patch_chunks_failed',
+            message: `Applied 0 of ${update.chunks.length.toString()} V4A hunks; ${failures.length.toString()} failed.`,
+            file: {
+              path: write.absolutePath,
+              chunks: 0,
+            },
+            appliedHunks,
+            failedHunks,
           });
         }
-        if (result.data.builtIn !== false) {
-          schemaWarnings = ['用户 capability manifest 建议写 builtIn: false'];
+
+        // All successful chunks are committed with one atomic file replacement.
+        phase = 'write';
+        atomicWriteFile(write.absolutePath, write.nextContent);
+        const file = {
+          path: write.absolutePath,
+          chunks: write.chunksApplied,
+          ...(write.fuzz !== 'exact' ? { fuzz: write.fuzz } : {}),
+        };
+
+        if (failures.length > 0) {
+          return JSON.stringify({
+            ok: false,
+            partial: true,
+            phase: 'match',
+            code: 'partial_patch_applied',
+            message: `Applied ${result.chunks.length.toString()} of ${update.chunks.length.toString()} V4A hunks; ${failures.length.toString()} failed.`,
+            file,
+            appliedHunks,
+            failedHunks,
+          });
         }
-      }
 
-      return JSON.stringify({
-        ok: true,
-        path: filePath,
-        format: detectedFormat,
-        schema: schema ?? 'none',
-        warnings: schemaWarnings,
-      });
-    } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
-    }
-  },
-  {
-    name: 'validate_structured_file',
-    description: '验证结构化文件内容。当前支持 JSON 语法检查，以及 capability_manifest 这类 schema 校验。适合在 write_file / apply_patch 之后单独执行验证。',
-    schema: z.object({
-      path: z.string().describe('要验证的文件路径'),
-      format: z.enum(['auto', 'json']).optional().describe('结构格式；默认 auto，目前实际支持 json'),
-      schema: z.enum(['none', 'capability_manifest']).optional().describe('可选 schema 校验类型'),
-    }),
-  },
-);
-
-export const movePathTool = tool(
-  async ({ source, destination, overwrite, createDirs }: {
-    source: string;
-    destination: string;
-    overwrite?: boolean;
-    createDirs?: boolean;
-  }, runtime: LocalToolRuntime) => {
-    try {
-      const sourcePath = resolveToolPath(source, runtime);
-      const destinationPath = resolveToolPath(destination, runtime);
-      const sourceStat = statSync(sourcePath);
-      const targetPath = resolveMoveTarget(sourcePath, destinationPath);
-
-      if (createDirs ?? true) {
-        mkdirSync(dirname(targetPath), { recursive: true });
-      }
-
-      const targetStat = tryStat(targetPath);
-      if (targetStat) {
-        if (!overwrite) {
-          return `Error: destination already exists: ${targetPath}`;
-        }
-        rmSync(targetPath, { recursive: true, force: true });
-      }
-
-      try {
-        renameSync(sourcePath, targetPath);
+        return JSON.stringify({
+          ok: true,
+          file,
+          appliedHunks,
+        });
       } catch (err) {
-        const isCrossDevice = err instanceof Error
-          && 'code' in err
-          && (err as NodeJS.ErrnoException).code === 'EXDEV';
+        return patchFailureOutput(err, phase);
+      }
+    },
+    {
+      name: 'apply_patch',
+      description: APPLY_PATCH_DESCRIPTION,
+      schema: z.object({
+        patch: z.string().describe('只更新一个已存在文件的 V4A 补丁；使用完整 envelope，并以 @@ hunk 明确分块'),
+      }),
+    },
+  );
 
-        if (!isCrossDevice) {
-          throw err;
+  const validateStructuredFileTool = tool(
+    async ({
+      path,
+      format,
+      schema,
+    }: {
+      path: string;
+      format?: 'auto' | 'json';
+      schema?: 'none' | 'capability_manifest';
+    }) => {
+      try {
+        const filePath = resolvePath(path);
+        const content = readFileSync(filePath, 'utf-8');
+        const detectedFormat =
+          format && format !== 'auto' ? format : extname(filePath).toLowerCase() === '.json' ? 'json' : 'json';
+
+        if (detectedFormat !== 'json') {
+          return `Error: unsupported structured format: ${detectedFormat}`;
+        }
+
+        const parsed = JSON.parse(content) as unknown;
+        let schemaWarnings: string[] = [];
+        if (schema === 'capability_manifest') {
+          const result = capabilityManifestSchema.safeParse(parsed);
+          if (!result.success) {
+            return JSON.stringify({
+              ok: false,
+              path: filePath,
+              format: detectedFormat,
+              schema: schema ?? 'none',
+              error: result.error.issues
+                .map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`)
+                .join('; '),
+            });
+          }
+          if (result.data.builtIn !== false) {
+            schemaWarnings = ['用户 capability manifest 建议写 builtIn: false'];
+          }
+        }
+
+        return JSON.stringify({
+          ok: true,
+          path: filePath,
+          format: detectedFormat,
+          schema: schema ?? 'none',
+          warnings: schemaWarnings,
+        });
+      } catch (err) {
+        return `Error: ${err instanceof Error ? err.message : err}`;
+      }
+    },
+    {
+      name: 'validate_structured_file',
+      description:
+        '验证结构化文件内容。当前支持 JSON 语法检查，以及 capability_manifest 这类 schema 校验。适合在 write_file / apply_patch 之后单独执行验证。',
+      schema: z.object({
+        path: z.string().describe('要验证的文件路径'),
+        format: z.enum(['auto', 'json']).optional().describe('结构格式；默认 auto，目前实际支持 json'),
+        schema: z.enum(['none', 'capability_manifest']).optional().describe('可选 schema 校验类型'),
+      }),
+    },
+  );
+
+  const movePathTool = tool(
+    async ({
+      source,
+      destination,
+      overwrite,
+      createDirs,
+    }: {
+      source: string;
+      destination: string;
+      overwrite?: boolean;
+      createDirs?: boolean;
+    }) => {
+      try {
+        const sourcePath = resolvePath(source);
+        const destinationPath = resolvePath(destination);
+        const sourceStat = statSync(sourcePath);
+        const targetPath = resolveMoveTarget(sourcePath, destinationPath);
+
+        if (createDirs ?? true) {
+          mkdirSync(dirname(targetPath), { recursive: true });
+        }
+
+        const targetStat = tryStat(targetPath);
+        if (targetStat) {
+          if (!overwrite) {
+            return `Error: destination already exists: ${targetPath}`;
+          }
+          rmSync(targetPath, { recursive: true, force: true });
+        }
+
+        try {
+          renameSync(sourcePath, targetPath);
+        } catch (err) {
+          const isCrossDevice =
+            err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'EXDEV';
+
+          if (!isCrossDevice) {
+            throw err;
+          }
+
+          cpSync(sourcePath, targetPath, {
+            recursive: sourceStat.isDirectory(),
+            force: overwrite ?? false,
+            errorOnExist: !(overwrite ?? false),
+          });
+          rmSync(sourcePath, {
+            recursive: sourceStat.isDirectory(),
+            force: true,
+          });
+        }
+
+        return JSON.stringify({
+          ok: true,
+          source: sourcePath,
+          destination: targetPath,
+          type: sourceStat.isDirectory() ? 'directory' : 'file',
+        });
+      } catch (err) {
+        return `Error: ${err instanceof Error ? err.message : err}`;
+      }
+    },
+    {
+      name: 'move_path',
+      description:
+        '移动本地文件或目录。优先用于文件/目录搬迁，包括普通目录、外接磁盘和已挂载的 SMB/网络共享卷；跨卷移动会自动复制后删除源路径。若 destination 是已存在目录，则会移动到该目录下并保留原名称。默认不覆盖目标；如需覆盖，传 overwrite=true。',
+      schema: z.object({
+        source: z.string().describe('源文件或目录路径'),
+        destination: z.string().describe('目标路径；可以是目标文件路径，也可以是已存在目录'),
+        overwrite: z.boolean().optional().describe('目标已存在时是否覆盖；默认 false'),
+        createDirs: z.boolean().optional().describe('是否自动创建目标父目录；默认 true'),
+      }),
+    },
+  );
+
+  const copyPathTool = tool(
+    async ({
+      source,
+      destination,
+      overwrite,
+      createDirs,
+    }: {
+      source: string;
+      destination: string;
+      overwrite?: boolean;
+      createDirs?: boolean;
+    }) => {
+      try {
+        const sourcePath = resolvePath(source);
+        const destinationPath = resolvePath(destination);
+        const sourceStat = statSync(sourcePath);
+        const targetPath = resolveCopyTarget(sourcePath, destinationPath);
+
+        if (createDirs ?? true) {
+          mkdirSync(dirname(targetPath), { recursive: true });
+        }
+
+        const targetStat = tryStat(targetPath);
+        if (targetStat && !overwrite) {
+          return `Error: destination already exists: ${targetPath}`;
         }
 
         cpSync(sourcePath, targetPath, {
@@ -685,131 +738,119 @@ export const movePathTool = tool(
           force: overwrite ?? false,
           errorOnExist: !(overwrite ?? false),
         });
-        rmSync(sourcePath, { recursive: sourceStat.isDirectory(), force: true });
+
+        return JSON.stringify({
+          ok: true,
+          source: sourcePath,
+          destination: targetPath,
+          type: sourceStat.isDirectory() ? 'directory' : 'file',
+        });
+      } catch (err) {
+        return `Error: ${err instanceof Error ? err.message : err}`;
       }
+    },
+    {
+      name: 'copy_path',
+      description:
+        '复制本地文件或目录。优先用于文件/目录复制，包括普通目录、外接磁盘和已挂载的 SMB/网络共享卷。若 destination 是已存在目录，则复制到该目录下并保留原名称。默认不覆盖目标；如需覆盖，传 overwrite=true。',
+      schema: z.object({
+        source: z.string().describe('源文件或目录路径'),
+        destination: z.string().describe('目标路径；可以是目标文件路径，也可以是已存在目录'),
+        overwrite: z.boolean().optional().describe('目标已存在时是否覆盖；默认 false'),
+        createDirs: z.boolean().optional().describe('是否自动创建目标父目录；默认 true'),
+      }),
+    },
+  );
 
-      return JSON.stringify({
-        ok: true,
-        source: sourcePath,
-        destination: targetPath,
-        type: sourceStat.isDirectory() ? 'directory' : 'file',
-      });
-    } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
-    }
-  },
-  {
-    name: 'move_path',
-    description: '移动本地文件或目录。优先用于文件/目录搬迁，包括普通目录、外接磁盘和已挂载的 SMB/网络共享卷；跨卷移动会自动复制后删除源路径。若 destination 是已存在目录，则会移动到该目录下并保留原名称。默认不覆盖目标；如需覆盖，传 overwrite=true。',
-    schema: z.object({
-      source: z.string().describe('源文件或目录路径'),
-      destination: z.string().describe('目标路径；可以是目标文件路径，也可以是已存在目录'),
-      overwrite: z.boolean().optional().describe('目标已存在时是否覆盖；默认 false'),
-      createDirs: z.boolean().optional().describe('是否自动创建目标父目录；默认 true'),
-    }),
-  },
-);
-
-export const copyPathTool = tool(
-  async ({ source, destination, overwrite, createDirs }: {
-    source: string;
-    destination: string;
-    overwrite?: boolean;
-    createDirs?: boolean;
-  }, runtime: LocalToolRuntime) => {
-    try {
-      const sourcePath = resolveToolPath(source, runtime);
-      const destinationPath = resolveToolPath(destination, runtime);
-      const sourceStat = statSync(sourcePath);
-      const targetPath = resolveCopyTarget(sourcePath, destinationPath);
-
-      if (createDirs ?? true) {
-        mkdirSync(dirname(targetPath), { recursive: true });
+  const mkdirPathTool = tool(
+    async ({ path, recursive }: { path: string; recursive?: boolean }) => {
+      try {
+        const targetPath = resolvePath(path);
+        mkdirSync(targetPath, { recursive: recursive ?? true });
+        return JSON.stringify({
+          ok: true,
+          path: targetPath,
+        });
+      } catch (err) {
+        return `Error: ${err instanceof Error ? err.message : err}`;
       }
+    },
+    {
+      name: 'mkdir_path',
+      description: '创建本地目录。默认递归创建父目录。',
+      schema: z.object({
+        path: z.string().describe('要创建的目录路径'),
+        recursive: z.boolean().optional().describe('是否递归创建；默认 true'),
+      }),
+    },
+  );
 
-      const targetStat = tryStat(targetPath);
-      if (targetStat && !overwrite) {
-        return `Error: destination already exists: ${targetPath}`;
+  const listDirTool = tool(
+    async ({ path }: { path: string }) => {
+      try {
+        const dirPath = resolvePath(path);
+        const entries = readdirSync(dirPath);
+        const lines = entries.map((name) => {
+          try {
+            const stat = statSync(resolve(dirPath, name));
+            return `${stat.isDirectory() ? 'd' : 'f'} ${name}`;
+          } catch {
+            return `? ${name}`;
+          }
+        });
+        return lines.join('\n') || '(empty)';
+      } catch (err) {
+        return `Error: ${err instanceof Error ? err.message : err}`;
       }
+    },
+    {
+      name: 'list_dir',
+      description: '列出目录内容。返回每个条目的类型（d=目录, f=文件）和名称。',
+      schema: z.object({
+        path: z.string().describe('目录路径，默认 "." 表示当前目录'),
+      }),
+    },
+  );
 
-      cpSync(sourcePath, targetPath, {
-        recursive: sourceStat.isDirectory(),
-        force: overwrite ?? false,
-        errorOnExist: !(overwrite ?? false),
-      });
+  return {
+    readFileTool,
+    viewFileChunkTool,
+    statPathTool,
+    writeFileTool,
+    applyPatchTool,
+    validateStructuredFileTool,
+    movePathTool,
+    copyPathTool,
+    mkdirPathTool,
+    listDirTool,
+    tools: [
+      readFileTool,
+      viewFileChunkTool,
+      statPathTool,
+      writeFileTool,
+      applyPatchTool,
+      validateStructuredFileTool,
+      movePathTool,
+      copyPathTool,
+      mkdirPathTool,
+      listDirTool,
+    ],
+  };
+}
 
-      return JSON.stringify({
-        ok: true,
-        source: sourcePath,
-        destination: targetPath,
-        type: sourceStat.isDirectory() ? 'directory' : 'file',
-      });
-    } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
-    }
-  },
-  {
-    name: 'copy_path',
-    description: '复制本地文件或目录。优先用于文件/目录复制，包括普通目录、外接磁盘和已挂载的 SMB/网络共享卷。若 destination 是已存在目录，则复制到该目录下并保留原名称。默认不覆盖目标；如需覆盖，传 overwrite=true。',
-    schema: z.object({
-      source: z.string().describe('源文件或目录路径'),
-      destination: z.string().describe('目标路径；可以是目标文件路径，也可以是已存在目录'),
-      overwrite: z.boolean().optional().describe('目标已存在时是否覆盖；默认 false'),
-      createDirs: z.boolean().optional().describe('是否自动创建目标父目录；默认 true'),
-    }),
-  },
-);
-
-export const mkdirPathTool = tool(
-  async (
-    { path, recursive }: { path: string; recursive?: boolean },
-    runtime: LocalToolRuntime,
-  ) => {
-    try {
-      const targetPath = resolveToolPath(path, runtime);
-      mkdirSync(targetPath, { recursive: recursive ?? true });
-      return JSON.stringify({
-        ok: true,
-        path: targetPath,
-      });
-    } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
-    }
-  },
-  {
-    name: 'mkdir_path',
-    description: '创建本地目录。默认递归创建父目录。',
-    schema: z.object({
-      path: z.string().describe('要创建的目录路径'),
-      recursive: z.boolean().optional().describe('是否递归创建；默认 true'),
-    }),
-  },
-);
-
-export const listDirTool = tool(
-  async ({ path }: { path: string }, runtime: LocalToolRuntime) => {
-    try {
-      const dirPath = resolveToolPath(path, runtime);
-      const entries = readdirSync(dirPath);
-      const lines = entries.map((name) => {
-        try {
-          const stat = statSync(resolve(dirPath, name));
-          return `${stat.isDirectory() ? 'd' : 'f'} ${name}`;
-        } catch {
-          return `? ${name}`;
-        }
-      });
-      return lines.join('\n') || '(empty)';
-    } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
-    }
-  },
-  {
-    name: 'list_dir',
-    description: '列出目录内容。返回每个条目的类型（d=目录, f=文件）和名称。',
-    schema: z.object({ path: z.string().describe('目录路径，默认 "." 表示当前目录') }),
-  },
-);
+export const {
+  readFileTool,
+  viewFileChunkTool,
+  statPathTool,
+  writeFileTool,
+  applyPatchTool,
+  validateStructuredFileTool,
+  movePathTool,
+  copyPathTool,
+  mkdirPathTool,
+  listDirTool,
+  tools: fileTools,
+} = createFileTools();
 
 export const fileOperationMetadata: Record<string, ToolOperationMetadata> = {
   read_file: {
@@ -850,10 +891,9 @@ export const fileOperationMetadata: Record<string, ToolOperationMetadata> = {
     },
     summarizeOutput: (output) => {
       const record = readJsonRecord(output);
-      return mergeOperationOutputSummary(
-        readString(record, 'path'),
-        { mode: readString(record, 'mode') },
-      );
+      return mergeOperationOutputSummary(readString(record, 'path'), {
+        mode: readString(record, 'mode'),
+      });
     },
   },
   apply_patch: {

@@ -30,12 +30,12 @@ The runtime can also expose derived workspace metadata (`id`, `name`, and
 `rootPath`) from the workdir. This is local metadata; there is no persisted
 workspace registry or per-request workspace selection contract.
 
-For an Agent invocation, the effective workdir is exposed to tools through
-`ToolRuntime.context.executionScope.workdir`. Tools use it as the base for
-relative paths and as the default command cwd. It is not a filesystem sandbox:
-an explicit absolute path or cwd remains authoritative tool input. Review and
-authorization policy decides whether an operation outside the workdir needs
-human approval; the execution layer does not silently rewrite that input.
+The Host captures its effective workdir when it assembles local-machine Toolkit
+definitions. The same snapshot is used for relative paths, the default command
+cwd, Agent prompts, and review/authorization identity. It is not a filesystem
+sandbox: an explicit absolute path or cwd remains authoritative tool input, and
+the execution layer does not silently rewrite it. A different workspace is
+served by a different Host-scoped inventory rather than mutable process state.
 
 See [Studio configuration](../../studio/configuration.md) for the files Studio
 actually reads, and [the workspace proposal](../../design/local-agent/workspace-runtime-config.md)

@@ -18,32 +18,22 @@ function definition(toolkit: AgentToolkit, toolName: string) {
   return toolkit.tools.find((item) => item.tool.name === toolName);
 }
 
-const shellInvocationConfig = {
-  context: {
-    executionScope: {
-      threadId: 'thread-shell-test',
-      runId: 'run-shell-test',
-      delegationId: 'delegation-shell-test',
-      workdir: process.cwd(),
-    },
-  },
-};
-
 test('get_current_time returns current time details for a requested timezone', async () => {
-  assert.deepEqual(
-    buildCurrentTimeSnapshot(new Date('2026-06-23T02:30:00.000Z'), 'Asia/Shanghai'),
-    {
-      iso: '2026-06-23T02:30:00.000Z',
-      timezone: 'Asia/Shanghai',
-      localTime: '2026-06-23 10:30:00',
-      unixMs: 1782181800000,
-      unixSeconds: 1782181800,
-    },
-  );
-
-  const parsed = JSON.parse(String(await getCurrentTimeTool.invoke({
+  assert.deepEqual(buildCurrentTimeSnapshot(new Date('2026-06-23T02:30:00.000Z'), 'Asia/Shanghai'), {
+    iso: '2026-06-23T02:30:00.000Z',
     timezone: 'Asia/Shanghai',
-  }))) as {
+    localTime: '2026-06-23 10:30:00',
+    unixMs: 1782181800000,
+    unixSeconds: 1782181800,
+  });
+
+  const parsed = JSON.parse(
+    String(
+      await getCurrentTimeTool.invoke({
+        timezone: 'Asia/Shanghai',
+      }),
+    ),
+  ) as {
     iso?: string;
     timezone?: string;
     localTime?: string;
@@ -91,20 +81,19 @@ test('shell review policy reviews configured command execution', async () => {
     authorizationMatcher: await buildMatcher(context),
   });
   assert.equal(review && 'schemaVersion' in review ? review.view.title : null, '执行命令');
-  assert.deepEqual(
-    review && 'schemaVersion' in review ? review.options.map((option) => option.id) : [],
-    ['approve', 'approve-and-authorize-thread', 'reject', 'respond'],
-  );
+  assert.deepEqual(review && 'schemaVersion' in review ? review.options.map((option) => option.id) : [], [
+    'approve',
+    'approve-and-authorize-thread',
+    'reject',
+    'respond',
+  ]);
 });
 
 test('normalizeShellActionInput trims commands and expands home cwd', () => {
-  assert.deepEqual(
-    normalizeShellActionInput({ command: ' printf ok ', cwd: '~' }),
-    {
-      command: 'printf ok',
-      cwd: homedir(),
-    },
-  );
+  assert.deepEqual(normalizeShellActionInput({ command: ' printf ok ', cwd: '~' }), {
+    command: 'printf ok',
+    cwd: homedir(),
+  });
 });
 
 test('shell operation metadata preserves explicit cwd without reading ambient workdir', () => {
@@ -118,10 +107,10 @@ test('shell operation metadata preserves explicit cwd without reading ambient wo
       summary: "printf 'value' > output.txt",
     },
   );
-  assert.deepEqual(
-    shellOperationMetadata.run_shell?.summarizeInput?.({ command: 'pwd' }),
-    { target: undefined, summary: 'pwd' },
-  );
+  assert.deepEqual(shellOperationMetadata.run_shell?.summarizeInput?.({ command: 'pwd' }), {
+    target: undefined,
+    summary: 'pwd',
+  });
 });
 
 test('runShellTool executes commands and explicit output writes', async (t) => {
@@ -129,19 +118,10 @@ test('runShellTool executes commands and explicit output writes', async (t) => {
   const file = join(dir, 'output.txt');
   t.after(() => rmSync(dir, { recursive: true, force: true }));
 
-  assert.equal(
-    await runShellTool.invoke({ command: 'printf ok' }, shellInvocationConfig),
-    'ok',
-  );
-  assert.equal(await runShellTool.invoke(
-    { command: `printf written > ${file}` },
-    shellInvocationConfig,
-  ), '(no output)');
+  assert.equal(await runShellTool.invoke({ command: 'printf ok' }), 'ok');
+  assert.equal(await runShellTool.invoke({ command: `printf written > ${file}` }), '(no output)');
   assert.equal(readFileSync(file, 'utf-8'), 'written');
-  assert.equal(await runShellTool.invoke(
-    { command: `printf piped | cat > ${file}` },
-    shellInvocationConfig,
-  ), '(no output)');
+  assert.equal(await runShellTool.invoke({ command: `printf piped | cat > ${file}` }), '(no output)');
   assert.equal(readFileSync(file, 'utf-8'), 'piped');
 });
 
@@ -151,52 +131,29 @@ test('runShellTool relies on toolkit review instead of a second interface gate',
   writeFileSync(file, 'generated', 'utf-8');
   t.after(() => rmSync(dir, { recursive: true, force: true }));
 
-  assert.equal(await runShellTool.invoke(
-    { command: `rm ${file}` },
-    shellInvocationConfig,
-  ), '(no output)');
+  assert.equal(await runShellTool.invoke({ command: `rm ${file}` }), '(no output)');
   assert.equal(existsSync(file), false);
 });
 
 test('runShellTool separates stderr and reports exit codes', async () => {
-  assert.equal(
-    await runShellTool.invoke(
-      { command: 'printf out; printf err 1>&2' },
-      shellInvocationConfig,
-    ),
-    'out\n--- stderr ---\nerr',
-  );
+  assert.equal(await runShellTool.invoke({ command: 'printf out; printf err 1>&2' }), 'out\n--- stderr ---\nerr');
 
-  assert.match(
-    String(await runShellTool.invoke(
-      { command: 'printf boom 1>&2; exit 3' },
-      shellInvocationConfig,
-    )),
-    /^Error \(exit 3\):\nboom/,
-  );
+  assert.match(String(await runShellTool.invoke({ command: 'printf boom 1>&2; exit 3' })), /^Error \(exit 3\):\nboom/);
 });
 
-test('runShellTool requires invocation workdir only when cwd is omitted or relative', async (t) => {
+test('runShellTool honors an explicit cwd', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'pinpawo-shell-explicit-cwd-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
 
-  assert.equal(
-    await runShellTool.invoke({ command: 'pwd', cwd: dir }),
-    realpathSync(dir),
-  );
-  assert.match(
-    String(await runShellTool.invoke({ command: 'pwd' })),
-    /requires an execution workdir/,
-  );
+  assert.equal(await runShellTool.invoke({ command: 'pwd', cwd: dir }), realpathSync(dir));
 });
 
 test('runShellTool truncates stdout larger than the old 64KB buffer limit', async () => {
-  const output = String(await runShellTool.invoke(
-    {
+  const output = String(
+    await runShellTool.invoke({
       command: `${JSON.stringify(process.execPath)} -e "process.stdout.write('x'.repeat(70 * 1024))"`,
-    },
-    shellInvocationConfig,
-  ));
+    }),
+  );
 
   assert.doesNotMatch(output, /ENOBUFS/);
   assert.match(output, /^x+/);
@@ -204,13 +161,12 @@ test('runShellTool truncates stdout larger than the old 64KB buffer limit', asyn
 });
 
 test('runShellTool times out long-running commands', async () => {
-  const output = String(await runShellTool.invoke(
-    {
+  const output = String(
+    await runShellTool.invoke({
       command: 'sleep 5',
       timeoutSeconds: 1,
-    },
-    shellInvocationConfig,
-  ));
+    }),
+  );
   assert.match(output, /timed out after 1s/);
 });
 

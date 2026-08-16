@@ -208,10 +208,11 @@ Tool implementation，例如 browser session 或 process registry；框架会验
 format，以及静态 `operation`、`review`、权限与 instructions。runtime binding 不会
 进入 registry、planner workspace、prompt 或 checkpoint。
 
-通用 invocation facts 不经过 `bindTools`。Agent 会把 `threadId`、`runId`、
-`delegationId`、`workdir` 放入 `ToolRuntime.context.executionScope`，Tool 在调用时直接
-读取。`workdir` 只为相对路径和缺省 cwd 提供基准；显式绝对路径或 cwd 仍由 Tool
-输入决定，越出 workdir 的风险由 review / authorization 判断。
+通用 invocation identity 不经过 `bindTools`；Agent 把 `threadId`、`runId` 和
+`delegationId` 放入 `ToolRuntime.context.executionScope`。Host-owned workdir 在创建
+本地 Toolkit definitions 时固定，并由同一个 Host snapshot 同时提供给 Agent prompt、
+review 和 Tool execution。Tool input 保持模型给出的相对路径、绝对路径或 cwd；
+越出 workdir 的风险由 review / authorization 判断。
 
 `ToolkitRuntimeManager` 是 host-owned：长期 local-agent 在进程启动/关闭时调用
 它；独立 `createPetAgentRuntime()` 创建的私有 manager 可通过其 `shutdown()`

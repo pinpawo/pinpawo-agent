@@ -62,7 +62,6 @@ function invocationConfig(threadId: string | null) {
         threadId,
         runId: 'r',
         delegationId: 'd',
-        workdir: null,
       },
     },
   };

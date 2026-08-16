@@ -1,5 +1,5 @@
 import { closeSync, cpSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { basename, dirname, extname, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, resolve } from 'node:path';
 import { tool } from '@langchain/core/tools';
 import { type ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { z } from 'zod';
@@ -396,31 +396,6 @@ export const writeFileTool = tool(
     }),
   },
 );
-
-type WriteFileAction = {
-  path: string;
-  content: string;
-  append: boolean;
-  createDirs: boolean;
-};
-
-function normalizeWriteFileAction(input: unknown): WriteFileAction {
-  const record = readRecord(input);
-  const path = readString(record, 'path');
-  const content = readString(record, 'content');
-  if (!path) {
-    throw new Error('write_file requires a path');
-  }
-  if (content === undefined) {
-    throw new Error('write_file requires content');
-  }
-  return {
-    path: resolveUserPath(path),
-    content,
-    append: readBoolean(record, 'append') ?? false,
-    createDirs: readBoolean(record, 'createDirs') ?? true,
-  };
-}
 
 interface ResolvedPatchWrite {
   absolutePath: string;
@@ -848,14 +823,13 @@ export const fileOperationMetadata: Record<string, ToolOperationMetadata> = {
       const target = readString(record, 'path');
       const content = readString(record, 'content');
       if (!target) return null;
-      const safePath = resolveUserPath(target);
       return {
-        target: safePath,
+        target,
         summary: readBoolean(record, 'append') ? 'append' : 'write',
         details: {
           append: readBoolean(record, 'append') ?? false,
           createDirs: readBoolean(record, 'createDirs') ?? true,
-          before: readFileContentPreview(safePath),
+          before: isAbsolute(target) ? readFileContentPreview(target) : undefined,
           afterPreview: content === undefined ? undefined : truncateForOperationDetails(content),
         },
       };
@@ -878,7 +852,7 @@ export const fileOperationMetadata: Record<string, ToolOperationMetadata> = {
       let target: string | undefined;
       try {
         const update = parsePatch(patch);
-        file = { path: resolveUserPath(update.path) };
+        file = { path: update.path };
         target = file.path;
       } catch {
         // Unparseable patch still gets a raw preview below.

@@ -12,7 +12,8 @@ import {
 import { z } from 'zod';
 import { readBoolean, readRecord, readString } from '../operationMetadata';
 import { readTextFileChunkResult } from './fileTools';
-import { getLocalToolsWorkdir, resolveUserPath } from './pathUtils';
+import { resolveDefaultWorkdir } from '../../runtimeConfig';
+import { resolveUserPath } from './pathUtils';
 
 const MAX_GIT_OUTPUT_CHARS = 30_000;
 const MAX_GH_BODY_CHARS = 60_000;
@@ -98,7 +99,10 @@ export async function runGit(
   cwd?: string,
   timeoutMs = DEFAULT_GIT_TIMEOUT_MS,
 ) {
-  const repo = cwd?.trim() ? resolveUserPath(cwd.trim()) : getLocalToolsWorkdir();
+  const defaultWorkdir = resolveDefaultWorkdir();
+  const repo = cwd?.trim()
+    ? resolveUserPath(cwd.trim(), defaultWorkdir)
+    : defaultWorkdir;
   try {
     const result = await execFileAsync('git', args, {
       cwd: repo,
@@ -128,7 +132,10 @@ export async function runGit(
 }
 
 function resolveGhWorkdir(cwd?: string) {
-  return cwd?.trim() ? resolveUserPath(cwd.trim()) : getLocalToolsWorkdir();
+  const defaultWorkdir = resolveDefaultWorkdir();
+  return cwd?.trim()
+    ? resolveUserPath(cwd.trim(), defaultWorkdir)
+    : defaultWorkdir;
 }
 
 async function executeGh(args: string[], cwd?: string) {

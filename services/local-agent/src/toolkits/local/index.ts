@@ -34,7 +34,7 @@ import { gitTools, gitOperationMetadata } from './gitTools';
 import { parsePatch, PatchParseError } from './applyPatch';
 import { resolveUserPath } from './pathUtils';
 import { globSearchTool, grepSearchTool, searchOperationMetadata } from './searchTools';
-import { shellRuntime, type ShellRuntimeBinding } from './shellRuntime';
+import { ShellRuntime, type ShellRuntimeBinding } from './shellRuntime';
 import {
   createProcessTools,
   processOperationMetadata,
@@ -43,10 +43,15 @@ import {
 import {
   createRunShellTool,
   getCurrentTimeTool,
-  normalizeShellActionInput,
+  normalizeShellAuthorizationInput,
   runShellTool,
   shellOperationMetadata,
 } from './shellTools';
+import {
+  bindBashToolWorkdir,
+  bindGitToolWorkdir,
+  requireExecutionWorkdir,
+} from './workdirBinding';
 
 const localUtilityTools: StructuredTool[] = [
   readFileTool,
@@ -153,7 +158,7 @@ function authorizeApplyPatch(ctx: ToolAutoAuthorizationContext) {
 
   let target: string;
   try {
-    target = resolveUserPath(parsePatch(patch).path);
+    target = resolveUserPath(parsePatch(patch).path, ctx.workdir);
   } catch (error) {
     // The executor uses the same parser before performing any filesystem
     // mutation. Invalid V4A is therefore safe to run: execution will disclose
@@ -186,7 +191,7 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
     download_file: ReviewPolicies.externalAccess({ authorization: 'exact' }),
     run_shell: ReviewPolicies.commandExecution({
       authorization: AuthorizationPolicies.exact({
-        subject: ({ input }) => normalizeShellActionInput(input),
+        subject: ({ input }) => normalizeShellAuthorizationInput(input),
       }),
     }),
     // The process tools carry no review policy on purpose. They only address
@@ -206,10 +211,11 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
     },
     runtime: {
       start: () => {
-        shellRuntime.start();
-        return shellRuntime;
+        const root = new ShellRuntime();
+        root.start();
+        return root;
       },
-      resolve: (_root, context) => shellRuntime.resolve(context.execution),
+      resolve: (root, context) => (root as ShellRuntime).resolve(context.execution),
       bindTools: (binding) => {
         const shell = binding as ShellRuntimeBinding;
         // The framework matches bound tools to the static inventory by
@@ -220,10 +226,11 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
           [createRunShellTool(shell), ...createProcessTools(shell)]
             .map((item) => [item.name, item]),
         );
-        return tools.map((staticTool) => bound.get(staticTool.name) ?? staticTool);
+        return tools.map((staticTool) => (
+          bound.get(staticTool.name) ?? bindBashToolWorkdir(staticTool, shell.workdir)
+        ));
       },
-      release: () => shellRuntime.release(),
-      stop: async () => { await shellRuntime.stop(); },
+      stop: async (root) => { await (root as ShellRuntime).stop(); },
     },
   });
 }
@@ -244,6 +251,16 @@ export function createGitToolkit(): AgentToolkit {
     reviewGuidance: {
       allow: 'Treat routine, scoped version-control collaboration as eligible for automatic authorization, including staging files, creating a local commit, a normal non-force push, and creating a pull request or issue.',
       ask: 'Require human authorization for destructive worktree or history changes, force pushes, deleting branches or tags, merging a pull request, changing repository settings or access, managing secrets, deleting or closing remote resources, and publishing packages or releases.',
+    },
+    runtime: {
+      start: () => Object.freeze({}),
+      resolve: (_root, context) => Object.freeze({
+        workdir: requireExecutionWorkdir('git', context.execution.workdir),
+      }),
+      bindTools: (binding) => {
+        const { workdir } = binding as { workdir: string };
+        return gitTools.map((staticTool) => bindGitToolWorkdir(staticTool, workdir));
+      },
     },
   });
 }

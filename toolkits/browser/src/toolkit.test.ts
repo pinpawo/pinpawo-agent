@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { ToolkitRuntimeManager } from '@pinpawo/pet-agent';
 import {
   buildBrowserAvailabilitySnapshot,
   createBrowserIntegration,
@@ -43,6 +44,23 @@ test('host configuration disables Browser without reading backend state', async 
   assert.equal(availability.available, false);
   assert.match(availability.reason ?? '', /disabled by host config/);
   assert.equal(backendReads, 0);
+});
+
+test('separate Host managers start independent Browser Runtime roots', async () => {
+  const integration = createBrowserIntegration({ backend: () => 'playwright' });
+  const managerA = new ToolkitRuntimeManager();
+  const managerB = new ToolkitRuntimeManager();
+
+  await managerA.start([integration.toolkit]);
+  const runtimeA = integration.runtime;
+  await managerB.start([integration.toolkit]);
+  const runtimeB = integration.runtime;
+
+  assert.notEqual(runtimeA, runtimeB);
+  await managerA.stop();
+  assert.equal(integration.runtime, runtimeB);
+  await managerB.stop();
+  assert.notEqual(integration.runtime, runtimeB);
 });
 
 test('waiting extension stays routable without claiming command readiness', () => {

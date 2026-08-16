@@ -96,16 +96,20 @@ test('normalizeShellActionInput trims commands and expands home cwd', () => {
   );
 });
 
-test('shell operation metadata exposes the resolved cwd without classifying command text', () => {
+test('shell operation metadata preserves explicit cwd without reading ambient workdir', () => {
   assert.deepEqual(
     shellOperationMetadata.run_shell?.summarizeInput?.({
       command: "printf 'value' > output.txt",
       cwd: '~',
     }),
     {
-      target: homedir(),
+      target: '~',
       summary: "printf 'value' > output.txt",
     },
+  );
+  assert.deepEqual(
+    shellOperationMetadata.run_shell?.summarizeInput?.({ command: 'pwd' }),
+    { target: undefined, summary: 'pwd' },
   );
 });
 

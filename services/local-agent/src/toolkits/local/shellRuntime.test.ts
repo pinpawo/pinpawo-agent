@@ -49,7 +49,17 @@ test('resolve carries the execution identity into the binding', { skip: isWindow
     runId: 'run-1',
     delegationId: 'delegation-1',
   });
+  assert.equal(binding.workdir, CWD);
   assert.equal(binding.registry, runtime.getRegistry());
+});
+
+test('resolve requires an execution workdir', () => {
+  const runtime = new ShellRuntime();
+  runtime.start();
+  assert.throws(
+    () => runtime.resolve(scope({ workdir: null })),
+    /requires an execution workdir/,
+  );
 });
 
 test('every execution shares one registry', { skip: isWindows }, () => {

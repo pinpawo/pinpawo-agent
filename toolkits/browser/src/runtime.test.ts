@@ -11,12 +11,13 @@ function execution(
   threadId: string | null,
   runId: string,
   delegationId: string,
+  workdir = process.cwd(),
 ): ToolkitRuntimeExecutionScope {
   return {
     threadId,
     runId,
     delegationId,
-    workdir: null,
+    workdir,
   };
 }
 
@@ -32,6 +33,63 @@ test('BrowserRuntime keeps one browser workspace per thread, not per delegation'
   assert.deepEqual(later.owner, { threadId: 'thread-1' });
   assert.equal(first.session, later.session);
   assert.notEqual(first.session, other.session);
+});
+
+test('independent BrowserRuntime roots lease one process extension bridge', async () => {
+  const lifecycle: string[] = [];
+  const bridge = {
+    async start() { lifecycle.push('start'); },
+    async stop() { lifecycle.push('stop'); },
+    getStatus() {
+      return {
+        listening: lifecycle.includes('start') && !lifecycle.includes('stop'),
+        hostConnected: false,
+        extensionConnected: false,
+        debuggerAttached: false,
+        targetAlive: false,
+        connectionId: null,
+        extensionId: null,
+        activeTabId: null,
+        activeTabBinding: null,
+        userBoundOrigin: null,
+        stateRevision: null,
+        capabilities: [],
+        socketPath: '/tmp/browser.sock',
+      } satisfies BrowserBridgeStatus;
+    },
+  } as unknown as BrowserExtensionBridge;
+  const runtimeA = new BrowserRuntime(
+    { backend: () => 'extension' },
+    { bridge },
+  );
+  const runtimeB = new BrowserRuntime(
+    { backend: () => 'extension' },
+    { bridge },
+  );
+
+  await Promise.all([runtimeA.start(), runtimeB.start()]);
+  assert.deepEqual(lifecycle, ['start']);
+
+  await runtimeA.stop();
+  assert.deepEqual(lifecycle, ['start']);
+
+  await runtimeB.stop();
+  assert.deepEqual(lifecycle, ['start', 'stop']);
+});
+
+test('BrowserRuntime binds each thread to its execution workdir', async (t) => {
+  const runtime = new BrowserRuntime();
+  t.after(async () => await runtime.stop());
+
+  const first = await runtime.resolve(execution('thread-a', 'run-a', 'delegation-a', '/workspace/a'));
+  const second = await runtime.resolve(execution('thread-b', 'run-b', 'delegation-b', '/workspace/b'));
+
+  assert.equal(first.workdir(), '/workspace/a');
+  assert.equal(second.workdir(), '/workspace/b');
+  await assert.rejects(
+    runtime.resolve(execution('thread-a', 'run-c', 'delegation-c', '/workspace/other')),
+    /already bound to workdir/,
+  );
 });
 
 test('BrowserRuntime refuses to create an unowned browser workspace', async (t) => {

@@ -15,12 +15,12 @@ import { HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
-import { createSubagent } from '@pinpawo/pet-agent';
+import { createSubagent, ToolkitRuntimeManager } from '@pinpawo/pet-agent';
 import { buildLocalAgentModels } from '../src/agentModels';
 import { buildLocalModelProfileRegistry } from '../src/llmConfig';
 import { parsePatch } from '../src/toolkits/local/applyPatch';
 import { applyPatchTool, viewFileChunkTool } from '../src/toolkits/local/fileTools';
-import { getLocalToolsWorkdir, setLocalToolsWorkdir } from '../src/toolkits/local/pathUtils';
+import { createBashToolkit } from '../src/toolkits/local';
 
 type Scenario = {
   name: string;
@@ -138,20 +138,28 @@ const llmConfig = profileRegistry.resolve(profileId);
 const model = buildLocalAgentModels(llmConfig).subagent;
 const repeats = readPositiveInteger(process.env.PINPAWO_APPLY_PATCH_EVAL_REPEATS, 1);
 const results = [];
-const originalCwd = process.cwd();
-const originalToolsWorkdir = getLocalToolsWorkdir();
 
 for (let repeat = 1; repeat <= repeats; repeat += 1) {
   for (const scenario of scenarios) {
     const root = mkdtempSync(resolve(tmpdir(), 'pinpawo-apply-patch-eval-'));
     const path = resolve(root, 'sample.txt');
+    const toolkit = createBashToolkit([viewFileChunkTool, applyPatchTool]);
+    const manager = new ToolkitRuntimeManager();
+    let runtimeExecution: Awaited<ReturnType<ToolkitRuntimeManager['resolve']>> | null = null;
     try {
-      process.chdir(root);
-      setLocalToolsWorkdir(root);
       writeFileSync(path, scenario.initial, 'utf-8');
+      runtimeExecution = await manager.resolve({
+        toolkits: [toolkit],
+        execution: {
+          threadId: `apply-patch-${scenario.name}`,
+          runId: `repeat-${repeat.toString()}`,
+          delegationId: 'eval',
+          workdir: root,
+        },
+      });
       const result = await createSubagent({
         model,
-        tools: [viewFileChunkTool, applyPatchTool],
+        tools: runtimeExecution.toolkits[0]!.tools.map(({ tool }) => tool),
         promptSections: [{
           id: 'apply-patch-eval',
           owner: 'eval',
@@ -174,8 +182,8 @@ for (let repeat = 1; repeat <= repeats; repeat += 1) {
         completionReason: result.completionReason,
       });
     } finally {
-      process.chdir(originalCwd);
-      setLocalToolsWorkdir(originalToolsWorkdir);
+      await runtimeExecution?.release();
+      await manager.stop();
       rmSync(root, { recursive: true, force: true });
     }
   }

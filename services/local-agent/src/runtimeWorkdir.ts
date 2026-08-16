@@ -1,7 +1,6 @@
 import { realpathSync } from 'node:fs';
 import { setConfig } from './config';
 import { buildLocalAgentRuntimeConfig, buildWorkspaceRuntimeConfig, type LocalAgentRuntimeConfig } from './runtimeConfig';
-import { setLocalToolsWorkdir } from './toolkits/local/pathUtils';
 
 export function applyRuntimeWorkdir(workdir?: string): LocalAgentRuntimeConfig {
   const initialRuntimeConfig = buildLocalAgentRuntimeConfig(workdir);
@@ -10,6 +9,5 @@ export function applyRuntimeWorkdir(workdir?: string): LocalAgentRuntimeConfig {
   });
   process.chdir(runtimeConfig.workdir);
   setConfig({ workdir: runtimeConfig.workdir });
-  setLocalToolsWorkdir(runtimeConfig.workdir);
   return runtimeConfig;
 }

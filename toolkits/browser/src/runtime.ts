@@ -96,6 +96,67 @@ function describeBrowserExtensionStatus(
   return 'browser extension bridge is not running';
 }
 
+/**
+ * Browser Runtime roots are isolated per Host manager, while the native-host
+ * bridge is one process transport bound to a fixed socket. This coordinator
+ * lets independent roots lease that transport without making either root own
+ * another root's lifecycle.
+ *
+ * This is a Browser provider detail, not a Host or framework-level Runtime.
+ */
+class BrowserExtensionBridgeCoordinator {
+  readonly bridge: BrowserExtensionBridge;
+  private activeLeases = 0;
+  private lifecycleTail: Promise<void> = Promise.resolve();
+
+  constructor(bridge: BrowserExtensionBridge = new BrowserExtensionBridge()) {
+    this.bridge = bridge;
+  }
+
+  acquire(): Promise<void> {
+    return this.queueLifecycle(async () => {
+      if (this.activeLeases === 0) {
+        await this.bridge.start();
+      }
+      this.activeLeases += 1;
+    });
+  }
+
+  release(): Promise<void> {
+    return this.queueLifecycle(async () => {
+      if (this.activeLeases === 0) return;
+      this.activeLeases -= 1;
+      if (this.activeLeases === 0) {
+        await this.bridge.stop();
+      }
+    });
+  }
+
+  private queueLifecycle(operation: () => Promise<void>): Promise<void> {
+    const queued = this.lifecycleTail.then(operation, operation);
+    this.lifecycleTail = queued.then(
+      () => undefined,
+      () => undefined,
+    );
+    return queued;
+  }
+}
+
+const bridgeCoordinators = new WeakMap<
+  BrowserExtensionBridge,
+  BrowserExtensionBridgeCoordinator
+>();
+
+function coordinatorForBridge(
+  bridge: BrowserExtensionBridge,
+): BrowserExtensionBridgeCoordinator {
+  const existing = bridgeCoordinators.get(bridge);
+  if (existing) return existing;
+  const coordinator = new BrowserExtensionBridgeCoordinator(bridge);
+  bridgeCoordinators.set(bridge, coordinator);
+  return coordinator;
+}
+
 export function projectBrowserRuntimeSnapshot(
   status: BrowserBridgeStatus,
   readiness: BrowserReadinessSnapshot | null = null,
@@ -127,9 +188,13 @@ export function projectBrowserRuntimeSnapshot(
 export class BrowserRuntime {
   private started = false;
   /** One browser workspace per conversation thread. */
-  private readonly sessionsByThread = new Map<string, BrowserSession>();
+  private readonly sessionsByThread = new Map<string, {
+    session: BrowserSession;
+    workdir: string;
+  }>();
   private readonly options: ResolvedBrowserToolkitOptions;
   private readonly bridge: BrowserExtensionBridge;
+  private readonly bridgeCoordinator: BrowserExtensionBridgeCoordinator;
 
   constructor(
     options: BrowserToolkitOptions = {},
@@ -137,11 +202,24 @@ export class BrowserRuntime {
   ) {
     this.options = resolveBrowserToolkitOptions(options);
     this.bridge = dependencies.bridge ?? new BrowserExtensionBridge();
+    this.bridgeCoordinator = coordinatorForBridge(this.bridge);
   }
 
-  private sessionForThread(threadId: string): BrowserSession {
+  private sessionForThread(threadId: string, workdir: string): BrowserSession {
     const existing = this.sessionsByThread.get(threadId);
-    if (existing) return existing;
+    if (existing) {
+      if (existing.workdir !== workdir) {
+        throw new Error(
+          `Browser runtime thread "${threadId}" is already bound to workdir "${existing.workdir}".`,
+        );
+      }
+      return existing.session;
+    }
+
+    const executionOptions = Object.freeze({
+      ...this.options,
+      workdir: () => workdir,
+    });
 
     // The extension receives only this opaque id; raw run/delegation tracing
     // metadata never crosses the native host boundary. Its lifetime is the
@@ -172,33 +250,34 @@ export class BrowserRuntime {
             if (!change.contextId || change.contextId === browserContextId) listener(change);
           }) }
         : {}),
-    }, this.options.workdir);
+    }, executionOptions.workdir);
     const session = new BrowserSession({
       requireExecutionOwner: true,
       getRuntimeSnapshot: () => this.getSnapshot(),
       createChromeExtensionSession: () => extensionSession,
-      environment: this.options,
+      environment: executionOptions,
     });
-    this.sessionsByThread.set(threadId, session);
+    this.sessionsByThread.set(threadId, { session, workdir });
     return session;
   }
 
   async start(): Promise<void> {
     if (!shouldStartBrowserExtensionBridge(configuredBrowserBackend(this.options))) return;
-    await this.bridge.start();
+    if (this.started) return;
+    await this.bridgeCoordinator.acquire();
     this.started = true;
   }
 
   async stop(): Promise<void> {
     try {
-      await Promise.all([...this.sessionsByThread.values()].map(async (session) => {
+      await Promise.all([...this.sessionsByThread.values()].map(async ({ session }) => {
         await session.shutdown();
       }));
       this.sessionsByThread.clear();
     } finally {
       if (this.started) {
         try {
-          await this.bridge.stop();
+          await this.bridgeCoordinator.release();
         } finally {
           this.started = false;
         }
@@ -210,13 +289,17 @@ export class BrowserRuntime {
     if (!execution.threadId) {
       throw new Error('Browser runtime requires a threadId.');
     }
+    if (!execution.workdir) {
+      throw new Error('Browser Toolkit runtime requires an execution workdir.');
+    }
     const threadId = execution.threadId;
+    const workdir = execution.workdir;
     const binding = Object.freeze({
-      session: this.sessionForThread(threadId),
+      session: this.sessionForThread(threadId, workdir),
       owner: {
         threadId,
       },
-      workdir: this.options.workdir,
+      workdir: () => workdir,
     });
     await binding.session.acquire(binding.owner);
     return binding;

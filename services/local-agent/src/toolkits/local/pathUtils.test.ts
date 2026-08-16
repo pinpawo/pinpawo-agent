@@ -4,25 +4,21 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
-import {
-  getLocalToolsWorkdir,
-  resolveUserPath,
-  setLocalToolsWorkdir,
-} from './pathUtils';
+import { resolveUserPath } from './pathUtils';
 
 const PATH_UTILS_IMPORT_PATH = process.cwd().endsWith('services/local-agent')
   ? './src/toolkits/local/pathUtils.ts'
   : './services/local-agent/src/toolkits/local/pathUtils.ts';
 
-test('local path utils resolve relative paths from the local tools workdir', () => {
-  const previous = getLocalToolsWorkdir();
-  try {
-    setLocalToolsWorkdir('/tmp/pinpawo-tools-workdir');
-    assert.equal(resolveUserPath('notes/todo.md'), '/tmp/pinpawo-tools-workdir/notes/todo.md');
-    assert.equal(resolveUserPath('/tmp/absolute.txt'), '/tmp/absolute.txt');
-  } finally {
-    setLocalToolsWorkdir(previous);
-  }
+test('local path utils resolve relative paths from an explicit workdir', () => {
+  assert.equal(
+    resolveUserPath('notes/todo.md', '/tmp/pinpawo-tools-workdir'),
+    '/tmp/pinpawo-tools-workdir/notes/todo.md',
+  );
+  assert.equal(
+    resolveUserPath('/tmp/absolute.txt', '/tmp/pinpawo-tools-workdir'),
+    '/tmp/absolute.txt',
+  );
 });
 
 test('local path utils can load without full config/LLM requirements', () => {
@@ -33,7 +29,7 @@ test('local path utils can load without full config/LLM requirements', () => {
     '-e',
     [
       `const mod = await import(${JSON.stringify(PATH_UTILS_IMPORT_PATH)});`,
-      'process.stdout.write(mod.getLocalToolsWorkdir());',
+      'process.stdout.write(mod.resolveUserPath("notes", process.cwd()));',
     ].join('\n'),
   ], {
     cwd: process.cwd(),
@@ -46,5 +42,5 @@ test('local path utils can load without full config/LLM requirements', () => {
     encoding: 'utf8',
   });
 
-  assert.equal(output, process.cwd());
+  assert.equal(output, resolve(process.cwd(), 'notes'));
 });

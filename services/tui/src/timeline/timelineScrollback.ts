@@ -42,6 +42,7 @@ const USER_MESSAGE_BACKGROUND = '#303842';
 const USER_MESSAGE_LABEL_COLOR = '#9fcbd2';
 const USER_MESSAGE_TEXT_COLOR = '#e7ecee';
 const ASSISTANT_LABEL_COLOR = '#69c0c8';
+const DETAIL_ENTRY_INDENT = 2;
 
 type ActiveTimelineSurface = {
   surface: ScrollbackSurface;
@@ -593,9 +594,7 @@ function populateTimelineRoot(
       });
       root.add(userMessageSurface);
       lines.forEach((line) => addLine(line, userMessageSurface));
-      if (isSettledTimelineEntry(entry)) {
-        addLine({ text: ' ', tone: 'muted' });
-      }
+      addTimelineEntrySpacing(entry);
       return;
     }
     if (
@@ -604,8 +603,11 @@ function populateTimelineRoot(
       && entry.text.trim()
       && assistantMarkdownStyle
     ) {
+      const detailSurface = entry.role === 'subagent'
+        ? createDetailEntrySurface(context, root, entryIndex, entry.id)
+        : root;
       const label = entry.updatedAt ?? entry.createdAt ? lines[0] : undefined;
-      if (label) addLine(label);
+      if (label) addLine(label, detailSurface);
       assistantMarkdown = createAssistantMarkdownSurface(context, {
         id: `${root.id}:${entry.role}:${entryIndex}:${entry.id}`,
         content: entry.role === 'subagent'
@@ -613,24 +615,58 @@ function populateTimelineRoot(
           : entry.text,
         syntaxStyle: assistantMarkdownStyle,
       });
-      root.add(assistantMarkdown.container);
-      if (
-        isSettledTimelineEntry(entry)
-        && root.getChildrenCount() > childCountBeforeEntry
-      ) {
-        addLine({ text: ' ', tone: 'muted' });
+      detailSurface.add(assistantMarkdown.container);
+      if (root.getChildrenCount() > childCountBeforeEntry) {
+        addTimelineEntrySpacing(entry);
       }
       return;
     }
-    lines.forEach((line) => addLine(line));
-    if (
-      isSettledTimelineEntry(entry)
-      && root.getChildrenCount() > childCountBeforeEntry
-    ) {
-      addLine({ text: ' ', tone: 'muted' });
+    const detailSurface = lines.length > 0 && isDetailEntry(entry)
+      ? createDetailEntrySurface(context, root, entryIndex, entry.id)
+      : root;
+    lines.forEach((line, lineIndex) => {
+      addLine(
+        entry.type === 'operation' && lineIndex === 0
+          ? { ...line, text: line.text.replace(/^ {2}/, '') }
+          : line,
+        detailSurface,
+      );
+    });
+    if (root.getChildrenCount() > childCountBeforeEntry) {
+      addTimelineEntrySpacing(entry);
     }
   });
   return { assistantMarkdown };
+
+  function addTimelineEntrySpacing(entry: AgentTimelineEntry) {
+    if (!isSettledTimelineEntry(entry)) return;
+    addLine({ text: ' ', tone: 'muted' });
+  }
+}
+
+function createDetailEntrySurface(
+  context: RenderContext,
+  root: BoxRenderable,
+  entryIndex: number,
+  entryId: string,
+) {
+  const surface = new BoxRenderable(context, {
+    id: `${root.id}:detail:${entryIndex}:${entryId}`,
+    width: '100%',
+    height: 'auto',
+    flexDirection: 'column',
+    paddingLeft: DETAIL_ENTRY_INDENT,
+  });
+  root.add(surface);
+  return surface;
+}
+
+function isDetailEntry(entry: AgentTimelineEntry) {
+  return entry.type === 'operation'
+    || (
+      entry.type === 'message'
+      && (entry.role === 'subagent' || entry.role === 'system')
+    );
 }
 
 function lineStyle(line: TimelineDisplayLine): {

@@ -1,16 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import {
-  CONTEXT_COMPACTION_MESSAGE_NAME,
   compactOrchestratorMessages,
+  createContextCompactionMessage,
   isContextCompactionMessage,
-  readContextCompactionSummaries,
 } from './contextCompaction';
-import { setPinpetMeta } from './messageLanes';
+import { getPinpetMeta, setPinpetMeta } from './messageLanes';
 import { materializeDelegation } from './delegationBriefing';
 
 function fakeSummaryModel(summary = '旧上下文摘要', onInvoke?: (messages: unknown[], config?: RunnableConfig) => void) {
@@ -62,9 +61,11 @@ test('orchestrator context compaction summarizes old messages and keeps recent s
   assert.equal(result.compacted, true);
   assert.equal(result.mainMessageCount, 15);
   assert.equal(result.messages.length, 6);
-  assert.ok(result.messages[1] instanceof SystemMessage);
+  assert.ok(result.messages[1] instanceof AIMessage);
   assert.equal(isContextCompactionMessage(result.messages[1]), true);
-  assert.equal(result.messages[1].content, '保留用户目标、已完成修改、未完成测试。');
+  assert.match(String(result.messages[1].content), /^<context_summary role="context" source="compaction">/);
+  assert.match(String(result.messages[1].content), /保留用户目标、已完成修改、未完成测试。/);
+  assert.equal(getPinpetMeta(result.messages[1]).authority, 'none');
   assert.deepEqual(
     result.messages.slice(2).map((message) => message.content),
     messages.slice(-4).map((message) => message.content),
@@ -122,20 +123,50 @@ test('orchestrator context compaction forwards runnable config to summary model'
   assert.equal(seenConfig?.configurable?.requestId, 'request-1');
 });
 
-test('orchestrator context compaction summaries are readable independently from recent messages', () => {
-  const firstSummary = new SystemMessage('第一次压缩摘要');
-  firstSummary.name = CONTEXT_COMPACTION_MESSAGE_NAME;
-  const secondSummary = new SystemMessage('第二次压缩摘要');
-  secondSummary.name = CONTEXT_COMPACTION_MESSAGE_NAME;
-  const messages = [
-    firstSummary,
-    new HumanMessage('recent request'),
-    secondSummary,
-    new AIMessage('recent reply'),
+test('orchestrator context compaction replaces the prior summary with one cumulative message', async () => {
+  let summaryInput = '';
+  const priorSummary = createContextCompactionMessage('第一次压缩摘要', 12);
+  const messages: BaseMessage[] = [
+    priorSummary,
+    ...Array.from({ length: 20 }, (_, index) => longMessage(index)),
+    usageMessage('模型已经看到了新的较长主线。', 900),
   ];
 
-  assert.deepEqual(readContextCompactionSummaries(messages), ['第一次压缩摘要', '第二次压缩摘要']);
-  assert.deepEqual(readContextCompactionSummaries(messages, 1), ['第二次压缩摘要']);
+  const result = await compactOrchestratorMessages({
+    messages,
+    model: fakeSummaryModel('合并后的压缩摘要', (input) => {
+      summaryInput = input.map((message) => String((message as BaseMessage).content)).join('\n');
+    }),
+    options: { keepMessages: 4 },
+  });
+
+  assert.equal(result.compacted, true);
+  assert.equal(result.messages.filter(isContextCompactionMessage).length, 1);
+  assert.equal(isContextCompactionMessage(result.messages[1]), true);
+  assert.match(String(result.messages[1].content), /合并后的压缩摘要/);
+  assert.match(summaryInput, /### 已有压缩摘要[\s\S]*第一次压缩摘要/);
+  assert.doesNotMatch(summaryInput, /### 主线 agent 回复[\s\S]*第一次压缩摘要/);
+});
+
+test('orchestrator context compaction reserves transcript space for new messages', async () => {
+  let summaryInput = '';
+  const priorSummary = createContextCompactionMessage(`prior ${'p'.repeat(2000)}`, 12);
+  const messages: BaseMessage[] = [
+    priorSummary,
+    new HumanMessage('new-context-marker'),
+    usageMessage('keep this recent message', 900),
+  ];
+
+  await compactOrchestratorMessages({
+    messages,
+    model: fakeSummaryModel('combined summary', (input) => {
+      summaryInput = input.map((message) => String((message as BaseMessage).content)).join('\n');
+    }),
+    options: { keepMessages: 1, summaryTranscriptChars: 600 },
+  });
+
+  assert.match(summaryInput, /prior/);
+  assert.match(summaryInput, /new-context-marker/);
 });
 
 test('orchestrator context compaction falls back when summary model fails', async () => {
@@ -159,6 +190,66 @@ test('orchestrator context compaction falls back when summary model fails', asyn
     assert.equal(result.compacted, true);
     assert.match(String(result.messages[1].content), /自动压缩摘要/);
     assert.match(String(result.messages[1].content), /message-9/);
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test('orchestrator context compaction fallback retains the prior cumulative summary', async () => {
+  const priorSummary = createContextCompactionMessage('必须保留的既有摘要', 12);
+  const messages: BaseMessage[] = [
+    priorSummary,
+    ...Array.from({ length: 20 }, (_, index) => longMessage(index)),
+    usageMessage('模型已经看到了新的较长主线。', 900),
+  ];
+  const model = {
+    invoke: async () => {
+      throw new Error('summary unavailable');
+    },
+  } as unknown as BaseChatModel;
+  const originalWarn = console.warn;
+  console.warn = () => {};
+
+  try {
+    const result = await compactOrchestratorMessages({
+      messages,
+      model,
+      options: { keepMessages: 4 },
+    });
+
+    assert.equal(result.messages.filter(isContextCompactionMessage).length, 1);
+    assert.match(String(result.messages[1].content), /必须保留的既有摘要/);
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test('orchestrator context compaction bounds repeated fallback summaries', async () => {
+  const priorSummary = createContextCompactionMessage(`prior ${'p'.repeat(10000)}`, 12);
+  const messages: BaseMessage[] = [
+    priorSummary,
+    new HumanMessage('fallback-new-context-marker'),
+    usageMessage('keep this recent message', 900),
+  ];
+  const model = {
+    invoke: async () => {
+      throw new Error('summary unavailable');
+    },
+  } as unknown as BaseChatModel;
+  const originalWarn = console.warn;
+  console.warn = () => {};
+
+  try {
+    const result = await compactOrchestratorMessages({
+      messages,
+      model,
+      options: { keepMessages: 1 },
+    });
+    const summary = String(result.messages[1].content);
+
+    assert.ok(summary.length < 4200);
+    assert.match(summary, /prior/);
+    assert.match(summary, /fallback-new-context-marker/);
   } finally {
     console.warn = originalWarn;
   }

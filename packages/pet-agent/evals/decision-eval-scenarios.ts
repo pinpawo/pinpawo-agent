@@ -108,6 +108,29 @@ const GOAL_CASES: readonly GoalCreationEvalCase[] = [
     forbiddenTerms: ['分析 GitHub issue #645', '给出最合理的任务拆分方案'],
     maxChars: 300,
   },
+  {
+    name: 'canonical-compaction-context-anchors-follow-up',
+    messages: [
+      {
+        role: 'assistant',
+        text: '<context_summary role="context" source="compaction">已确认 issue #651 的目标：把 compaction summary 改为 canonical context message，并让 Goal Creation 与 Answer 读取同一条主对话。</context_summary>',
+      },
+      {
+        role: 'assistant',
+        text: '<delegation_started><task>更新 issue #651，核对 compaction、Goal Creation 与 Answer 的边界。</task></delegation_started>',
+      },
+      {
+        role: 'assistant',
+        text: 'Issue #651 已更新，代码尚未实现。',
+      },
+      {
+        role: 'user',
+        text: 'OK，帮我推进代码的改动吧。',
+      },
+    ],
+    requiredTerms: ['#651', 'compaction', '代码'],
+    maxChars: 300,
+  },
 ];
 
 function renderMessages(prompt: RenderedDecisionPrompt) {

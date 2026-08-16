@@ -14,7 +14,7 @@ function textModel(output: string) {
 test('decision eval scenarios cover every canonical prompt distribution', () => {
   assert.deepEqual({
     goalCreation: getDecisionEvalScenarios('goal_creation').length,
-  }, { goalCreation: 5 });
+  }, { goalCreation: 6 });
 });
 
 test('decision eval scenarios render complete production messages', () => {

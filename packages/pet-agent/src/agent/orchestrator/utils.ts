@@ -1,5 +1,3 @@
-import type { DelegationStatus } from './types';
-
 export function clipForPrompt(text: string, maxLength = 180): string {
   const normalized = text.replace(/\s+/g, ' ').trim();
   if (normalized.length <= maxLength) return normalized;
@@ -24,10 +22,4 @@ export function readMessageText(message: { content?: unknown }): string {
       .trim();
   }
   return '';
-}
-
-export function formatDelegationStatus(status: DelegationStatus): string {
-  if (status === 'completed') return '已完成';
-  if (status === 'progress') return '进行中';
-  return '待执行';
 }

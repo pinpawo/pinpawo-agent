@@ -1,8 +1,6 @@
 import type { AgentActor } from '../../../types/agent';
 import { ORCHESTRATOR_DECISION_SHARED_PREFIX } from './templates/sharedPrefix.prompt';
 
-export const MAX_DECISION_RUN_DELEGATIONS = 6;
-
 export function xmlTextBlock(tag: string, text: string, attrs = ''): string {
   const safeText = text.replaceAll(']]>', ']]]]><![CDATA[>');
   return [

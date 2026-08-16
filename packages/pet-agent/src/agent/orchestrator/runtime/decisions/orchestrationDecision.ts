@@ -1,20 +1,13 @@
-import {
-  AIMessage,
-  SystemMessage,
-} from '@langchain/core/messages';
+import { SystemMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { Command, Send } from '@langchain/langgraph';
 import type { CapabilityPlannerDispatch } from '../../capabilityPlanner/runner';
 import { USER_GOAL_MAX_CHARS } from '../../capabilityPlanner/runner';
-import { readContextCompactionSummaries } from '../../contextCompaction';
-import {
-  buildCompactionSummaryXmlContext,
-  buildGoalCreationSystemPrompt,
-} from '../../prompts';
+import { mainConversationMessages } from '../../messageLanes';
+import { buildGoalCreationSystemPrompt } from '../../prompts';
 import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig, UserGoal } from '../../types';
 import { readMessageText } from '../../utils';
-import { mainMessagesWithoutCompaction } from './conversationContext';
 
 export function createGoalCreationRunner(config: OrchestratorConfig) {
   return async function runGoalCreation(
@@ -52,9 +45,7 @@ function buildGoalCreationMessages(params: {
   state: OrchestratorStateType;
 }) {
   const { state } = params;
-  const contextSummaries = readContextCompactionSummaries(state.messages);
-  const compactionContext = buildCompactionSummaryXmlContext(contextSummaries);
-  const mainMessages = mainMessagesWithoutCompaction(state.messages)
+  const mainMessages = mainConversationMessages(state.messages)
     .filter((message) => message._getType() === 'human' || message._getType() === 'ai');
   let currentRequestIndex = -1;
   for (let index = mainMessages.length - 1; index >= 0; index -= 1) {
@@ -67,10 +58,7 @@ function buildGoalCreationMessages(params: {
   if (!currentRequest) {
     throw new Error('Goal Creation requires a current HumanMessage.');
   }
-  const conversationHistory = [
-    ...(compactionContext ? [new AIMessage(compactionContext)] : []),
-    ...mainMessages.filter((_, index) => index !== currentRequestIndex),
-  ];
+  const conversationHistory = mainMessages.filter((_, index) => index !== currentRequestIndex);
   return [
     new SystemMessage(buildGoalCreationSystemPrompt()),
     ...conversationHistory,

@@ -16,6 +16,7 @@ import { resolveDefaultWorkdir } from '../../runtimeConfig';
 import {
   type LocalToolRuntime,
   resolveToolExecutionWorkdir,
+  resolveToolPath,
   resolveUserPath,
 } from './pathUtils';
 
@@ -103,9 +104,10 @@ export async function runGit(
   cwd = resolveDefaultWorkdir(),
   timeoutMs = DEFAULT_GIT_TIMEOUT_MS,
 ) {
+  const resolvedCwd = resolveUserPath(cwd, resolveDefaultWorkdir());
   try {
     const result = await execFileAsync('git', args, {
-      cwd,
+      cwd: resolvedCwd,
       encoding: 'utf-8',
       env: {
         ...process.env,
@@ -132,10 +134,9 @@ export async function runGit(
 }
 
 function resolveGitCommandCwd(cwd: string | undefined, runtime: LocalToolRuntime) {
-  const workdir = resolveToolExecutionWorkdir(runtime);
   return cwd?.trim()
-    ? resolveUserPath(cwd.trim(), workdir)
-    : workdir;
+    ? resolveToolPath(cwd.trim(), runtime)
+    : resolveToolExecutionWorkdir(runtime);
 }
 
 async function executeGh(args: string[], cwd: string) {

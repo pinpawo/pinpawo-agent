@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -17,6 +17,17 @@ import { createBashToolkit } from './toolkits/local';
 function definition(toolkit: AgentToolkit, toolName: string) {
   return toolkit.tools.find((item) => item.tool.name === toolName);
 }
+
+const shellInvocationConfig = {
+  context: {
+    executionScope: {
+      threadId: 'thread-shell-test',
+      runId: 'run-shell-test',
+      delegationId: 'delegation-shell-test',
+      workdir: process.cwd(),
+    },
+  },
+};
 
 test('get_current_time returns current time details for a requested timezone', async () => {
   assert.deepEqual(
@@ -119,12 +130,18 @@ test('runShellTool executes commands and explicit output writes', async (t) => {
   t.after(() => rmSync(dir, { recursive: true, force: true }));
 
   assert.equal(
-    await runShellTool.invoke({ command: 'printf ok' }),
+    await runShellTool.invoke({ command: 'printf ok' }, shellInvocationConfig),
     'ok',
   );
-  assert.equal(await runShellTool.invoke({ command: `printf written > ${file}` }), '(no output)');
+  assert.equal(await runShellTool.invoke(
+    { command: `printf written > ${file}` },
+    shellInvocationConfig,
+  ), '(no output)');
   assert.equal(readFileSync(file, 'utf-8'), 'written');
-  assert.equal(await runShellTool.invoke({ command: `printf piped | cat > ${file}` }), '(no output)');
+  assert.equal(await runShellTool.invoke(
+    { command: `printf piped | cat > ${file}` },
+    shellInvocationConfig,
+  ), '(no output)');
   assert.equal(readFileSync(file, 'utf-8'), 'piped');
 });
 
@@ -134,26 +151,52 @@ test('runShellTool relies on toolkit review instead of a second interface gate',
   writeFileSync(file, 'generated', 'utf-8');
   t.after(() => rmSync(dir, { recursive: true, force: true }));
 
-  assert.equal(await runShellTool.invoke({ command: `rm ${file}` }), '(no output)');
+  assert.equal(await runShellTool.invoke(
+    { command: `rm ${file}` },
+    shellInvocationConfig,
+  ), '(no output)');
   assert.equal(existsSync(file), false);
 });
 
 test('runShellTool separates stderr and reports exit codes', async () => {
   assert.equal(
-    await runShellTool.invoke({ command: 'printf out; printf err 1>&2' }),
+    await runShellTool.invoke(
+      { command: 'printf out; printf err 1>&2' },
+      shellInvocationConfig,
+    ),
     'out\n--- stderr ---\nerr',
   );
 
   assert.match(
-    String(await runShellTool.invoke({ command: 'printf boom 1>&2; exit 3' })),
+    String(await runShellTool.invoke(
+      { command: 'printf boom 1>&2; exit 3' },
+      shellInvocationConfig,
+    )),
     /^Error \(exit 3\):\nboom/,
   );
 });
 
+test('runShellTool requires invocation workdir only when cwd is omitted or relative', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'pinpawo-shell-explicit-cwd-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  assert.equal(
+    await runShellTool.invoke({ command: 'pwd', cwd: dir }),
+    realpathSync(dir),
+  );
+  assert.match(
+    String(await runShellTool.invoke({ command: 'pwd' })),
+    /requires an execution workdir/,
+  );
+});
+
 test('runShellTool truncates stdout larger than the old 64KB buffer limit', async () => {
-  const output = String(await runShellTool.invoke({
-    command: 'node -e "process.stdout.write(\'x\'.repeat(70 * 1024))"',
-  }));
+  const output = String(await runShellTool.invoke(
+    {
+      command: `${JSON.stringify(process.execPath)} -e "process.stdout.write('x'.repeat(70 * 1024))"`,
+    },
+    shellInvocationConfig,
+  ));
 
   assert.doesNotMatch(output, /ENOBUFS/);
   assert.match(output, /^x+/);
@@ -161,10 +204,13 @@ test('runShellTool truncates stdout larger than the old 64KB buffer limit', asyn
 });
 
 test('runShellTool times out long-running commands', async () => {
-  const output = String(await runShellTool.invoke({
-    command: 'sleep 5',
-    timeoutSeconds: 1,
-  }));
+  const output = String(await runShellTool.invoke(
+    {
+      command: 'sleep 5',
+      timeoutSeconds: 1,
+    },
+    shellInvocationConfig,
+  ));
   assert.match(output, /timed out after 1s/);
 });
 

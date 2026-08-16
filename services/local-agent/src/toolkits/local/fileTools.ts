@@ -24,7 +24,6 @@ import {
 } from '../operationMetadata';
 import {
   type LocalToolRuntime,
-  resolveToolExecutionWorkdir,
   resolveToolPath,
   resolveUserPath,
 } from './pathUtils';
@@ -278,17 +277,15 @@ function mergeOperationOutputSummary(
   } satisfies ReturnType<typeof okOutputPathSummary> | null;
 }
 
-function resolveMoveTarget(sourcePath: string, destinationPath: string, workdir: string) {
-  const source = resolveUserPath(sourcePath, workdir);
-  const destination = resolveUserPath(destinationPath, workdir);
-  const destinationStat = tryStat(destination);
+function resolveMoveTarget(sourcePath: string, destinationPath: string) {
+  const destinationStat = tryStat(destinationPath);
   return destinationStat?.isDirectory()
-    ? resolve(destination, basename(source))
-    : destination;
+    ? resolve(destinationPath, basename(sourcePath))
+    : destinationPath;
 }
 
-function resolveCopyTarget(sourcePath: string, destinationPath: string, workdir: string) {
-  return resolveMoveTarget(sourcePath, destinationPath, workdir);
+function resolveCopyTarget(sourcePath: string, destinationPath: string) {
+  return resolveMoveTarget(sourcePath, destinationPath);
 }
 
 export const readFileTool = tool(
@@ -334,10 +331,9 @@ export const viewFileChunkTool = tool(
   }, runtime: LocalToolRuntime) => {
     try {
       return readTextFileChunk({
-        path,
+        path: resolveToolPath(path, runtime),
         startLine,
         endLine,
-        workdir: resolveToolExecutionWorkdir(runtime),
       });
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : err}`;
@@ -656,10 +652,10 @@ export const movePathTool = tool(
     createDirs?: boolean;
   }, runtime: LocalToolRuntime) => {
     try {
-      const workdir = resolveToolExecutionWorkdir(runtime);
-      const sourcePath = resolveUserPath(source, workdir);
+      const sourcePath = resolveToolPath(source, runtime);
+      const destinationPath = resolveToolPath(destination, runtime);
       const sourceStat = statSync(sourcePath);
-      const targetPath = resolveMoveTarget(source, destination, workdir);
+      const targetPath = resolveMoveTarget(sourcePath, destinationPath);
 
       if (createDirs ?? true) {
         mkdirSync(dirname(targetPath), { recursive: true });
@@ -722,10 +718,10 @@ export const copyPathTool = tool(
     createDirs?: boolean;
   }, runtime: LocalToolRuntime) => {
     try {
-      const workdir = resolveToolExecutionWorkdir(runtime);
-      const sourcePath = resolveUserPath(source, workdir);
+      const sourcePath = resolveToolPath(source, runtime);
+      const destinationPath = resolveToolPath(destination, runtime);
       const sourceStat = statSync(sourcePath);
-      const targetPath = resolveCopyTarget(source, destination, workdir);
+      const targetPath = resolveCopyTarget(sourcePath, destinationPath);
 
       if (createDirs ?? true) {
         mkdirSync(dirname(targetPath), { recursive: true });

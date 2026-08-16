@@ -10,9 +10,10 @@ export function resolveToolExecutionWorkdir(
   runtime?: Pick<LocalToolRuntime, 'context'>,
 ) {
   const workdir = runtime?.context?.executionScope?.workdir;
-  return typeof workdir === 'string' && workdir.trim()
-    ? workdir
-    : resolveDefaultWorkdir();
+  if (typeof workdir === 'string' && workdir.trim()) {
+    return workdir;
+  }
+  throw new Error('Tool execution requires an execution workdir.');
 }
 
 export function resolveUserPath(path: string, workdir = resolveDefaultWorkdir()) {
@@ -32,5 +33,8 @@ export function resolveToolPath(
   path: string,
   runtime?: Pick<LocalToolRuntime, 'context'>,
 ) {
+  if (path === '~' || path.startsWith('~/') || isAbsolute(path)) {
+    return resolveUserPath(path);
+  }
   return resolveUserPath(path, resolveToolExecutionWorkdir(runtime));
 }

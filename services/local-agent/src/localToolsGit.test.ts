@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { type TestContext } from 'node:test';
@@ -21,6 +21,7 @@ import {
   ghPrViewTool,
   ghReadContentTool,
   gitStatusTool,
+  runGit,
 } from './toolkits/local/gitTools';
 
 function definition(toolkit: AgentToolkit, toolName: string) {
@@ -52,6 +53,28 @@ function createFakeGh(t: TestContext, script: string) {
   });
   return executable;
 }
+
+test('runGit resolves a relative cwd from the configured default workdir', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'pinpawo-run-git-workdir-'));
+  const repo = join(root, 'repo');
+  const originalWorkdir = process.env.PINPAWO_WORKDIR;
+  mkdirSync(repo);
+  execFileSync('git', ['init'], { cwd: repo, stdio: 'ignore' });
+  process.env.PINPAWO_WORKDIR = root;
+  t.after(() => {
+    if (originalWorkdir === undefined) {
+      delete process.env.PINPAWO_WORKDIR;
+    } else {
+      process.env.PINPAWO_WORKDIR = originalWorkdir;
+    }
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  assert.equal(
+    await runGit(['rev-parse', '--show-toplevel'], 'repo'),
+    realpathSync(repo),
+  );
+});
 
 test('git tools inspect and stage a repository without shell command strings', async () => {
   const repo = createRepo();

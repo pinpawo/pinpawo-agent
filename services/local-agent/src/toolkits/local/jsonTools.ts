@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { statSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
@@ -8,7 +9,7 @@ import { readRecord, readString } from '../operationMetadata';
 import { resolveDefaultWorkdir } from '../../runtimeConfig';
 import {
   type LocalToolRuntime,
-  resolveToolExecutionWorkdir,
+  resolveToolPath,
   resolveUserPath,
 } from './pathUtils';
 
@@ -200,11 +201,14 @@ export async function runJqQuery(
 }
 
 export const jqQueryTool = tool(
-  (input: JqQueryInput, runtime: LocalToolRuntime) => runJqQuery(
-    input,
-    runJqProcess,
-    resolveToolExecutionWorkdir(runtime),
-  ),
+  (input: JqQueryInput, runtime: LocalToolRuntime) => {
+    const filePath = resolveToolPath(input.path, runtime);
+    return runJqQuery(
+      { ...input, path: filePath },
+      runJqProcess,
+      dirname(filePath),
+    );
+  },
   {
     name: 'jq_query',
     description: '使用本机 jq 对一个 JSON 文件做只读查询。适合先查看 keys、数组长度、筛选字段、分组计数和生成紧凑摘要；可读取当前 workdir 之外由用户提供的显式文件路径。直接传 jq filter，不要再用 run_shell 或临时 Python 脚本包装 jq。输出默认使用 jq compact JSON，并限制为 50000 字符。',

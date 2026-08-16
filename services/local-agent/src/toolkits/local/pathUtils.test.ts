@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
-import { resolveUserPath } from './pathUtils';
+import {
+  resolveToolExecutionWorkdir,
+  resolveToolPath,
+  resolveUserPath,
+} from './pathUtils';
 
 const PATH_UTILS_IMPORT_PATH = process.cwd().endsWith('services/local-agent')
   ? './src/toolkits/local/pathUtils.ts'
@@ -19,6 +23,19 @@ test('local path utils resolve relative paths from an explicit workdir', () => {
     resolveUserPath('/tmp/absolute.txt', '/tmp/pinpawo-tools-workdir'),
     '/tmp/absolute.txt',
   );
+});
+
+test('tool paths require invocation workdir only for relative paths', () => {
+  assert.throws(
+    () => resolveToolExecutionWorkdir(),
+    /requires an execution workdir/,
+  );
+  assert.throws(
+    () => resolveToolPath('notes/todo.md'),
+    /requires an execution workdir/,
+  );
+  assert.equal(resolveToolPath('/tmp/absolute.txt'), '/tmp/absolute.txt');
+  assert.equal(resolveToolPath('~/notes.txt'), resolve(homedir(), 'notes.txt'));
 });
 
 test('local path utils can load without full config/LLM requirements', () => {

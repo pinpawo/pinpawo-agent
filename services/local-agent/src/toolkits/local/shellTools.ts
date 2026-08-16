@@ -6,6 +6,7 @@ import { resolveDefaultWorkdir } from '../../runtimeConfig';
 import {
   type LocalToolRuntime,
   resolveToolExecutionWorkdir,
+  resolveToolPath,
   resolveUserPath,
 } from './pathUtils';
 import type { ShellRunHandle } from './processExecutor';
@@ -44,6 +45,17 @@ export function normalizeShellActionInput(
   const cwd = typeof record.cwd === 'string' && record.cwd.trim()
     ? resolveUserPath(record.cwd.trim(), workdir)
     : workdir;
+  return { command, cwd };
+}
+
+function normalizeShellToolActionInput(
+  input: unknown,
+  runtime: LocalToolRuntime,
+) {
+  const { record, command } = readShellActionInput(input);
+  const cwd = typeof record.cwd === 'string' && record.cwd.trim()
+    ? resolveToolPath(record.cwd.trim(), runtime)
+    : resolveToolExecutionWorkdir(runtime);
   return { command, cwd };
 }
 
@@ -130,10 +142,7 @@ export function createRunShellTool(binding: ShellProcessBinding | null) {
       let shellAction: { command: string; cwd: string };
 
       try {
-        shellAction = normalizeShellActionInput(
-          input,
-          resolveToolExecutionWorkdir(runtime),
-        );
+        shellAction = normalizeShellToolActionInput(input, runtime);
       } catch (err) {
         return `Error: ${err instanceof Error ? err.message : err}`;
       }

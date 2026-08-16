@@ -65,7 +65,7 @@ Agent 是接收 invocation 并执行任务的运行单元。它负责：
 - 使用同一个常驻 Chat runtime / graph 处理 invocation；
 - 从编译后的 registry 选择并执行 Capability；
 - 通过 `ToolRuntime.context` 为一次 Capability execution 传递 thread、run、
-  delegation、workdir 和 signal；
+  delegation 和 workdir，并通过 `ToolRuntime.signal` 传递 cancellation；
 - 通过 Host 注入的通用 manager 获取 Toolkit execution bindings。
 
 Agent 不读取 Host 配置，不拥有 Browser、shell、git 等专属生命周期，也不在

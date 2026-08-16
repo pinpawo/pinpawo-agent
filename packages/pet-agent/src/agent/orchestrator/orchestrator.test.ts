@@ -488,6 +488,7 @@ test('Goal Creation stores bounded text without appending it to canonical messag
 test('execution boundary routes through capabilityPlanner before the next task', async () => {
   const goalCreationInputs: string[] = [];
   const plannerInputs: CapabilityPlannerInput[] = [];
+  let answerMessages: BaseMessage[] = [];
   const decisionModel = {
     invoke: async (messages: BaseMessage[]) => {
       goalCreationInputs.push(messages.map(readMessageText).join('\n'));
@@ -495,7 +496,10 @@ test('execution boundary routes through capabilityPlanner before the next task',
     },
   } as unknown as AgentModels['act'];
   const routeModel = {
-    invoke: async () => new AIMessage('final summary'),
+    invoke: async (messages: BaseMessage[]) => {
+      answerMessages = messages;
+      return new AIMessage('final summary');
+    },
   } as unknown as AgentModels['act'];
   const capabilityPlannerRunner: CapabilityPlannerRunner = {
     async invoke(input) {
@@ -573,6 +577,16 @@ test('execution boundary routes through capabilityPlanner before the next task',
   assert.deepEqual(state.runCapabilityPlan, []);
   assert.equal(state.runNextDelegation, null);
   assert.equal(state.taskActiveDelegation, null);
+  const answerInput = readMessageText(answerMessages.at(-1) ?? new HumanMessage(''));
+  assert.match(answerInput, /<accepted_results>/);
+  assert.equal(answerInput.match(/<accepted_result order=/g)?.length, 2);
+  assert.match(answerInput, /issue #269 需求点：需要检查本地实现/);
+  assert.ok(
+    answerInput.indexOf('读取 issue #269 并提炼需求点')
+      < answerInput.indexOf('检索本地实现与 git log，判断需求点是否已覆盖'),
+  );
+  assert.equal(answerMessages.some(isDelegationStartedMessage), false);
+  assert.equal(answerMessages.some((message) => Boolean(getMessageHandoffSource(message))), false);
 });
 
 test('a completed single-task goal is accepted by the boundary Planner', async () => {

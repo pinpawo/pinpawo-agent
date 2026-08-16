@@ -31,6 +31,10 @@ export type AnswerBehaviorInput = {
     task: string;
     outcome: 'goal_done' | 'user_input_required';
     context?: string;
+    acceptedResults?: Array<{
+      task: string;
+      result: string;
+    }>;
   };
 };
 
@@ -256,6 +260,20 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
           runId: 'answer-eval-multi-handoff-run',
           task: '完成发布准备',
           outcome: 'goal_done',
+          acceptedResults: [
+            {
+              task: '审查风险',
+              result: '风险审查已完成：发现阻塞项 cache-key-17；建议统一 transcriptRunId 的使用。风险审查阶段已完成。',
+            },
+            {
+              task: '修复阻塞问题',
+              result: '阻塞问题修复已完成：已统一 transcriptRunId，并为 resume 场景补充测试。修复阶段已完成，测试通过。',
+            },
+            {
+              task: '提交 PR',
+              result: '发布准备交付已完成：PR #643 已创建，包含上述修复和测试；当前没有剩余阻塞项。PR 提交阶段已完成。',
+            },
+          ],
         },
       },
       expected: {

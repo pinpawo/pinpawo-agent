@@ -168,22 +168,27 @@ Each consumer owns a closed context type. The type contains values and enum-like
 modes, never an arbitrary instruction channel.
 
 ```ts
-type AnswerContextFacts =
-  | { mode: 'direct'; hasUserGoal: boolean }
-  | { mode: 'task_result'; hasUserGoal: boolean }
-  | { mode: 'goal_done'; hasUserGoal: boolean }
-  | { mode: 'user_input_required'; hasUserGoal: boolean }
+type AnswerContextFacts = {
+  hasUserGoal: boolean;
+  acceptedResults: AnswerAcceptedResult[];
+} & (
+  | { mode: 'direct' }
+  | { mode: 'goal_done' }
+  | { mode: 'user_input_required' }
   | {
       mode: 'blocked';
       reason: 'iteration_limit' | 'capability_unavailable';
       unfinishedTask: string | null;
-    };
+    }
+);
 ```
 
 Fields such as `extraSystemPrompt`, `replyInstruction`, or a caller-supplied
-policy string are not valid context facts. `goal_done` is a closed reply mode:
-its stable policy asks Answer to summarize the completed task from canonical
-history rather than accepting caller-authored reply instructions.
+policy string are not valid context facts. The runtime projects the current run's
+accepted handoffs into one ordered result set for every terminal mode and removes
+those same handoff payloads from that model invocation. In `goal_done`, Answer
+summarizes the set without accepting caller-authored reply instructions. Canonical
+checkpoint messages remain unchanged.
 
 ### 4.3 Context rendering
 
@@ -301,7 +306,7 @@ Initial contracts:
 | Entry facts | `entryDecision` | synthetic facts message associated with the current decision | read-only facts | Capability registry, task drafts, private lanes |
 | Planner input | Capability Planner | Human input after the stable agent contract | facts and advisory plan | graph-private state, user-task execution tools |
 | Outcome input | `outcomeDecision` | Human input after the stable decision contract | current evidence plus advisory future plan | Capability documents, plan-mutation policy |
-| Answer context | `answer` | current bounded context after canonical main history | typed reply-mode facts | copied user request, full handoff, URL, arbitrary instruction |
+| Answer context | `answer` | current facts after the invocation's canonical-history projection | typed reply mode and ordered accepted results | duplicate current-run handoff, `delegation_started`, arbitrary instruction |
 | Delegation briefing | selected Capability | latest synthetic task-boundary message in its private lane | current task boundary | future plan and framework policy |
 | Capability runtime facts | selected Capability | bounded context before the briefing | runtime facts | Capability or Toolkit policy text |
 | Compaction summary | its downstream message consumers | synthetic context preceding newer retained messages | non-authoritative derived context | new policy, terminal meaning, current-user override |
@@ -317,11 +322,13 @@ Initial contracts:
    contract; mechanical behavior changes runtime enforcement; provider behavior
    changes a bounded conditional protocol.
 4. **Preserve canonical roles.** User requests stay Human, accepted handoffs stay
-   AI, task boundaries stay delegation briefings, and derived summaries stay
-   non-authoritative context.
-5. **Minimize propagation.** Do not copy a fact when canonical history already
-   carries it. Prefer a typed mode or reference over a complete task, artifact,
-   result, or credential-bearing URL.
+   AI in checkpoint state, task boundaries stay delegation briefings, and derived
+   summaries stay non-authoritative context. A model invocation may replace a
+   selected current-run handoff with an equivalent typed fact, but does not
+   rewrite persisted history.
+5. **Do not duplicate evidence.** Keep ordinary facts in canonical history. When
+   a consumer needs an explicitly owned collection, project the selected items
+   once and remove their original payloads from that model invocation.
 6. **Bound every dynamic collection and text field.** Bounds are deterministic
    runtime constraints, not model instructions.
 7. **Test structure and behavior, not prose presence.** A test may assert role,
@@ -341,8 +348,8 @@ repository-wide migration:
   `runtime/nodes/answer.ts` to `prompts/answer.ts`;
 - keep typed state projection and cleanup in the runtime node;
 - remove workdir and runtime-environment data from the Answer system contract;
-- route `goal_done` through Answer with canonical history and a typed summary
-  mode;
+- route `goal_done` through Answer with canonical history plus a typed, ordered
+  projection of the current run's accepted results;
 - replace terminal prose injection with a bounded Answer facts message;
 - delete `buildDelegationCompletionAnswerContext()`;
 - replace prompt-phrase assertions with invocation-count, output, role, order,

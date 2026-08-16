@@ -4,6 +4,12 @@ import {
   type BaseMessage,
 } from '@langchain/core/messages';
 import type { AgentActor } from '../../../types/agent';
+import {
+  MAX_HANDOFF_ARTIFACT_PREVIEW_LENGTH,
+  MAX_HANDOFF_ARTIFACT_TITLE_LENGTH,
+  MAX_HANDOFF_ARTIFACT_URI_LENGTH,
+  type HandOffArtifactRef,
+} from '../artifacts/handoff';
 import { getPinpetMeta, setPinpetMeta } from '../messageLanes';
 import type { UserGoal } from '../types';
 import { clipForPrompt } from '../utils';
@@ -19,6 +25,12 @@ export const ANSWER_CONTEXT_LIMITS = {
   awaitingUserInputChars: 2_000,
 } as const;
 
+export type AnswerAcceptedResult = {
+  task: string;
+  result: string;
+  artifactRefs: readonly HandOffArtifactRef[];
+};
+
 export type AnswerBlockedReason =
   | 'iteration_limit'
   | 'execution_limit'
@@ -32,23 +44,77 @@ export type AnswerBlockedReason =
  * This type intentionally contains no caller-supplied prompt or policy field.
  * Every mode is rendered as low-authority context for the Answer model.
  */
-export type AnswerContextFacts =
-  | { mode: 'direct'; hasUserGoal: boolean }
-  | { mode: 'goal_done'; hasUserGoal: boolean }
+type AnswerContextBaseFacts = {
+  hasUserGoal: boolean;
+  acceptedResults: readonly AnswerAcceptedResult[];
+};
+
+export type AnswerContextFacts = AnswerContextBaseFacts & (
+  | { mode: 'direct' }
+  | {
+      mode: 'goal_done';
+    }
   | {
       mode: 'user_input_required';
-      hasUserGoal: boolean;
       context: string | null;
     }
   | {
       mode: 'blocked';
-      hasUserGoal: boolean;
       reason: AnswerBlockedReason;
       unfinishedTask: string | null;
       detail: string | null;
-    };
+    }
+);
 
 export type ModelAnswerContextFacts = AnswerContextFacts;
+
+function renderAcceptedResultArtifacts(refs: readonly HandOffArtifactRef[]): string | null {
+  if (refs.length === 0) return null;
+  const lines = ['<artifacts>'];
+  for (const ref of refs) {
+    lines.push('  <artifact>');
+    lines.push(indentXmlBlock(xmlTextBlock('id', ref.id), 4));
+    lines.push(indentXmlBlock(xmlTextBlock(
+      'uri',
+      clipForPrompt(ref.uri, MAX_HANDOFF_ARTIFACT_URI_LENGTH),
+    ), 4));
+    lines.push(indentXmlBlock(xmlTextBlock('capability', clipForPrompt(ref.capabilityId, 160)), 4));
+    lines.push(`    <kind>${ref.kind}</kind>`);
+    if (ref.mimeType) {
+      lines.push(indentXmlBlock(xmlTextBlock('mime_type', clipForPrompt(ref.mimeType, 80)), 4));
+    }
+    if (ref.title) {
+      lines.push(indentXmlBlock(xmlTextBlock(
+        'title',
+        clipForPrompt(ref.title, MAX_HANDOFF_ARTIFACT_TITLE_LENGTH),
+      ), 4));
+    }
+    if (ref.preview) {
+      lines.push(indentXmlBlock(xmlTextBlock(
+        'preview',
+        clipForPrompt(ref.preview, MAX_HANDOFF_ARTIFACT_PREVIEW_LENGTH),
+      ), 4));
+    }
+    lines.push('  </artifact>');
+  }
+  lines.push('</artifacts>');
+  return lines.join('\n');
+}
+
+function renderAcceptedResults(results: readonly AnswerAcceptedResult[]): string | null {
+  if (results.length === 0) return null;
+  const lines = ['<accepted_results>'];
+  for (const [index, result] of results.entries()) {
+    lines.push(`  <accepted_result order="${(index + 1).toString()}">`);
+    lines.push(indentXmlBlock(xmlTextBlock('task', result.task), 4));
+    lines.push(indentXmlBlock(xmlTextBlock('result', result.result, ' format="markdown" role="data"'), 4));
+    const artifacts = renderAcceptedResultArtifacts(result.artifactRefs);
+    if (artifacts) lines.push(indentXmlBlock(artifacts, 4));
+    lines.push('  </accepted_result>');
+  }
+  lines.push('</accepted_results>');
+  return lines.join('\n');
+}
 
 function renderAnswerContext(facts: ModelAnswerContextFacts): string {
   const lines = [
@@ -77,6 +143,8 @@ function renderAnswerContext(facts: ModelAnswerContextFacts): string {
       clipForPrompt(facts.context, ANSWER_CONTEXT_LIMITS.awaitingUserInputChars),
     ), 2));
   }
+  const acceptedResults = renderAcceptedResults(facts.acceptedResults);
+  if (acceptedResults) lines.push(indentXmlBlock(acceptedResults, 2));
   lines.push('</answer_context>');
   return lines.join('\n');
 }

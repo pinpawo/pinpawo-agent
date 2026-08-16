@@ -31,6 +31,11 @@ test('Answer prompt package owns stable system plus canonical history plus facts
     contextFacts: {
       mode: 'user_input_required',
       hasUserGoal: true,
+      acceptedResults: [{
+        task: '检查配置',
+        result: '配置检查已完成。',
+        artifactRefs: [],
+      }],
       context: '还需要用户选择检查范围。',
     },
   });
@@ -55,6 +60,7 @@ test('Answer prompt package owns stable system plus canonical history plus facts
   assert.match(String(message.content), /^<answer_input role="fact" source="orchestrator_state" authority="none">/);
   assert.match(String(message.content), /<run_user_goal[^>]*>[\s\S]*检查仓库并报告结果。/);
   assert.match(String(message.content), /<reply_mode>user_input_required<\/reply_mode>/);
+  assert.match(String(message.content), /<accepted_results>[\s\S]*配置检查已完成/);
   assert.match(String(message.content), /<awaiting_user_input_context>[\s\S]*还需要用户选择检查范围/);
   assert.equal(String(message.content).trimEnd().endsWith('</answer_input>'), true);
 });
@@ -67,6 +73,7 @@ test('Answer dynamic blocked values stay out of the system message', () => {
     contextFacts: {
       mode: 'blocked',
       hasUserGoal: true,
+      acceptedResults: [],
       reason: 'capability_unavailable',
       unfinishedTask: instructionLikeTask,
       detail: '当前没有匹配能力',
@@ -82,6 +89,7 @@ test('Answer input append helper does not mutate canonical history', () => {
   const messages = appendAnswerInputMessage(history, null, {
     mode: 'user_input_required',
     hasUserGoal: true,
+    acceptedResults: [],
     context: null,
   });
 
@@ -92,9 +100,9 @@ test('Answer input append helper does not mutate canonical history', () => {
 
 test('Answer input uses a closed reply mode without an instruction field', () => {
   const variants: ModelAnswerContextFacts[] = [
-    { mode: 'direct', hasUserGoal: true },
-    { mode: 'goal_done', hasUserGoal: true },
-    { mode: 'user_input_required', hasUserGoal: false, context: null },
+    { mode: 'direct', hasUserGoal: true, acceptedResults: [] },
+    { mode: 'goal_done', hasUserGoal: true, acceptedResults: [] },
+    { mode: 'user_input_required', hasUserGoal: false, acceptedResults: [], context: null },
   ];
 
   for (const facts of variants) {
@@ -106,6 +114,37 @@ test('Answer input uses a closed reply mode without an instruction field', () =>
   }
 });
 
+test('goal_done Answer input renders accepted results in order with artifact facts', () => {
+  const message = appendAnswerInputMessage([], '完成发布准备', {
+    mode: 'goal_done',
+    hasUserGoal: true,
+    acceptedResults: [
+      { task: '审查风险', result: '发现 cache-key-17。', artifactRefs: [] },
+      {
+        task: '提交修复',
+        result: 'PR #643 已创建。',
+        artifactRefs: [{
+          id: 'artifact-1',
+          kind: 'report',
+          mimeType: 'text/markdown',
+          uri: 'pinpawo://artifact/report.md',
+          title: '修复报告',
+          preview: '测试通过',
+          capabilityId: 'general',
+          delegationId: 'delegation-2',
+          runId: 'run-2',
+        }],
+      },
+    ],
+  }).at(-1);
+  const context = String(message?.content ?? '');
+
+  assert.match(context, /<accepted_result order="1">[\s\S]*审查风险[\s\S]*cache-key-17/);
+  assert.match(context, /<accepted_result order="2">[\s\S]*提交修复[\s\S]*PR #643/);
+  assert.match(context, /<uri>[\s\S]*pinpawo:\/\/artifact\/report\.md/);
+  assert.ok(context.indexOf('审查风险') < context.indexOf('提交修复'));
+});
+
 test('Answer input replaces a stale synthetic Answer input instead of duplicating it', () => {
   const staleInput = new HumanMessage('<answer_input>stale</answer_input>');
   staleInput.name = ANSWER_INPUT_MESSAGE_NAME;
@@ -115,6 +154,7 @@ test('Answer input replaces a stale synthetic Answer input instead of duplicatin
   ], null, {
     mode: 'user_input_required',
     hasUserGoal: true,
+    acceptedResults: [],
     context: '需要用户确认目标分支。',
   });
 
@@ -128,6 +168,7 @@ test('blocked Answer facts are escaped and bounded as data', () => {
   const message = appendAnswerInputMessage([], null, {
     mode: 'blocked',
     hasUserGoal: true,
+    acceptedResults: [],
     reason: 'capability_unavailable',
     unfinishedTask: instructionLikeTask,
     detail: '没有已注册的 Capability。'.repeat(80),

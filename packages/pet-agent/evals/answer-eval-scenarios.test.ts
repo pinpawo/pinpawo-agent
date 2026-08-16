@@ -55,7 +55,6 @@ test('answer eval models goal_done as a grounded task summary', async () => {
   assert.deepEqual(scenario.render().map((message) => message._getType()), [
     'system',
     'human',
-    'ai',
     'human',
   ]);
   assert.equal(subjectInvocations, 1);
@@ -64,9 +63,10 @@ test('answer eval models goal_done as a grounded task summary', async () => {
   assert.match(answerInput, /^<answer_input[^>]*>/);
   assert.match(answerInput, /<run_user_goal[^>]*>/);
   assert.match(answerInput, /<reply_mode>goal_done<\/reply_mode>/);
+  assert.match(answerInput, /<accepted_results>[\s\S]*database-freeze-42/);
 });
 
-test('answer eval keeps full handoff evidence while measuring compressed summaries', async () => {
+test('answer eval projects full accepted-result evidence while measuring compressed summaries', async () => {
   const scenarios = getAnswerEvalScenarios().filter(({ caseName }) => [
     'verbose-handoff-compression',
     'multi-handoff-compression',
@@ -89,8 +89,11 @@ test('answer eval keeps full handoff evidence while measuring compressed summari
   for (const scenario of scenarios) {
     const messages = scenario.render();
     const priorAssistantMessages = messages.filter((message) => message._getType() === 'ai');
-    assert.ok(priorAssistantMessages.length >= 1);
-    assert.match(String(messages.at(-1)?.content), /<reply_mode>goal_done<\/reply_mode>/);
+    const answerInput = String(messages.at(-1)?.content);
+    assert.equal(priorAssistantMessages.length, 0);
+    assert.match(answerInput, /<reply_mode>goal_done<\/reply_mode>/);
+    assert.match(answerInput, /<accepted_results>[\s\S]*<accepted_result order="1">/);
+    assert.match(answerInput, /PR #64[23]/);
 
     const result = await scenario.run(subject, undefined, {
       model: answerModel('judge'),

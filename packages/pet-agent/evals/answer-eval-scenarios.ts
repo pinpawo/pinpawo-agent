@@ -113,27 +113,52 @@ function collectDiagnostics(
 
 function render(testCase: AnswerBehaviorCase): BaseMessage[] {
   const delegationOutcome = testCase.input.delegationOutcome;
+  const fallbackAcceptedResult = delegationOutcome?.outcome === 'goal_done'
+    ? [...testCase.input.messages].reverse().find(({ role }) => role === 'assistant')
+    : undefined;
+  const acceptedResults = delegationOutcome?.acceptedResults
+    ?? (fallbackAcceptedResult
+        ? [{ task: delegationOutcome?.task ?? '完成当前任务', result: fallbackAcceptedResult.text }]
+        : []);
+  const acceptedResultTexts = new Set(acceptedResults.map(({ result }) => result));
+  const history = testCase.input.messages.filter((message) => !(
+    message.role === 'assistant'
+    && acceptedResultTexts.has(message.text)
+  ));
   const hasUserGoal = Boolean(
     testCase.input.userGoal
     ?? testCase.input.messages.find(({ role }) => role === 'user'),
   );
   return buildAnswerInvocationMessages({
     actor,
-    history: testCase.input.messages.map((message) => message.role === 'user'
+    history: history.map((message) => message.role === 'user'
       ? new HumanMessage(message.text)
       : new AIMessage(message.text)),
     userGoal: testCase.input.userGoal,
     contextFacts: delegationOutcome?.outcome === 'goal_done'
-      ? { mode: 'goal_done', hasUserGoal }
+      ? {
+          mode: 'goal_done',
+          hasUserGoal,
+          acceptedResults: acceptedResults.map(({ task, result }) => ({
+            task,
+            result,
+            artifactRefs: [],
+          })),
+        }
       : delegationOutcome?.outcome === 'user_input_required'
         ? {
             mode: 'user_input_required',
             hasUserGoal,
+            acceptedResults: acceptedResults.map(({ task, result }) => ({
+              task,
+              result,
+              artifactRefs: [],
+            })),
             context: delegationOutcome.context
               ?? [...testCase.input.messages].reverse().find(({ role }) => role === 'assistant')?.text
               ?? null,
           }
-        : { mode: 'direct', hasUserGoal },
+        : { mode: 'direct', hasUserGoal, acceptedResults: [] },
   });
 }
 

@@ -1,5 +1,6 @@
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
+import { isDelegationStartedMessage } from '../../delegationBriefing';
 import {
   buildHandoffArtifactRefs,
   formatHandoffArtifactRefsForMessage,
@@ -14,6 +15,7 @@ import {
 } from '../../messageLanes';
 import {
   buildAnswerInvocationMessages,
+  type AnswerAcceptedResult,
   type AnswerContextFacts,
 } from '../../prompts';
 import type { OrchestratorStateType } from '../../state';
@@ -25,6 +27,70 @@ import {
   resolveActor,
 } from '../config';
 import { DEFAULT_ORCHESTRATOR_MAX_ITERATIONS } from '../constants';
+import { readCapabilityNameFromLane } from '../decisions/delegationLifecycle';
+
+type AcceptedRunResultsProjection = {
+  history: BaseMessage[];
+  results: AnswerAcceptedResult[];
+};
+
+function stripProjectedArtifactFooter(
+  text: string,
+  artifactRefs: AnswerAcceptedResult['artifactRefs'],
+): string {
+  if (artifactRefs.length === 0) return text;
+  const footer = formatHandoffArtifactRefsForMessage([...artifactRefs]).trimStart();
+  return footer && text.endsWith(footer)
+    ? text.slice(0, -footer.length).trimEnd()
+    : text;
+}
+
+export function projectAcceptedRunResults(params: {
+  state: OrchestratorStateType;
+  history: BaseMessage[];
+}): AcceptedRunResultsProjection {
+  const selectedMessages = new Set<BaseMessage>();
+  const results: AnswerAcceptedResult[] = [];
+
+  for (const delegation of params.state.runDelegationSummaries) {
+    if (delegation.status !== 'completed') continue;
+    const matchingHandoffs = params.history.filter((message) => {
+      const source = getMessageHandoffSource(message);
+      return source?.delegationId === delegation.id
+        && source.handoffFrom === delegation.lane;
+    });
+    const handoffMessage = matchingHandoffs.at(-1);
+    if (!handoffMessage) continue;
+    const source = getMessageHandoffSource(handoffMessage);
+    if (!source) continue;
+    const artifactRefs = buildHandoffArtifactRefs(
+      params.state.sessionCapabilityArtifacts,
+      {
+        delegationId: delegation.id,
+        runId: source.runId,
+        capabilityId: readCapabilityNameFromLane(delegation.lane),
+      },
+    );
+    const result = stripProjectedArtifactFooter(readMessageText(handoffMessage), artifactRefs);
+    if (!result) continue;
+    for (const matchingHandoff of matchingHandoffs) {
+      selectedMessages.add(matchingHandoff);
+    }
+    results.push({
+      task: source.task ?? delegation.task,
+      result,
+      artifactRefs,
+    });
+  }
+
+  return {
+    history: params.history.filter((message) => (
+      !selectedMessages.has(message)
+      && !isDelegationStartedMessage(message)
+    )),
+    results,
+  };
+}
 
 export const CHECKPOINT_INCOMPATIBLE_MESSAGE =
   '这个任务由旧版本创建，当前版本无法继续。请重新发起或重述任务。';
@@ -50,13 +116,14 @@ export function createAnswerNode(config: OrchestratorConfig) {
     // handoff copies (first-class, lane-free). A user-input-required result is
     // different: its lane remains resumable, so its announce and artifact refs
     // are appended only to this model invocation and never copied into main state.
-    const history = mainConversationMessages(state.messages);
-    const latestMainMessage = history.at(-1);
-    const handoffSource = latestMainMessage
-      ? getMessageHandoffSource(latestMainMessage)
-      : null;
+    const canonicalHistory = mainConversationMessages(state.messages);
+    const acceptedResultsProjection = projectAcceptedRunResults({
+      state,
+      history: canonicalHistory,
+    });
+    const history = acceptedResultsProjection.history;
     const acceptedOutcome = state.runLatestDelegationOutcome;
-    const acceptedHandoffOutcome = handoffSource
+    const acceptedHandoffOutcome = acceptedResultsProjection.results.length > 0
       && acceptedOutcome === 'goal_done'
       ? acceptedOutcome
       : null;
@@ -87,6 +154,7 @@ export function createAnswerNode(config: OrchestratorConfig) {
       state,
       history,
       acceptedHandoffOutcome,
+      acceptedResults: acceptedResultsProjection.results,
       awaitingUserInput,
       userInputRequiredContext,
       runIterationLimit: maxRunIterations
@@ -121,6 +189,7 @@ export function selectAnswerContextFacts(params: {
   state: OrchestratorStateType;
   history: BaseMessage[];
   acceptedHandoffOutcome: 'goal_done' | null;
+  acceptedResults: readonly AnswerAcceptedResult[];
   awaitingUserInput: boolean;
   userInputRequiredContext?: string | null;
   runIterationLimit: number;
@@ -133,16 +202,22 @@ export function selectAnswerContextFacts(params: {
     return {
       mode: 'user_input_required',
       hasUserGoal,
+      acceptedResults: params.acceptedResults,
       context: params.userInputRequiredContext?.trim() || null,
     };
   }
   if (params.acceptedHandoffOutcome === 'goal_done') {
-    return { mode: 'goal_done', hasUserGoal };
+    return {
+      mode: 'goal_done',
+      hasUserGoal,
+      acceptedResults: params.acceptedResults,
+    };
   }
   if (params.state.runRuntimeFailure === 'planner_checkpoint_missing') {
     return {
       mode: 'blocked',
       hasUserGoal,
+      acceptedResults: params.acceptedResults,
       reason: 'planner_checkpoint_missing',
       unfinishedTask: params.state.taskActiveDelegation?.task
         ?? params.state.runUserGoal
@@ -154,6 +229,7 @@ export function selectAnswerContextFacts(params: {
     return {
       mode: 'blocked',
       hasUserGoal,
+      acceptedResults: params.acceptedResults,
       reason: 'capability_unavailable',
       unfinishedTask: params.state.taskActiveDelegation?.task
         ?? params.state.runUserGoal
@@ -167,6 +243,7 @@ export function selectAnswerContextFacts(params: {
     return {
       mode: 'blocked',
       hasUserGoal,
+      acceptedResults: params.acceptedResults,
       reason: 'iteration_limit',
       unfinishedTask: activeDelegation.task,
       detail: null,
@@ -181,13 +258,14 @@ export function selectAnswerContextFacts(params: {
     return {
       mode: 'blocked',
       hasUserGoal,
+      acceptedResults: params.acceptedResults,
       reason: completionReason === 'limit_reached' ? 'execution_limit' : 'incomplete',
       unfinishedTask: activeDelegation.task,
       detail: null,
     };
   }
 
-  return { mode: 'direct', hasUserGoal };
+  return { mode: 'direct', hasUserGoal, acceptedResults: params.acceptedResults };
 }
 
 function buildAnswerCleanup() {

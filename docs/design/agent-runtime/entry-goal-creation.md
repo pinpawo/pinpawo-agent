@@ -131,8 +131,7 @@ Planner 的完整上下文必须保持私有。除 terminal action 和 plan task
 
 - canonical main conversation 中的用户与助手消息；
 - 已接受的 handoff copy；
-- main context compaction summary；
-- 解释路径、时间和当前环境所必需的稳定 runtime facts。
+- canonical main conversation 顶部的 context compaction message。
 
 它输出一段完整、紧凑的目标文本。当前目的、必要背景、已确认约束和被消解的指代自然地写在同一个
 文本值中，不再人为拆成 `objective` 与 `context` 两个字段。
@@ -235,9 +234,7 @@ Root 也只把完整文本当作目标数据。该响应不进入 `state.message
 
 ```text
 System(goal creation contract)
-Synthetic runtime facts
-Compaction summaries, when present
-Canonical main conversation
+Canonical main conversation, including its leading compaction context when present
 Latest user request
 ```
 

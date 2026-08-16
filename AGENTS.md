@@ -32,6 +32,13 @@
 - Do not modify `docs/wiki/` or `docs/log.md` unless the user explicitly asks to ingest.
 - During normal development, update raw documents under `docs/` instead. Keep incomplete designs there until ingest is explicitly requested.
 
+## Design Draft Lifecycle
+
+- When a change introduces a coherent subsystem concept or cross-cutting contract, create or update a draft design under `docs/` before or alongside broad implementation work.
+- Keep the draft aligned as implementation and review change the concept. Do not let later PRs silently diverge from its boundaries, open questions, or migration plan.
+- A draft is working design evidence, not a canonical contract. Promote it to a formal document only after the concept and implementation have stabilized and received explicit review.
+- Small, isolated fixes do not require a new design draft. Prefer updating an existing draft over creating a competing document for the same concept.
+
 ## Security
 
 - Do not commit `.env`, tokens, JWTs, API keys, local session state, or generated build output.

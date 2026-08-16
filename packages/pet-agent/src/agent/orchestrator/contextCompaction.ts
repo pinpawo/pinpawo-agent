@@ -1,17 +1,21 @@
-import { HumanMessage, RemoveMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, RemoveMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import { REMOVE_ALL_MESSAGES } from '@langchain/langgraph';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import {
   getMessageLane,
+  getPinpetMeta,
   mainConversationMessages,
+  setPinpetMeta,
   toolProtocolSafeMessages,
 } from './messageLanes';
 import { clipForPrompt, readMessageText } from './utils';
 import { isDelegationBriefingMessage } from './delegationBriefing';
+import { xmlTextBlock } from './prompts/shared';
 
 const DEFAULT_KEEP_MESSAGES = 10;
 const DEFAULT_SUMMARY_TRANSCRIPT_CHARS = 12000;
+const DEFAULT_FALLBACK_SUMMARY_CHARS = 4000;
 export const CONTEXT_COMPACTION_MESSAGE_NAME = 'context_compaction';
 
 export type ContextCompactionOptions = {
@@ -26,39 +30,48 @@ export type ContextCompactionResult = {
 };
 
 export function isContextCompactionMessage(message: BaseMessage): boolean {
-  return message._getType() === 'system' && message.name === CONTEXT_COMPACTION_MESSAGE_NAME;
+  return message.name === CONTEXT_COMPACTION_MESSAGE_NAME
+    || getPinpetMeta(message).source === CONTEXT_COMPACTION_MESSAGE_NAME;
 }
 
-export function readContextCompactionSummaries(messages: BaseMessage[], limit = 2): string[] {
-  const summaries: string[] = [];
-  for (let i = messages.length - 1; i >= 0 && summaries.length < limit; i--) {
-    const message = messages[i];
-    if (!isContextCompactionMessage(message)) continue;
-    const text = readMessageText(message);
-    if (text) {
-      summaries.unshift(text);
-    }
-  }
-  return summaries;
+export function createContextCompactionMessage(
+  summary: string,
+  mainMessageCount: number,
+): AIMessage {
+  const message = new AIMessage(xmlTextBlock(
+    'context_summary',
+    summary,
+    ' role="context" source="compaction"',
+  ));
+  message.name = CONTEXT_COMPACTION_MESSAGE_NAME;
+  setPinpetMeta(message, {
+    source: CONTEXT_COMPACTION_MESSAGE_NAME,
+    synthetic: true,
+    authority: 'none',
+    compaction: 'summary',
+    mainMessageCount,
+  });
+  return message;
 }
 
 function selectMessagesToKeep(messages: BaseMessage[], keepMessages: number): BaseMessage[] {
-  return toolProtocolSafeMessages(messages.slice(-Math.max(1, keepMessages)));
+  const candidates = messages.filter((message) => !isContextCompactionMessage(message));
+  return toolProtocolSafeMessages(candidates.slice(-Math.max(1, keepMessages)));
 }
 
 function formatMainMessageForSummary(message: BaseMessage): string | null {
   if (isDelegationBriefingMessage(message)) return null;
-  const type = message._getType();
   const text = readMessageText(message);
   if (!text) return null;
+  if (isContextCompactionMessage(message)) {
+    return [`### 已有压缩摘要`, text].join('\n');
+  }
+  const type = message._getType();
   if (type === 'human') {
     return [`### 主线用户输入`, clipForPrompt(text, 1200)].join('\n');
   }
   if (type === 'ai') {
     return [`### 主线 agent 回复`, clipForPrompt(text, 1200)].join('\n');
-  }
-  if (isContextCompactionMessage(message)) {
-    return [`### 已有压缩摘要`, clipForPrompt(text, 1600)].join('\n');
   }
   return null;
 }
@@ -87,33 +100,76 @@ function buildNoisyFallbackSummary(messages: BaseMessage[]): string {
 }
 
 function buildSummaryTranscript(messages: BaseMessage[], maxChars: number): string {
-  const chunks = buildSummaryItems(messages);
+  const existingSummaryChunks = buildSummaryItems(
+    messages.filter(isContextCompactionMessage),
+  );
+  const recentChunks = buildSummaryItems(
+    messages.filter((message) => !isContextCompactionMessage(message)),
+  );
+  const selectedSummaryChunks: string[] = [];
   const selectedChunks: string[] = [];
   let usedChars = 0;
+  const existingSummaryBudget = recentChunks.length > 0
+    ? Math.floor(maxChars / 2)
+    : maxChars;
 
-  for (let i = chunks.length - 1; i >= 0; i--) {
-    const chunk = chunks[i];
+  for (let i = existingSummaryChunks.length - 1; i >= 0; i--) {
+    const remainingChars = existingSummaryBudget - usedChars;
+    if (remainingChars <= 0) break;
+    const sourceChunk = existingSummaryChunks[i];
+    const chunk = sourceChunk.length <= remainingChars
+      ? sourceChunk
+      : clipForPrompt(sourceChunk, remainingChars);
+    selectedSummaryChunks.unshift(chunk);
+    usedChars += chunk.length;
+  }
+
+  for (let i = recentChunks.length - 1; i >= 0; i--) {
+    const remainingChars = maxChars - usedChars;
+    if (remainingChars <= 0) break;
+    const chunk = recentChunks[i];
     if (selectedChunks.length > 0 && usedChars + chunk.length > maxChars) {
+      break;
+    }
+    if (usedChars + chunk.length > maxChars) {
+      selectedChunks.unshift(clipForPrompt(chunk, remainingChars));
       break;
     }
     selectedChunks.unshift(chunk);
     usedChars += chunk.length;
   }
 
-  return selectedChunks.join('\n\n');
+  return [...selectedSummaryChunks, ...selectedChunks].join('\n\n');
 }
 
 function buildFallbackSummary(messages: BaseMessage[]): string {
-  const importantLines = buildSummaryItems(messages)
-    .slice(-8)
+  const heading = '[以下是更早上下文的自动压缩摘要]';
+  const existingSummary = buildSummaryItems(
+    messages.filter(isContextCompactionMessage),
+  ).at(-1);
+  const recentItems = buildSummaryItems(
+    messages.filter((message) => !isContextCompactionMessage(message)),
+  ).slice(existingSummary ? -7 : -8);
+  const importantLines = recentItems
     .map((item) => `- ${clipForPrompt(item.replace(/\n+/g, ' '), 260)}`);
+  const recentSummary = importantLines.length > 0
+    ? importantLines.join('\n')
+    : existingSummary
+      ? null
+      : buildNoisyFallbackSummary(messages).replace(`${heading}\n`, '');
+  const reservedChars = heading.length
+    + (recentSummary?.length ?? 0)
+    + (existingSummary && recentSummary ? 2 : 1);
+  const existingSummaryChars = Math.max(0, DEFAULT_FALLBACK_SUMMARY_CHARS - reservedChars);
+  const boundedExistingSummary = existingSummary && existingSummaryChars > 1
+    ? clipForPrompt(existingSummary, existingSummaryChars)
+    : null;
 
   return [
-    '[以下是更早上下文的自动压缩摘要]',
-    importantLines.length > 0
-      ? importantLines.join('\n')
-      : buildNoisyFallbackSummary(messages).replace('[以下是更早上下文的自动压缩摘要]\n', ''),
-  ].join('\n');
+    heading,
+    boundedExistingSummary,
+    recentSummary,
+  ].filter((line): line is string => line !== null).join('\n');
 }
 
 async function summarizeMessages(params: {
@@ -185,14 +241,7 @@ export async function compactOrchestratorMessages(params: {
     summary = buildFallbackSummary(messagesToSummarize);
   }
 
-  const summaryMessage = new SystemMessage(summary);
-  summaryMessage.name = CONTEXT_COMPACTION_MESSAGE_NAME;
-  summaryMessage.additional_kwargs = {
-    pinpawo: {
-      compaction: 'summary',
-      mainMessageCount,
-    },
-  };
+  const summaryMessage = createContextCompactionMessage(summary, mainMessageCount);
 
   return {
     messages: [

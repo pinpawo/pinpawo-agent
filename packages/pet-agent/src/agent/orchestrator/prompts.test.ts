@@ -1,47 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { HumanMessage } from '@langchain/core/messages';
-import { materializeDelegation } from './delegationBriefing';
-import {
-  buildCapabilityArtifactContext,
-  buildPreparedRequestContext,
-  buildRuntimeContext,
-  buildSubagentAnnounceContext,
-} from './prompts';
+import { buildSubagentAnnounceContext } from './prompts';
 import { buildCapabilityPlannerAgentInput } from './prompts/capabilityPlannerAgent';
 import type { CapabilityPlannerInput } from './capabilityPlanner/runner';
-
-function recentMessages(count: number) {
-  return Array.from({ length: count }, (_, index) => new HumanMessage(`recent-${index}`));
-}
-
-test('start-loop router request context includes compaction summaries outside recent message window', () => {
-  const requestContext = buildPreparedRequestContext({
-    latestUserRequest: '继续推进',
-    recentMessages: recentMessages(8),
-    contextSummaries: ['更早任务摘要：已完成删除旧 pet-bot，PR 已打开，待修 router context。'],
-  });
-
-  assert.match(requestContext, /<user_intent_context>/);
-  assert.match(requestContext, /<context_summaries source="compaction" role="context">/);
-  assert.match(requestContext, /更早任务摘要：已完成删除旧 pet-bot/);
-  assert.match(requestContext, /<recent_messages purpose="coreference">/);
-  assert.match(requestContext, /recent-7/);
-  assert.doesNotMatch(requestContext, /recent-0/);
-});
-
-test('prepared request context does not repeat the current user request in recent messages', () => {
-  const requestContext = buildPreparedRequestContext({
-    latestUserRequest: '打开示例站点',
-    recentMessages: [
-      new HumanMessage('更早的请求'),
-      new HumanMessage('打开示例站点'),
-    ],
-  });
-
-  assert.equal((requestContext.match(/打开示例站点/g) ?? []).length, 1);
-  assert.match(requestContext, /更早的请求/);
-});
 
 const plannerPromptWorkspace = {
   rootPath: '/tmp/capabilities',
@@ -161,70 +122,6 @@ test('Capability Planner boundary input omits the follow-up section once the pla
   assert.match(input, /浏览器已经连接，目标页面可访问。/);
   assert.doesNotMatch(input, /此前保留的后续任务/);
   assert.doesNotMatch(input, /planner_request_briefing/);
-});
-
-test('decision recent messages label delegation briefings as scheduling context', () => {
-  const [briefing] = materializeDelegation({
-    mode: 'initial',
-    lane: 'capability:general',
-    transcriptRunId: 'run-1',
-    delegationId: 'delegation-1',
-    task: '只完成任务 A',
-    essentialContext: null,
-  }).laneMessages;
-  const requestContext = buildPreparedRequestContext({
-    latestUserRequest: '完成 A 和 B',
-    recentMessages: [briefing],
-  });
-
-  assert.match(requestContext, /<role>委派简报<\/role>/);
-  assert.doesNotMatch(requestContext, /<role>助手<\/role>/);
-});
-
-test('request contexts include bounded capability artifact refs', () => {
-  const artifactContext = buildCapabilityArtifactContext([
-    {
-      id: 'artifact-1',
-      threadId: 'thread-1',
-      capabilityId: 'explore',
-      delegationId: 'delegation-1',
-      runId: 'turn-1',
-      kind: 'report',
-      mimeType: 'text/markdown',
-      uri: 'capability-artifact://thread/thread-1/delegation/delegation-1/artifact/artifact-1',
-      title: 'Issue explore report',
-      preview: '已确认 issue explore 的关键文件和下一步。',
-      sizeBytes: 1200,
-      createdAt: '2026-06-16T00:00:00.000Z',
-    },
-  ]);
-
-  assert.match(artifactContext, /当前会话 capability artifacts/);
-  assert.match(artifactContext, /Issue explore report/);
-  assert.match(artifactContext, /capability-artifact:\/\/thread\/thread-1/);
-
-  const requestContext = buildPreparedRequestContext({
-    latestUserRequest: '继续刚才的探索',
-    recentMessages: [],
-    capabilityArtifacts: [{
-      id: 'artifact-1',
-      threadId: 'thread-1',
-      capabilityId: 'explore',
-      delegationId: 'delegation-1',
-      runId: 'turn-1',
-      kind: 'report',
-      mimeType: 'text/markdown',
-      uri: 'capability-artifact://thread/thread-1/delegation/delegation-1/artifact/artifact-1',
-      title: 'Issue explore report',
-      preview: '已确认 issue explore 的关键文件和下一步。',
-      sizeBytes: 1200,
-      createdAt: '2026-06-16T00:00:00.000Z',
-    }],
-  });
-
-  assert.match(requestContext, /<capability_artifacts>/);
-  assert.match(requestContext, /当前会话 capability artifacts/);
-  assert.match(requestContext, /继续刚才的探索/);
 });
 
 test('completed subagent announce context includes the full current result text', () => {

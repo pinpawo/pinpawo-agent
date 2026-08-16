@@ -13,5 +13,4 @@ export const GOAL_CREATION_SYSTEM_PROMPT = definePromptTemplate<Record<string, n
 - 即使目标可以直接回答、需要用户补充信息或当前能力不可用，也只描述用户当前想要达成的目标，不做路由判断；
 - 输出应当独立可理解、非空且简洁。
 
-上下文：
-- 主对话提供可供引用的历史与已有结果；context_summaries 在存在时概括更早的对话。`, []);
+主对话提供可供引用的历史与已有结果。`, []);

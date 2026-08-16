@@ -67,7 +67,10 @@ import {
   resumeRunDelegationSummary,
   updateRunDelegationSummaryResult,
 } from './delegations';
-import { CONTEXT_COMPACTION_MESSAGE_NAME } from './contextCompaction';
+import {
+  createContextCompactionMessage,
+  isContextCompactionMessage,
+} from './contextCompaction';
 import { findLatestHandoffCopyForDelegation } from './artifacts/handoff';
 import type { RunDelegationSummary, TaskActiveDelegation } from './types';
 import {
@@ -370,8 +373,10 @@ test('Goal Creation reads full canonical main messages and excludes lane announc
     delegationId: 'task-prev',
     task: '旧 lane task',
   });
-  const compactionSummary = new SystemMessage('更早的 canonical main 摘要。COMPACTED_MAIN_CONTEXT');
-  compactionSummary.name = CONTEXT_COMPACTION_MESSAGE_NAME;
+  const compactionSummary = createContextCompactionMessage(
+    '更早的 canonical main 摘要。COMPACTED_MAIN_CONTEXT',
+    12,
+  );
   const longReview = `${'distribution-worker 专项审查。'.repeat(30)}\n最新问题：NEW_DISTRIBUTION_FINDING_A、NEW_DISTRIBUTION_FINDING_B。`;
   const internalBriefing = new AIMessage('这条消息的正文不参与分类。');
   setPinpetMeta(internalBriefing, {
@@ -403,6 +408,11 @@ test('Goal Creation reads full canonical main messages and excludes lane announc
     goalCreationMessages.map((message) => message._getType?.()),
     ['system', 'ai', 'human', 'ai', 'ai', 'human'],
   );
+  const observedCompaction = goalCreationMessages.find((message) => (
+    message.name === compactionSummary.name
+  ));
+  assert.equal(observedCompaction?._getType?.(), 'ai');
+  assert.equal(observedCompaction?.content, compactionSummary.content);
   assert.match(String(goalCreationMessages[1]?.content ?? ''), /COMPACTED_MAIN_CONTEXT/);
   assert.equal(
     String(goalCreationMessages.at(-1)?.content ?? ''),
@@ -529,8 +539,7 @@ test('execution boundary routes through capabilityPlanner before the next task',
   });
 
   const dynamicSystemContext = new SystemMessage('DYNAMIC_WIKI_SYSTEM_CONTEXT');
-  const compactionContext = new SystemMessage('FRAMEWORK_COMPACTION_CONTEXT');
-  compactionContext.name = CONTEXT_COMPACTION_MESSAGE_NAME;
+  const compactionContext = createContextCompactionMessage('FRAMEWORK_COMPACTION_CONTEXT', 8);
   const state = await graph.invoke(buildOrchestratorRunInput([
     dynamicSystemContext,
     compactionContext,
@@ -1147,12 +1156,10 @@ test('a completed subagent announce reaches the decision, then Answer summarizes
 });
 
 test('answer node still sees compacted older results when the user asks to re-show them', async () => {
-  let answerInput = '';
+  let answerInput: BaseMessage[] = [];
   const model = {
     invoke: async (messages: unknown[]) => {
-      answerInput = (messages as Array<{ content?: unknown }>)
-        .map((m) => String(m?.content ?? ''))
-        .join('\n');
+      answerInput = messages as BaseMessage[];
       return new AIMessage('answered');
     },
     bindTools: () => ({ invoke: async () => new AIMessage('') }),
@@ -1165,9 +1172,11 @@ test('answer node still sees compacted older results when the user asks to re-sh
     models: { act: model, observe: model },
     actor: testActor,
   });
-  // After compaction the older result survives only as the summary system message.
-  const summary = new SystemMessage('压缩摘要：之前 explore 调研得到 SWE-bench Verified GPT-5.5 88.7%。COMPACTED_RESULT_MARKER');
-  summary.name = CONTEXT_COMPACTION_MESSAGE_NAME;
+  // After compaction the older result survives only as the canonical context message.
+  const summary = createContextCompactionMessage(
+    '压缩摘要：之前 explore 调研得到 SWE-bench Verified GPT-5.5 88.7%。COMPACTED_RESULT_MARKER',
+    14,
+  );
   const input = buildOrchestratorRunInput([
     summary,
     new HumanMessage('把之前的调研结果再发一下'),
@@ -1185,7 +1194,10 @@ test('answer node still sees compacted older results when the user asks to re-sh
   assert.equal(result.messages.at(-1)?.content, 'answered');
   // The answer node must see the compaction summary — otherwise it is blind to
   // the only surviving record of the older result and would re-fabricate it.
-  assert.match(answerInput, /COMPACTED_RESULT_MARKER/);
+  const observedSummary = answerInput.find(isContextCompactionMessage);
+  assert.equal(observedSummary?._getType(), 'ai');
+  assert.equal(observedSummary?.content, summary.content);
+  assert.match(answerInput.map(readMessageText).join('\n'), /COMPACTED_RESULT_MARKER/);
 });
 
 test('delegation goal_done summarizes and preserves the handed-off result', async () => {

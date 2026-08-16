@@ -47,11 +47,6 @@ import {
   runShellTool,
   shellOperationMetadata,
 } from './shellTools';
-import {
-  bindBashToolWorkdir,
-  bindGitToolWorkdir,
-  requireExecutionWorkdir,
-} from './workdirBinding';
 
 const localUtilityTools: StructuredTool[] = [
   readFileTool,
@@ -226,9 +221,7 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
           [createRunShellTool(shell), ...createProcessTools(shell)]
             .map((item) => [item.name, item]),
         );
-        return tools.map((staticTool) => (
-          bound.get(staticTool.name) ?? bindBashToolWorkdir(staticTool, shell.workdir)
-        ));
+        return tools.map((staticTool) => bound.get(staticTool.name) ?? staticTool);
       },
       stop: async (root) => { await (root as ShellRuntime).stop(); },
     },
@@ -251,16 +244,6 @@ export function createGitToolkit(): AgentToolkit {
     reviewGuidance: {
       allow: 'Treat routine, scoped version-control collaboration as eligible for automatic authorization, including staging files, creating a local commit, a normal non-force push, and creating a pull request or issue.',
       ask: 'Require human authorization for destructive worktree or history changes, force pushes, deleting branches or tags, merging a pull request, changing repository settings or access, managing secrets, deleting or closing remote resources, and publishing packages or releases.',
-    },
-    runtime: {
-      start: () => Object.freeze({}),
-      resolve: (_root, context) => Object.freeze({
-        workdir: requireExecutionWorkdir('git', context.execution.workdir),
-      }),
-      bindTools: (binding) => {
-        const { workdir } = binding as { workdir: string };
-        return gitTools.map((staticTool) => bindGitToolWorkdir(staticTool, workdir));
-      },
     },
   });
 }

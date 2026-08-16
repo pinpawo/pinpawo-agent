@@ -29,6 +29,10 @@ runtime 还能由 workdir 派生 `id`、`name`、`rootPath` 形式的 workspace 
 这是本地派生信息，不代表已有持久化 workspace registry 或按请求切换 workspace 的
 公共协议。
 
+一次 Agent invocation 会通过 `ToolRuntime.context.executionScope.workdir` 把有效
+workdir 提供给 Tool。Tool 以它作为相对路径的基准和命令缺省 cwd，但它不是文件系统
+sandbox：显式绝对路径或 cwd 仍然是有效的 Tool 输入。越出 workdir 的操作是否需要
+人工确认，由 review / authorization 策略判断；执行层不会静默改写该输入。
+
 Studio 实际读取的文件见 [Studio 配置](../../studio/configuration.md)；未交付的设计见
 [workspace proposal（英文）](../../../design/local-agent/workspace-runtime-config.md)。
-

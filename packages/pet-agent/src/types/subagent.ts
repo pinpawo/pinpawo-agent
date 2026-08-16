@@ -10,6 +10,7 @@ export type SubagentExecutionScope = {
   threadId: string | null;
   runId: string;
   delegationId: string;
+  workdir?: string | null;
 };
 
 export type SubagentRuntimeContext = {

@@ -193,9 +193,10 @@ createGitToolkit({ workdir: runtimeConfig.workdir });
 createBrowserToolkit({ workdir: runtimeConfig.workdir });
 ```
 
-该做法只能支持单 workdir 进程，已被 per-execution Runtime binding 目标取代。
-当前约束是 Host 把 workdir 放入 `ToolkitRuntimeExecutionScope`，Toolkit Runtime
-为本次 execution 绑定 tools；工具不得读取模块级配置或共享可变 workdir。
+该做法只能支持单 workdir 进程，已被 per-invocation ToolRuntime context 取代。
+当前约束是 Agent 把 workdir 放入 `ToolRuntime.context.executionScope`，普通 Tool
+在调用时读取它；Toolkit Runtime binding 只注入 Toolkit 自己的动态资源与 ownership。
+工具不得读取模块级配置或共享可变 workdir。
 
 ## Studio Runtime 路径
 

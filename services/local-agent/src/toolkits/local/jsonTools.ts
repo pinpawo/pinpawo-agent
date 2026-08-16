@@ -5,7 +5,12 @@ import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import type { ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { readRecord, readString } from '../operationMetadata';
-import { resolveUserPath } from './pathUtils';
+import { resolveDefaultWorkdir } from '../../runtimeConfig';
+import {
+  type LocalToolRuntime,
+  resolveToolExecutionWorkdir,
+  resolveUserPath,
+} from './pathUtils';
 
 const JQ_TIMEOUT_MS = 30_000;
 const JQ_OUTPUT_LIMIT_CHARS = 50_000;
@@ -117,8 +122,12 @@ export type JqQueryInput = {
   compactOutput?: boolean;
 };
 
-export async function runJqQuery(input: JqQueryInput, run: JqExec = runJqProcess) {
-  const filePath = resolveUserPath(input.path);
+export async function runJqQuery(
+  input: JqQueryInput,
+  run: JqExec = runJqProcess,
+  workdir = resolveDefaultWorkdir(),
+) {
+  const filePath = resolveUserPath(input.path, workdir);
   const filter = input.filter.trim();
   if (!filter) return 'Error: jq_query requires a filter';
 
@@ -147,7 +156,7 @@ export async function runJqQuery(input: JqQueryInput, run: JqExec = runJqProcess
       stdoutTotalChars,
       stderrTotalChars,
     } = await run('jq', args, {
-      cwd: process.cwd(),
+      cwd: workdir,
       encoding: 'utf-8',
       env: {
         LANG: 'C.UTF-8',
@@ -191,7 +200,11 @@ export async function runJqQuery(input: JqQueryInput, run: JqExec = runJqProcess
 }
 
 export const jqQueryTool = tool(
-  (input: JqQueryInput) => runJqQuery(input),
+  (input: JqQueryInput, runtime: LocalToolRuntime) => runJqQuery(
+    input,
+    runJqProcess,
+    resolveToolExecutionWorkdir(runtime),
+  ),
   {
     name: 'jq_query',
     description: '使用本机 jq 对一个 JSON 文件做只读查询。适合先查看 keys、数组长度、筛选字段、分组计数和生成紧凑摘要；可读取当前 workdir 之外由用户提供的显式文件路径。直接传 jq filter，不要再用 run_shell 或临时 Python 脚本包装 jq。输出默认使用 jq compact JSON，并限制为 50000 字符。',

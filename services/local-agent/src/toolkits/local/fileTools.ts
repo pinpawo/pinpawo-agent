@@ -22,7 +22,12 @@ import {
   readString,
   sourceDestinationInputSummary,
 } from '../operationMetadata';
-import { resolveUserPath } from './pathUtils';
+import {
+  type LocalToolRuntime,
+  resolveToolExecutionWorkdir,
+  resolveToolPath,
+  resolveUserPath,
+} from './pathUtils';
 
 const capabilityManifestSchema = z.object({
   id: z.string().min(1),
@@ -165,13 +170,15 @@ export function readTextFileChunkResult({
   startLine,
   endLine,
   maxBytes: configuredMaxBytes,
+  workdir,
 }: {
   path: string;
   startLine?: number;
   endLine?: number;
   maxBytes?: number;
+  workdir?: string;
 }): TextFileChunkResult {
-  const filePath = resolveUserPath(path);
+  const filePath = resolveUserPath(path, workdir);
   const content = readUtf8TextFile(filePath);
   const lines = content.split('\n');
   const start = Math.max(1, startLine ?? 1);
@@ -254,6 +261,7 @@ export function readTextFileChunk(input: {
   path: string;
   startLine?: number;
   endLine?: number;
+  workdir?: string;
 }) {
   return formatTextFileChunkResult(readTextFileChunkResult(input));
 }
@@ -270,23 +278,23 @@ function mergeOperationOutputSummary(
   } satisfies ReturnType<typeof okOutputPathSummary> | null;
 }
 
-function resolveMoveTarget(sourcePath: string, destinationPath: string) {
-  const source = resolveUserPath(sourcePath);
-  const destination = resolveUserPath(destinationPath);
+function resolveMoveTarget(sourcePath: string, destinationPath: string, workdir: string) {
+  const source = resolveUserPath(sourcePath, workdir);
+  const destination = resolveUserPath(destinationPath, workdir);
   const destinationStat = tryStat(destination);
   return destinationStat?.isDirectory()
     ? resolve(destination, basename(source))
     : destination;
 }
 
-function resolveCopyTarget(sourcePath: string, destinationPath: string) {
-  return resolveMoveTarget(sourcePath, destinationPath);
+function resolveCopyTarget(sourcePath: string, destinationPath: string, workdir: string) {
+  return resolveMoveTarget(sourcePath, destinationPath, workdir);
 }
 
 export const readFileTool = tool(
-  async ({ path }: { path: string }) => {
+  async ({ path }: { path: string }, runtime: LocalToolRuntime) => {
     try {
-      const filePath = resolveUserPath(path);
+      const filePath = resolveToolPath(path, runtime);
       const stat = statSync(filePath);
       if (!stat.isFile()) {
         return `Error: read_file expects a file path, got ${stat.isDirectory() ? 'directory' : 'non-file'}: ${filePath}`;
@@ -323,9 +331,14 @@ export const viewFileChunkTool = tool(
     path: string;
     startLine?: number;
     endLine?: number;
-  }) => {
+  }, runtime: LocalToolRuntime) => {
     try {
-      return readTextFileChunk({ path, startLine, endLine });
+      return readTextFileChunk({
+        path,
+        startLine,
+        endLine,
+        workdir: resolveToolExecutionWorkdir(runtime),
+      });
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : err}`;
     }
@@ -342,9 +355,9 @@ export const viewFileChunkTool = tool(
 );
 
 export const statPathTool = tool(
-  async ({ path }: { path: string }) => {
+  async ({ path }: { path: string }, runtime: LocalToolRuntime) => {
     try {
-      const resolvedPath = resolveUserPath(path);
+      const resolvedPath = resolveToolPath(path, runtime);
       return formatStat(resolvedPath);
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : err}`;
@@ -365,9 +378,9 @@ export const writeFileTool = tool(
     content: string;
     append?: boolean;
     createDirs?: boolean;
-  }) => {
+  }, runtime: LocalToolRuntime) => {
     try {
-      const filePath = resolveUserPath(path);
+      const filePath = resolveToolPath(path, runtime);
       if (createDirs ?? true) {
         mkdirSync(dirname(filePath), { recursive: true });
       }
@@ -483,13 +496,13 @@ function patchTargetError(code: string, message: string, path: string) {
 }
 
 export const applyPatchTool = tool(
-  async ({ patch }: { patch: string }) => {
+  async ({ patch }: { patch: string }, runtime: LocalToolRuntime) => {
     let phase: 'parse' | 'match' | 'write' = 'parse';
     try {
       const update = parsePatch(patch);
       phase = 'match';
 
-      const absolutePath = resolveUserPath(update.path);
+      const absolutePath = resolveToolPath(update.path, runtime);
       const stat = tryStat(absolutePath);
       if (!stat?.isFile()) {
         throw patchTargetError(
@@ -581,9 +594,9 @@ export const validateStructuredFileTool = tool(
     path: string;
     format?: 'auto' | 'json';
     schema?: 'none' | 'capability_manifest';
-  }) => {
+  }, runtime: LocalToolRuntime) => {
     try {
-      const filePath = resolveUserPath(path);
+      const filePath = resolveToolPath(path, runtime);
       const content = readFileSync(filePath, 'utf-8');
       const detectedFormat = format && format !== 'auto'
         ? format
@@ -641,11 +654,12 @@ export const movePathTool = tool(
     destination: string;
     overwrite?: boolean;
     createDirs?: boolean;
-  }) => {
+  }, runtime: LocalToolRuntime) => {
     try {
-      const sourcePath = resolveUserPath(source);
+      const workdir = resolveToolExecutionWorkdir(runtime);
+      const sourcePath = resolveUserPath(source, workdir);
       const sourceStat = statSync(sourcePath);
-      const targetPath = resolveMoveTarget(source, destination);
+      const targetPath = resolveMoveTarget(source, destination, workdir);
 
       if (createDirs ?? true) {
         mkdirSync(dirname(targetPath), { recursive: true });
@@ -706,11 +720,12 @@ export const copyPathTool = tool(
     destination: string;
     overwrite?: boolean;
     createDirs?: boolean;
-  }) => {
+  }, runtime: LocalToolRuntime) => {
     try {
-      const sourcePath = resolveUserPath(source);
+      const workdir = resolveToolExecutionWorkdir(runtime);
+      const sourcePath = resolveUserPath(source, workdir);
       const sourceStat = statSync(sourcePath);
-      const targetPath = resolveCopyTarget(source, destination);
+      const targetPath = resolveCopyTarget(source, destination, workdir);
 
       if (createDirs ?? true) {
         mkdirSync(dirname(targetPath), { recursive: true });
@@ -750,9 +765,12 @@ export const copyPathTool = tool(
 );
 
 export const mkdirPathTool = tool(
-  async ({ path, recursive }: { path: string; recursive?: boolean }) => {
+  async (
+    { path, recursive }: { path: string; recursive?: boolean },
+    runtime: LocalToolRuntime,
+  ) => {
     try {
-      const targetPath = resolveUserPath(path);
+      const targetPath = resolveToolPath(path, runtime);
       mkdirSync(targetPath, { recursive: recursive ?? true });
       return JSON.stringify({
         ok: true,
@@ -773,9 +791,9 @@ export const mkdirPathTool = tool(
 );
 
 export const listDirTool = tool(
-  async ({ path }: { path: string }) => {
+  async ({ path }: { path: string }, runtime: LocalToolRuntime) => {
     try {
-      const dirPath = resolveUserPath(path);
+      const dirPath = resolveToolPath(path, runtime);
       const entries = readdirSync(dirPath);
       const lines = entries.map((name) => {
         try {

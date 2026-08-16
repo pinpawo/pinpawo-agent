@@ -31,7 +31,8 @@ host start
 
 capability subagent start
   -> resolve(root, generic execution scope)
-  -> bindTools(binding) [same static names only]
+  -> expose execution scope through ToolRuntime.context
+  -> bindTools(binding) for Toolkit-owned live resources [same static names only]
   -> execute with bound tools
   -> release(binding, reverse order; also on error/cancellation)
 
@@ -55,10 +56,17 @@ their normal release path before it stops shared roots.
 
 `AgentToolkit` 中的 tools、`operation` metadata、review policy、authorization、
 instructions、availability 和 Capability 的 `uses` 均是静态契约。`bindTools` 仅为
-同名、同数量的 Tool 提供 execution implementation；管理器保留原始 Tool 对象的
+同名、同数量的 Tool 注入 Toolkit 自己持有的动态资源或 ownership，例如 Browser
+session、shell process registry。管理器保留原始 Tool 对象的
 schema、description、response format 等公开契约，只把底层 `_call` 分派给 bound
 implementation。管理器拒绝更名、增删或非 StructuredTool 的返回值。因此 planner、
 checkpoint、registry 与 review 决策永远引用静态契约，不携带 runtime binding。
+
+`threadId`、`runId`、`delegationId`、`workdir` 等通用 invocation facts 由 Agent 统一
+放入 `ToolRuntime.context.executionScope`，普通 Tool 在真实调用时直接读取，不需要
+为每个 Toolkit 再造 binding。`workdir` 是相对路径和缺省 cwd 的解析基准，不是文件
+访问边界；Tool 仍尊重模型显式给出的绝对路径或 cwd。是否需要审核属于 review /
+authorization 层，不应由 `bindTools` 静默改写输入或由 executor 特判阻止。
 
 Browser 的 binding 仅把同一个 `BrowserSession` 封装为带 execution owner 的闭包。
 release 会在 Browser 自己的串行队列中撤销 active owner；保留的页面只能由相同

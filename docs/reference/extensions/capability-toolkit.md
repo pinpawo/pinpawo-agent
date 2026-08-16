@@ -202,10 +202,16 @@ subagent 结束（成功、失败或取消）后逆序 release。host 关闭时�
 binding，再逆序 stop root。并发 subagent 可以同时 resolve，但同一个 root 只会
 启动一次。
 
-`bindTools` 只能提供当前执行的 Tool implementation；框架会验证工具数量和名称与
-静态 inventory 相同，并继续使用静态 Tool 的 schema、description、response
-format，以及静态 `operation`、`review`、权限与 instructions。runtime 数据不会
+`bindTools` 只用于把 Toolkit 自己持有的 live resource 或 ownership 注入当前执行的
+Tool implementation，例如 browser session 或 process registry；框架会验证工具数量
+和名称与静态 inventory 相同，并继续使用静态 Tool 的 schema、description、response
+format，以及静态 `operation`、`review`、权限与 instructions。runtime binding 不会
 进入 registry、planner workspace、prompt 或 checkpoint。
+
+通用 invocation facts 不经过 `bindTools`。Agent 会把 `threadId`、`runId`、
+`delegationId`、`workdir` 放入 `ToolRuntime.context.executionScope`，Tool 在调用时直接
+读取。`workdir` 只为相对路径和缺省 cwd 提供基准；显式绝对路径或 cwd 仍由 Tool
+输入决定，越出 workdir 的风险由 review / authorization 判断。
 
 `ToolkitRuntimeManager` 是 host-owned：长期 local-agent 在进程启动/关闭时调用
 它；独立 `createPetAgentRuntime()` 创建的私有 manager 可通过其 `shutdown()`

@@ -118,6 +118,7 @@ test('createSubagent exposes invocation context to tool runtime', async () => {
         threadId: 'thread-1',
         runId: 'run-1',
         delegationId: 'delegation-1',
+        workdir: '/tmp/project',
       },
     },
   });
@@ -126,6 +127,7 @@ test('createSubagent exposes invocation context to tool runtime', async () => {
     threadId: 'thread-1',
     runId: 'run-1',
     delegationId: 'delegation-1',
+    workdir: '/tmp/project',
   });
 });
 

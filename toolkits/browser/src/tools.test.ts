@@ -57,6 +57,7 @@ test('bound browser screenshot writes its own tool result and image message', as
         threadId: 'thread-1',
         runId: 'run-1',
         delegationId: 'delegation-1',
+        workdir,
       },
     },
   });

@@ -131,7 +131,7 @@ test('completed subagent messages render rich Markdown without an actor label', 
     }]));
 
     const text = setup.cellOutput.takeText();
-    assert.match(text, /^\| Result/m);
+    assert.match(text, /^  \| Result/m);
     assert.match(text, /Use bold and docs \(https:\/\/example\.com\)\./);
     assert.match(text, /Key\s+Value/);
     assert.match(text, /mode\s+rich/);
@@ -224,9 +224,11 @@ test('message timestamps align without actor labels', async () => {
     const headers = entries.map((entry) => (
       formatTimelineEntry(entry).split('\n')[0]
     ));
-    const rows = text.split('\n').filter((row) => headers.includes(row));
+    const rows = text.split('\n').filter((row) => (
+      headers.includes(row.trimStart())
+    ));
 
-    assert.deepEqual(rows, headers);
+    assert.deepEqual(rows.map((row) => row.trimStart()), headers);
     assert.doesNotMatch(text, /\b(?:PinPawo|subagent)\b|你/);
   } finally {
     timeline.destroy();
@@ -422,12 +424,16 @@ test('a running operation gets a live surface without committing later rows out 
       'timeline-live-operation-1',
     );
     assert.ok(liveRoot instanceof BoxRenderable);
-    const [operationLine, subagentMarkdown, spacer] = liveRoot.getChildren();
-    assert.ok(operationLine instanceof TextRenderable);
-    assert.equal(operationLine.plainText, formatTimelineEntry(operation));
-    assert.ok(subagentMarkdown instanceof BoxRenderable);
+    const [operationSurface, subagentSurface, spacer] = liveRoot.getChildren();
+    assert.ok(operationSurface instanceof BoxRenderable);
+    assert.ok(subagentSurface instanceof BoxRenderable);
     assert.ok(spacer instanceof TextRenderable);
     assert.equal(spacer.plainText, ' ');
+    const [operationLine] = operationSurface.getChildren();
+    assert.ok(operationLine instanceof TextRenderable);
+    assert.equal(operationLine.plainText, '◌ Read file（开始）');
+    const [subagentMarkdown] = subagentSurface.getChildren();
+    assert.ok(subagentMarkdown instanceof BoxRenderable);
 
     const completedOperation = {
       ...operation,
@@ -439,7 +445,7 @@ test('a running operation gets a live surface without committing later rows out 
       [
         formatTimelineEntry(completedOperation),
         '',
-        '| found evidence',
+        '  | found evidence',
         '',
       ].join('\n'),
     );

@@ -21,7 +21,6 @@ import {
   Annotation,
   END,
   MemorySaver,
-  messagesStateReducer,
   START,
   StateGraph,
 } from '@langchain/langgraph';
@@ -488,83 +487,6 @@ test('Planner lane persists one trace in root messages and deduplicates boundary
   assert.ok(traceBUpdates.some((message) =>
     isCapabilityPlannerMessage(message, 'trace-b')));
 
-});
-
-test('Planner compacts only its root-owned lane and preserves current context', async (t) => {
-  const workspace = await createWorkspace(t, {
-    general: capabilityDocument({
-      name: 'general',
-      description: 'Handle ordinary workspace tasks.',
-      instructions: 'Complete the requested work.',
-    }),
-  });
-  const model = new ScriptedPlannerModel([{
-    structuredOutput: {
-      kind: 'plan',
-      args: { tasks: [{ capability: 'general', task: 'Complete the long task.' }] },
-    },
-  }, ...Array.from({ length: 4 }, (_, index) => ({
-    toolCalls: [{ id: `done-${String(index)}`, name: 'complete_goal', args: {} }],
-  }))]);
-  const planner = createCapabilityPlannerAgent({
-    model,
-    laneContextMaxChars: 500,
-    laneContextKeepInputs: 2,
-  });
-  const userRequest = `PRIVATE_COMPACTION_GOAL ${'context '.repeat(80)}`;
-  let rootMessages: BaseMessage[] = [new HumanMessage(userRequest)];
-  const entryResult = await planner.invoke(
-    plannerInput(workspace, {
-      inputId: 'trace_started:trace-compaction',
-      traceId: 'trace-compaction',
-      runId: 'run-0',
-      userRequest,
-      messages: rootMessages,
-    }),
-  );
-  rootMessages = messagesStateReducer(rootMessages, [...(entryResult.messageUpdates ?? [])]);
-  for (let index = 1; index <= 4; index += 1) {
-    const executionResult = new AIMessage(
-      `Execution result ${String(index)} ${'evidence '.repeat(40)}`,
-    );
-    rootMessages = messagesStateReducer(rootMessages, [executionResult]);
-    const result = await planner.invoke(
-      plannerInput(workspace, {
-        mode: 'boundary',
-        inputId: `announce:delegation:${String(index)}`,
-        traceId: 'trace-compaction',
-        runId: `run-${String(index)}`,
-        userRequest,
-        activeDelegation: {
-          delegationId: 'delegation',
-          transcriptRunId: 'transcript-compaction',
-          capability: 'general',
-          task: 'Complete the long task.',
-        },
-        latestAnnounce: {
-          messageId: `announce-${String(index)}`,
-          completionReason: 'natural',
-        },
-        messages: rootMessages,
-      }),
-    );
-    rootMessages = messagesStateReducer(rootMessages, [...(result.messageUpdates ?? [])]);
-  }
-
-  assert.ok(rootMessages.some((message) => {
-    const text = readMessageText(message);
-    return isCapabilityPlannerMessage(message, 'trace-compaction')
-      && text.includes('<planner_lane_compaction>')
-      && text.includes('PRIVATE_COMPACTION_GOAL');
-  }));
-  assert.ok(model.invocations.at(-1)?.some((message) =>
-    readMessageText(message).includes('<planner_lane_compaction>')));
-  const latestInvocationText = model.invocations.at(-1)
-    ?.map(readMessageText)
-    .join('\n') ?? '';
-  assert.match(latestInvocationText, /Execution result 4/);
-  assert.ok(rootMessages.some((message) =>
-    isCapabilityPlannerMessage(message, 'trace-compaction')));
 });
 
 test('Planner supports additional invocation-scoped tools without child persistence', async (t) => {

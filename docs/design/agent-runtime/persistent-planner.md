@@ -139,7 +139,6 @@ threadId
 - Planner human/AI/tool messages；
 - `capability_search` 结果和 Capability 文档观察；
 - 规划过程、被拒绝的候选计划和内部推理；
-- Planner 自己的 context compaction summary；
 - terminal ToolMessage 及其 `plannerInputId`；
 - registry digest metadata。
 
@@ -392,17 +391,6 @@ Planner lane updates 与对应的 root transition 由同一个 node `Command` �
 Planner commit 已落盘而 root transition 尚未落盘的双 checkpoint 窗口。graph 重试相同
 `inputId` 时，已落盘的 terminal ToolMessage 提供幂等 replay。
 
-### Context compaction
-
-Planner lane 使用独立的字符预算和 deterministic compaction。Planner summary：
-
-- 只写回 root messages 的 Planner lane；
-- 不进入 main conversation 或 Capability lane；
-- 不由 main-conversation compaction 处理；
-- 必须保留当前目标、accepted/rejected boundary、committed tasks、关键 Capability
-  observations 和尚未关闭的依赖；
-- 必须可从 root checkpoint 恢复后继续规划。
-
 ### Registry 变化
 
 持久上下文可能包含过期 Capability 文档观察。Planner lane messages 必须记录
@@ -512,7 +500,7 @@ packages/pet-agent/src/agent/orchestrator/capabilityPlanner/
 - `runner.ts`：Planner invocation seam 和 root message updates；
 - `messageContext.ts`：Planner lane 标记、Entry/Boundary 消息选择；
 - `agent.ts`：Capability 探索工具和 terminal commit tools；
-- `agent.ts` 同时负责 lane compaction、commit replay 和 message reconcile；
+- `agent.ts` 同时负责 commit replay 和 message reconcile；
 - root node 只包装 boundary input dispatch，并把 `PlannerCommit` 交给确定性 transition
   builder。
 
@@ -556,7 +544,6 @@ report_unavailable()
 - 使用 `orchestrator` lane 与稳定 source metadata 标记 Planner messages；
 - Planner graph/agent 改为构建一次；
 - 实现 input ID 去重、terminal ToolMessage replay 和 registry digest invalidation；
-- 实现 Planner lane compaction；
 - 暂时通过 adapter 输出当前 `CapabilityPlannerResult`，生产 graph 仍保留 Outcome；
 - 验证同一 trace 跨 run 恢复及新 trace 隔离。
 
@@ -605,7 +592,6 @@ report_unavailable()
 - Planner AI/tool messages 进入 `OrchestratorState.messages` 的 `orchestrator` lane；
 - main conversation、Answer 和 Capability selector 不读取 Planner lane；
 - `capability_search` 文本不进入 handoff、Answer input 或 delegation summary；
-- Planner compaction summary 不进入 main-conversation compaction；
 - 新 trace 无法读取旧 trace Planner lane；
 - 相同 `traceId` 在不同 conversation thread 之间仍然隔离。
 
@@ -632,8 +618,7 @@ report_unavailable()
 6. 当前 task 局部完成但必须等待用户输入 -> `user_input_required`；
 7. 用户补充后以相同 trace、新 run 恢复；
 8. 没有可执行 Capability -> `unavailable`；
-9. Planner 内部发生 compaction 后继续正确规划；
-10. 多 task trace 中 Planner 保留早期 Capability observation，但不向 main conversation 泄漏。
+9. 多 task trace 中 Planner 保留早期 Capability observation，但不向 main conversation 泄漏。
 
 ### Regression 与模型 eval
 
@@ -651,7 +636,7 @@ report_unavailable()
 - `traceId`、`runId`、`delegationId`；
 - Planner action；
 - task count 和 capability names；
-- Planner lane message count 和 compaction count；
+- Planner lane message count；
 - input dedupe hit；
 - registry digest；
 - token、latency、tool call count 和错误码。
@@ -660,7 +645,6 @@ report_unavailable()
 
 - Planner prompt/messages；
 - Capability 文档正文；
-- Planner compaction summary；
 - 被拒绝计划的自由文本；
 - 内部 tool result 内容。
 
@@ -682,8 +666,7 @@ report_unavailable()
 
 ### Planner lane 长期上下文变陈旧
 
-缓解：registry digest invalidation、Planner lane compaction、每个 execution result 作为新
-事实覆盖旧计划假设。
+缓解：registry digest invalidation、每个 execution result 作为新事实覆盖旧计划假设。
 
 ### Answer 缺少 Planner 的自由文本问题描述
 
@@ -693,8 +676,8 @@ report_unavailable()
 
 ### Checkpoint 体积持续增长
 
-缓解：独立字符预算、lane compaction、新 trace 清理旧 Planner lane、artifact/document
-观察摘要化；不把完整 workspace 文件复制进 checkpoint。
+Planner lane 不做独立压缩；它与 root messages 一起保留。新 trace 清理旧 Planner lane，
+且不把完整 workspace 文件复制进 checkpoint。
 
 ## 验收标准
 

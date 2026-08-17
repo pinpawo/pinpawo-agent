@@ -51,11 +51,6 @@ import {
 } from '../messageLanes';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
-const DEFAULT_LANE_CONTEXT_MAX_CHARS = 96_000;
-const DEFAULT_LANE_CONTEXT_KEEP_INPUTS = 6;
-const LANE_COMPACTION_ITEM_MAX_CHARS = 2_000;
-const LANE_COMPACTION_SUMMARY_MAX_CHARS = 24_000;
-const LANE_COMPACTION_MESSAGE_NAME = 'planner_lane_compaction';
 const MAX_PLAN_TASKS = 24;
 const MAX_TASK_TEXT_CHARS = 2_000;
 const CONTINUE_CURRENT_TOOL_NAME = 'continue_current';
@@ -211,95 +206,6 @@ function assertPositiveInteger(value: number, label: string) {
   }
 }
 
-function readPlannerMessageText(message: BaseMessage) {
-  if (typeof message.content === 'string') return message.content;
-  try {
-    return JSON.stringify(message.content);
-  } catch {
-    return String(message.content);
-  }
-}
-
-function clipPlannerText(value: string, maxChars: number) {
-  if (value.length <= maxChars) return value;
-  return `${value.slice(0, maxChars)}\n[Planner lane context truncated]`;
-}
-
-function buildPlannerCompactionSummary(messages: readonly BaseMessage[]) {
-  const facts: string[] = [];
-  for (const message of messages) {
-    const text = readPlannerMessageText(message).trim();
-    if (!text) continue;
-    if (message._getType() === 'system'
-      && message.name === LANE_COMPACTION_MESSAGE_NAME) {
-      facts.push(text);
-      continue;
-    }
-    if (message._getType() === 'human'
-      && message.id?.startsWith('planner:')) {
-      facts.push(`Planner input:\n${clipPlannerText(text, LANE_COMPACTION_ITEM_MAX_CHARS)}`);
-      continue;
-    }
-    if (ToolMessage.isInstance(message)) {
-      const label = [
-        CONTINUE_CURRENT_TOOL_NAME,
-        SUBMIT_PLAN_TOOL_NAME,
-        ADVANCE_PLAN_TOOL_NAME,
-        ANSWER_DIRECTLY_TOOL_NAME,
-        COMPLETE_GOAL_TOOL_NAME,
-        REQUEST_USER_INPUT_TOOL_NAME,
-        REPORT_UNAVAILABLE_TOOL_NAME,
-      ].includes(message.name ?? '')
-        ? 'Planner commit'
-        : `Planner tool observation (${message.name ?? 'unknown'})`;
-      facts.push(`${label}:\n${clipPlannerText(text, LANE_COMPACTION_ITEM_MAX_CHARS)}`);
-    }
-  }
-  return clipPlannerText([
-    '<planner_lane_compaction>',
-    'Earlier Planner-lane history retained for later planning.',
-    ...facts,
-    '</planner_lane_compaction>',
-  ].join('\n\n'), LANE_COMPACTION_SUMMARY_MAX_CHARS);
-}
-
-function compactPlannerLaneMessages(params: {
-  messages: readonly BaseMessage[];
-  maxChars: number;
-  keepInputs: number;
-}) {
-  const totalChars = params.messages.reduce(
-    (sum, message) => sum + readPlannerMessageText(message).length,
-    0,
-  );
-  if (totalChars <= params.maxChars) {
-    return { messages: [...params.messages], updates: [] as BaseMessage[] };
-  }
-  const inputIndexes = params.messages.flatMap((message, index) =>
-    message._getType() === 'human' && message.id?.startsWith('planner:')
-      ? [index]
-      : [],
-  );
-  if (inputIndexes.length <= params.keepInputs) {
-    return { messages: [...params.messages], updates: [] as BaseMessage[] };
-  }
-  const keepFrom = inputIndexes.at(-params.keepInputs);
-  if (keepFrom === undefined || keepFrom <= 0) {
-    return { messages: [...params.messages], updates: [] as BaseMessage[] };
-  }
-  const summary = new SystemMessage(
-    buildPlannerCompactionSummary(params.messages.slice(0, keepFrom)),
-  );
-  summary.name = LANE_COMPACTION_MESSAGE_NAME;
-  const removed = params.messages.slice(0, keepFrom).flatMap((message) =>
-    message.id ? [new RemoveMessage({ id: message.id }) as BaseMessage] : [],
-  );
-  return {
-    messages: [summary, ...params.messages.slice(keepFrom)],
-    updates: [...removed, summary],
-  };
-}
-
 function stampPlannerMessage(params: {
   message: BaseMessage;
   input: CapabilityPlannerInput;
@@ -337,7 +243,6 @@ function readCachedPlannerCommit(input: CapabilityPlannerInput) {
 function buildPlannerMessageUpdates(params: {
   input: CapabilityPlannerInput;
   resultMessages: readonly BaseMessage[];
-  compactionUpdates: readonly BaseMessage[];
 }) {
   const rootRefs = new Set(params.input.messages);
   const rootIds = new Set(params.input.messages.flatMap((message) =>
@@ -355,10 +260,8 @@ function buildPlannerMessageUpdates(params: {
     }
     return message.id ? [new RemoveMessage({ id: message.id }) as BaseMessage] : [];
   });
-  const compactionRemovals = params.compactionUpdates.filter(RemoveMessage.isInstance);
   return [
     ...stalePlannerRemovals,
-    ...compactionRemovals,
     ...produced.map((message) => stampPlannerMessage({ message, input: params.input })),
   ];
 }
@@ -491,10 +394,6 @@ export function createCapabilityPlannerAgent(params: {
   timeoutMs?: number;
   registryBackend?: CapabilityRegistryBackend;
   maxDocumentReadBytes?: number;
-  /** Planner-lane transcript budget before deterministic compaction. */
-  laneContextMaxChars?: number;
-  /** Recent Planner inputs retained verbatim after lane compaction. */
-  laneContextKeepInputs?: number;
   /** Additional invocation-scoped Planner tools. */
   additionalTools?: StructuredTool[];
 }): CapabilityPlannerRunner {
@@ -506,13 +405,6 @@ export function createCapabilityPlannerAgent(params: {
       'Capability Planner maxDocumentReadBytes',
     );
   }
-  const laneContextMaxChars = params.laneContextMaxChars
-    ?? DEFAULT_LANE_CONTEXT_MAX_CHARS;
-  const laneContextKeepInputs = params.laneContextKeepInputs
-    ?? DEFAULT_LANE_CONTEXT_KEEP_INPUTS;
-  assertPositiveInteger(laneContextMaxChars, 'Capability Planner laneContextMaxChars');
-  assertPositiveInteger(laneContextKeepInputs, 'Capability Planner laneContextKeepInputs');
-
   const explorers = new Map<string, CapabilityPlannerFileExplorer>();
   const explorerForInput = (input: CapabilityPlannerInput) => {
     const existing = explorers.get(input.inputId);
@@ -590,25 +482,9 @@ export function createCapabilityPlannerAgent(params: {
               traceId: input.traceId,
               registryDigest: input.workspace.registryDigest,
             });
-        const plannerLane = selectedMessages.filter((message) =>
-          isCapabilityPlannerMessage(
-            message,
-            input.traceId,
-            input.workspace.registryDigest,
-          ),
-        );
-        const compacted = compactPlannerLaneMessages({
-          messages: plannerLane,
-          maxChars: laneContextMaxChars,
-          keepInputs: laneContextKeepInputs,
-        });
-        const contextMessages = selectedMessages.filter((message) =>
-          !isCapabilityPlannerMessage(message, input.traceId),
-        );
         const result = await agent.invoke({
           messages: [
-            ...compacted.messages,
-            ...contextMessages,
+            ...selectedMessages,
             new HumanMessage({
               id: `planner:${input.inputId}`,
               content: buildCapabilityPlannerAgentInput(
@@ -631,7 +507,6 @@ export function createCapabilityPlannerAgent(params: {
             messageUpdates: buildPlannerMessageUpdates({
               input,
               resultMessages: result.messages,
-              compactionUpdates: compacted.updates,
             }),
           };
         }

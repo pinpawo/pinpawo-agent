@@ -292,6 +292,31 @@ test('ToolkitRuntimeManager preserves the static tool contract while binding exe
   assert.equal(executableTool.description, staticTool.description);
   assert.equal(executableTool.responseFormat, staticTool.responseFormat);
   assert.equal(await executableTool.invoke({}), 'bound:delegation-a');
+  assert.equal(runtimeExecution.runtimes.runtime_toolkit, undefined);
+
+  await runtimeExecution.release();
+  await manager.stop();
+});
+
+test('ToolkitRuntimeManager exposes a root Runtime port without rebuilding tools', async () => {
+  const root = Object.freeze({ invoke: () => 'runtime' });
+  const staticTool = createTool('static_tool', 'static');
+  const toolkit: AgentToolkit = {
+    name: 'static_runtime_toolkit',
+    description: 'static runtime toolkit',
+    tools: [{ tool: staticTool }],
+    runtime: {
+      start: () => root,
+    },
+  };
+  const manager = new ToolkitRuntimeManager();
+  const runtimeExecution = await manager.resolve({
+    toolkits: [toolkit],
+    execution: execution('delegation-a'),
+  });
+
+  assert.equal(runtimeExecution.toolkits[0]?.tools[0]?.tool, staticTool);
+  assert.equal(runtimeExecution.runtimes.static_runtime_toolkit, root);
 
   await runtimeExecution.release();
   await manager.stop();

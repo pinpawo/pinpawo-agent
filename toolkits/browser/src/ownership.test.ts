@@ -15,33 +15,6 @@ test('same thread can reuse browser ownership across executions', async () => {
   assert.equal(await ownership.runOwned(owner(), async () => 'snapshot'), 'snapshot');
 });
 
-test('release lets a later execution in the same thread resume the retained page', async () => {
-  const ownership = new BrowserContextOwnership();
-  const firstExecution = owner();
-  const laterExecution = owner();
-  const otherThread = owner('thread-2');
-
-  await ownership.runOpen(firstExecution, async () => 'opened');
-  await ownership.release(firstExecution);
-  await assert.rejects(
-    ownership.runOwned(firstExecution, async () => 'snapshot'),
-    (error: unknown) => error instanceof Error
-      && 'code' in error
-      && error.code === 'browser_not_open',
-  );
-
-  await ownership.acquire(otherThread);
-  await assert.rejects(
-    ownership.runOwned(otherThread, async () => 'foreign snapshot'),
-    (error: unknown) => error instanceof Error
-      && 'code' in error
-      && error.code === 'browser_not_open',
-  );
-
-  await ownership.acquire(laterExecution);
-  assert.equal(await ownership.runOwned(laterExecution, async () => 'resumed'), 'resumed');
-});
-
 test('another thread must explicitly open before using the browser', async () => {
   const ownership = new BrowserContextOwnership();
   const first = owner('thread-1');

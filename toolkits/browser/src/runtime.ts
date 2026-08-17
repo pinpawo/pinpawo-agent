@@ -5,10 +5,19 @@ import {
 import { randomUUID } from 'node:crypto';
 import type { BrowserExtensionCapability } from './drivers/chromeExtension/protocol';
 import { ChromeExtensionBrowserSession } from './drivers/chromeExtension/session';
-import { BrowserSession } from './session';
-import type { BrowserExecutionOwner } from './ownership';
+import {
+  BrowserSession,
+  type BrowserElementTarget,
+  type BrowserExtractOptions,
+  type BrowserOpenOptions,
+  type BrowserScrollOptions,
+  type BrowserWaitState,
+} from './session';
 import type { BrowserRuntimeEvent } from './lifecycle/events';
-import type { ToolkitRuntimeExecutionScope } from '@pinpawo/pet-agent';
+import type {
+  BrowserRuntimeCallContext,
+  BrowserRuntimePort,
+} from './runtimePort';
 import {
   configuredBrowserBackend,
   resolveBrowserToolkitOptions,
@@ -52,12 +61,6 @@ export type BrowserReadinessSnapshot = Readonly<{
   phase: string | null;
   ready: boolean;
   error?: { code: string; message: string; retryable: boolean };
-}>;
-
-export type BrowserRuntimeBinding = Readonly<{
-  session: BrowserSession;
-  owner: BrowserExecutionOwner;
-  workdir: () => string;
 }>;
 
 export type BrowserRuntimeDependencies = {
@@ -185,7 +188,7 @@ export function projectBrowserRuntimeSnapshot(
   });
 }
 
-export class BrowserRuntime {
+export class BrowserRuntime implements BrowserRuntimePort {
   private started = false;
   /** One browser workspace per conversation thread. */
   private readonly sessionsByThread = new Map<string, {
@@ -261,6 +264,103 @@ export class BrowserRuntime {
     return session;
   }
 
+  private sessionForCall(context: BrowserRuntimeCallContext) {
+    if (!context.threadId.trim()) {
+      throw new Error('Browser runtime requires a threadId.');
+    }
+    if (!context.workdir.trim()) {
+      throw new Error('Browser runtime requires a workdir.');
+    }
+    const session = this.sessionForThread(context.threadId, context.workdir);
+    return {
+      session,
+      owner: { threadId: context.threadId },
+    };
+  }
+
+  async open(
+    context: BrowserRuntimeCallContext,
+    url: string,
+    options?: BrowserOpenOptions,
+  ) {
+    const { session, owner } = this.sessionForCall(context);
+    return session.open(url, options, owner, context.signal);
+  }
+
+  async openWithProfile(
+    context: BrowserRuntimeCallContext,
+    url: string,
+    userDataDir: string,
+    options?: Omit<BrowserOpenOptions, 'session' | 'userDataDir'>,
+  ) {
+    const { session, owner } = this.sessionForCall(context);
+    return session.openWithProfile(url, userDataDir, options, owner, context.signal);
+  }
+
+  async snapshot(context: BrowserRuntimeCallContext) {
+    const { session, owner } = this.sessionForCall(context);
+    return session.snapshot(owner, context.signal);
+  }
+
+  async click(
+    context: BrowserRuntimeCallContext,
+    target: string | BrowserElementTarget,
+  ) {
+    const { session, owner } = this.sessionForCall(context);
+    return session.click(target, owner, context.signal);
+  }
+
+  async type(
+    context: BrowserRuntimeCallContext,
+    target: string | BrowserElementTarget,
+    text: string,
+    submit?: boolean,
+  ) {
+    const { session, owner } = this.sessionForCall(context);
+    return session.type(target, text, submit, owner, context.signal);
+  }
+
+  async scroll(
+    context: BrowserRuntimeCallContext,
+    options?: BrowserScrollOptions,
+  ) {
+    const { session, owner } = this.sessionForCall(context);
+    return session.scroll(options, owner, context.signal);
+  }
+
+  async wait(
+    context: BrowserRuntimeCallContext,
+    target?: string | BrowserElementTarget,
+    timeoutMs?: number,
+    state?: BrowserWaitState,
+  ) {
+    const { session, owner } = this.sessionForCall(context);
+    return session.wait(target, timeoutMs, state, owner, context.signal);
+  }
+
+  async extract(
+    context: BrowserRuntimeCallContext,
+    options?: BrowserExtractOptions,
+  ) {
+    const { session, owner } = this.sessionForCall(context);
+    return session.extract(options, owner, context.signal);
+  }
+
+  async screenshot(context: BrowserRuntimeCallContext) {
+    const { session, owner } = this.sessionForCall(context);
+    return session.screenshot(owner, context.signal);
+  }
+
+  async close(context: BrowserRuntimeCallContext) {
+    const { session, owner } = this.sessionForCall(context);
+    return session.close(owner, context.signal);
+  }
+
+  async listSessions(context: BrowserRuntimeCallContext) {
+    const { session } = this.sessionForCall(context);
+    return session.listSessions();
+  }
+
   async start(): Promise<void> {
     if (!shouldStartBrowserExtensionBridge(configuredBrowserBackend(this.options))) return;
     if (this.started) return;
@@ -283,26 +383,6 @@ export class BrowserRuntime {
         }
       }
     }
-  }
-
-  async resolve(execution: ToolkitRuntimeExecutionScope): Promise<BrowserRuntimeBinding> {
-    if (!execution.threadId) {
-      throw new Error('Browser runtime requires a threadId.');
-    }
-    if (!execution.workdir) {
-      throw new Error('Browser Toolkit runtime requires an execution workdir.');
-    }
-    const threadId = execution.threadId;
-    const workdir = execution.workdir;
-    const binding = Object.freeze({
-      session: this.sessionForThread(threadId, workdir),
-      owner: {
-        threadId,
-      },
-      workdir: () => workdir,
-    });
-    await binding.session.acquire(binding.owner);
-    return binding;
   }
 
   getSnapshot(): BrowserRuntimeSnapshot {

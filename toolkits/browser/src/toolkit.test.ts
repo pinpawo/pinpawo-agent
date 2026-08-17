@@ -14,6 +14,33 @@ test('only browser_screenshot requires image input', () => {
     .map((definition) => definition.tool.name);
 
   assert.deepEqual(requiringImage, ['browser_screenshot']);
+  assert.equal(toolkit.runtime?.resolve, undefined);
+  assert.equal(toolkit.runtime?.bindTools, undefined);
+  assert.equal(toolkit.runtime?.release, undefined);
+});
+
+test('Browser Runtime is exposed as a port without replacing static tools', async () => {
+  const integration = createBrowserIntegration({ backend: () => 'playwright' });
+  const manager = new ToolkitRuntimeManager();
+  const staticTools = integration.toolkit.tools.map(({ tool }) => tool);
+  const execution = await manager.resolve({
+    toolkits: [integration.toolkit],
+    execution: {
+      threadId: 'thread-1',
+      runId: 'run-1',
+      delegationId: 'delegation-1',
+      workdir: process.cwd(),
+    },
+  });
+
+  assert.deepEqual(
+    execution.toolkits[0]?.tools.map(({ tool }) => tool),
+    staticTools,
+  );
+  assert.equal(execution.runtimes.browser, integration.runtime);
+
+  await execution.release();
+  await manager.stop();
 });
 
 test('browser availability caches only the structural backend decision', async () => {

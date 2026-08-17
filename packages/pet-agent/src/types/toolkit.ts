@@ -171,9 +171,11 @@ export type ToolkitRuntimeStopContext = {
  * Optional Toolkit-owned execution lifecycle.
  *
  * The root may be shared across executions. A resolved binding is opaque to
- * the framework and is only handed back to the same Toolkit's bindTools and
- * release hooks. bindTools may replace executable Tool instances, but the
- * framework verifies that the static tool inventory is unchanged.
+ * the framework. A Toolkit with static Tools can consume it under its Toolkit
+ * name in ToolRuntime context; a Toolkit with bindTools receives it through
+ * that hook instead. release receives it in either mode. bindTools may replace
+ * executable Tool instances, but the framework verifies that the static tool
+ * inventory is unchanged.
  */
 export type ToolkitRuntimeDefinition<TRoot = unknown, TBinding = TRoot> = {
   start: (

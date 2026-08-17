@@ -2,10 +2,9 @@ import type { SubagentExecutionScope } from '@pinpawo/pet-agent';
 import { BrowserOperationError } from './errors';
 
 /**
- * Browser state belongs to the conversation, not to one transient capability
- * execution. `runId` and `delegationId` remain useful tracing data in the
- * generic runtime scope, but must not decide whether the next browser tool in
- * the same thread can resume its tab.
+ * Browser state belongs to the conversation thread, not to one transient
+ * capability execution. Every Tool call supplies the thread identity; run and
+ * delegation tracing never decide which retained page the Runtime operates.
  */
 export type BrowserExecutionOwner = Pick<SubagentExecutionScope, 'threadId'>;
 
@@ -43,8 +42,6 @@ function retainsOwnerAfterOpenFailure(error: unknown): boolean {
 
 export class BrowserContextOwnership {
   private owner: BrowserExecutionOwner | null = null;
-  /** Last cleanly released thread, eligible to resume the retained page. */
-  private resumableOwner: BrowserExecutionOwner | null = null;
   private operationTail: Promise<void> = Promise.resolve();
 
   private enqueue<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
@@ -87,29 +84,6 @@ export class BrowserContextOwnership {
     }
   }
 
-  acquire(owner: BrowserExecutionOwner | null): Promise<void> {
-    return this.enqueue(async () => {
-      const nextOwner = this.requireOwner(owner);
-      if (
-        !this.owner
-        && this.resumableOwner
-        && isSameOwner(this.resumableOwner, nextOwner)
-      ) {
-        this.owner = nextOwner;
-      }
-    });
-  }
-
-  release(owner: BrowserExecutionOwner | null): Promise<void> {
-    return this.enqueue(async () => {
-      const releasedOwner = this.requireOwner(owner);
-      if (this.owner && isSameOwner(this.owner, releasedOwner)) {
-        this.owner = null;
-        this.resumableOwner = releasedOwner;
-      }
-    });
-  }
-
   runOpen<T>(
     owner: BrowserExecutionOwner | null,
     operation: () => Promise<T>,
@@ -120,7 +94,6 @@ export class BrowserContextOwnership {
       // browser_open is the explicit handoff boundary. Serializing the claim
       // with page operations prevents a previous thread from acting on
       // the newly opened page after ownership changes.
-      this.resumableOwner = null;
       this.owner = nextOwner;
       try {
         return await operation();
@@ -133,7 +106,6 @@ export class BrowserContextOwnership {
           throw error;
         }
         this.owner = null;
-        this.resumableOwner = null;
         throw error;
       }
     }, signal);
@@ -163,7 +135,6 @@ export class BrowserContextOwnership {
         return await operation();
       } finally {
         this.owner = null;
-        this.resumableOwner = null;
       }
     }, signal);
   }
@@ -174,7 +145,6 @@ export class BrowserContextOwnership {
         return await operation();
       } finally {
         this.owner = null;
-        this.resumableOwner = null;
       }
     });
   }

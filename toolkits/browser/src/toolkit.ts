@@ -13,12 +13,9 @@ import {
   type BrowserEnvironment,
   type BrowserStatus,
 } from './session';
-import { browserTools, createBrowserTools } from './tools';
+import { browserTools } from './tools';
 import { browserOperationMetadata } from './operationMetadata';
-import {
-  BrowserRuntime,
-  type BrowserRuntimeBinding,
-} from './runtime';
+import { BrowserRuntime } from './runtime';
 import { BrowserExtensionBridge } from './drivers/chromeExtension/bridge';
 import {
   resolveBrowserToolkitOptions,
@@ -163,62 +160,6 @@ export function createBrowserIntegration(
         await root.start();
         runtimeRoots.push(root);
         return root;
-      },
-      resolve: (root, context) => (
-        root as BrowserRuntime
-      ).resolve(context.execution),
-      bindTools: (binding) => {
-        const browser = binding as BrowserRuntimeBinding;
-        return createBrowserTools({
-          open: (url, openOptions, signal) => browser.session.open(
-            url,
-            openOptions,
-            browser.owner,
-            signal,
-          ),
-          openWithProfile: (url, userDataDir, openOptions, signal) => (
-            browser.session.openWithProfile(
-              url,
-              userDataDir,
-              openOptions,
-              browser.owner,
-              signal,
-            )
-          ),
-          snapshot: (signal) => browser.session.snapshot(browser.owner, signal),
-          click: (target, signal) => browser.session.click(target, browser.owner, signal),
-          type: (target, text, submit, signal) => browser.session.type(
-            target,
-            text,
-            submit,
-            browser.owner,
-            signal,
-          ),
-          scroll: (scrollOptions, signal) => browser.session.scroll(
-            scrollOptions,
-            browser.owner,
-            signal,
-          ),
-          wait: (target, timeoutMs, state, signal) => browser.session.wait(
-            target,
-            timeoutMs,
-            state,
-            browser.owner,
-            signal,
-          ),
-          extract: (extractOptions, signal) => browser.session.extract(
-            extractOptions,
-            browser.owner,
-            signal,
-          ),
-          screenshot: (signal) => browser.session.screenshot(browser.owner, signal),
-          close: (signal) => browser.session.close(browser.owner, signal),
-          listSessions: () => browser.session.listSessions(),
-        }, { workdir: browser.workdir });
-      },
-      release: async (binding) => {
-        const browser = binding as BrowserRuntimeBinding;
-        await browser.session.release(browser.owner);
       },
       stop: async (root) => {
         const runtimeRoot = root as BrowserRuntime;

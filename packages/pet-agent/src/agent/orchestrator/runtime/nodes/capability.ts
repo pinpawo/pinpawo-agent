@@ -196,7 +196,11 @@ export function createCapabilityNode(params: {
             threadId,
             runId: transcriptRunId,
             delegationId: runNextDelegation.id,
+            workdir: workdir ?? null,
           },
+          ...(runtimeExecution
+            ? { toolkitRuntimes: runtimeExecution.runtimes }
+            : {}),
         },
         runnableConfig,
         signal: runnableConfig?.signal,

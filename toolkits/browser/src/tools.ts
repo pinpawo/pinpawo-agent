@@ -1,16 +1,20 @@
 import { tool } from '@langchain/core/tools';
 import type { StructuredTool, ToolRuntime } from '@langchain/core/tools';
 import { Command } from '@langchain/langgraph';
+import type { SubagentRuntimeContext } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import type {
-  BrowserElementTarget,
   BrowserExtractOptions,
-  BrowserOpenOptions,
-  BrowserScrollOptions,
   BrowserWaitState,
 } from './session';
 import { formatBrowserToolError } from './errors';
 import { buildBrowserScreenshotMessages } from './screenshot';
+import { BROWSER_TOOLKIT_NAME } from './constants';
+import {
+  isBrowserRuntimePort,
+  type BrowserRuntimeCallContext,
+  type BrowserRuntimePort,
+} from './runtimePort';
 
 type BrowserTargetInput = { selector?: string; ref?: string };
 
@@ -26,43 +30,45 @@ function readBrowserTarget(input: BrowserTargetInput) {
   return { selector: input.selector, ref: input.ref };
 }
 
-type BrowserToolRuntime = ToolRuntime;
+type BrowserToolRuntime = ToolRuntime<unknown, SubagentRuntimeContext>;
 
-/** Browser Runtime resolves this narrow, execution-bound facade for tools. */
-export type BrowserToolkitSession = {
-  open: (url: string, opts?: BrowserOpenOptions, signal?: AbortSignal) => Promise<string>;
-  openWithProfile: (
-    url: string,
-    userDataDir: string,
-    opts?: Omit<BrowserOpenOptions, 'session' | 'userDataDir'>,
-    signal?: AbortSignal,
-  ) => Promise<string>;
-  snapshot: (signal?: AbortSignal) => Promise<string>;
-  click: (target: string | BrowserElementTarget, signal?: AbortSignal) => Promise<string>;
-  type: (target: string | BrowserElementTarget, text: string, submit?: boolean, signal?: AbortSignal) => Promise<string>;
-  scroll: (options?: BrowserScrollOptions, signal?: AbortSignal) => Promise<string>;
-  wait: (target?: string | BrowserElementTarget, timeoutMs?: number, state?: BrowserWaitState, signal?: AbortSignal) => Promise<string>;
-  extract: (options?: BrowserExtractOptions, signal?: AbortSignal) => Promise<string>;
-  screenshot: (signal?: AbortSignal) => Promise<string>;
-  close: (signal?: AbortSignal) => Promise<string>;
-  listSessions: () => Promise<string[]>;
-};
+function resolveBrowserCall(runtime: BrowserToolRuntime): {
+  browser: BrowserRuntimePort;
+  context: BrowserRuntimeCallContext;
+} {
+  const scope = runtime.context?.executionScope;
+  if (!scope?.threadId) {
+    throw new Error('Browser tool call requires a threadId.');
+  }
+  if (!scope.workdir) {
+    throw new Error('Browser tool call requires a workdir.');
+  }
+  const browser = runtime.context?.toolkitRuntimes?.[BROWSER_TOOLKIT_NAME];
+  if (!isBrowserRuntimePort(browser)) {
+    throw new Error('Browser tool call requires an active Browser Runtime.');
+  }
+  return {
+    browser,
+    context: {
+      threadId: scope.threadId,
+      workdir: scope.workdir,
+      ...(runtime.signal ? { signal: runtime.signal } : {}),
+    },
+  };
+}
 
-export function createBrowserTools(
-  session: BrowserToolkitSession,
-  options: { workdir?: () => string } = {},
-): StructuredTool[] {
-
+export function createBrowserTools(): StructuredTool[] {
 const browserOpenTool = tool(
   async (
     { url, headless }: { url: string; headless?: boolean },
     runtime: BrowserToolRuntime,
   ) => {
     try {
-      return await session.open(
+      const { browser, context } = resolveBrowserCall(runtime);
+      return await browser.open(
+        context,
         url,
         { headless },
-        runtime.signal,
       );
     } catch (err) {
       return formatBrowserToolError(err);
@@ -91,10 +97,11 @@ const browserOpenWithSessionTool = tool(
     runtime: BrowserToolRuntime,
   ) => {
     try {
-      return await session.open(
+      const { browser, context } = resolveBrowserCall(runtime);
+      return await browser.open(
+        context,
         url,
         { headless, session: sessionName.trim() },
-        runtime.signal,
       );
     } catch (err) {
       return formatBrowserToolError(err);
@@ -128,11 +135,12 @@ const browserOpenWithProfileTool = tool(
     runtime: BrowserToolRuntime,
   ) => {
     try {
-      return await session.openWithProfile(
+      const { browser, context } = resolveBrowserCall(runtime);
+      return await browser.openWithProfile(
+        context,
         url,
         userDataDir,
         { headless },
-        runtime.signal,
       );
     } catch (err) {
       return formatBrowserToolError(err);
@@ -163,7 +171,8 @@ const browserOpenWithProfileTool = tool(
 const browserSnapshotTool = tool(
   async (_input, runtime: BrowserToolRuntime) => {
     try {
-      return await session.snapshot(runtime.signal);
+      const { browser, context } = resolveBrowserCall(runtime);
+      return await browser.snapshot(context);
     } catch (err) {
       return formatBrowserToolError(err);
     }
@@ -180,9 +189,10 @@ const browserSnapshotTool = tool(
 const browserClickTool = tool(
   async (input: BrowserTargetInput, runtime: BrowserToolRuntime) => {
     try {
-      return await session.click(
+      const { browser, context } = resolveBrowserCall(runtime);
+      return await browser.click(
+        context,
         readBrowserTarget(input),
-        runtime.signal,
       );
     } catch (err) {
       return formatBrowserToolError(err);
@@ -205,11 +215,12 @@ const browserTypeTool = tool(
     runtime: BrowserToolRuntime,
   ) => {
     try {
-      return await session.type(
+      const { browser, context } = resolveBrowserCall(runtime);
+      return await browser.type(
+        context,
         readBrowserTarget({ selector, ref }),
         text,
         submit ?? false,
-        runtime.signal,
       );
     } catch (err) {
       return formatBrowserToolError(err);
@@ -236,11 +247,12 @@ const browserScrollTool = tool(
   ) => {
     try {
       const target = selector || ref ? readBrowserTarget({ selector, ref }) : undefined;
-      return await session.scroll({
+      const { browser, context } = resolveBrowserCall(runtime);
+      return await browser.scroll(context, {
         deltaX: deltaX ?? 0,
         deltaY: deltaY ?? 600,
         target,
-      }, runtime.signal);
+      });
     } catch (err) {
       return formatBrowserToolError(err);
     }
@@ -266,11 +278,12 @@ const browserWaitTool = tool(
   }, runtime: BrowserToolRuntime) => {
     try {
       const target = selector || ref ? readBrowserTarget({ selector, ref }) : undefined;
-      return await session.wait(
+      const { browser, context } = resolveBrowserCall(runtime);
+      return await browser.wait(
+        context,
         target,
         timeoutMs ?? 3_000,
         state ?? 'visible',
-        runtime.signal,
       );
     } catch (err) {
       return formatBrowserToolError(err);
@@ -305,9 +318,10 @@ const browserExtractTool = tool(
     runtime: BrowserToolRuntime,
   ) => {
     try {
-      return await session.extract(
+      const { browser, context } = resolveBrowserCall(runtime);
+      return await browser.extract(
+        context,
         { selector, offset, limit },
-        runtime.signal,
       );
     } catch (err) {
       return formatBrowserToolError(err);
@@ -342,7 +356,8 @@ const browserExtractTool = tool(
 const browserCloseTool = tool(
   async (_input, runtime: BrowserToolRuntime) => {
     try {
-      return await session.close(runtime.signal);
+      const { browser, context } = resolveBrowserCall(runtime);
+      return await browser.close(context);
     } catch (err) {
       return formatBrowserToolError(err);
     }
@@ -357,7 +372,8 @@ const browserCloseTool = tool(
 const browserScreenshotTool = tool(
   async (_input, runtime: BrowserToolRuntime) => {
     try {
-      const result = await session.screenshot(runtime.signal);
+      const { browser, context } = resolveBrowserCall(runtime);
+      const result = await browser.screenshot(context);
       // The screenshot needs its own user message to carry the image, so this
       // tool writes the graph update itself instead of returning tool content.
       return new Command({
@@ -365,7 +381,7 @@ const browserScreenshotTool = tool(
           messages: await buildBrowserScreenshotMessages(
             result,
             runtime.toolCallId,
-            options.workdir?.() ?? process.cwd(),
+            context.workdir,
           ),
         },
       });
@@ -381,10 +397,11 @@ const browserScreenshotTool = tool(
 );
 
 const browserSessionTool = tool(
-  async ({ action }: { action: 'list' }) => {
+  async ({ action }: { action: 'list' }, runtime: BrowserToolRuntime) => {
     try {
       if (action === 'list') {
-        const sessions = await session.listSessions();
+        const { browser, context } = resolveBrowserCall(runtime);
+        const sessions = await browser.listSessions(context);
         if (sessions.length === 0) {
           return '暂无已保存的浏览器会话。browser_open 默认使用 default；明确传入 session 时会创建对应会话。';
         }
@@ -428,21 +445,4 @@ const browserSessionTool = tool(
   ];
 }
 
-function unboundBrowserRuntime(): never {
-  throw new Error('Browser tools require a resolved Browser Runtime execution binding.');
-}
-
-/** Static schema inventory. Runtime execution replaces only these tool instances. */
-export const browserTools = createBrowserTools({
-  open: unboundBrowserRuntime,
-  openWithProfile: unboundBrowserRuntime,
-  snapshot: unboundBrowserRuntime,
-  click: unboundBrowserRuntime,
-  type: unboundBrowserRuntime,
-  scroll: unboundBrowserRuntime,
-  wait: unboundBrowserRuntime,
-  extract: unboundBrowserRuntime,
-  screenshot: unboundBrowserRuntime,
-  close: unboundBrowserRuntime,
-  listSessions: unboundBrowserRuntime,
-});
+export const browserTools = createBrowserTools();

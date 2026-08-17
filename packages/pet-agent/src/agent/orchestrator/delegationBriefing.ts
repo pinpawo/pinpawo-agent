@@ -37,7 +37,7 @@ export type DelegationSpec = DelegationSpecBase & (
     }
   | {
       mode: 'continue';
-      gapNote: string | null;
+      guidance: string | null;
     }
 );
 
@@ -94,8 +94,8 @@ function renderDelegationBriefingXml(spec: DelegationSpec): string {
     spec.mode === 'initial' && spec.essentialContext
       ? xmlTextBlock('essential_context', spec.essentialContext)
       : null,
-    spec.mode === 'continue' && spec.gapNote
-      ? xmlTextBlock('gap_note', spec.gapNote)
+    spec.mode === 'continue' && spec.guidance
+      ? xmlTextBlock('guidance', spec.guidance)
       : null,
   ].filter((block): block is string => block !== null);
 

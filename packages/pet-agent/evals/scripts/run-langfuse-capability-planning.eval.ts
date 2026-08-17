@@ -1,4 +1,5 @@
 import { tool } from '@langchain/core/tools';
+import { AIMessage } from '@langchain/core/messages';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,6 +16,7 @@ import {
 import { defineToolkit } from '../../src/types/toolkit.ts';
 import {
   evaluateCapabilityPlanningOutput,
+  buildCapabilityPlanningMessages,
   type CapabilityPlanningEvalOutput,
 } from '../capability-planning-evaluation.ts';
 import {
@@ -68,7 +70,6 @@ function plannerOutput(
       result: result.action,
       nextTask: null,
       capabilityName: null,
-      gapNote: null,
       remainingPlan: [],
     };
   }
@@ -77,7 +78,6 @@ function plannerOutput(
     result: result.action,
     nextTask: nextTask?.task ?? null,
     capabilityName: nextTask?.capability ?? null,
-    gapNote: result.action === 'continue_current' ? result.gapNote : null,
     remainingPlan: remainingPlan.map((task) => ({ ...task })),
   };
 }
@@ -155,7 +155,17 @@ async function main() {
             traceId: `eval:${testCase.id}`,
             runId: `eval:${testCase.id}`,
             userRequest: testCase.input.userRequest,
-            latestUserMessage: null,
+            messageContext: {
+              scope: testCase.input.mode === 'entry'
+                ? 'main_conversation'
+                : 'active_delegation',
+              messages: [
+                ...buildCapabilityPlanningMessages(testCase.input.messages),
+                ...(testCase.input.mode === 'boundary' && testCase.input.latestAnnounce
+                  ? [new AIMessage(testCase.input.latestAnnounce)]
+                  : []),
+              ],
+            },
             activeDelegation: testCase.input.mode === 'boundary'
               ? {
                   delegationId: 'eval-delegation',
@@ -168,7 +178,6 @@ async function main() {
             latestAnnounce: testCase.input.mode === 'boundary'
               ? {
                   messageId: 'eval-announce',
-                  text: testCase.input.latestAnnounce ?? null,
                   completionReason: 'natural',
                 }
               : null,

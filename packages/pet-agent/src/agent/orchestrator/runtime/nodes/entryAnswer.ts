@@ -1,4 +1,4 @@
-import { AIMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { Command, END, Send, START, StateGraph } from '@langchain/langgraph';
@@ -12,13 +12,6 @@ import { resolveActor } from '../config';
 import type { CapabilityPlannerDispatch } from '../../capabilityPlanner/runner';
 
 export const PLAN_REQUEST_TOOL_NAME = 'plan_request';
-
-function entryMainMessages(messages: BaseMessage[]) {
-  return mainConversationMessages(messages).filter((message) => (
-    !ToolMessage.isInstance(message)
-    && !(AIMessage.isInstance(message) && message.tool_calls?.length)
-  ));
-}
 
 function readCurrentUserRequest(messages: BaseMessage[]) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -34,7 +27,7 @@ function readCurrentUserRequest(messages: BaseMessage[]) {
 }
 
 export function captureRunUserRequest(state: OrchestratorStateType) {
-  const runUserRequest = readCurrentUserRequest(entryMainMessages(state.messages));
+  const runUserRequest = readCurrentUserRequest(mainConversationMessages(state.messages));
   if (!runUserRequest) {
     throw new Error('Entry Answer requires a current HumanMessage.');
   }
@@ -63,7 +56,7 @@ function plannerDispatch(state: OrchestratorStateType): CapabilityPlannerDispatc
       runDelegationSummaries: state.runDelegationSummaries,
       runCapabilityPlan: [],
     },
-    mainMessages: entryMainMessages(state.messages),
+    messages: state.messages,
   };
 }
 
@@ -105,7 +98,7 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
       new SystemMessage(buildEntryAnswerSystemPrompt({
         actor: resolveActor(config, runnableConfig),
       })),
-      ...entryMainMessages(state.messages),
+      ...mainConversationMessages(state.messages),
     ], runnableConfig);
     if (!AIMessage.isInstance(response)) {
       throw new Error('Entry Answer model must return an AIMessage.');

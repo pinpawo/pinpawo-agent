@@ -91,7 +91,7 @@ export function applyActiveDelegationTransition(
     transcriptRunId: activeDelegation.transcriptRunId,
     delegationId: activeDelegation.id,
     task: activeDelegation.task,
-    gapNote: guidance,
+    guidance,
   });
 
   return {

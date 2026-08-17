@@ -297,7 +297,10 @@ function plannerInput(
     traceId: 'trace-test',
     runId: 'run-test',
     userRequest: 'Research the repository and then prepare a review.',
-    latestUserMessage: null,
+    messageContext: {
+      scope: 'main_conversation' as const,
+      messages: [],
+    },
     activeDelegation: null,
     latestAnnounce: null,
     remainingPlan: [],
@@ -384,10 +387,13 @@ test('nested Planner checkpoint persists one trace privately and deduplicates bo
     traceId: 'trace-a',
     runId: 'run-a1',
     userRequest: 'PRIVATE_TRACE_A_GOAL',
-    mainMessages: [
-      new HumanMessage('PRIOR_MAIN_CONVERSATION'),
-      new HumanMessage('PRIVATE_TRACE_A_GOAL'),
-    ],
+    messageContext: {
+      scope: 'main_conversation',
+      messages: [
+        new HumanMessage('PRIOR_MAIN_CONVERSATION'),
+        new HumanMessage('PRIVATE_TRACE_A_GOAL'),
+      ],
+    },
   });
   const boundaryA = plannerInput(workspace, {
     mode: 'boundary',
@@ -402,8 +408,11 @@ test('nested Planner checkpoint persists one trace privately and deduplicates bo
     },
     latestAnnounce: {
       messageId: 'announce-a',
-      text: 'Trace A execution is complete.',
       completionReason: 'natural',
+    },
+    messageContext: {
+      scope: 'active_delegation',
+      messages: [new AIMessage('Trace A execution is complete.')],
     },
   });
 
@@ -421,7 +430,7 @@ test('nested Planner checkpoint persists one trace privately and deduplicates bo
   const entryCheckpointInput = (
     entryPlannerCheckpoint?.checkpoint.channel_values.currentInput
   ) as CapabilityPlannerInput | undefined;
-  assert.equal('mainMessages' in (entryCheckpointInput ?? {}), false);
+  assert.equal('messageContext' in (entryCheckpointInput ?? {}), false);
   assert.match(model.invocations[0]?.map(readMessageText).join('\n') ?? '', /PRIOR_MAIN_CONVERSATION/);
   const boundaryState = await graph.invoke({ input: boundaryA }, config);
   assert.deepEqual(boundaryState.commit, { action: 'goal_done', tasks: [] });
@@ -446,6 +455,15 @@ test('nested Planner checkpoint persists one trace privately and deduplicates bo
   assert.match(
     model.invocations[1]?.map(readMessageText).join('\n') ?? '',
     /PRIVATE_TRACE_A_GOAL/,
+  );
+  assert.match(
+    model.invocations[1]?.map(readMessageText).join('\n') ?? '',
+    /Trace A execution is complete/,
+  );
+  assert.equal(
+    model.invocations[1]?.some((message) =>
+      message.id === `planner-context-start:${boundaryA.inputId}`),
+    true,
   );
 
   const duplicateState = await graph.invoke({ input: boundaryA }, config);
@@ -580,8 +598,13 @@ test('Planner compacts only its private checkpoint and preserves trace context',
         },
         latestAnnounce: {
           messageId: `announce-${String(index)}`,
-          text: `Execution result ${String(index)} ${'evidence '.repeat(40)}`,
           completionReason: 'natural',
+        },
+        messageContext: {
+          scope: 'active_delegation',
+          messages: [new AIMessage(
+            `Execution result ${String(index)} ${'evidence '.repeat(40)}`,
+          )],
         },
       }),
     }, config);
@@ -605,6 +628,11 @@ test('Planner compacts only its private checkpoint and preserves trace context',
   }));
   assert.ok(model.invocations.at(-1)?.some((message) =>
     readMessageText(message).includes('<private_planner_compaction>')));
+  const latestInvocationText = model.invocations.at(-1)
+    ?.map(readMessageText)
+    .join('\n') ?? '';
+  assert.doesNotMatch(latestInvocationText, /Execution result 3/);
+  assert.match(latestInvocationText, /Execution result 4/);
   const rootState = await graph.getState(config);
   assert.equal('messages' in rootState.values, false);
 });
@@ -1380,8 +1408,11 @@ test('boundary mode rejects an empty executable plan', async (t) => {
       },
       latestAnnounce: {
         messageId: 'announce-1',
-        text: fullHandoff,
         completionReason: 'natural',
+      },
+      messageContext: {
+        scope: 'active_delegation',
+        messages: [new AIMessage(fullHandoff)],
       },
       remainingPlan: [{
         capability: 'general',
@@ -1422,8 +1453,11 @@ test('a boundary with an exhausted plan can still submit newly required work', a
       },
       latestAnnounce: {
         messageId: 'announce-1',
-        text: 'issue #587 is open; the README section is stale.',
         completionReason: 'natural',
+      },
+      messageContext: {
+        scope: 'active_delegation',
+        messages: [new AIMessage('issue #587 is open; the README section is stale.')],
       },
       remainingPlan: [],
     }),
@@ -1440,7 +1474,7 @@ test('a boundary with an exhausted plan can still submit newly required work', a
   });
 });
 
-test('boundary Planner can correct an invalid continuation capability', async (t) => {
+test('boundary Planner continues without replacing the active task', async (t) => {
   const workspace = await createWorkspace(t, {
     explore: capabilityDocument({
       name: 'explore',
@@ -1455,27 +1489,9 @@ test('boundary Planner can correct an invalid continuation capability', async (t
   });
   const model = new ScriptedPlannerModel([{
     toolCalls: [{
-      id: 'wrong-continuation',
+      id: 'continue-current',
       name: 'continue_current',
-      args: {
-        tasks: [{
-          capability: 'general',
-          task: 'Finish collecting the missing repository evidence.',
-        }],
-        gap_note: 'The repository evidence is incomplete; collect and verify the missing facts.',
-      },
-    }],
-  }, {
-    toolCalls: [{
-      id: 'corrected-continuation',
-      name: 'continue_current',
-      args: {
-        tasks: [{
-          capability: 'explore',
-          task: 'Finish collecting the missing repository evidence.',
-        }],
-        gap_note: 'The repository evidence is incomplete; collect and verify the missing facts.',
-      },
+      args: {},
     }],
   }]);
 
@@ -1489,28 +1505,23 @@ test('boundary Planner can correct an invalid continuation capability', async (t
       },
       latestAnnounce: {
         messageId: 'announce-1',
-        text: 'The dependency evidence is still incomplete.',
         completionReason: 'natural',
+      },
+      messageContext: {
+        scope: 'active_delegation',
+        messages: [new AIMessage('The dependency evidence is still incomplete.')],
       },
     }),
   );
 
   assert.deepEqual(result, {
     action: 'continue_current',
-    tasks: [{
-      capability: 'explore',
-      task: 'Finish collecting the missing repository evidence.',
-    }],
-    gapNote: 'The repository evidence is incomplete; collect and verify the missing facts.',
+    tasks: [],
   });
-  assert.equal(model.invocations.length, 2);
-  assert.ok(model.invocations[1]?.some((message) =>
-    ToolMessage.isInstance(message)
-    && message.status === 'error'
-    && readMessageText(message).includes('active delegation capability "explore"')));
+  assert.equal(model.invocations.length, 1);
 });
 
-test('boundary Planner supplies default guidance when gap_note is omitted', async (t) => {
+test('boundary Planner can stop for user confirmation without rewriting the task', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -1518,15 +1529,11 @@ test('boundary Planner supplies default guidance when gap_note is omitted', asyn
       instructions: 'Complete and verify the requested work.',
     }),
   });
-  const tasks = [{
-    capability: 'general',
-    task: 'Run the missing verification and return its result.',
-  }];
   const model = new ScriptedPlannerModel([{
     toolCalls: [{
-      id: 'continue-with-default-guidance',
-      name: 'continue_current',
-      args: { tasks },
+      id: 'request-target-confirmation',
+      name: 'request_user_input',
+      args: {},
     }],
   }]);
 
@@ -1534,17 +1541,26 @@ test('boundary Planner supplies default guidance when gap_note is omitted', asyn
     plannerInput(workspace, {
       mode: 'boundary',
       activeDelegation: {
-        delegationId: 'delegation-1',
+        delegationId: 'delegation-review-662',
         capability: 'general',
-        task: 'Complete and verify the change.',
+        task: 'Review PR #662.',
+      },
+      latestAnnounce: {
+        messageId: 'announce-review-662',
+        completionReason: 'natural',
+      },
+      messageContext: {
+        scope: 'active_delegation',
+        messages: [new AIMessage(
+          'PR #662 does not exist. PR #663 may be related but is not the requested target.',
+        )],
       },
     }),
   );
 
   assert.deepEqual(result, {
-    action: 'continue_current',
-    tasks,
-    gapNote: '上一次结果尚未完全满足当前任务；按本轮 task 继续执行，并返回可核验的完成证据。',
+    action: 'user_input_required',
+    tasks: [],
   });
   assert.equal(model.invocations.length, 1);
 });
@@ -1588,8 +1604,13 @@ test('boundary Planner repairs submit_plan to advance_plan', async (t) => {
       },
       latestAnnounce: {
         messageId: 'announce-1',
-        text: 'The investigation is complete and identifies the required change.',
         completionReason: 'natural',
+      },
+      messageContext: {
+        scope: 'active_delegation',
+        messages: [new AIMessage(
+          'The investigation is complete and identifies the required change.',
+        )],
       },
     }),
   );

@@ -155,7 +155,7 @@ threadId
 
 ### 3. Planner 只有一个受控输出出口
 
-Planner 只提交 `PlannerCommit`。除 plan task 文本外，不允许输出任意语义文本。
+Planner 只提交 `PlannerCommit`。除 plan task 外，不允许输出任意语义文本。
 
 ```ts
 type PlannerAction =
@@ -172,8 +172,8 @@ type PlannerCommit = {
 };
 ```
 
-`action` 是 graph control protocol，不是用户内容。`tasks` 是唯一允许从 Planner
-私有边界向外投影的语义内容。
+`action` 是 graph control protocol，不是用户内容。可执行语义只通过 `tasks`
+投影；`continue_current` 不携带新语义，也不能替换当前 task 或后续计划。
 
 移除以下 Planner 输出形式：
 
@@ -206,11 +206,12 @@ Planner 只做语义判断并提交 commit。graph 必须确定性地负责：
 约束：
 
 - 必须存在 active delegation；
-- `tasks.length >= 1`；
-- `tasks[0].capability` 必须与 active delegation capability 相同；
+- `tasks` 必须为空；
 - graph 保留现有 `delegationId`、lane 和 transcript；
-- `tasks[0].task` 作为新的 continuation instruction 注入同一 delegation；
-- `tasks.slice(1)` 是 Planner 当前承诺的未来计划；
+- graph 保留 active delegation task 和此前 committed future plan，不接受 Planner
+  在 continuation 中重写它们；
+- continuation 不注入 Planner 生成的 gap；subagent 继续读取同一 task 和完整 lane
+  transcript；
 - 当前 announce 不做 accepted handoff；
 - 不把 Planner 的拒绝理由作为独立文本带出。
 
@@ -277,7 +278,7 @@ Planner 只做语义判断并提交 commit。graph 必须确定性地负责：
 schema 和 runtime 必须同时验证：
 
 ```text
-continue_current     -> active delegation + non-empty tasks + same capability
+continue_current     -> active delegation + empty tasks
 execute_plan         -> entry + non-empty tasks
 advance_plan         -> boundary + non-empty tasks
 goal_done            -> empty tasks + accepted-result preconditions
@@ -290,8 +291,9 @@ action 静默改写成另一个 action。
 
 ## Planner 私有输入协议
 
-每次 Planner 正常开始一个新决策 turn 时，Root 只追加当前 boundary 的新事实，不重建
-完整 Planner transcript，也不发明一套 Planner 专属的 resume command。
+每次 Planner 正常开始一个新决策 turn 时，Root 提供当前 canonical messages，Planner
+领域按 boundary 选择本次所需的完整只读消息；它不重建私有 Planner transcript，也不
+发明一套 Planner 专属的 resume command。
 
 ```ts
 type PlannerInput = {
@@ -299,10 +301,15 @@ type PlannerInput = {
   traceId: string;
   runId: string;
   userRequest: UserRequest;
-  mainMessages?: readonly BaseMessage[];
-  latestUserMessage: string | null;
+  messageContext: {
+    scope: 'main_conversation' | 'active_delegation';
+    messages: readonly BaseMessage[];
+  };
   activeDelegation: PlannerDelegationInput | null;
-  latestAnnounce: PlannerAnnounceInput | null;
+  latestAnnounce: {
+    messageId: string | null;
+    completionReason: SubagentCompletionReason | null;
+  } | null;
   committedPlan: CapabilityPlanTask[];
   registryDigest: string;
 };
@@ -311,10 +318,19 @@ type PlannerInput = {
 字段是否存在表达当前 boundary：
 
 - 初次规划：没有 active delegation 和 announce；
-- delegation 返回：包含 active task、完整 announce candidate、stop reason 和 artifact
-  refs；
-- 前一个 run 已结束后的用户继续：包含 latest user message 和 resumable delegation；
+- 初次规划的 message context 是截止当前请求的完整 main conversation；
+- delegation 返回或 fresh-turn continuation 的 message context 是 main conversation
+  加当前 delegation 的完整、tool-protocol-safe lane transcript；
+- announce 字段只保留 boundary identity 与 stop reason；announce 内容、用户追问和执行
+  进展直接从原始消息读取，不再重复投影为字符串字段；
 - registry 变化：在下一次正常 Planner input 中提供新的 digest。
+
+`messageContext.messages` 是调用级只读输入。Root 把完整 state messages 交给 Planner
+领域，由 Planner 根据 mode 选择 main conversation 或 active delegation lane；选中的原始
+message objects 只在本次 model invocation 中注入，不写入 Planner 私有 checkpoint。
+因此媒体 content blocks、tool call/result 配对和 subagent announce 都保持原形，同时不会
+被 Planner 私有 compaction 复制或重复持久化。Planner 私有 checkpoint 只保存自己的输入、
+Capability 探索记录和 commit。
 
 这里的“用户继续”只是 Planner 已完成上一轮 commit 后收到的一个新输入 turn，不是
 checkpoint resume，也不需要 `user_resumed` 事件。Capability announce 本来属于 execution
@@ -567,7 +583,7 @@ packages/pet-agent/src/agent/orchestrator/privatePlanner/
 Planner terminal tools 建议改为：
 
 ```text
-continue_current(tasks)
+continue_current()
 submit_plan(tasks)
 advance_plan(tasks)
 complete_goal()

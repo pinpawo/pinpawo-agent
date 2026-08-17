@@ -40,7 +40,7 @@ test('Capability context preserves full evidence and inserts one goal before the
     transcriptRunId: 'run-1',
     delegationId: 'task-1',
     task: '继续检查 packages/b.ts。',
-    gapNote: null,
+    guidance: null,
   }).laneMessages;
   const original = [
     mainUser,

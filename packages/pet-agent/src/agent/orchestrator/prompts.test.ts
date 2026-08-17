@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { buildSubagentAnnounceContext } from './prompts';
 import { buildCapabilityPlannerAgentInput } from './prompts/capabilityPlannerAgent';
 import type { CapabilityPlannerInput } from './capabilityPlanner/runner';
@@ -18,6 +17,11 @@ const plannerPromptWorkspace = {
   reused: false,
 };
 
+const emptyPlannerMessageContext = {
+  scope: 'main_conversation' as const,
+  messages: [],
+};
+
 test('Capability Planner entry input leads with the run user request', () => {
   const input = buildCapabilityPlannerAgentInput({
     mode: 'entry',
@@ -26,7 +30,7 @@ test('Capability Planner entry input leads with the run user request', () => {
     runId: 'run-1',
     workspace: plannerPromptWorkspace,
     userRequest: '打开示例站点并浏览相关内容。\n\n浏览器已经连接。',
-    latestUserMessage: null,
+    messageContext: emptyPlannerMessageContext,
     activeDelegation: null,
     latestAnnounce: null,
     remainingPlan: [],
@@ -39,32 +43,6 @@ test('Capability Planner entry input leads with the run user request', () => {
   assert.doesNotMatch(input, /workspace|registry_digest|document_count|<planning_state>/);
 });
 
-test('Capability Planner entry receives prior main conversation without duplicating the current request', () => {
-  const currentRequest = '继续上面的方案，并修复代码。';
-  const input = buildCapabilityPlannerAgentInput({
-    mode: 'entry',
-    inputId: 'trace_started:trace-context',
-    traceId: 'trace-context',
-    runId: 'run-context',
-    workspace: plannerPromptWorkspace,
-    userRequest: currentRequest,
-    mainMessages: [
-      new HumanMessage('请先分析 PR 方案。'),
-      new AIMessage('已确认 Entry Answer 应在 Planner 之前。'),
-      new HumanMessage(currentRequest),
-    ],
-    latestUserMessage: null,
-    activeDelegation: null,
-    latestAnnounce: null,
-    remainingPlan: [],
-  } satisfies CapabilityPlannerInput);
-
-  assert.match(input, /<main_conversation[^>]*>/);
-  assert.match(input, /请先分析 PR 方案。/);
-  assert.match(input, /已确认 Entry Answer 应在 Planner 之前。/);
-  assert.equal(input.split(currentRequest).length - 1, 1);
-});
-
 test('Capability Planner input keeps the verified default Capability private context after the goal', () => {
   const input = buildCapabilityPlannerAgentInput({
     mode: 'entry',
@@ -73,7 +51,7 @@ test('Capability Planner input keeps the verified default Capability private con
     runId: 'run-1',
     workspace: plannerPromptWorkspace,
     userRequest: '整理下载目录。',
-    latestUserMessage: null,
+    messageContext: emptyPlannerMessageContext,
     activeDelegation: null,
     latestAnnounce: null,
     remainingPlan: [],
@@ -98,7 +76,10 @@ test('Capability Planner boundary input carries the run user request and boundar
     runId: 'run-1',
     workspace: plannerPromptWorkspace,
     userRequest: '打开示例站点并浏览相关内容。\n\n浏览器已经连接。',
-    latestUserMessage: null,
+    messageContext: {
+      scope: 'active_delegation',
+      messages: [],
+    },
     activeDelegation: {
       delegationId: 'delegation-1',
       capability: 'browser',
@@ -106,7 +87,6 @@ test('Capability Planner boundary input carries the run user request and boundar
     },
     latestAnnounce: {
       messageId: 'announce-1',
-      text: '浏览器已经连接，目标页面可访问。',
       completionReason: 'natural',
     },
     remainingPlan: [{
@@ -117,7 +97,7 @@ test('Capability Planner boundary input carries the run user request and boundar
 
   assert.match(input, /^<run_user_request[^>]*>/);
   assert.match(input, /当前任务：确认浏览器可用/);
-  assert.match(input, /浏览器已经连接，目标页面可访问。/);
+  assert.match(input, /执行停止原因：natural/);
   assert.match(input, /- \[browser\] 浏览相关内容/);
   assert.doesNotMatch(input, /workspace|registry_digest|document_count|<planning_state>/);
 });
@@ -130,7 +110,10 @@ test('Capability Planner boundary input omits the follow-up section once the pla
     runId: 'run-1',
     workspace: plannerPromptWorkspace,
     userRequest: '打开示例站点并浏览相关内容。',
-    latestUserMessage: null,
+    messageContext: {
+      scope: 'active_delegation',
+      messages: [],
+    },
     activeDelegation: {
       delegationId: 'delegation-1',
       capability: 'browser',
@@ -138,7 +121,6 @@ test('Capability Planner boundary input omits the follow-up section once the pla
     },
     latestAnnounce: {
       messageId: 'announce-1',
-      text: '浏览器已经连接，目标页面可访问。',
       completionReason: 'natural',
     },
     remainingPlan: [],
@@ -146,7 +128,7 @@ test('Capability Planner boundary input omits the follow-up section once the pla
 
   assert.match(input, /^<run_user_request[^>]*>/);
   assert.match(input, /当前任务：确认浏览器可用/);
-  assert.match(input, /浏览器已经连接，目标页面可访问。/);
+  assert.match(input, /执行停止原因：natural/);
   assert.doesNotMatch(input, /此前保留的后续任务/);
   assert.doesNotMatch(input, /planner_request_briefing/);
 });

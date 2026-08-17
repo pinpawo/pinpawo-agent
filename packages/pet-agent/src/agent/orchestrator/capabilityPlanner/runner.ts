@@ -11,14 +11,13 @@ import type {
   PlannerCommit,
   PlannerDelegationInput,
 } from './protocol';
+import type { CapabilityPlannerMessageContext } from './messageContext';
 
 export type CapabilityPlannerMode = 'entry' | 'boundary';
 
-export const CAPABILITY_PLANNER_BOUNDARY_RESULT_MAX_CHARS = 16_000;
-
 /**
- * The bounded run state a Planner node needs to understand recent context and
- * materialize its result. Delegation-lane transcripts stay outside this seam.
+ * Root-owned control state needed to materialize a Planner result. Canonical
+ * messages cross the invocation seam separately and never become Planner state.
  */
 export type CapabilityPlannerRuntimeState = Pick<
   {
@@ -39,7 +38,7 @@ export type CapabilityPlannerDispatch =
   {
     readonly mode: 'entry';
     readonly plannerState: CapabilityPlannerRuntimeState;
-    readonly mainMessages: readonly BaseMessage[];
+    readonly messages: readonly BaseMessage[];
   };
 
 type CapabilityPlannerInputBase = {
@@ -47,10 +46,9 @@ type CapabilityPlannerInputBase = {
   readonly traceId: string;
   readonly runId: string;
   readonly userRequest: UserRequest;
-  readonly mainMessages?: readonly BaseMessage[];
-  readonly latestUserMessage: string | null;
+  readonly messageContext: CapabilityPlannerMessageContext;
   readonly activeDelegation: PlannerDelegationInput | null;
-  /** Candidate execution evidence. Root has not accepted it as a handoff yet. */
+  /** Boundary identity and stop reason. Evidence remains in messageContext. */
   readonly latestAnnounce: PlannerAnnounceInput | null;
   readonly remainingPlan: readonly CapabilityPlanTask[];
   readonly workspace: CapabilityDocumentWorkspace;

@@ -113,7 +113,8 @@ test('plan_request routes to Planner without persisting control messages', async
 
   assert.deepEqual(scripted.counts(), { boundCalls: 1, resultCalls: 1 });
   assert.equal(plannerInputs[0]?.userRequest, request);
-  assert.equal(plannerInputs[0]?.mainMessages?.at(-1)?.content, request);
+  assert.equal(plannerInputs[0]?.messageContext.scope, 'main_conversation');
+  assert.equal(plannerInputs[0]?.messageContext.messages.at(-1)?.content, request);
   assert.equal(result.runUserRequest, request);
   assert.equal(result.messages.some((message) => ToolMessage.isInstance(message)), false);
   assert.equal(result.messages.some((message) => (

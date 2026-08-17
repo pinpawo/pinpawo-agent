@@ -70,33 +70,33 @@ test('initial delegation omits empty essential context', () => {
   assert.doesNotMatch(String(briefing.content), /<essential_context>/);
 });
 
-test('continuation delegation carries task and optional gap note', () => {
-  const withGap = materializeDelegation({
+test('continuation delegation carries task and explicit user guidance', () => {
+  const withGuidance = materializeDelegation({
     mode: 'continue',
     lane: 'capability:github',
     transcriptRunId: 'run-1',
     delegationId: 'task-a',
     task: '关闭 GitHub Issue #272。',
-    gapNote: '未验证 issue 状态，请确认已关闭。',
+    guidance: '未验证 issue 状态，请确认已关闭。',
   });
-  const [briefing] = withGap.laneMessages;
+  const [briefing] = withGuidance.laneMessages;
   const text = String(briefing.content);
 
-  assert.deepEqual(withGap.mainMessages, []);
+  assert.deepEqual(withGuidance.mainMessages, []);
   assert.match(text, /^<delegation_briefing role="task_boundary" source="orchestrator" mode="continue">/);
   assert.match(text, /<task>[\s\S]*关闭 GitHub Issue #272。[\s\S]*<\/task>/);
-  assert.match(text, /<gap_note>[\s\S]*未验证 issue 状态，请确认已关闭。[\s\S]*<\/gap_note>/);
+  assert.match(text, /<guidance>[\s\S]*未验证 issue 状态，请确认已关闭。[\s\S]*<\/guidance>/);
   assert.equal(getMessageLane(briefing), 'capability:github');
 
-  const [withoutGap] = materializeDelegation({
+  const [withoutGuidance] = materializeDelegation({
     mode: 'continue',
     lane: 'capability:github',
     transcriptRunId: 'run-1',
     delegationId: 'task-a',
     task: '关闭 GitHub Issue #272。',
-    gapNote: null,
+    guidance: null,
   }).laneMessages;
-  assert.doesNotMatch(String(withoutGap.content), /<gap_note>/);
+  assert.doesNotMatch(String(withoutGuidance.content), /<guidance>/);
 });
 
 test('delegation XML safely preserves a CDATA terminator in task text', () => {

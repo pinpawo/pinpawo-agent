@@ -132,7 +132,7 @@ function buildScriptedPlannerRunner() {
         return { action: 'goal_done', tasks: [] };
       }
       secondTaskSawHandoff = /循环依赖|token validation/.test(
-        input.latestAnnounce?.text ?? '',
+        input.messageContext.messages.map((message) => message.text).join('\n'),
       );
       const objective = '根据调查结论重构 auth 模块，提取 token validation 并移除循环依赖';
       plannedObjectives.push(objective);

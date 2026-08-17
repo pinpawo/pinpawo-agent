@@ -22,7 +22,6 @@ export type CapabilityPlanningExpected = {
     | 'user_input_required'
     | 'unavailable';
   nextTaskTerms?: string[];
-  gapNoteTerms?: string[];
   capabilityName?: string;
   remainingPlan: Array<{ taskTerms: string[]; capability: string }>;
   /**
@@ -43,9 +42,9 @@ const SOURCE_FILE = 'packages/pet-agent/evals/datasets/capability-planning-basic
 type CapabilityPlanningTranscriptInput = Omit<CapabilityPlanningInput, 'userRequest'> & {
   /**
    * Current user request that production stores for every Planner invocation.
-   * The transcript messages are also projected into Planner as the latest ten
-   * user and assistant messages; contextual cases may provide a more precise
-   * normalized goal explicitly.
+   * The transcript messages are projected into Planner as complete canonical
+   * conversation context; contextual cases may provide a more precise
+   * normalized request explicitly.
    */
   userRequest?: CapabilityPlanningInput['userRequest'];
 };
@@ -698,9 +697,8 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     },
     expected: {
       result: 'continue_current',
-      gapNoteTerms: ['测试尚未运行', '运行测试', '测试结果'],
       remainingPlan: [],
-      planEffect: 'revised',
+      planEffect: 'empty',
       rubberStamp: false,
       reason: 'The current task is incomplete and the same Capability can finish it.',
     },
@@ -735,17 +733,15 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     },
     expected: {
       result: 'continue_current',
-      capabilityName: 'general',
-      gapNoteTerms: ['内部上下文', '尚未执行', '实际修改', '运行生成脚本', '验证证据'],
       remainingPlan: [],
       exactRemainingPlanLength: 0,
-      planEffect: 'revised',
+      planEffect: 'empty',
       rubberStamp: false,
-      reason: 'The latest announce is an internal-context-shaped summary that explicitly says no workspace work occurred. Continue the same delegation with concise corrective guidance to perform and verify the requested mutation instead of repeating the summary.',
+      reason: 'The latest announce is an internal-context-shaped summary that explicitly says no workspace work occurred. Continue the same delegation because its full transcript already preserves the task and evidence.',
     },
     metadata: {
       difficulty: 'hard',
-      reason: 'Regression from a production trace where repeated context-summary-shaped announces caused continuation without corrective guidance.',
+      reason: 'Regression from a production trace where repeated context-summary-shaped announces obscured whether execution had actually progressed.',
       source: SOURCE_FILE,
     },
   },
@@ -770,13 +766,11 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     },
     expected: {
       result: 'continue_current',
-      capabilityName: 'general',
-      gapNoteTerms: ['计划性文字', '尚未执行', '实际修改', '运行命令', '验证结果'],
       remainingPlan: [],
       exactRemainingPlanLength: 0,
-      planEffect: 'revised',
+      planEffect: 'empty',
       rubberStamp: false,
-      reason: 'The latest announce only restates a future plan and contains no completed work. Continue the same delegation with guidance to act now and return concrete execution and verification evidence.',
+      reason: 'The latest announce only restates a future plan and contains no completed work. Continue the same delegation using its existing task and transcript.',
     },
     metadata: {
       difficulty: 'medium',
@@ -805,13 +799,11 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     },
     expected: {
       result: 'continue_current',
-      capabilityName: 'general',
-      gapNoteTerms: ['四宫格占位', '不符合语义', '不同语义图标', '重新生成', '抽查内容'],
       remainingPlan: [],
       exactRemainingPlanLength: 0,
-      planEffect: 'revised',
+      planEffect: 'empty',
       rubberStamp: false,
-      reason: 'The subagent produced the explicitly rejected placeholder design. Continue the same delegation with corrective guidance to implement distinct semantic glyphs and verify the generated SVG content.',
+      reason: 'The subagent produced the explicitly rejected placeholder design. Continue the same delegation because the original task and full transcript preserve the unmet acceptance criteria.',
     },
     metadata: {
       difficulty: 'hard',
@@ -840,11 +832,9 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     },
     expected: {
       result: 'continue_current',
-      capabilityName: 'general',
-      gapNoteTerms: ['脚本已修改', '尚未执行生成', '运行 node generate.js', '刷新预览', '校验 70 个文件'],
       remainingPlan: [],
       exactRemainingPlanLength: 0,
-      planEffect: 'revised',
+      planEffect: 'empty',
       rubberStamp: false,
       reason: 'Useful progress exists, but the same Capability must execute the generator and verify its outputs before the task can be accepted.',
     },
@@ -875,13 +865,11 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     },
     expected: {
       result: 'continue_current',
-      capabilityName: 'general',
-      gapNoteTerms: ['已生成文件', '缺少验证', 'XML 校验', '抽查 SVG 内容', '确认无占位图'],
       remainingPlan: [],
       exactRemainingPlanLength: 0,
-      planEffect: 'revised',
+      planEffect: 'empty',
       rubberStamp: false,
-      reason: 'Generation may have succeeded, but the explicit verification contract remains incomplete. Continue the same delegation with verification-focused guidance.',
+      reason: 'Generation may have succeeded, but the explicit verification contract remains incomplete. Continue the same delegation with the full execution transcript intact.',
     },
     metadata: {
       difficulty: 'medium',
@@ -910,6 +898,36 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       reason: 'The accepted execution evidence completes the full user goal.',
     },
     metadata: { difficulty: 'easy', reason: 'Unified goal completion action.', source: SOURCE_FILE },
+  },
+  {
+    id: `${SUITE}.boundary-asks-before-substituting-missing-target`,
+    name: 'boundary-asks-before-substituting-missing-target',
+    suite: SUITE,
+    tags: ['capability_planning', 'delegation_control', 'planner_boundary', 'context_synthesis'],
+    input: {
+      mode: 'boundary',
+      userRequest: '帮我 review PR #662。',
+      messages: [{ role: 'user', content: '帮我 review PR #662。' }],
+      capabilityRegistry: [
+        'project_review: review a requested pull request from repository evidence',
+        'general: perform other available work',
+      ],
+      activeTask: 'Review PR #662 and report actionable findings.',
+      latestAnnounce: 'GitHub 上未找到 PR #662；Issue #662 存在，关联实现是 PR #663，但尚未得到用户确认是否改为 review PR #663。',
+      remainingPlan: [],
+    },
+    expected: {
+      result: 'user_input_required',
+      remainingPlan: [],
+      planEffect: 'empty',
+      rubberStamp: false,
+      reason: 'The requested PR does not exist and replacing it with a related PR would change the target, so the Planner must ask instead of rewriting and continuing the delegation.',
+    },
+    metadata: {
+      difficulty: 'hard',
+      reason: 'Regression from a trace where continue_current replaced the active task and injected an unsupported gap note.',
+      source: SOURCE_FILE,
+    },
   },
   {
     id: `${SUITE}.boundary-waits-for-user-input`,

@@ -10,12 +10,12 @@ import {
   createCapabilityPlannerAgent,
 } from '../../capabilityPlanner/agent';
 import {
-  CAPABILITY_PLANNER_BOUNDARY_RESULT_MAX_CHARS,
   type CapabilityPlannerDispatch,
   type CapabilityPlannerInput,
   type CapabilityPlannerRuntimeState,
   type CapabilityPlannerRunner,
 } from '../../capabilityPlanner/runner';
+import { selectCapabilityPlannerMessages } from '../../capabilityPlanner/messageContext';
 import {
   parsePlannerCommit,
   type PlannerCommit,
@@ -43,7 +43,6 @@ import {
   getMessageHandoffSource,
   readLatestAnnounce,
   readLatestAnnounceCompletionReason,
-  readLatestHumanRequest,
 } from '../../messageLanes';
 import {
   getInvokeOptions,
@@ -63,16 +62,6 @@ function isPlannerDispatch(
   input: OrchestratorStateType | CapabilityPlannerDispatch,
 ): input is CapabilityPlannerDispatch {
   return 'plannerState' in input && input.mode === 'entry';
-}
-
-function boundPlannerAnnounce(value: string | null): string | null {
-  const text = value?.trim() ?? '';
-  if (!text) return null;
-  if (text.length <= CAPABILITY_PLANNER_BOUNDARY_RESULT_MAX_CHARS) return text;
-  const marker = '\n\n[announce truncated for Planner context]\n\n';
-  const available = CAPABILITY_PLANNER_BOUNDARY_RESULT_MAX_CHARS - marker.length;
-  const tailLength = Math.floor(available / 4);
-  return `${text.slice(0, available - tailLength)}${marker}${text.slice(-tailLength)}`;
 }
 
 function materializeNextDelegation(params: {
@@ -185,17 +174,12 @@ function buildAcceptedDelegationUpdate(
 function buildContinueCurrentUpdate(params: {
   state: OrchestratorStateType;
   activeDelegation: TaskActiveDelegation;
-  commit: Extract<PlannerCommit, { action: 'continue_current' }>;
 }) {
-  const { state, activeDelegation, commit } = params;
-  const [nextTask, ...remainingPlan] = commit.tasks;
-  if (!nextTask) {
-    throw new Error('Planner continue_current requires a continuation task.');
-  }
+  const { state, activeDelegation } = params;
   const runNextDelegation: RunNextDelegation = {
     id: activeDelegation.id,
     lane: activeDelegation.lane,
-    task: nextTask.task,
+    task: activeDelegation.task,
     contextSummary: null,
   };
   const materialized = materializeDelegation({
@@ -203,16 +187,15 @@ function buildContinueCurrentUpdate(params: {
     lane: activeDelegation.lane,
     transcriptRunId: activeDelegation.transcriptRunId,
     delegationId: activeDelegation.id,
-    task: nextTask.task,
-    gapNote: commit.gapNote,
+    task: activeDelegation.task,
+    guidance: null,
   });
   return {
     messages: materialized.laneMessages,
     runNextDelegation,
-    runCapabilityPlan: remainingPlan,
+    runCapabilityPlan: state.runCapabilityPlan,
     taskActiveDelegation: {
       ...activeDelegation,
-      task: nextTask.task,
       contextSummary: null,
       status: 'pending' as const,
       resultPreview: null,
@@ -285,7 +268,6 @@ function runtimeStateFromRoot(state: OrchestratorStateType): CapabilityPlannerRu
 
 function buildPlannerInput(params: {
   nodeInput: OrchestratorStateType | CapabilityPlannerDispatch;
-  rootState?: OrchestratorStateType;
   workspace: CapabilityPlannerInput['workspace'];
 }): { input: CapabilityPlannerInput; state: CapabilityPlannerRuntimeState } {
   const { nodeInput, workspace } = params;
@@ -299,8 +281,10 @@ function buildPlannerInput(params: {
         traceId: state.traceId,
         runId: state.runId,
         userRequest: state.runUserRequest,
-        mainMessages: nodeInput.mainMessages,
-        latestUserMessage: null,
+        messageContext: selectCapabilityPlannerMessages({
+          mode: 'entry',
+          messages: nodeInput.messages,
+        }),
         activeDelegation: null,
         latestAnnounce: null,
         remainingPlan: state.runCapabilityPlan,
@@ -343,8 +327,13 @@ function buildPlannerInput(params: {
       traceId: state.traceId,
       runId: state.runId,
       userRequest: plannerState.runUserRequest,
-      mainMessages: [],
-      latestUserMessage: freshTurn ? readLatestHumanRequest(state.messages) : null,
+      messageContext: selectCapabilityPlannerMessages({
+        mode: 'boundary',
+        messages: state.messages,
+        lane: activeDelegation.lane,
+        transcriptRunId: activeDelegation.transcriptRunId,
+        delegationId: activeDelegation.id,
+      }),
       activeDelegation: {
         delegationId: activeDelegation.id,
         capability,
@@ -353,7 +342,6 @@ function buildPlannerInput(params: {
       latestAnnounce: announce
         ? {
             messageId: announce.messageId,
-            text: boundPlannerAnnounce(announce.text),
             completionReason,
           }
         : null,
@@ -445,7 +433,6 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
         update: buildContinueCurrentUpdate({
           state: rootState,
           activeDelegation,
-          commit,
         }),
         goto: 'capability',
       });

@@ -47,7 +47,6 @@ const PRIVATE_COMPACTION_SUMMARY_MAX_CHARS = 24_000;
 const PRIVATE_COMPACTION_MESSAGE_NAME = 'private_planner_compaction';
 const MAX_PLAN_TASKS = 24;
 const MAX_TASK_TEXT_CHARS = 2_000;
-const MAX_GAP_NOTE_CHARS = 2_000;
 const CONTINUE_CURRENT_TOOL_NAME = 'continue_current';
 const SUBMIT_PLAN_TOOL_NAME = 'submit_plan';
 const ADVANCE_PLAN_TOOL_NAME = 'advance_plan';
@@ -56,11 +55,13 @@ const COMPLETE_GOAL_TOOL_NAME = 'complete_goal';
 const REQUEST_USER_INPUT_TOOL_NAME = 'request_user_input';
 const REPORT_UNAVAILABLE_TOOL_NAME = 'report_unavailable';
 
+type CapabilityPlannerCheckpointInput = Omit<CapabilityPlannerInput, 'messageContext'>;
+
 const plannerPrivateStateSchema = z4.object({
   requestedTraceId: z4.string().default(''),
   traceId: z4.string().default(''),
   currentInputId: z4.string().default(''),
-  currentInput: z4.custom<CapabilityPlannerInput>(),
+  currentInput: z4.custom<CapabilityPlannerCheckpointInput>(),
   registryDigest: z4.string().default(''),
   plannerCommit: z4.custom<PlannerCommit>().nullable().default(null),
   committedInputId: z4.string().default(''),
@@ -106,20 +107,11 @@ function plannerTasksSchema() {
 
 function createPlannerTerminalTools(): StructuredTool[] {
   const continueCurrent = tool(
-    async ({ tasks, gap_note }: {
-      tasks: Array<{ capability: string; task: string }>;
-      gap_note?: string;
-    }) => {
-      return JSON.stringify({ action: 'continue_current', tasks, gapNote: gap_note });
-    },
+    async () => JSON.stringify({ action: 'continue_current', tasks: [] }),
     {
       name: CONTINUE_CURRENT_TOOL_NAME,
-      description: 'Boundary-only terminal action. The current task is incomplete. Continue the same active delegation; the first task must use the Current Capability shown in the Planner input. Explain the observed gap and give concise, forward-looking correction or verification guidance for the next attempt. Optional future tasks may follow.',
-      schema: z.object({
-        tasks: plannerTasksSchema(),
-        gap_note: z.string().trim().min(1).max(MAX_GAP_NOTE_CHARS).optional()
-          .describe('Continuation guidance for the same delegation. State the observed gap, the concrete next action, and the evidence needed for acceptance. Do not copy the previous result verbatim.'),
-      }),
+      description: 'Boundary-only terminal action. The current task remains executable but incomplete, so continue the same delegation without replacing its task or remaining plan.',
+      schema: z.object({}).strict(),
     },
   );
   const submitPlan = tool(
@@ -162,7 +154,7 @@ function createPlannerTerminalTools(): StructuredTool[] {
     async () => JSON.stringify({ action: 'user_input_required', tasks: [] }),
     {
       name: REQUEST_USER_INPUT_TOOL_NAME,
-      description: 'Terminal Planner action. Further progress must wait for user input. Do not provide a question or explanation.',
+      description: 'Terminal Planner action. Further progress requires a user choice or missing information. Answer will use the current delegation result to ask the user.',
       schema: z.object({}).strict(),
     },
   );
@@ -348,7 +340,33 @@ function currentPlannerInput(state: Partial<PlannerPrivateState>) {
   return state.currentInput;
 }
 
-function terminalRepairMessage(input: CapabilityPlannerInput) {
+function injectPlannerMessageContext(params: {
+  messages: readonly BaseMessage[];
+  input: CapabilityPlannerCheckpointInput;
+  context: CapabilityPlannerInput['messageContext'] | undefined;
+}) {
+  const { messages, input, context } = params;
+  if (!context || context.messages.length === 0) return [...messages];
+  const inputIndex = messages.findIndex((message) => message.id === `planner:${input.inputId}`);
+  if (inputIndex < 0) return [...messages];
+  const opening = new HumanMessage({
+    id: `planner-context-start:${input.inputId}`,
+    content: `<planner_message_context role="fact" source="${context.scope}" trust="read_only">`,
+  });
+  const closing = new HumanMessage({
+    id: `planner-context-end:${input.inputId}`,
+    content: '</planner_message_context>',
+  });
+  return [
+    ...messages.slice(0, inputIndex),
+    opening,
+    ...context.messages,
+    closing,
+    ...messages.slice(inputIndex),
+  ];
+}
+
+function terminalRepairMessage(input: CapabilityPlannerCheckpointInput) {
   const actions = input.mode === 'entry'
     ? 'submit_plan, request_user_input, or report_unavailable'
     : 'continue_current, advance_plan, complete_goal, request_user_input, or report_unavailable';
@@ -358,6 +376,9 @@ function terminalRepairMessage(input: CapabilityPlannerInput) {
 function createPrivatePlannerMiddleware(params: {
   privateContextMaxChars: number;
   privateContextKeepInputs: number;
+  messageContextForInput: (
+    input: CapabilityPlannerCheckpointInput,
+  ) => CapabilityPlannerInput['messageContext'] | undefined;
 }) {
   return createMiddleware({
     name: 'PrivateCapabilityPlanner',
@@ -423,6 +444,11 @@ function createPrivatePlannerMiddleware(params: {
       }
       return handler({
         ...request,
+        messages: injectPlannerMessageContext({
+          messages: request.messages,
+          input,
+          context: params.messageContextForInput(input),
+        }),
         systemMessage: new SystemMessage(
           buildCapabilityPlannerAgentSystemPrompt(input.mode),
         ),
@@ -526,7 +552,7 @@ export function createCapabilityPlannerAgent(params: {
   assertPositiveInteger(privateContextKeepInputs, 'Capability Planner privateContextKeepInputs');
 
   const explorers = new Map<string, CapabilityPlannerFileExplorer>();
-  const explorerForInput = (input: CapabilityPlannerInput) => {
+  const explorerForInput = (input: CapabilityPlannerCheckpointInput) => {
     const existing = explorers.get(input.inputId);
     if (existing) return existing;
     const explorer = createCapabilityPlannerFileExplorer({
@@ -551,9 +577,14 @@ export function createCapabilityPlannerAgent(params: {
     runLimit: CAPABILITY_PLANNER_MAX_CAPABILITY_SEARCH_CALLS,
     exitBehavior: 'continue',
   });
+  const invocationMessageContexts = new Map<
+    string,
+    CapabilityPlannerInput['messageContext']
+  >();
   const middleware = createPrivatePlannerMiddleware({
     privateContextMaxChars,
     privateContextKeepInputs,
+    messageContextForInput: (input) => invocationMessageContexts.get(input.inputId),
   });
   const buildAgent = (checkpointer: boolean) => createAgent({
     name: 'privateCapabilityPlanner',
@@ -576,10 +607,11 @@ export function createCapabilityPlannerAgent(params: {
       runnableConfig?: RunnableConfig,
     ): Promise<CapabilityPlannerResult> {
       const timeout = mergePlannerSignal(runnableConfig?.signal, timeoutMs);
-      // Main messages are invocation-only context. Their rendered text enters
-      // the private Planner transcript below; do not duplicate canonical
-      // message objects (including media blocks) into checkpoint state.
-      const { mainMessages: _mainMessages, ...checkpointInput } = input;
+      // Canonical conversation and delegation messages are invocation-only.
+      // They remain complete for the model call without entering the private
+      // Planner checkpoint or its compaction lifecycle.
+      const { messageContext, ...checkpointInput } = input;
+      invocationMessageContexts.set(input.inputId, messageContext);
       const config = buildPlannerRunnableConfig({
         input,
         runnableConfig,
@@ -680,6 +712,7 @@ export function createCapabilityPlannerAgent(params: {
       } finally {
         timeout.dispose();
         explorers.delete(input.inputId);
+        invocationMessageContexts.delete(input.inputId);
       }
     },
   });

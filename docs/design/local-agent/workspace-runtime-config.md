@@ -202,7 +202,9 @@ type StudioRunIdentity = {
 
 ## Local-machine Toolkit Runtime
 
-The current local-machine Toolkit implementations use process-global mutable workdir. That is an implementation limitation, not a valid Host/Toolkit contract. The canonical target is defined in [Host / Agent / Capability / Toolkit relationships](../host-agent-capability-toolkit.md).
+The local-machine Toolkit implementations no longer carry a process-global
+mutable workdir or create execution bindings solely to rewrite Tool input. The
+canonical boundary is defined in [Host / Agent / Capability / Toolkit relationships](../host-agent-capability-toolkit.md).
 
 The generic execution scope may still carry workdir for a Toolkit Runtime that
 owns a workspace-bound resource, but it is not a Tool-argument binding mechanism:

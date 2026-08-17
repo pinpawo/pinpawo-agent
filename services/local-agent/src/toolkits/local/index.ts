@@ -42,7 +42,7 @@ import {
 import {
   createRunShellTool,
   getCurrentTimeTool,
-  normalizeShellActionInput,
+  normalizeShellAuthorizationInput,
   runShellTool,
   shellOperationMetadata,
 } from './shellTools';
@@ -188,7 +188,7 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
     download_file: ReviewPolicies.externalAccess({ authorization: 'exact' }),
     run_shell: ReviewPolicies.commandExecution({
       authorization: AuthorizationPolicies.exact({
-        subject: ({ input }) => normalizeShellActionInput(input),
+        subject: ({ input }) => normalizeShellAuthorizationInput(input),
       }),
     }),
     // The process tools carry no review policy on purpose. They only address

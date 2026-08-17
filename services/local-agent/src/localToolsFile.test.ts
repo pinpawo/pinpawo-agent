@@ -277,13 +277,12 @@ test('bash toolkit reviews local path mutations with presets', () => {
 });
 
 test('file operation metadata preserves model-provided relative paths', () => {
-  assert.equal(
-    fileOperationMetadata.write_file?.summarizeInput?.({
-      path: 'notes/todo.md',
-      content: 'todo',
-    })?.target,
-    'notes/todo.md',
-  );
+  const summary = fileOperationMetadata.write_file?.summarizeInput?.({
+    path: 'notes/todo.md',
+    content: 'todo',
+  });
+  assert.equal(summary?.target, 'notes/todo.md');
+  assert.equal(summary?.details?.before, undefined);
 });
 
 test('bash toolkit leaves read-only file tools without review policy', () => {

@@ -20,7 +20,6 @@ import { buildLocalAgentModels } from '../src/agentModels';
 import { buildLocalModelProfileRegistry } from '../src/llmConfig';
 import { parsePatch } from '../src/toolkits/local/applyPatch';
 import { applyPatchTool, viewFileChunkTool } from '../src/toolkits/local/fileTools';
-import { getLocalToolsWorkdir, setLocalToolsWorkdir } from '../src/toolkits/local/pathUtils';
 
 type Scenario = {
   name: string;
@@ -139,7 +138,6 @@ const model = buildLocalAgentModels(llmConfig).subagent;
 const repeats = readPositiveInteger(process.env.PINPAWO_APPLY_PATCH_EVAL_REPEATS, 1);
 const results = [];
 const originalCwd = process.cwd();
-const originalToolsWorkdir = getLocalToolsWorkdir();
 
 for (let repeat = 1; repeat <= repeats; repeat += 1) {
   for (const scenario of scenarios) {
@@ -147,7 +145,6 @@ for (let repeat = 1; repeat <= repeats; repeat += 1) {
     const path = resolve(root, 'sample.txt');
     try {
       process.chdir(root);
-      setLocalToolsWorkdir(root);
       writeFileSync(path, scenario.initial, 'utf-8');
       const result = await createSubagent({
         model,
@@ -175,7 +172,6 @@ for (let repeat = 1; repeat <= repeats; repeat += 1) {
       });
     } finally {
       process.chdir(originalCwd);
-      setLocalToolsWorkdir(originalToolsWorkdir);
       rmSync(root, { recursive: true, force: true });
     }
   }

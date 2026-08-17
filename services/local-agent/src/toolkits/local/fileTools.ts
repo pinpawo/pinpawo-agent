@@ -1,5 +1,5 @@
 import { closeSync, cpSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { basename, dirname, extname, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, resolve } from 'node:path';
 import { tool } from '@langchain/core/tools';
 import { type ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { z } from 'zod';
@@ -844,7 +844,7 @@ export const fileOperationMetadata: Record<string, ToolOperationMetadata> = {
         details: {
           append: readBoolean(record, 'append') ?? false,
           createDirs: readBoolean(record, 'createDirs') ?? true,
-          before: readFileContentPreview(target),
+          before: isAbsolute(target) ? readFileContentPreview(target) : undefined,
           afterPreview: content === undefined ? undefined : truncateForOperationDetails(content),
         },
       };

@@ -8,6 +8,7 @@ import {
   buildCurrentTimeSnapshot,
   getCurrentTimeTool,
   normalizeShellActionInput,
+  normalizeShellAuthorizationInput,
   runShellTool,
   shellOperationMetadata,
   truncateShellOutput,
@@ -110,7 +111,24 @@ test('normalizeShellActionInput preserves explicit cwd and inherits process cwd'
   );
 });
 
-test('shell operation metadata exposes the effective cwd without classifying command text', () => {
+test('normalizeShellAuthorizationInput preserves only model-provided cwd', () => {
+  assert.deepEqual(
+    normalizeShellAuthorizationInput({ command: ' printf ok ', cwd: ' packages/pet-agent ' }),
+    {
+      command: 'printf ok',
+      cwd: 'packages/pet-agent',
+    },
+  );
+  assert.deepEqual(
+    normalizeShellAuthorizationInput({ command: 'pwd' }),
+    {
+      command: 'pwd',
+      cwd: null,
+    },
+  );
+});
+
+test('shell operation metadata preserves the model-provided cwd without classifying command text', () => {
   assert.deepEqual(
     shellOperationMetadata.run_shell?.summarizeInput?.({
       command: "printf 'value' > output.txt",
@@ -120,6 +138,10 @@ test('shell operation metadata exposes the effective cwd without classifying com
       target: '~',
       summary: "printf 'value' > output.txt",
     },
+  );
+  assert.equal(
+    shellOperationMetadata.run_shell?.summarizeInput?.({ command: 'pwd' })?.target,
+    undefined,
   );
 });
 

@@ -2,14 +2,13 @@ import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { z } from 'zod';
 import { createAbortError, type ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { readRecord, readString } from '../operationMetadata';
-import { getLocalToolsWorkdir, resolveUserPath } from './pathUtils';
 import type { ShellRunHandle } from './processExecutor';
 import { runShellCommand } from './processTree';
 import type { ShellProcessBinding } from './processRegistry';
 import { windowsProcessExecutor } from './windowsProcessExecutor';
 
 
-export function normalizeShellActionInput(input: unknown) {
+function readShellActionInput(input: unknown) {
   if (!input || typeof input !== 'object') {
     throw new Error('run_shell requires a command');
   }
@@ -20,9 +19,22 @@ export function normalizeShellActionInput(input: unknown) {
   if (!command) {
     throw new Error('run_shell requires a command');
   }
+  return { record, command };
+}
+
+export function normalizeShellAuthorizationInput(input: unknown) {
+  const { record, command } = readShellActionInput(input);
   const cwd = typeof record.cwd === 'string' && record.cwd.trim()
-    ? resolveUserPath(record.cwd.trim())
-    : getLocalToolsWorkdir();
+    ? record.cwd.trim()
+    : null;
+  return { command, cwd };
+}
+
+export function normalizeShellActionInput(input: unknown) {
+  const { record, command } = readShellActionInput(input);
+  const cwd = typeof record.cwd === 'string' && record.cwd.trim()
+    ? record.cwd.trim()
+    : process.cwd();
   return { command, cwd };
 }
 
@@ -263,9 +275,9 @@ export const shellOperationMetadata: Record<string, ToolOperationMetadata> = {
   run_shell: {
     title: '执行命令',
     summarizeInput: (input) => {
-      const shellAction = normalizeShellActionInput(input);
+      const shellAction = normalizeShellAuthorizationInput(input);
       return {
-        target: shellAction.cwd,
+        target: shellAction.cwd ?? undefined,
         summary: shellAction.command,
       };
     },

@@ -145,7 +145,11 @@ request.workspaceId
 > homedir()
 ```
 
-`workdir` is still the path used by local-machine Toolkit Runtime execution bindings. `workspace` is the stable identity used by UI, session binding, scheduler trace, and future project background.
+`workdir` is the Host context shown to the Agent and supplied to review and
+authorization. The model remains responsible for choosing each Tool's path or
+cwd; the execution layer does not inject or rewrite those arguments. `workspace`
+is the stable identity used by UI, session binding, scheduler trace, and future
+project background.
 
 ## Chat Behavior
 
@@ -198,25 +202,24 @@ type StudioRunIdentity = {
 
 ## Local-machine Toolkit Runtime
 
-The current local-machine Toolkit implementations use process-global mutable workdir. That is an implementation limitation, not a valid Host/Toolkit contract. The canonical target is defined in [Host / Agent / Capability / Toolkit relationships](../host-agent-capability-toolkit.md).
+The local-machine Toolkit implementations no longer carry a process-global
+mutable workdir or create execution bindings solely to rewrite Tool input. The
+canonical boundary is defined in [Host / Agent / Capability / Toolkit relationships](../host-agent-capability-toolkit.md).
 
-Target:
+The generic execution scope may still carry workdir for a Toolkit Runtime that
+owns a workspace-bound resource, but it is not a Tool-argument binding mechanism:
 
 ```ts
-toolkitRuntimeManager.resolve({
-  execution: {
-    workdir: runtimeConfig.workdir,
-    threadId,
-    runId,
-    delegationId,
-  },
-});
+buildLocalChatAgentInput({ workdir: runtimeConfig.workdir });
+buildReviewContext({ workdir: runtimeConfig.workdir });
+tool.invoke(modelGeneratedInput);
 ```
 
-Every Chat/Studio invocation passes its workspace-bound workdir through
-`ToolkitRuntimeExecutionScope`. Relative paths resolve from the execution binding,
-not from a module-level variable or process-wide Toolkit singleton. A Host may keep
-Toolkit roots resident while concurrent bindings use different workdirs.
+Every Chat/Studio invocation uses the same workspace-bound workdir for the Agent
+prompt and review context. The model emits the concrete relative path, absolute
+path, or cwd required by the Tool contract. Supporting another workspace must not
+be implemented by wrapping Tools, rewriting their input, or creating a Runtime
+whose only purpose is to carry workdir.
 
 ## Protocol Additions
 
@@ -263,7 +266,7 @@ Server/runtime responses should expose:
 4. Extend local protocol to accept `workspaceId` for chat and studio requests.
 5. Bind chat sessions/checkpoints to workspace id.
 6. Make Studio legacy config fallback opt-in or migration-only.
-7. Replace global local-tool workdir with per-execution Toolkit Runtime bindings.
+7. Align Agent and review/authorization workdir context without Tool input rewriting.
 8. Add App/Desktop UI for selecting, opening, and registering workspaces.
 
 ## Validation
@@ -272,4 +275,4 @@ Server/runtime responses should expose:
 - `/runtime` endpoint tests verify workspace metadata is visible to clients.
 - Chat tests should cover workspace-bound thread ids before protocol fields become active.
 - Studio tests should cover workspace config lookup, missing config errors, and legacy migration hints.
-- Tool tests should cover two concurrent execution bindings resolving the same relative path against different workdirs.
+- Tool tests should verify that model-provided path and cwd values reach execution unchanged.

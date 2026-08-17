@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { ToolkitRuntimeManager } from '@pinpawo/pet-agent';
 import {
   buildBrowserAvailabilitySnapshot,
   createBrowserIntegration,
@@ -13,6 +14,33 @@ test('only browser_screenshot requires image input', () => {
     .map((definition) => definition.tool.name);
 
   assert.deepEqual(requiringImage, ['browser_screenshot']);
+  assert.equal(toolkit.runtime?.resolve, undefined);
+  assert.equal(toolkit.runtime?.bindTools, undefined);
+  assert.equal(toolkit.runtime?.release, undefined);
+});
+
+test('Browser Runtime is exposed as a port without replacing static tools', async () => {
+  const integration = createBrowserIntegration({ backend: () => 'playwright' });
+  const manager = new ToolkitRuntimeManager();
+  const staticTools = integration.toolkit.tools.map(({ tool }) => tool);
+  const execution = await manager.resolve({
+    toolkits: [integration.toolkit],
+    execution: {
+      threadId: 'thread-1',
+      runId: 'run-1',
+      delegationId: 'delegation-1',
+      workdir: process.cwd(),
+    },
+  });
+
+  assert.deepEqual(
+    execution.toolkits[0]?.tools.map(({ tool }) => tool),
+    staticTools,
+  );
+  assert.equal(execution.runtimes.browser, integration.runtime);
+
+  await execution.release();
+  await manager.stop();
 });
 
 test('browser availability caches only the structural backend decision', async () => {
@@ -43,6 +71,49 @@ test('host configuration disables Browser without reading backend state', async 
   assert.equal(availability.available, false);
   assert.match(availability.reason ?? '', /disabled by host config/);
   assert.equal(backendReads, 0);
+});
+
+test('separate Host managers start independent Browser Runtime roots', async () => {
+  const integration = createBrowserIntegration({ backend: () => 'playwright' });
+  const managerA = new ToolkitRuntimeManager();
+  const managerB = new ToolkitRuntimeManager();
+
+  await managerA.start([integration.toolkit]);
+  const runtimeA = integration.runtime;
+  await managerB.start([integration.toolkit]);
+  const runtimeB = integration.runtime;
+
+  assert.notEqual(runtimeA, runtimeB);
+  await managerA.stop();
+  assert.equal(integration.runtime, runtimeB);
+  await managerB.stop();
+  assert.notEqual(integration.runtime, runtimeB);
+});
+
+test('a failed Browser Runtime stop does not hide another active Host root', async () => {
+  const integration = createBrowserIntegration({ backend: () => 'playwright' });
+  const managerA = new ToolkitRuntimeManager();
+  const managerB = new ToolkitRuntimeManager();
+
+  await managerA.start([integration.toolkit]);
+  const runtimeA = integration.runtime;
+  await managerB.start([integration.toolkit]);
+  const runtimeB = integration.runtime;
+  const stopRuntimeB = runtimeB.stop.bind(runtimeB);
+  runtimeB.stop = async () => {
+    await stopRuntimeB();
+    throw new Error('simulated Browser Runtime cleanup failure');
+  };
+
+  try {
+    await assert.rejects(
+      managerB.stop(),
+      /simulated Browser Runtime cleanup failure/,
+    );
+    assert.equal(integration.runtime, runtimeA);
+  } finally {
+    await managerA.stop();
+  }
 });
 
 test('waiting extension stays routable without claiming command readiness', () => {

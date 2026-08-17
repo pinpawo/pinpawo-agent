@@ -1,5 +1,5 @@
 import { realpathSync, statSync } from 'node:fs';
-import { isAbsolute, relative, sep } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { StructuredTool } from '@langchain/core/tools';
 import {
   ARTIFACT_DISCOVERY_LIST_TOOL_NAME,
@@ -32,9 +32,8 @@ import { downloadFileTool, httpFetchTool, networkOperationMetadata } from './net
 import { jqQueryTool, jsonOperationMetadata } from './jsonTools';
 import { gitTools, gitOperationMetadata } from './gitTools';
 import { parsePatch, PatchParseError } from './applyPatch';
-import { resolveUserPath } from './pathUtils';
 import { globSearchTool, grepSearchTool, searchOperationMetadata } from './searchTools';
-import { shellRuntime, type ShellRuntimeBinding } from './shellRuntime';
+import { ShellRuntime, type ShellRuntimeBinding } from './shellRuntime';
 import {
   createProcessTools,
   processOperationMetadata,
@@ -43,7 +42,7 @@ import {
 import {
   createRunShellTool,
   getCurrentTimeTool,
-  normalizeShellActionInput,
+  normalizeShellAuthorizationInput,
   runShellTool,
   shellOperationMetadata,
 } from './shellTools';
@@ -153,7 +152,10 @@ function authorizeApplyPatch(ctx: ToolAutoAuthorizationContext) {
 
   let target: string;
   try {
-    target = resolveUserPath(parsePatch(patch).path);
+    const requestedPath = parsePatch(patch).path;
+    target = isAbsolute(requestedPath)
+      ? requestedPath
+      : resolve(ctx.workdir, requestedPath);
   } catch (error) {
     // The executor uses the same parser before performing any filesystem
     // mutation. Invalid V4A is therefore safe to run: execution will disclose
@@ -186,7 +188,7 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
     download_file: ReviewPolicies.externalAccess({ authorization: 'exact' }),
     run_shell: ReviewPolicies.commandExecution({
       authorization: AuthorizationPolicies.exact({
-        subject: ({ input }) => normalizeShellActionInput(input),
+        subject: ({ input }) => normalizeShellAuthorizationInput(input),
       }),
     }),
     // The process tools carry no review policy on purpose. They only address
@@ -206,10 +208,11 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
     },
     runtime: {
       start: () => {
-        shellRuntime.start();
-        return shellRuntime;
+        const root = new ShellRuntime();
+        root.start();
+        return root;
       },
-      resolve: (_root, context) => shellRuntime.resolve(context.execution),
+      resolve: (root, context) => (root as ShellRuntime).resolve(context.execution),
       bindTools: (binding) => {
         const shell = binding as ShellRuntimeBinding;
         // The framework matches bound tools to the static inventory by
@@ -222,8 +225,7 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
         );
         return tools.map((staticTool) => bound.get(staticTool.name) ?? staticTool);
       },
-      release: () => shellRuntime.release(),
-      stop: async () => { await shellRuntime.stop(); },
+      stop: async (root) => { await (root as ShellRuntime).stop(); },
     },
   });
 }

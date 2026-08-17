@@ -352,7 +352,8 @@ event、发什么形状,由插件决定。所以:
 
 1. **`AgentToolkit` 面** —— 给 pet 一组工具排期,例如
    `schedule_add({ cron, request, petId })` / `schedule_list` / `schedule_cancel`。
-   与 kanban 同理,`bindTools` 已带 `execution.threadId`,pet 不需要转抄任何 ID。
+   与 kanban 同理,工具从 `ToolRuntime.context.executionScope.threadId` 读取当前
+   invocation identity，pet 不需要转抄任何 ID。
 2. **`studio.start(context)` 面** —— 起自己的定时器。到点直接
    `context.dispatch({ petId, request })`,派完即忘;不等结果,不判定成败。
 3. **自己的存储** —— 排期表是插件私有状态,由插件持有并落盘。studio 不知道

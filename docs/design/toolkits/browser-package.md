@@ -127,7 +127,7 @@ const browser = createBrowserIntegration({
 });
 ```
 
-Browser 包当前返回同一实例关联的 `toolkit`、`capability` 和宿主操作接口。这样 availability、runtime snapshot、CLI status 与实际执行共享同一 runtime，而不是依赖包级全局单例。该 aggregate 是构造便利，不定义新的 `BrowserIntegration` 领域；Host 的最终 inventory 仍分别由 Capability 和 Toolkit definitions 构成。
+Browser 包当前返回同一组配置关联的 `toolkit`、`capability` 和宿主操作接口。每个 `ToolkitRuntimeManager` 启动并持有独立的 Browser Runtime root；不同 root 只共享固定 socket 所需的进程级 extension bridge transport，不共享 thread/session/workdir 状态，也不互相拥有 shutdown。availability 与兼容 runtime snapshot 接口读取当前活动 root（尚未启动时读取无资源的 fallback snapshot），而不是依赖包级可变 Runtime 单例。该 aggregate 是构造便利，不定义新的 `BrowserIntegration` 领域；Host 的最终 inventory 仍分别由 Capability 和 Toolkit definitions 构成。PR 3 引入通用 Toolkit Runtime diagnostics 后，兼容 snapshot 投影不再作为 Browser 专属 lifecycle 状态源。
 
 ## 宿主接口
 

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import { ToolMessage } from '@langchain/core/messages/tool';
-import { tool, type StructuredTool } from '@langchain/core/tools';
+import { tool, type StructuredTool, type ToolRuntime } from '@langchain/core/tools';
 import { FakeListChatModel } from '@langchain/core/utils/testing';
 import { Command, MemorySaver, messagesStateReducer } from '@langchain/langgraph';
 import { createMiddleware, FakeToolCallingModel } from 'langchain';
@@ -73,6 +73,7 @@ import {
 } from './contextCompaction';
 import { findLatestHandoffCopyForDelegation } from './artifacts/handoff';
 import type { RunDelegationSummary, TaskActiveDelegation } from './types';
+import type { SubagentRuntimeContext } from '../../types/subagent';
 import {
   ORCHESTRATOR_STATE_CHANNEL_NAMES,
   type OrchestratorStateType,
@@ -1925,6 +1926,81 @@ test('capability receives tools only from Toolkits authorized by fixed uses', as
   assert.equal(runtimeEvents[0], 'start');
   assert.match(runtimeEvents[1] ?? '', /^resolve:/);
   assert.equal(runtimeEvents[2], 'release');
+  await toolkitRuntimeManager.stop();
+});
+
+test('capability tools receive their Toolkit Runtime port with invocation identity', async () => {
+  let routeCallCount = 0;
+  let seenRuntime: unknown;
+  let seenExecutionScope: SubagentRuntimeContext['executionScope'];
+  const browserRuntime = Object.freeze({ kind: 'browser-runtime' });
+  const inspectRuntime = tool(async (
+    _input,
+    runtime: ToolRuntime<unknown, SubagentRuntimeContext>,
+  ) => {
+    seenRuntime = runtime.context.toolkitRuntimes?.browser;
+    seenExecutionScope = runtime.context.executionScope;
+    return 'runtime inspected';
+  }, {
+    name: 'browser_snapshot',
+    description: 'Inspect the active browser runtime.',
+    schema: z.object({}),
+  });
+  const routeModel = {
+    invoke: async () => new AIMessage('answered'),
+    bindTools: () => ({ invoke: async () => new AIMessage('') }),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        routeCallCount += 1;
+        if (routeCallCount === 1) return scriptedPlannerTask('inspect browser state');
+        if (routeCallCount === 2) return scriptedPlannerCapability('inspect_browser');
+        return goalDoneDecision();
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const subagentModel = new FakeToolCallingModel({
+    toolCalls: [
+      [{ id: 'inspect-browser-runtime', name: 'browser_snapshot', args: {} }],
+      [],
+    ],
+  });
+  const toolkitRuntimeManager = new ToolkitRuntimeManager();
+  const graph = createOrchestratorGraph({
+    models: { act: routeModel, observe: routeModel, subagent: subagentModel },
+    actor: testActor,
+    toolkitRuntimeManager,
+  });
+
+  await graph.invoke(buildOrchestratorRunInput([new HumanMessage('inspect')]), {
+    configurable: {
+      thread_id: 'browser-runtime-context',
+      workdir: '/workspace',
+      actor: testActor,
+      capabilities: [{
+        name: 'inspect_browser',
+        description: 'Inspect browser state.',
+        uses: ['browser'],
+        instructions: defineInstructionDocument({
+          content: 'Inspect the browser with the authorized tools.',
+        }),
+      }],
+      toolkits: [{
+        name: 'browser',
+        description: 'browser toolkit',
+        tools: toolDefinitions(inspectRuntime),
+        runtime: {
+          start: () => browserRuntime,
+        },
+      }],
+      allowedCapabilityNames: ['inspect_browser'],
+    },
+  });
+
+  assert.equal(seenRuntime, browserRuntime);
+  assert.equal(seenExecutionScope?.threadId, 'browser-runtime-context');
+  assert.equal(seenExecutionScope?.workdir, '/workspace');
+  assert.ok(seenExecutionScope?.runId);
+  assert.ok(seenExecutionScope?.delegationId);
   await toolkitRuntimeManager.stop();
 });
 

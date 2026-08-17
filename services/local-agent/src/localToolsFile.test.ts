@@ -8,6 +8,7 @@ import { createBashToolkit } from './toolkits/local';
 import {
   applyPatchTool as rawApplyPatchTool,
   copyPathTool,
+  fileOperationMetadata,
   listDirTool,
   mkdirPathTool,
   movePathTool,
@@ -242,6 +243,10 @@ test('auto review deterministically authorizes safe apply_patch execution', asyn
     workdir: root,
   }), true);
   assert.equal(await authorize({
+    ...reviewContext('apply_patch', patchInput('inside.txt')),
+    workdir: root,
+  }), true);
+  assert.equal(await authorize({
     ...reviewContext('apply_patch', patchInput(outsidePath)),
     workdir: root,
   }), false);
@@ -269,6 +274,15 @@ test('bash toolkit reviews local path mutations with presets', () => {
   assert.equal(Boolean(definition(toolkit, 'move_path')?.review), true);
   assert.equal(Boolean(definition(toolkit, 'copy_path')?.review), true);
   assert.equal(Boolean(definition(toolkit, 'mkdir_path')?.review), true);
+});
+
+test('file operation metadata preserves model-provided relative paths', () => {
+  const summary = fileOperationMetadata.write_file?.summarizeInput?.({
+    path: 'notes/todo.md',
+    content: 'todo',
+  });
+  assert.equal(summary?.target, 'notes/todo.md');
+  assert.equal(summary?.details?.before, undefined);
 });
 
 test('bash toolkit leaves read-only file tools without review policy', () => {

@@ -5,10 +5,19 @@ import {
 import { randomUUID } from 'node:crypto';
 import type { BrowserExtensionCapability } from './drivers/chromeExtension/protocol';
 import { ChromeExtensionBrowserSession } from './drivers/chromeExtension/session';
-import { BrowserSession } from './session';
-import type { BrowserExecutionOwner } from './ownership';
+import {
+  BrowserSession,
+  type BrowserElementTarget,
+  type BrowserExtractOptions,
+  type BrowserOpenOptions,
+  type BrowserScrollOptions,
+  type BrowserWaitState,
+} from './session';
 import type { BrowserRuntimeEvent } from './lifecycle/events';
-import type { ToolkitRuntimeExecutionScope } from '@pinpawo/pet-agent';
+import type {
+  BrowserRuntimeCallContext,
+  BrowserRuntimePort,
+} from './runtimePort';
 import {
   configuredBrowserBackend,
   resolveBrowserToolkitOptions,
@@ -54,12 +63,6 @@ export type BrowserReadinessSnapshot = Readonly<{
   error?: { code: string; message: string; retryable: boolean };
 }>;
 
-export type BrowserRuntimeBinding = Readonly<{
-  session: BrowserSession;
-  owner: BrowserExecutionOwner;
-  workdir: () => string;
-}>;
-
 export type BrowserRuntimeDependencies = {
   bridge?: BrowserExtensionBridge;
 };
@@ -96,6 +99,67 @@ function describeBrowserExtensionStatus(
   return 'browser extension bridge is not running';
 }
 
+/**
+ * Browser Runtime roots are isolated per Host manager, while the native-host
+ * bridge is one process transport bound to a fixed socket. This coordinator
+ * lets independent roots lease that transport without making either root own
+ * another root's lifecycle.
+ *
+ * This is a Browser provider detail, not a Host or framework-level Runtime.
+ */
+class BrowserExtensionBridgeCoordinator {
+  readonly bridge: BrowserExtensionBridge;
+  private activeLeases = 0;
+  private lifecycleTail: Promise<void> = Promise.resolve();
+
+  constructor(bridge: BrowserExtensionBridge = new BrowserExtensionBridge()) {
+    this.bridge = bridge;
+  }
+
+  acquire(): Promise<void> {
+    return this.queueLifecycle(async () => {
+      if (this.activeLeases === 0) {
+        await this.bridge.start();
+      }
+      this.activeLeases += 1;
+    });
+  }
+
+  release(): Promise<void> {
+    return this.queueLifecycle(async () => {
+      if (this.activeLeases === 0) return;
+      this.activeLeases -= 1;
+      if (this.activeLeases === 0) {
+        await this.bridge.stop();
+      }
+    });
+  }
+
+  private queueLifecycle(operation: () => Promise<void>): Promise<void> {
+    const queued = this.lifecycleTail.then(operation, operation);
+    this.lifecycleTail = queued.then(
+      () => undefined,
+      () => undefined,
+    );
+    return queued;
+  }
+}
+
+const bridgeCoordinators = new WeakMap<
+  BrowserExtensionBridge,
+  BrowserExtensionBridgeCoordinator
+>();
+
+function coordinatorForBridge(
+  bridge: BrowserExtensionBridge,
+): BrowserExtensionBridgeCoordinator {
+  const existing = bridgeCoordinators.get(bridge);
+  if (existing) return existing;
+  const coordinator = new BrowserExtensionBridgeCoordinator(bridge);
+  bridgeCoordinators.set(bridge, coordinator);
+  return coordinator;
+}
+
 export function projectBrowserRuntimeSnapshot(
   status: BrowserBridgeStatus,
   readiness: BrowserReadinessSnapshot | null = null,
@@ -124,12 +188,16 @@ export function projectBrowserRuntimeSnapshot(
   });
 }
 
-export class BrowserRuntime {
+export class BrowserRuntime implements BrowserRuntimePort {
   private started = false;
   /** One browser workspace per conversation thread. */
-  private readonly sessionsByThread = new Map<string, BrowserSession>();
+  private readonly sessionsByThread = new Map<string, {
+    session: BrowserSession;
+    workdir: string;
+  }>();
   private readonly options: ResolvedBrowserToolkitOptions;
   private readonly bridge: BrowserExtensionBridge;
+  private readonly bridgeCoordinator: BrowserExtensionBridgeCoordinator;
 
   constructor(
     options: BrowserToolkitOptions = {},
@@ -137,11 +205,24 @@ export class BrowserRuntime {
   ) {
     this.options = resolveBrowserToolkitOptions(options);
     this.bridge = dependencies.bridge ?? new BrowserExtensionBridge();
+    this.bridgeCoordinator = coordinatorForBridge(this.bridge);
   }
 
-  private sessionForThread(threadId: string): BrowserSession {
+  private sessionForThread(threadId: string, workdir: string): BrowserSession {
     const existing = this.sessionsByThread.get(threadId);
-    if (existing) return existing;
+    if (existing) {
+      if (existing.workdir !== workdir) {
+        throw new Error(
+          `Browser runtime thread "${threadId}" is already bound to workdir "${existing.workdir}".`,
+        );
+      }
+      return existing.session;
+    }
+
+    const executionOptions = Object.freeze({
+      ...this.options,
+      workdir: () => workdir,
+    });
 
     // The extension receives only this opaque id; raw run/delegation tracing
     // metadata never crosses the native host boundary. Its lifetime is the
@@ -172,54 +253,136 @@ export class BrowserRuntime {
             if (!change.contextId || change.contextId === browserContextId) listener(change);
           }) }
         : {}),
-    }, this.options.workdir);
+    }, executionOptions.workdir);
     const session = new BrowserSession({
       requireExecutionOwner: true,
       getRuntimeSnapshot: () => this.getSnapshot(),
       createChromeExtensionSession: () => extensionSession,
-      environment: this.options,
+      environment: executionOptions,
     });
-    this.sessionsByThread.set(threadId, session);
+    this.sessionsByThread.set(threadId, { session, workdir });
     return session;
+  }
+
+  private sessionForCall(context: BrowserRuntimeCallContext) {
+    if (!context.threadId.trim()) {
+      throw new Error('Browser runtime requires a threadId.');
+    }
+    if (!context.workdir.trim()) {
+      throw new Error('Browser runtime requires a workdir.');
+    }
+    const session = this.sessionForThread(context.threadId, context.workdir);
+    return {
+      session,
+      owner: { threadId: context.threadId },
+    };
+  }
+
+  async open(
+    context: BrowserRuntimeCallContext,
+    url: string,
+    options?: BrowserOpenOptions,
+  ) {
+    const { session, owner } = this.sessionForCall(context);
+    return session.open(url, options, owner, context.signal);
+  }
+
+  async openWithProfile(
+    context: BrowserRuntimeCallContext,
+    url: string,
+    userDataDir: string,
+    options?: Omit<BrowserOpenOptions, 'session' | 'userDataDir'>,
+  ) {
+    const { session, owner } = this.sessionForCall(context);
+    return session.openWithProfile(url, userDataDir, options, owner, context.signal);
+  }
+
+  async snapshot(context: BrowserRuntimeCallContext) {
+    const { session, owner } = this.sessionForCall(context);
+    return session.snapshot(owner, context.signal);
+  }
+
+  async click(
+    context: BrowserRuntimeCallContext,
+    target: string | BrowserElementTarget,
+  ) {
+    const { session, owner } = this.sessionForCall(context);
+    return session.click(target, owner, context.signal);
+  }
+
+  async type(
+    context: BrowserRuntimeCallContext,
+    target: string | BrowserElementTarget,
+    text: string,
+    submit?: boolean,
+  ) {
+    const { session, owner } = this.sessionForCall(context);
+    return session.type(target, text, submit, owner, context.signal);
+  }
+
+  async scroll(
+    context: BrowserRuntimeCallContext,
+    options?: BrowserScrollOptions,
+  ) {
+    const { session, owner } = this.sessionForCall(context);
+    return session.scroll(options, owner, context.signal);
+  }
+
+  async wait(
+    context: BrowserRuntimeCallContext,
+    target?: string | BrowserElementTarget,
+    timeoutMs?: number,
+    state?: BrowserWaitState,
+  ) {
+    const { session, owner } = this.sessionForCall(context);
+    return session.wait(target, timeoutMs, state, owner, context.signal);
+  }
+
+  async extract(
+    context: BrowserRuntimeCallContext,
+    options?: BrowserExtractOptions,
+  ) {
+    const { session, owner } = this.sessionForCall(context);
+    return session.extract(options, owner, context.signal);
+  }
+
+  async screenshot(context: BrowserRuntimeCallContext) {
+    const { session, owner } = this.sessionForCall(context);
+    return session.screenshot(owner, context.signal);
+  }
+
+  async close(context: BrowserRuntimeCallContext) {
+    const { session, owner } = this.sessionForCall(context);
+    return session.close(owner, context.signal);
+  }
+
+  async listSessions(context: BrowserRuntimeCallContext) {
+    const { session } = this.sessionForCall(context);
+    return session.listSessions();
   }
 
   async start(): Promise<void> {
     if (!shouldStartBrowserExtensionBridge(configuredBrowserBackend(this.options))) return;
-    await this.bridge.start();
+    if (this.started) return;
+    await this.bridgeCoordinator.acquire();
     this.started = true;
   }
 
   async stop(): Promise<void> {
     try {
-      await Promise.all([...this.sessionsByThread.values()].map(async (session) => {
+      await Promise.all([...this.sessionsByThread.values()].map(async ({ session }) => {
         await session.shutdown();
       }));
       this.sessionsByThread.clear();
     } finally {
       if (this.started) {
         try {
-          await this.bridge.stop();
+          await this.bridgeCoordinator.release();
         } finally {
           this.started = false;
         }
       }
     }
-  }
-
-  async resolve(execution: ToolkitRuntimeExecutionScope): Promise<BrowserRuntimeBinding> {
-    if (!execution.threadId) {
-      throw new Error('Browser runtime requires a threadId.');
-    }
-    const threadId = execution.threadId;
-    const binding = Object.freeze({
-      session: this.sessionForThread(threadId),
-      owner: {
-        threadId,
-      },
-      workdir: this.options.workdir,
-    });
-    await binding.session.acquire(binding.owner);
-    return binding;
   }
 
   getSnapshot(): BrowserRuntimeSnapshot {

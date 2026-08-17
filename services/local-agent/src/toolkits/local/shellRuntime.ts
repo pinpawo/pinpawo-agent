@@ -81,5 +81,3 @@ export class ShellRuntime {
     return this.registry;
   }
 }
-
-export const shellRuntime = new ShellRuntime();

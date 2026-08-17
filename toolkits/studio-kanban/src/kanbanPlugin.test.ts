@@ -49,12 +49,22 @@ function pet(options: {
 
 type KanbanTools = Record<string, NamedStructuredTool>;
 
-/** 取得绑定到某个 thread 的工具 —— 与 pet 执行时拿到的是同一批。 */
-function toolsForThread(plugin: ReturnType<typeof createKanbanPlugin>, threadId: string | null) {
-  const bound = plugin.runtime!.bindTools!({}, {
-    execution: { threadId, runId: 'r', delegationId: 'd', workdir: null },
-  }) as NamedStructuredTool[];
-  return Object.fromEntries(bound.map((item) => [item.name, item])) as KanbanTools;
+function pluginTools(plugin: ReturnType<typeof createKanbanPlugin>) {
+  return Object.fromEntries(
+    plugin.tools.map(({ tool }) => [tool.name, tool]),
+  ) as KanbanTools;
+}
+
+function invocationConfig(threadId: string | null) {
+  return {
+    context: {
+      executionScope: {
+        threadId,
+        runId: 'r',
+        delegationId: 'd',
+      },
+    },
+  };
 }
 
 const flush = async () => {
@@ -74,7 +84,7 @@ test('a full round: entry pet plans, kanban dispatches, worker completes', async
     pets: [
       pet({
         petId: 'planner',
-        tools: () => toolsForThread(plugin, null),
+        tools: () => pluginTools(plugin),
         onInvoke: async (_input, tools) => {
           // planner 拆解出一个任务 —— 它只知道"新增任务"，不知道看板。
           await tools.kanban_task_add!.invoke({ petId: 'writer', brief: '写稿' });
@@ -86,8 +96,11 @@ test('a full round: entry pet plans, kanban dispatches, worker completes', async
         onInvoke: async (input) => {
           writerBrief = input.brief;
           // worker 用自己 thread 的工具标记完成 —— 无需转述任何 id。
-          const scoped = toolsForThread(plugin, input.threadId ?? null);
-          await scoped.kanban_task_complete!.invoke({ result: '稿子写完了' });
+          const tools = pluginTools(plugin);
+          await tools.kanban_task_complete!.invoke(
+            { result: '稿子写完了' },
+            invocationConfig(input.threadId ?? null),
+          );
         },
       }),
     ],
@@ -191,10 +204,13 @@ test('restart marks in-flight tasks blocked rather than silently requeuing them'
 
 test('tools report plainly when the caller has no assigned task', async () => {
   const plugin = createKanbanPlugin();
-  const tools = toolsForThread(plugin, 'unknown-thread');
+  const tools = pluginTools(plugin);
 
   assert.match(
-    await tools.kanban_task_complete!.invoke({ result: 'x' }) as string,
+    await tools.kanban_task_complete!.invoke(
+      { result: 'x' },
+      invocationConfig('unknown-thread'),
+    ) as string,
     /no task is currently assigned/,
   );
 });

@@ -13,9 +13,10 @@ import {
   type BrowserEnvironment,
   type BrowserStatus,
 } from './session';
-import { browserTools, createBrowserTools } from './tools';
+import { browserTools } from './tools';
 import { browserOperationMetadata } from './operationMetadata';
-import { BrowserRuntime, type BrowserRuntimeBinding } from './runtime';
+import { BrowserRuntime } from './runtime';
+import { BrowserExtensionBridge } from './drivers/chromeExtension/bridge';
 import {
   resolveBrowserToolkitOptions,
   type BrowserToolkitOptions,
@@ -89,7 +90,15 @@ export function createBrowserIntegration(
   browserOptions: BrowserToolkitOptions = {},
 ): BrowserIntegration {
   const options = resolveBrowserToolkitOptions(browserOptions);
-  const runtime = new BrowserRuntime(options);
+  // Availability may be queried before a Host starts Runtime roots. The
+  // fallback never acquires resources; every ToolkitRuntimeManager start gets
+  // its own BrowserRuntime root instead of sharing this integration object.
+  // Roots share only the process-level extension bridge transport: their
+  // thread/session/workdir state and shutdown remain isolated.
+  const bridge = new BrowserExtensionBridge();
+  const availabilityRuntime = new BrowserRuntime(options, { bridge });
+  const runtimeRoots: BrowserRuntime[] = [];
+  const currentRuntime = () => runtimeRoots.at(-1) ?? availabilityRuntime;
   let latestAvailability: BrowserAvailabilitySnapshot | null = null;
 
   const rememberAvailability = (
@@ -105,7 +114,10 @@ export function createBrowserIntegration(
     }
 
     try {
-      const status = await detectBrowserStatus(runtime.getSnapshot(), options);
+      const status = await detectBrowserStatus(
+        currentRuntime().getSnapshot(),
+        options,
+      );
       return rememberAvailability(buildBrowserAvailabilitySnapshot(status));
     } catch (error) {
       return rememberAvailability({
@@ -143,62 +155,21 @@ export function createBrowserIntegration(
         : {}),
     })),
     runtime: {
-      start: async () => await runtime.start(),
-      resolve: (_root, context) => runtime.resolve(context.execution),
-      bindTools: (binding) => {
-        const browser = binding as BrowserRuntimeBinding;
-        return createBrowserTools({
-          open: (url, openOptions, signal) => browser.session.open(
-            url,
-            openOptions,
-            browser.owner,
-            signal,
-          ),
-          openWithProfile: (url, userDataDir, openOptions, signal) => (
-            browser.session.openWithProfile(
-              url,
-              userDataDir,
-              openOptions,
-              browser.owner,
-              signal,
-            )
-          ),
-          snapshot: (signal) => browser.session.snapshot(browser.owner, signal),
-          click: (target, signal) => browser.session.click(target, browser.owner, signal),
-          type: (target, text, submit, signal) => browser.session.type(
-            target,
-            text,
-            submit,
-            browser.owner,
-            signal,
-          ),
-          scroll: (scrollOptions, signal) => browser.session.scroll(
-            scrollOptions,
-            browser.owner,
-            signal,
-          ),
-          wait: (target, timeoutMs, state, signal) => browser.session.wait(
-            target,
-            timeoutMs,
-            state,
-            browser.owner,
-            signal,
-          ),
-          extract: (extractOptions, signal) => browser.session.extract(
-            extractOptions,
-            browser.owner,
-            signal,
-          ),
-          screenshot: (signal) => browser.session.screenshot(browser.owner, signal),
-          close: (signal) => browser.session.close(browser.owner, signal),
-          listSessions: () => browser.session.listSessions(),
-        }, { workdir: browser.workdir });
+      start: async () => {
+        const root = new BrowserRuntime(options, { bridge });
+        await root.start();
+        runtimeRoots.push(root);
+        return root;
       },
-      release: async (binding) => {
-        const browser = binding as BrowserRuntimeBinding;
-        await browser.session.release(browser.owner);
+      stop: async (root) => {
+        const runtimeRoot = root as BrowserRuntime;
+        try {
+          await runtimeRoot.stop();
+        } finally {
+          const index = runtimeRoots.lastIndexOf(runtimeRoot);
+          if (index >= 0) runtimeRoots.splice(index, 1);
+        }
       },
-      stop: async () => await runtime.stop(),
     },
     instructions: browserToolkitInstructions.join('\n'),
   });
@@ -206,7 +177,9 @@ export function createBrowserIntegration(
   return {
     toolkit,
     capability: createBrowserCapability(),
-    runtime,
+    get runtime() {
+      return currentRuntime();
+    },
     checkAvailability,
     getCachedAvailability: () => latestAvailability,
     detectEnvironment: () => detectBrowserEnvironment(options),

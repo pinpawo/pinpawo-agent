@@ -30,7 +30,12 @@ The runtime can also expose derived workspace metadata (`id`, `name`, and
 `rootPath`) from the workdir. This is local metadata; there is no persisted
 workspace registry or per-request workspace selection contract.
 
+The Host exposes its effective workdir to the Agent prompt and to
+review/authorization context. It is not a filesystem sandbox or a hidden Tool
+argument: the model chooses each relative path, absolute path, or cwd, and the
+execution layer does not inject or rewrite that input. Toolkit Runtime bindings
+are reserved for Toolkit-owned live resources and ownership.
+
 See [Studio configuration](../../studio/configuration.md) for the files Studio
 actually reads, and [the workspace proposal](../../design/local-agent/workspace-runtime-config.md)
 for unshipped workspace ideas.
-

@@ -722,14 +722,6 @@ export class BrowserSession {
     return this.initPromise;
   }
 
-  async acquire(owner: BrowserExecutionOwner | null) {
-    await this.ownership?.acquire(owner);
-  }
-
-  async release(owner: BrowserExecutionOwner | null) {
-    await this.ownership?.release(owner);
-  }
-
   async open(
     url: string,
     opts?: BrowserOpenOptions,

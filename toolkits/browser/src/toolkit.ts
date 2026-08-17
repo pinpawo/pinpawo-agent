@@ -163,9 +163,12 @@ export function createBrowserIntegration(
       },
       stop: async (root) => {
         const runtimeRoot = root as BrowserRuntime;
-        await runtimeRoot.stop();
-        const index = runtimeRoots.lastIndexOf(runtimeRoot);
-        if (index >= 0) runtimeRoots.splice(index, 1);
+        try {
+          await runtimeRoot.stop();
+        } finally {
+          const index = runtimeRoots.lastIndexOf(runtimeRoot);
+          if (index >= 0) runtimeRoots.splice(index, 1);
+        }
       },
     },
     instructions: browserToolkitInstructions.join('\n'),

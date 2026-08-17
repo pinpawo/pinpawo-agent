@@ -90,6 +90,32 @@ test('separate Host managers start independent Browser Runtime roots', async () 
   assert.notEqual(integration.runtime, runtimeB);
 });
 
+test('a failed Browser Runtime stop does not hide another active Host root', async () => {
+  const integration = createBrowserIntegration({ backend: () => 'playwright' });
+  const managerA = new ToolkitRuntimeManager();
+  const managerB = new ToolkitRuntimeManager();
+
+  await managerA.start([integration.toolkit]);
+  const runtimeA = integration.runtime;
+  await managerB.start([integration.toolkit]);
+  const runtimeB = integration.runtime;
+  const stopRuntimeB = runtimeB.stop.bind(runtimeB);
+  runtimeB.stop = async () => {
+    await stopRuntimeB();
+    throw new Error('simulated Browser Runtime cleanup failure');
+  };
+
+  try {
+    await assert.rejects(
+      managerB.stop(),
+      /simulated Browser Runtime cleanup failure/,
+    );
+    assert.equal(integration.runtime, runtimeA);
+  } finally {
+    await managerA.stop();
+  }
+});
+
 test('waiting extension stays routable without claiming command readiness', () => {
   const availability = buildBrowserAvailabilitySnapshot({
     mode: 'extension',

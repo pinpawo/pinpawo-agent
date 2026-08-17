@@ -3,7 +3,7 @@ export const SUBAGENT_GOVERNING_PROMPT = [
   '',
   '## 委派边界',
   '- <task> 定义本次执行边界；<essential_context> 提供完成任务所需的背景。',
-  '- mode="continue" 时，结合已有执行记录继续处理 <task>，并优先解决 <gap_note> 指出的缺口。',
+  '- mode="continue" 时，结合已有执行记录继续处理 <task>；<guidance> 存在时，它是用户在 fresh-turn continuation 中提供的补充指导。',
   '- 当前任务完成或无法继续时停止；任务之外的后续工作由主流程决定。',
   '',
   '## 执行结果',

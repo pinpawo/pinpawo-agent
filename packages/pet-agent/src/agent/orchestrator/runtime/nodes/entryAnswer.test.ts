@@ -9,7 +9,7 @@ import type { OrchestratorConfig } from '../../types';
 import { createOrchestratorGraph } from '../graph';
 import { PLAN_REQUEST_TOOL_NAME } from './entryAnswer';
 import { createContextCompactionMessage } from '../../contextCompaction';
-import { setPinpetMeta } from '../../messageLanes';
+import { getMessageLane, mainConversationMessages, setPinpetMeta } from '../../messageLanes';
 
 function entryAnswerModel(
   mode: 'direct' | 'plan',
@@ -94,13 +94,23 @@ test('Entry Answer returns an ordinary reply without invoking Planner', async ()
 test('plan_request routes to Planner without persisting control messages', async () => {
   const scripted = entryAnswerModel('plan');
   const plannerInputs: CapabilityPlannerInput[] = [];
+  const plannerObservation = new AIMessage('INTERNAL_PLANNER_OBSERVATION');
+  setPinpetMeta(plannerObservation, {
+    lane: 'orchestrator',
+    source: 'capability_planner',
+    traceId: 'test-trace',
+  });
   const graph = createOrchestratorGraph({
     models: { act: scripted.model, answer: scripted.model },
     actor,
     capabilityPlannerRunner: {
       async invoke(input) {
         plannerInputs.push(input);
-        return { action: 'unavailable', tasks: [] };
+        return {
+          action: 'unavailable',
+          tasks: [],
+          messageUpdates: [plannerObservation],
+        };
       },
     },
   });
@@ -113,13 +123,15 @@ test('plan_request routes to Planner without persisting control messages', async
 
   assert.deepEqual(scripted.counts(), { boundCalls: 1, resultCalls: 1 });
   assert.equal(plannerInputs[0]?.userRequest, request);
-  assert.equal(plannerInputs[0]?.mainMessages?.at(-1)?.content, request);
+  assert.equal(plannerInputs[0]?.messages.some((message) => message.content === request), true);
   assert.equal(result.runUserRequest, request);
   assert.equal(result.messages.some((message) => ToolMessage.isInstance(message)), false);
   assert.equal(result.messages.some((message) => (
     AIMessage.isInstance(message)
     && message.tool_calls?.some((call) => call.name === PLAN_REQUEST_TOOL_NAME)
   )), false);
+  assert.equal(result.messages.some((message) => getMessageLane(message) === 'orchestrator'), true);
+  assert.equal(mainConversationMessages(result.messages).includes(plannerObservation), false);
   assert.equal(result.messages.at(-1)?.content, '当前没有可执行该任务的 Capability。');
 });
 

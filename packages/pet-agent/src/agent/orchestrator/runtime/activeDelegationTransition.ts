@@ -33,7 +33,7 @@ function buildRunNextDelegation(
  *
  * Resuming reuses the exact delegation and transcript identities. A pending
  * delegation can return directly to its capability; an awaiting delegation
- * returns to the private Planner boundary with the new human message available
+ * returns to the Planner boundary with the new human message available
  * as guidance.
  */
 export function applyActiveDelegationTransition(
@@ -91,7 +91,7 @@ export function applyActiveDelegationTransition(
     transcriptRunId: activeDelegation.transcriptRunId,
     delegationId: activeDelegation.id,
     task: activeDelegation.task,
-    gapNote: guidance,
+    guidance,
   });
 
   return {

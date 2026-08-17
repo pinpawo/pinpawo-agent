@@ -213,18 +213,6 @@ export function selectAnswerContextFacts(params: {
       acceptedResults: params.acceptedResults,
     };
   }
-  if (params.state.runRuntimeFailure === 'planner_checkpoint_missing') {
-    return {
-      mode: 'blocked',
-      hasUserRequest,
-      acceptedResults: params.acceptedResults,
-      reason: 'planner_checkpoint_missing',
-      unfinishedTask: params.state.taskActiveDelegation?.task
-        ?? params.state.runUserRequest
-        ?? null,
-      detail: null,
-    };
-  }
   if (params.state.runLatestDelegationOutcome === 'unavailable') {
     return {
       mode: 'blocked',

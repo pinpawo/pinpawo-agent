@@ -14,11 +14,9 @@ import type {
 
 export type CapabilityPlannerMode = 'entry' | 'boundary';
 
-export const CAPABILITY_PLANNER_BOUNDARY_RESULT_MAX_CHARS = 16_000;
-
 /**
- * The bounded run state a Planner node needs to understand recent context and
- * materialize its result. Delegation-lane transcripts stay outside this seam.
+ * Root-owned control state needed to materialize a Planner result. Canonical
+ * messages cross the invocation seam separately and never become Planner state.
  */
 export type CapabilityPlannerRuntimeState = Pick<
   {
@@ -39,7 +37,7 @@ export type CapabilityPlannerDispatch =
   {
     readonly mode: 'entry';
     readonly plannerState: CapabilityPlannerRuntimeState;
-    readonly mainMessages: readonly BaseMessage[];
+    readonly messages: readonly BaseMessage[];
   };
 
 type CapabilityPlannerInputBase = {
@@ -47,10 +45,10 @@ type CapabilityPlannerInputBase = {
   readonly traceId: string;
   readonly runId: string;
   readonly userRequest: UserRequest;
-  readonly mainMessages?: readonly BaseMessage[];
-  readonly latestUserMessage: string | null;
+  /** Canonical root messages. The Planner domain owns invocation projection. */
+  readonly messages: readonly BaseMessage[];
   readonly activeDelegation: PlannerDelegationInput | null;
-  /** Candidate execution evidence. Root has not accepted it as a handoff yet. */
+  /** Boundary identity and stop reason. Evidence remains in canonical messages. */
   readonly latestAnnounce: PlannerAnnounceInput | null;
   readonly remainingPlan: readonly CapabilityPlanTask[];
   readonly workspace: CapabilityDocumentWorkspace;
@@ -60,14 +58,17 @@ export type CapabilityPlannerInput = CapabilityPlannerInputBase & {
   readonly mode: CapabilityPlannerMode;
 };
 
-export type CapabilityPlannerResult = PlannerCommit;
+export type CapabilityPlannerResult = PlannerCommit & {
+  /** Planner-lane updates to merge into the root orchestrator messages. */
+  readonly messageUpdates?: readonly BaseMessage[];
+};
 
 /**
  * Typed graph seam for the framework-internal Capability Planner.
  *
  * Graph tests inject a scripted implementation of this interface. Production
- * uses createCapabilityPlannerAgent(), whose private transcript and document
- * observations never enter the parent orchestrator state.
+ * uses createCapabilityPlannerAgent(), whose transcript and document
+ * observations are returned as isolated root Planner-lane updates.
  */
 export interface CapabilityPlannerRunner {
   invoke(

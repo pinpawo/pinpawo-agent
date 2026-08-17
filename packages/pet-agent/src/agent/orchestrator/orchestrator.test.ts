@@ -81,13 +81,16 @@ import {
 import { applyActiveDelegationTransition } from './runtime/activeDelegationTransition';
 import { afterContextPrep } from './runtime/routes/afterContextPrep';
 import {
-  CAPABILITY_PLANNER_BOUNDARY_RESULT_MAX_CHARS,
   type CapabilityPlannerInput,
   type CapabilityPlannerResult,
   type CapabilityPlannerRunner,
 } from './capabilityPlanner/runner';
 import { readMessageText } from './utils';
 import { PLAN_REQUEST_TOOL_NAME } from './runtime/nodes/entryAnswer';
+
+function plannerMessageContextText(input: CapabilityPlannerInput | null | undefined) {
+  return input?.messages.map(readMessageText).join('\n') ?? '';
+}
 
 function capability(
   name: string,
@@ -194,22 +197,15 @@ function createQueuedPlannerRunner(
         if (planning.outcome === 'continue') {
           const active = input.activeDelegation;
           if (!active) throw new Error('scripted continue requires active delegation');
-          const gapNote = typeof planning.gap_note === 'string'
-            ? planning.gap_note
-            : '当前 delegated task 还未达标，继续执行。';
           return {
             action: 'continue_current',
-            tasks: [{
-              capability: active.capability,
-              task: active.task,
-            }],
-            gapNote,
+            tasks: [],
           };
         }
         if (planning.outcome !== 'task_done') {
           throw new Error(`unsupported scripted planner outcome ${planning.outcome}`);
         }
-        if (!input.latestAnnounce?.text) {
+        if (!input.messages.some(getMessageIsAnnounce)) {
           return { action: 'unavailable', tasks: [] };
         }
         return this.invoke(input);
@@ -435,7 +431,7 @@ test('execution boundary routes through capabilityPlanner before the next task',
   assert.equal(entryPlannerInput?.userRequest, '看 issue #269，再查本地实现，最后总结。');
   assert.deepEqual(boundaryPlannerInput?.userRequest, entryPlannerInput?.userRequest);
   assert.equal(plannerInputs[1]?.activeDelegation?.task, '读取 issue #269 并提炼需求点。');
-  assert.match(plannerInputs[1]?.latestAnnounce?.text ?? '', /issue #269 需求点/);
+  assert.match(plannerMessageContextText(plannerInputs[1]), /issue #269 需求点/);
   assert.ok(plannerInputs[1]?.latestAnnounce?.messageId);
   assert.equal(
     plannerInputs[1]?.inputId,
@@ -574,13 +570,9 @@ test('Planner boundary returns to capabilityPlanner until the remaining goal is 
     task: '检索本地实现与 git log。',
   }]);
   assert.equal(plannerInputs[1]?.activeDelegation?.task, '读取 issue #269 并提炼需求点。');
-  assert.equal(
-    plannerInputs[1]?.latestAnnounce?.text?.length,
-    CAPABILITY_PLANNER_BOUNDARY_RESULT_MAX_CHARS,
-  );
-  assert.match(plannerInputs[1]?.latestAnnounce?.text ?? '', /issue #269 需求点：需要检查本地实现/);
-  assert.match(plannerInputs[1]?.latestAnnounce?.text ?? '', /announce truncated for Planner context/);
-  assert.match(plannerInputs[1]?.latestAnnounce?.text ?? '', /完整 handoff 末尾约束：必须检查兼容性/);
+  assert.match(plannerMessageContextText(plannerInputs[1]), /issue #269 需求点：需要检查本地实现/);
+  assert.doesNotMatch(plannerMessageContextText(plannerInputs[1]), /announce truncated for Planner context/);
+  assert.match(plannerMessageContextText(plannerInputs[1]), /完整 handoff 末尾约束：必须检查兼容性/);
   assert.equal(answerModelInvocations, 1);
   assert.equal(
     String(state.messages.at(-1)?.content ?? ''),
@@ -963,8 +955,8 @@ test('a completed subagent announce reaches the decision, then Answer summarizes
 
   const observedPlannerInput = plannerInput as CapabilityPlannerInput | null;
   assert.equal(observedPlannerInput?.mode, 'boundary');
-  assert.match(observedPlannerInput?.latestAnnounce?.text ?? '', /文件读取完成，lint 已通过/);
-  assert.match(observedPlannerInput?.latestAnnounce?.text ?? '', /END_OF_FULL_SUBAGENT_RESULT/);
+  assert.match(plannerMessageContextText(observedPlannerInput), /文件读取完成，lint 已通过/);
+  assert.match(plannerMessageContextText(observedPlannerInput), /END_OF_FULL_SUBAGENT_RESULT/);
   assert.equal(answerModelInvocations, 1);
   assert.equal(result.messages.at(-1)?.content, '文件读取和 lint 检查已完成，lint 已通过。');
   assert.match(answerInput.map(readMessageText).join('\n'), /END_OF_FULL_SUBAGENT_RESULT/);
@@ -1495,11 +1487,7 @@ test('limit-reached progress announce lets model choose the same capability dele
         plannerInput = input;
         return {
           action: 'continue_current',
-          tasks: [{
-            capability: 'inspect_repo',
-            task: '继续调查仓库 capability 注册链路。',
-          }],
-          gapNote: '上次调查结果不足；继续收集并验证 capability 注册链路证据。',
+          tasks: [],
         };
       },
     },
@@ -1555,7 +1543,7 @@ test('limit-reached progress announce lets model choose the same capability dele
   const observedPlannerInput = plannerInput as CapabilityPlannerInput | null;
   assert.equal(observedPlannerInput?.activeDelegation?.capability, 'inspect_repo');
   assert.equal(observedPlannerInput?.latestAnnounce?.completionReason, 'limit_reached');
-  assert.match(observedPlannerInput?.latestUserMessage ?? '', /继续/);
+  assert.match(plannerMessageContextText(observedPlannerInput), /继续/);
 });
 
 test('toolkits compose tools and instructions for capability runtimes', async () => {
@@ -3879,7 +3867,7 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
   assert.equal(finalState.__interrupt__, undefined);
   assert.equal(reviewCount, 2);
   assert.equal(runCount, 1);
-  // After the resumed tool approval, the private Planner boundary finishes the task.
+  // After the resumed tool approval, the Planner boundary finishes the task.
   // The result is handed off into the main queue and the lane transcript is
   // cleared, so continuation state is no longer inferred from a stale announce.
   const handoffCopy = mainConversationMessages(finalState.messages)
@@ -5337,9 +5325,9 @@ test('limit-reached subagent announce reaches the Planner boundary input', async
   const observedPlannerInput = plannerInput as CapabilityPlannerInput | null;
   assert.equal(observedPlannerInput?.mode, 'boundary');
   assert.equal(observedPlannerInput?.latestAnnounce?.completionReason, 'limit_reached');
-  assert.equal(
-    observedPlannerInput?.latestAnnounce?.text,
-    '已完成依赖检查，剩余源码还需要继续探查。',
+  assert.match(
+    plannerMessageContextText(observedPlannerInput),
+    /已完成依赖检查，剩余源码还需要继续探查。/,
   );
 });
 
@@ -6147,11 +6135,7 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
         return plannerInputs.length === 1
           ? {
             action: 'continue_current',
-            tasks: [{
-              capability: 'general',
-              task: '继续原来的仓库检查，并优先检查最新修改。',
-            }],
-            gapNote: '上次结果尚未覆盖最新修改；检查并返回对应证据。',
+            tasks: [],
           }
           : { action: 'goal_done', tasks: [] };
       },
@@ -6191,8 +6175,8 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
   assert.equal(state.messages.filter(isDelegationStartedMessage).length, 1);
   assert.equal(plannerInputs[0]?.traceId, activeDelegation.traceId);
   assert.equal(plannerInputs[0]?.activeDelegation?.delegationId, activeDelegation.id);
-  assert.match(plannerInputs[0]?.latestUserMessage ?? '', /优先检查最新修改/);
-  assert.match(plannerInputs[0]?.latestAnnounce?.text ?? '', /需要用户确认检查方向/);
+  assert.match(plannerMessageContextText(plannerInputs[0]), /优先检查最新修改/);
+  assert.match(plannerMessageContextText(plannerInputs[0]), /需要用户确认检查方向/);
   assert.equal(plannerInputs[0]?.latestAnnounce?.messageId, 'prior-resume-announce');
   assert.ok(plannerInputs[1]?.latestAnnounce?.messageId);
   assert.notEqual(plannerInputs[1]?.latestAnnounce?.messageId, 'prior-resume-announce');
@@ -6450,7 +6434,7 @@ test('delegation briefing stays lane-scoped across sequential tasks', async () =
   }
 });
 
-test('continue_current appends a continuation briefing carrying the gap note', async () => {
+test('continue_current appends a continuation briefing without rewriting the task', async () => {
   let structuredCallCount = 0;
   const actModel = {
     invoke: async () => new AIMessage('issue 已确认关闭。'),
@@ -6507,10 +6491,7 @@ test('continue_current appends a continuation briefing carrying the gap note', a
     continuation,
     /<task>[\s\S]*关闭 GitHub Issue #272。[\s\S]*<\/task>/,
   );
-  assert.match(
-    continuation,
-    /<gap_note>[\s\S]*未验证 issue 状态，请确认已关闭。[\s\S]*<\/gap_note>/,
-  );
+  assert.doesNotMatch(continuation, /<guidance>/);
 
   // The continuation run keeps the same delegation transcript and reads the
   // continuation briefing as the latest message.

@@ -14,6 +14,7 @@ import {
 import { defineToolkit } from '../../src/types/toolkit.ts';
 import type { AgentModels } from '../../src/types/agent.ts';
 import type { CapabilityPlannerRunner } from '../../src/agent/orchestrator/capabilityPlanner/runner.ts';
+import { PLAN_REQUEST_TOOL_NAME } from '../../src/agent/orchestrator/runtime/nodes/entryAnswer.ts';
 import { compileAgentRegistry } from '../../src/agent/orchestrator/registry.ts';
 import { multiTaskFlowBasicsDataset } from '../datasets/multi-task-flow-basics.ts';
 import { readRunDelegationSummaries, routeModeFromResult } from '../orchestratorStateReaders.ts';
@@ -85,26 +86,23 @@ function buildRecordingSubagent(responses: string[]) {
   return { model, laneMessageCounts };
 }
 
-function buildScriptedDecisionModel() {
-  let goalCreationCount = 0;
+function buildScriptedAnswerModel() {
   const model = {
     invoke: async () => new AIMessage(
       'auth 重构已经完成：token validation 已提取，循环依赖已移除，公开接口保持不变，测试通过。',
     ),
-  } as unknown as AgentModels['act'];
-  const goalCreationModel = {
-    invoke: async () => {
-      goalCreationCount += 1;
-      return new AIMessage('完成当前 auth 模块重构：先调查现有结构、依赖和风险，再实施改动并验证。');
-    },
-  } as unknown as AgentModels['act'];
-  return {
-    model,
-    goalCreationModel,
-    stats: () => ({
-      goalCreationCount,
+    bindTools: () => ({
+      invoke: async () => new AIMessage({
+        content: '',
+        tool_calls: [{
+          id: 'multi-task-eval-plan-request',
+          name: PLAN_REQUEST_TOOL_NAME,
+          args: {},
+        }],
+      }),
     }),
-  };
+  } as unknown as AgentModels['act'];
+  return { model };
 }
 
 function buildScriptedPlannerRunner() {
@@ -164,14 +162,14 @@ function taskMatches(actual: string, expectedTerms: string[]) {
 }
 
 async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]) {
-  const decisions = buildScriptedDecisionModel();
+  const answers = buildScriptedAnswerModel();
   const planner = buildScriptedPlannerRunner();
   const subagent = buildRecordingSubagent(testCase.input.subagentResults);
   const graph = createOrchestratorGraph({
     models: {
-      act: decisions.model,
-      decision: decisions.goalCreationModel,
-      observe: decisions.model,
+      act: answers.model,
+      answer: answers.model,
+      observe: answers.model,
       subagent: subagent.model,
     },
     actor,
@@ -196,7 +194,6 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
     .map((summary) => summary.resultPreview ?? '')
     .join('\n');
   const stats = {
-    ...decisions.stats(),
     ...planner.stats(),
   };
   const messages = Array.isArray(result.messages) ? result.messages : [];

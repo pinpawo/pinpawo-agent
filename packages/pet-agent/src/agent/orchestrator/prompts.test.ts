@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { buildSubagentAnnounceContext } from './prompts';
 import { buildCapabilityPlannerAgentInput } from './prompts/capabilityPlannerAgent';
 import type { CapabilityPlannerInput } from './capabilityPlanner/runner';
@@ -17,25 +18,51 @@ const plannerPromptWorkspace = {
   reused: false,
 };
 
-test('Capability Planner entry input leads with the run user goal', () => {
+test('Capability Planner entry input leads with the run user request', () => {
   const input = buildCapabilityPlannerAgentInput({
     mode: 'entry',
     inputId: 'trace_started:trace-1',
     traceId: 'trace-1',
     runId: 'run-1',
     workspace: plannerPromptWorkspace,
-    userGoal: '打开示例站点并浏览相关内容。\n\n浏览器已经连接。',
+    userRequest: '打开示例站点并浏览相关内容。\n\n浏览器已经连接。',
     latestUserMessage: null,
     activeDelegation: null,
     latestAnnounce: null,
     remainingPlan: [],
   } satisfies CapabilityPlannerInput);
 
-  assert.match(input, /^<run_user_goal[^>]*>/);
+  assert.match(input, /^<run_user_request[^>]*>/);
   assert.match(input, /打开示例站点并浏览相关内容。/);
   assert.match(input, /浏览器已经连接。/);
-  assert.equal(input.trimEnd().endsWith('</run_user_goal>'), true);
+  assert.equal(input.trimEnd().endsWith('</run_user_request>'), true);
   assert.doesNotMatch(input, /workspace|registry_digest|document_count|<planning_state>/);
+});
+
+test('Capability Planner entry receives prior main conversation without duplicating the current request', () => {
+  const currentRequest = '继续上面的方案，并修复代码。';
+  const input = buildCapabilityPlannerAgentInput({
+    mode: 'entry',
+    inputId: 'trace_started:trace-context',
+    traceId: 'trace-context',
+    runId: 'run-context',
+    workspace: plannerPromptWorkspace,
+    userRequest: currentRequest,
+    mainMessages: [
+      new HumanMessage('请先分析 PR 方案。'),
+      new AIMessage('已确认 Entry Answer 应在 Planner 之前。'),
+      new HumanMessage(currentRequest),
+    ],
+    latestUserMessage: null,
+    activeDelegation: null,
+    latestAnnounce: null,
+    remainingPlan: [],
+  } satisfies CapabilityPlannerInput);
+
+  assert.match(input, /<main_conversation[^>]*>/);
+  assert.match(input, /请先分析 PR 方案。/);
+  assert.match(input, /已确认 Entry Answer 应在 Planner 之前。/);
+  assert.equal(input.split(currentRequest).length - 1, 1);
 });
 
 test('Capability Planner input keeps the verified default Capability private context after the goal', () => {
@@ -45,7 +72,7 @@ test('Capability Planner input keeps the verified default Capability private con
     traceId: 'trace-1',
     runId: 'run-1',
     workspace: plannerPromptWorkspace,
-    userGoal: '整理下载目录。',
+    userRequest: '整理下载目录。',
     latestUserMessage: null,
     activeDelegation: null,
     latestAnnounce: null,
@@ -56,21 +83,21 @@ test('Capability Planner input keeps the verified default Capability private con
     content: '# General\n\n使用本地工具；保留 ]]> 作为文档数据。',
   });
 
-  assert.match(input, /^<run_user_goal[^>]*>/);
+  assert.match(input, /^<run_user_request[^>]*>/);
   assert.match(input, /<default_capability[^>]*source="immutable_workspace"/);
   assert.match(input, /general\/CAPABILITY\.md/);
   assert.match(input, /使用本地工具；保留 \]\]\]\]>\<!\[CDATA\[> 作为文档数据。/);
-  assert.ok(input.indexOf('</run_user_goal>') < input.indexOf('<default_capability'));
+  assert.ok(input.indexOf('</run_user_request>') < input.indexOf('<default_capability'));
 });
 
-test('Capability Planner boundary input carries the run user goal and boundary facts', () => {
+test('Capability Planner boundary input carries the run user request and boundary facts', () => {
   const input = buildCapabilityPlannerAgentInput({
     mode: 'boundary',
     inputId: 'announce:delegation-1:1',
     traceId: 'trace-1',
     runId: 'run-1',
     workspace: plannerPromptWorkspace,
-    userGoal: '打开示例站点并浏览相关内容。\n\n浏览器已经连接。',
+    userRequest: '打开示例站点并浏览相关内容。\n\n浏览器已经连接。',
     latestUserMessage: null,
     activeDelegation: {
       delegationId: 'delegation-1',
@@ -88,7 +115,7 @@ test('Capability Planner boundary input carries the run user goal and boundary f
     }],
   } satisfies CapabilityPlannerInput);
 
-  assert.match(input, /^<run_user_goal[^>]*>/);
+  assert.match(input, /^<run_user_request[^>]*>/);
   assert.match(input, /当前任务：确认浏览器可用/);
   assert.match(input, /浏览器已经连接，目标页面可访问。/);
   assert.match(input, /- \[browser\] 浏览相关内容/);
@@ -102,7 +129,7 @@ test('Capability Planner boundary input omits the follow-up section once the pla
     traceId: 'trace-1',
     runId: 'run-1',
     workspace: plannerPromptWorkspace,
-    userGoal: '打开示例站点并浏览相关内容。',
+    userRequest: '打开示例站点并浏览相关内容。',
     latestUserMessage: null,
     activeDelegation: {
       delegationId: 'delegation-1',
@@ -117,7 +144,7 @@ test('Capability Planner boundary input omits the follow-up section once the pla
     remainingPlan: [],
   } satisfies CapabilityPlannerInput);
 
-  assert.match(input, /^<run_user_goal[^>]*>/);
+  assert.match(input, /^<run_user_request[^>]*>/);
   assert.match(input, /当前任务：确认浏览器可用/);
   assert.match(input, /浏览器已经连接，目标页面可访问。/);
   assert.doesNotMatch(input, /此前保留的后续任务/);

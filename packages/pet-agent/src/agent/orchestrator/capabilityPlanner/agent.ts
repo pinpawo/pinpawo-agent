@@ -95,7 +95,7 @@ function plannerTaskSchema() {
     capability: z.string().trim().min(1).max(200)
       .describe('Capability that executes this task.'),
     task: z.string().trim().min(1).max(MAX_TASK_TEXT_CHARS)
-      .describe('A concise execution objective for that Capability. Keep it within 500 characters and do not repeat details already present in the current user goal or conversation.'),
+      .describe('A concise execution objective for that Capability. Keep it within 500 characters and do not repeat details already present in the current user request or conversation.'),
   });
 }
 
@@ -576,6 +576,10 @@ export function createCapabilityPlannerAgent(params: {
       runnableConfig?: RunnableConfig,
     ): Promise<CapabilityPlannerResult> {
       const timeout = mergePlannerSignal(runnableConfig?.signal, timeoutMs);
+      // Main messages are invocation-only context. Their rendered text enters
+      // the private Planner transcript below; do not duplicate canonical
+      // message objects (including media blocks) into checkpoint state.
+      const { mainMessages: _mainMessages, ...checkpointInput } = input;
       const config = buildPlannerRunnableConfig({
         input,
         runnableConfig,
@@ -606,7 +610,7 @@ export function createCapabilityPlannerAgent(params: {
               requestedTraceId: input.traceId,
               traceId: input.traceId,
               currentInputId: input.inputId,
-              currentInput: input,
+              currentInput: checkpointInput,
               registryDigest: input.workspace.registryDigest,
               plannerCommit: null,
               committedInputId: '',
@@ -644,7 +648,7 @@ export function createCapabilityPlannerAgent(params: {
           })],
           requestedTraceId: input.traceId,
           currentInputId: input.inputId,
-          currentInput: input,
+          currentInput: checkpointInput,
           registryDigest: input.workspace.registryDigest,
         }, config);
         timeout.signal.throwIfAborted();

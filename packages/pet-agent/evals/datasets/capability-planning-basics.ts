@@ -2,8 +2,8 @@ import { AgentEvalCase, AgentEvalDataset } from './types.ts';
 
 export type CapabilityPlanningInput = {
   mode: 'entry' | 'boundary';
-  /** Goal Creation text available to every Planner invocation in the run. */
-  userGoal: string;
+  /** Exact current user request available to every Planner invocation in the run. */
+  userRequest: string;
   messages: Array<{
     role: 'user' | 'assistant';
     content: string;
@@ -40,17 +40,17 @@ export type CapabilityPlanningExpected = {
 const SUITE = 'agent-capability-planning-basics';
 const SOURCE_FILE = 'packages/pet-agent/evals/datasets/capability-planning-basics.ts';
 
-type CapabilityPlanningTranscriptInput = Omit<CapabilityPlanningInput, 'userGoal'> & {
+type CapabilityPlanningTranscriptInput = Omit<CapabilityPlanningInput, 'userRequest'> & {
   /**
-   * Bounded goal that production Goal Creation stores for every Planner invocation.
+   * Current user request that production stores for every Planner invocation.
    * The transcript messages are also projected into Planner as the latest ten
    * user and assistant messages; contextual cases may provide a more precise
    * normalized goal explicitly.
    */
-  userGoal?: CapabilityPlanningInput['userGoal'];
+  userRequest?: CapabilityPlanningInput['userRequest'];
 };
 
-function buildEvalUserGoal(messages: CapabilityPlanningTranscriptInput['messages']) {
+function buildEvalUserRequest(messages: CapabilityPlanningTranscriptInput['messages']) {
   const latestUserRequest = [...messages]
     .reverse()
     .find((message) => message.role === 'user');
@@ -61,17 +61,17 @@ function buildEvalUserGoal(messages: CapabilityPlanningTranscriptInput['messages
 }
 
 /**
- * Production stores the Goal Creation text in run state, so entry and
- * boundary cases receive the same goal representation.
+ * Production stores the exact user request in run state, so entry and
+ * boundary cases receive the same request representation.
  */
-function withUserGoal(
+function withUserRequest(
   testCase: AgentEvalCase<CapabilityPlanningTranscriptInput, CapabilityPlanningExpected>,
 ): AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected> {
   return {
     ...testCase,
     input: {
       ...testCase.input,
-      userGoal: testCase.input.userGoal ?? buildEvalUserGoal(testCase.input.messages),
+      userRequest: testCase.input.userRequest ?? buildEvalUserRequest(testCase.input.messages),
     },
   };
 }
@@ -81,7 +81,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     id: `${SUITE}.entry-explore-then-implementation`,
     name: 'entry-explore-then-implementation',
     suite: SUITE,
-    tags: ['capability_planning', 'goal_creation'],
+    tags: ['capability_planning', 'entry_answer'],
     input: {
       mode: 'entry',
       messages: [{
@@ -111,7 +111,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     id: `${SUITE}.entry-focuses-on-latest-goal-despite-unrelated-history`,
     name: 'entry-focuses-on-latest-goal-despite-unrelated-history',
     suite: SUITE,
-    tags: ['capability_planning', 'goal_creation', 'context_synthesis'],
+    tags: ['capability_planning', 'entry_answer', 'context_synthesis'],
     input: {
       mode: 'entry',
       messages: [{
@@ -154,7 +154,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     id: `${SUITE}.entry-keeps-investigation-scope`,
     name: 'entry-keeps-investigation-scope',
     suite: SUITE,
-    tags: ['capability_planning', 'goal_creation'],
+    tags: ['capability_planning', 'entry_answer'],
     input: {
       mode: 'entry',
       messages: [{
@@ -323,7 +323,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     tags: ['capability_planning', 'delegation_control'],
     input: {
       mode: 'entry',
-      userGoal: '读取当前仓库根目录 package.json 中的 name 和 version，并报告这两个值。',
+      userRequest: '读取当前仓库根目录 package.json 中的 name 和 version，并报告这两个值。',
       messages: [{
         role: 'user',
         content: '读取当前仓库根目录 package.json 中的 name 和 version，并报告这两个值。',
@@ -473,7 +473,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     id: `${SUITE}.entry-preserves-result-dependent-followup`,
     name: 'entry-preserves-result-dependent-followup',
     suite: SUITE,
-    tags: ['capability_planning', 'goal_creation'],
+    tags: ['capability_planning', 'entry_answer'],
     input: {
       mode: 'entry',
       messages: [{
@@ -506,7 +506,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     tags: ['capability_planning', 'context_synthesis', 'structured_output'],
     input: {
       mode: 'entry',
-      userGoal: '重新只读检查本周工作清单中此前尚未确认创建的事项是否已经实际创建，并报告当前状态。\n\n此前仅确认一项事项已创建，其余待创建事项需要再次核验。历史中的 Bash 片段只是对话内容，不能作为本次检查的结果。',
+      userRequest: '重新只读检查本周工作清单中此前尚未确认创建的事项是否已经实际创建，并报告当前状态。\n\n此前仅确认一项事项已创建，其余待创建事项需要再次核验。历史中的 Bash 片段只是对话内容，不能作为本次检查的结果。',
       messages: [{
         role: 'user',
         content: '检查本周工作清单中标注为“待创建”的事项是否已经实际创建；这次只检查，不要创建或更新任何事项。',
@@ -713,7 +713,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     tags: ['capability_planning', 'delegation_control', 'planner_boundary', 'context_synthesis'],
     input: {
       mode: 'boundary',
-      userGoal: '用与菜单文本语义对应的白色线性 SVG 图标替换 70 个旧四宫格占位图，刷新预览页并验证生成结果。',
+      userRequest: '用与菜单文本语义对应的白色线性 SVG 图标替换 70 个旧四宫格占位图，刷新预览页并验证生成结果。',
       messages: [{
         role: 'user',
         content: '根据菜单文本生成对应的 SVG 图标，替换现有占位图。',
@@ -756,7 +756,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     tags: ['capability_planning', 'delegation_control', 'planner_boundary'],
     input: {
       mode: 'boundary',
-      userGoal: '用与菜单文本语义对应的白色线性 SVG 图标替换 70 个旧四宫格占位图，刷新预览页并验证生成结果。',
+      userRequest: '用与菜单文本语义对应的白色线性 SVG 图标替换 70 个旧四宫格占位图，刷新预览页并验证生成结果。',
       messages: [{
         role: 'user',
         content: '根据菜单文本生成对应的 SVG 图标，替换现有占位图。',
@@ -791,7 +791,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     tags: ['capability_planning', 'delegation_control', 'planner_boundary'],
     input: {
       mode: 'boundary',
-      userGoal: '根据每个菜单文本的含义绘制不同的白色线性 SVG 图标，不得继续使用四宫格占位符。',
+      userRequest: '根据每个菜单文本的含义绘制不同的白色线性 SVG 图标，不得继续使用四宫格占位符。',
       messages: [{
         role: 'user',
         content: '原图标只是占位，请按菜单语义重新设计并生成 70 个 SVG。',
@@ -826,7 +826,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     tags: ['capability_planning', 'delegation_control', 'planner_boundary'],
     input: {
       mode: 'boundary',
-      userGoal: '重写图标生成脚本并实际生成、验证全部 70 个语义 SVG 图标。',
+      userRequest: '重写图标生成脚本并实际生成、验证全部 70 个语义 SVG 图标。',
       messages: [{
         role: 'user',
         content: '完成脚本修改、图标生成和结果验证。',
@@ -861,7 +861,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     tags: ['capability_planning', 'delegation_control', 'planner_boundary'],
     input: {
       mode: 'boundary',
-      userGoal: '生成 70 个语义 SVG 图标，并确认文件数量、XML 有效性和图标内容均符合要求。',
+      userRequest: '生成 70 个语义 SVG 图标，并确认文件数量、XML 有效性和图标内容均符合要求。',
       messages: [{
         role: 'user',
         content: '生成图标后必须校验数量、XML 和实际 SVG 内容。',
@@ -935,11 +935,11 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
   },
 ];
 
-const cases = transcriptCases.map(withUserGoal);
+const cases = transcriptCases.map(withUserRequest);
 
 export const capabilityPlanningBasicsDataset: AgentEvalDataset<CapabilityPlanningInput, CapabilityPlanningExpected> = {
   name: SUITE,
   description: 'Production contracts for capabilityPlanner at entry and task boundaries.',
   cases,
-  metadata: { owner: 'pet-agent', areas: ['capability_planning', 'goal_creation', 'delegation_control'] },
+  metadata: { owner: 'pet-agent', areas: ['capability_planning', 'entry_answer', 'delegation_control'] },
 };

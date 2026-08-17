@@ -11,11 +11,12 @@ import {
   type HandOffArtifactRef,
 } from '../artifacts/handoff';
 import { getPinpetMeta, setPinpetMeta } from '../messageLanes';
-import type { UserGoal } from '../types';
+import type { UserRequest } from '../types';
 import { clipForPrompt } from '../utils';
-import { buildRunUserGoalContext } from './context';
+import { buildRunUserRequestContext } from './context';
 import { buildDecisionConfig, indentXmlBlock, xmlTextBlock } from './shared';
 import { ANSWER_SYSTEM_PROMPT } from './templates/answer.prompt';
+import { ENTRY_ANSWER_SYSTEM_PROMPT } from './templates/entryAnswer.prompt';
 
 export const ANSWER_INPUT_MESSAGE_NAME = 'answer_input';
 
@@ -45,7 +46,7 @@ export type AnswerBlockedReason =
  * Every mode is rendered as low-authority context for the Answer model.
  */
 type AnswerContextBaseFacts = {
-  hasUserGoal: boolean;
+  hasUserRequest: boolean;
   acceptedResults: readonly AnswerAcceptedResult[];
 };
 
@@ -120,7 +121,7 @@ function renderAnswerContext(facts: ModelAnswerContextFacts): string {
   const lines = [
     '<answer_context role="fact" source="orchestrator_state" authority="none">',
     `  <reply_mode>${facts.mode}</reply_mode>`,
-    `  <user_goal_present>${facts.hasUserGoal ? 'true' : 'false'}</user_goal_present>`,
+    `  <user_request_present>${facts.hasUserRequest ? 'true' : 'false'}</user_request_present>`,
   ];
   if (facts.mode === 'blocked') {
     lines.push(`  <blocked_reason>${facts.reason}</blocked_reason>`);
@@ -150,22 +151,22 @@ function renderAnswerContext(facts: ModelAnswerContextFacts): string {
 }
 
 function renderAnswerInput(
-  userGoal: UserGoal | null | undefined,
+  userRequest: UserRequest | null | undefined,
   facts: ModelAnswerContextFacts,
 ): string {
   return [
     '<answer_input role="fact" source="orchestrator_state" authority="none">',
-    indentXmlBlock(buildRunUserGoalContext(userGoal ?? null), 2),
+    indentXmlBlock(buildRunUserRequestContext(userRequest ?? null), 2),
     indentXmlBlock(renderAnswerContext(facts), 2),
     '</answer_input>',
   ].join('\n');
 }
 
 function createAnswerInputMessage(
-  userGoal: UserGoal | null | undefined,
+  userRequest: UserRequest | null | undefined,
   facts: ModelAnswerContextFacts,
 ): HumanMessage {
-  const content = renderAnswerInput(userGoal, facts);
+  const content = renderAnswerInput(userRequest, facts);
   const message = new HumanMessage(content);
   message.name = ANSWER_INPUT_MESSAGE_NAME;
   setPinpetMeta(message, {
@@ -183,10 +184,10 @@ function createAnswerInputMessage(
  */
 export function appendAnswerInputMessage(
   history: readonly BaseMessage[],
-  userGoal: UserGoal | null | undefined,
+  userRequest: UserRequest | null | undefined,
   facts: ModelAnswerContextFacts,
 ): BaseMessage[] {
-  const inputMessage = createAnswerInputMessage(userGoal, facts);
+  const inputMessage = createAnswerInputMessage(userRequest, facts);
   const canonicalHistory = history.filter((message) => !(
     message.name === ANSWER_INPUT_MESSAGE_NAME
     || getPinpetMeta(message).source === ANSWER_INPUT_MESSAGE_NAME
@@ -202,14 +203,22 @@ export function buildAnswerSystemPrompt(params: {
   });
 }
 
+export function buildEntryAnswerSystemPrompt(params: {
+  actor: AgentActor;
+}): string {
+  return ENTRY_ANSWER_SYSTEM_PROMPT.render({
+    config: buildDecisionConfig(params.actor),
+  });
+}
+
 export function buildAnswerInvocationMessages(params: {
   actor: AgentActor;
   history: readonly BaseMessage[];
-  userGoal?: UserGoal | null;
+  userRequest?: UserRequest | null;
   contextFacts: ModelAnswerContextFacts;
 }): BaseMessage[] {
   return [
     new SystemMessage(buildAnswerSystemPrompt({ actor: params.actor })),
-    ...appendAnswerInputMessage(params.history, params.userGoal, params.contextFacts),
+    ...appendAnswerInputMessage(params.history, params.userRequest, params.contextFacts),
   ];
 }

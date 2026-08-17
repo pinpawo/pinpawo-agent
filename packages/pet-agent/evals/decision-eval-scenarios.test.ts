@@ -8,13 +8,14 @@ import { measureDecisionPrompt } from './prompt-preview.ts';
 function textModel(output: string) {
   return {
     invoke: async () => new AIMessage(output),
+    bindTools: () => ({ invoke: async () => new AIMessage(output) }),
   } as never;
 }
 
 test('decision eval scenarios cover every canonical prompt distribution', () => {
   assert.deepEqual({
-    goalCreation: getDecisionEvalScenarios('goal_creation').length,
-  }, { goalCreation: 6 });
+    entryAnswer: getDecisionEvalScenarios('entry_answer').length,
+  }, { entryAnswer: 4 });
 });
 
 test('decision eval scenarios render complete production messages', () => {
@@ -37,19 +38,19 @@ test('decision eval scenarios render complete production messages', () => {
 test('decision stability summary separates schema and invocation failures', () => {
   const summary = summarizeDecisionStability([
     {
-      target: 'goal_creation', caseId: 'case-1', contract: 'goal_creation.text', objective: 'Complete the goal.', repeat: 1, goalAchieved: true, durationMs: 10,
+      target: 'entry_answer', caseId: 'case-1', contract: 'entry_answer.route', objective: 'Route the request.', repeat: 1, goalAchieved: true, durationMs: 10,
       verdict: 'goal_done', outputShape: 'gapNote=0', outputFingerprint: 'a', criteria: [], failedCriteria: [], diagnostics: {}, failureKind: null, error: null,
       usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 }, estimatedCostUsd: 0.001,
       evaluationUsage: null, evaluationEstimatedCostUsd: null,
     },
     {
-      target: 'goal_creation', caseId: 'case-1', contract: 'goal_creation.text', objective: 'Complete the goal.', repeat: 2, goalAchieved: false, durationMs: 20,
+      target: 'entry_answer', caseId: 'case-1', contract: 'entry_answer.route', objective: 'Route the request.', repeat: 2, goalAchieved: false, durationMs: 20,
       verdict: 'task_done', outputShape: 'gapNote=1', outputFingerprint: 'b', criteria: [], failedCriteria: ['outcome_correct'], diagnostics: {}, failureKind: null, error: null,
       usage: { inputTokens: 12, outputTokens: 3, totalTokens: 15 }, estimatedCostUsd: 0.002,
       evaluationUsage: null, evaluationEstimatedCostUsd: null,
     },
     {
-      target: 'goal_creation', caseId: 'case-1', contract: 'goal_creation.text', objective: 'Complete the goal.', repeat: 3, goalAchieved: null, durationMs: 30,
+      target: 'entry_answer', caseId: 'case-1', contract: 'entry_answer.route', objective: 'Route the request.', repeat: 3, goalAchieved: null, durationMs: 30,
       verdict: null, outputShape: null, outputFingerprint: null, criteria: [], failedCriteria: [], diagnostics: {}, failureKind: 'schema', error: 'invalid output',
       usage: null, estimatedCostUsd: null,
       evaluationUsage: null, evaluationEstimatedCostUsd: null,
@@ -70,9 +71,9 @@ test('decision stability summary separates schema and invocation failures', () =
 test('decision eval scenarios invoke, parse, normalize, and score each target', async () => {
   const cases = [
     {
-      target: 'goal_creation' as const,
-      name: 'preserves-path-and-scope',
-      output: '只检查 /tmp/project 的 README，不要修改文件。',
+      target: 'entry_answer' as const,
+      name: 'direct-answer-arithmetic',
+      output: '2 + 3 等于 5。',
     },
   ];
   for (const item of cases) {

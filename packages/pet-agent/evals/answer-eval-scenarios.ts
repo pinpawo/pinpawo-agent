@@ -76,7 +76,7 @@ async function evaluateGoal(
     evidence: {
       conversation: testCase.input.messages,
       runtimeContext: {
-        userGoal: testCase.input.userGoal ?? null,
+        userRequest: testCase.input.userRequest ?? null,
         delegationOutcome: testCase.input.delegationOutcome ?? null,
       },
     },
@@ -125,8 +125,8 @@ function render(testCase: AnswerBehaviorCase): BaseMessage[] {
     message.role === 'assistant'
     && acceptedResultTexts.has(message.text)
   ));
-  const hasUserGoal = Boolean(
-    testCase.input.userGoal
+  const hasUserRequest = Boolean(
+    testCase.input.userRequest
     ?? testCase.input.messages.find(({ role }) => role === 'user'),
   );
   return buildAnswerInvocationMessages({
@@ -134,11 +134,11 @@ function render(testCase: AnswerBehaviorCase): BaseMessage[] {
     history: history.map((message) => message.role === 'user'
       ? new HumanMessage(message.text)
       : new AIMessage(message.text)),
-    userGoal: testCase.input.userGoal,
+    userRequest: testCase.input.userRequest,
     contextFacts: delegationOutcome?.outcome === 'goal_done'
       ? {
           mode: 'goal_done',
-          hasUserGoal,
+          hasUserRequest,
           acceptedResults: acceptedResults.map(({ task, result }) => ({
             task,
             result,
@@ -148,7 +148,7 @@ function render(testCase: AnswerBehaviorCase): BaseMessage[] {
       : delegationOutcome?.outcome === 'user_input_required'
         ? {
             mode: 'user_input_required',
-            hasUserGoal,
+            hasUserRequest,
             acceptedResults: acceptedResults.map(({ task, result }) => ({
               task,
               result,
@@ -158,7 +158,7 @@ function render(testCase: AnswerBehaviorCase): BaseMessage[] {
               ?? [...testCase.input.messages].reverse().find(({ role }) => role === 'assistant')?.text
               ?? null,
           }
-        : { mode: 'direct', hasUserGoal, acceptedResults: [] },
+        : { mode: 'direct', hasUserRequest, acceptedResults: [] },
   });
 }
 

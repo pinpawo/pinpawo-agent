@@ -80,7 +80,7 @@ const actor = {
   species: null,
 };
 
-type DecisionKind = 'goal_creation' | 'planner' | 'unknown';
+type DecisionKind = 'entry_answer' | 'planner' | 'unknown';
 
 type DecisionRecord = {
   kind: DecisionKind;
@@ -295,15 +295,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function createRecordingModels(model: AgentModels['act']) {
   const decisions: DecisionRecord[] = [];
   const answers: AnswerRecord[] = [];
-  const decision = model.pipe(new RunnableLambda<BaseMessage, BaseMessage>({
+  const recordEntryAnswer = new RunnableLambda<BaseMessage, BaseMessage>({
     func: async (response: BaseMessage) => {
+      const toolCalls = readMessageToolCalls(response);
       decisions.push({
-        kind: 'goal_creation',
-        output: { goal: readMessageText(response).trim() },
+        kind: 'entry_answer',
+        output: {
+          route: toolCalls.some(({ name }) => name === 'plan_request')
+            ? 'plan_request'
+            : 'answer',
+          text: readMessageText(response).trim(),
+          toolCalls: toolCalls.map(({ name, args }) => ({ name, args })),
+        },
       });
       return response;
     },
-  })) as unknown as AgentModels['act'];
+  });
   const act = model.pipe(new RunnableLambda<BaseMessage, BaseMessage>({
     func: async (response: BaseMessage) => {
       for (const toolCall of readMessageToolCalls(response)) {
@@ -329,15 +336,32 @@ function createRecordingModels(model: AgentModels['act']) {
       return response;
     },
   })) as unknown as AgentModels['act'];
-  const answer = model.pipe(new RunnableLambda<BaseMessage, BaseMessage>({
-    func: async (response: BaseMessage) => {
-      answers.push({ text: readMessageText(response).trim() });
-      return response;
+  const bindTools = (model as unknown as {
+    bindTools?: (...args: unknown[]) => { pipe: (next: unknown) => unknown };
+  }).bindTools?.bind(model);
+  const answer = new Proxy(model, {
+    get(target, property) {
+      if (property === 'bindTools') {
+        return (...args: unknown[]) => {
+          if (!bindTools) {
+            throw new Error('Lifecycle Entry Answer model must support tool binding.');
+          }
+          return bindTools(...args).pipe(recordEntryAnswer);
+        };
+      }
+      if (property === 'invoke') {
+        return async (...args: Parameters<typeof target.invoke>) => {
+          const response = await target.invoke(...args);
+          answers.push({ text: readMessageText(response).trim() });
+          return response;
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
     },
-  })) as unknown as AgentModels['act'];
+  });
   return {
     act,
-    decision,
     answer,
     decisions,
     answers,
@@ -440,7 +464,7 @@ function countDecisions(
   turns: LifecycleTurnOutput[],
 ): Record<DecisionKind | 'answer', number> {
   const counts: Record<DecisionKind | 'answer', number> = {
-    goal_creation: 0,
+    entry_answer: 0,
     planner: 0,
     unknown: 0,
     answer: 0,
@@ -480,7 +504,6 @@ async function runCase(params: {
   const graph = createOrchestratorGraph({
     models: {
       act: recorder.act,
-      decision: recorder.decision,
       answer: recorder.answer,
       observe: recorder.act,
       subagent: executor.model,

@@ -4,7 +4,7 @@ import type {
   MessageLane,
   RunNextDelegation,
   TaskActiveDelegation,
-  UserGoal,
+  UserRequest,
 } from '../../types';
 
 export function decisionModeFromRunNextDelegation(pending: RunNextDelegation | null): DecisionMode {
@@ -14,7 +14,7 @@ export function decisionModeFromRunNextDelegation(pending: RunNextDelegation | n
 export function createTaskActiveDelegation(
   delegation: RunNextDelegation,
   runId: string,
-  userGoal: UserGoal,
+  userRequest: UserRequest,
   traceId: string,
 ): TaskActiveDelegation {
   return {
@@ -26,7 +26,7 @@ export function createTaskActiveDelegation(
     traceId,
     status: 'pending',
     resultPreview: null,
-    userGoal,
+    userRequest,
   };
 }
 

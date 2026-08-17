@@ -2,22 +2,22 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import {
-  RUN_USER_GOAL_CONTEXT_SOURCE,
-  buildRunUserGoalContextMessage,
-  withRunUserGoalContext,
+  RUN_USER_REQUEST_CONTEXT_SOURCE,
+  buildRunUserRequestContextMessage,
+  withRunUserRequestContext,
 } from './capabilityContext';
 import { materializeDelegation } from './delegationBriefing';
 import { getPinpetMeta } from './messageLanes';
 
-test('run goal context is synthetic task data with explicit provenance', () => {
-  const message = buildRunUserGoalContextMessage(
+test('run request context is synthetic task data with explicit provenance', () => {
+  const message = buildRunUserRequestContextMessage(
     '完成仓库修复。\n\n保留此前已确认的文件修改。',
   );
 
   assert.equal(message._getType(), 'ai');
-  assert.equal(getPinpetMeta(message).source, RUN_USER_GOAL_CONTEXT_SOURCE);
+  assert.equal(getPinpetMeta(message).source, RUN_USER_REQUEST_CONTEXT_SOURCE);
   assert.equal(getPinpetMeta(message).synthetic, true);
-  assert.match(String(message.content), /<run_user_goal role="task_boundary"/);
+  assert.match(String(message.content), /<run_user_request role="task_boundary"/);
   assert.match(String(message.content), /source="orchestrator_state" trust="read_only"/);
   assert.match(String(message.content), /保留此前已确认的文件修改/);
 });
@@ -50,12 +50,12 @@ test('Capability context preserves full evidence and inserts one goal before the
     continuationBriefing,
   ];
 
-  const projected = withRunUserGoalContext(
+  const projected = withRunUserRequestContext(
     original,
     '完成仓库检查并修复剩余类型错误。',
   );
   const goalContexts = projected.filter((message) =>
-    getPinpetMeta(message).source === RUN_USER_GOAL_CONTEXT_SOURCE);
+    getPinpetMeta(message).source === RUN_USER_REQUEST_CONTEXT_SOURCE);
 
   assert.equal(goalContexts.length, 1);
   assert.equal(projected.length, original.length + 1);
@@ -67,13 +67,13 @@ test('Capability context preserves full evidence and inserts one goal before the
   assert.equal(projected.includes(initialBriefing), true);
   assert.equal(projected.includes(privateProgress), true);
 
-  const refreshed = withRunUserGoalContext(
+  const refreshed = withRunUserRequestContext(
     projected,
     '完成仓库检查并修复剩余类型错误。',
   );
   assert.equal(
     refreshed.filter((message) =>
-      getPinpetMeta(message).source === RUN_USER_GOAL_CONTEXT_SOURCE).length,
+      getPinpetMeta(message).source === RUN_USER_REQUEST_CONTEXT_SOURCE).length,
     1,
   );
   assert.equal(refreshed.length, projected.length);

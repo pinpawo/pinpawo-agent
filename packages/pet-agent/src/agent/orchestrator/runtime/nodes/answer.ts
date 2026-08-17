@@ -164,7 +164,7 @@ export function createAnswerNode(config: OrchestratorConfig) {
     const answerMessages = buildAnswerInvocationMessages({
       actor,
       history,
-      userGoal: state.runUserGoal,
+      userRequest: state.runUserRequest,
       contextFacts: answerContextFacts,
     });
     const response = await (config.models.answer ?? config.models.act).invoke(
@@ -194,14 +194,14 @@ export function selectAnswerContextFacts(params: {
   userInputRequiredContext?: string | null;
   runIterationLimit: number;
 }): AnswerContextFacts {
-  const hasUserGoal = Boolean(
-    params.state.runUserGoal
+  const hasUserRequest = Boolean(
+    params.state.runUserRequest
     ?? readLatestHumanRequest(params.history),
   );
   if (params.awaitingUserInput) {
     return {
       mode: 'user_input_required',
-      hasUserGoal,
+      hasUserRequest,
       acceptedResults: params.acceptedResults,
       context: params.userInputRequiredContext?.trim() || null,
     };
@@ -209,18 +209,18 @@ export function selectAnswerContextFacts(params: {
   if (params.acceptedHandoffOutcome === 'goal_done') {
     return {
       mode: 'goal_done',
-      hasUserGoal,
+      hasUserRequest,
       acceptedResults: params.acceptedResults,
     };
   }
   if (params.state.runRuntimeFailure === 'planner_checkpoint_missing') {
     return {
       mode: 'blocked',
-      hasUserGoal,
+      hasUserRequest,
       acceptedResults: params.acceptedResults,
       reason: 'planner_checkpoint_missing',
       unfinishedTask: params.state.taskActiveDelegation?.task
-        ?? params.state.runUserGoal
+        ?? params.state.runUserRequest
         ?? null,
       detail: null,
     };
@@ -228,11 +228,11 @@ export function selectAnswerContextFacts(params: {
   if (params.state.runLatestDelegationOutcome === 'unavailable') {
     return {
       mode: 'blocked',
-      hasUserGoal,
+      hasUserRequest,
       acceptedResults: params.acceptedResults,
       reason: 'capability_unavailable',
       unfinishedTask: params.state.taskActiveDelegation?.task
-        ?? params.state.runUserGoal
+        ?? params.state.runUserRequest
         ?? null,
       detail: null,
     };
@@ -242,7 +242,7 @@ export function selectAnswerContextFacts(params: {
   if (activeDelegation && params.state.runIterationCount >= params.runIterationLimit) {
     return {
       mode: 'blocked',
-      hasUserGoal,
+      hasUserRequest,
       acceptedResults: params.acceptedResults,
       reason: 'iteration_limit',
       unfinishedTask: activeDelegation.task,
@@ -257,7 +257,7 @@ export function selectAnswerContextFacts(params: {
     });
     return {
       mode: 'blocked',
-      hasUserGoal,
+      hasUserRequest,
       acceptedResults: params.acceptedResults,
       reason: completionReason === 'limit_reached' ? 'execution_limit' : 'incomplete',
       unfinishedTask: activeDelegation.task,
@@ -265,7 +265,7 @@ export function selectAnswerContextFacts(params: {
     };
   }
 
-  return { mode: 'direct', hasUserGoal, acceptedResults: params.acceptedResults };
+  return { mode: 'direct', hasUserRequest, acceptedResults: params.acceptedResults };
 }
 
 function buildAnswerCleanup() {

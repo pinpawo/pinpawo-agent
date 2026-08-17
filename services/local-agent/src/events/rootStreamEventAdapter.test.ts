@@ -92,6 +92,117 @@ test('adapter attributes root answer tokens to assistant and drops internal deci
     && Array.isArray((event.values as { messages?: unknown }).messages)));
 });
 
+test('adapter exposes Entry Answer text as the main reply and hides its control tool', async () => {
+  const state: RootStreamAdapterState = new Map();
+  const namespace = ['entryAnswer:task-1', 'model:task-2'];
+
+  readRootStreamChatEvent({
+    type: 'event',
+    seq: 1,
+    method: 'messages',
+    params: { namespace, data: { event: 'message-start', id: 'entry-reply-1' } },
+  }, state);
+  const delta = readRootStreamChatEvent({
+    type: 'event',
+    seq: 2,
+    method: 'messages',
+    params: {
+      namespace,
+      data: {
+        event: 'content-block-delta',
+        delta: { type: 'text-delta', text: '直接回复' },
+      },
+    },
+  }, state);
+  const toolEvent = readRootStreamChatEvent({
+    type: 'event',
+    seq: 3,
+    method: 'tools',
+    params: {
+      namespace: ['entryAnswer:task-1', 'tools:task-3'],
+      data: { event: 'tool-start', name: 'plan_request', input: {} },
+    },
+  }, state);
+
+  assert.deepEqual(delta, {
+    type: 'assistant.delta',
+    messageId: 'entry-reply-1',
+    node: 'entryAnswer',
+    text: '直接回复',
+  });
+  assert.equal(toolEvent, null);
+});
+
+test('adapted Entry Answer text is emitted only when root state accepts it as the reply', async () => {
+  async function collect(events: RootProtocolEvent[]) {
+    async function* protocolEvents() {
+      for (const event of events) yield event;
+    }
+    const adapted: RootStreamChatEvent[] = [];
+    for await (const event of adaptRootStream(protocolEvents())) adapted.push(event);
+    return adapted;
+  }
+  const namespace = ['entryAnswer:task-1', 'model:task-2'];
+  const entryMessageEvents: RootProtocolEvent[] = [{
+    type: 'event',
+    seq: 1,
+    method: 'messages',
+    params: { namespace, data: { event: 'message-start', id: 'entry-message' } },
+  }, {
+    type: 'event',
+    seq: 2,
+    method: 'messages',
+    params: {
+      namespace,
+      data: {
+        event: 'content-block-delta',
+        delta: { type: 'text-delta', text: '只在直答时展示' },
+      },
+    },
+  }];
+
+  const direct = await collect([...entryMessageEvents, {
+    type: 'event',
+    seq: 3,
+    method: 'values',
+    params: {
+      namespace: [],
+      data: {
+        messages: [new HumanMessage('问题'), new AIMessage('只在直答时展示')],
+      },
+    },
+  }]);
+  assert.deepEqual(
+    direct.filter((event) => event.type === 'assistant.delta'),
+    [{
+      type: 'assistant.delta',
+      messageId: 'entry-message',
+      node: 'entryAnswer',
+      text: '只在直答时展示',
+    }],
+  );
+
+  const planned = await collect([...entryMessageEvents, {
+    type: 'event',
+    seq: 3,
+    method: 'tools',
+    params: {
+      namespace: ['entryAnswer:task-1', 'tools:task-3'],
+      data: { event: 'tool-started', tool_name: 'plan_request', input: '{}' },
+    },
+  }, {
+    type: 'event',
+    seq: 4,
+    method: 'values',
+    params: {
+      namespace: [],
+      data: { messages: [new HumanMessage('问题')] },
+    },
+  }]);
+  assert.equal(planned.some((event) => event.type === 'assistant.delta'), false);
+  assert.equal(planned.some((event) => event.type === 'tool'), false);
+});
+
 test('adapter drops synthetic assistant messages written by prepare', () => {
   const state: RootStreamAdapterState = new Map();
   const namespace = ['prepare:task-1'];

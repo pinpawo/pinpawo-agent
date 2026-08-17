@@ -39,7 +39,7 @@ test('Answer runtime projects accepted terminal meaning into closed facts', () =
     runIterationLimit: 4,
   }), {
     mode: 'goal_done',
-    hasUserGoal: true,
+    hasUserRequest: true,
     acceptedResults,
   });
 
@@ -52,16 +52,16 @@ test('Answer runtime projects accepted terminal meaning into closed facts', () =
     runIterationLimit: 4,
   }), {
     mode: 'user_input_required',
-    hasUserGoal: true,
+    hasUserRequest: true,
     acceptedResults,
     context: null,
   });
 });
 
-test('Answer runtime recognizes the run user goal when canonical history has no current request', () => {
+test('Answer runtime recognizes the run user request when canonical history has no current request', () => {
   assert.deepEqual(selectAnswerContextFacts({
     state: state({
-      runUserGoal: '总结已经完成的仓库检查。\n\n只报告当前工作区结果。',
+      runUserRequest: '总结已经完成的仓库检查。\n\n只报告当前工作区结果。',
     }),
     history: [new AIMessage('仓库检查已经完成。')],
     acceptedHandoffOutcome: 'goal_done',
@@ -70,7 +70,7 @@ test('Answer runtime recognizes the run user goal when canonical history has no 
     runIterationLimit: 4,
   }), {
     mode: 'goal_done',
-    hasUserGoal: true,
+    hasUserRequest: true,
     acceptedResults: [],
   });
 });
@@ -222,7 +222,7 @@ test('goal_done asks Answer to summarize the completed task from canonical histo
   assert.equal(invocationMessages.some((message) => message === handoff), false);
   assert.match(String(invocationMessages.at(-1)?.content), /公开信息已经提取并结构化返回/);
   assert.match(String(invocationMessages.at(-1)?.content), /<reply_mode>goal_done<\/reply_mode>/);
-  assert.match(String(invocationMessages.at(-1)?.content), /<user_goal_present>true<\/user_goal_present>/);
+  assert.match(String(invocationMessages.at(-1)?.content), /<user_request_present>true<\/user_request_present>/);
   assert.doesNotMatch(String(invocationMessages[0]?.content), /账号主页|等待页面|提取昵称/);
   assert.equal(result.runLatestDelegationOutcome, null);
 });
@@ -240,7 +240,7 @@ test('Answer runtime projects unfinished work as facts rather than prose', () =>
         traceId: 'trace-1',
         status: 'awaiting_decision',
         resultPreview: null,
-        userGoal: '检查仓库',
+        userRequest: '检查仓库',
       },
     }),
     history: [new HumanMessage('检查仓库')],
@@ -252,7 +252,7 @@ test('Answer runtime projects unfinished work as facts rather than prose', () =>
 
   assert.deepEqual(facts, {
     mode: 'blocked',
-    hasUserGoal: true,
+    hasUserRequest: true,
     acceptedResults: [],
     reason: 'iteration_limit',
     unfinishedTask: '检查剩余文件',

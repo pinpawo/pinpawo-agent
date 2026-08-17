@@ -17,7 +17,7 @@ capability each case covers:
 - `context_synthesis`: answer from completed subagent context.
 - `structured_output`: produce schema-compatible orchestration outputs where a
   structured contract still exists.
-- `goal_creation`: preserve the current task and required context as stable text.
+- `entry_answer`: answer from existing context or route execution work to Planner.
 - `planner_boundary`: accept execution evidence and select the next private
   Planner action.
 - `capability_discovery`: let the Planner explore Capability documents and select an executor.
@@ -56,8 +56,8 @@ recreate datasets.
 - `agent-context-synthesis-basics`: answer-from-context and missing-information cases.
 - `agent-answer-behavior-basics`: direct reply, handoff synthesis, historical replay,
   clarification, task completion summary, and required-user-input return control.
-- `agent-goal-creation-basics`: plain-text goal creation, including path,
-  constraint, and cross-message reference preservation.
+- `agent-entry-answer-routing`: direct-answer, clarification, and Planner handoff
+  cases for Entry Answer.
 - `agent-capability-planning-basics`: production private Planner entry and
   execution-boundary actions, including acceptance, continuation, completion,
   user-input, and unavailable-capability boundaries.
@@ -102,15 +102,16 @@ Model configuration is read from `LLM_*`, `~/.pinpawo/.env`, or
 These evals exercise the remaining public decision boundary and the Planner
 through complete graph runs:
 
-1. Goal Creation converts the current canonical request into stable plain text:
+1. Entry Answer either replies from existing conversation context or requests
+   planning through the empty `plan_request` control tool:
 
    ```sh
-   npm run eval:goal-creation
+   npm run eval:entry-answer
    ```
 
-   The runner invokes the production Goal Creation prompt without structured
-   output. It evaluates context preservation only; routing and task boundaries
-   belong to the Capability Planner.
+   The runner invokes the production Entry Answer prompt with only that control
+   tool bound. It checks both route selection and the tool-call shape; execution
+   planning remains owned by the Capability Planner.
 
 2. The Capability Planner is a private, trace-scoped tool-loop agent. It owns
    current-result acceptance and next-step planning together. Its transcript and
@@ -401,23 +402,22 @@ human review, the reject resume must finish without executing the rejected
 tool, and the same subagent invocation must receive the cancellation ToolMessage
 before producing its real final result for normal handoff.
 
-## Goal Creation Stability Runner
+## Entry Answer Stability Runner
 
-The Goal Creation runner calls the production plain-text prompt directly with
-the configured real LLM. It repeats each case so path, constraint, and reference
-preservation drift is visible without Capability Planner or graph noise:
+The Entry Answer runner calls the production prompt with the configured real
+LLM. It repeats each case so direct-answer, clarification, and Planner-routing
+drift is visible without Capability Planner or graph noise:
 
 ```sh
-npm run eval:goal-creation
+npm run eval:entry-answer
 ```
 
-It covers direct-answer goals, path and scope preservation, cross-message
-references, and latest confirmed constraints. Task formation, routing, and task
-splitting belong to the Capability Planner datasets and graph-level evals.
+Task formation and task splitting belong to the Capability Planner datasets and
+graph-level evals.
 
 Useful knobs:
 
 ```sh
-PROMPT_EVAL_REPEATS=5 npm run eval:goal-creation
-PROMPT_EVAL_CASES=agent-goal-creation-basics.preserves-path-and-scope npm run eval:goal-creation
+PROMPT_EVAL_REPEATS=5 npm run eval:entry-answer
+PROMPT_EVAL_CASES=agent-entry-answer-routing.trace-pr-review-follow-up npm run eval:entry-answer
 ```

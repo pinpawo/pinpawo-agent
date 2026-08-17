@@ -82,8 +82,8 @@ function materializeNextDelegation(params: {
   allowedCapabilityNames: readonly string[];
 }) {
   const { state, nextTask, remainingPlan, allowedCapabilityNames } = params;
-  if (!state.runUserGoal) {
-    throw new Error('Capability Planner requires runUserGoal before materializing a delegation.');
+  if (!state.runUserRequest) {
+    throw new Error('Capability Planner requires runUserRequest before materializing a delegation.');
   }
   if (!allowedCapabilityNames.includes(nextTask.capability)) {
     throw new Error(
@@ -100,7 +100,7 @@ function materializeNextDelegation(params: {
   const taskActiveDelegation = createTaskActiveDelegation(
     runNextDelegation,
     state.runId,
-    state.runUserGoal,
+    state.runUserRequest,
     state.traceId,
   );
   const materializedDelegation = materializeDelegation({
@@ -271,13 +271,13 @@ function createDefaultPlannerRunner(config: OrchestratorConfig): CapabilityPlann
 }
 
 function runtimeStateFromRoot(state: OrchestratorStateType): CapabilityPlannerRuntimeState {
-  if (!state.runUserGoal) {
-    throw new Error('Capability Planner requires runUserGoal.');
+  if (!state.runUserRequest) {
+    throw new Error('Capability Planner requires runUserRequest.');
   }
   return {
     runId: state.runId,
     traceId: state.traceId,
-    runUserGoal: state.runUserGoal,
+    runUserRequest: state.runUserRequest,
     runDelegationSummaries: state.runDelegationSummaries,
     runCapabilityPlan: state.runCapabilityPlan,
   };
@@ -298,7 +298,8 @@ function buildPlannerInput(params: {
         inputId: `trace_started:${state.traceId}`,
         traceId: state.traceId,
         runId: state.runId,
-        userGoal: state.runUserGoal,
+        userRequest: state.runUserRequest,
+        mainMessages: nodeInput.mainMessages,
         latestUserMessage: null,
         activeDelegation: null,
         latestAnnounce: null,
@@ -341,7 +342,8 @@ function buildPlannerInput(params: {
           ?? `${activeDelegation.transcriptRunId}:${String(state.runIterationCount)}`}`,
       traceId: state.traceId,
       runId: state.runId,
-      userGoal: plannerState.runUserGoal,
+      userRequest: plannerState.runUserRequest,
+      mainMessages: [],
       latestUserMessage: freshTurn ? readLatestHumanRequest(state.messages) : null,
       activeDelegation: {
         delegationId: activeDelegation.id,

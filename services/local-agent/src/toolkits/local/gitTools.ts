@@ -12,7 +12,6 @@ import {
 import { z } from 'zod';
 import { readBoolean, readRecord, readString } from '../operationMetadata';
 import { readTextFileChunkResult } from './fileTools';
-import { getLocalToolsWorkdir, resolveUserPath } from './pathUtils';
 
 const MAX_GIT_OUTPUT_CHARS = 30_000;
 const MAX_GH_BODY_CHARS = 60_000;
@@ -98,7 +97,7 @@ export async function runGit(
   cwd?: string,
   timeoutMs = DEFAULT_GIT_TIMEOUT_MS,
 ) {
-  const repo = cwd?.trim() ? resolveUserPath(cwd.trim()) : getLocalToolsWorkdir();
+  const repo = cwd?.trim() || process.cwd();
   try {
     const result = await execFileAsync('git', args, {
       cwd: repo,
@@ -128,7 +127,7 @@ export async function runGit(
 }
 
 function resolveGhWorkdir(cwd?: string) {
-  return cwd?.trim() ? resolveUserPath(cwd.trim()) : getLocalToolsWorkdir();
+  return cwd?.trim() || process.cwd();
 }
 
 async function executeGh(args: string[], cwd?: string) {
@@ -299,12 +298,11 @@ function ghContentRoot(cwd?: string) {
 
 function resolveGhContentPath(path: string, cwd?: string) {
   const root = ghContentRoot(cwd);
-  const filePath = resolveUserPath(path);
-  const relativePath = relative(root, filePath);
+  const relativePath = relative(root, path);
   if (!relativePath || relativePath.startsWith('..') || isAbsolute(relativePath)) {
     throw new Error(`gh_read_content only reads files under ${root}`);
   }
-  return filePath;
+  return path;
 }
 
 function safeGhFileSegment(value: string) {

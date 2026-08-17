@@ -2,7 +2,6 @@ import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { z } from 'zod';
 import { createAbortError, type ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { readRecord, readString } from '../operationMetadata';
-import { getLocalToolsWorkdir, resolveUserPath } from './pathUtils';
 import type { ShellRunHandle } from './processExecutor';
 import { runShellCommand } from './processTree';
 import type { ShellProcessBinding } from './processRegistry';
@@ -21,8 +20,8 @@ export function normalizeShellActionInput(input: unknown) {
     throw new Error('run_shell requires a command');
   }
   const cwd = typeof record.cwd === 'string' && record.cwd.trim()
-    ? resolveUserPath(record.cwd.trim())
-    : getLocalToolsWorkdir();
+    ? record.cwd.trim()
+    : process.cwd();
   return { command, cwd };
 }
 

@@ -1,5 +1,5 @@
 import { realpathSync, statSync } from 'node:fs';
-import { isAbsolute, relative, sep } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { StructuredTool } from '@langchain/core/tools';
 import {
   ARTIFACT_DISCOVERY_LIST_TOOL_NAME,
@@ -32,7 +32,6 @@ import { downloadFileTool, httpFetchTool, networkOperationMetadata } from './net
 import { jqQueryTool, jsonOperationMetadata } from './jsonTools';
 import { gitTools, gitOperationMetadata } from './gitTools';
 import { parsePatch, PatchParseError } from './applyPatch';
-import { resolveUserPath } from './pathUtils';
 import { globSearchTool, grepSearchTool, searchOperationMetadata } from './searchTools';
 import { ShellRuntime, type ShellRuntimeBinding } from './shellRuntime';
 import {
@@ -153,7 +152,10 @@ function authorizeApplyPatch(ctx: ToolAutoAuthorizationContext) {
 
   let target: string;
   try {
-    target = resolveUserPath(parsePatch(patch).path);
+    const requestedPath = parsePatch(patch).path;
+    target = isAbsolute(requestedPath)
+      ? requestedPath
+      : resolve(ctx.workdir, requestedPath);
   } catch (error) {
     // The executor uses the same parser before performing any filesystem
     // mutation. Invalid V4A is therefore safe to run: execution will disclose

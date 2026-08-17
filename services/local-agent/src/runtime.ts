@@ -31,6 +31,7 @@ import {
   findLegacyLocalAgentState,
   type LocalAgentRuntimeConfig,
 } from './runtimeConfig';
+import { setLocalToolsWorkdir } from './toolkits/local/pathUtils';
 import { LocalServerStudioHandler } from './localServerStudioHandler';
 import type { LocalServerDeps } from './localServerTypes';
 import { DEFAULT_SERVER_MODE, type ServerMode } from './serverMode';
@@ -75,6 +76,7 @@ export class LocalAgentRuntime {
   ) {
     this.runtimeConfig = runtimeConfig;
     this.serverMode = serverMode;
+    setLocalToolsWorkdir(runtimeConfig.workdir);
     this.capabilityRegistry = new LocalAgentCapabilityRegistry({
       capabilityArtifactRoot: runtimeConfig.capabilityArtifactRoot,
     });
@@ -159,8 +161,8 @@ export class LocalAgentRuntime {
           id: 'local-agent',
           kind: 'host_builtin',
           definitions: [
-            createBashToolkit({ workdir: this.runtimeConfig.workdir }),
-            createGitToolkit({ workdir: this.runtimeConfig.workdir }),
+            createBashToolkit(),
+            createGitToolkit(),
             browserIntegration.toolkit,
           ],
         },

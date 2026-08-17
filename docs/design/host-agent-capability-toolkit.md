@@ -194,10 +194,10 @@ Browser、bash、git 都是普通 Toolkit：
    不存在 direct host tools、capability-private tools 或与 Toolkit 平级的
    LocalTools。Capability Planner 的 `submit_plan` / `return_to_answer` 等框架内部
    control action 不属于扩展 inventory，不应为了形式统一伪装成 Host Toolkit。
-4. Host 在创建本地 Toolkit definitions 时固定自己的 workdir；Agent 的 prompt、
-   review 与 Toolkit Runtime execution scope 使用同一份 snapshot。普通 Tool input
-   保持模型给出的原始值，不能由 binding 静默改写。禁止模块级可变 workdir、共享
-   Runtime singleton 或跨 Host 隐式状态。
+4. Host 将同一份 workdir snapshot 提供给 Agent prompt 与 review/authorization
+   context。Tool 的 path、cwd、command 等参数由模型决定并保持原样；不得为了
+   workdir scoping 创建虚假 Toolkit Runtime，也不得由 binding 静默补全或改写输入。
+   Toolkit Runtime 只绑定 Toolkit 自己拥有的动态资源和 ownership。
 5. shutdown 一个 Host/manager 不能释放另一个 Host 的 roots、bindings、进程或连接。
 6. Chat 与 Studio 使用相同领域模型。Studio 只改变 Host 如何配置、持有和 invoke
    多个常驻 Agent Runtime，不创造 Studio 专属 Tool/Toolkit/Runtime 体系。

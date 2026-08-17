@@ -209,10 +209,10 @@ format，以及静态 `operation`、`review`、权限与 instructions。runtime 
 进入 registry、planner workspace、prompt 或 checkpoint。
 
 通用 invocation identity 不经过 `bindTools`；Agent 把 `threadId`、`runId` 和
-`delegationId` 放入 `ToolRuntime.context.executionScope`。Host-owned workdir 在创建
-本地 Toolkit definitions 时固定，并由同一个 Host snapshot 同时提供给 Agent prompt、
-review 和 Tool execution。Tool input 保持模型给出的相对路径、绝对路径或 cwd；
-越出 workdir 的风险由 review / authorization 判断。
+`delegationId` 放入 `ToolRuntime.context.executionScope`。Host 将同一份 workdir
+snapshot 提供给 Agent prompt 与 review/authorization context。Tool input 中的相对
+路径、绝对路径或 cwd 由模型决定并原样执行；越出 workdir 的风险由 review /
+authorization 判断，而不是由 execution binding 改写参数。
 
 `ToolkitRuntimeManager` 是 host-owned：长期 local-agent 在进程启动/关闭时调用
 它；独立 `createPetAgentRuntime()` 创建的私有 manager 可通过其 `shutdown()`

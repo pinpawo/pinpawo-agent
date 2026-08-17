@@ -185,20 +185,19 @@ import { config } from './config';
 resolve(config.workdir, userPath);
 ```
 
-本文最初建议在 Toolkit factory 固定 workdir：
+本文曾建议在 Toolkit factory 固定 workdir：
 
 ```ts
 createBashToolkit({ workdir: runtimeConfig.workdir });
 createGitToolkit({ workdir: runtimeConfig.workdir });
 ```
 
-当前实现采用这条 Host-scoped factory 路径：每个 Host 用自己的 runtimeConfig 创建
-本地 Toolkit definitions，因此同一进程可以持有多个互不共享 workdir 的 Host。
-Agent prompt、review 和本地 Tool execution 使用同一份 Host snapshot；Toolkit Runtime
-binding 只注入 Toolkit 自己的动态资源与 ownership。工具不得读取模块级配置或共享
-可变 workdir，也不得由 binding 静默改写模型给出的 Tool input。
-Browser 等确实拥有 workspace-bound live resource 的 Toolkit Runtime 仍可从通用
-execution scope 读取 workdir；这不把普通本地 Tool 变成 Runtime binding。
+最终没有采用 factory 或 per-execution Tool binding。Host 把同一份 workdir snapshot
+提供给 Agent prompt 与 review/authorization context；path、cwd、command 等 Tool 参数
+由模型生成，并原样进入执行。Toolkit Runtime binding 只注入 Toolkit 自己拥有的动态
+资源与 ownership，不得为了 workdir 静默补全、解析或改写 Tool input，也不得为没有
+动态资源的 Toolkit 创建虚假 Runtime。Browser 等确实拥有 workspace-bound live
+resource 的 Runtime 仍可读取通用 execution scope；这不改变普通 Tool 的参数契约。
 
 ## Studio Runtime 路径
 

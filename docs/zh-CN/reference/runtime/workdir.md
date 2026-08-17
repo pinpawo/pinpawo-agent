@@ -29,10 +29,10 @@ runtime 还能由 workdir 派生 `id`、`name`、`rootPath` 形式的 workspace 
 这是本地派生信息，不代表已有持久化 workspace registry 或按请求切换 workspace 的
 公共协议。
 
-Host 在装配本地 Toolkit definitions 时固定有效 workdir。相对路径、命令缺省 cwd、
-Agent prompt 与 review/authorization identity 使用同一份 snapshot。workdir 不是文件
-系统 sandbox：显式绝对路径或 cwd 仍然是有效的 Tool 输入，执行层不会静默改写它。
-另一个 workspace 由另一份 Host-scoped inventory 服务，不依赖进程级可变状态。
+Host 将有效 workdir 提供给 Agent prompt 与 review/authorization context。它不是文件
+系统 sandbox，也不是隐式 Tool 参数：相对路径、绝对路径或 cwd 由模型决定，执行层
+不会注入或改写输入。Toolkit Runtime binding 只用于 Toolkit 自己拥有的动态资源与
+ownership。
 
 Studio 实际读取的文件见 [Studio 配置](../../studio/configuration.md)；未交付的设计见
 [workspace proposal（英文）](../../../design/local-agent/workspace-runtime-config.md)。

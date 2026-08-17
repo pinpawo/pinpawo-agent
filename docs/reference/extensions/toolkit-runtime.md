@@ -63,10 +63,10 @@ implementation。管理器拒绝更名、增删或非 StructuredTool 的返回�
 checkpoint、registry 与 review 决策永远引用静态契约，不携带 runtime binding。
 
 `threadId`、`runId`、`delegationId` 等 invocation identity 由 Agent 放入
-`ToolRuntime.context.executionScope`。Host-owned workdir 不属于 Toolkit Runtime
-binding：Host 在装配本地 Toolkit definitions 时固定它，并让 Agent prompt、review
-和 Tool execution 使用同一份 snapshot。Toolkit Runtime 可以从通用 execution scope
-读取 workdir 来管理自身资源，例如 Browser session 和截图目录，但不能据此静默改写
+`ToolRuntime.context.executionScope`。workdir 不属于普通 Tool 的 Toolkit Runtime
+binding：Host 将同一份 snapshot 提供给 Agent prompt 与 review/authorization，模型
+负责生成具体 path 或 cwd。Toolkit Runtime 可以从通用 execution scope 读取 workdir
+来管理自身资源，例如 Browser session 和截图目录，但不能据此静默补全、解析或改写
 普通 Tool input。是否需要审核属于 review / authorization 层。
 
 Browser 的 binding 仅把同一个 `BrowserSession` 封装为带 execution owner 的闭包。

@@ -6,6 +6,7 @@ const boundaryContext = {
   mode: 'boundary' as const,
   activeDelegation: {
     delegationId: 'delegation-1',
+    transcriptRunId: 'transcript-1',
     capability: 'general',
     task: 'Complete the current task.',
   },

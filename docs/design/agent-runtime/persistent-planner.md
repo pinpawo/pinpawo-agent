@@ -1,4 +1,4 @@
-# refactor(orchestrator): merge outcome decisions into a trace-scoped persistent private Planner
+# refactor(orchestrator): merge outcome decisions into a trace-scoped Planner lane
 
 > 后续的 fresh-run 入口路由设计见
 > [`Entry Answer routing draft`](entry-answer-routing.md)。
@@ -33,32 +33,33 @@ capability
 3. 当前 Planner 每次 boundary 都重新创建 agent，只能从公开 briefing 重建上下文；
 4. Planner 之前读取过的 Capability 文档、搜索观察、规划取舍和计划演化不会跨 boundary 保留；
 5. Planner 的现有 `return_to_answer` 可以把自由文本 `reason/context/question`
-   带回 root，与 Planner 私有上下文边界不一致。
+   带回 root，与 Planner lane 边界不一致。
 
 我们希望保留 Outcome 所代表的执行验收语义，但删除独立的 Outcome 模型节点，将其
-并入一个在完整用户任务中持续存在的私有 Planner actor。
+并入一个在完整用户任务中持续存在的 Planner actor。
 
 ## 决策摘要
 
-将 Capability Planner 重构为一个 **trace-scoped persistent private Planner**：
+将 Capability Planner 重构为一个 **trace-scoped persistent Planner lane**：
 
 - 一个用户任务/目标对应一个稳定的 `traceId`；
 - 每次执行、唤醒或恢复拥有独立的 `runId`；
-- Planner 私有状态以 `threadId + traceId` 为持久化边界；
+- Planner transcript 作为 root `messages` 中的 `orchestrator` lane，以
+  `threadId + traceId` 为持久化边界；
 - Planner 在同一 trace 的多个 run、delegation 和用户输入中断之间保持上下文；
 - Planner 接管执行边界的验收与后续规划；
 - root graph 继续独占 handoff、delegation 生命周期、路由和公开状态更新；
 - Planner 对 root 只提交结构化 control action 和 plan tasks；
-- Planner transcript、工具消息、Capability 文档观察、内部摘要和自由文本不得进入
-  root state、main messages、Answer input 或 handoff。
+- Planner transcript、工具消息、Capability 文档观察和内部摘要进入 root checkpoint
+  的 Planner lane，但不进入 main conversation、Answer input 或 handoff。
 
 目标流程：
 
 ```text
 entryDecision
-  -> private Planner
+  -> Planner
   -> capability
-  -> private Planner
+  -> Planner
        |-- continue_current  -> same capability delegation
        |-- advance_plan      -> accept handoff -> next delegation
        |-- goal_done         -> accept handoff -> answer
@@ -73,7 +74,7 @@ entryDecision
 | 标识 | 生命周期 | 用途 |
 |---|---|---|
 | `threadId` | 整个会话 | 对话与 checkpoint 顶层隔离 |
-| `traceId` | 一次用户任务/目标，跨中断与恢复 | Planner 私有状态和完整任务链路 |
+| `traceId` | 一次用户任务/目标，跨中断与恢复 | Planner lane 和完整任务链路 |
 | `runId` | 一次已经开始的 root graph run | 运行时 guard、遥测和单次执行边界 |
 | `delegationId` | 一个具体 Capability task | Capability lane、transcript 和执行结果归属 |
 
@@ -83,7 +84,7 @@ entryDecision
 ```text
 threadId
   `-- traceId
-       |-- Planner private state
+       |-- Planner lane
        |-- runId A
        |-- runId B (resume)
        |-- delegationId D1
@@ -98,13 +99,12 @@ threadId
 
 1. 删除独立的 `delegationOutcomeDecision` 模型调用和 graph node；
 2. 由一个持久 Planner 同时判断当前结果是否达标以及下一步计划；
-3. 同一 `traceId` 下跨 `runId` 恢复 Planner 私有上下文；
+3. 同一 `traceId` 下跨 `runId` 从 root messages 恢复 Planner lane；
 4. 同一 delegation 继续执行时保留其 ID、lane 和 transcript；
-5. 把 Planner 的所有内部消息与公开 orchestrator 上下文隔离；
-6. 只允许 Planner 向 root 提交 control action、plan tasks 和必要的 opaque
-   checkpoint metadata；
+5. 用现有 lane 协议把 Planner 内部消息与 main conversation、Capability lane 隔离；
+6. Planner 向 root 提交 control action、plan tasks 和标准 message reducer updates；
 7. 保持 graph 对状态转移、handoff、guard 和用户可见回复的最终所有权；
-8. 支持 checkpoint resume、幂等重试、进程重启和 trace 隔离；
+8. 支持幂等重试、进程重启和 trace 隔离；
 9. 保持或提升现有 lifecycle eval 的真实性与稳定性；
 10. 减少 accepted non-terminal boundary 上重复的独立模型决策。
 
@@ -117,7 +117,7 @@ threadId
 - 不依赖 `completionReason` 推导 task 成败；
 - 不改变 Capability 文档的公开格式或 registry backend；
 - 不在本 issue 中修改 `../../wiki` 或执行 wiki ingest；
-- 不要求立即物理删除已关闭 trace 的历史 checkpoint；清理由 retention policy 负责。
+- 不在目标结束时立即删除当前 Planner lane；下一条新 trace 的 Planner commit 清理旧 lane。
 
 ## 核心不变量
 
@@ -128,29 +128,28 @@ threadId
   `traceId`，从中断位置继续；
 - 前一个 run 已经结束、用户在新请求中通过 `resume_active` 继续同一任务时，创建新
   `runId`，但保持 `traceId`；
-- 同一 trace 内的所有 Planner invocation 读取同一个私有 Planner checkpoint；
+- 同一 trace 内的所有 Planner invocation 读取同一个 Planner lane；
 - `supersede_active` 或明确的新目标创建新 `traceId`；
 - 新 trace 不得读取旧 trace 的 Planner state。
 
-### 2. Planner 状态是私有状态
+### 2. Planner 状态是隔离的 root lane
 
-以下内容只能存在于 Planner checkpoint namespace：
+以下内容只能存在于 root `messages` 的 Planner lane：
 
 - Planner human/AI/tool messages；
 - `capability_search` 结果和 Capability 文档观察；
 - 规划过程、被拒绝的候选计划和内部推理；
 - Planner 自己的 context compaction summary；
-- 已处理 input IDs、内部 current plan 和 last commit；
-- registry digest 及其对应的私有缓存状态。
+- terminal ToolMessage 及其 `plannerInputId`；
+- registry digest metadata。
 
 这些内容不得进入：
 
-- `OrchestratorState.messages`；
 - main message lane；
 - Capability handoff copy；
 - Answer prompt；
-- root 的 compaction input；
-- 面向调用方的事件或 API response；
+- main-conversation compaction input；
+- 面向调用方的投影或 API response；
 - `runDelegationSummaries.resultPreview`。
 
 ### 3. Planner 只有一个受控输出出口
@@ -246,7 +245,7 @@ Planner 只做语义判断并提交 commit。graph 必须确定性地负责：
 - post-execution 阶段必须存在可接受的 announce；
 - `tasks` 必须为空；
 - graph 接受 handoff、完成 delegation，并以 `goal_done` 进入 Answer；
-- Planner 私有文本不能用于完成总结；Answer 只能基于公开请求、accepted handoff
+- Planner lane 文本不能用于完成总结；Answer 只能基于公开请求、accepted handoff
   和 artifact 生成回复。
 
 ### `user_input_required`
@@ -289,11 +288,11 @@ unavailable          -> empty tasks
 模型非法输出必须作为 Planner invocation failure 处理，不能通过松散 normalize 把一个
 action 静默改写成另一个 action。
 
-## Planner 私有输入协议
+## Planner 输入与 lane 协议
 
 每次 Planner 正常开始一个新决策 turn 时，Root 提供当前 canonical messages，Planner
-领域按 boundary 选择本次所需的完整只读消息；它不重建私有 Planner transcript，也不
-发明一套 Planner 专属的 resume command。
+领域按 boundary 选择本次所需的完整只读消息。Planner transcript 已经是 canonical root
+messages 中的一个 lane，不需要第二套 checkpoint 或 Planner 专属 resume command。
 
 ```ts
 type PlannerInput = {
@@ -301,16 +300,13 @@ type PlannerInput = {
   traceId: string;
   runId: string;
   userRequest: UserRequest;
-  messageContext: {
-    scope: 'main_conversation' | 'active_delegation';
-    messages: readonly BaseMessage[];
-  };
+  messages: readonly BaseMessage[];
   activeDelegation: PlannerDelegationInput | null;
   latestAnnounce: {
     messageId: string | null;
     completionReason: SubagentCompletionReason | null;
   } | null;
-  committedPlan: CapabilityPlanTask[];
+  remainingPlan: CapabilityPlanTask[];
   registryDigest: string;
 };
 ```
@@ -318,45 +314,35 @@ type PlannerInput = {
 字段是否存在表达当前 boundary：
 
 - 初次规划：没有 active delegation 和 announce；
-- 初次规划的 message context 是截止当前请求的完整 main conversation；
-- delegation 返回或 fresh-turn continuation 的 message context 是 main conversation
-  加当前 delegation 的完整、tool-protocol-safe lane transcript；
+- 初次规划从完整 root messages 中选择截止当前请求的 main conversation 和当前 trace 的
+  Planner lane；
+- delegation 返回或 fresh-turn continuation 时选择 main conversation、当前 delegation 的
+  完整 tool-protocol-safe lane transcript，以及当前 trace 的 Planner lane；
 - announce 字段只保留 boundary identity 与 stop reason；announce 内容、用户追问和执行
   进展直接从原始消息读取，不再重复投影为字符串字段；
 - registry 变化：在下一次正常 Planner input 中提供新的 digest。
 
-`messageContext.messages` 是调用级只读输入。Root 把完整 state messages 交给 Planner
-领域，由 Planner 根据 mode 选择 main conversation 或 active delegation lane；选中的原始
-message objects 只在本次 model invocation 中注入，不写入 Planner 私有 checkpoint。
-因此媒体 content blocks、tool call/result 配对和 subagent announce 都保持原形，同时不会
-被 Planner 私有 compaction 复制或重复持久化。Planner 私有 checkpoint 只保存自己的输入、
-Capability 探索记录和 commit。
+`messages` 是 root checkpoint 已经持久化的 canonical 输入。Planner 领域根据 mode 选择
+main conversation、当前 delegation lane 与 Planner lane，保留原始 message objects、媒体
+content blocks 和 tool call/result 配对。Planner 本轮产生的新输入、搜索观察和 terminal
+tool 配对会标记为 `lane: orchestrator`、`source: capability_planner` 并通过 root message
+reducer 回写；它们不会进入 main conversation 或 Capability transcript。
 
 这里的“用户继续”只是 Planner 已完成上一轮 commit 后收到的一个新输入 turn，不是
 checkpoint resume，也不需要 `user_resumed` 事件。Capability announce 本来属于 execution
 evidence；Planner 只消费它，不拥有它。
 
-## Checkpoint 与恢复设计
+## 持久化与恢复设计
 
-### 两类恢复必须分开
+Planner 不维护独立 checkpoint namespace。成功调用产生的 lane updates 与 root transition
+在同一个 graph step 中提交，因此进程重启后从 root checkpoint 恢复。相同 `inputId` 的
+terminal ToolMessage 保存在 Planner lane 中，可直接 replay commit 而不重复调用模型。
+fresh trace 在 Entry capture 阶段删除旧 trace 的 Planner lane，即使本轮随后直接 Answer、
+不进入 Planner，也不会让隐藏 transcript 无限累积。
 
-Capability subagent 当前已经区分两种机制，Planner 应复用相同语义：
-
-#### In-flight checkpoint resume
-
-当 Planner 内部的工具、审批或其他节点调用 LangGraph `interrupt()` 时：
-
-- Planner 尚未提交 `PlannerCommit`；
-- parent graph 和 Planner child graph 都停在同一个 checkpoint lineage；
-- 调用方对 parent graph 发送普通 `Command({ resume })`；
-- child 继承 parent runnable config/checkpointer，从原中断位置继续；
-- 保持同一个 `traceId` 和 `runId`；
-- 不调用 `resume_active`；
-- 不构造新的 `PlannerInput`；
-- 不增加 Planner 专属 resume event、resume API 或状态重建逻辑。
-
-这应与 `createSubagent` 当前“child 不自带 checkpointer、通过 parent config 继承并由 bare
-`Command({ resume })` 重入”的机制保持一致。
+Planner 当前只使用无需人机中断的 registry search 和 terminal tools。若未来需要在 Planner
+内部支持 `interrupt()`，应把 Planner agent 作为真正的 LangGraph subgraph 接入 parent
+checkpoint lineage；不得为此恢复第二套私有 message checkpoint。
 
 #### Fresh-turn task continuation
 
@@ -365,55 +351,30 @@ Capability subagent 当前已经区分两种机制，Planner 应复用相同语�
 
 - 这是一个新的 root run，因此创建新 `runId`；
 - 仍属于同一用户任务，因此保持 `traceId`；
-- Planner 读取同一 trace 的已完成私有历史；
+- Planner 读取同一 trace 的 Planner lane；
 - root 追加一个包含最新用户消息和 active delegation 的普通 `PlannerInput`；
 - Planner 从新的 decision turn 开始，而不是恢复已经结束的旧程序计数器。
 
-只有前一种情况叫“哪里停止哪里恢复”。后一种情况是同一持久 actor 收到下一条输入，
-不应伪装成 LangGraph interrupt resume。
+这是同一持久 actor 收到下一条输入，不应伪装成 LangGraph interrupt resume。
 
 ### 持久化作用域
 
-Planner 使用 root 已配置的持久化 backend 和相同 `thread_id`，由 LangGraph 原生 subgraph
-checkpoint namespace 隔离 child state。`traceId` 是 Planner state 的生命周期身份和隔离
-条件，不要求调用方另外管理一个 Planner thread/session。
-
-Planner graph/agent 必须在 orchestrator 构建时创建一次，不得在每次 invocation 内重新
-`createAgent`。
-
-Root 与 Planner 使用不同 state schema，因此生产组合采用 LangGraph 的标准 wrapper
-模式：在 Root node function 内调用预编译的 Planner subgraph。生产 Planner 使用
-`checkpointer: true` 继承 parent checkpointer 并跨同一 trace 的 invocation 保留状态；
-无 parent checkpointer 的直接单测/eval 使用单独预编译的 `checkpointer: false` adapter。
-这两个 graph 都只在 runner 构建时创建，不得在 `invoke()` 内动态编译。
-Planner 私有 state 由拥有这些字段的 middleware 声明一次，再由 `createAgent` 自动合并；不要
-在 agent 与 middleware 上重复注册同一份 state schema。
-
-优先把 Planner 作为 parent graph 的原生持久 subgraph，使其继承 parent checkpointer 和
-runnable config。不能为了 trace 持久化而把 Planner 变成一个 detached checkpoint workflow，
-否则会破坏 bare `Command({ resume })` 从 root 重入 pending child interrupt 的能力。
-
-实现前必须用一个最小 spike 验证所选 LangGraph 组合同时满足：
-
-1. Planner child interrupt 可由 parent 的 bare `Command({ resume })` 原地恢复；
-2. Planner 正常完成一次 commit 后，同 trace 的下一次 invocation 能读取旧私有 state；
-3. 新 trace 不会读取旧 trace 私有 state。
-
-如果 LangGraph 自动 child namespace 不能同时提供第 2、3 点，可以在原生 subgraph 模型
-内增加 trace-keyed private state/reset，或使用 framework 支持的 checkpoint namespace
-配置；不要另外定义 Planner thread、session 或专属 resume protocol。
+Planner 使用 root 已配置的持久化 backend 和相同 `thread_id`。`traceId` 写入 Planner
+message metadata，作为 lane 的生命周期身份；调用方不管理 Planner thread、session 或
+checkpoint namespace。Planner agent 在 orchestrator 构建时创建一次，但每次 invocation
+从 root messages 重新选择上下文并以 stateless adapter 运行。
 
 Capability discovery 的调用预算使用标准 `toolCallLimitMiddleware` 按单次 Planner input
 限制，不再定义自有的并行 reducer/counter，计数和并行批次裁剪交给 middleware 的内置
 run state。若 effective workspace 包含 `general`，runtime 必须在模型首次决策前读取经过
-workspace 校验的完整 General 文档，并只把它注入 Planner 私有输入，作为不依赖字面搜索的
+workspace 校验的完整 General 文档，并只把它注入当前 Planner invocation，作为不依赖字面搜索的
 默认候选。`capability_search` 只负责发现更具体的 Capability，不返回 `fallback` 字段。Planner 在提交
 `report_unavailable` 前必须先评估默认 General；它能执行当前工作时应选择它。显式受限 workspace
 可以没有 General，此时只有全部可见 Capability 都不能执行时才能提交 `unavailable`。
 
 ### 幂等输入消费
 
-Planner private state 保存 `processedInputIds` 和对应的 last commit。建议 input ID：
+Planner terminal ToolMessage 携带 `plannerInputId`，其内容就是经过校验的 commit。建议 input ID：
 
 ```text
 trace_started:<traceId>
@@ -421,55 +382,35 @@ announce:<delegationId>:<announceMessageId>
 human:<humanMessageId>
 ```
 
-registry digest 是 input 的事实字段，不需要单独模拟成 resume/event。重复 input 必须返回
-已提交的同一 commit，不得再次调用模型或重复追加 Planner messages。
+registry digest 写入 Planner message metadata，不需要单独模拟成 resume/event。重复 input
+从当前 trace、当前 digest 的 terminal ToolMessage replay 同一 commit，不得再次调用模型
+或重复追加 Planner messages。
 
-### Parent/child checkpoint 一致性
+### Root transition 一致性
 
-必须覆盖以下失败窗口：
-
-```text
-Planner 已持久化 commit
-  -> process crashes
-  -> root 尚未持久化相应 transition
-```
-
-恢复后 root 会重放相同 `inputId`；Planner 必须返回原 commit，使 root transition 可以
-安全重试。
-
-如果所选 LangGraph subgraph 集成不能保证 parent/child checkpoint lineage，一种可接受
-的实现是由 root 保存 opaque Planner checkpoint revision/cursor。该 metadata 只能用于
-一致性恢复，不能包含 Planner 语义内容。
-
-### 缺失或损坏的 Planner checkpoint
-
-Root 必须能区分：
-
-- 新 trace 尚未初始化 Planner；
-- 已初始化 trace 的 Planner checkpoint 丢失或损坏。
-
-后一种情况不得静默创建一个空 Planner 并继续。graph 应进入 typed blocked state，避免
-在缺少规划上下文时重新解释已执行一半的任务。
+Planner lane updates 与对应的 root transition 由同一个 node `Command` 提交，不存在 detached
+Planner commit 已落盘而 root transition 尚未落盘的双 checkpoint 窗口。graph 重试相同
+`inputId` 时，已落盘的 terminal ToolMessage 提供幂等 replay。
 
 ### Context compaction
 
-Planner 使用独立的 context budget、watermark 和 compaction。Planner summary：
+Planner lane 使用独立的字符预算和 deterministic compaction。Planner summary：
 
-- 只写回 Planner private state；
-- 不写入 main messages；
-- 不进入 root compaction；
+- 只写回 root messages 的 Planner lane；
+- 不进入 main conversation 或 Capability lane；
+- 不由 main-conversation compaction 处理；
 - 必须保留当前目标、accepted/rejected boundary、committed tasks、关键 Capability
   observations 和尚未关闭的依赖；
-- 必须可从 checkpoint 恢复后继续规划。
+- 必须可从 root checkpoint 恢复后继续规划。
 
 ### Registry 变化
 
-持久上下文可能包含过期 Capability 文档观察。Planner private state 必须记录
+持久上下文可能包含过期 Capability 文档观察。Planner lane messages 必须记录
 `registryDigest`。digest 变化时：
 
-- 保留与用户目标和 execution result 相关的历史；
-- 将 Capability availability 和文档观察视为需重新验证；
+- 不选择旧 digest 的 Planner lane，Capability availability 和文档观察重新验证；
 - 重新 materialize workspace；
+- 成功提交当前调用时删除旧 digest 的 Planner lane messages；
 - 不允许仅凭旧 transcript 选择已经删除或不可用的 Capability。
 
 ## Root state 调整
@@ -541,7 +482,7 @@ Planner commit 后由 graph 验证，但不能作为 Planner prompt 才知道的
 
 ## Answer 边界
 
-Answer 不得读取 Planner private checkpoint。
+Answer 不得读取 Planner lane。
 
 Reply mode 的公开依据：
 
@@ -558,25 +499,20 @@ summary 不能成为 Answer context。
 新增：
 
 ```text
-packages/pet-agent/src/agent/orchestrator/privatePlanner/
-  graph.ts
-  state.ts
+packages/pet-agent/src/agent/orchestrator/capabilityPlanner/
   protocol.ts
-  inputs.ts
-  checkpoint.ts
+  runner.ts
+  messageContext.ts
   agent.ts
-  prompts/
-  index.ts
 ```
 
 职责建议：
 
 - `protocol.ts`：`PlannerInput`、`PlannerCommit` 和结构约束；
-- `state.ts`：只属于 Planner 的 state schema；
-- `inputs.ts`：boundary input 构造和幂等消费；
-- `checkpoint.ts`：trace namespace 与恢复完整性；
+- `runner.ts`：Planner invocation seam 和 root message updates；
+- `messageContext.ts`：Planner lane 标记、Entry/Boundary 消息选择；
 - `agent.ts`：Capability 探索工具和 terminal commit tools；
-- `graph.ts`：私有 Planner graph、内部 compaction 和 commit extraction；
+- `agent.ts` 同时负责 lane compaction、commit replay 和 message reconcile；
 - root node 只包装 boundary input dispatch，并把 `PlannerCommit` 交给确定性 transition
   builder。
 
@@ -602,7 +538,7 @@ report_unavailable()
 - 把现有 Outcome 场景映射为新的 Planner action 场景；
 - 固定 `traceId/runId/delegationId` 语义；
 - 定义 `PlannerInput`、`PlannerCommit` 和 runtime validation；
-- 完成 Planner child checkpoint/resume 最小 spike，验证原生 resume、跨 turn 持久化和
+- 完成 Planner lane selection/reconcile 最小 spike，验证跨 turn 持久化、幂等 replay 和
   trace 隔离可以同时成立；
 - 不修改生产路由。
 
@@ -615,19 +551,19 @@ report_unavailable()
 - delegation 和相关 telemetry 能关联回 `traceId`；
 - 保持当前 Outcome + ephemeral Planner 行为不变。
 
-### Phase 2：实现持久私有 Planner
+### Phase 2：实现持久 Planner lane
 
-- 创建独立 state schema 和 checkpoint namespace；
+- 使用 `orchestrator` lane 与稳定 source metadata 标记 Planner messages；
 - Planner graph/agent 改为构建一次；
-- 实现 input ID 去重、last commit replay 和 registry digest invalidation；
-- 实现 Planner 私有 compaction；
+- 实现 input ID 去重、terminal ToolMessage replay 和 registry digest invalidation；
+- 实现 Planner lane compaction；
 - 暂时通过 adapter 输出当前 `CapabilityPlannerResult`，生产 graph 仍保留 Outcome；
 - 验证同一 trace 跨 run 恢复及新 trace 隔离。
 
 ### Phase 3：合并 Outcome 与 Planner contract
 
 - Planner terminal tools 改为 `PlannerCommit` actions；
-- post-capability route 从 Outcome 改到 private Planner；
+- post-capability route 从 Outcome 改到 Planner；
 - 实现六种 action 的确定性 root transition；
 - `continue_current` 复用 delegation；
 - `advance_plan/goal_done` 执行 accepted handoff；
@@ -664,27 +600,23 @@ report_unavailable()
 - graph 对每个 commit 产生正确 state update 和 route；
 - 不通过 prompt literal/regex 测试契约，只测试 schema 和可观察行为。
 
-### 私有状态隔离测试
+### Planner lane 隔离测试
 
-- Planner AI/tool messages 不进入 `OrchestratorState.messages`；
+- Planner AI/tool messages 进入 `OrchestratorState.messages` 的 `orchestrator` lane；
+- main conversation、Answer 和 Capability selector 不读取 Planner lane；
 - `capability_search` 文本不进入 handoff、Answer input 或 delegation summary；
-- Planner compaction summary 不进入 root compaction；
-- root snapshot 只包含 action、tasks 和 opaque checkpoint metadata；
-- 新 trace 无法读取旧 trace 私有 state；
+- Planner compaction summary 不进入 main-conversation compaction；
+- 新 trace 无法读取旧 trace Planner lane；
 - 相同 `traceId` 在不同 conversation thread 之间仍然隔离。
 
-### Checkpoint 与恢复集成测试
+### Root checkpoint 与恢复集成测试
 
 - 同一 trace、新 run 恢复 Planner transcript；
-- 用户输入中断后恢复 active delegation 和 Planner state；
+- 用户输入后恢复 active delegation 和 Planner lane；
 - 进程重启后从持久 backend 恢复；
-- in-flight interrupt resume 保持原 `traceId/runId`，且不会追加新的 Planner input；
 - 已结束 run 的 fresh-turn continuation 保持 `traceId`、创建新 `runId`，并追加一个
   普通 Planner input；
-- Planner commit 后、root transition 前故障，恢复时重放相同 commit；
 - 相同 input 重复投递不会再次调用模型；
-- Planner 内部 interrupt 通过 parent bare `Command({ resume })` 从原位置恢复；
-- 已初始化 trace 丢失 Planner checkpoint 时 fail closed；
 - supersede 后新 trace 不复用旧 state；
 - registry digest 变化后重新验证 Capability。
 
@@ -701,7 +633,7 @@ report_unavailable()
 7. 用户补充后以相同 trace、新 run 恢复；
 8. 没有可执行 Capability -> `unavailable`；
 9. Planner 内部发生 compaction 后继续正确规划；
-10. 多 task trace 中 Planner 保留早期 Capability observation，但不向 root 泄漏。
+10. 多 task trace 中 Planner 保留早期 Capability observation，但不向 main conversation 泄漏。
 
 ### Regression 与模型 eval
 
@@ -719,14 +651,14 @@ report_unavailable()
 - `traceId`、`runId`、`delegationId`；
 - Planner action；
 - task count 和 capability names；
-- checkpoint namespace/revision；
+- Planner lane message count 和 compaction count；
 - input dedupe hit；
 - registry digest；
 - token、latency、tool call count 和错误码。
 
 默认 telemetry 不记录：
 
-- Planner private prompt/messages；
+- Planner prompt/messages；
 - Capability 文档正文；
 - Planner compaction summary；
 - 被拒绝计划的自由文本；
@@ -748,15 +680,10 @@ report_unavailable()
 - 只有 `advance_plan` 才接受当前 announce 并 materialize 新 delegation；
 - eval 覆盖 incomplete announce、sibling evidence 和 repeated investigation。
 
-### 私有长期上下文变陈旧
+### Planner lane 长期上下文变陈旧
 
-缓解：registry digest invalidation、Planner 私有 compaction、每个 execution result 作为新
+缓解：registry digest invalidation、Planner lane compaction、每个 execution result 作为新
 事实覆盖旧计划假设。
-
-### Parent/child checkpoint 不一致
-
-缓解：相同 input ID 的 commit replay、opaque revision 或 LangGraph 原生 subgraph
-lineage、故障注入测试。
 
 ### Answer 缺少 Planner 的自由文本问题描述
 
@@ -766,27 +693,27 @@ lineage、故障注入测试。
 
 ### Checkpoint 体积持续增长
 
-缓解：独立 token budget、私有 compaction、closed trace retention、artifact/document
+缓解：独立字符预算、lane compaction、新 trace 清理旧 Planner lane、artifact/document
 观察摘要化；不把完整 workspace 文件复制进 checkpoint。
 
 ## 验收标准
 
 - [ ] `traceId`、`runId`、`delegationId` 的语义在类型、runtime 和文档中一致；
-- [ ] 同一 trace 在新 run 中恢复 Planner 私有上下文；
+- [ ] 同一 trace 在新 run 中恢复 Planner lane；
 - [ ] 新 trace 与旧 trace、不同 thread 之间严格隔离；
-- [ ] Planner 使用持久 checkpointer，且不在每次 invocation 重新创建；
+- [ ] Planner agent 只构建一次，持久消息由 root Planner lane 拥有；
 - [ ] Planner 只输出 `PlannerCommit.action + tasks`；
 - [ ] Planner 不再输出 `reason/context/question/gap_note` 或 direct text；
-- [ ] Planner transcript/tool observations/summary 不进入 root state 或 Answer；
+- [ ] Planner transcript/tool observations/summary 进入 root Planner lane，但不进入 main conversation 或 Answer；
 - [ ] `continue_current` 保持 delegation ID、lane 和 transcript；
 - [ ] `execute_plan` 只用于 Entry 初始计划；
 - [ ] `advance_plan` 与 `goal_done` 只在 graph 接受 handoff 后推进；
 - [ ] `user_input_required` 不把未完成 delegation 标记为 completed；
 - [ ] `unavailable` 不被表述为目标完成；
-- [ ] Planner in-flight interrupt 使用 parent bare `Command({ resume })` 原地恢复；
-- [ ] in-flight resume 保持原 `runId`；fresh-turn continuation 才创建新 `runId`；
+- [ ] Planner 不暴露需要 in-flight interrupt 的工具；未来如需支持则使用原生 subgraph；
+- [ ] fresh-turn continuation 创建新 `runId` 并保持 `traceId`；
 - [ ] 重复 Planner input 幂等且不重复调用模型；
-- [ ] Planner/root checkpoint 故障窗口可安全恢复；
+- [ ] Planner lane updates 与 root transition 在同一 graph step 中提交；
 - [ ] registry digest 变化不会复用过期 Capability availability；
 - [ ] 独立 Outcome 模型节点和旧 contract 被删除；
 - [ ] 现有 typecheck、unit tests 和 build 全部通过；
@@ -799,9 +726,9 @@ lineage、故障注入测试。
 本 issue 只有在以下条件同时成立时才能关闭：
 
 1. 新 Planner 默认用于 entry 和 post-execution planning；
-2. 同一 trace 跨 run 的持久恢复已通过真实 checkpoint backend 测试；
-3. Planner 私有上下文隔离有自动化回归测试；
+2. 同一 trace 跨 run 的 Planner lane 恢复已通过 root checkpoint 测试；
+3. Planner lane 与 main/delegation transcript 隔离有自动化回归测试；
 4. 旧 Outcome 和 Planner return 路径已删除，而非仅停用；
 5. lifecycle eval、成本与延迟对比报告已保存并可追溯；
 6. 回滚 feature flag 已完成观察期并被清理，或已形成单独的清理 issue；
-7. checkpoint retention、trace closure 和 registry invalidation 均有明确运行时行为。
+7. lane retention、trace closure 和 registry invalidation 均有明确运行时行为。

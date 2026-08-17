@@ -58,7 +58,7 @@ recreate datasets.
   clarification, task completion summary, and required-user-input return control.
 - `agent-entry-answer-routing`: direct-answer, clarification, and Planner handoff
   cases for Entry Answer.
-- `agent-capability-planning-basics`: production private Planner entry and
+- `agent-capability-planning-basics`: production Planner entry and
   execution-boundary actions, including acceptance, continuation, completion,
   user-input, and unavailable-capability boundaries.
 - `agent-multi-task-flow-basics`: real graph baseline across meaningful task boundaries.
@@ -139,7 +139,7 @@ The package test-script lookup plus test run is intentionally one Planner task
 because preparation, execution, and reporting belong to one workspace boundary.
 
 4. Lifecycle composition executes the production graph with the configured real
-   model for entry, private Planner, capability, and answer. Executor results
+   model for entry, Planner, capability, and answer. Executor results
    are controlled so the final goal verdict measures orchestrator composition
    without tool or environment variance:
 

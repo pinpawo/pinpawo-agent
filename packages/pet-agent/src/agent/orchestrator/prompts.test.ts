@@ -17,11 +17,6 @@ const plannerPromptWorkspace = {
   reused: false,
 };
 
-const emptyPlannerMessageContext = {
-  scope: 'main_conversation' as const,
-  messages: [],
-};
-
 test('Capability Planner entry input leads with the run user request', () => {
   const input = buildCapabilityPlannerAgentInput({
     mode: 'entry',
@@ -30,7 +25,7 @@ test('Capability Planner entry input leads with the run user request', () => {
     runId: 'run-1',
     workspace: plannerPromptWorkspace,
     userRequest: '打开示例站点并浏览相关内容。\n\n浏览器已经连接。',
-    messageContext: emptyPlannerMessageContext,
+    messages: [],
     activeDelegation: null,
     latestAnnounce: null,
     remainingPlan: [],
@@ -51,7 +46,7 @@ test('Capability Planner input keeps the verified default Capability private con
     runId: 'run-1',
     workspace: plannerPromptWorkspace,
     userRequest: '整理下载目录。',
-    messageContext: emptyPlannerMessageContext,
+    messages: [],
     activeDelegation: null,
     latestAnnounce: null,
     remainingPlan: [],
@@ -76,12 +71,10 @@ test('Capability Planner boundary input carries the run user request and boundar
     runId: 'run-1',
     workspace: plannerPromptWorkspace,
     userRequest: '打开示例站点并浏览相关内容。\n\n浏览器已经连接。',
-    messageContext: {
-      scope: 'active_delegation',
-      messages: [],
-    },
+    messages: [],
     activeDelegation: {
       delegationId: 'delegation-1',
+      transcriptRunId: 'transcript-1',
       capability: 'browser',
       task: '确认浏览器可用',
     },
@@ -110,12 +103,10 @@ test('Capability Planner boundary input omits the follow-up section once the pla
     runId: 'run-1',
     workspace: plannerPromptWorkspace,
     userRequest: '打开示例站点并浏览相关内容。',
-    messageContext: {
-      scope: 'active_delegation',
-      messages: [],
-    },
+    messages: [],
     activeDelegation: {
       delegationId: 'delegation-1',
+      transcriptRunId: 'transcript-1',
       capability: 'browser',
       task: '确认浏览器可用',
     },

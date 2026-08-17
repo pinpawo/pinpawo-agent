@@ -20,7 +20,6 @@ export type PlannerReplyOutcome = Extract<
 
 /** Deterministic root-visible failure metadata; never produced by a model. */
 export type OrchestratorRuntimeFailure =
-  | 'planner_checkpoint_missing'
   | 'checkpoint_incompatible';
 
 export type PlannerCommit = {
@@ -30,6 +29,7 @@ export type PlannerCommit = {
 
 export type PlannerDelegationInput = {
   readonly delegationId: string;
+  readonly transcriptRunId: string;
   readonly capability: string;
   readonly task: string;
 };

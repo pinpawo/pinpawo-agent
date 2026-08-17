@@ -89,7 +89,7 @@ import { readMessageText } from './utils';
 import { PLAN_REQUEST_TOOL_NAME } from './runtime/nodes/entryAnswer';
 
 function plannerMessageContextText(input: CapabilityPlannerInput | null | undefined) {
-  return input?.messageContext.messages.map(readMessageText).join('\n') ?? '';
+  return input?.messages.map(readMessageText).join('\n') ?? '';
 }
 
 function capability(
@@ -205,7 +205,7 @@ function createQueuedPlannerRunner(
         if (planning.outcome !== 'task_done') {
           throw new Error(`unsupported scripted planner outcome ${planning.outcome}`);
         }
-        if (!input.messageContext.messages.some(getMessageIsAnnounce)) {
+        if (!input.messages.some(getMessageIsAnnounce)) {
           return { action: 'unavailable', tasks: [] };
         }
         return this.invoke(input);
@@ -3867,7 +3867,7 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
   assert.equal(finalState.__interrupt__, undefined);
   assert.equal(reviewCount, 2);
   assert.equal(runCount, 1);
-  // After the resumed tool approval, the private Planner boundary finishes the task.
+  // After the resumed tool approval, the Planner boundary finishes the task.
   // The result is handed off into the main queue and the lane transcript is
   // cleared, so continuation state is no longer inferred from a stale announce.
   const handoffCopy = mainConversationMessages(finalState.messages)

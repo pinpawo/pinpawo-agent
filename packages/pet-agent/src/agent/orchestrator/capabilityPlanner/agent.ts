@@ -9,7 +9,8 @@ import {
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { tool, type StructuredTool } from '@langchain/core/tools';
-import { Command, END, REMOVE_ALL_MESSAGES } from '@langchain/langgraph';
+import { Command, END } from '@langchain/langgraph';
+import { randomUUID } from 'node:crypto';
 import {
   createAgent,
   createMiddleware,
@@ -38,13 +39,23 @@ import {
   parsePlannerCommit,
   type PlannerCommit,
 } from './protocol';
+import {
+  CAPABILITY_PLANNER_MESSAGE_SOURCE,
+  isCapabilityPlannerMessage,
+  selectCapabilityPlannerMessages,
+} from './messageContext';
+import {
+  getPinpetMeta,
+  setPinpetMeta,
+  stampMessageCreatedAtUtc,
+} from '../messageLanes';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
-const DEFAULT_PRIVATE_CONTEXT_MAX_CHARS = 96_000;
-const DEFAULT_PRIVATE_CONTEXT_KEEP_INPUTS = 6;
-const PRIVATE_COMPACTION_ITEM_MAX_CHARS = 2_000;
-const PRIVATE_COMPACTION_SUMMARY_MAX_CHARS = 24_000;
-const PRIVATE_COMPACTION_MESSAGE_NAME = 'private_planner_compaction';
+const DEFAULT_LANE_CONTEXT_MAX_CHARS = 96_000;
+const DEFAULT_LANE_CONTEXT_KEEP_INPUTS = 6;
+const LANE_COMPACTION_ITEM_MAX_CHARS = 2_000;
+const LANE_COMPACTION_SUMMARY_MAX_CHARS = 24_000;
+const LANE_COMPACTION_MESSAGE_NAME = 'planner_lane_compaction';
 const MAX_PLAN_TASKS = 24;
 const MAX_TASK_TEXT_CHARS = 2_000;
 const CONTINUE_CURRENT_TOOL_NAME = 'continue_current';
@@ -55,30 +66,17 @@ const COMPLETE_GOAL_TOOL_NAME = 'complete_goal';
 const REQUEST_USER_INPUT_TOOL_NAME = 'request_user_input';
 const REPORT_UNAVAILABLE_TOOL_NAME = 'report_unavailable';
 
-type CapabilityPlannerCheckpointInput = Omit<CapabilityPlannerInput, 'messageContext'>;
-
-const plannerPrivateStateSchema = z4.object({
-  requestedTraceId: z4.string().default(''),
-  traceId: z4.string().default(''),
-  currentInputId: z4.string().default(''),
-  currentInput: z4.custom<CapabilityPlannerCheckpointInput>(),
-  registryDigest: z4.string().default(''),
+const plannerInvocationStateSchema = z4.object({
+  currentInput: z4.custom<CapabilityPlannerInput>(),
   plannerCommit: z4.custom<PlannerCommit>().nullable().default(null),
-  committedInputId: z4.string().default(''),
-  processedInputs: z4.record(
-    z4.string(),
-    z4.custom<PlannerCommit>(),
-  ).default({}),
   terminalRepairInputId: z4.string().default(''),
-  compactionCount: z4.number().int().nonnegative().default(0),
 });
 
-type PlannerPrivateState = z4.infer<typeof plannerPrivateStateSchema>;
+type PlannerInvocationState = z4.infer<typeof plannerInvocationStateSchema>;
 
 export type CapabilityPlannerAgentErrorCode =
   | 'planning_limit_reached'
   | 'planning_timeout'
-  | 'planner_checkpoint_missing'
   | 'submission_required';
 
 export class CapabilityPlannerAgentError extends Error {
@@ -213,7 +211,7 @@ function assertPositiveInteger(value: number, label: string) {
   }
 }
 
-function readPrivateMessageText(message: BaseMessage) {
+function readPlannerMessageText(message: BaseMessage) {
   if (typeof message.content === 'string') return message.content;
   try {
     return JSON.stringify(message.content);
@@ -222,24 +220,24 @@ function readPrivateMessageText(message: BaseMessage) {
   }
 }
 
-function clipPrivateText(value: string, maxChars: number) {
+function clipPlannerText(value: string, maxChars: number) {
   if (value.length <= maxChars) return value;
-  return `${value.slice(0, maxChars)}\n[private Planner context truncated]`;
+  return `${value.slice(0, maxChars)}\n[Planner lane context truncated]`;
 }
 
-function buildPrivateCompactionSummary(messages: readonly BaseMessage[]) {
+function buildPlannerCompactionSummary(messages: readonly BaseMessage[]) {
   const facts: string[] = [];
   for (const message of messages) {
-    const text = readPrivateMessageText(message).trim();
+    const text = readPlannerMessageText(message).trim();
     if (!text) continue;
     if (message._getType() === 'system'
-      && message.name === PRIVATE_COMPACTION_MESSAGE_NAME) {
+      && message.name === LANE_COMPACTION_MESSAGE_NAME) {
       facts.push(text);
       continue;
     }
     if (message._getType() === 'human'
       && message.id?.startsWith('planner:')) {
-      facts.push(`Planner input:\n${clipPrivateText(text, PRIVATE_COMPACTION_ITEM_MAX_CHARS)}`);
+      facts.push(`Planner input:\n${clipPlannerText(text, LANE_COMPACTION_ITEM_MAX_CHARS)}`);
       continue;
     }
     if (ToolMessage.isInstance(message)) {
@@ -253,44 +251,115 @@ function buildPrivateCompactionSummary(messages: readonly BaseMessage[]) {
         REPORT_UNAVAILABLE_TOOL_NAME,
       ].includes(message.name ?? '')
         ? 'Planner commit'
-        : `Private tool observation (${message.name ?? 'unknown'})`;
-      facts.push(`${label}:\n${clipPrivateText(text, PRIVATE_COMPACTION_ITEM_MAX_CHARS)}`);
+        : `Planner tool observation (${message.name ?? 'unknown'})`;
+      facts.push(`${label}:\n${clipPlannerText(text, LANE_COMPACTION_ITEM_MAX_CHARS)}`);
     }
   }
-  return clipPrivateText([
-    '<private_planner_compaction>',
-    'Private task history retained for later planning. This content must never leave the Planner checkpoint.',
+  return clipPlannerText([
+    '<planner_lane_compaction>',
+    'Earlier Planner-lane history retained for later planning.',
     ...facts,
-    '</private_planner_compaction>',
-  ].join('\n\n'), PRIVATE_COMPACTION_SUMMARY_MAX_CHARS);
+    '</planner_lane_compaction>',
+  ].join('\n\n'), LANE_COMPACTION_SUMMARY_MAX_CHARS);
 }
 
-function compactPrivatePlannerMessages(params: {
+function compactPlannerLaneMessages(params: {
   messages: readonly BaseMessage[];
   maxChars: number;
   keepInputs: number;
 }) {
   const totalChars = params.messages.reduce(
-    (sum, message) => sum + readPrivateMessageText(message).length,
+    (sum, message) => sum + readPlannerMessageText(message).length,
     0,
   );
-  if (totalChars <= params.maxChars) return null;
+  if (totalChars <= params.maxChars) {
+    return { messages: [...params.messages], updates: [] as BaseMessage[] };
+  }
   const inputIndexes = params.messages.flatMap((message, index) =>
     message._getType() === 'human' && message.id?.startsWith('planner:')
       ? [index]
       : [],
   );
-  if (inputIndexes.length <= params.keepInputs) return null;
+  if (inputIndexes.length <= params.keepInputs) {
+    return { messages: [...params.messages], updates: [] as BaseMessage[] };
+  }
   const keepFrom = inputIndexes.at(-params.keepInputs);
-  if (keepFrom === undefined || keepFrom <= 0) return null;
+  if (keepFrom === undefined || keepFrom <= 0) {
+    return { messages: [...params.messages], updates: [] as BaseMessage[] };
+  }
   const summary = new SystemMessage(
-    buildPrivateCompactionSummary(params.messages.slice(0, keepFrom)),
+    buildPlannerCompactionSummary(params.messages.slice(0, keepFrom)),
   );
-  summary.name = PRIVATE_COMPACTION_MESSAGE_NAME;
+  summary.name = LANE_COMPACTION_MESSAGE_NAME;
+  const removed = params.messages.slice(0, keepFrom).flatMap((message) =>
+    message.id ? [new RemoveMessage({ id: message.id }) as BaseMessage] : [],
+  );
+  return {
+    messages: [summary, ...params.messages.slice(keepFrom)],
+    updates: [...removed, summary],
+  };
+}
+
+function stampPlannerMessage(params: {
+  message: BaseMessage;
+  input: CapabilityPlannerInput;
+}) {
+  const { message, input } = params;
+  if (!message.id) message.id = randomUUID();
+  stampMessageCreatedAtUtc(message);
+  setPinpetMeta(message, {
+    lane: 'orchestrator',
+    source: CAPABILITY_PLANNER_MESSAGE_SOURCE,
+    traceId: input.traceId,
+    runId: input.runId,
+    plannerInputId: input.inputId,
+    registryDigest: input.workspace.registryDigest,
+  });
+  return message;
+}
+
+function readCachedPlannerCommit(input: CapabilityPlannerInput) {
+  for (let index = input.messages.length - 1; index >= 0; index -= 1) {
+    const message = input.messages[index];
+    const meta = getPinpetMeta(message);
+    if (!ToolMessage.isInstance(message)
+      || !isCapabilityPlannerMessage(message, input.traceId)
+      || meta.registryDigest !== input.workspace.registryDigest
+      || meta.plannerInputId !== input.inputId) {
+      continue;
+    }
+    const rawCommit = readTerminalCommit(message);
+    if (rawCommit) return rawCommit;
+  }
+  return null;
+}
+
+function buildPlannerMessageUpdates(params: {
+  input: CapabilityPlannerInput;
+  resultMessages: readonly BaseMessage[];
+  compactionUpdates: readonly BaseMessage[];
+}) {
+  const rootRefs = new Set(params.input.messages);
+  const rootIds = new Set(params.input.messages.flatMap((message) =>
+    message.id ? [message.id] : [],
+  ));
+  const produced = params.resultMessages.filter((message) =>
+    !rootRefs.has(message) && (!message.id || !rootIds.has(message.id)),
+  );
+  const stalePlannerRemovals = params.input.messages.flatMap((message) => {
+    if (!isCapabilityPlannerMessage(message)) return [];
+    const meta = getPinpetMeta(message);
+    if (meta.traceId === params.input.traceId
+      && meta.registryDigest === params.input.workspace.registryDigest) {
+      return [];
+    }
+    return message.id ? [new RemoveMessage({ id: message.id }) as BaseMessage] : [];
+  });
+  const compactionRemovals = params.compactionUpdates.filter(RemoveMessage.isInstance);
   return [
-    new RemoveMessage({ id: REMOVE_ALL_MESSAGES }),
-    summary,
-    ...params.messages.slice(keepFrom),
+    ...stalePlannerRemovals,
+    ...compactionRemovals,
+    ...produced.map((message) => stampPlannerMessage({ message, input: params.input })),
   ];
 }
 
@@ -299,31 +368,17 @@ function buildPlannerRunnableConfig(params: {
   runnableConfig?: RunnableConfig;
   signal: AbortSignal;
 }): RunnableConfig {
-  const {
-    checkpoint_id: _parentCheckpointId,
-    checkpoint_map: _parentCheckpointMap,
-    checkpoint_ns: _parentCheckpointNamespace,
-    ...configurable
-  } = params.runnableConfig?.configurable ?? {};
   return {
     ...params.runnableConfig,
-    configurable: {
-      ...configurable,
-      // The Planner is invoked manually from the root node, so LangGraph does
-      // not assign it a stable subgraph task namespace. Derive that namespace
-      // from the task identity itself; no independent Planner session id is
-      // introduced, and a new root run can reopen the latest trace checkpoint.
-      checkpoint_ns: `privateCapabilityPlanner_${params.input.traceId}`,
-    },
     signal: params.signal,
-    runName: 'framework.private_capability_planner',
+    runName: 'framework.capability_planner',
     tags: [
       ...(params.runnableConfig?.tags ?? []),
-      'framework.private_capability_planner',
+      'framework.capability_planner',
     ],
     metadata: {
       ...(params.runnableConfig?.metadata ?? {}),
-      frameworkComponent: 'private_capability_planner',
+      frameworkComponent: 'capability_planner',
       traceId: params.input.traceId,
       runId: params.input.runId,
       plannerInputId: params.input.inputId,
@@ -333,107 +388,24 @@ function buildPlannerRunnableConfig(params: {
   };
 }
 
-function currentPlannerInput(state: Partial<PlannerPrivateState>) {
+function currentPlannerInput(state: Partial<PlannerInvocationState>) {
   if (!state.currentInput) {
-    throw new Error('Private Planner state has no current input.');
+    throw new Error('Planner invocation state has no current input.');
   }
   return state.currentInput;
 }
 
-function injectPlannerMessageContext(params: {
-  messages: readonly BaseMessage[];
-  input: CapabilityPlannerCheckpointInput;
-  context: CapabilityPlannerInput['messageContext'] | undefined;
-}) {
-  const { messages, input, context } = params;
-  if (!context || context.messages.length === 0) return [...messages];
-  const inputIndex = messages.findIndex((message) => message.id === `planner:${input.inputId}`);
-  if (inputIndex < 0) return [...messages];
-  const opening = new HumanMessage({
-    id: `planner-context-start:${input.inputId}`,
-    content: `<planner_message_context role="fact" source="${context.scope}" trust="read_only">`,
-  });
-  const closing = new HumanMessage({
-    id: `planner-context-end:${input.inputId}`,
-    content: '</planner_message_context>',
-  });
-  return [
-    ...messages.slice(0, inputIndex),
-    opening,
-    ...context.messages,
-    closing,
-    ...messages.slice(inputIndex),
-  ];
-}
-
-function terminalRepairMessage(input: CapabilityPlannerCheckpointInput) {
+function terminalRepairMessage(input: CapabilityPlannerInput) {
   const actions = input.mode === 'entry'
     ? 'submit_plan, request_user_input, or report_unavailable'
     : 'continue_current, advance_plan, complete_goal, request_user_input, or report_unavailable';
   return `Your previous response did not finish this Planner turn. Invoke exactly one valid terminal tool now: ${actions}. Do not respond with ordinary text.`;
 }
 
-function createPrivatePlannerMiddleware(params: {
-  privateContextMaxChars: number;
-  privateContextKeepInputs: number;
-  messageContextForInput: (
-    input: CapabilityPlannerCheckpointInput,
-  ) => CapabilityPlannerInput['messageContext'] | undefined;
-}) {
+function createPlannerMiddleware() {
   return createMiddleware({
-    name: 'PrivateCapabilityPlanner',
-    stateSchema: plannerPrivateStateSchema,
-    beforeAgent: {
-      canJumpTo: ['end'],
-      hook: (state) => {
-        const input = currentPlannerInput(state);
-        const traceChanged = state.traceId !== state.requestedTraceId;
-        const registryChanged = Boolean(
-          state.registryDigest
-          && state.registryDigest !== input.workspace.registryDigest,
-        );
-        const cachedCommit = traceChanged || registryChanged
-          ? null
-          : state.committedInputId === state.currentInputId
-            ? state.plannerCommit
-            : state.processedInputs?.[state.currentInputId] ?? null;
-        const message = state.messages.find((item) =>
-          item.id === `planner:${state.currentInputId}`,
-        );
-        const resetMessages: BaseMessage[] = traceChanged || registryChanged
-          ? [
-              new RemoveMessage({ id: REMOVE_ALL_MESSAGES }),
-              ...(message ? [message] : []),
-            ]
-          : [];
-        const compactedMessages = resetMessages.length === 0
-          ? compactPrivatePlannerMessages({
-              messages: state.messages,
-              maxChars: params.privateContextMaxChars,
-              keepInputs: params.privateContextKeepInputs,
-            })
-          : null;
-        return {
-          ...(resetMessages.length > 0
-            ? { messages: resetMessages }
-            : compactedMessages
-              ? { messages: compactedMessages }
-              : {}),
-          traceId: state.requestedTraceId,
-          registryDigest: input.workspace.registryDigest,
-          plannerCommit: cachedCommit,
-          committedInputId: traceChanged || registryChanged ? '' : state.committedInputId,
-          processedInputs: traceChanged || registryChanged ? {} : state.processedInputs,
-          terminalRepairInputId: traceChanged || registryChanged
-            ? ''
-            : state.terminalRepairInputId,
-          compactionCount: traceChanged || registryChanged
-            ? 0
-            : state.compactionCount + (compactedMessages ? 1 : 0),
-          ...(cachedCommit ? { jumpTo: 'end' as const } : {}),
-        };
-      },
-    },
+    name: 'CapabilityPlanner',
+    stateSchema: plannerInvocationStateSchema,
     wrapModelCall: (request, handler) => {
       const input = currentPlannerInput(request.state);
       if (request.state.plannerCommit) {
@@ -444,11 +416,6 @@ function createPrivatePlannerMiddleware(params: {
       }
       return handler({
         ...request,
-        messages: injectPlannerMessageContext({
-          messages: request.messages,
-          input,
-          context: params.messageContextForInput(input),
-        }),
         systemMessage: new SystemMessage(
           buildCapabilityPlannerAgentSystemPrompt(input.mode),
         ),
@@ -511,11 +478,6 @@ function createPrivatePlannerMiddleware(params: {
         update: {
           messages: [result],
           plannerCommit: commit,
-          committedInputId: input.inputId,
-          processedInputs: {
-            ...(request.state.processedInputs ?? {}),
-            [input.inputId]: commit,
-          },
           jumpTo: 'end',
         },
         goto: END,
@@ -529,12 +491,12 @@ export function createCapabilityPlannerAgent(params: {
   timeoutMs?: number;
   registryBackend?: CapabilityRegistryBackend;
   maxDocumentReadBytes?: number;
-  /** Private checkpoint transcript budget before deterministic compaction. */
-  privateContextMaxChars?: number;
-  /** Recent Planner inputs retained verbatim after private compaction. */
-  privateContextKeepInputs?: number;
-  /** Private Planner-only tools, primarily for host middleware and HITL. */
-  additionalPrivateTools?: StructuredTool[];
+  /** Planner-lane transcript budget before deterministic compaction. */
+  laneContextMaxChars?: number;
+  /** Recent Planner inputs retained verbatim after lane compaction. */
+  laneContextKeepInputs?: number;
+  /** Additional invocation-scoped Planner tools. */
+  additionalTools?: StructuredTool[];
 }): CapabilityPlannerRunner {
   const timeoutMs = params.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   assertPositiveInteger(timeoutMs, 'Capability Planner timeoutMs');
@@ -544,15 +506,15 @@ export function createCapabilityPlannerAgent(params: {
       'Capability Planner maxDocumentReadBytes',
     );
   }
-  const privateContextMaxChars = params.privateContextMaxChars
-    ?? DEFAULT_PRIVATE_CONTEXT_MAX_CHARS;
-  const privateContextKeepInputs = params.privateContextKeepInputs
-    ?? DEFAULT_PRIVATE_CONTEXT_KEEP_INPUTS;
-  assertPositiveInteger(privateContextMaxChars, 'Capability Planner privateContextMaxChars');
-  assertPositiveInteger(privateContextKeepInputs, 'Capability Planner privateContextKeepInputs');
+  const laneContextMaxChars = params.laneContextMaxChars
+    ?? DEFAULT_LANE_CONTEXT_MAX_CHARS;
+  const laneContextKeepInputs = params.laneContextKeepInputs
+    ?? DEFAULT_LANE_CONTEXT_KEEP_INPUTS;
+  assertPositiveInteger(laneContextMaxChars, 'Capability Planner laneContextMaxChars');
+  assertPositiveInteger(laneContextKeepInputs, 'Capability Planner laneContextKeepInputs');
 
   const explorers = new Map<string, CapabilityPlannerFileExplorer>();
-  const explorerForInput = (input: CapabilityPlannerCheckpointInput) => {
+  const explorerForInput = (input: CapabilityPlannerInput) => {
     const existing = explorers.get(input.inputId);
     if (existing) return existing;
     const explorer = createCapabilityPlannerFileExplorer({
@@ -566,8 +528,8 @@ export function createCapabilityPlannerAgent(params: {
     return explorer;
   };
   const terminalTools = createPlannerTerminalTools();
-  const additionalPrivateTools = params.additionalPrivateTools ?? [];
-  const capabilitySearchTool = createCapabilityPlannerSearchTool<PlannerPrivateState>(
+  const additionalTools = params.additionalTools ?? [];
+  const capabilitySearchTool = createCapabilityPlannerSearchTool<PlannerInvocationState>(
     (terms, runtime) => explorerForInput(
       currentPlannerInput(runtime.state),
     ).search(terms, runtime.signal),
@@ -577,29 +539,15 @@ export function createCapabilityPlannerAgent(params: {
     runLimit: CAPABILITY_PLANNER_MAX_CAPABILITY_SEARCH_CALLS,
     exitBehavior: 'continue',
   });
-  const invocationMessageContexts = new Map<
-    string,
-    CapabilityPlannerInput['messageContext']
-  >();
-  const middleware = createPrivatePlannerMiddleware({
-    privateContextMaxChars,
-    privateContextKeepInputs,
-    messageContextForInput: (input) => invocationMessageContexts.get(input.inputId),
-  });
-  const buildAgent = (checkpointer: boolean) => createAgent({
-    name: 'privateCapabilityPlanner',
+  const middleware = createPlannerMiddleware();
+  const agent = createAgent({
+    name: 'capabilityPlanner',
     model: params.model,
-    tools: [capabilitySearchTool, ...terminalTools, ...additionalPrivateTools],
+    tools: [capabilitySearchTool, ...terminalTools, ...additionalTools],
     systemPrompt: '',
     middleware: [capabilitySearchLimitMiddleware, middleware],
-    checkpointer,
+    checkpointer: false,
   });
-  // These are the two standard LangGraph subgraph persistence modes used by
-  // this runner. Production uses per-thread persistence (`true`) inherited
-  // from the parent; direct tests/evals use the precompiled stateless adapter
-  // (`false`). Neither graph is rebuilt per Planner invocation.
-  const persistentAgent = buildAgent(true);
-  const statelessDirectAgent = buildAgent(false);
 
   return Object.freeze({
     async invoke(
@@ -607,11 +555,6 @@ export function createCapabilityPlannerAgent(params: {
       runnableConfig?: RunnableConfig,
     ): Promise<CapabilityPlannerResult> {
       const timeout = mergePlannerSignal(runnableConfig?.signal, timeoutMs);
-      // Canonical conversation and delegation messages are invocation-only.
-      // They remain complete for the model call without entering the private
-      // Planner checkpoint or its compaction lifecycle.
-      const { messageContext, ...checkpointInput } = input;
-      invocationMessageContexts.set(input.inputId, messageContext);
       const config = buildPlannerRunnableConfig({
         input,
         runnableConfig,
@@ -619,77 +562,78 @@ export function createCapabilityPlannerAgent(params: {
       });
       try {
         timeout.signal.throwIfAborted();
-        const hasParentCheckpointer = Boolean(
-          runnableConfig?.configurable?.__pregel_checkpointer,
-        );
-        const selectedAgent = hasParentCheckpointer
-          ? persistentAgent
-          : statelessDirectAgent;
-        if (hasParentCheckpointer) {
-          const snapshot = await persistentAgent.graph.getState(config);
-          const saved = snapshot.values as Partial<PlannerPrivateState>;
-          if (input.mode === 'boundary' && saved.traceId !== input.traceId) {
-            throw new CapabilityPlannerAgentError(
-              'planner_checkpoint_missing',
-              `Capability Planner checkpoint is missing for trace ${input.traceId}.`,
-            );
-          }
-          if (saved.traceId === input.traceId
-            && saved.registryDigest
-            && saved.registryDigest !== input.workspace.registryDigest) {
-            await persistentAgent.graph.updateState(config, {
-              messages: [new RemoveMessage({ id: REMOVE_ALL_MESSAGES })],
-              requestedTraceId: input.traceId,
-              traceId: input.traceId,
-              currentInputId: input.inputId,
-              currentInput: checkpointInput,
-              registryDigest: input.workspace.registryDigest,
-              plannerCommit: null,
-              committedInputId: '',
-              processedInputs: {},
-              terminalRepairInputId: '',
-              compactionCount: 0,
-            });
-          }
-          const cachedCommit = saved.traceId === input.traceId
-            && saved.registryDigest === input.workspace.registryDigest
-            ? saved.processedInputs?.[input.inputId]
-              ?? (saved.committedInputId === input.inputId
-                ? saved.plannerCommit
-                : null)
-            : null;
-          if (cachedCommit) {
-            return parsePlannerCommit(cachedCommit, {
-              mode: input.mode,
-              activeDelegation: input.activeDelegation,
-              allowedCapabilityNames: input.workspace.capabilityNames,
-            });
-          }
+        const cachedCommit = readCachedPlannerCommit(input);
+        if (cachedCommit) {
+          return parsePlannerCommit(cachedCommit, {
+            mode: input.mode,
+            activeDelegation: input.activeDelegation,
+            allowedCapabilityNames: input.workspace.capabilityNames,
+          });
         }
         const explorer = explorerForInput(input);
         const defaultCapability = await explorer.readDefaultCapability(
           timeout.signal,
         );
-        const result = await selectedAgent.invoke({
-          messages: [new HumanMessage({
-            id: `planner:${input.inputId}`,
-            content: buildCapabilityPlannerAgentInput(
-              input,
-              defaultCapability,
-            ),
-          })],
-          requestedTraceId: input.traceId,
-          currentInputId: input.inputId,
-          currentInput: checkpointInput,
-          registryDigest: input.workspace.registryDigest,
+        const selectedMessages = input.mode === 'boundary' && input.activeDelegation
+          ? selectCapabilityPlannerMessages({
+              mode: 'boundary',
+              messages: input.messages,
+              traceId: input.traceId,
+              registryDigest: input.workspace.registryDigest,
+              lane: `capability:${input.activeDelegation.capability}`,
+              transcriptRunId: input.activeDelegation.transcriptRunId,
+              delegationId: input.activeDelegation.delegationId,
+            })
+          : selectCapabilityPlannerMessages({
+              mode: 'entry',
+              messages: input.messages,
+              traceId: input.traceId,
+              registryDigest: input.workspace.registryDigest,
+            });
+        const plannerLane = selectedMessages.filter((message) =>
+          isCapabilityPlannerMessage(
+            message,
+            input.traceId,
+            input.workspace.registryDigest,
+          ),
+        );
+        const compacted = compactPlannerLaneMessages({
+          messages: plannerLane,
+          maxChars: laneContextMaxChars,
+          keepInputs: laneContextKeepInputs,
+        });
+        const contextMessages = selectedMessages.filter((message) =>
+          !isCapabilityPlannerMessage(message, input.traceId),
+        );
+        const result = await agent.invoke({
+          messages: [
+            ...compacted.messages,
+            ...contextMessages,
+            new HumanMessage({
+              id: `planner:${input.inputId}`,
+              content: buildCapabilityPlannerAgentInput(
+                input,
+                defaultCapability,
+              ),
+            }),
+          ],
+          currentInput: input,
         }, config);
         timeout.signal.throwIfAborted();
         if (result.plannerCommit) {
-          return parsePlannerCommit(result.plannerCommit, {
+          const commit = parsePlannerCommit(result.plannerCommit, {
             mode: input.mode,
             activeDelegation: input.activeDelegation,
             allowedCapabilityNames: input.workspace.capabilityNames,
           });
+          return {
+            ...commit,
+            messageUpdates: buildPlannerMessageUpdates({
+              input,
+              resultMessages: result.messages,
+              compactionUpdates: compacted.updates,
+            }),
+          };
         }
         if (explorer.didReachDocumentReadLimit()) {
           throw new CapabilityPlannerAgentError(
@@ -712,7 +656,6 @@ export function createCapabilityPlannerAgent(params: {
       } finally {
         timeout.dispose();
         explorers.delete(input.inputId);
-        invocationMessageContexts.delete(input.inputId);
       }
     },
   });

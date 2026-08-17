@@ -5,17 +5,13 @@ import { Command } from '@langchain/langgraph';
 import { type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { materializeCapabilityDocumentWorkspace } from '../../capabilityPlanner/documentWorkspace';
-import {
-  CapabilityPlannerAgentError,
-  createCapabilityPlannerAgent,
-} from '../../capabilityPlanner/agent';
+import { createCapabilityPlannerAgent } from '../../capabilityPlanner/agent';
 import {
   type CapabilityPlannerDispatch,
   type CapabilityPlannerInput,
   type CapabilityPlannerRuntimeState,
   type CapabilityPlannerRunner,
 } from '../../capabilityPlanner/runner';
-import { selectCapabilityPlannerMessages } from '../../capabilityPlanner/messageContext';
 import {
   parsePlannerCommit,
   type PlannerCommit,
@@ -229,23 +225,6 @@ function buildWaitingUpdate(
   };
 }
 
-function buildPlannerCheckpointMissingUpdate(state: OrchestratorStateType) {
-  const activeDelegation = state.taskActiveDelegation;
-  return {
-    runNextDelegation: null,
-    runCapabilityPlan: state.runCapabilityPlan,
-    taskActiveDelegation: activeDelegation,
-    runDelegationSummaries: activeDelegation
-      ? state.runDelegationSummaries.map((delegation) =>
-          delegation.id === activeDelegation.id
-            ? { ...delegation, status: 'progress' as const }
-            : delegation)
-      : state.runDelegationSummaries,
-    runLatestDelegationOutcome: null,
-    runRuntimeFailure: 'planner_checkpoint_missing' as const,
-  };
-}
-
 function createDefaultPlannerRunner(config: OrchestratorConfig): CapabilityPlannerRunner {
   return createCapabilityPlannerAgent({
     model: config.models.act,
@@ -281,10 +260,7 @@ function buildPlannerInput(params: {
         traceId: state.traceId,
         runId: state.runId,
         userRequest: state.runUserRequest,
-        messageContext: selectCapabilityPlannerMessages({
-          mode: 'entry',
-          messages: nodeInput.messages,
-        }),
+        messages: nodeInput.messages,
         activeDelegation: null,
         latestAnnounce: null,
         remainingPlan: state.runCapabilityPlan,
@@ -327,15 +303,10 @@ function buildPlannerInput(params: {
       traceId: state.traceId,
       runId: state.runId,
       userRequest: plannerState.runUserRequest,
-      messageContext: selectCapabilityPlannerMessages({
-        mode: 'boundary',
-        messages: state.messages,
-        lane: activeDelegation.lane,
-        transcriptRunId: activeDelegation.transcriptRunId,
-        delegationId: activeDelegation.id,
-      }),
+      messages: state.messages,
       activeDelegation: {
         delegationId: activeDelegation.id,
+        transcriptRunId: activeDelegation.transcriptRunId,
         capability,
         task: activeDelegation.task,
       },
@@ -366,60 +337,60 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
       ...(allowedCapabilityNames ? { allowedCapabilityNames } : {}),
     });
     const { input, state } = buildPlannerInput({ nodeInput, workspace });
-    let commit: PlannerCommit;
-    try {
-      commit = parsePlannerCommit(
-        await runner.invoke(input, runnableConfig),
-        {
-          mode: input.mode,
-          activeDelegation: input.activeDelegation,
-          allowedCapabilityNames: workspace.capabilityNames,
-        },
-      );
-    } catch (error) {
-      if (input.mode === 'boundary'
-        && error instanceof CapabilityPlannerAgentError
-        && error.code === 'planner_checkpoint_missing') {
-        return new Command({
-          update: buildPlannerCheckpointMissingUpdate(nodeInput as OrchestratorStateType),
-          goto: 'answer',
-        });
-      }
-      throw error;
-    }
+    const result = await runner.invoke(input, runnableConfig);
+    const commit = parsePlannerCommit(
+      { action: result.action, tasks: result.tasks },
+      {
+        mode: input.mode,
+        activeDelegation: input.activeDelegation,
+        allowedCapabilityNames: workspace.capabilityNames,
+      },
+    );
+    const plannerMessageUpdates = [...(result.messageUpdates ?? [])];
+    const includePlannerMessages = <T extends object>(update: T) => {
+      const existingMessages = 'messages' in update && Array.isArray(update.messages)
+        ? update.messages as BaseMessage[]
+        : [];
+      return {
+        ...update,
+        ...(plannerMessageUpdates.length > 0 || existingMessages.length > 0
+          ? { messages: [...plannerMessageUpdates, ...existingMessages] }
+          : {}),
+      };
+    };
 
     if (input.mode === 'entry') {
       if (commit.action === 'execute_plan') {
         const [nextTask, ...remainingPlan] = commit.tasks;
         if (!nextTask) throw new Error('Planner execute_plan requires a task.');
         return new Command({
-          update: materializeNextDelegation({
+          update: includePlannerMessages(materializeNextDelegation({
             state,
             nextTask,
             remainingPlan: [...remainingPlan],
             allowedCapabilityNames: workspace.capabilityNames,
-          }),
+          })),
           goto: 'capability',
         });
       }
       if (commit.action === 'answer_directly') {
         return new Command({
-          update: {
+          update: includePlannerMessages({
             runNextDelegation: null,
             runCapabilityPlan: [],
             runLatestDelegationOutcome: null,
             runRuntimeFailure: null,
-          },
+          }),
           goto: 'answer',
         });
       }
       return new Command({
-        update: {
+        update: includePlannerMessages({
           runNextDelegation: null,
           runCapabilityPlan: [],
           runLatestDelegationOutcome: commit.action,
           runRuntimeFailure: null,
-        },
+        }),
         goto: 'answer',
       });
     }
@@ -430,16 +401,16 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
 
     if (commit.action === 'continue_current') {
       return new Command({
-        update: buildContinueCurrentUpdate({
+        update: includePlannerMessages(buildContinueCurrentUpdate({
           state: rootState,
           activeDelegation,
-        }),
+        })),
         goto: 'capability',
       });
     }
     if (commit.action === 'user_input_required' || commit.action === 'unavailable') {
       return new Command({
-        update: buildWaitingUpdate(rootState, commit.action),
+        update: includePlannerMessages(buildWaitingUpdate(rootState, commit.action)),
         goto: 'answer',
       });
     }
@@ -451,15 +422,15 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
     );
     if (!accepted) {
       return new Command({
-        update: {
+        update: includePlannerMessages({
           runNextDelegation: null,
           runCapabilityPlan: [],
-        },
+        }),
         goto: 'answer',
       });
     }
     if (commit.action === 'goal_done') {
-      return new Command({ update: accepted, goto: 'answer' });
+      return new Command({ update: includePlannerMessages(accepted), goto: 'answer' });
     }
 
     const [nextTask, ...remainingPlan] = commit.tasks;
@@ -474,11 +445,11 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
       allowedCapabilityNames: workspace.capabilityNames,
     });
     return new Command({
-      update: {
+      update: includePlannerMessages({
         ...accepted,
         ...next,
         messages: [...accepted.messages, ...next.messages],
-      },
+      }),
       goto: 'capability',
     });
   };

@@ -1,6 +1,6 @@
 import { definePromptTemplate } from '../template';
 
-export const CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT = definePromptTemplate<Record<string, never>>(`你是框架内部的私有 Planner，负责为当前用户请求制定 Capability 执行计划。本轮工作包括：
+export const CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT = definePromptTemplate<Record<string, never>>(`你是框架内部的 Planner，负责为当前用户请求制定 Capability 执行计划。本轮工作包括：
 1. 了解当前用户请求和必要背景。
 2. 使用 capability_search 探索相关 Capability，并形成可执行的任务计划。
 3. 通过 submit_plan 提交可执行计划；无需执行即可由 Answer 回复时调用 answer_directly；需要用户输入时调用 request_user_input；没有可执行能力时调用 report_unavailable。
@@ -18,7 +18,7 @@ export const CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT = definePromptTemplate<Recor
 
 本轮必须以一次结构化结果工具调用结束，不生成普通文本。`, []);
 
-export const CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT = definePromptTemplate<Record<string, never>>(`你是框架内部的私有 Planner，负责验收最新任务结果并更新 Capability 执行计划。本轮工作包括：
+export const CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT = definePromptTemplate<Record<string, never>>(`你是框架内部的 Planner，负责验收最新任务结果并更新 Capability 执行计划。本轮工作包括：
 1. 判断当前 task 是否已达标，以及用户目标是否已完成。
 2. 使用 capability_search 探索相关 Capability，并更新可执行的任务计划。
 3. 当前 task 仍可执行但尚未达标时调用 continue_current；当前 task 达标且仍有自主工作时调用 advance_plan；目标完成时调用 complete_goal；继续需要用户确认、选择或补充信息时调用 request_user_input；没有可执行能力时调用 report_unavailable。

@@ -19,10 +19,9 @@ import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { tool, type StructuredTool } from '@langchain/core/tools';
 import {
   Annotation,
-  Command,
   END,
-  interrupt,
   MemorySaver,
+  messagesStateReducer,
   START,
   StateGraph,
 } from '@langchain/langgraph';
@@ -36,6 +35,12 @@ import {
   createCapabilityPlannerAgent,
 } from './agent';
 import type { CapabilityPlannerInput } from './runner';
+import { isCapabilityPlannerMessage } from './messageContext';
+
+function commitOnly(value: unknown) {
+  const result = value as { action: unknown; tasks: unknown };
+  return { action: result.action, tasks: result.tasks };
+}
 
 type ScriptedToolCall = {
   id?: string;
@@ -297,10 +302,7 @@ function plannerInput(
     traceId: 'trace-test',
     runId: 'run-test',
     userRequest: 'Research the repository and then prepare a review.',
-    messageContext: {
-      scope: 'main_conversation' as const,
-      messages: [],
-    },
+    messages: [],
     activeDelegation: null,
     latestAnnounce: null,
     remainingPlan: [],
@@ -334,7 +336,7 @@ function submitArgs(
   };
 }
 
-test('nested Planner checkpoint persists one trace privately and deduplicates boundary inputs', async (t) => {
+test('Planner lane persists one trace in root messages and deduplicates boundary inputs', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -381,19 +383,16 @@ test('nested Planner checkpoint persists one trace privately and deduplicates bo
     .addEdge(START, 'planner')
     .addEdge('planner', END)
     .compile({ checkpointer });
-  const config = { configurable: { thread_id: 'private-planner-checkpoint' } };
+  const config = { configurable: { thread_id: 'planner-lane-root' } };
   const entryA = plannerInput(workspace, {
     inputId: 'trace_started:trace-a',
     traceId: 'trace-a',
     runId: 'run-a1',
     userRequest: 'PRIVATE_TRACE_A_GOAL',
-    messageContext: {
-      scope: 'main_conversation',
-      messages: [
-        new HumanMessage('PRIOR_MAIN_CONVERSATION'),
-        new HumanMessage('PRIVATE_TRACE_A_GOAL'),
-      ],
-    },
+    messages: [
+      new HumanMessage('PRIOR_MAIN_CONVERSATION'),
+      new HumanMessage('PRIVATE_TRACE_A_GOAL'),
+    ],
   });
   const boundaryA = plannerInput(workspace, {
     mode: 'boundary',
@@ -403,6 +402,7 @@ test('nested Planner checkpoint persists one trace privately and deduplicates bo
     userRequest: entryA.userRequest,
     activeDelegation: {
       delegationId: 'delegation-a',
+      transcriptRunId: 'transcript-a',
       capability: 'general',
       task: 'Complete trace A.',
     },
@@ -410,48 +410,25 @@ test('nested Planner checkpoint persists one trace privately and deduplicates bo
       messageId: 'announce-a',
       completionReason: 'natural',
     },
-    messageContext: {
-      scope: 'active_delegation',
-      messages: [new AIMessage('Trace A execution is complete.')],
-    },
+    messages: [new AIMessage('Trace A execution is complete.')],
   });
 
   const entryState = await graph.invoke({ input: entryA }, config);
-  assert.deepEqual(entryState.commit, {
+  assert.deepEqual(commitOnly(entryState.commit), {
     action: 'execute_plan',
     tasks: [{ capability: 'general', task: 'Complete trace A.' }],
   });
-  const entryPlannerCheckpoint = await checkpointer.getTuple({
-    configurable: {
-      thread_id: 'private-planner-checkpoint',
-      checkpoint_ns: 'privateCapabilityPlanner_trace-a',
-    },
-  });
-  const entryCheckpointInput = (
-    entryPlannerCheckpoint?.checkpoint.channel_values.currentInput
-  ) as CapabilityPlannerInput | undefined;
-  assert.equal('messageContext' in (entryCheckpointInput ?? {}), false);
   assert.match(model.invocations[0]?.map(readMessageText).join('\n') ?? '', /PRIOR_MAIN_CONVERSATION/);
-  const boundaryState = await graph.invoke({ input: boundaryA }, config);
-  assert.deepEqual(boundaryState.commit, { action: 'goal_done', tasks: [] });
+  const entryMessageUpdates = (
+    entryState.commit as { messageUpdates?: BaseMessage[] }
+  ).messageUpdates ?? [];
+  const boundaryInput = {
+    ...boundaryA,
+    messages: [...entryA.messages, ...entryMessageUpdates, ...boundaryA.messages],
+  };
+  const boundaryState = await graph.invoke({ input: boundaryInput }, config);
+  assert.deepEqual(commitOnly(boundaryState.commit), { action: 'goal_done', tasks: [] });
   assert.equal(model.invocations.length, 2);
-  const checkpointNamespaces = Object.keys(
-    checkpointer.storage['private-planner-checkpoint'] ?? {},
-  );
-  assert.ok(
-    checkpointNamespaces.includes('privateCapabilityPlanner_trace-a'),
-    `expected stable Planner namespace; found ${JSON.stringify(checkpointNamespaces)}`,
-  );
-  const plannerCheckpoint = await checkpointer.getTuple({
-    configurable: {
-      thread_id: 'private-planner-checkpoint',
-      checkpoint_ns: 'privateCapabilityPlanner_trace-a',
-    },
-  });
-  assert.equal(
-    plannerCheckpoint?.checkpoint.channel_values.committedInputId,
-    boundaryA.inputId,
-  );
   assert.match(
     model.invocations[1]?.map(readMessageText).join('\n') ?? '',
     /PRIVATE_TRACE_A_GOAL/,
@@ -460,15 +437,17 @@ test('nested Planner checkpoint persists one trace privately and deduplicates bo
     model.invocations[1]?.map(readMessageText).join('\n') ?? '',
     /Trace A execution is complete/,
   );
-  assert.equal(
-    model.invocations[1]?.some((message) =>
-      message.id === `planner-context-start:${boundaryA.inputId}`),
-    true,
-  );
+  const boundaryMessageUpdates = (
+    boundaryState.commit as { messageUpdates?: BaseMessage[] }
+  ).messageUpdates ?? [];
+  const completedBoundaryInput = {
+    ...boundaryInput,
+    messages: [...boundaryInput.messages, ...boundaryMessageUpdates],
+  };
 
-  const duplicateState = await graph.invoke({ input: boundaryA }, config);
-  assert.deepEqual(duplicateState.commit, { action: 'goal_done', tasks: [] });
-  assert.equal(model.invocations.length, 2, 'duplicate inputId must use the private cached commit');
+  const duplicateState = await graph.invoke({ input: completedBoundaryInput }, config);
+  assert.deepEqual(commitOnly(duplicateState.commit), { action: 'goal_done', tasks: [] });
+  assert.equal(model.invocations.length, 2, 'duplicate inputId must use the Planner-lane cached commit');
 
   const restartedModel = new ScriptedPlannerModel([{
     toolCalls: [{ id: 'must-not-run', name: 'report_unavailable', args: {} }],
@@ -481,14 +460,14 @@ test('nested Planner checkpoint persists one trace privately and deduplicates bo
     .addEdge(START, 'planner')
     .addEdge('planner', END)
     .compile({ checkpointer });
-  const restartedState = await restartedGraph.invoke({ input: boundaryA }, config);
-  assert.deepEqual(restartedState.commit, { action: 'goal_done', tasks: [] });
+  const restartedState = await restartedGraph.invoke({ input: completedBoundaryInput }, config);
+  assert.deepEqual(commitOnly(restartedState.commit), { action: 'goal_done', tasks: [] });
   assert.equal(restartedModel.invocations.length, 0, 'a rebuilt Planner must replay the persisted commit');
 
   const changedRegistryState = await graph.invoke({
-    input: { ...boundaryA, workspace: changedWorkspace },
+    input: { ...completedBoundaryInput, workspace: changedWorkspace },
   }, config);
-  assert.deepEqual(changedRegistryState.commit, { action: 'unavailable', tasks: [] });
+  assert.deepEqual(commitOnly(changedRegistryState.commit), { action: 'unavailable', tasks: [] });
   assert.equal(model.invocations.length, 3, 'registry changes must invalidate a cached commit');
 
   const entryB = plannerInput(workspace, {
@@ -498,44 +477,20 @@ test('nested Planner checkpoint persists one trace privately and deduplicates bo
     userRequest: 'PRIVATE_TRACE_B_GOAL',
   });
   const traceBState = await graph.invoke({ input: entryB }, config);
-  assert.deepEqual(traceBState.commit, { action: 'unavailable', tasks: [] });
+  assert.deepEqual(commitOnly(traceBState.commit), { action: 'unavailable', tasks: [] });
   assert.equal(model.invocations.length, 4);
   const traceBMessages = model.invocations[3]?.map(readMessageText).join('\n') ?? '';
   assert.match(traceBMessages, /PRIVATE_TRACE_B_GOAL/);
   assert.doesNotMatch(traceBMessages, /PRIVATE_TRACE_A_GOAL/);
-  assert.equal('messages' in traceBState, false, 'private Planner messages must not enter root state');
+  const traceBUpdates = (
+    traceBState.commit as { messageUpdates?: BaseMessage[] }
+  ).messageUpdates ?? [];
+  assert.ok(traceBUpdates.some((message) =>
+    isCapabilityPlannerMessage(message, 'trace-b')));
 
-  await assert.rejects(
-    graph.invoke({
-      input: plannerInput(workspace, {
-        mode: 'boundary',
-        inputId: 'announce:missing:1',
-        traceId: 'trace-missing',
-        runId: 'run-missing',
-        activeDelegation: {
-          delegationId: 'missing',
-          capability: 'general',
-          task: 'Cannot resume without a Planner checkpoint.',
-        },
-      }),
-    }, config),
-    (error: unknown) => error instanceof CapabilityPlannerAgentError
-      && error.code === 'planner_checkpoint_missing',
-  );
-  assert.equal(model.invocations.length, 4);
-
-  await assert.rejects(
-    restartedGraph.invoke({ input: boundaryA }, {
-      configurable: { thread_id: 'private-planner-other-thread' },
-    }),
-    (error: unknown) => error instanceof CapabilityPlannerAgentError
-      && error.code === 'planner_checkpoint_missing',
-    'the same traceId in another conversation thread must not see private state',
-  );
-  assert.equal(restartedModel.invocations.length, 0);
 });
 
-test('Planner compacts only its private checkpoint and preserves trace context', async (t) => {
+test('Planner compacts only its root-owned lane and preserves current context', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -553,39 +508,28 @@ test('Planner compacts only its private checkpoint and preserves trace context',
   }))]);
   const planner = createCapabilityPlannerAgent({
     model,
-    privateContextMaxChars: 500,
-    privateContextKeepInputs: 2,
+    laneContextMaxChars: 500,
+    laneContextKeepInputs: 2,
   });
-  const HarnessState = Annotation.Root({
-    input: Annotation<CapabilityPlannerInput>({
-      reducer: (_previous, next) => next,
-    }),
-    commit: Annotation<unknown>({
-      reducer: (_previous, next) => next,
-      default: () => null,
-    }),
-  });
-  const checkpointer = new MemorySaver();
-  const graph = new StateGraph(HarnessState)
-    .addNode('planner', async (state, config) => ({
-      commit: await planner.invoke(state.input, config),
-    }))
-    .addEdge(START, 'planner')
-    .addEdge('planner', END)
-    .compile({ checkpointer });
-  const config = { configurable: { thread_id: 'private-planner-compaction' } };
   const userRequest = `PRIVATE_COMPACTION_GOAL ${'context '.repeat(80)}`;
-  await graph.invoke({
-    input: plannerInput(workspace, {
+  let rootMessages: BaseMessage[] = [new HumanMessage(userRequest)];
+  const entryResult = await planner.invoke(
+    plannerInput(workspace, {
       inputId: 'trace_started:trace-compaction',
       traceId: 'trace-compaction',
       runId: 'run-0',
       userRequest,
+      messages: rootMessages,
     }),
-  }, config);
+  );
+  rootMessages = messagesStateReducer(rootMessages, [...(entryResult.messageUpdates ?? [])]);
   for (let index = 1; index <= 4; index += 1) {
-    await graph.invoke({
-      input: plannerInput(workspace, {
+    const executionResult = new AIMessage(
+      `Execution result ${String(index)} ${'evidence '.repeat(40)}`,
+    );
+    rootMessages = messagesStateReducer(rootMessages, [executionResult]);
+    const result = await planner.invoke(
+      plannerInput(workspace, {
         mode: 'boundary',
         inputId: `announce:delegation:${String(index)}`,
         traceId: 'trace-compaction',
@@ -593,6 +537,7 @@ test('Planner compacts only its private checkpoint and preserves trace context',
         userRequest,
         activeDelegation: {
           delegationId: 'delegation',
+          transcriptRunId: 'transcript-compaction',
           capability: 'general',
           task: 'Complete the long task.',
         },
@@ -600,44 +545,29 @@ test('Planner compacts only its private checkpoint and preserves trace context',
           messageId: `announce-${String(index)}`,
           completionReason: 'natural',
         },
-        messageContext: {
-          scope: 'active_delegation',
-          messages: [new AIMessage(
-            `Execution result ${String(index)} ${'evidence '.repeat(40)}`,
-          )],
-        },
+        messages: rootMessages,
       }),
-    }, config);
+    );
+    rootMessages = messagesStateReducer(rootMessages, [...(result.messageUpdates ?? [])]);
   }
 
-  const plannerCheckpoint = await checkpointer.getTuple({
-    configurable: {
-      thread_id: 'private-planner-compaction',
-      checkpoint_ns: 'privateCapabilityPlanner_trace-compaction',
-    },
-  });
-  const values = plannerCheckpoint?.checkpoint.channel_values as {
-    messages?: BaseMessage[];
-    compactionCount?: number;
-  } | undefined;
-  assert.ok((values?.compactionCount ?? 0) > 0);
-  assert.ok(values?.messages?.some((message) => {
+  assert.ok(rootMessages.some((message) => {
     const text = readMessageText(message);
-    return text.includes('<private_planner_compaction>')
+    return isCapabilityPlannerMessage(message, 'trace-compaction')
+      && text.includes('<planner_lane_compaction>')
       && text.includes('PRIVATE_COMPACTION_GOAL');
   }));
   assert.ok(model.invocations.at(-1)?.some((message) =>
-    readMessageText(message).includes('<private_planner_compaction>')));
+    readMessageText(message).includes('<planner_lane_compaction>')));
   const latestInvocationText = model.invocations.at(-1)
     ?.map(readMessageText)
     .join('\n') ?? '';
-  assert.doesNotMatch(latestInvocationText, /Execution result 3/);
   assert.match(latestInvocationText, /Execution result 4/);
-  const rootState = await graph.getState(config);
-  assert.equal('messages' in rootState.values, false);
+  assert.ok(rootMessages.some((message) =>
+    isCapabilityPlannerMessage(message, 'trace-compaction')));
 });
 
-test('parent bare Command resume continues an in-flight private Planner interrupt', async (t) => {
+test('Planner supports additional invocation-scoped tools without child persistence', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -645,15 +575,13 @@ test('parent bare Command resume continues an in-flight private Planner interrup
       instructions: 'Complete the requested work.',
     }),
   });
-  const pausePlanner = tool(async () => interrupt({
-    kind: 'private_planner_test_pause',
-  }), {
-    name: 'pause_planner',
-    description: 'Pause the private Planner for a host decision.',
+  const inspectPlanner = tool(async () => 'approved', {
+    name: 'inspect_planner',
+    description: 'Return an invocation-scoped observation.',
     schema: z.object({}).strict(),
   });
   const model = new ScriptedPlannerModel([{
-    toolCalls: [{ id: 'pause', name: 'pause_planner', args: {} }],
+    toolCalls: [{ id: 'inspect', name: 'inspect_planner', args: {} }],
   }, {
     structuredOutput: {
       kind: 'plan',
@@ -664,48 +592,20 @@ test('parent bare Command resume continues an in-flight private Planner interrup
   }]);
   const planner = createCapabilityPlannerAgent({
     model,
-    additionalPrivateTools: [pausePlanner],
+    additionalTools: [inspectPlanner],
   });
-  const HarnessState = Annotation.Root({
-    input: Annotation<CapabilityPlannerInput>({
-      reducer: (_previous, next) => next,
-    }),
-    commit: Annotation<unknown>({
-      reducer: (_previous, next) => next,
-      default: () => null,
-    }),
-  });
-  const graph = new StateGraph(HarnessState)
-    .addNode('planner', async (state, config) => ({
-      commit: await planner.invoke(state.input, config),
-    }))
-    .addEdge(START, 'planner')
-    .addEdge('planner', END)
-    .compile({ checkpointer: new MemorySaver() });
-  const config = { configurable: { thread_id: 'private-planner-interrupt' } };
   const input = plannerInput(workspace, {
     inputId: 'trace_started:trace-interrupt',
     traceId: 'trace-interrupt',
     runId: 'run-interrupt',
-    userRequest: 'Continue after private approval.',
+    userRequest: 'Continue after an invocation-scoped check.',
   });
 
-  const interrupted = await graph.invoke({ input }, config) as {
-    __interrupt__?: unknown[];
-  };
-  assert.equal(interrupted.__interrupt__?.length, 1);
-  assert.equal(model.invocations.length, 1);
-
-  const resumed = await graph.invoke(
-    new Command({ resume: 'approved' }),
-    config,
-  );
-  assert.deepEqual(resumed.commit, {
+  const result = await planner.invoke(input);
+  assert.deepEqual(commitOnly(result), {
     action: 'execute_plan',
     tasks: [{ capability: 'general', task: 'Continue after approval.' }],
   });
-  assert.equal(resumed.input.runId, 'run-interrupt');
-  assert.equal(resumed.input.traceId, 'trace-interrupt');
   assert.equal(model.invocations.length, 2);
   assert.match(
     model.invocations[1]?.map(readMessageText).join('\n') ?? '',
@@ -768,7 +668,7 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
     (text) => text.includes('Research the repository and then prepare a review.'),
   );
   assert.ok(plannerInputIndex >= 0);
-  assert.deepEqual(result, {
+  assert.deepEqual(commitOnly(result), {
     action: 'execute_plan',
     tasks: [{
       capability: 'explore',
@@ -796,7 +696,7 @@ test('entry mode can commit answer_directly without Capability discovery', async
     plannerInput(workspace, { userRequest: '解释已经在主对话中确认的结果。' }),
   );
 
-  assert.deepEqual(result, { action: 'answer_directly', tasks: [] });
+  assert.deepEqual(commitOnly(result), { action: 'answer_directly', tasks: [] });
   assert.equal(model.invocations.length, 1);
 });
 
@@ -869,7 +769,7 @@ test('Planner accepts a detailed task beyond the legacy 500-character limit', as
   const result = await createCapabilityPlannerAgent({ model })
     .invoke(plannerInput(workspace));
 
-  assert.deepEqual(result, {
+  assert.deepEqual(commitOnly(result), {
     action: 'execute_plan',
     tasks: [{
       capability: 'general',
@@ -949,7 +849,7 @@ test('Planner closes discovery through general after three capability_search cal
     plannerInput(workspace),
   );
 
-  assert.deepEqual(result, {
+  assert.deepEqual(commitOnly(result), {
     action: 'execute_plan',
     tasks: [{
       capability: 'general',
@@ -992,20 +892,20 @@ test('Planner receives verified General before discovery starts', async (t) => {
     }),
   );
 
-  assert.deepEqual(result, {
+  assert.deepEqual(commitOnly(result), {
     action: 'execute_plan',
     tasks: [{
       capability: 'general',
       task: 'Inspect and organize the requested Downloads directory.',
     }],
   });
-  const privateInput = model.invocations[0]?.find(
+  const plannerInputMessage = model.invocations[0]?.find(
     (message) => message instanceof HumanMessage,
   );
-  assert.ok(privateInput instanceof HumanMessage);
-  assert.match(readMessageText(privateInput), /<default_capability/);
-  assert.match(readMessageText(privateInput), /general\/CAPABILITY\.md/);
-  assert.match(readMessageText(privateInput), /通用工具读取和修改工作区/);
+  assert.ok(plannerInputMessage instanceof HumanMessage);
+  assert.match(readMessageText(plannerInputMessage), /<default_capability/);
+  assert.match(readMessageText(plannerInputMessage), /general\/CAPABILITY\.md/);
+  assert.match(readMessageText(plannerInputMessage), /通用工具读取和修改工作区/);
   assert.equal(model.invocations.flat().some(
     (message) => message instanceof ToolMessage
       && message.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
@@ -1056,7 +956,7 @@ test('Planner handles parallel capability_search calls without concurrent state 
     plannerInput(workspace),
   );
 
-  assert.deepEqual(result, {
+  assert.deepEqual(commitOnly(result), {
     action: 'execute_plan',
     tasks: [{
       capability: 'general',
@@ -1109,7 +1009,7 @@ test('Planner returns to Answer after three capability_search calls without gene
     plannerInput(workspace),
   );
 
-  assert.deepEqual(result, {
+  assert.deepEqual(commitOnly(result), {
     action: 'unavailable',
     tasks: [],
   });
@@ -1147,7 +1047,7 @@ test('Planner repairs an ordinary text response after capability_search', async 
     plannerInput(workspace),
   );
 
-  assert.deepEqual(result, {
+  assert.deepEqual(commitOnly(result), {
     action: 'execute_plan',
     tasks: [{
       capability: 'general',
@@ -1160,7 +1060,7 @@ test('Planner repairs an ordinary text response after capability_search', async 
     && message.id === 'planner-repair:trace_started:trace-test'));
 });
 
-test('a submitted plan becomes private Planner state for the final reply', async (t) => {
+test('a submitted plan commits once without a final ordinary-text reply', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -1185,7 +1085,7 @@ test('a submitted plan becomes private Planner state for the final reply', async
     plannerInput(workspace),
   );
 
-  assert.deepEqual(result, { action: 'execute_plan', tasks: submittedTasks });
+  assert.deepEqual(commitOnly(result), { action: 'execute_plan', tasks: submittedTasks });
   assert.equal(model.invocations.length, 1);
 });
 
@@ -1217,7 +1117,7 @@ test('Planner can return bounded facts to Answer without submitting a plan', asy
   const result = await createCapabilityPlannerAgent({ model })
     .invoke(plannerInput(workspace));
 
-  assert.deepEqual(result, {
+  assert.deepEqual(commitOnly(result), {
     action: 'unavailable',
     tasks: [],
   });
@@ -1257,7 +1157,7 @@ test('an unknown Capability returns tool feedback and can be repaired in-loop', 
     plannerInput(workspace),
   );
 
-  assert.deepEqual(result, {
+  assert.deepEqual(commitOnly(result), {
     action: 'execute_plan',
     tasks: [{
       capability: 'general',
@@ -1310,7 +1210,7 @@ test('Planner caps a parallel capability_search batch with standard middleware',
     plannerInput(workspace),
   );
 
-  assert.deepEqual(result, {
+  assert.deepEqual(commitOnly(result), {
     action: 'execute_plan',
     tasks: [{
       capability: 'general',
@@ -1349,7 +1249,7 @@ test('an empty workspace can return truthful facts to Answer', async (t) => {
   assert.equal(model.structuredOutputToolNames.has('plan'), true);
   assert.equal(model.structuredOutputToolNames.has('advance'), true);
   assert.ok(model.structuredOutputToolNames.has('unavailable'));
-  assert.deepEqual(result, {
+  assert.deepEqual(commitOnly(result), {
     action: 'unavailable',
     tasks: [],
   });
@@ -1403,6 +1303,7 @@ test('boundary mode rejects an empty executable plan', async (t) => {
       mode: 'boundary',
       activeDelegation: {
         delegationId: 'delegation-1',
+        transcriptRunId: 'transcript-1',
         capability: 'explore',
         task: 'Research the repository.',
       },
@@ -1410,10 +1311,7 @@ test('boundary mode rejects an empty executable plan', async (t) => {
         messageId: 'announce-1',
         completionReason: 'natural',
       },
-      messageContext: {
-        scope: 'active_delegation',
-        messages: [new AIMessage(fullHandoff)],
-      },
+      messages: [new AIMessage(fullHandoff)],
       remainingPlan: [{
         capability: 'general',
         task: 'Prepare the review from the findings.',
@@ -1448,6 +1346,7 @@ test('a boundary with an exhausted plan can still submit newly required work', a
       mode: 'boundary',
       activeDelegation: {
         delegationId: 'delegation-1',
+        transcriptRunId: 'transcript-1',
         capability: 'explore',
         task: 'Read the issue #587 status.',
       },
@@ -1455,17 +1354,14 @@ test('a boundary with an exhausted plan can still submit newly required work', a
         messageId: 'announce-1',
         completionReason: 'natural',
       },
-      messageContext: {
-        scope: 'active_delegation',
-        messages: [new AIMessage('issue #587 is open; the README section is stale.')],
-      },
+      messages: [new AIMessage('issue #587 is open; the README section is stale.')],
       remainingPlan: [],
     }),
   );
 
   // An empty remaining plan is not by itself a terminal state: the latest
   // result may still require follow-up work.
-  assert.deepEqual(result, {
+  assert.deepEqual(commitOnly(result), {
     action: 'advance_plan',
     tasks: [{
       capability: 'general',
@@ -1500,6 +1396,7 @@ test('boundary Planner continues without replacing the active task', async (t) =
       mode: 'boundary',
       activeDelegation: {
         delegationId: 'delegation-1',
+        transcriptRunId: 'transcript-1',
         capability: 'explore',
         task: 'Inspect the repository.',
       },
@@ -1507,14 +1404,11 @@ test('boundary Planner continues without replacing the active task', async (t) =
         messageId: 'announce-1',
         completionReason: 'natural',
       },
-      messageContext: {
-        scope: 'active_delegation',
-        messages: [new AIMessage('The dependency evidence is still incomplete.')],
-      },
+      messages: [new AIMessage('The dependency evidence is still incomplete.')],
     }),
   );
 
-  assert.deepEqual(result, {
+  assert.deepEqual(commitOnly(result), {
     action: 'continue_current',
     tasks: [],
   });
@@ -1542,6 +1436,7 @@ test('boundary Planner can stop for user confirmation without rewriting the task
       mode: 'boundary',
       activeDelegation: {
         delegationId: 'delegation-review-662',
+        transcriptRunId: 'transcript-review-662',
         capability: 'general',
         task: 'Review PR #662.',
       },
@@ -1549,16 +1444,13 @@ test('boundary Planner can stop for user confirmation without rewriting the task
         messageId: 'announce-review-662',
         completionReason: 'natural',
       },
-      messageContext: {
-        scope: 'active_delegation',
-        messages: [new AIMessage(
-          'PR #662 does not exist. PR #663 may be related but is not the requested target.',
-        )],
-      },
+      messages: [new AIMessage(
+        'PR #662 does not exist. PR #663 may be related but is not the requested target.',
+      )],
     }),
   );
 
-  assert.deepEqual(result, {
+  assert.deepEqual(commitOnly(result), {
     action: 'user_input_required',
     tasks: [],
   });
@@ -1599,6 +1491,7 @@ test('boundary Planner repairs submit_plan to advance_plan', async (t) => {
       mode: 'boundary',
       activeDelegation: {
         delegationId: 'delegation-1',
+        transcriptRunId: 'transcript-1',
         capability: 'explore',
         task: 'Inspect the repository.',
       },
@@ -1606,16 +1499,13 @@ test('boundary Planner repairs submit_plan to advance_plan', async (t) => {
         messageId: 'announce-1',
         completionReason: 'natural',
       },
-      messageContext: {
-        scope: 'active_delegation',
-        messages: [new AIMessage(
-          'The investigation is complete and identifies the required change.',
-        )],
-      },
+      messages: [new AIMessage(
+        'The investigation is complete and identifies the required change.',
+      )],
     }),
   );
 
-  assert.deepEqual(result, { action: 'advance_plan', tasks });
+  assert.deepEqual(commitOnly(result), { action: 'advance_plan', tasks });
   assert.equal(model.invocations.length, 2);
   assert.ok(model.invocations[1]?.some((message) =>
     ToolMessage.isInstance(message)

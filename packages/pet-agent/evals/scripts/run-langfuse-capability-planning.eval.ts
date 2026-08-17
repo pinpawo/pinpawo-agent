@@ -155,20 +155,16 @@ async function main() {
             traceId: `eval:${testCase.id}`,
             runId: `eval:${testCase.id}`,
             userRequest: testCase.input.userRequest,
-            messageContext: {
-              scope: testCase.input.mode === 'entry'
-                ? 'main_conversation'
-                : 'active_delegation',
-              messages: [
-                ...buildCapabilityPlanningMessages(testCase.input.messages),
-                ...(testCase.input.mode === 'boundary' && testCase.input.latestAnnounce
-                  ? [new AIMessage(testCase.input.latestAnnounce)]
-                  : []),
-              ],
-            },
+            messages: [
+              ...buildCapabilityPlanningMessages(testCase.input.messages),
+              ...(testCase.input.mode === 'boundary' && testCase.input.latestAnnounce
+                ? [new AIMessage(testCase.input.latestAnnounce)]
+                : []),
+            ],
             activeDelegation: testCase.input.mode === 'boundary'
               ? {
                   delegationId: 'eval-delegation',
+                  transcriptRunId: `eval:${testCase.id}`,
                   capability: testCase.input.remainingPlan?.[0]?.capability
                     ?? workspace.capabilityNames[0]
                     ?? 'unavailable',

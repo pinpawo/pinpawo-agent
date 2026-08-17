@@ -107,6 +107,16 @@ function capability(
   };
 }
 
+function readLatestHumanText(messages: BaseMessage[]): string {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?._getType() !== 'human') continue;
+    const text = typeof message.content === 'string' ? message.content : message.text;
+    if (text.trim()) return text;
+  }
+  return 'Execute the requested task.';
+}
+
 function createOrchestratorGraph(
   config: Parameters<typeof createRuntimeOrchestratorGraph>[0],
 ): ReturnType<typeof createRuntimeOrchestratorGraph> {
@@ -115,12 +125,15 @@ function createOrchestratorGraph(
     get(target, property) {
       if (property === 'bindTools') {
         return () => ({
-          invoke: async () => new AIMessage({
+          // Stand in for Entry Answer's goal resolution: echo the latest human
+          // message, which is what a real model produces when the current
+          // request already states the goal on its own.
+          invoke: async (messages: BaseMessage[]) => new AIMessage({
             content: '',
             tool_calls: [{
               id: 'test-plan-request',
               name: PLAN_REQUEST_TOOL_NAME,
-              args: {},
+              args: { goal: readLatestHumanText(messages) },
             }],
           }),
         });

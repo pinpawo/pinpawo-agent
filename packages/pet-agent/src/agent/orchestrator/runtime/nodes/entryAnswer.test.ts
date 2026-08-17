@@ -11,9 +11,20 @@ import { PLAN_REQUEST_TOOL_NAME } from './entryAnswer';
 import { createContextCompactionMessage } from '../../contextCompaction';
 import { getMessageLane, mainConversationMessages, setPinpetMeta } from '../../messageLanes';
 
+function readLatestHumanText(messages: BaseMessage[]): string {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?._getType() !== 'human') continue;
+    const text = typeof message.content === 'string' ? message.content : message.text;
+    if (text.trim()) return text;
+  }
+  return 'Execute the requested task.';
+}
+
 function entryAnswerModel(
   mode: 'direct' | 'plan',
   onEntryInvoke?: (messages: BaseMessage[]) => void,
+  planGoal?: string,
 ) {
   let boundCalls = 0;
   let resultCalls = 0;
@@ -28,7 +39,10 @@ function entryAnswerModel(
               tool_calls: [{
                 id: 'call-plan-request',
                 name: PLAN_REQUEST_TOOL_NAME,
-                args: {},
+                // Default to echoing the current request, as a real model does
+                // when it already states the goal; planGoal covers the
+                // continuation-utterance case.
+                args: { goal: planGoal ?? readLatestHumanText(messages) },
               }],
             })
           : new AIMessage('可以，现有信息足够直接回答。');
@@ -157,6 +171,36 @@ test('Entry Answer preserves the current textual HumanMessage exactly', async ()
 
   assert.equal(result.runUserRequest, request);
   assert.equal(plannerRequest, request);
+});
+
+test('Entry Answer resolves a continuation utterance into the goal it refers back to', async () => {
+  const resolvedGoal = '把 docs/ 下的接口文档同步到最新实现。';
+  const scripted = entryAnswerModel('plan', undefined, resolvedGoal);
+  let plannerRequest = '';
+  const graph = createOrchestratorGraph({
+    models: { act: scripted.model, answer: scripted.model },
+    actor,
+    capabilityPlannerRunner: {
+      async invoke(input) {
+        plannerRequest = input.userRequest;
+        return { action: 'unavailable', tasks: [] };
+      },
+    },
+  });
+
+  const result = await graph.invoke(
+    buildOrchestratorRunInput([
+      new HumanMessage('帮我把 docs/ 下的接口文档同步到最新实现，先别动测试。'),
+      new AIMessage('好的，我先确认一下范围：只更新 docs/ 下的接口文档，不改测试，对吗？'),
+      new HumanMessage('嗯。开始吧'),
+    ]),
+    invokeConfig(),
+  );
+
+  // The continuation utterance never becomes the run goal: everything
+  // downstream needs a request that stands on its own.
+  assert.equal(result.runUserRequest, resolvedGoal);
+  assert.equal(plannerRequest, resolvedGoal);
 });
 
 test('Entry Answer receives normalized main conversation and excludes delegation lanes', async () => {

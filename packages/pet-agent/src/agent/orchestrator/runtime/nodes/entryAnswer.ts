@@ -14,6 +14,8 @@ import { removeStaleCapabilityPlannerMessages } from '../../capabilityPlanner/me
 
 export const PLAN_REQUEST_TOOL_NAME = 'plan_request';
 
+export const MAX_PLAN_REQUEST_GOAL_CHARS = 2_000;
+
 function readCurrentUserRequest(messages: BaseMessage[]) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
@@ -27,6 +29,16 @@ function readCurrentUserRequest(messages: BaseMessage[]) {
   return null;
 }
 
+/**
+ * Seed runUserRequest with the latest human message before Entry Answer runs.
+ *
+ * This is a provisional value, not the authoritative run goal. A continuation
+ * utterance ("嗯，开始吧") is a valid message but not a statable goal, and this
+ * node cannot tell the difference — it has no view of what the utterance refers
+ * back to. Entry Answer resolves the real goal against the whole conversation
+ * and commits it through plan_request's `goal` argument; until then this value
+ * only has to be non-empty so the state invariant holds.
+ */
 export function captureRunUserRequest(state: OrchestratorStateType) {
   const runUserRequest = readCurrentUserRequest(mainConversationMessages(state.messages));
   if (!runUserRequest) {
@@ -40,6 +52,31 @@ export function captureRunUserRequest(state: OrchestratorStateType) {
   };
 }
 
+/**
+ * Resolve the authoritative run goal from the plan_request argument, falling
+ * back to the provisional capture when the model supplies nothing usable.
+ * Everything downstream — Planner input, Capability run context, Answer, and the
+ * TaskActiveDelegation snapshot replayed on every resume — reads this one value.
+ *
+ * When the resolved goal is just the current message again, the original is kept
+ * byte-for-byte. The verbatim guarantee matters for requests whose formatting is
+ * part of the content (pasted code, exact paths, deliberate layout), and it is
+ * only worth spending when the model actually had to look past the current
+ * message — which is exactly the continuation-utterance case.
+ */
+function resolveRunUserRequest(state: OrchestratorStateType, goal: string) {
+  const provisional = state.runUserRequest;
+  const resolved = goal.trim();
+  if (!resolved) {
+    if (!provisional?.trim()) {
+      throw new Error('Entry Answer requires a current user request.');
+    }
+    return provisional;
+  }
+  if (provisional && provisional.trim() === resolved) return provisional;
+  return resolved.slice(0, MAX_PLAN_REQUEST_GOAL_CHARS);
+}
+
 function requireRunUserRequest(state: OrchestratorStateType) {
   const request = state.runUserRequest;
   if (!request?.trim()) {
@@ -48,13 +85,16 @@ function requireRunUserRequest(state: OrchestratorStateType) {
   return request;
 }
 
-function plannerDispatch(state: OrchestratorStateType): CapabilityPlannerDispatch {
+function plannerDispatch(
+  state: OrchestratorStateType,
+  runUserRequest: string,
+): CapabilityPlannerDispatch {
   return {
     mode: 'entry',
     plannerState: {
       runId: state.runId,
       traceId: state.traceId,
-      runUserRequest: requireRunUserRequest(state),
+      runUserRequest,
       runDelegationSummaries: state.runDelegationSummaries,
       runCapabilityPlan: [],
     },
@@ -64,8 +104,11 @@ function plannerDispatch(state: OrchestratorStateType): CapabilityPlannerDispatc
 
 function createPlanRequestTool() {
   return tool(
-    async (_input, runtime: ToolRuntime<OrchestratorStateType>) => {
-      const runUserRequest = requireRunUserRequest(runtime.state);
+    async ({ goal }: { goal: string }, runtime: ToolRuntime<OrchestratorStateType>) => {
+      // The Command update below has not been applied to runtime.state yet, so
+      // the dispatch must carry the resolved goal explicitly rather than reading
+      // it back from state.
+      const runUserRequest = resolveRunUserRequest(runtime.state, goal);
       return new Command({
         graph: Command.PARENT,
         update: {
@@ -73,13 +116,16 @@ function createPlanRequestTool() {
           runNextDelegation: null,
           runCapabilityPlan: [],
         },
-        goto: new Send('capabilityPlanner', plannerDispatch(runtime.state)),
+        goto: new Send('capabilityPlanner', plannerDispatch(runtime.state, runUserRequest)),
       });
     },
     {
       name: PLAN_REQUEST_TOOL_NAME,
-      description: 'Hand the current user request to the Capability Planner when satisfying it requires any tool, external capability, or task execution. This control action takes no arguments.',
-      schema: z.object({}).strict(),
+      description: 'Hand the current user request to the Capability Planner when satisfying it requires any tool, external capability, or task execution.',
+      schema: z.object({
+        goal: z.string().trim().min(1).max(MAX_PLAN_REQUEST_GOAL_CHARS)
+          .describe('用户当前要达成的目标，一句话陈述。当前消息是延续话语（例如“继续”“开始吧”“可以”）时，回到它所指代的那条请求，把目标补全为可独立理解的一句话；不要照抄延续话语，也不要加入执行步骤、方案或你的推断。保留用户给出的编号、URL、路径和显式约束。'),
+      }).strict(),
     },
   );
 }

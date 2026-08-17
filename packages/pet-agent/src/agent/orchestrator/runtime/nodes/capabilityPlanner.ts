@@ -358,12 +358,19 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
       },
     );
     const plannerMessageUpdates = [...(result.messageUpdates ?? [])];
+    // On entry the goal reaching this node came from plan_request, resolved by
+    // Entry Answer against the whole conversation. Its Command.PARENT update is
+    // overwritten when the entryAnswer subgraph writes its own channels back, so
+    // this node — the first to run outside that subgraph — is what commits the
+    // resolved goal to root state for Capability, Answer and the delegation
+    // snapshot to read.
     const includePlannerMessages = <T extends object>(update: T) => {
       const existingMessages = 'messages' in update && Array.isArray(update.messages)
         ? update.messages as BaseMessage[]
         : [];
       return {
         ...update,
+        ...(input.mode === 'entry' ? { runUserRequest: state.runUserRequest } : {}),
         ...(plannerMessageUpdates.length > 0 || existingMessages.length > 0
           ? { messages: [...plannerMessageUpdates, ...existingMessages] }
           : {}),

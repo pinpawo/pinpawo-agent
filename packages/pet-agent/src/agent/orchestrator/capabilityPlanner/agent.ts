@@ -206,6 +206,14 @@ function assertPositiveInteger(value: number, label: string) {
   }
 }
 
+/**
+ * Stamp Planner-lane provenance onto a message, in place.
+ *
+ * Callers must only pass messages this invocation produced. The `produced`
+ * filter in buildPlannerMessageUpdates() is what guarantees that: it drops any
+ * message still referenced by, or sharing an id with, `input.messages`, so a
+ * message already committed to root state is never mutated here.
+ */
 function stampPlannerMessage(params: {
   message: BaseMessage;
   input: CapabilityPlannerInput;
@@ -238,6 +246,20 @@ function readCachedPlannerCommit(input: CapabilityPlannerInput) {
     if (rawCommit) return rawCommit;
   }
   return null;
+}
+
+/**
+ * The single source of the validation context for this invocation. Every
+ * parsePlannerCommit() call inside the agent — live commit, replayed commit and
+ * mid-run tool validation — must agree on mode, active delegation and allowed
+ * capabilities, so they all derive it from here.
+ */
+function plannerCommitContext(input: CapabilityPlannerInput) {
+  return {
+    mode: input.mode,
+    activeDelegation: input.activeDelegation,
+    allowedCapabilityNames: input.workspace.capabilityNames,
+  };
 }
 
 function buildPlannerMessageUpdates(params: {
@@ -364,11 +386,7 @@ function createPlannerMiddleware() {
       if (!rawCommit) return result;
       let commit: PlannerCommit;
       try {
-        commit = parsePlannerCommit(rawCommit, {
-          mode: input.mode,
-          activeDelegation: input.activeDelegation,
-          allowedCapabilityNames: input.workspace.capabilityNames,
-        });
+        commit = parsePlannerCommit(rawCommit, plannerCommitContext(input));
       } catch (error) {
         return new ToolMessage({
           content: error instanceof Error ? error.message : String(error),
@@ -456,11 +474,7 @@ export function createCapabilityPlannerAgent(params: {
         timeout.signal.throwIfAborted();
         const cachedCommit = readCachedPlannerCommit(input);
         if (cachedCommit) {
-          return parsePlannerCommit(cachedCommit, {
-            mode: input.mode,
-            activeDelegation: input.activeDelegation,
-            allowedCapabilityNames: input.workspace.capabilityNames,
-          });
+          return parsePlannerCommit(cachedCommit, plannerCommitContext(input));
         }
         const explorer = explorerForInput(input);
         const defaultCapability = await explorer.readDefaultCapability(
@@ -497,11 +511,10 @@ export function createCapabilityPlannerAgent(params: {
         }, config);
         timeout.signal.throwIfAborted();
         if (result.plannerCommit) {
-          const commit = parsePlannerCommit(result.plannerCommit, {
-            mode: input.mode,
-            activeDelegation: input.activeDelegation,
-            allowedCapabilityNames: input.workspace.capabilityNames,
-          });
+          const commit = parsePlannerCommit(
+            result.plannerCommit,
+            plannerCommitContext(input),
+          );
           return {
             ...commit,
             messageUpdates: buildPlannerMessageUpdates({

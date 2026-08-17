@@ -167,6 +167,13 @@ function buildAcceptedDelegationUpdate(
   };
 }
 
+/**
+ * Materialize `continue_current`, which carries no tasks: the active
+ * delegation's id, lane and task are reused verbatim and `runCapabilityPlan` is
+ * passed through untouched. This is where the "continue_current changes neither
+ * the task nor the remaining plan" invariant is enforced — PlannerCommit is a
+ * flat shape and cannot express it in the type system.
+ */
 function buildContinueCurrentUpdate(params: {
   state: OrchestratorStateType;
   activeDelegation: TaskActiveDelegation;
@@ -338,6 +345,10 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
     });
     const { input, state } = buildPlannerInput({ nodeInput, workspace });
     const result = await runner.invoke(input, runnableConfig);
+    // CapabilityPlannerRunner is an injectable seam: config.capabilityPlannerRunner
+    // may be a scripted or third-party implementation that never ran the agent's
+    // own validation. This re-parse is the root's trust boundary, not a duplicate
+    // of the parse inside createCapabilityPlannerAgent() — do not remove it.
     const commit = parsePlannerCommit(
       { action: result.action, tasks: result.tasks },
       {

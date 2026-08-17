@@ -22,6 +22,16 @@ export type PlannerReplyOutcome = Extract<
 export type OrchestratorRuntimeFailure =
   | 'checkpoint_incompatible';
 
+/**
+ * A parsed terminal Planner action. `tasks` is non-empty exactly for
+ * `execute_plan` and `advance_plan`; parsePlannerCommit enforces that pairing,
+ * so consumers may read `tasks` directly for those two actions only.
+ *
+ * `continue_current` deliberately carries no tasks: it keeps the active
+ * delegation's task and the remaining plan unchanged. That invariant is not
+ * expressible in this shape — it lives in buildContinueCurrentUpdate(), which
+ * reuses the existing delegation instead of materializing a new one.
+ */
 export type PlannerCommit = {
   readonly action: PlannerAction;
   readonly tasks: readonly CapabilityPlanTask[];

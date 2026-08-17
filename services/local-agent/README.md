@@ -86,7 +86,6 @@ pinpawo run
 pinpawo server --mode studio
 pinpawo server --stdio
 pinpawo tui
-pinpawo detect
 pinpawo browser extension status
 pinpawo browser extension register --extension-id <id>
 pinpawo browser extension repair --extension-id <id>

@@ -2,6 +2,7 @@ import {
   isStructuredTool,
   type StructuredTool,
 } from '@langchain/core/tools';
+import type { JsonValue } from '@pinpawo/agent-contracts';
 import type { ReviewSpec } from '../agent/orchestrator/review/reviewSpec';
 import type { ToolAuthorizationMatcher } from '../agent/orchestrator/review/authorizationMatchers';
 import { wrapToolCancellation } from './toolCancellation';
@@ -193,6 +194,13 @@ export type ToolkitRuntimeDefinition<TRoot = unknown, TBinding = TRoot> = {
     binding: TBinding,
     context: ToolkitRuntimeReleaseContext,
   ) => void | Promise<void>;
+  /**
+   * Project Toolkit-owned live state into a JSON-safe diagnostic detail.
+   * The framework stores and transports the value without interpreting it.
+   */
+  diagnose?: (
+    root: TRoot,
+  ) => JsonValue | Promise<JsonValue>;
   stop?: (
     root: TRoot,
     context: ToolkitRuntimeStopContext,
@@ -318,7 +326,7 @@ export function validateToolkitDefinition(toolkit: AgentToolkit) {
     ) {
       throw new Error(`Toolkit "${toolkit.name}" runtime must define start()`);
     }
-    for (const hook of ['resolve', 'bindTools', 'release', 'stop'] as const) {
+    for (const hook of ['resolve', 'bindTools', 'release', 'diagnose', 'stop'] as const) {
       if (toolkit.runtime[hook] !== undefined && typeof toolkit.runtime[hook] !== 'function') {
         throw new Error(`Toolkit "${toolkit.name}" runtime.${hook} must be a function`);
       }

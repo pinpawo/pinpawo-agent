@@ -1,11 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ToolkitRuntimeManager } from '@pinpawo/pet-agent';
-import {
-  buildBrowserAvailabilitySnapshot,
-  createBrowserIntegration,
-  createBrowserToolkit,
-} from './toolkit';
+import { createBrowserToolkit } from './toolkit';
+import { BrowserRuntime } from './runtime';
 
 test('only browser_screenshot requires image input', () => {
   const toolkit = createBrowserToolkit();
@@ -20,11 +17,11 @@ test('only browser_screenshot requires image input', () => {
 });
 
 test('Browser Runtime is exposed as a port without replacing static tools', async () => {
-  const integration = createBrowserIntegration({ backend: () => 'playwright' });
+  const toolkit = createBrowserToolkit({ backend: () => 'playwright' });
   const manager = new ToolkitRuntimeManager();
-  const staticTools = integration.toolkit.tools.map(({ tool }) => tool);
+  const staticTools = toolkit.tools.map(({ tool }) => tool);
   const execution = await manager.resolve({
-    toolkits: [integration.toolkit],
+    toolkits: [toolkit],
     execution: {
       threadId: 'thread-1',
       runId: 'run-1',
@@ -37,107 +34,60 @@ test('Browser Runtime is exposed as a port without replacing static tools', asyn
     execution.toolkits[0]?.tools.map(({ tool }) => tool),
     staticTools,
   );
-  assert.equal(execution.runtimes.browser, integration.runtime);
+  assert.ok(execution.runtimes.browser instanceof BrowserRuntime);
 
   await execution.release();
   await manager.stop();
 });
 
-test('browser availability caches only the structural backend decision', async () => {
-  const integration = createBrowserIntegration();
-  const availability = await integration.checkAvailability();
-
-  assert.equal(integration.getCachedAvailability(), availability);
-  assert.equal(typeof availability.available, 'boolean');
-  if (availability.metadata) {
-    assert.equal(typeof availability.metadata.mode, 'string');
-    assert.equal(Object.hasOwn(availability.metadata, 'nativeHostConnected'), false);
-    assert.equal(Object.hasOwn(availability.metadata, 'extensionRegistered'), false);
-  }
-});
-
-test('host configuration disables Browser without reading backend state', async () => {
+test('browser availability describes structural backend support, not Host selection', async () => {
   let backendReads = 0;
-  const integration = createBrowserIntegration({
-    enabled: () => false,
+  const toolkit = createBrowserToolkit({
     backend: () => {
       backendReads += 1;
       return 'extension';
     },
   });
 
-  const availability = await integration.checkAvailability();
+  const availability = await toolkit.availability?.();
 
-  assert.equal(availability.available, false);
-  assert.match(availability.reason ?? '', /disabled by host config/);
-  assert.equal(backendReads, 0);
+  assert.deepEqual(availability, { available: true });
+  assert.equal(backendReads, 1);
 });
 
 test('separate Host managers start independent Browser Runtime roots', async () => {
-  const integration = createBrowserIntegration({ backend: () => 'playwright' });
+  const toolkit = createBrowserToolkit({ backend: () => 'playwright' });
   const managerA = new ToolkitRuntimeManager();
   const managerB = new ToolkitRuntimeManager();
 
-  await managerA.start([integration.toolkit]);
-  const runtimeA = integration.runtime;
-  await managerB.start([integration.toolkit]);
-  const runtimeB = integration.runtime;
+  const executionA = await managerA.resolve({
+    toolkits: [toolkit],
+    execution: {
+      threadId: 'thread-a',
+      runId: 'run-a',
+      delegationId: 'delegation-a',
+      workdir: process.cwd(),
+    },
+  });
+  const executionB = await managerB.resolve({
+    toolkits: [toolkit],
+    execution: {
+      threadId: 'thread-b',
+      runId: 'run-b',
+      delegationId: 'delegation-b',
+      workdir: process.cwd(),
+    },
+  });
+  const runtimeA = executionA.runtimes.browser;
+  const runtimeB = executionB.runtimes.browser;
 
   assert.notEqual(runtimeA, runtimeB);
+  assert.equal((await managerA.diagnose())[0]?.lifecycle, 'ready');
+  assert.equal((await managerB.diagnose())[0]?.lifecycle, 'ready');
+  await executionA.release();
   await managerA.stop();
-  assert.equal(integration.runtime, runtimeB);
+  assert.equal((await managerA.diagnose())[0]?.lifecycle, 'stopped');
+  assert.equal((await managerB.diagnose())[0]?.lifecycle, 'ready');
+  await executionB.release();
   await managerB.stop();
-  assert.notEqual(integration.runtime, runtimeB);
-});
-
-test('a failed Browser Runtime stop does not hide another active Host root', async () => {
-  const integration = createBrowserIntegration({ backend: () => 'playwright' });
-  const managerA = new ToolkitRuntimeManager();
-  const managerB = new ToolkitRuntimeManager();
-
-  await managerA.start([integration.toolkit]);
-  const runtimeA = integration.runtime;
-  await managerB.start([integration.toolkit]);
-  const runtimeB = integration.runtime;
-  const stopRuntimeB = runtimeB.stop.bind(runtimeB);
-  runtimeB.stop = async () => {
-    await stopRuntimeB();
-    throw new Error('simulated Browser Runtime cleanup failure');
-  };
-
-  try {
-    await assert.rejects(
-      managerB.stop(),
-      /simulated Browser Runtime cleanup failure/,
-    );
-    assert.equal(integration.runtime, runtimeA);
-  } finally {
-    await managerA.stop();
-  }
-});
-
-test('waiting extension stays routable without claiming command readiness', () => {
-  const availability = buildBrowserAvailabilitySnapshot({
-    mode: 'extension',
-    configured: 'extension',
-    detail: 'native host connected; waiting for extension registration',
-    commandReady: false,
-  });
-
-  assert.equal(availability.available, true);
-  assert.equal(availability.reason, undefined);
-  assert.equal(availability.metadata?.commandReady, false);
-});
-
-test('structurally unavailable browser is filtered from the toolkit registry', () => {
-  const availability = buildBrowserAvailabilitySnapshot({
-    mode: 'none',
-    configured: 'playwright',
-    detail: 'configured playwright but unavailable',
-    commandReady: false,
-  });
-
-  assert.equal(availability.available, false);
-  assert.equal(availability.reason, 'configured playwright but unavailable');
-  assert.equal(availability.metadata?.commandReady, false);
 });

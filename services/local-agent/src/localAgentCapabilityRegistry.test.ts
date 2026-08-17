@@ -64,7 +64,7 @@ test('LocalAgentCapabilityRegistry loads capabilities and rescans user capabilit
   assert.deepEqual(registry.getUserCapabilities().map((item) => item.meta.id), ['rescanned-user-cap']);
 });
 
-test('LocalAgentCapabilityRegistry keeps the built-in Capability contract stable', async () => {
+test('LocalAgentCapabilityRegistry keeps Host-independent core Capabilities stable', async () => {
   const registry = new LocalAgentCapabilityRegistry({
     loadUserCapabilities: async () => [],
   });
@@ -73,14 +73,10 @@ test('LocalAgentCapabilityRegistry keeps the built-in Capability contract stable
 
   assert.deepEqual(
     registry.getLocalCapabilities().map((item) => item.name),
-    ['general', 'explore', 'browser'],
+    ['general', 'explore'],
   );
   assert.deepEqual(
     registry.getLocalCapabilities().find((item) => item.name === 'general')?.uses,
     ['bash', 'git'],
-  );
-  assert.deepEqual(
-    registry.getLocalCapabilities().find((item) => item.name === 'browser')?.uses,
-    ['browser'],
   );
 });

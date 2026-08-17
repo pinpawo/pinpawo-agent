@@ -1,4 +1,5 @@
 import { isStructuredTool } from '@langchain/core/tools';
+import { isJsonValue, type JsonValue } from '@pinpawo/agent-contracts';
 import type {
   AgentToolkit,
   NamedStructuredTool,
@@ -13,6 +14,34 @@ type StartedToolkitRuntime = {
   toolkitName: string;
   runtime: ToolkitRuntimeDefinition;
   root: unknown;
+};
+
+export type ToolkitRuntimeLifecycle =
+  | 'starting'
+  | 'ready'
+  | 'degraded'
+  | 'stopping'
+  | 'stopped'
+  | 'failed';
+
+export type ToolkitRuntimeDiagnosticError = Readonly<{
+  code?: string;
+  message: string;
+}>;
+
+export type ToolkitRuntimeDiagnostic = Readonly<{
+  toolkitName: string;
+  lifecycle: ToolkitRuntimeLifecycle;
+  activeBindings: number;
+  lastError?: ToolkitRuntimeDiagnosticError;
+  details?: JsonValue;
+}>;
+
+type ToolkitRuntimeDiagnosticState = {
+  toolkitName: string;
+  lifecycle: ToolkitRuntimeLifecycle;
+  activeBindings: number;
+  lastError?: ToolkitRuntimeDiagnosticError;
 };
 
 type ResolvedToolkitBinding = {
@@ -42,6 +71,29 @@ export type ToolkitRuntimeExecution = {
 
 function describeError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function projectDiagnosticError(error: unknown): ToolkitRuntimeDiagnosticError {
+  const rawCode = error && typeof error === 'object'
+    ? Reflect.get(error, 'code')
+    : undefined;
+  const code = typeof rawCode === 'string' ? rawCode : undefined;
+  return Object.freeze({
+    ...(code ? { code } : {}),
+    message: describeError(error),
+  });
+}
+
+function freezeJsonValue(value: JsonValue): JsonValue {
+  if (Array.isArray(value)) {
+    return Object.freeze(value.map(freezeJsonValue)) as unknown as JsonValue;
+  }
+  if (value && typeof value === 'object') {
+    return Object.freeze(Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, freezeJsonValue(entry)]),
+    ));
+  }
+  return value;
 }
 
 function lifecycleError(message: string, errors: readonly unknown[]) {
@@ -139,6 +191,7 @@ function bindToolkitTools(params: {
  */
 export class ToolkitRuntimeManager {
   private readonly roots = new Map<string, StartedToolkitRuntime>();
+  private readonly diagnosticStates = new Map<string, ToolkitRuntimeDiagnosticState>();
   private readonly startOrder: string[] = [];
   private readonly activeExecutions = new Set<ActiveToolkitRuntimeExecution>();
   private readonly pendingResolutions = new Set<Promise<void>>();
@@ -174,7 +227,18 @@ export class ToolkitRuntimeManager {
           assertSameRuntime(toolkit, existing);
           continue;
         }
-        const root = await toolkit.runtime.start(context);
+        this.diagnosticStates.set(toolkit.name, {
+          toolkitName: toolkit.name,
+          lifecycle: 'starting',
+          activeBindings: 0,
+        });
+        let root: unknown;
+        try {
+          root = await toolkit.runtime.start(context);
+        } catch (error) {
+          this.recordRuntimeError(toolkit.name, 'failed', error);
+          throw error;
+        }
         this.roots.set(toolkit.name, {
           toolkitName: toolkit.name,
           runtime: toolkit.runtime,
@@ -182,6 +246,7 @@ export class ToolkitRuntimeManager {
         });
         this.startOrder.push(toolkit.name);
         startedNow.push(toolkit.name);
+        this.setRuntimeLifecycle(toolkit.name, this.stopping ? 'stopping' : 'ready');
       }
     } catch (error) {
       await this.stopRoots([...startedNow].reverse(), context).catch(() => undefined);
@@ -224,19 +289,25 @@ export class ToolkitRuntimeManager {
           throw new Error(`Toolkit runtime "${toolkit.name}" was not started.`);
         }
         assertSameRuntime(toolkit, started);
-        const binding = runtime.resolve
-          ? await runtime.resolve(started.root, context)
-          : started.root;
-        bindings.push({ toolkit, runtime, binding, context });
-        if (!runtime.bindTools) {
-          runtimes[toolkit.name] = binding;
+        try {
+          const binding = runtime.resolve
+            ? await runtime.resolve(started.root, context)
+            : started.root;
+          bindings.push({ toolkit, runtime, binding, context });
+          this.changeActiveBindings(toolkit.name, 1);
+          if (!runtime.bindTools) {
+            runtimes[toolkit.name] = binding;
+          }
+          toolkits.push(runtime.bindTools
+            ? bindToolkitTools({
+                toolkit,
+                boundTools: await runtime.bindTools(binding, context),
+              })
+            : toolkit);
+        } catch (error) {
+          this.recordRuntimeError(toolkit.name, 'degraded', error);
+          throw error;
         }
-        toolkits.push(runtime.bindTools
-          ? bindToolkitTools({
-              toolkit,
-              boundTools: await runtime.bindTools(binding, context),
-            })
-          : toolkit);
       }
 
       if (this.stopping || this.stopped) {
@@ -273,8 +344,56 @@ export class ToolkitRuntimeManager {
   stop(context: ToolkitRuntimeStopContext = {}): Promise<void> {
     if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
+    for (const state of this.diagnosticStates.values()) {
+      if (state.lifecycle !== 'failed' && state.lifecycle !== 'stopped') {
+        state.lifecycle = 'stopping';
+      }
+    }
     this.stopPromise = this.queueLifecycle(() => this.stopRootsAndBindings(context));
     return this.stopPromise;
+  }
+
+  /**
+   * Read one generic diagnostic projection for every Runtime this manager has
+   * attempted to start. Toolkit-specific details remain opaque JSON.
+   */
+  async diagnose(): Promise<readonly ToolkitRuntimeDiagnostic[]> {
+    const diagnostics = await Promise.all(
+      [...this.diagnosticStates.keys()].map(async (toolkitName) => {
+        const started = this.roots.get(toolkitName);
+        let details: JsonValue | undefined;
+        if (started?.runtime.diagnose) {
+          try {
+            const projected = await started.runtime.diagnose(started.root);
+            if (!isJsonValue(projected)) {
+              throw new Error(
+                `Toolkit runtime "${toolkitName}" diagnose() returned a non-JSON value.`,
+              );
+            }
+            if (this.roots.get(toolkitName) === started) {
+              details = freezeJsonValue(projected);
+            }
+          } catch (error) {
+            const current = this.diagnosticStates.get(toolkitName);
+            if (current?.lifecycle === 'ready' || current?.lifecycle === 'degraded') {
+              this.recordRuntimeError(toolkitName, 'degraded', error);
+            }
+          }
+        }
+        const state = this.diagnosticStates.get(toolkitName);
+        if (!state) {
+          throw new Error(`Toolkit runtime "${toolkitName}" diagnostic state is missing.`);
+        }
+        return Object.freeze({
+          toolkitName: state.toolkitName,
+          lifecycle: state.lifecycle,
+          activeBindings: state.activeBindings,
+          ...(state.lastError ? { lastError: state.lastError } : {}),
+          ...(details !== undefined ? { details } : {}),
+        });
+      }),
+    );
+    return Object.freeze(diagnostics);
   }
 
   private async stopRootsAndBindings(context: ToolkitRuntimeStopContext): Promise<void> {
@@ -333,7 +452,10 @@ export class ToolkitRuntimeManager {
       try {
         await binding.runtime.release?.(binding.binding, binding.context);
       } catch (error) {
+        this.recordRuntimeError(binding.toolkit.name, 'degraded', error);
         errors.push(error);
+      } finally {
+        this.changeActiveBindings(binding.toolkit.name, -1);
       }
     }
     if (errors.length > 0) {
@@ -349,17 +471,57 @@ export class ToolkitRuntimeManager {
     for (const name of names) {
       const started = this.roots.get(name);
       if (!started) continue;
+      this.setRuntimeLifecycle(name, 'stopping');
       this.roots.delete(name);
       const orderIndex = this.startOrder.lastIndexOf(name);
       if (orderIndex >= 0) this.startOrder.splice(orderIndex, 1);
       try {
         await started.runtime.stop?.(started.root, context);
+        this.setRuntimeLifecycle(name, 'stopped');
       } catch (error) {
+        this.recordRuntimeError(name, 'failed', error);
         errors.push(error);
       }
     }
     if (errors.length > 0) {
       throw lifecycleError('Toolkit runtime stop failed', errors);
     }
+  }
+
+  private setRuntimeLifecycle(
+    toolkitName: string,
+    lifecycle: ToolkitRuntimeLifecycle,
+  ): void {
+    const state = this.diagnosticStates.get(toolkitName);
+    if (!state) return;
+    state.lifecycle = lifecycle;
+  }
+
+  private recordRuntimeError(
+    toolkitName: string,
+    lifecycle: ToolkitRuntimeLifecycle,
+    error: unknown,
+  ): void {
+    const state = this.diagnosticStates.get(toolkitName) ?? {
+      toolkitName,
+      lifecycle,
+      activeBindings: 0,
+    };
+    if (
+      lifecycle !== 'degraded'
+      || (state.lifecycle !== 'stopping'
+        && state.lifecycle !== 'stopped'
+        && state.lifecycle !== 'failed')
+    ) {
+      state.lifecycle = lifecycle;
+    }
+    state.lastError = projectDiagnosticError(error);
+    this.diagnosticStates.set(toolkitName, state);
+  }
+
+  private changeActiveBindings(toolkitName: string, delta: 1 | -1): void {
+    const state = this.diagnosticStates.get(toolkitName);
+    if (!state) return;
+    state.activeBindings = Math.max(0, state.activeBindings + delta);
   }
 }

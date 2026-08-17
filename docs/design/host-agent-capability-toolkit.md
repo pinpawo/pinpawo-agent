@@ -10,8 +10,8 @@ Studio Host 和未来 Host surface 的装配方式。Capability / Toolkit 的当
 为准；Toolkit Runtime 的已实现生命周期见
 [Toolkit 可选 Runtime 生命周期](../reference/extensions/toolkit-runtime.md)。
 
-本文中的统一诊断、去全局 workdir 和 inventory 收敛是 #645 的 accepted target，
-不是对当前代码已经完成这些迁移的声明。当历史设计中的 `local tools`、
+本文中的 inventory、execution boundary、Host Toolkit 协调器和统一诊断已按 #645
+进入当前实现。当历史设计中的 `local tools`、
 `host tools`、`capability-private tools`、Browser 专属 lifecycle/diagnostics 或
 `BrowserIntegration` 与本文冲突时，只能把这些表述作为历史实现背景，不能据此
 新增公共架构层。
@@ -172,9 +172,9 @@ Browser、bash、git 都是普通 Toolkit：
 
 - Browser backend/driver、bridge、session、ownership 和 live state 属于 Browser
   Toolkit Runtime；Browser Capability 只声明 `uses: ['browser']`。
-- 当前 `BrowserIntegration` 同时打包 Capability、Toolkit、Runtime、availability
-  cache 和 environment detection。迁移后它只能降为私有装配 helper；不能作为
-  Host 必须认识的公共领域对象。
+- Browser 包分别导出 Capability、Toolkit 和窄的管理接口。local-agent 的
+  composition root 只根据 Host 配置选择静态 definitions；不持有 Runtime root、
+  availability cache 或 diagnostics 状态。
 - 当前所谓 `local tools` 不是领域概念。它们是 local-machine / Node Host 提供的
   Toolkit definitions；CLI 只是其中一类 Host 入口。
 - `bash` 当前包含文件、搜索、JSON、网络、shell、process 等工具，`git` 同时包含

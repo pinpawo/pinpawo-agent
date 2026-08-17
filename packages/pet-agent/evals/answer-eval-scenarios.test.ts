@@ -61,7 +61,7 @@ test('answer eval models goal_done as a grounded task summary', async () => {
   assert.equal(result.output.text, summary);
   const answerInput = String(scenario.render().at(-1)?.content);
   assert.match(answerInput, /^<answer_input[^>]*>/);
-  assert.match(answerInput, /<run_user_goal[^>]*>/);
+  assert.match(answerInput, /<run_user_request[^>]*>/);
   assert.match(answerInput, /<reply_mode>goal_done<\/reply_mode>/);
   assert.match(answerInput, /<accepted_results>[\s\S]*database-freeze-42/);
 });
@@ -160,7 +160,7 @@ test('answer eval covers a resumable result that requires a user choice', () => 
   assert.match(String(messages[1].content), /邮件或项目群/);
   assert.match(String(messages[2].content), /还没有发送/);
   assert.match(contextText, /^<answer_input[^>]*>/);
-  assert.match(contextText, /<run_user_goal[^>]*>/);
+  assert.match(contextText, /<run_user_request[^>]*>/);
   assert.match(contextText, /<reply_mode>user_input_required<\/reply_mode>/);
   assert.match(contextText, /<awaiting_user_input_context>/);
 });

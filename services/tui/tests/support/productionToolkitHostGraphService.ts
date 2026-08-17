@@ -209,20 +209,23 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
         total_tokens: 7,
       },
     }),
-  } as unknown as AgentModels['act'];
-  const goalCreationModel = {
-    invoke: async (messages: BaseMessage[]) => new AIMessage(
-      messagesContain(messages, ATTACHMENT_TOOL_INPUT)
-        ? `Read the selected attachment.\n\n${ATTACHMENT_TOOL_INPUT}`
-        : 'Write the guarded fixture.',
-    ),
+    bindTools: () => ({
+      invoke: async () => new AIMessage({
+        content: '',
+        tool_calls: [{
+          id: 'production-toolkit-plan-request',
+          name: 'plan_request',
+          args: {},
+        }],
+      }),
+    }),
   } as unknown as AgentModels['act'];
   const capabilityPlannerRunner: CapabilityPlannerRunner = {
     async invoke(input) {
       if (input.mode === 'boundary') {
         return { action: 'goal_done', tasks: [] };
       }
-      const readsAttachment = input.userGoal.includes(ATTACHMENT_TOOL_INPUT);
+      const readsAttachment = input.userRequest.includes(ATTACHMENT_TOOL_INPUT);
       return {
         action: 'execute_plan',
         tasks: [
@@ -246,7 +249,7 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
         ...setup.graphConfig,
         models: {
           act: routeModel,
-          decision: goalCreationModel,
+          answer: routeModel,
           observe: routeModel,
           subagent: subagentModel,
         },

@@ -43,8 +43,8 @@ export type CapabilityPlanTask = {
   task: string;
 };
 
-/** Goal Creation output shared by the orchestration nodes in one run. */
-export type UserGoal = string;
+/** Exact text of the HumanMessage that started the current run. */
+export type UserRequest = string;
 
 export type TaskActiveDelegation = {
   id: string;
@@ -56,8 +56,8 @@ export type TaskActiveDelegation = {
   traceId: string;
   status: 'pending' | 'awaiting_decision';
   resultPreview: string | null;
-  /** Snapshot used to restore runUserGoal when this delegation is resumed. */
-  userGoal: UserGoal;
+  /** Snapshot used to restore runUserRequest when this delegation is resumed. */
+  userRequest: UserRequest;
 };
 
 export type SubagentAnnounce = {

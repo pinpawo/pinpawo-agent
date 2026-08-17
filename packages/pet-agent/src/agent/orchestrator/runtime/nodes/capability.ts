@@ -38,7 +38,7 @@ import {
   withArtifactDiscoveryContext,
 } from '../../artifacts/discovery';
 import type { ToolkitRuntimeExecution } from '../../toolkitRuntime';
-import { withRunUserGoalContext } from '../../capabilityContext';
+import { withRunUserRequestContext } from '../../capabilityContext';
 
 export function createCapabilityNode(params: {
   config: OrchestratorConfig;
@@ -66,8 +66,8 @@ export function createCapabilityNode(params: {
     if (!runNextDelegation) {
       throw new Error('Capability node cannot run without a pending capability delegation.');
     }
-    if (!state.runUserGoal) {
-      throw new Error('Capability execution requires runUserGoal.');
+    if (!state.runUserRequest) {
+      throw new Error('Capability execution requires runUserRequest.');
     }
     const activeDelegation = state.taskActiveDelegation;
     if (!activeDelegation || activeDelegation.id !== runNextDelegation.id) {
@@ -88,9 +88,9 @@ export function createCapabilityNode(params: {
     const toolkitList = [...compiledCapability.toolkits];
     const lane: MessageLane = runNextDelegation.lane;
     const transcriptRunId = resolveDelegationTranscriptRunId(state, runNextDelegation);
-    const scopedMessages = withRunUserGoalContext(
+    const scopedMessages = withRunUserRequestContext(
       laneMessages(state.messages, lane, transcriptRunId, runNextDelegation.id),
-      state.runUserGoal,
+      state.runUserRequest,
     );
     const threadId = readThreadId(runnableConfig);
 

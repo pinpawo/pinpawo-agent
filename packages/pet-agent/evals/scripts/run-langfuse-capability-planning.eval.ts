@@ -154,7 +154,7 @@ async function main() {
             inputId: `${testCase.input.mode}:${testCase.id}`,
             traceId: `eval:${testCase.id}`,
             runId: `eval:${testCase.id}`,
-            userGoal: testCase.input.userGoal,
+            userRequest: testCase.input.userRequest,
             latestUserMessage: null,
             activeDelegation: testCase.input.mode === 'boundary'
               ? {

@@ -17,8 +17,9 @@ import {
  *
  * Attribution model (established by the Phase 1 spike):
  * - namespace depth 0/1 = the root graph / a root node's own activity;
- * - namespace depth >= 2 = a delegated child scope (subagent model calls,
- *   tool executions run inside a child agent);
+ * - namespace depth >= 2 normally = a delegated child scope (subagent model
+ *   calls, tool executions run inside a child agent); the `entryAnswer`
+ *   subgraph is the one user-facing exception;
  * - the node name is the first segment of a namespace entry (`"answer:<task>"`).
  *
  * Scope granularities differ on purpose:
@@ -65,6 +66,7 @@ export type RootStreamChatEvent =
   | { type: 'interrupt'; interrupts: unknown[] };
 
 const MAIN_ASSISTANT_NODE_NAMES = new Set(['answer']);
+const ENTRY_ANSWER_NODE_NAME = 'entryAnswer';
 const INTERNAL_SUBAGENT_MESSAGE_NODE_NAMES = new Set([
   'SummarizationMiddleware.before_model',
 ]);
@@ -119,6 +121,10 @@ function defaultIsMainAssistantNode(node: string | null): boolean {
 function isInternalOrchestratorNamespace(namespace: string[]) {
   const node = readNamespaceNode(namespace);
   return node !== null && isOrchestratorInternalAiStreamNode(node);
+}
+
+function isEntryAnswerNamespace(namespace: string[]) {
+  return readNamespaceNode(namespace) === ENTRY_ANSWER_NODE_NAME;
 }
 
 /**
@@ -190,7 +196,7 @@ export function readRootStreamChatEvent(
         return null;
       }
 
-      if (namespace.length >= 2) {
+      if (namespace.length >= 2 && !isEntryAnswerNamespace(namespace)) {
         const childNode = readNamespaceNode(namespace, 1);
         if (childNode && INTERNAL_SUBAGENT_MESSAGE_NODE_NAMES.has(childNode)) {
           // The summarization model call is an implementation detail of the
@@ -234,6 +240,14 @@ export function readRootStreamChatEvent(
         return null;
       }
       const node = readNamespaceNode(namespace);
+      if (isEntryAnswerNamespace(namespace)) {
+        return {
+          type: 'assistant.delta',
+          messageId: current.messageId,
+          node: ENTRY_ANSWER_NODE_NAME,
+          text,
+        };
+      }
       const isMain = options.isMainAssistantNode ?? defaultIsMainAssistantNode;
       if (!isMain(node)) {
         // Internal decision/discovery output and depth-1 lane echoes are
@@ -250,6 +264,11 @@ export function readRootStreamChatEvent(
       // Planner file exploration tools are framework internals, not Capability
       // Toolkit activity exposed to the chat surface.
       if (isInternalOrchestratorNamespace(namespace)) {
+        return null;
+      }
+      // `plan_request` is an internal control transition of Entry Answer, not
+      // user-visible Toolkit activity.
+      if (isEntryAnswerNamespace(namespace)) {
         return null;
       }
       return { type: 'tool', namespace, data };
@@ -312,12 +331,24 @@ export async function* adaptRootStream(
 ): AsyncGenerator<RootStreamChatEvent> {
   const state: RootStreamAdapterState = new Map();
   let assistantReply = '';
+  let pendingEntryReply: Extract<RootStreamChatEvent, { type: 'assistant.delta' }> | null = null;
   for await (const event of protocolEvents) {
     const chatEvent = readRootStreamChatEvent(event, state, options);
     if (!chatEvent) {
       continue;
     }
     if (chatEvent.type === 'assistant.delta') {
+      if (chatEvent.node === ENTRY_ANSWER_NODE_NAME) {
+        const buffered: string = pendingEntryReply?.text ?? '';
+        const token = chatEvent.text.startsWith(buffered)
+          ? chatEvent.text.slice(buffered.length)
+          : chatEvent.text;
+        pendingEntryReply = {
+          ...chatEvent,
+          text: `${buffered}${token}`,
+        };
+        continue;
+      }
       const token = chatEvent.text.startsWith(assistantReply)
         ? chatEvent.text.slice(assistantReply.length)
         : chatEvent.text;
@@ -327,6 +358,22 @@ export async function* adaptRootStream(
       assistantReply += token;
       yield { ...chatEvent, text: token };
       continue;
+    }
+    if (chatEvent.type === 'values' && pendingEntryReply) {
+      const messages = Array.isArray(chatEvent.values.messages)
+        ? chatEvent.values.messages
+        : [];
+      const finalMessage = readRecord(messages.at(-1));
+      const finalText = typeof finalMessage?.text === 'string'
+        ? finalMessage.text
+        : typeof finalMessage?.content === 'string'
+          ? finalMessage.content
+          : '';
+      if (finalText === pendingEntryReply.text) {
+        assistantReply += pendingEntryReply.text;
+        yield pendingEntryReply;
+        pendingEntryReply = null;
+      }
     }
     yield chatEvent;
   }

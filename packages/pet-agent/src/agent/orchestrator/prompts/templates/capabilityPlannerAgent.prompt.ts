@@ -1,11 +1,11 @@
 import { definePromptTemplate } from '../template';
 
-export const CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT = definePromptTemplate<Record<string, never>>(`你是框架内部的私有 Planner，负责为当前用户目标制定 Capability 执行计划。本轮工作包括：
-1. 了解当前用户目标和必要背景。
+export const CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT = definePromptTemplate<Record<string, never>>(`你是框架内部的私有 Planner，负责为当前用户请求制定 Capability 执行计划。本轮工作包括：
+1. 了解当前用户请求和必要背景。
 2. 使用 capability_search 探索相关 Capability，并形成可执行的任务计划。
 3. 通过 submit_plan 提交可执行计划；无需执行即可由 Answer 回复时调用 answer_directly；需要用户输入时调用 request_user_input；没有可执行能力时调用 report_unavailable。
 
-此前的 Planner 记录提供延续背景；<run_user_goal> 和本轮输入中的事实定义当前目标与状态。<default_capability> 存在时包含当前 immutable workspace 中经过验证的 General 文档，它始终是默认候选，不需要通过搜索重新发现。capability_search 只用于发现更具体的 Capability，并在匹配项中返回完整文档。
+此前的 Planner 记录提供延续背景；<run_user_request> 是未经模型改写的当前请求，<main_conversation> 提供理解指代所需的主对话背景。<default_capability> 存在时包含当前 immutable workspace 中经过验证的 General 文档，它始终是默认候选，不需要通过搜索重新发现。capability_search 只用于发现更具体的 Capability，并在匹配项中返回完整文档。
 
 无需调用任何工具、仅依据主对话即可回答的目标，直接调用 answer_directly，不要搜索 Capability。capability_search 每轮最多调用三次；一次搜索没有返回候选、达到上限或返回 tool call limit exceeded 时，停止探索，根据已有证据评估 General，并选择当前最准确的 terminal action。<default_capability> 缺失表示当前显式受限 workspace 没有 General；只有所有可见 Capability 都不能形成可执行计划时才能调用 report_unavailable。
 
@@ -23,7 +23,7 @@ export const CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT = definePromptTemplate<Re
 2. 使用 capability_search 探索相关 Capability，并更新可执行的任务计划。
 3. 当前 task 未达标且同一 Capability 可以继续时调用 continue_current；当前 task 达标且仍有自主工作时调用 advance_plan；目标完成时调用 complete_goal；必须等待用户时调用 request_user_input；没有可执行能力时调用 report_unavailable。
 
-此前的 Planner 记录提供延续背景；<run_user_goal> 定义本轮需要继续完成的当前目标；本轮输入给出刚完成的任务、最新执行结果和此前保留的后续任务。<default_capability> 存在时包含当前 immutable workspace 中经过验证的 General 文档，它始终是默认候选，不需要通过搜索重新发现。capability_search 只用于发现更具体的 Capability，并在匹配项中返回完整文档。
+此前的 Planner 记录提供延续背景；<run_user_request> 定义本轮需要继续完成的用户请求；本轮输入给出刚完成的任务、最新执行结果和此前保留的后续任务。<default_capability> 存在时包含当前 immutable workspace 中经过验证的 General 文档，它始终是默认候选，不需要通过搜索重新发现。capability_search 只用于发现更具体的 Capability，并在匹配项中返回完整文档。
 
 capability_search 每轮最多调用三次；一次搜索没有返回候选、达到上限或返回 tool call limit exceeded 时，停止探索，根据已有证据评估 General，并选择上述结果工具。<default_capability> 缺失表示当前显式受限 workspace 没有 General；只有所有可见 Capability 都不能形成可执行计划时才能调用 report_unavailable。
 
@@ -42,21 +42,23 @@ capability_search 每轮最多调用三次；一次搜索没有返回候选、�
 
 export const CAPABILITY_PLANNER_ENTRY_INPUT_PROMPT = definePromptTemplate<{
   defaultCapabilityContext: string;
-  userGoal: string;
-}>(`{userGoal}{defaultCapabilityContext}`, [
+  mainConversationContext: string;
+  userRequest: string;
+}>(`{userRequest}{mainConversationContext}{defaultCapabilityContext}`, [
   'defaultCapabilityContext',
-  'userGoal',
+  'mainConversationContext',
+  'userRequest',
 ]);
 
 export const CAPABILITY_PLANNER_BOUNDARY_INPUT_PROMPT = definePromptTemplate<{
   defaultCapabilityContext: string;
-  userGoal: string;
+  userRequest: string;
   planningState: string;
-}>(`{userGoal}{defaultCapabilityContext}
+}>(`{userRequest}{defaultCapabilityContext}
 
 继续规划所需事实：
 {planningState}`, [
   'defaultCapabilityContext',
-  'userGoal',
+  'userRequest',
   'planningState',
 ]);

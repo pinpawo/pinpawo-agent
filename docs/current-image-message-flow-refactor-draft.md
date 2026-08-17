@@ -60,9 +60,9 @@ ledger。provider adapter 负责在模型边界转换成对应的原生图片格
 
 | 模型调用 | 输入来源 | 当前是否包含主消息图片 |
 |---|---|---|
-| Goal Creation | system/context message + 完整 main human/AI messages | 是 |
-| Capability Planner entry | `runUserGoal` 等结构化 Planner input | 否 |
-| Capability subagent | 未分 lane 的主消息 + 当前 delegation lane + User Goal context | 是 |
+| Entry Answer | system message + 完整 main human/AI messages | 是 |
+| Capability Planner entry | `runUserRequest` + main conversation 的文本投影 | 否 |
+| Capability subagent | 未分 lane 的主消息 + 当前 delegation lane + User Request context | 是 |
 | Boundary Planner | active delegation、announce、remaining plan 等结构化 input | 否 |
 | Answer | 完整 main conversation + Answer input | 是 |
 | Root compaction summarizer | 较旧 main messages 的文本投影 | 不读取图片内容 |
@@ -70,14 +70,15 @@ ledger。provider adapter 负责在模型边界转换成对应的原生图片格
 
 主要实现位置：
 
-- Goal Creation：[`orchestrationDecision.ts`](../packages/pet-agent/src/agent/orchestrator/runtime/decisions/orchestrationDecision.ts)
+- Entry Answer：[`entryAnswer.ts`](../packages/pet-agent/src/agent/orchestrator/runtime/nodes/entryAnswer.ts)
 - Planner input：[`capabilityPlanner.ts`](../packages/pet-agent/src/agent/orchestrator/runtime/nodes/capabilityPlanner.ts)
 - Capability input：[`capability.ts`](../packages/pet-agent/src/agent/orchestrator/runtime/nodes/capability.ts)
 - Answer input：[`answer.ts`](../packages/pet-agent/src/agent/orchestrator/runtime/nodes/answer.ts)
 - Message lane：[`messageLanes.ts`](../packages/pet-agent/src/agent/orchestrator/messageLanes.ts)
 
-Planner 当前负责根据已经整理的 User Goal 和执行结果做任务规划，不直接分析图片。图片理解发生在
-Goal Creation、Capability 或 Answer 的模型上下文中。
+Planner 使用原始 User Request 和 main conversation 的文本投影做任务规划，
+不直接分析图片。图片理解发生在 Entry Answer、Capability 或 Result Answer
+的模型上下文中。
 
 ### 2.3 Subagent 工具循环
 
@@ -94,7 +95,7 @@ child summarization 改写其内部消息列表或本次 subagent 结束。
 run 上安装 [`CallbackHandler`](../services/local-agent/src/langfuseTracing.ts)。当前 callback 没有
 PinPawo 侧的 message/media 投影，模型输入中的完整图片 payload 会进入 SDK 的媒体处理路径。
 
-Tracing 与模型调用共享相同的 runnable callback tree，因此 Goal Creation、Capability 和 Answer 等实际
+Tracing 与模型调用共享相同的 runnable callback tree，因此 Entry Answer、Capability 和 Answer 等实际
 包含图片的模型输入都可能触发 SDK 媒体处理。
 
 ## 3. 已确认的现状与问题
@@ -155,8 +156,8 @@ Langfuse callback 直接把真实模型输入写入 span，因此完整图片 pa
 
 - 图片继续作为标准 `image` content block 进入 `HumanMessage`；
 - 主消息继续由 `OrchestratorState.messages` 和 FileSaver checkpoint 保存；
-- Goal Creation、Capability 和 Answer 继续获得各自现有的 main message 上下文；
-- Planner 继续消费结构化 User Goal 和 delegation state；
+- Entry Answer、Capability 和 Answer 继续获得各自现有的 main message 上下文；
+- Planner 继续消费 User Request 和 delegation state；
 - `laneMessages` 继续把未分 lane 的主消息提供给 Capability subagent；
 - root 与 subagent summarization 继续以摘要替代被折叠的旧消息；
 - model profile 继续在 admission 时校验 image modality；
@@ -313,7 +314,7 @@ root compaction、Planner 或 Answer。
 - 保持 inline 标准 `image` block 为本轮 canonical representation；
 - 不新增 media store、URI resolver 或跨设备附件协议；
 - 不扩展 audio、video、PDF 和普通文件的模型输入；
-- 不改变 Planner、User Goal、message lane、Artifact 或 Toolkit Runtime contract；
+- 不改变 Planner、User Request、message lane、Artifact 或 Toolkit Runtime contract；
 - 不以减少模型实际需要的图片上下文作为性能手段。
 
 ## 10. 待确认问题

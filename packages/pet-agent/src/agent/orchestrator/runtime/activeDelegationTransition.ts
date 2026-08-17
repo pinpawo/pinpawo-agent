@@ -7,7 +7,6 @@ import { readLatestHumanRequest } from '../messageLanes';
 import type { OrchestratorStateType } from '../state';
 import type { RunNextDelegation, TaskActiveDelegation } from '../types';
 import { clipForPrompt } from '../utils';
-import { USER_GOAL_MAX_CHARS } from '../capabilityPlanner/runner';
 
 const RESUME_GUIDANCE_MAX_CHARS = 2_000;
 
@@ -64,7 +63,7 @@ export function applyActiveDelegationTransition(
   const guidance = latestHumanRequest
     ? clipForPrompt(latestHumanRequest, RESUME_GUIDANCE_MAX_CHARS)
     : null;
-  const resumedUserGoal = activeDelegation.userGoal;
+  const resumedUserRequest = activeDelegation.userRequest;
   const runNextDelegation = buildRunNextDelegation(activeDelegation, guidance);
   const resumedSummaries = resumeRunDelegationSummary(
     state.runDelegationSummaries,
@@ -74,7 +73,7 @@ export function applyActiveDelegationTransition(
   if (activeDelegation.status === 'awaiting_decision') {
     return {
       traceId: activeDelegation.traceId,
-      runUserGoal: resumedUserGoal,
+      runUserRequest: resumedUserRequest,
       runDelegationSummaries: updateRunDelegationSummaryResult(
         resumedSummaries,
         activeDelegation.id,
@@ -98,7 +97,7 @@ export function applyActiveDelegationTransition(
   return {
     messages: materializedDelegation.laneMessages,
     traceId: activeDelegation.traceId,
-    runUserGoal: resumedUserGoal,
+    runUserRequest: resumedUserRequest,
     runNextDelegation,
     taskActiveDelegation: {
       ...activeDelegation,
@@ -113,10 +112,9 @@ export function applyActiveDelegationTransition(
 
 function isResumableDelegation(
   value: TaskActiveDelegation,
-): value is TaskActiveDelegation & { traceId: string; userGoal: string } {
+): value is TaskActiveDelegation & { traceId: string; userRequest: string } {
   return typeof value.traceId === 'string'
     && value.traceId.trim().length > 0
-    && typeof value.userGoal === 'string'
-    && value.userGoal.trim().length > 0
-    && value.userGoal.length <= USER_GOAL_MAX_CHARS;
+    && typeof value.userRequest === 'string'
+    && value.userRequest.trim().length > 0;
 }

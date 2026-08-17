@@ -8,9 +8,6 @@ import type {
   OrchestratorConfig,
 } from '../types';
 import {
-  createGoalCreationRunner,
-} from './decisions/orchestrationDecision';
-import {
   DEFAULT_ORCHESTRATOR_MAX_ITERATIONS,
 } from './constants';
 import {
@@ -21,6 +18,10 @@ import {
 import { createAnswerNode } from './nodes/answer';
 import { createCapabilityNode } from './nodes/capability';
 import { createCapabilityPlannerNode } from './nodes/capabilityPlanner';
+import {
+  captureRunUserRequest,
+  createEntryAnswerSubgraph,
+} from './nodes/entryAnswer';
 import {
   createCompactContextNode,
   createPrepareNode,
@@ -41,10 +42,10 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const compactContext = createCompactContextNode({ config });
   const afterPlannerBoundaryIterationGuard =
     createAfterPlannerBoundaryIterationGuard({ orchestratorMaxIterations });
-  const runGoalCreation = createGoalCreationRunner(config);
   const runCapabilityPlanner = createCapabilityPlannerNode(config);
 
-  const answerNode = createAnswerNode(config);
+  const entryAnswer = createEntryAnswerSubgraph(config);
+  const resultAnswer = createAnswerNode(config);
   const capabilityNode = createCapabilityNode({
     config,
     subagentContextWindowTokens,
@@ -58,14 +59,15 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const graph = new StateGraph(OrchestratorState)
     .addNode('prepare', prepare)
     .addNode('compactContext', compactContext)
-    .addNode('goalCreation', runGoalCreation, {
+    .addNode('captureUserRequest', captureRunUserRequest)
+    .addNode('entryAnswer', entryAnswer, {
       ends: ['capabilityPlanner'],
     })
     .addNode('capabilityPlanner', runCapabilityPlanner, {
       ends: ['answer', 'capability'],
     })
     .addNode('plannerBoundaryIterationGuard', plannerBoundaryIterationGuard)
-    .addNode('answer', answerNode)
+    .addNode('answer', resultAnswer)
     .addNode('capability', capabilityNode)
     .addEdge(START, 'prepare')
     .addConditionalEdges('prepare', afterPrepare, {
@@ -76,13 +78,15 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     // transcript/context storage and are not the normal control-flow signal.
     .addConditionalEdges('compactContext', afterContextPrep, {
       plannerBoundaryIterationGuard: 'plannerBoundaryIterationGuard',
-      goalCreation: 'goalCreation',
+      captureUserRequest: 'captureUserRequest',
       capability: 'capability',
     })
+    .addEdge('captureUserRequest', 'entryAnswer')
     .addConditionalEdges('plannerBoundaryIterationGuard', afterPlannerBoundaryIterationGuard, {
       answer: 'answer',
       capabilityPlanner: 'capabilityPlanner',
     })
+    .addEdge('entryAnswer', END)
     .addEdge('answer', END)
     .addConditionalEdges('capability', afterCapability, {
       end: END,

@@ -1,7 +1,7 @@
 # refactor(orchestrator): merge outcome decisions into a trace-scoped persistent private Planner
 
-> 后续提案：在本重构基线上进一步将 Entry 收缩为纯目标创建，并把 fresh-run 路由统一交给
-> Planner，见 [`ENTRY_GOAL_CREATION_REFACTOR_DESIGN.md`](entry-goal-creation.md)。
+> 后续的 fresh-run 入口路由设计见
+> [`Entry Answer routing draft`](entry-answer-routing.md)。
 
 建议 labels：`architecture`、`orchestrator`、`planner`、`breaking-change`
 
@@ -298,7 +298,8 @@ type PlannerInput = {
   inputId: string;
   traceId: string;
   runId: string;
-  userGoal: UserGoal;
+  userRequest: UserRequest;
+  mainMessages?: readonly BaseMessage[];
   latestUserMessage: string | null;
   activeDelegation: PlannerDelegationInput | null;
   latestAnnounce: PlannerAnnounceInput | null;
@@ -528,9 +529,9 @@ Answer 不得读取 Planner private checkpoint。
 
 Reply mode 的公开依据：
 
-- `goal_done`：normalized user goal + accepted handoff + public artifacts；
-- `user_input_required`：user goal + active delegation announce + public artifacts；
-- `unavailable`：user goal + registry/runtime 的确定性公开 facts；
+- `goal_done`：user request + accepted handoff + public artifacts；
+- `user_input_required`：user request + active delegation announce + public artifacts；
+- `unavailable`：user request + registry/runtime 的确定性公开 facts；
 - iteration/execution limit：guard state + active delegation evidence。
 
 Planner action 可以决定 reply mode，但 Planner 的自由文本、tool observations 和内部

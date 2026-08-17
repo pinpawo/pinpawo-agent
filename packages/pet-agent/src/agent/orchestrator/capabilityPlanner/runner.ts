@@ -1,9 +1,10 @@
+import type { BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { CapabilityDocumentWorkspace } from './documentWorkspace';
 import type {
   CapabilityPlanTask,
   RunDelegationSummary,
-  UserGoal,
+  UserRequest,
 } from '../types';
 import type {
   PlannerAnnounceInput,
@@ -13,7 +14,6 @@ import type {
 
 export type CapabilityPlannerMode = 'entry' | 'boundary';
 
-export const USER_GOAL_MAX_CHARS = 6_000;
 export const CAPABILITY_PLANNER_BOUNDARY_RESULT_MAX_CHARS = 16_000;
 
 /**
@@ -24,13 +24,13 @@ export type CapabilityPlannerRuntimeState = Pick<
   {
     runId: string;
     traceId: string;
-    runUserGoal: UserGoal;
+    runUserRequest: UserRequest;
     runDelegationSummaries: RunDelegationSummary[];
     runCapabilityPlan: CapabilityPlanTask[];
   },
   | 'runId'
   | 'traceId'
-  | 'runUserGoal'
+  | 'runUserRequest'
   | 'runDelegationSummaries'
   | 'runCapabilityPlan'
 >;
@@ -39,13 +39,15 @@ export type CapabilityPlannerDispatch =
   {
     readonly mode: 'entry';
     readonly plannerState: CapabilityPlannerRuntimeState;
+    readonly mainMessages: readonly BaseMessage[];
   };
 
 type CapabilityPlannerInputBase = {
   readonly inputId: string;
   readonly traceId: string;
   readonly runId: string;
-  readonly userGoal: UserGoal;
+  readonly userRequest: UserRequest;
+  readonly mainMessages?: readonly BaseMessage[];
   readonly latestUserMessage: string | null;
   readonly activeDelegation: PlannerDelegationInput | null;
   /** Candidate execution evidence. Root has not accepted it as a handoff yet. */

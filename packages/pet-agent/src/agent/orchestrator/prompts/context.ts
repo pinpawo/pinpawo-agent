@@ -1,17 +1,17 @@
 import type {
   SubagentAnnounce,
   SubagentCompletionReason,
-  UserGoal,
+  UserRequest,
 } from '../types';
 import { clipForPrompt } from '../utils';
 import { indentXmlBlock, xmlTextBlock } from './shared';
 
-export function buildRunUserGoalContext(userGoal: UserGoal | null): string {
-  if (!userGoal) return '<run_user_goal missing="true" />';
+export function buildRunUserRequestContext(userRequest: UserRequest | null): string {
+  if (!userRequest) return '<run_user_request missing="true" />';
   return [
-    '<run_user_goal role="task_boundary" source="orchestrator_state" trust="read_only">',
-    indentXmlBlock(xmlTextBlock('goal', userGoal), 2),
-    '</run_user_goal>',
+    '<run_user_request role="task_boundary" source="orchestrator_state" trust="read_only">',
+    indentXmlBlock(xmlTextBlock('request', userRequest), 2),
+    '</run_user_request>',
   ].join('\n');
 }
 

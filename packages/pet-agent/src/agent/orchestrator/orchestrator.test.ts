@@ -61,7 +61,7 @@ import {
   isDelegationStartedMessage,
   materializeDelegationStarted,
 } from './delegationBriefing';
-import { RUN_USER_GOAL_CONTEXT_SOURCE } from './capabilityContext';
+import { RUN_USER_REQUEST_CONTEXT_SOURCE } from './capabilityContext';
 import {
   appendRunDelegationSummary,
   resumeRunDelegationSummary,
@@ -86,6 +86,7 @@ import {
   type CapabilityPlannerRunner,
 } from './capabilityPlanner/runner';
 import { readMessageText } from './utils';
+import { PLAN_REQUEST_TOOL_NAME } from './runtime/nodes/entryAnswer';
 
 function capability(
   name: string,
@@ -105,8 +106,31 @@ function capability(
 function createOrchestratorGraph(
   config: Parameters<typeof createRuntimeOrchestratorGraph>[0],
 ): ReturnType<typeof createRuntimeOrchestratorGraph> {
+  const resultAnswerModel = config.models.answer ?? config.models.act;
+  const entryPlanningAnswerModel = new Proxy(resultAnswerModel, {
+    get(target, property) {
+      if (property === 'bindTools') {
+        return () => ({
+          invoke: async () => new AIMessage({
+            content: '',
+            tool_calls: [{
+              id: 'test-plan-request',
+              name: PLAN_REQUEST_TOOL_NAME,
+              args: {},
+            }],
+          }),
+        });
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
   const graph = createRuntimeOrchestratorGraph({
     ...config,
+    models: {
+      ...config.models,
+      answer: entryPlanningAnswerModel,
+    },
     capabilityPlannerRunner:
       config.capabilityPlannerRunner ?? createQueuedPlannerRunner(config.models.act),
   });
@@ -338,163 +362,9 @@ function continueDecision(gapNote: string | null = '当前 delegated task 还未
   return { outcome: 'continue', gap_note: gapNote };
 }
 
-test('Goal Creation reads full canonical main messages and excludes lane announces', async () => {
-  let goalCreationMessages: Array<{
-    _getType?: () => string;
-    content?: unknown;
-    name?: string;
-  }> = [];
-  const model = {
-    invoke: async (messages: unknown[]) => {
-      goalCreationMessages = messages as Array<{ _getType?: () => string; content?: unknown }>;
-      return new AIMessage('把 #619 和 #621 的审查问题发布为 GitHub issue。');
-    },
-  } as unknown as AgentModels['act'];
-
-  const graph = createOrchestratorGraph({
-    models: {
-      act: model,
-      answer: new FakeListChatModel({ responses: ['answered'], sleep: 0 }),
-      observe: model,
-      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
-    },
-    actor: testActor,
-    capabilityPlannerRunner: {
-      async invoke() {
-        return { action: 'answer_directly', tasks: [] };
-      },
-    },
-  });
-  const previousAnnounce = new AIMessage('这是未 handoff 的 lane announce，不应进入 Goal Creation。');
-  setPinpetMeta(previousAnnounce, {
-    lane: 'capability:general',
-    runId: 'prev-turn',
-    isAnnounce: true,
-    delegationId: 'task-prev',
-    task: '旧 lane task',
-  });
-  const compactionSummary = createContextCompactionMessage(
-    '更早的 canonical main 摘要。COMPACTED_MAIN_CONTEXT',
-    12,
-  );
-  const longReview = `${'distribution-worker 专项审查。'.repeat(30)}\n最新问题：NEW_DISTRIBUTION_FINDING_A、NEW_DISTRIBUTION_FINDING_B。`;
-  const internalBriefing = new AIMessage('这条消息的正文不参与分类。');
-  setPinpetMeta(internalBriefing, {
-    source: 'delegation_briefing',
-    lane: 'capability:general',
-    runId: 'prev-turn',
-    delegationId: 'task-briefing',
-  });
-  const input = buildOrchestratorRunInput([
-    compactionSummary,
-    new HumanMessage('发布上一轮全仓库审查的问题。'),
-    new AIMessage('上一轮 10 个全仓库架构问题已经发布为 issue。'),
-    previousAnnounce,
-    internalBriefing,
-    new AIMessage(longReview),
-    new HumanMessage('OK，把这些问题也发 issue 帮我。'),
-  ]);
-
-  await graph.invoke(input, {
-    configurable: {
-      thread_id: 'test-discovery-latest',
-      actor: testActor,
-      capabilities: [capability('content_writer', '生成通用内容草稿。')],
-      tools: [],
-    },
-  });
-
-  assert.deepEqual(
-    goalCreationMessages.map((message) => message._getType?.()),
-    ['system', 'ai', 'human', 'ai', 'ai', 'human'],
-  );
-  const observedCompaction = goalCreationMessages.find((message) => (
-    message.name === compactionSummary.name
-  ));
-  assert.equal(observedCompaction?._getType?.(), 'ai');
-  assert.equal(observedCompaction?.content, compactionSummary.content);
-  assert.match(String(goalCreationMessages[1]?.content ?? ''), /COMPACTED_MAIN_CONTEXT/);
-  assert.equal(
-    String(goalCreationMessages.at(-1)?.content ?? ''),
-    'OK，把这些问题也发 issue 帮我。',
-  );
-  assert.equal(String(goalCreationMessages[3]?.content ?? ''), '上一轮 10 个全仓库架构问题已经发布为 issue。');
-  assert.match(String(goalCreationMessages[4]?.content ?? ''), /NEW_DISTRIBUTION_FINDING_A/);
-  assert.match(String(goalCreationMessages[4]?.content ?? ''), /NEW_DISTRIBUTION_FINDING_B/);
-  assert.doesNotMatch(
-    goalCreationMessages.map((message) => String(message.content ?? '')).join('\n'),
-    /未 handoff 的 lane announce|这条消息的正文不参与分类/,
-  );
-});
-
-test('Goal Creation stores bounded text without appending it to canonical messages', async () => {
-  let plannerInput: CapabilityPlannerInput | null = null;
-  const userGoalContext = 'RUN_USER_GOAL_CONTEXT';
-  const model = {
-    invoke: async () => new AIMessage(
-      `处理 issue #587，并且不要修改 /tmp/legacy-path。\n\n${userGoalContext}`,
-    ),
-  } as unknown as AgentModels['act'];
-  const graph = createOrchestratorGraph({
-    models: {
-      act: model,
-      answer: new FakeListChatModel({ responses: ['当前能力不可用。'], sleep: 0 }),
-      observe: model,
-      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
-    },
-    actor: testActor,
-    capabilityPlannerRunner: {
-      async invoke(input) {
-        plannerInput = input;
-        return {
-          action: 'unavailable',
-          tasks: [],
-        };
-      },
-    },
-  });
-
-  const mainInputMessages = Array.from({ length: 12 }, (_, index) =>
-    index % 2 === 0
-      ? new HumanMessage(`main-user-${String(index)}`)
-      : new AIMessage(`main-assistant-${String(index)}`));
-  mainInputMessages[11] = new HumanMessage('请处理当前请求。');
-  const state = await graph.invoke(buildOrchestratorRunInput(mainInputMessages), {
-    configurable: {
-      thread_id: 'entry-private-planner-briefing',
-      actor: testActor,
-      capabilities: [capability('general', '处理通用任务。')],
-      allowedCapabilityNames: ['general'],
-    },
-  }) as OrchestratorStateType;
-
-  const capturedPlannerInput = plannerInput as CapabilityPlannerInput | null;
-  assert.ok(capturedPlannerInput);
-  assert.equal(
-    capturedPlannerInput.userGoal,
-    '处理 issue #587，并且不要修改 /tmp/legacy-path。\n\nRUN_USER_GOAL_CONTEXT',
-  );
-  assert.deepEqual(state.runUserGoal, capturedPlannerInput.userGoal);
-  assert.doesNotMatch(
-    mainConversationMessages(state.messages).slice(0, -1).map(readMessageText).join('\n'),
-    new RegExp(userGoalContext),
-  );
-  assert.equal(
-    ORCHESTRATOR_STATE_CHANNEL_NAMES.some((channel) => channel.includes('briefing')),
-    false,
-  );
-});
-
 test('execution boundary routes through capabilityPlanner before the next task', async () => {
-  const goalCreationInputs: string[] = [];
   const plannerInputs: CapabilityPlannerInput[] = [];
   let answerMessages: BaseMessage[] = [];
-  const decisionModel = {
-    invoke: async (messages: BaseMessage[]) => {
-      goalCreationInputs.push(messages.map(readMessageText).join('\n'));
-      return new AIMessage('看 issue #269，再查本地实现，最后总结。');
-    },
-  } as unknown as AgentModels['act'];
   const routeModel = {
     invoke: async (messages: BaseMessage[]) => {
       answerMessages = messages;
@@ -528,7 +398,6 @@ test('execution boundary routes through capabilityPlanner before the next task',
   const graph = createOrchestratorGraph({
     models: {
       act: routeModel,
-      decision: decisionModel,
       observe: routeModel,
       subagent: new FakeListChatModel({
         responses: [
@@ -557,15 +426,13 @@ test('execution boundary routes through capabilityPlanner before the next task',
     },
   }) as OrchestratorStateType;
 
-  assert.equal(goalCreationInputs.length, 1);
   assert.equal(plannerInputs.length, 3);
-  assert.doesNotMatch(goalCreationInputs[0], /plan_draft|task_plan_draft/);
   const entryPlannerInput = plannerInputs[0];
   const boundaryPlannerInput = plannerInputs[1];
   assert.equal(entryPlannerInput?.mode, 'entry');
   assert.equal(boundaryPlannerInput?.mode, 'boundary');
-  assert.equal(entryPlannerInput?.userGoal, '看 issue #269，再查本地实现，最后总结。');
-  assert.deepEqual(boundaryPlannerInput?.userGoal, entryPlannerInput?.userGoal);
+  assert.equal(entryPlannerInput?.userRequest, '看 issue #269，再查本地实现，最后总结。');
+  assert.deepEqual(boundaryPlannerInput?.userRequest, entryPlannerInput?.userRequest);
   assert.equal(plannerInputs[1]?.activeDelegation?.task, '读取 issue #269 并提炼需求点。');
   assert.match(plannerInputs[1]?.latestAnnounce?.text ?? '', /issue #269 需求点/);
   assert.ok(plannerInputs[1]?.latestAnnounce?.messageId);
@@ -638,14 +505,7 @@ test('a completed single-task goal is accepted by the boundary Planner', async (
 
 test('Planner boundary returns to capabilityPlanner until the remaining goal is complete', async () => {
   let answerModelInvocations = 0;
-  const goalCreationInputs: string[] = [];
   const plannerInputs: CapabilityPlannerInput[] = [];
-  const decisionModel = {
-    invoke: async (messages: BaseMessage[]) => {
-      goalCreationInputs.push(messages.map(readMessageText).join('\n'));
-      return new AIMessage('看 issue #269，再查本地实现。');
-    },
-  } as unknown as AgentModels['act'];
   const routeModel = {
     invoke: async () => {
       answerModelInvocations += 1;
@@ -682,7 +542,6 @@ test('Planner boundary returns to capabilityPlanner until the remaining goal is 
   const graph = createOrchestratorGraph({
     models: {
       act: routeModel,
-      decision: decisionModel,
       observe: routeModel,
       subagent: new FakeListChatModel({
         responses: [
@@ -707,7 +566,6 @@ test('Planner boundary returns to capabilityPlanner until the remaining goal is 
     },
   }) as OrchestratorStateType;
 
-  assert.equal(goalCreationInputs.length, 1);
   assert.equal(plannerInputs.length, 3);
   assert.deepEqual(plannerInputs.map(({ mode }) => mode), ['entry', 'boundary', 'boundary']);
   assert.deepEqual(plannerInputs[1]?.remainingPlan, [{
@@ -859,59 +717,6 @@ test('Capability Planner return is materialized without a second semantic policy
   });
 
   assert.equal(result.messages.at(-1)?.content, 'done');
-});
-
-test('Goal Creation uses plain text without structured output or route tools', async () => {
-  let goalSystemPrompt = '';
-  let structuredCalls = 0;
-  let bindToolCalls = 0;
-  const model = {
-    invoke: async (messages: BaseMessage[]) => {
-      goalSystemPrompt = String(messages[0]?.content ?? '');
-      return new AIMessage('继续当前请求。');
-    },
-    bindTools: () => ({
-      invoke: async () => {
-        bindToolCalls += 1;
-        return new AIMessage('');
-      },
-    }),
-    withStructuredOutput: () => ({
-      invoke: async () => {
-        structuredCalls += 1;
-        return {};
-      },
-    }),
-  } as unknown as AgentModels['act'];
-
-  const graph = createOrchestratorGraph({
-    models: {
-      act: model,
-      observe: model,
-      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
-    },
-    actor: testActor,
-    capabilityPlannerRunner: {
-      async invoke() {
-        return { action: 'answer_directly', tasks: [] };
-      },
-    },
-  });
-
-  await graph.invoke(buildOrchestratorRunInput([
-    new HumanMessage('继续'),
-  ]), {
-    configurable: {
-      thread_id: 'test-no-candidate-decision-prompt',
-      actor: testActor,
-      capabilities: [capability('browser', '浏览器 capability。')],
-      tools: [],
-    },
-  });
-
-  assert.equal(structuredCalls, 0);
-  assert.equal(bindToolCalls, 0);
-  assert.doesNotMatch(goalSystemPrompt, /delegate_capability\.browser|route_to_planner/);
 });
 
 test('allowedCapabilityNames scopes the immutable Planner workspace', async () => {
@@ -1143,7 +948,7 @@ test('a completed subagent announce reaches the decision, then Answer summarizes
     traceId: input.traceId,
     status: 'awaiting_decision',
     resultPreview: currentAnnounceText,
-    userGoal: '读取文件并运行 lint。',
+    userRequest: '读取文件并运行 lint。',
   };
 
   const result = await graph.invoke(input, {
@@ -1267,7 +1072,7 @@ test('delegation goal_done summarizes and preserves the handed-off result', asyn
     traceId: input.traceId,
     status: 'awaiting_decision',
     resultPreview: announceText,
-    userGoal: '列出目前 Vibe Coding 的模型排行榜。',
+    userRequest: '列出目前 Vibe Coding 的模型排行榜。',
   };
 
   const result = await graph.invoke(input, {
@@ -1351,7 +1156,7 @@ test('user_input_required returns control without claiming delegation completion
     traceId: input.traceId,
     status: 'awaiting_decision',
     resultPreview: announceText,
-    userGoal: '根据用户选择发送已经完成的报告。',
+    userRequest: '根据用户选择发送已经完成的报告。',
   };
   input.sessionCapabilityArtifacts = [{
     id: 'artifact-awaiting-user-choice',
@@ -1427,7 +1232,7 @@ test('capability errors retain the active delegation and lane without a handoff'
     traceId: 'trace-capability-error',
     status: 'pending',
     resultPreview: null,
-    userGoal: '继续处理当前 delegated task，并保留失败状态。',
+    userRequest: '继续处理当前 delegated task，并保留失败状态。',
   };
   const messages = interruptedLaneMessages({
     delegationId: activeDelegation.id,
@@ -1732,7 +1537,7 @@ test('limit-reached progress announce lets model choose the same capability dele
     traceId: input.traceId,
     status: 'awaiting_decision',
     resultPreview: '(no matches)',
-    userGoal: '先调查仓库，再修复注册链路。',
+    userRequest: '先调查仓库，再修复注册链路。',
   };
 
   await graph.invoke(input, {
@@ -4870,7 +4675,7 @@ test('terminal Planner action keeps active delegation when handoff cannot be bui
     traceId: 'trace-active',
     status: 'awaiting_decision',
     resultPreview: null,
-    userGoal: '继续判断当前 explore 任务。',
+    userRequest: '继续判断当前 explore 任务。',
   };
   const input = {
     ...buildOrchestratorRunInput([
@@ -4952,7 +4757,7 @@ test('Planner continue_current action can re-enter main and finalize handoff', a
     traceId: 'trace-continue',
     status: 'awaiting_decision',
     resultPreview: '已完成第一批抓取，剩余待查。',
-    userGoal: '继续批量梳理仓库问题。',
+    userRequest: '继续批量梳理仓库问题。',
   };
   const inputBase = buildOrchestratorRunInput(
     [new HumanMessage('继续处理仓库')],
@@ -5042,7 +4847,7 @@ test('Planner continuation path rechecks run iteration guard before next decisio
     traceId: 'trace-continue-limit',
     status: 'awaiting_decision',
     resultPreview: '进度已完成前段。',
-    userGoal: '继续执行长流程任务。',
+    userRequest: '继续执行长流程任务。',
   };
   const inputBase = buildOrchestratorRunInput(
     [new HumanMessage('继续执行任务')],
@@ -5132,7 +4937,7 @@ test('Planner boundary does not append duplicate handoff copies for unchanged an
     traceId: 'trace-dup-copy',
     status: 'awaiting_decision',
     resultPreview: '进度更新：已完成一部分，继续保留。',
-    userGoal: '继续处理大型清单。',
+    userRequest: '继续处理大型清单。',
   };
   const inputBase = buildOrchestratorRunInput(
     [new HumanMessage('继续清单处理')],
@@ -5430,7 +5235,7 @@ test('limit-reached subagent announce reaches the Planner boundary input', async
     traceId: baseInput.traceId,
     status: 'awaiting_decision',
     resultPreview: String(progress.content),
-    userGoal: '继续探查 repo。',
+    userRequest: '继续探查 repo。',
   };
 
   await graph.invoke({
@@ -5493,7 +5298,7 @@ test('Planner boundary does not handoff a limit_reached announce', async () => {
     traceId: baseInput.traceId,
     status: 'awaiting_decision',
     resultPreview: '上一轮还没结束。',
-    userGoal: '继续探查 repo。',
+    userRequest: '继续探查 repo。',
   };
   const input = {
     ...baseInput,
@@ -5585,7 +5390,7 @@ test('Planner boundary uses a unified run-iteration guard before invoking decisi
     traceId: baseInput.traceId,
     status: 'awaiting_decision',
     resultPreview: '处理到一半。',
-    userGoal: '完成大规模迁移。',
+    userRequest: '完成大规模迁移。',
   };
   const partialAnnounce = new AIMessage('继续迁移，已完成 50%。');
   setPinpetMeta(partialAnnounce, {
@@ -5982,7 +5787,7 @@ test('fresh-turn active delegation transitions are explicit for pending and awai
       traceId: `old-trace-${status}`,
       status,
       resultPreview: status === 'awaiting_decision' ? '旧进度。' : null,
-      userGoal: '完成旧的仓库检查。\n\n保留原任务目标。',
+      userRequest: '完成旧的仓库检查。\n\n保留原任务目标。',
     };
     const oldLaneMessages = interruptedLaneMessages({
       delegationId: activeDelegation.id,
@@ -6009,7 +5814,7 @@ test('fresh-turn active delegation transitions are explicit for pending and awai
       taskActiveDelegation: activeDelegation,
     } as OrchestratorStateType;
     const resumeUpdate = applyActiveDelegationTransition(resumeState);
-    assert.deepEqual(resumeUpdate.runUserGoal, activeDelegation.userGoal);
+    assert.deepEqual(resumeUpdate.runUserRequest, activeDelegation.userRequest);
     assert.notEqual(resumeState.runId, activeDelegation.transcriptRunId);
     const resumedState = {
       ...resumeState,
@@ -6074,7 +5879,7 @@ test('resume rejects a delegation without the current trace identity', () => {
     transcriptRunId: 'legacy-transcript-run',
     status: 'pending',
     resultPreview: null,
-    userGoal: '继续旧任务。',
+    userRequest: '继续旧任务。',
   } as unknown as TaskActiveDelegation;
   const state = {
     ...buildOrchestratorRunInput(
@@ -6102,7 +5907,7 @@ test('fresh delegated request supersedes checkpointed work without deleting its 
     traceId: 'old-awaiting-trace',
     status: 'awaiting_decision',
     resultPreview: '旧任务执行了一部分。',
-    userGoal: '检查历史 review 状态。',
+    userRequest: '检查历史 review 状态。',
   };
   const oldMessages = interruptedLaneMessages({
     delegationId: oldDelegation.id,
@@ -6205,7 +6010,7 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
     traceId: 'resume-pending-trace',
     status: 'awaiting_decision',
     resultPreview: '第一步完成后，需要用户确认检查方向。',
-    userGoal: '完成原来的仓库检查并报告结果。\n\n用户要求重点检查最新修改。',
+    userRequest: '完成原来的仓库检查并报告结果。\n\n用户要求重点检查最新修改。',
   };
   const oldMessages = interruptedLaneMessages({
     delegationId: activeDelegation.id,
@@ -6304,7 +6109,7 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
     delegationId: activeDelegation.id,
     runId: activeDelegation.transcriptRunId,
   });
-  assert.deepEqual(state.runUserGoal, activeDelegation.userGoal);
+  assert.deepEqual(state.runUserRequest, activeDelegation.userRequest);
   assert.notEqual(state.runId, activeDelegation.transcriptRunId);
   assert.equal(state.traceId, activeDelegation.traceId);
   assert.equal(state.messages.filter(isDelegationStartedMessage).length, 1);
@@ -6321,7 +6126,7 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
   );
   const resumedInput = recorder.subagentInputs.at(-1) ?? [];
   const resumedGoalContexts = resumedInput.filter((message) =>
-    getPinpetMeta(message).source === RUN_USER_GOAL_CONTEXT_SOURCE);
+    getPinpetMeta(message).source === RUN_USER_REQUEST_CONTEXT_SOURCE);
   assert.equal(resumedGoalContexts.length, 1);
   assert.match(
     String(resumedGoalContexts[0]?.content ?? ''),
@@ -6352,17 +6157,17 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
   );
 });
 
-test('legacy object UserGoal checkpoint returns a fixed incompatibility reply without models', async () => {
+test('legacy object UserRequest checkpoint returns a fixed incompatibility reply without models', async () => {
   const activeDelegation = {
     id: 'legacy-resume-delegation',
     lane: 'capability:general',
     task: '完成旧 checkpoint 中的仓库检查',
-    contextSummary: '旧 checkpoint 没有 runUserGoal。',
+    contextSummary: '旧 checkpoint 没有 runUserRequest。',
     transcriptRunId: 'legacy-resume-run',
     traceId: 'legacy-resume-trace',
     status: 'awaiting_decision',
     resultPreview: '仓库检查已经完成。',
-    userGoal: {
+    userRequest: {
       objective: '完成旧 checkpoint 中的仓库检查。',
       context: '旧版结构化目标。',
     },
@@ -6429,7 +6234,7 @@ test('legacy object UserGoal checkpoint returns a fixed incompatibility reply wi
   assert.equal(state.taskActiveDelegation, null);
   assert.equal(state.runLatestDelegationOutcome, null);
   assert.equal(state.runRuntimeFailure, null);
-  assert.equal(state.runUserGoal, null);
+  assert.equal(state.runUserRequest, null);
   assert.equal(
     String(state.messages.at(-1)?.content ?? ''),
     '这个任务由旧版本创建，当前版本无法继续。请重新发起或重述任务。',
@@ -6514,10 +6319,10 @@ test('delegation briefing stays lane-scoped across sequential tasks', async () =
   const [firstInput, secondInput] = recorder.subagentInputs;
   for (const input of recorder.subagentInputs) {
     const goalContexts = input.filter((message) =>
-      getPinpetMeta(message).source === RUN_USER_GOAL_CONTEXT_SOURCE);
+      getPinpetMeta(message).source === RUN_USER_REQUEST_CONTEXT_SOURCE);
     assert.equal(goalContexts.length, 1);
     assert.equal(
-      String(goalContexts[0]?.content ?? '').includes(String(state.runUserGoal)),
+      String(goalContexts[0]?.content ?? '').includes(String(state.runUserRequest)),
       true,
     );
     const latestBriefing = input.filter(isDelegationBriefingMessage).at(-1);
@@ -6546,7 +6351,7 @@ test('delegation briefing stays lane-scoped across sequential tasks', async () =
   assert.match(secondInputText, /<artifact_discovery_context[\s\S]*current_thread/);
   assert.equal(
     state.messages.some((message) =>
-      getPinpetMeta(message).source === RUN_USER_GOAL_CONTEXT_SOURCE),
+      getPinpetMeta(message).source === RUN_USER_REQUEST_CONTEXT_SOURCE),
     false,
   );
   assert.doesNotMatch(
@@ -6614,7 +6419,7 @@ test('continue_current appends a continuation briefing carrying the gap note', a
   for (const input of recorder.subagentInputs) {
     assert.equal(
       input.filter((message) =>
-        getPinpetMeta(message).source === RUN_USER_GOAL_CONTEXT_SOURCE).length,
+        getPinpetMeta(message).source === RUN_USER_REQUEST_CONTEXT_SOURCE).length,
       1,
     );
   }

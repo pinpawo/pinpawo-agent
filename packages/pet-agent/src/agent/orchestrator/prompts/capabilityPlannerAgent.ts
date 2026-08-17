@@ -6,8 +6,9 @@ import {
   CAPABILITY_PLANNER_ENTRY_INPUT_PROMPT,
   CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT,
 } from './templates/capabilityPlannerAgent.prompt';
-import { buildRunUserGoalContext } from './context';
+import { buildRunUserRequestContext } from './context';
 import { indentXmlBlock, promptBlock, xmlTextBlock } from './shared';
+import { readMessageText } from '../utils';
 
 function buildDefaultCapabilityContext(
   defaultCapability: CapabilityPlannerDefaultCapability | null,
@@ -49,6 +50,31 @@ function buildPlanningState(input: CapabilityPlannerInput) {
   return lines.length > 0 ? lines.join('\n') : '无。';
 }
 
+function buildMainConversationContext(input: CapabilityPlannerInput) {
+  const mainMessages = input.mainMessages ?? [];
+  if (input.mode !== 'entry' || mainMessages.length === 0) return '';
+  let currentRequestIndex = -1;
+  for (let index = mainMessages.length - 1; index >= 0; index -= 1) {
+    if (mainMessages[index]?._getType() === 'human') {
+      currentRequestIndex = index;
+      break;
+    }
+  }
+  const messages = mainMessages.flatMap((message, index) => {
+    if (index === currentRequestIndex) return [];
+    const text = readMessageText(message);
+    if (!text) return [];
+    const role = message._getType() === 'human' ? 'user' : 'assistant';
+    return [indentXmlBlock(xmlTextBlock('message', text, ` role="${role}"`), 2)];
+  });
+  if (messages.length === 0) return '';
+  return [
+    '<main_conversation role="context" source="orchestrator_state" trust="read_only">',
+    ...messages,
+    '</main_conversation>',
+  ].join('\n');
+}
+
 export function buildCapabilityPlannerAgentSystemPrompt(
   mode: CapabilityPlannerInput['mode'],
 ) {
@@ -61,19 +87,21 @@ export function buildCapabilityPlannerAgentInput(
   input: CapabilityPlannerInput,
   defaultCapability: CapabilityPlannerDefaultCapability | null = null,
 ) {
-  const userGoal = buildRunUserGoalContext(input.userGoal);
+  const userRequest = buildRunUserRequestContext(input.userRequest);
   const defaultCapabilityContext = promptBlock(
     buildDefaultCapabilityContext(defaultCapability),
     0,
   );
+  const mainConversationContext = promptBlock(buildMainConversationContext(input), 0);
   return input.mode === 'entry' && !input.latestUserMessage
     ? CAPABILITY_PLANNER_ENTRY_INPUT_PROMPT.render({
       defaultCapabilityContext,
-      userGoal,
+      mainConversationContext,
+      userRequest,
     })
     : CAPABILITY_PLANNER_BOUNDARY_INPUT_PROMPT.render({
       defaultCapabilityContext,
-      userGoal,
+      userRequest,
       planningState: buildPlanningState(input),
     });
 }

@@ -40,7 +40,7 @@ const cases: AgentEvalCase<
     id: `${SUITE}.direct-answer`,
     name: 'direct-answer',
     suite: SUITE,
-    tags: ['route_control', 'goal_creation', 'context_synthesis'],
+    tags: ['route_control', 'entry_answer', 'context_synthesis'],
     input: {
       capabilityProfile: 'standard',
       turns: [{
@@ -75,7 +75,7 @@ const cases: AgentEvalCase<
     suite: SUITE,
     tags: [
       'route_control',
-      'goal_creation',
+      'entry_answer',
       'capability_discovery',
       'planner_boundary',
       'context_synthesis',
@@ -115,7 +115,7 @@ const cases: AgentEvalCase<
     name: 'dynamic-multi-task',
     suite: SUITE,
     tags: [
-      'goal_creation',
+      'entry_answer',
       'capability_planning',
       'capability_discovery',
       'planner_boundary',
@@ -163,7 +163,7 @@ const cases: AgentEvalCase<
     name: 'continues-incomplete-task',
     suite: SUITE,
     tags: [
-      'goal_creation',
+      'entry_answer',
       'capability_discovery',
       'planner_boundary',
       'delegation_control',
@@ -213,7 +213,7 @@ const cases: AgentEvalCase<
     name: 'user-input-required',
     suite: SUITE,
     tags: [
-      'goal_creation',
+      'entry_answer',
       'capability_discovery',
       'planner_boundary',
       'context_synthesis',
@@ -257,7 +257,7 @@ const cases: AgentEvalCase<
     name: 'resume-after-user-input',
     suite: SUITE,
     tags: [
-      'goal_creation',
+      'entry_answer',
       'capability_discovery',
       'planner_boundary',
       'interruption_recovery',
@@ -316,7 +316,7 @@ const cases: AgentEvalCase<
     suite: SUITE,
     tags: [
       'route_control',
-      'goal_creation',
+      'entry_answer',
       'capability_discovery',
       'context_synthesis',
     ],
@@ -365,7 +365,7 @@ export const orchestratorLifecycleCompositionDataset: AgentEvalDataset<
     owner: 'pet-agent',
     areas: [
       'route_control',
-      'goal_creation',
+      'entry_answer',
       'capability_planning',
       'capability_discovery',
       'planner_boundary',

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
@@ -8,6 +8,7 @@ import {
   buildCurrentTimeSnapshot,
   getCurrentTimeTool,
   normalizeShellActionInput,
+  normalizeShellAuthorizationInput,
   runShellTool,
   shellOperationMetadata,
   truncateShellOutput,
@@ -86,17 +87,48 @@ test('shell review policy reviews configured command execution', async () => {
   );
 });
 
-test('normalizeShellActionInput trims commands and expands home cwd', () => {
+test('normalizeShellActionInput preserves explicit cwd and inherits process cwd', () => {
   assert.deepEqual(
     normalizeShellActionInput({ command: ' printf ok ', cwd: '~' }),
     {
       command: 'printf ok',
-      cwd: homedir(),
+      cwd: '~',
+    },
+  );
+  assert.deepEqual(
+    normalizeShellActionInput({ command: 'pwd', cwd: 'packages/pet-agent' }),
+    {
+      command: 'pwd',
+      cwd: 'packages/pet-agent',
+    },
+  );
+  assert.deepEqual(
+    normalizeShellActionInput({ command: 'pwd' }),
+    {
+      command: 'pwd',
+      cwd: process.cwd(),
     },
   );
 });
 
-test('shell operation metadata preserves explicit cwd without reading ambient workdir', () => {
+test('normalizeShellAuthorizationInput preserves only model-provided cwd', () => {
+  assert.deepEqual(
+    normalizeShellAuthorizationInput({ command: ' printf ok ', cwd: ' packages/pet-agent ' }),
+    {
+      command: 'printf ok',
+      cwd: 'packages/pet-agent',
+    },
+  );
+  assert.deepEqual(
+    normalizeShellAuthorizationInput({ command: 'pwd' }),
+    {
+      command: 'pwd',
+      cwd: null,
+    },
+  );
+});
+
+test('shell operation metadata preserves the model-provided cwd without classifying command text', () => {
   assert.deepEqual(
     shellOperationMetadata.run_shell?.summarizeInput?.({
       command: "printf 'value' > output.txt",
@@ -107,9 +139,9 @@ test('shell operation metadata preserves explicit cwd without reading ambient wo
       summary: "printf 'value' > output.txt",
     },
   );
-  assert.deepEqual(
-    shellOperationMetadata.run_shell?.summarizeInput?.({ command: 'pwd' }),
-    { target: undefined, summary: 'pwd' },
+  assert.equal(
+    shellOperationMetadata.run_shell?.summarizeInput?.({ command: 'pwd' })?.target,
+    undefined,
   );
 });
 

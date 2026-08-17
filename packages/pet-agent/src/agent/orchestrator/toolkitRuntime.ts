@@ -35,6 +35,8 @@ export type ToolkitRuntimeExecution = {
    * this execution where a Toolkit opted into a runtime.
    */
   toolkits: readonly AgentToolkit[];
+  /** Opaque Runtime ports exposed to their Toolkit tools through ToolRuntime.context. */
+  runtimes: Readonly<Record<string, unknown>>;
   release: () => Promise<void>;
 };
 
@@ -204,6 +206,7 @@ export class ToolkitRuntimeManager {
     this.pendingResolutions.add(pendingResolution);
     const context: ToolkitRuntimeResolveContext = { execution: params.execution };
     const bindings: ResolvedToolkitBinding[] = [];
+    const runtimes: Record<string, unknown> = {};
     try {
       await this.start(params.toolkits, { signal: params.execution.signal });
       if (this.stopping || this.stopped) {
@@ -225,6 +228,9 @@ export class ToolkitRuntimeManager {
           ? await runtime.resolve(started.root, context)
           : started.root;
         bindings.push({ toolkit, runtime, binding, context });
+        if (!runtime.bindTools) {
+          runtimes[toolkit.name] = binding;
+        }
         toolkits.push(runtime.bindTools
           ? bindToolkitTools({
               toolkit,
@@ -249,6 +255,7 @@ export class ToolkitRuntimeManager {
       this.activeExecutions.add(execution);
       return Object.freeze({
         toolkits: Object.freeze(toolkits),
+        runtimes: Object.freeze(runtimes),
         release: async () => await this.releaseExecution(execution),
       });
     } catch (error) {

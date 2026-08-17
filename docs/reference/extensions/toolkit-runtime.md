@@ -31,7 +31,8 @@ host start
 
 capability subagent start
   -> resolve(root, generic execution scope)
-  -> bindTools(binding) [same static names only]
+  -> expose invocation identity and opaque Toolkit Runtime ports through ToolRuntime.context
+  -> bindTools(binding) for Toolkit-owned live resources [same static names only]
   -> execute with bound tools
   -> release(binding, reverse order; also on error/cancellation)
 
@@ -54,16 +55,33 @@ their normal release path before it stops shared roots.
 ## 静态与动态边界
 
 `AgentToolkit` 中的 tools、`operation` metadata、review policy、authorization、
-instructions、availability 和 Capability 的 `uses` 均是静态契约。`bindTools` 仅为
-同名、同数量的 Tool 提供 execution implementation；管理器保留原始 Tool 对象的
+instructions、availability 和 Capability 的 `uses` 均是静态契约。没有声明
+`bindTools` 的 Toolkit 保持同一批静态 Tool；它的 opaque runtime port 以 Toolkit
+name 为 key 放入 `ToolRuntime.context.toolkitRuntimes`，Tool 可以在每次调用时把
+invocation identity 传给自己的 Runtime。框架不解释 port 的接口，也不把它放进
+registry、planner workspace、prompt 或 checkpoint。
+
+`bindTools` 是另一种互斥的消费方式：只在某个 Toolkit 确实需要替换执行
+implementation 时，为同名、同数量的 Tool 注入 Toolkit 自己持有的动态资源或
+ownership，例如 process registry；这类 binding 不再额外暴露到 Tool runtime context。
+管理器保留原始 Tool 对象的
 schema、description、response format 等公开契约，只把底层 `_call` 分派给 bound
 implementation。管理器拒绝更名、增删或非 StructuredTool 的返回值。因此 planner、
 checkpoint、registry 与 review 决策永远引用静态契约，不携带 runtime binding。
 
-Browser 的 binding 仅把同一个 `BrowserSession` 封装为带 execution owner 的闭包。
-release 会在 Browser 自己的串行队列中撤销 active owner；保留的页面只能由相同
-thread/run/delegation scope 在下一次 resolve 时恢复，其他 execution 仍需显式
-`browser_open`。通用 manager 不接触这些 ownership/origin/review 细节。
+`threadId`、`runId`、`delegationId` 等 invocation identity 由 Agent 放入
+`ToolRuntime.context.executionScope`。同一个 context 还携带按 Toolkit name 索引的
+opaque Runtime port。workdir 不属于普通 Tool 的模型输入或隐藏参数：Host 将同一份
+snapshot 提供给 Agent prompt、Tool runtime context 与 review/authorization，模型
+负责生成具体 path 或 cwd。Toolkit Runtime 可以从通用 execution scope 读取 workdir
+来管理自身资源，例如 Browser session 和截图目录，但不能据此静默补全、解析或改写
+普通 Tool input。是否需要审核属于 review / authorization 层。
+
+Browser Tools 不绑定或持有 `BrowserSession`。它们保持静态 Tool 形状，在每次调用时
+从 `toolkitRuntimes.browser` 取得 Browser Runtime port，并显式传入当前 `threadId`、
+workdir 和 cancellation signal。Browser Runtime 根据 thread 选择和管理 session；
+session ownership、backend、origin 和释放策略都留在 Browser Toolkit 内部。通用
+manager 和 Agent 不接触这些概念。
 
 ## 宿主责任
 
@@ -89,6 +107,7 @@ Runtime diagnostics 只描述 live operational state。它不替代 Host config 
 
 ## 验证
 
-`toolkitRuntime.test.ts` 覆盖 root 单次启动、并发 resolve 的隔离 binding、失败回滚
-和静态 Tool inventory 防漂移；Browser tools 测试验证两个 execution facade 不共享
-闭包。完整 `npm test` 同时覆盖 local-agent、socket bridge 和 Chrome extension。
+`toolkitRuntime.test.ts` 覆盖 root 单次启动、并发 resolve 的隔离 binding、失败回滚、
+Runtime port 暴露和静态 Tool inventory 防漂移；Browser tools 测试验证同一批静态
+Tool 会在每次调用时向当前 Runtime 传递 thread identity。完整 `npm test` 同时覆盖
+local-agent、socket bridge 和 Chrome extension。

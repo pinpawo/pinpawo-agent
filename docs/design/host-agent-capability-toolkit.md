@@ -64,7 +64,9 @@ Agent 是接收 invocation 并执行任务的运行单元。它负责：
 
 - 使用同一个常驻 Chat runtime / graph 处理 invocation；
 - 从编译后的 registry 选择并执行 Capability；
-- 为一次 Capability execution 传递 thread、run、delegation、workdir 和 signal；
+- 使用 Host 提供的同一份 workdir snapshot 构造 execution prompt 与 review context；
+- 通过 `ToolRuntime.context` 传递 thread、run、delegation identity 和按 Toolkit name
+  索引的 opaque Runtime ports，并通过 `ToolRuntime.signal` 传递 cancellation；
 - 通过 Host 注入的通用 manager 获取 Toolkit execution bindings。
 
 Agent 不读取 Host 配置，不拥有 Browser、shell、git 等专属生命周期，也不在
@@ -192,8 +194,10 @@ Browser、bash、git 都是普通 Toolkit：
    不存在 direct host tools、capability-private tools 或与 Toolkit 平级的
    LocalTools。Capability Planner 的 `submit_plan` / `return_to_answer` 等框架内部
    control action 不属于扩展 inventory，不应为了形式统一伪装成 Host Toolkit。
-4. workdir 和 invocation identity 从 `ToolkitRuntimeExecutionScope` 进入 binding；
-   禁止模块级可变 workdir、共享 Runtime singleton 或跨 Host 隐式状态。
+4. Host 将同一份 workdir snapshot 提供给 Agent prompt 与 review/authorization
+   context。Tool 的 path、cwd、command 等参数由模型决定并保持原样；不得为了
+   workdir scoping 创建虚假 Toolkit Runtime，也不得由 binding 静默补全或改写输入。
+   Toolkit Runtime 只绑定 Toolkit 自己拥有的动态资源和 ownership。
 5. shutdown 一个 Host/manager 不能释放另一个 Host 的 roots、bindings、进程或连接。
 6. Chat 与 Studio 使用相同领域模型。Studio 只改变 Host 如何配置、持有和 invoke
    多个常驻 Agent Runtime，不创造 Studio 专属 Tool/Toolkit/Runtime 体系。

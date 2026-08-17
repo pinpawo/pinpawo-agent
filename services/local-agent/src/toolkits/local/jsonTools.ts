@@ -5,7 +5,6 @@ import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import type { ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { readRecord, readString } from '../operationMetadata';
-import { resolveUserPath } from './pathUtils';
 
 const JQ_TIMEOUT_MS = 30_000;
 const JQ_OUTPUT_LIMIT_CHARS = 50_000;
@@ -118,7 +117,7 @@ export type JqQueryInput = {
 };
 
 export async function runJqQuery(input: JqQueryInput, run: JqExec = runJqProcess) {
-  const filePath = resolveUserPath(input.path);
+  const filePath = input.path;
   const filter = input.filter.trim();
   if (!filter) return 'Error: jq_query requires a filter';
 

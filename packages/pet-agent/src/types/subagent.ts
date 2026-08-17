@@ -10,10 +10,13 @@ export type SubagentExecutionScope = {
   threadId: string | null;
   runId: string;
   delegationId: string;
+  workdir?: string | null;
 };
 
 export type SubagentRuntimeContext = {
   executionScope?: SubagentExecutionScope;
+  /** Opaque Toolkit Runtime ports, keyed by Toolkit name. */
+  toolkitRuntimes?: Readonly<Record<string, unknown>>;
   [key: string]: unknown;
 };
 

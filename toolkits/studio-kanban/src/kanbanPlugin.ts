@@ -9,9 +9,9 @@
  * 全程 studio 不理解任何看板概念,pet 也不知道自己在驱动一块看板。
  */
 
-import { tool } from '@langchain/core/tools';
+import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { z } from 'zod';
-import type { NamedStructuredTool } from '@pinpawo/pet-agent';
+import type { NamedStructuredTool, SubagentRuntimeContext } from '@pinpawo/pet-agent';
 import type { StudioPlugin, StudioPluginContext } from '@pinpawo/studio';
 
 import { KanbanBoard, type KanbanTask } from './kanbanBoard';
@@ -26,12 +26,11 @@ function describeTask(task: KanbanTask): string {
   return `${task.taskId} [${task.status}] pet=${task.petId}${deps} ${task.brief}${note}`;
 }
 
-/**
- * `threadId` 让工具认出"我在干哪个任务" —— pet 因此不需要转述任何 id,
- * 也就不会写错。声明期传 null:那时还没有具体的执行上下文。
- */
-function buildTools(board: KanbanBoard, threadId: string | null): NamedStructuredTool[] {
-  const currentTask = () => (threadId ? board.findByThread(threadId) : undefined);
+function buildTools(board: KanbanBoard): NamedStructuredTool[] {
+  const currentTask = (runtime: ToolRuntime<unknown, SubagentRuntimeContext>) => {
+    const threadId = runtime.context?.executionScope?.threadId;
+    return threadId ? board.findByThread(threadId) : undefined;
+  };
 
   const listTasks = tool(
     async () => {
@@ -68,8 +67,8 @@ function buildTools(board: KanbanBoard, threadId: string | null): NamedStructure
   );
 
   const completeTask = tool(
-    async (input) => {
-      const task = currentTask();
+    async (input, runtime: ToolRuntime<unknown, SubagentRuntimeContext>) => {
+      const task = currentTask(runtime);
       if (!task) return 'no task is currently assigned to you; nothing to complete';
       board.complete(task.taskId, input.result);
       return `completed ${task.taskId}`;
@@ -82,8 +81,8 @@ function buildTools(board: KanbanBoard, threadId: string | null): NamedStructure
   );
 
   const blockTask = tool(
-    async (input) => {
-      const task = currentTask();
+    async (input, runtime: ToolRuntime<unknown, SubagentRuntimeContext>) => {
+      const task = currentTask(runtime);
       if (!task) return 'no task is currently assigned to you; nothing to block';
       board.block(task.taskId, input.reason);
       return `blocked ${task.taskId}`;
@@ -108,7 +107,7 @@ export type KanbanPlugin = StudioPlugin & { board: KanbanBoard };
 
 export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): KanbanPlugin {
   const board = options.board ?? new KanbanBoard();
-  const declaredTools = buildTools(board, null);
+  const declaredTools = buildTools(board);
   let context: StudioPluginContext | undefined;
   let unsubscribe: (() => void) | undefined;
 
@@ -141,15 +140,10 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
     board,
     name: KANBAN_TOOLKIT_NAME,
     description: '共享任务看板：查看、拆解、完成与阻塞任务。',
-    // 声明用的工具形状;实际执行时由 bindTools 换成带 thread 身份的版本。
     tools: declaredTools.map((declared, index) => ({
       tool: declared,
       operation: { title: TOOL_TITLES[index] ?? declared.name },
     })),
-    runtime: {
-      start: () => ({}),
-      bindTools: (_binding, runtimeContext) => buildTools(board, runtimeContext.execution.threadId),
-    },
     studio: {
       start: (pluginContext) => {
         context = pluginContext;

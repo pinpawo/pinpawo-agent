@@ -5,10 +5,21 @@ import { resolve } from 'node:path';
 import test from 'node:test';
 import { isCommand } from '@langchain/langgraph';
 import { persistBrowserScreenshot } from './screenshot';
-import { createBrowserTools, type BrowserToolkitSession } from './tools';
+import { BROWSER_TOOLKIT_NAME } from './constants';
+import { createBrowserTools } from './tools';
+import type {
+  BrowserRuntimeCallContext,
+  BrowserRuntimePort,
+} from './runtimePort';
 
-function session(value: string): BrowserToolkitSession {
-  const result = async () => value;
+function runtimePort(
+  value: string,
+  onCall?: (context: BrowserRuntimeCallContext) => void,
+): BrowserRuntimePort {
+  const result = async (context: BrowserRuntimeCallContext) => {
+    onCall?.(context);
+    return value;
+  };
   return {
     open: result,
     openWithProfile: result,
@@ -20,46 +31,69 @@ function session(value: string): BrowserToolkitSession {
     extract: result,
     screenshot: result,
     close: result,
-    listSessions: async () => [],
+    listSessions: async (context) => {
+      onCall?.(context);
+      return [];
+    },
   };
 }
 
-test('Browser tools execute through their resolved runtime binding', async () => {
-  const first = createBrowserTools(session('first'));
-  const second = createBrowserTools(session('second'));
-  const firstSnapshot = first.find(({ name }) => name === 'browser_snapshot');
-  const secondSnapshot = second.find(({ name }) => name === 'browser_snapshot');
+function invocation(
+  browser: BrowserRuntimePort,
+  threadId: string,
+  workdir = process.cwd(),
+) {
+  return {
+    context: {
+      executionScope: {
+        threadId,
+        runId: 'run-1',
+        delegationId: 'delegation-1',
+        workdir,
+      },
+      toolkitRuntimes: {
+        [BROWSER_TOOLKIT_NAME]: browser,
+      },
+    },
+  };
+}
 
-  assert.ok(firstSnapshot);
-  assert.ok(secondSnapshot);
-  assert.equal(await firstSnapshot.invoke({}), 'first');
-  assert.equal(await secondSnapshot.invoke({}), 'second');
-  assert.notEqual(firstSnapshot, secondSnapshot);
+test('static Browser tools pass thread identity to the active Runtime on every call', async () => {
+  const seen: BrowserRuntimeCallContext[] = [];
+  const tools = createBrowserTools();
+  const snapshot = tools.find(({ name }) => name === 'browser_snapshot');
+  assert.ok(snapshot);
+
+  assert.equal(
+    await snapshot.invoke({}, invocation(runtimePort('first', (context) => seen.push(context)), 'thread-1')),
+    'first',
+  );
+  assert.equal(
+    await snapshot.invoke({}, invocation(runtimePort('second', (context) => seen.push(context)), 'thread-2')),
+    'second',
+  );
+  assert.deepEqual(
+    seen.map(({ threadId }) => threadId),
+    ['thread-1', 'thread-2'],
+  );
 });
 
-test('bound browser screenshot writes its own tool result and image message', async () => {
-  const boundSession = session('image');
+test('browser screenshot uses Runtime output and invocation workdir', async () => {
   const workdir = await mkdtemp(resolve(tmpdir(), 'pinpawo-browser-tool-'));
-  boundSession.screenshot = async () => persistBrowserScreenshot({
+  const browser = runtimePort('unused');
+  browser.screenshot = async () => persistBrowserScreenshot({
     mimeType: 'image/png',
     data: Buffer.from('screenshot').toString('base64'),
   }, workdir);
-  const screenshotTool = createBrowserTools(
-    boundSession,
-    { workdir: () => workdir },
-  ).find((toolItem) => toolItem.name === 'browser_screenshot');
+  const screenshotTool = createBrowserTools()
+    .find((toolItem) => toolItem.name === 'browser_screenshot');
 
   assert.ok(screenshotTool);
 
-  const result = await screenshotTool.invoke({}, {
-    context: {
-      executionScope: {
-        threadId: 'thread-1',
-        runId: 'run-1',
-        delegationId: 'delegation-1',
-      },
-    },
-  });
+  const result = await screenshotTool.invoke(
+    {},
+    invocation(browser, 'thread-1', workdir),
+  );
 
   assert.ok(isCommand(result));
   const messages = (result.update as {

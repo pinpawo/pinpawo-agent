@@ -22,7 +22,6 @@ import {
   readString,
   sourceDestinationInputSummary,
 } from '../operationMetadata';
-import { resolveUserPath } from './pathUtils';
 
 const capabilityManifestSchema = z.object({
   id: z.string().min(1),
@@ -171,8 +170,7 @@ export function readTextFileChunkResult({
   endLine?: number;
   maxBytes?: number;
 }): TextFileChunkResult {
-  const filePath = resolveUserPath(path);
-  const content = readUtf8TextFile(filePath);
+  const content = readUtf8TextFile(path);
   const lines = content.split('\n');
   const start = Math.max(1, startLine ?? 1);
   const totalLines = lines.length;
@@ -271,8 +269,8 @@ function mergeOperationOutputSummary(
 }
 
 function resolveMoveTarget(sourcePath: string, destinationPath: string) {
-  const source = resolveUserPath(sourcePath);
-  const destination = resolveUserPath(destinationPath);
+  const source = sourcePath;
+  const destination = destinationPath;
   const destinationStat = tryStat(destination);
   return destinationStat?.isDirectory()
     ? resolve(destination, basename(source))
@@ -286,20 +284,19 @@ function resolveCopyTarget(sourcePath: string, destinationPath: string) {
 export const readFileTool = tool(
   async ({ path }: { path: string }) => {
     try {
-      const filePath = resolveUserPath(path);
-      const stat = statSync(filePath);
+      const stat = statSync(path);
       if (!stat.isFile()) {
-        return `Error: read_file expects a file path, got ${stat.isDirectory() ? 'directory' : 'non-file'}: ${filePath}`;
+        return `Error: read_file expects a file path, got ${stat.isDirectory() ? 'directory' : 'non-file'}: ${path}`;
       }
 
-      const extension = extname(filePath).toLowerCase();
-      if (looksLikeUtf8Text(readFileSample(filePath))) {
-        return `Error: ${filePath} is a readable UTF-8 text file; use view_file_chunk for line-numbered text reading.`;
+      const extension = extname(path).toLowerCase();
+      if (looksLikeUtf8Text(readFileSample(path))) {
+        return `Error: ${path} is a readable UTF-8 text file; use view_file_chunk for line-numbered text reading.`;
       }
 
       return JSON.stringify({
         ok: false,
-        path: filePath,
+        path,
         type: 'document_or_binary',
         extension: extension || null,
         size: stat.size,
@@ -344,8 +341,7 @@ export const viewFileChunkTool = tool(
 export const statPathTool = tool(
   async ({ path }: { path: string }) => {
     try {
-      const resolvedPath = resolveUserPath(path);
-      return formatStat(resolvedPath);
+      return formatStat(path);
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : err}`;
     }
@@ -367,17 +363,16 @@ export const writeFileTool = tool(
     createDirs?: boolean;
   }) => {
     try {
-      const filePath = resolveUserPath(path);
       if (createDirs ?? true) {
-        mkdirSync(dirname(filePath), { recursive: true });
+        mkdirSync(dirname(path), { recursive: true });
       }
-      writeFileSync(filePath, content, {
+      writeFileSync(path, content, {
         encoding: 'utf-8',
         flag: append ? 'a' : 'w',
       });
       return JSON.stringify({
         ok: true,
-        path: filePath,
+        path,
         mode: append ? 'append' : 'write',
         bytes: Buffer.byteLength(content, 'utf-8'),
       });
@@ -397,8 +392,33 @@ export const writeFileTool = tool(
   },
 );
 
+type WriteFileAction = {
+  path: string;
+  content: string;
+  append: boolean;
+  createDirs: boolean;
+};
+
+function normalizeWriteFileAction(input: unknown): WriteFileAction {
+  const record = readRecord(input);
+  const path = readString(record, 'path');
+  const content = readString(record, 'content');
+  if (!path) {
+    throw new Error('write_file requires a path');
+  }
+  if (content === undefined) {
+    throw new Error('write_file requires content');
+  }
+  return {
+    path,
+    content,
+    append: readBoolean(record, 'append') ?? false,
+    createDirs: readBoolean(record, 'createDirs') ?? true,
+  };
+}
+
 interface ResolvedPatchWrite {
-  absolutePath: string;
+  targetPath: string;
   nextContent: string;
   chunksApplied: number;
   fuzz: 'exact' | 'ignore-trailing-whitespace' | 'ignore-whitespace';
@@ -489,16 +509,16 @@ export const applyPatchTool = tool(
       const update = parsePatch(patch);
       phase = 'match';
 
-      const absolutePath = resolveUserPath(update.path);
-      const stat = tryStat(absolutePath);
+      const targetPath = update.path;
+      const stat = tryStat(targetPath);
       if (!stat?.isFile()) {
         throw patchTargetError(
           'target_not_found',
-          `Update File target is not an existing file: ${absolutePath}`,
+          `Update File target is not an existing file: ${targetPath}`,
           update.path,
         );
       }
-      const original = readUtf8TextFile(absolutePath);
+      const original = readUtf8TextFile(targetPath);
       const result = applyChunksToContentPartially(
         update.path,
         original,
@@ -506,7 +526,7 @@ export const applyPatchTool = tool(
         { requireUniqueContext: true },
       );
       const write: ResolvedPatchWrite = {
-        absolutePath,
+        targetPath,
         nextContent: result.content,
         chunksApplied: result.chunks.length,
         fuzz: worstFuzz(result.chunks),
@@ -528,7 +548,7 @@ export const applyPatchTool = tool(
             : 'all_patch_chunks_failed',
           message: `Applied 0 of ${update.chunks.length.toString()} V4A hunks; ${failures.length.toString()} failed.`,
           file: {
-            path: write.absolutePath,
+            path: write.targetPath,
             chunks: 0,
           },
           appliedHunks,
@@ -538,9 +558,9 @@ export const applyPatchTool = tool(
 
       // All successful chunks are committed with one atomic file replacement.
       phase = 'write';
-      atomicWriteFile(write.absolutePath, write.nextContent);
+      atomicWriteFile(write.targetPath, write.nextContent);
       const file = {
-        path: write.absolutePath,
+        path: write.targetPath,
         chunks: write.chunksApplied,
         ...(write.fuzz !== 'exact' ? { fuzz: write.fuzz } : {}),
       };
@@ -583,11 +603,10 @@ export const validateStructuredFileTool = tool(
     schema?: 'none' | 'capability_manifest';
   }) => {
     try {
-      const filePath = resolveUserPath(path);
-      const content = readFileSync(filePath, 'utf-8');
+      const content = readFileSync(path, 'utf-8');
       const detectedFormat = format && format !== 'auto'
         ? format
-        : extname(filePath).toLowerCase() === '.json'
+        : extname(path).toLowerCase() === '.json'
           ? 'json'
           : 'json';
 
@@ -602,7 +621,7 @@ export const validateStructuredFileTool = tool(
         if (!result.success) {
           return JSON.stringify({
             ok: false,
-            path: filePath,
+            path,
             format: detectedFormat,
             schema: schema ?? 'none',
             error: result.error.issues.map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`).join('; '),
@@ -615,7 +634,7 @@ export const validateStructuredFileTool = tool(
 
       return JSON.stringify({
         ok: true,
-        path: filePath,
+        path,
         format: detectedFormat,
         schema: schema ?? 'none',
         warnings: schemaWarnings,
@@ -643,8 +662,7 @@ export const movePathTool = tool(
     createDirs?: boolean;
   }) => {
     try {
-      const sourcePath = resolveUserPath(source);
-      const sourceStat = statSync(sourcePath);
+      const sourceStat = statSync(source);
       const targetPath = resolveMoveTarget(source, destination);
 
       if (createDirs ?? true) {
@@ -660,7 +678,7 @@ export const movePathTool = tool(
       }
 
       try {
-        renameSync(sourcePath, targetPath);
+        renameSync(source, targetPath);
       } catch (err) {
         const isCrossDevice = err instanceof Error
           && 'code' in err
@@ -670,17 +688,17 @@ export const movePathTool = tool(
           throw err;
         }
 
-        cpSync(sourcePath, targetPath, {
+        cpSync(source, targetPath, {
           recursive: sourceStat.isDirectory(),
           force: overwrite ?? false,
           errorOnExist: !(overwrite ?? false),
         });
-        rmSync(sourcePath, { recursive: sourceStat.isDirectory(), force: true });
+        rmSync(source, { recursive: sourceStat.isDirectory(), force: true });
       }
 
       return JSON.stringify({
         ok: true,
-        source: sourcePath,
+        source,
         destination: targetPath,
         type: sourceStat.isDirectory() ? 'directory' : 'file',
       });
@@ -708,8 +726,7 @@ export const copyPathTool = tool(
     createDirs?: boolean;
   }) => {
     try {
-      const sourcePath = resolveUserPath(source);
-      const sourceStat = statSync(sourcePath);
+      const sourceStat = statSync(source);
       const targetPath = resolveCopyTarget(source, destination);
 
       if (createDirs ?? true) {
@@ -721,7 +738,7 @@ export const copyPathTool = tool(
         return `Error: destination already exists: ${targetPath}`;
       }
 
-      cpSync(sourcePath, targetPath, {
+      cpSync(source, targetPath, {
         recursive: sourceStat.isDirectory(),
         force: overwrite ?? false,
         errorOnExist: !(overwrite ?? false),
@@ -729,7 +746,7 @@ export const copyPathTool = tool(
 
       return JSON.stringify({
         ok: true,
-        source: sourcePath,
+        source,
         destination: targetPath,
         type: sourceStat.isDirectory() ? 'directory' : 'file',
       });
@@ -752,11 +769,10 @@ export const copyPathTool = tool(
 export const mkdirPathTool = tool(
   async ({ path, recursive }: { path: string; recursive?: boolean }) => {
     try {
-      const targetPath = resolveUserPath(path);
-      mkdirSync(targetPath, { recursive: recursive ?? true });
+      mkdirSync(path, { recursive: recursive ?? true });
       return JSON.stringify({
         ok: true,
-        path: targetPath,
+        path,
       });
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : err}`;
@@ -775,11 +791,10 @@ export const mkdirPathTool = tool(
 export const listDirTool = tool(
   async ({ path }: { path: string }) => {
     try {
-      const dirPath = resolveUserPath(path);
-      const entries = readdirSync(dirPath);
+      const entries = readdirSync(path);
       const lines = entries.map((name) => {
         try {
-          const stat = statSync(resolve(dirPath, name));
+          const stat = statSync(resolve(path, name));
           return `${stat.isDirectory() ? 'd' : 'f'} ${name}`;
         } catch {
           return `? ${name}`;

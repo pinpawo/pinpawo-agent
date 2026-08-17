@@ -1,5 +1,5 @@
 import { realpathSync, statSync } from 'node:fs';
-import { isAbsolute, relative, sep } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { StructuredTool } from '@langchain/core/tools';
 import {
   ARTIFACT_DISCOVERY_LIST_TOOL_NAME,
@@ -32,7 +32,6 @@ import { downloadFileTool, httpFetchTool, networkOperationMetadata } from './net
 import { jqQueryTool, jsonOperationMetadata } from './jsonTools';
 import { gitTools, gitOperationMetadata } from './gitTools';
 import { parsePatch, PatchParseError } from './applyPatch';
-import { resolveUserPath } from './pathUtils';
 import { globSearchTool, grepSearchTool, searchOperationMetadata } from './searchTools';
 import { ShellRuntime, type ShellRuntimeBinding } from './shellRuntime';
 import {
@@ -47,11 +46,6 @@ import {
   runShellTool,
   shellOperationMetadata,
 } from './shellTools';
-import {
-  bindBashToolWorkdir,
-  bindGitToolWorkdir,
-  requireExecutionWorkdir,
-} from './workdirBinding';
 
 const localUtilityTools: StructuredTool[] = [
   readFileTool,
@@ -158,7 +152,10 @@ function authorizeApplyPatch(ctx: ToolAutoAuthorizationContext) {
 
   let target: string;
   try {
-    target = resolveUserPath(parsePatch(patch).path, ctx.workdir);
+    const requestedPath = parsePatch(patch).path;
+    target = isAbsolute(requestedPath)
+      ? requestedPath
+      : resolve(ctx.workdir, requestedPath);
   } catch (error) {
     // The executor uses the same parser before performing any filesystem
     // mutation. Invalid V4A is therefore safe to run: execution will disclose
@@ -226,9 +223,7 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
           [createRunShellTool(shell), ...createProcessTools(shell)]
             .map((item) => [item.name, item]),
         );
-        return tools.map((staticTool) => (
-          bound.get(staticTool.name) ?? bindBashToolWorkdir(staticTool, shell.workdir)
-        ));
+        return tools.map((staticTool) => bound.get(staticTool.name) ?? staticTool);
       },
       stop: async (root) => { await (root as ShellRuntime).stop(); },
     },
@@ -251,16 +246,6 @@ export function createGitToolkit(): AgentToolkit {
     reviewGuidance: {
       allow: 'Treat routine, scoped version-control collaboration as eligible for automatic authorization, including staging files, creating a local commit, a normal non-force push, and creating a pull request or issue.',
       ask: 'Require human authorization for destructive worktree or history changes, force pushes, deleting branches or tags, merging a pull request, changing repository settings or access, managing secrets, deleting or closing remote resources, and publishing packages or releases.',
-    },
-    runtime: {
-      start: () => Object.freeze({}),
-      resolve: (_root, context) => Object.freeze({
-        workdir: requireExecutionWorkdir('git', context.execution.workdir),
-      }),
-      bindTools: (binding) => {
-        const { workdir } = binding as { workdir: string };
-        return gitTools.map((staticTool) => bindGitToolWorkdir(staticTool, workdir));
-      },
     },
   });
 }

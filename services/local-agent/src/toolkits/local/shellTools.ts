@@ -2,8 +2,6 @@ import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { z } from 'zod';
 import { createAbortError, type ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { readRecord, readString } from '../operationMetadata';
-import { resolveDefaultWorkdir } from '../../runtimeConfig';
-import { resolveUserPath } from './pathUtils';
 import type { ShellRunHandle } from './processExecutor';
 import { runShellCommand } from './processTree';
 import type { ShellProcessBinding } from './processRegistry';
@@ -32,14 +30,11 @@ export function normalizeShellAuthorizationInput(input: unknown) {
   return { command, cwd };
 }
 
-export function normalizeShellActionInput(
-  input: unknown,
-  workdir = resolveDefaultWorkdir(),
-) {
+export function normalizeShellActionInput(input: unknown) {
   const { record, command } = readShellActionInput(input);
   const cwd = typeof record.cwd === 'string' && record.cwd.trim()
-    ? resolveUserPath(record.cwd.trim(), workdir)
-    : workdir;
+    ? record.cwd.trim()
+    : process.cwd();
   return { command, cwd };
 }
 
@@ -110,9 +105,7 @@ export const getCurrentTimeTool = tool(
   },
 );
 
-export function createRunShellTool(
-  binding: (ShellProcessBinding & { workdir?: string }) | null,
-) {
+export function createRunShellTool(binding: ShellProcessBinding | null) {
   // Run through the same executor the registry will terminate through.
   // Without a binding there is no registry, so pick by platform the same
   // way ShellRuntime does.
@@ -128,7 +121,7 @@ export function createRunShellTool(
       let shellAction: { command: string; cwd: string };
 
       try {
-        shellAction = normalizeShellActionInput(input, binding?.workdir);
+        shellAction = normalizeShellActionInput(input);
       } catch (err) {
         return `Error: ${err instanceof Error ? err.message : err}`;
       }

@@ -20,7 +20,6 @@ import {
 export type ShellRuntimeBinding = Readonly<{
   registry: ProcessRegistry;
   owner: ManagedProcessOwner;
-  workdir: string;
 }>;
 
 export class ShellRuntime {
@@ -45,9 +44,6 @@ export class ShellRuntime {
   }
 
   resolve(execution: ToolkitRuntimeExecutionScope): ShellRuntimeBinding {
-    if (!execution.workdir) {
-      throw new Error('bash Toolkit runtime requires an execution workdir.');
-    }
     return Object.freeze({
       registry: this.registry,
       owner: {
@@ -55,7 +51,6 @@ export class ShellRuntime {
         runId: execution.runId,
         delegationId: execution.delegationId,
       },
-      workdir: execution.workdir,
     });
   }
 

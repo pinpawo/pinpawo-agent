@@ -2,7 +2,6 @@ import { tool, type ToolRuntime } from '@langchain/core/tools';
 import type { ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import { readRecord, readString } from '../operationMetadata';
-import { resolveUserPath } from './pathUtils';
 import { ripgrepSearchBackend } from './searchBackend';
 import { formatGlobSearchResult, formatGrepSearchResult } from './searchFormatter';
 
@@ -16,7 +15,7 @@ export const globSearchTool = tool(
     runtime: ToolRuntime,
   ) => {
     try {
-      const rootPath = resolveUserPath(path ?? '.');
+      const rootPath = path ?? '.';
       const maxResults = Math.max(1, Math.min(limit ?? DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT));
       const result = await ripgrepSearchBackend.glob({
         rootPath,
@@ -51,7 +50,7 @@ export const grepSearchTool = tool(
     context?: number;
   }, runtime: ToolRuntime) => {
     try {
-      const rootPath = resolveUserPath(path ?? '.');
+      const rootPath = path ?? '.';
       const maxResults = Math.max(1, Math.min(limit ?? DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT));
       const contextLines = Math.max(0, Math.min(context ?? 0, MAX_SEARCH_CONTEXT));
       const result = await ripgrepSearchBackend.grep({

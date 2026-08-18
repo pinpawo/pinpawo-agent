@@ -21,7 +21,6 @@ import {
   type NewSessionMessage,
   type ReviewCancelMessage,
   type RunInterruptMessage,
-  type StudioRequestMessage,
 } from './localAgentProtocol';
 import { recordAgentRunActivity } from './operationActivityState';
 import type { StreamToolsPayload } from './agentStreamEvents';
@@ -62,7 +61,6 @@ type AppChatRunRequest = ChatSessionRequest;
 type AppChatRunSource =
   | { type: 'chat_request' }
   | HumanReviewResolutionSource;
-type RunStudioRequest = (ws: WebSocket, message: StudioRequestMessage) => Promise<void>;
 type ReviewActionRoute = HumanReviewActionRoute & {
   requestId: string;
   userId: string;
@@ -95,8 +93,6 @@ export type LocalAgentAppChatHandlerOptions = {
   getCapabilityArtifactStore: () => CapabilityArtifactStore;
   getWorkdir: () => string;
   getActorName: () => string | null;
-  runStudioRequest: RunStudioRequest;
-  rejectStudioPendingReview: (ws: WebSocket) => void;
   loadContext?: LoadContext;
   runChat?: RunChatSession;
   buildChatSetup?: BuildChatSetup;
@@ -119,8 +115,6 @@ export class LocalAgentAppChatHandler {
   private readonly getCapabilityArtifactStore: () => CapabilityArtifactStore;
   private readonly getWorkdir: () => string;
   private readonly getActorName: () => string | null;
-  private readonly runStudioRequest: RunStudioRequest;
-  private readonly rejectStudioPendingReview: (ws: WebSocket) => void;
   private readonly loadContext: LoadContext;
   private readonly runChat: RunChatSession;
   private readonly buildChatSetup: BuildChatSetup;
@@ -148,8 +142,6 @@ export class LocalAgentAppChatHandler {
     this.getCapabilityArtifactStore = options.getCapabilityArtifactStore;
     this.getWorkdir = options.getWorkdir;
     this.getActorName = options.getActorName;
-    this.runStudioRequest = options.runStudioRequest;
-    this.rejectStudioPendingReview = options.rejectStudioPendingReview;
     this.loadContext = options.loadContext ?? loadAgentContext;
     this.runChat = options.runChat ?? runChatSession;
     this.buildChatSetup = options.buildChatSetup ?? buildLocalChatAgentInput;
@@ -236,15 +228,7 @@ export class LocalAgentAppChatHandler {
   }
 
   handleClose(ws: WebSocket) {
-    this.rejectStudioPendingReview(ws);
     this.inflightRequests.abortAll(ws);
-  }
-
-  async handleStudioRequest(ws: WebSocket, msg: StudioRequestMessage) {
-    if (!this.canUseSocket(ws)) {
-      return;
-    }
-    await this.runStudioRequest(ws, msg);
   }
 
   async handleChatRequest(ws: WebSocket, msg: ChatRequestMessage) {

@@ -55,6 +55,11 @@ export type LocalServerHandlerOptions = {
   runChat?: (
     options: ChatSessionAdapterOptions,
   ) => Promise<ChatSessionResult>;
+  /**
+   * #643: Studio handler injected by `StudioHost` when running in studio mode.
+   * When absent, studio requests are rejected with a mode-mismatch error.
+   */
+  studioHandler?: LocalServerStudioHandler<LocalServerPeer>;
 };
 
 type SessionSummarySource = Pick<
@@ -110,12 +115,7 @@ export function createLocalServerHandlers(
     ...(options.loadContext ? { loadContext: options.loadContext } : {}),
     ...(options.runChat ? { runChat: options.runChat } : {}),
   });
-  const studioHandler = new LocalServerStudioHandler<LocalServerPeer>({
-    outbound: {
-      sendMessage: (peer, message) => peer.send(message),
-      sendEvent: (peer, event) => sendLocalServerPeerEvent(peer, event),
-    },
-  });
+  const studioHandler = options.studioHandler ?? null;
   const sessionCommands = new LocalServerSessionCommandQueue();
   // Actor-wide admission: session transitions and chat operations never overlap.
   let activeChatOperations = 0;
@@ -634,6 +634,14 @@ export function createLocalServerHandlers(
         rejectWrongMode(client, message.requestId, 'studio');
         return Promise.resolve();
       }
+      if (!studioHandler) {
+        client.send({
+          type: 'studio_error',
+          requestId: message.requestId,
+          message: 'Studio handler is not available in this server configuration.',
+        });
+        return Promise.resolve();
+      }
       return studioHandler.handleStudioRequest(
         client,
         message,
@@ -806,14 +814,14 @@ export function createLocalServerHandlers(
       sessionCommands.clear(client);
       activeChatRuns.delete(client);
       inflightRequests.abortAll(client);
-      studioHandler.rejectDisconnected(client);
+      studioHandler?.rejectDisconnected(client);
     },
   };
 
   return {
     peerHandlers,
     close: () => {
-      void studioHandler.shutdown();
+      void studioHandler?.shutdown();
     },
     handleHttpRequest: (req, res, authToken) => {
       const requestDeps = runtimeDeps.get();

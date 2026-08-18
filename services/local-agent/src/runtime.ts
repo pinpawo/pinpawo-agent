@@ -38,7 +38,6 @@ import {
   findLegacyLocalAgentState,
   type LocalAgentRuntimeConfig,
 } from './runtimeConfig';
-import { LocalServerStudioHandler } from './localServerStudioHandler';
 import type { LocalServerDeps } from './localServerTypes';
 import { DEFAULT_SERVER_MODE, type ServerMode } from './serverMode';
 import { createBashToolkit, createGitToolkit } from './toolkits/local';
@@ -48,6 +47,12 @@ import type { HostToolkitInventoryStore } from './toolkits/toolkitInventory';
 const WS_RECONNECT_DELAY_MS = 10000;
 const WS_PING_INTERVAL_MS = 30000;
 
+/**
+ * #643: Chat Host runtime.
+ *
+ * Studio 不再嵌入此处。`--mode studio` 时由 `StudioHost` 装配，
+ * 不创建 `LocalAgentRuntime`。
+ */
 export class LocalAgentRuntime {
   private readonly runtimeConfig: LocalAgentRuntimeConfig;
   private readonly serverMode: ServerMode;
@@ -67,7 +72,6 @@ export class LocalAgentRuntime {
     emitOperation: (ws, event) => sendLocalAgentEvent(ws, event),
     sendControl: (ws, message) => sendLocalAgentMessage(ws, message),
   });
-  private readonly studioHandler: LocalServerStudioHandler<WebSocket>;
   private appWsClient: LocalAgentAppWsClient | null = null;
   private readonly appChatHandler: LocalAgentAppChatHandler;
   private legacyStateNoticeReported = false;
@@ -93,12 +97,6 @@ export class LocalAgentRuntime {
         ...(browserSelected ? [createBrowserCapability()] : []),
       ],
     });
-    this.studioHandler = new LocalServerStudioHandler<WebSocket>({
-      outbound: {
-        sendMessage: (ws, message) => sendLocalAgentMessage(ws, message),
-        sendEvent: (ws, event) => sendLocalAgentEvent(ws, event),
-      },
-    });
     this.chatCheckpointer = new FileSaver(runtimeConfig.checkpointPath);
     this.appChatHandler = new LocalAgentAppChatHandler({
       graphService: this.graphService,
@@ -118,10 +116,6 @@ export class LocalAgentRuntime {
       getCapabilityArtifactStore: () => this.capabilityRegistry.getCapabilityArtifactStore(),
       getWorkdir: () => this.runtimeConfig.workdir,
       getActorName: () => this.actorName,
-      runStudioRequest: async (ws, message) => {
-        await this.studioHandler.handleStudioRequest(ws, message, this.buildLocalServerDeps());
-      },
-      rejectStudioPendingReview: (ws) => this.studioHandler.rejectDisconnected(ws),
     });
   }
 
@@ -297,7 +291,13 @@ export class LocalAgentRuntime {
       pingIntervalMs: WS_PING_INTERVAL_MS,
       handlers: {
         onChatRequest: (ws, msg) => this.appChatHandler.handleChatRequest(ws, msg),
-        onStudioRequest: (ws, msg) => this.appChatHandler.handleStudioRequest(ws, msg),
+        onStudioRequest: (ws, msg) => {
+          sendLocalAgentMessage(ws, {
+            type: 'studio_error',
+            requestId: msg.requestId,
+            message: 'This server runs in chat mode; studio requests are not accepted.',
+          });
+        },
         onNewSession: (_ws, msg) => this.appChatHandler.handleNewSession(msg),
         onReviewCancel: (ws, msg) => this.appChatHandler.handleReviewCancel(ws, msg),
         onRunInterrupt: (ws, msg) => this.appChatHandler.handleRunInterrupt(ws, msg),
@@ -313,7 +313,6 @@ export class LocalAgentRuntime {
     const ws = client?.getCurrentSocket() ?? null;
     if (ws) {
       this.inflightRequests.abortAll(ws);
-      this.studioHandler.rejectDisconnected(ws);
     }
     client?.disconnect();
     this.appWsClient = null;

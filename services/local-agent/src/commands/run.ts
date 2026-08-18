@@ -1,4 +1,5 @@
 import { LocalAgentRuntime } from '../runtime';
+import { StudioHost } from '../studioHost';
 import { startLocalServer } from '../localServer';
 import { getConfig } from '../config';
 import { ensureActorSelected } from '../actorSelection';
@@ -9,11 +10,13 @@ import {
   startLocalStdioServer,
 } from '../localServerStdioTransport';
 import type { LocalServerDeps } from '../localServerTypes';
+import { LocalServerStudioHandler } from '../localServerStudioHandler';
 import {
   preflightStudioMode,
   type ServerMode,
   type StudioModePreflight,
 } from '../serverMode';
+import { sendLocalServerPeerEvent, type LocalServerPeer } from '../localServerPeer';
 
 export type RunAgentOptions = {
   workdir?: string;
@@ -32,6 +35,7 @@ export async function runAgent(options: RunAgentOptions) {
     : () => undefined;
   let stopping = false;
   let runtime: LocalAgentRuntime | null = null;
+  let studioHost: StudioHost | null = null;
   let closeLocalTransport: (() => void) | null = null;
   const handleSigint = () => {
     if (stopping) {
@@ -45,11 +49,13 @@ export async function runAgent(options: RunAgentOptions) {
       : '[local-agent] stopping websocket, finishing current cleanup, then exiting');
     console.log('[local-agent] press Ctrl+C again to force exit immediately');
     runtime?.requestStop();
+    studioHost?.requestStop();
     closeLocalTransport?.();
   };
   const handleSigterm = () => {
     stopping = true;
     runtime?.requestStop();
+    studioHost?.requestStop();
     closeLocalTransport?.();
   };
   process.on('SIGINT', handleSigint);
@@ -78,63 +84,119 @@ export async function runAgent(options: RunAgentOptions) {
       );
     }
 
-    runtime = new LocalAgentRuntime(runtimeConfig, mode);
+    // #643: Chat and Studio use separate Host entry points.
+    // Chat mode → LocalAgentRuntime; Studio mode → StudioHost.
+    if (mode === 'studio') {
+      studioHost = new StudioHost({
+        runtimeConfig,
+        studioMode: studioPreflight
+          ? {
+              studioId: studioPreflight.studioId,
+              entryPetId: studioPreflight.entryPetId,
+              petIds: studioPreflight.petIds,
+            }
+          : undefined,
+      });
 
-    // Init loads Toolkit definitions and starts their optional runtimes before
-    // any local transport begins accepting execution requests.
-    await runtime.init();
-    logStartupConfig({
-      mode: 'server',
-      serverMode: mode,
-      workdir: runtimeConfig.workdir,
-      actorId: runtime.getActorId(),
-      actorName: runtime.getActorName(),
-    });
-    const deps: LocalServerDeps = {
-      serverMode: mode,
-      ...(studioPreflight ? {
-        studioMode: {
-          studioId: studioPreflight.studioId,
-          entryPetId: studioPreflight.entryPetId,
-          petIds: studioPreflight.petIds,
+      await studioHost.init();
+      logStartupConfig({
+        mode: 'server',
+        serverMode: mode,
+        workdir: runtimeConfig.workdir,
+        actorId: studioHost.getActorId(),
+        actorName: studioHost.getActorName(),
+      });
+
+      // Studio host creates its own studio handler with proper peer outbound.
+      const studioHandler = new LocalServerStudioHandler<LocalServerPeer>({
+        outbound: {
+          sendMessage: (peer, message) => peer.send(message),
+          sendEvent: (peer, event) => sendLocalServerPeerEvent(peer, event),
         },
-      } : {}),
-      actorId: runtime.getActorId(),
-      actorName: runtime.getActorName() ?? undefined,
-      chatCheckpointer: runtime.getChatCheckpointer(),
-      modelProfiles: runtime.getModelProfiles(),
-      globalReviewPolicyMode: getConfig().globalReviewPolicyMode,
-      autoAuthorizationSafetyLevel: getConfig().autoAuthorizationSafetyLevel,
-      workdir: runtimeConfig.workdir,
-      runtimeConfig,
-      toolkitInventory: runtime.getToolkitInventoryStore(),
-      toolkitRuntimeManager: runtime.getToolkitRuntimeManager(),
-      localCapabilities: runtime.getLocalCapabilities(),
-      userCapabilities: runtime.getUserCapabilities(),
-      capabilityArtifactStore: runtime.getCapabilityArtifactStore(),
-      rescanUserCapabilities: () => runtime!.rescanUserCapabilities(),
-    };
+      });
+      // Transfer the built studio from StudioHost to the handler.
+      // The handler owns studio lifecycle from here.
+      const deps: LocalServerDeps = studioHost.buildLocalServerDeps();
 
-    if (stopping) {
-      runtime.requestStop();
-      return;
-    }
+      if (stopping) {
+        studioHost.requestStop();
+        return;
+      }
 
-    if (options.stdio) {
-      const transport = startLocalStdioServer(deps);
-      closeLocalTransport = transport.close;
-      console.log('[local-server] stdio JSONL transport ready');
-      await transport.closed;
-      runtime.requestStop();
-    } else {
-      const transport = await startLocalServer(getConfig().localServerPort, deps);
-      closeLocalTransport = transport.close;
-      try {
-        await runtime.runForever({ skipInit: true });
-      } finally {
-        transport.close();
+      if (options.stdio) {
+        const transport = startLocalStdioServer(deps, { studioHandler });
+        closeLocalTransport = transport.close;
+        console.log('[local-server] stdio JSONL transport ready');
         await transport.closed;
-        closeLocalTransport = null;
+        studioHost.requestStop();
+      } else {
+        const transport = await startLocalServer(getConfig().localServerPort, deps, {
+          studioHandler,
+        });
+        closeLocalTransport = transport.close;
+        try {
+          // Studio host doesn't run a ws relay loop; keep process alive
+          // via the transport's closed promise.
+          await transport.closed;
+        } finally {
+          transport.close();
+          await transport.closed;
+          closeLocalTransport = null;
+        }
+      }
+    } else {
+      // Chat mode: original LocalAgentRuntime path.
+      runtime = new LocalAgentRuntime(runtimeConfig, mode);
+
+      // Init loads Toolkit definitions and starts their optional runtimes before
+      // any local transport begins accepting execution requests.
+      await runtime.init();
+      logStartupConfig({
+        mode: 'server',
+        serverMode: mode,
+        workdir: runtimeConfig.workdir,
+        actorId: runtime.getActorId(),
+        actorName: runtime.getActorName(),
+      });
+      const deps: LocalServerDeps = {
+        serverMode: mode,
+        actorId: runtime.getActorId(),
+        actorName: runtime.getActorName() ?? undefined,
+        chatCheckpointer: runtime.getChatCheckpointer(),
+        modelProfiles: runtime.getModelProfiles(),
+        globalReviewPolicyMode: getConfig().globalReviewPolicyMode,
+        autoAuthorizationSafetyLevel: getConfig().autoAuthorizationSafetyLevel,
+        workdir: runtimeConfig.workdir,
+        runtimeConfig,
+        toolkitInventory: runtime.getToolkitInventoryStore(),
+        toolkitRuntimeManager: runtime.getToolkitRuntimeManager(),
+        localCapabilities: runtime.getLocalCapabilities(),
+        userCapabilities: runtime.getUserCapabilities(),
+        capabilityArtifactStore: runtime.getCapabilityArtifactStore(),
+        rescanUserCapabilities: () => runtime!.rescanUserCapabilities(),
+      };
+
+      if (stopping) {
+        runtime.requestStop();
+        return;
+      }
+
+      if (options.stdio) {
+        const transport = startLocalStdioServer(deps);
+        closeLocalTransport = transport.close;
+        console.log('[local-server] stdio JSONL transport ready');
+        await transport.closed;
+        runtime.requestStop();
+      } else {
+        const transport = await startLocalServer(getConfig().localServerPort, deps);
+        closeLocalTransport = transport.close;
+        try {
+          await runtime.runForever({ skipInit: true });
+        } finally {
+          transport.close();
+          await transport.closed;
+          closeLocalTransport = null;
+        }
       }
     }
   } finally {
@@ -143,6 +205,9 @@ export async function runAgent(options: RunAgentOptions) {
     closeLocalTransport?.();
     await runtime?.shutdown().catch((error) => {
       console.warn('[local-agent] failed to stop Toolkit runtimes:', error instanceof Error ? error.message : error);
+    });
+    await studioHost?.shutdown().catch((error) => {
+      console.warn('[studio-host] failed to stop:', error instanceof Error ? error.message : error);
     });
     restoreConsole();
   }

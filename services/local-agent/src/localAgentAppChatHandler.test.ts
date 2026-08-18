@@ -154,8 +154,6 @@ function createHandler(overrides: Partial<ConstructorParameters<typeof LocalAgen
     getCapabilityArtifactStore: () => ({}) as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getCapabilityArtifactStore'] extends () => infer T ? T : never,
     getWorkdir: () => '/tmp/pinpawo-app-workdir',
     getActorName: () => 'Test Actor',
-    runStudioRequest: async () => undefined,
-    rejectStudioPendingReview: () => undefined,
     loadContext: async () => ({} as AgentContext),
     buildChatSetup: (params) => {
       buildInputs.push(params as unknown as Record<string, unknown>);
@@ -1297,26 +1295,4 @@ test('LocalAgentAppChatHandler rejects cancellation for a stale review action', 
   assert.equal(errorEvent.event?.code, 'review_stale');
 });
 
-test('LocalAgentAppChatHandler forwards studio requests to runtime handler', async () => {
-  let handled = false;
-  const { handler, ws } = createHandler({
-    runStudioRequest: async (_ws, message) => {
-      handled = true;
-      assert.equal(_ws, ws);
-      assert.equal(message.requestId, 'studio-1');
-      assert.equal(message.userRequest, 'plan this task');
-      assert.equal(message.runId, 'run-1');
-      assert.equal(message.conversationId, 'conv-1');
-    },
-  });
 
-  await handler.handleStudioRequest(ws, {
-    type: 'studio_request',
-    requestId: 'studio-1',
-    userRequest: 'plan this task',
-    runId: 'run-1',
-    conversationId: 'conv-1',
-  });
-
-  assert.equal(handled, true);
-});

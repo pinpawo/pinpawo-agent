@@ -88,7 +88,7 @@ function plannerTaskSchema() {
     capability: z.string().trim().min(1).max(200)
       .describe('Capability that executes this task.'),
     task: z.string().trim().min(1).max(MAX_TASK_TEXT_CHARS)
-      .describe('What this step must deliver, stated in one or two sentences. The executing Capability decides how: do not write checklists, review dimensions, output formats, or method steps, and do not introduce requirements the user never asked for. Do not repeat background already present in the user request or conversation.'),
+      .describe('What this step must deliver. The system prompt owns how a task is written.'),
   });
 }
 

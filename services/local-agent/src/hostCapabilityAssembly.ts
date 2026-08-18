@@ -146,6 +146,10 @@ export class HostCapabilityAssembly {
     return this.capabilityRegistry.getCapabilityArtifactStore();
   }
 
+  async deleteThreadArtifacts(threadId: string): Promise<void> {
+    await this.capabilityRegistry.deleteThreadArtifacts(threadId);
+  }
+
   getUserCapabilities(): LoadedUserCapability[] {
     return this.capabilityRegistry.getUserCapabilities();
   }

@@ -57,6 +57,7 @@ export class LocalAgentHost {
       checkpoint: this.caps.getChatCheckpointer(),
       deleteThread: async (threadId) => {
         await this.caps.getChatCheckpointer().deleteThread(threadId);
+        await this.caps.deleteThreadArtifacts(threadId);
       },
       inflightRequests: this.inflightRequests,
       isCurrentSocket: (ws) => this.appWsClient?.isCurrentSocket(ws) ?? false,

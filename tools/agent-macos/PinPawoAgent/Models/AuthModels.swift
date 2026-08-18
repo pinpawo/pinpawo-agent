@@ -61,27 +61,3 @@ func fetchActors() async throws -> [Actor] {
   }
 }
 
-// MARK: - Auth models
-
-struct AuthResponse: Codable {
-  let accessToken: String
-  let refreshToken: String
-  let user: AuthUser
-}
-
-struct AuthUser: Codable {
-  let id: String
-  let nickname: String
-  let phone: String
-}
-
-struct AgentTokenResponse: Codable {
-  let token: String
-  let hasuraJwt: String
-  let label: String
-
-  enum CodingKeys: String, CodingKey {
-    case token, label
-    case hasuraJwt = "hasura_jwt"
-  }
-}

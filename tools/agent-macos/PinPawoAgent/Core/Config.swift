@@ -80,7 +80,7 @@ struct AgentConfig: Codable {
     self.actorName = actorName
   }
 
-  // Custom decode: missing fields fall back to defaults so login state survives
+  // Custom decode: missing fields fall back to defaults so the config survives
   // even when the JSON was written by an older version or the TypeScript agent.
   init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -164,7 +164,6 @@ final class Config {
     saveUnsafe(config)
   }
 
-  var isLoggedIn: Bool { load().agentToken != nil }
   var hasLlmConfig: Bool { !(load().llmApiKey ?? "").isEmpty }
   var hasActor: Bool { !(load().actorId ?? "").isEmpty }
 

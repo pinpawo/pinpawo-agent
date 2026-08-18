@@ -35,13 +35,6 @@ struct LLMSettingsView: View {
         .buttonStyle(.borderedProminent)
         .frame(maxWidth: .infinity)
         .disabled(apiKey.isEmpty)
-
-      Divider()
-      HStack {
-        Spacer()
-        Button("退出登录") { appState.logout() }
-          .buttonStyle(.plain).font(.caption).foregroundColor(.secondary)
-      }
     }
     .padding(16)
     .frame(width: 300)

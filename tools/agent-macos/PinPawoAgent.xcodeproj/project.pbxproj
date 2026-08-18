@@ -10,7 +10,6 @@
 		0EC683CA23B07E97267B6034 /* media.gif in Resources */ = {isa = PBXBuildFile; fileRef = C39EB37626589852FFDE4684 /* media.gif */; };
 		10C90E4F7E1852AC5BDBCCDF /* Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE1D64376EB8076CA82A0DAA /* Config.swift */; };
 		114B429B483F8D8445B29EAA /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C72FA4654C5E970A9FC621D3 /* SettingsView.swift */; };
-		16631C1D7BA9DC09184257CB /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12FF621A71C53D60A95F8A84 /* AuthService.swift */; };
 		1BC2C10E418B161AFD799468 /* LLMSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FF98751AE96D3E61C60BC8F /* LLMSettingsView.swift */; };
 		27CCB8F56F3E6BE72642DA92 /* slacking.gif in Resources */ = {isa = PBXBuildFile; fileRef = 3B6ED8CFDAFE2DD308517648 /* slacking.gif */; };
 		27E963B4E268B5E65980B4B2 /* AgentProcess.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00F5F706938FBA65627EAFF /* AgentProcess.swift */; };
@@ -32,7 +31,6 @@
 		EA505892B2273084101F6424 /* StatusPoller.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0D6DF994C49417C25714063 /* StatusPoller.swift */; };
 		EDC207C26ED09D08D136BC7F /* HealthData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E3C46EE605E544C958BAF28 /* HealthData.swift */; };
 		F0C6B7247AE7D611BAFCD843 /* interrupted.gif in Resources */ = {isa = PBXBuildFile; fileRef = 2D74ACDBCFF2C9BB1E0F53FA /* interrupted.gif */; };
-		F523DF1CAAC8F2B7404602D6 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D4A0F4F69CC03C215EF1DE4 /* LoginView.swift */; };
 		F88C860F6F828E39EC29EECF /* typing.gif in Resources */ = {isa = PBXBuildFile; fileRef = 7315DFF5C20D371D0C28CA2F /* typing.gif */; };
 		FAA99A8318A5D8EAFB358FC7 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A524B379B9B3D0AA389BD20 /* AppState.swift */; };
 		FBF723699C0B5E30F6BE0BEF /* do-not-disturb.gif in Resources */ = {isa = PBXBuildFile; fileRef = 65A42D41F07A62FFDE816246 /* do-not-disturb.gif */; };
@@ -40,10 +38,8 @@
 
 /* Begin PBXFileReference section */
 		0FF98751AE96D3E61C60BC8F /* LLMSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMSettingsView.swift; sourceTree = "<group>"; };
-		12FF621A71C53D60A95F8A84 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
 		2362ED6B6B3962BBA8030A82 /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
 		24A4868D9F3F55EFFEF48650 /* DesktopPetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesktopPetView.swift; sourceTree = "<group>"; };
-		2D4A0F4F69CC03C215EF1DE4 /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		2D74ACDBCFF2C9BB1E0F53FA /* interrupted.gif */ = {isa = PBXFileReference; lastKnownFileType = image.gif; path = interrupted.gif; sourceTree = "<group>"; };
 		39628AAFC1F86E185334094C /* file.gif */ = {isa = PBXFileReference; lastKnownFileType = image.gif; path = file.gif; sourceTree = "<group>"; };
 		3B6ED8CFDAFE2DD308517648 /* slacking.gif */ = {isa = PBXFileReference; lastKnownFileType = image.gif; path = slacking.gif; sourceTree = "<group>"; };
@@ -120,7 +116,6 @@
 			children = (
 				C00F5F706938FBA65627EAFF /* AgentProcess.swift */,
 				9A524B379B9B3D0AA389BD20 /* AppState.swift */,
-				12FF621A71C53D60A95F8A84 /* AuthService.swift */,
 				BE1D64376EB8076CA82A0DAA /* Config.swift */,
 				A67AA67DF99F7FF837E5DFED /* DesktopPetController.swift */,
 				E6B890CEA97A156F364C84C0 /* KeychainService.swift */,
@@ -170,7 +165,6 @@
 				446F54A4DB5D7010FC240655 /* AnimatedGIFView.swift */,
 				24A4868D9F3F55EFFEF48650 /* DesktopPetView.swift */,
 				0FF98751AE96D3E61C60BC8F /* LLMSettingsView.swift */,
-				2D4A0F4F69CC03C215EF1DE4 /* LoginView.swift */,
 				2362ED6B6B3962BBA8030A82 /* MenuBarView.swift */,
 				C72FA4654C5E970A9FC621D3 /* SettingsView.swift */,
 				C072C916C9F010477F4337C9 /* StatusView.swift */,
@@ -284,7 +278,6 @@
 				9C1AF8C729F13A098D1156D9 /* AnimatedGIFView.swift in Sources */,
 				FAA99A8318A5D8EAFB358FC7 /* AppState.swift in Sources */,
 				D31ABF8B204E3DACE6B2159E /* AuthModels.swift in Sources */,
-				16631C1D7BA9DC09184257CB /* AuthService.swift in Sources */,
 				10C90E4F7E1852AC5BDBCCDF /* Config.swift in Sources */,
 				8227CE83135FFED0474D43D6 /* DesktopPetController.swift in Sources */,
 				5637158402553B2843F07BB6 /* DesktopPetView.swift in Sources */,
@@ -292,7 +285,6 @@
 				3405911C7E71F22756BBDAD6 /* KeychainService.swift in Sources */,
 				1BC2C10E418B161AFD799468 /* LLMSettingsView.swift in Sources */,
 				4D52433A83A459DD8946D891 /* LocalServerAuth.swift in Sources */,
-				F523DF1CAAC8F2B7404602D6 /* LoginView.swift in Sources */,
 				CC588A860FC6ED9C29B2074C /* MenuBarView.swift in Sources */,
 				BD5B9E0A5AED70573CB2C8B6 /* PinPawoAgentApp.swift in Sources */,
 				114B429B483F8D8445B29EAA /* SettingsView.swift in Sources */,

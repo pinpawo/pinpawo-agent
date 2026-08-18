@@ -9,6 +9,7 @@ related:
   - overview.md
   - agent-boundary-contracts.md
   - capability-toolkit-architecture.md
+  - concepts/context-injection-map.md
   - concepts/dynamic-context-governance.md
   - concepts/orchestrator-practical-reasoning.md
   - decisions/capability-planner-task-boundaries.md
@@ -32,9 +33,11 @@ explicitly migrated.
   host responsibilities.
 - [Decision node ownership](concepts/decision-node-ownership.md) — the
   four semantic owners and the Planner-owned task/Capability boundary.
+- [Context injection map](concepts/context-injection-map.md) — **authoritative**
+  per-node account of what enters each model's context window: static vs
+  run-stable vs dynamic, instruction vs boundary vs fact vs history.
 - [Message context and provenance](concepts/message-context-and-provenance.md) —
-  completeness-first flow across canonical main evidence, User Goal, delegation
-  briefing, private Capability lanes, announce, and accepted handoff.
+  lane/run/delegation identity as metadata, and interruption evidence retention.
 
 ## System prompt design
 
@@ -45,9 +48,10 @@ explicitly migrated.
   action, responsibility, time, and completion.
 - [Prompt knowledge layers](concepts/prompt-knowledge-layers.md) — static contract,
   conditional protocol, injected facts, and deterministic enforcement.
-- [Dynamic context governance](concepts/dynamic-context-governance.md) — draft
-  ownership contract for projection, typed facts, rendering, message placement,
-  and invocation assembly.
+- [Context injection map](concepts/context-injection-map.md) — authoritative
+  per-node context assembly; supersedes any conflicting context description.
+- [Dynamic context governance](concepts/dynamic-context-governance.md) — ownership
+  contract for projection, typed facts, rendering, and message placement.
 - [System prompt authoring principles](concepts/system-prompt-authoring-principles.md)
   — positive-first contracts, narrow negative boundaries, harness ownership,
   objective-derived eval targets, and eval-backed prompt changes.
@@ -59,8 +63,8 @@ explicitly migrated.
   Capability selection, terminal planning tools, and result-driven future-plan
   revision.
 - [Message context and provenance](concepts/message-context-and-provenance.md) —
-  canonical main messages as shared evidence, User Goal as the objective index,
-  delegation briefing as the execution boundary, plus private lanes and handoff.
+  protocol identity from lane/run/delegation metadata, and how an interrupted
+  delegation retains evidence without it becoming an accepted result.
 - [Delegation completion acknowledgement](decisions/delegation-completion-acknowledgement.md)
   — why the fixed completion close exists, why handoff alone cannot trigger it,
   and how answer returns control when user input is required.

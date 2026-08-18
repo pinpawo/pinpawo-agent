@@ -457,3 +457,39 @@ lint passes, and documentation migrations.
   message context.
 - Kept the ingest scoped to message context and provenance; the broader PR #632
   ownership and Prompt Contract Map migration remains a separate Wiki ingest.
+
+## [2026-08-18] ingest | Context Injection Map as the context authority
+
+- Registered `concepts/context-injection-map.md` as the authoritative per-node
+  account of what enters each model's context window, validated against merged
+  `main` after PR #664 and the PR #666 branch. Every claim was read from source
+  rather than carried over from prior design documents.
+- Adopted two orthogonal axes for classifying injected context: static /
+  run-stable / dynamic, and instruction / boundary / fact / history. The second
+  axis is what the existing `role=` / `source=` / `authority=` XML attributes
+  already encode; the page makes that contract explicit.
+- Recorded that one `<run_user_request>` string reaches three consumers with
+  three different roles — Planner input body, Capability background, Answer
+  target — and that the capability lane's `role="task_boundary"` attribute
+  overstates its authority while message ordering carries the real layering.
+- Recorded the three-writer run-goal lifecycle (provisional capture, the single
+  authoritative `plan_request(goal)` write, snapshot replay on resume) and why
+  the goal cannot drift within a delegation.
+- Removed superseded context assembly from `concepts/message-context-and-provenance.md`:
+  Goal Creation, `runUserGoal`, the `Gₜ = GoalCreation(...)` flow,
+  completeness-first Capability context, and the PR #632 implementation gap. The
+  page is now scoped to provenance/identity and interruption evidence, both of
+  which remain valid, and is promoted from draft to validated.
+- Removed the stale current-assembly survey from
+  `concepts/dynamic-context-governance.md`. Answer's production path uses the
+  typed `<answer_input>` message, not a legacy system-prose renderer, and the
+  compaction summary is an `AIMessage` with `authority="none"`, not a
+  `SystemMessage`. That page now keeps only the governance contract.
+- Recorded two dead helpers as unverified surface rather than working behavior:
+  `ORCHESTRATOR_DECISION_SHARED_PREFIX` is exported but unreferenced, and
+  `buildDecisionConfig`'s `workdir` / `runtimeEnvironment` parameters are never
+  passed; `workdir` reaches the model through capability `promptSections`.
+- Left routing-architecture drift out of scope: `overview.md` still describes
+  `entryDecision`, `outcomeDecision`, `return_to_answer` and `grep_search`, none
+  of which exist in code. That is decision-node ownership rather than context
+  assembly and needs its own ingest.

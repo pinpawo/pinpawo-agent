@@ -2,7 +2,6 @@ import type { AgentCapability } from '@pinpawo/pet-agent';
 import { loadUserCapabilities, type LoadedUserCapability } from './capabilityLoader';
 import { createExploreCapability } from './capabilities/explore';
 import { loadGeneralCapability } from './capabilities/general';
-import { browserIntegration } from './browserIntegration';
 import { FileCapabilityArtifactStore } from './capabilityArtifactStore';
 
 type LocalAgentCapabilityRegistryDeps = {
@@ -14,7 +13,7 @@ type LocalAgentCapabilityRegistryOptions = Partial<LocalAgentCapabilityRegistryD
   capabilityArtifactRoot?: string;
 };
 
-function createDefaultLocalCapabilities(): AgentCapability[] {
+export function createCoreLocalCapabilities(): AgentCapability[] {
   const general = loadGeneralCapability();
   if (!general) {
     throw new Error('local-agent requires the built-in "general" Capability.');
@@ -22,13 +21,12 @@ function createDefaultLocalCapabilities(): AgentCapability[] {
   return [
     general,
     createExploreCapability(),
-    browserIntegration.capability,
   ];
 }
 
 const defaultDeps: LocalAgentCapabilityRegistryDeps = {
   loadUserCapabilities,
-  createDefaultCapabilities: createDefaultLocalCapabilities,
+  createDefaultCapabilities: createCoreLocalCapabilities,
 };
 
 export class LocalAgentCapabilityRegistry {

@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   BrowserSession,
-  detectBrowserStatus,
   selectAutoBrowserBackend,
 } from './session';
 import {
@@ -151,28 +150,4 @@ test('extension BrowserSession requires the BrowserRuntime-provided driver', asy
     () => session.snapshot(),
     /must be created by BrowserRuntime/,
   );
-});
-
-test('browser status consumes the provided runtime snapshot without a second bridge projection', async (t) => {
-  const previousBackend = process.env.PINPAWO_BROWSER_BACKEND;
-  process.env.PINPAWO_BROWSER_BACKEND = 'extension';
-  t.after(() => {
-    if (previousBackend === undefined) {
-      delete process.env.PINPAWO_BROWSER_BACKEND;
-    } else {
-      process.env.PINPAWO_BROWSER_BACKEND = previousBackend;
-    }
-  });
-
-  const status = await detectBrowserStatus(projectBrowserRuntimeSnapshot(bridgeStatus({
-    listening: true,
-    hostConnected: true,
-  })));
-
-  assert.deepEqual(status, {
-    mode: 'extension',
-    detail: 'native host connected; waiting for extension registration',
-    configured: 'extension',
-    commandReady: false,
-  });
 });

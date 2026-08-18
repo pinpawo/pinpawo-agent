@@ -14,7 +14,6 @@ type LocalAgentCliHandlers = {
     check: boolean;
     qa: boolean;
   }) => Promise<void> | void;
-  runDetect?: () => Promise<void> | void;
   runInit?: (opts: InitCommandOptions) => Promise<void> | void;
   runSetup?: (opts: { workdir?: string }) => Promise<void> | void;
   runBrowser?: (
@@ -128,14 +127,6 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
         check: options.check ?? false,
         qa: options.qa ?? false,
       });
-    });
-
-  program
-    .command('detect')
-    .description('Print local browser/backend detection as JSON')
-    .action(async () => {
-      const runDetect = handlers.runDetect ?? (await import('./commands/detect')).runDetect;
-      await runDetect();
     });
 
   const browserCommand = program

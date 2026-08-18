@@ -5,10 +5,14 @@ import { getConfig } from './config';
 import { loadAgentContext } from './contextLoader';
 import {
   type AgentCapability,
-  ToolkitRuntimeManager,
+  type AgentToolkit,
+  type ToolkitRuntimeDiagnostic,
+  type ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
 import {
-} from '@pinpawo-toolkit/studio-kanban';
+  createBrowserCapability,
+  createBrowserToolkit,
+} from '@pinpawo-toolkit/browser';
 import { loadPlugins } from './pluginLoader';
 import type { LoadedUserCapability } from './capabilityLoader';
 import {
@@ -25,7 +29,10 @@ import {
 import { InflightRequestController } from './inflightRequestController';
 import { LocalAgentAppWsClient } from './localAgentAppWsClient';
 import { LocalAgentAppChatHandler } from './localAgentAppChatHandler';
-import { LocalAgentCapabilityRegistry } from './localAgentCapabilityRegistry';
+import {
+  createCoreLocalCapabilities,
+  LocalAgentCapabilityRegistry,
+} from './localAgentCapabilityRegistry';
 import {
   buildLocalAgentRuntimeConfig,
   findLegacyLocalAgentState,
@@ -35,12 +42,8 @@ import { LocalServerStudioHandler } from './localServerStudioHandler';
 import type { LocalServerDeps } from './localServerTypes';
 import { DEFAULT_SERVER_MODE, type ServerMode } from './serverMode';
 import { createBashToolkit, createGitToolkit } from './toolkits/local';
-import {
-  buildHostToolkitInventory,
-  HostToolkitInventoryStore,
-  reportUnavailableToolkitAvailability,
-} from './toolkits/toolkitInventory';
-import { browserIntegration } from './browserIntegration';
+import { HostToolkitCoordinator } from './toolkits/hostToolkitCoordinator';
+import type { HostToolkitInventoryStore } from './toolkits/toolkitInventory';
 
 const WS_RECONNECT_DELAY_MS = 10000;
 const WS_PING_INTERVAL_MS = 30000;
@@ -53,8 +56,8 @@ export class LocalAgentRuntime {
   private actorId: string | null = null;
   private actorName: string | null = null;
   private modelProfiles: LocalModelProfileRegistry | null = null;
-  private readonly toolkitInventory = new HostToolkitInventoryStore();
-  private readonly toolkitRuntimeManager = new ToolkitRuntimeManager();
+  private readonly toolkitCoordinator = new HostToolkitCoordinator();
+  private readonly hostBuiltInToolkits: readonly AgentToolkit[];
   private readonly capabilityRegistry: LocalAgentCapabilityRegistry;
   private readonly chatCheckpointer: FileSaver;
   private readonly graphService = new LocalAgentGraphService();
@@ -75,8 +78,20 @@ export class LocalAgentRuntime {
   ) {
     this.runtimeConfig = runtimeConfig;
     this.serverMode = serverMode;
+    const browserSelected = loadStoredConfig().capabilities?.browser !== false;
+    this.hostBuiltInToolkits = [
+      createBashToolkit(),
+      createGitToolkit(),
+      ...(browserSelected
+        ? [createBrowserToolkit({ backend: () => getConfig().browserBackend })]
+        : []),
+    ];
     this.capabilityRegistry = new LocalAgentCapabilityRegistry({
       capabilityArtifactRoot: runtimeConfig.capabilityArtifactRoot,
+      createDefaultCapabilities: () => [
+        ...createCoreLocalCapabilities(),
+        ...(browserSelected ? [createBrowserCapability()] : []),
+      ],
     });
     this.studioHandler = new LocalServerStudioHandler<WebSocket>({
       outbound: {
@@ -96,8 +111,8 @@ export class LocalAgentRuntime {
       isCurrentSocket: (ws) => this.appWsClient?.isCurrentSocket(ws) ?? false,
       getActorId: () => this.getActorId(),
       getModelProfiles: () => this.getModelProfiles(),
-      getToolkitInventory: () => this.toolkitInventory.getSnapshot(),
-      getToolkitRuntimeManager: () => this.toolkitRuntimeManager,
+      getToolkitInventory: () => this.toolkitCoordinator.getInventoryStore().getSnapshot(),
+      getToolkitRuntimeManager: () => this.toolkitCoordinator.getRuntimeManager(),
       getLocalCapabilities: () => this.capabilityRegistry.getLocalCapabilities(),
       getUserCapabilities: () => this.capabilityRegistry.getUserCapabilities(),
       getCapabilityArtifactStore: () => this.capabilityRegistry.getCapabilityArtifactStore(),
@@ -152,25 +167,14 @@ export class LocalAgentRuntime {
     }
     const { toolkitSources } = await loadPlugins();
     this.modelProfiles = buildLocalModelProfileRegistry();
-    const toolkitInventory = await buildHostToolkitInventory({
-      sources: [
-        ...toolkitSources,
-        {
-          id: 'local-agent',
-          kind: 'host_builtin',
-          definitions: [
-            createBashToolkit(),
-            createGitToolkit(),
-            browserIntegration.toolkit,
-          ],
-        },
-      ],
-      startToolkitRuntimes: async (definitions) => {
-        await this.toolkitRuntimeManager.start(definitions);
+    await this.toolkitCoordinator.initialize([
+      ...toolkitSources,
+      {
+        id: 'local-agent',
+        kind: 'host_builtin',
+        definitions: this.hostBuiltInToolkits,
       },
-    });
-    this.toolkitInventory.replace(toolkitInventory);
-    reportUnavailableToolkitAvailability(toolkitInventory);
+    ]);
     await this.capabilityRegistry.load();
     this.actorId = await ensureActorSelected({ interactive: false });
     this.actorName = getConfig().apiConnected ? loadSelectedActorName() : LOCAL_ONLY_ACTOR_NAME;
@@ -191,11 +195,15 @@ export class LocalAgentRuntime {
 
   async shutdown() {
     this.requestStop();
-    await this.toolkitRuntimeManager.stop();
+    await this.toolkitCoordinator.shutdown();
   }
 
   getToolkitRuntimeManager(): ToolkitRuntimeManager {
-    return this.toolkitRuntimeManager;
+    return this.toolkitCoordinator.getRuntimeManager();
+  }
+
+  getToolkitRuntimeDiagnostics(): Promise<readonly ToolkitRuntimeDiagnostic[]> {
+    return this.toolkitCoordinator.diagnose();
   }
 
   getModelProfiles(): LocalModelProfileRegistry {
@@ -203,7 +211,7 @@ export class LocalAgentRuntime {
   }
 
   getToolkitInventoryStore(): HostToolkitInventoryStore {
-    return this.toolkitInventory;
+    return this.toolkitCoordinator.getInventoryStore();
   }
 
   getLocalCapabilities(): AgentCapability[] {

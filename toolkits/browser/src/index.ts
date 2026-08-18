@@ -1,19 +1,11 @@
 export { createBrowserCapability } from './capability';
 export {
   BROWSER_TOOLKIT_NAME,
-  buildBrowserAvailabilitySnapshot,
-  createBrowserIntegration,
   createBrowserToolkit,
-  type BrowserAvailabilitySnapshot,
-  type BrowserIntegration,
 } from './toolkit';
 export {
   BrowserSession,
-  detectBrowserEnvironment,
-  detectBrowserStatus,
   type BrowserBackend,
-  type BrowserEnvironment,
-  type BrowserStatus,
 } from './session';
 export * from './lifecycle';
 export { ChromeExtensionBrowserSession } from './drivers/chromeExtension/session';

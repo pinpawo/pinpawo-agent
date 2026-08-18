@@ -99,12 +99,6 @@ function listSessionNames(): string[] {
 // ── Backend detection ─────────────────────────────────────────────────────────
 
 export type BrowserBackend = 'extension' | 'playwright';
-export type BrowserStatus = {
-  mode: BrowserBackend | 'none';
-  detail: string;
-  configured: string;
-  commandReady: boolean;
-};
 
 export function selectAutoBrowserBackend(input: {
   extensionCommandReady: boolean;
@@ -871,94 +865,7 @@ export class BrowserSession {
   async listSessions() { return (await this.ensureImpl()).listSessions(); }
 }
 
-// ── Lightweight detection (no browser launch) ─────────────────────────────────
-export async function detectBrowserStatus(
-  runtime: BrowserRuntimeSnapshot,
-  browserOptions: BrowserToolkitOptions = {},
-): Promise<BrowserStatus> {
-  const options = resolveBrowserToolkitOptions(browserOptions);
-  const configured = configuredBrowserBackend(options);
-  const chromeExecPath =
-    process.env.PINPAWO_BROWSER_EXECUTABLE_PATH?.trim() || DEFAULT_CHROME_EXECUTABLE_PATH;
-
-  // Respect the configured backend — same priority as detectBackend()
-  if (configured === 'playwright') {
-    if (await canUsePlaywright()) {
-      return {
-        mode: 'playwright',
-        detail: chromeExecPath,
-        configured,
-        commandReady: true,
-      };
-    }
-    return {
-      mode: 'none',
-      detail: `configured playwright but unavailable: missing playwright-core or Chrome at ${chromeExecPath}`,
-      configured,
-      commandReady: false,
-    };
-  }
-  if (configured === 'extension') {
-    const extension = runtime.extension;
-    return {
-      mode: extension.bridgeListening ? 'extension' : 'none',
-      detail: extension.detail,
-      configured,
-      commandReady: extension.commandReady,
-    };
-  }
-  if (configured === 'agent-browser') {
-    return {
-      mode: 'none',
-      detail: 'configured agent-browser but that backend is no longer supported',
-      configured,
-      commandReady: false,
-    };
-  }
-  if (configured !== 'auto') {
-    return {
-      mode: 'none',
-      detail: `unknown browser backend "${configured}"; use auto, playwright, or extension`,
-      configured,
-      commandReady: false,
-    };
-  }
-
-  // auto-detect
-  const extension = runtime.extension;
-  if (extension.commandReady) {
-    return {
-      mode: 'extension',
-      detail: extension.detail,
-      configured,
-      commandReady: true,
-    };
-  }
-  if (await canUsePlaywright()) {
-    return {
-      mode: 'playwright',
-      detail: chromeExecPath,
-      configured,
-      commandReady: true,
-    };
-  }
-  if (extension.bridgeListening) {
-    return {
-      mode: 'extension',
-      detail: extension.detail,
-      configured,
-      commandReady: false,
-    };
-  }
-  return {
-    mode: 'none',
-    detail: `missing playwright-core or Chrome at ${chromeExecPath}`,
-    configured,
-    commandReady: false,
-  };
-}
-
-// ── Full environment detection (for CLI `detect` command / Settings UI) ──────
+// ── Structural environment resolution used by Toolkit availability ───────────
 export type BrowserEnvironment = {
   configured: string;
   chromePath: string;
@@ -966,7 +873,7 @@ export type BrowserEnvironment = {
   playwrightCorePath: string | null;
 };
 
-export async function detectBrowserEnvironment(
+export async function resolveBrowserEnvironment(
   browserOptions: BrowserToolkitOptions = {},
 ): Promise<BrowserEnvironment> {
   const chromePath =

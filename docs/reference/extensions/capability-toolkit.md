@@ -192,6 +192,7 @@ type ToolkitRuntimeDefinition<TRoot, TBinding = TRoot> = {
   bindTools?(binding: TBinding, context: ToolkitRuntimeResolveContext):
     Promise<readonly NamedStructuredTool[]> | readonly NamedStructuredTool[];
   release?(binding: TBinding, context: ToolkitRuntimeReleaseContext): Promise<void> | void;
+  diagnose?(root: TRoot): Promise<JsonValue> | JsonValue;
   stop?(root: TRoot, context: { signal?: AbortSignal }): Promise<void> | void;
 };
 ```
@@ -224,10 +225,9 @@ authorization 判断，而不是由 execution binding 改写参数。
 释放。若由 host 注入共享 manager，则由该 host 统一 stop，不能由单个 pet
 runtime 终止。
 
-> Accepted target（#645，尚未作为当前公共 API 实现）：Runtime 的实时健康状态
-> 属于 Toolkit Runtime diagnostics，不属于 Toolkit availability。所有声明
-> Runtime 的 Toolkit 将通过同一个 manager 诊断；Host 不按 Toolkit 名称实现
-> 专属诊断或生命周期分支。
+`ToolkitRuntimeManager.diagnose()` 为所有声明 Runtime 的 Toolkit 返回同一份 lifecycle、
+active binding 数和最近错误。可选 `diagnose(root)` 只补充 JSON-safe、Toolkit-owned
+`details`；Host 不解释该结构，也不为 Browser 或其他 Toolkit 建第二份状态源。
 
 ### 3.3 可用性
 

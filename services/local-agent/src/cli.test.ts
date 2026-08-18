@@ -34,6 +34,11 @@ test('the removed legacy flags are no longer declared', () => {
   assert.deepEqual(flags.sort(), ['--check', '--qa', '--workdir']);
 });
 
+test('the deferred Browser detect command is not part of this CLI contract', () => {
+  const commandNames = createLocalAgentCli().commands.map((command) => command.name());
+  assert.equal(commandNames.includes('detect'), false);
+});
+
 test('tui still rejects --check together with --qa', async () => {
   await assert.rejects(
     createLocalAgentCli({ runTuiV2: () => undefined })

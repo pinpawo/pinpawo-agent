@@ -1,8 +1,7 @@
 # Browser Toolkit 独立包设计
 
-> 2026-08-16：package extraction 已完成；本文保留当时的构造接口设计。
-> `BrowserIntegration` 现在只视为兼容装配 helper，不是公共领域层。后续 Host、
-> Agent、Capability、Toolkit 与通用 Runtime diagnostics 以
+> 2026-08-18：package extraction 与通用 Host/Runtime 装配迁移已完成。
+> Host、Agent、Capability、Toolkit 与通用 Runtime diagnostics 以
 > [领域关系与装配约束](../host-agent-capability-toolkit.md)为准。
 
 ## 状态
@@ -11,7 +10,7 @@
 
 ## 背景
 
-Browser 已经不是一组无状态工具。它包含 Toolkit 定义、执行期 runtime、浏览器 session 与所有权、浏览器驱动、Chrome Extension、Native Messaging Host，以及安装和诊断能力。
+Browser 已经不是一组无状态工具。它包含 Toolkit 定义、执行期 runtime、浏览器 session 与所有权、浏览器驱动、Chrome Extension、Native Messaging Host，以及安装和状态管理能力。
 
 当前这些实现分散在 `services/local-agent/src/toolkits/browser` 与 `tools/chrome-extension`。这会造成两个问题：
 
@@ -100,7 +99,7 @@ services/local-agent/
 - 读取用户配置，并通过显式 options 创建 Browser Toolkit；
 - 将 Browser Toolkit 加入 PinPawo 默认发行组合；它与 bash、git 等默认 Toolkit 一样只是一个预设，不是 local-agent 的特权能力；
 - 启动通用 `ToolkitRuntimeManager`，不直接管理 Browser session；
-- Browser CLI 只调用 Browser 包公开的安装和诊断接口。
+- Browser CLI 只调用 Browser 包公开的 extension 安装和状态接口。
 
 “默认内置”是发行策略，不代表源码归 local-agent 所有。
 
@@ -108,7 +107,9 @@ services/local-agent/
 
 `general` 是默认集合中的 host baseline，始终由 local-agent 加载且缺失时启动失败，但不作为可关闭的设置项展示。它只声明稳定的本地 `bash` 和 `git` Toolkit；每次 run 才产生的 profile、artifact 等上下文能力不再成为它的隐式依赖。
 
-`/health` 只回答 local-agent 是否可用，不投影 Browser 的 bridge、tab 或 extension 状态。后续若需要运行时观测，应为所有 Toolkit 定义统一的存活状态契约和单独投影，而不是继续向 `/health` 追加单个 Toolkit 的字段。
+`/health` 不追加 Browser 专属 bridge、tab 或 extension 字段。运行时观测来自
+`ToolkitRuntimeManager.diagnose()` 的统一 projection；Browser 只通过通用
+`details` 提供自己的不透明状态。
 
 ## 配置与依赖
 
@@ -116,27 +117,29 @@ Browser 包不能导入 `services/local-agent/src/config` 或 `storage`。宿主
 
 ```ts
 type BrowserToolkitOptions = {
-  enabled?: () => boolean;
-  backend?: () => BrowserBackend;
-  paths?: Partial<BrowserHostPaths>;
+  backend?: () => string;
+  workdir?: () => string;
 };
 
-const browser = createBrowserIntegration({
-  enabled: () => loadStoredConfig().capabilities?.browser !== false,
+const browserToolkit = createBrowserToolkit({
   backend: () => getConfig().browserBackend,
 });
 ```
 
-Browser 包当前返回同一组配置关联的 `toolkit`、`capability` 和宿主操作接口。每个 `ToolkitRuntimeManager` 启动并持有独立的 Browser Runtime root；不同 root 只共享固定 socket 所需的进程级 extension bridge transport，不共享 thread/session/workdir 状态，也不互相拥有 shutdown。availability 与兼容 runtime snapshot 接口读取当前活动 root（尚未启动时读取无资源的 fallback snapshot），而不是依赖包级可变 Runtime 单例。该 aggregate 是构造便利，不定义新的 `BrowserIntegration` 领域；Host 的最终 inventory 仍分别由 Capability 和 Toolkit definitions 构成。PR 3 引入通用 Toolkit Runtime diagnostics 后，兼容 snapshot 投影不再作为 Browser 专属 lifecycle 状态源。
+Host 是否选择 Browser 由 local-agent 在调用构造函数前决定，不进入
+`BrowserToolkitOptions` 或 Toolkit availability。每个 `ToolkitRuntimeManager` 启动并
+持有独立的 Browser Runtime root；不同 root 只共享固定 socket 所需的进程级
+extension bridge transport，不共享 thread/session/workdir 状态，也不互相拥有
+shutdown。Browser Runtime snapshot 只通过 Toolkit 的 `diagnose(root)` 进入通用
+diagnostics，不再由 aggregate 或 availability cache 跟踪“当前 root”。
 
 ## 宿主接口
 
-当前不引入通用 CLI contribution 框架。Browser 包保留窄的安装/探测接口；
+当前不引入通用 CLI contribution 框架。Browser 包保留窄的 extension 安装/状态接口；
 Capability、Toolkit 与 Runtime lifecycle/diagnostics 则进入通用 Host 装配：
 
-- `createBrowserIntegration(options)`：兼容构造 helper，创建彼此关联的 Toolkit、Capability 与 runtime，不作为 Host inventory 类型；
-- `registerBrowserExtensionHost()`、`unregisterBrowserExtensionHost()`、`getBrowserExtensionHostStatus()`：供 CLI 适配；
-- `detectBrowserEnvironment()`：供诊断命令调用；
+- `createBrowserToolkit(options)`、`createBrowserCapability()`：分别创建静态 definitions；
+- `registerBrowserExtensionHost()`、`unregisterBrowserExtensionHost()`、`getBrowserExtensionHostStatus()`：供 CLI 适配。
 
 local-agent 保留 Commander 参数、stdout 格式和 HTTP response 格式。这些是宿主 UI；实现与状态来自 Browser 包。
 
@@ -155,7 +158,7 @@ local-agent 保留 Commander 参数、stdout 格式和 HTTP response 格式。�
 
 1. 创建 `toolkits/browser` workspace，将 Browser Toolkit、runtime、drivers、Extension 和 Native Host 源码归拢到该包。
 2. 以 options 注入替代 Browser 对 local-agent config/storage 的直接依赖。
-3. local-agent 默认 registry 分别组装 Browser Capability 与 Toolkit definitions；CLI 和 detect 使用包公开的窄操作接口。
+3. local-agent 默认 registry 分别组装 Browser Capability 与 Toolkit definitions；CLI 使用包公开的窄 extension 管理接口。
 4. Browser 包统一生成 Extension、Native Host 与 npm 入口产物；local-agent 发行构建消费这些产物。
 5. 删除 `services/local-agent/src/toolkits/browser` 与顶层 `tools/chrome-extension` 的旧所有权路径。
 
@@ -167,5 +170,5 @@ local-agent 保留 Commander 参数、stdout 格式和 HTTP response 格式。�
 - Browser 包不导入 local-agent 内部模块。
 - 仓库中的 Browser 与 Extension 源文件均为 TypeScript；生成目录除外。
 - Browser Toolkit 可通过注入配置被 local-agent 组装和启动。
-- `browser extension register/status/repair`、`detect` 和 Browser tools 继续工作。
+- `browser extension register/status/repair` 和 Browser tools 继续工作。
 - Browser 包单测、local-agent 单测、根类型检查和发行构建通过。

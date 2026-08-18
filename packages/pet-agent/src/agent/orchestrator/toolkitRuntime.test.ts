@@ -119,6 +119,7 @@ test('ToolkitRuntimeManager does not start one root twice for concurrent subagen
 
   const first = manager.resolve({ toolkits: [toolkit], execution: execution('delegation-a') });
   await started;
+  assert.equal((await manager.diagnose())[0]?.lifecycle, 'starting');
   const second = manager.resolve({ toolkits: [toolkit], execution: execution('delegation-b') });
   releaseStart?.();
 
@@ -149,6 +150,11 @@ test('ToolkitRuntimeManager waits for active executions to release before stoppi
   await new Promise<void>((resolve) => setImmediate(resolve));
 
   assert.equal(stopped, false);
+  assert.deepEqual(await manager.diagnose(), [{
+    toolkitName: 'runtime_toolkit',
+    lifecycle: 'stopping',
+    activeBindings: 1,
+  }]);
   assert.deepEqual(events, [
     'start:runtime_toolkit',
     'resolve:runtime_toolkit:delegation-a',
@@ -181,6 +187,12 @@ test('ToolkitRuntimeManager preserves the original resolution error as cause', a
       return true;
     },
   );
+  assert.deepEqual(await manager.diagnose(), [{
+    toolkitName: 'runtime_toolkit',
+    lifecycle: 'degraded',
+    activeBindings: 0,
+    lastError: { message: 'binding failed' },
+  }]);
   await manager.stop();
 });
 
@@ -320,4 +332,89 @@ test('ToolkitRuntimeManager exposes a root Runtime port without rebuilding tools
 
   await runtimeExecution.release();
   await manager.stop();
+});
+
+test('ToolkitRuntimeManager projects generic lifecycle, bindings, and opaque details', async () => {
+  const staticTool = createTool('diagnostic_tool', 'static');
+  const toolkit = defineToolkit({
+    name: 'diagnostic_runtime',
+    description: 'diagnostic runtime',
+    tools: [{ tool: staticTool }],
+    runtime: {
+      start: () => ({ providerState: 'connected' }),
+      diagnose: (root) => ({
+        providerState: (root as { providerState: string }).providerState,
+      }),
+    },
+  });
+  const manager = new ToolkitRuntimeManager();
+
+  await manager.start([toolkit]);
+  const readyDiagnostics = await manager.diagnose();
+  assert.deepEqual(readyDiagnostics, [{
+    toolkitName: 'diagnostic_runtime',
+    lifecycle: 'ready',
+    activeBindings: 0,
+    details: { providerState: 'connected' },
+  }]);
+  assert.equal(Object.isFrozen(readyDiagnostics), true);
+  assert.equal(Object.isFrozen(readyDiagnostics[0]), true);
+  assert.equal(Object.isFrozen(readyDiagnostics[0]?.details), true);
+
+  const active = await manager.resolve({
+    toolkits: [toolkit],
+    execution: execution('delegation-a'),
+  });
+  assert.equal((await manager.diagnose())[0]?.activeBindings, 1);
+
+  await active.release();
+  assert.equal((await manager.diagnose())[0]?.activeBindings, 0);
+  await manager.stop();
+  assert.deepEqual(await manager.diagnose(), [{
+    toolkitName: 'diagnostic_runtime',
+    lifecycle: 'stopped',
+    activeBindings: 0,
+  }]);
+});
+
+test('ToolkitRuntimeManager retains startup and shutdown failures in diagnostics', async () => {
+  const startFailure = defineToolkit({
+    name: 'start_failure',
+    description: 'start failure',
+    tools: [{ tool: createTool('start_failure_tool', 'static') }],
+    runtime: {
+      start: () => {
+        throw Object.assign(new Error('cannot start'), { code: 'START_FAILED' });
+      },
+    },
+  });
+  const startManager = new ToolkitRuntimeManager();
+  await assert.rejects(startManager.start([startFailure]), /cannot start/);
+  assert.deepEqual(await startManager.diagnose(), [{
+    toolkitName: 'start_failure',
+    lifecycle: 'failed',
+    activeBindings: 0,
+    lastError: { code: 'START_FAILED', message: 'cannot start' },
+  }]);
+
+  const stopFailure = defineToolkit({
+    name: 'stop_failure',
+    description: 'stop failure',
+    tools: [{ tool: createTool('stop_failure_tool', 'static') }],
+    runtime: {
+      start: () => ({}),
+      stop: () => {
+        throw new Error('cannot stop');
+      },
+    },
+  });
+  const stopManager = new ToolkitRuntimeManager();
+  await stopManager.start([stopFailure]);
+  await assert.rejects(stopManager.stop(), /cannot stop/);
+  assert.deepEqual(await stopManager.diagnose(), [{
+    toolkitName: 'stop_failure',
+    lifecycle: 'failed',
+    activeBindings: 0,
+    lastError: { message: 'cannot stop' },
+  }]);
 });

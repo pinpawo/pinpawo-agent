@@ -1,44 +1,24 @@
 import {
   defineToolkit,
   ReviewPolicies,
-  type AgentCapability,
   type AgentToolkit,
   type ToolReviewPolicy,
+  type ToolkitAvailability,
 } from '@pinpawo/pet-agent';
-import { createBrowserCapability } from './capability';
 import { BROWSER_TOOLKIT_NAME } from './constants';
-import {
-  detectBrowserEnvironment,
-  detectBrowserStatus,
-  type BrowserEnvironment,
-  type BrowserStatus,
-} from './session';
+import { resolveBrowserEnvironment } from './session';
 import { browserTools } from './tools';
 import { browserOperationMetadata } from './operationMetadata';
 import { BrowserRuntime } from './runtime';
 import { BrowserExtensionBridge } from './drivers/chromeExtension/bridge';
 import {
+  configuredBrowserBackend,
   resolveBrowserToolkitOptions,
   type BrowserToolkitOptions,
+  type ResolvedBrowserToolkitOptions,
 } from './options';
 
 export { BROWSER_TOOLKIT_NAME } from './constants';
-
-export type BrowserAvailabilitySnapshot = {
-  available: boolean;
-  reason?: string;
-  detail?: string;
-  metadata?: Record<string, string | number | boolean | null>;
-};
-
-export type BrowserIntegration = {
-  toolkit: AgentToolkit;
-  capability: AgentCapability;
-  runtime: BrowserRuntime;
-  checkAvailability: () => Promise<BrowserAvailabilitySnapshot>;
-  getCachedAvailability: () => BrowserAvailabilitySnapshot | null;
-  detectEnvironment: () => Promise<BrowserEnvironment>;
-};
 
 const browserToolkitInstructions = [
   '你负责需要真实浏览器参与的网页访问、页面交互、登录态复用、JS 渲染内容读取和页面内容提取。',
@@ -60,74 +40,58 @@ const browserToolkitInstructions = [
   '完成后返回你实际打开、操作或提取到的内容；不要声称完成未通过工具确认的页面操作。',
 ];
 
-function disabledAvailability(): BrowserAvailabilitySnapshot {
+async function checkBrowserAvailability(
+  options: ResolvedBrowserToolkitOptions,
+): Promise<ToolkitAvailability> {
+  const configured = configuredBrowserBackend(options);
+  if (configured === 'auto' || configured === 'extension') {
+    return { available: true };
+  }
+  if (configured === 'playwright') {
+    const environment = await resolveBrowserEnvironment(options);
+    const available = environment.chromeAvailable && Boolean(environment.playwrightCorePath);
+    return available
+      ? { available: true }
+      : {
+          available: false,
+          reason: `configured playwright but unavailable: missing playwright-core or Chrome at ${environment.chromePath}`,
+        };
+  }
   return {
     available: false,
-    reason: 'browser Toolkit disabled by host config',
+    reason: configured === 'agent-browser'
+      ? 'configured agent-browser but that backend is no longer supported'
+      : `unknown browser backend "${configured}"; use auto, playwright, or extension`,
   };
 }
 
-export function buildBrowserAvailabilitySnapshot(
-  status: BrowserStatus,
-): BrowserAvailabilitySnapshot {
-  // Toolkit availability is cached and filters the runtime registry. Keep a
-  // waiting extension routable so a later reconnect can recover without
-  // rebuilding the agent; commandReady is the live execution signal.
-  const available = status.mode !== 'none';
+function projectBrowserRuntimeDetails(runtime: BrowserRuntime) {
+  const snapshot = runtime.getSnapshot();
   return {
-    available,
-    reason: available ? undefined : status.detail,
-    detail: status.detail,
-    metadata: {
-      mode: status.mode,
-      configured: status.configured,
-      commandReady: status.commandReady,
+    extension: {
+      ...snapshot.extension,
+      capabilities: [...snapshot.extension.capabilities],
     },
+    readiness: snapshot.readiness
+      ? {
+          phase: snapshot.readiness.phase,
+          ready: snapshot.readiness.ready,
+          ...(snapshot.readiness.error
+            ? { error: { ...snapshot.readiness.error } }
+            : {}),
+        }
+      : null,
   };
 }
 
-export function createBrowserIntegration(
+export function createBrowserToolkit(
   browserOptions: BrowserToolkitOptions = {},
-): BrowserIntegration {
+): AgentToolkit {
   const options = resolveBrowserToolkitOptions(browserOptions);
-  // Availability may be queried before a Host starts Runtime roots. The
-  // fallback never acquires resources; every ToolkitRuntimeManager start gets
-  // its own BrowserRuntime root instead of sharing this integration object.
-  // Roots share only the process-level extension bridge transport: their
-  // thread/session/workdir state and shutdown remain isolated.
+  // One Toolkit definition may be started by independent Host managers. Each
+  // manager owns its BrowserRuntime root; roots share only the provider-level
+  // bridge transport through Browser's internal lease coordinator.
   const bridge = new BrowserExtensionBridge();
-  const availabilityRuntime = new BrowserRuntime(options, { bridge });
-  const runtimeRoots: BrowserRuntime[] = [];
-  const currentRuntime = () => runtimeRoots.at(-1) ?? availabilityRuntime;
-  let latestAvailability: BrowserAvailabilitySnapshot | null = null;
-
-  const rememberAvailability = (
-    availability: BrowserAvailabilitySnapshot,
-  ): BrowserAvailabilitySnapshot => {
-    latestAvailability = availability;
-    return availability;
-  };
-
-  const checkAvailability = async (): Promise<BrowserAvailabilitySnapshot> => {
-    if (!options.enabled()) {
-      return rememberAvailability(disabledAvailability());
-    }
-
-    try {
-      const status = await detectBrowserStatus(
-        currentRuntime().getSnapshot(),
-        options,
-      );
-      return rememberAvailability(buildBrowserAvailabilitySnapshot(status));
-    } catch (error) {
-      return rememberAvailability({
-        available: false,
-        reason: error instanceof Error
-          ? error.message
-          : 'browser availability check failed',
-      });
-    }
-  };
 
   const reviews: Record<string, ToolReviewPolicy> = {
     browser_open: ReviewPolicies.externalAccess({ authorization: 'url_origin' }),
@@ -137,15 +101,7 @@ export function createBrowserIntegration(
   const toolkit = defineToolkit({
     name: BROWSER_TOOLKIT_NAME,
     description: '浏览器网页访问、登录态复用、JS 渲染页面读取、点击输入等待和页面内容提取。',
-    availability: async () => {
-      const availability = await checkAvailability();
-      return availability.available
-        ? { available: true }
-        : {
-            available: false,
-            reason: availability.reason ?? 'browser toolkit unavailable',
-          };
-    },
+    availability: async () => await checkBrowserAvailability(options),
     tools: browserTools.map((toolItem) => ({
       tool: toolItem,
       operation: browserOperationMetadata[toolItem.name],
@@ -158,34 +114,13 @@ export function createBrowserIntegration(
       start: async () => {
         const root = new BrowserRuntime(options, { bridge });
         await root.start();
-        runtimeRoots.push(root);
         return root;
       },
-      stop: async (root) => {
-        const runtimeRoot = root as BrowserRuntime;
-        try {
-          await runtimeRoot.stop();
-        } finally {
-          const index = runtimeRoots.lastIndexOf(runtimeRoot);
-          if (index >= 0) runtimeRoots.splice(index, 1);
-        }
-      },
+      diagnose: (root) => projectBrowserRuntimeDetails(root as BrowserRuntime),
+      stop: async (root) => await (root as BrowserRuntime).stop(),
     },
     instructions: browserToolkitInstructions.join('\n'),
   });
 
-  return {
-    toolkit,
-    capability: createBrowserCapability(),
-    get runtime() {
-      return currentRuntime();
-    },
-    checkAvailability,
-    getCachedAvailability: () => latestAvailability,
-    detectEnvironment: () => detectBrowserEnvironment(options),
-  };
-}
-
-export function createBrowserToolkit(options: BrowserToolkitOptions = {}): AgentToolkit {
-  return createBrowserIntegration(options).toolkit;
+  return toolkit;
 }

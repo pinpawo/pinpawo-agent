@@ -17,7 +17,6 @@
 | `pinpawo actor` | Select the local Pet actor. | — |
 | `pinpawo server` / `pinpawo run` | Start the local host. | `--mode chat|studio`, `--workdir <directory>`, `--stdio` |
 | `pinpawo tui` | Start the terminal UI. | `--check`, `--qa`, `--workdir <directory>` |
-| `pinpawo detect` | Print browser/backend detection as JSON. | — |
 | `pinpawo browser extension <action>` | Manage the Chrome Extension driver. | `--extension-id <id>` |
 | `pinpawo capability list` | List installed user Capabilities. | — |
 | `pinpawo capability validate <dir>` | Validate one Capability directory. | — |

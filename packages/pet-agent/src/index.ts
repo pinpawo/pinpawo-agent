@@ -138,7 +138,10 @@ export {
   ToolkitRuntimeManager,
 } from './agent/orchestrator/toolkitRuntime';
 export type {
+  ToolkitRuntimeDiagnostic,
+  ToolkitRuntimeDiagnosticError,
   ToolkitRuntimeExecution,
+  ToolkitRuntimeLifecycle,
 } from './agent/orchestrator/toolkitRuntime';
 export type {
   CapabilityDocumentWorkspace,

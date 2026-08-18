@@ -122,6 +122,19 @@ test('toolkit registration rejects malformed static contract fields', () => {
 
   assert.throws(
     () => validateToolkitDefinition({
+      name: 'invalid_runtime_diagnostic',
+      description: 'Runtime diagnostic hooks must be callable.',
+      tools: [{ tool: alphaTool }],
+      runtime: {
+        start: () => ({}),
+        diagnose: 'not callable',
+      },
+    } as never),
+    /runtime\.diagnose must be a function/,
+  );
+
+  assert.throws(
+    () => validateToolkitDefinition({
       name: 'invalid_review_callback',
       description: 'Optional review callbacks must be callable.',
       tools: [{

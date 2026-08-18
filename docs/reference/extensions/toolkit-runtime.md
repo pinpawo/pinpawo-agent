@@ -94,13 +94,18 @@ manager 和 Agent 不接触这些概念。
 - 若 host 直接传入预构建 orchestrator graph，则该 graph 创建时必须获得同一个
   manager；pet factory 不会在 graph 外额外启动 root。
 
-## 统一诊断（Accepted target，pending #645）
+## 统一诊断
 
-本节是已确认的迁移目标，尚未作为当前 manager 公共 API 实现。
 `ToolkitRuntimeManager` 必须为每个声明 Runtime 的 Toolkit 暴露同一份基础诊断：
 Toolkit name、lifecycle、active binding 数和最近失败。Toolkit 可以通过通用
 `diagnose(root)` hook 提供不透明 `details`；Host 只负责聚合和转发，不按 Toolkit
 名称解释这些字段，也不维护 Browser、shell 或 git 专属状态源。
+
+Host 调用 `ToolkitRuntimeManager.diagnose()` 获取只读 snapshot。`starting`、`ready`、
+`stopping`、`stopped` 和 start/stop 的 `failed` 由 root lifecycle 产生；resolve、
+binding release 或 `diagnose(root)` 的非致命错误投影为 `degraded`。`lastError` 保留
+通用 code/message，`details` 必须为 JSON-safe value，不能携带 root、session 或
+其他动态对象。
 
 Runtime diagnostics 只描述 live operational state。它不替代 Host config selection，
 也不改变 Toolkit availability 或 Capability `uses` 的静态语义。

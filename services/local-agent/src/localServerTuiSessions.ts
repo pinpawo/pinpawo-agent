@@ -133,13 +133,18 @@ function readTuiCheckpointMessageSource(
   message: BaseMessage,
 ): TuiCheckpointMessageSource | null {
   const type = message._getType();
-  if (type === 'human') return { role: 'user' };
-  if (type !== 'ai') return null;
+  if (type !== 'human' && type !== 'ai') return null;
   const pinpawo = message.additional_kwargs?.pinpawo;
-  if (!pinpawo || typeof pinpawo !== 'object') return { role: 'assistant' };
-  if ('lane' in pinpawo || (pinpawo as Record<string, unknown>).synthetic === true) {
-    return null;
+  // Lane-tagged messages are internal transcripts, never conversation. The
+  // Planner writes its own input as a laned HumanMessage, so this check must
+  // precede the human/ai split or that input renders as a user turn.
+  if (pinpawo && typeof pinpawo === 'object') {
+    if ('lane' in pinpawo || (pinpawo as Record<string, unknown>).synthetic === true) {
+      return null;
+    }
   }
+  if (type === 'human') return { role: 'user' };
+  if (!pinpawo || typeof pinpawo !== 'object') return { role: 'assistant' };
   if (!('handoffFrom' in pinpawo)) return { role: 'assistant' };
   const runId = (pinpawo as Record<string, unknown>).runId;
   return typeof runId === 'string' && runId.trim()

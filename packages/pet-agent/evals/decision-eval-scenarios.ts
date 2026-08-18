@@ -81,6 +81,35 @@ const ENTRY_ANSWER_CASES: readonly EntryAnswerEvalCase[] = [
     messages: [{ role: 'user', text: '读取仓库文件，修复当前 TypeScript 错误并运行测试。' }],
     expectedRoute: 'plan_request',
   },
+  {
+    // The current message states no goal on its own. plan_request must carry the
+    // goal it refers back to, never the continuation utterance itself.
+    name: 'continuation-utterance-carries-referenced-goal',
+    messages: [
+      { role: 'user', text: '帮我把 docs/ 下的接口文档同步到最新实现，先别动测试。' },
+      {
+        role: 'assistant',
+        text: '我先确认范围：只更新 docs/ 下的接口文档，不改测试，对吗？',
+      },
+      { role: 'user', text: '嗯。开始吧' },
+    ],
+    expectedRoute: 'plan_request',
+  },
+  {
+    // Resolving a reference must not become an invitation to invent scope: the
+    // goal carries the URL the user pointed at, and nothing the user never said
+    // (review dimensions, checklists, output format).
+    name: 'reference-resolution-adds-no-scope',
+    messages: [
+      {
+        role: 'user',
+        text: '看下 https://github.com/pinpawo/pinpawo-agent/pull/667 这个改动。',
+      },
+      { role: 'assistant', text: '好的，我看一下。' },
+      { role: 'user', text: '你自己 review 一下这个 pr' },
+    ],
+    expectedRoute: 'plan_request',
+  },
 ];
 
 const actor = {
@@ -155,12 +184,14 @@ function entryAnswerScenarios(): DecisionEvalScenario[] {
             comment: `characters=${text.length.toString()}`,
           });
         } else {
+          const planGoal = planCalls[0]?.args?.goal;
           const validPlanCall = planCalls.length === 1
-            && Object.keys(planCalls[0]?.args ?? {}).length === 0
+            && typeof planGoal === 'string'
+            && planGoal.trim().length > 0
             && text.length === 0;
           scores.push({
             key: 'plan_request_shape',
-            statement: 'Call plan_request exactly once with an empty argument object and no user-facing text.',
+            statement: 'Call plan_request exactly once with a non-empty goal and no user-facing text.',
             evaluator: 'deterministic',
             score: validPlanCall ? 1 : 0,
             comment: `calls=${planCalls.length.toString()}`,

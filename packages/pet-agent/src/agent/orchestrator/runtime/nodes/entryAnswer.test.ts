@@ -11,9 +11,20 @@ import { PLAN_REQUEST_TOOL_NAME } from './entryAnswer';
 import { createContextCompactionMessage } from '../../contextCompaction';
 import { getMessageLane, mainConversationMessages, setPinpetMeta } from '../../messageLanes';
 
+function readLatestHumanText(messages: BaseMessage[]): string {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?._getType() !== 'human') continue;
+    const text = typeof message.content === 'string' ? message.content : message.text;
+    if (text.trim()) return text;
+  }
+  return 'Execute the requested task.';
+}
+
 function entryAnswerModel(
   mode: 'direct' | 'plan',
   onEntryInvoke?: (messages: BaseMessage[]) => void,
+  planGoal?: string,
 ) {
   let boundCalls = 0;
   let resultCalls = 0;
@@ -28,7 +39,10 @@ function entryAnswerModel(
               tool_calls: [{
                 id: 'call-plan-request',
                 name: PLAN_REQUEST_TOOL_NAME,
-                args: {},
+                // Default to echoing the current request, as a real model does
+                // when it already states the goal; planGoal covers the
+                // continuation-utterance case.
+                args: { goal: planGoal ?? readLatestHumanText(messages) },
               }],
             })
           : new AIMessage('可以，现有信息足够直接回答。');
@@ -159,6 +173,36 @@ test('Entry Answer preserves the current textual HumanMessage exactly', async ()
   assert.equal(plannerRequest, request);
 });
 
+test('Entry Answer resolves a continuation utterance into the goal it refers back to', async () => {
+  const resolvedGoal = '把 docs/ 下的接口文档同步到最新实现。';
+  const scripted = entryAnswerModel('plan', undefined, resolvedGoal);
+  let plannerRequest = '';
+  const graph = createOrchestratorGraph({
+    models: { act: scripted.model, answer: scripted.model },
+    actor,
+    capabilityPlannerRunner: {
+      async invoke(input) {
+        plannerRequest = input.userRequest;
+        return { action: 'unavailable', tasks: [] };
+      },
+    },
+  });
+
+  const result = await graph.invoke(
+    buildOrchestratorRunInput([
+      new HumanMessage('帮我把 docs/ 下的接口文档同步到最新实现，先别动测试。'),
+      new AIMessage('好的，我先确认一下范围：只更新 docs/ 下的接口文档，不改测试，对吗？'),
+      new HumanMessage('嗯。开始吧'),
+    ]),
+    invokeConfig(),
+  );
+
+  // The continuation utterance never becomes the run goal: everything
+  // downstream needs a request that stands on its own.
+  assert.equal(result.runUserRequest, resolvedGoal);
+  assert.equal(plannerRequest, resolvedGoal);
+});
+
 test('Entry Answer receives normalized main conversation and excludes delegation lanes', async () => {
   let entryMessages: BaseMessage[] = [];
   const scripted = entryAnswerModel('direct', (messages) => {
@@ -197,4 +241,75 @@ test('Entry Answer receives normalized main conversation and excludes delegation
     currentRequest,
   ]);
   assert.equal(entryMessages.includes(laneMessage), false);
+});
+
+test('Entry Answer retries when the model announces execution instead of calling plan_request', async () => {
+  // Reproduces run-01a0145f: after several delegation_started records sit in the
+  // main conversation, the model imitated them and wrote the announcement as
+  // plain text with no tool call, so nothing ran.
+  const goal = 'review https://github.com/pinpawo/pinpawo-agent/pull/667';
+  let invocations = 0;
+  let repairPrompt = '';
+  const model = {
+    bindTools: () => ({
+      invoke: async (messages: BaseMessage[]) => {
+        invocations += 1;
+        if (invocations === 1) {
+          return new AIMessage('开始执行计划任务：对 Pull Request #667 进行代码审查。');
+        }
+        repairPrompt = String(messages.at(-1)?.content ?? '');
+        return new AIMessage({
+          content: '',
+          tool_calls: [{ id: 'call-plan', name: PLAN_REQUEST_TOOL_NAME, args: { goal } }],
+        });
+      },
+    }),
+    invoke: async () => new AIMessage('当前没有可执行该任务的 Capability。'),
+  } as unknown as BaseChatModel;
+
+  let plannerRequest = '';
+  const graph = createOrchestratorGraph({
+    models: { act: model, answer: model },
+    actor,
+    capabilityPlannerRunner: {
+      async invoke(input) {
+        plannerRequest = input.userRequest;
+        return { action: 'unavailable', tasks: [] };
+      },
+    },
+  });
+
+  const result = await graph.invoke(
+    buildOrchestratorRunInput([new HumanMessage('你自己review一下这个pr')]),
+    invokeConfig(),
+  );
+
+  assert.equal(invocations, 2, 'the faked announcement must trigger exactly one retry');
+  assert.match(repairPrompt, /plan_request/);
+  assert.equal(plannerRequest, goal, 'the retry must reach the Planner');
+  assert.equal(
+    result.messages.some((message) => String(message.content).startsWith('开始执行计划任务')),
+    false,
+    'the faked announcement must never reach the user',
+  );
+});
+
+test('Entry Answer leaves an ordinary reply untouched', async () => {
+  const scripted = entryAnswerModel('direct');
+  const graph = createOrchestratorGraph({
+    models: { act: scripted.model, answer: scripted.model },
+    actor,
+    capabilityPlannerRunner: {
+      async invoke() {
+        throw new Error('Planner must not run for a direct reply.');
+      },
+    },
+  });
+
+  await graph.invoke(
+    buildOrchestratorRunInput([new HumanMessage('这个方案还有更好的选择吗？')]),
+    invokeConfig(),
+  );
+
+  assert.deepEqual(scripted.counts(), { boundCalls: 1, resultCalls: 0 });
 });

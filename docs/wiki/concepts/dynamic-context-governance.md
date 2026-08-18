@@ -32,27 +32,15 @@ This page records the repository's dynamic-context governance model. The raw
 design retains delivery planning; this Wiki page keeps only reusable contracts
 and current implementation facts.
 
-Current code assembles model-visible dynamic context in several places and with
-different authority:
+> **Per-node assembly is owned by [Context injection map](context-injection-map.md).**
+> This page keeps the *governance contract* — who may own, render, and place
+> dynamic context. For what each node actually receives today, read the map.
 
-- shared serializers live in `prompts/context.ts`;
-- Answer builds terminal reply prose in its runtime node and places it in the
-  leading system message;
-- Capability execution concatenates stable instructions and runtime-dependent
-  `promptSections` into one agent system prompt;
-- Entry projects canonical main-conversation evidence into a bounded ephemeral
-  Planner briefing carried only by graph dispatch;
-- an accepted `task_done` result is projected into a typed boundary dispatch
-  containing the completed task, a bounded complete-result representation, and
-  the remaining plan;
-- main-conversation compaction restores a generated summary as a
-  `SystemMessage`.
-
-Answer currently defines a closed `AnswerContextFacts` union, runtime projection,
-a bounded synthetic Human facts-message builder, and structural tests. Its
-production invocation still uses the legacy system-prose renderer. The typed
-contract is therefore current code, while the target placement is not yet
-current runtime behavior.
+This page's earlier survey of current assembly has been removed: several of its
+claims no longer hold. In particular, Answer's production invocation now uses
+the typed `<answer_input>` fact message via `appendAnswerInputMessage()`, not a
+legacy system-prose renderer, and the compaction summary is an `AIMessage`
+carrying `authority="none"`, not a `SystemMessage`.
 
 ## Governance priority
 

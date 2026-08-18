@@ -50,7 +50,6 @@ function main() {
       + `input=${metrics.inputChars} chars/${metrics.inputLines} lines, `
       + `total≈${metrics.approximateTokens} tokens`,
     );
-    console.log(`Shared prefix: ${metrics.sharedPrefixPercent}% of system prompt`);
     console.log('\n--- SYSTEM MESSAGE ---');
     console.log(prompt.system);
     console.log('\n--- STRUCTURED CONTEXT MESSAGE ---');

@@ -643,7 +643,7 @@ test('Planner return routes bounded facts through the answer node', async () => 
   assert.match(String(mainConversationMessages(state.messages).at(-1)?.content ?? ''), /扩大当前 Capability/);
   assert.doesNotMatch(answerInvocationText, /The compiled Capability registry is empty/);
   assert.match(answerInvocationText, /<reply_mode>blocked<\/reply_mode>/);
-  assert.match(answerInvocationText, /<blocked_reason>capability_unavailable<\/blocked_reason>/);
+  assert.match(answerInvocationText, /<blocked_reason meaning="[^"]+">capability_unavailable<\/blocked_reason>/);
   assert.equal(state.runNextDelegation, null);
   assert.equal(state.taskActiveDelegation, null);
 });
@@ -4734,7 +4734,7 @@ test('terminal Planner action keeps active delegation when handoff cannot be bui
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.id), ['active-1']);
   assert.doesNotMatch(String(answerMessages[0]?.content ?? ''), /当前 explore 任务|已有任务仍待判断/);
   assert.match(String(answerMessages.at(-1)?.content ?? ''), /<reply_mode>blocked<\/reply_mode>/);
-  assert.match(String(answerMessages.at(-1)?.content ?? ''), /<blocked_reason>capability_unavailable<\/blocked_reason>/);
+  assert.match(String(answerMessages.at(-1)?.content ?? ''), /<blocked_reason meaning="[^"]+">capability_unavailable<\/blocked_reason>/);
   assert.match(String(answerMessages.at(-1)?.content ?? ''), /当前 explore 任务/);
   assert.match(String(mainConversationMessages(state.messages).at(-1)?.content ?? ''), /暂不能完成任务边界切换/);
 });
@@ -5443,7 +5443,7 @@ test('Planner boundary uses a unified run-iteration guard before invoking decisi
 
   assert.doesNotMatch(String(answerMessages[0]?.content ?? ''), /持续执行大规模迁移|最近卡住/);
   assert.match(String(answerMessages.at(-1)?.content ?? ''), /<reply_mode>blocked<\/reply_mode>/);
-  assert.match(String(answerMessages.at(-1)?.content ?? ''), /<blocked_reason>iteration_limit<\/blocked_reason>/);
+  assert.match(String(answerMessages.at(-1)?.content ?? ''), /<blocked_reason meaning="[^"]+">iteration_limit<\/blocked_reason>/);
   assert.match(String(answerMessages.at(-1)?.content ?? ''), /持续执行大规模迁移/);
   assert.equal(state.messages.at(-1)?.content?.toString().includes('主流程循环已达到上限'), true);
   assert.equal(state.runIterationCount, 0);

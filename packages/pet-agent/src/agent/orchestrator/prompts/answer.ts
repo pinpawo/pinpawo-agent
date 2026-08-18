@@ -116,6 +116,19 @@ function renderAcceptedResults(results: readonly AnswerAcceptedResult[]): string
   return lines.join('\n');
 }
 
+/**
+ * The reason is a code-owned enum, so its meaning travels with the value rather
+ * than as a glossary in the system prompt. Adding a variant here is what keeps
+ * the rendered fact self-describing; the prompt states only what to do when
+ * blocked, not what each enum member means.
+ */
+const BLOCKED_REASON_MEANING: Record<AnswerBlockedReason, string> = {
+  iteration_limit: '主流程达到本轮迭代上限',
+  execution_limit: '执行器达到执行上限',
+  incomplete: '当前工作没有形成可交付结果',
+  capability_unavailable: '当前没有可执行该工作的能力',
+};
+
 function renderAnswerContext(facts: ModelAnswerContextFacts): string {
   const lines = [
     '<answer_context role="fact" source="orchestrator_state" authority="none">',
@@ -123,7 +136,7 @@ function renderAnswerContext(facts: ModelAnswerContextFacts): string {
     `  <user_request_present>${facts.hasUserRequest ? 'true' : 'false'}</user_request_present>`,
   ];
   if (facts.mode === 'blocked') {
-    lines.push(`  <blocked_reason>${facts.reason}</blocked_reason>`);
+    lines.push(`  <blocked_reason meaning="${BLOCKED_REASON_MEANING[facts.reason]}">${facts.reason}</blocked_reason>`);
     if (facts.unfinishedTask) {
       lines.push(indentXmlBlock(xmlTextBlock(
         'unfinished_task',

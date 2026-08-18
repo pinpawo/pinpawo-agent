@@ -169,12 +169,14 @@ test('blocked Answer facts are escaped and bounded as data', () => {
 
   assert.ok(message);
   const context = String(message.content);
-  assert.match(context, /<blocked_reason>capability_unavailable<\/blocked_reason>/);
+  assert.match(context, /<blocked_reason meaning="[^"]+">capability_unavailable<\/blocked_reason>/);
   assert.match(context, /<unfinished_task>\n\s*<!\[CDATA\[/);
   assert.doesNotMatch(context, /x{350}/);
+  // Fixed allowance covers the XML wrappers plus the code-owned blocked_reason
+  // meaning attribute; the bounded fields remain the only variable-length parts.
   assert.ok(context.length < (
     ANSWER_CONTEXT_LIMITS.unfinishedTaskChars
     + ANSWER_CONTEXT_LIMITS.detailChars
-    + 520
+    + 560
   ));
 });

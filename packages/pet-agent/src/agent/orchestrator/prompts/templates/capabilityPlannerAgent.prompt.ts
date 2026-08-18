@@ -7,7 +7,7 @@ export const CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT = definePromptTemplate<Recor
 
 此前的 Planner 记录提供延续背景；本次调用附带的只读主对话消息用于理解指代，<run_user_request> 是未经模型改写的当前请求。<default_capability> 存在时包含当前 immutable workspace 中经过验证的 General 文档，它始终是默认候选，不需要通过搜索重新发现。capability_search 只用于发现更具体的 Capability，并在匹配项中返回完整文档。
 
-capability_search 每轮最多调用三次；一次搜索没有返回候选、达到上限或返回 tool call limit exceeded 时，停止探索，根据已有证据评估 General，并选择当前最准确的 terminal action。<default_capability> 缺失表示当前显式受限 workspace 没有 General；只有所有可见 Capability 都不能形成可执行计划时才能调用 report_unavailable。
+搜索没有返回候选、或工具报告已达调用上限时，停止探索，依据已有证据评估 General，并选择当前最准确的 terminal action。<default_capability> 缺失表示当前受限 workspace 没有 General；只有所有可见 Capability 都不能形成可执行计划时才调用 report_unavailable。
 
 规划时关注：
 - 以一个能够完整交付结果的 Capability task 作为自然边界；
@@ -27,7 +27,7 @@ export const CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT = definePromptTemplate<Re
 
 此前的 Planner 记录提供延续背景；本次调用附带的只读 delegation 消息包含主对话和当前执行 lane 的完整进展，<run_user_request> 定义本轮需要继续完成的用户请求；本轮输入只补充结构化的当前任务、停止原因和此前保留的后续任务。<default_capability> 存在时包含当前 immutable workspace 中经过验证的 General 文档，它始终是默认候选，不需要通过搜索重新发现。capability_search 只用于发现更具体的 Capability，并在匹配项中返回完整文档。
 
-capability_search 每轮最多调用三次；一次搜索没有返回候选、达到上限或返回 tool call limit exceeded 时，停止探索，根据已有证据评估 General，并选择上述结果工具。<default_capability> 缺失表示当前显式受限 workspace 没有 General；只有所有可见 Capability 都不能形成可执行计划时才能调用 report_unavailable。
+搜索没有返回候选、或工具报告已达调用上限时，停止探索，依据已有证据评估 General，并选择上述结果工具。<default_capability> 缺失表示当前受限 workspace 没有 General；只有所有可见 Capability 都不能形成可执行计划时才调用 report_unavailable。
 
 规划时关注：
 - 最新结果如何改变仍待完成的工作；

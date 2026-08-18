@@ -12,7 +12,7 @@ const execFileAsync = promisify(execFile);
 
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
-await execFileAsync('tsc', ['-p', resolve(root, 'tsconfig.extension.build.json')]);
+await execFileAsync('tsc', ['-p', resolve(root, 'tsconfig.extension.build.json')], { shell: process.platform === 'win32' });
 await generateIcons(resolve(output, 'icons'));
 await cp(resolve(source, 'manifest.json'), resolve(output, 'manifest.json'));
 await cp(resolve(source, 'README.md'), resolve(output, 'README.md'));

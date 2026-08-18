@@ -3,7 +3,6 @@ import Combine
 import ServiceManagement
 
 enum AppScreen {
-  case login
   case llmSetup
   case actorMissing
   case status
@@ -11,7 +10,7 @@ enum AppScreen {
 
 @MainActor
 final class AppState: ObservableObject {
-  @Published var screen: AppScreen = .login
+  @Published var screen: AppScreen = .llmSetup
   @Published var launchAtLogin = false
   @Published private(set) var desktopPetVisible = true
 
@@ -45,7 +44,6 @@ final class AppState: ObservableObject {
 
   func resolveScreen() -> AppScreen {
     let c = Config.shared
-    if !c.isLoggedIn { return .login }
     if !c.hasLlmConfig { return .llmSetup }
     if !c.hasActor { return .actorMissing }
     return .status
@@ -56,19 +54,6 @@ final class AppState: ObservableObject {
     if screen == .status {
       startAgent()
     }
-  }
-
-  // MARK: - Auth
-
-  func completeLogin(user: AuthUser) {
-    advance()
-  }
-
-  func logout() {
-    agent.stop()
-    poller.stop()
-    AuthService.shared.logout()
-    screen = .login
   }
 
   // MARK: - Agent lifecycle

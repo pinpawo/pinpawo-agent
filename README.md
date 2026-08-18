@@ -78,7 +78,6 @@ Install the CLI globally:
 ```bash
 npm install -g pinpawo
 pinpawo init
-pinpawo login
 pinpawo setup
 pinpawo tui
 ```
@@ -87,7 +86,6 @@ Or run it without a global install:
 
 ```bash
 npx pinpawo init
-npx pinpawo login
 npx pinpawo tui
 ```
 
@@ -136,7 +134,7 @@ Configuration is resolved from:
 2. `~/.pinpawo/.env`
 3. process environment variables
 
-Use `pinpawo login` for interactive setup and `pinpawo setup` for diagnostics. Never commit local credentials or generated runtime state.
+Edit `~/.pinpawo/.env` to configure credentials and model settings; use `pinpawo setup` for diagnostics. Never commit local credentials or generated runtime state.
 
 | Key | Purpose |
 |---|---|
@@ -165,7 +163,6 @@ A complete `LLM_API_KEY` + `LLM_BASE_URL` + `LLM_MODEL` tuple creates an ephemer
 | `pinpawo server --mode studio` | Start in Studio mode. |
 | `pinpawo server --stdio` | Use a single JSONL stdio peer instead of HTTP/WebSocket. |
 | `pinpawo init` | Create local config and the example Capability. |
-| `pinpawo login` | Configure credentials and model settings. |
 | `pinpawo setup` | Diagnose configuration and show next steps. |
 | `pinpawo actor` | Select the local pet actor. |
 | `pinpawo tui` | Start the terminal client. |

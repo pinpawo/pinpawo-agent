@@ -5,8 +5,6 @@ struct MenuBarView: View {
 
   var body: some View {
     switch appState.screen {
-    case .login:
-      LoginView()
     case .llmSetup:
       LLMSettingsView()
     case .actorMissing:

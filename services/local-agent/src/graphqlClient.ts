@@ -14,10 +14,10 @@ function checkJwtExpiry() {
     if (!exp) return;
     const secsLeft = exp - Math.floor(Date.now() / 1000);
     if (secsLeft < 0) {
-      throw new Error('hasura_jwt has expired — run "pinpawo login" to refresh credentials');
+      throw new Error('hasura_jwt has expired — update HASURA_JWT in ~/.pinpawo/.env to refresh credentials');
     }
     if (secsLeft < 7 * 24 * 3600) {
-      console.warn(`[auth] hasura_jwt expires in ${Math.ceil(secsLeft / 86400)} days — consider re-running "pinpawo login"`);
+      console.warn(`[auth] hasura_jwt expires in ${Math.ceil(secsLeft / 86400)} days — consider updating HASURA_JWT in ~/.pinpawo/.env`);
     }
   } catch (e) {
     if (e instanceof Error && e.message.includes('expired')) throw e;

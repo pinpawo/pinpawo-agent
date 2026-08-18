@@ -19,11 +19,10 @@ local host 在你的机器上运行。`PINPAWO_LOCAL_ONLY=1` 会关闭 PinPawo h
 ```bash
 npm install -g pinpawo
 pinpawo init
-pinpawo login
 pinpawo setup
 ```
 
-`pinpawo init` 会创建 `~/.pinpawo/.env`、本地 Capability 目录与 `hello-pinpawo` 示例。`pinpawo login` 配置模型；`pinpawo setup` 用于诊断缺失配置。
+`pinpawo init` 会创建 `~/.pinpawo/.env`、本地 Capability 目录与 `hello-pinpawo` 示例。编辑 `~/.pinpawo/.env` 配置凭证与模型；`pinpawo setup` 用于诊断缺失配置。
 
 ## 验证示例
 

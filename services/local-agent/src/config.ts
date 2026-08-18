@@ -173,7 +173,7 @@ const apiConnected = !localOnlyMode && missingOrPlaceholderApiConfig.length === 
 const apiSetupMessage = localOnlyMode
   ? 'PINPAWO_LOCAL_ONLY is enabled. Local-only mode is enabled; hosted app relay and Hasura-backed context are disabled.'
   : missingOrPlaceholderApiConfig.length > 0
-    ? `API login is not configured (${missingOrPlaceholderApiConfig.join(', ')}). Local-only mode is enabled; run "pinpawo login" to enable the hosted app, chat relay, and Hasura-backed context.`
+    ? `API credentials are not configured (${missingOrPlaceholderApiConfig.join(', ')}). Local-only mode is enabled; configure API_BASE_URL, HASURA_ENDPOINT, AGENT_TOKEN, and HASURA_JWT to enable the hosted app, chat relay, and Hasura-backed context.`
     : '';
 
 const modelProfileRegistry = buildModelProfileRegistry({

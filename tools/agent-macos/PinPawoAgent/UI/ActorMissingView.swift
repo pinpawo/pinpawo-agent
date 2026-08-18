@@ -67,8 +67,6 @@ struct ActorMissingView: View {
         Button("刷新") { Task { await loadActors() } }
           .buttonStyle(.plain).font(.caption).foregroundColor(.secondary)
         Spacer()
-        Button("退出登录") { appState.logout() }
-          .buttonStyle(.plain).font(.caption).foregroundColor(.secondary)
       }
     }
     .padding(16)

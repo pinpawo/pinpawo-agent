@@ -133,15 +133,7 @@ struct StatusView: View {
   @ViewBuilder
   private var footerSection: some View {
     HStack {
-      VStack(alignment: .leading, spacing: 2) {
-        if let nickname = Config.shared.load().nickname {
-          Text(nickname).font(.caption).lineLimit(1)
-        }
-      }
       Spacer()
-      Button("退出登录") { appState.logout() }
-        .buttonStyle(.plain).font(.caption).foregroundColor(.secondary)
-      Divider().frame(height: 12)
       Toggle("开机启动", isOn: Binding(
         get: { appState.launchAtLogin },
         set: { _ in appState.toggleLaunchAtLogin() }

@@ -10,7 +10,6 @@ release.
 ```bash
 npm install -g pinpawo
 pinpawo init
-pinpawo login
 pinpawo setup
 pinpawo capability validate ~/.pinpawo/capabilities/hello-pinpawo
 pinpawo tui
@@ -20,7 +19,6 @@ For one-off usage without a global install:
 
 ```bash
 npx pinpawo init
-npx pinpawo login
 npx pinpawo tui
 ```
 
@@ -30,7 +28,7 @@ npx pinpawo tui
 - `~/.pinpawo/capabilities/` for user capabilities.
 - `~/.pinpawo/capabilities/hello-pinpawo/` as a minimal capability that validates and loads.
 
-Configuration is read from `~/.pinpawo/config.json`, `~/.pinpawo/.env`, and environment variables. Runnable models are stored as versioned profiles under `config.json#models`; use `PINPAWO_MODEL_PROFILE` to select a stored profile. A complete `LLM_API_KEY` + `LLM_BASE_URL` + `LLM_MODEL` tuple creates an ephemeral environment profile, while partial tuples are ignored instead of being mixed with stored credentials. Use `pinpawo login` for interactive credential setup, `pinpawo setup` to check missing config and next steps, or edit `~/.pinpawo/.env` directly. Set `PINPAWO_LOCAL_ONLY=1` to start without hosted API, WebSocket relay, or Hasura GraphQL connections even when saved server credentials exist. Browser `auto` mode prefers a connected Chrome extension for compatible default-session operations and otherwise uses Playwright; force either driver with `PINPAWO_BROWSER_BACKEND=extension` or `playwright`.
+Configuration is read from `~/.pinpawo/config.json`, `~/.pinpawo/.env`, and environment variables. Runnable models are stored as versioned profiles under `config.json#models`; use `PINPAWO_MODEL_PROFILE` to select a stored profile. A complete `LLM_API_KEY` + `LLM_BASE_URL` + `LLM_MODEL` tuple creates an ephemeral environment profile, while partial tuples are ignored instead of being mixed with stored credentials. Use `pinpawo setup` to check missing config and next steps, or edit `~/.pinpawo/.env` directly to configure credentials. Set `PINPAWO_LOCAL_ONLY=1` to start without hosted API, WebSocket relay, or Hasura GraphQL connections even when saved server credentials exist. Browser `auto` mode prefers a connected Chrome extension for compatible default-session operations and otherwise uses Playwright; force either driver with `PINPAWO_BROWSER_BACKEND=extension` or `playwright`.
 
 For a local repository smoke test:
 
@@ -78,7 +76,6 @@ export default {
 
 ```bash
 pinpawo init
-pinpawo login
 pinpawo setup
 pinpawo actor
 pinpawo server

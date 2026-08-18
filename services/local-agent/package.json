@@ -22,7 +22,6 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
-    "login": "tsx src/index.ts login",
     "actor": "tsx src/index.ts actor",
     "tui": "tsx src/index.ts tui",
     "tui:v2": "tsx src/index.ts tui",

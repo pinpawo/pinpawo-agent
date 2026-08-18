@@ -23,13 +23,12 @@ configuration required to run an agent.
 ```bash
 npm install -g pinpawo
 pinpawo init
-pinpawo login
 pinpawo setup
 ```
 
 `pinpawo init` creates `~/.pinpawo/.env`, a local Capability directory, and a
-small `hello-pinpawo` example. `pinpawo login` saves or updates model
-configuration interactively. Use `pinpawo setup` whenever you want a concise
+small `hello-pinpawo` example. Edit `~/.pinpawo/.env` to configure credentials
+and model settings. Use `pinpawo setup` whenever you want a concise
 diagnostic of missing configuration.
 
 ## Verify the scaffold

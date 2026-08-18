@@ -1,56 +1,33 @@
 /**
- * #643: Studio 独立 Host。
+ * #643: Studio Host — independent entry point for Studio mode.
  *
- * Studio 不再是 chat host 的一个分支。它有自己的入口、自己的
- * `HostToolkitCoordinator`、`FileSaver` 和 studio handler。
+ * Studio is no longer a branch of the Chat Host. It has its own entry,
+ * its own transport, and its own lifecycle. It shares capability supply
+ * (toolkit / capability / model / checkpointer) with Chat Host via
+ * {@link HostCapabilityAssembly}, but does NOT carry chat-only concerns
+ * (ws relay, TUI session, chat handler).
  *
- * `StudioHost` 负责:
- * - 装配 host built-in Toolkit(bash/git/browser)与 plugin Toolkit;
- * - 加载 Capability registry(local + user);
- * - 持有 `HostToolkitCoordinator`(inventory + runtime manager);
- * - 持有 `FileSaver`(共享 checkpointer);
- * - 提供 `LocalServerDeps` 给 local server / stdio transport。
- *
- * Studio handler 由 `runAgent` 在 transport 层创建并注入，不在此处持有 ——
- * 因为 handler 的 outbound 绑定具体 peer 类型(`LocalServerPeer` 或
- * `WebSocket`)，属于 transport 层的关注点。
- *
- * 它不负责 chat session、TUI session、ws relay —— 那些归 `LocalAgentRuntime`。
- * 当 studio mode 需要接收 chat 请求(人工解开卡住的 pet)时,chat 请求走
- * `LocalServerChatHandler`,与 studio request 共享同一 local server。
+ * Studio-specific fields like `globalReviewPolicyMode` and
+ * `autoAuthorizationSafetyLevel` are provided by `run.ts` when building
+ * `LocalServerDeps`, not held here — Studio has no chat surface to
+ * configure them.
  */
-import {
-  type AgentCapability,
-  type AgentToolkit,
-  type ToolkitRuntimeDiagnostic,
-  type ToolkitRuntimeManager,
+import type {
+  CapabilityArtifactStore,
+  ToolkitRuntimeDiagnostic,
+  ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
-import {
-  createBrowserCapability,
-  createBrowserToolkit,
-} from '@pinpawo-toolkit/browser';
-import { loadPlugins } from './pluginLoader';
 import type { LoadedUserCapability } from './capabilityLoader';
 import {
-  buildLocalModelProfileRegistry,
   type LocalModelProfileRegistry,
 } from './llmConfig';
-import { ensureActorSelected, loadSelectedActorName, LOCAL_ONLY_ACTOR_NAME } from './actorSelection';
-import { loadStoredConfig } from './storage';
-import {
-  createCoreLocalCapabilities,
-  LocalAgentCapabilityRegistry,
-} from './localAgentCapabilityRegistry';
+import { HostCapabilityAssembly } from './hostCapabilityAssembly';
 import {
   buildLocalAgentRuntimeConfig,
-  findLegacyLocalAgentState,
   type LocalAgentRuntimeConfig,
 } from './runtimeConfig';
 import type { LocalServerDeps, LocalServerStudioModeInfo } from './localServerTypes';
 import { getConfig } from './config';
-import { loadAgentContext } from './contextLoader';
-import { createBashToolkit, createGitToolkit } from './toolkits/local';
-import { HostToolkitCoordinator } from './toolkits/hostToolkitCoordinator';
 import type { HostToolkitInventoryStore } from './toolkits/toolkitInventory';
 import { FileSaver } from './fileSaver';
 
@@ -59,67 +36,27 @@ export type StudioHostOptions = {
   studioMode?: LocalServerStudioModeInfo;
 };
 
+/**
+ * Studio Host.
+ *
+ * It delegates all capability supply to {@link HostCapabilityAssembly} and
+ * only adds Studio-specific concerns: studio mode info and a no-op stop
+ * marker (no ws relay loop).
+ */
 export class StudioHost {
-  private readonly runtimeConfig: LocalAgentRuntimeConfig;
+  private readonly caps: HostCapabilityAssembly;
   private readonly studioModeInfo: LocalServerStudioModeInfo | undefined;
-  private actorId: string | null = null;
-  private actorName: string | null = null;
-  private modelProfiles: LocalModelProfileRegistry | null = null;
-  private readonly toolkitCoordinator = new HostToolkitCoordinator();
-  private readonly hostBuiltInToolkits: readonly AgentToolkit[];
-  private readonly capabilityRegistry: LocalAgentCapabilityRegistry;
-  private readonly chatCheckpointer: FileSaver;
-  private legacyStateNoticeReported = false;
 
   constructor(options: StudioHostOptions = {}) {
-    this.runtimeConfig = options.runtimeConfig ?? buildLocalAgentRuntimeConfig();
-    this.studioModeInfo = options.studioMode;
-    const browserSelected = loadStoredConfig().capabilities?.browser !== false;
-    this.hostBuiltInToolkits = [
-      createBashToolkit(),
-      createGitToolkit(),
-      ...(browserSelected
-        ? [createBrowserToolkit({ backend: () => getConfig().browserBackend })]
-        : []),
-    ];
-    this.capabilityRegistry = new LocalAgentCapabilityRegistry({
-      capabilityArtifactRoot: this.runtimeConfig.capabilityArtifactRoot,
-      createDefaultCapabilities: () => [
-        ...createCoreLocalCapabilities(),
-        ...(browserSelected ? [createBrowserCapability()] : []),
-      ],
+    this.caps = new HostCapabilityAssembly({
+      runtimeConfig: options.runtimeConfig ?? buildLocalAgentRuntimeConfig(),
+      sourceId: 'studio-host',
     });
-    this.chatCheckpointer = new FileSaver(this.runtimeConfig.checkpointPath);
+    this.studioModeInfo = options.studioMode;
   }
 
   async init() {
-    if (!this.legacyStateNoticeReported) {
-      this.legacyStateNoticeReported = true;
-      const legacyStatePaths = findLegacyLocalAgentState(this.runtimeConfig);
-      if (legacyStatePaths.length > 0) {
-        console.warn(
-          '[studio-host] Capability V2 uses a new conversation checkpoint namespace. '
-          + `Legacy state is preserved but not loaded: ${legacyStatePaths.join(', ')}`,
-        );
-      }
-    }
-    const { toolkitSources } = await loadPlugins();
-    this.modelProfiles = buildLocalModelProfileRegistry();
-    await this.toolkitCoordinator.initialize([
-      ...toolkitSources,
-      {
-        id: 'studio-host',
-        kind: 'host_builtin',
-        definitions: this.hostBuiltInToolkits,
-      },
-    ]);
-    await this.capabilityRegistry.load();
-    this.actorId = await ensureActorSelected({ interactive: false });
-    this.actorName = getConfig().apiConnected ? loadSelectedActorName() : LOCAL_ONLY_ACTOR_NAME;
-    const ctx = await loadAgentContext(this.actorId);
-    if (!this.actorName && ctx.pet.name) {
-      this.actorName = ctx.pet.name;
-    }
+    await this.caps.init();
   }
 
   requestStop() {
@@ -128,76 +65,84 @@ export class StudioHost {
 
   async shutdown() {
     this.requestStop();
-    await this.toolkitCoordinator.shutdown();
+    await this.caps.shutdown();
   }
 
+  // ---- Capability supply delegation ----
+
   getRuntimeConfig(): LocalAgentRuntimeConfig {
-    return this.runtimeConfig;
+    return this.caps.getRuntimeConfig();
   }
 
   getChatCheckpointer(): FileSaver {
-    return this.chatCheckpointer;
+    return this.caps.getChatCheckpointer();
   }
 
   getToolkitRuntimeManager(): ToolkitRuntimeManager {
-    return this.toolkitCoordinator.getRuntimeManager();
+    return this.caps.getToolkitRuntimeManager();
   }
 
   getToolkitRuntimeDiagnostics(): Promise<readonly ToolkitRuntimeDiagnostic[]> {
-    return this.toolkitCoordinator.diagnose();
+    return this.caps.getToolkitRuntimeDiagnostics();
   }
 
   getModelProfiles(): LocalModelProfileRegistry {
-    return this.modelProfiles ?? buildLocalModelProfileRegistry();
+    return this.caps.getModelProfiles();
   }
 
   getToolkitInventoryStore(): HostToolkitInventoryStore {
-    return this.toolkitCoordinator.getInventoryStore();
+    return this.caps.getToolkitInventoryStore();
   }
 
-  getLocalCapabilities(): AgentCapability[] {
-    return this.capabilityRegistry.getLocalCapabilities();
+  getLocalCapabilities() {
+    return this.caps.getLocalCapabilities();
   }
 
-  getCapabilityArtifactStore() {
-    return this.capabilityRegistry.getCapabilityArtifactStore();
+  getCapabilityArtifactStore(): CapabilityArtifactStore {
+    return this.caps.getCapabilityArtifactStore();
   }
 
   getUserCapabilities(): LoadedUserCapability[] {
-    return this.capabilityRegistry.getUserCapabilities();
+    return this.caps.getUserCapabilities();
   }
 
   async rescanUserCapabilities(): Promise<LoadedUserCapability[]> {
-    return this.capabilityRegistry.rescanUserCapabilities();
+    return this.caps.rescanUserCapabilities();
   }
 
   getActorId(): string {
-    if (!this.actorId) {
-      throw new Error('Studio host actorId is not initialized');
-    }
-    return this.actorId;
+    return this.caps.getActorId();
   }
 
   getActorName(): string | null {
-    return this.actorName;
+    return this.caps.getActorName();
   }
 
   getStudioModeInfo(): LocalServerStudioModeInfo | undefined {
     return this.studioModeInfo;
   }
 
+  /**
+   * Build `LocalServerDeps` for the transport layer.
+   *
+   * Chat-only fields (`globalReviewPolicyMode`,
+   * `autoAuthorizationSafetyLevel`) are included because `LocalServerDeps`
+   * is a shared type; the transport layer needs them even in studio mode
+   * for the local server's deps store. They come from host config, not
+   * from Studio-specific state.
+   */
   buildLocalServerDeps(): LocalServerDeps {
     return {
       serverMode: 'studio',
       ...(this.studioModeInfo ? { studioMode: this.studioModeInfo } : {}),
       actorId: this.getActorId(),
-      actorName: this.actorName ?? undefined,
-      chatCheckpointer: this.chatCheckpointer,
+      actorName: this.getActorName() ?? undefined,
+      chatCheckpointer: this.getChatCheckpointer(),
       modelProfiles: this.getModelProfiles(),
       globalReviewPolicyMode: getConfig().globalReviewPolicyMode,
       autoAuthorizationSafetyLevel: getConfig().autoAuthorizationSafetyLevel,
-      workdir: this.runtimeConfig.workdir,
-      runtimeConfig: this.runtimeConfig,
+      workdir: this.getRuntimeConfig().workdir,
+      runtimeConfig: this.getRuntimeConfig(),
       toolkitInventory: this.getToolkitInventoryStore(),
       toolkitRuntimeManager: this.getToolkitRuntimeManager(),
       localCapabilities: this.getLocalCapabilities(),

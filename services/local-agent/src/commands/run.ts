@@ -1,4 +1,4 @@
-import { LocalAgentRuntime } from '../runtime';
+import { LocalAgentHost } from '../runtime';
 import { StudioHost } from '../studioHost';
 import { startLocalServer } from '../localServer';
 import { getConfig } from '../config';
@@ -34,7 +34,7 @@ export async function runAgent(options: RunAgentOptions) {
     ? redirectConsoleToStdioDiagnostics()
     : () => undefined;
   let stopping = false;
-  let runtime: LocalAgentRuntime | null = null;
+  let runtime: LocalAgentHost | null = null;
   let studioHost: StudioHost | null = null;
   let closeLocalTransport: (() => void) | null = null;
   const handleSigint = () => {
@@ -85,7 +85,7 @@ export async function runAgent(options: RunAgentOptions) {
     }
 
     // #643: Chat and Studio use separate Host entry points.
-    // Chat mode → LocalAgentRuntime; Studio mode → StudioHost.
+    // Chat mode → LocalAgentHost; Studio mode → StudioHost.
     if (mode === 'studio') {
       studioHost = new StudioHost({
         runtimeConfig,
@@ -145,8 +145,9 @@ export async function runAgent(options: RunAgentOptions) {
         }
       }
     } else {
-      // Chat mode: original LocalAgentRuntime path.
-      runtime = new LocalAgentRuntime(runtimeConfig, mode);
+      // Chat mode: LocalAgentHost shares capability supply via
+// HostCapabilityAssembly; adds chat/ws-relay concerns on top.
+      runtime = new LocalAgentHost(runtimeConfig, mode);
 
       // Init loads Toolkit definitions and starts their optional runtimes before
       // any local transport begins accepting execution requests.

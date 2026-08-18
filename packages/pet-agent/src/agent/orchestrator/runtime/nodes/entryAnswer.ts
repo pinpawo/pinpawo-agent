@@ -124,7 +124,7 @@ function createPlanRequestTool() {
       description: 'Hand the current user request to the Capability Planner when satisfying it requires any tool, external capability, or task execution.',
       schema: z.object({
         goal: z.string().trim().min(1).max(MAX_PLAN_REQUEST_GOAL_CHARS)
-          .describe('用户当前要达成的目标，一句话陈述。当前消息是延续话语（例如“继续”“开始吧”“可以”）时，回到它所指代的那条请求，把目标补全为可独立理解的一句话；不要照抄延续话语，也不要加入执行步骤、方案或你的推断。保留用户给出的编号、URL、路径和显式约束。'),
+          .describe('用户当前要达成的目标，用用户自己的话陈述。默认直接用用户当前这句话；只在其中含有指代（“这个 PR”“继续”“开始吧”）时，把指代替换成它在对话中指向的具体对象。除替换指代外不要新增用户没说过的内容——不写执行步骤、检查项、关注维度、输出格式或技术方案。保留用户给出的编号、URL、路径和显式约束。'),
       }).strict(),
     },
   );

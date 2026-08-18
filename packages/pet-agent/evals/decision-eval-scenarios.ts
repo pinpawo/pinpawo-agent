@@ -95,6 +95,21 @@ const ENTRY_ANSWER_CASES: readonly EntryAnswerEvalCase[] = [
     ],
     expectedRoute: 'plan_request',
   },
+  {
+    // Resolving a reference must not become an invitation to invent scope: the
+    // goal carries the URL the user pointed at, and nothing the user never said
+    // (review dimensions, checklists, output format).
+    name: 'reference-resolution-adds-no-scope',
+    messages: [
+      {
+        role: 'user',
+        text: '看下 https://github.com/pinpawo/pinpawo-agent/pull/667 这个改动。',
+      },
+      { role: 'assistant', text: '好的，我看一下。' },
+      { role: 'user', text: '你自己 review 一下这个 pr' },
+    ],
+    expectedRoute: 'plan_request',
+  },
 ];
 
 const actor = {

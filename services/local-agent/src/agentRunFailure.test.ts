@@ -1,0 +1,86 @@
+import { strict as assert } from 'node:assert';
+import { describe, it } from 'node:test';
+import {
+  classifyAgentRunFailure,
+  describeFatalAgentRunFailure,
+  isFatalAgentRunError,
+} from './agentRunFailure';
+
+// Verbatim shape of the failure that regressed review cancellation: the model
+// provider rejected the call after the user had already cancelled the review.
+const QUOTA_ERROR_MESSAGE = '429 Your token-plan 1-week quota has been exhausted. '
+  + 'The quota will reset at 08-20 23:43:00 UTC.\n\n'
+  + 'Troubleshooting URL: https://docs.langchain.com/oss/javascript/langchain/errors/MODEL_RATE_LIMIT/';
+
+describe('classifyAgentRunFailure', () => {
+  it('treats an exhausted model quota as fatal and keeps the reset time', () => {
+    const error = new Error(QUOTA_ERROR_MESSAGE);
+    error.name = 'InsufficientQuotaError';
+
+    const failure = classifyAgentRunFailure(error);
+
+    assert.equal(failure.kind, 'fatal');
+    assert.equal(failure.retryAt, '08-20 23:43:00 UTC');
+  });
+
+  it('classifies by status code even when the message is opaque', () => {
+    const failure = classifyAgentRunFailure(
+      Object.assign(new Error('request failed'), { status: 429 }),
+    );
+
+    assert.equal(failure.kind, 'fatal');
+  });
+
+  it('treats rejected credentials as fatal', () => {
+    for (const status of [401, 403]) {
+      const failure = classifyAgentRunFailure(
+        Object.assign(new Error('nope'), { status }),
+      );
+      assert.equal(failure.kind, 'fatal', `status ${status} should be fatal`);
+    }
+  });
+
+  it('keeps ordinary tool and runtime failures recoverable', () => {
+    for (const error of [
+      new Error('ENOENT: no such file or directory'),
+      new Error('apply_patch failed: context did not match'),
+      Object.assign(new Error('server error'), { status: 500 }),
+      new Error('AbortError'),
+    ]) {
+      assert.equal(
+        classifyAgentRunFailure(error).kind,
+        'recoverable',
+        `${error.message} should stay recoverable`,
+      );
+    }
+  });
+
+  it('defaults unknown values to recoverable rather than terminating a review', () => {
+    assert.equal(classifyAgentRunFailure(undefined).kind, 'recoverable');
+    assert.equal(classifyAgentRunFailure('something odd').kind, 'recoverable');
+  });
+
+  it('exposes a fatal predicate', () => {
+    assert.equal(isFatalAgentRunError(new Error(QUOTA_ERROR_MESSAGE)), true);
+    assert.equal(isFatalAgentRunError(new Error('tool timed out')), false);
+  });
+});
+
+describe('describeFatalAgentRunFailure', () => {
+  it('tells the user when capacity returns and that the run was terminated', () => {
+    const text = describeFatalAgentRunFailure(
+      classifyAgentRunFailure(new Error(QUOTA_ERROR_MESSAGE)),
+    );
+
+    assert.match(text, /08-20 23:43:00 UTC/);
+    assert.match(text, /已终止本次运行/);
+  });
+
+  it('stays usable when the provider gave no reset time', () => {
+    const text = describeFatalAgentRunFailure(
+      classifyAgentRunFailure(Object.assign(new Error('denied'), { status: 401 })),
+    );
+
+    assert.match(text, /模型当前不可用/);
+  });
+});

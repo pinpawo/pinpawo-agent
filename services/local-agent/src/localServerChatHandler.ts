@@ -37,6 +37,10 @@ import {
   type HumanReviewResolutionSource,
 } from './humanReviewActionRouting';
 import type { ReviewAction } from '@pinpawo/agent-session';
+import {
+  classifyAgentRunFailure,
+  describeFatalAgentRunFailure,
+} from './agentRunFailure';
 import { ReviewResolutionLifecycle } from './reviewResolutionLifecycle';
 import { sendLocalServerPeerEvent, type LocalServerPeer } from './localServerPeer';
 import { ThreadInvocationCoordinator } from './threadInvocationCoordinator';
@@ -442,6 +446,7 @@ export class LocalServerChatHandler {
           );
         }
       }
+      const failure = classifyAgentRunFailure(err);
       if (isStillCurrent && peer.isConnected()) {
         const message = err instanceof Error ? err.message : 'internal error';
         sendLocalServerPeerEvent(peer, {
@@ -449,10 +454,13 @@ export class LocalServerChatHandler {
           requestId,
           message: recoveredFromToolProtocolError
             ? `${message}\n\n已重置本地 TUI 会话，下一条消息会从新的后端会话继续。`
-            : message,
+            : failure.kind === 'fatal'
+              ? describeFatalAgentRunFailure(failure)
+              : message,
+          ...(failure.kind === 'fatal' ? { code: 'agent_unavailable' } : {}),
         });
       }
-      return 'failed';
+      return failure.kind === 'fatal' ? 'fatal_failed' : 'failed';
     } finally {
       invocation.settle();
     }

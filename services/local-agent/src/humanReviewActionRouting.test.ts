@@ -355,3 +355,58 @@ test('human review rejection queues the same checkpoint interruption as cancella
   }]);
   assert.deepEqual(lifecycle.routes(), []);
 });
+
+// Regression: a model-level failure (exhausted quota) used to leave the review
+// action available, so the cancelled review was immediately re-offered to the
+// user and cancelling could never terminate the run.
+test('a fatal run failure consumes the review action instead of re-offering it', async () => {
+  const lifecycle = new ReviewResolutionLifecycle<ReturnType<typeof reviewRoute> & {
+    requestId: string;
+  }>();
+  const route = { ...reviewRoute(['review-1'], 'interrupt-1'), requestId: 'req-1' };
+  lifecycle.register(route);
+
+  await resolveHumanReviewAction({
+    lifecycle,
+    message: { type: 'review.cancel', requestId: 'req-1' } as never,
+    recover: async () => null,
+    emitClosed: () => {},
+    emitEvent: () => {},
+    isConnected: () => true,
+    run: async () => 'fatal_failed',
+  });
+
+  assert.deepEqual(lifecycle.routes(), []);
+
+  // The action stays consumed, so a repeated cancel cannot revive the review.
+  const revived = await lifecycle.begin({ requestId: 'req-1', actionId: route.actionId }, async () => null);
+  assert.equal(revived, null);
+});
+
+test('a recoverable run failure keeps the review action available for a retry', async () => {
+  const lifecycle = new ReviewResolutionLifecycle<ReturnType<typeof reviewRoute> & {
+    requestId: string;
+  }>();
+  const route = { ...reviewRoute(['review-1'], 'interrupt-1'), requestId: 'req-1' };
+  lifecycle.register(route);
+
+  await resolveHumanReviewAction({
+    lifecycle,
+    message: { type: 'review.cancel', requestId: 'req-1' } as never,
+    recover: async () => null,
+    emitClosed: () => {},
+    emitEvent: () => {},
+    isConnected: () => true,
+    run: async () => 'failed',
+  });
+
+  // A recoverable failure drops the in-memory route but must NOT consume the
+  // action: the review is still pending in the checkpoint, so the next attempt
+  // recovers it and resolves normally.
+  const retried = await lifecycle.begin(
+    { requestId: 'req-1' },
+    async () => route,
+  );
+  assert.ok(retried, 'a recoverable failure must leave the review resolvable');
+  assert.equal(retried?.actionId, route.actionId);
+});

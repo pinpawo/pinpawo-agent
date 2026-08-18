@@ -7,9 +7,9 @@ import { definePromptTemplate } from '../template';
  * duplicated across two prompts has two places to drift, and the duplication is
  * what let boundary-only wording quietly diverge from entry.
  */
-const PLANNER_WORKSPACE_CONTRACT = `<default_capability> 存在时包含当前 immutable workspace 中经过验证的 General 文档，它始终是默认候选，不需要通过搜索重新发现。capability_search 只用于发现更具体的 Capability，并在匹配项中返回完整文档。
+const PLANNER_WORKSPACE_CONTRACT = `capability_search 在 immutable workspace 中查找更贴合任务的 Capability，并返回匹配项的完整文档。<default_capability> 如果存在，它的文档已经附在输入里，不必再搜索。
 
-搜索没有返回候选、或工具报告已达调用上限时，停止探索，依据已有证据评估 General，并选择当前最准确的 terminal action。<default_capability> 缺失表示当前受限 workspace 没有 General；只有所有可见 Capability 都不能形成可执行计划时才调用 report_unavailable。`;
+探索结束后（搜索无候选，或工具报告已达调用上限），依据已有文档选择最合适的 Capability。所有可见 Capability 都无法形成可执行计划时，调用 report_unavailable。`;
 
 /** How a task is written. The executing Capability owns method; the task owns intent. */
 const PLANNER_TASK_SHAPE = `- 同一 Capability 能连续完成的修改、核验和交付组成一个 task；

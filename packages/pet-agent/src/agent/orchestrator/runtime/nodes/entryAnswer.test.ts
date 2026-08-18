@@ -242,3 +242,74 @@ test('Entry Answer receives normalized main conversation and excludes delegation
   ]);
   assert.equal(entryMessages.includes(laneMessage), false);
 });
+
+test('Entry Answer retries when the model announces execution instead of calling plan_request', async () => {
+  // Reproduces run-01a0145f: after several delegation_started records sit in the
+  // main conversation, the model imitated them and wrote the announcement as
+  // plain text with no tool call, so nothing ran.
+  const goal = 'review https://github.com/pinpawo/pinpawo-agent/pull/667';
+  let invocations = 0;
+  let repairPrompt = '';
+  const model = {
+    bindTools: () => ({
+      invoke: async (messages: BaseMessage[]) => {
+        invocations += 1;
+        if (invocations === 1) {
+          return new AIMessage('开始执行计划任务：对 Pull Request #667 进行代码审查。');
+        }
+        repairPrompt = String(messages.at(-1)?.content ?? '');
+        return new AIMessage({
+          content: '',
+          tool_calls: [{ id: 'call-plan', name: PLAN_REQUEST_TOOL_NAME, args: { goal } }],
+        });
+      },
+    }),
+    invoke: async () => new AIMessage('当前没有可执行该任务的 Capability。'),
+  } as unknown as BaseChatModel;
+
+  let plannerRequest = '';
+  const graph = createOrchestratorGraph({
+    models: { act: model, answer: model },
+    actor,
+    capabilityPlannerRunner: {
+      async invoke(input) {
+        plannerRequest = input.userRequest;
+        return { action: 'unavailable', tasks: [] };
+      },
+    },
+  });
+
+  const result = await graph.invoke(
+    buildOrchestratorRunInput([new HumanMessage('你自己review一下这个pr')]),
+    invokeConfig(),
+  );
+
+  assert.equal(invocations, 2, 'the faked announcement must trigger exactly one retry');
+  assert.match(repairPrompt, /plan_request/);
+  assert.equal(plannerRequest, goal, 'the retry must reach the Planner');
+  assert.equal(
+    result.messages.some((message) => String(message.content).startsWith('开始执行计划任务')),
+    false,
+    'the faked announcement must never reach the user',
+  );
+});
+
+test('Entry Answer leaves an ordinary reply untouched', async () => {
+  const scripted = entryAnswerModel('direct');
+  const graph = createOrchestratorGraph({
+    models: { act: scripted.model, answer: scripted.model },
+    actor,
+    capabilityPlannerRunner: {
+      async invoke() {
+        throw new Error('Planner must not run for a direct reply.');
+      },
+    },
+  });
+
+  await graph.invoke(
+    buildOrchestratorRunInput([new HumanMessage('这个方案还有更好的选择吗？')]),
+    invokeConfig(),
+  );
+
+  assert.deepEqual(scripted.counts(), { boundCalls: 1, resultCalls: 0 });
+});

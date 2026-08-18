@@ -1,4 +1,4 @@
-import { AIMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { Command, END, Send, START, StateGraph } from '@langchain/langgraph';
@@ -85,6 +85,35 @@ function requireRunUserRequest(state: OrchestratorStateType) {
   return request;
 }
 
+/**
+ * Detect a reply that announces execution instead of performing it.
+ *
+ * `delegation_started` records ("开始执行计划任务：…") stay in the main
+ * conversation, so a multi-turn session shows Entry Answer several assistant
+ * turns that look exactly like this. The model imitates them: it emits the
+ * sentence as ordinary text with no tool call, the run ends, and the user is
+ * told work started that never did. Observed twice in one session, once with
+ * the model's own reasoning saying "需要调用 plan_request" before it wrote text
+ * instead.
+ *
+ * Prompt wording alone cannot guarantee this, so the shape is also checked here.
+ */
+const EXECUTION_ANNOUNCEMENT_PATTERNS = [
+  /^\s*开始执行计划任务/,
+  /^\s*(我)?(这就|马上|现在)(去|来)?(执行|处理|开始)/,
+  /^\s*正在(执行|处理)/,
+];
+
+export function isExecutionAnnouncement(text: string) {
+  return EXECUTION_ANNOUNCEMENT_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+const EXECUTION_ANNOUNCEMENT_REPAIR = [
+  '你刚才只是用文字宣告要执行，但没有发起 plan_request 工具调用，因此不会有任何事情发生。',
+  '「开始执行计划任务：…」是系统在真正派发任务时写入的记录，不是你可以输出的正文。',
+  '现在重新处理这一轮：需要执行就发起 plan_request 工具调用；不需要执行就直接给出面向用户的最终回复。',
+].join('\n');
+
 function plannerDispatch(
   state: OrchestratorStateType,
   runUserRequest: string,
@@ -142,14 +171,26 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
     state: OrchestratorStateType,
     runnableConfig?: RunnableConfig,
   ) => {
-    const response = await model.invoke([
+    const history = [
       new SystemMessage(buildEntryAnswerSystemPrompt({
         actor: resolveActor(config, runnableConfig),
       })),
       ...mainConversationMessages(state.messages),
-    ], runnableConfig);
+    ];
+    let response = await model.invoke(history, runnableConfig);
     if (!AIMessage.isInstance(response)) {
       throw new Error('Entry Answer model must return an AIMessage.');
+    }
+    if (!response.tool_calls?.length && isExecutionAnnouncement(response.text)) {
+      const retried = await model.invoke([
+        ...history,
+        response,
+        new HumanMessage(EXECUTION_ANNOUNCEMENT_REPAIR),
+      ], runnableConfig);
+      if (!AIMessage.isInstance(retried)) {
+        throw new Error('Entry Answer model must return an AIMessage.');
+      }
+      response = retried;
     }
     if (!response.tool_calls?.length && !response.text.trim()) {
       response.content = '我这边暂时没有可展示的回复，麻烦你再说一下需要我做什么。';

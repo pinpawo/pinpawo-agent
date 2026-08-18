@@ -48,7 +48,7 @@ Per-workspace (use `-w <pkg>` or `cd`):
 
 ## Local-agent architecture
 
-- `src/cli.ts` + `src/index.ts` — Commander CLI (`pinpawo login|actor|once|tui|capability ...`).
+- `src/cli.ts` + `src/index.ts` — Commander CLI (`pinpawo actor|once|tui|capability ...`).
 - `src/tui/` + `src/chatInterface.ts` — Ink/React TUI. State machine lives in `tuiStateReducer`; resume picker, transcript export, input/keys all have their own files with `.test.ts` siblings.
 - `src/localServer.ts` + `src/localServer*.ts` + `src/localHttpHandlers.ts` + `src/localServerWsTransport.ts` — local HTTP+WS server on `127.0.0.1:3210`. Handles chat, studio reviews, TUI sessions, operation events. Macos companion and remote app talk to it; e.g. `GET /capabilities/rescan` reloads plugins.
 - `src/localAgentAppWsClient.ts` + `src/localAgentAppChatHandler.ts` — WS client back to the hosted PinPawo app, plus its chat handler.

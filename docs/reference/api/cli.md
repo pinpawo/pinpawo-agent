@@ -14,7 +14,6 @@
 |---|---|---|
 | `pinpawo init` | Create local configuration and the example Capability. | `--dir <directory>`, `--force`, `--no-example-capability` |
 | `pinpawo setup` | Diagnose local model and runtime configuration. | `--workdir <directory>` |
-| `pinpawo login` | Save or update local credentials and model configuration. | — |
 | `pinpawo actor` | Select the local Pet actor. | — |
 | `pinpawo server` / `pinpawo run` | Start the local host. | `--mode chat|studio`, `--workdir <directory>`, `--stdio` |
 | `pinpawo tui` | Start the terminal UI. | `--check`, `--qa`, `--workdir <directory>` |

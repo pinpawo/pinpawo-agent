@@ -547,7 +547,7 @@ export function buildModelProfileRegistry(options: {
 
   if (!configuredDefaultProfileId) {
     throw new ModelProfileConfigError(
-      'No model profile is configured. Run "pinpawo login" or configure a complete LLM_API_KEY + LLM_BASE_URL + LLM_MODEL tuple.',
+      'No model profile is configured. Configure a complete LLM_API_KEY + LLM_BASE_URL + LLM_MODEL tuple in ~/.pinpawo/.env.',
     );
   }
 

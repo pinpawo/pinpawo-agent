@@ -10,7 +10,7 @@
 |---|---|---|
 | `pinpawo init` | 创建本地配置与示例 Capability。 | `--dir`、`--force`、`--no-example-capability` |
 | `pinpawo setup` | 诊断模型和运行时配置。 | `--workdir` |
-| `pinpawo login` / `actor` | 配置登录与 Pet identity。 | — |
+| `pinpawo actor` | 选择本地 Pet identity。 | — |
 | `pinpawo server` / `run` | 启动 local host。 | `--mode chat|studio`、`--workdir`、`--stdio` |
 | `pinpawo tui` | 启动终端 UI。 | `--check`、`--qa`、`--workdir` |
 | `pinpawo detect` | 输出 browser/backend 检测 JSON。 | — |

@@ -108,7 +108,7 @@ export function buildSetupGuide(options: {
           label: 'LLM API',
           status: 'missing',
           detail: `No runnable default model profile. ${modelConfigError}`,
-          nextStep: 'Run "pinpawo login" or configure LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL together in ~/.pinpawo/.env.',
+          nextStep: 'Configure LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL together in ~/.pinpawo/.env.',
         },
     localOnlyMode
       ? {
@@ -130,7 +130,7 @@ export function buildSetupGuide(options: {
           label: 'Hosted app/API',
           status: 'warning',
           detail: `Missing or placeholder values: ${missingApiKeys.join(', ')}. Local-only mode can still run, but hosted app relay, heartbeat, and Hasura context are disabled.`,
-          nextStep: 'Run "pinpawo login" to configure hosted API credentials.',
+          nextStep: 'Configure API_BASE_URL, HASURA_ENDPOINT, AGENT_TOKEN, and HASURA_JWT in ~/.pinpawo/.env to enable hosted API credentials.',
         },
     actorId
       ? {
@@ -148,7 +148,7 @@ export function buildSetupGuide(options: {
             : 'No actor is selected. Local-only mode will use the built-in local actor.',
           nextStep: hostedApiEnabled
             ? 'Run "pinpawo actor" to choose a pet actor.'
-            : 'After hosted login, run "pinpawo actor" to choose a pet actor.',
+            : 'After configuring hosted API credentials, run "pinpawo actor" to choose a pet actor.',
         },
     buildStudioConfigCheck(runtimeConfig),
   ];

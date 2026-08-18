@@ -30,7 +30,7 @@ function writeNewFile(path: string, content: string, force: boolean, written: Wr
 
 function envTemplate(): string {
   return `# PinPawo Local Agent quick-start configuration.
-# You can also run "pinpawo login" to save these values to config.json.
+# Fill in the values below; they are read together with config.json.
 
 # Server
 # Set PINPAWO_LOCAL_ONLY=1 to force local-only startup even if saved
@@ -122,7 +122,7 @@ export async function runInit(options: InitCommandOptions = {}): Promise<void> {
     process.stdout.write('Use --force to overwrite generated scaffold files.\n');
   }
   process.stdout.write('\nNext steps:\n');
-  process.stdout.write('  1. Edit the generated .env or run: pinpawo login\n');
+  process.stdout.write('  1. Edit the generated .env to configure credentials and model settings\n');
   process.stdout.write(`  2. Validate the example capability: pinpawo capability validate ${exampleCapabilityDir}\n`);
   process.stdout.write('  3. Start the TUI: pinpawo tui\n');
 }

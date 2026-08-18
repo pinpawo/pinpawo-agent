@@ -7,7 +7,6 @@ import { readLocalAgentPackageVersion } from './packageVersion';
 import { parseServerMode, type ServerMode } from './serverMode';
 
 type LocalAgentCliHandlers = {
-  runLogin?: () => Promise<void> | void;
   runActorSelect?: () => Promise<void> | void;
   runAgent?: (opts: { workdir?: string; stdio: boolean; mode: ServerMode }) => Promise<void> | void;
   runTuiV2?: (opts: {
@@ -74,14 +73,6 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
         : undefined;
       const runSetup = handlers.runSetup ?? (await import('./commands/setup')).runSetupGuide;
       await runSetup({ workdir });
-    });
-
-  program
-    .command('login')
-    .description('Sign in and write local agent configuration')
-    .action(async () => {
-      const runLogin = handlers.runLogin ?? (await import('./commands/login')).runLogin;
-      await runLogin();
     });
 
   program

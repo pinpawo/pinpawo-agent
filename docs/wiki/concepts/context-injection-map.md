@@ -19,6 +19,7 @@ sources:
   - ../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/capabilityPlanner.ts
   - https://github.com/pinpawo/pinpawo-agent/pull/664
   - https://github.com/pinpawo/pinpawo-agent/pull/666
+  - https://github.com/pinpawo/pinpawo-agent/pull/668
 related:
   - dynamic-context-governance.md
   - prompt-knowledge-layers.md
@@ -66,13 +67,37 @@ invoke no model.
 | entryAnswer | `mainConversationMessages()` | none — no XML fact block at all |
 | capabilityPlanner | `selectCapabilityPlannerMessages()`, filtered by `traceId` **and** `registryDigest` | `<run_user_request>`, `<default_capability>`, boundary adds `<planning_state>` |
 | capability | `laneMessages(lane, transcriptRunId, delegationId)` | `<run_user_request>` as background; `<delegation_briefing>` last |
-| answer | canonical messages minus prior answer-input | `<answer_input>` appended last |
+| answer | **none** | `<answer_input>` — the entire context |
 
-`entryAnswer` receiving no fact block is deliberate: it is the node that decides
-what the goal *is*, so it sees the conversation and nothing else.
+The two extremes are deliberate and opposite. `entryAnswer` receives no fact
+block because it decides what the goal *is*, so it sees the conversation and
+nothing else. `answer` receives no history because it is a **closer** — it runs
+only after a decision, in `goal_done` / `blocked` / `user_input_required` mode,
+and `<answer_input>` fully serves all three.
 
 Boundary-mode `capabilityPlanner` is the only decision node that receives a full
 delegation transcript. That is what lets it judge whether a task is done.
+
+## Why Answer has no history
+
+Every completed turn left a near-duplicate pair in the main conversation: the
+subagent handoff, and the reply Answer wrote *about* that handoff.
+`projectAcceptedRunResults()` lifts the current run's handoff into
+`<accepted_results>` and drops it from history, but prior runs kept both copies —
+so Answer saw its own restatements and learned to restate again. Measured on one
+session: 68% / 71% / 100% similarity across three pairs, with history at 5269
+chars against 539 chars of accepted results.
+
+The Planner action `answer_directly` was the only route into Answer that needed
+history — its contract was "answerable from the canonical main conversation".
+Since #663 `entryAnswer` owns conversational replies and never routes such
+requests to the Planner, so the action was already unreachable in production and
+was removed. That is what makes "Answer is a closer, its input is
+`<answer_input>`" an invariant rather than a convention.
+
+Consequence worth knowing: the compaction summary no longer reaches Answer.
+Re-showing an older result is a conversational request that `entryAnswer` owns,
+and the summary survives in canonical history for it.
 
 ## One request string, three roles
 
@@ -139,6 +164,8 @@ The compaction summary is an `AIMessage` carrying `source="compaction"` and
 - **Planner lane compaction** — removed; see above.
 - **Answer "legacy system-prose renderer"** — production Answer uses
   `appendAnswerInputMessage()` with the typed `<answer_input>` fact block.
+- **Answer reading canonical history** — Answer receives no history at all; see
+  above. `answer_directly` no longer exists as a Planner action.
 
 ## Dead surface
 

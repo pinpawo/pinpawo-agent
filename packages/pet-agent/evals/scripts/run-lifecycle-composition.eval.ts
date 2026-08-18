@@ -324,7 +324,6 @@ function createRecordingModels(model: AgentModels['act']) {
           'complete_goal',
           'request_user_input',
           'report_unavailable',
-          'answer_directly',
         ].includes(toolCall.name)) {
           continue;
         }

@@ -197,8 +197,8 @@ function createQueuedPlannerRunner(
   return {
     async invoke(input: CapabilityPlannerInput): Promise<CapabilityPlannerResult> {
       const planning = await nextStructuredValue();
-      if (planning.action === 'answer_directly') {
-        return { action: 'answer_directly', tasks: [] };
+      if (planning.action === 'unavailable') {
+        return { action: 'unavailable', tasks: [] };
       }
       if (input.mode === 'boundary' && typeof planning.outcome === 'string') {
         if (planning.outcome === 'goal_done') {
@@ -853,40 +853,6 @@ test('Capability Planner owns the executable task boundary at entry', async () =
   );
 });
 
-test('Planner answer_directly reaches Answer without Capability execution', async () => {
-  let plannerCalls = 0;
-  const model = {
-    invoke: async () => new AIMessage('answered'),
-  } as unknown as AgentModels['act'];
-
-  const graph = createOrchestratorGraph({
-    models: {
-      act: model,
-      decision: new FakeListChatModel({ responses: ['回答当前版本问题。'], sleep: 0 }),
-      observe: model,
-    },
-    actor: testActor,
-    capabilityPlannerRunner: {
-      async invoke() {
-        plannerCalls += 1;
-        return { action: 'answer_directly', tasks: [] };
-      },
-    },
-  });
-  const input = buildOrchestratorRunInput([new HumanMessage('做一支讲秋日食材的短视频')]);
-
-  await graph.invoke(input, {
-    configurable: {
-      thread_id: 'no-forced-cap-thread',
-      actor: testActor,
-      capabilities: [capability('studio_plan', 'Planner 唯一的目标:把用户请求拆解为一份 plan。')],
-      tools: [],
-    },
-  });
-
-  assert.equal(plannerCalls, 1);
-});
-
 test('a completed subagent announce reaches the decision, then Answer summarizes the result', async () => {
   let plannerInput: CapabilityPlannerInput | null = null;
   let answerModelInvocations = 0;
@@ -989,7 +955,7 @@ test('answer node still sees compacted older results when the user asks to re-sh
     },
     bindTools: () => ({ invoke: async () => new AIMessage('') }),
     withStructuredOutput: () => ({
-      invoke: async () => ({ action: 'answer_directly', tasks: [] }),
+      invoke: async () => ({ action: 'unavailable', tasks: [] }),
     }),
   } as unknown as AgentModels['act'];
 
@@ -1017,12 +983,16 @@ test('answer node still sees compacted older results when the user asks to re-sh
   });
 
   assert.equal(result.messages.at(-1)?.content, 'answered');
-  // The answer node must see the compaction summary — otherwise it is blind to
-  // the only surviving record of the older result and would re-fabricate it.
-  const observedSummary = answerInput.find(isContextCompactionMessage);
-  assert.equal(observedSummary?._getType(), 'ai');
-  assert.equal(observedSummary?.content, summary.content);
-  assert.match(answerInput.map(readMessageText).join('\n'), /COMPACTED_RESULT_MARKER/);
+  // Answer is a closer and receives only <answer_input>, so the compaction
+  // summary does not reach it. Re-showing an older result is a conversational
+  // request: Entry Answer owns it, and it has the summary in its own view.
+  assert.equal(answerInput.some(isContextCompactionMessage), false);
+  assert.doesNotMatch(answerInput.map(readMessageText).join('\n'), /COMPACTED_RESULT_MARKER/);
+  assert.equal(
+    mainConversationMessages(result.messages).some(isContextCompactionMessage),
+    true,
+    'the summary must survive in canonical history for Entry Answer',
+  );
 });
 
 test('delegation goal_done summarizes and preserves the handed-off result', async () => {
@@ -1194,7 +1164,7 @@ test('user_input_required returns control without claiming delegation completion
   );
   assert.deepEqual(
     answerMessages.map((message) => message._getType()),
-    ['system', 'human', 'human'],
+    ['system', 'human'],
   );
   const answerSystem = String(answerMessages[0]?.content ?? '');
   const answerFacts = String(answerMessages.at(-1)?.content ?? '');
@@ -1317,44 +1287,6 @@ test('capability errors retain the active delegation and lane without a handoff'
   );
 });
 
-test('Planner answer_directly carries no reply text and routes to the dedicated Answer node', async () => {
-  let answerCalled = false;
-  const model = {
-    invoke: async () => {
-      answerCalled = true;
-      return new AIMessage('final reply from answer node');
-    },
-  } as unknown as AgentModels['act'];
-
-  const graph = createOrchestratorGraph({
-    models: {
-      act: model,
-      decision: new FakeListChatModel({ responses: ['向用户问好。'], sleep: 0 }),
-      observe: model,
-    },
-    actor: testActor,
-    capabilityPlannerRunner: {
-      async invoke() {
-        return { action: 'answer_directly', tasks: [] };
-      },
-    },
-  });
-  const input = buildOrchestratorRunInput([new HumanMessage('你好')]);
-  const state = await graph.invoke(input, {
-    configurable: {
-      thread_id: 'answer-routes-to-answer',
-      actor: testActor,
-      capabilities: [],
-      tools: [],
-    },
-  });
-
-  assert.equal(answerCalled, true, 'answer_directly must route to the Answer node');
-  const finalMessage = mainConversationMessages(state.messages).at(-1);
-  assert.equal(finalMessage?.content, 'final reply from answer node');
-  assert.match(readMessageCreatedAtUtc(finalMessage!) ?? '', /^\d{4}-\d{2}-\d{2}T.*Z$/);
-});
-
 test('answer filters internal briefings by lane without parsing message text', async () => {
   let answerInput = '';
   const model = {
@@ -1366,7 +1298,7 @@ test('answer filters internal briefings by lane without parsing message text', a
     },
     bindTools: () => ({ invoke: async () => new AIMessage('') }),
     withStructuredOutput: () => ({
-      invoke: async () => ({ action: 'answer_directly', tasks: [] }),
+      invoke: async () => ({ action: 'unavailable', tasks: [] }),
     }),
   } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
@@ -1392,8 +1324,15 @@ test('answer filters internal briefings by lane without parsing message text', a
   }) as OrchestratorStateType;
 
   assert.equal(state.messages.at(-1)?.content, '正常回复');
+  // Answer receives no history, so nothing from either message may reach it.
   assert.doesNotMatch(answerInput, /metadata 表明它属于 delegation lane/);
-  assert.match(answerInput, /这是用户可见的普通历史内容/);
+  assert.doesNotMatch(answerInput, /这是用户可见的普通历史内容/);
+  // The lane distinction itself is still metadata-driven, not text-shaped: the
+  // briefing-shaped conversation message stays in canonical history, the
+  // lane-tagged one does not.
+  const canonical = mainConversationMessages(state.messages);
+  assert.equal(canonical.includes(briefingShapedConversation), true);
+  assert.equal(canonical.includes(internalBriefing), false);
 });
 
 test('answer returns model output unchanged without classifying its text shape', async () => {
@@ -1406,7 +1345,7 @@ test('answer returns model output unchanged without classifying its text shape',
     },
     bindTools: () => ({ invoke: async () => new AIMessage('') }),
     withStructuredOutput: () => ({
-      invoke: async () => ({ action: 'answer_directly', tasks: [] }),
+      invoke: async () => ({ action: 'unavailable', tasks: [] }),
     }),
   } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
@@ -1438,7 +1377,7 @@ test('answer does not special-case briefing-shaped output', async () => {
     },
     bindTools: () => ({ invoke: async () => new AIMessage('') }),
     withStructuredOutput: () => ({
-      invoke: async () => ({ action: 'answer_directly', tasks: [] }),
+      invoke: async () => ({ action: 'unavailable', tasks: [] }),
     }),
   } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({

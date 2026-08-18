@@ -150,20 +150,47 @@ defines its task. The run request sits earlier as background.
 Produces the user-facing reply. Source: `runtime/nodes/answer.ts`,
 `prompts/answer.ts`.
 
+**Answer receives no conversation history.** Its entire invocation is two
+messages:
+
 | Slot | Class | Content |
 |---|---|---|
 | system | `RUN-STABLE` / `INSTRUCTION` | `buildAnswerSystemPrompt({ actor })` |
-| history | `DYNAMIC` / `HISTORY` | canonical messages, minus any prior answer-input message |
-| input | `DYNAMIC` / `FACT` | `<answer_input>` appended **last** |
+| input | `DYNAMIC` / `FACT` | `<answer_input>` — the whole context |
 
 `<answer_input>` carries `role="fact" source="orchestrator_state"
 authority="none"` and contains `<run_user_request>` plus `<answer_context>`
 (reply mode, accepted results, blocked reason, awaiting-input context).
 
-`appendAnswerInputMessage()` strips any previous answer-input message before
-appending, so repeated Answer invocations never stack stale fact blocks. It is a
-`HumanMessage` by transport, but `authority="none"` marks it as data — the
-system prompt states it is not a new user request.
+Answer is a **closer**: it runs only after a decision, in `goal_done`,
+`blocked` or `user_input_required` mode, and all three are fully served by that
+block. History was never load-bearing for the reply — only for imitation.
+
+Why it was removed: every completed turn left a near-duplicate pair in the main
+conversation — the subagent handoff, and the reply Answer wrote *about* that
+handoff. `projectAcceptedRunResults()` lifts the current run's handoff into
+`<accepted_results>` and drops it from history, but prior runs kept both copies,
+so Answer saw its own restatements and restated again. Measured on one session:
+68% / 71% / 100% similarity across three pairs, history at 5269 chars against
+539 chars of accepted results.
+
+Two consequences worth knowing:
+
+- The compaction summary does not reach Answer. Re-showing an older result is a
+  conversational request that `entryAnswer` owns, and the summary survives in
+  canonical history for it.
+- `direct` mode still exists in `selectAnswerContextFacts()` as a fallback, but
+  no route produces it — see §7a.
+
+### 7a. Why `answer_directly` is gone
+
+The Planner terminal action `answer_directly` was defined as "the current goal
+can be answered from the canonical main conversation", making it the only route
+into Answer that needed history. Since #663, `entryAnswer` owns conversational
+replies and never hands such requests to the Planner, so the action was already
+unreachable in production. It was removed rather than kept as a dead branch,
+which is what turns "Answer is a closer, its input is `<answer_input>`" into an
+invariant rather than a convention.
 
 ## 8. `<run_user_request>`: one string, three consumers
 

@@ -56,7 +56,6 @@ const MAX_TASK_TEXT_CHARS = 2_000;
 const CONTINUE_CURRENT_TOOL_NAME = 'continue_current';
 const SUBMIT_PLAN_TOOL_NAME = 'submit_plan';
 const ADVANCE_PLAN_TOOL_NAME = 'advance_plan';
-const ANSWER_DIRECTLY_TOOL_NAME = 'answer_directly';
 const COMPLETE_GOAL_TOOL_NAME = 'complete_goal';
 const REQUEST_USER_INPUT_TOOL_NAME = 'request_user_input';
 const REPORT_UNAVAILABLE_TOOL_NAME = 'report_unavailable';
@@ -135,14 +134,6 @@ function createPlannerTerminalTools(): StructuredTool[] {
       schema: z.object({}).strict(),
     },
   );
-  const answerDirectly = tool(
-    async () => JSON.stringify({ action: 'answer_directly', tasks: [] }),
-    {
-      name: ANSWER_DIRECTLY_TOOL_NAME,
-      description: 'Terminal Planner action for entry only. The current goal can be answered from the canonical main conversation without Capability execution. Do not provide answer text.',
-      schema: z.object({}).strict(),
-    },
-  );
   const requestUserInput = tool(
     async () => JSON.stringify({ action: 'user_input_required', tasks: [] }),
     {
@@ -163,7 +154,6 @@ function createPlannerTerminalTools(): StructuredTool[] {
     continueCurrent,
     submitPlan,
     advancePlan,
-    answerDirectly,
     completeGoal,
     requestUserInput,
     reportUnavailable,
@@ -375,8 +365,7 @@ function createPlannerMiddleware() {
           CONTINUE_CURRENT_TOOL_NAME,
           SUBMIT_PLAN_TOOL_NAME,
           ADVANCE_PLAN_TOOL_NAME,
-          ANSWER_DIRECTLY_TOOL_NAME,
-          COMPLETE_GOAL_TOOL_NAME,
+            COMPLETE_GOAL_TOOL_NAME,
           REQUEST_USER_INPUT_TOOL_NAME,
           REPORT_UNAVAILABLE_TOOL_NAME,
         ].includes(request.toolCall.name)) {

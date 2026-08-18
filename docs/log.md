@@ -493,3 +493,25 @@ lint passes, and documentation migrations.
   `entryDecision`, `outcomeDecision`, `return_to_answer` and `grep_search`, none
   of which exist in code. That is decision-node ownership rather than context
   assembly and needs its own ingest.
+
+## [2026-08-18] ingest | Answer is a closer with no conversation history
+
+- Updated `concepts/context-injection-map.md` and its maintained reference for
+  the Answer node: its invocation is now exactly the system prompt plus one
+  `<answer_input>` message, with no conversation history at all.
+- Recorded the cause rather than only the new shape. Each completed turn left a
+  near-duplicate pair in the main conversation — the subagent handoff and the
+  reply Answer wrote about that handoff — so Answer was shown its own
+  restatements and restated again. Measured 68% / 71% / 100% similarity across
+  three pairs in one session, history at 5269 chars against 539 chars of
+  accepted results.
+- Recorded that the Planner action `answer_directly` was removed. Its contract
+  was "answerable from the canonical main conversation", which made it the only
+  route into Answer that required history; since #663 Entry Answer owns
+  conversational replies, so it was already unreachable in production.
+- Recorded the consequence: the compaction summary no longer reaches Answer.
+  Re-showing an older result is a conversational request Entry Answer owns, and
+  the summary still survives in canonical history for it.
+- Framed the two extremes as deliberate opposites: Entry Answer gets
+  conversation and no fact block because it decides what the goal is; Answer
+  gets facts and no conversation because it only closes a decided run.

@@ -120,21 +120,17 @@ function render(testCase: AnswerBehaviorCase): BaseMessage[] {
     ?? (fallbackAcceptedResult
         ? [{ task: delegationOutcome?.task ?? '完成当前任务', result: fallbackAcceptedResult.text }]
         : []);
-  const acceptedResultTexts = new Set(acceptedResults.map(({ result }) => result));
-  const history = testCase.input.messages.filter((message) => !(
-    message.role === 'assistant'
-    && acceptedResultTexts.has(message.text)
-  ));
-  const hasUserRequest = Boolean(
-    testCase.input.userRequest
-    ?? testCase.input.messages.find(({ role }) => role === 'user'),
-  );
+  // Answer receives no history, so a case that states its request only as a user
+  // turn must still reach the model through <run_user_request>. In production
+  // that value is runUserRequest, resolved by Entry Answer.
+  const userTurns = testCase.input.messages.filter(({ role }) => role === 'user');
+  const userRequest = testCase.input.userRequest
+    ?? userTurns[userTurns.length - 1]?.text
+    ?? null;
+  const hasUserRequest = Boolean(userRequest);
   return buildAnswerInvocationMessages({
     actor,
-    history: history.map((message) => message.role === 'user'
-      ? new HumanMessage(message.text)
-      : new AIMessage(message.text)),
-    userRequest: testCase.input.userRequest,
+    userRequest,
     contextFacts: delegationOutcome?.outcome === 'goal_done'
       ? {
           mode: 'goal_done',

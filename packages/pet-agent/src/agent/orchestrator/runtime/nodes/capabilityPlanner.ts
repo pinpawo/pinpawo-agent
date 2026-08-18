@@ -391,17 +391,6 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
           goto: 'capability',
         });
       }
-      if (commit.action === 'answer_directly') {
-        return new Command({
-          update: includePlannerMessages({
-            runNextDelegation: null,
-            runCapabilityPlan: [],
-            runLatestDelegationOutcome: null,
-            runRuntimeFailure: null,
-          }),
-          goto: 'answer',
-        });
-      }
       return new Command({
         update: includePlannerMessages({
           runNextDelegation: null,

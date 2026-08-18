@@ -55,7 +55,6 @@ test('answer eval models goal_done as a grounded task summary', async () => {
   assert.deepEqual(scenario.render().map((message) => message._getType()), [
     'system',
     'human',
-    'human',
   ]);
   assert.equal(subjectInvocations, 1);
   assert.equal(result.output.text, summary);
@@ -149,16 +148,13 @@ test('answer eval covers a resumable result that requires a user choice', () => 
   assert.deepEqual(messages.map((message) => message._getType()), [
     'system',
     'human',
-    'ai',
-    'human',
   ]);
   assert.equal(scenario.expectedSummary, 'return_control');
   const systemText = String(messages[0].content);
   const contextText = String(messages.at(-1)?.content);
   assert.doesNotMatch(systemText, /邮件或项目群|报告已经完成|确认发送渠道/);
   assert.doesNotMatch(systemText, /"确认发送渠道并发送已经完成的报告"已完成/);
-  assert.match(String(messages[1].content), /邮件或项目群/);
-  assert.match(String(messages[2].content), /还没有发送/);
+  assert.match(contextText, /邮件或项目群/);
   assert.match(contextText, /^<answer_input[^>]*>/);
   assert.match(contextText, /<run_user_request[^>]*>/);
   assert.match(contextText, /<reply_mode>user_input_required<\/reply_mode>/);
@@ -193,12 +189,13 @@ test('answer eval renders the current user goal for an ordinary reply', () => {
   const scenario = getAnswerEvalScenarios().find(({ caseName }) => caseName === 'direct-answer');
   assert.ok(scenario);
   const messages = scenario.render();
-  assert.deepEqual(messages.map((message) => message._getType()), ['system', 'human', 'human']);
+  assert.deepEqual(messages.map((message) => message._getType()), ['system', 'human']);
   const systemText = String(messages[0].content);
   assert.match(systemText, /<reply_mode>/);
   assert.doesNotMatch(systemText, /只回答这个问题：2 \+ 3 等于多少/);
-  assert.equal(String(messages[1].content), '只回答这个问题：2 + 3 等于多少？');
-  assert.match(String(messages[2].content), /<reply_mode>direct<\/reply_mode>/);
+  // The request reaches Answer through <run_user_request>, not as a history turn.
+  assert.match(String(messages[1].content), /只回答这个问题：2 \+ 3 等于多少？/);
+  assert.match(String(messages[1].content), /<reply_mode>direct<\/reply_mode>/);
 });
 
 test('answer eval derives goal result from evaluator criteria', async () => {

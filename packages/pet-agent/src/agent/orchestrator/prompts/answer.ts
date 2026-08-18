@@ -210,14 +210,24 @@ export function buildEntryAnswerSystemPrompt(params: {
   });
 }
 
+/**
+ * Answer is a closer: it runs only after a decision has been made, in
+ * goal_done / blocked / user_input_required mode, and everything it must deliver
+ * is already projected into <answer_input>.
+ *
+ * It deliberately receives no conversation history. Every past turn left a
+ * near-duplicate pair in the main conversation — the subagent handoff and the
+ * reply this node wrote about that handoff — so history showed the model its own
+ * restatements and taught it to restate again. Measured at 68%/71%/100%
+ * similarity across one session. The facts block is the whole input.
+ */
 export function buildAnswerInvocationMessages(params: {
   actor: AgentActor;
-  history: readonly BaseMessage[];
   userRequest?: UserRequest | null;
   contextFacts: ModelAnswerContextFacts;
 }): BaseMessage[] {
   return [
     new SystemMessage(buildAnswerSystemPrompt({ actor: params.actor })),
-    ...appendAnswerInputMessage(params.history, params.userRequest, params.contextFacts),
+    ...appendAnswerInputMessage([], params.userRequest, params.contextFacts),
   ];
 }

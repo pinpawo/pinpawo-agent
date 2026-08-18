@@ -602,26 +602,6 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
   });
 });
 
-test('entry mode can commit answer_directly without Capability discovery', async (t) => {
-  const workspace = await createWorkspace(t, {
-    general: capabilityDocument({
-      name: 'general',
-      description: 'Handle ordinary tasks.',
-      instructions: 'Complete a general task.',
-    }),
-  });
-  const model = new ScriptedPlannerModel([{
-    toolCalls: [{ id: 'answer', name: 'answer_directly', args: {} }],
-  }]);
-
-  const result = await createCapabilityPlannerAgent({ model }).invoke(
-    plannerInput(workspace, { userRequest: '解释已经在主对话中确认的结果。' }),
-  );
-
-  assert.deepEqual(commitOnly(result), { action: 'answer_directly', tasks: [] });
-  assert.equal(model.invocations.length, 1);
-});
-
 test('entry mode forms one executable task after Capability exploration', async (t) => {
   const workspace = await createWorkspace(t, {
     explore: capabilityDocument({

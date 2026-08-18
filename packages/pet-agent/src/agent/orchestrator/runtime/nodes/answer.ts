@@ -163,7 +163,6 @@ export function createAnswerNode(config: OrchestratorConfig) {
     });
     const answerMessages = buildAnswerInvocationMessages({
       actor,
-      history,
       userRequest: state.runUserRequest,
       contextFacts: answerContextFacts,
     });

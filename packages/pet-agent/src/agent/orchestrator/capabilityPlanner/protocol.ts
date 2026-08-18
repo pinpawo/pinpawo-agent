@@ -6,7 +6,6 @@ export const PLANNER_ACTIONS = [
   'continue_current',
   'execute_plan',
   'advance_plan',
-  'answer_directly',
   'goal_done',
   'user_input_required',
   'unavailable',
@@ -91,9 +90,6 @@ export function parsePlannerCommit(
   }
   if (context.mode === 'boundary' && commit.action === 'execute_plan') {
     throw new Error('Planner action "execute_plan" is invalid at a boundary.');
-  }
-  if (context.mode === 'boundary' && commit.action === 'answer_directly') {
-    throw new Error('Planner action "answer_directly" is invalid at a boundary.');
   }
   if (commit.action === 'continue_current') {
     const activeDelegation = context.activeDelegation;

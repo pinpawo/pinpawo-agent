@@ -3,19 +3,11 @@ import type {
   StudioRequestMessage,
 } from './localAgentProtocol';
 import {
-  StudioNotConfiguredError,
-  buildStudio,
-  type BuildStudioInput,
-  type BuildStudioResult,
-} from './studio/buildStudio';
-import {
-  getLocalServerToolkitInventory,
   getLocalServerWorkdir,
   type LocalServerDeps,
 } from './localServerTypes';
 import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
-
-export type BuildStudio = (input: BuildStudioInput) => Promise<BuildStudioResult>;
+import type { Studio } from '@pinpawo/studio';
 
 export type LocalServerStudioOutbound<Peer extends object> = {
   sendMessage: (peer: Peer, message: LocalAgentServerMessage) => boolean;
@@ -29,12 +21,12 @@ export type LocalServerStudioOutbound<Peer extends object> = {
  * 没有人在等 pet(设计 §4.3)。进度与产出经插件的 event 流出,客户端订阅
  * `studio.progress` 即可。
  *
- * studio 按 workdir **常驻**:不再每请求重新装配 pet runtime 与 graph。
+ * Studio 由 {@link StudioHost} 在 init 时构建并注入;handler 不拥有
+ * studio 生命周期,也不按 workdir 缓存。请求只 invoke 常驻 studio。
  */
 export class LocalServerStudioHandler<Peer extends object> {
   private readonly outbound: LocalServerStudioOutbound<Peer>;
-  private readonly buildStudio: BuildStudio;
-  private readonly studios = new Map<string, Promise<BuildStudioResult>>();
+  private readonly studio: Studio;
   /**
    * 每个 peer 一座事件桥。`requestId` 存在可变盒子里而**不是闭包捕获** ——
    * 桥只建一次,若把首次的 requestId 封进闭包,第二次提交产生的事件会
@@ -47,55 +39,17 @@ export class LocalServerStudioHandler<Peer extends object> {
 
   constructor(options: {
     outbound: LocalServerStudioOutbound<Peer>;
-    buildStudio?: BuildStudio;
+    /** Resident Studio built by StudioHost at init time. */
+    studio: Studio;
   }) {
     this.outbound = options.outbound;
-    this.buildStudio = options.buildStudio ?? buildStudio;
+    this.studio = options.studio;
   }
 
   /** 断开时只解绑事件桥;studio 本身常驻,不随连接生灭。 */
   rejectDisconnected(peer: Peer) {
     this.eventBridges.get(peer)?.unsubscribe();
     this.eventBridges.delete(peer);
-  }
-
-  async shutdown(): Promise<void> {
-    const pending = [...this.studios.values()];
-    this.studios.clear();
-    for (const entry of pending) {
-      await entry.then(({ studio }) => studio.shutdown()).catch(() => undefined);
-    }
-  }
-
-  private getStudio(deps: LocalServerDeps): Promise<BuildStudioResult> {
-    const workdir = getLocalServerWorkdir(deps);
-    const existing = this.studios.get(workdir);
-    if (existing) return existing;
-    const toolkitInventory = getLocalServerToolkitInventory(deps);
-
-    const pending = this.buildStudio({
-      modelProfiles: deps.modelProfiles,
-      capabilities: [
-        ...(deps.localCapabilities ?? []),
-        ...(deps.userCapabilities ?? []).map((item) => item.capability),
-      ],
-      toolkits: [...toolkitInventory.effectiveToolkits],
-      ...(deps.toolkitRuntimeManager ? { toolkitRuntimeManager: deps.toolkitRuntimeManager } : {}),
-      ...(deps.chatCheckpointer ? { checkpoint: deps.chatCheckpointer } : {}),
-      ownerUserId: null,
-      workdir,
-      ...(deps.runtimeConfig ? {
-        studioConfigPath: deps.runtimeConfig.studioConfigPath,
-        petsDir: deps.runtimeConfig.petsDir,
-      } : {}),
-    }).catch((error: unknown) => {
-      // 装配失败不缓存,否则一次配置错误会让这个 workdir 永久不可用。
-      this.studios.delete(workdir);
-      throw error;
-    });
-
-    this.studios.set(workdir, pending);
-    return pending;
   }
 
   async handleStudioRequest(peer: Peer, msg: StudioRequestMessage, deps: LocalServerDeps) {
@@ -105,15 +59,13 @@ export class LocalServerStudioHandler<Peer extends object> {
     };
 
     try {
-      const { studio } = await this.getStudio(deps);
-
       const bridge = this.eventBridges.get(peer);
       if (bridge) {
         // 桥已在,只把归属指向本次提交。
         bridge.latestRequestId.current = requestId;
       } else {
         const latestRequestId = { current: requestId };
-        const unsubscribe = studio.subscribe((event) => {
+        const unsubscribe = this.studio.subscribe((event) => {
           this.outbound.sendEvent(peer, {
             type: 'studio.progress',
             requestId: latestRequestId.current,
@@ -123,7 +75,7 @@ export class LocalServerStudioHandler<Peer extends object> {
         this.eventBridges.set(peer, { unsubscribe, latestRequestId });
       }
 
-      const { threadId } = await studio.dispatch({ petId: studio.entryPetId, request: userRequest });
+      const { threadId } = await this.studio.dispatch({ petId: this.studio.entryPetId, request: userRequest });
       console.log(
         `[local-server] studio_request accepted requestId=${requestId} thread=${threadId}`,
       );
@@ -137,12 +89,8 @@ export class LocalServerStudioHandler<Peer extends object> {
         workdir: getLocalServerWorkdir(deps),
       });
     } catch (error) {
-      const message = error instanceof StudioNotConfiguredError
-        ? `Studio 未配置:${error.message}`
-        : error instanceof Error ? error.message : String(error);
-      if (!(error instanceof StudioNotConfiguredError)) {
-        console.error('[local-server] handleStudioRequest error:', message);
-      }
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[local-server] handleStudioRequest error:', message);
       send({ type: 'studio_error', requestId, message });
     }
   }

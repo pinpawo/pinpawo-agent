@@ -288,7 +288,9 @@ export function startLocalStdioServer(
   deps: LocalServerDeps,
   options: LocalServerStdioTransportOptions = {},
 ) {
-  const handlers = createLocalServerHandlers(deps);
+  const handlers = createLocalServerHandlers(deps, {
+    ...(options.studioHandler ? { studioHandler: options.studioHandler } : {}),
+  });
   const transport = attachLocalServerStdioTransport(handlers.peerHandlers, options);
   return {
     ...transport,

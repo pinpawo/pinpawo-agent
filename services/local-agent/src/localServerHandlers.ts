@@ -820,9 +820,7 @@ export function createLocalServerHandlers(
 
   return {
     peerHandlers,
-    close: () => {
-      void studioHandler?.shutdown();
-    },
+    close: () => {},
     handleHttpRequest: (req, res, authToken) => {
       const requestDeps = runtimeDeps.get();
       return handleLocalHttpRequest(req, res, requestDeps, {

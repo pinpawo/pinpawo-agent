@@ -30,6 +30,8 @@ import type { LocalServerDeps, LocalServerStudioModeInfo } from './localServerTy
 import { getConfig } from './config';
 import type { HostToolkitInventoryStore } from './toolkits/toolkitInventory';
 import { FileSaver } from './fileSaver';
+import { buildStudio, type BuildStudioResult } from './studio/buildStudio';
+import type { Studio } from '@pinpawo/studio';
 
 export type StudioHostOptions = {
   runtimeConfig?: LocalAgentRuntimeConfig;
@@ -40,12 +42,19 @@ export type StudioHostOptions = {
  * Studio Host.
  *
  * It delegates all capability supply to {@link HostCapabilityAssembly} and
- * only adds Studio-specific concerns: studio mode info and a no-op stop
- * marker (no ws relay loop).
+ * only adds Studio-specific concerns: studio mode info, a no-op stop
+ * marker (no ws relay loop), and a resident Studio built at init time.
+ *
+ * The Studio is built once during {@link StudioHost.init} — before any
+ * transport begins listening. Requests only invoke the resident Studio;
+ * they do not trigger assembly. This is the "resident Host" model from
+ * #643: "Studio Host 按配置启动多个常驻 pet runtime / graph；请求只
+ * invoke。"
  */
 export class StudioHost {
   private readonly caps: HostCapabilityAssembly;
   private readonly studioModeInfo: LocalServerStudioModeInfo | undefined;
+  private studio: BuildStudioResult | null = null;
 
   constructor(options: StudioHostOptions = {}) {
     this.caps = new HostCapabilityAssembly({
@@ -57,6 +66,23 @@ export class StudioHost {
 
   async init() {
     await this.caps.init();
+    // Build the resident Studio now — before any transport starts listening.
+    // Requests only dispatch to this pre-built instance.
+    const runtimeConfig = this.caps.getRuntimeConfig();
+    this.studio = await buildStudio({
+      modelProfiles: this.caps.getModelProfiles(),
+      capabilities: [
+        ...this.caps.getLocalCapabilities(),
+        ...this.caps.getUserCapabilities().map((item) => item.capability),
+      ],
+      toolkits: [...this.caps.getToolkitInventoryStore().getSnapshot().effectiveToolkits],
+      toolkitRuntimeManager: this.caps.getToolkitRuntimeManager(),
+      checkpoint: this.caps.getChatCheckpointer(),
+      ownerUserId: null,
+      workdir: runtimeConfig.workdir,
+      ...(runtimeConfig.studioConfigPath ? { studioConfigPath: runtimeConfig.studioConfigPath } : {}),
+      ...(runtimeConfig.petsDir ? { petsDir: runtimeConfig.petsDir } : {}),
+    });
   }
 
   requestStop() {
@@ -65,7 +91,19 @@ export class StudioHost {
 
   async shutdown() {
     this.requestStop();
+    await this.studio?.studio.shutdown().catch(() => undefined);
     await this.caps.shutdown();
+  }
+
+  /**
+   * Returns the resident Studio built during {@link StudioHost.init}.
+   * Throws if called before init.
+   */
+  getStudio(): Studio {
+    if (!this.studio) {
+      throw new Error('StudioHost.getStudio() called before init()');
+    }
+    return this.studio.studio;
   }
 
   // ---- Capability supply delegation ----

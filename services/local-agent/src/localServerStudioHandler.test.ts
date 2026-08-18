@@ -2,9 +2,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { LocalServerStudioHandler } from './localServerStudioHandler';
-import type { BuildStudio } from './localServerStudioHandler';
-import type { BuildStudioResult } from './studio/buildStudio';
-import { StudioNotConfiguredError } from './studio/buildStudio';
 import type { LocalServerDeps } from './localServerTypes';
 import type { Studio, StudioEventHandler } from '@pinpawo/studio';
 import { createTestModelServerDeps } from './testing/modelProfiles';
@@ -37,15 +34,11 @@ function fakeStudio(overrides: Partial<Studio> = {}): Studio {
   };
 }
 
-function handlerWith(studio: Studio, onBuild?: () => void) {
-  const build: BuildStudio = async () => {
-    onBuild?.();
-    return { studio, resolved: {}, plugins: [] } as unknown as BuildStudioResult;
-  };
+function handlerWith(studio: Studio) {
   const sent: unknown[] = [];
   const events: unknown[] = [];
   const handler = new LocalServerStudioHandler<Peer>({
-    buildStudio: build,
+    studio,
     outbound: {
       sendMessage: (peer, message) => peer.send(message),
       sendEvent: (_peer, event) => { events.push(event); return true; },
@@ -82,10 +75,14 @@ test('a studio request returns as soon as it is submitted', async () => {
   released();
 });
 
-test('the studio is built once per workdir and reused across requests', async () => {
-  // 常驻:不再每请求重新装配 pet runtime 与 graph。
-  let builds = 0;
-  const { handler, sent } = handlerWith(fakeStudio(), () => { builds += 1; });
+test('multiple requests dispatch to the same resident studio', async () => {
+  // #643 常驻 Host 模型:Studio 在 Host init 时构建一次,
+  // 多个 request 只 dispatch,不再 build。
+  let dispatchCount = 0;
+  const studio = fakeStudio({
+    dispatch: async () => { dispatchCount += 1; return { threadId: `thread-${dispatchCount}` }; },
+  });
+  const { handler, sent } = handlerWith(studio);
   const peer = createPeer(sent);
   const deps = createDeps();
 
@@ -97,8 +94,10 @@ test('the studio is built once per workdir and reused across requests', async ()
     }, deps);
   }
 
-  assert.equal(builds, 1);
-  await handler.shutdown();
+  assert.equal(dispatchCount, 3);
+  // All three responses should be studio_response
+  const responses = sent.filter((m) => (m as { type: string }).type === 'studio_response');
+  assert.equal(responses.length, 3);
 });
 
 test('plugin events reach the peer as studio progress', async () => {
@@ -148,13 +147,15 @@ test('events are attributed to the latest request, not the first one', async () 
   assert.equal(progress.requestId, 'studio-2');
 });
 
-test('a missing studio config is reported as studio_error', async () => {
-  const build: BuildStudio = async () => {
-    throw new StudioNotConfiguredError('/tmp/nope/studio.json');
-  };
+test('a dispatch error is reported as studio_error', async () => {
+  // Studio 由 Host 构建并注入;handler 层面的错误来自 dispatch,
+  // 不再有 buildStudio 路径。
+  const studio = fakeStudio({
+    dispatch: async () => { throw new Error('dispatch boom'); },
+  });
   const sent: unknown[] = [];
   const handler = new LocalServerStudioHandler<Peer>({
-    buildStudio: build,
+    studio,
     outbound: {
       sendMessage: (peer, message) => peer.send(message),
       sendEvent: () => true,
@@ -169,36 +170,5 @@ test('a missing studio config is reported as studio_error', async () => {
 
   const error = sent.at(-1) as { type: string; message: string };
   assert.equal(error.type, 'studio_error');
-  assert.match(error.message, /Studio 未配置/);
-});
-
-test('a failed build is not cached, so a later request can succeed', async () => {
-  // 缓存失败会让一次配置错误把这个 workdir 永久锁死。
-  let attempts = 0;
-  const build: BuildStudio = async () => {
-    attempts += 1;
-    if (attempts === 1) throw new Error('transient boom');
-    return { studio: fakeStudio(), resolved: {}, plugins: [] } as unknown as BuildStudioResult;
-  };
-  const sent: unknown[] = [];
-  const handler = new LocalServerStudioHandler<Peer>({
-    buildStudio: build,
-    outbound: {
-      sendMessage: (peer, message) => peer.send(message),
-      sendEvent: () => true,
-    },
-  });
-  const peer = createPeer(sent);
-  const deps = createDeps();
-
-  await handler.handleStudioRequest(peer, {
-    type: 'studio_request', requestId: 's1', userRequest: 'go',
-  }, deps);
-  assert.equal((sent.at(-1) as { type: string }).type, 'studio_error');
-
-  await handler.handleStudioRequest(peer, {
-    type: 'studio_request', requestId: 's2', userRequest: 'go',
-  }, deps);
-  assert.equal((sent.at(-1) as { type: string }).type, 'studio_response');
-  assert.equal(attempts, 2);
+  assert.match(error.message, /dispatch boom/);
 });

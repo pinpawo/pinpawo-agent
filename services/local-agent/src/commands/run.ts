@@ -107,15 +107,15 @@ export async function runAgent(options: RunAgentOptions) {
         actorName: studioHost.getActorName(),
       });
 
-      // Studio host creates its own studio handler with proper peer outbound.
+      // Studio host creates its own studio handler with the resident Studio
+      // built during init(). The handler only dispatches to this Studio.
       const studioHandler = new LocalServerStudioHandler<LocalServerPeer>({
         outbound: {
           sendMessage: (peer, message) => peer.send(message),
           sendEvent: (peer, event) => sendLocalServerPeerEvent(peer, event),
         },
+        studio: studioHost.getStudio(),
       });
-      // Transfer the built studio from StudioHost to the handler.
-      // The handler owns studio lifecycle from here.
       const deps: LocalServerDeps = studioHost.buildLocalServerDeps();
 
       if (stopping) {

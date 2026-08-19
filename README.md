@@ -18,63 +18,48 @@ Humans have always possessed natural intelligence, but its density is low—cons
 
 Like the engine, the principle of agent harness is not mysterious, but different scenarios demand different forms: a personal assistant is a "four-cylinder engine," enterprise-grade multi-agent collaboration is a "steam turbine." And just as an engine needs wheels and control systems on top of it, an agent harness needs tools, transports, storage, and human-machine interaction layered on top.
 
-The two flowcharts below illustrate this parallel—the left shows how an engine turns energy into power, the right shows how an agent turns intelligence into value:
+The two cycle diagrams below illustrate this parallel—the left shows how an engine continuously turns energy into power, the right shows how an agent continuously turns intelligence into value:
 
 ```mermaid
-flowchart LR
-    F["Fuel<br/>(high-density energy)"] --> CC["Combustion Chamber<br/>release energy"]
-    CC --> P["Piston<br/>expansion does work"]
-    P --> C["Crankshaft<br/>linear → rotary"]
-    C --> D["Drivetrain<br/>match load"]
-    D --> O["Output Power"]
-    style F fill:#f9f,stroke:#333,stroke-width:2px
-    style CC fill:#fcc,stroke:#333,stroke-width:2px
-    style P fill:#fcc,stroke:#333,stroke-width:2px
-    style C fill:#fcc,stroke:#333,stroke-width:2px
-    style D fill:#fcc,stroke:#333,stroke-width:2px
-    style O fill:#cfc,stroke:#333,stroke-width:2px
+flowchart TD
+    I["Intake<br/>draw in air + fuel"] --> CP["Compression<br/>mix & pressurize"]
+    CP --> CB["Combustion & Power<br/>release energy, do work"]
+    CB --> PR["Piston Return<br/>back to origin"]
+    PR --> I
+    style I fill:#9cf,stroke:#333,stroke-width:2px
+    style CP fill:#ccf,stroke:#333,stroke-width:2px
+    style CB fill:#fcc,stroke:#333,stroke-width:2px
+    style PR fill:#fcf,stroke:#333,stroke-width:2px
 ```
 
 ```mermaid
-flowchart LR
-    L["LLM<br/>(high-density intelligence)"] --> P["Prompt Contract<br/>organize intelligence"]
-    P --> R["Reason & Plan<br/>decide how to act"]
-    R --> T["Tool Dispatch<br/>intent → action"]
-    T --> K["Toolkit Execution<br/>interact with the real world"]
-    K --> V["Output Value"]
-    style L fill:#9cf,stroke:#333,stroke-width:2px
-    style P fill:#ccf,stroke:#333,stroke-width:2px
+flowchart TD
+    P["Perceive<br/>read in context + token"] --> R["Reason & Plan<br/>produce tokens, decide actions"]
+    R --> A["Act<br/>call tools, interact with the world"]
+    A --> SR["State Reflow<br/>output merges into context"]
+    SR --> P
+    style P fill:#9cf,stroke:#333,stroke-width:2px
     style R fill:#ccf,stroke:#333,stroke-width:2px
-    style T fill:#ccf,stroke:#333,stroke-width:2px
-    style K fill:#ccf,stroke:#333,stroke-width:2px
-    style V fill:#cfc,stroke:#333,stroke-width:2px
+    style A fill:#fcc,stroke:#333,stroke-width:2px
+    style SR fill:#fcf,stroke:#333,stroke-width:2px
 ```
 
 | Engine | Agent | Shared Role |
 |---|---|---|
-| Fuel (high-density energy) | LLM (high-density intelligence) | High-density energy source |
-| Combustion chamber (release energy) | Prompt contract (organize intelligence) | Release & organize |
-| Piston (expansion does work) | Reason & plan (decide how to act) | Core transformation |
-| Crankshaft (linear → rotary) | Tool dispatch (intent → action) | Form conversion |
-| Drivetrain (match load) | Toolkit execution (interact with real world) | Adapt & execute |
-| Output power | Output value | Final output |
+| Intake (draw in air + fuel) | Perceive (read in context + token) | Draw in raw material |
+| Compression (mix & pressurize) | Reason & plan (organize intelligence) | Compress & organize |
+| Combustion & power (release energy, do work) | Act (call tools, interact with the world) | Core work |
+| Piston return (back to origin) | State reflow (output merges into context) | Close the loop |
+| → back to intake | → back to perceive | Cycle repeats |
 
 ### The Essence of the Loop: Energy + Air vs Token + Context
 
-The flowcharts above show a single transformation, but the real power of both engines and agents comes from **the loop**—not a one-shot conversion, but a continuous cycle.
+Both diagrams above are **cycles**, not one-shot pipelines. The real power of an engine or agent comes from **the loop**—a continuous cycle, not a single transformation.
 
 An engine draws in air, mixes it with fuel, combusts, the piston does work and outputs power, then returns to its starting position as fresh air rushes in to begin the next cycle. The key insight: each stroke is not isolated; energy is continuously released across cycles.
 
 An agent works the same way. It reads in context (user intent, conversation history, tool feedback), mixes it with tokens (the LLM's reasoning capability), and produces new tokens—perhaps an answer, perhaps a tool call. The output is not discarded; it becomes new context fed back into the next cycle. Each round of reasoning builds on the accumulated results of the previous round; intelligence iteratively converges toward the goal within the loop.
 After doing its work, the state flows back—just as a piston returns to its origin after the power stroke to prepare for the next intake. It is not about "exhausting" anything; it is about closing the loop.
-
-| Engine Cycle | Agent Cycle | Shared Role |
-|---|---|---|
-| Intake (draw in air + fuel) | Perceive (read in context + token) | Draw in raw material |
-| Compression (mix and pressurize) | Organize & focus (prompt contract, attention) | Compress & organize |
-| Combustion & power (release energy) | Reason & act (produce tokens, call tools) | Core work |
-| Piston return (back to origin, ready for next intake) | State reflux (output merges into context, becomes next-round input) | Close the loop |
-| → back to intake | → back to perceive | Cycle |
 
 This is the core responsibility of an agent harness: **keep the loop running stably**. Engine engineering is the precise coordination of intake / compression / combustion / cooling; agent engineering is the precise coordination of context management, token scheduling, tool execution, feedback integration, and state persistence. The more stable, fast, and long-running the loop, the greater the value created.
 

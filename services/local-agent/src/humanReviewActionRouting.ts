@@ -182,7 +182,13 @@ export type HumanReviewResolutionOutcome =
   | 'completed'
   | 'waiting_human'
   | 'interrupted'
-  | 'failed';
+  // The run failed but the agent is still usable, so the review action stays
+  // parked for the user to decide again.
+  | 'failed'
+  // The agent itself is unusable (model quota exhausted, auth rejected). The
+  // review action can never be resolved by retrying, so it is terminated
+  // instead of being offered back to the user.
+  | 'fatal_failed';
 
 export type HumanReviewResolutionSource =
   | {
@@ -354,10 +360,19 @@ export async function resolveHumanReviewAction<
     try {
       outcome = await options.run(route, resume, source);
     } finally {
-      lifecycle.settle(
-        actionId,
-        outcome === 'completed' || outcome === 'waiting_human',
-      );
+      if (outcome === 'fatal_failed') {
+        // The resume never reached a checkpoint, so this review is still
+        // pending in the graph. Retrying cannot help while the agent is
+        // unusable, and restoring the route would re-open the same review the
+        // user just tried to leave. Terminate it here; the user resumes work by
+        // starting a new turn once the agent is available again.
+        lifecycle.consume(actionId);
+      } else {
+        lifecycle.settle(
+          actionId,
+          outcome === 'completed' || outcome === 'waiting_human',
+        );
+      }
     }
   } finally {
     lifecycle.abandon(actionId);

@@ -44,6 +44,7 @@ import {
   type HumanReviewResolutionOutcome,
   type HumanReviewResolutionSource,
 } from './humanReviewActionRouting';
+import { classifyAgentRunFailure } from './agentRunFailure';
 import { ReviewResolutionLifecycle } from './reviewResolutionLifecycle';
 import type { AgentSession } from '@pinpawo/agent-session';
 import {
@@ -429,14 +430,20 @@ export class LocalAgentAppChatHandler {
       this.inflightRequests.clear(ws, inflight);
       recordAgentRunActivity('error', requestId, 5_000);
       console.error('[local-agent] chat error:', err instanceof Error ? err.message : err);
+      const failure = classifyAgentRunFailure(err);
       if (isStillCurrent && ws.readyState === WebSocket.OPEN) {
         this.emitRemoteEvent(ws, userId, {
           type: 'error',
           requestId,
-          message: 'internal error',
+          // Remote peers keep the redacted message; only the terminal nature of
+          // the failure is worth telling them, so the run does not look stuck.
+          message: failure.kind === 'fatal'
+            ? '模型当前不可用，已终止本次运行并关闭待确认的操作。'
+            : 'internal error',
+          ...(failure.kind === 'fatal' ? { code: 'agent_unavailable' as const } : {}),
         });
       }
-      return 'failed';
+      return failure.kind === 'fatal' ? 'fatal_failed' : 'failed';
     } finally {
       invocation.settle();
     }

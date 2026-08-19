@@ -738,6 +738,7 @@ function readAgentErrorCode(record: Record<string, unknown>): AgentErrorCode | n
     code === 'review_closed'
     || code === 'review_stale'
     || code === 'review_wrong_session'
+    || code === 'agent_unavailable'
   ) {
     return code;
   }

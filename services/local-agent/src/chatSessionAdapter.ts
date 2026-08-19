@@ -400,6 +400,11 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
 
   let finalMessages: BaseMessage[] = [];
   let streamedReply = '';
+  // Identifies the assistant entry the streamed reply is building, so the
+  // terminal `message.completed` finalizes that same entry instead of creating
+  // a second one. Falls back to the requestId when the model stream carried no
+  // lifecycle id (one reply per request makes that unambiguous).
+  let streamedReplyMessageId = '';
   let emittedPlan: AgentPlan | null = null;
   const emitCurrentPlan = (plan: AgentPlan | null) => {
     if (currentPlansEqual(emittedPlan, plan)) return;
@@ -452,10 +457,12 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
       switch (chatEvent.type) {
         case 'assistant.delta': {
           streamedReply += chatEvent.text;
+          streamedReplyMessageId = chatEvent.messageId || streamedReplyMessageId;
           recordAgentRunActivity('streaming', requestId);
           emitEvent({
             type: 'message.delta',
             requestId,
+            messageId: chatEvent.messageId || requestId,
             role: 'assistant',
             text: chatEvent.text,
           });
@@ -548,10 +555,23 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
       return { status: 'interrupted' };
     }
     const reply = streamedReply.trim() || RECURSION_LIMIT_NOTICE;
+    const replyMessageId = streamedReplyMessageId || requestId;
     if (!streamedReply.trim()) {
-      emitEvent({ type: 'message.delta', requestId, role: 'assistant', text: reply });
+      emitEvent({
+        type: 'message.delta',
+        requestId,
+        messageId: replyMessageId,
+        role: 'assistant',
+        text: reply,
+      });
     }
-    emitEvent({ type: 'message.completed', requestId, role: 'assistant', text: reply });
+    emitEvent({
+      type: 'message.completed',
+      requestId,
+      messageId: replyMessageId,
+      role: 'assistant',
+      text: reply,
+    });
     clearAgentRunActivity(requestId);
     return { status: 'completed', reply };
   } finally {
@@ -607,6 +627,7 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
   emitEvent({
     type: 'message.completed',
     requestId,
+    messageId: streamedReplyMessageId || requestId,
     role: 'assistant',
     text: finalReply,
     ...(finalUsage ? { usage: finalUsage } : {}),

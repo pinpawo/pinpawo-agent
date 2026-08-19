@@ -189,6 +189,7 @@ test('incremental projection and parsed snapshot converge', () => {
     event: {
       type: 'message.completed',
       requestId: 'req-1',
+      messageId: 'm-req-1',
       role: 'assistant',
       text: 'world',
     },
@@ -251,6 +252,7 @@ test('protocol uses the same snapshot and runtime event contracts', () => {
   const event = {
     type: 'message.completed' as const,
     requestId: 'req-1',
+    messageId: 'm-req-1',
     role: 'assistant' as const,
     text: 'done',
   };

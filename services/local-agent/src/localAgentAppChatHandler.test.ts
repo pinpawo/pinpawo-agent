@@ -251,12 +251,14 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
       options.emitEvent({
         type: 'message.delta',
         requestId: 'req-1',
+        messageId: 'm-req-1',
         role: 'assistant',
         text: 'Saved to /Users/al',
       });
       options.emitEvent({
         type: 'message.delta',
         requestId: 'req-1',
+        messageId: 'm-req-1',
         role: 'assistant',
         text: 'ice/project/secret.ts',
       });
@@ -273,6 +275,7 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
       options.emitEvent({
         type: 'message.completed',
         requestId: 'req-1',
+        messageId: 'm-req-1',
         role: 'assistant',
         text: 'Saved to /Users/alice/project/secret.ts',
       });
@@ -485,6 +488,7 @@ test('LocalAgentAppChatHandler settles the previous run before projecting replac
       options.emitEvent({
         type: 'message.delta',
         requestId: 'req-old',
+        messageId: 'm-req-old',
         role: 'assistant',
         text: 'late stale output',
       });
@@ -595,6 +599,7 @@ test('LocalAgentAppChatHandler retains active projections above the idle retenti
       options.emitEvent({
         type: 'message.delta',
         requestId: options.request.requestId,
+        messageId: 'm-1',
         role: 'assistant',
         text: options.request.requestId,
       });

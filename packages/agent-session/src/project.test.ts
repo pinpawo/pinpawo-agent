@@ -6,6 +6,7 @@ import {
   reduceSession,
   type AgentSession,
   type AgentSessionInput,
+  type AgentTimelineEntry,
 } from './index';
 
 function createDomainSession(): AgentSession {
@@ -82,6 +83,7 @@ test('reduceSession deterministically replays canonical run inputs', () => {
         event: {
           type: 'message.delta',
           requestId: 'req-1',
+          messageId: 'm-req-1',
           role: 'assistant',
           text: 'All ',
         },
@@ -107,6 +109,7 @@ test('reduceSession deterministically replays canonical run inputs', () => {
         event: {
           type: 'message.completed',
           requestId: 'req-1',
+          messageId: 'm-req-1',
           role: 'assistant',
           text: 'All tests passed.',
           usage: { inputTokens: 10, outputTokens: 4, totalTokens: 14 },
@@ -139,7 +142,7 @@ test('reduceSession deterministically replays canonical run inputs', () => {
     completedAt: 1_200,
     raw: { input: { command: 'npm test' }, output: 'passed' },
   });
-  assert.equal(first.timeline[2]?.id, 'req-1:assistant:0');
+  assert.equal(first.timeline[2]?.id, 'req-1:assistant:m-req-1');
   assert.equal(first.timeline[2]?.type === 'message' ? first.timeline[2].status : undefined, 'completed');
   assert.equal(first.timeline[3]?.id, 'req-1:subagent:general:t1|model_request:t2:child-1');
   assert.equal(first.timeline[3]?.type === 'message' ? first.timeline[3].status : undefined, 'completed');
@@ -206,6 +209,7 @@ test('reduceSession accumulates usage across runs and clears only run usage on s
     event: {
       type: 'message.completed',
       requestId: 'req-1',
+      messageId: 'm-req-1',
       role: 'assistant',
       text: 'first answer',
       usage: {
@@ -232,6 +236,7 @@ test('reduceSession accumulates usage across runs and clears only run usage on s
     event: {
       type: 'message.completed',
       requestId: 'req-2',
+      messageId: 'm-req-2',
       role: 'assistant',
       text: 'second answer',
       usage: {
@@ -324,6 +329,7 @@ test('run completion settles partial assistant output before its terminal notice
     event: {
       type: 'message.delta',
       requestId: 'req-interrupt',
+      messageId: 'm-req-interrupt',
       role: 'assistant',
       text: 'Partial output',
     },
@@ -455,4 +461,149 @@ test('applySessionSnapshot rematerializes timeline state from a checkpoint point
   });
   assert.equal(resumed.tokenUsage, undefined);
   assert.deepEqual(resumed.sessionTokenUsage, withUsage.sessionTokenUsage);
+});
+
+test('a reply settled mid-run by a tool is finalized in place, not duplicated', () => {
+  // The delegation shape that produced duplicated handoff/answer output: the
+  // reply streams, a tool operation and a subagent handoff land, then the run
+  // completes with that same text. Keying assistant entries by the upstream
+  // message id makes the completion finalize the streamed entry directly.
+  const inputs: Array<{ input: AgentSessionInput; observedAt: number }> = [
+    {
+      input: { type: 'user.accepted', requestId: 'req-1', kind: 'chat', text: 'go' },
+      observedAt: 1_000,
+    },
+    {
+      input: {
+        type: 'runtime.event',
+        event: {
+          type: 'message.delta',
+          requestId: 'req-1',
+          messageId: 'ai-1',
+          role: 'assistant',
+          text: 'handed off result',
+        },
+      },
+      observedAt: 1_100,
+    },
+    {
+      input: {
+        type: 'runtime.event',
+        event: {
+          type: 'operation',
+          requestId: 'req-1',
+          phase: 'started',
+          operation: { id: 'tool-1', kind: 'shell' },
+        },
+      },
+      observedAt: 1_150,
+    },
+    {
+      input: {
+        type: 'runtime.event',
+        event: {
+          type: 'subagent.message.completed',
+          requestId: 'req-1',
+          messageId: 'child-1',
+          namespace: ['general:t1'],
+          text: 'handed off result',
+        },
+      },
+      observedAt: 1_200,
+    },
+    {
+      input: {
+        type: 'runtime.event',
+        event: {
+          type: 'message.completed',
+          requestId: 'req-1',
+          messageId: 'ai-1',
+          role: 'assistant',
+          text: 'handed off result',
+        },
+      },
+      observedAt: 1_400,
+    },
+  ];
+
+  const session = replay(createDomainSession(), inputs);
+  const assistants = session.timeline.filter((entry) =>
+    entry.type === 'message' && entry.role === 'assistant');
+  assert.equal(assistants.length, 1);
+  assert.equal(assistants[0]?.id, 'req-1:assistant:ai-1');
+  assert.equal(assistants[0]?.type === 'message' ? assistants[0].status : undefined, 'completed');
+  // The subagent progress entry stays visible alongside the reply.
+  assert.equal(
+    session.timeline.filter((entry) => entry.type === 'message' && entry.role === 'subagent').length,
+    1,
+  );
+});
+
+test('text resuming after a tool becomes its own assistant entry', () => {
+  const inputs: Array<{ input: AgentSessionInput; observedAt: number }> = [
+    {
+      input: { type: 'user.accepted', requestId: 'req-1', kind: 'chat', text: 'go' },
+      observedAt: 1_000,
+    },
+    {
+      input: {
+        type: 'runtime.event',
+        event: {
+          type: 'message.delta',
+          requestId: 'req-1',
+          messageId: 'ai-1',
+          role: 'assistant',
+          text: 'let me check',
+        },
+      },
+      observedAt: 1_100,
+    },
+    {
+      input: {
+        type: 'runtime.event',
+        event: {
+          type: 'operation',
+          requestId: 'req-1',
+          phase: 'started',
+          operation: { id: 'tool-1', kind: 'shell' },
+        },
+      },
+      observedAt: 1_150,
+    },
+    {
+      input: {
+        type: 'runtime.event',
+        event: {
+          type: 'message.delta',
+          requestId: 'req-1',
+          messageId: 'ai-2',
+          role: 'assistant',
+          text: 'port is 3210',
+        },
+      },
+      observedAt: 1_300,
+    },
+    {
+      input: {
+        type: 'runtime.event',
+        event: {
+          type: 'message.completed',
+          requestId: 'req-1',
+          messageId: 'ai-2',
+          role: 'assistant',
+          text: 'port is 3210',
+        },
+      },
+      observedAt: 1_400,
+    },
+  ];
+
+  const session = replay(createDomainSession(), inputs);
+  const assistants = session.timeline.filter((entry): entry is Extract<AgentTimelineEntry, { type: 'message' }> =>
+    entry.type === 'message' && entry.role === 'assistant');
+  assert.equal(assistants.length, 2);
+  // The pre-tool paragraph is not extended by post-tool text.
+  assert.equal(assistants[0]?.text, 'let me check');
+  assert.equal(assistants[1]?.text, 'port is 3210');
+  assert.equal(assistants[0]?.status, 'completed');
 });

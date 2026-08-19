@@ -28,9 +28,7 @@ export function createLocalServerWebSocketPeer(
     isConnected: () => ws.readyState === WebSocket.OPEN,
     send: (message) => {
       try {
-        return sendLocalAgentMessage(ws, message, {
-          audience: 'trusted-local',
-        });
+        return sendLocalAgentMessage(ws, message);
       } catch (err) {
         logError('[local-server] failed to send websocket message:', err);
         return false;

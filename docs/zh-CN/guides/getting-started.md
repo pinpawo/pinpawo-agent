@@ -12,7 +12,7 @@
 - npm
 - 一个 OpenAI-compatible 模型端点和 API key
 
-local host 在你的机器上运行。`PINPAWO_LOCAL_ONLY=1` 会关闭 PinPawo hosted API、relay 和 Hasura 连接，但不会替代运行 Agent 所必需的模型配置。
+local host 完全运行在你的机器上，不需要 PinPawo 账号或后端，只需要上面的模型配置。
 
 ## 安装与初始化
 

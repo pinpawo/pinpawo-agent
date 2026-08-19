@@ -799,81 +799,12 @@ test('sendLocalAgentMessage writes only when websocket-like object is open', () 
   assert.deepEqual(sent.map((item) => JSON.parse(item)), [{ type: 'pong' }]);
 });
 
-test('sendLocalAgentMessage preserves message deltas for every audience', () => {
-  const remoteSent: string[] = [];
-  const trustedSent: string[] = [];
-  const eventMessage = {
-    type: 'event' as const,
-    requestId: 'req-1',
-    event: {
-      type: 'message.delta' as const,
-      requestId: 'req-1',
-      messageId: 'm-req-1',
-      role: 'assistant' as const,
-      text: 'Saved to /Users/al',
-    },
-  };
-
-  assert.equal(sendLocalAgentMessage({
-    readyState: 1,
-    send(data: string) {
-      remoteSent.push(data);
-    },
-  }, eventMessage), true);
-  assert.equal(sendLocalAgentMessage({
-    readyState: 1,
-    send(data: string) {
-      trustedSent.push(data);
-    },
-  }, eventMessage, { audience: 'trusted-local' }), true);
-
-  assert.deepEqual(remoteSent.map((item) => JSON.parse(item)), [eventMessage]);
-  assert.deepEqual(trustedSent.map((item) => JSON.parse(item)), [eventMessage]);
-});
-
-test('sendLocalAgentMessage only redacts completed main-agent event text remotely', () => {
+test('completed message text crosses the transport verbatim', () => {
+  // app relay 撤除后不再有远端出口:本地对端信任本地路径,
+  // 从前只对 remote 生效的路径打码随之移除。
   const sent: string[] = [];
-  const completedMessage = {
-    type: 'event' as const,
-    requestId: 'req-1',
-    event: {
-      type: 'message.completed' as const,
-      requestId: 'req-1',
-      messageId: 'm-1',
-      role: 'assistant' as const,
-      text: 'Saved to /Users/alice/project/result.txt',
-    },
-  };
+  const openWs = { readyState: 1, send(data: string) { sent.push(data); } };
 
-  assert.equal(sendLocalAgentMessage({
-    readyState: 1,
-    send(data: string) {
-      sent.push(data);
-    },
-  }, completedMessage), true);
-
-  assert.equal(
-    JSON.parse(sent[0] ?? '{}').event.text,
-    'Saved to [local-path]',
-  );
-});
-
-test('sendLocalAgentEvent only redacts remote completed message text', () => {
-  const sent: string[] = [];
-  const openWs = {
-    readyState: 1,
-    send(data: string) {
-      sent.push(data);
-    },
-  };
-
-  assert.equal(sendLocalAgentEvent(openWs, {
-    type: 'message.delta',
-    requestId: 'req-1',
-    messageId: 'm-req-1',
-    role: 'assistant',
-    text: 'hello',
-  }), true);
   assert.equal(sendLocalAgentEvent(openWs, {
     type: 'message.completed',
     requestId: 'req-1',
@@ -881,60 +812,11 @@ test('sendLocalAgentEvent only redacts remote completed message text', () => {
     role: 'assistant',
     text: 'Saved to /Users/alice/project/result.txt',
   }), true);
-  const internalOperationEvent: AgentOperationEvent = {
-    type: 'operation',
-    requestId: 'req-1',
-    phase: 'started',
-    operation: {
-      kind: 'bash.read_file',
-      title: '读文件',
-    },
-    raw: {
-      input: { path: 'README.md' },
-    },
-  };
-  assert.equal(sendLocalAgentEvent(openWs, internalOperationEvent), true);
 
-  assert.deepEqual(sent.map((item) => JSON.parse(item)), [
-    {
-      type: 'event',
-      requestId: 'req-1',
-      event: {
-        type: 'message.delta',
-        requestId: 'req-1',
-        messageId: 'm-req-1',
-        role: 'assistant',
-        text: 'hello',
-      },
-    },
-    {
-      type: 'event',
-      requestId: 'req-1',
-      event: {
-        type: 'message.completed',
-        requestId: 'req-1',
-        messageId: 'm-req-1',
-        role: 'assistant',
-        text: 'Saved to [local-path]',
-      },
-    },
-    {
-      type: 'event',
-      requestId: 'req-1',
-      event: {
-        type: 'operation',
-        requestId: 'req-1',
-        phase: 'started',
-        operation: {
-          kind: 'bash.read_file',
-          title: '读文件',
-        },
-        raw: {
-          input: { path: 'README.md' },
-        },
-      },
-    },
-  ]);
+  assert.equal(
+    JSON.parse(sent[0] ?? '{}').event.text,
+    'Saved to /Users/alice/project/result.txt',
+  );
 });
 
 test('sendLocalAgentEvent forwards operation.raw for trusted local transport', () => {
@@ -955,9 +837,7 @@ test('sendLocalAgentEvent forwards operation.raw for trusted local transport', (
       output: 'file contents',
     },
   };
-  assert.equal(sendLocalAgentEvent(openWs, event, {
-    audience: 'trusted-local',
-  }), true);
+  assert.equal(sendLocalAgentEvent(openWs, event), true);
   assert.deepEqual(JSON.parse(sent[0] ?? '{}'), {
     type: 'event',
     requestId: 'req-1',
@@ -1005,9 +885,7 @@ test('remote event adapter preserves operation display fields and raw payloads',
   };
 
   assert.equal(sendLocalAgentEvent(remoteWs, event), true);
-  assert.equal(sendLocalAgentEvent(trustedWs, event, {
-    audience: 'trusted-local',
-  }), true);
+  assert.equal(sendLocalAgentEvent(trustedWs, event), true);
 
   const remoteEvent = JSON.parse(remoteSent[0] ?? '{}').event;
   assert.deepEqual(remoteEvent.raw, {
@@ -1063,9 +941,7 @@ test('remote server-message adapter preserves snapshot payloads', () => {
   };
 
   assert.equal(sendLocalAgentMessage(remoteWs, message), true);
-  assert.equal(sendLocalAgentMessage(trustedWs, message, {
-    audience: 'trusted-local',
-  }), true);
+  assert.equal(sendLocalAgentMessage(trustedWs, message), true);
 
   const remoteSession = JSON.parse(remoteSent[0] ?? '{}').snapshot.session;
   assert.deepEqual(remoteSession.runtime, {
@@ -1101,7 +977,7 @@ test('trusted local event transport preserves streaming message deltas', () => {
     messageId: 'm-req-1',
     role: 'assistant',
     text: 'hi',
-  }, { audience: 'trusted-local' }), true);
+  }), true);
   assert.deepEqual(JSON.parse(sent[0] ?? '{}'), {
     type: 'event',
     requestId: 'req-1',

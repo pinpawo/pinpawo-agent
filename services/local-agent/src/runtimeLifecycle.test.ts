@@ -12,17 +12,12 @@ import {
 import { LocalAgentHost } from './runtime';
 import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
 
-test('requestStop wakes runForever without waiting for the poll interval', async () => {
+test('requestStop ends runForever promptly', async () => {
   const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-runtime-stop-'));
   const originalConfig = getConfig();
   const runtime = new LocalAgentHost(
     buildLocalAgentRuntimeConfig(workdir),
   );
-  setConfig({
-    apiConnected: false,
-    pollIntervalSeconds: 60,
-  });
-
   try {
     const running = runtime.runForever({ skipInit: true });
     await new Promise<void>((resolve) => setImmediate(resolve));

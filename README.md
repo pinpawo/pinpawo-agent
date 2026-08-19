@@ -199,16 +199,11 @@ Edit `~/.pinpawo/.env` to configure credentials and model settings; use `pinpawo
 
 | Key | Purpose |
 |---|---|
-| `API_BASE_URL` | PinPawo API base URL. |
-| `HASURA_ENDPOINT` | Hasura GraphQL endpoint. |
-| `AGENT_TOKEN` | Agent API token. |
-| `HASURA_JWT` | Hasura JWT. |
 | `LLM_API_KEY` | OpenAI-compatible provider API key. |
 | `LLM_BASE_URL` | OpenAI-compatible provider base URL. |
 | `LLM_MODEL` | Default model. |
 | `LLM_CONTEXT_WINDOW_TOKENS` | Optional context-window override for custom models. |
 | `PINPAWO_MODEL_PROFILE` | Stored model profile ID. |
-| `PINPAWO_LOCAL_ONLY` | Disable hosted API, relay, and Hasura access when set to `1`. |
 | `PINPAWO_WORKDIR` | Default runtime working directory. |
 | `PINPAWO_BROWSER_BACKEND` | `auto`, `playwright`, or `extension`. |
 | `LOCAL_SERVER_PORT` | Local HTTP/WebSocket port. |
@@ -225,7 +220,6 @@ A complete `LLM_API_KEY` + `LLM_BASE_URL` + `LLM_MODEL` tuple creates an ephemer
 | `pinpawo server --stdio` | Use a single JSONL stdio peer instead of HTTP/WebSocket. |
 | `pinpawo init` | Create local config and the example Capability. |
 | `pinpawo setup` | Diagnose configuration and show next steps. |
-| `pinpawo actor` | Select the local pet actor. |
 | `pinpawo tui` | Start the terminal client. |
 | `pinpawo detect` | Print browser and backend detection as JSON. |
 | `pinpawo capability list` | List installed user Capabilities. |

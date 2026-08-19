@@ -6,12 +6,6 @@ import type { StoredModelProfilesV1 } from './modelProfiles';
 const CONFIG_PATH = resolve(homedir(), '.pinpawo', 'config.json');
 
 export type StoredConfig = {
-  api_base_url?: string;
-  hasura_endpoint?: string;
-  agent_token?: string;
-  hasura_jwt?: string;
-  /** Force local-only startup even when hosted API credentials are present. */
-  local_only?: boolean;
   user_id?: string;
   nickname?: string;
   actor_id?: string;

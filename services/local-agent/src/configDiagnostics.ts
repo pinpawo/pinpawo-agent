@@ -31,15 +31,6 @@ export type SetupGuide = {
 
 type EnvMap = Record<string, string | undefined>;
 
-export function isMissingOrGeneratedApiPlaceholder(envKey: string, value: string): boolean {
-  const trimmed = value.trim();
-  if (!trimmed) return true;
-  if (envKey === 'API_BASE_URL') return /your-api\.example\.com/i.test(trimmed);
-  if (envKey === 'HASURA_ENDPOINT') return /your-hasura\.example\.com/i.test(trimmed);
-  if (envKey === 'AGENT_TOKEN') return /^your-agent-token-here$/i.test(trimmed);
-  if (envKey === 'HASURA_JWT') return trimmed === 'eyJ...' || /^your-hasura-jwt/i.test(trimmed);
-  return false;
-}
 
 export function loadSetupEnvironment(baseEnv: EnvMap = process.env): EnvMap {
   const merged: EnvMap = { ...baseEnv };
@@ -81,19 +72,6 @@ export function buildSetupGuide(options: {
       ? error.message
       : String(error);
   }
-  const apiValues = [
-    ['API_BASE_URL', readConfigValue(env, options.stored, 'API_BASE_URL', 'api_base_url')],
-    ['HASURA_ENDPOINT', readConfigValue(env, options.stored, 'HASURA_ENDPOINT', 'hasura_endpoint')],
-    ['AGENT_TOKEN', readConfigValue(env, options.stored, 'AGENT_TOKEN', 'agent_token')],
-    ['HASURA_JWT', readConfigValue(env, options.stored, 'HASURA_JWT', 'hasura_jwt')],
-  ] as const;
-  const missingApiKeys = apiValues
-    .filter(([key, value]) => isMissingOrGeneratedApiPlaceholder(key, value))
-    .map(([key]) => key);
-  const localOnlyMode = readBooleanConfigValue(env, options.stored, 'PINPAWO_LOCAL_ONLY', 'local_only') ?? false;
-  const hostedApiConfigured = missingApiKeys.length === 0;
-  const hostedApiEnabled = hostedApiConfigured && !localOnlyMode;
-  const actorId = options.stored.actor_id?.trim() ?? '';
   const readyForLocalRun = Boolean(resolvedModelLabel);
   const checks: SetupCheck[] = [
     readyForLocalRun
@@ -109,46 +87,6 @@ export function buildSetupGuide(options: {
           status: 'missing',
           detail: `No runnable default model profile. ${modelConfigError}`,
           nextStep: 'Configure LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL together in ~/.pinpawo/.env.',
-        },
-    localOnlyMode
-      ? {
-          id: 'hosted-api',
-          label: 'Hosted app/API',
-          status: 'warning',
-          detail: 'PINPAWO_LOCAL_ONLY is enabled. Hosted app relay and Hasura context are disabled even if API credentials are configured.',
-          nextStep: 'Unset PINPAWO_LOCAL_ONLY or set local_only=false in config.json to re-enable hosted API connections.',
-        }
-      : hostedApiConfigured
-      ? {
-          id: 'hosted-api',
-          label: 'Hosted app/API',
-          status: 'ok',
-          detail: 'API credentials are configured.',
-        }
-      : {
-          id: 'hosted-api',
-          label: 'Hosted app/API',
-          status: 'warning',
-          detail: `Missing or placeholder values: ${missingApiKeys.join(', ')}. Local-only mode can still run, but hosted app relay, heartbeat, and Hasura context are disabled.`,
-          nextStep: 'Configure API_BASE_URL, HASURA_ENDPOINT, AGENT_TOKEN, and HASURA_JWT in ~/.pinpawo/.env to enable hosted API credentials.',
-        },
-    actorId
-      ? {
-          id: 'actor',
-          label: 'Actor',
-          status: 'ok',
-          detail: options.stored.actor_name ? `Selected actor: ${options.stored.actor_name}.` : 'Actor id is configured.',
-        }
-      : {
-          id: 'actor',
-          label: 'Actor',
-          status: hostedApiEnabled ? 'missing' : 'warning',
-          detail: hostedApiEnabled
-            ? 'No hosted actor is selected.'
-            : 'No actor is selected. Local-only mode will use the built-in local actor.',
-          nextStep: hostedApiEnabled
-            ? 'Run "pinpawo actor" to choose a pet actor.'
-            : 'After configuring hosted API credentials, run "pinpawo actor" to choose a pet actor.',
         },
     buildStudioConfigCheck(runtimeConfig),
   ];

@@ -2,7 +2,7 @@ import {
   FileCapabilityArtifactStore,
 } from '../../../local-agent/src/capabilityArtifactStore';
 import {
-  buildLocalOnlyAgentContext,
+  buildAgentContext,
 } from '../../../local-agent/src/contextLoader';
 import {
   startLocalServer,
@@ -67,7 +67,7 @@ const transport = await startLocalServer(requestedPort, {
   authToken,
   handlerOptions: {
     chatGraphService: graphService,
-    loadContext: async (actorId) => buildLocalOnlyAgentContext(actorId),
+    loadContext: async (actorId) => buildAgentContext(actorId),
   },
 });
 

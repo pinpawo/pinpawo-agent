@@ -10,7 +10,6 @@
 |---|---|---|
 | `pinpawo init` | 创建本地配置与示例 Capability。 | `--dir`、`--force`、`--no-example-capability` |
 | `pinpawo setup` | 诊断模型和运行时配置。 | `--workdir` |
-| `pinpawo actor` | 选择本地 Pet identity。 | — |
 | `pinpawo server` / `run` | 启动 local host。 | `--mode chat|studio`、`--workdir`、`--stdio` |
 | `pinpawo tui` | 启动终端 UI。 | `--check`、`--qa`、`--workdir` |
 | `pinpawo browser extension <action>` | 管理 Chrome Extension driver。 | `--extension-id` |

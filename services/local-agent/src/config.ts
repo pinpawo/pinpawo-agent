@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
-import { isMissingOrGeneratedApiPlaceholder } from './configDiagnostics';
 import {
   buildModelProfileRegistry,
   fingerprintModelProfile,
@@ -19,8 +18,6 @@ import {
   isToolAuthorizationSafetyLevel,
   type ToolAuthorizationSafetyLevel,
 } from '@pinpawo/agent-contracts';
-
-export { isMissingOrGeneratedApiPlaceholder } from './configDiagnostics';
 
 function parseDotEnv(content: string) {
   for (const line of content.split('\n')) {
@@ -48,10 +45,6 @@ const stored = loadStoredConfig();
 function get(envKey: string, storedKey: keyof typeof stored): string {
   const storedVal = stored[storedKey];
   return process.env[envKey] || (typeof storedVal === 'string' ? storedVal : '') || '';
-}
-
-function optional(envKey: string, storedKey: keyof typeof stored): string {
-  return get(envKey, storedKey).trim();
 }
 
 export function resolveNumberConfigValue(envVal: string | undefined, storedVal: unknown): number | undefined {
@@ -155,27 +148,6 @@ export function resolveCapabilityRegistryBackend(
   );
 }
 
-const apiBaseUrl = optional('API_BASE_URL', 'api_base_url').replace(/\/$/, '');
-const hasuraEndpoint = optional('HASURA_ENDPOINT', 'hasura_endpoint').replace(/\/$/, '');
-const agentToken = optional('AGENT_TOKEN', 'agent_token');
-const hasuraJwt = optional('HASURA_JWT', 'hasura_jwt');
-const localOnlyMode = getBoolean('PINPAWO_LOCAL_ONLY', 'local_only') ?? false;
-const apiCredentialValues = [
-  ['API_BASE_URL', apiBaseUrl],
-  ['HASURA_ENDPOINT', hasuraEndpoint],
-  ['AGENT_TOKEN', agentToken],
-  ['HASURA_JWT', hasuraJwt],
-] as const;
-const missingOrPlaceholderApiConfig = apiCredentialValues
-  .filter(([key, value]) => isMissingOrGeneratedApiPlaceholder(key, value))
-  .map(([key]) => key);
-const apiConnected = !localOnlyMode && missingOrPlaceholderApiConfig.length === 0;
-const apiSetupMessage = localOnlyMode
-  ? 'PINPAWO_LOCAL_ONLY is enabled. Local-only mode is enabled; hosted app relay and Hasura-backed context are disabled.'
-  : missingOrPlaceholderApiConfig.length > 0
-    ? `API credentials are not configured (${missingOrPlaceholderApiConfig.join(', ')}). Local-only mode is enabled; configure API_BASE_URL, HASURA_ENDPOINT, AGENT_TOKEN, and HASURA_JWT to enable the hosted app, chat relay, and Hasura-backed context.`
-    : '';
-
 const modelProfileRegistry = buildModelProfileRegistry({
   stored,
   env: process.env,
@@ -184,13 +156,6 @@ const selectedModelProfile = resolveModelProfile(modelProfileRegistry);
 const selectedModelProfileFingerprint = fingerprintModelProfile(selectedModelProfile).fingerprint;
 
 export type Config = Readonly<{
-  apiBaseUrl: string;
-  hasuraEndpoint: string;
-  agentToken: string;
-  hasuraJwt: string;
-  localOnlyMode: boolean;
-  apiConnected: boolean;
-  apiSetupMessage: string;
   modelProfileRegistry: ModelProfileRegistrySnapshot;
   modelProfileId: string;
   modelProfileFingerprint: string;
@@ -201,7 +166,6 @@ export type Config = Readonly<{
   workdir: string;
   browserBackend: string;
   capabilityRegistryBackend: CapabilityRegistryBackend;
-  pollIntervalSeconds: number;
   localServerPort: number;
 }>;
 
@@ -213,13 +177,6 @@ function freezeConfig(input: Config): Config {
 
 function readConfigDefaults(): Config {
   return freezeConfig({
-    apiBaseUrl,
-    hasuraEndpoint,
-    agentToken,
-    hasuraJwt,
-    localOnlyMode,
-    apiConnected,
-    apiSetupMessage,
     modelProfileRegistry,
     modelProfileId: selectedModelProfile.id,
     modelProfileFingerprint: selectedModelProfileFingerprint,
@@ -241,7 +198,6 @@ function readConfigDefaults(): Config {
         'capability_registry_backend',
       ),
     ) ?? 'filesystem',
-    pollIntervalSeconds: Number(process.env.POLL_INTERVAL_SECONDS ?? 60),
     localServerPort: Number(process.env.LOCAL_SERVER_PORT ?? 3210),
   });
 }

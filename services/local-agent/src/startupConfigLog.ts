@@ -13,8 +13,6 @@ export type StartupConfigSnapshot = {
   actorId?: string;
   actorName?: string;
   localServerPort: number;
-  localOnlyMode: boolean;
-  apiConnected: boolean;
   modelProfileId: string;
   modelProfileFingerprint: string;
   llmModel: string;
@@ -61,8 +59,6 @@ export function buildStartupConfigSnapshot(params: {
     ...(params.actorId ? { actorId: params.actorId } : {}),
     ...(params.actorName ? { actorName: params.actorName } : {}),
     localServerPort: config.localServerPort,
-    localOnlyMode: config.localOnlyMode,
-    apiConnected: config.apiConnected,
     modelProfileId: profile.id,
     modelProfileFingerprint: config.modelProfileFingerprint,
     llmModel: profile.model,
@@ -87,8 +83,6 @@ export function formatStartupConfigSnapshot(snapshot: StartupConfigSnapshot) {
     snapshot.actorId ? `  actorId=${snapshot.actorId}` : null,
     snapshot.actorName ? `  actorName=${snapshot.actorName}` : null,
     `  localServerPort=${snapshot.localServerPort}`,
-    `  localOnlyMode=${snapshot.localOnlyMode}`,
-    `  apiConnected=${snapshot.apiConnected}`,
     `  modelProfileId=${snapshot.modelProfileId}`,
     `  modelProfileFingerprint=${snapshot.modelProfileFingerprint}`,
     `  llmModel=${snapshot.llmModel}`,

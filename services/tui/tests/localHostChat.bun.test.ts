@@ -21,7 +21,7 @@ import {
   FileCapabilityArtifactStore,
 } from '../../local-agent/src/capabilityArtifactStore';
 import {
-  buildLocalOnlyAgentContext,
+  buildAgentContext,
 } from '../../local-agent/src/contextLoader';
 import {
   readLocalChatDisplayText,
@@ -99,7 +99,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     ),
   }, {
     chatGraphService: graphFixture.service,
-    loadContext: async (actorId) => buildLocalOnlyAgentContext(actorId),
+    loadContext: async (actorId) => buildAgentContext(actorId),
   });
 
   const server = createServer((_request, response) => {

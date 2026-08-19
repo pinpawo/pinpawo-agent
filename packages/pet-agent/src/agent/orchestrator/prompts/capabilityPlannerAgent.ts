@@ -14,7 +14,7 @@ function buildDefaultCapabilityContext(
 ) {
   if (!defaultCapability) return '';
   return [
-    '<default_capability role="default_executor" source="immutable_workspace" trust="read_only">',
+    '<default_capability role="default_executor" source="capability_registry" trust="read_only">',
     indentXmlBlock(xmlTextBlock('name', defaultCapability.capabilityName), 2),
     indentXmlBlock(xmlTextBlock('path', defaultCapability.path), 2),
     indentXmlBlock(xmlTextBlock('document', defaultCapability.content), 2),

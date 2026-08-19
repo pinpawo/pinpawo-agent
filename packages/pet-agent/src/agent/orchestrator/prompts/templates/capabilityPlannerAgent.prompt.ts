@@ -3,13 +3,17 @@ import { definePromptTemplate } from '../template';
 /**
  * Rules that hold in both Planner modes, declared once.
  *
+ * Keep repository vocabulary out of the rendered text: "immutable workspace",
+ * "registry" and similar name our implementation, not anything the model can act
+ * on. The <default_capability> block already carries the capability's name.
+ *
  * Entry and boundary previously carried seven byte-identical lines each. A rule
  * duplicated across two prompts has two places to drift, and the duplication is
  * what let boundary-only wording quietly diverge from entry.
  */
-const PLANNER_WORKSPACE_CONTRACT = `capability_search 在 immutable workspace 中查找更贴合任务的 Capability，并返回匹配项的完整文档。<default_capability> 的文档已在下方给出，不必搜索它。
+const PLANNER_WORKSPACE_CONTRACT = `capability_search 查找更贴合任务的 Capability，并返回匹配项的完整文档。下方 <default_capability> 的文档已经给出，不必搜索它。
 
-探索结束后（搜索无候选，或工具报告已达调用上限），依据已有文档选择最合适的 Capability。所有可见 Capability 都无法形成可执行计划时，调用 report_unavailable。`;
+探索结束后（搜索无候选，或工具报告已达调用上限），依据已有文档选择最合适的 Capability。都不适用时调用 report_unavailable。`;
 
 /** How a task is written. The executing Capability owns method; the task owns intent. */
 const PLANNER_TASK_SHAPE = `- 同一 Capability 能连续完成的修改、核验和交付组成一个 task；

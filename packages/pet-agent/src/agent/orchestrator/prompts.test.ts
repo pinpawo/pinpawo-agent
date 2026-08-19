@@ -48,7 +48,7 @@ test('Capability Planner system prompt carries the verified default Capability',
     content: '# General\n\n使用本地工具；保留 ]]> 作为文档数据。',
   });
 
-  assert.match(systemPrompt, /<default_capability[^>]*source="immutable_workspace"/);
+  assert.match(systemPrompt, /<default_capability[^>]*source="capability_registry"/);
   assert.match(systemPrompt, /general\/CAPABILITY\.md/);
   assert.match(systemPrompt, /使用本地工具；保留 \]\]\]\]>\<!\[CDATA\[> 作为文档数据。/);
 });

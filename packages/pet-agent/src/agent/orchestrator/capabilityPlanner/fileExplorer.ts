@@ -14,7 +14,7 @@ import {
 } from './workspaceReader';
 
 export const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME = 'capability_search';
-const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_DESCRIPTION = 'Search the configured immutable Capability registry by literal terms. Each match contains the complete CAPABILITY.md document. This is a Planner exploration action, not a terminal action.';
+const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_DESCRIPTION = 'Search available Capabilities by literal terms. Each match contains the complete CAPABILITY.md document. This is an exploration action, not a terminal action.';
 
 const DEFAULT_MAX_DOCUMENT_READ_BYTES = 64 * 1024;
 const MAX_CAPABILITY_SEARCH_RESULTS = 50;

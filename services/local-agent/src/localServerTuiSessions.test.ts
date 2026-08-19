@@ -95,6 +95,24 @@ test('readTuiCheckpointMessages keeps visible conversation, starts, and handoffs
   ]);
 });
 
+test('readTuiCheckpointMessages hides laned Planner input written as a HumanMessage', () => {
+  const messages = readTuiCheckpointMessages([
+    new HumanMessage('real user turn'),
+    new HumanMessage({
+      content: '<run_user_request role="task_boundary" source="orchestrator_state" trust="read_only">',
+      additional_kwargs: {
+        pinpawo: { lane: 'orchestrator', source: 'capability_planner' },
+      },
+    }),
+    new HumanMessage({
+      content: 'subagent lane echo',
+      additional_kwargs: { pinpawo: { lane: 'capability:general' } },
+    }),
+  ]);
+
+  assert.deepEqual(messages, [{ role: 'user', text: 'real user turn' }]);
+});
+
 test('readTuiCheckpointMessages uses attachment display metadata instead of local paths', () => {
   const messages = readTuiCheckpointMessages([
     createLocalChatHumanMessage('review this', [{

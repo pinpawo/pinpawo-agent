@@ -23,6 +23,7 @@ import {
   CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
   createCapabilityPlannerFileExplorer,
   createCapabilityPlannerSearchTool,
+  type CapabilityPlannerDefaultCapability,
   type CapabilityPlannerFileExplorer,
 } from './fileExplorer';
 import type { CapabilityRegistryBackend } from './registryDocuments';
@@ -62,6 +63,7 @@ const REPORT_UNAVAILABLE_TOOL_NAME = 'report_unavailable';
 
 const plannerInvocationStateSchema = z4.object({
   currentInput: z4.custom<CapabilityPlannerInput>(),
+  defaultCapability: z4.custom<CapabilityPlannerDefaultCapability | null>().default(null),
   plannerCommit: z4.custom<PlannerCommit>().nullable().default(null),
   terminalRepairInputId: z4.string().default(''),
 });
@@ -332,7 +334,10 @@ function createPlannerMiddleware() {
       return handler({
         ...request,
         systemMessage: new SystemMessage(
-          buildCapabilityPlannerAgentSystemPrompt(input.mode),
+          buildCapabilityPlannerAgentSystemPrompt(
+            input.mode,
+            request.state.defaultCapability ?? null,
+          ),
         ),
       });
     },
@@ -490,13 +495,11 @@ export function createCapabilityPlannerAgent(params: {
             ...selectedMessages,
             new HumanMessage({
               id: `planner:${input.inputId}`,
-              content: buildCapabilityPlannerAgentInput(
-                input,
-                defaultCapability,
-              ),
+              content: buildCapabilityPlannerAgentInput(input),
             }),
           ],
           currentInput: input,
+          defaultCapability,
         }, config);
         timeout.signal.throwIfAborted();
         if (result.plannerCommit) {

@@ -42,30 +42,30 @@ function buildPlanningState(input: CapabilityPlannerInput) {
   return lines.length > 0 ? lines.join('\n') : '无。';
 }
 
+/**
+ * The default capability is a property of the immutable workspace, not of this
+ * turn's request, so it belongs in the system message. Rendering it beside
+ * <run_user_request> put a run-stable workspace fact in the same block as the
+ * one thing that changes every turn.
+ */
 export function buildCapabilityPlannerAgentSystemPrompt(
   mode: CapabilityPlannerInput['mode'],
-) {
-  return mode === 'entry'
-    ? CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT.render({})
-    : CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT.render({});
-}
-
-export function buildCapabilityPlannerAgentInput(
-  input: CapabilityPlannerInput,
   defaultCapability: CapabilityPlannerDefaultCapability | null = null,
 ) {
-  const userRequest = buildRunUserRequestContext(input.userRequest);
   const defaultCapabilityContext = promptBlock(
     buildDefaultCapabilityContext(defaultCapability),
     0,
   );
+  return mode === 'entry'
+    ? CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT.render({ defaultCapabilityContext })
+    : CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT.render({ defaultCapabilityContext });
+}
+
+export function buildCapabilityPlannerAgentInput(input: CapabilityPlannerInput) {
+  const userRequest = buildRunUserRequestContext(input.userRequest);
   return input.mode === 'entry'
-    ? CAPABILITY_PLANNER_ENTRY_INPUT_PROMPT.render({
-      defaultCapabilityContext,
-      userRequest,
-    })
+    ? CAPABILITY_PLANNER_ENTRY_INPUT_PROMPT.render({ userRequest })
     : CAPABILITY_PLANNER_BOUNDARY_INPUT_PROMPT.render({
-      defaultCapabilityContext,
       userRequest,
       planningState: buildPlanningState(input),
     });

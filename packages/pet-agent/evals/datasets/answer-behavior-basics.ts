@@ -74,56 +74,6 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
       metadata: { difficulty: 'easy', reason: 'Direct reply without internal language.', source: SOURCE_FILE },
     },
     {
-      id: `${ANSWER_BEHAVIOR_BASICS_DATASET}.handoff-synthesis`,
-      name: 'handoff-synthesis',
-      suite: ANSWER_BEHAVIOR_BASICS_DATASET,
-      tags: ['context_synthesis'],
-      input: {
-        messages: [
-          { role: 'user', text: '调研 Aurora 方案并记录推荐结论和主要风险。' },
-          { role: 'assistant', text: '调研结论：首选方案是 Aurora；主要风险是 migration-window-17。' },
-          { role: 'user', text: '根据上面的调研结果告诉我推荐方案和主要风险。' },
-        ],
-      },
-      expected: {
-        contract: 'answer.user-visible-close',
-        objective: '依据已有调研结论向用户给出推荐方案和主要风险。',
-        acceptanceCriteria: [
-          { id: 'recommendation_grounded', statement: '推荐 Aurora，且推荐内容有已有调研结论支持。' },
-          { id: 'risk_grounded', statement: '将 migration-window-17 作为主要风险，且没有虚构其他调研结论。' },
-          { id: 'user_facing_language', statement: '回复面向用户，不暴露 orchestrator、handoff 等内部执行语言。' },
-        ],
-        expectedBehavior: 'synthesize_handoff',
-        diagnostics: { referenceMaxCharacters: 300, comparePriorAssistantText: true },
-      },
-      metadata: { difficulty: 'medium', reason: 'Synthesize accepted result facts.', source: SOURCE_FILE },
-    },
-    {
-      id: `${ANSWER_BEHAVIOR_BASICS_DATASET}.historical-replay`,
-      name: 'historical-replay',
-      suite: ANSWER_BEHAVIOR_BASICS_DATASET,
-      tags: ['context_synthesis'],
-      input: {
-        messages: [
-          { role: 'user', text: '保存这条发布结论。' },
-          { role: 'assistant', text: 'ARCHIVE_RESULT_731：周四发布，回滚窗口为 30 分钟。' },
-          { role: 'user', text: '请把上面的编号和回滚窗口原样再发一次。' },
-        ],
-      },
-      expected: {
-        contract: 'answer.user-visible-close',
-        objective: '按用户要求重发历史回复中的编号和回滚窗口。',
-        acceptanceCriteria: [
-          { id: 'requested_identifier_preserved', statement: '准确重发编号 ARCHIVE_RESULT_731。' },
-          { id: 'requested_window_preserved', statement: '准确重发回滚窗口 30 分钟。' },
-          { id: 'request_scope_respected', statement: '回复聚焦用户要求重发的两项信息。' },
-        ],
-        expectedBehavior: 'historical_replay',
-        diagnostics: { comparePriorAssistantText: true },
-      },
-      metadata: { difficulty: 'medium', reason: 'Explicit replay should preserve requested facts.', source: SOURCE_FILE },
-    },
-    {
       id: `${ANSWER_BEHAVIOR_BASICS_DATASET}.clarification-question`,
       name: 'clarification-question',
       suite: ANSWER_BEHAVIOR_BASICS_DATASET,

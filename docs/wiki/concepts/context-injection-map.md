@@ -65,7 +65,7 @@ invoke no model.
 | Node | History projection | Injected facts |
 |---|---|---|
 | entryAnswer | `mainConversationMessages()` | none — no XML fact block at all |
-| capabilityPlanner | `selectCapabilityPlannerMessages()`, filtered by `traceId` **and** `registryDigest` | `<run_user_request>`, `<default_capability>`, boundary adds `<planning_state>` |
+| capabilityPlanner | `selectCapabilityPlannerMessages()`, filtered by `traceId` **and** `registryDigest` | `<run_user_request>`, boundary adds `<planning_state>`; `<default_capability>` rides the system message |
 | capability | `laneMessages(lane, transcriptRunId, delegationId)` | `<run_user_request>` as background; `<delegation_briefing>` last |
 | answer | **none** | `<answer_input>` — the entire context |
 

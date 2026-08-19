@@ -101,13 +101,18 @@ Two modes, same node, different context. Sources:
 
 | Slot | Class | Entry mode | Boundary mode |
 |---|---|---|---|
-| system | `STATIC` / `INSTRUCTION` | `CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT` | `CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT` |
+| system | `RUN-STABLE` / `INSTRUCTION` | entry prompt + `<default_capability>` | boundary prompt + `<default_capability>` |
 | history | `DYNAMIC` / `HISTORY` | planner lane + main conversation up to current request | planner lane + main conversation + **the active delegation lane** |
-| input | `DYNAMIC` / `FACT` | `<run_user_request>` + `<default_capability>` | same + `继续规划所需事实：<planning_state>` |
+| input | `DYNAMIC` / `FACT` | `<run_user_request>` | same + `继续规划所需事实：<planning_state>` |
 
 Both modes are projected by `selectCapabilityPlannerMessages()`, filtered by
 `traceId` **and** `registryDigest` — a registry change invalidates stale
 document observations.
+
+`<default_capability>` rides the system message because it is a property of the
+immutable workspace, not of this turn: it is identical for every call against the
+same registry. Rendering it beside `<run_user_request>` mixed a run-stable fact
+into the one block that changes every turn.
 
 The planner's own transcript (its inputs, `capability_search` observations and
 terminal commits) is persisted in root `messages` under the `orchestrator` lane,

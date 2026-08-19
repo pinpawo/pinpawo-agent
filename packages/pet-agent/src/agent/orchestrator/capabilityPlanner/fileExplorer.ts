@@ -14,11 +14,10 @@ import {
 } from './workspaceReader';
 
 export const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME = 'capability_search';
-const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_DESCRIPTION = 'Search the configured immutable Capability registry by literal terms. Each match contains the complete CAPABILITY.md document. This is a Planner exploration action, not a terminal action.';
+const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_DESCRIPTION = 'Search available Capabilities by literal terms. Each match contains the complete CAPABILITY.md document. This is an exploration action, not a terminal action.';
 
 const DEFAULT_MAX_DOCUMENT_READ_BYTES = 64 * 1024;
 const MAX_CAPABILITY_SEARCH_RESULTS = 50;
-const MAX_CAPABILITY_SEARCH_TERMS = 3;
 const MAX_CAPABILITY_SEARCH_TERM_CHARS = 40;
 const MAX_CAPABILITY_SEARCH_TERM_WORDS = 4;
 const MAX_CAPABILITY_SEARCH_RESULT_BYTES = 64 * 1024;
@@ -70,8 +69,8 @@ export function createCapabilityPlannerSearchTool<TState>(
               'Each term must be a literal word or short phrase, not a search instruction.',
             )
             .describe('A literal word or short phrase expected in a Capability name, description, or document; not an action or search instruction.'),
-        ).min(1).max(MAX_CAPABILITY_SEARCH_TERMS)
-          .describe('One to three alternative Capability terms. Any matching term may select a document.'),
+        ).min(1)
+          .describe('Alternative terms for one Capability. Any matching term may select a document.'),
       }),
     },
   );
@@ -109,12 +108,6 @@ function normalizeCapabilitySearchTerms(input: readonly string[]) {
     throw new PlannerFileToolError(
       'invalid_query',
       'Capability search must contain at least one non-empty term',
-    );
-  }
-  if (terms.length > MAX_CAPABILITY_SEARCH_TERMS) {
-    throw new PlannerFileToolError(
-      'invalid_query',
-      `Capability search must contain at most ${String(MAX_CAPABILITY_SEARCH_TERMS)} terms`,
     );
   }
   if (terms.some((term) => /[\0\r\n]/.test(term))) {

@@ -131,7 +131,8 @@ function plannerDispatch(
   };
 }
 
-function createPlanRequestTool() {
+/** Exported so evals can assert their stub still mirrors this contract. */
+export function createPlanRequestTool() {
   return tool(
     async ({ goal }: { goal: string }, runtime: ToolRuntime<OrchestratorStateType>) => {
       // The Command update below has not been applied to runtime.state yet, so

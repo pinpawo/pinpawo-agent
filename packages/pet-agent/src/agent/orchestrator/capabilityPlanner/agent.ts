@@ -23,6 +23,7 @@ import {
   CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
   createCapabilityPlannerFileExplorer,
   createCapabilityPlannerSearchTool,
+  type CapabilityPlannerDefaultCapability,
   type CapabilityPlannerFileExplorer,
 } from './fileExplorer';
 import type { CapabilityRegistryBackend } from './registryDocuments';
@@ -62,6 +63,7 @@ const REPORT_UNAVAILABLE_TOOL_NAME = 'report_unavailable';
 
 const plannerInvocationStateSchema = z4.object({
   currentInput: z4.custom<CapabilityPlannerInput>(),
+  defaultCapability: z4.custom<CapabilityPlannerDefaultCapability | null>().default(null),
   plannerCommit: z4.custom<PlannerCommit>().nullable().default(null),
   terminalRepairInputId: z4.string().default(''),
 });
@@ -88,7 +90,7 @@ function plannerTaskSchema() {
     capability: z.string().trim().min(1).max(200)
       .describe('Capability that executes this task.'),
     task: z.string().trim().min(1).max(MAX_TASK_TEXT_CHARS)
-      .describe('What this step must deliver, stated in one or two sentences. The executing Capability decides how: do not write checklists, review dimensions, output formats, or method steps, and do not introduce requirements the user never asked for. Do not repeat background already present in the user request or conversation.'),
+      .describe('What this step must deliver. The system prompt owns how a task is written.'),
   });
 }
 
@@ -332,7 +334,10 @@ function createPlannerMiddleware() {
       return handler({
         ...request,
         systemMessage: new SystemMessage(
-          buildCapabilityPlannerAgentSystemPrompt(input.mode),
+          buildCapabilityPlannerAgentSystemPrompt(
+            input.mode,
+            request.state.defaultCapability ?? null,
+          ),
         ),
       });
     },
@@ -365,7 +370,7 @@ function createPlannerMiddleware() {
           CONTINUE_CURRENT_TOOL_NAME,
           SUBMIT_PLAN_TOOL_NAME,
           ADVANCE_PLAN_TOOL_NAME,
-            COMPLETE_GOAL_TOOL_NAME,
+          COMPLETE_GOAL_TOOL_NAME,
           REQUEST_USER_INPUT_TOOL_NAME,
           REPORT_UNAVAILABLE_TOOL_NAME,
         ].includes(request.toolCall.name)) {
@@ -490,13 +495,11 @@ export function createCapabilityPlannerAgent(params: {
             ...selectedMessages,
             new HumanMessage({
               id: `planner:${input.inputId}`,
-              content: buildCapabilityPlannerAgentInput(
-                input,
-                defaultCapability,
-              ),
+              content: buildCapabilityPlannerAgentInput(input),
             }),
           ],
           currentInput: input,
+          defaultCapability,
         }, config);
         timeout.signal.throwIfAborted();
         if (result.plannerCommit) {

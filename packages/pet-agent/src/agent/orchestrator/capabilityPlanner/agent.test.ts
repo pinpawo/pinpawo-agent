@@ -801,13 +801,19 @@ test('Planner receives verified General before discovery starts', async (t) => {
       task: 'Inspect and organize the requested Downloads directory.',
     }],
   });
+  // The default Capability is a workspace property, so it rides the system
+  // message rather than the per-turn request block.
+  const systemMessage = model.invocations[0]?.[0];
+  assert.ok(systemMessage);
+  assert.equal(systemMessage._getType(), 'system');
+  assert.match(readMessageText(systemMessage), /<default_capability role=/);
+  assert.match(readMessageText(systemMessage), /general\/CAPABILITY\.md/);
+  assert.match(readMessageText(systemMessage), /通用工具读取和修改工作区/);
   const plannerInputMessage = model.invocations[0]?.find(
     (message) => message instanceof HumanMessage,
   );
   assert.ok(plannerInputMessage instanceof HumanMessage);
-  assert.match(readMessageText(plannerInputMessage), /<default_capability/);
-  assert.match(readMessageText(plannerInputMessage), /general\/CAPABILITY\.md/);
-  assert.match(readMessageText(plannerInputMessage), /通用工具读取和修改工作区/);
+  assert.doesNotMatch(readMessageText(plannerInputMessage), /<default_capability role=/);
   assert.equal(model.invocations.flat().some(
     (message) => message instanceof ToolMessage
       && message.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,

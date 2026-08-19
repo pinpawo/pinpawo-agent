@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildSubagentAnnounceContext } from './prompts';
-import { buildCapabilityPlannerAgentInput } from './prompts/capabilityPlannerAgent';
+import {
+  buildCapabilityPlannerAgentInput,
+  buildCapabilityPlannerAgentSystemPrompt,
+} from './prompts/capabilityPlannerAgent';
 import type { CapabilityPlannerInput } from './capabilityPlanner/runner';
 
 const plannerPromptWorkspace = {
@@ -38,7 +41,25 @@ test('Capability Planner entry input leads with the run user request', () => {
   assert.doesNotMatch(input, /workspace|registry_digest|document_count|<planning_state>/);
 });
 
-test('Capability Planner input keeps the verified default Capability private context after the goal', () => {
+test('Capability Planner system prompt carries the verified default Capability', () => {
+  const systemPrompt = buildCapabilityPlannerAgentSystemPrompt('entry', {
+    capabilityName: 'general',
+    path: 'general/CAPABILITY.md',
+    content: '# General\n\n使用本地工具；保留 ]]> 作为文档数据。',
+  });
+
+  assert.match(systemPrompt, /<default_capability[^>]*source="capability_registry"/);
+  assert.match(systemPrompt, /general\/CAPABILITY\.md/);
+  assert.match(systemPrompt, /使用本地工具；保留 \]\]\]\]>\<!\[CDATA\[> 作为文档数据。/);
+});
+
+test('Capability Planner system prompt omits the block when the workspace has no default', () => {
+  const systemPrompt = buildCapabilityPlannerAgentSystemPrompt('entry');
+  // The contract paragraph still names the tag; only the rendered block is absent.
+  assert.doesNotMatch(systemPrompt, /<default_capability role=/);
+});
+
+test('Capability Planner input carries the run user request alone', () => {
   const input = buildCapabilityPlannerAgentInput({
     mode: 'entry',
     inputId: 'trace_started:trace-1',
@@ -50,17 +71,12 @@ test('Capability Planner input keeps the verified default Capability private con
     activeDelegation: null,
     latestAnnounce: null,
     remainingPlan: [],
-  } satisfies CapabilityPlannerInput, {
-    capabilityName: 'general',
-    path: 'general/CAPABILITY.md',
-    content: '# General\n\n使用本地工具；保留 ]]> 作为文档数据。',
-  });
+  } satisfies CapabilityPlannerInput);
 
+  // The default Capability is a workspace property, not part of this turn's
+  // request, so it must not share the block that changes every turn.
   assert.match(input, /^<run_user_request[^>]*>/);
-  assert.match(input, /<default_capability[^>]*source="immutable_workspace"/);
-  assert.match(input, /general\/CAPABILITY\.md/);
-  assert.match(input, /使用本地工具；保留 \]\]\]\]>\<!\[CDATA\[> 作为文档数据。/);
-  assert.ok(input.indexOf('</run_user_request>') < input.indexOf('<default_capability'));
+  assert.doesNotMatch(input, /<default_capability role=/);
 });
 
 test('Capability Planner boundary input carries the run user request and boundary facts', () => {

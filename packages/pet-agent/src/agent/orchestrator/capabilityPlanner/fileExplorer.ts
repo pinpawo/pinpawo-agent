@@ -71,7 +71,11 @@ export function createCapabilityPlannerSearchTool<TState>(
             )
             .describe('A literal word or short phrase expected in a Capability name, description, or document; not an action or search instruction.'),
         ).min(1).max(MAX_CAPABILITY_SEARCH_TERMS)
-          .describe('One to three alternative Capability terms. Any matching term may select a document.'),
+          .describe(
+            `At most ${String(MAX_CAPABILITY_SEARCH_TERMS)} alternative terms for one Capability. `
+            + 'Any matching term may select a document, so send the most distinctive '
+            + 'ones rather than every candidate; a further search can use different terms.',
+          ),
       }),
     },
   );

@@ -365,7 +365,7 @@ function createPlannerMiddleware() {
           CONTINUE_CURRENT_TOOL_NAME,
           SUBMIT_PLAN_TOOL_NAME,
           ADVANCE_PLAN_TOOL_NAME,
-            COMPLETE_GOAL_TOOL_NAME,
+          COMPLETE_GOAL_TOOL_NAME,
           REQUEST_USER_INPUT_TOOL_NAME,
           REPORT_UNAVAILABLE_TOOL_NAME,
         ].includes(request.toolCall.name)) {

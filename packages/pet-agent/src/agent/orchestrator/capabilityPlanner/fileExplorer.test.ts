@@ -244,10 +244,8 @@ test('capability_search enforces compact literal terms without an active Planner
     invalidExplorer,
     CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
   );
-  await assert.rejects(
-    searchTool.invoke({ terms: ['one', 'two', 'three', 'four'] }),
-    /Array must contain at most 3 element/,
-  );
+  // The term count is unbounded: per-term shape is what keeps a search literal.
+  assert.ok(await searchTool.invoke({ terms: ['one', 'two', 'three', 'four'] }));
   await assert.rejects(
     searchTool.invoke({
       terms: ['scan project files find AI model names'],

@@ -6,27 +6,27 @@ The repository contains the public, local-first agent stack: orchestration, Capa
 
 ## Vision
 
-### 智能革命的"发动机"
+### The "Engine" of the Intelligence Revolution
 
-工业革命的起点，是人类开始理解"能量"。
+The Industrial Revolution began when humanity started understanding "energy."
 
-起初，我们利用自然中松散的能力——风力和水力，但能量密度低、不可控。后来我们学会了开采高密度能量（煤炭、石油），并不断寻找更高效的方式来利用它。**发动机**就是这一进步的技术结晶：它把高密度能量转化为可控、可组合、可量产的机械动力。发动机的原理并不复杂，但不同的发动机适配不同的场景——汽车用四缸内燃机、发电厂用蒸汽轮机、飞机用喷气发动机。发动机本身只是开始；接下来要接上传动轴、轮子、控制系统，才能让能量真正创造价值。
+At first, we harnessed diffuse natural forces—wind and water—but energy density was low and uncontrollable. Then we learned to extract high-density energy (coal, petroleum) and kept finding more efficient ways to use it. The **engine** is the technical crystallization of this progress: it transforms high-density energy into controllable, composable, mass-producible mechanical power. The principle of an engine is not complicated, but different engines suit different scenarios—cars use four-cylinder internal combustion engines, power plants use steam turbines, aircraft use jet engines. The engine itself is only the beginning; you still need to attach driveshafts, wheels, and control systems before that energy can truly create value.
 
-我们正在经历一场平行的变革——**智能革命**。
+We are living through a parallel transformation—the **Intelligence Revolution**.
 
-人类一直拥有自然存在的智力，但智力密度很低，受限于个体、时间和传递成本。大语言模型（LLM）的出现让我们第一次能够通过能源大规模产出智力。问题随之而来：这些高密度的智力如何高效地运转起来、创造价值？这正是 **agent（harness）** 要回答的问题。如果 LLM 是高密度智力的来源，那么 agent harness 就是这场智能革命的"发动机"——它决定智力如何被组织、调度、约束和释放。
+Humans have always possessed natural intelligence, but its density is low—constrained by individuals, time, and the cost of transmission. Large Language Models (LLMs) let us, for the first time, produce intelligence at scale through energy. The question follows: how do we make this high-density intelligence run efficiently and create value? That is precisely the question **agent (harness)** answers. If the LLM is the source of high-density intelligence, then the agent harness is the "engine" of this Intelligence Revolution—it determines how intelligence is organized, dispatched, constrained, and released.
 
-和发动机一样，agent harness 的原理并不神秘，但不同场景需要不同形态：个人助手是"四缸发动机"，企业级多 agent 协作是"蒸汽轮机"。发动机之上还要接上轮子和控制系统——agent harness 之上还要接上工具、传输、存储和人机交互。
+Like the engine, the principle of agent harness is not mysterious, but different scenarios demand different forms: a personal assistant is a "four-cylinder engine," enterprise-grade multi-agent collaboration is a "steam turbine." And just as an engine needs wheels and control systems on top of it, an agent harness needs tools, transports, storage, and human-machine interaction layered on top.
 
-下方的两张流程图展示了这种平行关系——左侧是发动机如何利用能源输出动力，右侧是 agent 如何利用智力输出价值：
+The two flowcharts below illustrate this parallel—the left shows how an engine turns energy into power, the right shows how an agent turns intelligence into value:
 
 ```mermaid
 flowchart LR
-    F["燃料<br/>（高密度能源）"] --> CC["燃烧室<br/>释放能量"]
-    CC --> P["活塞<br/>膨胀做功"]
-    P --> C["曲轴<br/>直线→旋转"]
-    C --> D["传动系统<br/>匹配负载"]
-    D --> O["输出动力"]
+    F["Fuel<br/>(high-density energy)"] --> CC["Combustion Chamber<br/>release energy"]
+    CC --> P["Piston<br/>expansion does work"]
+    P --> C["Crankshaft<br/>linear → rotary"]
+    C --> D["Drivetrain<br/>match load"]
+    D --> O["Output Power"]
     style F fill:#f9f,stroke:#333,stroke-width:2px
     style CC fill:#fcc,stroke:#333,stroke-width:2px
     style P fill:#fcc,stroke:#333,stroke-width:2px
@@ -37,11 +37,11 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    L["LLM<br/>（高密度智力）"] --> P["Prompt 契约<br/>组织智力"]
-    P --> R["推理与规划<br/>决定如何行动"]
-    R --> T["工具调度<br/>意图→操作"]
-    T --> K["Toolkit 执行<br/>与真实世界交互"]
-    K --> V["输出价值"]
+    L["LLM<br/>(high-density intelligence)"] --> P["Prompt Contract<br/>organize intelligence"]
+    P --> R["Reason & Plan<br/>decide how to act"]
+    R --> T["Tool Dispatch<br/>intent → action"]
+    T --> K["Toolkit Execution<br/>interact with the real world"]
+    K --> V["Output Value"]
     style L fill:#9cf,stroke:#333,stroke-width:2px
     style P fill:#ccf,stroke:#333,stroke-width:2px
     style R fill:#ccf,stroke:#333,stroke-width:2px
@@ -50,35 +50,35 @@ flowchart LR
     style V fill:#cfc,stroke:#333,stroke-width:2px
 ```
 
-| 发动机 | Agent | 共同角色 |
+| Engine | Agent | Shared Role |
 |---|---|---|
-| 燃料（高密度能源） | LLM（高密度智力） | 高密度能量来源 |
-| 燃烧室（释放能量） | Prompt 契约（组织智力） | 释放与组织 |
-| 活塞（膨胀做功） | 推理与规划（决定如何行动） | 核心转化 |
-| 曲轴（直线→旋转） | 工具调度（意图→操作） | 形态转换 |
-| 传动系统（匹配负载） | Toolkit 执行（与真实世界交互） | 适配与执行 |
-| 输出动力 | 输出价值 | 最终产出 |
+| Fuel (high-density energy) | LLM (high-density intelligence) | High-density energy source |
+| Combustion chamber (release energy) | Prompt contract (organize intelligence) | Release & organize |
+| Piston (expansion does work) | Reason & plan (decide how to act) | Core transformation |
+| Crankshaft (linear → rotary) | Tool dispatch (intent → action) | Form conversion |
+| Drivetrain (match load) | Toolkit execution (interact with real world) | Adapt & execute |
+| Output power | Output value | Final output |
 
-### 循环的本质：能量+空气 vs token+context
+### The Essence of the Loop: Energy + Air vs Token + Context
 
-上面的流程图展示的是单次转化，但发动机和 agent 真正的力量来自**循环**——不是一次性转化，而是持续往复。
+The flowcharts above show a single transformation, but the real power of both engines and agents comes from **the loop**—not a one-shot conversion, but a continuous cycle.
 
-发动机吸入空气与燃料混合燃烧，活塞做功输出动力，做功后活塞回到初始位置，新鲜空气再次涌入，开始下一轮循环。关键在于：每一轮的做功不是孤立的，而是循环中的能量持续释放。
+An engine draws in air, mixes it with fuel, combusts, the piston does work and outputs power, then returns to its starting position as fresh air rushes in to begin the next cycle. The key insight: each stroke is not isolated; energy is continuously released across cycles.
 
-Agent 同样如此。它读入 context（上下文——用户意图、历史对话、工具反馈），与 token（LLM 的推理能力）混合，推理产出新的 token——可能是一个回答，也可能是一次工具调用。产出的结果不丢弃，而是作为新的 context 重新输入下一轮循环。每一轮的推理都建立在前一轮的累积之上，智力在循环中迭代逼近目标。
-做功后的状态回流，就像活塞做完功回到原点准备下一轮进气——不是为了"排掉"什么，而是为了让循环闭合。
+An agent works the same way. It reads in context (user intent, conversation history, tool feedback), mixes it with tokens (the LLM's reasoning capability), and produces new tokens—perhaps an answer, perhaps a tool call. The output is not discarded; it becomes new context fed back into the next cycle. Each round of reasoning builds on the accumulated results of the previous round; intelligence iteratively converges toward the goal within the loop.
+After doing its work, the state flows back—just as a piston returns to its origin after the power stroke to prepare for the next intake. It is not about "exhausting" anything; it is about closing the loop.
 
-| 发动机循环 | Agent 循环 | 共同角色 |
+| Engine Cycle | Agent Cycle | Shared Role |
 |---|---|---|
-| 进气（吸入空气+燃料） | 感知（读入 context + token） | 吸入原料 |
-| 压缩（混合并加压） | 组织与聚焦（prompt 契约、注意力聚焦） | 压缩与组织 |
-| 燃烧做功（释放能量） | 推理与行动（产出 token、调用工具） | 核心做功 |
-| 活塞回位（做功后回到原点，准备再进气） | 状态回流（产出融入 context，成为下一轮输入） | 循环闭合 |
-| → 回到进气 | → 回到感知 | 循环 |
+| Intake (draw in air + fuel) | Perceive (read in context + token) | Draw in raw material |
+| Compression (mix and pressurize) | Organize & focus (prompt contract, attention) | Compress & organize |
+| Combustion & power (release energy) | Reason & act (produce tokens, call tools) | Core work |
+| Piston return (back to origin, ready for next intake) | State reflux (output merges into context, becomes next-round input) | Close the loop |
+| → back to intake | → back to perceive | Cycle |
 
-这就是 agent harness 的核心职责：让这个循环**稳定地转起来**。发动机的工程化是进气/压缩/燃烧/冷却的精密配合；agent 的工程化是 context 管理、token 调度、工具执行、反馈融合和状态持久化的精密配合。循环转得越稳、越快、越久，创造的价值就越大。
+This is the core responsibility of an agent harness: **keep the loop running stably**. Engine engineering is the precise coordination of intake / compression / combustion / cooling; agent engineering is the precise coordination of context management, token scheduling, tool execution, feedback integration, and state persistence. The more stable, fast, and long-running the loop, the greater the value created.
 
-**PinPawo Agent 探索的，正是这场智能革命中"发动机"的工程化路径**：我们研究什么技术能高效地组织智力、如何让 agent 在不同场景下可靠运转、如何把 LLM 的能力转化为可交付的价值。本仓库是我们的公开实践——runtime、Capability、Toolkit、Studio 协调、本地 host 和开发者工具都是这台"发动机"的零件。
+**PinPawo Agent explores exactly the engineering path of the "engine" in this Intelligence Revolution**: we study what technologies can efficiently organize intelligence, how to make agents run reliably across different scenarios, and how to translate LLM capability into deliverable value. This repository is our public practice—runtime, Capability, Toolkit, Studio coordination, local host, and developer tooling are all parts of this "engine."
 
 ## Highlights
 

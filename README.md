@@ -21,10 +21,16 @@ Like the engine, the principle of agent harness is not mysterious, but different
 The two cycle diagrams below illustrate this parallel—the left shows how an engine continuously turns energy into power, the right shows how an agent continuously turns intelligence into value:
 
 ```mermaid
-flowchart TD
-    I["Intake<br/>draw in air + fuel"] --> CP["Compression<br/>mix & pressurize"]
-    CP --> CB["Combustion & Power<br/>release energy, do work"]
-    CB --> PR["Piston Return<br/>back to origin"]
+flowchart LR
+    subgraph TOP [" "]
+        direction LR
+        I["Intake<br/>draw in air + fuel"] --> CP["Compression<br/>mix & pressurize"]
+    end
+    subgraph BOTTOM [" "]
+        direction RL
+        PR["Piston Return<br/>back to origin"] --> CB["Combustion & Power<br/>release energy, do work"]
+    end
+    CP --> CB
     PR --> I
     style I fill:#9cf,stroke:#333,stroke-width:2px
     style CP fill:#ccf,stroke:#333,stroke-width:2px
@@ -33,10 +39,16 @@ flowchart TD
 ```
 
 ```mermaid
-flowchart TD
-    P["Perceive<br/>read in context + token"] --> R["Reason & Plan<br/>produce tokens, decide actions"]
-    R --> A["Act<br/>call tools, interact with the world"]
-    A --> SR["State Reflow<br/>output merges into context"]
+flowchart LR
+    subgraph TOP [" "]
+        direction LR
+        P["Perceive<br/>read in context + token"] --> R["Reason & Plan<br/>produce tokens, decide actions"]
+    end
+    subgraph BOTTOM [" "]
+        direction RL
+        SR["State Reflow<br/>output merges into context"] --> A["Act<br/>call tools, interact with the world"]
+    end
+    R --> A
     SR --> P
     style P fill:#9cf,stroke:#333,stroke-width:2px
     style R fill:#ccf,stroke:#333,stroke-width:2px

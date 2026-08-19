@@ -54,23 +54,54 @@ function readRetryAt(text: string): string | undefined {
 
 const FATAL_STATUS_CODES = new Set([401, 402, 403, 429]);
 
-const FATAL_PATTERNS = [
+/**
+ * Errors that name the model provider explicitly. These are unambiguous: no
+ * tool produces them, so they classify as fatal on their own.
+ */
+const MODEL_PROVIDER_PATTERNS = [
   'insufficientquotaerror',
-  'quota has been exhausted',
   'model_rate_limit',
-  'rate limit',
   'insufficient_quota',
   'exceeded your current quota',
-  'invalid api key',
-  'incorrect api key',
-  'authentication_error',
-  'permission_denied',
+  'quota has been exhausted',
 ];
 
 /**
- * Classifies a thrown run error. Unknown failures stay `recoverable`: keeping a
- * review parked is the safe default, since wrongly terminating a resolvable
- * review loses the user's pending decision.
+ * Evidence that a throw came from the model call rather than from a tool.
+ *
+ * A status code alone is not evidence: any HTTP-speaking tool (GitHub, browser,
+ * a capability plugin) can surface 429 or 403, and terminating a pending review
+ * for those would discard a decision the user still owns. So a status code only
+ * counts as fatal when the error also carries model-provider provenance.
+ */
+function hasModelProviderProvenance(value: unknown, haystack: string): boolean {
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    // LangChain/OpenAI SDK errors carry provider identity on the error object.
+    for (const key of ['llmProvider', 'lc_error_code', 'provider', 'model']) {
+      if (typeof record[key] === 'string' && record[key]) return true;
+    }
+  }
+  return [
+    '@langchain/openai',
+    '@langchain/anthropic',
+    '@langchain/core',
+    'chat_models',
+    'apierror.generate',
+    'openai.makestatuserror',
+    'openai.makerequest',
+  ].some((marker) => haystack.includes(marker));
+}
+
+/**
+ * Classifies a thrown run error.
+ *
+ * Only failures of the agent's own model call are fatal — those cannot be
+ * retried until an external condition changes, so a pending review must be
+ * terminated rather than re-offered. Everything else, including tool-level
+ * rate limits and permission errors, stays `recoverable`: wrongly terminating
+ * a resolvable review loses the user's pending decision, which is the more
+ * expensive mistake.
  */
 export function classifyAgentRunFailure(value: unknown): AgentRunFailure {
   const text = readErrorText(value);
@@ -78,8 +109,18 @@ export function classifyAgentRunFailure(value: unknown): AgentRunFailure {
   const status = readErrorStatus(value);
   const haystack = text.toLowerCase();
 
-  const fatal = (status !== null && FATAL_STATUS_CODES.has(status))
-    || FATAL_PATTERNS.some((pattern) => haystack.includes(pattern));
+  const namesModelProvider = MODEL_PROVIDER_PATTERNS.some(
+    (pattern) => haystack.includes(pattern),
+  );
+  // A bare status code is ambiguous, and so is a bare "rate limit" phrase.
+  // Either becomes fatal only alongside model-provider provenance.
+  const looksRateLimited = (status !== null && FATAL_STATUS_CODES.has(status))
+    || /\b(429|401|403)\b/.test(haystack)
+    || haystack.includes('rate limit')
+    || haystack.includes('invalid api key')
+    || haystack.includes('authentication_error');
+  const fatal = namesModelProvider
+    || (looksRateLimited && hasModelProviderProvenance(value, haystack));
 
   if (!fatal) {
     return { kind: 'recoverable', message };

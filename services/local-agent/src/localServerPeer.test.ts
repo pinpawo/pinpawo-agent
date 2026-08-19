@@ -30,6 +30,7 @@ test('local server peers preserve trusted event payloads by default', () => {
   assert.equal(sendLocalServerPeerEvent(peer, {
     type: 'message.delta',
     requestId: 'req-1',
+    messageId: 'm-1',
     role: 'assistant',
     text: 'Saved to /Users/alice/project/private.txt',
   }), true);
@@ -56,6 +57,7 @@ test('local server peers preserve trusted event payloads by default', () => {
       event: {
         type: 'message.delta',
         requestId: 'req-1',
+        messageId: 'm-1',
         role: 'assistant',
         text: 'Saved to /Users/alice/project/private.txt',
       },

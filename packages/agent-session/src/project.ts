@@ -183,9 +183,17 @@ function reduceRuntimeEvent(
 ): AgentSession {
   switch (event.type) {
     case 'message.delta':
-      return appendAssistantDelta(session, event.requestId, event.text, message, context);
+      return appendAssistantDelta(session, event.requestId, event.messageId, event.text, message, context);
     case 'message.completed':
-      return completeAssistantMessage(session, event.requestId, event.text, event.usage, message, context);
+      return completeAssistantMessage(
+        session,
+        event.requestId,
+        event.messageId,
+        event.text,
+        event.usage,
+        message,
+        context,
+      );
     case 'operation':
       return applyOperationEvent(session, event, context);
     case 'plan.updated':
@@ -238,33 +246,30 @@ function appendRuntimeSystemMessage(
 function appendAssistantDelta(
   session: AgentSession,
   requestId: string,
+  messageId: string,
   token: string,
   message: AgentSessionMessageInput | undefined,
   context: AgentSessionReductionContext,
 ) {
   if (!token || !ownsRun(session, requestId)) return session;
-  const streamingIndex = findStreamingAssistantIndex(session.timeline, requestId);
+  const id = message?.id ?? assistantEntryId(requestId, messageId);
+  const previous = findMessageEntry(session.timeline, id);
   const createdAt = message?.createdAt ?? observedAtIso(context.observedAt);
-  const nextTimeline = [...session.timeline];
-  if (streamingIndex >= 0) {
-    const current = nextTimeline[streamingIndex] as AgentMessageEntry;
-    nextTimeline[streamingIndex] = {
-      ...current,
-      text: current.text + token,
-      ...(createdAt ? { updatedAt: createdAt } : {}),
-    };
-  } else {
-    nextTimeline.push({
-      id: message?.id ?? `${requestId}:assistant:${countMessages(session.timeline, requestId, 'assistant')}`,
-      type: 'message',
-      role: 'assistant',
-      requestId,
-      text: token,
-      status: 'streaming',
-      ...(createdAt ? { createdAt } : {}),
-    });
-  }
-  return updateOwnedRun({ ...session, timeline: nextTimeline }, requestId, (run) => ({
+  const entry: AgentMessageEntry = {
+    id,
+    type: 'message',
+    role: 'assistant',
+    requestId,
+    text: (previous?.text ?? '') + token,
+    status: 'streaming',
+    ...(previous?.createdAt
+      ? { createdAt: previous.createdAt, ...(createdAt ? { updatedAt: createdAt } : {}) }
+      : (createdAt ? { createdAt } : {})),
+  };
+  return updateOwnedRun({
+    ...session,
+    timeline: upsertTimelineEntry(session.timeline, entry),
+  }, requestId, (run) => ({
     ...runViewBase(run),
     state: 'running',
     activity: 'streaming',
@@ -275,6 +280,7 @@ function appendAssistantDelta(
 function completeAssistantMessage(
   session: AgentSession,
   requestId: string,
+  messageId: string,
   completedText: string,
   usage: TokenUsageSnapshot | undefined,
   message: AgentSessionMessageInput | undefined,
@@ -284,9 +290,9 @@ function completeAssistantMessage(
   const recoveredFromTimeline = !ownsActiveRun && hasTimelineRequest(session, requestId);
   if (!ownsActiveRun && !recoveredFromTimeline) return session;
   if (recoveredFromTimeline && hasLocalInterruptReleaseNotice(session, requestId)) return session;
-  const fallbackText = findLatestAssistantText(session, requestId);
-  const text = completedText.trim() || fallbackText || '...';
-  const withMessage = finalizeAssistantMessage(session, requestId, text, message, context);
+  const id = message?.id ?? assistantEntryId(requestId, messageId);
+  const text = completedText.trim() || findMessageEntry(session.timeline, id)?.text.trim() || '...';
+  const withMessage = finalizeAssistantMessage(session, requestId, id, text, message, context);
   if (ownsActiveRun) {
     return finishOwnedRun(withMessage, requestId, [], usage ?? null, context);
   }
@@ -299,16 +305,16 @@ function applyOperationEvent(
   context: AgentSessionReductionContext,
 ) {
   if (!ownsRun(session, event.requestId)) return session;
-  const settledSession = event.phase === 'started'
-    ? settleStreamingAssistant(session, event.requestId)
-    : session;
+  // A starting operation no longer has to settle the streaming reply: assistant
+  // entries are keyed by their upstream message id, so text that resumes after
+  // a tool belongs to a new id and never appends to the pre-tool paragraph.
   const entryId = agentOperationEntryId(event);
-  const previous = settledSession.timeline.find((entry): entry is AgentOperationEntry =>
+  const previous = session.timeline.find((entry): entry is AgentOperationEntry =>
     entry.type === 'operation' && entry.id === entryId);
   const operation = agentOperationEntryFromEvent(event, context.observedAt, previous);
   const withOperation = {
-    ...settledSession,
-    timeline: upsertTimelineEntry(settledSession.timeline, operation),
+    ...session,
+    timeline: upsertTimelineEntry(session.timeline, operation),
   };
   return updateOwnedRun(withOperation, event.requestId, (run) => {
     if (event.phase === 'started' || event.phase === 'updated') {
@@ -429,10 +435,9 @@ function finishOwnedRun(
   context: AgentSessionReductionContext,
 ) {
   if (!ownsRun(session, requestId)) return session;
-  const settledSession = settleStreamingAssistant(session, requestId);
   let nextSession: AgentSession = {
-    ...settledSession,
-    timeline: finalizeSubagentMessages(settledSession.timeline, requestId),
+    ...session,
+    timeline: finalizeRunMessages(session.timeline, requestId),
     activeRun: null,
   };
   for (const message of messages) {
@@ -467,46 +472,38 @@ function appendMessage(
 function finalizeAssistantMessage(
   session: AgentSession,
   requestId: string,
+  id: string,
   text: string,
   message: AgentSessionMessageInput | undefined,
   context: AgentSessionReductionContext,
 ) {
-  const streamingIndex = findStreamingAssistantIndex(session.timeline, requestId);
-  const nextTimeline = [...session.timeline];
-  if (streamingIndex >= 0) {
-    const current = nextTimeline[streamingIndex] as AgentMessageEntry;
-    const updatedAt = message?.createdAt ?? observedAtIso(context.observedAt);
-    nextTimeline[streamingIndex] = {
-      ...current,
-      text,
-      status: 'completed',
-      ...(updatedAt ? { updatedAt } : {}),
-    };
-  } else {
-    nextTimeline.push({
-      id: message?.id ?? `${requestId}:assistant:${countMessages(session.timeline, requestId, 'assistant')}`,
-      type: 'message',
-      role: 'assistant',
-      requestId,
-      text,
-      status: 'completed',
-      ...createdAtField(message?.createdAt, context),
-    });
-  }
-  return { ...session, timeline: nextTimeline };
+  const previous = findMessageEntry(session.timeline, id);
+  const updatedAt = message?.createdAt ?? observedAtIso(context.observedAt);
+  const entry: AgentMessageEntry = {
+    id,
+    type: 'message',
+    role: 'assistant',
+    requestId,
+    text,
+    status: 'completed',
+    ...(previous
+      ? {
+          ...(previous.createdAt ? { createdAt: previous.createdAt } : {}),
+          ...(updatedAt ? { updatedAt } : {}),
+        }
+      : createdAtField(message?.createdAt, context)),
+  };
+  return { ...session, timeline: upsertTimelineEntry(session.timeline, entry) };
 }
 
-function settleStreamingAssistant(session: AgentSession, requestId: string) {
-  const index = findStreamingAssistantIndex(session.timeline, requestId);
-  if (index < 0) return session;
-  const timeline = [...session.timeline];
-  timeline[index] = { ...timeline[index] as AgentMessageEntry, status: 'completed' };
-  return { ...session, timeline };
-}
-
-function finalizeSubagentMessages(timeline: AgentTimelineEntry[], requestId: string) {
+/**
+ * A finished run leaves nothing mid-flight: any message still marked streaming
+ * is settled so an interrupted or failed run cannot strand the view in a
+ * streaming state. Keyed entries make this a flat pass — no position lookup.
+ */
+function finalizeRunMessages(timeline: AgentTimelineEntry[], requestId: string) {
   return timeline.map((entry) =>
-    entry.type === 'message' && entry.role === 'subagent' && entry.requestId === requestId
+    entry.type === 'message' && entry.requestId === requestId && entry.status === 'streaming'
       ? { ...entry, status: 'completed' as const }
       : entry);
 }
@@ -597,24 +594,14 @@ function hasLocalInterruptReleaseNotice(session: AgentSession, requestId: string
       && entry.id === `message:${requestId}:interrupt-local-release`);
 }
 
-function findStreamingAssistantIndex(timeline: AgentTimelineEntry[], requestId: string) {
-  for (let index = timeline.length - 1; index >= 0; index -= 1) {
-    const entry = timeline[index];
-    if (entry.type === 'message' && entry.requestId === requestId && entry.role === 'assistant') {
-      return entry.status === 'streaming' ? index : -1;
-    }
-  }
-  return -1;
+/** Assistant entries are addressed by the upstream model lifecycle id. */
+function assistantEntryId(requestId: string, messageId: string) {
+  return `${requestId}:assistant:${messageId}`;
 }
 
-function findLatestAssistantText(session: AgentSession, requestId: string) {
-  for (let index = session.timeline.length - 1; index >= 0; index -= 1) {
-    const entry = session.timeline[index];
-    if (entry.type === 'message' && entry.requestId === requestId && entry.role === 'assistant') {
-      return entry.text.trim();
-    }
-  }
-  return '';
+function findMessageEntry(timeline: AgentTimelineEntry[], id: string) {
+  return timeline.find((entry): entry is AgentMessageEntry =>
+    entry.type === 'message' && entry.id === id);
 }
 
 function countMessages(

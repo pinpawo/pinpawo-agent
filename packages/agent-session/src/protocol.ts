@@ -597,8 +597,9 @@ function readAgentEvent(record: Record<string, unknown>): AgentRuntimeEvent | nu
   if (type === 'message.delta') {
     const role = readString(record, 'role');
     const text = readString(record, 'text');
-    return role === 'assistant' && text != null
-      ? { type, requestId, role, text }
+    const messageId = readString(record, 'messageId');
+    return role === 'assistant' && text != null && messageId
+      ? { type, requestId, messageId, role, text }
       : null;
   }
   if (type === 'subagent.message.completed') {
@@ -617,11 +618,13 @@ function readAgentEvent(record: Record<string, unknown>): AgentRuntimeEvent | nu
   if (type === 'message.completed') {
     const role = readString(record, 'role');
     const text = readString(record, 'text');
-    if (role !== 'assistant' || text == null) return null;
+    const messageId = readString(record, 'messageId');
+    if (role !== 'assistant' || text == null || !messageId) return null;
     const usage = parseAgentTokenUsageSnapshot(record.usage);
     return {
       type,
       requestId,
+      messageId,
       ...(usage ? { usage } : {}),
       role,
       text,

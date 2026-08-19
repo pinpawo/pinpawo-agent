@@ -21,6 +21,13 @@ export type AgentAssistantMessageEvent =
 export type AgentMessageDeltaEvent = {
   type: 'message.delta';
   requestId: string;
+  /**
+   * The upstream model lifecycle id this delta belongs to. Carrying it makes
+   * assistant identity explicit, so the projection keys messages the same way
+   * operations and subagent messages are keyed instead of inferring ownership
+   * from timeline position and streaming status.
+   */
+  messageId: string;
   role: 'assistant';
   text: string;
 };
@@ -38,6 +45,8 @@ export type AgentSubagentMessageCompletedEvent = {
 export type AgentMessageCompletedEvent = {
   type: 'message.completed';
   requestId: string;
+  /** Identifies the streamed message this completion finalizes. */
+  messageId: string;
   role: 'assistant';
   text: string;
   usage?: TokenUsageSnapshot;

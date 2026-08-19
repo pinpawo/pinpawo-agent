@@ -126,6 +126,7 @@ test('replacement request waits for the previous thread invocation to settle', a
       options.emitEvent({
         type: 'message.delta',
         requestId: 'req-old',
+        messageId: 'm-1',
         role: 'assistant',
         text: 'late stale output',
       });

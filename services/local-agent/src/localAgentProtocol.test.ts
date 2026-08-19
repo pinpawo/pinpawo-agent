@@ -462,6 +462,7 @@ test('parseLocalAgentServerMessage keeps usage on message.completed event when v
       event: {
         type: 'message.completed',
         requestId: 'req-1',
+        messageId: 'm-req-1',
         role: 'assistant',
         text: 'done',
         usage: {
@@ -481,6 +482,7 @@ test('parseLocalAgentServerMessage keeps usage on message.completed event when v
       event: {
         type: 'message.completed',
         requestId: 'req-1',
+        messageId: 'm-req-1',
         role: 'assistant',
         text: 'done',
         usage: {
@@ -806,6 +808,7 @@ test('sendLocalAgentMessage preserves message deltas for every audience', () => 
     event: {
       type: 'message.delta' as const,
       requestId: 'req-1',
+      messageId: 'm-req-1',
       role: 'assistant' as const,
       text: 'Saved to /Users/al',
     },
@@ -836,6 +839,7 @@ test('sendLocalAgentMessage only redacts completed main-agent event text remotel
     event: {
       type: 'message.completed' as const,
       requestId: 'req-1',
+      messageId: 'm-1',
       role: 'assistant' as const,
       text: 'Saved to /Users/alice/project/result.txt',
     },
@@ -866,12 +870,14 @@ test('sendLocalAgentEvent only redacts remote completed message text', () => {
   assert.equal(sendLocalAgentEvent(openWs, {
     type: 'message.delta',
     requestId: 'req-1',
+    messageId: 'm-req-1',
     role: 'assistant',
     text: 'hello',
   }), true);
   assert.equal(sendLocalAgentEvent(openWs, {
     type: 'message.completed',
     requestId: 'req-1',
+    messageId: 'm-req-1',
     role: 'assistant',
     text: 'Saved to /Users/alice/project/result.txt',
   }), true);
@@ -896,6 +902,7 @@ test('sendLocalAgentEvent only redacts remote completed message text', () => {
       event: {
         type: 'message.delta',
         requestId: 'req-1',
+        messageId: 'm-req-1',
         role: 'assistant',
         text: 'hello',
       },
@@ -906,6 +913,7 @@ test('sendLocalAgentEvent only redacts remote completed message text', () => {
       event: {
         type: 'message.completed',
         requestId: 'req-1',
+        messageId: 'm-req-1',
         role: 'assistant',
         text: 'Saved to [local-path]',
       },
@@ -1090,6 +1098,7 @@ test('trusted local event transport preserves streaming message deltas', () => {
   assert.equal(sendLocalAgentEvent(openWs, {
     type: 'message.delta',
     requestId: 'req-1',
+    messageId: 'm-req-1',
     role: 'assistant',
     text: 'hi',
   }, { audience: 'trusted-local' }), true);
@@ -1099,6 +1108,7 @@ test('trusted local event transport preserves streaming message deltas', () => {
     event: {
       type: 'message.delta',
       requestId: 'req-1',
+      messageId: 'm-req-1',
       role: 'assistant',
       text: 'hi',
     },

@@ -27,9 +27,10 @@ Toolkit or Toolkit Runtime system. See the accepted
 
 `buildStudio()` resolves the active workdir, reads its Studio and pet files,
 creates one `PetAgentRuntime` per configured pet, and installs the configured
-plugins. The local server keeps the resulting Studio instance alive per workdir
-rather than rebuilding it for every request. A failed assembly is not cached,
-so correcting the configuration allows the next request to try again.
+plugins. `StudioHost.init()` builds and holds the Studio before any transport
+begins listening; requests only dispatch to this resident instance and do not
+trigger assembly. The Studio lifecycle is owned by the Host, not created or
+cached per request.
 
 The host supplies a shared checkpointer when available. The Pet runtime uses it
 to determine whether `invoke()` has a pending continuation and therefore
@@ -57,7 +58,8 @@ own correlation in plugin domain state or event payloads.
 
 ## Shutdown
 
-Server shutdown stops each cached Studio. Studio then rejects new dispatches,
+Server shutdown stops the resident Studio via `StudioHost.shutdown()`.
+Studio then rejects new dispatches,
 stops plugins in reverse order, clears subscriptions, and releases waiting
 queues instead of waiting indefinitely for human input. A host that owns
 Toolkit runtime managers is responsible for their wider lifecycle.

@@ -11,7 +11,9 @@ import {
   createLocalServerHandlers,
   type LocalServerHandlerOptions,
 } from './localServerHandlers';
+import type { LocalServerPeer } from './localServerPeer';
 import type { LocalServerDeps } from './localServerTypes';
+import type { LocalServerStudioHandler } from './localServerStudioHandler';
 import { attachLocalServerWebSocketTransport } from './localServerWsTransport';
 
 export type { LocalServerDeps };
@@ -19,6 +21,8 @@ export type { LocalServerDeps };
 export type LocalServerOptions = {
   authToken?: string;
   handlerOptions?: LocalServerHandlerOptions;
+  /** #643: Injected by StudioHost when running in studio mode. */
+  studioHandler?: LocalServerStudioHandler<LocalServerPeer>;
 };
 
 export type LocalServerTransport = {
@@ -32,8 +36,11 @@ export async function startLocalServer(
   deps: LocalServerDeps,
   options: LocalServerOptions = {},
 ): Promise<LocalServerTransport> {
-  const handlers = createLocalServerHandlers(deps, options.handlerOptions);
   const authToken = options.authToken ?? ensureLocalServerAuthToken();
+  const handlers = createLocalServerHandlers(deps, {
+    ...(options.handlerOptions ?? {}),
+    ...(options.studioHandler ? { studioHandler: options.studioHandler } : {}),
+  });
   const server = createServer((req, res) => {
     if (handlers.handleHttpRequest(req, res, authToken)) {
       return;

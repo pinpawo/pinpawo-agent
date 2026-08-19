@@ -15,6 +15,7 @@ Studio Host 和未来 Host surface 的装配方式。Capability / Toolkit 的当
 `host tools`、`capability-private tools`、Browser 专属 lifecycle/diagnostics 或
 `BrowserIntegration` 与本文冲突时，只能把这些表述作为历史实现背景，不能据此
 新增公共架构层。
+Studio Host 已按 #643 提取为独立入口，不再嵌入 Chat Host (`LocalAgentHost`)。
 
 ## 1. 核心关系
 
@@ -201,6 +202,10 @@ Browser、bash、git 都是普通 Toolkit：
 5. shutdown 一个 Host/manager 不能释放另一个 Host 的 roots、bindings、进程或连接。
 6. Chat 与 Studio 使用相同领域模型。Studio 只改变 Host 如何配置、持有和 invoke
    多个常驻 Agent Runtime，不创造 Studio 专属 Tool/Toolkit/Runtime 体系。
+   Chat Host (`LocalAgentHost`) 和 Studio Host (`StudioHost`) 是两个独立的
+   装配入口，`runAgent` 按 `--mode` 分流，不再共用同一条启动路径。
+   两个 Host 共享能力供给（toolkit / capability / model / checkpointer），
+   通过 `HostCapabilityAssembly` 装配，不复制代码。
 7. BrowserIntegration、BrowserProvider、LocalTools 或 RuntimeEnvironment 不能作为
    新的公共架构层；普通构造辅助不得反向定义领域模型。
 8. 如果实现需要改变稳定的 Pet Agent Chat graph、wire、checkpoint、Capability

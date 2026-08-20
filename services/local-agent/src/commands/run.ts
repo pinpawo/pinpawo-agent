@@ -2,7 +2,6 @@ import { LocalAgentHost } from '../runtime';
 import { StudioHost } from '../studioHost';
 import { startLocalServer } from '../localServer';
 import { getConfig } from '../config';
-import { ensureActorSelected } from '../actorSelection';
 import { applyRuntimeWorkdir } from '../runtimeWorkdir';
 import { logStartupConfig } from '../startupConfigLog';
 import {
@@ -62,7 +61,6 @@ export async function runAgent(options: RunAgentOptions) {
   process.on('SIGTERM', handleSigterm);
 
   try {
-    await ensureActorSelected({ interactive: !options.stdio });
     const runtimeConfig = buildRunAgentRuntimeConfig(options);
     const mode = options.mode;
 

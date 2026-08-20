@@ -27,7 +27,7 @@ import {
   buildLocalModelProfileRegistry,
   type LocalModelProfileRegistry,
 } from './llmConfig';
-import { ensureActorSelected, loadSelectedActorName, LOCAL_ONLY_ACTOR_NAME } from './actorSelection';
+import { LOCAL_ACTOR_ID, LOCAL_ACTOR_NAME } from './actorSelection';
 import { loadStoredConfig, saveStoredConfig } from './storage';
 import {
   createCoreLocalCapabilities,
@@ -105,13 +105,8 @@ export class HostCapabilityAssembly {
       },
     ]);
     await this.capabilityRegistry.load();
-    this.actorId = await ensureActorSelected({ interactive: false });
-    this.actorName = getConfig().apiConnected ? loadSelectedActorName() : LOCAL_ONLY_ACTOR_NAME;
-    const ctx = await loadAgentContext(this.actorId);
-    if (!this.actorName && ctx.pet.name) {
-      this.actorName = ctx.pet.name;
-      saveStoredConfig({ ...loadStoredConfig(), actor_name: ctx.pet.name });
-    }
+    this.actorId = LOCAL_ACTOR_ID;
+    this.actorName = LOCAL_ACTOR_NAME;
   }
 
   getRuntimeConfig(): LocalAgentRuntimeConfig {

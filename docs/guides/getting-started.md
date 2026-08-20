@@ -14,9 +14,8 @@ scaffold, and points you to the next integration path.
 - npm
 - An OpenAI-compatible model endpoint and API key
 
-The local host runs on your machine. `PINPAWO_LOCAL_ONLY=1` disables the hosted
-PinPawo API, relay, and Hasura connections; it does not replace the model
-configuration required to run an agent.
+The local host runs entirely on your machine. It needs no PinPawo account or
+backend — only the model configuration above.
 
 ## Install and initialize
 

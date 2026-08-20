@@ -7,7 +7,6 @@ import { readLocalAgentPackageVersion } from './packageVersion';
 import { parseServerMode, type ServerMode } from './serverMode';
 
 type LocalAgentCliHandlers = {
-  runActorSelect?: () => Promise<void> | void;
   runAgent?: (opts: { workdir?: string; stdio: boolean; mode: ServerMode }) => Promise<void> | void;
   runTuiV2?: (opts: {
     workdir?: string;
@@ -72,14 +71,6 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
         : undefined;
       const runSetup = handlers.runSetup ?? (await import('./commands/setup')).runSetupGuide;
       await runSetup({ workdir });
-    });
-
-  program
-    .command('actor')
-    .description('Choose the pet actor used by this local agent')
-    .action(async () => {
-      const runActorSelect = handlers.runActorSelect ?? (await import('./actorSelection')).runActorSelect;
-      await runActorSelect();
     });
 
   // `run` predates server mode and starts chat, so it stays as an alias.

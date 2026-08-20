@@ -10,10 +10,6 @@ const CONFIG_IMPORT_PATH = process.cwd().endsWith('services/local-agent')
   : './services/local-agent/src/config.ts';
 
 const REQUIRED_ENV = {
-  API_BASE_URL: 'https://example.test',
-  HASURA_ENDPOINT: 'https://example.test/v1/graphql',
-  AGENT_TOKEN: 'agent-token',
-  HASURA_JWT: 'hasura-jwt',
   LLM_API_KEY: 'llm-key',
   LLM_BASE_URL: 'https://models.example.test/v1',
   LLM_MODEL: 'test-model',
@@ -100,16 +96,6 @@ test('Capability registry backend is explicit and rejects unknown values', async
   );
 });
 
-test('isMissingOrGeneratedApiPlaceholder detects init scaffold values', async () => {
-  const { isMissingOrGeneratedApiPlaceholder } = await loadConfigHelpers();
-
-  assert.equal(isMissingOrGeneratedApiPlaceholder('API_BASE_URL', ''), true);
-  assert.equal(isMissingOrGeneratedApiPlaceholder('API_BASE_URL', 'https://your-api.example.com'), true);
-  assert.equal(isMissingOrGeneratedApiPlaceholder('HASURA_ENDPOINT', 'https://your-hasura.example.com/v1/graphql'), true);
-  assert.equal(isMissingOrGeneratedApiPlaceholder('AGENT_TOKEN', 'your-agent-token-here'), true);
-  assert.equal(isMissingOrGeneratedApiPlaceholder('HASURA_JWT', 'eyJ...'), true);
-  assert.equal(isMissingOrGeneratedApiPlaceholder('API_BASE_URL', 'https://api.example.test'), false);
-});
 
 test('config workdir defaults to process cwd when env and stored config are absent', () => {
   const home = mkdtempSync(resolve(tmpdir(), 'pinpawo-config-home-'));
@@ -137,37 +123,6 @@ test('config workdir defaults to process cwd when env and stored config are abse
   assert.equal(output, process.cwd());
 });
 
-test('PINPAWO_LOCAL_ONLY disables hosted API even when credentials are present', () => {
-  const home = mkdtempSync(resolve(tmpdir(), 'pinpawo-config-home-'));
-  const output = execFileSync(process.execPath, [
-    '--import',
-    'tsx',
-    '-e',
-    [
-      `const { getConfig } = await import(${JSON.stringify(CONFIG_IMPORT_PATH)});`,
-      'const config = getConfig();',
-      'process.stdout.write(JSON.stringify({ apiConnected: config.apiConnected, localOnlyMode: config.localOnlyMode, apiSetupMessage: config.apiSetupMessage }));',
-    ].join('\n'),
-  ], {
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      ...REQUIRED_ENV,
-      HOME: home,
-      PINPAWO_LOCAL_ONLY: '1',
-    },
-    encoding: 'utf8',
-  });
-
-  const parsed = JSON.parse(output) as {
-    apiConnected: boolean;
-    localOnlyMode: boolean;
-    apiSetupMessage: string;
-  };
-  assert.equal(parsed.apiConnected, false);
-  assert.equal(parsed.localOnlyMode, true);
-  assert.match(parsed.apiSetupMessage, /Local-only mode is enabled/);
-});
 
 test('config ignores the removed PINPAWO_REVIEW_POLICY_STRATEGY environment alias', () => {
   const home = mkdtempSync(resolve(tmpdir(), 'pinpawo-config-home-'));

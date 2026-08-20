@@ -1,15 +1,5 @@
-import { setTimeout as sleep } from 'node:timers/promises';
-import { WebSocket } from 'ws';
 import { FileSaver } from './fileSaver';
 import { getConfig } from './config';
-import {
-  sendLocalAgentEvent,
-  sendLocalAgentMessage,
-} from './localAgentProtocol';
-import { InflightRequestController } from './inflightRequestController';
-import { LocalAgentAppWsClient } from './localAgentAppWsClient';
-import { LocalAgentAppChatHandler } from './localAgentAppChatHandler';
-import { LocalAgentGraphService } from './agentGraphService';
 import { HostCapabilityAssembly } from './hostCapabilityAssembly';
 import {
   buildLocalAgentRuntimeConfig,
@@ -18,31 +8,23 @@ import {
 import type { LocalServerDeps } from './localServerTypes';
 import { DEFAULT_SERVER_MODE, type ServerMode } from './serverMode';
 
-const WS_RECONNECT_DELAY_MS = 10000;
-const WS_PING_INTERVAL_MS = 30000;
-
 /**
- * Chat Host — assembles capability supply via {@link HostCapabilityAssembly},
- * then adds chat/ws-relay concerns that Studio Host does not need.
+ * Chat Host — assembles capability supply via {@link HostCapabilityAssembly}
+ * and serves the local transport (ws on 127.0.0.1, or stdio).
+ *
+ * The hosted-app relay and its Hasura-backed context were removed: clients
+ * reach this host over the local transport only. Pet identity and context
+ * now come from local config, and a future Studio plugin owns any remote
+ * surface (#638).
  *
  * `--mode studio` uses {@link StudioHost} instead; the two hosts share the
- * same capability supply but not the same transport or relay concerns.
+ * same capability supply but not the same transport.
  */
 export class LocalAgentHost {
   private readonly caps: HostCapabilityAssembly;
   private readonly serverMode: ServerMode;
   private stopRequested = false;
   private readonly stopController = new AbortController();
-  private readonly graphService = new LocalAgentGraphService();
-  private readonly inflightRequests = new InflightRequestController<WebSocket>({
-    // Hosted app WS relay: do NOT include raw — keeps payloads small and
-    // avoids leaking raw tool input/output through the remote channel.
-    emitOperation: (ws, event) => sendLocalAgentEvent(ws, event),
-    sendControl: (ws, message) => sendLocalAgentMessage(ws, message),
-  });
-  private appWsClient: LocalAgentAppWsClient | null = null;
-  private readonly appChatHandler: LocalAgentAppChatHandler;
-
   constructor(
     runtimeConfig: LocalAgentRuntimeConfig = buildLocalAgentRuntimeConfig(),
     serverMode: ServerMode = DEFAULT_SERVER_MODE,
@@ -52,25 +34,6 @@ export class LocalAgentHost {
       sourceId: 'local-agent',
     });
     this.serverMode = serverMode;
-    this.appChatHandler = new LocalAgentAppChatHandler({
-      graphService: this.graphService,
-      checkpoint: this.caps.getChatCheckpointer(),
-      deleteThread: async (threadId) => {
-        await this.caps.getChatCheckpointer().deleteThread(threadId);
-        await this.caps.deleteThreadArtifacts(threadId);
-      },
-      inflightRequests: this.inflightRequests,
-      isCurrentSocket: (ws) => this.appWsClient?.isCurrentSocket(ws) ?? false,
-      getActorId: () => this.caps.getActorId(),
-      getModelProfiles: () => this.caps.getModelProfiles(),
-      getToolkitInventory: () => this.caps.getToolkitInventoryStore().getSnapshot(),
-      getToolkitRuntimeManager: () => this.caps.getToolkitRuntimeManager(),
-      getLocalCapabilities: () => this.caps.getLocalCapabilities(),
-      getUserCapabilities: () => this.caps.getUserCapabilities(),
-      getCapabilityArtifactStore: () => this.caps.getCapabilityArtifactStore(),
-      getWorkdir: () => this.caps.getRuntimeConfig().workdir,
-      getActorName: () => this.caps.getActorName(),
-    });
   }
 
   async init() {
@@ -80,7 +43,6 @@ export class LocalAgentHost {
   requestStop() {
     this.stopRequested = true;
     this.stopController.abort();
-    this.disconnectWs();
   }
 
   async shutdown() {
@@ -165,82 +127,20 @@ export class LocalAgentHost {
     if (!opts?.skipInit) {
       await this.init();
     }
-    console.log('[local-agent] started — local server + chat relay');
+    console.log('[local-agent] started — local server');
 
-    const config = getConfig();
-    if (config.apiConnected) {
-      // Connect WebSocket for app ↔ local agent chat relay.
-      this.connectWs();
-    } else {
-      console.log(`[local-agent] ${config.apiSetupMessage}`);
-    }
-
-    // Keep the process alive for the local server + WebSocket relay until stop.
-    while (!this.stopRequested) {
-      try {
-        await sleep(
-          config.pollIntervalSeconds * 1000,
-          undefined,
-          { signal: this.stopController.signal },
+    // Nothing is polled any more — the scheduled hosted-app work went with the
+    // relay — so this only parks until stop. The transport keeps itself alive.
+    if (!this.stopRequested) {
+      await new Promise<void>((resolve) => {
+        this.stopController.signal.addEventListener(
+          'abort',
+          () => { resolve(); },
+          { once: true },
         );
-      } catch (error) {
-        if (this.stopController.signal.aborted) {
-          break;
-        }
-        throw error;
-      }
+      });
     }
 
     console.log('[local-agent] stopped');
-  }
-
-  // ---- WebSocket connection ----
-
-  connectWs() {
-    const config = getConfig();
-    if (this.stopRequested) return;
-    if (!config.apiConnected) {
-      console.log(`[local-agent] hosted app WebSocket disabled: ${config.apiSetupMessage}`);
-      return;
-    }
-    if (!this.getActorId()) {
-      throw new Error('Local agent actorId is missing; run init() before connectWs()');
-    }
-
-    const wsUrl = `${config.apiBaseUrl.replace(/^https?/, (m) => m === 'https' ? 'wss' : 'ws')}/ws/agent?token=${encodeURIComponent(config.agentToken)}&actorId=${encodeURIComponent(this.getActorId())}`;
-
-    this.disconnectWs();
-    this.appWsClient = new LocalAgentAppWsClient({
-      actorId: this.getActorId(),
-      url: wsUrl,
-      reconnectDelayMs: WS_RECONNECT_DELAY_MS,
-      pingIntervalMs: WS_PING_INTERVAL_MS,
-      handlers: {
-        onChatRequest: (ws, msg) => this.appChatHandler.handleChatRequest(ws, msg),
-        onStudioRequest: (ws, msg) => {
-          sendLocalAgentMessage(ws, {
-            type: 'studio_error',
-            requestId: msg.requestId,
-            message: 'This server runs in chat mode; studio requests are not accepted.',
-          });
-        },
-        onNewSession: (_ws, msg) => this.appChatHandler.handleNewSession(msg),
-        onReviewCancel: (ws, msg) => this.appChatHandler.handleReviewCancel(ws, msg),
-        onRunInterrupt: (ws, msg) => this.appChatHandler.handleRunInterrupt(ws, msg),
-        onHumanReviewResponse: (ws, msg) => this.appChatHandler.handleHumanReviewResponse(ws, msg),
-        onClose: (ws) => this.appChatHandler.handleClose(ws),
-      },
-    });
-    this.appWsClient.connect();
-  }
-
-  private disconnectWs() {
-    const client = this.appWsClient;
-    const ws = client?.getCurrentSocket() ?? null;
-    if (ws) {
-      this.inflightRequests.abortAll(ws);
-    }
-    client?.disconnect();
-    this.appWsClient = null;
   }
 }

@@ -32,15 +32,6 @@ function envTemplate(): string {
   return `# PinPawo Local Agent quick-start configuration.
 # Fill in the values below; they are read together with config.json.
 
-# Server
-# Set PINPAWO_LOCAL_ONLY=1 to force local-only startup even if saved
-# server credentials exist in config.json.
-PINPAWO_LOCAL_ONLY=
-API_BASE_URL=https://your-api.example.com
-HASURA_ENDPOINT=https://your-hasura.example.com/v1/graphql
-AGENT_TOKEN=your-agent-token-here
-HASURA_JWT=eyJ...
-
 # LLM (OpenAI-compatible)
 LLM_API_KEY=sk-xxx
 # Presets: gpt-5, claude-sonnet, qwen, minimax, glm, kimi, deepseek, gemini.

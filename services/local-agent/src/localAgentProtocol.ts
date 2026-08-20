@@ -60,16 +60,6 @@ const AGENT_SERVER_MESSAGE_TYPES = {
   'model.select.error': true,
 } as const satisfies Record<AgentServerMessage['type'], true>;
 
-export type LocalAgentTransportAudience = 'trusted-local' | 'remote';
-
-export type SendLocalAgentMessageOptions = {
-  audience?: LocalAgentTransportAudience;
-};
-
-export type SendLocalAgentEventOptions = {
-  audience?: LocalAgentTransportAudience;
-};
-
 export function readLocalAgentClientMessageEnvelope(raw: unknown) {
   return readAgentClientMessageEnvelope(normalizeProtocolInput(raw));
 }
@@ -88,49 +78,31 @@ export function buildLocalAgentEventEnvelope(
   return buildAgentEventEnvelope(event);
 }
 
-export function redactRemoteCompletedMessagePaths(event: AgentRuntimeEvent) {
-  if (event.type !== 'message.completed') {
-    return event;
-  }
-  return {
-    ...event,
-    text: redactLocalPathFragments(event.text),
-  };
-}
-
+/**
+ * Local path redaction lived here to keep filesystem fragments from crossing
+ * to the hosted app. That egress is gone with the app relay: every peer now
+ * reaches this host over 127.0.0.1 and is trusted with local paths, which the
+ * one remaining caller already opted into. A `remote` audience whose default
+ * still redacted would only mislead the next caller, so both are removed.
+ * A Studio plugin that opens a genuinely remote surface owns its own
+ * disclosure policy at that boundary (#638).
+ */
 export function sendLocalAgentMessage(
   ws: WsLike,
   message: AgentServerMessage | AgentClientMessage,
-  options: SendLocalAgentMessageOptions = {},
 ) {
   if (ws.readyState !== WS_OPEN) {
     return false;
   }
-  const isRemoteServerMessage = isAgentServerMessage(message)
-    && (options.audience ?? 'remote') === 'remote';
-  const protocolMessage = isRemoteServerMessage && message.type === 'event'
-    ? {
-        ...message,
-        event: redactRemoteCompletedMessagePaths(message.event),
-      }
-    : message;
-  ws.send(JSON.stringify(protocolMessage));
+  ws.send(JSON.stringify(message));
   return true;
 }
 
-export function sendLocalAgentEvent(
-  ws: WsLike,
-  event: AgentRuntimeEvent,
-  options: SendLocalAgentEventOptions = {},
-) {
+export function sendLocalAgentEvent(ws: WsLike, event: AgentRuntimeEvent) {
   if (ws.readyState !== WS_OPEN) {
     return false;
   }
-  const protocolEvent = options.audience === 'trusted-local'
-    ? event
-    : redactRemoteCompletedMessagePaths(event);
-  const protocolEnvelope = buildLocalAgentEventEnvelope(protocolEvent);
-  ws.send(JSON.stringify(protocolEnvelope));
+  ws.send(JSON.stringify(buildLocalAgentEventEnvelope(event)));
   return true;
 }
 
@@ -138,12 +110,6 @@ function normalizeProtocolInput(raw: unknown) {
   return raw instanceof Buffer ? raw.toString() : raw;
 }
 
-function redactLocalPathFragments(value: string) {
-  return value.replace(
-    /(^|[\s"'`([{=])(?:file:\/\/|~\/|\/(?:Users|home|root|private|tmp|var|Volumes|workspace|workspaces|app|opt|srv)\/|[A-Za-z]:[\\/])[^\s"'`<>{}\])]+/g,
-    '$1[local-path]',
-  );
-}
 
 function isAgentServerMessage(
   message: AgentServerMessage | AgentClientMessage,

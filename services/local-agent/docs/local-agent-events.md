@@ -1,9 +1,12 @@
 # Local-Agent Event Pipeline
 
 This document describes how tool-call activity inside `pet-agent` becomes
-`operation` events that reach a TUI, the macOS companion, or the hosted
-PinPawo app, and the small transport-specific transformation applied to
-completed main-agent messages.
+`operation` events that reach a TUI or the macOS companion.
+
+Egress is single and local. The hosted-app relay was removed along with its
+`audience`/redaction split: every peer reaches this host over 127.0.0.1 and
+receives events unchanged. A Studio plugin that opens a genuinely remote
+surface owns its own disclosure policy at that boundary (#638).
 
 ## Big picture
 
@@ -17,39 +20,28 @@ flowchart LR
     NORM[agentStreamNormalizer<br/>→ AgentOperationEvent]
     TRK[ToolOperationTracker<br/>(id reuse, finishActive)]
     REG[recordOperationActivity<br/>operationActivityState]
-    APPOUT[sendLocalAgentEvent<br/>(audience=remote)]
-    LOCOUT[sendLocalAgentEvent<br/>(audience=trusted-local)]
+    LOCOUT[sendLocalAgentEvent]
   end
 
-  subgraph remote[Hosted PinPawo app]
-    APPUI[Remote chat UI<br/>reads summary/details only]
-  end
-
-  subgraph trusted[Trusted local clients]
-    TUI[Ink TUI<br/>tuiStateReducer]
+  subgraph trusted[Local clients]
+    TUI[TUI]
     MAC[macOS companion]
   end
 
   LG --> NORM --> TRK --> REG
-  REG --> APPOUT
   REG --> LOCOUT
-  APPOUT -- "native events; completed text redacted" --> APPUI
   LOCOUT -- "raw preserved" --> TUI
   LOCOUT -- "raw preserved" --> MAC
 ```
 
-Two physical egress points exist:
+One physical egress point exists:
 
-| Egress | File | Audience |
-| --- | --- | --- |
-| App WS relay | `runtime.ts` (`inflightRequests`), `localAgentAppChatHandler.ts` | `remote` (default) |
-| Local HTTP/WS server | `localServer.ts`, `localServerChatHandler.ts`, `localServerStudioHandler.ts` | `trusted-local` |
+| Egress | File |
+| --- | --- |
+| Local HTTP/WS server | `localServer.ts`, `localServerChatHandler.ts`, `localServerStudioHandler.ts` |
 
-Both call the same `sendLocalAgentEvent(ws, event, options?)`. Remote delivery
-only redacts obvious local path fragments in main-agent
-`message.completed.text`. Deltas, operation payloads, snapshots, and other
-messages retain their native shape. Trusted-local delivery preserves every
-event unchanged.
+It calls `sendLocalAgentEvent(ws, event)`, which delivers every event
+unchanged — deltas, completed text, operation payloads and snapshots alike.
 
 ## Why two modes
 
@@ -83,29 +75,23 @@ sequenceDiagram
   participant Act as operationActivityState
   participant Send as sendLocalAgentEvent
   participant Local as TUI / companion
-  participant App as Hosted app
 
   Graph->>Norm: on_tool_start { name, input, toolCallId }
   Norm->>Track: accept(payload)
   Track-->>Norm: event { phase:'started', raw:{input} }
   Norm->>Act: recordOperationActivity(event)
-  par fan-out to both transports
-    Norm->>Send: emit on local socket (audience=trusted-local)
-    Send->>Local: { phase, operation, raw:{input} }
-  and
-    Norm->>Send: emit on app socket (audience=remote)
-    Send->>App: { phase, operation, raw }
-  end
+  Norm->>Send: emit on local socket
+  Send->>Local: { phase, operation, raw:{input} }
 
   Graph->>Norm: on_tool_end { output }
   Norm->>Track: accept(payload)
   Track-->>Norm: event { phase:'completed', raw:{input,output} }
-  Norm->>Send: emit (same fan-out rules)
+  Norm->>Send: emit
 ```
 
 When a turn ends mid-stream (user interrupt, error), the tracker's
 `finishActive(phase, error)` synthesizes terminal events for any tool calls
-that didn't naturally complete; they go through the same fan-out.
+that didn't naturally complete; they go through the same egress.
 
 ## Where `raw` is consumed locally
 
@@ -145,23 +131,17 @@ type AgentOperationEvent = {
 };
 ```
 
-`AgentOperationEvent` is the canonical operation event type. The trusted-local
-vs remote split is enforced at the **transport** layer through `audience`, not
-through separate internal and external event types. The current remote rule is
-intentionally narrow: only main-agent `message.completed.text` is redacted.
+`AgentOperationEvent` is the canonical operation event type. There is one
+event shape, not an internal and an external one.
 
-`buildLocalAgentEventEnvelope` only frames a native event. It does not accept
-an audience or apply disclosure policy. Remote egress must use
-`sendLocalAgentEvent`; `sendLocalServerPeerEvent` is intentionally fixed to
-trusted loopback peers.
+`buildLocalAgentEventEnvelope` only frames a native event; it applies no
+disclosure policy, and neither does the transport.
 
 ## Adding a new transport
 
-If you build a new egress (e.g. a different IPC, a webhook), select its
-`audience` using the same rule:
+A new local egress needs no disclosure decision — send the native event.
 
-- Trusted, same-machine, bandwidth-rich → `trusted-local`.
-- Remote, multi-tenant, or low-bandwidth → `remote`.
-
-If in doubt, use the default `remote` policy. This preserves protocol behavior
-while applying the completed-message text transformation.
+A transport that leaves this machine is a different matter: `raw` carries
+unmodified tool input and output from the user's environment. Such a transport
+owns its own disclosure policy at its own boundary rather than reintroducing
+one here.

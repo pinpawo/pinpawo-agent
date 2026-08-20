@@ -7,7 +7,6 @@ import test from 'node:test';
 import {
   buildSetupGuide,
   formatSetupGuide,
-  isMissingOrGeneratedApiPlaceholder,
 } from './configDiagnostics';
 import type { LocalAgentRuntimeConfig } from './runtimeConfig';
 
@@ -25,8 +24,6 @@ test('buildSetupGuide reports missing required and recommended config', () => {
     guide.checks.map((check) => [check.id, check.status]),
     [
       ['llm', 'missing'],
-      ['hosted-api', 'warning'],
-      ['actor', 'warning'],
       ['studio-config', 'warning'],
     ],
   );
@@ -37,13 +34,10 @@ test('buildSetupGuide reports missing required and recommended config', () => {
   assert.doesNotMatch(formatSetupGuide(guide), /studio migrate/);
 });
 
-test('buildSetupGuide accepts local-ready config without hosted API', () => {
+test('a runnable model profile is all local startup needs', () => {
+  // 托管 API 与 actor 选择随 app relay 一并移除:能跑起模型就算就绪。
   const guide = buildSetupGuide({
-    stored: {
-      llm_api_key: 'llm-key',
-      actor_id: 'local-only',
-      actor_name: 'Local Agent',
-    },
+    stored: { llm_api_key: 'llm-key' },
     env: {},
     configFilePath: '/tmp/pinpawo/config.json',
     runtimeConfig: runtimeConfigForMissingStudio(),
@@ -51,32 +45,8 @@ test('buildSetupGuide accepts local-ready config without hosted API', () => {
 
   assert.equal(guide.readyForLocalRun, true);
   assert.equal(guide.checks.find((check) => check.id === 'llm')?.status, 'ok');
-  assert.equal(guide.checks.find((check) => check.id === 'hosted-api')?.status, 'warning');
-  assert.equal(guide.checks.find((check) => check.id === 'actor')?.status, 'ok');
-});
-
-test('buildSetupGuide reports local-only override when hosted API credentials exist', () => {
-  const guide = buildSetupGuide({
-    stored: {
-      llm_api_key: 'llm-key',
-      api_base_url: 'https://api.example.test',
-      hasura_endpoint: 'https://hasura.example.test/v1/graphql',
-      agent_token: 'agent-token',
-      hasura_jwt: 'hasura-jwt',
-      local_only: true,
-    },
-    env: {},
-    configFilePath: '/tmp/pinpawo/config.json',
-    runtimeConfig: runtimeConfigForMissingStudio(),
-  });
-
-  const hostedApi = guide.checks.find((check) => check.id === 'hosted-api');
-  const actor = guide.checks.find((check) => check.id === 'actor');
-
-  assert.equal(hostedApi?.status, 'warning');
-  assert.match(hostedApi?.detail ?? '', /PINPAWO_LOCAL_ONLY is enabled/);
-  assert.equal(actor?.status, 'warning');
-  assert.match(actor?.detail ?? '', /Local-only mode/);
+  assert.equal(guide.checks.some((check) => check.id === 'hosted-api'), false);
+  assert.equal(guide.checks.some((check) => check.id === 'actor'), false);
 });
 
 test('buildSetupGuide reports workdir-scoped Studio config when present', async () => {
@@ -96,14 +66,6 @@ test('buildSetupGuide reports workdir-scoped Studio config when present', async 
   assert.equal(guide.checks.find((check) => check.id === 'studio-config')?.status, 'ok');
 });
 
-test('isMissingOrGeneratedApiPlaceholder detects init scaffold values', () => {
-  assert.equal(isMissingOrGeneratedApiPlaceholder('API_BASE_URL', ''), true);
-  assert.equal(isMissingOrGeneratedApiPlaceholder('API_BASE_URL', 'https://your-api.example.com'), true);
-  assert.equal(isMissingOrGeneratedApiPlaceholder('HASURA_ENDPOINT', 'https://your-hasura.example.com/v1/graphql'), true);
-  assert.equal(isMissingOrGeneratedApiPlaceholder('AGENT_TOKEN', 'your-agent-token-here'), true);
-  assert.equal(isMissingOrGeneratedApiPlaceholder('HASURA_JWT', 'eyJ...'), true);
-  assert.equal(isMissingOrGeneratedApiPlaceholder('API_BASE_URL', 'https://api.example.test'), false);
-});
 
 function runtimeConfigForMissingStudio(): LocalAgentRuntimeConfig {
   return runtimeConfigFor(join(tmpdir(), `pinpawo-missing-${randomUUID()}`));

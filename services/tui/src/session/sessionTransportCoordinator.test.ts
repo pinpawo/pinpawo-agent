@@ -49,6 +49,7 @@ test('session transport owns snapshot correlation and forwards application messa
     event: {
       type: 'message.delta',
       requestId: 'chat',
+      messageId: 'chat:assistant',
       role: 'assistant',
       text: 'hello',
     },

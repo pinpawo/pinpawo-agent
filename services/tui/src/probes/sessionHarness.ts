@@ -66,6 +66,7 @@ export function createSpikeSession(turnCount = 120): AgentSession {
       event: {
         type: 'message.completed',
         requestId,
+        messageId: `message-${index}`,
         role: 'assistant',
         text: `Rendered turn ${index + 1}. 宽字符 🙂 stay aligned.`,
       },

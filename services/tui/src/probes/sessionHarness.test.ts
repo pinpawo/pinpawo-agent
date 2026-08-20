@@ -47,6 +47,8 @@ test('spike session applies high-frequency deltas in place', () => {
     session = applySpikeEvent(session, {
       type: 'message.delta',
       requestId: 'delta-1',
+      // 同一条消息的所有 delta 共享 messageId —— 用例断言它们合并成一行。
+      messageId: 'message-delta-1',
       role: 'assistant',
       text: token,
     }, 1_001);
@@ -54,7 +56,7 @@ test('spike session applies high-frequency deltas in place', () => {
 
   assert.equal(session.timeline.length, 2);
   assert.deepEqual(session.timeline[1], {
-    id: 'delta-1:assistant:0',
+    id: 'delta-1:assistant:message-delta-1',
     type: 'message',
     role: 'assistant',
     requestId: 'delta-1',

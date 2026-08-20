@@ -254,6 +254,7 @@ export function createDemoConnectionFactory(
             dispatchRuntimeEvent({
               type: 'message.completed',
               requestId: 'smoke-run',
+              messageId: 'smoke-run:review-demo',
               role: 'assistant',
               text: 'The review demo completed.',
             });

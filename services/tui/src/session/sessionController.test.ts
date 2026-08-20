@@ -75,6 +75,7 @@ test('TuiSessionController synchronizes one session and projects a chat run', ()
   connection.receive(eventMessage({
     type: 'message.delta',
     requestId: 'chat-1',
+    messageId: 'chat-1:assistant',
     role: 'assistant',
     text: 'hi',
   }));
@@ -85,6 +86,7 @@ test('TuiSessionController synchronizes one session and projects a chat run', ()
   connection.receive(eventMessage({
     type: 'message.completed',
     requestId: 'chat-1',
+    messageId: 'chat-1:assistant',
     role: 'assistant',
     text: 'hi there',
     usage: {
@@ -624,6 +626,7 @@ test('starting a new session applies the authoritative snapshot and ignores an o
   connection.receive(eventMessage({
     type: 'message.completed',
     requestId: 'old-run',
+    messageId: 'old-run:assistant',
     role: 'assistant',
     text: 'late completion',
   }));
@@ -834,6 +837,7 @@ test('completion snapshot refresh cannot erase a newer optimistic run', () => {
   connection.receive(eventMessage({
     type: 'message.completed',
     requestId: 'first',
+    messageId: 'first:assistant',
     role: 'assistant',
     text: 'first reply',
   }));
@@ -924,6 +928,8 @@ test('production controller keeps high-frequency deltas interleaved with operati
     connection.receive(eventMessage({
       type: 'message.delta',
       requestId: 'chat',
+      // 1000 条 delta 与其 completed 同属一条消息,用例断言它们只留一行。
+      messageId: 'chat:assistant',
       role: 'assistant',
       text: String(index % 10),
     }));
@@ -931,6 +937,7 @@ test('production controller keeps high-frequency deltas interleaved with operati
   connection.receive(eventMessage({
     type: 'message.completed',
     requestId: 'chat',
+    messageId: 'chat:assistant',
     role: 'assistant',
     text: 'final answer',
   }));
@@ -1035,6 +1042,7 @@ test('resuming clears an older completion snapshot request', async () => {
   connection.receive(eventMessage({
     type: 'message.completed',
     requestId: 'chat',
+    messageId: 'chat:assistant',
     role: 'assistant',
     text: 'done',
   }));
@@ -1136,6 +1144,7 @@ test('session commands reject protocol errors, busy runs, and timeouts', async (
   connection.receive(eventMessage({
     type: 'message.completed',
     requestId: 'chat',
+    messageId: 'chat:assistant',
     role: 'assistant',
     text: 'done',
   }));
@@ -1322,6 +1331,7 @@ test('delegation continuation sends resume_active without client-owned availabil
   connection.receive(eventMessage({
     type: 'message.completed',
     requestId: 'continue-sent',
+    messageId: 'continue-sent:assistant',
     role: 'assistant',
     text: 'continued',
   }));

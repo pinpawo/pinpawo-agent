@@ -68,6 +68,7 @@ export function buildDemoQaEventSequence(
     event: {
       type: 'message.delta',
       requestId,
+      messageId: `qa-assistant:${requestId}`,
       role: 'assistant',
       text: '## QA response\n\n',
     },
@@ -76,6 +77,7 @@ export function buildDemoQaEventSequence(
     event: {
       type: 'message.delta',
       requestId,
+      messageId: `qa-assistant:${requestId}`,
       role: 'assistant',
       text: 'Streaming **Markdown** stays editable while history is browsed.',
     },
@@ -84,6 +86,7 @@ export function buildDemoQaEventSequence(
     event: {
       type: 'message.completed',
       requestId,
+      messageId: `qa-assistant:${requestId}`,
       role: 'assistant',
       text: `${partial}\n\n完成 🙂`,
       usage: {

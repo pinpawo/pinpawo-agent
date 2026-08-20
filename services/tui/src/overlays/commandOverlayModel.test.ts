@@ -26,13 +26,15 @@ test('command palette follows a slash token at the composer cursor', () => {
     cursorOffset: 3,
     enabled: true,
   });
+  // `/refresh` (#654) 也以 re 开头,按注册表顺序排在 resume 之前;
+  // policy 是靠别名匹配进来的。
   assert.deepEqual(
     state.phase === 'palette'
       ? state.items.map((command) => command.name)
       : [],
-    ['resume', 'policy'],
+    ['refresh', 'resume', 'policy'],
   );
-  assert.equal(commandCompletion(state), '/resume');
+  assert.equal(commandCompletion(state), '/refresh');
 
   state = syncCommandPalette(state, {
     text: '/review',

@@ -31,6 +31,20 @@ export type LocalAgentRuntimeConfig = Readonly<{
  */
 export const LOCAL_AGENT_CHECKPOINT_CONTRACT = 'capability-v2';
 
+/** Independent local Hosts must use distinct FileSaver writer roots. */
+export function resolveHostCheckpointPath(
+  runtimeConfig: Pick<LocalAgentRuntimeConfig, 'stateRoot'>,
+  hostId: string,
+): string {
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(hostId)) {
+    throw new Error(`Invalid local Host checkpoint id: ${hostId}`);
+  }
+  return resolve(
+    runtimeConfig.stateRoot,
+    `checkpoints-${hostId}-${LOCAL_AGENT_CHECKPOINT_CONTRACT}.json`,
+  );
+}
+
 const LEGACY_LOCAL_STATE_NAMES = [
   'checkpoints.json',
   'checkpoints',

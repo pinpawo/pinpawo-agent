@@ -6,19 +6,16 @@ import {
   type AgentToolkit,
   type ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
+import { createStudio } from '../createStudio';
+import type { Studio, StudioPlugin } from '../studioContract';
+import type { PetAgentRuntime } from '../types';
 import {
-  createStudio,
-  type PetAgentRuntime,
-  type Studio,
-  type StudioPlugin,
-} from '@pinpawo/studio';
-import { createKanbanPlugin } from '@pinpawo-toolkit/studio-kanban';
-
-import { buildLocalAgentModels, resolveLlmGenerationReserveTokens } from '../agentModels';
-import type { LocalModelProfileRegistry } from '../llmConfig';
-import { createExploreCapability } from '../capabilities/explore';
-import { loadStudioPlanningCapability } from '../capabilities/studioPlanning';
-import { buildLocalAgentRuntimeConfig } from '../runtimeConfig';
+  buildLocalAgentModels,
+  buildLocalAgentRuntimeConfig,
+  createExploreCapability,
+  resolveLlmGenerationReserveTokens,
+  type LocalModelProfileRegistry,
+} from 'pinpawo/host-runtime';
 import { loadPetLocalConfigs } from './petConfig';
 import { loadStudioLocalConfig, resolveStudio, type ResolvedStudio } from './studioConfig';
 import { buildPetActorFromLocalConfig } from './petActor';
@@ -29,7 +26,7 @@ import { createPetAgentRuntime } from './createPetAgentRuntime';
  */
 export class StudioNotConfiguredError extends Error {
   constructor(public readonly configPath: string) {
-    super(`No Studio config found at ${configPath}. Create one to enable studio mode.`);
+    super(`No Studio config found at ${configPath}. Create one before starting the Studio Host.`);
     this.name = 'StudioNotConfiguredError';
   }
 }
@@ -47,8 +44,8 @@ export type BuildStudioInput = {
   studioConfigPath?: string;
   petsDir?: string;
   workdir?: string;
-  /** 覆盖内置插件表;仅供测试注入假插件。 */
-  pluginFactories?: Record<string, StudioPluginFactory>;
+  /** Installed optional modules are resolved by the application composition root. */
+  resolveModule?: StudioModuleResolver;
 };
 
 export type BuildStudioResult = {
@@ -59,20 +56,19 @@ export type BuildStudioResult = {
 };
 
 /**
- * 插件工厂。`options` 原样来自 `studio.json`,**由插件自己解释与校验** ——
- * 宿主不认识任何插件的领域概念,只负责把它递过去。
+ * Optional module contribution. A module may provide the Studio lifecycle /
+ * Toolkit face and capabilities that refer to that Toolkit. Studio never
+ * imports a concrete module implementation.
  */
-export type StudioPluginFactory = (options?: Record<string, unknown>) => StudioPlugin;
-
-/**
- * 已内置的插件实现。
- *
- * `studio.json` 里显式列出要装哪些 —— studio 不做隐式装配,读一眼配置就
- * 知道这块 studio 由什么驱动。
- */
-const PLUGIN_FACTORIES: Record<string, StudioPluginFactory> = {
-  kanban: () => createKanbanPlugin(),
+export type ResolvedStudioModule = {
+  plugin: StudioPlugin;
+  capabilities?: readonly AgentCapability[];
 };
+
+export type StudioModuleResolver = (
+  id: string,
+  options?: Record<string, unknown>,
+) => Promise<ResolvedStudioModule> | ResolvedStudioModule;
 
 /**
  * 从 workdir 装配一块 studio。
@@ -94,30 +90,39 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
   const petsDir = input.petsDir ?? path.join(path.dirname(studioConfigPath), 'pets');
   const resolved = resolveStudio(studioConfig, await loadPetLocalConfigs(petsDir));
 
-  const pluginFactories = input.pluginFactories ?? PLUGIN_FACTORIES;
-  const plugins = (studioConfig.plugins ?? []).map(({ id, options }) => {
-    const factory = pluginFactories[id];
-    if (!factory) {
+  const modules: ResolvedStudioModule[] = [];
+  for (const { id, options } of studioConfig.plugins ?? []) {
+    if (!input.resolveModule) {
       throw new Error(
-        `studio "${studioConfig.studioId}": unknown plugin "${id}". `
-        + `Known plugins: ${Object.keys(pluginFactories).join(', ')}.`,
+        `studio "${studioConfig.studioId}": optional module "${id}" is configured `
+        + 'but no module resolver is installed.',
       );
     }
-    return factory(options);
-  });
+    modules.push(await input.resolveModule(id, options));
+  }
+  const plugins = modules.map(({ plugin }) => plugin);
 
   const globalLlmConfig = input.modelProfiles.resolve();
   const globalModels = buildLocalAgentModels(globalLlmConfig);
-  // studio 专用的内置 Capability 只在这里加入,**不进默认 registry** ——
-  // 它声明 uses: ['kanban'],而 kanban 只在 studio 装配时作为插件注入。放进
-  // 全局 registry 会让每个普通 chat 会话都打一条 "unavailable" 警告。
-  //
-  // 仍由 pet 配置决定谁用得上:这里只是让 studio 侧能解析到这个名字。
-  const studioPlanning = loadStudioPlanningCapability();
-  const capabilitiesByName = new Map([
-    ...(studioPlanning ? [[studioPlanning.name, studioPlanning] as const] : []),
-    ...input.capabilities.map((item) => [item.name, item] as const),
-  ]);
+  const capabilitiesByName = new Map<string, AgentCapability>();
+  const registerCapability = (capability: AgentCapability, source: string) => {
+    if (capabilitiesByName.has(capability.name)) {
+      throw new Error(
+        `studio "${studioConfig.studioId}": duplicate capability "${capability.name}" `
+        + `contributed by ${source}`,
+      );
+    }
+    capabilitiesByName.set(capability.name, capability);
+  };
+  for (const capability of input.capabilities) {
+    registerCapability(capability, 'Host capability assembly');
+  }
+  modules.forEach(({ capabilities = [] }, moduleIndex) => {
+    const moduleId = studioConfig.plugins?.[moduleIndex]?.id ?? `module[${moduleIndex}]`;
+    for (const capability of capabilities) {
+      registerCapability(capability, `optional module "${moduleId}"`);
+    }
+  });
   const generalCapability = capabilitiesByName.get(GENERAL_CAPABILITY_NAME);
   if (!generalCapability) {
     throw new Error(`Studio requires the host baseline Capability "${GENERAL_CAPABILITY_NAME}".`);
@@ -141,7 +146,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
       const capability = capabilitiesByName.get(name);
       if (!capability) {
         throw new Error(
-          `pet "${petConfig.petId}" references capability "${name}" which is not registered in this local-agent`,
+          `pet "${petConfig.petId}" references capability "${name}" which is not registered by the Host or an installed module`,
         );
       }
       return capability;

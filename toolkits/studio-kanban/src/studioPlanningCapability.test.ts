@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { compileAgentRegistry } from '@pinpawo/pet-agent';
-import { createKanbanPlugin } from '@pinpawo-toolkit/studio-kanban';
-
-import { LocalAgentCapabilityRegistry } from '../../localAgentCapabilityRegistry';
-import { loadStudioPlanningCapability, STUDIO_PLANNING_CAPABILITY_NAME } from './index';
+import { createKanbanPlugin } from './kanbanPlugin';
+import {
+  loadStudioPlanningCapability,
+  STUDIO_PLANNING_CAPABILITY_NAME,
+} from './studioPlanningCapability';
 
 test('the built-in capability declares the kanban toolkit', () => {
   const capability = loadStudioPlanningCapability();
@@ -47,20 +48,5 @@ test('without the kanban toolkit it degrades to unavailable rather than throwing
   assert.equal(
     registry.unavailableCapabilities[0]?.capability.name,
     STUDIO_PLANNING_CAPABILITY_NAME,
-  );
-});
-
-test('it stays out of the default registry so chat is untouched', async () => {
-  // 它声明 uses: ['kanban'],而 kanban 只在 studio 装配时注入。放进默认
-  // registry 会让**每个普通 chat 会话**都打一条 "unavailable" 警告 ——
-  // 稳定的 chat 路径不该因为 studio 的改动而变。
-  // getLocalCapabilities() 正是 chat handler 取用的那个列表。
-  const registry = new LocalAgentCapabilityRegistry();
-  await registry.load();
-
-  assert.equal(
-    registry.getLocalCapabilities().some((item) => item.name === STUDIO_PLANNING_CAPABILITY_NAME),
-    false,
-    'studio_planning must be provided by the studio assembly, not the default registry',
   );
 });

@@ -216,7 +216,6 @@ A complete `LLM_API_KEY` + `LLM_BASE_URL` + `LLM_MODEL` tuple creates an ephemer
 |---|---|
 | `pinpawo` / `pinpawo server` | Start the local host in chat mode. |
 | `pinpawo run` | Alias for `pinpawo server`. |
-| `pinpawo server --mode studio` | Start in Studio mode. |
 | `pinpawo server --stdio` | Use a single JSONL stdio peer instead of HTTP/WebSocket. |
 | `pinpawo init` | Create local config and the example Capability. |
 | `pinpawo setup` | Diagnose configuration and show next steps. |
@@ -226,6 +225,10 @@ A complete `LLM_API_KEY` + `LLM_BASE_URL` + `LLM_MODEL` tuple creates an ephemer
 | `pinpawo capability validate <dir>` | Validate a Capability directory. |
 | `pinpawo capability install <dir>` | Install a Capability. |
 | `pinpawo capability install <dir> --link` | Link a Capability in place. |
+
+The independent Studio Host is currently exposed as the programmatic
+`@pinpawo/studio` Host API. Its application composition/CLI entry is a separate
+follow-up; it is not a mode of the Chat server command.
 
 ## Capabilities and Plugins
 

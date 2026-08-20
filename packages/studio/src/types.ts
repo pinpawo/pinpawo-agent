@@ -54,8 +54,8 @@ export type PetAgentRuntimeInvokeInput = {
 
 /**
  * pet runtime 的 invoke 返回。一段文本,可包含对文件路径的引用,
- * curator 解析并整理进 wiki。HITL 由 humanReviewer 内部消化,对调用方
- * 不可见——`invoke()` 是原子的,要么 reply,要么抛错。
+ * curator 解析并整理进 wiki。`invoke()` 也可能因为 checkpointed interrupt
+ * 提前返回；调用方不解释 review payload，只从 gate 观察到 `waiting`。
  */
 export type PetAgentRuntimeInvokeResult = {
   reply: string;

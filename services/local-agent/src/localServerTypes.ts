@@ -15,21 +15,9 @@ import {
   HostToolkitInventoryStore,
 } from './toolkits/toolkitInventory';
 
-/**
- * #561: startup-determined Studio facts. Present only in studio mode, where
- * they are validated during startup preflight rather than per request.
- */
-export type LocalServerStudioModeInfo = {
-  studioId: string;
-  entryPetId: string;
-  petIds: readonly string[];
-};
-
 export type LocalServerDeps = {
-  /** #561 primary server mode, decided at startup. */
+  /** Local-agent transport is owned by the Chat Host. */
   serverMode: ServerMode;
-  /** Present only in studio mode. */
-  studioMode?: LocalServerStudioModeInfo;
   actorId: string;
   actorName?: string;
   modelProfiles: LocalModelProfileRegistry;
@@ -38,9 +26,10 @@ export type LocalServerDeps = {
   workdir: string;
   runtimeConfig?: LocalAgentRuntimeConfig;
   /**
-   * Host 持有的 chat checkpointer。Studio 的 pet 复用同一实例:threadId
-   * 已含 studio/run/task/pet/invocation 层级,与 chat 线程天然隔离,
-   * 而 FileSaver 自带 per-checkpoint 写锁,并发写不会互相覆盖。
+   * Chat Host 持有的 checkpointer。Studio Host 使用独立的 checkpoint root，
+   * 不通过 transport deps 暴露给 Chat/TUI session 栈。FileSaver 仍提供
+   * store-wide filesystem writer lock，保护同一 root 被意外多进程打开时的
+   * read-modify-write 与 GC。
    *
    * 缺少它时 pet 的 graph 跑在无 checkpoint 状态 —— 执行进度只存在于内存,
    * 中断后无法 resume。见 #613。

@@ -10,8 +10,10 @@ import {
   type AgentCapability,
 } from '@pinpawo/pet-agent';
 
-import { buildStudio } from './buildStudio';
-import { createTestModelProfileRegistry } from '../testing/modelProfiles';
+import { buildStudio } from '@pinpawo/studio';
+import { createTestModelProfileRegistry } from '../../../services/local-agent/src/testing/modelProfiles';
+import { createKanbanPlugin } from './kanbanPlugin';
+import { loadStudioPlanningCapability } from './studioPlanningCapability';
 
 /**
  * 真实装配路径的集成测试:studio.json + pets/*.json + kanban 插件 + buildStudio。
@@ -64,6 +66,10 @@ test('a pet that declares studio_planning resolves it and reaches the kanban too
     capabilities: [generalCapability()],
     toolkits: [],
     ownerUserId: null,
+    resolveModule: () => ({
+      plugin: createKanbanPlugin(),
+      capabilities: [loadStudioPlanningCapability()!],
+    }),
   });
 
   const planner = studio.listPets().find((pet) => pet.petId === 'planner');
@@ -86,6 +92,10 @@ test('studio_planning is not forced on pets that do not declare it', async () =>
     capabilities: [generalCapability()],
     toolkits: [],
     ownerUserId: null,
+    resolveModule: () => ({
+      plugin: createKanbanPlugin(),
+      capabilities: [loadStudioPlanningCapability()!],
+    }),
   });
 
   const planner = studio.listPets().find((pet) => pet.petId === 'planner');

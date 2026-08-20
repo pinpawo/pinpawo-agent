@@ -7,18 +7,13 @@ import {
   type ToolAuthorizationSafetyLevel,
 } from '@pinpawo/agent-contracts';
 import { readLocalAgentPackageVersion } from './packageVersion';
-import type {
-  LocalServerDeps,
-  LocalServerStudioModeInfo,
-} from './localServerTypes';
+import type { LocalServerDeps } from './localServerTypes';
 import type { ServerMode } from './serverMode';
 import type { ModelInputModality } from './modelProfiles';
 
 export type LocalRuntimeProjection = {
-  /** #561 primary server mode, decided at startup. */
+  /** Local-agent projection is always the Chat Host. */
   serverMode: ServerMode;
-  /** Startup-validated Studio facts; present only in studio mode. */
-  studioMode?: LocalServerStudioModeInfo;
   modelProfileId: string;
   modelProfileLabel: string;
   modelProfileAvailable: boolean;
@@ -48,7 +43,6 @@ export function buildLocalRuntimeProjection(
   if (!profile) {
     return {
       serverMode: deps.serverMode,
-      ...(deps.studioMode ? { studioMode: deps.studioMode } : {}),
       modelProfileId,
       modelProfileLabel: modelProfileId,
       modelProfileAvailable: false,
@@ -79,7 +73,6 @@ export function buildLocalRuntimeProjection(
 
   return {
     serverMode: deps.serverMode,
-    ...(deps.studioMode ? { studioMode: deps.studioMode } : {}),
     modelProfileId,
     modelProfileLabel: profile.label,
     modelProfileAvailable: true,
@@ -114,13 +107,6 @@ export function buildLocalHttpRuntimeProjection(deps: LocalServerDeps) {
   return {
     local_agent_version: readLocalAgentPackageVersion(),
     server_mode: runtime.serverMode,
-    ...(runtime.studioMode ? {
-      studio_mode: {
-        studio_id: runtime.studioMode.studioId,
-        entry_pet_id: runtime.studioMode.entryPetId,
-        pet_ids: [...runtime.studioMode.petIds],
-      },
-    } : {}),
     model_profile_id: runtime.modelProfileId,
     model_profile_label: runtime.modelProfileLabel,
     model_profile_available: runtime.modelProfileAvailable,

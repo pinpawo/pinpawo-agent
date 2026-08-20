@@ -48,6 +48,8 @@ export type HostCapabilityAssemblyOptions = {
   runtimeConfig: LocalAgentRuntimeConfig;
   /** Distinguishes plugin toolkit source label for diagnostics. */
   sourceId: string;
+  /** Host-owned checkpoint root. Independent hosts must not share a writer root. */
+  checkpointPath?: string;
 };
 
 export class HostCapabilityAssembly {
@@ -59,7 +61,10 @@ export class HostCapabilityAssembly {
   private readonly toolkitCoordinator = new HostToolkitCoordinator();
   private readonly hostBuiltInToolkits: readonly AgentToolkit[];
   private readonly capabilityRegistry: LocalAgentCapabilityRegistry;
-  private readonly chatCheckpointer: FileSaver;
+  private readonly checkpointer: FileSaver;
+  private writerLeaseHeld = false;
+  private initialized = false;
+  private initPromise: Promise<void> | null = null;
   private legacyStateNoticeReported = false;
 
   constructor(options: HostCapabilityAssemblyOptions) {
@@ -80,10 +85,37 @@ export class HostCapabilityAssembly {
         ...(browserSelected ? [createBrowserCapability()] : []),
       ],
     });
-    this.chatCheckpointer = new FileSaver(this.runtimeConfig.checkpointPath);
+    this.checkpointer = new FileSaver(
+      options.checkpointPath ?? this.runtimeConfig.checkpointPath,
+    );
   }
 
   async init() {
+    if (this.initialized) return;
+    if (this.initPromise) return this.initPromise;
+    const pending = this.initializeWithWriterLease();
+    this.initPromise = pending;
+    try {
+      await pending;
+      this.initialized = true;
+    } finally {
+      if (this.initPromise === pending) this.initPromise = null;
+    }
+  }
+
+  private async initializeWithWriterLease() {
+    this.checkpointer.acquireHostWriterLease(this.sourceId);
+    this.writerLeaseHeld = true;
+    try {
+      await this.initialize();
+    } catch (error) {
+      this.writerLeaseHeld = false;
+      this.checkpointer.releaseHostWriterLease();
+      throw error;
+    }
+  }
+
+  private async initialize() {
     if (!this.legacyStateNoticeReported) {
       this.legacyStateNoticeReported = true;
       const legacyStatePaths = findLegacyLocalAgentState(this.runtimeConfig);
@@ -113,8 +145,13 @@ export class HostCapabilityAssembly {
     return this.runtimeConfig;
   }
 
+  getCheckpointer(): FileSaver {
+    return this.checkpointer;
+  }
+
+  /** Chat compatibility name; shared consumers should use getCheckpointer(). */
   getChatCheckpointer(): FileSaver {
-    return this.chatCheckpointer;
+    return this.getCheckpointer();
   }
 
   getToolkitRuntimeManager(): ToolkitRuntimeManager {
@@ -165,6 +202,14 @@ export class HostCapabilityAssembly {
   }
 
   async shutdown(): Promise<void> {
-    await this.toolkitCoordinator.shutdown();
+    try {
+      await this.toolkitCoordinator.shutdown();
+    } finally {
+      this.initialized = false;
+      if (this.writerLeaseHeld) {
+        this.writerLeaseHeld = false;
+        this.checkpointer.releaseHostWriterLease();
+      }
+    }
   }
 }

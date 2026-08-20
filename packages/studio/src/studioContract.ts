@@ -164,6 +164,14 @@ export type Studio = {
    */
   entryPetId: string;
   dispatch: (input: StudioDispatchInput) => Promise<StudioDispatchResult>;
+  /**
+   * 订阅所有 dispatch 的闸门变化，包括宿主直接发起的 dispatch。
+   *
+   * 插件仍应优先使用 `StudioPluginContext.onDispatchGate`，因为那条订阅只会
+   * 收到插件自己的派活。这个全局入口属于 Host 控制面，用于把状态投射给
+   * 发起请求的 transport，并在 dispatch 结束后释放关联关系。
+   */
+  onDispatchGate: (handler: StudioDispatchGateHandler) => () => void;
   notify: (event: StudioEvent) => void;
   subscribe: (handler: StudioEventHandler) => () => void;
   listPets: () => PetAgentRuntimeDescriptor[];

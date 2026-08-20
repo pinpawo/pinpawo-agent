@@ -21,6 +21,8 @@ const CJS_EXTERNALS = [
 export default defineConfig({
   entry: {
     index: 'src/index.ts',
+    hostRuntime: 'src/hostRuntime.ts',
+    localServerTransportApi: 'src/localServerTransportApi.ts',
   },
   format: ['esm'],
   platform: 'node',
@@ -28,8 +30,9 @@ export default defineConfig({
   outDir: 'dist',
   clean: true,
   splitting: false,
+  dts: true,
   onSuccess: async () => {
-    await Promise.all(['general', 'capabilityCreator', 'studioPlanning'].map(async (capability) => {
+    await Promise.all(['general', 'capabilityCreator'].map(async (capability) => {
       const targetDir = `dist/capabilities/${capability}`;
       await mkdir(targetDir, { recursive: true });
       await copyFile(

@@ -203,12 +203,20 @@ Browser、bash、git 都是普通 Toolkit：
 6. Chat 与 Studio 使用相同领域模型。Studio 只改变 Host 如何配置、持有和 invoke
    多个常驻 Agent Runtime，不创造 Studio 专属 Tool/Toolkit/Runtime 体系。
    Chat Host (`LocalAgentHost`) 和 Studio Host (`StudioHost`) 是两个独立的
-   装配入口，`runAgent` 按 `--mode` 分流，不再共用同一条启动路径。
-   两个 Host 共享能力供给（toolkit / capability / model / checkpointer），
-   通过 `HostCapabilityAssembly` 装配，不复制代码。
-7. BrowserIntegration、BrowserProvider、LocalTools 或 RuntimeEnvironment 不能作为
+   package / 装配入口；Chat CLI 不再通过 `--mode` 分流创建 Studio。
+   两个 Host 共享能力供给（toolkit / capability / model）以及 checkpointer 的装配方式。
+   local-agent 通过中性的 `host-runtime` 子路径暴露 `HostCapabilityAssembly`，Studio
+   复用该 Host 装配能力而不复制代码；具体 local wire adapter 则通过独立的
+   `local-server-transport` 子路径暴露，不属于 Host runtime，也不是 Studio core API。
+   两个 Host 各自持有独立 checkpoint root，不共享 writer ownership、transport
+   composition 或 Chat session state。依赖方向只能是 Studio → local-agent public
+   surfaces；local-agent Chat 路径不得反向 import Studio。
+7. Studio Host 只声明 optional module resolver port，不静态 import kanban、scheduler
+   或其他具体 module。module 实现可以依赖 Studio contract，并由应用 composition root
+   注入；“配置中出现 module id”不等于 Studio package 依赖该 module。
+8. BrowserIntegration、BrowserProvider、LocalTools 或 RuntimeEnvironment 不能作为
    新的公共架构层；普通构造辅助不得反向定义领域模型。
-8. 如果实现需要改变稳定的 Pet Agent Chat graph、wire、checkpoint、Capability
+9. 如果实现需要改变稳定的 Pet Agent Chat graph、wire、checkpoint、Capability
    行为或 review policy，必须单独说明影响并获得明确确认。
 
 ## 7. 文档用词约束

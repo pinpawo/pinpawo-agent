@@ -82,31 +82,7 @@ test('runtime projection surfaces the startup-decided chat mode', () => {
   assert.equal(buildLocalHttpRuntimeProjection(deps).server_mode, 'chat');
 });
 
-test('runtime projection surfaces studio mode with its planner and worker set', () => {
-  const deps: LocalServerDeps = {
-    ...createDeps('/tmp/pinpawo-mode-studio'),
-    serverMode: 'studio',
-    studioMode: {
-      studioId: 'demo',
-      entryPetId: 'lead',
-      petIds: ['coder', 'writer'],
-    },
-  };
-
-  const runtime = buildLocalRuntimeProjection(deps);
-  assert.equal(runtime.serverMode, 'studio');
-  assert.equal(runtime.studioMode?.entryPetId, 'lead');
-
-  const http = buildLocalHttpRuntimeProjection(deps);
-  assert.equal(http.server_mode, 'studio');
-  assert.deepEqual(http.studio_mode, {
-    studio_id: 'demo',
-    entry_pet_id: 'lead',
-    pet_ids: ['coder', 'writer'],
-  });
-});
-
-test('chat mode projection omits the studio block entirely', () => {
+test('chat projection omits Studio-specific fields', () => {
   const http = buildLocalHttpRuntimeProjection(createDeps('/tmp/pinpawo-mode-chat'));
 
   assert.equal('studio_mode' in http, false);

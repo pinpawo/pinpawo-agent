@@ -6,7 +6,7 @@ import {
   studioLocalConfigSchema,
   type ResolvedStudio,
   type StudioLocalConfig,
-} from '@pinpawo/studio';
+} from '../configSchema';
 
 export { resolveStudio };
 export type { ResolvedStudio, StudioLocalConfig };
@@ -14,7 +14,7 @@ export type { ResolvedStudio, StudioLocalConfig };
 /**
  * 文件入口:studio 配置住在 `<workdir>/.pinpawo/studio.json`,一个 workdir 一份。
  *
- * schema 与引用一致性校验归 `@pinpawo/studio`;本模块只负责去哪读。
+ * schema 与引用一致性校验归 Studio core；本模块只负责去哪读。
  */
 
 /**

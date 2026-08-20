@@ -33,7 +33,7 @@ function pet(options: {
       gateListeners.add(listener);
       return () => gateListeners.delete(listener);
     },
-    /** 测试用:模拟人把卡住的 pet 解开(现实里走 chat 路径)。 */
+    /** 测试用:模拟外部控制面把卡住的 pet 解开。 */
     openGate: () => setGate('open'),
     /** 测试用:模拟卡住期间的状态转折。 */
     setGate,
@@ -331,6 +331,48 @@ test('a plugin that fails to start fails createStudio', async () => {
   );
 });
 
+test('plugin startup failure rolls back every plugin that may have allocated resources', async () => {
+  const order: string[] = [];
+  await assert.rejects(
+    () => createStudio({
+      studioId: 's1',
+      entryPetId: 'p1',
+      pets: [pet({ petId: 'p1' })],
+      plugins: [
+        {
+          name: 'started',
+          description: 'started',
+          tools: [],
+          studio: {
+            start: () => { order.push('start:started'); },
+            stop: () => { order.push('stop:started'); },
+          },
+        },
+        {
+          name: 'partial',
+          description: 'partial',
+          tools: [],
+          studio: {
+            start: () => {
+              order.push('start:partial');
+              throw new Error('partial startup failed');
+            },
+            stop: () => { order.push('stop:partial'); },
+          },
+        },
+      ],
+    }),
+    /partial startup failed/,
+  );
+
+  assert.deepEqual(order, [
+    'start:started',
+    'start:partial',
+    'stop:partial',
+    'stop:started',
+  ]);
+});
+
 test('a plugin without a studio aspect is just a toolkit', async () => {
   const studio = await createStudio({
     studioId: 's1',
@@ -402,7 +444,7 @@ test('the queue holds while a pet is waiting, and resumes when a human opens the
   // 第一条停在等人上,第二条必须还排着。
   assert.deepEqual(started, ['first']);
 
-  // 人走 chat 路径把它解开(现实里不经过 studio)。
+  // 外部控制面把它解开(不经过 Studio core)。
   stuck.openGate();
   await flush();
   assert.deepEqual(started, ['first', 'second']);
@@ -454,6 +496,33 @@ test('a plugin hears the gate of its own dispatches, and only its own', async ()
   assert.ok(seen.every((item) => item.threadId === own.threadId));
   assert.ok(seen.every((item) => item.correlationId === 'task-7'));
   assert.deepEqual(seen.map((item) => item.state), ['busy', 'open']);
+});
+
+test('the Host control surface hears direct dispatch gate changes with correlation', async () => {
+  const studio = await createStudio({
+    studioId: 's1',
+    entryPetId: 'p1',
+    pets: [pet({ petId: 'p1' })],
+  });
+  const seen: Array<{ state: string; correlationId?: string }> = [];
+  studio.onDispatchGate((change) => {
+    seen.push({
+      state: change.state,
+      ...(change.correlationId ? { correlationId: change.correlationId } : {}),
+    });
+  });
+
+  await studio.dispatch({
+    petId: 'p1',
+    request: 'host request',
+    correlationId: 'transport-route-1',
+  });
+  await flush();
+
+  assert.deepEqual(seen, [
+    { state: 'busy', correlationId: 'transport-route-1' },
+    { state: 'open', correlationId: 'transport-route-1' },
+  ]);
 });
 
 test('a stopped plugin stops hearing gate changes', async () => {
@@ -554,6 +623,39 @@ test('shutdown does not hang on a dispatch that is waiting for a human', async (
       setTimeout(() => reject(new Error('shutdown hung on a waiting dispatch')), 300);
     }),
   ]);
+});
+
+test('shutdown prevents dispatches already queued behind an active item from invoking', async () => {
+  const started: string[] = [];
+  let activeSignal!: AbortSignal;
+  let invocationExited = false;
+  const studio = await createStudio({
+    studioId: 's1',
+    entryPetId: 'p1',
+    pets: [{
+      ...pet({ petId: 'p1' }),
+      invoke: async (input) => {
+        started.push(input.brief);
+        activeSignal = input.signal!;
+        await new Promise<void>((resolve) => {
+          input.signal!.addEventListener('abort', () => resolve(), { once: true });
+        });
+        invocationExited = true;
+        throw input.signal!.reason;
+      },
+    }],
+  });
+
+  await studio.dispatch({ petId: 'p1', request: 'first' });
+  await studio.dispatch({ petId: 'p1', request: 'must-not-start' });
+  await flush();
+  assert.deepEqual(started, ['first']);
+
+  await studio.shutdown();
+
+  assert.deepEqual(started, ['first']);
+  assert.equal(activeSignal.aborted, true);
+  assert.equal(invocationExited, true);
 });
 
 test('a plugin whose stop() throws still gets its gate handlers dropped', async () => {

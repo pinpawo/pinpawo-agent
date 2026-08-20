@@ -169,7 +169,7 @@ pet 之间并行,单个 pet 内串行。队列只在内存里(§7 开放问题 1
 | `waiting` | 等外部输入 | 关 | 只有人 |
 | `blocked` | 失败 / pet 声明干不了 | 关 | 只有人 |
 
-判据是 checkpoint 上还有没有待跑节点(`next` / `tasks`),与 chat 路径同源。
+判据是 Studio 自己的 checkpoint 上还有没有待跑节点(`next` / `tasks`)。
 
 四种而非两种,是因为门关着的原因分两类,而这个区别对**看的人**是必要的:
 `busy` 的队列在动,等就行;`waiting` / `blocked` 的队列永远不会自己动。
@@ -183,16 +183,21 @@ pet 之间并行,单个 pet 内串行。队列只在内存里(§7 开放问题 1
 
 ### 3.3 闸门的两条边界
 
-**没有控制面。** 闸门是一面镜子,不是开关 —— studio 只读,不能操作 pet。
-人要解开卡住的 pet,走 chat 路径直接跟它对话(两条路共用 checkpointer),
-与 studio 无关。
+**Studio core 没有控制面。** 闸门是一面镜子,不是开关 —— studio 只读,不能
+操作 pet。runtime 可以进入 `waiting`:LangGraph 已把 interrupt 和 continuation
+持久化到 checkpoint,它不依赖另一个 Chat Host 的进程内状态。
+
+当前 local Studio transport 没有内建 review UI,但 Pet runtime 仍声明
+`humanReview: true`。没有控制插件时 waiting 可以一直卡住；独立 Studio plugin / Host
+adapter 可以读取 pending action,向用户交互层发 event,再恢复同一 thread。这个机制不把
+review 概念引入 Studio core。
 
 **读不到判据时一律放行。** 没有 checkpointer、拿不到 threadId、`getState`
 抛错 —— 三种情况都开门。关着的代价是**这个 pet 永久锁死**(没有控制面能解开
 它),开着的代价只是退回"撞车可能并发"。宁可退化,不可锁死。
 
-> 推论:**没有 checkpointer 的 studio 等于没有队列保护。** `chatCheckpointer`
-> 在宿主侧是可选的(#613),没配时闸门恒为 `open`,`waiting` / `blocked` 都
+> 推论:**没有 checkpointer 的 studio 等于没有队列保护。** Studio-owned
+> checkpointer 在宿主侧是可选的(#613),没配时闸门恒为 `open`,`waiting` / `blocked` 都
 > 不会出现。要队列真正起作用,必须配 checkpointer。
 
 ### 3.4 HITL 对 studio 透明
@@ -202,6 +207,9 @@ Studio 不认识 review。**等人只是执行的一种形态**,与"在跑模型
 
 review 是 pet 与人之间的事:人已经在跟 pet 打交道了,再让 studio 知道一遍是
 多余的一层。
+
+这是 core 的领域边界。展示、鉴权、resume 与重启后的 pending-action 索引属于可选的
+交互插件/Host adapter；它们可以独立演进，不能反向改变 Studio core 的 review policy。
 
 > 类比:企业管理中,如果每个细节都要闭环上报,管理成本会压垮组织。不是所有
 > 闭环都需要汇总 —— 需要汇总时 pet 主动报,或者从插件的领域数据里去发现。

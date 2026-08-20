@@ -11,6 +11,10 @@
 
 export { createKanbanPlugin, KANBAN_TOOLKIT_NAME } from './kanbanPlugin';
 export type { CreateKanbanPluginOptions, KanbanPlugin } from './kanbanPlugin';
+export {
+  loadStudioPlanningCapability,
+  STUDIO_PLANNING_CAPABILITY_NAME,
+} from './studioPlanningCapability';
 export { KanbanBoard } from './kanbanBoard';
 export type { KanbanTask, KanbanTaskStatus, KanbanBoardSnapshot } from './kanbanBoard';
 
@@ -22,4 +26,3 @@ export {
   createWikiReadCapability,
   WIKI_READ_CAPABILITY_NAME,
 } from './wikiReadCapability';
-

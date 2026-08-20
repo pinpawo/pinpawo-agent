@@ -2,14 +2,14 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 import { parseConfigDocument } from '@pinpawo/pet-agent';
-import { petLocalConfigSchema, type PetLocalConfig } from '@pinpawo/studio';
+import { petLocalConfigSchema, type PetLocalConfig } from '../configSchema';
 
 export type { PetLocalConfig };
 
 /**
  * 文件入口:pet 配置住在 `<workdir>/.pinpawo/pets/<petId>.json`。
  *
- * schema 与校验归 `@pinpawo/studio`,解析机制与报错格式归 `@pinpawo/pet-agent`;
+ * schema 与校验归 Studio core，解析机制与报错格式归 `@pinpawo/pet-agent`;
  * 本模块只负责"去哪读、读哪些文件",以及目录级的一致性(petId 不重复)。
  */
 

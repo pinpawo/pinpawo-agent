@@ -22,7 +22,6 @@ import type {
   ChatSessionAdapterOptions,
   ChatSessionResult,
 } from './chatSessionAdapter';
-import { LocalServerStudioHandler } from './localServerStudioHandler';
 import { LocalServerTuiSessionService } from './localServerTuiSessions';
 import { persistGlobalReviewPolicyMode } from './globalReviewPolicyConfig';
 import { loadAgentContext } from './contextLoader';
@@ -55,11 +54,6 @@ export type LocalServerHandlerOptions = {
   runChat?: (
     options: ChatSessionAdapterOptions,
   ) => Promise<ChatSessionResult>;
-  /**
-   * #643: Studio handler injected by `StudioHost` when running in studio mode.
-   * When absent, studio requests are rejected with a mode-mismatch error.
-   */
-  studioHandler?: LocalServerStudioHandler<LocalServerPeer>;
 };
 
 type SessionSummarySource = Pick<
@@ -115,7 +109,6 @@ export function createLocalServerHandlers(
     ...(options.loadContext ? { loadContext: options.loadContext } : {}),
     ...(options.runChat ? { runChat: options.runChat } : {}),
   });
-  const studioHandler = options.studioHandler ?? null;
   const sessionCommands = new LocalServerSessionCommandQueue();
   // Actor-wide admission: session transitions and chat operations never overlap.
   let activeChatOperations = 0;
@@ -590,35 +583,8 @@ export function createLocalServerHandlers(
     }
   };
 
-  /**
-   * #561:一个 server 进程只有一个主模式。mode 不只是启动预检与投影,
-   * 它是**执行边界** —— 与当前模式不符的请求直接拒绝,而不是照常执行。
-   *
-   * 拒绝而非静默忽略:客户端连错模式时应该立刻知道,否则会一直等一个
-   * 永远不来的回包。
-   */
-  function rejectWrongMode(
-    client: LocalServerPeer,
-    requestId: string,
-    kind: 'chat' | 'studio',
-  ): void {
-    const mode = runtimeDeps.get().serverMode;
-    const message = `This server runs in ${mode} mode; ${kind} requests are not accepted.`;
-    if (kind === 'studio') {
-      client.send({ type: 'studio_error', requestId, message });
-      return;
-    }
-    // 不设 code:AgentErrorCode 是 #570 拥有的共享契约,为一个本地
-    // 模式检查去扩它不划算;message 已经自解释。
-    sendLocalServerPeerEvent(client, { type: 'error', requestId, message });
-  }
-
   const peerHandlers: LocalServerPeerHandlers = {
     onChatRequest: (client, message) => {
-      if (runtimeDeps.get().serverMode !== 'chat') {
-        rejectWrongMode(client, message.requestId, 'chat');
-        return Promise.resolve();
-      }
       return afterSessionCommands(
         client,
         message.requestId,
@@ -627,25 +593,6 @@ export function createLocalServerHandlers(
           message,
           runtimeDeps.get(),
         ),
-      );
-    },
-    onStudioRequest: (client, message) => {
-      if (runtimeDeps.get().serverMode !== 'studio') {
-        rejectWrongMode(client, message.requestId, 'studio');
-        return Promise.resolve();
-      }
-      if (!studioHandler) {
-        client.send({
-          type: 'studio_error',
-          requestId: message.requestId,
-          message: 'Studio handler is not available in this server configuration.',
-        });
-        return Promise.resolve();
-      }
-      return studioHandler.handleStudioRequest(
-        client,
-        message,
-        runtimeDeps.get(),
       );
     },
     onHumanReviewResponse: async (client, message) => {
@@ -814,7 +761,6 @@ export function createLocalServerHandlers(
       sessionCommands.clear(client);
       activeChatRuns.delete(client);
       inflightRequests.abortAll(client);
-      studioHandler?.rejectDisconnected(client);
     },
   };
 

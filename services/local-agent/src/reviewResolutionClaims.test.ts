@@ -51,6 +51,30 @@ test('a review raised again mid-resolution survives the settle', async () => {
   );
 });
 
+// LangGraph reuses one interrupt id for successive interrupt() calls in the
+// same node — verified against a real graph — so the action id alone cannot
+// tell a resolved review apart from the follow-up that replaces it.
+test('a new review under a reused interrupt id is not mistaken for a stale echo', async () => {
+  type Reviewed = Route & { reviews: { id: string }[] };
+  const claims = new ReviewResolutionClaims<Reviewed>();
+  const first: Reviewed = { actionId: 'i-1', requestId: 'i-1', reviews: [{ id: 'rev-a' }] };
+  const second: Reviewed = { actionId: 'i-1', requestId: 'i-1', reviews: [{ id: 'rev-b' }] };
+
+  claims.register(first);
+  await claims.claim(first, async () => null);
+  claims.release('i-1', { resolved: true });
+
+  // The same review read back from a checkpoint is a stale echo.
+  assert.equal(claims.register(first), false);
+  // A different review under the same id is genuinely new, even when it is
+  // only ever seen through a checkpoint read.
+  assert.equal(claims.register(second), true);
+  assert.ok(
+    await claims.claim(second, async () => null),
+    'the follow-up review must be answerable',
+  );
+});
+
 test('a recovered route cannot revive a resolved action', async () => {
   const claims = new ReviewResolutionClaims<Route>();
   claims.register(route);

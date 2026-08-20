@@ -27,6 +27,22 @@ export type ReviewResolutionRoute = {
   requestId: string;
 };
 
+/**
+ * Identifies *which* review an action currently carries.
+ *
+ * LangGraph reuses one interrupt id for successive `interrupt()` calls in the
+ * same node, so the action id alone cannot tell a resolved review apart from
+ * the follow-up that replaces it. The review ids can.
+ */
+function readReviewIdentity(route: ReviewResolutionRoute): string {
+  const reviews = (route as { reviews?: unknown }).reviews;
+  if (!Array.isArray(reviews)) return '';
+  return reviews
+    .map((review) => (review as { id?: unknown })?.id)
+    .filter((id): id is string => typeof id === 'string')
+    .join(',');
+}
+
 export type ReviewRunInterruptDisposition<TRoute> =
   | { type: 'cancel_pending'; route: TRoute }
   | { type: 'queued' }
@@ -54,32 +70,35 @@ export class ReviewResolutionClaims<TRoute extends ReviewResolutionRoute> {
   private readonly claims = new Map<string, ClaimedResolution>();
 
   /**
-   * Actions whose resume was applied.
+   * Which review each action last resolved, keyed by actionId.
    *
    * The checkpoint is the authority on what is pending, but it is read
-   * asynchronously and a resumed review can still appear there briefly — and
-   * the review that follows a batch may reuse the same interrupt id. Without
-   * this, a second decision arriving right after the first would recover the
-   * stale review and resolve it twice. Kept bounded, since it only has to
-   * outlive the window between applying a resume and observing its effect.
+   * asynchronously, so a review whose resume already landed can still appear
+   * there briefly; without this, a decision arriving in that window would
+   * resolve it a second time. The value records *which* review was resolved,
+   * because LangGraph reuses one interrupt id across successive `interrupt()`
+   * calls — so the id alone would also suppress the legitimate follow-up.
+   * Kept bounded: it only has to outlive that window.
    */
-  private readonly resolvedActionIds = new Set<string>();
+  private readonly resolvedActionIds = new Map<string, string>();
 
   constructor(private readonly maxResolved = 1000) {}
 
   /**
-   * Records the route for a pending review action. Re-registering an action
-   * that is already being resolved refreshes its route: the checkpoint decides
-   * whether the review still exists, so a newer observation is never stale.
+   * Records the route for a pending review action.
+   *
+   * Pass `observedPending` when the review was seen first-hand — the graph
+   * raised it during this run — as opposed to being read back from a
+   * checkpoint, which can still show a review whose resume already landed.
+   * Returns false when the route was ignored as such a stale echo.
    */
   register(route: TRoute, options: { observedPending?: boolean } = {}) {
-    if (this.resolvedActionIds.has(route.actionId)) {
-      // Already resolved. A checkpoint read can still surface this action for a
-      // moment, so only a first-hand observation of a *new* pending review
-      // revives it; a recovered route is treated as stale.
-      if (!options.observedPending) return false;
-      this.resolvedActionIds.delete(route.actionId);
+    // A stale echo only if this action already resolved *this same* review; a
+    // different review under a reused interrupt id is genuinely new.
+    if (this.isResolved(route) && !options.observedPending) {
+      return false;
     }
+    this.resolvedActionIds.delete(route.actionId);
     const claim = this.claims.get(route.actionId);
     if (claim && options.observedPending) {
       // Raised again mid-resolution: the settle must not retire this id.
@@ -103,17 +122,17 @@ export class ReviewResolutionClaims<TRoute extends ReviewResolutionRoute> {
     let route = this.findRoute(params);
     if (!params.actionId && !route) {
       route = await recover();
-      if (route && this.resolvedActionIds.has(route.actionId)) route = null;
+      if (route && this.isResolved(route)) route = null;
       if (route) this.register(route);
     }
 
     const actionId = params.actionId ?? route?.actionId;
-    if (!actionId || this.claims.has(actionId) || this.resolvedActionIds.has(actionId)) {
+    if (!actionId || this.claims.has(actionId)) {
       return null;
     }
 
     route ??= this.findRoute(params) ?? await recover();
-    if (!route || this.resolvedActionIds.has(route.actionId)) {
+    if (!route || this.isResolved(route)) {
       return null;
     }
     this.register(route);
@@ -133,8 +152,9 @@ export class ReviewResolutionClaims<TRoute extends ReviewResolutionRoute> {
     const claim = this.claims.get(actionId);
     this.claims.delete(actionId);
     if (!options.resolved || claim?.raisedAgain) return;
+    const route = this.routesByActionId.get(actionId);
     this.routesByActionId.delete(actionId);
-    this.resolvedActionIds.add(actionId);
+    this.resolvedActionIds.set(actionId, route ? readReviewIdentity(route) : '');
     this.pruneResolved();
   }
 
@@ -197,17 +217,23 @@ export class ReviewResolutionClaims<TRoute extends ReviewResolutionRoute> {
     this.resolvedActionIds.clear();
   }
 
+  /** True when this action already resolved exactly this review. */
+  private isResolved(route: TRoute) {
+    const resolved = this.resolvedActionIds.get(route.actionId);
+    return resolved !== undefined && resolved === readReviewIdentity(route);
+  }
+
   private findRoute(params: { requestId: string; actionId?: string }) {
     if (params.actionId) {
-      if (this.resolvedActionIds.has(params.actionId)) return null;
-      return this.routesByActionId.get(params.actionId) ?? null;
+      const direct = this.routesByActionId.get(params.actionId) ?? null;
+      return direct && this.isResolved(direct) ? null : direct;
     }
     return this.routes().find((route) => route.requestId === params.requestId) ?? null;
   }
 
   private pruneResolved() {
     if (this.resolvedActionIds.size <= this.maxResolved) return;
-    for (const actionId of this.resolvedActionIds) {
+    for (const actionId of this.resolvedActionIds.keys()) {
       this.resolvedActionIds.delete(actionId);
       if (this.resolvedActionIds.size <= this.maxResolved) return;
     }

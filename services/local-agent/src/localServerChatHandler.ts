@@ -41,7 +41,7 @@ import {
   classifyAgentRunFailure,
   describeFatalAgentRunFailure,
 } from './agentRunFailure';
-import { ReviewResolutionLifecycle } from './reviewResolutionLifecycle';
+import { ReviewResolutionClaims } from './reviewResolutionClaims';
 import { sendLocalServerPeerEvent, type LocalServerPeer } from './localServerPeer';
 import { ThreadInvocationCoordinator } from './threadInvocationCoordinator';
 
@@ -93,7 +93,7 @@ export class LocalServerChatHandler {
   private readonly inflightRequests: InflightRequestController<LocalServerPeer>;
   private readonly loadContext: typeof loadAgentContext;
   private readonly runChat: RunChatSession;
-  private readonly reviewResolutions = new ReviewResolutionLifecycle<ReviewActionRoute>();
+  private readonly reviewResolutions = new ReviewResolutionClaims<ReviewActionRoute>();
   private readonly threadInvocations = new ThreadInvocationCoordinator();
 
   constructor(options: {
@@ -156,7 +156,7 @@ export class LocalServerChatHandler {
       ...(params.reviews.length > 1 ? { reviews: params.reviews } : {}),
       ...(sessionId ? { sessionId } : {}),
       ...(params.actor ? { actor: params.actor } : {}),
-    }), { observedPending: true });
+    }));
   }
 
   /**

@@ -11,9 +11,9 @@ import type {
   ReviewCancelMessage,
 } from './localAgentProtocol';
 import {
-  ReviewResolutionLifecycle,
+  ReviewResolutionClaims,
   type ReviewResolutionRoute,
-} from './reviewResolutionLifecycle';
+} from './reviewResolutionClaims';
 
 /** Internal route: it retains the authoritative pet-agent specs for response resolution. */
 export type HumanReviewActionRoute = {
@@ -209,7 +209,7 @@ type HumanReviewResolutionMessage = HumanReviewResponseMessage | ReviewCancelMes
 type ResolvableHumanReviewRoute = HumanReviewActionRoute & ReviewResolutionRoute;
 
 type HumanReviewRunInterruptOptions<TRoute extends ResolvableHumanReviewRoute> = {
-  lifecycle: ReviewResolutionLifecycle<TRoute>;
+  lifecycle: ReviewResolutionClaims<TRoute>;
   requestId: string;
   cancelPending: (route: TRoute) => Promise<void>;
 };
@@ -240,7 +240,7 @@ export async function routeRunInterruptThroughHumanReview<
 }
 
 type HumanReviewResolutionOptions<TRoute extends ResolvableHumanReviewRoute> = {
-  lifecycle: ReviewResolutionLifecycle<TRoute>;
+  lifecycle: ReviewResolutionClaims<TRoute>;
   message: HumanReviewResolutionMessage;
   recover: () => Promise<TRoute | null>;
   emitClosed: () => void;
@@ -266,7 +266,7 @@ export async function resolveHumanReviewAction<
   TRoute extends ResolvableHumanReviewRoute,
 >(options: HumanReviewResolutionOptions<TRoute>) {
   const { lifecycle, message } = options;
-  const resolution = await lifecycle.begin(
+  const resolution = await lifecycle.claim(
     {
       requestId: message.requestId,
       ...(message.actionId ? { actionId: message.actionId } : {}),
@@ -279,6 +279,7 @@ export async function resolveHumanReviewAction<
   }
 
   const { actionId, route } = resolution;
+  let outcome: HumanReviewResolutionOutcome = 'failed';
   try {
     if (!matchesHumanReviewAction(route, message.actionId)) {
       options.emitEvent({
@@ -356,25 +357,13 @@ export async function resolveHumanReviewAction<
       );
     }
 
-    let outcome: HumanReviewResolutionOutcome = 'failed';
-    try {
-      outcome = await options.run(route, resume, source);
-    } finally {
-      if (outcome === 'fatal_failed') {
-        // The resume never reached a checkpoint, so this review is still
-        // pending in the graph. Retrying cannot help while the agent is
-        // unusable, and restoring the route would re-open the same review the
-        // user just tried to leave. Terminate it here; the user resumes work by
-        // starting a new turn once the agent is available again.
-        lifecycle.consume(actionId);
-      } else {
-        lifecycle.settle(
-          actionId,
-          outcome === 'completed' || outcome === 'waiting_human',
-        );
-      }
-    }
+    outcome = await options.run(route, resume, source);
   } finally {
-    lifecycle.abandon(actionId);
+    // Drop the cached route once the resume was applied, or once the agent
+    // turned out to be unusable: in both cases re-offering this review from
+    // memory is wrong, and the checkpoint decides what is still pending. An
+    // early return (stale action, wrong session, disconnected peer) and an
+    // ordinary failure both keep it, since resolving it again is meaningful.
+    lifecycle.release(actionId, { resolved: outcome !== 'failed' });
   }
 }

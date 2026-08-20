@@ -773,12 +773,15 @@ test('handleReviewCancel resumes pending review with run interruption control', 
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
   const fakePeer = createFakePeer(sentEvents);
+  // Mirrors the checkpoint: once a resume is applied, LangGraph stops
+  // reporting that interrupt, so recovery finds nothing pending afterwards.
+  let reviewResumed = false;
   const handler = new LocalServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
-      readActivePendingReview: async () => ({
+      readActivePendingReview: async () => (reviewResumed ? null : {
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
         review: {
@@ -800,6 +803,7 @@ test('handleReviewCancel resumes pending review with run interruption control', 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (handler as any).runChatRequest = async (...args: unknown[]) => {
     handleChatCalls.push(args);
+    reviewResumed = true;
     return 'completed';
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -862,7 +866,11 @@ test('handleReviewCancel resumes pending review with run interruption control', 
     { actorId: 'pet-1' } as never,
   );
 
-  assert.equal(handleChatCalls.length, 1, 'pending review route should be consumed by interrupt');
+  assert.equal(
+    handleChatCalls.length,
+    1,
+    'the cancelled review is gone from the checkpoint, so a late decision resolves nothing',
+  );
   assert.equal(sentEvents.length, 1);
   const event = sentEvents[0] as { type: string; event?: { type: string; message: string; code?: string } };
   assert.equal(event.type, 'event');

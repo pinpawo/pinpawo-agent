@@ -10,7 +10,7 @@ import {
   validateHumanReviewDecisions,
 } from './humanReviewActionRouting';
 import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
-import { ReviewResolutionLifecycle } from './reviewResolutionLifecycle';
+import { ReviewResolutionClaims } from './reviewResolutionClaims';
 
 function reviewSpec(id: string): ReviewSpec {
   return {
@@ -41,7 +41,7 @@ function reviewRoute(ids: string[], interruptId?: string) {
 }
 
 test('run interrupt routing normalizes pending and resolving review states', async () => {
-  const lifecycle = new ReviewResolutionLifecycle<ReturnType<typeof reviewRoute> & {
+  const lifecycle = new ReviewResolutionClaims<ReturnType<typeof reviewRoute> & {
     requestId: string;
   }>();
   const route = { ...reviewRoute(['review-1'], 'interrupt-1'), requestId: 'req-1' };
@@ -57,7 +57,7 @@ test('run interrupt routing normalizes pending and resolving review states', asy
   }), 'cancelled_pending');
   assert.deepEqual(cancelled, [route]);
 
-  const resolution = await lifecycle.begin(route, async () => null);
+  const resolution = await lifecycle.claim(route, async () => null);
   assert.ok(resolution);
   assert.equal(await routeRunInterruptThroughHumanReview({
     lifecycle,
@@ -179,7 +179,7 @@ test('human review action resolution owns validation, resume, and consumption', 
     requestId: 'req-1',
     rejectOptionId: 'reject',
   };
-  const lifecycle = new ReviewResolutionLifecycle<typeof route>();
+  const lifecycle = new ReviewResolutionClaims<typeof route>();
   lifecycle.register(route);
   const runs: unknown[] = [];
   const events: AgentRuntimeEvent[] = [];
@@ -233,7 +233,7 @@ test('human review response validation runs before the route boundary guard', as
     ...reviewRoute(['review-1'], 'interrupt-1'),
     requestId: 'req-1',
   };
-  const lifecycle = new ReviewResolutionLifecycle<typeof route>();
+  const lifecycle = new ReviewResolutionClaims<typeof route>();
   lifecycle.register(route);
   const events: AgentRuntimeEvent[] = [];
   let guardCalls = 0;
@@ -272,7 +272,7 @@ test('human review cancellation interrupts an approve-only review without fabric
     ...reviewRoute(['review-1'], 'interrupt-1'),
     requestId: 'req-1',
   };
-  const lifecycle = new ReviewResolutionLifecycle<typeof route>();
+  const lifecycle = new ReviewResolutionClaims<typeof route>();
   lifecycle.register(route);
   const runs: unknown[] = [];
 
@@ -315,7 +315,7 @@ test('human review rejection queues the same checkpoint interruption as cancella
     ...reviewRoute(['review-1'], 'interrupt-1'),
     requestId: 'req-1',
   };
-  const lifecycle = new ReviewResolutionLifecycle<typeof route>();
+  const lifecycle = new ReviewResolutionClaims<typeof route>();
   lifecycle.register(route);
   const runs: unknown[] = [];
 
@@ -360,7 +360,7 @@ test('human review rejection queues the same checkpoint interruption as cancella
 // action available, so the cancelled review was immediately re-offered to the
 // user and cancelling could never terminate the run.
 test('a fatal run failure consumes the review action instead of re-offering it', async () => {
-  const lifecycle = new ReviewResolutionLifecycle<ReturnType<typeof reviewRoute> & {
+  const lifecycle = new ReviewResolutionClaims<ReturnType<typeof reviewRoute> & {
     requestId: string;
   }>();
   const route = { ...reviewRoute(['review-1'], 'interrupt-1'), requestId: 'req-1' };
@@ -379,12 +379,12 @@ test('a fatal run failure consumes the review action instead of re-offering it',
   assert.deepEqual(lifecycle.routes(), []);
 
   // The action stays consumed, so a repeated cancel cannot revive the review.
-  const revived = await lifecycle.begin({ requestId: 'req-1', actionId: route.actionId }, async () => null);
+  const revived = await lifecycle.claim({ requestId: 'req-1', actionId: route.actionId }, async () => null);
   assert.equal(revived, null);
 });
 
 test('a recoverable run failure keeps the review action available for a retry', async () => {
-  const lifecycle = new ReviewResolutionLifecycle<ReturnType<typeof reviewRoute> & {
+  const lifecycle = new ReviewResolutionClaims<ReturnType<typeof reviewRoute> & {
     requestId: string;
   }>();
   const route = { ...reviewRoute(['review-1'], 'interrupt-1'), requestId: 'req-1' };
@@ -403,7 +403,7 @@ test('a recoverable run failure keeps the review action available for a retry', 
   // A recoverable failure drops the in-memory route but must NOT consume the
   // action: the review is still pending in the checkpoint, so the next attempt
   // recovers it and resolves normally.
-  const retried = await lifecycle.begin(
+  const retried = await lifecycle.claim(
     { requestId: 'req-1' },
     async () => route,
   );

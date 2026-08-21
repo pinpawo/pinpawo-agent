@@ -54,9 +54,16 @@ runtime may return while it awaits human review. Studio only observes the gate;
 it does not offer a control plane for opening it. A host/runtime integration
 must ensure that a resumed pet eventually reports `open`.
 
+The current local Studio transport has no built-in review UI, but the Pet runtime
+still declares `humanReview: true`. LangGraph persists the interrupt and the gate
+may remain `waiting` indefinitely. A separate Studio plugin or Host adapter may
+project the pending action to an interaction layer and resume the same thread;
+Studio core does not need to understand review.
+
 Plugins can subscribe with `onDispatchGate()` to changes for dispatches they
 initiated. This is point-to-point feedback, not a broadcast event. Host-issued
-dispatches have no such plugin callback.
+dispatches are observable through the public `Studio.onDispatchGate()` control
+subscription without exposing them to unrelated plugins.
 
 ## Event bus
 
@@ -122,4 +129,3 @@ Current deliberate limits are in-memory queues, no backpressure, no terminal
 dispatch result, no automatic retry, and no plugin-state persistence convention.
 Those are not hidden behavior; integrations that require them must model them
 explicitly at their own boundary.
-

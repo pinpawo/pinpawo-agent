@@ -1,12 +1,8 @@
 import assert from 'node:assert/strict';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
-import type { LocalServerDeps } from './localServerTypes';
-import { LocalServerStudioHandler } from './localServerStudioHandler';
-import type { LocalServerPeer } from './localServerPeer';
-import { startLocalStdioServer } from './localServerStdioTransport';
-import { createTestModelServerDeps } from './testing/modelProfiles';
-import type { Studio, StudioEventHandler } from '@pinpawo/studio';
+import { startStudioStdioTransport } from './startStudioTransport';
+import type { Studio, StudioEventHandler } from '../studioContract';
 
 function collectText(stream: PassThrough) {
   let value = '';
@@ -38,20 +34,12 @@ async function assertEventually(assertion: () => void) {
   throw lastError;
 }
 
-function createStudioDeps(): LocalServerDeps {
-  return {
-    serverMode: 'studio',
-    actorId: 'pet-a',
-    workdir: '/tmp/pinpawo-studio-test',
-    ...createTestModelServerDeps(),
-  };
-}
-
 function fakeStudio(): Studio {
   const handlers = new Set<StudioEventHandler>();
   return {
     entryPetId: 'pet-a',
     dispatch: async () => ({ threadId: 'thread-1' }),
+    onDispatchGate: () => () => {},
     notify: (event) => { for (const handler of handlers) void handler(event); },
     subscribe: (handler) => { handlers.add(handler); return () => handlers.delete(handler); },
     listPets: () => [],
@@ -59,28 +47,18 @@ function fakeStudio(): Studio {
   };
 }
 
-test('startLocalStdioServer dispatches studio requests via injected studioHandler', async () => {
-  // P1-1 regression: startLocalStdioServer must pass studioHandler to
-  // createLocalServerHandlers. Without it, onStudioRequest returns
-  // "Studio handler is not available" even in studio mode.
+test('the independent Studio stdio transport dispatches studio requests', async () => {
   const input = new PassThrough();
   const output = new PassThrough();
   const readOutput = collectText(output);
 
-  const studio = fakeStudio();
-  const studioHandler = new LocalServerStudioHandler<LocalServerPeer>({
-    studio,
-    outbound: {
-      sendMessage: (peer, message) => peer.send(message),
-      sendEvent: () => true,
-    },
-  });
-
-  const transport = startLocalStdioServer(createStudioDeps(), {
+  const transport = startStudioStdioTransport({
+    studio: fakeStudio(),
+    workdir: '/tmp/pinpawo-studio-test',
+  }, {
     input,
     output,
     diagnostics: new PassThrough(),
-    studioHandler,
   });
 
   input.write(`${JSON.stringify({

@@ -10,9 +10,9 @@ import type {
   NamedStructuredTool,
   OrchestratorGraph,
 } from '@pinpawo/pet-agent';
-import { createFileWikiAccess } from '@pinpawo-toolkit/studio-kanban';
+import { createFileWikiAccess } from './wikiAccess';
 
-import { createPetAgentRuntime } from './createPetAgentRuntime';
+import { createPetAgentRuntime } from '@pinpawo/studio';
 
 // adapter 把 PetAgentRuntime port 接到 LangGraph 执行路径上;wiki 装配是
 // 这条接线的一部分,因此测试跟着 adapter 走,而不是留在 kanban。
@@ -148,4 +148,3 @@ test('a pet invoke without wiki access installs no wiki tooling', async () => {
     undefined,
   );
 });
-

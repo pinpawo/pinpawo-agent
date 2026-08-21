@@ -55,6 +55,25 @@ type ChannelValueRef =
   | { kind: 'array'; itemHashes: string[] };
 
 const ROOT_NAMESPACE_SEGMENT = '__root__';
+const STORE_LOCK_WAIT_MS = 10;
+const STORE_LOCK_TIMEOUT_MS = 30_000;
+const STORE_LOCK_ORPHAN_GRACE_MS = 1_000;
+
+type HostWriterLeaseOwner = {
+  version: 1;
+  pid: number;
+  token: string;
+  ownerId: string;
+  acquiredAt: string;
+};
+
+type HostWriterRecoveryOwner = {
+  version: 1;
+  pid: number;
+  token: string;
+  previousToken: string;
+  acquiredAt: string;
+};
 
 function generateWriteKey(threadId: string, checkpointNamespace: string | undefined, checkpointId: string) {
   return JSON.stringify([threadId, checkpointNamespace, checkpointId]);
@@ -130,6 +149,15 @@ function isSupportedCheckpointVersion(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 4;
 }
 
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+}
+
 /**
  * Content-addressed checkpoint saver.
  *
@@ -146,6 +174,10 @@ function isSupportedCheckpointVersion(value: unknown): value is number {
 export class FileSaver extends BaseCheckpointSaver {
   private _loadedThreadCount = 0;
   private readonly casRootDir: string;
+  private readonly storeLockDir: string;
+  private readonly hostWriterLeasePath: string;
+  private readonly hostWriterRecoveryPath: string;
+  private hostWriterLeaseToken: string | null = null;
   /**
    * Per-checkpoint write locks. LangGraph fans out putWrites for multiple tasks
    * against the same checkpoint concurrently; each call read-modify-writes the
@@ -178,7 +210,301 @@ export class FileSaver extends BaseCheckpointSaver {
     super();
     const extension = extname(filePath) || '.json';
     this.casRootDir = join(dirname(filePath), basename(filePath, extension));
+    this.storeLockDir = join(this.casRootDir, '.writer-lock');
+    this.hostWriterLeasePath = join(this.casRootDir, '.host-writer.json');
+    this.hostWriterRecoveryPath = join(this.casRootDir, '.host-writer-recovery');
     this.load();
+  }
+
+  /**
+   * Claim this checkpoint root for one Host lifetime.
+   *
+   * The short-lived store lock below protects individual mutations. This
+   * lease is the stronger deployment invariant: two Host processes must not
+   * drive the same checkpoint root at the same time.
+   */
+  acquireHostWriterLease(ownerId: string): void {
+    if (this.hostWriterLeaseToken) return;
+    mkdirSync(this.casRootDir, { recursive: true });
+    const staleRecoveryGuardPath = this.claimStaleRecoveryGuard();
+
+    try {
+      const owner: HostWriterLeaseOwner = {
+        version: 1,
+        pid: process.pid,
+        token: randomUUID(),
+        ownerId,
+        acquiredAt: new Date().toISOString(),
+      };
+      try {
+        writeFileSync(this.hostWriterLeasePath, JSON.stringify(owner), { flag: 'wx' });
+        this.hostWriterLeaseToken = owner.token;
+        return;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      }
+
+      const previous = this.readHostWriterLease();
+      if (!previous) {
+        throw new Error(
+          `Checkpoint writer lease is unreadable; refusing unsafe recovery: ${this.hostWriterLeasePath}`,
+        );
+      }
+      if (isProcessAlive(previous.pid)) {
+        throw new Error(
+          `Checkpoint root is already owned by ${previous.ownerId} (pid ${previous.pid}): ${this.casRootDir}`,
+        );
+      }
+
+      const recoveryOwner: HostWriterRecoveryOwner = {
+        version: 1,
+        pid: process.pid,
+        token: randomUUID(),
+        previousToken: previous.token,
+        acquiredAt: new Date().toISOString(),
+      };
+      this.publishRecoveryGuard(recoveryOwner);
+
+      try {
+        const current = this.readHostWriterLease();
+        if (!current || current.token !== previous.token) {
+          throw new Error(
+            `Checkpoint writer ownership changed during recovery: ${this.hostWriterLeasePath}`,
+          );
+        }
+        if (isProcessAlive(current.pid)) {
+          throw new Error(
+            `Checkpoint root became active during recovery (pid ${current.pid}): ${this.casRootDir}`,
+          );
+        }
+        rmSync(this.hostWriterLeasePath);
+        writeFileSync(this.hostWriterLeasePath, JSON.stringify(owner), { flag: 'wx' });
+        this.hostWriterLeaseToken = owner.token;
+      } finally {
+        this.releaseRecoveryGuard(recoveryOwner.token);
+      }
+    } finally {
+      if (staleRecoveryGuardPath) {
+        rmSync(staleRecoveryGuardPath, { recursive: true, force: true });
+      }
+    }
+  }
+
+  /** Run startup maintenance only after this Host owns the checkpoint root. */
+  async runHostStartupMaintenance(): Promise<void> {
+    const token = this.hostWriterLeaseToken;
+    if (!token || this.readHostWriterLease()?.token !== token) {
+      throw new Error('Checkpoint startup maintenance requires the Host writer lease.');
+    }
+    await this.runStoreExclusive(() => this.gcObjects());
+  }
+
+  /** Release the Host lifetime claim if this FileSaver still owns it. */
+  releaseHostWriterLease(): void {
+    const token = this.hostWriterLeaseToken;
+    if (!token) return;
+    try {
+      const owner = this.readHostWriterLease();
+      if (owner?.token === token) {
+        rmSync(this.hostWriterLeasePath);
+      }
+    } catch {
+      // A missing/replaced lease no longer belongs to this Host.
+    } finally {
+      this.hostWriterLeaseToken = null;
+    }
+  }
+
+  private readHostWriterLease(): HostWriterLeaseOwner | null {
+    try {
+      const parsed = JSON.parse(readFileSync(this.hostWriterLeasePath, 'utf-8')) as Partial<HostWriterLeaseOwner>;
+      if (
+        parsed.version !== 1
+        || typeof parsed.pid !== 'number'
+        || typeof parsed.token !== 'string'
+        || typeof parsed.ownerId !== 'string'
+        || typeof parsed.acquiredAt !== 'string'
+      ) {
+        return null;
+      }
+      return parsed as HostWriterLeaseOwner;
+    } catch {
+      return null;
+    }
+  }
+
+  private readRecoveryGuard(path = this.hostWriterRecoveryPath): HostWriterRecoveryOwner | null {
+    try {
+      const parsed = JSON.parse(
+        readFileSync(join(path, 'owner.json'), 'utf-8'),
+      ) as Partial<HostWriterRecoveryOwner>;
+      if (
+        parsed.version !== 1
+        || typeof parsed.pid !== 'number'
+        || typeof parsed.token !== 'string'
+        || typeof parsed.previousToken !== 'string'
+        || typeof parsed.acquiredAt !== 'string'
+      ) {
+        return null;
+      }
+      return parsed as HostWriterRecoveryOwner;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Atomically move a dead recovery guard aside before retrying acquisition.
+   *
+   * The token-derived destination remains present until acquisition finishes.
+   * Because both source and destination are non-empty directories, a contender
+   * holding a stale view cannot rename a newly published live guard over it.
+   */
+  private claimStaleRecoveryGuard(): string | null {
+    while (existsSync(this.hostWriterRecoveryPath)) {
+      const previous = this.readRecoveryGuard();
+      if (!previous) {
+        if (!existsSync(this.hostWriterRecoveryPath)) {
+          continue;
+        }
+        throw new Error(
+          `Checkpoint writer recovery guard is unreadable; refusing unsafe recovery: ${this.hostWriterRecoveryPath}`,
+        );
+      }
+      if (isProcessAlive(previous.pid)) {
+        throw new Error(
+          `Checkpoint writer ownership recovery is already in progress: ${this.hostWriterRecoveryPath}`,
+        );
+      }
+      const staleToken = createHash('sha256').update(previous.token).digest('hex');
+      const stalePath = `${this.hostWriterRecoveryPath}.stale-${staleToken}`;
+      try {
+        renameSync(this.hostWriterRecoveryPath, stalePath);
+        return stalePath;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT') {
+          continue;
+        }
+        if (code === 'EEXIST' || code === 'ENOTEMPTY') {
+          throw new Error(
+            `Checkpoint writer ownership recovery is already in progress: ${this.hostWriterRecoveryPath}`,
+          );
+        }
+        throw error;
+      }
+    }
+    return null;
+  }
+
+  /** Publish a fully written recovery guard with one atomic directory rename. */
+  private publishRecoveryGuard(owner: HostWriterRecoveryOwner): void {
+    const tempPath = `${this.hostWriterRecoveryPath}.tmp-${process.pid}-${randomUUID()}`;
+    mkdirSync(tempPath);
+    try {
+      writeFileSync(join(tempPath, 'owner.json'), JSON.stringify(owner));
+      renameSync(tempPath, this.hostWriterRecoveryPath);
+    } catch (error) {
+      rmSync(tempPath, { recursive: true, force: true });
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'EEXIST' || code === 'ENOTEMPTY') {
+        throw new Error(
+          `Checkpoint writer ownership recovery is already in progress: ${this.hostWriterRecoveryPath}`,
+        );
+      }
+      throw error;
+    }
+  }
+
+  private releaseRecoveryGuard(token: string): void {
+    try {
+      if (this.readRecoveryGuard()?.token === token) {
+        rmSync(this.hostWriterRecoveryPath, { recursive: true, force: true });
+      }
+    } catch {
+      // A missing/replaced recovery guard is no longer ours to release.
+    }
+  }
+
+  /**
+   * Atomic renames protect individual files, but `putWrites` and GC are
+   * multi-file transactions, so a filesystem lock covers each store mutation.
+   * Host-level process ownership is enforced separately by the lifetime lease.
+   */
+  private async runStoreExclusive<T>(fn: () => Promise<T> | T): Promise<T> {
+    const token = `${process.pid}:${randomUUID()}`;
+    const startedAt = Date.now();
+    mkdirSync(this.casRootDir, { recursive: true });
+    while (true) {
+      try {
+        mkdirSync(this.storeLockDir, { recursive: false });
+        writeFileSync(
+          join(this.storeLockDir, 'owner.json'),
+          JSON.stringify({ pid: process.pid, token, acquiredAt: new Date().toISOString() }),
+        );
+        break;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== 'EEXIST') throw error;
+        this.removeStaleStoreLock();
+        if (Date.now() - startedAt >= STORE_LOCK_TIMEOUT_MS) {
+          throw new Error(
+            `Timed out waiting for checkpoint store writer lock: ${this.storeLockDir}`,
+          );
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, STORE_LOCK_WAIT_MS));
+      }
+    }
+
+    try {
+      return await fn();
+    } finally {
+      // Only the owner may release. A stale-lock recovery can replace the lock
+      // while an unusually long old writer is still unwinding.
+      try {
+        const owner = JSON.parse(
+          readFileSync(join(this.storeLockDir, 'owner.json'), 'utf-8'),
+        ) as { token?: unknown };
+        if (owner.token === token) {
+          rmSync(this.storeLockDir, { recursive: true, force: true });
+        }
+      } catch {
+        // Missing/replaced lock is already released from this owner's view.
+      }
+    }
+  }
+
+  private removeStaleStoreLock(): void {
+    try {
+      const owner = JSON.parse(
+        readFileSync(join(this.storeLockDir, 'owner.json'), 'utf-8'),
+      ) as { pid?: unknown };
+      if (typeof owner.pid === 'number') {
+        try {
+          process.kill(owner.pid, 0);
+          return;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return;
+        }
+        // The owning process no longer exists; recover immediately.
+        rmSync(this.storeLockDir, { recursive: true, force: true });
+        return;
+      }
+    } catch {
+      // The owner file may be between mkdir and publication. Give that tiny
+      // synchronous window a grace period before treating it as orphaned.
+    }
+
+    try {
+      if (
+        Date.now() - statSync(this.storeLockDir).mtimeMs
+        >= STORE_LOCK_ORPHAN_GRACE_MS
+      ) {
+        rmSync(this.storeLockDir, { recursive: true, force: true });
+      }
+    } catch {
+      // Another writer released or recovered it first.
+    }
   }
 
   /** Serialize `fn` against others sharing `key` (a promise-chain mutex). */
@@ -414,7 +740,10 @@ export class FileSaver extends BaseCheckpointSaver {
 
   private load() {
     this.seedKnownThreads();
-    this.gcObjects();
+    // Validate existing manifests, but do not delete objects during constructor
+    // startup: constructors cannot await the cross-process writer lock. The
+    // owning Host runs startup GC after acquiring its lifetime writer lease.
+    this.collectReachableObjectHashes();
   }
 
   async getTuple(config: RunnableConfig): Promise<CheckpointTuple | undefined> {
@@ -504,12 +833,14 @@ export class FileSaver extends BaseCheckpointSaver {
       this.serde.dumpsTyped(preparedCheckpoint),
       this.serde.dumpsTyped(metadata),
     ]);
-    this.writeCheckpointTuple(threadId, checkpointNamespace, checkpoint.id, [
-      serializedCheckpoint,
-      serializedMetadata,
-      config.configurable?.checkpoint_id,
-    ]);
-    this.noteThread(threadId);
+    await this.runStoreExclusive(() => {
+      this.writeCheckpointTuple(threadId, checkpointNamespace, checkpoint.id, [
+        serializedCheckpoint,
+        serializedMetadata,
+        config.configurable?.checkpoint_id,
+      ]);
+      this.noteThread(threadId);
+    });
     return {
       configurable: {
         thread_id: threadId,
@@ -535,39 +866,43 @@ export class FileSaver extends BaseCheckpointSaver {
     // Serialize the read-modify-write so concurrent putWrites for sibling tasks
     // on the same checkpoint do not clobber each other's writes manifest.
     await this.runExclusive(outerKey, async () => {
-      const existingManifest = this.readWritesManifest(this.writesPath(threadId, checkpointNamespace ?? '', checkpointId));
-      const outerWrites: Record<string, [string, string, Uint8Array]> = {};
-      for (const [innerKey, record] of Object.entries(existingManifest?.writes ?? {})) {
-        outerWrites[innerKey] = [
-          record.taskId,
-          record.channel,
-          readObject(this.casRootDir, record.valueHash),
-        ];
-      }
+      await this.runStoreExclusive(async () => {
+        const existingManifest = this.readWritesManifest(this.writesPath(threadId, checkpointNamespace ?? '', checkpointId));
+        const outerWrites: Record<string, [string, string, Uint8Array]> = {};
+        for (const [innerKey, record] of Object.entries(existingManifest?.writes ?? {})) {
+          outerWrites[innerKey] = [
+            record.taskId,
+            record.channel,
+            readObject(this.casRootDir, record.valueHash),
+          ];
+        }
 
-      await Promise.all(writes.map(async ([channel, value], idx) => {
-        const [, serializedValue] = await this.serde.dumpsTyped(value);
-        const writeIndex = WRITES_IDX_MAP[channel] ?? idx;
-        const innerKeyStr = `${taskId},${writeIndex}`;
-        if (writeIndex >= 0 && innerKeyStr in outerWrites) return;
-        outerWrites[innerKeyStr] = [
-          taskId,
-          channel,
-          serializedValue,
-        ];
-      }));
+        await Promise.all(writes.map(async ([channel, value], idx) => {
+          const [, serializedValue] = await this.serde.dumpsTyped(value);
+          const writeIndex = WRITES_IDX_MAP[channel] ?? idx;
+          const innerKeyStr = `${taskId},${writeIndex}`;
+          if (writeIndex >= 0 && innerKeyStr in outerWrites) return;
+          outerWrites[innerKeyStr] = [
+            taskId,
+            channel,
+            serializedValue,
+          ];
+        }));
 
-      this.writeWritesManifest(threadId, checkpointNamespace, checkpointId, outerKey, outerWrites);
+        this.writeWritesManifest(threadId, checkpointNamespace, checkpointId, outerKey, outerWrites);
+      });
     });
     this.noteThread(threadId);
   }
 
   async deleteThread(threadId: string): Promise<void> {
-    rmSync(this.threadDir(threadId), { recursive: true, force: true });
-    if (this.knownThreads.delete(encodePathSegment(threadId))) {
-      this._loadedThreadCount -= 1;
-    }
-    this.gcObjects();
+    await this.runStoreExclusive(() => {
+      rmSync(this.threadDir(threadId), { recursive: true, force: true });
+      if (this.knownThreads.delete(encodePathSegment(threadId))) {
+        this._loadedThreadCount -= 1;
+      }
+      this.gcObjects();
+    });
   }
 
   private collectReachableObjectHashes() {
@@ -612,14 +947,8 @@ export class FileSaver extends BaseCheckpointSaver {
   }
 
   // GC walks every manifest to build the reachable set, then deletes any object
-  // not in it. This is only invoked from `load()` (constructor) and
-  // `deleteThread`. It is NOT safe to run concurrently with `put`/`putWrites`:
-  // an object written between collecting the reachable set and the delete pass
-  // would look unreachable and be removed. All writers here are synchronous up
-  // to their final atomic rename, and the manifest's ref is written last, so
-  // within a single FileSaver instance no in-flight put overlaps GC today. Keep
-  // it that way — if a writer ever becomes async across the rename, gate GC
-  // behind the same lock.
+  // not in it. Callers must hold the store-wide filesystem lock so another
+  // process cannot publish an object between the reachability scan and delete.
   private gcObjects() {
     const objectsDir = join(this.casRootDir, 'objects');
     if (!existsSync(objectsDir)) return;

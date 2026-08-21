@@ -31,6 +31,8 @@ test('buildSetupGuide reports missing required and recommended config', () => {
   assert.match(formatSetupGuide(guide), new RegExp(escapeRegExp(runtimeConfig.workdir)));
   const studioCheck = guide.checks.find((check) => check.id === 'studio-config');
   assert.equal(studioCheck?.nextStep, `Create ${runtimeConfig.studioConfigPath}.`);
+  assert.match(studioCheck?.detail ?? '', /independent Studio Host/);
+  assert.doesNotMatch(studioCheck?.detail ?? '', /Studio mode/);
   assert.doesNotMatch(formatSetupGuide(guide), /studio migrate/);
 });
 

@@ -7,7 +7,7 @@ import path from 'node:path';
 import { loadStudioLocalConfig } from './studioConfig';
 
 // 本文件只覆盖**文件入口**。schema、字段校验与 resolveStudio 的测试
-// 在 @pinpawo/studio 的 configSchema.test.ts。
+// 在上层 configSchema.test.ts。
 
 async function mkTempDir(prefix: string): Promise<string> {
   return await fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -42,4 +42,3 @@ test('loadStudioLocalConfig surfaces invalid JSON', async () => {
     /not valid JSON/,
   );
 });
-

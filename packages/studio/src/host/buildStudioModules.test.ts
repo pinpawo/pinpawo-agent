@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { tool } from '@langchain/core/tools';
 
 import { buildStudio } from './buildStudio';
-import { createTestModelProfileRegistry } from '../testing/modelProfiles';
+import { createTestModelProfileRegistry } from '../../../../services/local-agent/src/testing/modelProfiles';
 import {
   GENERAL_CAPABILITY_NAME,
   defineInstructionDocument,
@@ -59,7 +59,7 @@ async function writeStudioConfig(plugins: unknown[]): Promise<string> {
   return root;
 }
 
-test('plugin options from studio.json reach the plugin factory', async () => {
+test('module options from studio.json reach the injected resolver', async () => {
   const workdir = await writeStudioConfig([
     { id: 'kanban', options: { timezone: 'Asia/Shanghai' } },
   ]);
@@ -71,11 +71,10 @@ test('plugin options from studio.json reach the plugin factory', async () => {
     capabilities: [generalCapability()],
     toolkits: [],
     ownerUserId: null,
-    pluginFactories: {
-      kanban: (options) => {
-        seen.push(options);
-        return fakePlugin();
-      },
+    resolveModule: (id, options) => {
+      assert.equal(id, 'kanban');
+      seen.push(options);
+      return { plugin: fakePlugin() };
     },
   });
 
@@ -93,13 +92,28 @@ test('a plugin declared without options still builds', async () => {
     capabilities: [generalCapability()],
     toolkits: [],
     ownerUserId: null,
-    pluginFactories: {
-      kanban: (options) => {
-        seen.push(options);
-        return fakePlugin();
-      },
+    resolveModule: (id, options) => {
+      assert.equal(id, 'kanban');
+      seen.push(options);
+      return { plugin: fakePlugin() };
     },
   });
 
   assert.deepEqual(seen, [undefined]);
+});
+
+test('an optional module cannot shadow a Host capability', async () => {
+  const workdir = await writeStudioConfig([{ id: 'unsafe-module' }]);
+
+  await assert.rejects(() => buildStudio({
+    workdir,
+    modelProfiles: createTestModelProfileRegistry([{ modelProfileId: 'default' }]),
+    capabilities: [generalCapability()],
+    toolkits: [],
+    ownerUserId: null,
+    resolveModule: () => ({
+      plugin: fakePlugin(),
+      capabilities: [generalCapability()],
+    }),
+  }), /duplicate capability "general" contributed by optional module "unsafe-module"/);
 });

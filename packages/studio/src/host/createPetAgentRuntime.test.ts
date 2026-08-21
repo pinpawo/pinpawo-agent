@@ -12,7 +12,7 @@ import path from 'node:path';
 
 import { createPetAgentRuntime } from './createPetAgentRuntime';
 import { createOrchestratorGraph } from '@pinpawo/pet-agent';
-import { FileSaver } from '../fileSaver';
+import { FileSaver } from 'pinpawo/host-runtime';
 import type { OrchestratorGraph } from '@pinpawo/pet-agent';
 import { ToolkitRuntimeManager } from '@pinpawo/pet-agent';
 import type { AgentActor, AgentModels } from '@pinpawo/pet-agent';
@@ -162,6 +162,40 @@ test('invoke evaluates Toolkit availability before compiling its registry genera
     registry?.unavailableCapabilities?.[0]?.issues,
     [{ code: 'unknown_toolkit', toolkitName: 'offline' }],
   );
+});
+
+test('Studio pet invocation preserves a checkpointed review as a waiting gate', async () => {
+  const calls: { input: unknown; options?: unknown }[] = [];
+  const graph = {
+    invoke: async (input: unknown, options?: unknown) => {
+      calls.push({ input, options });
+      return { messages: [new AIMessage('waiting')] };
+    },
+    getState: async () => ({
+      tasks: [{ interrupts: [{ value: sampleReviewInterrupt }] }],
+    }),
+  } as unknown as OrchestratorGraph;
+  const runtime = createPetAgentRuntime({
+    models: fakeModels(),
+    actor: fakeActor(),
+    graph,
+    // A Host-owned checkpointer makes continuation inspection available. The
+    // stub graph above models the durable snapshot returned by LangGraph.
+    checkpoint: {} as NonNullable<Parameters<typeof createPetAgentRuntime>[0]['checkpoint']>,
+  });
+
+  await runtime.invoke({
+    brief: 'task that requires review',
+    threadId: 'studio:s1:pet:p1:dispatch:d1',
+  });
+
+  assert.deepEqual(
+    (calls[0]?.options as {
+      configurable?: { reviewCapabilities?: unknown };
+    } | undefined)?.configurable?.reviewCapabilities,
+    { humanReview: true, sessionAuthorization: true },
+  );
+  assert.equal(runtime.gate(), 'waiting');
 });
 
 test('invoke starts Toolkit roots before evaluating runtime-dependent availability', async () => {

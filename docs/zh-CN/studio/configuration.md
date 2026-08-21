@@ -2,7 +2,7 @@
 
 > **状态：当前本地宿主配置。** schema 位于
 > [`configSchema.ts`](../../../packages/studio/src/configSchema.ts)，装配位于
-> [`buildStudio.ts`](../../../services/local-agent/src/studio/buildStudio.ts)。
+> [`buildStudio.ts`](../../../packages/studio/src/host/buildStudio.ts)。
 
 [English](../../studio/configuration.md)
 
@@ -36,16 +36,15 @@
   // 装哪些插件 —— **必须显式列出**,studio 不做任何隐式装配。
   // 顺序即 start 顺序(插件之间可能有依赖);stop 时逆序。
   //
-  // 目前只有 kanban 一个内置插件。配了别的 id 会直接报错。
+  // id 由应用 composition root 的 optional module resolver 解析。
   "plugins": [
     { "id": "kanban" }
   ]
 }
 ```
 
-`plugins[].options` 会原样传给插件工厂，由插件自己解释与校验。当前内置的
-`kanban` 插件没有声明 options；不要依赖它读取任何 options。scheduler 尚未实现，
-不能作为可配置插件使用。
+`plugins[].options` 会原样传给 module resolver，再由 module 自己解释与校验。
+Studio package 不含内置 module registry，也不 import kanban 或 scheduler。
 
 `plugins` 可省略 —— 那样这块 studio 没有任何驱动方,只能由宿主手动
 `dispatch`。这是合法的,但通常意味着配漏了。
@@ -58,7 +57,7 @@
 | `pets` 里有重名 | `pets array has duplicate petId "…"` |
 | `entryPetId` 不在 `pets` 里 | `entryPetId "…" is not in pets` |
 | `pets` 里的名字没有对应的 `pets/<petId>.json` | `pet "…" has no matching pet config…` |
-| `plugins[].id` 不认识 | `unknown plugin "…". Known plugins: …` |
+| 配了 module 但宿主未安装 resolver | `optional module "…" is configured but no module resolver is installed` |
 
 ### 1.1 这里不该出现什么
 
@@ -88,14 +87,14 @@
   "modelProfileId": "qwen-max",  // 省略则用宿主默认 profile
 
   // 能力清单 —— 这里写的是 **capability 名**,不是 toolkit 名。
-  // 未在 local-agent 注册的名字会在装配时直接报错。
+  // 未由 Host 或已安装 module 注册的名字会在装配时直接报错。
   "capabilities": ["general", "studio_planning"]
 }
 ```
 
-`studio_planning` 是内置的看板拆解能力(声明 `uses: ['kanban']`)。**它只在
-studio 装配时可用**,不在默认 Capability 注册表里 —— 否则每个普通 chat 会话
-都会因为找不到 kanban toolkit 打一条 "unavailable" 警告。
+`studio_planning` 由可选 `@pinpawo-toolkit/studio-kanban` module 提供(声明
+`uses: ['kanban']`)。它不在 Studio 或 local-agent 默认 Capability 注册表里；安装该
+module 时，由 composition root 连同 kanban plugin/Toolkit 一起注入。
 
 要不要给某个 pet 装,仍由这份配置决定:planner 需要它来拆任务,worker 需要它
 来认领与完成任务;不碰看板的 pet 不必声明。
@@ -143,7 +142,7 @@ const studio = await createStudio({
   studioId: config.studioId,
   entryPetId: config.entryPetId,
   pets: resolvedPets,   // 宿主从 pets/*.json 装配出的 PetAgentRuntime[]
-  plugins,              // 由 plugins[].id 查内置注册表得到
+  plugins,              // 由外部 resolveModule(plugins[].id) 注入
 });
 ```
 
@@ -157,21 +156,23 @@ const studio = await createStudio({
 **它是 `async` 的** —— 插件启动失败必须让调用方看见。一个没起来的驱动器
 意味着这块 studio 不会派活,静默吞掉会变成"提交了但什么都没发生"。
 
-**它不读配置文件。** 文件入口属于宿主(与 #613 的 config loader 分层一致),
-`@pinpawo/studio` 因此完全不碰 FS。
+`createStudio` 不读配置文件；`@pinpawo/studio` 的 Host 层负责 workdir 文件与 runtime
+装配，core contract 保持 transport/filesystem 无关。
 
 ### 3.1 `plugins[].id` 怎么解析
 
-宿主持有一张内置注册表:
+Studio Host 接收外部 resolver:
 
 ```ts
-const PLUGIN_FACTORIES: Record<string, StudioPluginFactory> = {
-  kanban: () => createKanbanPlugin(),
-};
+const resolveModule: StudioModuleResolver = (id, options) =>
+  installedModules.resolve(id, options);
+
+const host = new StudioHost({ resolveModule });
 ```
 
-`options` 原样传给工厂,由插件自己解释与校验。id 不认识就报错并列出已知
-插件 —— 不静默跳过,否则配了插件却没装上会很难查。
+`options` 原样传给 resolver。未安装或不认识的 id 必须 fail fast，不能静默跳过。
+`studio-kanban` 自己拥有 kanban 实现与 `studio_planning` Capability；依赖方向是
+module → Studio contract，不是 Studio → kanban。
 
 插件的 toolkit 面与普通 toolkit 合并后交给所有 pet:
 
@@ -182,8 +183,8 @@ const availableToolkits = [...(input.toolkits ?? []), ...plugins];
 pet 实际拿到哪些工具,由它的 capability 声明的 `uses` 筛出来 —— 见 §2.1。
 `capabilities` 里**只写 capability 名**。
 
-> 第三方插件(从 `~/.pinpawo/` 加载,像 capability 那样)尚未实现。这属于
-> 宿主的装配职责,不影响契约本身。
+> module catalog/discovery 尚未实现。这属于应用 composition root 的职责，不进入
+> Studio package。
 
 ---
 
@@ -223,17 +224,23 @@ pet 实际拿到哪些工具,由它的 capability 声明的 `uses` 筛出来 —
 
 ### 4.1 卡住的时候
 
-第 5 步若 writer 撞上人工确认:
+第 5 步若 writer 请求一个必须人工确认的操作:
 
 ```text
-5'. writer 的闸门变成 waiting —— studio 不放行这个 pet 的下一条
+5'. LangGraph 创建 interrupt,把 pending continuation 写入 checkpoint
        ↓
-6'. 人走 chat 路径跟 writer 对话,把它解开
-       ↓  闸门回到 open
-7'. 队列继续
+6'. writer 的闸门变成 waiting,studio 不放行这个 pet 的下一条
+       ↓
+7'. 独立交互 plugin/Host adapter 把 pending action 作为 event 告知用户层
+       ↓
+8'. 用户授权后,控制 adapter 恢复同一个 thread
+       ↓
+9'. 闸门回到 open,队列继续
 ```
 
-studio 全程不知道"review"是什么,只知道门关着。
+studio 全程不知道"review"是什么,它只观察 gate。waiting/interrupt 本身由 LangGraph
+checkpoint 持久化,不依赖 Chat Host 的内存状态；没有安装交互插件时,这条 dispatch 一直
+卡住也是合法状态。
 
 > **看板上目前看不出来。** 插件可以经 `context.onDispatchGate` 订阅自己派出去
 > 那些 dispatch 的闸门变化,把 `waiting` / `blocked` 标到任务上 —— 但 kanban

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { HostCapabilityAssembly } from './hostCapabilityAssembly';
 import { FileCapabilityArtifactStore } from './capabilityArtifactStore';
+import { FileSaver } from './fileSaver';
 import type { LocalAgentRuntimeConfig } from './runtimeConfig';
 
 function buildTestConfig(root: string): LocalAgentRuntimeConfig {
@@ -22,6 +23,23 @@ function buildTestConfig(root: string): LocalAgentRuntimeConfig {
     capabilityArtifactRoot: join(root, 'capability-artifacts'),
   };
 }
+
+test('HostCapabilityAssembly refuses startup when another Host owns its checkpoint root', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-caps-owner-'));
+  const runtimeConfig = buildTestConfig(root);
+  const existingHost = new FileSaver(runtimeConfig.checkpointPath);
+  existingHost.acquireHostWriterLease('existing-host');
+  const caps = new HostCapabilityAssembly({
+    runtimeConfig,
+    sourceId: 'second-host',
+  });
+
+  try {
+    await assert.rejects(() => caps.init(), /already owned by existing-host/);
+  } finally {
+    existingHost.releaseHostWriterLease();
+  }
+});
 
 test('HostCapabilityAssembly.deleteThreadArtifacts removes capability artifacts for the thread', async () => {
   const root = await mkdtemp(join(tmpdir(), 'pinpawo-caps-delete-'));

@@ -6,7 +6,9 @@
     "baseUrl": ".",
     "paths": {
       "@pinpawo/pet-agent": ["../../packages/pet-agent/src/index.ts"],
-      "@pinpawo/studio": ["../../packages/studio/src/index.ts"]
+      "@pinpawo/studio": ["../../packages/studio/src/index.ts"],
+      "pinpawo/host-runtime": ["../../services/local-agent/src/hostRuntime.ts"],
+      "pinpawo/local-server-transport": ["../../services/local-agent/src/localServerTransportApi.ts"]
     },
     "strict": true,
     "esModuleInterop": true,

@@ -3,7 +3,7 @@ import type { AgentActor } from '@pinpawo/pet-agent';
 import type { PetLocalConfig } from './petConfig';
 
 /**
- * 从本地 pet 配置合成 AgentActor。
+ * 从 Studio pet 配置合成 AgentActor。
  *
  * Studio 模式下 pet 身份是**本地 source of truth** —— 名称 / personality
  * 等都来自 `<workdir>/.pinpawo/pets/<petId>.json`,不依赖服务端 pet 记录。

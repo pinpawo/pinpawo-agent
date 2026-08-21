@@ -7,7 +7,7 @@ import path from 'node:path';
 import { loadPetLocalConfigs } from './petConfig';
 
 // 本文件只覆盖**文件入口**:去哪读、读哪些、目录级一致性。
-// schema 与字段校验的测试在 @pinpawo/studio 的 configSchema.test.ts。
+// schema 与字段校验的测试在上层 configSchema.test.ts。
 
 async function mkTempDir(prefix: string): Promise<string> {
   return await fs.mkdtemp(path.join(os.tmpdir(), prefix));

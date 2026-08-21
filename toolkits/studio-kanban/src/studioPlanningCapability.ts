@@ -6,16 +6,12 @@ import {
   defineInstructionDocument,
   type AgentCapability,
 } from '@pinpawo/pet-agent';
-import { parseFrontmatterDocument } from '../../capabilityLoader';
 
 export const STUDIO_PLANNING_CAPABILITY_NAME = 'studio_planning';
 
 function resolveDocumentUrl(): URL {
-  const sourceUrl = new URL('./CAPABILITY.md', import.meta.url);
+  const sourceUrl = new URL('./STUDIO_PLANNING_CAPABILITY.md', import.meta.url);
   if (existsSync(sourceUrl)) return sourceUrl;
-
-  const bundledUrl = new URL('./capabilities/studioPlanning/CAPABILITY.md', import.meta.url);
-  if (existsSync(bundledUrl)) return bundledUrl;
 
   throw new Error('Built-in studio_planning Capability document is missing');
 }
@@ -24,11 +20,14 @@ function readStudioPlanningCapability(): AgentCapability {
   const documentUrl = resolveDocumentUrl();
   const documentPath = fileURLToPath(documentUrl);
   const source = readFileSync(documentUrl, 'utf8');
-  const { frontmatter, body } = parseFrontmatterDocument(source, documentPath);
+  const closingFrontmatter = source.indexOf('\n---', 4);
+  const body = closingFrontmatter >= 0
+    ? source.slice(source.indexOf('\n', closingFrontmatter + 4) + 1)
+    : source;
   return defineCapability({
-    name: frontmatter.name,
-    description: frontmatter.description,
-    uses: frontmatter.uses,
+    name: STUDIO_PLANNING_CAPABILITY_NAME,
+    description: '在共享看板上拆解与推进任务；把目标拆成可指派的任务、认领并完成分配给自己的任务。',
+    uses: ['kanban'],
     instructions: defineInstructionDocument({ content: body }),
     document: defineCapabilityDocumentSource({
       filePath: documentPath,
@@ -42,10 +41,9 @@ let cached: AgentCapability | null | undefined;
 /**
  * 开箱即用的看板拆解能力。
  *
- * 它声明 `uses: ['kanban']`,而 kanban toolkit 只在 studio 装配时作为插件注入
- * (`buildStudio`)。因此在 chat 模式下这个 Capability 会落进
- * `unavailableCapabilities` —— 那是**预期行为**,不是错误:注册表缺 toolkit 时
- * 只把 Capability 标为不可用,不抛错(`compileExecutor`)。
+ * 它声明 `uses: ['kanban']`,并与 kanban module 一起由应用 composition root
+ * 注入 Studio。缺少 toolkit 时 Capability 会落进 `unavailableCapabilities` ——
+ * 那是预期行为,不是错误:注册表只把它标为不可用,不会抛错。
  *
  * 走与用户 Capability 完全相同的 Markdown 契约,用户想改写它时可以直接复制
  * CAPABILITY.md 到 `~/.pinpawo/capabilities/` 覆盖。

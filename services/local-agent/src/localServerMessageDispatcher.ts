@@ -24,7 +24,7 @@ export type LocalServerLogWarn = (message: string) => void;
 
 export type LocalServerPeerHandlers = {
   onChatRequest: (peer: LocalServerPeer, message: ChatRequestMessage) => MaybePromise<void>;
-  onStudioRequest: (peer: LocalServerPeer, message: StudioRequestMessage) => MaybePromise<void>;
+  onStudioRequest?: (peer: LocalServerPeer, message: StudioRequestMessage) => MaybePromise<void>;
   onHumanReviewResponse: (
     peer: LocalServerPeer,
     message: HumanReviewResponseMessage,
@@ -52,6 +52,43 @@ export type LocalServerPeerHandlers = {
   logError?: LocalServerLogError;
   logWarn?: LocalServerLogWarn;
 };
+
+export type LocalServerTransportHandlers = Partial<LocalServerPeerHandlers> & Pick<
+  LocalServerPeerHandlers,
+  'log' | 'logError' | 'logWarn'
+>;
+
+function rejectUnsupportedMessage(
+  peer: LocalServerPeer,
+  message: { type: string; requestId?: string },
+  logWarn: LocalServerLogWarn,
+) {
+  if (!message.requestId) {
+    logWarn(
+      `[local-server] ignored unsupported client message type=${message.type} because it has no requestId`,
+    );
+    return Promise.resolve();
+  }
+  sendLocalServerPeerEvent(peer, {
+    type: 'error',
+    requestId: message.requestId,
+    message: `Message type "${message.type}" is not supported by this Host transport.`,
+  });
+  return Promise.resolve();
+}
+
+function dispatchOptional<TMessage extends { type: string; requestId?: string }>(
+  peer: LocalServerPeer,
+  message: TMessage,
+  handler: ((peer: LocalServerPeer, message: TMessage) => MaybePromise<void>) | undefined,
+  handlerName: string,
+  logError: LocalServerLogError,
+  logWarn: LocalServerLogWarn,
+) {
+  return handler
+    ? runLocalServerPeerHandler(handlerName, () => handler(peer, message), logError)
+    : rejectUnsupportedMessage(peer, message, logWarn);
+}
 
 export function defaultLocalServerLogError(message: string, error: unknown) {
   console.error(message, error instanceof Error ? error.message : error);
@@ -122,7 +159,7 @@ export function runLocalServerPeerHandler(
 export function dispatchLocalServerMessage(
   peer: LocalServerPeer,
   data: Buffer | string,
-  handlers: LocalServerPeerHandlers,
+  handlers: LocalServerTransportHandlers,
   logError: LocalServerLogError = handlers.logError ?? defaultLocalServerLogError,
   logWarn: LocalServerLogWarn = handlers.logWarn ?? defaultLocalServerLogWarn,
 ) {
@@ -135,71 +172,27 @@ export function dispatchLocalServerMessage(
     }
 
     if (msg.type === 'chat_request') {
-      return runLocalServerPeerHandler(
-        'handleChatRequest',
-        () => handlers.onChatRequest(peer, msg),
-        logError,
-      );
+      return dispatchOptional(peer, msg, handlers.onChatRequest, 'handleChatRequest', logError, logWarn);
     } else if (msg.type === 'studio_request') {
-      return runLocalServerPeerHandler(
-        'handleStudioRequest',
-        () => handlers.onStudioRequest(peer, msg),
-        logError,
-      );
+      return dispatchOptional(peer, msg, handlers.onStudioRequest, 'handleStudioRequest', logError, logWarn);
     } else if (msg.type === 'human_review_response') {
-      return runLocalServerPeerHandler(
-        'handleHumanReviewResponse',
-        () => handlers.onHumanReviewResponse(peer, msg),
-        logError,
-      );
+      return dispatchOptional(peer, msg, handlers.onHumanReviewResponse, 'handleHumanReviewResponse', logError, logWarn);
     } else if (msg.type === 'review.cancel') {
-      return runLocalServerPeerHandler(
-        'handleReviewCancel',
-        () => handlers.onReviewCancel(peer, msg),
-        logError,
-      );
+      return dispatchOptional(peer, msg, handlers.onReviewCancel, 'handleReviewCancel', logError, logWarn);
     } else if (msg.type === 'run.interrupt') {
-      return runLocalServerPeerHandler(
-        'handleRunInterrupt',
-        () => handlers.onRunInterrupt(peer, msg),
-        logError,
-      );
+      return dispatchOptional(peer, msg, handlers.onRunInterrupt, 'handleRunInterrupt', logError, logWarn);
     } else if (msg.type === 'new_session') {
-      return runLocalServerPeerHandler(
-        'handleNewSession',
-        () => handlers.onNewSession(peer, msg),
-        logError,
-      );
+      return dispatchOptional(peer, msg, handlers.onNewSession, 'handleNewSession', logError, logWarn);
     } else if (msg.type === 'runtime_config.update') {
-      return runLocalServerPeerHandler(
-        'handleRuntimeConfigUpdate',
-        () => handlers.onRuntimeConfigUpdate(peer, msg),
-        logError,
-      );
+      return dispatchOptional(peer, msg, handlers.onRuntimeConfigUpdate, 'handleRuntimeConfigUpdate', logError, logWarn);
     } else if (msg.type === 'session.snapshot.get') {
-      return runLocalServerPeerHandler(
-        'handleSessionSnapshotGet',
-        () => handlers.onSessionSnapshotGet(peer, msg),
-        logError,
-      );
+      return dispatchOptional(peer, msg, handlers.onSessionSnapshotGet, 'handleSessionSnapshotGet', logError, logWarn);
     } else if (msg.type === 'session.list') {
-      return runLocalServerPeerHandler(
-        'handleSessionList',
-        () => handlers.onSessionList(peer, msg),
-        logError,
-      );
+      return dispatchOptional(peer, msg, handlers.onSessionList, 'handleSessionList', logError, logWarn);
     } else if (msg.type === 'session.new') {
-      return runLocalServerPeerHandler(
-        'handleSessionNew',
-        () => handlers.onSessionNew(peer, msg),
-        logError,
-      );
+      return dispatchOptional(peer, msg, handlers.onSessionNew, 'handleSessionNew', logError, logWarn);
     } else if (msg.type === 'session.resume') {
-      return runLocalServerPeerHandler(
-        'handleSessionResume',
-        () => handlers.onSessionResume(peer, msg),
-        logError,
-      );
+      return dispatchOptional(peer, msg, handlers.onSessionResume, 'handleSessionResume', logError, logWarn);
     } else if (msg.type === 'session.compact') {
       if (!handlers.onSessionCompact) {
         peer.send({
@@ -216,17 +209,9 @@ export function dispatchLocalServerMessage(
         logError,
       );
     } else if (msg.type === 'model.list') {
-      return runLocalServerPeerHandler(
-        'handleModelList',
-        () => handlers.onModelList(peer, msg),
-        logError,
-      );
+      return dispatchOptional(peer, msg, handlers.onModelList, 'handleModelList', logError, logWarn);
     } else if (msg.type === 'model.select') {
-      return runLocalServerPeerHandler(
-        'handleModelSelect',
-        () => handlers.onModelSelect(peer, msg),
-        logError,
-      );
+      return dispatchOptional(peer, msg, handlers.onModelSelect, 'handleModelSelect', logError, logWarn);
     } else if (msg.type === 'ping') {
       peer.send({ type: 'pong' });
     }

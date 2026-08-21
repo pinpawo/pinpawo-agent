@@ -1,16 +1,12 @@
 /**
- * `PetAgentRuntime` port 的 local host 适配器。
+ * `PetAgentRuntime` port 的 Studio Host 适配器。
  *
- * 它住在 local-agent 而不是 `@pinpawo/studio`,因为它把 port 接到具体的
- * LangGraph 执行路径上 —— 直接 `createOrchestratorGraph()`、组装消息、
- * 消化 HITL。编排核心不该背这些:那会让 `@pinpawo/studio` 依赖
- * `@langchain/langgraph`,而它本身根本不跑 graph。
+ * 它位于 Studio package 的 Host 层，把 core port 接到具体 LangGraph
+ * 执行路径。core 目录本身仍不依赖 Host 或本机服务实现。
  *
- * 未来若出现第二个 host,再单独抽 `studio-pet-agent-adapter`。
- *
- * HITL 对 Studio 透明:pet 撞到 review 时 invoke 直接返回,不在内部等待。
- * review 是 pet 与人之间的事 —— 人已经在跟 pet 打交道了,再让 Studio 知道
- * 一遍是多余的一层。答复走 pet-agent 既有的 resume 路径,与 chat 一致。
+ * HITL 对 Studio core 透明：LangGraph 把 interrupt 与 pending continuation
+ * 持久化到 checkpoint，runtime 只把 gate 保持在 `waiting`。review 的投射与
+ * resume 由独立的 Host/plugin 控制适配负责，不属于 Studio core。
  */
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
@@ -26,7 +22,7 @@ import type {
   PetAgentCapabilitySummary,
   PetAgentStartupMode,
   PetAgentStatus,
-} from '@pinpawo/studio';
+} from '../petAgentTypes';
 import {
   buildOrchestratorRunInput,
   createOrchestratorGraph,
@@ -41,8 +37,18 @@ import type {
   PetAgentRuntimeInvokeInput,
   PetAgentRuntimeInvokeResult,
   PetGateState,
-} from '@pinpawo/studio';
-import type { StudioWikiAccess } from '@pinpawo/studio';
+} from '../types';
+import type { StudioWikiAccess } from '../wikiPort';
+
+/**
+ * Studio runtime 允许 LangGraph 生成可持久化的 review interrupt。当前内建
+ * transport 不处理 Chat review 消息，但这不等于 runtime 没有 HITL 能力：
+ * 独立交互插件可以投射 pending action，并对同一 thread 执行 resume。
+ */
+const STUDIO_REVIEW_CAPABILITIES = {
+  humanReview: true,
+  sessionAuthorization: true,
+} as const;
 
 export type PetAgentRuntimeConfig = {
   models: AgentModels;
@@ -245,6 +251,7 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
       actor: config.actor,
       thread_id: input.threadId,
       registry,
+      reviewCapabilities: STUDIO_REVIEW_CAPABILITIES,
       execution: input.execution ?? config.execution,
       workdir: input.workdir ?? config.workdir,
       runtimeEnvironment: input.runtimeEnvironment,
@@ -259,8 +266,8 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
         messages,
         { activeDelegationTransition: input.activeDelegationTransition },
       );
-      // 撞到 review 就返回 —— 进度已落在 checkpoint 上(#613),答复由客户端
-      // 经 pet-agent 的 resume 路径送回。Studio 不参与,也不需要知道。
+      // 撞到 review 时 LangGraph 会返回，并把 interrupt 保存在 checkpoint；
+      // Studio core 不解释 payload，只通过下面的 snapshot 把 gate 标成 waiting。
       const result = await graph.invoke(graphInput, { signal: input.signal, configurable });
       // 返回不等于干完了。checkpoint 上还有待跑节点 = 停在中断点等人 ——
       // 门此时是 `waiting`,不是 `open`,队列不该放行下一条。
@@ -325,4 +332,3 @@ function readReply(result: unknown): string {
   const last = messages.at(-1);
   return typeof last?.content === 'string' ? last.content.trim() : '';
 }
-

@@ -17,8 +17,8 @@ import { DEFAULT_SERVER_MODE, type ServerMode } from './serverMode';
  * now come from local config, and a future Studio plugin owns any remote
  * surface (#638).
  *
- * `--mode studio` uses {@link StudioHost} instead; the two hosts share the
- * same capability supply but not the same transport.
+ * Studio is started from its own package and depends only on the exported
+ * shared capability-supply surface; this Chat Host never imports it.
  */
 export class LocalAgentHost {
   private readonly caps: HostCapabilityAssembly;

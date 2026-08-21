@@ -147,6 +147,154 @@ test('FileSaver serializes concurrent putWrites for the same checkpoint', async 
   assert.deepEqual(channels, ['channel-a', 'channel-b']);
 });
 
+test('FileSaver serializes read-modify-write across independent saver instances', async (t) => {
+  const root = createTempDir(t);
+  const filePath = join(root, 'checkpoints.json');
+  const firstProcessView = new FileSaver(filePath);
+  const config = await firstProcessView.put(
+    { configurable: { thread_id: 'thread-1' } },
+    checkpoint('cp-1', { messages: [] }),
+    { source: 'loop', step: 1, parents: {} },
+  );
+  const secondProcessView = new FileSaver(filePath);
+
+  await Promise.all([
+    ...Array.from({ length: 20 }, (_, index) => firstProcessView.putWrites(
+      config,
+      [[`channel-a-${index}`, { index }]],
+      `task-a-${index}`,
+    )),
+    ...Array.from({ length: 20 }, (_, index) => secondProcessView.putWrites(
+      config,
+      [[`channel-b-${index}`, { index }]],
+      `task-b-${index}`,
+    )),
+  ]);
+
+  const restored = new FileSaver(filePath);
+  const tuple = await restored.getTuple(config);
+  assert.equal(tuple?.pendingWrites?.length, 40);
+  assert.equal(
+    new Set((tuple?.pendingWrites ?? []).map(([taskId]) => taskId)).size,
+    40,
+  );
+});
+
+test('FileSaver recovers a writer lock left by a dead process', async (t) => {
+  const root = createTempDir(t);
+  const filePath = join(root, 'checkpoints.json');
+  const lockDir = join(root, 'checkpoints', '.writer-lock');
+  mkdirSync(lockDir, { recursive: true });
+  writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({
+    pid: 2_147_483_647,
+    token: 'dead-owner',
+  }));
+
+  const saver = new FileSaver(filePath);
+  await assert.doesNotReject(() => saver.put(
+    { configurable: { thread_id: 'thread-1' } },
+    checkpoint('cp-1', { messages: [] }),
+    { source: 'loop', step: 1, parents: {} },
+  ));
+  assert.equal(existsSync(lockDir), false);
+});
+
+test('FileSaver allows only one Host writer lease per checkpoint root', (t) => {
+  const root = createTempDir(t);
+  const filePath = join(root, 'checkpoints.json');
+  const firstHost = new FileSaver(filePath);
+  const secondHost = new FileSaver(filePath);
+
+  firstHost.acquireHostWriterLease('first-host');
+  assert.throws(
+    () => secondHost.acquireHostWriterLease('second-host'),
+    /already owned by first-host/,
+  );
+
+  firstHost.releaseHostWriterLease();
+  assert.doesNotThrow(() => secondHost.acquireHostWriterLease('second-host'));
+  secondHost.releaseHostWriterLease();
+  assert.equal(existsSync(join(root, 'checkpoints', '.host-writer.json')), false);
+});
+
+test('FileSaver safely recovers a Host writer lease left by a dead process', (t) => {
+  const root = createTempDir(t);
+  const filePath = join(root, 'checkpoints.json');
+  const checkpointRoot = join(root, 'checkpoints');
+  mkdirSync(checkpointRoot, { recursive: true });
+  writeFileSync(join(checkpointRoot, '.host-writer.json'), JSON.stringify({
+    version: 1,
+    pid: 2_147_483_647,
+    token: 'dead-host-token',
+    ownerId: 'dead-host',
+    acquiredAt: new Date(0).toISOString(),
+  }));
+
+  const saver = new FileSaver(filePath);
+  assert.doesNotThrow(() => saver.acquireHostWriterLease('replacement-host'));
+  const owner = JSON.parse(
+    readFileSync(join(checkpointRoot, '.host-writer.json'), 'utf-8'),
+  ) as { ownerId: string; pid: number };
+  assert.equal(owner.ownerId, 'replacement-host');
+  assert.equal(owner.pid, process.pid);
+  assert.equal(existsSync(join(checkpointRoot, '.host-writer-recovery')), false);
+  saver.releaseHostWriterLease();
+});
+
+test('FileSaver recovers a writer recovery guard left by a dead process', (t) => {
+  const root = createTempDir(t);
+  const filePath = join(root, 'checkpoints.json');
+  const checkpointRoot = join(root, 'checkpoints');
+  const recoveryRoot = join(checkpointRoot, '.host-writer-recovery');
+  mkdirSync(recoveryRoot, { recursive: true });
+  writeFileSync(join(recoveryRoot, 'owner.json'), JSON.stringify({
+    version: 1,
+    pid: 2_147_483_647,
+    token: 'dead-recovery-token',
+    previousToken: 'dead-host-token',
+    acquiredAt: new Date(0).toISOString(),
+  }));
+
+  const saver = new FileSaver(filePath);
+  assert.doesNotThrow(() => saver.acquireHostWriterLease('replacement-host'));
+  assert.equal(existsSync(recoveryRoot), false);
+  assert.equal(
+    readdirSync(checkpointRoot).some((entry) => entry.startsWith('.host-writer-recovery.stale-')),
+    false,
+  );
+  saver.releaseHostWriterLease();
+});
+
+test('FileSaver startup maintenance requires the Host lease and collects orphan objects', async (t) => {
+  const root = createTempDir(t);
+  const filePath = join(root, 'checkpoints.json');
+  const writer = new FileSaver(filePath);
+  const config = { configurable: { thread_id: 'thread-1' } };
+
+  for (let index = 0; index < 20; index += 1) {
+    await writer.put(config, checkpoint('same-checkpoint', {
+      messages: [{ role: 'human', content: `version-${index}` }],
+    }), { source: 'loop', step: index, parents: {} });
+  }
+
+  const objectCountBeforeRestart = countObjectFiles(root);
+  const host = new FileSaver(filePath);
+  assert.equal(countObjectFiles(root), objectCountBeforeRestart);
+  await assert.rejects(
+    () => host.runHostStartupMaintenance(),
+    /requires the Host writer lease/,
+  );
+
+  host.acquireHostWriterLease('test-host');
+  await host.runHostStartupMaintenance();
+  assert.equal(countObjectFiles(root), 3);
+  assert.deepEqual(
+    (await host.getTuple(config))?.checkpoint.channel_values.messages,
+    [{ role: 'human', content: 'version-19' }],
+  );
+  host.releaseHostWriterLease();
+});
+
 test('FileSaver leaves legacy monolith and shard data untouched without restoring them', async (t) => {
   const root = createTempDir(t);
   const filePath = join(root, 'checkpoints.json');

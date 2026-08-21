@@ -4,8 +4,8 @@
 
 > **Status: current local-host configuration.** The schemas are in
 > [`packages/studio/src/configSchema.ts`](../../packages/studio/src/configSchema.ts)
-> and local assembly is in
-> [`services/local-agent/src/studio/buildStudio.ts`](../../services/local-agent/src/studio/buildStudio.ts).
+> and Host assembly is in
+> [`packages/studio/src/host/buildStudio.ts`](../../packages/studio/src/host/buildStudio.ts).
 
 One workdir has one Studio configuration at
 `<workdir>/.pinpawo/studio.json`. Pet files live beside it in
@@ -31,11 +31,12 @@ One workdir has one Studio configuration at
 | `pets` | Yes | Non-empty ordered list of referenced pet IDs. |
 | `name`, `description` | No | Display metadata. |
 | `plugins` | No | Explicit plugin list; order is plugin start order. |
-| `plugins[].id` | When a plugin is listed | Host plugin-factory key. |
-| `plugins[].options` | No | Opaque object passed to that plugin factory. |
+| `plugins[].id` | When a module is listed | Optional-module ID resolved by the application composition root. |
+| `plugins[].options` | No | Opaque object passed to that module resolver. |
 
 The configuration rejects an empty or duplicate `pets` list, an entry pet that
-is not listed, a referenced pet file that is missing, and unknown plugin IDs.
+is not listed, or a referenced pet file that is missing. A configured module
+fails fast when no resolver is installed or the resolver cannot resolve it.
 `plugins` may be omitted for manual host dispatch, but no plugin will then drive
 workflow progress. Extra legacy fields are not a migration mechanism and should
 be removed; in particular, do not use `plannerPetId`, `agents`, queue, retry,
@@ -67,16 +68,18 @@ pet. For example, `kanban` is a Toolkit name, not a value to put in
 
 ## Plugin assembly
 
-The local host resolves each listed ID through its built-in factory registry.
-At present the only built-in ID is `kanban`. Plugin options are passed to the
-factory unchanged; the bundled Kanban factory currently declares no options, so
-do not rely on `options` for it yet. Third-party Studio-plugin discovery is not
-implemented by this host.
+`@pinpawo/studio` declares a `StudioModuleResolver` port but contains no module
+registry and imports no concrete module. The application composition root maps
+installed IDs to module implementations and passes `resolveModule` to
+`StudioHost`. Options pass through unchanged for the module to validate.
 
-`buildStudio()` reads files, resolves pets, builds their runtime adapters, and
-then calls `createStudio()`. The package itself performs no filesystem I/O.
-After a local host has built a Studio for a workdir, it caches that instance;
+`@pinpawo-toolkit/studio-kanban` is an optional module, not a Studio dependency.
+It may contribute both its Studio plugin/Toolkit face and the matching
+`studio_planning` Capability. Catalog/discovery policy remains outside Studio.
+
+The Host-level `buildStudio()` reads files, resolves pets, builds their runtime
+adapters, and then calls the filesystem-independent `createStudio()` core.
+After a Studio Host has built a Studio for a workdir, it keeps that resident instance;
 restart the host to pick up configuration changes.
 
 For dispatch, gate, and event behavior, read the [push model](push-model.md).
-

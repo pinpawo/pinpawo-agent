@@ -1,10 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { LocalServerStudioHandler } from './localServerStudioHandler';
-import type { LocalServerDeps } from './localServerTypes';
-import type { Studio, StudioEventHandler } from '@pinpawo/studio';
-import { createTestModelServerDeps } from './testing/modelProfiles';
+import { StudioRequestHandler } from './StudioRequestHandler';
+import type {
+  Studio,
+  StudioDispatchGateHandler,
+  StudioEventHandler,
+} from '../studioContract';
 
 type Peer = { send: (message: unknown) => boolean };
 
@@ -12,33 +14,39 @@ function createPeer(sent: unknown[]): Peer {
   return { send: (message) => { sent.push(message); return true; } };
 }
 
-function createDeps(): LocalServerDeps {
-  return {
-    serverMode: 'studio',
-    actorId: 'pet-a',
-    workdir: '/tmp/pinpawo-studio-test',
-    ...createTestModelServerDeps(),
-  };
-}
+type TestStudio = Studio & {
+  lastCorrelationId: () => string | undefined;
+};
 
-function fakeStudio(overrides: Partial<Studio> = {}): Studio {
+function fakeStudio(overrides: Partial<Studio> = {}): TestStudio {
   const handlers = new Set<StudioEventHandler>();
+  const gateHandlers = new Set<StudioDispatchGateHandler>();
+  let correlationId: string | undefined;
   return {
     entryPetId: 'pet-a',
-    dispatch: async () => ({ threadId: 'thread-1' }),
+    dispatch: async (input) => {
+      correlationId = input.correlationId;
+      return { threadId: 'thread-1' };
+    },
+    onDispatchGate: (handler) => {
+      gateHandlers.add(handler);
+      return () => gateHandlers.delete(handler);
+    },
     notify: (event) => { for (const handler of handlers) void handler(event); },
     subscribe: (handler) => { handlers.add(handler); return () => handlers.delete(handler); },
     listPets: () => [],
     shutdown: async () => {},
     ...overrides,
+    lastCorrelationId: () => correlationId,
   };
 }
 
 function handlerWith(studio: Studio) {
   const sent: unknown[] = [];
   const events: unknown[] = [];
-  const handler = new LocalServerStudioHandler<Peer>({
+  const handler = new StudioRequestHandler<Peer>({
     studio,
+    workdir: '/tmp/pinpawo-studio-test',
     outbound: {
       sendMessage: (peer, message) => peer.send(message),
       sendEvent: (_peer, event) => { events.push(event); return true; },
@@ -65,7 +73,7 @@ test('a studio request returns as soon as it is submitted', async () => {
     type: 'studio_request',
     requestId: 'studio-1',
     userRequest: 'plan this',
-  }, createDeps());
+  });
 
   const response = sent.at(-1) as { type: string; outcome: string; reply: string };
   assert.equal(response.type, 'studio_response');
@@ -84,14 +92,13 @@ test('multiple requests dispatch to the same resident studio', async () => {
   });
   const { handler, sent } = handlerWith(studio);
   const peer = createPeer(sent);
-  const deps = createDeps();
 
   for (const requestId of ['studio-1', 'studio-2', 'studio-3']) {
     await handler.handleStudioRequest(peer, {
       type: 'studio_request',
       requestId,
       userRequest: 'go',
-    }, deps);
+    });
   }
 
   assert.equal(dispatchCount, 3);
@@ -109,11 +116,12 @@ test('plugin events reach the peer as studio progress', async () => {
     type: 'studio_request',
     requestId: 'studio-1',
     userRequest: 'go',
-  }, createDeps());
+  });
 
   studio.notify({
     type: 'task.done',
     source: 'kanban',
+    correlationId: studio.lastCorrelationId(),
     occurredAt: new Date().toISOString(),
   });
 
@@ -122,29 +130,47 @@ test('plugin events reach the peer as studio progress', async () => {
   assert.equal(progress.event.type, 'task.done');
 });
 
-test('events are attributed to the latest request, not the first one', async () => {
-  // 事件桥每个 peer 只建一次。若把首次的 requestId 封进闭包,第二次提交
-  // 之后的事件会全部错误归到 studio-1 上,客户端据此过滤就会丢弃它们。
+test('events are attributed by correlation instead of the peer latest request', async () => {
   const studio = fakeStudio();
   const { handler, sent, events } = handlerWith(studio);
   const peer = createPeer(sent);
-  const deps = createDeps();
 
   await handler.handleStudioRequest(peer, {
     type: 'studio_request', requestId: 'studio-1', userRequest: 'first',
-  }, deps);
+  });
+  const firstCorrelationId = studio.lastCorrelationId();
   await handler.handleStudioRequest(peer, {
     type: 'studio_request', requestId: 'studio-2', userRequest: 'second',
-  }, deps);
+  });
 
   studio.notify({
     type: 'task.done',
     source: 'kanban',
+    correlationId: firstCorrelationId,
     occurredAt: new Date().toISOString(),
   });
 
   const progress = events.at(-1) as { requestId: string };
-  assert.equal(progress.requestId, 'studio-2');
+  assert.equal(progress.requestId, 'studio-1');
+});
+
+test('uncorrelated events are not broadcast across peers', async () => {
+  const studio = fakeStudio();
+  const { handler, events } = handlerWith(studio);
+  await handler.handleStudioRequest(createPeer([]), {
+    type: 'studio_request', requestId: 'peer-a', userRequest: 'a',
+  });
+  await handler.handleStudioRequest(createPeer([]), {
+    type: 'studio_request', requestId: 'peer-b', userRequest: 'b',
+  });
+
+  studio.notify({
+    type: 'global.tick',
+    source: 'scheduler',
+    occurredAt: new Date().toISOString(),
+  });
+
+  assert.deepEqual(events, []);
 });
 
 test('a dispatch error is reported as studio_error', async () => {
@@ -154,8 +180,9 @@ test('a dispatch error is reported as studio_error', async () => {
     dispatch: async () => { throw new Error('dispatch boom'); },
   });
   const sent: unknown[] = [];
-  const handler = new LocalServerStudioHandler<Peer>({
+  const handler = new StudioRequestHandler<Peer>({
     studio,
+    workdir: '/tmp/pinpawo-studio-test',
     outbound: {
       sendMessage: (peer, message) => peer.send(message),
       sendEvent: () => true,
@@ -166,7 +193,7 @@ test('a dispatch error is reported as studio_error', async () => {
     type: 'studio_request',
     requestId: 'studio-1',
     userRequest: 'go',
-  }, createDeps());
+  });
 
   const error = sent.at(-1) as { type: string; message: string };
   assert.equal(error.type, 'studio_error');

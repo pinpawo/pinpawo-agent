@@ -11,6 +11,20 @@
   },
   "type": "module",
   "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./host-runtime": {
+      "types": "./dist/hostRuntime.d.ts",
+      "import": "./dist/hostRuntime.js"
+    },
+    "./local-server-transport": {
+      "types": "./dist/localServerTransportApi.d.ts",
+      "import": "./dist/localServerTransportApi.js"
+    }
+  },
   "bin": {
     "pinpawo": "dist/index.js"
   },
@@ -60,9 +74,7 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@pinpawo-toolkit/studio-kanban": "*",
     "@pinpawo/agent-session": "*",
-    "@pinpawo/studio": "*",
     "@types/node": "^24.0.0",
     "@types/ws": "^8.5.14",
     "tsup": "^8.3.5",

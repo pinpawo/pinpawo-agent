@@ -2,16 +2,14 @@ import { Console } from 'node:console';
 import { stderr, stdin, stdout } from 'node:process';
 import type { Readable, Writable } from 'node:stream';
 import type { LocalAgentServerMessage } from './localAgentProtocol';
-import { createLocalServerHandlers } from './localServerHandlers';
 import {
   dispatchLocalServerMessage,
   type LocalServerLogError,
   type LocalServerLogWarn,
   type LocalServerPeerHandlers,
+  type LocalServerTransportHandlers,
 } from './localServerMessageDispatcher';
 import type { LocalServerPeer } from './localServerPeer';
-import type { LocalServerStudioHandler } from './localServerStudioHandler';
-import type { LocalServerDeps } from './localServerTypes';
 
 const DEFAULT_MAX_PENDING_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAX_INPUT_LINE_BYTES = 8 * 1024 * 1024;
@@ -22,8 +20,6 @@ export type LocalServerStdioTransportOptions = {
   diagnostics?: Writable;
   maxPendingBytes?: number;
   maxInputLineBytes?: number;
-  /** #643: Injected by StudioHost when running in studio mode. */
-  studioHandler?: LocalServerStudioHandler<LocalServerPeer>;
 };
 
 export type LocalServerStdioTransport = {
@@ -60,7 +56,7 @@ export function redirectConsoleToStdioDiagnostics(diagnostics: Writable = stderr
 }
 
 export function attachLocalServerStdioTransport(
-  handlers: LocalServerPeerHandlers,
+  handlers: LocalServerTransportHandlers,
   options: LocalServerStdioTransportOptions = {},
 ): LocalServerStdioTransport {
   const input = options.input ?? stdin;
@@ -102,7 +98,7 @@ export function attachLocalServerStdioTransport(
     input.off('close', handleInputClose);
     input.pause();
     Promise.resolve()
-      .then(() => handlers.onClose(peer))
+      .then(() => handlers.onClose?.(peer))
       .catch((error) => {
         logError('[local-server] handleClose error:', error);
       })
@@ -281,19 +277,5 @@ export function attachLocalServerStdioTransport(
     peer,
     closed,
     close: finish,
-  };
-}
-
-export function startLocalStdioServer(
-  deps: LocalServerDeps,
-  options: LocalServerStdioTransportOptions = {},
-) {
-  const handlers = createLocalServerHandlers(deps, {
-    ...(options.studioHandler ? { studioHandler: options.studioHandler } : {}),
-  });
-  const transport = attachLocalServerStdioTransport(handlers.peerHandlers, options);
-  return {
-    ...transport,
-    closed: transport.closed.finally(handlers.close),
   };
 }

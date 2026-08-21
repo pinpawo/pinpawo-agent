@@ -448,6 +448,7 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (handler as any).runChatRequest = async (...args: unknown[]) => {
     handleChatCalls.push(args);
+    return 'completed';
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (handler as any).recordReviewActionRoute({
@@ -964,6 +965,10 @@ test('handleReviewCancel interrupts an approve-only pending review', async () =>
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (handler as any).runChatRequest = async (...args: unknown[]) => {
     handleChatCalls.push(args);
+    // A real review cancellation releases its queued interrupt only after the
+    // resume reaches the checkpoint.
+    (handler as any).reviewResolutions.checkpoint('req-1');
+    return 'interrupted';
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (handler as any).recordReviewActionRoute({

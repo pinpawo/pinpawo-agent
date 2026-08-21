@@ -156,7 +156,7 @@ export class LocalServerChatHandler {
       ...(params.reviews.length > 1 ? { reviews: params.reviews } : {}),
       ...(sessionId ? { sessionId } : {}),
       ...(params.actor ? { actor: params.actor } : {}),
-    }));
+    }), { observedPending: true });
   }
 
   /**

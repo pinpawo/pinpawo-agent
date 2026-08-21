@@ -18,26 +18,28 @@ test('a claimed action cannot be claimed again until it is released', async () =
   // Guards a double submit from one client: a repeat click, a resent message.
   assert.equal(await claims.claim(route, async () => null), null);
 
-  claims.release('action-1', { resolved: false });
+  claims.release('action-1', { outcome: 'failed' });
   assert.ok(await claims.claim(route, async () => null));
 });
 
-test('a resolved action drops its cached route', () => {
+test('a resolved action drops its cached route', async () => {
   const claims = new ReviewResolutionClaims<Route>();
   claims.register(route);
+  await claims.claim(route, async () => null);
 
-  claims.release('action-1', { resolved: true });
+  claims.release('action-1', { outcome: 'resolved' });
 
   // Nothing is remembered about the resolved review: once its resume is
   // applied the checkpoint stops reporting it, so memory has nothing to add.
   assert.deepEqual(claims.routes(), []);
 });
 
-test('a failed resolution keeps its route for the next attempt', () => {
+test('a failed resolution keeps its route for the next attempt', async () => {
   const claims = new ReviewResolutionClaims<Route>();
   claims.register(route);
+  await claims.claim(route, async () => null);
 
-  claims.release('action-1', { resolved: false });
+  claims.release('action-1', { outcome: 'failed' });
 
   assert.deepEqual(claims.routes(), [route]);
 });
@@ -55,7 +57,7 @@ test('an unknown action recovers its route from the checkpoint', async () => {
   assert.equal(recovered, 1);
 
   // The recovered route is cached, so the next attempt needs no second read.
-  claims.release('action-1', { resolved: false });
+  claims.release('action-1', { outcome: 'failed' });
   await claims.claim({ requestId: 'req-1' }, async () => {
     recovered += 1;
     return route;
@@ -102,16 +104,61 @@ test('a route for a different action is returned for the caller to reject', asyn
   assert.deepEqual(resolution, { actionId: 'action-1', route: other });
 });
 
-test('a review raised after one resolves is registered in its own right', async () => {
+test('a same-id review registered during resolution survives release', async () => {
   const claims = new ReviewResolutionClaims<Route>();
   claims.register(route);
   await claims.claim(route, async () => null);
-  claims.release('action-1', { resolved: true });
 
-  // Nothing about the resolved action lingers, so a later review — including
-  // a re-ask under the same interrupt id, which the middleware raises when a
-  // decision could not be understood — is answerable once registered.
+  // The resumed run can raise a re-ask before the current resolution returns.
+  // LangGraph reuses the interrupt id, so route identity—not actionId alone—
+  // distinguishes the new pending review from the claimed generation.
+  const reasked = { ...route, requestId: 'req-2' };
+  claims.register(reasked, { observedPending: true });
+  claims.release('action-1', { outcome: 'resolved' });
+
+  assert.deepEqual(claims.routes(), [reasked]);
+  assert.deepEqual(claims.routeRunInterrupt('req-2'), {
+    type: 'cancel_pending',
+    route: reasked,
+  });
+});
+
+test('an uncheckpointed interrupt remains retryable', async () => {
+  const claims = new ReviewResolutionClaims<Route>();
   claims.register(route);
+  await claims.claim(route, async () => null);
+
+  claims.release('action-1', { outcome: 'interrupted' });
+
+  assert.deepEqual(claims.routes(), [route]);
+  assert.ok(await claims.claim(route, async () => null));
+});
+
+test('a checkpointed interrupt drops the claimed route', async () => {
+  const claims = new ReviewResolutionClaims<Route>();
+  claims.register(route);
+  await claims.claim(route, async () => null);
+  claims.checkpoint('req-1');
+
+  claims.release('action-1', { outcome: 'interrupted' });
+
+  assert.deepEqual(claims.routes(), []);
+});
+
+test('a fatal close blocks checkpoint recovery until a run observes it again', async () => {
+  const claims = new ReviewResolutionClaims<Route>();
+  claims.register(route);
+  await claims.claim(route, async () => null);
+  claims.release('action-1', { outcome: 'fatal_failed' });
+
+  assert.equal(
+    await claims.claim(route, async () => route),
+    null,
+    'passive recovery must not reopen the fatal review',
+  );
+  assert.equal(claims.register(route), false, 'a snapshot must not reopen it');
+
+  assert.equal(claims.register(route, { observedPending: true }), true);
   assert.ok(await claims.claim(route, async () => null));
 });
 

@@ -359,11 +359,15 @@ export async function resolveHumanReviewAction<
 
     outcome = await options.run(route, resume, source);
   } finally {
-    // Drop the cached route once the resume was applied, or once the agent
-    // turned out to be unusable: in both cases re-offering this review from
-    // memory is wrong, and the checkpoint decides what is still pending. An
-    // early return (stale action, wrong session, disconnected peer) and an
-    // ordinary failure both keep it, since resolving it again is meaningful.
-    lifecycle.release(actionId, { resolved: outcome !== 'failed' });
+    // Successful runs release the claimed route generation; a same-id review
+    // registered by the resumed run is newer and survives. Interrupted runs
+    // are consumed only after checkpoint confirmation, while fatal failures
+    // keep a bounded local close marker so the unresolved checkpoint review is
+    // not immediately re-offered.
+    lifecycle.release(actionId, {
+      outcome: outcome === 'completed' || outcome === 'waiting_human'
+        ? 'resolved'
+        : outcome,
+    });
   }
 }

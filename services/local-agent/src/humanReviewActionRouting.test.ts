@@ -228,6 +228,46 @@ test('human review action resolution owns validation, resume, and consumption', 
   assert.equal(closed, 1);
 });
 
+test('a same-id review registered by the resumed run remains interruptible', async () => {
+  const lifecycle = new ReviewResolutionClaims<ReturnType<typeof reviewRoute> & {
+    requestId: string;
+  }>();
+  const route = { ...reviewRoute(['review-1'], 'interrupt-1'), requestId: 'req-1' };
+  const reasked = { ...reviewRoute(['review-2'], 'interrupt-1'), requestId: 'req-1' };
+  lifecycle.register(route);
+
+  await resolveHumanReviewAction({
+    lifecycle,
+    message: {
+      type: 'human_review_response',
+      requestId: 'req-1',
+      actionId: 'interrupt-1',
+      reviewId: 'review-1',
+      selectedOptionId: 'approve',
+    },
+    recover: async () => null,
+    emitClosed: () => undefined,
+    emitEvent: () => undefined,
+    isConnected: () => true,
+    run: async () => {
+      // runChatSession registers the final pending review before returning
+      // waiting_human. LangGraph can reuse the interrupt id for a re-ask.
+      lifecycle.register(reasked, { observedPending: true });
+      return 'waiting_human';
+    },
+  });
+
+  const cancelled: typeof reasked[] = [];
+  assert.equal(await routeRunInterruptThroughHumanReview({
+    lifecycle,
+    requestId: 'req-1',
+    cancelPending: async (pendingRoute) => {
+      cancelled.push(pendingRoute);
+    },
+  }), 'cancelled_pending');
+  assert.deepEqual(cancelled, [reasked]);
+});
+
 test('human review response validation runs before the route boundary guard', async () => {
   const route = {
     ...reviewRoute(['review-1'], 'interrupt-1'),
@@ -378,8 +418,12 @@ test('a fatal run failure consumes the review action instead of re-offering it',
 
   assert.deepEqual(lifecycle.routes(), []);
 
-  // The action stays consumed, so a repeated cancel cannot revive the review.
-  const revived = await lifecycle.claim({ requestId: 'req-1', actionId: route.actionId }, async () => null);
+  // The action stays consumed even though the unchanged checkpoint still
+  // reports it, so a repeated cancel cannot revive the review.
+  const revived = await lifecycle.claim(
+    { requestId: 'req-1', actionId: route.actionId },
+    async () => route,
+  );
   assert.equal(revived, null);
 });
 
@@ -400,9 +444,8 @@ test('a recoverable run failure keeps the review action available for a retry', 
     run: async () => 'failed',
   });
 
-  // A recoverable failure drops the in-memory route but must NOT consume the
-  // action: the review is still pending in the checkpoint, so the next attempt
-  // recovers it and resolves normally.
+  // A recoverable failure must NOT consume the action: the review is still
+  // pending, so the next attempt can resolve it normally.
   const retried = await lifecycle.claim(
     { requestId: 'req-1' },
     async () => route,

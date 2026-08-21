@@ -68,8 +68,8 @@ Studio 不 import kanban 或任何具体 module。配置中的 module id 由外�
   恢复者同时成为 owner。
 - `FileSaver` 的单次 store mutation 使用 filesystem writer lock；锁覆盖 checkpoint 发布、
   pending-write read-modify-write、thread delete 与 GC。
-- constructor 不执行删除型 GC，因为同步 constructor 无法等待跨进程锁；GC 只在持锁的
-  delete transaction 内运行。
+- constructor 不执行删除型 GC，因为同步 constructor 无法等待跨进程锁；Host 取得
+  lifetime writer lease 后，在 mutation lock 内执行启动 GC，thread delete 也在同一锁内 GC。
 - 独立 root 与 Host lifetime lease 是正常部署的所有权边界；mutation lock 只保证单次事务，
   不允许多个 Host 共同驱动同一 thread。
 
@@ -124,4 +124,6 @@ runtime HITL 的方式代替。
 
 - 独立 Studio HITL/control plugin，以及重启后的 pending-action/dispatch-route 重建。
 - durable event log 与断线重放。
-- module catalog/discovery、HTTP trigger、scheduler 与 Kanban 持久化；这些仍由 #638/#645 继续设计。
+- HTTP trigger、scheduler 与 Kanban 持久化；这些仍由 #638/#645 继续设计。独立应用
+  composition root 与显式 installed-module catalog 见
+  [standalone application draft](standalone-application.md)。

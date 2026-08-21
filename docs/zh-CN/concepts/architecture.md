@@ -26,6 +26,9 @@ PinPawo Agent 将编排、任务权限、工具执行、人工审核和持久状
 
 local-agent host 是机器集成边界：解析配置、启动 Toolkit runtime、暴露 HTTP/WebSocket 或 JSONL stdio，并组装 Capability registry。与机器无关的编排在 `packages/pet-agent/`；本地集成留在 `services/` 与 `toolkits/`。
 
+独立 Studio 进程由 `services/studio-app/` 组合：它提供 `pinpawo-studio` 入口并持有
+installed optional-module catalog；`packages/studio/` 仍不依赖 Kanban 等具体 module。
+
 领域所有权链是 `Host -> Agent Runtime -> Capability -> Toolkit`。
 `ToolDefinition` 与 Toolkit Runtime 从属于 Toolkit；orchestrator 与 subagent lane
 属于 Agent 内部实现。Browser 等 package factory 不能因此形成平级架构层。完整的

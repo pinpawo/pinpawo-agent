@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@pinpawo/agent-session": ["../../packages/agent-session/src/index.ts"],
+      "@pinpawo/pet-agent": ["../../packages/pet-agent/src/index.ts"],
+      "@pinpawo/studio": ["../../packages/studio/src/index.ts"],
+      "@pinpawo-toolkit/browser": ["../../toolkits/browser/src/index.ts"],
+      "@pinpawo-toolkit/studio-kanban": ["../../toolkits/studio-kanban/src/index.ts"],
+      "pinpawo/host-runtime": ["../local-agent/src/hostRuntime.ts"],
+      "pinpawo/local-server-transport": ["../local-agent/src/localServerTransportApi.ts"]
+    },
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["src", "tsup.config.ts"]
+}

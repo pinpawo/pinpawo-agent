@@ -183,8 +183,8 @@ const availableToolkits = [...(input.toolkits ?? []), ...plugins];
 pet 实际拿到哪些工具,由它的 capability 声明的 `uses` 筛出来 —— 见 §2.1。
 `capabilities` 里**只写 capability 名**。
 
-> module catalog/discovery 尚未实现。这属于应用 composition root 的职责，不进入
-> Studio package。
+> `services/studio-app` 已提供显式 installed-module catalog，目前注册 `kanban`。
+> 第三方 module 的安装/discovery 策略仍属于应用 composition root，不进入 Studio package。
 
 ---
 

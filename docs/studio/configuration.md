@@ -75,7 +75,9 @@ installed IDs to module implementations and passes `resolveModule` to
 
 `@pinpawo-toolkit/studio-kanban` is an optional module, not a Studio dependency.
 It may contribute both its Studio plugin/Toolkit face and the matching
-`studio_planning` Capability. Catalog/discovery policy remains outside Studio.
+`studio_planning` Capability. The standalone application's explicit installed
+catalog is in `services/studio-app`; third-party installation/discovery policy
+remains outside Studio.
 
 The Host-level `buildStudio()` reads files, resolves pets, builds their runtime
 adapters, and then calls the filesystem-independent `createStudio()` core.

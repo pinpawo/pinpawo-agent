@@ -65,6 +65,7 @@ layer. See the accepted
 | Session state | `packages/agent-session/` | Client-neutral session model, reducers, versioned snapshots, and parsers. |
 | Collaboration | `packages/studio/` | Studio dispatch, per-Pet queue, gates, and plugin events independent of local transport details. |
 | Local host | `services/local-agent/` | CLI, configuration, runtime composition, and local transports. |
+| Studio application | `services/studio-app/` | Standalone Studio process entry and installed optional-module catalog. |
 | Terminal UI | `services/tui/` | OpenTUI client and packaged distribution. |
 | Tool integrations | `toolkits/` | Browser and Studio Kanban Toolkits, including their runtime lifecycles. |
 | Desktop companion | `tools/agent-macos/` | macOS supervision and configuration UI. |
@@ -104,7 +105,7 @@ state from a transient tool-event stream.
 | Interactive local agent | A person works directly in the terminal. | `pinpawo tui` |
 | Local server | Another local UI or app needs an HTTP/WebSocket host. | `pinpawo server` |
 | JSONL stdio | A process integration needs one transport-safe peer. | `pinpawo server --stdio` |
-| Studio | A request needs planner-led work across multiple pets. | Programmatic `@pinpawo/studio` Host API; standalone composition entry pending. |
+| Studio | A request needs planner-led work across multiple pets. | `pinpawo-studio --stdio` or `pinpawo-studio --port <port>` |
 
 ## Extension model
 

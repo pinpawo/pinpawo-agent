@@ -8,6 +8,8 @@
 > through the public local-agent
 > [`host-runtime`](../../services/local-agent/src/hostRuntime.ts) surface; the
 > concrete local wire adapter is a separate `local-server-transport` surface.
+> The executable application composition root and installed optional-module
+> catalog live in [`services/studio-app`](../../services/studio-app/).
 
 Studio is a small coordination substrate for multiple Pet runtimes. It keeps a
 registry of dispatchable pets, serializes work per pet, and gives plugins an

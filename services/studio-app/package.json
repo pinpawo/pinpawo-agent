@@ -1,0 +1,29 @@
+{
+  "name": "@pinpawo/studio-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone application composition root for the PinPawo Studio Host",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "pinpawo-studio": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "test": "node --import tsx --test $(find src -name '*.test.ts' | sort)",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@pinpawo-toolkit/studio-kanban": "*",
+    "@pinpawo/studio": "*",
+    "pinpawo": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsup": "^8.3.5",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

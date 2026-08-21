@@ -110,7 +110,7 @@ The main boundaries are:
 | `packages/agent-contracts/` | Shared wire and event contracts. |
 | `packages/agent-session/` | Session domain, projection, snapshots, parsers, and protocol types. |
 | `packages/pet-agent/` | Core agent runtime, orchestrator, Capability contracts, and evaluations. |
-| `packages/studio/` | Runtime-independent Studio coordination. |
+| `packages/studio/` | Published `@pinpawo/studio` Host/runtime library and CLI. |
 | `services/local-agent/` | Published `pinpawo` CLI, local host, configuration, and integrations. |
 | `services/tui/` | OpenTUI client and distribution bundle. |
 | `toolkits/browser/` | Browser Toolkit, drivers, extension, and Native Messaging host. |
@@ -228,10 +228,9 @@ A complete `LLM_API_KEY` + `LLM_BASE_URL` + `LLM_MODEL` tuple creates an ephemer
 | `pinpawo capability install <dir>` | Install a Capability. |
 | `pinpawo capability install <dir> --link` | Link a Capability in place. |
 
-The independent Studio Host is exposed through the programmatic
-`@pinpawo/studio` Host API and the `pinpawo-studio` application entry. Its
-installed optional-module catalog lives in `services/studio-app`; Studio is
-not a mode of the Chat server command.
+The independent Studio Host and `pinpawo-studio` executable both live in
+`@pinpawo/studio`. Concrete optional modules are still injected through the
+Host's resolver port; Studio is not a mode of the Chat server command.
 
 ## Capabilities and Plugins
 
@@ -334,7 +333,7 @@ npm run test:unit -w pinpawo
 
 ## Contributing
 
-Keep runtime-independent agent logic in `packages/`. Put local machine, CLI, browser, transport, and desktop integrations in `services/`, `toolkits/`, or `tools/` as appropriate. TypeScript uses two-space indentation, semicolons, and single quotes.
+Keep shared runtime and package-owned entry points in `packages/`. Put Chat/local-machine integration, browser integration, optional toolkits, and desktop companions in `services/`, `toolkits/`, or `tools/` as appropriate. TypeScript uses two-space indentation, semicolons, and single quotes.
 
 Before opening a pull request, run the relevant quality gates and include the problem, implementation summary, validation performed, and any compatibility or security impact.
 
@@ -346,6 +345,7 @@ npm test
 npm run build
 npm pack --dry-run -w @pinpawo/pet-agent
 npm run pack:dry -w pinpawo
+npm run pack:dry -w @pinpawo/studio
 ```
 
 Review package contents before publishing. Confirm versions, the quick-start commands, and the absence of private endpoints, credentials, local state, or generated artifacts.

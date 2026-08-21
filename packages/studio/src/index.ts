@@ -68,3 +68,8 @@ export type {
   RunningStudioHost,
   StartStudioHostOptions,
 } from './startStudioHost';
+export { runStudioHostProcess } from './studioHostProcess';
+export type {
+  StudioHostProcessDependencies,
+  StudioHostProcessOptions,
+} from './studioHostProcess';

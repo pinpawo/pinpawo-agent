@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { StudioHostApplicationOptions } from './studioHostApplication';
+import type { StudioHostProcessOptions } from './studioHostProcess';
 import { parseStudioHostCliArgs, runStudioHostCli } from './cli';
 
-test('Studio application CLI routes explicit stdio options to the application', async () => {
-  let received: StudioHostApplicationOptions | undefined;
+test('Studio CLI routes explicit stdio options to the Host process', async () => {
+  let received: StudioHostProcessOptions | undefined;
   await runStudioHostCli([
     '--workdir',
     '/tmp/project',
@@ -19,8 +19,8 @@ test('Studio application CLI routes explicit stdio options to the application', 
   });
 });
 
-test('Studio Host CLI routes an explicit WebSocket port to the application', async () => {
-  let received: StudioHostApplicationOptions | undefined;
+test('Studio CLI routes an explicit WebSocket port to the Host process', async () => {
+  let received: StudioHostProcessOptions | undefined;
   await runStudioHostCli(['--port', '4321'], {
     runHost: (options) => { received = options; },
   });

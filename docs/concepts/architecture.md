@@ -63,9 +63,8 @@ layer. See the accepted
 | Contracts | `packages/agent-contracts/` | Shared request, event, review, and run contracts. |
 | Orchestration | `packages/pet-agent/` | Agent graph, Capability planning, lane isolation, review integration, and artifact references. |
 | Session state | `packages/agent-session/` | Client-neutral session model, reducers, versioned snapshots, and parsers. |
-| Collaboration | `packages/studio/` | Studio dispatch, per-Pet queue, gates, and plugin events independent of local transport details. |
+| Collaboration | `packages/studio/` | Studio Host, dispatch, per-Pet queue, gates, transports, and the standalone process entry. |
 | Local host | `services/local-agent/` | CLI, configuration, runtime composition, and local transports. |
-| Studio application | `services/studio-app/` | Standalone Studio process entry and installed optional-module catalog. |
 | Terminal UI | `services/tui/` | OpenTUI client and packaged distribution. |
 | Tool integrations | `toolkits/` | Browser and Studio Kanban Toolkits, including their runtime lifecycles. |
 | Desktop companion | `tools/agent-macos/` | macOS supervision and configuration UI. |

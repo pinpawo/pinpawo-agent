@@ -6,7 +6,7 @@ try {
   await runStudioHostCli();
 } catch (error) {
   console.error(
-    '[studio-app] startup failed:',
+    '[studio] startup failed:',
     error instanceof Error ? error.message : error,
   );
   process.exitCode = 1;

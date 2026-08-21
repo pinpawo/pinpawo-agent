@@ -1,17 +1,18 @@
 import {
+  buildLocalAgentRuntimeConfig,
+  type LocalAgentRuntimeConfig,
+} from 'pinpawo/host-runtime';
+import type { StudioModuleResolver } from './host/buildStudio';
+import {
   startStudioHostStdio,
   startStudioHostWebSocket,
   type RunningStudioHost,
   type StartStudioHostOptions,
-} from '@pinpawo/studio';
-import {
-  buildLocalAgentRuntimeConfig,
-  type LocalAgentRuntimeConfig,
-} from 'pinpawo/host-runtime';
-import { createStudioModuleResolver } from './moduleCatalog';
+} from './startStudioHost';
 
-export type StudioHostApplicationOptions = {
+export type StudioHostProcessOptions = {
   workdir?: string;
+  resolveModule?: StudioModuleResolver;
   transport:
     | { kind: 'stdio' }
     | { kind: 'websocket'; port: number };
@@ -22,9 +23,8 @@ type SignalTarget = {
   off(event: 'SIGINT' | 'SIGTERM', listener: () => void): unknown;
 };
 
-export type StudioHostApplicationDependencies = {
+export type StudioHostProcessDependencies = {
   buildRuntimeConfig?: (workdir?: string) => LocalAgentRuntimeConfig;
-  createModuleResolver?: typeof createStudioModuleResolver;
   startStdio?: (
     options: StartStudioHostOptions,
   ) => Promise<RunningStudioHost>;
@@ -36,19 +36,16 @@ export type StudioHostApplicationDependencies = {
 };
 
 /** Start one standalone Studio Host and own its process signal boundary. */
-export async function runStudioHostApplication(
-  options: StudioHostApplicationOptions,
-  dependencies: StudioHostApplicationDependencies = {},
+export async function runStudioHostProcess(
+  options: StudioHostProcessOptions,
+  dependencies: StudioHostProcessDependencies = {},
 ): Promise<void> {
   const runtimeConfig = (dependencies.buildRuntimeConfig ?? buildLocalAgentRuntimeConfig)(
     options.workdir,
   );
-  const resolveModule = (dependencies.createModuleResolver ?? createStudioModuleResolver)({
-    workdir: runtimeConfig.workdir,
-  });
   const hostOptions: StartStudioHostOptions = {
     runtimeConfig,
-    resolveModule,
+    ...(options.resolveModule ? { resolveModule: options.resolveModule } : {}),
   };
   const signals = dependencies.signals ?? process;
   let closeRequested = false;

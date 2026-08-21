@@ -31,7 +31,7 @@ One workdir has one Studio configuration at
 | `pets` | Yes | Non-empty ordered list of referenced pet IDs. |
 | `name`, `description` | No | Display metadata. |
 | `plugins` | No | Explicit plugin list; order is plugin start order. |
-| `plugins[].id` | When a module is listed | Optional-module ID resolved by the application composition root. |
+| `plugins[].id` | When a module is listed | Optional-module ID resolved by the injected `StudioModuleResolver`. |
 | `plugins[].options` | No | Opaque object passed to that module resolver. |
 
 The configuration rejects an empty or duplicate `pets` list, an entry pet that
@@ -69,15 +69,14 @@ pet. For example, `kanban` is a Toolkit name, not a value to put in
 ## Plugin assembly
 
 `@pinpawo/studio` declares a `StudioModuleResolver` port but contains no module
-registry and imports no concrete module. The application composition root maps
-installed IDs to module implementations and passes `resolveModule` to
-`StudioHost`. Options pass through unchanged for the module to validate.
+registry and imports no concrete module. A Host caller maps installed IDs to
+module implementations and passes `resolveModule` to `StudioHost`. Options pass
+through unchanged for the module to validate.
 
 `@pinpawo-toolkit/studio-kanban` is an optional module, not a Studio dependency.
 It may contribute both its Studio plugin/Toolkit face and the matching
-`studio_planning` Capability. The standalone application's explicit installed
-catalog is in `services/studio-app`; third-party installation/discovery policy
-remains outside Studio.
+`studio_planning` Capability. Installation/discovery policy remains outside
+Studio; callers inject concrete definitions through `StudioModuleResolver`.
 
 The Host-level `buildStudio()` reads files, resolves pets, builds their runtime
 adapters, and then calls the filesystem-independent `createStudio()` core.

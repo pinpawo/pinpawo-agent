@@ -44,7 +44,7 @@ export type BuildStudioInput = {
   studioConfigPath?: string;
   petsDir?: string;
   workdir?: string;
-  /** Installed optional modules are resolved by the application composition root. */
+  /** Installed optional modules are resolved by the Host caller. */
   resolveModule?: StudioModuleResolver;
 };
 

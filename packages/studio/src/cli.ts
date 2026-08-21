@@ -1,7 +1,7 @@
 import {
-  runStudioHostApplication,
-  type StudioHostApplicationOptions,
-} from './studioHostApplication';
+  runStudioHostProcess,
+  type StudioHostProcessOptions,
+} from './studioHostProcess';
 
 const HELP = `Usage: pinpawo-studio [options]
 
@@ -15,7 +15,7 @@ Options:
 `;
 
 export type StudioHostCliHandlers = {
-  runHost?: (options: StudioHostApplicationOptions) => Promise<void> | void;
+  runHost?: (options: StudioHostProcessOptions) => Promise<void> | void;
   writeOutput?: (text: string) => void;
 };
 
@@ -37,7 +37,7 @@ function parsePort(value: string): number {
 
 export type ParsedStudioHostCli =
   | { help: true }
-  | { help: false; options: StudioHostApplicationOptions };
+  | { help: false; options: StudioHostProcessOptions };
 
 export function parseStudioHostCliArgs(args: readonly string[]): ParsedStudioHostCli {
   let workdir: string | undefined;
@@ -76,7 +76,7 @@ export function parseStudioHostCliArgs(args: readonly string[]): ParsedStudioHos
   };
 }
 
-/** Run the standalone Studio application CLI. */
+/** Run the Studio package's standalone CLI. */
 export async function runStudioHostCli(
   argv = process.argv.slice(2),
   handlers: StudioHostCliHandlers = {},
@@ -86,5 +86,5 @@ export async function runStudioHostCli(
     (handlers.writeOutput ?? process.stdout.write.bind(process.stdout))(HELP);
     return;
   }
-  await (handlers.runHost ?? runStudioHostApplication)(parsed.options);
+  await (handlers.runHost ?? runStudioHostProcess)(parsed.options);
 }

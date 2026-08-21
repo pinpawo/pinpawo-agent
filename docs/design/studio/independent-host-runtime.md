@@ -124,6 +124,6 @@ runtime HITL 的方式代替。
 
 - 独立 Studio HITL/control plugin，以及重启后的 pending-action/dispatch-route 重建。
 - durable event log 与断线重放。
-- HTTP trigger、scheduler 与 Kanban 持久化；这些仍由 #638/#645 继续设计。独立应用
-  composition root 与显式 installed-module catalog 见
-  [standalone application draft](standalone-application.md)。
+- HTTP trigger、scheduler、Kanban 持久化与 module discovery；这些仍由 #638/#645
+  继续设计。独立进程入口见
+  [standalone process draft](standalone-process.md)。

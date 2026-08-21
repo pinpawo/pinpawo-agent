@@ -5,8 +5,8 @@
 > **状态：当前契约。** `@pinpawo/studio` 是独立 Studio Host/runtime package；
 > 它通过 local-agent 的公共 `host-runtime` surface 复用本机 Host 装配能力；具体的
 > local wire adapter 来自独立的 `local-server-transport` surface，不进入 Chat 启动链路。
-> 可执行 application composition root 与 installed optional-module catalog 位于
-> [`services/studio-app`](../../../services/studio-app/)。
+> `pinpawo-studio` 可执行入口也直接位于 `packages/studio`；具体 optional module
+> 仍通过 `StudioModuleResolver` 从外部注入。
 
 Studio 维护可派发 Pet 的注册表、每个 Pet 的 FIFO 队列和插件事件总线。一次
 `dispatch()` 返回 `threadId` 只表示请求已经被接收；任务结果、进度、依赖、

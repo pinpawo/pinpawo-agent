@@ -69,16 +69,37 @@ test('claiming reports nothing when the checkpoint has no pending review', async
   assert.equal(await claims.claim({ requestId: 'missing' }, async () => null), null);
 });
 
-test('a recovered route for a different action does not satisfy the request', async () => {
+test('a stale actionId still finds the review its run raised', async () => {
   const claims = new ReviewResolutionClaims<Route>();
+  claims.register(route);
 
-  // The checkpoint moved on to a different review than the one being answered.
+  // The client holds an actionId from a review that has since been replaced.
+  // It still identifies the review by the request that raised it, so the
+  // claim resolves and the caller reports the mismatch as a stale action —
+  // not as a closed review, which is what the user would see if the lookup
+  // gave up here.
   const resolution = await claims.claim(
-    { requestId: 'req-1', actionId: 'action-1' },
-    async () => ({ actionId: 'action-2', requestId: 'req-1' }),
+    { requestId: 'req-1', actionId: 'stale-action' },
+    async () => null,
   );
 
-  assert.equal(resolution, null);
+  assert.deepEqual(resolution, { actionId: 'stale-action', route });
+});
+
+test('a route for a different action is returned for the caller to reject', async () => {
+  const claims = new ReviewResolutionClaims<Route>();
+  const other = { actionId: 'action-2', requestId: 'req-1' };
+
+  // The checkpoint moved on to a different review than the one being answered.
+  // Claiming still succeeds: the caller compares the ids and reports a stale
+  // review action, which is a different condition from the review being
+  // closed, so the distinction must survive this far.
+  const resolution = await claims.claim(
+    { requestId: 'req-1', actionId: 'action-1' },
+    async () => other,
+  );
+
+  assert.deepEqual(resolution, { actionId: 'action-1', route: other });
 });
 
 test('a review raised after one resolves is registered in its own right', async () => {

@@ -71,11 +71,10 @@ export class ReviewResolutionClaims<TRoute extends ReviewResolutionRoute> {
     if (!actionId || !route || this.claims.has(actionId)) {
       return null;
     }
-    // A recovered route may describe a different action than the one asked for.
-    if (params.actionId && route.actionId !== params.actionId) {
-      return null;
-    }
 
+    // The route may describe a different action than the one asked for; the
+    // caller compares them and reports that as a stale review action, which is
+    // a different condition from the review being closed.
     this.register(route);
     this.claims.set(actionId, { requestId: params.requestId, interruptQueued: false });
     return { actionId, route };
@@ -155,9 +154,13 @@ export class ReviewResolutionClaims<TRoute extends ReviewResolutionRoute> {
   }
 
   private findRoute(params: { requestId: string; actionId?: string }) {
-    if (params.actionId) {
-      return this.routesByActionId.get(params.actionId) ?? null;
-    }
+    const direct = params.actionId
+      ? this.routesByActionId.get(params.actionId)
+      : undefined;
+    if (direct) return direct;
+    // Fall back to the run: a client holding a stale actionId still identifies
+    // the review by the request that raised it, and the caller decides whether
+    // the mismatch makes the response stale.
     return this.routes().find((route) => route.requestId === params.requestId) ?? null;
   }
 

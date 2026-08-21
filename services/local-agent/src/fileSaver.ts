@@ -67,6 +67,14 @@ type HostWriterLeaseOwner = {
   acquiredAt: string;
 };
 
+type HostWriterRecoveryOwner = {
+  version: 1;
+  pid: number;
+  token: string;
+  previousToken: string;
+  acquiredAt: string;
+};
+
 function generateWriteKey(threadId: string, checkpointNamespace: string | undefined, checkpointId: string) {
   return JSON.stringify([threadId, checkpointNamespace, checkpointId]);
 }
@@ -204,7 +212,7 @@ export class FileSaver extends BaseCheckpointSaver {
     this.casRootDir = join(dirname(filePath), basename(filePath, extension));
     this.storeLockDir = join(this.casRootDir, '.writer-lock');
     this.hostWriterLeasePath = join(this.casRootDir, '.host-writer.json');
-    this.hostWriterRecoveryPath = join(this.casRootDir, '.host-writer-recovery.json');
+    this.hostWriterRecoveryPath = join(this.casRootDir, '.host-writer-recovery');
     this.load();
   }
 
@@ -218,74 +226,77 @@ export class FileSaver extends BaseCheckpointSaver {
   acquireHostWriterLease(ownerId: string): void {
     if (this.hostWriterLeaseToken) return;
     mkdirSync(this.casRootDir, { recursive: true });
-    if (existsSync(this.hostWriterRecoveryPath)) {
-      throw new Error(
-        `Checkpoint writer ownership recovery is already in progress: ${this.hostWriterRecoveryPath}`,
-      );
-    }
+    const staleRecoveryGuardPath = this.claimStaleRecoveryGuard();
 
-    const owner: HostWriterLeaseOwner = {
-      version: 1,
-      pid: process.pid,
-      token: randomUUID(),
-      ownerId,
-      acquiredAt: new Date().toISOString(),
-    };
     try {
-      writeFileSync(this.hostWriterLeasePath, JSON.stringify(owner), { flag: 'wx' });
-      this.hostWriterLeaseToken = owner.token;
-      return;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-    }
-
-    const previous = this.readHostWriterLease();
-    if (!previous) {
-      throw new Error(
-        `Checkpoint writer lease is unreadable; refusing unsafe recovery: ${this.hostWriterLeasePath}`,
-      );
-    }
-    if (isProcessAlive(previous.pid)) {
-      throw new Error(
-        `Checkpoint root is already owned by ${previous.ownerId} (pid ${previous.pid}): ${this.casRootDir}`,
-      );
-    }
-
-    const recoveryToken = randomUUID();
-    try {
-      writeFileSync(this.hostWriterRecoveryPath, JSON.stringify({
+      const owner: HostWriterLeaseOwner = {
+        version: 1,
         pid: process.pid,
-        token: recoveryToken,
+        token: randomUUID(),
+        ownerId,
+        acquiredAt: new Date().toISOString(),
+      };
+      try {
+        writeFileSync(this.hostWriterLeasePath, JSON.stringify(owner), { flag: 'wx' });
+        this.hostWriterLeaseToken = owner.token;
+        return;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      }
+
+      const previous = this.readHostWriterLease();
+      if (!previous) {
+        throw new Error(
+          `Checkpoint writer lease is unreadable; refusing unsafe recovery: ${this.hostWriterLeasePath}`,
+        );
+      }
+      if (isProcessAlive(previous.pid)) {
+        throw new Error(
+          `Checkpoint root is already owned by ${previous.ownerId} (pid ${previous.pid}): ${this.casRootDir}`,
+        );
+      }
+
+      const recoveryOwner: HostWriterRecoveryOwner = {
+        version: 1,
+        pid: process.pid,
+        token: randomUUID(),
         previousToken: previous.token,
         acquiredAt: new Date().toISOString(),
-      }), { flag: 'wx' });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-        throw new Error(
-          `Checkpoint writer ownership recovery is already in progress: ${this.hostWriterRecoveryPath}`,
-        );
-      }
-      throw error;
-    }
+      };
+      this.publishRecoveryGuard(recoveryOwner);
 
-    try {
-      const current = this.readHostWriterLease();
-      if (!current || current.token !== previous.token) {
-        throw new Error(
-          `Checkpoint writer ownership changed during recovery: ${this.hostWriterLeasePath}`,
-        );
+      try {
+        const current = this.readHostWriterLease();
+        if (!current || current.token !== previous.token) {
+          throw new Error(
+            `Checkpoint writer ownership changed during recovery: ${this.hostWriterLeasePath}`,
+          );
+        }
+        if (isProcessAlive(current.pid)) {
+          throw new Error(
+            `Checkpoint root became active during recovery (pid ${current.pid}): ${this.casRootDir}`,
+          );
+        }
+        rmSync(this.hostWriterLeasePath);
+        writeFileSync(this.hostWriterLeasePath, JSON.stringify(owner), { flag: 'wx' });
+        this.hostWriterLeaseToken = owner.token;
+      } finally {
+        this.releaseRecoveryGuard(recoveryOwner.token);
       }
-      if (isProcessAlive(current.pid)) {
-        throw new Error(
-          `Checkpoint root became active during recovery (pid ${current.pid}): ${this.casRootDir}`,
-        );
-      }
-      rmSync(this.hostWriterLeasePath);
-      writeFileSync(this.hostWriterLeasePath, JSON.stringify(owner), { flag: 'wx' });
-      this.hostWriterLeaseToken = owner.token;
     } finally {
-      this.releaseRecoveryGuard(recoveryToken);
+      if (staleRecoveryGuardPath) {
+        rmSync(staleRecoveryGuardPath, { recursive: true, force: true });
+      }
     }
+  }
+
+  /** Run startup maintenance only after this Host owns the checkpoint root. */
+  async runHostStartupMaintenance(): Promise<void> {
+    const token = this.hostWriterLeaseToken;
+    if (!token || this.readHostWriterLease()?.token !== token) {
+      throw new Error('Checkpoint startup maintenance requires the Host writer lease.');
+    }
+    await this.runStoreExclusive(() => this.gcObjects());
   }
 
   /** Release the Host lifetime claim if this FileSaver still owns it. */
@@ -322,13 +333,93 @@ export class FileSaver extends BaseCheckpointSaver {
     }
   }
 
+  private readRecoveryGuard(path = this.hostWriterRecoveryPath): HostWriterRecoveryOwner | null {
+    try {
+      const parsed = JSON.parse(
+        readFileSync(join(path, 'owner.json'), 'utf-8'),
+      ) as Partial<HostWriterRecoveryOwner>;
+      if (
+        parsed.version !== 1
+        || typeof parsed.pid !== 'number'
+        || typeof parsed.token !== 'string'
+        || typeof parsed.previousToken !== 'string'
+        || typeof parsed.acquiredAt !== 'string'
+      ) {
+        return null;
+      }
+      return parsed as HostWriterRecoveryOwner;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Atomically move a dead recovery guard aside before retrying acquisition.
+   *
+   * The token-derived destination remains present until acquisition finishes.
+   * Because both source and destination are non-empty directories, a contender
+   * holding a stale view cannot rename a newly published live guard over it.
+   */
+  private claimStaleRecoveryGuard(): string | null {
+    while (existsSync(this.hostWriterRecoveryPath)) {
+      const previous = this.readRecoveryGuard();
+      if (!previous) {
+        if (!existsSync(this.hostWriterRecoveryPath)) {
+          continue;
+        }
+        throw new Error(
+          `Checkpoint writer recovery guard is unreadable; refusing unsafe recovery: ${this.hostWriterRecoveryPath}`,
+        );
+      }
+      if (isProcessAlive(previous.pid)) {
+        throw new Error(
+          `Checkpoint writer ownership recovery is already in progress: ${this.hostWriterRecoveryPath}`,
+        );
+      }
+      const staleToken = createHash('sha256').update(previous.token).digest('hex');
+      const stalePath = `${this.hostWriterRecoveryPath}.stale-${staleToken}`;
+      try {
+        renameSync(this.hostWriterRecoveryPath, stalePath);
+        return stalePath;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT') {
+          continue;
+        }
+        if (code === 'EEXIST' || code === 'ENOTEMPTY') {
+          throw new Error(
+            `Checkpoint writer ownership recovery is already in progress: ${this.hostWriterRecoveryPath}`,
+          );
+        }
+        throw error;
+      }
+    }
+    return null;
+  }
+
+  /** Publish a fully written recovery guard with one atomic directory rename. */
+  private publishRecoveryGuard(owner: HostWriterRecoveryOwner): void {
+    const tempPath = `${this.hostWriterRecoveryPath}.tmp-${process.pid}-${randomUUID()}`;
+    mkdirSync(tempPath);
+    try {
+      writeFileSync(join(tempPath, 'owner.json'), JSON.stringify(owner));
+      renameSync(tempPath, this.hostWriterRecoveryPath);
+    } catch (error) {
+      rmSync(tempPath, { recursive: true, force: true });
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'EEXIST' || code === 'ENOTEMPTY') {
+        throw new Error(
+          `Checkpoint writer ownership recovery is already in progress: ${this.hostWriterRecoveryPath}`,
+        );
+      }
+      throw error;
+    }
+  }
+
   private releaseRecoveryGuard(token: string): void {
     try {
-      const owner = JSON.parse(
-        readFileSync(this.hostWriterRecoveryPath, 'utf-8'),
-      ) as { token?: unknown };
-      if (owner.token === token) {
-        rmSync(this.hostWriterRecoveryPath);
+      if (this.readRecoveryGuard()?.token === token) {
+        rmSync(this.hostWriterRecoveryPath, { recursive: true, force: true });
       }
     } catch {
       // A missing/replaced recovery guard is no longer ours to release.
@@ -650,8 +741,8 @@ export class FileSaver extends BaseCheckpointSaver {
   private load() {
     this.seedKnownThreads();
     // Validate existing manifests, but do not delete objects during constructor
-    // startup: constructors cannot await the cross-process writer lock. GC runs
-    // only inside deleteThread's locked transaction.
+    // startup: constructors cannot await the cross-process writer lock. The
+    // owning Host runs startup GC after acquiring its lifetime writer lease.
     this.collectReachableObjectHashes();
   }
 

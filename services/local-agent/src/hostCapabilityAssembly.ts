@@ -107,6 +107,7 @@ export class HostCapabilityAssembly {
     this.checkpointer.acquireHostWriterLease(this.sourceId);
     this.writerLeaseHeld = true;
     try {
+      await this.checkpointer.runHostStartupMaintenance();
       await this.initialize();
     } catch (error) {
       this.writerLeaseHeld = false;

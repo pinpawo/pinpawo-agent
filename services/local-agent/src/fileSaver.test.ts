@@ -237,8 +237,62 @@ test('FileSaver safely recovers a Host writer lease left by a dead process', (t)
   ) as { ownerId: string; pid: number };
   assert.equal(owner.ownerId, 'replacement-host');
   assert.equal(owner.pid, process.pid);
-  assert.equal(existsSync(join(checkpointRoot, '.host-writer-recovery.json')), false);
+  assert.equal(existsSync(join(checkpointRoot, '.host-writer-recovery')), false);
   saver.releaseHostWriterLease();
+});
+
+test('FileSaver recovers a writer recovery guard left by a dead process', (t) => {
+  const root = createTempDir(t);
+  const filePath = join(root, 'checkpoints.json');
+  const checkpointRoot = join(root, 'checkpoints');
+  const recoveryRoot = join(checkpointRoot, '.host-writer-recovery');
+  mkdirSync(recoveryRoot, { recursive: true });
+  writeFileSync(join(recoveryRoot, 'owner.json'), JSON.stringify({
+    version: 1,
+    pid: 2_147_483_647,
+    token: 'dead-recovery-token',
+    previousToken: 'dead-host-token',
+    acquiredAt: new Date(0).toISOString(),
+  }));
+
+  const saver = new FileSaver(filePath);
+  assert.doesNotThrow(() => saver.acquireHostWriterLease('replacement-host'));
+  assert.equal(existsSync(recoveryRoot), false);
+  assert.equal(
+    readdirSync(checkpointRoot).some((entry) => entry.startsWith('.host-writer-recovery.stale-')),
+    false,
+  );
+  saver.releaseHostWriterLease();
+});
+
+test('FileSaver startup maintenance requires the Host lease and collects orphan objects', async (t) => {
+  const root = createTempDir(t);
+  const filePath = join(root, 'checkpoints.json');
+  const writer = new FileSaver(filePath);
+  const config = { configurable: { thread_id: 'thread-1' } };
+
+  for (let index = 0; index < 20; index += 1) {
+    await writer.put(config, checkpoint('same-checkpoint', {
+      messages: [{ role: 'human', content: `version-${index}` }],
+    }), { source: 'loop', step: index, parents: {} });
+  }
+
+  const objectCountBeforeRestart = countObjectFiles(root);
+  const host = new FileSaver(filePath);
+  assert.equal(countObjectFiles(root), objectCountBeforeRestart);
+  await assert.rejects(
+    () => host.runHostStartupMaintenance(),
+    /requires the Host writer lease/,
+  );
+
+  host.acquireHostWriterLease('test-host');
+  await host.runHostStartupMaintenance();
+  assert.equal(countObjectFiles(root), 3);
+  assert.deepEqual(
+    (await host.getTuple(config))?.checkpoint.channel_values.messages,
+    [{ role: 'human', content: 'version-19' }],
+  );
+  host.releaseHostWriterLease();
 });
 
 test('FileSaver leaves legacy monolith and shard data untouched without restoring them', async (t) => {

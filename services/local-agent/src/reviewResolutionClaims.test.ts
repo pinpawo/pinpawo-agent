@@ -85,13 +85,11 @@ test('a review raised after one resolves is registered in its own right', async 
   const claims = new ReviewResolutionClaims<Route>();
   claims.register(route);
   await claims.claim(route, async () => null);
-
-  // The run raises its next review before settling; LangGraph reuses the
-  // interrupt id, so the follow-up arrives under the same action id.
-  claims.register(route);
   claims.release('action-1', { resolved: true });
 
-  // Registering it again is all that is needed for it to be answerable.
+  // Nothing about the resolved action lingers, so a later review — including
+  // a re-ask under the same interrupt id, which the middleware raises when a
+  // decision could not be understood — is answerable once registered.
   claims.register(route);
   assert.ok(await claims.claim(route, async () => null));
 });

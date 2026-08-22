@@ -2,9 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 test('buildAgentContext returns an API-free fallback context', async () => {
-  process.env.LLM_API_KEY = 'test-key';
-  process.env.LLM_BASE_URL = 'https://models.example.test/v1';
-  process.env.LLM_MODEL = 'test-model';
   const { LOCAL_ACTOR_ID, LOCAL_ACTOR_NAME } = await import('./actorSelection');
   const { buildAgentContext } = await import('./contextLoader');
   const context = buildAgentContext();

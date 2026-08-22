@@ -11,7 +11,6 @@ import type { StoredConfig } from './storage';
 
 export const MODEL_PROFILES_VERSION = 1 as const;
 export const LEGACY_DEFAULT_MODEL_PROFILE_ID = 'legacy-default';
-export const ENV_MODEL_PROFILE_ID = 'env';
 
 export type ModelInputModality = 'text' | 'image';
 
@@ -54,9 +53,7 @@ export type ModelProfileIssue = Readonly<{
   code:
     | 'invalid_models_contract'
     | 'invalid_profile'
-    | 'profile_id_mismatch'
-    | 'reserved_profile_id'
-    | 'incomplete_environment_profile';
+    | 'profile_id_mismatch';
   message: string;
 }>;
 
@@ -413,54 +410,6 @@ function buildLegacyProfile(stored: StoredConfig): ModelProfileV1 | undefined {
   });
 }
 
-function buildEnvironmentProfile(env: EnvMap): {
-  profile?: ModelProfileV1;
-  issues?: readonly ModelProfileIssue[];
-} {
-  const apiKey = env.LLM_API_KEY?.trim() ?? '';
-  const baseUrl = env.LLM_BASE_URL?.trim() ?? '';
-  const model = env.LLM_MODEL?.trim() ?? '';
-  const presentCount = [apiKey, baseUrl, model].filter(Boolean).length;
-  if (presentCount === 0) return {};
-  if (presentCount !== 3) {
-    return {
-      issues: Object.freeze([{
-        code: 'incomplete_environment_profile',
-        message: 'LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL must be set together; partial environment overrides are ignored',
-      }]),
-    };
-  }
-
-  const contextWindowRaw = env.LLM_CONTEXT_WINDOW_TOKENS?.trim();
-  const contextWindowTokens = contextWindowRaw ? Number(contextWindowRaw) : undefined;
-  const requestedPreset = findLlmModelPresetByKey(env.LLM_MODEL_PRESET);
-  const modelPreset = inferLlmModelPreset(model);
-  const preset = requestedPreset?.key === modelPreset?.key
-    ? requestedPreset
-    : modelPreset;
-  try {
-    return {
-      profile: createModelProfile({
-        id: ENV_MODEL_PROFILE_ID,
-        label: preset ? `${preset.label} (environment)` : `${model} (environment)`,
-        sourcePreset: preset?.key,
-        apiKey,
-        baseUrl,
-        model,
-        contextWindowTokens,
-      }),
-    };
-  } catch (error) {
-    const issues = error instanceof ModelProfileConfigError && error.issues.length > 0
-      ? error.issues
-      : Object.freeze([{
-          code: 'invalid_profile' as const,
-          message: error instanceof Error ? error.message : String(error),
-        }]);
-    return { issues };
-  }
-}
-
 function parseStoredProfiles(
   value: unknown,
 ): {
@@ -477,12 +426,6 @@ function parseStoredProfiles(
   if (typeof value.defaultProfileId !== 'string' || !value.defaultProfileId.trim()) {
     throw new ModelProfileConfigError('models.defaultProfileId must be a non-empty string');
   }
-  if (value.defaultProfileId.trim() === ENV_MODEL_PROFILE_ID) {
-    throw new ModelProfileConfigError(
-      `models.defaultProfileId cannot use reserved profile id "${ENV_MODEL_PROFILE_ID}"`,
-      { profileId: ENV_MODEL_PROFILE_ID },
-    );
-  }
   if (!isRecord(value.profiles)) {
     throw new ModelProfileConfigError('models.profiles must be an object');
   }
@@ -490,13 +433,6 @@ function parseStoredProfiles(
   const profiles = createDictionary<ModelProfileV1>();
   const unavailableProfiles = createDictionary<readonly ModelProfileIssue[]>();
   for (const [profileId, rawProfile] of Object.entries(value.profiles)) {
-    if (profileId === ENV_MODEL_PROFILE_ID) {
-      unavailableProfiles[profileId] = Object.freeze([{
-        code: 'reserved_profile_id',
-        message: `profile id "${ENV_MODEL_PROFILE_ID}" is reserved for environment configuration`,
-      }]);
-      continue;
-    }
     const parsed = parseModelProfile(rawProfile, profileId);
     if (parsed.profile) {
       profiles[profileId] = parsed.profile;
@@ -532,22 +468,13 @@ export function buildModelProfileRegistry(options: {
     }
   }
 
-  const environment = buildEnvironmentProfile(env);
-  if (environment.profile) {
-    storedResult.profiles[environment.profile.id] = environment.profile;
-    delete storedResult.unavailableProfiles[environment.profile.id];
-  } else if (environment.issues) {
-    storedResult.unavailableProfiles[ENV_MODEL_PROFILE_ID] = environment.issues;
-  }
-
-  const configuredDefaultProfileId = storedResult.defaultProfileId
-    ?? (environment.profile || environment.issues ? ENV_MODEL_PROFILE_ID : '');
+  const configuredDefaultProfileId = storedResult.defaultProfileId ?? '';
   const selectedProfileId = env.PINPAWO_MODEL_PROFILE?.trim()
-    || (environment.profile ? ENV_MODEL_PROFILE_ID : configuredDefaultProfileId);
+    || configuredDefaultProfileId;
 
   if (!configuredDefaultProfileId) {
     throw new ModelProfileConfigError(
-      'No model profile is configured. Configure a complete LLM_API_KEY + LLM_BASE_URL + LLM_MODEL tuple in ~/.pinpawo/.env.',
+      'No model profile is configured. Define a versioned model profile under "models" in ~/.pinpawo/config.json and set models.defaultProfileId.',
     );
   }
 
@@ -675,12 +602,6 @@ export function writeDefaultModelProfile(
 ): StoredConfig {
   const defaultProfileId = stored.models?.defaultProfileId
     ?? LEGACY_DEFAULT_MODEL_PROFILE_ID;
-  if (defaultProfileId === ENV_MODEL_PROFILE_ID || profile.id === ENV_MODEL_PROFILE_ID) {
-    throw new ModelProfileConfigError(
-      `Profile id "${ENV_MODEL_PROFILE_ID}" is reserved for environment configuration`,
-      { profileId: ENV_MODEL_PROFILE_ID },
-    );
-  }
   if (profile.id !== defaultProfileId) {
     throw new ModelProfileConfigError(
       `Default profile write expected id "${defaultProfileId}", received "${profile.id}"`,

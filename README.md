@@ -153,6 +153,7 @@ npx pinpawo tui
 `pinpawo init` creates:
 
 - `~/.pinpawo/.env`
+- `~/.pinpawo/config.json` with an editable default model profile
 - `~/.pinpawo/capabilities/`
 - `~/.pinpawo/capabilities/hello-pinpawo/`
 
@@ -195,20 +196,20 @@ Configuration is resolved from:
 2. `~/.pinpawo/.env`
 3. process environment variables
 
-Edit `~/.pinpawo/.env` to configure credentials and model settings; use `pinpawo setup` for diagnostics. Never commit local credentials or generated runtime state.
+Runnable model profiles, including their credentials and endpoints, are stored in
+`~/.pinpawo/config.json`. Use `PINPAWO_MODEL_PROFILE` to select one, and use
+`~/.pinpawo/.env` only for runtime settings. Run `pinpawo setup` for diagnostics.
+Never commit local credentials or generated runtime state.
 
 | Key | Purpose |
 |---|---|
-| `LLM_API_KEY` | OpenAI-compatible provider API key. |
-| `LLM_BASE_URL` | OpenAI-compatible provider base URL. |
-| `LLM_MODEL` | Default model. |
-| `LLM_CONTEXT_WINDOW_TOKENS` | Optional context-window override for custom models. |
 | `PINPAWO_MODEL_PROFILE` | Stored model profile ID. |
 | `PINPAWO_WORKDIR` | Default runtime working directory. |
 | `PINPAWO_BROWSER_BACKEND` | `auto`, `playwright`, or `extension`. |
 | `LOCAL_SERVER_PORT` | Local HTTP/WebSocket port. |
 
-A complete `LLM_API_KEY` + `LLM_BASE_URL` + `LLM_MODEL` tuple creates an ephemeral environment profile. Partial tuples are not mixed with stored profiles. See [Model Profile Configuration](docs/guides/model-profiles.md).
+See [Model Profile Configuration](docs/guides/model-profiles.md) for the stored
+profile format and selection behavior.
 
 ## CLI
 

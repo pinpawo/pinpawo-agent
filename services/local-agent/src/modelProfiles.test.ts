@@ -8,7 +8,6 @@ import {
 import {
   buildModelProfileRegistry,
   createModelProfile,
-  ENV_MODEL_PROFILE_ID,
   fingerprintModelProfile,
   LEGACY_DEFAULT_MODEL_PROFILE_ID,
   MODEL_PROFILES_VERSION,
@@ -238,63 +237,23 @@ test('stored profile ids that match object internals remain ordinary own keys', 
   assert.equal(Object.hasOwn(registry.profiles, 'constructor'), true);
 });
 
-test('stored profiles cannot claim the reserved environment profile id', () => {
+test('stored profiles may use the env id and environment model values are ignored', () => {
   const registry = buildModelProfileRegistry({
     stored: storedConfig({
-      primary: storedProfile(),
       env: storedProfile({
-        id: ENV_MODEL_PROFILE_ID,
-        label: 'Stored env',
+        id: 'env',
+        label: 'Environment named profile',
       }),
-    }),
-    env: {},
-  });
-
-  assert.equal(Object.hasOwn(registry.profiles, ENV_MODEL_PROFILE_ID), false);
-  assert.match(
-    registry.unavailableProfiles[ENV_MODEL_PROFILE_ID]?.[0]?.message ?? '',
-    /reserved/,
-  );
-});
-
-test('reserved environment id cannot be configured as the stored default', () => {
-  assert.throws(
-    () => buildModelProfileRegistry({
-      stored: storedConfig({
-        env: storedProfile({
-          id: ENV_MODEL_PROFILE_ID,
-        }),
-      }, ENV_MODEL_PROFILE_ID),
-      env: {
-        LLM_API_KEY: 'environment-secret',
-        LLM_BASE_URL: 'https://environment.example.test/v1',
-        LLM_MODEL: 'environment-model',
-      },
-    }),
-    /defaultProfileId cannot use reserved profile id "env"/,
-  );
-});
-
-test('ephemeral environment profile replaces reserved-id diagnostics', () => {
-  const registry = buildModelProfileRegistry({
-    stored: storedConfig({
-      primary: storedProfile(),
-      env: storedProfile({
-        id: ENV_MODEL_PROFILE_ID,
-      }),
-    }),
+    }, 'env'),
     env: {
-      LLM_API_KEY: 'environment-secret',
-      LLM_BASE_URL: 'https://environment.example.test/v1',
-      LLM_MODEL: 'environment-model',
+      LLM_API_KEY: 'ignored-secret',
+      LLM_BASE_URL: 'https://ignored.example.test/v1',
+      LLM_MODEL: 'ignored-model',
     },
   });
 
-  assert.equal(resolveModelProfile(registry).id, ENV_MODEL_PROFILE_ID);
-  assert.equal(
-    Object.hasOwn(registry.unavailableProfiles, ENV_MODEL_PROFILE_ID),
-    false,
-  );
+  assert.equal(registry.selectedProfileId, 'env');
+  assert.equal(resolveModelProfile(registry).apiKey, 'secret-primary');
 });
 
 test('invalid configured default blocks resolution instead of falling back', () => {
@@ -311,101 +270,6 @@ test('invalid configured default blocks resolution instead of falling back', () 
       && error.profileId === 'primary'
       && /Default model profile/.test(error.message)
     ),
-  );
-});
-
-test('complete environment tuple creates an ephemeral selected profile', () => {
-  const registry = buildModelProfileRegistry({
-    stored: storedConfig({ primary: storedProfile() }),
-    env: {
-      LLM_API_KEY: 'env-secret',
-      LLM_BASE_URL: 'https://env.example.test/v1',
-      LLM_MODEL: 'env-model',
-      LLM_CONTEXT_WINDOW_TOKENS: '128000',
-    },
-  });
-
-  assert.equal(registry.defaultProfileId, 'primary');
-  assert.equal(registry.selectedProfileId, ENV_MODEL_PROFILE_ID);
-  assert.equal(resolveModelProfile(registry).apiKey, 'env-secret');
-  assert.equal(resolveModelProfile(registry).contextWindowTokens, 128_000);
-});
-
-test('environment selector can explicitly choose a stored profile', () => {
-  const registry = buildModelProfileRegistry({
-    stored: storedConfig({ primary: storedProfile() }),
-    env: {
-      LLM_API_KEY: 'env-secret',
-      LLM_BASE_URL: 'https://env.example.test/v1',
-      LLM_MODEL: 'env-model',
-      PINPAWO_MODEL_PROFILE: 'primary',
-    },
-  });
-
-  assert.equal(registry.selectedProfileId, 'primary');
-  assert.equal(resolveModelProfile(registry).apiKey, 'secret-primary');
-});
-
-test('partial environment tuple never overlays a stored profile', () => {
-  const registry = buildModelProfileRegistry({
-    stored: storedConfig({ primary: storedProfile() }),
-    env: {
-      LLM_API_KEY: 'wrong-provider-secret',
-    },
-  });
-
-  assert.equal(registry.selectedProfileId, 'primary');
-  assert.equal(resolveModelProfile(registry).apiKey, 'secret-primary');
-  assert.match(
-    registry.unavailableProfiles[ENV_MODEL_PROFILE_ID]?.[0]?.message ?? '',
-    /must be set together/,
-  );
-});
-
-test('explicitly selecting an incomplete environment profile blocks', () => {
-  assert.throws(
-    () => buildModelProfileRegistry({
-      stored: storedConfig({ primary: storedProfile() }),
-      env: {
-        LLM_API_KEY: 'env-secret',
-        PINPAWO_MODEL_PROFILE: ENV_MODEL_PROFILE_ID,
-      },
-    }),
-    /Selected model profile "env" is invalid/,
-  );
-});
-
-test('invalid environment profile is isolated when a stored profile is selected', () => {
-  const registry = buildModelProfileRegistry({
-    stored: storedConfig({ primary: storedProfile() }),
-    env: {
-      LLM_API_KEY: 'env-secret',
-      LLM_BASE_URL: 'not-a-url',
-      LLM_MODEL: 'env-model',
-      PINPAWO_MODEL_PROFILE: 'primary',
-    },
-  });
-
-  assert.equal(registry.selectedProfileId, 'primary');
-  assert.equal(resolveModelProfile(registry).id, 'primary');
-  assert.match(
-    registry.unavailableProfiles[ENV_MODEL_PROFILE_ID]?.[0]?.message ?? '',
-    /baseUrl/,
-  );
-});
-
-test('invalid environment-only profile blocks with its validation diagnostics', () => {
-  assert.throws(
-    () => buildModelProfileRegistry({
-      stored: {},
-      env: {
-        LLM_API_KEY: 'env-secret',
-        LLM_BASE_URL: 'https://env.example.test/v1',
-        LLM_MODEL: 'env-model',
-        LLM_CONTEXT_WINDOW_TOKENS: 'not-a-number',
-      },
-    }),
-    /Default model profile "env" is invalid: contextWindowTokens/,
   );
 });
 
@@ -577,26 +441,4 @@ test('default model profile write migrates legacy fields and preserves peer prof
   assert.equal('llm_model' in migrated, false);
   assert.equal(migrated.models?.profiles.primary.label, 'Replacement');
   assert.equal(migrated.models?.profiles.secondary.label, 'Secondary');
-});
-
-test('default model profile write rejects the reserved environment identity', () => {
-  const profile = createModelProfile({
-    id: ENV_MODEL_PROFILE_ID,
-    label: 'Environment',
-    apiKey: 'environment-secret',
-    baseUrl: 'https://environment.example.test/v1',
-    model: 'environment-model',
-    contextWindowTokens: 64_000,
-  });
-
-  assert.throws(
-    () => writeDefaultModelProfile({
-      models: {
-        version: MODEL_PROFILES_VERSION,
-        defaultProfileId: ENV_MODEL_PROFILE_ID,
-        profiles: {},
-      },
-    }, profile),
-    /reserved for environment configuration/,
-  );
 });

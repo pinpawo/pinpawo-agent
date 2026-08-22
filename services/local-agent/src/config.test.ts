@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
@@ -9,16 +9,32 @@ const CONFIG_IMPORT_PATH = process.cwd().endsWith('services/local-agent')
   ? './src/config.ts'
   : './services/local-agent/src/config.ts';
 
-const REQUIRED_ENV = {
-  LLM_API_KEY: 'llm-key',
-  LLM_BASE_URL: 'https://models.example.test/v1',
-  LLM_MODEL: 'test-model',
-};
+function storedModelConfig(): Record<string, unknown> {
+  return {
+    models: {
+      version: 1,
+      defaultProfileId: 'primary',
+      profiles: {
+        primary: {
+          id: 'primary',
+          label: 'Primary',
+          provider: 'example',
+          model: 'stored-model',
+          baseUrl: 'https://stored.example.test/v1',
+          apiKey: 'stored-secret',
+          contextWindowTokens: 128000,
+          inputModalities: ['text'],
+        },
+      },
+    },
+  };
+}
 
 function readGlobalReviewPolicyMode(
   home: string,
   env: Record<string, string> = {},
 ) {
+  ensureModelProfileConfig(home);
   return execFileSync(process.execPath, [
     '--import',
     'tsx',
@@ -31,7 +47,6 @@ function readGlobalReviewPolicyMode(
     cwd: process.cwd(),
     env: {
       ...process.env,
-      ...REQUIRED_ENV,
       HOME: home,
       PINPAWO_GLOBAL_REVIEW_POLICY: '',
       PINPAWO_REVIEW_POLICY_STRATEGY: '',
@@ -42,6 +57,7 @@ function readGlobalReviewPolicyMode(
 }
 
 function readAutoAuthorizationSafetyLevel(home: string) {
+  ensureModelProfileConfig(home);
   return execFileSync(process.execPath, [
     '--import',
     'tsx',
@@ -54,7 +70,6 @@ function readAutoAuthorizationSafetyLevel(home: string) {
     cwd: process.cwd(),
     env: {
       ...process.env,
-      ...REQUIRED_ENV,
       HOME: home,
     },
     encoding: 'utf8',
@@ -67,10 +82,15 @@ function writeStoredConfig(home: string, config: Record<string, unknown>) {
   writeFileSync(resolve(configDir, 'config.json'), JSON.stringify(config));
 }
 
+function ensureModelProfileConfig(home: string): void {
+  const configPath = resolve(home, '.pinpawo', 'config.json');
+  if (!existsSync(configPath)) writeStoredConfig(home, storedModelConfig());
+}
+
 async function loadConfigHelpers() {
-  for (const [key, value] of Object.entries(REQUIRED_ENV)) {
-    process.env[key] = value;
-  }
+  const home = mkdtempSync(resolve(tmpdir(), 'pinpawo-config-home-'));
+  writeStoredConfig(home, storedModelConfig());
+  process.env.HOME = home;
   return import('./config');
 }
 
@@ -124,8 +144,9 @@ test('Capability registry backend is explicit and rejects unknown values', async
 });
 
 
-test('config workdir defaults to process cwd when env and stored config are absent', () => {
+test('config workdir defaults to process cwd when no workdir is configured', () => {
   const home = mkdtempSync(resolve(tmpdir(), 'pinpawo-config-home-'));
+  writeStoredConfig(home, storedModelConfig());
   const output = execFileSync(process.execPath, [
     '--import',
     'tsx',
@@ -140,9 +161,6 @@ test('config workdir defaults to process cwd when env and stored config are abse
       ...process.env,
       HOME: home,
       PINPAWO_WORKDIR: '',
-      LLM_API_KEY: 'llm-key',
-      LLM_BASE_URL: 'https://models.example.test/v1',
-      LLM_MODEL: 'test-model',
     },
     encoding: 'utf8',
   });
@@ -162,6 +180,7 @@ test('config ignores the removed PINPAWO_REVIEW_POLICY_STRATEGY environment alia
 test('config ignores the removed review_policy_strategy stored key', () => {
   const home = mkdtempSync(resolve(tmpdir(), 'pinpawo-config-home-'));
   writeStoredConfig(home, {
+    ...storedModelConfig(),
     review_policy_strategy: 'full_access',
   });
 
@@ -179,6 +198,7 @@ test('config still accepts the canonical global review policy setting', () => {
 test('config still accepts the canonical global_review_policy stored key', () => {
   const home = mkdtempSync(resolve(tmpdir(), 'pinpawo-config-home-'));
   writeStoredConfig(home, {
+    ...storedModelConfig(),
     global_review_policy: 'full_access',
   });
 
@@ -191,6 +211,7 @@ test('auto authorization safety level defaults to strict and reads the stored re
 
   const configuredHome = mkdtempSync(resolve(tmpdir(), 'pinpawo-config-home-'));
   writeStoredConfig(configuredHome, {
+    ...storedModelConfig(),
     auto_authorization_safety_level: 'relaxed',
   });
   assert.equal(readAutoAuthorizationSafetyLevel(configuredHome), 'relaxed');
@@ -267,7 +288,7 @@ test('config resolves a stored versioned model profile without legacy singleton 
   assert.match(parsed.fingerprint, /^[a-f0-9]{64}$/);
 });
 
-test('config never combines a partial environment override with a stored profile', () => {
+test('config ignores environment model tuples and resolves the stored profile', () => {
   const home = mkdtempSync(resolve(tmpdir(), 'pinpawo-config-home-'));
   writeStoredConfig(home, {
     models: {
@@ -303,9 +324,9 @@ test('config never combines a partial environment override with a stored profile
       ...process.env,
       HOME: home,
       LLM_API_KEY: 'wrong-provider-secret',
-      LLM_BASE_URL: '',
-      LLM_MODEL: '',
-      LLM_MODEL_PRESET: '',
+      LLM_BASE_URL: 'https://wrong.example.test/v1',
+      LLM_MODEL: 'wrong-model',
+      LLM_MODEL_PRESET: 'qwen',
       PINPAWO_MODEL_PROFILE: '',
     },
     encoding: 'utf8',

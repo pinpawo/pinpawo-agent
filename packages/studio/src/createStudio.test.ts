@@ -89,6 +89,37 @@ test('dispatch acknowledges immediately and exposes terminal completion separate
   assert.equal(result.output, 'eventually');
 });
 
+test('a receipt replays current progress and observes only its invocation', async () => {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const studio = await createStudio({
+    studioId: 's1',
+    entryPetId: 'worker',
+    pets: [pet({
+      petId: 'worker',
+      invoke: async () => {
+        await held;
+        return { status: 'completed', reply: 'done' };
+      },
+    })],
+  });
+
+  const receipt = await studio.dispatch(request('worker', 'observe me'));
+  const statuses: string[] = [];
+  const unsubscribe = receipt.onInvocation((event) => {
+    assert.equal(event.invocationId, receipt.invocationId);
+    statuses.push(event.status);
+  });
+  await flush();
+  assert.deepEqual(statuses, ['busy']);
+
+  release();
+  await receipt.completion;
+  await flush();
+  assert.deepEqual(statuses, ['busy', 'completed']);
+  unsubscribe();
+});
+
 test('repeated dispatches reuse one Pet thread and receive distinct invocation ids', async () => {
   const studio = await createStudio({
     studioId: 's1',

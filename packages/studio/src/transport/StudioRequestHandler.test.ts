@@ -24,6 +24,7 @@ type TestStudio = Studio & {
 function fakeStudio(overrides: Partial<Studio> = {}): TestStudio {
   const eventHandlers = new Set<StudioEventHandler>();
   const invocationHandlers = new Set<StudioInvocationEventHandler>();
+  const receiptInvocationHandlers = new Map<string, Set<StudioInvocationEventHandler>>();
   let dispatched: StudioDispatchRequest | undefined;
   return {
     entryPetId: 'pet-a',
@@ -34,6 +35,12 @@ function fakeStudio(overrides: Partial<Studio> = {}): TestStudio {
         threadId: 'studio:s1:pet:pet-a',
         invocationId: 'invocation-1',
         metadata: input.metadata,
+        onInvocation: (handler) => {
+          const handlers = receiptInvocationHandlers.get('invocation-1') ?? new Set();
+          handlers.add(handler);
+          receiptInvocationHandlers.set('invocation-1', handlers);
+          return () => handlers.delete(handler);
+        },
         completion: Promise.resolve({
           petId: input.petId,
           threadId: 'studio:s1:pet:pet-a',
@@ -58,6 +65,9 @@ function fakeStudio(overrides: Partial<Studio> = {}): TestStudio {
     lastDispatch: () => dispatched,
     emitInvocation: (event) => {
       for (const handler of invocationHandlers) void handler(event);
+      for (const handler of receiptInvocationHandlers.get(event.invocationId) ?? []) {
+        void handler(event);
+      }
     },
   };
 }
@@ -86,8 +96,8 @@ test('a Studio dispatch returns Pet, thread, and invocation identity', async () 
   const dispatched = studio.lastDispatch();
   assert.deepEqual(dispatched?.input, { kind: 'request', request: 'plan this' });
   assert.equal(dispatched?.petId, 'pet-a');
-  assert.equal(typeof dispatched?.metadata?.transportRouteId, 'string');
-  assert.deepEqual(sent.at(-1), {
+  assert.equal(dispatched?.metadata, undefined);
+  assert.deepEqual(sent[0], {
     type: 'studio.accepted',
     deliveryId: 'delivery-1',
     petId: 'pet-a',
@@ -96,22 +106,25 @@ test('a Studio dispatch returns Pet, thread, and invocation identity', async () 
   });
 });
 
-test('acceptance is delivered before an invocation emitted during dispatch', async () => {
-  let studio!: TestStudio;
-  studio = fakeStudio({
+test('acceptance is delivered before a receipt replays current invocation state', async () => {
+  const studio = fakeStudio({
     dispatch: async (input) => {
-      studio.emitInvocation({
+      const busy: StudioInvocationEvent = {
         petId: input.petId,
         threadId: 'studio:s1:pet:pet-a',
         invocationId: 'invocation-1',
         status: 'busy',
         metadata: input.metadata,
-      });
+      };
       return {
         petId: input.petId,
         threadId: 'studio:s1:pet:pet-a',
         invocationId: 'invocation-1',
         metadata: input.metadata,
+        onInvocation: (handler) => {
+          void handler(busy);
+          return () => undefined;
+        },
         completion: new Promise(() => undefined),
       };
     },
@@ -132,8 +145,8 @@ test('acceptance is delivered before an invocation emitted during dispatch', asy
 
 test('a canonical Studio request targets a Pet and carries typed resume input opaquely', async () => {
   const studio = fakeStudio();
-  const { handler } = handlerWith(studio);
-  await handler.handleStudioRequest(createPeer([]), {
+  const { handler, sent } = handlerWith(studio);
+  await handler.handleStudioRequest(createPeer(sent), {
     type: 'studio.dispatch',
     deliveryId: 'delivery-resume-1',
     petId: 'pet-b',
@@ -145,7 +158,7 @@ test('a canonical Studio request targets a Pet and carries typed resume input op
         responses: [{ interactionId: 'review-1', selectedOptionId: 'approve' }],
       },
     },
-    metadata: { taskId: 'task-1' },
+    metadata: { taskId: 'task-1', transportRouteId: 'producer-owned' },
     idempotencyKey: 'resume-task-1',
   });
 
@@ -153,11 +166,21 @@ test('a canonical Studio request targets a Pet and carries typed resume input op
   assert.equal(dispatched?.petId, 'pet-b');
   assert.equal(dispatched?.input.kind, 'resume_interrupt');
   assert.equal(dispatched?.idempotencyKey, 'resume-task-1');
-  assert.equal(dispatched?.metadata?.taskId, 'task-1');
-  assert.equal(typeof dispatched?.metadata?.transportRouteId, 'string');
+  assert.deepEqual(dispatched?.metadata, {
+    taskId: 'task-1',
+    transportRouteId: 'producer-owned',
+  });
+  assert.deepEqual(sent[0], {
+    type: 'studio.accepted',
+    deliveryId: 'delivery-resume-1',
+    petId: 'pet-b',
+    threadId: 'studio:s1:pet:pet-a',
+    invocationId: 'invocation-1',
+    metadata: { taskId: 'task-1', transportRouteId: 'producer-owned' },
+  });
 });
 
-test('invocation events route by opaque transport metadata and expose pending interrupt', async () => {
+test('receipt-scoped invocation events expose pending interrupt without transport metadata', async () => {
   const studio = fakeStudio();
   const { handler, sent } = handlerWith(studio);
   await handler.handleStudioRequest(createPeer(sent), {
@@ -166,14 +189,12 @@ test('invocation events route by opaque transport metadata and expose pending in
     petId: 'pet-a',
     input: { kind: 'request', request: 'go' },
   });
-  const metadata = studio.lastDispatch()?.metadata;
-  assert.ok(metadata);
   studio.emitInvocation({
     petId: 'pet-a',
     threadId: 'studio:s1:pet:pet-a',
     invocationId: 'invocation-1',
     status: 'pending_interrupt',
-    metadata: { ...metadata, taskId: 'task-1' },
+    metadata: { taskId: 'task-1' },
     pendingInterrupt: {
       interruptId: 'interrupt-1',
       payload: { kind: 'human_review', interactions: [] },
@@ -202,14 +223,25 @@ test('an idempotent transport retry receives the existing invocation terminal re
       petId: 'pet-a',
       threadId: 'studio:s1:pet:pet-a',
       invocationId: 'invocation-existing',
-      metadata: { transportRouteId: 'studio-route:original', taskId: 'task-1' },
+      metadata: { taskId: 'task-1' },
+      onInvocation: (handler) => {
+        void handler({
+          petId: 'pet-a',
+          threadId: 'studio:s1:pet:pet-a',
+          invocationId: 'invocation-existing',
+          status: 'completed',
+          output: 'already complete',
+          metadata: { taskId: 'task-1' },
+        });
+        return () => undefined;
+      },
       completion: Promise.resolve({
         petId: 'pet-a',
         threadId: 'studio:s1:pet:pet-a',
         invocationId: 'invocation-existing',
         status: 'completed',
         output: 'already complete',
-        metadata: { transportRouteId: 'studio-route:original', taskId: 'task-1' },
+        metadata: { taskId: 'task-1' },
       }),
     }),
   });
@@ -266,15 +298,12 @@ test('disconnect drops only that peer routes while the resident Studio remains a
     petId: 'pet-a',
     input: { kind: 'request', request: 'go' },
   });
-  const metadata = studio.lastDispatch()?.metadata;
-  assert.ok(metadata);
   handler.rejectDisconnected(peer);
   studio.emitInvocation({
     petId: 'pet-a',
     threadId: 'studio:s1:pet:pet-a',
     invocationId: 'invocation-1',
     status: 'completed',
-    metadata,
   });
   assert.deepEqual(sent, []);
 });

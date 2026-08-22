@@ -29,6 +29,10 @@ const receipt = await studio.dispatch({
 });
 
 const result = await receipt.completion;
+
+const unsubscribe = receipt.onInvocation((event) => {
+  // Observe only this invocation; the latest state is replayed on subscribe.
+});
 ```
 
 Acceptance returns immediately. Every resident Pet owns one deterministic,
@@ -83,10 +87,13 @@ validates the interrupt and responses, and resumes LangGraph. A stale interrupt
 fails without changing the checkpoint. No Chat session, route cache, or review
 message is reused.
 
-`onInvocation()` is the live control-plane observation. The public Studio sees
-all invocations; a Plugin context sees only invocations it dispatched. Events
-carry Pet/thread/invocation identity and opaque metadata. They are not durable;
-checkpoint state, not an event subscriber, owns interrupt existence.
+`receipt.onInvocation()` observes one accepted invocation and immediately
+replays its latest known state. This is the request transport's correlation
+boundary: no private route identity is added to producer metadata. The public
+Studio `onInvocation()` remains the live Host-wide observation, while a Plugin
+context sees only invocations it dispatched. Events carry Pet/thread/invocation
+identity and opaque metadata. They are not durable; checkpoint state, not an
+event subscriber, owns interrupt existence.
 
 ## Independent event bus
 
@@ -100,7 +107,8 @@ context.notify({
 
 Studio fills `source` and `occurredAt` for Plugin events, then asynchronously
 fans them out. It does not validate payload meaning, persist or replay events,
-or infer that an event completes a dispatch. Dispatch observation belongs to
+infer that an event completes a dispatch, or attach a global Plugin event to a
+transport delivery. Dispatch observation belongs to receipt/Studio
 `onInvocation`; domain notification belongs to `notify`/`subscribe`.
 
 ## Plugin and Toolkit boundary

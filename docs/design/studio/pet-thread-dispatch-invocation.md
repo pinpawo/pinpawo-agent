@@ -84,6 +84,7 @@ type StudioDispatchRequest = {
 type StudioDispatchReceipt = {
   threadId: string;
   invocationId: string;
+  onInvocation: (handler: StudioInvocationEventHandler) => () => void;
   completion: Promise<StudioDispatchResult>;
 };
 
@@ -99,9 +100,10 @@ type StudioDispatchResult = {
 Every accepted call receives a new `invocationId` unless an explicit
 `idempotencyKey` resolves to an existing call. Studio resolves the stable
 `threadId` from `petId`; callers do not choose the checkpoint namespace.
-Dispatch acknowledges acceptance with a receipt immediately. Its `completion`
-promise settles when the serialized invocation reaches a terminal or durable
-interrupt state, so push-style producers do not need to block on graph work.
+Dispatch acknowledges acceptance with a receipt immediately. Its scoped
+observer replays the latest invocation state, and its `completion` promise
+settles when the serialized invocation reaches a terminal or durable interrupt
+state, so push-style producers do not need to block on graph work.
 
 Producer metadata is opaque. Studio core does not define a `correlationId`:
 producers may put their own task, correlation, or source fields under metadata,
@@ -185,10 +187,12 @@ review options or construct graph resume commands.
   rejects ordinary input while a continuation is pending, validates interrupt
   identity and review responses, and issues a keyed LangGraph resume command.
 - Studio owns a typed `studio.dispatch` request/resume wire envelope and emits
-  `studio.accepted`, `studio.invocation`, and `studio.event`. Producer correlation
-  is opaque `metadata` echoed at the Studio boundary; it is neither Pet execution
-  context nor part of the Pet thread. Agent Session and the Chat dispatcher
-  contain no Studio messages.
+  `studio.accepted` plus receipt-scoped `studio.invocation` progress. Plugin events
+  remain on the independent in-process bus and are not implicitly attached to a
+  request delivery. Producer correlation is opaque `metadata` echoed unchanged
+  at the Studio boundary; it is neither transport state, Pet execution context,
+  nor part of the Pet thread. Agent Session and the Chat dispatcher contain no
+  Studio messages.
 - Chat continues to use its own session and review transport. Only the public
   pending-interrupt and review response contracts are shared.
 

@@ -6,7 +6,6 @@ import {
 } from '@pinpawo/agent-contracts';
 import type {
   StudioDispatchInput,
-  StudioEvent,
   StudioInvocationEvent,
 } from '../studioContract';
 
@@ -33,7 +32,6 @@ export type StudioServerMessage =
       metadata?: JsonObject;
     }
   | ({ type: 'studio.invocation'; deliveryId: string } & StudioInvocationEvent)
-  | { type: 'studio.event'; deliveryId: string; event: StudioEvent }
   | { type: 'studio.error'; deliveryId: string; message: string };
 
 export type StudioClientMessageEnvelope = {

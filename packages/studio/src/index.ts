@@ -39,10 +39,6 @@ export type {
 export * from './types';
 export * from './petAgentTypes';
 
-/* ─────────────── Wiki port:宿主注入实现 ─────────────── */
-
-export type { StudioWikiAccess } from './wikiPort';
-
 /* ─────────────── Host/runtime layer ─────────────── */
 
 export { StudioHost } from './host/StudioHost';

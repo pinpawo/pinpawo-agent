@@ -2,7 +2,7 @@
   "name": "@pinpawo-toolkit/studio-kanban",
   "version": "0.1.0",
   "private": true,
-  "description": "File-backed kanban for Studio: run queue persistence and the shared wiki",
+  "description": "Optional Kanban Plugin and Agent Toolkit for PinPawo Studio",
   "type": "module",
   "main": "./src/index.ts",
   "exports": {

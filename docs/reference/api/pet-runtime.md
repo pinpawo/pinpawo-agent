@@ -23,17 +23,7 @@ type PetAgentRuntime = {
 type PetAgentRuntimeInvokeInput = {
   input: StudioDispatchInput;
   threadId: string;
-  invocationId: string;
-  metadata?: JsonObject;
-  wikiRoot?: string;
   signal?: AbortSignal;
-  execution?: AgentExecution;
-  workdir?: string;
-  runtimeEnvironment?: string;
-  toolkits?: AgentToolkit[];
-  extraCapabilities?: AgentCapability[];
-  allowedCapabilityNames?: string[];
-  activeDelegationTransition?: ActiveDelegationTransition;
 };
 
 type PetAgentRuntimeInvokeResult =
@@ -42,11 +32,11 @@ type PetAgentRuntimeInvokeResult =
 ```
 
 `input` is either a natural-language request or a typed interrupt resume.
-Studio resolves the stable Pet `threadId` and current `invocationId`; producers
-cannot choose the checkpoint namespace. `extraCapabilities` and `toolkits` add
-to the runtime configuration for this invocation only.
-`allowedCapabilityNames` limits the Capability Planner's readable workspace;
-it is an allowlist, not a tool permission bypass.
+Studio resolves the stable Pet `threadId`; producers cannot choose the
+checkpoint namespace. Studio's `invocationId` identifies dispatch progress and
+does not enter the Pet runtime. Capability, Toolkit, workdir, and other Agent
+execution configuration are fixed when the Host builds the resident Pet rather
+than supplied by individual dispatches.
 
 ## Lifecycle and ownership
 
@@ -63,9 +53,6 @@ it is an allowlist, not a tool permission bypass.
 - A runtime that creates its own `ToolkitRuntimeManager` may expose `shutdown()`
   to release Toolkit roots. When a host injects a shared manager, the host owns
   shutdown.
-- `wikiRoot` is optional. When the local host also supplies `wikiAccess`, the
-  runtime reads the wiki index and adds a constrained read Toolkit; Studio does
-  not receive the worker's private scratch state in return.
 
 ## Integrating review and events
 

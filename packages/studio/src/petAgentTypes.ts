@@ -1,5 +1,3 @@
-import type { AgentActor } from '@pinpawo/pet-agent';
-
 export type PetAgentStartupMode = 'standby' | 'lazy' | 'disabled';
 
 export type PetAgentStatus =
@@ -19,19 +17,4 @@ export type PetAgentCapabilitySummary = {
    */
   available: boolean;
   reason?: string | null;
-};
-
-export type StudioAgent = AgentActor & {
-  role?: string | null;
-  serviceSummary?: string | null;
-  startupMode?: PetAgentStartupMode;
-  status?: PetAgentStatus;
-  capabilities?: PetAgentCapabilitySummary[];
-};
-
-export type StudioContext = {
-  studioId: string;
-  ownerUserId: string | null;
-  defaultPetId?: string | null;
-  agents: StudioAgent[];
 };

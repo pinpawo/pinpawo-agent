@@ -15,7 +15,7 @@ loopback WebSocket/stdio framing。
 Studio + PetAgentRuntime[] + 已配置插件
       ↓ StudioRequestHandler
 studio.dispatch → typed dispatch(petId) → studio.accepted（确认）
-                                      ↘ studio.invocation / studio.event
+                                      ↘ studio.invocation
 ```
 
 这是与 Chat 相同的 `Host -> Agent Runtime -> Capability -> Toolkit` 领域模型。
@@ -54,14 +54,15 @@ metadata 与可选 idempotency key。接收后立即返回带 `petId`、稳定 `
 `invocationId` 的 `studio.accepted`；这是**已接收确认**，不是最终答复。历史 Chat
 `studio_request` shape 不再接受。
 
-handler 会把 invocation 的 busy 与终态投射为 `studio.invocation`，并把关联的 Plugin
-事件投射为 `studio.event`。插件事件只有显式携带该请求的内部 route metadata 时才会
-转发；无关联的全局事件不会跨 peer 广播。该事件流是进程内 best-effort 通知，不能
-用作持久审计；pending interrupt 仍以 checkpoint 为权威。
+handler 订阅已接收的 receipt，把该 invocation 的 busy 与终态投射为
+`studio.invocation`。receipt observer 会回放最新状态，因此即使 progress 与接收确认
+并发，也会在 `studio.accepted` 之后投递。
 
-每次请求都会得到不可碰撞的 transport route id，放在不透明 metadata 中并在公开转发
-前移除。多个工作流或 peer 并发时，事件不会归到另一个 delivery。没有内部 route 的
-插件事件保持领域全局语义，不附着到任何 delivery。
+producer metadata 保持原样，不再携带 transport route 状态。Plugin event 继续属于
+Studio 独立的进程内事件总线；request transport 不把全局 Plugin event 隐式附着到
+某个 delivery。未来若需对外提供 Plugin event feed，需要显式的 subscription/replay
+契约。当前 invocation 流仍是进程内 best-effort 通知，pending interrupt 仍以
+checkpoint 为权威。
 
 ## 关闭
 

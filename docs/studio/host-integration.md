@@ -16,7 +16,7 @@ supplies only protocol-neutral loopback WebSocket/stdio framing:
 Studio + PetAgentRuntime[] + configured plugins
       ↓ StudioRequestHandler
 studio.dispatch → typed dispatch(petId) → studio.accepted
-                                      ↘ studio.invocation / studio.event
+                                      ↘ studio.invocation
 ```
 
 This is the Studio form of the same `Host -> Agent Runtime -> Capability ->
@@ -65,19 +65,18 @@ accepted, the handler sends `studio.accepted` with `petId`, stable `threadId`,
 and current `invocationId`. This is an acknowledgement, not a final answer.
 The historical Chat `studio_request` shape is not accepted.
 
-The handler forwards invocation changes as `studio.invocation`, including
-completed, pending interrupt, failure, and cancellation, and correlated Plugin
-events as `studio.event`. Plugin events are forwarded only when they carry the
-internal route metadata of an accepted request; uncorrelated global events are
-not broadcast across peers. Consumers must treat this stream as best-effort
-process-local notification, not a durable audit. The checkpoint remains
-authoritative for a pending interrupt.
+The handler subscribes to the accepted receipt and forwards its invocation
+changes as `studio.invocation`, including completed, pending interrupt, failure,
+and cancellation. Receipt observation replays the latest state, so progress
+that races acknowledgement is still delivered after `studio.accepted`.
 
-Each accepted request receives an unguessable transport route ID that is passed
-inside opaque metadata and removed before public forwarding. This prevents
-simultaneous workflows or peers from being projected under another delivery ID.
-A Plugin event without that internal route remains domain-global and is not
-attached to a request.
+Producer metadata remains untouched and contains no transport route state.
+Plugin events remain on Studio's independent in-process event bus; the request
+transport does not implicitly attach a global Plugin event to one delivery. A
+future external Plugin-event feed must define an explicit subscription and
+replay contract. Consumers must treat the current invocation stream as
+best-effort process-local notification, not a durable audit. The checkpoint
+remains authoritative for a pending interrupt.
 
 ## Shutdown
 

@@ -49,7 +49,8 @@ capability
 - Planner 在同一 trace 的多个 run、delegation 和用户输入中断之间保持上下文；
 - Planner 接管执行边界的验收与后续规划；
 - root graph 继续独占 handoff、delegation 生命周期、路由和公开状态更新；
-- Planner 对 root 只提交结构化 control action 和 plan tasks；
+- Planner 对 root 只提交结构化 control action、plan tasks，以及
+  `user_input_required` 专用的单个结构化问题；
 - Planner transcript、工具消息、Capability 文档观察和内部摘要进入 root checkpoint
   的 Planner lane，但不进入 main conversation、Answer input 或 handoff。
 
@@ -58,7 +59,10 @@ capability
 ```text
 entryDecision
   -> Planner
-  -> capability
+       |-- execute_plan        -> capability
+       |-- user_input_required -> answer
+       `-- unavailable         -> answer
+capability
   -> Planner
        |-- continue_current  -> same capability delegation
        |-- advance_plan      -> accept handoff -> next delegation
@@ -167,17 +171,22 @@ type PlannerAction =
 type PlannerCommit = {
   action: PlannerAction;
   tasks: CapabilityPlanTask[];
+  userInputRequest?: {
+    question: string;
+  };
 };
 ```
 
 `action` 是 graph control protocol，不是用户内容。可执行语义只通过 `tasks`
 投影；`continue_current` 不携带新语义，也不能替换当前 task 或后续计划。
+`userInputRequest` 是唯一例外：它只允许在 `user_input_required` 中出现，
+且只携带 Answer 必须询问的一个具体问题，不携带推理或上下文。
 
 移除以下 Planner 输出形式：
 
 - `reason`；
 - `context`；
-- `question`；
+- 顶层或自由形式的 `question`；
 - `gap_note`；
 - direct text fallback；
 - Planner 生成的 Answer briefing。
@@ -253,9 +262,9 @@ Planner 只做语义判断并提交 commit。graph 必须确定性地负责：
 
 适用条件：目标尚未完成，并且下一次进展必须先等待用户补充、选择或确认。
 
-该 action 只允许在 execution Boundary 使用。Entry Answer 在把请求交给 Planner 前拥有
-完整的用户交互边界；一旦进入 Entry Planner，本轮只能形成执行计划或报告无可执行能力，
-不能在缺少 active delegation 公开证据的情况下提前返回 `user_input_required`。
+该 action 在 Entry 和 execution Boundary 都合法。Entry Answer 仍负责显而易见的
+交互分流；如果 Planner 在形成执行计划时才确认存在真正的用户独占阻塞，
+也可以在没有 active delegation 时返回 `user_input_required`。
 
 “Planner 尚未核验或不知道某个事实”不属于该条件。只要任一 Capability 能读取、
 查询、验证或执行得到所需事实，Planner 必须继续形成可执行 task；用户要求先分析、
@@ -265,10 +274,12 @@ Planner 只做语义判断并提交 commit。graph 必须确定性地负责：
 约束：
 
 - `tasks` 必须为空；
+- `userInputRequest.question` 必须是非空、有长度上限的单一具体问题；
 - post-execution 阶段保留 active delegation 与 transcript；
 - 不把未完成 announce 标记为 completed handoff；
-- Answer 根据公开用户请求、当前 announce、artifact 和 typed outcome 提出问题；
-- Planner 不输出 `question` 或自由文本 context；
+- Answer 原样使用结构化问题，并可根据公开用户请求、当前 announce
+  和 artifact 简要说明进展；
+- Planner 不输出自由文本 question 或 context；
 - 用户回复后，以相同 `traceId`、新 `runId` 恢复 Planner 和 active delegation。
 
 ### `unavailable`
@@ -291,7 +302,7 @@ continue_current     -> active delegation + empty tasks
 execute_plan         -> entry + non-empty tasks
 advance_plan         -> boundary + non-empty tasks
 goal_done            -> empty tasks + accepted-result preconditions
-user_input_required  -> boundary + active delegation + empty tasks
+user_input_required  -> entry or boundary + empty tasks + structured question
 unavailable          -> empty tasks
 ```
 
@@ -495,7 +506,8 @@ Answer 不得读取 Planner lane。
 Reply mode 的公开依据：
 
 - `goal_done`：user request + accepted handoff + public artifacts；
-- `user_input_required`：user request + active delegation announce + public artifacts；
+- `user_input_required`：user request + root 投影的 structured question；Boundary 还可以
+  附带 active delegation announce + public artifacts；
 - `unavailable`：user request + registry/runtime 的确定性公开 facts；
 - iteration/execution limit：guard state + active delegation evidence。
 
@@ -531,7 +543,7 @@ continue_current()
 submit_plan(tasks)
 advance_plan(tasks)
 complete_goal()
-request_user_input()
+request_user_input(question)
 report_unavailable()
 ```
 

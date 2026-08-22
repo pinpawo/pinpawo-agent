@@ -205,7 +205,15 @@ function createQueuedPlannerRunner(
           return { action: 'goal_done', tasks: [] };
         }
         if (planning.outcome === 'user_input_required') {
-          return { action: 'user_input_required', tasks: [] };
+          return {
+            action: 'user_input_required',
+            tasks: [],
+            userInputRequest: {
+              question: typeof planning.question === 'string'
+                ? planning.question
+                : '请提供继续当前任务所需的选择或信息。',
+            },
+          };
         }
         if (planning.outcome === 'continue') {
           const active = input.activeDelegation;
@@ -361,7 +369,11 @@ function goalDoneDecision() {
 }
 
 function userInputRequiredDecision() {
-  return { outcome: 'user_input_required', gap_note: null };
+  return {
+    outcome: 'user_input_required',
+    question: '请选择将报告发送到邮件还是项目群？',
+    gap_note: null,
+  };
 }
 
 function taskDoneDecision(gapNote: string | null = '当前任务已完成，但用户目标仍有后续步骤。') {
@@ -646,6 +658,58 @@ test('Planner return routes bounded facts through the answer node', async () => 
   assert.match(answerInvocationText, /<blocked_reason meaning="[^"]+">capability_unavailable<\/blocked_reason>/);
   assert.equal(state.runNextDelegation, null);
   assert.equal(state.taskActiveDelegation, null);
+});
+
+test('Entry Planner routes its structured user question through Answer without an active delegation', async () => {
+  let answerInvocationText = '';
+  let answerInputText = '';
+  const question = '请选择部署到生产还是预发布环境？';
+  const model = {
+    invoke: async (messages: BaseMessage[]) => {
+      answerInvocationText = messages.map(readMessageText).join('\n');
+      answerInputText = readMessageText(messages.at(-1) ?? new HumanMessage(''));
+      return new AIMessage(question);
+    },
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+  } as unknown as AgentModels['act'];
+  const graph = createOrchestratorGraph({
+    models: {
+      act: model,
+      observe: model,
+      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
+    },
+    actor: testActor,
+    capabilityPlannerRunner: {
+      async invoke() {
+        return {
+          action: 'user_input_required',
+          tasks: [],
+          userInputRequest: { question },
+        };
+      },
+    },
+  });
+
+  const state = await graph.invoke(buildOrchestratorRunInput([
+    new HumanMessage('把服务部署到生产或预发布环境，目标由我决定。'),
+  ]), {
+    configurable: {
+      thread_id: 'entry-planner-user-input-question',
+      actor: testActor,
+      capabilities: [capability('general', 'Deploy after the user selects an environment.')],
+      toolkits: [],
+    },
+  }) as OrchestratorStateType;
+
+  assert.match(answerInvocationText, /<reply_mode>user_input_required<\/reply_mode>/);
+  assert.match(answerInvocationText, /<requested_user_input>/);
+  assert.match(answerInvocationText, /请选择部署到生产还是预发布环境/);
+  assert.doesNotMatch(answerInputText, /<awaiting_user_input_context>/);
+  assert.equal(state.taskActiveDelegation, null);
+  assert.equal(state.runNextDelegation, null);
+  assert.equal(state.runUserInputRequest, null);
 });
 
 test('Planner non-commit routes to Answer without inventing a General delegation', async () => {
@@ -1300,6 +1364,8 @@ test('user_input_required returns control without claiming delegation completion
   const answerFacts = String(answerMessages.at(-1)?.content ?? '');
   assert.doesNotMatch(answerSystem, /确认发送渠道|报告已经完成|artifact-awaiting-user-choice/);
   assert.match(answerFacts, /<reply_mode>user_input_required<\/reply_mode>/);
+  assert.match(answerFacts, /<requested_user_input>/);
+  assert.match(answerFacts, /请选择将报告发送到邮件还是项目群/);
   assert.match(answerFacts, /<awaiting_user_input_context>/);
   assert.match(answerFacts, /报告已经完成，但用户尚未选择邮件或项目群/);
   assert.match(answerFacts, /<artifacts>/);
@@ -5368,7 +5434,11 @@ test('limit-reached subagent announce reaches the Planner boundary input', async
     capabilityPlannerRunner: {
       async invoke(input) {
         plannerInput = input;
-        return { action: 'user_input_required', tasks: [] };
+        return {
+          action: 'user_input_required',
+          tasks: [],
+          userInputRequest: { question: '是否继续探查当前仓库？' },
+        };
       },
     },
   });

@@ -155,10 +155,15 @@ type DelegationOutcome =
 
 - `goal_done` means only that the user goal is complete.
 - `user_input_required` means that the goal is incomplete and autonomous
-  execution at a delegation boundary cannot continue without user input. Entry
-  clarification remains owned by Entry Answer before execution planning starts.
+  execution cannot continue without a user-owned choice, authorization, or
+  information. Entry Answer owns obvious interaction routing, while the Entry
+  Planner may return this outcome when the blocker is established during
+  planning; an active delegation is not required in that case.
 - Model uncertainty or an unchecked fact is not user input: when an available
   Capability can inspect or verify it, autonomous execution must continue.
+- The Planner commit carries one bounded structured question for this outcome;
+  Answer receives that question from root state instead of inventing it from
+  Planner prose or requiring active-delegation evidence.
 - Every accepted non-continue announce is copied into the main conversation as
   a handoff. This records evidence provenance, not completion.
 - The graph carries the accepted outcome through run-scoped state. `answer`

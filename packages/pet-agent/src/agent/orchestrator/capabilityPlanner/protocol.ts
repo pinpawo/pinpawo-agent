@@ -24,6 +24,10 @@ export type PlannerRouteOutcome = PlannerReplyOutcome | 'planner_incomplete';
 export type OrchestratorRuntimeFailure =
   | 'checkpoint_incompatible';
 
+export type PlannerUserInputRequest = {
+  readonly question: string;
+};
+
 /**
  * A parsed terminal Planner action. `tasks` is non-empty exactly for
  * `execute_plan` and `advance_plan`; parsePlannerCommit enforces that pairing,
@@ -37,6 +41,7 @@ export type OrchestratorRuntimeFailure =
 export type PlannerCommit = {
   readonly action: PlannerAction;
   readonly tasks: readonly CapabilityPlanTask[];
+  readonly userInputRequest?: PlannerUserInputRequest;
 };
 
 export type PlannerDelegationInput = {
@@ -56,9 +61,14 @@ const plannerTaskSchema = z.object({
   task: z.string().trim().min(1).max(2_000),
 }).strict();
 
+const plannerUserInputRequestSchema = z.object({
+  question: z.string().trim().min(1).max(1_000),
+}).strict();
+
 export const plannerCommitSchema = z.object({
   action: z.enum(PLANNER_ACTIONS),
   tasks: z.array(plannerTaskSchema).max(24),
+  userInputRequest: plannerUserInputRequestSchema.optional(),
 }).strict();
 
 export function parsePlannerCommit(
@@ -77,6 +87,12 @@ export function parsePlannerCommit(
       `Planner action "${commit.action}" ${requiresTasks ? 'requires' : 'forbids'} tasks.`,
     );
   }
+  const requiresUserInputRequest = commit.action === 'user_input_required';
+  if (requiresUserInputRequest !== Boolean(commit.userInputRequest)) {
+    throw new Error(
+      `Planner action "${commit.action}" ${requiresUserInputRequest ? 'requires' : 'forbids'} userInputRequest.`,
+    );
+  }
   for (const task of commit.tasks) {
     if (!context.allowedCapabilityNames.includes(task.capability)) {
       throw new Error(
@@ -88,7 +104,6 @@ export function parsePlannerCommit(
     commit.action === 'continue_current'
     || commit.action === 'advance_plan'
     || commit.action === 'goal_done'
-    || commit.action === 'user_input_required'
   )) {
     throw new Error(`Planner action "${commit.action}" is invalid at entry.`);
   }
@@ -104,5 +119,8 @@ export function parsePlannerCommit(
   return {
     action: commit.action,
     tasks: commit.tasks,
+    ...(commit.userInputRequest
+      ? { userInputRequest: commit.userInputRequest }
+      : {}),
   };
 }

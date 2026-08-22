@@ -30,6 +30,7 @@ export type AnswerBehaviorInput = {
     runId: string;
     task: string;
     outcome: 'goal_done' | 'user_input_required';
+    question?: string;
     context?: string;
     acceptedResults?: Array<{
       task: string;
@@ -388,6 +389,7 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
           runId: 'answer-eval-user-choice-run',
           task: '确认发送渠道并发送已经完成的报告',
           outcome: 'user_input_required',
+          question: '请选择将报告发送到邮件还是项目群？',
           context: '报告已经完成但尚未发送；继续前需要用户选择发送到邮件或项目群。',
         },
       },
@@ -426,6 +428,7 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
           runId: 'answer-eval-runtime-wait-user-input-run',
           task: '完成 extension 与协议层改造并提交 PR-B1',
           outcome: 'user_input_required',
+          question: '是否允许更新已有远端分支？',
           context: '当前执行停在远端分支处理前，需要用户确认是否允许更新已有远端分支。',
         },
       },

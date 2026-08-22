@@ -31,6 +31,7 @@ test('Answer invocation is exactly the system prompt plus one answer_input messa
         result: '配置检查已完成。',
         artifactRefs: [],
       }],
+      question: '请选择要检查的范围。',
       context: '还需要用户选择检查范围。',
     },
   });
@@ -55,6 +56,7 @@ test('Answer invocation is exactly the system prompt plus one answer_input messa
   assert.match(String(message.content), /<run_user_request[^>]*>[\s\S]*检查仓库并报告结果。/);
   assert.match(String(message.content), /<reply_mode>user_input_required<\/reply_mode>/);
   assert.match(String(message.content), /<accepted_results>[\s\S]*配置检查已完成/);
+  assert.match(String(message.content), /<requested_user_input>[\s\S]*请选择要检查的范围/);
   assert.match(String(message.content), /<awaiting_user_input_context>[\s\S]*还需要用户选择检查范围/);
   assert.equal(String(message.content).trimEnd().endsWith('</answer_input>'), true);
 });
@@ -83,6 +85,7 @@ test('Answer input append helper does not mutate canonical history', () => {
     mode: 'user_input_required',
     hasUserRequest: true,
     acceptedResults: [],
+    question: '请选择要检查的范围。',
     context: null,
   });
 
@@ -95,7 +98,13 @@ test('Answer input uses a closed reply mode without an instruction field', () =>
   const variants: ModelAnswerContextFacts[] = [
     { mode: 'direct', hasUserRequest: true, acceptedResults: [] },
     { mode: 'goal_done', hasUserRequest: true, acceptedResults: [] },
-    { mode: 'user_input_required', hasUserRequest: false, acceptedResults: [], context: null },
+    {
+      mode: 'user_input_required',
+      hasUserRequest: false,
+      acceptedResults: [],
+      question: '请选择要检查的范围。',
+      context: null,
+    },
   ];
 
   for (const facts of variants) {
@@ -148,6 +157,7 @@ test('Answer input replaces a stale synthetic Answer input instead of duplicatin
     mode: 'user_input_required',
     hasUserRequest: true,
     acceptedResults: [],
+    question: '请确认目标分支。',
     context: '需要用户确认目标分支。',
   });
 

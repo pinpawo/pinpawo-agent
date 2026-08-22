@@ -34,7 +34,6 @@ Content-Type: application/json
 {
   "petId": "planner",
   "input": { "kind": "request", "request": "plan this work" },
-  "metadata": { "producerTaskId": "task-1" },
   "idempotencyKey": "retry-1"
 }
 ```
@@ -45,12 +44,14 @@ An accepted dispatch returns `202` immediately:
 {
   "petId": "planner",
   "threadId": "studio:demo:pet:planner",
-  "invocationId": "...",
-  "metadata": { "producerTaskId": "task-1" }
+  "invocationId": "..."
 }
 ```
 
 The HTTP connection does not own cancellation and does not wait for completion.
+Optional producer metadata is only passed through and echoed when the caller
+explicitly supplies it; the Plugin creates no HTTP-, frontend-, or Kanban-specific
+correlation field.
 Invalid JSON/dispatch shapes return `400`, unsupported media returns `415`, and
 a Studio dispatch rejection returns `422`.
 

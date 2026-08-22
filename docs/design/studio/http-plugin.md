@@ -25,15 +25,15 @@ context.subscribe(event)
 {
   "petId": "planner",
   "input": { "kind": "request", "request": "plan this work" },
-  "metadata": { "producerTaskId": "task-1" },
   "idempotencyKey": "optional-retry-key"
 }
 ```
 
 HTTP Plugin 校验结构后调用 `context.dispatch()`。接受成功返回 `202` 和
-`petId/threadId/invocationId/metadata`；它不等待 invocation completion，也不把 HTTP
-连接变成 cancellation owner。调用方如需执行进度，应使用 Studio invocation transport，
-而不是把 Plugin event 当成 invocation event。
+`petId/threadId/invocationId`；仅当调用方显式提供可选 `metadata` 时才原样回显它。
+Plugin 不为 HTTP、前端或 Kanban 生成额外关联字段。它不等待 invocation completion，
+也不把 HTTP 连接变成 cancellation owner。调用方如需执行进度，应使用 Studio
+invocation transport，而不是把 Plugin event 当成 invocation event。
 
 ### `GET /events`
 

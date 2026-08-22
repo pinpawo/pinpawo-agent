@@ -33,14 +33,14 @@ Content-Type: application/json
 {
   "petId": "planner",
   "input": { "kind": "request", "request": "plan this work" },
-  "metadata": { "producerTaskId": "task-1" },
   "idempotencyKey": "retry-1"
 }
 ```
 
-接受成功立即返回 `202` 和 `petId/threadId/invocationId/metadata`。HTTP 连接不拥有
-cancellation，也不等待 invocation completion。非法 JSON/dispatch 返回 `400`，错误
-media type 返回 `415`，Studio 拒绝 dispatch 返回 `422`。
+接受成功立即返回 `202` 和 `petId/threadId/invocationId`。只有调用方显式提供可选
+`metadata` 时才会原样透传并回显；Plugin 不生成 HTTP、前端或 Kanban 专用的关联字段。
+HTTP 连接不拥有 cancellation，也不等待 invocation completion。非法 JSON/dispatch
+返回 `400`，错误 media type 返回 `415`，Studio 拒绝 dispatch 返回 `422`。
 
 ## SSE live event
 

@@ -112,7 +112,6 @@ test('HTTP Plugin dispatches a validated request and returns receipt identity', 
     body: JSON.stringify({
       petId: 'planner',
       input: { kind: 'request', request: 'plan this work' },
-      metadata: { producerTaskId: 'task-1' },
       idempotencyKey: 'retry-1',
     }),
   });
@@ -122,12 +121,10 @@ test('HTTP Plugin dispatches a validated request and returns receipt identity', 
     petId: 'planner',
     threadId: 'thread:planner',
     invocationId: 'invocation-1',
-    metadata: { producerTaskId: 'task-1' },
   });
   assert.deepEqual(harness.requests, [{
     petId: 'planner',
     input: { kind: 'request', request: 'plan this work' },
-    metadata: { producerTaskId: 'task-1' },
     idempotencyKey: 'retry-1',
   }]);
 });

@@ -90,10 +90,12 @@ Studio。每个 Pet 的 Capability 目录也必须在 resident runtime 构建前
 
 - Studio Host 不构造 `LocalAgentGraphService`、`LocalServerTuiSessionService` 或
   `LocalServerChatHandler`。
-- 每次外部 request 创建不可碰撞的内部 route id，并放在 producer-owned `metadata` 中。
-- 只有显式携带该 route metadata 的 plugin event 才能投射回对应 peer/request；无 route
-  的全局事件不能广播给所有连接，也不能归到“该 peer 最近一次请求”。
-- invocation 通过 Host control subscription 投射为 `studio.invocation` progress；
+- 每次已接收 dispatch 的 receipt 提供 invocation-scoped observer，并回放已知最新状态。
+- transport 先发 `studio.accepted`，再订阅该 receipt；producer-owned `metadata` 不携带
+  route id 或其他 transport 私有状态。
+- Plugin event 保持进程内全局总线语义，request transport 不隐式把它归到某个
+  peer/delivery。未来的外部 event feed 需要显式 subscription/replay 契约。
+- invocation 通过 receipt observer 投射为 `studio.invocation` progress；
   到达 completed/pending_interrupt/failed/cancelled 后释放本次 transport route。
 
 ### 2.4 HITL
@@ -128,7 +130,7 @@ route 不做重建。用户侧 pending-action 索引、授权与断线重放属�
 - plugin partial-start failure 逆序 rollback。
 - 同一 checkpoint root 的第二个 Host writer lease 被拒绝；owner 释放或 dead-owner 安全恢复后
   才能启动。两个 `FileSaver` 实例并发 `putWrites` 不丢 sibling writes。
-- Studio event 按 route metadata 精确归属；无关联事件不跨 peer 广播。
+- Studio invocation 通过 receipt observer 精确归属；producer metadata 无 transport 私有字段。
 - Studio transport 接受 typed interrupt resume，但明确拒绝 Chat session/run control。
 - Studio Pet invocation 保留 human review/session authorization capability，使 interrupt 可落入 checkpoint。
 - `StudioHost` success/failure init 均按所有权顺序释放资源。

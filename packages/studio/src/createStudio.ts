@@ -149,6 +149,19 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
     const metadata = request.metadata
       ? Object.freeze({ ...request.metadata })
       : undefined;
+    const receiptInvocationHandlers = new Set<StudioInvocationEventHandler>();
+    let latestInvocationEvent: StudioInvocationEvent | undefined;
+
+    function emitReceiptInvocation(event: StudioInvocationEvent): void {
+      latestInvocationEvent = event;
+      emitInvocation(event, source);
+      for (const handler of receiptInvocationHandlers) {
+        void invokeObserver(
+          () => handler(event),
+          `[studio] receipt invocation handler failed (invocation=${event.invocationId})`,
+        );
+      }
+    }
 
     console.log(
       `[studio] dispatch petId=${request.petId} source=${source ?? 'studio'} `
@@ -164,12 +177,12 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
       };
       if (stopped) {
         const result: StudioDispatchResult = { ...base, status: 'cancelled' };
-        emitInvocation(result, source);
+        emitReceiptInvocation(result);
         return result;
       }
       if (request.signal?.aborted) {
         const result: StudioDispatchResult = { ...base, status: 'cancelled' };
-        emitInvocation(result, source);
+        emitReceiptInvocation(result);
         return result;
       }
 
@@ -178,13 +191,12 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
       const signal = request.signal
         ? AbortSignal.any([request.signal, controller.signal])
         : controller.signal;
-      emitInvocation({ ...base, status: 'busy' }, source);
+      emitReceiptInvocation({ ...base, status: 'busy' });
 
       try {
         const result = await pet.invoke({
           input: request.input,
           threadId,
-          invocationId,
           signal,
         });
         const completed: StudioDispatchResult = result.status === 'pending_interrupt'
@@ -198,7 +210,7 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
               status: 'completed',
               ...(result.reply ? { output: result.reply } : {}),
             };
-        emitInvocation(completed, source);
+        emitReceiptInvocation(completed);
         return completed;
       } catch (error) {
         const aborted = signal.aborted;
@@ -214,7 +226,7 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
             message,
           );
         }
-        emitInvocation(failed, source);
+        emitReceiptInvocation(failed);
         return failed;
       } finally {
         activeInvocations.delete(invocationId);
@@ -226,6 +238,17 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
       threadId,
       invocationId,
       ...(metadata ? { metadata } : {}),
+      onInvocation: (handler) => {
+        receiptInvocationHandlers.add(handler);
+        const current = latestInvocationEvent;
+        if (current) {
+          void invokeObserver(
+            () => handler(current),
+            `[studio] receipt invocation handler failed (invocation=${invocationId})`,
+          );
+        }
+        return () => receiptInvocationHandlers.delete(handler);
+      },
       completion,
     });
     if (idempotencyRecordKey) {

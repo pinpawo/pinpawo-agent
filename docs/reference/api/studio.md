@@ -63,6 +63,7 @@ type StudioDispatchReceipt = {
   threadId: string;
   invocationId: string;
   metadata?: JsonObject;
+  onInvocation(handler: StudioInvocationEventHandler): () => void;
   completion: Promise<StudioDispatchResult>;
 };
 
@@ -91,6 +92,9 @@ returns a receipt. `threadId` is stable for the `(studioId, petId)` pair;
 `invocationId` is new for every accepted call unless an explicit
 `idempotencyKey` finds an existing call. Acceptance does not mean the graph work
 has completed. The receipt's `completion` promise settles with a terminal result.
+Its `onInvocation()` observer is scoped to this invocation and immediately
+replays the latest known event, so transport adapters can acknowledge first and
+still observe progress that raced receipt delivery.
 
 One Pet executes at most one invocation at a time. A durable interrupt settles
 the current invocation as `pending_interrupt` and releases the queue slot. A
@@ -108,10 +112,12 @@ handlers run asynchronously; an error in one is isolated from the publisher and
 other subscribers. The API does not persist, replay, validate, or correlate
 event payloads.
 
-`onInvocation()` is the Host control subscription. It observes `busy` and
-terminal events for direct Host and Plugin dispatches. Unlike the generic event
-bus, it is an execution observation channel with explicit Pet/thread/invocation
-identity. It is in-memory and has no replay guarantee.
+Receipt `onInvocation()` is the correlation-safe observer for one accepted
+dispatch. Studio-level `onInvocation()` is the Host control subscription. It
+observes `busy` and terminal events for direct Host and Plugin dispatches.
+Unlike the generic event bus, both are execution observation channels with
+explicit Pet/thread/invocation identity. They are in-memory; only the receipt
+observer replays its latest event.
 
 `listPets()` returns descriptors only, not runtime references. This keeps all
 plugin-originated work on the dispatch boundary.
@@ -189,8 +195,11 @@ type PetAgentRuntime = {
 };
 ```
 
-The invocation input carries the typed request/resume, resolved stable
-`threadId`, current `invocationId`, and opaque metadata. The runtime owns
+The invocation input carries only the typed request/resume, resolved stable
+`threadId`, and cancellation signal. Invocation identity remains in Studio's
+coordination and observation envelope; it is not Pet graph input. Capability,
+Toolkit, workdir, and Agent execution context are fixed when the Host builds the
+resident Pet; Studio cannot inject them per dispatch. The runtime owns
 checkpoint interpretation and resume validation. `gate()` is retained as a
 Host diagnostic; Studio does not keep an invocation alive or block its queue on
 `waiting`. The local adapter is documented in [Pet Runtime API](pet-runtime.md).

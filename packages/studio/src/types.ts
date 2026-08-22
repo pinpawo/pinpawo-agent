@@ -1,13 +1,9 @@
-import type { AgentActor, AgentExecution } from '@pinpawo/pet-agent';
-import type { AgentCapability } from '@pinpawo/pet-agent';
-import type { AgentToolkit } from '@pinpawo/pet-agent';
+import type { AgentActor } from '@pinpawo/pet-agent';
 import type {
   PetAgentCapabilitySummary,
   PetAgentStartupMode,
   PetAgentStatus,
-  StudioContext,
 } from './petAgentTypes';
-import type { ActiveDelegationTransition } from '@pinpawo/pet-agent';
 import type {
   PendingInterruptProjection,
   StudioDispatchInput,
@@ -28,33 +24,16 @@ export type PetAgentRuntimeDescriptor = AgentActor & {
  * pet runtime 的 invoke 参数。Studio↔pet 边界是函数调用,而非 envelope 协议。
  *
  * - input: 普通请求或显式 interrupt resume。Pet runtime 负责对 checkpoint 校验。
- * - wikiRoot: 共享知识库目录绝对路径。提供时 wiki middleware 会自动读取
- *   {wikiRoot}/index.md 注入到 system prompt,并装备 wiki_read toolkit。
  * - signal: Studio 取消信号。
- * - threadId / execution / workdir: 运行时透传字段。
- * - toolkits: 本次 invoke 临时注入的 toolkit,会与 runtime config toolkits 合并。
+ * - threadId: Studio 从 Pet 解析的持久连续性身份。
+ *
+ * Capability、Toolkit、workdir 与 Agent execution context 在 Host 构建
+ * resident Pet 时确定，不属于 Studio dispatch 的动态输入。
  */
 export type PetAgentRuntimeInvokeInput = {
   input: StudioDispatchInput;
   threadId: string;
-  invocationId: string;
-  wikiRoot?: string;
   signal?: AbortSignal;
-  execution?: AgentExecution;
-  workdir?: string;
-  runtimeEnvironment?: string;
-  toolkits?: AgentToolkit[];
-  /**
-   * 调用方在本次 invoke 临时注入的 capability(例如 Studio 给 planner agent 的
-   * `studio_plan` capability)。与 runtime 构造时声明的 capability 合并使用。
-   */
-  extraCapabilities?: AgentCapability[];
-  /**
-   * 本次 invoke 的 Capability allowlist。Capability Planner 的只读文档
-   * workspace 只物化这些已编译、可用的 Capability；不传时暴露完整 registry。
-   */
-  allowedCapabilityNames?: string[];
-  activeDelegationTransition?: ActiveDelegationTransition;
 };
 
 /**

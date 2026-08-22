@@ -142,7 +142,6 @@ test('invoke evaluates Toolkit availability before compiling its registry genera
   await runtime.invoke({
     input: { kind: 'request', request: 'inspect' },
     threadId: 'studio:s1:pet:p1',
-    invocationId: 'invocation-1',
   });
 
   const registry = (calls[0]?.options as {
@@ -193,7 +192,6 @@ test('Studio pet invocation preserves a checkpointed review as a waiting gate', 
   const result = await runtime.invoke({
     input: { kind: 'request', request: 'task that requires review' },
     threadId: 'studio:s1:pet:p1',
-    invocationId: 'invocation-1',
   });
 
   assert.deepEqual(
@@ -245,7 +243,6 @@ test('Studio pet rejects a stale interrupt id without invoking or mutating the g
         },
       },
       threadId: 'studio:s1:pet:p1',
-      invocationId: 'invocation-2',
     }),
     /stale.*interrupt-current/i,
   );
@@ -289,7 +286,6 @@ test('Studio pet resumes a matching interrupt through a keyed LangGraph Command'
       },
     },
     threadId: 'studio:s1:pet:p1',
-    invocationId: 'invocation-2',
   });
 
   assert.equal(result.status, 'completed');
@@ -347,7 +343,6 @@ test('invoke starts Toolkit roots before evaluating runtime-dependent availabili
   await runtime.invoke({
     input: { kind: 'request', request: 'inspect' },
     threadId: 'studio:s1:pet:p1',
-    invocationId: 'invocation-1',
   });
   const registry = (calls[0]?.options as {
     configurable?: { registry?: { capabilities?: Array<{ capability: { name: string } }> } };
@@ -365,53 +360,6 @@ test('invoke starts Toolkit roots before evaluating runtime-dependent availabili
 
 
 
-
-test('pet runtime does not replace an explicitly configured wiki Capability', async () => {
-  const { graph, calls } = makeStubGraph([
-    { messages: [new AIMessage('done')] },
-  ]);
-  const runtime = createPetAgentRuntime({
-    models: fakeModels(),
-    actor: fakeActor(),
-    capabilities: [{
-      name: 'wiki',
-      description: 'Use an externally managed knowledge source.',
-      uses: [],
-      instructions: defineInstructionDocument({
-        content: '# External Wiki',
-      }),
-    }],
-    graph,
-  });
-
-  const result = await runtime.invoke({
-    input: { kind: 'request', request: 'read wiki' },
-    threadId: 'studio:s1:pet:p1',
-    invocationId: 'invocation-1',
-    wikiRoot: '/tmp/pinpawo-test-wiki',
-  });
-
-  assert.equal(result.status, 'completed');
-  assert.equal(result.status === 'completed' ? result.reply : null, 'done');
-  const configurable = (calls[0]?.options as {
-    configurable?: {
-      registry?: {
-        capabilities?: Array<{
-          capability?: { name?: string; description?: string };
-          toolkits?: Array<{ name?: string }>;
-        }>;
-      };
-    };
-  } | undefined)?.configurable;
-  const wikiCapabilities = configurable?.registry?.capabilities
-    ?.filter(({ capability }) => capability?.name === 'wiki');
-  assert.equal(wikiCapabilities?.length, 1);
-  assert.equal(
-    wikiCapabilities?.[0]?.capability?.description,
-    'Use an externally managed knowledge source.',
-  );
-  assert.deepEqual(wikiCapabilities?.[0]?.toolkits, []);
-});
 
 test('a pet runtime built with a checkpointer exposes durable thread state', async () => {
   // #613:此前 Studio 从不传 checkpoint,pet 的 graph 因此跑在无 checkpoint

@@ -42,6 +42,7 @@ function fakeStudio(): Studio {
       petId: 'pet-1',
       threadId: 'thread-1',
       invocationId: 'invocation-1',
+      onInvocation: () => () => undefined,
       completion: Promise.resolve({
         petId: 'pet-1',
         threadId: 'thread-1',

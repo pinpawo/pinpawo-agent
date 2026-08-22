@@ -26,6 +26,10 @@ const receipt = await studio.dispatch({
   input: { kind: 'request', request: '写一篇文章。' },
   metadata: { producerRef: 'external-job-42' },
 });
+
+const unsubscribe = receipt.onInvocation((event) => {
+  // 只观察本次 invocation；订阅时会回放最新状态。
+});
 ```
 
 dispatch 返回 receipt 只表示 Studio 已接收，不等待模型执行：
@@ -99,7 +103,10 @@ pending_interrupt、failed 或 cancelled 后，队列就可以接收下一次调
 
 ## 4. Invocation 观察与 Plugin event 是两条通道
 
-`onInvocation()` 是 dispatch 的 live control-plane 投射：
+`receipt.onInvocation()` 只观察一次已接收 invocation，并在订阅时回放其最新状态。
+它是 request transport 的关联边界；Studio 不再往 producer metadata 中塞私有 route id。
+
+Studio/Plugin 上的 `onInvocation()` 是更广的 live control-plane 投射：
 
 - 公共 Studio 订阅看到所有 invocation；
 - Plugin context 只看到自己发起的 invocation；
@@ -118,7 +125,8 @@ context.notify({
 ```
 
 Studio 补 `source` 与 `occurredAt`，异步扇出，但不解释 payload、不推断它对应哪个
-dispatch，也不负责持久化和重试。领域结果是否落盘、如何展示，仍由 Plugin 决定。
+dispatch，也不把全局 Plugin event 附着到某个 transport delivery，更不负责持久化
+和重试。领域结果是否落盘、如何展示，仍由 Plugin 决定。
 
 ## 5. Plugin、Toolkit、Capability 边界
 

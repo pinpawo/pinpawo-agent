@@ -8,12 +8,12 @@
  * 负责把它投射成公开 PendingInterrupt、校验 typed resume，并构造 Command。
  * Studio core 只搬运这些输入/结果，不解释 review 选项或 checkpoint 内容。
  */
-import { HumanMessage, SystemMessage } from '@langchain/core/messages';
+import { HumanMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import { Command } from '@langchain/langgraph';
 
 import type { AgentCapability } from '@pinpawo/pet-agent';
-import type { AgentActor, AgentExecution, AgentModels } from '@pinpawo/pet-agent';
+import type { AgentActor, AgentModels } from '@pinpawo/pet-agent';
 import {
   filterAvailableToolkits,
   type AgentToolkit,
@@ -46,7 +46,6 @@ import type {
   PetAgentRuntimeInvokeResult,
   PetGateState,
 } from '../types';
-import type { StudioWikiAccess } from '../wikiPort';
 import type { PendingInterruptProjection } from '../studioInvocation';
 
 /**
@@ -68,7 +67,6 @@ export type PetAgentRuntimeConfig = {
   status?: PetAgentStatus;
   capabilities?: AgentCapability[];
   toolkits?: AgentToolkit[];
-  execution?: AgentExecution;
   workdir?: string;
   graph?: OrchestratorGraph;
   modelInputModalities?: OrchestratorConfig['modelInputModalities'];
@@ -79,11 +77,6 @@ export type PetAgentRuntimeConfig = {
   subagentGenerationReserveTokens?: OrchestratorConfig['subagentGenerationReserveTokens'];
   /** Host-owned when a process has a durable Toolkit runtime lifecycle. */
   toolkitRuntimeManager?: ToolkitRuntimeManager;
-  /**
-   * 注入的 wiki 访问实现。不提供时 pet 不装备 wiki 检索工具,
-   * 也不注入知识库 system prompt。
-   */
-  wikiAccess?: StudioWikiAccess;
 };
 
 function buildCapabilitySummaries(config: PetAgentRuntimeConfig): PetAgentCapabilitySummary[] {
@@ -122,42 +115,6 @@ function initialStatus(config: PetAgentRuntimeConfig): PetAgentStatus {
 
 function canInvokeStatus(status: PetAgentStatus): boolean {
   return status === 'standby' || status === 'degraded';
-}
-
-/**
- * Wiki middleware:通过注入的 wiki access 读取索引并构造 system prompt 片段。
- * 读不到则降级为只列检索工具,不抛错。
- */
-async function buildWikiSystemPrompt(
-  wikiRoot: string,
-  wikiAccess: StudioWikiAccess,
-): Promise<string> {
-  const indexContent = (await wikiAccess.readIndex(wikiRoot))
-    ?? '(知识库为空,尚未生成 index.md)';
-  return [
-    '你可以访问一个共享知识库,根目录已通过 wiki_read 工具配置好。',
-    '下面是知识库的当前索引:',
-    '',
-    '----- index.md -----',
-    indexContent.trim(),
-    '--------------------',
-    '',
-    '使用 wiki_read_ls / wiki_read_cat / wiki_read_grep / wiki_read_find / wiki_read_head / wiki_read_tail 检索详情。',
-  ].join('\n');
-}
-
-async function buildRequestMessages(
-  brief: string,
-  wikiRoot: string | undefined,
-  wikiAccess: StudioWikiAccess | undefined,
-): Promise<BaseMessage[]> {
-  const messages: BaseMessage[] = [];
-  if (wikiRoot && wikiAccess) {
-    const wikiPrompt = await buildWikiSystemPrompt(wikiRoot, wikiAccess);
-    messages.push(new SystemMessage(wikiPrompt));
-  }
-  messages.push(new HumanMessage(brief));
-  return messages;
 }
 
 /**
@@ -330,14 +287,8 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
             : `Pet "${config.actor.petId}" has an unsupported pending continuation.`,
         );
       }
-      const messages = await buildRequestMessages(
-        input.input.request,
-        input.wikiRoot,
-        config.wikiAccess,
-      );
       graphInput = buildOrchestratorRunInput(
-        messages,
-        { activeDelegationTransition: input.activeDelegationTransition },
+        [new HumanMessage(input.input.request)],
       );
     } else {
       if (!pending) {
@@ -360,31 +311,12 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
       });
     }
 
-    const toolkitDefinitions = [
-      ...(config.toolkits ?? []),
-      ...(input.toolkits ?? []),
-      ...(input.wikiRoot && config.wikiAccess
-        ? [config.wikiAccess.createReadToolkit(input.wikiRoot)]
-        : []),
-    ];
+    const toolkitDefinitions = config.toolkits ?? [];
     await toolkitRuntimeManager?.start(toolkitDefinitions, { signal: input.signal });
     const toolkits = await filterAvailableToolkits(toolkitDefinitions);
-    const configuredCapabilities = [
-      ...(config.capabilities ?? []),
-      ...(input.extraCapabilities ?? []),
-    ];
-    const wikiCapability = input.wikiRoot && config.wikiAccess
-      && !configuredCapabilities.some((capability) =>
-        capability.name === config.wikiAccess!.readCapabilityName
-          || capability.uses.includes('wiki_read'))
-      ? config.wikiAccess.createReadCapability()
-      : null;
-    const capabilities = wikiCapability
-      ? [...configuredCapabilities, wikiCapability]
-      : configuredCapabilities;
     const registry = compileAgentRegistry({
       toolkits,
-      capabilities,
+      capabilities: config.capabilities ?? [],
     });
     const configurable: Record<string, unknown> = {
       actor: config.actor,
@@ -392,13 +324,9 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
       registry,
       reviewCapabilities: STUDIO_REVIEW_CAPABILITIES,
       execution: {
-        ...(config.execution ?? {}),
-        ...(input.execution ?? {}),
         threadId: input.threadId,
       },
-      workdir: input.workdir ?? config.workdir,
-      runtimeEnvironment: input.runtimeEnvironment,
-      allowedCapabilityNames: input.allowedCapabilityNames,
+      workdir: config.workdir,
     };
 
     const previousStatus = status;

@@ -59,6 +59,11 @@ export type StudioDispatchReceipt = {
   threadId: string;
   invocationId: string;
   metadata?: JsonObject;
+  /**
+   * Observe only this invocation. The latest event is replayed immediately so
+   * a caller cannot miss progress emitted before the receipt was delivered.
+   */
+  onInvocation: (handler: StudioInvocationEventHandler) => () => void;
   completion: Promise<StudioDispatchResult>;
 };
 

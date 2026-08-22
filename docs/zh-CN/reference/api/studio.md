@@ -37,6 +37,7 @@ type StudioDispatchReceipt = {
   threadId: string;
   invocationId: string;
   metadata?: JsonObject;
+  onInvocation(handler: StudioInvocationEventHandler): () => void;
   completion: Promise<StudioDispatchResult>;
 };
 ```
@@ -48,6 +49,10 @@ dispatch 有不同的 `invocationId`。同一个 Pet 的 active invocation 串�
 
 `metadata` 完全由 producer 所有，Studio 只透传。任务号、关联号或来源可以放在
 其中，但不能替代 `petId`、`threadId`、`invocationId` 或 `interruptId`。
+
+`receipt.onInvocation()` 只观察这一次 invocation，订阅时会立即回放已知的最新
+event。因此 transport 可以先发 `studio.accepted`，再安全订阅 progress，无需向
+producer metadata 注入私有 route id。
 
 ## interrupt 与 resume
 
@@ -87,6 +92,10 @@ Studio 不复用 Chat 的 session、route cache 或 review message。独立 inte
   再逆序停止 Plugin。
 
 interrupt 是否存在由 checkpoint 决定，不由 `onInvocation` 的内存订阅决定。
+
+Pet runtime 的单次 invoke 输入只携带 typed request/resume、`threadId` 和 cancellation
+signal。`invocationId` 只属于 Studio 协调/投射 envelope，不进入 Pet graph。Capability、Toolkit、workdir 与 Agent execution
+context 都在 Host 构建 resident Pet 时确定，Studio 不能通过 dispatch 临时注入。
 
 ## Plugin、Toolkit 与 Capability
 

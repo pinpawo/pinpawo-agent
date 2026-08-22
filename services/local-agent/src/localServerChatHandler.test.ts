@@ -165,7 +165,7 @@ test('replacement request waits for the previous thread invocation to settle', a
   }]);
 });
 
-test('run interrupt waits until the review resolution is checkpointed', async () => {
+test('run interrupt supersedes an unstarted response and cancels through the pending checkpoint', async () => {
   const controls: unknown[] = [];
   let runCount = 0;
   const fakePeer = createFakePeer();
@@ -180,7 +180,16 @@ test('run interrupt waits until the review resolution is checkpointed', async ()
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
-      readActivePendingReview: async () => null,
+      readActivePendingInterrupt: async () => ({
+        sessionId: 'sess-active',
+        interruptId: 'interrupt-1',
+        review: {
+          id: 'review-current',
+          schemaVersion: 1,
+          view: { kind: 'plain', body: 'Approve?' },
+          options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+        },
+      }),
       buildChatSetup: () => ({
         graphKey: 'test',
         graphConfig: {},
@@ -198,24 +207,11 @@ test('run interrupt waits until the review resolution is checkpointed', async ()
       return { status: 'interrupted' };
     },
   });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).recordReviewActionRoute({
-    type: 'human_review.requested',
-    interruptId: 'interrupt-1',
-    requestId: 'req-1',
-    review: {
-      id: 'review-current',
-      schemaVersion: 1,
-      view: { kind: 'plain', body: 'Approve?' },
-      options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
-    },
-  }, { actorId: 'pet-1' });
-
   const resolution = handler.handleHumanReviewResponse(fakePeer, {
     type: 'human_review_response',
     requestId: 'req-1',
-    actionId: 'interrupt-1',
-    reviewId: 'review-current',
+    interruptId: 'interrupt-1',
+    interactionId: 'review-current',
     selectedOptionId: 'approve',
   }, { actorId: 'pet-1' } as never);
   assert.equal(await handler.handleRunInterrupt(fakePeer, {
@@ -227,6 +223,7 @@ test('run interrupt waits until the review resolution is checkpointed', async ()
 
   assert.equal(runCount, 1);
   assert.deepEqual(controls, [
+    { type: 'interrupted', requestId: 'req-1', message: 'interrupted' },
     { type: 'interrupting', requestId: 'req-1', message: 'interrupting' },
     { type: 'interrupted', requestId: 'req-1', message: 'interrupted' },
   ]);
@@ -246,7 +243,16 @@ test('review cancellation automatically interrupts at the first resolved checkpo
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
-      readActivePendingReview: async () => null,
+      readActivePendingInterrupt: async () => ({
+        sessionId: 'sess-active',
+        interruptId: 'interrupt-1',
+        review: {
+          id: 'review-current',
+          schemaVersion: 1,
+          view: { kind: 'plain', body: 'Approve?' },
+          options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+        },
+      }),
       buildChatSetup: () => ({
         graphKey: 'test',
         graphConfig: {},
@@ -273,23 +279,10 @@ test('review cancellation automatically interrupts at the first resolved checkpo
       return { status: 'interrupted' };
     },
   });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).recordReviewActionRoute({
-    type: 'human_review.requested',
-    interruptId: 'interrupt-1',
-    requestId: 'req-1',
-    review: {
-      id: 'review-current',
-      schemaVersion: 1,
-      view: { kind: 'plain', body: 'Approve?' },
-      options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
-    },
-  }, { actorId: 'pet-1' });
-
   await handler.handleReviewCancel(fakePeer, {
     type: 'review.cancel',
     requestId: 'req-1',
-    actionId: 'interrupt-1',
+    interruptId: 'interrupt-1',
   }, { actorId: 'pet-1' } as never);
 
   assert.deepEqual(controls, [
@@ -307,7 +300,16 @@ test('run interrupt cancels a review that became pending before the client obser
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
-      readActivePendingReview: async () => null,
+      readActivePendingInterrupt: async () => ({
+        sessionId: 'sess-active',
+        interruptId: 'interrupt-race',
+        review: {
+          id: 'review-race',
+          schemaVersion: 1,
+          view: { kind: 'plain', body: 'Approve?' },
+          options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+        },
+      }),
       buildChatSetup: () => ({
         graphKey: 'test',
         graphConfig: {},
@@ -327,20 +329,8 @@ test('run interrupt cancels a review that became pending before the client obser
       return { status: 'interrupted' };
     },
   });
-  // Simulate the server registering waiting_review immediately before the TUI
-  // sends the ordinary run.interrupt it chose from its stale thinking state.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).recordReviewActionRoute({
-    type: 'human_review.requested',
-    interruptId: 'interrupt-race',
-    requestId: 'req-race',
-    review: {
-      id: 'review-race',
-      schemaVersion: 1,
-      view: { kind: 'plain', body: 'Approve?' },
-      options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
-    },
-  }, { actorId: 'pet-1' });
+  // The TUI chose run.interrupt from stale thinking state, but the active
+  // checkpoint already contains the interrupt.
 
   const result = await handler.handleRunInterrupt(fakePeer, {
     type: 'run.interrupt',
@@ -361,14 +351,14 @@ test('run interrupt cancels a review that became pending before the client obser
   ]);
 });
 
-test('handleHumanReviewResponse rejects stale canonical reviewId before forwarding', async () => {
+test('handleHumanReviewResponse rejects a stale canonical interactionId before forwarding', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
   const fakePeer = createFakePeer(sentEvents);
   const tuiSessions = {
     getActiveSessionId: () => 'sess-active',
     getChatThreadId: () => 'thread-x',
-    readActivePendingReview: async () => ({
+    readActivePendingInterrupt: async () => ({
       sessionId: 'sess-active',
       interruptId: 'interrupt-1',
       review: {
@@ -391,25 +381,12 @@ test('handleHumanReviewResponse rejects stale canonical reviewId before forwardi
   (handler as any).runChatRequest = async (...args: unknown[]) => {
     handleChatCalls.push(args);
   };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).recordReviewActionRoute({
-    type: 'human_review.requested',
-    interruptId: 'interrupt-1',
-    requestId: 'req-1',
-    review: {
-      id: 'review-current',
-      schemaVersion: 1,
-      view: { kind: 'plain', body: 'Approve?' },
-      options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
-    },
-  }, { actorId: 'pet-1' });
-
   await handler.handleHumanReviewResponse(
     fakePeer,
     {
       type: 'human_review_response',
       requestId: 'req-1',
-      reviewId: 'review-old',
+      interactionId: 'review-old',
       selectedOptionId: 'approve',
     },
     { actorId: 'pet-1' } as never,
@@ -432,10 +409,20 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
   const fakePeer = createFakePeer(sentEvents);
+  let pendingInterrupt: unknown = {
+    sessionId: 'sess-active',
+    interruptId: 'interrupt-1',
+    review: {
+      id: 'review-current',
+      schemaVersion: 1,
+      view: { kind: 'plain', body: 'Approve?' },
+      options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+    },
+  };
   const tuiSessions = {
     getActiveSessionId: () => 'sess-active',
     getChatThreadId: () => 'thread-x',
-    readActivePendingReview: async () => null,
+    readActivePendingInterrupt: async () => pendingInterrupt,
   } as never;
   const handler = new LocalServerChatHandler({
     graphService: {} as never,
@@ -448,25 +435,14 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (handler as any).runChatRequest = async (...args: unknown[]) => {
     handleChatCalls.push(args);
+    pendingInterrupt = null;
     return 'completed';
   };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).recordReviewActionRoute({
-    type: 'human_review.requested',
-    interruptId: 'interrupt-1',
-    requestId: 'req-1',
-    review: {
-      id: 'review-current',
-      schemaVersion: 1,
-      view: { kind: 'plain', body: 'Approve?' },
-      options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
-    },
-  }, { actorId: 'pet-1' });
 
   const message = {
     type: 'human_review_response' as const,
     requestId: 'req-1',
-    reviewId: 'review-current',
+    interactionId: 'review-current',
     selectedOptionId: 'approve',
   };
   await handler.handleHumanReviewResponse(fakePeer, message, { actorId: 'pet-1' } as never);
@@ -493,7 +469,7 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
   });
   assert.deepEqual(forwardedSource, {
     type: 'human_review_response',
-    reviewId: 'review-current',
+    interactionId: 'review-current',
     selectedOptionId: 'approve',
     decisionCount: 1,
   });
@@ -509,7 +485,7 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
     {
       type: 'review.cancel',
       requestId: 'req-1',
-      actionId: 'interrupt-1',
+      interruptId: 'interrupt-1',
     },
     { actorId: 'pet-1' } as never,
   );
@@ -531,7 +507,12 @@ test('handleHumanReviewResponse keeps single-review review as batch resume shape
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
-      readActivePendingReview: async () => null,
+      readActivePendingInterrupt: async () => ({
+        sessionId: 'sess-active',
+        interruptId: 'interrupt-1',
+        review,
+        reviews: [review],
+      }),
     } as never,
     inflightRequests: new InflightRequestController({
       emitOperation: () => {},
@@ -542,23 +523,14 @@ test('handleHumanReviewResponse keeps single-review review as batch resume shape
   (handler as any).runChatRequest = async (...args: unknown[]) => {
     handleChatCalls.push(args);
   };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).recordReviewActionRoute({
-    type: 'human_review.requested',
-    interruptId: 'interrupt-1',
-    requestId: 'req-1',
-    review,
-    reviews: [review],
-  }, { actorId: 'pet-1' });
-
   await handler.handleHumanReviewResponse(
     fakePeer,
     {
       type: 'human_review_response',
       requestId: 'req-1',
-      reviewId: 'review-current',
+      interactionId: 'review-current',
       selectedOptionId: 'approve',
-      decisions: [{ reviewId: 'review-current', selectedOptionId: 'approve' }],
+      decisions: [{ interactionId: 'review-current', selectedOptionId: 'approve' }],
     },
     { actorId: 'pet-1' } as never,
   );
@@ -581,7 +553,7 @@ test('handleHumanReviewResponse keeps single-review review as batch resume shape
   });
   assert.deepEqual(forwardedSource, {
     type: 'human_review_response',
-    reviewId: 'review-current',
+    interactionId: 'review-current',
     selectedOptionId: 'approve',
     decisionCount: 1,
   });
@@ -596,7 +568,7 @@ test('handleHumanReviewResponse recovers missing route from active checkpoint re
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
-      readActivePendingReview: async () => ({
+      readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
         review: {
@@ -622,7 +594,7 @@ test('handleHumanReviewResponse recovers missing route from active checkpoint re
     {
       type: 'human_review_response',
       requestId: 'req-1',
-      reviewId: 'review-current',
+      interactionId: 'review-current',
       selectedOptionId: 'approve',
     },
     { actorId: 'pet-1' } as never,
@@ -658,7 +630,7 @@ test('handleHumanReviewResponse releases a recovered review when its peer discon
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
-      readActivePendingReview: async () => ({
+      readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
         review: {
@@ -681,7 +653,7 @@ test('handleHumanReviewResponse releases a recovered review when its peer discon
   const message = {
     type: 'human_review_response' as const,
     requestId: 'req-1',
-    reviewId: 'review-current',
+    interactionId: 'review-current',
     selectedOptionId: 'approve',
   };
 
@@ -693,7 +665,7 @@ test('handleHumanReviewResponse releases a recovered review when its peer discon
   assert.equal(handleChatCalls.length, 1);
 });
 
-test('buildReviewActionSnapshot exposes routeable review action request ids', () => {
+test('buildPendingInterruptSnapshot projects the active checkpoint interrupt', () => {
   const review = {
     id: 'review-current',
     schemaVersion: 1,
@@ -705,7 +677,7 @@ test('buildReviewActionSnapshot exposes routeable review action request ids', ()
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
-      readActivePendingReview: async () => ({
+      readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
         review,
       }),
@@ -715,57 +687,19 @@ test('buildReviewActionSnapshot exposes routeable review action request ids', ()
       sendControl: () => {},
     }),
   });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).recordReviewActionRoute({
-    type: 'human_review.requested',
-    interruptId: 'interrupt-1',
-    requestId: 'req-existing',
-    review,
-    actor: { petId: 'pet-a' },
-  }, { actorId: 'pet-1' });
-
-  assert.deepEqual(handler.buildReviewActionSnapshot({ actorId: 'pet-1' } as never, null), {
-    requestId: 'interrupt-1',
-    sessionId: 'sess-active',
-    reviewAction: {
-      actionId: 'interrupt-1',
-      reviews: [projectHumanReviewRequest(review)],
-    },
-    actor: { petId: 'pet-a' },
-  });
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).reviewResolutions.clear();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).recordReviewActionRoute({
-    type: 'human_review.requested',
-    interruptId: 'interrupt-1',
-    requestId: 'req-action',
-    review,
-    reviews: [review],
-  }, { actorId: 'pet-1' });
-
-  assert.deepEqual(handler.buildReviewActionSnapshot({ actorId: 'pet-1' } as never, null), {
-    requestId: 'interrupt-1',
-    sessionId: 'sess-active',
-    reviewAction: {
-      actionId: 'interrupt-1',
-      reviews: [projectHumanReviewRequest(review)],
-    },
-  });
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).reviewResolutions.clear();
-  assert.deepEqual(handler.buildReviewActionSnapshot({ actorId: 'pet-1' } as never, {
+  assert.deepEqual(handler.buildPendingInterruptSnapshot({ actorId: 'pet-1' } as never, {
     sessionId: 'sess-active',
     interruptId: 'interrupt-1',
     review,
   }), {
     requestId: 'interrupt-1',
     sessionId: 'sess-active',
-    reviewAction: {
-      actionId: 'interrupt-1',
-      reviews: [projectHumanReviewRequest(review)],
+    pendingInterrupt: {
+      interruptId: 'interrupt-1',
+      payload: {
+        kind: 'human_review',
+        interactions: [projectHumanReviewRequest(review)],
+      },
     },
   });
 });
@@ -782,7 +716,7 @@ test('handleReviewCancel resumes pending review with run interruption control', 
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
-      readActivePendingReview: async () => (reviewResumed ? null : {
+      readActivePendingInterrupt: async () => (reviewResumed ? null : {
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
         review: {
@@ -807,28 +741,12 @@ test('handleReviewCancel resumes pending review with run interruption control', 
     reviewResumed = true;
     return 'completed';
   };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).recordReviewActionRoute({
-    type: 'human_review.requested',
-    interruptId: 'interrupt-1',
-    requestId: 'req-1',
-    review: {
-      id: 'review-current',
-      schemaVersion: 1,
-      view: { kind: 'plain', body: 'Approve?' },
-      options: [
-        { id: 'approve', label: 'Approve', decision: { type: 'approve' } },
-        { id: 'reject', label: 'Reject', decision: { type: 'reject' } },
-      ],
-    },
-  }, { actorId: 'pet-1' });
-
   await handler.handleReviewCancel(
     fakePeer,
     {
       type: 'review.cancel',
       requestId: 'req-1',
-      actionId: 'interrupt-1',
+      interruptId: 'interrupt-1',
     },
     { actorId: 'pet-1' } as never,
   );
@@ -852,7 +770,7 @@ test('handleReviewCancel resumes pending review with run interruption control', 
   });
   assert.deepEqual(forwardedSource, {
     type: 'review.cancel',
-    reviewId: 'review-current',
+    interactionId: 'review-current',
     decisionCount: 0,
   });
 
@@ -861,7 +779,7 @@ test('handleReviewCancel resumes pending review with run interruption control', 
     {
       type: 'human_review_response',
       requestId: 'req-1',
-      reviewId: 'review-current',
+      interactionId: 'review-current',
       selectedOptionId: 'approve',
     },
     { actorId: 'pet-1' } as never,
@@ -889,7 +807,7 @@ test('handleReviewCancel recovers missing route from active checkpoint review', 
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
-      readActivePendingReview: async () => ({
+      readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
         review: {
@@ -918,7 +836,7 @@ test('handleReviewCancel recovers missing route from active checkpoint review', 
     {
       type: 'review.cancel',
       requestId: 'req-1',
-      actionId: 'interrupt-1',
+      interruptId: 'interrupt-1',
     },
     { actorId: 'pet-1' } as never,
   );
@@ -942,7 +860,7 @@ test('handleReviewCancel recovers missing route from active checkpoint review', 
   });
   assert.deepEqual(forwardedSource, {
     type: 'review.cancel',
-    reviewId: 'review-current',
+    interactionId: 'review-current',
     decisionCount: 0,
   });
 });
@@ -951,11 +869,22 @@ test('handleReviewCancel interrupts an approve-only pending review', async () =>
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
   const fakePeer = createFakePeer(sentEvents);
+  let pendingInterrupt: unknown = {
+    sessionId: 'sess-active',
+    interruptId: 'interrupt-1',
+    review: {
+      id: 'review-current',
+      schemaVersion: 1,
+      view: { kind: 'plain', body: 'Approve?' },
+      options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+    },
+  };
   const handler = new LocalServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
+      readActivePendingInterrupt: async () => pendingInterrupt,
     } as never,
     inflightRequests: new InflightRequestController({
       emitOperation: () => {},
@@ -965,31 +894,16 @@ test('handleReviewCancel interrupts an approve-only pending review', async () =>
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (handler as any).runChatRequest = async (...args: unknown[]) => {
     handleChatCalls.push(args);
-    // A real review cancellation releases its queued interrupt only after the
-    // resume reaches the checkpoint.
-    (handler as any).reviewResolutions.checkpoint('req-1');
+    pendingInterrupt = null;
     return 'interrupted';
   };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).recordReviewActionRoute({
-    type: 'human_review.requested',
-    interruptId: 'interrupt-1',
-    requestId: 'req-1',
-    prompt: 'Approve?',
-    review: {
-      id: 'review-current',
-      schemaVersion: 1,
-      view: { kind: 'plain', body: 'Approve?' },
-      options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
-    },
-  }, { actorId: 'pet-1' });
 
   await handler.handleReviewCancel(
     fakePeer,
     {
       type: 'review.cancel',
       requestId: 'req-1',
-      actionId: 'interrupt-1',
+      interruptId: 'interrupt-1',
     },
     { actorId: 'pet-1' } as never,
   );
@@ -1012,7 +926,7 @@ test('handleReviewCancel interrupts an approve-only pending review', async () =>
     {
       type: 'human_review_response',
       requestId: 'req-1',
-      reviewId: 'review-current',
+      interactionId: 'review-current',
       selectedOptionId: 'approve',
     },
     { actorId: 'pet-1' } as never,
@@ -1028,6 +942,21 @@ test('handleHumanReviewResponse forwards canonical selected option without resol
   const tuiSessions = {
     getActiveSessionId: () => 'sess-active',
     getChatThreadId: () => 'thread-x',
+    readActivePendingInterrupt: async () => ({
+      sessionId: 'sess-active',
+      interruptId: 'interrupt-1',
+      review: {
+        id: 'review-current',
+        schemaVersion: 1,
+        view: { kind: 'plain', body: 'Need input' },
+        options: [{
+          id: 'respond',
+          label: 'Respond',
+          input: { kind: 'text', key: 'message', required: true, multiline: true },
+          decision: { type: 'respond', messageInputKey: 'message' },
+        }],
+      },
+    }),
   } as never;
   const handler = new LocalServerChatHandler({
     graphService: {} as never,
@@ -1041,30 +970,12 @@ test('handleHumanReviewResponse forwards canonical selected option without resol
   (handler as any).runChatRequest = async (...args: unknown[]) => {
     handleChatCalls.push(args);
   };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).recordReviewActionRoute({
-    type: 'human_review.requested',
-    interruptId: 'interrupt-1',
-    requestId: 'req-1',
-    review: {
-      id: 'review-current',
-      schemaVersion: 1,
-      view: { kind: 'plain', body: 'Need input' },
-      options: [{
-        id: 'respond',
-        label: 'Respond',
-        input: { kind: 'text', key: 'message', required: true, multiline: true },
-        decision: { type: 'respond', messageInputKey: 'message' },
-      }],
-    },
-  }, { actorId: 'pet-1' });
-
   await handler.handleHumanReviewResponse(
     fakePeer,
     {
       type: 'human_review_response',
       requestId: 'req-1',
-      reviewId: 'review-current',
+      interactionId: 'review-current',
       selectedOptionId: 'respond',
       input: { message: '请先解释风险' },
     },
@@ -1093,7 +1004,7 @@ test('handleHumanReviewResponse forwards canonical selected option without resol
   });
   assert.deepEqual(forwardedSource, {
     type: 'human_review_response',
-    reviewId: 'review-current',
+    interactionId: 'review-current',
     selectedOptionId: 'respond',
     decisionCount: 1,
   });
@@ -1107,6 +1018,16 @@ test('handleHumanReviewResponse rejects canonical review response from a differe
   const tuiSessions = {
     getActiveSessionId: () => activeSessionId,
     getChatThreadId: () => 'thread-x',
+    readActivePendingInterrupt: async () => ({
+      sessionId: 'sess-origin',
+      interruptId: 'interrupt-1',
+      review: {
+        id: 'review-current',
+        schemaVersion: 1,
+        view: { kind: 'plain', body: 'Approve?' },
+        options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+      },
+    }),
   } as never;
   const handler = new LocalServerChatHandler({
     graphService: {} as never,
@@ -1120,18 +1041,6 @@ test('handleHumanReviewResponse rejects canonical review response from a differe
   (handler as any).runChatRequest = async (...args: unknown[]) => {
     handleChatCalls.push(args);
   };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).recordReviewActionRoute({
-    type: 'human_review.requested',
-    interruptId: 'interrupt-1',
-    requestId: 'req-1',
-    review: {
-      id: 'review-current',
-      schemaVersion: 1,
-      view: { kind: 'plain', body: 'Approve?' },
-      options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
-    },
-  }, { actorId: 'pet-1' });
   activeSessionId = 'sess-other';
 
   await handler.handleHumanReviewResponse(
@@ -1139,7 +1048,7 @@ test('handleHumanReviewResponse rejects canonical review response from a differe
     {
       type: 'human_review_response',
       requestId: 'req-1',
-      reviewId: 'review-current',
+      interactionId: 'review-current',
       selectedOptionId: 'approve',
     },
     { actorId: 'pet-1' } as never,
@@ -1169,6 +1078,24 @@ test('handleHumanReviewResponse forwards effect-bearing options without local au
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
+      readActivePendingInterrupt: async () => ({
+        sessionId: 'sess-active',
+        interruptId: 'interrupt-1',
+        review: {
+          id: 'review-current',
+          schemaVersion: 1,
+          view: { kind: 'plain', body: 'Approve?' },
+          options: [{
+            id: 'approve-and-authorize-thread',
+            label: 'Approve and authorize',
+            decision: { type: 'approve' },
+            effects: [{
+              type: 'graph.authorize_tool_action',
+              scope: 'thread',
+            }],
+          }],
+        },
+      }),
     } as never,
     inflightRequests: new InflightRequestController({
       emitOperation: () => {},
@@ -1179,42 +1106,12 @@ test('handleHumanReviewResponse forwards effect-bearing options without local au
   (handler as any).runChatRequest = async (...args: unknown[]) => {
     handleChatCalls.push(args);
   };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).recordReviewActionRoute({
-    type: 'human_review.requested',
-    interruptId: 'interrupt-1',
-    requestId: 'req-1',
-    payload: {
-      kind: 'review',
-      pendingAction: {
-        actionId: 'call-1',
-        toolName: 'run_shell',
-        args: { command: 'git status', cwd: '/repo' },
-        description: 'Run git status',
-      },
-    },
-    review: {
-      id: 'review-current',
-      schemaVersion: 1,
-      view: { kind: 'plain', body: 'Approve?' },
-      options: [{
-        id: 'approve-and-authorize-thread',
-        label: 'Approve and authorize',
-        decision: { type: 'approve' },
-        effects: [{
-          type: 'graph.authorize_tool_action',
-          scope: 'thread',
-        }],
-      }],
-    },
-  }, { actorId: 'pet-1' }, {} as never);
-
   await handler.handleHumanReviewResponse(
     fakePeer,
     {
       type: 'human_review_response',
       requestId: 'req-1',
-      reviewId: 'review-current',
+      interactionId: 'review-current',
       selectedOptionId: 'approve-and-authorize-thread',
     },
     {
@@ -1243,7 +1140,7 @@ test('handleHumanReviewResponse forwards effect-bearing options without local au
   });
   assert.deepEqual(forwardedSource, {
     type: 'human_review_response',
-    reviewId: 'review-current',
+    interactionId: 'review-current',
     selectedOptionId: 'approve-and-authorize-thread',
     decisionCount: 1,
   });
@@ -1272,6 +1169,26 @@ test('handleHumanReviewResponse does not validate authorization effect context i
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
+      readActivePendingInterrupt: async () => ({
+        sessionId: 'sess-active',
+        interruptId: 'interrupt-1',
+        review: {
+          id: 'review-current',
+          schemaVersion: 1,
+          view: { kind: 'plain', body: 'Approve?' },
+          options: [{
+            id: 'approve-and-authorize-thread',
+            label: 'Approve and authorize',
+            decision: { type: 'approve' },
+            effects: [{
+              type: 'graph.authorize_tool_action',
+              scope: 'thread',
+              actionRef: { type: 'pending_action' },
+              matcher: { type: 'policy_hook' },
+            }],
+          }],
+        },
+      }),
     } as never,
     inflightRequests: new InflightRequestController({
       emitOperation: () => {},
@@ -1282,38 +1199,12 @@ test('handleHumanReviewResponse does not validate authorization effect context i
   (handler as any).runChatRequest = async (...args: unknown[]) => {
     handleChatCalls.push(args);
   };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).recordReviewActionRoute({
-    type: 'human_review.requested',
-    interruptId: 'interrupt-1',
-    requestId: 'req-1',
-    payload: {
-      kind: 'review',
-    },
-    review: {
-      id: 'review-current',
-      schemaVersion: 1,
-      view: { kind: 'plain', body: 'Approve?' },
-      options: [{
-        id: 'approve-and-authorize-thread',
-        label: 'Approve and authorize',
-        decision: { type: 'approve' },
-        effects: [{
-          type: 'graph.authorize_tool_action',
-          scope: 'thread',
-          actionRef: { type: 'pending_action' },
-          matcher: { type: 'policy_hook' },
-        }],
-      }],
-    },
-  }, { actorId: 'pet-1' }, {} as never);
-
   await handler.handleHumanReviewResponse(
     fakePeer,
     {
       type: 'human_review_response',
       requestId: 'req-1',
-      reviewId: 'review-current',
+      interactionId: 'review-current',
       selectedOptionId: 'approve-and-authorize-thread',
     },
     { actorId: 'pet-1' } as never,

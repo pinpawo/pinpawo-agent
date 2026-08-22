@@ -44,22 +44,24 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
       source: 'provider',
       scope: 'session',
     },
-    pendingReview: {
+    pendingInterrupt: {
       requestId: 'req-review',
       sessionId: 'chat:pet-a',
-      actor: { petId: 'pet-a' },
-      reviewAction: {
-        actionId: 'interrupt-1',
-        reviews: [{
-          interactionId: 'review-1',
-          schemaVersion: 2,
-          view: { kind: 'plain', body: 'Approve?' },
-          options: [{
-            id: 'approve',
-            label: 'Approve',
-            batchSubmission: 'immediate',
+      pendingInterrupt: {
+        interruptId: 'interrupt-1',
+        payload: {
+          kind: 'human_review',
+          interactions: [{
+            interactionId: 'review-1',
+            schemaVersion: 2,
+            view: { kind: 'plain', body: 'Approve?' },
+            options: [{
+              id: 'approve',
+              label: 'Approve',
+              batchSubmission: 'immediate',
+            }],
           }],
-        }],
+        },
       },
     },
     currentPlan: {
@@ -91,10 +93,12 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
   );
   assert.ok(parseAgentSessionSnapshot(JSON.parse(JSON.stringify(snapshot))));
   assert.equal(snapshot.session.activeRun?.requestId, 'req-review');
-  assert.equal(snapshot.session.activeRun?.state, 'waiting_review');
-  if (snapshot.session.activeRun?.state !== 'waiting_review') assert.fail('expected waiting review');
-  assert.equal(snapshot.session.activeRun.reviewAction.reviews[0]?.interactionId, 'review-1');
-  assert.equal(snapshot.session.activeRun.reviewAction.petId, 'pet-a');
+  assert.equal(snapshot.session.activeRun?.state, 'pending_interrupt');
+  if (snapshot.session.activeRun?.state !== 'pending_interrupt') assert.fail('expected pending interrupt');
+  assert.equal(
+    snapshot.session.activeRun.pendingInterrupt.payload.interactions[0]?.interactionId,
+    'review-1',
+  );
   assert.deepEqual(snapshot.session.currentPlan, {
     items: [{
       id: 'delegation-1',

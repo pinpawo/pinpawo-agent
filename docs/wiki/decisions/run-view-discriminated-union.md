@@ -25,20 +25,20 @@ related:
 
 The active run in an `AgentSession` is a discriminated union
 (`AgentRunView`) of exactly three server-observed facts, carried in snapshot
-version 3
+version 4
 ([`domain.ts`](../../../packages/agent-session/src/domain.ts)):
 
 - `running` — carries one runtime `activity`: `thinking`, `using_tool`, or
   `streaming`;
-- `waiting_review` — structurally carries its checkpoint-derived `ReviewAction`;
+- `pending_interrupt` — structurally carries its checkpoint-derived `PendingInterrupt`;
 - `interrupting` — the server run controller has begun interruption.
 
 ## Rationale
 
-The earlier flat shape (`phase` enum plus an optional `reviewAction`) allowed
+The earlier flat shape (`phase` enum plus an optional review projection) allowed
 illegal combinations — a waiting review without review content, or a running run
-that still carried a review action — and forced every consumer to re-infer the
-valid `phase × reviewAction` cross-product. Removing `ReviewAction.status`
+that still carried review content — and forced every consumer to re-infer the
+valid phase/projection cross-product. Removing the legacy `ReviewAction.status`
 (PR #388) deleted one field but left that cross-product enforced by reducer
 discipline and tests rather than by types. PR #389 finished the job: the union
 makes the invalid combinations unrepresentable in TypeScript and rejects them at
@@ -51,7 +51,7 @@ the local snapshot boundary parser.
 - Later `running.activity` changes come from server runtime events. Elapsed-time
   presentation (busy-copy escalation) stays in the render layer and must not leak
   into the shared view.
-- `waiting_review` always carries its `ReviewAction`; `running` and `interrupting`
+- `pending_interrupt` always carries its `PendingInterrupt`; `running` and `interrupting`
   never carry review content.
 - Sending `run.interrupt` does **not** optimistically create the `interrupting`
   view; only the server run controller does.
@@ -60,8 +60,9 @@ the local snapshot boundary parser.
   a client timer cannot perform this transition.
 - Whether an interrupted review delegation may be offered through `/continue`
   is a separate TUI-local fact, not a fourth `AgentRunView` variant.
-- Snapshot versions 1 and 2, `runs[] + activeRunId`, legacy pending-review
-  payloads, and message-only restore are unsupported by the current reader.
+- Snapshot versions 1 and 2, `runs[] + activeRunId`, and message-only restore are
+  unsupported. The V3 `waiting_review/reviewAction` shape is accepted only by
+  the compatibility parser and normalized to V4.
 
 ## Consequences
 

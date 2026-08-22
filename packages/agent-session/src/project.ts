@@ -11,7 +11,7 @@ import type {
 } from './domain';
 import type { AgentSessionSnapshot } from './snapshot';
 import { agentOperationEntryFromEvent, agentOperationEntryId } from './timeline';
-import { reviewActionId, reviewActionReviews } from './review';
+import { humanReviewInterruptInteractions, pendingInterruptId } from './review';
 
 export type AgentSessionInput =
   | {
@@ -325,7 +325,7 @@ function applyOperationEvent(
         ...observedAtUpdate(context),
       };
     }
-    if (run.state === 'waiting_review') {
+    if (run.state === 'pending_interrupt') {
       return {
         ...runViewBase(run),
         state: 'running',
@@ -400,20 +400,21 @@ function applyReviewRequest(
   event: Extract<AgentRuntimeEvent, { type: 'human_review.requested' }>,
   context: AgentSessionReductionContext,
 ) {
-  const reviews = reviewActionReviews(event.review, event.reviews);
-  const actionId = reviewActionId({
+  const interactions = humanReviewInterruptInteractions(event.review, event.reviews);
+  const interruptId = pendingInterruptId({
     requestId: event.requestId,
     ...(event.interruptId ? { interruptId: event.interruptId } : {}),
-    reviews,
+    reviews: interactions,
   });
-  const petId = event.actor?.petId;
   return updateOwnedRun(session, event.requestId, (run) => ({
     ...runViewBase(run),
-    state: 'waiting_review',
-    reviewAction: {
-      actionId,
-      reviews,
-      ...(petId ? { petId } : {}),
+    state: 'pending_interrupt',
+    pendingInterrupt: {
+      interruptId,
+      payload: {
+        kind: 'human_review',
+        interactions,
+      },
     },
     ...observedAtUpdate(context),
   }));

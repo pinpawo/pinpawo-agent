@@ -5,12 +5,11 @@ import {
   buildHumanReviewCancelResume,
   buildHumanReviewRejectResume,
   buildHumanReviewResume,
-  resolveHumanReviewAction,
+  resolvePendingHumanReviewInterrupt,
   routeRunInterruptThroughHumanReview,
   validateHumanReviewDecisions,
-} from './humanReviewActionRouting';
+} from './pendingHumanReviewInterrupt';
 import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
-import { ReviewResolutionClaims } from './reviewResolutionClaims';
 
 function reviewSpec(id: string): ReviewSpec {
   return {
@@ -32,46 +31,27 @@ function reviewSpec(id: string): ReviewSpec {
   };
 }
 
-function reviewRoute(ids: string[], interruptId?: string) {
+function reviewRoute(ids: string[], interruptId = 'interrupt-1') {
   return {
-    actionId: interruptId ?? `request:req-1:reviews:${ids.join(',')}`,
-    ...(interruptId ? { interruptId } : {}),
+    interruptId,
     reviews: ids.map(reviewSpec),
   };
 }
 
-test('run interrupt routing normalizes pending and resolving review states', async () => {
-  const lifecycle = new ReviewResolutionClaims<ReturnType<typeof reviewRoute> & {
-    requestId: string;
-  }>();
+test('run interrupt routing reloads the pending interrupt from checkpoint', async () => {
   const route = { ...reviewRoute(['review-1'], 'interrupt-1'), requestId: 'req-1' };
   const cancelled: typeof route[] = [];
-  lifecycle.register(route);
 
   assert.equal(await routeRunInterruptThroughHumanReview({
-    lifecycle,
-    requestId: 'req-1',
+    recover: async () => route,
     cancelPending: async (pendingRoute) => {
       cancelled.push(pendingRoute);
     },
   }), 'cancelled_pending');
   assert.deepEqual(cancelled, [route]);
 
-  const resolution = await lifecycle.claim(route, async () => null);
-  assert.ok(resolution);
   assert.equal(await routeRunInterruptThroughHumanReview({
-    lifecycle,
-    requestId: 'req-1',
-    cancelPending: async (pendingRoute) => {
-      cancelled.push(pendingRoute);
-    },
-  }), 'queued_for_resolution');
-  assert.deepEqual(cancelled, [route]);
-  assert.equal(lifecycle.checkpoint('req-1'), true);
-
-  assert.equal(await routeRunInterruptThroughHumanReview({
-    lifecycle,
-    requestId: 'req-unknown',
+    recover: async () => null,
     cancelPending: async (pendingRoute) => {
       cancelled.push(pendingRoute);
     },
@@ -79,7 +59,7 @@ test('run interrupt routing normalizes pending and resolving review states', asy
   assert.deepEqual(cancelled, [route]);
 });
 
-test('human review action routing resumes once for a rejected first decision', () => {
+test('human review interrupt resumes once for a rejected first decision', () => {
   const route = reviewRoute(['review-1', 'review-2'], 'interrupt-1');
 
   assert.deepEqual(buildHumanReviewRejectResume(route, 'reject'), {
@@ -91,30 +71,30 @@ test('human review action routing resumes once for a rejected first decision', (
   });
 });
 
-test('human review action routing rejects partial approval resumes', () => {
+test('human review interrupt rejects partial approval resumes', () => {
   const route = reviewRoute(['review-1', 'review-2']);
 
   assert.throws(() => validateHumanReviewDecisions(route, {
     type: 'human_review_response',
     requestId: 'req-1',
-    reviewId: 'review-1',
+    interactionId: 'review-1',
     selectedOptionId: 'approve',
     decisions: [
-      { reviewId: 'review-1', selectedOptionId: 'approve' },
+      { interactionId: 'review-1', selectedOptionId: 'approve' },
     ],
   }));
 });
 
-test('human review action routing resumes complete approvals as one review action', () => {
+test('human review interrupt resumes complete approvals as one payload', () => {
   const route = reviewRoute(['review-1', 'review-2'], 'interrupt-1');
   const decisions = validateHumanReviewDecisions(route, {
     type: 'human_review_response',
     requestId: 'req-1',
-    reviewId: 'review-2',
+    interactionId: 'review-2',
     selectedOptionId: 'approve',
     decisions: [
-      { reviewId: 'review-1', selectedOptionId: 'approve' },
-      { reviewId: 'review-2', selectedOptionId: 'approve' },
+      { interactionId: 'review-1', selectedOptionId: 'approve' },
+      { interactionId: 'review-2', selectedOptionId: 'approve' },
     ],
   });
 
@@ -125,12 +105,12 @@ test('human review action routing resumes complete approvals as one review actio
   });
 });
 
-test('human review action routing resolves single-review resume as batch shape', () => {
+test('human review interrupt resolves a single interaction as batch shape', () => {
   const route = reviewRoute(['review-1'], 'interrupt-1');
   const decisions = validateHumanReviewDecisions(route, {
     type: 'human_review_response',
     requestId: 'req-1',
-    reviewId: 'review-1',
+    interactionId: 'review-1',
     selectedOptionId: 'approve',
   });
 
@@ -144,57 +124,41 @@ test('human review action routing resolves single-review resume as batch shape',
   });
 });
 
-test('human review action routing rejects decisions for mismatched review order', () => {
+test('human review interrupt rejects decisions for mismatched interaction order', () => {
   const route = reviewRoute(['review-1', 'review-2']);
 
   assert.throws(() => validateHumanReviewDecisions(route, {
     type: 'human_review_response',
     requestId: 'req-1',
-    reviewId: 'review-2',
+    interactionId: 'review-2',
     selectedOptionId: 'approve',
     decisions: [
-      { reviewId: 'review-2', selectedOptionId: 'approve' },
-      { reviewId: 'review-1', selectedOptionId: 'approve' },
+      { interactionId: 'review-2', selectedOptionId: 'approve' },
+      { interactionId: 'review-1', selectedOptionId: 'approve' },
     ],
   }));
 });
 
-test('human review action routing fails closed when the interrupt identity is missing', () => {
-  const route = reviewRoute(['review-1', 'review-2']);
-
-  assert.deepEqual(buildHumanReviewResume(route, [
-    { reviewId: 'review-1', selectedOptionId: 'approve' },
-    { reviewId: 'review-2', selectedOptionId: 'approve' },
-  ]), {
-    decisions: [
-      { reviewId: 'review-1', selectedOptionId: 'reject' },
-      { reviewId: 'review-2', selectedOptionId: 'reject' },
-    ],
-  });
-});
-
-test('human review action resolution owns validation, resume, and consumption', async () => {
+test('human review interrupt reloads checkpoint authority for every attempt', async () => {
   const route = {
     ...reviewRoute(['review-1'], 'interrupt-1'),
     requestId: 'req-1',
     rejectOptionId: 'reject',
   };
-  const lifecycle = new ReviewResolutionClaims<typeof route>();
-  lifecycle.register(route);
+  let pending: typeof route | null = route;
   const runs: unknown[] = [];
   const events: AgentRuntimeEvent[] = [];
   let closed = 0;
   const message = {
     type: 'human_review_response' as const,
     requestId: 'req-1',
-    actionId: 'interrupt-1',
-    reviewId: 'review-1',
+    interruptId: 'interrupt-1',
+    interactionId: 'review-1',
     selectedOptionId: 'approve',
   };
-  const resolve = () => resolveHumanReviewAction({
-    lifecycle,
+  const resolve = () => resolvePendingHumanReviewInterrupt({
     message,
-    recover: async () => null,
+    recover: async () => pending,
     emitClosed: () => {
       closed += 1;
     },
@@ -204,6 +168,7 @@ test('human review action resolution owns validation, resume, and consumption', 
     isConnected: () => true,
     run: async (_route, resume, source) => {
       runs.push({ resume, source });
+      pending = null;
       return 'completed';
     },
   });
@@ -219,7 +184,7 @@ test('human review action resolution owns validation, resume, and consumption', 
     },
     source: {
       type: 'human_review_response',
-      reviewId: 'review-1',
+      interactionId: 'review-1',
       selectedOptionId: 'approve',
       decisionCount: 1,
     },
@@ -228,39 +193,32 @@ test('human review action resolution owns validation, resume, and consumption', 
   assert.equal(closed, 1);
 });
 
-test('a same-id review registered by the resumed run remains interruptible', async () => {
-  const lifecycle = new ReviewResolutionClaims<ReturnType<typeof reviewRoute> & {
-    requestId: string;
-  }>();
+test('a same-id re-ask is read from the latest checkpoint', async () => {
   const route = { ...reviewRoute(['review-1'], 'interrupt-1'), requestId: 'req-1' };
   const reasked = { ...reviewRoute(['review-2'], 'interrupt-1'), requestId: 'req-1' };
-  lifecycle.register(route);
+  let pending = route;
 
-  await resolveHumanReviewAction({
-    lifecycle,
+  await resolvePendingHumanReviewInterrupt({
     message: {
       type: 'human_review_response',
       requestId: 'req-1',
-      actionId: 'interrupt-1',
-      reviewId: 'review-1',
+      interruptId: 'interrupt-1',
+      interactionId: 'review-1',
       selectedOptionId: 'approve',
     },
-    recover: async () => null,
+    recover: async () => pending,
     emitClosed: () => undefined,
     emitEvent: () => undefined,
     isConnected: () => true,
     run: async () => {
-      // runChatSession registers the final pending review before returning
-      // waiting_human. LangGraph can reuse the interrupt id for a re-ask.
-      lifecycle.register(reasked, { observedPending: true });
+      pending = reasked;
       return 'waiting_human';
     },
   });
 
   const cancelled: typeof reasked[] = [];
   assert.equal(await routeRunInterruptThroughHumanReview({
-    lifecycle,
-    requestId: 'req-1',
+    recover: async () => pending,
     cancelPending: async (pendingRoute) => {
       cancelled.push(pendingRoute);
     },
@@ -273,21 +231,18 @@ test('human review response validation runs before the route boundary guard', as
     ...reviewRoute(['review-1'], 'interrupt-1'),
     requestId: 'req-1',
   };
-  const lifecycle = new ReviewResolutionClaims<typeof route>();
-  lifecycle.register(route);
   const events: AgentRuntimeEvent[] = [];
   let guardCalls = 0;
 
-  await resolveHumanReviewAction({
-    lifecycle,
+  await resolvePendingHumanReviewInterrupt({
     message: {
       type: 'human_review_response',
       requestId: 'req-1',
-      actionId: 'interrupt-1',
-      reviewId: 'review-stale',
+      interruptId: 'interrupt-1',
+      interactionId: 'review-stale',
       selectedOptionId: 'approve',
     },
-    recover: async () => null,
+    recover: async () => route,
     emitClosed: () => undefined,
     emitEvent: (event) => {
       events.push(event);
@@ -312,24 +267,20 @@ test('human review cancellation interrupts an approve-only review without fabric
     ...reviewRoute(['review-1'], 'interrupt-1'),
     requestId: 'req-1',
   };
-  const lifecycle = new ReviewResolutionClaims<typeof route>();
-  lifecycle.register(route);
   const runs: unknown[] = [];
 
-  await resolveHumanReviewAction({
-    lifecycle,
+  await resolvePendingHumanReviewInterrupt({
     message: {
       type: 'review.cancel',
       requestId: 'req-1',
-      actionId: 'interrupt-1',
+      interruptId: 'interrupt-1',
     },
-    recover: async () => null,
+    recover: async () => route,
     emitClosed: () => undefined,
     emitEvent: () => undefined,
     isConnected: () => true,
     run: async (_route, resume, source) => {
       runs.push({ resume, source });
-      assert.equal(lifecycle.checkpoint('req-1'), true);
       return 'interrupted';
     },
   });
@@ -343,11 +294,10 @@ test('human review cancellation interrupts an approve-only review without fabric
     },
     source: {
       type: 'review.cancel',
-      reviewId: 'review-1',
+      interactionId: 'review-1',
       decisionCount: 0,
     },
   }]);
-  assert.deepEqual(lifecycle.routes(), []);
 });
 
 test('human review rejection queues the same checkpoint interruption as cancellation', async () => {
@@ -355,26 +305,22 @@ test('human review rejection queues the same checkpoint interruption as cancella
     ...reviewRoute(['review-1'], 'interrupt-1'),
     requestId: 'req-1',
   };
-  const lifecycle = new ReviewResolutionClaims<typeof route>();
-  lifecycle.register(route);
   const runs: unknown[] = [];
 
-  await resolveHumanReviewAction({
-    lifecycle,
+  await resolvePendingHumanReviewInterrupt({
     message: {
       type: 'human_review_response',
       requestId: 'req-1',
-      actionId: 'interrupt-1',
-      reviewId: 'review-1',
+      interruptId: 'interrupt-1',
+      interactionId: 'review-1',
       selectedOptionId: 'reject',
     },
-    recover: async () => null,
+    recover: async () => route,
     emitClosed: () => undefined,
     emitEvent: () => undefined,
     isConnected: () => true,
     run: async (_route, resume, source) => {
       runs.push({ resume, source });
-      assert.equal(lifecycle.checkpoint('req-1'), true);
       return 'interrupted';
     },
   });
@@ -387,69 +333,52 @@ test('human review rejection queues the same checkpoint interruption as cancella
     },
     source: {
       type: 'human_review_response',
-      reviewId: 'review-1',
+      interactionId: 'review-1',
       selectedOptionId: 'reject',
       decisionCount: 1,
       interruptRun: true,
     },
   }]);
-  assert.deepEqual(lifecycle.routes(), []);
 });
 
-// Regression: a model-level failure (exhausted quota) used to leave the review
-// action available, so the cancelled review was immediately re-offered to the
-// user and cancelling could never terminate the run.
-test('a fatal run failure consumes the review action instead of re-offering it', async () => {
-  const lifecycle = new ReviewResolutionClaims<ReturnType<typeof reviewRoute> & {
-    requestId: string;
-  }>();
+test('a fatal run failure leaves checkpoint authority available for a later retry', async () => {
   const route = { ...reviewRoute(['review-1'], 'interrupt-1'), requestId: 'req-1' };
-  lifecycle.register(route);
+  let runs = 0;
 
-  await resolveHumanReviewAction({
-    lifecycle,
+  const resolve = () => resolvePendingHumanReviewInterrupt({
     message: { type: 'review.cancel', requestId: 'req-1' } as never,
-    recover: async () => null,
+    recover: async () => route,
     emitClosed: () => {},
     emitEvent: () => {},
     isConnected: () => true,
-    run: async () => 'fatal_failed',
+    run: async () => {
+      runs += 1;
+      return runs === 1 ? 'fatal_failed' : 'completed';
+    },
   });
 
-  assert.deepEqual(lifecycle.routes(), []);
-
-  // The action stays consumed even though the unchanged checkpoint still
-  // reports it, so a repeated cancel cannot revive the review.
-  const revived = await lifecycle.claim(
-    { requestId: 'req-1', actionId: route.actionId },
-    async () => route,
-  );
-  assert.equal(revived, null);
+  await resolve();
+  await resolve();
+  assert.equal(runs, 2);
 });
 
-test('a recoverable run failure keeps the review action available for a retry', async () => {
-  const lifecycle = new ReviewResolutionClaims<ReturnType<typeof reviewRoute> & {
-    requestId: string;
-  }>();
+test('a recoverable run failure re-reads the pending interrupt on retry', async () => {
   const route = { ...reviewRoute(['review-1'], 'interrupt-1'), requestId: 'req-1' };
-  lifecycle.register(route);
+  let runs = 0;
 
-  await resolveHumanReviewAction({
-    lifecycle,
+  const resolve = () => resolvePendingHumanReviewInterrupt({
     message: { type: 'review.cancel', requestId: 'req-1' } as never,
-    recover: async () => null,
+    recover: async () => route,
     emitClosed: () => {},
     emitEvent: () => {},
     isConnected: () => true,
-    run: async () => 'failed',
+    run: async () => {
+      runs += 1;
+      return runs === 1 ? 'failed' : 'completed';
+    },
   });
 
-  // A recoverable failure must NOT consume the action: the review is still
-  // pending, so the next attempt can resolve it normally.
-  const retried = await lifecycle.claim(
-    { requestId: 'req-1' },
-    async () => route,
-  );
-  assert.ok(retried, 'a recoverable failure must leave the review resolvable');
-  assert.equal(retried?.actionId, route.actionId);
+  await resolve();
+  await resolve();
+  assert.equal(runs, 2);
 });

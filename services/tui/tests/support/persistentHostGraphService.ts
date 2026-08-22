@@ -139,7 +139,7 @@ export function createPersistentHostGraphService() {
         messages: Array.isArray(values.messages)
           ? values.messages as BaseMessage[]
           : [],
-        pendingHumanReview: readPendingReview(snapshot),
+        pendingInterrupt: readPendingReview(snapshot),
         hasPendingContinuation: hasPendingContinuation(snapshot),
         currentPlan: null,
       };
@@ -326,7 +326,7 @@ function readReviewDecisions(value: unknown): ReviewResponse[] {
 
 function readPendingReview(
   snapshot: unknown,
-): LocalAgentGraphThreadState['pendingHumanReview'] {
+): LocalAgentGraphThreadState['pendingInterrupt'] {
   const pending = readPendingInterrupt(snapshot);
   if (!pending) return null;
   if (isHumanReviewBatchInterruptPayload(pending.value)) {

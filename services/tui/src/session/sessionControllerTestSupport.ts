@@ -84,9 +84,9 @@ export function reviewSnapshotResult(
   reviews: NonNullable<
     Extract<
       ReturnType<TuiSessionController['getState']>['session']['activeRun'],
-      { state: 'waiting_review' }
+      { state: 'pending_interrupt' }
     >
-  >['reviewAction']['reviews'],
+  >['pendingInterrupt']['payload']['interactions'],
 ): AgentServerMessage {
   return {
     type: 'session.snapshot.result',
@@ -97,10 +97,13 @@ export function reviewSnapshotResult(
       timeline: [],
       activeRun: {
         requestId: 'chat',
-        state: 'waiting_review',
-        reviewAction: {
-          actionId: 'review-action',
-          reviews,
+        state: 'pending_interrupt',
+        pendingInterrupt: {
+          interruptId: 'review-action',
+          payload: {
+            kind: 'human_review',
+            interactions: reviews,
+          },
         },
       },
     }),
@@ -112,9 +115,9 @@ export function reviewSpec(
   options: NonNullable<
     Extract<
       ReturnType<TuiSessionController['getState']>['session']['activeRun'],
-      { state: 'waiting_review' }
+      { state: 'pending_interrupt' }
     >
-  >['reviewAction']['reviews'][number]['options'],
+  >['pendingInterrupt']['payload']['interactions'][number]['options'],
 ) {
   return {
     interactionId: id,

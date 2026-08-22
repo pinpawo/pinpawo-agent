@@ -14,6 +14,7 @@ related:
   - concepts/orchestrator-practical-reasoning.md
   - decisions/capability-planner-task-boundaries.md
   - decisions/delegation-completion-acknowledgement.md
+  - concepts/studio-pet-thread-dispatch-invocation.md
   - interruption-and-delegation-continuation.md
   - migrations/docs-wiki-management-plan.md
 ---
@@ -82,10 +83,10 @@ explicitly migrated.
   and State ports; public review projection; V2/V4 compatibility; and the
   recoverable server-local review-resolution route.
 - [Local-agent session projection](local-agent-session-projection.md) — system
-  synthesis: how checkpoint, snapshot, shared reducer, review lifecycle, and
+  synthesis: how checkpoint, snapshot, shared reducer, pending interrupts, and
   transports fit together.
 - [Interruption and delegation continuation](interruption-and-delegation-continuation.md)
-  — end-to-end contract for run settlement, waiting-review Esc, retained
+  — end-to-end contract for run settlement, pending-interrupt Esc, retained
   delegation lanes, and the fresh-versus-continued next request.
 - [Checkpoint, snapshot, timeline, and timeline state](concepts/checkpoint-snapshot-timeline.md)
   — the four distinct domain terms and the completion-replaces-timeline lifecycle.
@@ -94,11 +95,21 @@ explicitly migrated.
 - [Local-agent transport boundary](concepts/local-agent-transport-boundary.md) —
   peer identity, WebSocket/stdio parity, and one-implementation session commands.
 - [Active run view as a discriminated union](decisions/run-view-discriminated-union.md)
-  — making illegal `running / waiting_review / interrupting` states unrepresentable.
+  — making illegal `running / pending_interrupt / interrupting` states unrepresentable.
 - [Review resolution progress is client-local](decisions/review-resolution-is-client-local.md)
-  — why `ReviewAction` carries no status and the server lifecycle stays unprojected.
+  — why `PendingInterrupt` carries no submission status and Chat reloads checkpoint
+  authority instead of creating a server review lifecycle.
 - [Session projection open questions](questions/session-projection-open-questions.md)
   — TUI wire migration, a future API projection, and deferred snapshot coordinates.
+
+## Studio dispatch identity
+
+- [Studio Pet thread and dispatch invocation](concepts/studio-pet-thread-dispatch-invocation.md)
+  — contested synthesis of the proposed one-thread-per-Pet model, one invocation
+  per dispatch, and interrupt resume through Studio dispatch.
+- [Review resolution progress is client-local](decisions/review-resolution-is-client-local.md)
+  — Chat/TUI submission progress over a shared `PendingInterrupt` projection;
+  explicitly not the Studio dispatch delivery contract.
 
 ## Documentation management
 

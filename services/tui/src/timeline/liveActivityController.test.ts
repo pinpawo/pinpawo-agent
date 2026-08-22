@@ -99,10 +99,10 @@ test('live activity pulse cancels when the run settles or the controller ends', 
   assert.equal(timers.length, 2);
   controller.sync({
     requestId: 'request',
-    state: 'waiting_review',
-    reviewAction: {
-      actionId: 'review',
-      reviews: [],
+    state: 'pending_interrupt',
+    pendingInterrupt: {
+      interruptId: 'review',
+      payload: { kind: 'human_review', interactions: [] },
     },
   });
   assert.equal(controller.frame, 0);

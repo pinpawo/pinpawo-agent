@@ -102,8 +102,8 @@ test('snapshot parser migrates legacy V3 reviews to the V4 public boundary', () 
 
   assert.equal(parsed?.version, AGENT_SESSION_SNAPSHOT_VERSION);
   assert.deepEqual(
-    parsed?.session.activeRun?.state === 'waiting_review'
-      ? parsed.session.activeRun.reviewAction.reviews
+    parsed?.session.activeRun?.state === 'pending_interrupt'
+      ? parsed.session.activeRun.pendingInterrupt.payload.interactions
       : null,
     [{
       interactionId: 'review-1',

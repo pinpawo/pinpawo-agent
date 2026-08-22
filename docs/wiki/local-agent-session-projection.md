@@ -2,9 +2,8 @@
 title: Local-Agent Session Projection
 page_type: system
 status: validated
-updated: 2026-08-07
+updated: 2026-08-22
 sources:
-  - ../LOCAL_AGENT_SESSION_PROJECTION.md
   - ../../packages/agent-session/src/domain.ts
   - ../../packages/agent-session/src/project.ts
   - ../../packages/agent-session/src/parser.ts
@@ -12,11 +11,10 @@ sources:
   - ../../packages/agent-contracts/src/interaction.ts
   - ../../packages/pet-agent/src/agent/orchestrator/review/reviewSpec.ts
   - ../../services/local-agent/src/localAgentSessionSnapshot.ts
-  - ../../services/local-agent/src/localAgentAppChatHandler.ts
-  - ../../services/local-agent/src/reviewResolutionLifecycle.ts
+  - ../design/local-agent/pending-interrupt-chat.md
   - ../../services/local-agent/src/inflightRequestController.ts
   - ../../services/local-agent/src/chatSessionAdapter.ts
-  - ../../services/local-agent/src/tui/TuiRuntimeController.ts
+  - ../../services/tui/src/session/sessionController.ts
   - ../../services/local-agent/src/localServerStdioTransport.ts
   - https://github.com/pinpawo/pinpawo-agent/issues/355
   - https://github.com/pinpawo/pinpawo-agent/issues/377
@@ -37,6 +35,7 @@ related:
   - concepts/local-agent-transport-boundary.md
   - decisions/run-view-discriminated-union.md
   - decisions/review-resolution-is-client-local.md
+  - concepts/studio-pet-thread-dispatch-invocation.md
   - questions/session-projection-open-questions.md
 ---
 
@@ -47,10 +46,8 @@ related:
 `AgentSession` is one client-neutral, in-memory projection of a conversation,
 consumed by the local TUI and the hosted chat adapter. It is **not** a second
 durable conversation store — LangGraph checkpoints remain the durable authority.
-The accepted source contract is
-[`LOCAL_AGENT_SESSION_PROJECTION.md`](../LOCAL_AGENT_SESSION_PROJECTION.md);
-this page is the current navigable synthesis over it and the shared
-`@pinpawo/agent-session` implementation.
+This page is the current navigable synthesis over the shared
+`@pinpawo/agent-session` implementation and the checkpoint-backed local host.
 
 The projection replaced several overlapping, TUI-specific session and snapshot
 shapes with one shared model (Decision, issue #355). A session owns one ordered
@@ -80,10 +77,10 @@ server-observed runtime/control events + accepted user input
   [`parser.ts`](../../packages/agent-session/src/parser.ts),
   reused by the HTTP client and the stdio session commands rather than duplicated
   per client.
-- **Server-local review lifecycle** — one `actionId`-keyed
-  [`ReviewResolutionLifecycle`](../../services/local-agent/src/reviewResolutionLifecycle.ts)
-  owns route, claim, consumption, and interrupt ordering, shared by both chat
-  handlers through `resolveHumanReviewAction`.
+- **Server-local interrupt resume** — the Chat handler reloads the implicit
+  active thread checkpoint for each response, then thread invocation
+  serialization orders resume and cancel calls. No second review existence or
+  consumed-state machine is projected or persisted.
 - **Transport adapters** — WebSocket and JSONL stdio both attach to the same
   composed handlers behind a `LocalServerPeer` identity; no transport concept
   enters the session model.
@@ -101,7 +98,7 @@ history.
 ## Active-run shape
 
 Snapshot version 4 represents the active run as a discriminated union of exactly
-three facts — `running(activity)`, `waiting_review(reviewAction)`, `interrupting`
+three facts — `running(activity)`, `pending_interrupt(pendingInterrupt)`, `interrupting`
 — so illegal combinations are unrepresentable. See
 [Run view as a discriminated union](decisions/run-view-discriminated-union.md).
 
@@ -114,19 +111,22 @@ and [Review resolution is client-local](decisions/review-resolution-is-client-lo
 
 ## Agent boundary contracts
 
-**Fact (issue #570 / PR #572).** `ReviewAction.reviews` now contains public
-`HumanReviewRequest` values from `@pinpawo/agent-contracts`, not the internal
-pet-agent `ReviewSpec`. Public requests expose presentation, input, and required
-`batchSubmission`; runtime decisions and effects remain checkpoint-owned. The
-V4 snapshot parser migrates valid V3 checkpointed review specs to this public V2
-interaction shape. See [Agent boundary contracts](agent-boundary-contracts.md).
+**Fact (issue #570 / PR #572, revised by PR #682).** A
+`PendingInterrupt` has one `interruptId` and a typed payload. For human review,
+`payload.kind === 'human_review'` and `payload.interactions` contains public
+`HumanReviewRequest` values from `@pinpawo/agent-contracts`, not internal
+pet-agent `ReviewSpec` values. Presentation, input, and `batchSubmission` cross
+the boundary; runtime decisions and effects remain checkpoint-owned. The V4
+parser accepts the former `waiting_review/reviewAction` snapshot only as an
+inbound compatibility shape and normalizes it immediately. See
+[Agent boundary contracts](agent-boundary-contracts.md).
 
 ## Interruption and continuation
 
 **Decision (PRs #475 and #485).** Interrupting the current invocation,
 retaining an unfinished delegation in the checkpoint, and interpreting the next
 user input are three separate transitions. The server emits terminal
-`interrupted` only after graph output settles. Esc from `waiting_review` first
+`interrupted` only after graph output settles. Esc from `pending_interrupt` first
 persists a canceled tool result and guard stop, then ends the invocation without
 handoff while retaining the active delegation and its private lane.
 

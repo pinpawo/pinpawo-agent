@@ -45,7 +45,7 @@ export function buildAgentGraphConfigurable(setup: AgentChannelSetup) {
   return Object.keys(configurable).length > 0 ? configurable : undefined;
 }
 
-export type LocalAgentGraphPendingHumanReview = {
+export type LocalAgentGraphPendingInterrupt = {
   interruptId?: string;
   review: ReviewSpec;
   reviews?: ReviewSpec[];
@@ -53,7 +53,7 @@ export type LocalAgentGraphPendingHumanReview = {
 
 export type LocalAgentGraphThreadState = {
   messages: BaseMessage[];
-  pendingHumanReview: LocalAgentGraphPendingHumanReview | null;
+  pendingInterrupt: LocalAgentGraphPendingInterrupt | null;
   hasPendingContinuation: boolean;
   currentPlan: AgentPlan | null;
 };
@@ -77,7 +77,7 @@ function readSnapshotValues(snapshot: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function readPendingInterrupt(snapshot: unknown): { id?: string; value: Record<string, unknown> } | null {
+function readGraphInterrupt(snapshot: unknown): { id?: string; value: Record<string, unknown> } | null {
   const tasks = Array.isArray((snapshot as { tasks?: unknown } | null)?.tasks)
     ? (snapshot as { tasks: unknown[] }).tasks
     : [];
@@ -110,8 +110,8 @@ function hasPendingContinuation(snapshot: unknown) {
   return tasks.length > 0;
 }
 
-function readPendingHumanReview(snapshot: unknown): LocalAgentGraphPendingHumanReview | null {
-  const pendingInterrupt = readPendingInterrupt(snapshot);
+function projectPendingInterrupt(snapshot: unknown): LocalAgentGraphPendingInterrupt | null {
+  const pendingInterrupt = readGraphInterrupt(snapshot);
   if (!pendingInterrupt) {
     return null;
   }
@@ -216,7 +216,7 @@ export class LocalAgentGraphService {
     const values = readSnapshotValues(snapshot);
     return {
       messages: readSnapshotMessages(snapshot),
-      pendingHumanReview: readPendingHumanReview(snapshot),
+      pendingInterrupt: projectPendingInterrupt(snapshot),
       hasPendingContinuation: hasPendingContinuation(snapshot),
       currentPlan: projectCurrentPlan(values),
     };

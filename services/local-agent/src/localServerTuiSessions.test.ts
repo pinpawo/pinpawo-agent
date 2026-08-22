@@ -444,7 +444,7 @@ test('LocalServerTuiSessionService reads one checkpoint point for messages and p
         capturedThreadId = setup.input.threadId;
         return {
           messages: [new HumanMessage('checkpoint prompt')],
-          pendingHumanReview: { review },
+          pendingInterrupt: { review },
           hasPendingContinuation: true,
         };
       },
@@ -475,7 +475,7 @@ test('LocalServerTuiSessionService reads one checkpoint point for messages and p
     capabilityArtifactStore: testArtifactStore,
   } as never);
 
-  assert.deepEqual(checkpoint.pendingReview, {
+  assert.deepEqual(checkpoint.pendingInterrupt, {
     sessionId: session.id,
     review,
   });

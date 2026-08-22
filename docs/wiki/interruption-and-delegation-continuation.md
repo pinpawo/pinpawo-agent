@@ -2,9 +2,8 @@
 title: Interruption And Delegation Continuation
 page_type: system
 status: validated
-updated: 2026-07-29
+updated: 2026-08-22
 sources:
-  - ../LOCAL_AGENT_SESSION_PROJECTION.md
   - ../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../../packages/agent-session/src/domain.ts
   - ../../packages/agent-session/src/project.ts
@@ -15,8 +14,8 @@ sources:
   - ../../packages/pet-agent/src/agent/orchestrator/runtime/activeDelegationTransition.ts
   - ../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/capability.ts
   - ../../packages/pet-agent/src/agent/orchestrator/runtime/routes/afterCapability.ts
-  - ../../services/local-agent/src/reviewResolutionLifecycle.ts
-  - ../../services/local-agent/src/humanReviewActionRouting.ts
+  - ../design/local-agent/pending-interrupt-chat.md
+  - ../../services/local-agent/src/pendingHumanReviewInterrupt.ts
   - ../../services/local-agent/src/inflightRequestController.ts
   - ../../services/local-agent/src/threadInvocationCoordinator.ts
   - ../../services/local-agent/src/chatSessionAdapter.ts
@@ -25,7 +24,7 @@ sources:
   - ../../packages/pet-agent/src/agent/orchestrator/orchestrator.test.ts
   - ../../services/local-agent/src/chatSessionAdapter.test.ts
   - ../../services/local-agent/src/localServerChatHandler.test.ts
-  - ../../services/local-agent/src/tuiRuntimeController.test.ts
+  - ../../services/tui/src/session/sessionControllerReview.test.ts
   - https://github.com/pinpawo/pinpawo-agent/issues/465
   - https://github.com/pinpawo/pinpawo-agent/issues/466
   - https://github.com/pinpawo/pinpawo-agent/issues/478
@@ -40,6 +39,7 @@ related:
   - concepts/message-context-and-provenance.md
   - decisions/run-view-discriminated-union.md
   - decisions/review-resolution-is-client-local.md
+  - concepts/studio-pet-thread-dispatch-invocation.md
   - questions/session-projection-open-questions.md
 ---
 
@@ -47,9 +47,12 @@ related:
 
 ## Scope
 
-This page records the current end-to-end contract for stopping a local-agent run,
-stopping specifically from `waiting_review`, retaining an unfinished delegation,
-and choosing what the next user input means.
+This page records the current Chat/TUI end-to-end contract for stopping a
+local-agent run, stopping specifically from `pending_interrupt`, retaining an
+unfinished delegation, and choosing what the next user input means. It does not
+define Studio's Pet-thread dispatch lifecycle; see the contested [Studio Pet
+thread and dispatch invocation](concepts/studio-pet-thread-dispatch-invocation.md)
+model.
 
 **Decision (PRs #468, #475, #481, and #485).** An interrupted invocation and
 an unfinished delegation are different lifecycles:
@@ -71,7 +74,7 @@ continuation from message prose.
 | interrupt intent | a client asked the current invocation to stop | client command |
 | `interrupting` | the server accepted the stop request and signaled its abort controller | server-observed session projection |
 | terminal `interrupted` | the invocation owner observed graph output settlement and terminalized the request | local server invocation owner |
-| pending `ReviewAction` | the checkpoint is waiting for a review response | LangGraph checkpoint |
+| pending `PendingInterrupt` | the checkpoint is waiting for a review response | LangGraph checkpoint |
 | review resolution progress | the TUI has sent one response/cancel command and must not send another | TUI-local `ReviewDraft.resolutionSent` |
 | active delegation | the checkpoint identifies an unfinished delegation and its private lane | orchestrator state |
 | continuation availability | this TUI instance canceled a review and later observed that invocation end as `interrupted` | TUI-local session marker |
@@ -105,20 +108,19 @@ sequenceDiagram
     Note over TUI: input is released only now
 ```
 
-The `waiting_review` Esc path has an additional checkpoint boundary:
+The `pending_interrupt` Esc path has an additional checkpoint boundary:
 
 ```mermaid
 sequenceDiagram
     participant TUI
     participant Server as Local server
-    participant Review as Review lifecycle
     participant Graph
     participant Checkpoint
 
-    TUI->>Server: review.cancel(actionId)
+    TUI->>Server: review.cancel(interruptId)
     Note over TUI: resolutionSent = true
-    Server->>Review: claim interrupt_run action
-    Review->>Graph: resume review interrupt
+    Server->>Checkpoint: reload current pending interrupt
+    Server->>Graph: resume with interrupt_run
     Graph->>Checkpoint: append canceled ToolMessage and guard stop
     Checkpoint-->>Server: resumed checkpoint persisted
     Server->>Graph: abort current invocation
@@ -174,11 +176,11 @@ request, global active-request guards can still reject a session resume. This is
 an intentional, usually brief safety window rather than proof of a wedged
 session.
 
-## Esc while `waiting_review`
+## Esc while a review interrupt is pending
 
 ### Cancel is a control action, not a review verdict
 
-**Fact.** When the focused run is in `waiting_review` and that review has not
+**Fact.** When the focused run is in `pending_interrupt` and that review has not
 already been resolved, Esc sends `review.cancel`. The server maps that command to
 the internal `{ action: 'interrupt_run' }` control action. It does not choose a
 declared reject option and therefore works even when the review schema has no
@@ -199,15 +201,14 @@ unfinished delegation for an explicit later decision.”
 3. jumping to the end of the subagent run without another child-model call;
 4. producing no announce and no accepted handoff.
 
-The local server queues the run interrupt before resuming the graph, but applies
-the abort only after the resumed review checkpoint has been persisted. The
-`actionId`-keyed
-[`ReviewResolutionLifecycle`](../../services/local-agent/src/reviewResolutionLifecycle.ts)
-owns route, claim, consumption, and this interrupt ordering.
+The local server resumes the interrupt with the `interrupt_run` control payload
+and applies the abort only after the resumed checkpoint has been persisted.
+The active Chat invocation and its checkpoint callback own this ordering; there
+is no separate review lifecycle or action-keyed claim authority.
 
 **Decision.** The server interrupts only if the original review was consumed and
 the resumed checkpoint did not immediately expose a newer pending review. This
-prevents a late cancel from aborting a different review action belonging to the
+prevents a late cancel from aborting a different pending interrupt belonging to the
 same run.
 
 ### State retained after the stop
@@ -297,7 +298,7 @@ precondition themselves. See the corresponding
 | stop takes longer than ten seconds | show a notice, keep input gated | user feedback must not fabricate completion |
 | WebSocket disconnect during settlement | abort affected runs; owner clears later | preserve single-owner terminalization |
 | Esc after review resolution was already sent | do not cancel the same review again | `resolutionSent` is the local one-shot gate |
-| canceled review resumes into a newer review | do not apply the queued abort to the new review | checkpoint identity protects the newer action |
+| canceled review resumes into a newer review | do not apply the queued abort to the new review | checkpoint identity protects the newer interrupt |
 | ordinary input after review interruption | fresh request; old active pointer superseded | new user intent must not inherit review state |
 | `/continue` transport send fails | keep command availability | no transition was accepted |
 | `/continue` issued through the API without an active delegation | no active transition; normal entry processing remains possible | protocol callers own this precondition |
@@ -309,7 +310,7 @@ precondition themselves. See the corresponding
    graph output settles.
 2. **No fabricated recovery:** timers may explain delay but may not release the
    run or emit a terminal event.
-3. **Review identity:** cancel/resume ordering stays keyed by `actionId`; a stale
+3. **Review identity:** cancel/resume ordering stays keyed by `interruptId`; a stale
    cancel cannot target a newer review.
 4. **Persist before abort:** review cancellation reaches a checkpoint that
    records the canceled tool result and guard stop before the invocation is
@@ -337,11 +338,11 @@ precondition themselves. See the corresponding
 - [Issue #466](https://github.com/pinpawo/pinpawo-agent/issues/466) defined the
   fresh-turn pollution problem and the explicit supersede/resume contract.
 - [Issue #478](https://github.com/pinpawo/pinpawo-agent/issues/478) defined Esc
-  from `waiting_review` as suspension at a resumable checkpoint rather than a
+  from `pending_interrupt` as suspension at a resumable checkpoint rather than a
   review rejection.
 - [PR #475](https://github.com/pinpawo/pinpawo-agent/pull/475) separated fresh
   turns from interrupted delegations, added explicit supersede/resume
-  transitions, and made waiting-review Esc stop at a resumable checkpoint.
+  transitions, and made pending-interrupt Esc stop at a resumable checkpoint.
 - [PR #481](https://github.com/pinpawo/pinpawo-agent/pull/481) generalized lane
   retention to incomplete delegation outcomes and reserved handoff/cleanup for
   accepted completion.
@@ -353,11 +354,7 @@ The authoritative regression coverage is in
 [`localServerChatHandler.test.ts`](../../services/local-agent/src/localServerChatHandler.test.ts),
 [`chatSessionAdapter.test.ts`](../../services/local-agent/src/chatSessionAdapter.test.ts),
 and
-[`tuiRuntimeController.test.ts`](../../services/local-agent/src/tuiRuntimeController.test.ts).
+[`sessionControllerReview.test.ts`](../../services/tui/src/session/sessionControllerReview.test.ts).
 
-**Source note.** The older source contract
-[`LOCAL_AGENT_SESSION_PROJECTION.md`](../LOCAL_AGENT_SESSION_PROJECTION.md) uses
-type and implementation terminology that predates both the shared
-`@pinpawo/agent-session` package and the current `ReviewResolutionLifecycle`.
-For current behavior, the merged implementation and tests listed in this page's
-frontmatter take precedence.
+For current behavior, the implementation and tests listed in this page's
+frontmatter take precedence over historical terminology.

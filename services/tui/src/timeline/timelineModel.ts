@@ -109,7 +109,7 @@ export function formatLiveSession(
   }
   const run = session.activeRun;
   if (!run) return 'idle';
-  if (run.state === 'waiting_review') return 'waiting for review';
+  if (run.state === 'pending_interrupt') return 'waiting for review';
   if (run.state === 'interrupting') return 'interrupting';
   if (run.activity === 'using_tool') return 'using tool';
   if (run.activity === 'streaming') return 'streaming response';
@@ -131,7 +131,7 @@ export function formatLiveActivity(
     1,
     Math.floor(maxCodePoints) - [...suffix].length,
   );
-  if (run.state === 'waiting_review') {
+  if (run.state === 'pending_interrupt') {
     return appendElapsed('! waiting for review', suffix, activityWidth);
   }
   if (run.state === 'interrupting') {

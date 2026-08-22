@@ -117,10 +117,10 @@ test('composer placeholder acknowledges active work without blocking drafting', 
       ...session,
       activeRun: {
         requestId: 'request',
-        state: 'waiting_review',
-        reviewAction: {
-          actionId: 'review-action',
-          reviews: [],
+        state: 'pending_interrupt',
+        pendingInterrupt: {
+          interruptId: 'review-action',
+          payload: { kind: 'human_review', interactions: [] },
         },
       },
     }),

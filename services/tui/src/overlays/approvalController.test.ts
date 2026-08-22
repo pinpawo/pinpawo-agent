@@ -121,7 +121,7 @@ test('approval controller preserves the one-shot resolution gate when connection
   assert.match(disconnected.message ?? '', /connection changed/i);
 });
 
-test('approval controller sends canonical cancellation for the active action', () => {
+test('approval controller sends canonical cancellation for the pending interrupt', () => {
   const sessionController = new FakeReviewSessionController();
   const controller = new ApprovalController({
     sessionController,
@@ -134,7 +134,7 @@ test('approval controller sends canonical cancellation for the active action', (
 
   assert.deepEqual(sessionController.cancelCalls, [{
     requestId: 'request-1',
-    actionId: 'action-1',
+    interruptId: 'action-1',
   }]);
   assert.equal(controller.getState().phase, 'resolution-sent');
   controller.markInterruptSent();
@@ -172,10 +172,10 @@ function waitingReview(
 ): AgentRunView {
   return {
     requestId: 'request-1',
-    state: 'waiting_review',
-    reviewAction: {
-      actionId: 'action-1',
-      reviews,
+    state: 'pending_interrupt',
+    pendingInterrupt: {
+      interruptId: 'action-1',
+      payload: { kind: 'human_review', interactions: reviews },
     },
   };
 }

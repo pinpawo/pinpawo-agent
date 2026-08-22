@@ -1258,7 +1258,7 @@ test('delegation continuation sends resume_active without client-owned availabil
 
   assert.deepEqual(controller.cancelReview({
     requestId: 'chat',
-    actionId: 'review-action',
+    interruptId: 'review-action',
   }), { ok: true });
   connection.receive({
     type: 'interrupted',

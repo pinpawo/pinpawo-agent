@@ -8,7 +8,7 @@ import type {
   AgentTimelineEntry,
 } from '@pinpawo/agent-session';
 import { createAgentSessionSnapshot } from '@pinpawo/agent-session';
-import type { ReviewActionSnapshot } from './localServerChatHandler';
+import type { PendingInterruptSnapshot } from './localServerChatHandler';
 import type { LocalServerDeps } from './localServerTypes';
 import type { TuiCheckpointMessage } from './localServerTuiSessions';
 import { buildLocalRuntimeProjection } from './localConfigProjection';
@@ -25,13 +25,13 @@ export function buildLocalAgentSessionSnapshot(params: {
   modelProfileId?: string;
   requiredInputModalities?: readonly AgentInputModality[];
   sessionTokenUsage?: AgentSession['sessionTokenUsage'] | null;
-  pendingReview?: ReviewActionSnapshot | null;
+  pendingInterrupt?: PendingInterruptSnapshot | null;
   /** Live local transport state; never inferred from checkpoint plan data. */
   activeRun?: Extract<AgentRunView, { state: 'running' }> | null;
   currentPlan?: AgentPlan | null;
 }): AgentSessionSnapshot {
   const timeline = timelineFromCheckpointMessages(params.messages);
-  const pendingReview = params.pendingReview ?? null;
+  const pendingInterrupt = params.pendingInterrupt ?? null;
   const runtime = buildLocalAgentRuntimeView(
     params.deps,
     params.modelProfileId,
@@ -49,9 +49,9 @@ export function buildLocalAgentSessionSnapshot(params: {
     sessionId: params.sessionId,
     kind: params.kind,
     timeline,
-    activeRun: pendingReview
-      ? runFromPendingReview({
-        pendingReview,
+    activeRun: pendingInterrupt
+      ? runFromPendingInterrupt({
+        pendingInterrupt,
       })
       : params.activeRun ?? null,
     ...(params.currentPlan !== undefined ? { currentPlan: params.currentPlan } : {}),
@@ -135,16 +135,12 @@ function timelineFromCheckpointMessages(messages: TuiCheckpointMessage[]): Agent
   });
 }
 
-function runFromPendingReview(params: {
-  pendingReview: ReviewActionSnapshot;
+function runFromPendingInterrupt(params: {
+  pendingInterrupt: PendingInterruptSnapshot;
 }): AgentRunView {
-  const petId = params.pendingReview.actor?.petId;
   return {
-    requestId: params.pendingReview.requestId,
-    state: 'waiting_review',
-    reviewAction: {
-      ...params.pendingReview.reviewAction,
-      ...(petId ? { petId } : {}),
-    },
+    requestId: params.pendingInterrupt.requestId,
+    state: 'pending_interrupt',
+    pendingInterrupt: params.pendingInterrupt.pendingInterrupt,
   };
 }

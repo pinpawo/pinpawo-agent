@@ -125,9 +125,9 @@ export function createLocalServerHandlers(
   const loadSnapshot = async (peer?: LocalServerPeer) => {
     const requestDeps = runtimeDeps.get();
     const checkpoint = await tuiSessions.readActiveCheckpointPoint(requestDeps);
-    const pendingReview = chatHandler.buildReviewActionSnapshot(
+    const pendingInterrupt = chatHandler.buildPendingInterruptSnapshot(
       requestDeps,
-      checkpoint.pendingReview,
+      checkpoint.pendingInterrupt,
     );
     const active = peer ? activeChatRuns.get(peer) : null;
     const inflight = peer ? inflightRequests.get(peer) : null;
@@ -148,7 +148,7 @@ export function createLocalServerHandlers(
       modelProfileId: checkpoint.modelProfileId,
       requiredInputModalities: checkpoint.requiredInputModalities,
       sessionTokenUsage: checkpoint.sessionTokenUsage,
-      pendingReview,
+      pendingInterrupt,
       activeRun,
       currentPlan: checkpoint.currentPlan,
     });
@@ -351,7 +351,7 @@ export function createLocalServerHandlers(
         );
         return;
       }
-      if (checkpoint.pendingReview) {
+      if (checkpoint.pendingInterrupt) {
         sendModelSelectionError(
           peer,
           message,
@@ -368,7 +368,7 @@ export function createLocalServerHandlers(
         modelProfileId: candidateSession.modelProfileId,
         requiredInputModalities: checkpoint.requiredInputModalities,
         sessionTokenUsage: checkpoint.sessionTokenUsage,
-        pendingReview: null,
+        pendingInterrupt: null,
         currentPlan: checkpoint.currentPlan,
       });
       const session = tuiSessions.selectModelProfile(
@@ -438,7 +438,7 @@ export function createLocalServerHandlers(
           modelProfileId: session.modelProfileId,
           requiredInputModalities: session.requiredInputModalities,
           sessionTokenUsage: null,
-          pendingReview: null,
+          pendingInterrupt: null,
           currentPlan: null,
         }),
       };
@@ -471,9 +471,9 @@ export function createLocalServerHandlers(
     try {
       const requestDeps = runtimeDeps.get();
       const result = await tuiSessions.resumeSession(requestDeps, sessionId);
-      const pendingReview = chatHandler.buildReviewActionSnapshot(
+      const pendingInterrupt = chatHandler.buildPendingInterruptSnapshot(
         requestDeps,
-        result.pendingReview,
+        result.pendingInterrupt,
       );
       return {
         session: projectChatSessionSummary(result.session),
@@ -485,7 +485,7 @@ export function createLocalServerHandlers(
           modelProfileId: result.session.modelProfileId,
           requiredInputModalities: result.session.requiredInputModalities,
           sessionTokenUsage: result.sessionTokenUsage,
-          pendingReview,
+          pendingInterrupt,
           currentPlan: result.currentPlan,
         }),
       };
@@ -521,7 +521,7 @@ export function createLocalServerHandlers(
       const ctx = await (options.loadContext ?? loadAgentContext)(requestDeps.actorId);
       const setup = tuiSessions.buildChatSetup(requestDeps, ctx, session.threadId);
       const state = await chatGraphService.readThreadState(setup);
-      if (state.pendingHumanReview) {
+      if (state.pendingInterrupt) {
         throw new Error('cannot compact context while human review is pending');
       }
       const result = await compactOrchestratorMessages({

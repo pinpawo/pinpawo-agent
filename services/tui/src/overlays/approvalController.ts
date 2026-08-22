@@ -119,7 +119,7 @@ export class ApprovalController {
     if (action === 'cancel') {
       const result = this.sessionController.cancelReview({
         requestId: this.state.requestId,
-        actionId: this.state.action.actionId,
+        interruptId: this.state.action.interruptId,
       });
       this.update(result.ok
         ? this.beginSubmission(this.state)
@@ -134,7 +134,7 @@ export class ApprovalController {
     }
     const result = this.sessionController.submitReviewResponse({
       requestId: this.state.requestId,
-      actionId: this.state.action.actionId,
+      interruptId: this.state.action.interruptId,
       decisions: this.state.decisions,
       optionId: option.id,
       inputText: this.state.draft,
@@ -168,12 +168,12 @@ export class ApprovalController {
     this.clearSubmissionTimers();
     const resolutionSent = beginApprovalSubmission(state);
     if (resolutionSent.phase === 'closed') return resolutionSent;
-    const actionId = resolutionSent.action.actionId;
+    const interruptId = resolutionSent.action.interruptId;
     this.submissionTimer = this.setTimer(() => {
       this.submissionTimer = null;
       if (
         this.state.phase !== 'resolution-sent'
-        || this.state.action.actionId !== actionId
+        || this.state.action.interruptId !== interruptId
       ) {
         return;
       }
@@ -185,21 +185,21 @@ export class ApprovalController {
         },
       ));
     }, this.submissionTimeoutMs);
-    this.scheduleSubmissionPulse(actionId);
+    this.scheduleSubmissionPulse(interruptId);
     return resolutionSent;
   }
 
-  private scheduleSubmissionPulse(actionId: string) {
+  private scheduleSubmissionPulse(interruptId: string) {
     this.submissionPulseTimer = this.setTimer(() => {
       this.submissionPulseTimer = null;
       if (
         this.state.phase !== 'resolution-sent'
-        || this.state.action.actionId !== actionId
+        || this.state.action.interruptId !== interruptId
       ) {
         return;
       }
       this.update(advanceApprovalSubmissionFrame(this.state));
-      this.scheduleSubmissionPulse(actionId);
+      this.scheduleSubmissionPulse(interruptId);
     }, this.submissionPulseMs);
   }
 

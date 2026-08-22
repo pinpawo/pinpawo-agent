@@ -89,18 +89,16 @@ test('parseLocalAgentClientMessage accepts canonical human review response field
     parseLocalAgentClientMessage(JSON.stringify({
       type: 'human_review_response',
       requestId: 'req-1',
-      actionId: 'interrupt-1',
+      interruptId: 'interrupt-1',
       interactionId: 'review-1',
-      reviewId: 'review-1',
       selectedOptionId: 'respond',
       input: { message: 'list files first' },
     })),
     {
       type: 'human_review_response',
       requestId: 'req-1',
-      actionId: 'interrupt-1',
+      interruptId: 'interrupt-1',
       interactionId: 'review-1',
-      reviewId: 'review-1',
       selectedOptionId: 'respond',
       input: { message: 'list files first' },
     },
@@ -109,12 +107,12 @@ test('parseLocalAgentClientMessage accepts canonical human review response field
     parseLocalAgentClientMessage(JSON.stringify({
       type: 'review.cancel',
       requestId: 'req-1',
-      actionId: 'interrupt-1',
+      interruptId: 'interrupt-1',
     })),
     {
       type: 'review.cancel',
       requestId: 'req-1',
-      actionId: 'interrupt-1',
+      interruptId: 'interrupt-1',
     },
   );
   assert.deepEqual(
@@ -155,7 +153,6 @@ test('parseLocalAgentClientMessage accepts canonical human review response field
       type: 'human_review_response',
       requestId: 'req-1',
       interactionId: 'review-2',
-      reviewId: 'review-2',
       selectedOptionId: 'approve',
       decisions: [
         { interactionId: 'review-1', selectedOptionId: 'approve' },
@@ -204,6 +201,46 @@ test('parseLocalAgentClientMessage accepts canonical human review response field
     null,
   );
   assert.equal(parseLocalAgentClientMessage(JSON.stringify({ type: 'human_review_response', requestId: 'req-1' })), null);
+});
+
+test('parseLocalAgentClientMessage normalizes legacy actionId to interruptId', () => {
+  assert.deepEqual(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'human_review_response',
+      requestId: 'req-1',
+      actionId: 'interrupt-1',
+      interactionId: 'review-1',
+      selectedOptionId: 'approve',
+    })),
+    {
+      type: 'human_review_response',
+      requestId: 'req-1',
+      interruptId: 'interrupt-1',
+      interactionId: 'review-1',
+      selectedOptionId: 'approve',
+    },
+  );
+  assert.deepEqual(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'review.cancel',
+      requestId: 'req-1',
+      actionId: 'interrupt-1',
+    })),
+    {
+      type: 'review.cancel',
+      requestId: 'req-1',
+      interruptId: 'interrupt-1',
+    },
+  );
+  assert.equal(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'review.cancel',
+      requestId: 'req-1',
+      interruptId: 'interrupt-1',
+      actionId: 'other-interrupt',
+    })),
+    null,
+  );
 });
 
 test('parseLocalAgentClientMessage rejects legacy interrupt_request control messages', () => {

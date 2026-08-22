@@ -1,7 +1,4 @@
-import type {
-  AgentReviewAction,
-  ReviewResponse,
-} from '@pinpawo/agent-session';
+import type { PendingInterruptProjection, ReviewResponse } from '@pinpawo/agent-session';
 
 export type PreparedReviewDecision =
   | {
@@ -16,7 +13,7 @@ export type PreparedReviewDecision =
     };
 
 export function prepareReviewDecision(params: {
-  action: AgentReviewAction;
+  action: PendingInterruptProjection;
   decisions: readonly ReviewResponse[];
   optionId: string;
   inputText?: string;
@@ -25,7 +22,8 @@ export function prepareReviewDecision(params: {
     return { ok: false, reason: 'stale' };
   }
 
-  const review = params.action.reviews[params.decisions.length];
+  const interactions = params.action.payload.interactions;
+  const review = interactions[params.decisions.length];
   const option = review?.options.find((candidate) => (
     candidate.id === params.optionId
   ));
@@ -51,17 +49,18 @@ export function prepareReviewDecision(params: {
     decision,
     decisions,
     shouldSend: option.batchSubmission === 'immediate'
-      || decisions.length >= params.action.reviews.length,
+      || decisions.length >= interactions.length,
   };
 }
 
 export function reviewDecisionsRemainValid(
-  action: AgentReviewAction,
+  action: PendingInterruptProjection,
   decisions: readonly ReviewResponse[],
 ) {
-  if (decisions.length >= action.reviews.length) return false;
+  const interactions = action.payload.interactions;
+  if (decisions.length >= interactions.length) return false;
   return decisions.every((decision, index) => {
-    const review = action.reviews[index];
+    const review = interactions[index];
     const option = review?.options.find((candidate) => (
       candidate.id === decision.selectedOptionId
     ));

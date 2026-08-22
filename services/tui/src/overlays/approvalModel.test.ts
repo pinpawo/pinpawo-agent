@@ -326,11 +326,10 @@ test('every review view variant renders through its own path', () => {
 function waitingReview(reviews: ReviewSpec[]): AgentRunView {
   return {
     requestId: 'request-1',
-    state: 'waiting_review',
-    reviewAction: {
-      actionId: 'action-1',
-      reviews,
-      petId: 'paws',
+    state: 'pending_interrupt',
+    pendingInterrupt: {
+      interruptId: 'action-1',
+      payload: { kind: 'human_review', interactions: reviews },
     },
   };
 }

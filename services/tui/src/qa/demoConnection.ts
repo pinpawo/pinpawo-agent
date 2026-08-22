@@ -375,11 +375,12 @@ function createDemoSession(
     activeRun: options.review
       ? {
           requestId: 'smoke-run',
-          state: 'waiting_review',
-          reviewAction: {
-            actionId: 'smoke-review-action',
-            petId: 'paws',
-            reviews: [{
+          state: 'pending_interrupt',
+          pendingInterrupt: {
+            interruptId: 'smoke-review-action',
+            payload: {
+              kind: 'human_review',
+              interactions: [{
               interactionId: 'smoke-review',
               schemaVersion: 2,
               // A realistic multi-line command: the reviewed content must stay
@@ -420,7 +421,8 @@ function createDemoSession(
                 variant: 'danger',
                 batchSubmission: 'immediate',
               }],
-            }],
+              }],
+            },
           },
         }
       : null,

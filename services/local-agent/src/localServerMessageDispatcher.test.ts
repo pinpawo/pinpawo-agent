@@ -30,10 +30,10 @@ test('local server dispatcher routes typed client messages and pong', async () =
       seen.push(`studio:${message.requestId}:${message.userRequest}`);
     },
     onHumanReviewResponse: (_peer, message) => {
-      seen.push(`review:${message.requestId}:${message.reviewId}:${message.selectedOptionId}`);
+      seen.push(`review:${message.requestId}:${message.interactionId}:${message.selectedOptionId}`);
     },
     onReviewCancel: (_peer, message) => {
-      seen.push(`review-cancel:${message.requestId}:${message.actionId}`);
+      seen.push(`review-cancel:${message.requestId}:${message.interruptId}`);
     },
     onRunInterrupt: (_peer, message) => {
       seen.push(`run-interrupt:${message.requestId}`);
@@ -99,7 +99,7 @@ test('local server dispatcher routes typed client messages and pong', async () =
   dispatchLocalServerMessage(peer, JSON.stringify({
     type: 'review.cancel',
     requestId: 'review-1',
-    actionId: 'action-1',
+    interruptId: 'action-1',
   }), handlers);
   dispatchLocalServerMessage(peer, JSON.stringify({
     type: 'new_session',

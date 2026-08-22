@@ -1,6 +1,6 @@
 import type {
-  AgentReviewAction,
   AgentRunView,
+  PendingInterruptProjection,
   ReviewResponse,
   ReviewSpec,
 } from '@pinpawo/agent-session';
@@ -18,7 +18,7 @@ export type ApprovalState =
   | {
       phase: ApprovalPhase;
       requestId: string;
-      action: AgentReviewAction;
+      action: PendingInterruptProjection;
       reviewIndex: number;
       decisions: ReviewResponse[];
       selectedIndex: number;
@@ -114,32 +114,32 @@ export function syncApprovalState(
   state: ApprovalState,
   run: AgentRunView | null,
 ): ApprovalState {
-  if (!run || run.state !== 'waiting_review') {
+  if (!run || run.state !== 'pending_interrupt') {
     return state.phase === 'closed' ? state : createApprovalState();
   }
   if (
     state.phase !== 'closed'
     && state.requestId === run.requestId
-    && state.action.actionId === run.reviewAction.actionId
-    && reviewDecisionsRemainValid(run.reviewAction, state.decisions)
+    && state.action.interruptId === run.pendingInterrupt.interruptId
+    && reviewDecisionsRemainValid(run.pendingInterrupt, state.decisions)
   ) {
     return {
       ...state,
-      action: run.reviewAction,
+      action: run.pendingInterrupt,
       reviewIndex: state.decisions.length,
       selectedIndex: clampOptionIndex(
         state.selectedIndex,
-        currentReviewFrom(run.reviewAction, state.decisions)?.options.length ?? 0,
+        currentReviewFrom(run.pendingInterrupt, state.decisions)?.options.length ?? 0,
       ),
     };
   }
   return {
     phase: 'ready',
     requestId: run.requestId,
-    action: run.reviewAction,
+    action: run.pendingInterrupt,
     reviewIndex: 0,
     decisions: [],
-    selectedIndex: defaultOptionIndex(run.reviewAction.reviews[0]),
+    selectedIndex: defaultOptionIndex(run.pendingInterrupt.payload.interactions[0]),
     contentOffset: 0,
     draft: '',
     interruptSent: false,
@@ -150,7 +150,7 @@ export function syncApprovalState(
 export function currentApprovalReview(state: ApprovalState) {
   return state.phase === 'closed'
     ? null
-    : state.action.reviews[state.reviewIndex] ?? null;
+    : state.action.payload.interactions[state.reviewIndex] ?? null;
 }
 
 export function selectedApprovalOption(state: ApprovalState) {
@@ -237,10 +237,13 @@ export function advanceApproval(
   state: ApprovalState,
   decisions: ReviewResponse[],
 ): ApprovalState {
-  if (state.phase === 'closed' || decisions.length >= state.action.reviews.length) {
+  const interactions = state.phase === 'closed'
+    ? []
+    : state.action.payload.interactions;
+  if (state.phase === 'closed' || decisions.length >= interactions.length) {
     return state;
   }
-  const review = state.action.reviews[decisions.length];
+  const review = interactions[decisions.length];
   return {
     ...state,
     phase: 'ready',
@@ -339,12 +342,11 @@ export function buildApprovalViewModel(
 ): ApprovalViewModel {
   const innerWidth = Math.max(1, width - 4);
   const review = currentApprovalReview(state);
-  const reviewCount = state.action.reviews.length;
-  const pet = state.action.petId ? ` · ${state.action.petId}` : '';
+  const reviewCount = state.action.payload.interactions.length;
   if (state.phase === 'resolution-sent') {
     const message = state.message ?? 'Submitting review decision…';
     const rawTitle = width >= 50
-      ? `Review ${state.reviewIndex + 1}/${reviewCount}${pet}`
+      ? `Review ${state.reviewIndex + 1}/${reviewCount}`
       : `Review ${state.reviewIndex + 1}/${reviewCount}`;
     return {
       title: ` ${truncateTerminalLine(rawTitle, innerWidth)} `,
@@ -389,7 +391,7 @@ export function buildApprovalViewModel(
     ? ` · ${offset + 1}-${Math.min(offset + bodyRows, allBodyLines.length)}/${allBodyLines.length}`
     : '';
   const rawTitle = width >= 50
-    ? `Review ${state.reviewIndex + 1}/${reviewCount}${pet}${contentProgress}`
+    ? `Review ${state.reviewIndex + 1}/${reviewCount}${contentProgress}`
     : `Review ${state.reviewIndex + 1}/${reviewCount}${compactContentProgress}`;
   const title = truncateTerminalLine(
     rawTitle,
@@ -513,8 +515,8 @@ function clampOptionIndex(index: number, count: number) {
 }
 
 function currentReviewFrom(
-  action: AgentReviewAction,
+  action: PendingInterruptProjection,
   decisions: readonly ReviewResponse[],
 ) {
-  return action.reviews[decisions.length];
+  return action.payload.interactions[decisions.length];
 }

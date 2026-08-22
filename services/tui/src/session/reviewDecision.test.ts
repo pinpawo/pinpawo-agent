@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { AgentReviewAction } from '@pinpawo/agent-session';
+import type { PendingInterruptProjection } from '@pinpawo/agent-session';
 import { prepareReviewDecision } from './reviewDecision';
 
 test('approved review batches advance without sending until the final review', () => {
@@ -47,30 +47,33 @@ test('review decision preparation validates required input and stale drafts', ()
   });
 });
 
-function reviewAction(): AgentReviewAction {
+function reviewAction(): PendingInterruptProjection {
   return {
-    actionId: 'review-action',
-    reviews: ['review-1', 'review-2'].map((id) => ({
-      interactionId: id,
-      schemaVersion: 2 as const,
-      view: {
-        kind: 'plain',
-        body: `Review ${id}`,
-      },
-      options: [{
-        id: 'approve',
-        label: 'Approve',
-        batchSubmission: 'defer',
-      }, {
-        id: 'comment',
-        label: 'Comment',
-        batchSubmission: 'immediate',
-        input: {
-          kind: 'text',
-          key: 'message',
-          label: 'Comment',
+    interruptId: 'review-action',
+    payload: {
+      kind: 'human_review',
+      interactions: ['review-1', 'review-2'].map((id) => ({
+        interactionId: id,
+        schemaVersion: 2 as const,
+        view: {
+          kind: 'plain',
+          body: `Review ${id}`,
         },
-      }],
-    })),
+        options: [{
+          id: 'approve',
+          label: 'Approve',
+          batchSubmission: 'defer',
+        }, {
+          id: 'comment',
+          label: 'Comment',
+          batchSubmission: 'immediate',
+          input: {
+            kind: 'text',
+            key: 'message',
+            label: 'Comment',
+          },
+        }],
+      })),
+    },
   };
 }

@@ -85,10 +85,10 @@ test('approval view remains bounded and accepts multiline input after resize', a
 function waitingReview(): AgentRunView {
   return {
     requestId: 'request-1',
-    state: 'waiting_review',
-    reviewAction: {
-      actionId: 'action-1',
-      reviews: [review()],
+    state: 'pending_interrupt',
+    pendingInterrupt: {
+      interruptId: 'action-1',
+      payload: { kind: 'human_review', interactions: [review()] },
     },
   };
 }

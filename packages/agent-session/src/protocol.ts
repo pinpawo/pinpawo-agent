@@ -50,7 +50,6 @@ export type ChatRequestMessage = {
   requestId: string;
   message: string;
   attachments?: AgentLocalAttachment[];
-  petId?: string;
   userId?: string;
   activeDelegationTransition?: LegacyActiveDelegationTransition;
 };
@@ -63,12 +62,11 @@ export type RunInterruptMessage = {
 export type ReviewCancelMessage = {
   type: 'review.cancel';
   requestId: string;
-  actionId: string;
+  interruptId: string;
 };
 
 export type NewSessionMessage = {
   type: 'new_session';
-  petId?: string;
   userId?: string;
 };
 
@@ -94,26 +92,15 @@ export type StudioRequestMessage = {
 type HumanReviewResponseMessageBase = {
   type: 'human_review_response';
   requestId: string;
-  actionId?: string;
+  interruptId?: string;
   selectedOptionId: string;
   input?: Record<string, unknown>;
-  decisions?: (ReviewResponse | LegacyHumanReviewResponse)[];
+  decisions?: ReviewResponse[];
 };
 
-/**
- * A public interaction response. `reviewId` is accepted only as a legacy wire
- * alias and never appears in agent-contracts.
- */
-export type HumanReviewResponseMessage = HumanReviewResponseMessageBase & (
-  | { interactionId: string; reviewId?: string }
-  | { /** @deprecated Pre-contract wire compatibility only. */ interactionId?: undefined; reviewId: string }
-);
-
-/** @deprecated Accepted only to preserve pre-contract wire compatibility. */
-export type LegacyHumanReviewResponse = {
-  reviewId: string;
-  selectedOptionId: string;
-  input?: Record<string, unknown>;
+/** Public response after parser-boundary compatibility normalization. */
+export type HumanReviewResponseMessage = HumanReviewResponseMessageBase & {
+  interactionId: string;
 };
 
 export type SessionSnapshotGetMessage = {
@@ -800,7 +787,6 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
       'requestId',
       'message',
       'attachments',
-      'petId',
       'userId',
       'activeDelegationTransition',
     ])) return null;
@@ -819,9 +805,6 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
       requestId,
       message,
       ...(attachments ? { attachments } : {}),
-      ...(readOptionalString(record, 'petId') !== undefined
-        ? { petId: readOptionalString(record, 'petId') }
-        : {}),
       ...(readOptionalString(record, 'userId') !== undefined
         ? { userId: readOptionalString(record, 'userId') }
         : {}),
@@ -831,8 +814,9 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
     };
   }
   if (type === 'human_review_response') {
-    if (!hasOnlyKeys(record, ['type', 'requestId', 'actionId', 'interactionId', 'reviewId', 'selectedOptionId', 'input', 'decisions'])) return null;
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'interruptId', 'actionId', 'interactionId', 'reviewId', 'selectedOptionId', 'input', 'decisions'])) return null;
     const requestId = readString(record, 'requestId');
+    const interruptId = readOptionalString(record, 'interruptId');
     const actionId = readOptionalString(record, 'actionId');
     const interactionId = readOptionalString(record, 'interactionId');
     const reviewId = readOptionalString(record, 'reviewId');
@@ -841,16 +825,17 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
     const decisions = readReviewResponses(record, 'decisions');
     if (record.input !== undefined && !input) return null;
     if (record.decisions !== undefined && !decisions) return null;
+    if (record.interruptId !== undefined && !interruptId) return null;
     if (record.actionId !== undefined && !actionId) return null;
+    if (interruptId !== undefined && actionId !== undefined && interruptId !== actionId) return null;
     if (!requestId || (!interactionId && !reviewId) || !selectedOptionId) return null;
     if (interactionId !== undefined && reviewId !== undefined && interactionId !== reviewId) return null;
     const canonicalInteractionId = interactionId ?? reviewId!;
     return {
       type,
       requestId,
-      ...(actionId ? { actionId } : {}),
+      ...((interruptId ?? actionId) ? { interruptId: interruptId ?? actionId } : {}),
       interactionId: canonicalInteractionId,
-      ...(reviewId ? { reviewId } : {}),
       selectedOptionId,
       ...(input ? { input } : {}),
       ...(decisions ? { decisions } : {}),
@@ -862,17 +847,22 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
     return requestId ? { type, requestId } : null;
   }
   if (type === 'review.cancel') {
-    if (!hasOnlyKeys(record, ['type', 'requestId', 'actionId'])) return null;
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'interruptId', 'actionId'])) return null;
     const requestId = readString(record, 'requestId');
-    const actionId = readString(record, 'actionId');
-    return requestId && actionId ? { type, requestId, actionId } : null;
+    const interruptId = readOptionalString(record, 'interruptId');
+    const actionId = readOptionalString(record, 'actionId');
+    if (record.interruptId !== undefined && !interruptId) return null;
+    if (record.actionId !== undefined && !actionId) return null;
+    if (interruptId !== undefined && actionId !== undefined && interruptId !== actionId) return null;
+    const canonicalInterruptId = interruptId ?? actionId;
+    return requestId && canonicalInterruptId
+      ? { type, requestId, interruptId: canonicalInterruptId }
+      : null;
   }
   if (type === 'new_session') {
+    if (!hasOnlyKeys(record, ['type', 'userId'])) return null;
     return {
       type,
-      ...(readOptionalString(record, 'petId') !== undefined
-        ? { petId: readOptionalString(record, 'petId') }
-        : {}),
       ...(readOptionalString(record, 'userId') !== undefined
         ? { userId: readOptionalString(record, 'userId') }
         : {}),

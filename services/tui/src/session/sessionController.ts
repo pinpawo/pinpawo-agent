@@ -329,7 +329,7 @@ export class TuiSessionController {
     if (!run) {
       return { ok: false, reason: 'idle' };
     }
-    if (run.state === 'waiting_review') {
+    if (run.state === 'pending_interrupt') {
       return { ok: false, reason: 'review-active' };
     }
     if (run.state === 'interrupting') {
@@ -354,18 +354,18 @@ export class TuiSessionController {
 
   interruptResolvedReview(params: {
     requestId: string;
-    actionId: string;
+    interruptId: string;
   }): InterruptResolvedReviewResult {
     if (this.state.connection !== 'ready' || !this.transport.isConnected()) {
       return { ok: false, reason: 'not-ready' };
     }
     const run = this.state.session.activeRun;
-    if (!run || run.state !== 'waiting_review') {
+    if (!run || run.state !== 'pending_interrupt') {
       return { ok: false, reason: 'closed' };
     }
     if (
       run.requestId !== params.requestId
-      || run.reviewAction.actionId !== params.actionId
+      || run.pendingInterrupt.interruptId !== params.interruptId
     ) {
       return { ok: false, reason: 'stale' };
     }
@@ -438,7 +438,7 @@ export class TuiSessionController {
 
   submitReviewResponse(params: {
     requestId: string;
-    actionId: string;
+    interruptId: string;
     decisions: readonly ReviewResponse[];
     optionId: string;
     inputText?: string;
@@ -447,17 +447,17 @@ export class TuiSessionController {
       return { ok: false, reason: 'not-ready' };
     }
     const run = this.state.session.activeRun;
-    if (!run || run.state !== 'waiting_review') {
+    if (!run || run.state !== 'pending_interrupt') {
       return { ok: false, reason: 'closed' };
     }
     if (
       run.requestId !== params.requestId
-      || run.reviewAction.actionId !== params.actionId
+      || run.pendingInterrupt.interruptId !== params.interruptId
     ) {
       return { ok: false, reason: 'stale' };
     }
     const prepared = prepareReviewDecision({
-      action: run.reviewAction,
+      action: run.pendingInterrupt,
       decisions: params.decisions,
       optionId: params.optionId,
       inputText: params.inputText,
@@ -476,7 +476,7 @@ export class TuiSessionController {
     if (!this.transport.send({
       type: 'human_review_response',
       requestId: run.requestId,
-      actionId: run.reviewAction.actionId,
+      interruptId: run.pendingInterrupt.interruptId,
       interactionId: prepared.decision.interactionId,
       selectedOptionId: prepared.decision.selectedOptionId,
       ...(prepared.decision.input
@@ -496,25 +496,25 @@ export class TuiSessionController {
 
   cancelReview(params: {
     requestId: string;
-    actionId: string;
+    interruptId: string;
   }): CancelReviewResult {
     if (!this.reviewTransportReady()) {
       return { ok: false, reason: 'not-ready' };
     }
     const run = this.state.session.activeRun;
-    if (!run || run.state !== 'waiting_review') {
+    if (!run || run.state !== 'pending_interrupt') {
       return { ok: false, reason: 'closed' };
     }
     if (
       run.requestId !== params.requestId
-      || run.reviewAction.actionId !== params.actionId
+      || run.pendingInterrupt.interruptId !== params.interruptId
     ) {
       return { ok: false, reason: 'stale' };
     }
     if (!this.transport.send({
       type: 'review.cancel',
       requestId: run.requestId,
-      actionId: run.reviewAction.actionId,
+      interruptId: run.pendingInterrupt.interruptId,
     })) {
       return { ok: false, reason: 'send-failed' };
     }

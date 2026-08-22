@@ -7,7 +7,7 @@ import type {
   AgentOperationPhase,
   AgentOperationRaw,
 } from './events';
-import type { ReviewAction } from './review';
+import type { PendingInterruptProjection } from './review';
 
 export const AGENT_SESSION_SNAPSHOT_VERSION = 4 as const;
 
@@ -58,10 +58,6 @@ export type AgentSessionMessageInput = {
   createdAt?: string;
 };
 
-export type AgentReviewAction = ReviewAction & {
-  petId?: string;
-};
-
 export type AgentRunActivity =
   | 'thinking'
   | 'using_tool'
@@ -91,8 +87,8 @@ export type AgentRunView =
       activity: AgentRunActivity;
     }
   | AgentRunViewBase & {
-      state: 'waiting_review';
-      reviewAction: AgentReviewAction;
+      state: 'pending_interrupt';
+      pendingInterrupt: PendingInterruptProjection;
     }
   | AgentRunViewBase & {
       state: 'interrupting';

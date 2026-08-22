@@ -446,15 +446,15 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
       requestId: 'chat-review-approve',
     });
     await waitFor(() => (
-      controller.getState().session.activeRun?.state === 'waiting_review'
+      controller.getState().session.activeRun?.state === 'pending_interrupt'
     ));
     const approvalRun = controller.getState().session.activeRun;
-    assert.ok(approvalRun?.state === 'waiting_review');
-    assert.equal(approvalRun.reviewAction.actionId, 'review-interrupt-approve');
-    assert.equal(approvalRun.reviewAction.reviews[0]?.interactionId, REVIEW_SPEC.id);
+    assert.ok(approvalRun?.state === 'pending_interrupt');
+    assert.equal(approvalRun.pendingInterrupt.interruptId, 'review-interrupt-approve');
+    assert.equal(approvalRun.pendingInterrupt.payload.interactions[0]?.interactionId, REVIEW_SPEC.id);
     const approvalResult = controller.submitReviewResponse({
       requestId: 'chat-review-approve',
-      actionId: approvalRun.reviewAction.actionId,
+      interruptId: approvalRun.pendingInterrupt.interruptId,
       decisions: [],
       optionId: 'approve',
     });
@@ -488,14 +488,14 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
       requestId: 'chat-review-cancel',
     });
     await waitFor(() => (
-      controller.getState().session.activeRun?.state === 'waiting_review'
+      controller.getState().session.activeRun?.state === 'pending_interrupt'
     ));
     const cancellationRun = controller.getState().session.activeRun;
-    assert.ok(cancellationRun?.state === 'waiting_review');
-    assert.equal(cancellationRun.reviewAction.actionId, 'review-interrupt-cancel');
+    assert.ok(cancellationRun?.state === 'pending_interrupt');
+    assert.equal(cancellationRun.pendingInterrupt.interruptId, 'review-interrupt-cancel');
     assert.deepEqual(controller.cancelReview({
       requestId: 'chat-review-cancel',
-      actionId: cancellationRun.reviewAction.actionId,
+      interruptId: cancellationRun.pendingInterrupt.interruptId,
     }), {
       ok: true,
     });
@@ -514,17 +514,17 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
       },
     );
     await waitFor(() => (
-      controller.getState().session.activeRun?.state === 'waiting_review'
+      controller.getState().session.activeRun?.state === 'pending_interrupt'
     ));
     const continuedRun = controller.getState().session.activeRun;
-    assert.ok(continuedRun?.state === 'waiting_review');
+    assert.ok(continuedRun?.state === 'pending_interrupt');
     assert.equal(
-      continuedRun.reviewAction.actionId,
+      continuedRun.pendingInterrupt.interruptId,
       'review-interrupt-cancel',
     );
     const continuedApproval = controller.submitReviewResponse({
       requestId: 'chat-review-continue',
-      actionId: continuedRun.reviewAction.actionId,
+      interruptId: continuedRun.pendingInterrupt.interruptId,
       decisions: [],
       optionId: 'approve',
     });

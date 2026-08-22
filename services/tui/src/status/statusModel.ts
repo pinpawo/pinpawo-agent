@@ -109,7 +109,7 @@ export function formatComposerPlaceholder(
 ) {
   const actor = sessionActorLabel(session);
   const run = session.activeRun;
-  if (run?.state === 'waiting_review') {
+  if (run?.state === 'pending_interrupt') {
     return 'Review required · use the approval panel';
   }
   if (run?.state === 'interrupting') {

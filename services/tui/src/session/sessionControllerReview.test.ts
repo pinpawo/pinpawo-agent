@@ -33,7 +33,7 @@ test('review responses advance approved batches and send the final canonical dec
 
   const first = controller.submitReviewResponse({
     requestId: 'chat',
-    actionId: 'review-action',
+    interruptId: 'review-action',
     decisions: [],
     optionId: 'approve-1',
   });
@@ -43,7 +43,7 @@ test('review responses advance approved batches and send the final canonical dec
 
   const second = controller.submitReviewResponse({
     requestId: 'chat',
-    actionId: 'review-action',
+    interruptId: 'review-action',
     decisions: first.ok ? first.decisions : [],
     optionId: 'approve-2',
   });
@@ -52,7 +52,7 @@ test('review responses advance approved batches and send the final canonical dec
   assert.deepEqual(connection.sent.at(-1), {
     type: 'human_review_response',
     requestId: 'chat',
-    actionId: 'review-action',
+    interruptId: 'review-action',
     interactionId: 'review-2',
     selectedOptionId: 'approve-2',
     decisions: [{
@@ -93,7 +93,7 @@ test('review responses validate free text and reject stale local drafts', () => 
 
   assert.deepEqual(controller.submitReviewResponse({
     requestId: 'chat',
-    actionId: 'review-action',
+    interruptId: 'review-action',
     decisions: [],
     optionId: 'respond',
     inputText: '   ',
@@ -103,7 +103,7 @@ test('review responses validate free text and reject stale local drafts', () => 
   });
   assert.deepEqual(controller.submitReviewResponse({
     requestId: 'chat',
-    actionId: 'review-action',
+    interruptId: 'review-action',
     decisions: [{
       interactionId: 'wrong-review',
       selectedOptionId: 'respond',
@@ -117,7 +117,7 @@ test('review responses validate free text and reject stale local drafts', () => 
 
   const result = controller.submitReviewResponse({
     requestId: 'chat',
-    actionId: 'review-action',
+    interruptId: 'review-action',
     decisions: [],
     optionId: 'respond',
     inputText: '  needs changes  ',
@@ -126,7 +126,7 @@ test('review responses validate free text and reject stale local drafts', () => 
   assert.deepEqual(connection.sent.at(-1), {
     type: 'human_review_response',
     requestId: 'chat',
-    actionId: 'review-action',
+    interruptId: 'review-action',
     interactionId: 'review-1',
     selectedOptionId: 'respond',
     input: { message: 'needs changes' },
@@ -139,7 +139,7 @@ test('review responses validate free text and reject stale local drafts', () => 
   controller.stop();
 });
 
-test('review cancellation targets only the current canonical action', () => {
+test('review cancellation targets only the current pending interrupt', () => {
   let connection!: FakeConnection;
   const controller = new TuiSessionController({
     connectionFactory: (handlers) => {
@@ -160,21 +160,21 @@ test('review cancellation targets only the current canonical action', () => {
 
   assert.deepEqual(controller.cancelReview({
     requestId: 'other',
-    actionId: 'review-action',
+    interruptId: 'review-action',
   }), {
     ok: false,
     reason: 'stale',
   });
   assert.deepEqual(controller.cancelReview({
     requestId: 'chat',
-    actionId: 'review-action',
+    interruptId: 'review-action',
   }), {
     ok: true,
   });
   assert.deepEqual(connection.sent.at(-1), {
     type: 'review.cancel',
     requestId: 'chat',
-    actionId: 'review-action',
+    interruptId: 'review-action',
   });
   controller.stop();
 });
@@ -200,14 +200,14 @@ test('a sent review resolution can be followed by an ordered run interrupt', () 
 
   assert.deepEqual(controller.interruptResolvedReview({
     requestId: 'other',
-    actionId: 'review-action',
+    interruptId: 'review-action',
   }), {
     ok: false,
     reason: 'stale',
   });
   assert.deepEqual(controller.interruptResolvedReview({
     requestId: 'chat',
-    actionId: 'review-action',
+    interruptId: 'review-action',
   }), {
     ok: true,
     requestId: 'chat',
@@ -218,7 +218,7 @@ test('a sent review resolution can be followed by an ordered run interrupt', () 
   });
   assert.equal(
     controller.getState().session.activeRun?.state,
-    'waiting_review',
+    'pending_interrupt',
   );
   controller.stop();
 });

@@ -284,9 +284,9 @@ test('reduceSession keeps review and terminal control scoped to the owning run',
     },
   }, { observedAt: 1_100 });
 
-  assert.equal(session.activeRun?.state, 'waiting_review');
-  if (session.activeRun?.state !== 'waiting_review') assert.fail('expected waiting review');
-  assert.equal(session.activeRun.reviewAction.actionId, 'request:req-1:reviews:review-1');
+  assert.equal(session.activeRun?.state, 'pending_interrupt');
+  if (session.activeRun?.state !== 'pending_interrupt') assert.fail('expected pending interrupt');
+  assert.equal(session.activeRun.pendingInterrupt.interruptId, 'request:req-1:reviews:review-1');
   const unknownRun = reduceSession(session, {
     type: 'run.interrupting',
     requestId: 'req-other',
@@ -307,14 +307,14 @@ test('reduceSession keeps review and terminal control scoped to the owning run',
   }, { observedAt: 1_200 });
   assert.equal(session.activeRun?.state, 'running');
   assert.equal(session.activeRun?.state === 'running' ? session.activeRun.activity : null, 'thinking');
-  assert.equal(session.activeRun && 'reviewAction' in session.activeRun, false);
+  assert.equal(session.activeRun && 'pendingInterrupt' in session.activeRun, false);
 
   session = reduceSession(session, {
     type: 'run.interrupting',
     requestId: 'req-1',
   }, { observedAt: 1_300 });
   assert.equal(session.activeRun?.state, 'interrupting');
-  assert.equal(session.activeRun && 'reviewAction' in session.activeRun, false);
+  assert.equal(session.activeRun && 'pendingInterrupt' in session.activeRun, false);
 });
 
 test('run completion settles partial assistant output before its terminal notice', () => {

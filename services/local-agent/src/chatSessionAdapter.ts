@@ -16,7 +16,7 @@ import {
 import type { AgentChannelSetup } from './agentChannel';
 import type {
   LocalAgentGraphEventStream,
-  LocalAgentGraphPendingHumanReview,
+  LocalAgentGraphPendingInterrupt,
   LocalAgentGraphService,
   LocalAgentGraphThreadState,
 } from './agentGraphService';
@@ -67,12 +67,6 @@ export type ChatSessionAdapterOptions = {
   isCurrent: () => boolean;
   finishInterrupted: () => void;
   emitEvent: (event: AgentRuntimeEvent) => void;
-  /** Registers an ephemeral route to the authoritative specs used for resume validation. */
-  registerHumanReviewResolutionRoute?: (params: {
-    requestId: string;
-    interruptId?: string;
-    reviews: ReviewSpec[];
-  }) => void;
   emitToolEvent: (payload: StreamToolsPayload) => void;
   /**
    * A review.cancel run stops itself at a safe graph checkpoint. If the active
@@ -99,34 +93,22 @@ function throwUnexpectedInterruptPayload(): never {
   throw new Error('Received an interrupt without canonical human review payload.');
 }
 
-function normalizeReviewList(review: ReviewSpec, reviews?: ReviewSpec[]): ReviewSpec[] {
-  return reviews?.length ? reviews : [review];
-}
-
-function pendingReviewSpecIdentity(pending: LocalAgentGraphPendingHumanReview) {
-  const reviews = normalizeReviewList(pending.review, pending.reviews);
-  return reviews.map((review) => encodeURIComponent(review.id)).join(',');
-}
-
 function isSamePendingReview(
-  initial: LocalAgentGraphPendingHumanReview,
-  current: LocalAgentGraphPendingHumanReview | null,
+  initial: LocalAgentGraphPendingInterrupt,
+  current: LocalAgentGraphPendingInterrupt | null,
 ) {
   if (!current) return false;
-  if (initial.interruptId && current.interruptId) {
-    return initial.interruptId === current.interruptId;
-  }
-  return pendingReviewSpecIdentity(initial) === pendingReviewSpecIdentity(current);
+  return initial.interruptId === current.interruptId;
 }
 
 function originalReviewWasCheckpointed(
   initial: LocalAgentGraphThreadState,
   current: LocalAgentGraphThreadState,
 ) {
-  if (initial.pendingHumanReview) {
-    return !isSamePendingReview(initial.pendingHumanReview, current.pendingHumanReview);
+  if (initial.pendingInterrupt) {
+    return !isSamePendingReview(initial.pendingInterrupt, current.pendingInterrupt);
   }
-  return current.pendingHumanReview !== null || !current.hasPendingContinuation;
+  return current.pendingInterrupt !== null || !current.hasPendingContinuation;
 }
 
 async function waitForGraphRunSettlement(run: LocalAgentGraphEventStream | null) {
@@ -141,29 +123,25 @@ async function waitForGraphRunSettlement(run: LocalAgentGraphEventStream | null)
 }
 
 function emitHumanReviewRequested(params: {
-  interruptId?: string;
+  interruptId: string;
   reviews: ReviewSpec[];
   requestId: string;
   emitEvent: (event: AgentRuntimeEvent) => void;
-  registerHumanReviewResolutionRoute?: ChatSessionAdapterOptions['registerHumanReviewResolutionRoute'];
 }) {
-  const review = params.reviews[0];
-  if (!review) {
+  if (!params.reviews.length) {
     return;
   }
-  const reviews = params.reviews;
   recordAgentRunActivity('waiting_human', params.requestId);
-  params.registerHumanReviewResolutionRoute?.({
-    requestId: params.requestId,
-    ...(params.interruptId ? { interruptId: params.interruptId } : {}),
-    reviews,
-  });
   params.emitEvent({
     type: 'human_review.requested',
     requestId: params.requestId,
-    ...(params.interruptId ? { interruptId: params.interruptId } : {}),
-    review: projectHumanReviewRequest(review),
-    ...(reviews.length > 1 ? { reviews: reviews.map(projectHumanReviewRequest) } : {}),
+    pendingInterrupt: {
+      interruptId: params.interruptId,
+      payload: {
+        kind: 'human_review',
+        interactions: params.reviews.map(projectHumanReviewRequest),
+      },
+    },
   });
 }
 
@@ -357,7 +335,7 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
     return { status: 'interrupted' };
   }
 
-  if (initialThreadState.pendingHumanReview && !isResumeRequest) {
+  if (initialThreadState.pendingInterrupt && !isResumeRequest) {
     if (message.trim() || attachments.length > 0) {
       emitEvent({
         type: 'system.notice',
@@ -366,16 +344,10 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
       });
     }
     emitHumanReviewRequested({
-      ...(initialThreadState.pendingHumanReview.interruptId
-        ? { interruptId: initialThreadState.pendingHumanReview.interruptId }
-        : {}),
-      reviews: normalizeReviewList(
-        initialThreadState.pendingHumanReview.review,
-        initialThreadState.pendingHumanReview.reviews,
-      ),
+      interruptId: initialThreadState.pendingInterrupt.interruptId,
+      reviews: initialThreadState.pendingInterrupt.reviews,
       requestId,
       emitEvent,
-      registerHumanReviewResolutionRoute: options.registerHumanReviewResolutionRoute,
     });
     return { status: 'waiting_human' };
   }
@@ -428,7 +400,7 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
     }
     resumeCheckpointed = true;
     options.onResumeCheckpointed?.({
-      canInterrupt: runIsActive && state.pendingHumanReview === null,
+      canInterrupt: runIsActive && state.pendingInterrupt === null,
     });
   };
   const readResumeCheckpointAtBoundary = async () => {
@@ -531,8 +503,8 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
           const interruptPayload = readFirstHumanReviewInterrupt(chatEvent.interrupts);
           if (interruptPayload) {
             emitHumanReviewRequested({
-              ...(interruptPayload.interruptId ? { interruptId: interruptPayload.interruptId } : {}),
-              reviews: normalizeReviewList(interruptPayload.review, interruptPayload.reviews),
+              interruptId: interruptPayload.interruptId,
+              reviews: interruptPayload.reviews,
               requestId,
               emitEvent,
             });
@@ -597,18 +569,12 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
     return { status: 'interrupted' };
   }
 
-  if (finalThreadState.pendingHumanReview) {
+  if (finalThreadState.pendingInterrupt) {
     emitHumanReviewRequested({
-      ...(finalThreadState.pendingHumanReview.interruptId
-        ? { interruptId: finalThreadState.pendingHumanReview.interruptId }
-        : {}),
-      reviews: normalizeReviewList(
-        finalThreadState.pendingHumanReview.review,
-        finalThreadState.pendingHumanReview.reviews,
-      ),
+      interruptId: finalThreadState.pendingInterrupt.interruptId,
+      reviews: finalThreadState.pendingInterrupt.reviews,
       requestId,
       emitEvent,
-      registerHumanReviewResolutionRoute: options.registerHumanReviewResolutionRoute,
     });
     return { status: 'waiting_human' };
   }
@@ -639,13 +605,13 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
 
 function readFirstHumanReviewInterrupt(
   interrupts: unknown[],
-): { interruptId?: string; review: ReviewSpec; reviews: ReviewSpec[] } | null {
+): LocalAgentGraphPendingInterrupt | null {
   const firstInterrupt = interrupts[0] ?? null;
   const interruptId = firstInterrupt
     && typeof firstInterrupt === 'object'
     && typeof (firstInterrupt as { id?: unknown }).id === 'string'
     ? (firstInterrupt as { id: string }).id
-    : undefined;
+    : null;
   const value = firstInterrupt
     && typeof firstInterrupt === 'object'
     && 'value' in firstInterrupt
@@ -653,18 +619,16 @@ function readFirstHumanReviewInterrupt(
     && typeof firstInterrupt.value === 'object'
     ? firstInterrupt.value as Record<string, unknown>
     : null;
-  if (!value) {
+  if (!interruptId || !value) {
     return null;
   }
   if (isHumanReviewBatchInterruptPayload(value)) {
     const reviews = value.reviews.map((item) => item.review);
-    const review = reviews[0];
-    if (!review) {
+    if (!reviews.length) {
       return null;
     }
     return {
-      ...(interruptId ? { interruptId } : {}),
-      review,
+      interruptId,
       reviews,
     };
   }
@@ -672,8 +636,7 @@ function readFirstHumanReviewInterrupt(
     throwUnexpectedInterruptPayload();
   }
   return {
-    ...(interruptId ? { interruptId } : {}),
-    review: value.review,
+    interruptId,
     reviews: [value.review],
   };
 }

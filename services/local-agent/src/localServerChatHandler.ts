@@ -24,24 +24,21 @@ import { emitLocalServerToolOperationEvent } from './localServerOperationEvents'
 import { LocalAgentGraphService } from './agentGraphService';
 import {
   LocalServerTuiSessionService,
-  type ActivePendingReview,
+  type ActivePendingInterrupt,
 } from './localServerTuiSessions';
 import type { LocalServerDeps } from './localServerTypes';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
-import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 import {
-  resolveHumanReviewAction,
+  resolvePendingHumanReviewInterrupt,
   routeRunInterruptThroughHumanReview,
-  type HumanReviewActionRoute,
-  type HumanReviewResolutionOutcome,
+  type PendingHumanReviewInterruptRoute,
   type HumanReviewResolutionSource,
-} from './humanReviewActionRouting';
-import type { ReviewAction } from '@pinpawo/agent-session';
+} from './pendingHumanReviewInterrupt';
+import type { PendingInterruptProjection } from '@pinpawo/agent-session';
 import {
   classifyAgentRunFailure,
   describeFatalAgentRunFailure,
 } from './agentRunFailure';
-import { ReviewResolutionLifecycle } from './reviewResolutionLifecycle';
 import { sendLocalServerPeerEvent, type LocalServerPeer } from './localServerPeer';
 import { ThreadInvocationCoordinator } from './threadInvocationCoordinator';
 
@@ -49,34 +46,26 @@ type InflightRequest = InflightOperationRun;
 
 type LocalServerRunRequest = ChatSessionRequest;
 type RunChatSession = typeof runChatSession;
+type ChatRunOutcome =
+  | 'completed'
+  | 'waiting_human'
+  | 'interrupted'
+  | 'failed'
+  | 'fatal_failed';
 
 type LocalServerRunSource =
   | { type: 'chat_request' }
   | HumanReviewResolutionSource;
 
-type ReviewActionRoute = HumanReviewActionRoute & {
-  requestId: string;
-  rejectOptionId?: string;
-  sessionId?: string;
-  actor?: Extract<AgentRuntimeEvent, { type: 'human_review.requested' }>['actor'];
-};
-
-export type ReviewActionSnapshot = {
+type PendingInterruptRoute = PendingHumanReviewInterruptRoute & {
   requestId: string;
   sessionId?: string;
-  reviewAction: ReviewAction;
-  actor?: Extract<AgentRuntimeEvent, { type: 'human_review.requested' }>['actor'];
 };
 
-function internalReviewActionId(params: {
-  requestId: string;
-  interruptId?: string;
-  reviews: ReviewSpec[];
-}) {
-  if (params.interruptId) return params.interruptId;
-  const reviewKey = params.reviews.map((review) => encodeURIComponent(review.id)).join(',') || 'unknown';
-  return `request:${params.requestId}:reviews:${reviewKey}`;
-}
+export type PendingInterruptSnapshot = {
+  sessionId?: string;
+  pendingInterrupt: PendingInterruptProjection;
+};
 
 export function isToolProtocolHistoryError(value: unknown): boolean {
   const text = value instanceof Error
@@ -93,7 +82,6 @@ export class LocalServerChatHandler {
   private readonly inflightRequests: InflightRequestController<LocalServerPeer>;
   private readonly loadContext: typeof loadAgentContext;
   private readonly runChat: RunChatSession;
-  private readonly reviewResolutions = new ReviewResolutionLifecycle<ReviewActionRoute>();
   private readonly threadInvocations = new ThreadInvocationCoordinator();
 
   constructor(options: {
@@ -110,92 +98,33 @@ export class LocalServerChatHandler {
     this.runChat = options.runChat ?? runChatSession;
   }
 
-  private buildReviewActionRoute(params: {
+  private buildPendingInterruptRoute(params: {
     requestId: string;
-    interruptId?: string;
-    review: ReviewSpec;
-    reviews?: ReviewSpec[];
+    interruptId: string;
+    reviews: ReviewSpec[];
     sessionId?: string;
-    actor?: ReviewActionRoute['actor'];
-  }): ReviewActionRoute {
-    const reviews = params.reviews?.length ? params.reviews : [params.review];
-    const rejectOption = reviews[0]?.options.find((option) => option.decision.type === 'reject');
+  }): PendingInterruptRoute {
     return {
       requestId: params.requestId,
-      ...(params.interruptId ? { interruptId: params.interruptId } : {}),
-      actionId: internalReviewActionId({
-        requestId: params.requestId,
-        ...(params.interruptId ? { interruptId: params.interruptId } : {}),
-        reviews,
-      }),
-      ...(rejectOption ? { rejectOptionId: rejectOption.id } : {}),
+      interruptId: params.interruptId,
       ...(params.sessionId ? { sessionId: params.sessionId } : {}),
-      reviews,
-      ...(params.actor ? { actor: params.actor } : {}),
+      reviews: params.reviews,
     };
   }
 
-  private recordInternalReviewActionRoute(
-    params: {
-      requestId: string;
-      interruptId?: string;
-      reviews: ReviewSpec[];
-      actor?: ReviewActionRoute['actor'];
-    },
-    deps: LocalServerDeps,
-  ) {
-    const review = params.reviews[0];
-    if (!review) {
-      return;
-    }
-    const sessionId = this.tuiSessions.getActiveSessionId(deps.actorId);
-    this.reviewResolutions.register(this.buildReviewActionRoute({
-      requestId: params.requestId,
-      ...(params.interruptId ? { interruptId: params.interruptId } : {}),
-      review,
-      ...(params.reviews.length > 1 ? { reviews: params.reviews } : {}),
-      ...(sessionId ? { sessionId } : {}),
-      ...(params.actor ? { actor: params.actor } : {}),
-    }), { observedPending: true });
-  }
-
-  /**
-   * Internal compatibility seam for checkpoint/recovery callers that already
-   * hold authoritative pet-agent review specs. Public runtime events use the
-   * presentation-only contract and are registered through the invocation hook.
-   */
-  private recordReviewActionRoute(
-    event: {
-      requestId: string;
-      interruptId?: string;
-      review: ReviewSpec;
-      reviews?: ReviewSpec[];
-      actor?: ReviewActionRoute['actor'];
-    },
-    deps: LocalServerDeps,
-  ) {
-    this.recordInternalReviewActionRoute({
-      requestId: event.requestId,
-      ...(event.interruptId ? { interruptId: event.interruptId } : {}),
-      reviews: event.reviews?.length ? event.reviews : [event.review],
-      ...(event.actor ? { actor: event.actor } : {}),
-    }, deps);
-  }
-
-  private async recoverReviewActionRoute(
+  private async recoverPendingInterruptRoute(
     requestId: string,
     deps: LocalServerDeps,
   ) {
     try {
-      const pending = await this.tuiSessions.readActivePendingReview(deps);
+      const pending = await this.tuiSessions.readActivePendingInterrupt(deps);
       if (!pending) {
         return null;
       }
-      const route = this.buildReviewActionRoute({
+      const route = this.buildPendingInterruptRoute({
         requestId,
-        ...(pending.interruptId ? { interruptId: pending.interruptId } : {}),
-        review: pending.review,
-        ...(pending.reviews ? { reviews: pending.reviews } : {}),
+        interruptId: pending.interruptId,
+        reviews: pending.reviews,
         sessionId: pending.sessionId,
       });
       return route;
@@ -208,46 +137,21 @@ export class LocalServerChatHandler {
     }
   }
 
-  buildReviewActionSnapshot(
-    deps: LocalServerDeps,
-    pending: ActivePendingReview | null,
-  ): ReviewActionSnapshot | null {
-    const activeSessionId = this.tuiSessions.getActiveSessionId(deps.actorId);
-    for (const route of this.reviewResolutions.routes()) {
-      if (route.sessionId && activeSessionId && route.sessionId !== activeSessionId) {
-        continue;
-      }
-      return {
-        requestId: route.actionId,
-        ...(route.sessionId ? { sessionId: route.sessionId } : {}),
-        reviewAction: {
-          actionId: route.actionId,
-          reviews: route.reviews.map(projectHumanReviewRequest),
-        },
-        ...(route.actor ? { actor: route.actor } : {}),
-      };
-    }
-
+  buildPendingInterruptSnapshot(
+    _deps: LocalServerDeps,
+    pending: ActivePendingInterrupt | null,
+  ): PendingInterruptSnapshot | null {
     if (!pending) {
       return null;
     }
-    const requestId = pending.interruptId
-      ?? `review:${pending.sessionId}:${pending.review.id}`;
-    const route = this.buildReviewActionRoute({
-      requestId,
-      ...(pending.interruptId ? { interruptId: pending.interruptId } : {}),
-      review: pending.review,
-      ...(pending.reviews ? { reviews: pending.reviews } : {}),
-      sessionId: pending.sessionId,
-    });
-    const canonicalRoute = { ...route, requestId: route.actionId };
-    this.reviewResolutions.register(canonicalRoute);
     return {
-      requestId: route.actionId,
       sessionId: pending.sessionId,
-      reviewAction: {
-        actionId: route.actionId,
-        reviews: route.reviews.map(projectHumanReviewRequest),
+      pendingInterrupt: {
+        interruptId: pending.interruptId,
+        payload: {
+          kind: 'human_review',
+          interactions: pending.reviews.map(projectHumanReviewRequest),
+        },
       },
     };
   }
@@ -287,12 +191,11 @@ export class LocalServerChatHandler {
       return inflight;
     }
     await routeRunInterruptThroughHumanReview({
-      lifecycle: this.reviewResolutions,
-      requestId: msg.requestId,
+      recover: () => this.recoverPendingInterruptRoute(msg.requestId, deps),
       cancelPending: (route) => this.handleReviewCancel(peer, {
         type: 'review.cancel',
         requestId: msg.requestId,
-        actionId: route.actionId,
+        interruptId: route.interruptId,
       }, deps),
     });
     return null;
@@ -303,7 +206,7 @@ export class LocalServerChatHandler {
     request: LocalServerRunRequest,
     deps: LocalServerDeps,
     source: LocalServerRunSource,
-  ): Promise<HumanReviewResolutionOutcome> {
+  ): Promise<ChatRunOutcome> {
     const { requestId } = request;
     const message = request.kind === 'user_message' ? request.message : '';
 
@@ -312,13 +215,13 @@ export class LocalServerChatHandler {
     } else if (source.type === 'human_review_response') {
       console.log(
         `[local-server] human_review_response requestId=${requestId} `
-        + `reviewId=${source.reviewId} option=${source.selectedOptionId}`
+        + `interactionId=${source.interactionId} option=${source.selectedOptionId}`
         + (source.decisionCount ? ` decisions=${source.decisionCount}` : ''),
       );
     } else {
       console.log(
         `[local-server] review.cancel resume human_review requestId=${requestId} `
-        + `reviewId=${source.reviewId} action=interrupt_run`,
+        + `interactionId=${source.interactionId} action=interrupt_run`,
       );
     }
     const threadId = this.tuiSessions.getChatThreadId(deps.actorId);
@@ -364,10 +267,6 @@ export class LocalServerChatHandler {
           if (!isCurrent()) return;
           sendLocalServerPeerEvent(peer, event);
         },
-        registerHumanReviewResolutionRoute: (pending) => {
-          if (!isCurrent()) return;
-          this.recordInternalReviewActionRoute(pending, deps);
-        },
         emitToolEvent: (event) => {
           if (!isCurrent()) return;
           this.sendStreamToolOperationEvent(peer, inflight, event);
@@ -392,8 +291,7 @@ export class LocalServerChatHandler {
         ...(source.type !== 'chat_request'
           ? {
             onResumeCheckpointed: ({ canInterrupt }: { canInterrupt: boolean }) => {
-              const interruptQueued = this.reviewResolutions.checkpoint(requestId);
-              if (canInterrupt && interruptQueued) {
+              if (canInterrupt) {
                 this.inflightRequests.interrupt(peer, { requestId });
               }
             },
@@ -471,7 +369,7 @@ export class LocalServerChatHandler {
     msg: HumanReviewResponseMessage,
     deps: LocalServerDeps,
   ) {
-    await this.resolveReviewAction(peer, msg, deps);
+    await this.resolvePendingInterrupt(peer, msg, deps);
   }
 
   async handleReviewCancel(
@@ -479,22 +377,21 @@ export class LocalServerChatHandler {
     msg: ReviewCancelMessage,
     deps: LocalServerDeps,
   ) {
-    await this.resolveReviewAction(peer, msg, deps);
+    await this.resolvePendingInterrupt(peer, msg, deps);
   }
 
-  private async resolveReviewAction(
+  private async resolvePendingInterrupt(
     peer: LocalServerPeer,
     msg: HumanReviewResponseMessage | ReviewCancelMessage,
     deps: LocalServerDeps,
   ) {
-    await resolveHumanReviewAction({
-      lifecycle: this.reviewResolutions,
+    await resolvePendingHumanReviewInterrupt({
       message: msg,
-      recover: () => this.recoverReviewActionRoute(msg.requestId, deps),
+      recover: () => this.recoverPendingInterruptRoute(msg.requestId, deps),
       emitClosed: () => {
         if (msg.type === 'human_review_response') {
           console.warn(
-            `[local-server] human_review_response rejected: pending review request already consumed or active requestId=${msg.requestId}`,
+            `[local-server] human_review_response rejected: checkpoint has no matching pending interrupt requestId=${msg.requestId}`,
           );
         }
         this.sendClosedReviewError(peer, msg.requestId);
@@ -514,7 +411,7 @@ export class LocalServerChatHandler {
 
   private acceptReviewRoute(
     peer: LocalServerPeer,
-    route: ReviewActionRoute,
+    route: PendingInterruptRoute,
     message: HumanReviewResponseMessage | ReviewCancelMessage,
     deps: LocalServerDeps,
   ) {

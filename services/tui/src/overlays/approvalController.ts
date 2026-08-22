@@ -1,4 +1,4 @@
-import type { AgentRunView } from '@pinpawo/agent-session';
+import type { PendingInterruptProjection } from '@pinpawo/agent-session';
 import type {
   TuiSessionController,
   TuiConnectionStatus,
@@ -71,8 +71,16 @@ export class ApprovalController {
     return this.state;
   }
 
-  sync(run: AgentRunView | null, connection: TuiConnectionStatus) {
-    let next = syncApprovalState(this.state, run);
+  sync(
+    pendingInterrupt: PendingInterruptProjection | null,
+    connection: TuiConnectionStatus,
+    resumeInFlight = false,
+  ) {
+    let next = syncApprovalState(
+      this.state,
+      pendingInterrupt,
+      resumeInFlight || connection !== 'ready',
+    );
     if (next.phase !== 'resolution-sent') {
       this.clearSubmissionTimers();
     } else if (connection !== 'ready') {
@@ -118,8 +126,7 @@ export class ApprovalController {
     }
     if (action === 'cancel') {
       const result = this.sessionController.cancelReview({
-        requestId: this.state.requestId,
-        actionId: this.state.action.actionId,
+        interruptId: this.state.pendingInterrupt.interruptId,
       });
       this.update(result.ok
         ? this.beginSubmission(this.state)
@@ -133,16 +140,15 @@ export class ApprovalController {
       return;
     }
     const result = this.sessionController.submitReviewResponse({
-      requestId: this.state.requestId,
-      actionId: this.state.action.actionId,
-      decisions: this.state.decisions,
+      interruptId: this.state.pendingInterrupt.interruptId,
+      responses: this.state.responses,
       optionId: option.id,
       inputText: this.state.draft,
     });
     if (!result.ok) {
       this.update(failApproval(this.state, reviewFailureText(result.reason)));
     } else if (result.status === 'advanced') {
-      this.update(advanceApproval(this.state, result.decisions));
+      this.update(advanceApproval(this.state, result.responses));
     } else {
       this.update(this.beginSubmission(this.state));
     }
@@ -168,12 +174,12 @@ export class ApprovalController {
     this.clearSubmissionTimers();
     const resolutionSent = beginApprovalSubmission(state);
     if (resolutionSent.phase === 'closed') return resolutionSent;
-    const actionId = resolutionSent.action.actionId;
+    const interruptId = resolutionSent.pendingInterrupt.interruptId;
     this.submissionTimer = this.setTimer(() => {
       this.submissionTimer = null;
       if (
         this.state.phase !== 'resolution-sent'
-        || this.state.action.actionId !== actionId
+        || this.state.pendingInterrupt.interruptId !== interruptId
       ) {
         return;
       }
@@ -185,21 +191,21 @@ export class ApprovalController {
         },
       ));
     }, this.submissionTimeoutMs);
-    this.scheduleSubmissionPulse(actionId);
+    this.scheduleSubmissionPulse(interruptId);
     return resolutionSent;
   }
 
-  private scheduleSubmissionPulse(actionId: string) {
+  private scheduleSubmissionPulse(interruptId: string) {
     this.submissionPulseTimer = this.setTimer(() => {
       this.submissionPulseTimer = null;
       if (
         this.state.phase !== 'resolution-sent'
-        || this.state.action.actionId !== actionId
+        || this.state.pendingInterrupt.interruptId !== interruptId
       ) {
         return;
       }
       this.update(advanceApprovalSubmissionFrame(this.state));
-      this.scheduleSubmissionPulse(actionId);
+      this.scheduleSubmissionPulse(interruptId);
     }, this.submissionPulseMs);
   }
 

@@ -1,8 +1,8 @@
 import type {
-  HumanReviewRequest,
   TokenUsageSnapshot,
 } from '@pinpawo/agent-contracts';
 import type { AgentPlan } from './domain';
+import type { PendingInterruptProjection } from './review';
 
 export type AgentRuntimeEvent =
   | AgentAssistantMessageEvent
@@ -101,12 +101,7 @@ export type AgentPlanUpdatedEvent = {
 export type AgentHumanReviewRequestedEvent = {
   type: 'human_review.requested';
   requestId: string;
-  interruptId?: string;
-  review: HumanReviewRequest;
-  reviews?: HumanReviewRequest[];
-  actor?: {
-    petId?: string;
-  };
+  pendingInterrupt: PendingInterruptProjection;
 };
 
 export type AgentStudioProgressEvent = {
@@ -126,7 +121,8 @@ export type AgentErrorCode =
   | 'review_stale'
   | 'review_wrong_session'
   // The agent could not run at all (model quota exhausted, auth rejected).
-  // The run is terminated and any pending review action is closed with it.
+  // The invocation terminates; checkpoint state remains authoritative for any
+  // pending interrupt and is reconciled separately.
   | 'agent_unavailable';
 
 export type AgentErrorEvent = {

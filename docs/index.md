@@ -65,6 +65,14 @@ There are no compatibility redirects in this directory. Current pages use their
 categorized, lowercase paths directly; obsolete implementations are retained
 only under `history/`.
 
+Active interrupt design work is split by mode. [Pending interrupt in
+Chat](design/local-agent/pending-interrupt-chat.md) defines the checkpoint,
+projection, and resume boundary for the implicit active Chat thread. [Pet thread
+and dispatch invocation](design/studio/pet-thread-dispatch-invocation.md) defines
+how Studio may later wrap that shared boundary with explicit `petId`, stable Pet
+threads, and per-dispatch invocations. Both are drafts and do not override the
+current Studio reference contract.
+
 ## Documentation maintenance and future wiki ingest
 
 `docs/` is the source-document layer. The synthesized

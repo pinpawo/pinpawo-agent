@@ -1,13 +1,10 @@
-import type {
-  AgentReviewAction,
-  ReviewResponse,
-} from '@pinpawo/agent-session';
+import type { PendingInterruptProjection, ReviewResponse } from '@pinpawo/agent-session';
 
 export type PreparedReviewDecision =
   | {
       ok: true;
       decision: ReviewResponse;
-      decisions: ReviewResponse[];
+      responses: ReviewResponse[];
       shouldSend: boolean;
     }
   | {
@@ -16,16 +13,17 @@ export type PreparedReviewDecision =
     };
 
 export function prepareReviewDecision(params: {
-  action: AgentReviewAction;
-  decisions: readonly ReviewResponse[];
+  pendingInterrupt: PendingInterruptProjection;
+  responses: readonly ReviewResponse[];
   optionId: string;
   inputText?: string;
 }): PreparedReviewDecision {
-  if (!reviewDecisionsRemainValid(params.action, params.decisions)) {
+  if (!reviewResponsesRemainValid(params.pendingInterrupt, params.responses)) {
     return { ok: false, reason: 'stale' };
   }
 
-  const review = params.action.reviews[params.decisions.length];
+  const interactions = params.pendingInterrupt.payload.interactions;
+  const review = interactions[params.responses.length];
   const option = review?.options.find((candidate) => (
     candidate.id === params.optionId
   ));
@@ -45,23 +43,24 @@ export function prepareReviewDecision(params: {
     selectedOptionId: option.id,
     ...(input ? { input } : {}),
   };
-  const decisions = [...params.decisions, decision];
+  const responses = [...params.responses, decision];
   return {
     ok: true,
     decision,
-    decisions,
+    responses,
     shouldSend: option.batchSubmission === 'immediate'
-      || decisions.length >= params.action.reviews.length,
+      || responses.length >= interactions.length,
   };
 }
 
-export function reviewDecisionsRemainValid(
-  action: AgentReviewAction,
-  decisions: readonly ReviewResponse[],
+export function reviewResponsesRemainValid(
+  pendingInterrupt: PendingInterruptProjection,
+  responses: readonly ReviewResponse[],
 ) {
-  if (decisions.length >= action.reviews.length) return false;
-  return decisions.every((decision, index) => {
-    const review = action.reviews[index];
+  const interactions = pendingInterrupt.payload.interactions;
+  if (responses.length >= interactions.length) return false;
+  return responses.every((decision, index) => {
+    const review = interactions[index];
     const option = review?.options.find((candidate) => (
       candidate.id === decision.selectedOptionId
     ));

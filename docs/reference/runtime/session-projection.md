@@ -43,15 +43,16 @@ Startup, reconnect, resume, completion, and review-state refresh are reasons a c
 
 ## Shape
 
-A session owns one ordered timeline and zero or one active run. Snapshot version 3
-represents that run as exactly one of three projection facts:
+A session owns one ordered timeline, zero or one active invocation, and zero or
+one checkpoint-derived pending interrupt. Snapshot version 5 represents the
+active invocation as exactly one of two projection facts:
 
 - `running` carries one runtime `activity`: `thinking`, `using_tool`, or `streaming`;
-- `waiting_review` structurally carries its checkpoint-derived `ReviewAction`;
 - `interrupting` means an interruption command is pending for the owned run.
 
-The union cannot represent a running or interrupting run with review content, or
-a waiting review without review content. The initial `running` / `thinking` view
+`pendingInterrupt` is a separate nullable field because a checkpoint wait is
+not itself a running invocation. It may coexist with a new `activeRun` after a
+response or cancel resumes the checkpoint. The initial `running` / `thinking` view
 is created only after the outbound run command is accepted by the transport.
 Later activity changes come from server runtime events; elapsed-time presentation
 such as busy-copy escalation remains in the render layer. The initiating client
@@ -60,10 +61,12 @@ this acknowledges the command locally, not that the agent has stopped. A server
 event or snapshot remains authoritative for the next review, completion,
 interruption, or error state.
 
-Local snapshot readers accept only the current versioned
-`AgentSessionSnapshot`. Snapshot versions 1 and 2 are unsupported, as are
-the previous `runs[] + activeRunId`, legacy pending-review payloads, and
-message-only restore shapes.
+Local snapshot readers emit only the current versioned `AgentSessionSnapshot`.
+The parser accepts the former V3 `waiting_review/reviewAction` and V4
+`activeRun.state === 'pending_interrupt'` shapes as inbound compatibility
+boundaries and normalizes them to V5. Snapshot versions 1
+and 2, the previous `runs[] + activeRunId`, and message-only restore shapes
+remain unsupported.
 
 ## Shared package and transport boundary
 
@@ -85,10 +88,16 @@ WebSocket, stdio, HTTP, future API routes, authentication, persistence and
 pagination remain outside the shared package. Remote APIs adapt the shared
 snapshot contract instead of defining a third session model.
 
-Partial `ReviewDraft` decisions and the one-shot `resolutionSent` marker are
+Partial approval decisions and the one-shot `resolution-sent` phase are
 client-local interaction state and are not part of the shared snapshot.
-`ReviewAction` contains only the checkpoint-derived batch identity and ordered
-review specifications; it does not contain review-command progress.
+`PendingInterrupt` contains the checkpoint-derived `interruptId` and a typed
+payload. A human-review payload contains ordered public interactions; it does
+not contain command progress or runtime decisions/effects.
+`PendingInterrupt` never carries a `requestId`. After the client submits a
+response or cancel, an `interrupt.resume.accepted` reduction creates a new
+`activeRun` with the command's required `requestId`; the pending interrupt stays
+unchanged until server-observed progress clears or replaces it. This models two
+facts directly instead of making invocation ownership optional on a wait.
 
 Delegation continuation is checkpoint-owned rather than inferred from a
 particular client's review-cancellation history. Continuation availability is
@@ -154,12 +163,16 @@ session events.
 
 `reduceSession(session, input, { observedAt })` is the deterministic,
 client-neutral transition boundary for accepted user input, server-observed
-runtime events, interrupt state, and terminal run state. Sending a review
-resolution does not mutate this shared projection; subsequent server events or
-a snapshot provide the next shared fact. Callers supply observation time
+runtime events, interrupt state, and terminal run state. Accepting a review
+resolution starts a new active invocation in the shared projection but does not
+mutate the checkpoint-derived `pendingInterrupt`; subsequent server events or a
+snapshot clear or replace that wait. Callers supply observation time
 explicitly; the reducer does not read clocks, sockets, files, or UI state.
 
-`applySessionSnapshot(session, snapshot, options)` replaces the ordered timeline and active run with the materialized snapshot value. Its options describe application policy, such as whether omitted token usage should retain a process-local observation; they do not classify the snapshot.
+`applySessionSnapshot(session, snapshot, options)` replaces the ordered timeline,
+active run, and pending interrupt with the materialized snapshot value. Its
+options describe application policy, such as whether omitted token usage should
+retain a process-local observation; they do not classify the snapshot.
 
 Token usage keeps two scopes explicit in the projection: `tokenUsage` is the
 latest provider-reported run snapshot, while `sessionTokenUsage` accumulates
@@ -177,25 +190,18 @@ The TUI reducer adapts TUI actions and presentation text into these inputs.
 Composer history, focus, connection copy, partial review drafts, the one-shot
 review-resolution send marker, and viewport state remain TUI-owned and are
 not part of the shared projection. After a review resolution is sent and before
-the next server fact arrives, that marker gates composer input and routes a
-further interrupt request to `run.interrupt`; there is no cancellable
-review-submission lifecycle. It is cleared when server-observed state diverges
-from the waiting review action. A user-triggered run interrupt does not add a
-separate client-side pending domain state.
+the next server fact arrives, the new `activeRun` owns further `run.interrupt`
+commands while that marker keeps the approval UI one-shot. There is no
+cancellable review-submission lifecycle. The marker is cleared when
+server-observed state diverges from that pending interrupt. A user-triggered run
+interrupt does not add a separate client-side pending domain state.
 
-The server preserves client command order through a server-local
-`RunCommandSequencer`. If `run.interrupt` arrives while a preceding review
-resolution is still being validated, the sequencer queues it behind that
-resolution. Once the resumed run is registered, `run.interrupt` follows the
-ordinary inflight interruption path even if checkpoint consumption has not yet
-been confirmed. A queued interrupt is released only after a graph state boundary
-confirms that the original pending review has been removed from the checkpoint;
-registering an inflight run or observing an arbitrary stream event is not
-sufficient. If that boundary contains a new pending review, the earlier
-interrupt is consumed without canceling the new review. Sequencer state is
-transport control state and is never
-projected into `AgentSession` or a snapshot. Long-running agent execution
-does not block later client commands from entering the sequencer.
+The Chat server reloads the implicit active thread checkpoint for every human
+review response or cancel. A thread-local invocation coordinator serializes
+competing calls, and the latest checkpoint decides whether the command still
+matches. There is no server-local review claim, consumed tombstone, or durable
+resolution lifecycle. Invocation coordination is transport control state and
+is never projected into `AgentSession` or a snapshot.
 
 ## Invocation ownership and interruption
 
@@ -247,8 +253,15 @@ narrow endpoint rule is not part of the shared projection contract. Other
 events and snapshots retain their canonical payload, including operation
 `raw`, title, summary, source, target, and details fields.
 
-Pending chat reviews are durable in LangGraph checkpoints. If an in-memory review route is lost after a restart or websocket route change, the hosted adapter scans the actor's app-chat threads and reconstructs the route from checkpoint state. New clients identify the continuation with `actionId` (the checkpoint interrupt ID), which is also the concurrency and duplicate-protection key. A failed or interrupted resume releases its action claim and forces the next attempt to re-read the checkpoint. Legacy responses without `actionId` may recover by `reviewId` only when exactly one pending review matches and every candidate thread was readable; ambiguity or an incomplete scan fails closed. Decisions remain ordered as supplied by the review batch.
+Pending Chat interrupts are durable in the implicit active thread's LangGraph
+checkpoint. Every response attempt reloads that checkpoint and identifies the
+continuation with `interruptId`; `interactionId` identifies one item inside a
+human-review payload. The parser accepts legacy `actionId` and `reviewId` only
+as inbound aliases and normalizes them immediately. Decisions remain ordered as
+supplied by the human-review payload.
 
-Studio review batching and backend persistence changes are outside this compatibility step.
+Studio dispatch, `petId`, and backend persistence are outside this Chat
+projection contract. Studio may reuse the `PendingInterrupt` value contract,
+but not Chat's implicit-thread route or response protocol.
 
 Ink/React state, composer focus, viewport state, sockets, filesystem handles, and partial review drafts are outside this contract.

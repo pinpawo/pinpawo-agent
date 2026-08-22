@@ -6,24 +6,14 @@ import { resolveGlobalInterruptAction } from './globalInterrupt';
 test('global Ctrl+C cancels review, interrupts once, then exits', () => {
   assert.equal(resolveGlobalInterruptAction({
     approval: approvalState('ready'),
-    activeRun: {
-      requestId: 'review',
-      state: 'waiting_review',
-      reviewAction: {
-        actionId: 'action',
-        reviews: [],
-      },
-    },
+    activeRun: null,
   }), 'cancel-review');
   assert.equal(resolveGlobalInterruptAction({
     approval: approvalState('resolution-sent'),
     activeRun: {
       requestId: 'review',
-      state: 'waiting_review',
-      reviewAction: {
-        actionId: 'action',
-        reviews: [],
-      },
+      state: 'running',
+      activity: 'thinking',
     },
   }), 'interrupt-run');
   assert.equal(resolveGlobalInterruptAction({
@@ -33,11 +23,8 @@ test('global Ctrl+C cancels review, interrupts once, then exits', () => {
     },
     activeRun: {
       requestId: 'review',
-      state: 'waiting_review',
-      reviewAction: {
-        actionId: 'action',
-        reviews: [],
-      },
+      state: 'running',
+      activity: 'thinking',
     },
   }), 'exit');
   assert.equal(resolveGlobalInterruptAction({
@@ -64,13 +51,12 @@ test('global Ctrl+C cancels review, interrupts once, then exits', () => {
 function approvalState(phase: 'ready' | 'resolution-sent') {
   return {
     phase,
-    requestId: 'review',
-    action: {
-      actionId: 'action',
-      reviews: [],
+    pendingInterrupt: {
+      interruptId: 'interrupt-1',
+      payload: { kind: 'human_review', interactions: [] },
     },
     reviewIndex: 0,
-    decisions: [],
+    responses: [],
     selectedIndex: 0,
     contentOffset: 0,
     draft: '',

@@ -118,6 +118,7 @@ function sessionState(
       kind: 'chat',
       timeline: [],
       activeRun,
+      pendingInterrupt: null,
     },
   };
 }

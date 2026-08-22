@@ -34,5 +34,11 @@ contracts in [reference/](../reference/index.md).
   [OpenTUI capability matrix](tui/v2-capability-matrix.md)
 - [Browser Toolkit package](toolkits/browser-package.md)
 - [App Studio agents requirements](studio/app-agents-requirements.md)
+- [Pending interrupt in Chat](local-agent/pending-interrupt-chat.md) — draft
+  checkpoint/projection/resume boundary for PR #682, explicitly excluding
+  Studio dispatch identity
+- [Studio Pet thread and dispatch invocation](studio/pet-thread-dispatch-invocation.md) —
+  draft identity/lifecycle model for one durable thread per Pet, one invocation
+  per dispatch, and interrupt resumes delivered through dispatch
 
 Completed or superseded work belongs in [history/](../history/index.md).

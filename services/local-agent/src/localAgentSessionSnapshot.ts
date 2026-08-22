@@ -8,7 +8,7 @@ import type {
   AgentTimelineEntry,
 } from '@pinpawo/agent-session';
 import { createAgentSessionSnapshot } from '@pinpawo/agent-session';
-import type { ReviewActionSnapshot } from './localServerChatHandler';
+import type { PendingInterruptSnapshot } from './localServerChatHandler';
 import type { LocalServerDeps } from './localServerTypes';
 import type { TuiCheckpointMessage } from './localServerTuiSessions';
 import { buildLocalRuntimeProjection } from './localConfigProjection';
@@ -25,13 +25,13 @@ export function buildLocalAgentSessionSnapshot(params: {
   modelProfileId?: string;
   requiredInputModalities?: readonly AgentInputModality[];
   sessionTokenUsage?: AgentSession['sessionTokenUsage'] | null;
-  pendingReview?: ReviewActionSnapshot | null;
+  pendingInterrupt?: PendingInterruptSnapshot | null;
   /** Live local transport state; never inferred from checkpoint plan data. */
   activeRun?: Extract<AgentRunView, { state: 'running' }> | null;
   currentPlan?: AgentPlan | null;
 }): AgentSessionSnapshot {
   const timeline = timelineFromCheckpointMessages(params.messages);
-  const pendingReview = params.pendingReview ?? null;
+  const pendingInterrupt = params.pendingInterrupt ?? null;
   const runtime = buildLocalAgentRuntimeView(
     params.deps,
     params.modelProfileId,
@@ -49,11 +49,8 @@ export function buildLocalAgentSessionSnapshot(params: {
     sessionId: params.sessionId,
     kind: params.kind,
     timeline,
-    activeRun: pendingReview
-      ? runFromPendingReview({
-        pendingReview,
-      })
-      : params.activeRun ?? null,
+    activeRun: params.activeRun ?? null,
+    pendingInterrupt: pendingInterrupt?.pendingInterrupt ?? null,
     ...(params.currentPlan !== undefined ? { currentPlan: params.currentPlan } : {}),
     runtime,
     ...(sessionTokenUsage ? { sessionTokenUsage } : {}),
@@ -133,18 +130,4 @@ function timelineFromCheckpointMessages(messages: TuiCheckpointMessage[]): Agent
       ...(message.createdAt ? { createdAt: message.createdAt } : {}),
     } satisfies AgentTimelineEntry];
   });
-}
-
-function runFromPendingReview(params: {
-  pendingReview: ReviewActionSnapshot;
-}): AgentRunView {
-  const petId = params.pendingReview.actor?.petId;
-  return {
-    requestId: params.pendingReview.requestId,
-    state: 'waiting_review',
-    reviewAction: {
-      ...params.pendingReview.reviewAction,
-      ...(petId ? { petId } : {}),
-    },
-  };
 }

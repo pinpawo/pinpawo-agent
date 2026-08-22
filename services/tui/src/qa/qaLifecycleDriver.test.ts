@@ -110,6 +110,7 @@ function state(
       kind: 'chat',
       timeline: [],
       activeRun: null,
+      pendingInterrupt: null,
       runtime,
     },
   };

@@ -164,6 +164,7 @@ test('live timeline shows the newest streaming tail within its footer budget', (
       state: 'running',
       activity: 'streaming',
     },
+    pendingInterrupt: null,
   };
   assert.equal(formatLiveSession(session, 20), 'PinPawo  …qrstuvwxyz');
   assert.equal(formatLiveActivity(session, 0, 20), 'PinPawo  …uvwxyz');
@@ -191,6 +192,7 @@ test('live activity distinguishes progress from paused and stopping runs', () =>
       state: 'running',
       activity: 'thinking',
     },
+    pendingInterrupt: null,
   };
   assert.equal(
     formatLiveActivity(session, 0),
@@ -235,26 +237,20 @@ test('live activity distinguishes progress from paused and stopping runs', () =>
   assert.equal(
     formatLiveActivity({
       ...session,
-      activeRun: {
-        requestId: 'request',
-        state: 'waiting_review',
-        reviewAction: {
-          actionId: 'review-action',
-          reviews: [],
-        },
+      activeRun: null,
+      pendingInterrupt: {
+        interruptId: 'review-action',
+        payload: { kind: 'human_review', interactions: [] },
       },
     }),
     '! waiting for review',
   );
   assert.equal(isLiveActivityPulseActive({
     ...session,
-    activeRun: {
-      requestId: 'request',
-      state: 'waiting_review',
-      reviewAction: {
-        actionId: 'review-action',
-        reviews: [],
-      },
+    activeRun: null,
+    pendingInterrupt: {
+      interruptId: 'review-action',
+      payload: { kind: 'human_review', interactions: [] },
     },
   }, 0), false);
   assert.equal(

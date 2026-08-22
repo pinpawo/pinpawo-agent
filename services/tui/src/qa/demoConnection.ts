@@ -163,6 +163,7 @@ export function createDemoConnectionFactory(
             kind: 'chat',
             timeline: [],
             activeRun: null,
+            pendingInterrupt: null,
             runtime: {
               ...DEMO_RUNTIME,
               globalReviewPolicyMode,
@@ -197,6 +198,7 @@ export function createDemoConnectionFactory(
               status: 'completed',
             }],
             activeRun: null,
+            pendingInterrupt: null,
             runtime: {
               ...DEMO_RUNTIME,
               globalReviewPolicyMode,
@@ -372,14 +374,13 @@ function createDemoSession(
       summary: 'Deterministic cross-terminal interaction probe',
     },
     timeline: createDemoTimeline(Boolean(options.qa)),
-    activeRun: options.review
+    activeRun: null,
+    pendingInterrupt: options.review
       ? {
-          requestId: 'smoke-run',
-          state: 'waiting_review',
-          reviewAction: {
-            actionId: 'smoke-review-action',
-            petId: 'paws',
-            reviews: [{
+          interruptId: 'smoke-review-action',
+          payload: {
+            kind: 'human_review',
+            interactions: [{
               interactionId: 'smoke-review',
               schemaVersion: 2,
               // A realistic multi-line command: the reviewed content must stay

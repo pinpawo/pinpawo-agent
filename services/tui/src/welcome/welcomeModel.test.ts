@@ -20,6 +20,7 @@ const SESSION: AgentSession = {
   },
   timeline: [],
   activeRun: null,
+  pendingInterrupt: null,
 };
 
 test('welcome includes the raster paw, version, runtime, and shortcuts', () => {

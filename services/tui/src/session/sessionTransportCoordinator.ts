@@ -83,6 +83,14 @@ export class SessionTransportCoordinator {
     this.requestSnapshot('completion');
   }
 
+  invalidateCompletionSnapshotState() {
+    for (const [requestId, reason] of this.snapshotRequests) {
+      if (reason === 'completion') {
+        this.snapshotRequests.set(requestId, 'completion-metadata');
+      }
+    }
+  }
+
   clearSnapshotRequests() {
     this.clearSnapshotTimer();
     this.snapshotRequests.clear();
@@ -108,7 +116,7 @@ export class SessionTransportCoordinator {
       const reason = this.snapshotRequests.get(message.requestId);
       if (!reason) return;
       this.snapshotRequests.delete(message.requestId);
-      if (reason !== 'completion') {
+      if (!isCompletionSnapshotReason(reason)) {
         this.clearSnapshotTimer();
         this.reconnectAttempt = 0;
       }
@@ -123,7 +131,7 @@ export class SessionTransportCoordinator {
         return;
       }
       this.snapshotRequests.delete(message.requestId);
-      if (reason !== 'completion') {
+      if (!isCompletionSnapshotReason(reason)) {
         this.clearSnapshotTimer();
         this.options.onConnection('error', message.message);
       } else {
@@ -152,7 +160,7 @@ export class SessionTransportCoordinator {
 
   private requestSnapshot(reason: SessionSnapshotReason) {
     if (!this.connection.isConnected()) {
-      if (reason !== 'completion') {
+      if (!isCompletionSnapshotReason(reason)) {
         this.scheduleReconnect();
       }
       return;
@@ -161,12 +169,12 @@ export class SessionTransportCoordinator {
     this.snapshotRequests.set(requestId, reason);
     if (!this.connection.send({ type: 'session.snapshot.get', requestId })) {
       this.snapshotRequests.delete(requestId);
-      if (reason !== 'completion') {
+      if (!isCompletionSnapshotReason(reason)) {
         this.scheduleReconnect();
       }
       return;
     }
-    if (reason !== 'completion') {
+    if (!isCompletionSnapshotReason(reason)) {
       this.clearSnapshotTimer();
       this.snapshotTimer = this.options.setTimer(() => {
         this.snapshotTimer = null;
@@ -217,6 +225,10 @@ export class SessionTransportCoordinator {
     this.options.clearTimer(this.snapshotTimer);
     this.snapshotTimer = null;
   }
+}
+
+function isCompletionSnapshotReason(reason: SessionSnapshotReason) {
+  return reason === 'completion' || reason === 'completion-metadata';
 }
 
 function formatDelay(delayMs: number) {

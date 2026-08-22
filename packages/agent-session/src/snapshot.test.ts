@@ -17,6 +17,7 @@ function createSession(): AgentSession {
     kind: 'chat',
     timeline: [],
     activeRun: null,
+    pendingInterrupt: null,
     runtime: {
       model: 'gpt-test',
       cwd: '/Users/example/project',
@@ -68,7 +69,7 @@ test('snapshot parser accepts JSON session data and rejects invalid boundaries',
   }), null);
 });
 
-test('snapshot parser migrates legacy V3 reviews to the V4 public boundary', () => {
+test('snapshot parser migrates legacy V3 reviews to the V5 interrupt boundary', () => {
   const parsed = parseAgentSessionSnapshot({
     version: 3,
     session: {
@@ -102,9 +103,7 @@ test('snapshot parser migrates legacy V3 reviews to the V4 public boundary', () 
 
   assert.equal(parsed?.version, AGENT_SESSION_SNAPSHOT_VERSION);
   assert.deepEqual(
-    parsed?.session.activeRun?.state === 'waiting_review'
-      ? parsed.session.activeRun.reviewAction.reviews
-      : null,
+    parsed?.session.pendingInterrupt?.payload.interactions,
     [{
       interactionId: 'review-1',
       schemaVersion: 2,
@@ -139,6 +138,52 @@ test('snapshot parser migrates legacy V3 reviews to the V4 public boundary', () 
           }],
         },
       },
+    },
+  }), null);
+});
+
+test('snapshot parser separates a V4 pending run and rejects it in V5', () => {
+  const legacySession = {
+    sessionId: 'chat:legacy-v4',
+    kind: 'chat',
+    timeline: [],
+    activeRun: {
+      state: 'pending_interrupt',
+      pendingInterrupt: {
+        interruptId: 'interrupt-v4',
+        payload: {
+          kind: 'human_review',
+          interactions: [{
+            interactionId: 'review-v4',
+            schemaVersion: 2,
+            view: { kind: 'plain', body: 'Approve?' },
+            options: [{
+              id: 'approve',
+              label: 'Approve',
+              batchSubmission: 'immediate',
+            }],
+          }],
+        },
+      },
+    },
+  };
+
+  const parsed = parseAgentSessionSnapshot({
+    version: 4,
+    session: legacySession,
+  });
+
+  assert.equal(parsed?.version, AGENT_SESSION_SNAPSHOT_VERSION);
+  assert.equal(parsed?.session.activeRun, null);
+  assert.equal(
+    parsed?.session.pendingInterrupt?.interruptId,
+    'interrupt-v4',
+  );
+  assert.equal(parseAgentSessionSnapshot({
+    version: AGENT_SESSION_SNAPSHOT_VERSION,
+    session: {
+      ...legacySession,
+      pendingInterrupt: null,
     },
   }), null);
 });

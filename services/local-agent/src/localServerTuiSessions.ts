@@ -60,11 +60,10 @@ type TuiCheckpointMessageSource =
   | { role: 'user' | 'assistant' }
   | { role: 'subagent'; requestId: string };
 
-export type ActivePendingReview = {
+export type ActivePendingInterrupt = {
   sessionId: string;
-  interruptId?: string;
-  review: ReviewSpec;
-  reviews?: ReviewSpec[];
+  interruptId: string;
+  reviews: ReviewSpec[];
 };
 
 export type TuiCheckpointPoint = {
@@ -73,7 +72,7 @@ export type TuiCheckpointPoint = {
   requiredInputModalities: AgentInputModality[];
   messages: TuiCheckpointMessage[];
   sessionTokenUsage: (TokenUsageSnapshot & { scope: 'session' }) | null;
-  pendingReview: ActivePendingReview | null;
+  pendingInterrupt: ActivePendingInterrupt | null;
   currentPlan: AgentPlan | null;
 };
 
@@ -366,16 +365,11 @@ export class LocalServerTuiSessionService {
       checkpointReaderProfileId,
     );
     const state = await this.graphService.readThreadState(setup);
-    const pendingReview = state.pendingHumanReview
+    const pendingInterrupt = state.pendingInterrupt
       ? {
           sessionId: session.id,
-          ...(state.pendingHumanReview.interruptId
-            ? { interruptId: state.pendingHumanReview.interruptId }
-            : {}),
-          review: state.pendingHumanReview.review,
-          ...(state.pendingHumanReview.reviews
-            ? { reviews: state.pendingHumanReview.reviews }
-            : {}),
+          interruptId: state.pendingInterrupt.interruptId,
+          reviews: state.pendingInterrupt.reviews,
         }
       : null;
     return {
@@ -384,7 +378,7 @@ export class LocalServerTuiSessionService {
       requiredInputModalities: readTuiCheckpointInputModalities(state.messages),
       messages: readTuiCheckpointMessages(state.messages),
       sessionTokenUsage: readTuiCheckpointTokenUsage(state.messages),
-      pendingReview,
+      pendingInterrupt,
       currentPlan: state.currentPlan,
     };
   }
@@ -414,9 +408,9 @@ export class LocalServerTuiSessionService {
     }
   }
 
-  async readActivePendingReview(deps: LocalServerDeps): Promise<ActivePendingReview | null> {
+  async readActivePendingInterrupt(deps: LocalServerDeps): Promise<ActivePendingInterrupt | null> {
     const session = this.getActiveSession(deps.actorId);
-    return (await this.readSessionCheckpointPoint(deps, session)).pendingReview;
+    return (await this.readSessionCheckpointPoint(deps, session)).pendingInterrupt;
   }
 
   async readActiveCheckpointPoint(deps: LocalServerDeps) {
@@ -477,7 +471,7 @@ export class LocalServerTuiSessionService {
       },
       messages: checkpoint.messages,
       sessionTokenUsage: checkpoint.sessionTokenUsage,
-      pendingReview: checkpoint.pendingReview,
+      pendingInterrupt: checkpoint.pendingInterrupt,
       currentPlan: checkpoint.currentPlan,
     };
   }

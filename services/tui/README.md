@@ -292,11 +292,12 @@ The transport is reachable only through the explicit `--qa` flag; normal v2
 startup and the default legacy entry remain production paths. Direct workspace
 development is still available through `npm run dev:qa -w @pinpawo/tui`.
 
-Studio mode reuses the shared `studio_request`, progress event, review,
-interrupt, response, and error protocol. Composer mode and conversation ID stay
-view-local; accepted Studio runs, progress, terminal replies, and errors are
-projected into the canonical ordered timeline. Run the deterministic Studio PTY
-smoke without a host with:
+Studio mode uses `studio_request`, Studio progress, response, and error
+messages. The built-in Studio adapter does not accept Chat review, interrupt,
+or session-control messages; those require a separate Studio control adapter.
+Composer mode and conversation ID stay view-local; accepted Studio runs,
+progress, terminal replies, and errors are projected into the canonical ordered
+timeline. Run the deterministic Studio PTY smoke without a host with:
 
 ```sh
 npm run smoke:studio -w @pinpawo/tui

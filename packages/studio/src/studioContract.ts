@@ -125,33 +125,32 @@ export type StudioPluginContext = {
 };
 
 /**
- * layout 插件 —— 决定"什么时候派谁"。
+ * Studio 插件 —— 决定"什么时候派谁"，并可为 Agent 定义 Toolkit。
  *
  * kanban(依据任务依赖与进度)、scheduler(依据时间)、trigger(依据外部
  * 事件)都是同级的实现;studio 对它们一视同仁,不为任何一个特殊设计。
  *
- * **结构上它就是一个 `AgentToolkit`,外加一个 `studio` 字段。**
- * 这样现有 toolkit 变成插件只需补一个字段,不必重写:
+ * Plugin 高于 Toolkit，但不是 Toolkit。Plugin 的 Studio lifecycle 使用
+ * `StudioPluginContext` 驱动 dispatch/event；它定义的 Toolkit 进入 Host 的
+ * Agent Toolkit inventory，由 Capability.uses 在 Agent 侧选择。
  *
  * ```ts
  * const kanbanPlugin: StudioPlugin = {
- *   ...existingKanbanToolkit,          // 原样复用
- *   studio: { start: (ctx) => { ... } } // 只补这一段
+ *   name: 'kanban',
+ *   toolkits: [kanbanToolkit],
+ *   start: (ctx) => { ... },
  * };
  * ```
  *
- * 两副面孔由此自然成立:作为 toolkit 绑在 pet 上(pet 读写它的领域数据),
- * 作为插件插在 studio 上(委托 dispatch、发 event)。pet 调 toolkit →
- * toolkit 触发插件内部状态 → 插件发 event,闭环不经过 studio 解释内容。
- *
- * `studio` 省略时它就是个普通 toolkit;`tools` 为空时它就是个纯驱动方。
- * 两者都合法 —— 插件不必同时具备两副面孔。
+ * Plugin 可以定义零个或多个 Toolkit；`toolkits` 是明确的定义出口，不是把
+ * Plugin 伪装成 Toolkit。Capability 完全属于 Agent，不由 Plugin 或 Studio 注册。
  */
-export type StudioPlugin = AgentToolkit & {
-  studio?: {
-    start: (context: StudioPluginContext) => Promise<void> | void;
-    stop?: () => Promise<void> | void;
-  };
+export type StudioPlugin = {
+  name: string;
+  /** Toolkit definitions owned by this Plugin and consumed only by Agent runtimes. */
+  toolkits: readonly AgentToolkit[];
+  start: (context: StudioPluginContext) => Promise<void> | void;
+  stop?: () => Promise<void> | void;
 };
 
 /* ─────────────── Studio ─────────────── */
@@ -164,6 +163,14 @@ export type Studio = {
    */
   entryPetId: string;
   dispatch: (input: StudioDispatchInput) => Promise<StudioDispatchResult>;
+  /**
+   * 订阅所有 dispatch 的闸门变化，包括宿主直接发起的 dispatch。
+   *
+   * 插件仍应优先使用 `StudioPluginContext.onDispatchGate`，因为那条订阅只会
+   * 收到插件自己的派活。这个全局入口属于 Host 控制面，用于把状态投射给
+   * 发起请求的 transport，并在 dispatch 结束后释放关联关系。
+   */
+  onDispatchGate: (handler: StudioDispatchGateHandler) => () => void;
   notify: (event: StudioEvent) => void;
   subscribe: (handler: StudioEventHandler) => () => void;
   listPets: () => PetAgentRuntimeDescriptor[];

@@ -139,7 +139,7 @@ function buildStudioConfigCheck(runtimeConfig: LocalAgentRuntimeConfig): SetupCh
     id: 'studio-config',
     label: 'Studio config',
     status: 'warning',
-    detail: `No Studio config at ${runtimeConfig.studioConfigPath}. Studio mode will stay disabled until this file exists.`,
+    detail: `No Studio config at ${runtimeConfig.studioConfigPath}. An independent Studio Host cannot initialize this workdir until the file exists.`,
     nextStep: `Create ${runtimeConfig.studioConfigPath}.`,
   };
 }

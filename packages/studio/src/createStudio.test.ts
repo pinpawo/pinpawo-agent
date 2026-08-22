@@ -33,7 +33,7 @@ function pet(options: {
       gateListeners.add(listener);
       return () => gateListeners.delete(listener);
     },
-    /** 测试用:模拟人把卡住的 pet 解开(现实里走 chat 路径)。 */
+    /** 测试用:模拟外部控制面把卡住的 pet 解开。 */
     openGate: () => setGate('open'),
     /** 测试用:模拟卡住期间的状态转折。 */
     setGate,
@@ -209,6 +209,23 @@ test('createStudio rejects an entryPetId that is not among the pets', async () =
   );
 });
 
+test('createStudio rejects duplicate Plugin names', async () => {
+  const plugin = (name: string): StudioPlugin => ({
+    name,
+    toolkits: [],
+    start: () => undefined,
+  });
+  await assert.rejects(
+    () => createStudio({
+      studioId: 's1',
+      entryPetId: 'p1',
+      pets: [pet({ petId: 'p1' })],
+      plugins: [plugin('layout'), plugin('layout')],
+    }),
+    /duplicate plugin "layout"/,
+  );
+});
+
 test('events are broadcast to every subscriber without being interpreted', async () => {
   // studio 不认识任何 event type,也不校验 payload —— 它只转发。
   const received: unknown[] = [];
@@ -216,15 +233,13 @@ test('events are broadcast to every subscriber without being interpreted', async
 
   const publisher: StudioPlugin = {
     name: 'kanban',
-    description: 'kanban',
-    tools: [],
-    studio: { start: (context) => { publish = context.notify; } },
+    toolkits: [],
+    start: (context) => { publish = context.notify; },
   };
   const listener: StudioPlugin = {
     name: 'scheduler',
-    description: 'scheduler',
-    tools: [],
-    studio: { start: (context) => { context.subscribe((event) => { received.push(event); }); } },
+    toolkits: [],
+    start: (context) => { context.subscribe((event) => { received.push(event); }); },
   };
 
   await createStudio({
@@ -259,25 +274,20 @@ test('one failing subscriber does not stop the others', async () => {
     plugins: [
       {
         name: 'source',
-        description: 'source',
-        tools: [],
-        studio: { start: (context) => { publish = context.notify; } },
+        toolkits: [],
+        start: (context) => { publish = context.notify; },
       },
       {
         name: 'broken',
-        description: 'broken',
-        tools: [],
-        studio: {
-          start: (context) => {
-            context.subscribe(() => { throw new Error('handler exploded'); });
-          },
+        toolkits: [],
+        start: (context) => {
+          context.subscribe(() => { throw new Error('handler exploded'); });
         },
       },
       {
         name: 'healthy',
-        description: 'healthy',
-        tools: [],
-        studio: { start: (context) => { context.subscribe(() => { delivered.push('healthy'); }); } },
+        toolkits: [],
+        start: (context) => { context.subscribe(() => { delivered.push('healthy'); }); },
       },
     ],
   });
@@ -292,12 +302,9 @@ test('plugins are started in order and stopped in reverse', async () => {
   const order: string[] = [];
   const make = (name: string): StudioPlugin => ({
     name,
-    description: name,
-    tools: [],
-    studio: {
-      start: () => { order.push(`start:${name}`); },
-      stop: () => { order.push(`stop:${name}`); },
-    },
+    toolkits: [],
+    start: () => { order.push(`start:${name}`); },
+    stop: () => { order.push(`stop:${name}`); },
   });
 
   const studio = await createStudio({
@@ -322,21 +329,56 @@ test('a plugin that fails to start fails createStudio', async () => {
       pets: [pet({ petId: 'p1' })],
       plugins: [{
         name: 'broken',
-        description: 'broken',
-        tools: [],
-        studio: { start: () => { throw new Error('cannot start'); } },
+        toolkits: [],
+        start: () => { throw new Error('cannot start'); },
       }],
     }),
     /cannot start/,
   );
 });
 
-test('a plugin without a studio aspect is just a toolkit', async () => {
+test('plugin startup failure rolls back every plugin that may have allocated resources', async () => {
+  const order: string[] = [];
+  await assert.rejects(
+    () => createStudio({
+      studioId: 's1',
+      entryPetId: 'p1',
+      pets: [pet({ petId: 'p1' })],
+      plugins: [
+        {
+          name: 'started',
+          toolkits: [],
+          start: () => { order.push('start:started'); },
+          stop: () => { order.push('stop:started'); },
+        },
+        {
+          name: 'partial',
+          toolkits: [],
+          start: () => {
+            order.push('start:partial');
+            throw new Error('partial startup failed');
+          },
+          stop: () => { order.push('stop:partial'); },
+        },
+      ],
+    }),
+    /partial startup failed/,
+  );
+
+  assert.deepEqual(order, [
+    'start:started',
+    'start:partial',
+    'stop:partial',
+    'stop:started',
+  ]);
+});
+
+test('a plugin may define no Toolkits', async () => {
   const studio = await createStudio({
     studioId: 's1',
     entryPetId: 'p1',
     pets: [pet({ petId: 'p1' })],
-    plugins: [{ name: 'plain', description: 'plain toolkit', tools: [] }],
+    plugins: [{ name: 'plain', toolkits: [], start: () => undefined }],
   });
 
   assert.deepEqual(studio.listPets().map((descriptor) => descriptor.petId), ['p1']);
@@ -354,9 +396,8 @@ test('a dispatch records who sent it, using the plugin name studio supplies', as
     let ctx!: StudioPluginContext;
     const kanban: StudioPlugin = {
       name: 'kanban',
-      description: 'test plugin',
-      tools: [],
-      studio: { start: (context) => { ctx = context; } },
+      toolkits: [],
+      start: (context) => { ctx = context; },
     };
 
     const studio = await createStudio({
@@ -402,7 +443,7 @@ test('the queue holds while a pet is waiting, and resumes when a human opens the
   // 第一条停在等人上,第二条必须还排着。
   assert.deepEqual(started, ['first']);
 
-  // 人走 chat 路径把它解开(现实里不经过 studio)。
+  // 外部控制面把它解开(不经过 Studio core)。
   stuck.openGate();
   await flush();
   assert.deepEqual(started, ['first', 'second']);
@@ -415,26 +456,22 @@ test('a plugin hears the gate of its own dispatches, and only its own', async ()
 
   const a: StudioPlugin = {
     name: 'kanban',
-    description: 'p',
-    tools: [],
-    studio: {
-      start: (ctx) => {
-        mine = ctx;
-        ctx.onDispatchGate((change) => {
-          seen.push({
-            threadId: change.threadId,
-            state: change.state,
-            ...(change.correlationId ? { correlationId: change.correlationId } : {}),
-          });
+    toolkits: [],
+    start: (ctx) => {
+      mine = ctx;
+      ctx.onDispatchGate((change) => {
+        seen.push({
+          threadId: change.threadId,
+          state: change.state,
+          ...(change.correlationId ? { correlationId: change.correlationId } : {}),
         });
-      },
+      });
     },
   };
   const b: StudioPlugin = {
     name: 'scheduler',
-    description: 'p',
-    tools: [],
-    studio: { start: (ctx) => { theirs = ctx; } },
+    toolkits: [],
+    start: (ctx) => { theirs = ctx; },
   };
 
   const studio = await createStudio({
@@ -456,6 +493,33 @@ test('a plugin hears the gate of its own dispatches, and only its own', async ()
   assert.deepEqual(seen.map((item) => item.state), ['busy', 'open']);
 });
 
+test('the Host control surface hears direct dispatch gate changes with correlation', async () => {
+  const studio = await createStudio({
+    studioId: 's1',
+    entryPetId: 'p1',
+    pets: [pet({ petId: 'p1' })],
+  });
+  const seen: Array<{ state: string; correlationId?: string }> = [];
+  studio.onDispatchGate((change) => {
+    seen.push({
+      state: change.state,
+      ...(change.correlationId ? { correlationId: change.correlationId } : {}),
+    });
+  });
+
+  await studio.dispatch({
+    petId: 'p1',
+    request: 'host request',
+    correlationId: 'transport-route-1',
+  });
+  await flush();
+
+  assert.deepEqual(seen, [
+    { state: 'busy', correlationId: 'transport-route-1' },
+    { state: 'open', correlationId: 'transport-route-1' },
+  ]);
+});
+
 test('a stopped plugin stops hearing gate changes', async () => {
   // shutdown 之后闸门再变化,已停的插件不该被叫醒。
   //
@@ -466,13 +530,10 @@ test('a stopped plugin stops hearing gate changes', async () => {
   let ctx!: StudioPluginContext;
   const kanban: StudioPlugin = {
     name: 'kanban',
-    description: 'p',
-    tools: [],
-    studio: {
-      start: (context) => {
-        ctx = context;
-        context.onDispatchGate(() => { calls += 1; });
-      },
+    toolkits: [],
+    start: (context) => {
+      ctx = context;
+      context.onDispatchGate(() => { calls += 1; });
     },
   };
 
@@ -513,13 +574,10 @@ test('gate changes while stuck keep reaching the originator', async () => {
   let ctx!: StudioPluginContext;
   const plugin: StudioPlugin = {
     name: 'kanban',
-    description: 'p',
-    tools: [],
-    studio: {
-      start: (context) => {
-        ctx = context;
-        context.onDispatchGate((change) => { seen.push(change.state); });
-      },
+    toolkits: [],
+    start: (context) => {
+      ctx = context;
+      context.onDispatchGate((change) => { seen.push(change.state); });
     },
   };
 
@@ -556,6 +614,39 @@ test('shutdown does not hang on a dispatch that is waiting for a human', async (
   ]);
 });
 
+test('shutdown prevents dispatches already queued behind an active item from invoking', async () => {
+  const started: string[] = [];
+  let activeSignal!: AbortSignal;
+  let invocationExited = false;
+  const studio = await createStudio({
+    studioId: 's1',
+    entryPetId: 'p1',
+    pets: [{
+      ...pet({ petId: 'p1' }),
+      invoke: async (input) => {
+        started.push(input.brief);
+        activeSignal = input.signal!;
+        await new Promise<void>((resolve) => {
+          input.signal!.addEventListener('abort', () => resolve(), { once: true });
+        });
+        invocationExited = true;
+        throw input.signal!.reason;
+      },
+    }],
+  });
+
+  await studio.dispatch({ petId: 'p1', request: 'first' });
+  await studio.dispatch({ petId: 'p1', request: 'must-not-start' });
+  await flush();
+  assert.deepEqual(started, ['first']);
+
+  await studio.shutdown();
+
+  assert.deepEqual(started, ['first']);
+  assert.equal(activeSignal.aborted, true);
+  assert.equal(invocationExited, true);
+});
+
 test('a plugin whose stop() throws still gets its gate handlers dropped', async () => {
   // 覆盖对外表现:stop 抛错不该让 shutdown 失败,也不该再收到闸门回调。
   // 注:handler 表是被逐个 delete 还是被结尾的 clear() 兜住,从外部不可区分。
@@ -563,15 +654,12 @@ test('a plugin whose stop() throws still gets its gate handlers dropped', async 
   let ctx!: StudioPluginContext;
   const plugin: StudioPlugin = {
     name: 'kanban',
-    description: 'p',
-    tools: [],
-    studio: {
-      start: (context) => {
-        ctx = context;
-        context.onDispatchGate(() => { calls += 1; });
-      },
-      stop: () => { throw new Error('stop exploded'); },
+    toolkits: [],
+    start: (context) => {
+      ctx = context;
+      context.onDispatchGate(() => { calls += 1; });
     },
+    stop: () => { throw new Error('stop exploded'); },
   };
 
   const stuck = pet({

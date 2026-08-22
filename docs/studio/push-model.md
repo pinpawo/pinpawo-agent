@@ -54,9 +54,16 @@ runtime may return while it awaits human review. Studio only observes the gate;
 it does not offer a control plane for opening it. A host/runtime integration
 must ensure that a resumed pet eventually reports `open`.
 
+The current local Studio transport has no built-in review UI, but the Pet runtime
+still declares `humanReview: true`. LangGraph persists the interrupt and the gate
+may remain `waiting` indefinitely. A separate Studio plugin or Host adapter may
+project the pending action to an interaction layer and resume the same thread;
+Studio core does not need to understand review.
+
 Plugins can subscribe with `onDispatchGate()` to changes for dispatches they
 initiated. This is point-to-point feedback, not a broadcast event. Host-issued
-dispatches have no such plugin callback.
+dispatches are observable through the public `Studio.onDispatchGate()` control
+subscription without exposing them to unrelated plugins.
 
 ## Event bus
 
@@ -79,24 +86,33 @@ a host must provide complete `StudioEvent` values itself.
 The bus is neither durable nor replayable. It has no delivery guarantee across
 process restarts and must not be used as the source of truth for plugin state.
 
-## Plugins have two optional faces
+## Plugins define Toolkits; they are not Toolkits
 
-A `StudioPlugin` extends `AgentToolkit`:
+A `StudioPlugin` is a higher-level Studio extension with an explicit Toolkit
+definition outlet:
 
 ```ts
-type StudioPlugin = AgentToolkit & {
-  studio?: {
-    start(context: StudioPluginContext): Promise<void> | void;
-    stop?(): Promise<void> | void;
-  };
+type StudioPlugin = {
+  name: string;
+  toolkits: readonly AgentToolkit[];
+  start(context: StudioPluginContext): Promise<void> | void;
+  stop?(): Promise<void> | void;
 };
 ```
 
-The Toolkit face lets a pet read or modify the plugin's domain state. The
-Studio face lets that same component dispatch work and publish notifications.
-Either face may be omitted. Studio starts plugin faces in configuration order;
-if a start operation fails, construction fails. It stops them in reverse order
-and isolates stop failures while cleaning subscriptions.
+The Plugin itself is never passed to the Agent as a Toolkit. Its zero or more
+Toolkit definitions enter the Host's unified Toolkit inventory before resident
+Pet runtimes are built. Availability, provenance, optional Toolkit Runtime
+startup, and `Capability.uses` selection therefore stay on the Agent side.
+
+Capability is also an Agent concept. A Studio Plugin does not define, register,
+or implicitly contribute Capability. A Host may independently register a
+Capability that uses a Plugin-defined Toolkit, and pet configuration still
+selects that Capability explicitly.
+
+Studio starts Plugins in configuration order; if a start operation fails,
+construction fails. It stops them in reverse order and isolates stop failures
+while cleaning subscriptions.
 
 The bundled `kanban` plugin illustrates the loop:
 
@@ -122,4 +138,3 @@ Current deliberate limits are in-memory queues, no backpressure, no terminal
 dispatch result, no automatic retry, and no plugin-state persistence convention.
 Those are not hidden behavior; integrations that require them must model them
 explicitly at their own boundary.
-

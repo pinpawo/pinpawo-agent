@@ -34,6 +34,7 @@ plugin start rejects construction.
 type Studio = {
   entryPetId: string;
   dispatch(input: StudioDispatchInput): Promise<StudioDispatchResult>;
+  onDispatchGate(handler: StudioDispatchGateHandler): () => void;
   notify(event: StudioEvent): void;
   subscribe(handler: StudioEventHandler): () => void;
   listPets(): PetAgentRuntimeDescriptor[];
@@ -68,13 +69,35 @@ handlers run asynchronously; an error in one is isolated from the publisher and
 other subscribers. The API does not persist, replay, validate, or correlate
 event payloads.
 
+`onDispatchGate()` is the Host control subscription. Unlike the plugin-scoped
+callback below, it observes direct Host dispatches as well as plugin dispatches.
+It is intended for a transport to project gate state and release its request
+correlation when work reaches `open` or `blocked`.
+
 `listPets()` returns descriptors only, not runtime references. This keeps all
 plugin-originated work on the dispatch boundary.
 
 ## Plugin context
 
-A Studio plugin is an `AgentToolkit` with an optional Studio lifecycle hook.
-When started, it receives this context:
+A Studio Plugin is a higher-level extension, not an `AgentToolkit`. It defines
+zero or more Agent Toolkits through `toolkits` and has a required Studio
+lifecycle entry:
+
+```ts
+type StudioPlugin = {
+  name: string;
+  toolkits: readonly AgentToolkit[];
+  start(context: StudioPluginContext): Promise<void> | void;
+  stop?(): Promise<void> | void;
+};
+```
+
+Plugin-defined Toolkits enter the Host inventory before Pet construction.
+Capabilities remain Agent-owned and are never registered by Studio Plugins.
+The local Studio Host derives each Pet's definitions and selection from
+`pets/<petId>/capabilities/<capability>/CAPABILITY.md`; the Pet JSON contains no
+Capability name list.
+When a Plugin starts, it receives this context:
 
 ```ts
 type StudioPluginContext = {
@@ -101,6 +124,11 @@ type StudioDispatchGateChange = {
 The callback is a progress signal. It is not a result channel and has no
 durability or replay guarantee.
 
+If plugin startup fails, Studio calls `stop()` in reverse order for every
+plugin that may have started, including the plugin whose `start()` rejected.
+After shutdown, queued dispatches that have not begun are discarded rather
+than invoking a pet after plugin listeners have stopped.
+
 ## Pet runtime port
 
 A host supplies the runnable pets:
@@ -125,4 +153,3 @@ The local adapter is documented in [Pet Runtime API](pet-runtime.md).
 `petLocalConfigSchema`, and `resolveStudio()`. File paths and plugin factory
 selection are intentionally local-host concerns; see
 [Studio configuration](../../studio/configuration.md).
-

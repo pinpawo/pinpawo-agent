@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { HostCapabilityAssembly } from './hostCapabilityAssembly';
 import { FileCapabilityArtifactStore } from './capabilityArtifactStore';
+import { FileSaver } from './fileSaver';
 import type { LocalAgentRuntimeConfig } from './runtimeConfig';
 
 function buildTestConfig(root: string): LocalAgentRuntimeConfig {
@@ -22,6 +23,59 @@ function buildTestConfig(root: string): LocalAgentRuntimeConfig {
     capabilityArtifactRoot: join(root, 'capability-artifacts'),
   };
 }
+
+test('HostCapabilityAssembly refuses early ownership when another Host owns its checkpoint root', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-caps-owner-'));
+  const runtimeConfig = buildTestConfig(root);
+  const existingHost = new FileSaver(runtimeConfig.checkpointPath);
+  existingHost.acquireHostWriterLease('existing-host');
+  const caps = new HostCapabilityAssembly({
+    runtimeConfig,
+    sourceId: 'second-host',
+  });
+
+  try {
+    assert.throws(
+      () => caps.acquireWriterLease(),
+      /already owned by existing-host/,
+    );
+  } finally {
+    existingHost.releaseHostWriterLease();
+  }
+});
+
+test('HostCapabilityAssembly rejects extension definitions omitted from the first init call', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-caps-init-sources-'));
+  const caps = new HostCapabilityAssembly({
+    runtimeConfig: buildTestConfig(root),
+    sourceId: 'test',
+  });
+  let maintenanceStarted!: () => void;
+  let failMaintenance!: () => void;
+  const started = new Promise<void>((resolve) => { maintenanceStarted = resolve; });
+  const maintenance = new Promise<void>((_resolve, reject) => {
+    failMaintenance = () => { reject(new Error('stop test initialization')); };
+  });
+  caps.getCheckpointer().runHostStartupMaintenance = async () => {
+    maintenanceStarted();
+    await maintenance;
+  };
+
+  const firstInit = caps.init();
+  await started;
+  await assert.rejects(
+    () => caps.init({
+      toolkitSources: [{
+        id: 'late-source',
+        kind: 'plugin',
+        definitions: [],
+      }],
+    }),
+    /initialization already started without Toolkit source "late-source"/,
+  );
+  failMaintenance();
+  await assert.rejects(() => firstInit, /stop test initialization/);
+});
 
 test('HostCapabilityAssembly.deleteThreadArtifacts removes capability artifacts for the thread', async () => {
   const root = await mkdtemp(join(tmpdir(), 'pinpawo-caps-delete-'));

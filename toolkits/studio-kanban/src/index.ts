@@ -9,7 +9,11 @@
 
 /* ─────────────── Studio 插件 ─────────────── */
 
-export { createKanbanPlugin, KANBAN_TOOLKIT_NAME } from './kanbanPlugin';
+export {
+  createKanbanPlugin,
+  createKanbanToolkit,
+  KANBAN_TOOLKIT_NAME,
+} from './kanbanPlugin';
 export type { CreateKanbanPluginOptions, KanbanPlugin } from './kanbanPlugin';
 export { KanbanBoard } from './kanbanBoard';
 export type { KanbanTask, KanbanTaskStatus, KanbanBoardSnapshot } from './kanbanBoard';
@@ -22,4 +26,3 @@ export {
   createWikiReadCapability,
   WIKI_READ_CAPABILITY_NAME,
 } from './wikiReadCapability';
-

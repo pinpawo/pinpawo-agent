@@ -2,7 +2,11 @@
 
 [English](../../studio/index.md)
 
-> **状态：当前契约。** Studio 是多 Pet 的轻量协调底座，不是工作流编排器。
+> **状态：当前契约。** `@pinpawo/studio` 是独立 Studio Host/runtime package；
+> 它通过 local-agent 的公共 `host-runtime` surface 复用本机 Host 装配能力；具体的
+> local wire adapter 来自独立的 `local-server-transport` surface，不进入 Chat 启动链路。
+> `pinpawo-studio` 可执行入口也直接位于 `packages/studio`；具体 Plugin
+> 仍通过 `StudioPluginResolver` 从外部注入。
 
 Studio 维护可派发 Pet 的注册表、每个 Pet 的 FIFO 队列和插件事件总线。一次
 `dispatch()` 返回 `threadId` 只表示请求已经被接收；任务结果、进度、依赖、
@@ -15,7 +19,7 @@ plugin ── notify(event) ──> Studio ── dispatch(request) ──> pet
 ## 建议阅读顺序
 
 - [推模型与边界](push-model.md) — dispatch、队列 / gate、事件和插件生命周期。
-- [配置](configuration.md) — `studio.json`、Pet 文件、校验与内置 Kanban 插件。
+- [配置](configuration.md) — `studio.json`、Pet 文件、校验与 Plugin 注入。
 - [本地宿主集成](host-integration.md) — workdir 装配、WebSocket 确认和事件转发。
 - [Studio API（中文）](../reference/api/studio.md) — 导出的类型和精确语义。
 
@@ -27,15 +31,15 @@ plugin ── notify(event) ──> Studio ── dispatch(request) ──> pet
 - 按配置顺序启动插件、逆序停止插件，并广播插件通知而不解释内容。
 
 任务如何拆分、依赖和进度如何保存、何时重试、scheduler / webhook / UI / 传输如何
-工作，都不属于 Studio。内置 `kanban` 是典型的双面插件：Pet 通过其 Toolkit
-读写看板，插件自身根据看板状态派活或发事件。
+工作，都不属于 Studio。可选 `studio-kanban` package 提供一个 Plugin：它定义供 Pet
+使用的 Kanban Toolkit，并在自己的生命周期内根据看板状态派活或发事件。Plugin 本身
+不是 Toolkit。
 
 ## 运行限制
 
 队列与事件订阅都只存在于当前进程内。Studio 不提供持久化确认、背压、自动重试、
 超时或终态结果 API。需要这些能力的插件必须自行建模并持久化相应状态。修改配置后
-需重启 local host，才能重新装配该 workdir 的 Studio。
+需重启 Studio Host，才能重新装配该 workdir 的 Studio。
 
 旧的 run controller、due-run scheduler 和 shared wiki 方案已经移到
 [Studio 历史记录](../../history/studio/)，不再代表当前行为。
-

@@ -6,6 +6,7 @@ import test from 'node:test';
 import {
   attachWorkspaceConfig,
   buildLocalAgentRuntimeConfig,
+  resolveHostCheckpointPath,
   buildWorkspaceRuntimeConfig,
   deriveWorkspaceId,
   deriveWorkspaceName,
@@ -37,6 +38,10 @@ test('buildLocalAgentRuntimeConfig scopes runtime state under workdir .pinpawo',
     capabilityArtifactRoot: '/tmp/pinpawo-workdir/.pinpawo/capability-artifacts',
   });
   assert.equal(Object.isFrozen(runtimeConfig), true);
+  assert.equal(
+    resolveHostCheckpointPath(runtimeConfig, 'studio'),
+    '/tmp/pinpawo-workdir/.pinpawo/checkpoints-studio-capability-v2.json',
+  );
 });
 
 test('resolveDefaultWorkdir prefers env, then stored config, then process cwd', () => {

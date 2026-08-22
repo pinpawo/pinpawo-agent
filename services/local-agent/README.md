@@ -79,7 +79,6 @@ pinpawo init
 pinpawo setup
 pinpawo server
 pinpawo run
-pinpawo server --mode studio
 pinpawo server --stdio
 pinpawo tui
 pinpawo browser extension status
@@ -90,6 +89,10 @@ pinpawo capability list
 pinpawo capability validate ./my-capability
 pinpawo capability install ./my-capability
 ```
+
+Studio is an independent Host exposed through `@pinpawo/studio`, not a mode of
+this Chat server command. The `pinpawo-studio` process entry lives directly in
+`packages/studio`.
 
 `pinpawo tui` launches the OpenTUI client. Installed packages use the
 Bun-targeted bundle in `dist/tui` together with npm-selected Bun and OpenTUI

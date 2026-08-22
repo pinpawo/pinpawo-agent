@@ -131,16 +131,11 @@ test('local agent CLI defaults the server command to chat mode', async () => {
   assert.equal(received!.mode, 'chat');
 });
 
-test('local agent CLI passes studio mode through to the handler', async () => {
-  let received: { mode?: string } | null = null;
-  const program = createLocalAgentCli({
-    runAgent: (options) => {
-      received = options;
-    },
-  });
-
-  await program.parseAsync(['node', 'pinpawo', 'server', '--mode', 'studio']);
-  assert.equal(received!.mode, 'studio');
+test('local agent CLI does not expose Studio as a server mode', () => {
+  const server = createLocalAgentCli().commands
+    .find((command) => command.name() === 'server');
+  assert.ok(server);
+  assert.equal(server.options.some((option) => option.long === '--mode'), false);
 });
 
 test('local agent CLI keeps run as a chat-mode alias of server', async () => {
@@ -161,7 +156,7 @@ test('local agent CLI keeps run as a chat-mode alias of server', async () => {
   });
 });
 
-test('local agent CLI routes run and server through the same handler options', async () => {
+test('local agent CLI routes run and server through the same Chat handler options', async () => {
   // One shared definition, so the two names cannot drift into separate
   // runtime paths.
   const seen: unknown[] = [];
@@ -171,26 +166,11 @@ test('local agent CLI routes run and server through the same handler options', a
     },
   });
 
-  await program.parseAsync(['node', 'pinpawo', 'run', '--mode', 'studio', '--stdio']);
-  await program.parseAsync(['node', 'pinpawo', 'server', '--mode', 'studio', '--stdio']);
+  await program.parseAsync(['node', 'pinpawo', 'run', '--stdio']);
+  await program.parseAsync(['node', 'pinpawo', 'server', '--stdio']);
 
   assert.equal(seen.length, 2);
   assert.deepEqual(seen[0], seen[1]);
-});
-
-test('local agent CLI rejects an unknown server mode instead of falling back', async () => {
-  let called = false;
-  const program = createLocalAgentCli({
-    runAgent: () => {
-      called = true;
-    },
-  });
-
-  await assert.rejects(
-    () => program.parseAsync(['node', 'pinpawo', 'server', '--mode', 'kitchen-sink']),
-    /Expected one of: chat, studio/,
-  );
-  assert.equal(called, false);
 });
 
 test('local agent CLI passes Chrome extension registration options to the handler', async () => {

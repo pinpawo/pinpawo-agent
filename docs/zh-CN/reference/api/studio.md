@@ -36,16 +36,29 @@ Pet 不存在或 Pet disabled 时才会抛错；busy Pet 会排队而非被拒�
 
 公共 `Studio` 还提供：
 
+- `onDispatchGate(handler)`：Host 控制面订阅所有 dispatch 的 gate 变化，包括
+  Host 直接发起的投递；transport 可据此投射状态并释放 request correlation。
 - `notify(event)`：广播完整 `StudioEvent`；Studio 不校验、持久化、重放或关联
   payload。
 - `subscribe(handler)`：订阅当前进程内事件；单个 handler 失败不会影响其他订阅方。
 - `listPets()`：返回 Pet descriptor，不返回 runtime 引用。
 - `shutdown()`：拒绝后续 dispatch、按逆序停止插件并清理订阅。
 
+插件启动失败时，Studio 会对所有可能已经启动的插件（包括 `start()` 抛错的插件）
+逆序调用 `stop()`。shutdown 后尚未开始的 queued dispatch 会被丢弃，不会在插件
+listener 已停止后继续 invoke Pet。
+
 ## 插件 context 与 gate
 
-`StudioPlugin` 是带可选 `studio.start(context)` / `stop()` 钩子的
-`AgentToolkit`。启动时拿到的 context 提供 `dispatch`、`notify`、
+`StudioPlugin` 是高于 Toolkit 的扩展，不是 `AgentToolkit`。它通过必需的
+`toolkits` 字段定义零个或多个 Agent Toolkit，并通过 `start(context)` / 可选
+`stop()` 管理 Studio 生命周期。Plugin 定义的 Toolkit 在 Pet 构建前进入 Host
+inventory；Capability 仍由 Agent Host 独立注册，与 Plugin/Studio 无关。
+本地 Studio Host 根据 `petId` 从
+`pets/<petId>/capabilities/<capability>/CAPABILITY.md` 加载定义；目录成员就是选择，
+Pet JSON 不再包含 Capability 名称列表。
+
+Plugin 启动时拿到的 context 提供 `dispatch`、`notify`、
 `subscribe`、`listPets` 和 `onDispatchGate`。context 会自动补 event 的
 `source` 与 `occurredAt`。
 
@@ -61,4 +74,3 @@ runtime 的 `gate()` / `onGateChange()` 决定何时放行同一 Pet 的下一�
 
 更多类型与精确语义见[英文 API 参考](../../../reference/api/studio.md)。本地文件配置见
 [Studio 配置](../../studio/configuration.md)。
-

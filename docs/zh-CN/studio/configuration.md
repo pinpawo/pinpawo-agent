@@ -2,7 +2,7 @@
 
 > **状态：当前本地宿主配置。** schema 位于
 > [`configSchema.ts`](../../../packages/studio/src/configSchema.ts)，装配位于
-> [`buildStudio.ts`](../../../services/local-agent/src/studio/buildStudio.ts)。
+> [`buildStudio.ts`](../../../packages/studio/src/host/buildStudio.ts)。
 
 [English](../../studio/configuration.md)
 
@@ -36,16 +36,15 @@
   // 装哪些插件 —— **必须显式列出**,studio 不做任何隐式装配。
   // 顺序即 start 顺序(插件之间可能有依赖);stop 时逆序。
   //
-  // 目前只有 kanban 一个内置插件。配了别的 id 会直接报错。
+  // id 由应用 composition root 的 Plugin resolver 解析。
   "plugins": [
     { "id": "kanban" }
   ]
 }
 ```
 
-`plugins[].options` 会原样传给插件工厂，由插件自己解释与校验。当前内置的
-`kanban` 插件没有声明 options；不要依赖它读取任何 options。scheduler 尚未实现，
-不能作为可配置插件使用。
+`plugins[].options` 会原样传给 Plugin resolver，再由 Plugin 自己解释与校验。
+Studio package 不含内置 Plugin registry，也不 import kanban 或 scheduler。
 
 `plugins` 可省略 —— 那样这块 studio 没有任何驱动方,只能由宿主手动
 `dispatch`。这是合法的,但通常意味着配漏了。
@@ -58,7 +57,10 @@
 | `pets` 里有重名 | `pets array has duplicate petId "…"` |
 | `entryPetId` 不在 `pets` 里 | `entryPetId "…" is not in pets` |
 | `pets` 里的名字没有对应的 `pets/<petId>.json` | `pet "…" has no matching pet config…` |
-| `plugins[].id` 不认识 | `unknown plugin "…". Known plugins: …` |
+| 配了 Plugin 但宿主未安装 resolver | `plugin "…" is configured but no plugin resolver is installed` |
+
+同一个 Plugin id 可以用不同 options 配置多次；resolver 返回的每个 Plugin 实例仍必须
+具有唯一 `name`，因为它是 Studio 内部的生命周期与 event source 标识。
 
 ### 1.1 这里不该出现什么
 
@@ -85,31 +87,50 @@
   "name": "撰稿",              // 必填
   "role": "把提纲写成完整稿件",
   "serviceSummary": "长文写作、结构化改写",
-  "modelProfileId": "qwen-max",  // 省略则用宿主默认 profile
-
-  // 能力清单 —— 这里写的是 **capability 名**,不是 toolkit 名。
-  // 未在 local-agent 注册的名字会在装配时直接报错。
-  "capabilities": ["general", "studio_planning"]
+  "modelProfileId": "qwen-max"  // 省略则用宿主默认 profile
 }
 ```
 
-`studio_planning` 是内置的看板拆解能力(声明 `uses: ['kanban']`)。**它只在
-studio 装配时可用**,不在默认 Capability 注册表里 —— 否则每个普通 chat 会话
-都会因为找不到 kanban toolkit 打一条 "unavailable" 警告。
+`petId` 同时用于推导 Capability 目录，所以必须是安全的单个路径段。`general`
+仍由 Agent Host 作为 baseline 自动提供。旧的 `capabilities` 名称列表和 `model`
+字段都会显式报迁移错误，不会被静默忽略。
 
-要不要给某个 pet 装,仍由这份配置决定:planner 需要它来拆任务,worker 需要它
-来认领与完成任务;不碰看板的 pet 不必声明。
+### 2.1 `pets/<petId>/capabilities/`
+
+目录成员就是该 Pet 的 Capability 选择，不需要额外配置目录或名称列表：
+
+```text
+<workdir>/.pinpawo/pets/writer/capabilities/
+├── explore/
+│   └── CAPABILITY.md
+└── studio-planning/
+    └── CAPABILITY.md
+```
+
+每个直接子目录都必须是有效的 Capability 目录。损坏文档或同一 Pet 内的重名会让
+Host 启动失败。目录 symlink 是允许的，因此多个 Pet 可以复用同一份 Capability，
+不必复制。Capability 名以 Pet 为作用域：不同 Pet 可以拥有同名但内容不同的定义。
+
+`studio_planning` 的 `CAPABILITY.md` 声明 `uses: ['kanban']`，但它仍完全属于
+Agent。Kanban Plugin 只定义对应 Toolkit，不注册或携带 Capability。
+
+仓库中的 `packages/studio/examples/kanban-workdir/` 提供了一份完整目录示例。
 
 `model` 字段已被 `modelProfileId` 取代,**继续使用会显式报错**而不是静默
 忽略 —— 否则 pet 会悄悄跑在默认 profile 上。
 
-### 2.1 toolkit 不在 pet 配置里
+### 2.2 Toolkit 不在 Pet 配置里
 
-**插件的 toolkit 不需要(也不能)写进 `capabilities`。** 装配时所有 toolkit
-统一注入给每个 pet:
+Plugin 定义的 Toolkit 先进入 Host 的统一 Toolkit inventory：
 
 ```ts
-const availableToolkits = [...(input.toolkits ?? []), ...plugins];
+await capabilityAssembly.init({
+  toolkitSources: plugins.map((plugin) => ({
+    id: `studio-plugin:${plugin.name}`,
+    kind: 'plugin',
+    definitions: plugin.toolkits,
+  })),
+});
 ```
 
 pet 能不能真的用到 `kanban_task_*`,由**它的 capability 怎么声明 `uses`**
@@ -118,72 +139,81 @@ pet 能不能真的用到 `kanban_task_*`,由**它的 capability 怎么声明 `u
 ```text
 capability.uses: ['kanban']   ← 能力声明它需要这个 toolkit
         ↓
-pet.capabilities: ['general', 'explore']  ← pet 只声明它有哪些能力
+该 Capability 位于 pets/<petId>/capabilities/  ← 目录成员就是选择
         ↓
 toolkits 全量注入,由 uses 筛出这个 pet 实际拿到的工具
 ```
 
-往 `capabilities` 里写 `"kanban"` 会抛
-`references capability "kanban" which is not registered` —— 因为 `kanban` 是
-toolkit 名,注册表里没有同名 capability。
+`kanban` 是 Toolkit 名，只应出现在 Capability 的 `uses` 中。
 
 **关键:pet 侧看不出"插件"这个概念。** 它只知道自己有某个能力,而那个能力
 恰好用到了看板工具。至于看板同时也在驱动 studio 派活,与 pet 无关。
 
-这正是两副面孔的价值:同一个东西,在 pet 那里是工具,在 studio 那里是驱动方。
+Plugin 高于 Toolkit：它在 Studio 中是驱动方，同时可以定义 Agent 使用的 Toolkit，
+但 Plugin 本身从不作为 Toolkit 传给 Pet。
 
 ---
 
 ## 3. 装配
 
-宿主(`buildStudio`)负责读文件、解析 pet、把插件接上:
+宿主先解析配置与 Plugin，再初始化统一 Toolkit inventory，最后构建 resident Pet:
 
 ```ts
-const studio = await createStudio({
-  studioId: config.studioId,
-  entryPetId: config.entryPetId,
-  pets: resolvedPets,   // 宿主从 pets/*.json 装配出的 PetAgentRuntime[]
-  plugins,              // 由 plugins[].id 查内置注册表得到
+const configuration = await resolveStudioHostConfig({ resolvePlugin });
+await capabilityAssembly.init({
+  toolkitSources: pluginToolkitSources,
+});
+const studio = await buildStudio({
+  configuration,
+  toolkits: capabilityAssembly.getToolkitInventoryStore()
+    .getSnapshot().effectiveToolkits,
+  hostCapabilities: hostBaselineCapabilities,
+  petCapabilities: capabilitiesLoadedFromPetDirectories,
+  // ...models/checkpoint
 });
 ```
 
 `createStudio` 只做三件事:
 
 1. 建 pet registry(重复 petId、`entryPetId` 不在 `pets` 中都会报错);
-2. 依次 `await plugin.studio.start(context)`,把 `dispatch` / `onDispatchGate` /
+2. 依次 `await plugin.start(context)`,把 `dispatch` / `onDispatchGate` /
    `notify` / `subscribe` / `listPets` 交给它;
 3. 返回插板。
 
 **它是 `async` 的** —— 插件启动失败必须让调用方看见。一个没起来的驱动器
 意味着这块 studio 不会派活,静默吞掉会变成"提交了但什么都没发生"。
 
-**它不读配置文件。** 文件入口属于宿主(与 #613 的 config loader 分层一致),
-`@pinpawo/studio` 因此完全不碰 FS。
+`createStudio` 不读配置文件；`@pinpawo/studio` 的 Host 层负责 workdir 文件与 runtime
+装配，core contract 保持 transport/filesystem 无关。
 
 ### 3.1 `plugins[].id` 怎么解析
 
-宿主持有一张内置注册表:
+Studio Host 接收外部 resolver:
 
 ```ts
-const PLUGIN_FACTORIES: Record<string, StudioPluginFactory> = {
-  kanban: () => createKanbanPlugin(),
-};
+const resolvePlugin: StudioPluginResolver = (id, options) =>
+  installedPlugins.resolve(id, options);
+
+const host = new StudioHost({
+  resolvePlugin,
+});
 ```
 
-`options` 原样传给工厂,由插件自己解释与校验。id 不认识就报错并列出已知
-插件 —— 不静默跳过,否则配了插件却没装上会很难查。
+`options` 原样传给 resolver。未安装或不认识的 id 必须 fail fast，不能静默跳过。
+`studio-kanban` 自己拥有 Kanban Plugin 与 Toolkit 实现；依赖方向是
+Plugin package → Studio contract，不是 Studio → Kanban。`studio_planning`
+Capability 由对应 Pet 的约定目录独立提供。
 
-插件的 toolkit 面与普通 toolkit 合并后交给所有 pet:
+Plugin 定义的 Toolkit 与其他 Toolkit 来源一起进入 Host inventory:
 
 ```ts
-const availableToolkits = [...(input.toolkits ?? []), ...plugins];
+const availableToolkits = hostInventory.effectiveToolkits;
 ```
 
-pet 实际拿到哪些工具,由它的 capability 声明的 `uses` 筛出来 —— 见 §2.1。
-`capabilities` 里**只写 capability 名**。
+pet 实际拿到哪些工具,由它目录中 Capability 声明的 `uses` 筛出来 —— 见 §2.2。
 
-> 第三方插件(从 `~/.pinpawo/` 加载,像 capability 那样)尚未实现。这属于
-> 宿主的装配职责,不影响契约本身。
+> Studio 继续只声明 `StudioPluginResolver` port，不持有具体 Plugin catalog。
+> Plugin 的安装/discovery 策略仍由外部装配者负责。
 
 ---
 
@@ -223,17 +253,23 @@ pet 实际拿到哪些工具,由它的 capability 声明的 `uses` 筛出来 —
 
 ### 4.1 卡住的时候
 
-第 5 步若 writer 撞上人工确认:
+第 5 步若 writer 请求一个必须人工确认的操作:
 
 ```text
-5'. writer 的闸门变成 waiting —— studio 不放行这个 pet 的下一条
+5'. LangGraph 创建 interrupt,把 pending continuation 写入 checkpoint
        ↓
-6'. 人走 chat 路径跟 writer 对话,把它解开
-       ↓  闸门回到 open
-7'. 队列继续
+6'. writer 的闸门变成 waiting,studio 不放行这个 pet 的下一条
+       ↓
+7'. 独立交互 plugin/Host adapter 把 pending action 作为 event 告知用户层
+       ↓
+8'. 用户授权后,控制 adapter 恢复同一个 thread
+       ↓
+9'. 闸门回到 open,队列继续
 ```
 
-studio 全程不知道"review"是什么,只知道门关着。
+studio 全程不知道"review"是什么,它只观察 gate。waiting/interrupt 本身由 LangGraph
+checkpoint 持久化,不依赖 Chat Host 的内存状态；没有安装交互插件时,这条 dispatch 一直
+卡住也是合法状态。
 
 > **看板上目前看不出来。** 插件可以经 `context.onDispatchGate` 订阅自己派出去
 > 那些 dispatch 的闸门变化,把 `waiting` / `blocked` 标到任务上 —— 但 kanban

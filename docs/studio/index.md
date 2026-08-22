@@ -3,9 +3,13 @@
 [简体中文](../zh-CN/studio/index.md)
 
 > **Status: current contract.** Studio is implemented by
-> [`@pinpawo/studio`](../../packages/studio/src/index.ts) and assembled by the
-> local host in
-> [`buildStudio`](../../services/local-agent/src/studio/buildStudio.ts).
+> [`@pinpawo/studio`](../../packages/studio/src/index.ts), which owns its Host,
+> runtime assembly, and local transport adapters. It reuses local Host assembly
+> through the public local-agent
+> [`host-runtime`](../../services/local-agent/src/hostRuntime.ts) surface; the
+> concrete local wire adapter is a separate `local-server-transport` surface.
+> The `pinpawo-studio` executable entry also lives in this package. Concrete
+> concrete Plugins remain externally injected through `StudioPluginResolver`.
 
 Studio is a small coordination substrate for multiple Pet runtimes. It keeps a
 registry of dispatchable pets, serializes work per pet, and gives plugins an
@@ -24,7 +28,7 @@ the relevant plugin. That plugin may update its own state and publish an event.
 - [Push model and boundaries](push-model.md) — the current coordination model,
   queue and gate semantics, event rules, and plugin lifecycle.
 - [Configuration](configuration.md) — `studio.json`, per-pet files, validation,
-  and the built-in Kanban plugin.
+  and Plugin injection.
 - [Local-host integration](host-integration.md) — workdir assembly, WebSocket
   acknowledgement and event forwarding.
 - [Studio API reference](../reference/api/studio.md) — exported TypeScript
@@ -50,20 +54,20 @@ The following are plugin or host responsibilities, not Studio concepts:
 - schedules, webhooks, HTTP/WebSocket transport, UI state, and authentication;
 - shared knowledge stores or private agent scratch state.
 
-The bundled `kanban` plugin is the first example: it is both a Toolkit that
-pets use to manage Kanban tasks and a Studio plugin that dispatches tasks whose
-dependencies are ready. Future scheduler or trigger integrations must use the
-same plugin boundary rather than enlarge the Studio contract.
+The optional `studio-kanban` package is the first example: its Plugin defines a
+Toolkit that pets use to manage Kanban tasks, while the Plugin lifecycle dispatches
+tasks whose dependencies are ready. The Plugin is not itself a Toolkit. Future
+scheduler or trigger integrations must use the same Plugin boundary rather than
+enlarge the Studio contract.
 
 ## Operational limits
 
 Queues and event subscriptions are process-local and in memory. Dispatch has no
 durable acknowledgement, backpressure, automatic retry, timeout, or terminal
 result API. Plugin authors that need those properties must own the corresponding
-state and policy. Restarting the local host also rebuilds its per-workdir Studio
+state and policy. Restarting the Studio Host also rebuilds its per-workdir Studio
 instances.
 
 The former run-controller, due-run scheduler, and shared-wiki design documents
 describe the removed pull model. They are retained only in
 [Studio history](../history/studio/) and do not define present behavior.
-

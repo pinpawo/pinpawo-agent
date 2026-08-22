@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   dispatchLocalServerMessage,
   type LocalServerPeerHandlers,
+  type LocalServerTransportHandlers,
 } from './localServerMessageDispatcher';
 import type { LocalAgentServerMessage } from './localAgentProtocol';
 import type { LocalServerPeer } from './localServerPeer';
@@ -201,6 +202,37 @@ test('local server dispatcher routes typed client messages and pong', async () =
       '[local-server] ignored malformed client message type=unknown requestId=unknown',
     ]);
   });
+});
+
+test('local server dispatcher reports unsupported messages without silently dropping them', async () => {
+  const sent: LocalAgentServerMessage[] = [];
+  const warnings: string[] = [];
+  const peer = createFakePeer(sent);
+  const handlers: LocalServerTransportHandlers = {
+    logWarn: (message) => warnings.push(message),
+  };
+
+  await dispatchLocalServerMessage(peer, JSON.stringify({
+    type: 'new_session',
+    userId: 'legacy-client',
+  }), handlers);
+  await dispatchLocalServerMessage(peer, JSON.stringify({
+    type: 'run.interrupt',
+    requestId: 'interrupt-1',
+  }), handlers);
+
+  assert.deepEqual(warnings, [
+    '[local-server] ignored unsupported client message type=new_session because it has no requestId',
+  ]);
+  assert.deepEqual(sent, [{
+    type: 'event',
+    requestId: 'interrupt-1',
+    event: {
+      type: 'error',
+      requestId: 'interrupt-1',
+      message: 'Message type "run.interrupt" is not supported by this Host transport.',
+    },
+  }]);
 });
 
 async function assertEventually(assertion: () => void) {

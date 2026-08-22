@@ -5,12 +5,15 @@
     "moduleResolution": "bundler",
     "baseUrl": ".",
     "paths": {
-      "@pinpawo/pet-agent": ["../pet-agent/src/index.ts"]
+      "@pinpawo/agent-session": ["../agent-session/src/index.ts"],
+      "@pinpawo/pet-agent": ["../pet-agent/src/index.ts"],
+      "pinpawo/host-runtime": ["../../services/local-agent/src/hostRuntime.ts"],
+      "pinpawo/local-server-transport": ["../../services/local-agent/src/localServerTransportApi.ts"]
     },
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src"]
+  "include": ["src", "scripts", "tsup.config.ts"]
 }

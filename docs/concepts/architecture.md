@@ -63,7 +63,7 @@ layer. See the accepted
 | Contracts | `packages/agent-contracts/` | Shared request, event, review, and run contracts. |
 | Orchestration | `packages/pet-agent/` | Agent graph, Capability planning, lane isolation, review integration, and artifact references. |
 | Session state | `packages/agent-session/` | Client-neutral session model, reducers, versioned snapshots, and parsers. |
-| Collaboration | `packages/studio/` | Studio dispatch, per-Pet queue, gates, and plugin events independent of local transport details. |
+| Collaboration | `packages/studio/` | Studio Host, dispatch, per-Pet queue, gates, transports, and the standalone process entry. |
 | Local host | `services/local-agent/` | CLI, configuration, runtime composition, and local transports. |
 | Terminal UI | `services/tui/` | OpenTUI client and packaged distribution. |
 | Tool integrations | `toolkits/` | Browser and Studio Kanban Toolkits, including their runtime lifecycles. |
@@ -104,7 +104,7 @@ state from a transient tool-event stream.
 | Interactive local agent | A person works directly in the terminal. | `pinpawo tui` |
 | Local server | Another local UI or app needs an HTTP/WebSocket host. | `pinpawo server` |
 | JSONL stdio | A process integration needs one transport-safe peer. | `pinpawo server --stdio` |
-| Studio | A request needs planner-led work across multiple pets. | `pinpawo server --mode studio` |
+| Studio | A request needs planner-led work across multiple pets. | `pinpawo-studio --stdio` or `pinpawo-studio --port <port>` |
 
 ## Extension model
 

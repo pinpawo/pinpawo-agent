@@ -169,7 +169,7 @@ pet 之间并行,单个 pet 内串行。队列只在内存里(§7 开放问题 1
 | `waiting` | 等外部输入 | 关 | 只有人 |
 | `blocked` | 失败 / pet 声明干不了 | 关 | 只有人 |
 
-判据是 checkpoint 上还有没有待跑节点(`next` / `tasks`),与 chat 路径同源。
+判据是 Studio 自己的 checkpoint 上还有没有待跑节点(`next` / `tasks`)。
 
 四种而非两种,是因为门关着的原因分两类,而这个区别对**看的人**是必要的:
 `busy` 的队列在动,等就行;`waiting` / `blocked` 的队列永远不会自己动。
@@ -183,16 +183,21 @@ pet 之间并行,单个 pet 内串行。队列只在内存里(§7 开放问题 1
 
 ### 3.3 闸门的两条边界
 
-**没有控制面。** 闸门是一面镜子,不是开关 —— studio 只读,不能操作 pet。
-人要解开卡住的 pet,走 chat 路径直接跟它对话(两条路共用 checkpointer),
-与 studio 无关。
+**Studio core 没有控制面。** 闸门是一面镜子,不是开关 —— studio 只读,不能
+操作 pet。runtime 可以进入 `waiting`:LangGraph 已把 interrupt 和 continuation
+持久化到 checkpoint,它不依赖另一个 Chat Host 的进程内状态。
+
+当前 local Studio transport 没有内建 review UI,但 Pet runtime 仍声明
+`humanReview: true`。没有控制插件时 waiting 可以一直卡住；独立 Studio plugin / Host
+adapter 可以读取 pending action,向用户交互层发 event,再恢复同一 thread。这个机制不把
+review 概念引入 Studio core。
 
 **读不到判据时一律放行。** 没有 checkpointer、拿不到 threadId、`getState`
 抛错 —— 三种情况都开门。关着的代价是**这个 pet 永久锁死**(没有控制面能解开
 它),开着的代价只是退回"撞车可能并发"。宁可退化,不可锁死。
 
-> 推论:**没有 checkpointer 的 studio 等于没有队列保护。** `chatCheckpointer`
-> 在宿主侧是可选的(#613),没配时闸门恒为 `open`,`waiting` / `blocked` 都
+> 推论:**没有 checkpointer 的 studio 等于没有队列保护。** Studio-owned
+> checkpointer 在宿主侧是可选的(#613),没配时闸门恒为 `open`,`waiting` / `blocked` 都
 > 不会出现。要队列真正起作用,必须配 checkpointer。
 
 ### 3.4 HITL 对 studio 透明
@@ -202,6 +207,9 @@ Studio 不认识 review。**等人只是执行的一种形态**,与"在跑模型
 
 review 是 pet 与人之间的事:人已经在跟 pet 打交道了,再让 studio 知道一遍是
 多余的一层。
+
+这是 core 的领域边界。展示、鉴权、resume 与重启后的 pending-action 索引属于可选的
+交互插件/Host adapter；它们可以独立演进，不能反向改变 Studio core 的 review policy。
 
 > 类比:企业管理中,如果每个细节都要闭环上报,管理成本会压垮组织。不是所有
 > 闭环都需要汇总 —— 需要汇总时 pet 主动报,或者从插件的领域数据里去发现。
@@ -293,40 +301,43 @@ event 推进自己的状态。总线先于需求存在,不必为它编造用例�
 ## 5. 写一个插件
 
 ```ts
-type StudioPlugin = AgentToolkit & {
-  studio?: {
-    start: (context: StudioPluginContext) => Promise<void> | void;
-    stop?: () => Promise<void> | void;
-  };
+type StudioPlugin = {
+  name: string;
+  toolkits: readonly AgentToolkit[];
+  start: (context: StudioPluginContext) => Promise<void> | void;
+  stop?: () => Promise<void> | void;
 };
 ```
 
-现有 toolkit 变成插件只需补一个字段,不必重写:
+Plugin 可以明确地定义零个或多个 Toolkit:
 
 ```ts
 const plugin: StudioPlugin = {
-  ...existingToolkit,                  // 原样复用
-  studio: { start: (ctx) => { ... } },  // 只补这一段
+  name: 'kanban',
+  toolkits: [kanbanToolkit],
+  start: (ctx) => { ... },
 };
 ```
 
-复用 `AgentToolkit` 而不是另立一套接口,是因为 `AgentToolkit` 已经有
-`runtime.start` / `runtime.stop`;并排放第二套生命周期只会让两者不同步。
+Plugin 高于 Toolkit，但本身不是 Toolkit。它定义的 Toolkit 先进入 Host 的统一
+inventory，在 Agent 侧完成 availability、provenance、Runtime 初始化与
+`Capability.uses` 选择。Capability 也属于 Agent；Plugin 与 Studio 都不注册或附带
+Capability。
 
 插件按配置顺序 `start`,逆序 `stop` —— 后启动的可能依赖先启动的。`start`
 抛错会让 `createStudio` 失败:一个没起来的驱动器意味着这块 studio 不会派活,
 静默吞掉会变成"提交了但什么都没发生"。
 
-### 5.1 两副面孔
+### 5.1 Plugin 与 Toolkit 的边界
 
 | 身份 | 插在哪 | 做什么 |
 | --- | --- | --- |
-| toolkit | pet | 让 pet 读写它的领域数据 |
-| 插件 | studio | 委托 dispatch、发 event |
+| Toolkit | Agent/Pet | 让 Pet 读写 Plugin 的领域数据 |
+| Plugin | Studio | 委托 dispatch、发 event，并定义 Toolkit |
 
-两者都可选:`studio` 省略时它是普通 toolkit;`tools` 为空时它是纯驱动方。
+`toolkits` 可以为空，此时它是纯驱动 Plugin；但 Plugin lifecycle 不是可选面。
 
-**闭环由这两副面孔自然形成:**
+**闭环由两个分型的对象协作形成:**
 
 ```text
 pet ──调用──> toolkit ──> 插件内部状态 ──event──> studio ──> 其他插件
@@ -350,11 +361,11 @@ event、发什么形状,由插件决定。所以:
 
 它是一个**和 kanban 平级的普通插件**,形态由契约直接决定:
 
-1. **`AgentToolkit` 面** —— 给 pet 一组工具排期,例如
+1. **Plugin 定义的 Toolkit** —— 给 pet 一组工具排期,例如
    `schedule_add({ cron, request, petId })` / `schedule_list` / `schedule_cancel`。
    与 kanban 同理,工具从 `ToolRuntime.context.executionScope.threadId` 读取当前
    invocation identity，pet 不需要转抄任何 ID。
-2. **`studio.start(context)` 面** —— 起自己的定时器。到点直接
+2. **`start(context)` 生命周期** —— 起自己的定时器。到点直接
    `context.dispatch({ petId, request })`,派完即忘;不等结果,不判定成败。
 3. **自己的存储** —— 排期表是插件私有状态,由插件持有并落盘。studio 不知道
    "排期"这个词。
@@ -368,7 +379,7 @@ event、发什么形状,由插件决定。所以:
 
 未来若需要对外 HTTP 入口，它可以是一个插件：
 
-- `studio.start(context)` 里起服务器,收到请求就 `context.dispatch(...)`;
+- `start(context)` 里起服务器,收到请求就 `context.dispatch(...)`;
 - 派活的 `source` 因此是它的插件名,与 kanban、scheduler 一视同仁;
 - 要跟踪自己派出去那些活的进展,订阅 `context.onDispatchGate`。
 

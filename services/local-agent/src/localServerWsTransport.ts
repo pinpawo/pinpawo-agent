@@ -11,7 +11,7 @@ import {
   dispatchLocalServerMessage,
   runLocalServerPeerHandler,
   type LocalServerLogError,
-  type LocalServerPeerHandlers,
+  type LocalServerTransportHandlers,
 } from './localServerMessageDispatcher';
 import type { LocalServerPeer } from './localServerPeer';
 
@@ -39,7 +39,7 @@ export function createLocalServerWebSocketPeer(
 
 export function attachLocalServerWebSocketTransport(
   server: Server,
-  handlers: LocalServerPeerHandlers,
+  handlers: LocalServerTransportHandlers,
   options: LocalServerWsTransportOptions,
 ) {
   const log = handlers.log ?? console.log;
@@ -69,15 +69,17 @@ export function attachLocalServerWebSocketTransport(
 
   wss.on('connection', (ws) => {
     const peer = createLocalServerWebSocketPeer(ws, logError);
-    log('[local-server] TUI client connected');
+    log('[local-server] local client connected');
 
     ws.on('message', (data: Buffer | string) => {
       dispatchLocalServerMessage(peer, data, handlers, logError, logWarn);
     });
 
     ws.on('close', () => {
-      runLocalServerPeerHandler('handleClose', () => handlers.onClose(peer), logError);
-      log('[local-server] TUI client disconnected');
+      if (handlers.onClose) {
+        runLocalServerPeerHandler('handleClose', () => handlers.onClose!(peer), logError);
+      }
+      log('[local-server] local client disconnected');
     });
 
     ws.on('error', (err) => {

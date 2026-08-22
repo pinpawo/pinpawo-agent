@@ -20,7 +20,6 @@ function pet(petId: string, overrides: Partial<PetLocalConfig> = {}): PetLocalCo
   return {
     petId,
     name: `Pet ${petId}`,
-    capabilities: [],
     ...overrides,
   };
 }
@@ -32,7 +31,6 @@ test('parsePetLocalConfig accepts minimal valid config', () => {
   );
   assert.equal(config.petId, 'p1');
   assert.equal(config.name, 'Pet 1');
-  assert.deepEqual(config.capabilities, []);
   assert.equal(config.serverBinding, undefined);
 });
 
@@ -45,14 +43,12 @@ test('parsePetLocalConfig keeps optional fields when provided', () => {
       role: '脚本撰写',
       serviceSummary: '短视频脚本',
       modelProfileId: 'qwen-max',
-      capabilities: ['script-creator', 'wiki-reader'],
       serverBinding: { petId: 'srv-001' },
     },
     'test-source',
   );
   assert.equal(config.personality, '创意丰富');
   assert.equal(config.modelProfileId, 'qwen-max');
-  assert.deepEqual(config.capabilities, ['script-creator', 'wiki-reader']);
   assert.deepEqual(config.serverBinding, { petId: 'srv-001' });
 });
 
@@ -71,14 +67,34 @@ test('parsePetLocalConfig rejects bad types in optional fields', () => {
     () => parsePet({ petId: 'p1', name: 'X', personality: '' }, 'src'),
     /"personality" must be a non-empty string/,
   );
+});
+
+test('parsePetLocalConfig rejects retired capability name lists', () => {
   assert.throws(
-    () => parsePet({ petId: 'p1', name: 'X', capabilities: 'not-an-array' }, 'src'),
-    /"capabilities" must be a string\[\]/,
+    () => parsePet({ petId: 'p1', name: 'X', capabilities: ['inspect'] }, 'src'),
+    /"capabilities" was replaced by the conventional pets\/<petId>\/capabilities directory/,
   );
-  assert.throws(
-    () => parsePet({ petId: 'p1', name: 'X', capabilities: ['ok', 123] }, 'src'),
-    /"capabilities" must be a string\[\]/,
-  );
+});
+
+test('parsePetLocalConfig requires petId to be a safe directory segment', () => {
+  for (const petId of [
+    '.',
+    '..',
+    '../escape',
+    'nested/pet',
+    'nested\\pet',
+    'D:',
+    'a:b',
+    'CON',
+    'com1.txt',
+    'trailing.',
+    'trailing ',
+  ]) {
+    assert.throws(
+      () => parsePet({ petId, name: 'X' }, 'src'),
+      /"petId" must be a safe path segment/,
+    );
+  }
 });
 
 test('parsePetLocalConfig rejects the retired raw model override', () => {
@@ -193,6 +209,20 @@ test('parseStudioLocalConfig rejects malformed plugin entries', () => {
     () => parseStudio({ ...base, plugins: [{ id: 'kanban', options: [] }] }, 'src'),
     /"plugins\[0\]\.options" must be an object when present/,
   );
+});
+
+test('parseStudioLocalConfig allows multiple instances of one Plugin id', () => {
+  const cfg = parseStudio({
+    studioId: 's1',
+    entryPetId: 'p1',
+    pets: ['p1'],
+    plugins: [
+      { id: 'scheduler', options: { instance: 'morning' } },
+      { id: 'scheduler', options: { instance: 'evening' } },
+    ],
+  }, 'src');
+
+  assert.deepEqual(cfg.plugins?.map(({ id }) => id), ['scheduler', 'scheduler']);
 });
 
 test('resolveStudio joins pet configs in pets order', () => {

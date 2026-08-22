@@ -41,14 +41,63 @@ import { getConfig } from './config';
 import { loadAgentContext } from './contextLoader';
 import { createBashToolkit, createGitToolkit } from './toolkits/local';
 import { HostToolkitCoordinator } from './toolkits/hostToolkitCoordinator';
-import type { HostToolkitInventoryStore } from './toolkits/toolkitInventory';
+import type {
+  HostToolkitInventoryStore,
+  ToolkitDefinitionSource,
+} from './toolkits/toolkitInventory';
 import { FileSaver } from './fileSaver';
 
 export type HostCapabilityAssemblyOptions = {
   runtimeConfig: LocalAgentRuntimeConfig;
   /** Distinguishes plugin toolkit source label for diagnostics. */
   sourceId: string;
+  /** Host-owned checkpoint root. Independent hosts must not share a writer root. */
+  checkpointPath?: string;
+  /** Chat loads the global user registry; per-Pet hosts may own stricter sources. */
+  loadUserCapabilities?: boolean;
 };
+
+export type HostCapabilityAssemblyInitOptions = {
+  /** Additional Toolkit definitions supplied by the concrete Host. */
+  toolkitSources?: readonly ToolkitDefinitionSource[];
+};
+
+type NormalizedHostCapabilityAssemblyInitOptions = Readonly<{
+  toolkitSources: readonly ToolkitDefinitionSource[];
+}>;
+
+function normalizeInitOptions(
+  options: HostCapabilityAssemblyInitOptions,
+): NormalizedHostCapabilityAssemblyInitOptions {
+  return Object.freeze({
+    toolkitSources: Object.freeze([...(options.toolkitSources ?? [])]),
+  });
+}
+
+function sameToolkitSource(
+  left: ToolkitDefinitionSource,
+  right: ToolkitDefinitionSource,
+): boolean {
+  return left.id === right.id
+    && left.kind === right.kind
+    && left.definitions.length === right.definitions.length
+    && left.definitions.every((definition, index) => definition === right.definitions[index]);
+}
+
+function assertInitOptionsCompatible(
+  initialized: NormalizedHostCapabilityAssemblyInitOptions,
+  requested: NormalizedHostCapabilityAssemblyInitOptions,
+): void {
+  const missingToolkitSource = requested.toolkitSources.find((source) => (
+    !initialized.toolkitSources.some((candidate) => sameToolkitSource(candidate, source))
+  ));
+  if (!missingToolkitSource) return;
+
+  throw new Error(
+    `HostCapabilityAssembly initialization already started without Toolkit source "${missingToolkitSource.id}". `
+    + 'All Host extension definitions must be supplied on the first init() call.',
+  );
+}
 
 export class HostCapabilityAssembly {
   private readonly runtimeConfig: LocalAgentRuntimeConfig;
@@ -59,7 +108,11 @@ export class HostCapabilityAssembly {
   private readonly toolkitCoordinator = new HostToolkitCoordinator();
   private readonly hostBuiltInToolkits: readonly AgentToolkit[];
   private readonly capabilityRegistry: LocalAgentCapabilityRegistry;
-  private readonly chatCheckpointer: FileSaver;
+  private readonly checkpointer: FileSaver;
+  private writerLeaseHeld = false;
+  private initialized = false;
+  private initPromise: Promise<void> | null = null;
+  private initOptions: NormalizedHostCapabilityAssemblyInitOptions | null = null;
   private legacyStateNoticeReported = false;
 
   constructor(options: HostCapabilityAssemblyOptions) {
@@ -75,15 +128,65 @@ export class HostCapabilityAssembly {
     ];
     this.capabilityRegistry = new LocalAgentCapabilityRegistry({
       capabilityArtifactRoot: this.runtimeConfig.capabilityArtifactRoot,
+      ...(options.loadUserCapabilities === false
+        ? { loadUserCapabilities: async () => [] }
+        : {}),
       createDefaultCapabilities: () => [
         ...createCoreLocalCapabilities(),
         ...(browserSelected ? [createBrowserCapability()] : []),
       ],
     });
-    this.chatCheckpointer = new FileSaver(this.runtimeConfig.checkpointPath);
+    this.checkpointer = new FileSaver(
+      options.checkpointPath ?? this.runtimeConfig.checkpointPath,
+    );
   }
 
-  async init() {
+  async init(options: HostCapabilityAssemblyInitOptions = {}) {
+    const requestedOptions = normalizeInitOptions(options);
+    if (this.initOptions) {
+      assertInitOptionsCompatible(this.initOptions, requestedOptions);
+    } else {
+      this.initOptions = requestedOptions;
+    }
+    if (this.initialized) return;
+    if (this.initPromise) return this.initPromise;
+    const pending = this.initializeWithWriterLease(this.initOptions);
+    this.initPromise = pending;
+    try {
+      await pending;
+      this.initialized = true;
+    } catch (error) {
+      this.initOptions = null;
+      throw error;
+    } finally {
+      if (this.initPromise === pending) this.initPromise = null;
+    }
+  }
+
+  /**
+   * Claim this Host's checkpoint root before resolving executable Host
+   * extensions. `init()` also calls this method, so Chat callers keep the
+   * existing one-step lifecycle while Studio can establish ownership earlier.
+   */
+  acquireWriterLease(): void {
+    if (this.writerLeaseHeld) return;
+    this.checkpointer.acquireHostWriterLease(this.sourceId);
+    this.writerLeaseHeld = true;
+  }
+
+  private async initializeWithWriterLease(options: NormalizedHostCapabilityAssemblyInitOptions) {
+    this.acquireWriterLease();
+    try {
+      await this.checkpointer.runHostStartupMaintenance();
+      await this.initialize(options);
+    } catch (error) {
+      this.writerLeaseHeld = false;
+      this.checkpointer.releaseHostWriterLease();
+      throw error;
+    }
+  }
+
+  private async initialize(options: NormalizedHostCapabilityAssemblyInitOptions) {
     if (!this.legacyStateNoticeReported) {
       this.legacyStateNoticeReported = true;
       const legacyStatePaths = findLegacyLocalAgentState(this.runtimeConfig);
@@ -98,6 +201,7 @@ export class HostCapabilityAssembly {
     this.modelProfiles = buildLocalModelProfileRegistry();
     await this.toolkitCoordinator.initialize([
       ...toolkitSources,
+      ...options.toolkitSources,
       {
         id: this.sourceId,
         kind: 'host_builtin',
@@ -113,8 +217,13 @@ export class HostCapabilityAssembly {
     return this.runtimeConfig;
   }
 
+  getCheckpointer(): FileSaver {
+    return this.checkpointer;
+  }
+
+  /** Chat compatibility name; shared consumers should use getCheckpointer(). */
   getChatCheckpointer(): FileSaver {
-    return this.chatCheckpointer;
+    return this.getCheckpointer();
   }
 
   getToolkitRuntimeManager(): ToolkitRuntimeManager {
@@ -165,6 +274,15 @@ export class HostCapabilityAssembly {
   }
 
   async shutdown(): Promise<void> {
-    await this.toolkitCoordinator.shutdown();
+    try {
+      await this.toolkitCoordinator.shutdown();
+    } finally {
+      this.initialized = false;
+      this.initOptions = null;
+      if (this.writerLeaseHeld) {
+        this.writerLeaseHeld = false;
+        this.checkpointer.releaseHostWriterLease();
+      }
+    }
   }
 }

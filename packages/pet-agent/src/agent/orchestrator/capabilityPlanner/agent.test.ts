@@ -747,7 +747,7 @@ test('Planner accepts consecutive tasks from one Capability when the model keeps
   }]);
 });
 
-test('Planner closes discovery after two capability_search rounds', async (t) => {
+test('Planner reports closed discovery after two rounds while keeping search auto', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -815,9 +815,9 @@ test('Planner closes discovery after two capability_search rounds', async (t) =>
   ), true);
   assert.equal(model.boundToolNameHistory[2]?.includes(
     CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
-  ), false);
+  ), true);
   assert.equal(model.boundToolOptions[1]?.tool_choice, undefined);
-  assert.equal(model.boundToolOptions[2]?.tool_choice, 'required');
+  assert.equal(model.boundToolOptions[2]?.tool_choice, undefined);
 });
 
 test('Planner receives verified General before discovery starts', async (t) => {
@@ -1168,7 +1168,7 @@ test('Planner returns to Answer after one capability_search without general', as
   });
 });
 
-test('Planner does not retry ordinary text after the second search round closes', async (t) => {
+test('Planner returns a stable limit result for every search after max rounds', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -1189,25 +1189,70 @@ test('Planner does not retry ordinary text after the second search round closes'
       args: { terms: ['license review'] },
     }],
   }, {
-    content: 'The general Capability can handle this request.',
+    toolCalls: [{
+      id: 'search-telecom-over-limit-1',
+      name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+      args: { terms: ['license'] },
+    }],
+  }, {
+    toolCalls: [{
+      id: 'search-telecom-over-limit-2',
+      name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+      args: { terms: ['review'] },
+    }],
+  }, {
+    structuredOutput: {
+      kind: 'plan',
+      args: {
+        tasks: [{
+          capability: 'general',
+          task: 'Review the telecom license requirements with the available Capability.',
+        }],
+      },
+    },
   }]);
 
   const result = await createCapabilityPlannerAgent({ model }).invoke(
     plannerInput(workspace),
   );
 
-  assert.ok('plannerStatus' in result);
-  if (!('plannerStatus' in result)) assert.fail('expected an incomplete Planner result');
-  assert.equal(result.plannerStatus, 'incomplete');
-  assert.equal(model.invocations.length, 3);
+  assert.deepEqual(commitOnly(result), {
+    action: 'execute_plan',
+    tasks: [{
+      capability: 'general',
+      task: 'Review the telecom license requirements with the available Capability.',
+    }],
+  });
+  assert.equal(model.invocations.length, 5);
   assert.match(
     readMessageText(model.invocations[2]?.[0] as BaseMessage),
     /capability_search 当前状态：CLOSED；已使用 2 轮；剩余 0 轮。/,
   );
-  assert.equal(model.boundToolNameHistory[2]?.includes(
-    CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
-  ), false);
-  assert.equal(model.boundToolOptions[2]?.tool_choice, 'required');
+  const searchResults = [...new Map(
+    model.invocations.flat().filter(
+      (message): message is ToolMessage => ToolMessage.isInstance(message)
+        && message.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+    ).map((message) => [message.tool_call_id, message]),
+  ).values()];
+  assert.equal(searchResults.length, 4);
+  assert.equal(JSON.parse(String(searchResults[0]?.content)).ok, true);
+  assert.equal(JSON.parse(String(searchResults[1]?.content)).ok, true);
+  for (const [offset, message] of searchResults.slice(2).entries()) {
+    const payload = JSON.parse(String(message.content)) as {
+      ok?: boolean;
+      error?: { code?: string; message?: string };
+      exploration?: { status?: string; roundsUsed?: number; remainingRounds?: number };
+    };
+    assert.equal(payload.ok, false);
+    assert.equal(payload.error?.code, 'capability_search_round_limit_exceeded');
+    assert.match(payload.error?.message ?? '', /No search was executed/);
+    assert.equal(payload.exploration?.status, 'closed');
+    assert.equal(payload.exploration?.roundsUsed, offset + 3);
+    assert.equal(payload.exploration?.remainingRounds, 0);
+  }
+  assert.ok(model.boundToolNameHistory.every((toolNames) =>
+    toolNames.includes(CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME)));
+  assert.ok(model.boundToolOptions.every((options) => options?.tool_choice === undefined));
 });
 
 test('a submitted plan commits once without a final ordinary-text reply', async (t) => {
@@ -1741,7 +1786,7 @@ test('Planner reports an incomplete result when it exits without a commit', asyn
     && message.name === 'report_unavailable'), false);
 });
 
-test('Planner does not invent General when closed exploration ends without a commit', async (t) => {
+test('Planner keeps search auto when closed exploration ends without a commit', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -1771,8 +1816,8 @@ test('Planner does not invent General when closed exploration ends without a com
   assert.equal(model.invocations.length, 3);
   assert.equal(model.boundToolNameHistory[2]?.includes(
     CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
-  ), false);
-  assert.equal(model.boundToolOptions[2]?.tool_choice, 'required');
+  ), true);
+  assert.equal(model.boundToolOptions[2]?.tool_choice, undefined);
   assert.equal(result.messageUpdates?.some((message) =>
     ToolMessage.isInstance(message)
     && message.name === 'submit_plan'

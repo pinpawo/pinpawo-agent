@@ -321,18 +321,6 @@ function currentPlannerInput(state: Partial<PlannerInvocationState>) {
   return state.currentInput;
 }
 
-function terminalToolNamesForMode(input: CapabilityPlannerInput) {
-  return input.mode === 'entry'
-    ? [SUBMIT_PLAN_TOOL_NAME, REQUEST_USER_INPUT_TOOL_NAME, REPORT_UNAVAILABLE_TOOL_NAME]
-    : [
-        CONTINUE_CURRENT_TOOL_NAME,
-        ADVANCE_PLAN_TOOL_NAME,
-        COMPLETE_GOAL_TOOL_NAME,
-        REQUEST_USER_INPUT_TOOL_NAME,
-        REPORT_UNAVAILABLE_TOOL_NAME,
-      ];
-}
-
 type CapabilityExplorationState = {
   status: 'open' | 'closed';
   roundsUsed: number;
@@ -366,7 +354,19 @@ function capabilityExplorationState(
   };
 }
 
-function closeCapabilityExploration(
+function capabilitySearchLimitExceeded(
+  exploration: CapabilityExplorationState,
+) {
+  return JSON.stringify({
+    ok: false,
+    error: {
+      code: 'capability_search_round_limit_exceeded',
+      message: `Capability search limit exceeded after ${exploration.maxRounds.toString()} rounds. No search was executed and no new Capability documents were disclosed. Finish planning from the Capability documents and facts already available.`,
+    },
+  });
+}
+
+function annotateCapabilitySearchResult(
   message: ToolMessage,
   state: Partial<PlannerInvocationState> & { messages?: BaseMessage[] },
   maxSearchRounds: number,
@@ -443,7 +443,6 @@ function createPlannerMiddleware(maxSearchRounds: number) {
         });
       }
       const exploration = capabilityExplorationState(request.state, maxSearchRounds);
-      const terminalToolNames = new Set(terminalToolNamesForMode(input));
       return handler({
         ...request,
         systemMessage: new SystemMessage(
@@ -453,14 +452,6 @@ function createPlannerMiddleware(maxSearchRounds: number) {
             exploration,
           ),
         ),
-        ...(exploration.status === 'closed'
-          ? {
-              tools: request.tools.filter((plannerTool) =>
-                typeof plannerTool.name === 'string'
-                && terminalToolNames.has(plannerTool.name)),
-              toolChoice: 'required' as const,
-            }
-          : {}),
       });
     },
     wrapToolCall: async (request, handler) => {
@@ -468,7 +459,7 @@ function createPlannerMiddleware(maxSearchRounds: number) {
       const result = await handler(request);
       if (ToolMessage.isInstance(result)
         && request.toolCall.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME) {
-        return closeCapabilityExploration(result, request.state, maxSearchRounds);
+        return annotateCapabilitySearchResult(result, request.state, maxSearchRounds);
       }
       if (!ToolMessage.isInstance(result)
         || ![
@@ -509,7 +500,7 @@ function createPlannerMiddleware(maxSearchRounds: number) {
 export function createCapabilityPlannerAgent(params: {
   model: BaseChatModel;
   timeoutMs?: number;
-  /** Maximum model turns that may invoke capability_search. Defaults to 2. */
+  /** Maximum model turns that may execute capability_search discovery. Defaults to 2. */
   maxSearchRounds?: number;
   registryBackend?: CapabilityRegistryBackend;
   maxDocumentReadBytes?: number;
@@ -544,9 +535,15 @@ export function createCapabilityPlannerAgent(params: {
   const terminalTools = createPlannerTerminalTools();
   const additionalTools = params.additionalTools ?? [];
   const capabilitySearchTool = createCapabilityPlannerSearchTool<PlannerInvocationState>(
-    (terms, runtime) => explorerForInput(
-      currentPlannerInput(runtime.state),
-    ).search(terms, runtime.signal),
+    (terms, runtime) => {
+      const exploration = capabilityExplorationState(runtime.state, maxSearchRounds);
+      if (exploration.roundsUsed > exploration.maxRounds) {
+        return Promise.resolve(capabilitySearchLimitExceeded(exploration));
+      }
+      return explorerForInput(
+        currentPlannerInput(runtime.state),
+      ).search(terms, runtime.signal);
+    },
   );
   const middleware = createPlannerMiddleware(maxSearchRounds);
   const agent = createAgent({

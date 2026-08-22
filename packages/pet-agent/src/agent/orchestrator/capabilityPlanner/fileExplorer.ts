@@ -14,7 +14,7 @@ import {
 } from './workspaceReader';
 
 export const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME = 'capability_search';
-const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_DESCRIPTION = 'Search Capability documents by literal terms. Each match contains the complete CAPABILITY.md document; the result also reports the current exploration state.';
+const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_DESCRIPTION = 'Progressively disclose specific Capability documents by literal terms. Each match contains the complete CAPABILITY.md document; the result also reports remaining search rounds and exact Capability names available for a later query.';
 
 const DEFAULT_MAX_DOCUMENT_READ_BYTES = 64 * 1024;
 const MAX_CAPABILITY_SEARCH_RESULTS = 50;

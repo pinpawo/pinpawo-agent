@@ -401,9 +401,6 @@ function closeCapabilityExploration(
         : [];
     }),
   )];
-  const reason = payload.ok === true
-    ? (data?.matches?.length ? 'candidates_disclosed' : 'no_match')
-    : 'search_error';
   const defaultCandidate = state.defaultCapability?.capabilityName ?? null;
   const availableSpecificCandidates = input.workspace.capabilityNames.filter(
     (capabilityName) => capabilityName !== defaultCandidate,
@@ -417,37 +414,17 @@ function closeCapabilityExploration(
     && exploration.status === 'open'
     ? discoverableSpecificCandidates.slice(0, MAX_CAPABILITY_DISCOVERY_HINTS)
     : [];
-  const uncheckedSpecificCandidatesRemain = nextSearchCandidates.length > 0;
   message.content = JSON.stringify({
     ...payload,
     exploration: {
       status: exploration.status,
-      reason,
       roundsUsed: exploration.roundsUsed,
-      maxRounds: exploration.maxRounds,
       remainingRounds,
       specificCandidates,
       nextSearchCandidates,
       nextSearchCandidatesComplete: nextSearchCandidates.length
         === discoverableSpecificCandidates.length,
       defaultCandidate,
-      defaultCandidateRole: defaultCandidate
-        ? (specificCandidates.length > 0
-            ? 'fallback_only'
-            : uncheckedSpecificCandidatesRemain
-              ? 'deferred_while_specific_candidates_remain_unchecked'
-              : 'eligible_default')
-        : 'absent',
-      searchAvailable: exploration.status === 'open',
-      mustStopSearching: exploration.status === 'closed',
-      terminalTools: terminalToolNamesForMode(input),
-      nextAction: exploration.status === 'closed'
-        ? 'invoke_one_terminal_tool_now'
-        : specificCandidates.length > 0
-          ? 'evaluate_disclosed_candidates_then_commit_if_sufficient'
-          : uncheckedSpecificCandidatesRemain
-            ? 'search_exact_candidate_name_before_default'
-            : 'commit_with_default_or_unavailable',
     },
   });
   return message;

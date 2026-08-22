@@ -131,7 +131,9 @@ function plannerDiagnostics(result: CapabilityPlannerResult) {
         data?: { matches?: Array<{ path?: unknown }> };
         exploration?: {
           specificCandidates?: unknown;
-          defaultCandidateRole?: unknown;
+          defaultCandidate?: unknown;
+          status?: unknown;
+          remainingRounds?: unknown;
         };
       };
       return [{
@@ -144,8 +146,14 @@ function plannerDiagnostics(result: CapabilityPlannerResult) {
               (candidate): candidate is string => typeof candidate === 'string',
             )
           : [],
-        defaultCandidateRole: typeof payload.exploration?.defaultCandidateRole === 'string'
-          ? payload.exploration.defaultCandidateRole
+        defaultCandidate: typeof payload.exploration?.defaultCandidate === 'string'
+          ? payload.exploration.defaultCandidate
+          : null,
+        status: typeof payload.exploration?.status === 'string'
+          ? payload.exploration.status
+          : null,
+        remainingRounds: typeof payload.exploration?.remainingRounds === 'number'
+          ? payload.exploration.remainingRounds
           : null,
       }];
     } catch {
@@ -153,7 +161,9 @@ function plannerDiagnostics(result: CapabilityPlannerResult) {
         toolCallId: message.tool_call_id,
         matchedPaths: [],
         specificCandidates: [],
-        defaultCandidateRole: null,
+        defaultCandidate: null,
+        status: null,
+        remainingRounds: null,
       }];
     }
   }) ?? [];

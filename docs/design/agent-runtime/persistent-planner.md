@@ -547,16 +547,16 @@ request_user_input(question)
 report_unavailable()
 ```
 
-决策语义只存在于 Planner system prompt：它定义何时选择每个 action、
-Capability 优先级和计划改写边界。Terminal tool description 只说明该工具
-提交的 action 和参数形状，不重复决策条件。`capability_search` 返回只提供
-本次披露的事实、剩余轮次、搜索是否已关闭和下一个控制动作；
-不再嵌入另一份 Capability 选择或计划改写政策。
+Planner system prompt 以目标和上下文为中心：说明 Planner 要形成的产物、
+各类输入代表什么，以及可执行计划应达到的质量目标；不提供 Capability 搜索、
+action 选择或计划改写的条件树。Terminal tool description 只说明提交的 action
+和参数形状。`capability_search` 返回只提供本次披露的候选与轮次事实，不提供
+`nextAction`、候选优先级或另一份决策政策。
 
 Planner system message 中的动态结构也保持单一职责：`<default_capability>`
 只携带默认 Capability 的名称和完整文档，不再重复 role、priority、trust 或
 registry path。搜索状态是 system prompt 末尾的一行可信控制事实，不使用 XML；
-OPEN/CLOSED 的解释与动作规则仍只存在于 system prompt 正文。
+实际工具绑定决定 capability_search 是否可用。
 
 成功调用 terminal tool 后应直接形成结构化 commit；不要再要求模型用普通文本确认，也
 不要从普通 AI text 推导 fallback result。

@@ -614,11 +614,11 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
   const searchPayload = JSON.parse(String(searchResult.content)) as {
     exploration?: {
       specificCandidates?: string[];
-      defaultCandidateRole?: string;
+      defaultCandidate?: string;
     };
   };
   assert.deepEqual(searchPayload.exploration?.specificCandidates, ['explore']);
-  assert.equal(searchPayload.exploration?.defaultCandidateRole, 'fallback_only');
+  assert.equal(searchPayload.exploration?.defaultCandidate, 'general');
   assert.deepEqual(commitOnly(result), {
     action: 'execute_plan',
     tasks: [{
@@ -803,17 +803,13 @@ test('Planner closes discovery after two capability_search rounds', async (t) =>
   assert.equal(searchResults.length, 2);
   assert.equal(searchResults.some((message) => message.status === 'error'), false);
   assert.match(String(searchResults[0]?.content), /"status":"open"/);
-  assert.match(String(searchResults[0]?.content), /"mustStopSearching":false/);
   assert.match(String(searchResults[0]?.content), /"roundsUsed":1/);
   assert.match(String(searchResults[0]?.content), /"remainingRounds":1/);
   assert.match(String(searchResults[1]?.content), /"status":"closed"/);
-  assert.match(String(searchResults[1]?.content), /"mustStopSearching":true/);
-  assert.match(String(searchResults[1]?.content), /"nextAction":"invoke_one_terminal_tool_now"/);
   assert.match(String(searchResults[1]?.content), /"roundsUsed":2/);
   assert.match(String(searchResults[1]?.content), /"remainingRounds":0/);
   assert.match(String(searchResults[0]?.content), /"defaultCandidate":"general"/);
   assert.match(String(searchResults[0]?.content), /"specificCandidates":\[\]/);
-  assert.match(String(searchResults[0]?.content), /"defaultCandidateRole":"eligible_default"/);
   assert.equal(model.boundToolNameHistory[1]?.includes(
     CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
   ), true);
@@ -927,29 +923,20 @@ test('a first-round miss discloses exact specific names before General becomes e
         && message.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
     ).map((message) => [message.tool_call_id, JSON.parse(String(message.content)) as {
       exploration?: {
+        status?: string;
+        remainingRounds?: number;
         specificCandidates?: string[];
         nextSearchCandidates?: string[];
-        defaultCandidateRole?: string;
-        nextAction?: string;
       };
     }]),
   ).values()];
   assert.deepEqual(searchResults[0]?.exploration?.specificCandidates, []);
   assert.deepEqual(searchResults[0]?.exploration?.nextSearchCandidates, ['explore']);
-  assert.equal(
-    searchResults[0]?.exploration?.defaultCandidateRole,
-    'deferred_while_specific_candidates_remain_unchecked',
-  );
-  assert.equal(
-    searchResults[0]?.exploration?.nextAction,
-    'search_exact_candidate_name_before_default',
-  );
+  assert.equal(searchResults[0]?.exploration?.status, 'open');
+  assert.equal(searchResults[0]?.exploration?.remainingRounds, 1);
   assert.deepEqual(searchResults[1]?.exploration?.specificCandidates, ['explore']);
-  assert.equal(searchResults[1]?.exploration?.defaultCandidateRole, 'fallback_only');
-  assert.equal(
-    searchResults[1]?.exploration?.nextAction,
-    'invoke_one_terminal_tool_now',
-  );
+  assert.equal(searchResults[1]?.exploration?.status, 'closed');
+  assert.equal(searchResults[1]?.exploration?.remainingRounds, 0);
 });
 
 test('a boundary literal match still requires positive unfinished-work scope', async (t) => {
@@ -993,21 +980,16 @@ test('a boundary literal match still requires positive unfinished-work scope', a
   assert.ok(ToolMessage.isInstance(searchResult));
   const payload = JSON.parse(String(searchResult.content)) as {
     exploration?: {
+      status?: string;
+      remainingRounds?: number;
       specificCandidates?: string[];
       nextSearchCandidates?: string[];
-      searchAvailable?: boolean;
-      mustStopSearching?: boolean;
-      nextAction?: string;
     };
   };
   assert.deepEqual(payload.exploration?.specificCandidates, ['explore']);
   assert.deepEqual(payload.exploration?.nextSearchCandidates, []);
-  assert.equal(payload.exploration?.searchAvailable, true);
-  assert.equal(payload.exploration?.mustStopSearching, false);
-  assert.equal(
-    payload.exploration?.nextAction,
-    'evaluate_disclosed_candidates_then_commit_if_sufficient',
-  );
+  assert.equal(payload.exploration?.status, 'open');
+  assert.equal(payload.exploration?.remainingRounds, 1);
 });
 
 test('a boundary miss discloses non-active specific names for newly revealed work', async (t) => {

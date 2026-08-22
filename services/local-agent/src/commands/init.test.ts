@@ -17,7 +17,7 @@ test('scaffoldQuickInstall creates env template and a valid example capability',
     result.written.map((file) => file.status),
     ['created', 'created'],
   );
-  assert.match(readFileSync(resolve(targetDir, '.env'), 'utf-8'), /LLM_API_KEY=sk-xxx/);
+  assert.match(readFileSync(resolve(targetDir, '.env'), 'utf-8'), /Model profiles.*config\.json/);
 
   const validation = await validateCapabilityPlugin(resolve(targetDir, 'capabilities', 'hello-pinpawo'));
   assert.equal(validation.ok, true, validation.errors.join('; '));

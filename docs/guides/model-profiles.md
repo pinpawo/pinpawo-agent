@@ -36,7 +36,7 @@ Model names are not identities. Two profiles may use the same model name with di
 
 The API key is host-private. It must never be included in client protocol payloads, logs, reports, or telemetry.
 
-Profile IDs use 1–64 lowercase letters, digits, dots, underscores, or hyphens. The record key must match the profile's `id`. The ID `env` is reserved for the ephemeral environment profile and cannot be stored.
+Profile IDs use 1–64 lowercase letters, digits, dots, underscores, or hyphens. The record key must match the profile's `id`.
 
 `inputModalities` is authoritative. Custom profiles with no modality metadata are treated as text-only. Runtime code must not infer image support from a model name.
 
@@ -46,8 +46,7 @@ Profile IDs use 1–64 lowercase letters, digits, dots, underscores, or hyphens.
 
 - The configured default profile is used unless a host or session supplies another profile ID.
 - `PINPAWO_MODEL_PROFILE` selects a stored profile without changing the configured default.
-- A complete `LLM_API_KEY`, `LLM_BASE_URL`, and `LLM_MODEL` environment tuple creates an ephemeral `env` profile.
-- The three environment values are atomic. Partial values are ignored and never overlaid onto a stored profile.
+- Model configuration is read only from stored versioned profiles under `models`; it is no longer read from environment variables.
 - An invalid non-default profile is isolated with diagnostics.
 - An invalid or missing default/selected profile blocks startup; no other profile is selected silently.
 

@@ -86,7 +86,7 @@ export function buildSetupGuide(options: {
           label: 'LLM API',
           status: 'missing',
           detail: `No runnable default model profile. ${modelConfigError}`,
-          nextStep: 'Configure LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL together in ~/.pinpawo/.env.',
+          nextStep: 'Define a versioned model profile under "models" in ~/.pinpawo/config.json and set models.defaultProfileId.',
         },
     buildStudioConfigCheck(runtimeConfig),
   ];

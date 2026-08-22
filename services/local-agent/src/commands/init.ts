@@ -30,16 +30,13 @@ function writeNewFile(path: string, content: string, force: boolean, written: Wr
 
 function envTemplate(): string {
   return `# PinPawo Local Agent quick-start configuration.
-# Fill in the values below; they are read together with config.json.
+# Model profiles, including credentials and endpoints, belong in config.json
+# under "models". They are not read from environment variables.
 
-# LLM (OpenAI-compatible)
-LLM_API_KEY=sk-xxx
-# Presets: gpt-5, claude-sonnet, qwen, minimax, glm, kimi, deepseek, gemini.
-LLM_MODEL_PRESET=qwen
-LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-LLM_MODEL=qwen3.7-max
-# Optional. Fill this for custom models when automatic inference is not enough.
-LLM_CONTEXT_WINDOW_TOKENS=
+# Optional structured-output auto repair. Disabled by default.
+LLM_STRUCTURED_OUTPUT_AUTO_REPAIR=
+# Defaults to 1 when auto repair is enabled; capped at 3.
+LLM_STRUCTURED_OUTPUT_REPAIR_MAX_RETRIES=
 
 # Local runtime
 PINPAWO_WORKDIR=${homedir()}
@@ -113,7 +110,7 @@ export async function runInit(options: InitCommandOptions = {}): Promise<void> {
     process.stdout.write('Use --force to overwrite generated scaffold files.\n');
   }
   process.stdout.write('\nNext steps:\n');
-  process.stdout.write('  1. Edit the generated .env to configure credentials and model settings\n');
+  process.stdout.write('  1. Define a model profile under "models" in ~/.pinpawo/config.json\n');
   process.stdout.write(`  2. Validate the example capability: pinpawo capability validate ${exampleCapabilityDir}\n`);
   process.stdout.write('  3. Start the TUI: pinpawo tui\n');
 }

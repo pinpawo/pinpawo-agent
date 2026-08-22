@@ -64,7 +64,14 @@ export function buildCapabilityPlanningGoalContract(
               'A later task is justified when it depends on a prior returned result or requires a different independently executing ability.',
               'Stages one ability can perform continuously toward the same result should remain together.',
             ].join(' '),
-          }, {
+          }, ...(expected.result === 'advance_plan' ? [{
+            id: 'remaining_plan_change_is_minimal',
+            statement: [
+              'Preserve the prior remaining plan unchanged unless the accepted result proves a change is necessary.',
+              'Do not rewrite tasks for style or to copy handoff details that the next executor already receives as context.',
+              'When a change is necessary, revise only the affected task or shortest affected segment and preserve the unaffected tail.',
+            ].join(' '),
+          }] : []), {
             id: expected.remainingPlanPolicy === 'optional'
               ? 'future_work_strategy_valid'
               : 'remaining_plan_objectives_correct',

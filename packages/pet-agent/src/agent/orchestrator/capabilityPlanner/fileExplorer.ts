@@ -14,15 +14,13 @@ import {
 } from './workspaceReader';
 
 export const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME = 'capability_search';
-const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_DESCRIPTION = 'Search available Capabilities by literal terms. Each match contains the complete CAPABILITY.md document. This is an exploration action, not a terminal action.';
+const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_DESCRIPTION = 'Progressively disclose specific Capabilities by literal terms; each match contains the complete CAPABILITY.md document. Search with short role, domain, or deliverable terms likely to appear in Capability documents, translating the user intent when needed. A miss may return exact Capability names for the next search round. The result reports candidate priority and whether another disclosure round remains. Prefer an applicable specific match over the General fallback.';
 
 const DEFAULT_MAX_DOCUMENT_READ_BYTES = 64 * 1024;
 const MAX_CAPABILITY_SEARCH_RESULTS = 50;
 const MAX_CAPABILITY_SEARCH_TERM_CHARS = 40;
 const MAX_CAPABILITY_SEARCH_TERM_WORDS = 4;
 const MAX_CAPABILITY_SEARCH_RESULT_BYTES = 64 * 1024;
-export const CAPABILITY_PLANNER_MAX_CAPABILITY_SEARCH_CALLS = 3;
-
 export type CapabilityPlannerFileExplorer = {
   /**
    * Framework-private tools for a Capability Planner Agent. They are not an

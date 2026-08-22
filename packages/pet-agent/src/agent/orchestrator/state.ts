@@ -18,7 +18,7 @@ import {
 } from './review/reviewAuthorizations';
 import type {
   OrchestratorRuntimeFailure,
-  PlannerReplyOutcome,
+  PlannerRouteOutcome,
 } from './capabilityPlanner/protocol';
 
 export type SessionToolAuthorizationState = {
@@ -59,7 +59,7 @@ const orchestratorStateChannels = {
     reducer: (_prev, next) => next,
     default: () => 0,
   }),
-  runLatestDelegationOutcome: Annotation<PlannerReplyOutcome | null>({
+  runLatestDelegationOutcome: Annotation<PlannerRouteOutcome | null>({
     reducer: (_prev, next) => next,
     default: () => null,
   }),

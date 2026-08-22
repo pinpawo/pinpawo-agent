@@ -36,7 +36,8 @@ export type AnswerBlockedReason =
   | 'iteration_limit'
   | 'execution_limit'
   | 'incomplete'
-  | 'capability_unavailable';
+  | 'capability_unavailable'
+  | 'planner_incomplete';
 
 /**
  * Closed invocation facts owned by Answer.
@@ -127,6 +128,7 @@ const BLOCKED_REASON_MEANING: Record<AnswerBlockedReason, string> = {
   execution_limit: '执行器达到执行上限',
   incomplete: '当前工作没有形成可交付结果',
   capability_unavailable: '当前没有可执行该工作的能力',
+  planner_incomplete: '规划流程没有形成可执行计划',
 };
 
 function renderAnswerContext(facts: ModelAnswerContextFacts): string {

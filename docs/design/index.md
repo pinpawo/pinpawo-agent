@@ -15,6 +15,7 @@ contracts in [reference/](../reference/index.md).
 - [Persistent Planner](agent-runtime/persistent-planner.md),
   [orchestrator routing](agent-runtime/orchestrator-routing.md), and
   [terminal semantics](agent-runtime/terminal-semantics.md)
+- [Planner non-commit routing](agent-runtime/planner-incomplete-routing.md)
 - [Dynamic context governance](agent-runtime/dynamic-context-governance.md),
   [human review](agent-runtime/human-review.md), and
   [subagent limits](agent-runtime/subagent-limits.md)

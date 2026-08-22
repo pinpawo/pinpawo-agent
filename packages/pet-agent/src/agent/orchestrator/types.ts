@@ -112,6 +112,11 @@ export type OrchestratorConfig = {
    */
   capabilityPlannerRunner?: CapabilityPlannerRunner;
   /**
+   * Maximum Capability discovery model turns per Planner input. Defaults to 2.
+   * Parallel capability_search calls in one model response count as one round.
+   */
+  capabilityPlannerMaxSearchRounds?: number;
+  /**
    * Storage/search backend for the immutable Capability registry documents.
    * Defaults to filesystem. Memory is opt-in and never used as an automatic fallback.
    */

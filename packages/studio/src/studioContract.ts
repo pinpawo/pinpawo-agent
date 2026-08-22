@@ -18,65 +18,25 @@
  * 任务队列、依赖、进度、调度时机、重试 —— 全部属于插件,不属于 studio。
  */
 
+import type { JsonObject } from '@pinpawo/agent-contracts';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
 
-import type { PetAgentRuntimeDescriptor, PetGateState } from './types';
-
-/* ─────────────── 出:dispatch ─────────────── */
-
-/**
- * 一次派活。**这是 studio 唯一的对外动作。**
- *
- * `request` 是自然语言 —— studio 不定义任务结构,那是插件的事。
- */
-export type StudioDispatchInput = {
-  petId: string;
-  request: string;
-  /**
-   * 发起方自己的关联标识,studio **原样透传**不解释。插件用它把后续
-   * event 与这次 dispatch 对上;不同插件可以有完全不同的编码方式。
-   */
-  correlationId?: string;
-  signal?: AbortSignal;
-};
-
-/**
- * dispatch 的返回。
- *
- * **它只表示"已经发出去了",不表示任务完成。** pet 干完之后自己经由
- * toolkit → 插件 → event 汇报,不通过这个返回值。
- *
- * 因此这里没有 reply、没有成功失败判定 —— studio 对结果不做任何解释。
- */
-export type StudioDispatchResult = {
-  /**
-   * pet 执行落在哪个 thread 上。它同时充当这次 dispatch 的标识 ——
-   * thread 本来就唯一,再发一个 dispatchId 只是同义词。
-   */
-  threadId: string;
-};
-
-/**
- * 一次派活的闸门变化。
- *
- * **它沿 dispatch 那条线回到发起方,不走 event 总线。** 派活是点对点的,
- * 它的进展也是 —— "你派的那条活现在怎么样"是发起方与 studio 之间的事,
- * 与别的插件无关。
- *
- * 这条边界要守住:`event` 只承载"某个插件宣布发生了什么"。把通道自己的
- * 机制反馈也塞进去,event 会慢慢变成万能管道,定义随之失效。
- */
-export type StudioDispatchGateChange = {
-  /** 哪次 dispatch —— 与 `StudioDispatchResult.threadId` 同一个值。 */
-  threadId: string;
-  petId: string;
-  /** 发起方自己的关联标识,原样带回。 */
-  correlationId?: string;
-  state: PetGateState;
-};
-
-export type StudioDispatchGateHandler =
-  (change: StudioDispatchGateChange) => void | Promise<void>;
+import type { PetAgentRuntimeDescriptor } from './types';
+import type {
+  StudioDispatchReceipt,
+  StudioDispatchRequest,
+  StudioInvocationEventHandler,
+} from './studioInvocation';
+export type {
+  PendingInterruptProjection,
+  StudioDispatchInput,
+  StudioDispatchReceipt,
+  StudioDispatchRequest,
+  StudioDispatchResult,
+  StudioInvocationEvent,
+  StudioInvocationEventHandler,
+  StudioInvocationTerminalStatus,
+} from './studioInvocation';
 
 /* ─────────────── 入:event ─────────────── */
 
@@ -93,8 +53,8 @@ export type StudioEvent = {
   type: string;
   /** 发布该 event 的插件名,便于订阅方判断来源。 */
   source: string;
-  /** 若该 event 源于某次 dispatch,带上它的 correlationId。 */
-  correlationId?: string;
+  /** Producer-owned context; Studio does not assign meaning to its fields. */
+  metadata?: JsonObject;
   payload?: unknown;
   occurredAt: string;
 };
@@ -111,14 +71,14 @@ export type StudioEventHandler = (event: StudioEvent) => void | Promise<void>;
  */
 export type StudioPluginContext = {
   /** 派活。来源由 studio 补成本插件名,插件不需要(也无法)自报。 */
-  dispatch: (input: StudioDispatchInput) => Promise<StudioDispatchResult>;
+  dispatch: (input: StudioDispatchRequest) => Promise<StudioDispatchReceipt>;
   /**
-   * 订阅**本插件派出去的**那些 dispatch 的闸门变化。别的插件派的活不会
-   * 送到这里 —— 这是 dispatch 那条点对点的线,不是共享总线。
+   * 订阅**本插件派出去的** invocation 状态。别的插件派的活不会送到这里
+   * —— 这是 dispatch 那条点对点的线,不是共享总线。
    *
    * 想听就订,不想听就不订。返回退订函数。
    */
-  onDispatchGate: (handler: StudioDispatchGateHandler) => () => void;
+  onInvocation: (handler: StudioInvocationEventHandler) => () => void;
   notify: (event: StudioEventInput) => void;
   subscribe: (handler: StudioEventHandler) => () => void;
   listPets: () => PetAgentRuntimeDescriptor[];
@@ -158,19 +118,14 @@ export type StudioPlugin = {
 export type Studio = {
   /**
    * 外部输入默认派给谁。曾经有个 `submitRequest(goal)` 包着它 —— 那是多余的:
-   * 它完全等价于 `dispatch({ petId: entryPetId, request: goal })`,却让 entry pet
-   * 在 API 上有了专属地位。按插板的逻辑,entry pet 只是配置里的一个 pet。
+   * 它完全等价于 `dispatch({ petId: entryPetId, input: { kind: 'request',
+   * request: goal } })`,却让 entry pet 在 API 上有了专属地位。按插板的逻辑,
+   * entry pet 只是配置里的一个 pet。
    */
   entryPetId: string;
-  dispatch: (input: StudioDispatchInput) => Promise<StudioDispatchResult>;
-  /**
-   * 订阅所有 dispatch 的闸门变化，包括宿主直接发起的 dispatch。
-   *
-   * 插件仍应优先使用 `StudioPluginContext.onDispatchGate`，因为那条订阅只会
-   * 收到插件自己的派活。这个全局入口属于 Host 控制面，用于把状态投射给
-   * 发起请求的 transport，并在 dispatch 结束后释放关联关系。
-   */
-  onDispatchGate: (handler: StudioDispatchGateHandler) => () => void;
+  dispatch: (input: StudioDispatchRequest) => Promise<StudioDispatchReceipt>;
+  /** Host control-plane observation for every Studio invocation. */
+  onInvocation: (handler: StudioInvocationEventHandler) => () => void;
   notify: (event: StudioEvent) => void;
   subscribe: (handler: StudioEventHandler) => () => void;
   listPets: () => PetAgentRuntimeDescriptor[];

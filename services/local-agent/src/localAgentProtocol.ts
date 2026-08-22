@@ -23,7 +23,6 @@ export type {
   SessionNewMessage,
   SessionResumeMessage,
   SessionSnapshotGetMessage,
-  StudioRequestMessage,
 } from '@pinpawo/agent-session';
 export type {
   AgentClientMessage as LocalAgentClientMessage,
@@ -47,8 +46,6 @@ const AGENT_SERVER_MESSAGE_TYPES = {
   'runtime_config.error': true,
   interrupting: true,
   interrupted: true,
-  studio_response: true,
-  studio_error: true,
   'session.snapshot.result': true,
   'session.list.result': true,
   'session.new.result': true,
@@ -84,8 +81,8 @@ export function buildLocalAgentEventEnvelope(
  * reaches this host over 127.0.0.1 and is trusted with local paths, which the
  * one remaining caller already opted into. A `remote` audience whose default
  * still redacted would only mislead the next caller, so both are removed.
- * A Studio plugin that opens a genuinely remote surface owns its own
- * disclosure policy at that boundary (#638).
+ * Any adapter that opens a genuinely remote surface owns its disclosure
+ * policy at that boundary (#638).
  */
 export function sendLocalAgentMessage(
   ws: WsLike,

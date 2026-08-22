@@ -16,8 +16,6 @@ export type QaLifecycleDriverOptions = {
 
 export class QaLifecycleDriver {
   private readonly enqueue: (callback: () => void) => void;
-  private studioStarted = false;
-  private studioFinished = false;
   private policyStarted = false;
   private policyFinished = false;
   private editStarted = false;
@@ -45,7 +43,6 @@ export class QaLifecycleDriver {
     if (
       this.launch.smokeEnabled
       && !this.launch.hostSmoke
-      && !smoke.studio
       && !smoke.policy
       && !smoke.edit
       && !smoke.transcript
@@ -56,31 +53,6 @@ export class QaLifecycleDriver {
 
   handleState(state: TuiSessionState) {
     const { smoke } = this.launch;
-    if (
-      smoke.studio
-      && !this.studioStarted
-      && state.connection === 'ready'
-    ) {
-      this.studioStarted = true;
-      this.enqueue(() => {
-        this.actions.submitInput('/studio verify Studio mode');
-      });
-      return;
-    }
-    if (
-      smoke.studio
-      && this.studioStarted
-      && !this.studioFinished
-      && !state.session.activeRun
-      && state.session.timeline.some((entry) => (
-        entry.type === 'message'
-        && entry.text === 'Studio demo completed.'
-      ))
-    ) {
-      this.studioFinished = true;
-      this.actions.destroySoon();
-      return;
-    }
     if (
       smoke.policy
       && !this.policyStarted

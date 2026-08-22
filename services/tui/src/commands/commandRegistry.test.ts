@@ -11,7 +11,6 @@ test('command registry exposes only implemented OpenTUI commands', () => {
     [
       'help',
       'new',
-      'studio',
       'chat',
       'model',
       'policy',
@@ -45,13 +44,6 @@ test('command parser resolves commands and aliases', () => {
     name: 'continue',
     raw: '/continue   apply the new constraints',
     args: 'apply the new constraints',
-  });
-  assert.deepEqual(parseTuiCommand('/studio   ship the release '), {
-    type: 'command',
-    command: command('studio'),
-    name: 'studio',
-    raw: '/studio   ship the release',
-    args: 'ship the release',
   });
   assert.deepEqual(parseTuiCommand('/export transcripts/today.md'), {
     type: 'command',

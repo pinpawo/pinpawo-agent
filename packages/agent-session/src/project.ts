@@ -213,8 +213,6 @@ function reduceRuntimeEvent(
       return applyReviewRequest(session, event);
     case 'system.notice':
       return appendRuntimeSystemMessage(session, event.requestId, event.message, message, context);
-    case 'studio.progress':
-      return message ? appendMessage(session, message, context) : session;
     case 'error':
       return finishOwnedRun(session, event.requestId, [{
         ...(message ?? {}),

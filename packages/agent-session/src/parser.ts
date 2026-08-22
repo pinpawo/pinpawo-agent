@@ -155,10 +155,7 @@ function parseAgentRuntime(value: unknown): AgentRuntimeView | null {
     'workspaceName',
     'workspaceRoot',
     'stateRoot',
-    'studioConfigPath',
-    'studioDueRunsPath',
     'petsDir',
-    'studioWikiBaseDir',
   ] as const;
   if (stringFields.some((field) =>
     value[field] !== undefined && typeof value[field] !== 'string')) {
@@ -266,10 +263,7 @@ function parseAgentRuntime(value: unknown): AgentRuntimeView | null {
     ...(typeof value.workspaceName === 'string' ? { workspaceName: value.workspaceName } : {}),
     ...(typeof value.workspaceRoot === 'string' ? { workspaceRoot: value.workspaceRoot } : {}),
     ...(typeof value.stateRoot === 'string' ? { stateRoot: value.stateRoot } : {}),
-    ...(typeof value.studioConfigPath === 'string' ? { studioConfigPath: value.studioConfigPath } : {}),
-    ...(typeof value.studioDueRunsPath === 'string' ? { studioDueRunsPath: value.studioDueRunsPath } : {}),
     ...(typeof value.petsDir === 'string' ? { petsDir: value.petsDir } : {}),
-    ...(typeof value.studioWikiBaseDir === 'string' ? { studioWikiBaseDir: value.studioWikiBaseDir } : {}),
     ...(typeof value.contextWindow === 'number' ? { contextWindow: value.contextWindow } : {}),
   };
 }
@@ -566,7 +560,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isSessionKind(value: unknown): value is AgentSession['kind'] {
-  return value === 'chat' || value === 'studio';
+  return value === 'chat';
 }
 
 function isOperationPhase(value: unknown): value is AgentOperationEntry['phase'] {

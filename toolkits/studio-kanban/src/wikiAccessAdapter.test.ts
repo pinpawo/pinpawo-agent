@@ -91,7 +91,9 @@ test('file wiki access installs wiki_read tooling into a pet invoke', async () =
   });
 
   const result = await runtime.invoke({
-    brief: 'read wiki',
+    input: { kind: 'request', request: 'read wiki' },
+    threadId: 'studio:s1:pet:p1',
+    invocationId: 'invocation-1',
     wikiRoot: '/tmp/pinpawo-test-wiki',
     toolkits: [{
       name: 'invoke_toolkit',
@@ -100,7 +102,8 @@ test('file wiki access installs wiki_read tooling into a pet invoke', async () =
     }],
   });
 
-  assert.equal(result.reply, 'done');
+  assert.equal(result.status, 'completed');
+  assert.equal(result.status === 'completed' ? result.reply : null, 'done');
   const configurable = (calls[0]?.options as StubConfigurable | undefined)?.configurable;
   assert.ok(configurable, 'graph should receive configurable');
 
@@ -140,7 +143,12 @@ test('a pet invoke without wiki access installs no wiki tooling', async () => {
     graph,
   });
 
-  await runtime.invoke({ brief: 'no wiki', wikiRoot: '/tmp/pinpawo-test-wiki' });
+  await runtime.invoke({
+    input: { kind: 'request', request: 'no wiki' },
+    threadId: 'studio:s1:pet:p1',
+    invocationId: 'invocation-1',
+    wikiRoot: '/tmp/pinpawo-test-wiki',
+  });
 
   const configurable = (calls[0]?.options as StubConfigurable | undefined)?.configurable;
   assert.equal(

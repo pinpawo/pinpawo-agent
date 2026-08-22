@@ -38,8 +38,18 @@ function fakeStudio(): Studio {
   const handlers = new Set<StudioEventHandler>();
   return {
     entryPetId: 'pet-a',
-    dispatch: async () => ({ threadId: 'thread-1' }),
-    onDispatchGate: () => () => {},
+    dispatch: async () => ({
+      petId: 'pet-1',
+      threadId: 'thread-1',
+      invocationId: 'invocation-1',
+      completion: Promise.resolve({
+        petId: 'pet-1',
+        threadId: 'thread-1',
+        invocationId: 'invocation-1',
+        status: 'completed',
+      }),
+    }),
+    onInvocation: () => () => {},
     notify: (event) => { for (const handler of handlers) void handler(event); },
     subscribe: (handler) => { handlers.add(handler); return () => handlers.delete(handler); },
     listPets: () => [],
@@ -54,7 +64,6 @@ test('the independent Studio stdio transport dispatches studio requests', async 
 
   const transport = startStudioStdioTransport({
     studio: fakeStudio(),
-    workdir: '/tmp/pinpawo-studio-test',
   }, {
     input,
     output,
@@ -62,28 +71,28 @@ test('the independent Studio stdio transport dispatches studio requests', async 
   });
 
   input.write(`${JSON.stringify({
-    type: 'studio_request',
-    requestId: 'studio-1',
-    userRequest: 'go',
+    type: 'studio.dispatch',
+    deliveryId: 'delivery-1',
+    petId: 'pet-1',
+    input: { kind: 'request', request: 'go' },
   })}\n`);
 
   await assertEventually(() => {
     const messages = parseJsonLines(readOutput());
     const response = messages.find(
-      (m) => (m as { type: string }).type === 'studio_response',
+      (m) => (m as { type: string }).type === 'studio.accepted',
     );
-    assert.ok(response, 'expected a studio_response message');
+    assert.ok(response, 'expected a studio.accepted message');
   });
 
   input.end();
   await transport.closed;
 
-  const messages = parseJsonLines(readOutput()) as Array<{ type: string; requestId?: string }>;
-  const response = messages.find((m) => m.type === 'studio_response');
+  const messages = parseJsonLines(readOutput()) as Array<{ type: string; deliveryId?: string }>;
+  const response = messages.find((m) => m.type === 'studio.accepted');
   assert.ok(response);
-  assert.equal(response!.requestId, 'studio-1');
+  assert.equal(response!.deliveryId, 'delivery-1');
 
-  // Ensure we did NOT get a studio_error about handler not being available.
-  const error = messages.find((m) => m.type === 'studio_error');
+  const error = messages.find((m) => m.type === 'studio.error');
   assert.equal(error, undefined);
 });

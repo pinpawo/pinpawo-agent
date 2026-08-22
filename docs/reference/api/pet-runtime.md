@@ -3,11 +3,11 @@
 > **Status: current host-integration contract.** The public port types live in
 > [`@pinpawo/studio`](../../../packages/studio/src/types.ts); the local-host
 > adapter that executes them lives in
-> [`services/local-agent/src/studio/createPetAgentRuntime.ts`](../../../services/local-agent/src/studio/createPetAgentRuntime.ts).
+> [`packages/studio/src/host/createPetAgentRuntime.ts`](../../../packages/studio/src/host/createPetAgentRuntime.ts).
 
 `PetAgentRuntime` is the boundary between Studio and one agent runtime. Studio
-submits a bounded request, observes only its gate, and never inspects the
-agent's private messages, Toolkit calls, or review loop.
+submits a typed graph invocation and never inspects the agent's private
+messages, Toolkit calls, or checkpoint internals.
 
 ## Port
 
@@ -21,10 +21,12 @@ type PetAgentRuntime = {
 };
 
 type PetAgentRuntimeInvokeInput = {
-  brief: string;
+  input: StudioDispatchInput;
+  threadId: string;
+  invocationId: string;
+  metadata?: JsonObject;
   wikiRoot?: string;
   signal?: AbortSignal;
-  threadId?: string;
   execution?: AgentExecution;
   workdir?: string;
   runtimeEnvironment?: string;
@@ -34,22 +36,30 @@ type PetAgentRuntimeInvokeInput = {
   activeDelegationTransition?: ActiveDelegationTransition;
 };
 
-type PetAgentRuntimeInvokeResult = { reply: string };
+type PetAgentRuntimeInvokeResult =
+  | { status: 'completed'; reply: string }
+  | { status: 'pending_interrupt'; pendingInterrupt: PendingInterruptProjection };
 ```
 
-`brief` is the task handed to the pet. `extraCapabilities` and `toolkits` add
-to the runtime configuration for this invocation only. `allowedCapabilityNames`
-limits the Capability Planner's readable workspace; it is an allowlist, not a
-tool permission bypass.
+`input` is either a natural-language request or a typed interrupt resume.
+Studio resolves the stable Pet `threadId` and current `invocationId`; producers
+cannot choose the checkpoint namespace. `extraCapabilities` and `toolkits` add
+to the runtime configuration for this invocation only.
+`allowedCapabilityNames` limits the Capability Planner's readable workspace;
+it is an allowlist, not a tool permission bypass.
 
 ## Lifecycle and ownership
 
 - `descriptor()` exposes the pet identity, configured role, startup mode,
   dispatch status, and compiled Capability summary.
-- `invoke()` resolves with `{ reply }` or rejects, but that does not necessarily
-  mean all work is complete: a checkpointed runtime can return while it waits
-  for human input. `gate()` and `onGateChange()` are the queue-authority
-  boundary for Studio.
+- `invoke()` resolves as `completed` or `pending_interrupt`. A durable interrupt
+  ends this invocation but remains the current continuation of the stable Pet
+  thread. A later invocation may resume it.
+- Before ordinary input or resume, the local adapter reads the authoritative
+  checkpoint. It rejects ordinary input while a continuation is pending and
+  rejects a stale interrupt ID without invoking the graph.
+- `gate()` and `onGateChange()` expose Host diagnostics. Studio's per-Pet queue
+  serializes active invocations; it does not remain occupied by a durable wait.
 - A runtime that creates its own `ToolkitRuntimeManager` may expose `shutdown()`
   to release Toolkit roots. When a host injects a shared manager, the host owns
   shutdown.
@@ -59,10 +69,13 @@ tool permission bypass.
 
 ## Integrating review and events
 
-`humanReviewer` is supplied when the local host creates the runtime, not per
-call. It accepts a canonical `HumanReviewInterruptPayload` and resolves to a
-`ReviewResponse`. See [Events and human review](events-and-review.md) for the
-review and root-stream boundary.
+The local adapter enables checkpointed human review. It projects the pending
+payload into `PendingInterruptProjection`, validates public responses against
+the authoritative review specs, and creates a keyed LangGraph `Command` only
+for a matching interrupt. Studio transports or interaction Plugins can present
+that projection and submit the later typed resume without adopting Chat's
+session protocol. See [Events and human review](events-and-review.md) for the
+shared review boundary.
 
 ## Related contracts
 

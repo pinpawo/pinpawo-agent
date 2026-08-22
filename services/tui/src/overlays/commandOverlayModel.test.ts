@@ -48,7 +48,7 @@ test('command palette follows a slash token at the composer cursor', () => {
     cursorOffset: 4,
     enabled: true,
   });
-  assert.equal(commandCompletion(state), '/studio ');
+  assert.equal(commandCompletion(state), null);
 
   state = syncCommandPalette(state, {
     text: '/tra',
@@ -98,7 +98,7 @@ test('command palette navigation clamps and yields ordinary editing keys', () =>
     : null;
   assert.equal(palette?.kind, 'palette');
   assert.equal(palette?.content.split('\n').length, 5);
-  assert.match(palette?.content ?? '', /› \/studio/);
+  assert.match(palette?.content ?? '', /› \/chat/);
 
   state = syncCommandPalette(state, {
     text: '/help ',

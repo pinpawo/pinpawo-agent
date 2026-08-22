@@ -176,7 +176,7 @@ const studio = await buildStudio({
 `createStudio` 只做三件事:
 
 1. 建 pet registry(重复 petId、`entryPetId` 不在 `pets` 中都会报错);
-2. 依次 `await plugin.start(context)`,把 `dispatch` / `onDispatchGate` /
+2. 依次 `await plugin.start(context)`,把 `dispatch` / `onInvocation` /
    `notify` / `subscribe` / `listPets` 交给它;
 3. 返回插板。
 
@@ -222,20 +222,22 @@ pet 实际拿到哪些工具,由它目录中 Capability 声明的 `uses` 筛出�
 用配置串一遍,验证契约是否自洽:
 
 ```text
-1. 宿主 dispatch({ petId: entryPetId, request: "写一篇关于 X 的稿子" })
-       ↓  返回 { threadId },立即结束 —— 没有人在等
+1. 宿主 dispatch({ petId: entryPetId,
+                    input: { kind: "request", request: "写一篇关于 X 的稿子" } })
+       ↓  返回 { threadId, invocationId, completion },立即确认
 2. planner 排进它自己的队列;轮到它就跑,调 kanban toolkit 贴了三张任务
        ↓
 3. kanban 插件感知到自己的领域数据变了(它订阅的是自己的 board)
        ↓
-4. kanban 调 context.dispatch({ petId: "writer", request: "...",
-                                correlationId: "task-1" })
-       ↓  studio 记录 source=kanban;排进 writer 的队列
-5. writer 干完,调 kanban toolkit 把 task-1 标记完成
+4. kanban 调 context.dispatch({ petId: "writer",
+                                input: { kind: "request",
+                                         request: "Kanban taskId: task-1\n..." } })
+       ↓  排进 writer 的 active invocation 队列
+5. writer 干完,调用 kanban_task_complete({ taskId: "task-1", result: "..." })
        ↓  看板状态变了 —— 这是 kanban 得知完成的**唯一**途径
-6. writer 的闸门回到 open → studio 放行这个 pet 的下一条
+6. writer invocation completed → studio 放行这个 pet 的下一条
        ↓
-7. kanban 调 context.notify({ type: "task.done", correlationId: "task-1" })
+7. kanban 调 context.notify({ type: "task.done", payload: { taskId: "task-1" } })
        ↓
 8. studio 广播 → 别的插件若订阅了就能看到
        ↓
@@ -244,10 +246,10 @@ pet 实际拿到哪些工具,由它目录中 Capability 声明的 `uses` 筛出�
 
 **验证点:**
 
-- 第 1 步之后 studio 就不管了 —— 没有任何地方在等 pet
+- 第 1 步只是确认；调用方可选地观察 invocation event 或 completion
 - 第 3 步的"感知"是插件内部的事,契约不规定它怎么实现
 - 第 5 步是闭环的关键:pet 调 toolkit,数据落在插件自己的状态里
-- 第 6 步的放行由**闸门**决定,不是"上一次 invoke 返回了"(契约 §3.1)
+- 第 6 步只按 active invocation 串行；durable interrupt 会作为一种终态结束本次 invocation
 - 第 7 步 studio 只广播,不解释 `task.done` 是什么意思
 - 全程 pet 从未直接与 studio 通信
 
@@ -258,21 +260,22 @@ pet 实际拿到哪些工具,由它目录中 Capability 声明的 `uses` 筛出�
 ```text
 5'. LangGraph 创建 interrupt,把 pending continuation 写入 checkpoint
        ↓
-6'. writer 的闸门变成 waiting,studio 不放行这个 pet 的下一条
+6'. 当前 invocation 以 pending_interrupt 结束；checkpoint 保持 waiting
        ↓
 7'. 独立交互 plugin/Host adapter 把 pending action 作为 event 告知用户层
        ↓
-8'. 用户授权后,控制 adapter 恢复同一个 thread
+8'. 用户授权后,交互 adapter 对同一个 pet 发起 typed resume dispatch
        ↓
-9'. 闸门回到 open,队列继续
+9'. 新 invocation 在同一个稳定 thread 上 resume
 ```
 
-studio 全程不知道"review"是什么,它只观察 gate。waiting/interrupt 本身由 LangGraph
-checkpoint 持久化,不依赖 Chat Host 的内存状态；没有安装交互插件时,这条 dispatch 一直
-卡住也是合法状态。
+Studio core 不解释 review 选项；Pet runtime 负责投射 pending、校验 response 和构造
+resume Command。waiting/interrupt 由 LangGraph checkpoint 持久化,不依赖 Chat Host
+内存；没有交互 Plugin 时，Pet thread 可以一直停在 checkpoint 上，但不会占住一次
+内存 invocation。
 
-> **看板上目前看不出来。** 插件可以经 `context.onDispatchGate` 订阅自己派出去
-> 那些 dispatch 的闸门变化,把 `waiting` / `blocked` 标到任务上 —— 但 kanban
+> **看板上目前看不出来。** Plugin 可以经 `context.onInvocation` 订阅自己派出去
+> 那些 invocation 的 `pending_interrupt` / `failed` 终态并标到任务上 —— 但 kanban
 > **尚未接上这条**,它现在只从 pet 调 `kanban_task_*` 得知进展。要不要标、
 > 怎么标,是 kanban 的领域判断。
 

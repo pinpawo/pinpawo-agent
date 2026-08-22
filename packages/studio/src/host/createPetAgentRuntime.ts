@@ -4,12 +4,13 @@
  * 它位于 Studio package 的 Host 层，把 core port 接到具体 LangGraph
  * 执行路径。core 目录本身仍不依赖 Host 或本机服务实现。
  *
- * HITL 对 Studio core 透明：LangGraph 把 interrupt 与 pending continuation
- * 持久化到 checkpoint，runtime 只把 gate 保持在 `waiting`。review 的投射与
- * resume 由独立的 Host/plugin 控制适配负责，不属于 Studio core。
+ * LangGraph 把 interrupt 与 pending continuation 持久化到 checkpoint；runtime
+ * 负责把它投射成公开 PendingInterrupt、校验 typed resume，并构造 Command。
+ * Studio core 只搬运这些输入/结果，不解释 review 选项或 checkpoint 内容。
  */
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
+import { Command } from '@langchain/langgraph';
 
 import type { AgentCapability } from '@pinpawo/pet-agent';
 import type { AgentActor, AgentExecution, AgentModels } from '@pinpawo/pet-agent';
@@ -28,8 +29,15 @@ import {
   createOrchestratorGraph,
   compileAgentRegistry,
   formatExecutorCompilationIssues,
+  isHumanReviewBatchInterruptPayload,
+  isHumanReviewInterruptPayload,
+  projectHumanReviewRequest,
+  resolveHumanReviewResponse,
+  toInternalReviewResponse,
   type OrchestratorConfig,
   type OrchestratorGraph,
+  type ReviewResponse,
+  type ReviewSpec,
 } from '@pinpawo/pet-agent';
 import type {
   PetAgentRuntime,
@@ -39,11 +47,12 @@ import type {
   PetGateState,
 } from '../types';
 import type { StudioWikiAccess } from '../wikiPort';
+import type { PendingInterruptProjection } from '../studioInvocation';
 
 /**
  * Studio runtime 允许 LangGraph 生成可持久化的 review interrupt。当前内建
- * transport 不处理 Chat review 消息，但这不等于 runtime 没有 HITL 能力：
- * 独立交互插件可以投射 pending action，并对同一 thread 执行 resume。
+ * transport 不复用 Chat review 消息；独立交互 Plugin 可以观察 pending
+ * invocation event，并通过 Studio dispatch 对同一 Pet thread 提交 typed resume。
  */
 const STUDIO_REVIEW_CAPABILITIES = {
   humanReview: true,
@@ -137,7 +146,7 @@ async function buildWikiSystemPrompt(
   ].join('\n');
 }
 
-async function buildInvokeMessages(
+async function buildRequestMessages(
   brief: string,
   wikiRoot: string | undefined,
   wikiAccess: StudioWikiAccess | undefined,
@@ -165,6 +174,84 @@ function hasPendingContinuation(snapshot: unknown): boolean {
   if (next.length > 0) return true;
   const tasks = Array.isArray(record?.tasks) ? record.tasks : [];
   return tasks.length > 0;
+}
+
+type PendingHumanReview = {
+  projection: PendingInterruptProjection;
+  reviews: ReviewSpec[];
+};
+
+function readGraphInterrupt(snapshot: unknown): { id: string; value: unknown } | null {
+  const tasks = Array.isArray((snapshot as { tasks?: unknown } | null)?.tasks)
+    ? (snapshot as { tasks: unknown[] }).tasks
+    : [];
+  for (const task of tasks) {
+    if (!task || typeof task !== 'object') continue;
+    const interrupts = Array.isArray((task as { interrupts?: unknown }).interrupts)
+      ? (task as { interrupts: unknown[] }).interrupts
+      : [];
+    const first = interrupts[0];
+    if (!first || typeof first !== 'object') continue;
+    const id = (first as { id?: unknown }).id;
+    if (typeof id !== 'string' || !id) continue;
+    return { id, value: (first as { value?: unknown }).value };
+  }
+  return null;
+}
+
+function projectPendingHumanReview(snapshot: unknown): PendingHumanReview | null {
+  const interrupt = readGraphInterrupt(snapshot);
+  if (!interrupt) return null;
+  const reviews = isHumanReviewBatchInterruptPayload(interrupt.value)
+    ? interrupt.value.reviews.map((item) => item.review)
+    : isHumanReviewInterruptPayload(interrupt.value)
+      ? [interrupt.value.review]
+      : [];
+  if (reviews.length === 0) return null;
+  return {
+    projection: {
+      interruptId: interrupt.id,
+      payload: {
+        kind: 'human_review',
+        interactions: reviews.map(projectHumanReviewRequest),
+      },
+    },
+    reviews,
+  };
+}
+
+function buildHumanReviewResume(
+  pending: PendingHumanReview,
+  responses: Parameters<typeof toInternalReviewResponse>[0][],
+) {
+  const decisions = responses.map(toInternalReviewResponse);
+  if (decisions.length === 0 || decisions.length > pending.reviews.length) {
+    throw new Error(
+      `Interrupt "${pending.projection.interruptId}" expects ${pending.reviews.length} review response(s).`,
+    );
+  }
+  for (let index = 0; index < decisions.length; index += 1) {
+    const review = pending.reviews[index];
+    const decision = decisions[index];
+    if (!review || !decision || decision.reviewId !== review.id) {
+      throw new Error(
+        `Review response at index ${index.toString()} does not match the pending interaction.`,
+      );
+    }
+    const resolution = resolveHumanReviewResponse({ reviewSpec: review }, decision);
+    const isFinal = index === decisions.length - 1;
+    if (resolution.decision.type !== 'approve' && !isFinal) {
+      throw new Error(`Review response "${decision.reviewId}" stops the batch and must be final.`);
+    }
+    if (
+      resolution.decision.type === 'approve'
+      && isFinal
+      && decisions.length < pending.reviews.length
+    ) {
+      throw new Error(`Review response batch is incomplete after "${decision.reviewId}".`);
+    }
+  }
+  return { [pending.projection.interruptId]: { decisions: decisions as ReviewResponse[] } };
 }
 
 export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRuntime {
@@ -220,7 +307,59 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
       throw new Error(`Pet agent "${config.actor.petId}" is not dispatchable: ${status}`);
     }
 
-    const messages = await buildInvokeMessages(input.brief, input.wikiRoot, config.wikiAccess);
+    const checkpointConfigurable: Record<string, unknown> = {
+      actor: config.actor,
+      thread_id: input.threadId,
+    };
+    const initialSnapshot = config.checkpoint
+      ? await graph.getState({ configurable: checkpointConfigurable })
+      : null;
+    const pending = projectPendingHumanReview(initialSnapshot);
+    setGate(pending
+      ? 'waiting'
+      : hasPendingContinuation(initialSnapshot)
+        ? 'blocked'
+        : 'open');
+    let graphInput: Parameters<OrchestratorGraph['invoke']>[0];
+    if (input.input.kind === 'request') {
+      if (hasPendingContinuation(initialSnapshot)) {
+        setGate(pending ? 'waiting' : 'blocked');
+        throw new Error(
+          pending
+            ? `Pet "${config.actor.petId}" is waiting on interrupt "${pending.projection.interruptId}".`
+            : `Pet "${config.actor.petId}" has an unsupported pending continuation.`,
+        );
+      }
+      const messages = await buildRequestMessages(
+        input.input.request,
+        input.wikiRoot,
+        config.wikiAccess,
+      );
+      graphInput = buildOrchestratorRunInput(
+        messages,
+        { activeDelegationTransition: input.activeDelegationTransition },
+      );
+    } else {
+      if (!pending) {
+        setGate(hasPendingContinuation(initialSnapshot) ? 'blocked' : 'open');
+        throw new Error(`Pet "${config.actor.petId}" has no pending human-review interrupt.`);
+      }
+      if (pending.projection.interruptId !== input.input.interruptId) {
+        setGate('waiting');
+        throw new Error(
+          `Interrupt "${input.input.interruptId}" is stale; `
+          + `Pet "${config.actor.petId}" is waiting on "${pending.projection.interruptId}".`,
+        );
+      }
+      if (input.input.payload.kind !== 'human_review_response') {
+        setGate('waiting');
+        throw new Error(`Interrupt "${input.input.interruptId}" received an unsupported payload.`);
+      }
+      graphInput = new Command({
+        resume: buildHumanReviewResume(pending, input.input.payload.responses),
+      });
+    }
+
     const toolkitDefinitions = [
       ...(config.toolkits ?? []),
       ...(input.toolkits ?? []),
@@ -252,7 +391,11 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
       thread_id: input.threadId,
       registry,
       reviewCapabilities: STUDIO_REVIEW_CAPABILITIES,
-      execution: input.execution ?? config.execution,
+      execution: {
+        ...(config.execution ?? {}),
+        ...(input.execution ?? {}),
+        threadId: input.threadId,
+      },
       workdir: input.workdir ?? config.workdir,
       runtimeEnvironment: input.runtimeEnvironment,
       allowedCapabilityNames: input.allowedCapabilityNames,
@@ -262,52 +405,31 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
     status = 'active';
     setGate('busy');
     try {
-      const graphInput: Parameters<OrchestratorGraph['invoke']>[0] = buildOrchestratorRunInput(
-        messages,
-        { activeDelegationTransition: input.activeDelegationTransition },
-      );
-      // 撞到 review 时 LangGraph 会返回，并把 interrupt 保存在 checkpoint；
-      // Studio core 不解释 payload，只通过下面的 snapshot 把 gate 标成 waiting。
       const result = await graph.invoke(graphInput, { signal: input.signal, configurable });
-      // 返回不等于干完了。checkpoint 上还有待跑节点 = 停在中断点等人 ——
-      // 门此时是 `waiting`,不是 `open`,队列不该放行下一条。
-      await refreshGate(input.threadId, configurable, 'waiting');
-      return { reply: readReply(result) };
+      const finalSnapshot = config.checkpoint
+        ? await graph.getState({ configurable })
+        : null;
+      const finalPending = projectPendingHumanReview(finalSnapshot);
+      if (finalPending) {
+        setGate('waiting');
+        return {
+          status: 'pending_interrupt',
+          pendingInterrupt: finalPending.projection,
+        };
+      }
+      if (hasPendingContinuation(finalSnapshot)) {
+        setGate('blocked');
+        throw new Error(
+          `Pet "${config.actor.petId}" stopped on an unsupported pending continuation.`,
+        );
+      }
+      setGate('open');
+      return { status: 'completed', reply: readReply(result) };
     } catch (error) {
-      // 失败必须停下:后面排着的活可能正建立在这条的产出之上,在坏掉的状态
-      // 上继续操作才是破坏性的来源。留给人去 chat 里看一眼。
       setGate('blocked');
       throw error;
     } finally {
       status = previousStatus === 'active' ? 'standby' : previousStatus;
-    }
-  }
-
-  /**
-   * 读一次 checkpoint,决定门开还是关。
-   *
-   * `closedState` 是"还有活没跑完"时的落点 —— 正常返回后是 `waiting`
-   * (停在中断点等人)。读不到快照时保守放行,否则一次读取失败就会把这个
-   * pet 永久锁死。
-   */
-  async function refreshGate(
-    threadId: string | undefined,
-    configurable: Record<string, unknown>,
-    closedState: PetGateState,
-  ): Promise<void> {
-    if (!threadId || !config.checkpoint) {
-      setGate('open');
-      return;
-    }
-    try {
-      const snapshot = await graph.getState({ configurable });
-      setGate(hasPendingContinuation(snapshot) ? closedState : 'open');
-    } catch (error) {
-      console.error(
-        `[pet-runtime] gate check failed (thread=${threadId}); opening to avoid a permanent stall:`,
-        error instanceof Error ? error.message : error,
-      );
-      setGate('open');
     }
   }
 

@@ -77,16 +77,6 @@ export type RuntimeConfigUpdateMessage = {
   autoAuthorizationSafetyLevel?: ToolAuthorizationSafetyLevel;
 };
 
-export type StudioRequestMessage = {
-  type: 'studio_request';
-  requestId: string;
-  userRequest: string;
-  /** 可选:显式覆盖 runId，供外部调度器维持同一次 Studio 运行的幂等主键 */
-  runId?: string;
-  /** 可选:overrides 默认的 conversation 命名,影响 wiki 子目录 */
-  conversationId?: string;
-};
-
 export type HumanReviewResponseMessage = {
   type: 'human_review_response';
   requestId: string;
@@ -141,7 +131,6 @@ export type AgentClientMessage =
   | ReviewCancelMessage
   | NewSessionMessage
   | RuntimeConfigUpdateMessage
-  | StudioRequestMessage
   | HumanReviewResponseMessage
   | SessionSnapshotGetMessage
   | SessionListMessage
@@ -172,20 +161,7 @@ export type AgentControlServerMessage =
       message: string;
     }
   | { type: 'interrupting'; requestId: string; message?: string }
-  | { type: 'interrupted'; requestId: string; message?: string }
-  | {
-      type: 'studio_response';
-      requestId: string;
-      outcome: 'done' | 'stopped';
-      reply: string;
-      finalPetRunId?: string;
-      reason?: string;
-      workdir?: string;
-      runId?: string;
-      conversationId?: string;
-      idempotencyKey?: string;
-    }
-  | { type: 'studio_error'; requestId: string; message: string };
+  | { type: 'interrupted'; requestId: string; message?: string };
 
 export type AgentSessionServerMessage =
   | {
@@ -728,10 +704,6 @@ function readAgentEvent(record: Record<string, unknown>): AgentRuntimeEvent | nu
       },
     };
   }
-  if (type === 'studio.progress') {
-    const event = readJsonObject(record, 'event');
-    return event ? { type, requestId, event } : null;
-  }
   if (type === 'system.notice' || type === 'error') {
     const message = readString(record, 'message');
     const code = type === 'error' ? readAgentErrorCode(record) : null;
@@ -940,27 +912,6 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
         }
       : null;
   }
-  if (type === 'studio_request') {
-    const requestId = readString(record, 'requestId');
-    const userRequest = readString(record, 'userRequest');
-    if (!requestId || userRequest == null) return null;
-    if ('runId' in record && typeof record.runId !== 'string') return null;
-    if ('conversationId' in record && typeof record.conversationId !== 'string') return null;
-    if (!hasOnlyKeys(record, ['type', 'requestId', 'runId', 'userRequest', 'conversationId'])) {
-      return null;
-    }
-    return {
-      type,
-      requestId,
-      userRequest,
-      ...(readOptionalString(record, 'conversationId') !== undefined
-        ? { conversationId: readOptionalString(record, 'conversationId') }
-        : {}),
-      ...(readOptionalString(record, 'runId') !== undefined
-        ? { runId: readOptionalString(record, 'runId') }
-        : {}),
-    };
-  }
   return null;
 }
 
@@ -1148,43 +1099,13 @@ function parseAgentServerRecord(record: Record<string, unknown>): AgentServerMes
     const event = eventRecord ? readAgentEvent(eventRecord) : null;
     return event && event.requestId === requestId ? { type, requestId, event } : null;
   }
-  if (type === 'interrupting' || type === 'interrupted' || type === 'studio_error') {
-    const message = readOptionalString(record, 'message')
-      ?? (type === 'studio_error' ? '' : undefined);
+  if (type === 'interrupting' || type === 'interrupted') {
+    const message = readOptionalString(record, 'message');
     return {
       type,
       requestId,
       ...(message !== undefined ? { message } : {}),
     } as AgentServerMessage;
-  }
-  if (type === 'studio_response') {
-    const outcome = readString(record, 'outcome');
-    const reply = readString(record, 'reply');
-    if ((outcome !== 'done' && outcome !== 'stopped') || reply == null) return null;
-    return {
-      type,
-      requestId,
-      outcome,
-      reply,
-      ...(readOptionalString(record, 'finalPetRunId') !== undefined
-        ? { finalPetRunId: readOptionalString(record, 'finalPetRunId') }
-        : {}),
-      ...(readOptionalString(record, 'reason') !== undefined
-        ? { reason: readOptionalString(record, 'reason') }
-        : {}),
-      ...(readOptionalString(record, 'workdir') !== undefined
-        ? { workdir: readOptionalString(record, 'workdir') }
-        : {}),
-      ...(readOptionalString(record, 'runId') !== undefined
-        ? { runId: readOptionalString(record, 'runId') }
-        : {}),
-      ...(readOptionalString(record, 'conversationId') !== undefined
-        ? { conversationId: readOptionalString(record, 'conversationId') }
-        : {}),
-      ...(readOptionalString(record, 'idempotencyKey') !== undefined
-        ? { idempotencyKey: readOptionalString(record, 'idempotencyKey') }
-        : {}),
-    };
   }
   return null;
 }

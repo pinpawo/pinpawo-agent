@@ -105,10 +105,7 @@ export function buildLocalAgentRuntimeView(
     ...(runtime.workspaceName ? { workspaceName: runtime.workspaceName } : {}),
     ...(runtime.workspaceRoot ? { workspaceRoot: runtime.workspaceRoot } : {}),
     ...(runtime.stateRoot ? { stateRoot: runtime.stateRoot } : {}),
-    ...(runtime.studioConfigPath ? { studioConfigPath: runtime.studioConfigPath } : {}),
-    ...(runtime.studioDueRunsPath ? { studioDueRunsPath: runtime.studioDueRunsPath } : {}),
     ...(runtime.petsDir ? { petsDir: runtime.petsDir } : {}),
-    ...(runtime.studioWikiBaseDir ? { studioWikiBaseDir: runtime.studioWikiBaseDir } : {}),
   };
 }
 

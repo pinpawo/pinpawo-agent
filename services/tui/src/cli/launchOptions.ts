@@ -13,7 +13,6 @@ export type TuiLaunchOptions = {
     hostReady: boolean;
     policy: boolean;
     review: boolean;
-    studio: boolean;
     transcript: boolean;
   };
   smokeEnabled: boolean;
@@ -38,7 +37,6 @@ export function parseTuiLaunchOptions(
     hostReady: flags.has('--smoke-host'),
     policy: flags.has('--smoke-policy'),
     review: flags.has('--smoke-review'),
-    studio: flags.has('--smoke-studio'),
     transcript: flags.has('--smoke-transcript'),
   };
   const hostSmoke = smoke.hostReady || smoke.hostChat;
@@ -47,7 +45,6 @@ export function parseTuiLaunchOptions(
     || smoke.edit
     || smoke.policy
     || smoke.review
-    || smoke.studio
     || smoke.transcript
     || hostSmoke;
 

@@ -8,6 +8,10 @@ import type {
   StudioContext,
 } from './petAgentTypes';
 import type { ActiveDelegationTransition } from '@pinpawo/pet-agent';
+import type {
+  PendingInterruptProjection,
+  StudioDispatchInput,
+} from './studioInvocation';
 
 /**
  * Pet runtime descriptor — pet agent registry 中暴露的元数据。
@@ -23,7 +27,7 @@ export type PetAgentRuntimeDescriptor = AgentActor & {
 /**
  * pet runtime 的 invoke 参数。Studio↔pet 边界是函数调用,而非 envelope 协议。
  *
- * - brief: Studio 撰写的任务文本(自然语言),pet 作为唯一输入。
+ * - input: 普通请求或显式 interrupt resume。Pet runtime 负责对 checkpoint 校验。
  * - wikiRoot: 共享知识库目录绝对路径。提供时 wiki middleware 会自动读取
  *   {wikiRoot}/index.md 注入到 system prompt,并装备 wiki_read toolkit。
  * - signal: Studio 取消信号。
@@ -31,10 +35,11 @@ export type PetAgentRuntimeDescriptor = AgentActor & {
  * - toolkits: 本次 invoke 临时注入的 toolkit,会与 runtime config toolkits 合并。
  */
 export type PetAgentRuntimeInvokeInput = {
-  brief: string;
+  input: StudioDispatchInput;
+  threadId: string;
+  invocationId: string;
   wikiRoot?: string;
   signal?: AbortSignal;
-  threadId?: string;
   execution?: AgentExecution;
   workdir?: string;
   runtimeEnvironment?: string;
@@ -53,19 +58,17 @@ export type PetAgentRuntimeInvokeInput = {
 };
 
 /**
- * pet runtime 的 invoke 返回。一段文本,可包含对文件路径的引用,
- * curator 解析并整理进 wiki。`invoke()` 也可能因为 checkpointed interrupt
- * 提前返回；调用方不解释 review payload，只从 gate 观察到 `waiting`。
+ * pet runtime 的 invoke 返回。一次 graph invocation 要么完成并返回文本,
+ * 要么停在已持久化的 interrupt 上并返回公开投射；两者都会结束本次 invocation。
  */
-export type PetAgentRuntimeInvokeResult = {
-  reply: string;
-};
+export type PetAgentRuntimeInvokeResult =
+  | { status: 'completed'; reply: string }
+  | { status: 'pending_interrupt'; pendingInterrupt: PendingInterruptProjection };
 
 /**
- * Pet 的闸门状态 —— runtime 对 studio 唯一需要暴露的执行事实。
+ * Pet runtime 的 Host 诊断状态。
  *
- * **studio 只关心门开不开**,不关心 pet 在跑模型、在等工具还是在等人。
- * 但门关着的原因分两类,而这个区别对**看的人**是必要的:
+ * 门关着的原因分两类,而这个区别对 Host control-plane 的观察者是必要的:
  *
  * - `busy` 的队列**在动**,等就行;
  * - `waiting` / `blocked` 的队列**永远不会自己动**,只有人能推动它。
@@ -73,16 +76,11 @@ export type PetAgentRuntimeInvokeResult = {
  * 这正是让 §4.2「进度停滞是自明的」成立的东西 —— 一个 pet 卡了两小时,
  * 是在跑大任务、在等人回话,还是砸了没人管,得能一眼看出来。
  *
- * **失败必须停下,不能放行下一条。** 队列里排着的活往往彼此依赖 ——
- * 前一条写文件失败了,后一条接着去改那个文件,那不是"下一个任务失败",
- * 是在一个坏掉的状态上继续操作,破坏性正是这么来的。所以 `blocked`
- * 与 `waiting` 同类:都得人看一眼才继续。
- *
  * 这里没有 `disabled`:那是配置属性,在 `descriptor().startupMode` 里,
  * dispatch 直接拒,不进队列。
  *
- * gate 只服务于**队列放不放行**这一个判断。它是通道自己的机制,不是一份
- * 要广播出去的通知 —— 别把它变成 event。
+ * Studio invocation coordinator 不用 gate 延长一次 dispatch：durable interrupt
+ * 会结束当前 invocation，后续 typed dispatch 再由 runtime 对 checkpoint 校验。
  */
 export type PetGateState =
   /** 空闲,能收下一条派活。 */
@@ -101,16 +99,11 @@ export type PetAgentRuntime = {
   descriptor: () => PetAgentRuntimeDescriptor;
   invoke: (input: PetAgentRuntimeInvokeInput) => Promise<PetAgentRuntimeInvokeResult>;
   /**
-   * 当前闸门状态。studio 的队列据此决定要不要投递下一条。
-   *
-   * 它**不是** `invoke` 的返回值:pet 撞到人工确认时 `invoke` 会提前返回,
-   * 但活并没有干完 —— 门此时是 `waiting` 而非 `open`。把"invoke 返回"当成
-   * "派活结束"正是队列失效的根源。
+   * 当前 checkpoint/execution 的诊断状态；不是 dispatch 或 invocation identity。
    */
   gate: () => PetGateState;
   /**
-   * 订阅闸门变化。studio 在门关着时挂起队列,由这里唤醒 —— 不轮询。
-   * 返回退订函数。
+   * 订阅诊断状态变化。Studio core 当前不消费它；Host adapter 可以选择投射。
    */
   onGateChange: (listener: (state: PetGateState) => void) => () => void;
   /**

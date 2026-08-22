@@ -10,11 +10,6 @@ import {
   type ToolAuthorizationSafetyLevel,
 } from '@pinpawo/agent-session';
 import { formatAttachmentDisplayText } from '../attachments/attachmentModel';
-import {
-  studioAcceptedMessage,
-  studioErrorMessage,
-  studioUserMessage,
-} from './studioProjection';
 import { prepareReviewDecision } from './reviewDecision';
 import {
   RuntimeConfigCoordinator,
@@ -285,46 +280,6 @@ export class TuiSessionController {
     return { ok: true, requestId };
   }
 
-  submitStudio(
-    userRequest: string,
-    conversationId: string,
-  ): SubmitChatResult {
-    const request = userRequest.trim();
-    if (!request) {
-      return { ok: false, reason: 'empty' };
-    }
-    if (this.state.connection !== 'ready' || !this.transport.isConnected()) {
-      return { ok: false, reason: 'not-ready' };
-    }
-    if (
-      this.state.session.activeRun
-      || this.state.session.pendingInterrupt
-      || this.sessionCommands.hasPending()
-      || this.modelProfiles.hasPending()
-      || this.runtimeConfig.hasPending()
-    ) {
-      return { ok: false, reason: 'busy' };
-    }
-
-    const requestId = this.requestIdFactory();
-    if (!this.transport.send({
-      type: 'studio_request',
-      requestId,
-      userRequest: request,
-      conversationId,
-    })) {
-      return { ok: false, reason: 'send-failed' };
-    }
-    this.transport.invalidateCompletionSnapshotState();
-    this.updateSession(reduceSession(this.state.session, {
-      type: 'user.accepted',
-      requestId,
-      kind: 'studio',
-      text: studioUserMessage(request),
-    }, { observedAt: this.now() }));
-    return { ok: true, requestId };
-  }
-
   interruptRun(): InterruptRunResult {
     if (this.state.connection !== 'ready' || !this.transport.isConnected()) {
       return { ok: false, reason: 'not-ready' };
@@ -559,9 +514,6 @@ export class TuiSessionController {
     }
 
     if (message.type === 'event') {
-      // Studio 进度不再往这条会话里投影:推模型下提交即返回,activeRun 早就
-      // 结束了,按 requestId 匹配恒不成立 —— 那是拉模型留下的形状。进度归
-      // 插件自己的视图,studio 不代它呈现。
       if (message.event.type === 'human_review.requested') {
         // A pending interrupt is newer than every completion refresh requested
         // before this runtime boundary. Those older responses may still update
@@ -578,27 +530,6 @@ export class TuiSessionController {
       ) {
         this.transport.requestCompletionSnapshot();
       }
-      return;
-    }
-
-    if (message.type === 'studio_response') {
-      this.updateSession(reduceSession(this.state.session, {
-        type: 'run.finished',
-        requestId: message.requestId,
-        messages: studioAcceptedMessage(message),
-      }, { observedAt: this.now() }));
-      return;
-    }
-
-    if (message.type === 'studio_error') {
-      this.updateSession(reduceSession(this.state.session, {
-        type: 'run.finished',
-        requestId: message.requestId,
-        messages: [studioErrorMessage(
-          message.requestId,
-          message.message,
-        )],
-      }, { observedAt: this.now() }));
       return;
     }
 

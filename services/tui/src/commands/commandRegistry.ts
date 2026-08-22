@@ -1,7 +1,6 @@
 export type TuiCommandName =
   | 'help'
   | 'new'
-  | 'studio'
   | 'chat'
   | 'model'
   | 'policy'
@@ -46,10 +45,6 @@ const COMMANDS: readonly TuiCommandDefinition[] = [{
   name: 'new',
   usage: '/new',
   description: 'Start a new chat session',
-}, {
-  name: 'studio',
-  usage: '/studio [task]',
-  description: 'Enter Studio mode or run a Studio task',
 }, {
   name: 'chat',
   usage: '/chat',

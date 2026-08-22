@@ -139,7 +139,11 @@ test('invoke evaluates Toolkit availability before compiling its registry genera
   // Synchronous descriptors report static dependency resolution only.
   assert.equal(runtime.descriptor().capabilities[0]?.available, true);
 
-  await runtime.invoke({ brief: 'inspect' });
+  await runtime.invoke({
+    input: { kind: 'request', request: 'inspect' },
+    threadId: 'studio:s1:pet:p1',
+    invocationId: 'invocation-1',
+  });
 
   const registry = (calls[0]?.options as {
     configurable?: {
@@ -171,9 +175,11 @@ test('Studio pet invocation preserves a checkpointed review as a waiting gate', 
       calls.push({ input, options });
       return { messages: [new AIMessage('waiting')] };
     },
-    getState: async () => ({
-      tasks: [{ interrupts: [{ value: sampleReviewInterrupt }] }],
-    }),
+    getState: async () => calls.length === 0
+      ? { tasks: [], next: [] }
+      : {
+          tasks: [{ interrupts: [{ id: 'interrupt-1', value: sampleReviewInterrupt }] }],
+        },
   } as unknown as OrchestratorGraph;
   const runtime = createPetAgentRuntime({
     models: fakeModels(),
@@ -184,9 +190,10 @@ test('Studio pet invocation preserves a checkpointed review as a waiting gate', 
     checkpoint: {} as NonNullable<Parameters<typeof createPetAgentRuntime>[0]['checkpoint']>,
   });
 
-  await runtime.invoke({
-    brief: 'task that requires review',
-    threadId: 'studio:s1:pet:p1:dispatch:d1',
+  const result = await runtime.invoke({
+    input: { kind: 'request', request: 'task that requires review' },
+    threadId: 'studio:s1:pet:p1',
+    invocationId: 'invocation-1',
   });
 
   assert.deepEqual(
@@ -195,7 +202,105 @@ test('Studio pet invocation preserves a checkpointed review as a waiting gate', 
     } | undefined)?.configurable?.reviewCapabilities,
     { humanReview: true, sessionAuthorization: true },
   );
+  assert.equal(result.status, 'pending_interrupt');
+  assert.equal(
+    result.status === 'pending_interrupt'
+      ? result.pendingInterrupt.interruptId
+      : null,
+    'interrupt-1',
+  );
   assert.equal(runtime.gate(), 'waiting');
+});
+
+test('Studio pet rejects a stale interrupt id without invoking or mutating the graph', async () => {
+  let invokes = 0;
+  const snapshot = {
+    tasks: [{ interrupts: [{ id: 'interrupt-current', value: sampleReviewInterrupt }] }],
+  };
+  const graph = {
+    invoke: async () => {
+      invokes += 1;
+      return { messages: [new AIMessage('unexpected')] };
+    },
+    getState: async () => snapshot,
+  } as unknown as OrchestratorGraph;
+  const runtime = createPetAgentRuntime({
+    models: fakeModels(),
+    actor: fakeActor(),
+    graph,
+    checkpoint: {} as NonNullable<Parameters<typeof createPetAgentRuntime>[0]['checkpoint']>,
+  });
+
+  await assert.rejects(
+    () => runtime.invoke({
+      input: {
+        kind: 'resume_interrupt',
+        interruptId: 'interrupt-stale',
+        payload: {
+          kind: 'human_review_response',
+          responses: [{
+            interactionId: 'review-direct',
+            selectedOptionId: 'approve',
+          }],
+        },
+      },
+      threadId: 'studio:s1:pet:p1',
+      invocationId: 'invocation-2',
+    }),
+    /stale.*interrupt-current/i,
+  );
+  assert.equal(invokes, 0);
+  assert.equal(runtime.gate(), 'waiting');
+  assert.equal((await graph.getState({} as never)), snapshot);
+});
+
+test('Studio pet resumes a matching interrupt through a keyed LangGraph Command', async () => {
+  let waiting = true;
+  const calls: unknown[] = [];
+  const graph = {
+    invoke: async (input: unknown) => {
+      calls.push(input);
+      waiting = false;
+      return { messages: [new AIMessage('resumed')] };
+    },
+    getState: async () => waiting
+      ? {
+          tasks: [{ interrupts: [{ id: 'interrupt-1', value: sampleReviewInterrupt }] }],
+        }
+      : { tasks: [], next: [] },
+  } as unknown as OrchestratorGraph;
+  const runtime = createPetAgentRuntime({
+    models: fakeModels(),
+    actor: fakeActor(),
+    graph,
+    checkpoint: {} as NonNullable<Parameters<typeof createPetAgentRuntime>[0]['checkpoint']>,
+  });
+
+  const result = await runtime.invoke({
+    input: {
+      kind: 'resume_interrupt',
+      interruptId: 'interrupt-1',
+      payload: {
+        kind: 'human_review_response',
+        responses: [{
+          interactionId: 'review-direct',
+          selectedOptionId: 'approve',
+        }],
+      },
+    },
+    threadId: 'studio:s1:pet:p1',
+    invocationId: 'invocation-2',
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(runtime.gate(), 'open');
+  assert.equal(calls.length, 1);
+  assert.ok(isCommand(calls[0]));
+  assert.deepEqual((calls[0] as { resume?: unknown }).resume, {
+    'interrupt-1': {
+      decisions: [{ reviewId: 'review-direct', selectedOptionId: 'approve' }],
+    },
+  });
 });
 
 test('invoke starts Toolkit roots before evaluating runtime-dependent availability', async () => {
@@ -239,7 +344,11 @@ test('invoke starts Toolkit roots before evaluating runtime-dependent availabili
     toolkitRuntimeManager,
   });
 
-  await runtime.invoke({ brief: 'inspect' });
+  await runtime.invoke({
+    input: { kind: 'request', request: 'inspect' },
+    threadId: 'studio:s1:pet:p1',
+    invocationId: 'invocation-1',
+  });
   const registry = (calls[0]?.options as {
     configurable?: { registry?: { capabilities?: Array<{ capability: { name: string } }> } };
   } | undefined)?.configurable?.registry;
@@ -276,11 +385,14 @@ test('pet runtime does not replace an explicitly configured wiki Capability', as
   });
 
   const result = await runtime.invoke({
-    brief: 'read wiki',
+    input: { kind: 'request', request: 'read wiki' },
+    threadId: 'studio:s1:pet:p1',
+    invocationId: 'invocation-1',
     wikiRoot: '/tmp/pinpawo-test-wiki',
   });
 
-  assert.equal(result.reply, 'done');
+  assert.equal(result.status, 'completed');
+  assert.equal(result.status === 'completed' ? result.reply : null, 'done');
   const configurable = (calls[0]?.options as {
     configurable?: {
       registry?: {

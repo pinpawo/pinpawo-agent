@@ -80,10 +80,8 @@ export async function startStudioHostStdio(
     // Redirect before Host initialization: plugin/capability startup logs are
     // diagnostics too and must never corrupt JSONL protocol stdout.
     host = await initializeHost(options);
-    const runtimeConfig = host.getRuntimeConfig();
     const transport = startStudioStdioTransport({
       studio: host.getStudio(),
-      workdir: runtimeConfig.workdir,
     }, transportOptions);
     return ownHostLifecycle(host, transport, restoreConsole);
   } catch (error) {
@@ -101,10 +99,8 @@ export async function startStudioHostWebSocket(
 ): Promise<RunningStudioHost> {
   const host = await initializeHost(options);
   try {
-    const runtimeConfig = host.getRuntimeConfig();
     const transport = await startStudioWebSocketTransport(port, {
       studio: host.getStudio(),
-      workdir: runtimeConfig.workdir,
     }, transportOptions);
     return ownHostLifecycle(host, transport);
   } catch (error) {

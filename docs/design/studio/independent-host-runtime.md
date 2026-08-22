@@ -2,7 +2,7 @@
 
 > 状态：Draft implementation contract
 > 对应：#643，基于 `origin/main@80b6f2ac` 的运行时复核
-> 更新：2026-08-21
+> 更新：2026-08-23
 
 本文补足“Studio 已提取成独立类”之后仍需成立的运行时边界。它不重新定义
 Host / Agent / Capability / Toolkit 领域关系；该关系以
@@ -14,7 +14,7 @@ Host / Agent / Capability / Toolkit 领域关系；该关系以
 Chat Host                         Studio Host
   Chat/TUI session stack            resident Studio
   chat checkpoint root              Studio checkpoint root
-  chat HITL/control face             gate projection + optional control plugins
+  chat HITL/control face             invocation projection + optional interaction plugins
           \                         /
              pinpawo/host-runtime
              HostCapabilityAssembly
@@ -28,8 +28,9 @@ Chat Host                         Studio Host
 也不是同一个 checkpoint writer root。
 
 `host-runtime` 是按 Host 职责划分的中性公共面，不是为了 Studio 建立的 support
-facade。`local-server-transport` 则明确是 local-agent wire protocol 的一种具体 adapter；
-它不冒充 Host runtime，也不属于 transport-independent Studio core。
+facade。`local-server-transport` 只暴露 protocol-neutral framing、peer 与 loopback
+认证原语；Chat 与 Studio 分别拥有自己的 message contract、parser 和 dispatcher。
+这些 transport 原语不冒充 Host runtime，也不属于 transport-independent Studio core。
 
 package 依赖方向固定为：
 
@@ -66,7 +67,7 @@ Studio。每个 Pet 的 Capability 目录也必须在 resident runtime 构建前
   `stop()`。
 - `shutdown()` 之后拒绝新 dispatch；已经入队但尚未开始的 dispatch 不得再调用 pet。
 - `shutdown()` 取消并等待 active dispatch 退出后，才停止 plugin 与共享 Toolkit runtime；
-  checkpointed waiting dispatch 只解除队列等待，不删除其持久化 continuation。
+  durable interrupt 已经结束当前 invocation，shutdown 不删除其 checkpoint continuation。
 - transport 断开只删除该 peer 的 route，不关闭 resident Studio；Host shutdown 才关闭它。
 
 ### 2.2 持久化所有权
@@ -89,17 +90,16 @@ Studio。每个 Pet 的 Capability 目录也必须在 resident runtime 构建前
 
 - Studio Host 不构造 `LocalAgentGraphService`、`LocalServerTuiSessionService` 或
   `LocalServerChatHandler`。
-- 每次外部 request 创建不可碰撞的内部 route id，并作为 dispatch `correlationId`。
-- 只有显式携带该 correlation 的 plugin event 才能投射回对应 peer/request；无 correlation
+- 每次外部 request 创建不可碰撞的内部 route id，并放在 producer-owned `metadata` 中。
+- 只有显式携带该 route metadata 的 plugin event 才能投射回对应 peer/request；无 route
   的全局事件不能广播给所有连接，也不能归到“该 peer 最近一次请求”。
-- dispatch gate 通过 Host control subscription 投射为 `studio.dispatch.gate` progress；
-  `open`/`blocked` 后释放 route。
+- invocation 通过 Host control subscription 投射为 `studio.invocation` progress；
+  到达 completed/pending_interrupt/failed/cancelled 后释放本次 transport route。
 
 ### 2.4 HITL
 
 LangGraph 已经把 interrupt、pending continuation 与 thread state 持久化到 checkpoint；
-waiting 不是 Chat Host 的进程内状态，也不要求 Studio core 理解 review。因此 Pet adapter
-保留 review 能力：
+waiting 不是 Chat Host 的进程内状态。Pet adapter 保留 review 能力：
 
 ```ts
 reviewCapabilities = {
@@ -108,33 +108,34 @@ reviewCapabilities = {
 }
 ```
 
-需要人工确认的 Toolkit operation 可以产生 checkpointed interrupt；`invoke()` 返回后 Pet
-gate 保持 `waiting`，Studio 队列停在该 dispatch。没有控制插件时它可以一直卡住，这比在
-核心层改变 review policy 更符合持久化执行语义。
+需要人工确认的 Toolkit operation 可以产生 checkpointed interrupt；这会让当前 invocation
+以 `pending_interrupt` 结束并释放 active queue slot，但不会结束或删除 Pet thread。没有交互
+Plugin 时 checkpoint 可以一直等待，这比在核心层改变 review policy 更符合持久化执行语义。
 
-当前内建 Studio transport 仍不复用 Chat 的 `human_review_response`、session 或 run-control
-协议，因为它不拥有 Chat session state。交互能力应由独立 Studio plugin/Host adapter 提供：
-它读取 pending action，把事件投射给用户交互层，并用 Host-owned graph/checkpointer 对同一
-thread 执行 resume。Studio core 只观察 gate，不新增 review 领域概念。
+Studio transport 不复用 Chat 的 session 或 run-control 协议，因为它不拥有 Chat session
+state。它接受 Studio 自己的 typed `resume_interrupt` dispatch。交互能力由独立 Studio
+Plugin/Host adapter 提供：它观察公开 `PendingInterrupt` 投射，把事件送给用户交互层，再把
+回答作为一次新的 dispatch 送回同一 Pet。Pet runtime 对 checkpoint 校验 interrupt identity、
+解析公开回答并构造 LangGraph resume；Studio core 只搬运 typed input/result，不解释选项。
 
-checkpoint 已兜底保存中断状态，但当前实现尚未在进程重启后自动重建 dispatch route、gate
-订阅和用户侧 pending-action 投射；这些属于控制插件的恢复索引与授权边界，不应以关闭
-runtime HITL 的方式代替。
+checkpoint 已兜底保存中断状态，稳定 Pet thread 在进程重启后仍能恢复；一次性的 transport
+route 不做重建。用户侧 pending-action 索引、授权与断线重放属于交互 Plugin 的持久化边界，
+不应以关闭 runtime HITL 的方式代替。
 
 ## 3. 验收测试
 
-- shutdown 后 active dispatch 收到取消、queued dispatch 不 invoke；waiting dispatch 不阻塞 shutdown。
+- shutdown 后 active dispatch 收到取消、queued dispatch 不 invoke；pending interrupt 不阻塞 shutdown。
 - plugin partial-start failure 逆序 rollback。
 - 同一 checkpoint root 的第二个 Host writer lease 被拒绝；owner 释放或 dead-owner 安全恢复后
   才能启动。两个 `FileSaver` 实例并发 `putWrites` 不丢 sibling writes。
-- Studio event 按 correlation 精确归属；无关联事件不跨 peer 广播。
-- Studio transport 明确拒绝 Chat/HITL/session control。
+- Studio event 按 route metadata 精确归属；无关联事件不跨 peer 广播。
+- Studio transport 接受 typed interrupt resume，但明确拒绝 Chat session/run control。
 - Studio Pet invocation 保留 human review/session authorization capability，使 interrupt 可落入 checkpoint。
 - `StudioHost` success/failure init 均按所有权顺序释放资源。
 
 ## 4. 尚未纳入
 
-- 独立 Studio HITL/control plugin，以及重启后的 pending-action/dispatch-route 重建。
+- 独立 Studio interaction Plugin，以及重启后的 pending-action 索引。
 - durable event log 与断线重放。
 - HTTP trigger、scheduler、Kanban 持久化与 Plugin discovery；这些仍由 #638/#645
   继续设计。独立进程入口见

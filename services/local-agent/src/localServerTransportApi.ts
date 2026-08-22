@@ -1,24 +1,34 @@
 /**
- * Public adapter for the local-agent wire protocol and its loopback/stdio
- * transports.
+ * Public loopback/stdio framing primitives plus the Chat Host adapter.
  *
  * This is deliberately separate from `host-runtime`: it is one concrete local
  * transport adapter, not part of Host capability assembly and not a
  * transport-independent Studio contract.
  */
-export { startLocalServerTransport } from './localServerTransport';
+export {
+  startLocalServerTransport,
+  startLocalServerWireTransport,
+} from './localServerTransport';
 export type {
   LocalServerTransport,
   LocalServerTransportOptions,
 } from './localServerTransport';
 export {
   attachLocalServerStdioTransport,
+  attachLocalServerWireStdioTransport,
   redirectConsoleToStdioDiagnostics,
 } from './localServerStdioTransport';
 export type {
   LocalServerStdioTransport,
+  LocalServerWireStdioTransport,
   LocalServerStdioTransportOptions,
 } from './localServerStdioTransport';
+export type {
+  LocalServerWireHandlers,
+  LocalServerWireLogError,
+  LocalServerWireLogWarn,
+  LocalServerWirePeer,
+} from './localServerWire';
 export type {
   LocalServerLogError,
   LocalServerLogWarn,
@@ -27,7 +37,4 @@ export type {
 } from './localServerMessageDispatcher';
 export type { LocalServerPeer } from './localServerPeer';
 export { sendLocalServerPeerEvent } from './localServerPeer';
-export type {
-  LocalAgentServerMessage,
-  StudioRequestMessage,
-} from './localAgentProtocol';
+export type { LocalAgentServerMessage } from './localAgentProtocol';

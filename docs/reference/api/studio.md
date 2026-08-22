@@ -33,46 +33,85 @@ plugin start rejects construction.
 ```ts
 type Studio = {
   entryPetId: string;
-  dispatch(input: StudioDispatchInput): Promise<StudioDispatchResult>;
-  onDispatchGate(handler: StudioDispatchGateHandler): () => void;
+  dispatch(input: StudioDispatchRequest): Promise<StudioDispatchReceipt>;
+  onInvocation(handler: StudioInvocationEventHandler): () => void;
   notify(event: StudioEvent): void;
   subscribe(handler: StudioEventHandler): () => void;
   listPets(): PetAgentRuntimeDescriptor[];
   shutdown(): Promise<void>;
 };
 
-type StudioDispatchInput = {
+type StudioDispatchRequest = {
   petId: string;
-  request: string;
-  correlationId?: string;
+  input:
+    | { kind: 'request'; request: string }
+    | {
+        kind: 'resume_interrupt';
+        interruptId: string;
+        payload: {
+          kind: 'human_review_response';
+          responses: HumanReviewResponse[];
+        };
+      };
+  metadata?: JsonObject;
+  idempotencyKey?: string;
   signal?: AbortSignal;
 };
 
-type StudioDispatchResult = { threadId: string };
+type StudioDispatchReceipt = {
+  petId: string;
+  threadId: string;
+  invocationId: string;
+  metadata?: JsonObject;
+  completion: Promise<StudioDispatchResult>;
+};
+
+type StudioDispatchResult = {
+  petId: string;
+  threadId: string;
+  invocationId: string;
+  status: 'completed' | 'pending_interrupt' | 'failed' | 'cancelled';
+  metadata?: JsonObject;
+  output?: string;
+  pendingInterrupt?: PendingInterruptProjection;
+  error?: string;
+};
 
 type StudioEvent = {
   type: string;
   source: string;
-  correlationId?: string;
+  metadata?: JsonObject;
   payload?: unknown;
   occurredAt: string;
 };
 ```
 
-`dispatch()` accepts delivery to a configured, non-disabled pet and returns a
-new `threadId` immediately. It queues the runtime invocation and does not mean
-that work has completed. It throws only when Studio has shut down, the pet is
-unknown, or the pet is disabled. A busy pet is queued, not rejected.
+`dispatch()` accepts delivery to a configured, non-disabled Pet and immediately
+returns a receipt. `threadId` is stable for the `(studioId, petId)` pair;
+`invocationId` is new for every accepted call unless an explicit
+`idempotencyKey` finds an existing call. Acceptance does not mean the graph work
+has completed. The receipt's `completion` promise settles with a terminal result.
+
+One Pet executes at most one invocation at a time. A durable interrupt settles
+the current invocation as `pending_interrupt` and releases the queue slot. A
+later typed resume creates a different invocation on the same Pet thread. The
+Pet runtime validates the interrupt against its authoritative checkpoint; a
+stale resume fails without mutating it.
+
+Producer `metadata` is opaque and is copied into receipts, results, and
+invocation events. It never replaces Studio, Pet, thread, invocation, or
+interrupt identity. An `idempotencyKey` is scoped to one Pet and retained for
+the current Host generation.
 
 `notify()` fans a complete event out to current subscribers. Notification
 handlers run asynchronously; an error in one is isolated from the publisher and
 other subscribers. The API does not persist, replay, validate, or correlate
 event payloads.
 
-`onDispatchGate()` is the Host control subscription. Unlike the plugin-scoped
-callback below, it observes direct Host dispatches as well as plugin dispatches.
-It is intended for a transport to project gate state and release its request
-correlation when work reaches `open` or `blocked`.
+`onInvocation()` is the Host control subscription. It observes `busy` and
+terminal events for direct Host and Plugin dispatches. Unlike the generic event
+bus, it is an execution observation channel with explicit Pet/thread/invocation
+identity. It is in-memory and has no replay guarantee.
 
 `listPets()` returns descriptors only, not runtime references. This keeps all
 plugin-originated work on the dispatch boundary.
@@ -101,28 +140,32 @@ When a Plugin starts, it receives this context:
 
 ```ts
 type StudioPluginContext = {
-  dispatch(input: StudioDispatchInput): Promise<StudioDispatchResult>;
-  onDispatchGate(handler: StudioDispatchGateHandler): () => void;
+  dispatch(input: StudioDispatchRequest): Promise<StudioDispatchReceipt>;
+  onInvocation(handler: StudioInvocationEventHandler): () => void;
   notify(event: StudioEventInput): void;
   subscribe(handler: StudioEventHandler): () => void;
   listPets(): PetAgentRuntimeDescriptor[];
 };
 ```
 
-The context assigns the plugin's `source` and the event timestamp. Its gate
-handler sees changes only for dispatches initiated by that plugin:
+The context assigns the Plugin's `source` and event timestamp. Its invocation
+handler sees only dispatches initiated by that Plugin:
 
 ```ts
-type StudioDispatchGateChange = {
-  threadId: string;
+type StudioInvocationEvent = {
   petId: string;
-  correlationId?: string;
-  state: 'open' | 'busy' | 'waiting' | 'blocked';
+  threadId: string;
+  invocationId: string;
+  status: 'busy' | 'completed' | 'pending_interrupt' | 'failed' | 'cancelled';
+  metadata?: JsonObject;
+  output?: string;
+  pendingInterrupt?: PendingInterruptProjection;
+  error?: string;
 };
 ```
 
-The callback is a progress signal. It is not a result channel and has no
-durability or replay guarantee.
+The callback is a live projection of the same result lifecycle. The durable
+source of interrupt existence remains the Pet checkpoint, not this callback.
 
 If plugin startup fails, Studio calls `stop()` in reverse order for every
 plugin that may have started, including the plugin whose `start()` rejected.
@@ -136,16 +179,21 @@ A host supplies the runnable pets:
 ```ts
 type PetAgentRuntime = {
   descriptor(): PetAgentRuntimeDescriptor;
-  invoke(input: PetAgentRuntimeInvokeInput): Promise<{ reply: string }>;
+  invoke(input: PetAgentRuntimeInvokeInput): Promise<
+    | { status: 'completed'; reply: string }
+    | { status: 'pending_interrupt'; pendingInterrupt: PendingInterruptProjection }
+  >;
   gate(): 'open' | 'busy' | 'waiting' | 'blocked';
   onGateChange(listener: (state: PetGateState) => void): () => void;
   shutdown?(): Promise<void>;
 };
 ```
 
-Studio uses `gate()` and `onGateChange()` to protect its per-pet queue. A
-runtime must signal `open` after any pending continuation is actually complete.
-The local adapter is documented in [Pet Runtime API](pet-runtime.md).
+The invocation input carries the typed request/resume, resolved stable
+`threadId`, current `invocationId`, and opaque metadata. The runtime owns
+checkpoint interpretation and resume validation. `gate()` is retained as a
+Host diagnostic; Studio does not keep an invocation alive or block its queue on
+`waiting`. The local adapter is documented in [Pet Runtime API](pet-runtime.md).
 
 ## Configuration exports
 

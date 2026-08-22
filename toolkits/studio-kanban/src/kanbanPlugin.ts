@@ -8,12 +8,11 @@
  * 全程 studio 不理解任何看板概念,pet 也不知道自己在驱动一块看板。
  */
 
-import { tool, type ToolRuntime } from '@langchain/core/tools';
+import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import type {
   AgentToolkit,
   NamedStructuredTool,
-  SubagentRuntimeContext,
 } from '@pinpawo/pet-agent';
 import type { StudioPlugin, StudioPluginContext } from '@pinpawo/studio';
 
@@ -29,12 +28,17 @@ function describeTask(task: KanbanTask): string {
   return `${task.taskId} [${task.status}] pet=${task.petId}${deps} ${task.brief}${note}`;
 }
 
-function buildTools(board: KanbanBoard): NamedStructuredTool[] {
-  const currentTask = (runtime: ToolRuntime<unknown, SubagentRuntimeContext>) => {
-    const threadId = runtime.context?.executionScope?.threadId;
-    return threadId ? board.findByThread(threadId) : undefined;
-  };
+function buildTaskRequest(task: KanbanTask): string {
+  return [
+    `Kanban taskId: ${task.taskId}`,
+    '',
+    task.brief,
+    '',
+    'When reporting completion or a block, pass this taskId to the Kanban tool.',
+  ].join('\n');
+}
 
+function buildTools(board: KanbanBoard): NamedStructuredTool[] {
   const listTasks = tool(
     async () => {
       const tasks = board.list();
@@ -70,32 +74,44 @@ function buildTools(board: KanbanBoard): NamedStructuredTool[] {
   );
 
   const completeTask = tool(
-    async (input, runtime: ToolRuntime<unknown, SubagentRuntimeContext>) => {
-      const task = currentTask(runtime);
-      if (!task) return 'no task is currently assigned to you; nothing to complete';
+    async (input) => {
+      const task = board.get(input.taskId);
+      if (!task) return `unknown Kanban taskId "${input.taskId}"`;
+      if (task.status !== 'doing') {
+        return `Kanban task "${input.taskId}" is ${task.status}, not doing`;
+      }
       board.complete(task.taskId, input.result);
       return `completed ${task.taskId}`;
     },
     {
       name: 'kanban_task_complete',
-      description: '标记你当前的任务已完成，并附上结果供后续任务参考。',
-      schema: z.object({ result: z.string().describe('完成结果或产出摘要') }),
+      description: '按 taskId 标记任务已完成，并附上结果供后续任务参考。',
+      schema: z.object({
+        taskId: z.string().describe('派发请求中给出的 Kanban taskId'),
+        result: z.string().describe('完成结果或产出摘要'),
+      }),
     },
   );
 
   const blockTask = tool(
-    async (input, runtime: ToolRuntime<unknown, SubagentRuntimeContext>) => {
-      const task = currentTask(runtime);
-      if (!task) return 'no task is currently assigned to you; nothing to block';
+    async (input) => {
+      const task = board.get(input.taskId);
+      if (!task) return `unknown Kanban taskId "${input.taskId}"`;
+      if (task.status !== 'doing') {
+        return `Kanban task "${input.taskId}" is ${task.status}, not doing`;
+      }
       board.block(task.taskId, input.reason);
       return `blocked ${task.taskId}`;
     },
     {
       name: 'kanban_task_block',
       description:
-        '当你无法完成当前任务时调用，并说明原因。它不会自动重试 —— '
+        '按 taskId 标记无法完成的任务，并说明原因。它不会自动重试 —— '
         + '任务会留在看板上等人决定。',
-      schema: z.object({ reason: z.string().describe('卡住的原因') }),
+      schema: z.object({
+        taskId: z.string().describe('派发请求中给出的 Kanban taskId'),
+        reason: z.string().describe('卡住的原因'),
+      }),
     },
   );
 
@@ -137,14 +153,10 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
     const pluginContext = context;
     for (const task of board.ready()) {
       // 先占位再派发,避免同一轮里被重复挑中。
-      board.markDispatched(task.taskId, '');
+      board.markDispatched(task.taskId);
       void pluginContext.dispatch({
         petId: task.petId,
-        request: task.brief,
-        // correlationId 让订阅方把 event 与这次派发对上。
-        correlationId: task.taskId,
-      }).then((result) => {
-        board.markDispatched(task.taskId, result.threadId);
+        input: { kind: 'request', request: buildTaskRequest(task) },
       }).catch((error) => {
         board.block(task.taskId, error instanceof Error ? error.message : String(error));
       });
@@ -160,8 +172,7 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
       unsubscribe = board.subscribe((task) => {
         pluginContext.notify({
           type: `task.${task.status}`,
-          correlationId: task.taskId,
-          payload: { petId: task.petId, note: task.note },
+          payload: { taskId: task.taskId, petId: task.petId, note: task.note },
         });
         // 任一状态变化都可能解锁别的任务的依赖。
         dispatchReady();

@@ -2,7 +2,6 @@ import type { AgentSession } from '@pinpawo/agent-session';
 import stringWidth from 'string-width';
 import {
   COMPOSER_PLACEHOLDER,
-  STUDIO_COMPOSER_PLACEHOLDER,
 } from '../input/composerKeyBindings';
 import { formatPolicyMode } from '../overlays/policyPickerModel';
 import type {
@@ -124,9 +123,7 @@ export function formatComposerPlaceholder(
   if (run) {
     return `Waiting for ${actor} · draft next message · Esc interrupt`;
   }
-  return composerMode === 'studio'
-    ? STUDIO_COMPOSER_PLACEHOLDER
-    : COMPOSER_PLACEHOLDER;
+  return COMPOSER_PLACEHOLDER;
 }
 
 export function formatUsage(session: AgentSession) {

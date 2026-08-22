@@ -3,9 +3,6 @@ import type { TextareaOptions } from '@opentui/core';
 export const COMPOSER_PLACEHOLDER =
   'Message · Enter to send · Shift+Enter newline';
 
-export const STUDIO_COMPOSER_PLACEHOLDER =
-  'Studio task · Enter to run · Shift+Enter newline · /chat to exit';
-
 export const COMPOSER_KEY_BINDINGS = [
   {
     name: 'return',

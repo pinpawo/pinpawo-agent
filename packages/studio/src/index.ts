@@ -7,17 +7,22 @@
 export { createStudio } from './createStudio';
 export type { CreateStudioInput } from './createStudio';
 export type {
+  PendingInterruptProjection,
   Studio,
-  StudioDispatchGateChange,
-  StudioDispatchGateHandler,
   StudioDispatchInput,
+  StudioDispatchReceipt,
+  StudioDispatchRequest,
   StudioDispatchResult,
   StudioEvent,
   StudioEventHandler,
   StudioEventInput,
   StudioPlugin,
   StudioPluginContext,
+  StudioInvocationEvent,
+  StudioInvocationEventHandler,
+  StudioInvocationTerminalStatus,
 } from './studioContract';
+export { buildStudioPetThreadId } from './studioInvocation';
 
 export {
   petLocalConfigSchema,
@@ -58,8 +63,18 @@ export { createPetAgentRuntime } from './host/createPetAgentRuntime';
 export type { PetAgentRuntimeConfig } from './host/createPetAgentRuntime';
 export {
   StudioRequestHandler,
-  createStudioPeerHandlers,
+  createStudioWireHandlers,
 } from './transport/StudioRequestHandler';
+export {
+  parseStudioClientMessage,
+  readStudioClientMessageEnvelope,
+} from './transport/studioProtocol';
+export type {
+  StudioClientMessage,
+  StudioClientMessageEnvelope,
+  StudioDispatchMessage,
+  StudioServerMessage,
+} from './transport/studioProtocol';
 export {
   startStudioStdioTransport,
   startStudioWebSocketTransport,

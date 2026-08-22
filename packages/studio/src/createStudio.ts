@@ -2,34 +2,35 @@ import { randomUUID } from 'node:crypto';
 
 import type {
   Studio,
-  StudioDispatchGateChange,
-  StudioDispatchGateHandler,
-  StudioDispatchInput,
-  StudioDispatchResult,
   StudioEvent,
   StudioEventHandler,
   StudioEventInput,
   StudioPlugin,
   StudioPluginContext,
 } from './studioContract';
-import type { PetAgentRuntime, PetAgentRuntimeDescriptor, PetGateState } from './types';
+import {
+  buildStudioPetThreadId,
+  type StudioDispatchReceipt,
+  type StudioDispatchRequest,
+  type StudioDispatchResult,
+  type StudioInvocationEvent,
+  type StudioInvocationEventHandler,
+} from './studioInvocation';
+import type { PetAgentRuntime, PetAgentRuntimeDescriptor } from './types';
 
 export type CreateStudioInput = {
   studioId: string;
-  /** 本 studio 可派活的 pet。 */
   pets: PetAgentRuntime[];
-  /** 外部输入默认派给谁;必须在 `pets` 中。 */
   entryPetId: string;
-  /** 装哪些插件。顺序即 start 顺序。 */
   plugins?: StudioPlugin[];
 };
 
 /**
- * 创建一块 studio 插板。
+ * Create one resident Studio registry and invocation coordinator.
  *
- * 它只做三件事:持有 pet registry、提供 `dispatch` 出口、维护 `event` 总线。
- * 任务队列、依赖、进度、调度时机、重试全部属于插件 —— studio 不认识它们,
- * 也不持有由 event 推导出的任何状态。
+ * Every Pet owns one deterministic graph thread. Dispatches are serialized by
+ * Pet, but a durable interrupt settles its invocation and releases the queue;
+ * a later typed dispatch resumes the same checkpoint.
  */
 export async function createStudio(input: CreateStudioInput): Promise<Studio> {
   const petsById = new Map<string, PetAgentRuntime>();
@@ -57,168 +58,67 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
     }
     pluginNames.add(plugin.name);
   }
-  const handlers = new Set<StudioEventHandler>();
+
+  const eventHandlers = new Set<StudioEventHandler>();
+  const invocationHandlers = new Map<string, Set<StudioInvocationEventHandler>>();
+  const hostInvocationHandlers = new Set<StudioInvocationEventHandler>();
+  const queues = new Map<string, Promise<void>>();
+  const activeInvocations = new Map<string, AbortController>();
+  const idempotencyRecords = new Map<string, StudioDispatchReceipt>();
   let stopped = false;
-
-  /**
-   * 每个插件订阅的 dispatch 闸门回调。按插件分组存放,`stop` 时整组清掉 ——
-   * 插件停了还留着它的闭包,studio 就成了泄漏源。
-   */
-  const gateHandlers = new Map<string, Set<StudioDispatchGateHandler>>();
-  /** Host 控制面订阅所有 dispatch；插件订阅仍按 source 隔离。 */
-  const hostGateHandlers = new Set<StudioDispatchGateHandler>();
-  /**
-   * threadId → 这次派活是谁发起的,用于把闸门变化只送回发起方。
-   * `source` 为 undefined 表示宿主派的 —— 没有插件在听。
-   */
-  const dispatchOrigins = new Map<string, {
-    source?: string;
-    petId: string;
-    correlationId?: string;
-  }>();
-
-  function emitGateChange(threadId: string, state: PetGateState): void {
-    const origin = dispatchOrigins.get(threadId);
-    if (!origin) return;
-
-    const change: StudioDispatchGateChange = {
-      threadId,
-      petId: origin.petId,
-      ...(origin.correlationId ? { correlationId: origin.correlationId } : {}),
-      state,
-    };
-    const listeners = [
-      ...hostGateHandlers,
-      ...(origin.source ? gateHandlers.get(origin.source) ?? [] : []),
-    ];
-    for (const handler of listeners) {
-      void (async () => {
-        try {
-          await handler(change);
-        } catch (error) {
-          console.error(
-            `[studio] dispatch gate handler failed (source=${origin.source ?? 'host'}, thread=${threadId}):`,
-            error instanceof Error ? error.message : error,
-          );
-        }
-      })();
-    }
-  }
 
   function listPets(): PetAgentRuntimeDescriptor[] {
     return [...petsById.values()].map((pet) => pet.descriptor());
   }
 
   function subscribe(handler: StudioEventHandler): () => void {
-    handlers.add(handler);
-    return () => handlers.delete(handler);
+    eventHandlers.add(handler);
+    return () => eventHandlers.delete(handler);
   }
 
   function notify(event: StudioEvent): void {
-    for (const handler of handlers) {
-      // 一个订阅方抛错不应牵连其他订阅方,也不应回溯影响发布方 ——
-      // event 是单向通知,发出即结束。
-      void (async () => {
-        try {
-          await handler(event);
-        } catch (error) {
-          console.error(
-            `[studio] event handler failed (type=${event.type}, source=${event.source}):`,
-            error instanceof Error ? error.message : error,
-          );
-        }
-      })();
+    for (const handler of eventHandlers) {
+      void invokeObserver(
+        () => handler(event),
+        `[studio] event handler failed (type=${event.type}, source=${event.source})`,
+      );
     }
   }
 
-  /**
-   * 每个 pet 一条队列。studio 收下所有 dispatch,pet 空了就发 ——
-   * **插件完全不用关心 pet 忙不忙。**
-   *
-   * 这是"所有派活必经 studio"要解决的实际问题:多个插件(kanban、scheduler、
-   * http…)会并发给同一个 pet 派活。若不排队,第二个撞上 `status === 'active'`
-   * 就被拒,派活凭空丢掉 —— 而"失败留着等人"(§2.2)说的是任务失败,不是
-   * "插板忙,请稍后"。这两件事不该被混成同一个错误。
-   *
-   * 排队不是业务:它不决定派给谁(那是插件的事),只保证已经收下的派活不会
-   * 因为撞车而丢。与 `notify` 保证每个订阅者都收到是同一类事。
-   */
-  const queues = new Map<string, Promise<void>>();
-
-  /**
-   * Studio owns one cancellation controller for every invocation it starts.
-   * A caller signal may cancel its own dispatch; the Host-owned signal also
-   * lets shutdown stop active work before plugin/Toolkit resources disappear.
-   */
-  const activeInvocations = new Set<AbortController>();
-
-  /** shutdown 时用来叫醒所有卡在闸门上的等待,让队列干净地收尾。 */
-  const gateWaiters = new Set<() => void>();
-  function abortGateWaits(): void {
-    for (const abort of [...gateWaiters]) abort();
-    gateWaiters.clear();
+  function emitInvocation(event: StudioInvocationEvent, source?: string): void {
+    const listeners = [
+      ...hostInvocationHandlers,
+      ...(source ? invocationHandlers.get(source) ?? [] : []),
+    ];
+    for (const handler of listeners) {
+      void invokeObserver(
+        () => handler(event),
+        `[studio] invocation handler failed (invocation=${event.invocationId})`,
+      );
+    }
   }
 
-  /**
-   * 挂起,直到这个 pet 的闸门重新打开,并把过程中的每一次变化报给发起方。
-   *
-   * 门从 `waiting` / `blocked` 回到 `open`,只可能由外部控制面推动。Studio
-   * core 不假定具体 transport，也不解释 checkpoint 中的 interrupt；独立
-   * plugin/Host adapter 可以投射 pending action 并恢复同一 thread。
-   *
-   * 注意闸门是 **pet 级**的,而队列是 **dispatch 级**的:同一时刻这个 pet
-   * 上只有队列头那一条在跑,所以"门开了"就等价于"队列头这条走完了"。
-   * 这个等价关系依赖串行 —— 它正是队列存在的另一半理由。
-   *
-   * 返回 `true` 表示门真的开了;`false` 表示被 shutdown 打断。
-   */
-  function waitForGateOpen(pet: PetAgentRuntime, threadId: string): Promise<boolean> {
-    return new Promise((resolve) => {
-      let settled = false;
-      const finish = (unsubscribe: () => void, opened: boolean) => {
-        if (settled) return;
-        settled = true;
-        unsubscribe();
-        gateWaiters.delete(abort);
-        resolve(opened);
-      };
-      const unsubscribe = pet.onGateChange((state) => {
-        // 卡住期间的每一次转折(waiting → blocked 之类)都要报给发起方,
-        // 否则它只看到最初那一下,之后的变化全丢。
-        if (!settled && state !== 'open') emitGateChange(threadId, state);
-        if (state === 'open') finish(unsubscribe, true);
-      });
-      const abort = () => finish(unsubscribe, false);
-      gateWaiters.add(abort);
-      // 订阅与检查之间可能已经开了,补一次。
-      if (pet.gate() === 'open') finish(unsubscribe, true);
-      else if (stopped) abort();
-    });
-  }
-
-  function enqueue(petId: string, threadId: string, run: () => Promise<void>): void {
+  function enqueue(
+    petId: string,
+    run: () => Promise<StudioDispatchResult>,
+  ): Promise<StudioDispatchResult> {
     const tail = queues.get(petId) ?? Promise.resolve();
-    const guardedRun = async () => {
-      // shutdown 可能发生在入队之后、真正轮到这条 dispatch 之前。入队时的
-      // stopped 检查不够；必须在队列头实际执行时再检查一次。
-      if (stopped) {
-        dispatchOrigins.delete(threadId);
-        return;
-      }
-      await run();
-    };
-    const next = tail.then(guardedRun, guardedRun);
-    queues.set(petId, next);
-    // 队列跑空后清掉,避免 map 无限增长。
-    void next.finally(() => {
-      if (queues.get(petId) === next) queues.delete(petId);
+    const completion = tail.then(run, run);
+    const settled = completion.then(
+      () => undefined,
+      () => undefined,
+    );
+    queues.set(petId, settled);
+    void settled.finally(() => {
+      if (queues.get(petId) === settled) queues.delete(petId);
     });
+    return completion;
   }
 
   async function dispatch(
-    request: StudioDispatchInput,
+    request: StudioDispatchRequest,
     source?: string,
-  ): Promise<StudioDispatchResult> {
+  ): Promise<StudioDispatchReceipt> {
     if (stopped) {
       throw new Error(`studio "${input.studioId}": already shut down`);
     }
@@ -226,82 +126,121 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
     if (!pet) {
       throw new Error(`studio "${input.studioId}": unknown petId "${request.petId}"`);
     }
-    // 只拦永久不可派发的(disabled)。"正忙"不是错误 —— 那正是队列存在的理由。
     if (pet.descriptor().startupMode === 'disabled') {
       throw new Error(
         `studio "${input.studioId}": pet "${request.petId}" is disabled`,
       );
     }
 
-    const threadId = `studio:${input.studioId}:pet:${request.petId}:dispatch:${randomUUID()}`;
+    const idempotencyKey = request.idempotencyKey?.trim();
+    if (request.idempotencyKey !== undefined && !idempotencyKey) {
+      throw new Error('Studio dispatch idempotencyKey must not be empty.');
+    }
+    const idempotencyRecordKey = idempotencyKey
+      ? JSON.stringify([request.petId, idempotencyKey])
+      : null;
+    const existing = idempotencyRecordKey
+      ? idempotencyRecords.get(idempotencyRecordKey)
+      : undefined;
+    if (existing) return existing;
 
-    // 谁派的。插件派活时由 studio 从它的 context 补齐(插件填不了也不用填 ——
-    // 自报的来源迟早会撒谎),缺省表示不来自任何插件。
-    //
-    // **目前只做记录。** dispatch 是点对点的 —— 它不上 event 总线(那会让
-    // 每个插件都看见谁给谁派了活),也不进 pet.invoke(pet 不需要知道谁派的)。
+    const threadId = buildStudioPetThreadId(input.studioId, request.petId);
+    const invocationId = randomUUID();
+    const metadata = request.metadata
+      ? Object.freeze({ ...request.metadata })
+      : undefined;
+
     console.log(
-      `[studio] dispatch petId=${request.petId} source=${source ?? 'studio'} thread=${threadId}`,
+      `[studio] dispatch petId=${request.petId} source=${source ?? 'studio'} `
+      + `thread=${threadId} invocation=${invocationId}`,
     );
 
-    dispatchOrigins.set(threadId, {
-      ...(source ? { source } : {}),
-      petId: request.petId,
-      ...(request.correlationId ? { correlationId: request.correlationId } : {}),
-    });
+    const completion = enqueue(request.petId, async () => {
+      const base = {
+        petId: request.petId,
+        threadId,
+        invocationId,
+        ...(metadata ? { metadata } : {}),
+      };
+      if (stopped) {
+        const result: StudioDispatchResult = { ...base, status: 'cancelled' };
+        emitInvocation(result, source);
+        return result;
+      }
+      if (request.signal?.aborted) {
+        const result: StudioDispatchResult = { ...base, status: 'cancelled' };
+        emitInvocation(result, source);
+        return result;
+      }
 
-    // 排到该 pet 的队尾。dispatch 本身立即返回 —— studio 不等 pet 干完,
-    // 也不解释它的返回值。pet 的产出经由 toolkit → 插件 → event 汇报。
-    enqueue(request.petId, threadId, async () => {
-      emitGateChange(threadId, 'busy');
       const controller = new AbortController();
-      activeInvocations.add(controller);
+      activeInvocations.set(invocationId, controller);
       const signal = request.signal
         ? AbortSignal.any([request.signal, controller.signal])
         : controller.signal;
+      emitInvocation({ ...base, status: 'busy' }, source);
+
       try {
-        await pet.invoke({
-          brief: request.request,
+        const result = await pet.invoke({
+          input: request.input,
           threadId,
+          invocationId,
           signal,
         });
+        const completed: StudioDispatchResult = result.status === 'pending_interrupt'
+          ? {
+              ...base,
+              status: 'pending_interrupt',
+              pendingInterrupt: result.pendingInterrupt,
+            }
+          : {
+              ...base,
+              status: 'completed',
+              ...(result.reply ? { output: result.reply } : {}),
+            };
+        emitInvocation(completed, source);
+        return completed;
       } catch (error) {
-        // 派活失败只记录:判定与善后属于插件的领域,studio 不越权处理。
-        // Host shutdown 的取消不是业务失败；此时没有插件需要接收失败投射。
-        if (!(stopped && controller.signal.aborted)) {
+        const aborted = signal.aborted;
+        const message = error instanceof Error ? error.message : String(error);
+        const failed: StudioDispatchResult = {
+          ...base,
+          status: aborted ? 'cancelled' : 'failed',
+          ...(!aborted ? { error: message } : {}),
+        };
+        if (!aborted) {
           console.error(
-            `[studio] dispatch failed (petId=${request.petId}, threadId=${threadId}):`,
-            error instanceof Error ? error.message : error,
+            `[studio] invocation failed (petId=${request.petId}, invocation=${invocationId}):`,
+            message,
           );
         }
+        emitInvocation(failed, source);
+        return failed;
       } finally {
-        activeInvocations.delete(controller);
+        activeInvocations.delete(invocationId);
       }
-
-      // invoke 返回不等于活干完了 —— pet 撞到人工确认时会提前返回。真相在
-      // 闸门上:`waiting` / `blocked` 都还占着这个 pet,队列不放行下一条。
-      const state = pet.gate();
-      emitGateChange(threadId, state);
-      if (state !== 'open') {
-        const opened = await waitForGateOpen(pet, threadId);
-        // 人把门解开了 —— 发起方要知道自己这条终于走完了,否则它只看到
-        // 「卡住」而永远等不到收尾。shutdown 打断时不报:那条活并没有走完。
-        if (opened) emitGateChange(threadId, 'open');
-      }
-      dispatchOrigins.delete(threadId);
     });
 
-    return { threadId };
+    const receipt: StudioDispatchReceipt = Object.freeze({
+      petId: request.petId,
+      threadId,
+      invocationId,
+      ...(metadata ? { metadata } : {}),
+      completion,
+    });
+    if (idempotencyRecordKey) {
+      idempotencyRecords.set(idempotencyRecordKey, receipt);
+    }
+    return receipt;
   }
 
   function buildPluginContext(plugin: StudioPlugin): StudioPluginContext {
     return {
-      // source 由 studio 从 context 补,与 notify 同理。
-      dispatch: (request: StudioDispatchInput) => dispatch(request, plugin.name),
-      onDispatchGate: (handler: StudioDispatchGateHandler) => {
-        const listeners = gateHandlers.get(plugin.name) ?? new Set();
+      dispatch: (request) => dispatch(request, plugin.name),
+      onInvocation: (handler) => {
+        const listeners = invocationHandlers.get(plugin.name) ?? new Set();
         listeners.add(handler);
-        gateHandlers.set(plugin.name, listeners);
+        invocationHandlers.set(plugin.name, listeners);
         return () => listeners.delete(handler);
       },
       notify: (event: StudioEventInput) => notify({
@@ -315,21 +254,11 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
   }
 
   async function shutdown(): Promise<void> {
-    // 关上门:此后不再收 dispatch。否则派出去的活没有任何插件在听它的产出。
     stopped = true;
-    // 先取消正在运行的模型/工具调用。Plugin 与共享 Toolkit runtime 要等这些
-    // invocation 真正退出之后才能停止，否则仍在执行的 graph 会踩到已释放资源。
-    for (const controller of activeInvocations) {
+    for (const controller of activeInvocations.values()) {
       controller.abort(new Error(`studio "${input.studioId}" is shutting down`));
     }
-    // 唤醒所有卡在闸门上的队列。**不能等它们跑完** —— `waiting` / `blocked`
-    // 按设计可能永远等不到人(§2.2),等下去 shutdown 就永远返回不了。
-    // 队列因此在这里放弃等待:已排队未开始的活不会再派出去。
-    abortGateWaits();
-    // queued dispatch 会在 guardedRun 看到 stopped 后直接退出；active dispatch
-    // 已收到 abort。等队列 settle 后才进入 plugin/resource teardown。
     await Promise.allSettled([...queues.values()]);
-    // 逆序停止:后启动的插件可能依赖先启动的。
     for (const plugin of [...plugins].reverse()) {
       try {
         await plugin.stop?.();
@@ -339,31 +268,23 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
           error instanceof Error ? error.message : error,
         );
       } finally {
-        // 停干净与否都要清掉它的订阅。当前结尾的 gateHandlers.clear() 已经
-        // 兜住了这一条,所以这里是**防御性**的:一旦将来 shutdown 变成部分
-        // 停止(只停某个插件),清理就不能依赖 stop 有没有抛错。
-        gateHandlers.delete(plugin.name);
+        invocationHandlers.delete(plugin.name);
       }
     }
-    handlers.clear();
-    hostGateHandlers.clear();
-    gateHandlers.clear();
-    dispatchOrigins.clear();
+    eventHandlers.clear();
+    hostInvocationHandlers.clear();
+    invocationHandlers.clear();
+    idempotencyRecords.clear();
   }
 
-  // 插件启动失败必须让调用方看见 —— 一个没起来的驱动器意味着这块 studio
-  // 不会派活,静默吞掉会变成"提交了但什么都没发生"。
   const startedPlugins: StudioPlugin[] = [];
   try {
     for (const plugin of plugins) {
-      // 先登记再 start：即便 start 在完成一半后抛错，也给该插件一次 stop
-      // 机会清掉已经创建的 listener/timer/server。
       startedPlugins.push(plugin);
       await plugin.start(buildPluginContext(plugin));
     }
   } catch (error) {
     stopped = true;
-    abortGateWaits();
     for (const plugin of [...startedPlugins].reverse()) {
       try {
         await plugin.stop?.();
@@ -374,23 +295,31 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
         );
       }
     }
-    handlers.clear();
-    hostGateHandlers.clear();
-    gateHandlers.clear();
-    dispatchOrigins.clear();
+    eventHandlers.clear();
+    hostInvocationHandlers.clear();
+    invocationHandlers.clear();
+    idempotencyRecords.clear();
     throw error;
   }
 
   return {
     entryPetId: input.entryPetId,
     dispatch,
-    onDispatchGate: (handler) => {
-      hostGateHandlers.add(handler);
-      return () => hostGateHandlers.delete(handler);
+    onInvocation: (handler) => {
+      hostInvocationHandlers.add(handler);
+      return () => hostInvocationHandlers.delete(handler);
     },
     notify,
     subscribe,
     listPets,
     shutdown,
   };
+}
+
+async function invokeObserver(run: () => void | Promise<void>, context: string) {
+  try {
+    await run();
+  } catch (error) {
+    console.error(`${context}:`, error instanceof Error ? error.message : error);
+  }
 }

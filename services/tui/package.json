@@ -25,7 +25,6 @@
     "smoke:policy": "bun run src/main.ts --smoke-policy",
     "smoke:host": "bun run src/main.ts --smoke-host",
     "smoke:host-chat": "bun run src/main.ts --smoke-host-chat",
-    "smoke:studio": "bun run src/main.ts --smoke-studio",
     "smoke:spike": "bun run src/probes/viewportProbe.ts --smoke",
     "smoke:split": "bun run src/probes/splitFooterProbe.ts --smoke",
     "test:host": "bun test tests/localHost*.bun.test.ts",

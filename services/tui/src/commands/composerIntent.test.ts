@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { resolveComposerIntent } from './composerIntent';
 
-test('composer intent routes chat, Studio, and slash commands', () => {
+test('composer intent routes chat and slash commands', () => {
   assert.deepEqual(resolveComposerIntent({
     text: 'hello',
     attachmentCount: 0,
@@ -12,34 +12,9 @@ test('composer intent routes chat, Studio, and slash commands', () => {
     text: 'hello',
   });
   assert.deepEqual(resolveComposerIntent({
-    text: 'build it',
-    attachmentCount: 0,
-    mode: 'studio',
-  }), {
-    type: 'submit-studio',
-    text: 'build it',
-    enterMode: false,
-  });
-  assert.deepEqual(resolveComposerIntent({
-    text: '/studio inspect',
-    attachmentCount: 0,
-    mode: 'chat',
-  }), {
-    type: 'submit-studio',
-    text: 'inspect',
-    enterMode: true,
-  });
-  assert.deepEqual(resolveComposerIntent({
-    text: '/studio',
-    attachmentCount: 0,
-    mode: 'studio',
-  }), {
-    type: 'enter-chat',
-  });
-  assert.deepEqual(resolveComposerIntent({
     text: '/model',
     attachmentCount: 0,
-    mode: 'studio',
+    mode: 'chat',
   }), {
     type: 'open-model',
   });

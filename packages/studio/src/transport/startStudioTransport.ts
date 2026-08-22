@@ -1,34 +1,31 @@
 import {
-  attachLocalServerStdioTransport,
-  sendLocalServerPeerEvent,
-  startLocalServerTransport,
-  type LocalServerPeer,
+  attachLocalServerWireStdioTransport,
+  startLocalServerWireTransport,
   type LocalServerStdioTransportOptions,
   type LocalServerTransportOptions,
+  type LocalServerWirePeer,
 } from 'pinpawo/local-server-transport';
 import type { Studio } from '../studioContract';
 import {
-  createStudioPeerHandlers,
+  createStudioWireHandlers,
   StudioRequestHandler,
 } from './StudioRequestHandler';
+import type { StudioServerMessage } from './studioProtocol';
 
 export type StudioTransportInput = {
   studio: Studio;
-  workdir: string;
 };
 
 function composeStudioTransport(input: StudioTransportInput) {
-  const handler = new StudioRequestHandler<LocalServerPeer>({
+  const handler = new StudioRequestHandler<LocalServerWirePeer<StudioServerMessage>>({
     studio: input.studio,
-    workdir: input.workdir,
     outbound: {
-      sendMessage: (peer, message) => peer.send(message),
-      sendEvent: (peer, event) => sendLocalServerPeerEvent(peer, event),
+      send: (peer, message) => peer.send(message),
     },
   });
   return {
     handler,
-    peerHandlers: createStudioPeerHandlers(handler),
+    peerHandlers: createStudioWireHandlers(handler),
   };
 }
 
@@ -38,7 +35,7 @@ export async function startStudioWebSocketTransport(
   options: Omit<LocalServerTransportOptions, 'closeHandlers'> = {},
 ) {
   const composed = composeStudioTransport(input);
-  return startLocalServerTransport(port, composed.peerHandlers, {
+  return startLocalServerWireTransport(port, composed.peerHandlers, {
     ...options,
     closeHandlers: () => composed.handler.close(),
   });
@@ -49,7 +46,7 @@ export function startStudioStdioTransport(
   options: LocalServerStdioTransportOptions = {},
 ) {
   const composed = composeStudioTransport(input);
-  const transport = attachLocalServerStdioTransport(composed.peerHandlers, options);
+  const transport = attachLocalServerWireStdioTransport(composed.peerHandlers, options);
   return {
     ...transport,
     closed: transport.closed.finally(() => composed.handler.close()),

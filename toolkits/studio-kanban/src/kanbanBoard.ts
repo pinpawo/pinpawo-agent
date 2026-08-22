@@ -23,11 +23,6 @@ export type KanbanTask = {
   deps: string[];
   /** 完成时 pet 给出的结果;blocked 时是卡住的原因。 */
   note?: string;
-  /**
-   * 该任务被派出去时落在哪个 thread 上。工具据此认出"我在干哪个任务",
-   * 因此 pet 不需要转述任何 id。
-   */
-  threadId?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -76,11 +71,6 @@ export class KanbanBoard {
     return this.tasks.get(taskId);
   }
 
-  /** 找出该 thread 正在执行的任务 —— 工具据此认出调用者的身份。 */
-  findByThread(threadId: string): KanbanTask | undefined {
-    return this.list().find((task) => task.threadId === threadId && task.status === 'doing');
-  }
-
   /**
    * 依赖已满足且尚未派发的任务。
    *
@@ -94,8 +84,8 @@ export class KanbanBoard {
     ));
   }
 
-  markDispatched(taskId: string, threadId: string): void {
-    this.update(taskId, (task) => ({ ...task, status: 'doing', threadId }));
+  markDispatched(taskId: string): void {
+    this.update(taskId, (task) => ({ ...task, status: 'doing' }));
   }
 
   complete(taskId: string, note?: string): KanbanTask {

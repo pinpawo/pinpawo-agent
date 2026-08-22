@@ -13,4 +13,4 @@
 | 通过终端或进程运行 | [CLI 参考](cli.md) |
 | 处理失败和遥测 | [错误处理（英文）](../../../reference/api/error-handling.md) |
 
-Pet runtime 拥有单个 Agent 的执行、Capability 选择、工具调用和审核继续；Studio 提供多 Pet 的 dispatch、每 Pet 队列、gate 观察和插件事件总线，不复制 worker 的私有工具或消息历史。任务依赖、进度、重试和持久化属于插件或宿主。checkpoint 是持久权威，session projection 是客户端物化视图。
+Pet runtime 拥有单个 Agent 的执行、Capability 选择、工具调用、checkpoint 校验和审核继续；Studio 提供稳定 Pet thread、每 Pet invocation 串行、live invocation 投射和 Plugin 事件总线，不复制 worker 的私有工具或消息历史。任务依赖、进度、重试和持久化属于 Plugin 或 Host。checkpoint 是 pending continuation 的持久权威。

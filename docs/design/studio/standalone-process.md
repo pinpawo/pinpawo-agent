@@ -55,9 +55,19 @@ SIGINT/SIGTERM 只关闭本 Host，shutdown 顺序仍由 `StudioHost` 负责。
 
 ## 4. 后续阶段
 
-本阶段不实现具体 HTTP 页面、Plugin discovery、HITL/control 或 durable route index：
+Kanban Plugin 已按独立草案拥有可选 durable state，并直接消费自己的 dispatch
+receipt；Studio core 没有增加 Kanban 状态或持久化接口。
 
-1. #638 的 HTTP Plugin 可提供看板展示与 request 提交；
-2. wiki ingest、样例配置、Kanban 持久化/invocation 投射继续按 #638 推进；
-3. interaction Plugin 消费公开 pending interrupt，并负责重启后的用户侧索引重建；
-4. durable event log、断线重放和 Plugin 安装/discovery 策略单独设计。
+HTTP Plugin 已作为独立的零 Toolkit Plugin 提供 direct dispatch 与 live SSE event
+投射，并暴露 route hook 供其他 Plugin 反向贡献页面或 API，见
+[HTTP Plugin draft](http-plugin.md)。它自身不内置领域页面，也不替代 Studio Host
+自己的 invocation transport。
+
+后续仍需分别设计：
+
+1. interaction Plugin 消费公开 pending interrupt，并负责重启后的用户侧索引重建；
+2. durable event log 与断线重放；
+3. trigger、scheduler 和 Plugin 安装/discovery 策略。
+
+HTTP 展示与 Wiki ingest 已不再作为当前核心架构阶段的默认链路；如重新启用，应分别
+以具体 Plugin / Agent Capability 的需求重新评审，不能恢复 Studio core 特例。

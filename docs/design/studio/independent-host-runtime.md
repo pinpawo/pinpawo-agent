@@ -139,6 +139,10 @@ route 不做重建。用户侧 pending-action 索引、授权与断线重放属�
 
 - 独立 Studio interaction Plugin，以及重启后的 pending-action 索引。
 - durable event log 与断线重放。
-- HTTP trigger、scheduler、Kanban 持久化与 Plugin discovery；这些仍由 #638/#645
-  继续设计。独立进程入口见
+- HTTP trigger、scheduler 与 Plugin discovery；这些仍由 #638/#645 继续设计。
+  独立进程入口见
   [standalone process draft](standalone-process.md)。
+
+Kanban 持久化和 dispatch result 投射由可选 Plugin 自己实现，见
+[Kanban Plugin durable state](kanban-plugin-durable-state.md)。它不改变上述 Studio
+Host 边界。

@@ -80,6 +80,14 @@ LangGraph Command。Pet runtime 读取权威 checkpoint、校验 interrupt 与 r
 Studio 不复用 Chat 的 session、route cache 或 review message。独立 interaction Plugin
 或 Host adapter 可以观察 pending event、与用户交互，再提交上面的 typed resume。
 
+### 与 transport 无关的 dispatch 解析
+
+`parseStudioDispatchRequest(value)` 校验 `StudioDispatchRequest` 的 JSON 表示。它接收
+`petId`、typed request/resume input、兼容 JSON 的 `metadata` 与 `idempotencyKey`，但
+有意排除仅存在于当前进程的 `AbortSignal`。Studio wire transport 与可选的
+[HTTP Plugin](../../studio/http-plugin.md) 共用这个解析器，避免不同 transport 各自定义
+一套 dispatch 形状。
+
 ## 公共观察与事件总线
 
 - `onInvocation(handler)`：Host 观察所有 invocation 的 `busy` 与终态事件；Plugin
@@ -113,6 +121,13 @@ type StudioPlugin = {
 Plugin 可以定义零个或多个 Toolkit。它们在 resident Pet 构建前进入 Host inventory。
 Capability 完全属于 Agent；Studio 与 Plugin 都不注册 Capability。Studio Host 根据
 Pet 约定目录加载 Capability，并由 `Capability.uses` 选择 Toolkit。
+
+`StudioPluginContext.hooks` 是不透明的 Plugin 间装配通道。提供方通过
+`expose(name, hook)` 暴露扩展点，贡献方通过
+`contribute(targetPluginName, hookName, install)` 反向注入。无论两者启动顺序如何，
+贡献都会在 hook 出现时挂载；任一方结束生命周期时自动卸载。Studio 只匹配身份并
+管理清理，不解释 hook 内容。例如 HTTP Plugin 暴露 `routes`，Kanban 可以贡献自己的
+board route，而 HTTP 不需要 import Kanban。
 
 更多运行时语义见[英文 Pet Runtime API](../../../reference/api/pet-runtime.md)，配置见
 [Studio 配置](../../studio/configuration.md)。

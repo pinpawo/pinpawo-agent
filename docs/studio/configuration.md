@@ -107,6 +107,19 @@ Capability by placing its `CAPABILITY.md` directory under the conventional
 per-Pet root. Installation/discovery policy for Plugins remains outside Studio;
 callers inject concrete Plugins through `StudioPluginResolver`.
 
+Durable Plugin state remains Plugin-owned. For example, an application resolver
+can construct `createKanbanPlugin({ stateStore: createFileKanbanStateStore(...) })`.
+The application chooses an absolute path such as
+`<workdir>/.pinpawo/studio/<plugin-instance>/kanban.json`; Studio neither derives
+that path nor reads the snapshot. Without a state store, the same Plugin remains
+an explicitly in-memory instance.
+
+Installed Plugins may compose through the opaque `StudioPluginContext.hooks`
+broker. Studio only matches Plugin and hook names and owns lifecycle cleanup; it
+does not import or interpret extension contracts. The HTTP Plugin exposes a
+`routes` hook, while Kanban optionally contributes its `/kanban` snapshot route.
+Kanban remains valid when HTTP is absent, and HTTP never depends on Kanban.
+
 The Host first calls `resolveStudioHostConfig()` to read files and resolve Plugins,
 then initializes its unified Toolkit inventory, and finally calls `buildStudio()`
 to build pet runtime adapters and the filesystem-independent `createStudio()` core.

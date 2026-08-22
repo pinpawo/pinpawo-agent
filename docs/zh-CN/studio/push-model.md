@@ -7,12 +7,13 @@
 > [`studioInvocation.ts`](../../../packages/studio/src/studioInvocation.ts) 和
 > [`createStudio.ts`](../../../packages/studio/src/createStudio.ts) 为准。
 
-Studio 是 Plugin 与常驻 Pet runtime 之间的插板。它提供 typed dispatch 通道和一条
-彼此独立的通用 event 总线：
+Studio 是 Plugin 与常驻 Pet runtime 之间的插板。它提供 typed dispatch 通道、
+彼此独立的通用 event 总线，以及已安装 Plugin 之间的不透明装配通道：
 
 ```text
 Plugin ── dispatch(input) ──> Studio ── serialized invocation ──> Pet thread
 Plugin ── notify(event)  ──> Studio ── fan-out ────────────────> Plugins
+Plugin ── contribute ──────> Plugin-owned hook（Studio 只匹配生命周期）
 ```
 
 Studio 不定义任务、依赖、排期、重试、Plugin 持久化或 Capability。Plugin 是高于
@@ -146,6 +147,12 @@ Plugin 都不注册或附带 Capability；Studio Host 按 Pet 约定目录加载
 Plugin 按顺序启动、逆序停止，启动失败会回滚已启动前缀。Plugin 只能通过 dispatch
 派活；`listPets()` 只返回 descriptor，不暴露 runtime 引用。
 
+Plugin hook 不替代 event：event 通知运行时事实，hook 负责装配已安装的功能。hook
+值与类型由提供方拥有；Studio 只按 `targetPluginName + hookName` 连接双方、兼容任意
+启动顺序，并在任一 Plugin 停止时卸载贡献。这样 HTTP Plugin 可以暴露 route 注册，
+Kanban Plugin 可以贡献自己的 route，而 HTTP 不依赖 Kanban，Studio core 也不出现
+HTTP 类型。
+
 ## 6. 边界检查表
 
 | Studio | Plugin、Pet runtime 或 Host |
@@ -154,6 +161,7 @@ Plugin 按顺序启动、逆序停止，启动失败会回滚已启动前缀。P
 | 稳定 Pet thread 与每 Pet invocation 串行 | checkpoint 解释与 resume command |
 | invocation identity 与 live observation | 交互 UI、授权、durable pending index |
 | 不透明 event 扇出 | event 含义与持久化 |
+| 不透明 Plugin hook 匹配与清理 | hook 值、route schema、贡献行为 |
 | Plugin lifecycle | Plugin 领域状态与存储 |
 
 当前刻意保留的限制包括：内存 invocation 队列、Host generation 内幂等记录、无

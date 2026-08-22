@@ -1,0 +1,23 @@
+{
+  "name": "@pinpawo-plugin/studio-http",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Loopback HTTP dispatch and live SSE event Plugin for PinPawo Studio",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx/esm --test $(find src -name '*.test.ts' | sort)"
+  },
+  "dependencies": {
+    "@pinpawo/studio": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

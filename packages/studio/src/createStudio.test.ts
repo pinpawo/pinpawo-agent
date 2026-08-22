@@ -396,6 +396,46 @@ test('Plugin events remain an opaque broadcast channel', async () => {
   assert.deepEqual((received[0] as { metadata: unknown }).metadata, { taskId: 'task-1' });
 });
 
+test('Plugin hooks attach in either start order and detach with contributor lifecycle', async () => {
+  for (const consumerFirst of [true, false]) {
+    const installed: string[] = [];
+    const removed: string[] = [];
+    const provider: StudioPlugin = {
+      name: 'provider',
+      toolkits: [],
+      start: (context) => {
+        context.hooks.expose('routes', {
+          register: (path: string) => {
+            installed.push(path);
+            return () => { removed.push(path); };
+          },
+        });
+      },
+    };
+    const consumer: StudioPlugin = {
+      name: 'consumer',
+      toolkits: [],
+      start: (context) => {
+        context.hooks.contribute<{ register: (path: string) => () => void }>(
+          'provider',
+          'routes',
+          (routes) => routes.register('/consumer'),
+        );
+      },
+    };
+    const studio = await createStudio({
+      studioId: `hooks-${consumerFirst ? 'consumer-first' : 'provider-first'}`,
+      entryPetId: 'worker',
+      pets: [pet({ petId: 'worker' })],
+      plugins: consumerFirst ? [consumer, provider] : [provider, consumer],
+    });
+
+    assert.deepEqual(installed, ['/consumer']);
+    await studio.shutdown();
+    assert.deepEqual(removed, ['/consumer']);
+  }
+});
+
 test('plugins start in order, stop in reverse, and startup failure rolls back', async () => {
   const order: string[] = [];
   const plugin = (name: string, fail = false): StudioPlugin => ({

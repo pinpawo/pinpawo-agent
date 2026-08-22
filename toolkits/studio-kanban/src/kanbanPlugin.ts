@@ -14,9 +14,15 @@ import type {
   AgentToolkit,
   NamedStructuredTool,
 } from '@pinpawo/pet-agent';
-import type { StudioPlugin, StudioPluginContext } from '@pinpawo/studio';
+import type {
+  StudioDispatchResult,
+  StudioPlugin,
+  StudioPluginContext,
+} from '@pinpawo/studio';
+import type { StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 
 import { KanbanBoard, type KanbanTask } from './kanbanBoard';
+import type { KanbanStateStore } from './kanbanStateStore';
 
 export const KANBAN_TOOLKIT_NAME = 'kanban';
 
@@ -39,6 +45,9 @@ function buildTaskRequest(task: KanbanTask): string {
 }
 
 function buildTools(board: KanbanBoard): NamedStructuredTool[] {
+  const canFinish = (task: KanbanTask) => (
+    task.status === 'doing' || task.status === 'waiting'
+  );
   const listTasks = tool(
     async () => {
       const tasks = board.list();
@@ -77,8 +86,8 @@ function buildTools(board: KanbanBoard): NamedStructuredTool[] {
     async (input) => {
       const task = board.get(input.taskId);
       if (!task) return `unknown Kanban taskId "${input.taskId}"`;
-      if (task.status !== 'doing') {
-        return `Kanban task "${input.taskId}" is ${task.status}, not doing`;
+      if (!canFinish(task)) {
+        return `Kanban task "${input.taskId}" is ${task.status}, not active`;
       }
       board.complete(task.taskId, input.result);
       return `completed ${task.taskId}`;
@@ -97,8 +106,8 @@ function buildTools(board: KanbanBoard): NamedStructuredTool[] {
     async (input) => {
       const task = board.get(input.taskId);
       if (!task) return `unknown Kanban taskId "${input.taskId}"`;
-      if (task.status !== 'doing') {
-        return `Kanban task "${input.taskId}" is ${task.status}, not doing`;
+      if (!canFinish(task)) {
+        return `Kanban task "${input.taskId}" is ${task.status}, not active`;
       }
       board.block(task.taskId, input.reason);
       return `blocked ${task.taskId}`;
@@ -120,6 +129,13 @@ function buildTools(board: KanbanBoard): NamedStructuredTool[] {
 
 export type CreateKanbanPluginOptions = {
   board?: KanbanBoard;
+  /** Optional Plugin-owned durable state. Studio does not select or interpret it. */
+  stateStore?: KanbanStateStore;
+  /** Optional reverse contribution into an installed Studio HTTP Plugin. */
+  httpRoute?: false | {
+    pluginName?: string;
+    path?: string;
+  };
 };
 
 export type KanbanPlugin = StudioPlugin & { board: KanbanBoard };
@@ -139,8 +155,70 @@ export function createKanbanToolkit(board: KanbanBoard): AgentToolkit {
 export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): KanbanPlugin {
   const board = options.board ?? new KanbanBoard();
   const toolkit = createKanbanToolkit(board);
+  const stateStore = options.stateStore;
   let context: StudioPluginContext | undefined;
   let unsubscribe: (() => void) | undefined;
+  let unsubscribeHttpRoute: (() => void) | undefined;
+  let persistenceTail = Promise.resolve();
+  let persistenceError: Error | undefined;
+  let dispatchRequested = false;
+  let dispatchLoop: Promise<void> | undefined;
+  let dispatchEnabled = false;
+  const activeDispatches = new Set<Promise<void>>();
+
+  function asError(error: unknown): Error {
+    return error instanceof Error ? error : new Error(String(error));
+  }
+
+  function schedulePersistence(): void {
+    if (!stateStore) return;
+    const snapshot = board.snapshot();
+    persistenceTail = persistenceTail
+      .then(() => stateStore.save(snapshot))
+      .then(() => {
+        persistenceError = undefined;
+      })
+      .catch((error) => {
+        persistenceError = asError(error);
+        context?.notify({
+          type: 'kanban.persistence_failed',
+          payload: { message: persistenceError.message },
+        });
+      });
+  }
+
+  function finishUnreportedTask(taskId: string, result: StudioDispatchResult): void {
+    const task = board.get(taskId);
+    if (!task || (task.status !== 'doing' && task.status !== 'waiting')) return;
+    if (result.status === 'pending_interrupt') {
+      if (task.status === 'doing') {
+        board.wait(taskId, 'Pet invocation is waiting for external interaction.');
+      }
+      return;
+    }
+    if (result.status === 'failed') {
+      board.block(taskId, result.error ?? 'Pet invocation failed.');
+      return;
+    }
+    if (result.status === 'cancelled') {
+      board.block(taskId, 'Pet invocation was cancelled.');
+      return;
+    }
+    board.block(taskId, 'Pet invocation completed without reporting a Kanban task outcome.');
+  }
+
+  function trackDispatch(taskId: string, completion: Promise<StudioDispatchResult>): void {
+    const tracked = completion
+      .then((result) => finishUnreportedTask(taskId, result))
+      .catch((error) => {
+        const task = board.get(taskId);
+        if (task?.status === 'doing' || task?.status === 'waiting') {
+          board.block(taskId, asError(error).message);
+        }
+      });
+    activeDispatches.add(tracked);
+    void tracked.finally(() => activeDispatches.delete(tracked));
+  }
 
   /**
    * 依赖满足即派发。
@@ -148,37 +226,100 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
    * 它逐个检查 ready 的任务 —— 一个任务排不上**不连累**其他已就绪的任务
    * (这正是旧 orchestrator 的 strict global FIFO 要避免的)。
    */
-  function dispatchReady(): void {
-    if (!context) return;
-    const pluginContext = context;
-    for (const task of board.ready()) {
-      // 先占位再派发,避免同一轮里被重复挑中。
-      board.markDispatched(task.taskId);
-      void pluginContext.dispatch({
-        petId: task.petId,
-        input: { kind: 'request', request: buildTaskRequest(task) },
-      }).catch((error) => {
-        board.block(task.taskId, error instanceof Error ? error.message : String(error));
-      });
+  async function runDispatchLoop(): Promise<void> {
+    while (dispatchEnabled && context && dispatchRequested) {
+      dispatchRequested = false;
+      await persistenceTail;
+      for (const task of board.ready()) {
+        if (!dispatchEnabled || !context) return;
+        // Persist doing before the external dispatch. A crash after this point
+        // restores the task as blocked instead of silently dispatching twice.
+        board.markDispatched(task.taskId);
+        await persistenceTail;
+        if (persistenceError) {
+          board.block(task.taskId, `Kanban persistence failed: ${persistenceError.message}`);
+          continue;
+        }
+        try {
+          const receipt = await context.dispatch({
+            petId: task.petId,
+            input: { kind: 'request', request: buildTaskRequest(task) },
+          });
+          trackDispatch(task.taskId, receipt.completion);
+        } catch (error) {
+          board.block(task.taskId, asError(error).message);
+        }
+      }
     }
+  }
+
+  function dispatchReady(): void {
+    if (!dispatchEnabled || !context) return;
+    dispatchRequested = true;
+    if (dispatchLoop) return;
+    const running = runDispatchLoop();
+    dispatchLoop = running;
+    void running.then(
+      () => {
+        if (dispatchLoop === running) dispatchLoop = undefined;
+        if (dispatchRequested) dispatchReady();
+      },
+      (error) => {
+        if (dispatchLoop === running) dispatchLoop = undefined;
+        context?.notify({
+          type: 'kanban.dispatch_loop_failed',
+          payload: { message: asError(error).message },
+        });
+      },
+    );
   }
 
   return {
     board,
     name: KANBAN_TOOLKIT_NAME,
     toolkits: [toolkit],
-    start: (pluginContext) => {
+    start: async (pluginContext) => {
+      if (context) throw new Error('Kanban Plugin is already started.');
+      if (stateStore) {
+        const snapshot = await stateStore.load();
+        if (snapshot) board.restore(snapshot);
+        // Persist recovery transitions (notably doing -> blocked) before the
+        // Plugin can dispatch any remaining todo task.
+        await stateStore.save(board.snapshot());
+      }
       context = pluginContext;
+      const httpRoute = options.httpRoute;
+      if (httpRoute !== false) {
+        unsubscribeHttpRoute = pluginContext.hooks.contribute<StudioHttpRoutesHook>(
+          httpRoute?.pluginName ?? 'http',
+          'routes',
+          (routes) => routes.register({
+            method: 'GET',
+            path: httpRoute?.path ?? '/kanban',
+            handle: () => ({ kind: 'json', body: board.snapshot() }),
+          }),
+        );
+      }
+      dispatchEnabled = true;
       unsubscribe = board.subscribe((task) => {
         pluginContext.notify({
           type: `task.${task.status}`,
           payload: { taskId: task.taskId, petId: task.petId, note: task.note },
         });
+        schedulePersistence();
         // 任一状态变化都可能解锁别的任务的依赖。
         dispatchReady();
       });
+      dispatchReady();
     },
-    stop: () => {
+    stop: async () => {
+      dispatchEnabled = false;
+      dispatchRequested = false;
+      await dispatchLoop;
+      await Promise.allSettled([...activeDispatches]);
+      await persistenceTail;
+      unsubscribeHttpRoute?.();
+      unsubscribeHttpRoute = undefined;
       unsubscribe?.();
       unsubscribe = undefined;
       context = undefined;

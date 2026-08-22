@@ -18,11 +18,16 @@ export type {
   StudioEventInput,
   StudioPlugin,
   StudioPluginContext,
+  StudioPluginHookInstaller,
+  StudioPluginHooks,
   StudioInvocationEvent,
   StudioInvocationEventHandler,
   StudioInvocationTerminalStatus,
 } from './studioContract';
-export { buildStudioPetThreadId } from './studioInvocation';
+export {
+  buildStudioPetThreadId,
+  parseStudioDispatchRequest,
+} from './studioInvocation';
 
 export {
   petLocalConfigSchema,

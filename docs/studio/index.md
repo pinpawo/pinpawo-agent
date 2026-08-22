@@ -31,6 +31,7 @@ may also report domain outcomes through a Toolkit owned by the relevant Plugin.
   and Plugin injection.
 - [Local-host integration](host-integration.md) — workdir assembly, WebSocket
   acknowledgement and event forwarding.
+- [HTTP Plugin](http-plugin.md) — direct dispatch and live Plugin events over SSE.
 - [Studio API reference](../reference/api/studio.md) — exported TypeScript
   types and exact method semantics.
 
@@ -51,7 +52,7 @@ The following are plugin or host responsibilities, not Studio concepts:
 
 - task shapes, dependencies, progress, retries, timeout policy, and persistence;
 - choosing which pet receives work (including planning);
-- schedules, webhooks, HTTP/WebSocket transport, UI state, and authentication;
+- schedules, webhooks, concrete HTTP adapters, UI state, and authentication;
 - shared knowledge stores or private agent scratch state.
 
 The optional `studio-kanban` package is the first example: its Plugin defines a
@@ -59,6 +60,10 @@ Toolkit that pets use to manage Kanban tasks, while the Plugin lifecycle dispatc
 tasks whose dependencies are ready. The Plugin is not itself a Toolkit. Future
 scheduler or trigger integrations must use the same Plugin boundary rather than
 enlarge the Studio contract.
+
+The optional `studio-http` package is another concrete Plugin. It defines no
+Toolkit; it projects `context.dispatch()` and `context.subscribe()` to an
+authenticated loopback HTTP/SSE boundary.
 
 ## Operational limits
 

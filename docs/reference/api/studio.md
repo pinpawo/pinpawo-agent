@@ -4,7 +4,8 @@
 
 > **Status: current programming contract.** The authoritative exports are in
 > [`packages/studio/src/index.ts`](../../../packages/studio/src/index.ts),
-> [`studioContract.ts`](../../../packages/studio/src/studioContract.ts), and
+> [`studioContract.ts`](../../../packages/studio/src/studioContract.ts),
+> [`studioInvocation.ts`](../../../packages/studio/src/studioInvocation.ts), and
 > [`types.ts`](../../../packages/studio/src/types.ts).
 
 Studio is a lightweight multi-pet dispatch substrate. It does not expose runs,
@@ -122,6 +123,15 @@ observer replays its latest event.
 `listPets()` returns descriptors only, not runtime references. This keeps all
 plugin-originated work on the dispatch boundary.
 
+### Transport-neutral dispatch parsing
+
+`parseStudioDispatchRequest(value)` validates the JSON representation of a
+`StudioDispatchRequest`. It accepts `petId`, typed request/resume input,
+JSON-compatible `metadata`, and `idempotencyKey`, while deliberately excluding
+the process-local `AbortSignal`. Studio wire transport and the optional
+[HTTP Plugin](../../studio/http-plugin.md) use the same parser, so transport
+adapters do not define competing dispatch shapes.
+
 ## Plugin context
 
 A Studio Plugin is a higher-level extension, not an `AgentToolkit`. It defines
@@ -151,6 +161,7 @@ type StudioPluginContext = {
   notify(event: StudioEventInput): void;
   subscribe(handler: StudioEventHandler): () => void;
   listPets(): PetAgentRuntimeDescriptor[];
+  hooks: StudioPluginHooks;
 };
 ```
 
@@ -172,6 +183,14 @@ type StudioInvocationEvent = {
 
 The callback is a live projection of the same result lifecycle. The durable
 source of interrupt existence remains the Pet checkpoint, not this callback.
+
+`hooks` is the opaque Plugin-to-Plugin composition channel. A provider calls
+`expose(name, hook)` and a contributor calls
+`contribute(targetPluginName, hookName, install)`. Contributions attach in
+either Plugin start order and are removed with either side's lifecycle. Studio
+matches identities and owns cleanup, but never interprets the hook value. For
+example, the HTTP Plugin exposes `routes`, and Kanban can contribute a board
+route without HTTP importing Kanban.
 
 If plugin startup fails, Studio calls `stop()` in reverse order for every
 plugin that may have started, including the plugin whose `start()` rejected.

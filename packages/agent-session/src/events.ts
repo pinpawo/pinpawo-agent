@@ -10,7 +10,6 @@ export type AgentRuntimeEvent =
   | AgentOperationEvent
   | AgentPlanUpdatedEvent
   | AgentHumanReviewRequestedEvent
-  | AgentStudioProgressEvent
   | AgentSystemNoticeEvent
   | AgentErrorEvent;
 
@@ -102,12 +101,6 @@ export type AgentHumanReviewRequestedEvent = {
   type: 'human_review.requested';
   requestId: string;
   pendingInterrupt: PendingInterruptProjection;
-};
-
-export type AgentStudioProgressEvent = {
-  type: 'studio.progress';
-  requestId: string;
-  event: Record<string, unknown>;
 };
 
 export type AgentSystemNoticeEvent = {

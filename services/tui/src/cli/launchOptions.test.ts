@@ -18,7 +18,6 @@ test('launch options keep production mode free of demo transports', () => {
       hostReady: false,
       policy: false,
       review: false,
-      studio: false,
       transcript: false,
     },
     smokeEnabled: false,

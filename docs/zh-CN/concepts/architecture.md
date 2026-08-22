@@ -44,7 +44,7 @@ accepted constraints 见[领域关系设计](../../design/host-agent-capability-
 | Capability 草稿与工具过程 | Subagent lane | 私有、短生命周期。 |
 | 跨 lane 输出 | Artifact store | 通过引用传递，不复制进每条消息。 |
 | 本地配置 | local host + workdir | 在创建 runtime 前解析。 |
-| Studio dispatch 投递 | Studio 的 per-Pet queue + runtime gate | 仅进程内投递；工作流状态属于插件或宿主。 |
+| Studio dispatch 投递 | 稳定 Pet thread + per-Pet active invocation queue | 队列仅在进程内；checkpoint 连续性可持久化；工作流状态属于 Plugin 或 Host。 |
 
 ## 下一步
 

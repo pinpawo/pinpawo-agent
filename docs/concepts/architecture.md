@@ -95,7 +95,7 @@ state from a transient tool-event stream.
 | Capability scratch work | Subagent lane | Private to the selected unit of work. |
 | Cross-lane output | Artifact store | Passed as references, not copied through every message. |
 | Local configuration | Local host and workdir | Resolved before a runtime is created. |
-| Studio dispatch delivery | Studio per-Pet queue and runtime gate | Process-local delivery; workflow state belongs to a plugin or host. |
+| Studio dispatch delivery | Stable Pet thread plus per-Pet active-invocation queue | Queue is process-local; checkpoint continuity is durable; workflow state belongs to a Plugin or Host. |
 
 ## Deployment modes
 

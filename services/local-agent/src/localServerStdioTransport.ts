@@ -1,15 +1,16 @@
 import { Console } from 'node:console';
 import { stderr, stdin, stdout } from 'node:process';
 import type { Readable, Writable } from 'node:stream';
-import type { LocalAgentServerMessage } from './localAgentProtocol';
 import {
-  dispatchLocalServerMessage,
+  createLocalAgentWireHandlers,
   type LocalServerLogError,
   type LocalServerLogWarn,
-  type LocalServerPeerHandlers,
   type LocalServerTransportHandlers,
 } from './localServerMessageDispatcher';
-import type { LocalServerPeer } from './localServerPeer';
+import type {
+  LocalServerWireHandlers,
+  LocalServerWirePeer,
+} from './localServerWire';
 
 const DEFAULT_MAX_PENDING_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAX_INPUT_LINE_BYTES = 8 * 1024 * 1024;
@@ -22,11 +23,15 @@ export type LocalServerStdioTransportOptions = {
   maxInputLineBytes?: number;
 };
 
-export type LocalServerStdioTransport = {
-  peer: LocalServerPeer;
+export type LocalServerWireStdioTransport<TMessage extends object> = {
+  peer: LocalServerWirePeer<TMessage>;
   closed: Promise<void>;
   close: () => void;
 };
+
+export type LocalServerStdioTransport = LocalServerWireStdioTransport<
+  import('./localAgentProtocol').LocalAgentServerMessage
+>;
 
 function writeDiagnostic(stream: Writable, message: string) {
   try {
@@ -55,10 +60,10 @@ export function redirectConsoleToStdioDiagnostics(diagnostics: Writable = stderr
   };
 }
 
-export function attachLocalServerStdioTransport(
-  handlers: LocalServerTransportHandlers,
+export function attachLocalServerWireStdioTransport<TMessage extends object>(
+  handlers: LocalServerWireHandlers<TMessage>,
   options: LocalServerStdioTransportOptions = {},
-): LocalServerStdioTransport {
+): LocalServerWireStdioTransport<TMessage> {
   const input = options.input ?? stdin;
   const output = options.output ?? stdout;
   const diagnostics = options.diagnostics ?? stderr;
@@ -66,8 +71,6 @@ export function attachLocalServerStdioTransport(
   const maxInputLineBytes = options.maxInputLineBytes ?? DEFAULT_MAX_INPUT_LINE_BYTES;
   const logError: LocalServerLogError = handlers.logError
     ?? ((message, error) => writeDiagnostic(diagnostics, `${message} ${formatError(error)}`));
-  const logWarn: LocalServerLogWarn = handlers.logWarn
-    ?? ((message) => writeDiagnostic(diagnostics, message));
   const pending: string[] = [];
   const pendingDispatches = new Set<Promise<void>>();
   let pendingBytes = 0;
@@ -141,9 +144,9 @@ export function attachLocalServerStdioTransport(
     finish();
   }
 
-  const peer: LocalServerPeer = {
+  const peer: LocalServerWirePeer<TMessage> = {
     isConnected: () => connected,
-    send: (message: LocalAgentServerMessage) => {
+    send: (message: TMessage) => {
       if (!connected) {
         return false;
       }
@@ -191,13 +194,11 @@ export function attachLocalServerStdioTransport(
     inputLineChunks = [];
     inputLineBytes = 0;
 
-    const dispatched = dispatchLocalServerMessage(
-      peer,
-      lineBuffer.toString('utf8'),
-      handlers,
-      logError,
-      logWarn,
-    );
+    const dispatched = Promise.resolve()
+      .then(() => handlers.onMessage(peer, lineBuffer.toString('utf8')))
+      .catch((error) => {
+        logError('[local-server] handleMessage error:', error);
+      });
     pendingDispatches.add(dispatched);
     void dispatched.finally(() => {
       pendingDispatches.delete(dispatched);
@@ -278,4 +279,20 @@ export function attachLocalServerStdioTransport(
     closed,
     close: finish,
   };
+}
+
+/** Chat/Agent Session adapter retained for the local-agent Host. */
+export function attachLocalServerStdioTransport(
+  handlers: LocalServerTransportHandlers,
+  options: LocalServerStdioTransportOptions = {},
+): LocalServerStdioTransport {
+  const diagnostics = options.diagnostics ?? stderr;
+  const logError: LocalServerLogError = handlers.logError
+    ?? ((message, error) => writeDiagnostic(diagnostics, `${message} ${formatError(error)}`));
+  const logWarn: LocalServerLogWarn = handlers.logWarn
+    ?? ((message) => writeDiagnostic(diagnostics, message));
+  return attachLocalServerWireStdioTransport(
+    createLocalAgentWireHandlers(handlers, logError, logWarn),
+    options,
+  );
 }

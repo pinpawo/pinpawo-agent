@@ -3,14 +3,14 @@
 [English](../../../reference/api/studio.md)
 
 > **状态：当前编程契约。** 权威导出位于
-> [`packages/studio/src/index.ts`](../../../../packages/studio/src/index.ts)、
-> [`studioContract.ts`](../../../../packages/studio/src/studioContract.ts) 和
+> [`studioContract.ts`](../../../../packages/studio/src/studioContract.ts)、
+> [`studioInvocation.ts`](../../../../packages/studio/src/studioInvocation.ts) 和
 > [`types.ts`](../../../../packages/studio/src/types.ts)。
 
-Studio 是轻量的多 Pet dispatch 底座；它不提供 run/task snapshot、取消、自动重试、
-结果聚合、scheduler 或 shared wiki API。
+Studio 是轻量的多 Pet dispatch 底座。它不定义任务结构、依赖、调度、重试、
+Plugin 状态持久化或 Capability；这些分别属于 Plugin 与 Agent。
 
-## 构造与核心 API
+## 构造与 dispatch
 
 ```ts
 const studio = await createStudio({
@@ -20,57 +20,90 @@ const studio = await createStudio({
   plugins: [kanbanPlugin],
 });
 
-const { threadId } = await studio.dispatch({
+const receipt = await studio.dispatch({
   petId: 'writer',
-  request: 'Draft the article.',
-  correlationId: 'task-42',
+  input: { kind: 'request', request: 'Draft the article.' },
+  metadata: { taskId: 'task-42' },
+});
+
+const result = await receipt.completion;
+```
+
+接收 dispatch 后会立即返回 receipt，不等待 graph 完成：
+
+```ts
+type StudioDispatchReceipt = {
+  petId: string;
+  threadId: string;
+  invocationId: string;
+  metadata?: JsonObject;
+  completion: Promise<StudioDispatchResult>;
+};
+```
+
+每个 `(studioId, petId)` 只有一个稳定、可持久化的 `threadId`；每次接收的
+dispatch 有不同的 `invocationId`。同一个 Pet 的 active invocation 串行，不同 Pet
+可以并行。`completion` 最终得到 `completed`、`pending_interrupt`、`failed` 或
+`cancelled`。显式 `idempotencyKey` 在当前 Host generation 内按 Pet 去重。
+
+`metadata` 完全由 producer 所有，Studio 只透传。任务号、关联号或来源可以放在
+其中，但不能替代 `petId`、`threadId`、`invocationId` 或 `interruptId`。
+
+## interrupt 与 resume
+
+持久化 interrupt 会结束当前 invocation，但不会结束 Pet thread。后续交互层通过
+一次新的 dispatch 恢复同一 thread：
+
+```ts
+await studio.dispatch({
+  petId: 'writer',
+  input: {
+    kind: 'resume_interrupt',
+    interruptId: 'interrupt-7',
+    payload: {
+      kind: 'human_review_response',
+      responses: [{ interactionId: 'review-1', selectedOptionId: 'approve' }],
+    },
+  },
 });
 ```
 
-`createStudio()` 会拒绝重复的 `petId`，以及不在 `pets` 中的 `entryPetId`。
-插件按传入顺序启动；任何插件启动失败都会使构造失败。
+Studio core 只搬运 typed input 与公开 pending 投射，不解释 review 选项，也不构造
+LangGraph Command。Pet runtime 读取权威 checkpoint、校验 interrupt 与 response，
+再执行 resume。过期 interrupt 会失败且不修改 checkpoint。
 
-`dispatch()` 接收向已配置且未 disabled Pet 的投递，并**立刻**返回新的
-`threadId`。这只表示请求已进入投递队列，不表示任务已经完成。只有 Studio 已关闭、
-Pet 不存在或 Pet disabled 时才会抛错；busy Pet 会排队而非被拒绝。
+Studio 不复用 Chat 的 session、route cache 或 review message。独立 interaction Plugin
+或 Host adapter 可以观察 pending event、与用户交互，再提交上面的 typed resume。
 
-公共 `Studio` 还提供：
+## 公共观察与事件总线
 
-- `onDispatchGate(handler)`：Host 控制面订阅所有 dispatch 的 gate 变化，包括
-  Host 直接发起的投递；transport 可据此投射状态并释放 request correlation。
-- `notify(event)`：广播完整 `StudioEvent`；Studio 不校验、持久化、重放或关联
-  payload。
-- `subscribe(handler)`：订阅当前进程内事件；单个 handler 失败不会影响其他订阅方。
-- `listPets()`：返回 Pet descriptor，不返回 runtime 引用。
-- `shutdown()`：拒绝后续 dispatch、按逆序停止插件并清理订阅。
+- `onInvocation(handler)`：Host 观察所有 invocation 的 `busy` 与终态事件；Plugin
+  context 只收到自己发起的 invocation。事件包含 Pet/thread/invocation identity、
+  metadata 与可选 pending 投射，但不持久化、不重放。
+- `notify(event)` / `subscribe(handler)`：独立的通用 Plugin event 总线。Studio
+  不解释、关联或持久化 payload。
+- `listPets()`：只返回 descriptor，不暴露 runtime 引用。
+- `shutdown()`：拒绝新 dispatch、取消 active invocation、等待已接收队列收口，
+  再逆序停止 Plugin。
 
-插件启动失败时，Studio 会对所有可能已经启动的插件（包括 `start()` 抛错的插件）
-逆序调用 `stop()`。shutdown 后尚未开始的 queued dispatch 会被丢弃，不会在插件
-listener 已停止后继续 invoke Pet。
+interrupt 是否存在由 checkpoint 决定，不由 `onInvocation` 的内存订阅决定。
 
-## 插件 context 与 gate
+## Plugin、Toolkit 与 Capability
 
-`StudioPlugin` 是高于 Toolkit 的扩展，不是 `AgentToolkit`。它通过必需的
-`toolkits` 字段定义零个或多个 Agent Toolkit，并通过 `start(context)` / 可选
-`stop()` 管理 Studio 生命周期。Plugin 定义的 Toolkit 在 Pet 构建前进入 Host
-inventory；Capability 仍由 Agent Host 独立注册，与 Plugin/Studio 无关。
-本地 Studio Host 根据 `petId` 从
-`pets/<petId>/capabilities/<capability>/CAPABILITY.md` 加载定义；目录成员就是选择，
-Pet JSON 不再包含 Capability 名称列表。
-
-Plugin 启动时拿到的 context 提供 `dispatch`、`notify`、
-`subscribe`、`listPets` 和 `onDispatchGate`。context 会自动补 event 的
-`source` 与 `occurredAt`。
-
-`onDispatchGate` 只接收**本插件发起的**投递的状态变化：
+`StudioPlugin` 是高于 Toolkit 的 Studio 扩展，不是 Toolkit 本身：
 
 ```ts
-type PetGateState = 'open' | 'busy' | 'waiting' | 'blocked';
+type StudioPlugin = {
+  name: string;
+  toolkits: readonly AgentToolkit[];
+  start(context: StudioPluginContext): Promise<void> | void;
+  stop?(): Promise<void> | void;
+};
 ```
 
-它是点对点的进度回路，不是任务结果协议，也没有持久化或重放保证。Studio 依赖
-runtime 的 `gate()` / `onGateChange()` 决定何时放行同一 Pet 的下一项；runtime
-必须在待继续工作真正完成后报告 `open`。
+Plugin 可以定义零个或多个 Toolkit。它们在 resident Pet 构建前进入 Host inventory。
+Capability 完全属于 Agent；Studio 与 Plugin 都不注册 Capability。Studio Host 根据
+Pet 约定目录加载 Capability，并由 `Capability.uses` 选择 Toolkit。
 
-更多类型与精确语义见[英文 API 参考](../../../reference/api/studio.md)。本地文件配置见
+更多运行时语义见[英文 Pet Runtime API](../../../reference/api/pet-runtime.md)，配置见
 [Studio 配置](../../studio/configuration.md)。

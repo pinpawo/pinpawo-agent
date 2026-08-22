@@ -257,8 +257,7 @@ let sessionPickerGeneration = 0;
 let policyPickerGeneration = 0;
 let modelPickerGeneration = 0;
 let sessionListRequest: ReturnType<TuiSessionController['listSessions']> | null = null;
-let composerMode: 'chat' | 'studio' = 'chat';
-let studioConversationId: string | null = null;
+const composerMode = 'chat' as const;
 let focusedSessionId = 'pending';
 let terminalHandoffOpen = false;
 let composerHistory = createComposerHistoryState();
@@ -407,8 +406,6 @@ const unsubscribe = controller.subscribe((state) => {
   syncOverlayLoading();
   if (state.session.sessionId !== focusedSessionId) {
     focusedSessionId = state.session.sessionId;
-    composerMode = state.session.kind;
-    studioConversationId = null;
   }
   syncApprovalFromSession();
   syncNoticeFromSession();
@@ -1639,15 +1636,6 @@ function submitComposerInput(input = composer.plainText) {
     case 'enter-chat':
       enterChatMode();
       return;
-    case 'enter-studio':
-      enterStudioMode();
-      return;
-    case 'submit-studio':
-      if (intent.enterMode) {
-        enterStudioMode(false);
-      }
-      submitStudioInput(intent.text);
-      return;
     case 'start-new-session':
       clearComposerPreservingNotice();
       localNotice = 'creating new session…';
@@ -1683,46 +1671,13 @@ function submitComposerInput(input = composer.plainText) {
   }
 }
 
-function enterStudioMode(clearComposer = true) {
-  if (clearComposer) composer.clear();
-  composerMode = 'studio';
-  studioConversationId ??= crypto.randomUUID();
-  localNotice = 'studio mode · /chat to return';
-  syncComposerModeUi();
-  syncComposerInputOverlays();
-  syncComposerLayout();
-  refreshStatus();
-}
-
 function enterChatMode(clearComposer = true) {
   if (clearComposer) composer.clear();
-  composerMode = 'chat';
-  studioConversationId = null;
   localNotice = 'chat mode';
   syncComposerModeUi();
   syncComposerInputOverlays();
   syncComposerLayout();
   refreshStatus();
-}
-
-function submitStudioInput(input: string) {
-  if (attachments.length > 0) {
-    localNotice = 'Studio attachments are not supported yet · remove them or use /chat';
-    refreshStatus();
-    return;
-  }
-  const conversationId = studioConversationId ?? crypto.randomUUID();
-  studioConversationId = conversationId;
-  const result = controller.submitStudio(input, conversationId);
-  if (result.ok) {
-    composer.clear();
-    localNotice = null;
-    syncComposerLayout();
-    refreshHeader();
-  } else {
-    localNotice = submitFailureText(result.reason);
-    refreshStatus();
-  }
 }
 
 function exportCurrentTranscript(requestedPath?: string) {

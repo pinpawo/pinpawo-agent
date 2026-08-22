@@ -58,6 +58,6 @@ SIGINT/SIGTERM 只关闭本 Host，shutdown 顺序仍由 `StudioHost` 负责。
 本阶段不实现具体 HTTP 页面、Plugin discovery、HITL/control 或 durable route index：
 
 1. #638 的 HTTP Plugin 可提供看板展示与 request 提交；
-2. wiki ingest、样例配置、Kanban 持久化/gate 投射继续按 #638 推进；
-3. HITL/control Plugin 读取 checkpoint pending action，并负责重启后的 route/index 重建；
+2. wiki ingest、样例配置、Kanban 持久化/invocation 投射继续按 #638 推进；
+3. interaction Plugin 消费公开 pending interrupt，并负责重启后的用户侧索引重建；
 4. durable event log、断线重放和 Plugin 安装/discovery 策略单独设计。

@@ -9,7 +9,7 @@
 > [`host-runtime`](../../services/local-agent/src/hostRuntime.ts) surface; the
 > concrete local wire adapter is a separate `local-server-transport` surface.
 > The `pinpawo-studio` executable entry also lives in this package. Concrete
-> concrete Plugins remain externally injected through `StudioPluginResolver`.
+> Plugins remain externally injected through `StudioPluginResolver`.
 
 Studio is a small coordination substrate for multiple Pet runtimes. It keeps a
 registry of dispatchable pets, serializes work per pet, and gives plugins an
@@ -19,14 +19,14 @@ in-process event bus. It is deliberately not a workflow engine.
 plugin ── notify(event) ──> Studio ── dispatch(request) ──> pet
 ```
 
-`dispatch()` acknowledges acceptance with a `threadId`; it does not represent a
-completed task. A pet reports useful domain outcomes through a Toolkit owned by
-the relevant plugin. That plugin may update its own state and publish an event.
+`dispatch()` immediately acknowledges acceptance with stable Pet-thread and new
+invocation identity. Its completion promise later settles the invocation; a Pet
+may also report domain outcomes through a Toolkit owned by the relevant Plugin.
 
 ## Read in this order
 
 - [Push model and boundaries](push-model.md) — the current coordination model,
-  queue and gate semantics, event rules, and plugin lifecycle.
+  thread/invocation semantics, durable resume, event rules, and Plugin lifecycle.
 - [Configuration](configuration.md) — `studio.json`, per-pet files, validation,
   and Plugin injection.
 - [Local-host integration](host-integration.md) — workdir assembly, WebSocket
@@ -39,9 +39,9 @@ the relevant plugin. That plugin may update its own state and publish an event.
 - Validating the configured pet registry and the default `entryPetId`.
 - Accepting dispatches unless Studio is stopped, the pet is unknown, or the pet
   is disabled.
-- One FIFO queue per pet, while allowing different pets to run in parallel.
-- Waiting for a runtime gate to reopen before sending that pet's next queued
-  request.
+- One active invocation per Pet, while allowing different Pets to run in parallel.
+- One stable durable thread per Pet and one identity per accepted invocation.
+- Live invocation observation, including presentation-safe pending interrupts.
 - Starting configured plugins in order, stopping them in reverse order, and
   broadcasting plugin notifications without interpreting their payloads.
 
@@ -62,11 +62,10 @@ enlarge the Studio contract.
 
 ## Operational limits
 
-Queues and event subscriptions are process-local and in memory. Dispatch has no
-durable acknowledgement, backpressure, automatic retry, timeout, or terminal
-result API. Plugin authors that need those properties must own the corresponding
-state and policy. Restarting the Studio Host also rebuilds its per-workdir Studio
-instances.
+Queues, idempotency records, and event subscriptions are process-local and in
+memory. Dispatch has no backpressure, automatic retry, timeout, durable event
+replay, or bundled interaction Plugin. Pet checkpoints and stable Pet thread
+identity survive Host restart independently of those process-local projections.
 
 The former run-controller, due-run scheduler, and shared-wiki design documents
 describe the removed pull model. They are retained only in

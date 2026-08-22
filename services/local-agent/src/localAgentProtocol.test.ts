@@ -47,42 +47,6 @@ test('parseLocalAgentClientMessage accepts valid chat requests and rejects malfo
   );
 });
 
-test('parseLocalAgentClientMessage accepts studio_request with explicit runId', () => {
-  assert.deepEqual(
-    parseLocalAgentClientMessage(JSON.stringify({
-      type: 'studio_request',
-      requestId: 'studio-1',
-      runId: 'run-100',
-      conversationId: 'conv-100',
-      userRequest: '做一份季度简报',
-    })), {
-      type: 'studio_request',
-      requestId: 'studio-1',
-      runId: 'run-100',
-      conversationId: 'conv-100',
-      userRequest: '做一份季度简报',
-    },
-  );
-  assert.equal(
-    parseLocalAgentClientMessage(JSON.stringify({
-      type: 'studio_request',
-      requestId: 'studio-1',
-      runId: 1,
-      userRequest: 'bad runId',
-    })),
-    null,
-  );
-  assert.equal(
-    parseLocalAgentClientMessage(JSON.stringify({
-      type: 'studio_request',
-      requestId: 'studio-1',
-      userRequest: 'bad extra',
-      extra: 'unsupported',
-    })),
-    null,
-  );
-});
-
 test('parseLocalAgentClientMessage accepts canonical human review response fields', () => {
   assert.deepEqual(
     parseLocalAgentClientMessage(JSON.stringify({
@@ -560,85 +524,6 @@ test('parseLocalAgentServerMessage keeps review reconciliation error code', () =
         message: '这个 review 已关闭或不存在，请等待当前确认面板刷新后再应答。',
         code: 'review_closed',
       },
-    },
-  );
-});
-
-test('parseLocalAgentServerMessage accepts studio_response with scheduler metadata', () => {
-  assert.deepEqual(
-    parseLocalAgentServerMessage(JSON.stringify({
-      type: 'studio_response',
-      requestId: 'req-1',
-      outcome: 'done',
-      reply: 'all done',
-      finalPetRunId: 'pet-run-1',
-      finalDispatchId: 'dispatch-1',
-      runId: 'run-1',
-      conversationId: 'conv-1',
-      idempotencyKey: 'studio:conv-1:run:run-1',
-    })),
-    {
-      type: 'studio_response',
-      requestId: 'req-1',
-      outcome: 'done',
-      reply: 'all done',
-      finalPetRunId: 'pet-run-1',
-      runId: 'run-1',
-      conversationId: 'conv-1',
-      idempotencyKey: 'studio:conv-1:run:run-1',
-    },
-  );
-});
-
-test('parseLocalAgentServerMessage accepts studio_response with finalPetRunId only', () => {
-  assert.deepEqual(
-    parseLocalAgentServerMessage(JSON.stringify({
-      type: 'studio_response',
-      requestId: 'req-1',
-      outcome: 'done',
-      reply: 'all done',
-      finalPetRunId: 'pet-run-1',
-      runId: 'run-1',
-      conversationId: 'conv-1',
-      idempotencyKey: 'studio:conv-1:run:run-1',
-    })),
-    {
-      type: 'studio_response',
-      requestId: 'req-1',
-      outcome: 'done',
-      reply: 'all done',
-      finalPetRunId: 'pet-run-1',
-      runId: 'run-1',
-      conversationId: 'conv-1',
-      idempotencyKey: 'studio:conv-1:run:run-1',
-    },
-  );
-});
-
-test('parseLocalAgentServerMessage accepts studio_response with workdir metadata', () => {
-  assert.deepEqual(
-    parseLocalAgentServerMessage(JSON.stringify({
-      type: 'studio_response',
-      requestId: 'req-1',
-      outcome: 'done',
-      reply: 'all done',
-      finalPetRunId: 'pet-run-1',
-      finalDispatchId: 'dispatch-1',
-      runId: 'run-1',
-      conversationId: 'conv-1',
-      workdir: '/tmp/project/.pinpawo',
-      idempotencyKey: 'studio:conv-1:run:run-1',
-    })),
-    {
-      type: 'studio_response',
-      requestId: 'req-1',
-      outcome: 'done',
-      reply: 'all done',
-      finalPetRunId: 'pet-run-1',
-      workdir: '/tmp/project/.pinpawo',
-      runId: 'run-1',
-      conversationId: 'conv-1',
-      idempotencyKey: 'studio:conv-1:run:run-1',
     },
   );
 });

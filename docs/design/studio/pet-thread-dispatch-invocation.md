@@ -1,7 +1,8 @@
 # Studio Pet Thread and Dispatch Invocation
 
-> Status: Draft
+> Status: Implemented draft
 > Date: 2026-08-22
+> Implemented: 2026-08-23
 > Related: issue #684, PR #682, issues #561 and #675
 > Shared interrupt contract: [Pending Interrupt in Chat](../local-agent/pending-interrupt-chat.md)
 
@@ -80,7 +81,14 @@ type StudioDispatchRequest = {
   signal?: AbortSignal;
 };
 
+type StudioDispatchReceipt = {
+  threadId: string;
+  invocationId: string;
+  completion: Promise<StudioDispatchResult>;
+};
+
 type StudioDispatchResult = {
+  petId: string;
   threadId: string;
   invocationId: string;
   status: 'completed' | 'pending_interrupt' | 'failed' | 'cancelled';
@@ -91,11 +99,14 @@ type StudioDispatchResult = {
 Every accepted call receives a new `invocationId` unless an explicit
 `idempotencyKey` resolves to an existing call. Studio resolves the stable
 `threadId` from `petId`; callers do not choose the checkpoint namespace.
+Dispatch acknowledges acceptance with a receipt immediately. Its `completion`
+promise settles when the serialized invocation reaches a terminal or durable
+interrupt state, so push-style producers do not need to block on graph work.
 
 Producer metadata is opaque. Studio core does not define a `correlationId`:
 producers may put their own task, correlation, or source fields under metadata,
 but those fields never replace `petId`, `threadId`, `invocationId`, or
-`interruptId`.
+`interruptId`, and Studio does not inject them into the Pet runtime.
 
 ## Pending interrupt projection
 
@@ -159,40 +170,42 @@ review options or construct graph resume commands.
 | `interactionId` | Keep | One interaction inside a review payload |
 | deprecated `reviewId` | Compatibility parser only | Alias of `interactionId` |
 | Chat `requestId` | Keep inside Chat transport only | Not a Studio identity |
+| Studio wire `deliveryId` | Keep inside Studio transport only | Correlates pre-acceptance errors and push delivery; not a runtime identity |
 | producer correlation/task fields | Opaque `metadata` | Studio does not own producer workflows |
 | `idempotencyKey` | Add only for explicit dispatch deduplication | Distinct from correlation |
 
-## Conflict with current sources
+## Implementation alignment
 
-This draft intentionally records a disagreement rather than rewriting current
-reference material:
+- `buildStudioPetThreadId(studioId, petId)` derives one deterministic checkpoint
+  namespace for each resident Pet, including after Host restart.
+- `createStudio()` creates one invocation per accepted dispatch, serializes only
+  active graph invocations, and settles a durable interrupt as
+  `pending_interrupt`.
+- `createPetAgentRuntime()` reads the authoritative checkpoint before invocation,
+  rejects ordinary input while a continuation is pending, validates interrupt
+  identity and review responses, and issues a keyed LangGraph resume command.
+- Studio owns a typed `studio.dispatch` request/resume wire envelope and emits
+  `studio.accepted`, `studio.invocation`, and `studio.event`. Producer correlation
+  is opaque `metadata` echoed at the Studio boundary; it is neither Pet execution
+  context nor part of the Pet thread. Agent Session and the Chat dispatcher
+  contain no Studio messages.
+- Chat continues to use its own session and review transport. Only the public
+  pending-interrupt and review response contracts are shared.
 
-- `packages/studio/src/createStudio.ts` creates a random thread for every
-  dispatch and waits for `open` after `waiting`;
-- `packages/studio/src/studioContract.ts` treats `threadId` as dispatch identity;
-- `services/local-agent/src/studio/studioApiContract.ts` includes workflow
-  run/task/conversation identity in the thread namespace;
-- issue #561 assumes invocation-specific threads.
+## Implemented migration
 
-Those sources describe current behavior. Issue #684 proposes replacing it with
-one stable thread per Pet and one invocation per dispatch. Public Studio
-reference docs remain unchanged until implementation and review adopt the new
-contract.
-
-## Migration plan
-
-1. Land the shared `PendingInterrupt` vocabulary and checkpoint projection in
+1. Landed the shared `PendingInterrupt` vocabulary and checkpoint projection in
    Chat without adding Studio concepts to Chat code.
-2. Add Studio behavior tests for stable Pet threads and distinct invocation IDs.
-3. Introduce typed request and interrupt-resume dispatch inputs.
-4. Resolve the stable thread in the Studio/Pet registry.
+2. Added Studio behavior tests for stable Pet threads and distinct invocation IDs.
+3. Introduced typed request and interrupt-resume dispatch inputs.
+4. Resolved the stable thread in the Studio/Pet registry.
 5. Let a durable interrupt settle the current invocation and admit the next
    serialized dispatch.
-6. Make the Pet runtime validate request versus interrupt-resume input against
+6. Made the Pet runtime validate request versus interrupt-resume input against
    its checkpoint.
-7. Add Studio envelopes around the shared interrupt projection.
-8. Remove duplicate action/review IDs and workflow identity from Studio core
-   after compatibility migration.
+7. Added Studio envelopes around the shared interrupt projection.
+8. Removed duplicate action/review IDs and workflow identity from Studio core,
+   and removed the old Studio-shaped messages from the Chat protocol.
 
 ## Required behavioral tests
 
@@ -207,10 +220,9 @@ contract.
 - Restart resolves the same Pet thread and pending interrupt.
 - Chat projections contain no Studio `petId` or dispatch identity.
 
-## Open questions
+## Remaining questions
 
-- Whether the stable thread ID is derived from `studioId + petId` or persisted
-  in the Studio registry.
 - How historical random per-dispatch checkpoints are retained.
 - Which typed inputs are legal while a Pet is `blocked`.
-- The exact shape and retention policy of dispatch idempotency records.
+- Whether idempotency records need durable retention beyond the current Host
+  generation.

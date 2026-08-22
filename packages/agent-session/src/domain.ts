@@ -129,16 +129,13 @@ export type AgentRuntimeView = {
   workspaceName?: string;
   workspaceRoot?: string;
   stateRoot?: string;
-  studioConfigPath?: string;
-  studioDueRunsPath?: string;
   petsDir?: string;
-  studioWikiBaseDir?: string;
   contextWindow?: number;
 };
 
 export type AgentSession = {
   sessionId: string;
-  kind: 'chat' | 'studio';
+  kind: 'chat';
   actor?: AgentActorView;
   timeline: AgentTimelineEntry[];
   activeRun: AgentRunView | null;

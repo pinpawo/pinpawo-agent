@@ -1,11 +1,13 @@
-import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { test } from 'node:test';
 
 import { StudioRequestHandler } from './StudioRequestHandler';
 import type {
   Studio,
-  StudioDispatchGateHandler,
+  StudioDispatchRequest,
   StudioEventHandler,
+  StudioInvocationEvent,
+  StudioInvocationEventHandler,
 } from '../studioContract';
 
 type Peer = { send: (message: unknown) => boolean };
@@ -15,187 +17,264 @@ function createPeer(sent: unknown[]): Peer {
 }
 
 type TestStudio = Studio & {
-  lastCorrelationId: () => string | undefined;
+  lastDispatch: () => StudioDispatchRequest | undefined;
+  emitInvocation: (event: StudioInvocationEvent) => void;
 };
 
 function fakeStudio(overrides: Partial<Studio> = {}): TestStudio {
-  const handlers = new Set<StudioEventHandler>();
-  const gateHandlers = new Set<StudioDispatchGateHandler>();
-  let correlationId: string | undefined;
+  const eventHandlers = new Set<StudioEventHandler>();
+  const invocationHandlers = new Set<StudioInvocationEventHandler>();
+  let dispatched: StudioDispatchRequest | undefined;
   return {
     entryPetId: 'pet-a',
     dispatch: async (input) => {
-      correlationId = input.correlationId;
-      return { threadId: 'thread-1' };
+      dispatched = input;
+      return {
+        petId: input.petId,
+        threadId: 'studio:s1:pet:pet-a',
+        invocationId: 'invocation-1',
+        metadata: input.metadata,
+        completion: Promise.resolve({
+          petId: input.petId,
+          threadId: 'studio:s1:pet:pet-a',
+          invocationId: 'invocation-1',
+          status: 'completed',
+          metadata: input.metadata,
+        }),
+      };
     },
-    onDispatchGate: (handler) => {
-      gateHandlers.add(handler);
-      return () => gateHandlers.delete(handler);
+    onInvocation: (handler) => {
+      invocationHandlers.add(handler);
+      return () => invocationHandlers.delete(handler);
     },
-    notify: (event) => { for (const handler of handlers) void handler(event); },
-    subscribe: (handler) => { handlers.add(handler); return () => handlers.delete(handler); },
+    notify: (event) => { for (const handler of eventHandlers) void handler(event); },
+    subscribe: (handler) => {
+      eventHandlers.add(handler);
+      return () => eventHandlers.delete(handler);
+    },
     listPets: () => [],
-    shutdown: async () => {},
+    shutdown: async () => undefined,
     ...overrides,
-    lastCorrelationId: () => correlationId,
+    lastDispatch: () => dispatched,
+    emitInvocation: (event) => {
+      for (const handler of invocationHandlers) void handler(event);
+    },
   };
 }
 
 function handlerWith(studio: Studio) {
   const sent: unknown[] = [];
-  const events: unknown[] = [];
   const handler = new StudioRequestHandler<Peer>({
     studio,
-    workdir: '/tmp/pinpawo-studio-test',
     outbound: {
-      sendMessage: (peer, message) => peer.send(message),
-      sendEvent: (_peer, event) => { events.push(event); return true; },
+      send: (peer, message) => peer.send(message),
     },
   });
-  return { handler, sent, events };
+  return { handler, sent };
 }
 
-test('a studio request returns as soon as it is submitted', async () => {
-  // 提交即返回:推模型下没有人在等 pet。若它退化成等结果,这里会挂住。
-  let released!: () => void;
-  const gate = new Promise<void>((resolve) => { released = resolve; });
-  const studio = fakeStudio({
-    dispatch: async () => {
-      void gate; // 模拟 pet 长时间执行:dispatch 本身不应等它
-      return { threadId: 'thread-slow' };
+test('a Studio dispatch returns Pet, thread, and invocation identity', async () => {
+  const studio = fakeStudio();
+  const { handler, sent } = handlerWith(studio);
+  await handler.handleStudioRequest(createPeer(sent), {
+    type: 'studio.dispatch',
+    deliveryId: 'delivery-1',
+    petId: 'pet-a',
+    input: { kind: 'request', request: 'plan this' },
+  });
+
+  const dispatched = studio.lastDispatch();
+  assert.deepEqual(dispatched?.input, { kind: 'request', request: 'plan this' });
+  assert.equal(dispatched?.petId, 'pet-a');
+  assert.equal(typeof dispatched?.metadata?.transportRouteId, 'string');
+  assert.deepEqual(sent.at(-1), {
+    type: 'studio.accepted',
+    deliveryId: 'delivery-1',
+    petId: 'pet-a',
+    threadId: 'studio:s1:pet:pet-a',
+    invocationId: 'invocation-1',
+  });
+});
+
+test('acceptance is delivered before an invocation emitted during dispatch', async () => {
+  let studio!: TestStudio;
+  studio = fakeStudio({
+    dispatch: async (input) => {
+      studio.emitInvocation({
+        petId: input.petId,
+        threadId: 'studio:s1:pet:pet-a',
+        invocationId: 'invocation-1',
+        status: 'busy',
+        metadata: input.metadata,
+      });
+      return {
+        petId: input.petId,
+        threadId: 'studio:s1:pet:pet-a',
+        invocationId: 'invocation-1',
+        metadata: input.metadata,
+        completion: new Promise(() => undefined),
+      };
+    },
+  });
+  const { handler, sent } = handlerWith(studio);
+  await handler.handleStudioRequest(createPeer(sent), {
+    type: 'studio.dispatch',
+    deliveryId: 'delivery-1',
+    petId: 'pet-a',
+    input: { kind: 'request', request: 'go' },
+  });
+
+  assert.deepEqual(sent.map((message) => (message as { type: string }).type), [
+    'studio.accepted',
+    'studio.invocation',
+  ]);
+});
+
+test('a canonical Studio request targets a Pet and carries typed resume input opaquely', async () => {
+  const studio = fakeStudio();
+  const { handler } = handlerWith(studio);
+  await handler.handleStudioRequest(createPeer([]), {
+    type: 'studio.dispatch',
+    deliveryId: 'delivery-resume-1',
+    petId: 'pet-b',
+    input: {
+      kind: 'resume_interrupt',
+      interruptId: 'interrupt-1',
+      payload: {
+        kind: 'human_review_response',
+        responses: [{ interactionId: 'review-1', selectedOptionId: 'approve' }],
+      },
+    },
+    metadata: { taskId: 'task-1' },
+    idempotencyKey: 'resume-task-1',
+  });
+
+  const dispatched = studio.lastDispatch();
+  assert.equal(dispatched?.petId, 'pet-b');
+  assert.equal(dispatched?.input.kind, 'resume_interrupt');
+  assert.equal(dispatched?.idempotencyKey, 'resume-task-1');
+  assert.equal(dispatched?.metadata?.taskId, 'task-1');
+  assert.equal(typeof dispatched?.metadata?.transportRouteId, 'string');
+});
+
+test('invocation events route by opaque transport metadata and expose pending interrupt', async () => {
+  const studio = fakeStudio();
+  const { handler, sent } = handlerWith(studio);
+  await handler.handleStudioRequest(createPeer(sent), {
+    type: 'studio.dispatch',
+    deliveryId: 'delivery-1',
+    petId: 'pet-a',
+    input: { kind: 'request', request: 'go' },
+  });
+  const metadata = studio.lastDispatch()?.metadata;
+  assert.ok(metadata);
+  studio.emitInvocation({
+    petId: 'pet-a',
+    threadId: 'studio:s1:pet:pet-a',
+    invocationId: 'invocation-1',
+    status: 'pending_interrupt',
+    metadata: { ...metadata, taskId: 'task-1' },
+    pendingInterrupt: {
+      interruptId: 'interrupt-1',
+      payload: { kind: 'human_review', interactions: [] },
     },
   });
 
-  const { handler, sent } = handlerWith(studio);
-  const peer = createPeer(sent);
-
-  await handler.handleStudioRequest(peer, {
-    type: 'studio_request',
-    requestId: 'studio-1',
-    userRequest: 'plan this',
-  });
-
-  const response = sent.at(-1) as { type: string; outcome: string; reply: string };
-  assert.equal(response.type, 'studio_response');
-  assert.equal(response.outcome, 'done');
-  // reply 为空是刻意的:提交时还没有结果,产出经 event 流出。
-  assert.equal(response.reply, '');
-  released();
+  const progress = sent.at(-1) as {
+    type: string;
+    deliveryId: string;
+    status: string;
+    invocationId: string;
+    metadata: Record<string, unknown>;
+    pendingInterrupt: { interruptId: string };
+  };
+  assert.equal(progress.type, 'studio.invocation');
+  assert.equal(progress.deliveryId, 'delivery-1');
+  assert.equal(progress.status, 'pending_interrupt');
+  assert.equal(progress.invocationId, 'invocation-1');
+  assert.deepEqual(progress.metadata, { taskId: 'task-1' });
+  assert.equal(progress.pendingInterrupt.interruptId, 'interrupt-1');
 });
 
-test('multiple requests dispatch to the same resident studio', async () => {
-  // #643 常驻 Host 模型:Studio 在 Host init 时构建一次,
-  // 多个 request 只 dispatch,不再 build。
-  let dispatchCount = 0;
+test('an idempotent transport retry receives the existing invocation terminal result', async () => {
   const studio = fakeStudio({
-    dispatch: async () => { dispatchCount += 1; return { threadId: `thread-${dispatchCount}` }; },
+    dispatch: async () => ({
+      petId: 'pet-a',
+      threadId: 'studio:s1:pet:pet-a',
+      invocationId: 'invocation-existing',
+      metadata: { transportRouteId: 'studio-route:original', taskId: 'task-1' },
+      completion: Promise.resolve({
+        petId: 'pet-a',
+        threadId: 'studio:s1:pet:pet-a',
+        invocationId: 'invocation-existing',
+        status: 'completed',
+        output: 'already complete',
+        metadata: { transportRouteId: 'studio-route:original', taskId: 'task-1' },
+      }),
+    }),
   });
   const { handler, sent } = handlerWith(studio);
-  const peer = createPeer(sent);
 
-  for (const requestId of ['studio-1', 'studio-2', 'studio-3']) {
-    await handler.handleStudioRequest(peer, {
-      type: 'studio_request',
-      requestId,
-      userRequest: 'go',
-    });
-  }
+  await handler.handleStudioRequest(createPeer(sent), {
+    type: 'studio.dispatch',
+    deliveryId: 'delivery-retry',
+    petId: 'pet-a',
+    input: { kind: 'request', request: 'same request' },
+    idempotencyKey: 'dispatch-1',
+  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
 
-  assert.equal(dispatchCount, 3);
-  // All three responses should be studio_response
-  const responses = sent.filter((m) => (m as { type: string }).type === 'studio_response');
-  assert.equal(responses.length, 3);
+  const progress = sent.at(-1) as {
+    deliveryId: string;
+    status: string;
+    invocationId: string;
+    output: string;
+    metadata: Record<string, unknown>;
+  };
+  assert.equal(progress.deliveryId, 'delivery-retry');
+  assert.equal(progress.status, 'completed');
+  assert.equal(progress.invocationId, 'invocation-existing');
+  assert.equal(progress.output, 'already complete');
+  assert.deepEqual(progress.metadata, { taskId: 'task-1' });
 });
 
-test('plugin events reach the peer as studio progress', async () => {
-  const studio = fakeStudio();
-  const { handler, sent, events } = handlerWith(studio);
-  const peer = createPeer(sent);
-
-  await handler.handleStudioRequest(peer, {
-    type: 'studio_request',
-    requestId: 'studio-1',
-    userRequest: 'go',
-  });
-
-  studio.notify({
-    type: 'task.done',
-    source: 'kanban',
-    correlationId: studio.lastCorrelationId(),
-    occurredAt: new Date().toISOString(),
-  });
-
-  const progress = events.at(-1) as { type: string; event: { type: string } };
-  assert.equal(progress.type, 'studio.progress');
-  assert.equal(progress.event.type, 'task.done');
-});
-
-test('events are attributed by correlation instead of the peer latest request', async () => {
-  const studio = fakeStudio();
-  const { handler, sent, events } = handlerWith(studio);
-  const peer = createPeer(sent);
-
-  await handler.handleStudioRequest(peer, {
-    type: 'studio_request', requestId: 'studio-1', userRequest: 'first',
-  });
-  const firstCorrelationId = studio.lastCorrelationId();
-  await handler.handleStudioRequest(peer, {
-    type: 'studio_request', requestId: 'studio-2', userRequest: 'second',
-  });
-
-  studio.notify({
-    type: 'task.done',
-    source: 'kanban',
-    correlationId: firstCorrelationId,
-    occurredAt: new Date().toISOString(),
-  });
-
-  const progress = events.at(-1) as { requestId: string };
-  assert.equal(progress.requestId, 'studio-1');
-});
-
-test('uncorrelated events are not broadcast across peers', async () => {
-  const studio = fakeStudio();
-  const { handler, events } = handlerWith(studio);
-  await handler.handleStudioRequest(createPeer([]), {
-    type: 'studio_request', requestId: 'peer-a', userRequest: 'a',
-  });
-  await handler.handleStudioRequest(createPeer([]), {
-    type: 'studio_request', requestId: 'peer-b', userRequest: 'b',
-  });
-
-  studio.notify({
-    type: 'global.tick',
-    source: 'scheduler',
-    occurredAt: new Date().toISOString(),
-  });
-
-  assert.deepEqual(events, []);
-});
-
-test('a dispatch error is reported as studio_error', async () => {
-  // Studio 由 Host 构建并注入;handler 层面的错误来自 dispatch,
-  // 不再有 buildStudio 路径。
+test('a dispatch error returns studio_error and releases its route', async () => {
   const studio = fakeStudio({
     dispatch: async () => { throw new Error('dispatch boom'); },
   });
-  const sent: unknown[] = [];
-  const handler = new StudioRequestHandler<Peer>({
-    studio,
-    workdir: '/tmp/pinpawo-studio-test',
-    outbound: {
-      sendMessage: (peer, message) => peer.send(message),
-      sendEvent: () => true,
-    },
-  });
-
+  const { handler, sent } = handlerWith(studio);
   await handler.handleStudioRequest(createPeer(sent), {
-    type: 'studio_request',
-    requestId: 'studio-1',
-    userRequest: 'go',
+    type: 'studio.dispatch',
+    deliveryId: 'delivery-1',
+    petId: 'pet-a',
+    input: { kind: 'request', request: 'go' },
   });
+  assert.deepEqual(sent.at(-1), {
+    type: 'studio.error',
+    deliveryId: 'delivery-1',
+    message: 'dispatch boom',
+  });
+});
 
-  const error = sent.at(-1) as { type: string; message: string };
-  assert.equal(error.type, 'studio_error');
-  assert.match(error.message, /dispatch boom/);
+test('disconnect drops only that peer routes while the resident Studio remains alive', async () => {
+  const studio = fakeStudio();
+  const { handler, sent } = handlerWith(studio);
+  const peer = createPeer([]);
+  await handler.handleStudioRequest(peer, {
+    type: 'studio.dispatch',
+    deliveryId: 'delivery-1',
+    petId: 'pet-a',
+    input: { kind: 'request', request: 'go' },
+  });
+  const metadata = studio.lastDispatch()?.metadata;
+  assert.ok(metadata);
+  handler.rejectDisconnected(peer);
+  studio.emitInvocation({
+    petId: 'pet-a',
+    threadId: 'studio:s1:pet:pet-a',
+    invocationId: 'invocation-1',
+    status: 'completed',
+    metadata,
+  });
+  assert.deepEqual(sent, []);
 });

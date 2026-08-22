@@ -1,6 +1,6 @@
 import { parseTuiCommand } from './commandRegistry';
 
-export type ComposerMode = 'chat' | 'studio';
+export type ComposerMode = 'chat';
 
 export type ComposerIntent =
   | { type: 'none' }
@@ -17,10 +17,8 @@ export type ComposerIntent =
   | { type: 'export-transcript'; path?: string }
   | { type: 'open-editor'; text: string }
   | { type: 'enter-chat' }
-  | { type: 'enter-studio' }
   | { type: 'start-new-session' }
-  | { type: 'submit-chat'; text: string }
-  | { type: 'submit-studio'; text: string; enterMode: boolean };
+  | { type: 'submit-chat'; text: string };
 
 export function resolveComposerIntent(input: {
   text: string;
@@ -39,9 +37,7 @@ export function resolveComposerIntent(input: {
     };
   }
   if (parsed.type === 'text') {
-    return input.mode === 'studio'
-      ? { type: 'submit-studio', text: parsed.text, enterMode: false }
-      : { type: 'submit-chat', text: parsed.text };
+    return { type: 'submit-chat', text: parsed.text };
   }
 
   switch (parsed.name) {
@@ -81,13 +77,6 @@ export function resolveComposerIntent(input: {
       return { type: 'open-editor', text: parsed.args };
     case 'chat':
       return { type: 'enter-chat' };
-    case 'studio':
-      if (parsed.args) {
-        return { type: 'submit-studio', text: parsed.args, enterMode: true };
-      }
-      return input.mode === 'studio'
-        ? { type: 'enter-chat' }
-        : { type: 'enter-studio' };
     case 'new':
       return { type: 'start-new-session' };
   }

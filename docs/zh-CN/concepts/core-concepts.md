@@ -12,7 +12,7 @@ PinPawo Agent 是一个本地优先的 Agent 框架。它让模型可以推理�
 - **显式权限：** Capability 必须声明可使用的 Toolkit；有副作用的工具可在执行前等待人工审核。
 - **可恢复执行：** checkpoint 保存对话和待继续状态，session projection 为 TUI 与集成提供统一视图。
 - **可组合扩展：** 任务意图写在可审查的 Markdown Capability 中，可执行行为与安全策略写在 typed Toolkit 中。
-- **可扩展协作：** Studio 提供多 Pet 的 dispatch、每 Pet 队列、runtime gate 与插件事件总线，而不暴露 worker 的私有推理。
+- **可扩展协作：** Studio 提供稳定 Pet thread、每 Pet invocation 串行与 Plugin 事件总线，而不暴露 worker 的私有推理。
 
 ## 术语
 
@@ -27,7 +27,7 @@ PinPawo Agent 是一个本地优先的 Agent 框架。它让模型可以推理�
 | **Checkpoint** | LangGraph 的持久状态，保存消息与待继续执行。 | resume 与恢复的权威来源。 |
 | **Session projection** | checkpoint 与当前运行事实的客户端无关表示。 | 客户端不需要各自重建状态。 |
 | **Artifact** | 要跨越 lane 或在清理后继续存在的结果引用。 | 避免把聊天消息当作长期存储。 |
-| **Studio** | 多 Pet 的 dispatch 底座、每 Pet 队列、runtime gate 与插件事件总线。 | 在不破坏 worker 边界的前提下协作。 |
+| **Studio** | 多 Pet 的 dispatch 底座、稳定 Pet thread、invocation 串行与 Plugin 事件总线。 | 在不破坏 worker 边界的前提下协作。 |
 | **Workdir** | 运行时配置、Studio 状态和相对工具路径的本地作用域。 | 防止不同项目误共享状态。 |
 
 ## 三个扩展边界

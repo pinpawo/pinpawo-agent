@@ -14,9 +14,9 @@ import {
   type SessionNewMessage,
   type SessionResumeMessage,
   type SessionSnapshotGetMessage,
-  type StudioRequestMessage,
 } from './localAgentProtocol';
 import { sendLocalServerPeerEvent, type LocalServerPeer } from './localServerPeer';
+import type { LocalServerWireHandlers } from './localServerWire';
 
 type MaybePromise<T> = T | Promise<T>;
 export type LocalServerLogError = (message: string, error: unknown) => void;
@@ -24,7 +24,6 @@ export type LocalServerLogWarn = (message: string) => void;
 
 export type LocalServerPeerHandlers = {
   onChatRequest: (peer: LocalServerPeer, message: ChatRequestMessage) => MaybePromise<void>;
-  onStudioRequest?: (peer: LocalServerPeer, message: StudioRequestMessage) => MaybePromise<void>;
   onHumanReviewResponse: (
     peer: LocalServerPeer,
     message: HumanReviewResponseMessage,
@@ -173,8 +172,6 @@ export function dispatchLocalServerMessage(
 
     if (msg.type === 'chat_request') {
       return dispatchOptional(peer, msg, handlers.onChatRequest, 'handleChatRequest', logError, logWarn);
-    } else if (msg.type === 'studio_request') {
-      return dispatchOptional(peer, msg, handlers.onStudioRequest, 'handleStudioRequest', logError, logWarn);
     } else if (msg.type === 'human_review_response') {
       return dispatchOptional(peer, msg, handlers.onHumanReviewResponse, 'handleHumanReviewResponse', logError, logWarn);
     } else if (msg.type === 'review.cancel') {
@@ -219,4 +216,24 @@ export function dispatchLocalServerMessage(
     logError('[local-server] failed to dispatch client message:', err);
   }
   return Promise.resolve();
+}
+
+export function createLocalAgentWireHandlers(
+  handlers: LocalServerTransportHandlers,
+  logError: LocalServerLogError = handlers.logError ?? defaultLocalServerLogError,
+  logWarn: LocalServerLogWarn = handlers.logWarn ?? defaultLocalServerLogWarn,
+): LocalServerWireHandlers<import('./localAgentProtocol').LocalAgentServerMessage> {
+  return {
+    onMessage: (peer, data) => dispatchLocalServerMessage(
+      peer,
+      data,
+      handlers,
+      logError,
+      logWarn,
+    ),
+    onClose: handlers.onClose,
+    log: handlers.log,
+    logError,
+    logWarn,
+  };
 }

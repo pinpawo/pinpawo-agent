@@ -27,9 +27,6 @@ test('local server dispatcher routes typed client messages and pong', async () =
     onChatRequest: (_peer, message) => {
       seen.push(`chat:${message.requestId}:${message.message}`);
     },
-    onStudioRequest: (_peer, message) => {
-      seen.push(`studio:${message.requestId}:${message.userRequest}`);
-    },
     onHumanReviewResponse: (_peer, message) => {
       const response = message.responses.at(-1);
       seen.push(`review:${message.requestId}:${response?.interactionId}:${response?.selectedOptionId}`);
@@ -82,11 +79,6 @@ test('local server dispatcher routes typed client messages and pong', async () =
     type: 'chat_request',
     requestId: 'chat-1',
     message: 'hi',
-  }), handlers);
-  dispatchLocalServerMessage(peer, JSON.stringify({
-    type: 'studio_request',
-    requestId: 'studio-1',
-    userRequest: 'plan',
   }), handlers);
   dispatchLocalServerMessage(peer, JSON.stringify({
     type: 'human_review_response',
@@ -182,7 +174,6 @@ test('local server dispatcher routes typed client messages and pong', async () =
     ]);
     assert.deepEqual(seen, [
       'chat:chat-1:hi',
-      'studio:studio-1:plan',
       'review:review-1:review-spec-1:approve',
       'run-interrupt:chat-1',
       'review-cancel:review-1:action-1',

@@ -7,16 +7,16 @@
 
 The Studio core contract is filesystem- and transport-independent. The
 `@pinpawo/studio` package also exports the concrete local Host adapter that owns
-file loading and runtime construction; local-agent supplies its optional wire
-transport adapter:
+file loading, runtime construction, and the Studio wire protocol; local-agent
+supplies only protocol-neutral loopback WebSocket/stdio framing:
 
 ```text
 <workdir>/.pinpawo/{studio.json,pets/*.json,pets/<petId>/capabilities/*/CAPABILITY.md}
       ↓ resolveStudioHostConfig() + Host Toolkit inventory + buildStudio()
 Studio + PetAgentRuntime[] + configured plugins
       ↓ StudioRequestHandler
-studio_request → dispatch(entryPetId) → studio_response acknowledgement
-                                      ↘ studio.progress plugin events
+studio.dispatch → typed dispatch(petId) → studio.accepted
+                                      ↘ studio.invocation / studio.event
 ```
 
 This is the Studio form of the same `Host -> Agent Runtime -> Capability ->
@@ -44,44 +44,49 @@ use separate checkpoint roots because they can run as independent processes.
 At startup, each Host claims a lifetime writer lease for its checkpoint root and
 fails fast if another Host owns it. `FileSaver` also serializes individual store
 mutations with a filesystem writer lock. The Pet runtime uses the checkpointer
-to determine whether `invoke()` has a pending continuation and therefore
-whether its gate is `open`, `waiting`, or `blocked`. Studio itself never reads
-or interprets a checkpoint. The Pet runtime keeps human review enabled, so
-LangGraph may persist an interrupt and leave the gate at `waiting`. This state
-does not depend on Chat Host memory and may remain pending until an external
-control adapter resumes the same thread.
+to validate whether a typed request or resume is legal for the current
+continuation. Studio itself never reads or interprets checkpoint contents. The
+Pet runtime keeps human review enabled, so LangGraph may persist an interrupt
+and return a public pending projection. This state does not depend on Chat Host
+memory and may remain pending until an external interaction adapter dispatches
+a resume to the same stable Pet thread.
 
-The built-in Studio transport does not accept Chat review/session messages.
-An independent Studio plugin or Host adapter can inspect pending actions, emit
-events to a user-facing integration, and resume through the Host-owned graph and
-checkpointer. That control adapter is separate from the Studio core contract.
+The built-in Studio transport does not accept Chat review/session messages. It
+does accept Studio's own typed `resume_interrupt` dispatch. An independent
+Studio Plugin or Host adapter can consume pending invocation events, interact
+with a user, and submit that typed resume. The Pet runtime remains the component
+that validates the checkpoint and constructs the graph command.
 
 ## Wire behavior
 
-On a `studio_request`, the handler dispatches the user text to
-`studio.entryPetId`. Once the request is accepted into Studio's per-pet queue,
-it sends a `studio_response` with an empty `reply`. This is an acknowledgement,
-not a final answer or a task-completion signal, even though the current wire
-message uses `outcome: 'done'`.
+The Studio-owned `studio.dispatch` message carries `petId` plus a typed
+request/resume input, opaque metadata, and an optional idempotency key. Once
+accepted, the handler sends `studio.accepted` with `petId`, stable `threadId`,
+and current `invocationId`. This is an acknowledgement, not a final answer.
+The historical Chat `studio_request` shape is not accepted.
 
-The handler forwards dispatch gate changes as `studio.progress`. Plugin events
-are forwarded only when they carry the exact correlation of an accepted request;
-uncorrelated global events are not broadcast across peers. Consumers must treat this stream as
-best-effort process-local notification, not a durable audit or a reliable
-completion protocol.
+The handler forwards invocation changes as `studio.invocation`, including
+completed, pending interrupt, failure, and cancellation, and correlated Plugin
+events as `studio.event`. Plugin events are forwarded only when they carry the
+internal route metadata of an accepted request; uncorrelated global events are
+not broadcast across peers. Consumers must treat this stream as best-effort
+process-local notification, not a durable audit. The checkpoint remains
+authoritative for a pending interrupt.
 
 Each accepted request receives an unguessable transport route ID that is passed
-as the dispatch correlation. This prevents simultaneous workflows or peers from
-being projected under another request ID. A plugin event without that explicit
-correlation remains domain-global and is not attached to a request.
+inside opaque metadata and removed before public forwarding. This prevents
+simultaneous workflows or peers from being projected under another delivery ID.
+A Plugin event without that internal route remains domain-global and is not
+attached to a request.
 
 ## Shutdown
 
 Server shutdown stops the resident Studio via `StudioHost.shutdown()`.
-Studio then rejects new dispatches,
-stops plugins in reverse order, clears subscriptions, and releases waiting
-queues instead of waiting indefinitely for external input. Queued dispatches
-that have not started are discarded and cannot invoke a pet after shutdown.
+Studio then rejects new dispatches, cancels active invocations, settles queued
+invocations as cancelled, stops Plugins in reverse order, and clears
+subscriptions. Durable pending interrupts occupy no active queue slot and do not
+block shutdown. Queued dispatches that have not started cannot invoke a Pet
+after shutdown.
 Plugin startup failure rolls back the started prefix in reverse order. A host that owns
 Toolkit runtime managers is responsible for their wider lifecycle.
 

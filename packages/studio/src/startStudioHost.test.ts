@@ -32,8 +32,18 @@ function fakeAssembly(events: string[]): HostCapabilityAssembly {
 function fakeStudio(events: string[]): Studio {
   return {
     entryPetId: 'pet-a',
-    dispatch: async () => ({ threadId: 'thread-1' }),
-    onDispatchGate: () => () => {},
+    dispatch: async () => ({
+      petId: 'pet-1',
+      threadId: 'thread-1',
+      invocationId: 'invocation-1',
+      completion: Promise.resolve({
+        petId: 'pet-1',
+        threadId: 'thread-1',
+        invocationId: 'invocation-1',
+        status: 'completed',
+      }),
+    }),
+    onInvocation: () => () => {},
     notify: () => {},
     subscribe: () => () => {},
     listPets: () => [],

@@ -67,7 +67,6 @@ function launch(
     hostReady: false,
     policy: false,
     review: false,
-    studio: false,
     transcript: false,
     ...smokeOverrides,
   };

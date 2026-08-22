@@ -42,7 +42,7 @@ function pet(options: {
     }),
     invoke: async (input) => {
       await options.onInvoke?.(input, options.tools());
-      return { reply: 'ok' };
+      return { status: 'completed', reply: 'ok' };
     },
   };
 }
@@ -55,18 +55,6 @@ function pluginTools(plugin: ReturnType<typeof createKanbanPlugin>) {
   return Object.fromEntries(
     toolkit.tools.map(({ tool }) => [tool.name, tool]),
   ) as KanbanTools;
-}
-
-function invocationConfig(threadId: string | null) {
-  return {
-    context: {
-      executionScope: {
-        threadId,
-        runId: 'r',
-        delegationId: 'd',
-      },
-    },
-  };
 }
 
 const flush = async () => {
@@ -96,12 +84,12 @@ test('a full round: entry pet plans, kanban dispatches, worker completes', async
         petId: 'writer',
         tools: () => ({}),
         onInvoke: async (input) => {
-          writerBrief = input.brief;
-          // worker 用自己 thread 的工具标记完成 —— 无需转述任何 id。
+          writerBrief = input.input.kind === 'request' ? input.input.request : '';
+          const taskId = /Kanban taskId: ([^\s]+)/.exec(writerBrief)?.[1];
+          assert.ok(taskId, 'Kanban Plugin must put its taskId in the dispatched request');
           const tools = pluginTools(plugin);
           await tools.kanban_task_complete!.invoke(
-            { result: '稿子写完了' },
-            invocationConfig(input.threadId ?? null),
+            { taskId, result: '稿子写完了' },
           );
         },
       }),
@@ -111,11 +99,15 @@ test('a full round: entry pet plans, kanban dispatches, worker completes', async
 
   studio.subscribe((event) => { events.push(event); });
 
-  await studio.dispatch({ petId: studio.entryPetId, request: '写一篇关于 X 的稿子' });
+  await studio.dispatch({
+    petId: studio.entryPetId,
+    input: { kind: 'request', request: '写一篇关于 X 的稿子' },
+  });
   await flush();
 
-  // planner 的任务被派给了 writer,brief 原样传达。
-  assert.equal(writerBrief, '写稿');
+  // Plugin 派发自己的领域 taskId 和原始 brief，不需要 runtime identity 帮它关联。
+  assert.match(writerBrief, /Kanban taskId:/);
+  assert.match(writerBrief, /写稿/);
 
   const tasks = plugin.board.list();
   assert.equal(tasks.length, 1);
@@ -141,7 +133,9 @@ test('a dependent task waits until its dependency is done', async () => {
     pets: [pet({
       petId: 'worker',
       tools: () => ({}),
-      onInvoke: async (input) => { dispatched.push(input.brief); },
+      onInvoke: async (input) => {
+        if (input.input.kind === 'request') dispatched.push(input.input.request);
+      },
     })],
     plugins: [plugin],
   });
@@ -151,13 +145,13 @@ test('a dependent task waits until its dependency is done', async () => {
   await flush();
 
   // 依赖未满足的 second 不该被派发。
-  assert.ok(dispatched.includes('first'));
-  assert.ok(!dispatched.includes('second'));
+  assert.ok(dispatched.some((request) => request.includes('first')));
+  assert.ok(!dispatched.some((request) => request.includes('second')));
 
   board.complete(first.taskId, 'done');
   await flush();
 
-  assert.ok(dispatched.includes('second'));
+  assert.ok(dispatched.some((request) => request.includes('second')));
   await studio.shutdown();
 });
 
@@ -177,7 +171,9 @@ test('a blocked task neither retries nor blocks other ready work', async () => {
     pets: [pet({
       petId: 'worker',
       tools: () => ({}),
-      onInvoke: async (input) => { dispatched.push(input.brief); },
+      onInvoke: async (input) => {
+        if (input.input.kind === 'request') dispatched.push(input.input.request);
+      },
     })],
     plugins: [plugin],
   });
@@ -185,8 +181,11 @@ test('a blocked task neither retries nor blocks other ready work', async () => {
   board.add({ petId: 'worker', brief: 'kick' });
   await flush();
 
-  assert.ok(dispatched.includes('independent'), 'a blocked task must not stall ready work');
-  assert.equal(dispatched.filter((brief) => brief === 'stuck').length, 0);
+  assert.ok(
+    dispatched.some((request) => request.includes('independent')),
+    'a blocked task must not stall ready work',
+  );
+  assert.equal(dispatched.filter((request) => request.includes('stuck')).length, 0);
   assert.equal(board.get(stuck.taskId)?.status, 'blocked');
 });
 
@@ -195,7 +194,7 @@ test('restart marks in-flight tasks blocked rather than silently requeuing them'
   // 重来与否是人的判断。
   const source = new KanbanBoard();
   const task = source.add({ petId: 'worker', brief: 'interrupted' });
-  source.markDispatched(task.taskId, 'thread-1');
+  source.markDispatched(task.taskId);
 
   const restored = new KanbanBoard();
   restored.restore(source.snapshot());
@@ -204,15 +203,14 @@ test('restart marks in-flight tasks blocked rather than silently requeuing them'
   assert.match(restored.get(task.taskId)?.note ?? '', /interrupted by restart/);
 });
 
-test('tools report plainly when the caller has no assigned task', async () => {
+test('tools report plainly when taskId does not identify a doing task', async () => {
   const plugin = createKanbanPlugin();
   const tools = pluginTools(plugin);
 
   assert.match(
     await tools.kanban_task_complete!.invoke(
-      { result: 'x' },
-      invocationConfig('unknown-thread'),
+      { taskId: 'missing', result: 'x' },
     ) as string,
-    /no task is currently assigned/,
+    /unknown Kanban taskId/,
   );
 });

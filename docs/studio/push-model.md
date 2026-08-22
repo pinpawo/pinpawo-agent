@@ -3,93 +3,107 @@
 [简体中文](../zh-CN/studio/push-model.md)
 
 > **Status: current contract.** The source of truth is
-> [`studioContract.ts`](../../packages/studio/src/studioContract.ts) and
+> [`studioContract.ts`](../../packages/studio/src/studioContract.ts),
+> [`studioInvocation.ts`](../../packages/studio/src/studioInvocation.ts), and
 > [`createStudio.ts`](../../packages/studio/src/createStudio.ts).
 
-Studio is a plugboard between plugins and Pet runtimes. It exposes two
-independent one-way channels:
+Studio is a plugboard between Plugins and resident Pet runtimes. It provides a
+typed dispatch channel and a separate generic event bus:
 
 ```text
-plugin ── notify(event) ──> Studio ── dispatch(request) ──> pet
+Plugin ── dispatch(input) ──> Studio ── serialized invocation ──> Pet thread
+Plugin ── notify(event)  ──> Studio ── fan-out ────────────────> Plugins
 ```
 
-It neither interprets an event nor treats an event as the result of a dispatch.
-A plugin may publish no events for a dispatch, many events, or events unrelated
-to dispatch entirely. `correlationId` is a plugin-owned value that Studio only
-passes through.
+Studio does not define task schemas, dependencies, scheduling, retries, or
+Plugin persistence. Plugin is a higher-level extension that may define Agent
+Toolkits; it is not itself a Toolkit. Capability remains entirely Agent-owned.
 
-## Dispatch is acceptance, not completion
+## Dispatch, thread, and invocation
 
 ```ts
-const { threadId } = await studio.dispatch({
+const receipt = await studio.dispatch({
   petId: 'writer',
-  request: 'Draft the article.',
-  correlationId: 'task-42',
+  input: { kind: 'request', request: 'Draft the article.' },
+  metadata: { producerRef: 'external-job-42' },
+});
+
+const result = await receipt.completion;
+```
+
+Acceptance returns immediately. Every resident Pet owns one deterministic,
+durable thread derived from `(studioId, petId)`. Every accepted dispatch creates
+a separate invocation on that thread. This distinguishes continuity from work:
+
+- `threadId` is stable across dispatches and Host restarts;
+- `invocationId` identifies one accepted call;
+- `interruptId` identifies the current resumable checkpoint wait;
+- external producers may keep their own correlation references in opaque
+  `metadata`; Studio echoes them on receipts/events but never passes them into
+  the Pet runtime.
+
+One Pet executes at most one active invocation at a time; different Pets may
+execute concurrently. A receipt's `completion` settles as `completed`,
+`pending_interrupt`, `failed`, or `cancelled`. An explicit `idempotencyKey`
+deduplicates retries for one Pet within the current Host generation.
+
+Studio rejects acceptance when it is shut down, the Pet is unknown or disabled,
+or the dispatch envelope is invalid. Runtime failures settle the accepted
+invocation as `failed` rather than turning acceptance into a long-running RPC.
+
+## Durable interrupt and resume
+
+A checkpointed interrupt ends the current invocation but not the Pet thread:
+
+```text
+request invocation A1 ──> pending_interrupt(interrupt-7)
+resume invocation  A2 ──> same Pet thread ──> completed
+```
+
+The pending result/event contains a presentation-safe projection. An interaction
+Plugin or Host adapter may show it to a user and later submit:
+
+```ts
+await studio.dispatch({
+  petId: 'writer',
+  input: {
+    kind: 'resume_interrupt',
+    interruptId: 'interrupt-7',
+    payload: {
+      kind: 'human_review_response',
+      responses: [{ interactionId: 'review-1', selectedOptionId: 'approve' }],
+    },
+  },
 });
 ```
 
-The returned `threadId` identifies the accepted delivery. Studio rejects only
-three cases: it has shut down, the `petId` is unknown, or the target pet has
-`startupMode: 'disabled'`. A busy pet is not rejected; the request is queued.
+Studio core carries this typed value but does not interpret review options or
+construct graph commands. The Pet runtime reads the authoritative checkpoint,
+validates the interrupt and responses, and resumes LangGraph. A stale interrupt
+fails without changing the checkpoint. No Chat session, route cache, or review
+message is reused.
 
-Studio does not wait for a reply, expose a run snapshot, infer success, retry,
-or correlate a reply with an event. If `invoke()` rejects, Studio records the
-failure and leaves the runtime gate to prevent unsafe follow-up work. Result
-storage and recovery rules belong to the dispatching plugin.
+`onInvocation()` is the live control-plane observation. The public Studio sees
+all invocations; a Plugin context sees only invocations it dispatched. Events
+carry Pet/thread/invocation identity and opaque metadata. They are not durable;
+checkpoint state, not an event subscriber, owns interrupt existence.
 
-## Per-pet queue and runtime gate
-
-Each pet has one FIFO queue. Different pets may execute concurrently, but one
-pet receives its next request only after its gate is open:
-
-| Gate | Meaning | Queue behavior |
-|---|---|---|
-| `open` | The pet has no unfinished continuation. | Deliver the next request. |
-| `busy` | The runtime is executing. | Keep the queue closed; it may recover itself. |
-| `waiting` | The runtime is waiting for external input. | Keep the queue closed until the runtime signals `open`. |
-| `blocked` | The preceding dispatch failed or could not proceed. | Keep the queue closed for human intervention. |
-
-`invoke()` resolving is not sufficient to release the queue: a checkpointed
-runtime may return while it awaits human review. Studio only observes the gate;
-it does not offer a control plane for opening it. A host/runtime integration
-must ensure that a resumed pet eventually reports `open`.
-
-The current local Studio transport has no built-in review UI, but the Pet runtime
-still declares `humanReview: true`. LangGraph persists the interrupt and the gate
-may remain `waiting` indefinitely. A separate Studio plugin or Host adapter may
-project the pending action to an interaction layer and resume the same thread;
-Studio core does not need to understand review.
-
-Plugins can subscribe with `onDispatchGate()` to changes for dispatches they
-initiated. This is point-to-point feedback, not a broadcast event. Host-issued
-dispatches are observable through the public `Studio.onDispatchGate()` control
-subscription without exposing them to unrelated plugins.
-
-## Event bus
-
-Plugins use their context to publish:
+## Independent event bus
 
 ```ts
 context.notify({
   type: 'task.completed',
-  correlationId: 'task-42',
+  metadata: { taskId: 'task-42' },
   payload: { summary: 'Draft saved.' },
 });
 ```
 
-Studio fills `source` from the plugin name and supplies `occurredAt`. It fans
-the notification out asynchronously to subscribers. A failing subscriber is
-logged and does not affect the publisher or other subscribers. The public
-`Studio.notify()` / `subscribe()` methods also support a host event bridge, but
-a host must provide complete `StudioEvent` values itself.
+Studio fills `source` and `occurredAt` for Plugin events, then asynchronously
+fans them out. It does not validate payload meaning, persist or replay events,
+or infer that an event completes a dispatch. Dispatch observation belongs to
+`onInvocation`; domain notification belongs to `notify`/`subscribe`.
 
-The bus is neither durable nor replayable. It has no delivery guarantee across
-process restarts and must not be used as the source of truth for plugin state.
-
-## Plugins define Toolkits; they are not Toolkits
-
-A `StudioPlugin` is a higher-level Studio extension with an explicit Toolkit
-definition outlet:
+## Plugin and Toolkit boundary
 
 ```ts
 type StudioPlugin = {
@@ -100,41 +114,26 @@ type StudioPlugin = {
 };
 ```
 
-The Plugin itself is never passed to the Agent as a Toolkit. Its zero or more
-Toolkit definitions enter the Host's unified Toolkit inventory before resident
-Pet runtimes are built. Availability, provenance, optional Toolkit Runtime
-startup, and `Capability.uses` selection therefore stay on the Agent side.
+Plugin Toolkits enter the Host inventory before resident Pets are built.
+Capability definitions are loaded for each Pet by the Agent Host and select
+Toolkits through `Capability.uses`; Studio and Plugins do not register or attach
+Capabilities. A Plugin may define zero Toolkits when it only drives dispatch or
+events.
 
-Capability is also an Agent concept. A Studio Plugin does not define, register,
-or implicitly contribute Capability. A Host may independently register a
-Capability that uses a Plugin-defined Toolkit, and pet configuration still
-selects that Capability explicitly.
-
-Studio starts Plugins in configuration order; if a start operation fails,
-construction fails. It stops them in reverse order and isolates stop failures
-while cleaning subscriptions.
-
-The bundled `kanban` plugin illustrates the loop:
-
-```text
-pet → kanban_task_* Toolkit → Kanban board → plugin dispatch / notification
-```
-
-Studio remains unaware of task IDs, dependencies, board status, and task
-results throughout that loop.
+Studio starts Plugins in order and stops them in reverse. A startup failure
+rolls back the started prefix. `listPets()` returns descriptors, never runtime
+references, so Plugin-originated work stays on the shared dispatch boundary.
 
 ## Boundary checklist
 
-Put a concern in Studio only when it is necessary for the shared channel:
-
-| Studio | Plugin or host |
+| Studio | Plugin, Pet runtime, or Host |
 |---|---|
-| Pet registry, dispatch validity, per-pet serialization | Task schema, dependencies, progress, retries, and persistence |
-| Runtime-gate observation | How a pet is resumed or a blocked task is resolved |
-| Event fan-out | Event payload meaning and durable delivery |
-| Plugin lifecycle | Scheduling, webhooks, transports, UI, and auth |
+| Pet registry and dispatch validity | Task schema, dependencies, scheduling, retries |
+| Stable Pet thread and per-Pet invocation serialization | Checkpoint interpretation and resume command |
+| Invocation identity and live observation | Interaction UI, authorization, durable pending index |
+| Opaque event fan-out | Event meaning and durable delivery |
+| Plugin lifecycle | Plugin state and persistence |
 
-Current deliberate limits are in-memory queues, no backpressure, no terminal
-dispatch result, no automatic retry, and no plugin-state persistence convention.
-Those are not hidden behavior; integrations that require them must model them
-explicitly at their own boundary.
+Current deliberate limits include in-memory invocation queues and idempotency
+records, no backpressure, no durable event replay, and no bundled interaction
+Plugin. The Pet checkpoint remains durable independently of those limits.

@@ -1,9 +1,5 @@
 /**
- * Loopback HTTP/WebSocket transport for the local-agent wire protocol.
- *
- * Chat and Studio install different handler sets, but this adapter still owns
- * local-agent message parsing and serialization. It is Host-neutral, not a
- * protocol-neutral Studio API.
+ * Protocol-neutral loopback HTTP/WebSocket framing plus a Chat Host adapter.
  */
 import {
   createServer,
@@ -13,8 +9,12 @@ import {
 } from 'node:http';
 import type { WebSocketServer } from 'ws';
 import { ensureLocalServerAuthToken } from './localServerAuth';
-import type { LocalServerTransportHandlers } from './localServerMessageDispatcher';
-import { attachLocalServerWebSocketTransport } from './localServerWsTransport';
+import {
+  createLocalAgentWireHandlers,
+  type LocalServerTransportHandlers,
+} from './localServerMessageDispatcher';
+import { attachLocalServerWireWebSocketTransport } from './localServerWsTransport';
+import type { LocalServerWireHandlers } from './localServerWire';
 
 export type LocalServerTransport = {
   port: number;
@@ -28,9 +28,9 @@ export type LocalServerTransportOptions = {
   closeHandlers?: () => void;
 };
 
-export async function startLocalServerTransport(
+export async function startLocalServerWireTransport<TMessage extends object>(
   port: number,
-  peerHandlers: LocalServerTransportHandlers,
+  peerHandlers: LocalServerWireHandlers<TMessage>,
   options: LocalServerTransportOptions = {},
 ): Promise<LocalServerTransport> {
   const authToken = options.authToken ?? ensureLocalServerAuthToken();
@@ -46,7 +46,7 @@ export async function startLocalServerTransport(
     if (!address || typeof address === 'string') {
       throw new Error('local server did not expose a TCP address');
     }
-    webSocketServer = attachLocalServerWebSocketTransport(server, peerHandlers, {
+    webSocketServer = attachLocalServerWireWebSocketTransport(server, peerHandlers, {
       authToken,
       port: address.port,
     });
@@ -90,6 +90,19 @@ export async function startLocalServerTransport(
     options.closeHandlers?.();
     throw error;
   }
+}
+
+/** Chat/Agent Session adapter retained for the local-agent Host. */
+export function startLocalServerTransport(
+  port: number,
+  peerHandlers: LocalServerTransportHandlers,
+  options: LocalServerTransportOptions = {},
+): Promise<LocalServerTransport> {
+  return startLocalServerWireTransport(
+    port,
+    createLocalAgentWireHandlers(peerHandlers),
+    options,
+  );
 }
 
 async function listen(server: Server, port: number) {

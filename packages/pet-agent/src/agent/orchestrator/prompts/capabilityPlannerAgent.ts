@@ -7,19 +7,17 @@ import {
   CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT,
 } from './templates/capabilityPlannerAgent.prompt';
 import { buildRunUserRequestContext } from './context';
-import { indentXmlBlock, promptBlock, xmlTextBlock } from './shared';
+import { promptBlock, xmlTextBlock } from './shared';
 
 function buildDefaultCapabilityContext(
   defaultCapability: CapabilityPlannerDefaultCapability | null,
 ) {
   if (!defaultCapability) return '';
-  return [
-    '<default_capability role="fallback_executor" priority="after_specific_candidates" source="capability_registry" trust="read_only">',
-    indentXmlBlock(xmlTextBlock('name', defaultCapability.capabilityName), 2),
-    indentXmlBlock(xmlTextBlock('path', defaultCapability.path), 2),
-    indentXmlBlock(xmlTextBlock('document', defaultCapability.content), 2),
-    '</default_capability>',
-  ].join('\n');
+  return xmlTextBlock(
+    'default_capability',
+    defaultCapability.content,
+    ` name="${defaultCapability.capabilityName}"`,
+  );
 }
 
 function buildPlanningState(input: CapabilityPlannerInput) {
@@ -65,18 +63,14 @@ export function buildCapabilityPlannerAgentSystemPrompt(
     ? CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT.render({ defaultCapabilityContext })
     : CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT.render({ defaultCapabilityContext });
   const remainingRounds = Math.max(0, exploration.maxRounds - exploration.roundsUsed);
-  const explorationControl = exploration.status === 'open'
-    ? [
-        `<capability_exploration status="open" rounds_used="${exploration.roundsUsed.toString()}" max_rounds="${exploration.maxRounds.toString()}" remaining_rounds="${remainingRounds.toString()}">`,
-        'capability_search 当前可用，但剩余轮次不必用完；已有足够候选时立即提交终结 action。',
-        '</capability_exploration>',
-      ]
-    : [
-        `<capability_exploration status="closed" rounds_used="${exploration.roundsUsed.toString()}" max_rounds="${exploration.maxRounds.toString()}" remaining_rounds="0">`,
-        'capability_search 已关闭，不得再搜索。现在必须调用一个终结工具。',
-        '</capability_exploration>',
-      ];
-  return [prompt, ...explorationControl].join('\n');
+  const searchState = [
+    '<capability_search_state',
+    ` status="${exploration.status}"`,
+    ` rounds_used="${exploration.roundsUsed.toString()}"`,
+    ` remaining_rounds="${remainingRounds.toString()}"`,
+    ' />',
+  ].join('');
+  return [prompt, searchState].join('\n');
 }
 
 export function buildCapabilityPlannerAgentInput(input: CapabilityPlannerInput) {

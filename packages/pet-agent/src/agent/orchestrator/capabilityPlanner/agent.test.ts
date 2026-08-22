@@ -862,14 +862,14 @@ test('Planner receives verified General before discovery starts', async (t) => {
   const systemMessage = model.invocations[0]?.[0];
   assert.ok(systemMessage);
   assert.equal(systemMessage._getType(), 'system');
-  assert.match(readMessageText(systemMessage), /<default_capability role=/);
-  assert.match(readMessageText(systemMessage), /general\/CAPABILITY\.md/);
+  assert.match(readMessageText(systemMessage), /<default_capability name="general">/);
+  assert.doesNotMatch(readMessageText(systemMessage), /general\/CAPABILITY\.md/);
   assert.match(readMessageText(systemMessage), /通用工具读取和修改工作区/);
   const plannerInputMessage = model.invocations[0]?.find(
     (message) => message instanceof HumanMessage,
   );
   assert.ok(plannerInputMessage instanceof HumanMessage);
-  assert.doesNotMatch(readMessageText(plannerInputMessage), /<default_capability role=/);
+  assert.doesNotMatch(readMessageText(plannerInputMessage), /<default_capability name=/);
   assert.equal(model.invocations.flat().some(
     (message) => message instanceof ToolMessage
       && message.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,

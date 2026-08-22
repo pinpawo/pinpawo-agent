@@ -12,10 +12,11 @@ import { definePromptTemplate } from '../template';
  * what let boundary-only wording quietly diverge from entry.
  */
 const PLANNER_WORKSPACE_CONTRACT = `Capability 选择规则：
-1. <default_capability> 是已披露的兜底执行方，不要搜索它。只有需要寻找更具体的执行方时才调用 capability_search。
+1. <default_capability> 包含已披露的默认 Capability 完整文档，不要搜索它。只有需要寻找更具体的执行方时才调用 capability_search。
 2. capability_search 返回匹配项的完整文档和 exploration 状态。字面命中不等于可执行；只根据文档的正向职责判断候选能否交付当前 task。
 3. 有具体 Capability 能完整交付当前 task 时，选择最贴合的一个；不得因为 General 覆盖更广而改选 General。
-4. 没有具体候选适用时，如果 General 的文档能交付当前 task，使用 General；General 也不能交付时，调用 report_unavailable。`;
+4. 没有具体候选适用时，如果 General 的文档能交付当前 task，使用 General；General 也不能交付时，调用 report_unavailable。
+5. <capability_search_state> 是当前搜索控制状态：status="open" 时可以搜索但不要求用完轮次；status="closed" 时不得继续搜索，必须立即调用一个终结工具。`;
 
 /** How a task is written. The executing Capability owns method; the task owns intent. */
 const PLANNER_TASK_SHAPE = `- 同一 Capability 能连续完成的修改、核验和交付组成一个 task；
@@ -37,7 +38,7 @@ export const CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT = definePromptTemplate<{
   defaultCapabilityContext: string;
 }>(`你是框架内部的 Planner，负责为当前用户请求制定 Capability 执行计划。
 
-此前的 Planner 记录提供延续背景；本次调用附带的只读主对话消息用于理解指代，<run_user_request> 是未经模型改写的当前请求。${PLANNER_WORKSPACE_CONTRACT}
+此前的 Planner 记录提供延续背景；本次调用附带的只读主对话消息用于理解指代，<run_user_request> 是未经模型改写的当前请求。${PLANNER_WORKSPACE_CONTRACT}{defaultCapabilityContext}
 
 ${PLANNER_AUTONOMY_CONTRACT}
 
@@ -50,13 +51,13 @@ ${PLANNER_AUTONOMY_CONTRACT}
 - 以一个能够完整交付结果的 Capability task 作为自然边界；
 ${PLANNER_TASK_SHAPE}
 
-${PLANNER_TERMINAL_CONTRACT}{defaultCapabilityContext}`, ['defaultCapabilityContext']);
+${PLANNER_TERMINAL_CONTRACT}`, ['defaultCapabilityContext']);
 
 export const CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT = definePromptTemplate<{
   defaultCapabilityContext: string;
 }>(`你是框架内部的 Planner，负责验收最新任务结果并更新 Capability 执行计划。
 
-此前的 Planner 记录提供延续背景；本次调用附带的只读 delegation 消息包含主对话和当前执行 lane 的完整进展，<run_user_request> 定义本轮需要继续完成的用户请求；本轮输入只补充结构化的当前任务、停止原因和此前保留的后续任务。${PLANNER_WORKSPACE_CONTRACT}
+此前的 Planner 记录提供延续背景；本次调用附带的只读 delegation 消息包含主对话和当前执行 lane 的完整进展，<run_user_request> 定义本轮需要继续完成的用户请求；本轮输入只补充结构化的当前任务、停止原因和此前保留的后续任务。${PLANNER_WORKSPACE_CONTRACT}{defaultCapabilityContext}
 
 ${PLANNER_AUTONOMY_CONTRACT}
 
@@ -80,7 +81,7 @@ ${PLANNER_AUTONOMY_CONTRACT}
 - 哪些后续 tasks 仍然值得执行，以及它们自然的 Capability 边界；
 ${PLANNER_TASK_SHAPE}
 
-${PLANNER_TERMINAL_CONTRACT}{defaultCapabilityContext}`, ['defaultCapabilityContext']);
+${PLANNER_TERMINAL_CONTRACT}`, ['defaultCapabilityContext']);
 
 export const CAPABILITY_PLANNER_ENTRY_INPUT_PROMPT = definePromptTemplate<{
   userRequest: string;

@@ -553,6 +553,11 @@ Capability 优先级和计划改写边界。Terminal tool description 只说明�
 本次披露的事实、剩余轮次、搜索是否已关闭和下一个控制动作；
 不再嵌入另一份 Capability 选择或计划改写政策。
 
+Planner system message 中的动态结构也保持单一职责：`<default_capability>`
+只携带默认 Capability 的名称和完整文档，不再重复 role、priority、trust 或
+registry path；`<capability_search_state />` 只携带搜索状态和轮次，是无正文的
+自闭合事实块。两个结构的解释与动作规则仍只存在于 system prompt 正文。
+
 成功调用 terminal tool 后应直接形成结构化 commit；不要再要求模型用普通文本确认，也
 不要从普通 AI text 推导 fallback result。
 

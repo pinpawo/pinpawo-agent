@@ -275,6 +275,34 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     metadata: { difficulty: 'hard', reason: 'Planner-owned multi-task boundary.', source: SOURCE_FILE },
   },
   {
+    id: `${SUITE}.entry-asks-for-user-owned-deployment-target`,
+    name: 'entry-asks-for-user-owned-deployment-target',
+    suite: SUITE,
+    tags: ['capability_planning', 'entry_answer', 'delegation_control'],
+    input: {
+      mode: 'entry',
+      messages: [{
+        role: 'user',
+        content: '把服务部署到生产或预发布环境；目标由我决定，但我还没有选。',
+      }],
+      capabilityRegistry: [
+        'general: deploy and verify the service after the target environment is selected',
+      ],
+    },
+    expected: {
+      result: 'user_input_required',
+      remainingPlan: [],
+      planEffect: 'empty',
+      rubberStamp: false,
+      reason: 'The target environment is an explicit user-owned choice, so no autonomous deployment can begin until the user selects it.',
+    },
+    metadata: {
+      difficulty: 'medium',
+      reason: 'Keeps legitimate Entry user-input routing while distinguishing it from Capability-verifiable facts.',
+      source: SOURCE_FILE,
+    },
+  },
+  {
     id: `${SUITE}.boundary-materializes-from-explore-handoff`,
     name: 'boundary-materializes-from-explore-handoff',
     suite: SUITE,

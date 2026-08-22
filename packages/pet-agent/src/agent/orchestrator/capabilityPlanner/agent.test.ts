@@ -37,8 +37,18 @@ import type { CapabilityPlannerInput } from './runner';
 import { isCapabilityPlannerMessage } from './messageContext';
 
 function commitOnly(value: unknown) {
-  const result = value as { action: unknown; tasks: unknown };
-  return { action: result.action, tasks: result.tasks };
+  const result = value as {
+    action: unknown;
+    tasks: unknown;
+    userInputRequest?: unknown;
+  };
+  return {
+    action: result.action,
+    tasks: result.tasks,
+    ...('userInputRequest' in result
+      ? { userInputRequest: result.userInputRequest }
+      : {}),
+  };
 }
 
 type ScriptedToolCall = {
@@ -571,11 +581,11 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
   assert.deepEqual(model.boundToolNameHistory[0]?.slice(0, 1), [
     CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
   ]);
-  assert.equal(model.boundToolNameHistory[0]?.includes('request_user_input'), false);
+  assert.equal(model.boundToolNameHistory[0]?.includes('request_user_input'), true);
   assert.equal(model.boundToolNameHistory[1]?.includes(
     CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
   ), true);
-  assert.equal(model.boundToolNameHistory[1]?.includes('request_user_input'), false);
+  assert.equal(model.boundToolNameHistory[1]?.includes('request_user_input'), true);
   assert.equal(model.structuredOutputToolNames.size, 3);
   assert.ok(model.structuredOutputToolNames.has('plan'));
   assert.ok(model.structuredOutputToolNames.has('advance'));
@@ -1562,7 +1572,37 @@ test('boundary Planner continues without replacing the active task', async (t) =
   assert.equal(model.invocations.length, 1);
 });
 
-test('boundary Planner can stop for user confirmation without rewriting the task', async (t) => {
+test('entry Planner can request a user-owned choice with a structured question', async (t) => {
+  const workspace = await createWorkspace(t, {
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary tasks.',
+      instructions: 'Complete and verify the requested work.',
+    }),
+  });
+  const model = new ScriptedPlannerModel([{
+    toolCalls: [{
+      id: 'request-environment',
+      name: 'request_user_input',
+      args: { question: 'Should I deploy to production or staging?' },
+    }],
+  }]);
+
+  const result = await createCapabilityPlannerAgent({ model }).invoke(
+    plannerInput(workspace, {
+      userRequest: 'Deploy the service to production or staging; I will choose the target.',
+    }),
+  );
+
+  assert.deepEqual(commitOnly(result), {
+    action: 'user_input_required',
+    tasks: [],
+    userInputRequest: { question: 'Should I deploy to production or staging?' },
+  });
+  assert.equal(model.invocations.length, 1);
+});
+
+test('boundary Planner can stop for user confirmation with a structured question', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -1574,7 +1614,7 @@ test('boundary Planner can stop for user confirmation without rewriting the task
     toolCalls: [{
       id: 'request-target-confirmation',
       name: 'request_user_input',
-      args: {},
+      args: { question: 'Should I review PR #663 instead?' },
     }],
   }]);
 
@@ -1600,6 +1640,7 @@ test('boundary Planner can stop for user confirmation without rewriting the task
   assert.deepEqual(commitOnly(result), {
     action: 'user_input_required',
     tasks: [],
+    userInputRequest: { question: 'Should I review PR #663 instead?' },
   });
   assert.equal(model.invocations.length, 1);
 });

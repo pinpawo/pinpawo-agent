@@ -156,6 +156,7 @@ export function createAnswerNode(config: OrchestratorConfig) {
       acceptedHandoffOutcome,
       acceptedResults: acceptedResultsProjection.results,
       awaitingUserInput,
+      userInputQuestion: state.runUserInputRequest?.question ?? null,
       userInputRequiredContext,
       runIterationLimit: maxRunIterations
         ?? readRunIterationLimit(config.maxRunIterations)
@@ -190,6 +191,7 @@ export function selectAnswerContextFacts(params: {
   acceptedHandoffOutcome: 'goal_done' | null;
   acceptedResults: readonly AnswerAcceptedResult[];
   awaitingUserInput: boolean;
+  userInputQuestion?: string | null;
   userInputRequiredContext?: string | null;
   runIterationLimit: number;
 }): AnswerContextFacts {
@@ -202,6 +204,7 @@ export function selectAnswerContextFacts(params: {
       mode: 'user_input_required',
       hasUserRequest,
       acceptedResults: params.acceptedResults,
+      question: params.userInputQuestion?.trim() || null,
       context: params.userInputRequiredContext?.trim() || null,
     };
   }
@@ -276,6 +279,7 @@ function buildAnswerCleanup(state: OrchestratorStateType) {
     runCapabilityPlan: preserveBoundaryPlan ? [...state.runCapabilityPlan] : [],
     runIterationCount: 0,
     runLatestDelegationOutcome: null,
+    runUserInputRequest: null,
     runRuntimeFailure: null,
   };
 }

@@ -174,7 +174,11 @@ type AnswerContextFacts = {
 } & (
   | { mode: 'direct' }
   | { mode: 'goal_done' }
-  | { mode: 'user_input_required' }
+  | {
+      mode: 'user_input_required';
+      question: string | null;
+      context: string | null;
+    }
   | {
       mode: 'blocked';
       reason: 'iteration_limit' | 'capability_unavailable';
@@ -198,6 +202,7 @@ into bounded, role-labelled data without inventing new policy.
 ```xml
 <answer_context role="fact" source="orchestrator_state" authority="none">
   <reply_mode>user_input_required</reply_mode>
+  <requested_user_input>Which target should be used?</requested_user_input>
 </answer_context>
 ```
 

@@ -58,14 +58,15 @@ test('boundary planning cases identify the active Capability explicitly', () => 
   }
 });
 
-test('entry planning cases never return user-input-required after Entry Answer delegates', () => {
-  const entryCases = capabilityPlanningBasicsDataset.cases.filter(
-    ({ input }) => input.mode === 'entry',
+test('entry planning distinguishes verifiable facts from user-owned choices', () => {
+  const verifiableFact = capabilityPlanningBasicsDataset.cases.find(
+    ({ name }) => name === 'entry-verifies-latest-main-instead-of-requesting-user-input',
   );
-  assert.ok(entryCases.length > 0);
-  for (const testCase of entryCases) {
-    assert.notEqual(testCase.expected.result, 'user_input_required', testCase.name);
-  }
+  const userOwnedChoice = capabilityPlanningBasicsDataset.cases.find(
+    ({ name }) => name === 'entry-asks-for-user-owned-deployment-target',
+  );
+  assert.equal(verifiableFact?.expected.result, 'execute_plan');
+  assert.equal(userOwnedChoice?.expected.result, 'user_input_required');
 });
 
 test('planner goal contract keeps semantic plan checks outside the deterministic result score', () => {

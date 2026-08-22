@@ -111,6 +111,7 @@ function materializeNextDelegation(params: {
       runNextDelegation,
     ),
     runLatestDelegationOutcome: null,
+    runUserInputRequest: null,
     runRuntimeFailure: null,
   };
 }
@@ -164,6 +165,7 @@ function buildAcceptedDelegationUpdate(
         ? { ...delegation, status: 'completed' as const }
         : delegation),
     runLatestDelegationOutcome: outcome,
+    runUserInputRequest: null,
     runRuntimeFailure: null,
   };
 }
@@ -209,13 +211,14 @@ function buildContinueCurrentUpdate(params: {
       runNextDelegation,
     ),
     runLatestDelegationOutcome: null,
+    runUserInputRequest: null,
     runRuntimeFailure: null,
   };
 }
 
 function buildWaitingUpdate(
   state: OrchestratorStateType,
-  outcome: Extract<PlannerReplyOutcome, 'user_input_required' | 'unavailable'>,
+  commit: PlannerCommit,
 ) {
   const activeDelegation = state.taskActiveDelegation;
   return {
@@ -228,7 +231,8 @@ function buildWaitingUpdate(
             ? { ...delegation, status: 'progress' as const }
             : delegation)
       : state.runDelegationSummaries,
-    runLatestDelegationOutcome: outcome,
+    runLatestDelegationOutcome: commit.action,
+    runUserInputRequest: commit.userInputRequest ?? null,
     runRuntimeFailure: null,
   };
 }
@@ -366,6 +370,7 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
             ? [...state.runCapabilityPlan]
             : [],
           runLatestDelegationOutcome: 'planner_incomplete' as const,
+          runUserInputRequest: null,
           runRuntimeFailure: null,
         }),
         goto: 'answer',
@@ -376,7 +381,13 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
     // own validation. This re-parse is the root's trust boundary, not a duplicate
     // of the parse inside createCapabilityPlannerAgent() — do not remove it.
     const commit = parsePlannerCommit(
-      { action: result.action, tasks: result.tasks },
+      {
+        action: result.action,
+        tasks: result.tasks,
+        ...('userInputRequest' in result
+          ? { userInputRequest: result.userInputRequest }
+          : {}),
+      },
       {
         mode: input.mode,
         activeDelegation: input.activeDelegation,
@@ -421,6 +432,7 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
           runNextDelegation: null,
           runCapabilityPlan: [],
           runLatestDelegationOutcome: commit.action,
+          runUserInputRequest: commit.userInputRequest ?? null,
           runRuntimeFailure: null,
         }),
         goto: 'answer',
@@ -442,7 +454,7 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
     }
     if (commit.action === 'user_input_required' || commit.action === 'unavailable') {
       return new Command({
-        update: includePlannerMessages(buildWaitingUpdate(rootState, commit.action)),
+        update: includePlannerMessages(buildWaitingUpdate(rootState, commit)),
         goto: 'answer',
       });
     }
@@ -457,6 +469,7 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
         update: includePlannerMessages({
           runNextDelegation: null,
           runCapabilityPlan: [],
+          runUserInputRequest: null,
         }),
         goto: 'answer',
       });

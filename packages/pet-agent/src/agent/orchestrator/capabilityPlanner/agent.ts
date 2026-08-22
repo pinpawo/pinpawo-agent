@@ -135,11 +135,18 @@ function createPlannerTerminalTools(): StructuredTool[] {
     },
   );
   const requestUserInput = tool(
-    async () => JSON.stringify({ action: 'user_input_required', tasks: [] }),
+    async ({ question }: { question: string }) => JSON.stringify({
+      action: 'user_input_required',
+      tasks: [],
+      userInputRequest: { question },
+    }),
     {
       name: REQUEST_USER_INPUT_TOOL_NAME,
-      description: 'Terminal Planner action. Use only when autonomous work cannot continue because a concrete choice, authorization, or information controlled exclusively by the user is missing. Never use for a fact that any available Capability can inspect, query, verify, or execute to obtain, including repository, revision, environment, or current-state facts. Never use merely because the Planner has not checked or does not know something. If analysis, evaluation, or a recommendation can still be produced before confirmation, plan that work first. Answer will ask from the public user request and current delegation evidence.',
-      schema: z.object({}).strict(),
+      description: 'Terminal Planner action. Use only when autonomous work cannot continue because a concrete choice, authorization, or information controlled exclusively by the user is missing. Never use for a fact that any available Capability can inspect, query, verify, or execute to obtain, including repository, revision, environment, or current-state facts. Never use merely because the Planner has not checked or does not know something. If analysis, evaluation, or a recommendation can still be produced before confirmation, plan that work first. Provide the one concrete question Answer must ask the user.',
+      schema: z.object({
+        question: z.string().trim().min(1).max(1_000)
+          .describe('The one concrete question only the user can answer before autonomous work can continue.'),
+      }).strict(),
     },
   );
   const reportUnavailable = tool(
@@ -312,7 +319,7 @@ function currentPlannerInput(state: Partial<PlannerInvocationState>) {
 
 function terminalToolNamesForMode(input: CapabilityPlannerInput) {
   return input.mode === 'entry'
-    ? [SUBMIT_PLAN_TOOL_NAME, REPORT_UNAVAILABLE_TOOL_NAME]
+    ? [SUBMIT_PLAN_TOOL_NAME, REQUEST_USER_INPUT_TOOL_NAME, REPORT_UNAVAILABLE_TOOL_NAME]
     : [
         CONTINUE_CURRENT_TOOL_NAME,
         ADVANCE_PLAN_TOOL_NAME,
@@ -463,10 +470,6 @@ function createPlannerMiddleware(maxSearchRounds: number) {
       }
       const exploration = capabilityExplorationState(request.state, maxSearchRounds);
       const terminalToolNames = new Set(terminalToolNamesForMode(input));
-      const modeTools = input.mode === 'entry'
-        ? request.tools.filter((plannerTool) =>
-            plannerTool.name !== REQUEST_USER_INPUT_TOOL_NAME)
-        : request.tools;
       return handler({
         ...request,
         systemMessage: new SystemMessage(
@@ -478,12 +481,12 @@ function createPlannerMiddleware(maxSearchRounds: number) {
         ),
         ...(exploration.status === 'closed'
           ? {
-              tools: modeTools.filter((plannerTool) =>
+              tools: request.tools.filter((plannerTool) =>
                 typeof plannerTool.name === 'string'
                 && terminalToolNames.has(plannerTool.name)),
               toolChoice: 'required' as const,
             }
-          : { tools: modeTools }),
+          : {}),
       });
     },
     wrapToolCall: async (request, handler) => {

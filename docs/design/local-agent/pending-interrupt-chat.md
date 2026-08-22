@@ -34,7 +34,7 @@ active Chat thread
 | human-review payload | Ordered review interactions carried by the interrupt | Pet runtime |
 | interrupt projection | Presentation-safe view of the current interrupt | `agent-session` / adapter |
 | interaction response | Selection for one review interaction | Producer/adapter input |
-| `requestId` | Chat transport correlation | Chat adapter |
+| `requestId` | One Chat transport command and the events it produces | Chat adapter |
 
 There is no canonical `ReviewAction`, `actionId`, or independent review
 lifecycle. During compatibility migration, old names may remain at the wire or
@@ -66,6 +66,31 @@ The same interrupt ID can be observed again with updated review content after a
 middleware re-ask. Consumers must refresh the payload from the latest checkpoint
 or event rather than treating an ID match as immutable content.
 
+The canonical Chat wire shapes are:
+
+```ts
+type HumanReviewRequested = {
+  type: 'human_review.requested';
+  requestId: string;
+  pendingInterrupt: PendingInterrupt<HumanReviewInterruptPayload>;
+};
+
+type HumanReviewResponse = {
+  type: 'human_review_response';
+  requestId: string;
+  interruptId: string;
+  responses: Array<{
+    interactionId: string;
+    selectedOptionId: string;
+    input?: Record<string, unknown>;
+  }>;
+};
+```
+
+`actionId`, scalar response fields, and `decisions` are accepted only by the
+inbound compatibility parser and are normalized immediately. Newly emitted
+messages use the shapes above.
+
 ## Chat boundary
 
 Chat resolves the active thread from its active session. Therefore:
@@ -74,6 +99,9 @@ Chat resolves the active thread from its active session. Therefore:
 - a Chat review response is not a Studio dispatch;
 - `requestId` correlates the protocol exchange but does not identify the
   checkpoint wait;
+- a checkpoint-restored `pending_interrupt` may have no `requestId`; after the
+  client sends a response or cancel, `activeRun.requestId` temporarily binds
+  the resulting transport events without changing `PendingInterrupt`;
 - the handler reloads the active checkpoint for every resume attempt;
 - missing or mismatched `interruptId` is closed/stale without mutating state;
 - internal `ReviewSpec` decisions and effects are recovered from the checkpoint,

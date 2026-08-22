@@ -19,34 +19,24 @@ export type PendingHumanReviewInterruptRoute = {
 
 export function matchesPendingHumanReviewInterrupt(
   route: PendingHumanReviewInterruptRoute,
-  interruptId: string | undefined,
+  interruptId: string,
 ) {
-  return !interruptId || interruptId === route.interruptId;
+  return interruptId === route.interruptId;
 }
 
-export function readHumanReviewDecisions(msg: HumanReviewResponseMessage): ReviewResponse[] {
-  return msg.decisions?.map(toInternalReviewResponse) ?? [{
-    reviewId: msg.interactionId,
-    selectedOptionId: msg.selectedOptionId,
-    ...(msg.input ? { input: msg.input } : {}),
-  }];
+export function readHumanReviewResponses(msg: HumanReviewResponseMessage): ReviewResponse[] {
+  return msg.responses.map(toInternalReviewResponse);
 }
 
-export function validateHumanReviewDecisions(
+export function validateHumanReviewResponses(
   route: PendingHumanReviewInterruptRoute,
   msg: HumanReviewResponseMessage,
 ): ReviewResponse[] {
-  const decisions = readHumanReviewDecisions(msg);
-  const interactionId = msg.interactionId;
-  const finalDecision = decisions.at(-1);
-  if (
-    !finalDecision
-    || finalDecision.reviewId !== interactionId
-    || finalDecision.selectedOptionId !== msg.selectedOptionId
-  ) {
+  const decisions = readHumanReviewResponses(msg);
+  if (!decisions.length) {
     throw new ReviewResponseResolutionError(
-      'stale_review',
-      'Human review response must identify its final pending interaction decision.',
+      'invalid_response',
+      'Human review response must include at least one interaction response.',
     );
   }
   if (decisions.length > route.reviews.length) {
@@ -106,23 +96,6 @@ export function buildHumanReviewResume(
   return { [route.interruptId]: { decisions } };
 }
 
-export function buildHumanReviewRejectResume(
-  route: PendingHumanReviewInterruptRoute,
-  rejectOptionId: string,
-) {
-  const firstReview = route.reviews[0];
-  if (!firstReview) {
-    throw new ReviewResponseResolutionError(
-      'invalid_response',
-      `Interrupt "${route.interruptId}" has no reviews to cancel.`,
-    );
-  }
-  return buildHumanReviewResume(route, [{
-    reviewId: firstReview.id,
-    selectedOptionId: rejectOptionId,
-  }]);
-}
-
 export function buildHumanReviewCancelResume(
   route: PendingHumanReviewInterruptRoute,
 ) {
@@ -135,17 +108,6 @@ export function buildHumanReviewCancelResume(
 export type HumanReviewResume =
   | ReturnType<typeof buildHumanReviewResume>
   | ReturnType<typeof buildHumanReviewCancelResume>;
-
-export type HumanReviewResolutionOutcome =
-  | 'completed'
-  | 'waiting_human'
-  | 'interrupted'
-  // The run failed but the agent is still usable, so the interrupt stays
-  // pending for another attempt.
-  | 'failed'
-  // The current resume attempt cannot run because the agent is unavailable.
-  // The checkpoint remains the authority, so the interrupt stays pending.
-  | 'fatal_failed';
 
 export type HumanReviewResolutionSource =
   | {
@@ -170,23 +132,19 @@ type HumanReviewRunInterruptOptions<TRoute extends ResolvableHumanReviewRoute> =
   cancelPending: (route: TRoute) => Promise<void>;
 };
 
-export type HumanReviewRunInterruptOutcome =
-  | 'cancelled_pending'
-  | 'unhandled';
-
 /**
- * Normalizes a run-level stop intent against server-owned review state. This
+ * Normalizes a run-level stop intent against checkpoint-owned interrupt state. This
  * keeps clients transport-agnostic: a stale `run.interrupt` and an explicit
  * `review.cancel` follow the same canonical cancellation path once the server
  * knows that the run is waiting for review.
  */
 export async function routeRunInterruptThroughHumanReview<
   TRoute extends ResolvableHumanReviewRoute,
->(options: HumanReviewRunInterruptOptions<TRoute>): Promise<HumanReviewRunInterruptOutcome> {
+>(options: HumanReviewRunInterruptOptions<TRoute>): Promise<boolean> {
   const route = await options.recover();
-  if (!route) return 'unhandled';
+  if (!route) return false;
   await options.cancelPending(route);
-  return 'cancelled_pending';
+  return true;
 }
 
 type HumanReviewResolutionOptions<TRoute extends ResolvableHumanReviewRoute> = {
@@ -203,7 +161,7 @@ type HumanReviewResolutionOptions<TRoute extends ResolvableHumanReviewRoute> = {
     route: TRoute,
     resume: HumanReviewResume,
     source: HumanReviewResolutionSource,
-  ) => Promise<HumanReviewResolutionOutcome>;
+  ) => Promise<unknown>;
 };
 
 /**
@@ -238,10 +196,11 @@ export async function resolvePendingHumanReviewInterrupt<
   if (message.type === 'human_review_response') {
     let decisions: ReviewResponse[];
     try {
-      decisions = validateHumanReviewDecisions(route, message);
+      decisions = validateHumanReviewResponses(route, message);
     } catch (err) {
+      const interactionId = message.responses.at(-1)?.interactionId ?? 'missing';
       console.warn(
-        `[human-review] response rejected: interactionId=${message.interactionId} `
+        `[human-review] response rejected: interactionId=${interactionId} `
         + `does not match pending interrupt=${route.interruptId} reviews=${route.reviews.map((review) => review.id).join(',')} `
         + (err instanceof Error ? err.message : String(err)),
       );
@@ -263,10 +222,11 @@ export async function resolvePendingHumanReviewInterrupt<
       return;
     }
     resume = buildHumanReviewResume(route, decisions);
+    const finalDecision = decisions.at(-1)!;
     source = {
       type: 'human_review_response',
-      interactionId: message.interactionId,
-      selectedOptionId: message.selectedOptionId,
+      interactionId: finalDecision.reviewId,
+      selectedOptionId: finalDecision.selectedOptionId,
       decisionCount: decisions.length,
       ...(interruptRun ? { interruptRun: true } : {}),
     };

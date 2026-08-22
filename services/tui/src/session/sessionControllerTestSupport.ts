@@ -96,7 +96,6 @@ export function reviewSnapshotResult(
       kind: 'chat',
       timeline: [],
       activeRun: {
-        requestId: 'chat',
         state: 'pending_interrupt',
         pendingInterrupt: {
           interruptId: 'review-action',

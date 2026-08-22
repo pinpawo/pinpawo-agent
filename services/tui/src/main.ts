@@ -991,8 +991,7 @@ function requestReviewResolutionInterrupt(
   >,
 ) {
   const result = controller.interruptResolvedReview({
-    requestId: approval.requestId,
-    interruptId: approval.action.interruptId,
+    interruptId: approval.pendingInterrupt.interruptId,
   });
   if (result.ok) {
     approvalController.markInterruptSent();

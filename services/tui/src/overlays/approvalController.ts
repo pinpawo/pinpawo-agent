@@ -118,8 +118,7 @@ export class ApprovalController {
     }
     if (action === 'cancel') {
       const result = this.sessionController.cancelReview({
-        requestId: this.state.requestId,
-        interruptId: this.state.action.interruptId,
+        interruptId: this.state.pendingInterrupt.interruptId,
       });
       this.update(result.ok
         ? this.beginSubmission(this.state)
@@ -133,16 +132,15 @@ export class ApprovalController {
       return;
     }
     const result = this.sessionController.submitReviewResponse({
-      requestId: this.state.requestId,
-      interruptId: this.state.action.interruptId,
-      decisions: this.state.decisions,
+      interruptId: this.state.pendingInterrupt.interruptId,
+      responses: this.state.responses,
       optionId: option.id,
       inputText: this.state.draft,
     });
     if (!result.ok) {
       this.update(failApproval(this.state, reviewFailureText(result.reason)));
     } else if (result.status === 'advanced') {
-      this.update(advanceApproval(this.state, result.decisions));
+      this.update(advanceApproval(this.state, result.responses));
     } else {
       this.update(this.beginSubmission(this.state));
     }
@@ -168,12 +166,12 @@ export class ApprovalController {
     this.clearSubmissionTimers();
     const resolutionSent = beginApprovalSubmission(state);
     if (resolutionSent.phase === 'closed') return resolutionSent;
-    const interruptId = resolutionSent.action.interruptId;
+    const interruptId = resolutionSent.pendingInterrupt.interruptId;
     this.submissionTimer = this.setTimer(() => {
       this.submissionTimer = null;
       if (
         this.state.phase !== 'resolution-sent'
-        || this.state.action.interruptId !== interruptId
+        || this.state.pendingInterrupt.interruptId !== interruptId
       ) {
         return;
       }
@@ -194,7 +192,7 @@ export class ApprovalController {
       this.submissionPulseTimer = null;
       if (
         this.state.phase !== 'resolution-sent'
-        || this.state.action.interruptId !== interruptId
+        || this.state.pendingInterrupt.interruptId !== interruptId
       ) {
         return;
       }

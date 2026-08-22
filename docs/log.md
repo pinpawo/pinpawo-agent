@@ -537,6 +537,17 @@ lint passes, and documentation migrations.
 - Scoped PR #682 and the client-local submission decision to Chat/TUI. Chat has
   an implicit active thread and neither `petId` nor Studio dispatch. Studio
   later reuses only the interrupt contract through its own dispatch envelope.
+- Completed the Chat-side contract cleanup: emitted review events now carry one
+  `PendingInterrupt`, responses name `interruptId` and ordered `responses`, and
+  checkpoint recovery rejects interrupts without a real runtime ID instead of
+  synthesizing identity from review content.
+- Kept `requestId` outside `PendingInterrupt`: it is optional transport
+  ownership on the active-run envelope and is rebound only when a response or
+  cancel command is accepted, so resumed events can be correlated without
+  creating a second review identity.
+- Removed the server-side review lifecycle/result enum and reject-option
+  shortcut. Every attempt reloads checkpoint authority, validates it, and
+  resumes or cancels that exact interrupt.
 - Created issue [#684](https://github.com/pinpawo/pinpawo-agent/issues/684) as
   the dedicated implementation and identity-consolidation tracker, related to
   but intentionally separate from the broader #561 host refactor.

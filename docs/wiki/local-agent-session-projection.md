@@ -121,6 +121,12 @@ parser accepts the former `waiting_review/reviewAction` snapshot only as an
 inbound compatibility shape and normalizes it immediately. See
 [Agent boundary contracts](agent-boundary-contracts.md).
 
+`activeRun.requestId` while `state === 'pending_interrupt'` is optional
+transport ownership. It is
+absent when the view is rebuilt from checkpoint alone and may be bound to a
+response/cancel command so its resumed events can be reduced. Interrupt and
+interaction identity remain `interruptId` and `interactionId` respectively.
+
 ## Interruption and continuation
 
 **Decision (PRs #475 and #485).** Interrupting the current invocation,

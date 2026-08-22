@@ -45,7 +45,6 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
       scope: 'session',
     },
     pendingInterrupt: {
-      requestId: 'req-review',
       sessionId: 'chat:pet-a',
       pendingInterrupt: {
         interruptId: 'interrupt-1',
@@ -92,7 +91,7 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
     'run-1',
   );
   assert.ok(parseAgentSessionSnapshot(JSON.parse(JSON.stringify(snapshot))));
-  assert.equal(snapshot.session.activeRun?.requestId, 'req-review');
+  assert.equal(snapshot.session.activeRun?.requestId, undefined);
   assert.equal(snapshot.session.activeRun?.state, 'pending_interrupt');
   if (snapshot.session.activeRun?.state !== 'pending_interrupt') assert.fail('expected pending interrupt');
   assert.equal(

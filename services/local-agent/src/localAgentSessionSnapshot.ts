@@ -139,7 +139,6 @@ function runFromPendingInterrupt(params: {
   pendingInterrupt: PendingInterruptSnapshot;
 }): AgentRunView {
   return {
-    requestId: params.pendingInterrupt.requestId,
     state: 'pending_interrupt',
     pendingInterrupt: params.pendingInterrupt.pendingInterrupt,
   };

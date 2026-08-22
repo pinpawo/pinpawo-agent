@@ -32,7 +32,6 @@ import {
   resolvePendingHumanReviewInterrupt,
   routeRunInterruptThroughHumanReview,
   type PendingHumanReviewInterruptRoute,
-  type HumanReviewResolutionOutcome,
   type HumanReviewResolutionSource,
 } from './pendingHumanReviewInterrupt';
 import type { PendingInterruptProjection } from '@pinpawo/agent-session';
@@ -47,6 +46,12 @@ type InflightRequest = InflightOperationRun;
 
 type LocalServerRunRequest = ChatSessionRequest;
 type RunChatSession = typeof runChatSession;
+type ChatRunOutcome =
+  | 'completed'
+  | 'waiting_human'
+  | 'interrupted'
+  | 'failed'
+  | 'fatal_failed';
 
 type LocalServerRunSource =
   | { type: 'chat_request' }
@@ -54,12 +59,10 @@ type LocalServerRunSource =
 
 type PendingInterruptRoute = PendingHumanReviewInterruptRoute & {
   requestId: string;
-  rejectOptionId?: string;
   sessionId?: string;
 };
 
 export type PendingInterruptSnapshot = {
-  requestId: string;
   sessionId?: string;
   pendingInterrupt: PendingInterruptProjection;
 };
@@ -98,18 +101,14 @@ export class LocalServerChatHandler {
   private buildPendingInterruptRoute(params: {
     requestId: string;
     interruptId: string;
-    review: ReviewSpec;
-    reviews?: ReviewSpec[];
+    reviews: ReviewSpec[];
     sessionId?: string;
   }): PendingInterruptRoute {
-    const reviews = params.reviews?.length ? params.reviews : [params.review];
-    const rejectOption = reviews[0]?.options.find((option) => option.decision.type === 'reject');
     return {
       requestId: params.requestId,
       interruptId: params.interruptId,
-      ...(rejectOption ? { rejectOptionId: rejectOption.id } : {}),
       ...(params.sessionId ? { sessionId: params.sessionId } : {}),
-      reviews,
+      reviews: params.reviews,
     };
   }
 
@@ -122,15 +121,10 @@ export class LocalServerChatHandler {
       if (!pending) {
         return null;
       }
-      if (!pending.interruptId) {
-        console.warn('[local-server] pending interrupt is missing interruptId');
-        return null;
-      }
       const route = this.buildPendingInterruptRoute({
         requestId,
         interruptId: pending.interruptId,
-        review: pending.review,
-        ...(pending.reviews ? { reviews: pending.reviews } : {}),
+        reviews: pending.reviews,
         sessionId: pending.sessionId,
       });
       return route;
@@ -150,26 +144,13 @@ export class LocalServerChatHandler {
     if (!pending) {
       return null;
     }
-    if (!pending.interruptId) {
-      console.warn('[local-server] pending interrupt is missing interruptId');
-      return null;
-    }
-    const requestId = pending.interruptId;
-    const route = this.buildPendingInterruptRoute({
-      requestId,
-      interruptId: pending.interruptId,
-      review: pending.review,
-      ...(pending.reviews ? { reviews: pending.reviews } : {}),
-      sessionId: pending.sessionId,
-    });
     return {
-      requestId: route.interruptId,
       sessionId: pending.sessionId,
       pendingInterrupt: {
-        interruptId: route.interruptId,
+        interruptId: pending.interruptId,
         payload: {
           kind: 'human_review',
-          interactions: route.reviews.map(projectHumanReviewRequest),
+          interactions: pending.reviews.map(projectHumanReviewRequest),
         },
       },
     };
@@ -225,7 +206,7 @@ export class LocalServerChatHandler {
     request: LocalServerRunRequest,
     deps: LocalServerDeps,
     source: LocalServerRunSource,
-  ): Promise<HumanReviewResolutionOutcome> {
+  ): Promise<ChatRunOutcome> {
     const { requestId } = request;
     const message = request.kind === 'user_message' ? request.message : '';
 
@@ -410,7 +391,7 @@ export class LocalServerChatHandler {
       emitClosed: () => {
         if (msg.type === 'human_review_response') {
           console.warn(
-            `[local-server] human_review_response rejected: pending review request already consumed or active requestId=${msg.requestId}`,
+            `[local-server] human_review_response rejected: checkpoint has no matching pending interrupt requestId=${msg.requestId}`,
           );
         }
         this.sendClosedReviewError(peer, msg.requestId);

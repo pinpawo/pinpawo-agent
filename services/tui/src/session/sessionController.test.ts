@@ -1231,6 +1231,7 @@ test('manual compaction binds the active session and uses its model-call timeout
 test('delegation continuation sends resume_active without client-owned availability', async () => {
   const requestIds = [
     'startup',
+    'review-cancel',
     'interrupted-refresh',
     'resume-other',
     'resume-original',
@@ -1257,12 +1258,11 @@ test('delegation continuation sends resume_active without client-owned availabil
   ]));
 
   assert.deepEqual(controller.cancelReview({
-    requestId: 'chat',
     interruptId: 'review-action',
   }), { ok: true });
   connection.receive({
     type: 'interrupted',
-    requestId: 'chat',
+    requestId: 'review-cancel',
     message: 'review interrupted',
   });
   assert.deepEqual(connection.sent.at(-1), {

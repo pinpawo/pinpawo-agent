@@ -46,9 +46,8 @@ export function buildAgentGraphConfigurable(setup: AgentChannelSetup) {
 }
 
 export type LocalAgentGraphPendingInterrupt = {
-  interruptId?: string;
-  review: ReviewSpec;
-  reviews?: ReviewSpec[];
+  interruptId: string;
+  reviews: ReviewSpec[];
 };
 
 export type LocalAgentGraphThreadState = {
@@ -77,7 +76,7 @@ function readSnapshotValues(snapshot: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function readGraphInterrupt(snapshot: unknown): { id?: string; value: Record<string, unknown> } | null {
+function readGraphInterrupt(snapshot: unknown): { id: string; value: Record<string, unknown> } | null {
   const tasks = Array.isArray((snapshot as { tasks?: unknown } | null)?.tasks)
     ? (snapshot as { tasks: unknown[] }).tasks
     : [];
@@ -89,10 +88,8 @@ function readGraphInterrupt(snapshot: unknown): { id?: string; value: Record<str
     const first = interrupts[0];
     if (first && typeof first === 'object' && 'value' in first && first.value && typeof first.value === 'object') {
       const interrupt = first as { id?: unknown; value: unknown };
-      return {
-        ...(typeof interrupt.id === 'string' ? { id: interrupt.id } : {}),
-        value: interrupt.value as Record<string, unknown>,
-      };
+      if (typeof interrupt.id !== 'string' || !interrupt.id) return null;
+      return { id: interrupt.id, value: interrupt.value as Record<string, unknown> };
     }
   }
   return null;
@@ -122,8 +119,7 @@ function projectPendingInterrupt(snapshot: unknown): LocalAgentGraphPendingInter
       return null;
     }
     return {
-      ...(pendingInterrupt.id ? { interruptId: pendingInterrupt.id } : {}),
-      review,
+      interruptId: pendingInterrupt.id,
       reviews,
     };
   }
@@ -131,8 +127,8 @@ function projectPendingInterrupt(snapshot: unknown): LocalAgentGraphPendingInter
     return null;
   }
   return {
-    ...(pendingInterrupt.id ? { interruptId: pendingInterrupt.id } : {}),
-    review: pendingInterrupt.value.review,
+    interruptId: pendingInterrupt.id,
+    reviews: [pendingInterrupt.value.review],
   };
 }
 

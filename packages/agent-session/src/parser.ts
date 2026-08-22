@@ -387,24 +387,24 @@ function parseAgentRun(
 ): AgentRunView | null {
   if (
     !isRecord(value)
-    || typeof value.requestId !== 'string'
     || !isOptionalFiniteNumber(value.startedAt)
     || !isOptionalFiniteNumber(value.updatedAt)
   ) {
     return null;
   }
   const base = {
-    requestId: value.requestId,
+    ...(typeof value.requestId === 'string' ? { requestId: value.requestId } : {}),
     ...(isFiniteNumber(value.startedAt) ? { startedAt: value.startedAt } : {}),
     ...(isFiniteNumber(value.updatedAt) ? { updatedAt: value.updatedAt } : {}),
   };
   if (value.state === 'running') {
     if (
-      !isRunActivity(value.activity)
+      typeof value.requestId !== 'string'
+      || !isRunActivity(value.activity)
       || value.pendingInterrupt !== undefined
       || value.reviewAction !== undefined
     ) return null;
-    return { ...base, state: 'running', activity: value.activity };
+    return { ...base, requestId: value.requestId, state: 'running', activity: value.activity };
   }
   if (value.state === 'pending_interrupt') {
     const pendingInterrupt = parsePendingInterrupt(value.pendingInterrupt, readReviews);
@@ -420,11 +420,12 @@ function parseAgentRun(
   }
   if (value.state === 'interrupting') {
     if (
-      value.activity !== undefined
+      typeof value.requestId !== 'string'
+      || value.activity !== undefined
       || value.pendingInterrupt !== undefined
       || value.reviewAction !== undefined
     ) return null;
-    return { ...base, state: 'interrupting' };
+    return { ...base, requestId: value.requestId, state: 'interrupting' };
   }
   return null;
 }

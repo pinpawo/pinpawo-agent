@@ -62,9 +62,8 @@ type TuiCheckpointMessageSource =
 
 export type ActivePendingInterrupt = {
   sessionId: string;
-  interruptId?: string;
-  review: ReviewSpec;
-  reviews?: ReviewSpec[];
+  interruptId: string;
+  reviews: ReviewSpec[];
 };
 
 export type TuiCheckpointPoint = {
@@ -369,13 +368,8 @@ export class LocalServerTuiSessionService {
     const pendingInterrupt = state.pendingInterrupt
       ? {
           sessionId: session.id,
-          ...(state.pendingInterrupt.interruptId
-            ? { interruptId: state.pendingInterrupt.interruptId }
-            : {}),
-          review: state.pendingInterrupt.review,
-          ...(state.pendingInterrupt.reviews
-            ? { reviews: state.pendingInterrupt.reviews }
-            : {}),
+          interruptId: state.pendingInterrupt.interruptId,
+          reviews: state.pendingInterrupt.reviews,
         }
       : null;
     return {

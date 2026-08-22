@@ -75,22 +75,25 @@ export type AgentPlanItem = {
   status: 'completed' | 'active' | 'pending';
 };
 
-type AgentRunViewBase = {
-  requestId: string;
+type AgentRunTiming = {
   startedAt?: number;
   updatedAt?: number;
 };
 
 export type AgentRunView =
-  | AgentRunViewBase & {
+  | AgentRunTiming & {
+      requestId: string;
       state: 'running';
       activity: AgentRunActivity;
     }
-  | AgentRunViewBase & {
+  | AgentRunTiming & {
+      /** Present only while a transport command owns the resumed run. */
+      requestId?: string;
       state: 'pending_interrupt';
       pendingInterrupt: PendingInterruptProjection;
     }
-  | AgentRunViewBase & {
+  | AgentRunTiming & {
+      requestId: string;
       state: 'interrupting';
     };
 

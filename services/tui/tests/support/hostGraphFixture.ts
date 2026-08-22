@@ -63,7 +63,12 @@ export function createHostGraphFixture() {
       const pendingInterrupt = pendingInterrupts.get(readThreadKey(setup)) ?? null;
       return {
         messages: messagesByThread.get(readThreadKey(setup)) ?? [],
-        pendingInterrupt: pendingInterrupt,
+        pendingInterrupt: pendingInterrupt
+          ? {
+              interruptId: pendingInterrupt.interruptId,
+              reviews: [pendingInterrupt.review],
+            }
+          : null,
         hasPendingContinuation:
           pendingInterrupt !== null || suspendedReviews.has(readThreadKey(setup)),
       };

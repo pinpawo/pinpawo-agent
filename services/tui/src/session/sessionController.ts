@@ -353,7 +353,6 @@ export class TuiSessionController {
   }
 
   interruptResolvedReview(params: {
-    requestId: string;
     interruptId: string;
   }): InterruptResolvedReviewResult {
     if (this.state.connection !== 'ready' || !this.transport.isConnected()) {
@@ -364,7 +363,7 @@ export class TuiSessionController {
       return { ok: false, reason: 'closed' };
     }
     if (
-      run.requestId !== params.requestId
+      !run.requestId
       || run.pendingInterrupt.interruptId !== params.interruptId
     ) {
       return { ok: false, reason: 'stale' };
@@ -437,9 +436,8 @@ export class TuiSessionController {
   }
 
   submitReviewResponse(params: {
-    requestId: string;
     interruptId: string;
-    decisions: readonly ReviewResponse[];
+    responses: readonly ReviewResponse[];
     optionId: string;
     inputText?: string;
   }): SubmitReviewResponseResult {
@@ -450,15 +448,12 @@ export class TuiSessionController {
     if (!run || run.state !== 'pending_interrupt') {
       return { ok: false, reason: 'closed' };
     }
-    if (
-      run.requestId !== params.requestId
-      || run.pendingInterrupt.interruptId !== params.interruptId
-    ) {
+    if (run.pendingInterrupt.interruptId !== params.interruptId) {
       return { ok: false, reason: 'stale' };
     }
     const prepared = prepareReviewDecision({
-      action: run.pendingInterrupt,
-      decisions: params.decisions,
+      pendingInterrupt: run.pendingInterrupt,
+      responses: params.responses,
       optionId: params.optionId,
       inputText: params.inputText,
     });
@@ -470,32 +465,32 @@ export class TuiSessionController {
         ok: true,
         status: 'advanced',
         decision: prepared.decision,
-        decisions: prepared.decisions,
+        responses: prepared.responses,
       };
     }
+    const requestId = this.requestIdFactory();
     if (!this.transport.send({
       type: 'human_review_response',
-      requestId: run.requestId,
+      requestId,
       interruptId: run.pendingInterrupt.interruptId,
-      interactionId: prepared.decision.interactionId,
-      selectedOptionId: prepared.decision.selectedOptionId,
-      ...(prepared.decision.input
-        ? { input: prepared.decision.input }
-        : {}),
-      decisions: prepared.decisions,
+      responses: prepared.responses,
     })) {
       return { ok: false, reason: 'send-failed' };
     }
+    this.updateSession(reduceSession(this.state.session, {
+      type: 'review.resolution.accepted',
+      requestId,
+      interruptId: run.pendingInterrupt.interruptId,
+    }, { observedAt: this.now() }));
     return {
       ok: true,
       status: 'sent',
       decision: prepared.decision,
-      decisions: prepared.decisions,
+      responses: prepared.responses,
     };
   }
 
   cancelReview(params: {
-    requestId: string;
     interruptId: string;
   }): CancelReviewResult {
     if (!this.reviewTransportReady()) {
@@ -505,19 +500,22 @@ export class TuiSessionController {
     if (!run || run.state !== 'pending_interrupt') {
       return { ok: false, reason: 'closed' };
     }
-    if (
-      run.requestId !== params.requestId
-      || run.pendingInterrupt.interruptId !== params.interruptId
-    ) {
+    if (run.pendingInterrupt.interruptId !== params.interruptId) {
       return { ok: false, reason: 'stale' };
     }
+    const requestId = this.requestIdFactory();
     if (!this.transport.send({
       type: 'review.cancel',
-      requestId: run.requestId,
+      requestId,
       interruptId: run.pendingInterrupt.interruptId,
     })) {
       return { ok: false, reason: 'send-failed' };
     }
+    this.updateSession(reduceSession(this.state.session, {
+      type: 'review.resolution.accepted',
+      requestId,
+      interruptId: run.pendingInterrupt.interruptId,
+    }, { observedAt: this.now() }));
     return { ok: true };
   }
 

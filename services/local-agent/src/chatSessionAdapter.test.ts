@@ -655,6 +655,7 @@ test('runChatSession projects review interrupts to public interaction contracts'
       return (async function* () {
         yield protocolEvent('values', {
           __interrupt__: [{
+            id: 'interrupt-1',
             value: {
               kind: 'review',
               review,
@@ -692,7 +693,10 @@ test('runChatSession projects review interrupts to public interaction contracts'
   assert.deepEqual(result, { status: 'waiting_human' });
   const event = emittedEvents[0];
   assert.equal(event?.type, 'human_review.requested');
-  assert.deepEqual(event.review, projectHumanReviewRequest(review));
+  assert.deepEqual(
+    event.pendingInterrupt.payload.interactions,
+    [projectHumanReviewRequest(review)],
+  );
 });
 
 test('runChatSession resumes explicit response after state update clears interrupt payload', async () => {
@@ -771,7 +775,7 @@ test('runChatSession does not confirm a review resolution while checkpoint keeps
   };
   const pending = {
     interruptId: 'interrupt-original',
-    review,
+    reviews: [review],
   };
   const finalMessages = [new AIMessage('continued')];
   const setup = {
@@ -846,12 +850,12 @@ test('runChatSession confirms the original resolution without interrupting a new
       return reads === 1
         ? {
           messages: [],
-          pendingInterrupt: { interruptId: 'interrupt-original', review: originalReview },
+          pendingInterrupt: { interruptId: 'interrupt-original', reviews: [originalReview] },
           hasPendingContinuation: true,
         }
         : {
           messages: [],
-          pendingInterrupt: { interruptId: 'interrupt-next', review: nextReview },
+          pendingInterrupt: { interruptId: 'interrupt-next', reviews: [nextReview] },
           hasPendingContinuation: true,
         };
     },
@@ -890,7 +894,7 @@ test('runChatSession confirms the original resolution without interrupting a new
   assert.equal(emittedEvents[0]?.type, 'human_review.requested');
   assert.equal(
     emittedEvents[0]?.type === 'human_review.requested'
-      ? emittedEvents[0].review.interactionId
+      ? emittedEvents[0].pendingInterrupt.payload.interactions[0]?.interactionId
       : null,
     'review-next',
   );
@@ -1150,7 +1154,11 @@ test('runChatSession does not map pending review free text to review response', 
   } as unknown as AgentChannelSetup;
   const graphService = {
     async readThreadState() {
-      return { messages: [], pendingInterrupt: { review }, hasPendingContinuation: true };
+      return {
+        messages: [],
+        pendingInterrupt: { interruptId: 'interrupt-1', reviews: [review] },
+        hasPendingContinuation: true,
+      };
     },
     buildResumeCommand(value: unknown) {
       throw new Error(`should not build resume command: ${String(value)}`);
@@ -1196,7 +1204,9 @@ test('runChatSession does not map pending review free text to review response', 
   );
   assert.equal(emittedEvents[1]?.type, 'human_review.requested');
   assert.deepEqual(
-    emittedEvents[1]?.type === 'human_review.requested' ? emittedEvents[1].review : null,
+    emittedEvents[1]?.type === 'human_review.requested'
+      ? emittedEvents[1].pendingInterrupt.payload.interactions[0]
+      : null,
     projectHumanReviewRequest(review),
   );
 });

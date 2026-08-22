@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { projectHumanReviewRequest } from '@pinpawo/pet-agent';
+import type { HumanReviewResponseMessage } from '@pinpawo/agent-session';
 import { isToolProtocolHistoryError, LocalServerChatHandler } from './localServerChatHandler';
 import { InflightRequestController } from './inflightRequestController';
 import type { LocalServerPeer } from './localServerPeer';
@@ -15,6 +16,24 @@ function createFakePeer(
       sent.push(message);
       return true;
     },
+  };
+}
+
+function humanReviewResponse(
+  interactionId: string,
+  selectedOptionId = 'approve',
+  input?: HumanReviewResponseMessage['responses'][number]['input'],
+  interruptId = 'interrupt-1',
+): HumanReviewResponseMessage {
+  return {
+    type: 'human_review_response',
+    requestId: 'req-1',
+    interruptId,
+    responses: [{
+      interactionId,
+      selectedOptionId,
+      ...(input ? { input } : {}),
+    }],
   };
 }
 
@@ -183,12 +202,12 @@ test('run interrupt supersedes an unstarted response and cancels through the pen
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
-        review: {
+        reviews: [{
           id: 'review-current',
           schemaVersion: 1,
           view: { kind: 'plain', body: 'Approve?' },
           options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
-        },
+        }],
       }),
       buildChatSetup: () => ({
         graphKey: 'test',
@@ -207,13 +226,11 @@ test('run interrupt supersedes an unstarted response and cancels through the pen
       return { status: 'interrupted' };
     },
   });
-  const resolution = handler.handleHumanReviewResponse(fakePeer, {
-    type: 'human_review_response',
-    requestId: 'req-1',
-    interruptId: 'interrupt-1',
-    interactionId: 'review-current',
-    selectedOptionId: 'approve',
-  }, { actorId: 'pet-1' } as never);
+  const resolution = handler.handleHumanReviewResponse(
+    fakePeer,
+    humanReviewResponse('review-current'),
+    { actorId: 'pet-1' } as never,
+  );
   assert.equal(await handler.handleRunInterrupt(fakePeer, {
     type: 'run.interrupt',
     requestId: 'req-1',
@@ -246,12 +263,12 @@ test('review cancellation automatically interrupts at the first resolved checkpo
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
-        review: {
+        reviews: [{
           id: 'review-current',
           schemaVersion: 1,
           view: { kind: 'plain', body: 'Approve?' },
           options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
-        },
+        }],
       }),
       buildChatSetup: () => ({
         graphKey: 'test',
@@ -303,12 +320,12 @@ test('run interrupt cancels a review that became pending before the client obser
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-race',
-        review: {
+        reviews: [{
           id: 'review-race',
           schemaVersion: 1,
           view: { kind: 'plain', body: 'Approve?' },
           options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
-        },
+        }],
       }),
       buildChatSetup: () => ({
         graphKey: 'test',
@@ -361,12 +378,12 @@ test('handleHumanReviewResponse rejects a stale canonical interactionId before f
     readActivePendingInterrupt: async () => ({
       sessionId: 'sess-active',
       interruptId: 'interrupt-1',
-      review: {
+      reviews: [{
         id: 'review-current',
         schemaVersion: 1,
         view: { kind: 'plain', body: 'Approve?' },
         options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
-      },
+      }],
     }),
   } as never;
   const handler = new LocalServerChatHandler({
@@ -383,12 +400,7 @@ test('handleHumanReviewResponse rejects a stale canonical interactionId before f
   };
   await handler.handleHumanReviewResponse(
     fakePeer,
-    {
-      type: 'human_review_response',
-      requestId: 'req-1',
-      interactionId: 'review-old',
-      selectedOptionId: 'approve',
-    },
+    humanReviewResponse('review-old'),
     { actorId: 'pet-1' } as never,
   );
 
@@ -412,12 +424,12 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
   let pendingInterrupt: unknown = {
     sessionId: 'sess-active',
     interruptId: 'interrupt-1',
-    review: {
+    reviews: [{
       id: 'review-current',
       schemaVersion: 1,
       view: { kind: 'plain', body: 'Approve?' },
       options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
-    },
+    }],
   };
   const tuiSessions = {
     getActiveSessionId: () => 'sess-active',
@@ -439,12 +451,7 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
     return 'completed';
   };
 
-  const message = {
-    type: 'human_review_response' as const,
-    requestId: 'req-1',
-    interactionId: 'review-current',
-    selectedOptionId: 'approve',
-  };
+  const message = humanReviewResponse('review-current');
   await handler.handleHumanReviewResponse(fakePeer, message, { actorId: 'pet-1' } as never);
   await handler.handleHumanReviewResponse(fakePeer, message, { actorId: 'pet-1' } as never);
 
@@ -510,7 +517,6 @@ test('handleHumanReviewResponse keeps single-review review as batch resume shape
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
-        review,
         reviews: [review],
       }),
     } as never,
@@ -525,13 +531,7 @@ test('handleHumanReviewResponse keeps single-review review as batch resume shape
   };
   await handler.handleHumanReviewResponse(
     fakePeer,
-    {
-      type: 'human_review_response',
-      requestId: 'req-1',
-      interactionId: 'review-current',
-      selectedOptionId: 'approve',
-      decisions: [{ interactionId: 'review-current', selectedOptionId: 'approve' }],
-    },
+    humanReviewResponse('review-current'),
     { actorId: 'pet-1' } as never,
   );
 
@@ -571,12 +571,12 @@ test('handleHumanReviewResponse recovers missing route from active checkpoint re
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
-        review: {
+        reviews: [{
           id: 'review-current',
           schemaVersion: 1,
           view: { kind: 'plain', body: 'Approve?' },
           options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
-        },
+        }],
       }),
     } as never,
     inflightRequests: new InflightRequestController({
@@ -591,12 +591,7 @@ test('handleHumanReviewResponse recovers missing route from active checkpoint re
 
   await handler.handleHumanReviewResponse(
     fakePeer,
-    {
-      type: 'human_review_response',
-      requestId: 'req-1',
-      interactionId: 'review-current',
-      selectedOptionId: 'approve',
-    },
+    humanReviewResponse('review-current'),
     { actorId: 'pet-1' } as never,
   );
 
@@ -633,12 +628,12 @@ test('handleHumanReviewResponse releases a recovered review when its peer discon
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
-        review: {
+        reviews: [{
           id: 'review-current',
           schemaVersion: 1,
           view: { kind: 'plain', body: 'Approve?' },
           options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
-        },
+        }],
       }),
     } as never,
     inflightRequests: new InflightRequestController({
@@ -650,12 +645,7 @@ test('handleHumanReviewResponse releases a recovered review when its peer discon
   (handler as any).runChatRequest = async (...args: unknown[]) => {
     handleChatCalls.push(args);
   };
-  const message = {
-    type: 'human_review_response' as const,
-    requestId: 'req-1',
-    interactionId: 'review-current',
-    selectedOptionId: 'approve',
-  };
+  const message = humanReviewResponse('review-current');
 
   await handler.handleHumanReviewResponse(fakePeer, message, { actorId: 'pet-1' } as never);
   assert.equal(handleChatCalls.length, 0);
@@ -679,7 +669,7 @@ test('buildPendingInterruptSnapshot projects the active checkpoint interrupt', (
       getChatThreadId: () => 'thread-x',
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
-        review,
+        reviews: [review],
       }),
     } as never,
     inflightRequests: new InflightRequestController({
@@ -690,9 +680,8 @@ test('buildPendingInterruptSnapshot projects the active checkpoint interrupt', (
   assert.deepEqual(handler.buildPendingInterruptSnapshot({ actorId: 'pet-1' } as never, {
     sessionId: 'sess-active',
     interruptId: 'interrupt-1',
-    review,
+    reviews: [review],
   }), {
-    requestId: 'interrupt-1',
     sessionId: 'sess-active',
     pendingInterrupt: {
       interruptId: 'interrupt-1',
@@ -719,7 +708,7 @@ test('handleReviewCancel resumes pending review with run interruption control', 
       readActivePendingInterrupt: async () => (reviewResumed ? null : {
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
-        review: {
+        reviews: [{
           id: 'review-current',
           schemaVersion: 1,
           view: { kind: 'plain', body: 'Approve?' },
@@ -727,7 +716,7 @@ test('handleReviewCancel resumes pending review with run interruption control', 
             { id: 'approve', label: 'Approve', decision: { type: 'approve' } },
             { id: 'reject', label: 'Reject', decision: { type: 'reject' } },
           ],
-        },
+        }],
       }),
     } as never,
     inflightRequests: new InflightRequestController({
@@ -776,12 +765,7 @@ test('handleReviewCancel resumes pending review with run interruption control', 
 
   await handler.handleHumanReviewResponse(
     fakePeer,
-    {
-      type: 'human_review_response',
-      requestId: 'req-1',
-      interactionId: 'review-current',
-      selectedOptionId: 'approve',
-    },
+    humanReviewResponse('review-current'),
     { actorId: 'pet-1' } as never,
   );
 
@@ -810,7 +794,7 @@ test('handleReviewCancel recovers missing route from active checkpoint review', 
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
-        review: {
+        reviews: [{
           id: 'review-current',
           schemaVersion: 1,
           view: { kind: 'plain', body: 'Approve?' },
@@ -818,7 +802,7 @@ test('handleReviewCancel recovers missing route from active checkpoint review', 
             { id: 'approve', label: 'Approve', decision: { type: 'approve' } },
             { id: 'reject', label: 'Reject', decision: { type: 'reject' } },
           ],
-        },
+        }],
       }),
     } as never,
     inflightRequests: new InflightRequestController({
@@ -872,12 +856,12 @@ test('handleReviewCancel interrupts an approve-only pending review', async () =>
   let pendingInterrupt: unknown = {
     sessionId: 'sess-active',
     interruptId: 'interrupt-1',
-    review: {
+    reviews: [{
       id: 'review-current',
       schemaVersion: 1,
       view: { kind: 'plain', body: 'Approve?' },
       options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
-    },
+    }],
   };
   const handler = new LocalServerChatHandler({
     graphService: {} as never,
@@ -923,12 +907,7 @@ test('handleReviewCancel interrupts an approve-only pending review', async () =>
 
   await handler.handleHumanReviewResponse(
     fakePeer,
-    {
-      type: 'human_review_response',
-      requestId: 'req-1',
-      interactionId: 'review-current',
-      selectedOptionId: 'approve',
-    },
+    humanReviewResponse('review-current'),
     { actorId: 'pet-1' } as never,
   );
 
@@ -945,7 +924,7 @@ test('handleHumanReviewResponse forwards canonical selected option without resol
     readActivePendingInterrupt: async () => ({
       sessionId: 'sess-active',
       interruptId: 'interrupt-1',
-      review: {
+      reviews: [{
         id: 'review-current',
         schemaVersion: 1,
         view: { kind: 'plain', body: 'Need input' },
@@ -955,7 +934,7 @@ test('handleHumanReviewResponse forwards canonical selected option without resol
           input: { kind: 'text', key: 'message', required: true, multiline: true },
           decision: { type: 'respond', messageInputKey: 'message' },
         }],
-      },
+      }],
     }),
   } as never;
   const handler = new LocalServerChatHandler({
@@ -972,13 +951,7 @@ test('handleHumanReviewResponse forwards canonical selected option without resol
   };
   await handler.handleHumanReviewResponse(
     fakePeer,
-    {
-      type: 'human_review_response',
-      requestId: 'req-1',
-      interactionId: 'review-current',
-      selectedOptionId: 'respond',
-      input: { message: '请先解释风险' },
-    },
+    humanReviewResponse('review-current', 'respond', { message: '请先解释风险' }),
     { actorId: 'pet-1' } as never,
   );
 
@@ -1021,12 +994,12 @@ test('handleHumanReviewResponse rejects canonical review response from a differe
     readActivePendingInterrupt: async () => ({
       sessionId: 'sess-origin',
       interruptId: 'interrupt-1',
-      review: {
+      reviews: [{
         id: 'review-current',
         schemaVersion: 1,
         view: { kind: 'plain', body: 'Approve?' },
         options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
-      },
+      }],
     }),
   } as never;
   const handler = new LocalServerChatHandler({
@@ -1045,12 +1018,7 @@ test('handleHumanReviewResponse rejects canonical review response from a differe
 
   await handler.handleHumanReviewResponse(
     fakePeer,
-    {
-      type: 'human_review_response',
-      requestId: 'req-1',
-      interactionId: 'review-current',
-      selectedOptionId: 'approve',
-    },
+    humanReviewResponse('review-current'),
     { actorId: 'pet-1' } as never,
   );
 
@@ -1081,7 +1049,7 @@ test('handleHumanReviewResponse forwards effect-bearing options without local au
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
-        review: {
+        reviews: [{
           id: 'review-current',
           schemaVersion: 1,
           view: { kind: 'plain', body: 'Approve?' },
@@ -1094,7 +1062,7 @@ test('handleHumanReviewResponse forwards effect-bearing options without local au
               scope: 'thread',
             }],
           }],
-        },
+        }],
       }),
     } as never,
     inflightRequests: new InflightRequestController({
@@ -1108,12 +1076,7 @@ test('handleHumanReviewResponse forwards effect-bearing options without local au
   };
   await handler.handleHumanReviewResponse(
     fakePeer,
-    {
-      type: 'human_review_response',
-      requestId: 'req-1',
-      interactionId: 'review-current',
-      selectedOptionId: 'approve-and-authorize-thread',
-    },
+    humanReviewResponse('review-current', 'approve-and-authorize-thread'),
     {
       actorId: 'pet-1',
     } as never,
@@ -1172,7 +1135,7 @@ test('handleHumanReviewResponse does not validate authorization effect context i
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
-        review: {
+        reviews: [{
           id: 'review-current',
           schemaVersion: 1,
           view: { kind: 'plain', body: 'Approve?' },
@@ -1187,7 +1150,7 @@ test('handleHumanReviewResponse does not validate authorization effect context i
               matcher: { type: 'policy_hook' },
             }],
           }],
-        },
+        }],
       }),
     } as never,
     inflightRequests: new InflightRequestController({
@@ -1201,12 +1164,7 @@ test('handleHumanReviewResponse does not validate authorization effect context i
   };
   await handler.handleHumanReviewResponse(
     fakePeer,
-    {
-      type: 'human_review_response',
-      requestId: 'req-1',
-      interactionId: 'review-current',
-      selectedOptionId: 'approve-and-authorize-thread',
-    },
+    humanReviewResponse('review-current', 'approve-and-authorize-thread'),
     { actorId: 'pet-1' } as never,
   );
 

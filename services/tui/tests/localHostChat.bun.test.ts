@@ -162,10 +162,13 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     'chat-interrupt',
     'snapshot-interrupt',
     'chat-review-approve',
+    'review-response-approve',
     'snapshot-review-approve',
     'chat-review-cancel',
+    'review-cancel',
     'snapshot-review-cancel',
     'chat-review-continue',
+    'review-response-continue',
     'snapshot-review-continue',
     'chat-error',
     'snapshot-error',
@@ -418,6 +421,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     assert.equal(controller.getState().session.activeRun?.state, 'interrupting');
     await waitFor(() => (
       graphFixture.interruptObserved()
+      && snapshotRequestCount === 4
       && controller.getState().session.activeRun === null
     ));
     const interruptedEntries = controller.getState().session.timeline.filter(
@@ -453,9 +457,8 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     assert.equal(approvalRun.pendingInterrupt.interruptId, 'review-interrupt-approve');
     assert.equal(approvalRun.pendingInterrupt.payload.interactions[0]?.interactionId, REVIEW_SPEC.id);
     const approvalResult = controller.submitReviewResponse({
-      requestId: 'chat-review-approve',
       interruptId: approvalRun.pendingInterrupt.interruptId,
-      decisions: [],
+      responses: [],
       optionId: 'approve',
     });
     assert.equal(approvalResult.ok, true);
@@ -465,7 +468,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
       && controller.getState().session.activeRun === null
       && hasCompletedRequestMessage(
         controller.getState().session,
-        'chat-review-approve',
+        'review-response-approve',
         REVIEW_APPROVED_REPLY,
       )
     ));
@@ -494,7 +497,6 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     assert.ok(cancellationRun?.state === 'pending_interrupt');
     assert.equal(cancellationRun.pendingInterrupt.interruptId, 'review-interrupt-cancel');
     assert.deepEqual(controller.cancelReview({
-      requestId: 'chat-review-cancel',
       interruptId: cancellationRun.pendingInterrupt.interruptId,
     }), {
       ok: true,
@@ -523,9 +525,8 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
       'review-interrupt-cancel',
     );
     const continuedApproval = controller.submitReviewResponse({
-      requestId: 'chat-review-continue',
       interruptId: continuedRun.pendingInterrupt.interruptId,
-      decisions: [],
+      responses: [],
       optionId: 'approve',
     });
     assert.equal(continuedApproval.ok, true);
@@ -534,7 +535,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
       && controller.getState().session.activeRun === null
       && hasCompletedRequestMessage(
         controller.getState().session,
-        'chat-review-continue',
+        'review-response-continue',
         REVIEW_APPROVED_REPLY,
       )
     ));

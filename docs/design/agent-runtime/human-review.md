@@ -1,10 +1,26 @@
-# Human Review Approval Refactor Design
+# Human Review Approval Refactor Design (Historical)
 
-> 本文保留为早期 review protocol 的历史设计。authorization matcher 与 session grant 生命周期已经由 [AUTHORIZATION_MATCHER_LIFECYCLE.md](../../reference/runtime/authorization-matcher.md) 取代；下文中的 matcher template、`shell_pattern` 和 `exact_args` 不再是当前实现。
+> 状态：Historical / superseded。本文从“历史设计记录”起的旧 schema、迁移步骤和命名都不是当前 contract，不能用于指导新实现。
+>
+> 当前 Chat contract 见 [Pending Interrupt in Chat](../local-agent/pending-interrupt-chat.md)；当前 runtime projection 见 [Session Projection](../../reference/runtime/session-projection.md)；Studio 后续方案见 [Pet Thread and Dispatch Invocation](../studio/pet-thread-dispatch-invocation.md)。authorization matcher 与 session grant 生命周期见 [Authorization Matcher Lifecycle](../../reference/runtime/authorization-matcher.md)。
 
-> 状态：Draft v2
 > 日期：2026-06-09
 > 关联：issue #82，PR #76
+
+## Current replacement contract
+
+- `PendingInterrupt` is the checkpoint fact; human review is its typed payload
+  and projection, not a parallel lifecycle.
+- `interruptId` identifies the wait, and `interactionId` identifies one item in
+  the human-review payload.
+- Chat has an implicit active thread and no `petId` or dispatch semantics.
+- Studio dispatch is a separate, later integration. Each dispatch is one
+  invocation on the addressed Pet's stable thread; its typed resume input is
+  intentionally not fixed by this historical document.
+- Legacy `ReviewAction`, `actionId`, scalar response fields, and public
+  `decisions` survive only at compatibility boundaries.
+
+## Historical design record
 
 ## 1. 文档目标
 
@@ -768,8 +784,8 @@ V1 需要明确几个运行时边界：
   不维护 claim、consumed tombstone 或 `interruptId` keyed existence state。
 - timeout / cancellation：LangGraph interrupt 本身不定义 timeout。local-agent
   可以做 UI 层提示，但不能只清理 UI 状态而让 graph checkpoint 悬挂。
-- `respond` 不创建新的 Chat request。它仍然是当前 pending interrupt 的
-  human-review resume；TUI 不应把 respond 当成普通用户消息。
+- `respond` 不创建普通用户 Chat message。transport 会为 resume command
+  分配新的 `requestId`，但它仍然恢复当前 pending interrupt。
 
 V1 cancellation 默认策略：
 
@@ -789,13 +805,15 @@ V1 cancellation 默认策略：
   `interruptId + interactionId + selectedOptionId + input`；旧 `actionId` 与
   `reviewId` 只在 parser 边界兼容并立即归一化。
 - Studio：一次 `dispatch` 就是一次 invocation，同一 `petId` 复用稳定 Pet
-  thread。review decision 是后续 dispatch 的 input，用于 resume 同一
-  `interruptId`；它不是“用户回复”，也不复用 Chat route。
+  thread。interrupt response 是后续 typed dispatch input，用于 resume 同一
+  `interruptId`；它不是“用户回复”，也不复用 Chat route。具体 input schema
+  留给 Studio 后续改造确定。
 - 两者只共享 `PendingInterrupt` value contract 和 graph resume 语义，不共享
   Chat client-local submission marker、implicit active-thread lookup 或 wire
   handler。
 
-也就是说，Studio 可以保留 promise slot 这个控制流实现，但不能保留另一套 message text decoder。Studio review response 只允许 canonical `{ reviewId, selectedOptionId, input }`；不能再从 `message` 文本或 `resume.decisions` 猜 decision。
+Studio 后续可以保留 promise slot 这类内部控制流实现，但不能保留另一套
+message text decoder；也不能从普通 message 文本猜测 interrupt response。
 
 ## 7. Toolkit policy 调整
 

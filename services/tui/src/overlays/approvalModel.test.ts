@@ -30,7 +30,11 @@ test('approval state follows the canonical waiting review and defaults to primar
   assert.equal(state.phase, 'ready');
   assert.equal(selectedApprovalOption(state)?.id, 'approve');
   assert.equal(
-    syncApprovalState(state, { ...run, state: 'running', activity: 'thinking' }).phase,
+    syncApprovalState(state, {
+      requestId: 'run-next',
+      state: 'running',
+      activity: 'thinking',
+    }).phase,
     'closed',
   );
 });
@@ -49,18 +53,18 @@ test('approval navigation yields to free-text editing after the draft starts', (
   assert.equal(resolveApprovalKey(state, key('escape')), 'cancel');
 });
 
-test('approved batch decisions advance locally before transport submission', () => {
+test('approved batch responses advance locally before transport submission', () => {
   let state = syncApprovalState(createApprovalState(), waitingReview([
     review('review-1'),
     review('review-2'),
   ]));
-  const decisions: ReviewResponse[] = [{
+  const responses: ReviewResponse[] = [{
     interactionId: 'review-1',
     selectedOptionId: 'approve',
   }];
-  state = advanceApproval(state, decisions);
+  state = advanceApproval(state, responses);
   assert.equal(currentApprovalReview(state)?.interactionId, 'review-2');
-  assert.deepEqual(state.phase === 'closed' ? null : state.decisions, decisions);
+  assert.deepEqual(state.phase === 'closed' ? null : state.responses, responses);
   assert.equal(state.phase === 'closed' ? null : state.draft, '');
 
   state = beginApprovalSubmission(state);
@@ -328,7 +332,7 @@ function waitingReview(reviews: ReviewSpec[]): AgentRunView {
     requestId: 'request-1',
     state: 'pending_interrupt',
     pendingInterrupt: {
-      interruptId: 'action-1',
+      interruptId: 'pendingInterrupt-1',
       payload: { kind: 'human_review', interactions: reviews },
     },
   };

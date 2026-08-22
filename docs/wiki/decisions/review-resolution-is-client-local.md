@@ -47,10 +47,17 @@ below about a "client response" is limited to Chat/TUI.
 
 ## Decision
 
-Sending a review resolution (response or cancel) is a one-shot client command. It
-does **not** mutate the shared `AgentSession`. The shared projection stays at
-`pending_interrupt` until a server event or snapshot provides the next fact. The
-only client-side progress is the TUI-local `ReviewDraft.resolutionSent` marker.
+Sending a review resolution (response or cancel) is a one-shot client command.
+It does **not** change the checkpoint-derived `PendingInterrupt` or add command
+progress to it. The shared projection stays at `pending_interrupt` until a
+server event or snapshot provides the next fact. The only client-side progress
+is the TUI-local `ReviewDraft.resolutionSent` marker.
+
+The `activeRun` envelope may temporarily bind its optional `requestId` to the
+accepted response/cancel command so later events from that resumed invocation
+can be correlated. That binding is transport ownership, not another interrupt
+identity or a `waiting/submitting/canceling` lifecycle; a checkpoint-restored
+pending interrupt can have no request owner.
 
 The shared `PendingInterrupt` projection therefore carries only `interruptId`
 and its presentation-safe payload—no `waiting | submitting | canceling` status.
@@ -116,6 +123,8 @@ checkpoint-derived review fact. See the complete
 
 - Do not add a submission `status` field to `PendingInterrupt` or any differently named
   duplicate of client submission progress in the shared model.
+- Do not use `requestId` as the pending wait identity; stale validation always
+  uses `interruptId` and then `interactionId`.
 - A human-review payload keeps its ordered interactions; `interruptId`
   identifies the checkpoint wait and `interactionId` identifies one item.
 - `review.cancel` and `run.interrupt` remain distinct intents.

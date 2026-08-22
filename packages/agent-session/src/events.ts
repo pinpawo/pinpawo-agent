@@ -1,8 +1,8 @@
 import type {
-  HumanReviewRequest,
   TokenUsageSnapshot,
 } from '@pinpawo/agent-contracts';
 import type { AgentPlan } from './domain';
+import type { PendingInterruptProjection } from './review';
 
 export type AgentRuntimeEvent =
   | AgentAssistantMessageEvent
@@ -101,12 +101,7 @@ export type AgentPlanUpdatedEvent = {
 export type AgentHumanReviewRequestedEvent = {
   type: 'human_review.requested';
   requestId: string;
-  interruptId?: string;
-  review: HumanReviewRequest;
-  reviews?: HumanReviewRequest[];
-  actor?: {
-    petId?: string;
-  };
+  pendingInterrupt: PendingInterruptProjection;
 };
 
 export type AgentStudioProgressEvent = {

@@ -50,7 +50,6 @@ export type ChatRequestMessage = {
   requestId: string;
   message: string;
   attachments?: AgentLocalAttachment[];
-  userId?: string;
   activeDelegationTransition?: LegacyActiveDelegationTransition;
 };
 
@@ -67,7 +66,6 @@ export type ReviewCancelMessage = {
 
 export type NewSessionMessage = {
   type: 'new_session';
-  userId?: string;
 };
 
 export type RuntimeConfigUpdateMessage = {
@@ -89,18 +87,11 @@ export type StudioRequestMessage = {
   conversationId?: string;
 };
 
-type HumanReviewResponseMessageBase = {
+export type HumanReviewResponseMessage = {
   type: 'human_review_response';
   requestId: string;
-  interruptId?: string;
-  selectedOptionId: string;
-  input?: Record<string, unknown>;
-  decisions?: ReviewResponse[];
-};
-
-/** Public response after parser-boundary compatibility normalization. */
-export type HumanReviewResponseMessage = HumanReviewResponseMessageBase & {
-  interactionId: string;
+  interruptId: string;
+  responses: ReviewResponse[];
 };
 
 export type SessionSnapshotGetMessage = {
@@ -672,27 +663,69 @@ function readAgentEvent(record: Record<string, unknown>): AgentRuntimeEvent | nu
       : { type, requestId, plan };
   }
   if (type === 'human_review.requested') {
-    if (!hasOnlyKeys(record, ['type', 'requestId', 'interruptId', 'review', 'reviews', 'actor'])) return null;
-    const review = readReviewSpec(record, 'review');
-    const reviews = readReviewSpecs(record, 'reviews');
-    const actor = readRecord(record, 'actor');
-    if (!review) return null;
-    if (actor && !hasOnlyKeys(actor, ['petId'])) return null;
+    if (!hasOnlyKeys(record, [
+      'type',
+      'requestId',
+      'pendingInterrupt',
+      // Compatibility input only; canonical events emit pendingInterrupt.
+      'interruptId',
+      'review',
+      'reviews',
+      'actor',
+    ])) return null;
+    const pending = readRecord(record, 'pendingInterrupt');
+    const pendingPayload = pending ? readRecord(pending, 'payload') : null;
+    const canonicalInteractions = pendingPayload
+      ? readReviewSpecs(pendingPayload, 'interactions')
+      : null;
+    const canonicalInterruptId = pending
+      ? readString(pending, 'interruptId')
+      : null;
+    if (pending) {
+      if (
+        !hasOnlyKeys(pending, ['interruptId', 'payload'])
+        || !pendingPayload
+        || !hasOnlyKeys(pendingPayload, ['kind', 'interactions'])
+        || pendingPayload.kind !== 'human_review'
+        || !canonicalInterruptId
+        || !canonicalInteractions
+      ) return null;
+      return {
+        type,
+        requestId,
+        pendingInterrupt: {
+          interruptId: canonicalInterruptId,
+          payload: {
+            kind: 'human_review',
+            interactions: canonicalInteractions,
+          },
+        },
+      };
+    }
+    const legacyInterruptId = readString(record, 'interruptId');
+    const legacyReview = readReviewSpec(record, 'review');
+    const legacyReviews = readReviewSpecs(record, 'reviews');
+    const legacyActor = readRecord(record, 'actor');
+    if (
+      !legacyInterruptId
+      || !legacyReview
+      || (record.actor !== undefined && !legacyActor)
+      || (legacyActor && (
+        !hasOnlyKeys(legacyActor, ['petId'])
+        || (legacyActor.petId !== undefined
+          && !readOptionalString(legacyActor, 'petId'))
+      ))
+    ) return null;
     return {
       type,
       requestId,
-      ...(readOptionalString(record, 'interruptId') ? { interruptId: readOptionalString(record, 'interruptId') } : {}),
-      review,
-      ...(reviews ? { reviews } : {}),
-      ...(actor
-        ? {
-            actor: {
-              ...(readOptionalString(actor, 'petId') !== undefined
-                ? { petId: readOptionalString(actor, 'petId') }
-                : {}),
-            },
-          }
-        : {}),
+      pendingInterrupt: {
+        interruptId: legacyInterruptId,
+        payload: {
+          kind: 'human_review',
+          interactions: legacyReviews ?? [legacyReview],
+        },
+      },
     };
   }
   if (type === 'studio.progress') {
@@ -799,46 +832,66 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
       || message == null
       || attachments === null
       || activeDelegationTransition === null
+      || (record.userId !== undefined && !readOptionalString(record, 'userId'))
     ) return null;
     return {
       type,
       requestId,
       message,
       ...(attachments ? { attachments } : {}),
-      ...(readOptionalString(record, 'userId') !== undefined
-        ? { userId: readOptionalString(record, 'userId') }
-        : {}),
       ...(activeDelegationTransition
         ? { activeDelegationTransition }
         : {}),
     };
   }
   if (type === 'human_review_response') {
-    if (!hasOnlyKeys(record, ['type', 'requestId', 'interruptId', 'actionId', 'interactionId', 'reviewId', 'selectedOptionId', 'input', 'decisions'])) return null;
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'interruptId', 'actionId', 'responses', 'interactionId', 'reviewId', 'selectedOptionId', 'input', 'decisions'])) return null;
     const requestId = readString(record, 'requestId');
     const interruptId = readOptionalString(record, 'interruptId');
     const actionId = readOptionalString(record, 'actionId');
+    const responses = readReviewResponses(record, 'responses');
     const interactionId = readOptionalString(record, 'interactionId');
     const reviewId = readOptionalString(record, 'reviewId');
     const selectedOptionId = readOptionalString(record, 'selectedOptionId');
     const input = readRecord(record, 'input');
     const decisions = readReviewResponses(record, 'decisions');
-    if (record.input !== undefined && !input) return null;
+    if (record.responses !== undefined && !responses) return null;
+    if (record.input !== undefined && (!input || !isJsonValue(input))) return null;
     if (record.decisions !== undefined && !decisions) return null;
     if (record.interruptId !== undefined && !interruptId) return null;
     if (record.actionId !== undefined && !actionId) return null;
     if (interruptId !== undefined && actionId !== undefined && interruptId !== actionId) return null;
-    if (!requestId || (!interactionId && !reviewId) || !selectedOptionId) return null;
+    const canonicalInterruptId = interruptId ?? actionId;
+    if (!requestId || !canonicalInterruptId) return null;
+    if (responses && (interactionId || reviewId || selectedOptionId || input || decisions)) return null;
+    if (responses) {
+      return {
+        type,
+        requestId,
+        interruptId: canonicalInterruptId,
+        responses,
+      };
+    }
+    if ((!interactionId && !reviewId) || !selectedOptionId) return null;
     if (interactionId !== undefined && reviewId !== undefined && interactionId !== reviewId) return null;
     const canonicalInteractionId = interactionId ?? reviewId!;
+    const scalarResponse: ReviewResponse = {
+      interactionId: canonicalInteractionId,
+      selectedOptionId,
+      ...(input ? { input: input as ContractJsonObject } : {}),
+    };
+    const canonicalResponses = decisions ?? [scalarResponse];
+    const finalResponse = canonicalResponses.at(-1);
+    if (
+      !finalResponse
+      || finalResponse.interactionId !== scalarResponse.interactionId
+      || finalResponse.selectedOptionId !== scalarResponse.selectedOptionId
+    ) return null;
     return {
       type,
       requestId,
-      ...((interruptId ?? actionId) ? { interruptId: interruptId ?? actionId } : {}),
-      interactionId: canonicalInteractionId,
-      selectedOptionId,
-      ...(input ? { input } : {}),
-      ...(decisions ? { decisions } : {}),
+      interruptId: canonicalInterruptId,
+      responses: canonicalResponses,
     };
   }
   if (type === 'run.interrupt') {
@@ -861,12 +914,8 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
   }
   if (type === 'new_session') {
     if (!hasOnlyKeys(record, ['type', 'userId'])) return null;
-    return {
-      type,
-      ...(readOptionalString(record, 'userId') !== undefined
-        ? { userId: readOptionalString(record, 'userId') }
-        : {}),
-    };
+    if (record.userId !== undefined && !readOptionalString(record, 'userId')) return null;
+    return { type };
   }
   if (type === 'runtime_config.update') {
     if (!hasOnlyKeys(record, [

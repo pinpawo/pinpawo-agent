@@ -26,22 +26,3 @@ export type PendingInterruptProjection = {
   interruptId: string;
   payload: HumanReviewInterruptProjection;
 };
-
-export function pendingInterruptId(params: {
-  requestId: string;
-  interruptId?: string;
-  reviews?: HumanReviewRequest[];
-}) {
-  if (params.interruptId) return params.interruptId;
-  const reviewKey = params.reviews?.length
-    ? params.reviews.map((review) => encodeURIComponent(review.interactionId)).join(',')
-    : 'unknown';
-  return `request:${params.requestId}:reviews:${reviewKey}`;
-}
-
-export function humanReviewInterruptInteractions(
-  review: HumanReviewRequest,
-  reviews?: HumanReviewRequest[],
-) {
-  return reviews?.length ? reviews : [review];
-}

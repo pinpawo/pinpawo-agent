@@ -10,7 +10,7 @@ test('global Ctrl+C cancels review, interrupts once, then exits', () => {
       requestId: 'review',
       state: 'pending_interrupt',
       pendingInterrupt: {
-        interruptId: 'action',
+        interruptId: 'interrupt-1',
         payload: { kind: 'human_review', interactions: [] },
       },
     },
@@ -21,7 +21,7 @@ test('global Ctrl+C cancels review, interrupts once, then exits', () => {
       requestId: 'review',
       state: 'pending_interrupt',
       pendingInterrupt: {
-        interruptId: 'action',
+        interruptId: 'interrupt-1',
         payload: { kind: 'human_review', interactions: [] },
       },
     },
@@ -35,7 +35,7 @@ test('global Ctrl+C cancels review, interrupts once, then exits', () => {
       requestId: 'review',
       state: 'pending_interrupt',
       pendingInterrupt: {
-        interruptId: 'action',
+        interruptId: 'interrupt-1',
         payload: { kind: 'human_review', interactions: [] },
       },
     },
@@ -64,13 +64,12 @@ test('global Ctrl+C cancels review, interrupts once, then exits', () => {
 function approvalState(phase: 'ready' | 'resolution-sent') {
   return {
     phase,
-    requestId: 'review',
-    action: {
-      interruptId: 'action',
+    pendingInterrupt: {
+      interruptId: 'interrupt-1',
       payload: { kind: 'human_review', interactions: [] },
     },
     reviewIndex: 0,
-    decisions: [],
+    responses: [],
     selectedIndex: 0,
     contentOffset: 0,
     draft: '',

@@ -444,7 +444,7 @@ test('LocalServerTuiSessionService reads one checkpoint point for messages and p
         capturedThreadId = setup.input.threadId;
         return {
           messages: [new HumanMessage('checkpoint prompt')],
-          pendingInterrupt: { review },
+          pendingInterrupt: { interruptId: 'interrupt-1', reviews: [review] },
           hasPendingContinuation: true,
         };
       },
@@ -477,7 +477,8 @@ test('LocalServerTuiSessionService reads one checkpoint point for messages and p
 
   assert.deepEqual(checkpoint.pendingInterrupt, {
     sessionId: session.id,
-    review,
+    interruptId: 'interrupt-1',
+    reviews: [review],
   });
   assert.deepEqual(checkpoint.messages, [{ role: 'user', text: 'checkpoint prompt' }]);
   assert.equal(checkpoint.sessionTokenUsage, null);

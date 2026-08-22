@@ -4,7 +4,7 @@ import type {
   ReviewResponse,
   ReviewSpec,
 } from '@pinpawo/agent-session';
-import { reviewDecisionsRemainValid } from '../session/reviewDecision';
+import { reviewResponsesRemainValid } from '../session/reviewDecision';
 import { truncateTerminalLine } from '../text/terminalText';
 import {
   buildReviewContentLines as renderReviewContentLines,
@@ -17,10 +17,9 @@ export type ApprovalState =
   | { phase: 'closed' }
   | {
       phase: ApprovalPhase;
-      requestId: string;
-      action: PendingInterruptProjection;
+      pendingInterrupt: PendingInterruptProjection;
       reviewIndex: number;
-      decisions: ReviewResponse[];
+      responses: ReviewResponse[];
       selectedIndex: number;
       contentOffset: number;
       draft: string;
@@ -119,26 +118,24 @@ export function syncApprovalState(
   }
   if (
     state.phase !== 'closed'
-    && state.requestId === run.requestId
-    && state.action.interruptId === run.pendingInterrupt.interruptId
-    && reviewDecisionsRemainValid(run.pendingInterrupt, state.decisions)
+    && state.pendingInterrupt.interruptId === run.pendingInterrupt.interruptId
+    && reviewResponsesRemainValid(run.pendingInterrupt, state.responses)
   ) {
     return {
       ...state,
-      action: run.pendingInterrupt,
-      reviewIndex: state.decisions.length,
+      pendingInterrupt: run.pendingInterrupt,
+      reviewIndex: state.responses.length,
       selectedIndex: clampOptionIndex(
         state.selectedIndex,
-        currentReviewFrom(run.pendingInterrupt, state.decisions)?.options.length ?? 0,
+        currentReviewFrom(run.pendingInterrupt, state.responses)?.options.length ?? 0,
       ),
     };
   }
   return {
     phase: 'ready',
-    requestId: run.requestId,
-    action: run.pendingInterrupt,
+    pendingInterrupt: run.pendingInterrupt,
     reviewIndex: 0,
-    decisions: [],
+    responses: [],
     selectedIndex: defaultOptionIndex(run.pendingInterrupt.payload.interactions[0]),
     contentOffset: 0,
     draft: '',
@@ -150,7 +147,7 @@ export function syncApprovalState(
 export function currentApprovalReview(state: ApprovalState) {
   return state.phase === 'closed'
     ? null
-    : state.action.payload.interactions[state.reviewIndex] ?? null;
+    : state.pendingInterrupt.payload.interactions[state.reviewIndex] ?? null;
 }
 
 export function selectedApprovalOption(state: ApprovalState) {
@@ -235,20 +232,20 @@ export function scrollApprovalContent(
 
 export function advanceApproval(
   state: ApprovalState,
-  decisions: ReviewResponse[],
+  responses: ReviewResponse[],
 ): ApprovalState {
   const interactions = state.phase === 'closed'
     ? []
-    : state.action.payload.interactions;
-  if (state.phase === 'closed' || decisions.length >= interactions.length) {
+    : state.pendingInterrupt.payload.interactions;
+  if (state.phase === 'closed' || responses.length >= interactions.length) {
     return state;
   }
-  const review = interactions[decisions.length];
+  const review = interactions[responses.length];
   return {
     ...state,
     phase: 'ready',
-    reviewIndex: decisions.length,
-    decisions,
+    reviewIndex: responses.length,
+    responses,
     selectedIndex: defaultOptionIndex(review),
     contentOffset: 0,
     draft: '',
@@ -342,7 +339,7 @@ export function buildApprovalViewModel(
 ): ApprovalViewModel {
   const innerWidth = Math.max(1, width - 4);
   const review = currentApprovalReview(state);
-  const reviewCount = state.action.payload.interactions.length;
+  const reviewCount = state.pendingInterrupt.payload.interactions.length;
   if (state.phase === 'resolution-sent') {
     const message = state.message ?? 'Submitting review decision…';
     const rawTitle = width >= 50
@@ -515,8 +512,8 @@ function clampOptionIndex(index: number, count: number) {
 }
 
 function currentReviewFrom(
-  action: PendingInterruptProjection,
-  decisions: readonly ReviewResponse[],
+  pendingInterrupt: PendingInterruptProjection,
+  responses: readonly ReviewResponse[],
 ) {
-  return action.payload.interactions[decisions.length];
+  return pendingInterrupt.payload.interactions[responses.length];
 }

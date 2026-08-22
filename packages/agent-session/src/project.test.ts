@@ -275,18 +275,24 @@ test('reduceSession keeps review and terminal control scoped to the owning run',
     event: {
       type: 'human_review.requested',
       requestId: 'req-1',
-      review: {
-        interactionId: 'review-1',
-        schemaVersion: 2,
-        view: { kind: 'plain', body: 'Approve?' },
-        options: [{ id: 'approve', label: 'Approve', batchSubmission: 'defer' }],
+      pendingInterrupt: {
+        interruptId: 'interrupt-1',
+        payload: {
+          kind: 'human_review',
+          interactions: [{
+            interactionId: 'review-1',
+            schemaVersion: 2,
+            view: { kind: 'plain', body: 'Approve?' },
+            options: [{ id: 'approve', label: 'Approve', batchSubmission: 'defer' }],
+          }],
+        },
       },
     },
   }, { observedAt: 1_100 });
 
   assert.equal(session.activeRun?.state, 'pending_interrupt');
   if (session.activeRun?.state !== 'pending_interrupt') assert.fail('expected pending interrupt');
-  assert.equal(session.activeRun.pendingInterrupt.interruptId, 'request:req-1:reviews:review-1');
+  assert.equal(session.activeRun.pendingInterrupt.interruptId, 'interrupt-1');
   const unknownRun = reduceSession(session, {
     type: 'run.interrupting',
     requestId: 'req-other',

@@ -328,22 +328,17 @@ function readPendingReview(
   snapshot: unknown,
 ): LocalAgentGraphThreadState['pendingInterrupt'] {
   const pending = readPendingInterrupt(snapshot);
-  if (!pending) return null;
+  if (!pending?.id) return null;
   if (isHumanReviewBatchInterruptPayload(pending.value)) {
     const reviews = pending.value.reviews.map((item) => item.review);
-    const review = reviews[0];
-    return review
-      ? {
-          ...(pending.id ? { interruptId: pending.id } : {}),
-          review,
-          reviews,
-        }
+    return reviews.length
+      ? { interruptId: pending.id, reviews }
       : null;
   }
   return isHumanReviewInterruptPayload(pending.value)
     ? {
-        ...(pending.id ? { interruptId: pending.id } : {}),
-        review: pending.value.review,
+        interruptId: pending.id,
+        reviews: [pending.value.review],
       }
     : null;
 }

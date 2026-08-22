@@ -3,11 +3,10 @@ import test from 'node:test';
 import type { ReviewSpec } from '@pinpawo/pet-agent';
 import {
   buildHumanReviewCancelResume,
-  buildHumanReviewRejectResume,
   buildHumanReviewResume,
   resolvePendingHumanReviewInterrupt,
   routeRunInterruptThroughHumanReview,
-  validateHumanReviewDecisions,
+  validateHumanReviewResponses,
 } from './pendingHumanReviewInterrupt';
 import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 
@@ -47,7 +46,7 @@ test('run interrupt routing reloads the pending interrupt from checkpoint', asyn
     cancelPending: async (pendingRoute) => {
       cancelled.push(pendingRoute);
     },
-  }), 'cancelled_pending');
+  }), true);
   assert.deepEqual(cancelled, [route]);
 
   assert.equal(await routeRunInterruptThroughHumanReview({
@@ -55,31 +54,18 @@ test('run interrupt routing reloads the pending interrupt from checkpoint', asyn
     cancelPending: async (pendingRoute) => {
       cancelled.push(pendingRoute);
     },
-  }), 'unhandled');
+  }), false);
   assert.deepEqual(cancelled, [route]);
-});
-
-test('human review interrupt resumes once for a rejected first decision', () => {
-  const route = reviewRoute(['review-1', 'review-2'], 'interrupt-1');
-
-  assert.deepEqual(buildHumanReviewRejectResume(route, 'reject'), {
-    'interrupt-1': {
-      decisions: [
-        { reviewId: 'review-1', selectedOptionId: 'reject' },
-      ],
-    },
-  });
 });
 
 test('human review interrupt rejects partial approval resumes', () => {
   const route = reviewRoute(['review-1', 'review-2']);
 
-  assert.throws(() => validateHumanReviewDecisions(route, {
+  assert.throws(() => validateHumanReviewResponses(route, {
     type: 'human_review_response',
     requestId: 'req-1',
-    interactionId: 'review-1',
-    selectedOptionId: 'approve',
-    decisions: [
+    interruptId: 'interrupt-1',
+    responses: [
       { interactionId: 'review-1', selectedOptionId: 'approve' },
     ],
   }));
@@ -87,12 +73,11 @@ test('human review interrupt rejects partial approval resumes', () => {
 
 test('human review interrupt resumes complete approvals as one payload', () => {
   const route = reviewRoute(['review-1', 'review-2'], 'interrupt-1');
-  const decisions = validateHumanReviewDecisions(route, {
+  const decisions = validateHumanReviewResponses(route, {
     type: 'human_review_response',
     requestId: 'req-1',
-    interactionId: 'review-2',
-    selectedOptionId: 'approve',
-    decisions: [
+    interruptId: 'interrupt-1',
+    responses: [
       { interactionId: 'review-1', selectedOptionId: 'approve' },
       { interactionId: 'review-2', selectedOptionId: 'approve' },
     ],
@@ -107,11 +92,11 @@ test('human review interrupt resumes complete approvals as one payload', () => {
 
 test('human review interrupt resolves a single interaction as batch shape', () => {
   const route = reviewRoute(['review-1'], 'interrupt-1');
-  const decisions = validateHumanReviewDecisions(route, {
+  const decisions = validateHumanReviewResponses(route, {
     type: 'human_review_response',
     requestId: 'req-1',
-    interactionId: 'review-1',
-    selectedOptionId: 'approve',
+    interruptId: 'interrupt-1',
+    responses: [{ interactionId: 'review-1', selectedOptionId: 'approve' }],
   });
 
   assert.deepEqual(buildHumanReviewResume(route, decisions), {
@@ -127,12 +112,11 @@ test('human review interrupt resolves a single interaction as batch shape', () =
 test('human review interrupt rejects decisions for mismatched interaction order', () => {
   const route = reviewRoute(['review-1', 'review-2']);
 
-  assert.throws(() => validateHumanReviewDecisions(route, {
+  assert.throws(() => validateHumanReviewResponses(route, {
     type: 'human_review_response',
     requestId: 'req-1',
-    interactionId: 'review-2',
-    selectedOptionId: 'approve',
-    decisions: [
+    interruptId: 'interrupt-1',
+    responses: [
       { interactionId: 'review-2', selectedOptionId: 'approve' },
       { interactionId: 'review-1', selectedOptionId: 'approve' },
     ],
@@ -143,7 +127,6 @@ test('human review interrupt reloads checkpoint authority for every attempt', as
   const route = {
     ...reviewRoute(['review-1'], 'interrupt-1'),
     requestId: 'req-1',
-    rejectOptionId: 'reject',
   };
   let pending: typeof route | null = route;
   const runs: unknown[] = [];
@@ -153,8 +136,7 @@ test('human review interrupt reloads checkpoint authority for every attempt', as
     type: 'human_review_response' as const,
     requestId: 'req-1',
     interruptId: 'interrupt-1',
-    interactionId: 'review-1',
-    selectedOptionId: 'approve',
+    responses: [{ interactionId: 'review-1', selectedOptionId: 'approve' }],
   };
   const resolve = () => resolvePendingHumanReviewInterrupt({
     message,
@@ -203,8 +185,7 @@ test('a same-id re-ask is read from the latest checkpoint', async () => {
       type: 'human_review_response',
       requestId: 'req-1',
       interruptId: 'interrupt-1',
-      interactionId: 'review-1',
-      selectedOptionId: 'approve',
+      responses: [{ interactionId: 'review-1', selectedOptionId: 'approve' }],
     },
     recover: async () => pending,
     emitClosed: () => undefined,
@@ -222,7 +203,7 @@ test('a same-id re-ask is read from the latest checkpoint', async () => {
     cancelPending: async (pendingRoute) => {
       cancelled.push(pendingRoute);
     },
-  }), 'cancelled_pending');
+  }), true);
   assert.deepEqual(cancelled, [reasked]);
 });
 
@@ -239,8 +220,7 @@ test('human review response validation runs before the route boundary guard', as
       type: 'human_review_response',
       requestId: 'req-1',
       interruptId: 'interrupt-1',
-      interactionId: 'review-stale',
-      selectedOptionId: 'approve',
+      responses: [{ interactionId: 'review-stale', selectedOptionId: 'approve' }],
     },
     recover: async () => route,
     emitClosed: () => undefined,
@@ -312,8 +292,7 @@ test('human review rejection queues the same checkpoint interruption as cancella
       type: 'human_review_response',
       requestId: 'req-1',
       interruptId: 'interrupt-1',
-      interactionId: 'review-1',
-      selectedOptionId: 'reject',
+      responses: [{ interactionId: 'review-1', selectedOptionId: 'reject' }],
     },
     recover: async () => route,
     emitClosed: () => undefined,
@@ -346,7 +325,11 @@ test('a fatal run failure leaves checkpoint authority available for a later retr
   let runs = 0;
 
   const resolve = () => resolvePendingHumanReviewInterrupt({
-    message: { type: 'review.cancel', requestId: 'req-1' } as never,
+    message: {
+      type: 'review.cancel',
+      requestId: 'req-1',
+      interruptId: 'interrupt-1',
+    },
     recover: async () => route,
     emitClosed: () => {},
     emitEvent: () => {},
@@ -367,7 +350,11 @@ test('a recoverable run failure re-reads the pending interrupt on retry', async 
   let runs = 0;
 
   const resolve = () => resolvePendingHumanReviewInterrupt({
-    message: { type: 'review.cancel', requestId: 'req-1' } as never,
+    message: {
+      type: 'review.cancel',
+      requestId: 'req-1',
+      interruptId: 'interrupt-1',
+    },
     recover: async () => route,
     emitClosed: () => {},
     emitEvent: () => {},

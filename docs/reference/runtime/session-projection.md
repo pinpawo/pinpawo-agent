@@ -91,6 +91,10 @@ client-local interaction state and are not part of the shared snapshot.
 `PendingInterrupt` contains the checkpoint-derived `interruptId` and a typed
 payload. A human-review payload contains ordered public interactions; it does
 not contain command progress or runtime decisions/effects.
+The surrounding `pending_interrupt` run view may temporarily carry an optional
+`requestId` after the client submits response/cancel so resumed transport events
+have an owner. A snapshot restored only from checkpoint authority may omit it.
+That correlation value is not part of `PendingInterrupt` identity.
 
 Delegation continuation is checkpoint-owned rather than inferred from a
 particular client's review-cancellation history. Continuation availability is

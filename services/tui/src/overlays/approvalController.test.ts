@@ -25,12 +25,12 @@ test('approval controller keeps the one-shot resolution gate after a wait timeou
     ok: true,
     status: 'advanced',
     decision: firstDecision,
-    decisions: [firstDecision],
+    responses: [firstDecision],
   }, {
     ok: true,
     status: 'sent',
     decision: secondDecision,
-    decisions: [firstDecision, secondDecision],
+    responses: [firstDecision, secondDecision],
   });
   const timers: Array<{
     callback: () => void;
@@ -99,7 +99,7 @@ test('approval controller preserves the one-shot resolution gate when connection
     ok: true,
     status: 'sent',
     decision,
-    decisions: [decision],
+    responses: [decision],
   });
   const cleared: ReturnType<typeof setTimeout>[] = [];
   const controller = new ApprovalController({
@@ -133,8 +133,7 @@ test('approval controller sends canonical cancellation for the pending interrupt
   controller.handle('cancel');
 
   assert.deepEqual(sessionController.cancelCalls, [{
-    requestId: 'request-1',
-    interruptId: 'action-1',
+    interruptId: 'pendingInterrupt-1',
   }]);
   assert.equal(controller.getState().phase, 'resolution-sent');
   controller.markInterruptSent();
@@ -174,7 +173,7 @@ function waitingReview(
     requestId: 'request-1',
     state: 'pending_interrupt',
     pendingInterrupt: {
-      interruptId: 'action-1',
+      interruptId: 'pendingInterrupt-1',
       payload: { kind: 'human_review', interactions: reviews },
     },
   };

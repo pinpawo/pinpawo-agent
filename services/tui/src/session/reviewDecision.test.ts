@@ -4,10 +4,10 @@ import type { PendingInterruptProjection } from '@pinpawo/agent-session';
 import { prepareReviewDecision } from './reviewDecision';
 
 test('approved review batches advance without sending until the final review', () => {
-  const action = reviewAction();
+  const pendingInterrupt = reviewAction();
   const first = prepareReviewDecision({
-    action,
-    decisions: [],
+    pendingInterrupt,
+    responses: [],
     optionId: 'approve',
   });
   assert.equal(first.ok, true);
@@ -15,8 +15,8 @@ test('approved review batches advance without sending until the final review', (
   assert.equal(first.shouldSend, false);
 
   const second = prepareReviewDecision({
-    action,
-    decisions: first.decisions,
+    pendingInterrupt,
+    responses: first.responses,
     optionId: 'approve',
   });
   assert.equal(second.ok, true);
@@ -25,18 +25,18 @@ test('approved review batches advance without sending until the final review', (
 });
 
 test('review decision preparation validates required input and stale drafts', () => {
-  const action = reviewAction();
+  const pendingInterrupt = reviewAction();
   assert.deepEqual(prepareReviewDecision({
-    action,
-    decisions: [],
+    pendingInterrupt,
+    responses: [],
     optionId: 'comment',
   }), {
     ok: false,
     reason: 'input-required',
   });
   assert.deepEqual(prepareReviewDecision({
-    action,
-    decisions: [{
+    pendingInterrupt,
+    responses: [{
       interactionId: 'wrong-review',
       selectedOptionId: 'approve',
     }],
@@ -49,7 +49,7 @@ test('review decision preparation validates required input and stale drafts', ()
 
 function reviewAction(): PendingInterruptProjection {
   return {
-    interruptId: 'review-action',
+    interruptId: 'review-pendingInterrupt',
     payload: {
       kind: 'human_review',
       interactions: ['review-1', 'review-2'].map((id) => ({

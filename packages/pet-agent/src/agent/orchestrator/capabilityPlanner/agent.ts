@@ -99,7 +99,7 @@ function plannerTasksSchema() {
 
 /**
  * Terminal tools serialize an already-made decision. Their descriptions define
- * only the commit shape; the system prompt is the single owner of action policy.
+ * the commit shape and structural affordances, not planning policy.
  */
 function createPlannerTerminalTools(): StructuredTool[] {
   const continueCurrent = tool(

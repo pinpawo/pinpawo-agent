@@ -648,6 +648,56 @@ test('Planner return routes bounded facts through the answer node', async () => 
   assert.equal(state.taskActiveDelegation, null);
 });
 
+test('Planner non-commit routes to Answer without inventing a General delegation', async () => {
+  let answerInvocationText = '';
+  let plannerCalls = 0;
+  const model = {
+    invoke: async (messages: BaseMessage[]) => {
+      answerInvocationText = messages.map(readMessageText).join('\n');
+      return new AIMessage('规划没有形成可执行计划，请重新发起这个请求。');
+    },
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+  } as unknown as AgentModels['act'];
+  const graph = createOrchestratorGraph({
+    models: {
+      act: model,
+      observe: model,
+      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
+    },
+    actor: testActor,
+    capabilityPlannerRunner: {
+      async invoke() {
+        plannerCalls += 1;
+        return {
+          plannerStatus: 'incomplete',
+          reason: 'terminal_commit_missing',
+        };
+      },
+    },
+  });
+
+  const state = await graph.invoke(buildOrchestratorRunInput([
+    new HumanMessage('修改当前仓库的 Planner 行为'),
+  ]), {
+    configurable: {
+      thread_id: 'planner-non-commit-routes-answer',
+      actor: testActor,
+      capabilities: [capability('general', 'General-purpose capability.')],
+      toolkits: [],
+    },
+  }) as OrchestratorStateType;
+
+  assert.equal(plannerCalls, 1);
+  assert.match(String(mainConversationMessages(state.messages).at(-1)?.content ?? ''), /规划没有形成/);
+  assert.match(answerInvocationText, /<reply_mode>blocked<\/reply_mode>/);
+  assert.match(answerInvocationText, /<blocked_reason meaning="[^"]+">planner_incomplete<\/blocked_reason>/);
+  assert.equal(state.runNextDelegation, null);
+  assert.equal(state.taskActiveDelegation, null);
+  assert.equal(state.runDelegationSummaries.length, 0);
+});
+
 test('capability planner reports an empty compiled registry without inventing General', async () => {
   let plannerMode: CapabilityPlannerInput['mode'] | null = null;
   let plannerCapabilityNames: readonly string[] = [];

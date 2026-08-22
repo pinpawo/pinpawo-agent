@@ -224,6 +224,18 @@ export function selectAnswerContextFacts(params: {
       detail: null,
     };
   }
+  if (params.state.runLatestDelegationOutcome === 'planner_incomplete') {
+    return {
+      mode: 'blocked',
+      hasUserRequest,
+      acceptedResults: params.acceptedResults,
+      reason: 'planner_incomplete',
+      unfinishedTask: params.state.taskActiveDelegation?.task
+        ?? params.state.runUserRequest
+        ?? null,
+      detail: null,
+    };
+  }
 
   const activeDelegation = params.state.taskActiveDelegation;
   if (activeDelegation && params.state.runIterationCount >= params.runIterationLimit) {

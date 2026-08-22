@@ -1,11 +1,15 @@
 import { tool } from '@langchain/core/tools';
-import { AIMessage } from '@langchain/core/messages';
+import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { createCapabilityPlannerAgent } from '../../src/agent/orchestrator/capabilityPlanner/agent.ts';
-import type { CapabilityPlannerResult } from '../../src/agent/orchestrator/capabilityPlanner/runner.ts';
+import { CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME } from '../../src/agent/orchestrator/capabilityPlanner/fileExplorer.ts';
+import {
+  isCapabilityPlannerIncompleteResult,
+  type CapabilityPlannerResult,
+} from '../../src/agent/orchestrator/capabilityPlanner/runner.ts';
 import { materializeCapabilityDocumentWorkspace } from '../../src/agent/orchestrator/capabilityPlanner/documentWorkspace.ts';
 import { compileAgentRegistry } from '../../src/agent/orchestrator/registry.ts';
 import {
@@ -63,6 +67,14 @@ function capabilityFromRegistryEntry(entry: string): AgentCapability {
 function plannerOutput(
   result: CapabilityPlannerResult,
 ): CapabilityPlanningEvalOutput {
+  if (isCapabilityPlannerIncompleteResult(result)) {
+    return {
+      result: 'planner_incomplete',
+      nextTask: null,
+      capabilityName: null,
+      remainingPlan: [],
+    };
+  }
   if (result.action !== 'execute_plan'
     && result.action !== 'advance_plan'
     && result.action !== 'continue_current') {
@@ -80,6 +92,80 @@ function plannerOutput(
     capabilityName: nextTask?.capability ?? null,
     remainingPlan: remainingPlan.map((task) => ({ ...task })),
   };
+}
+
+function plannerDiagnostics(result: CapabilityPlannerResult) {
+  const searchCallIds = new Set(
+    result.messageUpdates?.flatMap((message) =>
+      ToolMessage.isInstance(message)
+      && message.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME
+      ? [message.tool_call_id]
+      : []) ?? [],
+  );
+  const searchRounds = result.messageUpdates?.filter((message) =>
+    AIMessage.isInstance(message)
+    && message.tool_calls?.some((toolCall) =>
+      toolCall.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME))
+    .length ?? 0;
+  const searchQueries = result.messageUpdates?.flatMap((message) =>
+    AIMessage.isInstance(message)
+      ? message.tool_calls?.flatMap((toolCall) =>
+          toolCall.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME
+            ? [{
+                toolCallId: toolCall.id ?? null,
+                terms: toolCall.args && typeof toolCall.args === 'object'
+                  && 'terms' in toolCall.args && Array.isArray(toolCall.args.terms)
+                  ? toolCall.args.terms.filter((term): term is string => typeof term === 'string')
+                  : [],
+              }]
+            : []) ?? []
+      : []) ?? [];
+  const searchResults = result.messageUpdates?.flatMap((message) => {
+    if (!ToolMessage.isInstance(message)
+      || message.name !== CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME
+      || typeof message.content !== 'string') {
+      return [];
+    }
+    try {
+      const payload = JSON.parse(message.content) as {
+        data?: { matches?: Array<{ path?: unknown }> };
+        exploration?: {
+          specificCandidates?: unknown;
+          defaultCandidateRole?: unknown;
+        };
+      };
+      return [{
+        toolCallId: message.tool_call_id,
+        matchedPaths: Array.isArray(payload.data?.matches)
+          ? payload.data.matches.flatMap(({ path }) => typeof path === 'string' ? [path] : [])
+          : [],
+        specificCandidates: Array.isArray(payload.exploration?.specificCandidates)
+          ? payload.exploration.specificCandidates.filter(
+              (candidate): candidate is string => typeof candidate === 'string',
+            )
+          : [],
+        defaultCandidateRole: typeof payload.exploration?.defaultCandidateRole === 'string'
+          ? payload.exploration.defaultCandidateRole
+          : null,
+      }];
+    } catch {
+      return [{
+        toolCallId: message.tool_call_id,
+        matchedPaths: [],
+        specificCandidates: [],
+        defaultCandidateRole: null,
+      }];
+    }
+  }) ?? [];
+  return {
+    searchCalls: searchCallIds.size,
+    searchRounds,
+    searchQueries,
+    searchResults,
+    plannerStatus: isCapabilityPlannerIncompleteResult(result)
+      ? result.plannerStatus
+      : 'committed',
+  } as const;
 }
 
 function splitList(value: string | undefined): string[] {
@@ -165,7 +251,8 @@ async function main() {
               ? {
                   delegationId: 'eval-delegation',
                   transcriptRunId: `eval:${testCase.id}`,
-                  capability: testCase.input.remainingPlan?.[0]?.capability
+                  capability: testCase.input.activeCapability
+                    ?? testCase.input.remainingPlan?.[0]?.capability
                     ?? workspace.capabilityNames[0]
                     ?? 'unavailable',
                   task: testCase.input.activeTask ?? 'Evaluate the current task.',
@@ -192,6 +279,7 @@ async function main() {
           },
         );
         const output = plannerOutput(result);
+        const diagnostics = plannerDiagnostics(result);
         const evaluation = await evaluateCapabilityPlanningOutput({
           input: testCase.input,
           expected: testCase.expected,
@@ -219,6 +307,7 @@ async function main() {
             testCase,
             output: {
               ...output,
+              ...diagnostics,
               evaluationSummary: evaluation.evaluationSummary,
             },
             scores: evaluation.scores,
@@ -233,11 +322,15 @@ async function main() {
         }
         console.log(
           `[${ok ? 'PASS' : 'FAIL'}] ${testCase.name}: `
+          + `search_calls=${diagnostics.searchCalls.toString()} `
+          + `search_rounds=${diagnostics.searchRounds.toString()} `
+          + `planner_status=${diagnostics.plannerStatus} `
           + evaluation.scores.map(({ key, score }) => `${key}=${score}`).join(' '),
         );
         if (!ok && showFailureDetails) {
           console.log(JSON.stringify({
             output,
+            diagnostics,
             evaluationSummary: evaluation.evaluationSummary,
           }, null, 2));
         }

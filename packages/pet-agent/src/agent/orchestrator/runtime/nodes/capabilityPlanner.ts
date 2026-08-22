@@ -11,6 +11,7 @@ import {
   type CapabilityPlannerInput,
   type CapabilityPlannerRuntimeState,
   type CapabilityPlannerRunner,
+  isCapabilityPlannerIncompleteResult,
 } from '../../capabilityPlanner/runner';
 import {
   parsePlannerCommit,
@@ -236,6 +237,9 @@ function createDefaultPlannerRunner(config: OrchestratorConfig): CapabilityPlann
   return createCapabilityPlannerAgent({
     model: config.models.act,
     registryBackend: config.capabilityRegistryBackend ?? 'filesystem',
+    ...(config.capabilityPlannerMaxSearchRounds !== undefined
+      ? { maxSearchRounds: config.capabilityPlannerMaxSearchRounds }
+      : {}),
   });
 }
 
@@ -345,6 +349,26 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
     });
     const { input, state } = buildPlannerInput({ nodeInput, workspace });
     const result = await runner.invoke(input, runnableConfig);
+    const plannerMessageUpdates = [...(result.messageUpdates ?? [])];
+    // A non-commit is not a model terminal action: do not invent General, do
+    // not fabricate a ToolMessage, and do not accept an active delegation.
+    // Root owns the truthful fallback route to Answer.
+    if (isCapabilityPlannerIncompleteResult(result)) {
+      const includeIncompletePlannerMessages = <T extends object>(update: T) => ({
+        ...update,
+        ...(input.mode === 'entry' ? { runUserRequest: state.runUserRequest } : {}),
+        ...(plannerMessageUpdates.length > 0 ? { messages: plannerMessageUpdates } : {}),
+      });
+      return new Command({
+        update: includeIncompletePlannerMessages({
+          runNextDelegation: null,
+          runCapabilityPlan: [],
+          runLatestDelegationOutcome: 'planner_incomplete' as const,
+          runRuntimeFailure: null,
+        }),
+        goto: 'answer',
+      });
+    }
     // CapabilityPlannerRunner is an injectable seam: config.capabilityPlannerRunner
     // may be a scripted or third-party implementation that never ran the agent's
     // own validation. This re-parse is the root's trust boundary, not a duplicate
@@ -357,7 +381,6 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
         allowedCapabilityNames: workspace.capabilityNames,
       },
     );
-    const plannerMessageUpdates = [...(result.messageUpdates ?? [])];
     // On entry the goal reaching this node came from plan_request, resolved by
     // Entry Answer against the whole conversation. Its Command.PARENT update is
     // overwritten when the entryAnswer subgraph writes its own channels back, so

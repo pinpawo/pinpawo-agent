@@ -232,6 +232,8 @@ Planner 只做语义判断并提交 commit。graph 必须确定性地负责：
 - `tasks.length >= 1`；
 - graph 必须先接受当前 announce、构造 handoff 并完成当前 delegation；
 - graph materialize `tasks[0]`，其余 tasks 写入公开 committed plan；
+- 默认保持此前 committed remaining plan 不变；accepted handoff 已直接提供给后续执行方，不因新增细节或措辞优化而重写 task；
+- 只有最新 accepted result 证明原计划已不再必要、不可执行，或不足以正确覆盖用户目标时才允许修改；必要修改只涉及受影响的最少 tasks，未受影响的 tail 原样保留；
 - 下一项 task 可以选择不同的 Capability；
 - Planner 不得用它掩盖当前 task 的缺口。
 
@@ -363,11 +365,21 @@ message metadata，作为 lane 的生命周期身份；调用方不管理 Planne
 checkpoint namespace。Planner agent 在 orchestrator 构建时创建一次，但每次 invocation
 从 root messages 重新选择上下文并以 stateless adapter 运行。
 
-Capability discovery 的调用预算使用标准 `toolCallLimitMiddleware` 按单次 Planner input
-限制，不再定义自有的并行 reducer/counter，计数和并行批次裁剪交给 middleware 的内置
-run state。若 effective workspace 包含 `general`，runtime 必须在模型首次决策前读取经过
+Capability discovery 使用显式的有限披露阶段，不使用 retry middleware 或 tool-call counter：
+Planner input 默认最多允许两个搜索模型轮次，可由 `capabilityPlannerMaxSearchRounds` 配置；同一
+模型回复中的并行 `capability_search` 属于一个候选批次，只计一个轮次。每次 ToolMessage 都返回
+`roundsUsed`、`remainingRounds` 和 open/closed 状态；候选足够时模型应立即终结，不必耗尽轮次。
+达到上限后下一次 model call 动态移除 search，只绑定 terminal tools 并要求必须调用工具。
+若 effective workspace 包含 `general`，runtime 必须在模型首次决策前读取经过
 workspace 校验的完整 General 文档，并只把它注入当前 Planner invocation，作为不依赖字面搜索的
-默认候选。`capability_search` 只负责发现更具体的 Capability，不返回 `fallback` 字段。Planner 在提交
+兜底候选。`capability_search` 只负责发现更具体的 Capability；每个 ToolMessage 会列出具体候选，
+并将 General 标记为 `fallback_only`。任何具体候选能执行当前 task 时必须优先选择最贴合者；只有
+全部具体候选都不适用时 General 才重新具备选择资格，不能用它吞并调查、修改等自然任务边界。
+字面命中本身不提高优先级：完整文档必须以正向职责覆盖仍待完成的 task，命中禁止或限制说明的
+候选不适用。首轮字面搜索无结果时，ToolMessage 返回有界的具体 Capability 名称目录；仍有披露
+轮次时 General 标记为 deferred，模型可用精确名称在下一轮读取完整文档。Boundary 的目录排除
+active Capability，既避免按名称重复已完成工作，也保留最新结果新揭示的其他执行方。
+ToolMessage 只表达选择优先级，不替 root 生成 fallback commit。Planner 在提交
 `report_unavailable` 前必须先评估默认 General；它能执行当前工作时应选择它。显式受限 workspace
 可以没有 General，此时只有全部可见 Capability 都不能执行时才能提交 `unavailable`。
 

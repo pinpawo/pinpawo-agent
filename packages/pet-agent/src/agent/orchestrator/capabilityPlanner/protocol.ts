@@ -17,6 +17,9 @@ export type PlannerReplyOutcome = Extract<
   'goal_done' | 'user_input_required' | 'unavailable'
 >;
 
+/** Root-owned terminal route outcomes, including Planner protocol failures. */
+export type PlannerRouteOutcome = PlannerReplyOutcome | 'planner_incomplete';
+
 /** Deterministic root-visible failure metadata; never produced by a model. */
 export type OrchestratorRuntimeFailure =
   | 'checkpoint_incompatible';

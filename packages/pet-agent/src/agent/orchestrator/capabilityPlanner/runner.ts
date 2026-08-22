@@ -58,10 +58,28 @@ export type CapabilityPlannerInput = CapabilityPlannerInputBase & {
   readonly mode: CapabilityPlannerMode;
 };
 
-export type CapabilityPlannerResult = PlannerCommit & {
+export type CapabilityPlannerCommitResult = PlannerCommit & {
   /** Planner-lane updates to merge into the root orchestrator messages. */
   readonly messageUpdates?: readonly BaseMessage[];
 };
+
+/** A Planner turn ended without a valid terminal control action. */
+export type CapabilityPlannerIncompleteResult = {
+  readonly plannerStatus: 'incomplete';
+  readonly reason: 'terminal_commit_missing';
+  /** Authentic Planner-lane updates to merge into the root orchestrator messages. */
+  readonly messageUpdates?: readonly BaseMessage[];
+};
+
+export type CapabilityPlannerResult =
+  | CapabilityPlannerCommitResult
+  | CapabilityPlannerIncompleteResult;
+
+export function isCapabilityPlannerIncompleteResult(
+  result: CapabilityPlannerResult,
+): result is CapabilityPlannerIncompleteResult {
+  return 'plannerStatus' in result && result.plannerStatus === 'incomplete';
+}
 
 /**
  * Typed graph seam for the framework-internal Capability Planner.

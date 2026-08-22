@@ -11,7 +11,6 @@
  * reverse-define domain models.
  */
 import {
-  type AgentCapability,
   type AgentToolkit,
   type CapabilityArtifactStore,
   type ToolkitRuntimeDiagnostic,
@@ -21,8 +20,12 @@ import {
   createBrowserCapability,
   createBrowserToolkit,
 } from '@pinpawo-toolkit/browser';
+import { FileCapabilityArtifactStore } from './capabilityArtifactStore';
+import {
+  createCapabilityCreatorCapability,
+  createCapabilityCreatorToolkit,
+} from './capabilities/capabilityCreator';
 import { loadPlugins } from './pluginLoader';
-import type { LoadedUserCapability } from './capabilityLoader';
 import {
   buildLocalModelProfileRegistry,
   type LocalModelProfileRegistry,
@@ -30,9 +33,9 @@ import {
 import { LOCAL_ACTOR_ID, LOCAL_ACTOR_NAME } from './actorSelection';
 import { loadStoredConfig, saveStoredConfig } from './storage';
 import {
-  createCoreLocalCapabilities,
-  LocalAgentCapabilityRegistry,
-} from './localAgentCapabilityRegistry';
+  createHostBaselineCapabilities,
+} from './hostCapabilityCatalog';
+import { HostCapabilityCatalog } from './hostCapabilityCatalog';
 import {
   findLegacyLocalAgentState,
   type LocalAgentRuntimeConfig,
@@ -107,7 +110,8 @@ export class HostCapabilityAssembly {
   private modelProfiles: LocalModelProfileRegistry | null = null;
   private readonly toolkitCoordinator = new HostToolkitCoordinator();
   private readonly hostBuiltInToolkits: readonly AgentToolkit[];
-  private readonly capabilityRegistry: LocalAgentCapabilityRegistry;
+  private readonly capabilityCatalog: HostCapabilityCatalog;
+  private readonly capabilityArtifactStore: FileCapabilityArtifactStore;
   private readonly checkpointer: FileSaver;
   private writerLeaseHeld = false;
   private initialized = false;
@@ -122,20 +126,24 @@ export class HostCapabilityAssembly {
     this.hostBuiltInToolkits = [
       createBashToolkit(),
       createGitToolkit(),
+      createCapabilityCreatorToolkit(),
       ...(browserSelected
         ? [createBrowserToolkit({ backend: () => getConfig().browserBackend })]
         : []),
     ];
-    this.capabilityRegistry = new LocalAgentCapabilityRegistry({
-      capabilityArtifactRoot: this.runtimeConfig.capabilityArtifactRoot,
+    this.capabilityCatalog = new HostCapabilityCatalog({
       ...(options.loadUserCapabilities === false
-        ? { loadUserCapabilities: async () => [] }
+        ? { loadConfiguredCapabilities: async () => [] }
         : {}),
-      createDefaultCapabilities: () => [
-        ...createCoreLocalCapabilities(),
+      createHostCapabilities: () => [
+        ...createHostBaselineCapabilities(),
+        createCapabilityCreatorCapability(),
         ...(browserSelected ? [createBrowserCapability()] : []),
       ],
     });
+    this.capabilityArtifactStore = new FileCapabilityArtifactStore(
+      this.runtimeConfig.capabilityArtifactRoot,
+    );
     this.checkpointer = new FileSaver(
       options.checkpointPath ?? this.runtimeConfig.checkpointPath,
     );
@@ -199,6 +207,10 @@ export class HostCapabilityAssembly {
     }
     const { toolkitSources } = await loadPlugins();
     this.modelProfiles = buildLocalModelProfileRegistry();
+    // Validate Capability sources before starting any Toolkit Runtime roots.
+    // A configured name collision must fail without acquiring dynamic
+    // resources or leaving a dirty Runtime manager behind.
+    await this.capabilityCatalog.load();
     await this.toolkitCoordinator.initialize([
       ...toolkitSources,
       ...options.toolkitSources,
@@ -208,7 +220,6 @@ export class HostCapabilityAssembly {
         definitions: this.hostBuiltInToolkits,
       },
     ]);
-    await this.capabilityRegistry.load();
     this.actorId = LOCAL_ACTOR_ID;
     this.actorName = LOCAL_ACTOR_NAME;
   }
@@ -242,24 +253,16 @@ export class HostCapabilityAssembly {
     return this.toolkitCoordinator.getInventoryStore();
   }
 
-  getLocalCapabilities(): AgentCapability[] {
-    return this.capabilityRegistry.getLocalCapabilities();
+  getCapabilityCatalog(): HostCapabilityCatalog {
+    return this.capabilityCatalog;
   }
 
   getCapabilityArtifactStore(): CapabilityArtifactStore {
-    return this.capabilityRegistry.getCapabilityArtifactStore();
+    return this.capabilityArtifactStore;
   }
 
   async deleteThreadArtifacts(threadId: string): Promise<void> {
-    await this.capabilityRegistry.deleteThreadArtifacts(threadId);
-  }
-
-  getUserCapabilities(): LoadedUserCapability[] {
-    return this.capabilityRegistry.getUserCapabilities();
-  }
-
-  async rescanUserCapabilities(): Promise<LoadedUserCapability[]> {
-    return this.capabilityRegistry.rescanUserCapabilities();
+    await this.capabilityArtifactStore.deleteThreadArtifacts(threadId);
   }
 
   getActorId(): string {

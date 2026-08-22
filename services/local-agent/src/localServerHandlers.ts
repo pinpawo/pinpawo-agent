@@ -774,7 +774,6 @@ export function createLocalServerHandlers(
         loadSnapshot,
         listSessions,
         resumeSession,
-        updateExtensions: (patch) => runtimeDeps.updateExtensions(patch),
       });
     },
   };

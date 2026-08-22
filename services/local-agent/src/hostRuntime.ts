@@ -9,6 +9,10 @@
 export { buildLocalAgentModels, resolveLlmGenerationReserveTokens } from './agentModels';
 export { createExploreCapability } from './capabilities/explore/index';
 export { loadCapabilityDirectory } from './capabilityLoader';
+export { HostCapabilityCatalog } from './hostCapabilityCatalog';
+export type {
+  CapabilityCatalogSnapshot,
+} from './hostCapabilityCatalog';
 export { FileSaver } from './fileSaver';
 export { HostCapabilityAssembly } from './hostCapabilityAssembly';
 export type {

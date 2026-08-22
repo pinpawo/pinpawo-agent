@@ -5,7 +5,6 @@ const DEFAULT_TIMEOUT_MS = 1_500;
 
 export type LocalHostMetadata = {
   localAgentVersion: string | null;
-  capabilities: string[];
 };
 
 type FetchLike = (
@@ -27,7 +26,6 @@ export async function loadLocalHostMetadata(
   if (!token) {
     return {
       localAgentVersion: null,
-      capabilities: [],
     };
   }
 
@@ -46,17 +44,13 @@ export async function loadLocalHostMetadata(
   } satisfies RequestInit;
 
   try {
-    const [runtime, capabilities] = await Promise.allSettled([
+    const [runtime] = await Promise.allSettled([
       fetchJson(fetcher, `http://127.0.0.1:${port}/runtime`, init),
-      fetchJson(fetcher, `http://127.0.0.1:${port}/capabilities`, init),
     ]);
     return {
       localAgentVersion: runtime.status === 'fulfilled'
         ? readOptionalString(runtime.value, 'local_agent_version')
         : null,
-      capabilities: capabilities.status === 'fulfilled'
-        ? readLoadedCapabilityNames(capabilities.value)
-        : [],
     };
   } finally {
     clearTimeout(timeout);
@@ -73,36 +67,6 @@ async function fetchJson(
     throw new Error(`local-agent metadata request failed (${response.status})`);
   }
   return response.json();
-}
-
-function readLoadedCapabilityNames(value: unknown) {
-  if (!isRecord(value)) return [];
-  const candidates = [
-    { id: 'general', enabled: true, loaded: true },
-    ...readRecordArray(value.builtIns),
-    ...readRecordArray(value.userCapabilities),
-  ];
-  const names: string[] = [];
-  const seen = new Set<string>();
-  for (const candidate of candidates) {
-    const id = readOptionalString(candidate, 'id');
-    if (
-      !id
-      || candidate.enabled !== true
-      || candidate.loaded !== true
-      || candidate.comingSoon === true
-      || seen.has(id)
-    ) {
-      continue;
-    }
-    seen.add(id);
-    names.push(id);
-  }
-  return names;
-}
-
-function readRecordArray(value: unknown) {
-  return Array.isArray(value) ? value.filter(isRecord) : [];
 }
 
 function readOptionalString(

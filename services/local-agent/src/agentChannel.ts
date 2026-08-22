@@ -2,7 +2,6 @@ import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messa
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
-  GENERAL_CAPABILITY_NAME,
   stampMessageCreatedAtUtc,
   type AgentCapability,
   type AgentInvokeInput,
@@ -14,11 +13,6 @@ import {
   type OrchestrationDecisionStructuredOutputConfig,
   type ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
-import {
-  createCapabilityCreatorCapability,
-  createCapabilityCreatorToolkit,
-} from './capabilities/capabilityCreator';
-import { createExploreCapability } from './capabilities/explore';
 import { createPetProfileToolkit } from './toolkits/petProfile';
 import {
   buildLocalAgentModels,
@@ -28,9 +22,7 @@ import type { AgentLlmConfig } from './agentConfig';
 import type { AgentContext } from './contextLoader';
 import { buildLocalLlmConfig } from './llmConfig';
 import { getConfig } from './config';
-import { loadStoredConfig } from './storage';
 import { buildRuntimeEnvironmentSummary } from './runtimeEnvironment';
-import type { LoadedUserCapability } from './capabilityLoader';
 import {
   buildLocalAgentInterfaceContext,
   type LocalAgentInterfaceContext,
@@ -74,17 +66,6 @@ function buildHistoryMessages(
     });
 }
 
-/**
- * Check whether a built-in capability is enabled in config.
- * Returns true if the key is absent (default-on) or explicitly set to true.
- */
-function isCapabilityEnabled(id: string): boolean {
-  const config = loadStoredConfig();
-  const caps = config.capabilities;
-  if (!caps || !(id in caps)) return true; // default enabled
-  return caps[id] === true;
-}
-
 export type AgentChannelSetup = {
   graphKey: string;
   graphConfig: OrchestratorConfig;
@@ -97,16 +78,6 @@ function buildGraphKey(parts: Array<string | null | undefined>) {
   return parts
     .map((part) => (part == null || part === '' ? '_' : part))
     .join(':');
-}
-
-function appendCapability(
-  capabilities: AgentCapability[],
-  capability: AgentCapability,
-) {
-  if (capabilities.some((item) => item.name === capability.name)) {
-    return;
-  }
-  capabilities.push(capability);
 }
 
 export function buildDecisionStructuredOutput(
@@ -148,10 +119,8 @@ export function buildLocalChatAgentInput(params: {
   threadId: string;
   interfaceKind?: LocalAgentInterfaceKind | null;
   checkpoint?: BaseCheckpointSaver;
-  /** Host-provided baseline and optional default Capabilities. */
-  extraCapabilities?: AgentCapability[];
-  /** User-defined capability plugins loaded by capabilityLoader */
-  userCapabilities?: LoadedUserCapability[];
+  /** Already-resolved Capability snapshot supplied by the Host catalog. */
+  capabilities?: readonly AgentCapability[];
   /** Store handed to capabilities so they can deterministically persist result artifacts */
   capabilityArtifactStore: CapabilityArtifactStore;
   /** Effective agent workdir for prompt context and relative tool paths. */
@@ -186,31 +155,7 @@ export function buildLocalChatAgentInput(params: {
     }),
   ];
 
-  const capabilities: AgentCapability[] = [];
-
-  if (isCapabilityEnabled('explore')) {
-    appendCapability(capabilities, createExploreCapability());
-  }
-
-  if (isCapabilityEnabled('capability_creator')) {
-    appendCapability(capabilities, createCapabilityCreatorCapability());
-    invocationToolkits.push(createCapabilityCreatorToolkit());
-  }
-
-  for (const capability of params.extraCapabilities ?? []) {
-    appendCapability(capabilities, capability);
-  }
-
-  // Append user-defined capabilities (enabled state checked against their manifest id)
-  for (const { meta, capability } of params.userCapabilities ?? []) {
-    if (!isCapabilityEnabled(meta.id)) continue;
-    if (capability.name === GENERAL_CAPABILITY_NAME) {
-      throw new Error(
-        `Capability name "${GENERAL_CAPABILITY_NAME}" is reserved by the local-agent host`,
-      );
-    }
-    appendCapability(capabilities, capability);
-  }
+  const capabilities = [...(params.capabilities ?? [])];
   const baseToolkits = [
     ...invocationToolkits,
     ...(params.toolkits ?? []),

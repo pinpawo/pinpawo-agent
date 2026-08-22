@@ -74,7 +74,7 @@ async function loadConfigHelpers() {
   return import('./config');
 }
 
-test('importing config does not require a model profile until config is read', () => {
+test('importing config does not require a model profile until configuration is read', () => {
   const home = mkdtempSync(resolve(tmpdir(), 'pinpawo-config-import-home-'));
   const output = execFileSync(process.execPath, [
     '--import',
@@ -92,6 +92,8 @@ test('importing config does not require a model profile until config is read', (
       LLM_API_KEY: '',
       LLM_BASE_URL: '',
       LLM_MODEL: '',
+      LLM_MODEL_PRESET: '',
+      PINPAWO_MODEL_PROFILE: '',
     },
     encoding: 'utf8',
   });

@@ -46,7 +46,7 @@
     "test:unit": "node --import tsx --test $(find src -name '*.test.ts' | sort)",
     "eval:hitl": "node --env-file=.env --import tsx/esm evals/hitl-resume.eval.ts",
     "eval:apply-patch": "LANGCHAIN_TRACING_V2=false node --import tsx/esm evals/apply-patch-protocol.eval.ts",
-    "build": "npm run build -w @pinpawo-toolkit/browser && tsup && node --import tsx/esm scripts/gen-manifest.ts && node --import tsx/esm scripts/copy-browser-host.ts && npm run build:distribution -w @pinpawo/tui",
+    "build": "npm run build -w @pinpawo-toolkit/browser && tsup && node --import tsx/esm scripts/copy-browser-host.ts && npm run build:distribution -w @pinpawo/tui",
     "typecheck": "tsc --noEmit",
     "pack:dry": "npm run build && npm pack --dry-run",
     "prepublishOnly": "npm run typecheck && npm run test:unit && npm run build && npm run test:distribution -w @pinpawo/tui"

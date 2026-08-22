@@ -15,6 +15,11 @@ import {
   type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 import { FileCapabilityArtifactStore } from './capabilityArtifactStore';
+import {
+  createCapabilityCreatorCapability,
+  createCapabilityCreatorToolkit,
+} from './capabilities/capabilityCreator';
+import { createExploreCapability } from './capabilities/explore';
 import { loadGeneralCapability } from './capabilities/general';
 import { createBashToolkit, createGitToolkit } from './toolkits/local';
 import { createTestModelProfileRegistry } from './testing/modelProfiles';
@@ -70,16 +75,18 @@ function buildTestLocalChatAgentInput(
   params: Omit<LocalChatAgentInputParams, 'threadId' | 'capabilityArtifactStore'>
     & Partial<Pick<LocalChatAgentInputParams, 'threadId' | 'capabilityArtifactStore'>>,
 ) {
-  const { extraCapabilities, ...rest } = params;
+  const { capabilities, toolkits, ...rest } = params;
   const general = loadGeneralCapability();
   return buildLocalChatAgentInput({
     threadId: 'agent-channel-test-thread',
     capabilityArtifactStore: testArtifactStore,
     ...rest,
-    extraCapabilities: [
+    capabilities: [
       ...(general ? [general] : []),
-      ...(extraCapabilities ?? []),
+      createCapabilityCreatorCapability(),
+      ...(capabilities ?? []),
     ],
+    toolkits: [createCapabilityCreatorToolkit(), ...(toolkits ?? [])],
   });
 }
 
@@ -180,7 +187,7 @@ test('buildLocalChatAgentInput keeps the General Capability permission boundary 
   );
 });
 
-test('buildLocalChatAgentInput dedupes built-in capabilities by name', () => {
+test('buildLocalChatAgentInput consumes the Host-resolved Capability snapshot', () => {
   const extraExplore: AgentCapability = {
     name: 'explore',
     description: 'extra explore capability',
@@ -193,7 +200,7 @@ test('buildLocalChatAgentInput dedupes built-in capabilities by name', () => {
   const setup = buildTestLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
-    extraCapabilities: [extraExplore],
+    capabilities: [extraExplore],
   });
 
   const capabilities = setup.input.capabilities ?? [];
@@ -399,6 +406,7 @@ test('buildLocalChatAgentInput registers artifact discovery for an empty thread'
     threadId: 'thread/with space',
     capabilityArtifactStore: store,
     toolkits: [createBashToolkit(), createGitToolkit()],
+    capabilities: [createExploreCapability()],
   });
   const toolkit = setup.input.toolkits?.find(({ name }) => name === 'artifact_discovery');
 

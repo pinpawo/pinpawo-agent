@@ -561,9 +561,9 @@ invocation 实际结算后才进入 graph；checkpoint 不参与这项互斥。
 `ToolDefinition` 同时绑定 tool、operation metadata 和 review policy。
 Capability 只通过静态 `uses` 获取工具，不再存在 capability-private toolset 或
 direct tools 注入。用户 Capability 使用 `CAPABILITY.md`，编码动作由已注册
-Toolkit 提供。runtime 的 local Toolkit/Capability loading 与 rescan state 收敛到
-`LocalAgentCapabilityRegistry`，实际可路由性以 compiled registry 及其
-diagnostics 为准。
+Toolkit 提供。`HostCapabilityCatalog` 收敛 Chat 的 configured source、Studio Pet 的
+目录 source、冲突校验和启用选择；实际可路由性以 compiled registry 及其 diagnostics
+为准。
 
 目标：让 local-machine Toolkits 和 Capability 管理可维护。
 

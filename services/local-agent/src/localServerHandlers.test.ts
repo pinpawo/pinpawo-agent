@@ -23,14 +23,15 @@ import type { LocalServerDeps } from './localServerTypes';
 import { HostToolkitInventoryStore } from './toolkits/toolkitInventory';
 
 function createLocalServerHandlers(
-  deps: Omit<LocalServerDeps, 'toolkitInventory'> & Partial<Pick<
+  deps: Omit<LocalServerDeps, 'toolkitInventory' | 'capabilityCatalog'> & Partial<Pick<
     LocalServerDeps,
-    'toolkitInventory'
+    'toolkitInventory' | 'capabilityCatalog'
   >>,
   options?: Parameters<typeof createProductionLocalServerHandlers>[1],
 ) {
   return createProductionLocalServerHandlers({
     toolkitInventory: new HostToolkitInventoryStore(),
+    capabilityCatalog: createTestModelServerDeps().capabilityCatalog,
     ...deps,
   }, options);
 }

@@ -15,7 +15,7 @@ import {
   statSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { delimiter, isAbsolute, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   CAPABILITY_DOCUMENT_FILE_NAME,
@@ -23,7 +23,6 @@ import {
   defineCapability,
   defineCapabilityDocumentSource,
   defineInstructionDocument,
-  GENERAL_CAPABILITY_NAME,
   parseCapabilityDocument,
   type AgentCapability,
   type CapabilityDocumentFrontmatter,
@@ -39,8 +38,13 @@ export const CAPABILITY_DOCUMENT_MAX_BYTES = CORE_CAPABILITY_DOCUMENT_MAX_BYTES;
 type CapabilityFrontmatter = CapabilityDocumentFrontmatter;
 
 export type LoadedCapability = {
-  meta: CapabilityMeta;
   capability: AgentCapability;
+  activation: Readonly<{
+    id: string;
+    defaultEnabled: boolean;
+  }>;
+  /** Stable diagnostic identity for the definition that produced this entry. */
+  sourceId: string;
 };
 
 /** Global user-registry compatibility name. */
@@ -71,7 +75,7 @@ function isDirectoryEntry(root: string, entryName: string): boolean {
 }
 
 export function resolveCapabilityDirs(): string[] {
-  const fromEnv = process.env.PINPAWO_CAPABILITY_DIRS?.split(':').filter(Boolean) ?? [];
+  const fromEnv = process.env.PINPAWO_CAPABILITY_DIRS?.split(delimiter).filter(Boolean) ?? [];
   const fromStored = loadStoredConfig().capability_dirs ?? [];
   const all = [
     DEFAULT_CAPABILITIES_DIR,
@@ -138,14 +142,6 @@ function toMeta(frontmatter: CapabilityFrontmatter): CapabilityMeta {
   };
 }
 
-function validateUserCapabilityName(name: string, path: string) {
-  if (name === GENERAL_CAPABILITY_NAME) {
-    throw new Error(
-      `${path}: Capability name "${GENERAL_CAPABILITY_NAME}" is reserved by the local-agent host`,
-    );
-  }
-}
-
 export async function validateCapabilityPlugin(
   rootDir: string,
 ): Promise<CapabilityPluginValidationResult> {
@@ -169,7 +165,6 @@ export async function validateCapabilityPlugin(
   try {
     const source = readFileSync(capabilityPath, 'utf8');
     const { frontmatter, body } = parseFrontmatterDocument(source, capabilityPath);
-    validateUserCapabilityName(frontmatter.name, capabilityPath);
     const lifecycle = frontmatter.entry
       ? await loadFinalizeLifecycle(
         result.entryPath = resolveContainedEntry(dir, frontmatter.entry),
@@ -199,7 +194,6 @@ export async function validateCapabilityPlugin(
 
 async function loadCapabilitiesFromDir(
   dir: string,
-  seenIds: Set<string>,
 ): Promise<LoadedUserCapability[]> {
   if (!existsSync(dir)) return [];
   const entries = readdirSync(dir, { withFileTypes: true })
@@ -217,14 +211,13 @@ async function loadCapabilitiesFromDir(
       }
       continue;
     }
-    if (seenIds.has(validation.meta.id)) {
-      console.warn(`[capabilities] duplicate capability id "${validation.meta.id}" in ${dir} — skipped`);
-      continue;
-    }
-    seenIds.add(validation.meta.id);
     loaded.push({
-      meta: validation.meta,
       capability: validation.capability,
+      activation: {
+        id: validation.meta.id,
+        defaultEnabled: validation.meta.defaultEnabled,
+      },
+      sourceId: validation.capabilityPath,
     });
   }
   return loaded;
@@ -270,8 +263,12 @@ export async function loadCapabilityDirectory(
     }
     seenIds.add(validation.meta.id);
     loaded.push({
-      meta: validation.meta,
       capability: validation.capability,
+      activation: {
+        id: validation.meta.id,
+        defaultEnabled: validation.meta.defaultEnabled,
+      },
+      sourceId: validation.capabilityPath,
     });
   }
 
@@ -295,10 +292,11 @@ function warnLegacyCapabilityDirectory(dir: string, name: string) {
 }
 
 export async function loadUserCapabilities(): Promise<LoadedUserCapability[]> {
-  const seenIds = new Set<string>();
   const loaded: LoadedUserCapability[] = [];
   for (const dir of resolveCapabilityDirs()) {
-    loaded.push(...await loadCapabilitiesFromDir(dir, seenIds));
+    // Preserve duplicates across configured roots. The Host catalog owns the
+    // collision policy and needs every definition plus its source identity.
+    loaded.push(...await loadCapabilitiesFromDir(dir));
   }
   return loaded;
 }
@@ -322,7 +320,6 @@ export function readUserCapabilityManifests(): CapabilityMeta[] {
           readFileSync(capabilityPath, 'utf8'),
           capabilityPath,
         );
-        validateUserCapabilityName(frontmatter.name, capabilityPath);
         if (seenIds.has(frontmatter.name)) continue;
         seenIds.add(frontmatter.name);
         metas.push(toMeta(frontmatter));

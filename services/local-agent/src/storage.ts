@@ -42,7 +42,7 @@ export type StoredConfig = {
    * Additional directories to scan for user-defined capability plugins,
    * appended to the default ~/.pinpawo/capabilities/ path.
    * Supports ~ expansion.  Also readable via PINPAWO_CAPABILITY_DIRS env var
-   * (colon-separated).
+   * (platform path-delimiter-separated).
    */
   capability_dirs?: string[];
 };

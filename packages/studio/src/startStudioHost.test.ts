@@ -17,8 +17,10 @@ function fakeAssembly(events: string[]): HostCapabilityAssembly {
     shutdown: async () => { events.push('caps:shutdown'); },
     getRuntimeConfig: () => runtimeConfig,
     getModelProfiles: () => ({}) as never,
-    getLocalCapabilities: () => [],
-    getUserCapabilities: () => [],
+    getCapabilityCatalog: () => ({
+      getSnapshot: () => ({ capabilities: [{ name: 'general' }] }),
+      createDirectorySnapshot: async () => ({ capabilities: [{ name: 'general' }] }),
+    }),
     getToolkitInventoryStore: () => ({
       getSnapshot: () => ({ effectiveToolkits: [] }),
     }) as never,

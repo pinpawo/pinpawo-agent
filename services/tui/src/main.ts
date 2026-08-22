@@ -176,7 +176,6 @@ const port = readLocalServerPort();
 const hostMetadata: LocalHostMetadata = launchOptions.useDemoConnection
   ? {
       localAgentVersion: 'demo',
-      capabilities: ['general', 'explore', 'browser'],
     }
   : await loadLocalHostMetadata({ port });
 const renderer = await createCliRenderer({

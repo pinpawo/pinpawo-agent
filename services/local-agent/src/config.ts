@@ -201,14 +201,23 @@ function readConfigDefaults(): Config {
   });
 }
 
+let defaultConfig: Config | null = null;
 let currentConfig: Config | null = null;
 
+function getDefaultConfig(): Config {
+  defaultConfig ??= readConfigDefaults();
+  return defaultConfig;
+}
+
 export function getConfig(): Config {
-  currentConfig ??= readConfigDefaults();
+  currentConfig ??= getDefaultConfig();
   return currentConfig;
 }
 
-export function buildConfig(input: ConfigInput = {}, defaults: Config = getConfig()): Config {
+export function buildConfig(
+  input: ConfigInput = {},
+  defaults: Config = getDefaultConfig(),
+): Config {
   return freezeConfig({
     ...defaults,
     ...input,

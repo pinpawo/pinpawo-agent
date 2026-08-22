@@ -49,7 +49,10 @@ entry: ./index.js
 
 未知字段、重复 `uses`、越界或 symlink 逃逸的 entry、空或超大 Markdown body 都会被拒绝。
 
-`general` 是 local-agent host 的保留名，用户 Capability 不能注册该名称。
+目录 loader 只校验通用 Capability 协议，不知道具体 Host 的保留名。Host Capability
+Catalog 在把来源合并为同一个 Agent snapshot 时拒绝重名的定义；不会依赖下游静默
+覆盖来决定优先级。`pinpawo capability install` 面向 Chat Host，因此会在复制前额外
+拒绝 Chat Host 已拥有的名称；这项限制不进入通用目录 validator。
 
 ## 3. 可选代码入口
 

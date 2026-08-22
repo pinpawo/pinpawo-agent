@@ -11,6 +11,7 @@ import {
 } from '@pinpawo/pet-agent';
 import {
   buildLocalAgentRuntimeConfig,
+  loadCapabilityDirectory,
   type HostCapabilityAssembly,
   type HostCapabilityAssemblyInitOptions,
 } from 'pinpawo/host-runtime';
@@ -37,18 +38,35 @@ function fakeCapabilityAssembly(
   } = {},
 ): HostCapabilityAssembly {
   const runtimeConfig = buildLocalAgentRuntimeConfig('/tmp/pinpawo-studio-host-test');
+  const hostCapabilities = [agentCapability('general')];
+  let initialized = false;
+  const capabilityCatalog = {
+    getSnapshot: () => ({ capabilities: hostCapabilities }),
+    createDirectorySnapshot: async ({ rootDir }: { rootDir: string }) => {
+      if (!initialized) {
+        throw new Error('Pet capability snapshots require an initialized Host catalog');
+      }
+      const loaded = await loadCapabilityDirectory(rootDir);
+      return {
+        capabilities: [
+          ...hostCapabilities,
+          ...loaded.map(({ capability }) => capability),
+        ],
+      };
+    },
+  };
   return {
     acquireWriterLease: () => undefined,
     init: async (input = {}) => {
       events.push('caps:init');
       options.onInit?.(input);
       if (options.failInit) throw new Error('caps init failed');
+      initialized = true;
     },
     shutdown: async () => { events.push('caps:shutdown'); },
     getRuntimeConfig: () => runtimeConfig,
     getModelProfiles: () => ({}) as never,
-    getLocalCapabilities: () => [],
-    getUserCapabilities: () => [],
+    getCapabilityCatalog: () => capabilityCatalog,
     getToolkitInventoryStore: () => ({
       getSnapshot: () => ({ effectiveToolkits: [] }),
     }) as never,
@@ -241,7 +259,6 @@ test('StudioHost loads each Pet Capability collection from its conventional dire
   const events: string[] = [];
   const general = agentCapability('general');
   const assembly = fakeCapabilityAssembly(events);
-  assembly.getLocalCapabilities = () => [general, agentCapability('explore')];
   const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-host-capabilities-'));
   const petsDir = path.join(root, '.pinpawo', 'pets');
   const capabilityDir = path.join(

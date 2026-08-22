@@ -77,20 +77,12 @@ export class LocalAgentHost {
     return this.caps.getToolkitInventoryStore();
   }
 
-  getLocalCapabilities() {
-    return this.caps.getLocalCapabilities();
+  getCapabilityCatalog() {
+    return this.caps.getCapabilityCatalog();
   }
 
   getCapabilityArtifactStore() {
     return this.caps.getCapabilityArtifactStore();
-  }
-
-  getUserCapabilities() {
-    return this.caps.getUserCapabilities();
-  }
-
-  async rescanUserCapabilities() {
-    return this.caps.rescanUserCapabilities();
   }
 
   getActorId(): string {
@@ -116,10 +108,8 @@ export class LocalAgentHost {
       runtimeConfig: this.getRuntimeConfig(),
       toolkitInventory: this.getToolkitInventoryStore(),
       toolkitRuntimeManager: this.getToolkitRuntimeManager(),
-      localCapabilities: this.getLocalCapabilities(),
-      userCapabilities: this.getUserCapabilities(),
+      capabilityCatalog: this.getCapabilityCatalog(),
       capabilityArtifactStore: this.getCapabilityArtifactStore(),
-      rescanUserCapabilities: () => this.rescanUserCapabilities(),
     };
   }
 

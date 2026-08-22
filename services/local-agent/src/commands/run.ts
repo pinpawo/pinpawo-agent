@@ -80,10 +80,8 @@ export async function runAgent(options: RunAgentOptions) {
       runtimeConfig,
       toolkitInventory: runtime.getToolkitInventoryStore(),
       toolkitRuntimeManager: runtime.getToolkitRuntimeManager(),
-      localCapabilities: runtime.getLocalCapabilities(),
-      userCapabilities: runtime.getUserCapabilities(),
+      capabilityCatalog: runtime.getCapabilityCatalog(),
       capabilityArtifactStore: runtime.getCapabilityArtifactStore(),
-      rescanUserCapabilities: () => runtime!.rescanUserCapabilities(),
     };
 
     if (stopping) {

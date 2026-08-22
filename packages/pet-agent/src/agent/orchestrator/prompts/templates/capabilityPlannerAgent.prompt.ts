@@ -16,7 +16,7 @@ const PLANNER_WORKSPACE_CONTRACT = `Capability 选择规则：
 2. capability_search 返回匹配项的完整文档和 exploration 状态。字面命中不等于可执行；只根据文档的正向职责判断候选能否交付当前 task。
 3. 有具体 Capability 能完整交付当前 task 时，选择最贴合的一个；不得因为 General 覆盖更广而改选 General。
 4. 没有具体候选适用时，如果 General 的文档能交付当前 task，使用 General；General 也不能交付时，调用 report_unavailable。
-5. <capability_search_state> 是当前搜索控制状态：status="open" 时可以搜索但不要求用完轮次；status="closed" 时不得继续搜索，必须立即调用一个终结工具。`;
+5. system prompt 末尾给出 capability_search 当前状态：OPEN 时可以搜索但不要求用完轮次；CLOSED 时不得继续搜索，必须立即调用一个终结工具。`;
 
 /** How a task is written. The executing Capability owns method; the task owns intent. */
 const PLANNER_TASK_SHAPE = `- 同一 Capability 能连续完成的修改、核验和交付组成一个 task；

@@ -1218,7 +1218,10 @@ test('Planner does not retry ordinary text after the second search round closes'
   if (!('plannerStatus' in result)) assert.fail('expected an incomplete Planner result');
   assert.equal(result.plannerStatus, 'incomplete');
   assert.equal(model.invocations.length, 3);
-  assert.match(readMessageText(model.invocations[2]?.[0] as BaseMessage), /status="closed"/);
+  assert.match(
+    readMessageText(model.invocations[2]?.[0] as BaseMessage),
+    /capability_search 当前状态：CLOSED；已使用 2 轮；剩余 0 轮。/,
+  );
   assert.equal(model.boundToolNameHistory[2]?.includes(
     CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
   ), false);

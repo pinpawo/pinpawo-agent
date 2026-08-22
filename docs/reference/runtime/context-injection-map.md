@@ -101,7 +101,7 @@ Two modes, same node, different context. Sources:
 
 | Slot | Class | Entry mode | Boundary mode |
 |---|---|---|---|
-| system | `RUN-STABLE` / `INSTRUCTION` | entry prompt + `<default_capability>` + `<capability_search_state />` | boundary prompt + `<default_capability>` + `<capability_search_state />` |
+| system | `RUN-STABLE` / `INSTRUCTION` | entry prompt + `<default_capability>` + search state | boundary prompt + `<default_capability>` + search state |
 | history | `DYNAMIC` / `HISTORY` | planner lane + main conversation up to current request | planner lane + main conversation + **the active delegation lane** |
 | input | `DYNAMIC` / `FACT` | `<run_user_request>` | same + `继续规划所需事实：<planning_state>` |
 
@@ -114,9 +114,9 @@ immutable workspace, not of this turn: it is identical for every call against th
 same registry. Rendering it beside `<run_user_request>` mixed a run-stable fact
 into the one block that changes every turn.
 
-`<capability_search_state />` is regenerated for each Planner model call. It is a
-data-only control snapshot; the system prompt owns the rules for interpreting its
-open or closed status.
+The plain-text `capability_search` state is regenerated for each Planner model
+call. It is a data-only control snapshot; the system prompt owns the rules for
+interpreting its OPEN or CLOSED status.
 
 The planner's own transcript (its inputs, `capability_search` observations and
 terminal commits) is persisted in root `messages` under the `orchestrator` lane,

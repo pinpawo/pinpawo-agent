@@ -8,11 +8,13 @@
 > [`createStudio.ts`](../../packages/studio/src/createStudio.ts).
 
 Studio is a plugboard between Plugins and resident Pet runtimes. It provides a
-typed dispatch channel and a separate generic event bus:
+typed dispatch channel, a separate generic event bus, and an opaque composition
+channel for installed Plugins:
 
 ```text
 Plugin ── dispatch(input) ──> Studio ── serialized invocation ──> Pet thread
 Plugin ── notify(event)  ──> Studio ── fan-out ────────────────> Plugins
+Plugin ── contribute ──────> Plugin-owned hook (Studio only matches lifecycle)
 ```
 
 Studio does not define task schemas, dependencies, scheduling, retries, or
@@ -132,6 +134,13 @@ Studio starts Plugins in order and stops them in reverse. A startup failure
 rolls back the started prefix. `listPets()` returns descriptors, never runtime
 references, so Plugin-originated work stays on the shared dispatch boundary.
 
+Plugin hooks do not replace events. Events announce runtime facts; hooks compose
+installed functionality. Hook values are owned and typed by the provider. Studio
+only connects `targetPluginName + hookName`, supports either start order, and
+removes contributions when either Plugin stops. This lets an HTTP Plugin expose
+route registration while a Kanban Plugin contributes its own route, without
+making HTTP depend on Kanban or putting HTTP types in Studio core.
+
 ## Boundary checklist
 
 | Studio | Plugin, Pet runtime, or Host |
@@ -140,6 +149,7 @@ references, so Plugin-originated work stays on the shared dispatch boundary.
 | Stable Pet thread and per-Pet invocation serialization | Checkpoint interpretation and resume command |
 | Invocation identity and live observation | Interaction UI, authorization, durable pending index |
 | Opaque event fan-out | Event meaning and durable delivery |
+| Opaque Plugin hook matching and cleanup | Hook value, route schema, contributed behavior |
 | Plugin lifecycle | Plugin state and persistence |
 
 Current deliberate limits include in-memory invocation queues and idempotency

@@ -19,6 +19,7 @@ import type {
   StudioPlugin,
   StudioPluginContext,
 } from '@pinpawo/studio';
+import type { StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 
 import { KanbanBoard, type KanbanTask } from './kanbanBoard';
 import type { KanbanStateStore } from './kanbanStateStore';
@@ -130,6 +131,11 @@ export type CreateKanbanPluginOptions = {
   board?: KanbanBoard;
   /** Optional Plugin-owned durable state. Studio does not select or interpret it. */
   stateStore?: KanbanStateStore;
+  /** Optional reverse contribution into an installed Studio HTTP Plugin. */
+  httpRoute?: false | {
+    pluginName?: string;
+    path?: string;
+  };
 };
 
 export type KanbanPlugin = StudioPlugin & { board: KanbanBoard };
@@ -152,6 +158,7 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
   const stateStore = options.stateStore;
   let context: StudioPluginContext | undefined;
   let unsubscribe: (() => void) | undefined;
+  let unsubscribeHttpRoute: (() => void) | undefined;
   let persistenceTail = Promise.resolve();
   let persistenceError: Error | undefined;
   let dispatchRequested = false;
@@ -281,6 +288,18 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
         await stateStore.save(board.snapshot());
       }
       context = pluginContext;
+      const httpRoute = options.httpRoute;
+      if (httpRoute !== false) {
+        unsubscribeHttpRoute = pluginContext.hooks.contribute<StudioHttpRoutesHook>(
+          httpRoute?.pluginName ?? 'http',
+          'routes',
+          (routes) => routes.register({
+            method: 'GET',
+            path: httpRoute?.path ?? '/kanban',
+            handle: () => ({ kind: 'json', body: board.snapshot() }),
+          }),
+        );
+      }
       dispatchEnabled = true;
       unsubscribe = board.subscribe((task) => {
         pluginContext.notify({
@@ -299,6 +318,8 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
       await dispatchLoop;
       await Promise.allSettled([...activeDispatches]);
       await persistenceTail;
+      unsubscribeHttpRoute?.();
+      unsubscribeHttpRoute = undefined;
       unsubscribe?.();
       unsubscribe = undefined;
       context = undefined;

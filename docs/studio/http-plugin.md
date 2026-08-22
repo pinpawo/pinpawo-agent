@@ -4,8 +4,9 @@
 
 `@pinpawo-plugin/studio-http` is an optional zero-Toolkit Studio Plugin. It
 provides a loopback HTTP dispatch endpoint and a live SSE projection of the
-Studio Plugin event bus. It does not serve a web page and is not the Studio
-Host WebSocket/stdio transport.
+Studio Plugin event bus. It does not bundle a domain page, but exposes a route
+hook through which another Plugin may contribute one. It is not the Studio Host
+WebSocket/stdio transport.
 
 ## Assembly
 
@@ -54,6 +55,17 @@ explicitly supplies it; the Plugin creates no HTTP-, frontend-, or Kanban-specif
 correlation field.
 Invalid JSON/dispatch shapes return `400`, unsupported media returns `415`, and
 a Studio dispatch rejection returns `422`.
+
+## Plugin-contributed routes
+
+The HTTP Plugin exposes a lifecycle-managed `routes` hook. Other installed
+Plugins can contribute HTTP handlers without the HTTP Plugin importing their
+domain. Every contributed route passes through the same Bearer authentication
+and Origin policy; `/dispatch` and `/events` remain reserved.
+
+When the Kanban Plugin is also installed, it contributes `GET /kanban`, which
+returns its current board snapshot. Kanban still starts normally without HTTP,
+and Plugin start order does not affect hook attachment.
 
 ## Live events over SSE
 

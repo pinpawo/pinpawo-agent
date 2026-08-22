@@ -114,6 +114,12 @@ The application chooses an absolute path such as
 that path nor reads the snapshot. Without a state store, the same Plugin remains
 an explicitly in-memory instance.
 
+Installed Plugins may compose through the opaque `StudioPluginContext.hooks`
+broker. Studio only matches Plugin and hook names and owns lifecycle cleanup; it
+does not import or interpret extension contracts. The HTTP Plugin exposes a
+`routes` hook, while Kanban optionally contributes its `/kanban` snapshot route.
+Kanban remains valid when HTTP is absent, and HTTP never depends on Kanban.
+
 The Host first calls `resolveStudioHostConfig()` to read files and resolve Plugins,
 then initializes its unified Toolkit inventory, and finally calls `buildStudio()`
 to build pet runtime adapters and the filesystem-independent `createStudio()` core.

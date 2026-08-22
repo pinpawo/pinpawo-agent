@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 import {
   createServer,
   type IncomingMessage,
+  type IncomingHttpHeaders,
   type Server,
   type ServerResponse,
 } from 'node:http';
@@ -17,6 +18,30 @@ const LOOPBACK_HOST = '127.0.0.1' as const;
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 const DEFAULT_MAX_EVENT_CLIENTS = 100;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
+export const STUDIO_HTTP_ROUTES_HOOK_NAME = 'routes';
+const RESERVED_ROUTE_PATHS = new Set(['/dispatch', '/events']);
+
+export type StudioHttpRouteRequest = {
+  readonly url: URL;
+  readonly headers: Readonly<IncomingHttpHeaders>;
+  readJson: () => Promise<unknown>;
+};
+
+export type StudioHttpRouteResult =
+  | { kind: 'json'; body: unknown; status?: number }
+  | { kind: 'text'; body: string; contentType?: string; status?: number };
+
+export type StudioHttpRoute = {
+  method: string;
+  path: string;
+  handle: (
+    request: StudioHttpRouteRequest,
+  ) => StudioHttpRouteResult | Promise<StudioHttpRouteResult>;
+};
+
+export type StudioHttpRoutesHook = {
+  register: (route: StudioHttpRoute) => () => void;
+};
 
 export type StudioHttpPluginAddress = {
   readonly host: typeof LOOPBACK_HOST;
@@ -122,13 +147,65 @@ function applyCorsHeaders(response: ServerResponse, origin: string | undefined):
 
 function sendJson(response: ServerResponse, status: number, value: unknown): void {
   if (response.headersSent) return;
-  const body = `${JSON.stringify(value)}\n`;
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) throw new Error('Studio HTTP JSON response is not serializable.');
+  const body = `${serialized}\n`;
   applyCommonHeaders(response);
   response.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Content-Length': Buffer.byteLength(body),
   });
   response.end(body);
+}
+
+function sendText(
+  response: ServerResponse,
+  status: number,
+  body: string,
+  contentType = 'text/plain; charset=utf-8',
+): void {
+  if (response.headersSent) return;
+  applyCommonHeaders(response);
+  response.writeHead(status, {
+    'Content-Type': contentType,
+    'Content-Length': Buffer.byteLength(body),
+  });
+  response.end(body);
+}
+
+function readRouteStatus(status: number | undefined): number {
+  if (status === undefined) return 200;
+  if (!Number.isSafeInteger(status) || status < 200 || status > 599) {
+    throw new Error('Studio HTTP route status must be an integer from 200 to 599.');
+  }
+  return status;
+}
+
+function normalizeRoute(route: StudioHttpRoute): StudioHttpRoute {
+  const method = route.method.trim().toUpperCase();
+  if (method !== 'GET' && method !== 'POST') {
+    throw new Error('Studio HTTP route method must be GET or POST.');
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(route.path, 'http://studio-http.local');
+  } catch {
+    throw new Error(`Studio HTTP route path is invalid: ${route.path}`);
+  }
+  if (
+    !route.path.startsWith('/')
+    || parsed.origin !== 'http://studio-http.local'
+    || parsed.pathname !== route.path
+    || parsed.search
+    || parsed.hash
+    || RESERVED_ROUTE_PATHS.has(parsed.pathname)
+  ) {
+    throw new Error(`Studio HTTP route must use an unreserved absolute path: ${route.path}`);
+  }
+  if (typeof route.handle !== 'function') {
+    throw new Error('Studio HTTP route must define handle().');
+  }
+  return { ...route, method, path: parsed.pathname };
 }
 
 async function readJsonBody(request: IncomingMessage, maxBytes: number): Promise<unknown> {
@@ -223,9 +300,23 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
   let currentAddress: StudioHttpPluginAddress | null = null;
   let unsubscribeEvents: (() => void) | undefined;
   let heartbeat: NodeJS.Timeout | undefined;
+  let unexposeRoutes: (() => void) | undefined;
   let started = false;
   let stopped = false;
   const eventClients = new Set<ServerResponse>();
+  const routes = new Map<string, StudioHttpRoute>();
+
+  const routesHook: StudioHttpRoutesHook = {
+    register: (input) => {
+      const route = normalizeRoute(input);
+      const key = `${route.method} ${route.path}`;
+      if (routes.has(key)) throw new Error(`Duplicate Studio HTTP route: ${key}`);
+      routes.set(key, route);
+      return () => {
+        if (routes.get(key) === route) routes.delete(key);
+      };
+    },
+  };
 
   function broadcastChunk(chunk: string): void {
     for (const client of eventClients) {
@@ -327,6 +418,36 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       return;
     }
 
+    const method = request.method ?? 'GET';
+    const route = routes.get(`${method} ${requestUrl.pathname}`);
+    if (route) {
+      let body: Promise<unknown> | undefined;
+      const result = await route.handle({
+        url: requestUrl,
+        headers: request.headers,
+        readJson: () => {
+          body ??= readJsonBody(request, maxBodyBytes);
+          return body;
+        },
+      });
+      const status = readRouteStatus(result.status);
+      if (result.kind === 'json') sendJson(response, status, result.body);
+      else if (result.kind === 'text') {
+        sendText(response, status, result.body, result.contentType);
+      } else {
+        throw new Error('Studio HTTP route returned an invalid result.');
+      }
+      return;
+    }
+    const allowedMethods = [...routes.values()]
+      .filter(({ path }) => path === requestUrl.pathname)
+      .map(({ method: routeMethod }) => routeMethod);
+    if (allowedMethods.length > 0) {
+      response.setHeader('Allow', [...new Set([...allowedMethods, 'OPTIONS'])].join(', '));
+      sendJson(response, 405, { error: 'Method not allowed.' });
+      return;
+    }
+
     sendJson(response, 404, { error: 'Not found.' });
   }
 
@@ -355,11 +476,17 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       nextServer.keepAliveTimeout = 5_000;
       server = nextServer;
       try {
+        unexposeRoutes = pluginContext.hooks.expose(
+          STUDIO_HTTP_ROUTES_HOOK_NAME,
+          routesHook,
+        );
         currentAddress = await listen(nextServer, options.port);
         unsubscribeEvents = pluginContext.subscribe(broadcastEvent);
         heartbeat = setInterval(() => broadcastChunk(': heartbeat\n\n'), heartbeatIntervalMs);
         heartbeat.unref();
       } catch (error) {
+        unexposeRoutes?.();
+        unexposeRoutes = undefined;
         context = undefined;
         currentAddress = null;
         await closeServer(nextServer).catch(() => undefined);
@@ -370,6 +497,9 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
     stop: async () => {
       if (stopped) return;
       stopped = true;
+      unexposeRoutes?.();
+      unexposeRoutes = undefined;
+      routes.clear();
       unsubscribeEvents?.();
       unsubscribeEvents = undefined;
       if (heartbeat) clearInterval(heartbeat);

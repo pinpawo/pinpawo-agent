@@ -177,7 +177,7 @@ const studio = await buildStudio({
 
 1. 建 pet registry(重复 petId、`entryPetId` 不在 `pets` 中都会报错);
 2. 依次 `await plugin.start(context)`,把 `dispatch` / `onInvocation` /
-   `notify` / `subscribe` / `listPets` 交给它;
+   `notify` / `subscribe` / `listPets` / `hooks` 交给它;
 3. 返回插板。
 
 **它是 `async` 的** —— 插件启动失败必须让调用方看见。一个没起来的驱动器
@@ -220,6 +220,11 @@ Plugin 的持久化状态仍由 Plugin 自己拥有。例如，应用 resolver �
 `<workdir>/.pinpawo/studio/<plugin-instance>/kanban.json` 这样的绝对路径。Studio
 既不推导该路径，也不读取 snapshot；没有注入 state store 时，同一个 Plugin 明确
 以纯内存方式运行。
+
+已安装 Plugin 可以通过不透明的 `StudioPluginContext.hooks` broker 进行装配。Studio
+只匹配 Plugin/hook 名称并托管生命周期清理，不 import 或解释扩展契约。HTTP Plugin
+暴露 `routes` hook，Kanban 可选地贡献 `/kanban` snapshot route。没有 HTTP 时 Kanban
+仍可独立运行，HTTP 也始终不依赖 Kanban。
 
 ---
 

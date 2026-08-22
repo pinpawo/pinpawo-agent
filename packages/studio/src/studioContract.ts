@@ -64,10 +64,28 @@ export type StudioEventInput = Omit<StudioEvent, 'source' | 'occurredAt'>;
 
 export type StudioEventHandler = (event: StudioEvent) => void | Promise<void>;
 
+export type StudioPluginHookInstaller<T> = (hook: T) => void | (() => void);
+
+/**
+ * Opaque Plugin-to-Plugin extension channel. Studio only matches provider,
+ * hook name, and lifecycle; it never interprets the hook value.
+ */
+export type StudioPluginHooks = {
+  /** Expose one hook owned by the current Plugin. */
+  expose: <T>(name: string, hook: T) => () => void;
+  /** Contribute when the named Plugin exposes the hook, in either start order. */
+  contribute: <T>(
+    targetPluginName: string,
+    hookName: string,
+    install: StudioPluginHookInstaller<T>,
+  ) => () => void;
+};
+
 /* ─────────────── 插件 ─────────────── */
 
 /**
- * 插件拿到的 studio 能力。它只能做两件事:派活、发通知。
+ * 插件拿到的 Studio 能力。dispatch/event 是运行通道；hooks 只负责在已安装
+ * Plugin 之间装配不透明扩展点，不承载领域事件或执行状态。
  */
 export type StudioPluginContext = {
   /** 派活。来源由 studio 补成本插件名,插件不需要(也无法)自报。 */
@@ -82,6 +100,7 @@ export type StudioPluginContext = {
   notify: (event: StudioEventInput) => void;
   subscribe: (handler: StudioEventHandler) => () => void;
   listPets: () => PetAgentRuntimeDescriptor[];
+  hooks: StudioPluginHooks;
 };
 
 /**

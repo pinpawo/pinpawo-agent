@@ -59,7 +59,8 @@ Kanban Plugin 已按独立草案拥有可选 durable state，并直接消费自�
 receipt；Studio core 没有增加 Kanban 状态或持久化接口。
 
 HTTP Plugin 已作为独立的零 Toolkit Plugin 提供 direct dispatch 与 live SSE event
-投射，见 [HTTP Plugin draft](http-plugin.md)。它不提供页面，也不替代 Studio Host
+投射，并暴露 route hook 供其他 Plugin 反向贡献页面或 API，见
+[HTTP Plugin draft](http-plugin.md)。它自身不内置领域页面，也不替代 Studio Host
 自己的 invocation transport。
 
 后续仍需分别设计：

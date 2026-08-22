@@ -122,5 +122,12 @@ Plugin 可以定义零个或多个 Toolkit。它们在 resident Pet 构建前进
 Capability 完全属于 Agent；Studio 与 Plugin 都不注册 Capability。Studio Host 根据
 Pet 约定目录加载 Capability，并由 `Capability.uses` 选择 Toolkit。
 
+`StudioPluginContext.hooks` 是不透明的 Plugin 间装配通道。提供方通过
+`expose(name, hook)` 暴露扩展点，贡献方通过
+`contribute(targetPluginName, hookName, install)` 反向注入。无论两者启动顺序如何，
+贡献都会在 hook 出现时挂载；任一方结束生命周期时自动卸载。Studio 只匹配身份并
+管理清理，不解释 hook 内容。例如 HTTP Plugin 暴露 `routes`，Kanban 可以贡献自己的
+board route，而 HTTP 不需要 import Kanban。
+
 更多运行时语义见[英文 Pet Runtime API](../../../reference/api/pet-runtime.md)，配置见
 [Studio 配置](../../studio/configuration.md)。

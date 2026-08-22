@@ -17,6 +17,7 @@ import {
   type StudioInvocationEventHandler,
 } from './studioInvocation';
 import type { PetAgentRuntime, PetAgentRuntimeDescriptor } from './types';
+import { StudioPluginHookRegistry } from './studioPluginHooks';
 
 export type CreateStudioInput = {
   studioId: string;
@@ -65,6 +66,7 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
   const queues = new Map<string, Promise<void>>();
   const activeInvocations = new Map<string, AbortController>();
   const idempotencyRecords = new Map<string, StudioDispatchReceipt>();
+  const pluginHooks = new StudioPluginHookRegistry();
   let stopped = false;
 
   function listPets(): PetAgentRuntimeDescriptor[] {
@@ -273,6 +275,7 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
       }),
       subscribe,
       listPets,
+      hooks: pluginHooks.contextFor(plugin.name),
     };
   }
 
@@ -292,6 +295,7 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
         );
       } finally {
         invocationHandlers.delete(plugin.name);
+        pluginHooks.releasePlugin(plugin.name);
       }
     }
     eventHandlers.clear();
@@ -316,6 +320,8 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
           `[studio] plugin "${plugin.name}" failed to roll back after startup failure:`,
           rollbackError instanceof Error ? rollbackError.message : rollbackError,
         );
+      } finally {
+        pluginHooks.releasePlugin(plugin.name);
       }
     }
     eventHandlers.clear();

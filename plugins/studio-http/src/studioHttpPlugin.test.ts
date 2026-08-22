@@ -51,6 +51,10 @@ function createContext(options: {
       return () => eventHandlers.delete(handler);
     },
     listPets: () => [],
+    hooks: {
+      expose: () => () => undefined,
+      contribute: () => () => undefined,
+    },
   };
   return {
     context,

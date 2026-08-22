@@ -1,6 +1,13 @@
-export { createStudioHttpPlugin } from './studioHttpPlugin';
+export {
+  createStudioHttpPlugin,
+  STUDIO_HTTP_ROUTES_HOOK_NAME,
+} from './studioHttpPlugin';
 export type {
   CreateStudioHttpPluginOptions,
+  StudioHttpRoute,
+  StudioHttpRouteRequest,
+  StudioHttpRouteResult,
+  StudioHttpRoutesHook,
   StudioHttpPlugin,
   StudioHttpPluginAddress,
 } from './studioHttpPlugin';

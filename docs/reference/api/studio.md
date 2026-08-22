@@ -161,6 +161,7 @@ type StudioPluginContext = {
   notify(event: StudioEventInput): void;
   subscribe(handler: StudioEventHandler): () => void;
   listPets(): PetAgentRuntimeDescriptor[];
+  hooks: StudioPluginHooks;
 };
 ```
 
@@ -182,6 +183,14 @@ type StudioInvocationEvent = {
 
 The callback is a live projection of the same result lifecycle. The durable
 source of interrupt existence remains the Pet checkpoint, not this callback.
+
+`hooks` is the opaque Plugin-to-Plugin composition channel. A provider calls
+`expose(name, hook)` and a contributor calls
+`contribute(targetPluginName, hookName, install)`. Contributions attach in
+either Plugin start order and are removed with either side's lifecycle. Studio
+matches identities and owns cleanup, but never interprets the hook value. For
+example, the HTTP Plugin exposes `routes`, and Kanban can contribute a board
+route without HTTP importing Kanban.
 
 If plugin startup fails, Studio calls `stop()` in reverse order for every
 plugin that may have started, including the plugin whose `start()` rejected.

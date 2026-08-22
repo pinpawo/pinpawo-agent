@@ -18,6 +18,8 @@ export type {
   StudioEventInput,
   StudioPlugin,
   StudioPluginContext,
+  StudioPluginHookInstaller,
+  StudioPluginHooks,
   StudioInvocationEvent,
   StudioInvocationEventHandler,
   StudioInvocationTerminalStatus,

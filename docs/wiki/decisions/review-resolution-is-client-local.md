@@ -49,15 +49,15 @@ below about a "client response" is limited to Chat/TUI.
 
 Sending a review resolution (response or cancel) is a one-shot client command.
 It does **not** change the checkpoint-derived `PendingInterrupt` or add command
-progress to it. The shared projection stays at `pending_interrupt` until a
-server event or snapshot provides the next fact. The only client-side progress
-is the TUI-local `ReviewDraft.resolutionSent` marker.
+progress to it. The shared `pendingInterrupt` remains unchanged until a server
+event or snapshot provides the next fact. The only client-side progress is the
+TUI-local approval `resolution-sent` phase.
 
-The `activeRun` envelope may temporarily bind its optional `requestId` to the
-accepted response/cancel command so later events from that resumed invocation
-can be correlated. That binding is transport ownership, not another interrupt
-identity or a `waiting/submitting/canceling` lifecycle; a checkpoint-restored
-pending interrupt can have no request owner.
+The accepted response/cancel command starts a new `activeRun` with a required
+`requestId`, so later events from that resumed invocation can be correlated.
+The old `pendingInterrupt` may coexist with that run until authoritative
+progress. This is transport ownership, not another interrupt identity or a
+`waiting/submitting/canceling` lifecycle.
 
 The shared `PendingInterrupt` projection therefore carries only `interruptId`
 and its presentation-safe payload—no `waiting | submitting | canceling` status.
@@ -84,8 +84,8 @@ resolution is not.
 ## Client-side gates the marker carries
 
 **Fact.** Between sending a resolution and the first server event, the shared
-projection still says `pending_interrupt`. The `resolutionSent` marker gates that
-window on the TUI side:
+projection contains both the old `pendingInterrupt` and the newly active
+invocation. The local `resolution-sent` phase gates that window on the TUI side:
 
 - a further interrupt request routes to `run.interrupt`, never `review.cancel`
   for the already-resolved action;
@@ -113,7 +113,8 @@ model call or handoff, and the active delegation lane remains resumable.
 
 **Decision (PR #485).** The TUI records `/continue` availability only if a
 review cancel that it sent later ends with the matching server-observed
-`interrupted`. This causal marker is separate from `ReviewDraft.resolutionSent`
+`interrupted`. This causal marker is separate from the approval
+`resolution-sent` phase
 and from the shared `PendingInterrupt`: the first controls a later command
 affordance, the second prevents duplicate submission, and the third remains the
 checkpoint-derived review fact. See the complete

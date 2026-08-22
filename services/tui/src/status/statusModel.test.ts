@@ -15,6 +15,7 @@ test('status model renders connection, model, token usage, context, and compact 
       kind: 'chat',
       timeline: [],
       activeRun: null,
+      pendingInterrupt: null,
       runtime: {
         model: 'gpt-test',
         modelProfileLabel: 'Primary coding',
@@ -61,6 +62,7 @@ test('composer placeholder acknowledges active work without blocking drafting', 
     kind: 'chat',
     timeline: [],
     activeRun: null,
+    pendingInterrupt: null,
   };
 
   assert.equal(
@@ -115,13 +117,10 @@ test('composer placeholder acknowledges active work without blocking drafting', 
   assert.equal(
     formatComposerPlaceholder({
       ...session,
-      activeRun: {
-        requestId: 'request',
-        state: 'pending_interrupt',
-        pendingInterrupt: {
-          interruptId: 'review-action',
-          payload: { kind: 'human_review', interactions: [] },
-        },
+      activeRun: null,
+      pendingInterrupt: {
+        interruptId: 'review-action',
+        payload: { kind: 'human_review', interactions: [] },
       },
     }),
     'Review required · use the approval panel',

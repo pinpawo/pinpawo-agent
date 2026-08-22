@@ -16,8 +16,12 @@ export function reconcileCompletionSnapshot(
     preserveOmittedTokenUsage: true,
     preserveOmittedSessionTokenUsage: true,
   });
-  if (live.activeRun || hasCanonicalOperationEntries(applied.timeline)) {
-    return live.activeRun
+  if (
+    live.activeRun
+    || live.pendingInterrupt
+    || hasCanonicalOperationEntries(applied.timeline)
+  ) {
+    return live.activeRun || live.pendingInterrupt
       ? mergeCompletionSnapshotMetadata(live, applied)
       : applied;
   }

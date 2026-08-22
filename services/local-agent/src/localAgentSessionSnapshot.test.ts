@@ -73,7 +73,7 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
     },
   });
 
-  assert.equal(snapshot.version, 4);
+  assert.equal(snapshot.version, 5);
   assert.equal(snapshot.session.sessionId, 'chat:pet-a');
   assert.deepEqual(snapshot.session.timeline.map((entry) => [entry.id, entry.type, entry.type === 'message' ? entry.role : '']), [
     ['message:0:user', 'message', 'user'],
@@ -91,11 +91,9 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
     'run-1',
   );
   assert.ok(parseAgentSessionSnapshot(JSON.parse(JSON.stringify(snapshot))));
-  assert.equal(snapshot.session.activeRun?.requestId, undefined);
-  assert.equal(snapshot.session.activeRun?.state, 'pending_interrupt');
-  if (snapshot.session.activeRun?.state !== 'pending_interrupt') assert.fail('expected pending interrupt');
+  assert.equal(snapshot.session.activeRun, null);
   assert.equal(
-    snapshot.session.activeRun.pendingInterrupt.payload.interactions[0]?.interactionId,
+    snapshot.session.pendingInterrupt?.payload.interactions[0]?.interactionId,
     'review-1',
   );
   assert.deepEqual(snapshot.session.currentPlan, {

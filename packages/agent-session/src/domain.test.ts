@@ -20,6 +20,7 @@ test('AgentSession snapshot owns one active run and one ordered timeline', () =>
         requestId: 'req-1',
       }],
       activeRun: null,
+      pendingInterrupt: null,
       runtime: { model: 'gpt-test' },
       tokenUsage: {
         inputTokens: 10,

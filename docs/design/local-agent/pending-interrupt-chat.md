@@ -99,9 +99,11 @@ Chat resolves the active thread from its active session. Therefore:
 - a Chat review response is not a Studio dispatch;
 - `requestId` correlates the protocol exchange but does not identify the
   checkpoint wait;
-- a checkpoint-restored `pending_interrupt` may have no `requestId`; after the
-  client sends a response or cancel, `activeRun.requestId` temporarily binds
-  the resulting transport events without changing `PendingInterrupt`;
+- `pendingInterrupt` and `activeRun` are independent projection facts: the wait
+  has no `requestId`, while every active invocation has one;
+- after the client sends a response or cancel, a new `activeRun` owns the
+  resulting transport events while the same `pendingInterrupt` remains visible
+  until authoritative runtime progress, another interrupt, or terminal state;
 - the handler reloads the active checkpoint for every resume attempt;
 - missing or mismatched `interruptId` is closed/stale without mutating state;
 - internal `ReviewSpec` decisions and effects are recovered from the checkpoint,

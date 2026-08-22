@@ -189,7 +189,10 @@ UI 不应该知道：
 后续实现需要统一这些术语：
 
 - `session`：local-agent 的一次聊天会话，对应一个 graph thread/checkpoint 上下文。它不是用户登录 session。
-- `request`：一次 agent run / turn 的请求，用 `requestId` 在 WebSocket event、TUI active run、graph thread/checkpoint 路由之间做关联。
+- `request`：一次 Chat transport command，对应一次 graph invocation；初始
+  turn、interrupt response 和 cancel 都各自有 `requestId`，用于关联该次
+  invocation 的 WebSocket event 与 TUI `activeRun`。它不标识 thread 或
+  checkpoint wait。
 - `review`：一次 pending human review 交互。一个 request 运行过程中可以顺序产生多个 review；任意时刻只有当前 pending review 的 `reviewId` 可以被接受。review 的完整 payload 由 LangGraph interrupt/checkpoint 持有，不作为普通业务 state 复制一份。
 - `decision`：graph/tool runtime resolve option 后得到的 human review 决策，用于处理当前 pending action。V1 只有 approve、reject、respond；edit 后续必须作为新的 canonical option/input 重新设计。
 - `effect`：选择某个 option 后，graph/tool runtime 需要额外应用的状态变更，例如“在当前 graph thread 授权当前 pending shell action”。effect 由 graph/tool runtime 根据 `selectedOptionId` 从 pending `ReviewSpec` 中解析出来；它不是 transport extras，也不是 tool input。

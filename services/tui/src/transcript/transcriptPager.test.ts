@@ -131,5 +131,6 @@ function createSession(
     },
     timeline,
     activeRun: null,
+    pendingInterrupt: null,
   };
 }

@@ -132,9 +132,10 @@ internal schema version.
   `continuesReviewBatch` field are rejected at this boundary.
 - Local inbound compatibility still accepts deprecated `reviewId` as an alias
   for `interactionId`; conflicting aliases are rejected.
-- `AgentSessionSnapshot` emits V4. Its parser accepts valid V3 checkpointed
-  internal review specs and projects them to public Human Review V2; malformed
-  legacy reviews are rejected rather than silently dropping or inventing state.
+- `AgentSessionSnapshot` emits V5. Its parser migrates V3 and V4 embedded review
+  waits into the separate `pendingInterrupt` field and projects valid legacy
+  internal review specs to public Human Review V2; malformed legacy reviews are
+  rejected rather than silently dropping or inventing state.
 
 The contract package supplies strict parsers for untrusted boundary values. A
 transport may add an envelope or disclosure policy, but it must not weaken or

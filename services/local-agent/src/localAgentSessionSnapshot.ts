@@ -49,11 +49,8 @@ export function buildLocalAgentSessionSnapshot(params: {
     sessionId: params.sessionId,
     kind: params.kind,
     timeline,
-    activeRun: pendingInterrupt
-      ? runFromPendingInterrupt({
-        pendingInterrupt,
-      })
-      : params.activeRun ?? null,
+    activeRun: params.activeRun ?? null,
+    pendingInterrupt: pendingInterrupt?.pendingInterrupt ?? null,
     ...(params.currentPlan !== undefined ? { currentPlan: params.currentPlan } : {}),
     runtime,
     ...(sessionTokenUsage ? { sessionTokenUsage } : {}),
@@ -133,13 +130,4 @@ function timelineFromCheckpointMessages(messages: TuiCheckpointMessage[]): Agent
       ...(message.createdAt ? { createdAt: message.createdAt } : {}),
     } satisfies AgentTimelineEntry];
   });
-}
-
-function runFromPendingInterrupt(params: {
-  pendingInterrupt: PendingInterruptSnapshot;
-}): AgentRunView {
-  return {
-    state: 'pending_interrupt',
-    pendingInterrupt: params.pendingInterrupt.pendingInterrupt,
-  };
 }

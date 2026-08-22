@@ -15,6 +15,7 @@ function createDomainSession(): AgentSession {
     kind: 'chat',
     timeline: [],
     activeRun: null,
+    pendingInterrupt: null,
     runtime: { contextWindow: 128_000 },
   };
 }
@@ -290,16 +291,15 @@ test('reduceSession keeps review and terminal control scoped to the owning run',
     },
   }, { observedAt: 1_100 });
 
-  assert.equal(session.activeRun?.state, 'pending_interrupt');
-  if (session.activeRun?.state !== 'pending_interrupt') assert.fail('expected pending interrupt');
-  assert.equal(session.activeRun.pendingInterrupt.interruptId, 'interrupt-1');
+  assert.equal(session.activeRun, null);
+  assert.equal(session.pendingInterrupt?.interruptId, 'interrupt-1');
   const unknownRun = reduceSession(session, {
     type: 'run.interrupting',
     requestId: 'req-other',
   }, { observedAt: 1_200 });
   assert.equal(unknownRun, session);
 
-  session = reduceSession(session, {
+  const staleProgress = reduceSession(session, {
     type: 'runtime.event',
     event: {
       type: 'operation',
@@ -311,16 +311,77 @@ test('reduceSession keeps review and terminal control scoped to the owning run',
       },
     },
   }, { observedAt: 1_200 });
+  assert.equal(staleProgress, session);
+
+  session = reduceSession(session, {
+    type: 'interrupt.resume.accepted',
+    requestId: 'req-resume',
+    interruptId: 'interrupt-1',
+  }, { observedAt: 1_250 });
+  assert.equal(session.activeRun?.requestId, 'req-resume');
+  assert.equal(session.pendingInterrupt?.interruptId, 'interrupt-1');
+
+  session = reduceSession(session, {
+    type: 'runtime.event',
+    event: {
+      type: 'operation',
+      requestId: 'req-resume',
+      phase: 'completed',
+      operation: {
+        id: 'tool-1',
+        kind: 'shell',
+      },
+    },
+  }, { observedAt: 1_300 });
   assert.equal(session.activeRun?.state, 'running');
   assert.equal(session.activeRun?.state === 'running' ? session.activeRun.activity : null, 'thinking');
-  assert.equal(session.activeRun && 'pendingInterrupt' in session.activeRun, false);
+  assert.equal(session.pendingInterrupt, null);
 
   session = reduceSession(session, {
     type: 'run.interrupting',
-    requestId: 'req-1',
-  }, { observedAt: 1_300 });
+    requestId: 'req-resume',
+  }, { observedAt: 1_400 });
   assert.equal(session.activeRun?.state, 'interrupting');
-  assert.equal(session.activeRun && 'pendingInterrupt' in session.activeRun, false);
+});
+
+test('a failed interrupt resume keeps the checkpoint wait retryable', () => {
+  let session = reduceSession(createDomainSession(), {
+    type: 'user.accepted',
+    requestId: 'req-initial',
+    kind: 'chat',
+    text: 'continue',
+  }, { observedAt: 1_000 });
+  session = reduceSession(session, {
+    type: 'runtime.event',
+    event: {
+      type: 'human_review.requested',
+      requestId: 'req-initial',
+      pendingInterrupt: {
+        interruptId: 'interrupt-retry',
+        payload: { kind: 'human_review', interactions: [] },
+      },
+    },
+  }, { observedAt: 1_100 });
+  session = reduceSession(session, {
+    type: 'interrupt.resume.accepted',
+    requestId: 'req-resume',
+    interruptId: 'interrupt-retry',
+  }, { observedAt: 1_200 });
+
+  session = reduceSession(session, {
+    type: 'runtime.event',
+    event: {
+      type: 'error',
+      requestId: 'req-resume',
+      message: 'temporary failure',
+    },
+  }, { observedAt: 1_300 });
+
+  assert.equal(session.activeRun, null);
+  assert.equal(
+    session.pendingInterrupt?.interruptId,
+    'interrupt-retry',
+  );
 });
 
 test('run completion settles partial assistant output before its terminal notice', () => {
@@ -433,6 +494,7 @@ test('applySessionSnapshot rematerializes timeline state from a checkpoint point
         activity: 'thinking' as const,
         startedAt: 1_700_000_000,
       },
+      pendingInterrupt: null,
     },
   };
 

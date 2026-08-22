@@ -51,7 +51,8 @@ This page is the current navigable synthesis over the shared
 
 The projection replaced several overlapping, TUI-specific session and snapshot
 shapes with one shared model (Decision, issue #355). A session owns one ordered
-timeline and zero-or-one active run. The shared reducer that transitions it has
+timeline, zero-or-one active invocation, and zero-or-one pending interrupt. The
+shared reducer that transitions it has
 no Ink, React, WebSocket, filesystem, singleton, or wall-clock dependency
 ([`project.ts`](../../packages/agent-session/src/project.ts)).
 
@@ -61,10 +62,10 @@ no Ink, React, WebSocket, filesystem, singleton, or wall-clock dependency
 LangGraph checkpoint  (durable authority)
    │  materialize one checkpoint point + current runtime facts
    ▼
-AgentSessionSnapshot  (versioned point value; v4)
+AgentSessionSnapshot  (versioned point value; v5)
    │  applySessionSnapshot()
    ▼
-AgentSession  (timeline + zero/one activeRun)
+AgentSession  (timeline + zero/one activeRun + zero/one pendingInterrupt)
    ▲  reduceSession(session, input, { observedAt })
    │
 server-observed runtime/control events + accepted user input
@@ -95,12 +96,13 @@ snapshot after `message.completed` intentionally replaces live-only operation an
 subagent entries — they are session-scoped presentation state, not durable
 history.
 
-## Active-run shape
+## Active invocation and pending interrupt
 
-Snapshot version 4 represents the active run as a discriminated union of exactly
-three facts — `running(activity)`, `pending_interrupt(pendingInterrupt)`, `interrupting`
-— so illegal combinations are unrepresentable. See
-[Run view as a discriminated union](decisions/run-view-discriminated-union.md).
+Snapshot version 5 represents the active invocation as a discriminated union of
+two facts — `running(activity)` and `interrupting`. The checkpoint wait is the
+separate nullable `pendingInterrupt` fact. A response/cancel starts a new active
+invocation while retaining that wait until authoritative runtime progress. See
+[Active invocation and pending interrupt](decisions/run-view-discriminated-union.md).
 
 ## Ownership boundaries
 
@@ -116,16 +118,16 @@ and [Review resolution is client-local](decisions/review-resolution-is-client-lo
 `payload.kind === 'human_review'` and `payload.interactions` contains public
 `HumanReviewRequest` values from `@pinpawo/agent-contracts`, not internal
 pet-agent `ReviewSpec` values. Presentation, input, and `batchSubmission` cross
-the boundary; runtime decisions and effects remain checkpoint-owned. The V4
-parser accepts the former `waiting_review/reviewAction` snapshot only as an
-inbound compatibility shape and normalizes it immediately. See
+the boundary; runtime decisions and effects remain checkpoint-owned. The V5
+parser accepts the former V3 `waiting_review/reviewAction` and V4 embedded
+`pending_interrupt` snapshots only as inbound compatibility shapes and
+normalizes them immediately. See
 [Agent boundary contracts](agent-boundary-contracts.md).
 
-`activeRun.requestId` while `state === 'pending_interrupt'` is optional
-transport ownership. It is
-absent when the view is rebuilt from checkpoint alone and may be bound to a
-response/cancel command so its resumed events can be reduced. Interrupt and
-interaction identity remain `interruptId` and `interactionId` respectively.
+Every `activeRun` has a required `requestId`; `pendingInterrupt` has none. A
+response/cancel command creates a new active run for its resumed invocation,
+while interrupt and interaction identity remain `interruptId` and
+`interactionId` respectively.
 
 ## Interruption and continuation
 

@@ -43,7 +43,7 @@ export type AgentSessionInput =
       requestId: string;
     }
   | {
-      type: 'review.resolution.accepted';
+      type: 'interrupt.resume.accepted';
       requestId: string;
       interruptId: string;
     }
@@ -85,6 +85,7 @@ export function reduceSession(
         kind: 'chat',
         timeline: [],
         activeRun: null,
+        pendingInterrupt: null,
         currentPlan: null,
       };
     case 'user.accepted':
@@ -99,8 +100,8 @@ export function reduceSession(
         state: 'interrupting',
         ...observedAtUpdate(context),
       }));
-    case 'review.resolution.accepted':
-      return bindPendingInterruptRequest(session, input, context);
+    case 'interrupt.resume.accepted':
+      return acceptInterruptResume(session, input, context);
     case 'run.finished':
       return finishOwnedRun(
         session,
@@ -138,6 +139,7 @@ export function applySessionSnapshot(
     activeRun: incoming.activeRun
       ? normalizeSnapshotRun(incoming.activeRun, session.activeRun, context)
       : null,
+    pendingInterrupt: incoming.pendingInterrupt,
     ...(incoming.currentPlan !== undefined
       ? { currentPlan: cloneAgentPlan(incoming.currentPlan) }
       : {}),
@@ -166,6 +168,7 @@ function acceptUserInput(
     ...withoutUsage,
     kind: input.kind,
     currentPlan: null,
+    pendingInterrupt: null,
     activeRun: {
       requestId: input.requestId,
       state: 'running',
@@ -207,7 +210,7 @@ function reduceRuntimeEvent(
     case 'subagent.message.completed':
       return appendSubagentMessage(session, event, context);
     case 'human_review.requested':
-      return applyReviewRequest(session, event, context);
+      return applyReviewRequest(session, event);
     case 'system.notice':
       return appendRuntimeSystemMessage(session, event.requestId, event.message, message, context);
     case 'studio.progress':
@@ -218,7 +221,7 @@ function reduceRuntimeEvent(
         role: 'system',
         requestId: event.requestId,
         text: message?.text ?? event.message ?? 'internal error',
-      }], undefined, context);
+      }], undefined, context, { preservePendingInterrupt: true });
   }
 }
 
@@ -230,6 +233,7 @@ function applyPlanUpdate(
   return {
     ...session,
     currentPlan: cloneAgentPlan(event.plan),
+    pendingInterrupt: null,
   };
 }
 
@@ -241,7 +245,7 @@ function appendRuntimeSystemMessage(
   context: AgentSessionReductionContext,
 ) {
   if (!ownsRun(session, requestId) || !text.trim()) return session;
-  return appendMessage(session, {
+  return appendMessage({ ...session, pendingInterrupt: null }, {
     ...(message ?? {}),
     role: 'system',
     requestId,
@@ -275,6 +279,7 @@ function appendAssistantDelta(
   return updateOwnedRun({
     ...session,
     timeline: upsertTimelineEntry(session.timeline, entry),
+    pendingInterrupt: null,
   }, requestId, (run) => ({
     ...runViewBase(run, requestId),
     state: 'running',
@@ -321,6 +326,7 @@ function applyOperationEvent(
   const withOperation = {
     ...session,
     timeline: upsertTimelineEntry(session.timeline, operation),
+    pendingInterrupt: null,
   };
   return updateOwnedRun(withOperation, event.requestId, (run) => {
     if (event.phase === 'started' || event.phase === 'updated') {
@@ -328,14 +334,6 @@ function applyOperationEvent(
         ...runViewBase(run, event.requestId),
         state: 'running',
         activity: 'using_tool',
-        ...observedAtUpdate(context),
-      };
-    }
-    if (run.state === 'pending_interrupt') {
-      return {
-        ...runViewBase(run, event.requestId),
-        state: 'running',
-        activity: 'thinking',
         ...observedAtUpdate(context),
       };
     }
@@ -392,6 +390,7 @@ function appendSubagentMessage(
   const withMessage = {
     ...session,
     timeline: upsertTimelineEntry(session.timeline, entry),
+    pendingInterrupt: null,
   };
   return updateOwnedRun(withMessage, event.requestId, (run) => ({
     ...runViewBase(run, event.requestId),
@@ -404,14 +403,13 @@ function appendSubagentMessage(
 function applyReviewRequest(
   session: AgentSession,
   event: Extract<AgentRuntimeEvent, { type: 'human_review.requested' }>,
-  context: AgentSessionReductionContext,
 ) {
-  return updateOwnedRun(session, event.requestId, (run) => ({
-    ...runViewBase(run, event.requestId),
-    state: 'pending_interrupt',
+  if (!ownsRun(session, event.requestId)) return session;
+  return {
+    ...session,
+    activeRun: null,
     pendingInterrupt: event.pendingInterrupt,
-    ...observedAtUpdate(context),
-  }));
+  };
 }
 
 function runViewBase(run: AgentRunView, requestId: string) {
@@ -428,12 +426,14 @@ function finishOwnedRun(
   messages: AgentSessionMessageInput[],
   tokenUsage: TokenUsageSnapshot | null | undefined,
   context: AgentSessionReductionContext,
+  options: { preservePendingInterrupt?: boolean } = {},
 ) {
   if (!ownsRun(session, requestId)) return session;
   let nextSession: AgentSession = {
     ...session,
     timeline: finalizeRunMessages(session.timeline, requestId),
     activeRun: null,
+    ...(options.preservePendingInterrupt ? {} : { pendingInterrupt: null }),
   };
   for (const message of messages) {
     nextSession = appendMessage(nextSession, {
@@ -446,25 +446,25 @@ function finishOwnedRun(
   return applyTokenUsage(nextSession, tokenUsage);
 }
 
-function bindPendingInterruptRequest(
+function acceptInterruptResume(
   session: AgentSession,
-  input: Extract<AgentSessionInput, { type: 'review.resolution.accepted' }>,
+  input: Extract<AgentSessionInput, { type: 'interrupt.resume.accepted' }>,
   context: AgentSessionReductionContext,
-) {
-  const run = session.activeRun;
+): AgentSession {
   if (
-    !run
-    || run.state !== 'pending_interrupt'
-    || run.pendingInterrupt.interruptId !== input.interruptId
+    session.activeRun
+    || session.pendingInterrupt?.interruptId !== input.interruptId
   ) {
     return session;
   }
   return {
     ...session,
     activeRun: {
-      ...run,
       requestId: input.requestId,
-      ...observedAtUpdate(context),
+      state: 'running',
+      activity: 'thinking',
+      startedAt: context.observedAt,
+      updatedAt: context.observedAt,
     },
   };
 }
@@ -670,7 +670,7 @@ function normalizeSnapshotRun(
 ): AgentRunView {
   const observedAt = context?.observedAt;
   const startedAt = normalizeSnapshotTimestamp(incoming.startedAt, observedAt)
-    ?? (incoming.requestId && existing?.requestId === incoming.requestId
+    ?? (existing?.requestId === incoming.requestId
       ? normalizeSnapshotTimestamp(existing.startedAt, observedAt)
       : undefined)
     ?? (observedAt && observedAt > 0 ? observedAt : undefined);

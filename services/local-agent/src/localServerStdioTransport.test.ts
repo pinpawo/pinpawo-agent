@@ -177,12 +177,13 @@ test('stdio carries correlated session results without routing them as live even
           active: true,
         },
         snapshot: {
-          version: 4,
+          version: 5,
           session: {
             sessionId: 'chat:new',
             kind: 'chat',
             timeline: [],
             activeRun: null,
+            pendingInterrupt: null,
           },
         },
       });
@@ -242,12 +243,13 @@ test('stdio carries correlated session results without routing them as live even
         active: true,
       },
       snapshot: {
-        version: 4,
+        version: 5,
         session: {
           sessionId: 'chat:new',
           kind: 'chat',
           timeline: [],
           activeRun: null,
+          pendingInterrupt: null,
         },
       },
     },

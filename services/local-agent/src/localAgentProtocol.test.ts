@@ -345,12 +345,13 @@ test('parseLocalAgentServerMessage rejects legacy server messages by default', (
 
 test('parseLocalAgentServerMessage accepts session results and validates resumed identity', () => {
   const snapshot = {
-    version: 4,
+    version: 5,
     session: {
       sessionId: 'chat:one',
       kind: 'chat',
       timeline: [],
       activeRun: null,
+      pendingInterrupt: null,
     },
   };
   const session = {
@@ -1002,6 +1003,7 @@ test('remote server-message adapter preserves snapshot payloads', () => {
       status: 'completed',
     }],
     activeRun: null,
+    pendingInterrupt: null,
     runtime: {
       model: 'test-model',
       cwd: '/Users/alice/project',

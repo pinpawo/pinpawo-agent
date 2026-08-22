@@ -75,7 +75,7 @@ continuation from message prose.
 | `interrupting` | the server accepted the stop request and signaled its abort controller | server-observed session projection |
 | terminal `interrupted` | the invocation owner observed graph output settlement and terminalized the request | local server invocation owner |
 | pending `PendingInterrupt` | the checkpoint is waiting for a review response | LangGraph checkpoint |
-| review resolution progress | the TUI has sent one response/cancel command and must not send another | TUI-local `ReviewDraft.resolutionSent` |
+| review resolution progress | the TUI has sent one response/cancel command and must not send another | TUI-local `ApprovalState.resolution-sent` |
 | active delegation | the checkpoint identifies an unfinished delegation and its private lane | orchestrator state |
 | continuation availability | this TUI instance canceled a review and later observed that invocation end as `interrupted` | TUI-local session marker |
 | `resume_active` / `supersede_active` | how the next accepted request treats the active delegation | request protocol + orchestrator transition |
@@ -118,7 +118,7 @@ sequenceDiagram
     participant Checkpoint
 
     TUI->>Server: review.cancel(interruptId)
-    Note over TUI: resolutionSent = true
+    Note over TUI: approval phase = resolution-sent
     Server->>Checkpoint: reload current pending interrupt
     Server->>Graph: resume with interrupt_run
     Graph->>Checkpoint: append canceled ToolMessage and guard stop
@@ -180,8 +180,8 @@ session.
 
 ### Cancel is a control action, not a review verdict
 
-**Fact.** When the focused run is in `pending_interrupt` and that review has not
-already been resolved, Esc sends `review.cancel`. The server maps that command to
+**Fact.** When the focused session has `pendingInterrupt` and no resume
+invocation is active, Esc sends `review.cancel`. The server maps that command to
 the internal `{ action: 'interrupt_run' }` control action. It does not choose a
 declared reject option and therefore works even when the review schema has no
 reject option.

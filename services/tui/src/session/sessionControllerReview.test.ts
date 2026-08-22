@@ -207,9 +207,10 @@ test('a sent review resolution can be followed by an ordered run interrupt', () 
     type: 'run.interrupt',
     requestId: 'startup',
   });
+  assert.equal(controller.getState().session.activeRun?.state, 'interrupting');
   assert.equal(
-    controller.getState().session.activeRun?.state,
-    'pending_interrupt',
+    controller.getState().session.pendingInterrupt?.interruptId,
+    'review-action',
   );
   controller.stop();
 });

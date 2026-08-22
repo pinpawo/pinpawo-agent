@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type {
-  AgentRunView,
+  PendingInterruptProjection,
   ReviewResponse,
   ReviewSpec,
 } from '@pinpawo/agent-session';
@@ -168,14 +168,10 @@ class FakeReviewSessionController {
 
 function waitingReview(
   reviews = [review('review-1'), review('review-2')],
-): AgentRunView {
+): PendingInterruptProjection {
   return {
-    requestId: 'request-1',
-    state: 'pending_interrupt',
-    pendingInterrupt: {
-      interruptId: 'pendingInterrupt-1',
-      payload: { kind: 'human_review', interactions: reviews },
-    },
+    interruptId: 'pendingInterrupt-1',
+    payload: { kind: 'human_review', interactions: reviews },
   };
 }
 

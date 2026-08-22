@@ -6,24 +6,14 @@ import { resolveGlobalInterruptAction } from './globalInterrupt';
 test('global Ctrl+C cancels review, interrupts once, then exits', () => {
   assert.equal(resolveGlobalInterruptAction({
     approval: approvalState('ready'),
-    activeRun: {
-      requestId: 'review',
-      state: 'pending_interrupt',
-      pendingInterrupt: {
-        interruptId: 'interrupt-1',
-        payload: { kind: 'human_review', interactions: [] },
-      },
-    },
+    activeRun: null,
   }), 'cancel-review');
   assert.equal(resolveGlobalInterruptAction({
     approval: approvalState('resolution-sent'),
     activeRun: {
       requestId: 'review',
-      state: 'pending_interrupt',
-      pendingInterrupt: {
-        interruptId: 'interrupt-1',
-        payload: { kind: 'human_review', interactions: [] },
-      },
+      state: 'running',
+      activity: 'thinking',
     },
   }), 'interrupt-run');
   assert.equal(resolveGlobalInterruptAction({
@@ -33,11 +23,8 @@ test('global Ctrl+C cancels review, interrupts once, then exits', () => {
     },
     activeRun: {
       requestId: 'review',
-      state: 'pending_interrupt',
-      pendingInterrupt: {
-        interruptId: 'interrupt-1',
-        payload: { kind: 'human_review', interactions: [] },
-      },
+      state: 'running',
+      activity: 'thinking',
     },
   }), 'exit');
   assert.equal(resolveGlobalInterruptAction({

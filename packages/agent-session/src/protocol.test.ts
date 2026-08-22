@@ -153,6 +153,7 @@ test('session compaction protocol is correlated and snapshot-backed', () => {
     kind: 'chat',
     timeline: [],
     activeRun: null,
+    pendingInterrupt: null,
   });
   assert.deepEqual(parseAgentServerMessage({
     type: 'session.compact.result',
@@ -259,6 +260,7 @@ test('model protocol accepts correlated selection messages and sanitized profile
     kind: 'chat',
     timeline: [],
     activeRun: null,
+    pendingInterrupt: null,
     runtime: {
       modelProfileId: 'vision',
       modelProfileLabel: 'Vision',

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { BoxRenderable, RGBA } from '@opentui/core';
 import { createTestRenderer } from '@opentui/core/testing';
-import type { AgentRunView, ReviewSpec } from '@pinpawo/agent-session';
+import type { PendingInterruptProjection, ReviewSpec } from '@pinpawo/agent-session';
 import {
   advanceApprovalSubmissionFrame,
   beginApprovalSubmission,
@@ -82,14 +82,10 @@ test('approval view remains bounded and accepts multiline input after resize', a
   assert.equal(setup.captureCharFrame(), submitting);
 });
 
-function waitingReview(): AgentRunView {
+function waitingReview(): PendingInterruptProjection {
   return {
-    requestId: 'request-1',
-    state: 'pending_interrupt',
-    pendingInterrupt: {
-      interruptId: 'action-1',
-      payload: { kind: 'human_review', interactions: [review()] },
-    },
+    interruptId: 'action-1',
+    payload: { kind: 'human_review', interactions: [review()] },
   };
 }
 

@@ -43,6 +43,7 @@ test('TuiSessionController synchronizes one session and projects a chat run', ()
       kind: 'chat',
       timeline: [],
       activeRun: null,
+      pendingInterrupt: null,
       runtime: {
         model: 'test-model',
         cwd: '/tmp/project',
@@ -125,6 +126,7 @@ test('TuiSessionController synchronizes one session and projects a chat run', ()
         status: 'completed',
       }],
       activeRun: null,
+      pendingInterrupt: null,
       sessionTokenUsage: {
         inputTokens: 20,
         outputTokens: 5,
@@ -181,6 +183,7 @@ test('manual refresh requests a snapshot without waiting for the active run', ()
         status: 'completed',
       }],
       activeRun: null,
+      pendingInterrupt: null,
     }),
   });
 
@@ -214,6 +217,7 @@ test('startup snapshot restores active run ownership for following activity even
         activity: 'thinking',
         startedAt: 500,
       },
+      pendingInterrupt: null,
     }),
   });
 
@@ -299,6 +303,7 @@ test('TuiSessionController updates review policy only after a correlated host ac
       kind: 'chat',
       timeline: [],
       activeRun: null,
+      pendingInterrupt: null,
       runtime: {
         globalReviewPolicyMode: 'require_authorization',
       },
@@ -374,6 +379,7 @@ test('TuiSessionController lists and switches session model profiles authoritati
       kind: 'chat',
       timeline: [],
       activeRun: null,
+      pendingInterrupt: null,
       runtime: {
         modelProfileId: 'text',
         modelProfileLabel: 'Text',
@@ -430,6 +436,7 @@ test('TuiSessionController lists and switches session model profiles authoritati
     kind: 'chat',
     timeline: [],
     activeRun: null,
+    pendingInterrupt: null,
     runtime: {
       modelProfileId: 'vision',
       modelProfileLabel: 'Vision',
@@ -615,6 +622,7 @@ test('starting a new session applies the authoritative snapshot and ignores an o
         status: 'completed',
       }],
       activeRun: null,
+      pendingInterrupt: null,
       sessionTokenUsage: {
         inputTokens: 10,
         outputTokens: 5,
@@ -648,6 +656,7 @@ test('starting a new session applies the authoritative snapshot and ignores an o
     kind: 'chat',
     timeline: [],
     activeRun: null,
+    pendingInterrupt: null,
   });
   connection.receive({
     type: 'session.new.result',
@@ -682,6 +691,7 @@ test('starting a new session applies the authoritative snapshot and ignores an o
         status: 'completed',
       }],
       activeRun: null,
+      pendingInterrupt: null,
     }),
   });
   assert.equal(controller.getState().session.timeline.length, 0);
@@ -863,6 +873,7 @@ test('completion snapshot refresh cannot erase a newer optimistic run', () => {
         status: 'completed',
       }],
       activeRun: null,
+      pendingInterrupt: null,
       sessionTokenUsage: {
         inputTokens: 10,
         outputTokens: 5,
@@ -1008,6 +1019,7 @@ test('TuiSessionController lists resumable sessions and applies the selected sna
       status: 'completed',
     }],
     activeRun: null,
+    pendingInterrupt: null,
   });
   connection.receive({
     type: 'session.resume.result',
@@ -1062,6 +1074,7 @@ test('resuming clears an older completion snapshot request', async () => {
       kind: 'chat',
       timeline: [],
       activeRun: null,
+      pendingInterrupt: null,
     }),
   });
   await resumePromise;
@@ -1095,6 +1108,7 @@ test('resume rejects a response whose snapshot belongs to another session', asyn
       kind: 'chat',
       timeline: [],
       activeRun: null,
+      pendingInterrupt: null,
     }),
   });
   await assert.rejects(resumePromise, /did not match/);
@@ -1209,6 +1223,7 @@ test('manual compaction binds the active session and uses its model-call timeout
       kind: 'chat',
       timeline: [],
       activeRun: null,
+      pendingInterrupt: null,
     }),
   });
   assert.equal((await compacted).compacted, true);
@@ -1277,6 +1292,7 @@ test('delegation continuation sends resume_active without client-owned availabil
       kind: 'chat',
       timeline: [],
       activeRun: null,
+      pendingInterrupt: null,
     }),
   });
 
@@ -1290,6 +1306,7 @@ test('delegation continuation sends resume_active without client-owned availabil
       kind: 'chat',
       timeline: [],
       activeRun: null,
+      pendingInterrupt: null,
     }),
   });
   await resumeOther;
@@ -1304,6 +1321,7 @@ test('delegation continuation sends resume_active without client-owned availabil
       kind: 'chat',
       timeline: [],
       activeRun: null,
+      pendingInterrupt: null,
     }),
   });
   await resumeOriginal;
@@ -1347,6 +1365,7 @@ test('delegation continuation sends resume_active without client-owned availabil
       kind: 'chat',
       timeline: [],
       activeRun: null,
+      pendingInterrupt: null,
     }),
   });
   controller.stop();

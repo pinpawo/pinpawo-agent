@@ -541,13 +541,28 @@ lint passes, and documentation migrations.
   `PendingInterrupt`, responses name `interruptId` and ordered `responses`, and
   checkpoint recovery rejects interrupts without a real runtime ID instead of
   synthesizing identity from review content.
-- Kept `requestId` outside `PendingInterrupt`: it is optional transport
-  ownership on the active-run envelope and is rebound only when a response or
-  cancel command is accepted, so resumed events can be correlated without
-  creating a second review identity.
+- Kept `requestId` outside `PendingInterrupt`: every active invocation owns a
+  required transport `requestId`, while the checkpoint wait owns only its
+  `interruptId`. A response or cancel starts a new active invocation and keeps
+  the pending wait until authoritative runtime progress.
 - Removed the server-side review lifecycle/result enum and reject-option
   shortcut. Every attempt reloads checkpoint authority, validates it, and
   resumes or cancels that exact interrupt.
 - Created issue [#684](https://github.com/pinpawo/pinpawo-agent/issues/684) as
   the dedicated implementation and identity-consolidation tracker, related to
   but intentionally separate from the broader #561 host refactor.
+
+## [2026-08-22] implementation | Separate active invocation from pending interrupt
+
+- Bumped `AgentSessionSnapshot` to V5 and split the V4
+  `activeRun.pending_interrupt` variant into independent `activeRun` and
+  `pendingInterrupt` facts.
+- Made every active invocation carry a required `requestId`; checkpoint-restored
+  waits no longer need optional transport ownership or review-specific request
+  rebinding.
+- Kept the pending interrupt visible while a response/cancel invocation starts,
+  then clear or replace it only from authoritative runtime progress, another
+  interrupt, or terminal settlement.
+- Migrated V3 and V4 snapshots at the parser boundary and aligned Chat/TUI
+  projection, completion-snapshot reconciliation, tests, reference docs, and
+  wiki decisions with the V5 lifecycle.

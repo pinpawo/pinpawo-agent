@@ -50,14 +50,15 @@ interaction around it have distinct owners—do not collapse them:
 | Fact | Owner | Lifetime |
 | --- | --- | --- |
 | `PendingInterrupt` (`interruptId` + presentation-safe payload) | shared / checkpoint-derived projection | while the checkpoint interrupt exists |
-| Partial decisions + `resolutionSent` marker (`ReviewDraft`) | TUI-local interaction state | until server-observed state diverges |
+| Partial decisions + `resolution-sent` phase (`ApprovalState`) | TUI-local interaction state | until server-observed state diverges |
 | Internal `ReviewSpec[]`, decisions, effects, and resume payload | Pet runtime checkpoint | while the interrupt exists |
-| Run activity / waiting / interrupting | shared, server-observed | reduced from server events |
+| Active invocation (`requestId` + running/interrupting) | shared | accepted command through terminal server event |
 
 Human review is one `PendingInterrupt` payload. Its projection contains only
 interrupt identity and ordered public interactions—never client command
-progress. Sending an interrupt resume does **not** optimistically advance the
-shared projection; the next server event or snapshot provides the next fact.
+progress. Sending an interrupt resume starts a new active invocation but does
+**not** optimistically consume the pending interrupt; the next server event or
+snapshot clears or replaces that checkpoint-derived fact.
 
 **Fact (PR #572, revised by PR #682).** The shared interactions are
 presentation-only boundary contracts. For each response attempt, the server

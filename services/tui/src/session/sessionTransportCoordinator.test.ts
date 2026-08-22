@@ -119,6 +119,7 @@ function snapshot(requestId: string) {
       kind: 'chat',
       timeline: [],
       activeRun: null,
+      pendingInterrupt: null,
     }),
   };
 }

@@ -80,7 +80,7 @@ explicitly migrated.
 
 - [Agent boundary contracts](agent-boundary-contracts.md) — validated system
   synthesis for the transport-neutral Configuration, Invocation, Interaction,
-  and State ports; public review projection; V2/V4 compatibility; and the
+  and State ports; public review projection; V2/V5 compatibility; and the
   recoverable server-local review-resolution route.
 - [Local-agent session projection](local-agent-session-projection.md) — system
   synthesis: how checkpoint, snapshot, shared reducer, pending interrupts, and
@@ -94,8 +94,8 @@ explicitly migrated.
   — one owner per fact: shared/checkpoint, TUI-local, and server transport-control.
 - [Local-agent transport boundary](concepts/local-agent-transport-boundary.md) —
   peer identity, WebSocket/stdio parity, and one-implementation session commands.
-- [Active run view as a discriminated union](decisions/run-view-discriminated-union.md)
-  — making illegal `running / pending_interrupt / interrupting` states unrepresentable.
+- [Active invocation and pending interrupt](decisions/run-view-discriminated-union.md)
+  — separating invocation control from checkpoint wait state.
 - [Review resolution progress is client-local](decisions/review-resolution-is-client-local.md)
   — why `PendingInterrupt` carries no submission status and Chat reloads checkpoint
   authority instead of creating a server review lifecycle.

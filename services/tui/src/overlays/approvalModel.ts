@@ -1,5 +1,4 @@
 import type {
-  AgentRunView,
   PendingInterruptProjection,
   ReviewResponse,
   ReviewSpec,
@@ -111,32 +110,43 @@ export function createApprovalState(): ApprovalState {
 
 export function syncApprovalState(
   state: ApprovalState,
-  run: AgentRunView | null,
+  pendingInterrupt: PendingInterruptProjection | null,
+  resumeInFlight = false,
 ): ApprovalState {
-  if (!run || run.state !== 'pending_interrupt') {
+  if (!pendingInterrupt) {
     return state.phase === 'closed' ? state : createApprovalState();
   }
   if (
     state.phase !== 'closed'
-    && state.pendingInterrupt.interruptId === run.pendingInterrupt.interruptId
-    && reviewResponsesRemainValid(run.pendingInterrupt, state.responses)
+    && state.pendingInterrupt.interruptId === pendingInterrupt.interruptId
+    && reviewResponsesRemainValid(pendingInterrupt, state.responses)
   ) {
+    if (state.phase === 'resolution-sent' && !resumeInFlight) {
+      return {
+        ...state,
+        phase: 'ready',
+        pendingInterrupt,
+        interruptSent: false,
+        submissionFrame: 0,
+        message: undefined,
+      };
+    }
     return {
       ...state,
-      pendingInterrupt: run.pendingInterrupt,
+      pendingInterrupt,
       reviewIndex: state.responses.length,
       selectedIndex: clampOptionIndex(
         state.selectedIndex,
-        currentReviewFrom(run.pendingInterrupt, state.responses)?.options.length ?? 0,
+        currentReviewFrom(pendingInterrupt, state.responses)?.options.length ?? 0,
       ),
     };
   }
   return {
     phase: 'ready',
-    pendingInterrupt: run.pendingInterrupt,
+    pendingInterrupt,
     reviewIndex: 0,
     responses: [],
-    selectedIndex: defaultOptionIndex(run.pendingInterrupt.payload.interactions[0]),
+    selectedIndex: defaultOptionIndex(pendingInterrupt.payload.interactions[0]),
     contentOffset: 0,
     draft: '',
     interruptSent: false,

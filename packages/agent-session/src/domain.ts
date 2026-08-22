@@ -9,7 +9,7 @@ import type {
 } from './events';
 import type { PendingInterruptProjection } from './review';
 
-export const AGENT_SESSION_SNAPSHOT_VERSION = 4 as const;
+export const AGENT_SESSION_SNAPSHOT_VERSION = 5 as const;
 
 export type AgentMessageEntry = {
   id: string;
@@ -87,12 +87,6 @@ export type AgentRunView =
       activity: AgentRunActivity;
     }
   | AgentRunTiming & {
-      /** Present only while a transport command owns the resumed run. */
-      requestId?: string;
-      state: 'pending_interrupt';
-      pendingInterrupt: PendingInterruptProjection;
-    }
-  | AgentRunTiming & {
       requestId: string;
       state: 'interrupting';
     };
@@ -148,6 +142,7 @@ export type AgentSession = {
   actor?: AgentActorView;
   timeline: AgentTimelineEntry[];
   activeRun: AgentRunView | null;
+  pendingInterrupt: PendingInterruptProjection | null;
   /** Ephemeral delegation plan, separate from the durable conversation timeline. */
   currentPlan?: AgentPlan | null;
   runtime?: AgentRuntimeView;

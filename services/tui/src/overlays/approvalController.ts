@@ -1,4 +1,4 @@
-import type { AgentRunView } from '@pinpawo/agent-session';
+import type { PendingInterruptProjection } from '@pinpawo/agent-session';
 import type {
   TuiSessionController,
   TuiConnectionStatus,
@@ -71,8 +71,16 @@ export class ApprovalController {
     return this.state;
   }
 
-  sync(run: AgentRunView | null, connection: TuiConnectionStatus) {
-    let next = syncApprovalState(this.state, run);
+  sync(
+    pendingInterrupt: PendingInterruptProjection | null,
+    connection: TuiConnectionStatus,
+    resumeInFlight = false,
+  ) {
+    let next = syncApprovalState(
+      this.state,
+      pendingInterrupt,
+      resumeInFlight || connection !== 'ready',
+    );
     if (next.phase !== 'resolution-sent') {
       this.clearSubmissionTimers();
     } else if (connection !== 'ready') {

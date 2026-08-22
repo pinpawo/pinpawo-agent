@@ -257,6 +257,7 @@ export class TuiSessionController {
     }
     if (
       this.state.session.activeRun
+      || this.state.session.pendingInterrupt
       || this.sessionCommands.hasPending()
       || this.modelProfiles.hasPending()
       || this.runtimeConfig.hasPending()
@@ -296,6 +297,7 @@ export class TuiSessionController {
     }
     if (
       this.state.session.activeRun
+      || this.state.session.pendingInterrupt
       || this.sessionCommands.hasPending()
       || this.modelProfiles.hasPending()
       || this.runtimeConfig.hasPending()
@@ -327,10 +329,9 @@ export class TuiSessionController {
     }
     const run = this.state.session.activeRun;
     if (!run) {
-      return { ok: false, reason: 'idle' };
-    }
-    if (run.state === 'pending_interrupt') {
-      return { ok: false, reason: 'review-active' };
+      return this.state.session.pendingInterrupt
+        ? { ok: false, reason: 'review-active' }
+        : { ok: false, reason: 'idle' };
     }
     if (run.state === 'interrupting') {
       return { ok: false, reason: 'already-interrupting' };
@@ -359,12 +360,13 @@ export class TuiSessionController {
       return { ok: false, reason: 'not-ready' };
     }
     const run = this.state.session.activeRun;
-    if (!run || run.state !== 'pending_interrupt') {
+    const pendingInterrupt = this.state.session.pendingInterrupt;
+    if (!pendingInterrupt) {
       return { ok: false, reason: 'closed' };
     }
     if (
-      !run.requestId
-      || run.pendingInterrupt.interruptId !== params.interruptId
+      !run
+      || pendingInterrupt.interruptId !== params.interruptId
     ) {
       return { ok: false, reason: 'stale' };
     }
@@ -374,6 +376,10 @@ export class TuiSessionController {
     })) {
       return { ok: false, reason: 'send-failed' };
     }
+    this.updateSession(reduceSession(this.state.session, {
+      type: 'run.interrupting',
+      requestId: run.requestId,
+    }, { observedAt: this.now() }));
     return { ok: true, requestId: run.requestId };
   }
 
@@ -444,15 +450,15 @@ export class TuiSessionController {
     if (!this.reviewTransportReady()) {
       return { ok: false, reason: 'not-ready' };
     }
-    const run = this.state.session.activeRun;
-    if (!run || run.state !== 'pending_interrupt') {
+    const pendingInterrupt = this.state.session.pendingInterrupt;
+    if (!pendingInterrupt || this.state.session.activeRun) {
       return { ok: false, reason: 'closed' };
     }
-    if (run.pendingInterrupt.interruptId !== params.interruptId) {
+    if (pendingInterrupt.interruptId !== params.interruptId) {
       return { ok: false, reason: 'stale' };
     }
     const prepared = prepareReviewDecision({
-      pendingInterrupt: run.pendingInterrupt,
+      pendingInterrupt,
       responses: params.responses,
       optionId: params.optionId,
       inputText: params.inputText,
@@ -472,15 +478,15 @@ export class TuiSessionController {
     if (!this.transport.send({
       type: 'human_review_response',
       requestId,
-      interruptId: run.pendingInterrupt.interruptId,
+      interruptId: pendingInterrupt.interruptId,
       responses: prepared.responses,
     })) {
       return { ok: false, reason: 'send-failed' };
     }
     this.updateSession(reduceSession(this.state.session, {
-      type: 'review.resolution.accepted',
+      type: 'interrupt.resume.accepted',
       requestId,
-      interruptId: run.pendingInterrupt.interruptId,
+      interruptId: pendingInterrupt.interruptId,
     }, { observedAt: this.now() }));
     return {
       ok: true,
@@ -496,25 +502,25 @@ export class TuiSessionController {
     if (!this.reviewTransportReady()) {
       return { ok: false, reason: 'not-ready' };
     }
-    const run = this.state.session.activeRun;
-    if (!run || run.state !== 'pending_interrupt') {
+    const pendingInterrupt = this.state.session.pendingInterrupt;
+    if (!pendingInterrupt || this.state.session.activeRun) {
       return { ok: false, reason: 'closed' };
     }
-    if (run.pendingInterrupt.interruptId !== params.interruptId) {
+    if (pendingInterrupt.interruptId !== params.interruptId) {
       return { ok: false, reason: 'stale' };
     }
     const requestId = this.requestIdFactory();
     if (!this.transport.send({
       type: 'review.cancel',
       requestId,
-      interruptId: run.pendingInterrupt.interruptId,
+      interruptId: pendingInterrupt.interruptId,
     })) {
       return { ok: false, reason: 'send-failed' };
     }
     this.updateSession(reduceSession(this.state.session, {
-      type: 'review.resolution.accepted',
+      type: 'interrupt.resume.accepted',
       requestId,
-      interruptId: run.pendingInterrupt.interruptId,
+      interruptId: pendingInterrupt.interruptId,
     }, { observedAt: this.now() }));
     return { ok: true };
   }
@@ -616,7 +622,7 @@ export class TuiSessionController {
     if (this.state.connection !== 'ready' || !this.transport.isConnected()) {
       return 'local-agent is not connected';
     }
-    if (this.state.session.activeRun) {
+    if (this.state.session.activeRun || this.state.session.pendingInterrupt) {
       return 'wait for the current response to finish';
     }
     if (this.modelProfiles.hasPending()) {
@@ -632,7 +638,7 @@ export class TuiSessionController {
     if (this.state.connection !== 'ready' || !this.transport.isConnected()) {
       return 'local-agent is not connected';
     }
-    if (this.state.session.activeRun) {
+    if (this.state.session.activeRun || this.state.session.pendingInterrupt) {
       return 'wait for the current response to finish';
     }
     if (this.sessionCommands.hasPending()) {
@@ -655,7 +661,7 @@ export class TuiSessionController {
     if (this.state.session.sessionId === 'pending') {
       return 'wait for session synchronization';
     }
-    if (this.state.session.activeRun) {
+    if (this.state.session.activeRun || this.state.session.pendingInterrupt) {
       return 'wait for the current response to finish';
     }
     if (this.sessionCommands.hasPending()) {
@@ -707,6 +713,7 @@ function createPendingSession(): AgentSession {
     kind: 'chat',
     timeline: [],
     activeRun: null,
+    pendingInterrupt: null,
   };
 }
 

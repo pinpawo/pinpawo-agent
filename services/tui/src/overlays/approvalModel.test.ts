@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import stringWidth from 'string-width';
 import type {
-  AgentRunView,
+  PendingInterruptProjection,
   ReviewResponse,
   ReviewSpec,
 } from '@pinpawo/agent-session';
@@ -30,11 +30,7 @@ test('approval state follows the canonical waiting review and defaults to primar
   assert.equal(state.phase, 'ready');
   assert.equal(selectedApprovalOption(state)?.id, 'approve');
   assert.equal(
-    syncApprovalState(state, {
-      requestId: 'run-next',
-      state: 'running',
-      activity: 'thinking',
-    }).phase,
+    syncApprovalState(state, null).phase,
     'closed',
   );
 });
@@ -96,6 +92,15 @@ test('approved batch responses advance locally before transport submission', () 
       : buildApprovalViewModel(state, 80).bottomTitle,
     /Interrupt requested/,
   );
+});
+
+test('a failed resume reopens the same pending interrupt for retry', () => {
+  const pending = waitingReview([review('review-1')]);
+  let state = syncApprovalState(createApprovalState(), pending);
+  state = beginApprovalSubmission(state);
+
+  assert.equal(syncApprovalState(state, pending, true).phase, 'resolution-sent');
+  assert.equal(syncApprovalState(state, pending, false).phase, 'ready');
 });
 
 test('approval diff details page within a bounded CJK footer view', () => {
@@ -327,14 +332,10 @@ test('every review view variant renders through its own path', () => {
   assert.equal(toneOf('const b = 3;'), 'muted');
 });
 
-function waitingReview(reviews: ReviewSpec[]): AgentRunView {
+function waitingReview(reviews: ReviewSpec[]): PendingInterruptProjection {
   return {
-    requestId: 'request-1',
-    state: 'pending_interrupt',
-    pendingInterrupt: {
-      interruptId: 'pendingInterrupt-1',
-      payload: { kind: 'human_review', interactions: reviews },
-    },
+    interruptId: 'pendingInterrupt-1',
+    payload: { kind: 'human_review', interactions: reviews },
   };
 }
 

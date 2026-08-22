@@ -1,10 +1,26 @@
-# Human Review Approval Refactor Design
+# Human Review Approval Refactor Design (Historical)
 
-> 本文保留为早期 review protocol 的历史设计。authorization matcher 与 session grant 生命周期已经由 [AUTHORIZATION_MATCHER_LIFECYCLE.md](../../reference/runtime/authorization-matcher.md) 取代；下文中的 matcher template、`shell_pattern` 和 `exact_args` 不再是当前实现。
+> 状态：Historical / superseded。本文从“历史设计记录”起的旧 schema、迁移步骤和命名都不是当前 contract，不能用于指导新实现。
+>
+> 当前 Chat contract 见 [Pending Interrupt in Chat](../local-agent/pending-interrupt-chat.md)；当前 runtime projection 见 [Session Projection](../../reference/runtime/session-projection.md)；Studio 后续方案见 [Pet Thread and Dispatch Invocation](../studio/pet-thread-dispatch-invocation.md)。authorization matcher 与 session grant 生命周期见 [Authorization Matcher Lifecycle](../../reference/runtime/authorization-matcher.md)。
 
-> 状态：Draft v2
 > 日期：2026-06-09
 > 关联：issue #82，PR #76
+
+## Current replacement contract
+
+- `PendingInterrupt` is the checkpoint fact; human review is its typed payload
+  and projection, not a parallel lifecycle.
+- `interruptId` identifies the wait, and `interactionId` identifies one item in
+  the human-review payload.
+- Chat has an implicit active thread and no `petId` or dispatch semantics.
+- Studio dispatch is a separate, later integration. Each dispatch is one
+  invocation on the addressed Pet's stable thread; its typed resume input is
+  intentionally not fixed by this historical document.
+- Legacy `ReviewAction`, `actionId`, scalar response fields, and public
+  `decisions` survive only at compatibility boundaries.
+
+## Historical design record
 
 ## 1. 文档目标
 
@@ -173,7 +189,10 @@ UI 不应该知道：
 后续实现需要统一这些术语：
 
 - `session`：local-agent 的一次聊天会话，对应一个 graph thread/checkpoint 上下文。它不是用户登录 session。
-- `request`：一次 agent run / turn 的请求，用 `requestId` 在 WebSocket event、TUI active run、graph thread/checkpoint 路由之间做关联。
+- `request`：一次 Chat transport command，对应一次 graph invocation；初始
+  turn、interrupt response 和 cancel 都各自有 `requestId`，用于关联该次
+  invocation 的 WebSocket event 与 TUI `activeRun`。它不标识 thread 或
+  checkpoint wait。
 - `review`：一次 pending human review 交互。一个 request 运行过程中可以顺序产生多个 review；任意时刻只有当前 pending review 的 `reviewId` 可以被接受。review 的完整 payload 由 LangGraph interrupt/checkpoint 持有，不作为普通业务 state 复制一份。
 - `decision`：graph/tool runtime resolve option 后得到的 human review 决策，用于处理当前 pending action。V1 只有 approve、reject、respond；edit 后续必须作为新的 canonical option/input 重新设计。
 - `effect`：选择某个 option 后，graph/tool runtime 需要额外应用的状态变更，例如“在当前 graph thread 授权当前 pending shell action”。effect 由 graph/tool runtime 根据 `selectedOptionId` 从 pending `ReviewSpec` 中解析出来；它不是 transport extras，也不是 tool input。
@@ -755,30 +774,49 @@ for (const effect of resolution.effects) {
 
 effect application 和当前 decision 处理必须在 graph/tool runtime 内形成一个原子步骤：如果 authorization effect 校验或写入失败，不能继续执行当前 tool call。当前 tool call 随后按 `resolution.decision` 继续执行；后续 tool call 进入 review policy 前，先读取 graph state 中的 authorizations。
 
-### 6.8 Pending review lifecycle
+### 6.8 Pending interrupt lifecycle
 
 V1 需要明确几个运行时边界：
 
-- 多客户端并发：同一个 graph thread 的同一个 pending review 可以被 TUI、Studio、App 等多个客户端看到，但只有第一个通过 `requestId + reviewId + session/thread` 校验的 response 生效。其他客户端提交同一 review 的 response 时应收到 stale/review-closed 错误。
-- timeout / cancellation：LangGraph interrupt 本身不定义 timeout。local-agent 可以做 UI 层提示或 session 清理，但取消 pending review 必须 resume graph 为一个明确 decision，例如 `{ type: 'reject', message: 'review cancelled' }`，或显式中断当前 run。不能只清理 UI 状态而让 graph checkpoint 悬挂。
-- `respond` 不创建新的 requestId。它仍然是当前 request/run 的 human review resume：graph/tool runtime 将 `input.message` 转成 `{ type: 'respond', message }`，把反馈交回 model 继续规划下一步。TUI 不应把 respond 当成一条新的普通用户消息。
+- `PendingInterrupt` 是 checkpoint fact；human review 只是
+  `payload.kind = 'human_review'` 的内容与展示投影，不建立并列的 review
+  lifecycle。
+- Chat 每次 response/cancel 都重新读取隐式 active thread 的 checkpoint，
+  用 `interruptId` 校验暂停点、用 `interactionId` 校验 payload 内的一项。
+  同 thread 的竞争 invocation 由 thread invocation coordinator 排序；server
+  不维护 claim、consumed tombstone 或 `interruptId` keyed existence state。
+- timeout / cancellation：LangGraph interrupt 本身不定义 timeout。local-agent
+  可以做 UI 层提示，但不能只清理 UI 状态而让 graph checkpoint 悬挂。
+- `respond` 不创建普通用户 Chat message。transport 会为 resume command
+  分配新的 `requestId`，但它仍然恢复当前 pending interrupt。
 
 V1 cancellation 默认策略：
 
 - 用户主动 `/interrupt`、TUI approval 面板中按 Esc、或 pending review 期间按 Ctrl+C：如果当前 session/thread 有 pending review，server 应以显式 `interrupt_run` control 消费具体 interrupt，并采用与 reject 相同的未执行 action rollback 语义。TUI 不能只本地关闭 approval 面板，因为 graph checkpoint 仍然停在同一个 interrupt。
 - WebSocket 断开：默认保留 graph checkpoint 中的 pending review，不自动 reject。下次客户端连接并恢复同一 session/thread 时，server 应重新发送当前 pending `ReviewSpec`。
-- TUI 进程崩溃或 local-agent 重启：只要 graph checkpoint 仍存在，pending review 继续保留；启动后通过 session/thread recovery 重新发现并展示。内存里的 `pendingReviewRoutes` 丢失不代表 review 已关闭，TUI local server 必须能从 checkpoint pending interrupt 重建 route。只有用户明确中断或 session 被显式删除时，才 resume reject 或删除对应 checkpoint。
-- App chat 也应收敛到同样的 checkpoint recovery 语义，但需要先补清楚 app user/session route API。当前实现只支持运行中内存 route，不应把这个临时限制写成已完成能力。
+- TUI 进程崩溃或 local-agent 重启：只要 graph checkpoint 仍存在，pending
+  interrupt 就继续保留。重连后直接从 Chat active thread checkpoint
+  rematerialize，不依赖进程内 route。
+- Chat 与 Studio 不共享寻址协议。Chat 没有 `petId` 或 dispatch；Studio
+  通过 `dispatch(petId, input)` 找到该 Pet 的稳定 thread。
 
 ### 6.9 Runtime entry points
 
 当前代码有两条 HITL 入口，重构后都要归一到同一个 `ReviewSpec` / response resolver：
 
-- TUI chat：通过 LangGraph checkpoint 中的 pending interrupt 恢复。server 从 active session/thread 找到 checkpoint，并把 `{ reviewId, selectedOptionId, input }` 作为 resume payload。
-- App chat：response payload 同样使用 canonical `{ reviewId, selectedOptionId, input }`。checkpoint recovery 需要后续通过明确的 app user/session route API 接入，不能依赖 local-agent 私有内存状态来伪装恢复。
-- Studio humanReviewer：可以保留 `createWsHumanReviewer()` 里的 pending promise slot，但 pending slot 必须保存当前 `ReviewSpec`。收到 canonical response 后校验 `reviewId` / `selectedOptionId`，并把 canonical `{ reviewId, selectedOptionId, input }` 作为 graph resume payload。
+- Chat：从隐式 active session/thread 的 checkpoint 恢复。wire 使用
+  `interruptId + interactionId + selectedOptionId + input`；旧 `actionId` 与
+  `reviewId` 只在 parser 边界兼容并立即归一化。
+- Studio：一次 `dispatch` 就是一次 invocation，同一 `petId` 复用稳定 Pet
+  thread。interrupt response 是后续 typed dispatch input，用于 resume 同一
+  `interruptId`；它不是“用户回复”，也不复用 Chat route。具体 input schema
+  留给 Studio 后续改造确定。
+- 两者只共享 `PendingInterrupt` value contract 和 graph resume 语义，不共享
+  Chat client-local submission marker、implicit active-thread lookup 或 wire
+  handler。
 
-也就是说，Studio 可以保留 promise slot 这个控制流实现，但不能保留另一套 message text decoder。Studio review response 只允许 canonical `{ reviewId, selectedOptionId, input }`；不能再从 `message` 文本或 `resume.decisions` 猜 decision。
+Studio 后续可以保留 promise slot 这类内部控制流实现，但不能保留另一套
+message text decoder；也不能从普通 message 文本猜测 interrupt response。
 
 ## 7. Toolkit policy 调整
 

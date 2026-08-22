@@ -11,6 +11,7 @@ test('parseAgentSessionSnapshot retains explicit session token usage', () => {
       kind: 'chat',
       timeline: [],
       activeRun: null,
+      pendingInterrupt: null,
       sessionTokenUsage: {
         inputTokens: 20,
         outputTokens: 5,
@@ -36,6 +37,7 @@ test('parseAgentSessionSnapshot rejects a run-scoped session aggregate', () => {
       kind: 'chat',
       timeline: [],
       activeRun: null,
+      pendingInterrupt: null,
       sessionTokenUsage: {
         inputTokens: 20,
         outputTokens: 5,
@@ -56,6 +58,7 @@ test('parseAgentSessionSnapshot retains and validates global review policy runti
       kind: 'chat',
       timeline: [],
       activeRun: null,
+      pendingInterrupt: null,
     },
   } as const;
   assert.equal(

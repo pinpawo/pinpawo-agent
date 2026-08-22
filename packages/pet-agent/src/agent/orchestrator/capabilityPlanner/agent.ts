@@ -14,12 +14,10 @@ import { randomUUID } from 'node:crypto';
 import {
   createAgent,
   createMiddleware,
-  toolCallLimitMiddleware,
 } from 'langchain';
 import { z } from 'zod';
 import { z as z4 } from 'zod/v4';
 import {
-  CAPABILITY_PLANNER_MAX_CAPABILITY_SEARCH_CALLS,
   CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
   createCapabilityPlannerFileExplorer,
   createCapabilityPlannerSearchTool,
@@ -52,6 +50,8 @@ import {
 } from '../messageLanes';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
+export const DEFAULT_CAPABILITY_PLANNER_MAX_SEARCH_ROUNDS = 2;
+const MAX_CAPABILITY_DISCOVERY_HINTS = 50;
 const MAX_PLAN_TASKS = 24;
 const MAX_TASK_TEXT_CHARS = 2_000;
 const CONTINUE_CURRENT_TOOL_NAME = 'continue_current';
@@ -65,15 +65,13 @@ const plannerInvocationStateSchema = z4.object({
   currentInput: z4.custom<CapabilityPlannerInput>(),
   defaultCapability: z4.custom<CapabilityPlannerDefaultCapability | null>().default(null),
   plannerCommit: z4.custom<PlannerCommit>().nullable().default(null),
-  terminalRepairInputId: z4.string().default(''),
 });
 
 type PlannerInvocationState = z4.infer<typeof plannerInvocationStateSchema>;
 
 export type CapabilityPlannerAgentErrorCode =
   | 'planning_limit_reached'
-  | 'planning_timeout'
-  | 'submission_required';
+  | 'planning_timeout';
 
 export class CapabilityPlannerAgentError extends Error {
   readonly code: CapabilityPlannerAgentErrorCode;
@@ -124,7 +122,7 @@ function createPlannerTerminalTools(): StructuredTool[] {
     },
     {
       name: ADVANCE_PLAN_TOOL_NAME,
-      description: 'Boundary-only terminal action. Accept the completed current task and submit the shortest updated sequence of remaining work. The next task may use a different Capability.',
+      description: 'Boundary-only terminal action. Accept the completed current task and submit the remaining work. Preserve the prior remaining plan unchanged unless the accepted result makes a change necessary; when necessary, change only the smallest affected portion. The next task may use a different Capability.',
       schema: z.object({ tasks: plannerTasksSchema() }),
     },
   );
@@ -312,14 +310,146 @@ function currentPlannerInput(state: Partial<PlannerInvocationState>) {
   return state.currentInput;
 }
 
-function terminalRepairMessage(input: CapabilityPlannerInput) {
-  const actions = input.mode === 'entry'
-    ? 'submit_plan, request_user_input, or report_unavailable'
-    : 'continue_current, advance_plan, complete_goal, request_user_input, or report_unavailable';
-  return `Your previous response did not finish this Planner turn. Invoke exactly one valid terminal tool now: ${actions}. Do not respond with ordinary text.`;
+function terminalToolNamesForMode(input: CapabilityPlannerInput) {
+  return input.mode === 'entry'
+    ? [SUBMIT_PLAN_TOOL_NAME, REQUEST_USER_INPUT_TOOL_NAME, REPORT_UNAVAILABLE_TOOL_NAME]
+    : [
+        CONTINUE_CURRENT_TOOL_NAME,
+        ADVANCE_PLAN_TOOL_NAME,
+        COMPLETE_GOAL_TOOL_NAME,
+        REQUEST_USER_INPUT_TOOL_NAME,
+        REPORT_UNAVAILABLE_TOOL_NAME,
+      ];
 }
 
-function createPlannerMiddleware() {
+type CapabilityExplorationState = {
+  status: 'open' | 'closed';
+  roundsUsed: number;
+  maxRounds: number;
+};
+
+function capabilityExplorationState(
+  state: Partial<PlannerInvocationState> & { messages?: BaseMessage[] },
+  maxRounds: number,
+): CapabilityExplorationState {
+  const input = currentPlannerInput(state);
+  const inputMessageId = `planner:${input.inputId}`;
+  let inputIndex = -1;
+  for (let index = (state.messages?.length ?? 0) - 1; index >= 0; index -= 1) {
+    if (state.messages?.[index]?.id === inputMessageId) {
+      inputIndex = index;
+      break;
+    }
+  }
+  const roundsUsed = inputIndex < 0
+    ? 0
+    : state.messages?.slice(inputIndex + 1).filter((message) =>
+        AIMessage.isInstance(message)
+        && message.tool_calls?.some((toolCall) =>
+          toolCall.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME))
+      .length ?? 0;
+  return {
+    status: roundsUsed >= maxRounds ? 'closed' : 'open',
+    roundsUsed,
+    maxRounds,
+  };
+}
+
+function closeCapabilityExploration(
+  message: ToolMessage,
+  state: Partial<PlannerInvocationState> & { messages?: BaseMessage[] },
+  maxSearchRounds: number,
+) {
+  const input = currentPlannerInput(state);
+  const exploration = capabilityExplorationState(state, maxSearchRounds);
+  const remainingRounds = Math.max(0, exploration.maxRounds - exploration.roundsUsed);
+  let payload: Record<string, unknown>;
+  try {
+    const parsed = typeof message.content === 'string'
+      ? JSON.parse(message.content) as unknown
+      : null;
+    payload = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : { ok: false, data: message.content };
+  } catch {
+    payload = { ok: false, data: message.content };
+  }
+  const data = payload.data && typeof payload.data === 'object'
+    ? payload.data as { matches?: unknown[] }
+    : null;
+  const specificCandidates = [...new Set(
+    (Array.isArray(data?.matches) ? data.matches : []).flatMap((match) => {
+      if (!match || typeof match !== 'object' || !('path' in match)
+        || typeof match.path !== 'string') {
+        return [];
+      }
+      const [capabilityName] = match.path.split('/');
+      return capabilityName
+        && capabilityName !== state.defaultCapability?.capabilityName
+        ? [capabilityName]
+        : [];
+    }),
+  )];
+  const reason = payload.ok === true
+    ? (data?.matches?.length ? 'candidates_disclosed' : 'no_match')
+    : 'search_error';
+  const defaultCandidate = state.defaultCapability?.capabilityName ?? null;
+  const availableSpecificCandidates = input.workspace.capabilityNames.filter(
+    (capabilityName) => capabilityName !== defaultCandidate,
+  );
+  const discoverableSpecificCandidates = input.mode === 'boundary'
+    ? availableSpecificCandidates.filter(
+        (capabilityName) => capabilityName !== input.activeDelegation?.capability,
+      )
+    : availableSpecificCandidates;
+  const nextSearchCandidates = specificCandidates.length === 0
+    && exploration.status === 'open'
+    ? discoverableSpecificCandidates.slice(0, MAX_CAPABILITY_DISCOVERY_HINTS)
+    : [];
+  const uncheckedSpecificCandidatesRemain = nextSearchCandidates.length > 0;
+  message.content = JSON.stringify({
+    ...payload,
+    exploration: {
+      status: exploration.status,
+      reason,
+      roundsUsed: exploration.roundsUsed,
+      maxRounds: exploration.maxRounds,
+      remainingRounds,
+      specificCandidates,
+      nextSearchCandidates,
+      nextSearchCandidatesComplete: nextSearchCandidates.length
+        === discoverableSpecificCandidates.length,
+      defaultCandidate,
+      defaultCandidateRole: defaultCandidate
+        ? (specificCandidates.length > 0
+            ? 'fallback_only'
+            : uncheckedSpecificCandidatesRemain
+              ? 'deferred_while_specific_candidates_remain_unchecked'
+              : 'eligible_default')
+        : 'absent',
+      specificCandidateStatus: specificCandidates.length > 0
+        ? 'literal_match_requires_positive_scope_check'
+        : 'none_disclosed',
+      planUpdateRule: input.mode === 'boundary'
+        ? 'Default to copying every prior remaining-plan task verbatim. The accepted handoff is already executor context, so never copy its details into task text. Modify the plan only when leaving it unchanged would be incorrect, unexecutable, or insufficient for the user goal; then change only the smallest necessary portion.'
+        : null,
+      selectionRule: specificCandidates.length > 0
+        ? input.mode === 'boundary'
+          ? 'A literal match is not proof of applicability. Evaluate complete documents against unfinished work after the accepted result, not against the completed active task or the whole user goal. Negative or limiting text does not authorize the matched action. Prefer the best-fitting specific candidate only when its positive scope executes the next task; otherwise preserve a valid planned executor, use General when applicable, or report unavailable.'
+          : 'A literal match is not proof of applicability. Check each complete document for positive scope; terms found only in negative or limiting text make that candidate unsuitable. If any specific candidate positively covers the current task, select the best-fitting one. Use General only after determining every disclosed specific candidate is unsuitable; never use General merely to merge distinct task boundaries.'
+        : uncheckedSpecificCandidatesRemain
+          ? 'No specific candidate matched. Before selecting General, inspect plausible nextSearchCandidates using an exact candidate name in the remaining search round.'
+          : 'No specific candidate was disclosed in this batch. Select the verified default only if it can execute the task.',
+      terminalTools: terminalToolNamesForMode(input),
+      next: exploration.status === 'closed'
+        ? 'Exploration is closed. Apply selectionRule, then invoke exactly one terminal tool.'
+        : 'Choose and invoke a terminal tool now if the candidates are sufficient; otherwise use the remaining disclosure round.',
+    },
+  });
+  return message;
+}
+
+function createPlannerMiddleware(maxSearchRounds: number) {
   return createMiddleware({
     name: 'CapabilityPlanner',
     stateSchema: plannerInvocationStateSchema,
@@ -331,40 +461,34 @@ function createPlannerMiddleware() {
           goto: END,
         });
       }
+      const exploration = capabilityExplorationState(request.state, maxSearchRounds);
+      const terminalToolNames = new Set(terminalToolNamesForMode(input));
       return handler({
         ...request,
         systemMessage: new SystemMessage(
           buildCapabilityPlannerAgentSystemPrompt(
             input.mode,
             request.state.defaultCapability ?? null,
+            exploration,
           ),
         ),
+        ...(exploration.status === 'closed'
+          ? {
+              tools: request.tools.filter((plannerTool) =>
+                typeof plannerTool.name === 'string'
+                && terminalToolNames.has(plannerTool.name)),
+              toolChoice: 'required' as const,
+            }
+          : {}),
       });
-    },
-    afterAgent: {
-      hook: (state) => {
-        const input = currentPlannerInput(state);
-        const latestMessage = state.messages.at(-1);
-        if (!AIMessage.isInstance(latestMessage)
-          || latestMessage.tool_calls?.length
-          || state.plannerCommit
-          || state.terminalRepairInputId === input.inputId) {
-          return undefined;
-        }
-        return {
-          messages: [new HumanMessage({
-            id: `planner-repair:${input.inputId}`,
-            content: terminalRepairMessage(input),
-          })],
-          terminalRepairInputId: input.inputId,
-          jumpTo: 'model' as const,
-        };
-      },
-      canJumpTo: ['model'],
     },
     wrapToolCall: async (request, handler) => {
       const input = currentPlannerInput(request.state);
       const result = await handler(request);
+      if (ToolMessage.isInstance(result)
+        && request.toolCall.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME) {
+        return closeCapabilityExploration(result, request.state, maxSearchRounds);
+      }
       if (!ToolMessage.isInstance(result)
         || ![
           CONTINUE_CURRENT_TOOL_NAME,
@@ -404,13 +528,18 @@ function createPlannerMiddleware() {
 export function createCapabilityPlannerAgent(params: {
   model: BaseChatModel;
   timeoutMs?: number;
+  /** Maximum model turns that may invoke capability_search. Defaults to 2. */
+  maxSearchRounds?: number;
   registryBackend?: CapabilityRegistryBackend;
   maxDocumentReadBytes?: number;
   /** Additional invocation-scoped Planner tools. */
   additionalTools?: StructuredTool[];
 }): CapabilityPlannerRunner {
   const timeoutMs = params.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const maxSearchRounds = params.maxSearchRounds
+    ?? DEFAULT_CAPABILITY_PLANNER_MAX_SEARCH_ROUNDS;
   assertPositiveInteger(timeoutMs, 'Capability Planner timeoutMs');
+  assertPositiveInteger(maxSearchRounds, 'Capability Planner maxSearchRounds');
   if (params.maxDocumentReadBytes !== undefined) {
     assertPositiveInteger(
       params.maxDocumentReadBytes,
@@ -438,18 +567,13 @@ export function createCapabilityPlannerAgent(params: {
       currentPlannerInput(runtime.state),
     ).search(terms, runtime.signal),
   );
-  const capabilitySearchLimitMiddleware = toolCallLimitMiddleware({
-    toolName: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
-    runLimit: CAPABILITY_PLANNER_MAX_CAPABILITY_SEARCH_CALLS,
-    exitBehavior: 'continue',
-  });
-  const middleware = createPlannerMiddleware();
+  const middleware = createPlannerMiddleware(maxSearchRounds);
   const agent = createAgent({
     name: 'capabilityPlanner',
     model: params.model,
     tools: [capabilitySearchTool, ...terminalTools, ...additionalTools],
     systemPrompt: '',
-    middleware: [capabilitySearchLimitMiddleware, middleware],
+    middleware: [middleware],
     checkpointer: false,
   });
 
@@ -521,10 +645,14 @@ export function createCapabilityPlannerAgent(params: {
             'Capability Planner document read limit was reached before a valid commit.',
           );
         }
-        throw new CapabilityPlannerAgentError(
-          'submission_required',
-          'Capability Planner must finish with a structured commit tool.',
-        );
+        return {
+          plannerStatus: 'incomplete',
+          reason: 'terminal_commit_missing',
+          messageUpdates: buildPlannerMessageUpdates({
+            input,
+            resultMessages: result.messages,
+          }),
+        };
       } catch (error) {
         if (timeout.didTimeOut()) {
           throw new CapabilityPlannerAgentError(

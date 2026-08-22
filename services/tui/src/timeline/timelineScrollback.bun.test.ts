@@ -591,6 +591,7 @@ function session(
           activity: 'streaming',
         }
       : null,
+    pendingInterrupt: null,
   };
 }
 

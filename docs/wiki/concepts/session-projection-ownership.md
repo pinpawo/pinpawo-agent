@@ -2,7 +2,7 @@
 title: Session Projection Ownership Boundaries
 page_type: concept
 status: validated
-updated: 2026-08-07
+updated: 2026-08-22
 sources:
   - ../../LOCAL_AGENT_SESSION_PROJECTION.md
   - ../../../packages/agent-session/src/domain.ts
@@ -12,7 +12,7 @@ sources:
   - ../../../packages/pet-agent/src/agent/orchestrator/review/reviewSpec.ts
   - ../../../services/local-agent/src/tui/state/tuiState.ts
   - ../../../services/local-agent/src/tui/TuiRuntimeController.ts
-  - ../../../services/local-agent/src/reviewResolutionLifecycle.ts
+  - ../../design/local-agent/pending-interrupt-chat.md
   - https://github.com/pinpawo/pinpawo-agent/issues/385
   - https://github.com/pinpawo/pinpawo-agent/issues/390
   - https://github.com/pinpawo/pinpawo-agent/pull/468
@@ -26,36 +26,45 @@ related:
   - ../interruption-and-delegation-continuation.md
   - checkpoint-snapshot-timeline.md
   - ../decisions/review-resolution-is-client-local.md
+  - studio-pet-thread-dispatch-invocation.md
 ---
 
 # Session Projection Ownership Boundaries
+
+> Scope note: this page describes the Chat/TUI session projection. Chat has an
+> implicit active thread and uses neither `petId` nor Studio dispatch. The
+> proposed Studio model wraps the shared interrupt projection in its own target
+> and invocation envelope. See [Studio Pet thread and dispatch
+> invocation](studio-pet-thread-dispatch-invocation.md).
 
 The central invariant of the projection is that each fact has exactly one owner.
 The refactor's own concept audit found that the client and contract layers
 converged cleanly, while server transport-control state briefly accreted; issue
 #390 addressed that. This page records where each responsibility lives.
 
-## Four owners of review state
+## Owners of interrupt and interaction state
 
-**Decision (issue #385).** A pending review is represented by four things with
-different owners and lifecycles — do not collapse them:
+**Decision (issue #385, revised by PR #682).** A pending interrupt and the local
+interaction around it have distinct owners—do not collapse them:
 
 | Fact | Owner | Lifetime |
 | --- | --- | --- |
-| `ReviewAction` (`actionId` + ordered public `HumanReviewRequest[]`) | shared / checkpoint-derived projection | while the checkpoint interrupt exists |
-| Partial decisions + `resolutionSent` marker (`ReviewDraft`) | TUI-local interaction state | until server-observed state diverges |
-| Route to internal `ReviewSpec[]` + claim + consumption + interrupt ordering | server-local `ReviewResolutionLifecycle` | per resolution attempt |
-| Run activity / waiting / interrupting | shared, server-observed | reduced from server events |
+| `PendingInterrupt` (`interruptId` + presentation-safe payload) | shared / checkpoint-derived projection | while the checkpoint interrupt exists |
+| Partial decisions + `resolution-sent` phase (`ApprovalState`) | TUI-local interaction state | until server-observed state diverges |
+| Internal `ReviewSpec[]`, decisions, effects, and resume payload | Pet runtime checkpoint | while the interrupt exists |
+| Active invocation (`requestId` + running/interrupting) | shared | accepted command through terminal server event |
 
-`ReviewAction` contains only checkpoint-derived batch identity and ordered review
-specs — never client command progress. Sending a review resolution does **not**
-optimistically advance the shared projection; the next server event or snapshot
-provides the next shared fact.
+Human review is one `PendingInterrupt` payload. Its projection contains only
+interrupt identity and ordered public interactions—never client command
+progress. Sending an interrupt resume starts a new active invocation but does
+**not** optimistically consume the pending interrupt; the next server event or
+snapshot clears or replaces that checkpoint-derived fact.
 
-**Fact (PR #572).** The shared specs are presentation-only boundary contracts.
-The server's ephemeral route retains the authoritative internal `ReviewSpec[]`
-needed to validate a response and resume the graph. It is recoverable from the
-checkpoint and must never become a second durable review authority; see
+**Fact (PR #572, revised by PR #682).** The shared interactions are
+presentation-only boundary contracts. For each response attempt, the server
+reloads the authoritative internal `ReviewSpec[]` from the active checkpoint,
+validates the response, and builds the resume. It retains no independent review
+existence or lifecycle state; see
 [Agent boundary contracts](../agent-boundary-contracts.md).
 
 ## What is TUI-local, not shared
@@ -96,11 +105,11 @@ the hosted adapter run the same transition logic. See
 
 ## Server transport-control state is never projected
 
-**Decision (issue #390).** `ReviewResolutionLifecycle` and the run command
-sequencing it absorbed are server-local transport control state. They are never
-projected into `AgentSession` or a snapshot. Client-command progress and
-one-shot run-interrupt handling stay out of the shared model; a user-triggered
-`run.interrupt` adds no client-side pending domain state.
+**Decision (issue #390, refined by PR #682).** Chat invocation serialization and
+one-shot run-interrupt handling are server-local transport control. They are
+never projected into `AgentSession` or a snapshot. The handler reloads the
+active thread checkpoint for projection and resume rather than maintaining a
+second review lifecycle. Client command progress remains local.
 
 **Fact.** Inflight request ownership is another server-local control fact. An
 interrupt signal changes the projected run to `interrupting`, but the invocation

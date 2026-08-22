@@ -9,8 +9,9 @@ export function createSpikeSession(turnCount = 120): AgentSession {
   let session: AgentSession = {
     sessionId: 'opentui-spike',
     kind: 'chat',
-    timeline: [],
-    activeRun: null,
+  timeline: [],
+  activeRun: null,
+  pendingInterrupt: null,
     runtime: {
       model: 'spike-model',
       cwd: '/tmp/pinpawo-opentui-spike',

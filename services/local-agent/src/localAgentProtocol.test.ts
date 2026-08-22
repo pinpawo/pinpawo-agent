@@ -24,7 +24,6 @@ test('parseLocalAgentClientMessage accepts valid chat requests and rejects malfo
       type: 'chat_request',
       requestId: 'req-1',
       message: 'hello',
-      userId: 'user-1',
     },
   );
   assert.equal(
@@ -89,32 +88,34 @@ test('parseLocalAgentClientMessage accepts canonical human review response field
     parseLocalAgentClientMessage(JSON.stringify({
       type: 'human_review_response',
       requestId: 'req-1',
-      actionId: 'interrupt-1',
-      interactionId: 'review-1',
-      reviewId: 'review-1',
-      selectedOptionId: 'respond',
-      input: { message: 'list files first' },
+      interruptId: 'interrupt-1',
+      responses: [{
+        interactionId: 'review-1',
+        selectedOptionId: 'respond',
+        input: { message: 'list files first' },
+      }],
     })),
     {
       type: 'human_review_response',
       requestId: 'req-1',
-      actionId: 'interrupt-1',
-      interactionId: 'review-1',
-      reviewId: 'review-1',
-      selectedOptionId: 'respond',
-      input: { message: 'list files first' },
+      interruptId: 'interrupt-1',
+      responses: [{
+        interactionId: 'review-1',
+        selectedOptionId: 'respond',
+        input: { message: 'list files first' },
+      }],
     },
   );
   assert.deepEqual(
     parseLocalAgentClientMessage(JSON.stringify({
       type: 'review.cancel',
       requestId: 'req-1',
-      actionId: 'interrupt-1',
+      interruptId: 'interrupt-1',
     })),
     {
       type: 'review.cancel',
       requestId: 'req-1',
-      actionId: 'interrupt-1',
+      interruptId: 'interrupt-1',
     },
   );
   assert.deepEqual(
@@ -143,6 +144,7 @@ test('parseLocalAgentClientMessage accepts canonical human review response field
     parseLocalAgentClientMessage(JSON.stringify({
       type: 'human_review_response',
       requestId: 'req-1',
+      interruptId: 'interrupt-1',
       interactionId: 'review-2',
       reviewId: 'review-2',
       selectedOptionId: 'approve',
@@ -154,10 +156,8 @@ test('parseLocalAgentClientMessage accepts canonical human review response field
     {
       type: 'human_review_response',
       requestId: 'req-1',
-      interactionId: 'review-2',
-      reviewId: 'review-2',
-      selectedOptionId: 'approve',
-      decisions: [
+      interruptId: 'interrupt-1',
+      responses: [
         { interactionId: 'review-1', selectedOptionId: 'approve' },
         { interactionId: 'review-2', selectedOptionId: 'approve' },
       ],
@@ -204,6 +204,45 @@ test('parseLocalAgentClientMessage accepts canonical human review response field
     null,
   );
   assert.equal(parseLocalAgentClientMessage(JSON.stringify({ type: 'human_review_response', requestId: 'req-1' })), null);
+});
+
+test('parseLocalAgentClientMessage normalizes legacy actionId to interruptId', () => {
+  assert.deepEqual(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'human_review_response',
+      requestId: 'req-1',
+      actionId: 'interrupt-1',
+      interactionId: 'review-1',
+      selectedOptionId: 'approve',
+    })),
+    {
+      type: 'human_review_response',
+      requestId: 'req-1',
+      interruptId: 'interrupt-1',
+      responses: [{ interactionId: 'review-1', selectedOptionId: 'approve' }],
+    },
+  );
+  assert.deepEqual(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'review.cancel',
+      requestId: 'req-1',
+      actionId: 'interrupt-1',
+    })),
+    {
+      type: 'review.cancel',
+      requestId: 'req-1',
+      interruptId: 'interrupt-1',
+    },
+  );
+  assert.equal(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'review.cancel',
+      requestId: 'req-1',
+      interruptId: 'interrupt-1',
+      actionId: 'other-interrupt',
+    })),
+    null,
+  );
 });
 
 test('parseLocalAgentClientMessage rejects legacy interrupt_request control messages', () => {
@@ -306,12 +345,13 @@ test('parseLocalAgentServerMessage rejects legacy server messages by default', (
 
 test('parseLocalAgentServerMessage accepts session results and validates resumed identity', () => {
   const snapshot = {
-    version: 4,
+    version: 5,
     session: {
       sessionId: 'chat:one',
       kind: 'chat',
       timeline: [],
       activeRun: null,
+      pendingInterrupt: null,
     },
   };
   const session = {
@@ -663,19 +703,25 @@ test('parseLocalAgentServerMessage accepts public human_review.requested interac
       event: {
         type: 'human_review.requested',
         requestId: 'req-1',
-        review: {
-          interactionId: 'review-1',
-          schemaVersion: 2,
-          view: {
-            kind: 'plain',
-            title: 'Needs approval',
-            body: 'Run command?',
+        pendingInterrupt: {
+          interruptId: 'interrupt-1',
+          payload: {
+            kind: 'human_review',
+            interactions: [{
+              interactionId: 'review-1',
+              schemaVersion: 2,
+              view: {
+                kind: 'plain',
+                title: 'Needs approval',
+                body: 'Run command?',
+              },
+              options: [{
+                id: 'approve',
+                label: 'Approve',
+                batchSubmission: 'immediate',
+              }],
+            }],
           },
-          options: [{
-            id: 'approve',
-            label: 'Approve',
-            batchSubmission: 'immediate',
-          }],
         },
       },
     })),
@@ -685,29 +731,36 @@ test('parseLocalAgentServerMessage accepts public human_review.requested interac
       event: {
         type: 'human_review.requested',
         requestId: 'req-1',
-        review: {
-          interactionId: 'review-1',
-          schemaVersion: 2,
-          view: {
-            kind: 'plain',
-            title: 'Needs approval',
-            body: 'Run command?',
+        pendingInterrupt: {
+          interruptId: 'interrupt-1',
+          payload: {
+            kind: 'human_review',
+            interactions: [{
+              interactionId: 'review-1',
+              schemaVersion: 2,
+              view: {
+                kind: 'plain',
+                title: 'Needs approval',
+                body: 'Run command?',
+              },
+              options: [{
+                id: 'approve',
+                label: 'Approve',
+                batchSubmission: 'immediate',
+              }],
+            }],
           },
-          options: [{
-            id: 'approve',
-            label: 'Approve',
-            batchSubmission: 'immediate',
-          }],
         },
       },
     },
   );
 });
 
-test('parseLocalAgentServerMessage rejects legacy human_review.requested fields', () => {
+test('parseLocalAgentServerMessage normalizes legacy human_review.requested fields', () => {
   const canonicalEvent = {
     type: 'human_review.requested',
     requestId: 'req-1',
+    interruptId: 'interrupt-1',
     review: {
       interactionId: 'review-1',
       schemaVersion: 2,
@@ -722,6 +775,29 @@ test('parseLocalAgentServerMessage rejects legacy human_review.requested fields'
       }],
     },
   };
+
+  assert.deepEqual(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'event',
+      requestId: 'req-1',
+      event: canonicalEvent,
+    })),
+    {
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        type: 'human_review.requested',
+        requestId: 'req-1',
+        pendingInterrupt: {
+          interruptId: 'interrupt-1',
+          payload: {
+            kind: 'human_review',
+            interactions: [canonicalEvent.review],
+          },
+        },
+      },
+    },
+  );
 
   assert.equal(
     parseLocalAgentServerMessage(JSON.stringify({
@@ -927,6 +1003,7 @@ test('remote server-message adapter preserves snapshot payloads', () => {
       status: 'completed',
     }],
     activeRun: null,
+    pendingInterrupt: null,
     runtime: {
       model: 'test-model',
       cwd: '/Users/alice/project',

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import stringWidth from 'string-width';
 import type {
-  AgentRunView,
+  PendingInterruptProjection,
   ReviewResponse,
   ReviewSpec,
 } from '@pinpawo/agent-session';
@@ -30,7 +30,7 @@ test('approval state follows the canonical waiting review and defaults to primar
   assert.equal(state.phase, 'ready');
   assert.equal(selectedApprovalOption(state)?.id, 'approve');
   assert.equal(
-    syncApprovalState(state, { ...run, state: 'running', activity: 'thinking' }).phase,
+    syncApprovalState(state, null).phase,
     'closed',
   );
 });
@@ -49,18 +49,18 @@ test('approval navigation yields to free-text editing after the draft starts', (
   assert.equal(resolveApprovalKey(state, key('escape')), 'cancel');
 });
 
-test('approved batch decisions advance locally before transport submission', () => {
+test('approved batch responses advance locally before transport submission', () => {
   let state = syncApprovalState(createApprovalState(), waitingReview([
     review('review-1'),
     review('review-2'),
   ]));
-  const decisions: ReviewResponse[] = [{
+  const responses: ReviewResponse[] = [{
     interactionId: 'review-1',
     selectedOptionId: 'approve',
   }];
-  state = advanceApproval(state, decisions);
+  state = advanceApproval(state, responses);
   assert.equal(currentApprovalReview(state)?.interactionId, 'review-2');
-  assert.deepEqual(state.phase === 'closed' ? null : state.decisions, decisions);
+  assert.deepEqual(state.phase === 'closed' ? null : state.responses, responses);
   assert.equal(state.phase === 'closed' ? null : state.draft, '');
 
   state = beginApprovalSubmission(state);
@@ -92,6 +92,15 @@ test('approved batch decisions advance locally before transport submission', () 
       : buildApprovalViewModel(state, 80).bottomTitle,
     /Interrupt requested/,
   );
+});
+
+test('a failed resume reopens the same pending interrupt for retry', () => {
+  const pending = waitingReview([review('review-1')]);
+  let state = syncApprovalState(createApprovalState(), pending);
+  state = beginApprovalSubmission(state);
+
+  assert.equal(syncApprovalState(state, pending, true).phase, 'resolution-sent');
+  assert.equal(syncApprovalState(state, pending, false).phase, 'ready');
 });
 
 test('approval diff details page within a bounded CJK footer view', () => {
@@ -323,15 +332,10 @@ test('every review view variant renders through its own path', () => {
   assert.equal(toneOf('const b = 3;'), 'muted');
 });
 
-function waitingReview(reviews: ReviewSpec[]): AgentRunView {
+function waitingReview(reviews: ReviewSpec[]): PendingInterruptProjection {
   return {
-    requestId: 'request-1',
-    state: 'waiting_review',
-    reviewAction: {
-      actionId: 'action-1',
-      reviews,
-      petId: 'paws',
-    },
+    interruptId: 'pendingInterrupt-1',
+    payload: { kind: 'human_review', interactions: reviews },
   };
 }
 

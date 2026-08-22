@@ -7,9 +7,9 @@ import type {
   AgentOperationPhase,
   AgentOperationRaw,
 } from './events';
-import type { ReviewAction } from './review';
+import type { PendingInterruptProjection } from './review';
 
-export const AGENT_SESSION_SNAPSHOT_VERSION = 4 as const;
+export const AGENT_SESSION_SNAPSHOT_VERSION = 5 as const;
 
 export type AgentMessageEntry = {
   id: string;
@@ -58,10 +58,6 @@ export type AgentSessionMessageInput = {
   createdAt?: string;
 };
 
-export type AgentReviewAction = ReviewAction & {
-  petId?: string;
-};
-
 export type AgentRunActivity =
   | 'thinking'
   | 'using_tool'
@@ -79,22 +75,19 @@ export type AgentPlanItem = {
   status: 'completed' | 'active' | 'pending';
 };
 
-type AgentRunViewBase = {
-  requestId: string;
+type AgentRunTiming = {
   startedAt?: number;
   updatedAt?: number;
 };
 
 export type AgentRunView =
-  | AgentRunViewBase & {
+  | AgentRunTiming & {
+      requestId: string;
       state: 'running';
       activity: AgentRunActivity;
     }
-  | AgentRunViewBase & {
-      state: 'waiting_review';
-      reviewAction: AgentReviewAction;
-    }
-  | AgentRunViewBase & {
+  | AgentRunTiming & {
+      requestId: string;
       state: 'interrupting';
     };
 
@@ -149,6 +142,7 @@ export type AgentSession = {
   actor?: AgentActorView;
   timeline: AgentTimelineEntry[];
   activeRun: AgentRunView | null;
+  pendingInterrupt: PendingInterruptProjection | null;
   /** Ephemeral delegation plan, separate from the durable conversation timeline. */
   currentPlan?: AgentPlan | null;
   runtime?: AgentRuntimeView;

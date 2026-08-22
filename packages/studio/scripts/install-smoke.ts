@@ -96,8 +96,8 @@ try {
 
   const cli = process.platform === 'win32'
     ? await runProcess(
-      process.env.ComSpec ?? 'cmd.exe',
-      ['/d', '/s', '/c', `"${installedBin}" --help`],
+      process.execPath,
+      [join(installedStudio, 'dist', 'cli.js'), '--help'],
       consumerDir,
       'run installed pinpawo-studio CLI',
       30_000,

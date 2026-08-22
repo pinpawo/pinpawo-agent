@@ -47,10 +47,11 @@ guardrails from this refactor should be pinned:
   define the local-agent domain model — the adapter maps local identifiers to
   canonical ones and trims fields (for example strips operation `raw`), without
   redefining session/timeline/review semantics.
-- **Fact.** The current snapshot emits V4 and migrates valid V3 review payloads
-  to public Human Review V2. The public interaction parser rejects undeclared
-  shapes rather than treating an internal review schema version as a public
-  protocol version.
+- **Fact.** The current snapshot emits V5 and migrates valid V3 and V4 embedded
+  review waits into the separate `pendingInterrupt` field. It also projects
+  valid legacy internal review specs to public Human Review V2. The public
+  interaction parser rejects undeclared shapes rather than treating an internal
+  review schema version as a public protocol version.
 - **Decision.** Do not introduce general negotiation before a real multi-version
   consumer exists. Once one does, every public schema change needs an explicit
   version, migration/compatibility window, and coordinated client rollout; see

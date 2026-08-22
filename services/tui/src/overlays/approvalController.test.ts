@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type {
-  AgentRunView,
+  PendingInterruptProjection,
   ReviewResponse,
   ReviewSpec,
 } from '@pinpawo/agent-session';
@@ -25,12 +25,12 @@ test('approval controller keeps the one-shot resolution gate after a wait timeou
     ok: true,
     status: 'advanced',
     decision: firstDecision,
-    decisions: [firstDecision],
+    responses: [firstDecision],
   }, {
     ok: true,
     status: 'sent',
     decision: secondDecision,
-    decisions: [firstDecision, secondDecision],
+    responses: [firstDecision, secondDecision],
   });
   const timers: Array<{
     callback: () => void;
@@ -99,7 +99,7 @@ test('approval controller preserves the one-shot resolution gate when connection
     ok: true,
     status: 'sent',
     decision,
-    decisions: [decision],
+    responses: [decision],
   });
   const cleared: ReturnType<typeof setTimeout>[] = [];
   const controller = new ApprovalController({
@@ -121,7 +121,7 @@ test('approval controller preserves the one-shot resolution gate when connection
   assert.match(disconnected.message ?? '', /connection changed/i);
 });
 
-test('approval controller sends canonical cancellation for the active action', () => {
+test('approval controller sends canonical cancellation for the pending interrupt', () => {
   const sessionController = new FakeReviewSessionController();
   const controller = new ApprovalController({
     sessionController,
@@ -133,8 +133,7 @@ test('approval controller sends canonical cancellation for the active action', (
   controller.handle('cancel');
 
   assert.deepEqual(sessionController.cancelCalls, [{
-    requestId: 'request-1',
-    actionId: 'action-1',
+    interruptId: 'pendingInterrupt-1',
   }]);
   assert.equal(controller.getState().phase, 'resolution-sent');
   controller.markInterruptSent();
@@ -169,14 +168,10 @@ class FakeReviewSessionController {
 
 function waitingReview(
   reviews = [review('review-1'), review('review-2')],
-): AgentRunView {
+): PendingInterruptProjection {
   return {
-    requestId: 'request-1',
-    state: 'waiting_review',
-    reviewAction: {
-      actionId: 'action-1',
-      reviews,
-    },
+    interruptId: 'pendingInterrupt-1',
+    payload: { kind: 'human_review', interactions: reviews },
   };
 }
 

@@ -31,16 +31,17 @@ test('local server dispatcher routes typed client messages and pong', async () =
       seen.push(`studio:${message.requestId}:${message.userRequest}`);
     },
     onHumanReviewResponse: (_peer, message) => {
-      seen.push(`review:${message.requestId}:${message.reviewId}:${message.selectedOptionId}`);
+      const response = message.responses.at(-1);
+      seen.push(`review:${message.requestId}:${response?.interactionId}:${response?.selectedOptionId}`);
     },
     onReviewCancel: (_peer, message) => {
-      seen.push(`review-cancel:${message.requestId}:${message.actionId}`);
+      seen.push(`review-cancel:${message.requestId}:${message.interruptId}`);
     },
     onRunInterrupt: (_peer, message) => {
       seen.push(`run-interrupt:${message.requestId}`);
     },
-    onNewSession: (_peer, message) => {
-      seen.push(`new:${message.userId ?? ''}`);
+    onNewSession: () => {
+      seen.push('new');
     },
     onRuntimeConfigUpdate: (_peer, message) => {
       seen.push(`policy:${message.globalReviewPolicyMode}`);
@@ -90,6 +91,7 @@ test('local server dispatcher routes typed client messages and pong', async () =
   dispatchLocalServerMessage(peer, JSON.stringify({
     type: 'human_review_response',
     requestId: 'review-1',
+    interruptId: 'action-1',
     reviewId: 'review-spec-1',
     selectedOptionId: 'approve',
   }), handlers);
@@ -100,7 +102,7 @@ test('local server dispatcher routes typed client messages and pong', async () =
   dispatchLocalServerMessage(peer, JSON.stringify({
     type: 'review.cancel',
     requestId: 'review-1',
-    actionId: 'action-1',
+    interruptId: 'action-1',
   }), handlers);
   dispatchLocalServerMessage(peer, JSON.stringify({
     type: 'new_session',
@@ -184,7 +186,7 @@ test('local server dispatcher routes typed client messages and pong', async () =
       'review:review-1:review-spec-1:approve',
       'run-interrupt:chat-1',
       'review-cancel:review-1:action-1',
-      'new:user-1',
+      'new',
       'policy:auto_authorization',
       'policy:full_access',
       'snapshot:snapshot-1',

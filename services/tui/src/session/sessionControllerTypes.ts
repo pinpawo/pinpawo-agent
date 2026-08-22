@@ -59,7 +59,7 @@ export type SubmitReviewResponseResult =
       ok: true;
       status: 'advanced' | 'sent';
       decision: ReviewResponse;
-      decisions: ReviewResponse[];
+      responses: ReviewResponse[];
     }
   | {
       ok: false;

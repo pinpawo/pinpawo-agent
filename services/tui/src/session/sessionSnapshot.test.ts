@@ -15,6 +15,7 @@ test('completion snapshot replaces an idle timeline', () => {
     kind: 'chat',
     timeline: [message('snapshot-message', 'canonical reply')],
     activeRun: null,
+    pendingInterrupt: null,
   });
 
   const reconciled = reconcileSessionSnapshot(
@@ -49,6 +50,7 @@ test('completion snapshot cannot replace a newer active timeline', () => {
     kind: 'chat',
     timeline: [message('old-run', 'old reply')],
     activeRun: null,
+    pendingInterrupt: null,
     sessionTokenUsage: {
       inputTokens: 10,
       outputTokens: 5,
@@ -75,6 +77,7 @@ function session(overrides: Partial<AgentSession> = {}): AgentSession {
     kind: 'chat',
     timeline: [],
     activeRun: null,
+    pendingInterrupt: null,
     ...overrides,
   };
 }

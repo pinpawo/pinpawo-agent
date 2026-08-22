@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createAgentSessionSnapshot } from '@pinpawo/agent-session';
 import { TuiSessionController } from './sessionController';
 import {
   FakeConnection,
@@ -7,7 +8,7 @@ import {
   reviewSpec,
 } from './sessionControllerTestSupport';
 
-test('review responses advance approved batches and send the final canonical decisions', () => {
+test('review responses advance approved batches and send the final canonical responses', () => {
   let connection!: FakeConnection;
   const controller = new TuiSessionController({
     connectionFactory: (handlers) => {
@@ -32,9 +33,8 @@ test('review responses advance approved batches and send the final canonical dec
   ]));
 
   const first = controller.submitReviewResponse({
-    requestId: 'chat',
-    actionId: 'review-action',
-    decisions: [],
+    interruptId: 'review-action',
+    responses: [],
     optionId: 'approve-1',
   });
   assert.equal(first.ok, true);
@@ -42,20 +42,17 @@ test('review responses advance approved batches and send the final canonical dec
   assert.equal(connection.sent.length, 1);
 
   const second = controller.submitReviewResponse({
-    requestId: 'chat',
-    actionId: 'review-action',
-    decisions: first.ok ? first.decisions : [],
+    interruptId: 'review-action',
+    responses: first.ok ? first.responses : [],
     optionId: 'approve-2',
   });
   assert.equal(second.ok, true);
   assert.equal(second.ok ? second.status : null, 'sent');
   assert.deepEqual(connection.sent.at(-1), {
     type: 'human_review_response',
-    requestId: 'chat',
-    actionId: 'review-action',
-    interactionId: 'review-2',
-    selectedOptionId: 'approve-2',
-    decisions: [{
+    requestId: 'startup',
+    interruptId: 'review-action',
+    responses: [{
       interactionId: 'review-1',
       selectedOptionId: 'approve-1',
     }, {
@@ -92,9 +89,8 @@ test('review responses validate free text and reject stale local drafts', () => 
   ]));
 
   assert.deepEqual(controller.submitReviewResponse({
-    requestId: 'chat',
-    actionId: 'review-action',
-    decisions: [],
+    interruptId: 'review-action',
+    responses: [],
     optionId: 'respond',
     inputText: '   ',
   }), {
@@ -102,9 +98,8 @@ test('review responses validate free text and reject stale local drafts', () => 
     reason: 'input-required',
   });
   assert.deepEqual(controller.submitReviewResponse({
-    requestId: 'chat',
-    actionId: 'review-action',
-    decisions: [{
+    interruptId: 'review-action',
+    responses: [{
       interactionId: 'wrong-review',
       selectedOptionId: 'respond',
     }],
@@ -116,21 +111,17 @@ test('review responses validate free text and reject stale local drafts', () => 
   });
 
   const result = controller.submitReviewResponse({
-    requestId: 'chat',
-    actionId: 'review-action',
-    decisions: [],
+    interruptId: 'review-action',
+    responses: [],
     optionId: 'respond',
     inputText: '  needs changes  ',
   });
   assert.equal(result.ok, true);
   assert.deepEqual(connection.sent.at(-1), {
     type: 'human_review_response',
-    requestId: 'chat',
-    actionId: 'review-action',
-    interactionId: 'review-1',
-    selectedOptionId: 'respond',
-    input: { message: 'needs changes' },
-    decisions: [{
+    requestId: 'startup',
+    interruptId: 'review-action',
+    responses: [{
       interactionId: 'review-1',
       selectedOptionId: 'respond',
       input: { message: 'needs changes' },
@@ -139,7 +130,7 @@ test('review responses validate free text and reject stale local drafts', () => 
   controller.stop();
 });
 
-test('review cancellation targets only the current canonical action', () => {
+test('review cancellation targets only the current pending interrupt', () => {
   let connection!: FakeConnection;
   const controller = new TuiSessionController({
     connectionFactory: (handlers) => {
@@ -159,23 +150,82 @@ test('review cancellation targets only the current canonical action', () => {
   ]));
 
   assert.deepEqual(controller.cancelReview({
-    requestId: 'other',
-    actionId: 'review-action',
+    interruptId: 'other-interrupt',
   }), {
     ok: false,
     reason: 'stale',
   });
   assert.deepEqual(controller.cancelReview({
-    requestId: 'chat',
-    actionId: 'review-action',
+    interruptId: 'review-action',
   }), {
     ok: true,
   });
   assert.deepEqual(connection.sent.at(-1), {
     type: 'review.cancel',
-    requestId: 'chat',
-    actionId: 'review-action',
+    requestId: 'startup',
+    interruptId: 'review-action',
   });
+  controller.stop();
+});
+
+test('authoritative completion snapshot closes a review rejected by the server', () => {
+  const requestIds = ['startup', 'resume', 'completion'];
+  let connection!: FakeConnection;
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => requestIds.shift() ?? 'unexpected',
+  });
+  controller.start();
+  connection.open();
+  connection.receive(reviewSnapshotResult('startup', [
+    reviewSpec('review-1', [{
+      id: 'approve',
+      label: 'Approve',
+      batchSubmission: 'immediate',
+    }]),
+  ]));
+
+  assert.equal(controller.submitReviewResponse({
+    interruptId: 'review-action',
+    responses: [],
+    optionId: 'approve',
+  }).ok, true);
+  connection.receive({
+    type: 'event',
+    requestId: 'resume',
+    event: {
+      type: 'error',
+      requestId: 'resume',
+      message: 'review closed',
+      code: 'review_closed',
+    },
+  });
+  assert.equal(
+    controller.getState().session.pendingInterrupt?.interruptId,
+    'review-action',
+  );
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'session.snapshot.get',
+    requestId: 'completion',
+  });
+
+  connection.receive({
+    type: 'session.snapshot.result',
+    requestId: 'completion',
+    snapshot: createAgentSessionSnapshot({
+      sessionId: 'chat:one',
+      kind: 'chat',
+      timeline: [],
+      activeRun: null,
+      pendingInterrupt: null,
+    }),
+  });
+
+  assert.equal(controller.getState().session.pendingInterrupt, null);
+  assert.equal(controller.getState().session.activeRun, null);
   controller.stop();
 });
 
@@ -199,26 +249,30 @@ test('a sent review resolution can be followed by an ordered run interrupt', () 
   ]));
 
   assert.deepEqual(controller.interruptResolvedReview({
-    requestId: 'other',
-    actionId: 'review-action',
+    interruptId: 'other-interrupt',
   }), {
     ok: false,
     reason: 'stale',
   });
+  controller.submitReviewResponse({
+    interruptId: 'review-action',
+    responses: [],
+    optionId: 'approve',
+  });
   assert.deepEqual(controller.interruptResolvedReview({
-    requestId: 'chat',
-    actionId: 'review-action',
+    interruptId: 'review-action',
   }), {
     ok: true,
-    requestId: 'chat',
+    requestId: 'startup',
   });
   assert.deepEqual(connection.sent.at(-1), {
     type: 'run.interrupt',
-    requestId: 'chat',
+    requestId: 'startup',
   });
+  assert.equal(controller.getState().session.activeRun?.state, 'interrupting');
   assert.equal(
-    controller.getState().session.activeRun?.state,
-    'waiting_review',
+    controller.getState().session.pendingInterrupt?.interruptId,
+    'review-action',
   );
   controller.stop();
 });

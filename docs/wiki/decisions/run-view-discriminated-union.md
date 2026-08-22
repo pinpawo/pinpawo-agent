@@ -1,8 +1,8 @@
 ---
-title: Active Run View As A Discriminated Union
+title: Active Invocation And Pending Interrupt Are Separate Facts
 page_type: decision
 status: validated
-updated: 2026-07-28
+updated: 2026-08-22
 sources:
   - ../../../packages/agent-session/src/domain.ts
   - ../../../packages/agent-session/src/project.ts
@@ -19,30 +19,34 @@ related:
   - review-resolution-is-client-local.md
 ---
 
-# Active Run View As A Discriminated Union
+# Active Invocation And Pending Interrupt Are Separate Facts
 
 ## Decision
 
-The active run in an `AgentSession` is a discriminated union
-(`AgentRunView`) of exactly three server-observed facts, carried in snapshot
-version 3
+The active invocation in an `AgentSession` is a discriminated union
+(`AgentRunView`) of exactly two facts, carried in snapshot version 5
 ([`domain.ts`](../../../packages/agent-session/src/domain.ts)):
 
 - `running` — carries one runtime `activity`: `thinking`, `using_tool`, or
   `streaming`;
-- `waiting_review` — structurally carries its checkpoint-derived `ReviewAction`;
 - `interrupting` — the server run controller has begun interruption.
+
+The checkpoint-derived `PendingInterrupt` is a separate nullable session field.
+It is not an invocation phase.
 
 ## Rationale
 
-The earlier flat shape (`phase` enum plus an optional `reviewAction`) allowed
-illegal combinations — a waiting review without review content, or a running run
-that still carried a review action — and forced every consumer to re-infer the
-valid `phase × reviewAction` cross-product. Removing `ReviewAction.status`
-(PR #388) deleted one field but left that cross-product enforced by reducer
-discipline and tests rather than by types. PR #389 finished the job: the union
-makes the invalid combinations unrepresentable in TypeScript and rejects them at
-the local snapshot boundary parser.
+The earlier flat shape (`phase` enum plus an optional review projection) allowed
+illegal combinations and forced consumers to infer a phase/projection
+cross-product. Making `pending_interrupt` a third `AgentRunView` variant removed
+some illegal shapes but conflated two lifetimes: a checkpoint can remain waiting
+while a new response/cancel invocation is already running. That forced
+`activeRun.requestId` to become optional and required review-specific rebinding.
+
+The V5 split models both facts directly. An active invocation always has a
+required `requestId`; a pending interrupt always has an `interruptId` and
+payload, never transport ownership. The two may coexist only while an interrupt
+resume is making authoritative progress.
 
 ## Constraints
 
@@ -51,24 +55,30 @@ the local snapshot boundary parser.
 - Later `running.activity` changes come from server runtime events. Elapsed-time
   presentation (busy-copy escalation) stays in the render layer and must not leak
   into the shared view.
-- `waiting_review` always carries its `ReviewAction`; `running` and `interrupting`
-  never carry review content.
-- Sending `run.interrupt` does **not** optimistically create the `interrupting`
-  view; only the server run controller does.
+- `pendingInterrupt` is `null` or carries a complete `PendingInterrupt`.
+- Every `running` or `interrupting` view has a required `requestId`.
+- Accepting response/cancel creates a new `running` active invocation and keeps
+  the pending interrupt until runtime progress, another interrupt, or terminal
+  settlement supplies the next authoritative fact.
+- A client may project `interrupting` after its transport accepts
+  `run.interrupt`; this is command acknowledgement, not terminal settlement.
 - `interrupting` is non-terminal. It remains the active run until the invocation
   owner has observed graph output settlement and emits terminal `interrupted`;
   a client timer cannot perform this transition.
 - Whether an interrupted review delegation may be offered through `/continue`
   is a separate TUI-local fact, not a fourth `AgentRunView` variant.
-- Snapshot versions 1 and 2, `runs[] + activeRunId`, legacy pending-review
-  payloads, and message-only restore are unsupported by the current reader.
+- Snapshot versions 1 and 2, `runs[] + activeRunId`, and message-only restore are
+  unsupported. V3 `waiting_review/reviewAction` and V4 embedded
+  `pending_interrupt` shapes are accepted only by the compatibility parser and
+  normalized to V5.
 
 ## Consequences
 
-Bugs of the "submit-then-Esc targets a stale action" family (found and fixed
-around PR #367/#388) become type-level impossibilities rather than review
-findings. This is the type-system counterpart to keeping review command progress
-client-local; see
+The shared model no longer needs an optional invocation identifier or a
+review-specific request-binding transition. Submit-then-Esc targets the new
+active invocation by its required `requestId`, while stale review validation
+continues to use `interruptId`. This is the type-system counterpart to keeping
+review command progress client-local; see
 [Review resolution is client-local](review-resolution-is-client-local.md).
 The lifecycle beyond `interrupting` is detailed in
 [Interruption and delegation continuation](../interruption-and-delegation-continuation.md).

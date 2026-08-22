@@ -2,7 +2,7 @@
 title: Agent Boundary Contracts
 page_type: system
 status: validated
-updated: 2026-08-07
+updated: 2026-08-22
 sources:
   - ../../packages/agent-contracts/src/configuration.ts
   - ../../packages/agent-contracts/src/invocation.ts
@@ -14,7 +14,7 @@ sources:
   - ../../packages/agent-session/src/parser.ts
   - ../../packages/agent-session/src/snapshot.ts
   - ../../services/local-agent/src/chatSessionAdapter.ts
-  - ../../services/local-agent/src/humanReviewActionRouting.ts
+  - ../../services/local-agent/src/pendingHumanReviewInterrupt.ts
   - ../../services/local-agent/scripts/tui-v2-install-smoke.ts
   - https://github.com/pinpawo/pinpawo-agent/issues/570
   - https://github.com/pinpawo/pinpawo-agent/pull/572
@@ -23,6 +23,7 @@ related:
   - concepts/session-projection-ownership.md
   - decisions/review-resolution-is-client-local.md
   - concepts/local-agent-transport-boundary.md
+  - concepts/studio-pet-thread-dispatch-invocation.md
   - interruption-and-delegation-continuation.md
 ---
 
@@ -85,9 +86,17 @@ checkpointed ReviewSpec                 public HumanReviewRequest
                                           no decision, effect, action, or checkpoint payload
 ```
 
-The client responds only with `interactionId`, `selectedOptionId`, and optional
-input. The server resolves that choice against the authoritative internal spec;
-it never trusts a client-supplied decision or effect.
+The canonical selection contains only `interactionId`, `selectedOptionId`, and
+optional input. The runtime resolves that choice against the authoritative
+internal spec; it never trusts a supplied decision or effect. The surrounding
+checkpoint fact is `PendingInterrupt`; human review is its payload and
+presentation projection, not an independent lifecycle.
+
+Current Chat/TUI carries the selection in a response for its implicit active
+thread. Studio may later carry the same interrupt-resume semantics in a dispatch
+to an explicit `petId`, but those dispatch coordinates do not enter the shared
+projection. See [Studio Pet thread and dispatch
+invocation](concepts/studio-pet-thread-dispatch-invocation.md).
 
 ### Batch submission is an interaction instruction
 
@@ -103,19 +112,15 @@ It does **not** say whether a conversation, graph, or agent continues. The
 runtime currently projects approve options as `defer` and reject/respond options
 as `immediate`; the client does not infer those runtime decision types.
 
-### Route registration is ephemeral control state
+### Checkpoint reload is the route
 
-Before emitting the public event,
 [`chatSessionAdapter`](../../services/local-agent/src/chatSessionAdapter.ts)
-calls `registerHumanReviewResolutionRoute` with the internal `ReviewSpec[]` and
-then emits the projected request. The first operation registers a temporary
-`request/action → interrupt + ReviewSpec[]` route for response validation and
-graph resume. The second operation is client-visible presentation.
-
-The route is not a second durable review store. LangGraph checkpoint state is
-authoritative; if the route is absent, the handlers recover it from the pending
-checkpoint review and fail closed if recovery is ambiguous or incomplete. See
-[review-resolution ownership](decisions/review-resolution-is-client-local.md).
+emits a public human-review projection when the graph stops at an interrupt.
+It does not register a second server-side review lifecycle. On every response
+or cancel attempt, the Chat handler reloads the implicit active thread's
+checkpoint, obtains the current interrupt id and internal `ReviewSpec[]`, then
+validates and builds the graph resume. If the checkpoint does not contain a
+matching human-review interrupt, the command fails closed.
 
 ## Version and compatibility policy
 
@@ -127,9 +132,10 @@ internal schema version.
   `continuesReviewBatch` field are rejected at this boundary.
 - Local inbound compatibility still accepts deprecated `reviewId` as an alias
   for `interactionId`; conflicting aliases are rejected.
-- `AgentSessionSnapshot` emits V4. Its parser accepts valid V3 checkpointed
-  internal review specs and projects them to public Human Review V2; malformed
-  legacy reviews are rejected rather than silently dropping or inventing state.
+- `AgentSessionSnapshot` emits V5. Its parser migrates V3 and V4 embedded review
+  waits into the separate `pendingInterrupt` field and projects valid legacy
+  internal review specs to public Human Review V2; malformed legacy reviews are
+  rejected rather than silently dropping or inventing state.
 
 The contract package supplies strict parsers for untrusted boundary values. A
 transport may add an envelope or disclosure policy, but it must not weaken or

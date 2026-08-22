@@ -15,6 +15,7 @@ contracts in [reference/](../reference/index.md).
 - [Persistent Planner](agent-runtime/persistent-planner.md),
   [orchestrator routing](agent-runtime/orchestrator-routing.md), and
   [terminal semantics](agent-runtime/terminal-semantics.md)
+- [Planner non-commit routing](agent-runtime/planner-incomplete-routing.md)
 - [Dynamic context governance](agent-runtime/dynamic-context-governance.md),
   [human review](agent-runtime/human-review.md), and
   [subagent limits](agent-runtime/subagent-limits.md)
@@ -33,5 +34,11 @@ contracts in [reference/](../reference/index.md).
   [OpenTUI capability matrix](tui/v2-capability-matrix.md)
 - [Browser Toolkit package](toolkits/browser-package.md)
 - [App Studio agents requirements](studio/app-agents-requirements.md)
+- [Pending interrupt in Chat](local-agent/pending-interrupt-chat.md) — draft
+  checkpoint/projection/resume boundary for PR #682, explicitly excluding
+  Studio dispatch identity
+- [Studio Pet thread and dispatch invocation](studio/pet-thread-dispatch-invocation.md) —
+  draft identity/lifecycle model for one durable thread per Pet, one invocation
+  per dispatch, and interrupt resumes delivered through dispatch
 
 Completed or superseded work belongs in [history/](../history/index.md).

@@ -2,6 +2,7 @@ import {
   createAgentSessionSnapshot,
   type AgentClientMessage,
   type AgentServerMessage,
+  type PendingInterruptProjection,
 } from '@pinpawo/agent-session';
 import type {
   AgentHostConnection,
@@ -81,12 +82,7 @@ export function sessionSummary(
 
 export function reviewSnapshotResult(
   requestId: string,
-  reviews: NonNullable<
-    Extract<
-      ReturnType<TuiSessionController['getState']>['session']['activeRun'],
-      { state: 'waiting_review' }
-    >
-  >['reviewAction']['reviews'],
+  reviews: PendingInterruptProjection['payload']['interactions'],
 ): AgentServerMessage {
   return {
     type: 'session.snapshot.result',
@@ -95,12 +91,12 @@ export function reviewSnapshotResult(
       sessionId: 'chat:one',
       kind: 'chat',
       timeline: [],
-      activeRun: {
-        requestId: 'chat',
-        state: 'waiting_review',
-        reviewAction: {
-          actionId: 'review-action',
-          reviews,
+      activeRun: null,
+      pendingInterrupt: {
+        interruptId: 'review-action',
+        payload: {
+          kind: 'human_review',
+          interactions: reviews,
         },
       },
     }),
@@ -109,12 +105,7 @@ export function reviewSnapshotResult(
 
 export function reviewSpec(
   id: string,
-  options: NonNullable<
-    Extract<
-      ReturnType<TuiSessionController['getState']>['session']['activeRun'],
-      { state: 'waiting_review' }
-    >
-  >['reviewAction']['reviews'][number]['options'],
+  options: PendingInterruptProjection['payload']['interactions'][number]['options'],
 ) {
   return {
     interactionId: id,
@@ -139,6 +130,7 @@ export function snapshotResult(
       kind: 'chat',
       timeline: [],
       activeRun: null,
+      pendingInterrupt: null,
     }),
   };
 }

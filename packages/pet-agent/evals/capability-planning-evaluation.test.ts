@@ -43,6 +43,21 @@ test('planner eval preserves the complete conversation with message roles', () =
   assert.ok(projected[1] instanceof AIMessage);
 });
 
+test('boundary planning cases identify the active Capability explicitly', () => {
+  const boundaryCases = capabilityPlanningBasicsDataset.cases.filter(
+    ({ input }) => input.mode === 'boundary',
+  );
+  assert.ok(boundaryCases.length > 0);
+  for (const testCase of boundaryCases) {
+    assert.ok(testCase.input.activeCapability, testCase.name);
+    assert.ok(
+      testCase.input.capabilityRegistry.some((entry) =>
+        entry.split(':', 1)[0]?.trim() === testCase.input.activeCapability),
+      `${testCase.name}: ${testCase.input.activeCapability ?? '(missing)'}`,
+    );
+  }
+});
+
 test('planner goal contract keeps semantic plan checks outside the deterministic result score', () => {
   const testCase = capabilityPlanningBasicsDataset.cases.find(
     ({ name }) => name === 'entry-explore-then-implementation',

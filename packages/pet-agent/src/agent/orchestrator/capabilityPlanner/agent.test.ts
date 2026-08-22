@@ -83,6 +83,7 @@ function readMessageText(message: BaseMessage): string {
 class ScriptedPlannerModel extends BaseChatModel {
   readonly invocations: BaseMessage[][] = [];
   readonly boundToolNames: string[] = [];
+  readonly boundToolNameHistory: string[][] = [];
   readonly boundToolOptions: Array<Record<string, unknown> | undefined> = [];
   readonly structuredOutputToolNames = new Map<string, string>();
   readonly structuredOutputSchemaReferences: string[] = [];
@@ -124,6 +125,7 @@ class ScriptedPlannerModel extends BaseChatModel {
         return name ? [name] : [];
       }),
     );
+    this.boundToolNameHistory.push([...this.boundToolNames]);
     this.structuredOutputToolNames.clear();
     this.structuredOutputSchemaReferences.splice(
       0,
@@ -566,9 +568,12 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
   const result = await createCapabilityPlannerAgent({ model })
     .invoke(plannerInput(workspace));
 
-  assert.deepEqual(model.boundToolNames.slice(0, 1), [
+  assert.deepEqual(model.boundToolNameHistory[0]?.slice(0, 1), [
     CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
   ]);
+  assert.equal(model.boundToolNameHistory[1]?.includes(
+    CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+  ), true);
   assert.equal(model.structuredOutputToolNames.size, 3);
   assert.ok(model.structuredOutputToolNames.has('plan'));
   assert.ok(model.structuredOutputToolNames.has('advance'));
@@ -576,8 +581,8 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
   assert.deepEqual(model.structuredOutputSchemaReferences, []);
   assert.deepEqual(model.structuredOutputPlanLimits, [24]);
   assert.deepEqual(model.structuredOutputCapabilityEnums, []);
-  assert.ok(model.boundToolOptions.every((options) =>
-    options?.tool_choice === undefined));
+  assert.equal(model.boundToolOptions[0]?.tool_choice, undefined);
+  assert.equal(model.boundToolOptions[1]?.tool_choice, undefined);
   assert.equal(model.invocations.length, 2);
   assert.equal(model.invocations.flat().some((message) =>
     message._getType() === 'system'
@@ -590,6 +595,18 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
     (text) => text.includes('Research the repository and then prepare a review.'),
   );
   assert.ok(plannerInputIndex >= 0);
+  const searchResult = model.invocations[1]?.find((message) =>
+    ToolMessage.isInstance(message)
+    && message.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME);
+  assert.ok(ToolMessage.isInstance(searchResult));
+  const searchPayload = JSON.parse(String(searchResult.content)) as {
+    exploration?: {
+      specificCandidates?: string[];
+      defaultCandidateRole?: string;
+    };
+  };
+  assert.deepEqual(searchPayload.exploration?.specificCandidates, ['explore']);
+  assert.equal(searchPayload.exploration?.defaultCandidateRole, 'fallback_only');
   assert.deepEqual(commitOnly(result), {
     action: 'execute_plan',
     tasks: [{
@@ -718,7 +735,7 @@ test('Planner accepts consecutive tasks from one Capability when the model keeps
   }]);
 });
 
-test('Planner closes discovery through general after three capability_search calls', async (t) => {
+test('Planner closes discovery after two capability_search rounds', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -727,13 +744,20 @@ test('Planner closes discovery through general after three capability_search cal
     }),
   });
   const model = new ScriptedPlannerModel([
-    ...[1, 2, 3].map((attempt) => ({
+    {
       toolCalls: [{
-        id: `grep-${String(attempt)}`,
+        id: 'grep-1',
         name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
         args: { terms: ['general'] },
       }],
-    })),
+    },
+    {
+      toolCalls: [{
+        id: 'grep-2',
+        name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+        args: { terms: ['workspace'] },
+      }],
+    },
     {
       structuredOutput: {
         kind: 'plan',
@@ -764,8 +788,25 @@ test('Planner closes discovery through general after three capability_search cal
         && message.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
     ).map((message) => [message.tool_call_id, message]),
   ).values()];
-  assert.equal(searchResults.length, 3);
+  assert.equal(searchResults.length, 2);
   assert.equal(searchResults.some((message) => message.status === 'error'), false);
+  assert.match(String(searchResults[0]?.content), /"status":"open"/);
+  assert.match(String(searchResults[0]?.content), /"roundsUsed":1/);
+  assert.match(String(searchResults[0]?.content), /"remainingRounds":1/);
+  assert.match(String(searchResults[1]?.content), /"status":"closed"/);
+  assert.match(String(searchResults[1]?.content), /"roundsUsed":2/);
+  assert.match(String(searchResults[1]?.content), /"remainingRounds":0/);
+  assert.match(String(searchResults[0]?.content), /"defaultCandidate":"general"/);
+  assert.match(String(searchResults[0]?.content), /"specificCandidates":\[\]/);
+  assert.match(String(searchResults[0]?.content), /"defaultCandidateRole":"eligible_default"/);
+  assert.equal(model.boundToolNameHistory[1]?.includes(
+    CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+  ), true);
+  assert.equal(model.boundToolNameHistory[2]?.includes(
+    CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+  ), false);
+  assert.equal(model.boundToolOptions[1]?.tool_choice, undefined);
+  assert.equal(model.boundToolOptions[2]?.tool_choice, 'required');
 });
 
 test('Planner receives verified General before discovery starts', async (t) => {
@@ -820,7 +861,202 @@ test('Planner receives verified General before discovery starts', async (t) => {
   ), false);
 });
 
-test('Planner handles parallel capability_search calls without concurrent state updates', async (t) => {
+test('a first-round miss discloses exact specific names before General becomes eligible', async (t) => {
+  const workspace = await createWorkspace(t, {
+    explore: capabilityDocument({
+      name: 'explore',
+      description: 'Inspect code structure and risks.',
+      instructions: 'Investigate the repository and report evidence.',
+    }),
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary workspace tasks.',
+      instructions: 'Complete the requested work.',
+    }),
+  });
+  const search = (id: string, terms: string[]) => ({
+    id,
+    name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+    args: { terms },
+  });
+  const model = new ScriptedPlannerModel([
+    { toolCalls: [search('search-miss', ['auth'])] },
+    { toolCalls: [search('search-exact', ['explore'])] },
+    {
+      structuredOutput: {
+        kind: 'plan',
+        args: {
+          tasks: [{
+            capability: 'explore',
+            task: 'Inspect the auth module structure and risks.',
+          }],
+        },
+      },
+    },
+  ]);
+
+  const result = await createCapabilityPlannerAgent({ model }).invoke(
+    plannerInput(workspace),
+  );
+
+  assert.deepEqual(commitOnly(result), {
+    action: 'execute_plan',
+    tasks: [{
+      capability: 'explore',
+      task: 'Inspect the auth module structure and risks.',
+    }],
+  });
+  const searchResults = [...new Map(
+    model.invocations.flat().filter(
+      (message): message is ToolMessage => ToolMessage.isInstance(message)
+        && message.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+    ).map((message) => [message.tool_call_id, JSON.parse(String(message.content)) as {
+      exploration?: {
+        specificCandidates?: string[];
+        nextSearchCandidates?: string[];
+        defaultCandidateRole?: string;
+      };
+    }]),
+  ).values()];
+  assert.deepEqual(searchResults[0]?.exploration?.specificCandidates, []);
+  assert.deepEqual(searchResults[0]?.exploration?.nextSearchCandidates, ['explore']);
+  assert.equal(
+    searchResults[0]?.exploration?.defaultCandidateRole,
+    'deferred_while_specific_candidates_remain_unchecked',
+  );
+  assert.deepEqual(searchResults[1]?.exploration?.specificCandidates, ['explore']);
+  assert.equal(searchResults[1]?.exploration?.defaultCandidateRole, 'fallback_only');
+});
+
+test('a boundary literal match still requires positive unfinished-work scope', async (t) => {
+  const workspace = await createWorkspace(t, {
+    explore: capabilityDocument({
+      name: 'explore',
+      description: 'Inspect release readiness without publishing packages.',
+      instructions: 'Report readiness evidence; do not publish packages.',
+    }),
+  });
+  const model = new ScriptedPlannerModel([{
+    toolCalls: [{
+      id: 'boundary-search-miss',
+      name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+      args: { terms: ['publish'] },
+    }],
+  }, {
+    structuredOutput: {
+      kind: 'unavailable',
+      args: {},
+    },
+  }]);
+
+  const result = await createCapabilityPlannerAgent({ model }).invoke(
+    plannerInput(workspace, {
+      mode: 'boundary',
+      activeDelegation: {
+        delegationId: 'delegation-1',
+        transcriptRunId: 'transcript-1',
+        capability: 'explore',
+        task: 'Inspect package release readiness.',
+      },
+      remainingPlan: [],
+    }),
+  );
+
+  assert.deepEqual(commitOnly(result), { action: 'unavailable', tasks: [] });
+  const searchResult = model.invocations[1]?.find((message) =>
+    ToolMessage.isInstance(message)
+    && message.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME);
+  assert.ok(ToolMessage.isInstance(searchResult));
+  const payload = JSON.parse(String(searchResult.content)) as {
+    exploration?: {
+      specificCandidates?: string[];
+      nextSearchCandidates?: string[];
+      specificCandidateStatus?: string;
+      planUpdateRule?: string | null;
+    };
+  };
+  assert.deepEqual(payload.exploration?.specificCandidates, ['explore']);
+  assert.deepEqual(payload.exploration?.nextSearchCandidates, []);
+  assert.equal(
+    payload.exploration?.specificCandidateStatus,
+    'literal_match_requires_positive_scope_check',
+  );
+  assert.match(
+    payload.exploration?.planUpdateRule ?? '',
+    /copying every prior remaining-plan task verbatim/,
+  );
+});
+
+test('a boundary miss discloses non-active specific names for newly revealed work', async (t) => {
+  const workspace = await createWorkspace(t, {
+    explore: capabilityDocument({
+      name: 'explore',
+      description: 'Investigate repositories and report evidence.',
+      instructions: 'Inspect the repository without editing documents.',
+    }),
+    document_writer: capabilityDocument({
+      name: 'document_writer',
+      description: 'Create and update project documents.',
+      instructions: 'Apply evidence-backed documentation changes.',
+    }),
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary workspace tasks.',
+      instructions: 'Complete the requested work.',
+    }),
+  });
+  const search = (id: string, terms: string[]) => ({
+    id,
+    name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+    args: { terms },
+  });
+  const model = new ScriptedPlannerModel([
+    { toolCalls: [search('boundary-miss', ['issue status'])] },
+    { toolCalls: [search('boundary-exact', ['document_writer'])] },
+    {
+      structuredOutput: {
+        kind: 'advance',
+        args: {
+          tasks: [{
+            capability: 'document_writer',
+            task: 'Update the README with the accepted issue status.',
+          }],
+        },
+      },
+    },
+  ]);
+
+  const result = await createCapabilityPlannerAgent({ model }).invoke(
+    plannerInput(workspace, {
+      mode: 'boundary',
+      activeDelegation: {
+        delegationId: 'delegation-1',
+        transcriptRunId: 'transcript-1',
+        capability: 'explore',
+        task: 'Read the current issue status.',
+      },
+      remainingPlan: [],
+    }),
+  );
+
+  assert.deepEqual(commitOnly(result), {
+    action: 'advance_plan',
+    tasks: [{
+      capability: 'document_writer',
+      task: 'Update the README with the accepted issue status.',
+    }],
+  });
+  const firstSearchResult = model.invocations[1]?.find((message) =>
+    ToolMessage.isInstance(message)
+    && message.tool_call_id === 'boundary-miss');
+  assert.ok(ToolMessage.isInstance(firstSearchResult));
+  const payload = JSON.parse(String(firstSearchResult.content)) as {
+    exploration?: { nextSearchCandidates?: string[] };
+  };
+  assert.deepEqual(payload.exploration?.nextSearchCandidates, ['document_writer']);
+});
+
+test('Planner counts parallel capability_search calls as one disclosure round', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -836,13 +1072,6 @@ test('Planner handles parallel capability_search calls without concurrent state 
         args: { terms: ['general'] },
       }, {
         id: 'parallel-grep-2',
-        name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
-        args: { terms: ['general'] },
-      }],
-    },
-    {
-      toolCalls: [{
-        id: 'parallel-grep-3',
         name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
         args: { terms: ['general'] },
       }],
@@ -882,11 +1111,22 @@ test('Planner handles parallel capability_search calls without concurrent state 
   assert.deepEqual(searchToolCallIds, new Set([
     'parallel-grep-1',
     'parallel-grep-2',
-    'parallel-grep-3',
   ]));
+  const searchResults = model.invocations[1]?.filter((message) =>
+    message instanceof ToolMessage
+    && message.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME) ?? [];
+  assert.equal(searchResults.length, 2);
+  assert.ok(searchResults.every((message) =>
+    String(message.content).includes('"status":"open"')));
+  assert.ok(searchResults.every((message) =>
+    String(message.content).includes('"roundsUsed":1')));
+  assert.equal(model.boundToolNameHistory[1]?.includes(
+    CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+  ), true);
+  assert.equal(model.boundToolOptions[1]?.tool_choice, undefined);
 });
 
-test('Planner returns to Answer after three capability_search calls without general', async (t) => {
+test('Planner returns to Answer after one capability_search without general', async (t) => {
   const workspace = await createWorkspace(t, {
     explore: capabilityDocument({
       name: 'explore',
@@ -895,13 +1135,13 @@ test('Planner returns to Answer after three capability_search calls without gene
     }),
   });
   const model = new ScriptedPlannerModel([
-    ...[1, 2, 3].map((attempt) => ({
+    {
       toolCalls: [{
-        id: `grep-answer-${String(attempt)}`,
+        id: 'grep-answer-1',
         name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
         args: { terms: ['explore'] },
       }],
-    })),
+    },
     {
       structuredOutput: {
         kind: 'unavailable',
@@ -923,7 +1163,7 @@ test('Planner returns to Answer after three capability_search calls without gene
   });
 });
 
-test('Planner repairs an ordinary text response after capability_search', async (t) => {
+test('Planner does not retry ordinary text after the second search round closes', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -933,39 +1173,33 @@ test('Planner repairs an ordinary text response after capability_search', async 
   });
   const model = new ScriptedPlannerModel([{
     toolCalls: [{
-      id: 'search-telecom',
+      id: 'search-telecom-1',
       name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
       args: { terms: ['telecom license', '增值电信', '审查'] },
     }],
   }, {
-    content: 'The general Capability can handle this request.',
+    toolCalls: [{
+      id: 'search-telecom-2',
+      name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+      args: { terms: ['license review'] },
+    }],
   }, {
-    structuredOutput: {
-      kind: 'plan',
-      args: {
-        tasks: [{
-          capability: 'general',
-          task: 'Review the telecom licensing requirements and report the findings.',
-        }],
-      },
-    },
+    content: 'The general Capability can handle this request.',
   }]);
 
   const result = await createCapabilityPlannerAgent({ model }).invoke(
     plannerInput(workspace),
   );
 
-  assert.deepEqual(commitOnly(result), {
-    action: 'execute_plan',
-    tasks: [{
-      capability: 'general',
-      task: 'Review the telecom licensing requirements and report the findings.',
-    }],
-  });
+  assert.ok('plannerStatus' in result);
+  if (!('plannerStatus' in result)) assert.fail('expected an incomplete Planner result');
+  assert.equal(result.plannerStatus, 'incomplete');
   assert.equal(model.invocations.length, 3);
-  assert.ok(model.invocations[2]?.some((message) =>
-    message instanceof HumanMessage
-    && message.id === 'planner-repair:trace_started:trace-test'));
+  assert.match(readMessageText(model.invocations[2]?.[0] as BaseMessage), /status="closed"/);
+  assert.equal(model.boundToolNameHistory[2]?.includes(
+    CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+  ), false);
+  assert.equal(model.boundToolOptions[2]?.tool_choice, 'required');
 });
 
 test('a submitted plan commits once without a final ordinary-text reply', async (t) => {
@@ -1079,7 +1313,7 @@ test('an unknown Capability returns tool feedback and can be repaired in-loop', 
     && readMessageText(message).includes('outside the immutable workspace')));
 });
 
-test('Planner caps a parallel capability_search batch with standard middleware', async (t) => {
+test('Planner allows every search in one parallel disclosure round', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -1125,16 +1359,19 @@ test('Planner caps a parallel capability_search batch with standard middleware',
       task: 'Complete the requested repository update.',
     }],
   });
-  const limitFeedback = model.invocations[1]?.find((message) =>
-    message instanceof ToolMessage && message.tool_call_id === 'grep-4');
-  assert.ok(limitFeedback instanceof ToolMessage);
-  assert.equal(limitFeedback.status, 'error');
-  assert.match(String(limitFeedback.content), /tool call limit exceeded/i);
   const successfulSearches = model.invocations[1]?.filter((message) =>
     message instanceof ToolMessage
     && message.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME
     && message.status !== 'error') ?? [];
-  assert.equal(successfulSearches.length, 3);
+  assert.equal(successfulSearches.length, 4);
+  assert.ok(successfulSearches.every((message) =>
+    String(message.content).includes('"status":"open"')));
+  assert.ok(successfulSearches.every((message) =>
+    String(message.content).includes('"roundsUsed":1')));
+  assert.equal(model.boundToolNameHistory[1]?.includes(
+    CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+  ), true);
+  assert.equal(model.boundToolOptions[1]?.tool_choice, undefined);
 });
 
 test('an empty workspace can return truthful facts to Answer', async (t) => {
@@ -1448,33 +1685,101 @@ test('oversized discovery is reported as planning_limit_reached', async (t) => {
   );
 });
 
-test('natural language completion cannot escape the commit protocol', async (t) => {
+test('Planner reports an incomplete result when it exits without a commit', async (t) => {
   const workspace = await createWorkspace(t, {});
   const model = new ScriptedPlannerModel([{
     content: 'The user needs to choose a target first.',
   }]);
 
-  await assert.rejects(
-    createCapabilityPlannerAgent({ model }).invoke(plannerInput(workspace)),
-    (error: unknown) => error instanceof CapabilityPlannerAgentError
-      && error.code === 'submission_required',
-  );
-  assert.equal(model.invocations.length, 2);
+  const result = await createCapabilityPlannerAgent({ model }).invoke(plannerInput(workspace));
+  assert.ok('plannerStatus' in result);
+  if (!('plannerStatus' in result)) assert.fail('expected an incomplete Planner result');
+  assert.equal(result.plannerStatus, 'incomplete');
+  assert.equal(result.reason, 'terminal_commit_missing');
+  assert.equal(model.invocations.length, 1);
+  assert.equal(result.messageUpdates?.some((message) =>
+    ToolMessage.isInstance(message)
+    && message.name === 'report_unavailable'), false);
 });
 
-test('missing structured output and direct text is rejected', async (t) => {
-  const workspace = await createWorkspace(t, {});
-  const model = new ScriptedPlannerModel([{ content: '' }]);
+test('Planner does not invent General when closed exploration ends without a commit', async (t) => {
+  const workspace = await createWorkspace(t, {
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary workspace tasks.',
+      instructions: 'Complete the requested work.',
+    }),
+  });
+  const search = (id: string) => ({
+    id,
+    name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+    args: { terms: ['ordinary'] },
+  });
+  const model = new ScriptedPlannerModel([
+    { toolCalls: [search('search-1')] },
+    { toolCalls: [search('search-2')] },
+    { content: 'I have finished looking for capabilities.' },
+  ]);
 
-  await assert.rejects(
-    createCapabilityPlannerAgent({ model }).invoke(plannerInput(workspace, {
-      userRequest: 'Current request.',
-    })),
-    (error: unknown) =>
-      error instanceof CapabilityPlannerAgentError
-      && error.code === 'submission_required',
+  const result = await createCapabilityPlannerAgent({ model }).invoke(plannerInput(workspace, {
+    userRequest: 'Current request.',
+  }));
+
+  assert.ok('plannerStatus' in result);
+  if (!('plannerStatus' in result)) assert.fail('expected an incomplete Planner result');
+  assert.equal(result.plannerStatus, 'incomplete');
+  assert.equal(result.reason, 'terminal_commit_missing');
+  assert.equal(model.invocations.length, 3);
+  assert.equal(model.boundToolNameHistory[2]?.includes(
+    CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+  ), false);
+  assert.equal(model.boundToolOptions[2]?.tool_choice, 'required');
+  assert.equal(result.messageUpdates?.some((message) =>
+    ToolMessage.isInstance(message)
+    && message.name === 'submit_plan'
+    && String(message.content).includes('execute_plan')), false);
+});
+
+test('boundary Planner reports incomplete without accepting its delegation', async (t) => {
+  const workspace = await createWorkspace(t, {
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary workspace tasks.',
+      instructions: 'Complete the requested work.',
+    }),
+  });
+  const model = new ScriptedPlannerModel([
+    { content: 'The current task should be handed over.' },
+    { content: 'Still no terminal tool call.' },
+  ]);
+
+  const result = await createCapabilityPlannerAgent({ model }).invoke(plannerInput(workspace, {
+    mode: 'boundary',
+    userRequest: 'Finish the remaining request.',
+    activeDelegation: {
+      delegationId: 'delegation-1',
+      transcriptRunId: 'transcript-1',
+      capability: 'explore',
+      task: 'Inspect the repository.',
+    },
+  }));
+
+  assert.ok('plannerStatus' in result);
+  if (!('plannerStatus' in result)) assert.fail('expected an incomplete Planner result');
+  assert.equal(result.plannerStatus, 'incomplete');
+  assert.equal(result.reason, 'terminal_commit_missing');
+  assert.equal(result.messageUpdates?.some((message) =>
+    ToolMessage.isInstance(message) && message.name === 'advance_plan'), false);
+});
+
+test('Planner Agent validates maxSearchRounds', () => {
+  assert.throws(
+    () => createCapabilityPlannerAgent({
+      model: new ScriptedPlannerModel([]),
+      maxSearchRounds: 0,
+    }),
+    /maxSearchRounds must be a positive integer/,
   );
-  assert.equal(model.invocations.length, 2);
 });
 
 test('Planner Agent enforces a total timeout', async (t) => {

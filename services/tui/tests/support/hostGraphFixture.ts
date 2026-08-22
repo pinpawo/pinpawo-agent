@@ -46,7 +46,7 @@ export const REVIEW_SPEC = {
 
 export function createHostGraphFixture() {
   const messagesByThread = new Map<string, BaseMessage[]>();
-  const pendingReviews = new Map<string, {
+  const pendingInterrupts = new Map<string, {
     interruptId: string;
     review: ReviewSpec;
   }>();
@@ -60,12 +60,17 @@ export function createHostGraphFixture() {
   let streams = 0;
   const service = {
     async readThreadState(setup: AgentChannelSetup) {
-      const pendingReview = pendingReviews.get(readThreadKey(setup)) ?? null;
+      const pendingInterrupt = pendingInterrupts.get(readThreadKey(setup)) ?? null;
       return {
         messages: messagesByThread.get(readThreadKey(setup)) ?? [],
-        pendingHumanReview: pendingReview,
+        pendingInterrupt: pendingInterrupt
+          ? {
+              interruptId: pendingInterrupt.interruptId,
+              reviews: [pendingInterrupt.review],
+            }
+          : null,
         hasPendingContinuation:
-          pendingReview !== null || suspendedReviews.has(readThreadKey(setup)),
+          pendingInterrupt !== null || suspendedReviews.has(readThreadKey(setup)),
       };
     },
     buildResumeCommand(resume: unknown) {
@@ -76,22 +81,22 @@ export function createHostGraphFixture() {
       const threadKey = readThreadKey(setup);
       const fixtureResume = readFixtureResume(inputOverride);
       if (fixtureResume) {
-        const pendingReview = pendingReviews.get(threadKey);
-        assert.ok(pendingReview, 'expected a pending review before graph resume');
+        const pendingInterrupt = pendingInterrupts.get(threadKey);
+        assert.ok(pendingInterrupt, 'expected a pending review before graph resume');
         reviewResumes.push(fixtureResume);
-        pendingReviews.delete(threadKey);
+        pendingInterrupts.delete(threadKey);
         if (isInterruptRunResume(
           fixtureResume,
-          pendingReview.interruptId,
+          pendingInterrupt.interruptId,
         )) {
-          suspendedReviews.set(threadKey, pendingReview);
+          suspendedReviews.set(threadKey, pendingInterrupt);
           return checkpointStream(
             messagesByThread.get(threadKey) ?? [],
           );
         }
         const selectedOptionId = readSelectedOptionId(
           fixtureResume,
-          pendingReview.interruptId,
+          pendingInterrupt.interruptId,
         );
         const reply = selectedOptionId === 'approve'
           ? REVIEW_APPROVED_REPLY
@@ -126,7 +131,7 @@ export function createHostGraphFixture() {
       ) {
         suspendedReviews.delete(threadKey);
         messagesByThread.set(threadKey, accumulatedInput);
-        pendingReviews.set(threadKey, suspendedReview);
+        pendingInterrupts.set(threadKey, suspendedReview);
         return reviewInterruptStream(suspendedReview);
       }
       suspendedReviews.delete(threadKey);
@@ -141,7 +146,7 @@ export function createHostGraphFixture() {
           ? 'review-interrupt-approve'
           : 'review-interrupt-cancel';
         messagesByThread.set(threadKey, accumulatedInput);
-        pendingReviews.set(threadKey, {
+        pendingInterrupts.set(threadKey, {
           interruptId,
           review: REVIEW_SPEC,
         });

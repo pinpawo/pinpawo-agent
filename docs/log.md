@@ -515,3 +515,54 @@ lint passes, and documentation migrations.
 - Framed the two extremes as deliberate opposites: Entry Answer gets
   conversation and no fact block because it decides what the goal is; Answer
   gets facts and no conversation because it only closes a decided run.
+
+## [2026-08-22] ingest | Studio Pet thread and dispatch invocation identity
+
+- Registered a draft Studio lifecycle in which each resident Pet owns one
+  durable thread and every dispatch call is a distinct serialized invocation on
+  that thread.
+- Recorded review processing as a later dispatch invocation to the same Pet:
+  the preceding invocation ends at a durable interrupt, while the Pet thread and
+  checkpoint survive for resume.
+- Consolidated identity roles: `threadId` for Pet continuity, `invocationId` for
+  one Studio dispatch, `interruptId` for one checkpoint wait, and
+  `interactionId` for one human-review item. Chat `requestId` remains transport
+  correlation; Studio core defines no generic `correlationId`.
+- Recorded explicit conflicts with current `createStudio()` behavior, the
+  current Studio API reference, and issue #561 rather than rewriting them as if
+  the proposal were already implemented.
+- Fixed `PendingInterrupt` as the shared checkpoint fact. Human review is a
+  payload and projection of that interrupt, not a parallel `ReviewAction`
+  lifecycle.
+- Scoped PR #682 and the client-local submission decision to Chat/TUI. Chat has
+  an implicit active thread and neither `petId` nor Studio dispatch. Studio
+  later reuses only the interrupt contract through its own dispatch envelope.
+- Completed the Chat-side contract cleanup: emitted review events now carry one
+  `PendingInterrupt`, responses name `interruptId` and ordered `responses`, and
+  checkpoint recovery rejects interrupts without a real runtime ID instead of
+  synthesizing identity from review content.
+- Kept `requestId` outside `PendingInterrupt`: every active invocation owns a
+  required transport `requestId`, while the checkpoint wait owns only its
+  `interruptId`. A response or cancel starts a new active invocation and keeps
+  the pending wait until authoritative runtime progress.
+- Removed the server-side review lifecycle/result enum and reject-option
+  shortcut. Every attempt reloads checkpoint authority, validates it, and
+  resumes or cancels that exact interrupt.
+- Created issue [#684](https://github.com/pinpawo/pinpawo-agent/issues/684) as
+  the dedicated implementation and identity-consolidation tracker, related to
+  but intentionally separate from the broader #561 host refactor.
+
+## [2026-08-22] implementation | Separate active invocation from pending interrupt
+
+- Bumped `AgentSessionSnapshot` to V5 and split the V4
+  `activeRun.pending_interrupt` variant into independent `activeRun` and
+  `pendingInterrupt` facts.
+- Made every active invocation carry a required `requestId`; checkpoint-restored
+  waits no longer need optional transport ownership or review-specific request
+  rebinding.
+- Kept the pending interrupt visible while a response/cancel invocation starts,
+  then clear or replace it only from authoritative runtime progress, another
+  interrupt, or terminal settlement.
+- Migrated V3 and V4 snapshots at the parser boundary and aligned Chat/TUI
+  projection, completion-snapshot reconciliation, tests, reference docs, and
+  wiki decisions with the V5 lifecycle.

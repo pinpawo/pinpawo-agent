@@ -9,6 +9,7 @@ export type CapabilityPlanningInput = {
     content: string;
   }>;
   capabilityRegistry: string[];
+  activeCapability?: string;
   activeTask?: string;
   latestAnnounce?: string;
   remainingPlan?: Array<{ capability: string; task: string }>;
@@ -256,18 +257,19 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
         'explore: inspect code structure and risks',
         'general: use workspace tools to edit and verify code',
       ],
+      activeCapability: 'explore',
       activeTask: '调查 auth 模块的现有结构和风险',
       latestAnnounce: 'auth/index.ts 存在循环依赖；应提取 token validation 并保持现有公开接口。',
       remainingPlan: [{ capability: 'general', task: '根据调查结论重构 auth 模块' }],
     },
     expected: {
       result: 'advance_plan',
-      nextTaskTerms: ['循环依赖', 'token', '接口'],
+      nextTaskTerms: ['auth', '重构'],
       capabilityName: 'general',
       remainingPlan: [],
-      planEffect: 'revised',
-      rubberStamp: false,
-      reason: 'Boundary planning materializes implementation details from the handoff.',
+      planEffect: 'unchanged',
+      rubberStamp: true,
+      reason: 'The accepted handoff already supplies implementation details to the next executor, so the valid planned task remains unchanged.',
     },
     metadata: { difficulty: 'hard', reason: 'planner@boundary materialization.', source: SOURCE_FILE },
   },
@@ -299,19 +301,20 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
         'general: use workspace tools to edit and verify code',
         'release_check: inspect release documentation and verify release readiness',
       ],
+      activeCapability: 'explore',
       activeTask: '调查 auth 模块的现有结构、依赖和风险。',
       latestAnnounce: 'auth/index.ts 存在循环依赖；token validation 需要提取，同时必须保持现有公开接口。',
       remainingPlan: [{ capability: 'general', task: '根据调查结论重构 auth 模块并验证。' }],
     },
     expected: {
       result: 'advance_plan',
-      nextTaskTerms: ['循环依赖', 'token', '公开接口'],
+      nextTaskTerms: ['auth', '重构', '验证'],
       capabilityName: 'general',
       remainingPlan: [],
       exactRemainingPlanLength: 0,
-      planEffect: 'revised',
-      rubberStamp: false,
-      reason: 'The completed auth investigation, not a closed release idea from earlier history, determines the next materialized task.',
+      planEffect: 'unchanged',
+      rubberStamp: true,
+      reason: 'The existing auth task remains valid and receives the accepted handoff directly; unrelated closed history does not justify rewriting it.',
     },
     metadata: { difficulty: 'hard', reason: 'Boundary handoff must win over unrelated earlier conversation.', source: SOURCE_FILE },
   },
@@ -365,6 +368,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
         'messaging: deliver messages and attachments',
         'general: perform other available work',
       ],
+      activeCapability: 'document_writer',
       activeTask: '生成项目报告',
       latestAnnounce: '报告已生成，路径为 /tmp/report.pdf，内容检查通过。',
       remainingPlan: [{ capability: 'messaging', task: '把完成的报告发送给项目负责人' }],
@@ -401,6 +405,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
         'general: modify source code',
         'release_check: run release verification',
       ],
+      activeCapability: 'general',
       activeTask: '调查 auth 风险',
       latestAnnounce: '调查确认 token validation 存在循环依赖，需要保持公开接口。',
       remainingPlan: [
@@ -410,17 +415,17 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     },
     expected: {
       result: 'advance_plan',
-      nextTaskTerms: ['token', '循环依赖', '公开接口'],
+      nextTaskTerms: ['auth', '风险', '修复'],
       capabilityName: 'general',
       remainingPlan: [{
         taskTerms: ['release', 'verification'],
         capability: 'release_check',
       }],
-      planEffect: 'revised',
-      rubberStamp: false,
-      reason: 'Boundary planning materializes the first task and preserves later work in the ordered plan.',
+      planEffect: 'unchanged',
+      rubberStamp: true,
+      reason: 'The accepted handoff is execution context, so both the valid plan head and its unaffected tail remain unchanged.',
     },
-    metadata: { difficulty: 'hard', reason: 'Revises a multi-task plan after handoff.', source: SOURCE_FILE },
+    metadata: { difficulty: 'hard', reason: 'Preserves a valid multi-task plan after handoff.', source: SOURCE_FILE },
   },
   {
     id: `${SUITE}.boundary-removes-completed-work-before-materializing-next-task`,
@@ -443,6 +448,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
         'explore: inspect issues, repositories, and implementation history',
         'general: perform ordinary workspace tasks',
       ],
+      activeCapability: 'explore',
       activeTask: '读取 issue #345 并整理架构演进内容',
       latestAnnounce: 'issue 正文和评论中的架构演进提案已经完整整理；下一步只需对照当前仓库实现。',
       remainingPlan: [
@@ -594,12 +600,12 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       ],
     },
     expected: {
-      result: 'unavailable',
+      result: 'user_input_required',
       remainingPlan: [],
       exactRemainingPlanLength: 0,
       planEffect: 'empty',
       rubberStamp: false,
-      reason: 'The user requests a recommendation and explicit confirmation before execution, so the Planner returns structured facts to Answer instead of emitting prose or invoking executor tools.',
+      reason: 'The user explicitly requests a recommendation and confirmation before execution, so the Planner returns control to Answer in user-input-required mode without invoking either executable Capability.',
     },
     metadata: { difficulty: 'medium', reason: 'Planner structured no-plan terminal.', source: SOURCE_FILE },
   },
@@ -620,6 +626,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       capabilityRegistry: [
         'explore: inspect repository and release readiness without publishing packages',
       ],
+      activeCapability: 'explore',
       activeTask: '检查 npm 包的发布条件',
       latestAnnounce: '版本、测试和工作区状态均满足发布条件；下一步需要发布 npm 包。',
       remainingPlan: [],
@@ -660,6 +667,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
         'document_writer: create and update project documents',
         'general: perform other available work',
       ],
+      activeCapability: 'explore',
       activeTask: '读取 issue #587 的当前状态',
       latestAnnounce: 'issue #587 当前为 open；README 的“已知问题”章节仍写着它已关闭，与实际状态不符。',
       remainingPlan: [],
@@ -691,6 +699,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       capabilityRegistry: [
         'general: inspect, modify, and verify the workspace',
       ],
+      activeCapability: 'general',
       activeTask: '检查仓库并完成测试验证',
       latestAnnounce: '已完成仓库检查，但测试尚未运行。',
       remainingPlan: [],
@@ -719,6 +728,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       capabilityRegistry: [
         'general: inspect, modify, execute, and verify workspace files',
       ],
+      activeCapability: 'general',
       activeTask: '重写 quality-safety-icons/generate.js，生成 70 个语义 SVG 图标并验证输出。',
       latestAnnounce: `<essential_context role="task_boundary" source="prior_summary" trust="read_only">
   <![CDATA[
@@ -760,6 +770,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       capabilityRegistry: [
         'general: inspect, modify, execute, and verify workspace files',
       ],
+      activeCapability: 'general',
       activeTask: '重写 quality-safety-icons/generate.js，生成 70 个语义 SVG 图标并验证输出。',
       latestAnnounce: '我现在来写完整的生成脚本并执行。首先建立 SVG 字形库和 70 项语义映射，然后运行 node generate.js，最后检查文件数量和 XML。',
       remainingPlan: [],
@@ -793,6 +804,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       capabilityRegistry: [
         'general: inspect, modify, execute, and verify workspace files',
       ],
+      activeCapability: 'general',
       activeTask: '生成 70 个与菜单语义对应的 SVG 图标并刷新预览页。',
       latestAnnounce: '已生成全部 70 个 SVG。每个图标使用彩色圆角方形底，内部统一绘制 2×2 四枚白色圆角小方块，并已刷新 index.html。',
       remainingPlan: [],
@@ -826,6 +838,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       capabilityRegistry: [
         'general: inspect, modify, execute, and verify workspace files',
       ],
+      activeCapability: 'general',
       activeTask: '重写 generate.js，执行生成并验证 70 个 SVG 文件。',
       latestAnnounce: 'generate.js 已经重写并加入语义字形映射，但尚未运行 node generate.js；svg/ 目录仍是旧时间戳，index.html 也尚未刷新。',
       remainingPlan: [],
@@ -859,6 +872,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       capabilityRegistry: [
         'general: inspect, modify, execute, and verify workspace files',
       ],
+      activeCapability: 'general',
       activeTask: '生成并完整验证 70 个语义 SVG 文件。',
       latestAnnounce: '生成脚本已经运行，并报告写出了 70 个 SVG 文件；但本轮没有执行 XML 校验，也没有抽查 SVG 是否仍包含四宫格占位 rect。',
       remainingPlan: [],
@@ -886,6 +900,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       mode: 'boundary',
       messages: [{ role: 'user', content: '运行测试并报告结果。' }],
       capabilityRegistry: ['general: run and verify workspace tests'],
+      activeCapability: 'general',
       activeTask: '运行测试并报告结果',
       latestAnnounce: '测试全部通过，结果已经整理完成。',
       remainingPlan: [],
@@ -912,6 +927,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
         'project_review: review a requested pull request from repository evidence',
         'general: perform other available work',
       ],
+      activeCapability: 'project_review',
       activeTask: 'Review PR #662 and report actionable findings.',
       latestAnnounce: 'GitHub 上未找到 PR #662；Issue #662 存在，关联实现是 PR #663，但尚未得到用户确认是否改为 review PR #663。',
       remainingPlan: [],
@@ -938,6 +954,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       mode: 'boundary',
       messages: [{ role: 'user', content: '发布包；如果需要凭据就先停下来。' }],
       capabilityRegistry: ['general: prepare and publish packages when credentials are available'],
+      activeCapability: 'general',
       activeTask: '发布 npm 包',
       latestAnnounce: '发布前检查已通过，但 registry token 尚未提供。',
       remainingPlan: [],

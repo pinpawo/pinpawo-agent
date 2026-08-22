@@ -97,14 +97,7 @@ test('live activity pulse cancels when the run settles or the controller ends', 
 
   controller.sync(run('streaming'));
   assert.equal(timers.length, 2);
-  controller.sync({
-    requestId: 'request',
-    state: 'waiting_review',
-    reviewAction: {
-      actionId: 'review',
-      reviews: [],
-    },
-  });
+  controller.sync(null);
   assert.equal(controller.frame, 0);
   assert.equal(timers.length, 0);
 

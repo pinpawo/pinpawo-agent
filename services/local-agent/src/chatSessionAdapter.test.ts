@@ -54,7 +54,7 @@ test('runChatSession does not settle before the underlying graph run output', as
   })(), { output });
   const graphService = {
     async readThreadState() {
-      return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
+      return { messages: [], pendingInterrupt: null, hasPendingContinuation: false };
     },
     streamEvents() {
       return stream;
@@ -108,7 +108,7 @@ test('runChatSession defers interrupted terminalization until graph output settl
   })(), { output });
   const graphService = {
     async readThreadState() {
-      return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
+      return { messages: [], pendingInterrupt: null, hasPendingContinuation: false };
     },
     streamEvents() {
       return stream;
@@ -159,7 +159,7 @@ test('runChatSession sources tool operations from the root protocol stream, not 
 
   const graphService = {
     async readThreadState() {
-      return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
+      return { messages: [], pendingInterrupt: null, hasPendingContinuation: false };
     },
     streamEvents() {
       return (async function* () {
@@ -246,7 +246,7 @@ test('runChatSession falls back to checkpoint final message when stream values o
       readThreadStateCalls += 1;
       return {
         messages: readThreadStateCalls === 1 ? [] : finalMessages,
-        pendingHumanReview: null,
+        pendingInterrupt: null,
         hasPendingContinuation: false,
       };
     },
@@ -296,7 +296,7 @@ test('runChatSession replaces the current plan from root values and clears it at
       threadStateRead += 1;
       return {
         messages: threadStateRead === 1 ? [] : finalMessages,
-        pendingHumanReview: null,
+        pendingInterrupt: null,
         hasPendingContinuation: false,
         currentPlan: null,
       };
@@ -375,7 +375,7 @@ test('runChatSession projects global policy authorization as completed operation
 
   const graphService = {
     async readThreadState() {
-      return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
+      return { messages: [], pendingInterrupt: null, hasPendingContinuation: false };
     },
     streamEvents() {
       return (async function* () {
@@ -513,7 +513,7 @@ test('runChatSession emits one completed subagent block per child model message 
 
   const graphService = {
     async readThreadState() {
-      return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
+      return { messages: [], pendingInterrupt: null, hasPendingContinuation: false };
     },
     streamEvents() {
       return (async function* () {
@@ -581,7 +581,7 @@ test('runChatSession merges subagent_operations announcements through acceptDele
 
   const graphService = {
     async readThreadState() {
-      return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
+      return { messages: [], pendingInterrupt: null, hasPendingContinuation: false };
     },
     streamEvents() {
       return (async function* () {
@@ -649,12 +649,13 @@ test('runChatSession projects review interrupts to public interaction contracts'
   };
   const graphService = {
     async readThreadState() {
-      return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
+      return { messages: [], pendingInterrupt: null, hasPendingContinuation: false };
     },
     streamEvents() {
       return (async function* () {
         yield protocolEvent('values', {
           __interrupt__: [{
+            id: 'interrupt-1',
             value: {
               kind: 'review',
               review,
@@ -692,7 +693,10 @@ test('runChatSession projects review interrupts to public interaction contracts'
   assert.deepEqual(result, { status: 'waiting_human' });
   const event = emittedEvents[0];
   assert.equal(event?.type, 'human_review.requested');
-  assert.deepEqual(event.review, projectHumanReviewRequest(review));
+  assert.deepEqual(
+    event.pendingInterrupt.payload.interactions,
+    [projectHumanReviewRequest(review)],
+  );
 });
 
 test('runChatSession resumes explicit response after state update clears interrupt payload', async () => {
@@ -714,8 +718,8 @@ test('runChatSession resumes explicit response after state update clears interru
     async readThreadState() {
       readThreadStateCalls += 1;
       return readThreadStateCalls === 1
-        ? { messages: [], pendingHumanReview: null, hasPendingContinuation: true }
-        : { messages: finalMessages, pendingHumanReview: null, hasPendingContinuation: false };
+        ? { messages: [], pendingInterrupt: null, hasPendingContinuation: true }
+        : { messages: finalMessages, pendingInterrupt: null, hasPendingContinuation: false };
     },
     buildResumeCommand(value: unknown) {
       return { kind: 'resume-command', value };
@@ -771,7 +775,7 @@ test('runChatSession does not confirm a review resolution while checkpoint keeps
   };
   const pending = {
     interruptId: 'interrupt-original',
-    review,
+    reviews: [review],
   };
   const finalMessages = [new AIMessage('continued')];
   const setup = {
@@ -786,9 +790,9 @@ test('runChatSession does not confirm a review resolution while checkpoint keeps
     async readThreadState() {
       reads += 1;
       if (reads <= 2) {
-        return { messages: [], pendingHumanReview: pending, hasPendingContinuation: true };
+        return { messages: [], pendingInterrupt: pending, hasPendingContinuation: true };
       }
-      return { messages: finalMessages, pendingHumanReview: null, hasPendingContinuation: false };
+      return { messages: finalMessages, pendingInterrupt: null, hasPendingContinuation: false };
     },
     buildResumeCommand(value: unknown) {
       return value;
@@ -846,12 +850,12 @@ test('runChatSession confirms the original resolution without interrupting a new
       return reads === 1
         ? {
           messages: [],
-          pendingHumanReview: { interruptId: 'interrupt-original', review: originalReview },
+          pendingInterrupt: { interruptId: 'interrupt-original', reviews: [originalReview] },
           hasPendingContinuation: true,
         }
         : {
           messages: [],
-          pendingHumanReview: { interruptId: 'interrupt-next', review: nextReview },
+          pendingInterrupt: { interruptId: 'interrupt-next', reviews: [nextReview] },
           hasPendingContinuation: true,
         };
     },
@@ -890,7 +894,7 @@ test('runChatSession confirms the original resolution without interrupting a new
   assert.equal(emittedEvents[0]?.type, 'human_review.requested');
   assert.equal(
     emittedEvents[0]?.type === 'human_review.requested'
-      ? emittedEvents[0].review.interactionId
+      ? emittedEvents[0].pendingInterrupt.payload.interactions[0]?.interactionId
       : null,
     'review-next',
   );
@@ -913,7 +917,7 @@ test('runChatSession does not confirm a review resolution when graph execution f
     async readThreadState() {
       return {
         messages: [],
-        pendingHumanReview: { interruptId: 'interrupt-original', review },
+        pendingInterrupt: { interruptId: 'interrupt-original', review },
         hasPendingContinuation: true,
       };
     },
@@ -970,7 +974,7 @@ test('runChatSession preserves review cancellation when the active checkpoint re
       if (reads === 1) {
         return {
           messages: [],
-          pendingHumanReview: { interruptId: 'interrupt-original', review },
+          pendingInterrupt: { interruptId: 'interrupt-original', review },
           hasPendingContinuation: true,
         };
       }
@@ -979,7 +983,7 @@ test('runChatSession preserves review cancellation when the active checkpoint re
       }
       return {
         messages: finalMessages,
-        pendingHumanReview: null,
+        pendingInterrupt: null,
         hasPendingContinuation: false,
       };
     },
@@ -1040,8 +1044,8 @@ test('runChatSession allows a user message after an aborted non-review run leave
     async readThreadState() {
       readThreadStateCalls += 1;
       return readThreadStateCalls === 1
-        ? { messages: [], pendingHumanReview: null, hasPendingContinuation: true }
-        : { messages: finalMessages, pendingHumanReview: null, hasPendingContinuation: false };
+        ? { messages: [], pendingInterrupt: null, hasPendingContinuation: true }
+        : { messages: finalMessages, pendingInterrupt: null, hasPendingContinuation: false };
     },
     streamEvents(streamSetup: AgentChannelSetup, inputOverride?: unknown) {
       return (async function* () {
@@ -1088,7 +1092,7 @@ test('runChatSession rejects stale resume with user-facing message', async () =>
   } as unknown as AgentChannelSetup;
   const graphService = {
     async readThreadState() {
-      return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
+      return { messages: [], pendingInterrupt: null, hasPendingContinuation: false };
     },
     buildResumeCommand() {
       throw new Error('should not build resume command');
@@ -1150,7 +1154,11 @@ test('runChatSession does not map pending review free text to review response', 
   } as unknown as AgentChannelSetup;
   const graphService = {
     async readThreadState() {
-      return { messages: [], pendingHumanReview: { review }, hasPendingContinuation: true };
+      return {
+        messages: [],
+        pendingInterrupt: { interruptId: 'interrupt-1', reviews: [review] },
+        hasPendingContinuation: true,
+      };
     },
     buildResumeCommand(value: unknown) {
       throw new Error(`should not build resume command: ${String(value)}`);
@@ -1196,7 +1204,9 @@ test('runChatSession does not map pending review free text to review response', 
   );
   assert.equal(emittedEvents[1]?.type, 'human_review.requested');
   assert.deepEqual(
-    emittedEvents[1]?.type === 'human_review.requested' ? emittedEvents[1].review : null,
+    emittedEvents[1]?.type === 'human_review.requested'
+      ? emittedEvents[1].pendingInterrupt.payload.interactions[0]
+      : null,
     projectHumanReviewRequest(review),
   );
 });
@@ -1211,7 +1221,7 @@ test('runChatSession degrades a GraphRecursionError to a completed 待续跑 rep
 
   const graphService = {
     async readThreadState() {
-      return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
+      return { messages: [], pendingInterrupt: null, hasPendingContinuation: false };
     },
     streamEvents() {
       return (async function* () {
@@ -1253,7 +1263,7 @@ test('runChatSession keeps the streamed reply when GraphRecursionError fires mid
 
   const graphService = {
     async readThreadState() {
-      return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
+      return { messages: [], pendingInterrupt: null, hasPendingContinuation: false };
     },
     streamEvents() {
       return (async function* () {
@@ -1289,7 +1299,7 @@ test('runChatSession rethrows non-recursion errors from the stream', async () =>
 
   const graphService = {
     async readThreadState() {
-      return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
+      return { messages: [], pendingInterrupt: null, hasPendingContinuation: false };
     },
     streamEvents() {
       return (async function* () {
@@ -1343,7 +1353,7 @@ test('runChatSession omits token usage when provider usage is unavailable', asyn
       readThreadStateCalls += 1;
       return {
         messages: readThreadStateCalls === 1 ? snapshotMessages : finalMessages,
-        pendingHumanReview: null,
+        pendingInterrupt: null,
         hasPendingContinuation: false,
       };
     },
@@ -1431,7 +1441,7 @@ test('runChatSession emits provider token usage from new state messages', async 
       readThreadStateCalls += 1;
       return {
         messages: readThreadStateCalls === 1 ? initialMessages : finalMessages,
-        pendingHumanReview: null,
+        pendingInterrupt: null,
         hasPendingContinuation: false,
       };
     },

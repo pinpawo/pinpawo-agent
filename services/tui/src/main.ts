@@ -990,8 +990,7 @@ function requestReviewResolutionInterrupt(
   >,
 ) {
   const result = controller.interruptResolvedReview({
-    requestId: approval.requestId,
-    actionId: approval.action.actionId,
+    interruptId: approval.pendingInterrupt.interruptId,
   });
   if (result.ok) {
     approvalController.markInterruptSent();
@@ -1023,8 +1022,9 @@ function requestRunInterrupt() {
 function syncApprovalFromSession() {
   const previous = approvalController.getState();
   approvalController.sync(
-    controller.getState().session.activeRun,
+    controller.getState().session.pendingInterrupt,
     controller.getState().connection,
+    controller.getState().session.activeRun !== null,
   );
   const approval = approvalController.getState();
   if (approval.phase !== 'closed') {

@@ -134,6 +134,7 @@ test('handleLocalHttpRequest serves TUI snapshot endpoint', async () => {
           status: 'completed',
         }],
         activeRun: null,
+        pendingInterrupt: null,
       },
     }),
     listSessions: async () => [],
@@ -157,6 +158,7 @@ test('handleLocalHttpRequest serves TUI snapshot endpoint', async () => {
         status: 'completed',
       }],
       activeRun: null,
+      pendingInterrupt: null,
     },
   });
 });

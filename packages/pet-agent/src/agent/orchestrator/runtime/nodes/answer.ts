@@ -107,7 +107,7 @@ export function createAnswerNode(config: OrchestratorConfig) {
           new AIMessage(CHECKPOINT_INCOMPATIBLE_MESSAGE),
         )],
         taskActiveDelegation: null,
-        ...buildAnswerCleanup(),
+        ...buildAnswerCleanup(state),
       };
     }
     const { maxRunIterations } = getInvokeOptions(runnableConfig);
@@ -174,12 +174,12 @@ export function createAnswerNode(config: OrchestratorConfig) {
       const fallback = new AIMessage('我这边暂时没有可展示的回复，麻烦你再说一下需要我做什么。');
       return {
         messages: [stampMessageCreatedAtUtc(fallback)],
-        ...buildAnswerCleanup(),
+        ...buildAnswerCleanup(state),
       };
     }
     return {
       messages: [stampMessageCreatedAtUtc(response)],
-      ...buildAnswerCleanup(),
+      ...buildAnswerCleanup(state),
     };
   };
 }
@@ -267,10 +267,13 @@ export function selectAnswerContextFacts(params: {
   return { mode: 'direct', hasUserRequest, acceptedResults: params.acceptedResults };
 }
 
-function buildAnswerCleanup() {
+function buildAnswerCleanup(state: OrchestratorStateType) {
+  const preserveBoundaryPlan = state.runLatestDelegationOutcome === 'planner_incomplete'
+    && state.runRuntimeFailure === null
+    && state.taskActiveDelegation !== null;
   return {
     runNextDelegation: null,
-    runCapabilityPlan: [],
+    runCapabilityPlan: preserveBoundaryPlan ? [...state.runCapabilityPlan] : [],
     runIterationCount: 0,
     runLatestDelegationOutcome: null,
     runRuntimeFailure: null,

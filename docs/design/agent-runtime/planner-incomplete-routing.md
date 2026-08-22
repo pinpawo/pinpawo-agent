@@ -73,14 +73,17 @@ The root Capability Planner node owns the recovery route:
 ```text
 Planner incomplete
   -> preserve authentic Planner transcript
-  -> clear future plan / do not materialize a delegation
+  -> do not materialize a delegation
+  -> Entry clears the empty plan; Boundary preserves the committed remaining plan
   -> set planner_incomplete route outcome
   -> Answer
 ```
 
 Answer renders this as a distinct blocked reason. It can truthfully explain
 that the requested execution did not start because planning did not complete,
-without asserting that no Capability exists or that work was done.
+without asserting that no Capability exists or that work was done. Its cleanup
+preserves the remaining plan only when `planner_incomplete` still has an active
+delegation; all other Answer routes continue to clear transient plan state.
 
 ## Invariants
 
@@ -90,6 +93,7 @@ without asserting that no Capability exists or that work was done.
   appeared in the Planner lane.
 - `unavailable` remains a real Planner action, not generic error handling.
 - A non-commit never accepts an active delegation or marks it complete.
+- A Boundary non-commit never discards the committed remaining plan.
 - Planner limits and timeouts remain operational errors until they receive
   their own typed recovery contract; this change narrows only the successful
   model completion-without-commit path.
@@ -99,6 +103,6 @@ without asserting that no Capability exists or that work was done.
 - Entry: two successful search rounds, ordinary text -> typed incomplete -> Answer;
   no Capability execution and no repair model call.
 - Boundary: ordinary text after a delegation -> typed incomplete -> Answer;
-  active delegation is not accepted as completed.
+  active delegation is not accepted as completed and its remaining plan survives.
 - Genuine `submit_plan`, `advance_plan`, and `report_unavailable` retain their
   existing graph behavior and transcript replay semantics.

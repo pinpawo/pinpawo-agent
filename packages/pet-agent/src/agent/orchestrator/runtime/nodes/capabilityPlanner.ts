@@ -362,7 +362,9 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
       return new Command({
         update: includeIncompletePlannerMessages({
           runNextDelegation: null,
-          runCapabilityPlan: [],
+          runCapabilityPlan: input.mode === 'boundary'
+            ? [...state.runCapabilityPlan]
+            : [],
           runLatestDelegationOutcome: 'planner_incomplete' as const,
           runRuntimeFailure: null,
         }),

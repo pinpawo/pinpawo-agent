@@ -15,7 +15,7 @@ import {
   statSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { delimiter, isAbsolute, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   CAPABILITY_DOCUMENT_FILE_NAME,
@@ -29,7 +29,10 @@ import {
   type CapabilityDocumentFrontmatter,
   type CapabilityLifecycle,
 } from '@pinpawo/pet-agent';
-import type { CapabilityMeta } from './capabilityRegistry';
+import {
+  getBuiltInCapabilityMeta,
+  type CapabilityMeta,
+} from './capabilityRegistry';
 import { loadStoredConfig } from './storage';
 
 export const DEFAULT_CAPABILITIES_DIR = resolve(homedir(), '.pinpawo', 'capabilities');
@@ -71,7 +74,7 @@ function isDirectoryEntry(root: string, entryName: string): boolean {
 }
 
 export function resolveCapabilityDirs(): string[] {
-  const fromEnv = process.env.PINPAWO_CAPABILITY_DIRS?.split(':').filter(Boolean) ?? [];
+  const fromEnv = process.env.PINPAWO_CAPABILITY_DIRS?.split(delimiter).filter(Boolean) ?? [];
   const fromStored = loadStoredConfig().capability_dirs ?? [];
   const all = [
     DEFAULT_CAPABILITIES_DIR,
@@ -142,6 +145,11 @@ function validateUserCapabilityName(name: string, path: string) {
   if (name === GENERAL_CAPABILITY_NAME) {
     throw new Error(
       `${path}: Capability name "${GENERAL_CAPABILITY_NAME}" is reserved by the local-agent host`,
+    );
+  }
+  if (getBuiltInCapabilityMeta(name)) {
+    throw new Error(
+      `${path}: Capability name "${name}" is reserved by the local-agent host`,
     );
   }
 }

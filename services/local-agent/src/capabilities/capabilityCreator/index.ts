@@ -18,12 +18,15 @@ function resolveCapabilityCreatorDocumentUrl(): URL {
   throw new Error('Built-in capability_creator Capability document is missing');
 }
 
+let cachedCapability: AgentCapability | undefined;
+
 export function createCapabilityCreatorCapability(): AgentCapability {
+  if (cachedCapability) return cachedCapability;
   const documentUrl = resolveCapabilityCreatorDocumentUrl();
   const documentPath = fileURLToPath(documentUrl);
   const source = readFileSync(documentUrl, 'utf8');
   const { frontmatter, body } = parseFrontmatterDocument(source, documentPath);
-  return defineCapability({
+  cachedCapability = defineCapability({
     name: frontmatter.name,
     description: frontmatter.description,
     uses: frontmatter.uses,
@@ -35,6 +38,7 @@ export function createCapabilityCreatorCapability(): AgentCapability {
       content: source,
     }),
   });
+  return cachedCapability;
 }
 
 export { createCapabilityCreatorToolkit } from './tools';

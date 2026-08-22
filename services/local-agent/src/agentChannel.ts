@@ -18,7 +18,6 @@ import {
   createCapabilityCreatorCapability,
   createCapabilityCreatorToolkit,
 } from './capabilities/capabilityCreator';
-import { createExploreCapability } from './capabilities/explore';
 import { createPetProfileToolkit } from './toolkits/petProfile';
 import {
   buildLocalAgentModels,
@@ -28,7 +27,7 @@ import type { AgentLlmConfig } from './agentConfig';
 import type { AgentContext } from './contextLoader';
 import { buildLocalLlmConfig } from './llmConfig';
 import { getConfig } from './config';
-import { loadStoredConfig } from './storage';
+import { loadStoredConfig, type StoredConfig } from './storage';
 import { buildRuntimeEnvironmentSummary } from './runtimeEnvironment';
 import type { LoadedUserCapability } from './capabilityLoader';
 import {
@@ -44,6 +43,8 @@ import {
   type CapabilityDiagnosticReporter,
 } from './agentRegistryPreparation';
 import type { ToolkitInventoryEntry } from './toolkits/toolkitInventory';
+import { getBuiltInCapabilityMeta } from './capabilityRegistry';
+import { resolveCapabilityEnabled } from './capabilityActivation';
 
 function buildActor(context: AgentContext) {
   return {
@@ -72,17 +73,6 @@ function buildHistoryMessages(
       }
       return messages;
     });
-}
-
-/**
- * Check whether a built-in capability is enabled in config.
- * Returns true if the key is absent (default-on) or explicitly set to true.
- */
-function isCapabilityEnabled(id: string): boolean {
-  const config = loadStoredConfig();
-  const caps = config.capabilities;
-  if (!caps || !(id in caps)) return true; // default enabled
-  return caps[id] === true;
 }
 
 export type AgentChannelSetup = {
@@ -152,6 +142,8 @@ export function buildLocalChatAgentInput(params: {
   extraCapabilities?: AgentCapability[];
   /** User-defined capability plugins loaded by capabilityLoader */
   userCapabilities?: LoadedUserCapability[];
+  /** Stable config snapshot used to select Capability definitions for this run. */
+  capabilityConfig?: Pick<StoredConfig, 'capabilities'>;
   /** Store handed to capabilities so they can deterministically persist result artifacts */
   capabilityArtifactStore: CapabilityArtifactStore;
   /** Effective agent workdir for prompt context and relative tool paths. */
@@ -176,6 +168,7 @@ export function buildLocalChatAgentInput(params: {
   const actor = buildActor(params.context);
   const models = buildLocalAgentModels(llmConfig);
   const generationReserveTokens = resolveLlmGenerationReserveTokens(llmConfig);
+  const capabilityConfig = params.capabilityConfig ?? loadStoredConfig();
   // These definitions are derived from invocation-local actor or artifact
   // state. They overlay the Host inventory for this compiled run; they are
   // not a second Host Toolkit inventory.
@@ -188,22 +181,21 @@ export function buildLocalChatAgentInput(params: {
 
   const capabilities: AgentCapability[] = [];
 
-  if (isCapabilityEnabled('explore')) {
-    appendCapability(capabilities, createExploreCapability());
-  }
-
-  if (isCapabilityEnabled('capability_creator')) {
+  const capabilityCreatorMeta = getBuiltInCapabilityMeta('capability_creator');
+  if (capabilityCreatorMeta && resolveCapabilityEnabled(capabilityCreatorMeta, capabilityConfig)) {
     appendCapability(capabilities, createCapabilityCreatorCapability());
     invocationToolkits.push(createCapabilityCreatorToolkit());
   }
 
   for (const capability of params.extraCapabilities ?? []) {
+    const meta = getBuiltInCapabilityMeta(capability.name);
+    if (meta && !resolveCapabilityEnabled(meta, capabilityConfig)) continue;
     appendCapability(capabilities, capability);
   }
 
   // Append user-defined capabilities (enabled state checked against their manifest id)
   for (const { meta, capability } of params.userCapabilities ?? []) {
-    if (!isCapabilityEnabled(meta.id)) continue;
+    if (!resolveCapabilityEnabled(meta, capabilityConfig)) continue;
     if (capability.name === GENERAL_CAPABILITY_NAME) {
       throw new Error(
         `Capability name "${GENERAL_CAPABILITY_NAME}" is reserved by the local-agent host`,

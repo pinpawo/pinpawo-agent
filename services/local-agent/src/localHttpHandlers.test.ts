@@ -339,6 +339,55 @@ test('capability rescan replaces frozen runtime capability snapshots', async () 
   assert.equal(Object.isFrozen(after.userCapabilities), true);
 });
 
+test('/capabilities projects the installed user Capability snapshot and its authored default', () => {
+  const definition: LoadedUserCapability = {
+    meta: {
+      id: 'snapshot-only-capability',
+      name: 'Snapshot only Capability',
+      description: 'must come from the Host snapshot',
+      icon: 'test',
+      color: 'gray',
+      defaultEnabled: false,
+      builtIn: false,
+    },
+    capability: {
+      name: 'snapshot-only-capability',
+      description: 'must come from the Host snapshot',
+      uses: [],
+      instructions: defineInstructionDocument({ content: '# Snapshot only' }),
+    },
+  };
+  const res = makeRes();
+
+  handleLocalHttpRequest(
+    makeReq('/capabilities', 'Bearer secret'),
+    res,
+    {
+      serverMode: 'chat',
+      actorId: 'pet-a',
+      ...createTestModelServerDeps(),
+      workdir: '/tmp/pinpawo-capability-snapshot',
+      userCapabilities: [definition],
+    } as LocalServerDeps,
+    {
+      authToken: 'secret',
+      loadSnapshot: async () => ({}),
+      listSessions: async () => [],
+      resumeSession: async () => {
+        throw new Error('not called');
+      },
+    },
+  );
+
+  const item = JSON.parse(res.body).userCapabilities;
+  assert.deepEqual(item, [{
+    ...definition.meta,
+    enabled: false,
+    loaded: true,
+    routability: null,
+  }]);
+});
+
 test('/capabilities projects run-scoped routability from the compiled registry', () => {
   const explore: AgentCapability = {
     name: 'explore',

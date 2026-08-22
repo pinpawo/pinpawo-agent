@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { delimiter } from 'node:path';
 import {
   CAPABILITY_DOCUMENT_MAX_BYTES,
   loadCapabilityDirectory,
@@ -230,6 +231,35 @@ test('validateCapabilityPlugin rejects the host-reserved general name', async ()
 
   assert.equal(result.ok, false);
   assert.match(result.errors.join('\n'), /name "general" is reserved by the local-agent host/);
+});
+
+test('validateCapabilityPlugin rejects local-agent built-in names', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-caps-reserved-built-in-'));
+  const capabilityDir = await mkCapability(root, 'explore');
+
+  const { validateCapabilityPlugin } = await import('./capabilityLoader');
+  const result = await validateCapabilityPlugin(capabilityDir);
+
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join('\n'), /name "explore" is reserved by the local-agent host/);
+});
+
+test('resolveCapabilityDirs parses environment entries with the platform delimiter', async () => {
+  const first = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-caps-source-first-'));
+  const second = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-caps-source-second-'));
+  const previousDirs = process.env.PINPAWO_CAPABILITY_DIRS;
+  process.env.PINPAWO_CAPABILITY_DIRS = [first, first, second].join(delimiter);
+  try {
+    const { resolveCapabilityDirs } = await import('./capabilityLoader');
+    const dirs = resolveCapabilityDirs();
+    assert.deepEqual(dirs.slice(-2), [first, second]);
+  } finally {
+    if (previousDirs === undefined) {
+      delete process.env.PINPAWO_CAPABILITY_DIRS;
+    } else {
+      process.env.PINPAWO_CAPABILITY_DIRS = previousDirs;
+    }
+  }
 });
 
 test('parseFrontmatterDocument accepts supported list forms and body delimiters', () => {

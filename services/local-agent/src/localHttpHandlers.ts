@@ -3,8 +3,9 @@ import {
   ARTIFACT_DISCOVERY_TOOLKIT_NAME,
 } from '@pinpawo/pet-agent';
 import { BUILT_IN_CAPABILITY_REGISTRY } from './capabilityRegistry';
-import { loadUserCapabilities, readUserCapabilityManifests } from './capabilityLoader';
+import { loadUserCapabilities } from './capabilityLoader';
 import { loadStoredConfig } from './storage';
+import { resolveCapabilityEnabled } from './capabilityActivation';
 import { readAgentActivityHealthFields } from './operationActivityState';
 import { isAuthorizedLocalServerRequest } from './localServerAuth';
 import {
@@ -190,11 +191,6 @@ async function refreshToolkitAvailability(
   await deps.toolkitInventory.refresh(name);
 }
 
-function isCapabilityEnabled(id: string) {
-  const caps = loadStoredConfig().capabilities;
-  return !caps || !(id in caps) ? true : caps[id] === true;
-}
-
 async function rescanUserCapabilities(deps: LocalServerDeps) {
   const userCapabilities = deps.rescanUserCapabilities
     ? await deps.rescanUserCapabilities()
@@ -213,14 +209,19 @@ function buildCapabilitiesPayload(
   deps: LocalServerDeps,
   threadId?: string,
 ) {
+  const capabilityConfig = loadStoredConfig();
   const toolkitInventory = getLocalServerToolkitInventory(deps);
-  const localCapabilityIds = new Set((deps.localCapabilities ?? []).map((item) => item.name));
+  const localCapabilities = (deps.localCapabilities ?? []).filter((capability) => {
+    const meta = BUILT_IN_CAPABILITY_REGISTRY.find(({ id }) => id === capability.name);
+    return !meta || resolveCapabilityEnabled(meta, capabilityConfig);
+  });
+  const localCapabilityIds = new Set(localCapabilities.map((item) => item.name));
   const userCapabilities = deps.userCapabilities ?? [];
-  const userCapabilityIds = new Set(
-    userCapabilities.flatMap((item) => [item.meta.id, item.capability.name]),
-  );
-  const capabilities = [...(deps.localCapabilities ?? [])];
-  for (const { capability } of userCapabilities) {
+  const enabledUserCapabilities = userCapabilities.filter(({ meta }) => (
+    resolveCapabilityEnabled(meta, capabilityConfig)
+  ));
+  const capabilities = [...localCapabilities];
+  for (const { capability } of enabledUserCapabilities) {
     if (!capabilities.some(({ name }) => name === capability.name)) {
       capabilities.push(capability);
     }
@@ -284,22 +285,21 @@ function buildCapabilitiesPayload(
     const isHostRuntimeCapability = localCapabilityIds.has(meta.id);
     return {
       ...meta,
-      enabled: isCapabilityEnabled(meta.id),
-      loaded: true,
+      enabled: resolveCapabilityEnabled(meta, capabilityConfig),
+      loaded: isHostRuntimeCapability,
       routability: isHostRuntimeCapability
         ? resolveRoutability(capability?.name ?? meta.id)
         : null,
     };
   });
 
-  const userManifests = readUserCapabilityManifests().map((meta) => {
-    const loadedCapability = userCapabilities.find((item) => item.meta.id === meta.id);
+  const userManifests = userCapabilities.map(({ meta, capability }) => {
     return {
       ...meta,
-      enabled: isCapabilityEnabled(meta.id),
-      loaded: userCapabilityIds.has(meta.id),
-      routability: loadedCapability
-        ? resolveRoutability(loadedCapability.capability.name)
+      enabled: resolveCapabilityEnabled(meta, capabilityConfig),
+      loaded: true,
+      routability: resolveCapabilityEnabled(meta, capabilityConfig)
+        ? resolveRoutability(capability.name)
         : null,
     };
   });

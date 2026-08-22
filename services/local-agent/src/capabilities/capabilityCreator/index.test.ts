@@ -31,6 +31,10 @@ test('capability_creator retains its authored CAPABILITY.md provenance', async (
   );
 });
 
+test('capability_creator loads its static document once per Host process', () => {
+  assert.equal(createCapabilityCreatorCapability(), createCapabilityCreatorCapability());
+});
+
 test('capability_creator keeps artifact persistence out of model tool calls', () => {
   const capability = createCapabilityCreatorCapability();
 

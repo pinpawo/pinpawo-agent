@@ -15,6 +15,7 @@ import {
   type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 import { FileCapabilityArtifactStore } from './capabilityArtifactStore';
+import { createExploreCapability } from './capabilities/explore';
 import { loadGeneralCapability } from './capabilities/general';
 import { createBashToolkit, createGitToolkit } from './toolkits/local';
 import { createTestModelProfileRegistry } from './testing/modelProfiles';
@@ -200,6 +201,54 @@ test('buildLocalChatAgentInput dedupes built-in capabilities by name', () => {
   assert.equal(
     capabilities.filter((item) => item.name === 'explore').length,
     1,
+  );
+});
+
+test('buildLocalChatAgentInput filters Host capabilities using the shared config snapshot', () => {
+  const setup = buildTestLocalChatAgentInput({
+    context: createContext(),
+    userMessage: 'hello',
+    capabilityConfig: { capabilities: { explore: false } },
+    extraCapabilities: [{
+      name: 'explore',
+      description: 'extra explore capability',
+      uses: [],
+      instructions: defineInstructionDocument({ content: 'Explore.' }),
+    }],
+  });
+
+  assert.equal(
+    setup.input.capabilities?.some(({ name }) => name === 'explore'),
+    false,
+  );
+});
+
+test('buildLocalChatAgentInput honors a user Capability defaultEnabled value', () => {
+  const setup = buildTestLocalChatAgentInput({
+    context: createContext(),
+    userMessage: 'hello',
+    userCapabilities: [{
+      meta: {
+        id: 'disabled-user-capability',
+        name: 'Disabled user Capability',
+        description: 'disabled test definition',
+        icon: 'test',
+        color: 'gray',
+        defaultEnabled: false,
+        builtIn: false,
+      },
+      capability: {
+        name: 'disabled-user-capability',
+        description: 'disabled test definition',
+        uses: [],
+        instructions: defineInstructionDocument({ content: '# Disabled' }),
+      },
+    }],
+  });
+
+  assert.equal(
+    setup.input.capabilities?.some(({ name }) => name === 'disabled-user-capability'),
+    false,
   );
 });
 
@@ -399,6 +448,7 @@ test('buildLocalChatAgentInput registers artifact discovery for an empty thread'
     threadId: 'thread/with space',
     capabilityArtifactStore: store,
     toolkits: [createBashToolkit(), createGitToolkit()],
+    extraCapabilities: [createExploreCapability()],
   });
   const toolkit = setup.input.toolkits?.find(({ name }) => name === 'artifact_discovery');
 

@@ -50,3 +50,7 @@ export const BUILT_IN_CAPABILITY_REGISTRY: CapabilityMeta[] = [
     builtIn: true,
   },
 ];
+
+export function getBuiltInCapabilityMeta(id: string): CapabilityMeta | undefined {
+  return BUILT_IN_CAPABILITY_REGISTRY.find((meta) => meta.id === id);
+}

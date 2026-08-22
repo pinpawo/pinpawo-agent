@@ -803,9 +803,12 @@ test('Planner closes discovery after two capability_search rounds', async (t) =>
   assert.equal(searchResults.length, 2);
   assert.equal(searchResults.some((message) => message.status === 'error'), false);
   assert.match(String(searchResults[0]?.content), /"status":"open"/);
+  assert.match(String(searchResults[0]?.content), /"mustStopSearching":false/);
   assert.match(String(searchResults[0]?.content), /"roundsUsed":1/);
   assert.match(String(searchResults[0]?.content), /"remainingRounds":1/);
   assert.match(String(searchResults[1]?.content), /"status":"closed"/);
+  assert.match(String(searchResults[1]?.content), /"mustStopSearching":true/);
+  assert.match(String(searchResults[1]?.content), /"nextAction":"invoke_one_terminal_tool_now"/);
   assert.match(String(searchResults[1]?.content), /"roundsUsed":2/);
   assert.match(String(searchResults[1]?.content), /"remainingRounds":0/);
   assert.match(String(searchResults[0]?.content), /"defaultCandidate":"general"/);
@@ -927,6 +930,7 @@ test('a first-round miss discloses exact specific names before General becomes e
         specificCandidates?: string[];
         nextSearchCandidates?: string[];
         defaultCandidateRole?: string;
+        nextAction?: string;
       };
     }]),
   ).values()];
@@ -936,8 +940,16 @@ test('a first-round miss discloses exact specific names before General becomes e
     searchResults[0]?.exploration?.defaultCandidateRole,
     'deferred_while_specific_candidates_remain_unchecked',
   );
+  assert.equal(
+    searchResults[0]?.exploration?.nextAction,
+    'search_exact_candidate_name_before_default',
+  );
   assert.deepEqual(searchResults[1]?.exploration?.specificCandidates, ['explore']);
   assert.equal(searchResults[1]?.exploration?.defaultCandidateRole, 'fallback_only');
+  assert.equal(
+    searchResults[1]?.exploration?.nextAction,
+    'invoke_one_terminal_tool_now',
+  );
 });
 
 test('a boundary literal match still requires positive unfinished-work scope', async (t) => {
@@ -983,19 +995,18 @@ test('a boundary literal match still requires positive unfinished-work scope', a
     exploration?: {
       specificCandidates?: string[];
       nextSearchCandidates?: string[];
-      specificCandidateStatus?: string;
-      planUpdateRule?: string | null;
+      searchAvailable?: boolean;
+      mustStopSearching?: boolean;
+      nextAction?: string;
     };
   };
   assert.deepEqual(payload.exploration?.specificCandidates, ['explore']);
   assert.deepEqual(payload.exploration?.nextSearchCandidates, []);
+  assert.equal(payload.exploration?.searchAvailable, true);
+  assert.equal(payload.exploration?.mustStopSearching, false);
   assert.equal(
-    payload.exploration?.specificCandidateStatus,
-    'literal_match_requires_positive_scope_check',
-  );
-  assert.match(
-    payload.exploration?.planUpdateRule ?? '',
-    /copying every prior remaining-plan task verbatim/,
+    payload.exploration?.nextAction,
+    'evaluate_disclosed_candidates_then_commit_if_sufficient',
   );
 });
 

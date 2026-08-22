@@ -547,6 +547,12 @@ request_user_input(question)
 report_unavailable()
 ```
 
+决策语义只存在于 Planner system prompt：它定义何时选择每个 action、
+Capability 优先级和计划改写边界。Terminal tool description 只说明该工具
+提交的 action 和参数形状，不重复决策条件。`capability_search` 返回只提供
+本次披露的事实、剩余轮次、搜索是否已关闭和下一个控制动作；
+不再嵌入另一份 Capability 选择或计划改写政策。
+
 成功调用 terminal tool 后应直接形成结构化 commit；不要再要求模型用普通文本确认，也
 不要从普通 AI text 推导 fallback result。
 

@@ -275,6 +275,7 @@ export class TuiSessionController {
     })) {
       return { ok: false, reason: 'send-failed' };
     }
+    this.transport.invalidateCompletionSnapshotState();
     this.updateSession(reduceSession(this.state.session, {
       type: 'user.accepted',
       requestId,
@@ -314,6 +315,7 @@ export class TuiSessionController {
     })) {
       return { ok: false, reason: 'send-failed' };
     }
+    this.transport.invalidateCompletionSnapshotState();
     this.updateSession(reduceSession(this.state.session, {
       type: 'user.accepted',
       requestId,
@@ -483,6 +485,7 @@ export class TuiSessionController {
     })) {
       return { ok: false, reason: 'send-failed' };
     }
+    this.transport.invalidateCompletionSnapshotState();
     this.updateSession(reduceSession(this.state.session, {
       type: 'interrupt.resume.accepted',
       requestId,
@@ -517,6 +520,7 @@ export class TuiSessionController {
     })) {
       return { ok: false, reason: 'send-failed' };
     }
+    this.transport.invalidateCompletionSnapshotState();
     this.updateSession(reduceSession(this.state.session, {
       type: 'interrupt.resume.accepted',
       requestId,
@@ -558,6 +562,12 @@ export class TuiSessionController {
       // Studio 进度不再往这条会话里投影:推模型下提交即返回,activeRun 早就
       // 结束了,按 requestId 匹配恒不成立 —— 那是拉模型留下的形状。进度归
       // 插件自己的视图,studio 不代它呈现。
+      if (message.event.type === 'human_review.requested') {
+        // A pending interrupt is newer than every completion refresh requested
+        // before this runtime boundary. Those older responses may still update
+        // aggregate metadata, but cannot replace live projection state.
+        this.transport.invalidateCompletionSnapshotState();
+      }
       this.updateSession(reduceSession(this.state.session, {
         type: 'runtime.event',
         event: message.event,

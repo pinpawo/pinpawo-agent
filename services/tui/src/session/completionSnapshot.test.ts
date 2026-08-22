@@ -70,14 +70,26 @@ test('completion snapshot does not replace a newer active run', () => {
   assert.equal(reconciled.activeRun, live.activeRun);
 });
 
-test('completion snapshot does not erase a newer pending interrupt', () => {
+test('completion snapshot applies authoritative pending interrupt state', () => {
   const live: AgentSession = {
     ...session([message('new-run', 'user', 'Needs approval.')]),
     pendingInterrupt: {
       interruptId: 'interrupt-new',
       payload: {
         kind: 'human_review',
-        interactions: [],
+        interactions: [{
+          interactionId: 'review-new',
+          schemaVersion: 2,
+          view: {
+            kind: 'plain',
+            body: 'Approve the operation?',
+          },
+          options: [{
+            id: 'approve',
+            label: 'Approve',
+            batchSubmission: 'immediate',
+          }],
+        }],
       },
     },
   };
@@ -87,8 +99,7 @@ test('completion snapshot does not erase a newer pending interrupt', () => {
 
   const reconciled = reconcileCompletionSnapshot(live, snapshot, 1_000);
 
-  assert.equal(reconciled.timeline, live.timeline);
-  assert.equal(reconciled.pendingInterrupt, live.pendingInterrupt);
+  assert.equal(reconciled.pendingInterrupt, null);
 });
 
 test('completion snapshot trusts a future full canonical timeline', () => {

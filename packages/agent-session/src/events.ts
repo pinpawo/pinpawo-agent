@@ -121,7 +121,8 @@ export type AgentErrorCode =
   | 'review_stale'
   | 'review_wrong_session'
   // The agent could not run at all (model quota exhausted, auth rejected).
-  // The run is terminated and any pending interrupt is closed with it.
+  // The invocation terminates; checkpoint state remains authoritative for any
+  // pending interrupt and is reconciled separately.
   | 'agent_unavailable';
 
 export type AgentErrorEvent = {

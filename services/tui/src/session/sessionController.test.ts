@@ -191,6 +191,47 @@ test('manual refresh requests a snapshot without waiting for the active run', ()
   controller.stop();
 });
 
+test('a pending interrupt invalidates an older in-flight refresh snapshot', () => {
+  const requestIds = ['startup', 'chat', 'refresh'];
+  let connection!: FakeConnection;
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => requestIds.shift() ?? 'unexpected',
+  });
+
+  controller.start();
+  connection.open();
+  connection.receive(snapshotResult('startup', 'chat:one'));
+  assert.equal(controller.submitChat('needs approval').ok, true);
+  assert.deepEqual(controller.refreshSession(), { ok: true });
+  connection.receive(eventMessage({
+    type: 'human_review.requested',
+    requestId: 'chat',
+    pendingInterrupt: {
+      interruptId: 'interrupt-new',
+      payload: {
+        kind: 'human_review',
+        interactions: [reviewSpec('review-new', [{
+          id: 'approve',
+          label: 'Approve',
+          batchSubmission: 'immediate',
+        }])],
+      },
+    },
+  }));
+
+  connection.receive(snapshotResult('refresh', 'chat:one'));
+
+  assert.equal(
+    controller.getState().session.pendingInterrupt?.interruptId,
+    'interrupt-new',
+  );
+  controller.stop();
+});
+
 test('startup snapshot restores active run ownership for following activity events', () => {
   let connection!: FakeConnection;
   const controller = new TuiSessionController({

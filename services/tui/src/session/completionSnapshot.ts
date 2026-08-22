@@ -18,10 +18,9 @@ export function reconcileCompletionSnapshot(
   });
   if (
     live.activeRun
-    || live.pendingInterrupt
     || hasCanonicalOperationEntries(applied.timeline)
   ) {
-    return live.activeRun || live.pendingInterrupt
+    return live.activeRun
       ? mergeCompletionSnapshotMetadata(live, applied)
       : applied;
   }
@@ -35,6 +34,21 @@ export function reconcileCompletionSnapshot(
       applied.timeline,
     ),
   };
+}
+
+export function reconcileCompletionSnapshotMetadata(
+  live: AgentSession,
+  snapshot: AgentSessionSnapshot,
+  observedAt: number,
+) {
+  return mergeCompletionSnapshotMetadata(
+    live,
+    applySessionSnapshot(live, snapshot, {
+      observedAt,
+      preserveOmittedTokenUsage: true,
+      preserveOmittedSessionTokenUsage: true,
+    }),
+  );
 }
 
 function mergeCheckpointMessagesWithLiveDetails(

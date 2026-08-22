@@ -110,6 +110,39 @@ test('session transport consumes snapshot errors but forwards command errors', (
   transport.stop();
 });
 
+test('session transport downgrades invalidated completion snapshots to metadata-only', () => {
+  const requestIds = ['startup', 'completion'];
+  let connection!: FakeConnection;
+  const snapshots: string[] = [];
+  const transport = new SessionTransportCoordinator({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => requestIds.shift() ?? 'unexpected',
+    reconnectDelaysMs: [10],
+    snapshotTimeoutMs: 1_000,
+    setTimer: setTimeout,
+    clearTimer: clearTimeout,
+    onConnection: () => undefined,
+    onSnapshot: (_snapshot, reason) => {
+      snapshots.push(reason);
+    },
+    onMessage: () => undefined,
+    onDisconnected: () => undefined,
+  });
+
+  transport.start();
+  connection.open();
+  connection.receive(snapshot('startup'));
+  transport.requestCompletionSnapshot();
+  transport.invalidateCompletionSnapshotState();
+  connection.receive(snapshot('completion'));
+
+  assert.deepEqual(snapshots, ['startup', 'completion-metadata']);
+  transport.stop();
+});
+
 function snapshot(requestId: string) {
   return {
     type: 'session.snapshot.result' as const,

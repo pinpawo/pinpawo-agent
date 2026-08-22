@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createAgentSessionSnapshot } from '@pinpawo/agent-session';
 import { TuiSessionController } from './sessionController';
 import {
   FakeConnection,
@@ -164,6 +165,67 @@ test('review cancellation targets only the current pending interrupt', () => {
     requestId: 'startup',
     interruptId: 'review-action',
   });
+  controller.stop();
+});
+
+test('authoritative completion snapshot closes a review rejected by the server', () => {
+  const requestIds = ['startup', 'resume', 'completion'];
+  let connection!: FakeConnection;
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => requestIds.shift() ?? 'unexpected',
+  });
+  controller.start();
+  connection.open();
+  connection.receive(reviewSnapshotResult('startup', [
+    reviewSpec('review-1', [{
+      id: 'approve',
+      label: 'Approve',
+      batchSubmission: 'immediate',
+    }]),
+  ]));
+
+  assert.equal(controller.submitReviewResponse({
+    interruptId: 'review-action',
+    responses: [],
+    optionId: 'approve',
+  }).ok, true);
+  connection.receive({
+    type: 'event',
+    requestId: 'resume',
+    event: {
+      type: 'error',
+      requestId: 'resume',
+      message: 'review closed',
+      code: 'review_closed',
+    },
+  });
+  assert.equal(
+    controller.getState().session.pendingInterrupt?.interruptId,
+    'review-action',
+  );
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'session.snapshot.get',
+    requestId: 'completion',
+  });
+
+  connection.receive({
+    type: 'session.snapshot.result',
+    requestId: 'completion',
+    snapshot: createAgentSessionSnapshot({
+      sessionId: 'chat:one',
+      kind: 'chat',
+      timeline: [],
+      activeRun: null,
+      pendingInterrupt: null,
+    }),
+  });
+
+  assert.equal(controller.getState().session.pendingInterrupt, null);
+  assert.equal(controller.getState().session.activeRun, null);
   controller.stop();
 });
 

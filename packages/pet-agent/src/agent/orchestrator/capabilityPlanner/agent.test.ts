@@ -571,9 +571,11 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
   assert.deepEqual(model.boundToolNameHistory[0]?.slice(0, 1), [
     CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
   ]);
+  assert.equal(model.boundToolNameHistory[0]?.includes('request_user_input'), false);
   assert.equal(model.boundToolNameHistory[1]?.includes(
     CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
   ), true);
+  assert.equal(model.boundToolNameHistory[1]?.includes('request_user_input'), false);
   assert.equal(model.structuredOutputToolNames.size, 3);
   assert.ok(model.structuredOutputToolNames.has('plan'));
   assert.ok(model.structuredOutputToolNames.has('advance'));

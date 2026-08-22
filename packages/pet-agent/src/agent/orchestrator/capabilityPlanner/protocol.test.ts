@@ -47,6 +47,14 @@ test('Planner commit enforces entry and continuation invariants', () => {
     activeDelegation: null,
   }), /invalid at entry/);
   assert.throws(() => parsePlannerCommit({
+    action: 'user_input_required',
+    tasks: [],
+  }, {
+    ...boundaryContext,
+    mode: 'entry',
+    activeDelegation: null,
+  }), /invalid at entry/);
+  assert.throws(() => parsePlannerCommit({
     action: 'continue_current',
     tasks: [{ capability: 'explore', task: 'Switch executor.' }],
   }, boundaryContext), /forbids tasks/);

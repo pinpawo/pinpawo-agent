@@ -88,6 +88,7 @@ export function parsePlannerCommit(
     commit.action === 'continue_current'
     || commit.action === 'advance_plan'
     || commit.action === 'goal_done'
+    || commit.action === 'user_input_required'
   )) {
     throw new Error(`Planner action "${commit.action}" is invalid at entry.`);
   }

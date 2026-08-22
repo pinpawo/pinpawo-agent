@@ -58,6 +58,16 @@ test('boundary planning cases identify the active Capability explicitly', () => 
   }
 });
 
+test('entry planning cases never return user-input-required after Entry Answer delegates', () => {
+  const entryCases = capabilityPlanningBasicsDataset.cases.filter(
+    ({ input }) => input.mode === 'entry',
+  );
+  assert.ok(entryCases.length > 0);
+  for (const testCase of entryCases) {
+    assert.notEqual(testCase.expected.result, 'user_input_required', testCase.name);
+  }
+});
+
 test('planner goal contract keeps semantic plan checks outside the deterministic result score', () => {
   const testCase = capabilityPlanningBasicsDataset.cases.find(
     ({ name }) => name === 'entry-explore-then-implementation',
@@ -86,15 +96,26 @@ test('planner goal contract evaluates an expected empty future plan', () => {
   assert.match(criterion.statement, /remaining plan is empty/i);
 });
 
-test('planner return-to-Answer is evaluated as a structured terminal result', () => {
+test('planner materializes requested recommendation work before asking for confirmation', () => {
   const testCase = capabilityPlanningBasicsDataset.cases.find(
-    ({ name }) => name === 'entry-returns-to-answer-before-execution',
+    ({ name }) => name === 'entry-recommends-before-requesting-confirmation',
   );
   assert.ok(testCase);
-  assert.deepEqual(
-    buildCapabilityPlanningGoalContract(testCase.expected).acceptanceCriteria,
-    [],
+  assert.equal(testCase.expected.result, 'execute_plan');
+  assert.equal(testCase.expected.capabilityName, 'general');
+  assert.ok(
+    buildCapabilityPlanningGoalContract(testCase.expected).acceptanceCriteria.length > 0,
   );
+});
+
+test('trace-derived latest-main verification requires execution rather than user input', () => {
+  const testCase = capabilityPlanningBasicsDataset.cases.find(
+    ({ name }) => name === 'entry-verifies-latest-main-instead-of-requesting-user-input',
+  );
+  assert.ok(testCase);
+  assert.equal(testCase.expected.result, 'execute_plan');
+  assert.equal(testCase.expected.capabilityName, 'general');
+  assert.equal(testCase.expected.exactRemainingPlanLength, 0);
 });
 
 test('planner goal evaluation rejects a semantically wrong plan with the correct result', async () => {

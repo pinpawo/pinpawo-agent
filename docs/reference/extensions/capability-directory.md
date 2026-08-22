@@ -49,8 +49,9 @@ entry: ./index.js
 
 未知字段、重复 `uses`、越界或 symlink 逃逸的 entry、空或超大 Markdown body 都会被拒绝。
 
-`general` 和 local-agent 内建 Capability 名称是 host 的保留名，用户 Capability
-不能注册这些名称。这样用户定义不会在 Chat registry 组装时被静默覆盖。
+目录 loader 只校验通用 Capability 协议，不知道具体 Host 的保留名。Host Capability
+Catalog 在把来源合并为同一个 Agent snapshot 时拒绝重名的定义；不会依赖下游静默
+覆盖来决定优先级。
 
 ## 3. 可选代码入口
 

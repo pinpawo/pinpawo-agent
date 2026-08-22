@@ -4,26 +4,10 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { tool } from '@langchain/core/tools';
-import {
-  defineInstructionDocument,
-  type AgentCapability,
-  type AgentToolkit,
-  type CapabilityArtifactStore,
-} from '@pinpawo/pet-agent';
-import { z } from 'zod';
 import { handleLocalHttpRequest } from './localHttpHandlers';
-import {
-  createLocalServerRuntimeDepsStore,
-  type LocalServerDeps,
-} from './localServerTypes';
-import type { LoadedUserCapability } from './capabilityLoader';
+import type { LocalServerDeps } from './localServerTypes';
 import { clearAgentRunActivity, recordOperationActivity } from './operationActivityState';
 import { readLocalAgentPackageVersion } from './packageVersion';
-import type {
-  ToolkitDefinitionSourceKind,
-} from './toolkits/toolkitInventory';
-import { HostToolkitInventoryStore } from './toolkits/toolkitInventory';
 import { createTestModelServerDeps } from './testing/modelProfiles';
 
 function makeReq(url: string, authorization?: string): IncomingMessage {
@@ -34,29 +18,6 @@ function makeReq(url: string, authorization?: string): IncomingMessage {
       ...(authorization ? { authorization } : {}),
     },
   } as IncomingMessage;
-}
-
-function toolkitInventory(
-  definitions: readonly AgentToolkit[],
-  effectiveToolkits: readonly AgentToolkit[] = definitions,
-  sourceKind: ToolkitDefinitionSourceKind = 'host_builtin',
-  unavailableReason = 'test unavailable',
-): HostToolkitInventoryStore {
-  return new HostToolkitInventoryStore({
-    entries: definitions.map((toolkit, definitionIndex) => ({
-      toolkit,
-      provenance: {
-        sourceId: sourceKind === 'plugin' ? 'test-plugin' : 'local-agent-test',
-        sourceKind,
-        sourceIndex: 0,
-        definitionIndex,
-      },
-      availability: effectiveToolkits.includes(toolkit)
-        ? { available: true }
-        : { available: false, reason: unavailableReason },
-    })),
-    effectiveToolkits,
-  });
 }
 
 function makeRes() {
@@ -282,128 +243,8 @@ test('handleLocalHttpRequest exposes active operation health fields', async () =
   clearAgentRunActivity('req-1');
 });
 
-test('capability rescan replaces frozen runtime capability snapshots', async () => {
-  const definition = {
-    meta: {
-      id: 'custom-test',
-      name: 'Custom Test',
-      description: 'test capability',
-      icon: 'test',
-      color: 'gray',
-      defaultEnabled: true,
-      builtIn: false,
-    },
-    capability: {
-      name: 'custom-test',
-      description: 'custom test capability',
-      uses: [],
-      instructions: defineInstructionDocument({
-        content: '# Custom Test',
-      }),
-    },
-  } as LoadedUserCapability;
-  const runtimeDeps = createLocalServerRuntimeDepsStore({
-    serverMode: 'chat',
-    actorId: 'pet-a',
-    ...createTestModelServerDeps(),
-    workdir: '/tmp/pinpawo-capability-rescan',
-    userCapabilities: [],
-    rescanUserCapabilities: async () => [definition],
-  });
-  const before = runtimeDeps.get();
-  const res = makeRes();
-
-  assert.equal(handleLocalHttpRequest(
-    makeReq('/capabilities/rescan', 'Bearer secret'),
-    res,
-    before,
-    {
-      authToken: 'secret',
-      loadSnapshot: async () => ({}),
-      listSessions: async () => [],
-      resumeSession: async () => {
-        throw new Error('not called');
-      },
-      updateExtensions: (patch) => runtimeDeps.updateExtensions(patch),
-    },
-  ), true);
-
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  const after = runtimeDeps.get();
-  assert.equal(res.statusCode, 200);
-  assert.equal(JSON.parse(res.body).status, 'ok');
-  assert.equal(JSON.parse(res.body).loaded, 1);
-  assert.notEqual(after, before);
-  assert.deepEqual(before.userCapabilities, []);
-  assert.equal(after.userCapabilities?.[0], definition);
-  assert.equal(Object.isFrozen(after.userCapabilities), true);
-});
-
-test('/capabilities projects the installed user Capability snapshot and its authored default', () => {
-  const definition: LoadedUserCapability = {
-    meta: {
-      id: 'snapshot-only-capability',
-      name: 'Snapshot only Capability',
-      description: 'must come from the Host snapshot',
-      icon: 'test',
-      color: 'gray',
-      defaultEnabled: false,
-      builtIn: false,
-    },
-    capability: {
-      name: 'snapshot-only-capability',
-      description: 'must come from the Host snapshot',
-      uses: [],
-      instructions: defineInstructionDocument({ content: '# Snapshot only' }),
-    },
-  };
-  const res = makeRes();
-
-  handleLocalHttpRequest(
-    makeReq('/capabilities', 'Bearer secret'),
-    res,
-    {
-      serverMode: 'chat',
-      actorId: 'pet-a',
-      ...createTestModelServerDeps(),
-      workdir: '/tmp/pinpawo-capability-snapshot',
-      userCapabilities: [definition],
-    } as LocalServerDeps,
-    {
-      authToken: 'secret',
-      loadSnapshot: async () => ({}),
-      listSessions: async () => [],
-      resumeSession: async () => {
-        throw new Error('not called');
-      },
-    },
-  );
-
-  const item = JSON.parse(res.body).userCapabilities;
-  assert.deepEqual(item, [{
-    ...definition.meta,
-    enabled: false,
-    loaded: true,
-    routability: null,
-  }]);
-});
-
-test('/capabilities projects run-scoped routability from the compiled registry', () => {
-  const explore: AgentCapability = {
-    name: 'explore',
-    description: 'explore capability',
-    uses: ['artifact_discovery'],
-    instructions: defineInstructionDocument({
-      content: '# Explore',
-    }),
-  };
-  const deps = {
-    actorId: 'pet-a',
-    ...createTestModelServerDeps(),
-    workdir: '/tmp/pinpawo-capability-routability',
-    localCapabilities: [explore],
-    capabilityArtifactStore: {} as CapabilityArtifactStore,
-  } as LocalServerDeps;
+test('Capability HTTP routes are not part of the local server contract', () => {
+  const deps = {} as LocalServerDeps;
   const options = {
     authToken: 'secret',
     loadSnapshot: async () => ({}),
@@ -413,255 +254,18 @@ test('/capabilities projects run-scoped routability from the compiled registry',
     },
   };
 
-  const unscopedRes = makeRes();
-  handleLocalHttpRequest(
+  assert.equal(handleLocalHttpRequest(
     makeReq('/capabilities', 'Bearer secret'),
-    unscopedRes,
+    makeRes(),
     deps,
     options,
-  );
-  const unscopedExplore = JSON.parse(unscopedRes.body).builtIns
-    .find((item: { id: string }) => item.id === 'explore');
-  assert.deepEqual(unscopedExplore.routability, {
-    status: 'requires_scope',
-    required: ['threadId'],
-  });
-
-  const missingAllScopeRes = makeRes();
-  handleLocalHttpRequest(
-    makeReq('/capabilities', 'Bearer secret'),
-    missingAllScopeRes,
-    {
-      ...deps,
-      capabilityArtifactStore: undefined,
-    },
-    options,
-  );
-  const missingAllScopeExplore = JSON.parse(missingAllScopeRes.body).builtIns
-    .find((item: { id: string }) => item.id === 'explore');
-  assert.deepEqual(missingAllScopeExplore.routability, {
-    status: 'requires_scope',
-    required: ['threadId', 'capabilityArtifactStore'],
-  });
-
-  const scopedRes = makeRes();
-  handleLocalHttpRequest(
-    makeReq('/capabilities?threadId=thread-1', 'Bearer secret'),
-    scopedRes,
+  ), false);
+  assert.equal(handleLocalHttpRequest(
+    makeReq('/capabilities/rescan', 'Bearer secret'),
+    makeRes(),
     deps,
     options,
-  );
-  const scopedExplore = JSON.parse(scopedRes.body).builtIns
-    .find((item: { id: string }) => item.id === 'explore');
-  assert.deepEqual(scopedExplore.routability, {
-    status: 'available',
-  });
-});
-
-test('/capabilities exposes registry compilation issues instead of recomputing missing Toolkits', () => {
-  const duplicateToolkits = ['first', 'second'].map((name) => ({
-    name,
-    description: `${name} Toolkit`,
-    tools: [{
-      tool: tool(
-        async () => 'duplicate result',
-        {
-          name: 'duplicate_tool',
-          description: 'Duplicate test tool.',
-          schema: z.object({}),
-        },
-      ),
-    }],
-  })) as unknown as AgentToolkit[];
-  const explore: AgentCapability = {
-    name: 'explore',
-    description: 'explore capability',
-    uses: ['first', 'second'],
-    instructions: defineInstructionDocument({
-      content: '# Explore',
-    }),
-  };
-  const res = makeRes();
-
-  handleLocalHttpRequest(
-    makeReq('/capabilities', 'Bearer secret'),
-    res,
-    {
-      actorId: 'pet-a',
-      ...createTestModelServerDeps(),
-      workdir: '/tmp/pinpawo-capability-duplicate-tool',
-      localCapabilities: [explore],
-      toolkitInventory: toolkitInventory(duplicateToolkits),
-    } as LocalServerDeps,
-    {
-      authToken: 'secret',
-      loadSnapshot: async () => ({}),
-      listSessions: async () => [],
-      resumeSession: async () => {
-        throw new Error('not called');
-      },
-    },
-  );
-
-  const payload = JSON.parse(res.body);
-  const routability = payload.builtIns
-    .find((item: { id: string }) => item.id === 'explore')
-    .routability;
-  assert.equal(routability.status, 'unavailable');
-  assert.deepEqual(routability.issues, [{
-    code: 'duplicate_tool',
-    toolName: 'duplicate_tool',
-    toolkitNames: ['first', 'second'],
-  }]);
-});
-
-test('/capabilities attaches the inventory reason for a known unavailable Toolkit', () => {
-  const offlineToolkit: AgentToolkit = {
-    name: 'offline-test',
-    description: 'Unavailable test Toolkit',
-    tools: [],
-    availability: () => ({
-      available: false,
-      reason: 'test dependency is offline',
-    }),
-  };
-  const res = makeRes();
-
-  handleLocalHttpRequest(
-    makeReq('/capabilities', 'Bearer secret'),
-    res,
-    {
-      serverMode: 'chat',
-      actorId: 'pet-a',
-      ...createTestModelServerDeps(),
-      workdir: '/tmp/pinpawo-capability-unavailable-toolkit',
-      localCapabilities: [{
-        name: 'explore',
-        description: 'explore capability',
-        uses: [offlineToolkit.name],
-        instructions: defineInstructionDocument({
-          content: '# Explore',
-        }),
-      }],
-      toolkitInventory: toolkitInventory(
-        [offlineToolkit],
-        [],
-        'host_builtin',
-        'test dependency is offline',
-      ),
-    } as LocalServerDeps,
-    {
-      authToken: 'secret',
-      loadSnapshot: async () => ({}),
-      listSessions: async () => [],
-      resumeSession: async () => {
-        throw new Error('not called');
-      },
-    },
-  );
-
-  const routability = JSON.parse(res.body).builtIns
-    .find((item: { id: string }) => item.id === 'explore')
-    .routability;
-  assert.deepEqual(routability, {
-    status: 'unavailable',
-    issues: [{
-      code: 'unavailable_toolkit',
-      toolkitName: 'offline-test',
-      reason: 'test dependency is offline',
-    }],
-  });
-});
-
-test('Toolkit refresh updates the immutable Host inventory with copy-on-write', async () => {
-  const toolkit = {
-    name: 'dynamic-test',
-    availability: () => ({ available: true as const }),
-  } as AgentToolkit;
-  const runtimeDeps = createLocalServerRuntimeDepsStore({
-    serverMode: 'chat',
-    actorId: 'pet-a',
-    ...createTestModelServerDeps(),
-    workdir: '/tmp/pinpawo-capability-refresh',
-    toolkitInventory: toolkitInventory([toolkit], []),
-  });
-  const before = runtimeDeps.get();
-  const beforeSnapshot = before.toolkitInventory.getSnapshot();
-  const res = makeRes();
-
-  handleLocalHttpRequest(
-    makeReq('/health?refresh_toolkit=dynamic-test', 'Bearer secret'),
-    res,
-    before,
-    {
-      authToken: 'secret',
-      loadSnapshot: async () => ({}),
-      listSessions: async () => [],
-      resumeSession: async () => {
-        throw new Error('not called');
-      },
-      updateExtensions: (patch) => runtimeDeps.updateExtensions(patch),
-    },
-  );
-
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  const after = runtimeDeps.get();
-  assert.equal(res.statusCode, 200);
-  assert.equal(after.toolkitInventory, before.toolkitInventory);
-  assert.deepEqual(beforeSnapshot.effectiveToolkits, []);
-  assert.notEqual(after.toolkitInventory.getSnapshot(), beforeSnapshot);
-  assert.deepEqual(after.toolkitInventory.getSnapshot().effectiveToolkits, [toolkit]);
-  assert.equal(Object.isFrozen(after.toolkitInventory.getSnapshot()), true);
-  assert.equal(Object.isFrozen(
-    after.toolkitInventory.getSnapshot().effectiveToolkits,
-  ), true);
-});
-
-test('Toolkit refresh can restore an unavailable plugin Toolkit', async () => {
-  const toolkit = {
-    name: 'dynamic-plugin-test',
-    availability: () => ({ available: true as const }),
-  } as AgentToolkit;
-  const runtimeDeps = createLocalServerRuntimeDepsStore({
-    serverMode: 'chat',
-    actorId: 'pet-a',
-    ...createTestModelServerDeps(),
-    workdir: '/tmp/pinpawo-plugin-toolkit-refresh',
-    toolkitInventory: toolkitInventory([toolkit], [], 'plugin'),
-  });
-  const before = runtimeDeps.get();
-  const beforeSnapshot = before.toolkitInventory.getSnapshot();
-  const res = makeRes();
-
-  handleLocalHttpRequest(
-    makeReq('/health?refresh_toolkit=dynamic-plugin-test', 'Bearer secret'),
-    res,
-    before,
-    {
-      authToken: 'secret',
-      loadSnapshot: async () => ({}),
-      listSessions: async () => [],
-      resumeSession: async () => {
-        throw new Error('not called');
-      },
-      updateExtensions: (patch) => runtimeDeps.updateExtensions(patch),
-    },
-  );
-
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  const after = runtimeDeps.get();
-  assert.equal(res.statusCode, 200);
-  assert.equal(after.toolkitInventory, before.toolkitInventory);
-  assert.deepEqual(beforeSnapshot.effectiveToolkits, []);
-  assert.notEqual(after.toolkitInventory.getSnapshot(), beforeSnapshot);
-  assert.equal(after.toolkitInventory.getSnapshot().effectiveToolkits[0], toolkit);
-  assert.equal(
-    after.toolkitInventory.getSnapshot().entries[0]?.provenance.sourceKind,
-    'plugin',
-  );
-  assert.equal(Object.isFrozen(
-    after.toolkitInventory.getSnapshot().effectiveToolkits,
-  ), true);
+  ), false);
 });
 
 test('handleLocalHttpRequest exposes canonical workdir Studio paths on runtime endpoint', async () => {

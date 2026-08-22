@@ -2,7 +2,6 @@ import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messa
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
-  GENERAL_CAPABILITY_NAME,
   stampMessageCreatedAtUtc,
   type AgentCapability,
   type AgentInvokeInput,
@@ -14,10 +13,6 @@ import {
   type OrchestrationDecisionStructuredOutputConfig,
   type ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
-import {
-  createCapabilityCreatorCapability,
-  createCapabilityCreatorToolkit,
-} from './capabilities/capabilityCreator';
 import { createPetProfileToolkit } from './toolkits/petProfile';
 import {
   buildLocalAgentModels,
@@ -27,9 +22,7 @@ import type { AgentLlmConfig } from './agentConfig';
 import type { AgentContext } from './contextLoader';
 import { buildLocalLlmConfig } from './llmConfig';
 import { getConfig } from './config';
-import { loadStoredConfig, type StoredConfig } from './storage';
 import { buildRuntimeEnvironmentSummary } from './runtimeEnvironment';
-import type { LoadedUserCapability } from './capabilityLoader';
 import {
   buildLocalAgentInterfaceContext,
   type LocalAgentInterfaceContext,
@@ -43,8 +36,6 @@ import {
   type CapabilityDiagnosticReporter,
 } from './agentRegistryPreparation';
 import type { ToolkitInventoryEntry } from './toolkits/toolkitInventory';
-import { getBuiltInCapabilityMeta } from './capabilityRegistry';
-import { resolveCapabilityEnabled } from './capabilityActivation';
 
 function buildActor(context: AgentContext) {
   return {
@@ -89,16 +80,6 @@ function buildGraphKey(parts: Array<string | null | undefined>) {
     .join(':');
 }
 
-function appendCapability(
-  capabilities: AgentCapability[],
-  capability: AgentCapability,
-) {
-  if (capabilities.some((item) => item.name === capability.name)) {
-    return;
-  }
-  capabilities.push(capability);
-}
-
 export function buildDecisionStructuredOutput(
   llmConfig: AgentLlmConfig,
 ): OrchestrationDecisionStructuredOutputConfig | undefined {
@@ -138,12 +119,8 @@ export function buildLocalChatAgentInput(params: {
   threadId: string;
   interfaceKind?: LocalAgentInterfaceKind | null;
   checkpoint?: BaseCheckpointSaver;
-  /** Host-provided baseline and optional default Capabilities. */
-  extraCapabilities?: AgentCapability[];
-  /** User-defined capability plugins loaded by capabilityLoader */
-  userCapabilities?: LoadedUserCapability[];
-  /** Stable config snapshot used to select Capability definitions for this run. */
-  capabilityConfig?: Pick<StoredConfig, 'capabilities'>;
+  /** Already-resolved Capability snapshot supplied by the Host catalog. */
+  capabilities?: readonly AgentCapability[];
   /** Store handed to capabilities so they can deterministically persist result artifacts */
   capabilityArtifactStore: CapabilityArtifactStore;
   /** Effective agent workdir for prompt context and relative tool paths. */
@@ -168,7 +145,6 @@ export function buildLocalChatAgentInput(params: {
   const actor = buildActor(params.context);
   const models = buildLocalAgentModels(llmConfig);
   const generationReserveTokens = resolveLlmGenerationReserveTokens(llmConfig);
-  const capabilityConfig = params.capabilityConfig ?? loadStoredConfig();
   // These definitions are derived from invocation-local actor or artifact
   // state. They overlay the Host inventory for this compiled run; they are
   // not a second Host Toolkit inventory.
@@ -179,30 +155,7 @@ export function buildLocalChatAgentInput(params: {
     }),
   ];
 
-  const capabilities: AgentCapability[] = [];
-
-  const capabilityCreatorMeta = getBuiltInCapabilityMeta('capability_creator');
-  if (capabilityCreatorMeta && resolveCapabilityEnabled(capabilityCreatorMeta, capabilityConfig)) {
-    appendCapability(capabilities, createCapabilityCreatorCapability());
-    invocationToolkits.push(createCapabilityCreatorToolkit());
-  }
-
-  for (const capability of params.extraCapabilities ?? []) {
-    const meta = getBuiltInCapabilityMeta(capability.name);
-    if (meta && !resolveCapabilityEnabled(meta, capabilityConfig)) continue;
-    appendCapability(capabilities, capability);
-  }
-
-  // Append user-defined capabilities (enabled state checked against their manifest id)
-  for (const { meta, capability } of params.userCapabilities ?? []) {
-    if (!resolveCapabilityEnabled(meta, capabilityConfig)) continue;
-    if (capability.name === GENERAL_CAPABILITY_NAME) {
-      throw new Error(
-        `Capability name "${GENERAL_CAPABILITY_NAME}" is reserved by the local-agent host`,
-      );
-    }
-    appendCapability(capabilities, capability);
-  }
+  const capabilities = [...(params.capabilities ?? [])];
   const baseToolkits = [
     ...invocationToolkits,
     ...(params.toolkits ?? []),

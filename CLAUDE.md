@@ -50,9 +50,9 @@ Per-workspace (use `-w <pkg>` or `cd`):
 
 - `src/cli.ts` + `src/index.ts` — Commander CLI (`pinpawo server|tui|capability ...`).
 - `src/tui/` + `src/chatInterface.ts` — Ink/React TUI. State machine lives in `tuiStateReducer`; resume picker, transcript export, input/keys all have their own files with `.test.ts` siblings.
-- `src/localServer.ts` + `src/localServer*.ts` + `src/localHttpHandlers.ts` + `src/localServerWsTransport.ts` — local HTTP+WS server on `127.0.0.1:3210`. Handles chat, studio reviews, TUI sessions, operation events. Macos companion and remote app talk to it; e.g. `GET /capabilities/rescan` reloads plugins.
+- `src/localServer.ts` + `src/localServer*.ts` + `src/localHttpHandlers.ts` + `src/localServerWsTransport.ts` — local HTTP+WS server on `127.0.0.1:3210`. Handles Chat/TUI sessions, runtime metadata, and operation events. Capability definitions are not projected or rescanned through HTTP.
 - `src/agentChannel.ts` / `src/agentGraphService.ts` / `src/agentStreamEvents.ts` — adapt pet-agent's LangGraph stream into channel events the TUI/server consume.
-- `src/capabilityLoader.ts` + `src/pluginLoader.ts` + `src/localAgentCapabilityRegistry.ts` — load plugins from `~/.pinpawo/capabilities/<id>/` (each has `manifest.json` + `index.js`). `--link` install mode keeps a capability's own `node_modules` in place.
+- `src/capabilityLoader.ts` + `src/hostCapabilityCatalog.ts` + `src/hostCapabilityAssembly.ts` — validate `CAPABILITY.md` directories, resolve Host-specific source/selection policy, and publish the Agent snapshot. Plugin loading supplies Toolkit definitions separately.
 - `src/toolkits/local/` — local-machine Toolkit implementations (file/git/shell/network/search). Toolkit definitions own tool operation metadata and review policy; `toolOperationTracker.ts` consumes their execution projection.
 - `src/config.ts` + `src/agentConfig.ts` + `src/llmConfig.ts` — config resolution. Reads `~/.pinpawo/config.json`, `~/.pinpawo/.env`, or process env. `.env.example` lives under `services/local-agent/`.
 - `src/studio/` — local-side Studio integration (companion to pet-agent's `agent/studio`).
@@ -67,4 +67,4 @@ Per-workspace (use `-w <pkg>` or `cd`):
 
 ## Capability plugins
 
-User capability plugins live in `~/.pinpawo/capabilities/<id>/` and need `manifest.json` + `index.js`. Manage with `pinpawo capability validate|install|list` (`--link` for capabilities with their own deps). A running agent reloads them via `GET http://127.0.0.1:3210/capabilities/rescan`.
+Chat Capability definitions live in `~/.pinpawo/capabilities/<id>/CAPABILITY.md`; an optional `index.js` may only export the documented lifecycle hook. Definitions are loaded when the Chat Host starts. Studio Pet definitions use their conventional per-Pet directories instead of this global source.

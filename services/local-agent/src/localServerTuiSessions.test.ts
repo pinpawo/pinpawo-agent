@@ -390,6 +390,7 @@ test('runtime config updates reach the next chat setup through the normalized de
     workdir: '/tmp/pinpawo-policy-update',
     toolkitInventory: new HostToolkitInventoryStore(),
     capabilityArtifactStore: testArtifactStore,
+    capabilityCatalog: createTestModelServerDeps().capabilityCatalog,
   });
   const context = {
     pet: {

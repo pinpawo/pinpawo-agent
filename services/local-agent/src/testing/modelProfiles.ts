@@ -15,6 +15,16 @@ import {
   type ModelProfileV1,
 } from '../modelProfiles';
 import { HostToolkitInventoryStore } from '../toolkits/toolkitInventory';
+import type { CapabilityCatalogReader } from '../localServerTypes';
+import type { CapabilityCatalogSnapshot } from '../hostCapabilityCatalog';
+
+const emptyCapabilityCatalogSnapshot: CapabilityCatalogSnapshot = Object.freeze({
+  capabilities: Object.freeze([]),
+});
+
+const emptyCapabilityCatalog: CapabilityCatalogReader = {
+  getSnapshot: () => emptyCapabilityCatalogSnapshot,
+};
 
 export type TestModelProfileInput = Partial<AgentLlmConfig> & {
   modelProfileId: string;
@@ -133,6 +143,7 @@ export function createTestModelServerDeps(
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
   toolkitInventory: HostToolkitInventoryStore;
+  capabilityCatalog: CapabilityCatalogReader;
 } {
   return {
     modelProfiles: createTestModelProfiles(input),
@@ -141,5 +152,6 @@ export function createTestModelServerDeps(
     autoAuthorizationSafetyLevel: input.autoAuthorizationSafetyLevel
       ?? DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL,
     toolkitInventory: new HostToolkitInventoryStore(),
+    capabilityCatalog: emptyCapabilityCatalog,
   };
 }

@@ -101,7 +101,7 @@ async function installCommand(sourceArg: string, options: CapabilityCommandOptio
     targetDir,
     mode: options.link ? 'link' : 'copy',
     warning,
-    nextStep: 'Restart the agent, or use the desktop settings refresh button to rescan capabilities in a running agent.',
+    nextStep: 'Restart the Chat Host to load the installed Capability.',
   }, null, 2) + '\n');
 }
 

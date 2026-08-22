@@ -222,28 +222,6 @@ export function createRuntime() {}
   assert.match(result.errors.join('\n'), /may only export lifecycle/);
 });
 
-test('validateCapabilityPlugin rejects the host-reserved general name', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-caps-reserved-'));
-  const capabilityDir = await mkCapability(root, 'general');
-
-  const { validateCapabilityPlugin } = await import('./capabilityLoader');
-  const result = await validateCapabilityPlugin(capabilityDir);
-
-  assert.equal(result.ok, false);
-  assert.match(result.errors.join('\n'), /name "general" is reserved by the local-agent host/);
-});
-
-test('validateCapabilityPlugin rejects local-agent built-in names', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-caps-reserved-built-in-'));
-  const capabilityDir = await mkCapability(root, 'explore');
-
-  const { validateCapabilityPlugin } = await import('./capabilityLoader');
-  const result = await validateCapabilityPlugin(capabilityDir);
-
-  assert.equal(result.ok, false);
-  assert.match(result.errors.join('\n'), /name "explore" is reserved by the local-agent host/);
-});
-
 test('resolveCapabilityDirs parses environment entries with the platform delimiter', async () => {
   const first = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-caps-source-first-'));
   const second = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-caps-source-second-'));

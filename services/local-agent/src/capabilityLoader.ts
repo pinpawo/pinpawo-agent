@@ -23,16 +23,12 @@ import {
   defineCapability,
   defineCapabilityDocumentSource,
   defineInstructionDocument,
-  GENERAL_CAPABILITY_NAME,
   parseCapabilityDocument,
   type AgentCapability,
   type CapabilityDocumentFrontmatter,
   type CapabilityLifecycle,
 } from '@pinpawo/pet-agent';
-import {
-  getBuiltInCapabilityMeta,
-  type CapabilityMeta,
-} from './capabilityRegistry';
+import type { CapabilityMeta } from './capabilityRegistry';
 import { loadStoredConfig } from './storage';
 
 export const DEFAULT_CAPABILITIES_DIR = resolve(homedir(), '.pinpawo', 'capabilities');
@@ -141,19 +137,6 @@ function toMeta(frontmatter: CapabilityFrontmatter): CapabilityMeta {
   };
 }
 
-function validateUserCapabilityName(name: string, path: string) {
-  if (name === GENERAL_CAPABILITY_NAME) {
-    throw new Error(
-      `${path}: Capability name "${GENERAL_CAPABILITY_NAME}" is reserved by the local-agent host`,
-    );
-  }
-  if (getBuiltInCapabilityMeta(name)) {
-    throw new Error(
-      `${path}: Capability name "${name}" is reserved by the local-agent host`,
-    );
-  }
-}
-
 export async function validateCapabilityPlugin(
   rootDir: string,
 ): Promise<CapabilityPluginValidationResult> {
@@ -177,7 +160,6 @@ export async function validateCapabilityPlugin(
   try {
     const source = readFileSync(capabilityPath, 'utf8');
     const { frontmatter, body } = parseFrontmatterDocument(source, capabilityPath);
-    validateUserCapabilityName(frontmatter.name, capabilityPath);
     const lifecycle = frontmatter.entry
       ? await loadFinalizeLifecycle(
         result.entryPath = resolveContainedEntry(dir, frontmatter.entry),
@@ -330,7 +312,6 @@ export function readUserCapabilityManifests(): CapabilityMeta[] {
           readFileSync(capabilityPath, 'utf8'),
           capabilityPath,
         );
-        validateUserCapabilityName(frontmatter.name, capabilityPath);
         if (seenIds.has(frontmatter.name)) continue;
         seenIds.add(frontmatter.name);
         metas.push(toMeta(frontmatter));

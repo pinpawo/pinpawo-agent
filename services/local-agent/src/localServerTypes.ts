@@ -1,12 +1,11 @@
 import type {
-  AgentCapability,
   BuiltinGlobalReviewPolicyMode,
   CapabilityArtifactStore,
   ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { ToolAuthorizationSafetyLevel } from '@pinpawo/agent-contracts';
-import type { LoadedUserCapability } from './capabilityLoader';
+import type { HostCapabilityCatalog } from './hostCapabilityCatalog';
 import type { LocalModelProfileRegistry } from './llmConfig';
 import { buildWorkspaceRuntimeConfig, type LocalAgentRuntimeConfig } from './runtimeConfig';
 import type { ServerMode } from './serverMode';
@@ -14,6 +13,11 @@ import {
   type HostToolkitInventorySnapshot,
   HostToolkitInventoryStore,
 } from './toolkits/toolkitInventory';
+
+export type CapabilityCatalogReader = Pick<
+  HostCapabilityCatalog,
+  'getSnapshot'
+>;
 
 export type LocalServerDeps = {
   /** Local-agent transport is owned by the Chat Host. */
@@ -37,10 +41,9 @@ export type LocalServerDeps = {
   chatCheckpointer?: BaseCheckpointSaver;
   toolkitInventory: HostToolkitInventoryStore;
   toolkitRuntimeManager?: ToolkitRuntimeManager;
-  localCapabilities?: AgentCapability[];
-  userCapabilities?: LoadedUserCapability[];
+  /** Host-owned Capability catalog; Chat consumes its configured snapshot. */
+  capabilityCatalog: CapabilityCatalogReader;
   capabilityArtifactStore?: CapabilityArtifactStore;
-  rescanUserCapabilities?: () => Promise<LoadedUserCapability[]>;
 };
 
 export type NormalizedLocalServerDeps = Readonly<Omit<
@@ -51,11 +54,6 @@ export type NormalizedLocalServerDeps = Readonly<Omit<
   runtimeConfig: LocalAgentRuntimeConfig;
 }>;
 
-export type LocalServerExtensionStatePatch = Partial<Pick<LocalServerDeps,
-  | 'localCapabilities'
-  | 'userCapabilities'
->>;
-
 export type LocalServerRuntimeDepsStore = Readonly<{
   get: () => NormalizedLocalServerDeps;
   updateGlobalReviewPolicyMode: (
@@ -64,20 +62,7 @@ export type LocalServerRuntimeDepsStore = Readonly<{
   updateAutoAuthorizationSafetyLevel: (
     safetyLevel: ToolAuthorizationSafetyLevel,
   ) => NormalizedLocalServerDeps;
-  updateExtensions: (patch: LocalServerExtensionStatePatch) => NormalizedLocalServerDeps;
 }>;
-
-function freezeList<T>(value: T[] | undefined): T[] | undefined {
-  return value ? Object.freeze([...value]) as T[] : undefined;
-}
-
-function freezeCapabilityLists<T extends LocalServerDeps>(deps: T): T {
-  return {
-    ...deps,
-    localCapabilities: freezeList(deps.localCapabilities),
-    userCapabilities: freezeList(deps.userCapabilities),
-  };
-}
 
 export function getLocalServerRuntimeConfig(deps: LocalServerDeps): LocalAgentRuntimeConfig {
   return deps.runtimeConfig ?? buildWorkspaceRuntimeConfig({ workdir: deps.workdir });
@@ -95,11 +80,11 @@ export function getLocalServerToolkitInventory(
 
 export function normalizeLocalServerDeps(deps: LocalServerDeps): NormalizedLocalServerDeps {
   const runtimeConfig = getLocalServerRuntimeConfig(deps);
-  return Object.freeze(freezeCapabilityLists({
+  return Object.freeze({
     ...deps,
     workdir: runtimeConfig.workdir,
     runtimeConfig,
-  }));
+  });
 }
 
 export function createLocalServerRuntimeDepsStore(
@@ -120,13 +105,6 @@ export function createLocalServerRuntimeDepsStore(
         ...current,
         autoAuthorizationSafetyLevel,
       });
-      return current;
-    },
-    updateExtensions: (patch: LocalServerExtensionStatePatch) => {
-      current = Object.freeze(freezeCapabilityLists({
-        ...current,
-        ...patch,
-      }));
       return current;
     },
   });

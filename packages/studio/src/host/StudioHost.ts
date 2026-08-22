@@ -20,7 +20,6 @@ import {
   buildLocalAgentRuntimeConfig,
   FileSaver,
   HostCapabilityAssembly,
-  loadCapabilityDirectory,
   resolveHostCheckpointPath,
   type HostToolkitInventoryStore,
   type LocalAgentRuntimeConfig,
@@ -122,22 +121,29 @@ export class StudioHost {
           definitions: plugin.toolkits,
         }),
       );
-      const petCapabilities = new Map<string, AgentCapability[]>();
-      for (const pet of configuration.resolved.pets) {
-        const capabilityDir = resolvePetCapabilityDirectory(configuration.petsDir, pet.petId);
-        const loaded = await loadCapabilityDirectory(capabilityDir);
-        petCapabilities.set(pet.petId, loaded.map(({ capability }) => capability));
-      }
-
+      // Load the shared Host catalog before resolving Pet directories so every
+      // Pet snapshot is built against the same initialized baseline.
       await this.caps.init({
         toolkitSources: pluginToolkitSources,
       });
+      const petCapabilities = new Map<string, AgentCapability[]>();
+      for (const pet of configuration.resolved.pets) {
+        const capabilityDir = resolvePetCapabilityDirectory(configuration.petsDir, pet.petId);
+        const snapshot = await this.caps.getCapabilityCatalog().createDirectorySnapshot({
+          rootDir: capabilityDir,
+          sourceId: `studio-pet:${pet.petId}`,
+        });
+        petCapabilities.set(
+          pet.petId,
+          snapshot.capabilities.filter(({ name }) => name !== GENERAL_CAPABILITY_NAME),
+        );
+      }
       // Build the resident Studio now — before any transport starts listening.
       // Requests only dispatch to this pre-built instance.
       this.studio = await this.buildStudioImpl({
         configuration,
         modelProfiles: this.caps.getModelProfiles(),
-        hostCapabilities: this.caps.getLocalCapabilities().filter(
+        hostCapabilities: this.caps.getCapabilityCatalog().getSnapshot().capabilities.filter(
           ({ name }) => name === GENERAL_CAPABILITY_NAME,
         ),
         petCapabilities,
@@ -221,10 +227,6 @@ export class StudioHost {
 
   getToolkitInventoryStore(): HostToolkitInventoryStore {
     return this.caps.getToolkitInventoryStore();
-  }
-
-  getLocalCapabilities() {
-    return this.caps.getLocalCapabilities();
   }
 
   getCapabilityArtifactStore(): CapabilityArtifactStore {

@@ -39,9 +39,6 @@ export function buildWelcomeLines(input: {
   const localAgentVersion = formatVersion(
     input.hostMetadata?.localAgentVersion,
   );
-  const capabilities = input.hostMetadata?.capabilities.length
-    ? input.hostMetadata.capabilities
-    : ['unavailable'];
   const shortcuts = contentWidth >= 54
     ? [
         '/ commands · PgUp history · Enter send',
@@ -53,11 +50,8 @@ export function buildWelcomeLines(input: {
         'Enter send · Ctrl+J newline',
         'Esc interrupt',
         'Ctrl+C exit',
-      ];
+  ];
   const sideBySide = contentWidth >= 64;
-  const detailWidth = sideBySide
-    ? Math.max(1, contentWidth - terminalBlockWidth(PAW_LINES) - 4)
-    : contentWidth;
   const details = [
     `PinPawo TUI v2 · ${actor}`,
     `v${version} · local-agent ${localAgentVersion}`,
@@ -65,7 +59,6 @@ export function buildWelcomeLines(input: {
     '',
     `model         ${model}`,
     `directory     ${cwd}`,
-    ...wrapCapabilityLines(capabilities, detailWidth, sideBySide ? 3 : 4),
   ];
   const identity = sideBySide
     ? joinTerminalColumns(PAW_LINES, details, contentWidth, 4)
@@ -87,33 +80,6 @@ export function buildWelcomeLines(input: {
     `╰${'─'.repeat(width - 2)}╯`,
     '',
   ];
-}
-
-function wrapCapabilityLines(
-  capabilities: readonly string[],
-  width: number,
-  maxLines: number,
-) {
-  const label = 'capabilities  ';
-  const continuation = ' '.repeat(label.length);
-  const lines: string[] = [];
-  let line = label;
-
-  for (const capability of capabilities) {
-    const token = `${line === label ? '' : ' · '}${capability}`;
-    if (
-      line !== label
-      && stringWidth(line) + stringWidth(token) > width
-      && lines.length < maxLines - 1
-    ) {
-      lines.push(line);
-      line = `${continuation}${capability}`;
-      continue;
-    }
-    line += token;
-  }
-  lines.push(line);
-  return lines;
 }
 
 function joinTerminalColumns(

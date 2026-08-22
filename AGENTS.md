@@ -7,6 +7,12 @@
 - `tools/agent-macos/` contains the macOS desktop companion.
 - `docs/` contains public architecture and capability design notes.
 
+## macOS Companion Status
+
+- All functionality under `tools/agent-macos/` is suspended until the user explicitly reactivates it.
+- Do not treat the macOS companion as an active consumer, compatibility constraint, migration target, or acceptance-test scope for feature work and architectural refactors.
+- Refactors may change or remove interfaces used by the macOS companion without preserving or updating its integration. Do not proactively modify or test macOS companion code unless the user explicitly requests it.
+
 ## Commands
 
 - `npm install` installs workspace dependencies.

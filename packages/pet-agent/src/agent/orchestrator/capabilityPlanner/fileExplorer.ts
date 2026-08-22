@@ -47,15 +47,18 @@ export type CapabilityPlannerDefaultCapability = {
   readonly content: string;
 };
 
-export function createCapabilityPlannerSearchTool<TState>(
+export function createCapabilityPlannerSearchTool<
+  TState = Record<string, unknown>,
+>(
   search: (
     terms: readonly string[],
-    runtime: ToolRuntime<TState>,
+    state: ToolRuntime<TState>['state'],
+    signal?: AbortSignal,
   ) => Promise<string>,
 ) {
   return tool(
     async ({ terms }: { terms: string[] }, runtime: ToolRuntime<TState>) =>
-      search(terms, runtime),
+      search(terms, runtime.state, runtime.signal),
     {
       name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
       description: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_DESCRIPTION,
@@ -226,7 +229,7 @@ export function createCapabilityPlannerFileExplorer(params: {
   };
 
   const capabilitySearch = createCapabilityPlannerSearchTool(
-    (terms, runtime) => search(terms, runtime.signal),
+    (terms, _state, signal) => search(terms, signal),
   );
 
   return Object.freeze({

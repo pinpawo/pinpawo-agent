@@ -68,6 +68,9 @@ const plannerInvocationStateSchema = z4.object({
 });
 
 type PlannerInvocationState = z4.infer<typeof plannerInvocationStateSchema>;
+type PlannerSearchToolState = Pick<PlannerInvocationState, 'currentInput'> & {
+  messages?: BaseMessage[];
+};
 
 export type CapabilityPlannerAgentErrorCode =
   | 'planning_limit_reached'
@@ -534,15 +537,15 @@ export function createCapabilityPlannerAgent(params: {
   };
   const terminalTools = createPlannerTerminalTools();
   const additionalTools = params.additionalTools ?? [];
-  const capabilitySearchTool = createCapabilityPlannerSearchTool<PlannerInvocationState>(
-    (terms, runtime) => {
-      const exploration = capabilityExplorationState(runtime.state, maxSearchRounds);
+  const capabilitySearchTool = createCapabilityPlannerSearchTool<PlannerSearchToolState>(
+    (terms, state, signal) => {
+      const exploration = capabilityExplorationState(state, maxSearchRounds);
       if (exploration.roundsUsed > exploration.maxRounds) {
         return Promise.resolve(capabilitySearchLimitExceeded(exploration));
       }
       return explorerForInput(
-        currentPlannerInput(runtime.state),
-      ).search(terms, runtime.signal);
+        currentPlannerInput(state),
+      ).search(terms, signal);
     },
   );
   const middleware = createPlannerMiddleware(maxSearchRounds);

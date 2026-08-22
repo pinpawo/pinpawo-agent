@@ -229,8 +229,8 @@ A complete `LLM_API_KEY` + `LLM_BASE_URL` + `LLM_MODEL` tuple creates an ephemer
 | `pinpawo capability install <dir> --link` | Link a Capability in place. |
 
 The independent Studio Host and `pinpawo-studio` executable both live in
-`@pinpawo/studio`. Concrete optional modules are still injected through the
-Host's resolver port; Studio is not a mode of the Chat server command.
+`@pinpawo/studio`. Concrete Studio Plugins are injected through the Host's
+`StudioPluginResolver` port; Studio is not a mode of the Chat server command.
 
 ## Capabilities and Plugins
 

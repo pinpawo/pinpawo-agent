@@ -5,8 +5,8 @@
 > **状态：当前契约。** `@pinpawo/studio` 是独立 Studio Host/runtime package；
 > 它通过 local-agent 的公共 `host-runtime` surface 复用本机 Host 装配能力；具体的
 > local wire adapter 来自独立的 `local-server-transport` surface，不进入 Chat 启动链路。
-> `pinpawo-studio` 可执行入口也直接位于 `packages/studio`；具体 optional module
-> 仍通过 `StudioModuleResolver` 从外部注入。
+> `pinpawo-studio` 可执行入口也直接位于 `packages/studio`；具体 Plugin
+> 仍通过 `StudioPluginResolver` 从外部注入。
 
 Studio 维护可派发 Pet 的注册表、每个 Pet 的 FIFO 队列和插件事件总线。一次
 `dispatch()` 返回 `threadId` 只表示请求已经被接收；任务结果、进度、依赖、
@@ -19,7 +19,7 @@ plugin ── notify(event) ──> Studio ── dispatch(request) ──> pet
 ## 建议阅读顺序
 
 - [推模型与边界](push-model.md) — dispatch、队列 / gate、事件和插件生命周期。
-- [配置](configuration.md) — `studio.json`、Pet 文件、校验与 optional module 注入。
+- [配置](configuration.md) — `studio.json`、Pet 文件、校验与 Plugin 注入。
 - [本地宿主集成](host-integration.md) — workdir 装配、WebSocket 确认和事件转发。
 - [Studio API（中文）](../reference/api/studio.md) — 导出的类型和精确语义。
 
@@ -31,8 +31,9 @@ plugin ── notify(event) ──> Studio ── dispatch(request) ──> pet
 - 按配置顺序启动插件、逆序停止插件，并广播插件通知而不解释内容。
 
 任务如何拆分、依赖和进度如何保存、何时重试、scheduler / webhook / UI / 传输如何
-工作，都不属于 Studio。可选 `studio-kanban` module 是典型的双面插件：Pet 通过其 Toolkit
-读写看板，插件自身根据看板状态派活或发事件。
+工作，都不属于 Studio。可选 `studio-kanban` package 提供一个 Plugin：它定义供 Pet
+使用的 Kanban Toolkit，并在自己的生命周期内根据看板状态派活或发事件。Plugin 本身
+不是 Toolkit。
 
 ## 运行限制
 

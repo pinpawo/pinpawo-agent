@@ -10,8 +10,8 @@ Studio core 契约不依赖文件系统或 transport；`@pinpawo/studio` package
 由 local-agent 的可选 adapter 提供。
 
 ```text
-<workdir>/.pinpawo/{studio.json,pets/*.json}
-      ↓ buildStudio()
+<workdir>/.pinpawo/{studio.json,pets/*.json,pets/<petId>/capabilities/*/CAPABILITY.md}
+      ↓ resolveStudioHostConfig() + Host Toolkit inventory + buildStudio()
 Studio + PetAgentRuntime[] + 已配置插件
       ↓ StudioRequestHandler
 studio_request → dispatch(entryPetId) → studio_response（确认）
@@ -25,8 +25,11 @@ Toolkit 或 Toolkit Runtime。完整约束见
 
 ## 装配与生命周期
 
-本地宿主根据 workdir 读取 Studio 与 Pet 配置，构造每个 `PetAgentRuntime` 并
-装配插件。`StudioHost.init()` 在 transport 开始监听前构建并持有 Studio，
+本地宿主根据 workdir 读取 Studio 与 Pet 配置、解析 Plugin，并先把 Plugin 定义的
+Toolkit 送入 Host 的统一 inventory。完成 availability、provenance 与 Toolkit Runtime
+初始化后，才构造每个 `PetAgentRuntime` 并装配 Plugin。构造前，Host 会严格加载每个
+Pet 的约定目录 `pets/<petId>/capabilities/`；目录成员就是该 Pet 的 Capability 选择，
+Plugin 不贡献 Capability。`StudioHost.init()` 在 transport 开始监听前构建并持有 Studio，
 请求只 dispatch 到这个常驻实例，不触发装配。Studio 的生命周期由 Host 管理，
 不在请求时创建或缓存。
 

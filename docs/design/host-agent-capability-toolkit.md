@@ -101,9 +101,19 @@ Host 配置中的全局 review mode 仍属于 Host Configuration；Toolkit 只�
 规则。Human review 的请求/响应属于 Agent 与交互边界，不能因此把全局配置或
 交互状态搬进 Toolkit。
 
-`StudioPlugin` 是 Host/Studio 的扩展装配形态，不是第五个 Agent 扩展领域。它的
-Toolkit face 仍遵守 Toolkit 契约；Studio lifecycle 只负责插件在 Host 中的启停、
-dispatch 和 notification，不改变 Capability 的工具权限模型。
+`StudioPlugin` 是高于 Toolkit 的 Studio 扩展装配形态，不是第五个 Agent 扩展领域，
+也不是 `AgentToolkit` 的子类型。Plugin 可以通过明确的 `toolkits` 定义出口提供零个或
+多个 Toolkit；这些定义必须先进入 Host 的统一 Toolkit inventory，再由 Agent 侧的
+`Capability.uses` 选择。Studio lifecycle 只负责 Plugin 在 Studio 中的启停、dispatch
+和 notification。
+
+Capability 完全属于 Agent。Plugin 和 Studio 都不得注册、贡献或隐式附带 Capability；
+即使某个 Capability 会使用 Plugin 定义的 Toolkit，也必须由 Agent Host 独立装配。
+Studio Host 根据 `petId` 从
+`pets/<petId>/capabilities/<capability>/CAPABILITY.md` 严格加载。目录成员同时表达
+该 Pet 的定义来源与选择，不再通过 Pet JSON 名称列表或 Plugin resolver 装配。
+不同 Pet 的 Capability registry 相互隔离；`general` 仍由 Agent Host 作为 baseline
+提供。
 
 ## 3. 静态定义、选择、可用性与运行状态
 
@@ -211,9 +221,12 @@ Browser、bash、git 都是普通 Toolkit：
    两个 Host 各自持有独立 checkpoint root，不共享 writer ownership、transport
    composition 或 Chat session state。依赖方向只能是 Studio → local-agent public
    surfaces；local-agent Chat 路径不得反向 import Studio。
-7. Studio Host 只声明 optional module resolver port，不静态 import kanban、scheduler
-   或其他具体 module。module 实现可以依赖 Studio contract，并由应用 composition root
-   注入；“配置中出现 module id”不等于 Studio package 依赖该 module。
+7. Studio Host 只声明 `StudioPluginResolver` port，不静态 import kanban、scheduler
+   或其他具体 Plugin。Plugin 实现可以依赖 Studio contract，并由应用 composition root
+   注入；“配置中出现 Plugin id”不等于 Studio package 依赖该 Plugin。Resolver 只返回
+   Plugin，不返回 Capability；Plugin 定义的 Toolkit 必须在 resident Pet 构建前进入
+   Host 的统一 inventory。Agent Capability 由 Studio Host 按 `petId` 从约定目录加载，
+   每个 Pet 的目录成员直接表达其定义与选择。
 8. BrowserIntegration、BrowserProvider、LocalTools 或 RuntimeEnvironment 不能作为
    新的公共架构层；普通构造辅助不得反向定义领域模型。
 9. 如果实现需要改变稳定的 Pet Agent Chat graph、wire、checkpoint、Capability

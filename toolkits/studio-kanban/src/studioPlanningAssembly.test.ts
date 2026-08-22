@@ -10,17 +10,16 @@ import {
   type AgentCapability,
 } from '@pinpawo/pet-agent';
 
-import { buildStudio } from '@pinpawo/studio';
+import { buildStudio, resolveStudioHostConfig } from '@pinpawo/studio';
+import { loadCapabilityDirectory } from 'pinpawo/host-runtime';
 import { createTestModelProfileRegistry } from '../../../services/local-agent/src/testing/modelProfiles';
 import { createKanbanPlugin } from './kanbanPlugin';
-import { loadStudioPlanningCapability } from './studioPlanningCapability';
 
 /**
  * 真实装配路径的集成测试:studio.json + pets/*.json + kanban 插件 + buildStudio。
  *
- * 单测里手搓 compileAgentRegistry 证明不了这条 —— pet 的 Capability 由
- * `pets/<id>.json` 显式声明,能不能解析到 `studio_planning` 这个名字取决于
- * buildStudio 怎么组装 capabilitiesByName。
+ * 单测里手搓 compileAgentRegistry 证明不了这条 —— pet 的 Capability 来自
+ * `pets/<id>/capabilities/`，必须沿真实目录 loader 和 buildStudio 装配路径验证。
  */
 
 function generalCapability(): AgentCapability {
@@ -32,7 +31,7 @@ function generalCapability(): AgentCapability {
   };
 }
 
-async function writeStudioWorkdir(petCapabilities: string[]): Promise<string> {
+async function writeStudioWorkdir(withPlanningCapability: boolean): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-planning-'));
   const stateRoot = path.join(root, '.pinpawo');
   await mkdir(path.join(stateRoot, 'pets'), { recursive: true });
@@ -51,25 +50,57 @@ async function writeStudioWorkdir(petCapabilities: string[]): Promise<string> {
       petId: 'planner',
       name: 'Planner',
       role: 'planner',
-      capabilities: petCapabilities,
     }),
   );
+  if (withPlanningCapability) {
+    const capabilityDir = path.join(
+      stateRoot,
+      'pets',
+      'planner',
+      'capabilities',
+      'studio-planning',
+    );
+    await mkdir(capabilityDir, { recursive: true });
+    await writeFile(path.join(capabilityDir, 'CAPABILITY.md'), `---
+name: studio_planning
+description: "Plan and advance work through the shared board."
+uses:
+  - kanban
+version: 1
+---
+
+# Studio planning
+
+Use the kanban Toolkit to plan and advance assigned work.
+`);
+  }
   return root;
 }
 
-test('a pet that declares studio_planning resolves it and reaches the kanban tools', async () => {
-  const workdir = await writeStudioWorkdir([GENERAL_CAPABILITY_NAME, 'studio_planning']);
-
-  const { studio } = await buildStudio({
+test('a Pet capability directory containing studio_planning reaches the kanban tools', async () => {
+  const workdir = await writeStudioWorkdir(true);
+  const configuration = await resolveStudioHostConfig({
     workdir,
+    resolvePlugin: () => createKanbanPlugin(),
+  });
+
+  const loaded = await loadCapabilityDirectory(path.join(
+    workdir,
+    '.pinpawo',
+    'pets',
+    'planner',
+    'capabilities',
+  ));
+  const { studio } = await buildStudio({
+    configuration,
     modelProfiles: createTestModelProfileRegistry([{ modelProfileId: 'default' }]),
-    capabilities: [generalCapability()],
-    toolkits: [],
+    hostCapabilities: [generalCapability()],
+    petCapabilities: new Map([[
+      'planner',
+      loaded.map(({ capability }) => capability),
+    ]]),
+    toolkits: configuration.plugins.flatMap((plugin) => plugin.toolkits),
     ownerUserId: null,
-    resolveModule: () => ({
-      plugin: createKanbanPlugin(),
-      capabilities: [loadStudioPlanningCapability()!],
-    }),
   });
 
   const planner = studio.listPets().find((pet) => pet.petId === 'planner');
@@ -82,20 +113,20 @@ test('a pet that declares studio_planning resolves it and reaches the kanban too
   assert.equal(planning.available, true, planning.reason ?? '');
 });
 
-test('studio_planning is not forced on pets that do not declare it', async () => {
-  // 不隐式给所有 pet 注入 —— 装不装仍由 pet 配置决定。
-  const workdir = await writeStudioWorkdir([GENERAL_CAPABILITY_NAME]);
+test('studio_planning is absent when the Pet capability directory is empty', async () => {
+  const workdir = await writeStudioWorkdir(false);
+  const configuration = await resolveStudioHostConfig({
+    workdir,
+    resolvePlugin: () => createKanbanPlugin(),
+  });
 
   const { studio } = await buildStudio({
-    workdir,
+    configuration,
     modelProfiles: createTestModelProfileRegistry([{ modelProfileId: 'default' }]),
-    capabilities: [generalCapability()],
-    toolkits: [],
+    hostCapabilities: [generalCapability()],
+    petCapabilities: new Map(),
+    toolkits: configuration.plugins.flatMap((plugin) => plugin.toolkits),
     ownerUserId: null,
-    resolveModule: () => ({
-      plugin: createKanbanPlugin(),
-      capabilities: [loadStudioPlanningCapability()!],
-    }),
   });
 
   const planner = studio.listPets().find((pet) => pet.petId === 'planner');

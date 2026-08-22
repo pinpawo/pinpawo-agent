@@ -11,8 +11,8 @@ file loading and runtime construction; local-agent supplies its optional wire
 transport adapter:
 
 ```text
-<workdir>/.pinpawo/{studio.json,pets/*.json}
-      ↓ buildStudio()
+<workdir>/.pinpawo/{studio.json,pets/*.json,pets/<petId>/capabilities/*/CAPABILITY.md}
+      ↓ resolveStudioHostConfig() + Host Toolkit inventory + buildStudio()
 Studio + PetAgentRuntime[] + configured plugins
       ↓ StudioRequestHandler
 studio_request → dispatch(entryPetId) → studio_response acknowledgement
@@ -27,9 +27,14 @@ Toolkit or Toolkit Runtime system. See the accepted
 
 ## Assembly and lifetime
 
-`buildStudio()` resolves the active workdir, reads its Studio and pet files,
-creates one `PetAgentRuntime` per configured pet, and installs the configured
-plugins. `StudioHost.init()` builds and holds the Studio before any transport
+`resolveStudioHostConfig()` reads Studio and pet files and resolves configured
+Plugins. `StudioHost` then supplies every Plugin-defined Toolkit to the shared
+Host inventory. Only after availability, provenance, and Toolkit Runtime startup
+does `buildStudio()` create one `PetAgentRuntime` per configured pet and install
+the configured Plugins. Before construction, the Host strictly loads each Pet's
+conventional `pets/<petId>/capabilities/` collection. Directory membership is that
+Pet's Capability selection; Plugins never contribute Capability definitions.
+`StudioHost.init()` builds and holds the Studio before any transport
 begins listening; requests only dispatch to this resident instance and do not
 trigger assembly. The Studio lifecycle is owned by the Host, not created or
 cached per request.

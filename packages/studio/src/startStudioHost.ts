@@ -29,9 +29,12 @@ function createHost(options: StartStudioHostOptions) {
     ?? buildLocalAgentRuntimeConfig(options.workdir);
   return new StudioHost({
     runtimeConfig,
-    ...(options.resolveModule ? { resolveModule: options.resolveModule } : {}),
+    ...(options.resolvePlugin ? { resolvePlugin: options.resolvePlugin } : {}),
     ...(options.capabilityAssembly
       ? { capabilityAssembly: options.capabilityAssembly }
+      : {}),
+    ...(options.resolveStudioHostConfig
+      ? { resolveStudioHostConfig: options.resolveStudioHostConfig }
       : {}),
     ...(options.buildStudio ? { buildStudio: options.buildStudio } : {}),
   });

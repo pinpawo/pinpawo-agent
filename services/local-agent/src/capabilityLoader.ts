@@ -38,10 +38,13 @@ export const CAPABILITY_DOCUMENT_MAX_BYTES = CORE_CAPABILITY_DOCUMENT_MAX_BYTES;
 
 type CapabilityFrontmatter = CapabilityDocumentFrontmatter;
 
-export type LoadedUserCapability = {
+export type LoadedCapability = {
   meta: CapabilityMeta;
   capability: AgentCapability;
 };
+
+/** Global user-registry compatibility name. */
+export type LoadedUserCapability = LoadedCapability;
 
 export type CapabilityPluginValidationResult = {
   ok: boolean;
@@ -224,6 +227,54 @@ async function loadCapabilitiesFromDir(
       capability: validation.capability,
     });
   }
+  return loaded;
+}
+
+/**
+ * Strictly load one explicit Capability collection root.
+ *
+ * Unlike the global user registry scan, an explicit root is configuration by
+ * convention: every child directory must be a valid Capability and duplicate
+ * names are errors. A missing root represents an empty collection.
+ */
+export async function loadCapabilityDirectory(
+  rootDir: string,
+): Promise<LoadedCapability[]> {
+  const dir = resolve(expandHome(rootDir));
+  if (!existsSync(dir)) return [];
+
+  const entries = readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const loaded: LoadedCapability[] = [];
+  const seenIds = new Set<string>();
+
+  for (const entry of entries) {
+    const capabilityDir = resolve(dir, entry.name);
+    if (entry.isSymbolicLink() && !isDirectoryEntry(dir, entry.name)) {
+      throw new Error(
+        `Invalid Capability directory "${capabilityDir}": symlink target is unavailable or not a directory`,
+      );
+    }
+    const validation = await validateCapabilityPlugin(capabilityDir);
+    if (!validation.ok || !validation.meta || !validation.capability) {
+      const reason = validation.errors.length > 0
+        ? validation.errors.join('; ')
+        : `missing ${CAPABILITY_DOCUMENT_NAME}`;
+      throw new Error(`Invalid Capability directory "${capabilityDir}": ${reason}`);
+    }
+    if (seenIds.has(validation.meta.id)) {
+      throw new Error(
+        `Duplicate Capability "${validation.meta.id}" in "${dir}"`,
+      );
+    }
+    seenIds.add(validation.meta.id);
+    loaded.push({
+      meta: validation.meta,
+      capability: validation.capability,
+    });
+  }
+
   return loaded;
 }
 

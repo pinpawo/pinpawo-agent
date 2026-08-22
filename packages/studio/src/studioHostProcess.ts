@@ -2,7 +2,7 @@ import {
   buildLocalAgentRuntimeConfig,
   type LocalAgentRuntimeConfig,
 } from 'pinpawo/host-runtime';
-import type { StudioModuleResolver } from './host/buildStudio';
+import type { StudioPluginResolver } from './host/buildStudio';
 import {
   startStudioHostStdio,
   startStudioHostWebSocket,
@@ -12,7 +12,7 @@ import {
 
 export type StudioHostProcessOptions = {
   workdir?: string;
-  resolveModule?: StudioModuleResolver;
+  resolvePlugin?: StudioPluginResolver;
   transport:
     | { kind: 'stdio' }
     | { kind: 'websocket'; port: number };
@@ -45,7 +45,7 @@ export async function runStudioHostProcess(
   );
   const hostOptions: StartStudioHostOptions = {
     runtimeConfig,
-    ...(options.resolveModule ? { resolveModule: options.resolveModule } : {}),
+    ...(options.resolvePlugin ? { resolvePlugin: options.resolvePlugin } : {}),
   };
   const signals = dependencies.signals ?? process;
   let closeRequested = false;

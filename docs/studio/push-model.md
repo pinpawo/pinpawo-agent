@@ -86,24 +86,33 @@ a host must provide complete `StudioEvent` values itself.
 The bus is neither durable nor replayable. It has no delivery guarantee across
 process restarts and must not be used as the source of truth for plugin state.
 
-## Plugins have two optional faces
+## Plugins define Toolkits; they are not Toolkits
 
-A `StudioPlugin` extends `AgentToolkit`:
+A `StudioPlugin` is a higher-level Studio extension with an explicit Toolkit
+definition outlet:
 
 ```ts
-type StudioPlugin = AgentToolkit & {
-  studio?: {
-    start(context: StudioPluginContext): Promise<void> | void;
-    stop?(): Promise<void> | void;
-  };
+type StudioPlugin = {
+  name: string;
+  toolkits: readonly AgentToolkit[];
+  start(context: StudioPluginContext): Promise<void> | void;
+  stop?(): Promise<void> | void;
 };
 ```
 
-The Toolkit face lets a pet read or modify the plugin's domain state. The
-Studio face lets that same component dispatch work and publish notifications.
-Either face may be omitted. Studio starts plugin faces in configuration order;
-if a start operation fails, construction fails. It stops them in reverse order
-and isolates stop failures while cleaning subscriptions.
+The Plugin itself is never passed to the Agent as a Toolkit. Its zero or more
+Toolkit definitions enter the Host's unified Toolkit inventory before resident
+Pet runtimes are built. Availability, provenance, optional Toolkit Runtime
+startup, and `Capability.uses` selection therefore stay on the Agent side.
+
+Capability is also an Agent concept. A Studio Plugin does not define, register,
+or implicitly contribute Capability. A Host may independently register a
+Capability that uses a Plugin-defined Toolkit, and pet configuration still
+selects that Capability explicitly.
+
+Studio starts Plugins in configuration order; if a start operation fails,
+construction fails. It stops them in reverse order and isolates stop failures
+while cleaning subscriptions.
 
 The bundled `kanban` plugin illustrates the loop:
 

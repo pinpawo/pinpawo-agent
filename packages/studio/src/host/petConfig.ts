@@ -3,8 +3,27 @@ import path from 'node:path';
 
 import { parseConfigDocument } from '@pinpawo/pet-agent';
 import { petLocalConfigSchema, type PetLocalConfig } from '../configSchema';
+import { isSafePetPathSegment } from '../petId';
 
 export type { PetLocalConfig };
+
+/** Capability collection root derived only from the validated Pet id. */
+export function resolvePetCapabilityDirectory(dir: string, petId: string): string {
+  if (!isSafePetPathSegment(petId)) {
+    throw new Error(`petId "${petId}" must be a safe path segment`);
+  }
+  const root = path.resolve(dir);
+  const petRoot = path.resolve(root, petId);
+  const relativePetRoot = path.relative(root, petRoot);
+  if (
+    relativePetRoot === '..'
+    || relativePetRoot.startsWith(`..${path.sep}`)
+    || path.isAbsolute(relativePetRoot)
+  ) {
+    throw new Error(`petId "${petId}" must stay inside the Pet configuration directory`);
+  }
+  return path.join(petRoot, 'capabilities');
+}
 
 /**
  * 文件入口:pet 配置住在 `<workdir>/.pinpawo/pets/<petId>.json`。

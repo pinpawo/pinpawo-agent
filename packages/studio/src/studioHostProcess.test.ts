@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import type { LocalAgentRuntimeConfig } from 'pinpawo/host-runtime';
-import type { StudioModuleResolver } from './host/buildStudio';
+import type { StudioPluginResolver } from './host/buildStudio';
 import type { RunningStudioHost, StartStudioHostOptions } from './startStudioHost';
 import { runStudioHostProcess } from './studioHostProcess';
 
@@ -20,14 +20,16 @@ function completedHost(): RunningStudioHost {
 
 test('Studio Host process composes resolver before starting stdio', async () => {
   const config = runtimeConfig('/resolved/project');
-  const resolver: StudioModuleResolver = async () => ({
-    plugin: {} as Awaited<ReturnType<StudioModuleResolver>>['plugin'],
+  const resolver: StudioPluginResolver = async () => ({
+    name: 'test',
+    toolkits: [],
+    start: () => undefined,
   });
   let started: StartStudioHostOptions | undefined;
 
   await runStudioHostProcess({
     workdir: './project',
-    resolveModule: resolver,
+    resolvePlugin: resolver,
     transport: { kind: 'stdio' },
   }, {
     buildRuntimeConfig: () => config,
@@ -39,7 +41,7 @@ test('Studio Host process composes resolver before starting stdio', async () => 
   });
 
   assert.equal(started?.runtimeConfig, config);
-  assert.equal(started?.resolveModule, resolver);
+  assert.equal(started?.resolvePlugin, resolver);
 });
 
 test('Studio Host process closes the WebSocket Host on SIGTERM', async () => {

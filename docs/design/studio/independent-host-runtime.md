@@ -34,15 +34,25 @@ facade。`local-server-transport` 则明确是 local-agent wire protocol 的一�
 package 依赖方向固定为：
 
 ```text
-local-agent (Chat + shared surface)  ←  @pinpawo/studio  ←  optional modules
+local-agent (Chat + shared surface)  ←  @pinpawo/studio  ←  concrete Plugins
                                       ↑ resolver 注入
                               application composition root
 ```
 
-Studio 不 import kanban 或任何具体 module。配置中的 module id 由外部
-`StudioModuleResolver` 解析；未安装 resolver 或找不到 module 时 fail fast。module 可同时
-贡献 Studio lifecycle/Toolkit face 与配套 Capability，但所有权都留在 module 包；module
-不得用同名 Capability 静默覆盖 Host baseline 或其他 module 的贡献。
+Studio 不 import kanban 或任何具体 Plugin。配置中的 Plugin id 由外部
+`StudioPluginResolver` 解析；未安装 resolver 或找不到 Plugin 时 fail fast。Plugin 是
+Studio lifecycle 的扩展单元，并可定义供 Agent 使用的 Toolkit，但 Plugin 本身不是
+Toolkit。Plugin Toolkit 与其他来源一起进入 Host 的统一 inventory，完成 availability、
+provenance 与 Runtime 初始化之后，才能构建 resident Pet。
+
+Capability 属于 Agent，与 Studio Plugin 无关。Resolver 不返回 Capability，Plugin 也不
+注册 Capability；Studio Host 按 `petId` 推导
+`pets/<petId>/capabilities/`，目录中的每个 `CAPABILITY.md` 就是该 Pet 的定义与选择。
+不同 Pet 可以拥有同名但不同内容的 Capability，同一 Pet 内重名则 fail fast。
+
+`HostCapabilityAssembly` 的 Toolkit sources 必须在首次 `init()` 一次性提供。已经初始化
+或正在初始化时出现新的 source 必须显式失败，不能静默返回旧 inventory 并构造半装配
+Studio。每个 Pet 的 Capability 目录也必须在 resident runtime 构建前完成严格加载。
 
 ## 2. 已确定的不变量
 
@@ -66,6 +76,8 @@ Studio 不 import kanban 或任何具体 module。配置中的 module id 由外�
 - 每个 Host 在 Capability assembly 初始化前取得 checkpoint root 的生命周期 writer lease；
   已有存活 owner 时启动直接失败。dead-owner 恢复由独占 recovery guard 串行，不能让两个
   恢复者同时成为 owner。
+- Studio Host 必须在解析 Plugin factory 或加载 Capability `entry` 模块前取得 writer lease；
+  竞争失败的 Host 不得先执行扩展代码再退出。
 - `FileSaver` 的单次 store mutation 使用 filesystem writer lock；锁覆盖 checkpoint 发布、
   pending-write read-modify-write、thread delete 与 GC。
 - constructor 不执行删除型 GC，因为同步 constructor 无法等待跨进程锁；Host 取得
@@ -124,6 +136,6 @@ runtime HITL 的方式代替。
 
 - 独立 Studio HITL/control plugin，以及重启后的 pending-action/dispatch-route 重建。
 - durable event log 与断线重放。
-- HTTP trigger、scheduler、Kanban 持久化与 module discovery；这些仍由 #638/#645
+- HTTP trigger、scheduler、Kanban 持久化与 Plugin discovery；这些仍由 #638/#645
   继续设计。独立进程入口见
   [standalone process draft](standalone-process.md)。

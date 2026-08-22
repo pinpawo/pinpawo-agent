@@ -1,9 +1,8 @@
 /**
- * Kanban 插件 —— studio 的第一个 layout 插件。
+ * Kanban Plugin —— Studio 的第一个 layout Plugin。
  *
- * **两副面孔:**
- * - 作为 toolkit 绑在 pet 上:pet 用 `kanban_task_*` 读写任务;
- * - 作为插件插在 studio 上:依赖满足时委托 dispatch,任务状态变化时发 event。
+ * Plugin 定义供 Agent 使用的 Kanban Toolkit,并在 Studio 生命周期内负责
+ * 依赖派发与事件通知。Plugin 本身不是 Toolkit。
  *
  * 闭环:pet 调工具 → 看板状态变 → 插件 dispatch 下一棒 / 发 event。
  * 全程 studio 不理解任何看板概念,pet 也不知道自己在驱动一块看板。
@@ -11,7 +10,11 @@
 
 import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { z } from 'zod';
-import type { NamedStructuredTool, SubagentRuntimeContext } from '@pinpawo/pet-agent';
+import type {
+  AgentToolkit,
+  NamedStructuredTool,
+  SubagentRuntimeContext,
+} from '@pinpawo/pet-agent';
 import type { StudioPlugin, StudioPluginContext } from '@pinpawo/studio';
 
 import { KanbanBoard, type KanbanTask } from './kanbanBoard';
@@ -105,9 +108,21 @@ export type CreateKanbanPluginOptions = {
 
 export type KanbanPlugin = StudioPlugin & { board: KanbanBoard };
 
+export function createKanbanToolkit(board: KanbanBoard): AgentToolkit {
+  const declaredTools = buildTools(board);
+  return {
+    name: KANBAN_TOOLKIT_NAME,
+    description: '共享任务看板：查看、拆解、完成与阻塞任务。',
+    tools: declaredTools.map((declared, index) => ({
+      tool: declared,
+      operation: { title: TOOL_TITLES[index] ?? declared.name },
+    })),
+  };
+}
+
 export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): KanbanPlugin {
   const board = options.board ?? new KanbanBoard();
-  const declaredTools = buildTools(board);
+  const toolkit = createKanbanToolkit(board);
   let context: StudioPluginContext | undefined;
   let unsubscribe: (() => void) | undefined;
 
@@ -139,29 +154,23 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
   return {
     board,
     name: KANBAN_TOOLKIT_NAME,
-    description: '共享任务看板：查看、拆解、完成与阻塞任务。',
-    tools: declaredTools.map((declared, index) => ({
-      tool: declared,
-      operation: { title: TOOL_TITLES[index] ?? declared.name },
-    })),
-    studio: {
-      start: (pluginContext) => {
-        context = pluginContext;
-        unsubscribe = board.subscribe((task) => {
-          pluginContext.notify({
-            type: `task.${task.status}`,
-            correlationId: task.taskId,
-            payload: { petId: task.petId, note: task.note },
-          });
-          // 任一状态变化都可能解锁别的任务的依赖。
-          dispatchReady();
+    toolkits: [toolkit],
+    start: (pluginContext) => {
+      context = pluginContext;
+      unsubscribe = board.subscribe((task) => {
+        pluginContext.notify({
+          type: `task.${task.status}`,
+          correlationId: task.taskId,
+          payload: { petId: task.petId, note: task.note },
         });
-      },
-      stop: () => {
-        unsubscribe?.();
-        unsubscribe = undefined;
-        context = undefined;
-      },
+        // 任一状态变化都可能解锁别的任务的依赖。
+        dispatchReady();
+      });
+    },
+    stop: () => {
+      unsubscribe?.();
+      unsubscribe = undefined;
+      context = undefined;
     },
   };
 }

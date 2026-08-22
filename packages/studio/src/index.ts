@@ -1,7 +1,7 @@
 /**
  * `@pinpawo/studio` — independent resident Studio Host and its runtime
- * contracts. Optional modules contribute policy and tools through explicit
- * injection; this package never imports a concrete module.
+ * contracts. Plugins are selected through explicit Host injection; this
+ * package never imports a concrete Plugin implementation.
  */
 
 export { createStudio } from './createStudio';
@@ -42,12 +42,17 @@ export type { StudioWikiAccess } from './wikiPort';
 
 export { StudioHost } from './host/StudioHost';
 export type { StudioHostOptions } from './host/StudioHost';
-export { buildStudio, StudioNotConfiguredError } from './host/buildStudio';
+export {
+  buildStudio,
+  resolveStudioHostConfig,
+  StudioNotConfiguredError,
+} from './host/buildStudio';
 export type {
   BuildStudioInput,
   BuildStudioResult,
-  ResolvedStudioModule,
-  StudioModuleResolver,
+  ResolvedStudioHostConfig,
+  ResolveStudioHostConfigInput,
+  StudioPluginResolver,
 } from './host/buildStudio';
 export { createPetAgentRuntime } from './host/createPetAgentRuntime';
 export type { PetAgentRuntimeConfig } from './host/createPetAgentRuntime';

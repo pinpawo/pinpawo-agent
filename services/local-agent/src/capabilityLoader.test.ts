@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   CAPABILITY_DOCUMENT_MAX_BYTES,
+  loadCapabilityDirectory,
   parseFrontmatterDocument,
 } from './capabilityLoader';
 
@@ -122,6 +123,57 @@ test('loadUserCapabilities follows directory symlinks in scan dirs', async () =>
       process.env.PINPAWO_CAPABILITY_DIRS = previousDirs;
     }
   }
+});
+
+test('loadCapabilityDirectory strictly loads one explicit collection root', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-explicit-caps-'));
+  await mkCapability(root, 'second');
+  await mkCapability(root, 'first');
+
+  const loaded = await loadCapabilityDirectory(root);
+
+  assert.deepEqual(loaded.map(({ capability }) => capability.name), ['first', 'second']);
+});
+
+test('loadCapabilityDirectory rejects invalid child directories', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-explicit-invalid-'));
+  await fs.mkdir(path.join(root, 'missing-document'));
+
+  await assert.rejects(
+    () => loadCapabilityDirectory(root),
+    /Invalid Capability directory .*missing-document.*missing CAPABILITY\.md/,
+  );
+});
+
+test('loadCapabilityDirectory rejects duplicate names within one collection', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-explicit-duplicate-'));
+  const first = await mkCapability(root, 'first');
+  const second = await mkCapability(root, 'second');
+  const firstSource = await fs.readFile(path.join(first, 'CAPABILITY.md'), 'utf8');
+  await fs.writeFile(
+    path.join(second, 'CAPABILITY.md'),
+    firstSource.replace('# first', '# duplicate first'),
+    'utf8',
+  );
+
+  await assert.rejects(
+    () => loadCapabilityDirectory(root),
+    /Duplicate Capability "first"/,
+  );
+});
+
+test('loadCapabilityDirectory rejects broken directory symlinks', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-explicit-broken-link-'));
+  await fs.symlink(
+    path.join(root, 'missing-target'),
+    path.join(root, 'selected-capability'),
+    process.platform === 'win32' ? 'junction' : 'dir',
+  );
+
+  await assert.rejects(
+    () => loadCapabilityDirectory(root),
+    /selected-capability.*symlink target is unavailable or not a directory/,
+  );
 });
 
 test('validateCapabilityPlugin accepts an entry that only exports lifecycle.finalize', async () => {

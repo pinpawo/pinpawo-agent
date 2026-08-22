@@ -8,14 +8,21 @@
  */
 export { buildLocalAgentModels, resolveLlmGenerationReserveTokens } from './agentModels';
 export { createExploreCapability } from './capabilities/explore/index';
+export { loadCapabilityDirectory } from './capabilityLoader';
 export { FileSaver } from './fileSaver';
 export { HostCapabilityAssembly } from './hostCapabilityAssembly';
-export type { HostCapabilityAssemblyOptions } from './hostCapabilityAssembly';
-export type { LoadedUserCapability } from './capabilityLoader';
+export type {
+  HostCapabilityAssemblyInitOptions,
+  HostCapabilityAssemblyOptions,
+} from './hostCapabilityAssembly';
+export type { LoadedCapability, LoadedUserCapability } from './capabilityLoader';
 export type { LocalModelProfileRegistry } from './llmConfig';
 export {
   buildLocalAgentRuntimeConfig,
   resolveHostCheckpointPath,
 } from './runtimeConfig';
 export type { LocalAgentRuntimeConfig } from './runtimeConfig';
-export type { HostToolkitInventoryStore } from './toolkits/toolkitInventory';
+export type {
+  HostToolkitInventoryStore,
+  ToolkitDefinitionSource,
+} from './toolkits/toolkitInventory';

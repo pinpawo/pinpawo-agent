@@ -47,6 +47,16 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
   }
 
   const plugins = input.plugins ?? [];
+  const pluginNames = new Set<string>();
+  for (const plugin of plugins) {
+    if (!plugin.name.trim()) {
+      throw new Error(`studio "${input.studioId}": plugin name must not be empty`);
+    }
+    if (pluginNames.has(plugin.name)) {
+      throw new Error(`studio "${input.studioId}": duplicate plugin "${plugin.name}"`);
+    }
+    pluginNames.add(plugin.name);
+  }
   const handlers = new Set<StudioEventHandler>();
   let stopped = false;
 
@@ -322,7 +332,7 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
     // 逆序停止:后启动的插件可能依赖先启动的。
     for (const plugin of [...plugins].reverse()) {
       try {
-        await plugin.studio?.stop?.();
+        await plugin.stop?.();
       } catch (error) {
         console.error(
           `[studio] plugin "${plugin.name}" failed to stop:`,
@@ -346,18 +356,17 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
   const startedPlugins: StudioPlugin[] = [];
   try {
     for (const plugin of plugins) {
-      if (!plugin.studio) continue;
       // 先登记再 start：即便 start 在完成一半后抛错，也给该插件一次 stop
       // 机会清掉已经创建的 listener/timer/server。
       startedPlugins.push(plugin);
-      await plugin.studio.start(buildPluginContext(plugin));
+      await plugin.start(buildPluginContext(plugin));
     }
   } catch (error) {
     stopped = true;
     abortGateWaits();
     for (const plugin of [...startedPlugins].reverse()) {
       try {
-        await plugin.studio?.stop?.();
+        await plugin.stop?.();
       } catch (rollbackError) {
         console.error(
           `[studio] plugin "${plugin.name}" failed to roll back after startup failure:`,

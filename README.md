@@ -113,6 +113,7 @@ The main boundaries are:
 | `packages/studio/` | Published `@pinpawo/studio` Host/runtime library and CLI. |
 | `services/local-agent/` | Published `pinpawo` CLI, local host, configuration, and integrations. |
 | `services/tui/` | OpenTUI client and distribution bundle. |
+| `tests/studio-e2e/` | Cross-package Studio dispatch/event acceptance tests. |
 | `plugins/studio-http/` | Optional Studio HTTP dispatch and SSE event Plugin. |
 | `toolkits/browser/` | Browser Toolkit, drivers, extension, and Native Messaging host. |
 | `toolkits/studio-kanban/` | Optional Studio Kanban Plugin and its Agent Toolkit. |

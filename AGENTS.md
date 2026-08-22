@@ -6,6 +6,7 @@
 - `packages/studio/` contains the independent Studio Host/runtime contracts and CLI.
 - `plugins/` contains optional concrete Studio Plugins; Studio must not import them.
 - `services/local-agent/` contains the local CLI/TUI, local server, plugin loading, browser tools, and local config.
+- `tests/studio-e2e/` contains cross-package Studio acceptance tests; concrete Plugins must remain independent of each other.
 - `toolkits/` contains concrete Agent Toolkits and Toolkit-owned runtimes.
 - `tools/agent-macos/` contains the macOS desktop companion.
 - `docs/` contains public architecture and capability design notes.

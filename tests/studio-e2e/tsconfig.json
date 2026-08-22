@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@pinpawo/studio": ["../../packages/studio/src/index.ts"],
+      "@pinpawo-plugin/studio-http": ["../../plugins/studio-http/src/index.ts"],
+      "@pinpawo-toolkit/studio-kanban": ["../../toolkits/studio-kanban/src/index.ts"]
+    },
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["src"]
+}

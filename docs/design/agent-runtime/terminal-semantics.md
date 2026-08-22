@@ -155,7 +155,10 @@ type DelegationOutcome =
 
 - `goal_done` means only that the user goal is complete.
 - `user_input_required` means that the goal is incomplete and autonomous
-  execution cannot continue without user input.
+  execution at a delegation boundary cannot continue without user input. Entry
+  clarification remains owned by Entry Answer before execution planning starts.
+- Model uncertainty or an unchecked fact is not user input: when an available
+  Capability can inspect or verify it, autonomous execution must continue.
 - Every accepted non-continue announce is copied into the main conversation as
   a handoff. This records evidence provenance, not completion.
 - The graph carries the accepted outcome through run-scoped state. `answer`

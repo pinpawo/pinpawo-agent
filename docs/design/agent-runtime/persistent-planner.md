@@ -253,6 +253,15 @@ Planner 只做语义判断并提交 commit。graph 必须确定性地负责：
 
 适用条件：目标尚未完成，并且下一次进展必须先等待用户补充、选择或确认。
 
+该 action 只允许在 execution Boundary 使用。Entry Answer 在把请求交给 Planner 前拥有
+完整的用户交互边界；一旦进入 Entry Planner，本轮只能形成执行计划或报告无可执行能力，
+不能在缺少 active delegation 公开证据的情况下提前返回 `user_input_required`。
+
+“Planner 尚未核验或不知道某个事实”不属于该条件。只要任一 Capability 能读取、
+查询、验证或执行得到所需事实，Planner 必须继续形成可执行 task；用户要求先分析、
+评估或给出建议再确认时，也必须先执行仍可自主完成的前置工作。只有用户是缺失信息、
+选择或授权的唯一来源，且不存在可先推进的自主工作时，才允许进入该结果。
+
 约束：
 
 - `tasks` 必须为空；
@@ -282,7 +291,7 @@ continue_current     -> active delegation + empty tasks
 execute_plan         -> entry + non-empty tasks
 advance_plan         -> boundary + non-empty tasks
 goal_done            -> empty tasks + accepted-result preconditions
-user_input_required  -> empty tasks
+user_input_required  -> boundary + active delegation + empty tasks
 unavailable          -> empty tasks
 ```
 
@@ -455,7 +464,6 @@ prepare
        |-- answer -> answer
        `-- needs_plan -> Planner(initial boundary input)
                             |-- execute_plan -> capability
-                            |-- user_input_required -> answer
                             `-- unavailable -> answer
 ```
 

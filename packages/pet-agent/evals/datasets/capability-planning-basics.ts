@@ -206,6 +206,44 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     metadata: { difficulty: 'medium', reason: 'Planner-owned one-task boundary.', source: SOURCE_FILE },
   },
   {
+    id: `${SUITE}.entry-verifies-latest-main-instead-of-requesting-user-input`,
+    name: 'entry-verifies-latest-main-instead-of-requesting-user-input',
+    suite: SUITE,
+    tags: ['capability_planning', 'entry_answer', 'context_synthesis'],
+    input: {
+      mode: 'entry',
+      userRequest: '确认刚才对 studio 结构和 local-agent 层 studio 概念侵入的评估是基于最新 main 分支的版本。',
+      messages: [{
+        role: 'user',
+        content: '看下最新的 studio 结构，然后评估目前还有哪些 studio 概念侵入到了 local-agent 这一层。',
+      }, {
+        role: 'assistant',
+        content: '已根据当前工作区源码完成 studio 结构和 local-agent 概念侵入评估，但尚未核对当前 HEAD 是否与远程最新 main 一致。',
+      }, {
+        role: 'user',
+        content: '你看的是最新的 main 的版本么？',
+      }],
+      capabilityRegistry: [
+        'general: inspect the current workspace and Git state, compare the checked-out revision with the latest main branch, and report verified evidence',
+      ],
+    },
+    expected: {
+      result: 'execute_plan',
+      nextTaskTerms: ['main', '版本', '核对'],
+      capabilityName: 'general',
+      remainingPlan: [],
+      exactRemainingPlanLength: 0,
+      planEffect: 'created',
+      rubberStamp: false,
+      reason: 'The latest-main status is an executable repository fact that General can verify. Model uncertainty or an unchecked fact is not missing user input, so the Planner must delegate verification instead of asking the user for a commit or timestamp.',
+    },
+    metadata: {
+      difficulty: 'hard',
+      reason: 'Trace-derived regression from trace 01a02b00-9cb1-7044-827d-38f43795b2f8, where Planner incorrectly returned user_input_required for a Git-verifiable fact.',
+      source: SOURCE_FILE,
+    },
+  },
+  {
     id: `${SUITE}.entry-splits-independent-deliverables`,
     name: 'entry-splits-independent-deliverables',
     suite: SUITE,
@@ -582,7 +620,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
   },
   {
     id: `${SUITE}.entry-returns-to-answer-before-execution`,
-    name: 'entry-returns-to-answer-before-execution',
+    name: 'entry-recommends-before-requesting-confirmation',
     suite: SUITE,
     tags: ['capability_planning', 'structured_output', 'context_synthesis'],
     input: {
@@ -597,17 +635,25 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       capabilityRegistry: [
         'capability_creator: create and validate a user-defined Capability',
         'wiki: read and maintain project knowledge in the wiki',
+        'general: inspect the current workspace context and recommend whether operational knowledge belongs in the wiki or a reusable Capability without creating either',
       ],
     },
     expected: {
-      result: 'user_input_required',
+      result: 'execute_plan',
+      nextTaskTerms: ['钉钉', 'wiki', 'Capability', '建议'],
+      capabilityName: 'general',
       remainingPlan: [],
       exactRemainingPlanLength: 0,
-      planEffect: 'empty',
+      planEffect: 'created',
       rubberStamp: false,
-      reason: 'The user explicitly requests a recommendation and confirmation before execution, so the Planner returns control to Answer in user-input-required mode without invoking either executable Capability.',
+      reason: 'The user asks for an evidence-based recommendation before confirming implementation. Recommendation work is still autonomous and executable, so the Planner delegates that analysis now and waits for confirmation only after its result.',
     },
-    metadata: { difficulty: 'medium', reason: 'Planner structured no-plan terminal.', source: SOURCE_FILE },
+    metadata: {
+      difficulty: 'medium',
+      reason: 'Do not request confirmation before the requested recommendation exists.',
+      source: SOURCE_FILE,
+      legacyName: 'entry-returns-to-answer-before-execution',
+    },
   },
   {
     id: `${SUITE}.boundary-returns-to-answer-when-no-capability-can-proceed`,

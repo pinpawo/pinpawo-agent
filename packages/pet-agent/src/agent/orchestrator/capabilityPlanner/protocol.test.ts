@@ -13,7 +13,7 @@ const boundaryContext = {
   allowedCapabilityNames: ['general', 'explore'],
 };
 
-test('Planner commit exposes only action and plan tasks', () => {
+test('Planner commit exposes only action, plan tasks, and a bounded user-input request', () => {
   assert.deepEqual(parsePlannerCommit({
     action: 'execute_plan',
     tasks: [{ capability: 'explore', task: 'Inspect the repository.' }],
@@ -33,6 +33,7 @@ test('Planner commit exposes only action and plan tasks', () => {
   assert.throws(() => parsePlannerCommit({
     action: 'user_input_required',
     tasks: [],
+    userInputRequest: { question: 'Which target should I use?' },
     question: 'private question must not cross the seam',
   }, boundaryContext));
 });
@@ -46,6 +47,28 @@ test('Planner commit enforces entry and continuation invariants', () => {
     mode: 'entry',
     activeDelegation: null,
   }), /invalid at entry/);
+  assert.deepEqual(parsePlannerCommit({
+    action: 'user_input_required',
+    tasks: [],
+    userInputRequest: { question: 'Which target should I use?' },
+  }, {
+    ...boundaryContext,
+    mode: 'entry',
+    activeDelegation: null,
+  }), {
+    action: 'user_input_required',
+    tasks: [],
+    userInputRequest: { question: 'Which target should I use?' },
+  });
+  assert.throws(() => parsePlannerCommit({
+    action: 'user_input_required',
+    tasks: [],
+  }, boundaryContext), /requires userInputRequest/);
+  assert.throws(() => parsePlannerCommit({
+    action: 'unavailable',
+    tasks: [],
+    userInputRequest: { question: 'Unexpected question.' },
+  }, boundaryContext), /forbids userInputRequest/);
   assert.throws(() => parsePlannerCommit({
     action: 'continue_current',
     tasks: [{ capability: 'explore', task: 'Switch executor.' }],

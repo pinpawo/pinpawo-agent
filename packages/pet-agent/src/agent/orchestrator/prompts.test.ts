@@ -48,15 +48,34 @@ test('Capability Planner system prompt carries the verified default Capability',
     content: '# General\n\n使用本地工具；保留 ]]> 作为文档数据。',
   });
 
-  assert.match(systemPrompt, /<default_capability[^>]*source="capability_registry"/);
-  assert.match(systemPrompt, /general\/CAPABILITY\.md/);
+  assert.match(systemPrompt, /<default_capability name="general">/);
+  assert.doesNotMatch(systemPrompt, /general\/CAPABILITY\.md/);
+  assert.doesNotMatch(systemPrompt, /role=|priority=|source=|trust=/);
   assert.match(systemPrompt, /使用本地工具；保留 \]\]\]\]>\<!\[CDATA\[> 作为文档数据。/);
+  assert.match(
+    systemPrompt,
+    /capability_search 当前状态：OPEN；已使用 0 轮；剩余 2 轮。/,
+  );
+});
+
+test('Capability Planner system prompt renders search control as one data-only state', () => {
+  const systemPrompt = buildCapabilityPlannerAgentSystemPrompt(
+    'boundary',
+    null,
+    { status: 'closed', roundsUsed: 2, maxRounds: 2 },
+  );
+
+  assert.match(
+    systemPrompt,
+    /capability_search 当前状态：CLOSED；已使用 2 轮；剩余 0 轮。$/,
+  );
+  assert.doesNotMatch(systemPrompt, /<capability_(?:exploration|search_state)/);
 });
 
 test('Capability Planner system prompt omits the block when the workspace has no default', () => {
   const systemPrompt = buildCapabilityPlannerAgentSystemPrompt('entry');
   // The contract paragraph still names the tag; only the rendered block is absent.
-  assert.doesNotMatch(systemPrompt, /<default_capability role=/);
+  assert.doesNotMatch(systemPrompt, /<default_capability name=/);
 });
 
 test('Capability Planner input carries the run user request alone', () => {
@@ -76,7 +95,7 @@ test('Capability Planner input carries the run user request alone', () => {
   // The default Capability is a workspace property, not part of this turn's
   // request, so it must not share the block that changes every turn.
   assert.match(input, /^<run_user_request[^>]*>/);
-  assert.doesNotMatch(input, /<default_capability role=/);
+  assert.doesNotMatch(input, /<default_capability name=/);
 });
 
 test('Capability Planner boundary input carries the run user request and boundary facts', () => {

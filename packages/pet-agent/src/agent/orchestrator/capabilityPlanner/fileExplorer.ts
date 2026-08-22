@@ -14,7 +14,7 @@ import {
 } from './workspaceReader';
 
 export const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME = 'capability_search';
-const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_DESCRIPTION = 'Progressively disclose specific Capabilities by literal terms; each match contains the complete CAPABILITY.md document. Search with short role, domain, or deliverable terms likely to appear in Capability documents, translating the user intent when needed. A miss may return exact Capability names for the next search round. The result reports candidate priority and whether another disclosure round remains. Prefer an applicable specific match over the General fallback.';
+const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_DESCRIPTION = 'Progressively disclose specific Capability documents by literal terms. Each match contains the complete CAPABILITY.md document; the result also reports remaining search rounds and exact Capability names available for a later query.';
 
 const DEFAULT_MAX_DOCUMENT_READ_BYTES = 64 * 1024;
 const MAX_CAPABILITY_SEARCH_RESULTS = 50;
@@ -47,15 +47,18 @@ export type CapabilityPlannerDefaultCapability = {
   readonly content: string;
 };
 
-export function createCapabilityPlannerSearchTool<TState>(
+export function createCapabilityPlannerSearchTool<
+  TState = Record<string, unknown>,
+>(
   search: (
     terms: readonly string[],
-    runtime: ToolRuntime<TState>,
+    state: ToolRuntime<TState>['state'],
+    signal?: AbortSignal,
   ) => Promise<string>,
 ) {
   return tool(
     async ({ terms }: { terms: string[] }, runtime: ToolRuntime<TState>) =>
-      search(terms, runtime),
+      search(terms, runtime.state, runtime.signal),
     {
       name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
       description: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_DESCRIPTION,
@@ -226,7 +229,7 @@ export function createCapabilityPlannerFileExplorer(params: {
   };
 
   const capabilitySearch = createCapabilityPlannerSearchTool(
-    (terms, runtime) => search(terms, runtime.signal),
+    (terms, _state, signal) => search(terms, signal),
   );
 
   return Object.freeze({

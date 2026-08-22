@@ -150,6 +150,7 @@ function render(testCase: AnswerBehaviorCase): BaseMessage[] {
               result,
               artifactRefs: [],
             })),
+            question: delegationOutcome.question ?? null,
             context: delegationOutcome.context
               ?? [...testCase.input.messages].reverse().find(({ role }) => role === 'assistant')?.text
               ?? null,

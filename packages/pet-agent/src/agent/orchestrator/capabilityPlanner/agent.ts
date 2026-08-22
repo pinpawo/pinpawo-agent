@@ -68,6 +68,9 @@ const plannerInvocationStateSchema = z4.object({
 });
 
 type PlannerInvocationState = z4.infer<typeof plannerInvocationStateSchema>;
+type PlannerSearchToolState = Pick<PlannerInvocationState, 'currentInput'> & {
+  messages?: BaseMessage[];
+};
 
 export type CapabilityPlannerAgentErrorCode =
   | 'planning_limit_reached'
@@ -86,23 +89,27 @@ export class CapabilityPlannerAgentError extends Error {
 function plannerTaskSchema() {
   return z.object({
     capability: z.string().trim().min(1).max(200)
-      .describe('Capability that executes this task.'),
+      .describe('Registered Capability name for this task.'),
     task: z.string().trim().min(1).max(MAX_TASK_TEXT_CHARS)
-      .describe('What this step must deliver. The system prompt owns how a task is written.'),
+      .describe('The task goal to deliver.'),
   });
 }
 
 function plannerTasksSchema() {
   return z.array(plannerTaskSchema()).min(1).max(MAX_PLAN_TASKS)
-    .describe('Ordered execution boundaries. Keep continuous work by one Capability in one task; preserve a separate boundary when later work depends on the accepted result of the current task.');
+    .describe('The non-empty ordered task sequence committed by this action.');
 }
 
+/**
+ * Terminal tools serialize an already-made decision. Their descriptions define
+ * the commit shape and structural affordances, not planning policy.
+ */
 function createPlannerTerminalTools(): StructuredTool[] {
   const continueCurrent = tool(
     async () => JSON.stringify({ action: 'continue_current', tasks: [] }),
     {
       name: CONTINUE_CURRENT_TOOL_NAME,
-      description: 'Boundary-only terminal action. The current task remains executable but incomplete, so continue the same delegation without replacing its task or remaining plan.',
+      description: 'Submit continue_current with no tasks.',
       schema: z.object({}).strict(),
     },
   );
@@ -112,7 +119,7 @@ function createPlannerTerminalTools(): StructuredTool[] {
     },
     {
       name: SUBMIT_PLAN_TOOL_NAME,
-      description: 'Entry-only terminal action. Submit the initial shortest executable task sequence.',
+      description: 'Submit execute_plan with the initial ordered tasks.',
       schema: z.object({ tasks: plannerTasksSchema() }),
     },
   );
@@ -122,7 +129,7 @@ function createPlannerTerminalTools(): StructuredTool[] {
     },
     {
       name: ADVANCE_PLAN_TOOL_NAME,
-      description: 'Boundary-only terminal action. Accept the completed current task and submit the remaining work. Preserve the prior remaining plan unchanged unless the accepted result makes a change necessary; when necessary, change only the smallest affected portion. The next task may use a different Capability.',
+      description: 'Submit advance_plan with the ordered remaining tasks.',
       schema: z.object({ tasks: plannerTasksSchema() }),
     },
   );
@@ -130,23 +137,30 @@ function createPlannerTerminalTools(): StructuredTool[] {
     async () => JSON.stringify({ action: 'goal_done', tasks: [] }),
     {
       name: COMPLETE_GOAL_TOOL_NAME,
-      description: 'Terminal Planner action. The accepted execution evidence completes the user goal.',
+      description: 'Submit goal_done with no tasks.',
       schema: z.object({}).strict(),
     },
   );
   const requestUserInput = tool(
-    async () => JSON.stringify({ action: 'user_input_required', tasks: [] }),
+    async ({ question }: { question: string }) => JSON.stringify({
+      action: 'user_input_required',
+      tasks: [],
+      userInputRequest: { question },
+    }),
     {
       name: REQUEST_USER_INPUT_TOOL_NAME,
-      description: 'Terminal Planner action. Further progress requires a user choice or missing information. Answer will use the current delegation result to ask the user.',
-      schema: z.object({}).strict(),
+      description: 'Submit user_input_required with the question Answer should ask.',
+      schema: z.object({
+        question: z.string().trim().min(1).max(1_000)
+          .describe('The concrete question to present to the user.'),
+      }).strict(),
     },
   );
   const reportUnavailable = tool(
     async () => JSON.stringify({ action: 'unavailable', tasks: [] }),
     {
       name: REPORT_UNAVAILABLE_TOOL_NAME,
-      description: 'Terminal Planner action. No available Capability can form an executable plan. Do not provide a reason or explanation.',
+      description: 'Submit unavailable with no tasks.',
       schema: z.object({}).strict(),
     },
   );
@@ -310,18 +324,6 @@ function currentPlannerInput(state: Partial<PlannerInvocationState>) {
   return state.currentInput;
 }
 
-function terminalToolNamesForMode(input: CapabilityPlannerInput) {
-  return input.mode === 'entry'
-    ? [SUBMIT_PLAN_TOOL_NAME, REQUEST_USER_INPUT_TOOL_NAME, REPORT_UNAVAILABLE_TOOL_NAME]
-    : [
-        CONTINUE_CURRENT_TOOL_NAME,
-        ADVANCE_PLAN_TOOL_NAME,
-        COMPLETE_GOAL_TOOL_NAME,
-        REQUEST_USER_INPUT_TOOL_NAME,
-        REPORT_UNAVAILABLE_TOOL_NAME,
-      ];
-}
-
 type CapabilityExplorationState = {
   status: 'open' | 'closed';
   roundsUsed: number;
@@ -355,7 +357,19 @@ function capabilityExplorationState(
   };
 }
 
-function closeCapabilityExploration(
+function capabilitySearchLimitExceeded(
+  exploration: CapabilityExplorationState,
+) {
+  return JSON.stringify({
+    ok: false,
+    error: {
+      code: 'capability_search_round_limit_exceeded',
+      message: `Capability search limit exceeded after ${exploration.maxRounds.toString()} rounds. No search was executed and no new Capability documents were disclosed. Finish planning from the Capability documents and facts already available.`,
+    },
+  });
+}
+
+function annotateCapabilitySearchResult(
   message: ToolMessage,
   state: Partial<PlannerInvocationState> & { messages?: BaseMessage[] },
   maxSearchRounds: number,
@@ -390,9 +404,6 @@ function closeCapabilityExploration(
         : [];
     }),
   )];
-  const reason = payload.ok === true
-    ? (data?.matches?.length ? 'candidates_disclosed' : 'no_match')
-    : 'search_error';
   const defaultCandidate = state.defaultCapability?.capabilityName ?? null;
   const availableSpecificCandidates = input.workspace.capabilityNames.filter(
     (capabilityName) => capabilityName !== defaultCandidate,
@@ -406,44 +417,17 @@ function closeCapabilityExploration(
     && exploration.status === 'open'
     ? discoverableSpecificCandidates.slice(0, MAX_CAPABILITY_DISCOVERY_HINTS)
     : [];
-  const uncheckedSpecificCandidatesRemain = nextSearchCandidates.length > 0;
   message.content = JSON.stringify({
     ...payload,
     exploration: {
       status: exploration.status,
-      reason,
       roundsUsed: exploration.roundsUsed,
-      maxRounds: exploration.maxRounds,
       remainingRounds,
       specificCandidates,
       nextSearchCandidates,
       nextSearchCandidatesComplete: nextSearchCandidates.length
         === discoverableSpecificCandidates.length,
       defaultCandidate,
-      defaultCandidateRole: defaultCandidate
-        ? (specificCandidates.length > 0
-            ? 'fallback_only'
-            : uncheckedSpecificCandidatesRemain
-              ? 'deferred_while_specific_candidates_remain_unchecked'
-              : 'eligible_default')
-        : 'absent',
-      specificCandidateStatus: specificCandidates.length > 0
-        ? 'literal_match_requires_positive_scope_check'
-        : 'none_disclosed',
-      planUpdateRule: input.mode === 'boundary'
-        ? 'Default to copying every prior remaining-plan task verbatim. The accepted handoff is already executor context, so never copy its details into task text. Modify the plan only when leaving it unchanged would be incorrect, unexecutable, or insufficient for the user goal; then change only the smallest necessary portion.'
-        : null,
-      selectionRule: specificCandidates.length > 0
-        ? input.mode === 'boundary'
-          ? 'A literal match is not proof of applicability. Evaluate complete documents against unfinished work after the accepted result, not against the completed active task or the whole user goal. Negative or limiting text does not authorize the matched action. Prefer the best-fitting specific candidate only when its positive scope executes the next task; otherwise preserve a valid planned executor, use General when applicable, or report unavailable.'
-          : 'A literal match is not proof of applicability. Check each complete document for positive scope; terms found only in negative or limiting text make that candidate unsuitable. If any specific candidate positively covers the current task, select the best-fitting one. Use General only after determining every disclosed specific candidate is unsuitable; never use General merely to merge distinct task boundaries.'
-        : uncheckedSpecificCandidatesRemain
-          ? 'No specific candidate matched. Before selecting General, inspect plausible nextSearchCandidates using an exact candidate name in the remaining search round.'
-          : 'No specific candidate was disclosed in this batch. Select the verified default only if it can execute the task.',
-      terminalTools: terminalToolNamesForMode(input),
-      next: exploration.status === 'closed'
-        ? 'Exploration is closed. Apply selectionRule, then invoke exactly one terminal tool.'
-        : 'Choose and invoke a terminal tool now if the candidates are sufficient; otherwise use the remaining disclosure round.',
     },
   });
   return message;
@@ -462,7 +446,6 @@ function createPlannerMiddleware(maxSearchRounds: number) {
         });
       }
       const exploration = capabilityExplorationState(request.state, maxSearchRounds);
-      const terminalToolNames = new Set(terminalToolNamesForMode(input));
       return handler({
         ...request,
         systemMessage: new SystemMessage(
@@ -472,14 +455,6 @@ function createPlannerMiddleware(maxSearchRounds: number) {
             exploration,
           ),
         ),
-        ...(exploration.status === 'closed'
-          ? {
-              tools: request.tools.filter((plannerTool) =>
-                typeof plannerTool.name === 'string'
-                && terminalToolNames.has(plannerTool.name)),
-              toolChoice: 'required' as const,
-            }
-          : {}),
       });
     },
     wrapToolCall: async (request, handler) => {
@@ -487,7 +462,7 @@ function createPlannerMiddleware(maxSearchRounds: number) {
       const result = await handler(request);
       if (ToolMessage.isInstance(result)
         && request.toolCall.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME) {
-        return closeCapabilityExploration(result, request.state, maxSearchRounds);
+        return annotateCapabilitySearchResult(result, request.state, maxSearchRounds);
       }
       if (!ToolMessage.isInstance(result)
         || ![
@@ -528,7 +503,7 @@ function createPlannerMiddleware(maxSearchRounds: number) {
 export function createCapabilityPlannerAgent(params: {
   model: BaseChatModel;
   timeoutMs?: number;
-  /** Maximum model turns that may invoke capability_search. Defaults to 2. */
+  /** Maximum model turns that may execute capability_search discovery. Defaults to 2. */
   maxSearchRounds?: number;
   registryBackend?: CapabilityRegistryBackend;
   maxDocumentReadBytes?: number;
@@ -562,10 +537,16 @@ export function createCapabilityPlannerAgent(params: {
   };
   const terminalTools = createPlannerTerminalTools();
   const additionalTools = params.additionalTools ?? [];
-  const capabilitySearchTool = createCapabilityPlannerSearchTool<PlannerInvocationState>(
-    (terms, runtime) => explorerForInput(
-      currentPlannerInput(runtime.state),
-    ).search(terms, runtime.signal),
+  const capabilitySearchTool = createCapabilityPlannerSearchTool<PlannerSearchToolState>(
+    (terms, state, signal) => {
+      const exploration = capabilityExplorationState(state, maxSearchRounds);
+      if (exploration.roundsUsed > exploration.maxRounds) {
+        return Promise.resolve(capabilitySearchLimitExceeded(exploration));
+      }
+      return explorerForInput(
+        currentPlannerInput(state),
+      ).search(terms, signal);
+    },
   );
   const middleware = createPlannerMiddleware(maxSearchRounds);
   const agent = createAgent({

@@ -23,6 +23,7 @@ export const ANSWER_INPUT_MESSAGE_NAME = 'answer_input';
 export const ANSWER_CONTEXT_LIMITS = {
   unfinishedTaskChars: 320,
   detailChars: 320,
+  userInputQuestionChars: 1_000,
   awaitingUserInputChars: 2_000,
 } as const;
 
@@ -57,6 +58,7 @@ export type AnswerContextFacts = AnswerContextBaseFacts & (
     }
   | {
       mode: 'user_input_required';
+      question: string | null;
       context: string | null;
     }
   | {
@@ -152,11 +154,19 @@ function renderAnswerContext(facts: ModelAnswerContextFacts): string {
       ), 2));
     }
   }
-  if (facts.mode === 'user_input_required' && facts.context) {
-    lines.push(indentXmlBlock(xmlTextBlock(
-      'awaiting_user_input_context',
-      clipForPrompt(facts.context, ANSWER_CONTEXT_LIMITS.awaitingUserInputChars),
-    ), 2));
+  if (facts.mode === 'user_input_required') {
+    if (facts.question) {
+      lines.push(indentXmlBlock(xmlTextBlock(
+        'requested_user_input',
+        clipForPrompt(facts.question, ANSWER_CONTEXT_LIMITS.userInputQuestionChars),
+      ), 2));
+    }
+    if (facts.context) {
+      lines.push(indentXmlBlock(xmlTextBlock(
+        'awaiting_user_input_context',
+        clipForPrompt(facts.context, ANSWER_CONTEXT_LIMITS.awaitingUserInputChars),
+      ), 2));
+    }
   }
   const acceptedResults = renderAcceptedResults(facts.acceptedResults);
   if (acceptedResults) lines.push(indentXmlBlock(acceptedResults, 2));

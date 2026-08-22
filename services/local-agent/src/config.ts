@@ -148,13 +148,6 @@ export function resolveCapabilityRegistryBackend(
   );
 }
 
-const modelProfileRegistry = buildModelProfileRegistry({
-  stored,
-  env: process.env,
-});
-const selectedModelProfile = resolveModelProfile(modelProfileRegistry);
-const selectedModelProfileFingerprint = fingerprintModelProfile(selectedModelProfile).fingerprint;
-
 export type Config = Readonly<{
   modelProfileRegistry: ModelProfileRegistrySnapshot;
   modelProfileId: string;
@@ -176,6 +169,12 @@ function freezeConfig(input: Config): Config {
 }
 
 function readConfigDefaults(): Config {
+  const modelProfileRegistry = buildModelProfileRegistry({
+    stored,
+    env: process.env,
+  });
+  const selectedModelProfile = resolveModelProfile(modelProfileRegistry);
+  const selectedModelProfileFingerprint = fingerprintModelProfile(selectedModelProfile).fingerprint;
   return freezeConfig({
     modelProfileRegistry,
     modelProfileId: selectedModelProfile.id,
@@ -202,14 +201,14 @@ function readConfigDefaults(): Config {
   });
 }
 
-const defaultConfig = readConfigDefaults();
-let currentConfig = defaultConfig;
+let currentConfig: Config | null = null;
 
 export function getConfig(): Config {
+  currentConfig ??= readConfigDefaults();
   return currentConfig;
 }
 
-export function buildConfig(input: ConfigInput = {}, defaults: Config = defaultConfig): Config {
+export function buildConfig(input: ConfigInput = {}, defaults: Config = getConfig()): Config {
   return freezeConfig({
     ...defaults,
     ...input,
@@ -217,7 +216,8 @@ export function buildConfig(input: ConfigInput = {}, defaults: Config = defaultC
 }
 
 export function setConfig(input: ConfigInput | ((current: Config) => ConfigInput)): Config {
-  const patch = typeof input === 'function' ? input(currentConfig) : input;
-  currentConfig = buildConfig(patch, currentConfig);
+  const current = getConfig();
+  const patch = typeof input === 'function' ? input(current) : input;
+  currentConfig = buildConfig(patch, current);
   return currentConfig;
 }

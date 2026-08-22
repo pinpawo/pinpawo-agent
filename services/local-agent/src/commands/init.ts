@@ -1,6 +1,15 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
+import {
+  createModelProfile,
+  MODEL_PROFILES_VERSION,
+  type ModelProfileV1,
+} from '../modelProfiles';
+import {
+  findLlmModelPresetByKey,
+  inferLlmModelPreset,
+} from '../llmModelPresets';
 
 export type InitCommandOptions = {
   dir?: string;
@@ -45,6 +54,72 @@ LOCAL_SERVER_PORT=3210
 `;
 }
 
+function parseDotEnv(content: string): Record<string, string> {
+  const values: Record<string, string> = {};
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const separator = trimmed.indexOf('=');
+    if (separator < 1) continue;
+    const key = trimmed.slice(0, separator).trim();
+    values[key] = trimmed.slice(separator + 1).trim().replace(/^[\"']|[\"']$/g, '');
+  }
+  return values;
+}
+
+function toPositiveInteger(value: string | undefined): number | undefined {
+  if (!value?.trim()) return undefined;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function serializeModelConfig(profile: ModelProfileV1): string {
+  return `${JSON.stringify({
+    models: {
+      version: MODEL_PROFILES_VERSION,
+      defaultProfileId: profile.id,
+      profiles: {
+        [profile.id]: profile,
+      },
+    },
+  }, null, 2)}\n`;
+}
+
+function modelConfigTemplate(env: Record<string, string>): string {
+  const apiKey = env.LLM_API_KEY?.trim();
+  const baseUrl = env.LLM_BASE_URL?.trim();
+  const model = env.LLM_MODEL?.trim();
+  if (apiKey && baseUrl && model) {
+    try {
+      const requestedPreset = findLlmModelPresetByKey(env.LLM_MODEL_PRESET);
+      const inferredPreset = inferLlmModelPreset(model);
+      const preset = requestedPreset?.key === inferredPreset?.key
+        ? requestedPreset
+        : inferredPreset;
+      return serializeModelConfig(createModelProfile({
+        id: 'primary',
+        label: preset?.label ?? model,
+        ...(preset ? { sourcePreset: preset.key } : {}),
+        apiKey,
+        baseUrl,
+        model,
+        contextWindowTokens: toPositiveInteger(env.LLM_CONTEXT_WINDOW_TOKENS),
+      }));
+    } catch {
+      // Leave invalid legacy values untouched in .env and provide an editable profile instead.
+    }
+  }
+
+  return serializeModelConfig(createModelProfile({
+    id: 'primary',
+    label: 'Qwen 3.7 Max',
+    sourcePreset: 'qwen',
+    apiKey: 'replace-with-your-api-key',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'qwen3.7-max',
+  }));
+}
+
 function exampleCapabilityDocument(): string {
   return `---
 name: hello-pinpawo
@@ -77,9 +152,14 @@ export function scaffoldQuickInstall(options: InitCommandOptions = {}): {
   const force = options.force ?? false;
   const includeExampleCapability = options.exampleCapability ?? true;
   const written: WrittenFile[] = [];
+  const envPath = resolve(rootDir, '.env');
+  const configPath = resolve(rootDir, 'config.json');
+  const existingEnv = existsSync(envPath) ? parseDotEnv(readFileSync(envPath, 'utf-8')) : {};
+  const needsConfig = force || !existsSync(configPath);
 
   mkdirSync(capabilitiesDir, { recursive: true });
-  writeNewFile(resolve(rootDir, '.env'), envTemplate(), force, written);
+  writeNewFile(envPath, envTemplate(), force, written);
+  writeNewFile(configPath, needsConfig ? modelConfigTemplate(existingEnv) : '', force, written);
 
   if (includeExampleCapability) {
     const exampleDir = resolve(capabilitiesDir, 'hello-pinpawo');
@@ -110,7 +190,7 @@ export async function runInit(options: InitCommandOptions = {}): Promise<void> {
     process.stdout.write('Use --force to overwrite generated scaffold files.\n');
   }
   process.stdout.write('\nNext steps:\n');
-  process.stdout.write('  1. Define a model profile under "models" in ~/.pinpawo/config.json\n');
+  process.stdout.write(`  1. Edit ${resolve(result.rootDir, 'config.json')} and replace the model profile credentials\n`);
   process.stdout.write(`  2. Validate the example capability: pinpawo capability validate ${exampleCapabilityDir}\n`);
   process.stdout.write('  3. Start the TUI: pinpawo tui\n');
 }

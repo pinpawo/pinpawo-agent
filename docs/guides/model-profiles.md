@@ -46,7 +46,7 @@ Profile IDs use 1–64 lowercase letters, digits, dots, underscores, or hyphens.
 
 - The configured default profile is used unless a host or session supplies another profile ID.
 - `PINPAWO_MODEL_PROFILE` selects a stored profile without changing the configured default.
-- Model configuration is read only from stored versioned profiles under `models`; it is no longer read from environment variables.
+- Runnable model configuration is read from stored profiles; it is no longer constructed from environment variables. When `pinpawo init` finds a complete legacy `.env` model tuple and no `config.json`, it migrates that tuple into a versioned stored profile.
 - An invalid non-default profile is isolated with diagnostics.
 - An invalid or missing default/selected profile blocks startup; no other profile is selected silently.
 

@@ -153,6 +153,7 @@ npx pinpawo tui
 `pinpawo init` creates:
 
 - `~/.pinpawo/.env`
+- `~/.pinpawo/config.json` with an editable default model profile
 - `~/.pinpawo/capabilities/`
 - `~/.pinpawo/capabilities/hello-pinpawo/`
 

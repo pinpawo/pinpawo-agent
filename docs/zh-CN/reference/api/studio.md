@@ -50,8 +50,15 @@ listener 已停止后继续 invoke Pet。
 
 ## 插件 context 与 gate
 
-`StudioPlugin` 是带可选 `studio.start(context)` / `stop()` 钩子的
-`AgentToolkit`。启动时拿到的 context 提供 `dispatch`、`notify`、
+`StudioPlugin` 是高于 Toolkit 的扩展，不是 `AgentToolkit`。它通过必需的
+`toolkits` 字段定义零个或多个 Agent Toolkit，并通过 `start(context)` / 可选
+`stop()` 管理 Studio 生命周期。Plugin 定义的 Toolkit 在 Pet 构建前进入 Host
+inventory；Capability 仍由 Agent Host 独立注册，与 Plugin/Studio 无关。
+本地 Studio Host 根据 `petId` 从
+`pets/<petId>/capabilities/<capability>/CAPABILITY.md` 加载定义；目录成员就是选择，
+Pet JSON 不再包含 Capability 名称列表。
+
+Plugin 启动时拿到的 context 提供 `dispatch`、`notify`、
 `subscribe`、`listPets` 和 `onDispatchGate`。context 会自动补 event 的
 `source` 与 `occurredAt`。
 

@@ -91,8 +91,8 @@ pinpawo capability install ./my-capability
 ```
 
 Studio is an independent Host exposed through `@pinpawo/studio`, not a mode of
-this Chat server command. A standalone application composition/CLI entry has
-not been added yet.
+this Chat server command. The `pinpawo-studio` process entry lives directly in
+`packages/studio`.
 
 `pinpawo tui` launches the OpenTUI client. Installed packages use the
 Bun-targeted bundle in `dist/tui` together with npm-selected Bun and OpenTUI

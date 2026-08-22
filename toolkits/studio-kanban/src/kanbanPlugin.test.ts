@@ -50,8 +50,10 @@ function pet(options: {
 type KanbanTools = Record<string, NamedStructuredTool>;
 
 function pluginTools(plugin: ReturnType<typeof createKanbanPlugin>) {
+  const toolkit = plugin.toolkits[0];
+  assert.ok(toolkit, 'kanban Plugin must define its Agent Toolkit');
   return Object.fromEntries(
-    plugin.tools.map(({ tool }) => [tool.name, tool]),
+    toolkit.tools.map(({ tool }) => [tool.name, tool]),
   ) as KanbanTools;
 }
 

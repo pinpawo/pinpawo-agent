@@ -12,7 +12,7 @@
     "toolkits/*"
   ],
   "scripts": {
-    "build": "npm run build -w @pinpawo/agent-contracts && npm run build -w @pinpawo/pet-agent && npm run build -w pinpawo",
+    "build": "npm run build -w @pinpawo/agent-contracts && npm run build -w @pinpawo/pet-agent && npm run build -w pinpawo && npm run build -w @pinpawo/studio",
     "test": "npm run test -w @pinpawo/agent-contracts && npm run test -w @pinpawo/pet-agent && npm run test -w @pinpawo/studio && npm run test -w @pinpawo/agent-session && npm run test -w @pinpawo/tui && npm run test -w @pinpawo-toolkit/browser && npm run test -w @pinpawo-toolkit/studio-kanban && npm run test:unit -w pinpawo",
     "typecheck": "npm run typecheck -w @pinpawo/agent-contracts && npm run typecheck -w @pinpawo/pet-agent && npm run typecheck -w @pinpawo/studio && npm run typecheck -w @pinpawo/agent-session && npm run typecheck -w @pinpawo/tui && npm run typecheck -w @pinpawo-toolkit/browser && npm run typecheck -w @pinpawo-toolkit/studio-kanban && npm run typecheck -w pinpawo",
     "langfuse:env": "bash infra/langfuse/bootstrap-env.sh",

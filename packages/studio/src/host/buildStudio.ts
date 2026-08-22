@@ -12,7 +12,6 @@ import type { PetAgentRuntime } from '../types';
 import {
   buildLocalAgentModels,
   buildLocalAgentRuntimeConfig,
-  createExploreCapability,
   resolveLlmGenerationReserveTokens,
   type LocalModelProfileRegistry,
 } from 'pinpawo/host-runtime';
@@ -32,20 +31,26 @@ export class StudioNotConfiguredError extends Error {
 }
 
 export type BuildStudioInput = {
+  configuration: ResolvedStudioHostConfig;
   modelProfiles: LocalModelProfileRegistry;
-  /** 全局 capability 池(local + user 合并);按 pet config 的 capability 名筛选。 */
-  capabilities: AgentCapability[];
-  /** 全局 toolkit 池(plugin + local);所有 pet 共享。 */
-  toolkits?: AgentToolkit[];
+  /** Host baseline Capability 池；Studio 只自动提供 general。 */
+  hostCapabilities: readonly AgentCapability[];
+  /** 每个 Pet 从约定目录严格加载的 Agent Capability 定义。 */
+  petCapabilities: ReadonlyMap<string, readonly AgentCapability[]>;
+  /** Host 已统一校验 availability/provenance/runtime 的 Toolkit inventory。 */
+  toolkits: readonly AgentToolkit[];
   toolkitRuntimeManager?: ToolkitRuntimeManager;
   /** Host 持有的 checkpointer,由所有 pet 共用(#613)。 */
   checkpoint?: BaseCheckpointSaver;
   ownerUserId: string | null;
+};
+
+export type ResolveStudioHostConfigInput = {
   studioConfigPath?: string;
   petsDir?: string;
   workdir?: string;
-  /** Installed optional modules are resolved by the application composition root. */
-  resolveModule?: StudioModuleResolver;
+  /** Installed Plugins are selected by config and resolved by the Host caller. */
+  resolvePlugin?: StudioPluginResolver;
 };
 
 export type BuildStudioResult = {
@@ -55,30 +60,51 @@ export type BuildStudioResult = {
   plugins: StudioPlugin[];
 };
 
-/**
- * Optional module contribution. A module may provide the Studio lifecycle /
- * Toolkit face and capabilities that refer to that Toolkit. Studio never
- * imports a concrete module implementation.
- */
-export type ResolvedStudioModule = {
-  plugin: StudioPlugin;
-  capabilities?: readonly AgentCapability[];
+/** One Studio configuration snapshot resolved once by its Host. */
+export type ResolvedStudioHostConfig = {
+  workdir: string;
+  studioConfigPath: string;
+  petsDir: string;
+  resolved: ResolvedStudio;
+  plugins: StudioPlugin[];
 };
 
-export type StudioModuleResolver = (
+export type StudioPluginResolver = (
   id: string,
   options?: Record<string, unknown>,
-) => Promise<ResolvedStudioModule> | ResolvedStudioModule;
+) => Promise<StudioPlugin> | StudioPlugin;
 
-/**
- * 从 workdir 装配一块 studio。
- *
- * 宿主职责:读配置文件、解析 pet、把插件接上。studio 本身不读文件 ——
- * 文件入口属于宿主(与 #613 的 config loader 分层一致)。
- */
-export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioResult> {
-  const effectiveWorkdir = input.workdir ?? buildLocalAgentRuntimeConfig().workdir;
-  const workdirStateRoot = path.join(effectiveWorkdir, '.pinpawo');
+function validateResolvedPlugins(studioId: string, plugins: readonly StudioPlugin[]): void {
+  const names = new Set<string>();
+  for (const [index, plugin] of plugins.entries()) {
+    if (!plugin || typeof plugin !== 'object' || Array.isArray(plugin)) {
+      throw new Error(`studio "${studioId}": resolved plugin at index ${index.toString()} must be an object`);
+    }
+    if (typeof plugin.name !== 'string' || !plugin.name.trim()) {
+      throw new Error(`studio "${studioId}": resolved plugin at index ${index.toString()} must have a name`);
+    }
+    if (names.has(plugin.name)) {
+      throw new Error(`studio "${studioId}": duplicate plugin "${plugin.name}"`);
+    }
+    names.add(plugin.name);
+    if (!Array.isArray(plugin.toolkits)) {
+      throw new Error(`studio "${studioId}": plugin "${plugin.name}" must define a Toolkit list`);
+    }
+    if (typeof plugin.start !== 'function') {
+      throw new Error(`studio "${studioId}": plugin "${plugin.name}" must define start()`);
+    }
+    if (plugin.stop !== undefined && typeof plugin.stop !== 'function') {
+      throw new Error(`studio "${studioId}": plugin "${plugin.name}" stop must be a function`);
+    }
+  }
+}
+
+/** Read one Studio config snapshot and resolve its selected Plugins. */
+export async function resolveStudioHostConfig(
+  input: ResolveStudioHostConfigInput,
+): Promise<ResolvedStudioHostConfig> {
+  const workdir = input.workdir ?? buildLocalAgentRuntimeConfig().workdir;
+  const workdirStateRoot = path.join(workdir, '.pinpawo');
   const studioConfigPath = input.studioConfigPath
     ?? path.join(workdirStateRoot, 'studio.json');
 
@@ -89,48 +115,40 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
 
   const petsDir = input.petsDir ?? path.join(path.dirname(studioConfigPath), 'pets');
   const resolved = resolveStudio(studioConfig, await loadPetLocalConfigs(petsDir));
-
-  const modules: ResolvedStudioModule[] = [];
+  const plugins: StudioPlugin[] = [];
   for (const { id, options } of studioConfig.plugins ?? []) {
-    if (!input.resolveModule) {
+    if (!input.resolvePlugin) {
       throw new Error(
-        `studio "${studioConfig.studioId}": optional module "${id}" is configured `
-        + 'but no module resolver is installed.',
+        `studio "${studioConfig.studioId}": plugin "${id}" is configured `
+        + 'but no plugin resolver is installed.',
       );
     }
-    modules.push(await input.resolveModule(id, options));
+    plugins.push(await input.resolvePlugin(id, options));
   }
-  const plugins = modules.map(({ plugin }) => plugin);
+  validateResolvedPlugins(studioConfig.studioId, plugins);
+  return { workdir, studioConfigPath, petsDir, resolved, plugins };
+}
+
+/** Build one resident Studio from an already-resolved Host snapshot. */
+export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioResult> {
+  const { workdir: effectiveWorkdir, resolved, plugins } = input.configuration;
+  const { studio: studioConfig } = resolved;
 
   const globalLlmConfig = input.modelProfiles.resolve();
   const globalModels = buildLocalAgentModels(globalLlmConfig);
-  const capabilitiesByName = new Map<string, AgentCapability>();
-  const registerCapability = (capability: AgentCapability, source: string) => {
-    if (capabilitiesByName.has(capability.name)) {
+  const hostCapabilitiesByName = new Map<string, AgentCapability>();
+  for (const capability of input.hostCapabilities) {
+    if (hostCapabilitiesByName.has(capability.name)) {
       throw new Error(
-        `studio "${studioConfig.studioId}": duplicate capability "${capability.name}" `
-        + `contributed by ${source}`,
+        `studio "${studioConfig.studioId}": duplicate Host baseline Capability "${capability.name}"`,
       );
     }
-    capabilitiesByName.set(capability.name, capability);
-  };
-  for (const capability of input.capabilities) {
-    registerCapability(capability, 'Host capability assembly');
+    hostCapabilitiesByName.set(capability.name, capability);
   }
-  modules.forEach(({ capabilities = [] }, moduleIndex) => {
-    const moduleId = studioConfig.plugins?.[moduleIndex]?.id ?? `module[${moduleIndex}]`;
-    for (const capability of capabilities) {
-      registerCapability(capability, `optional module "${moduleId}"`);
-    }
-  });
-  const generalCapability = capabilitiesByName.get(GENERAL_CAPABILITY_NAME);
+  const generalCapability = hostCapabilitiesByName.get(GENERAL_CAPABILITY_NAME);
   if (!generalCapability) {
     throw new Error(`Studio requires the host baseline Capability "${GENERAL_CAPABILITY_NAME}".`);
   }
-
-  // 插件的 toolkit 与普通 toolkit 在 pet 眼里没有区别 —— pet 不需要知道
-  // 某个 toolkit 背后还插在 studio 上。
-  const availableToolkits = [...(input.toolkits ?? []), ...plugins];
 
   const pets: PetAgentRuntime[] = resolved.pets.map((petConfig) => {
     const petLlmConfig = petConfig.modelProfileId
@@ -141,16 +159,19 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
       : globalModels;
     const generationReserveTokens = resolveLlmGenerationReserveTokens(petLlmConfig);
 
-    const petCapabilities = petConfig.capabilities.map((name) => {
-      if (name === 'explore') return createExploreCapability();
-      const capability = capabilitiesByName.get(name);
-      if (!capability) {
+    const petCapabilities = [...(input.petCapabilities.get(petConfig.petId) ?? [])];
+    const petCapabilityNames = new Set<string>();
+    for (const capability of petCapabilities) {
+      if (capability.name === GENERAL_CAPABILITY_NAME) {
         throw new Error(
-          `pet "${petConfig.petId}" references capability "${name}" which is not registered by the Host or an installed module`,
+          `pet "${petConfig.petId}" cannot replace the Host baseline Capability "${GENERAL_CAPABILITY_NAME}"`,
         );
       }
-      return capability;
-    });
+      if (petCapabilityNames.has(capability.name)) {
+        throw new Error(`pet "${petConfig.petId}" has duplicate Capability "${capability.name}"`);
+      }
+      petCapabilityNames.add(capability.name);
+    }
 
     return createPetAgentRuntime({
       models: petModels,
@@ -160,9 +181,9 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
       serviceSummary: petConfig.serviceSummary ?? null,
       capabilities: [
         generalCapability,
-        ...petCapabilities.filter(({ name }) => name !== GENERAL_CAPABILITY_NAME),
+        ...petCapabilities,
       ],
-      toolkits: availableToolkits,
+      toolkits: [...input.toolkits],
       toolkitRuntimeManager: input.toolkitRuntimeManager,
       checkpoint: input.checkpoint,
       contextWindowTokens: petLlmConfig.contextWindowTokens,

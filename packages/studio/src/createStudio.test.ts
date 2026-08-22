@@ -209,6 +209,23 @@ test('createStudio rejects an entryPetId that is not among the pets', async () =
   );
 });
 
+test('createStudio rejects duplicate Plugin names', async () => {
+  const plugin = (name: string): StudioPlugin => ({
+    name,
+    toolkits: [],
+    start: () => undefined,
+  });
+  await assert.rejects(
+    () => createStudio({
+      studioId: 's1',
+      entryPetId: 'p1',
+      pets: [pet({ petId: 'p1' })],
+      plugins: [plugin('layout'), plugin('layout')],
+    }),
+    /duplicate plugin "layout"/,
+  );
+});
+
 test('events are broadcast to every subscriber without being interpreted', async () => {
   // studio 不认识任何 event type,也不校验 payload —— 它只转发。
   const received: unknown[] = [];
@@ -216,15 +233,13 @@ test('events are broadcast to every subscriber without being interpreted', async
 
   const publisher: StudioPlugin = {
     name: 'kanban',
-    description: 'kanban',
-    tools: [],
-    studio: { start: (context) => { publish = context.notify; } },
+    toolkits: [],
+    start: (context) => { publish = context.notify; },
   };
   const listener: StudioPlugin = {
     name: 'scheduler',
-    description: 'scheduler',
-    tools: [],
-    studio: { start: (context) => { context.subscribe((event) => { received.push(event); }); } },
+    toolkits: [],
+    start: (context) => { context.subscribe((event) => { received.push(event); }); },
   };
 
   await createStudio({
@@ -259,25 +274,20 @@ test('one failing subscriber does not stop the others', async () => {
     plugins: [
       {
         name: 'source',
-        description: 'source',
-        tools: [],
-        studio: { start: (context) => { publish = context.notify; } },
+        toolkits: [],
+        start: (context) => { publish = context.notify; },
       },
       {
         name: 'broken',
-        description: 'broken',
-        tools: [],
-        studio: {
-          start: (context) => {
-            context.subscribe(() => { throw new Error('handler exploded'); });
-          },
+        toolkits: [],
+        start: (context) => {
+          context.subscribe(() => { throw new Error('handler exploded'); });
         },
       },
       {
         name: 'healthy',
-        description: 'healthy',
-        tools: [],
-        studio: { start: (context) => { context.subscribe(() => { delivered.push('healthy'); }); } },
+        toolkits: [],
+        start: (context) => { context.subscribe(() => { delivered.push('healthy'); }); },
       },
     ],
   });
@@ -292,12 +302,9 @@ test('plugins are started in order and stopped in reverse', async () => {
   const order: string[] = [];
   const make = (name: string): StudioPlugin => ({
     name,
-    description: name,
-    tools: [],
-    studio: {
-      start: () => { order.push(`start:${name}`); },
-      stop: () => { order.push(`stop:${name}`); },
-    },
+    toolkits: [],
+    start: () => { order.push(`start:${name}`); },
+    stop: () => { order.push(`stop:${name}`); },
   });
 
   const studio = await createStudio({
@@ -322,9 +329,8 @@ test('a plugin that fails to start fails createStudio', async () => {
       pets: [pet({ petId: 'p1' })],
       plugins: [{
         name: 'broken',
-        description: 'broken',
-        tools: [],
-        studio: { start: () => { throw new Error('cannot start'); } },
+        toolkits: [],
+        start: () => { throw new Error('cannot start'); },
       }],
     }),
     /cannot start/,
@@ -341,24 +347,18 @@ test('plugin startup failure rolls back every plugin that may have allocated res
       plugins: [
         {
           name: 'started',
-          description: 'started',
-          tools: [],
-          studio: {
-            start: () => { order.push('start:started'); },
-            stop: () => { order.push('stop:started'); },
-          },
+          toolkits: [],
+          start: () => { order.push('start:started'); },
+          stop: () => { order.push('stop:started'); },
         },
         {
           name: 'partial',
-          description: 'partial',
-          tools: [],
-          studio: {
-            start: () => {
-              order.push('start:partial');
-              throw new Error('partial startup failed');
-            },
-            stop: () => { order.push('stop:partial'); },
+          toolkits: [],
+          start: () => {
+            order.push('start:partial');
+            throw new Error('partial startup failed');
           },
+          stop: () => { order.push('stop:partial'); },
         },
       ],
     }),
@@ -373,12 +373,12 @@ test('plugin startup failure rolls back every plugin that may have allocated res
   ]);
 });
 
-test('a plugin without a studio aspect is just a toolkit', async () => {
+test('a plugin may define no Toolkits', async () => {
   const studio = await createStudio({
     studioId: 's1',
     entryPetId: 'p1',
     pets: [pet({ petId: 'p1' })],
-    plugins: [{ name: 'plain', description: 'plain toolkit', tools: [] }],
+    plugins: [{ name: 'plain', toolkits: [], start: () => undefined }],
   });
 
   assert.deepEqual(studio.listPets().map((descriptor) => descriptor.petId), ['p1']);
@@ -396,9 +396,8 @@ test('a dispatch records who sent it, using the plugin name studio supplies', as
     let ctx!: StudioPluginContext;
     const kanban: StudioPlugin = {
       name: 'kanban',
-      description: 'test plugin',
-      tools: [],
-      studio: { start: (context) => { ctx = context; } },
+      toolkits: [],
+      start: (context) => { ctx = context; },
     };
 
     const studio = await createStudio({
@@ -457,26 +456,22 @@ test('a plugin hears the gate of its own dispatches, and only its own', async ()
 
   const a: StudioPlugin = {
     name: 'kanban',
-    description: 'p',
-    tools: [],
-    studio: {
-      start: (ctx) => {
-        mine = ctx;
-        ctx.onDispatchGate((change) => {
-          seen.push({
-            threadId: change.threadId,
-            state: change.state,
-            ...(change.correlationId ? { correlationId: change.correlationId } : {}),
-          });
+    toolkits: [],
+    start: (ctx) => {
+      mine = ctx;
+      ctx.onDispatchGate((change) => {
+        seen.push({
+          threadId: change.threadId,
+          state: change.state,
+          ...(change.correlationId ? { correlationId: change.correlationId } : {}),
         });
-      },
+      });
     },
   };
   const b: StudioPlugin = {
     name: 'scheduler',
-    description: 'p',
-    tools: [],
-    studio: { start: (ctx) => { theirs = ctx; } },
+    toolkits: [],
+    start: (ctx) => { theirs = ctx; },
   };
 
   const studio = await createStudio({
@@ -535,13 +530,10 @@ test('a stopped plugin stops hearing gate changes', async () => {
   let ctx!: StudioPluginContext;
   const kanban: StudioPlugin = {
     name: 'kanban',
-    description: 'p',
-    tools: [],
-    studio: {
-      start: (context) => {
-        ctx = context;
-        context.onDispatchGate(() => { calls += 1; });
-      },
+    toolkits: [],
+    start: (context) => {
+      ctx = context;
+      context.onDispatchGate(() => { calls += 1; });
     },
   };
 
@@ -582,13 +574,10 @@ test('gate changes while stuck keep reaching the originator', async () => {
   let ctx!: StudioPluginContext;
   const plugin: StudioPlugin = {
     name: 'kanban',
-    description: 'p',
-    tools: [],
-    studio: {
-      start: (context) => {
-        ctx = context;
-        context.onDispatchGate((change) => { seen.push(change.state); });
-      },
+    toolkits: [],
+    start: (context) => {
+      ctx = context;
+      context.onDispatchGate((change) => { seen.push(change.state); });
     },
   };
 
@@ -665,15 +654,12 @@ test('a plugin whose stop() throws still gets its gate handlers dropped', async 
   let ctx!: StudioPluginContext;
   const plugin: StudioPlugin = {
     name: 'kanban',
-    description: 'p',
-    tools: [],
-    studio: {
-      start: (context) => {
-        ctx = context;
-        context.onDispatchGate(() => { calls += 1; });
-      },
-      stop: () => { throw new Error('stop exploded'); },
+    toolkits: [],
+    start: (context) => {
+      ctx = context;
+      context.onDispatchGate(() => { calls += 1; });
     },
+    stop: () => { throw new Error('stop exploded'); },
   };
 
   const stuck = pet({

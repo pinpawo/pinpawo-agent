@@ -4,7 +4,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { loadPetLocalConfigs } from './petConfig';
+import { loadPetLocalConfigs, resolvePetCapabilityDirectory } from './petConfig';
 
 // 本文件只覆盖**文件入口**:去哪读、读哪些、目录级一致性。
 // schema 与字段校验的测试在上层 configSchema.test.ts。
@@ -68,5 +68,24 @@ test('loadPetLocalConfigs surfaces schema errors with file path', async () => {
   await assert.rejects(
     () => loadPetLocalConfigs(dir),
     /no-name\.json: missing required string "name"/,
+  );
+});
+
+test('resolvePetCapabilityDirectory derives the conventional per-Pet root', () => {
+  assert.equal(
+    resolvePetCapabilityDirectory('/workspace/.pinpawo/pets', 'planner'),
+    path.resolve('/workspace/.pinpawo/pets/planner/capabilities'),
+  );
+  assert.throws(
+    () => resolvePetCapabilityDirectory('/workspace/.pinpawo/pets', '../escape'),
+    /safe path segment/,
+  );
+  assert.throws(
+    () => resolvePetCapabilityDirectory('/workspace/.pinpawo/pets', 'D:'),
+    /safe path segment/,
+  );
+  assert.throws(
+    () => resolvePetCapabilityDirectory('/workspace/.pinpawo/pets', ''),
+    /safe path segment/,
   );
 });

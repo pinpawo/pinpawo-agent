@@ -1,13 +1,21 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 import type { Studio } from '../studioContract';
 import {
+  defineInstructionDocument,
+  type AgentCapability,
+} from '@pinpawo/pet-agent';
+import {
   buildLocalAgentRuntimeConfig,
   type HostCapabilityAssembly,
+  type HostCapabilityAssemblyInitOptions,
 } from 'pinpawo/host-runtime';
 import { StudioHost } from './StudioHost';
-import type { BuildStudioResult } from './buildStudio';
+import type { BuildStudioResult, ResolvedStudioHostConfig } from './buildStudio';
 
 function fakeStudio(onShutdown: () => void): Studio {
   return {
@@ -23,12 +31,17 @@ function fakeStudio(onShutdown: () => void): Studio {
 
 function fakeCapabilityAssembly(
   events: string[],
-  options: { failInit?: boolean } = {},
+  options: {
+    failInit?: boolean;
+    onInit?: (input: HostCapabilityAssemblyInitOptions) => void;
+  } = {},
 ): HostCapabilityAssembly {
   const runtimeConfig = buildLocalAgentRuntimeConfig('/tmp/pinpawo-studio-host-test');
   return {
-    init: async () => {
+    acquireWriterLease: () => undefined,
+    init: async (input = {}) => {
       events.push('caps:init');
+      options.onInit?.(input);
       if (options.failInit) throw new Error('caps init failed');
     },
     shutdown: async () => { events.push('caps:shutdown'); },
@@ -44,11 +57,35 @@ function fakeCapabilityAssembly(
   } as unknown as HostCapabilityAssembly;
 }
 
+function configuration(
+  plugins: ResolvedStudioHostConfig['plugins'] = [],
+  petIds: string[] = [],
+): ResolvedStudioHostConfig {
+  return {
+    workdir: '/tmp/pinpawo-studio-host-test',
+    studioConfigPath: '/tmp/pinpawo-studio-host-test/.pinpawo/studio.json',
+    petsDir: '/tmp/pinpawo-studio-host-test/.pinpawo/pets',
+    resolved: {
+      pets: petIds.map((petId) => ({ petId, name: petId })),
+    } as ResolvedStudioHostConfig['resolved'],
+    plugins,
+  };
+}
+
 function result(studio: Studio): BuildStudioResult {
   return {
     studio,
     resolved: {} as BuildStudioResult['resolved'],
     plugins: [],
+  };
+}
+
+function agentCapability(name: string): AgentCapability {
+  return {
+    name,
+    description: `${name} Agent Capability.`,
+    uses: [],
+    instructions: defineInstructionDocument({ content: `# ${name}` }),
   };
 }
 
@@ -58,6 +95,7 @@ test('StudioHost owns resident Studio lifecycle and shuts it down before capabil
   const host = new StudioHost({
     runtimeConfig: buildLocalAgentRuntimeConfig('/tmp/pinpawo-studio-host-test'),
     capabilityAssembly: fakeCapabilityAssembly(events),
+    resolveStudioHostConfig: async () => configuration(),
     buildStudio: async () => {
       events.push('studio:build');
       return result(studio);
@@ -82,6 +120,7 @@ test('StudioHost rolls back capability assembly when resident Studio build fails
   const host = new StudioHost({
     runtimeConfig: buildLocalAgentRuntimeConfig('/tmp/pinpawo-studio-host-test'),
     capabilityAssembly: fakeCapabilityAssembly(events),
+    resolveStudioHostConfig: async () => configuration(),
     buildStudio: async () => {
       events.push('studio:build');
       throw new Error('studio build failed');
@@ -95,11 +134,28 @@ test('StudioHost rolls back capability assembly when resident Studio build fails
   assert.throws(() => host.getStudio(), /before init/);
 });
 
+test('StudioHost releases early writer ownership when configuration resolution fails', async () => {
+  const events: string[] = [];
+  const assembly = fakeCapabilityAssembly(events);
+  assembly.acquireWriterLease = () => { events.push('caps:lease'); };
+  const host = new StudioHost({
+    capabilityAssembly: assembly,
+    resolveStudioHostConfig: async () => {
+      throw new Error('configuration failed');
+    },
+    buildStudio: async () => assert.fail('Studio must not build'),
+  });
+
+  await assert.rejects(() => host.init(), /configuration failed/);
+  assert.deepEqual(events, ['caps:lease', 'caps:shutdown']);
+});
+
 test('StudioHost rolls back a partially initialized capability assembly', async () => {
   const events: string[] = [];
   const host = new StudioHost({
     runtimeConfig: buildLocalAgentRuntimeConfig('/tmp/pinpawo-studio-host-test'),
     capabilityAssembly: fakeCapabilityAssembly(events, { failInit: true }),
+    resolveStudioHostConfig: async () => configuration(),
     buildStudio: async () => {
       assert.fail('Studio must not build after capability init fails');
     },
@@ -120,6 +176,7 @@ test('StudioHost serializes concurrent init and shutdown', async () => {
   };
   const host = new StudioHost({
     capabilityAssembly: assembly,
+    resolveStudioHostConfig: async () => configuration(),
     buildStudio: async () => {
       events.push('studio:build');
       return result(fakeStudio(() => { events.push('studio:shutdown'); }));
@@ -140,4 +197,112 @@ test('StudioHost serializes concurrent init and shutdown', async () => {
     'caps:shutdown',
   ]);
   await assert.rejects(() => host.init(), /after shutdown started/);
+});
+
+test('StudioHost supplies Plugin Toolkits to the Host inventory before building Studio', async () => {
+  const events: string[] = [];
+  const toolkit = {
+    name: 'plugin-tools',
+    description: 'Plugin-defined Agent Toolkit.',
+    tools: [],
+  };
+  let sources: HostCapabilityAssemblyInitOptions['toolkitSources'];
+  const assembly = fakeCapabilityAssembly(events, {
+    onInit: (input) => { sources = input.toolkitSources; },
+  });
+  assembly.getToolkitInventoryStore = () => ({
+    getSnapshot: () => ({ effectiveToolkits: [toolkit] }),
+  }) as never;
+  const host = new StudioHost({
+    capabilityAssembly: assembly,
+    resolveStudioHostConfig: async () => configuration([{
+      name: 'layout',
+      toolkits: [toolkit],
+      start: () => undefined,
+    }]),
+    buildStudio: async (input) => {
+      events.push('studio:build');
+      assert.deepEqual(input.toolkits, [toolkit]);
+      return result(fakeStudio(() => undefined));
+    },
+  });
+
+  await host.init();
+  assert.deepEqual(sources, [{
+    id: 'studio-plugin:layout',
+    kind: 'plugin',
+    definitions: [toolkit],
+  }]);
+  assert.deepEqual(events, ['caps:init', 'studio:build']);
+  await host.shutdown();
+});
+
+test('StudioHost loads each Pet Capability collection from its conventional directory', async () => {
+  const events: string[] = [];
+  const general = agentCapability('general');
+  const assembly = fakeCapabilityAssembly(events);
+  assembly.getLocalCapabilities = () => [general, agentCapability('explore')];
+  const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-host-capabilities-'));
+  const petsDir = path.join(root, '.pinpawo', 'pets');
+  const capabilityDir = path.join(
+    petsDir,
+    'planner',
+    'capabilities',
+    'studio-planning',
+  );
+  await mkdir(capabilityDir, { recursive: true });
+  await writeFile(path.join(capabilityDir, 'CAPABILITY.md'), `---
+name: studio_planning
+description: "Plan work through the Studio board."
+uses: []
+version: 1
+---
+
+# Studio planning
+
+Plan the work assigned to this Pet.
+`);
+  const configured = {
+    ...configuration([], ['planner']),
+    workdir: root,
+    studioConfigPath: path.join(root, '.pinpawo', 'studio.json'),
+    petsDir,
+  };
+  const host = new StudioHost({
+    capabilityAssembly: assembly,
+    resolveStudioHostConfig: async () => configured,
+    buildStudio: async (input) => {
+      assert.deepEqual(input.hostCapabilities, [general]);
+      assert.deepEqual(
+        input.petCapabilities.get('planner')?.map(({ name }) => name),
+        ['studio_planning'],
+      );
+      return result(fakeStudio(() => undefined));
+    },
+  });
+
+  await host.init();
+  await host.shutdown();
+});
+
+test('StudioHost claims writer ownership before resolving executable extensions', async () => {
+  const events: string[] = [];
+  const assembly = fakeCapabilityAssembly(events);
+  assembly.acquireWriterLease = () => { events.push('caps:lease'); };
+  const host = new StudioHost({
+    capabilityAssembly: assembly,
+    resolveStudioHostConfig: async () => {
+      events.push('config:resolve');
+      return configuration();
+    },
+    buildStudio: async () => result(fakeStudio(() => undefined)),
+  });
+
+  await host.init();
+  assert.deepEqual(events.slice(0, 3), [
+    'caps:lease',
+    'config:resolve',
+    'caps:init',
+  ]);
+  await host.shutdown();
 });

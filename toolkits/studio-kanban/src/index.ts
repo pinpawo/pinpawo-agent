@@ -9,12 +9,12 @@
 
 /* ─────────────── Studio 插件 ─────────────── */
 
-export { createKanbanPlugin, KANBAN_TOOLKIT_NAME } from './kanbanPlugin';
-export type { CreateKanbanPluginOptions, KanbanPlugin } from './kanbanPlugin';
 export {
-  loadStudioPlanningCapability,
-  STUDIO_PLANNING_CAPABILITY_NAME,
-} from './studioPlanningCapability';
+  createKanbanPlugin,
+  createKanbanToolkit,
+  KANBAN_TOOLKIT_NAME,
+} from './kanbanPlugin';
+export type { CreateKanbanPluginOptions, KanbanPlugin } from './kanbanPlugin';
 export { KanbanBoard } from './kanbanBoard';
 export type { KanbanTask, KanbanTaskStatus, KanbanBoardSnapshot } from './kanbanBoard';
 

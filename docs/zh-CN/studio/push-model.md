@@ -301,40 +301,43 @@ event 推进自己的状态。总线先于需求存在,不必为它编造用例�
 ## 5. 写一个插件
 
 ```ts
-type StudioPlugin = AgentToolkit & {
-  studio?: {
-    start: (context: StudioPluginContext) => Promise<void> | void;
-    stop?: () => Promise<void> | void;
-  };
+type StudioPlugin = {
+  name: string;
+  toolkits: readonly AgentToolkit[];
+  start: (context: StudioPluginContext) => Promise<void> | void;
+  stop?: () => Promise<void> | void;
 };
 ```
 
-现有 toolkit 变成插件只需补一个字段,不必重写:
+Plugin 可以明确地定义零个或多个 Toolkit:
 
 ```ts
 const plugin: StudioPlugin = {
-  ...existingToolkit,                  // 原样复用
-  studio: { start: (ctx) => { ... } },  // 只补这一段
+  name: 'kanban',
+  toolkits: [kanbanToolkit],
+  start: (ctx) => { ... },
 };
 ```
 
-复用 `AgentToolkit` 而不是另立一套接口,是因为 `AgentToolkit` 已经有
-`runtime.start` / `runtime.stop`;并排放第二套生命周期只会让两者不同步。
+Plugin 高于 Toolkit，但本身不是 Toolkit。它定义的 Toolkit 先进入 Host 的统一
+inventory，在 Agent 侧完成 availability、provenance、Runtime 初始化与
+`Capability.uses` 选择。Capability 也属于 Agent；Plugin 与 Studio 都不注册或附带
+Capability。
 
 插件按配置顺序 `start`,逆序 `stop` —— 后启动的可能依赖先启动的。`start`
 抛错会让 `createStudio` 失败:一个没起来的驱动器意味着这块 studio 不会派活,
 静默吞掉会变成"提交了但什么都没发生"。
 
-### 5.1 两副面孔
+### 5.1 Plugin 与 Toolkit 的边界
 
 | 身份 | 插在哪 | 做什么 |
 | --- | --- | --- |
-| toolkit | pet | 让 pet 读写它的领域数据 |
-| 插件 | studio | 委托 dispatch、发 event |
+| Toolkit | Agent/Pet | 让 Pet 读写 Plugin 的领域数据 |
+| Plugin | Studio | 委托 dispatch、发 event，并定义 Toolkit |
 
-两者都可选:`studio` 省略时它是普通 toolkit;`tools` 为空时它是纯驱动方。
+`toolkits` 可以为空，此时它是纯驱动 Plugin；但 Plugin lifecycle 不是可选面。
 
-**闭环由这两副面孔自然形成:**
+**闭环由两个分型的对象协作形成:**
 
 ```text
 pet ──调用──> toolkit ──> 插件内部状态 ──event──> studio ──> 其他插件
@@ -358,11 +361,11 @@ event、发什么形状,由插件决定。所以:
 
 它是一个**和 kanban 平级的普通插件**,形态由契约直接决定:
 
-1. **`AgentToolkit` 面** —— 给 pet 一组工具排期,例如
+1. **Plugin 定义的 Toolkit** —— 给 pet 一组工具排期,例如
    `schedule_add({ cron, request, petId })` / `schedule_list` / `schedule_cancel`。
    与 kanban 同理,工具从 `ToolRuntime.context.executionScope.threadId` 读取当前
    invocation identity，pet 不需要转抄任何 ID。
-2. **`studio.start(context)` 面** —— 起自己的定时器。到点直接
+2. **`start(context)` 生命周期** —— 起自己的定时器。到点直接
    `context.dispatch({ petId, request })`,派完即忘;不等结果,不判定成败。
 3. **自己的存储** —— 排期表是插件私有状态,由插件持有并落盘。studio 不知道
    "排期"这个词。
@@ -376,7 +379,7 @@ event、发什么形状,由插件决定。所以:
 
 未来若需要对外 HTTP 入口，它可以是一个插件：
 
-- `studio.start(context)` 里起服务器,收到请求就 `context.dispatch(...)`;
+- `start(context)` 里起服务器,收到请求就 `context.dispatch(...)`;
 - 派活的 `source` 因此是它的插件名,与 kanban、scheduler 一视同仁;
 - 要跟踪自己派出去那些活的进展,订阅 `context.onDispatchGate`。
 

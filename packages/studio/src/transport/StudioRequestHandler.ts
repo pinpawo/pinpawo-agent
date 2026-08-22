@@ -3,9 +3,11 @@ import type {
   LocalAgentServerMessage,
   StudioRequestMessage,
   LocalServerTransportHandlers,
+  sendLocalServerPeerEvent,
 } from 'pinpawo/local-server-transport';
-import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 import type { Studio } from '../studioContract';
+
+type AgentRuntimeEvent = Parameters<typeof sendLocalServerPeerEvent>[1];
 
 type StudioRequestRoute<Peer extends object> = {
   peer: Peer;

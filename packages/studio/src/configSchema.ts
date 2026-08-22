@@ -3,6 +3,7 @@ import {
   type ConfigReader,
   type ConfigSchema,
 } from '@pinpawo/pet-agent';
+import { isSafePetPathSegment } from './petId';
 
 /**
  * Studio 的配置 **schema**。
@@ -34,8 +35,6 @@ export type PetLocalConfig = {
   serviceSummary?: string;
   /** 该 pet 使用的 model profile id;留空则继承 host default profile。 */
   modelProfileId?: string;
-  /** 该 pet 允许使用的 capability 名列表 */
-  capabilities: string[];
   /** 可选:绑定到服务端 pet,仅用于 app 同步通道,不存业务数据 */
   serverBinding?: {
     petId: string;
@@ -60,8 +59,19 @@ export const petLocalConfigSchema: ConfigSchema<PetLocalConfig> = defineConfigSc
 
     const serverBinding = reader.optionalSection('serverBinding');
 
+    const petId = reader.requiredString('petId');
+    if (!isSafePetPathSegment(petId)) {
+      reader.fail('"petId" must be a safe path segment', 'petId');
+    }
+    if (reader.raw.capabilities !== undefined) {
+      reader.fail(
+        '"capabilities" was replaced by the conventional pets/<petId>/capabilities directory',
+        'capabilities',
+      );
+    }
+
     return {
-      petId: reader.requiredString('petId'),
+      petId,
       name: reader.requiredString('name'),
       ...(personality !== undefined ? { personality } : {}),
       ...(species !== undefined ? { species } : {}),
@@ -69,9 +79,6 @@ export const petLocalConfigSchema: ConfigSchema<PetLocalConfig> = defineConfigSc
       ...(role !== undefined ? { role } : {}),
       ...(serviceSummary !== undefined ? { serviceSummary } : {}),
       ...(modelProfileId !== undefined ? { modelProfileId } : {}),
-      capabilities: reader.raw.capabilities === undefined
-        ? []
-        : reader.requiredStringArray('capabilities'),
       ...(serverBinding
         ? { serverBinding: { petId: serverBinding.requiredString('petId') } }
         : {}),

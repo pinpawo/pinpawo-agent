@@ -79,8 +79,25 @@ plugin-originated work on the dispatch boundary.
 
 ## Plugin context
 
-A Studio plugin is an `AgentToolkit` with an optional Studio lifecycle hook.
-When started, it receives this context:
+A Studio Plugin is a higher-level extension, not an `AgentToolkit`. It defines
+zero or more Agent Toolkits through `toolkits` and has a required Studio
+lifecycle entry:
+
+```ts
+type StudioPlugin = {
+  name: string;
+  toolkits: readonly AgentToolkit[];
+  start(context: StudioPluginContext): Promise<void> | void;
+  stop?(): Promise<void> | void;
+};
+```
+
+Plugin-defined Toolkits enter the Host inventory before Pet construction.
+Capabilities remain Agent-owned and are never registered by Studio Plugins.
+The local Studio Host derives each Pet's definitions and selection from
+`pets/<petId>/capabilities/<capability>/CAPABILITY.md`; the Pet JSON contains no
+Capability name list.
+When a Plugin starts, it receives this context:
 
 ```ts
 type StudioPluginContext = {

@@ -9,33 +9,40 @@
  *
  * Chat session/review transport state is intentionally absent.
  */
-import type {
-  CapabilityArtifactStore,
-  ToolkitRuntimeDiagnostic,
-  ToolkitRuntimeManager,
+import {
+  GENERAL_CAPABILITY_NAME,
+  type AgentCapability,
+  type CapabilityArtifactStore,
+  type ToolkitRuntimeDiagnostic,
+  type ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
 import {
   buildLocalAgentRuntimeConfig,
   FileSaver,
   HostCapabilityAssembly,
+  loadCapabilityDirectory,
   resolveHostCheckpointPath,
   type HostToolkitInventoryStore,
-  type LoadedUserCapability,
   type LocalAgentRuntimeConfig,
   type LocalModelProfileRegistry,
+  type ToolkitDefinitionSource,
 } from 'pinpawo/host-runtime';
 import {
   buildStudio,
+  resolveStudioHostConfig,
   type BuildStudioResult,
-  type StudioModuleResolver,
+  type StudioPluginResolver,
 } from './buildStudio';
 import type { Studio } from '../studioContract';
+import { resolvePetCapabilityDirectory } from './petConfig';
 
 export type StudioHostOptions = {
   runtimeConfig?: LocalAgentRuntimeConfig;
-  resolveModule?: StudioModuleResolver;
+  resolvePlugin?: StudioPluginResolver;
   /** Composition hook for lifecycle tests and embedded hosts. */
   capabilityAssembly?: HostCapabilityAssembly;
+  /** Composition hook for deterministic configuration tests. */
+  resolveStudioHostConfig?: typeof resolveStudioHostConfig;
   /** Composition hook for deterministic resident-Studio construction. */
   buildStudio?: typeof buildStudio;
 };
@@ -56,7 +63,8 @@ export type StudioHostOptions = {
 export class StudioHost {
   private readonly caps: HostCapabilityAssembly;
   private readonly buildStudioImpl: typeof buildStudio;
-  private readonly resolveModule: StudioModuleResolver | undefined;
+  private readonly resolveStudioHostConfigImpl: typeof resolveStudioHostConfig;
+  private readonly resolvePlugin: StudioPluginResolver | undefined;
   private studio: BuildStudioResult | null = null;
   private capsInitialized = false;
   private initPromise: Promise<void> | null = null;
@@ -69,9 +77,11 @@ export class StudioHost {
       runtimeConfig,
       sourceId: 'studio-host',
       checkpointPath: resolveHostCheckpointPath(runtimeConfig, 'studio'),
+      loadUserCapabilities: false,
     });
     this.buildStudioImpl = options.buildStudio ?? buildStudio;
-    this.resolveModule = options.resolveModule;
+    this.resolveStudioHostConfigImpl = options.resolveStudioHostConfig ?? resolveStudioHostConfig;
+    this.resolvePlugin = options.resolvePlugin;
   }
 
   async init() {
@@ -91,27 +101,50 @@ export class StudioHost {
 
   private async initialize() {
     try {
-      // Mark ownership before awaiting init so a partially initialized
-      // Capability/Toolkit assembly is still rolled back if init rejects.
+      // Establish exclusive Host ownership before resolving Plugins or loading
+      // Capability entry modules. A competing Host must fail before any
+      // extension code can execute.
+      this.caps.acquireWriterLease();
       this.capsInitialized = true;
-      await this.caps.init();
+      const runtimeConfig = this.caps.getRuntimeConfig();
+      const configuration = await this.resolveStudioHostConfigImpl({
+        workdir: runtimeConfig.workdir,
+        ...(runtimeConfig.studioConfigPath
+          ? { studioConfigPath: runtimeConfig.studioConfigPath }
+          : {}),
+        ...(runtimeConfig.petsDir ? { petsDir: runtimeConfig.petsDir } : {}),
+        ...(this.resolvePlugin ? { resolvePlugin: this.resolvePlugin } : {}),
+      });
+      const pluginToolkitSources: ToolkitDefinitionSource[] = configuration.plugins.map(
+        (plugin) => ({
+          id: `studio-plugin:${plugin.name}`,
+          kind: 'plugin',
+          definitions: plugin.toolkits,
+        }),
+      );
+      const petCapabilities = new Map<string, AgentCapability[]>();
+      for (const pet of configuration.resolved.pets) {
+        const capabilityDir = resolvePetCapabilityDirectory(configuration.petsDir, pet.petId);
+        const loaded = await loadCapabilityDirectory(capabilityDir);
+        petCapabilities.set(pet.petId, loaded.map(({ capability }) => capability));
+      }
+
+      await this.caps.init({
+        toolkitSources: pluginToolkitSources,
+      });
       // Build the resident Studio now — before any transport starts listening.
       // Requests only dispatch to this pre-built instance.
-      const runtimeConfig = this.caps.getRuntimeConfig();
       this.studio = await this.buildStudioImpl({
+        configuration,
         modelProfiles: this.caps.getModelProfiles(),
-        capabilities: [
-          ...this.caps.getLocalCapabilities(),
-          ...this.caps.getUserCapabilities().map((item) => item.capability),
-        ],
+        hostCapabilities: this.caps.getLocalCapabilities().filter(
+          ({ name }) => name === GENERAL_CAPABILITY_NAME,
+        ),
+        petCapabilities,
         toolkits: [...this.caps.getToolkitInventoryStore().getSnapshot().effectiveToolkits],
         toolkitRuntimeManager: this.caps.getToolkitRuntimeManager(),
         checkpoint: this.getCheckpointer(),
         ownerUserId: null,
-        workdir: runtimeConfig.workdir,
-        ...(runtimeConfig.studioConfigPath ? { studioConfigPath: runtimeConfig.studioConfigPath } : {}),
-        ...(runtimeConfig.petsDir ? { petsDir: runtimeConfig.petsDir } : {}),
-        ...(this.resolveModule ? { resolveModule: this.resolveModule } : {}),
       });
     } catch (error) {
       if (this.capsInitialized) {
@@ -196,14 +229,6 @@ export class StudioHost {
 
   getCapabilityArtifactStore(): CapabilityArtifactStore {
     return this.caps.getCapabilityArtifactStore();
-  }
-
-  getUserCapabilities(): LoadedUserCapability[] {
-    return this.caps.getUserCapabilities();
-  }
-
-  async rescanUserCapabilities(): Promise<LoadedUserCapability[]> {
-    return this.caps.rescanUserCapabilities();
   }
 
   getActorId(): string {

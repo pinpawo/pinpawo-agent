@@ -6,12 +6,13 @@ import {
   type HostCapabilityAssembly,
 } from 'pinpawo/host-runtime';
 import type { Studio } from './studioContract';
-import type { BuildStudioResult } from './host/buildStudio';
+import type { BuildStudioResult, ResolvedStudioHostConfig } from './host/buildStudio';
 import { startStudioHostStdio } from './startStudioHost';
 
 function fakeAssembly(events: string[]): HostCapabilityAssembly {
   const runtimeConfig = buildLocalAgentRuntimeConfig('/tmp/pinpawo-start-studio-host-test');
   return {
+    acquireWriterLease: () => undefined,
     init: async () => { events.push('caps:init'); },
     shutdown: async () => { events.push('caps:shutdown'); },
     getRuntimeConfig: () => runtimeConfig,
@@ -38,6 +39,18 @@ function fakeStudio(events: string[]): Studio {
   };
 }
 
+function configuration(): ResolvedStudioHostConfig {
+  return {
+    workdir: '/tmp/pinpawo-start-studio-host-test',
+    studioConfigPath: '/tmp/pinpawo-start-studio-host-test/.pinpawo/studio.json',
+    petsDir: '/tmp/pinpawo-start-studio-host-test/.pinpawo/pets',
+    resolved: {
+      pets: [{ petId: 'planner', name: 'Planner' }],
+    } as ResolvedStudioHostConfig['resolved'],
+    plugins: [],
+  };
+}
+
 test('top-level stdio entry owns transport, diagnostics, and Host shutdown', async () => {
   const events: string[] = [];
   const input = new PassThrough();
@@ -55,6 +68,7 @@ test('top-level stdio entry owns transport, diagnostics, and Host shutdown', asy
   };
   const running = await startStudioHostStdio({
     capabilityAssembly: assembly,
+    resolveStudioHostConfig: async () => configuration(),
     buildStudio: async (): Promise<BuildStudioResult> => {
       events.push('studio:build');
       return {
@@ -98,6 +112,7 @@ test('top-level stdio entry restores console when Host initialization fails', as
 
   await assert.rejects(() => startStudioHostStdio({
     capabilityAssembly: assembly,
+    resolveStudioHostConfig: async () => configuration(),
     buildStudio: async () => assert.fail('Studio must not build'),
   }, {
     input: new PassThrough(),

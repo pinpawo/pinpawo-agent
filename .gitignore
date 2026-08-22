@@ -7,6 +7,8 @@ dist/
 
 # local agent runtime data
 .pinpawo/
+!packages/studio/examples/kanban-workdir/.pinpawo/
+!packages/studio/examples/kanban-workdir/.pinpawo/**
 
 # macOS/Xcode output
 tools/agent-macos/build/

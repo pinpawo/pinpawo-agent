@@ -65,6 +65,21 @@ export const lifecycle = {
 
 不允许从 entry 导出 runtime、tools、模型调用或任意扩展对象。需要编码实现的动作必须进入 Toolkit，再由 `CAPABILITY.md` 的 `uses` 引用。
 
-## 4. 迁移
+## 4. Studio 的 per-Pet 目录约定
+
+Studio Host 不读取全局 `capability_dirs` 来决定 Pet 能力，也不在 Pet JSON 中维护
+Capability 名称列表。它根据已校验的 `petId` 直接推导：
+
+```text
+<workdir>/.pinpawo/pets/<petId>/capabilities/
+└── <capability>/
+    └── CAPABILITY.md
+```
+
+`capabilities/` 的每个直接子目录都按本文契约严格加载；损坏定义或同一 Pet 内的
+重名会阻止 Host 启动。目录 symlink 可以复用共享定义。不同 Pet 的 registry 相互
+独立，因此允许拥有同名但不同内容的 Capability。
+
+## 5. 迁移
 
 旧 `manifest.json/index.js` Capability 格式已删除，不提供兼容层。Loader 会跳过旧目录并输出迁移警告。

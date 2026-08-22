@@ -1,0 +1,6 @@
+{
+  "studioId": "kanban-example",
+  "entryPetId": "planner",
+  "pets": ["planner"],
+  "plugins": [{ "id": "kanban" }]
+}

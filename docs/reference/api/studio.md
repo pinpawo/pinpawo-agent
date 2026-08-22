@@ -4,7 +4,8 @@
 
 > **Status: current programming contract.** The authoritative exports are in
 > [`packages/studio/src/index.ts`](../../../packages/studio/src/index.ts),
-> [`studioContract.ts`](../../../packages/studio/src/studioContract.ts), and
+> [`studioContract.ts`](../../../packages/studio/src/studioContract.ts),
+> [`studioInvocation.ts`](../../../packages/studio/src/studioInvocation.ts), and
 > [`types.ts`](../../../packages/studio/src/types.ts).
 
 Studio is a lightweight multi-pet dispatch substrate. It does not expose runs,
@@ -121,6 +122,15 @@ observer replays its latest event.
 
 `listPets()` returns descriptors only, not runtime references. This keeps all
 plugin-originated work on the dispatch boundary.
+
+### Transport-neutral dispatch parsing
+
+`parseStudioDispatchRequest(value)` validates the JSON representation of a
+`StudioDispatchRequest`. It accepts `petId`, typed request/resume input,
+JSON-compatible `metadata`, and `idempotencyKey`, while deliberately excluding
+the process-local `AbortSignal`. Studio wire transport and the optional
+[HTTP Plugin](../../studio/http-plugin.md) use the same parser, so transport
+adapters do not define competing dispatch shapes.
 
 ## Plugin context
 

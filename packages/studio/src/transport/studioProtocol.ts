@@ -1,13 +1,12 @@
 import {
   isJsonObject,
-  isJsonValue,
-  parseHumanReviewResponse,
   type JsonObject,
 } from '@pinpawo/agent-contracts';
 import type {
   StudioDispatchInput,
   StudioInvocationEvent,
 } from '../studioContract';
+import { parseStudioDispatchRequest } from '../studioInvocation';
 
 export type StudioDispatchMessage = {
   type: 'studio.dispatch';
@@ -49,39 +48,6 @@ function readNonEmptyString(record: Record<string, unknown>, key: string) {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
-function parseInput(value: unknown): StudioDispatchInput | null {
-  if (!isJsonObject(value)) return null;
-  if (value.kind === 'request') {
-    return hasOnlyKeys(value, ['kind', 'request']) && typeof value.request === 'string'
-      ? { kind: 'request', request: value.request }
-      : null;
-  }
-  if (
-    value.kind !== 'resume_interrupt'
-    || !hasOnlyKeys(value, ['kind', 'interruptId', 'payload'])
-  ) return null;
-  const interruptId = readNonEmptyString(value, 'interruptId');
-  const payload = value.payload;
-  if (
-    !interruptId
-    || !isJsonObject(payload)
-    || !hasOnlyKeys(payload, ['kind', 'responses'])
-    || payload.kind !== 'human_review_response'
-    || !Array.isArray(payload.responses)
-    || payload.responses.length === 0
-  ) return null;
-  const responses = payload.responses.map(parseHumanReviewResponse);
-  if (responses.some((response) => response === null)) return null;
-  return {
-    kind: 'resume_interrupt',
-    interruptId,
-    payload: {
-      kind: 'human_review_response',
-      responses: responses as NonNullable<(typeof responses)[number]>[],
-    },
-  };
-}
-
 function normalize(raw: unknown): unknown {
   const value = raw instanceof Buffer ? raw.toString('utf8') : raw;
   if (typeof value !== 'string') return value;
@@ -109,15 +75,15 @@ export function parseStudioClientMessage(raw: unknown): StudioClientMessage | nu
   }
   if (value.type !== 'studio.dispatch') return null;
   const deliveryId = readNonEmptyString(value, 'deliveryId');
-  const petId = readNonEmptyString(value, 'petId');
-  const input = parseInput(value.input);
-  const idempotencyKey = value.idempotencyKey === undefined
-    ? undefined
-    : readNonEmptyString(value, 'idempotencyKey');
+  const request = parseStudioDispatchRequest({
+    petId: value.petId,
+    input: value.input,
+    ...(value.metadata !== undefined ? { metadata: value.metadata } : {}),
+    ...(value.idempotencyKey !== undefined ? { idempotencyKey: value.idempotencyKey } : {}),
+  });
   if (
     !deliveryId
-    || !petId
-    || !input
+    || !request
     || !hasOnlyKeys(value, [
       'type',
       'deliveryId',
@@ -126,15 +92,10 @@ export function parseStudioClientMessage(raw: unknown): StudioClientMessage | nu
       'metadata',
       'idempotencyKey',
     ])
-    || (value.metadata !== undefined && (!isJsonObject(value.metadata) || !isJsonValue(value.metadata)))
-    || (value.idempotencyKey !== undefined && !idempotencyKey)
   ) return null;
   return {
     type: 'studio.dispatch',
     deliveryId,
-    petId,
-    input,
-    ...(value.metadata !== undefined ? { metadata: value.metadata as JsonObject } : {}),
-    ...(idempotencyKey ? { idempotencyKey } : {}),
+    ...request,
   };
 }

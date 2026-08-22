@@ -22,7 +22,10 @@ export type {
   StudioInvocationEventHandler,
   StudioInvocationTerminalStatus,
 } from './studioContract';
-export { buildStudioPetThreadId } from './studioInvocation';
+export {
+  buildStudioPetThreadId,
+  parseStudioDispatchRequest,
+} from './studioInvocation';
 
 export {
   petLocalConfigSchema,

@@ -10,7 +10,7 @@
 
 import { randomUUID } from 'node:crypto';
 
-export type KanbanTaskStatus = 'todo' | 'doing' | 'done' | 'blocked';
+export type KanbanTaskStatus = 'todo' | 'doing' | 'waiting' | 'done' | 'blocked';
 
 export type KanbanTask = {
   taskId: string;
@@ -38,13 +38,17 @@ export class KanbanBoard {
   private readonly tasks = new Map<string, KanbanTask>();
   private readonly listeners = new Set<(task: KanbanTask) => void>();
 
+  private copy(task: KanbanTask): KanbanTask {
+    return { ...task, deps: [...task.deps] };
+  }
+
   subscribe(listener: (task: KanbanTask) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
 
   private emit(task: KanbanTask): void {
-    for (const listener of this.listeners) listener(task);
+    for (const listener of this.listeners) listener(this.copy(task));
   }
 
   add(input: { petId: string; brief: string; deps?: string[] }): KanbanTask {
@@ -54,21 +58,22 @@ export class KanbanBoard {
       petId: input.petId,
       brief: input.brief,
       status: 'todo',
-      deps: input.deps ?? [],
+      deps: [...(input.deps ?? [])],
       createdAt: now,
       updatedAt: now,
     };
     this.tasks.set(task.taskId, task);
     this.emit(task);
-    return task;
+    return this.copy(task);
   }
 
   list(): KanbanTask[] {
-    return [...this.tasks.values()];
+    return [...this.tasks.values()].map((task) => this.copy(task));
   }
 
   get(taskId: string): KanbanTask | undefined {
-    return this.tasks.get(taskId);
+    const task = this.tasks.get(taskId);
+    return task ? this.copy(task) : undefined;
   }
 
   /**
@@ -96,6 +101,10 @@ export class KanbanBoard {
     }));
   }
 
+  wait(taskId: string, reason: string): KanbanTask {
+    return this.update(taskId, (task) => ({ ...task, status: 'waiting', note: reason }));
+  }
+
   block(taskId: string, reason: string): KanbanTask {
     return this.update(taskId, (task) => ({ ...task, status: 'blocked', note: reason }));
   }
@@ -107,11 +116,19 @@ export class KanbanBoard {
   restore(snapshot: KanbanBoardSnapshot): void {
     this.tasks.clear();
     for (const task of snapshot.tasks) {
+      if (this.tasks.has(task.taskId)) {
+        throw new Error(`kanban: duplicate taskId "${task.taskId}" in snapshot`);
+      }
       // 进程已经不在了,任何 doing 都不可能还在跑 —— 恢复为 blocked
       // 而不是悄悄回到 todo:重来与否是人的判断。
       this.tasks.set(task.taskId, task.status === 'doing'
-        ? { ...task, status: 'blocked', note: task.note ?? 'interrupted by restart' }
-        : { ...task });
+        ? {
+            ...task,
+            deps: [...task.deps],
+            status: 'blocked',
+            note: task.note ?? 'interrupted by restart',
+          }
+        : { ...task, deps: [...task.deps] });
     }
   }
 
@@ -123,6 +140,6 @@ export class KanbanBoard {
     const next = { ...patch(current), updatedAt: new Date().toISOString() };
     this.tasks.set(taskId, next);
     this.emit(next);
-    return next;
+    return this.copy(next);
   }
 }

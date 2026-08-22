@@ -215,6 +215,12 @@ pet 实际拿到哪些工具,由它目录中 Capability 声明的 `uses` 筛出�
 > Studio 继续只声明 `StudioPluginResolver` port，不持有具体 Plugin catalog。
 > Plugin 的安装/discovery 策略仍由外部装配者负责。
 
+Plugin 的持久化状态仍由 Plugin 自己拥有。例如，应用 resolver 可以构造
+`createKanbanPlugin({ stateStore: createFileKanbanStateStore(...) })`，并选择
+`<workdir>/.pinpawo/studio/<plugin-instance>/kanban.json` 这样的绝对路径。Studio
+既不推导该路径，也不读取 snapshot；没有注入 state store 时，同一个 Plugin 明确
+以纯内存方式运行。
+
 ---
 
 ## 4. 一个完整回合

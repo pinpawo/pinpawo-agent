@@ -80,6 +80,14 @@ LangGraph Command。Pet runtime 读取权威 checkpoint、校验 interrupt 与 r
 Studio 不复用 Chat 的 session、route cache 或 review message。独立 interaction Plugin
 或 Host adapter 可以观察 pending event、与用户交互，再提交上面的 typed resume。
 
+### 与 transport 无关的 dispatch 解析
+
+`parseStudioDispatchRequest(value)` 校验 `StudioDispatchRequest` 的 JSON 表示。它接收
+`petId`、typed request/resume input、兼容 JSON 的 `metadata` 与 `idempotencyKey`，但
+有意排除仅存在于当前进程的 `AbortSignal`。Studio wire transport 与可选的
+[HTTP Plugin](../../studio/http-plugin.md) 共用这个解析器，避免不同 transport 各自定义
+一套 dispatch 形状。
+
 ## 公共观察与事件总线
 
 - `onInvocation(handler)`：Host 观察所有 invocation 的 `busy` 与终态事件；Plugin

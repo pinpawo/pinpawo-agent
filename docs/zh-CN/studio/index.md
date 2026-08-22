@@ -21,6 +21,7 @@ plugin ── notify(event) ──> Studio ── dispatch(request) ──> pet
 - [推模型与边界](push-model.md) — thread/invocation、durable resume、事件和 Plugin 生命周期。
 - [配置](configuration.md) — `studio.json`、Pet 文件、校验与 Plugin 注入。
 - [本地宿主集成](host-integration.md) — workdir 装配、WebSocket 确认和事件转发。
+- [HTTP Plugin](http-plugin.md) — 直接 dispatch 与 SSE live Plugin event。
 - [Studio API（中文）](../reference/api/studio.md) — 导出的类型和精确语义。
 
 ## Studio 负责什么
@@ -35,6 +36,10 @@ plugin ── notify(event) ──> Studio ── dispatch(request) ──> pet
 工作，都不属于 Studio。可选 `studio-kanban` package 提供一个 Plugin：它定义供 Pet
 使用的 Kanban Toolkit，并在自己的生命周期内根据看板状态派活或发事件。Plugin 本身
 不是 Toolkit。
+
+可选 `studio-http` package 是另一个具体 Plugin。它不定义 Toolkit，只把
+`context.dispatch()` 和 `context.subscribe()` 投射成带鉴权的 loopback HTTP/SSE
+边界。
 
 ## 运行限制
 

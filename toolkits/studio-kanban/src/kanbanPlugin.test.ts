@@ -5,12 +5,14 @@ import { createStudio } from '@pinpawo/studio';
 import type {
   PetAgentRuntime,
   PetAgentRuntimeInvokeInput,
+  PetAgentRuntimeInvokeResult,
   StudioEvent,
 } from '@pinpawo/studio';
 import type { NamedStructuredTool } from '@pinpawo/pet-agent';
 
 import { createKanbanPlugin } from './kanbanPlugin';
-import { KanbanBoard } from './kanbanBoard';
+import { KanbanBoard, type KanbanBoardSnapshot } from './kanbanBoard';
+import type { KanbanStateStore } from './kanbanStateStore';
 
 /**
  * 一个只会"收到任务 → 调工具"的假 pet。
@@ -20,7 +22,10 @@ import { KanbanBoard } from './kanbanBoard';
  */
 function pet(options: {
   petId: string;
-  onInvoke?: (input: PetAgentRuntimeInvokeInput, tools: KanbanTools) => Promise<void> | void;
+  onInvoke?: (
+    input: PetAgentRuntimeInvokeInput,
+    tools: KanbanTools,
+  ) => Promise<PetAgentRuntimeInvokeResult | void> | PetAgentRuntimeInvokeResult | void;
   tools: () => KanbanTools;
 }): PetAgentRuntime {
   return {
@@ -41,8 +46,8 @@ function pet(options: {
       capabilities: [],
     }),
     invoke: async (input) => {
-      await options.onInvoke?.(input, options.tools());
-      return { status: 'completed', reply: 'ok' };
+      const result = await options.onInvoke?.(input, options.tools());
+      return result ?? { status: 'completed', reply: 'ok' };
     },
   };
 }
@@ -201,6 +206,237 @@ test('restart marks in-flight tasks blocked rather than silently requeuing them'
 
   assert.equal(restored.get(task.taskId)?.status, 'blocked');
   assert.match(restored.get(task.taskId)?.note ?? '', /interrupted by restart/);
+});
+
+test('pending interrupt makes a task visible as waiting and the resumed tool can finish it', async () => {
+  const board = new KanbanBoard();
+  const task = board.add({ petId: 'worker', brief: 'needs approval' });
+  const plugin = createKanbanPlugin({ board });
+  const studio = await createStudio({
+    studioId: 's1',
+    entryPetId: 'worker',
+    pets: [pet({
+      petId: 'worker',
+      tools: () => pluginTools(plugin),
+      onInvoke: () => ({
+        status: 'pending_interrupt',
+        pendingInterrupt: {
+          interruptId: 'interrupt-1',
+          payload: {
+            kind: 'human_review',
+            interactions: [{
+              interactionId: 'interaction-1',
+              schemaVersion: 2,
+              view: { kind: 'plain', body: 'Approve?' },
+              options: [{ id: 'approve', label: 'Approve', batchSubmission: 'immediate' }],
+            }],
+          },
+        },
+      }),
+    })],
+    plugins: [plugin],
+  });
+
+  await flush();
+  assert.equal(board.get(task.taskId)?.status, 'waiting');
+
+  await pluginTools(plugin).kanban_task_complete!.invoke({
+    taskId: task.taskId,
+    result: 'continued after approval',
+  });
+  assert.equal(board.get(task.taskId)?.status, 'done');
+  await studio.shutdown();
+});
+
+test('an invocation that returns without reporting an outcome does not leave doing behind', async () => {
+  const board = new KanbanBoard();
+  const task = board.add({ petId: 'worker', brief: 'must report outcome' });
+  const plugin = createKanbanPlugin({ board });
+  const studio = await createStudio({
+    studioId: 's1',
+    entryPetId: 'worker',
+    pets: [pet({ petId: 'worker', tools: () => ({}) })],
+    plugins: [plugin],
+  });
+
+  await flush();
+  assert.equal(board.get(task.taskId)?.status, 'blocked');
+  assert.match(board.get(task.taskId)?.note ?? '', /without reporting/);
+  await studio.shutdown();
+});
+
+test('failed and cancelled invocations become explicit blocked tasks', async (t) => {
+  await t.test('failed', async () => {
+    const board = new KanbanBoard();
+    const task = board.add({ petId: 'worker', brief: 'will fail' });
+    const plugin = createKanbanPlugin({ board });
+    const studio = await createStudio({
+      studioId: 'failed-studio',
+      entryPetId: 'worker',
+      pets: [pet({
+        petId: 'worker',
+        tools: () => ({}),
+        onInvoke: () => { throw new Error('worker exploded'); },
+      })],
+      plugins: [plugin],
+    });
+
+    await flush();
+    assert.equal(board.get(task.taskId)?.status, 'blocked');
+    assert.match(board.get(task.taskId)?.note ?? '', /worker exploded/);
+    await studio.shutdown();
+  });
+
+  await t.test('cancelled', async () => {
+    const board = new KanbanBoard();
+    const task = board.add({ petId: 'worker', brief: 'will be cancelled' });
+    const plugin = createKanbanPlugin({ board });
+    let markStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    const studio = await createStudio({
+      studioId: 'cancelled-studio',
+      entryPetId: 'worker',
+      pets: [pet({
+        petId: 'worker',
+        tools: () => ({}),
+        onInvoke: (input) => new Promise((_resolve, reject) => {
+          markStarted?.();
+          input.signal?.addEventListener('abort', () => reject(input.signal?.reason), { once: true });
+        }),
+      })],
+      plugins: [plugin],
+    });
+
+    await started;
+    await studio.shutdown();
+    assert.equal(board.get(task.taskId)?.status, 'blocked');
+    assert.match(board.get(task.taskId)?.note ?? '', /cancelled/);
+  });
+});
+
+test('the doing snapshot is durable before Kanban dispatches external work', async () => {
+  const board = new KanbanBoard();
+  const task = board.add({ petId: 'worker', brief: 'persist first' });
+  let durable: KanbanBoardSnapshot = { tasks: [] };
+  const store: KanbanStateStore = {
+    load: async () => null,
+    save: async (snapshot) => {
+      durable = structuredClone(snapshot);
+    },
+  };
+  const plugin = createKanbanPlugin({ board, stateStore: store });
+  let durableStatusAtInvoke: string | undefined;
+  const studio = await createStudio({
+    studioId: 's1',
+    entryPetId: 'worker',
+    pets: [pet({
+      petId: 'worker',
+      tools: () => pluginTools(plugin),
+      onInvoke: async (_input, tools) => {
+        durableStatusAtInvoke = durable.tasks[0]?.status;
+        await tools.kanban_task_complete!.invoke({ taskId: task.taskId, result: 'done' });
+      },
+    })],
+    plugins: [plugin],
+  });
+
+  await flush();
+  assert.equal(durableStatusAtInvoke, 'doing');
+  assert.equal(durable.tasks[0]?.status, 'done');
+  await studio.shutdown();
+});
+
+test('Plugin startup restores doing as blocked without redispatching it', async () => {
+  const source = new KanbanBoard();
+  const task = source.add({ petId: 'worker', brief: 'uncertain external effect' });
+  source.markDispatched(task.taskId);
+  let durable = source.snapshot();
+  const store: KanbanStateStore = {
+    load: async () => structuredClone(durable),
+    save: async (snapshot) => {
+      durable = structuredClone(snapshot);
+    },
+  };
+  const plugin = createKanbanPlugin({ stateStore: store });
+  let invocationCount = 0;
+  const studio = await createStudio({
+    studioId: 's1',
+    entryPetId: 'worker',
+    pets: [pet({
+      petId: 'worker',
+      tools: () => ({}),
+      onInvoke: () => { invocationCount += 1; },
+    })],
+    plugins: [plugin],
+  });
+
+  await flush();
+  assert.equal(invocationCount, 0);
+  assert.equal(plugin.board.get(task.taskId)?.status, 'blocked');
+  assert.equal(durable.tasks[0]?.status, 'blocked');
+  await studio.shutdown();
+});
+
+test('Plugin serializes durable snapshots and flushes the latest state on stop', async () => {
+  let activeSaves = 0;
+  let maxActiveSaves = 0;
+  let durable: KanbanBoardSnapshot = { tasks: [] };
+  const store: KanbanStateStore = {
+    load: async () => null,
+    save: async (snapshot) => {
+      activeSaves += 1;
+      maxActiveSaves = Math.max(maxActiveSaves, activeSaves);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      durable = structuredClone(snapshot);
+      activeSaves -= 1;
+    },
+  };
+  const plugin = createKanbanPlugin({ stateStore: store });
+  const studio = await createStudio({
+    studioId: 's1',
+    entryPetId: 'worker',
+    pets: [pet({ petId: 'worker', tools: () => ({}) })],
+    plugins: [plugin],
+  });
+
+  plugin.board.add({ petId: 'worker', brief: 'one', deps: ['external'] });
+  plugin.board.add({ petId: 'worker', brief: 'two', deps: ['external'] });
+  plugin.board.add({ petId: 'worker', brief: 'three', deps: ['external'] });
+  await studio.shutdown();
+
+  assert.equal(maxActiveSaves, 1);
+  assert.equal(durable.tasks.length, 3);
+});
+
+test('a state save failure blocks the task before dispatch', async () => {
+  const board = new KanbanBoard();
+  const task = board.add({ petId: 'worker', brief: 'must not escape durability' });
+  let saveCount = 0;
+  const store: KanbanStateStore = {
+    load: async () => null,
+    save: async () => {
+      saveCount += 1;
+      if (saveCount === 2) throw new Error('disk unavailable');
+    },
+  };
+  const plugin = createKanbanPlugin({ board, stateStore: store });
+  let invocationCount = 0;
+  const studio = await createStudio({
+    studioId: 's1',
+    entryPetId: 'worker',
+    pets: [pet({
+      petId: 'worker',
+      tools: () => ({}),
+      onInvoke: () => { invocationCount += 1; },
+    })],
+    plugins: [plugin],
+  });
+
+  await flush();
+  assert.equal(invocationCount, 0);
+  assert.equal(board.get(task.taskId)?.status, 'blocked');
+  assert.match(board.get(task.taskId)?.note ?? '', /persistence failed.*disk unavailable/i);
+  await studio.shutdown();
 });
 
 test('tools report plainly when taskId does not identify a doing task', async () => {

@@ -10,3 +10,5 @@ export {
 export type { CreateKanbanPluginOptions, KanbanPlugin } from './kanbanPlugin';
 export { KanbanBoard } from './kanbanBoard';
 export type { KanbanTask, KanbanTaskStatus, KanbanBoardSnapshot } from './kanbanBoard';
+export { createFileKanbanStateStore } from './kanbanStateStore';
+export type { KanbanStateStore } from './kanbanStateStore';

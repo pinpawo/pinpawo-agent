@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseStudioClientMessage } from './studioProtocol';
+import { parseStudioDispatchRequest } from '../studioInvocation';
 
 test('Studio protocol parses a typed request dispatch', () => {
   assert.deepEqual(parseStudioClientMessage(JSON.stringify({
@@ -51,5 +52,24 @@ test('Studio protocol does not accept the historical Chat studio_request shape',
     type: 'studio_request',
     requestId: 'request-1',
     userRequest: 'go',
+  }), null);
+});
+
+test('transport-neutral dispatch parsing does not require a wire delivery envelope', () => {
+  assert.deepEqual(parseStudioDispatchRequest({
+    petId: 'pet-a',
+    input: { kind: 'request', request: 'hello' },
+    metadata: { producer: 'http' },
+    idempotencyKey: 'retry-1',
+  }), {
+    petId: 'pet-a',
+    input: { kind: 'request', request: 'hello' },
+    metadata: { producer: 'http' },
+    idempotencyKey: 'retry-1',
+  });
+  assert.equal(parseStudioDispatchRequest({
+    petId: 'pet-a',
+    input: { kind: 'request', request: 'hello' },
+    deliveryId: 'wire-only',
   }), null);
 });

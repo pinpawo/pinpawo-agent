@@ -38,8 +38,13 @@ export const CAPABILITY_DOCUMENT_MAX_BYTES = CORE_CAPABILITY_DOCUMENT_MAX_BYTES;
 type CapabilityFrontmatter = CapabilityDocumentFrontmatter;
 
 export type LoadedCapability = {
-  meta: CapabilityMeta;
   capability: AgentCapability;
+  activation: Readonly<{
+    id: string;
+    defaultEnabled: boolean;
+  }>;
+  /** Stable diagnostic identity for the definition that produced this entry. */
+  sourceId: string;
 };
 
 /** Global user-registry compatibility name. */
@@ -189,7 +194,6 @@ export async function validateCapabilityPlugin(
 
 async function loadCapabilitiesFromDir(
   dir: string,
-  seenIds: Set<string>,
 ): Promise<LoadedUserCapability[]> {
   if (!existsSync(dir)) return [];
   const entries = readdirSync(dir, { withFileTypes: true })
@@ -207,14 +211,13 @@ async function loadCapabilitiesFromDir(
       }
       continue;
     }
-    if (seenIds.has(validation.meta.id)) {
-      console.warn(`[capabilities] duplicate capability id "${validation.meta.id}" in ${dir} — skipped`);
-      continue;
-    }
-    seenIds.add(validation.meta.id);
     loaded.push({
-      meta: validation.meta,
       capability: validation.capability,
+      activation: {
+        id: validation.meta.id,
+        defaultEnabled: validation.meta.defaultEnabled,
+      },
+      sourceId: validation.capabilityPath,
     });
   }
   return loaded;
@@ -260,8 +263,12 @@ export async function loadCapabilityDirectory(
     }
     seenIds.add(validation.meta.id);
     loaded.push({
-      meta: validation.meta,
       capability: validation.capability,
+      activation: {
+        id: validation.meta.id,
+        defaultEnabled: validation.meta.defaultEnabled,
+      },
+      sourceId: validation.capabilityPath,
     });
   }
 
@@ -285,10 +292,11 @@ function warnLegacyCapabilityDirectory(dir: string, name: string) {
 }
 
 export async function loadUserCapabilities(): Promise<LoadedUserCapability[]> {
-  const seenIds = new Set<string>();
   const loaded: LoadedUserCapability[] = [];
   for (const dir of resolveCapabilityDirs()) {
-    loaded.push(...await loadCapabilitiesFromDir(dir, seenIds));
+    // Preserve duplicates across configured roots. The Host catalog owns the
+    // collision policy and needs every definition plus its source identity.
+    loaded.push(...await loadCapabilitiesFromDir(dir));
   }
   return loaded;
 }

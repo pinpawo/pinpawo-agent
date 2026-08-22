@@ -74,6 +74,33 @@ async function loadConfigHelpers() {
   return import('./config');
 }
 
+test('importing config does not require a model profile until configuration is read', () => {
+  const home = mkdtempSync(resolve(tmpdir(), 'pinpawo-config-import-home-'));
+  const output = execFileSync(process.execPath, [
+    '--import',
+    'tsx',
+    '-e',
+    [
+      `await import(${JSON.stringify(CONFIG_IMPORT_PATH)});`,
+      "process.stdout.write('imported');",
+    ].join('\n'),
+  ], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      HOME: home,
+      LLM_API_KEY: '',
+      LLM_BASE_URL: '',
+      LLM_MODEL: '',
+      LLM_MODEL_PRESET: '',
+      PINPAWO_MODEL_PROFILE: '',
+    },
+    encoding: 'utf8',
+  });
+
+  assert.equal(output, 'imported');
+});
+
 test('resolveNumberConfigValue falls back to stored number for empty env values', async () => {
   const { resolveNumberConfigValue } = await loadConfigHelpers();
   assert.equal(resolveNumberConfigValue('', 131072), 131072);

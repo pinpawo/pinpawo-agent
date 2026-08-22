@@ -22,18 +22,18 @@ function capability(name: string, uses: readonly string[] = []): AgentCapability
   };
 }
 
-function loadedUserCapability(name: string, defaultEnabled = true): LoadedUserCapability {
+function loadedUserCapability(
+  name: string,
+  defaultEnabled = true,
+  sourceId = `/configured/${name}/CAPABILITY.md`,
+): LoadedUserCapability {
   return {
-    meta: {
+    activation: {
       id: name,
-      name,
-      description: `${name} user capability`,
-      icon: 'sparkles',
-      color: '#7c3aed',
       defaultEnabled,
-      builtIn: false,
     },
     capability: capability(name),
+    sourceId,
   };
 }
 
@@ -93,6 +93,21 @@ test('HostCapabilityCatalog rejects source definitions that collide with Host na
   });
 
   await assert.rejects(() => catalog.load(), /explore.*conflicts with host:host/);
+});
+
+test('HostCapabilityCatalog rejects duplicate configured definitions with source evidence', async () => {
+  const catalog = new HostCapabilityCatalog({
+    loadConfiguredCapabilities: async () => [
+      loadedUserCapability('duplicate', true, '/first/duplicate/CAPABILITY.md'),
+      loadedUserCapability('duplicate', true, '/second/duplicate/CAPABILITY.md'),
+    ],
+    createHostCapabilities: () => [],
+  });
+
+  await assert.rejects(
+    () => catalog.load(),
+    /duplicate.*second\/duplicate\/CAPABILITY\.md.*first\/duplicate\/CAPABILITY\.md/,
+  );
 });
 
 test('HostCapabilityCatalog rejects a Pet directory that shadows its required baseline', async () => {

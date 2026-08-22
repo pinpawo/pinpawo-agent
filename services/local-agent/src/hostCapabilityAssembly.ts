@@ -207,6 +207,10 @@ export class HostCapabilityAssembly {
     }
     const { toolkitSources } = await loadPlugins();
     this.modelProfiles = buildLocalModelProfileRegistry();
+    // Validate Capability sources before starting any Toolkit Runtime roots.
+    // A configured name collision must fail without acquiring dynamic
+    // resources or leaving a dirty Runtime manager behind.
+    await this.capabilityCatalog.load();
     await this.toolkitCoordinator.initialize([
       ...toolkitSources,
       ...options.toolkitSources,
@@ -216,7 +220,6 @@ export class HostCapabilityAssembly {
         definitions: this.hostBuiltInToolkits,
       },
     ]);
-    await this.capabilityCatalog.load();
     this.actorId = LOCAL_ACTOR_ID;
     this.actorName = LOCAL_ACTOR_NAME;
   }

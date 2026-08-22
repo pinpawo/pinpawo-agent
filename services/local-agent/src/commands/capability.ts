@@ -2,12 +2,26 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync } from
 import { homedir } from 'node:os';
 import { basename, dirname, resolve } from 'node:path';
 import type { Command } from 'commander';
+import { GENERAL_CAPABILITY_NAME } from '@pinpawo/pet-agent';
 import { DEFAULT_CAPABILITIES_DIR, readUserCapabilityManifests, validateCapabilityPlugin } from '../capabilityLoader';
+import { BUILT_IN_CAPABILITY_IDS } from '../capabilityRegistry';
 
 type CapabilityCommandOptions = {
   overwrite: boolean;
   link: boolean;
 };
+
+const CHAT_HOST_RESERVED_CAPABILITY_NAMES = new Set([
+  GENERAL_CAPABILITY_NAME,
+  ...BUILT_IN_CAPABILITY_IDS,
+]);
+
+export function assertChatCapabilityInstallable(name: string): void {
+  if (!CHAT_HOST_RESERVED_CAPABILITY_NAMES.has(name)) return;
+  throw new Error(
+    `Capability "${name}" conflicts with a Chat Host Capability and cannot be installed.`,
+  );
+}
 
 function expandHome(path: string): string {
   if (path === '~') return homedir();
@@ -57,6 +71,7 @@ async function installCommand(sourceArg: string, options: CapabilityCommandOptio
   if (!validation.ok || !validation.meta) {
     throw new Error(`Capability plugin invalid: ${validation.errors.join('; ')}`);
   }
+  assertChatCapabilityInstallable(validation.meta.id);
 
   const targetDir = resolve(DEFAULT_CAPABILITIES_DIR, validation.meta.id);
   if (resolve(sourceDir) === targetDir) {

@@ -8,10 +8,6 @@ import {
   type LoadedCapability,
   type LoadedUserCapability,
 } from './capabilityLoader';
-import {
-  getBuiltInCapabilityMeta,
-  type CapabilityMeta,
-} from './capabilityRegistry';
 import { loadStoredConfig, type StoredConfig } from './storage';
 import { createExploreCapability } from './capabilities/explore';
 import { loadGeneralCapability } from './capabilities/general';
@@ -20,8 +16,10 @@ type CapabilityCatalogSource = 'host' | 'configured' | 'directory';
 
 type CapabilityCatalogEntry = Readonly<{
   capability: AgentCapability;
-  /** Present for user-authored and displayable Host Capability definitions. */
-  meta?: CapabilityMeta;
+  activation: Readonly<{
+    id: string;
+    defaultEnabled: boolean;
+  }>;
   source: CapabilityCatalogSource;
   sourceId: string;
   /** Required Host baselines are never governed by an enablement switch. */
@@ -58,8 +56,9 @@ function resolveEntryEnabled(
   entry: Omit<CapabilityCatalogEntry, 'enabled'>,
   config: Pick<StoredConfig, 'capabilities'>,
 ): boolean {
-  if (entry.required || !entry.meta) return true;
-  return config.capabilities?.[entry.meta.id] ?? entry.meta.defaultEnabled;
+  if (entry.required) return true;
+  return config.capabilities?.[entry.activation.id]
+    ?? entry.activation.defaultEnabled;
 }
 
 function assertDistinctCapabilityNames(entries: readonly Omit<CapabilityCatalogEntry, 'enabled'>[]) {
@@ -77,10 +76,12 @@ function assertDistinctCapabilityNames(entries: readonly Omit<CapabilityCatalogE
 }
 
 function hostEntry(capability: AgentCapability): Omit<CapabilityCatalogEntry, 'enabled'> {
-  const meta = getBuiltInCapabilityMeta(capability.name);
   return {
     capability,
-    ...(meta ? { meta } : {}),
+    activation: {
+      id: capability.name,
+      defaultEnabled: true,
+    },
     source: 'host',
     sourceId: 'host',
     required: capability.name === GENERAL_CAPABILITY_NAME,
@@ -94,9 +95,9 @@ function loadedEntry(
 ): Omit<CapabilityCatalogEntry, 'enabled'> {
   return {
     capability: loaded.capability,
-    meta: loaded.meta,
+    activation: loaded.activation,
     source,
-    sourceId,
+    sourceId: `${sourceId}:${loaded.sourceId}`,
     required: false,
   };
 }
@@ -150,7 +151,9 @@ export class HostCapabilityCatalog {
     return createSnapshot(
       [
         ...this.hostCapabilities.map(hostEntry),
-        ...this.configuredCapabilities.map((loaded) => loadedEntry(loaded, 'configured', 'configured')),
+        ...this.configuredCapabilities.map((loaded) => (
+          loadedEntry(loaded, 'configured', 'configured')
+        )),
       ],
       config,
     );
@@ -173,7 +176,7 @@ export class HostCapabilityCatalog {
         ...loaded.map((entry) => loadedEntry(entry, 'directory', options.sourceId)),
       ],
       { capabilities: Object.fromEntries(
-        loaded.map(({ meta }) => [meta.id, true]),
+        loaded.map(({ activation }) => [activation.id, true]),
       ) },
     );
   }
@@ -184,7 +187,9 @@ export class HostCapabilityCatalog {
   ): void {
     assertDistinctCapabilityNames([
       ...hostCapabilities.map(hostEntry),
-      ...configuredCapabilities.map((loaded) => loadedEntry(loaded, 'configured', 'configured')),
+      ...configuredCapabilities.map((loaded) => (
+        loadedEntry(loaded, 'configured', 'configured')
+      )),
     ]);
   }
 }

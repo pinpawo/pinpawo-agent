@@ -48,7 +48,9 @@ test('loadUserCapabilities loads a code-free CAPABILITY.md', async () => {
     const { loadUserCapabilities, readUserCapabilityManifests } = await import('./capabilityLoader');
     const loaded = await loadUserCapabilities();
     const manifests = readUserCapabilityManifests();
-    const item = loaded.find(({ meta }) => meta.id === 'unit_test_capability');
+    const item = loaded.find(
+      ({ activation }) => activation.id === 'unit_test_capability',
+    );
 
     assert.ok(item);
     assert.match(item.capability.instructions.content, /Execute the requested task/);
@@ -83,11 +85,11 @@ test('loadUserCapabilities preserves legacy v1 description and list syntax', asy
     const loaded = await loadUserCapabilities();
     const manifests = readUserCapabilityManifests();
     const item = loaded.find(
-      ({ meta }) => meta.id === 'legacy_yaml_capability',
+      ({ activation }) => activation.id === 'legacy_yaml_capability',
     );
 
     assert.equal(
-      item?.meta.description,
+      item?.capability.description,
       'Handles API: requests for budget #1',
     );
     assert.deepEqual(item?.capability.uses, ['bash']);
@@ -116,7 +118,33 @@ test('loadUserCapabilities follows directory symlinks in scan dirs', async () =>
     const { loadUserCapabilities } = await import('./capabilityLoader');
     const loaded = await loadUserCapabilities();
 
-    assert.ok(loaded.some((item) => item.meta.id === 'linked_capability'));
+    assert.ok(loaded.some((item) => item.activation.id === 'linked_capability'));
+  } finally {
+    if (previousDirs === undefined) {
+      delete process.env.PINPAWO_CAPABILITY_DIRS;
+    } else {
+      process.env.PINPAWO_CAPABILITY_DIRS = previousDirs;
+    }
+  }
+});
+
+test('loadUserCapabilities preserves duplicate configured definitions for Host validation', async () => {
+  const first = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-caps-duplicate-first-'));
+  const second = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-caps-duplicate-second-'));
+  const previousDirs = process.env.PINPAWO_CAPABILITY_DIRS;
+  process.env.PINPAWO_CAPABILITY_DIRS = [first, second].join(delimiter);
+  try {
+    await mkCapability(first, 'catalog_duplicate_fixture');
+    await mkCapability(second, 'catalog_duplicate_fixture');
+
+    const { loadUserCapabilities } = await import('./capabilityLoader');
+    const loaded = await loadUserCapabilities();
+    const duplicates = loaded.filter(
+      ({ activation }) => activation.id === 'catalog_duplicate_fixture',
+    );
+
+    assert.equal(duplicates.length, 2);
+    assert.notEqual(duplicates[0]?.sourceId, duplicates[1]?.sourceId);
   } finally {
     if (previousDirs === undefined) {
       delete process.env.PINPAWO_CAPABILITY_DIRS;
@@ -389,7 +417,9 @@ test('legacy capability directories emit one migration warning instead of disapp
   try {
     const { loadUserCapabilities, readUserCapabilityManifests } = await import('./capabilityLoader');
     assert.equal(
-      (await loadUserCapabilities()).some(({ meta }) => meta.id === 'legacy_capability'),
+      (await loadUserCapabilities()).some(
+        ({ activation }) => activation.id === 'legacy_capability',
+      ),
       false,
     );
     assert.equal(

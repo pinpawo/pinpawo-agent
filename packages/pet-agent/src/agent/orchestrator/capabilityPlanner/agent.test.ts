@@ -803,11 +803,11 @@ test('Planner reports closed discovery after two rounds while keeping search aut
   assert.equal(searchResults.length, 2);
   assert.equal(searchResults.some((message) => message.status === 'error'), false);
   assert.match(String(searchResults[0]?.content), /"status":"open"/);
-  assert.match(String(searchResults[0]?.content), /"roundsUsed":1/);
-  assert.match(String(searchResults[0]?.content), /"remainingRounds":1/);
+  assert.match(String(searchResults[0]?.content), /"emptyRoundsUsed":1/);
+  assert.match(String(searchResults[0]?.content), /"remainingEmptyRounds":1/);
   assert.match(String(searchResults[1]?.content), /"status":"closed"/);
-  assert.match(String(searchResults[1]?.content), /"roundsUsed":2/);
-  assert.match(String(searchResults[1]?.content), /"remainingRounds":0/);
+  assert.match(String(searchResults[1]?.content), /"emptyRoundsUsed":2/);
+  assert.match(String(searchResults[1]?.content), /"remainingEmptyRounds":0/);
   assert.match(String(searchResults[0]?.content), /"defaultCandidate":"general"/);
   assert.match(String(searchResults[0]?.content), /"specificCandidates":\[\]/);
   assert.equal(model.boundToolNameHistory[1]?.includes(
@@ -924,7 +924,7 @@ test('a first-round miss discloses exact specific names before General becomes e
     ).map((message) => [message.tool_call_id, JSON.parse(String(message.content)) as {
       exploration?: {
         status?: string;
-        remainingRounds?: number;
+        remainingEmptyRounds?: number;
         specificCandidates?: string[];
         nextSearchCandidates?: string[];
       };
@@ -940,7 +940,7 @@ test('a first-round miss discloses exact specific names before General becomes e
   assert.deepEqual(searchResults[0]?.exploration?.specificCandidates, []);
   assert.deepEqual(searchResults[0]?.exploration?.nextSearchCandidates, ['explore']);
   assert.equal(searchResults[0]?.exploration?.status, 'open');
-  assert.equal(searchResults[0]?.exploration?.remainingRounds, 1);
+  assert.equal(searchResults[0]?.exploration?.remainingEmptyRounds, 1);
   assert.deepEqual(searchResults[0]?.planningGuidance, {
     objective: 'select_most_specific_capability_for_current_request',
     defaultCandidate: 'general',
@@ -949,8 +949,10 @@ test('a first-round miss discloses exact specific names before General becomes e
     reportUnavailableWhen: 'no_available_capability_can_deliver_remaining_work',
   });
   assert.deepEqual(searchResults[1]?.exploration?.specificCandidates, ['explore']);
-  assert.equal(searchResults[1]?.exploration?.status, 'closed');
-  assert.equal(searchResults[1]?.exploration?.remainingRounds, 0);
+  // A matching search does not consume discovery budget: only wholly empty
+  // model rounds count toward closure.
+  assert.equal(searchResults[1]?.exploration?.status, 'open');
+  assert.equal(searchResults[1]?.exploration?.remainingEmptyRounds, 1);
   assert.equal(searchResults[1]?.planningGuidance, undefined);
 });
 
@@ -1056,7 +1058,7 @@ test('a boundary literal match still requires positive unfinished-work scope', a
   const payload = JSON.parse(String(searchResult.content)) as {
     exploration?: {
       status?: string;
-      remainingRounds?: number;
+      remainingEmptyRounds?: number;
       specificCandidates?: string[];
       nextSearchCandidates?: string[];
       defaultCandidate?: string | null;
@@ -1076,7 +1078,7 @@ test('a boundary literal match still requires positive unfinished-work scope', a
   assert.deepEqual(payload.exploration?.nextSearchCandidates, []);
   assert.equal(payload.exploration?.defaultCandidate, null);
   assert.equal(payload.exploration?.status, 'open');
-  assert.equal(payload.exploration?.remainingRounds, 1);
+  assert.equal(payload.exploration?.remainingEmptyRounds, 2);
   assert.deepEqual(payload.planningGuidance, {
     objective: 'stably_advance_existing_plan',
     activeCapability: 'explore',
@@ -1299,11 +1301,78 @@ test('Planner counts parallel capability_search calls as one disclosure round', 
   assert.ok(searchResults.every((message) =>
     String(message.content).includes('"status":"open"')));
   assert.ok(searchResults.every((message) =>
-    String(message.content).includes('"roundsUsed":1')));
+    String(message.content).includes('"emptyRoundsUsed":1')));
   assert.equal(model.boundToolNameHistory[1]?.includes(
     CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
   ), true);
   assert.equal(model.boundToolOptions[1]?.tool_choice, undefined);
+});
+
+test('a matching search keeps a parallel batch from consuming empty-search budget', async (t) => {
+  const workspace = await createWorkspace(t, {
+    explore: capabilityDocument({
+      name: 'explore',
+      description: 'Investigate repository evidence.',
+      instructions: 'Inspect available evidence and report findings.',
+    }),
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary workspace tasks.',
+      instructions: 'Complete the requested work.',
+    }),
+  });
+  const search = (id: string, terms: string[]) => ({
+    id,
+    name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+    args: { terms },
+  });
+  const model = new ScriptedPlannerModel([
+    { toolCalls: [
+      search('parallel-miss', ['ordinary']),
+      search('parallel-hit', ['explore']),
+    ] },
+    { toolCalls: [search('first-empty-after-hit', ['unrelated'])] },
+    {
+      structuredOutput: {
+        kind: 'plan',
+        args: {
+          tasks: [{
+            capability: 'explore',
+            task: 'Inspect the requested repository evidence.',
+          }],
+        },
+      },
+    },
+  ]);
+
+  const result = await createCapabilityPlannerAgent({
+    model,
+    maxSearchRounds: 1,
+  }).invoke(plannerInput(workspace));
+
+  assert.deepEqual(commitOnly(result), {
+    action: 'execute_plan',
+    tasks: [{
+      capability: 'explore',
+      task: 'Inspect the requested repository evidence.',
+    }],
+  });
+  const postHitSearch = model.invocations[2]?.find((message) =>
+    ToolMessage.isInstance(message)
+    && message.tool_call_id === 'first-empty-after-hit');
+  assert.ok(ToolMessage.isInstance(postHitSearch));
+  const payload = JSON.parse(String(postHitSearch.content)) as {
+    ok?: boolean;
+    exploration?: {
+      status?: string;
+      emptyRoundsUsed?: number;
+      remainingEmptyRounds?: number;
+    };
+  };
+  assert.equal(payload.ok, true);
+  assert.equal(payload.exploration?.status, 'closed');
+  assert.equal(payload.exploration?.emptyRoundsUsed, 1);
+  assert.equal(payload.exploration?.remainingEmptyRounds, 0);
 });
 
 test('Planner returns to Answer after one capability_search without general', async (t) => {
@@ -1399,10 +1468,6 @@ test('Planner returns a stable limit result for every search after max rounds', 
     }],
   });
   assert.equal(model.invocations.length, 5);
-  assert.match(
-    readMessageText(model.invocations[2]?.[0] as BaseMessage),
-    /capability_search 当前状态：CLOSED；已使用 2 轮；剩余 0 轮。/,
-  );
   const searchResults = [...new Map(
     model.invocations.flat().filter(
       (message): message is ToolMessage => ToolMessage.isInstance(message)
@@ -1412,15 +1477,29 @@ test('Planner returns a stable limit result for every search after max rounds', 
   assert.equal(searchResults.length, 4);
   assert.equal(JSON.parse(String(searchResults[0]?.content)).ok, true);
   assert.equal(JSON.parse(String(searchResults[1]?.content)).ok, true);
-  for (const [offset, message] of searchResults.slice(2).entries()) {
+  const secondSearchPayload = JSON.parse(String(searchResults[1]?.content)) as {
+    exploration?: { status?: string; emptyRoundsUsed?: number; remainingEmptyRounds?: number };
+  };
+  assert.deepEqual(secondSearchPayload.exploration, {
+    status: 'closed',
+    emptyRoundsUsed: 2,
+    maxEmptyRounds: 2,
+    remainingEmptyRounds: 0,
+    currentSearchMatched: false,
+    specificCandidates: [],
+    nextSearchCandidates: [],
+    nextSearchCandidatesComplete: true,
+    defaultCandidate: 'general',
+  });
+  for (const message of searchResults.slice(2)) {
     const payload = JSON.parse(String(message.content)) as {
       ok?: boolean;
       error?: { code?: string; message?: string };
       exploration?: {
         status?: string;
-        roundsUsed?: number;
-        attemptedRounds?: number;
-        remainingRounds?: number;
+        emptyRoundsUsed?: number;
+        maxEmptyRounds?: number;
+        remainingEmptyRounds?: number;
       };
       planningGuidance?: {
         objective?: string;
@@ -1434,9 +1513,9 @@ test('Planner returns a stable limit result for every search after max rounds', 
     assert.equal(payload.error?.code, 'capability_search_round_limit_exceeded');
     assert.match(payload.error?.message ?? '', /No search was executed/);
     assert.equal(payload.exploration?.status, 'closed');
-    assert.equal(payload.exploration?.roundsUsed, 2);
-    assert.equal(payload.exploration?.attemptedRounds, offset + 3);
-    assert.equal(payload.exploration?.remainingRounds, 0);
+    assert.equal(payload.exploration?.emptyRoundsUsed, 2);
+    assert.equal(payload.exploration?.maxEmptyRounds, 2);
+    assert.equal(payload.exploration?.remainingEmptyRounds, 0);
     assert.deepEqual(payload.planningGuidance, {
       objective: 'select_most_specific_capability_for_current_request',
       defaultCandidate: 'general',
@@ -1650,7 +1729,7 @@ test('Planner allows every search in one parallel disclosure round', async (t) =
   assert.ok(successfulSearches.every((message) =>
     String(message.content).includes('"status":"open"')));
   assert.ok(successfulSearches.every((message) =>
-    String(message.content).includes('"roundsUsed":1')));
+    String(message.content).includes('"emptyRoundsUsed":1')));
   assert.equal(model.boundToolNameHistory[1]?.includes(
     CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
   ), true);

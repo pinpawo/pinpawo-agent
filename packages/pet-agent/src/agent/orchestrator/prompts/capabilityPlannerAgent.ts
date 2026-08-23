@@ -49,11 +49,6 @@ function buildPlanningState(input: CapabilityPlannerInput) {
 export function buildCapabilityPlannerAgentSystemPrompt(
   mode: CapabilityPlannerInput['mode'],
   defaultCapability: CapabilityPlannerDefaultCapability | null = null,
-  exploration: {
-    status: 'open' | 'closed';
-    roundsUsed: number;
-    maxRounds: number;
-  } = { status: 'open', roundsUsed: 0, maxRounds: 2 },
 ) {
   const defaultCapabilityContext = promptBlock(
     buildDefaultCapabilityContext(defaultCapability),
@@ -62,9 +57,7 @@ export function buildCapabilityPlannerAgentSystemPrompt(
   const prompt = mode === 'entry'
     ? CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT.render({ defaultCapabilityContext })
     : CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT.render({ defaultCapabilityContext });
-  const remainingRounds = Math.max(0, exploration.maxRounds - exploration.roundsUsed);
-  const searchState = `capability_search 当前状态：${exploration.status.toUpperCase()}；已使用 ${exploration.roundsUsed.toString()} 轮；剩余 ${remainingRounds.toString()} 轮。`;
-  return [prompt, searchState].join('\n');
+  return prompt;
 }
 
 export function buildCapabilityPlannerAgentInput(input: CapabilityPlannerInput) {

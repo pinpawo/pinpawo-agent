@@ -16,7 +16,7 @@ import {
 } from './workspaceReader';
 
 export const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME = 'capability_search';
-const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_DESCRIPTION = 'Progressively disclose specific Capability documents by literal terms. Each match contains the complete CAPABILITY.md document. An unmatched result reports the remaining search opportunity and mode-specific planning guidance.';
+const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_DESCRIPTION = 'Use literal terms to disclose specific Capability documents before assigning work. Each match contains the complete CAPABILITY.md document. The result states whether this search matched, which candidates remain worth exploring, and when discovery is closed; use that returned guidance to either continue the current plan or submit the appropriate structured Planner result.';
 
 const DEFAULT_MAX_DOCUMENT_READ_BYTES = 64 * 1024;
 const MAX_CAPABILITY_SEARCH_RESULTS = 50;
@@ -60,13 +60,12 @@ export function createCapabilityPlannerSearchTool<
 >(
   search: (
     terms: readonly string[],
-    state: ToolRuntime<TState>['state'],
-    signal?: AbortSignal,
-  ) => Promise<string>,
+    runtime: ToolRuntime<TState>,
+  ) => Promise<unknown>,
 ) {
   return tool(
     async ({ terms }: { terms: string[] }, runtime: ToolRuntime<TState>) =>
-      search(terms, runtime.state, runtime.signal),
+      search(terms, runtime),
     {
       name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
       description: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_DESCRIPTION,

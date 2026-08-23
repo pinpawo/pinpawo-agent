@@ -1,7 +1,7 @@
 import { definePromptTemplate } from '../template';
 
 /** Context shared by entry and boundary planning. */
-const PLANNER_CAPABILITY_CONTEXT = `Capability 是 task 的执行方。<default_capability> 提供已加载的 General 完整文档；capability_search 用于披露更具体的 Capability 完整文档。system prompt 末尾的 capability_search 状态说明本轮是否还能继续披露，以及已经使用和剩余的轮次。
+const PLANNER_CAPABILITY_CONTEXT = `Capability 是 task 的执行方。<default_capability> 提供已加载的 General 完整文档；capability_search 用于披露更具体的 Capability 完整文档。每次搜索的工具结果会说明当前发现和下一步规划方向。
 
 搜索的字面命中只是候选发现结果；Capability 完整文档中的正向职责描述它能交付的工作。`;
 

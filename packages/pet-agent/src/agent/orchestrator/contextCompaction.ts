@@ -15,13 +15,11 @@ import { isDelegationBriefingMessage } from './delegationBriefing';
 import { xmlTextBlock } from './prompts/shared';
 
 const DEFAULT_KEEP_MESSAGES = 10;
-const DEFAULT_SUMMARY_TRANSCRIPT_CHARS = 12000;
 const DEFAULT_FALLBACK_SUMMARY_CHARS = 4000;
 export const CONTEXT_COMPACTION_MESSAGE_NAME = 'context_compaction';
 
 export type ContextCompactionOptions = {
   keepMessages?: number;
-  summaryTranscriptChars?: number;
 };
 
 export type ContextCompactionResult = {
@@ -71,10 +69,10 @@ function formatMainMessageForSummary(message: BaseMessage): string | null {
   }
   const type = message._getType();
   if (type === 'human') {
-    return [`### 主线用户输入`, clipForPrompt(text, 1200)].join('\n');
+    return [`### 主线用户输入`, text].join('\n');
   }
   if (type === 'ai') {
-    return [`### 主线 agent 回复`, clipForPrompt(text, 1200)].join('\n');
+    return [`### 主线 agent 回复`, text].join('\n');
   }
   return null;
 }
@@ -102,47 +100,12 @@ function buildNoisyFallbackSummary(messages: BaseMessage[]): string {
   ].join('\n');
 }
 
-function buildSummaryTranscript(messages: BaseMessage[], maxChars: number): string {
-  const existingSummaryChunks = buildSummaryItems(
-    messages.filter(isContextCompactionMessage),
-  );
-  const recentChunks = buildSummaryItems(
-    messages.filter((message) => !isContextCompactionMessage(message)),
-  );
-  const selectedSummaryChunks: string[] = [];
-  const selectedChunks: string[] = [];
-  let usedChars = 0;
-  const existingSummaryBudget = recentChunks.length > 0
-    ? Math.floor(maxChars / 2)
-    : maxChars;
-
-  for (let i = existingSummaryChunks.length - 1; i >= 0; i--) {
-    const remainingChars = existingSummaryBudget - usedChars;
-    if (remainingChars <= 0) break;
-    const sourceChunk = existingSummaryChunks[i];
-    const chunk = sourceChunk.length <= remainingChars
-      ? sourceChunk
-      : clipForPrompt(sourceChunk, remainingChars);
-    selectedSummaryChunks.unshift(chunk);
-    usedChars += chunk.length;
-  }
-
-  for (let i = recentChunks.length - 1; i >= 0; i--) {
-    const remainingChars = maxChars - usedChars;
-    if (remainingChars <= 0) break;
-    const chunk = recentChunks[i];
-    if (selectedChunks.length > 0 && usedChars + chunk.length > maxChars) {
-      break;
-    }
-    if (usedChars + chunk.length > maxChars) {
-      selectedChunks.unshift(clipForPrompt(chunk, remainingChars));
-      break;
-    }
-    selectedChunks.unshift(chunk);
-    usedChars += chunk.length;
-  }
-
-  return [...selectedSummaryChunks, ...selectedChunks].join('\n\n');
+function buildSummaryTranscript(messages: BaseMessage[]): string {
+  // The compaction watermark is derived from the provider's measured input
+  // usage, and the retained suffix is excluded before this point. Pass every
+  // remaining main message to the summarizer: per-message sampling loses facts
+  // before the model can decide what belongs in the durable summary.
+  return buildSummaryItems(messages).join('\n\n');
 }
 
 function buildFallbackSummary(messages: BaseMessage[]): string {
@@ -178,13 +141,9 @@ function buildFallbackSummary(messages: BaseMessage[]): string {
 async function summarizeMessages(params: {
   model: BaseChatModel;
   messages: BaseMessage[];
-  summaryTranscriptChars?: number;
   runnableConfig?: RunnableConfig;
 }): Promise<string> {
-  const transcript = buildSummaryTranscript(
-    params.messages,
-    params.summaryTranscriptChars ?? DEFAULT_SUMMARY_TRANSCRIPT_CHARS,
-  );
+  const transcript = buildSummaryTranscript(params.messages);
   if (!transcript.trim()) {
     return buildFallbackSummary(params.messages);
   }
@@ -234,7 +193,6 @@ export async function compactOrchestratorMessages(params: {
     summary = await summarizeMessages({
       model,
       messages: messagesToSummarize,
-      summaryTranscriptChars: params.options?.summaryTranscriptChars,
       runnableConfig: params.runnableConfig,
     });
   } catch (error) {

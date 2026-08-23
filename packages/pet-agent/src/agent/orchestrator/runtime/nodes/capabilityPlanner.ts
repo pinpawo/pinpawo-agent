@@ -96,10 +96,7 @@ function materializeNextDelegation(params: {
   });
 
   return {
-    messages: [
-      ...materializedDelegation.mainMessages,
-      ...materializedDelegation.laneMessages,
-    ] as BaseMessage[],
+    messages: materializedDelegation.laneMessages as BaseMessage[],
     runNextDelegation,
     runCapabilityPlan: remainingPlan,
     taskActiveDelegation,

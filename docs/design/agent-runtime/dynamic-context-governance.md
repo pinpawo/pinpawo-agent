@@ -311,7 +311,7 @@ Initial contracts:
 | Entry facts | `entryDecision` | synthetic facts message associated with the current decision | read-only facts | Capability registry, task drafts, private lanes |
 | Planner input | Capability Planner | Human input after the stable agent contract | facts and advisory plan | graph-private state, user-task execution tools |
 | Outcome input | `outcomeDecision` | Human input after the stable decision contract | current evidence plus advisory future plan | Capability documents, plan-mutation policy |
-| Answer context | `answer` | current facts after the invocation's canonical-history projection | typed reply mode and ordered accepted results | duplicate current-run handoff, `delegation_started`, arbitrary instruction |
+| Answer context | `answer` | current facts after the invocation's canonical-history projection | typed reply mode and ordered accepted results | duplicate current-run handoff, arbitrary instruction |
 | Delegation briefing | selected Capability | latest synthetic task-boundary message in its private lane | current task boundary | future plan and framework policy |
 | Capability runtime facts | selected Capability | bounded context before the briefing | runtime facts | Capability or Toolkit policy text |
 | Compaction summary | its downstream message consumers | synthetic context preceding newer retained messages | non-authoritative derived context | new policy, terminal meaning, current-user override |

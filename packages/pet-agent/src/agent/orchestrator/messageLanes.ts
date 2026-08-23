@@ -1,8 +1,7 @@
-import { AIMessage, RemoveMessage, type BaseMessage } from '@langchain/core/messages';
+import { RemoveMessage, type BaseMessage } from '@langchain/core/messages';
 import { randomUUID } from 'node:crypto';
 import type { MessageLane, PinpetMessageLane, SubagentAnnounce, SubagentCompletionReason } from './types';
-import type { CapabilityArtifactRef } from '../../types/artifact';
-import { formatHandoffArtifactRefsForMessage } from './artifacts/handoff';
+import { DelegationAnnounceMessage, getDelegationAnnounce } from './delegationAnnounce';
 import { messageHasToolCalls, readMessageToolCallIds, readToolResultCallId } from '../../utils/messages';
 import { readMessageText } from './utils';
 
@@ -154,11 +153,11 @@ export function laneMessages(
 
 /**
  * Build message list for orchestration decision nodes.
- * Decision nodes see the user-facing conversation only: lane-tagged messages
- * are hidden, as are pre-lane delegation briefings identified by system-written
- * provenance. A completed subagent's announce reaches this view because handoff
- * copies it into the main queue with handoff provenance; there is no separate
- * recall from lane-tagged messages.
+ * Decision nodes see the user-facing conversation plus accepted typed delegation
+ * announces. Lane-tagged messages stay private, as do pre-lane delegation
+ * briefings identified by system-written provenance. Consumers project an
+ * accepted announce before model invocation; there is no separate recall from
+ * lane-tagged messages.
  */
 export function mainConversationMessages(messages: BaseMessage[]): BaseMessage[] {
   return messages.filter((message) => (
@@ -258,44 +257,29 @@ export type HandoffSource = {
 };
 
 export function getMessageHandoffSource(message: BaseMessage): HandoffSource | null {
-  const meta = getPinpetMeta(message);
-  const handoffFrom = meta.handoffFrom;
-  const delegationId = meta.delegationId;
-  const runId = meta.runId;
-  const announceMessageId = meta.announceMessageId;
-  if (
-    typeof handoffFrom !== 'string'
-    || !isDelegationLane(handoffFrom as PinpetMessageLane)
-    || typeof delegationId !== 'string'
-    || !delegationId
-    || typeof runId !== 'string'
-    || !runId
-    || typeof announceMessageId !== 'string'
-    || !announceMessageId
-  ) {
-    return null;
-  }
+  const announce = getDelegationAnnounce(message);
+  if (!announce) return null;
   return {
-    handoffFrom: handoffFrom as MessageLane,
-    delegationId,
-    runId,
-    task: typeof meta.task === 'string' ? meta.task : null,
-    announceMessageId,
+    handoffFrom: announce.sourceLane,
+    delegationId: announce.delegationId,
+    runId: announce.transcriptRunId,
+    task: announce.task,
+    announceMessageId: announce.announceMessageId,
   };
 }
 
 /**
  * Build the state-message update for handing a completed subagent delegation
- * back to the main conversation queue.
+ * back to the main conversation queue as a typed announce.
  *
  * This replaces laneMessagesForStateUpdate's "prune in place" approach: instead
- * of leaving the lane-tagged announce mixed into main, we COPY the announce text
- * into a fresh main-queue message (a first-class main message, not lane-tagged)
- * and WIPE the entire delegation's lane (original announce + intermediate
- * transcript). See docs/reference/runtime/subagent-handoffs.md.
+ * of leaving the lane-tagged announce mixed into main, we replace it with one
+ * unlaned DelegationAnnounceMessage that retains the same announce identity and
+ * WIPE the entire delegation's lane (original announce + intermediate
+ * transcript). See docs/design/agent-runtime/delegation-announce-message.md.
  *
  * Returns the messages array update: optionally removes lane messages for this
- * lane+transcriptRunId+delegationId, followed by the main-queue copy.
+ * lane+transcriptRunId+delegationId, followed by the main-queue typed announce.
  * Returns null (no update) when no announce text can be located for the
  * delegation — caller should fall back to leaving state untouched.
  */
@@ -306,10 +290,6 @@ export function buildSubagentHandoff(params: {
   delegationId: string;
   clearLane?: boolean;
   includeCopy?: boolean;
-  artifactRefs?: Pick<
-    CapabilityArtifactRef,
-    'id' | 'kind' | 'mimeType' | 'uri' | 'title' | 'preview' | 'capabilityId' | 'delegationId' | 'runId'
-  >[];
 }): BaseMessage[] | null {
   const announceMessage = readLatestAnnounceMessage(params.messages, {
     transcriptRunId: params.transcriptRunId,
@@ -323,13 +303,6 @@ export function buildSubagentHandoff(params: {
   }
 
   const task = announceMessage ? getMessageDelegatedTask(announceMessage) : null;
-  const artifactRefFooter = params.artifactRefs && params.artifactRefs.length > 0
-    ? formatHandoffArtifactRefsForMessage(params.artifactRefs.map((ref) => ({
-      ...ref,
-      delegationId: params.delegationId,
-      runId: params.transcriptRunId,
-    })))
-    : '';
 
   const clearLane = params.clearLane ?? true;
   const includeCopy = params.includeCopy ?? true;
@@ -349,21 +322,23 @@ export function buildSubagentHandoff(params: {
     return removeMessages;
   }
 
-  // The copy is a first-class main message (no lane), carrying only minimal
-  // provenance so the main agent knows which executor produced it for which task.
-  const handoffCopy = new AIMessage(`${announceText}${artifactRefFooter}`);
-  stampMessageCreatedAtUtc(handoffCopy);
-  setPinpetMeta(handoffCopy, {
-    handoffFrom: params.lane,
+  const handoffAnnounce = new DelegationAnnounceMessage({
+    id: `delegation-announce:${params.transcriptRunId}:${params.delegationId}:${announceMessageId}`,
+    sourceLane: params.lane,
     delegationId: params.delegationId,
-    runId: params.transcriptRunId,
-    task,
+    transcriptRunId: params.transcriptRunId,
     announceMessageId,
+    task,
+    completionReason: announceMessage
+      ? getMessageCompletionReason(announceMessage) ?? 'natural'
+      : 'natural',
+    result: announceText,
+    createdAt: new Date().toISOString(),
   });
 
   return [
     ...removeMessages,
-    handoffCopy,
+    handoffAnnounce,
   ];
 }
 

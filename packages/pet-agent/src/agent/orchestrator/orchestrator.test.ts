@@ -72,6 +72,10 @@ import {
   isContextCompactionMessage,
 } from './contextCompaction';
 import { findLatestHandoffCopyForDelegation } from './artifacts/handoff';
+import {
+  DelegationAnnounceMessage,
+  getDelegationAnnounce,
+} from './delegationAnnounce';
 import type { RunDelegationSummary, TaskActiveDelegation } from './types';
 import type { SubagentRuntimeContext } from '../../types/subagent';
 import {
@@ -4587,21 +4591,27 @@ test('buildSubagentHandoff copies the announce into main and wipes the whole del
 });
 
 test('handoff idempotency is scoped by delegation lane and transcript run id', () => {
-  const oldCopy = new AIMessage('old run result');
-  setPinpetMeta(oldCopy, {
-    handoffFrom: 'capability:general',
+  const oldCopy = new DelegationAnnounceMessage({
+    id: 'stored-old-announce',
+    sourceLane: 'capability:general',
     delegationId: 'same-delegation',
-    runId: 'run-old',
+    transcriptRunId: 'run-old',
     task: 'same task',
     announceMessageId: 'announce-old',
+    completionReason: 'natural',
+    result: 'old run result',
+    createdAt: '2026-08-23T00:00:00.000Z',
   });
-  const currentCopy = new AIMessage('current run result');
-  setPinpetMeta(currentCopy, {
-    handoffFrom: 'capability:general',
+  const currentCopy = new DelegationAnnounceMessage({
+    id: 'stored-current-announce',
+    sourceLane: 'capability:general',
     delegationId: 'same-delegation',
-    runId: 'run-current',
+    transcriptRunId: 'run-current',
     task: 'same task',
     announceMessageId: 'announce-current',
+    completionReason: 'natural',
+    result: 'current run result',
+    createdAt: '2026-08-23T00:00:00.000Z',
   });
 
   assert.equal(
@@ -4626,7 +4636,21 @@ test('handoff idempotency is scoped by delegation lane and transcript run id', (
   );
 });
 
-test('buildSubagentHandoff carries announcement artifact refs', () => {
+test('old handoff metadata is not treated as an accepted delegation result', () => {
+  const oldCopy = new AIMessage('旧 handoff 文本');
+  setPinpetMeta(oldCopy, {
+    handoffFrom: 'capability:general',
+    delegationId: 'old-delegation',
+    runId: 'old-run',
+    task: '旧任务',
+    announceMessageId: 'old-announce',
+  });
+
+  assert.equal(getDelegationAnnounce(oldCopy), null);
+  assert.equal(getMessageHandoffSource(oldCopy), null);
+});
+
+test('buildSubagentHandoff retains only announce identity and result', () => {
   const userAsk = new HumanMessage('请帮我做一次探索');
   const announce = new AIMessage('已整理好探索结果。');
   announce.id = 'm-announce-2';
@@ -4642,37 +4666,13 @@ test('buildSubagentHandoff carries announcement artifact refs', () => {
     lane: 'capability:explore',
     transcriptRunId: 'run-1',
     delegationId: 'd-announce',
-    artifactRefs: [
-      {
-        id: 'artifact-1',
-        kind: 'report',
-        mimeType: 'text/markdown',
-        uri: 'capability-artifact://thread/t1/delegation/d-announce/artifact/artifact-1',
-        title: 'Explore report',
-        preview: '探索报告摘要',
-        capabilityId: 'explore',
-        delegationId: 'd-announce',
-        runId: 'run-1',
-      },
-      {
-        id: 'artifact-2',
-        kind: 'result',
-        mimeType: 'application/json',
-        uri: 'capability-artifact://thread/t1/delegation/d-announce/artifact/artifact-2',
-        capabilityId: 'explore',
-        delegationId: 'd-announce',
-        runId: 'run-1',
-      },
-    ],
   });
   assert.ok(update);
   const copy = update.find((message) => message instanceof AIMessage && message.id !== 'm-announce-2') as AIMessage;
-  const content = String(copy.content);
-  assert.match(content, /<artifacts>/);
-  assert.match(content, /kind=report/);
-  assert.match(content, /capability-artifact:\/\/thread\/t1\/delegation\/d-announce\/artifact\/artifact-1/);
-  assert.match(content, /kind=result/);
-  assert.match(content, /capability-artifact:\/\/thread\/t1\/delegation\/d-announce\/artifact\/artifact-2/);
+  const typed = getDelegationAnnounce(copy);
+  assert.ok(typed);
+  assert.equal(String(copy.content), '已整理好探索结果。');
+  assert.equal('artifactRefs' in typed, false);
   const source = getMessageHandoffSource(copy);
   assert.deepEqual(source, {
     handoffFrom: 'capability:explore',
@@ -4719,102 +4719,6 @@ test('buildSubagentHandoff keeps lane messages when clearLane is disabled', () =
     task: '增量处理',
     announceMessageId: 'm-announce-keep',
   });
-});
-
-test('buildSubagentHandoff appends handoff artifact footer to the main-queue copy', () => {
-  const userAsk = new HumanMessage('请帮我做一次探索');
-  const announce = new AIMessage('探索已完成，产出三条关键结论。');
-  announce.id = 'm-announce-3';
-  setPinpetMeta(announce, {
-    lane: 'capability:explore',
-    runId: 'run-2',
-    delegationId: 'd-announce-2',
-    isAnnounce: true,
-    task: '探索任务',
-  });
-
-  const update = buildSubagentHandoff({
-    messages: [userAsk, announce],
-    lane: 'capability:explore',
-    transcriptRunId: 'run-2',
-    delegationId: 'd-announce-2',
-    artifactRefs: [
-      {
-        id: 'artifact-1',
-        kind: 'report',
-        mimeType: 'text/markdown',
-        uri: 'capability-artifact://thread/t1/delegation/d-announce-2/artifact/artifact-1',
-        title: 'Explore report',
-        preview: '这是一个用于验证 footer 渲染的短 preview。',
-        capabilityId: 'explore',
-        delegationId: 'd-announce-2',
-        runId: 'run-2',
-      },
-      {
-        id: 'artifact-2',
-        kind: 'result',
-        mimeType: 'application/json',
-        uri: 'capability-artifact://thread/t1/delegation/d-announce-2/artifact/artifact-2',
-        capabilityId: 'explore',
-        delegationId: 'd-announce-2',
-        runId: 'run-2',
-      },
-    ],
-  });
-
-  assert.ok(update);
-  const copy = update.find((message) => message instanceof AIMessage && message.id !== 'm-announce-3') as AIMessage;
-  const copyText = String(copy.content);
-  assert.match(copyText, /^探索已完成，产出三条关键结论。/);
-  assert.match(copyText, /<artifacts>[\s\S]*<\/artifacts>\s*$/);
-  assert.equal((copyText.match(/- kind=/g) ?? []).length, 2);
-  assert.match(copyText, /kind=report/);
-  assert.match(copyText, /uri=capability-artifact:\/\/thread\/t1\/delegation\/d-announce-2\/artifact\/artifact-1/);
-});
-
-test('buildSubagentHandoff clips and bounds handoff artifact footer refs', () => {
-  const userAsk = new HumanMessage('请帮我做一次大规模探索');
-  const announce = new AIMessage('探索完成，已产出大量 evidence。');
-  announce.id = 'm-announce-4';
-  setPinpetMeta(announce, {
-    lane: 'capability:explore',
-    runId: 'run-3',
-    delegationId: 'd-announce-3',
-    isAnnounce: true,
-    task: '全量探索',
-  });
-
-  const artifactRefs = Array.from({ length: 9 }).map((_, index) => ({
-    id: `artifact-${index + 1}`,
-    kind: index === 0 ? 'file' as const : index === 1 ? 'result' as const : 'report' as const,
-    mimeType: 'text/markdown',
-    uri: `capability-artifact://thread/t1/delegation/d-announce-3/artifact/${'x'.repeat(250)}-${index + 1}`,
-    title: `这是一个很长的标题，长度会被裁剪 ${'标题'.repeat(40)}-${index + 1}`,
-    preview: `这是一个很长的 preview，会被裁剪，避免 prompt 爆炸。${'文本 '.repeat(120)}-${index + 1}`,
-    capabilityId: 'explore',
-    delegationId: 'd-announce-3',
-    runId: 'run-3',
-  }));
-
-  const update = buildSubagentHandoff({
-    messages: [userAsk, announce],
-    lane: 'capability:explore',
-    transcriptRunId: 'run-3',
-    delegationId: 'd-announce-3',
-    artifactRefs,
-  });
-
-  assert.ok(update);
-  const copy = update.find((message) => message instanceof AIMessage && message.id !== 'm-announce-4') as AIMessage;
-  const copyText = String(copy.content);
-  const footerEntries = copyText.match(/- kind=/g) ?? [];
-  assert.equal(footerEntries.length, 5);
-  const uriLines = copyText.split('\n').filter((line) => line.startsWith('  uri='));
-  assert.equal(uriLines.length, 5);
-  assert.ok(uriLines.every((line) => line.includes('…')));
-  const previewLines = copyText.split('\n').filter((line) => line.startsWith('  preview='));
-  assert.equal(previewLines.length, 5);
-  assert.ok(previewLines.every((line) => line.includes('…')));
 });
 
 test('buildSubagentHandoff returns null when the delegation has no announce text', () => {
@@ -5260,19 +5164,29 @@ test('lane tagging treats briefing-like subagent output as a deliverable, not in
 
 test('main conversation preserves accepted handoffs that begin with briefing formats', () => {
   const handoffs = [
-    new AIMessage('【委派简报】\n- 这是已经验收的普通 handoff 内容'),
-    new AIMessage('<delegation_briefing mode="initial">\n  <task>已验收结果</task>\n</delegation_briefing>'),
-  ];
-  for (const [index, handoff] of handoffs.entries()) {
-    setPinpetMeta(handoff, {
-      source: 'delegation_briefing',
-      handoffFrom: 'capability:general',
+    new DelegationAnnounceMessage({
+      id: 'stored-accepted-briefing-0',
+      sourceLane: 'capability:general',
       delegationId: 'task-accepted-briefing',
-      runId: 'turn-accepted-briefing',
+      transcriptRunId: 'turn-accepted-briefing',
       task: '返回简报格式示例',
-      announceMessageId: `accepted-briefing-${index}`,
-    });
-  }
+      announceMessageId: 'accepted-briefing-0',
+      completionReason: 'natural',
+      result: '【委派简报】\n- 这是已经验收的普通 handoff 内容',
+      createdAt: '2026-08-23T00:00:00.000Z',
+    }),
+    new DelegationAnnounceMessage({
+      id: 'stored-accepted-briefing-1',
+      sourceLane: 'capability:general',
+      delegationId: 'task-accepted-briefing',
+      transcriptRunId: 'turn-accepted-briefing',
+      task: '返回简报格式示例',
+      announceMessageId: 'accepted-briefing-1',
+      completionReason: 'natural',
+      result: '<delegation_briefing mode="initial">\n  <task>已验收结果</task>\n</delegation_briefing>',
+      createdAt: '2026-08-23T00:00:00.000Z',
+    }),
+  ];
 
   const legacyBriefing = new AIMessage('旧 checkpoint 中未打 lane 标的简报。');
   setPinpetMeta(legacyBriefing, { source: 'delegation_briefing' });
@@ -6520,9 +6434,8 @@ test('delegation briefing stays lane-scoped across sequential tasks', async () =
   assert.equal(new Set(starts.map((message) => message.id)).size, 2);
   for (const started of starts) {
     assert.ok(state.messages.some((message) => (
-      getMessageHandoffSource(message) !== null
-      && getMessageTranscriptRunId(message) === getMessageTranscriptRunId(started)
-      && getMessageDelegationId(message) === getMessageDelegationId(started)
+      getMessageHandoffSource(message)?.runId === getMessageTranscriptRunId(started)
+      && getMessageHandoffSource(message)?.delegationId === getMessageDelegationId(started)
     )));
   }
 

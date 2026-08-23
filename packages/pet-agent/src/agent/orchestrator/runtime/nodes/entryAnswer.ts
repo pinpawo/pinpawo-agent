@@ -5,6 +5,7 @@ import { Command, END, Send, START, StateGraph } from '@langchain/langgraph';
 import { ToolNode, toolsCondition } from '@langchain/langgraph/prebuilt';
 import { z } from 'zod';
 import { mainConversationMessages, stampMessageCreatedAtUtc } from '../../messageLanes';
+import { projectDelegationAnnouncesForModel } from '../../delegationAnnounce';
 import { buildEntryAnswerSystemPrompt } from '../../prompts';
 import { OrchestratorState, type OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
@@ -176,7 +177,7 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
       new SystemMessage(buildEntryAnswerSystemPrompt({
         actor: resolveActor(config, runnableConfig),
       })),
-      ...mainConversationMessages(state.messages),
+      ...projectDelegationAnnouncesForModel(mainConversationMessages(state.messages)),
     ];
     let response = await model.invoke(history, runnableConfig);
     if (!AIMessage.isInstance(response)) {

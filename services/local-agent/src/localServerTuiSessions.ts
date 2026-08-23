@@ -144,8 +144,11 @@ function readTuiCheckpointMessageSource(
   }
   if (type === 'human') return { role: 'user' };
   if (!pinpawo || typeof pinpawo !== 'object') return { role: 'assistant' };
-  if (!('handoffFrom' in pinpawo)) return { role: 'assistant' };
-  const runId = (pinpawo as Record<string, unknown>).runId;
+  const announce = (pinpawo as Record<string, unknown>).delegationAnnounce;
+  if (!announce || typeof announce !== 'object' || Array.isArray(announce)) {
+    return { role: 'assistant' };
+  }
+  const runId = (announce as Record<string, unknown>).transcriptRunId;
   return typeof runId === 'string' && runId.trim()
     ? { role: 'subagent', requestId: runId }
     : null;

@@ -9,6 +9,7 @@ import {
   setPinpetMeta,
   toolProtocolSafeMessages,
 } from './messageLanes';
+import { formatDelegationAnnounceForModel, getDelegationAnnounce } from './delegationAnnounce';
 import { clipForPrompt, readMessageText } from './utils';
 import { isDelegationBriefingMessage } from './delegationBriefing';
 import { xmlTextBlock } from './prompts/shared';
@@ -61,6 +62,8 @@ function selectMessagesToKeep(messages: BaseMessage[], keepMessages: number): Ba
 
 function formatMainMessageForSummary(message: BaseMessage): string | null {
   if (isDelegationBriefingMessage(message)) return null;
+  const announce = getDelegationAnnounce(message);
+  if (announce) return formatDelegationAnnounceForModel(announce);
   const text = readMessageText(message);
   if (!text) return null;
   if (isContextCompactionMessage(message)) {

@@ -13,6 +13,7 @@ import {
   readLatestHumanRequest,
   stampMessageCreatedAtUtc,
 } from '../../messageLanes';
+import { getDelegationAnnounce } from '../../delegationAnnounce';
 import {
   buildAnswerInvocationMessages,
   type AnswerAcceptedResult,
@@ -34,17 +35,6 @@ type AcceptedRunResultsProjection = {
   results: AnswerAcceptedResult[];
 };
 
-function stripProjectedArtifactFooter(
-  text: string,
-  artifactRefs: AnswerAcceptedResult['artifactRefs'],
-): string {
-  if (artifactRefs.length === 0) return text;
-  const footer = formatHandoffArtifactRefsForMessage([...artifactRefs]).trimStart();
-  return footer && text.endsWith(footer)
-    ? text.slice(0, -footer.length).trimEnd()
-    : text;
-}
-
 export function projectAcceptedRunResults(params: {
   state: OrchestratorStateType;
   history: BaseMessage[];
@@ -63,6 +53,7 @@ export function projectAcceptedRunResults(params: {
     if (!handoffMessage) continue;
     const source = getMessageHandoffSource(handoffMessage);
     if (!source) continue;
+    const announce = getDelegationAnnounce(handoffMessage);
     const artifactRefs = buildHandoffArtifactRefs(
       params.state.sessionCapabilityArtifacts,
       {
@@ -71,7 +62,7 @@ export function projectAcceptedRunResults(params: {
         capabilityId: readCapabilityNameFromLane(delegation.lane),
       },
     );
-    const result = stripProjectedArtifactFooter(readMessageText(handoffMessage), artifactRefs);
+    const result = announce?.result ?? readMessageText(handoffMessage);
     if (!result) continue;
     for (const matchingHandoff of matchingHandoffs) {
       selectedMessages.add(matchingHandoff);

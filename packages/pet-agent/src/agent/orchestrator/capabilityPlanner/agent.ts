@@ -62,6 +62,10 @@ const ADVANCE_PLAN_TOOL_NAME = 'advance_plan';
 const COMPLETE_GOAL_TOOL_NAME = 'complete_goal';
 const REQUEST_USER_INPUT_TOOL_NAME = 'request_user_input';
 const REPORT_UNAVAILABLE_TOOL_NAME = 'report_unavailable';
+const PLANNER_TERMINAL_COMMIT_REPAIR = [
+  '上一轮回复没有调用任何工具，不能作为 Planner 结果接受，也不会开始执行。',
+  '请重新完成当前规划：可继续调用 capability_search；一旦可以结束本轮，必须调用一个适用的结构化结果工具。不要输出普通文本。',
+].join('\n');
 
 const plannerInvocationStateSchema = z4.object({
   currentInput: z4.custom<CapabilityPlannerInput>(),
@@ -496,7 +500,7 @@ function createPlannerMiddleware(maxSearchRounds: number) {
   return createMiddleware({
     name: 'CapabilityPlanner',
     stateSchema: plannerInvocationStateSchema,
-    wrapModelCall: (request, handler) => {
+    wrapModelCall: async (request, handler) => {
       const input = currentPlannerInput(request.state);
       if (request.state.plannerCommit) {
         return new Command({
@@ -505,15 +509,29 @@ function createPlannerMiddleware(maxSearchRounds: number) {
         });
       }
       const exploration = capabilityExplorationState(request.state, maxSearchRounds);
+      const systemMessage = new SystemMessage(
+        buildCapabilityPlannerAgentSystemPrompt(
+          input.mode,
+          request.state.defaultCapability ?? null,
+          exploration,
+        ),
+      );
+      const response = await handler({
+        ...request,
+        systemMessage,
+      });
+      if (!AIMessage.isInstance(response) || response.tool_calls?.length) {
+        return response;
+      }
+      // Some providers occasionally return a natural-language planner answer
+      // despite the bound terminal tools. Do not persist that invalid answer:
+      // make one same-turn repair attempt with the identical tool contract.
       return handler({
         ...request,
-        systemMessage: new SystemMessage(
-          buildCapabilityPlannerAgentSystemPrompt(
-            input.mode,
-            request.state.defaultCapability ?? null,
-            exploration,
-          ),
-        ),
+        systemMessage: new SystemMessage([
+          String(systemMessage.content),
+          PLANNER_TERMINAL_COMMIT_REPAIR,
+        ].join('\n\n')),
       });
     },
     wrapToolCall: async (request, handler) => {

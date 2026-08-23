@@ -1,13 +1,18 @@
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 
 type TaskStatus = 'waiting' | 'doing' | 'todo' | 'blocked' | 'done';
 
 type Task = {
-  id: string;
-  assignee: string;
-  title: string;
+  taskId: string;
+  assigneeId: string;
+  brief: string;
   status: TaskStatus;
-  summary: string;
+  deps: string[];
+  note?: string;
+  continuation?: {
+    continuationId: string;
+    payload: Record<string, unknown>;
+  };
 };
 
 type EventItem = {
@@ -20,6 +25,26 @@ type EventItem = {
   detail?: string;
 };
 
+type KanbanSnapshot = {
+  tasks: Task[];
+  lastEventSequence: number;
+};
+
+type KanbanHistoryEvent = {
+  sequence: number;
+  taskId: string;
+  eventType: string;
+  note?: string;
+  occurredAt: string;
+};
+
+type StudioEvent = {
+  type: string;
+  source: string;
+  payload?: { taskId?: unknown; note?: unknown };
+  occurredAt: string;
+};
+
 type KnowledgeFile = {
   path: string;
   title: string;
@@ -28,88 +53,8 @@ type KnowledgeFile = {
 
 const statusOrder: TaskStatus[] = ['waiting', 'doing', 'todo', 'blocked', 'done'];
 
-const initialTasks: Task[] = [
-  {
-    id: 'task-024',
-    assignee: 'research-pet',
-    title: 'Review the source shortlist',
-    status: 'waiting',
-    summary: 'Needs approval before external research begins',
-  },
-  {
-    id: 'task-023',
-    assignee: 'writer-pet',
-    title: 'Draft the project brief',
-    status: 'doing',
-    summary: 'Depends on the source shortlist',
-  },
-  {
-    id: 'task-022',
-    assignee: 'planner-pet',
-    title: 'Prepare launch milestones',
-    status: 'todo',
-    summary: 'Ready after the project brief',
-  },
-  {
-    id: 'task-018',
-    assignee: 'ops-pet',
-    title: 'Validate workspace access',
-    status: 'blocked',
-    summary: 'Workspace credential is unavailable',
-  },
-  {
-    id: 'task-017',
-    assignee: 'planner-pet',
-    title: 'Create the initial work plan',
-    status: 'done',
-    summary: 'Completed 14:02',
-  },
-];
-
-const initialEvents: EventItem[] = [
-  {
-    id: 'evt-001',
-    time: '14:18:42',
-    source: 'studio',
-    type: 'dispatch.accepted',
-    message: 'Goal accepted by the planning runner',
-    detail: 'The browser has only received acknowledgement. Execution remains owned by the runner.',
-  },
-  {
-    id: 'evt-002',
-    time: '14:18:43',
-    source: 'kanban',
-    type: 'task.created',
-    taskId: 'task-024',
-    message: 'Review the source shortlist',
-  },
-  {
-    id: 'evt-003',
-    time: '14:18:44',
-    source: 'kanban',
-    type: 'task.waiting',
-    taskId: 'task-024',
-    message: 'Waiting for human authorization',
-    detail: 'Requested action: permit the research runner to use the configured external source adapter.',
-  },
-  {
-    id: 'evt-004',
-    time: '14:18:55',
-    source: 'writer-pet',
-    type: 'task.claimed',
-    taskId: 'task-023',
-    message: 'Drafting project brief',
-  },
-  {
-    id: 'evt-005',
-    time: '14:19:07',
-    source: 'ops-pet',
-    type: 'task.blocked',
-    taskId: 'task-018',
-    message: 'Workspace credential is unavailable',
-    detail: 'This is a static demo. A live Console would receive the persisted block reason from Kanban.',
-  },
-];
+const studioHttpUrl = import.meta.env.VITE_STUDIO_HTTP_URL?.replace(/\/$/, '');
+const studioHttpToken = import.meta.env.VITE_STUDIO_HTTP_TOKEN;
 
 const knowledgeFiles: KnowledgeFile[] = [
   {
@@ -133,24 +78,23 @@ function statusLabel(status: TaskStatus): string {
   return status === 'todo' ? 'queued' : status;
 }
 
-function nextTaskId(tasks: Task[]): string {
-  const largest = tasks.reduce((current, task) => Math.max(current, Number(task.id.slice(5))), 24);
-  return `task-${String(largest + 1).padStart(3, '0')}`;
-}
-
 export function App() {
-  const [tasks, setTasks] = useState(initialTasks);
-  const [events, setEvents] = useState(initialEvents);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [events, setEvents] = useState<EventItem[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string>();
   const [selectedEventId, setSelectedEventId] = useState<string>();
   const [selectedKnowledgePath, setSelectedKnowledgePath] = useState(knowledgeFiles[0].path);
-  const [dispatchTarget, setDispatchTarget] = useState('planner-pet');
+  const [dispatchTarget, setDispatchTarget] = useState('');
   const [dispatchGoal, setDispatchGoal] = useState('');
-  const [notice, setNotice] = useState('Static prototype · no runtime connection');
+  const [resumePayload, setResumePayload] = useState('{\n  \n}');
+  const [notice, setNotice] = useState(
+    studioHttpUrl && studioHttpToken ? 'Connecting to Studio HTTP…' : 'Set VITE_STUDIO_HTTP_URL and VITE_STUDIO_HTTP_TOKEN to connect.',
+  );
+  const [connected, setConnected] = useState(false);
 
   const selectedKnowledge = knowledgeFiles.find((file) => file.path === selectedKnowledgePath) ?? knowledgeFiles[0];
-  const selectedTask = tasks.find((task) => task.id === selectedTaskId);
-  const waitingTask = tasks.find((task) => task.status === 'waiting');
+  const selectedTask = tasks.find((task) => task.taskId === selectedTaskId);
+  const waitingTask = tasks.find((task) => task.status === 'waiting' && task.continuation);
   const visibleEvents = selectedTaskId
     ? events.filter((event) => event.taskId === selectedTaskId)
     : events;
@@ -159,57 +103,149 @@ export function App() {
     [tasks],
   );
 
-  function appendEvent(event: EventItem) {
-    setEvents((current) => [...current, event]);
-  }
+  useEffect(() => {
+    if (!studioHttpUrl || !studioHttpToken) return undefined;
+    const abort = new AbortController();
+    let historySequence = 0;
+    const headers = { Authorization: `Bearer ${studioHttpToken}` };
 
-  function resolveAuthorization(decision: 'approved' | 'rejected') {
-    if (!waitingTask) {
+    const refresh = async () => {
+      const [snapshotResponse, historyResponse] = await Promise.all([
+        fetch(`${studioHttpUrl}/kanban`, { headers, signal: abort.signal }),
+        fetch(`${studioHttpUrl}/kanban/events?after=${historySequence.toString()}`, {
+          headers,
+          signal: abort.signal,
+        }),
+      ]);
+      if (!snapshotResponse.ok || !historyResponse.ok) {
+        throw new Error(`Kanban HTTP request failed (${snapshotResponse.status.toString()}/${historyResponse.status.toString()}).`);
+      }
+      const snapshot = await snapshotResponse.json() as KanbanSnapshot;
+      const history = await historyResponse.json() as { events: KanbanHistoryEvent[] };
+      setTasks(snapshot.tasks);
+      if (history.events.length > 0) {
+        historySequence = history.events.at(-1)?.sequence ?? historySequence;
+        setEvents((current) => [
+          ...current,
+          ...history.events.map((item) => ({
+            id: `kanban-${item.sequence.toString()}`,
+            time: new Date(item.occurredAt).toLocaleTimeString(),
+            source: 'kanban',
+            type: `task.${item.eventType}`,
+            taskId: item.taskId,
+            message: item.note ?? item.eventType,
+          })),
+        ].filter((item, index, items) => items.findIndex(({ id }) => id === item.id) === index));
+      }
+      setConnected(true);
+      setNotice('Connected to Studio HTTP.');
+    };
+
+    const run = async () => {
+      try {
+        await refresh();
+        const response = await fetch(`${studioHttpUrl}/events`, {
+          headers,
+          signal: abort.signal,
+        });
+        if (!response.ok || !response.body) throw new Error(`Studio SSE request failed (${response.status.toString()}).`);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let pending = '';
+        while (!abort.signal.aborted) {
+          const next = await reader.read();
+          if (next.done) break;
+          pending += decoder.decode(next.value, { stream: true });
+          let boundary = pending.indexOf('\n\n');
+          while (boundary >= 0) {
+            const block = pending.slice(0, boundary);
+            pending = pending.slice(boundary + 2);
+            const data = block.split('\n').find((line) => line.startsWith('data:'))?.slice(5).trimStart();
+            if (data) {
+              const event = JSON.parse(data) as StudioEvent;
+              setEvents((current) => [...current, {
+                id: `studio-${event.occurredAt}-${event.type}`,
+                time: new Date(event.occurredAt).toLocaleTimeString(),
+                source: event.source,
+                type: event.type,
+                taskId: typeof event.payload?.taskId === 'string' ? event.payload.taskId : undefined,
+                message: typeof event.payload?.note === 'string' ? event.payload.note : event.type,
+              }]);
+              if (event.source === 'kanban') await refresh();
+            }
+            boundary = pending.indexOf('\n\n');
+          }
+        }
+      } catch (error) {
+        if (!abort.signal.aborted) {
+          setConnected(false);
+          setNotice(error instanceof Error ? error.message : String(error));
+        }
+      }
+    };
+    void run();
+    return () => abort.abort();
+  }, []);
+
+  async function dispatch(input: Record<string, unknown>, petId: string): Promise<void> {
+    if (!studioHttpUrl || !studioHttpToken) {
+      setNotice('Studio HTTP connection is not configured.');
       return;
     }
-
-    const nextStatus: TaskStatus = decision === 'approved' ? 'doing' : 'blocked';
-    setTasks((current) => current.map((task) => task.id === waitingTask.id ? { ...task, status: nextStatus } : task));
-    appendEvent({
-      id: `evt-${String(events.length + 1).padStart(3, '0')}`,
-      time: new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date()),
-      source: 'console-demo',
-      type: `authorization.${decision}`,
-      taskId: waitingTask.id,
-      message: decision === 'approved' ? 'Authorization approved in the static prototype' : 'Authorization rejected in the static prototype',
-      detail: 'This updates in-memory demo data only. A connected Console will call an interaction adapter instead.',
+    const response = await fetch(`${studioHttpUrl}/dispatch`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${studioHttpToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ petId, input }),
     });
-    setNotice(`Static authorization ${decision}; no checkpoint was resumed.`);
+    if (!response.ok) {
+      const body = await response.json().catch(() => null) as { error?: string } | null;
+      throw new Error(body?.error ?? `Studio dispatch failed (${response.status.toString()}).`);
+    }
   }
 
-  function submitDispatch(event: FormEvent<HTMLFormElement>) {
+  async function resumeContinuation(): Promise<void> {
+    if (!waitingTask?.continuation) return;
+    let payload: unknown;
+    try {
+      payload = JSON.parse(resumePayload) as unknown;
+    } catch {
+      setNotice('Resume payload must be valid JSON.');
+      return;
+    }
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      setNotice('Resume payload must be a JSON object.');
+      return;
+    }
+    try {
+      await dispatch({
+        kind: 'resume',
+        continuationId: waitingTask.continuation.continuationId,
+        payload,
+      }, waitingTask.assigneeId);
+      setNotice(`Resume accepted for ${waitingTask.taskId}.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function submitDispatch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const goal = dispatchGoal.trim();
-    if (!goal) {
-      setNotice('Enter a goal before sending the static dispatch.');
+    const target = dispatchTarget.trim();
+    if (!goal || !target) {
+      setNotice('Enter both a Pet target and a goal before dispatching.');
       return;
     }
-
-    const id = nextTaskId(tasks);
-    setTasks((current) => [...current, {
-      id,
-      assignee: dispatchTarget,
-      title: goal,
-      status: 'todo',
-      summary: 'Created locally by the static dispatch composer',
-    }]);
-    appendEvent({
-      id: `evt-${String(events.length + 1).padStart(3, '0')}`,
-      time: new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date()),
-      source: 'console-demo',
-      type: 'dispatch.preview',
-      taskId: id,
-      message: `Static dispatch prepared for ${dispatchTarget}`,
-      detail: 'This demo creates only local state. The future dispatch adapter will submit the goal to its configured host.',
-    });
-    setSelectedTaskId(undefined);
-    setDispatchGoal('');
-    setNotice(`Created ${id} in local prototype state.`);
+    try {
+      await dispatch({ kind: 'request', request: goal }, target);
+      setDispatchGoal('');
+      setNotice(`Dispatch accepted by ${target}.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    }
   }
 
   return (
@@ -219,11 +255,11 @@ export function App() {
           <span className="brand-mark">◎</span>
           <span>kanban console</span>
           <span className="separator">/</span>
-          <span className="instance-name">local prototype</span>
+          <span className="instance-name">local control plane</span>
         </div>
         <div className="connection-state" title={notice}>
-          <span className="connection-dot" />
-          STATIC DATA
+          <span className={`connection-dot ${connected ? 'connected' : ''}`} />
+          {connected ? 'LIVE' : 'OFFLINE'}
         </div>
       </header>
 
@@ -245,17 +281,17 @@ export function App() {
                     <div className="task-list">
                       {group.tasks.map((task) => (
                         <button
-                          className={`task-row ${selectedTaskId === task.id ? 'selected' : ''}`}
-                          key={task.id}
-                          onClick={() => setSelectedTaskId((current) => current === task.id ? undefined : task.id)}
-                          title={task.summary}
+                          className={`task-row ${selectedTaskId === task.taskId ? 'selected' : ''}`}
+                          key={task.taskId}
+                          onClick={() => setSelectedTaskId((current) => current === task.taskId ? undefined : task.taskId)}
+                          title={task.note ?? task.brief}
                           type="button"
                         >
                           <span className={`status-dot status-${task.status}`} />
-                          <span className="task-id">{task.id}</span>
+                          <span className="task-id">{task.taskId}</span>
                           <span className="task-copy">
-                            <strong>{task.title}</strong>
-                            <small>{task.assignee} · {task.summary}</small>
+                            <strong>{task.brief}</strong>
+                            <small>{task.assigneeId}{task.note ? ` · ${task.note}` : ''}</small>
                           </span>
                         </button>
                       ))}
@@ -294,24 +330,27 @@ export function App() {
 
         <section className="main-panel">
           <section className={`authorization panel ${waitingTask ? '' : 'empty'}`}>
-            <div className="authorization-label">AUTHORIZATION</div>
+            <div className="authorization-label">CONTINUATION</div>
             {waitingTask ? (
               <>
                 <div className="authorization-copy">
                   <span className="status-dot status-waiting" />
                   <div>
-                    <strong>{waitingTask.id} · {waitingTask.title}</strong>
-                    <p>{waitingTask.summary}</p>
+                    <strong>{waitingTask.taskId} · {waitingTask.brief}</strong>
+                    <p>{waitingTask.note ?? 'Pet is waiting for a continuation input.'}</p>
                   </div>
                 </div>
                 <div className="authorization-actions">
-                  <button className="quiet-button" onClick={() => setNotice('Static detail: this will be supplied by the interaction adapter.')} type="button">DETAILS</button>
-                  <button className="reject-button" onClick={() => resolveAuthorization('rejected')} type="button">REJECT</button>
-                  <button className="approve-button" onClick={() => resolveAuthorization('approved')} type="button">APPROVE</button>
+                  <textarea
+                    aria-label="Opaque continuation payload"
+                    onChange={(event) => setResumePayload(event.target.value)}
+                    value={resumePayload}
+                  />
+                  <button className="approve-button" onClick={() => void resumeContinuation()} type="button">RESUME</button>
                 </div>
               </>
             ) : (
-              <p>No authorization action is waiting.</p>
+              <p>No Pet continuation is waiting.</p>
             )}
           </section>
 
@@ -347,11 +386,7 @@ export function App() {
 
       <form className="dispatch-bar" onSubmit={submitDispatch}>
         <label htmlFor="dispatch-target">DISPATCH</label>
-        <select id="dispatch-target" onChange={(event) => setDispatchTarget(event.target.value)} value={dispatchTarget}>
-          <option>planner-pet</option>
-          <option>research-pet</option>
-          <option>writer-pet</option>
-        </select>
+        <input id="dispatch-target" onChange={(event) => setDispatchTarget(event.target.value)} placeholder="pet id" value={dispatchTarget} />
         <input aria-label="Dispatch goal" onChange={(event) => setDispatchGoal(event.target.value)} placeholder="Describe the next goal…" value={dispatchGoal} />
         <button type="submit">SEND</button>
       </form>

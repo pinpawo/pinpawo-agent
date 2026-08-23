@@ -9,8 +9,8 @@ import type {
   PetAgentRuntimeInvokeResult,
 } from './types';
 
-const pendingInterrupt = {
-  interruptId: 'interrupt-1',
+const pendingContinuation = {
+  continuationId: 'continuation-1',
   payload: {
     kind: 'human_review' as const,
     interactions: [{
@@ -206,7 +206,7 @@ test('a dispatch cancelled while queued never invokes its Pet', async () => {
   assert.deepEqual(started, ['first']);
 });
 
-test('a durable interrupt settles its invocation and admits a later resume', async () => {
+test('a durable continuation settles its invocation and admits a later resume', async () => {
   const inputs: PetAgentRuntimeInvokeInput[] = [];
   const studio = await createStudio({
     studioId: 's1',
@@ -216,7 +216,7 @@ test('a durable interrupt settles its invocation and admits a later resume', asy
       invoke: async (input) => {
         inputs.push(input);
         return input.input.kind === 'request'
-          ? { status: 'pending_interrupt', pendingInterrupt }
+          ? { status: 'waiting', pendingContinuation }
           : { status: 'completed', reply: 'resumed' };
       },
     })],
@@ -224,12 +224,12 @@ test('a durable interrupt settles its invocation and admits a later resume', asy
 
   const initial = await studio.dispatch(request('worker', 'needs review'));
   const waiting = await initial.completion;
-  assert.equal(waiting.status, 'pending_interrupt');
+  assert.equal(waiting.status, 'waiting');
   const resumed = await studio.dispatch({
     petId: 'worker',
     input: {
-      kind: 'resume_interrupt',
-      interruptId: 'interrupt-1',
+      kind: 'resume',
+      continuationId: 'continuation-1',
       payload: {
         kind: 'human_review_response',
         responses: [{ interactionId: 'review-1', selectedOptionId: 'approve' }],
@@ -240,7 +240,7 @@ test('a durable interrupt settles its invocation and admits a later resume', asy
   assert.equal(completed.status, 'completed');
   assert.equal(resumed.threadId, initial.threadId);
   assert.notEqual(resumed.invocationId, initial.invocationId);
-  assert.deepEqual(inputs.map((item) => item.input.kind), ['request', 'resume_interrupt']);
+  assert.deepEqual(inputs.map((item) => item.input.kind), ['request', 'resume']);
 });
 
 test('a restarted Studio resolves the same Pet thread and can resume its pending work', async () => {
@@ -252,10 +252,10 @@ test('a restarted Studio resolves the same Pet thread and can resume its pending
       invokedThreads.push(input.threadId);
       if (input.input.kind === 'request') {
         waiting = true;
-        return { status: 'pending_interrupt', pendingInterrupt };
+        return { status: 'waiting', pendingContinuation };
       }
       assert.equal(waiting, true);
-      assert.equal(input.input.interruptId, 'interrupt-1');
+      assert.equal(input.input.continuationId, 'continuation-1');
       waiting = false;
       return { status: 'completed', reply: 'resumed after restart' };
     },
@@ -266,7 +266,7 @@ test('a restarted Studio resolves the same Pet thread and can resume its pending
     pets: [createResidentPet()],
   });
   const first = await firstStudio.dispatch(request('worker', 'start'));
-  assert.equal((await first.completion).status, 'pending_interrupt');
+  assert.equal((await first.completion).status, 'waiting');
   await firstStudio.shutdown();
 
   const restartedStudio = await createStudio({
@@ -277,8 +277,8 @@ test('a restarted Studio resolves the same Pet thread and can resume its pending
   const resumed = await restartedStudio.dispatch({
     petId: 'worker',
     input: {
-      kind: 'resume_interrupt',
-      interruptId: 'interrupt-1',
+      kind: 'resume',
+      continuationId: 'continuation-1',
       payload: {
         kind: 'human_review_response',
         responses: [{ interactionId: 'review-1', selectedOptionId: 'approve' }],
@@ -355,7 +355,7 @@ test('Host invocation events carry identity, metadata, and pending projection', 
     entryPetId: 'worker',
     pets: [pet({
       petId: 'worker',
-      invoke: async () => ({ status: 'pending_interrupt', pendingInterrupt }),
+      invoke: async () => ({ status: 'waiting', pendingContinuation }),
     })],
   });
   studio.onInvocation((event) => {
@@ -371,7 +371,7 @@ test('Host invocation events carry identity, metadata, and pending projection', 
   });
   await receipt.completion;
   await flush();
-  assert.deepEqual(events.map(({ status }) => status), ['busy', 'pending_interrupt']);
+  assert.deepEqual(events.map(({ status }) => status), ['busy', 'waiting']);
   assert.ok(events.every(({ invocationId }) => invocationId === receipt.invocationId));
   assert.ok(events.every(({ taskId }) => taskId === 'task-1'));
 });

@@ -12,13 +12,13 @@ import type { PetAgentRuntime } from '../types';
 import {
   buildLocalAgentModels,
   buildLocalAgentRuntimeConfig,
+  createResidentPetAgentRuntime,
   resolveLlmGenerationReserveTokens,
   type LocalModelProfileRegistry,
 } from 'pinpawo/host-runtime';
 import { loadPetLocalConfigs } from './petConfig';
 import { loadStudioLocalConfig, resolveStudio, type ResolvedStudio } from './studioConfig';
 import { buildPetActorFromLocalConfig } from './petActor';
-import { createPetAgentRuntime } from './createPetAgentRuntime';
 
 /**
  * 当前 workdir 下没有 .pinpawo/studio.json 时抛此错。
@@ -173,7 +173,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
       petCapabilityNames.add(capability.name);
     }
 
-    return createPetAgentRuntime({
+    return createResidentPetAgentRuntime({
       models: petModels,
       modelInputModalities: petLlmConfig.inputModalities ?? ['text'],
       actor: buildPetActorFromLocalConfig(petConfig, input.ownerUserId),

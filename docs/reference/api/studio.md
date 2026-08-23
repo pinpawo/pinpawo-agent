@@ -46,14 +46,7 @@ type StudioDispatchRequest = {
   petId: string;
   input:
     | { kind: 'request'; request: string }
-    | {
-        kind: 'resume_interrupt';
-        interruptId: string;
-        payload: {
-          kind: 'human_review_response';
-          responses: HumanReviewResponse[];
-        };
-      };
+    | { kind: 'resume'; continuationId: string; payload: JsonObject };
   metadata?: JsonObject;
   idempotencyKey?: string;
   signal?: AbortSignal;
@@ -72,10 +65,10 @@ type StudioDispatchResult = {
   petId: string;
   threadId: string;
   invocationId: string;
-  status: 'completed' | 'pending_interrupt' | 'failed' | 'cancelled';
+  status: 'completed' | 'waiting' | 'failed' | 'cancelled';
   metadata?: JsonObject;
   output?: string;
-  pendingInterrupt?: PendingInterruptProjection;
+  pendingContinuation?: PendingContinuationProjection;
   error?: string;
 };
 
@@ -97,11 +90,11 @@ Its `onInvocation()` observer is scoped to this invocation and immediately
 replays the latest known event, so transport adapters can acknowledge first and
 still observe progress that raced receipt delivery.
 
-One Pet executes at most one invocation at a time. A durable interrupt settles
-the current invocation as `pending_interrupt` and releases the queue slot. A
-later typed resume creates a different invocation on the same Pet thread. The
-Pet runtime validates the interrupt against its authoritative checkpoint; a
-stale resume fails without mutating it.
+One Pet executes at most one invocation at a time. A durable continuation
+settles the current invocation as `waiting` and releases the queue slot. A later
+typed resume creates a different invocation on the same Pet thread. The Pet
+runtime validates the continuation against its authoritative checkpoint; a stale
+resume fails without mutating it.
 
 Producer `metadata` is opaque and is copied into receipts, results, and
 invocation events. It never replaces Studio, Pet, thread, invocation, or
@@ -173,10 +166,10 @@ type StudioInvocationEvent = {
   petId: string;
   threadId: string;
   invocationId: string;
-  status: 'busy' | 'completed' | 'pending_interrupt' | 'failed' | 'cancelled';
+  status: 'busy' | 'completed' | 'waiting' | 'failed' | 'cancelled';
   metadata?: JsonObject;
   output?: string;
-  pendingInterrupt?: PendingInterruptProjection;
+  pendingContinuation?: PendingContinuationProjection;
   error?: string;
 };
 ```
@@ -206,7 +199,7 @@ type PetAgentRuntime = {
   descriptor(): PetAgentRuntimeDescriptor;
   invoke(input: PetAgentRuntimeInvokeInput): Promise<
     | { status: 'completed'; reply: string }
-    | { status: 'pending_interrupt'; pendingInterrupt: PendingInterruptProjection }
+    | { status: 'waiting'; pendingContinuation: PendingContinuationProjection }
   >;
   gate(): 'open' | 'busy' | 'waiting' | 'blocked';
   onGateChange(listener: (state: PetGateState) => void): () => void;

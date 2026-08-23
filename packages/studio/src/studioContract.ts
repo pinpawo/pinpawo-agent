@@ -28,7 +28,7 @@ import type {
   StudioInvocationEventHandler,
 } from './studioInvocation';
 export type {
-  PendingInterruptProjection,
+  PendingContinuationProjection,
   StudioDispatchInput,
   StudioDispatchReceipt,
   StudioDispatchRequest,

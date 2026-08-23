@@ -7,6 +7,20 @@
  * import a concrete Host (Chat or Studio) or an optional Studio module.
  */
 export { buildLocalAgentModels, resolveLlmGenerationReserveTokens } from './agentModels';
+export { createResidentPetAgentRuntime } from './residentPetAgentRuntime';
+export type {
+  ResidentPetAgentCapabilitySummary,
+  ResidentPetAgentRuntimeConfig,
+  ResidentPetAgentStartupMode,
+  ResidentPetAgentStatus,
+  ResidentPetContinuation,
+  ResidentPetDispatchInput,
+  ResidentPetGateState,
+  ResidentPetRuntime,
+  ResidentPetRuntimeDescriptor,
+  ResidentPetRuntimeInvokeInput,
+  ResidentPetRuntimeInvokeResult,
+} from './residentPetAgentRuntime';
 export { createExploreCapability } from './capabilities/explore/index';
 export { loadCapabilityDirectory } from './capabilityLoader';
 export { HostCapabilityCatalog } from './hostCapabilityCatalog';

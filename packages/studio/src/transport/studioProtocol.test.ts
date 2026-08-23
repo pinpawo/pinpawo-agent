@@ -21,14 +21,14 @@ test('Studio protocol parses a typed request dispatch', () => {
   });
 });
 
-test('Studio protocol parses review resume and rejects invalid payloads', () => {
+test('Studio protocol parses an opaque continuation resume and rejects invalid envelopes', () => {
   assert.ok(parseStudioClientMessage({
     type: 'studio.dispatch',
     deliveryId: 'delivery-1',
     petId: 'writer',
     input: {
-      kind: 'resume_interrupt',
-      interruptId: 'interrupt-1',
+      kind: 'resume',
+      continuationId: 'continuation-1',
       payload: {
         kind: 'human_review_response',
         responses: [{ interactionId: 'review-1', selectedOptionId: 'approve' }],
@@ -40,8 +40,8 @@ test('Studio protocol parses review resume and rejects invalid payloads', () => 
     deliveryId: 'delivery-1',
     petId: 'writer',
     input: {
-      kind: 'resume_interrupt',
-      interruptId: 'interrupt-1',
+      kind: 'resume',
+      continuationId: '',
       payload: { kind: 'human_review_response', responses: [] },
     },
   }), null);

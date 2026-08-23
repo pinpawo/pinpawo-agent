@@ -71,7 +71,7 @@ Agent 是接收 invocation 并执行任务的运行单元。它负责：
 - 通过 Host 注入的通用 manager 获取 Toolkit execution bindings。
 
 Agent 不读取 Host 配置，不拥有 Browser、shell、git 等专属生命周期，也不在
-graph state 之外维护第二份 Toolkit 业务状态。独立 `createPetAgentRuntime()`
+graph state 之外维护第二份 Toolkit 业务状态。独立 `createResidentPetAgentRuntime()`
 在没有外部 Host 时可以创建私有 manager；这只是工厂代行最小 Host 所有权，
 不把 Toolkit Runtime 变成 Agent 领域概念。
 
@@ -101,11 +101,11 @@ Host 配置中的全局 review mode 仍属于 Host Configuration；Toolkit 只�
 规则。Human review 的请求/响应属于 Agent 与交互边界，不能因此把全局配置或
 交互状态搬进 Toolkit。
 
-`StudioPlugin` 是高于 Toolkit 的 Studio 扩展装配形态，不是第五个 Agent 扩展领域，
-也不是 `AgentToolkit` 的子类型。Plugin 可以通过明确的 `toolkits` 定义出口提供零个或
-多个 Toolkit；这些定义必须先进入 Host 的统一 Toolkit inventory，再由 Agent 侧的
-`Capability.uses` 选择。Studio lifecycle 只负责 Plugin 在 Studio 中的启停、dispatch
-和 notification。
+`StudioPlugin` 是 Studio control-plane 扩展形态，不是第五个 Agent 扩展领域，也不是
+`AgentToolkit` 的子类型。它可以通过 `toolkits` 定义出口声明零个或多个 Toolkit；Host 将
+它们纳入统一 inventory，Agent 侧再由 `Capability.uses` 选择。Plugin lifecycle 只使用
+Studio context 的 dispatch、event 与 hook，不能参与 Capability 选择或 Pet runtime 装配。详见
+[Studio Plugin control-plane boundary](studio/plugin-control-plane-boundary.md)。
 
 Capability 完全属于 Agent。Plugin 和 Studio 都不得注册、贡献或隐式附带 Capability；
 即使某个 Capability 会使用 Plugin 定义的 Toolkit，也必须由 Agent Host 独立装配。

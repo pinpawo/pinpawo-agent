@@ -21,6 +21,7 @@ button { cursor: pointer; }
 .connection-state, .read-only { display: inline-flex; align-items: center; gap: 7px; color: #85aeb0; font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .06em; }
 .connection-dot, .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #657376; flex: 0 0 auto; }
 .connection-dot { background: #e0ac54; box-shadow: 0 0 0 3px rgba(224, 172, 84, .1); }
+.connection-dot.connected { background: #69bd93; box-shadow: 0 0 0 3px rgba(105, 189, 147, .1); }
 
 .workspace { min-height: 0; display: grid; grid-template-columns: 38% 62%; }
 .sidebar { min-height: 0; border-right: 1px solid #263235; display: grid; grid-template-rows: minmax(0, 1fr) 35%; }
@@ -59,6 +60,7 @@ button { cursor: pointer; }
 .authorization-copy strong { display: block; color: #e5ecea; font-size: 14px; }
 .authorization-copy p, .authorization > p { margin: 5px 0 0; color: #8b9a9a; font-size: 12px; }
 .authorization-actions { display: flex; gap: 7px; }
+.authorization-actions textarea { width: 260px; min-height: 56px; resize: vertical; padding: 7px; color: #c7d7d5; border: 1px solid #344448; border-radius: 3px; background: #0d1315; font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .authorization-actions button, .events-heading button, .dispatch-bar button { border: 1px solid #344448; padding: 8px 10px; color: #c7d7d5; background: #162024; border-radius: 3px; font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .05em; }
 .authorization-actions button:hover, .events-heading button:hover { filter: brightness(1.15); }
 .authorization-actions .approve-button { color: #bdf1d2; border-color: #3f7960; background: #173326; }.authorization-actions .reject-button { color: #f0bbb7; border-color: #784945; background: #331e1e; }
@@ -71,6 +73,6 @@ button { cursor: pointer; }
 .event-item { border-bottom: 1px solid rgba(38, 50, 53, .65); }.event-row { width: 100%; padding: 12px 16px; color: #d0d8d7; border: 0; background: transparent; text-align: left; }.event-row:hover, .event-item.expanded .event-row { background: #162123; }
 .event-source { color: #81a8a9; }.event-type { color: #5bced3; }.event-task { color: #d9b968; }.event-message { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }.event-detail { margin: 0; padding: 0 16px 13px 440px; color: #92a1a0; font-size: 12px; line-height: 1.5; }.empty-stream { margin: 30px 16px; color: #78888a; font-size: 13px; }
 
-.dispatch-bar { border-top: 1px solid #263235; }.dispatch-bar label { color: #65cbd0; font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .1em; }.dispatch-bar select, .dispatch-bar input { height: 36px; border: 1px solid #2f3f42; border-radius: 3px; color: #cfdbd9; background: #0d1315; }.dispatch-bar select { width: 142px; padding: 0 9px; font: 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }.dispatch-bar input { min-width: 0; flex: 1; padding: 0 12px; font-size: 13px; }.dispatch-bar input:focus, .dispatch-bar select:focus { outline: 1px solid #56bbc0; border-color: #56bbc0; }.dispatch-bar button { height: 36px; color: #c7f7f2; border-color: #3f7e82; background: #163c3f; }.dispatch-bar button:hover { background: #1b5155; }
+.dispatch-bar { border-top: 1px solid #263235; }.dispatch-bar label { color: #65cbd0; font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .1em; }.dispatch-bar input { height: 36px; border: 1px solid #2f3f42; border-radius: 3px; color: #cfdbd9; background: #0d1315; }.dispatch-bar input:first-of-type { width: 142px; flex: 0 0 142px; padding: 0 9px; font: 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }.dispatch-bar input:last-of-type { min-width: 0; flex: 1; padding: 0 12px; font-size: 13px; }.dispatch-bar input:focus { outline: 1px solid #56bbc0; border-color: #56bbc0; }.dispatch-bar button { height: 36px; color: #c7f7f2; border-color: #3f7e82; background: #163c3f; }.dispatch-bar button:hover { background: #1b5155; }
 
 @media (max-width: 1120px) { body::before { content: 'Kanban Console needs a desktop width of at least 1120px for this prototype.'; position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 32px; color: #d9e4e2; background: #101517; text-align: center; font: 16px/1.5 ui-sans-serif, system-ui, sans-serif; } }

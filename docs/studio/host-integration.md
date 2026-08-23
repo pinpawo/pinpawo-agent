@@ -52,10 +52,10 @@ memory and may remain pending until an external interaction adapter dispatches
 a resume to the same stable Pet thread.
 
 The built-in Studio transport does not accept Chat review/session messages. It
-does accept Studio's own typed `resume_interrupt` dispatch. An independent
-Studio Plugin or Host adapter can consume pending invocation events, interact
-with a user, and submit that typed resume. The Pet runtime remains the component
-that validates the checkpoint and constructs the graph command.
+does accept Studio's own typed `resume` dispatch. An independent Studio Plugin
+or Host adapter can consume waiting invocation events, interact with a user, and
+submit that typed resume. The Pet runtime remains the component that validates
+the checkpoint and constructs the graph command.
 
 ## Wire behavior
 
@@ -66,7 +66,7 @@ and current `invocationId`. This is an acknowledgement, not a final answer.
 The historical Chat `studio_request` shape is not accepted.
 
 The handler subscribes to the accepted receipt and forwards its invocation
-changes as `studio.invocation`, including completed, pending interrupt, failure,
+changes as `studio.invocation`, including completed, waiting, failure,
 and cancellation. Receipt observation replays the latest state, so progress
 that races acknowledgement is still delivered after `studio.accepted`.
 

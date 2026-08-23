@@ -31,6 +31,8 @@ Chat Host                         Studio Host
 facade。`local-server-transport` 只暴露 protocol-neutral framing、peer 与 loopback
 认证原语；Chat 与 Studio 分别拥有自己的 message contract、parser 和 dispatcher。
 这些 transport 原语不冒充 Host runtime，也不属于 transport-independent Studio core。
+Pet graph/runtime 的构造也属于 `host-runtime`：它返回一个结构化的 Pet dispatch port；
+Studio 只保存该 port 并转发 dispatch，不读取 checkpoint 或构造 LangGraph command。
 
 package 依赖方向固定为：
 
@@ -42,9 +44,10 @@ local-agent (Chat + shared surface)  ←  @pinpawo/studio  ←  concrete Plugins
 
 Studio 不 import kanban 或任何具体 Plugin。配置中的 Plugin id 由外部
 `StudioPluginResolver` 解析；未安装 resolver 或找不到 Plugin 时 fail fast。Plugin 是
-Studio lifecycle 的扩展单元，并可定义供 Agent 使用的 Toolkit，但 Plugin 本身不是
-Toolkit。Plugin Toolkit 与其他来源一起进入 Host 的统一 inventory，完成 availability、
-provenance 与 Runtime 初始化之后，才能构建 resident Pet。
+Studio control-plane lifecycle 的扩展单元。Plugin 可定义 Agent Toolkit；Host 将 definitions
+与其他来源一起放入统一 inventory，再由 Agent Capability 选择。Plugin lifecycle 只通过
+dispatch/event/hook 与 Studio 交互，不参与 Capability 选择或 Pet runtime 装配。详见
+[Plugin control-plane boundary](plugin-control-plane-boundary.md)。
 
 Capability 属于 Agent，与 Studio Plugin 无关。Resolver 不返回 Capability，Plugin 也不
 注册 Capability；Studio Host 按 `petId` 推导
@@ -96,7 +99,7 @@ Studio。每个 Pet 的 Capability 目录也必须在 resident runtime 构建前
 - Plugin event 保持进程内全局总线语义，request transport 不隐式把它归到某个
   peer/delivery。未来的外部 event feed 需要显式 subscription/replay 契约。
 - invocation 通过 receipt observer 投射为 `studio.invocation` progress；
-  到达 completed/pending_interrupt/failed/cancelled 后释放本次 transport route。
+  到达 completed/waiting/failed/cancelled 后释放本次 transport route。
 
 ### 2.4 HITL
 
@@ -110,15 +113,16 @@ reviewCapabilities = {
 }
 ```
 
-需要人工确认的 Toolkit operation 可以产生 checkpointed interrupt；这会让当前 invocation
-以 `pending_interrupt` 结束并释放 active queue slot，但不会结束或删除 Pet thread。没有交互
-Plugin 时 checkpoint 可以一直等待，这比在核心层改变 review policy 更符合持久化执行语义。
+需要人工确认的 Toolkit operation 可以产生 checkpointed interrupt；Pet runtime 将它投射为
+通用 `waiting` continuation，使当前 invocation 结束并释放 active queue slot，但不会结束或
+删除 Pet thread。没有交互 Plugin 时 checkpoint 可以一直等待，这比在核心层改变 review policy
+更符合持久化执行语义。
 
 Studio transport 不复用 Chat 的 session 或 run-control 协议，因为它不拥有 Chat session
-state。它接受 Studio 自己的 typed `resume_interrupt` dispatch。交互能力由独立 Studio
-Plugin/Host adapter 提供：它观察公开 `PendingInterrupt` 投射，把事件送给用户交互层，再把
-回答作为一次新的 dispatch 送回同一 Pet。Pet runtime 对 checkpoint 校验 interrupt identity、
-解析公开回答并构造 LangGraph resume；Studio core 只搬运 typed input/result，不解释选项。
+state。它接受 Studio 自己的 typed `resume` dispatch。交互能力由独立 Studio Plugin/Host
+adapter 提供：它观察公开 continuation，把事件送给用户交互层，再把 Pet-defined回答作为一次
+新的 dispatch 送回同一 Pet。Pet runtime 对 checkpoint 校验 continuation identity、解析回答并
+构造 LangGraph resume；Studio core 只搬运 typed input/result，不解释选项。
 
 checkpoint 已兜底保存中断状态，稳定 Pet thread 在进程重启后仍能恢复；一次性的 transport
 route 不做重建。用户侧 pending-action 索引、授权与断线重放属于交互 Plugin 的持久化边界，

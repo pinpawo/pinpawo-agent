@@ -16,14 +16,14 @@ thread.
 Studio
 ├─ Pet A ── thread A
 │          ├─ dispatch(request)          -> invocation A1 -> complete
-│          ├─ dispatch(request)          -> invocation A2 -> PendingInterrupt
-│          └─ dispatch(interrupt resume) -> invocation A3 -> resume -> complete
+│          ├─ dispatch(request)          -> invocation A2 -> waiting continuation
+│          └─ dispatch(resume)           -> invocation A3 -> resume -> complete
 ├─ Pet B ── thread B
 └─ Pet C ── thread C
 ```
 
-The interrupt ends invocation A2, not thread A. A later dispatch may carry the
-input that resumes the pending interrupt. Dispatch producers are opaque; their
+The continuation ends invocation A2, not thread A. A later dispatch may carry the
+Pet-defined input that resumes it. Dispatch producers are opaque; their
 origin does not change routing or checkpoint semantics.
 
 ## Boundary with Chat
@@ -35,9 +35,9 @@ projection.
 Studio does not reuse Chat's response protocol, route cache, lifecycle, or
 claims. It reuses only the Pet runtime contract:
 
-- a thread checkpoint may expose one current `PendingInterrupt`;
-- `interruptId` identifies that wait;
-- a human-review payload can be projected into public interactions;
+- a thread checkpoint may expose one current continuation;
+- a Pet-owned continuation identity identifies that wait;
+- a Pet runtime may project presentation-safe payload into public JSON;
 - a matching resume advances the same checkpoint.
 
 Studio then adds its own explicit target and invocation envelope around that
@@ -52,8 +52,8 @@ shared contract.
 | Thread | Durable checkpoint and continuity scope for one Pet | Pet runtime | Across dispatch invocations and restart |
 | Dispatch | Producer-neutral call targeting a Pet | Studio API | One accepted call |
 | Invocation | Execution created by one dispatch | Studio invocation coordinator | Until complete, failed, cancelled, or pending interrupt |
-| `PendingInterrupt` | Current resumable checkpoint wait | Pet runtime/checkpointer | Until resumed or replaced |
-| human-review projection | Presentation-safe view of an interrupt payload | Adapter/projection | Rebuildable |
+| Pet continuation | Current resumable checkpoint wait | Pet runtime/checkpointer | Until resumed or replaced |
+| public continuation projection | Presentation-safe view of a Pet-owned payload | Pet runtime adapter | Rebuildable |
 
 Studio owns targeting, invocation identity, and per-Pet serialization. The Pet
 runtime owns checkpoint interpretation, interrupt validation, and resume.
@@ -67,11 +67,7 @@ semantics are:
 ```ts
 type StudioDispatchInput =
   | { kind: 'request'; request: string }
-  | {
-      kind: 'resume_interrupt';
-      interruptId: string;
-      payload: InterruptResumePayload;
-    };
+  | { kind: 'resume'; continuationId: string; payload: JsonObject };
 
 type StudioDispatchRequest = {
   petId: string;
@@ -92,8 +88,8 @@ type StudioDispatchResult = {
   petId: string;
   threadId: string;
   invocationId: string;
-  status: 'completed' | 'pending_interrupt' | 'failed' | 'cancelled';
-  pendingInterrupt?: PendingInterruptProjection;
+  status: 'completed' | 'waiting' | 'failed' | 'cancelled';
+  pendingContinuation?: PendingContinuationProjection;
 };
 ```
 
@@ -107,21 +103,18 @@ state, so push-style producers do not need to block on graph work.
 
 Producer metadata is opaque. Studio core does not define a `correlationId`:
 producers may put their own task, correlation, or source fields under metadata,
-but those fields never replace `petId`, `threadId`, `invocationId`, or
-`interruptId`, and Studio does not inject them into the Pet runtime.
+but those fields never replace `petId`, `threadId`, or `invocationId`, and
+Studio does not inject them into the Pet runtime.
 
-## Pending interrupt projection
+## Pending continuation projection
 
 The shared projection contains interrupt identity and presentation-safe
 payload only:
 
 ```ts
-type PendingInterruptProjection = {
-  interruptId: string;
-  payload: {
-    kind: 'human_review';
-    interactions: HumanReviewRequest[];
-  };
+type PendingContinuationProjection = {
+  continuationId: string;
+  payload: JsonObject; // Pet-owned opaque public payload
 };
 ```
 
@@ -134,7 +127,7 @@ type StudioInvocationEvent = {
   petId: string;
   threadId: string;
   invocationId: string;
-  pendingInterrupt?: PendingInterruptProjection;
+  pendingContinuation?: PendingContinuationProjection;
 };
 ```
 
@@ -148,9 +141,8 @@ The per-Pet queue serializes active invocations; it does not keep an invocation
 alive after the graph has durably interrupted.
 
 - `busy`: one invocation is executing; later calls wait.
-- `pending_interrupt`: the prior invocation settled at a durable wait; the next
-  invocation may start and the Pet runtime validates whether its input can
-  resume that wait.
+- `waiting`: the prior invocation settled at a durable wait; the next invocation
+  may start and the Pet runtime validates whether its input can resume it.
 - `open`: the checkpoint has no pending continuation blocking ordinary input.
 - `blocked`: execution requires explicit recovery policy; accepted inputs remain
   an implementation decision.
@@ -167,10 +159,9 @@ review options or construct graph resume commands.
 | `threadId` | Keep; one stable value per Studio/Pet | Checkpoint continuity |
 | `invocationId` | Keep; one per dispatch | Distinguishes calls sharing a thread |
 | `dispatchId` | Do not add | Synonymous with `invocationId` |
-| `interruptId` | Keep | Canonical pending-interrupt identity |
-| public `actionId` | Remove after compatibility migration | Duplicates `interruptId` |
-| `interactionId` | Keep | One interaction inside a review payload |
-| deprecated `reviewId` | Compatibility parser only | Alias of `interactionId` |
+| Pet continuation ID | Keep | Canonical pending-continuation identity |
+| public `actionId` | Remove after compatibility migration | Duplicates continuation identity |
+| interaction IDs | Pet payload only | Studio does not define them |
 | Chat `requestId` | Keep inside Chat transport only | Not a Studio identity |
 | Studio wire `deliveryId` | Keep inside Studio transport only | Correlates pre-acceptance errors and push delivery; not a runtime identity |
 | producer correlation/task fields | Opaque `metadata` | Studio does not own producer workflows |
@@ -181,11 +172,10 @@ review options or construct graph resume commands.
 - `buildStudioPetThreadId(studioId, petId)` derives one deterministic checkpoint
   namespace for each resident Pet, including after Host restart.
 - `createStudio()` creates one invocation per accepted dispatch, serializes only
-  active graph invocations, and settles a durable interrupt as
-  `pending_interrupt`.
-- `createPetAgentRuntime()` reads the authoritative checkpoint before invocation,
-  rejects ordinary input while a continuation is pending, validates interrupt
-  identity and review responses, and issues a keyed LangGraph resume command.
+  active graph invocations, and settles a durable continuation as `waiting`.
+- local-agent's `createResidentPetAgentRuntime()` reads the authoritative checkpoint before invocation,
+  rejects ordinary input while a continuation is pending, validates its identity
+  and Pet-specific payload, and issues a keyed LangGraph resume command.
 - Studio owns a typed `studio.dispatch` request/resume wire envelope and emits
   `studio.accepted` plus receipt-scoped `studio.invocation` progress. Plugin events
   remain on the independent in-process bus and are not implicitly attached to a
@@ -193,19 +183,17 @@ review options or construct graph resume commands.
   at the Studio boundary; it is neither transport state, Pet execution context,
   nor part of the Pet thread. Agent Session and the Chat dispatcher contain no
   Studio messages.
-- Chat continues to use its own session and review transport. Only the public
-  pending-interrupt and review response contracts are shared.
+- Chat continues to use its own session and review transport. Studio shares no
+  review-specific contract with Chat; only the Pet runtime owns that interpretation.
 
 ## Implemented migration
 
-1. Landed the shared `PendingInterrupt` vocabulary and checkpoint projection in
-   Chat without adding Studio concepts to Chat code.
-2. Added Studio behavior tests for stable Pet threads and distinct invocation IDs.
-3. Introduced typed request and interrupt-resume dispatch inputs.
+1. Added Studio behavior tests for stable Pet threads and distinct invocation IDs.
+2. Introduced typed request and opaque continuation-resume dispatch inputs.
 4. Resolved the stable thread in the Studio/Pet registry.
-5. Let a durable interrupt settle the current invocation and admit the next
+5. Let a durable continuation settle the current invocation and admit the next
    serialized dispatch.
-6. Made the Pet runtime validate request versus interrupt-resume input against
+6. Made the Pet runtime validate request versus continuation-resume input against
    its checkpoint.
 7. Added Studio envelopes around the shared interrupt projection.
 8. Removed duplicate action/review IDs and workflow identity from Studio core,
@@ -216,10 +204,10 @@ review options or construct graph resume commands.
 - Repeated dispatches to Pet A reuse one thread and receive distinct invocation
   IDs.
 - Dispatch to Pet B uses a different thread.
-- A request invocation can settle with `pending_interrupt` without destroying
+- A request invocation can settle with `waiting` without destroying
   the Pet thread.
 - A later interrupt-resume dispatch to Pet A resumes the same thread.
-- A stale interrupt ID does not mutate checkpoint state.
+- A stale continuation ID does not mutate checkpoint state.
 - Concurrent dispatch calls never execute concurrently on one Pet thread.
 - Restart resolves the same Pet thread and pending interrupt.
 - Chat projections contain no Studio `petId` or dispatch identity.

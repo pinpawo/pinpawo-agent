@@ -5,6 +5,7 @@ import {
   createStudio,
   type PetAgentRuntime,
   type PetAgentRuntimeInvokeInput,
+  type PetAgentRuntimeInvokeResult,
 } from '@pinpawo/studio';
 import {
   createKanbanPlugin,
@@ -17,7 +18,7 @@ const AUTH_TOKEN = 'e2e-token-with-at-least-16-characters';
 
 function pet(
   petId: string,
-  invoke: (input: PetAgentRuntimeInvokeInput) => Promise<void> | void,
+  invoke: (input: PetAgentRuntimeInvokeInput) => Promise<PetAgentRuntimeInvokeResult | void> | PetAgentRuntimeInvokeResult | void,
 ): PetAgentRuntime {
   return {
     descriptor: () => ({
@@ -34,12 +35,23 @@ function pet(
       capabilities: [],
     }),
     invoke: async (input) => {
-      await invoke(input);
-      return { status: 'completed', reply: 'ok' };
+      return await invoke(input) ?? { status: 'completed', reply: 'ok' };
     },
     gate: () => 'open',
     onGateChange: () => () => undefined,
   };
+}
+
+async function waitForTask(
+  plugin: KanbanPlugin,
+  predicate: (task: Awaited<ReturnType<KanbanPlugin['service']['readSnapshot']>>['tasks'][number]) => boolean,
+): Promise<Awaited<ReturnType<KanbanPlugin['service']['readSnapshot']>>['tasks'][number]> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const task = (await plugin.service.readSnapshot()).tasks[0];
+    if (task && predicate(task)) return task;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error('timed out waiting for Kanban task state');
 }
 
 async function invokeKanbanTool(
@@ -222,5 +234,95 @@ test('HTTP dispatch reaches a Pet and Kanban completion returns to the frontend 
   assert.deepEqual(
     history.events.map(({ sequence }) => sequence),
     [1, 2, 3],
+  );
+});
+
+test('Kanban persists an opaque continuation and HTTP resume completes the same task', async (t) => {
+  const kanban = createKanbanPlugin();
+  const http = createStudioHttpPlugin({
+    port: 0,
+    authToken: AUTH_TOKEN,
+    heartbeatIntervalMs: 60_000,
+  });
+  let taskId = '';
+  const studio = await createStudio({
+    studioId: 'http-continuation-e2e',
+    entryPetId: 'worker',
+    pets: [pet('worker', async (input) => {
+      if (input.input.kind === 'request') {
+        taskId = /Kanban taskId: ([^\s]+)/.exec(input.input.request)?.[1] ?? '';
+        assert.ok(taskId, 'Kanban dispatch must carry its taskId');
+        return {
+          status: 'waiting',
+          pendingContinuation: {
+            continuationId: 'continuation-1',
+            payload: {
+              kind: 'example_interaction',
+              prompt: 'Provide an opaque continuation payload.',
+            },
+          },
+        };
+      }
+      assert.deepEqual(input.input, {
+        kind: 'resume',
+        continuationId: 'continuation-1',
+        payload: { response: 'continue' },
+      });
+      await invokeKanbanTool(kanban, 'kanban_task_complete', {
+        taskId,
+        result: 'continued',
+      });
+      return { status: 'completed', reply: 'continued' };
+    })],
+    plugins: [kanban, http],
+  });
+  t.after(() => studio.shutdown());
+
+  const address = http.address();
+  assert.ok(address);
+  const headers = { Authorization: `Bearer ${AUTH_TOKEN}` };
+  await invokeKanbanTool(kanban, 'kanban_task_add', {
+    petId: 'worker',
+    brief: 'wait for external continuation',
+  });
+
+  const waiting = await waitForTask(kanban, (task) => task.status === 'waiting');
+  assert.equal(waiting.taskId, taskId);
+  assert.deepEqual(waiting.continuation, {
+    continuationId: 'continuation-1',
+    payload: {
+      kind: 'example_interaction',
+      prompt: 'Provide an opaque continuation payload.',
+    },
+  });
+
+  const resumeResponse = await fetch(
+    `http://${address.host}:${address.port.toString()}/dispatch`,
+    {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        petId: 'worker',
+        input: {
+          kind: 'resume',
+          continuationId: 'continuation-1',
+          payload: { response: 'continue' },
+        },
+      }),
+    },
+  );
+  assert.equal(resumeResponse.status, 202);
+
+  const completed = await waitForTask(kanban, (task) => task.status === 'done');
+  assert.equal(completed.note, 'continued');
+  const historyResponse = await fetch(
+    `http://${address.host}:${address.port.toString()}/kanban/events?after=0`,
+    { headers },
+  );
+  assert.equal(historyResponse.status, 200);
+  const history = await historyResponse.json() as { events: Array<{ eventType: string }> };
+  assert.deepEqual(
+    history.events.map(({ eventType }) => eventType),
+    ['created', 'claimed', 'waiting', 'completed'],
   );
 });

@@ -110,7 +110,7 @@ test('Studio adapter maps a committed Kanban task through dispatch and tools', a
   assert.ok(events.some((event) => event.type === 'task.done' && event.source === 'kanban'));
 });
 
-test('a pending Studio interrupt becomes a durable Kanban waiting task', async (t) => {
+test('a waiting Studio continuation becomes a durable Kanban waiting task', async (t) => {
   const plugin = createKanbanPlugin();
   const studio = await createStudio({
     studioId: 'kanban-waiting',
@@ -119,10 +119,18 @@ test('a pending Studio interrupt becomes a durable Kanban waiting task', async (
       petId: 'worker',
       tools: () => pluginTools(plugin),
       onInvoke: () => ({
-        status: 'pending_interrupt',
-        pendingInterrupt: {
-          interruptId: 'interrupt-1',
-          payload: { kind: 'human_review', interactions: [] },
+        status: 'waiting',
+        pendingContinuation: {
+          continuationId: 'continuation-1',
+          payload: {
+            kind: 'human_review',
+            interactions: [{
+              interactionId: 'review-1',
+              schemaVersion: 2,
+              view: { kind: 'plain', body: 'Approve?' },
+              options: [{ id: 'approve', label: 'Approve', batchSubmission: 'defer' }],
+            }],
+          },
         },
       }),
     })],
@@ -134,7 +142,19 @@ test('a pending Studio interrupt becomes a durable Kanban waiting task', async (
   await flush();
   const [task] = (await plugin.service.readSnapshot()).tasks;
   assert.equal(task?.status, 'waiting');
-  assert.equal(task?.note, 'Pet invocation is waiting for external interaction.');
+  assert.equal(task?.note, 'Waiting for continuation input.');
+  assert.deepEqual(task?.continuation, {
+    continuationId: 'continuation-1',
+    payload: {
+      kind: 'human_review',
+      interactions: [{
+        interactionId: 'review-1',
+        schemaVersion: 2,
+        view: { kind: 'plain', body: 'Approve?' },
+        options: [{ id: 'approve', label: 'Approve', batchSubmission: 'defer' }],
+      }],
+    },
+  });
 });
 
 test('a completed Studio invocation without a Kanban outcome becomes blocked', async (t) => {

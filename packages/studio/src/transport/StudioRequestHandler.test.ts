@@ -151,8 +151,8 @@ test('a canonical Studio request targets a Pet and carries typed resume input op
     deliveryId: 'delivery-resume-1',
     petId: 'pet-b',
     input: {
-      kind: 'resume_interrupt',
-      interruptId: 'interrupt-1',
+      kind: 'resume',
+      continuationId: 'continuation-1',
       payload: {
         kind: 'human_review_response',
         responses: [{ interactionId: 'review-1', selectedOptionId: 'approve' }],
@@ -164,7 +164,7 @@ test('a canonical Studio request targets a Pet and carries typed resume input op
 
   const dispatched = studio.lastDispatch();
   assert.equal(dispatched?.petId, 'pet-b');
-  assert.equal(dispatched?.input.kind, 'resume_interrupt');
+  assert.equal(dispatched?.input.kind, 'resume');
   assert.equal(dispatched?.idempotencyKey, 'resume-task-1');
   assert.deepEqual(dispatched?.metadata, {
     taskId: 'task-1',
@@ -180,7 +180,7 @@ test('a canonical Studio request targets a Pet and carries typed resume input op
   });
 });
 
-test('receipt-scoped invocation events expose pending interrupt without transport metadata', async () => {
+test('receipt-scoped invocation events expose pending continuation without transport metadata', async () => {
   const studio = fakeStudio();
   const { handler, sent } = handlerWith(studio);
   await handler.handleStudioRequest(createPeer(sent), {
@@ -193,10 +193,10 @@ test('receipt-scoped invocation events expose pending interrupt without transpor
     petId: 'pet-a',
     threadId: 'studio:s1:pet:pet-a',
     invocationId: 'invocation-1',
-    status: 'pending_interrupt',
+    status: 'waiting',
     metadata: { taskId: 'task-1' },
-    pendingInterrupt: {
-      interruptId: 'interrupt-1',
+    pendingContinuation: {
+      continuationId: 'continuation-1',
       payload: { kind: 'human_review', interactions: [] },
     },
   });
@@ -207,14 +207,14 @@ test('receipt-scoped invocation events expose pending interrupt without transpor
     status: string;
     invocationId: string;
     metadata: Record<string, unknown>;
-    pendingInterrupt: { interruptId: string };
+    pendingContinuation: { continuationId: string };
   };
   assert.equal(progress.type, 'studio.invocation');
   assert.equal(progress.deliveryId, 'delivery-1');
-  assert.equal(progress.status, 'pending_interrupt');
+  assert.equal(progress.status, 'waiting');
   assert.equal(progress.invocationId, 'invocation-1');
   assert.deepEqual(progress.metadata, { taskId: 'task-1' });
-  assert.equal(progress.pendingInterrupt.interruptId, 'interrupt-1');
+  assert.equal(progress.pendingContinuation.continuationId, 'continuation-1');
 });
 
 test('an idempotent transport retry receives the existing invocation terminal result', async () => {

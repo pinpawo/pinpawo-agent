@@ -37,7 +37,7 @@ dispatch 返回 receipt 只表示 Studio 已接收，不等待模型执行：
 
 - 一个 `(studioId, petId)` 对应一个确定且稳定的 `threadId`；
 - 每次接收的 dispatch 创建一个新的 `invocationId`；
-- `interruptId` 只标识 checkpoint 当前等待；
+- Pet-owned `continuationId` 只标识 checkpoint 当前等待；
 - 外部 producer 若需要关联自己的请求，可以把私有引用放在不透明 `metadata` 中；
   它只随 Studio receipt/event 返回，不会进入 Pet runtime。
 
@@ -45,57 +45,54 @@ dispatch 返回 receipt 只表示 Studio 已接收，不等待模型执行：
 `completion` 最终得到：
 
 - `completed`：本次 graph invocation 完成；
-- `pending_interrupt`：已持久化等待，本次 invocation 结束；
+- `waiting`：已持久化等待，本次 invocation 结束；
 - `failed`：runtime 执行失败；
 - `cancelled`：调用方或 Studio shutdown 取消。
 
 显式 `idempotencyKey` 用来去重同一个 Pet 在当前 Host generation 内的重试。它与
 taskId、threadId、invocationId 都不是同一个概念。
 
-## 2. Durable interrupt 不占住 invocation 队列
+## 2. Durable continuation 不占住 invocation 队列
 
 ```text
-request invocation A1 ──> pending_interrupt(interrupt-7)
+request invocation A1 ──> waiting(continuation-7)
 resume invocation  A2 ──> 同一个 Pet thread ──> completed
 ```
 
 LangGraph checkpoint 保存 interrupt、continuation 与 thread state。发生 interrupt 时，
-A1 以 `pending_interrupt` 结束并释放 active queue slot，但 thread 仍然等待。没有交互
+A1 以 `waiting` 结束并释放 active queue slot，但 thread 仍然等待。没有交互
 Plugin 时，它可以一直停在那里，并不会因为 Studio 内存里没有 waiting object 而丢失。
 
-独立 interaction Plugin 或 Host adapter 可以观察 pending 投射，把它交给用户界面，
+独立 interaction Plugin 或 Host adapter 可以观察 opaque continuation 投射，把它交给用户界面，
 随后提交新的 typed dispatch：
 
 ```ts
 await studio.dispatch({
   petId: 'writer',
   input: {
-    kind: 'resume_interrupt',
-    interruptId: 'interrupt-7',
-    payload: {
-      kind: 'human_review_response',
-      responses: [{ interactionId: 'review-1', selectedOptionId: 'approve' }],
-    },
+    kind: 'resume',
+    continuationId: 'continuation-7',
+    payload: { response: 'Pet-defined value' },
   },
 });
 ```
 
-Studio core 只搬运 input/result，不理解 review 选项，不决定授权效果，也不构造 graph
-resume command。Pet runtime 读取权威 checkpoint，校验 `interruptId` 与公开 response，
-再构造 keyed LangGraph Command。stale resume 会失败且不会修改 checkpoint。
+Studio core 只搬运 input/result，不解释 payload，也不构造 graph resume command。Pet runtime
+读取权威 checkpoint，校验 `continuationId` 与 Pet-defined payload，再构造 keyed LangGraph
+Command。stale resume 会失败且不会修改 checkpoint。
 
 这条链路不复用 Chat 的 session、route cache 或 `human_review_response` handler。Chat 与
-Studio 只共享 Agent 侧的 PendingInterrupt / HumanReview 公共 contract。
+Studio 不共享 review-specific contract；只有 Pet runtime 解释该 payload。
 
 ## 3. 每 Pet 串行，不按 waiting 挂住 dispatch
 
 Studio 的队列只序列化正在执行的 invocation。一个 invocation 到达 completed、
-pending_interrupt、failed 或 cancelled 后，队列就可以接收下一次调用。
+waiting、failed 或 cancelled 后，队列就可以接收下一次调用。
 
 若 checkpoint 仍有 pending continuation：
 
 - 普通 request 由 Pet runtime 拒绝；
-- matching `resume_interrupt` 可以继续；
+- matching `resume` 可以继续；
 - stale interrupt 或不支持的 continuation 会失败，不修改 checkpoint。
 
 因此并发完整性与持久化等待分开：Studio 负责同一 Pet 不并发 invoke；Pet runtime
@@ -112,7 +109,7 @@ Studio/Plugin 上的 `onInvocation()` 是更广的 live control-plane 投射：
 - 公共 Studio 订阅看到所有 invocation；
 - Plugin context 只看到自己发起的 invocation；
 - event 携带 `petId`、`threadId`、`invocationId`、status、metadata，以及可选的
-  `pendingInterrupt` / error；
+  `pendingContinuation` / error；
 - event 不持久化、不重放，interrupt 是否存在仍以 checkpoint 为准。
 
 `notify()` / `subscribe()` 则是完全独立的 Plugin event 总线：

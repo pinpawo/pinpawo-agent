@@ -30,8 +30,8 @@ export type CreateStudioInput = {
  * Create one resident Studio registry and invocation coordinator.
  *
  * Every Pet owns one deterministic graph thread. Dispatches are serialized by
- * Pet, but a durable interrupt settles its invocation and releases the queue;
- * a later typed dispatch resumes the same checkpoint.
+ * Pet, but a durable continuation settles its invocation and releases the
+ * queue; a later typed dispatch resumes the same checkpoint.
  */
 export async function createStudio(input: CreateStudioInput): Promise<Studio> {
   const petsById = new Map<string, PetAgentRuntime>();
@@ -201,11 +201,11 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
           threadId,
           signal,
         });
-        const completed: StudioDispatchResult = result.status === 'pending_interrupt'
+        const completed: StudioDispatchResult = result.status === 'waiting'
           ? {
               ...base,
-              status: 'pending_interrupt',
-              pendingInterrupt: result.pendingInterrupt,
+              status: 'waiting',
+              pendingContinuation: result.pendingContinuation,
             }
           : {
               ...base,

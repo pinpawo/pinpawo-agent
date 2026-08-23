@@ -2,7 +2,7 @@
   "name": "@pinpawo/kanban-console",
   "version": "0.1.0",
   "private": true,
-  "description": "Static React prototype for the PinPawo Kanban Console",
+  "description": "React control-plane client for the PinPawo Kanban HTTP Plugin",
   "type": "module",
   "scripts": {
     "dev": "vite",

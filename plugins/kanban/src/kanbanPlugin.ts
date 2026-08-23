@@ -2,8 +2,8 @@
  * Studio adapter for the independent Kanban task domain.
  *
  * The domain service owns tasks, dependencies, SQLite transactions and history.
- * This Plugin only maps a Kanban assignee to a Studio pet, exposes agent tools,
- * and projects committed mutations into Studio dispatch/events/HTTP hooks.
+ * This Plugin only maps a Kanban assignee to a Studio pet, defines its Agent
+ * Toolkit, and projects committed mutations into Studio dispatch/events/HTTP hooks.
  */
 
 import { tool } from '@langchain/core/tools';
@@ -185,9 +185,17 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
   async function finishUnreportedTask(taskId: string, result: StudioDispatchResult): Promise<void> {
     const task = await service.getTask(taskId);
     if (!task || !isActive(task)) return;
-    if (result.status === 'pending_interrupt') {
+    if (result.status === 'waiting') {
       if (task.status === 'doing') {
-        await service.waitTask(taskId, 'Pet invocation is waiting for external interaction.');
+        const continuation = result.pendingContinuation;
+        if (!continuation) {
+          await service.blockTask(
+            taskId,
+            'Pet reported waiting without a public continuation projection.',
+          );
+          return;
+        }
+        await service.waitForContinuation(taskId, continuation);
       }
       return;
     }

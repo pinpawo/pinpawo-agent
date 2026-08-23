@@ -31,8 +31,9 @@ concrete Plugin  ───> Studio contracts
 
 - programmatic caller 可以把 `StudioPluginResolver` 传给 `runStudioHostProcess()`；
 - `studio.json.plugins[].options` 由 resolver 对应的 Plugin factory 校验；
-- Resolver 返回 Plugin；Plugin 通过 `toolkits` 定义零个或多个 Agent Toolkit；
-- Studio Host 在构建 resident Pet 前，把这些 Toolkit 送入 Host 统一 inventory；
+- Resolver 返回 Plugin；Plugin 可通过 `toolkits` 声明零个或多个 Agent Toolkit；
+- Studio Host 在构建 resident Pet 前，把这些 Toolkit 与其他来源一起送入统一 inventory；
+- Plugin lifecycle 只使用 dispatch/event/hook，不参与 Capability 选择或 Pet runtime 装配；
 - Resolver 和 Plugin 都不注册 Capability，也不改变 Capability `uses`；
 - Studio Host 按 `petId` 严格加载 `pets/<petId>/capabilities/`；目录成员直接决定
   对应 Pet 的 Capability definitions 与选择；

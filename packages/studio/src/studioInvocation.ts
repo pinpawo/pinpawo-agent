@@ -1,29 +1,25 @@
 import {
   isJsonObject,
   isJsonValue,
-  parseHumanReviewResponse,
-  type HumanReviewRequest,
-  type HumanReviewResponse,
   type JsonObject,
 } from '@pinpawo/agent-contracts';
 
-export type PendingInterruptProjection = {
-  interruptId: string;
-  payload: {
-    kind: 'human_review';
-    interactions: HumanReviewRequest[];
-  };
+/**
+ * Public description of a Pet-owned durable wait. Studio preserves this
+ * opaque payload for dispatch producers; only the Pet runtime interprets it.
+ */
+export type PendingContinuationProjection = {
+  continuationId: string;
+  payload: JsonObject;
 };
 
 export type StudioDispatchInput =
   | { kind: 'request'; request: string }
   | {
-      kind: 'resume_interrupt';
-      interruptId: string;
-      payload: {
-        kind: 'human_review_response';
-        responses: HumanReviewResponse[];
-      };
+      /** Resume a Pet-owned continuation with a Pet-defined opaque payload. */
+      kind: 'resume';
+      continuationId: string;
+      payload: JsonObject;
     };
 
 export type StudioDispatchRequest = {
@@ -38,7 +34,7 @@ export type StudioDispatchRequest = {
 
 export type StudioInvocationTerminalStatus =
   | 'completed'
-  | 'pending_interrupt'
+  | 'waiting'
   | 'failed'
   | 'cancelled';
 
@@ -49,7 +45,7 @@ export type StudioDispatchResult = {
   status: StudioInvocationTerminalStatus;
   metadata?: JsonObject;
   output?: string;
-  pendingInterrupt?: PendingInterruptProjection;
+  pendingContinuation?: PendingContinuationProjection;
   error?: string;
 };
 
@@ -77,7 +73,7 @@ export type StudioInvocationEvent = {
   status: 'busy' | StudioInvocationTerminalStatus;
   metadata?: JsonObject;
   output?: string;
-  pendingInterrupt?: PendingInterruptProjection;
+  pendingContinuation?: PendingContinuationProjection;
   error?: string;
 };
 
@@ -101,29 +97,20 @@ function parseDispatchInput(value: unknown): StudioDispatchInput | null {
       ? { kind: 'request', request: value.request }
       : null;
   }
-  if (
-    value.kind !== 'resume_interrupt'
-    || !hasOnlyKeys(value, ['kind', 'interruptId', 'payload'])
-  ) return null;
-  const interruptId = readNonEmptyString(value, 'interruptId');
+  if (value.kind !== 'resume' || !hasOnlyKeys(value, ['kind', 'continuationId', 'payload'])) {
+    return null;
+  }
+  const continuationId = readNonEmptyString(value, 'continuationId');
   const payload = value.payload;
   if (
-    !interruptId
+    !continuationId
     || !isJsonObject(payload)
-    || !hasOnlyKeys(payload, ['kind', 'responses'])
-    || payload.kind !== 'human_review_response'
-    || !Array.isArray(payload.responses)
-    || payload.responses.length === 0
+    || !isJsonValue(payload)
   ) return null;
-  const responses = payload.responses.map(parseHumanReviewResponse);
-  if (responses.some((response) => response === null)) return null;
   return {
-    kind: 'resume_interrupt',
-    interruptId,
-    payload: {
-      kind: 'human_review_response',
-      responses: responses as NonNullable<(typeof responses)[number]>[],
-    },
+    kind: 'resume',
+    continuationId,
+    payload,
   };
 }
 

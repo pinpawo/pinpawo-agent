@@ -5,7 +5,7 @@ import type {
   PetAgentStatus,
 } from './petAgentTypes';
 import type {
-  PendingInterruptProjection,
+  PendingContinuationProjection,
   StudioDispatchInput,
 } from './studioInvocation';
 
@@ -23,7 +23,7 @@ export type PetAgentRuntimeDescriptor = AgentActor & {
 /**
  * pet runtime 的 invoke 参数。Studio↔pet 边界是函数调用,而非 envelope 协议。
  *
- * - input: 普通请求或显式 interrupt resume。Pet runtime 负责对 checkpoint 校验。
+ * - input: 普通请求或显式 continuation resume。Pet runtime 负责对 checkpoint 校验。
  * - signal: Studio 取消信号。
  * - threadId: Studio 从 Pet 解析的持久连续性身份。
  *
@@ -38,11 +38,11 @@ export type PetAgentRuntimeInvokeInput = {
 
 /**
  * pet runtime 的 invoke 返回。一次 graph invocation 要么完成并返回文本,
- * 要么停在已持久化的 interrupt 上并返回公开投射；两者都会结束本次 invocation。
+ * 要么停在已持久化的 continuation 上并返回公开投射；两者都会结束本次 invocation。
  */
 export type PetAgentRuntimeInvokeResult =
   | { status: 'completed'; reply: string }
-  | { status: 'pending_interrupt'; pendingInterrupt: PendingInterruptProjection };
+  | { status: 'waiting'; pendingContinuation: PendingContinuationProjection };
 
 /**
  * Pet runtime 的 Host 诊断状态。
@@ -58,7 +58,7 @@ export type PetAgentRuntimeInvokeResult =
  * 这里没有 `disabled`:那是配置属性,在 `descriptor().startupMode` 里,
  * dispatch 直接拒,不进队列。
  *
- * Studio invocation coordinator 不用 gate 延长一次 dispatch：durable interrupt
+ * Studio invocation coordinator 不用 gate 延长一次 dispatch：durable continuation
  * 会结束当前 invocation，后续 typed dispatch 再由 runtime 对 checkpoint 校验。
  */
 export type PetGateState =

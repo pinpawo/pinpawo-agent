@@ -63,8 +63,8 @@ export class StudioRequestHandler<Peer extends object> {
       status: event.status,
       ...(event.metadata ? { metadata: event.metadata } : {}),
       ...(event.output ? { output: event.output } : {}),
-      ...(event.pendingInterrupt
-        ? { pendingInterrupt: event.pendingInterrupt }
+      ...(event.pendingContinuation
+        ? { pendingContinuation: event.pendingContinuation }
         : {}),
       ...(event.error ? { error: event.error } : {}),
     }, terminal);

@@ -108,11 +108,17 @@ per-Pet root. Installation/discovery policy for Plugins remains outside Studio;
 callers inject concrete Plugins through `StudioPluginResolver`.
 
 Durable Plugin state remains Plugin-owned. For example, an application resolver
-can construct `createKanbanPlugin({ stateStore: createFileKanbanStateStore(...) })`.
-The application chooses an absolute path such as
-`<workdir>/.pinpawo/studio/<plugin-instance>/kanban.json`; Studio neither derives
-that path nor reads the snapshot. Without a state store, the same Plugin remains
-an explicitly in-memory instance.
+can construct `createKanbanPlugin({ databasePath: ... })`. The application chooses
+an absolute SQLite path such as
+`<workdir>/.pinpawo/kanban/<instance>/kanban.sqlite`; Studio neither derives that
+path nor reads task state. Without a database path, the same Plugin remains an
+explicitly in-memory instance. A larger Kanban application can instead own a
+`KanbanTaskService` itself and inject it into the Studio adapter.
+
+Existing file-backed `kanban.json` state is not loaded implicitly. Before changing
+an existing resolver to `databasePath`, run the explicit
+`migrateKanbanSnapshotToSqlite({ snapshotFile, databaseFile })` export once; it
+keeps the JSON source and refuses to write into a non-empty destination.
 
 Installed Plugins may compose through the opaque `StudioPluginContext.hooks`
 broker. Studio only matches Plugin and hook names and owns lifecycle cleanup; it

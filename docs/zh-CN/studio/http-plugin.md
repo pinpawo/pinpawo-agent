@@ -49,8 +49,9 @@ HTTP Plugin 暴露由生命周期托管的 `routes` hook。其他已安装 Plugi
 HTTP handler，HTTP 无需 import 或理解其领域。所有贡献 route 都经过相同的 Bearer
 鉴权与 Origin 策略；`/dispatch` 和 `/events` 是保留路径。
 
-同时安装 Kanban Plugin 时，它会贡献 `GET /kanban`，返回当前 board snapshot。
-Kanban 在未安装 HTTP 时仍可独立启动，Plugin 启动顺序也不影响 hook 挂载。
+同时安装 Kanban Plugin 时，它会贡献 `GET /kanban`，返回当前 task snapshot 与 event
+cursor，并贡献 `GET /kanban/events` 读取 Kanban 自己的 durable task history。Kanban
+在未安装 HTTP 时仍可独立启动，Plugin 启动顺序也不影响 hook 挂载。
 
 ## SSE live event
 

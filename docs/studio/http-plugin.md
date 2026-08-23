@@ -64,7 +64,8 @@ domain. Every contributed route passes through the same Bearer authentication
 and Origin policy; `/dispatch` and `/events` remain reserved.
 
 When the Kanban Plugin is also installed, it contributes `GET /kanban`, which
-returns its current board snapshot. Kanban still starts normally without HTTP,
+returns its current task snapshot and event cursor, plus `GET /kanban/events`
+for Kanban-owned durable task history. Kanban still starts normally without HTTP,
 and Plugin start order does not affect hook attachment.
 
 ## Live events over SSE

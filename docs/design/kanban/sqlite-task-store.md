@@ -7,6 +7,21 @@
 Kanban 可以被 CLI、Web、Studio adapter 或其他 application composition 使用；它的数据
 模型、状态机、repository 和恢复策略不属于 Studio。
 
+## 实现状态
+
+当前仓库已实现第一、二阶段的最小闭环：
+
+- `plugins/kanban/src/kanbanTaskService.ts` 提供独立的 SQLite repository、service、
+  transaction、history cursor 和 `doing -> blocked` recovery；
+- `migrateKanbanSnapshotToSqlite()` 提供从旧 JSON snapshot 到空 SQLite target 的显式、
+  一次性迁移；原文件会保留；
+- Studio Kanban Plugin 只通过 service 构建 Toolkit、dispatch adapter、Studio event
+  projection 和可选 HTTP read route；
+- 运行时 JSON snapshot store 已移除，SQLite 是持久化路径。
+
+仍未实现独立 Kanban CLI/Web composition，以及 Console 的真实 adapter；它们不能通过绕开
+service 或直接读写 SQLite 来临时补齐。
+
 ## 1. 领域边界
 
 ```text
@@ -56,7 +71,7 @@ type KanbanTask = {
 type KanbanTaskEvent = {
   sequence: number;
   taskId: string;
-  eventType: 'created' | 'claimed' | 'waiting' | 'completed' | 'blocked' | 'recovered';
+  eventType: 'created' | 'imported' | 'claimed' | 'waiting' | 'completed' | 'blocked' | 'recovered';
   fromStatus?: KanbanTaskStatus;
   toStatus: KanbanTaskStatus;
   note?: string;
@@ -269,15 +284,15 @@ storage 或 domain event 的所有权。
 ## 9. JSON snapshot 迁移
 
 SQLite 落地后，新 application 默认只创建 `kanban.sqlite`，不隐式扫描旧 JSON。
-如需保留数据，提供显式迁移：
+如需保留数据，使用显式迁移：
 
 ```ts
 migrateKanbanSnapshotToSqlite({ snapshotFile, databaseFile })
 ```
 
-它必须严格校验 snapshot，要求目标 database 尚无 task，在一个 transaction 中写入 task、
-dependency 和 import event。成功后保留原 JSON，由调用者确认后自行归档。重复调用明确
-报告 already imported，不得重复创建 task。
+它严格校验 snapshot，要求目标 database 尚无 task/event，在一个 transaction 中写入 task、
+dependency 和 `imported` event。成功后保留原 JSON，由调用者确认后自行归档；旧 `doing`
+会立刻走标准 recovery 变为 `blocked`。重复调用明确报告 target is not empty，不得重复创建 task。
 
 迁移期可暂时保留 file store compatibility adapter，但同一 Kanban instance 只能有一个
 writable truth source。

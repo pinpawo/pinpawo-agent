@@ -86,7 +86,7 @@ export function App() {
   const [selectedKnowledgePath, setSelectedKnowledgePath] = useState(knowledgeFiles[0].path);
   const [dispatchTarget, setDispatchTarget] = useState('');
   const [dispatchGoal, setDispatchGoal] = useState('');
-  const [resumePayload, setResumePayload] = useState('{\n  \n}');
+  const [resumeDrafts, setResumeDrafts] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState(
     studioHttpUrl && studioHttpToken ? 'Connecting to Studio HTTP…' : 'Set VITE_STUDIO_HTTP_URL and VITE_STUDIO_HTTP_TOKEN to connect.',
   );
@@ -94,7 +94,9 @@ export function App() {
 
   const selectedKnowledge = knowledgeFiles.find((file) => file.path === selectedKnowledgePath) ?? knowledgeFiles[0];
   const selectedTask = tasks.find((task) => task.taskId === selectedTaskId);
-  const waitingTask = tasks.find((task) => task.status === 'waiting' && task.continuation);
+  // 多个 Pet 可以各自停在自己的 continuation 上 —— 只渲染第一条会让其余的
+  // 既看不见也无法恢复。
+  const waitingTasks = tasks.filter((task) => task.status === 'waiting' && task.continuation);
   const visibleEvents = selectedTaskId
     ? events.filter((event) => event.taskId === selectedTaskId)
     : events;
@@ -206,26 +208,27 @@ export function App() {
     }
   }
 
-  async function resumeContinuation(): Promise<void> {
-    if (!waitingTask?.continuation) return;
+  async function resumeContinuation(task: Task): Promise<void> {
+    const continuation = task.continuation;
+    if (!continuation) return;
     let payload: unknown;
     try {
-      payload = JSON.parse(resumePayload) as unknown;
+      payload = JSON.parse(resumeDrafts[task.taskId] ?? '{}') as unknown;
     } catch {
-      setNotice('Resume payload must be valid JSON.');
+      setNotice(`Resume payload for ${task.taskId} must be valid JSON.`);
       return;
     }
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-      setNotice('Resume payload must be a JSON object.');
+      setNotice(`Resume payload for ${task.taskId} must be a JSON object.`);
       return;
     }
     try {
       await dispatch({
         kind: 'resume',
-        continuationId: waitingTask.continuation.continuationId,
+        continuationId: continuation.continuationId,
         payload,
-      }, waitingTask.assigneeId);
-      setNotice(`Resume accepted for ${waitingTask.taskId}.`);
+      }, task.assigneeId);
+      setNotice(`Resume accepted for ${task.taskId}.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
     }
@@ -329,27 +332,38 @@ export function App() {
         </aside>
 
         <section className="main-panel">
-          <section className={`authorization panel ${waitingTask ? '' : 'empty'}`}>
-            <div className="authorization-label">CONTINUATION</div>
-            {waitingTask ? (
-              <>
+          <section className={`authorization panel ${waitingTasks.length > 0 ? '' : 'empty'}`}>
+            <div className="authorization-label">
+              CONTINUATION{waitingTasks.length > 1 ? ` · ${waitingTasks.length.toString()}` : ''}
+            </div>
+            {waitingTasks.length > 0 ? waitingTasks.map((task) => (
+              <div className="authorization-entry" key={task.taskId}>
                 <div className="authorization-copy">
                   <span className="status-dot status-waiting" />
                   <div>
-                    <strong>{waitingTask.taskId} · {waitingTask.brief}</strong>
-                    <p>{waitingTask.note ?? 'Pet is waiting for a continuation input.'}</p>
+                    <strong>{task.taskId} · {task.brief}</strong>
+                    <p>{task.note ?? 'Pet is waiting for a continuation input.'}</p>
                   </div>
                 </div>
                 <div className="authorization-actions">
                   <textarea
-                    aria-label="Opaque continuation payload"
-                    onChange={(event) => setResumePayload(event.target.value)}
-                    value={resumePayload}
+                    aria-label={`Opaque continuation payload for ${task.taskId}`}
+                    onChange={(event) => setResumeDrafts((drafts) => ({
+                      ...drafts,
+                      [task.taskId]: event.target.value,
+                    }))}
+                    value={resumeDrafts[task.taskId] ?? '{\n  \n}'}
                   />
-                  <button className="approve-button" onClick={() => void resumeContinuation()} type="button">RESUME</button>
+                  <button
+                    className="approve-button"
+                    onClick={() => void resumeContinuation(task)}
+                    type="button"
+                  >
+                    RESUME
+                  </button>
                 </div>
-              </>
-            ) : (
+              </div>
+            )) : (
               <p>No Pet continuation is waiting.</p>
             )}
           </section>

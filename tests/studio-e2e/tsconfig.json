@@ -5,6 +5,8 @@
     "moduleResolution": "bundler",
     "baseUrl": ".",
     "paths": {
+      "pinpawo/host-runtime": ["../../services/local-agent/src/hostRuntime.ts"],
+      "pinpawo/local-server-transport": ["../../services/local-agent/src/localServerTransportApi.ts"],
       "@pinpawo/studio": ["../../packages/studio/src/index.ts"],
       "@pinpawo-plugin/studio-http": ["../../plugins/studio-http/src/index.ts"],
       "@pinpawo-plugin/kanban": ["../../plugins/kanban/src/index.ts"]

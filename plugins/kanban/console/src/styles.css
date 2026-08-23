@@ -53,8 +53,12 @@ button { cursor: pointer; }
 .markdown-preview pre { white-space: pre-wrap; margin: 0; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
 
 .main-panel { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); }
-.authorization { min-height: 98px; display: grid; grid-template-columns: 138px 1fr auto; align-items: center; gap: 18px; padding: 16px; border-bottom: 1px solid #40504c; background: #172020; }
+.authorization { min-height: 98px; display: grid; grid-template-columns: 138px 1fr; align-items: center; gap: 18px; padding: 16px; border-bottom: 1px solid #40504c; background: #172020; }
+/* 每条 waiting 的 continuation 自成一行,列表可以任意长。 */
+.authorization-entry { grid-column: 2; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 18px; min-width: 0; }
+.authorization-entry + .authorization-entry { padding-top: 12px; border-top: 1px solid #2a3838; }
 .authorization.empty { color: #718083; }
+.authorization > p { grid-column: 2; }
 .authorization-label { color: #e0ac54; font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .1em; }
 .authorization-copy { min-width: 0; display: flex; align-items: flex-start; gap: 10px; }
 .authorization-copy strong { display: block; color: #e5ecea; font-size: 14px; }

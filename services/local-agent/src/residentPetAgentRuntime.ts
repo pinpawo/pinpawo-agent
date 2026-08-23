@@ -394,6 +394,27 @@ export function createResidentPetAgentRuntime(
       workdir: config.workdir,
     };
 
+    /**
+     * 失败后按 checkpoint 判定门的状态。
+     *
+     * 只有一种情形需要从 `blocked` 改判:盘上留着一条可续的 continuation。
+     * 其余一律 `blocked` —— 派活失败就是关门等人,后面排着的活可能正建立在
+     * 这条的产出之上,不能自动放行(types.ts §PetGateState)。
+     */
+    async function settleGateAfterFailure(): Promise<void> {
+      if (!config.checkpoint) {
+        setGate('blocked');
+        return;
+      }
+      try {
+        const snapshot = await graph.getState({ configurable });
+        setGate(projectPendingHumanReview(snapshot) ? 'waiting' : 'blocked');
+      } catch {
+        // 连状态都读不到,更没有理由认为它还能被推动。
+        setGate('blocked');
+      }
+    }
+
     const previousStatus = status;
     status = 'active';
     setGate('busy');
@@ -419,7 +440,12 @@ export function createResidentPetAgentRuntime(
       setGate('open');
       return { status: 'completed', reply: readReply(result) };
     } catch (error) {
-      setGate('blocked');
+      // 失败不等于砸了。LangGraph 可能已经把 interrupt 落盘 —— 取消一次
+      // 正在跑的 invocation 就是这样:盘上留着一条人推一下就能继续的
+      // continuation。这时报 `blocked` 会把「等人回话」说成「没人管了」,
+      // 而这个区别正是 gate 存在的理由(types.ts §PetGateState)。
+      // 所以按 checkpoint 的实际状态定 gate,失败本身仍然照常抛出。
+      await settleGateAfterFailure();
       throw error;
     } finally {
       status = previousStatus === 'active' ? 'standby' : previousStatus;

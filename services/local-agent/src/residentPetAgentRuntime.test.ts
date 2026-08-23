@@ -399,3 +399,75 @@ test('a pet runtime built with a checkpointer exposes durable thread state', asy
 
   await fs.rm(dir, { recursive: true, force: true });
 });
+
+test('a cancelled invocation that persisted an interrupt stays resumable, not blocked', async () => {
+  // 取消一次正在跑的 invocation 时,LangGraph 可能已经把 interrupt 落盘。
+  // 这时报 blocked 会把「等人回话」说成「没人管了」,而这个区别正是 gate
+  // 存在的理由。判据必须取自 checkpoint,而不是「invoke 抛没抛」。
+  let snapshot: unknown = { tasks: [], next: [] };
+  let failNext = true;
+  const graph = {
+    invoke: async () => {
+      if (failNext) {
+        failNext = false;
+        snapshot = {
+          tasks: [{ interrupts: [{ id: 'interrupt-1', value: sampleReviewInterrupt }] }],
+        };
+        const aborted = new Error('Aborted');
+        aborted.name = 'AbortError';
+        throw aborted;
+      }
+      snapshot = { tasks: [], next: [] };
+      return { messages: [new AIMessage('resumed')] };
+    },
+    getState: async () => snapshot,
+  } as unknown as OrchestratorGraph;
+  const runtime = createResidentPetAgentRuntime({
+    models: fakeModels(),
+    actor: fakeActor(),
+    graph,
+    checkpoint: {} as NonNullable<Parameters<typeof createResidentPetAgentRuntime>[0]['checkpoint']>,
+  });
+
+  await assert.rejects(() => runtime.invoke({
+    input: { kind: 'request', request: 'go' },
+    threadId: 'studio:s1:pet:p1',
+  }));
+  assert.equal(runtime.gate(), 'waiting');
+
+  // 门报 waiting 就得真能被推动 —— 否则这个状态只是好看。
+  const resumed = await runtime.invoke({
+    input: {
+      kind: 'resume',
+      continuationId: 'interrupt-1',
+      payload: {
+        kind: 'human_review_response',
+        responses: [{ interactionId: 'review-direct', selectedOptionId: 'approve' }],
+      },
+    },
+    threadId: 'studio:s1:pet:p1',
+  });
+  assert.equal(resumed.status, 'completed');
+  assert.equal(runtime.gate(), 'open');
+});
+
+test('a failure that leaves no resumable continuation still blocks the gate', async () => {
+  // 反向断言:派活失败就是关门等人,不能因为盘上干净就自动放行 ——
+  // 后面排着的活可能正建立在这条的产出之上。
+  const graph = {
+    invoke: async () => { throw new Error('model exploded'); },
+    getState: async () => ({ tasks: [], next: [] }),
+  } as unknown as OrchestratorGraph;
+  const runtime = createResidentPetAgentRuntime({
+    models: fakeModels(),
+    actor: fakeActor(),
+    graph,
+    checkpoint: {} as NonNullable<Parameters<typeof createResidentPetAgentRuntime>[0]['checkpoint']>,
+  });
+
+  await assert.rejects(() => runtime.invoke({
+    input: { kind: 'request', request: 'go' },
+    threadId: 'studio:s1:pet:p1',
+  }));
+  assert.equal(runtime.gate(), 'blocked');
+});

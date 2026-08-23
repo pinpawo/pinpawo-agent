@@ -58,8 +58,6 @@ import {
 import { RemoveMessage } from '@langchain/core/messages';
 import {
   isDelegationBriefingMessage,
-  isDelegationStartedMessage,
-  materializeDelegationStarted,
 } from './delegationBriefing';
 import { RUN_USER_REQUEST_CONTEXT_SOURCE } from './capabilityContext';
 import {
@@ -478,7 +476,6 @@ test('execution boundary routes through capabilityPlanner before the next task',
     answerInput.indexOf('读取 issue #269 并提炼需求点')
       < answerInput.indexOf('检索本地实现与 git log，判断需求点是否已覆盖'),
   );
-  assert.equal(answerMessages.some(isDelegationStartedMessage), false);
   assert.equal(answerMessages.some((message) => Boolean(getMessageHandoffSource(message))), false);
 });
 
@@ -6146,12 +6143,6 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
     delegationId: activeDelegation.id,
     runId: activeDelegation.transcriptRunId,
   });
-  oldMessages.unshift(materializeDelegationStarted({
-    lane: activeDelegation.lane,
-    transcriptRunId: activeDelegation.transcriptRunId,
-    delegationId: activeDelegation.id,
-    task: activeDelegation.task,
-  }));
   const priorAnnounce = new AIMessage({
     id: 'prior-resume-announce',
     content: activeDelegation.resultPreview ?? '',
@@ -6238,7 +6229,6 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
   assert.deepEqual(state.runUserRequest, activeDelegation.userRequest);
   assert.notEqual(state.runId, activeDelegation.transcriptRunId);
   assert.equal(state.traceId, activeDelegation.traceId);
-  assert.equal(state.messages.filter(isDelegationStartedMessage).length, 1);
   assert.equal(plannerInputs[0]?.traceId, activeDelegation.traceId);
   assert.equal(plannerInputs[0]?.activeDelegation?.delegationId, activeDelegation.id);
   assert.match(plannerMessageContextText(plannerInputs[0]), /优先检查最新修改/);
@@ -6427,17 +6417,9 @@ test('delegation briefing stays lane-scoped across sequential tasks', async () =
   }) as OrchestratorStateType;
 
   // Completed delegation lanes are cleared without copying per-task plans into
-  // the private lane. Canonical starts remain paired with accepted handoffs.
+  // the private lane. The main history retains one accepted announce per task.
   assert.equal(state.messages.filter(isDelegationBriefingMessage).length, 0);
-  const starts = state.messages.filter(isDelegationStartedMessage);
-  assert.equal(starts.length, 2);
-  assert.equal(new Set(starts.map((message) => message.id)).size, 2);
-  for (const started of starts) {
-    assert.ok(state.messages.some((message) => (
-      getMessageHandoffSource(message)?.runId === getMessageTranscriptRunId(started)
-      && getMessageHandoffSource(message)?.delegationId === getMessageDelegationId(started)
-    )));
-  }
+  assert.equal(state.messages.filter((message) => getMessageHandoffSource(message)).length, 2);
 
   // Each selected subagent still receives its complete lane-scoped briefing.
   assert.equal(recorder.subagentInputs.length, 2);
@@ -6539,7 +6521,6 @@ test('continue_current appends a continuation briefing without rewriting the tas
   }) as OrchestratorStateType;
 
   assert.equal(state.messages.filter(isDelegationBriefingMessage).length, 0);
-  assert.equal(state.messages.filter(isDelegationStartedMessage).length, 1);
   assert.equal(recorder.subagentInputs.length, 2);
   for (const input of recorder.subagentInputs) {
     assert.equal(

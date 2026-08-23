@@ -40,7 +40,7 @@ const testArtifactStore: CapabilityArtifactStore = {
   getDownloadUri: async (uri) => uri,
 };
 
-test('readTuiCheckpointMessages keeps visible conversation, starts, and handoffs', () => {
+test('readTuiCheckpointMessages keeps visible conversation and handoffs', () => {
   const userMessage = stampMessageCreatedAtUtc(
     new HumanMessage(' hello '),
     '2026-06-01T01:00:00.000Z',
@@ -57,16 +57,6 @@ test('readTuiCheckpointMessages keeps visible conversation, starts, and handoffs
       additional_kwargs: { pinpawo: { lane: 'subagent' } },
     }),
     new AIMessage({
-      content: '开始执行计划任务：关闭 Issue #272。',
-      additional_kwargs: {
-        pinpawo: {
-          source: 'delegation_started',
-          runId: 'run-1',
-          delegationId: 'delegation-1',
-        },
-      },
-    }),
-    new AIMessage({
       content: 'handoff result visible',
       additional_kwargs: {
         pinpawo: {
@@ -79,7 +69,6 @@ test('readTuiCheckpointMessages keeps visible conversation, starts, and handoffs
             task: '关闭 Issue #272',
             completionReason: 'natural',
             result: 'handoff result visible',
-            artifactRefs: [],
             createdAt: '2026-06-01T01:00:00.000Z',
           },
         },
@@ -90,7 +79,6 @@ test('readTuiCheckpointMessages keeps visible conversation, starts, and handoffs
 
   assert.deepEqual(messages, [
     { role: 'user', text: 'hello', createdAt: '2026-06-01T01:00:00.000Z' },
-    { role: 'assistant', text: '开始执行计划任务：关闭 Issue #272。' },
     { role: 'subagent', requestId: 'run-1', text: 'handoff result visible' },
     { role: 'assistant', text: 'assistant reply', createdAt: '2026-06-01T01:00:01.000Z' },
   ]);

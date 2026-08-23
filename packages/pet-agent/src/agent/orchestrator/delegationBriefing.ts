@@ -9,8 +9,8 @@ import type { MessageLane } from './types';
  * handoff. When a delegation materializes, the Capability Planner node renders the
  * structured current task into a compact delegation-lane AIMessage, so the
  * executing subagent reads its task boundary from message history instead of a
- * dynamic system prompt. A concise start record remains in main so the
- * canonical conversation preserves the complete task lifecycle.
+ * dynamic system prompt. The briefing remains private to the Capability lane;
+ * the canonical main conversation receives only an accepted completion announce.
  *
  * Naming contract: "briefing" is orchestrator → subagent (task dispatch);
  * "handoff" is subagent → main (deliverable return). See issue #362.
@@ -21,7 +21,6 @@ import type { MessageLane } from './types';
  */
 
 export const DELEGATION_BRIEFING_SOURCE = 'delegation_briefing';
-export const DELEGATION_STARTED_SOURCE = 'delegation_started';
 
 type DelegationSpecBase = {
   lane: MessageLane;
@@ -42,7 +41,6 @@ export type DelegationSpec = DelegationSpecBase & (
 );
 
 export type MaterializedDelegation = {
-  mainMessages: AIMessage[];
   laneMessages: [AIMessage];
 };
 
@@ -63,10 +61,6 @@ function stampBriefingMeta(message: AIMessage, spec: DelegationSpec) {
 
 export function isDelegationBriefingMessage(message: BaseMessage): boolean {
   return getPinpetMeta(message).source === DELEGATION_BRIEFING_SOURCE;
-}
-
-export function isDelegationStartedMessage(message: BaseMessage): boolean {
-  return getPinpetMeta(message).source === DELEGATION_STARTED_SOURCE;
 }
 
 export function insertBeforeLatestDelegationBriefing(
@@ -107,24 +101,6 @@ function renderDelegationBriefingXml(spec: DelegationSpec): string {
 }
 
 /**
- * Record a new delegation in canonical main history. The stable message id
- * makes replaying the same delegation idempotent in LangGraph's message
- * reducer; continuation and resume paths do not create this record.
- */
-export function materializeDelegationStarted(spec: DelegationSpecBase): AIMessage {
-  const message = new AIMessage(`开始执行计划任务：${spec.task}`);
-  message.id = `delegation-started:${spec.transcriptRunId}:${spec.delegationId}`;
-  stampMessageCreatedAtUtc(message);
-  setPinpetMeta(message, {
-    source: DELEGATION_STARTED_SOURCE,
-    runId: spec.transcriptRunId,
-    delegationId: spec.delegationId,
-    task: spec.task,
-  });
-  return message;
-}
-
-/**
  * Materialize a typed delegation into its private lane briefing. Stable
  * execution rules stay in the governing prompt; XML contains only
  * per-delegation data and is never parsed back into runtime state.
@@ -135,9 +111,6 @@ export function materializeDelegation(spec: DelegationSpec): MaterializedDelegat
     spec,
   );
   return {
-    mainMessages: spec.mode === 'initial'
-      ? [materializeDelegationStarted(spec)]
-      : [],
     laneMessages: [briefingMessage],
   };
 }

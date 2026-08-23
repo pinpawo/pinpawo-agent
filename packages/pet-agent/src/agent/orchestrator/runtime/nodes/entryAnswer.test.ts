@@ -285,9 +285,6 @@ test('Entry Answer receives an accepted delegation result as execution data, not
 });
 
 test('Entry Answer retries when the model announces execution instead of calling plan_request', async () => {
-  // Reproduces run-01a0145f: after several delegation_started records sit in the
-  // main conversation, the model imitated them and wrote the announcement as
-  // plain text with no tool call, so nothing ran.
   const goal = 'review https://github.com/pinpawo/pinpawo-agent/pull/667';
   let invocations = 0;
   let repairPrompt = '';

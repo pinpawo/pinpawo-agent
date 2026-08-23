@@ -1,6 +1,5 @@
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { isDelegationStartedMessage } from '../../delegationBriefing';
 import {
   buildHandoffArtifactRefs,
   formatHandoffArtifactRefsForMessage,
@@ -75,10 +74,7 @@ export function projectAcceptedRunResults(params: {
   }
 
   return {
-    history: params.history.filter((message) => (
-      !selectedMessages.has(message)
-      && !isDelegationStartedMessage(message)
-    )),
+    history: params.history.filter((message) => !selectedMessages.has(message)),
     results,
   };
 }
